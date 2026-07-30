@@ -43,8 +43,8 @@ func AddDryRunFlag(cmd *cobra.Command, dest *bool) {
 }
 
 // EmitDryRun writes the dry-run envelope to w via FormatOptions.Emit, so the
-// envelope inherits the standard _notice injection, TTY indent, --jq filter,
-// and profile fields like every other success envelope. fopts may be nil for
+// envelope inherits the standard TTY indent, --jq filter, and profile fields
+// like every other success envelope. fopts may be nil for
 // callers that have no resolved FormatOptions (tests, error paths); a JSON-mode
 // default is used in that case.
 //

@@ -310,32 +310,42 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 		score = score * chunk.RecallWeight
 	}
 	return &types.SearchResult{
-		ID:                   chunk.ID,
-		Content:              chunk.Content,
-		KnowledgeID:          chunk.KnowledgeID,
-		ChunkIndex:           chunk.ChunkIndex,
-		KnowledgeTitle:       knowledge.Title,
-		StartAt:              chunk.StartAt,
-		EndAt:                chunk.EndAt,
-		Seq:                  chunk.ChunkIndex,
-		Score:                score,
-		MatchType:            matchType,
-		Metadata:             knowledge.GetMetadata(),
-		ChunkType:            string(chunk.ChunkType),
-		ParentChunkID:        chunk.ParentChunkID,
-		ImageInfo:            chunk.ImageInfo,
-		KnowledgeFilename:    knowledge.FileName,
-		KnowledgeSource:      knowledge.Source,
-		KnowledgeChannel:     knowledge.Channel,
-		KnowledgeDescription: knowledge.Description,
-		ChunkMetadata:        chunk.Metadata,
-		MatchedContent:       matchedContent,
-		KnowledgeBaseID:      knowledge.KnowledgeBaseID,
+		ID:                      chunk.ID,
+		Content:                 chunk.Content,
+		KnowledgeID:             chunk.KnowledgeID,
+		ChunkIndex:              chunk.ChunkIndex,
+		KnowledgeTitle:          knowledge.Title,
+		StartAt:                 chunk.StartAt,
+		EndAt:                   chunk.EndAt,
+		Seq:                     chunk.ChunkIndex,
+		Score:                   score,
+		MatchType:               matchType,
+		Metadata:                knowledge.GetMetadata(),
+		ChunkType:               string(chunk.ChunkType),
+		ParentChunkID:           chunk.ParentChunkID,
+		ImageInfo:               chunk.ImageInfo,
+		KnowledgeFilename:       knowledge.FileName,
+		KnowledgeSource:         knowledge.Source,
+		KnowledgeChannel:        knowledge.Channel,
+		KnowledgeDescription:    knowledge.Description,
+		KnowledgeCustomMetadata: knowledge.CustomMetadataText(),
+		ChunkMetadata:           chunk.Metadata,
+		MatchedContent:          matchedContent,
+		KnowledgeBaseID:         knowledge.KnowledgeBaseID,
 	}
 }
 
 // isSearchableChunk checks if a chunk type should be included in search results.
 func (s *knowledgeBaseService) isSearchableChunk(chunk *types.Chunk) bool {
+	if chunk == nil || !chunk.IsEnabled {
+		return false
+	}
+	// An edit is persisted before its retrieval artifacts are synchronized.
+	// Do not hydrate stale vector hits while that synchronization is pending or
+	// failed. Empty is accepted for legacy rows created before index_status.
+	if chunk.IndexStatus == "processing" || chunk.IndexStatus == "failed" {
+		return false
+	}
 	return slices.Contains([]types.ChunkType{
 		types.ChunkTypeText, types.ChunkTypeSummary,
 		types.ChunkTypeTableColumn, types.ChunkTypeTableSummary,

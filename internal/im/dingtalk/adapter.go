@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,13 +18,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/open-dingtalk/dingtalk-stream-sdk-go/chatbot"
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // httpClient is a shared HTTP client with a reasonable timeout for DingTalk API calls.
 var httpClient = &http.Client{Timeout: 15 * time.Second}
+
+// apiBaseURL is the DingTalk OpenAPI host. Overridable in tests.
+var apiBaseURL = "https://api.dingtalk.com"
 
 // minCardUpdateInterval is the minimum time between consecutive card streaming updates.
 const minCardUpdateInterval = 500 * time.Millisecond
@@ -33,8 +39,9 @@ const dingtalkConvTypeGroup = "2"
 
 // Compile-time checks.
 var (
-	_ im.Adapter      = (*Adapter)(nil)
-	_ im.StreamSender = (*Adapter)(nil)
+	_ im.Adapter        = (*Adapter)(nil)
+	_ im.StreamSender   = (*Adapter)(nil)
+	_ im.FileDownloader = (*Adapter)(nil)
 )
 
 // Adapter implements im.Adapter for DingTalk.
@@ -114,19 +121,20 @@ func (a *Adapter) VerifyCallback(c *gin.Context) error {
 
 // DingTalk callback message structure.
 type callbackMessage struct {
-	ConversationID   string       `json:"conversationId"`
-	ConversationType string       `json:"conversationType"`
-	MsgID            string       `json:"msgId"`
-	Msgtype          string       `json:"msgtype"`
-	Text             *textContent `json:"text"`
-	SenderNick       string       `json:"senderNick"`
-	SenderStaffId    string       `json:"senderStaffId"`
-	SenderID         string       `json:"senderId"`
-	SessionWebhook   string       `json:"sessionWebhook"`
-	RobotCode        string       `json:"robotCode"`
-	AtUsers          []atUser     `json:"atUsers"`
-	IsInAtList       bool         `json:"isInAtList"`
-	ChatbotCorpId    string       `json:"chatbotCorpId"`
+	ConversationID   string          `json:"conversationId"`
+	ConversationType string          `json:"conversationType"`
+	MsgID            string          `json:"msgId"`
+	Msgtype          string          `json:"msgtype"`
+	Text             *textContent    `json:"text"`
+	Content          json.RawMessage `json:"content"`
+	SenderNick       string          `json:"senderNick"`
+	SenderStaffId    string          `json:"senderStaffId"`
+	SenderID         string          `json:"senderId"`
+	SessionWebhook   string          `json:"sessionWebhook"`
+	RobotCode        string          `json:"robotCode"`
+	AtUsers          []atUser        `json:"atUsers"`
+	IsInAtList       bool            `json:"isInAtList"`
+	ChatbotCorpId    string          `json:"chatbotCorpId"`
 }
 
 type textContent struct {
@@ -153,6 +161,113 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	return parseCallbackMessage(&msg), nil
 }
 
+// fileMessageContent is the `content` object DingTalk sends for file and
+// picture messages. File messages carry fileName/spaceId/fileId; picture
+// messages carry only downloadCode (original quality) and pictureDownloadCode.
+// See https://open-dingtalk.github.io/developerpedia/docs/learn/bot/message/
+type fileMessageContent struct {
+	DownloadCode        string `json:"downloadCode"`
+	PictureDownloadCode string `json:"pictureDownloadCode"`
+	FileName            string `json:"fileName"`
+}
+
+// parseFileContent maps a DingTalk msgtype + content object to WeKnora's file
+// message fields. Returns ok=false for non-file/picture message types so the
+// caller keeps its text handling. Picture messages have no fileName; the IM
+// service appends an extension after download.
+func parseFileContent(msgtype string, content json.RawMessage) (im.MessageType, string, string, bool) {
+	var msgType im.MessageType
+	switch msgtype {
+	case "file":
+		msgType = im.MessageTypeFile
+	case "picture":
+		msgType = im.MessageTypeImage
+	default:
+		return "", "", "", false
+	}
+
+	var c fileMessageContent
+	if len(content) > 0 {
+		if err := json.Unmarshal(content, &c); err != nil {
+			return "", "", "", false
+		}
+	}
+	downloadCode := c.DownloadCode
+	if downloadCode == "" {
+		downloadCode = c.PictureDownloadCode
+	}
+	if downloadCode == "" {
+		return "", "", "", false
+	}
+
+	fileName := c.FileName
+	if msgType == im.MessageTypeImage {
+		fileName = ""
+	}
+	return msgType, fileName, downloadCode, true
+}
+
+// parseDownloadURL extracts the temporary downloadUrl from the response of the
+// robot/messageFiles/download API.
+func parseDownloadURL(raw json.RawMessage) (string, error) {
+	var r struct {
+		DownloadURL string `json:"downloadUrl"`
+	}
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return "", fmt.Errorf("parse download response: %w", err)
+	}
+	if r.DownloadURL == "" {
+		return "", fmt.Errorf("download response has no downloadUrl: %s", string(raw))
+	}
+	return r.DownloadURL, nil
+}
+
+// DownloadFile downloads a file/picture the user sent to the robot. DingTalk
+// does not deliver the bytes directly: the callback carries a downloadCode that
+// is exchanged for a temporary downloadUrl via robot/messageFiles/download,
+// which is then fetched. robotCode comes from the callback (webhook mode) or the
+// app client ID (stream mode). Implements im.FileDownloader (issue #1771).
+func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io.ReadCloser, string, error) {
+	downloadCode := msg.FileKey
+	if downloadCode == "" {
+		return nil, "", fmt.Errorf("no downloadCode in message")
+	}
+	robotCode := msg.Extra["robot_code"]
+	if robotCode == "" {
+		robotCode = a.clientID
+	}
+
+	respBody, err := a.dingtalkAPI(ctx, http.MethodPost, "/v1.0/robot/messageFiles/download", map[string]string{
+		"robotCode":    robotCode,
+		"downloadCode": downloadCode,
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("request download url: %w", err)
+	}
+	downloadURL, err := parseDownloadURL(respBody)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := validateFileDownloadURL(downloadURL); err != nil {
+		return nil, "", fmt.Errorf("download url rejected: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("create download request: %w", err)
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("download file: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, "", fmt.Errorf("download file returned %d: %s", resp.StatusCode, string(body))
+	}
+	return resp.Body, msg.FileName, nil
+}
+
 func parseCallbackMessage(msg *callbackMessage) *im.IncomingMessage {
 	chatType := im.ChatTypeDirect
 	chatID := ""
@@ -166,24 +281,126 @@ func parseCallbackMessage(msg *callbackMessage) *im.IncomingMessage {
 		userID = msg.SenderID
 	}
 
-	content := ""
-	if msg.Text != nil {
-		content = strings.TrimSpace(msg.Text.Content)
+	extra := map[string]string{
+		"session_webhook": msg.SessionWebhook,
+	}
+	incoming := &im.IncomingMessage{
+		Platform:  im.PlatformDingtalk,
+		UserID:    userID,
+		UserName:  msg.SenderNick,
+		ChatID:    chatID,
+		ChatType:  chatType,
+		MessageID: msg.MsgID,
+		Extra:     extra,
 	}
 
-	return &im.IncomingMessage{
-		Platform:    im.PlatformDingtalk,
-		UserID:      userID,
-		UserName:    msg.SenderNick,
-		ChatID:      chatID,
-		ChatType:    chatType,
-		MessageID:   msg.MsgID,
-		MessageType: im.MessageTypeText,
-		Content:     content,
-		Extra: map[string]string{
-			"session_webhook": msg.SessionWebhook,
-		},
+	if msgType, fileName, downloadCode, ok := parseFileContent(msg.Msgtype, msg.Content); ok {
+		incoming.MessageType = msgType
+		incoming.FileName = defaultFileName(msgType, fileName, msg.MsgID)
+		incoming.FileKey = downloadCode
+		extra["robot_code"] = msg.RobotCode
+	} else {
+		incoming.MessageType = im.MessageTypeText
+		if msg.Text != nil {
+			incoming.Content = strings.TrimSpace(msg.Text.Content)
+		}
 	}
+	return incoming
+}
+
+// defaultFileName gives picture messages (which carry no fileName) a name with a
+// real stem derived from the message ID, mirroring the WeCom adapter. File
+// messages keep their original name; if missing, fall back to the message ID so
+// post-download extension resolution can still run.
+func defaultFileName(msgType im.MessageType, fileName, msgID string) string {
+	if fileName != "" {
+		return fileName
+	}
+	if msgType == im.MessageTypeImage {
+		return msgID + ".png"
+	}
+	return msgID
+}
+
+// allowedDingTalkDownloadHostSuffixes lists CDN/OSS host suffixes DingTalk uses
+// for temporary file download links returned by messageFiles/download.
+var allowedDingTalkDownloadHostSuffixes = []string{
+	".aliyuncs.com",
+	".dingtalk.com",
+}
+
+// validateFileDownloadURL is overridable in tests (httptest uses loopback URLs).
+var validateFileDownloadURL = defaultValidateFileDownloadURL
+
+func defaultValidateFileDownloadURL(rawURL string) error {
+	if isAllowedDingTalkDownloadHost(rawURL) {
+		return nil
+	}
+	return secutils.ValidateURLForSSRF(rawURL)
+}
+
+func isAllowedDingTalkDownloadHost(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	hostname := strings.ToLower(u.Hostname())
+	for _, suffix := range allowedDingTalkDownloadHostSuffixes {
+		if strings.HasSuffix(hostname, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// streamToIncoming builds an IncomingMessage from a DingTalk Stream mode
+// callback. The Stream SDK does not expose robotCode, so file messages fall back
+// to the app client ID (which is the robotCode for enterprise internal robots).
+func streamToIncoming(data *chatbot.BotCallbackDataModel, fallbackRobotCode string) *im.IncomingMessage {
+	chatType := im.ChatTypeDirect
+	chatID := ""
+	if data.ConversationType == dingtalkConvTypeGroup {
+		chatType = im.ChatTypeGroup
+		chatID = data.ConversationId
+	}
+
+	userID := data.SenderStaffId
+	if userID == "" {
+		userID = data.SenderId
+	}
+
+	extra := map[string]string{
+		"session_webhook": data.SessionWebhook,
+	}
+	incoming := &im.IncomingMessage{
+		Platform:  im.PlatformDingtalk,
+		UserID:    userID,
+		UserName:  data.SenderNick,
+		ChatID:    chatID,
+		ChatType:  chatType,
+		MessageID: data.MsgId,
+		Extra:     extra,
+	}
+
+	// data.Content is a decoded interface{}; re-marshal it to JSON so the same
+	// parseFileContent helper used by the webhook path can read it.
+	var contentRaw json.RawMessage
+	if data.Content != nil {
+		if b, err := json.Marshal(data.Content); err == nil {
+			contentRaw = b
+		}
+	}
+
+	if msgType, fileName, downloadCode, ok := parseFileContent(data.Msgtype, contentRaw); ok {
+		incoming.MessageType = msgType
+		incoming.FileName = defaultFileName(msgType, fileName, data.MsgId)
+		incoming.FileKey = downloadCode
+		extra["robot_code"] = fallbackRobotCode
+	} else {
+		incoming.MessageType = im.MessageTypeText
+		incoming.Content = strings.TrimSpace(data.Text.Content)
+	}
+	return incoming
 }
 
 // ── Send reply ──
@@ -310,7 +527,7 @@ func (a *Adapter) getAccessToken(ctx context.Context) (string, error) {
 	jsonBody, _ := json.Marshal(body)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.dingtalk.com/v1.0/oauth2/accessToken",
+		apiBaseURL+"/v1.0/oauth2/accessToken",
 		bytes.NewReader(jsonBody))
 	if err != nil {
 		return "", err
@@ -358,7 +575,7 @@ func (a *Adapter) dingtalkAPI(ctx context.Context, method, path string, body int
 		return nil, fmt.Errorf("marshal body: %w", err)
 	}
 
-	url := "https://api.dingtalk.com" + path
+	url := apiBaseURL + path
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)

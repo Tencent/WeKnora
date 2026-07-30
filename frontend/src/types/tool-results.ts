@@ -35,6 +35,7 @@ export interface SearchResultItem {
     score: number;
     relevance_level: RelevanceLevel;
     knowledge_id: string;
+    knowledge_base_id?: string;
     knowledge_title: string;
     match_type: string;
     knowledge_base_type?: string;
@@ -197,10 +198,18 @@ export interface WebSearchResultsData {
 export interface WebFetchResultItem {
     url: string;
     prompt?: string;
+    status?: 'success' | 'failed' | 'skipped';
+    retryable?: boolean;
+    error_code?: string;
+    error_message?: string;
     summary?: string;
+    summary_status?: string;
+    summary_error_code?: string;
+    summary_error_message?: string;
     raw_content?: string;
     content_length?: number;
     method?: string;
+    /** @deprecated use error_message */
     error?: string;
 }
 
@@ -209,6 +218,10 @@ export interface WebFetchResultsData {
     display_type: 'web_fetch_results';
     results: WebFetchResultItem[];
     count?: number;
+    successful_count?: number;
+    failed_count?: number;
+    skipped_count?: number;
+    all_failed?: boolean;
 }
 
 // Grep knowledge aggregation item (legacy, grouped by knowledge_id)
@@ -343,4 +356,3 @@ export interface ActionData {
     display_type?: DisplayType;
     tool_data?: Record<string, any>;
 }
-

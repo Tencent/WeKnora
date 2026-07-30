@@ -40,71 +40,115 @@ func TestRAGFullLoop(t *testing.T) {
 
 	bin := buildBinary(t)
 	xdg := t.TempDir()
-	writeProfileYAML(t, xdg, host, token)
 
+	// Inject host + token as WEKNORA_HOST / WEKNORA_TOKEN env vars. The
+	// CLI's env-credential path (buildClientFromEnv) takes precedence
+	// over profile config, so this bypasses the secrets-store dance
+	// entirely — no keychain access, no file:// ref plumbing. This is
+	// the most robust path for CI and local e2e alike.
 	env := append(os.Environ(),
 		"XDG_CONFIG_HOME="+xdg,
 		"XDG_CACHE_HOME="+filepath.Join(xdg, "cache"),
+		"WEKNORA_HOST="+host,
+		"WEKNORA_TOKEN="+token,
 		// SDK debug off - explicit so the CI run isn't noisy.
 		"WEKNORA_LOG_LEVEL=error",
 	)
 
-	// 1. kb create → bare KnowledgeBase object
+	// 1. kb create → KnowledgeBase object (envelope-wrapped: {ok, data})
+	// The CLI now requires explicit model binding so uploaded docs are
+	// immediately searchable. Use the server's builtin model IDs (they
+	// exist on every deployment that configures builtin_models.yaml).
+	embeddingModel := envOr("WEKNORA_E2E_EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-8B")
+	chatModel := envOr("WEKNORA_E2E_CHAT_MODEL", "deepseek-ai/DeepSeek-V3.2")
 	kbName := prefix + fmt.Sprintf("%d", time.Now().UnixNano())
 	var created struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		OK   bool `json:"ok"`
+		Data struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"data"`
 	}
-	runJSONInto(t, bin, env, &created, "kb", "create", kbName, "--format", "json")
-	if created.ID == "" {
+	runJSONInto(t, bin, env, &created, "kb", "create", kbName,
+		"--embedding-model", embeddingModel,
+		"--chat-model", chatModel,
+		"--format", "json")
+	if created.Data.ID == "" {
 		t.Fatalf("kb create returned no id")
 	}
-	t.Logf("created KB: %s (%s)", created.ID, kbName)
+	t.Logf("created KB: %s (%s)", created.Data.ID, kbName)
 
 	t.Cleanup(func() {
 		// Best-effort cleanup; a 404 means the KB was already gone.
-		out, err := run(bin, env, "kb", "delete", created.ID, "-y", "--format", "json")
+		out, err := run(bin, env, "kb", "delete", created.Data.ID, "-y", "--format", "json")
 		if err != nil {
 			t.Logf("cleanup kb delete: %v\n%s", err, out)
 		}
 	})
 
-	// 2. doc upload → bare Knowledge object
+	// 2. doc upload → Knowledge object (envelope-wrapped: {ok, data})
 	docPath := writeSampleDoc(t)
 	var uploaded struct {
-		ID string `json:"id"`
+		OK   bool `json:"ok"`
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
 	}
-	runJSONInto(t, bin, env, &uploaded, "doc", "upload", docPath, "--kb", created.ID, "--format", "json")
-	if uploaded.ID == "" {
+	runJSONInto(t, bin, env, &uploaded, "doc", "upload", docPath, "--kb", created.Data.ID, "--format", "json")
+	if uploaded.Data.ID == "" {
 		t.Fatalf("doc upload returned no id")
 	}
-	t.Logf("uploaded doc: %s", uploaded.ID)
+	t.Logf("uploaded doc: %s", uploaded.Data.ID)
 
 	// 3. poll until indexing finishes (status changes from "pending" / "processing" to "ready" / similar)
-	waitDocReady(t, bin, env, created.ID, uploaded.ID, 90*time.Second)
+	waitDocReady(t, bin, env, created.Data.ID, uploaded.Data.ID, 90*time.Second)
 
-	// 4. search chunks → bare []SearchResult
-	var results []map[string]any
-	runJSONInto(t, bin, env, &results, "search", "chunks", "sample", "--kb", created.ID, "--limit", "5", "--format", "json")
+	// 4. search chunks → SearchResult list (envelope-wrapped: {ok, data})
+	var searchResp struct {
+		OK   bool              `json:"ok"`
+		Data []map[string]any `json:"data"`
+	}
+	runJSONInto(t, bin, env, &searchResp, "search", "chunks", "sample", "--kb", created.Data.ID, "--limit", "5", "--format", "json")
+	results := searchResp.Data
 	if len(results) == 0 {
 		t.Fatalf("search returned no results")
 	}
 	t.Logf("search returned %d results", len(results))
 
-	// 5. chat --format json → bare {answer, references, ...} object
-	var chat struct {
-		Answer     string           `json:"answer"`
-		References []map[string]any `json:"references"`
+	// 5. chat --format json → bounded answer-event envelope (--reference for citations)
+	var chatEnv struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Events []struct {
+				ResponseType        string `json:"response_type"`
+				Content             string `json:"content"`
+				KnowledgeReferences []struct {
+					ChunkID string `json:"chunk_id"`
+				} `json:"knowledge_references"`
+			} `json:"events"`
+			SessionID string `json:"session_id"`
+		} `json:"data"`
 	}
-	runJSONInto(t, bin, env, &chat, "chat", "summarize the document briefly", "--kb", created.ID, "--format", "json")
-	if strings.TrimSpace(chat.Answer) == "" {
+	runJSONInto(t, bin, env, &chatEnv, "chat", "summarize the document briefly", "--kb", created.Data.ID, "--format", "json", "--reference")
+	if !chatEnv.OK {
+		t.Fatal("chat ok=false")
+	}
+	var answer strings.Builder
+	refCount := 0
+	for _, ev := range chatEnv.Data.Events {
+		if ev.ResponseType == "answer" {
+			answer.WriteString(ev.Content)
+		}
+		refCount += len(ev.KnowledgeReferences)
+	}
+	if strings.TrimSpace(answer.String()) == "" {
 		t.Fatalf("chat returned empty answer")
 	}
-	t.Logf("chat answer (%d chars), %d references", len(chat.Answer), len(chat.References))
-	if len(chat.References) == 0 {
+	t.Logf("chat answer (%d chars), %d reference indexes", len(answer.String()), refCount)
+	if refCount == 0 {
 		// Soft warning - some servers may not surface references for every
 		// question, but the demo flow is supposed to.
-		t.Logf("warning: chat returned 0 references (server may have a different config)")
+		t.Logf("warning: chat returned 0 reference indexes (server may have a different config)")
 	}
 }
 
@@ -142,27 +186,6 @@ func buildBinary(t *testing.T) string {
 	return out
 }
 
-// writeProfileYAML drops a minimal config.yaml into XDG_CONFIG_HOME so the
-// CLI finds a profile without needing `weknora profile add` (which prompts
-// in interactive scenarios). Tests using `auth login` belong to a different
-// suite; here we go straight to authenticated calls.
-func writeProfileYAML(t *testing.T, xdg, host, token string) {
-	t.Helper()
-	dir := filepath.Join(xdg, "weknora")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatalf("mkdir xdg: %v", err)
-	}
-	yaml := fmt.Sprintf(`current_profile: e2e
-profiles:
-  - name: e2e
-    host: %s
-    token: %s
-`, host, token)
-	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-}
-
 // writeSampleDoc emits a small bilingual doc that gives the embedder enough
 // signal for retrieval but stays tiny so indexing finishes within the poll
 // window.
@@ -196,13 +219,18 @@ func waitDocReady(t *testing.T, bin string, env []string, kbID, docID string, ti
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	tick := 2 * time.Second
+	type docItem struct {
+		ID          string `json:"id"`
+		ParseStatus string `json:"parse_status"`
+	}
 	for time.Now().Before(deadline) {
-		var docs []struct {
-			ID          string `json:"id"`
-			ParseStatus string `json:"parse_status"`
+		// doc list is envelope-wrapped: {ok, data: [...]} (bare array)
+		var resp struct {
+			OK   bool      `json:"ok"`
+			Data []docItem `json:"data"`
 		}
-		runJSONInto(t, bin, env, &docs, "doc", "list", "--kb", kbID, "--page-size", "100", "--format", "json")
-		for _, d := range docs {
+		runJSONInto(t, bin, env, &resp, "doc", "list", "--kb", kbID, "--page-size", "100", "--format", "json")
+		for _, d := range resp.Data {
 			if d.ID != docID {
 				continue
 			}
@@ -210,7 +238,7 @@ func waitDocReady(t *testing.T, bin string, env []string, kbID, docID string, ti
 			switch {
 			case low == "failed", low == "error":
 				t.Fatalf("doc %s indexing failed: status=%q", docID, d.ParseStatus)
-			case low == "pending", low == "processing", low == "":
+			case low == "pending", low == "processing", low == "finalizing", low == "":
 				// keep waiting
 			default:
 				t.Logf("doc %s ready (status=%q)", docID, d.ParseStatus)

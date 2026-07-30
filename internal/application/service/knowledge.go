@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -26,8 +28,11 @@ var (
 	ErrInvalidFileType = errors.New("unsupported file type")
 	// ErrInvalidURL is returned when an invalid URL is provided
 	ErrInvalidURL = errors.New("invalid URL")
-	// ErrChunkNotFound is returned when a requested chunk cannot be found
-	ErrChunkNotFound = errors.New("chunk not found")
+	// ErrChunkNotFound is returned when a requested chunk cannot be found.
+	// Aliases the repository sentinel so a chunk-not-found from the repo
+	// errors.Is-matches at the service and middleware layers (a single
+	// identity instead of two string-equal-but-distinct errors).
+	ErrChunkNotFound = repository.ErrChunkNotFound
 	// ErrDuplicateFile is returned when trying to add a file that already exists
 	ErrDuplicateFile = errors.New("file already exists")
 	// ErrDuplicateURL is returned when trying to add a URL that already exists
@@ -52,6 +57,8 @@ type knowledgeService struct {
 	tagRepo         interfaces.KnowledgeTagRepository
 	tagService      interfaces.KnowledgeTagService
 	fileSvc         interfaces.FileService
+	storageResolver interfaces.StorageBackendResolver
+	resourceCatalog interfaces.ResourceCatalog
 	modelService    interfaces.ModelService
 	task            interfaces.TaskEnqueuer
 	taskInspector   interfaces.TaskInspector
@@ -72,6 +79,7 @@ type knowledgeService struct {
 	// handled because the public surface is the SpanTracker interface,
 	// which has a no-op fallback. See knowledge_span_tracker.go.
 	spanTracker SpanTracker
+	audit       interfaces.AuditLogService
 }
 
 const (
@@ -93,6 +101,8 @@ func NewKnowledgeService(
 	tagRepo interfaces.KnowledgeTagRepository,
 	tagService interfaces.KnowledgeTagService,
 	fileSvc interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
+	resourceCatalog interfaces.ResourceCatalog,
 	modelService interfaces.ModelService,
 	task interfaces.TaskEnqueuer,
 	taskInspector interfaces.TaskInspector,
@@ -106,6 +116,7 @@ func NewKnowledgeService(
 	wikiService interfaces.WikiPageService,
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
 	spanTracker SpanTracker,
+	audit interfaces.AuditLogService,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
 		config:          config,
@@ -119,6 +130,8 @@ func NewKnowledgeService(
 		tagRepo:         tagRepo,
 		tagService:      tagService,
 		fileSvc:         fileSvc,
+		storageResolver: storageResolver,
+		resourceCatalog: resourceCatalog,
 		modelService:    modelService,
 		task:            task,
 		taskInspector:   taskInspector,
@@ -132,6 +145,7 @@ func NewKnowledgeService(
 		wikiService:     wikiService,
 		taskPendingRepo: taskPendingRepo,
 		spanTracker:     spanTracker,
+		audit:           audit,
 	}, nil
 }
 
@@ -411,11 +425,11 @@ func (s *knowledgeService) isKnowledgeAborted(
 // checkStorageEngineConfigured verifies that the knowledge base has a storage engine configured
 // (either at the KB level or via the tenant default).
 //
-// 内部版兜底语义：当 KB 与租户都未配置 storage provider 时，如果服务实例持有
+// 内部版兜底语义：当 KB 与空间都未配置 storage provider 时，如果服务实例持有
 // 全局 FileService（由容器按 STORAGE_TYPE 注入，默认 local），允许直接落到该
 // 全局 fileSvc 上，不再硬性阻断。这与 resolveFileService / resolveFileServiceForPath
 // 在 provider 为空时回退到 s.fileSvc 的行为保持一致，避免上层闸门和下游解析口径不一。
-// 仅当 KB/租户/全局三处都拿不到任何可用 FileService 时才报错。
+// 仅当 KB/空间/全局三处都拿不到任何可用 FileService 时才报错。
 func (s *knowledgeService) checkStorageEngineConfigured(ctx context.Context, kb *types.KnowledgeBase) error {
 	provider := kb.GetStorageProvider()
 	if provider == "" {
@@ -495,7 +509,7 @@ func (s *knowledgeService) GetOwningKBCreatorID(ctx context.Context, knowledgeID
 	// minimal and tenant-scoped.
 	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
 	if !ok {
-		return "", werrors.NewUnauthorizedError("Tenant ID not found in context")
+		return "", werrors.NewUnauthorizedError("Workspace ID not found in context")
 	}
 	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
 	if err != nil {
@@ -597,11 +611,44 @@ func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types
 	if knowledge.Description != "" {
 		record.Description = knowledge.Description
 	}
+	metadataChanged := false
+	if knowledge.CustomMetadata != nil {
+		var custom map[string]interface{}
+		if err := json.Unmarshal(knowledge.CustomMetadata, &custom); err != nil {
+			return fmt.Errorf("custom_metadata must be a JSON object: %w", err)
+		}
+		if len(custom) > 20 {
+			return fmt.Errorf("custom_metadata supports at most 20 fields")
+		}
+		for key, value := range custom {
+			if len(strings.TrimSpace(key)) == 0 || len(key) > 64 || len(fmt.Sprint(value)) > 1000 {
+				return fmt.Errorf("invalid custom_metadata field %q", key)
+			}
+			switch value.(type) {
+			case string, float64, bool, nil:
+			default:
+				return fmt.Errorf("custom_metadata field %q must be a string, number, boolean, or null", key)
+			}
+		}
+		existing := make(map[string]interface{})
+		if len(record.CustomMetadata) > 0 {
+			_ = json.Unmarshal(record.CustomMetadata, &existing)
+		}
+		metadataChanged = !reflect.DeepEqual(existing, custom)
+		record.CustomMetadata = knowledge.CustomMetadata
+	}
 
 	// Update knowledge record in the repository
 	if err := s.repo.UpdateKnowledge(ctx, record); err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge: %v", err)
 		return err
+	}
+	if metadataChanged && record.SummaryStatus != "" && record.SummaryStatus != types.SummaryStatusNone {
+		if err := enqueueSummaryRefresh(ctx, s.repo, s.task, s.kbService, s.tracker(), record); err != nil {
+			logger.Warnf(ctx, "Metadata saved but summary refresh enqueue failed for %s: %v", record.ID, err)
+		} else {
+			logger.Infof(ctx, "Enqueued summary refresh after metadata update, knowledge ID: %s", record.ID)
+		}
 	}
 	logger.Infof(ctx, "Knowledge updated successfully, ID: %s", knowledge.ID)
 	return nil
@@ -667,6 +714,17 @@ func (s *knowledgeService) GetKnowledgeBatchWithSharedAccess(ctx context.Context
 // SetKnowledgeTags replaces all tags for a single knowledge entry.
 func (s *knowledgeService) SetKnowledgeTags(ctx context.Context, knowledgeID string, tagIDs []string) error {
 	return s.repo.SetKnowledgeTags(ctx, knowledgeID, tagIDs)
+}
+
+// ListKnowledgeIDsByTagIDs returns document knowledge IDs carrying any of the
+// specified KB-local tags.
+func (s *knowledgeService) ListKnowledgeIDsByTagIDs(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	tagIDs []string,
+) ([]string, error) {
+	return s.repo.ListIDsByTagIDs(ctx, tenantID, kbID, tagIDs)
 }
 
 // validateKnowledgeTagIDs ensures every tag exists and belongs to the given knowledge base.
@@ -777,11 +835,11 @@ func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, authoriz
 	}
 	tenantIDVal := ctx.Value(types.TenantIDContextKey)
 	if tenantIDVal == nil {
-		return werrors.NewUnauthorizedError("tenant ID not found in context")
+		return werrors.NewUnauthorizedError("workspace ID not found in context")
 	}
 	tenantID, ok := tenantIDVal.(uint64)
 	if !ok {
-		return werrors.NewUnauthorizedError("invalid tenant ID in context")
+		return werrors.NewUnauthorizedError("invalid workspace ID in context")
 	}
 
 	// Get all knowledge items in batch
@@ -868,7 +926,7 @@ func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, authoriz
 func (s *knowledgeService) SearchKnowledge(ctx context.Context, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error) {
 	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
 	if !ok {
-		return nil, false, 0, werrors.NewUnauthorizedError("Tenant ID not found in context")
+		return nil, false, 0, werrors.NewUnauthorizedError("Workspace ID not found in context")
 	}
 
 	scopes := make([]types.KnowledgeSearchScope, 0)

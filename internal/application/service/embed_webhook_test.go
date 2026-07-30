@@ -1,6 +1,13 @@
 package service
 
-import "testing"
+import (
+	stderrors "errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	secutils "github.com/Tencent/WeKnora/internal/utils"
+)
 
 func TestValidateEmbedWebhookURL(t *testing.T) {
 	withSSRFWhitelist(t, "*.example.com,127.0.0.1")
@@ -31,5 +38,29 @@ func TestSignEmbedWebhookBody(t *testing.T) {
 	sig2 := SignEmbedWebhookBody("test-secret", raw)
 	if sig != sig2 {
 		t.Fatal("signature not deterministic")
+	}
+}
+
+func TestEmbedWebhookHTTPClientBlocksRedirectToInternalURL(t *testing.T) {
+	withSSRFWhitelist(t, "127.0.0.1")
+
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://169.254.169.254/latest/meta-data/", http.StatusFound)
+	}))
+	defer origin.Close()
+
+	req, err := http.NewRequest(http.MethodPost, origin.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	resp, err := newEmbedWebhookHTTPClient().Do(req)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected redirect to link-local metadata endpoint to be blocked")
+	}
+	if !stderrors.Is(err, secutils.ErrSSRFRedirectBlocked) {
+		t.Fatalf("error = %v, want ErrSSRFRedirectBlocked", err)
 	}
 }

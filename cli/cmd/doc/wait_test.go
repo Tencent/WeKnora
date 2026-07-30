@@ -311,3 +311,30 @@ func TestDocWait_FailureError_IsSilent(t *testing.T) {
 		t.Errorf("exit code = %d, want 1", cmdutil.ExitCode(err))
 	}
 }
+
+// TestWaitForDocs_DraftFailsFast pins that a document stuck in parse_status
+// "draft" (inline `doc create` leaves docs here; it never auto-progresses) is
+// failed fast with a reparse hint instead of polling until the --timeout.
+// Regression: `doc create` + `doc wait` used to hang to a 124 timeout.
+func TestWaitForDocs_DraftFailsFast(t *testing.T) {
+	svc := newFakeKBSvc(map[string][]string{
+		"doc_draft": {"draft", "draft", "draft"},
+	})
+	start := time.Now()
+	res, _ := waitForDocs(context.Background(), []string{"doc_draft"}, svc, WaitOptions{
+		Timeout:  5 * time.Second,
+		Interval: 1 * time.Millisecond,
+	})
+	if len(res.Timeout) != 0 {
+		t.Errorf("draft must NOT time out; got timeout=%v", res.Timeout)
+	}
+	if len(res.Failed) != 1 || res.Failed[0].ID != "doc_draft" {
+		t.Fatalf("draft doc must be failed-fast; got failed=%v", res.Failed)
+	}
+	if !strings.Contains(res.Failed[0].Message, "reparse") {
+		t.Errorf("draft failure message must point to reparse; got %q", res.Failed[0].Message)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("draft must fail fast (well under timeout); took %v", elapsed)
+	}
+}

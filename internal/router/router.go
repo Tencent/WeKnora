@@ -2,15 +2,10 @@ package router
 
 import (
 	"context"
-	"io"
-	"net/http"
 	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
-	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -24,9 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
-	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
-	secutils "github.com/Tencent/WeKnora/internal/utils"
 
 	_ "github.com/Tencent/WeKnora/docs" // swagger docs
 )
@@ -51,6 +44,7 @@ type RouterParams struct {
 	KnowledgeHandler             *handler.KnowledgeHandler
 	TenantHandler                *handler.TenantHandler
 	TenantService                interfaces.TenantService
+	TenantAPIKeyService          interfaces.TenantAPIKeyService
 	TenantMemberService          interfaces.TenantMemberService
 	TenantMemberHandler          *handler.TenantMemberHandler
 	TenantInvitationHandler      *handler.TenantInvitationHandler
@@ -60,6 +54,7 @@ type RouterParams struct {
 	ChunkFeedbackHandler         *handler.ChunkFeedbackHandler
 	SessionHandler               *session.Handler
 	MessageHandler               *handler.MessageHandler
+	MessageSuggestionHandler     *handler.MessageSuggestionHandler
 	ModelHandler                 *handler.ModelHandler
 	ModelCredentialsHandler      *handler.ModelCredentialsHandler
 	EvaluationHandler            *handler.EvaluationHandler
@@ -73,6 +68,9 @@ type RouterParams struct {
 	WebSearchProviderHandler     *handler.WebSearchProviderHandler
 	WebSearchCredentialsHandler  *handler.WebSearchProviderCredentialsHandler
 	VectorStoreHandler           *handler.VectorStoreHandler
+	StorageBackendHandler        *handler.StorageBackendHandler
+	StorageBackendResolver       interfaces.StorageBackendResolver
+	ResourceCatalog              interfaces.ResourceCatalog
 	FAQHandler                   *handler.FAQHandler
 	TagHandler                   *handler.TagHandler
 	CustomAgentHandler           *handler.CustomAgentHandler
@@ -104,7 +102,12 @@ func NewRouter(params RouterParams) *gin.Engine {
 		logger.Errorf(context.Background(), "[Router] failed to set trusted proxies: %v", err)
 	}
 
-	// CORS 中间件应放在最前面
+	// CORS 中间件应放在最前面。
+	// 注意：通配符 AllowOrigins 下浏览器会拒绝一切带凭据（cookie）的跨域
+	// 请求（CORS 规范禁止 "*" 与 credentials 组合），因此 AllowCredentials
+	// 实际只对未来改为回显具体 Origin 时才生效；当前认证全部走显式的
+	// Authorization / X-API-Key 头，不依赖 ambient 凭据。若引入 cookie
+	// 认证，必须先把 AllowOrigins 换成受控清单。
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
@@ -155,19 +158,32 @@ func NewRouter(params RouterParams) *gin.Engine {
 	RegisterIMRoutes(r, params.IMHandler)
 
 	// Web embed 公开路由（使用 publish token 鉴权，不走全局 Auth）
-	RegisterEmbedPublicRoutes(r, params.EmbedChannelHandler, params.EmbedChannelService, params.TenantService, params.RedisClient, params.FileService)
+	RegisterEmbedPublicRoutes(
+		r,
+		params.EmbedChannelHandler,
+		params.EmbedChannelService,
+		params.TenantService,
+		params.RedisClient,
+		params.FileService,
+		params.StorageBackendResolver,
+		params.ResourceCatalog,
+	)
+
+	// Short-lived capability URLs for IM and other clients that cannot attach
+	// WeKnora authentication headers.
+	serveResourceGrants(r, params.ResourceCatalog, params.TenantService, params.FileService, params.StorageBackendResolver)
 
 	// 认证中间件
-	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.Config))
+	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.TenantAPIKeyService, params.Config))
 
 	// 文件服务：统一代理本地/MinIO/COS/TOS存储后端（需要认证）
-	serveFiles(r, params.FileService)
+	serveFilesWithResources(r, params.FileService, params.StorageBackendResolver, params.ResourceCatalog)
 
 	// Presigned file access: no auth required, signature-verified.
-	servePresignedFiles(r, params.TenantService)
+	servePresignedFiles(r, params.TenantService, params.StorageBackendResolver)
 
 	// Diagnostic preview of presigned URLs (Admin only, behind auth middleware).
-	servePresignedPreview(r, params.Config)
+	servePresignedPreview(r, params.Config, params.StorageBackendResolver)
 
 	// Langfuse observability — only active when LANGFUSE_* env vars are set.
 	// The middleware is registered unconditionally; when disabled it's a no-op.
@@ -202,16 +218,35 @@ func NewRouter(params RouterParams) *gin.Engine {
 			params.AgentShareService,
 		)
 
-		RegisterAuthRoutes(v1, params.AuthHandler)
+		// API-key gate: single authority for X-API-Key principals. Runs
+		// first on every /api/v1 route (JWT sessions pass straight
+		// through) and denies any route not explicitly declared via the
+		// apiKeyGroup helpers. Must be attached BEFORE the Register* calls
+		// so that sub-groups inherit it.
+		v1.Use(rbacGuards.apiKeyAuthorizer.Middleware())
+
+		RegisterAuthRoutes(v1, params.AuthHandler, rbacGuards)
 		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.TenantInvitationHandler, params.AuditLogHandler, rbacGuards)
 		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)
 		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)
+		RegisterKnowledgeBaseActivityRoutes(v1, params.AuditLogHandler, rbacGuards)
+		// KB-scoped image proxy: lets tenants render images embedded in
+		// org-shared / agent-visible KB content, which the tenant-scoped
+		// /files route cannot serve because it enforces same-tenant paths.
+		serveKBScopedFiles(
+			v1,
+			rbacGuards,
+			params.TenantService,
+			params.FileService,
+			params.StorageBackendResolver,
+			params.ResourceCatalog,
+		)
 		RegisterChunkFeedbackRoutes(v1, params.ChunkFeedbackHandler, rbacGuards)
 		RegisterKnowledgeTagRoutes(v1, params.TagHandler, rbacGuards)
 		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)
 		RegisterFAQRoutes(v1, params.FAQHandler, rbacGuards)
 		RegisterChunkRoutes(v1, params.ChunkHandler, rbacGuards)
-		RegisterSessionRoutes(v1, params.SessionHandler, rbacGuards)
+		RegisterSessionRoutes(v1, params.SessionHandler, params.MessageSuggestionHandler, rbacGuards)
 		RegisterChatRoutes(v1, params.SessionHandler, rbacGuards)
 		RegisterMessageRoutes(v1, params.MessageHandler, rbacGuards)
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
@@ -223,6 +258,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterWebSearchRoutes(v1, params.WebSearchHandler, rbacGuards)
 		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler, params.WebSearchCredentialsHandler, rbacGuards)
 		RegisterVectorStoreRoutes(v1, params.VectorStoreHandler, rbacGuards)
+		RegisterStorageBackendRoutes(v1, params.StorageBackendHandler, rbacGuards)
 		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler, rbacGuards)
 		RegisterUserFavoriteRoutes(v1, params.UserFavoriteHandler, rbacGuards)
 		RegisterSkillRoutes(v1, params.SkillHandler, rbacGuards)
@@ -233,6 +269,12 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
 		RegisterChunkerDebugRoutes(v1, rbacGuards)
+
+		// Fail fast if any declared API-key policy points at a route
+		// template that does not actually exist (typo / path drift). A
+		// stale template would silently 403 every API key on that route,
+		// so we panic at startup instead of shipping a dead policy.
+		rbacGuards.assertAPIKeyPoliciesMatchRoutes(r)
 	}
 
 	return r
@@ -1281,551 +1323,4 @@ func trustedProxies() []string {
 		}
 	}
 	return proxies
-}
-
-// embedChannelIDFromPath extracts the channel id from an /embed/:channelID path.
-func embedChannelIDFromPath(path string) string {
-	const prefix = "/embed/"
-	if !strings.HasPrefix(path, prefix) {
-		return ""
-	}
-	rest := strings.TrimPrefix(path, prefix)
-	if i := strings.IndexByte(rest, '/'); i >= 0 {
-		rest = rest[:i]
-	}
-	if i := strings.IndexByte(rest, '?'); i >= 0 {
-		rest = rest[:i]
-	}
-	return strings.TrimSpace(rest)
-}
-
-// embedFrameAncestorsMiddleware sets a per-channel `frame-ancestors` CSP on the
-// embed SPA page so it can only be framed by the channel's allowed origins.
-// When the channel declares no origins (or "*"), no restriction is applied,
-// matching the API allowlist semantics. Only GET/HEAD page loads are handled.
-func embedFrameAncestorsMiddleware(svc interfaces.EmbedChannelService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
-			c.Next()
-			return
-		}
-		channelID := embedChannelIDFromPath(c.Request.URL.Path)
-		if channelID == "" {
-			c.Next()
-			return
-		}
-		ch, err := svc.LookupEnabledChannel(c.Request.Context(), channelID)
-		if err != nil || ch == nil {
-			c.Next()
-			return
-		}
-		origins := ch.AllowedOriginsList()
-		sources := make([]string, 0, len(origins))
-		wildcard := false
-		for _, o := range origins {
-			o = strings.TrimSpace(o)
-			if o == "" {
-				continue
-			}
-			if o == "*" {
-				wildcard = true
-				break
-			}
-			sources = append(sources, o)
-		}
-		// No explicit origins or a wildcard => do not constrain framing here.
-		if wildcard || len(sources) == 0 {
-			c.Next()
-			return
-		}
-		c.Header("Content-Security-Policy", "frame-ancestors "+strings.Join(sources, " "))
-		c.Next()
-	}
-}
-
-// serveFrontendStatic registers a middleware that serves the frontend SPA
-// from the ./web directory if it exists. Must be called BEFORE auth middleware
-// so static files are served without authentication.
-func serveFrontendStatic(r *gin.Engine) {
-	webDir := os.Getenv("WEKNORA_WEB_DIR")
-	if webDir == "" {
-		webDir = "./web"
-	}
-	absDir, _ := filepath.Abs(webDir)
-	indexPath := filepath.Join(absDir, "index.html")
-	if _, err := os.Stat(indexPath); err != nil {
-		return
-	}
-
-	logger.Infof(context.Background(), "[Router] Serving frontend static files from %s", absDir)
-
-	fs := http.Dir(absDir)
-	fileServer := http.FileServer(fs)
-
-	r.Use(func(c *gin.Context) {
-		if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
-			c.Next()
-			return
-		}
-		path := c.Request.URL.Path
-		if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/health") || strings.HasPrefix(path, "/swagger/") {
-			c.Next()
-			return
-		}
-		fullPath := filepath.Join(absDir, path)
-		if info, err := os.Stat(fullPath); err == nil && !info.IsDir() {
-			setFrontendCacheHeaders(c.Writer, path)
-			fileServer.ServeHTTP(c.Writer, c.Request)
-			c.Abort()
-			return
-		}
-		setFrontendCacheHeaders(c.Writer, "/index.html")
-		c.File(indexPath)
-		c.Abort()
-	})
-}
-
-// setFrontendCacheHeaders sets Cache-Control headers for frontend static resources.
-// Vite 构建产物中 /assets/* 的文件名带 hash，可长期缓存；其余（index.html、config.js、favicon 等）
-// 每次都需 revalidate，避免前端升级后用户看到旧版本。
-func setFrontendCacheHeaders(w http.ResponseWriter, path string) {
-	if strings.HasPrefix(path, "/assets/") {
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		return
-	}
-	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
-}
-
-// serveFiles serves files via query parameters and tenant storage settings.
-// It is registered after auth middleware, so tenant context comes from authentication.
-//
-// Route:
-//   - /files?file_path=<provider://...>
-type getRouteRegistrar interface {
-	GET(string, ...gin.HandlerFunc) gin.IRoutes
-}
-
-// newFileServeHandler builds the file-proxy handler. It reads the tenant from
-// the request context (set by whichever auth middleware precedes it), so the
-// same handler backs both the authenticated /files route and the embed route
-// (where EmbedAuth injects the channel's tenant). Tenant ownership of the
-// requested path is enforced via ValidateStoragePathTenant either way.
-func newFileServeHandler(globalFileService interfaces.FileService) gin.HandlerFunc {
-	baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
-	if baseDir == "" {
-		baseDir = "/data/files"
-	}
-	absDir, _ := filepath.Abs(baseDir)
-	if info, err := os.Stat(absDir); err != nil || !info.IsDir() {
-		if err := os.MkdirAll(absDir, 0o755); err != nil {
-			logger.Warnf(context.Background(), "[Router] Cannot create local storage dir %s: %v", absDir, err)
-		}
-	}
-
-	return func(c *gin.Context) {
-		filePath := strings.TrimSpace(c.Query("file_path"))
-		if filePath == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "missing required parameter: file_path"})
-			return
-		}
-		if strings.Contains(filePath, "..") {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file path"})
-			return
-		}
-
-		provider := types.ParseProviderScheme(filePath)
-
-		tenant, _ := c.Request.Context().Value(types.TenantInfoContextKey).(*types.Tenant)
-		if tenant == nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: tenant context missing"})
-			return
-		}
-
-		if err := secutils.ValidateStoragePathTenant(filePath, tenant.ID); err != nil {
-			logger.Warnf(context.Background(), "[Router] /files denied cross-tenant or invalid path: tenant_id=%d file_path=%q err=%v", tenant.ID, filePath, err)
-			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file path not accessible"})
-			return
-		}
-
-		var (
-			fileSvc          interfaces.FileService
-			resolvedProvider string
-			err              error
-		)
-
-		if tenant.StorageEngineConfig != nil {
-			fileSvc, resolvedProvider, err = filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
-		} else {
-			err = http.ErrMissingFile
-		}
-		if err != nil {
-			globalStorageType := strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_TYPE")))
-			if globalStorageType == "" {
-				globalStorageType = "local"
-			}
-			if provider == globalStorageType && globalFileService != nil {
-				logger.Warnf(context.Background(), "[Router] /files tenant storage config missing or invalid, fallback to global file service: tenant_id=%d provider=%s err=%v", tenant.ID, provider, err)
-				fileSvc = globalFileService
-				resolvedProvider = globalStorageType
-			} else {
-				logger.Warnf(context.Background(), "[Router] /files resolve file service failed without fallback: tenant_id=%d provider=%s global_storage_type=%s err=%v", tenant.ID, provider, globalStorageType, err)
-				c.Status(http.StatusBadRequest)
-				return
-			}
-		}
-
-		reader, err := fileSvc.GetFile(c.Request.Context(), filePath)
-		if err != nil {
-			logger.Warnf(context.Background(), "[Router] /files get file failed: tenant_id=%d provider=%s path=%q err=%v", tenant.ID, resolvedProvider, filePath, err)
-			c.Status(http.StatusNotFound)
-			return
-		}
-		defer reader.Close()
-
-		ext := filepath.Ext(filePath)
-		contentType := "application/octet-stream"
-		switch strings.ToLower(ext) {
-		case ".png":
-			contentType = "image/png"
-		case ".jpg", ".jpeg":
-			contentType = "image/jpeg"
-		case ".gif":
-			contentType = "image/gif"
-		case ".webp":
-			contentType = "image/webp"
-		case ".bmp":
-			contentType = "image/bmp"
-		case ".svg":
-			contentType = "image/svg+xml"
-		case ".pdf":
-			contentType = "application/pdf"
-		case ".csv":
-			contentType = "text/csv; charset=utf-8"
-		}
-
-		c.Header("Content-Type", contentType)
-		c.Header("Cache-Control", "public, max-age=86400")
-		c.Status(http.StatusOK)
-		if _, err := io.Copy(c.Writer, reader); err != nil {
-			logger.Warnf(context.Background(), "[Router] /files write response failed: %v", err)
-		}
-	}
-}
-
-func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
-	logger.Infof(context.Background(), "[Router] Serving files from /files")
-	r.GET("/files", newFileServeHandler(globalFileService))
-}
-
-// servePresignedFiles serves files via HMAC-signed URLs without requiring authentication.
-// This is used by IM channels to serve images that are embedded in bot replies.
-//
-// Routes:
-//   - GET  /api/v1/files/presigned?file_path=<provider://...>&tenant_id=<id>&expires=<unix>&sig=<hmac>
-//   - HEAD /api/v1/files/presigned?...  (IM platforms issue HEAD first to validate
-//     Content-Type / Content-Length before rendering image previews; HEAD must
-//     succeed or the inline image renders as broken)
-//
-// Failure paths log client IP + User-Agent + (truncated) file_path so operators
-// can correlate an IM platform's fetch against the upstream signing log line.
-// Without this it is otherwise impossible to tell whether a "broken image" is
-// caused by an expired signature, a stale URL cached by the platform, the
-// platform's IP being blocked, or the URL simply never reaching us.
-func servePresignedFiles(r *gin.Engine, tenantService interfaces.TenantService) {
-	baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
-	if baseDir == "" {
-		baseDir = "/data/files"
-	}
-	absDir, _ := filepath.Abs(baseDir)
-
-	handler := presignedFileHandler(tenantService, absDir)
-	r.GET("/api/v1/files/presigned", handler)
-	r.HEAD("/api/v1/files/presigned", handler)
-}
-
-// presignedFileHandler returns the shared Gin handler used by both GET and HEAD.
-// For HEAD requests it returns the same status + headers but does not stream
-// the body — this is enough for IM platforms to validate the URL while saving
-// us a full read of the backing object.
-func presignedFileHandler(tenantService interfaces.TenantService, absDir string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		ctx := c.Request.Context()
-		clientIP := c.ClientIP()
-		userAgent := c.Request.UserAgent()
-
-		filePath := strings.TrimSpace(c.Query("file_path"))
-		tenantIDStr := strings.TrimSpace(c.Query("tenant_id"))
-		expiresStr := strings.TrimSpace(c.Query("expires"))
-		sig := strings.TrimSpace(c.Query("sig"))
-
-		if filePath == "" || tenantIDStr == "" || expiresStr == "" || sig == "" {
-			logger.Warnf(ctx, "[Router] /files/presigned missing params: client_ip=%s ua=%q file_path=%q tenant_id=%q expires=%q has_sig=%v",
-				clientIP, userAgent, filePath, tenantIDStr, expiresStr, sig != "")
-			c.JSON(http.StatusBadRequest, gin.H{"error": "missing required parameters"})
-			return
-		}
-		if strings.Contains(filePath, "..") {
-			logger.Warnf(ctx, "[Router] /files/presigned rejected path traversal: client_ip=%s file_path=%q", clientIP, filePath)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file path"})
-			return
-		}
-
-		tenantID, err := strconv.ParseUint(tenantIDStr, 10, 64)
-		if err != nil {
-			logger.Warnf(ctx, "[Router] /files/presigned invalid tenant_id: client_ip=%s tenant_id=%q err=%v", clientIP, tenantIDStr, err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tenant_id"})
-			return
-		}
-
-		// Verify HMAC signature and expiry. Logged at Warn because every 403
-		// here is a signal worth investigating: either the URL was tampered
-		// with, the IM platform cached an expired URL, or SYSTEM_AES_KEY was
-		// rotated without invalidating in-flight links.
-		if !secutils.VerifyFileURLSig(filePath, tenantID, expiresStr, sig) {
-			logger.Warnf(ctx, "[Router] /files/presigned sig invalid or expired: client_ip=%s ua=%q tenant_id=%d file_path=%q expires=%s",
-				clientIP, userAgent, tenantID, filePath, expiresStr)
-			c.JSON(http.StatusForbidden, gin.H{"error": "invalid or expired signature"})
-			return
-		}
-
-		provider := types.ParseProviderScheme(filePath)
-		tenant, err := tenantService.GetTenantByID(ctx, tenantID)
-		if err != nil {
-			logger.Warnf(ctx, "[Router] /files/presigned tenant lookup failed: client_ip=%s tenant_id=%d err=%v", clientIP, tenantID, err)
-			c.Status(http.StatusNotFound)
-			return
-		}
-
-		fileSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
-		if err != nil {
-			logger.Warnf(ctx, "[Router] /files/presigned resolve file service failed: client_ip=%s tenant_id=%d provider=%s err=%v",
-				clientIP, tenantID, provider, err)
-			c.Status(http.StatusBadRequest)
-			return
-		}
-
-		ext := filepath.Ext(filePath)
-		contentType := "application/octet-stream"
-		switch strings.ToLower(ext) {
-		case ".png":
-			contentType = "image/png"
-		case ".jpg", ".jpeg":
-			contentType = "image/jpeg"
-		case ".gif":
-			contentType = "image/gif"
-		case ".webp":
-			contentType = "image/webp"
-		case ".bmp":
-			contentType = "image/bmp"
-		case ".svg":
-			contentType = "image/svg+xml"
-		case ".pdf":
-			contentType = "application/pdf"
-		}
-
-		// HEAD short-circuits the body read. We still need to confirm the
-		// object exists, but we use a 0-byte content length and skip io.Copy.
-		// Skipping GetFile entirely for HEAD would risk reporting 200 for a
-		// signed URL that no longer points at a real object; that mismatch
-		// would make subsequent GETs from the same client mysteriously fail.
-		reader, err := fileSvc.GetFile(ctx, filePath)
-		if err != nil {
-			logger.Warnf(ctx, "[Router] /files/presigned get file failed: client_ip=%s tenant_id=%d provider=%s path=%q err=%v",
-				clientIP, tenantID, resolvedProvider, filePath, err)
-			c.Status(http.StatusNotFound)
-			return
-		}
-		defer reader.Close()
-
-		c.Header("Content-Type", contentType)
-		c.Header("Cache-Control", "public, max-age=86400")
-		if c.Request.Method == http.MethodHead {
-			c.Status(http.StatusOK)
-			return
-		}
-		c.Status(http.StatusOK)
-		if _, err := io.Copy(c.Writer, reader); err != nil {
-			logger.Warnf(ctx, "[Router] /files/presigned write response failed: client_ip=%s tenant_id=%d err=%v", clientIP, tenantID, err)
-		}
-	}
-}
-
-// servePresignedPreview registers an Admin-only diagnostic endpoint that
-// returns the presigned HTTP URL that *would be* generated for a given
-// storage path by the calling tenant's current storage config — exactly the
-// URL an IM channel would embed in a reply. Operators can paste the result
-// into a 4G/mobile browser to verify public reachability without having to
-// send a real message through an IM bot.
-//
-// Route:
-//   - GET /api/v1/files/presigned-preview?file_path=<provider://...>
-func servePresignedPreview(r *gin.Engine, cfg *config.Config) {
-	baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
-	if baseDir == "" {
-		baseDir = "/data/files"
-	}
-	absDir, _ := filepath.Abs(baseDir)
-
-	r.GET("/api/v1/files/presigned-preview",
-		middleware.RequireRole(types.TenantRoleAdmin, cfg),
-		func(c *gin.Context) {
-			ctx := c.Request.Context()
-			filePath := strings.TrimSpace(c.Query("file_path"))
-			if filePath == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "missing required parameter: file_path"})
-				return
-			}
-			if strings.Contains(filePath, "..") {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file path"})
-				return
-			}
-
-			tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-			if tenant == nil {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: tenant context missing"})
-				return
-			}
-
-			provider := types.ParseProviderScheme(filePath)
-			fileSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"error":    err.Error(),
-					"provider": provider,
-					"hint":     "tenant storage config is missing or incomplete for this provider",
-				})
-				return
-			}
-
-			httpURL, err := fileSvc.GetFileURL(ctx, filePath)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"error":    err.Error(),
-					"provider": resolvedProvider,
-					"hint":     "GetFileURL failed; for local storage this usually means APP_EXTERNAL_URL is unset",
-				})
-				return
-			}
-
-			// Detect the "no-op" case where local storage falls back to the
-			// provider:// path because APP_EXTERNAL_URL is missing. Surfacing
-			// this explicitly is the whole point of the endpoint.
-			rewritten := httpURL != filePath
-			hint := ""
-			if !rewritten {
-				hint = "URL unchanged; for local storage set APP_EXTERNAL_URL to enable presigned HTTP URLs"
-			}
-
-			c.JSON(http.StatusOK, gin.H{
-				"file_path": filePath,
-				"provider":  resolvedProvider,
-				"url":       httpURL,
-				"rewritten": rewritten,
-				"hint":      hint,
-			})
-		})
-}
-
-// RegisterDataSourceRoutes 注册数据源相关的路由
-//
-// Data sources hold external service credentials (Feishu/Notion/Yuque)
-// and trigger sync jobs that mutate KB content tenant-wide. Reads are
-// Viewer+; everything else (CRUD, validation, sync control, credential
-// subresource) is Admin+.
-func RegisterDataSourceRoutes(
-	r *gin.RouterGroup,
-	handler *handler.DataSourceHandler,
-	credHandler *handler.DataSourceCredentialsHandler,
-	g *rbacGuards,
-) {
-	// Data source routes
-	ds := r.Group("/datasource")
-	{
-		// Get available connector types — Viewer+
-		ds.GET("/types", g.Viewer(), handler.GetAvailableConnectors)
-
-		// Validate credentials without persistence (for "Test Connection" button) — Admin+
-		ds.POST("/validate-credentials", g.Admin(), handler.ValidateCredentials)
-
-		// CRUD operations
-		ds.POST("", g.Admin(), handler.CreateDataSource)
-		ds.GET("", g.Viewer(), handler.ListDataSources)
-		ds.GET("/:id", g.Viewer(), handler.GetDataSource)
-		ds.PUT("/:id", g.Admin(), handler.UpdateDataSource)
-		ds.DELETE("/:id", g.Admin(), handler.DeleteDataSource)
-
-		// Credential subresource. Single logical field "credentials" because
-		// connector credentials are a per-connector atomic map (see
-		// internal/handler/datasource_credentials.go). — Admin+
-		ds.PUT("/:id/credentials", g.Admin(), credHandler.Put)
-		ds.DELETE("/:id/credentials/:field", g.Admin(), credHandler.DeleteField)
-
-		// Connection and resource management — Admin+
-		ds.POST("/:id/validate", g.Admin(), handler.ValidateConnection)
-		ds.GET("/:id/resources", g.Admin(), handler.ListAvailableResources)
-		ds.POST("/:id/resource-ancestors", g.Admin(), handler.ResolveResourceAncestors)
-
-		// Sync management — Admin+
-		ds.POST("/:id/sync", g.Admin(), handler.ManualSync)
-		ds.POST("/:id/pause", g.Admin(), handler.PauseDataSource)
-		ds.POST("/:id/resume", g.Admin(), handler.ResumeDataSource)
-
-		// Sync logs — Viewer+ (read-only audit trail)
-		ds.GET("/:id/logs", g.Viewer(), handler.GetSyncLogs)
-		ds.GET("/logs/:log_id", g.Viewer(), handler.GetSyncLog)
-	}
-}
-
-// RegisterWeKnoraCloudRoutes 注册 WeKnoraCloud 初始化路由
-// RegisterWeKnoraCloudRoutes registers the WeKnoraCloud credential
-// management endpoints. SaveCredentials persists external SaaS keys
-// for the tenant (Admin+), Status is a low-risk readiness probe (Viewer+).
-func RegisterWeKnoraCloudRoutes(r *gin.RouterGroup, handler *handler.WeKnoraCloudHandler, g *rbacGuards) {
-	r.POST("/weknoracloud/credentials", g.Admin(), handler.SaveCredentials)
-	r.GET("/models/weknoracloud/status", g.Viewer(), handler.Status)
-}
-
-// RegisterWikiPageRoutes registers wiki page related routes.
-//
-// Wiki pages are KB content (wiki mode): reads are Viewer+, content
-// mutations (create/update/delete) and maintenance actions
-// (rebuild-links, auto-fix, change issue status) honour per-KB
-// ownership via OwnedWikiKBOrAdmin (PR 5, #1303): the URL :kb_id
-// resolves directly to the owning KB so a Contributor who owns the KB
-// can manage its wiki, while a non-owner Contributor gets 403.
-func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHandler, g *rbacGuards) {
-	wiki := r.Group("/knowledgebase/:kb_id/wiki")
-	{
-		// Page CRUD
-		wiki.GET("/pages", g.Viewer(), wikiHandler.ListPages)
-		wiki.POST("/pages", g.OwnedWikiKBOrAdmin(), wikiHandler.CreatePage)
-		wiki.PUT("/move-page", g.OwnedWikiKBOrAdmin(), wikiHandler.MovePage)
-		wiki.GET("/pages/*slug", g.Viewer(), wikiHandler.GetPage)
-		wiki.PUT("/pages/*slug", g.OwnedWikiKBOrAdmin(), wikiHandler.UpdatePage)
-		wiki.DELETE("/pages/*slug", g.OwnedWikiKBOrAdmin(), wikiHandler.DeletePage)
-
-		// Folder tree (directory nodes)
-		wiki.GET("/folders", g.Viewer(), wikiHandler.ListFolders)
-		wiki.POST("/folders", g.OwnedWikiKBOrAdmin(), wikiHandler.CreateFolder)
-		wiki.PUT("/folders/:folder_id", g.OwnedWikiKBOrAdmin(), wikiHandler.UpdateFolder)
-		wiki.DELETE("/folders/:folder_id", g.OwnedWikiKBOrAdmin(), wikiHandler.DeleteFolder)
-
-		// Special pages
-		wiki.GET("/index", g.Viewer(), wikiHandler.GetIndex)
-		wiki.GET("/log", g.Viewer(), wikiHandler.GetLog)
-
-		// Graph and stats
-		wiki.GET("/graph", g.Viewer(), wikiHandler.GetGraph)
-		wiki.GET("/stats", g.Viewer(), wikiHandler.GetStats)
-
-		// Search and maintenance
-		wiki.GET("/search", g.Viewer(), wikiHandler.SearchPages)
-		wiki.POST("/rebuild-links", g.OwnedWikiKBOrAdmin(), wikiHandler.RebuildLinks)
-		wiki.GET("/lint", g.Viewer(), wikiHandler.Lint)
-		wiki.POST("/auto-fix", g.OwnedWikiKBOrAdmin(), wikiHandler.AutoFix)
-
-		// Issues
-		wiki.GET("/issues", g.Viewer(), wikiHandler.ListIssues)
-		wiki.PUT("/issues/:issue_id/status", g.OwnedWikiKBOrAdmin(), wikiHandler.UpdateIssueStatus)
-	}
 }

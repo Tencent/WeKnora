@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	appservice "github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -178,6 +179,15 @@ func (h *MessageHandler) DeleteMessage(c *gin.Context) {
 			// surface ErrSessionNotFound when the caller can't see the
 			// owning session (post-#1309 user scope).
 			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
+		if stderrors.Is(err, gorm.ErrRecordNotFound) {
+			// The message_id doesn't exist under this session — a client error,
+			// not a server fault. 404 so callers read resource.not_found (a
+			// permanent condition, not retryable) instead of a 5xx. Mirrors the
+			// ContinueStream / kb / doc / chunk not-found handling.
+			logger.Warnf(ctx, "Message not found, session ID: %s, message ID: %s", sessionID, messageID)
 			c.Error(errors.NewNotFoundError(err.Error()))
 			return
 		}

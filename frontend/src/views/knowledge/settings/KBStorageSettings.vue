@@ -2,48 +2,28 @@
   <div class="kb-storage-settings">
     <div class="section-header">
       <h2>{{ $t('kbSettings.storage.title') }}</h2>
-      <p class="section-description">
-        {{ $t('kbSettings.storage.description') }}
-      </p>
+      <p class="section-description">{{ $t('kbSettings.storage.selectDescription') }}</p>
     </div>
-
-    <div v-if="loading" class="loading-inline">
-      <t-loading size="small" />
-      <span>{{ $t('kbSettings.storage.loading') }}</span>
-    </div>
-
+    <div v-if="loading" class="loading-inline"><t-loading size="small" /><span>{{ $t('kbSettings.storage.loading') }}</span></div>
     <div v-else class="settings-group">
       <div class="setting-row">
         <div class="setting-info">
-          <label>{{ $t('kbSettings.storage.engineLabel') }}</label>
-          <p class="desc">{{ $t('kbSettings.storage.engineDesc') }}</p>
+          <label>{{ $t('kbSettings.storage.instanceLabel') }}</label>
+          <p class="desc">{{ $t('kbSettings.storage.instanceDesc') }}</p>
         </div>
         <div class="setting-control">
-          <t-select
-            v-model="localProvider"
-            size="medium"
-            :placeholder="$t('kbSettings.storage.selectPlaceholder')"
-            style="width: 100%; min-width: 220px;"
-            @change="handleChange"
-          >
-            <t-option
-              v-for="opt in engineOptions"
-              :key="opt.value"
-              :value="opt.value"
-              :label="opt.label"
-              :disabled="opt.disabled"
-            >
+          <t-select v-model="localID" style="width:100%;min-width:260px" :disabled="!!props.hasFiles" @change="handleChange">
+            <t-option v-for="backend in backends" :key="backend.id" :value="backend.id" :label="backend.name">
               <span class="select-option">
-                <span>{{ opt.label }}</span>
-                 <t-tag v-if="opt.disabled && opt.allowed === false" theme="danger" variant="light" size="small">{{ $t('kbSettings.storage.unavailable') }}</t-tag>
-                 <t-tag v-else-if="opt.disabled" theme="warning" variant="light" size="small">{{ $t('kbSettings.storage.notConfigured') }}</t-tag>
-                <t-tag v-else-if="opt.available === false" theme="danger" variant="light" size="small">{{ $t('kbSettings.storage.unavailable') }}</t-tag>
+                <span>{{ backend.name }}</span>
+                <t-tag theme="primary" variant="light" size="small">{{ backend.provider.toUpperCase() }}</t-tag>
+                <t-tag v-if="backend.id === defaultID" variant="light" size="small">{{ $t('kbSettings.storage.defaultTag') }}</t-tag>
               </span>
             </t-option>
           </t-select>
-          <p v-if="props.hasFiles" class="option-hint change-warning">{{ $t('kbSettings.storage.changeWarning') }}</p>
-          <p v-else-if="selectedOption?.desc" class="option-hint">{{ selectedOption.desc }}</p>
-          <a v-if="showGoSettings" href="javascript:void(0)" class="go-settings" @click.prevent="goToStorageSettings">{{ $t('kbSettings.storage.goGlobalSettings') }}</a>
+          <p v-if="props.hasFiles" class="option-hint change-warning">{{ $t('kbSettings.storage.migrateHint') }}</p>
+          <p v-else-if="selected" class="option-hint">{{ selected.config.endpoint || selected.config.bucket_name || selected.config.path_prefix || $t('kbSettings.storage.localStorage') }}</p>
+          <a href="javascript:void(0)" class="go-settings" @click.prevent="goToSettings">{{ $t('kbSettings.storage.manageInstances') }}</a>
         </div>
       </div>
     </div>
@@ -51,271 +31,39 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
-import { useI18n } from 'vue-i18n'
-import { type StorageEngineStatusItem } from '@/api/system'
+import { computed, onMounted, ref, watch } from 'vue'
+import { listStorageBackends, type StorageBackend } from '@/api/storage-backend'
 import { useUIStore } from '@/stores/ui'
-import { useEditorResourcesStore } from '@/stores/editorResources'
 
-const { t } = useI18n()
-
-const props = defineProps<{
-  storageProvider: string
-  hasFiles?: boolean
-}>()
-
+const props = defineProps<{ storageBackendId?: string; storageProvider?: string; hasFiles?: boolean }>()
 const emit = defineEmits<{
+  'update:storageBackendId': [value: string]
   'update:storageProvider': [value: string]
 }>()
-
 const uiStore = useUIStore()
-const editorResources = useEditorResourcesStore()
-// Keep empty until tenant default_provider is loaded — do not pre-fill 'local'.
-const localProvider = ref(props.storageProvider)
-const loading = ref(true)
-const engineStatus = ref<StorageEngineStatusItem[]>([])
-const defaultProvider = ref('local')
-const allowedProviders = ref<string[]>([])
-const hasAnyConfig = ref(false)
-
-const engineOptions = computed(() => {
-  const statusMap: Record<string, boolean> = {}
-  const allowedMap: Record<string, boolean> = {}
-  for (const e of engineStatus.value) {
-    statusMap[e.name] = e.available
-    allowedMap[e.name] = e.allowed !== false
-  }
-  return [
-    {
-      value: 'local',
-      label: t('kbSettings.storage.engineLocal'),
-      desc: t('kbSettings.storage.engineLocalDesc'),
-      allowed: allowedMap.local !== false,
-      available: statusMap.local !== false,
-      disabled: allowedMap.local === false,
-    },
-    {
-      value: 'minio',
-      label: 'MinIO',
-      desc: t('kbSettings.storage.engineMinioDesc'),
-      allowed: allowedMap.minio !== false,
-      available: statusMap.minio,
-      disabled: allowedMap.minio === false || statusMap.minio === false,
-    },
-    {
-      value: 'cos',
-      label: t('kbSettings.storage.engineCos'),
-      desc: t('kbSettings.storage.engineCosDesc'),
-      allowed: allowedMap.cos !== false,
-      available: statusMap.cos,
-      disabled: allowedMap.cos === false || statusMap.cos === false,
-    },
-    {
-      value: 'tos',
-      label: t('kbSettings.storage.engineTos'),
-      desc: t('kbSettings.storage.engineTosDesc'),
-      allowed: allowedMap.tos !== false,
-      available: statusMap.tos,
-      disabled: allowedMap.tos === false || statusMap.tos === false,
-    },
-    {
-      value: 's3',
-      label: t('kbSettings.storage.engineS3'),
-      desc: t('kbSettings.storage.engineS3Desc'),
-      allowed: allowedMap.s3 !== false,
-      available: statusMap.s3,
-      disabled: allowedMap.s3 === false || statusMap.s3 === false,
-    },
-    {
-      value: 'oss',
-      label: t('kbSettings.storage.engineOss'),
-      desc: t('kbSettings.storage.engineOssDesc'),
-      allowed: allowedMap.oss !== false,
-      available: statusMap.oss,
-      disabled: allowedMap.oss === false || statusMap.oss === false,
-    },
-    {
-      value: 'ks3',
-      label: t('kbSettings.storage.engineKs3'),
-      desc: t('kbSettings.storage.engineKs3Desc'),
-      allowed: allowedMap.ks3 !== false,
-      available: statusMap.ks3,
-      disabled: allowedMap.ks3 === false || statusMap.ks3 === false,
-    },
-    {
-      value: 'obs',
-      label: t('kbSettings.storage.engineObs'),
-      desc: t('kbSettings.storage.engineObsDesc'),
-      allowed: allowedMap.obs !== false,
-      available: statusMap.obs,
-      disabled: allowedMap.obs === false || statusMap.obs === false,
-    },
-  ]
-})
-
-const showGoSettings = computed(() =>
-  engineOptions.value.some(o => o.disabled)
-)
-
-const selectedOption = computed(() =>
-  engineOptions.value.find(o => o.value === localProvider.value)
-)
+const loading = ref(false), backends = ref<StorageBackend[]>([]), defaultID = ref(''), localID = ref(props.storageBackendId || '')
+const selected = computed(() => backends.value.find(item => item.id === localID.value))
 
 function handleChange() {
-  emit('update:storageProvider', localProvider.value)
+  emit('update:storageBackendId', localID.value)
+  emit('update:storageProvider', selected.value?.provider || props.storageProvider || '')
 }
-
-function ensureAllowedProvider() {
-  const current = engineOptions.value.find(o => o.value === localProvider.value && !o.disabled)
-  if (current) return
-  const fallback = engineOptions.value.find(o => !o.disabled)?.value || defaultProvider.value || 'local'
-  localProvider.value = fallback
-  emit('update:storageProvider', localProvider.value)
-}
-
-function goToStorageSettings() {
-  uiStore.closeKBEditor?.()
-  uiStore.openSettings?.('storage')
-}
-
-async function load(force = false) {
+async function load() {
   loading.value = true
   try {
-    await editorResources.ensureStorageEngine(force)
-    const engines = editorResources.storageStatus
-    engineStatus.value = engines
-    allowedProviders.value = editorResources.storageAllowedProviders
-    defaultProvider.value = editorResources.storageConfig?.default_provider || 'local'
-    const d = editorResources.storageConfig
-    hasAnyConfig.value = !!(d?.local?.path_prefix || d?.minio?.bucket_name || d?.cos?.bucket_name || d?.tos?.bucket_name || d?.s3?.bucket_name || d?.oss?.bucket_name || d?.ks3?.bucket_name || d?.obs?.bucket_name)
-    const parentUnset = !props.storageProvider
-    if (parentUnset) {
-      localProvider.value = defaultProvider.value
-      emit('update:storageProvider', localProvider.value)
-    } else {
-      localProvider.value = props.storageProvider
-    }
-    ensureAllowedProvider()
-  } catch {
-    engineStatus.value = []
-  } finally {
-    loading.value = false
-  }
+    const response = await listStorageBackends()
+    backends.value = (response.data || []).filter(item => item.status === 'active')
+    defaultID.value = response.default_storage_backend_id || ''
+    if (!localID.value) localID.value = defaultID.value || backends.value[0]?.id || ''
+    if (localID.value) handleChange()
+  } finally { loading.value = false }
 }
-
-// Sync only when parent sets an explicit provider (edit mode). Create mode leaves
-// storageProvider empty until load() applies tenant default_provider.
-watch(() => props.storageProvider, (v) => {
-  if (v) {
-    localProvider.value = v
-  }
-})
-
+function goToSettings() { uiStore.closeKBEditor?.(); uiStore.openSettings?.('storage') }
+watch(() => props.storageBackendId, value => { if (value) localID.value = value })
 onMounted(load)
 </script>
 
-<style lang="less" scoped>
-.kb-storage-settings {
-  width: 100%;
-}
-
-.section-header {
-  margin-bottom: 20px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0 0 6px 0;
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.5;
-  }
-}
-
-.loading-inline {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 16px 0;
-}
-
-.settings-group {
-  display: flex;
-  flex-direction: column;
-}
-
-.setting-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 16px 0;
-  border-bottom: 1px solid var(--td-component-stroke);
-}
-
-.setting-info {
-  flex: 0 0 40%;
-  max-width: 40%;
-  padding-right: 24px;
-
-  label {
-    font-size: 15px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-    display: block;
-    margin-bottom: 4px;
-  }
-
-  .desc {
-    font-size: 13px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.5;
-  }
-}
-
-.setting-control {
-  flex: 0 0 55%;
-  max-width: 55%;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-}
-
-.select-option {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.option-hint {
-  font-size: 12px;
-  color: var(--td-text-color-placeholder);
-  margin: 0;
-  line-height: 1.4;
-
-  &.locked-hint {
-    color: var(--td-warning-color);
-  }
-
-  &.change-warning {
-    color: var(--td-warning-color);
-  }
-}
-
-.go-settings {
-  font-size: 13px;
-  color: var(--td-brand-color, #0052d9);
-  margin-top: 8px;
-  text-decoration: none;
-
-  &:hover {
-    text-decoration: underline;
-  }
-}
+<style scoped lang="less">
+.section-header{margin-bottom:20px}.section-header h2{font-size:20px;margin:0 0 6px}.section-description,.desc,.option-hint{color:var(--td-text-color-secondary)}
+.setting-row{display:flex;justify-content:space-between;gap:28px}.setting-info{flex:1}.setting-control{width:45%;min-width:300px}.select-option{display:flex;align-items:center;gap:8px}.option-hint{font-size:12px;margin:8px 0}.change-warning{color:var(--td-warning-color)}.go-settings{font-size:13px;color:var(--td-brand-color)}.loading-inline{display:flex;gap:8px}
 </style>

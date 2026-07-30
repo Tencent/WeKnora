@@ -38,6 +38,8 @@ type AgentConfig struct {
 	MCPAuthWaitTimeout int `json:"mcp_auth_wait_timeout,omitempty"`
 	// Whether to enable thinking mode (for models that support extended thinking)
 	Thinking *bool `json:"thinking"`
+	// Whether final answers include knowledge/web source citations. Nil defaults to true.
+	CitationEnabled *bool `json:"citation_enabled"`
 	// Whether to retrieve knowledge base only when explicitly mentioned with @ (default: false)
 	RetrieveKBOnlyWhenMentioned bool `json:"retrieve_kb_only_when_mentioned"`
 
@@ -54,6 +56,10 @@ type AgentConfig struct {
 	// Per-request @mention pins (runtime only; injected as <must_use> in the user message).
 	PinnedMCPServiceIDs []string `json:"-"`
 	PinnedSkillNames    []string `json:"-"`
+	// SharedAgentReadOnly prevents a shared agent from mutating resources in
+	// its source workspace. It is set from the verified share relation, never
+	// inferred from a client-provided tenant ID.
+	SharedAgentReadOnly bool `json:"-"`
 	// LLM call timeout in seconds (default: 120). Controls the maximum time for a single LLM call.
 	LLMCallTimeout int `json:"llm_call_timeout,omitempty"`
 
@@ -69,6 +75,12 @@ type AgentConfig struct {
 	// Whether to execute independent tool calls in parallel (default: false).
 	// When enabled and the LLM returns multiple tool calls, they run concurrently via errgroup.
 	ParallelToolCalls bool `json:"parallel_tool_calls,omitempty"`
+}
+
+// CitationsEnabled preserves citation output for legacy runtime configs that
+// predate the setting and therefore have a nil CitationEnabled value.
+func (c *AgentConfig) CitationsEnabled() bool {
+	return c == nil || c.CitationEnabled == nil || *c.CitationEnabled
 }
 
 // SessionAgentConfig represents session-level agent configuration

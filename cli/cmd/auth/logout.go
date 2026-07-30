@@ -61,6 +61,10 @@ accepted until it expires.`,
 				return cfgErr
 			}
 			if len(cfg.Profiles) == 0 {
+				if active, kind := cmdutil.EnvCredential(); active {
+					return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
+						"authenticated via "+kind+" (stateless env credential) — nothing is stored to log out; unset "+kind+" to drop it")
+				}
 				return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, "no profiles configured; nothing to log out")
 			}
 			if _, err := pickLogoutTargets(opts, cfg); err != nil {
@@ -86,12 +90,13 @@ accepted until it expires.`,
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetRisk(cmd, "auth.logout")
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor: "clear stored credentials for the active profile (or all) and remove the profile from config",
+		UsedFor: "clear stored credentials for the active profile (or --all); the profile itself stays registered (host preserved) so `auth login` can re-auth it — use `profile remove` to delete the profile entirely",
 		Examples: []string{
 			"weknora auth logout",
 			"weknora --profile staging auth logout",
 			"weknora auth logout --all",
 		},
+		Output: "envelope.data is {removed: [profile names cleared]}",
 		Warnings: []string{
 			"Requires explicit user approval (exit 10 / input.confirmation_required); never auto-add -y.",
 			"auth logout clears local credentials for this profile; server-side session continues until expiry.",
@@ -106,6 +111,10 @@ func runLogout(opts *LogoutOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Fac
 		return err
 	}
 	if len(cfg.Profiles) == 0 {
+		if active, kind := cmdutil.EnvCredential(); active {
+			return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
+				"authenticated via "+kind+" (stateless env credential) — nothing is stored to log out; unset "+kind+" to drop it")
+		}
 		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, "no profiles configured; nothing to log out")
 	}
 
@@ -116,9 +125,9 @@ func runLogout(opts *LogoutOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Fac
 
 	// Destructive-write protocol: confirm before clearing credentials.
 	scope := fmt.Sprintf("%d profile(s) [%s]", len(targets), strings.Join(targets, ", "))
-	retryCmd := "weknora auth logout -y"
+	retryCmd := []string{"weknora", "auth", "logout", "-y"}
 	if opts.All {
-		retryCmd = "weknora auth logout --all -y"
+		retryCmd = []string{"weknora", "auth", "logout", "--all", "-y"}
 	}
 	if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, fopts.WantsJSON(), "delete", "auth credentials", scope, "auth.logout", retryCmd); err != nil {
 		return err
@@ -130,14 +139,15 @@ func runLogout(opts *LogoutOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Fac
 	}
 	for _, name := range targets {
 		clearProfileSecrets(store, cfg.Profiles[name], name)
-		delete(cfg.Profiles, name)
-	}
-	// If we removed the active profile, pick a remaining one (deterministic by
-	// map order would be flaky - leave CurrentProfile empty so the next
-	// invocation surfaces a clear "no current profile" error rather than
-	// silently switching).
-	if _, stillExists := cfg.Profiles[cfg.CurrentProfile]; !stillExists {
-		cfg.CurrentProfile = ""
+		// Keep the profile registered (its host stays) — only clear the
+		// credential refs so it reads as logged-out and can be re-authed with
+		// `auth login`. Deleting the profile entirely is `profile remove`'s job;
+		// that clean logout(who)/remove(what) split matches gh / lark.
+		p := cfg.Profiles[name]
+		p.APIKeyRef = ""
+		p.TokenRef = ""
+		p.RefreshRef = ""
+		cfg.Profiles[name] = p
 	}
 	if err := config.Save(cfg); err != nil {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "save config")

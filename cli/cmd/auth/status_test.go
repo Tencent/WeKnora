@@ -54,8 +54,9 @@ func TestRunStatus_TextOutput(t *testing.T) {
 	}
 	require.NoError(t, runStatus(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, svc))
 	got := out.String()
-	assert.Contains(t, got, "profile: prod")
-	assert.Contains(t, got, "host:    https://kb.example.com")
+	assert.Contains(t, got, "profile:     prod")
+	assert.Contains(t, got, "auth_source: profile + keyring")
+	assert.Contains(t, got, "host:        https://kb.example.com")
 	assert.Contains(t, got, "alice@example.com")
 	assert.Contains(t, got, "Acme")
 }

@@ -1,9 +1,35 @@
 import { get, post, put, del, postUpload, getDown } from "../../utils/request";
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
+import type { AuditLog, AuditOutcome, ListAuditLogResponse } from '@/api/tenant/audit-log';
+
+export type KnowledgeBaseActivity = AuditLog;
+
+export interface ListKnowledgeBaseActivityParams {
+  after_id?: number;
+  limit?: number;
+  action?: string;
+  outcome?: AuditOutcome;
+  actor?: string;
+}
+
+export async function listKnowledgeBaseActivity(
+  id: string,
+  params: ListKnowledgeBaseActivityParams = {},
+): Promise<ListAuditLogResponse> {
+  const query = new URLSearchParams();
+  if (params.after_id) query.set('after_id', String(params.after_id));
+  if (params.limit) query.set('limit', String(params.limit));
+  if (params.action) query.set('action', params.action);
+  if (params.outcome) query.set('outcome', params.outcome);
+  if (params.actor) query.set('actor', params.actor);
+  const qs = query.toString();
+  return (await get(`/api/v1/knowledge-bases/${id}/activity${qs ? `?${qs}` : ''}`)) as unknown as ListAuditLogResponse;
+}
 
 // 知识库管理 API（列表、创建、获取、更新、删除、复制）
 export function listKnowledgeBases(params?: {
   agent_id?: string;
+  agent_source_tenant_id?: string;
   /**
    * Optional creator filter. Server-side semantics:
    *   - "mine"   → only KBs whose creator_id matches the caller
@@ -16,6 +42,7 @@ export function listKnowledgeBases(params?: {
 }) {
   const query = new URLSearchParams();
   if (params?.agent_id) query.set('agent_id', params.agent_id);
+  if (params?.agent_source_tenant_id) query.set('agent_source_tenant_id', params.agent_source_tenant_id);
   if (params?.creator && params.creator !== 'all') query.set('creator', params.creator);
   const qs = query.toString();
   return get(qs ? `/api/v1/knowledge-bases?${qs}` : '/api/v1/knowledge-bases');
@@ -65,9 +92,14 @@ export function createKnowledgeBase(data: {
   // store. Immutable after creation — UpdateKnowledgeBase intentionally
   // does not accept this field.
   vector_store_id?: string;
+  // Concrete tenant-owned storage instance. When omitted, the tenant default
+  // backend is bound by the server at creation time.
+  storage_backend_id?: string;
   vlm_config?: {
     enabled: boolean;
     model_id?: string;
+    description_language?: string;
+    custom_instructions?: string;
   };
   storage_provider_config?: { provider: string };
   storage_config?: any; // legacy, kept for backward compat (dual-write)
@@ -82,6 +114,8 @@ export function createKnowledgeBase(data: {
     synthesis_model_id?: string;
     max_pages_per_ingest?: number;
     extraction_granularity?: 'focused' | 'standard' | 'exhaustive';
+    content_instructions?: string;
+    extraction_instructions?: string;
   };
   indexing_strategy?: {
     vector_enabled: boolean;
@@ -93,9 +127,10 @@ export function createKnowledgeBase(data: {
   return post(`/api/v1/knowledge-bases`, data);
 }
 
-export function getKnowledgeBaseById(id: string, options?: { agent_id?: string }) {
+export function getKnowledgeBaseById(id: string, options?: { agent_id?: string; agent_source_tenant_id?: string }) {
   const query = new URLSearchParams();
   if (options?.agent_id) query.set('agent_id', options.agent_id);
+  if (options?.agent_source_tenant_id) query.set('agent_source_tenant_id', options.agent_source_tenant_id);
   const qs = query.toString();
   return get(qs ? `/api/v1/knowledge-bases/${id}?${qs}` : `/api/v1/knowledge-bases/${id}`);
 }
@@ -111,6 +146,8 @@ export function updateKnowledgeBase(id: string, data: {
       synthesis_model_id?: string;
       max_pages_per_ingest?: number;
       extraction_granularity?: 'focused' | 'standard' | 'exhaustive';
+      content_instructions?: string;
+      extraction_instructions?: string;
     };
     indexing_strategy?: {
       vector_enabled: boolean;
@@ -133,6 +170,10 @@ export function deleteKnowledgeBase(id: string) {
 
 export function copyKnowledgeBase(data: { source_id: string; target_id?: string }) {
   return post(`/api/v1/knowledge-bases/copy`, data);
+}
+
+export function duplicateKnowledgeBase(id: string) {
+  return post(`/api/v1/knowledge-bases/${id}/duplicate`);
 }
 
 // 获取可移动目标知识库列表（同类型、同Embedding模型）
@@ -239,9 +280,10 @@ export function listKnowledgeFiles(
   return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${qs}`);
 }
 
-export function getKnowledgeDetails(id: string, options?: { agent_id?: string }) {
+export function getKnowledgeDetails(id: string, options?: { agent_id?: string; agent_source_tenant_id?: string }) {
   const query = new URLSearchParams();
   if (options?.agent_id) query.set('agent_id', options.agent_id);
+  if (options?.agent_source_tenant_id) query.set('agent_source_tenant_id', options.agent_source_tenant_id);
   const qs = query.toString();
   return get(qs ? `/api/v1/knowledge/${id}?${qs}` : `/api/v1/knowledge/${id}`);
 }
@@ -284,15 +326,45 @@ export function previewKnowledgeFile(id: string) {
 }
 
 /** @param idsQueryString - query string with ids (e.g. ids=xxx&ids=yyy) */
-export function batchQueryKnowledge(idsQueryString: string, kbId?: string, agentId?: string) {
+export function batchQueryKnowledge(idsQueryString: string, kbId?: string, agentId?: string, agentSourceTenantId?: string) {
   let qs = idsQueryString;
   if (kbId) qs += `&kb_id=${encodeURIComponent(kbId)}`;
   if (agentId) qs += `&agent_id=${encodeURIComponent(agentId)}`;
+  if (agentSourceTenantId) qs += `&agent_source_tenant_id=${encodeURIComponent(agentSourceTenantId)}`;
   return get(`/api/v1/knowledge/batch?${qs}`);
 }
 
 export function getKnowledgeDetailsCon(id: string, page: number) {
   return get(`/api/v1/chunks/${id}?page=${page}&page_size=25`);
+}
+
+export interface ChunkEditPayload {
+  content?: string;
+  is_enabled?: boolean;
+  expected_revision?: number;
+}
+
+export function updateDocumentChunk(knowledgeId: string, chunkId: string, data: ChunkEditPayload) {
+  return put(`/api/v1/chunks/${knowledgeId}/${chunkId}`, data);
+}
+
+export function listChunkRevisions(knowledgeId: string, chunkId: string) {
+  return get(`/api/v1/chunks/${knowledgeId}/${chunkId}/revisions`);
+}
+
+export function revertDocumentChunk(knowledgeId: string, chunkId: string, revision: number, expectedRevision: number) {
+  return post(`/api/v1/chunks/${knowledgeId}/${chunkId}/revert`, {
+    revision,
+    expected_revision: expectedRevision,
+  });
+}
+
+export function updateKnowledgeMetadata(knowledgeId: string, customMetadata: Record<string, unknown>) {
+  return put(`/api/v1/knowledge/${knowledgeId}`, { custom_metadata: customMetadata });
+}
+
+export function regenerateKnowledgeSummary(knowledgeId: string) {
+  return post(`/api/v1/knowledge/${knowledgeId}/regenerate-summary`, {});
 }
 
 // Get chunk by chunk_id only (new endpoint - to be added to backend)
@@ -303,6 +375,17 @@ export function getChunkByIdOnly(chunkId: string) {
 // Delete a single generated question from a chunk by question ID
 export function deleteGeneratedQuestion(chunkId: string, questionId: string) {
   return del(`/api/v1/chunks/by-id/${chunkId}/questions`, { question_id: questionId });
+}
+
+export function upsertGeneratedQuestion(chunkId: string, question: string, questionId?: string) {
+  return put(`/api/v1/chunks/by-id/${chunkId}/questions`, {
+    question_id: questionId || '',
+    question,
+  });
+}
+
+export function regenerateGeneratedQuestions(chunkId: string) {
+  return post(`/api/v1/chunks/by-id/${chunkId}/questions/regenerate`, {});
 }
 
 export function listKnowledgeTags(
@@ -354,7 +437,7 @@ const buildQuery = (params?: Record<string, any>) => {
 
 export function listFAQEntries(
   kbId: string,
-  params?: { page?: number; page_size?: number; tag_id?: number; keyword?: string },
+  params?: { page?: number; page_size?: number; tag_id?: number; tag_ids?: string; keyword?: string },
 ) {
   const query = buildQuery(params);
   return get(`/api/v1/knowledge-bases/${kbId}/faq/entries${query}`);
@@ -407,10 +490,11 @@ export function searchFAQEntries(
   return post(`/api/v1/knowledge-bases/${kbId}/faq/search`, data);
 }
 
-// Export FAQ entries as CSV file
-export async function exportFAQEntries(kbId: string): Promise<Blob> {
-  const response = await getDown(`/api/v1/knowledge-bases/${kbId}/faq/entries/export`);
-  return response as unknown as Blob;
+// Export FAQ entries as CSV or JSON file
+export async function exportFAQEntries(kbId: string, format: 'csv' | 'json' = 'csv'): Promise<Blob> {
+  const suffix = format === 'json' ? '?format=json' : ''
+  const response = await getDown(`/api/v1/knowledge-bases/${kbId}/faq/entries/export${suffix}`)
+  return response as unknown as Blob
 }
 
 // FAQ Import Progress API
@@ -460,7 +544,7 @@ export function searchKnowledge(
   offset = 0,
   limit = 20,
   fileTypes?: string[],
-  options?: { agent_id?: string; recent?: boolean }
+  options?: { agent_id?: string; agent_source_tenant_id?: string; recent?: boolean }
 ) {
   const query = new URLSearchParams();
   if (keyword) {
@@ -472,6 +556,7 @@ export function searchKnowledge(
     query.set('file_types', fileTypes.join(','));
   }
   if (options?.agent_id) query.set('agent_id', options.agent_id);
+  if (options?.agent_source_tenant_id) query.set('agent_source_tenant_id', options.agent_source_tenant_id);
   if (options?.recent) query.set('recent', 'true');
   return get(`/api/v1/knowledge/search?${query.toString()}`);
 }
@@ -518,3 +603,4 @@ export function resetChunkFeedback(knowledgeBaseId: string, chunkId: string) {
 export function updateChunkWeight(knowledgeBaseId: string, chunkId: string, weight: number) {
   return put(`/api/v1/knowledge-bases/${knowledgeBaseId}/chunks/${chunkId}/weight`, { weight });
 }
+

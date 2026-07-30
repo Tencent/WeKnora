@@ -39,7 +39,7 @@ func (f *fakeCheckSvc) ListKnowledgeWithFilter(_ context.Context, _ string, page
 
 func TestRunCheck_AggregatesFailed(t *testing.T) {
 	svc := &fakeCheckSvc{
-		kb: &sdk.KnowledgeBase{ID: "kb_x", KnowledgeCount: 5, ChunkCount: 20},
+		kb: &sdk.KnowledgeBase{ID: "kb_x", KnowledgeCount: 5, ChunkCount: 20, EmbeddingModelID: "emb_1"},
 		failedDocs: []sdk.Knowledge{
 			{ID: "d1", ParseStatus: "failed"},
 			{ID: "d2", ParseStatus: "failed"},
@@ -54,6 +54,9 @@ func TestRunCheck_AggregatesFailed(t *testing.T) {
 	}
 	if !res.Reachable {
 		t.Error("Reachable=false, want true")
+	}
+	if !res.RetrievalReady {
+		t.Error("RetrievalReady=false, want true when an embedding model is bound")
 	}
 	if res.KnowledgeCount != 5 || res.ChunkCount != 20 {
 		t.Errorf("got %+v", res)

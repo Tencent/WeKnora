@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
@@ -109,7 +110,7 @@ type stubAgentShareForGuard struct {
 	kbsViaSomeAgent map[string]bool
 }
 
-func (s *stubAgentShareForGuard) GetSharedAgentForTenant(_ context.Context, _ uint64, _ types.TenantRole, agentID string) (*types.CustomAgent, error) {
+func (s *stubAgentShareForGuard) GetSharedAgentForTenant(_ context.Context, _ uint64, _ types.TenantRole, agentID string, _ ...uint64) (*types.CustomAgent, error) {
 	return s.agents[agentID], nil
 }
 
@@ -123,7 +124,7 @@ func (s *stubAgentShareForGuard) ShareAgent(context.Context, string, string, str
 func (s *stubAgentShareForGuard) RemoveShare(context.Context, string, string, uint64) error {
 	panic("not implemented")
 }
-func (s *stubAgentShareForGuard) ListSharesByAgent(context.Context, string) ([]*types.AgentShare, error) {
+func (s *stubAgentShareForGuard) ListSharesByAgent(context.Context, string, uint64) ([]*types.AgentShare, error) {
 	panic("not implemented")
 }
 func (s *stubAgentShareForGuard) ListSharesByOrganization(context.Context, string) ([]*types.AgentShare, error) {
@@ -157,8 +158,9 @@ func (s *stubAgentShareForGuard) CountByOrganizations(context.Context, []string)
 // guardOpts collects optional knobs for runGuard. Keeps the call site
 // readable when most tests only care about a couple of dimensions.
 type guardOpts struct {
-	agentID    string                  // ?agent_id query param
-	agentShare *stubAgentShareForGuard // nil means "no agent-share service"
+	agentID             string // ?agent_id query param
+	agentSourceTenantID string // ?agent_source_tenant_id query param
+	agentShare          *stubAgentShareForGuard // nil means "no agent-share service"
 }
 
 // runGuard fires a single request through the guard and returns the
@@ -181,8 +183,15 @@ func runGuard(
 	c.Params = gin.Params{{Key: "id", Value: kbID}}
 
 	url := "/"
+	query := make([]string, 0, 2)
 	if opts.agentID != "" {
-		url = "/?agent_id=" + opts.agentID
+		query = append(query, "agent_id="+opts.agentID)
+	}
+	if opts.agentSourceTenantID != "" {
+		query = append(query, "agent_source_tenant_id="+opts.agentSourceTenantID)
+	}
+	if len(query) > 0 {
+		url = "/?" + strings.Join(query, "&")
 	}
 	req := httptest.NewRequest("GET", url, nil)
 	ctx := context.WithValue(req.Context(), types.TenantIDContextKey, tenantID)
@@ -237,16 +246,31 @@ func TestRequireKBAccess_OwnKB(t *testing.T) {
 	require.Equal(t, uint64(100), got)
 }
 
+// TestIsResourceNotFound_RecognisesKnowledgeSentinel pins that a missing
+// *document* (knowledge) is treated as not-found, not a transient error.
+// Regression: ErrKnowledgeNotFound was absent from the predicate, so
+// GET/DELETE /knowledge/:id and chunk list resolved a missing doc into a
+// raw 500 instead of a 404 — which the CLI then surfaced as a retryable
+// server.error (exit 7), looping agents on a permanently-absent doc.
+func TestIsResourceNotFound_RecognisesKnowledgeSentinel(t *testing.T) {
+	require.True(t, isResourceNotFound(apprepo.ErrKnowledgeNotFound),
+		"missing document (ErrKnowledgeNotFound) must classify as not-found")
+	require.True(t, isResourceNotFound(apprepo.ErrKnowledgeBaseNotFound),
+		"missing KB must still classify as not-found")
+	require.True(t, isResourceNotFound(apprepo.ErrChunkNotFound),
+		"missing chunk (ErrChunkNotFound) must classify as not-found — chunk view/by-id resolved a missing chunk into a raw 500 (exit 7) otherwise")
+	require.True(t, isResourceNotFound(ErrResourceNotFound),
+		"generic resource-not-found sentinel must still classify as not-found")
+	require.False(t, isResourceNotFound(errors.New("connection refused")),
+		"a genuine transient error must NOT be classified as not-found")
+}
+
 func TestRequireKBAccess_NotFound_Aborts(t *testing.T) {
 	_, c := runGuard(t, 100, "kb-missing", types.OrgRoleViewer, nil, nil, guardOpts{})
 	require.True(t, c.IsAborted(), "missing KB must abort")
 	require.NotEmpty(t, c.Errors)
 	_, ok := KBAccessFromContext(c)
 	require.False(t, ok, "no access should be stashed on failure")
-}
-
-func TestIsResourceNotFound_ChunkNotFound(t *testing.T) {
-	require.True(t, isResourceNotFound(errors.New("chunk not found")))
 }
 
 func TestRequireKBAccess_SharedKB_RewritesTenantContext(t *testing.T) {
@@ -514,4 +538,19 @@ func TestRequireKBAccess_NotFound_FiresEvenWhenRBACDisabled(t *testing.T) {
 	guard(c)
 	require.True(t, c.IsAborted(), "404 still fires with enforcement off")
 	_ = rec
+}
+
+func TestRequireKBAccess_InvalidAgentSourceTenantID(t *testing.T) {
+	_, c := runGuard(t, 100, "kb-1",
+		types.OrgRoleViewer,
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 200},
+		nil,
+		guardOpts{
+			agentID:             "agent-1",
+			agentSourceTenantID: "not-a-number",
+			agentShare:          &stubAgentShareForGuard{},
+		},
+	)
+	require.True(t, c.IsAborted())
+	require.NotEmpty(t, c.Errors)
 }
