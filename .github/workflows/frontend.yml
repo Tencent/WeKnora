@@ -5,11 +5,17 @@ on:
     branches: [main]
     paths:
       - "frontend/**"
+      - "e2e/**"
+      - "go.mod"
+      - "go.sum"
       - "scripts/build_frontend_dist.sh"
       - ".github/workflows/frontend.yml"
   pull_request:
     paths:
       - "frontend/**"
+      - "e2e/**"
+      - "go.mod"
+      - "go.sum"
       - "scripts/build_frontend_dist.sh"
       - ".github/workflows/frontend.yml"
   workflow_dispatch:
@@ -23,6 +29,7 @@ permissions:
 
 env:
   NODE_VERSION: "24"
+  GO_VERSION: "1.26"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
@@ -53,3 +60,30 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  feedback-browser-e2e:
+    name: Feedback browser E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Run feedback browser E2E
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+        run: go test -tags feedback_e2e ./e2e -count=1 -v

@@ -45,8 +45,8 @@ env:
   BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
 
 jobs:
-  verify:
-    name: Format, vet, test, and build
+  backend-unit:
+    name: Backend unit
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -59,6 +59,29 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
           # v6 defaults to go.mod for the cache key (more stable than go.sum).
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Run backend tests
+        run: go test ./... -count=1
+
+      - name: Build server
+        run: go build ./cmd/server
+
+  backend-vet:
+    name: Backend vet and format
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
 
       - name: Download modules
         run: go mod download
@@ -87,12 +110,136 @@ jobs:
             exit 1
           fi
 
-      - name: Vet and test
+      - name: Vet
+        run: go vet ./...
+
+  backend-feedback-race:
+    name: Backend feedback race
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Run focused feedback race tests
         shell: bash
         run: |
-          mapfile -t pkgs < <(go list ./... | grep -v '/docreader/')
-          go vet "${pkgs[@]}"
-          go test "${pkgs[@]}"
+          set -euo pipefail
+          go test -race ./internal/application/repository -run 'Feedback|ChunkDelete|HydrateMessagesRequiresAnActiveChunkReference|CompletionExcludesWebOnlyReferences|DeletingOneOfThreeReferences|DeletedReferencedChunk|LegacyReference' -count=1
+          go test -race ./internal/application/service -run 'Feedback' -count=1
+          go test -race ./internal/application/service/chat_pipeline -run 'PluginFilterTopK|FeedbackWeight|FeedbackWeighted' -count=1
+          go test -race ./internal/application/feedbackweight -count=1
+          go test -race ./internal/agent/tools -run 'Feedback' -count=1
+          go test -race ./internal/router -run 'FeedbackRoutes' -count=1
 
-      - name: Build server
-        run: go build ./cmd/server
+  migration-postgres:
+    name: PostgreSQL migration and reset
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: paradedb/paradedb:v0.22.2-pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: feedback-ci
+          POSTGRES_DB: weknora_feedback
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d weknora_feedback"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      WEKNORA_TEST_POSTGRES_DSN: postgres://postgres:feedback-ci@localhost:5432/weknora_feedback?sslmode=disable
+      WEKNORA_TEST_PARADEDB_DSN: postgres://postgres:feedback-ci@localhost:5432/weknora_feedback?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Verify fresh, upgrade, down, and up migrations
+        run: >-
+          go test ./internal/database
+          -run '^TestChunkFeedback(Postgres|ParadeDB)'
+          -count=1
+          -v
+
+      - name: Verify linearizable reset transactions
+        run: >-
+          go test ./internal/application/repository
+          -run '^TestFeedbackPostgres'
+          -count=1
+          -v
+
+  migration-sqlite:
+    name: SQLite migration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Verify fresh, upgrade, down, up, and collision behavior
+        run: >-
+          go test ./internal/database
+          -run '^TestChunkFeedback(SQLite|MigrationVersions)'
+          -count=1
+          -v
+
+  mysql-schema-smoke:
+    name: MySQL fresh-schema smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: feedback-ci
+          MYSQL_DATABASE: weknora_feedback
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -pfeedback-ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      WEKNORA_TEST_MYSQL_DSN: root:feedback-ci@tcp(localhost:3306)/weknora_feedback?multiStatements=true&parseTime=true
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Verify MySQL feedback schema
+        run: >-
+          go test ./internal/database
+          -run '^TestChunkFeedbackMySQLFreshSchemaSmoke$'
+          -count=1
+          -v
