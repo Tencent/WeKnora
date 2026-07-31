@@ -1358,12 +1358,13 @@ const doSubmit = async () => {
       if (!result.success || !result.data?.id) {
         throw new Error(result.message || t('knowledgeEditor.messages.createFailed'))
       }
-      savedKbId.value = result.data.id
+      const createdKbId = result.data.id as string
+      savedKbId.value = createdKbId
       currentSection.value = 'basic'
-      await loadKBData(savedKbId.value)
+      await loadKBData(createdKbId)
       MessagePlugin.success(t('knowledgeEditor.messages.createSuccess'))
       markContextualGuideDone('kbCreate')
-      emit('success', savedKbId.value)
+      emit('success', createdKbId)
     } else {
       // 编辑模式：分别更新基本信息和配置
       const kbId = activeKbId.value

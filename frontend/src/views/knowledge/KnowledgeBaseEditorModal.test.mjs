@@ -15,7 +15,7 @@ test('the first successful create stays open for follow-up configuration', () =>
 
   assert.ok(createBranch, 'expected to find the create branch')
   assert.doesNotMatch(createBranch, /handleClose\(\)/)
-  assert.match(createBranch, /savedKbId\.value = result\.data\.id/)
+  assert.match(createBranch, /savedKbId\.value = createdKbId/)
 })
 
 test('save button labels distinguish create from save-and-close', () => {
