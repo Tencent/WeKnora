@@ -664,6 +664,9 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     isReplying.value = true;
     loading.value = true;
     const selectedAgentId = props.embeddedMode ? props.agentId : (useSettingsStoreInstance.selectedAgentId || '');
+    const selectedAgentSourceTenantId = props.embeddedMode
+        ? undefined
+        : (useSettingsStoreInstance.selectedAgentSourceTenantId || undefined);
 
     // Images are unified with the attachment pipeline: on the authenticated web
     // client they upload as temporary documents (understood in the background by
@@ -690,7 +693,9 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
                 continue;
             }
             try {
-                const upload = await uploadTemporaryAttachment(session_id.value, file, selectedAgentId, 'auto');
+                const upload = await uploadTemporaryAttachment(
+                    session_id.value, file, selectedAgentId, selectedAgentSourceTenantId, 'auto'
+                );
                 imageAttachmentIds.push(upload.data.id);
             } catch (e) {
                 console.error('[Image] Temporary image upload failed, falling back to inline:', e);
@@ -710,7 +715,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
             await Promise.all(localAttachments.map(async (attachment) => {
                 attachment.status = 'uploading';
                 const upload = await uploadTemporaryAttachment(
-                    session_id.value, attachment.file, selectedAgentId, 'auto'
+                    session_id.value, attachment.file, selectedAgentId, selectedAgentSourceTenantId, 'auto'
                 );
                 attachment.documentId = upload.data.id;
                 attachment.status = upload.data.status;
@@ -818,6 +823,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         knowledge_ids: knowledgeIds,
         agent_enabled: agentEnabled,
         agent_id: selectedAgentId,
+        agent_source_tenant_id: selectedAgentSourceTenantId,
         web_search_enabled: webSearchEnabled,
         summary_model_id: modelId,
         mcp_service_ids: requestMcpServiceIds,

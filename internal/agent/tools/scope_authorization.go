@@ -116,6 +116,9 @@ func authorizeChunkInSearchTargets(
 		}
 		return nil, fmt.Errorf("chunk %s not found: %w", chunkID, err)
 	}
+	if !chunk.IsEnabled {
+		return nil, fmt.Errorf("chunk %s is disabled", chunk.ID)
+	}
 	if !searchTargets.ContainsKB(chunk.KnowledgeBaseID) {
 		return nil, fmt.Errorf("knowledge base %s is not within the current Agent scope", chunk.KnowledgeBaseID)
 	}
