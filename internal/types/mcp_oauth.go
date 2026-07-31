@@ -84,7 +84,7 @@ type MCPOAuthToken struct {
 	AccessToken   string    `json:"-"             gorm:"type:text"`
 	RefreshToken  string    `json:"-"             gorm:"type:text"`
 	TokenType     string    `json:"token_type"    gorm:"type:varchar(32)"`
-	ExpiresAt     time.Time `json:"expires_at"`
+	ExpiresAt     time.Time `json:"expires_at"     gorm:"default:null"`
 	// RefreshLeaseID / RefreshLeaseUntil coordinate refresh-token rotation
 	// across application instances. They are operational fields only and are
 	// never exposed through the API.

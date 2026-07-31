@@ -29,6 +29,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/dig"
 	"google.golang.org/grpc"
+	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -53,6 +54,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
+	"github.com/Tencent/WeKnora/internal/database/mysqlconfig"
 	"github.com/Tencent/WeKnora/internal/datasource"
 	feishuConnector "github.com/Tencent/WeKnora/internal/datasource/connector/feishu"
 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
@@ -561,7 +563,7 @@ func initRedisClient() (*redis.Client, error) {
 
 // initDatabase initializes database connection
 // Creates and configures database connection based on environment configuration
-// Supports multiple database backends (PostgreSQL)
+// Supports PostgreSQL, SQLite, and MySQL metadata databases.
 // Parameters:
 //   - cfg: Application configuration
 //
@@ -569,8 +571,14 @@ func initRedisClient() (*redis.Client, error) {
 //   - Configured database connection
 //   - Error if connection fails
 func initDatabase(cfg *config.Config) (*gorm.DB, error) {
+	if err := ValidateDriverCombination(os.Getenv("DB_DRIVER"), os.Getenv("RETRIEVE_DRIVER")); err != nil {
+		return nil, err
+	}
+
 	var dialector gorm.Dialector
 	var migrateDSN string
+	var mysqlPoolCfg mysqlconfig.PoolConfig
+	var mysqlMigrationDSN string
 	var sqliteDBPath string
 	switch os.Getenv("DB_DRIVER") {
 	case "postgres":
@@ -632,6 +640,18 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		sqliteDBPath = dbPath
 		migrateDSN = "sqlite3://" + dbPath
 		logger.Infof(context.Background(), "DB Config: driver=sqlite path=%s", dbPath)
+	case "mysql":
+		// MySQL takes over the metadata layer only; vector retrieval
+		// must be delegated to an external engine via RETRIEVE_DRIVER.
+		applicationDSN, migrationDSN, mysqlPool, dsnErr := mysqlconfig.BuildDSN(os.Getenv)
+		if dsnErr != nil {
+			return nil, fmt.Errorf("invalid MySQL DSN configuration: %w", dsnErr)
+		}
+		dialector = mysql.Open(applicationDSN)
+		mysqlMigrationDSN = migrationDSN
+		mysqlPoolCfg = mysqlPool
+		logger.Infof(context.Background(), "DB Config: driver=mysql host=%s port=%s dbname=%s",
+			os.Getenv("DB_HOST"), os.Getenv("DB_PORT"), os.Getenv("DB_NAME"))
 	default:
 		return nil, fmt.Errorf("unsupported database driver: %s", os.Getenv("DB_DRIVER"))
 	}
@@ -646,14 +666,14 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 
 	// Sanity check: dialect-specific code in services (notably the
 	// vector_stores delete guard) compares Dialector.Name() to "postgres" /
-	// "sqlite" string literals. A future driver swap that produces a
-	// different name (e.g., a wrapper dialect for managed PG) would silently
-	// fall back to the SQLite path, dropping the row-level X-lock. Catching
-	// the mismatch at startup is loud and inexpensive.
-	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" {
+	// "sqlite" / "mysql" string literals. A future driver swap that produces
+	// a different name (e.g., a wrapper dialect for managed PG) would
+	// silently fall back to the SQLite path, dropping the row-level X-lock.
+	// Catching the mismatch at startup is loud and inexpensive.
+	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" && name != "mysql" {
 		return nil, fmt.Errorf(
-			"unsupported gorm dialector %q; expected postgres or sqlite "+
-				"(see vectorStoreService.isPostgres for impact)", name)
+			"unsupported gorm dialector %q; expected postgres, sqlite, or mysql "+
+				"(see vectorStoreService.supportsRowLocking for impact)", name)
 	}
 
 	if os.Getenv("DB_DRIVER") == "sqlite" {
@@ -675,13 +695,34 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		autoRecover := os.Getenv("AUTO_RECOVER_DIRTY") != "false"
 		migrationOpts := database.MigrationOptions{
 			AutoRecoverDirty: autoRecover,
-			SQLiteDBPath:     sqliteDBPath,
+			// MySQL DDL is not transactional, so auto-recovering a dirty
+			// migration by forcing the version backward and re-running Up()
+			// can leave a half-applied schema. Fail-closed for MySQL and let
+			// the operator inspect the schema manually.
+			FailOnDirty:       os.Getenv("DB_DRIVER") == "mysql",
+			SQLiteDBPath:      sqliteDBPath,
+			MySQLMigrationDSN: mysqlMigrationDSN,
 		}
 
 		// Run base migrations (all versioned migrations including embeddings)
 		// The embeddings migration will be conditionally executed based on skip_embedding parameter in DSN
 		if err := database.RunMigrationsWithOptions(migrateDSN, migrationOpts); err != nil {
-			// Log warning but don't fail startup - migrations might be handled externally
+			// Migration failure handling is dialect-aware:
+			//
+			//   - MySQL: a fresh deployment with a half-applied schema is a
+			//     brick - every business query will fail. Fail startup so the
+			//     operator notices immediately. Operators who run migrations
+			//     out-of-band (e.g. a CI job with golang-migrate) set
+			//     AUTO_MIGRATE=false (handled above), which skips the
+			//     in-process attempt entirely - the canonical opt-out.
+			//   - PostgreSQL / SQLite: preserve the historical "warn and
+			//     continue" behaviour so an existing deployment that runs
+			//     migrations via a separate job is not blocked by a startup
+			//     gate.
+			if os.Getenv("DB_DRIVER") == "mysql" {
+				return nil, fmt.Errorf("database migration failed (refusing to start MySQL with a partial schema): %w "+
+					"(set AUTO_MIGRATE=false if migrations are managed externally)", err)
+			}
 			logger.Warnf(context.Background(), "Database migration failed: %v", err)
 			logger.Warnf(
 				context.Background(),
@@ -712,13 +753,16 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	// Configure connection pool parameters
 	if os.Getenv("DB_DRIVER") == "sqlite" {
 		// SQLite only supports one concurrent writer even in WAL mode.
-		// Limiting to a single open connection serialises all DB access and
-		// prevents "database is locked" errors from concurrent goroutines.
 		sqlDB.SetMaxOpenConns(1)
+	} else if os.Getenv("DB_DRIVER") == "mysql" {
+		sqlDB.SetMaxOpenConns(mysqlPoolCfg.MaxOpenConns)
+		sqlDB.SetMaxIdleConns(mysqlPoolCfg.MaxIdleConns)
+		sqlDB.SetConnMaxLifetime(mysqlPoolCfg.ConnMaxLifetime)
+		sqlDB.SetConnMaxIdleTime(mysqlPoolCfg.ConnMaxIdleTime)
 	} else {
 		sqlDB.SetMaxIdleConns(10)
+		sqlDB.SetConnMaxLifetime(time.Duration(10) * time.Minute)
 	}
-	sqlDB.SetConnMaxLifetime(time.Duration(10) * time.Minute)
 
 	return db, nil
 }
@@ -726,6 +770,12 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 // resolveStorageProviderPending replaces the "__pending_env__" sentinel in
 // knowledge_bases.storage_provider_config with the actual STORAGE_TYPE from the environment.
 // This runs once after SQL migrations to bind historical KBs to their real storage provider.
+//
+// The JSON extraction in the WHERE clause is dialect-aware via
+// database.JSONPathExpr: postgres uses ->>'provider', MySQL uses
+// ->>'$.provider', SQLite uses json_extract(..., '$.provider'). The
+// bare-key postgres form errors on MySQL with "Invalid JSON path
+// expression" once any row has non-null JSON.
 func resolveStorageProviderPending(db *gorm.DB) {
 	storageType := strings.TrimSpace(os.Getenv("STORAGE_TYPE"))
 	if storageType == "" {
@@ -733,14 +783,29 @@ func resolveStorageProviderPending(db *gorm.DB) {
 	}
 	storageType = strings.ToLower(storageType)
 
+	providerExpr, err := database.JSONPathExpr(db.Dialector.Name(), "storage_provider_config", "provider")
+	if err != nil {
+		logger.Warnf(context.Background(), "Failed to build storage provider JSON path expression: %v", err)
+		return
+	}
+	updateQuery := fmt.Sprintf(
+		"UPDATE knowledge_bases SET storage_provider_config = ? "+
+			"WHERE storage_provider_config IS NOT NULL AND %s = '__pending_env__'",
+		providerExpr,
+	)
 	result := db.Exec(
-		`UPDATE knowledge_bases SET storage_provider_config = ? WHERE storage_provider_config IS NOT NULL AND storage_provider_config->>'provider' = '__pending_env__'`,
+		updateQuery,
 		fmt.Sprintf(`{"provider":"%s"}`, storageType),
 	)
 	if result.Error != nil {
 		logger.Warnf(context.Background(), "Failed to resolve __pending_env__ storage providers: %v", result.Error)
 	} else if result.RowsAffected > 0 {
-		logger.Infof(context.Background(), "Resolved %d knowledge bases with __pending_env__ storage provider → %s", result.RowsAffected, storageType)
+		logger.Infof(
+			context.Background(),
+			"Resolved %d knowledge bases with __pending_env__ storage provider -> %s",
+			result.RowsAffected,
+			storageType,
+		)
 	}
 
 	// Sync PostgreSQL sequences with actual MAX values to prevent duplicate key
@@ -1034,7 +1099,7 @@ func initRetrieveEngineRegistry(
 	// is absent from this process, which happens when startup skipped it after
 	// a construction failure or when another instance registered it.
 	registry := retriever.NewRetrieveEngineRegistry(storeRepo, engineFactory)
-	retrieveDriver := strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",")
+	retrieveDriver := ParseRetrieveDrivers(os.Getenv("RETRIEVE_DRIVER"))
 	log := logger.GetLogger(context.Background())
 	// Audit sink for OpenSearch driver events (index created / reindex). Driver
 	// events fire under a tenant-scoped ctx at indexing time; the env-path

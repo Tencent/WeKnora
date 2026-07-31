@@ -122,3 +122,34 @@ func TestSyncLogRepositoryUpdateResultClearsErrorMessage(t *testing.T) {
 	assert.Equal(t, result.ToString(), stored.Result.ToString())
 	require.NotNil(t, stored.FinishedAt)
 }
+
+func TestSyncLogRepositoryCleanupOldLogsUsesPortableCutoff(t *testing.T) {
+	db := setupDataSourceRepoTestDB(t)
+	repo := NewSyncLogRepository(db)
+	now := time.Now().UTC()
+
+	for _, log := range []*types.SyncLog{
+		{
+			ID:           "old-log",
+			DataSourceID: "ds-1",
+			TenantID:     1,
+			Status:       types.SyncLogStatusSuccess,
+			StartedAt:    now.Add(-48 * time.Hour),
+		},
+		{
+			ID:           "recent-log",
+			DataSourceID: "ds-1",
+			TenantID:     1,
+			Status:       types.SyncLogStatusSuccess,
+			StartedAt:    now.Add(-time.Hour),
+		},
+	} {
+		require.NoError(t, repo.Create(context.Background(), log))
+	}
+
+	require.NoError(t, repo.CleanupOldLogs(context.Background(), 1))
+
+	var ids []string
+	require.NoError(t, db.Model(&types.SyncLog{}).Order("id").Pluck("id", &ids).Error)
+	assert.Equal(t, []string{"recent-log"}, ids)
+}

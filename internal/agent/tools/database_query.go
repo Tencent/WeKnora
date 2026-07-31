@@ -115,6 +115,17 @@ func NewDatabaseQueryTool(db *gorm.DB, searchTargets types.SearchTargets) *Datab
 // Execute executes the database query tool
 func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	logger.Infof(ctx, "[Tool][DatabaseQuery] Execute started")
+	if t.db == nil || t.db.Dialector == nil {
+		err := fmt.Errorf("database_query is unavailable because the metadata database is not initialized")
+		return &types.ToolResult{Success: false, Error: err.Error()}, err
+	}
+	if dialect := t.db.Dialector.Name(); !DatabaseQuerySupported(dialect) {
+		err := fmt.Errorf(
+			"database_query is unavailable for %s metadata databases; use knowledge_search or grep_chunks instead",
+			dialect,
+		)
+		return &types.ToolResult{Success: false, Error: err.Error()}, err
+	}
 
 	tenantID := uint64(0)
 	if tid, ok := ctx.Value(types.TenantIDContextKey).(uint64); ok {
@@ -246,6 +257,14 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 			"display_type": "database_query",
 		},
 	}, nil
+}
+
+// DatabaseQuerySupported reports whether database_query should be exposed for
+// the active metadata dialect. SQLite keeps its existing compatibility path;
+// MySQL remains disabled because the security pipeline parses and rewrites
+// PostgreSQL syntax and has not been validated for MySQL SQL.
+func DatabaseQuerySupported(dialect string) bool {
+	return dialect == "postgres" || dialect == "sqlite"
 }
 
 // validateAndSecureSQL validates the SQL query and injects tenant_id conditions

@@ -185,6 +185,32 @@ securityContext:
 {{- end }}
 
 {{/*
+Return the MySQL image string (values.mysql.image is a full repo:tag).
+*/}}
+{{- define "weknora.mysql.image" -}}
+{{- .Values.mysql.image -}}
+{{- end }}
+
+{{/*
+Return the MySQL credential Secret name. An operator-managed Secret must
+contain MYSQL_DATABASE, MYSQL_USER, MYSQL_PASSWORD, and MYSQL_ROOT_PASSWORD.
+*/}}
+{{- define "weknora.mysqlSecretName" -}}
+{{- if .Values.mysql.auth.existingSecret }}
+{{- .Values.mysql.auth.existingSecret }}
+{{- else }}
+{{- printf "%s-mysql" (include "weknora.fullname" .) }}
+{{- end }}
+{{- end }}
+
+{{/*
+Return the Qdrant image with tag.
+*/}}
+{{- define "weknora.qdrant.image" -}}
+{{- printf "%s:%s" .Values.qdrant.image.repository .Values.qdrant.image.tag }}
+{{- end }}
+
+{{/*
 Container security context.
 */}}
 {{- define "weknora.containerSecurityContext" -}}

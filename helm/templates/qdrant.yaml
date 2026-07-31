@@ -1,0 +1,139 @@
+{{/*
+Qdrant Deployment, Service, and optional PVC.
+*/}}
+{{- if .Values.qdrant.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "weknora.fullname" . }}-qdrant
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "retriever" "context" .) | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "weknora.componentSelectorLabels" (dict "component" "retriever" "context" .) | nindent 6 }}
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        {{- include "weknora.componentSelectorLabels" (dict "component" "retriever" "context" .) | nindent 8 }}
+    spec:
+      {{- include "weknora.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "weknora.serviceAccountName" . }}
+      {{- with .Values.global.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: qdrant
+          image: {{ include "weknora.qdrant.image" . }}
+          imagePullPolicy: {{ .Values.qdrant.image.pullPolicy }}
+          {{- with .Values.qdrant.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 6333
+              protocol: TCP
+            - name: grpc
+              containerPort: 6334
+              protocol: TCP
+          {{- if .Values.qdrant.auth.existingSecret }}
+          env:
+            - name: QDRANT__SERVICE__API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.qdrant.auth.existingSecret }}
+                  key: {{ .Values.qdrant.auth.apiKeyKey }}
+          {{- end }}
+          volumeMounts:
+            - name: qdrant-data
+              mountPath: /qdrant/storage
+          resources:
+            {{- toYaml .Values.qdrant.resources | nindent 12 }}
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
+      volumes:
+        - name: qdrant-data
+          {{- if .Values.qdrant.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.qdrant.persistence.existingClaim | default (printf "%s-qdrant" (include "weknora.fullname" .)) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.qdrant.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.qdrant.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.qdrant.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "retriever" "context" .) | nindent 4 }}
+spec:
+  type: {{ .Values.qdrant.service.type }}
+  selector:
+    {{- include "weknora.componentSelectorLabels" (dict "component" "retriever" "context" .) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.qdrant.service.httpPort }}
+      targetPort: http
+      protocol: TCP
+    - name: grpc
+      port: {{ .Values.qdrant.service.grpcPort }}
+      targetPort: grpc
+      protocol: TCP
+{{- if and .Values.qdrant.persistence.enabled (not .Values.qdrant.persistence.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "weknora.fullname" . }}-qdrant
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "retriever" "context" .) | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.qdrant.persistence.size }}
+  {{- $storageClass := .Values.qdrant.persistence.storageClass }}
+  {{- if $storageClass }}
+  {{- if eq $storageClass "-" }}
+  storageClassName: ""
+  {{- else }}
+  storageClassName: {{ $storageClass | quote }}
+  {{- end }}
+  {{- else }}
+  {{- include "weknora.storageClass" . | nindent 2 }}
+  {{- end }}
+{{- end }}
+{{- end }}

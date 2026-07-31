@@ -18,15 +18,20 @@ import (
 
 var grepChunksTool = BaseTool{
 	name: ToolGrepChunks,
-	description: `Search knowledge base chunk content with a single POSIX regular expression, applied directly in the database (PostgreSQL ~* / MySQL/SQLite REGEXP, case-insensitive). Behaves like ` + "`grep -E -i`" + `.
+	description: `Search knowledge base chunk content with a single case-insensitive regular expression.
+Behaves like ` + "`grep -E -i`" + `.
 Pack multiple concepts into ONE regex using ` + "`|`" + ` alternation — do not call this tool repeatedly for synonyms.
 Returns matching chunks with a short cN chunk source ID, a parent dN document ID, and a <match> snippet around the first match.
 Examples:
 - Alternation (RECOMMENDED): "stardust|skyvault|psionic" (matches any of the words)
 - Multiple terms in order: "psionic.*engine" (matches both words in order)
-- Word boundary / anchor: "\\brag\\b" or "^chapter\\s+\\d+"
+- Anchors and character ranges: "^chapter[ ]+[0-9]+"
 - Plain text: "engine" (matches literal substring anywhere in chunk content)
-IMPORTANT — JSON escaping: every backslash in a regex MUST be written as \\ inside the JSON tool arguments (e.g. to search for literal "C++" write "C\\+\\+", NOT "C\+\+"; for "\d+" write "\\d+"). Plain "\+" / "\d" etc. are invalid JSON escapes and will fail to parse.
+Use the portable syntax shared by supported databases: literals, character ranges, grouping, alternation,
+anchors, and quantifiers. Do not use engine-specific escapes such as \d, \s, \w, \b or constructs beginning with "(?".
+IMPORTANT — JSON escaping: every backslash in a regex MUST be written as \\ inside the JSON tool arguments.
+For example, to search for literal "C++" write "C\\+\\+", NOT "C\+\+".
+Plain "\+" is an invalid JSON escape and will fail to parse.
 Use this to locate candidate chunks by exact identifiers, error codes, product names, or recurring terms.
 
 ## Deep read after grep:
@@ -37,7 +42,9 @@ Use this to locate candidate chunks by exact identifiers, error codes, product n
   "properties": {
     "query": {
       "type": "string",
-      "description": "A single POSIX regex applied directly to chunk content (case-insensitive). Combine multiple concepts with \"|\" alternation in ONE regex (e.g. \"stardust|skyvault|psionic\") — do not split into multiple calls.",
+      "description": "A single case-insensitive regex applied directly to chunk content. ` +
+		`Combine multiple concepts with \"|\" alternation in ONE regex ` +
+		`(e.g. \"stardust|skyvault|psionic\"); do not split into multiple calls.",
       "minLength": 1
     }
   },
@@ -55,9 +62,8 @@ type GrepChunksInput struct {
 	Query string `json:"query,omitempty"`
 }
 
-// GrepChunksTool performs regex pattern matching across knowledge base chunks.
-// PostgreSQL: uses the case-insensitive POSIX operator ~*.
-// MySQL/SQLite: falls back to REGEXP.
+// GrepChunksTool performs case-insensitive regex pattern matching across
+// knowledge base chunks.
 //
 // The tool tracks previously-returned chunk IDs per-instance (one instance per
 // agent session) so that a subsequent search hitting the same chunk can be
@@ -109,9 +115,9 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		}, fmt.Errorf("missing query parameter")
 	}
 
-	// Compile with (?i) prefix for case-insensitive Go-side matching.
-	// Compilation also validates the regex syntax before we send it to the DB.
-	re, err := regexp.Compile("(?i)" + query)
+	// Compile once for Go-side scoring and validate the cross-database subset
+	// before sending the same pattern to the active SQL regex engine.
+	re, err := compilePortableCaseInsensitiveRegex(query)
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][GrepChunks] Invalid regex %q: %v", query, err)
 		return &types.ToolResult{
@@ -236,18 +242,20 @@ type chunkWithTitle struct {
 	TotalChunkCount int  `json:"total_chunk_count" gorm:"column:total_chunk_count"`
 }
 
-// regexOperatorForDialect returns the SQL operator used to apply a POSIX
-// regular expression to a text column for the current dialect.
-// PostgreSQL ~* is case-insensitive by default; MySQL/SQLite REGEXP relies on
-// collation / driver extensions.
-func (t *GrepChunksTool) regexOperatorForDialect() string {
+// caseInsensitiveRegexForDialect returns the SQL predicate used to apply a
+// case-insensitive regular expression to one text column.
+func (t *GrepChunksTool) caseInsensitiveRegexForDialect(column string) (string, error) {
 	switch t.db.Dialector.Name() {
 	case "postgres":
-		return "~*"
+		return column + " ~* ?", nil
+	case "mysql":
+		// REGEXP_LIKE's explicit match flag keeps behavior independent of the
+		// column or connection collation.
+		return "REGEXP_LIKE(" + column + ", ?, 'i')", nil
+	case "sqlite":
+		return column + " REGEXP ?", nil
 	default:
-		// MySQL, SQLite (with the go-sqlite3 REGEXP extension), or anything else
-		// that understands the REGEXP keyword.
-		return "REGEXP"
+		return "", fmt.Errorf("unsupported database dialect %q for regex search", t.db.Dialector.Name())
 	}
 }
 
@@ -380,8 +388,6 @@ func (t *GrepChunksTool) searchChunks(
 		return nil, nil
 	}
 
-	regexOp := t.regexOperatorForDialect()
-
 	query := t.db.WithContext(ctx).Table("chunks").
 		Select("chunks.id, chunks.content, chunks.chunk_index, chunks.knowledge_id, "+
 			"chunks.knowledge_base_id, chunks.chunk_type, chunks.metadata, chunks.created_at, "+
@@ -403,9 +409,14 @@ func (t *GrepChunksTool) searchChunks(
 		len(knowledgeIDs), len(tagTargets), len(kbIDs))
 	query = query.Where(scopeSQL, scopeArgs...)
 
-	// For MySQL/SQLite REGEXP case-insensitivity we rely on the column's default
-	// collation (utf8mb4_general_ci etc.) OR the driver's REGEXP implementation,
-	// which mirrors what wiki_search already ships in this codebase.
+	contentRegex, err := t.caseInsensitiveRegexForDialect("chunks.content")
+	if err != nil {
+		return nil, err
+	}
+	titleRegex, err := t.caseInsensitiveRegexForDialect("knowledges.title")
+	if err != nil {
+		return nil, err
+	}
 	var regexConditions []string
 	var regexArgs []interface{}
 	for _, q := range queries {
@@ -413,7 +424,7 @@ func (t *GrepChunksTool) searchChunks(
 		// knowledge's title, so a doc whose title matches (e.g. titled
 		// "图片素材") surfaces even when its body rarely repeats the term.
 		regexConditions = append(regexConditions,
-			fmt.Sprintf("(chunks.content %s ? OR knowledges.title %s ?)", regexOp, regexOp))
+			"("+contentRegex+" OR "+titleRegex+")")
 		regexArgs = append(regexArgs, q, q)
 	}
 	query = query.Where("("+strings.Join(regexConditions, " OR ")+")", regexArgs...)

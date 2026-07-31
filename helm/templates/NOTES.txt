@@ -58,7 +58,11 @@ Components deployed:
 {{- if .Values.docreader.enabled }}
   - Document Reader ({{ include "weknora.docreader.image" . }})
 {{- end }}
-{{- if .Values.postgresql.enabled }}
+{{- if .Values.mysql.enabled }}
+  - MySQL ({{ include "weknora.mysql.image" . }}) -- DB_DRIVER=mysql
+{{- else if .Values.database.external }}
+  - External database (driver={{ .Values.database.driver }}, host={{ .Values.database.host }})
+{{- else if .Values.postgresql.enabled }}
   - PostgreSQL/ParadeDB ({{ include "weknora.postgresql.image" . }})
 {{- end }}
 {{- if .Values.redis.enabled }}

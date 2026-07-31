@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
@@ -261,8 +262,12 @@ func (r *userRepository) SearchUsers(ctx context.Context, query string, limit in
 	var users []*types.User
 	searchPattern := "%" + query + "%"
 
+	// CaseInsensitiveLike keeps ILIKE on Postgres (pg_trgm indexes) and
+	// falls back to LOWER() LIKE LOWER() on mysql/sqlite.
+	dialect := r.db.Dialector.Name()
 	dbQuery := r.db.WithContext(ctx).
-		Where("username ILIKE ? OR email ILIKE ?", searchPattern, searchPattern).
+		Where(database.CaseInsensitiveLike(dialect, "username", "?")+" OR "+
+			database.CaseInsensitiveLike(dialect, "email", "?"), searchPattern, searchPattern).
 		Where("is_active = ?", true).
 		Order("username ASC")
 

@@ -13,6 +13,15 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// dialectSupportsSkipLocked reports whether a GORM dialector with the
+// given name supports the FOR UPDATE SKIP LOCKED syntax. PostgreSQL
+// (all supported versions) and MySQL 8.0+ both do, with identical
+// syntax. SQLite does not — the claim path falls back to a non-locking
+// SELECT there.
+func dialectSupportsSkipLocked(dialectName string) bool {
+	return dialectName == "postgres" || dialectName == "mysql"
+}
+
 // taskPendingOpsRepository implements interfaces.TaskPendingOpsRepository.
 type taskPendingOpsRepository struct {
 	db *gorm.DB
@@ -25,7 +34,7 @@ func NewTaskPendingOpsRepository(db *gorm.DB) interfaces.TaskPendingOpsRepositor
 
 // Enqueue inserts a single op. Callers must populate TenantID/TaskType/
 // Scope/ScopeID/Op (Payload optional). ID, FailCount default to zero;
-// EnqueuedAt is filled with the DB-side default if left zero.
+// EnqueuedAt is filled with the current UTC time if left zero.
 func (r *taskPendingOpsRepository) Enqueue(ctx context.Context, op *types.TaskPendingOp) error {
 	if err := preparePendingOp(op); err != nil {
 		return err
@@ -49,15 +58,21 @@ func preparePendingOp(op *types.TaskPendingOp) error {
 		// driver-level default handling.
 		op.Payload = []byte("{}")
 	}
+	if op.EnqueuedAt.IsZero() {
+		// GORM sends Go's zero time explicitly on some create paths. MySQL
+		// rejects that value under STRICT_TRANS_TABLES instead of applying
+		// the column's CURRENT_TIMESTAMP default.
+		op.EnqueuedAt = time.Now().UTC()
+	}
 	return nil
 }
 
 // EnqueueIfKnowledgeBaseActive prevents detached wiki cleanup from writing new
-// durable work after a KB was soft-deleted. On Postgres the share lock
-// serializes this check+insert transaction against the row update performed by
-// soft deletion: whichever operation acquires the row first determines the
-// order, and the deletion path's subsequent scope scrub removes any insert
-// that committed before it.
+// durable work after a KB was soft-deleted. On PostgreSQL and MySQL the share
+// lock serializes this check+insert transaction against the row update
+// performed by soft deletion: whichever operation acquires the row first
+// determines the order, and the deletion path's subsequent scope scrub removes
+// any insert that committed before it.
 func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
 	ctx context.Context,
 	op *types.TaskPendingOp,
@@ -74,7 +89,7 @@ func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
 			Select("id").
 			Where("id = ? AND tenant_id = ?", op.ScopeID, op.TenantID)
 		dialector := tx.Dialector
-		if dialector.Name() == "postgres" {
+		if dialector.Name() == "postgres" || dialector.Name() == "mysql" {
 			query = query.Clauses(clause.Locking{Strength: "SHARE"})
 		}
 		var kb types.KnowledgeBase
@@ -206,13 +221,13 @@ func (r *taskPendingOpsRepository) PeekBatch(
 // (claimed_at < staleBefore), AND the key has no fresh claim. The whole thing
 // runs in one transaction:
 //
-//   - Postgres: we lock the ANCHOR row (earliest eligible id) of each
+//   - PostgreSQL/MySQL: we lock the ANCHOR row (earliest eligible id) of each
 //     candidate dedup_key with FOR UPDATE SKIP LOCKED. Because the anchor
 //     uniquely represents its key, SKIP LOCKED hands concurrent claimers
 //     DISJOINT key sets — a key whose anchor is already locked by another
 //     in-flight claim is skipped entirely rather than half-claimed. We then
 //     stamp every eligible row of the chosen keys and read them back.
-//   - Other dialects (SQLite, used by unit tests / Lite mode): writes are
+//   - SQLite (used by unit tests / Lite mode): writes are
 //     serialized by the single-writer engine, so a plain grouped SELECT +
 //     UPDATE is already race-free.
 //
@@ -234,15 +249,22 @@ func (r *taskPendingOpsRepository) ClaimBatch(
 	now := time.Now()
 	var claimed []*types.TaskPendingOp
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Isolation: GORM Transaction() uses the DB's default isolation level.
+		// PG defaults to READ COMMITTED; MySQL defaults to REPEATABLE READ.
+		// REPEATABLE READ is STRICTER (more locking) but preserves correctness —
+		// concurrent claimers still get disjoint key sets via SKIP LOCKED. The
+		// trade-off is potentially higher lock contention on MySQL under load.
+
 		// 1. Pick up to `limit` distinct dedup_keys to claim, oldest first.
 		//    Keys with a fresh claim are excluded WHOLESALE so a late sibling
 		//    of an in-flight document never gets claimed on its own.
 		var keys []string
-		if tx.Dialector.Name() == "postgres" {
+		if dialectSupportsSkipLocked(tx.Dialector.Name()) {
 			// Lock the anchor (earliest eligible) row of each key with SKIP
 			// LOCKED so concurrent claimers get disjoint KEY sets, then map
 			// the locked anchors back to their dedup_keys. The NOT IN subquery
 			// drops any key that still has a fresh (non-stale) claim.
+			// PostgreSQL and MySQL 8.0+ both support this syntax.
 			const anchorSQL = `
 SELECT dedup_key FROM task_pending_ops
 WHERE id IN (
@@ -354,18 +376,32 @@ func (r *taskPendingOpsRepository) DeleteByScope(ctx context.Context, scope, sco
 }
 
 // IncrFailCount atomically bumps fail_count for one row and returns the
-// new value. We use UPDATE ... RETURNING so the read+write happens in
-// one round trip and races between concurrent IncrFailCount callers
-// resolve to monotonic counts.
-//
-// A missing row returns (0, nil): the caller's ID may have been removed
-// by a concurrent DeleteByIDs (e.g. dead-letter path), which is benign.
+// new value. Postgres uses UPDATE ... RETURNING (single round trip);
+// MySQL has no RETURNING clause, so it uses an explicit transaction
+// (UPDATE + SELECT on the same tx). A missing row returns (0, nil).
 func (r *taskPendingOpsRepository) IncrFailCount(ctx context.Context, id int64) (int, error) {
+	if r.db.Dialector.Name() == "postgres" {
+		var newCount int
+		err := r.db.WithContext(ctx).Raw(
+			"UPDATE task_pending_ops SET fail_count = fail_count + 1 WHERE id = ? RETURNING fail_count", id,
+		).Scan(&newCount).Error
+		if err != nil {
+			return 0, err
+		}
+		return newCount, nil
+	}
 	var newCount int
-	err := r.db.WithContext(ctx).Raw(
-		`UPDATE task_pending_ops SET fail_count = fail_count + 1 WHERE id = ? RETURNING fail_count`,
-		id,
-	).Scan(&newCount).Error
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&types.TaskPendingOp{}).
+			Where("id = ?", id).
+			UpdateColumn("fail_count", gorm.Expr("fail_count + 1")).Error; err != nil {
+			return err
+		}
+		return tx.Model(&types.TaskPendingOp{}).
+			Where("id = ?", id).
+			Select("fail_count").
+			Scan(&newCount).Error
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -440,6 +476,13 @@ func (r *taskDeadLetterRepository) Insert(ctx context.Context, dl *types.TaskDea
 	}
 	if len(dl.Payload) == 0 {
 		dl.Payload = []byte("{}")
+	}
+	if dl.FailedAt.IsZero() {
+		// FailedAt is not one of GORM's conventional auto-timestamp fields.
+		// Without an explicit value GORM sends Go's zero time, which MySQL
+		// rejects under STRICT_TRANS_TABLES instead of applying the column's
+		// CURRENT_TIMESTAMP default.
+		dl.FailedAt = time.Now().UTC()
 	}
 	return r.db.WithContext(ctx).Create(dl).Error
 }

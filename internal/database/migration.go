@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/golang-migrate/migrate/v4"
+	mysql3migrate "github.com/golang-migrate/migrate/v4/database/mysql"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -78,6 +79,23 @@ func captureMigrationFailure(m *migrate.Migrate, err error) error {
 	return err
 }
 
+// migrationsPathForDSN picks the migration directory based on the DSN's
+// scheme. SQLite and MySQL each ship a dialect-specific squash baseline.
+// PostgreSQL keeps its original full history.
+func migrationsPathForDSN(dsn string) string {
+	switch {
+	case strings.HasPrefix(dsn, "sqlite3://"):
+		return "file://migrations/sqlite"
+	case strings.HasPrefix(dsn, "mysql://"):
+		return "file://migrations/mysql"
+	default:
+		// postgres:// and any unrecognised scheme → the versioned
+		// PostgreSQL history. This preserves existing behaviour for
+		// every postgres deployment.
+		return "file://migrations/versioned"
+	}
+}
+
 // RunMigrations executes all pending database migrations
 // This should be called during application startup
 func RunMigrations(dsn string) error {
@@ -90,11 +108,60 @@ type MigrationOptions struct {
 	// by forcing to the previous version and retrying the migration
 	AutoRecoverDirty bool
 
+	// FailOnDirty, when true, forces the migrator to surface an error on dirty
+	// state instead of attempting auto-recovery, regardless of AutoRecoverDirty.
+	// This is the fail-closed path for dialects whose DDL is not transactional
+	// (MySQL): forcing the version backward and re-running Up() can leave a
+	// half-applied schema that silently corrupts subsequent business queries,
+	// so recovery must be a human decision. Set by the container based on
+	// DB_DRIVER == "mysql".
+	FailOnDirty bool
+
 	// SQLiteDBPath is the raw filesystem path to the SQLite database file.
 	// When set, the migrator opens the DB directly via sql.Open instead of
 	// parsing a URL-based DSN, which avoids breakage when the path contains
 	// spaces (e.g. macOS "Application Support").
 	SQLiteDBPath string
+
+	// MySQLMigrationDSN is the go-sql-driver DSN already configured with
+	// multiStatements and any custom TLS registration. Using a database/sql
+	// instance avoids golang-migrate's URL parser trying to reconstruct custom
+	// TLS settings (which loses SNI and requires x-tls-* query parameters).
+	MySQLMigrationDSN string
+}
+
+// dirtyStateErrorMessage returns the error shown when the migrator refuses
+// to auto-recover from a dirty state. For MySQL (non-transactional DDL) it
+// tells the operator to inspect manually; for PG/SQLite it suggests the
+// force command.
+func dirtyStateErrorMessage(version uint, isMySQL bool) string {
+	if isMySQL {
+		return fmt.Sprintf(
+			"database migration is in dirty state at version %d. "+
+				"MySQL DDL is not transactional, so auto-recovery is disabled. "+
+				"Inspect the partially-created schema manually, then force the "+
+				"migration version backward or drop and recreate the database.",
+			version,
+		)
+	}
+	forceVersion := int(version) - 1
+	if version == 0 || forceVersion < 0 {
+		forceVersion = 0
+	}
+	return fmt.Sprintf(
+		"database is in dirty state at version %d. This usually means a migration failed partway through. "+
+			"To fix this:\n"+
+			"1. Check if the migration partially applied changes and manually fix if needed\n"+
+			"2. Use the force command to set the version to the last successful migration (usually %d):\n"+
+			"   ./scripts/migrate.sh force %d\n"+
+			"   Or if using make: make migrate-force version=%d\n"+
+			"3. After fixing, restart the application to retry the migration\n"+
+			"Or enable AutoRecoverDirty option to automatically retry",
+		version,
+		forceVersion,
+		forceVersion,
+		forceVersion,
+	)
 }
 
 // RunMigrationsWithOptions executes all pending database migrations with custom options
@@ -103,9 +170,9 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 
 	logger.Infof(ctx, "Starting database migration...")
 
-	migrationsPath := "file://migrations/versioned"
-	if strings.HasPrefix(dsn, "sqlite3://") {
-		migrationsPath = "file://migrations/sqlite"
+	migrationsPath := migrationsPathForDSN(dsn)
+	if opts.MySQLMigrationDSN != "" {
+		migrationsPath = "file://migrations/mysql"
 	}
 
 	var m *migrate.Migrate
@@ -129,6 +196,27 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 		if err != nil {
 			logger.Errorf(ctx, "Failed to create migrate instance: %v", err)
 			wrapped := fmt.Errorf("failed to create migrate instance: %w", err)
+			setMigrationState(0, false, wrapped.Error(), false)
+			return wrapped
+		}
+	} else if opts.MySQLMigrationDSN != "" {
+		sqlDB, err := sql.Open("mysql", opts.MySQLMigrationDSN)
+		if err != nil {
+			wrapped := fmt.Errorf("failed to open mysql db for migration: %w", err)
+			setMigrationState(0, false, wrapped.Error(), false)
+			return wrapped
+		}
+		driver, err := mysql3migrate.WithInstance(sqlDB, &mysql3migrate.Config{})
+		if err != nil {
+			_ = sqlDB.Close()
+			wrapped := fmt.Errorf("failed to create mysql migrate driver: %w", err)
+			setMigrationState(0, false, wrapped.Error(), false)
+			return wrapped
+		}
+		m, err = migrate.NewWithDatabaseInstance(migrationsPath, "mysql", driver)
+		if err != nil {
+			_ = sqlDB.Close()
+			wrapped := fmt.Errorf("failed to create mysql migrate instance: %w", err)
 			setMigrationState(0, false, wrapped.Error(), false)
 			return wrapped
 		}
@@ -160,6 +248,13 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 	// If database is in dirty state, try to recover or return error
 	if oldDirty {
 		logger.Warnf(ctx, "Database is in dirty state at version %d", oldVersion)
+		// FailOnDirty (MySQL) short-circuits: MySQL DDL is not transactional,
+		// so forcing the version backward and re-running Up() can leave a
+		// half-applied schema that silently corrupts business queries. Recovery
+		// must be a human decision, so surface an actionable error instead.
+		if opts.FailOnDirty {
+			return captureMigrationFailure(m, fmt.Errorf("%s", dirtyStateErrorMessage(oldVersion, true)))
+		}
 		if opts.AutoRecoverDirty {
 			logger.Infof(ctx, "AutoRecoverDirty is enabled, attempting recovery...")
 			if err := recoverFromDirtyState(ctx, m, oldVersion); err != nil {
@@ -168,25 +263,7 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 			// Update oldVersion after recovery
 			oldVersion, _, _ = m.Version()
 		} else {
-			// Calculate the version to force to (usually the previous version)
-			forceVersion := int(oldVersion) - 1
-			if oldVersion == 0 || forceVersion < 0 {
-				forceVersion = 0
-			}
-			return captureMigrationFailure(m, fmt.Errorf(
-				"database is in dirty state at version %d. This usually means a migration failed partway through. "+
-					"To fix this:\n"+
-					"1. Check if the migration partially applied changes and manually fix if needed\n"+
-					"2. Use the force command to set the version to the last successful migration (usually %d):\n"+
-					"   ./scripts/migrate.sh force %d\n"+
-					"   Or if using make: make migrate-force version=%d\n"+
-					"3. After fixing, restart the application to retry the migration\n"+
-					"Or enable AutoRecoverDirty option to automatically retry",
-				oldVersion,
-				forceVersion,
-				forceVersion,
-				forceVersion,
-			))
+			return captureMigrationFailure(m, fmt.Errorf("%s", dirtyStateErrorMessage(oldVersion, false)))
 		}
 	}
 
@@ -198,6 +275,16 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 		currentVersion, currentDirty, versionCheckErr := m.Version()
 		if versionCheckErr == nil && currentDirty {
 			logger.Warnf(ctx, "Migration caused dirty state at version %d", currentVersion)
+			// FailOnDirty (MySQL) short-circuits here too: the migration went
+			// dirty mid-Up(), so forcing the version is unsafe for the same
+			// non-transactional-DDL reason as the pre-migration branch above.
+			if opts.FailOnDirty {
+				return captureMigrationFailure(m, fmt.Errorf(
+					"migration failed: %w; %s",
+					err,
+					dirtyStateErrorMessage(currentVersion, true),
+				))
+			}
 			if opts.AutoRecoverDirty {
 				logger.Infof(ctx, "Attempting to recover from dirty state...")
 				// Try to recover and retry

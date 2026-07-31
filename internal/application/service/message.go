@@ -502,7 +502,7 @@ func (s *messageService) SearchMessages(ctx context.Context, params *types.Messa
 	var vectorResults []*types.MessageSearchResultItem
 	var err error
 
-	// Step 1: Keyword search (direct PG ILIKE)
+	// Step 1: Keyword search (dialect-aware case-insensitive LIKE)
 	if params.Mode == types.MessageSearchModeKeyword || params.Mode == types.MessageSearchModeHybrid {
 		keywordResults, err = s.messageRepo.SearchMessagesByKeyword(ctx, tenantID, params.Query, params.SessionIDs, params.Limit*3)
 		if err != nil {

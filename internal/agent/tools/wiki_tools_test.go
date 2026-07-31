@@ -159,6 +159,24 @@ func TestWikiToolsInAvailableDefinitions(t *testing.T) {
 	}
 }
 
+func TestWikiSearchDescriptionIsDatabaseAgnostic(t *testing.T) {
+	tool := NewWikiSearchTool(nil, nil, nil, nil)
+	description := tool.Description()
+
+	for _, databaseSpecificTerm := range []string{"PostgreSQL", "~* operator"} {
+		if strings.Contains(description, databaseSpecificTerm) {
+			t.Fatalf(
+				"wiki_search description must not expose database-specific syntax %q: %s",
+				databaseSpecificTerm,
+				description,
+			)
+		}
+	}
+	if !strings.Contains(description, "case-insensitive regular expressions") {
+		t.Fatalf("wiki_search description must document its portable regex behavior: %s", description)
+	}
+}
+
 func TestWikiReadPageSchemaUsesAutomaticKBRouting(t *testing.T) {
 	tool := NewWikiReadPageTool(
 		&fakeWikiPageService{}, nil,

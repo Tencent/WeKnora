@@ -43,6 +43,19 @@ func dedupStrings(in []string) []string {
 	return out
 }
 
+func filterDatabaseCompatibleTools(allowedTools []string, dialect string) ([]string, []string) {
+	filtered := make([]string, 0, len(allowedTools))
+	dropped := make([]string, 0, 1)
+	for _, toolName := range allowedTools {
+		if toolName == tools.ToolDatabaseQuery && !tools.DatabaseQuerySupported(dialect) {
+			dropped = append(dropped, toolName)
+			continue
+		}
+		filtered = append(filtered, toolName)
+	}
+	return filtered, dropped
+}
+
 // agentHasKnowledgeScope reports whether the agent has any KB retrieval scope for
 // this turn. Tag-only @mentions populate SearchTargets (with TagIDs) but leave
 // KnowledgeBases / KnowledgeIDs empty — those must still count as in-scope.
@@ -578,6 +591,21 @@ func (s *agentService) registerTools(
 		if len(dropped) > 0 {
 			logger.Warnf(ctx, "Dropped RAG tools %v because no RAG-capable KB is in scope", dropped)
 		}
+	}
+
+	dialect := ""
+	if s.db != nil && s.db.Dialector != nil {
+		dialect = s.db.Dialector.Name()
+	}
+	var droppedForDialect []string
+	allowedTools, droppedForDialect = filterDatabaseCompatibleTools(allowedTools, dialect)
+	if len(droppedForDialect) > 0 {
+		logger.Warnf(
+			ctx,
+			"Dropped tools %v because metadata database dialect %q is unsupported",
+			droppedForDialect,
+			dialect,
+		)
 	}
 
 	// Deduplicate while preserving original order.

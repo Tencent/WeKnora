@@ -3,9 +3,11 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
@@ -570,12 +572,18 @@ func (r *knowledgeRepository) CountKnowledgeByStatus(
 	return count, nil
 }
 
-// SearchKnowledge searches knowledge items by keyword across the tenant
-// If keyword is empty, returns recent files
-// Only returns documents from document-type knowledge bases (excludes FAQ)
-// Returns (results, hasMore, error)
-// FindByMetadataKey finds a knowledge item by a key-value pair in the metadata JSON column.
-// Uses Postgres jsonb operator: metadata->>'key' = 'value'.
+// FindByMetadataKey finds a knowledge item by a key-value pair in the
+// metadata JSON column. The JSON extraction syntax is dialect-aware via
+// database.JSONPathExpr:
+//
+//   - postgres: metadata ->> 'key'
+//   - mysql:    metadata ->> '$.key'   (bare-key form errors 1064)
+//   - sqlite:   json_extract(metadata, '$.key')
+//
+// Used by the datasource sync loop to deduplicate by external_id; a
+// query error here MUST NOT be swallowed by the caller - the
+// datasource service treats "found" as update-in-place and "not found"
+// as create, so a silent error would produce duplicate knowledge rows.
 func (r *knowledgeRepository) FindByMetadataKey(
 	ctx context.Context,
 	tenantID uint64,
@@ -584,9 +592,16 @@ func (r *knowledgeRepository) FindByMetadataKey(
 	value string,
 ) (*types.Knowledge, error) {
 	var knowledge types.Knowledge
-	err := r.db.WithContext(ctx).
+	dialectName := r.db.Dialector.Name()
+	jsonPathExpr, err := database.JSONPathExpr(dialectName, "metadata", key)
+	if err != nil {
+		// Invalid metadata key (caller bug) - surface as an error rather
+		// than querying a different JSON path than intended.
+		return nil, fmt.Errorf("invalid metadata key %q: %w", key, err)
+	}
+	err = r.db.WithContext(ctx).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
-		Where("metadata->>? = ?", key, value).
+		Where(jsonPathExpr+" = ?", value).
 		First(&knowledge).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

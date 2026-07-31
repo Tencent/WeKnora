@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
@@ -330,4 +331,47 @@ func TestListRecentDocumentChunksWithQuestions_UnionsExplicitKBAndKnowledge(t *t
 	require.NoError(t, err)
 	require.Len(t, got, 2)
 	assert.ElementsMatch(t, []string{fromExplicitKB.ID, fromExplicitDocument.ID}, []string{got[0].ID, got[1].ID})
+}
+
+// TestUpdateChunks_SQLite_RewritesFieldsAndTimestamp exercises the
+// SQLite branch of UpdateChunks (datetime('now')) so the three-dialect
+// switch has a red-capable unit test that does not need a live DB.
+func TestUpdateChunks_SQLite_RewritesFieldsAndTimestamp(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	kbID := uuid.New().String()
+	knowledgeID := uuid.New().String()
+	c1 := makeChunk(kbID, knowledgeID, "text")
+	c2 := makeChunk(kbID, knowledgeID, "text")
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{c1, c2}))
+	oldTime := time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+	result := db.Model(&types.Chunk{}).
+		Where("id IN ?", []string{c1.ID, c2.ID}).
+		UpdateColumn("updated_at", oldTime)
+	require.NoError(t, result.Error)
+	require.Equal(t, int64(2), result.RowsAffected)
+
+	// Mutate exactly the fields UpdateChunks rewrites.
+	c1.Content = "updated content 1"
+	c1.Status = 2
+	c1.IsEnabled = false
+	c2.Content = "updated content 2"
+	c2.Status = 3
+
+	require.NoError(t, repo.UpdateChunks(ctx, []*types.Chunk{c1, c2}))
+
+	var got1, got2 types.Chunk
+	require.NoError(t, db.First(&got1, "id = ?", c1.ID).Error)
+	require.NoError(t, db.First(&got2, "id = ?", c2.ID).Error)
+
+	assert.Equal(t, "updated content 1", got1.Content)
+	assert.Equal(t, 2, int(got1.Status))
+	assert.False(t, got1.IsEnabled)
+	assert.Equal(t, "updated content 2", got2.Content)
+	assert.Equal(t, 3, int(got2.Status))
+
+	assert.True(t, got1.UpdatedAt.After(oldTime), "first chunk updated_at must advance")
+	assert.True(t, got2.UpdatedAt.After(oldTime), "second chunk updated_at must advance")
 }

@@ -52,6 +52,71 @@ spec:
             - name: TZ
               value: {{ .Values.app.env.TZ | quote }}
             # Database configuration
+            {{- if .Values.mysql.enabled }}
+            - name: DB_DRIVER
+              value: "mysql"
+            - name: DB_HOST
+              value: "mysql"
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.mysqlSecretName" . }}
+                  key: MYSQL_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.mysqlSecretName" . }}
+                  key: MYSQL_PASSWORD
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.mysqlSecretName" . }}
+                  key: MYSQL_DATABASE
+            {{- else if .Values.database.external }}
+            {{- $databaseSecretName := default (include "weknora.secretName" .) .Values.database.existingSecret }}
+            - name: DB_DRIVER
+              value: {{ .Values.database.driver | quote }}
+            - name: DB_HOST
+              value: {{ .Values.database.host | quote }}
+            - name: DB_PORT
+              value: {{ .Values.database.port | default (ternary 3306 5432 (eq (lower .Values.database.driver) "mysql")) | quote }}
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $databaseSecretName }}
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $databaseSecretName }}
+                  key: DB_PASSWORD
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $databaseSecretName }}
+                  key: DB_NAME
+                  optional: true
+            {{- if and (eq (lower .Values.database.driver) "mysql") .Values.database.tls.enabled }}
+            - name: DB_USE_TLS
+              value: "true"
+            - name: DB_TLS_SERVER_NAME
+              value: {{ .Values.database.tls.serverName | quote }}
+            - name: DB_TLS_INSECURE_SKIP_VERIFY
+              value: {{ .Values.database.tls.insecureSkipVerify | quote }}
+            {{- if .Values.database.tls.caFile }}
+            - name: DB_TLS_CA
+              value: {{ printf "/etc/weknora/mysql-tls/%s" .Values.database.tls.caFile | quote }}
+            {{- end }}
+            {{- if .Values.database.tls.certFile }}
+            - name: DB_TLS_CERT
+              value: {{ printf "/etc/weknora/mysql-tls/%s" .Values.database.tls.certFile | quote }}
+            - name: DB_TLS_KEY
+              value: {{ printf "/etc/weknora/mysql-tls/%s" .Values.database.tls.keyFile | quote }}
+            {{- end }}
+            {{- end }}
+            {{- else }}
             - name: DB_DRIVER
               value: "postgres"
             - name: DB_HOST
@@ -73,6 +138,7 @@ spec:
                 secretKeyRef:
                   name: {{ include "weknora.secretName" . }}
                   key: DB_NAME
+            {{- end }}
             # Redis configuration
             - name: REDIS_ADDR
               value: "redis:6379"
@@ -107,6 +173,29 @@ spec:
             # Retrieval & Storage
             - name: RETRIEVE_DRIVER
               value: {{ .Values.app.env.RETRIEVE_DRIVER | quote }}
+            {{- $usesQdrant := false }}
+            {{- range (splitList "," (.Values.app.env.RETRIEVE_DRIVER | default "")) }}
+            {{- if eq (trim .) "qdrant" }}
+            {{- $usesQdrant = true }}
+            {{- end }}
+            {{- end }}
+            {{- if $usesQdrant }}
+            - name: QDRANT_HOST
+              value: {{ .Values.qdrant.connection.host | default "qdrant" | quote }}
+            - name: QDRANT_PORT
+              value: {{ .Values.qdrant.connection.port | quote }}
+            - name: QDRANT_COLLECTION
+              value: {{ .Values.qdrant.connection.collection | quote }}
+            - name: QDRANT_USE_TLS
+              value: {{ .Values.qdrant.connection.useTLS | quote }}
+            {{- if .Values.qdrant.auth.existingSecret }}
+            - name: QDRANT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.qdrant.auth.existingSecret }}
+                  key: {{ .Values.qdrant.auth.apiKeyKey }}
+            {{- end }}
+            {{- end }}
             - name: STORAGE_TYPE
               value: {{ .Values.app.env.STORAGE_TYPE | quote }}
             - name: LOCAL_STORAGE_BASE_DIR
@@ -145,6 +234,11 @@ spec:
           volumeMounts:
             - name: data-files
               mountPath: /data/files
+            {{- if and .Values.database.external (eq (lower .Values.database.driver) "mysql") .Values.database.tls.enabled .Values.database.tls.existingSecret }}
+            - name: mysql-tls
+              mountPath: /etc/weknora/mysql-tls
+              readOnly: true
+            {{- end }}
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}
           {{- with .Values.app.livenessProbe }}
@@ -163,6 +257,11 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- if and .Values.database.external (eq (lower .Values.database.driver) "mysql") .Values.database.tls.enabled .Values.database.tls.existingSecret }}
+        - name: mysql-tls
+          secret:
+            secretName: {{ .Values.database.tls.existingSecret }}
+        {{- end }}
       {{- with .Values.app.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

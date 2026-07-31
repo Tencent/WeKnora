@@ -340,6 +340,32 @@ func TestListByTypeLight_EmptyType_ReturnsZero(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
+func TestFindSimilarPagesSQLiteReturnsRankedMatches(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	for _, page := range []*types.WikiPage{
+		makeWikiPage("kb-similar", "entity/alpha", types.WikiPageTypeEntity, types.WikiPageStatusPublished),
+		makeWikiPage("kb-similar", "entity/alpha-longer-title", types.WikiPageTypeEntity, types.WikiPageStatusPublished),
+		makeWikiPage("kb-similar", "entity/unrelated", types.WikiPageTypeEntity, types.WikiPageStatusPublished),
+	} {
+		require.NoError(t, repo.Create(ctx, page))
+	}
+
+	got, err := repo.FindSimilarPages(
+		ctx,
+		"kb-similar",
+		"alpha",
+		[]string{types.WikiPageTypeEntity},
+		10,
+	)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "alpha", got[0].Title)
+	assert.Equal(t, "alpha-longer-title", got[1].Title)
+}
+
 // TestListByTypeLight_ClampsLimit verifies the [1, 200] clamp. We don't
 // want a client passing limit=100000 and forcing the DB to return a
 // multi-MB response.

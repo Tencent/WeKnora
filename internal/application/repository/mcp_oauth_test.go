@@ -122,3 +122,31 @@ func TestMCPOAuthRepositoryRefreshLeaseHasSingleOwner(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, second)
 }
+
+func TestMCPOAuthRepositoryTokenWithoutExpiryStoresNull(t *testing.T) {
+	repo := newMCPOAuthTestRepo(t)
+	ctx := context.Background()
+	principal := types.Principal{Type: types.PrincipalWebUser, ID: "u1"}
+
+	require.NoError(t, repo.SaveTokenForPrincipal(ctx, &types.MCPOAuthToken{
+		TenantID:      7,
+		UserID:        principal.StorageID(),
+		PrincipalType: principal.Type,
+		PrincipalID:   principal.ID,
+		ServiceID:     "svc1",
+		AccessToken:   "non-expiring-token",
+		TokenType:     "Bearer",
+	}))
+
+	var expiresAtIsNull bool
+	require.NoError(t, repo.db.Raw(
+		"SELECT expires_at IS NULL FROM mcp_oauth_tokens WHERE tenant_id = ? AND service_id = ?",
+		7,
+		"svc1",
+	).Scan(&expiresAtIsNull).Error)
+	require.True(t, expiresAtIsNull, "a provider token without an expiry must persist SQL NULL")
+
+	token, err := repo.GetTokenForPrincipal(ctx, 7, principal, "svc1")
+	require.NoError(t, err)
+	require.True(t, token.ExpiresAt.IsZero())
+}

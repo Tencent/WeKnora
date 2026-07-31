@@ -281,6 +281,115 @@ postgresql:
   affinity: {}
 
 # -----------------------------------------------------------------------------
+# MySQL (Alternative Relational Database)
+# -----------------------------------------------------------------------------
+# Mutually exclusive with postgresql.enabled and database.external.
+# When enabled, the app's DB_DRIVER is set to "mysql" and DB_HOST to "mysql".
+mysql:
+  # -- Enable MySQL (disables PostgreSQL for the app). Mutually exclusive with
+  # postgresql.enabled and database.external.
+  enabled: false
+
+  # -- MySQL image (full reference including repository:tag).
+  # Defaults match the upstream MySQL 8.0 image.
+  image: mysql:8.0.37
+
+  # -- Resource requests and limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # -- Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+
+  # -- Authentication credentials. When password/rootPassword are empty, random
+  # values are generated on first install and reused on upgrade (Secret lookup).
+  # For production, prefer existingSecret so credentials never enter Helm values
+  # or rendered release manifests.
+  auth:
+    # -- Existing Secret with MYSQL_DATABASE, MYSQL_USER, MYSQL_PASSWORD, and
+    # MYSQL_ROOT_PASSWORD. When set, this chart does not render a MySQL Secret.
+    existingSecret: ""
+    # -- Root password (auto-generated if empty)
+    rootPassword: ""
+    # -- Application database name
+    database: WeKnora
+    # -- Application username
+    username: weknora
+    # -- Application password (auto-generated if empty)
+    password: ""
+
+  # -- Primary instance configuration
+  primary:
+    persistence:
+      # -- Enable persistence
+      enabled: true
+      # -- Size of the PVC
+      size: 20Gi
+      # -- Storage class name (empty uses cluster default)
+      storageClass: ""
+      # -- Use existing PVC (leave empty to create new)
+      existingClaim: ""
+
+  # -- Node selector
+  nodeSelector: {}
+
+  # -- Tolerations
+  tolerations: []
+
+  # -- Affinity rules
+  affinity: {}
+
+# -----------------------------------------------------------------------------
+# External Database
+# -----------------------------------------------------------------------------
+# Use an externally managed database by enabling database.external and disabling
+# both postgresql.enabled and mysql.enabled. The app pulls DB_DRIVER/HOST/PORT
+# from this section.
+database:
+  # -- Use an external database; disable the internal database flags separately
+  external: false
+  # -- Database driver: postgres / mysql
+  driver: postgres
+  # -- External database host
+  host: ""
+  # -- External database port (empty defaults to 5432 for postgres, 3306 for mysql)
+  port: ""
+  # -- External database name
+  name: WeKnora
+  # -- External database username
+  username: ""
+  # -- External database password
+  password: ""
+  # -- Name of a pre-existing Secret containing DB_USER, DB_PASSWORD, and
+  # DB_NAME. When empty, the app uses secrets.existingSecret or the Secret
+  # rendered by templates/secrets.yaml.
+  existingSecret: ""
+
+  # -- TLS settings for an external MySQL database. Certificate filenames are
+  # keys in tls.existingSecret and are mounted read-only under /etc/weknora/mysql-tls.
+  tls:
+    # -- Require TLS for the MySQL connection
+    enabled: false
+    # -- TLS SNI / certificate verification name
+    serverName: ""
+    # -- Skip certificate verification. Development only.
+    insecureSkipVerify: false
+    # -- Existing Kubernetes Secret containing certificate files
+    existingSecret: ""
+    # -- CA certificate key/filename in existingSecret; empty uses system roots
+    caFile: ""
+    # -- Client certificate key/filename in existingSecret
+    certFile: ""
+    # -- Client private-key key/filename in existingSecret
+    keyFile: ""
+
+# -----------------------------------------------------------------------------
 # Redis (Stream & Task Queue)
 # -----------------------------------------------------------------------------
 redis:
@@ -406,8 +515,12 @@ secrets:
   # it has been removed from the Secret.
   systemAesKey: ""
 
-  # -- Use existing secret instead of creating one
-  # The secret must contain keys: DB_USER, DB_PASSWORD, DB_NAME, REDIS_USERNAME, REDIS_PASSWORD, JWT_SECRET, SYSTEM_AES_KEY
+  # -- Use an existing application Secret instead of rendering one
+  # Required keys: REDIS_PASSWORD, JWT_SECRET, and SYSTEM_AES_KEY.
+  # REDIS_USERNAME is optional. DB_USER, DB_PASSWORD, and DB_NAME are required
+  # for internal PostgreSQL, or for an external database without
+  # database.existingSecret. NEO4J_USERNAME and NEO4J_PASSWORD are required
+  # when Neo4j is enabled.
   existingSecret: ""
 
 # -----------------------------------------------------------------------------
@@ -486,7 +599,46 @@ qdrant:
   enabled: false
   image:
     repository: qdrant/qdrant
-    tag: latest
+    tag: v1.16.2
+    pullPolicy: IfNotPresent
+
+  # -- App connection settings. When enabled=true and host is empty, the app
+  # connects to the in-chart `qdrant` Service. When enabled=false, host must be
+  # set if RETRIEVE_DRIVER includes qdrant.
+  connection:
+    host: ""
+    port: 6334
+    collection: weknora_embeddings
+    useTLS: false
+
+  # -- Optional existing Secret containing the Qdrant API key. The same key is
+  # injected into the in-chart server and the app when enabled.
+  auth:
+    existingSecret: ""
+    apiKeyKey: QDRANT_API_KEY
+
+  service:
+    type: ClusterIP
+    httpPort: 6333
+    grpcPort: 6334
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+  securityContext:
+    allowPrivilegeEscalation: false
+
   persistence:
     enabled: true
     size: 10Gi
+    storageClass: ""
+    existingClaim: ""
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}

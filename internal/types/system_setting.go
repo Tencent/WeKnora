@@ -24,7 +24,7 @@ import (
 // roundtrip as `true`/`false`, ints as `42`, strings as `"foo"`.
 type SystemSetting struct {
 	ID    uint64 `gorm:"primaryKey"      json:"id"`
-	Key   string `gorm:"type:varchar(128);uniqueIndex;not null" json:"key"`
+	Key   string `gorm:"column:key;type:varchar(128);uniqueIndex;not null" json:"key"`
 	Value JSON   `gorm:"type:jsonb;not null"                    json:"value"`
 	// ValueType is one of "int", "string", "bool". Service layer rejects
 	// updates whose payload type does not match; UI uses it to pick
