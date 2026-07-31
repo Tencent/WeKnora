@@ -1707,7 +1707,7 @@ const handleKBEditorSuccess = (kbId: string) => {
   // 列表页编辑同样要让单 KB 详情缓存失效，否则侧栏 / 详情页 60s 内仍显示旧信息
   chatResources.invalidateKnowledgeBaseDetail(kbId)
   fetchList(true).then(() => {
-    if (shouldOpenDetailForUploadGuide && kbId) {
+    if (shouldOpenDetailForUploadGuide && kbId && !uiStore.showKBEditorModal) {
       goDetail(kbId)
     }
     // 如果是从路由参数中获取的高亮ID，触发闪烁效果

@@ -769,6 +769,7 @@ import { marked } from 'marked'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { RecycleScroller } from 'vue-virtual-scroller'
 import { hydrateProtectedFileImages, sanitizeMarkdownHTML } from '@/utils/security'
+import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess'
 import picturePreview from '@/components/picture-preview.vue'
 import WikiFolderActions from './WikiFolderActions.vue'
 import WikiRevisionDrawer from './WikiRevisionDrawer.vue'
@@ -827,6 +828,13 @@ const emit = defineEmits<{
   (e: 'status-change', payload: { pendingTasks: number; isActive: boolean; pendingIssues: number }): void
   (e: 'view-graph', slug: string): void
 }>()
+
+// Wiki content can reference objects owned by the KB's source tenant (shared
+// KBs), which the tenant-scoped /files proxy rejects as cross-tenant.
+const kbFileAccess = computed<ProtectedFileAccessContext>(() => ({
+  mode: 'knowledgeBase',
+  kbId: props.knowledgeBaseId,
+}))
 const pages = ref<WikiPage[]>([])
 const selectedPage = ref<WikiPage | null>(null)
 
@@ -1477,7 +1485,7 @@ function closeImagePreview() {
 watch(graphDrawerContent, async () => {
   await nextTick()
   if (drawerBodyRef.value) {
-    await hydrateProtectedFileImages(drawerBodyRef.value, undefined, props.knowledgeBaseId)
+    await hydrateProtectedFileImages(drawerBodyRef.value, kbFileAccess.value)
   }
 })
 
@@ -1984,7 +1992,7 @@ const indexHasMore = computed(() => {
 watch(renderedContent, async () => {
   await nextTick()
   if (readerBodyRef.value) {
-    await hydrateProtectedFileImages(readerBodyRef.value, undefined, props.knowledgeBaseId)
+    await hydrateProtectedFileImages(readerBodyRef.value, kbFileAccess.value)
   }
 })
 
@@ -1994,7 +2002,7 @@ watch(renderedContent, async () => {
 watch(renderedIndexMarkdown, async () => {
   await nextTick()
   if (indexBodyRef.value) {
-    await hydrateProtectedFileImages(indexBodyRef.value, undefined, props.knowledgeBaseId)
+    await hydrateProtectedFileImages(indexBodyRef.value, kbFileAccess.value)
   }
 })
 
@@ -4735,7 +4743,7 @@ watch(() => props.view, (v) => {
   } else if (v === 'browser') {
     nextTick(async () => {
       if (readerBodyRef.value && renderedContent.value) {
-        await hydrateProtectedFileImages(readerBodyRef.value, undefined, props.knowledgeBaseId)
+        await hydrateProtectedFileImages(readerBodyRef.value, kbFileAccess.value)
       }
     })
   }

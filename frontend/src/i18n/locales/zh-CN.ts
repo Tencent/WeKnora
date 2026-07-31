@@ -167,18 +167,16 @@ export default {
         denied: '拒绝'
       },
       action: {
-        rbac: {
-          member_added: '新增成员',
-          member_removed: '移除成员',
-          member_role_changed: '角色变更',
-          member_left: '成员退出',
-          access_denied: '访问被拒',
-          invitation_sent: '发出邀请',
-          invitation_accepted: '接受邀请',
-          invitation_declined: '拒绝邀请',
-          invitation_revoked: '撤销邀请',
-          invitation_expired: '邀请过期'
-        }
+        'rbac.member_added': '新增成员',
+        'rbac.member_removed': '移除成员',
+        'rbac.member_role_changed': '角色变更',
+        'rbac.member_left': '成员退出',
+        'rbac.access_denied': '访问被拒',
+        'rbac.invitation_sent': '发出邀请',
+        'rbac.invitation_accepted': '接受邀请',
+        'rbac.invitation_declined': '拒绝邀请',
+        'rbac.invitation_revoked': '撤销邀请',
+        'rbac.invitation_expired': '邀请过期'
       },
       columns: {
         time: '时间',
@@ -2564,19 +2562,17 @@ export default {
           denied: '拒绝'
         },
         action: {
-          system: {
-            setting_changed: '系统设置变更',
-            admin_promoted: '授予系统管理员',
-            api_key_created: '创建平台 API Key',
-            api_key_revoked: '吊销平台 API Key',
-            admin_revoked: '回收系统管理员',
-            user_password_reset: '重置用户密码',
-            queue_task_retried: '重新执行失败任务',
-            queue_task_deleted: '清除失败任务记录',
-            queue_task_run_now: '立即执行队列任务',
-            queue_task_cancelled: '终止队列任务',
-            queue_archived_purged: '清除全部失败任务'
-          }
+          'system.setting_changed': '系统设置变更',
+          'system.admin_promoted': '授予系统管理员',
+          'system.api_key_created': '创建平台 API Key',
+          'system.api_key_revoked': '吊销平台 API Key',
+          'system.admin_revoked': '回收系统管理员',
+          'system.user_password_reset': '重置用户密码',
+          'system.queue_task_retried': '重新执行失败任务',
+          'system.queue_task_deleted': '清除失败任务记录',
+          'system.queue_task_run_now': '立即执行队列任务',
+          'system.queue_task_cancelled': '终止队列任务',
+          'system.queue_archived_purged': '清除全部失败任务'
         },
         columns: {
           time: '时间',
@@ -3473,7 +3469,13 @@ export default {
     },
     buttons: {
       create: '创建知识库',
-      save: '保存配置'
+      save: '保存配置',
+      saveAndClose: '保存并关闭',
+    },
+    postCreateHint: {
+      title: '创建成功',
+      footer: '可继续调整配置，设置共享与数据源，完成后点击「保存并关闭」。',
+      followUpDesc: '可在左侧配置数据源，或在「共享管理」中发布到空间',
     },
     wikiBrowser: {
       editBtn: '编辑',
@@ -3796,53 +3798,68 @@ export default {
       countItems: '共 {count} 项',
       titleWithCount: '{title} 等 {count} 项',
       importSummary: '成功 {success} / 失败 {failed} / 跳过 {skipped}',
+      detailValues: {
+        user: '用户发起',
+        manual: '手动触发',
+        schedule: '定时调度',
+        system: '系统触发',
+        pending: '待处理',
+        completed: '已完成',
+        partial: '部分完成',
+        canceled: '已取消',
+        failed: '失败',
+        enqueue: '任务提交',
+        reuse_vectors: '复用向量',
+        reparse: '重新解析',
+        viewer: '只读',
+        editor: '可编辑',
+        admin: '管理',
+        append: '追加',
+        replace: '覆盖'
+      },
+      outcomes: {
+        accepted: '已受理',
+        success: '成功',
+        failed: '失败',
+        partial: '部分完成',
+        canceled: '已取消',
+        denied: '已拒绝'
+      },
       actions: {
-        kb: {
-          created: '创建知识库',
-          updated: '更新知识库',
-          deleted: '删除知识库',
-          duplicated: '复制知识库',
-          clone_started: '开始克隆',
-          clone_completed: '完成克隆',
-          clone_failed: '克隆失败',
-          share_added: '添加共享',
-          share_permission_changed: '修改共享权限',
-          share_removed: '移除共享'
-        },
-        knowledge: {
-          created: '添加知识',
-          updated: '更新知识',
-          deleted: '删除知识',
-          batch_deleted: '批量删除知识',
-          reparse_started: '开始重新解析',
-          parse_canceled: '取消解析',
-          move_started: '开始移动知识',
-          move_completed: '完成移动知识',
-          move_failed: '移动知识失败'
-        },
-        tag: {
-          created: '创建标签',
-          updated: '更新标签',
-          deleted: '删除标签'
-        },
-        datasource: {
-          created: '创建数据源',
-          updated: '更新数据源',
-          deleted: '删除数据源',
-          sync_started: '开始同步数据源',
-          sync_completed: '数据源同步完成',
-          sync_failed: '数据源同步失败',
-          paused: '暂停数据源',
-          resumed: '恢复数据源'
-        },
-        wiki: {
-          content_changed: '更新 Wiki 内容'
-        },
-        faq: {
-          import_started: '开始导入 FAQ',
-          import_completed: '完成导入 FAQ',
-          import_failed: '导入 FAQ 失败'
-        }
+        'kb.created': '创建知识库',
+        'kb.updated': '更新知识库',
+        'kb.deleted': '删除知识库',
+        'kb.duplicated': '复制知识库',
+        'kb.clone_started': '开始克隆',
+        'kb.clone_completed': '完成克隆',
+        'kb.clone_failed': '克隆失败',
+        'knowledge.created': '添加知识',
+        'knowledge.updated': '更新知识',
+        'knowledge.deleted': '删除知识',
+        'knowledge.batch_deleted': '批量删除知识',
+        'knowledge.reparse_started': '开始重新解析',
+        'knowledge.parse_canceled': '取消解析',
+        'knowledge.move_started': '开始移动知识',
+        'knowledge.move_completed': '完成移动知识',
+        'knowledge.move_failed': '移动知识失败',
+        'tag.created': '创建标签',
+        'tag.updated': '更新标签',
+        'tag.deleted': '删除标签',
+        'datasource.created': '创建数据源',
+        'datasource.updated': '更新数据源',
+        'datasource.deleted': '删除数据源',
+        'datasource.sync_started': '开始同步数据源',
+        'datasource.sync_completed': '数据源同步完成',
+        'datasource.sync_failed': '数据源同步失败',
+        'datasource.paused': '暂停数据源',
+        'datasource.resumed': '恢复数据源',
+        'kb.share_added': '添加共享',
+        'kb.share_permission_changed': '修改共享权限',
+        'kb.share_removed': '移除共享',
+        'wiki.content_changed': '更新 Wiki 内容',
+        'faq.import_started': '开始导入 FAQ',
+        'faq.import_completed': '完成导入 FAQ',
+        'faq.import_failed': '导入 FAQ 失败'
       },
       detailFields: {
         task_id: '任务 ID',
@@ -4852,6 +4869,15 @@ export default {
     editor: {
       createTitle: '创建智能体',
       editTitle: '编辑智能体',
+      buttons: {
+        create: '创建智能体',
+        saveAndClose: '保存并关闭',
+      },
+      postCreateHint: {
+        title: '创建成功',
+        footer: '可继续调整配置，设置共享与发布渠道，完成后点击「保存并关闭」。',
+        integrationDesc: '前往集成中心配置 IM、网页嵌入等发布渠道',
+      },
       basicInfo: '基本信息',
       basicInfoDesc: '配置智能体的名称、描述与运行模式',
       promptsConfig: '提示词',

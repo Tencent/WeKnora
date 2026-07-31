@@ -113,9 +113,8 @@ func (r *DataSourceRepository) Delete(ctx context.Context, id string) error {
 		return errors.New("id is empty")
 	}
 	if err := r.db.WithContext(ctx).
-		Model(&types.DataSource{}).
 		Where("id = ?", id).
-		Update("deleted_at", gorm.Expr("NOW()")).Error; err != nil {
+		Delete(&types.DataSource{}).Error; err != nil {
 		return err
 	}
 	return nil

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	werrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -90,6 +91,59 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	eff.GraphEnabled = eff.GraphEnabled && eff.ExtractConfig.Enabled
 
 	return eff
+}
+
+// validateDefaultFileImportRequirements enforces the VLM/ASR prerequisites that
+// ValidateProcessOverrides would otherwise cover, for imports that ship no
+// per-import overrides and therefore fall back to the KB defaults.
+func validateDefaultFileImportRequirements(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+	eff types.EffectiveProcessConfig,
+	fileType string,
+) error {
+	fileType = normalizeFileExtension(fileType)
+	if IsImageType(fileType) && !eff.VLMConfig.IsEnabled() {
+		logger.Error(ctx, "VLM model is not configured")
+		return werrors.NewBadRequestError("上传图片文件需要设置VLM模型")
+	}
+	if IsAudioType(fileType) && !kb.ASRConfig.IsASREnabled() {
+		logger.Error(ctx, "ASR model is not configured")
+		return werrors.NewBadRequestError("上传音频文件需要设置ASR语音识别模型")
+	}
+	return nil
+}
+
+// resolveFileImportProcessConfig is the single gate every file import passes
+// through: it rejects unsupported extensions, enforces the VLM/ASR
+// prerequisites for the resolved type, and returns the effective processing
+// config for task enqueue. Persisting overrides onto the knowledge record stays
+// with the caller, which owns the record's lifecycle.
+func resolveFileImportProcessConfig(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+	fileType string,
+	processOverrides *types.KnowledgeProcessOverrides,
+	enableMultimodel *bool,
+) (types.EffectiveProcessConfig, error) {
+	if err := validateImportFileType(fileType); err != nil {
+		return types.EffectiveProcessConfig{}, err
+	}
+
+	eff := ResolveProcessConfig(kb, processOverrides)
+	if enableMultimodel != nil && (processOverrides == nil || processOverrides.EnableMultimodel == nil) {
+		eff.EnableMultimodel = *enableMultimodel
+	}
+
+	if processOverrides != nil {
+		if err := ValidateProcessOverrides(ctx, kb, processOverrides, []string{fileType}); err != nil {
+			return eff, err
+		}
+	} else if err := validateDefaultFileImportRequirements(ctx, kb, eff, fileType); err != nil {
+		return eff, err
+	}
+
+	return eff, nil
 }
 
 // ValidateProcessOverrides validates batch overrides against file types in the upload.
