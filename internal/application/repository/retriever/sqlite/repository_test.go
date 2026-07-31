@@ -115,6 +115,27 @@ func TestVectorRetrieveFiltersBeforeTopK(t *testing.T) {
 	}
 }
 
+func TestVectorRetrieveZeroThresholdDoesNotFilter(t *testing.T) {
+	repository := newSQLiteRetrieverTestRepository(t)
+	saveSQLiteTestVector(t, repository,
+		sqliteTestIndex("anti-correlated", "kb-target", "knowledge-target", "tag-target", true),
+		[]float32{-1, 0},
+	)
+
+	results, err := repository.vectorRetrieve(context.Background(), types.RetrieveParams{
+		Embedding:        []float32{1, 0},
+		KnowledgeBaseIDs: []string{"kb-target"},
+		TopK:             1,
+		Threshold:        0,
+		RetrieverType:    types.VectorRetrieverType,
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Len(t, results[0].Results, 1)
+	assert.Equal(t, "anti-correlated", results[0].Results[0].ChunkID)
+	assert.Less(t, results[0].Results[0].Score, 0.0)
+}
+
 func TestVectorRetrieveAppliesSimilarityThreshold(t *testing.T) {
 	repository := newSQLiteRetrieverTestRepository(t)
 	saveSQLiteTestVector(t, repository,
