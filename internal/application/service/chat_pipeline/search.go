@@ -387,10 +387,13 @@ func (p *PluginSearch) searchByTargets(
 
 			// Separate full-KB targets (can be combined into one retrieval)
 			// from specific-knowledge targets (need per-target direct loading).
+			// A folder-scoped target (FolderIDs non-empty) must NOT be merged
+			// into the full-KB bucket — it carries a subtree filter that would
+			// be lost in the combined retrieval. (issue #1311 §5.2a)
 			var fullKBIDs []string
 			var knowledgeTargets []*types.SearchTarget
 			for _, t := range targets {
-				if t.Type == types.SearchTargetTypeKnowledgeBase && len(t.TagIDs) == 0 {
+				if t.Type == types.SearchTargetTypeKnowledgeBase && len(t.TagIDs) == 0 && len(t.FolderIDs) == 0 {
 					fullKBIDs = append(fullKBIDs, t.KnowledgeBaseID)
 				} else {
 					knowledgeTargets = append(knowledgeTargets, t)
@@ -492,6 +495,7 @@ func (p *PluginSearch) searchSingleTarget(
 		KeywordThreshold:      keywordThreshold,
 		MatchCount:            chatManage.EmbeddingTopK,
 		TagIDs:                t.TagIDs,
+		FolderIDs:             t.FolderIDs,
 		ScopeTagIDs:           t.ScopeTagIDs,
 		SkipContextEnrichment: true,
 	}

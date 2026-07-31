@@ -105,7 +105,7 @@ func TestRAGFullLoop(t *testing.T) {
 
 	// 4. search chunks → SearchResult list (envelope-wrapped: {ok, data})
 	var searchResp struct {
-		OK   bool              `json:"ok"`
+		OK   bool             `json:"ok"`
 		Data []map[string]any `json:"data"`
 	}
 	runJSONInto(t, bin, env, &searchResp, "search", "chunks", "sample", "--kb", created.Data.ID, "--limit", "5", "--format", "json")
@@ -115,7 +115,11 @@ func TestRAGFullLoop(t *testing.T) {
 	}
 	t.Logf("search returned %d results", len(results))
 
-	// 5. chat --format json → bounded answer-event envelope (--reference for citations)
+	// 5. Folder-scoped retrieval must filter the real indexed payload rather
+	// than expanding the folder into document IDs or falling back to the KB.
+	verifyFolderScopedRetrieval(t, bin, env, created.Data.ID)
+
+	// 6. chat --format json → bounded answer-event envelope (--reference for citations)
 	var chatEnv struct {
 		OK   bool `json:"ok"`
 		Data struct {
@@ -150,6 +154,252 @@ func TestRAGFullLoop(t *testing.T) {
 		// question, but the demo flow is supposed to.
 		t.Logf("warning: chat returned 0 reference indexes (server may have a different config)")
 	}
+}
+
+type rawAPIEnvelope[T any] struct {
+	OK   bool `json:"ok"`
+	Data T    `json:"data"`
+}
+
+type serverDataResponse[T any] struct {
+	Success bool `json:"success"`
+	Data    T    `json:"data"`
+}
+
+type folderSearchResult struct {
+	KnowledgeID string `json:"knowledge_id"`
+}
+
+func verifyFolderScopedRetrieval(t *testing.T, bin string, env []string, kbID string) {
+	t.Helper()
+	marker := fmt.Sprintf("folder scope marker %d", time.Now().UnixNano())
+
+	parentID := createFolder(t, bin, env, kbID, "", "Acceptance Scope")
+	childID := createFolder(t, bin, env, kbID, parentID, "Nested")
+	emptyID := createFolder(t, bin, env, kbID, "", "Empty Scope")
+
+	rootDocID := createManualDocument(
+		t,
+		bin,
+		env,
+		kbID,
+		"",
+		"Root scope control",
+		marker+" root control document",
+	)
+	nestedDocID := createManualDocument(
+		t,
+		bin,
+		env,
+		kbID,
+		childID,
+		"Nested scope target",
+		marker+" nested target document",
+	)
+	waitDocReady(t, bin, env, kbID, rootDocID, 90*time.Second)
+	waitDocReady(t, bin, env, kbID, nestedDocID, 90*time.Second)
+
+	waitForKnowledgeResults(t, bin, env, map[string]any{
+		"query":              marker,
+		"knowledge_base_ids": []string{kbID},
+	}, 30*time.Second, func(results []folderSearchResult) bool {
+		return resultContainsKnowledge(results, rootDocID) &&
+			resultContainsKnowledge(results, nestedDocID)
+	})
+
+	folderMention := map[string]any{
+		"id":    parentID,
+		"name":  "Acceptance Scope",
+		"type":  "folder",
+		"kb_id": kbID,
+	}
+	scopedResults := waitForKnowledgeResults(t, bin, env, map[string]any{
+		"query":           marker,
+		"mentioned_items": []any{folderMention},
+	}, 30*time.Second, func(results []folderSearchResult) bool {
+		for _, result := range results {
+			if result.KnowledgeID != nestedDocID {
+				t.Fatalf(
+					"folder scope leaked knowledge %s; want only nested document %s",
+					result.KnowledgeID,
+					nestedDocID,
+				)
+			}
+		}
+		return resultContainsKnowledge(results, nestedDocID)
+	})
+	t.Logf("folder subtree search returned %d scoped chunks", len(scopedResults))
+
+	emptyResults := searchKnowledge(t, bin, env, map[string]any{
+		"query": marker,
+		"mentioned_items": []any{map[string]any{
+			"id":    emptyID,
+			"name":  "Empty Scope",
+			"type":  "folder",
+			"kb_id": kbID,
+		}},
+	})
+	if len(emptyResults) != 0 {
+		t.Fatalf("empty folder search returned %d results; want 0", len(emptyResults))
+	}
+
+	intersectionResults := searchKnowledge(t, bin, env, map[string]any{
+		"query": marker,
+		"mentioned_items": []any{
+			folderMention,
+			map[string]any{
+				"id":    rootDocID,
+				"name":  "Root scope control",
+				"type":  "file",
+				"kb_id": kbID,
+			},
+		},
+	})
+	if len(intersectionResults) != 0 {
+		t.Fatalf(
+			"folder + out-of-folder file intersection returned %d results; want 0",
+			len(intersectionResults),
+		)
+	}
+}
+
+func createFolder(
+	t *testing.T,
+	bin string,
+	env []string,
+	kbID string,
+	parentID string,
+	name string,
+) string {
+	t.Helper()
+	var response rawAPIEnvelope[struct {
+		ID string `json:"id"`
+	}]
+	runRawPOSTInto(
+		t,
+		bin,
+		env,
+		&response,
+		"/api/v1/knowledgebase/"+kbID+"/document-folders",
+		map[string]any{"parent_id": parentID, "name": name},
+	)
+	if !response.OK || response.Data.ID == "" {
+		t.Fatalf("create folder %q returned no id", name)
+	}
+	return response.Data.ID
+}
+
+func createManualDocument(
+	t *testing.T,
+	bin string,
+	env []string,
+	kbID string,
+	folderID string,
+	title string,
+	content string,
+) string {
+	t.Helper()
+	var response rawAPIEnvelope[serverDataResponse[struct {
+		ID string `json:"id"`
+	}]]
+	runRawPOSTInto(
+		t,
+		bin,
+		env,
+		&response,
+		"/api/v1/knowledge-bases/"+kbID+"/knowledge/manual",
+		map[string]any{
+			"title":     title,
+			"content":   content,
+			"status":    "publish",
+			"folder_id": folderID,
+		},
+	)
+	if !response.OK || !response.Data.Success || response.Data.Data.ID == "" {
+		t.Fatalf("create manual document %q returned no id", title)
+	}
+	return response.Data.Data.ID
+}
+
+func waitForKnowledgeResults(
+	t *testing.T,
+	bin string,
+	env []string,
+	request map[string]any,
+	timeout time.Duration,
+	ready func([]folderSearchResult) bool,
+) []folderSearchResult {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		results := searchKnowledge(t, bin, env, request)
+		if ready(results) {
+			return results
+		}
+		time.Sleep(2 * time.Second)
+	}
+	t.Fatalf("knowledge search did not satisfy the expected scope within %s", timeout)
+	return nil
+}
+
+func searchKnowledge(
+	t *testing.T,
+	bin string,
+	env []string,
+	request map[string]any,
+) []folderSearchResult {
+	t.Helper()
+	var response rawAPIEnvelope[serverDataResponse[[]folderSearchResult]]
+	runRawPOSTInto(
+		t,
+		bin,
+		env,
+		&response,
+		"/api/v1/knowledge-search",
+		request,
+	)
+	if !response.OK || !response.Data.Success {
+		t.Fatal("knowledge search returned ok=false")
+	}
+	return response.Data.Data
+}
+
+func resultContainsKnowledge(results []folderSearchResult, knowledgeID string) bool {
+	for _, result := range results {
+		if result.KnowledgeID == knowledgeID {
+			return true
+		}
+	}
+	return false
+}
+
+func runRawPOSTInto(
+	t *testing.T,
+	bin string,
+	env []string,
+	out any,
+	path string,
+	payload any,
+) {
+	t.Helper()
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal POST %s: %v", path, err)
+	}
+	runJSONInto(
+		t,
+		bin,
+		env,
+		out,
+		"api",
+		path,
+		"-X",
+		"POST",
+		"-d",
+		string(body),
+		"--format",
+		"json",
+	)
 }
 
 func mustEnv(t *testing.T, key string) string {

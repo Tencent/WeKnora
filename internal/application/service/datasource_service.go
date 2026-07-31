@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -1175,6 +1176,8 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 
 	// Check if a knowledge item with this external_id already exists → delete it first (update)
 	isUpdate := false
+	// preservedFolderID captures the existing item's folder so it survives the delete + recreate below.
+	preservedFolderID := ""
 	if item.ExternalID != "" {
 		repo := s.knowledgeService.GetRepository()
 		existing, err := repo.FindByMetadataKey(ctx, ds.TenantID, ds.KnowledgeBaseID, "external_id", item.ExternalID)
@@ -1183,6 +1186,7 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			// Non-fatal: proceed with creation (may produce duplicate)
 		} else if existing != nil {
 			logger.Infof(ctx, "found existing knowledge %s for external_id=%s, deleting for update", existing.ID, item.ExternalID)
+			preservedFolderID = existing.FolderID
 			if err := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); err != nil {
 				logger.Warnf(ctx, "failed to delete existing knowledge %s: %v", existing.ID, err)
 			} else {
@@ -1197,17 +1201,21 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 		if err != nil {
 			return isUpdate, fmt.Errorf("build file header: %w", err)
 		}
-		if _, err := s.knowledgeService.CreateKnowledgeFromFile(
-			ctx,
-			ds.KnowledgeBaseID,
-			fh,
-			metadata,
-			nil,           // use KB default for multimodal
-			item.FileName, // customFileName — must include extension for file-type validation
-			tagIDs,        // auto-tag from data source
-			channel,
-			nil,
-		); err != nil {
+		_, err = createWithFolderFallback(ctx, preservedFolderID, func(folderID string) (*types.Knowledge, error) {
+			return s.knowledgeService.CreateKnowledgeFromFile(
+				ctx,
+				ds.KnowledgeBaseID,
+				fh,
+				metadata,
+				nil,           // use KB default for multimodal
+				item.FileName, // customFileName — must include extension for file-type validation
+				tagIDs,        // auto-tag from data source
+				channel,
+				nil,
+				folderID,
+			)
+		})
+		if err != nil {
 			var dupErr *types.DuplicateKnowledgeError
 			if errors.As(err, &dupErr) && dupIsSameNode(dupErr, item) {
 				// Identical content is already present in the KB under THIS node's
@@ -1223,18 +1231,22 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 
 	// Case 2: only a remote URL — let WeKnora handle downloading and parsing
 	if item.URL != "" {
-		if _, err := s.knowledgeService.CreateKnowledgeFromURL(
-			ctx,
-			ds.KnowledgeBaseID,
-			item.URL,
-			item.FileName,
-			"",  // auto-detect file type
-			nil, // use KB default for multimodal
-			item.Title,
-			tagIDs, // auto-tag from data source
-			channel,
-			nil,
-		); err != nil {
+		_, err := createWithFolderFallback(ctx, preservedFolderID, func(folderID string) (*types.Knowledge, error) {
+			return s.knowledgeService.CreateKnowledgeFromURL(
+				ctx,
+				ds.KnowledgeBaseID,
+				item.URL,
+				item.FileName,
+				"",  // auto-detect file type
+				nil, // use KB default for multimodal
+				item.Title,
+				tagIDs, // auto-tag from data source
+				channel,
+				nil,
+				folderID,
+			)
+		})
+		if err != nil {
 			var dupErr *types.DuplicateKnowledgeError
 			if errors.As(err, &dupErr) && dupIsSameNode(dupErr, item) {
 				// Identical content is already present in the KB under THIS node's
@@ -1315,6 +1327,23 @@ func (s *DataSourceService) sweepStaleSubtree(ctx context.Context, ds *types.Dat
 		logger.Warnf(ctx, "failed to delete %d stale sub-item(s) of external_id=%s: %v",
 			len(ids), item.ExternalID, derr)
 	}
+}
+
+// createWithFolderFallback preserves an existing datasource item's folder
+// during delete + recreate. If that folder is deleted concurrently, retrying
+// once at the virtual root lets the folder deletion win without losing the
+// refreshed document.
+func createWithFolderFallback(
+	ctx context.Context,
+	folderID string,
+	create func(string) (*types.Knowledge, error),
+) (*types.Knowledge, error) {
+	knowledge, err := create(folderID)
+	if folderID == types.DocumentFolderRootID || !errors.Is(err, apprepo.ErrDocumentFolderNotFound) {
+		return knowledge, err
+	}
+	logger.Warnf(ctx, "datasource target folder %s was deleted during refresh; retrying at root", folderID)
+	return create(types.DocumentFolderRootID)
 }
 
 // bytesToFileHeader wraps a []byte into a *multipart.FileHeader so it can be

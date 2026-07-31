@@ -126,6 +126,24 @@ func (c *CompositeRetrieveEngine) BatchUpdateChunkTagID(
 	})
 }
 
+// BatchUpdateChunkFolderID updates chunk folder payloads across every engine
+// selected for this knowledge base.
+func (c *CompositeRetrieveEngine) BatchUpdateChunkFolderID(
+	ctx context.Context,
+	chunkFolderMap map[string]string,
+) error {
+	return c.concurrentExecWithError(ctx, func(ctx context.Context, engineInfo *engineInfo) error {
+		updater, ok := engineInfo.retrieveEngine.(interfaces.ChunkFolderMetadataUpdater)
+		if !ok {
+			return fmt.Errorf(
+				"retrieve engine %s does not support chunk folder metadata updates",
+				engineInfo.retrieveEngine.EngineType(),
+			)
+		}
+		return updater.BatchUpdateChunkFolderID(ctx, chunkFolderMap)
+	})
+}
+
 // concurrentRetrieve is a helper function for concurrent processing of retrieval parameters
 // and collecting results
 func concurrentRetrieve(

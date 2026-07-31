@@ -24,7 +24,7 @@ import (
 // CreateKnowledgeFromFile creates a knowledge entry from an uploaded file
 func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagIDs []string, channel string,
-	processOverrides *types.KnowledgeProcessOverrides,
+	processOverrides *types.KnowledgeProcessOverrides, folderID string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file")
 
@@ -148,6 +148,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 		EmbeddingModelID: kb.EmbeddingModelID,
+		FolderID:         folderID,
 		Metadata:         metadataJSON,
 	}
 
@@ -275,7 +276,7 @@ func isFileURL(rawURL, fileName, fileType string) bool {
 
 func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool, title string, tagIDs []string, channel string,
-	processOverrides *types.KnowledgeProcessOverrides,
+	processOverrides *types.KnowledgeProcessOverrides, folderID string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from URL")
 	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, rawURL)
@@ -283,7 +284,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	// Route to file_url logic when the URL points to a downloadable file
 	if isFileURL(rawURL, fileName, fileType) {
 		return s.createKnowledgeFromFileURL(
-			ctx, kbID, rawURL, fileName, fileType, enableMultimodel, title, tagIDs, channel, processOverrides,
+			ctx, kbID, rawURL, fileName, fileType, enableMultimodel, title, tagIDs, channel, processOverrides, folderID,
 		)
 	}
 
@@ -363,6 +364,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 		EmbeddingModelID: kb.EmbeddingModelID,
+		FolderID:         folderID,
 	}
 
 	// Save knowledge record
@@ -489,6 +491,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 	tagIDs []string,
 	channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
+	folderID string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file URL")
 	logger.Infof(ctx, "Knowledge base ID: %s, file URL: %s", kbID, fileURL)
@@ -599,6 +602,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 		EmbeddingModelID: kb.EmbeddingModelID,
+		FolderID:         folderID,
 	}
 	if knowledge.Title == "" {
 		knowledge.Title = displayName
@@ -705,7 +709,7 @@ func (s *knowledgeService) CreateKnowledgeFromPassageSync(ctx context.Context,
 
 // CreateKnowledgeFromManual creates or saves manual Markdown knowledge content.
 func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
-	kbID string, payload *types.ManualKnowledgePayload, channel string,
+	kbID string, payload *types.ManualKnowledgePayload, channel string, folderID string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating manual knowledge entry")
 
@@ -769,6 +773,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		EmbeddingModelID: kb.EmbeddingModelID,
 		FileName:         fileName,
 		FileType:         types.KnowledgeTypeManual,
+		FolderID:         folderID,
 	}
 	if err := knowledge.SetManualMetadata(meta); err != nil {
 		logger.Errorf(ctx, "Failed to set manual metadata: %v", err)
@@ -1039,7 +1044,7 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 		existing.Description = ""
 		existing.ProcessedAt = nil
 
-		if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
+		if err := s.repo.UpdateKnowledgePreservingFolder(ctx, existing); err != nil {
 			logger.Errorf(ctx, "Failed to persist manual draft: %v", err)
 			return nil, err
 		}
@@ -1059,7 +1064,7 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 		return nil, err
 	}
 
-	if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
+	if err := s.repo.UpdateKnowledgePreservingFolder(ctx, existing); err != nil {
 		logger.Errorf(ctx, "Failed to persist manual knowledge before indexing: %v", err)
 		return nil, err
 	}
@@ -1071,7 +1076,7 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 		// Non-fatal: mark as failed so user can retry
 		existing.ParseStatus = "failed"
 		existing.ErrorMessage = "Failed to enqueue processing task"
-		s.repo.UpdateKnowledge(ctx, existing)
+		s.repo.UpdateKnowledgePreservingFolder(ctx, existing)
 		recordKBActivity(ctx, s.audit, tenantID, existing.KnowledgeBaseID, types.AuditActionKnowledgeUpdated,
 			"knowledge", existing.ID, types.AuditOutcomeFailed, map[string]any{
 				"title": existing.Title, "status": status,
@@ -1125,7 +1130,7 @@ func (s *knowledgeService) markKnowledgeEnqueueFailed(ctx context.Context, knowl
 	}
 	knowledge.ParseStatus = "failed"
 	knowledge.ErrorMessage = "Failed to enqueue processing task"
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	if err := s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "Failed to mark knowledge as failed after enqueue error: %v", err)
 	}
 }

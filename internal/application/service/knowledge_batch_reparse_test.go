@@ -33,6 +33,13 @@ func (r *reparseFailureKnowledgeRepo) UpdateKnowledge(
 	return nil
 }
 
+func (r *reparseFailureKnowledgeRepo) UpdateKnowledgePreservingFolder(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+) error {
+	return r.UpdateKnowledge(ctx, knowledge)
+}
+
 func (r *reparseFailureKnowledgeRepo) UpdateKnowledgeColumn(
 	_ context.Context,
 	_ string,

@@ -36,6 +36,7 @@ type AsynqTaskParams struct {
 	WikiServer           *asynq.Server `name:"wikiAsynqServer"`
 	KnowledgeService     interfaces.KnowledgeService
 	KnowledgeBaseService interfaces.KnowledgeBaseService
+	DocumentFolder       interfaces.DocumentFolderService
 	TagService           interfaces.KnowledgeTagService
 	DataSourceService    interfaces.DataSourceService
 	ChunkExtractor       interfaces.TaskHandler `name:"chunkExtractor"`
@@ -288,6 +289,9 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 
 	// Register knowledge list reparse handler
 	mux.HandleFunc(types.TypeKnowledgeListReparse, params.KnowledgeService.ProcessKnowledgeListReparse)
+
+	// Register document folder tree delete handler
+	mux.HandleFunc(types.TypeDocumentFolderDelete, params.DocumentFolder.ProcessDeleteFolderTree)
 
 	// Register index delete handler
 	mux.HandleFunc(types.TypeIndexDelete, params.TagService.ProcessIndexDelete)

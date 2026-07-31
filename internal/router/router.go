@@ -84,6 +84,7 @@ type RouterParams struct {
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	WikiPageHandler              *handler.WikiPageHandler
+	DocumentFolderHandler        *handler.DocumentFolderHandler
 }
 
 // NewRouter 创建新的路由
@@ -266,6 +267,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
+		RegisterDocumentFolderRoutes(v1, params.DocumentFolderHandler, params.KnowledgeHandler, rbacGuards)
 		RegisterChunkerDebugRoutes(v1, rbacGuards)
 
 		// Fail fast if any declared API-key policy points at a route
@@ -302,4 +304,50 @@ func trustedProxies() []string {
 		}
 	}
 	return proxies
+}
+
+// RegisterDocumentFolderRoutes wires folder search and KB-scoped folder CRUD.
+func RegisterDocumentFolderRoutes(
+	r *gin.RouterGroup,
+	folderHandler *handler.DocumentFolderHandler,
+	knowledgeHandler *handler.KnowledgeHandler,
+	g *rbacGuards,
+) {
+	if knowledgeHandler != nil {
+		knowledgeRead := g.apiKeyGroup(r.Group("/knowledge"), apiKeyRetrieve(apiKeyFullAccess()))
+		knowledgeRead.GET("/folders/search", g.Viewer(), knowledgeHandler.SearchDocumentFolders)
+	}
+	if folderHandler == nil {
+		return
+	}
+	folders := g.apiKeyGroup(
+		r.Group("/knowledgebase/:kb_id/document-folders"),
+		apiKeyIngest(apiKeyFullAccess()),
+	)
+	foldersRead := folders.With(apiKeyRetrieve(apiKeyFullAccess()))
+	foldersRead.GET("", g.Viewer(), g.KBAccessRead("kb_id"), folderHandler.ListFolders)
+	foldersRead.GET(
+		"/:folder_id/delete-impact",
+		g.Viewer(),
+		g.KBAccessRead("kb_id"),
+		folderHandler.GetDeleteImpact,
+	)
+	folders.POST(
+		"",
+		g.OwnedKBOrAdminFromKbIDParam(),
+		g.KBAccessWrite("kb_id"),
+		folderHandler.CreateFolder,
+	)
+	folders.PUT(
+		"/:folder_id",
+		g.OwnedKBOrAdminFromKbIDParam(),
+		g.KBAccessWrite("kb_id"),
+		folderHandler.UpdateFolder,
+	)
+	folders.DELETE(
+		"/:folder_id",
+		g.OwnedKBOrAdminFromKbIDParam(),
+		g.KBAccessWrite("kb_id"),
+		folderHandler.DeleteFolder,
+	)
 }

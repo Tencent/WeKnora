@@ -120,7 +120,10 @@ func createPostgresEngine(store types.VectorStore, db *gorm.DB) (interfaces.Retr
 }
 
 func createSQLiteEngine(_ types.VectorStore, db *gorm.DB) (interfaces.RetrieveEngineService, error) {
-	repo := sqliteRetrieverRepo.NewSQLiteRetrieveEngineRepository(db)
+	repo, err := sqliteRetrieverRepo.NewSQLiteRetrieveEngineRepository(db)
+	if err != nil {
+		return nil, fmt.Errorf("initialize sqlite retriever repository: %w", err)
+	}
 	return retriever.NewKVHybridRetrieveEngine(repo, types.SQLiteRetrieverEngineType), nil
 }
 
@@ -150,7 +153,10 @@ func createElasticsearchV8Engine(store types.VectorStore, cfg *config.Config) (i
 	if err != nil {
 		return nil, fmt.Errorf("create elasticsearch v8 client: %w", err)
 	}
-	repo := elasticsearchRepoV8.NewElasticsearchEngineRepository(client, cfg, &store.IndexConfig)
+	repo, err := elasticsearchRepoV8.NewElasticsearchEngineRepository(client, cfg, &store.IndexConfig)
+	if err != nil {
+		return nil, fmt.Errorf("initialize elasticsearch v8 repository: %w", err)
+	}
 	return retriever.NewKVHybridRetrieveEngine(repo, types.ElasticsearchRetrieverEngineType), nil
 }
 
@@ -164,7 +170,10 @@ func createElasticsearchV7Engine(store types.VectorStore, cfg *config.Config) (i
 	if err != nil {
 		return nil, fmt.Errorf("create elasticsearch v7 client: %w", err)
 	}
-	repo := elasticsearchRepoV7.NewElasticsearchEngineRepository(client, cfg, &store.IndexConfig)
+	repo, err := elasticsearchRepoV7.NewElasticsearchEngineRepository(client, cfg, &store.IndexConfig)
+	if err != nil {
+		return nil, fmt.Errorf("initialize elasticsearch v7 repository: %w", err)
+	}
 	return retriever.NewKVHybridRetrieveEngine(repo, types.ElasticsearchRetrieverEngineType), nil
 }
 

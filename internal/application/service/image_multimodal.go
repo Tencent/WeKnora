@@ -430,6 +430,11 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to get KB for indexing: %v", err)
 		return
 	}
+	knowledge, err := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, payload.KnowledgeID)
+	if err != nil || knowledge == nil {
+		logger.Warnf(ctx, "[ImageMultimodal] Failed to resolve knowledge folder placement for indexing: %v", err)
+		return
+	}
 
 	// Skip vector/keyword indexing when the KB has no embedding-based pipeline enabled
 	// (e.g. Wiki-only KBs). Without this check, GetEmbeddingModel would fail because
@@ -478,14 +483,7 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 
 	indexInfoList := make([]*types.IndexInfo, 0, len(chunks))
 	for _, chunk := range chunks {
-		indexInfoList = append(indexInfoList, &types.IndexInfo{
-			Content:         chunk.Content,
-			SourceID:        chunk.ID,
-			SourceType:      types.ChunkSourceType,
-			ChunkID:         chunk.ID,
-			KnowledgeID:     chunk.KnowledgeID,
-			KnowledgeBaseID: chunk.KnowledgeBaseID,
-		})
+		indexInfoList = append(indexInfoList, newDocumentIndexInfo(chunk, knowledge.FolderID))
 	}
 
 	if err := engine.BatchIndex(ctx, embeddingModel, indexInfoList); err != nil {

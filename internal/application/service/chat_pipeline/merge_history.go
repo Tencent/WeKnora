@@ -49,10 +49,19 @@ func filterHistoryResults(
 		query = chatManage.Query
 	}
 	queryTokens := searchutil.TokenizeSimple(query)
+	hasFolderScope := chatManage.SearchTargets.HasFolderScope()
 
 	var filtered []*types.SearchResult
 	for _, r := range raw {
 		if _, exists := existingIDs[r.ID]; exists {
+			continue
+		}
+		if hasFolderScope && !historyResultMatchesSearchTargets(r, chatManage.SearchTargets) {
+			pipelineInfo(ctx, "Merge", "history_filter_scope_drop", map[string]interface{}{
+				"chunk_id":          r.ID,
+				"knowledge_base_id": r.KnowledgeBaseID,
+				"folder_id":         r.FolderID,
+			})
 			continue
 		}
 		contentTokens := searchutil.TokenizeSimple(r.Content)
@@ -82,4 +91,38 @@ func filterHistoryResults(
 		}
 	}
 	return filtered
+}
+
+func historyResultMatchesSearchTargets(result *types.SearchResult, targets types.SearchTargets) bool {
+	if result == nil || result.KnowledgeBaseID == "" {
+		return false
+	}
+	for _, target := range targets {
+		if target == nil || target.KnowledgeBaseID != result.KnowledgeBaseID {
+			continue
+		}
+		if len(target.FolderIDs) > 0 && !containsScopeString(target.FolderIDs, result.FolderID) {
+			continue
+		}
+		if target.Type == types.SearchTargetTypeKnowledge {
+			if len(target.KnowledgeIDs) == 0 ||
+				!containsScopeString(target.KnowledgeIDs, result.KnowledgeID) {
+				continue
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func containsScopeString(values []string, target string) bool {
+	if target == "" {
+		return false
+	}
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }

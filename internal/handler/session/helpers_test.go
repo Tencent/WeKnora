@@ -23,6 +23,51 @@ func TestTagScopesFromMentionedItems(t *testing.T) {
 	assert.Equal(t, []string{"tag-3"}, byKB["kb-2"])
 }
 
+func TestFileKnowledgeBaseHints(t *testing.T) {
+	hints := fileKnowledgeBaseHints([]MentionedItemRequest{
+		{Type: "file", ID: "doc-1", KBID: "kb-1"},
+		{Type: "file", ID: "doc-2", KBID: "kb-2"},
+		{Type: "file", ID: "orphan"},
+		{Type: "folder", ID: "folder-1", KBID: "kb-1"},
+	})
+
+	assert.Equal(t, map[string]string{
+		"doc-1": "kb-1",
+		"doc-2": "kb-2",
+	}, hints)
+}
+
+func TestFolderScopesFromMentionedItemsRejectsMissingIdentifiers(t *testing.T) {
+	tests := []struct {
+		name string
+		item MentionedItemRequest
+	}{
+		{name: "empty id", item: MentionedItemRequest{Type: "folder", KBID: "kb-1"}},
+		{name: "blank id", item: MentionedItemRequest{Type: "folder", ID: " \t ", KBID: "kb-1"}},
+		{name: "empty kb id", item: MentionedItemRequest{Type: "folder", ID: "folder-1"}},
+		{name: "blank kb id", item: MentionedItemRequest{Type: "folder", ID: "folder-1", KBID: " \n "}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scopes, err := folderScopesFromMentionedItems([]MentionedItemRequest{tt.item})
+			assert.Error(t, err)
+			assert.Nil(t, scopes)
+		})
+	}
+}
+
+func TestFolderScopesFromMentionedItemsTrimsAndDeduplicates(t *testing.T) {
+	scopes, err := folderScopesFromMentionedItems([]MentionedItemRequest{
+		{Type: "folder", ID: " folder-1 ", KBID: " kb-1 "},
+		{Type: "folder", ID: "folder-1", KBID: "kb-1"},
+		{Type: "file", ID: "file-1", KBID: "kb-1"},
+	})
+
+	assert.NoError(t, err)
+	assert.Equal(t, []types.FolderScope{{KnowledgeBaseID: "kb-1", FolderID: "folder-1"}}, scopes)
+}
+
 func TestMergeTagScopesFromRequestIDs_SingleKB(t *testing.T) {
 	scopes := mergeTagScopesFromRequestIDs(
 		[]types.TagScope{{KnowledgeBaseID: "kb-1", TagIDs: []string{"tag-1"}}},

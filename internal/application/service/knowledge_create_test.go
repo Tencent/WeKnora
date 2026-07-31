@@ -148,6 +148,7 @@ func TestCreateKnowledgeFromFileDoesNotPersistWhenStorageSaveFails(t *testing.T)
 		nil,
 		"",
 		nil,
+		"", // folderID
 	)
 
 	require.Error(t, err)
@@ -179,6 +180,7 @@ func TestCreateKnowledgeFromFilePersistsStoredFilePathOnCreate(t *testing.T) {
 		nil,
 		"",
 		nil,
+		"", // folderID
 	)
 
 	require.NoError(t, err)
@@ -226,6 +228,7 @@ func TestCreateKnowledgeFromImageFallsBackWhenLegacyStorageConfigIsIncomplete(t 
 		nil,
 		"",
 		nil,
+		"", // folderID
 	)
 
 	require.NoError(t, err)
@@ -256,6 +259,7 @@ func TestCreateKnowledgeFromFileDeletesStoredFileWhenCreateFails(t *testing.T) {
 		nil,
 		"",
 		nil,
+		"", // folderID
 	)
 
 	require.EqualError(t, err, "database unavailable")
@@ -294,6 +298,7 @@ func TestCreateKnowledgeFromFile_PersistsProcessOverrides(t *testing.T) {
 		nil,
 		"",
 		overrides,
+		"", // folderID
 	)
 
 	require.NoError(t, err)

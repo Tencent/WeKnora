@@ -55,6 +55,10 @@ func (s *knowledgeService) cloneKnowledge(
 		FilePath:         src.FilePath,
 		StorageSize:      src.StorageSize,
 		Metadata:         src.Metadata,
+		// FolderID is intentionally NOT copied: folder IDs are KB-scoped and
+		// a folder in the source KB does not exist in the target KB. The
+		// clone lands at the target KB's root. (issue #1311)
+		FolderID: "",
 	}
 
 	// Deep-copy the source document file into an object owned by the destination
@@ -118,7 +122,7 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 	// Update status to processing
 	knowledge.ParseStatus = "processing"
 	knowledge.UpdatedAt = time.Now()
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	if err := s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge); err != nil {
 		return
 	}
 
@@ -497,7 +501,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		knowledge.ParseStatus = types.ParseStatusFailed
 		knowledge.ErrorMessage = err.Error()
 		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 		s.failStage(ctx, knowledge.ID, types.StageChunking,
 			werrors.ErrCodeChunkingFailed, "create chunks failed", err)
 		return
@@ -541,6 +545,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				ChunkID:         chunk.ID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
+				FolderID:        knowledge.FolderID,
 				IsEnabled:       true,
 			})
 		}
@@ -554,7 +559,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				knowledge.ParseStatus = types.ParseStatusFailed
 				knowledge.ErrorMessage = err.Error()
 				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 				return
 			}
 			// Check if there's enough storage quota available
@@ -562,7 +567,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				knowledge.ParseStatus = types.ParseStatusFailed
 				knowledge.ErrorMessage = "存储空间不足"
 				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 				return
 			}
 		}
@@ -585,7 +590,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			knowledge.ParseStatus = types.ParseStatusFailed
 			knowledge.ErrorMessage = err.Error()
 			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 
 			// delete failed chunks
 			if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
@@ -650,7 +655,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		now,
 	)
 
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	if err := s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update knowledge failed")
 	}
 
@@ -1054,7 +1059,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	// Update summary status to processing
 	knowledge.SummaryStatus = types.SummaryStatusProcessing
 	knowledge.UpdatedAt = time.Now()
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	if err := s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge); err != nil {
 		logger.Warnf(ctx, "Failed to update summary status to processing: %v", err)
 	}
 
@@ -1062,7 +1067,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	markSummaryFailed := func() {
 		knowledge.SummaryStatus = types.SummaryStatusFailed
 		knowledge.UpdatedAt = time.Now()
-		if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+		if err := s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge); err != nil {
 			logger.Warnf(ctx, "Failed to update summary status to failed: %v", err)
 		}
 	}
@@ -1090,7 +1095,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// Mark as completed since there's nothing to summarize
 		knowledge.SummaryStatus = types.SummaryStatusCompleted
 		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 		summaryOut["skipped"] = "no_text_chunks"
 		return nil
 	}
@@ -1129,7 +1134,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			knowledge.Description = ""
 			knowledge.SummaryStatus = types.SummaryStatusFailed
 			knowledge.UpdatedAt = time.Now()
-			if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
+			if updateErr := s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge); updateErr != nil {
 				logger.Errorf(ctx, "Failed to mark summary as failed: %v", updateErr)
 				summaryErr = updateErr
 				return fmt.Errorf("failed to update knowledge: %w", updateErr)
@@ -1177,7 +1182,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	// without hopping to the knowledge-detail page. Capped to keep
 	// span rows compact.
 	summaryOut["summary_preview"] = previewText(summary, 240)
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	if err := s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge description: %v", err)
 		summaryErr = err
 		return fmt.Errorf("failed to update knowledge: %w", err)
@@ -1253,6 +1258,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			ChunkID:         summaryChunk.ID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
+			FolderID:        knowledge.FolderID,
 			IsEnabled:       true,
 		}}
 
@@ -1639,6 +1645,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 				ChunkID:         chunk.ID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
+				FolderID:        knowledge.FolderID,
 				IsEnabled:       true,
 			})
 		}
@@ -1968,6 +1975,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 				ChunkID:         chunk.ID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
+				FolderID:        knowledge.FolderID,
 				IsEnabled:       true,
 			})
 		}
@@ -2331,7 +2339,7 @@ func (s *knowledgeService) ReparseKnowledge(
 
 		resetKnowledgeForReparse(existing, kb)
 
-		if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
+		if err := s.repo.UpdateKnowledgePreservingFolder(ctx, existing); err != nil {
 			logger.Errorf(ctx, "Failed to update knowledge status before reparse: %v", err)
 			return nil, err
 		}
@@ -2362,7 +2370,7 @@ func (s *knowledgeService) ReparseKnowledge(
 	// Step 2: Update knowledge status and metadata
 	resetKnowledgeForReparse(existing, kb)
 
-	if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
+	if err := s.repo.UpdateKnowledgePreservingFolder(ctx, existing); err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge status before reparse: %v", err)
 		return nil, err
 	}
@@ -2711,6 +2719,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 			ChunkID:         chunk.ID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
+			FolderID:        knowledge.FolderID,
 			KnowledgeType:   sourceKB.Type,
 			IsEnabled:       chunk.IsEnabled,
 		})
@@ -2725,7 +2734,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 						Content: buildKnowledgeIndexContent(knowledge, q.Question), SourceID: types.GeneratedQuestionSourceID(chunk.ID, q.ID),
 						SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
 						KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
-						KnowledgeType: sourceKB.Type, IsEnabled: true,
+						FolderID: knowledge.FolderID, KnowledgeType: sourceKB.Type, IsEnabled: true,
 					})
 				}
 			}
@@ -2906,7 +2915,7 @@ func (s *knowledgeService) UpdateImageInfo(
 	}
 	fileHash := calculateStr(knowledgeID, knowledge.FileHash, imageInfo)
 	knowledge.FileHash = fileHash
-	err = s.repo.UpdateKnowledge(ctx, knowledge)
+	err = s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to update knowledge file hash: %v", err)
 	}
@@ -2965,7 +2974,7 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = fmt.Sprintf("failed to get knowledge base: %v", err)
 		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 		return nil
 	}
 
@@ -2978,7 +2987,7 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	// Update status to processing
 	knowledge.ParseStatus = "processing"
 	knowledge.UpdatedAt = time.Now()
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	if err := s.repo.StartKnowledgeProcessing(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "ProcessManualUpdate: failed to update status to processing: %v", err)
 		return nil
 	}
@@ -3004,7 +3013,7 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 			knowledge.ParseStatus = "failed"
 			knowledge.ErrorMessage = fmt.Sprintf("failed to cleanup old resources: %v", err)
 			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 			return nil
 		}
 	}
@@ -3097,7 +3106,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = fmt.Sprintf("failed to get knowledge base: %v", err)
 		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 		return nil
 	}
 
@@ -3114,7 +3123,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	}
 	knowledge.ParseStatus = "processing"
 	knowledge.UpdatedAt = time.Now()
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	if err := s.repo.StartKnowledgeProcessing(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "failed to update knowledge status to processing: %v", err)
 		return nil
 	}
@@ -3140,7 +3149,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = ErrImageNotParse.Error()
 		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 		return nil
 	}
 
@@ -3151,7 +3160,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = "上传音频文件需要设置ASR语音识别模型"
 		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 		return nil
 	}
 
@@ -3162,7 +3171,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = "暂不支持视频文件"
 		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 		return nil
 	}
 
@@ -3177,7 +3186,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			knowledge.ParseStatus = "failed"
 			knowledge.ErrorMessage = "File URL is not allowed for security reasons"
 			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 			return nil
 		}
 
@@ -3190,7 +3199,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 				knowledge.ParseStatus = "failed"
 				knowledge.ErrorMessage = err.Error()
 				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 			}
 			return fmt.Errorf("failed to download file from URL: %w", err)
 		}
@@ -3200,7 +3209,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			knowledge.ParseStatus = "failed"
 			knowledge.ErrorMessage = fmt.Sprintf("unsupported file type: %s", resolvedFileType)
 			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 			return nil
 		}
 
@@ -3209,7 +3218,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 		if resolvedFileType != "" && knowledge.FileType == "" {
 			knowledge.FileType = resolvedFileType
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 		}
 
 		fileSvc := s.resolveFileService(ctx, kb)
@@ -3219,7 +3228,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 				knowledge.ParseStatus = "failed"
 				knowledge.ErrorMessage = err.Error()
 				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 			}
 			return fmt.Errorf("failed to save downloaded file: %w", err)
 		}
@@ -3248,7 +3257,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			if extractedTitle := convertResult.Metadata["title"]; extractedTitle != "" {
 				knowledge.Title = extractedTitle
 				knowledge.UpdatedAt = time.Now()
-				if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+				if err := s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge); err != nil {
 					logger.Warnf(ctx, "Failed to update knowledge title from extracted page title: %v", err)
 				} else {
 					logger.Infof(ctx, "Updated knowledge title to extracted page title: %s", extractedTitle)
@@ -3296,7 +3305,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			knowledge.ParseStatus = "failed"
 			knowledge.ErrorMessage = "ASR model is not configured for audio transcription"
 			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 			return nil
 		}
 
@@ -3309,7 +3318,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			knowledge.ParseStatus = "failed"
 			knowledge.ErrorMessage = fmt.Sprintf("failed to get ASR model: %v", err)
 			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 			return nil
 		}
 
@@ -3320,7 +3329,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 				knowledge.ParseStatus = "failed"
 				knowledge.ErrorMessage = fmt.Sprintf("audio transcription failed: %v", err)
 				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 			}
 			return fmt.Errorf("audio transcription failed: %w", err)
 		}
@@ -3467,7 +3476,7 @@ func (s *knowledgeService) convert(
 			knowledge.ParseStatus = "failed"
 			knowledge.ErrorMessage = "URL is not allowed for security reasons"
 			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 			s.failStage(ctx, knowledge.ID, types.StageDocReader,
 				werrors.ErrCodeDocReaderParseFailed, "URL rejected for security reasons", err)
 			return nil, nil
@@ -3489,7 +3498,7 @@ func (s *knowledgeService) convert(
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = "Document parsing service is not configured. Please use text/paragraph import or set DOCREADER_ADDR."
 		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 		s.failStage(ctx, knowledge.ID, types.StageDocReader,
 			werrors.ErrCodeDocReaderUnavailable, knowledge.ErrorMessage, nil)
 		return nil, nil
@@ -3541,7 +3550,7 @@ func (s *knowledgeService) convert(
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = result.Error
 		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 		s.failStage(ctx, knowledge.ID, types.StageDocReader,
 			werrors.ErrCodeDocReaderParseFailed, result.Error, nil)
 		return nil, nil
@@ -3662,7 +3671,7 @@ func (s *knowledgeService) failKnowledge(
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = errMsg
 		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.repo.UpdateKnowledgePreservingFolder(ctx, knowledge)
 	}
 	return nil, fmt.Errorf(format, args...)
 }

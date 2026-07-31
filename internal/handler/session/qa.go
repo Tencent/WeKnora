@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -24,33 +25,35 @@ import (
 
 // qaRequestContext holds all the common data needed for QA requests
 type qaRequestContext struct {
-	ctx                   context.Context
-	c                     *gin.Context
-	sessionID             string
-	requestID             string
-	receivedAt            time.Time // Wall-clock time the handler started processing the request
-	query                 string
-	session               *types.Session
-	customAgent           *types.CustomAgent
-	assistantMessage      *types.Message
-	knowledgeBaseIDs      []string
-	knowledgeIDs          []string
-	tagScopes             []types.TagScope
-	tagIDs                []string
-	mcpServiceIDs         []string
-	skillNames            []string
-	summaryModelID        string
-	webSearchEnabled      bool
-	mentionedItems        types.MentionedItems
-	effectiveTenantID     uint64                   // when using shared agent, tenant ID for model/KB/MCP resolution; 0 = use context tenant
-	sharedAgentReadOnly   bool                     // access was granted by a read-only agent share
-	images                []ImageAttachment        // Uploaded images with analysis text
-	userMessageID         string                   // Created user message ID (populated after createUserMessage)
-	channel               string                   // Source channel: "web", "api", "im", etc.
-	attachments           types.MessageAttachments // Processed base64 file attachments (legacy inline uploads)
-	attachmentIDs         []string                 // Pre-uploaded session-scoped document IDs, resolved after SSE starts
-	attachmentMetas       types.MessageAttachments // Metadata-only view of attachmentIDs for the persisted user message
-	suggestionAttribution *types.SuggestionAttribution
+	ctx                          context.Context
+	c                            *gin.Context
+	sessionID                    string
+	requestID                    string
+	receivedAt                   time.Time // Wall-clock time the handler started processing the request
+	query                        string
+	session                      *types.Session
+	customAgent                  *types.CustomAgent
+	assistantMessage             *types.Message
+	knowledgeBaseIDs             []string
+	knowledgeIDs                 []string
+	knowledgeBaseIDByKnowledgeID map[string]string
+	tagScopes                    []types.TagScope
+	folderScopes                 []types.FolderScope
+	tagIDs                       []string
+	mcpServiceIDs                []string
+	skillNames                   []string
+	summaryModelID               string
+	webSearchEnabled             bool
+	mentionedItems               types.MentionedItems
+	effectiveTenantID            uint64                   // when using shared agent, tenant ID for model/KB/MCP resolution; 0 = use context tenant
+	sharedAgentReadOnly          bool                     // access was granted by a read-only agent share
+	images                       []ImageAttachment        // Uploaded images with analysis text
+	userMessageID                string                   // Created user message ID (populated after createUserMessage)
+	channel                      string                   // Source channel: "web", "api", "im", etc.
+	attachments                  types.MessageAttachments // Processed base64 file attachments (legacy inline uploads)
+	attachmentIDs                []string                 // Pre-uploaded session-scoped document IDs, resolved after SSE starts
+	attachmentMetas              types.MessageAttachments // Metadata-only view of attachmentIDs for the persisted user message
+	suggestionAttribution        *types.SuggestionAttribution
 
 	// Snapshot of the request fields needed to persist the input-bar state
 	// for session restoration. Kept verbatim from the request so we record
@@ -63,23 +66,37 @@ type qaRequestContext struct {
 func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 	imageURLs, imageDescription := extractImageURLsAndOCRText(rc.images)
 	return &types.QARequest{
-		Session:             rc.session,
-		Query:               rc.query,
-		AssistantMessageID:  rc.assistantMessage.ID,
-		SummaryModelID:      rc.summaryModelID,
-		CustomAgent:         rc.customAgent,
-		SharedAgentReadOnly: rc.sharedAgentReadOnly,
-		KnowledgeBaseIDs:    rc.knowledgeBaseIDs,
-		KnowledgeIDs:        rc.knowledgeIDs,
-		TagScopes:           rc.tagScopes,
-		MCPServiceIDs:       rc.mcpServiceIDs,
-		SkillNames:          rc.skillNames,
-		ImageURLs:           imageURLs,
-		ImageDescription:    imageDescription,
-		UserMessageID:       rc.userMessageID,
-		WebSearchEnabled:    rc.webSearchEnabled,
-		Attachments:         rc.attachments,
+		Session:                      rc.session,
+		Query:                        rc.query,
+		AssistantMessageID:           rc.assistantMessage.ID,
+		SummaryModelID:               rc.summaryModelID,
+		CustomAgent:                  rc.customAgent,
+		SharedAgentReadOnly:          rc.sharedAgentReadOnly,
+		KnowledgeBaseIDs:             rc.knowledgeBaseIDs,
+		KnowledgeIDs:                 rc.knowledgeIDs,
+		KnowledgeBaseIDByKnowledgeID: rc.knowledgeBaseIDByKnowledgeID,
+		TagScopes:                    rc.tagScopes,
+		FolderScopes:                 rc.folderScopes,
+		MCPServiceIDs:                rc.mcpServiceIDs,
+		SkillNames:                   rc.skillNames,
+		ImageURLs:                    imageURLs,
+		ImageDescription:             imageDescription,
+		UserMessageID:                rc.userMessageID,
+		WebSearchEnabled:             rc.webSearchEnabled,
+		Attachments:                  rc.attachments,
 	}
+}
+
+func validateDocumentFolderScopesEnabled(
+	cfg *config.Config,
+	folderScopes []types.FolderScope,
+) error {
+	if len(folderScopes) == 0 || config.DocumentFoldersEnabled(cfg) {
+		return nil
+	}
+	return errors.NewServiceUnavailableError(
+		"document folders are disabled until the rolling upgrade is complete",
+	)
 }
 
 // parseQARequest parses and validates a QA request, returns the request context
@@ -147,7 +164,26 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 
 	// Merge @mentioned items into knowledge_base_ids and knowledge_ids
 	kbIDs, knowledgeIDs := mergeKnowledgeTargets(request.KnowledgeBaseIDs, request.KnowledgeIds, request.MentionedItems)
-	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs); err != nil {
+	knowledgeBaseIDByKnowledgeID := fileKnowledgeBaseHints(request.MentionedItems)
+	folderScopes, err := folderScopesFromMentionedItems(request.MentionedItems)
+	if err != nil {
+		return nil, nil, errors.NewBadRequestError(err.Error())
+	}
+	if err := validateDocumentFolderScopesEnabled(h.config, folderScopes); err != nil {
+		return nil, nil, err
+	}
+	if len(folderScopes) > 0 {
+		err = types.AuthorizeTenantAPIKeyKnowledgeTargetsWithFolders(
+			ctx,
+			kbIDs,
+			knowledgeIDs,
+			knowledgeBaseIDByKnowledgeID,
+			folderScopes,
+		)
+	} else {
+		err = types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs)
+	}
+	if err != nil {
 		return nil, nil, err
 	}
 
@@ -303,6 +339,14 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		return nil, nil, errors.NewBadRequestError(err.Error())
 	}
 	tagScopes := mergeTagScopesFromRequestIDs(mentionScopes, requestTagIDs, secutils.SanitizeForLogArray(kbIDs))
+	// Fail-closed: folder scope is not supported in smart-reasoning agent mode.
+	// The agent tools (knowledge_search / grep_chunks / database_query) do not
+	// honor FolderIDs and would silently search the whole KB, leaking across
+	// folder boundaries. Quick-answer (RAG) agents DO honor FolderIDs through
+	// the normal retrieval pipeline, so they are allowed. (issue #1311 §6a)
+	if customAgent != nil && customAgent.IsAgentMode() && len(folderScopes) > 0 {
+		return nil, nil, errors.NewBadRequestError("folder scope is not supported in agent mode")
+	}
 	tagIDs := dedupRequestStrings(append(request.TagIDs, mentionedIDsByType(request.MentionedItems, "tag")...))
 	mcpServiceIDs := dedupRequestStrings(append(request.MCPServiceIDs, mentionedIDsByType(request.MentionedItems, "mcp")...))
 	skillNames := dedupRequestStrings(append(request.SkillNames, mentionedIDsByType(request.MentionedItems, "skill")...))
@@ -315,6 +359,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		secutils.SanitizeForLogArray(knowledgeIDs),
 		secutils.SanitizeForLogArray(tagIDs),
 		tagScopes,
+		folderScopes,
 		secutils.SanitizeForLogArray(mcpServiceIDs),
 		secutils.SanitizeForLogArray(skillNames),
 		request.WebSearchEnabled,
@@ -341,25 +386,27 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 			ModelID:          modelID,
 			ExecutionContext: executionContext,
 		},
-		knowledgeBaseIDs:      secutils.SanitizeForLogArray(kbIDs),
-		knowledgeIDs:          secutils.SanitizeForLogArray(knowledgeIDs),
-		tagScopes:             tagScopes,
-		tagIDs:                secutils.SanitizeForLogArray(tagIDs),
-		mcpServiceIDs:         secutils.SanitizeForLogArray(mcpServiceIDs),
-		skillNames:            secutils.SanitizeForLogArray(skillNames),
-		summaryModelID:        secutils.SanitizeForLog(request.SummaryModelID),
-		webSearchEnabled:      request.WebSearchEnabled,
-		mentionedItems:        convertMentionedItems(request.MentionedItems),
-		effectiveTenantID:     effectiveTenantID,
-		sharedAgentReadOnly:   sharedAgentReadOnly,
-		images:                request.Images,
-		channel:               request.Channel,
-		attachments:           processedAttachments,
-		attachmentIDs:         attachmentIDs,
-		attachmentMetas:       attachmentMetas,
-		suggestionAttribution: request.SuggestionAttribution,
-		reqAgentEnabled:       request.AgentEnabled,
-		reqAgentID:            request.AgentID,
+		knowledgeBaseIDs:             secutils.SanitizeForLogArray(kbIDs),
+		knowledgeIDs:                 secutils.SanitizeForLogArray(knowledgeIDs),
+		knowledgeBaseIDByKnowledgeID: knowledgeBaseIDByKnowledgeID,
+		tagScopes:                    tagScopes,
+		folderScopes:                 folderScopes,
+		tagIDs:                       secutils.SanitizeForLogArray(tagIDs),
+		mcpServiceIDs:                secutils.SanitizeForLogArray(mcpServiceIDs),
+		skillNames:                   secutils.SanitizeForLogArray(skillNames),
+		summaryModelID:               secutils.SanitizeForLog(request.SummaryModelID),
+		webSearchEnabled:             request.WebSearchEnabled,
+		mentionedItems:               convertMentionedItems(request.MentionedItems),
+		effectiveTenantID:            effectiveTenantID,
+		sharedAgentReadOnly:          sharedAgentReadOnly,
+		images:                       request.Images,
+		channel:                      request.Channel,
+		attachments:                  processedAttachments,
+		attachmentIDs:                attachmentIDs,
+		attachmentMetas:              attachmentMetas,
+		suggestionAttribution:        request.SuggestionAttribution,
+		reqAgentEnabled:              request.AgentEnabled,
+		reqAgentID:                   request.AgentID,
 	}
 
 	return reqCtx, &request, nil
@@ -374,6 +421,7 @@ func buildMessageExecutionContext(
 	knowledgeIDs []string,
 	tagIDs []string,
 	tagScopes []types.TagScope,
+	folderScopes []types.FolderScope,
 	mcpServiceIDs []string,
 	skillNames []string,
 	webSearchEnabled bool,
@@ -388,6 +436,7 @@ func buildMessageExecutionContext(
 		KnowledgeIDs:     knowledgeIDs,
 		TagIDs:           tagIDs,
 		TagScopes:        cloneTagScopes(tagScopes),
+		FolderScopes:     cloneFolderScopes(folderScopes),
 		MCPServiceIDs:    mcpServiceIDs,
 		SkillNames:       skillNames,
 		WebSearchEnabled: webSearchEnabled,
@@ -422,6 +471,7 @@ func buildMessageExecutionContext(
 		KnowledgeIDs        []string                        `json:"knowledge_ids,omitempty"`
 		TagIDs              []string                        `json:"tag_ids,omitempty"`
 		TagScopes           []types.TagScope                `json:"tag_scopes,omitempty"`
+		FolderScopes        []types.FolderScope             `json:"folder_scopes,omitempty"`
 		ModelID             string                          `json:"model_id,omitempty"`
 	}{
 		QuestionSuggestions: snapshot.QuestionSuggestions,
@@ -429,6 +479,7 @@ func buildMessageExecutionContext(
 		KnowledgeIDs:        knowledgeIDs,
 		TagIDs:              tagIDs,
 		TagScopes:           snapshot.TagScopes,
+		FolderScopes:        snapshot.FolderScopes,
 		ModelID:             modelID,
 	}
 	if encoded, err := json.Marshal(hashInput); err == nil {
@@ -437,6 +488,25 @@ func buildMessageExecutionContext(
 	}
 
 	return snapshot, agent.ID, agentTenantID, modelID
+}
+
+// cloneFolderScopes returns a deep copy of folderScopes so a later request
+// cannot mutate an in-flight execution context. (issue #1311)
+func cloneFolderScopes(scopes []types.FolderScope) []types.FolderScope {
+	if len(scopes) == 0 {
+		return nil
+	}
+	cloned := make([]types.FolderScope, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.KnowledgeBaseID == "" || scope.FolderID == "" {
+			continue
+		}
+		cloned = append(cloned, types.FolderScope{
+			KnowledgeBaseID: scope.KnowledgeBaseID,
+			FolderID:        scope.FolderID,
+		})
+	}
+	return cloned
 }
 
 func cloneTagScopes(scopes []types.TagScope) []types.TagScope {
@@ -664,6 +734,12 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 			knowledgeBaseIDs = append(knowledgeBaseIDs, request.KnowledgeBaseID)
 		}
 	}
+	knowledgeBaseIDs, knowledgeIDs := mergeKnowledgeTargets(
+		knowledgeBaseIDs,
+		request.KnowledgeIDs,
+		request.MentionedItems,
+	)
+	knowledgeBaseIDByKnowledgeID := fileKnowledgeBaseHints(request.MentionedItems)
 
 	mentionScopes := tagScopesFromMentionedItems(request.MentionedItems)
 	requestTagIDs := dedupRequestStrings(request.TagIDs)
@@ -673,28 +749,63 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		return
 	}
 	tagScopes := mergeTagScopesFromRequestIDs(mentionScopes, requestTagIDs, secutils.SanitizeForLogArray(knowledgeBaseIDs))
-
-	if len(knowledgeBaseIDs) == 0 && len(request.KnowledgeIDs) == 0 && len(tagScopes) == 0 {
-		logger.Error(ctx, "No knowledge base IDs, knowledge IDs, or tag scopes provided")
-		c.Error(errors.NewBadRequestError("At least one knowledge_base_id, knowledge_base_ids, knowledge_ids, or scoped tag must be provided"))
+	folderScopes, err := folderScopesFromMentionedItems(request.MentionedItems)
+	if err != nil {
+		logger.Error(ctx, err.Error())
+		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, knowledgeBaseIDs, request.KnowledgeIDs); err != nil {
+	if err := validateDocumentFolderScopesEnabled(h.config, folderScopes); err != nil {
 		c.Error(err)
+		return
+	}
+
+	if len(knowledgeBaseIDs) == 0 && len(knowledgeIDs) == 0 && len(tagScopes) == 0 && len(folderScopes) == 0 {
+		logger.Error(ctx, "No knowledge base IDs, knowledge IDs, tag scopes, or folder scopes provided")
+		c.Error(errors.NewBadRequestError("At least one knowledge_base_id, knowledge_base_ids, knowledge_ids, scoped tag, or scoped folder must be provided"))
+		return
+	}
+	var authorizationErr error
+	if len(folderScopes) > 0 {
+		authorizationErr = types.AuthorizeTenantAPIKeyKnowledgeTargetsWithFolders(
+			ctx,
+			knowledgeBaseIDs,
+			knowledgeIDs,
+			knowledgeBaseIDByKnowledgeID,
+			folderScopes,
+		)
+	} else {
+		authorizationErr = types.AuthorizeTenantAPIKeyKnowledgeTargets(
+			ctx,
+			knowledgeBaseIDs,
+			knowledgeIDs,
+		)
+	}
+	if authorizationErr != nil {
+		c.Error(authorizationErr)
 		return
 	}
 
 	logger.Infof(
 		ctx,
-		"Knowledge search request, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, query: %s",
+		"Knowledge search request, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, folder scopes: %d, query: %s",
 		secutils.SanitizeForLogArray(knowledgeBaseIDs),
-		secutils.SanitizeForLogArray(request.KnowledgeIDs),
+		secutils.SanitizeForLogArray(knowledgeIDs),
 		len(tagScopes),
+		len(folderScopes),
 		secutils.SanitizeForLog(request.Query),
 	)
 
 	// Directly call knowledge retrieval service without LLM summarization
-	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs, request.KnowledgeIDs, tagScopes, request.Query)
+	searchResults, err := h.sessionService.SearchKnowledge(
+		ctx,
+		knowledgeBaseIDs,
+		knowledgeIDs,
+		knowledgeBaseIDByKnowledgeID,
+		tagScopes,
+		folderScopes,
+		request.Query,
+	)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))

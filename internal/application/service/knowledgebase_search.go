@@ -252,7 +252,11 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		deduplicatedChunks = deduplicatedChunks[:params.MatchCount]
 	}
 
-	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
+	results, err := s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
+	if err != nil {
+		return nil, err
+	}
+	return filterSearchResultsByFolderScope(results, params.FolderIDs), nil
 }
 
 // pickPrimary returns the KB whose ID matches id, or nil if id is not in
@@ -369,6 +373,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 				RetrieverType:    types.VectorRetrieverType,
 				KnowledgeIDs:     params.KnowledgeIDs,
 				TagIDs:           params.TagIDs,
+				FolderIDs:        params.FolderIDs,
 				KnowledgeType:    knowledgeType,
 			})
 		}
@@ -398,6 +403,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 			RetrieverType:    types.KeywordsRetrieverType,
 			KnowledgeIDs:     params.KnowledgeIDs,
 			TagIDs:           params.TagIDs,
+			FolderIDs:        params.FolderIDs,
 		})
 		logger.Info(ctx, "Keyword retrieval parameters setup completed")
 	}

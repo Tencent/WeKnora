@@ -13,9 +13,7 @@ import (
 
 	goerrors "errors"
 
-	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/repository"
-	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -36,6 +34,7 @@ type KnowledgeHandler struct {
 	kbService         interfaces.KnowledgeBaseService
 	kbShareService    interfaces.KBShareService
 	agentShareService interfaces.AgentShareService
+	folderService     interfaces.DocumentFolderService
 	asynqClient       interfaces.TaskEnqueuer
 	spanRepo          repository.KnowledgeSpanRepository
 }
@@ -47,6 +46,7 @@ func NewKnowledgeHandler(
 	kbService interfaces.KnowledgeBaseService,
 	kbShareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
+	folderService interfaces.DocumentFolderService,
 	asynqClient interfaces.TaskEnqueuer,
 	spanRepo repository.KnowledgeSpanRepository,
 ) *KnowledgeHandler {
@@ -56,6 +56,7 @@ func NewKnowledgeHandler(
 		kbService:         kbService,
 		kbShareService:    kbShareService,
 		agentShareService: agentShareService,
+		folderService:     folderService,
 		asynqClient:       asynqClient,
 		spanRepo:          spanRepo,
 	}
@@ -318,7 +319,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	logger.Info(ctx, "Start creating knowledge from file")
 
 	// Validate access to the knowledge base (only owner or admin/editor can create)
-	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
+	kb, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
 	if err != nil {
 		c.Error(err)
 		return
@@ -410,11 +411,20 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 
 	channel := c.PostForm("channel")
 
+	folderID := strings.TrimSpace(c.PostForm("folder_id"))
+	if err := h.validateFolderForKnowledgeCreate(ctx, kb, folderID); err != nil {
+		c.Error(err)
+		return
+	}
+
 	// Create knowledge entry from the file
-	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides)
+	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides, folderID)
 	// Check for duplicate knowledge error
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "file") {
+			return
+		}
+		if handleFolderPlacementWriteError(c, err) {
 			return
 		}
 		if appErr, ok := errors.IsAppError(err); ok {
@@ -457,7 +467,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	logger.Info(ctx, "Start creating knowledge from URL")
 
 	// Validate access to the knowledge base (only owner or admin/editor can create)
-	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
+	kb, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
 	if err != nil {
 		c.Error(err)
 		return
@@ -478,12 +488,18 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		EnableMultimodel *bool                            `json:"enable_multimodel"`
 		Title            string                           `json:"title"`
 		TagIDs           []string                         `json:"tag_ids"`
+		FolderID         string                           `json:"folder_id"`
 		Channel          string                           `json:"channel"`
 		ProcessConfig    *types.KnowledgeProcessOverrides `json:"process_config"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse URL request", err)
 		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	req.FolderID = strings.TrimSpace(req.FolderID)
+	if err := h.validateFolderForKnowledgeCreate(ctx, kb, req.FolderID); err != nil {
+		c.Error(err)
 		return
 	}
 
@@ -508,11 +524,14 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 
 	// Create knowledge entry from the URL
 	knowledge, err := h.kgService.CreateKnowledgeFromURL(
-		ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel, req.Title, req.TagIDs, req.Channel, req.ProcessConfig,
+		ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel, req.Title, req.TagIDs, req.Channel, req.ProcessConfig, req.FolderID,
 	)
 	// Check for duplicate knowledge error
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "url") {
+			return
+		}
+		if handleFolderPlacementWriteError(c, err) {
 			return
 		}
 		if appErr, ok := errors.IsAppError(err); ok {
@@ -554,7 +573,7 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 	logger.Info(ctx, "Start creating manual knowledge")
 
 	// Validate access to the knowledge base (only owner or admin/editor can create)
-	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
+	kb, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
 	if err != nil {
 		c.Error(err)
 		return
@@ -573,9 +592,17 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
+	req.FolderID = strings.TrimSpace(req.FolderID)
+	if err := h.validateFolderForKnowledgeCreate(ctx, kb, req.FolderID); err != nil {
+		c.Error(err)
+		return
+	}
 
-	knowledge, err := h.kgService.CreateKnowledgeFromManual(ctx, kbID, &req, req.Channel)
+	knowledge, err := h.kgService.CreateKnowledgeFromManual(ctx, kbID, &req, req.Channel, req.FolderID)
 	if err != nil {
+		if handleFolderPlacementWriteError(c, err) {
+			return
+		}
 		if appErr, ok := errors.IsAppError(err); ok {
 			c.Error(appErr)
 			return
@@ -959,6 +986,20 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		FileType:    c.Query("file_type"),
 		ParseStatus: c.Query("parse_status"),
 		Source:      c.Query("source"),
+	}
+	// Three-state folder_id filter: omitted = no filter (list across all
+	// folders), "" = root-level documents only, non-empty = that folder only.
+	// We use GetQuery (not Query) so the empty-string root case is
+	// distinguishable from omission. (issue #1311)
+	if raw, ok := c.GetQuery("folder_id"); ok {
+		if !config.DocumentFoldersEnabled(h.cfg) {
+			c.Error(errors.NewServiceUnavailableError(
+				"document folders are disabled until the rolling upgrade is complete",
+			))
+			return
+		}
+		fid := strings.TrimSpace(raw)
+		filter.FolderID = &fid
 	}
 	if raw := c.Query("start_time"); raw != "" {
 		t, err := parseFilterTime(raw)
@@ -1987,136 +2028,30 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 		}
 	}
 
-	agentID := c.Query("agent_id")
-	if agentID != "" {
-		userIDVal, ok := c.Get(types.UserIDContextKey.String())
-		if !ok {
-			c.Error(errors.NewUnauthorizedError("user ID not found"))
-			return
-		}
-		_ = userIDVal
-		currentTenantID := c.GetUint64(types.TenantIDContextKey.String())
-		if currentTenantID == 0 {
-			c.Error(errors.NewUnauthorizedError("workspace ID not found"))
-			return
-		}
-		callerTenantRole := types.TenantRoleFromContext(ctx)
-		requestedSourceTenantID, parseErr := types.ParseAgentSourceTenantID(c.Query(types.AgentSourceTenantIDParam))
-		if parseErr != nil {
-			c.Error(errors.NewBadRequestError(parseErr.Error()))
-			return
-		}
-		agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID, requestedSourceTenantID)
-		if err != nil {
-			if goerrors.Is(err, service.ErrAgentShareNotFound) || goerrors.Is(err, service.ErrAgentSharePermission) || goerrors.Is(err, service.ErrAgentNotFoundForShare) {
-				c.Error(errors.NewForbiddenError("no permission for this shared agent"))
-				return
-			}
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to verify shared agent access").WithDetails(err.Error()))
-			return
-		}
-		sourceTenantID := agent.TenantID
-		mode := agent.Config.KBSelectionMode
-		if mode == "none" {
-			c.JSON(http.StatusOK, gin.H{
-				"success":  true,
-				"data":     []interface{}{},
-				"has_more": false,
-				"total":    0,
-			})
-			return
-		}
-		var scopes []types.KnowledgeSearchScope
-		if mode == "selected" && len(agent.Config.KnowledgeBases) > 0 {
-			for _, kbID := range agent.Config.KnowledgeBases {
-				if kbID != "" {
-					scopes = append(scopes, types.KnowledgeSearchScope{TenantID: sourceTenantID, KBID: kbID})
-				}
-			}
-		}
-		if len(scopes) == 0 {
-			kbs, err := h.kbService.ListKnowledgeBasesByTenantID(ctx, sourceTenantID)
-			if err != nil {
-				logger.ErrorWithFields(ctx, err, nil)
-				c.Error(errors.NewInternalServerError("Failed to list knowledge bases").WithDetails(err.Error()))
-				return
-			}
-			// `all` mode: authoritative server-side capability filter. Mirrors the
-			// logic in ListKnowledgeBases so @file search, KB listing, and runtime
-			// all agree on what "mode=all" actually means for this agent. The
-			// filter is agent-mode aware so quick-answer (RAG-only) skips
-			// wiki-only KBs even though it has no `allowed_tools`.
-			filter := tools.DeriveKBFilterForAgent(agent.Config.AgentMode, agent.Config.AllowedTools)
-			removed := 0
-			for _, kb := range kbs {
-				if kb == nil || kb.Type != types.KnowledgeBaseTypeDocument {
-					continue
-				}
-				if !filter.IsEmpty() && !tools.KBSatisfiesAgentRequirements(kb.Capabilities(), agent.Config.AgentMode, agent.Config.AllowedTools) {
-					removed++
-					continue
-				}
-				scopes = append(scopes, types.KnowledgeSearchScope{TenantID: sourceTenantID, KBID: kb.ID})
-			}
-			if removed > 0 {
-				logger.Infof(ctx,
-					"SearchKnowledge(agent=%s, mode=all): capability filter removed %d KBs",
-					agentID, removed)
-			}
-		}
-		scopes = filterKnowledgeSearchScopesForAPIKey(ctx, scopes)
-		if len(scopes) == 0 {
-			c.JSON(http.StatusOK, gin.H{
-				"success":  true,
-				"data":     []interface{}{},
-				"has_more": false,
-				"total":    0,
-			})
-			return
-		}
-		knowledges, hasMore, total, err := h.kgService.SearchKnowledgeForScopes(ctx, scopes, keyword, offset, limit, fileTypes)
-		if err != nil {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to search knowledge").WithDetails(err.Error()))
-			return
-		}
+	scopes, err := h.resolveAuthorizedKnowledgeSearchScopes(c, ctx, c.Query("agent_id"))
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	scopes = restrictKnowledgeSearchScopes(scopes, c.Query("kb_ids"))
+	if len(scopes) == 0 {
 		c.JSON(http.StatusOK, gin.H{
 			"success":  true,
-			"data":     knowledges,
-			"has_more": hasMore,
-			"total":    total,
+			"data":     []interface{}{},
+			"has_more": false,
+			"total":    0,
 		})
 		return
 	}
 
-	if scopes, restricted := tenantAPIKeySearchScopes(ctx); restricted {
-		if len(scopes) == 0 {
-			c.JSON(http.StatusOK, gin.H{
-				"success":  true,
-				"data":     []interface{}{},
-				"has_more": false,
-				"total":    0,
-			})
-			return
-		}
-		knowledges, hasMore, total, err := h.kgService.SearchKnowledgeForScopes(ctx, scopes, keyword, offset, limit, fileTypes)
-		if err != nil {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to search knowledge").WithDetails(err.Error()))
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{
-			"success":  true,
-			"data":     knowledges,
-			"has_more": hasMore,
-			"total":    total,
-		})
-		return
-	}
-
-	// Default: own + shared KBs
-	knowledges, hasMore, total, err := h.kgService.SearchKnowledge(ctx, keyword, offset, limit, fileTypes)
+	knowledges, hasMore, total, err := h.kgService.SearchKnowledgeForScopes(
+		ctx,
+		scopes,
+		keyword,
+		offset,
+		limit,
+		fileTypes,
+	)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError("Failed to search knowledge").WithDetails(err.Error()))

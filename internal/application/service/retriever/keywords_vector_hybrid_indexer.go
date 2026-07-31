@@ -2,6 +2,7 @@ package retriever
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -345,4 +346,18 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchUpdateChunkTagID(
 	chunkTagMap map[string]string,
 ) error {
 	return v.indexRepository.BatchUpdateChunkTagID(ctx, chunkTagMap)
+}
+
+func (v *KeywordsVectorHybridRetrieveEngineService) BatchUpdateChunkFolderID(
+	ctx context.Context,
+	chunkFolderMap map[string]string,
+) error {
+	updater, ok := v.indexRepository.(interfaces.ChunkFolderMetadataUpdater)
+	if !ok {
+		return fmt.Errorf(
+			"retrieve engine %s does not support chunk folder metadata updates",
+			v.indexRepository.EngineType(),
+		)
+	}
+	return updater.BatchUpdateChunkFolderID(ctx, chunkFolderMap)
 }

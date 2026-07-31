@@ -54,6 +54,9 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 			wgExp.Add(1)
 			go func(q string, t *types.SearchTarget) {
 				defer wgExp.Done()
+				if t.Type == types.SearchTargetTypeKnowledge && len(t.KnowledgeIDs) == 0 {
+					return
+				}
 				sem <- struct{}{}
 				defer func() { <-sem }()
 				vectorThreshold, keywordThreshold := t.RecallThresholds(
@@ -66,6 +69,7 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 					KeywordThreshold:      keywordThreshold,
 					MatchCount:            expTopK,
 					TagIDs:                t.TagIDs,
+					FolderIDs:             t.FolderIDs,
 					ScopeTagIDs:           t.ScopeTagIDs,
 					DisableVectorMatch:    false,
 					DisableKeywordsMatch:  false,

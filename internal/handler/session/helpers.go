@@ -98,6 +98,51 @@ func tagScopesFromMentionedItems(items []MentionedItemRequest) []types.TagScope 
 	return scopes
 }
 
+func fileKnowledgeBaseHints(items []MentionedItemRequest) map[string]string {
+	hints := make(map[string]string)
+	for _, item := range items {
+		if item.Type == "file" && item.ID != "" && item.KBID != "" {
+			hints[item.ID] = item.KBID
+		}
+	}
+	if len(hints) == 0 {
+		return nil
+	}
+	return hints
+}
+
+// folderScopesFromMentionedItems extracts folder @mention items into
+// FolderScope records. Each item's ID is the folder ID and KBID is the owning
+// KB. Root Q&A uses a KB mention instead; a folder mention with either
+// identifier missing is malformed and must fail closed. (issue #1311)
+func folderScopesFromMentionedItems(items []MentionedItemRequest) ([]types.FolderScope, error) {
+	seen := make(map[string]bool)
+	scopes := make([]types.FolderScope, 0, len(items))
+	for i, item := range items {
+		if item.Type != "folder" {
+			continue
+		}
+		folderID := strings.TrimSpace(item.ID)
+		if folderID == "" {
+			return nil, fmt.Errorf("folder mention at index %d requires a non-empty id", i)
+		}
+		knowledgeBaseID := strings.TrimSpace(item.KBID)
+		if knowledgeBaseID == "" {
+			return nil, fmt.Errorf("folder mention at index %d requires a non-empty kb_id", i)
+		}
+		key := knowledgeBaseID + "|" + folderID
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		scopes = append(scopes, types.FolderScope{
+			KnowledgeBaseID: knowledgeBaseID,
+			FolderID:        folderID,
+		})
+	}
+	return scopes, nil
+}
+
 // orphanTagIDsForScope returns tag IDs from the request that are not already
 // covered by scoped mentions.
 func orphanTagIDsForScope(tagIDs []string, scopes []types.TagScope) []string {

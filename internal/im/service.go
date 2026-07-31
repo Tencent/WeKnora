@@ -3270,7 +3270,7 @@ func (s *Service) processFileToKnowledgeBase(ctx context.Context, msg *IncomingM
 	fh := newInMemoryFileHeader(fileName, content)
 
 	// Create knowledge entry via the knowledge service
-	knowledge, err := s.knowledgeService.CreateKnowledgeFromFile(kbCtx, kbID, fh, nil, nil, "", nil, imPlatformToChannel(channel.Platform), nil)
+	knowledge, err := s.knowledgeService.CreateKnowledgeFromFile(kbCtx, kbID, fh, nil, nil, "", nil, imPlatformToChannel(channel.Platform), nil, "")
 	if err != nil {
 		errMsg := err.Error()
 		// Check for duplicate file

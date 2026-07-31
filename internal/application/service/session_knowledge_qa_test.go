@@ -180,3 +180,36 @@ func TestHandleModelFallback_IncludesHistoryMessages(t *testing.T) {
 	assert.Equal(t, "user", chatModel.lastMessages[3].Role)
 	assert.Contains(t, chatModel.lastMessages[3].Content, "现在还能继续讲吗？")
 }
+
+func TestHandleScopeEmptyResponseUsesFixedReasonAndSkipsModel(t *testing.T) {
+	chatModel := &captureChatModel{}
+	svc := &sessionService{
+		modelService: &stubModelService{chatModel: chatModel},
+	}
+	bus := event.NewEventBus()
+	var emitted []event.AgentFinalAnswerData
+	bus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		emitted = append(emitted, evt.Data.(event.AgentFinalAnswerData))
+		return nil
+	})
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			SessionID:        "session-1",
+			ChatModelID:      "chat-model",
+			FallbackStrategy: types.FallbackStrategyModel,
+			FallbackPrompt:   "Use general knowledge",
+			FallbackResponse: "fallback",
+			SearchTargets:    types.SearchTargets{{FolderIDs: []string{"folder-1"}}},
+		},
+		PipelineContext: types.PipelineContext{EventBus: bus.AsEventBusInterface()},
+	}
+	ctx := context.WithValue(context.Background(), types.LanguageContextKey, "zh-CN")
+
+	svc.handleScopeEmptyResponse(ctx, cm)
+
+	require.Empty(t, chatModel.lastMessages)
+	require.Equal(t, "所选文件夹中没有找到相关内容。", cm.ChatResponse.Content)
+	require.Len(t, emitted, 1)
+	require.True(t, emitted[0].IsFallback)
+	require.True(t, emitted[0].Done)
+}

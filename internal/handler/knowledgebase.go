@@ -307,6 +307,14 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 		_ = c.Error(apperrors.NewBadRequestError("query_text is required"))
 		return
 	}
+	for _, folderID := range req.FolderIDs {
+		if strings.TrimSpace(folderID) == "" {
+			_ = c.Error(apperrors.NewBadRequestError(
+				"folder_ids must contain real folder IDs; use knowledge-base scope for root search",
+			))
+			return
+		}
+	}
 
 	logger.Infof(ctx, "Executing hybrid search, knowledge base ID: %s, query: %s, effectiveTenantID: %d",
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.QueryText), effectiveTenantID)

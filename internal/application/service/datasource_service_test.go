@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"mime/multipart"
 	"strings"
 	"testing"
 	"time"
@@ -186,4 +187,130 @@ func TestAllFetchedItemsFailedErrorTruncatesLongDetail(t *testing.T) {
 	require.Error(t, err)
 	assert.LessOrEqual(t, len(err.Error()), 560)
 	assert.Contains(t, err.Error(), "...")
+}
+
+type datasourceFolderKnowledgeRepository struct {
+	interfaces.KnowledgeRepository
+	existing *types.Knowledge
+}
+
+func (r *datasourceFolderKnowledgeRepository) FindByMetadataKey(
+	context.Context,
+	uint64,
+	string,
+	string,
+	string,
+) (*types.Knowledge, error) {
+	return r.existing, nil
+}
+
+type datasourceFolderKnowledgeService struct {
+	interfaces.KnowledgeService
+	repo        interfaces.KnowledgeRepository
+	fileFolders []string
+	fileTagIDs  [][]string
+	urlFolders  []string
+	urlTagIDs   [][]string
+	deleteCalls int
+}
+
+func (s *datasourceFolderKnowledgeService) GetRepository() interfaces.KnowledgeRepository {
+	return s.repo
+}
+
+func (s *datasourceFolderKnowledgeService) DeleteKnowledge(context.Context, string) error {
+	s.deleteCalls++
+	return nil
+}
+
+func (s *datasourceFolderKnowledgeService) CreateKnowledgeFromFile(
+	_ context.Context,
+	_ string,
+	_ *multipart.FileHeader,
+	_ map[string]string,
+	_ *bool,
+	_ string,
+	tagIDs []string,
+	_ string,
+	_ *types.KnowledgeProcessOverrides,
+	folderID string,
+) (*types.Knowledge, error) {
+	s.fileFolders = append(s.fileFolders, folderID)
+	s.fileTagIDs = append(s.fileTagIDs, append([]string(nil), tagIDs...))
+	if folderID != types.DocumentFolderRootID {
+		return nil, apprepo.ErrDocumentFolderNotFound
+	}
+	return &types.Knowledge{FolderID: folderID}, nil
+}
+
+func (s *datasourceFolderKnowledgeService) CreateKnowledgeFromURL(
+	_ context.Context,
+	_ string,
+	_ string,
+	_ string,
+	_ string,
+	_ *bool,
+	_ string,
+	tagIDs []string,
+	_ string,
+	_ *types.KnowledgeProcessOverrides,
+	folderID string,
+) (*types.Knowledge, error) {
+	s.urlFolders = append(s.urlFolders, folderID)
+	s.urlTagIDs = append(s.urlTagIDs, append([]string(nil), tagIDs...))
+	if folderID != types.DocumentFolderRootID {
+		return nil, apprepo.ErrDocumentFolderNotFound
+	}
+	return &types.Knowledge{FolderID: folderID}, nil
+}
+
+func newDatasourceFolderRaceService() (*DataSourceService, *datasourceFolderKnowledgeService) {
+	repo := &datasourceFolderKnowledgeRepository{existing: &types.Knowledge{
+		ID:       "knowledge-old",
+		FolderID: "folder-deleted",
+	}}
+	knowledgeService := &datasourceFolderKnowledgeService{repo: repo}
+	return &DataSourceService{knowledgeService: knowledgeService}, knowledgeService
+}
+
+func TestIngestItemFileRetriesAtRootWhenPreservedFolderIsDeleted(t *testing.T) {
+	svc, knowledgeService := newDatasourceFolderRaceService()
+	ds := &types.DataSource{
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Type:            "test",
+	}
+
+	isUpdate, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
+		ExternalID: "external-1",
+		FileName:   "document.txt",
+		Content:    []byte("content"),
+	}, []string{"tag-1"})
+
+	require.NoError(t, err)
+	assert.True(t, isUpdate)
+	assert.Equal(t, 1, knowledgeService.deleteCalls)
+	assert.Equal(t, []string{"folder-deleted", types.DocumentFolderRootID}, knowledgeService.fileFolders)
+	assert.Equal(t, [][]string{{"tag-1"}, {"tag-1"}}, knowledgeService.fileTagIDs)
+}
+
+func TestIngestItemURLRetriesAtRootWhenPreservedFolderIsDeleted(t *testing.T) {
+	svc, knowledgeService := newDatasourceFolderRaceService()
+	ds := &types.DataSource{
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Type:            "test",
+	}
+
+	isUpdate, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
+		ExternalID: "external-1",
+		FileName:   "document.html",
+		URL:        "https://example.com/document.html",
+	}, []string{"tag-1"})
+
+	require.NoError(t, err)
+	assert.True(t, isUpdate)
+	assert.Equal(t, 1, knowledgeService.deleteCalls)
+	assert.Equal(t, []string{"folder-deleted", types.DocumentFolderRootID}, knowledgeService.urlFolders)
+	assert.Equal(t, [][]string{{"tag-1"}, {"tag-1"}}, knowledgeService.urlTagIDs)
 }

@@ -82,6 +82,34 @@ func TestHybridSearchRejectsMissingQueryText(t *testing.T) {
 	}
 }
 
+func TestHybridSearchRejectsVirtualRootFolderID(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "empty root sentinel", body: `{"query_text":"MiniMax","folder_ids":[""]}`},
+		{name: "whitespace folder ID", body: `{"query_text":"MiniMax","folder_ids":["   "]}`},
+		{name: "empty value among real folders", body: `{"query_text":"MiniMax","folder_ids":["folder-1",""]}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &hybridSearchTestService{}
+			response := performHybridSearchRequest(svc, tt.body)
+
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d body=%s", response.Code, response.Body.String())
+			}
+			if svc.searchCalls != 0 {
+				t.Fatalf("invalid folder scope reached HybridSearch %d time(s)", svc.searchCalls)
+			}
+			if !strings.Contains(response.Body.String(), `"code":1000`) {
+				t.Fatalf("expected bad-request envelope, got %s", response.Body.String())
+			}
+		})
+	}
+}
+
 func TestHybridSearchAcceptsQueryText(t *testing.T) {
 	svc := &hybridSearchTestService{}
 	response := performHybridSearchRequest(svc, `{"query_text":"MiniMax","match_count":3}`)

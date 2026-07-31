@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -25,9 +26,10 @@ func (s *sessionService) resolveKnowledgeBases(
 	kbIDs = req.KnowledgeBaseIDs
 	knowledgeIDs = req.KnowledgeIDs
 	requestedKBIDs := append([]string(nil), req.KnowledgeBaseIDs...)
+	requestedFolderScopes := append([]types.FolderScope(nil), req.FolderScopes...)
 	customAgent := req.CustomAgent
 
-	hasExplicitMention := len(kbIDs) > 0 || len(knowledgeIDs) > 0 || len(req.TagScopes) > 0
+	hasExplicitMention := len(kbIDs) > 0 || len(knowledgeIDs) > 0 || len(req.TagScopes) > 0 || len(req.FolderScopes) > 0
 	if customAgent != nil {
 		logger.Infof(ctx, "KB resolution: hasExplicitMention=%v, RetrieveKBOnlyWhenMentioned=%v, KBSelectionMode=%s",
 			hasExplicitMention, customAgent.Config.RetrieveKBOnlyWhenMentioned, customAgent.Config.KBSelectionMode)
@@ -40,6 +42,15 @@ func (s *sessionService) resolveKnowledgeBases(
 		if customAgent != nil && req.Session != nil && req.Session.TenantID != customAgent.TenantID {
 			kbIDs, knowledgeIDs = s.restrictMentionsToAgentScope(ctx, customAgent, req.Session.TenantID, kbIDs, knowledgeIDs)
 			req.TagScopes = s.restrictTagScopesToAgentScope(ctx, customAgent, req.Session.TenantID, req.TagScopes)
+			req.FolderScopes, err = s.restrictFolderScopesToAgentScope(
+				ctx,
+				customAgent,
+				req.Session.TenantID,
+				req.FolderScopes,
+			)
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 	} else if customAgent != nil && customAgent.Config.RetrieveKBOnlyWhenMentioned {
 		kbIDs = nil
@@ -49,14 +60,58 @@ func (s *sessionService) resolveKnowledgeBases(
 		kbIDs = s.resolveKnowledgeBasesFromAgent(ctx, customAgent, req.Session.TenantID)
 	}
 
-	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, requestedKBIDs, req.KnowledgeIDs); err != nil {
-		return nil, nil, err
+	var authorizationErr error
+	if len(requestedFolderScopes) > 0 {
+		authorizationErr = types.AuthorizeTenantAPIKeyKnowledgeTargetsWithFolders(
+			ctx,
+			requestedKBIDs,
+			req.KnowledgeIDs,
+			req.KnowledgeBaseIDByKnowledgeID,
+			requestedFolderScopes,
+		)
+	} else {
+		authorizationErr = types.AuthorizeTenantAPIKeyKnowledgeTargets(
+			ctx,
+			requestedKBIDs,
+			req.KnowledgeIDs,
+		)
+	}
+	if authorizationErr != nil {
+		return nil, nil, authorizationErr
 	}
 	kbIDs, err = types.FilterKnowledgeBasesForTenantAPIKeyScope(ctx, requestedKBIDs, kbIDs)
 	if err != nil {
 		return nil, nil, err
 	}
 	return kbIDs, knowledgeIDs, nil
+}
+
+func (s *sessionService) restrictFolderScopesToAgentScope(
+	ctx context.Context,
+	agent *types.CustomAgent,
+	sessionTenantID uint64,
+	folderScopes []types.FolderScope,
+) ([]types.FolderScope, error) {
+	if len(folderScopes) == 0 {
+		return nil, nil
+	}
+	allowedKBIDs := s.resolveKnowledgeBasesFromAgent(ctx, agent, sessionTenantID)
+	allowedSet := make(map[string]bool, len(allowedKBIDs))
+	for _, id := range allowedKBIDs {
+		allowedSet[id] = true
+	}
+	filtered := make([]types.FolderScope, 0, len(folderScopes))
+	for _, scope := range folderScopes {
+		if allowedSet[scope.KnowledgeBaseID] {
+			filtered = append(filtered, scope)
+			continue
+		}
+		logger.Warnf(ctx, "Blocking @mentioned folder scope for KB %s: not in shared agent's allowed scope", scope.KnowledgeBaseID)
+		return nil, apperrors.NewForbiddenError(
+			"folder scope is outside the shared agent knowledge base scope",
+		)
+	}
+	return filtered, nil
 }
 
 func (s *sessionService) restrictTagScopesToAgentScope(

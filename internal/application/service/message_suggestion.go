@@ -417,15 +417,33 @@ func (s *messageSuggestionService) generateFromKnowledge(
 		// suggestion API because that surface cannot verify each ID's KB binding.
 		preferActualEvidence = false
 	}
+	hasFolderScope := len(message.ExecutionContext.FolderScopes) > 0
+	if hasFolderScope && !preferActualEvidence {
+		// The suggestion repository cannot filter by folder. Without documents
+		// actually used by this answer, any KB/tag fallback could surface a
+		// question from outside the selected subtree.
+		return types.SuggestionItems{}, nil
+	}
 	if preferActualEvidence {
 		knowledgeIDs = generationContext.ActualKnowledgeIDs
+	}
+	knowledgeBaseIDs := message.ExecutionContext.KnowledgeBaseIDs
+	tagScopes := message.ExecutionContext.TagScopes
+	allowRequestScopeFallback := preferActualEvidence
+	if hasFolderScope {
+		// ActualKnowledgeIDs are authoritative evidence already constrained by
+		// folder, file, and tag intersections. Passing KB/tag scopes as well
+		// would widen the repository query because those filters are additive.
+		knowledgeBaseIDs = nil
+		tagScopes = nil
+		allowRequestScopeFallback = false
 	}
 	candidates, err := s.customAgentService.GetKnowledgeSuggestedQuestions(
 		knowledgeCtx,
 		message.AgentID,
-		message.ExecutionContext.KnowledgeBaseIDs,
+		knowledgeBaseIDs,
 		knowledgeIDs,
-		message.ExecutionContext.TagScopes,
+		tagScopes,
 		poolSize,
 	)
 	if err != nil {
@@ -433,7 +451,7 @@ func (s *messageSuggestionService) generateFromKnowledge(
 	}
 	// Some retrieved documents do not carry pre-generated questions. Fall back
 	// to the request scope in that case, while still relevance-ranking the pool.
-	if len(candidates) == 0 && preferActualEvidence {
+	if len(candidates) == 0 && allowRequestScopeFallback {
 		candidates, err = s.customAgentService.GetKnowledgeSuggestedQuestions(
 			knowledgeCtx,
 			message.AgentID,

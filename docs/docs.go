@@ -6735,6 +6735,336 @@ const docTemplate = `{
                 }
             }
         },
+        "/knowledgebase/{kb_id}/document-folders": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "List one page of direct child folders. An empty parent_id selects the knowledge-base root.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识库"
+                ],
+                "summary": "List document folders",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Parent folder ID (empty = root)",
+                        "name": "parent_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Folder name or path keyword",
+                        "name": "keyword",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque continuation cursor",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Page size (1-200)",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DocumentFolderListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Create a new empty folder under parent_id. An empty parent_id selects the knowledge-base root.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识库"
+                ],
+                "summary": "Create a document folder",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Folder data",
+                        "name": "folder",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DocumentFolderCreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DocumentFolder"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledgebase/{kb_id}/document-folders/{folder_id}": {
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Rename a folder and its materialized descendant paths. Folder reparenting is not supported.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识库"
+                ],
+                "summary": "Rename a document folder",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Folder ID",
+                        "name": "folder_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Folder update",
+                        "name": "folder",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DocumentFolderUpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DocumentFolder"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Without mode, delete one empty folder synchronously. keep_documents recursively removes the folder structure and moves its documents to the knowledge-base root. delete_all permanently removes the subtree and all document-derived data. Explicit modes run asynchronously.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识库"
+                ],
+                "summary": "Delete a document folder subtree",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Folder ID",
+                        "name": "folder_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "keep_documents",
+                            "delete_all"
+                        ],
+                        "type": "string",
+                        "description": "Deletion mode; omit for legacy empty-folder deletion",
+                        "name": "mode",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledgebase/{kb_id}/document-folders/{folder_id}/delete-impact": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Return the live folder, document, and active-processing counts for the selected folder subtree.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识库"
+                ],
+                "summary": "Preview document-folder deletion",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Folder ID",
+                        "name": "folder_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DocumentFolderDeleteImpact"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/knowledgebase/{kb_id}/wiki/auto-fix": {
             "post": {
                 "security": [
@@ -15846,6 +16176,140 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.DocumentFolder": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "deleted_at": {
+                    "$ref": "#/definitions/gorm.DeletedAt"
+                },
+                "depth": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "parent_id": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "tenant_id": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.DocumentFolderCreateRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "minLength": 1
+                },
+                "parent_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.DocumentFolderDeleteImpact": {
+            "type": "object",
+            "properties": {
+                "active_document_count": {
+                    "type": "integer"
+                },
+                "document_count": {
+                    "type": "integer"
+                },
+                "folder_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.DocumentFolderListResponse": {
+            "type": "object",
+            "properties": {
+                "folders": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DocumentFolderNode"
+                    }
+                },
+                "has_more": {
+                    "type": "boolean"
+                },
+                "next_cursor": {
+                    "type": "string"
+                },
+                "parent_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.DocumentFolderNode": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "deleted_at": {
+                    "$ref": "#/definitions/gorm.DeletedAt"
+                },
+                "depth": {
+                    "type": "integer"
+                },
+                "document_count": {
+                    "type": "integer"
+                },
+                "has_children": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "parent_id": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "tenant_id": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.DocumentFolderUpdateRequest": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.EmbeddingParameters": {
             "type": "object",
             "properties": {
@@ -16411,6 +16875,14 @@ const docTemplate = `{
                 },
                 "file_type": {
                     "description": "File type of the knowledge",
+                    "type": "string"
+                },
+                "folder_id": {
+                    "description": "FolderID is the document folder this knowledge is filed under. Empty\nstring means the root level of the KB. Only meaningful for document-type\nKBs; FAQ/Wiki KBs leave it empty. (issue #1311)",
+                    "type": "string"
+                },
+                "folder_path": {
+                    "description": "FolderPath is the display path of FolderID, populated on cross-KB\nmention searches. Root-level documents and stale/deleted folders return\nan empty path.",
                     "type": "string"
                 },
                 "id": {
@@ -17207,6 +17679,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "content": {
+                    "type": "string"
+                },
+                "folder_id": {
                     "type": "string"
                 },
                 "process_config": {
@@ -18521,6 +18996,13 @@ const docTemplate = `{
                 "disable_vector_match": {
                     "type": "boolean"
                 },
+                "folder_ids": {
+                    "description": "Folder IDs for subtree filtering (issue #1311)",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "keyword_threshold": {
                     "type": "number"
                 },
@@ -18600,6 +19082,10 @@ const docTemplate = `{
                 "end_at": {
                     "description": "End at",
                     "type": "integer"
+                },
+                "folder_id": {
+                    "description": "FolderID is the document folder recorded on the authoritative knowledge\nrow. It is persisted in history references so later folder-scoped turns\ncan reject stale references from outside the active subtree.",
+                    "type": "string"
                 },
                 "id": {
                     "description": "ID",
@@ -20653,6 +21139,14 @@ const docTemplate = `{
                 "build_time": {
                     "type": "string"
                 },
+                "capabilities": {
+                    "description": "Capabilities are runtime gates, not build-time promises. Missing keys\nare interpreted as false by newer frontends talking to older pods.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/internal_handler.SystemCapabilities"
+                        }
+                    ]
+                },
                 "commit_id": {
                     "type": "string"
                 },
@@ -21588,6 +22082,14 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.SystemCapabilities": {
+            "type": "object",
+            "properties": {
+                "document_folders": {
+                    "type": "boolean"
+                }
+            }
+        },
         "internal_handler.TestProviderRequest": {
             "type": "object",
             "required": [
@@ -22216,7 +22718,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "kb_id": {
-                    "description": "Parent knowledge base for file/tag mentions",
+                    "description": "Parent knowledge base for file/tag/folder mentions",
                     "type": "string"
                 },
                 "kb_name": {
@@ -22239,7 +22741,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "type": {
-                    "description": "\"kb\", \"file\", \"tag\", \"mcp\", \"skill\"",
+                    "description": "\"kb\", \"file\", \"tag\", \"folder\", \"mcp\", \"skill\"",
                     "type": "string"
                 }
             }

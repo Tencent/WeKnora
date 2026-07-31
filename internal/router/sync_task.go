@@ -120,6 +120,7 @@ type SyncTaskParams struct {
 	Executor             *SyncTaskExecutor
 	KnowledgeService     interfaces.KnowledgeService
 	KnowledgeBaseService interfaces.KnowledgeBaseService
+	DocumentFolder       interfaces.DocumentFolderService
 	TagService           interfaces.KnowledgeTagService
 	DataSourceService    interfaces.DataSourceService
 	ChunkExtractor       interfaces.TaskHandler `name:"chunkExtractor"`
@@ -145,6 +146,7 @@ func RegisterSyncHandlers(params SyncTaskParams) {
 	params.Executor.RegisterHandler(types.TypeKnowledgeMove, params.KnowledgeService.ProcessKnowledgeMove)
 	params.Executor.RegisterHandler(types.TypeKnowledgeListDelete, params.KnowledgeService.ProcessKnowledgeListDelete)
 	params.Executor.RegisterHandler(types.TypeKnowledgeListReparse, params.KnowledgeService.ProcessKnowledgeListReparse)
+	params.Executor.RegisterHandler(types.TypeDocumentFolderDelete, params.DocumentFolder.ProcessDeleteFolderTree)
 	params.Executor.RegisterHandler(types.TypeIndexDelete, params.TagService.ProcessIndexDelete)
 	params.Executor.RegisterHandler(types.TypeKBDelete, params.KnowledgeBaseService.ProcessKBDelete)
 	params.Executor.RegisterHandler(types.TypeImageMultimodal, params.ImageMultimodal.Handle)

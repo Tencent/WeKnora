@@ -195,6 +195,36 @@ func TestProcessKBDeleteRepeatsQueueCleanup(t *testing.T) {
 	assert.Equal(t, []string{"kb-race", "kb-race"}, pendingRepo.scopeIDs)
 }
 
+func TestProcessKBDeleteRetriesDocumentFolderCleanupFailure(t *testing.T) {
+	const kbID = "kb-folder-cleanup"
+	cleanupErr := errors.New("folder cleanup unavailable")
+	folderRepo := newFakeFolderRepo()
+	folderRepo.folders["folder-1"] = &types.DocumentFolder{
+		ID:              "folder-1",
+		KnowledgeBaseID: kbID,
+	}
+	folderRepo.failOn["DeleteFoldersByKnowledgeBase"] = cleanupErr
+	svc := &knowledgeBaseService{
+		kgRepo:     emptyKBKnowledgeRepo{},
+		folderRepo: folderRepo,
+	}
+	payload, err := json.Marshal(types.KBDeletePayload{
+		TenantID:        1,
+		KnowledgeBaseID: kbID,
+	})
+	require.NoError(t, err)
+	task := asynq.NewTask(types.TypeKBDelete, payload)
+
+	err = svc.ProcessKBDelete(context.Background(), task)
+
+	require.ErrorIs(t, err, cleanupErr)
+	assert.False(t, folderRepo.deleted["folder-1"])
+
+	delete(folderRepo.failOn, "DeleteFoldersByKnowledgeBase")
+	require.NoError(t, svc.ProcessKBDelete(context.Background(), task))
+	assert.True(t, folderRepo.deleted["folder-1"])
+}
+
 type populatedKBKnowledgeRepo struct {
 	interfaces.KnowledgeRepository
 	items []*types.Knowledge

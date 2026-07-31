@@ -9,6 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/common"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
@@ -87,7 +88,15 @@ func (s *sessionService) KnowledgeQA(
 	retrievalTenantID := s.resolveRetrievalTenantID(ctx, req)
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.TagScopes)
+	searchTargets, err := s.buildSearchTargetsWithHints(
+		ctx,
+		retrievalTenantID,
+		knowledgeBaseIDs,
+		knowledgeIDs,
+		req.KnowledgeBaseIDByKnowledgeID,
+		req.TagScopes,
+		req.FolderScopes,
+	)
 	if err != nil {
 		return fmt.Errorf("build search targets: %w", err)
 	}
@@ -432,15 +441,38 @@ func (s *sessionService) buildSearchTargets(
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
 	tagScopes []types.TagScope,
+	folderScopes []types.FolderScope,
+) (types.SearchTargets, error) {
+	return s.buildSearchTargetsWithHints(
+		ctx,
+		tenantID,
+		knowledgeBaseIDs,
+		knowledgeIDs,
+		nil,
+		tagScopes,
+		folderScopes,
+	)
+}
+
+func (s *sessionService) buildSearchTargetsWithHints(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeBaseIDs []string,
+	knowledgeIDs []string,
+	knowledgeBaseIDByKnowledgeID map[string]string,
+	tagScopes []types.TagScope,
+	folderScopes []types.FolderScope,
 ) (types.SearchTargets, error) {
 	var targets types.SearchTargets
 	tagIDsByKB := mergeTagScopesByKB(tagScopes)
+	hasFolderScope := len(folderScopes) > 0
 
 	// Build a map from KB ID to TenantID for all KBs we need to process
 	kbTenantMap := make(map[string]uint64)
 
 	// Track which KBs are fully searched
 	fullKBSet := make(map[string]bool)
+	folderTargetByKB := make(map[string]*types.SearchTarget)
 
 	// First pass: batch-fetch KBs, then resolve tenant per ID (tenant scope already set by caller)
 	callerTenantRole := types.TenantRoleFromContext(ctx)
@@ -448,12 +480,18 @@ func (s *sessionService) buildSearchTargets(
 	for kbID := range tagIDsByKB {
 		kbIDsToFetch = append(kbIDsToFetch, kbID)
 	}
+	for _, folderScope := range folderScopes {
+		kbIDsToFetch = append(kbIDsToFetch, folderScope.KnowledgeBaseID)
+	}
 	kbIDsToFetch = uniqueNonEmptyStrings(kbIDsToFetch)
 
 	kbByID := make(map[string]*types.KnowledgeBase)
 	if len(kbIDsToFetch) > 0 {
 		kbs, kbFetchErr := s.knowledgeBaseService.GetKnowledgeBasesByIDsOnly(ctx, kbIDsToFetch)
 		if kbFetchErr != nil {
+			if hasFolderScope {
+				return nil, fmt.Errorf("load knowledge bases for folder scope: %w", kbFetchErr)
+			}
 			logger.Warnf(ctx, "Failed to fetch knowledge bases for search targets: %v", kbFetchErr)
 		}
 		for _, kb := range kbs {
@@ -461,6 +499,16 @@ func (s *sessionService) buildSearchTargets(
 				kbByID[kb.ID] = kb
 			}
 		}
+	}
+	if err := s.authorizeFolderScopeKnowledgeBases(ctx, tenantID, folderScopes, kbByID); err != nil {
+		return nil, err
+	}
+	// Resolve each authorized folder subtree before constructing retrieval
+	// targets. Authorization must happen first: folder existence and subtree
+	// shape are not observable to callers without KB read access.
+	folderScopeByKB, folderResolveErr := s.resolveFolderScopesByKB(ctx, folderScopes)
+	if folderResolveErr != nil {
+		return nil, folderResolveErr
 	}
 	userID, _ := types.UserIDFromContext(ctx)
 	resolveKBTenant := func(kbID string) uint64 {
@@ -492,6 +540,23 @@ func (s *sessionService) buildSearchTargets(
 			if len(tagIDsByKB[kbID]) > 0 {
 				continue
 			}
+			// Folder scope on this KB: emit a KB target carrying the subtree
+			// FolderIDs filter instead of an unbounded full-KB target. This is
+			// the "full-KB suppression" rule from the design (issue #1311
+			// §5.2a) — without it the folder filter would be diluted by an
+			// unfiltered full-KB retrieval.
+			if subtree, ok := folderScopeByKB[kbID]; ok && len(subtree) > 0 {
+				target := &types.SearchTarget{
+					Type:                    types.SearchTargetTypeKnowledgeBase,
+					KnowledgeBaseID:         kbID,
+					TenantID:                kbTenant,
+					FolderIDs:               subtree,
+					DisableRecallThresholds: true,
+				}
+				targets = append(targets, target)
+				folderTargetByKB[kbID] = target
+				continue
+			}
 			targets = append(targets, &types.SearchTarget{
 				Type:            types.SearchTargetTypeKnowledgeBase,
 				KnowledgeBaseID: kbID,
@@ -501,30 +566,67 @@ func (s *sessionService) buildSearchTargets(
 	}
 
 	kbToKnowledgeIDs := make(map[string][]string)
+	unresolvedExplicitKnowledgeByKB := make(map[string]bool)
 
 	// Process individual knowledge IDs (include shared KB files the user has access to)
 	if len(knowledgeIDs) > 0 {
-		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
+		requestedKnowledgeIDs := uniqueNonEmptyStrings(knowledgeIDs)
+		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, requestedKnowledgeIDs)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to get knowledge batch for search targets: %v", err)
-			return targets, nil // Return what we have, don't fail
+			if hasFolderScope {
+				return nil, fmt.Errorf("resolve explicit knowledge targets for folder scope: %w", err)
+			}
+			return targets, nil
 		}
 
 		// Group knowledge IDs by their KB, excluding those already covered by full KB search
 		// Also track KB tenant IDs from knowledge items
+		resolvedKnowledgeBaseByID := make(map[string]string, len(knowledgeList))
 		for _, k := range knowledgeList {
 			if k == nil || k.KnowledgeBaseID == "" {
+				continue
+			}
+			resolvedKnowledgeBaseByID[k.ID] = k.KnowledgeBaseID
+			if expectedKBID := knowledgeBaseIDByKnowledgeID[k.ID]; hasFolderScope && expectedKBID != "" &&
+				expectedKBID != k.KnowledgeBaseID {
 				continue
 			}
 			// Track KB -> TenantID mapping from knowledge items
 			if kbTenantMap[k.KnowledgeBaseID] == 0 {
 				kbTenantMap[k.KnowledgeBaseID] = k.TenantID
 			}
-			// Skip if this KB is already fully searched without a tag scope.
-			if fullKBSet[k.KnowledgeBaseID] && len(tagIDsByKB[k.KnowledgeBaseID]) == 0 {
+			// A whole-KB selection makes explicit files redundant, except when
+			// that KB is narrowed by a folder. In that case the explicit files
+			// and folder are an intersection and must share one target.
+			if fullKBSet[k.KnowledgeBaseID] &&
+				len(tagIDsByKB[k.KnowledgeBaseID]) == 0 &&
+				len(folderScopeByKB[k.KnowledgeBaseID]) == 0 {
 				continue
 			}
 			kbToKnowledgeIDs[k.KnowledgeBaseID] = append(kbToKnowledgeIDs[k.KnowledgeBaseID], k.ID)
+		}
+		hasUnresolvedKnowledgeWithoutKBHint := false
+		if hasFolderScope {
+			for _, knowledgeID := range requestedKnowledgeIDs {
+				resolvedKBID, resolved := resolvedKnowledgeBaseByID[knowledgeID]
+				expectedKBID := knowledgeBaseIDByKnowledgeID[knowledgeID]
+				if expectedKBID == "" {
+					if !resolved {
+						hasUnresolvedKnowledgeWithoutKBHint = true
+					}
+					continue
+				}
+				if !resolved || resolvedKBID != expectedKBID {
+					unresolvedExplicitKnowledgeByKB[expectedKBID] = true
+				}
+			}
+		}
+		if hasUnresolvedKnowledgeWithoutKBHint &&
+			(len(tagIDsByKB) > 0 || len(folderScopeByKB) > 0) {
+			return nil, fmt.Errorf(
+				"cannot combine unresolved knowledge IDs without knowledge base hints with folder or tag scopes",
+			)
 		}
 
 		// Create SearchTargetTypeKnowledge targets for each KB with specific files
@@ -536,13 +638,27 @@ func (s *sessionService) buildSearchTargets(
 			if kbTenant == 0 {
 				kbTenant = tenantID // fallback
 			}
+			folderSubtree := folderScopeByKB[kbID]
+			if folderTarget := folderTargetByKB[kbID]; folderTarget != nil {
+				folderTarget.Type = types.SearchTargetTypeKnowledge
+				folderTarget.KnowledgeIDs = kidList
+				continue
+			}
 			targets = append(targets, &types.SearchTarget{
 				Type:                    types.SearchTargetTypeKnowledge,
 				KnowledgeBaseID:         kbID,
 				TenantID:                kbTenant,
 				KnowledgeIDs:            kidList,
+				FolderIDs:               folderSubtree,
 				DisableRecallThresholds: true,
 			})
+		}
+
+		for kbID, folderTarget := range folderTargetByKB {
+			if unresolvedExplicitKnowledgeByKB[kbID] && len(kbToKnowledgeIDs[kbID]) == 0 {
+				folderTarget.Type = types.SearchTargetTypeKnowledge
+				folderTarget.KnowledgeIDs = nil
+			}
 		}
 	}
 
@@ -553,6 +669,22 @@ func (s *sessionService) buildSearchTargets(
 		kbTenant := resolveKBTenant(kbID)
 		kb := kbByID[kbID]
 		explicitKnowledgeIDs := uniqueNonEmptyStrings(kbToKnowledgeIDs[kbID])
+		// If this KB also has a folder scope, attach the resolved FolderIDs to
+		// the tag target so retrieval applies both filters (AND). The folder
+		// subtree was already expanded in folderScopeByKB.
+		folderSubtree := folderScopeByKB[kbID]
+
+		if len(folderSubtree) > 0 && unresolvedExplicitKnowledgeByKB[kbID] && len(explicitKnowledgeIDs) == 0 {
+			targets = append(targets, &types.SearchTarget{
+				Type:                    types.SearchTargetTypeKnowledge,
+				KnowledgeBaseID:         kbID,
+				TenantID:                kbTenant,
+				FolderIDs:               folderSubtree,
+				ScopeTagIDs:             append([]string(nil), tagIDs...),
+				DisableRecallThresholds: true,
+			})
+			continue
+		}
 
 		useDocumentTagResolution := kb == nil || kb.Type != types.KnowledgeBaseTypeFAQ
 		if kb == nil {
@@ -568,6 +700,21 @@ func (s *sessionService) buildSearchTargets(
 			}
 			tagKnowledgeIDs = uniqueNonEmptyStrings(tagKnowledgeIDs)
 			if len(tagKnowledgeIDs) == 0 {
+				if len(folderSubtree) == 0 {
+					continue
+				}
+				// Preserve an explicit empty scope as an empty knowledge target.
+				// Dropping it would turn tag-only chat into pure chat, while
+				// query expansion could otherwise widen folder+tag back to the
+				// whole folder.
+				targets = append(targets, &types.SearchTarget{
+					Type:                    types.SearchTargetTypeKnowledge,
+					KnowledgeBaseID:         kbID,
+					TenantID:                kbTenant,
+					FolderIDs:               folderSubtree,
+					ScopeTagIDs:             append([]string(nil), tagIDs...),
+					DisableRecallThresholds: true,
+				})
 				continue
 			}
 			targets = append(targets, &types.SearchTarget{
@@ -575,6 +722,7 @@ func (s *sessionService) buildSearchTargets(
 				KnowledgeBaseID:         kbID,
 				TenantID:                kbTenant,
 				KnowledgeIDs:            tagKnowledgeIDs,
+				FolderIDs:               folderSubtree,
 				ScopeTagIDs:             append([]string(nil), tagIDs...),
 				DisableRecallThresholds: true,
 			})
@@ -586,6 +734,7 @@ func (s *sessionService) buildSearchTargets(
 			KnowledgeBaseID:         kbID,
 			TenantID:                kbTenant,
 			TagIDs:                  append([]string(nil), tagIDs...),
+			FolderIDs:               folderSubtree,
 			ScopeTagIDs:             append([]string(nil), tagIDs...),
 			DisableRecallThresholds: true,
 		}
@@ -597,10 +746,91 @@ func (s *sessionService) buildSearchTargets(
 		targets = append(targets, target)
 	}
 
+	// Folder-only scopes on KBs that were neither in the request's
+	// knowledgeBaseIDs list nor carrying a tag scope. These KBs still need a
+	// SearchTarget so the folder subtree is queried. (issue #1311)
+	for kbID, subtree := range folderScopeByKB {
+		if kbID == "" || len(subtree) == 0 {
+			continue
+		}
+		// Skip KBs we already emitted a target for above (full-KB-with-folder,
+		// tag-with-folder). Detection: if the KB is in fullKBSet AND we emitted
+		// a folder target, OR a tag scope covered it.
+		if fullKBSet[kbID] {
+			continue
+		}
+		if _, hasTag := tagIDsByKB[kbID]; hasTag {
+			continue
+		}
+		if len(kbToKnowledgeIDs[kbID]) > 0 {
+			continue
+		}
+		kbTenant := resolveKBTenant(kbID)
+		if unresolvedExplicitKnowledgeByKB[kbID] {
+			targets = append(targets, &types.SearchTarget{
+				Type:                    types.SearchTargetTypeKnowledge,
+				KnowledgeBaseID:         kbID,
+				TenantID:                kbTenant,
+				FolderIDs:               subtree,
+				DisableRecallThresholds: true,
+			})
+			continue
+		}
+		targets = append(targets, &types.SearchTarget{
+			Type:                    types.SearchTargetTypeKnowledgeBase,
+			KnowledgeBaseID:         kbID,
+			TenantID:                kbTenant,
+			FolderIDs:               subtree,
+			DisableRecallThresholds: true,
+		})
+	}
+
 	logger.Infof(ctx, "Built %d search targets: %d full KB, %d partial/tag KB, kbTenantMap=%v",
 		len(targets), len(knowledgeBaseIDs), len(targets)-len(knowledgeBaseIDs), kbTenantMap)
 
 	return targets, nil
+}
+
+func (s *sessionService) authorizeFolderScopeKnowledgeBases(
+	ctx context.Context,
+	tenantID uint64,
+	folderScopes []types.FolderScope,
+	kbByID map[string]*types.KnowledgeBase,
+) error {
+	seen := make(map[string]bool, len(folderScopes))
+	callerTenantRole := types.TenantRoleFromContext(ctx)
+	for _, scope := range folderScopes {
+		kbID := scope.KnowledgeBaseID
+		if kbID == "" || seen[kbID] {
+			continue
+		}
+		seen[kbID] = true
+		kb := kbByID[kbID]
+		if kb == nil {
+			return apperrors.NewNotFoundError("knowledge base not found")
+		}
+		if kb.TenantID == tenantID {
+			continue
+		}
+		if s.kbShareService == nil {
+			return apperrors.NewNotFoundError("knowledge base not found")
+		}
+		hasAccess, err := s.kbShareService.HasTenantKBPermission(
+			ctx,
+			kbID,
+			tenantID,
+			callerTenantRole,
+			types.OrgRoleViewer,
+		)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to verify folder-scope KB access for %s: %v", kbID, err)
+			return apperrors.NewInternalServerError("failed to verify knowledge base access")
+		}
+		if !hasAccess {
+			return apperrors.NewNotFoundError("knowledge base not found")
+		}
+	}
+	return nil
 }
 
 func mergeTagScopesByKB(scopes []types.TagScope) map[string][]string {
@@ -622,6 +852,46 @@ func mergeTagScopesByKB(scopes []types.TagScope) map[string][]string {
 		}
 	}
 	return byKB
+}
+
+// resolveFolderScopesByKB expands each FolderScope into its folder subtree via
+// the DocumentFolderService, then unions the results by KB. The returned map
+// is keyed by KnowledgeBaseID and valued by the deduplicated, expanded folder
+// ID set ready to drop into SearchTarget.FolderIDs.
+//
+// Root Q&A does NOT use a folder scope (per design §5.7): callers must only
+// pass FolderScopes whose FolderID is non-empty. An empty FolderID is silently
+// skipped here rather than treated as "whole KB" — that would silently
+// bypass the scope and risk over-returning.
+func (s *sessionService) resolveFolderScopesByKB(
+	ctx context.Context, scopes []types.FolderScope,
+) (map[string][]string, error) {
+	out := make(map[string][]string)
+	if len(scopes) == 0 || s.documentFolderService == nil {
+		return out, nil
+	}
+	seen := make(map[string]map[string]bool)
+	for _, scope := range scopes {
+		if scope.KnowledgeBaseID == "" || scope.FolderID == "" {
+			continue
+		}
+		subtree, err := s.documentFolderService.ResolveSubtreeFolderIDs(ctx, scope.KnowledgeBaseID, scope.FolderID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve folder scope kb=%s folder=%s: %w",
+				scope.KnowledgeBaseID, scope.FolderID, err)
+		}
+		if seen[scope.KnowledgeBaseID] == nil {
+			seen[scope.KnowledgeBaseID] = make(map[string]bool)
+		}
+		for _, fid := range subtree {
+			if fid == "" || seen[scope.KnowledgeBaseID][fid] {
+				continue
+			}
+			seen[scope.KnowledgeBaseID][fid] = true
+			out[scope.KnowledgeBaseID] = append(out[scope.KnowledgeBaseID], fid)
+		}
+	}
+	return out, nil
 }
 
 func uniqueNonEmptyStrings(values []string) []string {
@@ -766,7 +1036,11 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 				"reason":      "search_nothing",
 				"strategy":    string(chatManage.FallbackStrategy),
 			})
-			s.handleFallbackResponse(ctx, chatManage)
+			if chatManage.SearchTargets.HasFolderScope() {
+				s.handleScopeEmptyResponse(ctx, chatManage)
+			} else {
+				s.handleFallbackResponse(ctx, chatManage)
+			}
 			return nil
 		}
 
@@ -798,11 +1072,16 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 // knowledgeBaseIDs: list of knowledge base IDs to search (supports multi-KB)
 // knowledgeIDs: list of specific knowledge (file) IDs to search
 func (s *sessionService) SearchKnowledge(ctx context.Context,
-	knowledgeBaseIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, query string,
+	knowledgeBaseIDs []string,
+	knowledgeIDs []string,
+	knowledgeBaseIDByKnowledgeID map[string]string,
+	tagScopes []types.TagScope,
+	folderScopes []types.FolderScope,
+	query string,
 ) ([]*types.SearchResult, error) {
 	logger.Info(ctx, "Start knowledge base search without LLM summary")
-	logger.Infof(ctx, "Knowledge base search parameters, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, query: %s",
-		knowledgeBaseIDs, knowledgeIDs, len(tagScopes), query)
+	logger.Infof(ctx, "Knowledge base search parameters, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, folder scopes: %d, query: %s",
+		knowledgeBaseIDs, knowledgeIDs, len(tagScopes), len(folderScopes), query)
 
 	// Get tenant ID from context
 	tenantID, ok := types.TenantIDFromContext(ctx)
@@ -812,7 +1091,15 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, tagScopes)
+	searchTargets, err := s.buildSearchTargetsWithHints(
+		ctx,
+		tenantID,
+		knowledgeBaseIDs,
+		knowledgeIDs,
+		knowledgeBaseIDByKnowledgeID,
+		tagScopes,
+		folderScopes,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}
@@ -921,6 +1208,29 @@ func (s *sessionService) handleFallbackResponse(ctx context.Context, chatManage 
 		s.handleModelFallback(ctx, chatManage)
 	} else {
 		s.handleFixedFallback(ctx, chatManage)
+	}
+}
+
+func (s *sessionService) handleScopeEmptyResponse(ctx context.Context, chatManage *types.ChatManage) {
+	content := scopeEmptyMessage(ctx)
+	chatManage.ChatResponse = &types.ChatResponse{Content: content}
+	s.emitFallbackAnswer(ctx, chatManage, content)
+}
+
+func scopeEmptyMessage(ctx context.Context) string {
+	language, ok := types.LanguageFromContext(ctx)
+	if !ok {
+		language = types.DefaultLanguage()
+	}
+	switch {
+	case strings.HasPrefix(language, "zh"):
+		return "所选文件夹中没有找到相关内容。"
+	case strings.HasPrefix(language, "ko"):
+		return "선택한 폴더에서 관련 내용을 찾지 못했습니다."
+	case strings.HasPrefix(language, "ru"):
+		return "В выбранной папке не найдено подходящих материалов."
+	default:
+		return "No relevant content was found in the selected folder."
 	}
 }
 
@@ -1064,10 +1374,23 @@ func (s *sessionService) renderFallbackPrompt(ctx context.Context, chatManage *t
 // associated with the current pipeline. This gives the LLM visibility into KB contents
 // when vector/keyword search returns empty (e.g., broad browse queries).
 func (s *sessionService) buildKBDocumentListing(ctx context.Context, chatManage *types.ChatManage) string {
-	// Collect unique KB IDs from search targets
+	// Collect unique KB IDs from search targets, and the folder subtree IDs
+	// per KB (if a folder scope is present). When a folder scope exists, the
+	// fallback listing must be filtered to that subtree — otherwise a
+	// folder-scoped Q&A that falls back would feed the LLM document titles
+	// from sibling folders, defeating the scope guarantee. (issue #1311 §6)
 	kbIDs := make(map[string]struct{})
+	folderScopeByKB := make(map[string]map[string]bool)
 	for _, t := range chatManage.SearchTargets {
 		kbIDs[t.KnowledgeBaseID] = struct{}{}
+		if len(t.FolderIDs) > 0 {
+			if folderScopeByKB[t.KnowledgeBaseID] == nil {
+				folderScopeByKB[t.KnowledgeBaseID] = make(map[string]bool, len(t.FolderIDs))
+			}
+			for _, fid := range t.FolderIDs {
+				folderScopeByKB[t.KnowledgeBaseID][fid] = true
+			}
+		}
 	}
 	for _, id := range chatManage.KnowledgeBaseIDs {
 		kbIDs[id] = struct{}{}
@@ -1089,11 +1412,19 @@ func (s *sessionService) buildKBDocumentListing(ctx context.Context, chatManage 
 			logger.Warnf(ctx, "buildKBDocumentListing: failed to list knowledge for KB %s: %v", kbID, err)
 			continue
 		}
+		// Folder scope filter: when present, skip documents not in the subtree.
+		// Root-level documents (folder_id="") are included only when the
+		// subtree set contains "" (root Q&A uses KB scope, not folder scope,
+		// so this branch only triggers for explicit folder mentions).
+		folderSet := folderScopeByKB[kbID]
 		for _, k := range knowledges {
 			if total >= maxDocuments {
 				break
 			}
 			if k.EnableStatus != "enabled" {
+				continue
+			}
+			if folderSet != nil && !folderSet[k.FolderID] {
 				continue
 			}
 			title := k.Title

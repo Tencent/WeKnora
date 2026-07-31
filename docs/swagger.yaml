@@ -1019,6 +1019,94 @@ definitions:
         description: Last update timestamp
         type: string
     type: object
+  github_com_Tencent_WeKnora_internal_types.DocumentFolder:
+    properties:
+      created_at:
+        type: string
+      deleted_at:
+        $ref: '#/definitions/gorm.DeletedAt'
+      depth:
+        type: integer
+      id:
+        type: string
+      knowledge_base_id:
+        type: string
+      name:
+        type: string
+      parent_id:
+        type: string
+      path:
+        type: string
+      tenant_id:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.DocumentFolderCreateRequest:
+    properties:
+      name:
+        maxLength: 255
+        minLength: 1
+        type: string
+      parent_id:
+        type: string
+    required:
+    - name
+    type: object
+  github_com_Tencent_WeKnora_internal_types.DocumentFolderDeleteImpact:
+    properties:
+      active_document_count:
+        type: integer
+      document_count:
+        type: integer
+      folder_count:
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.DocumentFolderListResponse:
+    properties:
+      folders:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DocumentFolderNode'
+        type: array
+      has_more:
+        type: boolean
+      next_cursor:
+        type: string
+      parent_id:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.DocumentFolderNode:
+    properties:
+      created_at:
+        type: string
+      deleted_at:
+        $ref: '#/definitions/gorm.DeletedAt'
+      depth:
+        type: integer
+      document_count:
+        type: integer
+      has_children:
+        type: boolean
+      id:
+        type: string
+      knowledge_base_id:
+        type: string
+      name:
+        type: string
+      parent_id:
+        type: string
+      path:
+        type: string
+      tenant_id:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.DocumentFolderUpdateRequest:
+    properties:
+      name:
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.EmbeddingParameters:
     properties:
       dimension:
@@ -1421,6 +1509,18 @@ definitions:
         type: integer
       file_type:
         description: File type of the knowledge
+        type: string
+      folder_id:
+        description: |-
+          FolderID is the document folder this knowledge is filed under. Empty
+          string means the root level of the KB. Only meaningful for document-type
+          KBs; FAQ/Wiki KBs leave it empty. (issue #1311)
+        type: string
+      folder_path:
+        description: |-
+          FolderPath is the display path of FolderID, populated on cross-KB
+          mention searches. Root-level documents and stale/deleted folders return
+          an empty path.
         type: string
       id:
         description: Unique identifier of the knowledge
@@ -2013,6 +2113,8 @@ definitions:
       channel:
         type: string
       content:
+        type: string
+      folder_id:
         type: string
       process_config:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides'
@@ -3008,6 +3110,11 @@ definitions:
         type: boolean
       disable_vector_match:
         type: boolean
+      folder_ids:
+        description: 'Folder IDs for subtree filtering (issue #1311)'
+        items:
+          type: string
+        type: array
       keyword_threshold:
         type: number
       knowledge_base_ids:
@@ -3072,6 +3179,12 @@ definitions:
       end_at:
         description: End at
         type: integer
+      folder_id:
+        description: |-
+          FolderID is the document folder recorded on the authoritative knowledge
+          row. It is persisted in history references so later folder-scoped turns
+          can reject stale references from outside the active subtree.
+        type: string
       id:
         description: ID
         type: string
@@ -4616,6 +4729,12 @@ definitions:
     properties:
       build_time:
         type: string
+      capabilities:
+        allOf:
+        - $ref: '#/definitions/internal_handler.SystemCapabilities'
+        description: |-
+          Capabilities are runtime gates, not build-time promises. Missing keys
+          are interpreted as false by newer frontends talking to older pods.
       commit_id:
         type: string
       db_migration_error:
@@ -5271,6 +5390,11 @@ definitions:
     - event_type
     - suggestion_set_id
     type: object
+  internal_handler.SystemCapabilities:
+    properties:
+      document_folders:
+        type: boolean
+    type: object
   internal_handler.TestProviderRequest:
     properties:
       parameters:
@@ -5703,7 +5827,7 @@ definitions:
       id:
         type: string
       kb_id:
-        description: Parent knowledge base for file/tag mentions
+        description: Parent knowledge base for file/tag/folder mentions
         type: string
       kb_name:
         description: Display name for parent KB
@@ -5720,7 +5844,7 @@ definitions:
         description: Preloaded agent skill name
         type: string
       type:
-        description: '"kb", "file", "tag", "mcp", "skill"'
+        description: '"kb", "file", "tag", "folder", "mcp", "skill"'
         type: string
     type: object
   internal_handler_session.SearchKnowledgeRequest:
@@ -10055,6 +10179,227 @@ paths:
       summary: 批量更新知识标签
       tags:
       - 知识管理
+  /knowledgebase/{kb_id}/document-folders:
+    get:
+      description: List one page of direct child folders. An empty parent_id selects
+        the knowledge-base root.
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Parent folder ID (empty = root)
+        in: query
+        name: parent_id
+        type: string
+      - description: Folder name or path keyword
+        in: query
+        name: keyword
+        type: string
+      - description: Opaque continuation cursor
+        in: query
+        name: cursor
+        type: string
+      - default: 50
+        description: Page size (1-200)
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DocumentFolderListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: List document folders
+      tags:
+      - 知识库
+    post:
+      consumes:
+      - application/json
+      description: Create a new empty folder under parent_id. An empty parent_id selects
+        the knowledge-base root.
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Folder data
+        in: body
+        name: folder
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DocumentFolderCreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DocumentFolder'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Create a document folder
+      tags:
+      - 知识库
+  /knowledgebase/{kb_id}/document-folders/{folder_id}:
+    delete:
+      description: Without mode, delete one empty folder synchronously. keep_documents
+        recursively removes the folder structure and moves its documents to the knowledge-base
+        root. delete_all permanently removes the subtree and all document-derived
+        data. Explicit modes run asynchronously.
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Folder ID
+        in: path
+        name: folder_id
+        required: true
+        type: string
+      - description: Deletion mode; omit for legacy empty-folder deletion
+        enum:
+        - keep_documents
+        - delete_all
+        in: query
+        name: mode
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Delete a document folder subtree
+      tags:
+      - 知识库
+    put:
+      consumes:
+      - application/json
+      description: Rename a folder and its materialized descendant paths. Folder reparenting
+        is not supported.
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Folder ID
+        in: path
+        name: folder_id
+        required: true
+        type: string
+      - description: Folder update
+        in: body
+        name: folder
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DocumentFolderUpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DocumentFolder'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Rename a document folder
+      tags:
+      - 知识库
+  /knowledgebase/{kb_id}/document-folders/{folder_id}/delete-impact:
+    get:
+      description: Return the live folder, document, and active-processing counts
+        for the selected folder subtree.
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Folder ID
+        in: path
+        name: folder_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DocumentFolderDeleteImpact'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Preview document-folder deletion
+      tags:
+      - 知识库
   /knowledgebase/{kb_id}/wiki/auto-fix:
     post:
       description: Automatically fix fixable wiki issues (broken links, etc.)

@@ -485,7 +485,13 @@ func (s *DataTableSummaryService) Handle(ctx context.Context, t *asynq.Task) err
 	}
 
 	// 4. 索引到向量数据库
-	if err := s.indexToVectorDB(ctx, chunks, resources.retrieveEngine, resources.embeddingModel); err != nil {
+	if err := s.indexToVectorDB(
+		ctx,
+		chunks,
+		resources.retrieveEngine,
+		resources.embeddingModel,
+		resources.knowledge.FolderID,
+	); err != nil {
 		s.cleanupOnFailure(ctx, resources, chunks, err)
 		return err
 	}
@@ -728,19 +734,12 @@ func (s *DataTableSummaryService) indexToVectorDB(
 	chunks []*types.Chunk,
 	engine *retriever.CompositeRetrieveEngine,
 	embedder embedding.Embedder,
+	folderID string,
 ) error {
 	// 构建索引信息列表
 	indexInfoList := make([]*types.IndexInfo, 0, len(chunks))
 	for _, chunk := range chunks {
-		indexInfoList = append(indexInfoList, &types.IndexInfo{
-			Content:         chunk.Content,
-			SourceID:        chunk.ID,
-			SourceType:      types.ChunkSourceType,
-			ChunkID:         chunk.ID,
-			KnowledgeID:     chunk.KnowledgeID,
-			KnowledgeBaseID: chunk.KnowledgeBaseID,
-			IsEnabled:       true,
-		})
+		indexInfoList = append(indexInfoList, newDocumentIndexInfo(chunk, folderID))
 	}
 
 	// 保存到数据库

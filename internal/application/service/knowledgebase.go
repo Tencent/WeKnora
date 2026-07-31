@@ -40,6 +40,7 @@ type knowledgeBaseService struct {
 	tenantRepo      interfaces.TenantRepository
 	fileSvc         interfaces.FileService
 	storageResolver interfaces.StorageBackendResolver
+	folderRepo      interfaces.DocumentFolderLifecycleRepository
 	graphEngine     interfaces.RetrieveGraphRepository
 	asynqClient     interfaces.TaskEnqueuer
 	taskInspector   interfaces.TaskInspector
@@ -62,6 +63,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	tenantRepo interfaces.TenantRepository,
 	fileSvc interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
+	folderRepo interfaces.DocumentFolderLifecycleRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
 	asynqClient interfaces.TaskEnqueuer,
 	taskInspector interfaces.TaskInspector,
@@ -83,6 +85,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 		tenantRepo:      tenantRepo,
 		fileSvc:         fileSvc,
 		storageResolver: storageResolver,
+		folderRepo:      folderRepo,
 		graphEngine:     graphEngine,
 		asynqClient:     asynqClient,
 		taskInspector:   taskInspector,
@@ -957,6 +960,16 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 				"knowledge_base_id": kbID,
 			})
 			return err
+		}
+	}
+
+	// Delete the document folder tree (issue #1311). Scoped to the KB and
+	// idempotent — runs unconditionally so a half-deleted KB still clears its
+	// folders. A failure must fail this maintenance attempt so Asynq retries
+	// instead of permanently leaving folder rows behind.
+	if s.folderRepo != nil {
+		if err := s.folderRepo.DeleteFoldersByKnowledgeBase(ctx, kbID); err != nil {
+			return fmt.Errorf("delete document folders for KB %s: %w", kbID, err)
 		}
 	}
 

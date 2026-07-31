@@ -23,9 +23,9 @@ type GenerateTitleRequest struct {
 type MentionedItemRequest struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
-	Type      string `json:"type"`       // "kb", "file", "tag", "mcp", "skill"
+	Type      string `json:"type"`       // "kb", "file", "tag", "folder", "mcp", "skill"
 	KBType    string `json:"kb_type"`    // "document" or "faq" (only for kb type)
-	KBID      string `json:"kb_id"`      // Parent knowledge base for file/tag mentions
+	KBID      string `json:"kb_id"`      // Parent knowledge base for file/tag/folder mentions
 	KBName    string `json:"kb_name"`    // Display name for parent KB
 	ServiceID string `json:"service_id"` // Parent MCP service for MCP tool mentions
 	SkillName string `json:"skill_name"` // Preloaded agent skill name

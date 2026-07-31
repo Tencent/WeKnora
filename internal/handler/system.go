@@ -293,6 +293,13 @@ type GetSystemInfoResponse struct {
 	StartedAt string `json:"started_at,omitempty"`
 	// UptimeSeconds is seconds elapsed since process start.
 	UptimeSeconds int64 `json:"uptime_seconds,omitempty"`
+	// Capabilities are runtime gates, not build-time promises. Missing keys
+	// are interpreted as false by newer frontends talking to older pods.
+	Capabilities SystemCapabilities `json:"capabilities"`
+}
+
+type SystemCapabilities struct {
+	DocumentFolders bool `json:"document_folders"`
 }
 
 // 编译时注入的版本信息
@@ -365,6 +372,9 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 		DBMigrationError:    dbMigrationErr,
 		StartedAt:           startedAt,
 		UptimeSeconds:       uptimeSec,
+		Capabilities: SystemCapabilities{
+			DocumentFolders: config.DocumentFoldersEnabled(h.cfg),
+		},
 	}
 
 	logger.Info(ctx, "System info retrieved successfully")

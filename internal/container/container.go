@@ -170,6 +170,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewDataSourceRepository))
 	must(container.Provide(repository.NewSyncLogRepository))
 	must(container.Provide(repository.NewWikiPageRepository))
+	must(container.Provide(repository.NewDocumentFolderRepository))
+	must(container.Provide(provideDocumentFolderLifecycleRepository))
 	must(container.Provide(repository.NewTaskPendingOpsRepository))
 	must(container.Provide(repository.NewTaskDeadLetterRepository))
 
@@ -215,6 +217,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewCustomAgentService))
 	must(container.Provide(service.NewUserResourceFavoriteService))
 	must(container.Provide(service.NewWikiPageService))
+	must(container.Provide(service.NewDocumentFolderService))
 	must(container.Provide(service.NewWikiIngestService, dig.Name("wikiIngest")))
 	must(container.Provide(service.NewWikiLintService))
 	must(container.Provide(service.NewEmbedChannelService))
@@ -373,6 +376,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewDataSourceHandler))
 	// Wiki page handler
 	must(container.Provide(handler.NewWikiPageHandler))
+	// Document folder handler (issue #1311)
+	must(container.Provide(handler.NewDocumentFolderHandler))
 	// IM integration
 	logger.Debugf(ctx, "[Container] Registering IM integration...")
 	must(container.Provide(imPkg.NewService))
@@ -403,6 +408,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")
 	return container
+}
+
+func provideDocumentFolderLifecycleRepository(
+	repo interfaces.DocumentFolderRepository,
+) interfaces.DocumentFolderLifecycleRepository {
+	return repo
 }
 
 // registerChatLocalImageResolver wires the chat package's LocalImageResolver
@@ -1052,7 +1063,10 @@ func initRetrieveEngineRegistry(
 		}
 	}
 	if slices.Contains(retrieveDriver, "sqlite") {
-		sqliteRepo := sqliteRetrieverRepo.NewSQLiteRetrieveEngineRepository(db)
+		sqliteRepo, err := sqliteRetrieverRepo.NewSQLiteRetrieveEngineRepository(db)
+		if err != nil {
+			return nil, fmt.Errorf("initialize configured sqlite retriever: %w", err)
+		}
 		if err := registry.Register(
 			retriever.NewKVHybridRetrieveEngine(sqliteRepo, types.SQLiteRetrieverEngineType),
 		); err != nil {
@@ -1068,9 +1082,12 @@ func initRetrieveEngineRegistry(
 			Password:  os.Getenv("ELASTICSEARCH_PASSWORD"),
 		})
 		if err != nil {
-			log.Errorf("Create elasticsearch_v8 client failed: %v", err)
+			return nil, fmt.Errorf("create configured elasticsearch_v8 client: %w", err)
 		} else {
-			elasticsearchRepo := elasticsearchRepoV8.NewElasticsearchEngineRepository(client, cfg, nil)
+			elasticsearchRepo, err := elasticsearchRepoV8.NewElasticsearchEngineRepository(client, cfg, nil)
+			if err != nil {
+				return nil, fmt.Errorf("initialize configured elasticsearch_v8 repository: %w", err)
+			}
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
 					elasticsearchRepo, types.ElasticsearchRetrieverEngineType,
@@ -1090,9 +1107,12 @@ func initRetrieveEngineRegistry(
 			Password:  os.Getenv("ELASTICSEARCH_PASSWORD"),
 		})
 		if err != nil {
-			log.Errorf("Create elasticsearch_v7 client failed: %v", err)
+			return nil, fmt.Errorf("create configured elasticsearch_v7 client: %w", err)
 		} else {
-			elasticsearchRepo := elasticsearchRepoV7.NewElasticsearchEngineRepository(client, cfg, nil)
+			elasticsearchRepo, err := elasticsearchRepoV7.NewElasticsearchEngineRepository(client, cfg, nil)
+			if err != nil {
+				return nil, fmt.Errorf("initialize configured elasticsearch_v7 repository: %w", err)
+			}
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
 					elasticsearchRepo, types.ElasticsearchRetrieverEngineType,

@@ -329,7 +329,35 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 		ChunkMetadata:           chunk.Metadata,
 		MatchedContent:          matchedContent,
 		KnowledgeBaseID:         knowledge.KnowledgeBaseID,
+		FolderID:                knowledge.FolderID,
 	}
+}
+
+// filterSearchResultsByFolderScope rechecks folder-scoped retrieval against
+// the relational knowledge row used to build each result. This keeps the
+// #1311 fail-closed guarantee local: stale index metadata can reduce recall,
+// but it cannot widen a folder query into another directory.
+func filterSearchResultsByFolderScope(
+	results []*types.SearchResult,
+	folderIDs []string,
+) []*types.SearchResult {
+	if len(folderIDs) == 0 {
+		return results
+	}
+	allowed := make(map[string]struct{}, len(folderIDs))
+	for _, folderID := range folderIDs {
+		allowed[folderID] = struct{}{}
+	}
+	filtered := make([]*types.SearchResult, 0, len(results))
+	for _, result := range results {
+		if result == nil {
+			continue
+		}
+		if _, ok := allowed[result.FolderID]; ok {
+			filtered = append(filtered, result)
+		}
+	}
+	return filtered
 }
 
 // isSearchableChunk checks if a chunk type should be included in search results.

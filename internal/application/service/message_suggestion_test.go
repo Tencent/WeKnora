@@ -1,11 +1,41 @@
 package service
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+type knowledgeSuggestionCall struct {
+	knowledgeBaseIDs []string
+	knowledgeIDs     []string
+	tagScopes        []types.TagScope
+}
+
+type recordingKnowledgeSuggestionService struct {
+	interfaces.CustomAgentService
+	calls      []knowledgeSuggestionCall
+	candidates []types.SuggestedQuestion
+}
+
+func (s *recordingKnowledgeSuggestionService) GetKnowledgeSuggestedQuestions(
+	_ context.Context,
+	_ string,
+	knowledgeBaseIDs []string,
+	knowledgeIDs []string,
+	tagScopes []types.TagScope,
+	_ int,
+) ([]types.SuggestedQuestion, error) {
+	s.calls = append(s.calls, knowledgeSuggestionCall{
+		knowledgeBaseIDs: append([]string(nil), knowledgeBaseIDs...),
+		knowledgeIDs:     append([]string(nil), knowledgeIDs...),
+		tagScopes:        append([]types.TagScope(nil), tagScopes...),
+	})
+	return append([]types.SuggestedQuestion(nil), s.candidates...), nil
+}
 
 func TestParseGeneratedSuggestionsFiltersAndDeduplicates(t *testing.T) {
 	content := "```json\n{\"questions\":[" +
@@ -43,6 +73,84 @@ func TestMergeSuggestionItemsPreservesPriorityAndLimit(t *testing.T) {
 	got := mergeSuggestionItems(primary, fallback, 2)
 	if len(got) != 2 || got[0].ID != "1" || got[1].ID != "3" {
 		t.Fatalf("mergeSuggestionItems() = %#v", got)
+	}
+}
+
+func TestGenerateFromKnowledgeFolderScopeUsesOnlyActualEvidenceWithoutFallback(t *testing.T) {
+	agentService := &recordingKnowledgeSuggestionService{}
+	service := &messageSuggestionService{customAgentService: agentService}
+	message := &types.Message{
+		AgentID: "agent-1",
+		ExecutionContext: types.MessageExecutionContext{
+			KnowledgeBaseIDs: []string{"kb-1"},
+			KnowledgeIDs:     []string{"requested-doc"},
+			TagScopes: []types.TagScope{{
+				KnowledgeBaseID: "kb-1",
+				TagIDs:          []string{"tag-1"},
+			}},
+			FolderScopes: []types.FolderScope{{
+				KnowledgeBaseID: "kb-1",
+				FolderID:        "folder-1",
+			}},
+		},
+	}
+
+	items, err := service.generateFromKnowledge(
+		context.Background(),
+		message,
+		"answer",
+		suggestionGenerationContext{ActualKnowledgeIDs: []string{"actual-doc"}},
+		3,
+	)
+
+	if err != nil {
+		t.Fatalf("generateFromKnowledge() error = %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("items = %#v, want no candidates", items)
+	}
+	if len(agentService.calls) != 1 {
+		t.Fatalf("calls = %d, want exactly one scoped lookup", len(agentService.calls))
+	}
+	call := agentService.calls[0]
+	if len(call.knowledgeBaseIDs) != 0 || len(call.tagScopes) != 0 {
+		t.Fatalf("folder lookup widened with KB/tag scopes: %#v", call)
+	}
+	if len(call.knowledgeIDs) != 1 || call.knowledgeIDs[0] != "actual-doc" {
+		t.Fatalf("knowledge IDs = %#v, want actual evidence only", call.knowledgeIDs)
+	}
+}
+
+func TestGenerateFromKnowledgeFolderScopeWithoutActualEvidenceSkipsLookup(t *testing.T) {
+	agentService := &recordingKnowledgeSuggestionService{}
+	service := &messageSuggestionService{customAgentService: agentService}
+	message := &types.Message{
+		AgentID: "agent-1",
+		ExecutionContext: types.MessageExecutionContext{
+			KnowledgeBaseIDs: []string{"kb-1"},
+			FolderScopes: []types.FolderScope{{
+				KnowledgeBaseID: "kb-1",
+				FolderID:        "folder-1",
+			}},
+		},
+	}
+
+	items, err := service.generateFromKnowledge(
+		context.Background(),
+		message,
+		"answer",
+		suggestionGenerationContext{},
+		3,
+	)
+
+	if err != nil {
+		t.Fatalf("generateFromKnowledge() error = %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("items = %#v, want no candidates", items)
+	}
+	if len(agentService.calls) != 0 {
+		t.Fatalf("calls = %d, want no broad lookup", len(agentService.calls))
 	}
 }
 
