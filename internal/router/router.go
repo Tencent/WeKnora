@@ -72,6 +72,7 @@ type RouterParams struct {
 	ResourceCatalog              interfaces.ResourceCatalog
 	FAQHandler                   *handler.FAQHandler
 	TagHandler                   *handler.TagHandler
+	KnowledgeFolderHandler       *handler.KnowledgeFolderHandler
 	CustomAgentHandler           *handler.CustomAgentHandler
 	UserFavoriteHandler          *handler.UserResourceFavoriteHandler
 	SkillHandler                 *handler.SkillHandler
@@ -241,6 +242,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 			params.ResourceCatalog,
 		)
 		RegisterKnowledgeTagRoutes(v1, params.TagHandler, rbacGuards)
+		RegisterKnowledgeFolderRoutes(v1, params.KnowledgeFolderHandler, rbacGuards)
 		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)
 		RegisterFAQRoutes(v1, params.FAQHandler, rbacGuards)
 		RegisterChunkRoutes(v1, params.ChunkHandler, rbacGuards)

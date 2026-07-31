@@ -921,12 +921,13 @@ func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, authoriz
 	return nil
 }
 
-// SearchKnowledge searches knowledge items by keyword across the tenant and shared knowledge bases.
-// fileTypes: optional list of file extensions to filter by (e.g., ["csv", "xlsx"])
-func (s *knowledgeService) SearchKnowledge(ctx context.Context, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error) {
+// ResolveTenantSearchScopes returns searchable document KBs owned by or shared with the caller.
+func (s *knowledgeService) ResolveTenantSearchScopes(
+	ctx context.Context,
+) ([]types.KnowledgeSearchScope, error) {
 	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
 	if !ok {
-		return nil, false, 0, werrors.NewUnauthorizedError("Workspace ID not found in context")
+		return nil, werrors.NewUnauthorizedError("Workspace ID not found in context")
 	}
 
 	scopes := make([]types.KnowledgeSearchScope, 0)
@@ -960,7 +961,16 @@ func (s *knowledgeService) SearchKnowledge(ctx context.Context, keyword string, 
 			}
 		}
 	}
+	return scopes, nil
+}
 
+// SearchKnowledge searches knowledge items by keyword across the tenant and shared knowledge bases.
+// fileTypes: optional list of file extensions to filter by (e.g., ["csv", "xlsx"])
+func (s *knowledgeService) SearchKnowledge(ctx context.Context, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error) {
+	scopes, err := s.ResolveTenantSearchScopes(ctx)
+	if err != nil {
+		return nil, false, 0, err
+	}
 	if len(scopes) == 0 {
 		return nil, false, 0, nil
 	}

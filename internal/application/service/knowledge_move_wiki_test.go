@@ -19,6 +19,11 @@ import (
 type moveWikiKnowledgeRepo struct {
 	interfaces.KnowledgeRepository
 	knowledge *types.Knowledge
+	// columnWrites records the targeted column updates the move performs.
+	// A cross-KB move must explicitly reset folder_id: full-row saves omit
+	// that column (see omitFieldsOnUpdate), so without this write the document
+	// would land in the target KB still pointing at a folder of the source KB.
+	columnWrites []map[string]interface{}
 }
 
 func (r *moveWikiKnowledgeRepo) GetKnowledgeByID(
@@ -31,6 +36,16 @@ func (r *moveWikiKnowledgeRepo) GetKnowledgeByID(
 func (r *moveWikiKnowledgeRepo) UpdateKnowledge(_ context.Context, k *types.Knowledge) error {
 	clone := *k
 	r.knowledge = &clone
+	return nil
+}
+
+func (r *moveWikiKnowledgeRepo) UpdateKnowledgeColumns(
+	_ context.Context, _ string, columns map[string]interface{},
+) error {
+	r.columnWrites = append(r.columnWrites, columns)
+	if folderID, ok := columns["folder_id"].(string); ok {
+		r.knowledge.FolderID = folderID
+	}
 	return nil
 }
 
@@ -102,25 +117,30 @@ func opsFor(ops []*types.TaskPendingOp, kbID string) []*types.TaskPendingOp {
 
 func newMoveWikiService(t *testing.T) (
 	*knowledgeService, *moveWikiPageRepo, *moveWikiPendingRepo, *moveWikiChunkRepo,
+	*moveWikiKnowledgeRepo,
 ) {
 	t.Helper()
 	wikiRepo := &moveWikiPageRepo{}
 	pendingRepo := &moveWikiPendingRepo{}
 	chunkRepo := &moveWikiChunkRepo{}
+	knowledgeRepo := &moveWikiKnowledgeRepo{knowledge: &types.Knowledge{
+		ID:              "kn-1",
+		TenantID:        1,
+		Title:           "Doc",
+		KnowledgeBaseID: "kb-src",
+		ParseStatus:     types.ParseStatusCompleted,
+		// The document sits in a folder of the source KB, so the move has to
+		// clear the placement rather than carry a dead folder id across.
+		FolderID: "folder-in-src",
+	}}
 	svc := &knowledgeService{
-		repo: &moveWikiKnowledgeRepo{knowledge: &types.Knowledge{
-			ID:              "kn-1",
-			TenantID:        1,
-			Title:           "Doc",
-			KnowledgeBaseID: "kb-src",
-			ParseStatus:     types.ParseStatusCompleted,
-		}},
+		repo:            knowledgeRepo,
 		wikiRepo:        wikiRepo,
 		taskPendingRepo: pendingRepo,
 		task:            &wikiGuardTaskQueue{},
 		chunkRepo:       chunkRepo,
 	}
-	return svc, wikiRepo, pendingRepo, chunkRepo
+	return svc, wikiRepo, pendingRepo, chunkRepo, knowledgeRepo
 }
 
 func moveWikiCtx() context.Context {
@@ -131,7 +151,7 @@ func TestMoveOneKnowledgeRetractsWikiFromSourceKB(t *testing.T) {
 	// An unknown mode makes the move itself a no-op, which pins the cleanup as
 	// unconditional: it runs before the mode dispatch, while the knowledge still
 	// belongs to the source KB.
-	svc, wikiRepo, pendingRepo, _ := newMoveWikiService(t)
+	svc, wikiRepo, pendingRepo, _, _ := newMoveWikiService(t)
 
 	err := svc.moveOneKnowledge(moveWikiCtx(), "kn-1",
 		wikiEnabledKB("kb-src"), wikiEnabledKB("kb-dst"), "bogus")
@@ -148,7 +168,7 @@ func TestMoveOneKnowledgeRetractsWikiFromSourceKB(t *testing.T) {
 func TestMoveOneKnowledgeReuseVectorsIngestsIntoTargetKB(t *testing.T) {
 	// reuse_vectors keeps the existing chunks and never re-enters the parse
 	// pipeline, so nothing else would tell the target KB to build wiki pages.
-	svc, _, pendingRepo, chunkRepo := newMoveWikiService(t)
+	svc, _, pendingRepo, chunkRepo, knowledgeRepo := newMoveWikiService(t)
 
 	err := svc.moveOneKnowledge(moveWikiCtx(), "kn-1",
 		wikiEnabledKB("kb-src"), wikiEnabledKB("kb-dst"), "reuse_vectors")
@@ -160,10 +180,16 @@ func TestMoveOneKnowledgeReuseVectorsIngestsIntoTargetKB(t *testing.T) {
 	require.Len(t, dstOps, 1)
 	assert.Equal(t, WikiOpIngest, dstOps[0].Op)
 	assert.Equal(t, "kn-1", dstOps[0].DedupKey)
+
+	// The folder placement is reset by an explicit column write: folder ids are
+	// KB-scoped, so keeping the source KB's id would point the document at a
+	// folder that does not exist in the target KB.
+	require.NotEmpty(t, knowledgeRepo.columnWrites)
+	assert.Equal(t, types.KnowledgeFolderRootID, knowledgeRepo.knowledge.FolderID)
 }
 
 func TestMoveOneKnowledgeSkipsWikiWorkForNonWikiKBs(t *testing.T) {
-	svc, wikiRepo, pendingRepo, _ := newMoveWikiService(t)
+	svc, wikiRepo, pendingRepo, _, _ := newMoveWikiService(t)
 
 	err := svc.moveOneKnowledge(moveWikiCtx(), "kn-1",
 		&types.KnowledgeBase{ID: "kb-src"}, &types.KnowledgeBase{ID: "kb-dst"}, "reuse_vectors")

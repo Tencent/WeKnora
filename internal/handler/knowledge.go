@@ -38,6 +38,7 @@ type KnowledgeHandler struct {
 	agentShareService interfaces.AgentShareService
 	asynqClient       interfaces.TaskEnqueuer
 	spanRepo          repository.KnowledgeSpanRepository
+	folderService     interfaces.KnowledgeFolderService
 }
 
 // NewKnowledgeHandler creates a new knowledge handler instance
@@ -49,6 +50,7 @@ func NewKnowledgeHandler(
 	agentShareService interfaces.AgentShareService,
 	asynqClient interfaces.TaskEnqueuer,
 	spanRepo repository.KnowledgeSpanRepository,
+	folderService interfaces.KnowledgeFolderService,
 ) *KnowledgeHandler {
 	return &KnowledgeHandler{
 		cfg:               cfg,
@@ -58,6 +60,7 @@ func NewKnowledgeHandler(
 		agentShareService: agentShareService,
 		asynqClient:       asynqClient,
 		spanRepo:          spanRepo,
+		folderService:     folderService,
 	}
 }
 
@@ -306,6 +309,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
 // @Param        metadata          formData  string  false  "元数据JSON"
 // @Param        enable_multimodel formData  bool    false  "启用多模态处理"
 // @Param        tag_ids       formData  string  false  "分类ID列表，逗号分隔"
+// @Param        folder_id     formData  string  false  "目标文件夹ID（空 = 根目录）；fileName 含相对路径时在其下自动建链"
 // @Param        process_config    formData  string  false  "处理配置JSON（KnowledgeProcessOverrides）"
 // @Success      200               {object}  map[string]interface{}  "创建的知识"
 // @Failure      400               {object}  errors.AppError         "请求参数错误"
@@ -426,6 +430,9 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		return
 	}
 
+	h.fileKnowledgeIntoFolder(ctx, kbID, effectiveTenantID, knowledge,
+		c.PostForm("folder_id"), customFileName)
+
 	logger.Infof(
 		ctx,
 		"Knowledge created successfully, ID: %s, title: %s",
@@ -436,6 +443,39 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		"success": true,
 		"data":    knowledge,
 	})
+}
+
+// fileKnowledgeIntoFolder applies folder placement without failing a completed upload.
+func (h *KnowledgeHandler) fileKnowledgeIntoFolder(
+	ctx context.Context, kbID string, tenantID uint64,
+	knowledge *types.Knowledge, baseFolderID string, fileName string,
+) {
+	if h.folderService == nil || knowledge == nil {
+		return
+	}
+	baseFolderID = strings.TrimSpace(baseFolderID)
+	targetFolderID := baseFolderID
+
+	if strings.Contains(fileName, "/") {
+		segments := strings.Split(fileName, "/")
+		leafID, err := h.folderService.FindOrCreateFolderPath(
+			ctx, kbID, tenantID, baseFolderID, segments[:len(segments)-1])
+		if err != nil {
+			logger.Warnf(ctx, "Failed to resolve folder chain for %s: %v",
+				secutils.SanitizeForLog(fileName), err)
+		} else {
+			targetFolderID = leafID
+		}
+	}
+	if targetFolderID == types.KnowledgeFolderRootID {
+		return
+	}
+	if _, err := h.folderService.MoveKnowledgeToFolder(ctx, kbID, []string{knowledge.ID}, targetFolderID); err != nil {
+		logger.Warnf(ctx, "Failed to file knowledge %s into folder %s: %v",
+			secutils.SanitizeForLog(knowledge.ID), secutils.SanitizeForLog(targetFolderID), err)
+		return
+	}
+	knowledge.FolderID = targetFolderID
 }
 
 // CreateKnowledgeFromURL godoc
@@ -478,6 +518,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		EnableMultimodel *bool                            `json:"enable_multimodel"`
 		Title            string                           `json:"title"`
 		TagIDs           []string                         `json:"tag_ids"`
+		FolderID         string                           `json:"folder_id"`
 		Channel          string                           `json:"channel"`
 		ProcessConfig    *types.KnowledgeProcessOverrides `json:"process_config"`
 	}
@@ -523,6 +564,8 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
+
+	h.fileKnowledgeIntoFolder(ctx, kbID, effectiveTenantID, knowledge, req.FolderID, "")
 
 	logger.Infof(
 		ctx,
@@ -586,6 +629,8 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
+
+	h.fileKnowledgeIntoFolder(ctx, kbID, effectiveTenantID, knowledge, req.FolderID, "")
 
 	logger.Infof(ctx, "Manual knowledge created successfully, knowledge ID: %s",
 		secutils.SanitizeForLog(knowledge.ID))
@@ -925,6 +970,8 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 // @Param        source        query     string  false  "来源/渠道筛选 (web/api/feishu/notion/yuque/wechat/...，或 manual/url 按 type 过滤)"
 // @Param        start_time    query     string  false  "更新时间起点，RFC3339 格式"
 // @Param        end_time      query     string  false  "更新时间终点，RFC3339 格式"
+// @Param        folder_id         query  string  false  "文件夹筛选：__root__ 表示根目录直属，其余为文件夹ID；缺省不过滤"
+// @Param        folder_recursive  query  bool    false  "为 true 时 folder_id 的筛选包含其全部子文件夹"
 // @Success      200        {object}  map[string]interface{}  "知识列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -975,6 +1022,22 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 			return
 		}
 		filter.UpdatedTo = t
+	}
+	if folderID := strings.TrimSpace(c.Query("folder_id")); folderID != "" {
+		filter.FolderID = folderID
+		if c.Query("folder_recursive") == "true" && folderID != types.FolderRootSentinel && h.folderService != nil {
+			subtree, err := h.folderService.ExpandFolderSubtrees(ctx, kbID, []string{folderID})
+			if err != nil {
+				logger.ErrorWithFields(ctx, err, nil)
+				c.Error(errors.NewInternalServerError(err.Error()))
+				return
+			}
+			if len(subtree) == 0 {
+				// Unknown/dead folder: an explicit empty scope, not "no filter".
+				subtree = []string{folderID}
+			}
+			filter.FolderIDs = subtree
+		}
 	}
 
 	logger.Infof(
@@ -1244,6 +1307,13 @@ func (h *KnowledgeHandler) ClearKnowledgeBaseContents(c *gin.Context) {
 		logger.Errorf(ctx, "Failed to enqueue knowledge list delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue cleanup task"))
 		return
+	}
+
+	if h.folderService != nil {
+		if err := h.folderService.DeleteFoldersByKnowledgeBase(ctx, kbID); err != nil {
+			logger.Warnf(ctx, "Failed to clear folders for knowledge base %s: %v",
+				secutils.SanitizeForLog(kbID), err)
+		}
 	}
 
 	logger.Infof(ctx, "Knowledge base contents clear task enqueued: %s, kb_id: %s, count: %d",
@@ -2126,6 +2196,67 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success":  true,
 		"data":     knowledges,
+		"has_more": hasMore,
+		"total":    total,
+	})
+}
+
+// SearchKnowledgeFolders godoc
+// @Summary      Search knowledge folders
+// @Description  Search folders across the caller's document knowledge bases (own + org-shared), matching the folder name or its materialized path. Only folders holding at least one document are returned, since an empty folder cannot narrow retrieval. Pagination and total span every scope, mirroring /knowledge/search.
+// @Tags         Knowledge
+// @Produce      json
+// @Param        keyword    query     string  false "Keyword to match against folder name or path"
+// @Param        offset     query     int     false "Offset for pagination"
+// @Param        limit      query     int     false "Limit for pagination (default 20, max 100)"
+// @Success      200         {object}  map[string]interface{}     "Search results"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/folders/search [get]
+func (h *KnowledgeHandler) SearchKnowledgeFolders(c *gin.Context) {
+	ctx := c.Request.Context()
+	if userID, ok := c.Get(types.UserIDContextKey.String()); ok {
+		ctx = context.WithValue(ctx, types.UserIDContextKey, userID)
+	}
+	if h.folderService == nil {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": []interface{}{}, "has_more": false, "total": 0})
+		return
+	}
+
+	keyword := strings.TrimSpace(c.Query("keyword"))
+	if keyword == "" {
+		keyword = strings.TrimSpace(c.Query("query"))
+	}
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	scopes, err := h.kgService.ResolveTenantSearchScopes(ctx)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(err)
+		return
+	}
+	scopes = filterKnowledgeSearchScopesForAPIKey(ctx, scopes)
+	if len(scopes) == 0 {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": []interface{}{}, "has_more": false, "total": 0})
+		return
+	}
+
+	folders, hasMore, total, err := h.folderService.SearchFoldersInScopes(ctx, scopes, keyword, offset, limit)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError("Failed to search knowledge folders").WithDetails(err.Error()))
+		return
+	}
+	if folders == nil {
+		folders = []*types.KnowledgeFolderSearchResult{}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success":  true,
+		"data":     folders,
 		"has_more": hasMore,
 		"total":    total,
 	})

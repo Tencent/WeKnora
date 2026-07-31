@@ -67,3 +67,49 @@ func TestListPaged_ExcludesDeletingByDefault(t *testing.T) {
 	assert.Equal(t, deletingID, rows[0].ID)
 	assert.Equal(t, int64(1), total)
 }
+
+// TestListPaged_FolderFilter locks the folder dimensions of the list filter:
+// no folder filter returns everything, FolderRootSentinel narrows to
+// root-level rows, a concrete folder id narrows to that folder, and a
+// pre-expanded FolderIDs subtree takes precedence over FolderID.
+func TestListPaged_FolderFilter(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+
+	const tenantID = uint64(1)
+	kbID := uuid.New().String()
+
+	insertInFolder := func(folderID string) string {
+		id := uuid.New().String()
+		require.NoError(t, db.Exec(`
+			INSERT INTO knowledges (id, tenant_id, knowledge_base_id, type, title, source, parse_status, folder_id)
+			VALUES (?, ?, ?, 'file', 'folder-filter-test', 'manual', 'completed', ?)
+		`, id, tenantID, kbID, folderID).Error)
+		return id
+	}
+	rootID := insertInFolder("")
+	inA := insertInFolder("folder-a")
+	inB := insertInFolder("folder-b")
+
+	page := &types.Pagination{Page: 1, PageSize: 100}
+	list := func(filter types.KnowledgeListFilter) []string {
+		rows, _, err := repo.ListPagedKnowledgeByKnowledgeBaseID(ctx, tenantID, kbID, page, filter)
+		require.NoError(t, err)
+		ids := make([]string, 0, len(rows))
+		for _, r := range rows {
+			ids = append(ids, r.ID)
+		}
+		return ids
+	}
+
+	assert.ElementsMatch(t, []string{rootID, inA, inB}, list(types.KnowledgeListFilter{}),
+		"no folder filter must return all rows")
+	assert.ElementsMatch(t, []string{rootID}, list(types.KnowledgeListFilter{FolderID: types.FolderRootSentinel}),
+		"root sentinel must narrow to root-level rows")
+	assert.ElementsMatch(t, []string{inA}, list(types.KnowledgeListFilter{FolderID: "folder-a"}),
+		"concrete folder id must narrow to that folder")
+	assert.ElementsMatch(t, []string{inA, inB},
+		list(types.KnowledgeListFilter{FolderID: "folder-a", FolderIDs: []string{"folder-a", "folder-b"}}),
+		"pre-expanded subtree list must take precedence over the single id")
+}

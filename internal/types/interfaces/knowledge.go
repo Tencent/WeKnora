@@ -209,6 +209,8 @@ type KnowledgeService interface {
 	SearchKnowledge(ctx context.Context, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error)
 	// SearchKnowledgeForScopes searches knowledge within the given (tenant_id, kb_id) scopes (e.g. for shared agent context).
 	SearchKnowledgeForScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error)
+	// ResolveTenantSearchScopes returns searchable document KB scopes visible to the caller.
+	ResolveTenantSearchScopes(ctx context.Context) ([]types.KnowledgeSearchScope, error)
 }
 
 // KnowledgeRepository defines the interface for knowledge repositories.

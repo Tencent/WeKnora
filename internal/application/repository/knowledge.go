@@ -36,7 +36,15 @@ func escapeLikeKeyword(keyword string) string {
 // counter jump back up and never reach zero (the "stuck
 // pending_subtasks_count / never promoted to completed" bug). Omitting
 // the column here means Save can never touch it.
-var omitFieldsOnUpdate = []string{"DeletedAt", "PendingSubtasksCount"}
+//
+// FolderID is omitted for the same reason: document parsing is asynchronous,
+// so a worker that loaded the row, did slow work, then saved an unrelated
+// field would write back the folder_id it read before a concurrent folder
+// move, silently undoing the move. Placement is owned by the knowledge folder
+// repository's targeted folder_id updates; callers that genuinely need to
+// reset placement (e.g. a cross-KB move, where the old KB's folder id must
+// not survive) must write the column explicitly via UpdateKnowledgeColumns.
+var omitFieldsOnUpdate = []string{"DeletedAt", "PendingSubtasksCount", "FolderID"}
 
 // knowledgeRepository implements knowledge base and knowledge repository interface
 type knowledgeRepository struct {
@@ -149,6 +157,19 @@ func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) 
 	}
 	if !filter.UpdatedTo.IsZero() {
 		query = query.Where("updated_at <= ?", filter.UpdatedTo)
+	}
+	// Folder placement. FolderIDs (a subtree pre-expanded by the service for
+	// recursive listing) takes precedence over the single-folder FolderID,
+	// where FolderRootSentinel selects root-level rows. The repository stays
+	// tree-agnostic on purpose.
+	if len(filter.FolderIDs) > 0 {
+		query = query.Where("folder_id IN (?)", filter.FolderIDs)
+	} else if filter.FolderID != "" {
+		if filter.FolderID == types.FolderRootSentinel {
+			query = query.Where("folder_id = ?", types.KnowledgeFolderRootID)
+		} else {
+			query = query.Where("folder_id = ?", filter.FolderID)
+		}
 	}
 	return query
 }

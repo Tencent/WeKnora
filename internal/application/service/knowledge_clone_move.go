@@ -1303,15 +1303,24 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 		return fmt.Errorf("failed to move chunks: %w", err)
 	}
 
-	// 4. Update knowledge record (tags are KB-scoped; clear relations before moving)
+	// 4. Update knowledge record (tags and folders are KB-scoped; clear both before moving)
 	if err := s.repo.DeleteKnowledgeTagRelations(ctx, knowledge.ID); err != nil {
 		return fmt.Errorf("failed to clear knowledge tag relations: %w", err)
 	}
 	knowledge.KnowledgeBaseID = targetKB.ID
+	knowledge.FolderID = types.KnowledgeFolderRootID
 	knowledge.ParseStatus = types.ParseStatusCompleted
 	knowledge.UpdatedAt = time.Now()
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		return fmt.Errorf("failed to update knowledge: %w", err)
+	}
+	// folder_id is omitted from full-row saves (it is owned by folder moves), so
+	// the reset to the target KB's root has to be written explicitly — keeping
+	// the source KB's folder id here would leave a dangling reference.
+	if err := s.repo.UpdateKnowledgeColumns(ctx, knowledge.ID, map[string]interface{}{
+		"folder_id": types.KnowledgeFolderRootID,
+	}); err != nil {
+		return fmt.Errorf("failed to reset knowledge folder: %w", err)
 	}
 
 	return nil
@@ -1331,11 +1340,12 @@ func (s *knowledgeService) moveKnowledgeReparse(
 		// Continue - partial cleanup is acceptable
 	}
 
-	// 2. Update knowledge to belong to target KB (tags are KB-scoped; clear relations)
+	// 2. Update knowledge to belong to target KB (tags and folders are KB-scoped; clear both)
 	if err := s.repo.DeleteKnowledgeTagRelations(ctx, knowledge.ID); err != nil {
 		return fmt.Errorf("failed to clear knowledge tag relations: %w", err)
 	}
 	knowledge.KnowledgeBaseID = targetKB.ID
+	knowledge.FolderID = types.KnowledgeFolderRootID
 	knowledge.EmbeddingModelID = targetKB.EmbeddingModelID
 	knowledge.ParseStatus = types.ParseStatusPending
 	knowledge.EnableStatus = "disabled"
@@ -1344,6 +1354,13 @@ func (s *knowledgeService) moveKnowledgeReparse(
 	knowledge.UpdatedAt = time.Now()
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		return fmt.Errorf("failed to update knowledge: %w", err)
+	}
+	// See moveKnowledgeReuseVectors: folder_id is omitted from full-row saves, so
+	// the reset to the target KB's root needs its own explicit write.
+	if err := s.repo.UpdateKnowledgeColumns(ctx, knowledge.ID, map[string]interface{}{
+		"folder_id": types.KnowledgeFolderRootID,
+	}); err != nil {
+		return fmt.Errorf("failed to reset knowledge folder: %w", err)
 	}
 
 	// 3. Enqueue document processing task with target KB's configuration

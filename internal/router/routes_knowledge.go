@@ -117,6 +117,7 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		kRead.GET("/:id/preview", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.PreviewKnowledgeFile)
 		k.PUT("/image/:id/:chunk_id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateImageInfo)
 		kRead.GET("/search", g.Viewer(), handler.SearchKnowledge)
+		kRead.GET("/folders/search", g.Viewer(), handler.SearchKnowledgeFolders)
 		kRead.GET("/move/progress/:task_id", g.Viewer(), handler.GetKnowledgeMoveProgress)
 		// Batch / cross-KB content writes: JWT Contributor+, or an API key
 		// with the ingest capability (or full access). Each handler binds the
@@ -277,6 +278,24 @@ func RegisterKnowledgeTagRoutes(r *gin.RouterGroup, tagHandler *handler.TagHandl
 		kbTags.PUT("/:tag_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), tagHandler.UpdateTag)
 		kbTags.DELETE("/:tag_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), tagHandler.DeleteTag)
 	}
+}
+
+// RegisterKnowledgeFolderRoutes registers folder management routes.
+func RegisterKnowledgeFolderRoutes(r *gin.RouterGroup, folderHandler *handler.KnowledgeFolderHandler, g *rbacGuards) {
+	if folderHandler == nil {
+		return
+	}
+	kbFolders := g.apiKeyGroup(r.Group("/knowledge-bases/:id/folders"), apiKeyIngest(apiKeyFullAccess()))
+	kbFoldersRead := kbFolders.With(apiKeyRetrieve(apiKeyFullAccess()))
+	{
+		kbFoldersRead.GET("", g.Viewer(), g.KBAccessRead("id"), folderHandler.ListFolders)
+		kbFolders.POST("", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), folderHandler.CreateFolder)
+		kbFolders.POST("/organize-by-path", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), folderHandler.OrganizeByPath)
+		kbFolders.PUT("/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), folderHandler.UpdateFolder)
+		kbFolders.DELETE("/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), folderHandler.DeleteFolder)
+	}
+	kbMove := g.apiKeyGroup(r.Group("/knowledge-bases/:id/knowledge"), apiKeyIngest(apiKeyFullAccess()))
+	kbMove.POST("/move-to-folder", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), folderHandler.MoveKnowledgeToFolder)
 }
 
 // RegisterWikiPageRoutes registers wiki page related routes.
