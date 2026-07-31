@@ -3597,3 +3597,5 @@ func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *a
 		len(payload.KnowledgeIDs)-failed, failed)
 	return nil
 }
+
+//解决冲突
