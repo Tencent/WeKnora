@@ -58,7 +58,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 			if searchutil.MarkdownImageRegex.MatchString(toolCall.Result.Output) {
 				hasRetrievedImage = true
 			}
-			modelOutput := e.sourceRefs.ModelOutput(toolCall.Result)
+			modelOutput := e.modelContext.ModelToolResultForTool(toolCall.Name, toolCall.Result)
 			messages = append(messages, chat.Message{
 				Role:    "user",
 				Content: fmt.Sprintf("Tool %s returned: %s", toolCall.Name, modelOutput),

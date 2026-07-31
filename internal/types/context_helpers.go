@@ -54,6 +54,20 @@ func UserIDFromContext(ctx context.Context) (string, bool) {
 	return v, ok && v != ""
 }
 
+// WithWikiEditSource marks ctx so wiki page writes performed under it are
+// attributed to the given edit source (WikiEditSourceUser / Agent / Revert).
+// Writes without the mark are attributed to the ingest pipeline.
+func WithWikiEditSource(ctx context.Context, source string) context.Context {
+	return context.WithValue(ctx, WikiEditSourceContextKey, NormalizeWikiEditSource(source))
+}
+
+// WikiEditSourceFromContext returns the wiki edit source carried by ctx,
+// defaulting to WikiEditSourcePipeline when absent.
+func WikiEditSourceFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(WikiEditSourceContextKey).(string)
+	return NormalizeWikiEditSource(v)
+}
+
 // TaskInitiator is the authenticated caller that submitted an asynchronous
 // task. Workers restore it into their context so audit entries describe who
 // initiated the operation, while tasks created by schedulers remain
@@ -181,6 +195,29 @@ func IsBackgroundTask(ctx context.Context) bool {
 	}
 	v, _ := ctx.Value(BackgroundTaskContextKey).(bool)
 	return v
+}
+
+// WithLLMCallMetadata annotates a provider call for cache observability. The
+// fingerprint must be a hash, never raw prompt content.
+func WithLLMCallMetadata(ctx context.Context, purpose, prefixFingerprint string) context.Context {
+	if strings.TrimSpace(purpose) != "" {
+		ctx = context.WithValue(ctx, LLMCallPurposeContextKey, strings.TrimSpace(purpose))
+	}
+	if strings.TrimSpace(prefixFingerprint) != "" {
+		ctx = context.WithValue(ctx, LLMPromptPrefixFingerprintContextKey, strings.TrimSpace(prefixFingerprint))
+	}
+	return ctx
+}
+
+// LLMCallMetadataFromContext returns the cache-observability labels attached
+// by the orchestration layer.
+func LLMCallMetadataFromContext(ctx context.Context) (purpose, prefixFingerprint string) {
+	if ctx == nil {
+		return "", ""
+	}
+	purpose, _ = ctx.Value(LLMCallPurposeContextKey).(string)
+	prefixFingerprint, _ = ctx.Value(LLMPromptPrefixFingerprintContextKey).(string)
+	return purpose, prefixFingerprint
 }
 
 // LanguageFromContext extracts the language locale string from ctx (e.g. "zh-CN", "en-US").

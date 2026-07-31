@@ -12,6 +12,7 @@ export interface StartStreamParams {
   tag_ids?: string[]
   agent_enabled?: boolean
   agent_id?: string
+  agent_source_tenant_id?: string | number
   web_search_enabled?: boolean
   summary_model_id?: string
   mcp_service_ids?: string[]
@@ -44,6 +45,9 @@ export function buildStreamPostBody(params: StartStreamParams): Record<string, a
   }
   if (params.agent_id) {
     postBody.agent_id = params.agent_id
+  }
+  if (params.agent_source_tenant_id) {
+    postBody.agent_source_tenant_id = Number(params.agent_source_tenant_id)
   }
   if (params.web_search_enabled !== undefined) {
     postBody.web_search_enabled = params.web_search_enabled

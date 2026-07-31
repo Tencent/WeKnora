@@ -682,6 +682,20 @@ func (a *asynqTaskInspector) ForceDeleteRuntimeTask(ctx context.Context, queue, 
 	return true, a.inspector.DeleteTask(queue, taskID)
 }
 
+// PurgeArchivedRuntimeTasks clears the whole archived (dead-letter) set for one
+// queue. asynq's DeleteAllArchivedTasks scopes strictly to the archived list,
+// so pending/active/scheduled/retry work is never at risk.
+func (a *asynqTaskInspector) PurgeArchivedRuntimeTasks(ctx context.Context, queue string) (int, bool, error) {
+	if a == nil || a.inspector == nil {
+		return 0, false, nil
+	}
+	deleted, err := a.inspector.DeleteAllArchivedTasks(queue)
+	if err != nil {
+		return 0, true, err
+	}
+	return deleted, true, nil
+}
+
 func (a *asynqTaskInspector) WorkerServerStats(
 	ctx context.Context,
 ) ([]types.WorkerServerStat, bool, error) {

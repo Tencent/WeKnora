@@ -258,6 +258,7 @@ function auditActionTheme(
     case 'system.user_password_reset':
     case 'system.queue_task_deleted':
     case 'system.queue_task_cancelled':
+    case 'system.queue_archived_purged':
       return 'danger'
     case 'rbac.access_denied':
       return 'danger'
@@ -330,6 +331,10 @@ function auditTargetKey(row: AuditLog): string {
     const queue = details && typeof details.queue === 'string' ? details.queue : ''
     const taskID = details && typeof details.task_id === 'string' ? details.task_id : row.target_id
     return queue && taskID ? `${queue}:${taskID}` : taskID || queue
+  }
+  if (row.action === 'system.queue_archived_purged') {
+    const queue = details && typeof details.queue === 'string' ? details.queue : ''
+    return queue || row.target_id || ''
   }
   if (row.target_user_id) return row.target_user_id.slice(0, 8)
   if (row.target_id) {

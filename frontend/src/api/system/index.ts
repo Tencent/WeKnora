@@ -651,3 +651,18 @@ export async function mutateRuntimeTask(
     `/api/v1/system/admin/runtime/queues/${encodeURIComponent(queue)}/tasks/${encodeURIComponent(taskID)}/actions/${encodeURIComponent(action)}`,
   )
 }
+
+/**
+ * Clear every archived (finally-failed) task in one queue in a single call.
+ * Only touches the archived dead-letter set — live tasks are never affected.
+ * Backend: DELETE /api/v1/system/admin/runtime/queues/{queue}/archived.
+ * Returns the object directly (no {data: ...} wrapping, see request.ts).
+ */
+export async function purgeArchivedRuntimeTasks(
+  queue: string,
+): Promise<{ success: boolean; deleted: number }> {
+  const response = await del(
+    `/api/v1/system/admin/runtime/queues/${encodeURIComponent(queue)}/archived`,
+  )
+  return response as unknown as { success: boolean; deleted: number }
+}

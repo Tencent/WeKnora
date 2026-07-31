@@ -86,7 +86,9 @@ services:
       # - WEKNORA_TRUSTED_PROXIES=${WEKNORA_TRUSTED_PROXIES:-}
       # 启动时自动执行数据库迁移；设为 false 禁用，默认启用
       - AUTO_MIGRATE=${AUTO_MIGRATE:-true}
-      # 本地存储后端生成下载链接用的外部可达 URL（IM 渠道 local 后端必填）
+      # IM 渠道图片/文件外链的外部可达 URL。IM 显示知识库图片需二选一：
+      # 存储后端公网可达（如 MINIO_ENDPOINT 设为公网），或设本变量走 <APP_EXTERNAL_URL>/r/<token>（需 nginx 代理 /r/）。
+      # 默认 MinIO 内网部署 / local 后端需设本变量。
       # - APP_EXTERNAL_URL=${APP_EXTERNAL_URL:-}
       # 前端外部 origin，用于邀请链接等绝对 URL（留空走 host-relative）
       - FRONTEND_BASE_URL=${FRONTEND_BASE_URL:-}
@@ -100,18 +102,18 @@ services:
       - COS_TEMP_BUCKET_NAME=${COS_TEMP_BUCKET_NAME:-}
       - COS_TEMP_REGION=${COS_TEMP_REGION:-}
 
-      # 认证 / 租户 / RBAC / 审计
+      # 认证 / 空间 / RBAC / 审计
       # 禁止新用户注册（生产建议 true）
       - DISABLE_REGISTRATION=${DISABLE_REGISTRATION:-false}
       # 公开注册后的默认空间策略：create_personal（默认，自动创建个人空间）/ tenantless
       - WEKNORA_AUTH_DEFAULT_TENANT_MODE=${WEKNORA_AUTH_DEFAULT_TENANT_MODE:-create_personal}
       # 是否允许普通用户登录后主动创建空间（默认 true；false 仅能邀请加入，超管不受影响）
       - WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED=${WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED:-true}
-      # 启用跨租户访问（需配合用户的 CanAccessAllTenants 权限；默认 false
+      # 启用跨空间访问（需配合用户的 CanAccessAllTenants 权限；默认 false
       - WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS=${WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS:-false}
       # 新建空间默认存储配额（GB，默认 10）
       - WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_GB=${WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_GB:-10}
-      # 租户邀请链接 TTL（Go duration，默认 168h=7 天）
+      # 空间邀请链接 TTL（Go duration，默认 168h=7 天）
       - WEKNORA_INVITATION_TTL=${WEKNORA_INVITATION_TTL:-168h}
       # 审计日志保留天数（0 禁用清理，默认 90）
       - WEKNORA_AUDIT_RETENTION_DAYS=${WEKNORA_AUDIT_RETENTION_DAYS:-90}
@@ -291,7 +293,9 @@ services:
       # overrides don't clobber it. (postgres is intentionally NOT listed: it
       # is not a user-registerable vector store, and whitelisting the app's own
       # DB host would skip the 5432 port block.)
-      - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-searxng,qdrant,milvus,weaviate,doris-fe}
+      # doris-be: Stream Load follows FE→BE redirects that must receive Basic
+      # credentials on whitelisted BE hosts.
+      - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-searxng,qdrant,milvus,weaviate,doris-fe,doris-be}
       - CONCURRENCY_POOL_SIZE=${CONCURRENCY_POOL_SIZE:-5}
       - JWT_SECRET=${JWT_SECRET:-}
       # File size limit (in MB)

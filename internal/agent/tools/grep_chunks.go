@@ -263,10 +263,15 @@ func (t *GrepChunksTool) resolveGrepScope() (fullKBIDs, knowledgeIDs []string, t
 		if target == nil || target.KnowledgeBaseID == "" {
 			continue
 		}
+		// A target that carries a resolved document whitelist is already the
+		// intersection of its mention and any tag scope, so it must be grepped
+		// by knowledge ID. Falling back to the tag branch would widen the
+		// search to every document carrying the tag.
+		targetKnowledgeIDs, targetTagIDs := searchTargetScope(target)
 		switch {
-		case target.KnowledgeIDsSet && len(target.KnowledgeIDs) == 0:
+		case target.KnowledgeIDsSet && len(targetKnowledgeIDs) == 0:
 			continue
-		case target.KnowledgeIDsSet && len(target.KnowledgeIDs) > 0 && len(target.TagIDs) > 0:
+		case target.KnowledgeIDsSet && len(targetKnowledgeIDs) > 0 && len(target.TagIDs) > 0:
 			tenantID := target.TenantID
 			if tenantID == 0 {
 				tenantID = t.searchTargets.GetTenantIDForKB(target.KnowledgeBaseID)
@@ -279,7 +284,7 @@ func (t *GrepChunksTool) resolveGrepScope() (fullKBIDs, knowledgeIDs []string, t
 				target.KnowledgeBaseID,
 				tenantID,
 				strings.Join(tagIDs, "\x00"),
-				strings.Join(dedupNonEmptyStrings(target.KnowledgeIDs), "\x00"),
+				strings.Join(targetKnowledgeIDs, "\x00"),
 			)
 			if seenTagScope[scopeKey] {
 				continue
@@ -289,23 +294,23 @@ func (t *GrepChunksTool) resolveGrepScope() (fullKBIDs, knowledgeIDs []string, t
 				Type:            types.SearchTargetTypeKnowledge,
 				KnowledgeBaseID: target.KnowledgeBaseID,
 				TenantID:        tenantID,
-				KnowledgeIDs:    dedupNonEmptyStrings(target.KnowledgeIDs),
+				KnowledgeIDs:    targetKnowledgeIDs,
 				KnowledgeIDsSet: true,
 				TagIDs:          tagIDs,
 			})
-		case len(target.KnowledgeIDs) > 0:
-			for _, kid := range target.KnowledgeIDs {
-				if kid != "" && !seenKnowledge[kid] {
+		case len(targetKnowledgeIDs) > 0:
+			for _, kid := range targetKnowledgeIDs {
+				if !seenKnowledge[kid] {
 					seenKnowledge[kid] = true
 					knowledgeIDs = append(knowledgeIDs, kid)
 				}
 			}
-		case len(target.TagIDs) > 0:
+		case len(targetTagIDs) > 0:
 			tenantID := target.TenantID
 			if tenantID == 0 {
 				tenantID = t.searchTargets.GetTenantIDForKB(target.KnowledgeBaseID)
 			}
-			tagIDs := dedupNonEmptyStrings(target.TagIDs)
+			tagIDs := targetTagIDs
 			if len(tagIDs) == 0 || tenantID == 0 {
 				continue
 			}

@@ -39,6 +39,13 @@ type WikiPageService interface {
 	// GetPageBySlug retrieves a wiki page by its slug within a knowledge base.
 	GetPageBySlug(ctx context.Context, kbID string, slug string) (*types.WikiPage, error)
 
+	// RepairContentLinks rewrites dead [[slug]] references in content to their
+	// most likely live target (rewrite-only — never strips). Used by the agent
+	// write path to auto-correct LLM-mangled slugs (especially UUID-based
+	// summary slugs) before persistence. Returns the possibly-updated content
+	// and whether any rewrite happened. Best-effort: callers may ignore errors.
+	RepairContentLinks(ctx context.Context, kbID, selfSlug, content string) (string, bool, error)
+
 	// GetPageByID retrieves a wiki page by its unique ID.
 	GetPageByID(ctx context.Context, id string) (*types.WikiPage, error)
 
@@ -68,16 +75,6 @@ type WikiPageService interface {
 	// on every index open. See /wiki/index handler + WikiBrowser.vue for
 	// the consumer.
 	GetIndexView(ctx context.Context, kbID string, pageTypes []string, limit int, cursor string) (*types.WikiIndexResponse, error)
-
-	// GetLog returns the log page for a knowledge base.
-	//
-	// Wiki operation events now live in the dedicated wiki_log_entries
-	// table, so this method no longer auto-creates a placeholder row on
-	// miss and may legitimately return (nil, nil) for KBs that never had
-	// the legacy row written. Retained for back-compat with callers that
-	// still probe the row (lint, knowledge delete); new code should use
-	// WikiLogEntryService.List for the event feed instead.
-	GetLog(ctx context.Context, kbID string) (*types.WikiPage, error)
 
 	// GetGraph returns the link graph data for visualization. The caller
 	// supplies a WikiGraphRequest describing the desired slice of the graph
@@ -207,6 +204,21 @@ type WikiPageService interface {
 
 	// SearchPages performs full-text search over wiki pages.
 	SearchPages(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
+
+	// ListRevisions returns the stored historical snapshots for a page
+	// (newest first, content omitted) plus the total snapshot count and the
+	// page's current version. The current version itself has no revision
+	// row — it lives in wiki_pages.
+	ListRevisions(ctx context.Context, kbID string, slug string, limit int, offset int) (*types.WikiPageRevisionListResponse, error)
+
+	// GetRevision returns one historical snapshot (content included).
+	GetRevision(ctx context.Context, kbID string, slug string, version int) (*types.WikiPageRevision, error)
+
+	// RevertPageToVersion rolls the page back to the content of the given
+	// stored revision by applying it as a regular edit: the pre-revert state
+	// is snapshotted, version advances, and links are re-parsed. The edit is
+	// attributed to WikiEditSourceRevert.
+	RevertPageToVersion(ctx context.Context, kbID string, slug string, version int) (*types.WikiPage, error)
 
 	// CreateIssue logs a new issue for a wiki page.
 	CreateIssue(ctx context.Context, issue *types.WikiPageIssue) (*types.WikiPageIssue, error)
@@ -348,7 +360,7 @@ type WikiPageRepository interface {
 	// ListRecentForSuggestions returns recent user-visible wiki pages under the given
 	// knowledge bases, used to produce fallback suggested questions for Wiki-only KBs
 	// that do not have AI-generated document questions or recommended FAQ entries.
-	// Excludes index/log pages and archived pages. Returns up to `limit` rows sorted
+	// Excludes the index page and archived pages. Returns up to `limit` rows sorted
 	// by updated_at descending.
 	ListRecentForSuggestions(ctx context.Context, tenantID uint64, kbIDs []string, limit int) ([]*types.WikiPage, error)
 
@@ -366,6 +378,26 @@ type WikiPageRepository interface {
 
 	// CountOrphans returns the number of pages with no inbound links.
 	CountOrphans(ctx context.Context, kbID string) (int64, error)
+
+	// UpdateWithRevision snapshots the version being superseded and applies
+	// the page update in a single transaction, so history can never contain
+	// a snapshot of a version that is still current. Inserting an already-
+	// present (page_id, version) pair is a silent no-op.
+	UpdateWithRevision(ctx context.Context, page *types.WikiPage, rev *types.WikiPageRevision) error
+
+	// ListRevisions returns snapshots for a page newest-first (content
+	// column omitted) plus the total snapshot count.
+	ListRevisions(ctx context.Context, kbID string, pageID string, limit int, offset int) ([]*types.WikiPageRevision, int64, error)
+
+	// GetRevision returns one snapshot with content.
+	GetRevision(ctx context.Context, kbID string, pageID string, version int) (*types.WikiPageRevision, error)
+
+	// PruneRevisions bounds per-page history storage using the two-tier
+	// retention described by the request.
+	PruneRevisions(ctx context.Context, req types.WikiRevisionPruneRequest) error
+
+	// DeleteRevisionsByPage hard-deletes a page's entire snapshot history.
+	DeleteRevisionsByPage(ctx context.Context, pageID string) error
 
 	// CreateIssue inserts a new wiki page issue record.
 	CreateIssue(ctx context.Context, issue *types.WikiPageIssue) error

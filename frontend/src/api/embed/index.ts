@@ -225,9 +225,11 @@ export async function getEmbedChunkById(channelId: string, token: string, chunkI
   )
 }
 
-export async function getEmbedSuggestedQuestions(channelId: string, token: string, limit = 6) {
+export async function getEmbedSuggestedQuestions(channelId: string, token: string, limit?: number) {
+  // Omit limit to let the channel agent's configured starter count apply.
+  const qs = typeof limit === 'number' && limit > 0 ? `?limit=${limit}` : ''
   return get<{ success: boolean; data: { questions: SuggestedQuestion[] } }>(
-    `/api/v1/embed/${channelId}/suggested-questions?limit=${limit}`,
+    `/api/v1/embed/${channelId}/suggested-questions${qs}`,
     { headers: { Authorization: `Embed ${token}` } },
   )
 }

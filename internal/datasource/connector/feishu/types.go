@@ -24,6 +24,30 @@ type Config struct {
 	// Base URL for Feishu API (default: https://open.feishu.cn)
 	// Use https://open.larksuite.com for Lark (international) deployments
 	BaseURL string `json:"base_url,omitempty"`
+
+	// Timezone is the IANA name (e.g. "Asia/Shanghai", "America/New_York") used to
+	// render bitable date cells. Feishu stores a date as a UTC instant, but the
+	// calendar date a user sees is that instant in the table's timezone, so
+	// rendering in UTC shifts the date. Empty defaults to GMT+8, which matches
+	// Feishu (mainland) tenants; set it for Lark tenants in other zones.
+	Timezone string `json:"timezone,omitempty"`
+}
+
+// defaultTimezoneOffsetSeconds is GMT+8 (the Feishu mainland default), used when
+// no timezone is configured. A fixed zone avoids any dependency on system tzdata,
+// which minimal container images may omit.
+const defaultTimezoneOffsetSeconds = 8 * 3600
+
+// resolveLocation returns the *time.Location used to render bitable date cells.
+// An empty name yields a fixed GMT+8 zone (no tzdata dependency); a named zone is
+// loaded from the system tz database, falling back to GMT+8 if it is unavailable.
+func resolveLocation(name string) *time.Location {
+	if name != "" {
+		if loc, err := time.LoadLocation(name); err == nil {
+			return loc
+		}
+	}
+	return time.FixedZone("GMT+8", defaultTimezoneOffsetSeconds)
 }
 
 // DefaultBaseURL is the default Feishu Open Platform API base URL.
@@ -174,9 +198,9 @@ type exportTaskStatusResponse struct {
 			FileToken string `json:"file_token"`
 			FileSize  int64  `json:"file_size"`
 			// JobStatus: 0=success, 1=initializing, 2=processing
-			JobStatus    int    `json:"job_status"`
-			JobErrorMsg  string `json:"job_error_msg"`
-			FileName     string `json:"file_name"`
+			JobStatus   int    `json:"job_status"`
+			JobErrorMsg string `json:"job_error_msg"`
+			FileName    string `json:"file_name"`
 		} `json:"result"`
 	} `json:"data"`
 }

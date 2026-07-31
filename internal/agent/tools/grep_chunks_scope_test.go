@@ -77,3 +77,20 @@ func TestScopeClause_EmptyWhenNoUsableScope(t *testing.T) {
 		t.Fatalf("expected empty scope, got sql=%q args=%v", sql, args)
 	}
 }
+
+func TestResolveGrepScope_ExplicitEmptyDoesNotWidenToWholeKB(t *testing.T) {
+	tool := &GrepChunksTool{searchTargets: types.SearchTargets{{
+		Type:            types.SearchTargetTypeKnowledgeBase,
+		KnowledgeBaseID: "kb-1",
+		TenantID:        7,
+		KnowledgeIDsSet: true,
+	}}}
+
+	kbIDs, knowledgeIDs, tagTargets := tool.resolveGrepScope()
+	if len(kbIDs) != 0 || len(knowledgeIDs) != 0 || len(tagTargets) != 0 {
+		t.Fatalf(
+			"explicitly empty scope widened: kbIDs=%v knowledgeIDs=%v tagTargets=%v",
+			kbIDs, knowledgeIDs, tagTargets,
+		)
+	}
+}

@@ -235,6 +235,50 @@ func TestCreateKnowledgeFromFilePersistsStoredFilePathOnCreate(t *testing.T) {
 	require.Equal(t, 1, task.calls)
 }
 
+func TestCreateKnowledgeFromImageFallsBackWhenLegacyStorageConfigIsIncomplete(t *testing.T) {
+	t.Parallel()
+
+	repo := &createKnowledgeFileRepoStub{}
+	fileSvc := &createKnowledgeFileServiceStub{}
+	task := &createKnowledgeTaskEnqueuerStub{}
+	kb := &types.KnowledgeBase{
+		ID:        "kb-1",
+		VLMConfig: types.VLMConfig{Enabled: true, ModelID: "vlm-1"},
+	}
+	kb.SetStorageProvider("cos")
+	svc := &knowledgeService{
+		repo:      repo,
+		kbService: &createKnowledgeFileKBServiceStub{kb: kb},
+		fileSvc:   fileSvc,
+		task:      task,
+	}
+	ctx := context.WithValue(newCreateKnowledgeFileContext(), types.TenantInfoContextKey, &types.Tenant{
+		StorageEngineConfig: &types.StorageEngineConfig{
+			DefaultProvider: "cos",
+			COS:             &types.COSEngineConfig{SecretID: "incomplete"},
+		},
+	})
+
+	knowledge, err := svc.CreateKnowledgeFromFile(
+		ctx,
+		"kb-1",
+		newMultipartFileHeader(t, "image.png", "image bytes"),
+		nil,
+		nil,
+		"",
+		nil,
+		"",
+		nil,
+		nil,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, knowledge)
+	require.Equal(t, 1, fileSvc.saveCalls)
+	require.Equal(t, 1, repo.createCalls)
+	require.Equal(t, 1, task.calls)
+}
+
 func TestCreateKnowledgeFromFileDeletesStoredFileWhenCreateFails(t *testing.T) {
 	t.Parallel()
 

@@ -229,7 +229,7 @@ Wiki 模式允许 Agent 根据原始文档自动生成并维护一套结构化�
 - 只读用户 → `Viewer`
 - 普通成员（上传文档、维护「自己」的 KB / Agent）→ `Contributor`
 - 运维人员（管理共享模型、向量库、解析器等基础设施）→ `Admin`
-- 空间所有者（拥有删除空间权限，每空间唯一）→ `Owner`
+- 空间所有者（拥有删除空间权限；每空间至少一位，可以有多位，最后一位不能被降级或移除）→ `Owner`
 
 如果你希望开启「invite-only」（不允许自助注册到本空间），可在空间设置里打开邀请制，并通过「邀请」入口签发邀请码或链接。
 
@@ -361,6 +361,21 @@ SystemAdmin 可在 **系统管理 → 平台 API Key** 创建 `scope_type=platfo
 ## 34. 升级到 0.7.0 后 `weknora` CLI 命令找不到或行为变化？
 
 0.7.0 随附 **CLI v0.10**（Agent 优先，破坏性变更）：新增 `model` / `message` / `config` / `skills` 命令组，`doc reparse` / `doc update`，`kb config` / `kb config set`；`session continue` 更名为 `session resume`，新增 `session tool-approval`；提供 agent-first 的 chat 与 `session ask` 输出模式，并强化了 SSE 可靠性与类型化错误。详见 [`cli/CHANGELOG.md`](../cli/CHANGELOG.md)。
+
+## 35. 如何接入云之家（Yunzhijia）？
+
+0.7.1 新增 **云之家 IM 集成**。在 **设置 → IM 集成** 添加云之家渠道并填写应用凭据即可；集成基于 WebSocket 长连接接收消息，支持图片消息入库（带 SSRF 安全下载），默认以 **Markdown** 格式回复。若图片无法下载，请检查出站网络与凭据是否具备下载权限。
+
+## 36. 如何使用火山引擎 Rerank / 智谱 AI 网络搜索？
+
+0.7.1 新增两个供应商：
+
+- **火山引擎 Rerank**：在 **设置 → 模型** 中添加 Rerank 模型并选择火山引擎。当单次请求文档数超过 API 上限时，客户端会自动分批发送并合并结果。vLLM Rerank 现默认不再发送 `truncate_prompt_tokens` 以提升兼容性。
+- **智谱 AI 网络搜索**：在 **设置 → 网络搜索** 中选择智谱 AI 作为搜索供应商并填写凭据即可，用于 Agent 联网检索。
+
+## 37. 升级到 0.7.1 后对话记忆（Memory）设置消失了？还需要 Neo4j 吗？
+
+0.7.1 **移除了基于 Neo4j 的会话记忆（episodic memory）** 功能，相关 API 字段、设置项与嵌入开关一并下线，对话不再依赖 Neo4j 做记忆召回。**注意：知识图谱（GraphRAG / 图检索）仍然使用 Neo4j**，因此若你启用了图谱检索，Neo4j 依旧是必需组件，无需移除部署。若你此前仅为记忆功能部署 Neo4j 且未使用图谱，可按需精简。
 
 ## P.S.
 如果以上方式未解决问题，请在issue中描述您的问题，并提供必要的日志信息辅助我们进行问题排查

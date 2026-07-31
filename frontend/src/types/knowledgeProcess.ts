@@ -3,6 +3,7 @@
 export interface ParserEngineRule {
   file_types: string[]
   engine: string
+  xlsx_first_row_as_header?: boolean
 }
 
 export interface ChunkingConfigOverride {
