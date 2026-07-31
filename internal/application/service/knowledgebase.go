@@ -330,9 +330,7 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 			kb.EnsureDefaults()
 		}
 
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id": tenantID,
-		})
+		logger.Error(ctx, "Failed to list knowledge bases")
 		return nil, err
 	}
 
@@ -345,7 +343,7 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 		case types.KnowledgeBaseTypeDocument:
 			knowledgeCount, err := s.kgRepo.CountKnowledgeByKnowledgeBaseID(ctx, tenantID, kb.ID)
 			if err != nil {
-				logger.Warnf(ctx, "Failed to get knowledge count for knowledge base %s: %v", kb.ID, err)
+				logger.Warn(ctx, "Failed to get knowledge count")
 			} else {
 				kb.KnowledgeCount = knowledgeCount
 			}
@@ -353,7 +351,7 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 			// Get chunk count
 			chunkCount, err := s.chunkRepo.CountChunksByKnowledgeBaseID(ctx, tenantID, kb.ID)
 			if err != nil {
-				logger.Warnf(ctx, "Failed to get chunk count for knowledge base %s: %v", kb.ID, err)
+				logger.Warn(ctx, "Failed to get knowledge-base chunk count")
 			} else {
 				kb.ChunkCount = chunkCount
 			}
@@ -367,7 +365,7 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 			[]string{"pending", "processing"},
 		)
 		if err != nil {
-			logger.Warnf(ctx, "Failed to check processing status for knowledge base %s: %v", kb.ID, err)
+			logger.Warn(ctx, "Failed to check knowledge-base processing status")
 		} else {
 			kb.IsProcessing = processingCount > 0
 			kb.ProcessingCount = processingCount
@@ -388,9 +386,7 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 func (s *knowledgeBaseService) ListKnowledgeBasesByTenantID(ctx context.Context, tenantID uint64) ([]*types.KnowledgeBase, error) {
 	kbs, err := s.repo.ListKnowledgeBasesByTenantID(ctx, tenantID)
 	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id": tenantID,
-		})
+		logger.Error(ctx, "Failed to list knowledge bases by tenant")
 		return nil, err
 	}
 	for _, kb := range kbs {
@@ -623,8 +619,7 @@ func (s *knowledgeBaseService) applyUserKBPins(
 		// should not break listing KBs. Log and bail without altering
 		// the slice — caller still gets a valid list, just unsorted by
 		// pin.
-		logger.Warnf(ctx, "applyUserKBPins: failed to load pins for tenant=%d user=%s: %v",
-			tenantID, userID, err)
+		logger.Warn(ctx, "Failed to load knowledge-base pin state")
 		return
 	}
 	if len(pins) == 0 {

@@ -1461,7 +1461,7 @@ func TestKnowledgeFolderService_DeleteFolderMapsEmptySemantics(t *testing.T) {
 }
 
 func TestKnowledgeFolderService_ListSubtreeFolderIDs(t *testing.T) {
-	service, repo, db, ctx := setupKnowledgeFolderServiceTest(t)
+	service, _, db, ctx := setupKnowledgeFolderServiceTest(t)
 	insertKnowledgeFolderServiceFixtures(t, db,
 		knowledgeFolderServiceFixture("root-a", 1, "kb-1", "", "A", "/root-a/", 1),
 		knowledgeFolderServiceFixture("child-a", 1, "kb-1", "root-a", "Child", "/root-a/child-a/", 2),

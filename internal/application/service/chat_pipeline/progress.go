@@ -86,10 +86,17 @@ func BeginRetrievalProgress(ctx context.Context, chatManage *types.ChatManage) *
 	args := map[string]any{
 		"search_source": retrievalSearchSource(chatManage),
 	}
-	if chatManage.RewriteQuery != "" {
-		args["query"] = chatManage.RewriteQuery
-	} else if chatManage.Query != "" {
-		args["query"] = chatManage.Query
+	query := chatManage.RewriteQuery
+	if query == "" {
+		query = chatManage.Query
+	}
+	if chatManage.ExecutionScopeHash != "" {
+		args["query_length"] = len(query)
+		args["scope_hash_prefix"] = scopeHashPrefix(
+			chatManage.ExecutionScopeHash,
+		)
+	} else if query != "" {
+		args["query"] = query
 	}
 
 	_ = chatManage.EventBus.Emit(ctx, types.Event{
@@ -113,7 +120,12 @@ func BeginQueryUnderstandProgress(ctx context.Context, chatManage *types.ChatMan
 
 	toolCallID := uuid.New().String()
 	args := map[string]any{}
-	if chatManage.Query != "" {
+	if chatManage.ExecutionScopeHash != "" {
+		args["query_length"] = len(chatManage.Query)
+		args["scope_hash_prefix"] = scopeHashPrefix(
+			chatManage.ExecutionScopeHash,
+		)
+	} else if chatManage.Query != "" {
 		args["query"] = chatManage.Query
 	}
 	if len(chatManage.Images) > 0 {
@@ -153,7 +165,11 @@ func EndQueryUnderstandProgress(
 
 	var errMsg string
 	if !success && stageErr != nil && stageErr.Err != nil {
-		errMsg = stageErr.Err.Error()
+		if chatManage.ExecutionScopeHash != "" {
+			errMsg = "query understanding failed"
+		} else {
+			errMsg = stageErr.Err.Error()
+		}
 	}
 
 	_ = chatManage.EventBus.Emit(ctx, types.Event{
@@ -206,7 +222,11 @@ func EndRetrievalProgress(
 
 	var errMsg string
 	if !success && stageErr != nil && stageErr.Err != nil {
-		errMsg = stageErr.Err.Error()
+		if chatManage.ExecutionScopeHash != "" {
+			errMsg = "knowledge retrieval failed"
+		} else {
+			errMsg = stageErr.Err.Error()
+		}
 	}
 
 	_ = chatManage.EventBus.Emit(ctx, types.Event{

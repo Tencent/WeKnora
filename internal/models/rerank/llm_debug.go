@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 )
 
 // debugReranker wraps a Reranker with LLM debug logging.
@@ -26,6 +27,20 @@ func (d *debugReranker) GetModelID() string   { return d.inner.GetModelID() }
 
 func logRerankDebug(ctx context.Context, model string, query string, documents []string, results []RankResult, callErr error, dur time.Duration) {
 	if !logger.LLMDebugEnabled() {
+		return
+	}
+	if hashPrefix, prepared := langfuse.PreparedKnowledgeScopeHashPrefix(ctx); prepared {
+		logger.LLMDebugLog(
+			ctx,
+			preparedRerankDebugRecord(
+				hashPrefix,
+				query,
+				documents,
+				results,
+				callErr,
+				dur,
+			),
+		)
 		return
 	}
 
@@ -67,4 +82,38 @@ func logRerankDebug(ctx context.Context, model string, query string, documents [
 		record.Error = callErr.Error()
 	}
 	logger.LLMDebugLog(ctx, record)
+}
+
+func preparedRerankDebugRecord(
+	hashPrefix string,
+	query string,
+	documents []string,
+	results []RankResult,
+	callErr error,
+	dur time.Duration,
+) *logger.LLMCallRecord {
+	totalDocumentLength := 0
+	for _, document := range documents {
+		totalDocumentLength += len([]rune(document))
+	}
+	record := &logger.LLMCallRecord{
+		CallType: "Rerank",
+		Model:    "prepared-knowledge-model",
+		Duration: dur,
+		Sections: []logger.RecordSection{{
+			Title: "Prepared Summary",
+			Content: fmt.Sprintf(
+				"scope_hash_prefix=%s\nquery_length=%d\ndocument_count=%d\ndocument_length=%d\nresult_count=%d\n",
+				hashPrefix,
+				len([]rune(query)),
+				len(documents),
+				totalDocumentLength,
+				len(results),
+			),
+		}},
+	}
+	if callErr != nil {
+		record.Error = "prepared rerank failed"
+	}
+	return record
 }

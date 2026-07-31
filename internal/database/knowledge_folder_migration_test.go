@@ -500,16 +500,20 @@ func TestSQLiteKnowledgeFolderMigration_RunnerRecoversDirtyVersionZeroWhenExplic
 	db, err = sql.Open("sqlite3", dbPath)
 	require.NoError(t, err)
 	defer db.Close()
-	assertSQLiteKnowledgeFolderMigrationVersion(t, db, 1)
+	assertSQLiteKnowledgeFolderMigrationVersion(t, db, 2)
 	var migratedTableCount int
 	err = db.QueryRow(`
 		SELECT COUNT(*)
 		FROM sqlite_master
 		WHERE type = 'table'
-		  AND name IN ('knowledges', 'knowledge_folders')
+		  AND name IN (
+		      'knowledges',
+		      'knowledge_folders',
+		      'knowledge_folder_index_pending'
+		  )
 	`).Scan(&migratedTableCount)
 	require.NoError(t, err)
-	assert.Equal(t, 2, migratedTableCount)
+	assert.Equal(t, 3, migratedTableCount)
 	assert.Empty(t, CachedMigrationError())
 }
 
@@ -721,7 +725,7 @@ func TestSQLiteKnowledgeFolderMigration_RunnerUpgradeIdempotentAndRollback(t *te
 
 	freshDB, err := sql.Open("sqlite3", freshDBPath)
 	require.NoError(t, err)
-	assertSQLiteKnowledgeFolderMigrationVersion(t, freshDB, 1)
+	assertSQLiteKnowledgeFolderMigrationVersion(t, freshDB, 2)
 	var freshFolderTableCount int
 	err = freshDB.QueryRow(`
 		SELECT COUNT(*)
@@ -730,6 +734,14 @@ func TestSQLiteKnowledgeFolderMigration_RunnerUpgradeIdempotentAndRollback(t *te
 	`).Scan(&freshFolderTableCount)
 	require.NoError(t, err)
 	assert.Equal(t, 1, freshFolderTableCount)
+	var freshPendingTableCount int
+	err = freshDB.QueryRow(`
+		SELECT COUNT(*)
+		FROM sqlite_master
+		WHERE type = 'table' AND name = 'knowledge_folder_index_pending'
+	`).Scan(&freshPendingTableCount)
+	require.NoError(t, err)
+	assert.Equal(t, 1, freshPendingTableCount)
 	freshColumns, err := freshDB.Query(`
 		SELECT folder_id, folder_version, folder_indexed_version
 		FROM knowledges
@@ -795,7 +807,7 @@ func TestSQLiteKnowledgeFolderMigration_RunnerUpgradeIdempotentAndRollback(t *te
 
 	db, err = sql.Open("sqlite3", dbPath)
 	require.NoError(t, err)
-	assertSQLiteKnowledgeFolderMigrationVersion(t, db, 1)
+	assertSQLiteKnowledgeFolderMigrationVersion(t, db, 2)
 	assertSQLiteKnowledgeFolderDefaults(t, db)
 	var folderTableCount int
 	err = db.QueryRow(`
@@ -810,12 +822,12 @@ func TestSQLiteKnowledgeFolderMigration_RunnerUpgradeIdempotentAndRollback(t *te
 	require.NoError(t, RunMigrationsWithOptions(dsn, options))
 	db, err = sql.Open("sqlite3", dbPath)
 	require.NoError(t, err)
-	assertSQLiteKnowledgeFolderMigrationVersion(t, db, 1)
+	assertSQLiteKnowledgeFolderMigrationVersion(t, db, 2)
 	assertSQLiteKnowledgeFolderDefaults(t, db)
 	require.NoError(t, db.Close())
 
 	migrator = newSQLiteKnowledgeFolderMigrator(t, dbPath, migrationsDirectory)
-	require.NoError(t, migrator.Steps(-1))
+	require.NoError(t, migrator.Steps(-2))
 	version, dirty, err = migrator.Version()
 	require.NoError(t, err)
 	assert.Equal(t, uint(0), version)
@@ -832,6 +844,14 @@ func TestSQLiteKnowledgeFolderMigration_RunnerUpgradeIdempotentAndRollback(t *te
 	`).Scan(&folderTableCount)
 	require.NoError(t, err)
 	assert.Zero(t, folderTableCount)
+	var pendingTableCount int
+	err = db.QueryRow(`
+		SELECT COUNT(*)
+		FROM sqlite_master
+		WHERE type = 'table' AND name = 'knowledge_folder_index_pending'
+	`).Scan(&pendingTableCount)
+	require.NoError(t, err)
+	assert.Zero(t, pendingTableCount)
 
 	rows, err := db.Query(`PRAGMA table_info(knowledges)`)
 	require.NoError(t, err)
@@ -868,7 +888,7 @@ func TestSQLiteKnowledgeFolderMigration_RunnerUpgradeIdempotentAndRollback(t *te
 	require.NoError(t, RunMigrationsWithOptions(dsn, options))
 	db, err = sql.Open("sqlite3", dbPath)
 	require.NoError(t, err)
-	assertSQLiteKnowledgeFolderMigrationVersion(t, db, 1)
+	assertSQLiteKnowledgeFolderMigrationVersion(t, db, 2)
 	assertSQLiteKnowledgeFolderDefaults(t, db)
 	require.NoError(t, db.Close())
 }

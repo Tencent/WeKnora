@@ -44,6 +44,21 @@ func (b *syncEventBus) finalAnswerContents() []string {
 	return out
 }
 
+func (b *syncEventBus) errorContents() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []string
+	for _, evt := range b.events {
+		if evt.Type != types.EventType(event.EventError) {
+			continue
+		}
+		if data, ok := evt.Data.(event.ErrorData); ok {
+			out = append(out, data.Error)
+		}
+	}
+	return out
+}
+
 // openStreamChat returns a buffered channel preloaded with chunks and never
 // closes it, so the stream plugin blocks on the channel until ctx is cancelled
 // — deterministically exercising the ctx.Done() branch.
@@ -120,4 +135,39 @@ func TestStreamFlushesHeldAliasOnCancel(t *testing.T) {
 		}
 		return false
 	}, 2*time.Second, 5*time.Millisecond)
+}
+
+func TestPreparedStreamErrorDoesNotExposeProviderContent(t *testing.T) {
+	const providerError = "provider-private-error tenant-42 folder-private"
+	bus := &syncEventBus{}
+	model := &openStreamChat{chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeError, Content: providerError},
+	}}
+
+	chatManage := &types.ChatManage{}
+	chatManage.SessionID = "sess-prepared"
+	chatManage.UserContent = "private-query"
+	chatManage.EventBus = bus
+	chatManage.ExecutionScopeHash = "1234567890abcdef"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	plugin := &PluginChatCompletionStream{
+		modelService: &stubModelService{model: model},
+	}
+	require.Nil(t, plugin.OnEvent(
+		ctx,
+		types.CHAT_COMPLETION_STREAM,
+		chatManage,
+		func() *PluginError { return nil },
+	))
+
+	require.Eventually(t, func() bool {
+		errors := bus.errorContents()
+		return len(errors) == 1
+	}, 2*time.Second, 5*time.Millisecond)
+	require.Equal(t, []string{"chat completion stream failed"}, bus.errorContents())
+	require.NotContains(t, bus.errorContents()[0], providerError)
+
+	require.Equal(t, providerError, preparedChatStreamError("", providerError))
 }

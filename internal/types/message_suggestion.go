@@ -32,11 +32,12 @@ type SuggestionAttribution struct {
 
 // SuggestionItem is a stable, attributable question rendered to an end user.
 type SuggestionItem struct {
-	ID               string   `json:"id"`
-	Text             string   `json:"text"`
-	Category         string   `json:"category,omitempty"`
-	Source           string   `json:"source"`
-	KnowledgeBaseIDs []string `json:"knowledge_base_ids,omitempty"`
+	ID               string                 `json:"id"`
+	Text             string                 `json:"text"`
+	Category         string                 `json:"category,omitempty"`
+	Source           string                 `json:"source"`
+	KnowledgeBaseIDs []string               `json:"knowledge_base_ids,omitempty"`
+	KnowledgeScope   *KnowledgeScopeRequest `json:"knowledge_scope,omitempty"`
 }
 
 type SuggestionItems []SuggestionItem

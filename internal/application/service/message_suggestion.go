@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode"
 
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/searchutil"
@@ -124,6 +125,9 @@ func (s *messageSuggestionService) EnsureFollowUps(
 	if config.FollowUps.SuppressWhenAnswerAsksQuestion && answerEndsWithQuestion(answer) {
 		return s.suppress(ctx, set, "answer_asks_question")
 	}
+	if message.ExecutionContext.RequestScope == nil {
+		return s.suppress(ctx, set, "missing_knowledge_scope")
+	}
 
 	startedAt := time.Now()
 	set.ModelID = config.FollowUps.ModelID
@@ -159,6 +163,10 @@ func (s *messageSuggestionService) EnsureFollowUps(
 	if len(questions) == 0 {
 		return s.suppress(ctx, set, "no_candidates")
 	}
+	attachSuggestionKnowledgeScope(
+		questions,
+		message.ExecutionContext.RequestScope,
+	)
 	set.Questions = questions
 	set.Status = types.SuggestionStatusReady
 	set.ErrorCode = ""
@@ -233,12 +241,12 @@ func (s *messageSuggestionService) ValidateAttribution(
 	sessionID string,
 	query string,
 	attribution *types.SuggestionAttribution,
-) error {
+) (*types.KnowledgeScopeRequest, error) {
 	if attribution == nil {
-		return nil
+		return nil, nil
 	}
 	if strings.TrimSpace(attribution.SuggestionSetID) == "" || strings.TrimSpace(attribution.QuestionID) == "" {
-		return errors.New("invalid suggestion attribution")
+		return nil, invalidSuggestionAttributionError()
 	}
 	set, err := s.repo.GetByID(
 		ctx,
@@ -247,22 +255,62 @@ func (s *messageSuggestionService) ValidateAttribution(
 		attribution.SuggestionSetID,
 	)
 	if err != nil {
-		return err
+		return nil, mapSuggestionAttributionRepositoryError(ctx, err)
+	}
+	if set == nil {
+		return nil, suggestionAttributionInternalError()
 	}
 	if set.Status != types.SuggestionStatusReady {
-		return errors.New("invalid suggestion attribution")
+		return nil, invalidSuggestionAttributionError()
 	}
-	found := false
 	for _, question := range set.Questions {
 		if question.ID == attribution.QuestionID && strings.TrimSpace(question.Text) == strings.TrimSpace(query) {
-			found = true
-			break
+			if question.KnowledgeScope == nil {
+				return nil, nil
+			}
+			return question.KnowledgeScope.Clone(), nil
 		}
 	}
-	if !found {
-		return errors.New("invalid suggestion attribution")
+	return nil, invalidSuggestionAttributionError()
+}
+
+func invalidSuggestionAttributionError() error {
+	return apperrors.NewBadRequestError("invalid suggestion attribution")
+}
+
+func suggestionAttributionInternalError() error {
+	return apperrors.NewInternalServerError(
+		"message suggestion operation failed",
+	)
+}
+
+func mapSuggestionAttributionRepositoryError(
+	ctx context.Context,
+	err error,
+) error {
+	if err == nil {
+		return nil
 	}
-	return nil
+	if errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return invalidSuggestionAttributionError()
+	}
+	return suggestionAttributionInternalError()
+}
+
+func attachSuggestionKnowledgeScope(
+	items types.SuggestionItems,
+	requestScope *types.KnowledgeScopeRequest,
+) {
+	for index := range items {
+		items[index].KnowledgeScope = requestScope.Clone()
+	}
 }
 
 func (s *messageSuggestionService) generate(

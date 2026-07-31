@@ -272,8 +272,15 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 		len(searchTargets))
 	kbTypeMap := t.getKnowledgeBaseTypes(ctx, kbIDs)
 
-	allResults := t.concurrentSearchByTargets(ctx, queries, searchTargets,
+	allResults, searchErr := t.concurrentSearchByTargets(ctx, queries, searchTargets,
 		topK, vectorThreshold, keywordThreshold, kbTypeMap)
+	if searchErr != nil {
+		logger.Warnf(ctx, "[Tool][KnowledgeSearch] Folder-scoped search failed closed")
+		return &types.ToolResult{
+			Success: false,
+			Error:   "folder-scoped knowledge search failed",
+		}, searchErr
+	}
 	logger.Infof(ctx, "[Tool][KnowledgeSearch] Concurrent search completed: %d raw results", len(allResults))
 
 	// Note: HybridSearch now uses RRF (Reciprocal Rank Fusion) which produces normalized scores
@@ -420,10 +427,66 @@ func (t *KnowledgeSearchTool) getKnowledgeBaseTypes(ctx context.Context, kbIDs [
 	return kbTypeMap
 }
 
+type knowledgeSearchModelGroupKey struct {
+	modelKey                string
+	sourceTenantID          uint64
+	fallbackKnowledgeBaseID string
+}
+
+func makeKnowledgeSearchModelGroupKey(
+	modelKey string,
+	modelKeyFound bool,
+	sourceTenantID uint64,
+	knowledgeBaseID string,
+) knowledgeSearchModelGroupKey {
+	if modelKeyFound && modelKey != "" {
+		return knowledgeSearchModelGroupKey{
+			modelKey:       modelKey,
+			sourceTenantID: sourceTenantID,
+		}
+	}
+	return knowledgeSearchModelGroupKey{fallbackKnowledgeBaseID: knowledgeBaseID}
+}
+
+func isCombinableKnowledgeSearchTarget(target *types.SearchTarget) bool {
+	return target.Type == types.SearchTargetTypeKnowledgeBase &&
+		!target.FolderFilter.Enabled() &&
+		len(target.KnowledgeIDs) == 0 &&
+		len(target.TagIDs) == 0 &&
+		len(target.ScopeTagIDs) == 0
+}
+
+func buildIndividualKnowledgeSearchParams(
+	query string,
+	queryEmbedding []float32,
+	topK int,
+	vectorThreshold, keywordThreshold float64,
+	target *types.SearchTarget,
+) types.SearchParams {
+	targetVectorThreshold, targetKeywordThreshold := target.RecallThresholds(
+		vectorThreshold,
+		keywordThreshold,
+	)
+	return types.SearchParams{
+		QueryText:          query,
+		QueryEmbedding:     append([]float32(nil), queryEmbedding...),
+		MatchCount:         topK,
+		VectorThreshold:    targetVectorThreshold,
+		KeywordThreshold:   targetKeywordThreshold,
+		KnowledgeIDs:       append([]string(nil), target.KnowledgeIDs...),
+		TagIDs:             append([]string(nil), target.TagIDs...),
+		ScopeTagIDs:        append([]string(nil), target.ScopeTagIDs...),
+		SourceTenantID:     target.EffectiveSourceTenantID(),
+		FolderFilter:       target.FolderFilter.Clone(),
+		ExecutionScopeHash: target.ExecutionScopeHash,
+	}
+}
+
 // concurrentSearchByTargets executes hybrid search using pre-computed search targets.
-// Targets sharing the same underlying embedding model (identified by model name + endpoint)
-// are grouped so the query embedding is computed once per (model, query) pair, and all
-// full-KB targets in a group are combined into a single retrieval call.
+// A non-empty model key shares one query embedding across retrieval scopes owned by
+// the same source tenant. Each model group is then split by source tenant and execution
+// hash before unrestricted full-KB targets are combined. Missing or empty model keys
+// remain isolated by KB.
 func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 	ctx context.Context,
 	queries []string,
@@ -431,7 +494,21 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 	topK int,
 	vectorThreshold, keywordThreshold float64,
 	kbTypeMap map[string]string,
-) []*searchResultWithMeta {
+) ([]*searchResultWithMeta, error) {
+	// Defense in depth for callers that bypass applyPreparedAgentKnowledgeScope:
+	// an enabled-empty folder scope must never fall back to whole-KB retrieval.
+	activeTargets := make(types.SearchTargets, 0, len(searchTargets))
+	for _, st := range searchTargets {
+		if st.FolderFilter.Empty() {
+			continue
+		}
+		activeTargets = append(activeTargets, st)
+	}
+	if len(activeTargets) == 0 {
+		return nil, nil
+	}
+	searchTargets = activeTargets
+
 	// Batch-fetch KB records for embedding model grouping
 	kbIDs := searchTargets.GetAllKnowledgeBaseIDs()
 	var kbList []*types.KnowledgeBase
@@ -473,131 +550,211 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 	}
 	if len(filteredTargets) == 0 {
 		logger.Infof(ctx, "[Tool][KnowledgeSearch] No searchable KBs in scope (all wiki/graph-only); skipping retrieval")
-		return nil
+		return nil, nil
 	}
 	searchTargets = filteredTargets
 
-	// Resolve actual model identities (name + endpoint) for cross-tenant grouping
+	// Resolve model keys used for tenant-local embedding grouping.
 	modelKeyMap := t.knowledgeBaseService.ResolveEmbeddingModelKeys(ctx, kbList)
 
-	groups := make(map[string][]*types.SearchTarget)
-	for _, st := range searchTargets {
-		key := modelKeyMap[st.KnowledgeBaseID]
-		groups[key] = append(groups[key], st)
+	type indexedSearchTarget struct {
+		target *types.SearchTarget
+		index  int
+	}
+	type modelTargetGroup struct {
+		modelKey string
+		targets  []indexedSearchTarget
+	}
+	type retrievalGroupKey struct {
+		sourceTenantID     uint64
+		executionScopeHash string
+	}
+
+	modelGroups := make(map[knowledgeSearchModelGroupKey]*modelTargetGroup)
+	for index, st := range searchTargets {
+		modelKey, modelKeyFound := modelKeyMap[st.KnowledgeBaseID]
+		groupKey := makeKnowledgeSearchModelGroupKey(
+			modelKey,
+			modelKeyFound,
+			st.EffectiveSourceTenantID(),
+			st.KnowledgeBaseID,
+		)
+		group := modelGroups[groupKey]
+		if group == nil {
+			group = &modelTargetGroup{
+				modelKey: groupKey.modelKey,
+			}
+			modelGroups[groupKey] = group
+		}
+		group.targets = append(group.targets, indexedSearchTarget{
+			target: st,
+			index:  index,
+		})
 	}
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	allResults := make([]*searchResultWithMeta, 0)
+	folderScopedErrors := make([]error, len(queries)*len(searchTargets))
+	var folderScopedErrorMu sync.Mutex
+	recordFolderScopedError := func(queryIndex, targetIndex int, err error) {
+		if err == nil {
+			return
+		}
+		errorIndex := queryIndex*len(searchTargets) + targetIndex
+		folderScopedErrorMu.Lock()
+		if folderScopedErrors[errorIndex] == nil {
+			folderScopedErrors[errorIndex] = err
+		}
+		folderScopedErrorMu.Unlock()
+	}
 
-	for _, query := range queries {
+	for queryIndex, query := range queries {
 		q := query
-		for modelKey, targets := range groups {
+		qIndex := queryIndex
+		for _, currentModelGroup := range modelGroups {
+			modelGroup := currentModelGroup
 			wg.Add(1)
-			go func(q string, modelKey string, targets []*types.SearchTarget) {
+			go func(q string, queryIndex int, group *modelTargetGroup) {
 				defer wg.Done()
 
-				// Compute embedding once for this (model, query) pair
+				// Compute one embedding for every non-empty
+				// (model, source tenant, query) group. Missing or empty model keys
+				// skip pre-computation and remain KB-isolated.
 				var queryEmbedding []float32
-				if modelKey != "" {
-					emb, err := t.knowledgeBaseService.GetQueryEmbedding(ctx, targets[0].KnowledgeBaseID, q)
+				if group.modelKey != "" {
+					emb, err := t.knowledgeBaseService.GetQueryEmbedding(
+						ctx,
+						group.targets[0].target.KnowledgeBaseID,
+						q,
+					)
 					if err != nil {
-						logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to pre-compute embedding for model %s: %v", modelKey, err)
+						logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to pre-compute embedding for model %s: %v", group.modelKey, err)
 					} else {
 						queryEmbedding = emb
 					}
 				}
 
-				// Separate full-KB targets (combinable) from specific-knowledge targets
-				var fullKBIDs []string
-				var knowledgeTargets []*types.SearchTarget
-				for _, st := range targets {
-					if st.Type == types.SearchTargetTypeKnowledgeBase && len(st.TagIDs) == 0 {
-						fullKBIDs = append(fullKBIDs, st.KnowledgeBaseID)
-					} else {
-						knowledgeTargets = append(knowledgeTargets, st)
+				retrievalGroups := make(map[retrievalGroupKey][]indexedSearchTarget)
+				for _, indexedTarget := range group.targets {
+					target := indexedTarget.target
+					key := retrievalGroupKey{
+						sourceTenantID:     target.EffectiveSourceTenantID(),
+						executionScopeHash: target.ExecutionScopeHash,
 					}
+					retrievalGroups[key] = append(retrievalGroups[key], indexedTarget)
 				}
 
 				var innerWg sync.WaitGroup
+				for _, retrievalTargets := range retrievalGroups {
+					// Only unrestricted whole-KB targets are safe to combine.
+					var fullKBIDs []string
+					var fullKBTargets []indexedSearchTarget
+					var individualTargets []indexedSearchTarget
+					for _, indexedTarget := range retrievalTargets {
+						if isCombinableKnowledgeSearchTarget(indexedTarget.target) {
+							fullKBIDs = append(fullKBIDs, indexedTarget.target.KnowledgeBaseID)
+							fullKBTargets = append(fullKBTargets, indexedTarget)
+						} else {
+							individualTargets = append(individualTargets, indexedTarget)
+						}
+					}
 
-				// Combined retrieval for all full-KB targets in this group
-				if len(fullKBIDs) > 0 {
-					innerWg.Add(1)
-					go func() {
-						defer innerWg.Done()
-						searchParams := types.SearchParams{
-							QueryText:        q,
-							QueryEmbedding:   queryEmbedding,
-							KnowledgeBaseIDs: fullKBIDs,
-							MatchCount:       topK,
-							VectorThreshold:  vectorThreshold,
-							KeywordThreshold: keywordThreshold,
-						}
-						kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], searchParams)
-						if err != nil {
-							logger.Warnf(ctx, "[Tool][KnowledgeSearch] Combined search failed for KBs %v: %v", fullKBIDs, err)
-							return
-						}
-						mu.Lock()
-						for _, r := range kbResults {
-							allResults = append(allResults, &searchResultWithMeta{
-								SearchResult:      r,
-								SourceQuery:       q,
-								QueryType:         "hybrid",
-								KnowledgeBaseID:   r.KnowledgeBaseID,
-								KnowledgeBaseType: kbTypeMap[r.KnowledgeBaseID],
-							})
-						}
-						mu.Unlock()
-					}()
-				}
+					// Combined retrieval for all full-KB targets in this subgroup.
+					if len(fullKBIDs) > 0 {
+						representative := fullKBTargets[0].target
+						innerWg.Add(1)
+						go func(kbIDs []string, target *types.SearchTarget) {
+							defer innerWg.Done()
+							searchParams := types.SearchParams{
+								QueryText:          q,
+								QueryEmbedding:     append([]float32(nil), queryEmbedding...),
+								KnowledgeBaseIDs:   append([]string(nil), kbIDs...),
+								MatchCount:         topK,
+								VectorThreshold:    vectorThreshold,
+								KeywordThreshold:   keywordThreshold,
+								KnowledgeIDs:       append([]string(nil), target.KnowledgeIDs...),
+								TagIDs:             append([]string(nil), target.TagIDs...),
+								ScopeTagIDs:        append([]string(nil), target.ScopeTagIDs...),
+								SourceTenantID:     target.EffectiveSourceTenantID(),
+								FolderFilter:       target.FolderFilter.Clone(),
+								ExecutionScopeHash: target.ExecutionScopeHash,
+							}
+							kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, kbIDs[0], searchParams)
+							if err != nil {
+								logger.Warnf(ctx, "[Tool][KnowledgeSearch] Combined search failed for KBs %v: %v", kbIDs, err)
+								return
+							}
+							mu.Lock()
+							for _, r := range kbResults {
+								allResults = append(allResults, &searchResultWithMeta{
+									SearchResult:      r,
+									SourceQuery:       q,
+									QueryType:         "hybrid",
+									KnowledgeBaseID:   r.KnowledgeBaseID,
+									KnowledgeBaseType: kbTypeMap[r.KnowledgeBaseID],
+								})
+							}
+							mu.Unlock()
+						}(fullKBIDs, representative)
+					}
 
-				// Individual retrieval for specific-knowledge targets
-				for _, target := range knowledgeTargets {
-					st := target
-					innerWg.Add(1)
-					go func() {
-						defer innerWg.Done()
-						stVectorThreshold, stKeywordThreshold := st.RecallThresholds(
-							vectorThreshold,
-							keywordThreshold,
-						)
-						searchParams := types.SearchParams{
-							QueryText:        q,
-							QueryEmbedding:   queryEmbedding,
-							MatchCount:       topK,
-							VectorThreshold:  stVectorThreshold,
-							KeywordThreshold: stKeywordThreshold,
-							KnowledgeIDs:     st.KnowledgeIDs,
-							TagIDs:           st.TagIDs,
-							ScopeTagIDs:      st.ScopeTagIDs,
-						}
-						kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, st.KnowledgeBaseID, searchParams)
-						if err != nil {
-							logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to search KB %s: %v", st.KnowledgeBaseID, err)
-							return
-						}
-						mu.Lock()
-						for _, r := range kbResults {
-							allResults = append(allResults, &searchResultWithMeta{
-								SearchResult:      r,
-								SourceQuery:       q,
-								QueryType:         "hybrid",
-								KnowledgeBaseID:   r.KnowledgeBaseID,
-								KnowledgeBaseType: kbTypeMap[r.KnowledgeBaseID],
-							})
-						}
-						mu.Unlock()
-					}()
+					// Individual retrieval preserves every target-level scope field.
+					for _, indexedTarget := range individualTargets {
+						innerWg.Add(1)
+						go func(indexedTarget indexedSearchTarget) {
+							defer innerWg.Done()
+							target := indexedTarget.target
+							searchParams := buildIndividualKnowledgeSearchParams(
+								q,
+								queryEmbedding,
+								topK,
+								vectorThreshold,
+								keywordThreshold,
+								target,
+							)
+							kbResults, err := t.knowledgeBaseService.HybridSearch(
+								ctx,
+								target.KnowledgeBaseID,
+								searchParams,
+							)
+							if err != nil {
+								if target.FolderFilter.Enabled() {
+									recordFolderScopedError(queryIndex, indexedTarget.index, err)
+									logger.Warnf(ctx, "[Tool][KnowledgeSearch] Folder-scoped target search failed closed")
+									return
+								}
+								logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to search KB %s: %v", target.KnowledgeBaseID, err)
+								return
+							}
+							mu.Lock()
+							for _, r := range kbResults {
+								allResults = append(allResults, &searchResultWithMeta{
+									SearchResult:      r,
+									SourceQuery:       q,
+									QueryType:         "hybrid",
+									KnowledgeBaseID:   r.KnowledgeBaseID,
+									KnowledgeBaseType: kbTypeMap[r.KnowledgeBaseID],
+								})
+							}
+							mu.Unlock()
+						}(indexedTarget)
+					}
 				}
 
 				innerWg.Wait()
-			}(q, modelKey, targets)
+			}(q, qIndex, modelGroup)
 		}
 	}
 	wg.Wait()
-	return allResults
+	// Select a fatal error in stable query/target input order, independent of
+	// goroutine completion order.
+	for _, err := range folderScopedErrors {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return allResults, nil
 }
 
 // rerankResults applies reranking to all search results (including FAQ entries)

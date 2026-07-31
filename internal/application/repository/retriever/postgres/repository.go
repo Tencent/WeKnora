@@ -164,7 +164,11 @@ func (g *pgRepository) Retrieve(ctx context.Context, params types.RetrieveParams
 func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 	params types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
-	logger.GetLogger(ctx).Infof("[Postgres] Keywords retrieval: query=%s, topK=%d", params.Query, params.TopK)
+	logger.GetLogger(ctx).Infof(
+		"[Postgres] Keywords retrieval: query_length=%d, topK=%d",
+		len(params.Query),
+		params.TopK,
+	)
 	conds := make([]clause.Expression, 0)
 
 	// KnowledgeBaseIDs and KnowledgeIDs use AND logic
@@ -172,14 +176,20 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 	// - If only KnowledgeIDs: search specific documents
 	// - If both: search specific documents within the knowledge bases (AND)
 	if len(params.KnowledgeBaseIDs) > 0 {
-		logger.GetLogger(ctx).Debugf("[Postgres] Filtering by knowledge base IDs: %v", params.KnowledgeBaseIDs)
+		logger.GetLogger(ctx).Debugf(
+			"[Postgres] Filtering by knowledge base IDs: count=%d",
+			len(params.KnowledgeBaseIDs),
+		)
 		conds = append(conds, clause.IN{
 			Column: "knowledge_base_id",
 			Values: common.ToInterfaceSlice(params.KnowledgeBaseIDs),
 		})
 	}
 	if len(params.KnowledgeIDs) > 0 {
-		logger.GetLogger(ctx).Debugf("[Postgres] Filtering by knowledge IDs: %v", params.KnowledgeIDs)
+		logger.GetLogger(ctx).Debugf(
+			"[Postgres] Filtering by knowledge IDs: count=%d",
+			len(params.KnowledgeIDs),
+		)
 		conds = append(conds, clause.IN{
 			Column: "knowledge_id",
 			Values: common.ToInterfaceSlice(params.KnowledgeIDs),
@@ -187,7 +197,10 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 	}
 	// Filter by tag IDs if specified
 	if len(params.TagIDs) > 0 {
-		logger.GetLogger(ctx).Debugf("[Postgres] Filtering by tag IDs: %v", params.TagIDs)
+		logger.GetLogger(ctx).Debugf(
+			"[Postgres] Filtering by tag IDs: count=%d",
+			len(params.TagIDs),
+		)
 		conds = append(conds, clause.IN{
 			Column: "tag_id",
 			Values: common.ToInterfaceSlice(params.TagIDs),
@@ -226,7 +239,9 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 		Find(&embeddingDBList).Error
 
 	if err == gorm.ErrRecordNotFound {
-		logger.GetLogger(ctx).Warnf("[Postgres] No records found for keywords query: %s", params.Query)
+		logger.GetLogger(ctx).Warn(
+			"[Postgres] No records found for keywords query",
+		)
 		return nil, nil
 	}
 	if err != nil {
@@ -288,8 +303,8 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 	// - If both: search specific documents within the knowledge bases (AND)
 	if len(params.KnowledgeBaseIDs) > 0 {
 		logger.GetLogger(ctx).Debugf(
-			"[Postgres] Filtering vector search by knowledge base IDs: %v",
-			params.KnowledgeBaseIDs,
+			"[Postgres] Filtering vector search by knowledge base IDs: count=%d",
+			len(params.KnowledgeBaseIDs),
 		)
 		placeholders := make([]string, len(params.KnowledgeBaseIDs))
 		paramStart := len(allVars) + 1
@@ -302,8 +317,8 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 	}
 	if len(params.KnowledgeIDs) > 0 {
 		logger.GetLogger(ctx).Debugf(
-			"[Postgres] Filtering vector search by knowledge IDs: %v",
-			params.KnowledgeIDs,
+			"[Postgres] Filtering vector search by knowledge IDs: count=%d",
+			len(params.KnowledgeIDs),
 		)
 		placeholders := make([]string, len(params.KnowledgeIDs))
 		paramStart := len(allVars) + 1
@@ -317,8 +332,8 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 	// Filter by tag IDs if specified
 	if len(params.TagIDs) > 0 {
 		logger.GetLogger(ctx).Debugf(
-			"[Postgres] Filtering vector search by tag IDs: %v",
-			params.TagIDs,
+			"[Postgres] Filtering vector search by tag IDs: count=%d",
+			len(params.TagIDs),
 		)
 		placeholders := make([]string, len(params.TagIDs))
 		paramStart := len(allVars) + 1

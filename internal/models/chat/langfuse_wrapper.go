@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -25,17 +26,18 @@ func (l *langfuseChat) Chat(ctx context.Context, messages []Message, opts *ChatO
 		return l.inner.Chat(ctx, messages, opts)
 	}
 
-	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
-		Name:            "chat.completion",
-		Model:           l.inner.GetModelName(),
-		Input:           buildLangfuseMessages(messages),
-		ModelParameters: buildLangfuseModelParams(opts),
-		Metadata: map[string]interface{}{
-			"model_id":  l.inner.GetModelID(),
-			"streaming": false,
-			"has_tools": opts != nil && len(opts.Tools) > 0,
-		},
-	})
+	genCtx, gen := mgr.StartGeneration(
+		ctx,
+		buildLangfuseGenerationOptions(
+			ctx,
+			"chat.completion",
+			l.inner.GetModelName(),
+			l.inner.GetModelID(),
+			messages,
+			opts,
+			false,
+		),
+	)
 
 	resp, err := l.inner.Chat(genCtx, messages, opts)
 
@@ -43,11 +45,16 @@ func (l *langfuseChat) Chat(ctx context.Context, messages []Message, opts *ChatO
 	var output interface{}
 	if resp != nil {
 		usage = convertUsage(&resp.Usage)
-		output = buildLangfuseGenerationOutput(
-			resp.Content, resp.ReasoningContent, resp.FinishReason, resp.ToolCalls,
+		output = buildLangfuseTraceOutput(
+			ctx,
+			resp.Content,
+			resp.ReasoningContent,
+			resp.FinishReason,
+			resp.ToolCalls,
+			false,
 		)
 	}
-	gen.Finish(output, usage, err)
+	gen.Finish(output, usage, buildLangfuseTraceError(ctx, err))
 	return resp, err
 }
 
@@ -57,21 +64,22 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 		return l.inner.ChatStream(ctx, messages, opts)
 	}
 
-	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
-		Name:            "chat.completion.stream",
-		Model:           l.inner.GetModelName(),
-		Input:           buildLangfuseMessages(messages),
-		ModelParameters: buildLangfuseModelParams(opts),
-		Metadata: map[string]interface{}{
-			"model_id":  l.inner.GetModelID(),
-			"streaming": true,
-			"has_tools": opts != nil && len(opts.Tools) > 0,
-		},
-	})
+	genCtx, gen := mgr.StartGeneration(
+		ctx,
+		buildLangfuseGenerationOptions(
+			ctx,
+			"chat.completion.stream",
+			l.inner.GetModelName(),
+			l.inner.GetModelID(),
+			messages,
+			opts,
+			true,
+		),
+	)
 
 	ch, err := l.inner.ChatStream(genCtx, messages, opts)
 	if err != nil {
-		gen.Finish(nil, nil, err)
+		gen.Finish(nil, nil, buildLangfuseTraceError(ctx, err))
 		return ch, err
 	}
 	if ch == nil {
@@ -88,8 +96,12 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 		var toolCalls []types.LLMToolCall
 		var finishReason string
 		var firstToken bool
+		var streamError bool
 
 		for resp := range ch {
+			if resp.ResponseType == types.ResponseTypeError {
+				streamError = true
+			}
 			if resp.ResponseType == types.ResponseTypeThinking && resp.Content != "" {
 				if !firstToken {
 					gen.MarkCompletionStart(time.Now())
@@ -116,12 +128,89 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 			wrapped <- resp
 		}
 
-		output := buildLangfuseGenerationOutput(
-			string(contentBuf), string(reasoningBuf), finishReason, toolCalls,
+		output := buildLangfuseTraceOutput(
+			ctx,
+			string(contentBuf),
+			string(reasoningBuf),
+			finishReason,
+			toolCalls,
+			streamError,
 		)
 		gen.Finish(output, convertUsage(usage), nil)
 	}()
 	return wrapped, nil
+}
+
+func buildLangfuseGenerationOptions(
+	ctx context.Context,
+	name string,
+	modelName string,
+	modelID string,
+	messages []Message,
+	opts *ChatOptions,
+	streaming bool,
+) langfuse.GenerationOptions {
+	options := langfuse.GenerationOptions{
+		Name:            name,
+		Model:           modelName,
+		Input:           buildLangfuseMessages(messages),
+		ModelParameters: buildLangfuseModelParams(opts),
+		Metadata: map[string]interface{}{
+			"model_id":  modelID,
+			"streaming": streaming,
+			"has_tools": opts != nil && len(opts.Tools) > 0,
+		},
+	}
+	if hashPrefix, prepared := langfuse.PreparedKnowledgeScopeHashPrefix(ctx); prepared {
+		options.Model = "prepared-knowledge-model"
+		options.Input = map[string]interface{}{
+			"message_count":     len(messages),
+			"scope_hash_prefix": hashPrefix,
+		}
+		options.ModelParameters = nil
+		options.Metadata = map[string]interface{}{
+			"streaming":         streaming,
+			"has_tools":         opts != nil && len(opts.Tools) > 0,
+			"scope_hash_prefix": hashPrefix,
+		}
+	}
+	return options
+}
+
+func buildLangfuseTraceOutput(
+	ctx context.Context,
+	content string,
+	reasoningContent string,
+	finishReason string,
+	toolCalls []types.LLMToolCall,
+	streamError bool,
+) map[string]interface{} {
+	if hashPrefix, prepared := langfuse.PreparedKnowledgeScopeHashPrefix(ctx); prepared {
+		return map[string]interface{}{
+			"content_length":           len([]rune(content)),
+			"reasoning_content_length": len([]rune(reasoningContent)),
+			"tool_call_count":          len(toolCalls),
+			"has_finish_reason":        finishReason != "",
+			"stream_error":             streamError,
+			"scope_hash_prefix":        hashPrefix,
+		}
+	}
+	return buildLangfuseGenerationOutput(
+		content,
+		reasoningContent,
+		finishReason,
+		toolCalls,
+	)
+}
+
+func buildLangfuseTraceError(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, prepared := langfuse.PreparedKnowledgeScopeHashPrefix(ctx); prepared {
+		return errors.New("prepared chat generation failed")
+	}
+	return err
 }
 
 func buildLangfuseMessages(messages []Message) []map[string]interface{} {

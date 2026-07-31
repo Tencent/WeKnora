@@ -112,7 +112,7 @@
         </transition>
         <div class="input-container" :class="{ 'is-embedded': embeddedMode }">
             <InputField ref="inputFieldRef"
-                @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles)"
+                @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles, suggestionAttribution) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles, suggestionAttribution)"
                 @stop-generation="handleStopGeneration" :isReplying="isReplying" :sessionId="session_id"
                 :assistantMessageId="currentAssistantMessageId" :embeddedMode="embeddedMode"></InputField>
         </div>
@@ -144,6 +144,10 @@ import { useKnowledgeBaseCreationNavigation } from '@/hooks/useKnowledgeBaseCrea
 import { useChatStreamHandler } from '@/composables/useChatStreamHandler';
 import { useStickyBottomOnResize } from '@/composables/useStickyBottomOnResize';
 import { clearCitationChunkCache } from '@/utils/citationChunkCache';
+import {
+    buildKnowledgeScopeProjection,
+    cloneKnowledgeScopeRequest,
+} from '@/utils/knowledgeScope';
 import ChatReferencesDrawer from '@/components/ChatReferencesDrawer.vue';
 import ChatAttachmentPreviewDrawer from '@/components/ChatAttachmentPreviewDrawer.vue';
 import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue';
@@ -230,8 +234,8 @@ const loadSessionAndHydrate = async (sid) => {
                 // 先把当前的"全局默认"快照下来，再用 session 状态覆盖；
                 // 离开会话时会从快照还原，避免本会话的状态污染新建对话。
                 useSettingsStoreInstance.snapshotAsDefaultsIfNeeded();
-                useSettingsStoreInstance.applyLastRequestState(lastState);
             }
+            useSettingsStoreInstance.applyLastRequestState(lastState);
         }
     } catch (error) {
         console.error('Failed to load session data:', error);
@@ -279,8 +283,6 @@ const suggestedQuestions = ref([]);
 const suggestedQuestionsLoading = ref(false);
 let suggestedQuestionsFetchId = 0; // 用于取消过时的请求
 let suggestedDebounceTimer = null;
-let pendingSuggestionAttribution = null;
-let pendingSuggestionKnowledgeBaseIds = [];
 
 const cancelSuggestedQuestionsFetch = () => {
     suggestedQuestionsFetchId++;
@@ -376,16 +378,26 @@ const recordSuggestionEvent = (message, set, eventType, questionId = '') => {
 
 const handleFollowUpSelect = (message, item) => {
     recordSuggestionEvent(message, message.suggestionSet, 'click', item.id);
-    pendingSuggestionAttribution = {
+    const suggestionAttribution = {
         suggestion_set_id: message.suggestionSet.id,
         question_id: item.id,
     };
-    // Knowledge-backed follow-ups are generated from a specific KB. Keep that
-    // authorized retrieval anchor for the immediate next request; model-backed
-    // suggestions intentionally do not inherit transient @file/@tag/MCP/Skill scope.
-    pendingSuggestionKnowledgeBaseIds = [...new Set(item.knowledge_base_ids || [])];
-    if (inputFieldRef.value?.triggerSend) inputFieldRef.value.triggerSend(item.text);
-    else sendMsg(item.text);
+    const restoredScope = item?.knowledge_scope;
+    if (
+        restoredScope
+        && typeof restoredScope === 'object'
+        && !Array.isArray(restoredScope)
+    ) {
+        useSettingsStoreInstance.snapshotAsDefaultsIfNeeded();
+        useSettingsStoreInstance.applyLastRequestState({
+            knowledge_scope: restoredScope,
+        });
+    }
+    if (inputFieldRef.value?.triggerSend) {
+        inputFieldRef.value.triggerSend(item.text, suggestionAttribution);
+    } else {
+        sendMsg(item.text, '', [], [], [], suggestionAttribution);
+    }
 };
 
 const dismissSuggestions = (message, set) => {
@@ -658,7 +670,14 @@ const handleStopGeneration = () => {
     // 保留 currentAssistantMessageId，Input-field 仍需用它调用 stop API
 };
 
-const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = []) => {
+const sendMsg = async (
+    value,
+    modelId = '',
+    mentionedItems = [],
+    imageFiles = [],
+    attachmentFiles = [],
+    suggestionAttribution = undefined,
+) => {
     stopStream();
     prepareForNewOutgoingMessage();
     isReplying.value = true;
@@ -787,9 +806,6 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     const sidebarFileIds = props.embeddedMode ? [] : (useSettingsStoreInstance.settings.selectedFiles || []);
     const kbIdSet = new Set(sidebarKbIds);
     const fileIdSet = new Set(sidebarFileIds);
-    for (const kbId of pendingSuggestionKnowledgeBaseIds) {
-        if (kbId) kbIdSet.add(kbId);
-    }
     for (const item of mentionedItems || []) {
         if (!item?.id) continue;
         if (item.type === 'kb' && !kbIdSet.has(item.id)) {
@@ -798,9 +814,37 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
             fileIdSet.add(item.id);
         }
     }
-    const kbIds = [...kbIdSet];
     const knowledgeIds = [...fileIdSet];
+    const knowledgeSelections = knowledgeIds.map((id) => {
+        const mentionedFile = (mentionedItems || []).find(item => (
+            item?.type === 'file' && item.id === id
+        ));
+        return {
+            id,
+            kbId: mentionedFile?.kb_id
+                || useSettingsStoreInstance.settings.selectedFileKbMap?.[id],
+        };
+    });
     const tagIds = [...new Set((mentionedItems || []).filter(item => item.type === 'tag' && item.id).map(item => item.id))];
+    const tagSelections = (mentionedItems || [])
+        .filter(item => item.type === 'tag' && item.id && item.kb_id)
+        .map(item => ({ id: item.id, kbId: item.kb_id }));
+    const canProjectFolderScope = (
+        !props.embeddedMode
+        && !agentEnabled
+        && useSettingsStoreInstance.isQuickAnswerMode
+        && !useSettingsStoreInstance.selectedAgentSourceTenantId
+    );
+    const knowledgeScopeProjection = canProjectFolderScope
+        ? buildKnowledgeScopeProjection({
+            knowledgeBaseIds: [...kbIdSet],
+            knowledgeIds,
+            knowledgeSelections,
+            tags: tagSelections,
+            folderSelections: useSettingsStoreInstance.selectedFolderScopes,
+        })
+        : { knowledge_base_ids: [...kbIdSet] };
+    const kbIds = knowledgeScopeProjection.knowledge_base_ids;
     const mcpServiceIds = [...new Set((mentionedItems || []).filter(item => item.type === 'mcp' && item.id).map(item => item.id))];
     const skillNames = [...new Set((mentionedItems || []).filter(item => item.type === 'skill' && item.id).map(item => item.skill_name || item.id))];
 
@@ -809,13 +853,23 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     const requestMcpServiceIds = agentEnabled ? mcpServiceIds : [];
     const requestSkillNames = agentEnabled ? skillNames : [];
 
-    const suggestionAttribution = pendingSuggestionAttribution;
-    pendingSuggestionAttribution = null;
-    pendingSuggestionKnowledgeBaseIds = [];
+    const restoredKnowledgeScope =
+        useSettingsStoreInstance._restoredKnowledgeScope;
+    let canonicalScope = knowledgeScopeProjection.knowledge_scope;
+    if (suggestionAttribution) {
+        canonicalScope = undefined;
+    } else if (
+        canProjectFolderScope
+        && restoredKnowledgeScope
+        && !useSettingsStoreInstance._knowledgeScopeDirty
+    ) {
+        canonicalScope = cloneKnowledgeScopeRequest(restoredKnowledgeScope);
+    }
     await startStream({
         session_id: session_id.value,
         knowledge_base_ids: kbIds,
         knowledge_ids: knowledgeIds,
+        knowledge_scope: canonicalScope,
         agent_enabled: agentEnabled,
         agent_id: selectedAgentId,
         web_search_enabled: webSearchEnabled,
@@ -828,7 +882,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         attachment_uploads: attachmentUploads.length > 0 ? attachmentUploads : undefined,
         attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
         query: value,
-        suggestion_attribution: suggestionAttribution || undefined,
+        suggestion_attribution: suggestionAttribution,
         method: 'POST',
         url: endpoint,
     });

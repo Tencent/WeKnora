@@ -3,6 +3,7 @@ package chatpipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -87,27 +88,59 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		candidatesToRerank = append(candidatesToRerank, result)
 	}
 
-	passagesPreview := langfuse.SummarizePassagePreviews(candidatesToRerank, passages, 25)
+	passagesPreview := langfuse.SummarizePassagePreviews(
+		candidatesToRerank,
+		passages,
+		25,
+	)
+	rerankInput := map[string]interface{}{
+		"query":            chatManage.RewriteQuery,
+		"candidate_count":  len(candidatesToRerank),
+		"rerank_model_id":  chatManage.RerankModelID,
+		"threshold":        chatManage.RerankThreshold,
+		"rerank_top_k":     chatManage.RerankTopK,
+		"faq_priority":     chatManage.FAQPriorityEnabled,
+		"faq_score_boost":  chatManage.FAQScoreBoost,
+		"passages_preview": passagesPreview,
+	}
+	rerankMetadata := map[string]interface{}{
+		"session_id": chatManage.SessionID,
+	}
+	if chatManage.ExecutionScopeHash != "" {
+		rerankInput = map[string]interface{}{
+			"query_length":    len(chatManage.RewriteQuery),
+			"candidate_count": len(candidatesToRerank),
+			"threshold":       chatManage.RerankThreshold,
+			"rerank_top_k":    chatManage.RerankTopK,
+			"faq_priority":    chatManage.FAQPriorityEnabled,
+			"scope_hash_prefix": scopeHashPrefix(
+				chatManage.ExecutionScopeHash,
+			),
+		}
+		rerankMetadata = map[string]interface{}{
+			"scope_hash_prefix": scopeHashPrefix(
+				chatManage.ExecutionScopeHash,
+			),
+		}
+	}
 	rerankCtx, rerankSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
-		Name: "rerank",
-		Input: map[string]interface{}{
-			"query":            chatManage.RewriteQuery,
-			"candidate_count":  len(candidatesToRerank),
-			"rerank_model_id":  chatManage.RerankModelID,
-			"threshold":        chatManage.RerankThreshold,
-			"rerank_top_k":     chatManage.RerankTopK,
-			"faq_priority":     chatManage.FAQPriorityEnabled,
-			"faq_score_boost":  chatManage.FAQScoreBoost,
-			"passages_preview": passagesPreview,
-		},
-		Metadata: map[string]interface{}{
-			"session_id": chatManage.SessionID,
-		},
+		Name:     "rerank",
+		Input:    rerankInput,
+		Metadata: rerankMetadata,
 	})
 	ctx = rerankCtx
 	spanOutput := map[string]interface{}{}
 	var spanErr error
 	defer func() {
+		if chatManage.ExecutionScopeHash != "" {
+			spanOutput = preparedRerankTraceOutput(
+				chatManage,
+				len(candidatesToRerank),
+			)
+			if spanErr != nil {
+				spanErr = errors.New("prepared rerank failed")
+			}
+		}
 		rerankSpan.Finish(spanOutput, nil, spanErr)
 	}()
 
@@ -263,6 +296,23 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		"filtered_cnt": len(chatManage.RerankResult),
 	})
 	return next()
+}
+
+func preparedRerankTraceOutput(
+	chatManage *types.ChatManage,
+	candidateCount int,
+) map[string]interface{} {
+	if chatManage == nil {
+		return map[string]interface{}{}
+	}
+	return map[string]interface{}{
+		"candidate_count":  candidateCount,
+		"search_hit_count": len(chatManage.SearchResult),
+		"reranked_count":   len(chatManage.RerankResult),
+		"scope_hash_prefix": scopeHashPrefix(
+			chatManage.ExecutionScopeHash,
+		),
+	}
 }
 
 func buildRerankSpanOutput(

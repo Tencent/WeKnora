@@ -78,10 +78,15 @@ func (s *knowledgeService) cloneKnowledge(
 		copiedFilePaths = append(copiedFilePaths, newPath)
 	}
 
+	persisted := false
 	defer func() {
 		if err != nil {
 			if len(copiedFilePaths) > 0 {
 				cleanupCopiedObjects(ctx, s.resolveFileService(ctx, targetKB), copiedFilePaths)
+			}
+			if !persisted {
+				logger.GetLogger(ctx).WithField("error", err).Errorf("MoveKnowledge failed to move knowledge")
+				return
 			}
 			dst.ParseStatus = "failed"
 			dst.ErrorMessage = err.Error()
@@ -99,6 +104,7 @@ func (s *knowledgeService) cloneKnowledge(
 		logger.GetLogger(ctx).WithField("error", err).Errorf("MoveKnowledge create knowledge failed")
 		return
 	}
+	persisted = true
 	tenantInfo.StorageUsed += dst.StorageSize
 	if err = s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, dst.StorageSize); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("MoveKnowledge update tenant storage used failed")

@@ -12,6 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	currentPostgresMigrationVersion uint = 72
+	currentPostgresMigrationName         = "knowledge_folder_index_pending"
+)
+
 func writePostgresMigrationFile(
 	t *testing.T,
 	directory string,
@@ -98,6 +103,11 @@ func requiredPostgresMigrationFilename(direction string) string {
 }
 
 func TestValidatePostgresMigrationsDirectory(t *testing.T) {
+	t.Run("required gate targets current knowledge folder pending migration", func(t *testing.T) {
+		assert.Equal(t, currentPostgresMigrationVersion, requiredPostgresMigrationVersion)
+		assert.Equal(t, currentPostgresMigrationName, requiredPostgresMigrationName)
+	})
+
 	t.Run("complete version chain through required migration", func(t *testing.T) {
 		directory := t.TempDir()
 		writePostgresMigrationRange(t, directory, requiredPostgresMigrationVersion)
@@ -118,11 +128,11 @@ func TestValidatePostgresMigrationsDirectory(t *testing.T) {
 		errorContains string
 	}{
 		{
-			name: "required pair missing with highest version seventy",
+			name: "required pair missing from current source",
 			setup: func(t *testing.T, directory string) {
-				writePostgresMigrationRange(t, directory, requiredPostgresMigrationVersion-1)
+				writePostgresMigrationRange(t, directory, currentPostgresMigrationVersion-1)
 			},
-			errorContains: "required postgres migration version 000071",
+			errorContains: "required postgres migration version 000072",
 		},
 		{
 			name: "only required pair is missing historical versions",
@@ -155,6 +165,7 @@ func TestValidatePostgresMigrationsDirectory(t *testing.T) {
 					requiredPostgresMigrationFilename("up"),
 				)))
 			},
+			errorContains: "version 000072 must have one up and one down file",
 		},
 		{
 			name: "required down missing",
@@ -165,6 +176,7 @@ func TestValidatePostgresMigrationsDirectory(t *testing.T) {
 					requiredPostgresMigrationFilename("down"),
 				)))
 			},
+			errorContains: "version 000072 must have one up and one down file",
 		},
 		{
 			name: "required names mismatch",
@@ -181,6 +193,7 @@ func TestValidatePostgresMigrationsDirectory(t *testing.T) {
 					"-- down",
 				)
 			},
+			errorContains: "version 000072 has mismatched names",
 		},
 		{
 			name: "required name is wrong",
@@ -193,6 +206,7 @@ func TestValidatePostgresMigrationsDirectory(t *testing.T) {
 					"other",
 				)
 			},
+			errorContains: `required postgres migration version 000072 has name "other", expected "knowledge_folder_index_pending"`,
 		},
 		{
 			name: "empty up",
@@ -236,28 +250,62 @@ func TestValidatePostgresMigrationsDirectory(t *testing.T) {
 			name: "malformed migration filename",
 			setup: func(t *testing.T, directory string) {
 				writePostgresMigrationRange(t, directory, requiredPostgresMigrationVersion)
-				writePostgresMigrationFile(t, directory, "000072_future.side.sql", "-- invalid")
+				writePostgresMigrationFile(
+					t,
+					directory,
+					fmt.Sprintf(
+						"%06d_future.side.sql",
+						requiredPostgresMigrationVersion+1,
+					),
+					"-- invalid",
+				)
 			},
 		},
 		{
 			name: "recognized version has only up",
 			setup: func(t *testing.T, directory string) {
 				writePostgresMigrationRange(t, directory, requiredPostgresMigrationVersion)
-				writePostgresMigrationFile(t, directory, "000072_future.up.sql", "-- up")
+				writePostgresMigrationFile(
+					t,
+					directory,
+					fmt.Sprintf(
+						"%06d_future.up.sql",
+						requiredPostgresMigrationVersion+1,
+					),
+					"-- up",
+				)
 			},
+			errorContains: "version 000073 must have one up and one down file",
 		},
 		{
 			name: "recognized version has only down",
 			setup: func(t *testing.T, directory string) {
 				writePostgresMigrationRange(t, directory, requiredPostgresMigrationVersion)
-				writePostgresMigrationFile(t, directory, "000072_future.down.sql", "-- down")
+				writePostgresMigrationFile(
+					t,
+					directory,
+					fmt.Sprintf(
+						"%06d_future.down.sql",
+						requiredPostgresMigrationVersion+1,
+					),
+					"-- down",
+				)
 			},
+			errorContains: "version 000073 must have one up and one down file",
 		},
 		{
 			name: "duplicate up",
 			setup: func(t *testing.T, directory string) {
 				writePostgresMigrationRange(t, directory, requiredPostgresMigrationVersion+1)
-				writePostgresMigrationFile(t, directory, "000072_zz_duplicate.up.sql", "-- up")
+				writePostgresMigrationFile(
+					t,
+					directory,
+					fmt.Sprintf(
+						"%06d_zz_duplicate.up.sql",
+						requiredPostgresMigrationVersion+1,
+					),
+					"-- up",
+				)
 			},
 			errorContains: "duplicate up",
 		},
@@ -265,7 +313,15 @@ func TestValidatePostgresMigrationsDirectory(t *testing.T) {
 			name: "duplicate down",
 			setup: func(t *testing.T, directory string) {
 				writePostgresMigrationRange(t, directory, requiredPostgresMigrationVersion+1)
-				writePostgresMigrationFile(t, directory, "000072_zz_duplicate.down.sql", "-- down")
+				writePostgresMigrationFile(
+					t,
+					directory,
+					fmt.Sprintf(
+						"%06d_zz_duplicate.down.sql",
+						requiredPostgresMigrationVersion+1,
+					),
+					"-- down",
+				)
 			},
 			errorContains: "duplicate down",
 		},
@@ -325,11 +381,20 @@ func TestValidatePostgresMigrationsDirectoryRejectsSymlink(t *testing.T) {
 func TestValidatePostgresMigrationsDirectoryRejectsFutureVersionGap(t *testing.T) {
 	directory := t.TempDir()
 	writePostgresMigrationRange(t, directory, requiredPostgresMigrationVersion)
-	writePostgresMigrationPair(t, directory, "000073", "future")
+	writePostgresMigrationPair(
+		t,
+		directory,
+		fmt.Sprintf("%06d", requiredPostgresMigrationVersion+2),
+		"future",
+	)
 
 	_, err := validatePostgresMigrationsDirectory(directory)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "000072")
+	assert.Contains(
+		t,
+		err.Error(),
+		fmt.Sprintf("%06d", requiredPostgresMigrationVersion+1),
+	)
 }
 
 func TestValidatePostgresMigrationsDirectoryAcceptsCompleteFutureVersion(t *testing.T) {
@@ -350,11 +415,15 @@ func TestValidatePostgresMigrationsDirectoryCurrentSource(t *testing.T) {
 
 	inventory, err := validatePostgresMigrationsDirectory(directory)
 	require.NoError(t, err)
-	expectedVersionCount := int(requiredPostgresMigrationVersion + 1)
+	expectedVersionCount := int(currentPostgresMigrationVersion + 1)
 	assert.Len(t, inventory.versions, expectedVersionCount)
 	assert.Len(t, inventory.files, expectedVersionCount*2)
 	assert.Equal(t, uint(0), inventory.versions[0])
-	assert.Equal(t, requiredPostgresMigrationVersion, inventory.versions[len(inventory.versions)-1])
+	assert.Equal(
+		t,
+		currentPostgresMigrationVersion,
+		inventory.versions[len(inventory.versions)-1],
+	)
 }
 
 func TestNewValidatedPostgresMigratorStopsBeforeFactoryOnInvalidSource(t *testing.T) {

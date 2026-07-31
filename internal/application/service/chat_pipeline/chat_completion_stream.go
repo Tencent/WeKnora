@@ -180,16 +180,20 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				}
 
 				if response.ResponseType == types.ResponseTypeError {
+					publicError := preparedChatStreamError(
+						chatManage.ExecutionScopeHash,
+						response.Content,
+					)
 					pipelineError(ctx, "Stream", "stream_error", map[string]interface{}{
 						"session_id": chatManage.SessionID,
-						"error":      response.Content,
+						"error":      publicError,
 					})
 					eventBus.Emit(ctx, types.Event{
 						ID:        fmt.Sprintf("%s-error", uuid.New().String()[:8]),
 						Type:      types.EventType(event.EventError),
 						SessionID: chatManage.SessionID,
 						Data: event.ErrorData{
-							Error:     response.Content,
+							Error:     publicError,
 							Stage:     "chat_completion_stream",
 							SessionID: chatManage.SessionID,
 						},
@@ -235,4 +239,14 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	}()
 
 	return next()
+}
+
+func preparedChatStreamError(
+	executionScopeHash string,
+	providerError string,
+) string {
+	if executionScopeHash != "" {
+		return "chat completion stream failed"
+	}
+	return providerError
 }

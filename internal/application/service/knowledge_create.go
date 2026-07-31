@@ -27,6 +27,7 @@ import (
 func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
+	folderID string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file")
 
@@ -55,6 +56,11 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	// FAQ knowledge bases should not accept file uploads — use the FAQ import API instead
 	if kb.Type == types.KnowledgeBaseTypeFAQ {
 		return nil, werrors.NewBadRequestError("FAQ 知识库不支持文件上传，请使用 FAQ 导入功能")
+	}
+
+	resolvedFolderID, err := s.resolveFolderIDForCreate(ctx, kbID, folderID)
+	if err != nil {
+		return nil, err
 	}
 
 	if err := s.checkStorageEngineConfigured(ctx, kb); err != nil {
@@ -91,7 +97,8 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	}
 	if exists {
 		logger.Infof(ctx, "File already exists: %s", fileName)
-		// Update creation time for existing knowledge
+		// Preserve the pre-folder behavior: a duplicate upload refreshes the
+		// existing knowledge creation timestamp without changing placement.
 		if err := s.repo.UpdateKnowledgeColumn(ctx, existingKnowledge.ID, "created_at", time.Now()); err != nil {
 			logger.Errorf(ctx, "Failed to update existing knowledge: %v", err)
 			return nil, err
@@ -191,6 +198,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		FolderID:         resolvedFolderID,
 		Type:             "file",
 		Channel:          defaultChannel(channel),
 		Title:            safeFilename,
@@ -317,18 +325,10 @@ func isFileURL(rawURL, fileName, fileType string) bool {
 func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool, title string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
+	folderID string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from URL")
-	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, rawURL)
-
-	// Route to file_url logic when the URL points to a downloadable file
-	if isFileURL(rawURL, fileName, fileType) {
-		return s.createKnowledgeFromFileURL(
-			ctx, kbID, rawURL, fileName, fileType, enableMultimodel, title, tagIDs, channel, processOverrides,
-		)
-	}
-
-	url := rawURL
+	logger.Infof(ctx, "Knowledge base ID: %s", kbID)
 
 	// Get knowledge base configuration
 	logger.Info(ctx, "Getting knowledge base configuration")
@@ -338,21 +338,47 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		return nil, err
 	}
 
+	resolvedFolderID, err := s.resolveFolderIDForCreate(ctx, kbID, folderID)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := s.checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
 	}
 
-	// Validate URL format and security
+	url := rawURL
+
+	// Keep cheap, local validation ahead of the DNS-aware SSRF check.
 	logger.Info(ctx, "Validating URL")
 	if !isValidURL(url) || !secutils.IsValidURL(url) {
 		logger.Error(ctx, "Invalid or unsafe URL format")
 		return nil, ErrInvalidURL
 	}
 
-	// SSRF protection: validate URL is safe to fetch (uses centralised entry-point with whitelist support)
+	// Keep DNS/network-facing validation in the service. Both local and SSRF
+	// rejection intentionally return the same safe domain sentinel.
 	if err := secutils.ValidateURLForSSRF(url); err != nil {
-		logger.Errorf(ctx, "URL rejected for SSRF protection: %s, err: %v", url, err)
+		logger.Error(ctx, "Knowledge URL rejected by SSRF protection")
 		return nil, ErrInvalidURL
+	}
+
+	// Route to file_url logic only after the common validation sequence.
+	if isFileURL(url, fileName, fileType) {
+		return s.createKnowledgeFromFileURL(
+			ctx,
+			kbID,
+			kb,
+			url,
+			fileName,
+			fileType,
+			enableMultimodel,
+			title,
+			tagIDs,
+			channel,
+			processOverrides,
+			resolvedFolderID,
+		)
 	}
 
 	// Check if URL already exists in the knowledge base
@@ -369,10 +395,10 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		return nil, err
 	}
 	if exists {
-		logger.Infof(ctx, "URL already exists: %s", url)
-		// Update creation time for existing knowledge
-		existingKnowledge.CreatedAt = time.Now()
-		existingKnowledge.UpdatedAt = time.Now()
+		logger.Info(ctx, "Knowledge URL already exists")
+		now := time.Now()
+		existingKnowledge.CreatedAt = now
+		existingKnowledge.UpdatedAt = now
 		if err := s.repo.UpdateKnowledge(ctx, existingKnowledge); err != nil {
 			logger.Errorf(ctx, "Failed to update existing knowledge: %v", err)
 			return nil, err
@@ -393,6 +419,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		FolderID:         resolvedFolderID,
 		Type:             "url",
 		Channel:          defaultChannel(channel),
 		Title:            title,
@@ -520,6 +547,7 @@ func extractFileNameFromContentDisposition(header string) string {
 func (s *knowledgeService) createKnowledgeFromFileURL(
 	ctx context.Context,
 	kbID string,
+	kb *types.KnowledgeBase,
 	fileURL string,
 	fileName string,
 	fileType string,
@@ -528,30 +556,10 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 	tagIDs []string,
 	channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
+	resolvedFolderID string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file URL")
-	logger.Infof(ctx, "Knowledge base ID: %s, file URL: %s", kbID, fileURL)
-
-	// Get knowledge base configuration
-	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
-		return nil, err
-	}
-
-	if err := s.checkStorageEngineConfigured(ctx, kb); err != nil {
-		return nil, err
-	}
-
-	// Validate URL format and security (static check only, no HEAD request)
-	if !isValidURL(fileURL) || !secutils.IsValidURL(fileURL) {
-		logger.Error(ctx, "Invalid or unsafe file URL format")
-		return nil, ErrInvalidURL
-	}
-	if err := secutils.ValidateURLForSSRF(fileURL); err != nil {
-		logger.Errorf(ctx, "File URL rejected for SSRF protection: %s, err: %v", fileURL, err)
-		return nil, ErrInvalidURL
-	}
+	logger.Infof(ctx, "Knowledge base ID: %s", kbID)
 
 	// Resolve fileName: user-provided > extracted from URL path
 	if fileName == "" {
@@ -597,9 +605,10 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		return nil, err
 	}
 	if exists {
-		logger.Infof(ctx, "File URL already exists: %s", fileURL)
-		existingKnowledge.CreatedAt = time.Now()
-		existingKnowledge.UpdatedAt = time.Now()
+		logger.Info(ctx, "File URL already exists")
+		now := time.Now()
+		existingKnowledge.CreatedAt = now
+		existingKnowledge.UpdatedAt = now
 		if err := s.repo.UpdateKnowledge(ctx, existingKnowledge); err != nil {
 			logger.Errorf(ctx, "Failed to update existing knowledge: %v", err)
 			return nil, err
@@ -619,6 +628,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		FolderID:         resolvedFolderID,
 		Type:             "file_url",
 		Channel:          defaultChannel(channel),
 		Title:            title,
@@ -723,7 +733,7 @@ func (s *knowledgeService) CreateKnowledgeFromPassageSync(ctx context.Context,
 
 // CreateKnowledgeFromManual creates or saves manual Markdown knowledge content.
 func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
-	kbID string, payload *types.ManualKnowledgePayload, channel string,
+	kbID string, payload *types.ManualKnowledgePayload, channel string, folderID string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating manual knowledge entry")
 
@@ -758,6 +768,11 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		return nil, err
 	}
 
+	resolvedFolderID, err := s.resolveFolderIDForCreate(ctx, kbID, folderID)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := s.checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
 	}
@@ -775,6 +790,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 	knowledge := &types.Knowledge{
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		FolderID:         resolvedFolderID,
 		Type:             types.KnowledgeTypeManual,
 		Channel:          defaultChannel(channel),
 		Title:            title,

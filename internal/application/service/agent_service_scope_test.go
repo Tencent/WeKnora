@@ -3,6 +3,7 @@ package service
 import (
 	"testing"
 
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 )
@@ -34,4 +35,44 @@ func TestKnowledgeBaseIDsForPrompt_FromSearchTargets(t *testing.T) {
 		},
 	}
 	assert.Equal(t, []string{"kb-1", "kb-2"}, knowledgeBaseIDsForPrompt(cfg))
+}
+
+func TestFilterToolsWithoutKnowledgeScopeKeepsNonKnowledgeCapabilities(t *testing.T) {
+	filtered := filterToolsWithoutKnowledgeScope(
+		[]string{
+			agenttools.ToolKnowledgeSearch,
+			agenttools.ToolWikiReadPage,
+			agenttools.ToolThinking,
+			agenttools.ToolReadSkill,
+			agenttools.ToolWebSearch,
+			agenttools.ToolTodoWrite,
+		},
+		true,
+	)
+
+	assert.Equal(
+		t,
+		[]string{
+			agenttools.ToolThinking,
+			agenttools.ToolReadSkill,
+			agenttools.ToolWebSearch,
+			agenttools.ToolTodoWrite,
+		},
+		filtered,
+	)
+}
+
+func TestFilterToolsWithoutKnowledgeScopeDropsTodoWithoutWeb(t *testing.T) {
+	filtered := filterToolsWithoutKnowledgeScope(
+		[]string{
+			agenttools.ToolKnowledgeSearch,
+			agenttools.ToolThinking,
+			agenttools.ToolWebSearch,
+			agenttools.ToolWebFetch,
+			agenttools.ToolTodoWrite,
+		},
+		false,
+	)
+
+	assert.Equal(t, []string{agenttools.ToolThinking}, filtered)
 }

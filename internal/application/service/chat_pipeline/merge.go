@@ -115,7 +115,7 @@ func (p *PluginMerge) selectInputResults(ctx context.Context, chatManage *types.
 // dedup wraps removeDuplicateResults with before/after logging.
 func (p *PluginMerge) dedup(ctx context.Context, label string, results []*types.SearchResult) []*types.SearchResult {
 	before := len(results)
-	out := removeDuplicateResults(results)
+	out := removeDuplicateResults(ctx, results)
 	if len(out) < before {
 		pipelineInfo(ctx, "Merge", label, map[string]interface{}{
 			"before": before,
@@ -141,7 +141,7 @@ func (p *PluginMerge) injectHistoryResults(
 		"history_hits": len(historyResults),
 	})
 	combined := append(current, historyResults...)
-	return removeDuplicateResults(combined)
+	return removeDuplicateResults(ctx, combined)
 }
 
 // groupAndMergeOverlapping groups chunks by KnowledgeID + ChunkType, then merges

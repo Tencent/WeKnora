@@ -60,6 +60,19 @@ func SummarizeRetrieveOutput(results []*types.RetrieveResult) map[string]interfa
 	return out
 }
 
+// SummarizePreparedRetrieveOutput returns aggregate-only trace data for an
+// authorized execution scope. It intentionally excludes result identifiers and
+// content previews.
+func SummarizePreparedRetrieveOutput(results []*types.RetrieveResult) map[string]interface{} {
+	summary := SummarizeRetrieveOutput(results)
+	return map[string]interface{}{
+		"total_hits":   summary["total_hits"],
+		"vector_hits":  summary["vector_hits"],
+		"keyword_hits": summary["keyword_hits"],
+		"group_count":  summary["group_count"],
+	}
+}
+
 // SummarizeSearchResults builds a compact ranked preview for rerank spans.
 func SummarizeSearchResults(results []*types.SearchResult, limit int) map[string]interface{} {
 	if limit <= 0 {
@@ -184,13 +197,13 @@ func SummarizePassagePreviews(
 	for i := 0; i < n; i++ {
 		sr := candidates[i]
 		out = append(out, map[string]interface{}{
-			"index":             i,
-			"chunk_id":          sr.ID,
-			"knowledge_id":      sr.KnowledgeID,
-			"knowledge_title":   sr.KnowledgeTitle,
-			"retrieval_score":   fmt.Sprintf("%.4f", sr.Score),
-			"match_type":        sr.MatchType,
-			"preview":           TruncateRunes(passages[i], 160),
+			"index":           i,
+			"chunk_id":        sr.ID,
+			"knowledge_id":    sr.KnowledgeID,
+			"knowledge_title": sr.KnowledgeTitle,
+			"retrieval_score": fmt.Sprintf("%.4f", sr.Score),
+			"match_type":      sr.MatchType,
+			"preview":         TruncateRunes(passages[i], 160),
 		})
 	}
 	return out

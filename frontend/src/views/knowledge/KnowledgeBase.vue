@@ -8,16 +8,15 @@ import EmptyKnowledge from '@/components/empty-knowledge.vue';
 import ContextualGuide from '@/components/ContextualGuide.vue';
 import KBInfoPopover from '@/components/KBInfoPopover.vue';
 import KBSwitcherDropdown from '@/components/KBSwitcherDropdown.vue';
-import { getSessionsList, createSessions, generateSessionsTitle } from "@/api/chat/index";
-import { useMenuStore } from '@/stores/menu';
 import { useUIStore } from '@/stores/ui';
+import { useSettingsStore } from '@/stores/settings';
 import { useOrganizationStore } from '@/stores/organization';
 import { useAuthStore } from '@/stores/auth';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue';
-const usemenuStore = useMenuStore();
 const uiStore = useUIStore();
+const settingsStore = useSettingsStore();
 const orgStore = useOrganizationStore();
 const authStore = useAuthStore();
 const chatResources = useChatResourcesStore();
@@ -42,10 +41,23 @@ import DocumentListView from './components/DocumentListView.vue';
 import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
+import KnowledgeFolderTree from './components/KnowledgeFolderTree.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
+import { ensureKnowledgeFolderPaths } from '@/api/knowledge-folder';
+import {
+  readKnowledgeFolderSelection,
+  resolveKnowledgeUploadFolderID,
+  writeKnowledgeFolderSelection,
+} from './utils/knowledgeFolderState';
+import {
+  buildKnowledgeFolderUploadPlan,
+  chunkKnowledgeFolderEnsurePaths,
+  mapKnowledgeFolderUploadTargets,
+} from './utils/knowledgeFolderUpload';
+import { filterUploadFiles } from './utils/uploadSources';
 import WikiBrowser from './wiki/WikiBrowser.vue';
 import { getWikiStats } from '@/api/wiki';
 import {
@@ -57,9 +69,66 @@ import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/
 import { useI18n } from 'vue-i18n';
 import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
 import type { ParserEngineInfo } from '@/api/system';
+import type { KnowledgeFolderBreadcrumb } from '@/types/knowledgeFolder';
 const route = useRoute();
 const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
+const currentFolderId = computed<string | undefined>({
+  get: () => readKnowledgeFolderSelection(route.query),
+  set: (folderId) => {
+    void router.replace({
+      query: writeKnowledgeFolderSelection(route.query, folderId),
+    });
+  },
+});
+const folderTreeRefreshKey = ref(0);
+const folderTreeRefreshParentId = ref('');
+
+const refreshKnowledgeFolderTree = (parentId: string) => {
+  folderTreeRefreshParentId.value = parentId;
+  folderTreeRefreshKey.value += 1;
+};
+
+const handleStartFolderChat = async (payload: {
+  knowledgeBaseId: string
+  folderId: string
+  folderName: string
+  breadcrumb: KnowledgeFolderBreadcrumb[]
+  includeDescendants: true
+}) => {
+  const currentIndex = payload.breadcrumb.findIndex(folder => folder.id === payload.folderId);
+  const visibleBreadcrumb = currentIndex >= 0
+    ? payload.breadcrumb.slice(0, currentIndex + 1)
+    : payload.breadcrumb;
+  const folderPath = visibleBreadcrumb.map(folder => folder.name || folder.id);
+  const ancestorFolderIds = visibleBreadcrumb
+    .filter(folder => folder.id !== payload.folderId)
+    .map(folder => folder.id);
+  settingsStore.prepareQuickAnswerScope({
+    type: 'folder',
+    folder: {
+      knowledgeBaseId: payload.knowledgeBaseId,
+      knowledgeBaseName: kbInfo.value?.name || payload.knowledgeBaseId,
+      folderId: payload.folderId,
+      folderName: payload.folderName,
+      folderPath: folderPath.length > 0 ? folderPath : [payload.folderName],
+      ancestorFolderIds,
+      includeDescendants: true,
+    },
+  });
+  await router.push({ name: 'globalCreatChat' });
+};
+
+const handleStartKnowledgeBaseChat = async (payload: {
+  knowledgeBaseId: string
+}) => {
+  settingsStore.prepareQuickAnswerScope({
+    type: 'knowledge-base',
+    knowledgeBaseId: payload.knowledgeBaseId,
+  });
+  await router.push({ name: 'globalCreatChat' });
+};
+
 const kbInfo = ref<any>(null);
 const uploadSourceRef = ref<InstanceType<typeof KbUploadSourceDropdown> | null>(null);
 const uploading = ref(false);
@@ -306,6 +375,7 @@ let { cardList, total, moreIndex, details, getKnowled, delKnowledge, openMore, o
 const showKbDetailContextualGuide = computed(() => {
   return Boolean(kbId.value)
     && !isFAQ.value
+    && currentFolderId.value === undefined
     && canEdit.value
     && !docListLoading.value
     && cardList.value.length === 0;
@@ -375,7 +445,12 @@ let knowledgeScroll = ref()
 let page = 1;
 let pageSize = 35;
 let scrollLoading = false;
-const resetPage = () => { page = 1; scrollLoading = false; };
+let scrollLoadingGeneration = 0;
+const resetPage = () => {
+  page = 1;
+  scrollLoading = false;
+  scrollLoadingGeneration += 1;
+};
 
 // Move state — inline in card menu
 const moveMenuMode = ref<'normal' | 'targets' | 'confirm'>('normal');
@@ -569,6 +644,7 @@ const filterParams = computed(() => {
     source: selectedSource.value || undefined,
     start_time: start ? `${start} 00:00:00` : undefined,
     end_time: end ? `${end} 23:59:59` : undefined,
+    folder_id: currentFolderId.value,
   };
 });
 const tagMap = computed<Record<string, any>>(() => {
@@ -648,8 +724,11 @@ const getTagName = (tagId?: string | number) => {
   return tagMap.value[key]?.name || '';
 };
 
+let knowledgeListLoadingGeneration = 0;
 const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
   if (!kbIdValue) return Promise.resolve();
+  const requestGeneration = ++knowledgeListLoadingGeneration;
+  const folderIdAtRequest = currentFolderId.value;
   if (!isFAQ.value) {
     docListLoading.value = true;
   }
@@ -661,7 +740,12 @@ const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
     },
     kbIdValue,
   ).finally(() => {
-    if (isCurrentKb(kbIdValue) && !isFAQ.value) {
+    if (
+      isCurrentKb(kbIdValue)
+      && requestGeneration === knowledgeListLoadingGeneration
+      && folderIdAtRequest === currentFolderId.value
+      && !isFAQ.value
+    ) {
       docListLoading.value = false;
     }
   });
@@ -958,6 +1042,9 @@ const handleFileUploaded = (event: CustomEvent) => {
   const uploadedKbId = event.detail.kbId;
   console.log('接收到文件上传事件，上传的知识库ID:', uploadedKbId, '当前知识库ID:', kbId.value);
   if (uploadedKbId && uploadedKbId === kbId.value && !isFAQ.value) {
+    if (typeof event.detail.folderId === 'string') {
+      refreshKnowledgeFolderTree(event.detail.folderId);
+    }
     console.log('匹配当前知识库，开始刷新文件列表');
     // 如果上传的文件属于当前知识库，使用 loadKnowledgeFiles 刷新文件列表
     resetPage(); // Reset page counter when reloading files after upload
@@ -1027,6 +1114,27 @@ const handleOpenKnowledgeEvent = (e: Event) => {
   tryAutoOpenDocument();
 };
 
+const handleKnowledgeFileDrop = (event: Event) => {
+  const detail = (event as CustomEvent<{ kbId?: string; files?: File[] }>).detail;
+  if (!detail || detail.kbId !== kbId.value || !Array.isArray(detail.files)) return;
+  if (!ensureDocumentKbReady() || detail.files.length === 0) return;
+  const filtered = filterUploadFiles(detail.files, {
+    supportedFileTypes: supportedFileTypes.value,
+    multiFile: detail.files.length > 1,
+  });
+  if (filtered.videoFilteredCount > 0) {
+    MessagePlugin.warning(t('knowledgeBase.videosFilteredNoVLM', { count: filtered.videoFilteredCount }));
+  }
+  if (filtered.skippedCount > 0) {
+    MessagePlugin.warning(t('knowledgeBase.filesSkippedNoEngine', { count: filtered.skippedCount }));
+  }
+  if (filtered.validFiles.length === 0) {
+    MessagePlugin.warning(t('knowledgeBase.allFilesSkippedNoEngine'));
+    return;
+  }
+  void openUploadConfirmDialog(filtered.validFiles);
+};
+
 onMounted(() => {
   loadKnowledgeList();
   editorResources.ensureParserEngines();
@@ -1034,12 +1142,14 @@ onMounted(() => {
   window.addEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.addEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
   window.addEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
+  window.addEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
 });
 
 onUnmounted(() => {
   window.removeEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.removeEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
   window.removeEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
+  window.removeEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
   stopMovePoll();
   if (timeout !== null) {
     clearTimeout(timeout);
@@ -1350,14 +1460,9 @@ const AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
 
 const uploadConfirmStore = useUploadConfirmStore();
 
-const getFolderUploadFileName = (file: File) => {
-  const relativePath = (file as any).webkitRelativePath;
-  if (!relativePath) return undefined;
-  const pathParts = relativePath.split('/');
-  if (pathParts.length <= 2) return undefined;
-  const subPath = pathParts.slice(1, -1).join('/');
-  return `${subPath}/${file.name}`;
-};
+const isFolderUpload = (files: File[]) => files.some((file) => (
+  !!(file as File & { webkitRelativePath?: string }).webkitRelativePath
+));
 
 const showUploadResultMessages = (
   successCount: number,
@@ -1394,9 +1499,13 @@ const showUploadResultMessages = (
 
 const executeUploadBatch = async (
   files: File[],
-  options: { processConfig?: KnowledgeProcessOverrides } = {},
+  options: {
+    targetKbId: string
+    folderId: string
+    processConfig?: KnowledgeProcessOverrides
+  },
 ) => {
-  const targetKbId = kbId.value;
+  const { targetKbId, folderId, processConfig } = options;
   if (!targetKbId || files.length === 0) {
     return { successCount: 0, failCount: files.length };
   }
@@ -1405,24 +1514,56 @@ const executeUploadBatch = async (
   let successCount = 0;
   let failCount = 0;
   const totalCount = files.length;
-  const hasFolderPaths = files.some((file) => {
-    const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-    return !!relativePath && relativePath.split('/').length > 2;
-  });
+  const hasFolderPaths = isFolderUpload(files);
+  const uploadPlan = buildKnowledgeFolderUploadPlan(files);
+  const ensuredItems: Array<{ client_key: string; folder_id: string }> = [];
 
-  for (const file of files) {
+  try {
+    for (const paths of chunkKnowledgeFolderEnsurePaths(uploadPlan.paths)) {
+      const response: any = await ensureKnowledgeFolderPaths(targetKbId, {
+        parent_id: folderId,
+        paths,
+      });
+      const items = response?.data?.items;
+      if (!Array.isArray(items) || items.length !== paths.length) {
+        throw new Error('invalid ensure-paths response');
+      }
+      ensuredItems.push(...items);
+    }
+  } catch {
+    if (ensuredItems.length > 0) {
+      refreshKnowledgeFolderTree(folderId);
+    }
+    MessagePlugin.error(t('knowledgeFolder.ensurePathsFailed'));
+    return { successCount: 0, failCount: totalCount };
+  }
+
+  let uploadTargets: Array<{ file: File; folder_id: string }>;
+  try {
+    uploadTargets = mapKnowledgeFolderUploadTargets(uploadPlan.files, ensuredItems, folderId);
+  } catch {
+    if (uploadPlan.paths.length > 0) {
+      refreshKnowledgeFolderTree(folderId);
+    }
+    MessagePlugin.error(t('knowledgeFolder.ensurePathsFailed'));
+    return { successCount: 0, failCount: totalCount };
+  }
+
+  for (const { file, folder_id: fileFolderId } of uploadTargets) {
     try {
       const uploadData: {
         file: File
         tag_ids?: string[]
-        fileName?: string
+        folder_id: string
         process_config?: KnowledgeProcessOverrides
-      } = { file, tag_ids: tagIdsToUpload };
+      } = {
+        file,
+        tag_ids: tagIdsToUpload,
+        folder_id: fileFolderId,
+      };
 
-      const fileName = getFolderUploadFileName(file);
-      if (fileName) uploadData.fileName = fileName;
-      if (options.processConfig) {
-        uploadData.process_config = options.processConfig;
+      if (processConfig) {
+        uploadData.process_config = processConfig;
       }
 
       const responseData: any = await uploadKnowledgeFile(targetKbId, uploadData);
@@ -1458,16 +1599,22 @@ const executeUploadBatch = async (
 
   if (successCount > 0) {
     window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
-      detail: { kbId: targetKbId },
+      detail: { kbId: targetKbId, folderId },
     }));
+  } else if (uploadPlan.paths.length > 0) {
+    refreshKnowledgeFolderTree(folderId);
   }
 
   showUploadResultMessages(successCount, failCount, totalCount, hasFolderPaths ? 'folder' : 'document');
   return { successCount, failCount };
 };
 
-const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOverrides) => {
-  const targetKbId = kbId.value;
+const executeUrlImport = async (
+  url: string,
+  processConfig: KnowledgeProcessOverrides | undefined,
+  targetKbId: string,
+  folderId: string,
+) => {
   if (!targetKbId) {
     MessagePlugin.error(t('error.missingKbId'));
     return;
@@ -1479,9 +1626,10 @@ const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOve
       url,
       tag_ids: tagIdsToUpload,
       process_config: processConfig,
+      folder_id: folderId,
     });
     window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
-      detail: { kbId: targetKbId },
+      detail: { kbId: targetKbId, folderId },
     }));
     const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
     if (isSuccess) {
@@ -1507,7 +1655,11 @@ const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOve
   }
 };
 
-const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
+const handleUploadConfirmResult = async (
+  result: UploadConfirmResult,
+  targetKbId: string,
+  folderId: string,
+) => {
   if (result.mode === 'manual') {
     return;
   }
@@ -1517,34 +1669,37 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
   const processConfig = result.processConfig;
 
   if (files.length > 0) {
-    const hasFolderPaths = files.some((file) => {
-      const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-      return !!relativePath && relativePath.split('/').length > 2;
-    });
-    if (hasFolderPaths) {
+    if (isFolderUpload(files)) {
       MessagePlugin.info(t('knowledgeBase.uploadingFolder', { total: files.length }));
     }
-    await executeUploadBatch(files, { processConfig });
+    await executeUploadBatch(files, {
+      targetKbId,
+      folderId,
+      processConfig,
+    });
   }
 
   for (const url of urls) {
-    await executeUrlImport(url, processConfig);
+    await executeUrlImport(url, processConfig, targetKbId, folderId);
   }
 };
 
 const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
-  if (!kbInfo.value) return;
+  const targetKbId = kbId.value;
+  const targetKbInfo = kbInfo.value;
+  const uploadFolderId = resolveKnowledgeUploadFolderID(currentFolderId.value);
+  if (!targetKbId || !targetKbInfo) return;
   if (files.length === 0 && urls.length === 0) return;
   try {
     const result = await uploadConfirmStore.open({
       mode: 'file',
-      kbInfo: kbInfo.value,
+      kbInfo: targetKbInfo,
       files,
       urls,
       acceptFileTypes: acceptFileTypes.value,
       supportedFileTypes: [...supportedFileTypes.value],
     });
-    await handleUploadConfirmResult(result);
+    await handleUploadConfirmResult(result, targetKbId, uploadFolderId);
   } catch {
     // cancelled
   }
@@ -1563,11 +1718,18 @@ const handleUploadSourceUrl = (url: string) => {
 
 const handleManualCreate = () => {
   if (!ensureDocumentKbReady()) return;
+  const folderId = resolveKnowledgeUploadFolderID(currentFolderId.value);
   uiStore.openManualEditor({
     mode: 'create',
     kbId: kbId.value,
+    folderId,
     status: 'draft',
-    onSuccess: manualEditorSuccess,
+    onSuccess: (payload) => {
+      manualEditorSuccess(payload);
+      if (payload.kbId === kbId.value) {
+        refreshKnowledgeFolderTree(folderId);
+      }
+    },
   });
 };
 
@@ -1706,8 +1868,14 @@ const handleScroll = () => {
       if (cardList.value.length < total.value && page < pageNum) {
         page++;
         scrollLoading = true;
+        const requestGeneration = ++scrollLoadingGeneration;
+        const folderIdAtRequest = currentFolderId.value;
         getKnowled({ page, page_size: pageSize, ...filterParams.value }, currentKbId).finally(() => {
-          if (isCurrentKb(currentKbId)) {
+          if (
+            isCurrentKb(currentKbId)
+            && requestGeneration === scrollLoadingGeneration
+            && folderIdAtRequest === currentFolderId.value
+          ) {
             scrollLoading = false;
           }
         });
@@ -1754,6 +1922,21 @@ const clearSelection = () => {
   selectedIds.value.clear();
   lastSelectedIndex = -1;
 };
+
+watch(currentFolderId, (folderId, previousFolderId) => {
+  if (folderId === previousFolderId) return;
+  clearSelection();
+  resetPage();
+  cardList.value = [];
+  total.value = 0;
+  if (
+    kbId.value
+    && String(kbInfo.value?.id || '') === kbId.value
+    && !isFAQ.value
+  ) {
+    void loadKnowledgeFiles(kbId.value);
+  }
+});
 
 // Batch (multi-select) mode mirrors the session list's "批量管理" UX: while off,
 // no checkbox is rendered so the title doesn't jitter on hover; while on,
@@ -1893,7 +2076,7 @@ const handleListAction = (
 
 // Clear selection on filter/tag/kb change to avoid acting on hidden items.
 watch(
-  [selectedTagIds, docSearchKeyword, selectedFileType, selectedParseStatus, selectedSource, updatedTimeRange, kbId],
+  [selectedTagIds, docSearchKeyword, selectedFileType, selectedParseStatus, selectedSource, updatedTimeRange, kbId, currentFolderId],
   () => {
     clearSelection();
   },
@@ -1926,36 +2109,6 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
   }
 };
 
-const getTitle = (session_id: string, value: string) => {
-  const now = new Date().toISOString();
-  let obj = {
-    title: t('knowledgeBase.newSession'),
-    path: `chat/${session_id}`,
-    id: session_id,
-    isMore: false,
-    isNoTitle: true,
-    created_at: now,
-    updated_at: now
-  };
-  usemenuStore.updataMenuChildren(obj);
-  usemenuStore.changeIsFirstSession(true);
-  usemenuStore.changeFirstQuery(value);
-  router.push(`/platform/chat/${session_id}`);
-};
-
-async function createNewSession(value: string): Promise<void> {
-  // Session 不再和知识库绑定，直接创建 Session
-  createSessions({}).then(res => {
-    if (res.data && res.data.id) {
-      getTitle(res.data.id, value);
-    } else {
-      // 错误处理
-      console.error(t('knowledgeBase.createSessionFailed'));
-    }
-  }).catch(error => {
-    console.error(t('knowledgeBase.createSessionError'), error);
-  });
-}
 </script>
 
 <template>
@@ -2051,6 +2204,16 @@ async function createNewSession(value: string): Promise<void> {
 
       <template v-if="activeKbTab === 'documents' || !isWiki">
         <div class="knowledge-main">
+          <KnowledgeFolderTree
+            v-if="kbId"
+            v-model="currentFolderId"
+            :knowledge-base-id="kbId"
+            :refresh-key="folderTreeRefreshKey"
+            :refresh-parent-id="folderTreeRefreshParentId"
+            :can-edit="canEdit"
+            @start-folder-chat="handleStartFolderChat"
+            @start-knowledge-base-chat="handleStartKnowledgeBaseChat"
+          />
           <div class="tag-content">
             <div class="doc-card-area">
               <div class="doc-filter-bar">
@@ -2440,6 +2603,7 @@ async function createNewSession(value: string): Promise<void> {
   display: flex;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
   background: transparent;
   border: none;
 }

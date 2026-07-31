@@ -6,6 +6,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -16,14 +17,23 @@ import (
 // KnowledgeFolderHandler handles knowledge base folder operations.
 // KB access middleware supplies the effective tenant through the request context.
 type KnowledgeFolderHandler struct {
-	service interfaces.KnowledgeFolderService
+	service     interfaces.KnowledgeFolderService
+	moveService interfaces.KnowledgeFolderMoveService
 }
 
 // NewKnowledgeFolderHandler creates a knowledge folder handler.
 func NewKnowledgeFolderHandler(
 	service interfaces.KnowledgeFolderService,
+	moveServices ...interfaces.KnowledgeFolderMoveService,
 ) *KnowledgeFolderHandler {
-	return &KnowledgeFolderHandler{service: service}
+	var moveService interfaces.KnowledgeFolderMoveService
+	if len(moveServices) > 0 {
+		moveService = moveServices[0]
+	}
+	return &KnowledgeFolderHandler{
+		service:     service,
+		moveService: moveService,
+	}
 }
 
 // ListFolders lists direct child folders.
@@ -44,7 +54,12 @@ func (h *KnowledgeFolderHandler) ListFolders(c *gin.Context) {
 		writeKnowledgeFolderError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+	response, ok := newKnowledgeFolderListResponse(result)
+	if !ok {
+		writeKnowledgeFolderError(c, service.ErrKnowledgeFolderDataIntegrity)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": response})
 }
 
 // CreateFolder creates a folder.
@@ -61,7 +76,11 @@ func (h *KnowledgeFolderHandler) CreateFolder(c *gin.Context) {
 		writeKnowledgeFolderError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"success": true, "data": folder})
+	if folder == nil {
+		writeKnowledgeFolderError(c, service.ErrKnowledgeFolderDataIntegrity)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"success": true, "data": dto.NewKnowledgeFolderResponse(folder)})
 }
 
 // GetFolder gets a folder and its direct navigation statistics.
@@ -75,7 +94,11 @@ func (h *KnowledgeFolderHandler) GetFolder(c *gin.Context) {
 		writeKnowledgeFolderError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": folder})
+	if folder == nil {
+		writeKnowledgeFolderError(c, service.ErrKnowledgeFolderDataIntegrity)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": dto.NewKnowledgeFolderWithStatsResponse(folder)})
 }
 
 // UpdateFolder renames, reorders, or moves a folder.
@@ -97,7 +120,11 @@ func (h *KnowledgeFolderHandler) UpdateFolder(c *gin.Context) {
 		writeKnowledgeFolderError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": folder})
+	if folder == nil {
+		writeKnowledgeFolderError(c, service.ErrKnowledgeFolderDataIntegrity)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": dto.NewKnowledgeFolderResponse(folder)})
 }
 
 // DeleteFolder deletes an empty folder.
@@ -125,7 +152,48 @@ func (h *KnowledgeFolderHandler) GetBreadcrumb(c *gin.Context) {
 		writeKnowledgeFolderError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": folders})
+	response, ok := newKnowledgeFolderBreadcrumbResponse(folders)
+	if !ok {
+		writeKnowledgeFolderError(c, service.ErrKnowledgeFolderDataIntegrity)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    response,
+	})
+}
+
+func newKnowledgeFolderListResponse(result *types.PageResult) (*types.PageResult, bool) {
+	if result == nil {
+		return nil, false
+	}
+	var folders []*types.KnowledgeFolderWithStats
+	if result.Data != nil {
+		var ok bool
+		folders, ok = result.Data.([]*types.KnowledgeFolderWithStats)
+		if !ok {
+			return nil, false
+		}
+	}
+	for _, folder := range folders {
+		if folder == nil {
+			return nil, false
+		}
+	}
+	response := *result
+	response.Data = dto.NewKnowledgeFolderWithStatsResponses(folders)
+	return &response, true
+}
+
+func newKnowledgeFolderBreadcrumbResponse(
+	folders []*types.KnowledgeFolder,
+) ([]*dto.KnowledgeFolderBreadcrumbItemResponse, bool) {
+	for _, folder := range folders {
+		if folder == nil {
+			return nil, false
+		}
+	}
+	return dto.NewKnowledgeFolderBreadcrumbItemResponses(folders), true
 }
 
 func writeKnowledgeFolderError(c *gin.Context, err error) {

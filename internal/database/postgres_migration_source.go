@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	postgresMigrationsDirectory          = "migrations/versioned"
-	requiredPostgresMigrationVersion uint = 71
-	requiredPostgresMigrationName         = "knowledge_folders"
+	postgresMigrationsDirectory           = "migrations/versioned"
+	requiredPostgresMigrationVersion uint = 72
+	requiredPostgresMigrationName         = "knowledge_folder_index_pending"
 )
 
 var postgresMigrationFilePattern = regexp.MustCompile(

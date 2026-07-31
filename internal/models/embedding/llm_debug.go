@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 )
 
 // debugEmbedder wraps an Embedder with LLM debug logging.
@@ -47,6 +48,19 @@ func logEmbeddingDebug(ctx context.Context, model string, inputs []string, outpu
 	if !logger.LLMDebugEnabled() {
 		return
 	}
+	if hashPrefix, prepared := langfuse.PreparedKnowledgeScopeHashPrefix(ctx); prepared {
+		logger.LLMDebugLog(
+			ctx,
+			preparedEmbeddingDebugRecord(
+				hashPrefix,
+				inputs,
+				outputs,
+				callErr,
+				dur,
+			),
+		)
+		return
+	}
 
 	record := &logger.LLMCallRecord{
 		CallType: "Embedding",
@@ -83,6 +97,43 @@ func logEmbeddingDebug(ctx context.Context, model string, inputs []string, outpu
 		record.Error = callErr.Error()
 	}
 	logger.LLMDebugLog(ctx, record)
+}
+
+func preparedEmbeddingDebugRecord(
+	hashPrefix string,
+	inputs []string,
+	outputs [][]float32,
+	callErr error,
+	dur time.Duration,
+) *logger.LLMCallRecord {
+	totalInputLength := 0
+	for _, input := range inputs {
+		totalInputLength += len([]rune(input))
+	}
+	dimensions := 0
+	if len(outputs) > 0 {
+		dimensions = len(outputs[0])
+	}
+	record := &logger.LLMCallRecord{
+		CallType: "Embedding",
+		Model:    "prepared-knowledge-model",
+		Duration: dur,
+		Sections: []logger.RecordSection{{
+			Title: "Prepared Summary",
+			Content: fmt.Sprintf(
+				"scope_hash_prefix=%s\ninput_count=%d\ninput_length=%d\noutput_count=%d\ndimensions=%d\n",
+				hashPrefix,
+				len(inputs),
+				totalInputLength,
+				len(outputs),
+				dimensions,
+			),
+		}},
+	}
+	if callErr != nil {
+		record.Error = "prepared embedding failed"
+	}
+	return record
 }
 
 func safeIdx(v []float32, i int) float32 {

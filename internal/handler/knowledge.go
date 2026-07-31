@@ -18,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -229,7 +230,7 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 ) bool {
 	if dupErr, ok := err.(*types.DuplicateKnowledgeError); ok {
 		ctx := c.Request.Context()
-		logger.Warnf(ctx, "Detected duplicate %s: %s", duplicateType, secutils.SanitizeForLog(dupErr.Error()))
+		logger.Warnf(ctx, "Detected duplicate %s knowledge", duplicateType)
 		c.JSON(http.StatusConflict, gin.H{
 			"success": false,
 			"message": dupErr.Error(),
@@ -301,6 +302,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
 // @Param        enable_multimodel formData  bool    false  "启用多模态处理"
 // @Param        tag_ids       formData  string  false  "分类ID列表，逗号分隔"
 // @Param        process_config    formData  string  false  "处理配置JSON（KnowledgeProcessOverrides）"
+// @Param        folder_id         formData  string  false  "知识目录ID，空值表示根目录"
 // @Success      200               {object}  map[string]interface{}  "创建的知识"
 // @Failure      400               {object}  errors.AppError         "请求参数错误"
 // @Failure      409               {object}  map[string]interface{}  "文件重复"
@@ -403,11 +405,15 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	tagIDs := parseCommaSeparatedTagIDs(c.PostForm("tag_ids"))
 
 	channel := c.PostForm("channel")
+	folderID := c.PostForm("folder_id")
 
 	// Create knowledge entry from the file
-	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides)
+	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides, folderID)
 	// Check for duplicate knowledge error
 	if err != nil {
+		if writeKnowledgeCreateFolderError(c, err) {
+			return
+		}
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "file") {
 			return
 		}
@@ -439,7 +445,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string  true  "知识库ID"
-// @Param        request  body      object{url=string,file_name=string,file_type=string,enable_multimodel=bool,title=string,tag_ids=[]string}  true  "URL请求"
+// @Param        request  body      dto.CreateURLKnowledgeRequest  true  "URL请求"
 // @Success      201      {object}  map[string]interface{}  "创建的知识"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      409      {object}  map[string]interface{}  "URL重复"
@@ -464,49 +470,35 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		return
 	}
 
-	// Parse URL from request body
-	var req struct {
-		URL              string                           `json:"url" binding:"required"`
-		FileName         string                           `json:"file_name"`
-		FileType         string                           `json:"file_type"`
-		EnableMultimodel *bool                            `json:"enable_multimodel"`
-		Title            string                           `json:"title"`
-		TagIDs           []string                         `json:"tag_ids"`
-		Channel          string                           `json:"channel"`
-		ProcessConfig    *types.KnowledgeProcessOverrides `json:"process_config"`
-	}
+	// Parse URL from request body.
+	var req dto.CreateURLKnowledgeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse URL request", err)
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
-	logger.Infof(ctx, "Received URL request: %s, file_name: %s, file_type: %s",
-		secutils.SanitizeForLog(req.URL),
+	logger.Infof(ctx, "Received URL request, file_name: %s, file_type: %s",
 		secutils.SanitizeForLog(req.FileName),
 		secutils.SanitizeForLog(req.FileType),
 	)
 
-	// SSRF validation for user-supplied URL
-	if err := secutils.ValidateURLForSSRF(req.URL); err != nil {
-		logger.Warnf(ctx, "SSRF validation failed for knowledge URL: %v", err)
-		c.Error(errors.NewBadRequestError(secutils.FormatSSRFError("URL", req.URL, err)))
-		return
-	}
-
-	logger.Infof(ctx,
-		"Creating knowledge from URL, knowledge base ID: %s, URL: %s",
-		secutils.SanitizeForLog(kbID),
-		secutils.SanitizeForLog(req.URL),
-	)
+	logger.Infof(ctx, "Creating knowledge from URL, knowledge base ID: %s", secutils.SanitizeForLog(kbID))
 
 	// Create knowledge entry from the URL
 	knowledge, err := h.kgService.CreateKnowledgeFromURL(
-		ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel, req.Title, req.TagIDs, req.Channel, req.ProcessConfig,
+		ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel, req.Title, req.TagIDs, req.Channel, req.ProcessConfig, req.FolderID,
 	)
 	// Check for duplicate knowledge error
 	if err != nil {
+		if writeKnowledgeCreateFolderError(c, err) {
+			return
+		}
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "url") {
+			return
+		}
+		if goerrors.Is(err, service.ErrInvalidURL) {
+			c.Error(errors.NewBadRequestError("Invalid URL"))
 			return
 		}
 		if appErr, ok := errors.IsAppError(err); ok {
@@ -537,7 +529,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string                       true  "知识库ID"
-// @Param        request  body      types.ManualKnowledgePayload true  "手工知识内容"
+// @Param        request  body      dto.CreateManualKnowledgeRequest true  "手工知识内容"
 // @Success      200      {object}  map[string]interface{}       "创建的知识"
 // @Failure      400      {object}  errors.AppError              "请求参数错误"
 // @Security     Bearer
@@ -561,15 +553,24 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 		return
 	}
 
-	var req types.ManualKnowledgePayload
+	var req dto.CreateManualKnowledgeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse manual knowledge request", err)
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
-	knowledge, err := h.kgService.CreateKnowledgeFromManual(ctx, kbID, &req, req.Channel)
+	knowledge, err := h.kgService.CreateKnowledgeFromManual(
+		ctx,
+		kbID,
+		req.ToManualKnowledgePayload(),
+		req.Channel,
+		req.FolderID,
+	)
 	if err != nil {
+		if writeKnowledgeCreateFolderError(c, err) {
+			return
+		}
 		if appErr, ok := errors.IsAppError(err); ok {
 			c.Error(appErr)
 			return
@@ -912,6 +913,7 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 // @Param        id         path      string  true   "知识库ID"
 // @Param        page       query     int     false  "页码"
 // @Param        page_size  query     int     false  "每页数量"
+// @Param        folder_id   query     string  false  "知识目录ID；参数缺失表示全部目录，显式空值表示根目录"
 // @Param        tag_ids       query     string  false  "标签ID筛选，逗号分隔（OR语义）"
 // @Param        keyword       query     string  false  "关键词搜索"
 // @Param        file_type     query     string  false  "文件类型筛选"
@@ -953,6 +955,9 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		FileType:    c.Query("file_type"),
 		ParseStatus: c.Query("parse_status"),
 		Source:      c.Query("source"),
+	}
+	if folderID, ok := c.GetQuery("folder_id"); ok {
+		filter.FolderID = &folderID
 	}
 	if raw := c.Query("start_time"); raw != "" {
 		t, err := parseFilterTime(raw)

@@ -9,7 +9,6 @@ import (
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
-	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // storeGroup is one fan-out unit of HybridSearch: a set of KB IDs that share
@@ -28,7 +27,7 @@ import (
 type storeGroup struct {
 	// StoreID is the bound VectorStore UUID, or "" for the env-store group
 	// (KBs with VectorStoreID = NULL). Never echo this in user-facing
-	// errors; use secutils.SanitizeForLog when emitting in structured logs.
+	// errors; never emit it in public errors or prepared-request logs.
 	StoreID string
 
 	// OwnerTenantID is the tenant that owns the KBs and the store for this
@@ -135,13 +134,11 @@ func (s *knowledgeBaseService) resolveStoreGroups(
 // recorded in the structured log only, sanitized via SanitizeForLog to
 // defeat log-injection through CR/LF in store IDs.
 func classifyFactoryError(
-	ctx context.Context, err error, tenantID uint64, storeID string,
+	ctx context.Context, err error, _ uint64, _ string,
 ) error {
 	logger.WarnWithFields(ctx, logger.Fields{
-		"tenant_id": tenantID,
-		"store_id":  secutils.SanitizeForLog(storeID),
-		"reason":    "resolve store engine",
-	}, err.Error())
+		"reason": "resolve store engine",
+	}, "retrieve engine resolution failed")
 	switch {
 	case errors.Is(err, retriever.ErrVectorStoreForbidden):
 		return apperrors.NewVectorStoreBindingInvalidError(
@@ -187,20 +184,15 @@ func (s *knowledgeBaseService) authorizeKBAccess(
 		hasPermission, permErr := s.kbShareService.HasTenantKBPermission(
 			ctx, kb.ID, requestTenantID, callerTenantRole, types.OrgRoleViewer)
 		if permErr != nil {
-			logger.ErrorWithFields(ctx, permErr, map[string]interface{}{
-				"caller_tenant_id": requestTenantID,
-				"kb_tenant_id":     kb.TenantID,
-				"kb_id":            kb.ID,
-				"reason":           "shared-KB permission lookup failed",
-			})
+			logger.Error(
+				ctx,
+				"Shared knowledge-base permission lookup failed",
+			)
 			return apperrors.NewInternalServerError("failed to verify knowledge base access")
 		}
 		if !hasPermission {
 			logger.WarnWithFields(ctx, logger.Fields{
-				"caller_tenant_id": requestTenantID,
-				"kb_tenant_id":     kb.TenantID,
-				"kb_id":            kb.ID,
-				"reason":           "tenant lacks viewer permission for foreign-tenant KB",
+				"reason": "caller lacks viewer permission for foreign target",
 			}, "search scope rejected: unauthorized foreign-tenant KB")
 			return apperrors.NewNotFoundError("knowledge base not found")
 		}
@@ -215,9 +207,8 @@ func (s *knowledgeBaseService) authorizeKBAccess(
 // KB lacks an embedding model, validation passes and HybridSearch returns
 // an empty result set via the allBaseParamsEmpty fast path.
 //
-// Log fields are sanitized via secutils.SanitizeForLog because resolved
-// keys are derived from model.Parameters.BaseURL, which is tenant-
-// configured and can contain CR/LF or other control characters.
+// Logs omit resolved model identities because tenant-configured endpoints
+// may contain sensitive values.
 func (s *knowledgeBaseService) validateSameEmbeddingModel(
 	ctx context.Context,
 	kbs []*types.KnowledgeBase,
@@ -239,10 +230,7 @@ func (s *knowledgeBaseService) validateSameEmbeddingModel(
 		}
 		if k != seen {
 			logger.WarnWithFields(ctx, logger.Fields{
-				"primary_key": secutils.SanitizeForLog(seen),
-				"diverging":   secutils.SanitizeForLog(k),
-				"kb_id":       kb.ID,
-				"kb_count":    len(kbs),
+				"kb_count": len(kbs),
 			}, "multi-KB search rejected: embedding models differ")
 			return apperrors.NewBadRequestError(
 				"selected knowledge bases use different embedding models; " +

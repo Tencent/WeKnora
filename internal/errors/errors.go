@@ -44,6 +44,9 @@ const (
 	ErrVectorStoreBindingInvalid ErrorCode = 2200
 	ErrVectorStoreUnavailable    ErrorCode = 2201
 
+	// Knowledge scope related error codes (2300-2399)
+	ErrKnowledgeScopeTooLarge ErrorCode = 2300
+
 	// Add more error codes here
 )
 
@@ -255,6 +258,19 @@ func NewVectorStoreUnavailableError(message string) *AppError {
 	return &AppError{
 		Code:     ErrVectorStoreUnavailable,
 		Message:  message,
+		HTTPCode: http.StatusBadRequest,
+	}
+}
+
+// NewKnowledgeScopeTooLargeError reports the per-request retrieval budget.
+func NewKnowledgeScopeTooLargeError(maxFiles int) *AppError {
+	return &AppError{
+		Code: ErrKnowledgeScopeTooLarge,
+		Message: fmt.Sprintf(
+			"knowledge scope exceeds the %d-file per-request limit; "+
+				"select a smaller folder or reduce the selected scope",
+			maxFiles,
+		),
 		HTTPCode: http.StatusBadRequest,
 	}
 }

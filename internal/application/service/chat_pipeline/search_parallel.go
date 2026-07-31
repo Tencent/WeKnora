@@ -100,9 +100,9 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	}
 
 	pipelineInfo(ctx, "SearchParallel", "start", map[string]interface{}{
-		"session_id":    chatManage.SessionID,
-		"has_entities":  len(chatManage.Entity) > 0,
-		"rewrite_query": chatManage.RewriteQuery,
+		"session_id":   chatManage.SessionID,
+		"has_entities": len(chatManage.Entity) > 0,
+		"query_length": len(chatManage.RewriteQuery),
 	})
 
 	// Deep-copy to avoid concurrent read/write on shared slice fields
@@ -112,6 +112,14 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	entityCM.SearchResult = nil
 
 	noop := func() *PluginError { return nil }
+	entitySearchEnabled := executionScopeAllowsEntitySearch(
+		chatManage.ExecutionScope,
+		chatManage.TenantID,
+	)
+	constrainEntitySearchProjection(
+		entityCM,
+		chatManage.ExecutionScope,
+	)
 
 	tasks := []ParallelTask{
 		{
@@ -131,9 +139,9 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 		{
 			Name: "entity_search",
 			Run: func() *PluginError {
-				if len(chatManage.Entity) == 0 {
+				if !entitySearchEnabled || len(chatManage.Entity) == 0 {
 					pipelineInfo(ctx, "SearchParallel", "entity_search_skip", map[string]interface{}{
-						"reason": "no_entities",
+						"reason": "scope_or_entities",
 					})
 					return nil
 				}
@@ -154,10 +162,14 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 
 	// Merge results from both searches
 	chatManage.SearchResult = append(chunkCM.SearchResult, entityCM.SearchResult...)
-	chatManage.SearchResult = removeDuplicateResults(chatManage.SearchResult)
+	chatManage.SearchResult = removeDuplicateResults(ctx, chatManage.SearchResult)
 
 	for name, err := range errs {
-		logger.Warnf(ctx, "[SearchParallel] %s error: %v", name, err.Err)
+		if chatManage.ExecutionScopeHash != "" {
+			logger.Warnf(ctx, "[SearchParallel] %s prepared search failed", name)
+		} else {
+			logger.Warnf(ctx, "[SearchParallel] %s error: %v", name, err.Err)
+		}
 	}
 
 	pipelineInfo(ctx, "SearchParallel", "complete", map[string]interface{}{
@@ -168,6 +180,16 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 		"error_count":    len(errs),
 	})
 
+	if chatManage.ExecutionScopeHash != "" {
+		if err, ok := errs["chunk_search"]; ok {
+			chatManage.SearchResult = nil
+			return err
+		}
+		if err, ok := errs["entity_search"]; ok {
+			chatManage.SearchResult = nil
+			return err
+		}
+	}
 	if len(chatManage.SearchResult) == 0 {
 		if err, ok := errs["chunk_search"]; ok {
 			return err
@@ -176,4 +198,58 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	}
 
 	return next()
+}
+
+func executionScopeAllowsEntitySearch(
+	scope *types.KnowledgeScope,
+	runtimeTenantID uint64,
+) bool {
+	if scope == nil {
+		return true
+	}
+	if !scope.HasLocalKnowledge() {
+		return false
+	}
+	for _, target := range scope.Targets() {
+		if target.SourceTenantID() != runtimeTenantID {
+			return false
+		}
+		if target.FolderFilter().Enabled() ||
+			len(target.KnowledgeIDs()) > 0 ||
+			len(target.TagIDs()) > 0 ||
+			len(target.ScopeTagIDs()) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func constrainEntitySearchProjection(
+	chatManage *types.ChatManage,
+	scope *types.KnowledgeScope,
+) {
+	if chatManage == nil || scope == nil {
+		return
+	}
+	allowedKnowledgeBases := make(map[string]struct{}, scope.Len())
+	for _, target := range scope.Targets() {
+		allowedKnowledgeBases[target.KnowledgeBaseID()] = struct{}{}
+	}
+	filteredKnowledgeBaseIDs := make([]string, 0, len(chatManage.EntityKBIDs))
+	for _, knowledgeBaseID := range chatManage.EntityKBIDs {
+		if _, allowed := allowedKnowledgeBases[knowledgeBaseID]; allowed {
+			filteredKnowledgeBaseIDs = append(
+				filteredKnowledgeBaseIDs,
+				knowledgeBaseID,
+			)
+		}
+	}
+	filteredKnowledge := make(map[string]string)
+	for knowledgeID, knowledgeBaseID := range chatManage.EntityKnowledge {
+		if _, allowed := allowedKnowledgeBases[knowledgeBaseID]; allowed {
+			filteredKnowledge[knowledgeID] = knowledgeBaseID
+		}
+	}
+	chatManage.EntityKBIDs = filteredKnowledgeBaseIDs
+	chatManage.EntityKnowledge = filteredKnowledge
 }

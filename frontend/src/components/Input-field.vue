@@ -8,6 +8,10 @@ import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
 import { useMenuStore } from '@/stores/menu';
 import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags } from '@/api/knowledge-base';
+import {
+  getKnowledgeFolder,
+  getKnowledgeFolderBreadcrumb,
+} from '@/api/knowledge-folder';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { stopSession } from '@/api/chat';
 import { useOrganizationStore } from '@/stores/organization';
@@ -42,6 +46,20 @@ import {
 } from '@/utils/agent-readiness';
 import { formatLocalizedList } from '@/utils/format-list';
 import type { MentionItem, MentionItemType, MentionRequestItem } from '@/types/mention';
+import type { FolderScopeSelection } from '@/types/knowledgeScope';
+import { folderScopeSelectionKey } from '@/utils/knowledgeScope';
+import {
+  buildFolderScopeChips,
+  buildKnowledgeScopeDisplayState,
+  getLastVisibleKnowledgeScopeItem,
+  getUnresolvedKnowledgeScopeFileIds,
+  removeFolderScopeSelection,
+} from '@/utils/knowledgeScopeSelection';
+
+type SuggestionAttribution = {
+  suggestion_set_id: string;
+  question_id: string;
+};
 
 const route = useRoute();
 const router = useRouter();
@@ -453,6 +471,22 @@ const mentionQuery = ref("");
 const mentionItems = ref<MentionItem[]>([]);
 /** 文件 ID -> 知识库 ID（用于批量查询时传 kb_id，支持共享知识库下的文档） */
 const fileIdToKbId = ref<Record<string, string>>({});
+const effectiveFileKbMap = computed<Record<string, string>>(() => {
+  const merged: Record<string, string> = {};
+  for (const source of [
+    settingsStore.settings.selectedFileKbMap || {},
+    fileIdToKbId.value,
+  ]) {
+    for (const [fileId, knowledgeBaseId] of Object.entries(source)) {
+      const normalizedFileId = fileId.trim();
+      const normalizedKnowledgeBaseId = knowledgeBaseId.trim();
+      if (normalizedFileId && normalizedKnowledgeBaseId) {
+        merged[normalizedFileId] = normalizedKnowledgeBaseId;
+      }
+    }
+  }
+  return merged;
+});
 const mcpServices = ref<MCPService[]>([]);
 const mentionActiveIndex = ref(0);
 const mentionStyle = ref<Record<string, string>>({});
@@ -461,6 +495,7 @@ const mentionSelectorRef = ref<any>(null);
 const mentionStartPos = ref(0);
 const isComposing = ref(false);
 const isMentionTriggeredByButton = ref(false);
+const isKnowledgeScopeMentionView = ref(false);
 const mentionHasMore = ref(false);
 const mentionGroupCounts = ref<Partial<Record<MentionItemType, number>>>({});
 // 当前 @ 会话可见的 KB ID 集合（含工具兼容性过滤），分页加载文件时复用，
@@ -505,6 +540,12 @@ const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
 const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || []);
 const selectedFileIds = computed(() => settingsStore.settings.selectedFiles || []);
 const selectedTags = computed(() => settingsStore.settings.selectedTags || []);
+const selectedFolderScopes = computed(() => settingsStore.selectedFolderScopes || []);
+const isFolderScopeSelectionEnabled = computed(() => (
+  !props.embeddedMode
+  && settingsStore.isQuickAnswerMode
+  && !settingsStore.selectedAgentSourceTenantId
+));
 const selectedMCPServiceIds = computed(() => settingsStore.settings.selectedMCPServices || []);
 const selectedSkillNames = computed(() => settingsStore.settings.selectedSkills || []);
 
@@ -550,6 +591,131 @@ const selectedFiles = computed(() => {
     return found || { id, name: 'Loading...' };
   });
 });
+
+const selectedFolderChips = computed(() => buildFolderScopeChips(
+  selectedFolderScopes.value,
+));
+const removeFolderScope = (scope: FolderScopeSelection) => {
+  settingsStore.replaceFolderScopes(removeFolderScopeSelection(
+    selectedFolderScopes.value,
+    scope.knowledgeBaseId,
+    scope.folderId,
+  ));
+};
+
+const resolveFolderKnowledgeBaseName = (knowledgeBaseId: string): string => {
+  const ownKnowledgeBase = knowledgeBases.value.find(kb => kb.id === knowledgeBaseId);
+  if (ownKnowledgeBase?.name) return ownKnowledgeBase.name;
+
+  const sharedKnowledgeBase = (orgStore.sharedKnowledgeBases || []).find(
+    (item: any) => String(item.knowledge_base?.id || '') === knowledgeBaseId,
+  );
+  if (sharedKnowledgeBase?.knowledge_base?.name) {
+    return sharedKnowledgeBase.knowledge_base.name;
+  }
+  return sharedAgentKbList.value.find(kb => kb.id === knowledgeBaseId)?.name
+    || knowledgeBaseId;
+};
+
+let folderScopeHydrationGeneration = 0;
+const needsFolderScopeHydration = (scope: FolderScopeSelection) => (
+  scope.folderName === scope.folderId
+  || scope.knowledgeBaseName === scope.knowledgeBaseId
+  || scope.folderPath.length === 0
+  || scope.folderPath.every(segment => segment === scope.folderId)
+);
+
+const resolveFolderScopeDisplay = async (scope: FolderScopeSelection) => {
+  const knowledgeBaseName = resolveFolderKnowledgeBaseName(scope.knowledgeBaseId);
+  try {
+    const response = await getKnowledgeFolderBreadcrumb(
+      scope.knowledgeBaseId,
+      scope.folderId,
+    );
+    const breadcrumb = Array.isArray(response?.data) ? response.data : [];
+    const currentIndex = breadcrumb.findIndex(folder => folder.id === scope.folderId);
+    if (currentIndex >= 0) {
+      const visiblePath = breadcrumb.slice(0, currentIndex + 1);
+      return {
+        knowledgeBaseName,
+        folderName: visiblePath[currentIndex].name || scope.folderId,
+        folderPath: visiblePath.map(folder => folder.name || folder.id),
+        ancestorFolderIds: visiblePath.slice(0, -1).map(folder => folder.id),
+      };
+    }
+  } catch {
+    // Detail fallback below keeps unavailable historical folders non-fatal.
+  }
+
+  try {
+    const response = await getKnowledgeFolder(scope.knowledgeBaseId, scope.folderId);
+    if (response?.data?.id === scope.folderId) {
+      const folderName = response.data.name || scope.folderName || scope.folderId;
+      const existingPath = scope.folderPath.filter(Boolean);
+      return {
+        knowledgeBaseName,
+        folderName,
+        folderPath: existingPath.length > 0
+          ? [...existingPath.slice(0, -1), folderName]
+          : [folderName],
+        ancestorFolderIds: [...scope.ancestorFolderIds],
+      };
+    }
+  } catch {
+    // Keep the ID-based fallback already stored by last_request_state recovery.
+  }
+  return null;
+};
+
+const hydrateFolderScopeDisplays = async () => {
+  const generation = ++folderScopeHydrationGeneration;
+  const pending = selectedFolderScopes.value.filter(needsFolderScopeHydration);
+  if (pending.length === 0) return;
+
+  const resolved = await Promise.all(pending.map(async scope => ({
+    scope,
+    display: await resolveFolderScopeDisplay(scope),
+  })));
+  if (generation !== folderScopeHydrationGeneration) return;
+
+  for (const item of resolved) {
+    if (!item.display) continue;
+    const stillSelected = selectedFolderScopes.value.some(scope => (
+      folderScopeSelectionKey(scope) === folderScopeSelectionKey(item.scope)
+    ));
+    if (stillSelected) {
+      settingsStore.enrichFolderScopeDisplay(
+        item.scope.knowledgeBaseId,
+        item.scope.folderId,
+        item.display,
+      );
+    }
+  }
+};
+
+const folderScopeDisplaySignature = computed(() => (
+  selectedFolderScopes.value.map(scope => [
+    folderScopeSelectionKey(scope),
+    scope.knowledgeBaseName,
+    scope.folderName,
+    scope.folderPath.join('/'),
+  ].join('|')).join(',')
+));
+const folderScopeKnowledgeBaseSignature = computed(() => ([
+  ...knowledgeBases.value.map(kb => `${kb.id}:${kb.name}`),
+  ...(orgStore.sharedKnowledgeBases || []).map((item: any) => (
+    `${item.knowledge_base?.id || ''}:${item.knowledge_base?.name || ''}`
+  )),
+  ...sharedAgentKbList.value.map(kb => `${kb.id}:${kb.name}`),
+].sort().join('|')));
+
+watch(
+  [folderScopeDisplaySignature, folderScopeKnowledgeBaseSignature],
+  () => {
+    void hydrateFolderScopeDisplays();
+  },
+  { immediate: true },
+);
 
 const skillMentionItems = computed<MentionItem[]>(() => {
   return selectedSkillNames.value
@@ -607,11 +773,12 @@ const allSelectedItems = computed(() => {
     });
   }
   const files = selectedFiles.value.map((f: { id: string; name: string }) => {
-    const kbId = fileIdToKbId.value[f.id];
+    const kbId = effectiveFileKbMap.value[f.id];
     const org_name = kbId ? sharedKbOrgMap[String(kbId)] || '' : '';
     return {
       ...f,
       type: 'file' as const,
+      kbId: kbId || undefined,
       isAgentConfigured: false,
       org_name
     };
@@ -632,6 +799,10 @@ const allSelectedItems = computed(() => {
 
   return [...agentConfiguredKbs, ...userSelectedKbs, ...files, ...tags, ...selectedMCPItems.value, ...skillMentionItems.value];
 });
+const selectedScopeItemCount = computed(() => buildKnowledgeScopeDisplayState(
+  allSelectedItems.value,
+  selectedFolderScopes.value,
+).count);
 
 // 移除选中项（智能体配置的项也可以移除）
 const removeSelectedItem = (item: MentionItem) => {
@@ -688,7 +859,7 @@ const inputPlaceholder = computed(() => {
     return t('input.placeholderAgent', { name: selectedAgent.value.name });
   }
 
-  const hasKnowledge = allSelectedItems.value.length > 0;
+  const hasKnowledge = selectedScopeItemCount.value > 0;
   const hasWebSearch = isWebSearchEnabled.value && isWebSearchConfigured.value;
 
   if (hasKnowledge && hasWebSearch) {
@@ -740,11 +911,17 @@ const loadKnowledgeBases = async (force = false) => {
   }
 };
 
-const loadFiles = async () => {
-  const ids = selectedFileIds.value;
+const loadFiles = async (ownershipFileIds?: readonly string[]) => {
+  const ids = [...new Set(
+    (ownershipFileIds ?? selectedFileIds.value)
+      .map((id: string) => id.trim())
+      .filter(Boolean),
+  )];
   if (ids.length === 0) return;
 
-  const missingIds = ids.filter((id: string) => !fileList.value.find(f => f.id === id));
+  const missingIds = ownershipFileIds
+    ? ids.filter((id: string) => !effectiveFileKbMap.value[id])
+    : ids.filter((id: string) => !fileList.value.find(f => f.id === id));
   if (missingIds.length === 0) return;
 
   try {
@@ -752,7 +929,7 @@ const loadFiles = async () => {
     const byKbId = new Map<string, string[]>();
     const noKbId: string[] = [];
     missingIds.forEach((id: string) => {
-      const kbId = fileIdToKbId.value[id];
+      const kbId = effectiveFileKbMap.value[id];
       if (kbId) {
         if (!byKbId.has(kbId)) byKbId.set(kbId, []);
         byKbId.get(kbId)!.push(id);
@@ -762,13 +939,20 @@ const loadFiles = async () => {
     });
 
     const allNewFiles: Array<{ id: string; name: string }> = [];
+    const resolvedFileKbMap: Record<string, string> = {};
     const agentIdForBatch = settingsStore.selectedAgentSourceTenantId ? settingsStore.selectedAgentId : undefined;
     const runBatch = async (batchIds: string[], kbId?: string, agentId?: string) => {
       const query = new URLSearchParams();
       batchIds.forEach((id: string) => query.append('ids', id));
       const res: any = await batchQueryKnowledge(query.toString(), kbId, agentId);
       if (res.data && Array.isArray(res.data)) {
-        res.data.forEach((f: any) => allNewFiles.push({ id: f.id, name: f.title || f.file_name }));
+        res.data.forEach((f: any) => {
+          allNewFiles.push({ id: f.id, name: f.title || f.file_name });
+          const resolvedKbId = f.knowledge_base_id ?? f.kb_id ?? kbId;
+          if (f.id && resolvedKbId) {
+            resolvedFileKbMap[String(f.id)] = String(resolvedKbId);
+          }
+        });
       }
     };
 
@@ -779,11 +963,53 @@ const loadFiles = async () => {
       await runBatch(noKbId, undefined, agentIdForBatch);
     }
     if (allNewFiles.length > 0) {
-      fileList.value = [...fileList.value, ...allNewFiles];
+      const filesById = new Map(fileList.value.map(file => [file.id, file]));
+      allNewFiles.forEach(file => filesById.set(file.id, file));
+      fileList.value = [...filesById.values()];
+    }
+    if (Object.keys(resolvedFileKbMap).length > 0) {
+      fileIdToKbId.value = {
+        ...fileIdToKbId.value,
+        ...resolvedFileKbMap,
+      };
+      settingsStore.setFileKbMap(resolvedFileKbMap);
     }
   } catch (e) {
     console.error("Failed to load files", e);
   }
+};
+
+let folderScopeFileHydrationPromise: Promise<void> | null = null;
+const ensureFolderScopeFileOwnership = async (): Promise<boolean> => {
+  const unresolvedFileIds = getUnresolvedKnowledgeScopeFileIds(
+    isFolderScopeSelectionEnabled.value ? selectedFolderScopes.value : [],
+    selectedFileIds.value,
+    effectiveFileKbMap.value,
+  );
+  if (unresolvedFileIds.length === 0) return true;
+
+  if (!folderScopeFileHydrationPromise) {
+    folderScopeFileHydrationPromise = loadFiles(unresolvedFileIds);
+  }
+  const hydrationPromise = folderScopeFileHydrationPromise;
+  try {
+    await hydrationPromise;
+  } finally {
+    if (folderScopeFileHydrationPromise === hydrationPromise) {
+      folderScopeFileHydrationPromise = null;
+    }
+  }
+
+  const stillUnresolved = getUnresolvedKnowledgeScopeFileIds(
+    isFolderScopeSelectionEnabled.value ? selectedFolderScopes.value : [],
+    selectedFileIds.value,
+    effectiveFileKbMap.value,
+  );
+  if (stillUnresolved.length > 0) {
+    MessagePlugin.error(t('knowledgeScope.fileOwnershipUnavailable'));
+    return false;
+  }
+  return true;
 };
 
 const loadMCPServices = async () => {
@@ -1449,6 +1675,117 @@ const getTextareaEl = () => {
   return el.querySelector('textarea');
 };
 
+const getMentionMenuBudget = () => (
+  isKnowledgeScopeMentionView.value
+    ? { width: 420, height: 480 }
+    : { width: 300, height: 320 }
+);
+
+const clampExpandedMentionMenuLeft = (
+  candidate: number,
+  menuWidth: number,
+  viewportWidth: number,
+) => Math.max(10, Math.min(candidate, viewportWidth - menuWidth - 10));
+
+const updateMentionMenuPosition = () => {
+  const textarea = getTextareaEl();
+  if (!textarea || !showMention.value) return;
+
+  const expanded = isKnowledgeScopeMentionView.value;
+  const zoom = getRootZoom();
+  const rect = rectToCssPx(textarea.getBoundingClientRect(), zoom);
+  const { width: vw, height: vh } = cssViewportSize(zoom);
+  const menuBudget = getMentionMenuBudget();
+
+  if (isMentionTriggeredByButton.value) {
+    const left = expanded
+      ? clampExpandedMentionMenuLeft(rect.left, menuBudget.width, vw)
+      : rect.left;
+    const spaceAbove = rect.top;
+    const spaceBelow = vh - rect.bottom;
+    if (spaceAbove > menuBudget.height || spaceAbove > spaceBelow) {
+      mentionStyle.value = {
+        left: `${left}px`,
+        bottom: `${vh - rect.top + 8}px`,
+        top: 'auto',
+        ...(expanded
+          ? {
+              '--mention-menu-available-height':
+                `${Math.max(160, spaceAbove - 16)}px`,
+            }
+          : {}),
+      };
+    } else {
+      mentionStyle.value = {
+        left: `${left}px`,
+        top: `${rect.bottom + 8}px`,
+        bottom: 'auto',
+        ...(expanded
+          ? {
+              '--mention-menu-available-height':
+                `${Math.max(160, spaceBelow - 16)}px`,
+            }
+          : {}),
+      };
+    }
+    return;
+  }
+
+  const cursor = textarea.selectionStart;
+  const coords = getCaretCoordinates(textarea, cursor);
+  let left = rect.left + coords.left;
+  if (left + menuBudget.width > vw) {
+    left = vw - menuBudget.width - 10;
+  }
+  if (expanded) {
+    left = Math.max(10, left);
+  }
+
+  const cursorAbsoluteTop = rect.top + coords.top - textarea.scrollTop;
+  const lineHeight = coords.height;
+  const spaceBelow = vh - (cursorAbsoluteTop + lineHeight);
+  if (
+    spaceBelow < menuBudget.height
+    && cursorAbsoluteTop > menuBudget.height
+  ) {
+    mentionStyle.value = {
+      left: `${left}px`,
+      bottom: `${vh - cursorAbsoluteTop}px`,
+      top: 'auto',
+      ...(expanded
+        ? {
+            '--mention-menu-available-height':
+              `${Math.max(160, cursorAbsoluteTop - 10)}px`,
+          }
+        : {}),
+    };
+  } else {
+    mentionStyle.value = {
+      left: `${left}px`,
+      top: `${cursorAbsoluteTop + lineHeight}px`,
+      bottom: 'auto',
+      ...(expanded
+        ? {
+            '--mention-menu-available-height':
+              `${Math.max(160, spaceBelow - 10)}px`,
+          }
+        : {}),
+    };
+  }
+};
+
+const onMentionViewModeChange = (expanded: boolean) => {
+  if (isKnowledgeScopeMentionView.value === expanded) return;
+  isKnowledgeScopeMentionView.value = expanded;
+  if (showMention.value) nextTick(updateMentionMenuPosition);
+};
+
+const restoreMentionInputFocus = () => {
+  nextTick(() => {
+    getTextareaEl()?.focus();
+  });
+};
+
 const onInput = (val: string | InputEvent) => {
   // 如果正在输入法组合中，不处理搜索逻辑，等待 compositionend
   if (isComposing.value) return;
@@ -1506,48 +1843,11 @@ const onInput = (val: string | InputEvent) => {
 
       console.log('[Mention] @ detected, opening menu');
       isMentionTriggeredByButton.value = false;
+      isKnowledgeScopeMentionView.value = false;
       mentionStartPos.value = cursor - 1;
       showMention.value = true;
       mentionQuery.value = "";
-
-      const coords = getCaretCoordinates(textarea, cursor);
-      // Normalize coordinates to CSS pixels (root <html> may carry `zoom`).
-      const zoom = getRootZoom();
-      const rect = rectToCssPx(textarea.getBoundingClientRect(), zoom);
-      const { width: vw, height: vh } = cssViewportSize(zoom);
-      const scrollTop = textarea.scrollTop;
-      const menuHeight = 320; // 预估最大高度
-
-      let left = rect.left + coords.left;
-      // Prevent menu from going off-screen horizontally
-      if (left + 300 > vw) {
-        left = vw - 300 - 10;
-      }
-
-      // 光标相对于视口的实际 top 位置（CSS 像素）
-      const cursorAbsoluteTop = rect.top + coords.top - scrollTop;
-      const lineHeight = coords.height; // 光标高度
-
-      // Check vertical space below cursor
-      const spaceBelow = vh - (cursorAbsoluteTop + lineHeight);
-
-      if (spaceBelow < menuHeight && cursorAbsoluteTop > menuHeight) {
-        // Show above cursor (using bottom positioning)
-        const bottom = vh - cursorAbsoluteTop;
-        mentionStyle.value = {
-          left: `${left}px`,
-          bottom: `${bottom}px`,
-          top: 'auto'
-        };
-      } else {
-        // Show below cursor (using top positioning)
-        const top = cursorAbsoluteTop + lineHeight;
-        mentionStyle.value = {
-          left: `${left}px`,
-          top: `${top}px`,
-          bottom: 'auto'
-        };
-      }
+      updateMentionMenuPosition();
 
       loadMentionItems("");
     }
@@ -1586,39 +1886,55 @@ const triggerMention = () => {
   textarea.focus();
 
   // 直接显示菜单，不插入 @
-  showMention.value = true;
   isMentionTriggeredByButton.value = true;
+  isKnowledgeScopeMentionView.value = false;
+  showMention.value = true;
   mentionQuery.value = "";
   mentionStartPos.value = textarea.selectionStart;
-
-  // Normalize coordinates to CSS pixels (root <html> may carry `zoom`).
-  const zoom = getRootZoom();
-  const rect = rectToCssPx(textarea.getBoundingClientRect(), zoom);
-  const { height: vh } = cssViewportSize(zoom);
-  const menuHeight = 320;
-
-  // 判断输入框上方空间
-  const spaceAbove = rect.top;
-  const spaceBelow = vh - rect.bottom;
-
-  // 优先显示在上方，除非上方空间不足且下方空间充足
-  if (spaceAbove > menuHeight || spaceAbove > spaceBelow) {
-    // Show above textarea
-    mentionStyle.value = {
-      left: `${rect.left}px`,
-      bottom: `${vh - rect.top + 8}px`, // 8px padding
-      top: 'auto'
-    };
-  } else {
-    // Show below textarea
-    mentionStyle.value = {
-      left: `${rect.left}px`,
-      top: `${rect.bottom + 8}px`,
-      bottom: 'auto'
-    };
-  }
+  updateMentionMenuPosition();
 
   loadMentionItems("");
+};
+
+const closeMentionAfterSelection = () => {
+  const textarea = getTextareaEl();
+  if (textarea) {
+    if (!isMentionTriggeredByButton.value) {
+      const cursor = textarea.selectionStart;
+      const textBeforeAt = query.value.slice(0, mentionStartPos.value);
+      const textAfterCursor = query.value.slice(cursor);
+      query.value = textBeforeAt + textAfterCursor;
+
+      nextTick(() => {
+        textarea.selectionStart = textarea.selectionEnd = mentionStartPos.value;
+        textarea.focus();
+      });
+    } else {
+      const cursor = textarea.selectionStart;
+      if (cursor > mentionStartPos.value) {
+        const textBeforeStart = query.value.slice(0, mentionStartPos.value);
+        const textAfterCursor = query.value.slice(cursor);
+        query.value = textBeforeStart + textAfterCursor;
+
+        nextTick(() => {
+          textarea.selectionStart = textarea.selectionEnd = mentionStartPos.value;
+          textarea.focus();
+        });
+      } else {
+        textarea.focus();
+      }
+    }
+  }
+  showMention.value = false;
+};
+
+const onKnowledgeScopeConfirm = (value: {
+  knowledgeBaseIds: string[]
+  folders: FolderScopeSelection[]
+}) => {
+  settingsStore.selectKnowledgeBases(value.knowledgeBaseIds);
+  settingsStore.replaceFolderScopes(value.folders);
+  closeMentionAfterSelection();
 };
 
 const onMentionSelect = (item: any) => {
@@ -1644,39 +1960,7 @@ const onMentionSelect = (item: any) => {
     settingsStore.addSkill(item.skillName || item.id);
   }
 
-  const textarea = getTextareaEl();
-  if (textarea) {
-    // 如果是通过输入 @ 触发的，需要删除 @ 和后面的查询文字
-    if (!isMentionTriggeredByButton.value) {
-      const cursor = textarea.selectionStart;
-      const textBeforeAt = query.value.slice(0, mentionStartPos.value);
-      const textAfterCursor = query.value.slice(cursor);
-      query.value = textBeforeAt + textAfterCursor;
-
-      nextTick(() => {
-        textarea.selectionStart = textarea.selectionEnd = mentionStartPos.value;
-        textarea.focus();
-      });
-    } else {
-      // 通过按钮触发的，如果用户输入了查询词，需要删除查询词
-      const cursor = textarea.selectionStart;
-      if (cursor > mentionStartPos.value) {
-        const textBeforeStart = query.value.slice(0, mentionStartPos.value);
-        const textAfterCursor = query.value.slice(cursor);
-        query.value = textBeforeStart + textAfterCursor;
-
-        nextTick(() => {
-          textarea.selectionStart = textarea.selectionEnd = mentionStartPos.value;
-          textarea.focus();
-        });
-      } else {
-        // 直接聚焦
-        textarea.focus();
-      }
-    }
-  }
-
-  showMention.value = false;
+  closeMentionAfterSelection();
 };
 
 const removeFile = (id: string) => {
@@ -1804,6 +2088,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  folderScopeHydrationGeneration += 1;
   window.removeEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
   document.removeEventListener('click', closeAgentModeSelector);
   document.removeEventListener('click', closeModelSelector);
@@ -1837,11 +2122,22 @@ watch([selectedKbIds, selectedFileIds], ([kbIds, fileIds]) => {
 }, { deep: true });
 
 const emit = defineEmits<{
-  (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[]): void;
+  (
+    e: 'send-msg',
+    query: string,
+    modelId: string,
+    mentionedItems: MentionRequestItem[],
+    imageFiles: File[],
+    attachmentFiles: AttachmentFile[],
+    suggestionAttribution?: SuggestionAttribution,
+  ): void;
   (e: 'stop-generation'): void;
 }>();
 
-const createSession = async (val: string) => {
+const createSession = async (
+  val: string,
+  suggestionAttribution?: SuggestionAttribution,
+) => {
   if (!val.trim()) {
     MessagePlugin.info(t('input.messages.enterContent'));
     return;
@@ -1869,7 +2165,15 @@ const createSession = async (val: string) => {
   if (props.embeddedMode) {
     const textarea = getTextareaEl();
     if (textarea) textarea.blur();
-    emit('send-msg', val, selectedModelId.value || '', [], [], []);
+    emit(
+      'send-msg',
+      val,
+      selectedModelId.value || '',
+      [],
+      [],
+      [],
+      suggestionAttribution,
+    );
     clearvalue();
     return;
   }
@@ -1884,6 +2188,10 @@ const createSession = async (val: string) => {
     uploadedAttachments.value.filter(item => item.status !== 'failed').length;
   if (combinedAttachmentCount > MAX_TOTAL_ATTACHMENTS) {
     MessagePlugin.warning(t('chat.attachmentTotalTooMany', { max: MAX_TOTAL_ATTACHMENTS }));
+    return;
+  }
+
+  if (!await ensureFolderScopeFileOwnership()) {
     return;
   }
 
@@ -1936,7 +2244,15 @@ const createSession = async (val: string) => {
   // detached DOM element (which causes getComputedStyle to throw).
   const textarea = getTextareaEl();
   if (textarea) textarea.blur();
-  emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles);
+  emit(
+    'send-msg',
+    val,
+    selectedModelId.value,
+    mentionedItems,
+    imageFiles,
+    attachmentFiles,
+    suggestionAttribution,
+  );
 
   // Clean up image previews
   uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
@@ -2200,11 +2516,17 @@ const onKeydown = (val: string, event: { e: { preventDefault(): unknown; keyCode
   if (event.e.keyCode === 8) { // Backspace
     const textarea = getTextareaEl();
     if (textarea && textarea.selectionStart === 0 && textarea.selectionEnd === 0 && query.value === '') {
-      const items = allSelectedItems.value;
-      if (items.length > 0) {
+      const lastVisibleItem = getLastVisibleKnowledgeScopeItem(
+        selectedFolderChips.value,
+        allSelectedItems.value,
+      );
+      if (lastVisibleItem) {
         event.e.preventDefault();
-        const lastItem = items[items.length - 1];
-        removeSelectedItem(lastItem);
+        if (lastVisibleItem.kind === 'folder') {
+          removeFolderScope(lastVisibleItem.item.scope);
+        } else {
+          removeSelectedItem(lastVisibleItem.item);
+        }
         return;
       }
     }
@@ -2454,10 +2776,13 @@ onBeforeRouteUpdate((to, from, next) => {
 })
 
 defineExpose({
-  triggerSend(text: string) {
+  triggerSend(
+    text: string,
+    suggestionAttribution?: SuggestionAttribution,
+  ) {
     if (!text.trim()) return;
     query.value = text;
-    nextTick(() => createSession(text));
+    nextTick(() => createSession(text, suggestionAttribution));
   }
 });
 
@@ -2483,7 +2808,24 @@ defineExpose({
         @update:files="uploadedAttachments = $event" />
 
       <!-- 选中的知识库和文件标签（显示在输入框内顶部） -->
-      <div v-if="allSelectedItems.length > 0" class="selected-tags-inline">
+      <div v-if="selectedFolderChips.length > 0 || allSelectedItems.length > 0" class="selected-tags-inline">
+        <span
+          v-for="item in selectedFolderChips"
+          :key="item.key"
+          class="mention-chip mention-chip--folder"
+        >
+          <span class="mention-chip__icon-wrap">
+            <span class="mention-chip__icon">
+              <t-icon name="folder" />
+            </span>
+          </span>
+          <span class="mention-chip__name" :title="item.title">{{ item.label }}</span>
+          <span
+            class="mention-chip__remove"
+            :aria-label="$t('common.remove')"
+            @click.stop="removeFolderScope(item.scope)"
+          >×</span>
+        </span>
         <span v-for="item in allSelectedItems" :key="`${item.type}:${item.id}`" class="mention-chip" :class="[
           getMentionChipClass(item),
           { 'mention-chip--agent': item.isAgentConfigured }
@@ -2608,13 +2950,13 @@ defineExpose({
                 <a href="#" @click.prevent="handleGoToAgentSettings('knowledge')">{{ $t('input.goToAgentSettings')
                 }}</a>
               </div>
-              <span v-else>{{ allSelectedItems.length > 0 ? $t('input.knowledgeBaseWithCount', {
+              <span v-else>{{ selectedScopeItemCount > 0 ? $t('input.knowledgeBaseWithCount', {
                 count:
-                  allSelectedItems.length
+                  selectedScopeItemCount
               }) : $t('input.knowledgeBase') }}</span>
             </template>
             <div ref="atButtonRef" class="control-btn kb-btn" data-guide="chat-kb-mention" :class="{
-              'active': allSelectedItems.length > 0,
+              'active': selectedScopeItemCount > 0,
               'disabled': isMentionDisabled
             }" @click.stop @mousedown.prevent="triggerMention">
               <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"
@@ -2624,7 +2966,7 @@ defineExpose({
                   d="M13.5 10V11.5C13.5 12.163 13.7634 12.7989 14.2322 13.2678C14.7011 13.7366 15.337 14 16 14C16.663 14 17.2989 13.7366 17.7678 13.2678C18.2366 12.7989 18.5 12.163 18.5 11.5V10C18.5 7.74566 17.6045 5.58365 16.0104 3.98959C14.4163 2.39553 12.2543 1.5 10 1.5C7.74566 1.5 5.58365 2.39553 3.98959 3.98959C2.39553 5.58365 1.5 7.74566 1.5 10C1.5 12.2543 2.39553 14.4163 3.98959 16.0104C5.58365 17.6045 7.74566 18.5 10 18.5H12"
                   stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
-              <span v-if="allSelectedItems.length > 0" class="kb-count">{{ allSelectedItems.length }}</span>
+              <span v-if="selectedScopeItemCount > 0" class="kb-count">{{ selectedScopeItemCount }}</span>
             </div>
           </t-tooltip>
 
@@ -2700,7 +3042,11 @@ defineExpose({
     <Teleport to="body">
       <MentionSelector ref="mentionSelectorRef" :visible="showMention" :style="mentionStyle" :items="mentionItems" :hasMore="mentionHasMore"
         :loading="mentionLoading" :emptyHint="mentionEmptyHint" :query="mentionQuery" :group-counts="mentionGroupCounts" v-model:activeIndex="mentionActiveIndex"
-        @select="onMentionSelect" @loadMore="loadMoreMentionItems" />
+        :selected-knowledge-base-ids="selectedKbIds" :selected-folders="selectedFolderScopes"
+        :enable-folder-scope="isFolderScopeSelectionEnabled"
+        @select="onMentionSelect" @confirmKnowledgeScope="onKnowledgeScopeConfirm"
+        @viewModeChange="onMentionViewModeChange" @requestInputFocus="restoreMentionInputFocus"
+        @loadMore="loadMoreMentionItems" />
     </Teleport>
 
     <!-- 知识库选择下拉（使用 Teleport 传送到 body，避免父容器定位影响） -->
@@ -2866,11 +3212,13 @@ const getImgSrc = (url: string) => {
 }
 
 /* 标签表面保持中性，仅用图标颜色表达资源类型。 */
-.mention-chip--kb {
+.mention-chip--kb,
+.mention-chip--folder {
   color: var(--td-text-color-primary);
 }
 
-.mention-chip--kb .mention-chip__icon-wrap {
+.mention-chip--kb .mention-chip__icon-wrap,
+.mention-chip--folder .mention-chip__icon-wrap {
   color: var(--td-brand-color, #07c05f);
 }
 

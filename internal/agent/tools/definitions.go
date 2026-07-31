@@ -34,6 +34,35 @@ const (
 	ToolWikiUpdateIssue   = "wiki_update_issue"
 )
 
+// knowledgeConsumingToolNames is the complete built-in tool set that requires
+// an authorized knowledge scope for the current turn.
+var knowledgeConsumingToolNames = map[string]struct{}{
+	ToolKnowledgeSearch:     {},
+	ToolGrepChunks:          {},
+	ToolListKnowledgeChunks: {},
+	ToolQueryKnowledgeGraph: {},
+	ToolGetDocumentInfo:     {},
+	ToolDatabaseQuery:       {},
+	ToolDataAnalysis:        {},
+	ToolDataSchema:          {},
+	ToolWikiReadPage:        {},
+	ToolWikiSearch:          {},
+	ToolWikiReadSourceDoc:   {},
+	ToolWikiFlagIssue:       {},
+	ToolWikiWritePage:       {},
+	ToolWikiReplaceText:     {},
+	ToolWikiRenamePage:      {},
+	ToolWikiDeletePage:      {},
+	ToolWikiReadIssue:       {},
+	ToolWikiUpdateIssue:     {},
+}
+
+// IsKnowledgeConsumingTool reports whether a built-in tool requires knowledge scope.
+func IsKnowledgeConsumingTool(name string) bool {
+	_, ok := knowledgeConsumingToolNames[name]
+	return ok
+}
+
 // AvailableTool defines a simple tool metadata used by settings APIs.
 type AvailableTool struct {
 	Name        string `json:"name"`

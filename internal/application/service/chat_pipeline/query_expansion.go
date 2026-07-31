@@ -12,14 +12,17 @@ import (
 
 // runQueryExpansion performs query expansion when initial recall is low.
 // It generates query variants and runs concurrent retrieval across search targets.
-func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.ChatManage) []*types.SearchResult {
+func (p *PluginSearch) runQueryExpansion(
+	ctx context.Context,
+	chatManage *types.ChatManage,
+) ([]*types.SearchResult, error) {
 	pipelineInfo(ctx, "Search", "recall_low", map[string]interface{}{
 		"current":   len(chatManage.SearchResult),
 		"threshold": chatManage.EmbeddingTopK,
 	})
 	expansions := p.expandQueries(ctx, chatManage)
 	if len(expansions) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	pipelineInfo(ctx, "Search", "expansion_start", map[string]interface{}{
@@ -32,6 +35,7 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 	expResults := make([]*types.SearchResult, 0, expTopK*len(expansions))
 	var muExp sync.Mutex
 	var wgExp sync.WaitGroup
+	var firstErr error
 	jobs := len(expansions) * len(chatManage.SearchTargets)
 	capSem := 16
 	if jobs < capSem {
@@ -47,6 +51,10 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 	})
 	for _, q := range expansions {
 		for _, target := range chatManage.SearchTargets {
+			if target == nil || target.FolderFilter.Empty() ||
+				target.EmptyResolvedTagScope() {
+				continue
+			}
 			wgExp.Add(1)
 			go func(q string, t *types.SearchTarget) {
 				defer wgExp.Done()
@@ -61,22 +69,41 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 					VectorThreshold:       vectorThreshold,
 					KeywordThreshold:      keywordThreshold,
 					MatchCount:            expTopK,
-					TagIDs:                t.TagIDs,
-					ScopeTagIDs:           t.ScopeTagIDs,
+					TagIDs:                append([]string(nil), t.TagIDs...),
+					ScopeTagIDs:           append([]string(nil), t.ScopeTagIDs...),
+					SourceTenantID:        t.EffectiveSourceTenantID(),
+					FolderFilter:          t.FolderFilter.Clone(),
+					ExecutionScopeHash:    t.ExecutionScopeHash,
 					DisableVectorMatch:    false,
 					DisableKeywordsMatch:  false,
 					SkipContextEnrichment: true, // Pipeline handles context assembly in merge stage
 				}
 				// Apply knowledge ID filter if this is a partial KB search
 				if t.Type == types.SearchTargetTypeKnowledge {
-					paramsExp.KnowledgeIDs = t.KnowledgeIDs
+					paramsExp.KnowledgeIDs = append(
+						[]string(nil),
+						t.KnowledgeIDs...,
+					)
 				}
 				res, err := p.knowledgeBaseService.HybridSearch(ctx, t.KnowledgeBaseID, paramsExp)
 				if err != nil {
+					errorSummary := err.Error()
+					if paramsExp.ExecutionScopeHash != "" {
+						errorSummary = "prepared retrieval failed"
+					}
 					pipelineWarn(ctx, "Search", "expansion_error", map[string]interface{}{
-						"kb_id": t.KnowledgeBaseID,
-						"error": err.Error(),
+						"scope_hash_prefix": scopeHashPrefix(
+							paramsExp.ExecutionScopeHash,
+						),
+						"error": errorSummary,
 					})
+					if paramsExp.ExecutionScopeHash != "" {
+						muExp.Lock()
+						if firstErr == nil {
+							firstErr = err
+						}
+						muExp.Unlock()
+					}
 					return
 				}
 				if len(res) > 0 {
@@ -84,9 +111,10 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 						r.KnowledgeBaseID = t.KnowledgeBaseID
 					}
 					pipelineInfo(ctx, "Search", "expansion_hits", map[string]interface{}{
-						"kb_id": t.KnowledgeBaseID,
-						"query": q,
-						"hits":  len(res),
+						"scope_hash_prefix": scopeHashPrefix(
+							paramsExp.ExecutionScopeHash,
+						),
+						"hits": len(res),
 					})
 					muExp.Lock()
 					expResults = append(expResults, res...)
@@ -96,13 +124,19 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 		}
 	}
 	wgExp.Wait()
+	if chatManage.ExecutionScopeHash != "" && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if firstErr != nil {
+		return nil, firstErr
+	}
 
 	if len(expResults) > 0 {
 		pipelineInfo(ctx, "Search", "expansion_done", map[string]interface{}{
 			"added": len(expResults),
 		})
 	}
-	return expResults
+	return expResults, nil
 }
 
 // expandQueries generates query variants locally without LLM to improve keyword recall.

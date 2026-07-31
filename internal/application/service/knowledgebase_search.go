@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -9,7 +11,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
-	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // GetQueryEmbedding computes the query embedding using the embedding model
@@ -31,7 +32,7 @@ func (s *knowledgeBaseService) GetQueryEmbedding(ctx context.Context, kbID strin
 		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 	}
 	if err != nil {
-		logger.Errorf(ctx, "GetQueryEmbedding: failed to get embedding model %s: %v", kb.EmbeddingModelID, err)
+		logger.Error(ctx, "GetQueryEmbedding: failed to get embedding model")
 		return nil, err
 	}
 
@@ -62,7 +63,7 @@ func (s *knowledgeBaseService) ResolveEmbeddingModelKeys(ctx context.Context, kb
 		tenantCtx := context.WithValue(ctx, types.TenantIDContextKey, ref.TenantID)
 		model, err := s.modelService.GetModelByID(tenantCtx, ref.ModelID)
 		if err != nil || model == nil {
-			logger.Warnf(ctx, "ResolveEmbeddingModelKeys: cannot resolve model %s for tenant %d: %v", ref.ModelID, ref.TenantID, err)
+			logger.Warn(ctx, "ResolveEmbeddingModelKeys: cannot resolve model")
 			resolvedKeys[ref] = ref.ModelID
 			continue
 		}
@@ -88,6 +89,51 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	id string,
 	params types.SearchParams,
 ) ([]*types.SearchResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	ctx = langfuse.WithPreparedKnowledgeScope(
+		ctx,
+		params.ExecutionScopeHash,
+	)
+	if params.FolderFilter.Empty() {
+		return []*types.SearchResult{}, nil
+	}
+	if params.EmptyResolvedTagScope() {
+		return []*types.SearchResult{}, nil
+	}
+	var folderKnowledgeIDs map[string]struct{}
+	if params.FolderFilter.Enabled() {
+		if len(params.KnowledgeIDs) == 0 {
+			return nil, apperrors.NewBadRequestError(
+				"invalid knowledge scope",
+			)
+		}
+		if len(params.KnowledgeIDs) > knowledgeScopeMaxMaterializedKnowledgeIDs {
+			return nil, apperrors.NewKnowledgeScopeTooLargeError(
+				knowledgeScopeMaxMaterializedKnowledgeIDs,
+			)
+		}
+		if params.ExecutionScopeHash == "" ||
+			params.SourceTenantID == 0 {
+			return nil, apperrors.NewServiceUnavailableError(
+				knowledgeScopeUnavailableMessage,
+			)
+		}
+		folderKnowledgeIDs = make(
+			map[string]struct{},
+			len(params.KnowledgeIDs),
+		)
+		for _, knowledgeID := range params.KnowledgeIDs {
+			if knowledgeID == "" ||
+				strings.TrimSpace(knowledgeID) != knowledgeID {
+				return nil, apperrors.NewBadRequestError(
+					"invalid knowledge scope",
+				)
+			}
+			folderKnowledgeIDs[knowledgeID] = struct{}{}
+		}
+	}
 	// Determine the set of KB IDs to search.
 	searchKBIDs := params.KnowledgeBaseIDs
 	if len(searchKBIDs) == 0 {
@@ -97,8 +143,14 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	// QueryText is user-controlled; sanitize before logging to prevent
 	// CR/LF/tab log injection. Matches the handler-layer sanitization at
 	// handler/knowledgebase.go.
-	logger.Infof(ctx, "Hybrid search parameters, knowledge base IDs: %v, query text: %s",
-		searchKBIDs, secutils.SanitizeForLog(params.QueryText))
+	logger.Infof(
+		ctx,
+		"Hybrid search parameters, knowledge bases: %d, query length: %d, folder enabled: %t, scope hash: %s",
+		len(searchKBIDs),
+		len(params.QueryText),
+		params.FolderFilter.Enabled(),
+		knowledgeScopeHashPrefix(params.ExecutionScopeHash),
+	)
 
 	tenantInfo, _ := types.TenantInfoFromContext(ctx)
 	requestTenantID := types.MustTenantIDFromContext(ctx)
@@ -111,9 +163,16 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	// returned row is enforced explicitly below.
 	kbs, err := s.repo.GetKnowledgeBaseByIDs(ctx, searchKBIDs)
 	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"knowledge_base_ids": searchKBIDs,
-		})
+		if params.ExecutionScopeHash != "" {
+			logger.Error(
+				ctx,
+				"Prepared hybrid search knowledge-base lookup failed",
+			)
+		} else {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"knowledge_base_count": len(searchKBIDs),
+			})
+		}
 		return nil, err
 	}
 	if len(kbs) == 0 {
@@ -188,35 +247,62 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	// Execute retrieval with fan-out + score normalization (multi-store
 	// only) and a langfuse span around the entire retrieve step.
 	logger.Infof(ctx, "Starting multi-store retrieval, group count: %d", len(groups))
+	retrieveInput := map[string]interface{}{
+		"query_length":           len(params.QueryText),
+		"kb_count":               len(searchKBIDs),
+		"knowledge_id_count":     len(params.KnowledgeIDs),
+		"tag_id_count":           len(params.TagIDs),
+		"scope_tag_id_count":     len(params.ScopeTagIDs),
+		"scope_hash_prefix":      knowledgeScopeHashPrefix(params.ExecutionScopeHash),
+		"folder_filter_enabled":  params.FolderFilter.Enabled(),
+		"folder_id_count":        len(params.FolderFilter.FolderIDs()),
+		"match_count":            matchCount,
+		"vector_threshold":       params.VectorThreshold,
+		"keyword_threshold":      params.KeywordThreshold,
+		"disable_vector_match":   params.DisableVectorMatch,
+		"disable_keywords_match": params.DisableKeywordsMatch,
+		"group_count":            len(groups),
+	}
+	retrieveMetadata := map[string]interface{}{
+		"primary_kb_type":     string(kb.Type),
+		"has_query_embedding": len(params.QueryEmbedding) > 0,
+	}
+	if params.ExecutionScopeHash == "" {
+		retrieveInput["query_text"] = params.QueryText
+		retrieveMetadata["primary_kb_id"] = kb.ID
+		retrieveMetadata["embedding_model_id"] = kb.EmbeddingModelID
+	}
 	retrieveCtx, retrieveSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
-		Name: "retrieve",
-		Input: map[string]interface{}{
-			"query_text":             params.QueryText,
-			"kb_ids":                 searchKBIDs,
-			"knowledge_ids":          params.KnowledgeIDs,
-			"tag_ids":                params.TagIDs,
-			"scope_tag_ids":          params.ScopeTagIDs,
-			"match_count":            matchCount,
-			"vector_threshold":       params.VectorThreshold,
-			"keyword_threshold":      params.KeywordThreshold,
-			"disable_vector_match":   params.DisableVectorMatch,
-			"disable_keywords_match": params.DisableKeywordsMatch,
-			"group_count":            len(groups),
-		},
-		Metadata: map[string]interface{}{
-			"primary_kb_id":       kb.ID,
-			"primary_kb_type":     string(kb.Type),
-			"embedding_model_id":  kb.EmbeddingModelID,
-			"has_query_embedding": len(params.QueryEmbedding) > 0,
-		},
+		Name:     "retrieve",
+		Input:    retrieveInput,
+		Metadata: retrieveMetadata,
 	})
 	retrieveResults, err := s.retrieveFromStores(retrieveCtx, groups, retriever.EngineAwareNormalizer{})
-	retrieveSpan.Finish(langfuse.SummarizeRetrieveOutput(retrieveResults), nil, err)
+	retrieveSpanErr := err
+	retrieveSpanOutput := langfuse.SummarizeRetrieveOutput(retrieveResults)
+	if err != nil && params.ExecutionScopeHash != "" {
+		retrieveSpanErr = errors.New("prepared hybrid retrieval failed")
+	}
+	if params.ExecutionScopeHash != "" {
+		retrieveSpanOutput = langfuse.SummarizePreparedRetrieveOutput(
+			retrieveResults,
+		)
+		retrieveSpanOutput["scope_hash_prefix"] =
+			knowledgeScopeHashPrefix(params.ExecutionScopeHash)
+	}
+	retrieveSpan.Finish(
+		retrieveSpanOutput,
+		nil,
+		retrieveSpanErr,
+	)
 	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"knowledge_base_ids": searchKBIDs,
-			"query_text":         params.QueryText,
-		})
+		if params.ExecutionScopeHash != "" {
+			logger.Error(ctx, "Prepared hybrid retrieval failed")
+		} else {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"knowledge_base_count": len(searchKBIDs),
+			})
+		}
 		return nil, err
 	}
 
@@ -247,12 +333,44 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+	if err = validateFolderSearchChunks(
+		deduplicatedChunks,
+		folderKnowledgeIDs,
+	); err != nil {
+		return nil, err
+	}
 
 	if len(deduplicatedChunks) > params.MatchCount {
 		deduplicatedChunks = deduplicatedChunks[:params.MatchCount]
 	}
 
-	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
+	return s.processSearchResults(
+		ctx,
+		deduplicatedChunks,
+		params.SkipContextEnrichment,
+	)
+}
+
+func validateFolderSearchChunks(
+	chunks []*types.IndexWithScore,
+	allowedKnowledgeIDs map[string]struct{},
+) error {
+	if allowedKnowledgeIDs == nil {
+		return nil
+	}
+	for _, chunk := range chunks {
+		if chunk == nil {
+			return apperrors.NewInternalServerError(
+				"folder-scoped retrieval failed",
+			)
+		}
+		if _, allowed := allowedKnowledgeIDs[chunk.KnowledgeID]; !allowed {
+			return apperrors.NewInternalServerError(
+				"folder-scoped retrieval failed",
+			)
+		}
+	}
+	return nil
 }
 
 // pickPrimary returns the KB whose ID matches id, or nil if id is not in
@@ -361,15 +479,19 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 
 		appendVectorParams := func(kbIDs []string, knowledgeType string) {
 			retrieveParams = append(retrieveParams, types.RetrieveParams{
-				Query:            params.QueryText,
-				Embedding:        queryEmbedding,
-				KnowledgeBaseIDs: kbIDs,
-				TopK:             matchCount,
-				Threshold:        params.VectorThreshold,
-				RetrieverType:    types.VectorRetrieverType,
-				KnowledgeIDs:     params.KnowledgeIDs,
-				TagIDs:           params.TagIDs,
-				KnowledgeType:    knowledgeType,
+				Query:              params.QueryText,
+				Embedding:          append([]float32(nil), queryEmbedding...),
+				KnowledgeBaseIDs:   append([]string(nil), kbIDs...),
+				TopK:               matchCount,
+				Threshold:          params.VectorThreshold,
+				RetrieverType:      types.VectorRetrieverType,
+				KnowledgeIDs:       append([]string(nil), params.KnowledgeIDs...),
+				TagIDs:             append([]string(nil), params.TagIDs...),
+				ScopeTagIDs:        append([]string(nil), params.ScopeTagIDs...),
+				SourceTenantID:     params.SourceTenantID,
+				FolderFilter:       params.FolderFilter.Clone(),
+				ExecutionScopeHash: params.ExecutionScopeHash,
+				KnowledgeType:      knowledgeType,
 			})
 		}
 
@@ -391,13 +513,17 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 		len(docKeywordKBIDs) > 0 {
 		logger.Info(ctx, "Keyword retrieval supported, preparing keyword retrieval parameters")
 		retrieveParams = append(retrieveParams, types.RetrieveParams{
-			Query:            params.QueryText,
-			KnowledgeBaseIDs: docKeywordKBIDs,
-			TopK:             matchCount,
-			Threshold:        params.KeywordThreshold,
-			RetrieverType:    types.KeywordsRetrieverType,
-			KnowledgeIDs:     params.KnowledgeIDs,
-			TagIDs:           params.TagIDs,
+			Query:              params.QueryText,
+			KnowledgeBaseIDs:   append([]string(nil), docKeywordKBIDs...),
+			TopK:               matchCount,
+			Threshold:          params.KeywordThreshold,
+			RetrieverType:      types.KeywordsRetrieverType,
+			KnowledgeIDs:       append([]string(nil), params.KnowledgeIDs...),
+			TagIDs:             append([]string(nil), params.TagIDs...),
+			ScopeTagIDs:        append([]string(nil), params.ScopeTagIDs...),
+			SourceTenantID:     params.SourceTenantID,
+			FolderFilter:       params.FolderFilter.Clone(),
+			ExecutionScopeHash: params.ExecutionScopeHash,
 		})
 		logger.Info(ctx, "Keyword retrieval parameters setup completed")
 	}
@@ -422,26 +548,26 @@ func (s *knowledgeBaseService) resolveQueryEmbedding(
 		return params.QueryEmbedding, nil
 	}
 
-	logger.Infof(ctx, "Getting embedding model, model ID: %s", kb.EmbeddingModelID)
+	logger.Info(ctx, "Getting embedding model")
 
 	var embeddingModel embedding.Embedder
 	var err error
 	if kb.TenantID != currentTenantID {
-		logger.Infof(ctx, "Cross-tenant knowledge base detected, using source tenant's embedding model. KB tenant: %d, current tenant: %d", kb.TenantID, currentTenantID)
+		logger.Info(ctx, "Using authorized source-tenant embedding model")
 		embeddingModel, err = s.modelService.GetEmbeddingModelForTenant(ctx, kb.EmbeddingModelID, kb.TenantID)
 	} else {
 		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 	}
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get embedding model, model ID: %s, error: %v", kb.EmbeddingModelID, err)
+		logger.Error(ctx, "Failed to get embedding model")
 		return nil, err
 	}
-	logger.Infof(ctx, "Embedding model retrieved: %v", embeddingModel)
+	logger.Info(ctx, "Embedding model retrieved")
 
 	logger.Info(ctx, "Starting to generate query embedding")
 	queryEmbedding, err := embeddingModel.Embed(ctx, params.QueryText)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to embed query text, query text: %s, error: %v", params.QueryText, err)
+		logger.Error(ctx, "Failed to embed query text")
 		return nil, err
 	}
 	logger.Infof(ctx, "Query embedding generated successfully, embedding vector length: %d", len(queryEmbedding))

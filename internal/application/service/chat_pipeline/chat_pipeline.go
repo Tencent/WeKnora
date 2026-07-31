@@ -3,6 +3,7 @@ package chatpipeline
 import (
 	"context"
 
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -71,6 +72,12 @@ func (e *EventManager) buildHandler(plugins []Plugin) func(
 func (e *EventManager) Trigger(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage,
 ) *PluginError {
+	if chatManage != nil && chatManage.ExecutionScopeHash != "" {
+		ctx = langfuse.WithPreparedKnowledgeScope(
+			ctx,
+			chatManage.ExecutionScopeHash,
+		)
+	}
 	if handler, ok := e.handlers[eventType]; ok {
 		return handler(ctx, eventType, chatManage)
 	}

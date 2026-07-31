@@ -32,20 +32,22 @@ func generateEventID(suffix string) string {
 // (see service.LoadAgentHistory and chat_pipeline history loading) — there is no
 // separate cross-turn cache layer.
 type sessionService struct {
-	cfg                   *config.Config                         // Application configuration
-	sessionRepo           interfaces.SessionRepository           // Repository for session data
-	messageRepo           interfaces.MessageRepository           // Repository for message data
-	knowledgeBaseService  interfaces.KnowledgeBaseService        // Service for knowledge base operations
-	modelService          interfaces.ModelService                // Service for model operations
-	tenantService         interfaces.TenantService               // Service for tenant operations
-	eventManager          *chatpipeline.EventManager             // Event manager for chat pipeline
-	agentService          interfaces.AgentService                // Service for agent operations
-	knowledgeService      interfaces.KnowledgeService            // Service for knowledge operations
-	chunkService          interfaces.ChunkService                // Service for chunk operations
-	webSearchStateRepo    interfaces.WebSearchStateService       // Service for web search state
-	webSearchProviderRepo interfaces.WebSearchProviderRepository // Repository for web search provider entities
-	kbShareService        interfaces.KBShareService              // Service for KB sharing operations
-	suggestionRepo        interfaces.MessageSuggestionRepository
+	cfg                    *config.Config                         // Application configuration
+	sessionRepo            interfaces.SessionRepository           // Repository for session data
+	messageRepo            interfaces.MessageRepository           // Repository for message data
+	knowledgeBaseService   interfaces.KnowledgeBaseService        // Service for knowledge base operations
+	modelService           interfaces.ModelService                // Service for model operations
+	tenantService          interfaces.TenantService               // Service for tenant operations
+	eventManager           *chatpipeline.EventManager             // Event manager for chat pipeline
+	agentService           interfaces.AgentService                // Service for agent operations
+	knowledgeService       interfaces.KnowledgeService            // Service for knowledge operations
+	chunkService           interfaces.ChunkService                // Service for chunk operations
+	webSearchStateRepo     interfaces.WebSearchStateService       // Service for web search state
+	webSearchProviderRepo  interfaces.WebSearchProviderRepository // Repository for web search provider entities
+	kbShareService         interfaces.KBShareService              // Service for KB sharing operations
+	suggestionRepo         interfaces.MessageSuggestionRepository
+	knowledgeScopeAuthRepo interfaces.KnowledgeScopeAuthorizationRepository
+	knowledgeScopeResolver interfaces.KnowledgeScopeResolver
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -63,22 +65,26 @@ func NewSessionService(cfg *config.Config,
 	webSearchProviderRepo interfaces.WebSearchProviderRepository,
 	kbShareService interfaces.KBShareService,
 	suggestionRepo interfaces.MessageSuggestionRepository,
+	knowledgeScopeAuthRepo interfaces.KnowledgeScopeAuthorizationRepository,
+	knowledgeScopeResolver interfaces.KnowledgeScopeResolver,
 ) interfaces.SessionService {
 	return &sessionService{
-		cfg:                   cfg,
-		sessionRepo:           sessionRepo,
-		messageRepo:           messageRepo,
-		knowledgeBaseService:  knowledgeBaseService,
-		knowledgeService:      knowledgeService,
-		chunkService:          chunkService,
-		modelService:          modelService,
-		tenantService:         tenantService,
-		eventManager:          eventManager,
-		agentService:          agentService,
-		webSearchStateRepo:    webSearchStateRepo,
-		webSearchProviderRepo: webSearchProviderRepo,
-		kbShareService:        kbShareService,
-		suggestionRepo:        suggestionRepo,
+		cfg:                    cfg,
+		sessionRepo:            sessionRepo,
+		messageRepo:            messageRepo,
+		knowledgeBaseService:   knowledgeBaseService,
+		knowledgeService:       knowledgeService,
+		chunkService:           chunkService,
+		modelService:           modelService,
+		tenantService:          tenantService,
+		eventManager:           eventManager,
+		agentService:           agentService,
+		webSearchStateRepo:     webSearchStateRepo,
+		webSearchProviderRepo:  webSearchProviderRepo,
+		kbShareService:         kbShareService,
+		suggestionRepo:         suggestionRepo,
+		knowledgeScopeAuthRepo: knowledgeScopeAuthRepo,
+		knowledgeScopeResolver: knowledgeScopeResolver,
 	}
 }
 
@@ -287,14 +293,26 @@ func (s *sessionService) UpdateSessionLastRequestState(
 	userID := sessionUserIDFromContext(ctx)
 	affected, err := s.sessionRepo.UpdateLastRequestState(ctx, tenantID, userID, sessionID, state)
 	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"session_id": sessionID,
-			"tenant_id":  tenantID,
-		})
+		if state != nil && state.RequestScope != nil {
+			logger.Error(ctx, "Prepared last request state update failed")
+		} else {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"session_id": sessionID,
+				"tenant_id":  tenantID,
+			})
+		}
 		return err
 	}
 	if affected == 0 {
-		logger.Warnf(ctx, "UpdateSessionLastRequestState: no rows affected for session %s", sessionID)
+		if state != nil && state.RequestScope != nil {
+			logger.Warn(ctx, "Prepared last request state update affected no rows")
+		} else {
+			logger.Warnf(
+				ctx,
+				"UpdateSessionLastRequestState: no rows affected for session %s",
+				sessionID,
+			)
+		}
 	}
 	return nil
 }
@@ -591,28 +609,8 @@ func (s *sessionService) GenerateTitleAsync(
 	modelID string,
 	eventBus *event.EventBus,
 ) {
-	// Use context tenant (effective tenant when using shared agent) so ListModels/GetChatModel find the agent's model.
-	// The session row itself is still updated by its persisted tenant/user owner scope.
-	tenantID := ctx.Value(types.TenantIDContextKey)
-	requestID := ctx.Value(types.RequestIDContextKey)
-	language := ctx.Value(types.LanguageContextKey)
-	// Keep the Langfuse trace handle so the async title generation shows up
-	// as a child of the same trace as the originating chat request.
-	langfuseTrace := ctx.Value(types.LangfuseTraceContextKey)
 	go func() {
-		bgCtx := context.Background()
-		if tenantID != nil {
-			bgCtx = context.WithValue(bgCtx, types.TenantIDContextKey, tenantID)
-		}
-		if requestID != nil {
-			bgCtx = context.WithValue(bgCtx, types.RequestIDContextKey, requestID)
-		}
-		if language != nil {
-			bgCtx = context.WithValue(bgCtx, types.LanguageContextKey, language)
-		}
-		if langfuseTrace != nil {
-			bgCtx = context.WithValue(bgCtx, types.LangfuseTraceContextKey, langfuseTrace)
-		}
+		bgCtx := detachedTitleGenerationContext(ctx)
 
 		// Skip if title already exists
 		if session.Title != "" {
@@ -654,4 +652,8 @@ func (s *sessionService) GenerateTitleAsync(
 			}
 		}
 	}()
+}
+
+func detachedTitleGenerationContext(ctx context.Context) context.Context {
+	return logger.CloneContext(ctx)
 }

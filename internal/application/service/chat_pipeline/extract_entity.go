@@ -66,7 +66,13 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 
 	model, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get model, session_id: %s, error: %v", chatManage.SessionID, err)
+		preparedPipelineErrorLog(
+			ctx,
+			"Prepared entity extraction model lookup failed",
+			"Failed to get model, session_id: %s, error: %v",
+			chatManage.SessionID,
+			err,
+		)
 		return next()
 	}
 
@@ -82,7 +88,12 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 	if len(chatManage.KnowledgeIDs) > 0 {
 		knowledges, err := p.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, chatManage.TenantID, chatManage.KnowledgeIDs)
 		if err != nil {
-			logger.Errorf(ctx, "failed to get knowledges: %v", err)
+			preparedPipelineErrorLog(
+				ctx,
+				"Prepared entity extraction knowledge lookup failed",
+				"failed to get knowledges: %v",
+				err,
+			)
 			return next()
 		}
 		for _, k := range knowledges {
@@ -100,7 +111,12 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 	// Batch retrieve all knowledge bases
 	kbs, err := p.knowledgeBaseRepo.GetKnowledgeBaseByIDs(ctx, allKBIDs)
 	if err != nil {
-		logger.Errorf(ctx, "failed to get knowledge bases: %v", err)
+		preparedPipelineErrorLog(
+			ctx,
+			"Prepared entity extraction knowledge-base lookup failed",
+			"failed to get knowledge bases: %v",
+			err,
+		)
 		return next()
 	}
 
@@ -139,14 +155,24 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 	extractor := NewExtractor(model, template)
 	graph, err := extractor.Extract(ctx, query)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to extract entities, session_id: %s, error: %v", chatManage.SessionID, err)
+		preparedPipelineErrorLog(
+			ctx,
+			"Prepared entity extraction failed",
+			"Failed to extract entities, session_id: %s, error: %v",
+			chatManage.SessionID,
+			err,
+		)
 		return next()
 	}
 	nodes := []string{}
 	for _, node := range graph.Node {
 		nodes = append(nodes, node.Name)
 	}
-	logger.Debugf(ctx, "extracted node: %v", nodes)
+	if preparedPipelineRequest(ctx) {
+		logger.Debugf(ctx, "Prepared entity extraction count: %d", len(nodes))
+	} else {
+		logger.Debugf(ctx, "extracted node: %v", nodes)
+	}
 	chatManage.Entity = nodes
 	return next()
 }
@@ -186,13 +212,23 @@ func (e *Extractor) Extract(ctx context.Context, content string) (*types.GraphDa
 
 	chatResponse, err := e.chat.Chat(ctx, generator.Render(ctx, content), e.chatOpt)
 	if err != nil {
-		logger.Errorf(ctx, "failed to chat: %v", err)
+		preparedPipelineErrorLog(
+			ctx,
+			"Prepared entity extraction model call failed",
+			"failed to chat: %v",
+			err,
+		)
 		return nil, err
 	}
 
 	graph, err := e.formater.ParseGraph(ctx, chatResponse.Content)
 	if err != nil {
-		logger.Errorf(ctx, "failed to parse graph: %v", err)
+		preparedPipelineErrorLog(
+			ctx,
+			"Prepared entity extraction response parsing failed",
+			"failed to parse graph: %v",
+			err,
+		)
 		return nil, err
 	}
 	// e.RemoveUnknownRelation(ctx, graph)
@@ -211,7 +247,11 @@ func (e *Extractor) RemoveUnknownRelation(ctx context.Context, graph *types.Grap
 		if _, ok := relationType[relation.Type]; ok {
 			relationNew = append(relationNew, relation)
 		} else {
-			logger.Infof(ctx, "Unknown relation type %s with %v, ignore it", relation.Type, e.template.Tags)
+			if preparedPipelineRequest(ctx) {
+				logger.Info(ctx, "Prepared entity extraction ignored unknown relation type")
+			} else {
+				logger.Infof(ctx, "Unknown relation type %s with %v, ignore it", relation.Type, e.template.Tags)
+			}
 		}
 	}
 	graph.Relation = relationNew
@@ -452,7 +492,11 @@ func (f *Formater) ParseGraph(ctx context.Context, text string) (*types.GraphDat
 				Type:  fmt.Sprintf("%v", group[f.relationPrefix]),
 			})
 		default:
-			logger.Warnf(ctx, "Unsupported graph group: %v", group)
+			if preparedPipelineRequest(ctx) {
+				logger.Warn(ctx, "Prepared entity extraction ignored unsupported graph group")
+			} else {
+				logger.Warnf(ctx, "Unsupported graph group: %v", group)
+			}
 			continue
 		}
 	}
@@ -469,7 +513,11 @@ func (f *Formater) rebuildGraph(ctx context.Context, graph *types.GraphData) {
 	nodes := make([]*types.GraphNode, 0, len(graph.Node))
 	for _, node := range graph.Node {
 		if prenode, ok := nodeMap[node.Name]; ok {
-			logger.Infof(ctx, "Duplicate node ID: %s, merge attribute", node.Name)
+			if preparedPipelineRequest(ctx) {
+				logger.Info(ctx, "Prepared entity extraction merged duplicate node")
+			} else {
+				logger.Infof(ctx, "Duplicate node ID: %s, merge attribute", node.Name)
+			}
 			// 修复panic：检查Attributes是否为nil
 			if node.Attributes == nil {
 				node.Attributes = make([]string, 0)
@@ -494,13 +542,21 @@ func (f *Formater) rebuildGraph(ctx context.Context, graph *types.GraphData) {
 			node := &types.GraphNode{Name: relation.Node1}
 			nodes = append(nodes, node)
 			nodeMap[relation.Node1] = node
-			logger.Infof(ctx, "Add unknown source node ID: %s", relation.Node1)
+			if preparedPipelineRequest(ctx) {
+				logger.Info(ctx, "Prepared entity extraction added unknown source node")
+			} else {
+				logger.Infof(ctx, "Add unknown source node ID: %s", relation.Node1)
+			}
 		}
 		if _, ok := nodeMap[relation.Node2]; !ok {
 			node := &types.GraphNode{Name: relation.Node2}
 			nodes = append(nodes, node)
 			nodeMap[relation.Node2] = node
-			logger.Infof(ctx, "Add unknown target node ID: %s", relation.Node2)
+			if preparedPipelineRequest(ctx) {
+				logger.Info(ctx, "Prepared entity extraction added unknown target node")
+			} else {
+				logger.Infof(ctx, "Add unknown target node ID: %s", relation.Node2)
+			}
 		}
 
 		relations = append(relations, relation)
@@ -537,7 +593,11 @@ func (f *Formater) extractContent(ctx context.Context, text string) string {
 		return strings.TrimSpace(candidates[0])
 
 	case len(matches) == 1:
-		logger.Debugf(ctx, "no candidate found, use first match without language tag: %s", matches[0][1])
+		if preparedPipelineRequest(ctx) {
+			logger.Debug(ctx, "Prepared entity extraction used first untagged match")
+		} else {
+			logger.Debugf(ctx, "no candidate found, use first match without language tag: %s", matches[0][1])
+		}
 		return strings.TrimSpace(matches[0][2])
 
 	case len(matches) > 1:

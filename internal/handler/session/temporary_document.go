@@ -38,7 +38,7 @@ func (h *Handler) UploadTemporaryDocument(c *gin.Context) {
 	}
 	defer file.Close()
 
-	agent, _ := h.resolveAgent(ctx, c, c.PostForm("agent_id"))
+	agent, _, _ := h.resolveAgent(ctx, c, c.PostForm("agent_id"))
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileHeader.Filename)), ".")
 	options := types.TemporaryDocumentCreateOptions{ParserEngine: strings.TrimSpace(c.PostForm("parser_engine"))}
 	if agent != nil {

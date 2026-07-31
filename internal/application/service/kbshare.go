@@ -27,7 +27,7 @@ var (
 // in this org, with what role" rather than "is this user". The 3-D cap
 // inside CheckTenantKBPermission encodes:
 //
-//   effective = min(share.Permission, tenant_org_role, tenant_role_cap)
+//	effective = min(share.Permission, tenant_org_role, tenant_role_cap)
 //
 // where tenant_role_cap pins tenant Viewers to OrgRoleViewer regardless
 // of what the org-level grant said. That keeps the tenant RBAC promise
@@ -273,14 +273,14 @@ func (s *kbShareService) ListSharedKnowledgeBases(ctx context.Context, tenantID 
 		case types.KnowledgeBaseTypeDocument:
 			knowledgeCount, err := s.kgRepo.CountKnowledgeByKnowledgeBaseID(ctx, share.SourceTenantID, kb.ID)
 			if err != nil {
-				logger.Warnf(ctx, "Failed to get knowledge count for shared KB %s: %v", kb.ID, err)
+				logger.Warn(ctx, "Failed to get shared knowledge-base count")
 			} else {
 				kb.KnowledgeCount = knowledgeCount
 			}
 		case types.KnowledgeBaseTypeFAQ:
 			chunkCount, err := s.chunkRepo.CountChunksByKnowledgeBaseID(ctx, share.SourceTenantID, kb.ID)
 			if err != nil {
-				logger.Warnf(ctx, "Failed to get chunk count for shared KB %s: %v", kb.ID, err)
+				logger.Warn(ctx, "Failed to get shared knowledge-base chunk count")
 			} else {
 				kb.ChunkCount = chunkCount
 			}

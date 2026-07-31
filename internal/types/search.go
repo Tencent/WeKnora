@@ -31,6 +31,9 @@ type SearchTarget struct {
 	// TenantID is the tenant ID that owns this knowledge base
 	// Required for cross-tenant shared KB queries
 	TenantID uint64 `json:"tenant_id"`
+	// SourceTenantID is the server-authorized owner of this target. TenantID is
+	// retained for legacy callers and carries the same value for projections.
+	SourceTenantID uint64 `json:"-"`
 	// KnowledgeIDs is the list of specific knowledge IDs to search within the knowledge base
 	// Only used when Type is SearchTargetTypeKnowledge
 	KnowledgeIDs []string `json:"knowledge_ids,omitempty"`
@@ -40,6 +43,10 @@ type SearchTarget struct {
 	// document KBs this is kept for tracing after the relation-table lookup has
 	// been resolved to KnowledgeIDs; TagIDs remains the physical index filter.
 	ScopeTagIDs []string `json:"scope_tag_ids,omitempty"`
+	// FolderFilter is the resolved, immutable pre-TopK folder constraint.
+	FolderFilter ResolvedFolderFilter `json:"-"`
+	// ExecutionScopeHash links this projection to its prepared execution scope.
+	ExecutionScopeHash string `json:"-"`
 	// DisableRecallThresholds keeps recall broad inside an already constrained,
 	// user-selected scope. The reranker still orders candidates, but vector and
 	// keyword thresholds cannot erase the whole explicit scope before reranking.
@@ -55,6 +62,26 @@ func (st *SearchTarget) RecallThresholds(vectorThreshold, keywordThreshold float
 		return 0, 0
 	}
 	return vectorThreshold, keywordThreshold
+}
+
+// EffectiveSourceTenantID preserves compatibility with legacy targets.
+func (st *SearchTarget) EffectiveSourceTenantID() uint64 {
+	if st == nil {
+		return 0
+	}
+	if st.SourceTenantID != 0 {
+		return st.SourceTenantID
+	}
+	return st.TenantID
+}
+
+// EmptyResolvedTagScope reports a document tag scope whose relation lookup
+// produced no knowledge IDs.
+func (st *SearchTarget) EmptyResolvedTagScope() bool {
+	return st != nil &&
+		len(st.ScopeTagIDs) > 0 &&
+		len(st.TagIDs) == 0 &&
+		len(st.KnowledgeIDs) == 0
 }
 
 // HasRecallThresholdOverride reports whether any target represents an
@@ -186,17 +213,20 @@ type SearchResult struct {
 
 // SearchParams represents the search parameters
 type SearchParams struct {
-	QueryText            string    `json:"query_text"`
-	QueryEmbedding       []float32 `json:"query_embedding,omitempty"`
-	VectorThreshold      float64   `json:"vector_threshold"`
-	KeywordThreshold     float64   `json:"keyword_threshold"`
-	MatchCount           int       `json:"match_count"`
-	DisableKeywordsMatch bool      `json:"disable_keywords_match"`
-	DisableVectorMatch   bool      `json:"disable_vector_match"`
-	KnowledgeIDs         []string  `json:"knowledge_ids"`
-	TagIDs               []string  `json:"tag_ids"` // Tag IDs for filtering (used for FAQ priority filtering)
-	ScopeTagIDs          []string  `json:"scope_tag_ids,omitempty"`
-	OnlyRecommended      bool      `json:"only_recommended"`
+	QueryText            string               `json:"query_text"`
+	QueryEmbedding       []float32            `json:"query_embedding,omitempty"`
+	VectorThreshold      float64              `json:"vector_threshold"`
+	KeywordThreshold     float64              `json:"keyword_threshold"`
+	MatchCount           int                  `json:"match_count"`
+	DisableKeywordsMatch bool                 `json:"disable_keywords_match"`
+	DisableVectorMatch   bool                 `json:"disable_vector_match"`
+	KnowledgeIDs         []string             `json:"knowledge_ids"`
+	TagIDs               []string             `json:"tag_ids"` // Tag IDs for filtering (used for FAQ priority filtering)
+	ScopeTagIDs          []string             `json:"scope_tag_ids,omitempty"`
+	SourceTenantID       uint64               `json:"-"`
+	FolderFilter         ResolvedFolderFilter `json:"-"`
+	ExecutionScopeHash   string               `json:"-"`
+	OnlyRecommended      bool                 `json:"only_recommended"`
 	// KnowledgeBaseIDs overrides the single KB ID passed to HybridSearch,
 	// allowing a single retrieval call to span multiple KBs that share the
 	// same embedding model. When empty, HybridSearch uses its own id parameter.
@@ -205,6 +235,74 @@ type SearchParams struct {
 	// in processSearchResults. Used by the chat pipeline where context assembly
 	// is handled separately in the merge stage.
 	SkipContextEnrichment bool `json:"skip_context_enrichment,omitempty"`
+}
+
+// EmptyResolvedTagScope reports a document tag scope with no candidates.
+func (p SearchParams) EmptyResolvedTagScope() bool {
+	return len(p.ScopeTagIDs) > 0 &&
+		len(p.TagIDs) == 0 &&
+		len(p.KnowledgeIDs) == 0
+}
+
+// ProjectKnowledgeScopeToSearchTargets creates independent runtime targets.
+func ProjectKnowledgeScopeToSearchTargets(
+	scope *KnowledgeScope,
+	executionScopeHash string,
+) SearchTargets {
+	if scope == nil {
+		return nil
+	}
+	targets := scope.Targets()
+	projected := make(SearchTargets, 0, len(targets))
+	for _, target := range targets {
+		knowledgeIDs := target.KnowledgeIDs()
+		folderFilter := target.FolderFilter()
+		if folderFilter.Enabled() && len(knowledgeIDs) == 0 {
+			continue
+		}
+		tagIDs := target.TagIDs()
+		scopeTagIDs := target.ScopeTagIDs()
+		sourceTenantID := target.SourceTenantID()
+		targetType := SearchTargetTypeKnowledgeBase
+		if len(knowledgeIDs) > 0 ||
+			(len(scopeTagIDs) > 0 && len(tagIDs) == 0) {
+			targetType = SearchTargetTypeKnowledge
+		}
+		projected = append(projected, &SearchTarget{
+			Type:               targetType,
+			KnowledgeBaseID:    target.KnowledgeBaseID(),
+			TenantID:           sourceTenantID,
+			SourceTenantID:     sourceTenantID,
+			KnowledgeIDs:       knowledgeIDs,
+			TagIDs:             tagIDs,
+			ScopeTagIDs:        scopeTagIDs,
+			FolderFilter:       folderFilter,
+			ExecutionScopeHash: executionScopeHash,
+			DisableRecallThresholds: len(knowledgeIDs) > 0 ||
+				len(tagIDs) > 0 ||
+				len(scopeTagIDs) > 0,
+		})
+	}
+	return projected
+}
+
+// Clone returns an ownership-independent runtime projection.
+func (st *SearchTarget) Clone() *SearchTarget {
+	if st == nil {
+		return nil
+	}
+	return &SearchTarget{
+		Type:                    st.Type,
+		KnowledgeBaseID:         st.KnowledgeBaseID,
+		TenantID:                st.TenantID,
+		SourceTenantID:          st.SourceTenantID,
+		KnowledgeIDs:            append([]string(nil), st.KnowledgeIDs...),
+		TagIDs:                  append([]string(nil), st.TagIDs...),
+		ScopeTagIDs:             append([]string(nil), st.ScopeTagIDs...),
+		FolderFilter:            st.FolderFilter.Clone(),
+		ExecutionScopeHash:      st.ExecutionScopeHash,
+		DisableRecallThresholds: st.DisableRecallThresholds,
+	}
 }
 
 // Value implements the driver.Valuer interface, used to convert SearchResult to database value

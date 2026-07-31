@@ -2,6 +2,7 @@ package rerank
 
 import (
 	"context"
+	"errors"
 
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 )
@@ -32,34 +33,103 @@ func (l *langfuseReranker) Rerank(ctx context.Context, query string, documents [
 		totalChars += len([]rune(doc))
 	}
 
-	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
-		Name:  "rerank",
-		Model: l.inner.GetModelName(),
-		Input: map[string]interface{}{
-			"query":             query,
-			"document_count":    len(documents),
-			"documents_preview": previewDocs(documents, langfuseRerankPreviewDocs),
-		},
-		Metadata: map[string]interface{}{
-			"model_id":        l.inner.GetModelID(),
-			"num_queries":     1,
-			"total_chars":     totalChars,
-			"avg_doc_chars":   avgDocChars(documents),
-		},
-	})
+	genCtx, gen := mgr.StartGeneration(
+		ctx,
+		buildLangfuseRerankOptions(
+			ctx,
+			l.inner.GetModelName(),
+			l.inner.GetModelID(),
+			query,
+			documents,
+			totalChars,
+		),
+	)
 
 	results, err := l.inner.Rerank(genCtx, query, documents)
 
+	gen.Finish(
+		buildLangfuseRerankOutput(ctx, results, documents),
+		approxRerankUsage(query, documents),
+		buildLangfuseRerankError(ctx, err),
+	)
+	return results, err
+}
+
+func buildLangfuseRerankOptions(
+	ctx context.Context,
+	modelName string,
+	modelID string,
+	query string,
+	documents []string,
+	totalChars int,
+) langfuse.GenerationOptions {
+	options := langfuse.GenerationOptions{
+		Name:  "rerank",
+		Model: modelName,
+		Input: map[string]interface{}{
+			"query":          query,
+			"document_count": len(documents),
+			"documents_preview": previewDocs(
+				documents,
+				langfuseRerankPreviewDocs,
+			),
+		},
+		Metadata: map[string]interface{}{
+			"model_id":      modelID,
+			"num_queries":   1,
+			"total_chars":   totalChars,
+			"avg_doc_chars": avgDocChars(documents),
+		},
+	}
+	if hashPrefix, prepared := langfuse.PreparedKnowledgeScopeHashPrefix(ctx); prepared {
+		options.Model = "prepared-knowledge-model"
+		options.Input = map[string]interface{}{
+			"query_length":      len([]rune(query)),
+			"document_count":    len(documents),
+			"scope_hash_prefix": hashPrefix,
+		}
+		options.Metadata = map[string]interface{}{
+			"num_queries":       1,
+			"total_chars":       totalChars,
+			"avg_doc_chars":     avgDocChars(documents),
+			"scope_hash_prefix": hashPrefix,
+		}
+	}
+	return options
+}
+
+func buildLangfuseRerankOutput(
+	ctx context.Context,
+	results []RankResult,
+	documents []string,
+) map[string]interface{} {
 	output := map[string]interface{}{
-		"results":     summarizeResults(results, documents, langfuseRerankMaxScores),
+		"results": summarizeResults(
+			results,
+			documents,
+			langfuseRerankMaxScores,
+		),
 		"total_count": len(results),
 		"score_stats": scoreStats(results),
 	}
 	if len(results) > langfuseRerankMaxScores {
 		output["truncated"] = len(results) - langfuseRerankMaxScores
 	}
-	gen.Finish(output, approxRerankUsage(query, documents), err)
-	return results, err
+	if hashPrefix, prepared := langfuse.PreparedKnowledgeScopeHashPrefix(ctx); prepared {
+		delete(output, "results")
+		output["scope_hash_prefix"] = hashPrefix
+	}
+	return output
+}
+
+func buildLangfuseRerankError(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, prepared := langfuse.PreparedKnowledgeScopeHashPrefix(ctx); prepared {
+		return errors.New("prepared rerank failed")
+	}
+	return err
 }
 
 func avgDocChars(documents []string) int {

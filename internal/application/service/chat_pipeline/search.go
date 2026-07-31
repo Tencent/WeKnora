@@ -2,6 +2,7 @@ package chatpipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -62,6 +63,12 @@ func (p *PluginSearch) ActivationEvents() []types.EventType {
 func (p *PluginSearch) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
+	if knowledgeScopeRetrievalExplicitlyEmpty(chatManage) {
+		if chatManage != nil {
+			chatManage.SearchResult = nil
+		}
+		return ErrSearchNothing
+	}
 	// Check if we have search targets or web search enabled
 	hasKBTargets := types.HasKnowledgeRetrievalScope(
 		chatManage.SearchTargets,
@@ -76,11 +83,11 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	}
 
 	pipelineInfo(ctx, "Search", "input", map[string]interface{}{
-		"session_id":     chatManage.SessionID,
-		"rewrite_query":  chatManage.RewriteQuery,
-		"search_targets": len(chatManage.SearchTargets),
-		"tenant_id":      chatManage.TenantID,
-		"web_enabled":    chatManage.WebSearchEnabled,
+		"session_id":        chatManage.SessionID,
+		"query_length":      len(chatManage.RewriteQuery),
+		"search_targets":    len(chatManage.SearchTargets),
+		"web_enabled":       chatManage.WebSearchEnabled,
+		"scope_hash_prefix": scopeHashPrefix(chatManage.ExecutionScopeHash),
 	})
 
 	// Run KB search and web search concurrently
@@ -93,12 +100,17 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	allResults := make([]*types.SearchResult, 0)
+	var knowledgeSearchErr error
 
 	wg.Add(2)
 	// Goroutine 1: Knowledge base search using SearchTargets
 	go func() {
 		defer wg.Done()
-		kbResults := p.searchByTargets(ctx, chatManage)
+		kbResults, err := p.searchByTargets(ctx, chatManage)
+		if err != nil && chatManage.ExecutionScopeHash != "" {
+			knowledgeSearchErr = err
+			return
+		}
 		if len(kbResults) > 0 {
 			mu.Lock()
 			allResults = append(allResults, kbResults...)
@@ -118,6 +130,9 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	}()
 
 	wg.Wait()
+	if knowledgeSearchErr != nil {
+		return ErrSearch.WithError(knowledgeSearchErr)
+	}
 
 	chatManage.SearchResult = allResults
 
@@ -125,7 +140,10 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 
 	// If recall is low, attempt query expansion with keyword-focused search
 	if chatManage.EnableQueryExpansion && len(chatManage.SearchResult) < max(1, chatManage.EmbeddingTopK) {
-		expResults := p.runQueryExpansion(ctx, chatManage)
+		expResults, err := p.runQueryExpansion(ctx, chatManage)
+		if err != nil && chatManage.ExecutionScopeHash != "" {
+			return ErrSearch.WithError(err)
+		}
 		if len(expResults) > 0 {
 			chatManage.SearchResult = append(chatManage.SearchResult, expResults...)
 		}
@@ -148,6 +166,35 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	return ErrSearchNothing
 }
 
+func knowledgeScopeRetrievalExplicitlyEmpty(
+	chatManage *types.ChatManage,
+) bool {
+	if chatManage == nil {
+		return false
+	}
+	if chatManage.RetrievalExplicitlyEmpty {
+		return true
+	}
+	if chatManage.ExecutionScope == nil ||
+		chatManage.ExecutionScope.HasLocalKnowledge() {
+		return false
+	}
+	for _, target := range chatManage.ExecutionScope.Targets() {
+		if target.FolderFilter().Empty() {
+			return true
+		}
+	}
+	return false
+}
+
+func scopeHashPrefix(hash string) string {
+	const prefixLength = 12
+	if len(hash) <= prefixLength {
+		return hash
+	}
+	return hash[:prefixLength]
+}
+
 // getSearchResultFromHistory retrieves relevant knowledge references from chat history
 func getSearchResultFromHistory(chatManage *types.ChatManage) []*types.SearchResult {
 	if len(chatManage.History) == 0 {
@@ -166,28 +213,41 @@ func getSearchResultFromHistory(chatManage *types.ChatManage) []*types.SearchRes
 	return nil
 }
 
-func removeDuplicateResults(results []*types.SearchResult) []*types.SearchResult {
+func removeDuplicateResults(
+	ctx context.Context,
+	results []*types.SearchResult,
+) []*types.SearchResult {
 	seen := make(map[string]bool)
 	contentSig := make(map[string]string) // sig -> first chunk ID
 	var uniqueResults []*types.SearchResult
+	duplicateIDs := 0
+	duplicateContents := 0
 	for _, r := range results {
 		// Only deduplicate by exact chunk ID — do NOT treat shared ParentChunkID
 		// as duplicates, because different child chunks of the same parent carry
 		// different content segments that may all be relevant.
 		if seen[r.ID] {
-			logger.Debugf(context.Background(), "Dedup: chunk %s removed due to duplicate ID", r.ID)
+			duplicateIDs++
 			continue
 		}
 		sig := buildContentSignature(r.Content)
 		if sig != "" {
-			if firstChunk, exists := contentSig[sig]; exists {
-				logger.Debugf(context.Background(), "Dedup: chunk %s removed due to content signature (dup of %s, sig prefix: %.50s...)", r.ID, firstChunk, sig)
+			if _, exists := contentSig[sig]; exists {
+				duplicateContents++
 				continue
 			}
 			contentSig[sig] = r.ID
 		}
 		seen[r.ID] = true
 		uniqueResults = append(uniqueResults, r)
+	}
+	if duplicateIDs > 0 || duplicateContents > 0 {
+		logger.Debugf(
+			ctx,
+			"Dedup removed results, duplicate IDs: %d, duplicate content: %d",
+			duplicateIDs,
+			duplicateContents,
+		)
 	}
 	return uniqueResults
 }
@@ -317,9 +377,23 @@ func logSearchScoreSample(ctx context.Context, action string, results []*types.S
 func (p *PluginSearch) searchByTargets(
 	ctx context.Context,
 	chatManage *types.ChatManage,
-) []*types.SearchResult {
+) ([]*types.SearchResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(chatManage.SearchTargets) == 0 {
-		return nil
+		return nil, nil
+	}
+	activeTargets := make(types.SearchTargets, 0, len(chatManage.SearchTargets))
+	for _, target := range chatManage.SearchTargets {
+		if target == nil || target.FolderFilter.Empty() ||
+			target.EmptyResolvedTagScope() {
+			continue
+		}
+		activeTargets = append(activeTargets, target)
+	}
+	if len(activeTargets) == 0 {
+		return nil, nil
 	}
 
 	queryText := strings.TrimSpace(chatManage.RewriteQuery)
@@ -327,8 +401,8 @@ func (p *PluginSearch) searchByTargets(
 	// Batch-fetch KB records to determine embedding model grouping.
 	// On failure, all targets fall into an empty-key group and HybridSearch
 	// computes the embedding per-KB (graceful degradation).
-	kbIDs := make([]string, 0, len(chatManage.SearchTargets))
-	for _, t := range chatManage.SearchTargets {
+	kbIDs := make([]string, 0, len(activeTargets))
+	for _, t := range activeTargets {
 		kbIDs = append(kbIDs, t.KnowledgeBaseID)
 	}
 	var kbList []*types.KnowledgeBase
@@ -341,9 +415,17 @@ func (p *PluginSearch) searchByTargets(
 			}
 		}
 	} else {
+		errorSummary := err.Error()
+		if chatManage.ExecutionScopeHash != "" {
+			errorSummary = "prepared knowledge-base lookup failed"
+		}
 		pipelineWarn(ctx, "Search", "batch_kb_fetch_error", map[string]interface{}{
-			"error": err.Error(),
+			"error":             errorSummary,
+			"scope_hash_prefix": scopeHashPrefix(chatManage.ExecutionScopeHash),
 		})
+		if chatManage.ExecutionScopeHash != "" {
+			return nil, err
+		}
 	}
 
 	// Resolve actual model identities (name + endpoint) so that cross-tenant
@@ -351,35 +433,70 @@ func (p *PluginSearch) searchByTargets(
 	modelKeyMap := p.knowledgeBaseService.ResolveEmbeddingModelKeys(ctx, kbList)
 
 	groups := make(map[string][]*types.SearchTarget)
-	for _, t := range chatManage.SearchTargets {
+	for _, t := range activeTargets {
 		key := modelKeyMap[t.KnowledgeBaseID] // empty string if unresolved
+		if t.ExecutionScopeHash != "" {
+			key = fmt.Sprintf(
+				"%s|scope-source:%d",
+				key,
+				t.EffectiveSourceTenantID(),
+			)
+		}
 		groups[key] = append(groups[key], t)
 	}
 
 	pipelineInfo(ctx, "Search", "embedding_groups", map[string]interface{}{
-		"total_targets": len(chatManage.SearchTargets),
+		"total_targets": len(activeTargets),
 		"unique_models": len(groups),
 	})
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var results []*types.SearchResult
+	var firstErr error
+	recordPreparedError := func(err error) {
+		if err == nil || chatManage.ExecutionScopeHash == "" {
+			return
+		}
+		mu.Lock()
+		if firstErr == nil {
+			firstErr = err
+		}
+		mu.Unlock()
+	}
 
 	for modelKey, targets := range groups {
 		wg.Add(1)
 		go func(modelKey string, targets []*types.SearchTarget) {
 			defer wg.Done()
+			loggedModelKey := modelKey
+			embeddingModelKey := ""
+			if len(targets) > 0 {
+				embeddingModelKey =
+					modelKeyMap[targets[0].KnowledgeBaseID]
+			}
+			if len(targets) > 0 && targets[0].ExecutionScopeHash != "" {
+				loggedModelKey = "prepared:" +
+					scopeHashPrefix(targets[0].ExecutionScopeHash)
+			}
 
 			// Compute embedding once for this model group.
 			var queryEmbedding []float32
-			if modelKey != "" {
+			if embeddingModelKey != "" {
 				emb, err := p.knowledgeBaseService.GetQueryEmbedding(ctx, targets[0].KnowledgeBaseID, queryText)
 				if err != nil {
+					errorSummary := err.Error()
+					if targets[0].ExecutionScopeHash != "" {
+						errorSummary = "prepared embedding failed"
+					}
 					pipelineWarn(ctx, "Search", "group_embed_error", map[string]interface{}{
-						"model_key": modelKey,
-						"kb_id":     targets[0].KnowledgeBaseID,
-						"error":     err.Error(),
+						"model_key": loggedModelKey,
+						"error":     errorSummary,
 					})
+					if targets[0].ExecutionScopeHash != "" {
+						recordPreparedError(err)
+						return
+					}
 				} else {
 					queryEmbedding = emb
 				}
@@ -388,9 +505,15 @@ func (p *PluginSearch) searchByTargets(
 			// Separate full-KB targets (can be combined into one retrieval)
 			// from specific-knowledge targets (need per-target direct loading).
 			var fullKBIDs []string
+			var fullKBRepresentative *types.SearchTarget
 			var knowledgeTargets []*types.SearchTarget
 			for _, t := range targets {
-				if t.Type == types.SearchTargetTypeKnowledgeBase && len(t.TagIDs) == 0 {
+				if t.Type == types.SearchTargetTypeKnowledgeBase &&
+					len(t.TagIDs) == 0 &&
+					!t.FolderFilter.Enabled() {
+					if fullKBRepresentative == nil {
+						fullKBRepresentative = t
+					}
 					fullKBIDs = append(fullKBIDs, t.KnowledgeBaseID)
 				} else {
 					knowledgeTargets = append(knowledgeTargets, t)
@@ -398,7 +521,7 @@ func (p *PluginSearch) searchByTargets(
 			}
 
 			pipelineInfo(ctx, "Search", "group_plan", map[string]interface{}{
-				"model_key":          modelKey,
+				"model_key":          loggedModelKey,
 				"combined_kb_count":  len(fullKBIDs),
 				"individual_targets": len(knowledgeTargets),
 				"vector_len":         len(queryEmbedding),
@@ -414,24 +537,38 @@ func (p *PluginSearch) searchByTargets(
 
 					params := types.SearchParams{
 						QueryText:             queryText,
-						QueryEmbedding:        queryEmbedding,
+						QueryEmbedding:        append([]float32(nil), queryEmbedding...),
 						KnowledgeBaseIDs:      fullKBIDs,
+						SourceTenantID:        fullKBRepresentative.EffectiveSourceTenantID(),
+						FolderFilter:          fullKBRepresentative.FolderFilter.Clone(),
+						ExecutionScopeHash:    fullKBRepresentative.ExecutionScopeHash,
 						VectorThreshold:       chatManage.VectorThreshold,
 						KeywordThreshold:      chatManage.KeywordThreshold,
 						MatchCount:            chatManage.EmbeddingTopK,
 						SkipContextEnrichment: true,
 					}
-					res, err := p.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], params)
+					res, err := p.knowledgeBaseService.HybridSearch(
+						ctx,
+						fullKBRepresentative.KnowledgeBaseID,
+						params,
+					)
 					if err != nil {
+						errorSummary := err.Error()
+						if params.ExecutionScopeHash != "" {
+							errorSummary = "prepared retrieval failed"
+						}
 						pipelineWarn(ctx, "Search", "combined_kb_search_error", map[string]interface{}{
-							"kb_ids": fullKBIDs,
-							"error":  err.Error(),
+							"kb_count":          len(fullKBIDs),
+							"scope_hash_prefix": scopeHashPrefix(params.ExecutionScopeHash),
+							"error":             errorSummary,
 						})
+						recordPreparedError(err)
 						return
 					}
 					pipelineInfo(ctx, "Search", "combined_kb_result", map[string]interface{}{
-						"kb_ids":    fullKBIDs,
-						"hit_count": len(res),
+						"kb_count":          len(fullKBIDs),
+						"hit_count":         len(res),
+						"scope_hash_prefix": scopeHashPrefix(params.ExecutionScopeHash),
 					})
 					mu.Lock()
 					results = append(results, res...)
@@ -444,7 +581,17 @@ func (p *PluginSearch) searchByTargets(
 				innerWg.Add(1)
 				go func(t *types.SearchTarget) {
 					defer innerWg.Done()
-					p.searchSingleTarget(ctx, chatManage, t, queryText, queryEmbedding, &mu, &results)
+					recordPreparedError(
+						p.searchSingleTarget(
+							ctx,
+							chatManage,
+							t,
+							queryText,
+							queryEmbedding,
+							&mu,
+							&results,
+						),
+					)
 				}(target)
 			}
 
@@ -453,11 +600,17 @@ func (p *PluginSearch) searchByTargets(
 	}
 
 	wg.Wait()
+	if chatManage.ExecutionScopeHash != "" && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 
 	pipelineInfo(ctx, "Search", "kb_result_summary", map[string]interface{}{
 		"total_hits": len(results),
 	})
-	return results
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return results, nil
 }
 
 // searchSingleTarget performs hybrid retrieval inside one constrained target.
@@ -469,9 +622,9 @@ func (p *PluginSearch) searchSingleTarget(
 	queryEmbedding []float32,
 	mu *sync.Mutex,
 	results *[]*types.SearchResult,
-) {
+) error {
 	if t.Type == types.SearchTargetTypeKnowledge && len(t.KnowledgeIDs) == 0 {
-		return
+		return nil
 	}
 
 	vectorThreshold, keywordThreshold := t.RecallThresholds(
@@ -480,42 +633,49 @@ func (p *PluginSearch) searchSingleTarget(
 	)
 	if t.DisableRecallThresholds {
 		pipelineInfo(ctx, "Search", "explicit_scope_threshold_override", map[string]interface{}{
-			"kb_id":              t.KnowledgeBaseID,
 			"knowledge_id_count": len(t.KnowledgeIDs),
 			"tag_id_count":       len(t.TagIDs),
+			"scope_hash_prefix":  scopeHashPrefix(t.ExecutionScopeHash),
 		})
 	}
 	params := types.SearchParams{
 		QueryText:             queryText,
-		QueryEmbedding:        queryEmbedding,
+		QueryEmbedding:        append([]float32(nil), queryEmbedding...),
 		VectorThreshold:       vectorThreshold,
 		KeywordThreshold:      keywordThreshold,
 		MatchCount:            chatManage.EmbeddingTopK,
-		TagIDs:                t.TagIDs,
-		ScopeTagIDs:           t.ScopeTagIDs,
+		TagIDs:                append([]string(nil), t.TagIDs...),
+		ScopeTagIDs:           append([]string(nil), t.ScopeTagIDs...),
+		SourceTenantID:        t.EffectiveSourceTenantID(),
+		FolderFilter:          t.FolderFilter.Clone(),
+		ExecutionScopeHash:    t.ExecutionScopeHash,
 		SkipContextEnrichment: true,
 	}
 	if t.Type == types.SearchTargetTypeKnowledge {
-		params.KnowledgeIDs = t.KnowledgeIDs
+		params.KnowledgeIDs = append([]string(nil), t.KnowledgeIDs...)
 	}
 	res, err := p.knowledgeBaseService.HybridSearch(ctx, t.KnowledgeBaseID, params)
 	if err != nil {
+		errorSummary := err.Error()
+		if params.ExecutionScopeHash != "" {
+			errorSummary = "prepared retrieval failed"
+		}
 		pipelineWarn(ctx, "Search", "kb_search_error", map[string]interface{}{
-			"kb_id":       t.KnowledgeBaseID,
-			"target_type": t.Type,
-			"query":       params.QueryText,
-			"error":       err.Error(),
+			"target_type":       t.Type,
+			"scope_hash_prefix": scopeHashPrefix(params.ExecutionScopeHash),
+			"error":             errorSummary,
 		})
-		return
+		return err
 	}
 	pipelineInfo(ctx, "Search", "kb_result", map[string]interface{}{
-		"kb_id":       t.KnowledgeBaseID,
-		"target_type": t.Type,
-		"hit_count":   len(res),
+		"target_type":       t.Type,
+		"hit_count":         len(res),
+		"scope_hash_prefix": scopeHashPrefix(params.ExecutionScopeHash),
 	})
 	mu.Lock()
 	*results = append(*results, res...)
 	mu.Unlock()
+	return nil
 }
 
 // searchWebIfEnabled executes web search when enabled and returns converted results
@@ -528,7 +688,9 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 
 	if providerID == "" {
 		pipelineWarn(ctx, "Search", "web_config_missing", map[string]interface{}{
-			"tenant_id": chatManage.TenantID,
+			"scope_hash_prefix": scopeHashPrefix(
+				chatManage.ExecutionScopeHash,
+			),
 		})
 		return nil
 	}
@@ -544,25 +706,40 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 	}
 
 	pipelineInfo(ctx, "Search", "web_request", map[string]interface{}{
-		"tenant_id":   chatManage.TenantID,
-		"provider_id": providerID,
+		"provider_set":      providerID != "",
+		"scope_hash_prefix": scopeHashPrefix(chatManage.ExecutionScopeHash),
 	})
+	webSpanInput := map[string]interface{}{
+		"provider_set": true,
+		"query_length": len(chatManage.RewriteQuery),
+		"max_results":  webConfig.MaxResults,
+	}
+	if chatManage.ExecutionScopeHash == "" {
+		webSpanInput["provider_id"] = providerID
+		webSpanInput["query"] = chatManage.RewriteQuery
+	}
 	webCtx, webSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
-		Name: "web_search",
-		Input: map[string]interface{}{
-			"provider_id": providerID,
-			"query":       chatManage.RewriteQuery,
-			"max_results": webConfig.MaxResults,
-		},
+		Name:  "web_search",
+		Input: webSpanInput,
 	})
 	webResults, err := p.webSearchService.Search(webCtx, providerID, webConfig, chatManage.RewriteQuery)
+	webSpanErr := err
+	if err != nil && chatManage.ExecutionScopeHash != "" {
+		webSpanErr = errors.New("prepared web search failed")
+	}
 	webSpan.Finish(map[string]interface{}{
 		"hit_count": len(webResults),
-	}, nil, err)
+	}, nil, webSpanErr)
 	if err != nil {
+		errorSummary := err.Error()
+		if chatManage.ExecutionScopeHash != "" {
+			errorSummary = "prepared web search failed"
+		}
 		pipelineWarn(ctx, "Search", "web_search_error", map[string]interface{}{
-			"tenant_id": chatManage.TenantID,
-			"error":     err.Error(),
+			"scope_hash_prefix": scopeHashPrefix(
+				chatManage.ExecutionScopeHash,
+			),
+			"error": errorSummary,
 		})
 		return nil
 	}

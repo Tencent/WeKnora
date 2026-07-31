@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -130,6 +132,9 @@ func (r *knowledgeRepository) ListKnowledgeByKnowledgeBaseID(
 // KnowledgeListFilter to a GORM query. Tenant / knowledge base scoping must be
 // applied by the caller before invoking this helper.
 func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) *gorm.DB {
+	if filter.FolderID != nil {
+		query = query.Where("folder_id = ?", *filter.FolderID)
+	}
 	if len(filter.TagIDs) > 0 {
 		query = query.Where(
 			"knowledges.id IN (SELECT knowledge_id FROM knowledge_tag_relations WHERE tag_id IN (?))",
@@ -227,12 +232,70 @@ func (r *knowledgeRepository) UpdateKnowledgeBatch(ctx context.Context, knowledg
 
 // DeleteKnowledge deletes knowledge
 func (r *knowledgeRepository) DeleteKnowledge(ctx context.Context, tenantID uint64, id string) error {
-	return r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).Delete(&types.Knowledge{}).Error
+	knowledge, err := r.GetKnowledgeByID(ctx, tenantID, id)
+	if err != nil {
+		return err
+	}
+	if knowledge == nil {
+		return ErrKnowledgeNotFound
+	}
+	if _, err := r.BeginKnowledgeDelete(
+		ctx,
+		tenantID,
+		knowledge.KnowledgeBaseID,
+		knowledge.ID,
+	); err != nil {
+		return err
+	}
+	return r.FinalizeKnowledgeDelete(
+		ctx,
+		tenantID,
+		knowledge.KnowledgeBaseID,
+		knowledge.ID,
+	)
 }
 
-// DeleteKnowledge deletes knowledge
+// DeleteKnowledgeList deletes the active subset of a knowledge ID list.
 func (r *knowledgeRepository) DeleteKnowledgeList(ctx context.Context, tenantID uint64, ids []string) error {
-	return r.db.WithContext(ctx).Where("tenant_id = ? AND id in ?", tenantID, ids).Delete(&types.Knowledge{}).Error
+	if len(ids) == 0 {
+		return nil
+	}
+
+	knowledgeList, err := r.GetKnowledgeBatch(ctx, tenantID, ids)
+	if err != nil {
+		return err
+	}
+	if len(knowledgeList) == 0 {
+		return nil
+	}
+	sort.Slice(knowledgeList, func(i, j int) bool {
+		if knowledgeList[i].KnowledgeBaseID != knowledgeList[j].KnowledgeBaseID {
+			return knowledgeList[i].KnowledgeBaseID < knowledgeList[j].KnowledgeBaseID
+		}
+		return knowledgeList[i].ID < knowledgeList[j].ID
+	})
+
+	var deleteErrors []error
+	for _, knowledge := range knowledgeList {
+		if _, err := r.BeginKnowledgeDelete(
+			ctx,
+			tenantID,
+			knowledge.KnowledgeBaseID,
+			knowledge.ID,
+		); err != nil {
+			deleteErrors = append(deleteErrors, err)
+			continue
+		}
+		if err := r.FinalizeKnowledgeDelete(
+			ctx,
+			tenantID,
+			knowledge.KnowledgeBaseID,
+			knowledge.ID,
+		); err != nil {
+			deleteErrors = append(deleteErrors, err)
+		}
+	}
+	return errors.Join(deleteErrors...)
 }
 
 // GetKnowledgeBatch gets knowledge in batch
@@ -801,4 +864,81 @@ func (r *knowledgeRepository) ListIDsByTagIDs(
 		Distinct("knowledges.id").
 		Pluck("knowledges.id", &ids).Error
 	return ids, err
+}
+
+// ListActiveKnowledgeIDsByFolderIDs applies knowledgeIDs only as an
+// intersection with the resolved folder scope.
+func (r *knowledgeRepository) ListActiveKnowledgeIDsByFolderIDs(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	folderIDs []string,
+	knowledgeIDs []string,
+	afterID string,
+	limit int,
+) (ids []string, hasMore bool, err error) {
+	if tenantID == 0 {
+		return nil, false, fmt.Errorf(
+			"%w: tenant ID is required",
+			types.ErrInvalidKnowledgeScopeRequest,
+		)
+	}
+	if kbID == "" {
+		return nil, false, fmt.Errorf(
+			"%w: knowledge base ID is required",
+			types.ErrInvalidKnowledgeScopeRequest,
+		)
+	}
+	// An empty folder scope must not remove the folder predicate and widen
+	// the query to the whole knowledge base. A single empty string remains
+	// valid and selects root-direct knowledge.
+	if len(folderIDs) == 0 {
+		return nil, false, fmt.Errorf(
+			"%w: folder scope is empty",
+			types.ErrInvalidKnowledgeScopeRequest,
+		)
+	}
+	if limit <= 0 {
+		return nil, false, fmt.Errorf(
+			"%w: limit must be positive",
+			types.ErrInvalidKnowledgeScopeRequest,
+		)
+	}
+	queryLimit := limit + 1
+	if queryLimit <= limit {
+		return nil, false, fmt.Errorf(
+			"%w: limit is invalid",
+			types.ErrInvalidKnowledgeScopeRequest,
+		)
+	}
+
+	query := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Where(
+			"tenant_id = ? AND knowledge_base_id = ? AND enable_status = ?",
+			tenantID,
+			kbID,
+			"enabled",
+		).
+		Where("folder_id IN ?", folderIDs)
+	if len(knowledgeIDs) > 0 {
+		query = query.Where("id IN ?", knowledgeIDs)
+	}
+	if afterID != "" {
+		query = query.Where("id > ?", afterID)
+	}
+	if err := query.
+		Order("id ASC").
+		Limit(queryLimit).
+		Pluck("id", &ids).Error; err != nil {
+		return nil, false, fmt.Errorf(
+			"list active knowledge IDs by folder IDs: %w",
+			err,
+		)
+	}
+
+	if len(ids) > limit {
+		return ids[:limit], true, nil
+	}
+	return ids, false, nil
 }

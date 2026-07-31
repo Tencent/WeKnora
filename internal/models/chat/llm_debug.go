@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -117,6 +118,19 @@ func logLLMDebugCall(ctx context.Context, model string, messages []Message, opts
 	if !logger.LLMDebugEnabled() {
 		return
 	}
+	if hashPrefix, prepared := langfuse.PreparedKnowledgeScopeHashPrefix(ctx); prepared {
+		record := preparedChatDebugRecord(
+			"Chat",
+			hashPrefix,
+			len(messages),
+			resp,
+			nil,
+			callErr,
+			dur,
+		)
+		logger.LLMDebugLog(ctx, record)
+		return
+	}
 
 	record := &logger.LLMCallRecord{
 		CallType: "Chat",
@@ -163,6 +177,22 @@ func logLLMDebugStream(ctx context.Context, model string, messages []Message, op
 	if !logger.LLMDebugEnabled() {
 		return
 	}
+	if hashPrefix, prepared := langfuse.PreparedKnowledgeScopeHashPrefix(ctx); prepared {
+		record := preparedChatDebugRecord(
+			"Chat Stream",
+			hashPrefix,
+			len(messages),
+			&types.ChatResponse{
+				Content:   fullContent,
+				ToolCalls: toolCalls,
+			},
+			usage,
+			callErr,
+			dur,
+		)
+		logger.LLMDebugLog(ctx, record)
+		return
+	}
 
 	record := &logger.LLMCallRecord{
 		CallType: "Chat Stream",
@@ -203,6 +233,54 @@ func logLLMDebugStream(ctx context.Context, model string, messages []Message, op
 		record.Error = callErr.Error()
 	}
 	logger.LLMDebugLog(ctx, record)
+}
+
+func preparedChatDebugRecord(
+	callType string,
+	hashPrefix string,
+	messageCount int,
+	resp *types.ChatResponse,
+	streamUsage *types.TokenUsage,
+	callErr error,
+	dur time.Duration,
+) *logger.LLMCallRecord {
+	record := &logger.LLMCallRecord{
+		CallType: callType,
+		Model:    "prepared-knowledge-model",
+		Duration: dur,
+	}
+	summary := fmt.Sprintf(
+		"scope_hash_prefix=%s\nmessage_count=%d\n",
+		hashPrefix,
+		messageCount,
+	)
+	if resp != nil {
+		summary += fmt.Sprintf(
+			"content_length=%d\nreasoning_content_length=%d\ntool_call_count=%d\n",
+			len([]rune(resp.Content)),
+			len([]rune(resp.ReasoningContent)),
+			len(resp.ToolCalls),
+		)
+	}
+	record.Sections = append(record.Sections, logger.RecordSection{
+		Title:   "Prepared Summary",
+		Content: summary,
+	})
+	if streamUsage != nil {
+		record.Sections = append(record.Sections, logger.RecordSection{
+			Title:   "Usage",
+			Content: usageString(*streamUsage),
+		})
+	} else if resp != nil {
+		record.Sections = append(record.Sections, logger.RecordSection{
+			Title:   "Usage",
+			Content: usageString(resp.Usage),
+		})
+	}
+	if callErr != nil {
+		record.Error = "prepared chat generation failed"
+	}
+	return record
 }
 
 func truncateForDebug(s string, maxRunes int) string {

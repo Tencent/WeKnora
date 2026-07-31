@@ -37,72 +37,195 @@ func (r *knowledgeFolderRepository) RunTreeWriteTransaction(
 	if fn == nil {
 		return fmt.Errorf("%w: transaction callback is nil", ErrKnowledgeFolderInvalid)
 	}
+	if ctx == nil {
+		return fmt.Errorf("%w: context is nil", ErrKnowledgeFolderInvalid)
+	}
+	return r.runKnowledgeFolderScopedWriteTransaction(
+		ctx,
+		tenantID,
+		kbID,
+		func(tx *gorm.DB) error {
+			return fn(newKnowledgeFolderTreeRepository(tx))
+		},
+	)
+}
+
+// RunKnowledgeFolderMoveTransaction serializes knowledge placement changes
+// with folder tree writes in the same knowledge-base scope.
+func (r *knowledgeFolderRepository) RunKnowledgeFolderMoveTransaction(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	fn interfaces.KnowledgeFolderMoveWriteFunc,
+) error {
+	if fn == nil {
+		return fmt.Errorf("%w: transaction callback is nil", ErrKnowledgeFolderMoveInvalid)
+	}
+	if ctx == nil {
+		return fmt.Errorf("%w: context is nil", ErrKnowledgeFolderMoveInvalid)
+	}
+	if tenantID == 0 || kbID == "" {
+		return fmt.Errorf("%w: knowledge folder scope is empty", ErrKnowledgeFolderMoveInvalid)
+	}
+	return r.runKnowledgeFolderScopedWriteTransaction(
+		ctx,
+		tenantID,
+		kbID,
+		func(tx *gorm.DB) error {
+			return fn(newKnowledgeFolderMoveWriteRepository(tx))
+		},
+	)
+}
+
+type knowledgeBaseLockMode uint8
+
+const (
+	knowledgeBaseLockActiveOnly knowledgeBaseLockMode = iota
+	knowledgeBaseLockIncludeSoftDeleted
+)
+
+type knowledgeBaseScopedWriteOptions struct {
+	lockMode        knowledgeBaseLockMode
+	sqliteRetryWait knowledgeFolderSQLiteWaitFunc
+}
+
+type knowledgeBaseScopedWriteFunc func(tx *gorm.DB) error
+
+func (r *knowledgeFolderRepository) runKnowledgeFolderScopedWriteTransaction(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	fn knowledgeBaseScopedWriteFunc,
+) error {
+	var db *gorm.DB
+	var sqliteRetryWait knowledgeFolderSQLiteWaitFunc
+	if r != nil && r.knowledgeFolderReader != nil {
+		db = r.db
+		sqliteRetryWait = r.sqliteRetryWait
+	}
+
+	return runKnowledgeBaseScopedWriteTransaction(
+		ctx,
+		db,
+		tenantID,
+		kbID,
+		knowledgeBaseScopedWriteOptions{
+			lockMode:        knowledgeBaseLockActiveOnly,
+			sqliteRetryWait: sqliteRetryWait,
+		},
+		fn,
+	)
+}
+
+func runKnowledgeBaseScopedWriteTransaction(
+	ctx context.Context,
+	db *gorm.DB,
+	tenantID uint64,
+	kbID string,
+	options knowledgeBaseScopedWriteOptions,
+	fn knowledgeBaseScopedWriteFunc,
+) error {
+	if fn == nil {
+		return fmt.Errorf("%w: scoped transaction callback is nil", ErrKnowledgeFolderInvalid)
+	}
+	if ctx == nil {
+		return fmt.Errorf("%w: context is nil", ErrKnowledgeFolderInvalid)
+	}
 	if tenantID == 0 || kbID == "" {
 		return fmt.Errorf("%w: knowledge folder scope is empty", ErrKnowledgeFolderInvalid)
 	}
-	if r == nil ||
-		r.knowledgeFolderReader == nil ||
-		r.db == nil ||
-		r.db.Dialector == nil {
+	if options.lockMode != knowledgeBaseLockActiveOnly &&
+		options.lockMode != knowledgeBaseLockIncludeSoftDeleted {
+		return fmt.Errorf("%w: invalid knowledge base lock mode", ErrKnowledgeFolderInvalid)
+	}
+	if db == nil || db.Config == nil || db.Dialector == nil {
 		return ErrKnowledgeFolderUnsupportedDialect
 	}
 
-	switch r.db.Dialector.Name() {
+	switch db.Dialector.Name() {
 	case "postgres":
-		return r.runPostgresTreeWriteTransaction(ctx, tenantID, kbID, fn)
+		return runPostgresKnowledgeBaseScopedWriteTransaction(
+			ctx,
+			db,
+			tenantID,
+			kbID,
+			options.lockMode,
+			fn,
+		)
 	case "sqlite":
-		return r.runSQLiteTreeWriteTransaction(ctx, tenantID, kbID, fn)
+		return runSQLiteKnowledgeBaseScopedWriteTransaction(
+			ctx,
+			db,
+			tenantID,
+			kbID,
+			options,
+			fn,
+		)
 	default:
 		return fmt.Errorf(
 			"%w: %s",
 			ErrKnowledgeFolderUnsupportedDialect,
-			r.db.Dialector.Name(),
+			db.Dialector.Name(),
 		)
 	}
 }
 
-func (r *knowledgeFolderRepository) runPostgresTreeWriteTransaction(
+func runPostgresKnowledgeBaseScopedWriteTransaction(
 	ctx context.Context,
+	db *gorm.DB,
 	tenantID uint64,
 	kbID string,
-	fn interfaces.KnowledgeFolderTreeWriteFunc,
+	lockMode knowledgeBaseLockMode,
+	fn knowledgeBaseScopedWriteFunc,
 ) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		lockKey := knowledgeFolderAdvisoryLockKey(tenantID, kbID)
 		if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", lockKey).Error; err != nil {
 			return err
 		}
-		if err := lockKnowledgeFolderKnowledgeBase(ctx, tx, tenantID, kbID); err != nil {
+		if err := lockKnowledgeBaseForScopedWrite(
+			ctx,
+			tx,
+			tenantID,
+			kbID,
+			lockMode,
+		); err != nil {
 			return err
 		}
-		return fn(newKnowledgeFolderTreeRepository(tx))
+		return fn(tx)
 	})
 }
 
-func (r *knowledgeFolderRepository) runSQLiteTreeWriteTransaction(
+func runSQLiteKnowledgeBaseScopedWriteTransaction(
 	ctx context.Context,
+	db *gorm.DB,
 	tenantID uint64,
 	kbID string,
-	fn interfaces.KnowledgeFolderTreeWriteFunc,
+	options knowledgeBaseScopedWriteOptions,
+	fn knowledgeBaseScopedWriteFunc,
 ) error {
-	waitFn := r.sqliteRetryWait
+	waitFn := options.sqliteRetryWait
 	if waitFn == nil {
 		waitFn = waitKnowledgeFolderSQLiteRetry
 	}
 	return runKnowledgeFolderSQLiteRetry(
 		ctx,
 		func() error {
-			return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-				result := tx.Model(&types.KnowledgeBase{}).
+			return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+				lockQuery := tx.Model(&types.KnowledgeBase{})
+				if options.lockMode == knowledgeBaseLockIncludeSoftDeleted {
+					lockQuery = lockQuery.Unscoped()
+				}
+				result := lockQuery.
 					Where("tenant_id = ? AND id = ?", tenantID, kbID).
 					UpdateColumn("id", gorm.Expr("id"))
 				if result.Error != nil {
 					return result.Error
 				}
-				if result.RowsAffected == 0 {
+				if result.RowsAffected != 1 {
 					return ErrKnowledgeFolderKnowledgeBaseNotFound
 				}
-				return fn(newKnowledgeFolderTreeRepository(tx))
+				return fn(tx)
 			})
 		},
 		waitFn,
@@ -134,17 +257,21 @@ func runKnowledgeFolderSQLiteRetry(
 	return lastErr
 }
 
-func lockKnowledgeFolderKnowledgeBase(
+func lockKnowledgeBaseForScopedWrite(
 	ctx context.Context,
 	tx *gorm.DB,
 	tenantID uint64,
 	kbID string,
+	lockMode knowledgeBaseLockMode,
 ) error {
 	var row struct {
 		ID string
 	}
-	err := tx.WithContext(ctx).
-		Model(&types.KnowledgeBase{}).
+	lockQuery := tx.WithContext(ctx).Model(&types.KnowledgeBase{})
+	if lockMode == knowledgeBaseLockIncludeSoftDeleted {
+		lockQuery = lockQuery.Unscoped()
+	}
+	err := lockQuery.
 		Select("id").
 		Where("tenant_id = ? AND id = ?", tenantID, kbID).
 		Clauses(clause.Locking{Strength: "UPDATE"}).

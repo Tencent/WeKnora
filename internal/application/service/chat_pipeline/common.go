@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/searchutil"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -38,17 +39,85 @@ func appendRetrievedImageOutputRequirement(systemPrompt, renderedContexts string
 
 // pipelineInfo logs pipeline info level entries.
 func pipelineInfo(ctx context.Context, stage, action string, fields map[string]interface{}) {
-	common.PipelineInfo(ctx, stage, action, fields)
+	common.PipelineInfo(ctx, stage, action, preparedPipelineLogFields(ctx, fields))
 }
 
 // pipelineWarn logs pipeline warning level entries.
 func pipelineWarn(ctx context.Context, stage, action string, fields map[string]interface{}) {
-	common.PipelineWarn(ctx, stage, action, fields)
+	common.PipelineWarn(ctx, stage, action, preparedPipelineLogFields(ctx, fields))
 }
 
 // pipelineError logs pipeline error level entries.
 func pipelineError(ctx context.Context, stage, action string, fields map[string]interface{}) {
-	common.PipelineError(ctx, stage, action, fields)
+	common.PipelineError(ctx, stage, action, preparedPipelineLogFields(ctx, fields))
+}
+
+func preparedPipelineLogFields(
+	ctx context.Context,
+	fields map[string]interface{},
+) map[string]interface{} {
+	hashPrefix, prepared := langfuse.PreparedKnowledgeScopeHashPrefix(ctx)
+	if !prepared {
+		return fields
+	}
+	safe := map[string]interface{}{
+		"scope_hash_prefix": hashPrefix,
+	}
+	for key, value := range fields {
+		if preparedPipelineMetricField(key) {
+			safe[key] = value
+		}
+	}
+	return safe
+}
+
+func preparedPipelineMetricField(key string) bool {
+	key = strings.ToLower(key)
+	switch {
+	case key == "scope_hash_prefix",
+		key == "success",
+		key == "index",
+		key == "rank",
+		key == "k",
+		key == "lambda",
+		key == "threshold",
+		key == "degraded",
+		strings.HasPrefix(key, "has_"),
+		strings.HasSuffix(key, "_enabled"),
+		strings.Contains(key, "count"),
+		strings.Contains(key, "_cnt"),
+		strings.Contains(key, "_len"),
+		strings.Contains(key, "length"),
+		strings.Contains(key, "duration"),
+		strings.Contains(key, "score"),
+		strings.Contains(key, "threshold"),
+		strings.Contains(key, "rounds"),
+		strings.Contains(key, "iteration"),
+		strings.Contains(key, "stages"),
+		strings.Contains(key, "truncated"),
+		strings.Contains(key, "total"):
+		return true
+	default:
+		return false
+	}
+}
+
+func preparedPipelineRequest(ctx context.Context) bool {
+	_, prepared := langfuse.PreparedKnowledgeScopeHashPrefix(ctx)
+	return prepared
+}
+
+func preparedPipelineErrorLog(
+	ctx context.Context,
+	safeMessage string,
+	legacyFormat string,
+	legacyArgs ...interface{},
+) {
+	if preparedPipelineRequest(ctx) {
+		logger.Error(ctx, safeMessage)
+		return
+	}
+	logger.Errorf(ctx, legacyFormat, legacyArgs...)
 }
 
 // prepareChatModel shared logic to prepare chat model and options
@@ -58,7 +127,11 @@ func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 ) (chat.Chat, *chat.ChatOptions, error) {
 	chatModel, err := modelService.GetChatModel(ctx, chatManage.ChatModelID)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get chat model: %v", err)
+		if chatManage.ExecutionScopeHash != "" {
+			logger.Error(ctx, "Failed to get chat model for prepared request")
+		} else {
+			logger.Errorf(ctx, "Failed to get chat model: %v", err)
+		}
 		return nil, nil, err
 	}
 

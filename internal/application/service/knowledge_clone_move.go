@@ -1006,6 +1006,11 @@ func (s *knowledgeService) moveOneKnowledge(
 			"reuse_vectors move across different vector stores is not supported "+
 				"(source KB %s, target KB %s); use reparse mode", sourceKB.ID, targetKB.ID)
 	}
+	if mode == "reuse_vectors" || mode == "reparse" {
+		if _, ok := s.repo.(interfaces.KnowledgeCrossKBMoveRepository); !ok {
+			return errors.New("cross-knowledge-base folder reset is unavailable")
+		}
+	}
 
 	// Mark as processing during move
 	knowledge.ParseStatus = types.ParseStatusProcessing
@@ -1105,7 +1110,7 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 	knowledge.KnowledgeBaseID = targetKB.ID
 	knowledge.ParseStatus = types.ParseStatusCompleted
 	knowledge.UpdatedAt = time.Now()
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	if err := s.updateKnowledgeForCrossKBMove(ctx, knowledge, sourceKB.ID); err != nil {
 		return fmt.Errorf("failed to update knowledge: %w", err)
 	}
 
@@ -1116,7 +1121,7 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 func (s *knowledgeService) moveKnowledgeReparse(
 	ctx context.Context,
 	knowledge *types.Knowledge,
-	_, targetKB *types.KnowledgeBase,
+	sourceKB, targetKB *types.KnowledgeBase,
 ) error {
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
@@ -1137,7 +1142,7 @@ func (s *knowledgeService) moveKnowledgeReparse(
 	knowledge.Description = ""
 	knowledge.ProcessedAt = nil
 	knowledge.UpdatedAt = time.Now()
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	if err := s.updateKnowledgeForCrossKBMove(ctx, knowledge, sourceKB.ID); err != nil {
 		return fmt.Errorf("failed to update knowledge: %w", err)
 	}
 
@@ -1192,6 +1197,33 @@ func (s *knowledgeService) moveKnowledgeReparse(
 	}
 
 	return nil
+}
+
+func (s *knowledgeService) updateKnowledgeForCrossKBMove(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	sourceKnowledgeBaseID string,
+) error {
+	if knowledge == nil ||
+		knowledge.TenantID == 0 ||
+		sourceKnowledgeBaseID == "" ||
+		knowledge.KnowledgeBaseID == "" ||
+		knowledge.KnowledgeBaseID == sourceKnowledgeBaseID {
+		return errors.New("invalid cross-knowledge-base move target")
+	}
+	moveRepo, ok := s.repo.(interfaces.KnowledgeCrossKBMoveRepository)
+	if !ok {
+		return errors.New("cross-knowledge-base folder reset is unavailable")
+	}
+
+	knowledge.FolderID = types.KnowledgeFolderRootID
+	knowledge.FolderVersion = 1
+	knowledge.FolderIndexedVersion = 0
+	return moveRepo.UpdateKnowledgeForCrossKBMove(
+		ctx,
+		knowledge,
+		sourceKnowledgeBaseID,
+	)
 }
 
 // getOrCreateTagInTarget finds or creates a tag in the target knowledge base based on the source tag.

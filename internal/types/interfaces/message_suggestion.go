@@ -49,5 +49,10 @@ type MessageSuggestionService interface {
 		questionID string,
 		eventType string,
 	) error
-	ValidateAttribution(ctx context.Context, sessionID string, query string, attribution *types.SuggestionAttribution) error
+	ValidateAttribution(
+		ctx context.Context,
+		sessionID string,
+		query string,
+		attribution *types.SuggestionAttribution,
+	) (*types.KnowledgeScopeRequest, error)
 }

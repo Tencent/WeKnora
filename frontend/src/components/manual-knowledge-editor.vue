@@ -620,6 +620,7 @@ const handleSave = async (targetStatus: ManualStatus) => {
       status: string
       tag_ids?: string[]
       process_config?: KnowledgeProcessOverrides
+      folder_id?: string
     } = {
       title: form.title.trim(),
       content: form.content,
@@ -627,6 +628,13 @@ const handleSave = async (targetStatus: ManualStatus) => {
     }
     if (tagIdsToUpload && tagIdsToUpload.length > 0) {
       payload.tag_ids = tagIdsToUpload
+    }
+    if (
+      mode.value === 'create'
+      && uiStore.manualEditorFolderId !== null
+      && form.kbId === uiStore.manualEditorKBId
+    ) {
+      payload.folder_id = uiStore.manualEditorFolderId
     }
 
     if (targetStatus === 'publish') {

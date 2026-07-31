@@ -145,6 +145,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewKnowledgeBaseRepository))
 	must(container.Provide(repository.NewKnowledgeRepository))
 	must(container.Provide(repository.NewKnowledgeFolderRepository))
+	must(container.Provide(repository.NewKnowledgeFolderMoveRepository))
+	must(container.Provide(repository.NewKnowledgeFolderScopeRepository))
+	must(container.Provide(repository.NewKnowledgeScopeAuthorizationRepository))
+	must(container.Provide(provideKnowledgeFolderReader))
 	must(container.Provide(repository.NewKnowledgeSpanRepository))
 	must(container.Provide(repository.NewChunkRepository))
 	must(container.Provide(repository.NewKnowledgeTagRepository))
@@ -191,8 +195,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewOrganizationService))
 	must(container.Provide(service.NewKBShareService)) // KBShareService must be registered before KnowledgeService and KnowledgeTagService
 	must(container.Provide(service.NewAgentShareService))
+	must(container.Provide(service.NewKnowledgeFolderPlacementResolver))
 	must(container.Provide(service.NewKnowledgeService))
 	must(container.Provide(service.NewKnowledgeFolderService))
+	must(container.Provide(service.NewKnowledgeFolderMoveService))
 	must(container.Provide(service.NewSpanTracker))
 	must(container.Provide(service.NewChunkService))
 	must(container.Provide(service.NewKnowledgeTagService))
@@ -262,6 +268,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Expose Gate as MCPApproval interface so AgentService and others can depend on the abstraction.
 	must(container.Provide(func(g *approval.Gate) approval.MCPApproval { return g }))
 	must(container.Provide(service.NewAgentService))
+	must(container.Provide(provideKnowledgeScopeResolver))
 
 	// Session service (depends on agent service)
 	// SessionService is created after AgentService and passes itself to AgentService.CreateAgentEngine when needed
@@ -345,7 +352,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewAuditLogHandler))
 	must(container.Provide(handler.NewKnowledgeBaseHandler))
 	must(container.Provide(handler.NewKnowledgeHandler))
-	must(container.Provide(handler.NewKnowledgeFolderHandler))
+	must(container.Provide(provideKnowledgeFolderHandler))
 	must(container.Provide(handler.NewChunkHandler))
 	must(container.Provide(handler.NewFAQHandler))
 	must(container.Provide(handler.NewTagHandler))
@@ -407,6 +414,31 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")
 	return container
+}
+
+func provideKnowledgeFolderReader(
+	repo interfaces.KnowledgeFolderRepository,
+) interfaces.KnowledgeFolderReader {
+	return repo
+}
+
+func provideKnowledgeScopeResolver(
+	repo interfaces.KnowledgeFolderScopeRepository,
+) (interfaces.KnowledgeScopeResolver, error) {
+	return service.NewKnowledgeScopeResolver(
+		repo,
+		service.KnowledgeScopeLimits{
+			MaxSelectors:         100,
+			MaxResolvedFolderIDs: 10000,
+		},
+	)
+}
+
+func provideKnowledgeFolderHandler(
+	folderService interfaces.KnowledgeFolderService,
+	moveService interfaces.KnowledgeFolderMoveService,
+) *handler.KnowledgeFolderHandler {
+	return handler.NewKnowledgeFolderHandler(folderService, moveService)
 }
 
 // registerChatLocalImageResolver wires the chat package's LocalImageResolver

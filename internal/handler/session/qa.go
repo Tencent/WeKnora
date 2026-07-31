@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -25,6 +26,7 @@ import (
 // qaRequestContext holds all the common data needed for QA requests
 type qaRequestContext struct {
 	ctx                   context.Context
+	requestContext        context.Context
 	c                     *gin.Context
 	sessionID             string
 	requestID             string
@@ -36,6 +38,9 @@ type qaRequestContext struct {
 	knowledgeBaseIDs      []string
 	knowledgeIDs          []string
 	tagScopes             []types.TagScope
+	requestScope          *types.KnowledgeScopeRequest
+	executionScope        *types.KnowledgeScope
+	executionScopeHash    string
 	tagIDs                []string
 	mcpServiceIDs         []string
 	skillNames            []string
@@ -43,6 +48,7 @@ type qaRequestContext struct {
 	webSearchEnabled      bool
 	mentionedItems        types.MentionedItems
 	effectiveTenantID     uint64                   // when using shared agent, tenant ID for model/KB/MCP resolution; 0 = use context tenant
+	sharedAgent           bool                     // trusted result from server-side share resolution
 	images                []ImageAttachment        // Uploaded images with analysis text
 	userMessageID         string                   // Created user message ID (populated after createUserMessage)
 	channel               string                   // Source channel: "web", "api", "im", etc.
@@ -58,6 +64,36 @@ type qaRequestContext struct {
 	reqAgentID      string
 }
 
+func knowledgeScopeHashPrefix(hash string) string {
+	const prefixLength = 12
+	if len(hash) <= prefixLength {
+		return hash
+	}
+	return hash[:prefixLength]
+}
+
+func preparedTitleGenerationContext(
+	ctx context.Context,
+	scope *types.KnowledgeScope,
+	executionScopeHash string,
+) context.Context {
+	if scope == nil || executionScopeHash == "" {
+		return ctx
+	}
+	folderFilterEnabled := false
+	for _, target := range scope.Targets() {
+		if target.FolderFilter().Enabled() {
+			folderFilterEnabled = true
+			break
+		}
+	}
+	return logger.WithFields(ctx, logger.Fields{
+		"knowledge_scope_prepared": true,
+		"folder_filter_enabled":    folderFilterEnabled,
+		"scope_hash_prefix":        knowledgeScopeHashPrefix(executionScopeHash),
+	})
+}
+
 // buildQARequest converts the qaRequestContext into a types.QARequest for service invocation.
 func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 	imageURLs, imageDescription := extractImageURLsAndOCRText(rc.images)
@@ -67,22 +103,26 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		AssistantMessageID: rc.assistantMessage.ID,
 		SummaryModelID:     rc.summaryModelID,
 		CustomAgent:        rc.customAgent,
-		KnowledgeBaseIDs:   rc.knowledgeBaseIDs,
-		KnowledgeIDs:       rc.knowledgeIDs,
-		TagScopes:          rc.tagScopes,
-		MCPServiceIDs:      rc.mcpServiceIDs,
-		SkillNames:         rc.skillNames,
+		KnowledgeBaseIDs:   append([]string(nil), rc.knowledgeBaseIDs...),
+		KnowledgeIDs:       append([]string(nil), rc.knowledgeIDs...),
+		TagScopes:          cloneTagScopes(rc.tagScopes),
+		RequestScope:       rc.requestScope.Clone(),
+		ExecutionScope:     rc.executionScope.Clone(),
+		ExecutionScopeHash: rc.executionScopeHash,
+		MCPServiceIDs:      append([]string(nil), rc.mcpServiceIDs...),
+		SkillNames:         append([]string(nil), rc.skillNames...),
 		ImageURLs:          imageURLs,
 		ImageDescription:   imageDescription,
 		UserMessageID:      rc.userMessageID,
 		WebSearchEnabled:   rc.webSearchEnabled,
-		Attachments:        rc.attachments,
+		Attachments:        append(types.MessageAttachments(nil), rc.attachments...),
 	}
 }
 
 // parseQARequest parses and validates a QA request, returns the request context
 func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestContext, *CreateKnowledgeQARequest, error) {
 	receivedAt := time.Now()
+	requestContext := c.Request.Context()
 	ctx := logger.CloneContext(c.Request.Context())
 	requestID := secutils.SanitizeForLog(c.GetString(types.RequestIDContextKey.String()))
 	logger.Infof(ctx, "[%s] TTFB:start request_id=%s received_at=%d",
@@ -107,9 +147,32 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		logger.Error(ctx, "Query content is empty")
 		return nil, nil, errors.NewBadRequestError("Query content cannot be empty")
 	}
-	if h.suggestionService != nil && request.SuggestionAttribution != nil {
-		if err := h.suggestionService.ValidateAttribution(ctx, sessionID, request.Query, request.SuggestionAttribution); err != nil {
-			return nil, nil, errors.NewBadRequestError("invalid suggestion attribution")
+	if request.SuggestionAttribution != nil {
+		if h.suggestionService == nil {
+			return nil, nil, errors.NewInternalServerError(
+				"message suggestion operation failed",
+			)
+		}
+		storedScope, err := h.suggestionService.ValidateAttribution(
+			requestContext,
+			sessionID,
+			request.Query,
+			request.SuggestionAttribution,
+		)
+		if err != nil {
+			return nil, nil, mapSuggestionAttributionError(err)
+		}
+		if storedScope != nil {
+			request.KnowledgeScope, err = reconcileSuggestionKnowledgeScope(
+				request.KnowledgeScope,
+				storedScope,
+			)
+			if err != nil {
+				return nil, nil, errors.NewBadRequestError(
+					"invalid suggestion attribution",
+				)
+			}
+			clearSuggestionLegacyKnowledgeSelectors(&request)
 		}
 	}
 
@@ -121,11 +184,17 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		request.Images[i].Caption = ""
 	}
 
-	// Log request details
-	if requestJSON, err := json.Marshal(request); err == nil {
-		logger.Infof(ctx, "[%s] Request: session_id=%s, request=%s",
-			logPrefix, sessionID, secutils.SanitizeForLog(secutils.CompactImageDataURLForLog(string(requestJSON))))
-	}
+	logger.Infof(
+		ctx,
+		"[%s] Request summary: session_id=%s, kb_count=%d, knowledge_count=%d, tag_count=%d, mentioned_count=%d, canonical_scope=%t",
+		logPrefix,
+		sessionID,
+		len(request.KnowledgeBaseIDs),
+		len(request.KnowledgeIds),
+		len(request.TagIDs),
+		len(request.MentionedItems),
+		request.KnowledgeScope != nil,
+	)
 
 	// Get session
 	session, err := h.sessionService.GetSession(ctx, sessionID)
@@ -135,14 +204,14 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	}
 
 	// Get custom agent if agent_id is provided. Backend resolves shared agent from share relation (no client-provided tenant).
-	customAgent, effectiveTenantID := h.resolveAgent(ctx, c, request.AgentID)
+	customAgent, effectiveTenantID, sharedAgent := h.resolveAgent(
+		ctx,
+		c,
+		request.AgentID,
+	)
 
 	// Merge @mentioned items into knowledge_base_ids and knowledge_ids
 	kbIDs, knowledgeIDs := mergeKnowledgeTargets(request.KnowledgeBaseIDs, request.KnowledgeIds, request.MentionedItems)
-	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs); err != nil {
-		return nil, nil, err
-	}
-
 	// The built-in wiki fixer is invoked from a KB page, not from a tenant's
 	// regular agent picker. When the KB is shared, run it in the source tenant
 	// only if the caller has edit permission, so KB-scoped models/tools resolve
@@ -157,12 +226,20 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		); scopedTenantID != 0 {
 			customAgent = scopedAgent
 			effectiveTenantID = scopedTenantID
+			sharedAgent = true
 		}
 	}
 
 	// Log merge results for debugging
-	logger.Infof(ctx, "[%s] @mention merge: request.KnowledgeBaseIDs=%v, request.MentionedItems=%d, merged kbIDs=%v, merged knowledgeIDs=%v",
-		logPrefix, request.KnowledgeBaseIDs, len(request.MentionedItems), kbIDs, knowledgeIDs)
+	logger.Infof(
+		ctx,
+		"[%s] @mention merge: request_kbs=%d, mentioned=%d, merged_kbs=%d, merged_knowledge=%d",
+		logPrefix,
+		len(request.KnowledgeBaseIDs),
+		len(request.MentionedItems),
+		len(kbIDs),
+		len(knowledgeIDs),
+	)
 
 	// Process inline base64 images: decode and save to storage.
 	// VLM analysis for RAG paths is deferred to the pipeline rewrite step.
@@ -286,10 +363,17 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 
 	mentionScopes := tagScopesFromMentionedItems(request.MentionedItems)
 	requestTagIDs := dedupRequestStrings(request.TagIDs)
-	if err := validateUnscopedTagIDs(orphanTagIDsForScope(requestTagIDs, mentionScopes), secutils.SanitizeForLogArray(kbIDs)); err != nil {
+	if err := validateUnscopedTagIDs(
+		orphanTagIDsForScope(requestTagIDs, mentionScopes),
+		kbIDs,
+	); err != nil {
 		return nil, nil, errors.NewBadRequestError(err.Error())
 	}
-	tagScopes := mergeTagScopesFromRequestIDs(mentionScopes, requestTagIDs, secutils.SanitizeForLogArray(kbIDs))
+	tagScopes := mergeTagScopesFromRequestIDs(
+		mentionScopes,
+		requestTagIDs,
+		kbIDs,
+	)
 	tagIDs := dedupRequestStrings(append(request.TagIDs, mentionedIDsByType(request.MentionedItems, "tag")...))
 	mcpServiceIDs := dedupRequestStrings(append(request.MCPServiceIDs, mentionedIDsByType(request.MentionedItems, "mcp")...))
 	skillNames := dedupRequestStrings(append(request.SkillNames, mentionedIDsByType(request.MentionedItems, "skill")...))
@@ -298,9 +382,9 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		customAgent,
 		effectiveTenantID,
 		request.SummaryModelID,
-		secutils.SanitizeForLogArray(kbIDs),
-		secutils.SanitizeForLogArray(knowledgeIDs),
-		secutils.SanitizeForLogArray(tagIDs),
+		kbIDs,
+		knowledgeIDs,
+		tagIDs,
 		tagScopes,
 		secutils.SanitizeForLogArray(mcpServiceIDs),
 		secutils.SanitizeForLogArray(skillNames),
@@ -309,14 +393,15 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 
 	// Build request context
 	reqCtx := &qaRequestContext{
-		ctx:         ctx,
-		c:           c,
-		sessionID:   sessionID,
-		requestID:   requestID,
-		receivedAt:  receivedAt,
-		query:       request.Query,
-		session:     session,
-		customAgent: customAgent,
+		ctx:            ctx,
+		requestContext: requestContext,
+		c:              c,
+		sessionID:      sessionID,
+		requestID:      requestID,
+		receivedAt:     receivedAt,
+		query:          request.Query,
+		session:        session,
+		customAgent:    customAgent,
 		assistantMessage: &types.Message{
 			SessionID:        sessionID,
 			Role:             "assistant",
@@ -328,16 +413,17 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 			ModelID:          modelID,
 			ExecutionContext: executionContext,
 		},
-		knowledgeBaseIDs:      secutils.SanitizeForLogArray(kbIDs),
-		knowledgeIDs:          secutils.SanitizeForLogArray(knowledgeIDs),
+		knowledgeBaseIDs:      append([]string(nil), kbIDs...),
+		knowledgeIDs:          append([]string(nil), knowledgeIDs...),
 		tagScopes:             tagScopes,
-		tagIDs:                secutils.SanitizeForLogArray(tagIDs),
+		tagIDs:                append([]string(nil), tagIDs...),
 		mcpServiceIDs:         secutils.SanitizeForLogArray(mcpServiceIDs),
 		skillNames:            secutils.SanitizeForLogArray(skillNames),
 		summaryModelID:        secutils.SanitizeForLog(request.SummaryModelID),
 		webSearchEnabled:      request.WebSearchEnabled,
 		mentionedItems:        convertMentionedItems(request.MentionedItems),
 		effectiveTenantID:     effectiveTenantID,
+		sharedAgent:           sharedAgent,
 		images:                request.Images,
 		channel:               request.Channel,
 		attachments:           processedAttachments,
@@ -349,6 +435,60 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	}
 
 	return reqCtx, &request, nil
+}
+
+func reconcileSuggestionKnowledgeScope(
+	clientScope *types.KnowledgeScopeRequest,
+	storedScope *types.KnowledgeScopeRequest,
+) (*types.KnowledgeScopeRequest, error) {
+	if storedScope == nil {
+		return nil, fmt.Errorf("suggestion knowledge scope is missing")
+	}
+	if clientScope != nil {
+		equivalent, err := types.EquivalentKnowledgeScopeRequest(
+			clientScope,
+			storedScope,
+		)
+		if err != nil || !equivalent {
+			return nil, fmt.Errorf("suggestion knowledge scope does not match")
+		}
+	}
+	return storedScope.Clone(), nil
+}
+
+func mapSuggestionAttributionError(err error) error {
+	if stderrors.Is(err, context.Canceled) ||
+		stderrors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	if appErr, ok := errors.IsAppError(err); ok {
+		return appErr
+	}
+	return errors.NewInternalServerError(
+		"message suggestion operation failed",
+	)
+}
+
+func clearSuggestionLegacyKnowledgeSelectors(
+	request *CreateKnowledgeQARequest,
+) {
+	request.KnowledgeBaseIDs = nil
+	request.KnowledgeIds = nil
+	request.TagIDs = nil
+
+	if len(request.MentionedItems) == 0 {
+		return
+	}
+	retained := make([]MentionedItemRequest, 0, len(request.MentionedItems))
+	for _, item := range request.MentionedItems {
+		switch item.Type {
+		case "kb", "file", "tag":
+			continue
+		default:
+			retained = append(retained, item)
+		}
+	}
+	request.MentionedItems = retained
 }
 
 func buildMessageExecutionContext(
@@ -370,12 +510,12 @@ func buildMessageExecutionContext(
 	}
 
 	snapshot := types.MessageExecutionContext{
-		KnowledgeBaseIDs: knowledgeBaseIDs,
-		KnowledgeIDs:     knowledgeIDs,
-		TagIDs:           tagIDs,
+		KnowledgeBaseIDs: append([]string(nil), knowledgeBaseIDs...),
+		KnowledgeIDs:     append([]string(nil), knowledgeIDs...),
+		TagIDs:           append([]string(nil), tagIDs...),
 		TagScopes:        cloneTagScopes(tagScopes),
-		MCPServiceIDs:    mcpServiceIDs,
-		SkillNames:       skillNames,
+		MCPServiceIDs:    append([]string(nil), mcpServiceIDs...),
+		SkillNames:       append([]string(nil), skillNames...),
 		WebSearchEnabled: webSearchEnabled,
 		Locale:           locale,
 	}
@@ -443,17 +583,22 @@ func cloneTagScopes(scopes []types.TagScope) []types.TagScope {
 }
 
 // resolveAgent resolves the custom agent by ID, trying shared agent first, then own agent.
-// Returns (nil, 0) if agentID is empty or not found.
-func (h *Handler) resolveAgent(ctx context.Context, c *gin.Context, agentID string) (*types.CustomAgent, uint64) {
+// Returns (nil, 0, false) if agentID is empty or not found.
+func (h *Handler) resolveAgent(
+	ctx context.Context,
+	c *gin.Context,
+	agentID string,
+) (*types.CustomAgent, uint64, bool) {
 	if agentID == "" {
-		return nil, 0
+		return nil, 0, false
 	}
 
-	logger.Infof(ctx, "Resolving agent, agent ID: %s", secutils.SanitizeForLog(agentID))
+	logger.Info(ctx, "Resolving configured agent")
 
 	// Try shared agent first
 	var customAgent *types.CustomAgent
 	var effectiveTenantID uint64
+	var sharedAgent bool
 	userIDVal, _ := c.Get(types.UserIDContextKey.String())
 	currentTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if h.agentShareService != nil && userIDVal != nil && currentTenantID != 0 {
@@ -462,8 +607,8 @@ func (h *Handler) resolveAgent(ctx context.Context, c *gin.Context, agentID stri
 		if err == nil && agent != nil {
 			effectiveTenantID = agent.TenantID
 			customAgent = agent
-			logger.Infof(ctx, "Using shared agent: ID=%s, Name=%s, effectiveTenantID=%d (retrieval scope)",
-				customAgent.ID, customAgent.Name, effectiveTenantID)
+			sharedAgent = true
+			logger.Info(ctx, "Using authorized shared agent")
 		}
 	}
 
@@ -472,18 +617,24 @@ func (h *Handler) resolveAgent(ctx context.Context, c *gin.Context, agentID stri
 		agent, err := h.customAgentService.GetAgentByID(ctx, agentID)
 		if err == nil {
 			customAgent = agent
-			logger.Infof(ctx, "Using own agent: ID=%s, Name=%s, AgentMode=%s",
-				customAgent.ID, customAgent.Name, customAgent.Config.AgentMode)
+			logger.Infof(
+				ctx,
+				"Using own agent, agent mode: %s",
+				customAgent.Config.AgentMode,
+			)
 		} else {
-			logger.Warnf(ctx, "Failed to get custom agent, agent ID: %s, error: %v, using default config",
-				secutils.SanitizeForLog(agentID), err)
+			logger.Warn(ctx, "Failed to resolve configured agent; using default config")
 		}
 	} else {
-		logger.Infof(ctx, "Using custom agent: ID=%s, Name=%s, IsBuiltin=%v, AgentMode=%s, effectiveTenantID=%d",
-			customAgent.ID, customAgent.Name, customAgent.IsBuiltin, customAgent.Config.AgentMode, effectiveTenantID)
+		logger.Infof(
+			ctx,
+			"Using shared agent, builtin: %t, agent mode: %s",
+			customAgent.IsBuiltin,
+			customAgent.Config.AgentMode,
+		)
 	}
 
-	return customAgent, effectiveTenantID
+	return customAgent, effectiveTenantID, sharedAgent
 }
 
 // mergeKnowledgeTargets merges request KB/knowledge IDs with @mentioned items into deduplicated slices.
@@ -547,7 +698,7 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 	if reqCtx.effectiveTenantID != 0 && h.tenantService != nil {
 		if tenant, err := h.tenantService.GetTenantByID(reqCtx.ctx, reqCtx.effectiveTenantID); err == nil && tenant != nil {
 			baseCtx = context.WithValue(context.WithValue(reqCtx.ctx, types.TenantIDContextKey, reqCtx.effectiveTenantID), types.TenantInfoContextKey, tenant)
-			logger.Infof(reqCtx.ctx, "Using effective tenant %d for shared agent (model/KB/MCP)", reqCtx.effectiveTenantID)
+			logger.Info(reqCtx.ctx, "Using authorized shared-agent tenant context")
 		}
 	}
 
@@ -588,7 +739,17 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 			modelID = reqCtx.customAgent.Config.ModelID
 		}
 		logger.Infof(reqCtx.ctx, "Session has no title, starting async title generation, session ID: %s, model: %s", reqCtx.sessionID, modelID)
-		h.sessionService.GenerateTitleAsync(asyncCtx, reqCtx.session, reqCtx.query, modelID, eventBus)
+		h.sessionService.GenerateTitleAsync(
+			preparedTitleGenerationContext(
+				asyncCtx,
+				reqCtx.executionScope,
+				reqCtx.executionScopeHash,
+			),
+			reqCtx.session,
+			reqCtx.query,
+			modelID,
+			eventBus,
+		)
 	}
 
 	return streamCtx
@@ -607,6 +768,7 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 // @Security     ApiKeyAuth
 // @Router       /sessions/search [post]
 func (h *Handler) SearchKnowledge(c *gin.Context) {
+	requestContext := c.Request.Context()
 	ctx := logger.CloneContext(c.Request.Context())
 	logger.Info(ctx, "Start processing knowledge search request")
 
@@ -641,39 +803,83 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		}
 	}
 
+	knowledgeBaseIDs, knowledgeIDs := mergeKnowledgeTargets(
+		knowledgeBaseIDs,
+		request.KnowledgeIDs,
+		request.MentionedItems,
+	)
 	mentionScopes := tagScopesFromMentionedItems(request.MentionedItems)
 	requestTagIDs := dedupRequestStrings(request.TagIDs)
-	if err := validateUnscopedTagIDs(orphanTagIDsForScope(requestTagIDs, mentionScopes), secutils.SanitizeForLogArray(knowledgeBaseIDs)); err != nil {
+	if err := validateUnscopedTagIDs(
+		orphanTagIDsForScope(requestTagIDs, mentionScopes),
+		knowledgeBaseIDs,
+	); err != nil {
 		logger.Error(ctx, err.Error())
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	tagScopes := mergeTagScopesFromRequestIDs(mentionScopes, requestTagIDs, secutils.SanitizeForLogArray(knowledgeBaseIDs))
+	tagScopes := mergeTagScopesFromRequestIDs(
+		mentionScopes,
+		requestTagIDs,
+		knowledgeBaseIDs,
+	)
 
-	if len(knowledgeBaseIDs) == 0 && len(request.KnowledgeIDs) == 0 && len(tagScopes) == 0 {
-		logger.Error(ctx, "No knowledge base IDs, knowledge IDs, or tag scopes provided")
-		c.Error(errors.NewBadRequestError("At least one knowledge_base_id, knowledge_base_ids, knowledge_ids, or scoped tag must be provided"))
+	legacy := &types.KnowledgeScopeRequest{
+		KnowledgeBaseIDs: append([]string(nil), knowledgeBaseIDs...),
+		KnowledgeIDs:     append([]string(nil), knowledgeIDs...),
+		TagScopes:        cloneTagScopes(tagScopes),
+	}
+	if len(legacy.KnowledgeBaseIDs) == 0 &&
+		len(legacy.KnowledgeIDs) == 0 &&
+		len(legacy.TagScopes) == 0 {
+		legacy = nil
+	}
+	preparation, err := h.sessionService.PrepareKnowledgeScope(
+		requestContext,
+		types.KnowledgeScopePrepareInput{
+			CanonicalRequest: request.KnowledgeScope.Clone(),
+			LegacyRequest:    legacy,
+		},
+	)
+	if err != nil {
+		c.Error(err)
 		return
 	}
-	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, knowledgeBaseIDs, request.KnowledgeIDs); err != nil {
-		c.Error(err)
+	executionScope := preparation.Execution()
+	requestScope := preparation.Request()
+	explicitEmptyFolderScope := requestScope != nil &&
+		requestScope.FolderScopes != nil
+	if executionScope == nil ||
+		(executionScope.IsEmpty() && !explicitEmptyFolderScope) {
+		c.Error(errors.NewBadRequestError("knowledge scope is empty"))
+		return
+	}
+	if preparation.HasEnabledNonEmptyFolderFilter() {
+		c.Error(errors.NewServiceUnavailableError(
+			"folder-scoped retrieval is temporarily unavailable",
+		))
 		return
 	}
 
 	logger.Infof(
 		ctx,
-		"Knowledge search request, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, query: %s",
-		secutils.SanitizeForLogArray(knowledgeBaseIDs),
-		secutils.SanitizeForLogArray(request.KnowledgeIDs),
+		"Knowledge search request, knowledge bases: %d, knowledge: %d, tag scopes: %d, folder enabled: %t",
+		len(knowledgeBaseIDs),
+		len(knowledgeIDs),
 		len(tagScopes),
-		secutils.SanitizeForLog(request.Query),
+		request.KnowledgeScope != nil &&
+			request.KnowledgeScope.FolderScopes != nil,
 	)
 
 	// Directly call knowledge retrieval service without LLM summarization
-	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs, request.KnowledgeIDs, tagScopes, request.Query)
+	searchResults, err := h.sessionService.SearchKnowledgeWithScope(
+		requestContext,
+		request.Query,
+		preparation,
+	)
 	if err != nil {
-		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		logger.Error(ctx, "Knowledge search failed")
+		c.Error(err)
 		return
 	}
 
@@ -701,6 +907,14 @@ func (h *Handler) KnowledgeQA(c *gin.Context) {
 	// Parse and validate request
 	reqCtx, request, err := h.parseQARequest(c, "KnowledgeQA")
 	if err != nil {
+		c.Error(err)
+		return
+	}
+	if err = h.prepareNormalKnowledgeScope(
+		reqCtx,
+		request.KnowledgeScope,
+		allowsFolderScopeForWebQuickAnswer(reqCtx, request),
+	); err != nil {
 		c.Error(err)
 		return
 	}
@@ -760,11 +974,96 @@ func (h *Handler) AgentQA(c *gin.Context) {
 
 	// Route to appropriate handler based on agent mode
 	if agentModeEnabled {
+		if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(
+			reqCtx.requestContext,
+			reqCtx.knowledgeBaseIDs,
+			reqCtx.knowledgeIDs,
+		); err != nil {
+			c.Error(err)
+			return
+		}
+		if err := h.prepareNormalKnowledgeScope(
+			reqCtx,
+			request.KnowledgeScope,
+			false,
+		); err != nil {
+			c.Error(err)
+			return
+		}
 		h.executeQA(reqCtx, qaModeAgent, true)
 	} else {
+		if err := h.prepareNormalKnowledgeScope(
+			reqCtx,
+			request.KnowledgeScope,
+			false,
+		); err != nil {
+			c.Error(err)
+			return
+		}
 		logger.Infof(reqCtx.ctx, "Agent mode disabled, delegating to normal mode for session: %s", reqCtx.sessionID)
 		h.executeQA(reqCtx, qaModeNormal, !request.DisableTitle)
 	}
+}
+
+func allowsFolderScopeForWebQuickAnswer(
+	reqCtx *qaRequestContext,
+	request *CreateKnowledgeQARequest,
+) bool {
+	if reqCtx == nil || request == nil || request.AgentEnabled ||
+		reqCtx.sharedAgent ||
+		(reqCtx.customAgent != nil && reqCtx.customAgent.IsAgentMode()) {
+		return false
+	}
+	principal, ok := types.PrincipalFromContext(reqCtx.requestContext)
+	if !ok || principal.Type != types.PrincipalWebUser {
+		return false
+	}
+	_, hasTenantAPIKeyScope :=
+		types.TenantAPIKeyScopeFromContext(reqCtx.requestContext)
+	return !hasTenantAPIKeyScope
+}
+
+func (h *Handler) prepareNormalKnowledgeScope(
+	reqCtx *qaRequestContext,
+	canonical *types.KnowledgeScopeRequest,
+	allowFolderScope bool,
+) error {
+	legacy := &types.KnowledgeScopeRequest{
+		KnowledgeBaseIDs: append([]string(nil), reqCtx.knowledgeBaseIDs...),
+		KnowledgeIDs:     append([]string(nil), reqCtx.knowledgeIDs...),
+		TagScopes:        cloneTagScopes(reqCtx.tagScopes),
+	}
+	if len(legacy.KnowledgeBaseIDs) == 0 &&
+		len(legacy.KnowledgeIDs) == 0 &&
+		len(legacy.TagScopes) == 0 {
+		legacy = nil
+	}
+	preparation, err := h.sessionService.PrepareKnowledgeScope(
+		reqCtx.requestContext,
+		types.KnowledgeScopePrepareInput{
+			CanonicalRequest: canonical.Clone(),
+			LegacyRequest:    legacy,
+			Session:          reqCtx.session,
+			CustomAgent:      reqCtx.customAgent,
+			SharedAgent:      reqCtx.sharedAgent,
+		},
+	)
+	if err != nil {
+		return err
+	}
+	if preparation.HasEnabledNonEmptyFolderFilter() && !allowFolderScope {
+		return errors.NewServiceUnavailableError(
+			"folder-scoped retrieval is temporarily unavailable",
+		)
+	}
+	reqCtx.requestScope = preparation.Request()
+	reqCtx.executionScope = preparation.Execution()
+	reqCtx.executionScopeHash = preparation.ExecutionScopeHash()
+	reqCtx.assistantMessage.ExecutionContext.RequestScope =
+		reqCtx.requestScope.Clone()
+	reqCtx.assistantMessage.ExecutionContext.ExecutionScopeHash =
+		reqCtx.executionScopeHash
+	return nil
 }
 
 // qaMode determines which QA execution path to use.
@@ -813,7 +1112,10 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	}
 	userMsg, err := h.createUserMessage(ctx, sessionID, reqCtx.query, reqCtx.requestID, reqCtx.mentionedItems, convertImageAttachments(reqCtx.images), userMessageAttachments, reqCtx.channel, reqCtx.suggestionAttribution)
 	if err != nil {
-		reqCtx.c.Error(errors.NewInternalServerError(err.Error()))
+		logger.Error(ctx, "Failed to create user message")
+		reqCtx.c.Error(errors.NewInternalServerError(
+			"failed to create message",
+		))
 		return
 	}
 	reqCtx.userMessageID = userMsg.ID
@@ -821,13 +1123,21 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	// Create assistant message
 	assistantMessagePtr, err := h.createAssistantMessage(ctx, reqCtx.assistantMessage)
 	if err != nil {
-		reqCtx.c.Error(errors.NewInternalServerError(err.Error()))
+		logger.Error(ctx, "Failed to create assistant message")
+		reqCtx.c.Error(errors.NewInternalServerError(
+			"failed to create message",
+		))
 		return
 	}
 	reqCtx.assistantMessage = assistantMessagePtr
 
 	if mode == qaModeNormal {
-		logger.Infof(ctx, "Using knowledge bases: %v", reqCtx.knowledgeBaseIDs)
+		logger.Infof(
+			ctx,
+			"Using prepared knowledge scope, knowledge bases: %d, hash: %s",
+			len(reqCtx.knowledgeBaseIDs),
+			knowledgeScopeHashPrefix(reqCtx.executionScopeHash),
+		)
 	} else {
 		logger.Infof(ctx, "Calling agent QA service, session ID: %s", sessionID)
 	}
@@ -885,15 +1195,22 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				buf := make([]byte, 10240)
-				runtime.Stack(buf, true)
 				stageName := "Knowledge QA"
 				if mode == qaModeAgent {
 					stageName = "Agent QA"
 				}
-				logger.ErrorWithFields(streamCtx.asyncCtx,
-					errors.NewInternalServerError(fmt.Sprintf("%s service panicked: %v\n%s", stageName, r, string(buf))),
-					map[string]interface{}{"session_id": sessionID})
+				if reqCtx.executionScope != nil {
+					logger.Error(
+						streamCtx.asyncCtx,
+						"Prepared knowledge service panicked",
+					)
+				} else {
+					buf := make([]byte, 10240)
+					runtime.Stack(buf, true)
+					logger.ErrorWithFields(streamCtx.asyncCtx,
+						errors.NewInternalServerError(fmt.Sprintf("%s service panicked: %v\n%s", stageName, r, string(buf))),
+						map[string]interface{}{"session_id": sessionID})
+				}
 			}
 			// Agent mode: complete the assistant message in defer (normal mode does it via event handler)
 			if mode == qaModeAgent {
@@ -939,12 +1256,21 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 			if streamCtx.asyncCtx.Err() != nil {
 				logger.Infof(streamCtx.asyncCtx, "QA cancelled by user stop for session: %s", sessionID)
 			} else {
-				logger.ErrorWithFields(streamCtx.asyncCtx, serviceErr, nil)
+				publicError := serviceErr.Error()
+				if reqCtx.executionScope != nil {
+					publicError = "knowledge request failed"
+					logger.Error(
+						streamCtx.asyncCtx,
+						"Prepared knowledge request failed",
+					)
+				} else {
+					logger.ErrorWithFields(streamCtx.asyncCtx, serviceErr, nil)
+				}
 				streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
 					Type:      event.EventError,
 					SessionID: sessionID,
 					Data: event.ErrorData{
-						Error:     serviceErr.Error(),
+						Error:     publicError,
 						Stage:     stageName,
 						SessionID: sessionID,
 					},
@@ -1286,17 +1612,31 @@ func (h *Handler) persistLastRequestState(parentCtx context.Context, reqCtx *qaR
 		AgentID:          reqCtx.reqAgentID,
 		AgentEnabled:     agentEnabled,
 		ModelID:          reqCtx.summaryModelID,
-		KnowledgeBaseIDs: reqCtx.knowledgeBaseIDs,
-		KnowledgeIDs:     reqCtx.knowledgeIDs,
-		TagIDs:           reqCtx.tagIDs,
-		MCPServiceIDs:    reqCtx.mcpServiceIDs,
-		SkillNames:       reqCtx.skillNames,
-		MentionedItems:   reqCtx.mentionedItems,
+		KnowledgeBaseIDs: append([]string(nil), reqCtx.knowledgeBaseIDs...),
+		KnowledgeIDs:     append([]string(nil), reqCtx.knowledgeIDs...),
+		TagIDs:           append([]string(nil), reqCtx.tagIDs...),
+		RequestScope:     reqCtx.requestScope.Clone(),
+		MCPServiceIDs:    append([]string(nil), reqCtx.mcpServiceIDs...),
+		SkillNames:       append([]string(nil), reqCtx.skillNames...),
+		MentionedItems:   append(types.MentionedItems(nil), reqCtx.mentionedItems...),
 		WebSearchEnabled: reqCtx.webSearchEnabled,
 	}
 
 	if err := h.sessionService.UpdateSessionLastRequestState(ctx, reqCtx.sessionID, state); err != nil {
-		logger.Warnf(ctx, "persist last_request_state failed for session %s: %v", reqCtx.sessionID, err)
+		if reqCtx.executionScopeHash != "" {
+			logger.WarnWithFields(ctx, logger.Fields{
+				"scope_hash_prefix": knowledgeScopeHashPrefix(
+					reqCtx.executionScopeHash,
+				),
+			}, "Prepared last request state persistence failed")
+		} else {
+			logger.Warnf(
+				ctx,
+				"persist last_request_state failed for session %s: %v",
+				reqCtx.sessionID,
+				err,
+			)
+		}
 	}
 }
 

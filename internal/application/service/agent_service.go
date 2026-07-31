@@ -471,40 +471,10 @@ func (s *agentService) registerTools(
 	// Filter out knowledge base tools if no knowledge scope is configured for this turn.
 	hasKnowledge := agentHasKnowledgeScope(config)
 	if !hasKnowledge {
-		filteredTools := make([]string, 0)
-		kbTools := map[string]bool{
-			tools.ToolKnowledgeSearch:     true,
-			tools.ToolGrepChunks:          true,
-			tools.ToolListKnowledgeChunks: true,
-			tools.ToolQueryKnowledgeGraph: true,
-			tools.ToolGetDocumentInfo:     true,
-			tools.ToolDatabaseQuery:       true,
-			tools.ToolDataAnalysis:        true,
-			tools.ToolDataSchema:          true,
-			// Wiki tools also require at least one KB in scope.
-			tools.ToolWikiReadPage:      true,
-			tools.ToolWikiSearch:        true,
-			tools.ToolWikiReadSourceDoc: true,
-			tools.ToolWikiFlagIssue:     true,
-			tools.ToolWikiWritePage:     true,
-			tools.ToolWikiReplaceText:   true,
-			tools.ToolWikiRenamePage:    true,
-			tools.ToolWikiDeletePage:    true,
-			tools.ToolWikiReadIssue:     true,
-			tools.ToolWikiUpdateIssue:   true,
-		}
-
-		// If no knowledge and no web search, also disable todo_write (not useful for simple chat)
-		if !config.WebSearchEnabled {
-			kbTools[tools.ToolTodoWrite] = true
-		}
-
-		for _, toolName := range allowedTools {
-			if !kbTools[toolName] {
-				filteredTools = append(filteredTools, toolName)
-			}
-		}
-		allowedTools = filteredTools
+		allowedTools = filterToolsWithoutKnowledgeScope(
+			allowedTools,
+			config.WebSearchEnabled,
+		)
 		logger.Infof(ctx, "Pure Agent Mode: Knowledge base tools filtered out, remaining: %v", allowedTools)
 	}
 
@@ -669,6 +639,28 @@ func (s *agentService) registerTools(
 
 	logger.Infof(ctx, "Registered %d tools", len(registry.ListTools()))
 	return nil
+}
+
+func filterToolsWithoutKnowledgeScope(
+	allowedTools []string,
+	webSearchEnabled bool,
+) []string {
+	filtered := make([]string, 0, len(allowedTools))
+	for _, toolName := range allowedTools {
+		if tools.IsKnowledgeConsumingTool(toolName) {
+			continue
+		}
+		if !webSearchEnabled &&
+			(toolName == tools.ToolWebSearch ||
+				toolName == tools.ToolWebFetch) {
+			continue
+		}
+		if toolName == tools.ToolTodoWrite && !webSearchEnabled {
+			continue
+		}
+		filtered = append(filtered, toolName)
+	}
+	return filtered
 }
 
 // ValidateConfig validates the agent configuration

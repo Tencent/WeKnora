@@ -48,6 +48,14 @@ type RetrieveParams struct {
 	KnowledgeIDs []string
 	// Tag IDs for filtering (used for FAQ priority filtering)
 	TagIDs []string
+	// ScopeTagIDs preserves the logical tag selector used to prepare this call.
+	ScopeTagIDs []string
+	// SourceTenantID is the server-authorized owner of this target.
+	SourceTenantID uint64
+	// FolderFilter is the resolved pre-TopK folder constraint.
+	FolderFilter ResolvedFolderFilter
+	// ExecutionScopeHash links this runtime projection to its prepared scope.
+	ExecutionScopeHash string
 	// Excluded knowledge IDs
 	ExcludeKnowledgeIDs []string
 	// Excluded chunk IDs

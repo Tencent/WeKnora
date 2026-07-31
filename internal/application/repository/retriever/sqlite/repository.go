@@ -264,35 +264,32 @@ func (r *sqliteRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 // --- Retrieve ---
 
 func (r *sqliteRepository) Retrieve(ctx context.Context, params types.RetrieveParams) ([]*types.RetrieveResult, error) {
-	var results []*types.RetrieveResult
-
-	if params.RetrieverType == types.KeywordsRetrieverType || params.RetrieverType == "" {
+	switch params.RetrieverType {
+	case types.KeywordsRetrieverType:
 		res, err := r.keywordsRetrieve(ctx, params)
 		if err != nil {
-			results = append(results, &types.RetrieveResult{
-				RetrieverEngineType: types.SQLiteRetrieverEngineType,
-				RetrieverType:       types.KeywordsRetrieverType,
-				Error:               err,
-			})
-		} else {
-			results = append(results, res...)
+			return nil, fmt.Errorf("sqlite keyword retrieve failed: %w", err)
 		}
-	}
-
-	if params.RetrieverType == types.VectorRetrieverType || params.RetrieverType == "" {
+		return res, nil
+	case types.VectorRetrieverType:
 		res, err := r.vectorRetrieve(ctx, params)
 		if err != nil {
-			results = append(results, &types.RetrieveResult{
-				RetrieverEngineType: types.SQLiteRetrieverEngineType,
-				RetrieverType:       types.VectorRetrieverType,
-				Error:               err,
-			})
-		} else {
-			results = append(results, res...)
+			return nil, fmt.Errorf("sqlite vector retrieve failed: %w", err)
 		}
+		return res, nil
+	case "":
+		keywordsResults, err := r.keywordsRetrieve(ctx, params)
+		if err != nil {
+			return nil, fmt.Errorf("sqlite keyword retrieve failed: %w", err)
+		}
+		vectorResults, err := r.vectorRetrieve(ctx, params)
+		if err != nil {
+			return nil, fmt.Errorf("sqlite vector retrieve failed: %w", err)
+		}
+		return append(keywordsResults, vectorResults...), nil
+	default:
+		return nil, fmt.Errorf("unsupported SQLite retriever type %q", params.RetrieverType)
 	}
-
-	return results, nil
 }
 
 // --- Keywords retrieval via FTS5 ---
@@ -341,7 +338,12 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 		return nil, fmt.Errorf("FTS5 query failed: %w", err)
 	}
 
-	logger.GetLogger(ctx).Infof("[SQLite] keywordsRetrieve: query=%q, ftsQuery=%q, matched=%d rows", params.Query, ftsQuery, len(rows))
+	logger.GetLogger(ctx).Infof(
+		"[SQLite] keywordsRetrieve: query_length=%d, fts_query_length=%d, matched=%d rows",
+		len(params.Query),
+		len(ftsQuery),
+		len(rows),
+	)
 
 	items := make([]*types.IndexWithScore, len(rows))
 	for i, row := range rows {
@@ -388,32 +390,28 @@ func (r *sqliteRepository) vectorRetrieve(ctx context.Context, params types.Retr
 
 	tbl := vecTableName(dim)
 
-	// ⚠️ sqlite-vec 要求必须有 k = ?
+	// vec0 applies k before external metadata predicates in practice, so compute
+	// distance only after the authorized candidate set is constrained.
 	vecSQL := fmt.Sprintf(`
-		SELECT v.rowid, v.distance,
+		SELECT v.rowid,
+			vec_distance_cosine(v.embedding, ?) AS distance,
 			e.source_id, e.source_type, e.chunk_id,
 			e.knowledge_id, e.knowledge_base_id,
 			e.tag_id, e.content
-		FROM %s v
-		JOIN lite_embeddings e ON e.id = v.rowid
-		WHERE v.embedding MATCH ?
-		AND k = ?
-		AND (e.is_enabled IS NULL OR e.is_enabled = 1)
+		FROM lite_embeddings AS e
+		JOIN %s AS v ON v.rowid = e.id
+		WHERE (e.is_enabled IS NULL OR e.is_enabled = 1)
 	`, tbl)
 
-	args := []interface{}{
-		queryBlob,
-		params.TopK, // 这里就是 k
-	}
+	args := []interface{}{queryBlob}
 
-	// 追加过滤条件
 	for _, wp := range buildFilterWhere(params) {
 		vecSQL += " AND " + wp.clause
 		args = append(args, wp.args...)
 	}
 
-	// ⚠️ 这里仍然建议加 ORDER BY，虽然 vec0 已经按距离返回
-	vecSQL += " ORDER BY v.distance ASC"
+	vecSQL += " ORDER BY distance ASC LIMIT ?"
+	args = append(args, params.TopK)
 
 	type row struct {
 		Rowid           uint

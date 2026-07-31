@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/common"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/llmreference"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -16,6 +18,110 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+type knowledgeQARuntimeProjection struct {
+	prepared                 bool
+	knowledgeBaseIDs         []string
+	knowledgeIDs             []string
+	searchTargets            types.SearchTargets
+	hasLocalKnowledge        bool
+	retrievalExplicitlyEmpty bool
+}
+
+func projectKnowledgeQARuntime(
+	requestScope *types.KnowledgeScopeRequest,
+	scope *types.KnowledgeScope,
+	executionScopeHash string,
+) (knowledgeQARuntimeProjection, error) {
+	if scope == nil {
+		if executionScopeHash != "" {
+			return knowledgeQARuntimeProjection{},
+				apperrors.NewBadRequestError("invalid knowledge scope")
+		}
+		return knowledgeQARuntimeProjection{}, nil
+	}
+	if executionScopeHash == "" {
+		return knowledgeQARuntimeProjection{},
+			apperrors.NewBadRequestError("invalid knowledge scope")
+	}
+
+	projection := knowledgeQARuntimeProjection{
+		prepared:      true,
+		searchTargets: types.ProjectKnowledgeScopeToSearchTargets(scope, executionScopeHash),
+	}
+	projection.hasLocalKnowledge = len(projection.searchTargets) > 0
+	folderFilterEnabled := requestScope != nil &&
+		requestScope.FolderScopes != nil
+	folderFilterEnabled = folderFilterEnabled ||
+		scope.HasEnabledNonEmptyFolderFilter()
+	for _, target := range projection.searchTargets {
+		if target == nil {
+			continue
+		}
+		projection.knowledgeBaseIDs = append(
+			projection.knowledgeBaseIDs,
+			target.KnowledgeBaseID,
+		)
+		projection.knowledgeIDs = append(
+			projection.knowledgeIDs,
+			target.KnowledgeIDs...,
+		)
+	}
+	projection.retrievalExplicitlyEmpty =
+		folderFilterEnabled && !projection.hasLocalKnowledge
+	return projection, nil
+}
+
+func buildKnowledgeQAPipeline(
+	hasLocalKnowledge bool,
+	webSearchEnabled bool,
+	retrievalExplicitlyEmpty bool,
+	hasHistory bool,
+	dataAnalysisEnabled bool,
+) []types.EventType {
+	if retrievalExplicitlyEmpty ||
+		(!hasLocalKnowledge && !webSearchEnabled) {
+		return types.NewPipelineBuilder().
+			AddIf(hasHistory, types.LOAD_HISTORY).
+			Add(types.CHAT_COMPLETION_STREAM).
+			Build()
+	}
+	return types.NewPipelineBuilder().
+		AddIf(hasHistory, types.LOAD_HISTORY).
+		Add(types.QUERY_UNDERSTAND).
+		Add(types.CHUNK_SEARCH_PARALLEL).
+		Add(types.CHUNK_RERANK).
+		AddIf(webSearchEnabled, types.WEB_FETCH).
+		Add(types.CHUNK_MERGE).
+		Add(types.FILTER_TOP_K).
+		AddIf(dataAnalysisEnabled, types.DATA_ANALYSIS).
+		Add(types.INTO_CHAT_MESSAGE).
+		Add(types.CHAT_COMPLETION_STREAM).
+		Build()
+}
+
+func applyKnowledgeQARuntimeProjection(
+	request *types.PipelineRequest,
+	knowledgeBaseIDs []string,
+	knowledgeIDs []string,
+	searchTargets types.SearchTargets,
+	executionScope *types.KnowledgeScope,
+	executionScopeHash string,
+	retrievalExplicitlyEmpty bool,
+) {
+	if request == nil {
+		return
+	}
+	request.KnowledgeBaseIDs = append([]string(nil), knowledgeBaseIDs...)
+	request.KnowledgeIDs = append([]string(nil), knowledgeIDs...)
+	request.SearchTargets = make(types.SearchTargets, len(searchTargets))
+	for index, target := range searchTargets {
+		request.SearchTargets[index] = target.Clone()
+	}
+	request.ExecutionScope = executionScope.Clone()
+	request.ExecutionScopeHash = executionScopeHash
+	request.RetrievalExplicitlyEmpty = retrievalExplicitlyEmpty
+}
 
 // KnowledgeQA performs knowledge base question answering with LLM summarization
 // Events are emitted through eventBus (references, answer chunks, completion)
@@ -25,29 +131,75 @@ func (s *sessionService) KnowledgeQA(
 	req *types.QARequest,
 	eventBus *event.EventBus,
 ) error {
-	logger.Infof(
-		ctx,
-		"Knowledge base question answering parameters, session ID: %s, query: %s, webSearchEnabled: %v",
-		req.Session.ID,
-		req.Query,
-		req.WebSearchEnabled,
-	)
+	if req.ExecutionScopeHash != "" {
+		logger.Infof(
+			ctx,
+			"Prepared knowledge QA request, query length: %d, web enabled: %t, scope hash: %s",
+			len(req.Query),
+			req.WebSearchEnabled,
+			knowledgeScopeHashPrefix(req.ExecutionScopeHash),
+		)
+	} else {
+		logger.Infof(
+			ctx,
+			"Knowledge base question answering parameters, session ID: %s, query: %s, webSearchEnabled: %v",
+			req.Session.ID,
+			req.Query,
+			req.WebSearchEnabled,
+		)
+	}
 
 	// Span the request setup (KB / model resolution, search target building,
 	// agent override application). This covers the visible gap between trace
 	// start and the first stage observation in the Langfuse timeline.
+	setupMetadata := map[string]interface{}{
+		"session_id": req.Session.ID,
+	}
+	if req.ExecutionScopeHash != "" {
+		setupMetadata = map[string]interface{}{
+			"query_length": len(req.Query),
+			"web_enabled":  req.WebSearchEnabled,
+			"scope_hash_prefix": knowledgeScopeHashPrefix(
+				req.ExecutionScopeHash,
+			),
+		}
+	}
 	setupCtx, setupSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
-		Name: "qa.setup",
-		Metadata: map[string]interface{}{
-			"session_id": req.Session.ID,
-		},
+		Name:     "qa.setup",
+		Metadata: setupMetadata,
 	})
 	ctx = setupCtx
 
-	// Resolve knowledge bases using shared helper
-	knowledgeBaseIDs, knowledgeIDs, err := s.resolveKnowledgeBases(ctx, req)
+	var (
+		knowledgeBaseIDs []string
+		knowledgeIDs     []string
+		searchTargets    types.SearchTargets
+		err              error
+	)
+	runtimeProjection, err := projectKnowledgeQARuntime(
+		req.RequestScope,
+		req.ExecutionScope,
+		req.ExecutionScopeHash,
+	)
 	if err != nil {
 		return err
+	}
+	if runtimeProjection.prepared {
+		knowledgeBaseIDs = append(
+			knowledgeBaseIDs,
+			runtimeProjection.knowledgeBaseIDs...,
+		)
+		knowledgeIDs = append(
+			knowledgeIDs,
+			runtimeProjection.knowledgeIDs...,
+		)
+		searchTargets = runtimeProjection.searchTargets
+	} else {
+		// Legacy callers remain unchanged until their Phase 4B2 integration.
+		knowledgeBaseIDs, knowledgeIDs, err = s.resolveKnowledgeBases(ctx, req)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Resolve chat model ID using shared helper
@@ -86,20 +238,29 @@ func (s *sessionService) KnowledgeQA(
 	// Resolve retrieval tenant scope using shared helper
 	retrievalTenantID := s.resolveRetrievalTenantID(ctx, req)
 
-	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.TagScopes)
-	if err != nil {
-		return fmt.Errorf("build search targets: %w", err)
+	if !runtimeProjection.prepared {
+		// Build unified search targets for legacy Agent/IM callers only.
+		searchTargets, err = s.buildSearchTargets(
+			ctx,
+			retrievalTenantID,
+			knowledgeBaseIDs,
+			knowledgeIDs,
+			req.TagScopes,
+		)
+		if err != nil {
+			return fmt.Errorf("build search targets: %w", err)
+		}
 	}
 
 	// Create chat management object with session settings
 	logger.Infof(
 		ctx,
-		"Creating chat manage object, knowledge base IDs: %v, knowledge IDs: %v, chat model ID: %s, search targets: %d",
-		knowledgeBaseIDs,
-		knowledgeIDs,
-		chatModelID,
+		"Creating chat manage object, knowledge bases: %d, knowledge: %d, chat model set: %t, search targets: %d, execution hash: %s",
+		len(knowledgeBaseIDs),
+		len(knowledgeIDs),
+		chatModelID != "",
 		len(searchTargets),
+		knowledgeScopeHashPrefix(req.ExecutionScopeHash),
 	)
 
 	chatManage := &types.ChatManage{
@@ -108,9 +269,6 @@ func (s *sessionService) KnowledgeQA(
 			SessionID:               req.Session.ID,
 			UserID:                  types.SessionOwnerIDFromContext(ctx),
 			MaxRounds:               s.cfg.Conversation.MaxRounds,
-			KnowledgeBaseIDs:        knowledgeBaseIDs,
-			KnowledgeIDs:            knowledgeIDs,
-			SearchTargets:           searchTargets,
 			VectorThreshold:         s.cfg.Conversation.VectorThreshold,
 			KeywordThreshold:        s.cfg.Conversation.KeywordThreshold,
 			EmbeddingTopK:           s.cfg.Conversation.EmbeddingTopK,
@@ -148,6 +306,15 @@ func (s *sessionService) KnowledgeQA(
 			UserMessageID: req.UserMessageID,
 		},
 	}
+	applyKnowledgeQARuntimeProjection(
+		&chatManage.PipelineRequest,
+		knowledgeBaseIDs,
+		knowledgeIDs,
+		searchTargets,
+		req.ExecutionScope,
+		req.ExecutionScopeHash,
+		runtimeProjection.retrievalExplicitlyEmpty,
+	)
 
 	// Apply custom agent overrides (system prompt, temperature, retrieval params,
 	// rewrite, fallback, FAQ strategy, history turns)
@@ -157,11 +324,20 @@ func (s *sessionService) KnowledgeQA(
 	// web search setting. Tag-only mentions leave the raw KB/knowledge ID slices
 	// empty but produce SearchTargets, so the unified targets must participate in
 	// this decision or the request is incorrectly downgraded to pure chat.
-	hasKB := types.HasKnowledgeRetrievalScope(searchTargets, knowledgeBaseIDs, knowledgeIDs)
+	hasKB := types.HasKnowledgeRetrievalScope(
+		searchTargets,
+		knowledgeBaseIDs,
+		knowledgeIDs,
+	)
+	if runtimeProjection.prepared {
+		hasKB = runtimeProjection.hasLocalKnowledge
+	}
 	needsRAG := hasKB || req.WebSearchEnabled
+	if runtimeProjection.retrievalExplicitlyEmpty {
+		needsRAG = false
+	}
 	hasHistory := chatManage.MaxRounds > 0
 
-	var pipeline []types.EventType
 	if !needsRAG {
 		// Pure chat — no retrieval needed.
 		userContent := req.Query
@@ -177,25 +353,14 @@ func (s *sessionService) KnowledgeQA(
 		}
 		chatManage.UserContent = userContent
 
-		pipeline = types.NewPipelineBuilder().
-			AddIf(hasHistory, types.LOAD_HISTORY).
-			Add(types.CHAT_COMPLETION_STREAM).
-			Build()
-	} else {
-		// RAG — dynamically assemble based on feature flags.
-		pipeline = types.NewPipelineBuilder().
-			AddIf(hasHistory, types.LOAD_HISTORY).
-			Add(types.QUERY_UNDERSTAND).
-			Add(types.CHUNK_SEARCH_PARALLEL).
-			Add(types.CHUNK_RERANK).
-			AddIf(req.WebSearchEnabled, types.WEB_FETCH).
-			Add(types.CHUNK_MERGE).
-			Add(types.FILTER_TOP_K).
-			AddIf(chatManage.DataAnalysisEnabled, types.DATA_ANALYSIS).
-			Add(types.INTO_CHAT_MESSAGE).
-			Add(types.CHAT_COMPLETION_STREAM).
-			Build()
 	}
+	pipeline := buildKnowledgeQAPipeline(
+		hasKB,
+		req.WebSearchEnabled,
+		runtimeProjection.retrievalExplicitlyEmpty,
+		hasHistory,
+		chatManage.DataAnalysisEnabled,
+	)
 
 	logger.Infof(ctx, "Assembled pipeline (%d stages), hasKB=%v, webSearch=%v, history=%v",
 		len(pipeline), hasKB, req.WebSearchEnabled, hasHistory)
@@ -204,15 +369,24 @@ func (s *sessionService) KnowledgeQA(
 	ctx = context.WithValue(ctx, types.SessionTenantIDContextKey, req.Session.TenantID)
 	logger.Info(ctx, "Triggering question answering event")
 	setupSpan.Finish(map[string]interface{}{
-		"stages":             len(pipeline),
-		"knowledge_base_ids": knowledgeBaseIDs,
-		"search_targets":     len(searchTargets),
+		"stages":               len(pipeline),
+		"knowledge_base_count": len(knowledgeBaseIDs),
+		"search_targets":       len(searchTargets),
+		"scope_hash_prefix":    knowledgeScopeHashPrefix(req.ExecutionScopeHash),
 	}, nil, nil)
 	err = s.KnowledgeQAByEvent(ctx, chatManage, pipeline)
 	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"session_id": req.Session.ID,
-		})
+		if req.ExecutionScopeHash != "" {
+			logger.WarnWithFields(ctx, logger.Fields{
+				"scope_hash_prefix": knowledgeScopeHashPrefix(
+					req.ExecutionScopeHash,
+				),
+			}, "prepared knowledge QA failed")
+		} else {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"session_id": req.Session.ID,
+			})
+		}
 		return err
 	}
 
@@ -242,7 +416,7 @@ func (s *sessionService) selectChatModelID(
 		tenantID := types.MustTenantIDFromContext(ctx)
 		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
 		if err != nil {
-			logger.Warnf(ctx, "Failed to get knowledge batch for model selection: %v", err)
+			logger.Warn(ctx, "Failed to get knowledge batch for model selection")
 		} else {
 			// Collect unique KB IDs from knowledge items
 			kbIDSet := make(map[string]bool)
@@ -264,7 +438,7 @@ func (s *sessionService) selectChatModelID(
 		for _, kbID := range knowledgeBaseIDs {
 			kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, kbID)
 			if err != nil {
-				logger.Warnf(ctx, "Failed to get knowledge base: %v", err)
+				logger.Warn(ctx, "Failed to get knowledge base for model selection")
 				continue
 			}
 			if kb != nil && kb.SummaryModelID != "" {
@@ -279,16 +453,11 @@ func (s *sessionService) selectChatModelID(
 		// If no Remote model found, use first knowledge base's model
 		kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, knowledgeBaseIDs[0])
 		if err != nil {
-			logger.Errorf(ctx, "Failed to get knowledge base for model ID: %v", err)
-			return "", fmt.Errorf("failed to get knowledge base %s: %w", knowledgeBaseIDs[0], err)
+			logger.Error(ctx, "Failed to get knowledge base for model selection")
+			return "", fmt.Errorf("failed to get knowledge base: %w", err)
 		}
 		if kb != nil && kb.SummaryModelID != "" {
-			logger.Infof(
-				ctx,
-				"Using summary model from first knowledge base %s: %s",
-				knowledgeBaseIDs[0],
-				kb.SummaryModelID,
-			)
+			logger.Info(ctx, "Using summary model from first knowledge base")
 			return kb.SummaryModelID, nil
 		}
 	}
@@ -296,12 +465,12 @@ func (s *sessionService) selectChatModelID(
 	// No knowledge bases - try to find any available chat model
 	models, err := s.modelService.ListModels(ctx)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to list models: %v", err)
+		logger.Error(ctx, "Failed to list models")
 		return "", fmt.Errorf("failed to list models: %w", err)
 	}
 	for _, model := range models {
 		if model != nil && model.Type == types.ModelTypeKnowledgeQA {
-			logger.Infof(ctx, "Using first available KnowledgeQA model: %s", model.ID)
+			logger.Info(ctx, "Using first available KnowledgeQA model")
 			return model.ID, nil
 		}
 	}
@@ -325,8 +494,25 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 	customAgent *types.CustomAgent,
 	sessionTenantID uint64,
 ) []string {
-	if customAgent == nil {
+	knowledgeBaseIDs, err := s.resolveKnowledgeBasesFromAgentStrict(
+		ctx,
+		customAgent,
+		sessionTenantID,
+	)
+	if err != nil {
+		logger.Warn(ctx, "Failed to resolve agent knowledge bases")
 		return nil
+	}
+	return knowledgeBaseIDs
+}
+
+func (s *sessionService) resolveKnowledgeBasesFromAgentStrict(
+	ctx context.Context,
+	customAgent *types.CustomAgent,
+	sessionTenantID uint64,
+) ([]string, error) {
+	if customAgent == nil {
+		return nil, nil
 	}
 
 	switch customAgent.Config.KBSelectionMode {
@@ -350,7 +536,7 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 		// Get own knowledge bases (uses ctx TenantID = agent's tenant)
 		allKBs, err := s.knowledgeBaseService.ListKnowledgeBases(ctx)
 		if err != nil {
-			logger.Warnf(ctx, "Failed to list all knowledge bases: %v", err)
+			return nil, err
 		}
 		kbIDSet := make(map[string]bool)
 		kbIDs := make([]string, 0, len(allKBs))
@@ -377,46 +563,44 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 					callerTenantRole := types.TenantRoleFromContext(ctx)
 					sharedList, err := s.kbShareService.ListSharedKnowledgeBases(ctx, tenantID, callerTenantRole)
 					if err != nil {
-						logger.Warnf(ctx, "Failed to list shared knowledge bases: %v", err)
-					} else {
-						for _, info := range sharedList {
-							if info == nil || info.KnowledgeBase == nil || kbIDSet[info.KnowledgeBase.ID] {
-								continue
-							}
-							if !accept(info.KnowledgeBase) {
-								sharedSkipped++
-								continue
-							}
-							kbIDs = append(kbIDs, info.KnowledgeBase.ID)
-							kbIDSet[info.KnowledgeBase.ID] = true
+						return nil, err
+					}
+					for _, info := range sharedList {
+						if info == nil || info.KnowledgeBase == nil || kbIDSet[info.KnowledgeBase.ID] {
+							continue
 						}
+						if !accept(info.KnowledgeBase) {
+							sharedSkipped++
+							continue
+						}
+						kbIDs = append(kbIDs, info.KnowledgeBase.ID)
+						kbIDSet[info.KnowledgeBase.ID] = true
 					}
 				}
 			}
 		} else {
-			logger.Infof(ctx, "Shared agent detected (session tenant %d != agent tenant %d): skipping user's shared KBs",
-				sessionTenantID, customAgent.TenantID)
+			logger.Info(ctx, "Shared agent detected: skipping caller-shared knowledge bases")
 		}
 
 		if ownSkipped+sharedSkipped > 0 {
 			logger.Infof(ctx,
-				"KBSelectionMode=all: tool-capability filter removed %d own + %d shared KBs (agent=%s, tools=%v)",
-				ownSkipped, sharedSkipped, customAgent.ID, customAgent.Config.AllowedTools)
+				"KBSelectionMode=all: tool-capability filter removed %d own + %d shared knowledge bases",
+				ownSkipped, sharedSkipped)
 		}
 		logger.Infof(ctx, "KBSelectionMode=all: loaded %d knowledge bases (own + shared)", len(kbIDs))
-		return kbIDs
+		return kbIDs, nil
 	case "selected":
 		logger.Infof(ctx, "KBSelectionMode=selected: using %d configured knowledge bases", len(customAgent.Config.KnowledgeBases))
-		return customAgent.Config.KnowledgeBases
+		return append([]string(nil), customAgent.Config.KnowledgeBases...), nil
 	case "none":
 		logger.Infof(ctx, "KBSelectionMode=none: no knowledge bases configured")
-		return nil
+		return nil, nil
 	default:
 		// Default to "selected" behavior for backward compatibility
 		if len(customAgent.Config.KnowledgeBases) > 0 {
 			logger.Infof(ctx, "KBSelectionMode not set: using %d configured knowledge bases", len(customAgent.Config.KnowledgeBases))
 		}
-		return customAgent.Config.KnowledgeBases
+		return append([]string(nil), customAgent.Config.KnowledgeBases...), nil
 	}
 }
 
@@ -659,14 +843,27 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 	chatManage *types.ChatManage, eventList []types.EventType,
 ) error {
 	logger.Info(ctx, "Start processing knowledge base question answering through events")
-	logger.Infof(ctx, "Knowledge base question answering parameters, session ID: %s, query: %s",
-		chatManage.SessionID, chatManage.Query)
-
-	methods := make([]string, len(eventList))
-	for i, event := range eventList {
-		methods[i] = string(event)
+	if chatManage.ExecutionScopeHash != "" {
+		logger.Infof(
+			ctx,
+			"Prepared knowledge QA parameters, query length: %d, scope hash: %s",
+			len(chatManage.Query),
+			knowledgeScopeHashPrefix(chatManage.ExecutionScopeHash),
+		)
+	} else {
+		logger.Infof(ctx, "Knowledge base question answering parameters, session ID: %s, query: %s",
+			chatManage.SessionID, chatManage.Query)
 	}
-	logger.Infof(ctx, "Trigger event list: %v", methods)
+
+	if chatManage.ExecutionScopeHash != "" {
+		logger.Infof(ctx, "Trigger prepared event count: %d", len(eventList))
+	} else {
+		methods := make([]string, len(eventList))
+		for i, event := range eventList {
+			methods[i] = string(event)
+		}
+		logger.Infof(ctx, "Trigger event list: %v", methods)
+	}
 
 	pipelineStart := time.Now()
 	lastRetrievalStage := chatpipeline.LastConsolidatedRetrievalStage(eventList, chatManage)
@@ -691,12 +888,21 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 		stageCtx := ctx
 		var stageSpan *langfuse.Span
 		if eventType != types.CHAT_COMPLETION_STREAM {
-			stageCtx, stageSpan = langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
-				Name: "pipeline." + string(eventType),
-				Metadata: map[string]interface{}{
+			stageMetadata := map[string]interface{}{
+				"event_type": string(eventType),
+				"session_id": chatManage.SessionID,
+			}
+			if chatManage.ExecutionScopeHash != "" {
+				stageMetadata = map[string]interface{}{
 					"event_type": string(eventType),
-					"session_id": chatManage.SessionID,
-				},
+					"scope_hash_prefix": knowledgeScopeHashPrefix(
+						chatManage.ExecutionScopeHash,
+					),
+				}
+			}
+			stageCtx, stageSpan = langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
+				Name:     "pipeline." + string(eventType),
+				Metadata: stageMetadata,
 			})
 		}
 		if eventType == types.QUERY_UNDERSTAND && chatpipeline.ShouldEmitQueryUnderstandProgress(chatManage) {
@@ -733,7 +939,11 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 		stageDuration := time.Since(stageStart)
 		var spanErr error
 		if err != nil && err != chatpipeline.ErrSearchNothing {
-			spanErr = err.Err
+			if chatManage.ExecutionScopeHash != "" {
+				spanErr = stderrors.New("prepared pipeline stage failed")
+			} else {
+				spanErr = err.Err
+			}
 		}
 		if stageSpan != nil {
 			stageSpan.Finish(map[string]interface{}{
@@ -816,7 +1026,110 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	if err != nil {
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}
+	results, err := s.searchKnowledgeByTargets(
+		ctx,
+		query,
+		knowledgeBaseIDs,
+		knowledgeIDs,
+		searchTargets,
+		nil,
+		"",
+	)
+	return results, err
+}
 
+// SearchKnowledgeWithScope executes HTTP search from one prepared scope.
+func (s *sessionService) SearchKnowledgeWithScope(
+	ctx context.Context,
+	query string,
+	preparation *types.KnowledgeScopePreparation,
+) ([]*types.SearchResult, error) {
+	if ctx == nil {
+		return nil, apperrors.NewBadRequestError("invalid knowledge scope")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if preparation == nil {
+		return nil, apperrors.NewBadRequestError("invalid knowledge scope")
+	}
+	execution := preparation.Execution()
+	if execution == nil {
+		return nil, apperrors.NewBadRequestError("invalid knowledge scope")
+	}
+	if execution.HasEnabledNonEmptyFolderFilter() {
+		return nil, apperrors.NewServiceUnavailableError(
+			knowledgeScopeUnavailableMessage,
+		)
+	}
+	if !execution.HasLocalKnowledge() {
+		return []*types.SearchResult{}, nil
+	}
+	var knowledgeBaseIDs []string
+	var knowledgeIDs []string
+	for _, target := range execution.Targets() {
+		if target.FolderFilter().Empty() {
+			continue
+		}
+		knowledgeBaseIDs = append(knowledgeBaseIDs, target.KnowledgeBaseID())
+		knowledgeIDs = append(knowledgeIDs, target.KnowledgeIDs()...)
+	}
+	results, err := s.searchKnowledgeByTargets(
+		ctx,
+		query,
+		knowledgeBaseIDs,
+		knowledgeIDs,
+		types.ProjectKnowledgeScopeToSearchTargets(
+			execution,
+			preparation.ExecutionScopeHash(),
+		),
+		execution,
+		preparation.ExecutionScopeHash(),
+	)
+	if err != nil {
+		return nil, mapPreparedKnowledgeRuntimeError(ctx, err)
+	}
+	return results, nil
+}
+
+func mapPreparedKnowledgeRuntimeError(
+	ctx context.Context,
+	err error,
+) error {
+	if err == nil {
+		return nil
+	}
+	if stderrors.Is(err, context.Canceled) ||
+		stderrors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	var appError *apperrors.AppError
+	if stderrors.As(err, &appError) &&
+		appError.HTTPCode == 503 &&
+		appError.Message == knowledgeScopeUnavailableMessage {
+		return apperrors.NewServiceUnavailableError(
+			knowledgeScopeUnavailableMessage,
+		)
+	}
+	return apperrors.NewInternalServerError("knowledge search failed")
+}
+
+func (s *sessionService) searchKnowledgeByTargets(
+	ctx context.Context,
+	query string,
+	knowledgeBaseIDs []string,
+	knowledgeIDs []string,
+	searchTargets types.SearchTargets,
+	executionScope *types.KnowledgeScope,
+	executionScopeHash string,
+) ([]*types.SearchResult, error) {
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("workspace ID not found in context")
+	}
 	if len(searchTargets) == 0 {
 		logger.Warn(ctx, "No search targets available, returning empty results")
 		return []*types.SearchResult{}, nil
@@ -833,17 +1146,19 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 
 	chatManage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{
-			Query:            query,
-			UserID:           userID,
-			KnowledgeBaseIDs: knowledgeBaseIDs,
-			KnowledgeIDs:     knowledgeIDs,
-			SearchTargets:    searchTargets,
-			MaxRounds:        s.cfg.Conversation.MaxRounds,
-			EmbeddingTopK:    rc.GetEffectiveEmbeddingTopK(),
-			VectorThreshold:  rc.GetEffectiveVectorThreshold(),
-			KeywordThreshold: rc.GetEffectiveKeywordThreshold(),
-			RerankTopK:       rc.GetEffectiveRerankTopK(),
-			RerankThreshold:  rc.GetEffectiveRerankThreshold(),
+			Query:              query,
+			UserID:             userID,
+			KnowledgeBaseIDs:   knowledgeBaseIDs,
+			KnowledgeIDs:       knowledgeIDs,
+			SearchTargets:      searchTargets,
+			ExecutionScope:     executionScope.Clone(),
+			ExecutionScopeHash: executionScopeHash,
+			MaxRounds:          s.cfg.Conversation.MaxRounds,
+			EmbeddingTopK:      rc.GetEffectiveEmbeddingTopK(),
+			VectorThreshold:    rc.GetEffectiveVectorThreshold(),
+			KeywordThreshold:   rc.GetEffectiveKeywordThreshold(),
+			RerankTopK:         rc.GetEffectiveRerankTopK(),
+			RerankThreshold:    rc.GetEffectiveRerankThreshold(),
 		},
 		PipelineState: types.PipelineState{
 			RewriteQuery: query,
@@ -853,7 +1168,11 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	// Get default models
 	models, err := s.modelService.ListModels(ctx)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get models: %v", err)
+		if executionScopeHash != "" {
+			logger.Error(ctx, "Failed to get models for prepared search")
+		} else {
+			logger.Errorf(ctx, "Failed to get models: %v", err)
+		}
 		return nil, err
 	}
 
@@ -894,7 +1213,11 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 		err := s.eventManager.Trigger(stageCtx, event, chatManage)
 		var spanErr error
 		if err != nil && err != chatpipeline.ErrSearchNothing {
-			spanErr = err.Err
+			if executionScopeHash != "" {
+				spanErr = stderrors.New("prepared search event failed")
+			} else {
+				spanErr = err.Err
+			}
 		}
 		stageSpan.Finish(nil, nil, spanErr)
 
@@ -904,8 +1227,17 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 		}
 
 		if err != nil {
-			logger.Errorf(ctx, "Event triggering failed, event: %v, error type: %s, description: %s, error: %v",
-				event, err.ErrorType, err.Description, err.Err)
+			if executionScopeHash != "" {
+				logger.Errorf(
+					ctx,
+					"Prepared search event failed, event: %v, scope hash: %s",
+					event,
+					knowledgeScopeHashPrefix(executionScopeHash),
+				)
+			} else {
+				logger.Errorf(ctx, "Event triggering failed, event: %v, error type: %s, description: %s, error: %v",
+					event, err.ErrorType, err.Description, err.Err)
+			}
 			return nil, err.Err
 		}
 		logger.Infof(ctx, "Event %v triggered successfully", event)
@@ -1067,10 +1399,21 @@ func (s *sessionService) buildKBDocumentListing(ctx context.Context, chatManage 
 	// Collect unique KB IDs from search targets
 	kbIDs := make(map[string]struct{})
 	for _, t := range chatManage.SearchTargets {
+		if t == nil || t.FolderFilter.Enabled() {
+			continue
+		}
+		if chatManage.ExecutionScope != nil &&
+			(len(t.KnowledgeIDs) > 0 ||
+				len(t.TagIDs) > 0 ||
+				len(t.ScopeTagIDs) > 0) {
+			continue
+		}
 		kbIDs[t.KnowledgeBaseID] = struct{}{}
 	}
-	for _, id := range chatManage.KnowledgeBaseIDs {
-		kbIDs[id] = struct{}{}
+	if chatManage.ExecutionScope == nil {
+		for _, id := range chatManage.KnowledgeBaseIDs {
+			kbIDs[id] = struct{}{}
+		}
 	}
 	if len(kbIDs) == 0 {
 		return ""
@@ -1086,7 +1429,14 @@ func (s *sessionService) buildKBDocumentListing(ctx context.Context, chatManage 
 		}
 		knowledges, err := s.knowledgeService.ListKnowledgeByKnowledgeBaseID(ctx, kbID)
 		if err != nil {
-			logger.Warnf(ctx, "buildKBDocumentListing: failed to list knowledge for KB %s: %v", kbID, err)
+			if chatManage.ExecutionScopeHash != "" {
+				logger.Warn(
+					ctx,
+					"Prepared document listing failed",
+				)
+			} else {
+				logger.Warnf(ctx, "buildKBDocumentListing: failed to list knowledge for KB %s: %v", kbID, err)
+			}
 			continue
 		}
 		for _, k := range knowledges {

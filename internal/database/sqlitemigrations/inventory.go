@@ -11,7 +11,7 @@ import (
 )
 
 // RequiredVersion is the minimum SQLite schema version required by this build.
-const RequiredVersion uint = 1
+const RequiredVersion uint = 2
 
 var migrationFilePattern = regexp.MustCompile(
 	`^([0-9]{6})_([a-z0-9][a-z0-9_-]*)\.(up|down)\.sql$`,

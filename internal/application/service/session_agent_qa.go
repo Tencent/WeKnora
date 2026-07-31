@@ -24,11 +24,6 @@ func (s *sessionService) AgentQA(
 	eventBus *event.EventBus,
 ) error {
 	sessionID := req.Session.ID
-	sessionJSON, err := json.Marshal(req.Session)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to marshal session, session ID: %s, error: %v", sessionID, err)
-		return fmt.Errorf("failed to marshal session: %w", err)
-	}
 
 	// customAgent is required for AgentQA (handler has already done permission check for shared agent)
 	if req.CustomAgent == nil {
@@ -38,8 +33,22 @@ func (s *sessionService) AgentQA(
 
 	// Resolve retrieval tenant using shared helper
 	agentTenantID := s.resolveRetrievalTenantID(ctx, req)
-	logger.Infof(ctx, "Start agent-based question answering, session ID: %s, agent tenant ID: %d, query: %s, session: %s",
-		sessionID, agentTenantID, req.Query, string(sessionJSON))
+	if req.ExecutionScopeHash != "" {
+		logger.Infof(
+			ctx,
+			"Start prepared agent question answering, query length: %d, scope hash: %s",
+			len(req.Query),
+			knowledgeScopeHashPrefix(req.ExecutionScopeHash),
+		)
+	} else {
+		sessionJSON, err := json.Marshal(req.Session)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to marshal session, session ID: %s, error: %v", sessionID, err)
+			return fmt.Errorf("failed to marshal session: %w", err)
+		}
+		logger.Infof(ctx, "Start agent-based question answering, session ID: %s, agent tenant ID: %d, query: %s, session: %s",
+			sessionID, agentTenantID, req.Query, string(sessionJSON))
+	}
 
 	var tenantInfo *types.Tenant
 	if v := ctx.Value(types.TenantInfoContextKey); v != nil {
@@ -50,12 +59,20 @@ func (s *sessionService) AgentQA(
 		if s.tenantService != nil {
 			if agentTenant, err := s.tenantService.GetTenantByID(ctx, agentTenantID); err == nil && agentTenant != nil {
 				tenantInfo = agentTenant
-				logger.Infof(ctx, "Using agent tenant info for retrieval scope, tenant ID: %d", agentTenantID)
+				if req.ExecutionScopeHash != "" {
+					logger.Info(ctx, "Using authorized agent tenant info")
+				} else {
+					logger.Infof(ctx, "Using agent tenant info for retrieval scope, tenant ID: %d", agentTenantID)
+				}
 			}
 		}
 	}
 	if tenantInfo == nil {
-		logger.Warnf(ctx, "Tenant info not available for agent tenant %d, proceeding with defaults", agentTenantID)
+		if req.ExecutionScopeHash != "" {
+			logger.Warn(ctx, "Authorized agent tenant info unavailable, proceeding with defaults")
+		} else {
+			logger.Warnf(ctx, "Tenant info not available for agent tenant %d, proceeding with defaults", agentTenantID)
+		}
 		tenantInfo = &types.Tenant{ID: agentTenantID}
 	}
 
@@ -93,7 +110,8 @@ func (s *sessionService) AgentQA(
 	// actually run. A disabled KB scope makes all KB tools ineffective, so it
 	// must not force users to configure an otherwise-unused rerank model.
 	var rerankModel rerank.Reranker
-	if agentRequiresRerankModel(req.CustomAgent) {
+	if agentHasKnowledgeScope(agentConfig) &&
+		agentRequiresRerankModel(req.CustomAgent) {
 		// Rerank model is resolved purely from the agent config now.
 		// We used to fall back to ConversationConfig.RerankModelID at
 		// the tenant level, but that path encouraged "leave rerank
@@ -217,6 +235,14 @@ func (s *sessionService) buildAgentConfig(
 	agentTenantID uint64,
 ) (*types.AgentConfig, error) {
 	customAgent := req.CustomAgent
+	runtimeProjection, err := projectKnowledgeQARuntime(
+		req.RequestScope,
+		req.ExecutionScope,
+		req.ExecutionScopeHash,
+	)
+	if err != nil {
+		return nil, err
+	}
 	agentConfig := &types.AgentConfig{
 		MaxIterations:               customAgent.Config.MaxIterations,
 		Temperature:                 customAgent.Config.Temperature,
@@ -243,13 +269,17 @@ func (s *sessionService) buildAgentConfig(
 	// Configure skills based on CustomAgentConfig
 	s.configureSkillsFromAgent(ctx, agentConfig, customAgent)
 
-	// Resolve knowledge bases using shared helper
-	kbIDs, knowledgeIDs, err := s.resolveKnowledgeBases(ctx, req)
-	if err != nil {
-		return nil, err
+	if runtimeProjection.prepared {
+		applyPreparedAgentKnowledgeScope(agentConfig, runtimeProjection)
+	} else {
+		// Resolve knowledge bases using the legacy request path.
+		kbIDs, knowledgeIDs, resolveErr := s.resolveKnowledgeBases(ctx, req)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		agentConfig.KnowledgeBases = kbIDs
+		agentConfig.KnowledgeIDs = knowledgeIDs
 	}
-	agentConfig.KnowledgeBases = kbIDs
-	agentConfig.KnowledgeIDs = knowledgeIDs
 
 	// Use custom agent's allowed tools if specified, otherwise use defaults
 	if len(customAgent.Config.AllowedTools) > 0 {
@@ -282,17 +312,29 @@ func (s *sessionService) buildAgentConfig(
 	}
 
 	// Resolve web search provider ID: agent-level > tenant default (is_default=true)
-	if agentConfig.WebSearchProviderID == "" {
+	if agentConfig.WebSearchEnabled &&
+		agentConfig.WebSearchProviderID == "" {
 		if defaultProvider, err := s.webSearchProviderRepo.GetDefault(ctx, tenantInfo.ID); err == nil && defaultProvider != nil {
 			agentConfig.WebSearchProviderID = defaultProvider.ID
 		}
 	}
 
-	logger.Infof(ctx, "Merged agent config from tenant %d and session %s", tenantInfo.ID, req.Session.ID)
+	if runtimeProjection.prepared {
+		logger.Info(ctx, "Merged prepared agent configuration")
+	} else {
+		logger.Infof(ctx, "Merged agent config from tenant %d and session %s", tenantInfo.ID, req.Session.ID)
+	}
 
 	// Log knowledge bases if present
 	if len(agentConfig.KnowledgeBases) > 0 || len(req.TagScopes) > 0 {
-		if len(agentConfig.KnowledgeBases) > 0 {
+		if runtimeProjection.prepared {
+			logger.Infof(
+				ctx,
+				"Prepared agent knowledge scope: knowledge bases=%d, search targets=%d",
+				len(agentConfig.KnowledgeBases),
+				len(agentConfig.SearchTargets),
+			)
+		} else if len(agentConfig.KnowledgeBases) > 0 {
 			logger.Infof(ctx, "Agent configured with %d knowledge base(s): %v",
 				len(agentConfig.KnowledgeBases), agentConfig.KnowledgeBases)
 		} else {
@@ -302,31 +344,71 @@ func (s *sessionService) buildAgentConfig(
 		logger.Infof(ctx, "No knowledge bases specified for agent, running in pure agent mode")
 	}
 
-	// Build search targets using agent's tenant (handler has validated access for shared agent)
-	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.TagScopes)
-	if err != nil {
-		return nil, fmt.Errorf("build search targets: %w", err)
-	}
-	agentConfig.SearchTargets = searchTargets
-	// Document tags are stored in knowledge_tag_relations, so document-KB tag
-	// scopes are resolved to concrete knowledge IDs before retrieval. Preserve
-	// those resolved IDs as this turn's pinned documents as well: otherwise the
-	// Agent tools are correctly constrained behind the scenes, but the model only
-	// sees a bound KB and does not know which documents the user explicitly chose.
-	if len(req.TagScopes) > 0 {
-		agentConfig.KnowledgeIDs = mergeResolvedTagKnowledgeIDs(
+	if !runtimeProjection.prepared {
+		// Build search targets using the legacy agent tenant path.
+		searchTargets, buildErr := s.buildSearchTargets(
+			ctx,
+			agentTenantID,
+			agentConfig.KnowledgeBases,
 			agentConfig.KnowledgeIDs,
-			searchTargets,
 			req.TagScopes,
 		)
+		if buildErr != nil {
+			return nil, fmt.Errorf("build search targets: %w", buildErr)
+		}
+		agentConfig.SearchTargets = searchTargets
+		// Document tags are stored in knowledge_tag_relations, so document-KB
+		// tag scopes resolve to concrete knowledge IDs on the legacy path.
+		if len(req.TagScopes) > 0 {
+			agentConfig.KnowledgeIDs = mergeResolvedTagKnowledgeIDs(
+				agentConfig.KnowledgeIDs,
+				searchTargets,
+				req.TagScopes,
+			)
+		}
 	}
-	logger.Infof(ctx, "Agent search targets built: %d targets", len(searchTargets))
+	logger.Infof(
+		ctx,
+		"Agent search targets built: %d targets",
+		len(agentConfig.SearchTargets),
+	)
 
 	if agentConfig.MaxContextTokens <= 0 {
 		agentConfig.MaxContextTokens = types.DefaultMaxContextTokens
 	}
 
 	return agentConfig, nil
+}
+
+func applyPreparedAgentKnowledgeScope(
+	config *types.AgentConfig,
+	projection knowledgeQARuntimeProjection,
+) {
+	if config == nil || !projection.prepared {
+		return
+	}
+	config.KnowledgeBases = append(
+		[]string(nil),
+		projection.knowledgeBaseIDs...,
+	)
+	config.KnowledgeIDs = append(
+		[]string(nil),
+		projection.knowledgeIDs...,
+	)
+	config.SearchTargets = make(
+		types.SearchTargets,
+		0,
+		len(projection.searchTargets),
+	)
+	for _, target := range projection.searchTargets {
+		if target == nil || target.FolderFilter.Empty() {
+			continue
+		}
+		config.SearchTargets = append(config.SearchTargets, target.Clone())
+	}
+	if projection.retrievalExplicitlyEmpty {
+		config.WebSearchEnabled = false
+	}
 }
 
 func mergeResolvedTagKnowledgeIDs(

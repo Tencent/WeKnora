@@ -1,11 +1,30 @@
 import { get, post } from '@/utils/request'
 
+export interface MessageSuggestionTagScope {
+  knowledge_base_id: string
+  tag_ids: string[]
+}
+
+export interface MessageSuggestionFolderScope {
+  knowledge_base_id: string
+  folder_ids: string[]
+  include_descendants?: boolean
+}
+
+export interface MessageSuggestionKnowledgeScope {
+  knowledge_base_ids?: string[]
+  knowledge_ids?: string[]
+  tag_scopes?: MessageSuggestionTagScope[]
+  folder_scopes?: MessageSuggestionFolderScope[] | null
+}
+
 export interface MessageSuggestionItem {
   id: string
   text: string
   category?: 'clarify' | 'deepen' | 'action'
   source: 'model' | 'faq' | 'document' | 'wiki' | string
   knowledge_base_ids?: string[]
+  knowledge_scope?: MessageSuggestionKnowledgeScope | null
 }
 
 export interface MessageSuggestionSet {

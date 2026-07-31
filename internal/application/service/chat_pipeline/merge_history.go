@@ -35,6 +35,15 @@ func filterHistoryResults(
 	if len(raw) == 0 {
 		return nil
 	}
+	if chatManage.ExecutionScope != nil {
+		raw = filterHistoryByExecutionScope(
+			raw,
+			chatManage.ExecutionScope,
+		)
+		if len(raw) == 0 {
+			return nil
+		}
+	}
 
 	// Build a set of chunk IDs already in current results for fast dedup
 	existingIDs := make(map[string]struct{}, len(currentResults))
@@ -59,7 +68,6 @@ func filterHistoryResults(
 		sim := searchutil.Jaccard(queryTokens, contentTokens)
 		if sim < minSimilarity {
 			pipelineInfo(ctx, "Merge", "history_filter_drop", map[string]interface{}{
-				"chunk_id":   r.ID,
 				"similarity": sim,
 			})
 			continue
@@ -72,13 +80,66 @@ func filterHistoryResults(
 		filtered = append(filtered, r)
 
 		pipelineInfo(ctx, "Merge", "history_filter_keep", map[string]interface{}{
-			"chunk_id":   r.ID,
 			"similarity": sim,
 			"new_score":  r.Score,
 		})
 
 		if len(filtered) >= maxHistoryResults {
 			break
+		}
+	}
+	return filtered
+}
+
+func filterHistoryByExecutionScope(
+	results []*types.SearchResult,
+	scope *types.KnowledgeScope,
+) []*types.SearchResult {
+	if scope == nil {
+		return results
+	}
+	wholeKnowledgeBases := make(map[string]struct{})
+	knowledgeIDsByKB := make(map[string]map[string]struct{})
+	for _, target := range scope.Targets() {
+		if target.FolderFilter().Enabled() {
+			continue
+		}
+		if len(target.TagIDs()) > 0 {
+			// Historical results do not carry authoritative physical tag
+			// membership, so a tag-constrained target cannot be revalidated.
+			continue
+		}
+		targetKnowledgeIDs := target.KnowledgeIDs()
+		if len(targetKnowledgeIDs) > 0 {
+			if knowledgeIDsByKB[target.KnowledgeBaseID()] == nil {
+				knowledgeIDsByKB[target.KnowledgeBaseID()] =
+					make(map[string]struct{}, len(targetKnowledgeIDs))
+			}
+			for _, knowledgeID := range targetKnowledgeIDs {
+				knowledgeIDsByKB[target.KnowledgeBaseID()][knowledgeID] =
+					struct{}{}
+			}
+			continue
+		}
+		if len(target.ScopeTagIDs()) > 0 {
+			continue
+		}
+		wholeKnowledgeBases[target.KnowledgeBaseID()] = struct{}{}
+	}
+
+	filtered := make([]*types.SearchResult, 0, len(results))
+	for _, result := range results {
+		if result == nil {
+			continue
+		}
+		if knowledgeIDs := knowledgeIDsByKB[result.KnowledgeBaseID]; knowledgeIDs != nil {
+			if _, allowed := knowledgeIDs[result.KnowledgeID]; allowed {
+				filtered = append(filtered, result)
+				continue
+			}
+		}
+		if _, allowed := wholeKnowledgeBases[result.KnowledgeBaseID]; allowed {
+			filtered = append(filtered, result)
 		}
 	}
 	return filtered

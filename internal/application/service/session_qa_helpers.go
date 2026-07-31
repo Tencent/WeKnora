@@ -141,11 +141,27 @@ func (s *sessionService) resolveRetrievalTenantID(
 	retrievalTenantID := session.TenantID
 	if customAgent != nil && customAgent.TenantID != 0 {
 		retrievalTenantID = customAgent.TenantID
-		logger.Infof(ctx, "Using agent tenant %d for retrieval scope", retrievalTenantID)
+		if req.ExecutionScopeHash != "" {
+			logger.Info(ctx, "Using authorized agent retrieval tenant")
+		} else {
+			logger.Infof(
+				ctx,
+				"Using agent tenant %d for retrieval scope",
+				retrievalTenantID,
+			)
+		}
 	} else if v := ctx.Value(types.TenantIDContextKey); v != nil {
 		if tid, ok := v.(uint64); ok && tid != 0 {
 			retrievalTenantID = tid
-			logger.Infof(ctx, "Using effective tenant %d for retrieval from context", retrievalTenantID)
+			if req.ExecutionScopeHash != "" {
+				logger.Info(ctx, "Using authorized context retrieval tenant")
+			} else {
+				logger.Infof(
+					ctx,
+					"Using effective tenant %d for retrieval from context",
+					retrievalTenantID,
+				)
+			}
 		}
 	}
 	return retrievalTenantID

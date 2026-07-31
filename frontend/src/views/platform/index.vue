@@ -23,7 +23,6 @@
 import Menu from '@/components/menu.vue'
 import { ref, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
-import useKnowledgeBase from '@/hooks/useKnowledgeBase'
 import UploadMask from '@/components/upload-mask.vue'
 import Settings from '@/views/settings/Settings.vue'
 import GlobalCommandPalette from '@/components/GlobalCommandPalette.vue'
@@ -35,7 +34,6 @@ import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 
-let { requestMethod } = useKnowledgeBase()
 const route = useRoute();
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();
@@ -198,7 +196,12 @@ const handleGlobalDrop = async (event: DragEvent) => {
         return;
     }
 
-    droppedFiles.forEach(file => requestMethod(file, uploadInput));
+    window.dispatchEvent(new CustomEvent('weknora:knowledge-file-drop', {
+        detail: {
+            kbId: getCurrentKbId(),
+            files: droppedFiles,
+        },
+    }));
 }
 
 // 组件挂载时添加全局事件监听器

@@ -2,6 +2,7 @@ package chatpipeline
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -63,6 +64,18 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 	var mu sync.Mutex
 	var allNodes []*types.GraphNode
 	var allRelations []*types.GraphRelation
+	var firstErr error
+	prepared := chatManage.ExecutionScopeHash != ""
+	recordPreparedError := func(err error) {
+		if err == nil || !prepared {
+			return
+		}
+		mu.Lock()
+		if firstErr == nil {
+			firstErr = err
+		}
+		mu.Unlock()
+	}
 
 	// If specific KnowledgeIDs are provided, search by individual files
 	if len(entityKnowledge) > 0 {
@@ -77,14 +90,14 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 					Knowledge:     knowledgeID,
 				}, entity)
 				if err != nil {
-					logger.Errorf(ctx, "Failed to search entity in Knowledge %s: %v", knowledgeID, err)
+					logger.Error(ctx, "Knowledge entity search failed")
+					recordPreparedError(err)
 					return
 				}
 
 				logger.Infof(
 					ctx,
-					"Knowledge %s entity search result count: %d nodes, %d relations",
-					knowledgeID,
+					"Knowledge entity search result count: %d nodes, %d relations",
 					len(graph.Node),
 					len(graph.Relation),
 				)
@@ -97,7 +110,7 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 		}
 	} else {
 		// Otherwise, search by knowledge base
-		logger.Infof(ctx, "Searching entities across %d knowledge base(s): %v", len(knowledgeBaseIDs), knowledgeBaseIDs)
+		logger.Infof(ctx, "Searching entities across %d knowledge base(s)", len(knowledgeBaseIDs))
 		for _, kbID := range knowledgeBaseIDs {
 			wg.Add(1)
 			go func(knowledgeBaseID string) {
@@ -105,14 +118,14 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 
 				graph, err := p.graphRepo.SearchNode(ctx, types.NameSpace{KnowledgeBase: knowledgeBaseID}, entity)
 				if err != nil {
-					logger.Errorf(ctx, "Failed to search entity in KB %s: %v", knowledgeBaseID, err)
+					logger.Error(ctx, "Knowledge-base entity search failed")
+					recordPreparedError(err)
 					return
 				}
 
 				logger.Infof(
 					ctx,
-					"KB %s entity search result count: %d nodes, %d relations",
-					knowledgeBaseID,
+					"Knowledge-base entity search result count: %d nodes, %d relations",
 					len(graph.Node),
 					len(graph.Relation),
 				)
@@ -126,6 +139,12 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 	}
 
 	wg.Wait()
+	if prepared && ctx.Err() != nil {
+		return ErrSearch.WithError(ctx.Err())
+	}
+	if firstErr != nil {
+		return ErrSearch.WithError(firstErr)
+	}
 
 	// Merge graph data
 	chatManage.GraphResult = &types.GraphData{
@@ -141,7 +160,10 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 	}
 	chunks, err := p.chunkRepo.ListChunksByID(ctx, types.MustTenantIDFromContext(ctx), chunkIDs)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to list chunks, session_id: %s, error: %v", chatManage.SessionID, err)
+		logger.Error(ctx, "Failed to list entity-search chunks")
+		if prepared {
+			return ErrSearch.WithError(err)
+		}
 		return next()
 	}
 	knowledgeIDs := []string{}
@@ -154,7 +176,10 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 		knowledgeIDs,
 	)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to list knowledge, session_id: %s, error: %v", chatManage.SessionID, err)
+		logger.Error(ctx, "Failed to list entity-search knowledge")
+		if prepared {
+			return ErrSearch.WithError(err)
+		}
 		return next()
 	}
 
@@ -164,23 +189,44 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 	}
 	var entityResults []*types.SearchResult
 	for _, chunk := range chunks {
-		searchResult := chunk2SearchResult(chunk, knowledgeMap[chunk.KnowledgeID])
+		knowledge := knowledgeMap[chunk.KnowledgeID]
+		if knowledge == nil {
+			if prepared {
+				return ErrSearch.WithError(
+					errors.New("entity-search knowledge is unavailable"),
+				)
+			}
+			continue
+		}
+		searchResult := chunk2SearchResult(chunk, knowledge)
 		entityResults = append(entityResults, searchResult)
 	}
 	searchutil.EnrichSearchResultsImageInfo(ctx, p.chunkRepo, types.MustTenantIDFromContext(ctx), entityResults)
 	chatManage.SearchResult = append(chatManage.SearchResult, entityResults...)
 	// remove duplicate results
-	chatManage.SearchResult = removeDuplicateResults(chatManage.SearchResult)
+	chatManage.SearchResult = removeDuplicateResults(ctx, chatManage.SearchResult)
 	if len(chatManage.SearchResult) == 0 {
-		logger.Infof(ctx, "No new search result, session_id: %s", chatManage.SessionID)
+		if preparedPipelineRequest(ctx) {
+			logger.Info(ctx, "Prepared entity search produced no new result")
+		} else {
+			logger.Infof(ctx, "No new search result, session_id: %s", chatManage.SessionID)
+		}
 		return ErrSearchNothing
 	}
-	logger.Infof(
-		ctx,
-		"search entity result count: %d, session_id: %s",
-		len(chatManage.SearchResult),
-		chatManage.SessionID,
-	)
+	if preparedPipelineRequest(ctx) {
+		logger.Infof(
+			ctx,
+			"Prepared entity search result count: %d",
+			len(chatManage.SearchResult),
+		)
+	} else {
+		logger.Infof(
+			ctx,
+			"search entity result count: %d, session_id: %s",
+			len(chatManage.SearchResult),
+			chatManage.SessionID,
+		)
+	}
 	return next()
 }
 

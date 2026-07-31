@@ -89,8 +89,10 @@ func (p *PluginWebFetch) OnEvent(
 	fetchedCount := 0
 	for _, fr := range results {
 		if fr.err != nil {
-			logger.Warnf(ctx, "[PIPELINE] stage=WebFetch action=fetch_failed url=%s err=%v",
-				webResults[fr.idx].ID, fr.err)
+			pipelineWarn(ctx, "WebFetch", "fetch_failed", map[string]any{
+				"url":   webResults[fr.idx].ID,
+				"error": fr.err.Error(),
+			})
 			continue
 		}
 		if fr.content == "" {

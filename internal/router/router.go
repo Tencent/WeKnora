@@ -299,6 +299,18 @@ func RegisterKnowledgeFolderRoutes(
 	{
 		folderReads.GET("", g.Viewer(), g.KBAccessRead("id"), folderHandler.ListFolders)
 		folders.POST("", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), folderHandler.CreateFolder)
+		folders.POST(
+			"/ensure-paths",
+			g.OwnedKBOrAdmin(),
+			g.KBAccessWrite("id"),
+			folderHandler.EnsurePaths,
+		)
+		folders.POST(
+			"/move-knowledge",
+			g.OwnedKBOrAdmin(),
+			g.KBAccessWrite("id"),
+			folderHandler.MoveKnowledge,
+		)
 		folderReads.GET(
 			"/:folder_id/breadcrumb",
 			g.Viewer(),

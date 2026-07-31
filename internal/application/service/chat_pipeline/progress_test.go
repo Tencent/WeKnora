@@ -2,6 +2,7 @@ package chatpipeline
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -152,4 +153,58 @@ func TestRetrievalProgressWebOnlySearchSource(t *testing.T) {
 	assert.Equal(t, 0, resultData.Data["doc_count"])
 	assert.Equal(t, 2, resultData.Data["web_count"])
 	assert.Equal(t, retrievalSourceWeb, resultData.Data["search_source"])
+}
+
+func TestPreparedProgressRedactsQueryAndInternalErrors(t *testing.T) {
+	bus := &recordingEventBus{}
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			SessionID:          "sess-prepared",
+			Query:              "private raw query",
+			ExecutionScopeHash: "1234567890abcdef",
+			EnableRewrite:      true,
+		},
+		PipelineState: types.PipelineState{
+			RewriteQuery: "private rewritten query",
+		},
+		PipelineContext: types.PipelineContext{EventBus: bus},
+	}
+	privateErr := errors.New("private SQL detail")
+
+	retrieval := BeginRetrievalProgress(context.Background(), cm)
+	require.NotNil(t, retrieval)
+	EndRetrievalProgress(
+		context.Background(),
+		cm,
+		retrieval,
+		time.Now(),
+		ErrSearch.WithError(privateErr),
+	)
+	understand := BeginQueryUnderstandProgress(context.Background(), cm)
+	require.NotNil(t, understand)
+	EndQueryUnderstandProgress(
+		context.Background(),
+		cm,
+		understand,
+		time.Now(),
+		ErrSearch.WithError(privateErr),
+	)
+
+	require.Len(t, bus.events, 4)
+	for _, eventIndex := range []int{0, 2} {
+		callData, ok := bus.events[eventIndex].Data.(event.AgentToolCallData)
+		require.True(t, ok)
+		assert.NotContains(t, callData.Arguments, "query")
+		assert.Equal(t, "1234567890ab", callData.Arguments["scope_hash_prefix"])
+	}
+
+	retrievalResult, ok := bus.events[1].Data.(event.AgentToolResultData)
+	require.True(t, ok)
+	assert.Equal(t, "knowledge retrieval failed", retrievalResult.Error)
+	assert.NotContains(t, retrievalResult.Error, "private SQL detail")
+
+	understandResult, ok := bus.events[3].Data.(event.AgentToolResultData)
+	require.True(t, ok)
+	assert.Equal(t, "query understanding failed", understandResult.Error)
+	assert.NotContains(t, understandResult.Error, "private SQL detail")
 }

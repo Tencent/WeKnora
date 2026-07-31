@@ -8,6 +8,11 @@ import (
 
 // KnowledgeFolderService manages knowledge folder trees.
 type KnowledgeFolderService interface {
+	EnsurePaths(
+		ctx context.Context,
+		kbID string,
+		req *types.KnowledgeFolderEnsurePathsRequest,
+	) ([]types.KnowledgeFolderEnsurePathResult, error)
 	CreateFolder(
 		ctx context.Context,
 		kbID string,
@@ -58,6 +63,13 @@ type KnowledgeFolderReader interface {
 		parentID string,
 		name string,
 	) (*types.KnowledgeFolder, error)
+	ListByParentAndNames(
+		ctx context.Context,
+		tenantID uint64,
+		kbID string,
+		parentID string,
+		names []string,
+	) ([]*types.KnowledgeFolder, error)
 	ListByParent(
 		ctx context.Context,
 		tenantID uint64,
@@ -110,6 +122,7 @@ type KnowledgeFolderMoveSubtreeParams struct {
 type KnowledgeFolderTreeRepository interface {
 	KnowledgeFolderReader
 	Create(ctx context.Context, folder *types.KnowledgeFolder) error
+	CreateIfAbsent(ctx context.Context, folder *types.KnowledgeFolder) (bool, error)
 	UpdateFolderAttributes(
 		ctx context.Context,
 		tenantID uint64,

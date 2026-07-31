@@ -49,6 +49,514 @@ func TestParamsWithTopK_RebuildsFresh(t *testing.T) {
 	assert.Equal(t, "q1", g.BaseParams[0].Query)
 }
 
+func TestParamsWithTopK_DoesNotShareReferenceFields(t *testing.T) {
+	t.Parallel()
+
+	filter, err := types.NewResolvedFolderFilter(
+		true,
+		[]string{"10000000-0000-4000-8000-000000000001"},
+	)
+	require.NoError(t, err)
+	g := &storeGroup{
+		BaseParams: []types.RetrieveParams{{
+			Embedding:           []float32{0.1, 0.2},
+			KnowledgeBaseIDs:    []string{"kb-1"},
+			KnowledgeIDs:        []string{"knowledge-1"},
+			TagIDs:              []string{"tag-physical"},
+			ScopeTagIDs:         []string{"tag-logical"},
+			FolderFilter:        filter,
+			ExcludeKnowledgeIDs: []string{"excluded-knowledge"},
+			ExcludeChunkIDs:     []string{"excluded-chunk"},
+			AdditionalParams:    map[string]interface{}{"mode": "strict"},
+		}},
+		TopK: 42,
+	}
+
+	first := paramsWithTopK(g)
+	second := paramsWithTopK(g)
+	require.Len(t, first, 1)
+	require.Len(t, second, 1)
+
+	first[0].Embedding[0] = 9
+	first[0].KnowledgeBaseIDs[0] = "mutated-kb"
+	first[0].KnowledgeIDs[0] = "mutated-knowledge"
+	first[0].TagIDs[0] = "mutated-physical-tag"
+	first[0].ScopeTagIDs[0] = "mutated-logical-tag"
+	first[0].ExcludeKnowledgeIDs[0] = "mutated-excluded-knowledge"
+	first[0].ExcludeChunkIDs[0] = "mutated-excluded-chunk"
+	first[0].AdditionalParams["mode"] = "mutated"
+
+	base := g.BaseParams[0]
+	assert.Equal(t, []float32{0.1, 0.2}, base.Embedding)
+	assert.Equal(t, []string{"kb-1"}, base.KnowledgeBaseIDs)
+	assert.Equal(t, []string{"knowledge-1"}, base.KnowledgeIDs)
+	assert.Equal(t, []string{"tag-physical"}, base.TagIDs)
+	assert.Equal(t, []string{"tag-logical"}, base.ScopeTagIDs)
+	assert.Equal(t, []string{"excluded-knowledge"}, base.ExcludeKnowledgeIDs)
+	assert.Equal(t, []string{"excluded-chunk"}, base.ExcludeChunkIDs)
+	assert.Equal(t, "strict", base.AdditionalParams["mode"])
+
+	assert.Equal(t, []float32{0.1, 0.2}, second[0].Embedding)
+	assert.Equal(t, []string{"kb-1"}, second[0].KnowledgeBaseIDs)
+	assert.Equal(t, []string{"knowledge-1"}, second[0].KnowledgeIDs)
+	assert.Equal(t, []string{"tag-physical"}, second[0].TagIDs)
+	assert.Equal(t, []string{"tag-logical"}, second[0].ScopeTagIDs)
+	assert.Equal(t, []string{"excluded-knowledge"}, second[0].ExcludeKnowledgeIDs)
+	assert.Equal(t, []string{"excluded-chunk"}, second[0].ExcludeChunkIDs)
+	assert.Equal(t, "strict", second[0].AdditionalParams["mode"])
+	assert.Equal(
+		t,
+		[]string{"10000000-0000-4000-8000-000000000001"},
+		second[0].FolderFilter.FolderIDs(),
+	)
+}
+
+func TestBuildRetrievalParamsPreservesPreparedScopeProjection(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeRetrieveEngineService{
+		engineType: types.PostgresRetrieverEngineType,
+		support: []types.RetrieverType{
+			types.VectorRetrieverType,
+			types.KeywordsRetrieverType,
+		},
+	}
+	engine := buildBoundComposite(t, fake)
+	filter, err := types.NewResolvedFolderFilter(
+		true,
+		[]string{"10000000-0000-4000-8000-000000000001"},
+	)
+	require.NoError(t, err)
+	params := types.SearchParams{
+		QueryText:          "prepared query",
+		QueryEmbedding:     []float32{0.1, 0.2},
+		VectorThreshold:    0.6,
+		KeywordThreshold:   0.4,
+		KnowledgeIDs:       []string{"knowledge-1"},
+		TagIDs:             []string{"tag-physical"},
+		ScopeTagIDs:        []string{"tag-logical"},
+		SourceTenantID:     41,
+		FolderFilter:       filter,
+		ExecutionScopeHash: "execution-hash",
+	}
+	kb := &types.KnowledgeBase{
+		ID:               "kb-1",
+		TenantID:         41,
+		EmbeddingModelID: "model-1",
+		IndexingStrategy: types.IndexingStrategy{
+			VectorEnabled:  true,
+			KeywordEnabled: true,
+		},
+	}
+	ctx := context.WithValue(
+		context.Background(),
+		types.TenantIDContextKey,
+		uint64(7),
+	)
+
+	projected, err := (&knowledgeBaseService{}).buildRetrievalParams(
+		ctx,
+		engine,
+		kb,
+		[]*types.KnowledgeBase{kb},
+		params,
+		25,
+	)
+	require.NoError(t, err)
+	require.Len(t, projected, 2)
+
+	for _, got := range projected {
+		assert.Equal(t, "prepared query", got.Query)
+		assert.Equal(t, []string{"kb-1"}, got.KnowledgeBaseIDs)
+		assert.Equal(t, []string{"knowledge-1"}, got.KnowledgeIDs)
+		assert.Equal(t, []string{"tag-physical"}, got.TagIDs)
+		assert.Equal(t, []string{"tag-logical"}, got.ScopeTagIDs)
+		assert.Equal(t, uint64(41), got.SourceTenantID)
+		assert.True(t, got.FolderFilter.Enabled())
+		assert.Equal(
+			t,
+			[]string{"10000000-0000-4000-8000-000000000001"},
+			got.FolderFilter.FolderIDs(),
+		)
+		assert.Equal(t, "execution-hash", got.ExecutionScopeHash)
+		assert.Equal(t, 25, got.TopK)
+	}
+
+	projected[0].KnowledgeBaseIDs[0] = "mutated-kb"
+	projected[0].KnowledgeIDs[0] = "mutated-knowledge"
+	projected[0].TagIDs[0] = "mutated-physical-tag"
+	projected[0].ScopeTagIDs[0] = "mutated-logical-tag"
+	if len(projected[0].Embedding) > 0 {
+		projected[0].Embedding[0] = 9
+	}
+	assert.Equal(t, []float32{0.1, 0.2}, params.QueryEmbedding)
+	assert.Equal(t, []string{"knowledge-1"}, params.KnowledgeIDs)
+	assert.Equal(t, []string{"tag-physical"}, params.TagIDs)
+	assert.Equal(t, []string{"tag-logical"}, params.ScopeTagIDs)
+}
+
+func TestHybridSearchFolderFilterInputGuardRunsBeforeDependencies(t *testing.T) {
+	t.Parallel()
+
+	enabledEmpty, err := types.NewResolvedFolderFilter(true, nil)
+	require.NoError(t, err)
+	results, err := (&knowledgeBaseService{}).HybridSearch(
+		context.Background(),
+		"kb-1",
+		types.SearchParams{FolderFilter: enabledEmpty},
+	)
+	require.NoError(t, err)
+	assert.Empty(t, results)
+
+	enabledNonEmpty, err := types.NewResolvedFolderFilter(
+		true,
+		[]string{"10000000-0000-4000-8000-000000000001"},
+	)
+	require.NoError(t, err)
+	results, err = (&knowledgeBaseService{}).HybridSearch(
+		context.Background(),
+		"kb-1",
+		types.SearchParams{FolderFilter: enabledNonEmpty},
+	)
+	assert.Nil(t, results)
+	appErr, ok := apperrors.IsAppError(err)
+	require.True(t, ok, "expected AppError, got %T", err)
+	assert.Equal(t, apperrors.ErrBadRequest, appErr.Code)
+	assert.Equal(t, "invalid knowledge scope", appErr.Message)
+	assert.NotContains(t, appErr.Message, "10000000-0000-4000-8000-000000000001")
+
+	results, err = (&knowledgeBaseService{}).HybridSearch(
+		context.Background(),
+		"kb-1",
+		types.SearchParams{
+			FolderFilter: enabledNonEmpty,
+			KnowledgeIDs: []string{"knowledge-1"},
+		},
+	)
+	assert.Nil(t, results)
+	appErr, ok = apperrors.IsAppError(err)
+	require.True(t, ok, "expected AppError, got %T", err)
+	assert.Equal(t, apperrors.ErrServiceUnavailable, appErr.Code)
+	assert.Equal(t, knowledgeScopeUnavailableMessage, appErr.Message)
+
+	overLimit := make(
+		[]string,
+		knowledgeScopeMaxMaterializedKnowledgeIDs+1,
+	)
+	for index := range overLimit {
+		overLimit[index] = fmt.Sprintf("knowledge-%05d", index)
+	}
+	results, err = (&knowledgeBaseService{}).HybridSearch(
+		context.Background(),
+		"kb-1",
+		types.SearchParams{
+			FolderFilter: enabledNonEmpty,
+			KnowledgeIDs: overLimit,
+		},
+	)
+	assert.Nil(t, results)
+	appErr, ok = apperrors.IsAppError(err)
+	require.True(t, ok, "expected AppError, got %T", err)
+	assert.Equal(t, apperrors.ErrKnowledgeScopeTooLarge, appErr.Code)
+	assert.Equal(t, 400, appErr.HTTPCode)
+	assert.Equal(
+		t,
+		fmt.Sprintf(
+			"knowledge scope exceeds the %d-file per-request limit; "+
+				"select a smaller folder or reduce the selected scope",
+			knowledgeScopeMaxMaterializedKnowledgeIDs,
+		),
+		appErr.Message,
+	)
+}
+
+func TestValidateFolderSearchChunks(t *testing.T) {
+	t.Parallel()
+
+	allowed := map[string]struct{}{
+		"knowledge-1": {},
+		"knowledge-2": {},
+	}
+	require.NoError(t, validateFolderSearchChunks(
+		[]*types.IndexWithScore{
+			{ChunkID: "chunk-1", KnowledgeID: "knowledge-1"},
+			{ChunkID: "chunk-2", KnowledgeID: "knowledge-2"},
+		},
+		allowed,
+	))
+	require.NoError(t, validateFolderSearchChunks(
+		[]*types.IndexWithScore{{ChunkID: "legacy-result"}},
+		nil,
+	))
+
+	testCases := []struct {
+		name    string
+		results []*types.IndexWithScore
+	}{
+		{
+			name:    "nil result",
+			results: []*types.IndexWithScore{nil},
+		},
+		{
+			name: "empty knowledge id",
+			results: []*types.IndexWithScore{{
+				ChunkID: "chunk-empty",
+			}},
+		},
+		{
+			name: "out of scope knowledge id",
+			results: []*types.IndexWithScore{{
+				ChunkID:     "chunk-outside",
+				KnowledgeID: "knowledge-outside",
+			}},
+		},
+		{
+			name: "mixed allowed and out of scope",
+			results: []*types.IndexWithScore{
+				{ChunkID: "chunk-allowed", KnowledgeID: "knowledge-1"},
+				{
+					ChunkID:     "chunk-outside",
+					KnowledgeID: "knowledge-outside",
+				},
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := validateFolderSearchChunks(testCase.results, allowed)
+
+			appErr, ok := apperrors.IsAppError(err)
+			require.True(t, ok, "expected AppError, got %T", err)
+			assert.Equal(t, apperrors.ErrInternalServer, appErr.Code)
+			assert.Equal(t, "folder-scoped retrieval failed", appErr.Message)
+			assert.NotContains(t, appErr.Message, "knowledge-outside")
+		})
+	}
+}
+
+type hybridFolderGuardKnowledgeBaseRepositoryStub struct {
+	interfaces.KnowledgeBaseRepository
+
+	knowledgeBase *types.KnowledgeBase
+	getByIDsCalls atomic.Int64
+}
+
+func (s *hybridFolderGuardKnowledgeBaseRepositoryStub) GetKnowledgeBaseByIDs(
+	context.Context,
+	[]string,
+) ([]*types.KnowledgeBase, error) {
+	s.getByIDsCalls.Add(1)
+	return []*types.KnowledgeBase{s.knowledgeBase}, nil
+}
+
+type hybridFolderGuardKnowledgeRepositoryStub struct {
+	interfaces.KnowledgeRepository
+
+	knowledge     *types.Knowledge
+	getBatchCalls atomic.Int64
+}
+
+func (s *hybridFolderGuardKnowledgeRepositoryStub) GetKnowledgeBatch(
+	_ context.Context,
+	_ uint64,
+	ids []string,
+) ([]*types.Knowledge, error) {
+	s.getBatchCalls.Add(1)
+	if len(ids) == 1 && ids[0] == s.knowledge.ID {
+		return []*types.Knowledge{s.knowledge}, nil
+	}
+	return nil, nil
+}
+
+type hybridFolderGuardChunkRepositoryStub struct {
+	interfaces.ChunkRepository
+
+	chunk                *types.Chunk
+	listByIDCalls        atomic.Int64
+	listByIDOnlyCalls    atomic.Int64
+	listByParentIDsCalls atomic.Int64
+}
+
+func (s *hybridFolderGuardChunkRepositoryStub) ListChunksByID(
+	_ context.Context,
+	_ uint64,
+	ids []string,
+) ([]*types.Chunk, error) {
+	s.listByIDCalls.Add(1)
+	if len(ids) == 1 && ids[0] == s.chunk.ID {
+		return []*types.Chunk{s.chunk}, nil
+	}
+	return nil, nil
+}
+
+func (s *hybridFolderGuardChunkRepositoryStub) ListChunksByIDOnly(
+	context.Context,
+	[]string,
+) ([]*types.Chunk, error) {
+	s.listByIDOnlyCalls.Add(1)
+	return nil, nil
+}
+
+func (s *hybridFolderGuardChunkRepositoryStub) ListChunksByParentIDs(
+	context.Context,
+	uint64,
+	[]string,
+) ([]*types.Chunk, error) {
+	s.listByParentIDsCalls.Add(1)
+	return nil, nil
+}
+
+func TestHybridSearchFolderOutputGuardRunsBeforeResultHydration(
+	t *testing.T,
+) {
+	filter, err := types.NewResolvedFolderFilter(
+		true,
+		[]string{"10000000-0000-4000-8000-000000000001"},
+	)
+	require.NoError(t, err)
+	testCases := []struct {
+		name                 string
+		retrievedKnowledgeID string
+		retrievedChunkID     string
+		wantScopeError       bool
+		wantHydrationDBCalls int64
+	}{
+		{
+			name:                 "allowed result is retained",
+			retrievedKnowledgeID: "knowledge-a",
+			retrievedChunkID:     "chunk-a",
+			wantHydrationDBCalls: 1,
+		},
+		{
+			name:                 "out of scope result is rejected",
+			retrievedKnowledgeID: "knowledge-b",
+			retrievedChunkID:     "chunk-b",
+			wantScopeError:       true,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			const storeID = "00000000-0000-0000-0000-000000000001"
+			storeIDValue := storeID
+			knowledgeBase := &types.KnowledgeBase{
+				ID:               "kb-1",
+				Type:             types.KnowledgeBaseTypeDocument,
+				TenantID:         41,
+				EmbeddingModelID: "model-1",
+				VectorStoreID:    &storeIDValue,
+				IndexingStrategy: types.IndexingStrategy{
+					VectorEnabled: true,
+				},
+			}
+			kbRepo := &hybridFolderGuardKnowledgeBaseRepositoryStub{
+				knowledgeBase: knowledgeBase,
+			}
+			knowledgeRepo := &hybridFolderGuardKnowledgeRepositoryStub{
+				knowledge: &types.Knowledge{
+					ID:              "knowledge-a",
+					TenantID:        41,
+					KnowledgeBaseID: "kb-1",
+					Title:           "allowed document",
+				},
+			}
+			chunkRepo := &hybridFolderGuardChunkRepositoryStub{
+				chunk: &types.Chunk{
+					ID:              "chunk-a",
+					TenantID:        41,
+					KnowledgeID:     "knowledge-a",
+					KnowledgeBaseID: "kb-1",
+					Content:         "allowed content",
+					ChunkType:       types.ChunkTypeText,
+					ImageInfo:       "[]",
+				},
+			}
+			engine := &fakeRetrieveEngineService{
+				engineType: types.PostgresRetrieverEngineType,
+				support:    []types.RetrieverType{types.VectorRetrieverType},
+				canned: []*types.IndexWithScore{{
+					Content:         "retrieved content",
+					ChunkID:         testCase.retrievedChunkID,
+					KnowledgeID:     testCase.retrievedKnowledgeID,
+					KnowledgeBaseID: "kb-1",
+					Score:           0.9,
+					MatchType:       types.MatchTypeEmbedding,
+				}},
+			}
+			service := &knowledgeBaseService{
+				repo:      kbRepo,
+				kgRepo:    knowledgeRepo,
+				chunkRepo: chunkRepo,
+				retrieveEngine: &fakeFanoutRegistry{
+					byStore: map[string]interfaces.RetrieveEngineService{
+						storeID: engine,
+					},
+				},
+				ownership: &fakeOwnership{
+					owned: map[string]uint64{storeID: 41},
+				},
+			}
+			ctx := context.WithValue(
+				context.Background(),
+				types.TenantIDContextKey,
+				uint64(41),
+			)
+
+			results, err := service.HybridSearch(
+				ctx,
+				"kb-1",
+				types.SearchParams{
+					QueryText:             "folder query",
+					QueryEmbedding:        []float32{0.1},
+					KnowledgeIDs:          []string{"knowledge-a"},
+					SourceTenantID:        41,
+					FolderFilter:          filter,
+					ExecutionScopeHash:    "0123456789abcdef",
+					MatchCount:            1,
+					DisableKeywordsMatch:  true,
+					SkipContextEnrichment: true,
+				},
+			)
+
+			assert.Equal(t, int64(1), engine.retrieveCalls.Load())
+			assert.Equal(t, int64(1), kbRepo.getByIDsCalls.Load())
+			assert.Equal(
+				t,
+				testCase.wantHydrationDBCalls,
+				knowledgeRepo.getBatchCalls.Load(),
+			)
+			assert.Equal(
+				t,
+				testCase.wantHydrationDBCalls,
+				chunkRepo.listByIDCalls.Load(),
+			)
+			assert.Equal(t, int64(0), chunkRepo.listByIDOnlyCalls.Load())
+			assert.Equal(t, int64(0), chunkRepo.listByParentIDsCalls.Load())
+
+			if !testCase.wantScopeError {
+				require.NoError(t, err)
+				require.Len(t, results, 1)
+				assert.Equal(t, "knowledge-a", results[0].KnowledgeID)
+				return
+			}
+
+			require.Error(t, err)
+			assert.Nil(t, results)
+			appErr, ok := apperrors.IsAppError(err)
+			require.True(t, ok, "expected AppError, got %T", err)
+			assert.Equal(t, apperrors.ErrInternalServer, appErr.Code)
+			assert.Equal(t, 500, appErr.HTTPCode)
+			assert.Equal(
+				t,
+				"folder-scoped retrieval failed",
+				appErr.Message,
+			)
+			assert.NotContains(t, appErr.Message, "knowledge-b")
+		})
+	}
+}
+
 func TestHasMixedEngineTypes(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -500,6 +1008,126 @@ func TestRetrieveFromStores_SingleGroupFastPath(t *testing.T) {
 	}
 }
 
+func TestRetrieveFromStores_SingleGroupFailureIsSafelyMapped(t *testing.T) {
+	t.Parallel()
+
+	sensitiveMarker := "sqlite secret path / KB-ID-secret"
+	backendErr := stderrors.New(sensitiveMarker)
+	fake := &fakeRetrieveEngineService{
+		engineType: types.SQLiteRetrieverEngineType,
+		support:    []types.RetrieverType{types.VectorRetrieverType},
+		cannedErr:  backendErr,
+	}
+	group := &storeGroup{
+		StoreID:    "store-secret",
+		KBIDs:      []string{"kb-secret"},
+		Engine:     buildBoundComposite(t, fake),
+		BaseParams: vectorParams("q"),
+		TopK:       50,
+	}
+
+	results, err := (&knowledgeBaseService{}).retrieveFromStores(
+		context.Background(),
+		[]*storeGroup{group},
+		retriever.EngineAwareNormalizer{},
+	)
+
+	require.Error(t, err)
+	require.Nil(t, results)
+	require.False(t, stderrors.Is(err, backendErr))
+	require.Equal(t, int64(1), fake.retrieveCalls.Load())
+
+	app, ok := apperrors.IsAppError(err)
+	require.True(t, ok, "expected typed AppError, got %T", err)
+	require.Equal(t, apperrors.ErrVectorStoreUnavailable, app.Code)
+	require.NotContains(t, err.Error(), sensitiveMarker)
+	require.NotContains(t, app.Message, sensitiveMarker)
+	require.NotContains(t, fmt.Sprint(app.Details), sensitiveMarker)
+}
+
+func TestRetrieveFromStores_SingleGroupCanceledContextIsPreserved(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeRetrieveEngineService{
+		engineType: types.SQLiteRetrieverEngineType,
+		support:    []types.RetrieverType{types.VectorRetrieverType},
+		cannedErr:  stderrors.New("backend error"),
+	}
+	group := &storeGroup{
+		Engine:     buildBoundComposite(t, fake),
+		BaseParams: vectorParams("q"),
+		TopK:       50,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	results, err := (&knowledgeBaseService{}).retrieveFromStores(
+		ctx,
+		[]*storeGroup{group},
+		retriever.EngineAwareNormalizer{},
+	)
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, results)
+	require.Equal(t, int64(1), fake.retrieveCalls.Load())
+}
+
+func TestRetrieveFromStores_SingleGroupDeadlineMapping(t *testing.T) {
+	tests := []struct {
+		name               string
+		executionScopeHash string
+		wantDeadline       bool
+	}{
+		{
+			name:         "generic scope maps deadline to unavailable",
+			wantDeadline: false,
+		},
+		{
+			name:               "prepared scope preserves deadline",
+			executionScopeHash: "prepared-scope-hash",
+			wantDeadline:       true,
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			fake := &fakeRetrieveEngineService{
+				engineType: types.SQLiteRetrieverEngineType,
+				support:    []types.RetrieverType{types.VectorRetrieverType},
+				cannedErr:  stderrors.New("backend error"),
+			}
+			params := vectorParams("q")
+			params[0].ExecutionScopeHash = test.executionScopeHash
+			group := &storeGroup{
+				Engine:     buildBoundComposite(t, fake),
+				BaseParams: params,
+				TopK:       50,
+			}
+			ctx, cancel := context.WithDeadline(context.Background(), time.Time{})
+			defer cancel()
+
+			results, err := (&knowledgeBaseService{}).retrieveFromStores(
+				ctx,
+				[]*storeGroup{group},
+				retriever.EngineAwareNormalizer{},
+			)
+
+			require.Error(t, err)
+			require.Nil(t, results)
+			if test.wantDeadline {
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+				return
+			}
+			app, ok := apperrors.IsAppError(err)
+			require.True(t, ok, "expected typed AppError, got %T", err)
+			require.Equal(t, apperrors.ErrVectorStoreUnavailable, app.Code)
+		})
+	}
+}
+
 func TestRetrieveFromStores_MultiGroupParallel_Concat(t *testing.T) {
 	t.Parallel()
 	fakeA := &fakeRetrieveEngineService{
@@ -681,6 +1309,8 @@ func TestRetrieveFromStores_KeywordPassthroughOnMixed(t *testing.T) {
 
 func TestRetrieveFromStores_OneGroupFails_AllFail(t *testing.T) {
 	t.Parallel()
+	sensitiveMarker := "sqlite secret path / KB-ID-secret"
+
 	fakeOK := &fakeRetrieveEngineService{
 		engineType: types.PostgresRetrieverEngineType,
 		support:    []types.RetrieverType{types.VectorRetrieverType},
@@ -689,24 +1319,26 @@ func TestRetrieveFromStores_OneGroupFails_AllFail(t *testing.T) {
 	fakeBad := &fakeRetrieveEngineService{
 		engineType: types.PostgresRetrieverEngineType,
 		support:    []types.RetrieverType{types.VectorRetrieverType},
-		cannedErr:  stderrors.New("simulated retrieve failure"),
+		cannedErr:  stderrors.New(sensitiveMarker),
 	}
 	groups := []*storeGroup{
 		{Engine: buildBoundComposite(t, fakeOK), BaseParams: vectorParams("q"), TopK: 50, KBIDs: []string{"kb-ok"}},
 		{Engine: buildBoundComposite(t, fakeBad), BaseParams: vectorParams("q"), TopK: 50, KBIDs: []string{"kb-bad"}},
 	}
 	s := &knowledgeBaseService{}
-	_, err := s.retrieveFromStores(context.Background(), groups, retriever.EngineAwareNormalizer{})
+	results, err := s.retrieveFromStores(context.Background(), groups, retriever.EngineAwareNormalizer{})
 	require.Error(t, err)
+	require.Nil(t, results)
 
 	// Generic infra failure → 2201 (Unavailable). Message MUST NOT echo
 	// the raw error or any store UUID.
 	app, ok := apperrors.IsAppError(err)
 	require.True(t, ok, "expected typed AppError, got %T", err)
 	assert.Equal(t, apperrors.ErrVectorStoreUnavailable, app.Code)
-	if strings.Contains(app.Message, "simulated") {
+	if strings.Contains(app.Message, sensitiveMarker) {
 		t.Fatalf("AppError message leaked raw err string: %q", app.Message)
 	}
+	require.NotContains(t, fmt.Sprint(app.Details), sensitiveMarker)
 }
 
 func TestRetrieveFromStores_PerGroupTimeout(t *testing.T) {

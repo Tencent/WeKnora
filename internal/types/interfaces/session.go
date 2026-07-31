@@ -49,12 +49,24 @@ type SessionService interface {
 	// KnowledgeQA performs knowledge-based question answering.
 	// Events are emitted through eventBus (references, answer chunks, completion).
 	KnowledgeQA(ctx context.Context, req *types.QARequest, eventBus *event.EventBus) error
+	// PrepareKnowledgeScope reconciles logical scope, authorizes every target,
+	// resolves folders, and computes the execution hash.
+	PrepareKnowledgeScope(
+		ctx context.Context,
+		input types.KnowledgeScopePrepareInput,
+	) (*types.KnowledgeScopePreparation, error)
 	// KnowledgeQAByEvent performs knowledge-based question answering by event
 	KnowledgeQAByEvent(ctx context.Context, chatManage *types.ChatManage, eventList []types.EventType) error
 	// SearchKnowledge performs knowledge-based search, without summarization
 	// knowledgeBaseIDs: list of knowledge base IDs to search (supports multi-KB)
 	// knowledgeIDs: list of specific knowledge (file) IDs to search
 	SearchKnowledge(ctx context.Context, knowledgeBaseIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, query string) ([]*types.SearchResult, error)
+	// SearchKnowledgeWithScope executes HTTP search from a prepared scope.
+	SearchKnowledgeWithScope(
+		ctx context.Context,
+		query string,
+		preparation *types.KnowledgeScopePreparation,
+	) ([]*types.SearchResult, error)
 	// AgentQA performs agent-based question answering with conversation history and streaming support.
 	AgentQA(ctx context.Context, req *types.QARequest, eventBus *event.EventBus) error
 }

@@ -7,6 +7,7 @@ import {
   sanitizeStreamRequestBody,
   type StreamRequestMeta,
 } from '@/utils/chatRequestDebug';
+import type { KnowledgeScopeRequest } from '@/types/knowledgeScope';
 
 
 
@@ -36,7 +37,7 @@ export function useStream() {
   let renderTimer: number | null = null
 
   // 启动流式请求
-  const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; tag_ids?: string[]; agent_enabled?: boolean; agent_id?: string; web_search_enabled?: boolean; summary_model_id?: string; mcp_service_ids?: string[]; skill_names?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string; kb_id?: string; kb_name?: string; service_id?: string; skill_name?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; attachment_ids?: string[]; suggestion_attribution?: { suggestion_set_id: string; question_id: string }; method: string; url: string; embed_token?: string; embed_session_sig?: string; embed_visitor_id?: string }) => {
+  const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; knowledge_scope?: KnowledgeScopeRequest; tag_ids?: string[]; agent_enabled?: boolean; agent_id?: string; web_search_enabled?: boolean; summary_model_id?: string; mcp_service_ids?: string[]; skill_names?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string; kb_id?: string; kb_name?: string; service_id?: string; skill_name?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; attachment_ids?: string[]; suggestion_attribution?: { suggestion_set_id: string; question_id: string }; method: string; url: string; embed_token?: string; embed_session_sig?: string; embed_visitor_id?: string }) => {
     const myGeneration = ++streamGeneration
     // 重置状态
     output.value = '';
@@ -94,6 +95,9 @@ export function useStream() {
       // Include knowledge_ids if provided
       if (params.knowledge_ids !== undefined && params.knowledge_ids.length > 0) {
         postBody.knowledge_ids = params.knowledge_ids;
+      }
+      if (params.knowledge_scope !== undefined) {
+        postBody.knowledge_scope = params.knowledge_scope;
       }
       // Include agent_id if provided (backend resolves shared agent and tenant from share relation)
       if (params.agent_id) {

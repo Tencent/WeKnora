@@ -86,8 +86,12 @@ const (
 )
 
 // KnowledgeListFilter aggregates optional filters for listing knowledge entries
-// under a knowledge base. Empty / zero fields mean "no filter on that dimension".
+// under a knowledge base. Empty / zero fields mean "no filter on that dimension",
+// except FolderID, where a non-nil pointer to an empty string selects the root.
 type KnowledgeListFilter struct {
+	// FolderID applies an exact folder placement filter when non-nil.
+	// Nil means all folders; a pointer to "" means the knowledge base root.
+	FolderID *string
 	// TagIDs filters by multiple tags (OR semantics: match any of the given tags).
 	TagIDs []string
 	// Keyword performs a LIKE match on file_name / title when non-empty.

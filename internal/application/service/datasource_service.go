@@ -933,6 +933,7 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			tagIDs,        // auto-tag from data source
 			channel,
 			nil,
+			"",
 		)
 		return isUpdate, err
 	}
@@ -950,6 +951,7 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			tagIDs, // auto-tag from data source
 			channel,
 			nil,
+			"",
 		)
 		return isUpdate, err
 	}

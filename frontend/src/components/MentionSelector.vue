@@ -1,5 +1,14 @@
 <template>
-  <div v-if="visible" class="mention-menu" :style="style" ref="menuRef" @click.stop>
+  <div
+    v-if="visible"
+    class="mention-menu"
+    :class="{
+      'mention-menu--knowledge-scope': isKnowledgeScopeView,
+    }"
+    :style="style"
+    ref="menuRef"
+    @click.stop
+  >
     <div class="mention-list" ref="listRef" @scroll="onScroll">
       <template v-if="!currentGroupType && !isFlatMode">
         <button
@@ -24,7 +33,12 @@
       </template>
 
       <template v-else>
-        <button v-if="!isFlatMode" type="button" class="mention-back-row" @click.stop="leaveGroup">
+        <button
+          v-if="!isFlatMode"
+          type="button"
+          class="mention-back-row"
+          @click.stop="leaveGroupAndRestoreInputFocus"
+        >
           <t-icon name="chevron-left" />
           <span>{{ currentGroup?.label }}</span>
         </button>
@@ -35,8 +49,25 @@
       >
         {{ $t('common.knowledgeBase') }}
       </div>
+      <KnowledgeScopeSelector
+        v-if="!isFlatMode && currentGroupType === 'kb' && props.enableFolderScope"
+        ref="knowledgeScopeSelectorRef"
+        :knowledge-bases="knowledgeScopeKnowledgeBases"
+        :selected-knowledge-base-ids="props.selectedKnowledgeBaseIds || []"
+        :selected-folders="props.selectedFolders || []"
+        @confirm="value => emit('confirmKnowledgeScope', value)"
+        @cancel="leaveGroupAndRestoreInputFocus"
+      />
+
       <!-- Knowledge Bases Group -->
-      <div v-if="(isFlatMode || currentGroupType === 'kb') && kbItems.length > 0" class="mention-group" data-group-type="kb">
+      <div
+        v-if="(
+          isFlatMode
+          || (currentGroupType === 'kb' && !props.enableFolderScope)
+        ) && kbItems.length > 0"
+        class="mention-group"
+        data-group-type="kb"
+      >
         <t-popup
           v-for="(item, index) in kbItems"
           :key="item.id"
@@ -266,6 +297,8 @@ import { getKnowledgeDetails } from '@/api/knowledge-base';
 import { useOrganizationStore } from '@/stores/organization';
 import { useSettingsStore } from '@/stores/settings';
 import type { MentionItem, MentionItemType } from '@/types/mention';
+import type { FolderScopeSelection } from '@/types/knowledgeScope';
+import KnowledgeScopeSelector from './KnowledgeScopeSelector.vue';
 
 type DetailState = { loading: boolean; error?: string; data?: any };
 
@@ -282,9 +315,19 @@ const props = defineProps<{
   query?: string;
   // 分组入口展示用的总数（如文件搜索的 total），避免仅用首屏已加载条数
   groupCounts?: Partial<Record<MentionItemType, number>>;
+  selectedKnowledgeBaseIds?: string[];
+  selectedFolders?: FolderScopeSelection[];
+  enableFolderScope?: boolean;
 }>();
 
-const emit = defineEmits(['select', 'update:activeIndex', 'loadMore']);
+const emit = defineEmits([
+  'select',
+  'update:activeIndex',
+  'loadMore',
+  'confirmKnowledgeScope',
+  'viewModeChange',
+  'requestInputFocus',
+]);
 
 const router = useRouter();
 const { t } = useI18n();
@@ -292,6 +335,7 @@ const orgStore = useOrganizationStore();
 const settingsStore = useSettingsStore();
 const menuRef = ref<HTMLElement | null>(null);
 const listRef = ref<HTMLElement | null>(null);
+const knowledgeScopeSelectorRef = ref<{ focusFirstControl: () => void } | null>(null);
 const detailCache = ref<Record<string, DetailState>>({});
 const isScrolling = ref(false);
 const currentGroupType = ref<MentionItemType | null>(null);
@@ -311,6 +355,12 @@ const agentIdForDetail = computed(() => {
 
 const kbItems = computed(() => props.items.filter(item => item.type === 'kb'));
 const fileItems = computed(() => props.items.filter(item => item.type === 'file'));
+const knowledgeScopeKnowledgeBases = computed(() => kbItems.value.map(item => ({
+  id: item.id,
+  name: item.name,
+  kbType: item.kbType,
+  count: item.count,
+})));
 
 const mentionGroupDefs = computed<Array<{ type: MentionItemType; label: string; icon: string }>>(() => [
   { type: 'kb', label: t('common.knowledgeBase'), icon: 'folder' },
@@ -346,6 +396,12 @@ const groupTabs = computed(() => mentionGroups.value.filter(group => group.count
 const groupRows = computed(() => groupTabs.value);
 const isFlatMode = computed(() => (props.query ?? '').trim().length > 0);
 const currentGroup = computed(() => mentionGroups.value.find(group => group.type === currentGroupType.value));
+const isKnowledgeScopeView = computed(() => (
+  props.visible
+  && !isFlatMode.value
+  && currentGroupType.value === 'kb'
+  && Boolean(props.enableFolderScope)
+));
 const extraGroups = computed(() => mentionGroups.value.filter(group =>
   group.type !== 'kb' && group.type !== 'file' && group.count > 0
 ));
@@ -367,6 +423,9 @@ const enterGroup = (type: MentionItemType) => {
     listRef.value.scrollTo({
       top: 0,
     });
+    if (type === 'kb' && props.enableFolderScope) {
+      knowledgeScopeSelectorRef.value?.focusFirstControl();
+    }
   });
 };
 
@@ -380,6 +439,10 @@ const leaveGroup = () => {
     if (listRef.value) listRef.value.scrollTop = 0;
   });
   return true;
+};
+
+const leaveGroupAndRestoreInputFocus = () => {
+  if (leaveGroup()) emit('requestInputFocus');
 };
 
 const updateActiveGroupFromIndex = (index: number) => {
@@ -401,6 +464,11 @@ const moveActive = (delta: number) => {
     return;
   }
 
+  if (currentGroupType.value === 'kb' && props.enableFolderScope) {
+    knowledgeScopeSelectorRef.value?.focusFirstControl();
+    return;
+  }
+
   if (!currentGroupType.value) {
     const maxIndex = Math.max(0, groupRows.value.length - 1);
     groupActiveIndex.value = Math.min(maxIndex, Math.max(0, groupActiveIndex.value + delta));
@@ -419,6 +487,11 @@ const confirmActive = () => {
   if (isFlatMode.value) {
     const item = props.items[props.activeIndex];
     if (item) emit('select', item);
+    return;
+  }
+
+  if (currentGroupType.value === 'kb' && props.enableFolderScope) {
+    knowledgeScopeSelectorRef.value?.focusFirstControl();
     return;
   }
 
@@ -520,12 +593,16 @@ watch(isFlatMode, (flat) => {
   }
 });
 
+watch(isKnowledgeScopeView, (active) => {
+  emit('viewModeChange', active);
+}, { immediate: true });
+
 watch(() => props.visible, (newVisible) => {
   if (newVisible) {
+    currentGroupType.value = null;
+    groupActiveIndex.value = 0;
     nextTick(() => {
       if (listRef.value) listRef.value.scrollTop = 0;
-      currentGroupType.value = null;
-      groupActiveIndex.value = 0;
     });
   }
 });
@@ -570,6 +647,23 @@ const scrollToItem = (index: number) => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+.mention-menu--knowledge-scope {
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  max-height: min(
+    520px,
+    calc(100vh - 32px),
+    var(--mention-menu-available-height, 520px)
+  );
+}
+
+.mention-menu--knowledge-scope .mention-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
 }
 
 .mention-list {

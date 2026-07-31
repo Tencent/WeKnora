@@ -10,13 +10,18 @@ type PipelineRequest struct {
 	MaxRounds int    `json:"max_rounds"`
 
 	// Knowledge base retrieval parameters
-	KnowledgeBaseIDs []string      `json:"knowledge_base_ids"`
-	KnowledgeIDs     []string      `json:"knowledge_ids,omitempty"`
-	SearchTargets    SearchTargets `json:"-"`
-	VectorThreshold  float64       `json:"vector_threshold"`
-	KeywordThreshold float64       `json:"keyword_threshold"`
-	EmbeddingTopK    int           `json:"embedding_top_k"`
-	VectorDatabase   string        `json:"vector_database"`
+	KnowledgeBaseIDs   []string        `json:"knowledge_base_ids"`
+	KnowledgeIDs       []string        `json:"knowledge_ids,omitempty"`
+	SearchTargets      SearchTargets   `json:"-"`
+	ExecutionScope     *KnowledgeScope `json:"-"`
+	ExecutionScopeHash string          `json:"-"`
+	// RetrievalExplicitlyEmpty preserves an enabled-empty request even when
+	// the authorized execution scope has no targets to project.
+	RetrievalExplicitlyEmpty bool    `json:"-"`
+	VectorThreshold          float64 `json:"vector_threshold"`
+	KeywordThreshold         float64 `json:"keyword_threshold"`
+	EmbeddingTopK            int     `json:"embedding_top_k"`
+	VectorDatabase           string  `json:"vector_database"`
 
 	// Rerank parameters
 	RerankModelID   string  `json:"rerank_model_id"`
@@ -168,24 +173,8 @@ func (c *ChatManage) Clone() *ChatManage {
 	copy(knowledgeIDs, c.KnowledgeIDs)
 
 	searchTargets := make(SearchTargets, len(c.SearchTargets))
-	for i, t := range c.SearchTargets {
-		if t != nil {
-			kidsCopy := make([]string, len(t.KnowledgeIDs))
-			copy(kidsCopy, t.KnowledgeIDs)
-			tagIDsCopy := make([]string, len(t.TagIDs))
-			copy(tagIDsCopy, t.TagIDs)
-			scopeTagIDsCopy := make([]string, len(t.ScopeTagIDs))
-			copy(scopeTagIDsCopy, t.ScopeTagIDs)
-			searchTargets[i] = &SearchTarget{
-				Type:                    t.Type,
-				KnowledgeBaseID:         t.KnowledgeBaseID,
-				TenantID:                t.TenantID,
-				KnowledgeIDs:            kidsCopy,
-				TagIDs:                  tagIDsCopy,
-				ScopeTagIDs:             scopeTagIDsCopy,
-				DisableRecallThresholds: t.DisableRecallThresholds,
-			}
-		}
+	for i, target := range c.SearchTargets {
+		searchTargets[i] = target.Clone()
 	}
 
 	// Deep copy Entity using in search entity plugin
@@ -207,6 +196,9 @@ func (c *ChatManage) Clone() *ChatManage {
 			KnowledgeBaseIDs:         knowledgeBaseIDs,
 			KnowledgeIDs:             knowledgeIDs,
 			SearchTargets:            searchTargets,
+			ExecutionScope:           c.ExecutionScope.Clone(),
+			ExecutionScopeHash:       c.ExecutionScopeHash,
+			RetrievalExplicitlyEmpty: c.RetrievalExplicitlyEmpty,
 			VectorThreshold:          c.VectorThreshold,
 			KeywordThreshold:         c.KeywordThreshold,
 			EmbeddingTopK:            c.EmbeddingTopK,

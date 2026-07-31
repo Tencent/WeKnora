@@ -84,7 +84,16 @@ func (p *PluginDataAnalysis) OnEvent(
 	// Get Knowledge details to get file path
 	knowledge, err := p.knowledgeService.GetKnowledgeByID(ctx, targetFile.KnowledgeID)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get knowledge %s: %v", targetFile.KnowledgeID, err)
+		if chatManage.ExecutionScopeHash != "" {
+			logger.Error(ctx, "Prepared data analysis knowledge lookup failed")
+		} else {
+			logger.Errorf(
+				ctx,
+				"Failed to get knowledge %s: %v",
+				targetFile.KnowledgeID,
+				err,
+			)
+		}
 		return next()
 	}
 
@@ -95,7 +104,11 @@ func (p *PluginDataAnalysis) OnEvent(
 	// Load data into DuckDB
 	schema, err := tool.LoadFromKnowledge(ctx, knowledge)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get data schema: %v", err)
+		if chatManage.ExecutionScopeHash != "" {
+			logger.Error(ctx, "Prepared data analysis schema load failed")
+		} else {
+			logger.Errorf(ctx, "Failed to get data schema: %v", err)
+		}
 		return next()
 	}
 
@@ -126,7 +139,11 @@ Return your response in the specified JSON format.`, chatManage.Query, knowledge
 		Format:      formatSchema,
 	})
 	if err != nil {
-		logger.Errorf(ctx, "Failed to generate analysis response: %v", err)
+		if chatManage.ExecutionScopeHash != "" {
+			logger.Error(ctx, "Prepared data analysis generation failed")
+		} else {
+			logger.Errorf(ctx, "Failed to generate analysis response: %v", err)
+		}
 		return next()
 	}
 	// logger.Debugf(ctx, "Data analysis LLM response: %s", response.Content)
@@ -135,7 +152,11 @@ Return your response in the specified JSON format.`, chatManage.Query, knowledge
 	// Initialize DataAnalysisTool
 	toolResult, err := tool.Execute(ctx, json.RawMessage(response.Content))
 	if err != nil {
-		logger.Errorf(ctx, "Failed to execute SQL: %v", err)
+		if chatManage.ExecutionScopeHash != "" {
+			logger.Error(ctx, "Prepared data analysis execution failed")
+		} else {
+			logger.Errorf(ctx, "Failed to execute SQL: %v", err)
+		}
 		return next()
 	}
 

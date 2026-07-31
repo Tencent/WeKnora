@@ -1,13 +1,13 @@
 package repository
 
 import (
-	"time"
 	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -42,7 +42,7 @@ func TestKnowledgeFolderPostgresTransactionBindsAdvisoryLockKey(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock($1)")).
 		WithArgs(lockKey).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery(`SELECT .* FROM "knowledge_bases".*FOR UPDATE`).
+	mock.ExpectQuery(`SELECT .* FROM "knowledge_bases".*"deleted_at" IS NULL.*FOR UPDATE`).
 		WithArgs(uint64(7), "kb-1", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("kb-1"))
 	mock.ExpectCommit()
@@ -59,6 +59,85 @@ func TestKnowledgeFolderPostgresTransactionBindsAdvisoryLockKey(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.True(t, called)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestKnowledgeBaseScopedPostgresTransactionIncludesSoftDeletedKnowledgeBase(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{})
+	require.NoError(t, err)
+	lockKey := knowledgeFolderAdvisoryLockKey(7, "kb-deleted")
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock($1)")).
+		WithArgs(lockKey).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(
+		`SELECT "id" FROM "knowledge_bases" WHERE tenant_id = $1 AND id = $2 LIMIT $3 FOR UPDATE`,
+	)).
+		WithArgs(uint64(7), "kb-deleted", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("kb-deleted"))
+	mock.ExpectCommit()
+
+	callbackCalls := 0
+	err = runKnowledgeBaseScopedWriteTransaction(
+		context.Background(),
+		db,
+		7,
+		"kb-deleted",
+		knowledgeBaseScopedWriteOptions{
+			lockMode: knowledgeBaseLockIncludeSoftDeleted,
+		},
+		func(tx *gorm.DB) error {
+			callbackCalls++
+			assert.False(t, tx.Statement.Unscoped)
+			return nil
+		},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, 1, callbackCalls)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestKnowledgeBaseScopedPostgresTransactionRejectsMissingKnowledgeBase(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{})
+	require.NoError(t, err)
+	lockKey := knowledgeFolderAdvisoryLockKey(7, "kb-missing")
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock($1)")).
+		WithArgs(lockKey).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(
+		`SELECT "id" FROM "knowledge_bases" WHERE tenant_id = $1 AND id = $2 LIMIT $3 FOR UPDATE`,
+	)).
+		WithArgs(uint64(7), "kb-missing", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectRollback()
+
+	callbackCalls := 0
+	err = runKnowledgeBaseScopedWriteTransaction(
+		context.Background(),
+		db,
+		7,
+		"kb-missing",
+		knowledgeBaseScopedWriteOptions{
+			lockMode: knowledgeBaseLockIncludeSoftDeleted,
+		},
+		func(*gorm.DB) error {
+			callbackCalls++
+			return nil
+		},
+	)
+	require.ErrorIs(t, err, ErrKnowledgeFolderKnowledgeBaseNotFound)
+	assert.Zero(t, callbackCalls)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -93,6 +172,186 @@ func TestKnowledgeFolderSQLiteTransactionLocksScopedKnowledgeBase(t *testing.T) 
 	)
 	require.ErrorIs(t, err, ErrKnowledgeFolderKnowledgeBaseNotFound)
 	assert.Equal(t, 1, called)
+}
+
+func TestKnowledgeFolderSQLiteTransactionsRejectSoftDeletedKnowledgeBase(t *testing.T) {
+	db := setupKnowledgeFolderTestDB(t)
+	repo := newKnowledgeFolderRepository(db)
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledge_bases (id, tenant_id, deleted_at) VALUES (?, ?, ?)`,
+		"kb-deleted",
+		1,
+		time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC),
+	).Error)
+
+	treeCalls := 0
+	err := repo.RunTreeWriteTransaction(
+		context.Background(),
+		1,
+		"kb-deleted",
+		func(interfaces.KnowledgeFolderTreeRepository) error {
+			treeCalls++
+			return nil
+		},
+	)
+	require.ErrorIs(t, err, ErrKnowledgeFolderKnowledgeBaseNotFound)
+	assert.Zero(t, treeCalls)
+
+	moveCalls := 0
+	err = repo.RunKnowledgeFolderMoveTransaction(
+		context.Background(),
+		1,
+		"kb-deleted",
+		func(interfaces.KnowledgeFolderMoveTxRepository) error {
+			moveCalls++
+			return nil
+		},
+	)
+	require.ErrorIs(t, err, ErrKnowledgeFolderKnowledgeBaseNotFound)
+	assert.Zero(t, moveCalls)
+}
+
+func TestKnowledgeBaseScopedSQLiteTransactionIncludesSoftDeletedKnowledgeBase(t *testing.T) {
+	tests := []struct {
+		name      string
+		deletedAt interface{}
+	}{
+		{name: "active", deletedAt: nil},
+		{
+			name:      "soft deleted",
+			deletedAt: time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			db := setupKnowledgeFolderTestDB(t)
+			require.NoError(t, db.Exec(
+				`INSERT INTO knowledge_bases (id, tenant_id, deleted_at) VALUES (?, ?, ?)`,
+				"kb-1",
+				1,
+				test.deletedAt,
+			).Error)
+
+			callbackCalls := 0
+			err := runKnowledgeBaseScopedWriteTransaction(
+				context.Background(),
+				db,
+				1,
+				"kb-1",
+				knowledgeBaseScopedWriteOptions{
+					lockMode: knowledgeBaseLockIncludeSoftDeleted,
+				},
+				func(tx *gorm.DB) error {
+					callbackCalls++
+					assert.False(t, tx.Statement.Unscoped)
+					if test.deletedAt == nil {
+						return nil
+					}
+
+					var kb types.KnowledgeBase
+					readErr := tx.
+						Where("tenant_id = ? AND id = ?", 1, "kb-1").
+						Take(&kb).Error
+					require.ErrorIs(t, readErr, gorm.ErrRecordNotFound)
+					return nil
+				},
+			)
+			require.NoError(t, err)
+			assert.Equal(t, 1, callbackCalls)
+		})
+	}
+}
+
+func TestKnowledgeBaseScopedSQLiteTransactionRejectsMissingOrWrongTenantKnowledgeBase(t *testing.T) {
+	tests := []struct {
+		name     string
+		tenantID uint64
+		kbID     string
+	}{
+		{name: "physically missing", tenantID: 1, kbID: "kb-missing"},
+		{name: "wrong tenant", tenantID: 2, kbID: "kb-1"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			db := setupKnowledgeFolderTestDB(t)
+			require.NoError(t, db.Exec(
+				`INSERT INTO knowledge_bases (id, tenant_id, deleted_at) VALUES (?, ?, ?)`,
+				"kb-1",
+				1,
+				time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC),
+			).Error)
+
+			callbackCalls := 0
+			err := runKnowledgeBaseScopedWriteTransaction(
+				context.Background(),
+				db,
+				test.tenantID,
+				test.kbID,
+				knowledgeBaseScopedWriteOptions{
+					lockMode: knowledgeBaseLockIncludeSoftDeleted,
+				},
+				func(*gorm.DB) error {
+					callbackCalls++
+					return nil
+				},
+			)
+			require.ErrorIs(t, err, ErrKnowledgeFolderKnowledgeBaseNotFound)
+			assert.Zero(t, callbackCalls)
+		})
+	}
+}
+
+func TestKnowledgeBaseScopedTransactionRejectsInvalidLockMode(t *testing.T) {
+	db := setupKnowledgeFolderTestDB(t)
+	callbackCalls := 0
+
+	err := runKnowledgeBaseScopedWriteTransaction(
+		context.Background(),
+		db,
+		1,
+		"kb-1",
+		knowledgeBaseScopedWriteOptions{
+			lockMode: knowledgeBaseLockMode(255),
+		},
+		func(*gorm.DB) error {
+			callbackCalls++
+			return nil
+		},
+	)
+
+	require.ErrorIs(t, err, ErrKnowledgeFolderInvalid)
+	assert.Zero(t, callbackCalls)
+}
+
+func TestKnowledgeBaseScopedTransactionRejectsInvalidDatabase(t *testing.T) {
+	tests := []struct {
+		name string
+		db   *gorm.DB
+	}{
+		{name: "nil"},
+		{name: "empty handle", db: &gorm.DB{}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			callbackCalls := 0
+			err := runKnowledgeBaseScopedWriteTransaction(
+				context.Background(),
+				test.db,
+				1,
+				"kb-1",
+				knowledgeBaseScopedWriteOptions{},
+				func(*gorm.DB) error {
+					callbackCalls++
+					return nil
+				},
+			)
+			require.ErrorIs(t, err, ErrKnowledgeFolderUnsupportedDialect)
+			assert.Zero(t, callbackCalls)
+		})
+	}
 }
 
 func TestKnowledgeFolderTreeTransactionRejectsEmptyScope(t *testing.T) {

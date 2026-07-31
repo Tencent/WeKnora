@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"strconv"
 	"sync"
@@ -53,8 +54,17 @@ func (s *knowledgeBaseService) retrieveFromStores(
 	if len(groups) == 0 {
 		return nil, nil
 	}
+
+	executionScopeHash := storeGroupsExecutionScopeHash(groups)
+
 	if len(groups) == 1 {
-		return groups[0].Engine.Retrieve(ctx, paramsWithTopK(groups[0]))
+		group := groups[0]
+		results, err := group.Engine.Retrieve(ctx, paramsWithTopK(group))
+		if err != nil {
+			logStoreRetrieveFailure(ctx, group, executionScopeHash, "single-store", err)
+			return nil, mapRetrieveFromStoresFailure(ctx, executionScopeHash)
+		}
+		return results, nil
 	}
 
 	timeout := multiStoreRetrieveTimeout()
@@ -73,11 +83,7 @@ func (s *knowledgeBaseService) retrieveFromStores(
 			defer cancel()
 			res, err := grp.Engine.Retrieve(gcCtx, paramsWithTopK(grp))
 			if err != nil {
-				logger.WarnWithFields(gctx, logger.Fields{
-					"tenant_id":  grp.OwnerTenantID,
-					"kb_count":   len(grp.KBIDs),
-					"store_kind": storeKindLabel(grp.StoreID),
-				}, fmt.Sprintf("multi-store retrieve failed: %v", err))
+				logStoreRetrieveFailure(gctx, grp, executionScopeHash, "multi-store", err)
 				return fmt.Errorf("store group retrieve: %w", err)
 			}
 			mu.Lock()
@@ -87,21 +93,7 @@ func (s *knowledgeBaseService) retrieveFromStores(
 		})
 	}
 	if err := g.Wait(); err != nil {
-		// Only treat an explicit client cancellation (context.Canceled)
-		// as "the client gave up". A parent context whose deadline has
-		// expired must still surface as a typed unavailable error so the
-		// handler returns a clean 4xx instead of leaking the raw stdlib
-		// DeadlineExceeded.
-		if isParentCancelled(ctx) {
-			return nil, ctx.Err()
-		}
-		// Any retrieve failure (per-group timeout, transport error,
-		// upstream rejection) is collapsed into a single typed
-		// unavailable error. The underlying cause is recorded in
-		// structured logs above; the response body intentionally exposes
-		// no internal detail.
-		return nil, apperrors.NewVectorStoreUnavailableError(
-			"vector retrieval failed for one or more bound stores")
+		return nil, mapRetrieveFromStoresFailure(ctx, executionScopeHash)
 	}
 
 	// Apply normalizer only when results span >1 distinct engine type.
@@ -130,6 +122,56 @@ func (s *knowledgeBaseService) retrieveFromStores(
 	return all, nil
 }
 
+func logStoreRetrieveFailure(
+	ctx context.Context,
+	group *storeGroup,
+	executionScopeHash string,
+	pathLabel string,
+	err error,
+) {
+	if executionScopeHash != "" {
+		logger.WarnWithFields(ctx, logger.Fields{
+			"kb_count":   len(group.KBIDs),
+			"store_kind": storeKindLabel(group.StoreID),
+			"scope_hash_prefix": knowledgeScopeHashPrefix(
+				executionScopeHash,
+			),
+		}, fmt.Sprintf("prepared %s retrieve failed", pathLabel))
+		return
+	}
+
+	logger.WarnWithFields(ctx, logger.Fields{
+		"tenant_id":  group.OwnerTenantID,
+		"kb_count":   len(group.KBIDs),
+		"store_kind": storeKindLabel(group.StoreID),
+	}, fmt.Sprintf("%s retrieve failed: %v", pathLabel, err))
+}
+
+func mapRetrieveFromStoresFailure(ctx context.Context, executionScopeHash string) error {
+	if executionScopeHash != "" && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if isParentCancelled(ctx) {
+		return ctx.Err()
+	}
+	return apperrors.NewVectorStoreUnavailableError(
+		"vector retrieval failed for one or more bound stores")
+}
+
+func storeGroupsExecutionScopeHash(groups []*storeGroup) string {
+	for _, group := range groups {
+		if group == nil {
+			continue
+		}
+		for _, params := range group.BaseParams {
+			if params.ExecutionScopeHash != "" {
+				return params.ExecutionScopeHash
+			}
+		}
+	}
+	return ""
+}
+
 // paramsWithTopK builds a fresh []RetrieveParams for a group. BaseParams
 // stay immutable; only TopK is overridden. This isolates iterative FAQ's
 // TopK mutation from the goroutines that read params inside Retrieve,
@@ -149,6 +191,18 @@ func paramsWithTopK(g *storeGroup) []types.RetrieveParams {
 	out := make([]types.RetrieveParams, len(g.BaseParams))
 	for i, p := range g.BaseParams {
 		p.TopK = g.TopK
+		p.Embedding = append([]float32(nil), p.Embedding...)
+		p.KnowledgeBaseIDs = append([]string(nil), p.KnowledgeBaseIDs...)
+		p.KnowledgeIDs = append([]string(nil), p.KnowledgeIDs...)
+		p.TagIDs = append([]string(nil), p.TagIDs...)
+		p.ScopeTagIDs = append([]string(nil), p.ScopeTagIDs...)
+		p.ExcludeKnowledgeIDs = append(
+			[]string(nil),
+			p.ExcludeKnowledgeIDs...,
+		)
+		p.ExcludeChunkIDs = append([]string(nil), p.ExcludeChunkIDs...)
+		p.FolderFilter = p.FolderFilter.Clone()
+		p.AdditionalParams = maps.Clone(p.AdditionalParams)
 		out[i] = p
 	}
 	return out

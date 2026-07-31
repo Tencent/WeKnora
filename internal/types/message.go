@@ -269,6 +269,8 @@ type MessageExecutionContext struct {
 	KnowledgeIDs          []string                  `json:"knowledge_ids,omitempty"`
 	TagIDs                []string                  `json:"tag_ids,omitempty"`
 	TagScopes             []TagScope                `json:"tag_scopes,omitempty"`
+	RequestScope          *KnowledgeScopeRequest    `json:"knowledge_scope,omitempty"`
+	ExecutionScopeHash    string                    `json:"execution_scope_hash,omitempty"`
 	MCPServiceIDs         []string                  `json:"mcp_service_ids,omitempty"`
 	SkillNames            []string                  `json:"skill_names,omitempty"`
 	WebSearchEnabled      bool                      `json:"web_search_enabled"`
