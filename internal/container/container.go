@@ -639,9 +639,9 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		cfg.ParseTime = true
 		cfg.Loc = time.UTC
 		cfg.Params = map[string]string{
-			"charset":          "utf8mb4",
-			"collation":        "utf8mb4_unicode_ci",
-			"multiStatements":  "true",
+			"charset":           "utf8mb4",
+			"collation":         "utf8mb4_unicode_ci",
+			"multiStatements":   "true",
 			"interpolateParams": "true",
 		}
 		dialector = gormmysql.Open(cfg.FormatDSN())
