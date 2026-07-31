@@ -18,13 +18,15 @@
                 <RagPipelineProgress :session="session" :embedded-mode="embeddedMode" />
                 <AgentStreamDisplay v-if="session.isAgentMode" :session="session" :session-id="sessionId"
                     :user-query="userQuery" :rag-mode="true" :follow-up-loading="followUpLoading"
-                    @render-complete-change="emit('render-complete-change', $event)" />
+                    @render-complete-change="emit('render-complete-change', $event)"
+                    @feedback-change="emit('feedback-change', $event)" />
             </div>
             <template v-else>
                 <docInfo v-if="session.knowledge_references?.length" :session="session"></docInfo>
                 <AgentStreamDisplay :session="session" :session-id="sessionId" :user-query="userQuery"
                     v-if="session.isAgentMode" :follow-up-loading="followUpLoading"
-                    @render-complete-change="emit('render-complete-change', $event)" />
+                    @render-complete-change="emit('render-complete-change', $event)"
+                    @feedback-change="emit('feedback-change', $event)" />
             </template>
             <deepThink :deepSession="session" v-if="session.showThink && !session.isAgentMode"></deepThink>
         </div>
@@ -172,7 +174,6 @@ const props = defineProps({
 
 const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
 const feedbackEligible = computed(() => props.session?.feedback_eligible === true);
-
 const preview = (url) => {
     nextTick(() => {
         reviewUrl.value = url;
