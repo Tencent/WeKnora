@@ -1,7 +1,7 @@
 <template>
-    <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed && variant !== 'drawer', 'aside_box--drawer': variant === 'drawer' }">
+    <div class="aside_box" :class="{ 'aside_box--collapsed': isCollapsed, 'aside_box--drawer': variant === 'drawer' }">
         <!-- 展开时：Logo + 搜索/折叠按钮同行（drawer 模式下仅 Logo + 搜索，无折叠按钮） -->
-        <div class="logo_row" v-if="!uiStore.sidebarCollapsed || variant === 'drawer'">
+        <div class="logo_row" v-if="!isCollapsed">
             <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
                 <img class="logo" src="@/assets/img/weknora.png" alt="">
                 <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
@@ -30,7 +30,7 @@
             </div>
         </div>
         <!-- 折叠时：展开按钮（drawer 模式下不显示） -->
-        <t-tooltip v-else-if="variant !== 'drawer'" :content="t('menu.expandSidebar')" placement="right">
+        <t-tooltip v-else :content="t('menu.expandSidebar')" placement="right">
             <div class="menu_item sidebar-toggle-item" @click="uiStore.toggleSidebar">
                 <div class="menu_item-box">
                     <div class="menu_icon">
@@ -50,16 +50,16 @@
         </t-tooltip>
 
         <!-- 空间选择器：仅在用户可切换空间时显示 -->
-        <TenantSelector v-if="canAccessAllTenants && !uiStore.sidebarCollapsed" />
+        <TenantSelector v-if="canAccessAllTenants && !isCollapsed" />
 
         <!-- 折叠时右侧拖拽展开手柄（drawer 模式下不显示） -->
-        <div v-if="uiStore.sidebarCollapsed && variant !== 'drawer'" class="sidebar-drag-handle" @mousedown="onDragHandleMouseDown" />
+        <div v-if="isCollapsed" class="sidebar-drag-handle" @mousedown="onDragHandleMouseDown" />
 
         <!-- 上半部分：新对话吸顶 + 知识库/智能体/共享空间/历史会话随滚动一起滚走 -->
         <div class="menu_top" ref="scrollContainer" @scroll="handleScroll">
             <!-- 全局搜索入口：点击打开命令面板（⌘K）。展开态移至顶部 logo_row 的图标按钮；
                  折叠态在此处保留为图标项 + 深色 tooltip。 -->
-            <div class="menu_box menu_box--cmdk" v-if="uiStore.sidebarCollapsed">
+            <div class="menu_box menu_box--cmdk" v-if="isCollapsed">
                 <t-tooltip placement="right">
                     <template #content>
                         <span class="cmdk-tip">
@@ -76,9 +76,9 @@
                     </div>
                 </t-tooltip>
             </div>
-            <div class="menu_box" :class="{ 'menu_box--sticky': item.children && !uiStore.sidebarCollapsed }"
+            <div class="menu_box" :class="{ 'menu_box--sticky': item.children && !isCollapsed }"
                 v-for="(item, index) in topMenuItems" :key="index">
-                <t-tooltip :content="item.title" placement="right" :disabled="!uiStore.sidebarCollapsed">
+                <t-tooltip :content="item.title" placement="right" :disabled="!isCollapsed">
                     <div @click="handleMenuClick(item.path)" @mouseenter="mouseenteMenu(item.path)"
                         @mouseleave="mouseleaveMenu(item.path)" :data-guide="`nav-${item.path}`"
                         :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
@@ -88,7 +88,7 @@
                                     :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
                                     alt="">
                             </div>
-                            <template v-if="!uiStore.sidebarCollapsed">
+                            <template v-if="!isCollapsed">
                                 <span class="menu_title" :title="item.title">{{ item.title }}</span>
                                 <span v-if="item.path === 'organizations' && orgStore.totalPendingJoinRequestCount > 0"
                                     class="menu-pending-badge"
@@ -101,7 +101,7 @@
             </div>
 
             <!-- 历史会话：按来源筛选后统一按日期分组展示 -->
-            <div class="submenu" v-if="!uiStore.sidebarCollapsed">
+            <div class="submenu" v-if="!isCollapsed">
                 <!-- Stable, always-mounted source filter: reserving its row here
                      (instead of embedding it in the first date group, which
                      appears/disappears while a bucket loads) prevents the
@@ -170,7 +170,7 @@
         </div>
 
         <!-- 批量管理底部操作条：固定在侧栏底部、用户头像上方 -->
-        <div v-if="batchMode && !uiStore.sidebarCollapsed" class="batch-inline-footer">
+        <div v-if="batchMode && !isCollapsed" class="batch-inline-footer">
             <div class="batch-footer-left">
                 <t-checkbox :checked="isAllBatchSelected" :indeterminate="isBatchIndeterminate"
                     @change="toggleBatchSelectAll">
@@ -298,6 +298,7 @@ const usemenuStore = useMenuStore();
 const authStore = useAuthStore();
 const orgStore = useOrganizationStore();
 const uiStore = useUIStore();
+const isCollapsed = computed(() => props.variant !== 'drawer' && uiStore.sidebarCollapsed)
 const commandPaletteStore = useCommandPaletteStore();
 
 // Platform-aware label for the ⌘K hint. navigator.platform is deprecated but

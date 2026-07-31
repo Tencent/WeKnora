@@ -62,7 +62,7 @@ import { useUIStore } from '@/stores/ui'
 import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
-import { isTablet as isTabletRef, isMobile as isMobileRef } from '@/composables/useBreakpoint'
+import { isTablet as isTabletRef } from '@/composables/useBreakpoint'
 
 const route = useRoute();
 const router = useRouter();
@@ -75,17 +75,16 @@ const { t } = useI18n();
 const isTablet = computed(() => isTabletRef.value)
 
 // 平板模式自动折叠侧边栏；桌面模式恢复用户偏好
+let tabletOverrideActive = false
 watch(isTabletRef, (val) => {
   if (val) {
-    // 进入平板：自动折叠侧边栏
-    uiStore.collapseSidebar()
-  }
-})
-
-watch(isMobileRef, (val) => {
-  if (val) {
-    // 进入手机模式：关闭可能残留的桌面侧边栏状态
-    uiStore.expandSidebar()
+    tabletOverrideActive = true
+    uiStore.collapseSidebar(false)
+  } else if (tabletOverrideActive) {
+    tabletOverrideActive = false
+    const shouldCollapse = localStorage.getItem('sidebar_collapsed') === 'true'
+    if (shouldCollapse) uiStore.collapseSidebar(false)
+    else uiStore.expandSidebar(false)
   }
 })
 

@@ -1,4 +1,4 @@
-import { ref, onMounted, onUnmounted, readonly } from 'vue'
+import { ref, onUnmounted, readonly } from 'vue'
 
 /**
  * 响应式断点检测 composable
@@ -80,20 +80,8 @@ function stopListening() {
 }
 
 export function useBreakpoint() {
-  // 首次使用时启动监听
-  if (listeners === 0) {
-    startListening()
-  }
-
-  // 但这里有个问题：如果页面没有组件调用 useBreakpoint，监听不会启动。
-  // 解决方案：在应用入口处（App.vue onMounted）主动调用 evalBreakpoint + startListening
-  // 这里只做组件级别的清理。
-
-  onMounted(() => {
-    if (listeners === 0) {
-      startListening()
-    }
-  })
+  // 每个使用者都持有一个监听引用，卸载时成对释放。
+  startListening()
 
   onUnmounted(() => {
     stopListening()
@@ -115,6 +103,6 @@ export function useBreakpoint() {
  * 但在应用未挂载任何 useBreakpoint 之前不会自动更新。
  * App.vue onMounted 会启动全局监听。
  */
-export { isMobile, isTablet, isDesktop, evalBreakpoint, startListening }
+export { isMobile, isTablet, isDesktop, evalBreakpoint, startListening, stopListening }
 
 export { MOBILE_MAX, TABLET_MAX }

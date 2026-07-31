@@ -128,14 +128,14 @@ export const useUIStore = defineStore('ui', {
       localStorage.setItem('sidebar_collapsed', String(this.sidebarCollapsed))
     },
 
-    collapseSidebar() {
+    collapseSidebar(persist = true) {
       this.sidebarCollapsed = true
-      localStorage.setItem('sidebar_collapsed', 'true')
+      if (persist) localStorage.setItem('sidebar_collapsed', 'true')
     },
 
-    expandSidebar() {
+    expandSidebar(persist = true) {
       this.sidebarCollapsed = false
-      localStorage.setItem('sidebar_collapsed', 'false')
+      if (persist) localStorage.setItem('sidebar_collapsed', 'false')
     },
 
     // 响应式断点
