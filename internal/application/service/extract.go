@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"slices"
 	"strings"
 	"time"
 
@@ -157,7 +156,8 @@ func NewDataTableSummaryTask(
 	return nil
 }
 
-// enqueueDataTableSummaryIfNeeded enqueues table summary work for spreadsheet imports.
+// enqueueDataTableSummaryIfNeeded enqueues table summary work for spreadsheet
+// imports. fileName is a fallback for older records whose FileType is empty.
 func enqueueDataTableSummaryIfNeeded(
 	ctx context.Context,
 	client interfaces.TaskEnqueuer,
@@ -165,11 +165,11 @@ func enqueueDataTableSummaryIfNeeded(
 	knowledgeID string,
 	fileName, fileType, summaryModelID, embeddingModelID string,
 ) {
-	ft := strings.ToLower(strings.TrimPrefix(fileType, "."))
+	ft := normalizeFileExtension(fileType)
 	if ft == "" && fileName != "" {
 		ft = getFileType(fileName)
 	}
-	if !slices.Contains([]string{"csv", "xlsx", "xls"}, ft) {
+	if !isDataTableFileType(ft) {
 		return
 	}
 	if err := NewDataTableSummaryTask(ctx, client, tenantID, knowledgeID, summaryModelID, embeddingModelID); err != nil {
