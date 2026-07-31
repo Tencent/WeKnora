@@ -434,7 +434,7 @@ func (r *sqliteRepository) vectorRetrieve(ctx context.Context, params types.Retr
 	for i, v := range rows {
 		// cosine distance = 1 - cosine_similarity
 		score := 1 - v.Distance
-		if score < params.Threshold {
+		if params.Threshold > 0 && score < params.Threshold {
 			continue
 		}
 
