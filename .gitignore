@@ -4,10 +4,6 @@
 !.env.example
 !.gitignore
 !.github/
-!.cursor/
-!.cursor/hooks.json
-!.cursor/hooks/
-!.cursor/hooks/**
 
 # 敏感文件
 *.pem
