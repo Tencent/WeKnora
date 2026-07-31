@@ -3500,15 +3500,14 @@ export default {
       tip1: 'After sharing, space members will access this knowledge base based on the assigned permissions',
       tip2: 'Editable permission allows members to modify content; Read-only permission only allows retrieval and Q&A'
     },
-    buttons: {
-      create: 'Создать базу знаний',
-      save: 'Сохранить настройки',
-      saveAndClose: 'Сохранить и закрыть',
-    },
     postCreateHint: {
       title: 'База знаний создана',
       footer: 'Продолжите настройку, настройте совместное использование и источники данных, затем нажмите «Сохранить и закрыть».',
-      followUpDesc: 'Настройте источники данных слева или опубликуйте базу в пространствах через «Управление общим доступом»',
+      followUpDesc: 'Настройте источники данных слева или опубликуйте базу в пространствах через «Управление общим доступом»'
+    },
+    buttons: {
+      create: 'Создать базу знаний',
+      saveAndClose: 'Сохранить и закрыть'
     },
     wikiBrowser: {
       editBtn: 'Редактировать',
@@ -4828,15 +4827,6 @@ export default {
     editor: {
       createTitle: 'Create Agent',
       editTitle: 'Edit Agent',
-      buttons: {
-        create: 'Создать агента',
-        saveAndClose: 'Сохранить и закрыть',
-      },
-      postCreateHint: {
-        title: 'Агент создан',
-        footer: 'Продолжите настройку, настройте совместное использование и публикацию, затем нажмите «Сохранить и закрыть».',
-        integrationDesc: 'Перейдите в раздел интеграций, чтобы настроить каналы IM, веб-встраивания и другие каналы публикации',
-      },
       basicInfo: 'Basic Info',
       basicInfoDesc: 'Настройка имени, описания и режима работы агента',
       promptsConfig: 'Промпты',
@@ -4930,7 +4920,16 @@ export default {
       selectSkillsDesc: 'Выберите Skills для активации',
       noSkillsAvailable: 'Нет доступных предустановленных Skills',
       skillsInfoTitle: 'Что такое Skills?',
-      skillsInfoContent: 'Skills — это предустановленные модули профессиональных знаний, которые предоставляют агенту инструкции, рабочие процессы и инструменты для конкретных областей. При активации агент автоматически загружает соответствующие знания по мере необходимости.'
+      skillsInfoContent: 'Skills — это предустановленные модули профессиональных знаний, которые предоставляют агенту инструкции, рабочие процессы и инструменты для конкретных областей. При активации агент автоматически загружает соответствующие знания по мере необходимости.',
+      postCreateHint: {
+        title: 'Агент создан',
+        footer: 'Продолжите настройку, настройте совместное использование и публикацию, затем нажмите «Сохранить и закрыть».',
+        integrationDesc: 'Перейдите в раздел интеграций, чтобы настроить каналы IM, веб-встраивания и другие каналы публикации'
+      },
+      buttons: {
+        create: 'Создать агента',
+        saveAndClose: 'Сохранить и закрыть'
+      }
     },
     messages: {
       created: 'Agent created successfully',

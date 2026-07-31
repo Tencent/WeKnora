@@ -1,5 +1,6 @@
-// Package asynqdl provides an asynq middleware that records every task
-// whose retry budget is exhausted into the generic task_dead_letters table.
+// Package asynqdl provides an asynq middleware that records every task Asynq
+// will permanently archive, either because its retry budget is exhausted or
+// because its handler returned asynq.SkipRetry.
 //
 // The middleware is the catch-all observability path for asynq failures:
 // without it, archived tasks live only inside Redis with the asynq
@@ -16,6 +17,7 @@ package asynqdl
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -36,11 +38,9 @@ import (
 //     zero overhead besides the function call.
 //
 //   - Tasks that fail (handler returns non-nil) trigger an inspection of
-//     asynq's retry counters. We only record on the FINAL retry —
-//     i.e. when GetRetryCount(ctx) >= GetMaxRetry(ctx). Earlier failures
-//     are still reported up to asynq for backoff/retry but do not
-//     create dead-letter rows; otherwise we'd write one row per
-//     transient hiccup.
+//     asynq's retry counters. We record when GetRetryCount(ctx) >=
+//     GetMaxRetry(ctx), or immediately for SkipRetry. Earlier retryable
+//     failures are reported up to asynq without creating a row.
 //
 //   - Insert is best-effort: a DB error is logged and swallowed. The
 //     middleware never alters the task error returned to the caller.
@@ -69,11 +69,13 @@ func MiddlewareWithCallback(repo interfaces.TaskDeadLetterRepository, cb OnDeadL
 			if err == nil {
 				return nil
 			}
-			if !isFinalAttempt(ctx) {
+			if !isFinalAttempt(ctx, err) {
 				return err
 			}
 			attempts := 0
 			if retried, ok := asynq.GetRetryCount(ctx); ok {
+				attempts = retried + 1
+			} else if retried, _, ok := types.TaskRetryMetadata(ctx); ok {
 				attempts = retried + 1
 			}
 			if repo != nil {
@@ -119,14 +121,21 @@ func Middleware(repo interfaces.TaskDeadLetterRepository) asynq.MiddlewareFunc {
 // attempt retry_count == max_retry. Both helpers can fail (returning
 // 0, false) when the middleware runs outside an asynq worker context;
 // in that case we conservatively report "final" so test setups that
-// invoke the middleware directly still exercise the insert path.
-func isFinalAttempt(ctx context.Context) bool {
-	retried, retriedOK := asynq.GetRetryCount(ctx)
-	maxRetry, maxOK := asynq.GetMaxRetry(ctx)
-	if !retriedOK || !maxOK {
+// invoke the middleware directly still exercise the insert path. SkipRetry is
+// also final even when the task's configured retry budget is not exhausted.
+func isFinalAttempt(ctx context.Context, taskErr error) bool {
+	if errors.Is(taskErr, asynq.SkipRetry) {
 		return true
 	}
-	return retried >= maxRetry
+	retried, retriedOK := asynq.GetRetryCount(ctx)
+	maxRetry, maxOK := asynq.GetMaxRetry(ctx)
+	if retriedOK && maxOK {
+		return retried >= maxRetry
+	}
+	if retried, maxRetry, ok := types.TaskRetryMetadata(ctx); ok {
+		return retried >= maxRetry
+	}
+	return true
 }
 
 // buildDeadLetter constructs a TaskDeadLetter from the task and the

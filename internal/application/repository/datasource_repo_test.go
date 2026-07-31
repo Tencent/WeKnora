@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -19,6 +20,15 @@ func setupDataSourceRepoTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&types.DataSource{}, &types.SyncLog{}))
 	return db
+}
+
+func TestSyncLogRepositoryFindByIDReturnsNotFoundSentinel(t *testing.T) {
+	repo := NewSyncLogRepository(setupDataSourceRepoTestDB(t))
+
+	_, err := repo.FindByID(context.Background(), "missing-sync-log")
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, datasource.ErrSyncLogNotFound))
 }
 
 func TestDataSourceRepositoryUpdateSyncStateClearsErrorMessage(t *testing.T) {

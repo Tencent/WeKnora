@@ -1,5 +1,10 @@
 package types
 
+import (
+	"context"
+	"time"
+)
+
 // Worker-pool names are part of the runtime observability API. Each pool is
 // backed by an independent asynq.Server, so concurrency is hard-isolated
 // between pools instead of being only a weighted dequeue preference.
@@ -43,12 +48,44 @@ const (
 	QueueMaintenance    = "low"
 	QueueWiki           = "wiki"
 
-	// DataSourceSyncMaxRetry gives asynchronous knowledge parsing enough time
-	// to finish while a data-source run retains its overlap/cursor barrier.
-	// The worker applies a fixed 30-second delay to that one retryable state,
-	// so this budget is approximately one hour.
-	DataSourceSyncMaxRetry = 120
+	// DataSourceSyncMaxRetry preserves the normal retry budget for fetch,
+	// persistence, and other data-source sync failures.
+	DataSourceSyncMaxRetry = 5
+	// DataSourceIngestPendingMaxRetry is reserved for the continuation task
+	// created only after a sync observes asynchronous knowledge ingestion.
+	// With the fixed 30-second delay, this is approximately one hour.
+	DataSourceIngestPendingMaxRetry = 120
+	// DataSourceIngestPendingRetryDelay is shared by Redis-backed and Lite
+	// workers so pending reconciliation has identical polling cadence.
+	DataSourceIngestPendingRetryDelay = 30 * time.Second
 )
+
+type taskRetryMetadata struct {
+	retryCount int
+	maxRetry   int
+}
+
+type taskRetryMetadataContextKey struct{}
+
+// WithTaskRetryMetadata attaches retry counters for task executors that do not
+// run inside an Asynq worker, such as Lite mode.
+func WithTaskRetryMetadata(ctx context.Context, retryCount, maxRetry int) context.Context {
+	return context.WithValue(ctx, taskRetryMetadataContextKey{}, taskRetryMetadata{
+		retryCount: retryCount,
+		maxRetry:   maxRetry,
+	})
+}
+
+// TaskRetryMetadata returns retry counters attached by a non-Asynq task
+// executor. Redis-backed workers should continue using asynq.GetRetryCount and
+// asynq.GetMaxRetry as their authoritative metadata source.
+func TaskRetryMetadata(ctx context.Context) (retryCount, maxRetry int, ok bool) {
+	metadata, ok := ctx.Value(taskRetryMetadataContextKey{}).(taskRetryMetadata)
+	if !ok {
+		return 0, 0, false
+	}
+	return metadata.retryCount, metadata.maxRetry, true
+}
 
 // QueueDefinition is the single source of truth for queue topology. Worker
 // servers and runtime inspection both consume this registry, preventing the

@@ -339,7 +339,7 @@ func (r *SyncLogRepository) FindByID(ctx context.Context, id string) (*types.Syn
 		Where("id = ?", id).
 		First(&log).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("sync log not found")
+			return nil, datasource.ErrSyncLogNotFound
 		}
 		return nil, err
 	}

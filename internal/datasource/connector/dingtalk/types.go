@@ -193,7 +193,7 @@ type node struct {
 	NodeID            string `json:"nodeId"`
 	WorkspaceID       string `json:"workspaceId"`
 	Name              string `json:"name"`
-	Type              string `json:"type"` // "FOLDER" or "DOC"
+	Type              string `json:"type"` // "FOLDER" or "FILE"; online docs are FILE/ALIDOC/adoc
 	Category          string `json:"category"`
 	Extension         string `json:"extension"`
 	URL               string `json:"url"`

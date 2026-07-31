@@ -3500,15 +3500,14 @@ export default {
       tip1: '공유 후 스페이스 구성원은 설정된 권한에 따라 이 지식베이스에 액세스하게 됩니다.',
       tip2: '편집 가능한 권한을 통해 구성원은 지식베이스 콘텐츠를 수정할 수 있으며, 읽기 전용 권한은 검색 및 Q&A만 허용합니다.'
     },
-    buttons: {
-      create: '지식베이스 생성',
-      save: '설정 저장',
-      saveAndClose: '저장 후 닫기',
-    },
     postCreateHint: {
       title: '생성 완료',
       footer: '설정을 계속 조정하고 공유·데이터 소스를 구성한 뒤 "저장 후 닫기"를 클릭하세요.',
-      followUpDesc: '왼쪽에서 데이터 소스를 구성하거나 "공유 관리"에서 스페이스에 게시할 수 있습니다',
+      followUpDesc: '왼쪽에서 데이터 소스를 구성하거나 "공유 관리"에서 스페이스에 게시할 수 있습니다'
+    },
+    buttons: {
+      create: '지식베이스 생성',
+      saveAndClose: '저장 후 닫기'
     },
     wikiBrowser: {
       editBtn: '편집',
@@ -4828,15 +4827,6 @@ export default {
     editor: {
       createTitle: '에이전트 만들기',
       editTitle: '에이전트 편집',
-      buttons: {
-        create: '에이전트 만들기',
-        saveAndClose: '저장 후 닫기',
-      },
-      postCreateHint: {
-        title: '생성 완료',
-        footer: '설정을 계속 조정하고 공유·배포 채널을 구성한 뒤 "저장 후 닫기"를 클릭하세요.',
-        integrationDesc: '통합 센터에서 IM, 웹 임베드 등 배포 채널을 설정하세요',
-      },
       basicInfo: '기본정보',
       basicInfoDesc: '에이전트 이름, 설명 및 실행 모드 구성',
       promptsConfig: '프롬프트',
@@ -4930,7 +4920,16 @@ export default {
       selectSkillsDesc: '활성화할 Skills 선택',
       noSkillsAvailable: '사전 설치된 Skills가 없습니다',
       skillsInfoTitle: 'Skills란 무엇인가요?',
-      skillsInfoContent: 'Skills는 Agent에 특정 도메인의 지침, 워크플로 및 도구 지원을 제공하는 사전 설치된 전문 지식 모듈입니다. 활성화되면 Agent는 필요할 때 자동으로 관련 지식을 로드합니다.'
+      skillsInfoContent: 'Skills는 Agent에 특정 도메인의 지침, 워크플로 및 도구 지원을 제공하는 사전 설치된 전문 지식 모듈입니다. 활성화되면 Agent는 필요할 때 자동으로 관련 지식을 로드합니다.',
+      postCreateHint: {
+        title: '생성 완료',
+        footer: '설정을 계속 조정하고 공유·배포 채널을 구성한 뒤 "저장 후 닫기"를 클릭하세요.',
+        integrationDesc: '통합 센터에서 IM, 웹 임베드 등 배포 채널을 설정하세요'
+      },
+      buttons: {
+        create: '에이전트 만들기',
+        saveAndClose: '저장 후 닫기'
+      }
     },
     messages: {
       created: '에이전트가 성공적으로 생성되었습니다.',

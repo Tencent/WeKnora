@@ -545,6 +545,11 @@ type DataSourceSyncPayload struct {
 	// Force full sync even if incremental mode is configured
 	ForceFull bool `json:"force_full"`
 
+	// PendingReconciliation marks the dedicated continuation created only
+	// after asynchronous knowledge ingestion is observed. Its larger retry
+	// budget must never be applied to ordinary sync tasks.
+	PendingReconciliation bool `json:"pending_reconciliation,omitempty"`
+
 	// Maximum number of items to fetch (0 = unlimited)
 	MaxItems int `json:"max_items,omitempty"`
 }

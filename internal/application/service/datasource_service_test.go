@@ -175,11 +175,13 @@ func TestProcessSyncAutomaticallyReconcilesPendingDingTalkCreate(t *testing.T) {
 	syncLogs := &processSyncSyncLogRepo{logs: map[string]*types.SyncLog{
 		syncLog.ID: syncLog,
 	}}
+	enqueuer := &recordingDataSourceTaskEnqueuer{}
 	svc := &DataSourceService{
 		dsRepo:            dsRepo,
 		syncLogRepo:       syncLogs,
 		knowledgeService:  knowledgeService,
 		kbService:         &processSyncKBService{kb: &types.KnowledgeBase{ID: ds.KnowledgeBaseID}},
+		taskEnqueuer:      enqueuer,
 		connectorRegistry: registry,
 		tenantRepo:        &processSyncTenantRepo{},
 		tagService:        &processSyncTagService{},
@@ -194,7 +196,7 @@ func TestProcessSyncAutomaticallyReconcilesPendingDingTalkCreate(t *testing.T) {
 
 	err = svc.ProcessSync(context.Background(), task)
 
-	require.ErrorIs(t, err, ErrDataSourceIngestPending)
+	require.NoError(t, err)
 	assert.Equal(t, types.SyncLogStatusRunning, syncLog.Status)
 	assert.Nil(t, syncLog.FinishedAt)
 	assert.Zero(t, syncLog.ItemsFailed)
@@ -206,14 +208,26 @@ func TestProcessSyncAutomaticallyReconcilesPendingDingTalkCreate(t *testing.T) {
 	assert.Empty(t, knowledgeService.deleted, "old identity must remain while the replacement is pending")
 	assert.Equal(t, []string{"create:document.md"}, knowledgeService.events)
 	assert.Equal(t, 1, connector.fetchCalls)
+	require.Equal(t, 1, enqueuer.recordCount())
+	continuation := enqueuer.record(0).task
+	knowledgeRepo.findAllReturn = []*types.Knowledge{created, obsolete}
+
+	// The dedicated continuation alone owns the long retry budget. Repeated
+	// pending observations return the sentinel for Asynq without enqueuing
+	// another continuation.
+	err = svc.ProcessSync(context.Background(), continuation)
+
+	require.ErrorIs(t, err, ErrDataSourceIngestPending)
+	require.Equal(t, 1, enqueuer.recordCount())
+	assert.Equal(t, types.SyncLogStatusRunning, syncLog.Status)
+	assert.Equal(t, 2, connector.fetchCalls)
 
 	// The knowledge worker completes asynchronously. The same Asynq task retry
 	// then promotes the row, applies the deferred deletion, and is the only
 	// attempt allowed to advance cursor.
 	created.ParseStatus = types.ParseStatusCompleted
-	knowledgeRepo.findAllReturn = []*types.Knowledge{created, obsolete}
 
-	err = svc.ProcessSync(context.Background(), task)
+	err = svc.ProcessSync(context.Background(), continuation)
 
 	require.NoError(t, err)
 	assert.Equal(t, types.SyncLogStatusSuccess, syncLog.Status)
@@ -222,7 +236,7 @@ func TestProcessSyncAutomaticallyReconcilesPendingDingTalkCreate(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, persistedCursor)
 	assert.Equal(t, "new", persistedCursor.ConnectorCursor["revision"])
-	assert.Equal(t, 2, connector.fetchCalls)
+	assert.Equal(t, 3, connector.fetchCalls)
 	assert.Equal(t, []string{"create:document.md", "delete:knowledge-obsolete"}, knowledgeService.events)
 	assert.Equal(t, []string{"knowledge-obsolete"}, knowledgeService.deleted)
 	require.Len(t, knowledgeRepo.updated, 1)
@@ -1363,7 +1377,7 @@ func (r *processSyncSyncLogRepo) Create(_ context.Context, log *types.SyncLog) e
 func (r *processSyncSyncLogRepo) FindByID(_ context.Context, id string) (*types.SyncLog, error) {
 	log, ok := r.logs[id]
 	if !ok {
-		return nil, errors.New("sync log not found")
+		return nil, datasource.ErrSyncLogNotFound
 	}
 	return log, nil
 }

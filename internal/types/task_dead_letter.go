@@ -5,15 +5,16 @@ import (
 	"time"
 )
 
-// TaskDeadLetter is one row in the `task_dead_letters` archive: a
-// permanent record of a task whose retry budget was exhausted. The table
-// is populated from two distinct paths:
+// TaskDeadLetter is one row in the `task_dead_letters` archive: a permanent
+// record of a task that exhausted its retry budget or was explicitly marked
+// non-retryable. The table is populated from two distinct paths:
 //
 //  1. The asynq dead-letter middleware
 //     (internal/middleware/asynq_dead_letter.go) inserts a row whenever
-//     an asynq task's retry count equals its MaxRetry on the way out.
-//     This is the catch-all that covers every registered task type
-//     uniformly without per-handler instrumentation.
+//     an asynq task's retry count equals its MaxRetry on the way out, or
+//     when a handler returns asynq.SkipRetry. This is the catch-all that
+//     covers every registered task type uniformly without per-handler
+//     instrumentation.
 //
 //  2. Service-level retry handlers insert directly when an in-batch
 //     retry counter exceeds the service-defined cap. Wiki ingest is the

@@ -682,12 +682,13 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 	langfuse.InjectTracing(ctx, payload)
 
 	payloadJSON, _ := json.Marshal(payload)
-	task := asynq.NewTask(types.TypeDataSourceSync, payloadJSON,
+	task := asynq.NewTask(types.TypeDataSourceSync, payloadJSON)
+
+	info, err := s.taskEnqueuer.Enqueue(task,
 		asynq.Queue(types.QueueSync),
 		asynq.MaxRetry(types.DataSourceSyncMaxRetry),
-		asynq.Timeout(2*time.Hour))
-
-	info, err := s.taskEnqueuer.Enqueue(task)
+		asynq.Timeout(2*time.Hour),
+	)
 	if err != nil {
 		logger.Errorf(ctx, "failed to enqueue sync task: %v", err)
 		syncLog.Status = types.SyncLogStatusFailed
@@ -786,14 +787,26 @@ func (s *DataSourceService) GetSyncLog(ctx context.Context, syncLogID string) (*
 }
 
 // ProcessSync handles the actual sync operation (called by asynq task)
-func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) error {
+func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) (retErr error) {
+	taskID, _ := asynq.GetTaskID(ctx)
+	pendingReconciliation := strings.HasPrefix(taskID, dataSourcePendingReconciliationTaskIDPrefix)
 	var payload types.DataSourceSyncPayload
+	defer func() {
+		pendingReconciliation = pendingReconciliation || payload.PendingReconciliation
+		if !pendingReconciliation {
+			return
+		}
+		if payload.SyncLogID == "" {
+			payload.SyncLogID = pendingReconciliationSyncLogID(taskID)
+		}
+		retErr = s.limitPendingReconciliationError(ctx, payload, retErr)
+	}()
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		logger.Errorf(ctx, "failed to unmarshal sync payload: %v", err)
 		return err
 	}
+	pendingReconciliation = pendingReconciliation || payload.PendingReconciliation
 	ctx = payload.Initiator.Apply(ctx)
-	taskID, _ := asynq.GetTaskID(ctx)
 	ctx = withKBActivityTask(ctx, taskID, payload.Trigger)
 
 	logger.Infof(ctx, "processing data source sync: ds=%s syncLog=%s", payload.DataSourceID, payload.SyncLogID)
@@ -814,8 +827,12 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	// Get sync log
 	syncLog, err := s.syncLogRepo.FindByID(ctx, payload.SyncLogID)
 	if err != nil {
+		if errors.Is(err, datasource.ErrSyncLogNotFound) {
+			logger.Infof(ctx, "skipping data source sync whose log was removed: syncLog=%s", payload.SyncLogID)
+			return nil
+		}
 		logger.Errorf(ctx, "failed to get sync log: %v", err)
-		return nil
+		return err
 	}
 	if syncLog == nil || syncLog.Status != types.SyncLogStatusRunning {
 		// A failed attempt writes its log terminal before returning an error.
@@ -1032,7 +1049,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			"%d document(s) are still processing and will be checked again",
 			result.Pending,
 		)
-		if syncRetryBudgetExhausted(ctx) {
+		if payload.PendingReconciliation && syncRetryBudgetExhausted(ctx) {
 			pendingCount := result.Pending
 			result.Pending = 0
 			result.Failed += pendingCount
@@ -1064,6 +1081,22 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			return timeoutErr
 		}
 		s.updateSyncRunProgress(ctx, syncLog, result, resultJSON, pendingMessage)
+		if !payload.PendingReconciliation {
+			if err := s.enqueuePendingReconciliation(ctx, payload); err != nil {
+				if syncRetryBudgetExhausted(ctx) {
+					s.finishPendingReconciliationScheduleFailure(
+						ctx,
+						ds,
+						syncLog,
+						result,
+						runStartStatus,
+						err,
+					)
+				}
+				return err
+			}
+			return nil
+		}
 		return ErrDataSourceIngestPending
 	}
 	if err := allFetchedItemsFailedError(result); err != nil {
@@ -1683,10 +1716,158 @@ func (s *DataSourceService) updateSyncRunProgress(
 	}
 }
 
-func syncRetryBudgetExhausted(ctx context.Context) bool {
-	retried, retriedOK := asynq.GetRetryCount(ctx)
+const dataSourcePendingReconciliationTaskIDPrefix = "dssync-pending:"
+
+func (s *DataSourceService) enqueuePendingReconciliation(
+	ctx context.Context,
+	payload types.DataSourceSyncPayload,
+) error {
+	if s.taskEnqueuer == nil {
+		return errors.New("data-source task enqueuer is not configured")
+	}
+	if payload.SyncLogID == "" {
+		return errors.New("cannot enqueue pending reconciliation without a sync log ID")
+	}
+
+	payload.PendingReconciliation = true
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal pending data-source reconciliation: %w", err)
+	}
+	taskID := dataSourcePendingReconciliationTaskIDPrefix + payload.SyncLogID
+	_, err = s.taskEnqueuer.Enqueue(
+		asynq.NewTask(types.TypeDataSourceSync, payloadJSON),
+		asynq.Queue(types.QueueSync),
+		asynq.MaxRetry(types.DataSourceIngestPendingMaxRetry),
+		asynq.Timeout(2*time.Hour),
+		asynq.ProcessIn(types.DataSourceIngestPendingRetryDelay),
+		asynq.TaskID(taskID),
+	)
+	if errors.Is(err, asynq.ErrTaskIDConflict) {
+		logger.Infof(ctx, "pending data-source reconciliation already enqueued: syncLog=%s", payload.SyncLogID)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("enqueue pending data-source reconciliation: %w", err)
+	}
+	logger.Infof(ctx, "pending data-source reconciliation enqueued: syncLog=%s", payload.SyncLogID)
+	return nil
+}
+
+func pendingReconciliationSyncLogID(taskID string) string {
+	if !strings.HasPrefix(taskID, dataSourcePendingReconciliationTaskIDPrefix) {
+		return ""
+	}
+	return strings.TrimPrefix(taskID, dataSourcePendingReconciliationTaskIDPrefix)
+}
+
+func dataSourceTaskRetryMetadata(ctx context.Context) (retryCount, maxRetry int, ok bool) {
+	retryCount, retryOK := asynq.GetRetryCount(ctx)
 	maxRetry, maxRetryOK := asynq.GetMaxRetry(ctx)
-	return retriedOK && maxRetryOK && retried >= maxRetry
+	if retryOK && maxRetryOK {
+		return retryCount, maxRetry, true
+	}
+	return types.TaskRetryMetadata(ctx)
+}
+
+func syncRetryBudgetExhausted(ctx context.Context) bool {
+	retried, maxRetry, ok := dataSourceTaskRetryMetadata(ctx)
+	return ok && retried >= maxRetry
+}
+
+func (s *DataSourceService) limitPendingReconciliationError(
+	ctx context.Context,
+	payload types.DataSourceSyncPayload,
+	taskErr error,
+) error {
+	if taskErr == nil ||
+		errors.Is(taskErr, ErrDataSourceIngestPending) ||
+		errors.Is(taskErr, asynq.SkipRetry) {
+		return taskErr
+	}
+
+	retried, maxRetry, ok := dataSourceTaskRetryMetadata(ctx)
+	if !ok ||
+		maxRetry <= types.DataSourceSyncMaxRetry ||
+		retried < types.DataSourceSyncMaxRetry {
+		return taskErr
+	}
+
+	if err := s.finishRunningPendingReconciliation(ctx, payload, taskErr); err != nil {
+		return errors.Join(
+			taskErr,
+			fmt.Errorf("finalize pending data-source reconciliation: %w", err),
+		)
+	}
+	return fmt.Errorf("%w: %w", taskErr, asynq.SkipRetry)
+}
+
+func (s *DataSourceService) finishRunningPendingReconciliation(
+	ctx context.Context,
+	payload types.DataSourceSyncPayload,
+	taskErr error,
+) error {
+	if payload.SyncLogID == "" {
+		return errors.New("pending reconciliation has no sync log ID")
+	}
+	if s.syncLogRepo == nil {
+		return errors.New("sync log repository is not configured")
+	}
+	syncLog, err := s.syncLogRepo.FindByID(ctx, payload.SyncLogID)
+	if err != nil {
+		return fmt.Errorf("load sync log %s: %w", payload.SyncLogID, err)
+	}
+	if syncLog == nil {
+		return fmt.Errorf("sync log %s was not found", payload.SyncLogID)
+	}
+	if syncLog.Status != types.SyncLogStatusRunning {
+		return nil
+	}
+	syncLog.Status = types.SyncLogStatusFailed
+	syncLog.FinishedAt = timePtr(time.Now().UTC())
+	syncLog.ErrorMessage = fmt.Sprintf(
+		"Pending ingestion reconciliation stopped after %d retries: %v",
+		types.DataSourceSyncMaxRetry,
+		taskErr,
+	)
+	if err := s.syncLogRepo.Update(ctx, syncLog); err != nil {
+		return fmt.Errorf("update sync log %s: %w", payload.SyncLogID, err)
+	}
+	return nil
+}
+
+func (s *DataSourceService) finishPendingReconciliationScheduleFailure(
+	ctx context.Context,
+	ds *types.DataSource,
+	syncLog *types.SyncLog,
+	result *types.SyncResult,
+	runStartStatus string,
+	scheduleErr error,
+) {
+	pendingCount := result.Pending
+	result.Pending = 0
+	result.Failed += pendingCount
+	recordSyncError(result, types.SyncItemError{
+		Code:    "ingest_reconciliation_enqueue_failed",
+		Message: "Failed to schedule another document-processing status check",
+	})
+	resultJSON, _ := result.ToJSON()
+	status := types.SyncLogStatusPartial
+	if result.Failed == result.Total &&
+		result.Created == 0 && result.Updated == 0 &&
+		result.Deleted == 0 && result.Skipped == 0 {
+		status = types.SyncLogStatusFailed
+	}
+	s.updateSyncRunResult(
+		ctx,
+		ds,
+		syncLog,
+		result,
+		resultJSON,
+		status,
+		fmt.Sprintf("Failed to schedule document-processing status check: %v", scheduleErr),
+		runStartStatus,
+	)
 }
 
 // applySyncOutcomeStatus derives only the run's proposed status. The repository

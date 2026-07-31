@@ -180,6 +180,41 @@ func TestMiddleware_RepoFailure_DoesNotMaskTaskError(t *testing.T) {
 	}
 }
 
+func TestMiddleware_SkipRetryRecordsBeforeConfiguredMaxRetry(t *testing.T) {
+	repo := &fakeRepo{}
+	wantErr := errors.New("reconciliation failed")
+	handlerErr := errors.Join(wantErr, asynq.SkipRetry)
+	wrapped := Middleware(repo)(asynq.HandlerFunc(
+		func(context.Context, *asynq.Task) error {
+			return handlerErr
+		},
+	))
+	ctx := types.WithTaskRetryMetadata(context.Background(), 5, 120)
+
+	gotErr := wrapped.ProcessTask(ctx, asynq.NewTask(
+		"datasource:sync",
+		[]byte(`{"tenant_id":7}`),
+	))
+
+	if !errors.Is(gotErr, wantErr) || !errors.Is(gotErr, asynq.SkipRetry) {
+		t.Fatalf("expected wrapped original and SkipRetry errors, got %v", gotErr)
+	}
+	if got := repo.rowCount(); got != 1 {
+		t.Fatalf("expected SkipRetry to record one dead letter, got %d", got)
+	}
+	if got := repo.captureRow(0).FailCount; got != 6 {
+		t.Fatalf("FailCount = %d, want 6 attempts from Lite retry metadata", got)
+	}
+}
+
+func TestIsFinalAttempt_OrdinaryErrorBeforeConfiguredMaxRetry(t *testing.T) {
+	ctx := types.WithTaskRetryMetadata(context.Background(), 5, 120)
+
+	if isFinalAttempt(ctx, errors.New("transient")) {
+		t.Fatal("ordinary error before max retry must not be final")
+	}
+}
+
 func TestInferScope_Priority(t *testing.T) {
 	tests := []struct {
 		name      string

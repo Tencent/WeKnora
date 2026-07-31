@@ -206,6 +206,9 @@ func (s *Scheduler) triggerSync(dataSourceID string, tenantID uint64) {
 
 	_, err = s.taskEnqueuer.Enqueue(task,
 		asynq.Queue(types.QueueSync),
+		// Ordinary sync failures retain the historical five-retry budget.
+		// ProcessSync creates a separate long-lived task only after it observes
+		// asynchronous knowledge ingestion still in progress.
 		asynq.MaxRetry(types.DataSourceSyncMaxRetry),
 		asynq.Timeout(2*time.Hour),
 		asynq.TaskID(taskID),
