@@ -7309,21 +7309,24 @@ onUnmounted(() => {
 
 .wiki-health-filter-row {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 6px;
+  align-items: flex-start;
+  gap: 10px;
   min-width: 0;
 }
 
 .wiki-health-filter-label {
   flex: 0 0 auto;
+  min-width: 52px;
+  padding-top: 5px;
   font-size: 12px;
   line-height: 1.2;
   color: var(--td-text-color-placeholder);
+  white-space: nowrap;
 }
 
 .wiki-health-filter-chips {
   display: flex;
+  flex: 1 1 0;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
