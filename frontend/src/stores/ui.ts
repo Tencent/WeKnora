@@ -1,5 +1,18 @@
 import { defineStore } from 'pinia'
 
+const SIDEBAR_COLLAPSED_KEY = 'sidebar_collapsed'
+
+const getInitialSidebarCollapsed = () => {
+  if (window.matchMedia('(max-width: 768px)').matches) {
+    return true
+  }
+  const savedPreference = localStorage.getItem(SIDEBAR_COLLAPSED_KEY)
+  if (savedPreference !== null) {
+    return savedPreference === 'true'
+  }
+  return false
+}
+
 export const useUIStore = defineStore('ui', {
   state: () => ({
     showSettingsModal: false,
@@ -20,7 +33,7 @@ export const useUIStore = defineStore('ui', {
     manualEditorInitialContent: '',
     manualEditorInitialStatus: 'draft' as 'draft' | 'publish',
     manualEditorOnSuccess: null as null | ((payload: { kbId: string; knowledgeId: string; status: 'draft' | 'publish' }) => void),
-    sidebarCollapsed: localStorage.getItem('sidebar_collapsed') === 'true'
+    sidebarCollapsed: getInitialSidebarCollapsed()
   }),
 
   actions: {
@@ -122,17 +135,17 @@ export const useUIStore = defineStore('ui', {
 
     toggleSidebar() {
       this.sidebarCollapsed = !this.sidebarCollapsed
-      localStorage.setItem('sidebar_collapsed', String(this.sidebarCollapsed))
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(this.sidebarCollapsed))
     },
 
     collapseSidebar() {
       this.sidebarCollapsed = true
-      localStorage.setItem('sidebar_collapsed', 'true')
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, 'true')
     },
 
     expandSidebar() {
       this.sidebarCollapsed = false
-      localStorage.setItem('sidebar_collapsed', 'false')
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, 'false')
     }
   }
 })
