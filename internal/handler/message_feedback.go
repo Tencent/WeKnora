@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"bytes"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,15 +13,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
-
-func readBody(c *gin.Context) string {
-	if c.Request == nil || c.Request.Body == nil {
-		return ""
-	}
-	raw, _ := io.ReadAll(c.Request.Body)
-	c.Request.Body = io.NopCloser(bytes.NewBuffer(raw))
-	return string(raw)
-}
 
 // MessageFeedbackHandler exposes the answer like/dislike endpoints required
 // by issue #1248. It owns three responsibilities:
@@ -76,7 +65,6 @@ type SetMessageFeedbackRequest struct {
 // @Security     ApiKeyAuth
 // @Router       /sessions/{session_id}/messages/{message_id}/feedback [put]
 func (h *MessageFeedbackHandler) Set(c *gin.Context) {
-	logger.Infof(c.Request.Context(), "[FeedbackHandler] Set hit: url=%s rawBody=%s", c.Request.URL.String(), readBody(c))
 	var req SetMessageFeedbackRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperrors.NewBadRequestError("invalid request body"))

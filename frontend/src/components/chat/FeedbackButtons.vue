@@ -95,6 +95,9 @@ const dialogVisible = ref(false);
 const selectedReasons = ref([...props.reasons]);
 const comment = ref(props.comment || '');
 const commentError = ref('');
+// Captures the rating state that existed before the dislike dialog opened.
+// Used to restore state on cancel or failed confirm.
+const preDialogState = ref({ rating: '', reasons: [] as string[], comment: '' });
 
 // Keep the dialog's draft state in sync when the parent updates the
 // hydrated rating (e.g. after a page reload). The rating itself is not
@@ -158,14 +161,17 @@ async function onClick(next) {
   const previousComment = comment.value;
 
   if (target === 'dislike') {
+    // Save the state before opening the dialog so we can restore on cancel/failure.
+    preDialogState.value = {
+      rating: previous,
+      reasons: [...previousReasons],
+      comment: previousComment,
+    };
+    // Reset dialog draft state to the current hydrated values so stale edits
+    // from a previously canceled session don't leak into this one.
     selectedReasons.value = [...previousReasons];
     comment.value = previousComment;
     commentError.value = '';
-    pending.value = true;
-    emit('update:modelValue', 'dislike');
-    if (previous === 'like') {
-      emit('update:reasons', []);
-    }
     dialogVisible.value = true;
     pending.value = false;
     return;
@@ -208,13 +214,16 @@ async function onConfirmDislike() {
       reasons: apiReasons,
       comment: comment.value,
     });
+    emit('update:modelValue', 'dislike');
     emit('update:reasons', apiReasons);
     emit('update:comment', comment.value);
     emit('feedback-saved', { rating: 'dislike', reasons: apiReasons, comment: comment.value });
     dialogVisible.value = false;
     MessagePlugin.success(t('feedback.saveSuccess'));
   } catch (err) {
-    emit('update:modelValue', '');
+    emit('update:modelValue', preDialogState.value.rating);
+    emit('update:reasons', preDialogState.value.reasons);
+    emit('update:comment', preDialogState.value.comment);
     MessagePlugin.error(t('feedback.saveError'));
   } finally {
     pending.value = false;
@@ -222,11 +231,14 @@ async function onConfirmDislike() {
 }
 
 function onCancelDislike() {
-  // Revert the optimistic flip on cancel so the bubble stays consistent
-  // with the persisted state.
-  emit('update:modelValue', '');
-  emit('update:reasons', []);
-  emit('update:comment', '');
+  // Revert to the state that existed before the dialog opened.
+  emit('update:modelValue', preDialogState.value.rating);
+  emit('update:reasons', preDialogState.value.reasons);
+  emit('update:comment', preDialogState.value.comment);
+  // Reset local draft state so the next dialog open starts clean.
+  selectedReasons.value = [...preDialogState.value.reasons];
+  comment.value = preDialogState.value.comment;
+  commentError.value = '';
   dialogVisible.value = false;
 }
 

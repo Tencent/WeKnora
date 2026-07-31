@@ -62,7 +62,7 @@ const columns = [
   { colKey: 'chunk_id', title: 'Chunk', ellipsis: true, minWidth: 220 },
   { colKey: 'old_weight', title: 'Old', width: 80 },
   { colKey: 'new_weight', title: 'New', width: 80 },
-  { colKey: 'reason', title: 'Reason', minWidth: 160 },
+  { colKey: 'trigger_source', title: 'Reason', minWidth: 160 },
   { colKey: 'created_at', title: 'When', width: 180 },
 ];
 

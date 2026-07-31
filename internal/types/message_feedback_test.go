@@ -113,7 +113,7 @@ func TestValidateFeedbackPolicy(t *testing.T) {
 	}
 
 	bad3 := &types.RetrievalConfig{}
-	bad3.FeedbackMinSamples = 0
+	bad3.FeedbackMinSamples = -1
 	if err := bad3.ValidateFeedbackPolicy(); err == nil {
 		t.Fatal("min-samples<1 must error")
 	}

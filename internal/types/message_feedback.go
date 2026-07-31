@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // ErrFeedbackRecomputeStale aborts a weight recomputation whose source
@@ -113,7 +114,7 @@ func (MessageFeedback) TableName() string {
 }
 
 // BeforeCreate generates a UUID for new feedback rows.
-func (m *MessageFeedback) BeforeCreate(_ interface{}) error {
+func (m *MessageFeedback) BeforeCreate(tx *gorm.DB) error {
 	if m.ID == "" {
 		m.ID = uuid.New().String()
 	}

@@ -233,6 +233,17 @@ func (c *RetrievalConfig) ValidateFeedbackPolicy() error {
 		(c.FeedbackNeedsOptimizationThreshold <= 0 || c.FeedbackNeedsOptimizationThreshold > 1) {
 		return fmt.Errorf("feedback_needs_optimization_threshold must be in (0, 1], got %v", c.FeedbackNeedsOptimizationThreshold)
 	}
+	// An explicitly-set needs-optimization threshold must not exceed the
+	// effective penalty threshold — otherwise the "low-quality" flag and the
+	// penalty band would disagree. The effective getter clamps at runtime,
+	// but we reject at save time so the config owner gets feedback.
+	if c.FeedbackNeedsOptimizationThreshold != 0 {
+		penaltyForNeedsOpt := c.GetEffectiveFeedbackPenaltyThreshold()
+		if c.FeedbackNeedsOptimizationThreshold > penaltyForNeedsOpt {
+			return fmt.Errorf("feedback_needs_optimization_threshold (%v) must be <= feedback_penalty_threshold (%v)",
+				c.FeedbackNeedsOptimizationThreshold, penaltyForNeedsOpt)
+		}
+	}
 	return nil
 }
 
