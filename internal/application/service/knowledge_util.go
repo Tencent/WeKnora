@@ -30,6 +30,15 @@ func isValidFileType(filename string) bool {
 	}
 }
 
+// isAllowedFileURLExtension checks whether a file extension is supported for URL-based file import.
+func isAllowedFileURLExtension(ext string) bool {
+	ext = strings.ToLower(strings.TrimPrefix(ext, "."))
+	if ext == "" {
+		return false
+	}
+	return isValidFileType("file." + ext)
+}
+
 // getFileType extracts the file extension from a filename
 func getFileType(filename string) string {
 	ext := strings.Split(filename, ".")
