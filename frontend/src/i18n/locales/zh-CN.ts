@@ -631,6 +631,8 @@ export default {
     },
     field: {
       appId: 'App ID',
+      appKey: 'AppKey / Client ID',
+      operatorId: '操作人 UnionID',
       appSecret: 'App Secret',
       integrationToken: 'Integration Token',
       apiToken: 'API Token',
@@ -646,6 +648,7 @@ export default {
       lark: '同步 Lark 知识库中的文档、表格、文件（飞书国际版）',
       notion: '同步 Notion 中的页面和数据库',
       yuque: '同步语雀知识库中的文档',
+      dingtalk: '同步钉钉知识库中的文档',
       rss: '同步 RSS / Atom 订阅源中的文章'
     },
     connector: {
@@ -653,6 +656,7 @@ export default {
       lark: 'Lark（飞书国际版）',
       notion: 'Notion',
       yuque: '语雀',
+      dingtalk: '钉钉文档',
       rss: 'RSS / Atom 订阅'
     },
     logDetail: {

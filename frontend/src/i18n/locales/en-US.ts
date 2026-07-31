@@ -5086,6 +5086,7 @@ export default {
       lark: 'Lark',
       notion: 'Notion',
       yuque: 'Yuque',
+      dingtalk: 'DingTalk Docs',
       rss: 'RSS / Atom Feed'
     },
     connectorDesc: {
@@ -5093,6 +5094,7 @@ export default {
       lark: 'Sync documents, spreadsheets and files from Lark Wiki (Feishu international)',
       notion: 'Sync pages and databases from Notion',
       yuque: 'Sync documents from Yuque knowledge bases',
+      dingtalk: 'Sync documents from DingTalk knowledge bases',
       rss: 'Sync articles from RSS / Atom feeds'
     },
     field: {
