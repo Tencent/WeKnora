@@ -31,17 +31,49 @@ func NewWikiPageRepository(db *gorm.DB) interfaces.WikiPageRepository {
 }
 
 func (r *wikiPageRepository) wikiCategoryRankOrder() string {
-	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
-		return "CASE WHEN COALESCE(json_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	if r.db != nil && r.db.Dialector != nil {
+		switch r.db.Dialector.Name() {
+		case "sqlite":
+			return "CASE WHEN COALESCE(json_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+		case "mysql":
+			return "CASE WHEN COALESCE(JSON_LENGTH(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+		}
 	}
 	return "CASE WHEN COALESCE(jsonb_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
 }
 
 func (r *wikiPageRepository) wikiEmptyInLinksPredicate() string {
-	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
-		return "(in_links IS NULL OR json_array_length(in_links) = 0)"
+	if r.db != nil && r.db.Dialector != nil {
+		switch r.db.Dialector.Name() {
+		case "sqlite":
+			return "(in_links IS NULL OR json_array_length(in_links) = 0)"
+		case "mysql":
+			return "(in_links IS NULL OR JSON_LENGTH(in_links) = 0)"
+		}
 	}
 	return "(in_links IS NULL OR in_links = '[]'::JSONB)"
+}
+
+func (r *wikiPageRepository) wikiSourceRefsContainsPredicate() string {
+	if r.db != nil && r.db.Dialector != nil {
+		switch r.db.Dialector.Name() {
+		case "mysql":
+			return "JSON_CONTAINS(source_refs, ?)"
+		case "sqlite":
+			return "EXISTS (SELECT 1 FROM json_each(source_refs) WHERE value IN (SELECT value FROM json_each(?)))"
+		}
+	}
+	return "source_refs @> ?::jsonb"
+}
+
+func (r *wikiPageRepository) wikiSourceRefsTextLikePredicate() string {
+	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "postgres" {
+		return "source_refs::text LIKE ?"
+	}
+	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "mysql" {
+		return "CAST(source_refs AS CHAR) LIKE ?"
+	}
+	return "source_refs LIKE ?"
 }
 
 // Create inserts a new wiki page record
@@ -319,12 +351,26 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 		query = query.Where("status = ?", req.Status)
 	}
 	if req.Query != "" {
-		// Use PostgreSQL full-text search + ILIKE for aliases
-		query = query.Where(
-			"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
-			req.Query,
-			"%"+req.Query+"%",
-		)
+		like := "%" + req.Query + "%"
+		switch r.db.Dialector.Name() {
+		case "postgres":
+			// Use PostgreSQL full-text search + ILIKE for aliases
+			query = query.Where(
+				"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
+				req.Query,
+				like,
+			)
+		case "mysql":
+			query = query.Where(
+				"(LOWER(title) LIKE LOWER(?) OR LOWER(content) LIKE LOWER(?) OR CAST(aliases AS CHAR) LIKE ?)",
+				like, like, like,
+			)
+		default:
+			query = query.Where(
+				"(LOWER(title) LIKE LOWER(?) OR LOWER(content) LIKE LOWER(?) OR aliases LIKE ?)",
+				like, like, like,
+			)
+		}
 	}
 	// Directory filters are pushed to SQL so the DB does the counting and
 	// pagination instead of loading every page of the type into memory. `depth`
@@ -488,7 +534,7 @@ func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, s
 
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
+		Where("knowledge_base_id = ? AND ("+r.wikiSourceRefsContainsPredicate()+" OR "+r.wikiSourceRefsTextLikePredicate()+")",
 			kbID,
 			string(needle),
 			likePattern,
@@ -526,7 +572,7 @@ func (r *wikiPageRepository) ListSlugsBySourceRef(ctx context.Context, kbID stri
 	var slugs []string
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
+		Where("knowledge_base_id = ? AND ("+r.wikiSourceRefsContainsPredicate()+" OR "+r.wikiSourceRefsTextLikePredicate()+")",
 			kbID,
 			string(needle),
 			likePattern,
@@ -827,7 +873,7 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if err != nil {
 			return nil, fmt.Errorf("marshal kid needle: %w", err)
 		}
-		clauses = append(clauses, "source_refs @> ?::jsonb")
+		clauses = append(clauses, r.wikiSourceRefsContainsPredicate())
 		args = append(args, string(needle))
 
 		prefix, err := json.Marshal(kid + "|")
@@ -838,7 +884,7 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
 			prefixStr = prefixStr[:len(prefixStr)-1]
 		}
-		clauses = append(clauses, "source_refs::text LIKE ?")
+		clauses = append(clauses, r.wikiSourceRefsTextLikePredicate())
 		args = append(args, "%"+escapeLikePattern(prefixStr)+"%")
 	}
 	if len(clauses) == 0 {

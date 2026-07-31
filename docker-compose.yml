@@ -499,7 +499,7 @@ services:
       - WeKnora-network
     restart: unless-stopped
 
-  # 修改的PostgreSQL配置
+  # 修改的PostgreSQL配置（默认主库；DB_DRIVER=mysql 时可改用下方 mysql 服务）
   postgres:
     image: paradedb/paradedb:v0.22.2-pg17
     container_name: WeKnora-postgres
@@ -520,6 +520,32 @@ services:
     restart: unless-stopped
     # 添加停机时的优雅退出时间
     stop_grace_period: 1m
+
+  mysql:
+    image: mysql:8.4
+    container_name: WeKnora-mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-weknora-root-password}
+      - MYSQL_DATABASE=${DB_NAME}
+      - MYSQL_USER=${DB_USER}
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+      - TZ=${TZ:-Asia/Shanghai}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - WeKnora-network
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    profiles:
+      - mysql
 
   redis:
     image: redis:7.0-alpine
@@ -1009,6 +1035,7 @@ networks:
 
 volumes:
   postgres-data:
+  mysql-data:
   data-files:
   docreader-tmp:
   minio_data:

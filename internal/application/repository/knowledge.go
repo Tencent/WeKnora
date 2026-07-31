@@ -584,10 +584,17 @@ func (r *knowledgeRepository) FindByMetadataKey(
 	value string,
 ) (*types.Knowledge, error) {
 	var knowledge types.Knowledge
-	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
-		Where("metadata->>? = ?", key, value).
-		First(&knowledge).Error
+	query := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID)
+	switch r.db.Dialector.Name() {
+	case "postgres":
+		query = query.Where("metadata->>? = ?", key, value)
+	case "mysql":
+		query = query.Where("JSON_UNQUOTE(JSON_EXTRACT(metadata, ?)) = ?", "$."+key, value)
+	default:
+		query = query.Where("json_extract(metadata, ?) = ?", "$."+key, value)
+	}
+	err := query.First(&knowledge).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -621,7 +628,15 @@ func (r *knowledgeRepository) FindByMetadataKeyPrefix(
 	// custom-planned with the actual value, so LIKE 'prefix%' still extracts the
 	// prefix and drives the index. The explicit ESCAPE '\' keeps backslash-escaped
 	// wildcards (e.g. \_) literal on both PostgreSQL and SQLite.
-	keyExpr := "metadata->>'" + strings.ReplaceAll(key, "'", "''") + "'"
+	var keyExpr string
+	switch r.db.Dialector.Name() {
+	case "postgres":
+		keyExpr = "metadata->>'" + strings.ReplaceAll(key, "'", "''") + "'"
+	case "mysql":
+		keyExpr = "JSON_UNQUOTE(JSON_EXTRACT(metadata, '$." + strings.ReplaceAll(key, "'", "''") + "'))"
+	default:
+		keyExpr = "json_extract(metadata, '$." + strings.ReplaceAll(key, "'", "''") + "')"
+	}
 	err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
 		Where(keyExpr+" LIKE ? ESCAPE ?", escaped+"%", `\`).
