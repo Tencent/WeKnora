@@ -27,15 +27,15 @@ func NewWikiUpdateIssueTool(wikiService interfaces.WikiPageService, kbIDs []stri
       "type": "string",
       "description": "The short iN issue ID from wiki_read_issue."
     },
-		"status": {
+    "status": {
       "type": "string",
-      "enum": ["resolved", "ignored", "pending"],
-      "description": "The new status for the issue."
-		}
-		,"summary": {
-		  "type": "string",
-		  "description": "Concise evidence-based explanation of the repair or why no edit was required."
-		}
+      "enum": ["resolved", "ignored", "open", "pending"],
+      "description": "The new status for the issue. Prefer 'open' to reopen; 'pending' is accepted as a legacy alias for 'open'."
+    },
+    "summary": {
+      "type": "string",
+      "description": "Concise evidence-based explanation of the repair or why no edit was required."
+    }
   },
   "required": ["issue_id", "status"]
 }`),

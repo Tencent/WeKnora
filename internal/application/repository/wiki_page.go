@@ -1714,7 +1714,12 @@ func (r *wikiPageRepository) ExpireStaleRepairAttempts(
 		err := r.FailIssueRepair(
 			ctx, attempt.KnowledgeBaseID, attempt.IssueID, attempt.ID, message, now,
 		)
-		if err != nil && !errors.Is(err, ErrWikiIssueConflict) {
+		if errors.Is(err, ErrWikiIssueConflict) {
+			// Another writer already settled this attempt; it is no longer ours
+			// to count as a retirement.
+			continue
+		}
+		if err != nil {
 			return retired, err
 		}
 		retired++

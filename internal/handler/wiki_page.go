@@ -912,7 +912,7 @@ func (h *WikiPageHandler) GetStats(c *gin.Context) {
 // @Param        kb_id  path   string  true   "Knowledge base ID"
 // @Param        slug   query  string  false  "Filter by page slug"
 // @Param        status    query  string  false  "Filter by status (open, actionable, unresolved, ignored, resolved)"
-// @Param        page      query  int     false  "Page number"
+// @Param        page      query  int     false  "Page number (omit with page_size for legacy bare-array response)"
 // @Param        page_size query  int     false  "Page size (max 100)"
 // @Success      200  {object}  types.WikiIssueListResponse
 // @Security     Bearer
@@ -926,15 +926,26 @@ func (h *WikiPageHandler) ListIssues(c *gin.Context) {
 
 	slug := c.Query("slug")
 	status := c.Query("status")
+	// Callers that omit both pagination keys get the pre-pagination bare array,
+	// so scripts and older clients keep working. The problem-centre UI always
+	// sends page/page_size and receives the envelope.
+	if !c.Request.URL.Query().Has("page") && !c.Request.URL.Query().Has("page_size") {
+		issues, err := h.wikiService.ListIssues(c.Request.Context(), kbID, slug, status)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, issues)
+		return
+	}
+
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-
 	issues, err := h.wikiService.ListIssuesPage(c.Request.Context(), kbID, slug, status, page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
 	c.JSON(http.StatusOK, issues)
 }
 
@@ -1089,6 +1100,18 @@ func (h *WikiPageHandler) StartIssueRepair(c *gin.Context) {
 		mode = issue.RepairMode
 	}
 	if mode == "" {
+		mode = types.WikiIssueRepairAgent
+	}
+	// A deterministic rule only helps when it has a confident rewrite to make.
+	// A broken link whose target page is simply gone has none, and running the
+	// deterministic path anyway would hand the user a failed attempt with no
+	// agent session to continue in — and a retry that fails the same way every
+	// time. Escalate to the agent before the issue is claimed, so the caller
+	// gets a working repair session on the first click.
+	if mode == types.WikiIssueRepairDeterministic &&
+		!h.lintService.DeterministicRepairAvailable(c.Request.Context(), issue) {
+		logger.Infof(c.Request.Context(),
+			"wiki repair: issue %s has no applicable deterministic fix, escalating to agent", issue.ID)
 		mode = types.WikiIssueRepairAgent
 	}
 

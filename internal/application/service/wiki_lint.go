@@ -616,6 +616,58 @@ func (s *WikiLintService) FailRun(ctx context.Context, kbID, runID, message stri
 	return s.repo.UpdateLintRun(ctx, run)
 }
 
+// ErrWikiNoDeterministicRepair means the finding is real but its typed repair
+// has nothing confident to apply — a broken link whose target is simply gone,
+// rather than a mangled spelling of a page that exists. Retrying cannot help,
+// so callers should route the issue to the Wiki Fixer agent instead.
+var ErrWikiNoDeterministicRepair = errors.New("no deterministic repair applies to this finding")
+
+// planDeterministicRepair computes the rewrite a typed repair would apply
+// without writing anything. It is the single place that decides whether a
+// deterministic fix exists, so the pre-flight check and the repair itself can
+// never disagree about that.
+func (s *WikiLintService) planDeterministicRepair(
+	ctx context.Context, issue *types.WikiPageIssue,
+) (*types.WikiPage, string, error) {
+	rule, ok := wikiLintRuleFor(issue.IssueType)
+	if !ok || rule.RepairMode != types.WikiIssueRepairDeterministic {
+		return nil, "", fmt.Errorf("issue type %s does not have a deterministic repair", issue.IssueType)
+	}
+	page, err := s.wikiService.GetPageBySlug(ctx, issue.KnowledgeBaseID, issue.Slug)
+	if err != nil {
+		return nil, "", err
+	}
+	repaired, changed, err := s.wikiService.RepairContentLinks(
+		ctx, issue.KnowledgeBaseID, page.Slug, page.Content,
+	)
+	if err != nil {
+		return nil, "", err
+	}
+	if !changed {
+		return nil, "", ErrWikiNoDeterministicRepair
+	}
+	return page, repaired, nil
+}
+
+// DeterministicRepairAvailable reports whether a typed repair can actually
+// change the page right now.
+//
+// StartIssueRepair consults this before claiming an issue: a broken link to a
+// page that no longer exists at all has no high-confidence rewrite, so without
+// the check the user would get a failed attempt, no agent session, and a retry
+// button that fails identically every time. Any error answers false, which
+// routes the issue to the agent — the escalation path is always safe, while
+// silently failing is not.
+func (s *WikiLintService) DeterministicRepairAvailable(
+	ctx context.Context, issue *types.WikiPageIssue,
+) bool {
+	if issue == nil {
+		return false
+	}
+	_, _, err := s.planDeterministicRepair(ctx, issue)
+	return err == nil
+}
+
 // RepairPersistedIssue executes only deterministic, typed repairs. Everything
 // else stays bound to the Wiki Fixer session created by the repair endpoint.
 func (s *WikiLintService) RepairPersistedIssue(
@@ -624,22 +676,9 @@ func (s *WikiLintService) RepairPersistedIssue(
 	if issue == nil || attempt == nil {
 		return errors.New("issue and repair attempt are required")
 	}
-	rule, ok := wikiLintRuleFor(issue.IssueType)
-	if !ok || rule.RepairMode != types.WikiIssueRepairDeterministic {
-		return fmt.Errorf("issue type %s does not have a deterministic repair", issue.IssueType)
-	}
-	page, err := s.wikiService.GetPageBySlug(ctx, issue.KnowledgeBaseID, issue.Slug)
+	page, repaired, err := s.planDeterministicRepair(ctx, issue)
 	if err != nil {
 		return err
-	}
-	repaired, changed, err := s.wikiService.RepairContentLinks(
-		ctx, issue.KnowledgeBaseID, page.Slug, page.Content,
-	)
-	if err != nil {
-		return err
-	}
-	if !changed {
-		return errors.New("no unique high-confidence replacement exists for the broken link")
 	}
 	page.Content = repaired
 	if _, err := s.wikiService.UpdatePage(types.WithWikiEditSource(ctx, types.WikiEditSourcePipeline), page); err != nil {

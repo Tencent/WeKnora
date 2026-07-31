@@ -879,7 +879,11 @@ func (s *wikiPageService) GetStats(ctx context.Context, kbID string) (*types.Wik
 		isActive = activeFlag > 0
 	}
 
-	pendingIssues, _ = s.CountIssues(ctx, kbID, "unresolved")
+	// Counted with the same filter the problem-centre drawer lists, because the
+	// badge is what opens that drawer. Counting "unresolved" here would include
+	// issues already under repair and make the badge read higher than the list
+	// it links to.
+	pendingIssues, _ = s.CountIssues(ctx, kbID, "actionable")
 
 	return &types.WikiStats{
 		TotalPages:    total,
@@ -1368,15 +1372,20 @@ func (s *wikiPageService) CreateIssue(ctx context.Context, issue *types.WikiPage
 		issue.OccurrenceCount = 1
 	}
 	if issue.Fingerprint == "" {
+		// Agent findings of the same type on one page are distinct prose claims
+		// ("page mixes A+B" vs "page mixes C+D"). Without a differentiator they
+		// collapse to one fingerprint and the later flag silently overwrites the
+		// earlier one. Suspected knowledge ids are the preferred identity when
+		// present; otherwise the description is the only stable signal we have.
+		// Lint findings stamp their own fingerprint (including target slug) before
+		// they reach UpsertLintIssue, so they never take this path.
 		identity := ""
 		if len(issue.SuspectedKnowledgeIDs) > 0 {
 			ids := append([]string(nil), issue.SuspectedKnowledgeIDs...)
 			sort.Strings(ids)
 			identity = strings.Join(ids, ",")
-		} else if issue.IssueType == "other" {
-			// The catch-all type may represent multiple unrelated findings on
-			// one page, so retain normalized description as its differentiator.
-			identity = issue.Description
+		} else {
+			identity = strings.TrimSpace(issue.Description)
 		}
 		issue.Fingerprint = wikiIssueFingerprint(
 			issue.KnowledgeBaseID, issue.PageID, issue.Slug, issue.IssueType, identity,
