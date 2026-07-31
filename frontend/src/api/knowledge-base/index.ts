@@ -208,6 +208,7 @@ export function uploadKnowledgeFile(
     file: File
     tag_ids?: string[]
     fileName?: string
+    folder_id?: string
     process_config?: KnowledgeProcessOverrides | string
     [key: string]: any
   } = { file: new File([], '') },
@@ -232,7 +233,7 @@ export function uploadKnowledgeFile(
 // data.tag_ids: 可选，指定知识所属的多个标签 ID
 export function createKnowledgeFromURL(
   kbId: string,
-  data: { url: string; enable_multimodel?: boolean; tag_ids?: string[]; process_config?: KnowledgeProcessOverrides },
+  data: { url: string; enable_multimodel?: boolean; tag_ids?: string[]; folder_id?: string; process_config?: KnowledgeProcessOverrides },
 ) {
   return post(`/api/v1/knowledge-bases/${kbId}/knowledge/url`, data);
 }
@@ -246,6 +247,7 @@ export function createManualKnowledge(
     content: string
     status: string
     tag_ids?: string[]
+    folder_id?: string
     process_config?: KnowledgeProcessOverrides
   },
 ) {
@@ -264,6 +266,8 @@ export function listKnowledgeFiles(
     source?: string;
     start_time?: string;
     end_time?: string;
+    folder_id?: string;
+    folder_recursive?: boolean;
   },
 ) {
   const query = new URLSearchParams();
@@ -276,8 +280,84 @@ export function listKnowledgeFiles(
   if (params.source) query.append('source', params.source);
   if (params.start_time) query.append('start_time', params.start_time);
   if (params.end_time) query.append('end_time', params.end_time);
+  if (params.folder_id) query.append('folder_id', params.folder_id);
+  if (params.folder_recursive) query.append('folder_recursive', 'true');
   const qs = query.toString();
   return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${qs}`);
+}
+
+// 多级文件夹 API
+
+// Document-list sentinel for root-level documents.
+export const FOLDER_FILTER_ROOT = '__root__';
+
+export interface KnowledgeFolder {
+  id: string;
+  knowledge_base_id: string;
+  parent_id: string;
+  name: string;
+  path: string;
+  depth: number;
+  sort_order: number;
+}
+
+export interface KnowledgeFolderNode extends KnowledgeFolder {
+  knowledge_count: number;
+  has_children: boolean;
+}
+
+// 列出 parent_id 的直接子文件夹；all=true 返回全量平铺列表
+export function listKnowledgeFolders(
+  kbId: string,
+  params: { parent_id?: string; all?: boolean } = {},
+) {
+  const query = new URLSearchParams();
+  if (params.parent_id) query.append('parent_id', params.parent_id);
+  if (params.all) query.append('all', 'true');
+  const qs = query.toString();
+  return get(`/api/v1/knowledge-bases/${kbId}/folders${qs ? `?${qs}` : ''}`);
+}
+
+// Paged cross-KB folder search for chat mentions.
+export function searchKnowledgeFolders(
+  keyword: string,
+  offset = 0,
+  limit = 20,
+) {
+  const query = new URLSearchParams();
+  if (keyword) query.set('keyword', keyword);
+  query.set('offset', String(offset));
+  query.set('limit', String(limit));
+  return get(`/api/v1/knowledge/folders/search?${query.toString()}`);
+}
+
+export function createKnowledgeFolder(kbId: string, data: { name: string; parent_id?: string }) {
+  return post(`/api/v1/knowledge-bases/${kbId}/folders`, data);
+}
+
+// 重命名和/或移动文件夹；移动到根目录需 move_parent=true 且 parent_id 为空
+export function updateKnowledgeFolder(
+  kbId: string,
+  folderId: string,
+  data: { name?: string; parent_id?: string; move_parent?: boolean },
+) {
+  return put(`/api/v1/knowledge-bases/${kbId}/folders/${folderId}`, data);
+}
+
+// mode=promote 时先将文件夹内容上移到父级再删除
+export function deleteKnowledgeFolder(kbId: string, folderId: string, mode?: 'promote') {
+  const qs = mode ? `?mode=${mode}` : '';
+  return del(`/api/v1/knowledge-bases/${kbId}/folders/${folderId}${qs}`);
+}
+
+// 将存量按路径上传的文档整理进文件夹（幂等）
+export function organizeKnowledgeFoldersByPath(kbId: string) {
+  return post(`/api/v1/knowledge-bases/${kbId}/folders/organize-by-path`);
+}
+
+// 批量移动文档到文件夹（folder_id 为空 = 根目录）
+export function moveKnowledgeToFolder(kbId: string, data: { knowledge_ids: string[]; folder_id: string }) {
+  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/move-to-folder`, data);
 }
 
 export function getKnowledgeDetails(id: string, options?: { agent_id?: string; agent_source_tenant_id?: string }) {

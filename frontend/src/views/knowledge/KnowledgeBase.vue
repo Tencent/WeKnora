@@ -29,6 +29,8 @@ import {
   updateKnowledgeTagBatch,
   uploadKnowledgeFile,
   createKnowledgeFromURL,
+  moveKnowledgeToFolder,
+  FOLDER_FILTER_ROOT,
   reparseKnowledge,
   cancelKnowledgeParse,
   batchDeleteKnowledge,
@@ -41,6 +43,8 @@ import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
 import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
+import FolderTreePicker from './components/FolderTreePicker.vue';
+import KbFolderTree from './components/KbFolderTree.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
 import BatchTagDialog from './components/BatchTagDialog.vue';
@@ -526,6 +530,14 @@ const isTagFilterPlaceholder = computed(
 );
 
 const selectedTagIds = ref<string[]>([]);
+
+const currentFolderId = ref('');
+const uploadTargetFolderId = computed(() =>
+  currentFolderId.value && currentFolderId.value !== FOLDER_FILTER_ROOT
+    ? currentFolderId.value
+    : undefined,
+);
+const batchMovePickerVisible = ref(false);
 const tagList = ref<any[]>([]);
 const tagLoading = ref(false);
 const tagSearchQuery = ref('');
@@ -591,8 +603,24 @@ const sourceOptions = computed(() => [
 const updatedTimeRange = ref<string[]>([]);
 // Disable any date after today so users cannot filter into the future.
 const disableFutureDate = { after: new Date(new Date().setHours(23, 59, 59, 999)) };
+const hasActiveDocFilters = computed(() => {
+  const [start, end] = updatedTimeRange.value || [];
+  return (
+    selectedTagIds.value.length > 0 ||
+    !!(docSearchKeyword.value && docSearchKeyword.value.trim()) ||
+    !!selectedFileType.value ||
+    !!selectedParseStatus.value ||
+    !!selectedSource.value ||
+    !!start ||
+    !!end
+  );
+});
+
 const filterParams = computed(() => {
   const [start, end] = updatedTimeRange.value || [];
+  const scope = currentFolderId.value;
+  const recursive =
+    hasActiveDocFilters.value && !!scope && scope !== FOLDER_FILTER_ROOT ? true : undefined;
   return {
     tag_ids: selectedTagIds.value.length > 0 ? selectedTagIds.value.join(',') : undefined,
     keyword: docSearchKeyword.value ? docSearchKeyword.value.trim() : undefined,
@@ -601,6 +629,8 @@ const filterParams = computed(() => {
     source: selectedSource.value || undefined,
     start_time: start ? `${start} 00:00:00` : undefined,
     end_time: end ? `${end} 23:59:59` : undefined,
+    folder_id: isFAQ.value ? undefined : scope || undefined,
+    folder_recursive: isFAQ.value ? undefined : recursive,
   };
 });
 const tagMap = computed<Record<string, any>>(() => {
@@ -935,6 +965,7 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
     resetPage();
     tagSearchQuery.value = '';
     tagPage.value = 1;
+    currentFolderId.value = '';
     uiStore.clearSelectedTagIds();
   }
   loadKnowledgeBaseInfo(newKbId);
@@ -989,6 +1020,37 @@ watch([selectedParseStatus, selectedSource, updatedTimeRange], () => {
     loadKnowledgeFiles(kbId.value);
   }
 }, { deep: true });
+
+// 进入/离开文件夹时刷新文档列表
+watch(currentFolderId, () => {
+  if (kbId.value) {
+    resetPage();
+    loadKnowledgeFiles(kbId.value);
+  }
+});
+
+// 文件夹树变化（新建/重命名/移动/删除/整理）后刷新
+const handleFolderTreeChanged = () => {
+  if (kbId.value) {
+    resetPage();
+    loadKnowledgeFiles(kbId.value);
+  }
+};
+
+// 批量移动选中文档到文件夹
+const handleBatchMoveToFolder = async (folderId: string) => {
+  const ids = [...selectedIds.value];
+  if (!ids.length || !kbId.value) return;
+  try {
+    const res: any = await moveKnowledgeToFolder(kbId.value, { knowledge_ids: ids, folder_id: folderId });
+    MessagePlugin.success(t('knowledgeBase.folder.movedDocs', { count: res?.data?.moved ?? ids.length }));
+    clearSelection();
+    resetPage();
+    loadKnowledgeFiles(kbId.value);
+  } catch (e: any) {
+    MessagePlugin.error(e?.error?.message || e?.message || t('common.operationFailed'));
+  }
+};
 
 // 监听文件上传事件
 const handleFileUploaded = (event: CustomEvent) => {
@@ -1467,8 +1529,10 @@ const executeUploadBatch = async (
         file: File
         tag_ids?: string[]
         fileName?: string
+        folder_id?: string
         process_config?: KnowledgeProcessOverrides
       } = { file, tag_ids: tagIdsToUpload };
+      if (uploadTargetFolderId.value) uploadData.folder_id = uploadTargetFolderId.value;
 
       const fileName = getFolderUploadFileName(file);
       if (fileName) uploadData.fileName = fileName;
@@ -1533,6 +1597,7 @@ const executeUrlImport = async (
     const responseData: any = await createKnowledgeFromURL(targetKbId, {
       url,
       tag_ids: tagIdsToUpload,
+      folder_id: uploadTargetFolderId.value,
       process_config: processConfig,
     });
     window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
@@ -2149,6 +2214,8 @@ async function createNewSession(value: string): Promise<void> {
 
       <template v-if="activeKbTab === 'documents' || !isWiki">
         <div class="knowledge-main">
+          <KbFolderTree v-if="!isFAQ" v-model="currentFolderId" :kb-id="kbId" :can-edit="canEdit"
+            :filters-active="hasActiveDocFilters" @changed="handleFolderTreeChanged" />
           <div class="tag-content">
             <div class="doc-card-area">
               <div class="doc-filter-bar">
@@ -2392,7 +2459,10 @@ async function createNewSession(value: string): Promise<void> {
                 <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
                   :reparse-loading="batchReparsing" :tag-loading="batchTagging" :visible="batchMode || selectedIds.size > 0"
                   @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse"
-                  @batch-tag="handleBatchTag" />
+                  @batch-tag="handleBatchTag" @move-folder="batchMovePickerVisible = true" />
+                <FolderTreePicker v-model:visible="batchMovePickerVisible" :kb-id="kbId" allow-root
+                  :title="t('knowledgeBase.folder.moveDocsTo', { count: selectedIds.size })"
+                  @confirm="handleBatchMoveToFolder" />
               </div>
             </div>
           </div>
@@ -2549,6 +2619,9 @@ async function createNewSession(value: string): Promise<void> {
   display: flex;
   flex: 1;
   min-height: 0;
+  // 左侧文件夹树 aside 与文档区之间留出间隙；FAQ 库不渲染 aside 时
+  // 只有一个 flex 子项，gap 不生效，文档区仍然铺满。
+  gap: 16px;
   background: transparent;
   border: none;
 }
