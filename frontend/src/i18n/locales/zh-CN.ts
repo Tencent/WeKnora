@@ -3455,7 +3455,13 @@ export default {
     },
     buttons: {
       create: '创建知识库',
-      save: '保存配置'
+      save: '保存配置',
+      saveAndClose: '保存并关闭',
+    },
+    postCreateHint: {
+      title: '创建成功',
+      footer: '可继续调整配置，设置共享与数据源，完成后点击「保存并关闭」。',
+      followUpDesc: '可在左侧配置数据源，或在「共享管理」中发布到空间',
     },
     wikiBrowser: {
       editBtn: '编辑',
@@ -4760,6 +4766,15 @@ export default {
     editor: {
       createTitle: '创建智能体',
       editTitle: '编辑智能体',
+      buttons: {
+        create: '创建智能体',
+        saveAndClose: '保存并关闭',
+      },
+      postCreateHint: {
+        title: '创建成功',
+        footer: '可继续调整配置，设置共享与发布渠道，完成后点击「保存并关闭」。',
+        integrationDesc: '前往集成中心配置 IM、网页嵌入等发布渠道',
+      },
       basicInfo: '基本信息',
       basicInfoDesc: '配置智能体的名称、描述与运行模式',
       promptsConfig: '提示词',
