@@ -1114,7 +1114,6 @@ async function restoreLatestLintRun() {
 
 function repairStatusLabel(status: string) {
   const labels: Record<string, string> = {
-    claimed: t('knowledgeEditor.wikiBrowser.repairClaimed'),
     repairing: t('knowledgeEditor.wikiBrowser.repairRepairing'),
     verifying: t('knowledgeEditor.wikiBrowser.repairVerifying'),
     resolved: t('knowledgeEditor.wikiBrowser.repairResolved'),

@@ -3606,7 +3606,6 @@ export default {
       issueGoFix: '去处理',
       healthCheck: '健康检查',
       fixAssistantTitle: 'Wiki 智能修复助手',
-      repairClaimed: '已领取修复任务',
       repairRepairing: '正在分析并修复',
       repairVerifying: '正在验证修复结果',
       repairResolved: '修复并验证完成',

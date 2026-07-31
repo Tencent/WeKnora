@@ -3606,7 +3606,6 @@ export default {
       issueGoFix: '수정하러 가기',
       healthCheck: '상태 점검',
       fixAssistantTitle: 'Wiki 스마트 수정 도우미',
-      repairClaimed: '수정 작업 수락됨',
       repairRepairing: '분석 및 수정 중',
       repairVerifying: '수정 결과 확인 중',
       repairResolved: '수정 및 확인 완료',

@@ -2258,7 +2258,6 @@ export default {
       issueGoFix: 'Go to fix',
       healthCheck: 'Health check',
       fixAssistantTitle: 'Wiki Smart Fix Assistant',
-      repairClaimed: 'Repair task claimed',
       repairRepairing: 'Analyzing and repairing',
       repairVerifying: 'Verifying the repair',
       repairResolved: 'Repair verified and completed',

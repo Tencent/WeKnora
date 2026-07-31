@@ -736,14 +736,25 @@ type WikiPageIssue struct {
 }
 
 // Wiki issue lifecycle, provenance, and repair-mode values.
+//
+// The lifecycle is: open → repairing → verifying → resolved, with failed and
+// ignored as the two off-ramps. There is deliberately no separate "claimed"
+// state — claiming an issue and starting its repair happen in one transaction
+// (see ClaimIssueAndCreateAttempt), so a state between the two would only ever
+// exist in code that never runs.
 const (
 	WikiIssueStatusOpen      = "open"
-	WikiIssueStatusClaimed   = "claimed"
 	WikiIssueStatusRepairing = "repairing"
 	WikiIssueStatusVerifying = "verifying"
 	WikiIssueStatusResolved  = "resolved"
 	WikiIssueStatusIgnored   = "ignored"
 	WikiIssueStatusFailed    = "failed"
+
+	// WikiIssueStatusLegacyPending is the status value used before the repair
+	// lifecycle existed. Rows written back then still carry it and the
+	// update-issue agent tool still accepts it as an alias for open, so the
+	// status sets below have to keep including it until a backfill retires it.
+	WikiIssueStatusLegacyPending = "pending"
 
 	WikiIssueSourceLint  = "lint"
 	WikiIssueSourceAgent = "agent"
@@ -752,6 +763,44 @@ const (
 	WikiIssueRepairDeterministic = "deterministic"
 	WikiIssueRepairAgent         = "agent"
 	WikiIssueRepairManual        = "manual"
+)
+
+// Wiki issue status sets.
+//
+// These groupings were previously spelled out as inline literals in nine
+// places across the repository, the service and the reaper, and they had
+// already drifted: some copies listed a "claimed" state that nothing ever
+// wrote. Naming each set once makes the lifecycle legible and keeps the copies
+// from diverging again.
+//
+// Treat them as read-only; they are package-level slices only because that is
+// what GORM's `status IN ?` binding takes.
+var (
+	// WikiIssueActionableStatuses are the states a user still has to act on and
+	// the only states a repair may be claimed from. An issue already under
+	// repair, ignored, or resolved is excluded from both.
+	WikiIssueActionableStatuses = []string{
+		WikiIssueStatusOpen, WikiIssueStatusFailed, WikiIssueStatusLegacyPending,
+	}
+
+	// WikiIssueInFlightStatuses are the states held by a live repair attempt.
+	// The reaper looks for attempts in these states that stopped reporting.
+	WikiIssueInFlightStatuses = []string{
+		WikiIssueStatusRepairing, WikiIssueStatusVerifying,
+	}
+
+	// WikiIssueUnresolvedStatuses is everything that is not yet closed —
+	// actionable plus in-flight.
+	WikiIssueUnresolvedStatuses = append(
+		append([]string{}, WikiIssueActionableStatuses...), WikiIssueInFlightStatuses...,
+	)
+
+	// WikiIssueReopenableStatuses are the closed states a fresh lint sighting
+	// may re-open. Ignored is absent on purpose: a user who silenced a finding
+	// should not have it come back on the next scan.
+	WikiIssueReopenableStatuses = []string{
+		WikiIssueStatusResolved, WikiIssueStatusFailed, WikiIssueStatusLegacyPending,
+	}
 )
 
 // WikiLintRun records one complete, restart-observable health scan. Findings

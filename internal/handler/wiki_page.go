@@ -973,7 +973,14 @@ func (h *WikiPageHandler) UpdateIssueStatus(c *gin.Context) {
 		return
 	}
 
-	validStatuses := map[string]bool{"open": true, "pending": true, "ignored": true, "resolved": true}
+	// Only the transitions a client may request. repairing and verifying are
+	// absent because they are owned by the repair lifecycle, not by callers.
+	validStatuses := map[string]bool{
+		types.WikiIssueStatusOpen:          true,
+		types.WikiIssueStatusLegacyPending: true,
+		types.WikiIssueStatusIgnored:       true,
+		types.WikiIssueStatusResolved:      true,
+	}
 	if !validStatuses[req.Status] {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid status. Must be open, pending, ignored, or resolved"})
 		return
@@ -1039,10 +1046,25 @@ func (h *WikiPageHandler) GetLintRun(c *gin.Context) {
 		run, err = h.lintService.GetRun(c.Request.Context(), kbID, runID)
 	}
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		writeWikiIssueError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, run)
+}
+
+// writeWikiIssueError maps the wiki issue/repair sentinels onto status codes.
+// Without it every failure on these routes collapsed into one code — a lost
+// race and a broken database looked identical to the client, and to us.
+func writeWikiIssueError(c *gin.Context, err error) {
+	switch {
+	case stderrors.Is(err, repository.ErrWikiIssueNotFound),
+		stderrors.Is(err, repository.ErrWikiPageNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	case stderrors.Is(err, repository.ErrWikiIssueConflict):
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	}
 }
 
 // StartIssueRepair atomically claims an issue and starts its repair path.
@@ -1055,7 +1077,7 @@ func (h *WikiPageHandler) StartIssueRepair(c *gin.Context) {
 	issueID := strings.TrimSpace(c.Param("issue_id"))
 	issue, err := h.wikiService.GetIssue(c.Request.Context(), kbID, issueID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		writeWikiIssueError(c, err)
 		return
 	}
 	var req struct {
@@ -1089,20 +1111,67 @@ func (h *WikiPageHandler) StartIssueRepair(c *gin.Context) {
 		if sessionID != "" {
 			_ = h.sessionService.DeleteSession(c.Request.Context(), sessionID)
 		}
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		writeWikiIssueError(c, err)
 		return
 	}
 	if mode == types.WikiIssueRepairDeterministic {
-		if err := h.lintService.RepairPersistedIssue(c.Request.Context(), claimedIssue, attempt); err != nil {
-			_ = h.wikiService.FailIssueRepair(c.Request.Context(), kbID, issueID, attempt.ID, err.Error())
-		}
+		h.runDeterministicRepair(c.Request.Context(), kbID, claimedIssue, attempt)
 	}
-	attempt, _ = h.wikiService.GetRepairAttempt(c.Request.Context(), kbID, attempt.ID)
+	// Re-read so the client sees the attempt's settled state rather than the
+	// pre-repair snapshot. A read failure here is not worth failing the request
+	// over — the client polls this same record.
+	if refreshed, refreshErr := h.wikiService.GetRepairAttempt(
+		c.Request.Context(), kbID, attempt.ID,
+	); refreshErr == nil {
+		attempt = refreshed
+	}
 	c.JSON(http.StatusAccepted, gin.H{
 		"attempt":        attempt,
 		"session_id":     sessionID,
-		"initial_prompt": fmt.Sprintf("请修复 Wiki 页面 [[%s]] 的问题，问题 ID：%s。请先读取问题和页面，核对来源后执行修复。", issue.Slug, issue.ID),
+		"initial_prompt": wikiRepairInitialPrompt(c, issue),
 	})
+}
+
+// runDeterministicRepair executes a typed repair and records the outcome.
+//
+// RepairPersistedIssue closes the attempt itself when verification passes, and
+// already fails it when verification rejects the result. So we only mark a
+// failure that the service could not have recorded — otherwise the second write
+// would race an attempt that is no longer active and lose to its own guard.
+func (h *WikiPageHandler) runDeterministicRepair(
+	ctx context.Context, kbID string,
+	issue *types.WikiPageIssue, attempt *types.WikiRepairAttempt,
+) {
+	err := h.lintService.RepairPersistedIssue(ctx, issue, attempt)
+	if err == nil {
+		return
+	}
+	logger.Warnf(ctx, "wiki deterministic repair failed: issue=%s attempt=%s err=%v",
+		issue.ID, attempt.ID, err)
+	current, getErr := h.wikiService.GetRepairAttempt(ctx, kbID, attempt.ID)
+	if getErr == nil && current.Status == types.WikiIssueStatusFailed {
+		return
+	}
+	_ = h.wikiService.FailIssueRepair(ctx, kbID, issue.ID, attempt.ID, err.Error())
+}
+
+// wikiRepairInitialPrompt is the first turn handed to the Wiki Fixer session.
+// It follows the caller's locale (resolved by middleware.Language) so a
+// non-Chinese operator is not handed a Chinese instruction, with English as the
+// fallback for every other locale.
+func wikiRepairInitialPrompt(c *gin.Context, issue *types.WikiPageIssue) string {
+	lang, _ := types.LanguageFromContext(c.Request.Context())
+	if strings.HasPrefix(strings.ToLower(lang), "zh") {
+		return fmt.Sprintf(
+			"请修复 Wiki 页面 [[%s]] 的问题，问题 ID：%s。请先读取问题和页面，核对来源后执行修复。",
+			issue.Slug, issue.ID,
+		)
+	}
+	return fmt.Sprintf(
+		"Repair the issue on Wiki page [[%s]] (issue ID: %s). "+
+			"Read the issue and the page first, verify against the sources, then apply the fix.",
+		issue.Slug, issue.ID,
+	)
 }
 
 // GetRepairAttempt returns a KB-scoped repair attempt.
@@ -1114,7 +1183,7 @@ func (h *WikiPageHandler) GetRepairAttempt(c *gin.Context) {
 	}
 	attempt, err := h.wikiService.GetRepairAttempt(c.Request.Context(), kbID, strings.TrimSpace(c.Param("attempt_id")))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		writeWikiIssueError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, attempt)

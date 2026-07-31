@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -17,28 +17,9 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-// WikiLintIssueType defines the type of lint issue
-type WikiLintIssueType string
-
-const (
-	LintIssueOrphanPage      WikiLintIssueType = "orphan_page"
-	LintIssueBrokenLink      WikiLintIssueType = "broken_link"
-	LintIssueStaleRef        WikiLintIssueType = "stale_ref"
-	LintIssueMissingCrossRef WikiLintIssueType = "missing_cross_ref"
-	LintIssueEmptyContent    WikiLintIssueType = "empty_content"
-	LintIssueDuplicateSlug   WikiLintIssueType = "duplicate_slug"
-)
-
-// WikiLintIssueSeverity defines the severity of a lint issue
-type WikiLintIssueSeverity string
-
-const (
-	SeverityInfo    WikiLintIssueSeverity = "info"
-	SeverityWarning WikiLintIssueSeverity = "warning"
-	SeverityError   WikiLintIssueSeverity = "error"
-)
-
-// WikiLintIssue represents a single lint finding
+// WikiLintIssue represents a single lint finding. Instances are built through
+// wikiLintRule.finding so a finding's severity and repair mode always match the
+// rule that knows how to verify it — see wiki_lint_rules.go.
 type WikiLintIssue struct {
 	Type     WikiLintIssueType     `json:"type"`
 	Severity WikiLintIssueSeverity `json:"severity"`
@@ -55,10 +36,16 @@ type WikiLintIssue struct {
 	Fingerprint string `json:"fingerprint"`
 }
 
-// WikiLintReport is the complete lint report for a wiki KB
+// WikiLintReport is the lint report for a wiki KB.
+//
+// Issues carries at most wikiLintReportMaxIssues entries so the synchronous
+// endpoint never has to serialize an unbounded finding set; TotalIssues and
+// Truncated describe the full picture the walk actually saw.
 type WikiLintReport struct {
 	KnowledgeBaseID string           `json:"knowledge_base_id"`
 	Issues          []WikiLintIssue  `json:"issues"`
+	TotalIssues     int              `json:"total_issues"`
+	Truncated       bool             `json:"truncated"`
 	HealthScore     int              `json:"health_score"` // 0-100
 	Stats           *types.WikiStats `json:"stats"`
 	Summary         string           `json:"summary"`
@@ -93,6 +80,24 @@ func NewWikiLintService(
 // what we want to hold while running per-page checks.
 const lintCursorBatch = 200
 
+const (
+	// wikiLintReportMaxIssues caps what the synchronous report materializes.
+	// The walk still counts every finding, so health score and summary stay
+	// exact — we just refuse to build a multi-hundred-thousand element JSON
+	// array for a human-facing overview.
+	wikiLintReportMaxIssues = 500
+
+	// wikiCrossRefPerPageLimit caps the advisory cross-reference suggestions a
+	// single page may contribute. Without it one long page that name-drops
+	// hundreds of entities drowns out every other page's suggestions.
+	wikiCrossRefPerPageLimit = 5
+
+	// wikiLintUpsertBatch is the persistence window for a durable run. Batching
+	// turns N single-row round-trips into N/200, which is what makes a
+	// full-KB scan viable at 4w-page scale.
+	wikiLintUpsertBatch = 200
+)
+
 type wikiLintTitlePattern struct {
 	Slug       string
 	Title      string
@@ -115,7 +120,18 @@ type wikiLintTitleMatcher struct {
 
 func newWikiLintTitleMatcher(entitySlugs map[string]string) *wikiLintTitleMatcher {
 	m := &wikiLintTitleMatcher{nodes: []wikiLintTitleNode{{next: make(map[rune]int)}}}
-	for slug, title := range entitySlugs {
+	// Patterns are registered in slug order so a pattern's index — and therefore
+	// the order Find reports hits in — is a property of the input set rather than
+	// of map iteration. Callers that keep only the first N hits depend on this:
+	// a shifting selection would give the same page different findings on every
+	// run, and each run would close the previous run's suggestions.
+	slugs := make([]string, 0, len(entitySlugs))
+	for slug := range entitySlugs {
+		slugs = append(slugs, slug)
+	}
+	sort.Strings(slugs)
+	for _, slug := range slugs {
+		title := entitySlugs[slug]
 		normalized := []rune(strings.ToLower(strings.TrimSpace(title)))
 		if len(normalized) == 0 {
 			continue
@@ -194,11 +210,21 @@ func (m *wikiLintTitleMatcher) Find(content string) []wikiLintTitlePattern {
 			seen[patternIndex] = struct{}{}
 		}
 	}
-	matches := make([]wikiLintTitlePattern, 0, len(seen))
-	for i, pattern := range m.patterns {
-		if _, ok := seen[i]; ok {
-			matches = append(matches, pattern)
-		}
+	if len(seen) == 0 {
+		return nil
+	}
+	// Collect from the hits, not from every registered pattern: a full pattern
+	// sweep per page would reintroduce the O(pages × entities) cost that the
+	// automaton exists to remove. Sorting keeps the output order stable so a
+	// finding's identity does not depend on map iteration order.
+	indexes := make([]int, 0, len(seen))
+	for i := range seen {
+		indexes = append(indexes, i)
+	}
+	sort.Ints(indexes)
+	matches := make([]wikiLintTitlePattern, 0, len(indexes))
+	for _, i := range indexes {
+		matches = append(matches, m.patterns[i])
 	}
 	return matches
 }
@@ -207,20 +233,38 @@ func isASCIIAlphaNumeric(ch rune) bool {
 	return ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9'
 }
 
-// RunLint performs a comprehensive health check on a wiki knowledge base.
+// wikiLintScan is the aggregate view of one complete walk. The counters are
+// exact even when the caller materializes only a subset of the findings, so
+// health score and summary never depend on how much a consumer chose to keep.
+type wikiLintScan struct {
+	Total      int
+	ByType     map[WikiLintIssueType]int
+	BySeverity map[WikiLintIssueSeverity]int
+	Stats      *types.WikiStats
+}
+
+// scanWiki walks a wiki KB once and hands every finding to emit.
 //
-// At 4w-document scale the legacy "load every page in one shot"
-// approach was the dominant tail in this method (and intermittently
-// caused OOM in production). We now walk the page set via
-// ListPagesCursor in lintCursorBatch-sized windows, accumulating
-// issues incrementally — memory stays bounded regardless of KB size.
+// Both the page walk and the finding stream are bounded here: pages arrive in
+// lintCursorBatch windows, and findings are never accumulated. The caller
+// decides what to retain — the synchronous report keeps a capped slice, a
+// durable run batches straight into the problem centre — so peak memory stops
+// scaling with the number of defects a KB happens to have. That matters most
+// for the advisory cross-reference rule, which fires once per (page, mentioned
+// entity) pair.
 //
-// We also drop the GetGraph(Limit:0) call that the legacy path used
-// to compute the live-slug set. ListAllSlugs is a one-column projection
-// over the same predicate (kbID + status<>archived), so it gives the
-// same answer at a fraction of the cost.
-func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintReport, error) {
-	// Validate KB
+// The live-slug set comes from ListAllSlugs, a one-column projection over the
+// same predicate a full GetGraph would use (kbID + status<>archived), so it
+// answers "does this link target exist" at a fraction of the cost.
+//
+// progress, when non-nil, receives a coarse 0-100 estimate as the two passes
+// advance. It is a UI hint, not a guaranteed cadence.
+func (s *WikiLintService) scanWiki(
+	ctx context.Context,
+	kbID string,
+	emit func(WikiLintIssue) error,
+	progress func(percent int),
+) (*wikiLintScan, error) {
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, kbID)
 	if err != nil {
 		return nil, fmt.Errorf("get KB: %w", err)
@@ -229,15 +273,11 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 		return nil, fmt.Errorf("KB %s is not a wiki type", kbID)
 	}
 
-	// Get stats
 	stats, err := s.wikiService.GetStats(ctx, kbID)
 	if err != nil {
 		return nil, fmt.Errorf("get stats: %w", err)
 	}
 
-	// Compute the live-slug set from the cheap one-column projection.
-	// This replaces a full GetGraph call (which materialized every node
-	// + edge) with a single Pluck("slug") query.
 	liveSlugs, err := s.wikiService.ListAllSlugs(ctx, kbID)
 	if err != nil {
 		return nil, fmt.Errorf("list all slugs: %w", err)
@@ -247,18 +287,30 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 		slugSet[slug] = true
 	}
 
-	var issues []WikiLintIssue
-	healthScore := 100
+	scan := &wikiLintScan{
+		ByType:     make(map[WikiLintIssueType]int),
+		BySeverity: make(map[WikiLintIssueSeverity]int),
+		Stats:      stats,
+	}
+	// The fingerprint is the finding's durable identity, so it is stamped at
+	// the single point every finding passes through.
+	emitFinding := func(finding WikiLintIssue) error {
+		finding.Fingerprint = wikiIssueFingerprint(
+			kbID, finding.PageID, finding.PageSlug, string(finding.Type), finding.TargetSlug,
+		)
+		scan.Total++
+		scan.ByType[finding.Type]++
+		scan.BySeverity[finding.Severity]++
+		return emit(finding)
+	}
+
+	reporter := newWikiLintProgress(stats.TotalPages, progress)
 	knowledgeLive := make(map[string]bool) // kid -> exists; cached across pages
 
-	// First-pass walk: orphan / broken-link / empty / stale-ref
-	// detection. Each check is independent of order; we accumulate
-	// issues per-batch and the cursor walk keeps memory bounded.
-	//
-	// We collect entity / concept titles in this pass too so the
-	// missing-cross-ref matcher can be built once. The check itself runs
-	// in a second walk because it
-	// needs the full entity-title set to compare against any page.
+	// First pass: orphan / broken-link / empty / stale-ref detection. Every
+	// check is order-independent. Entity and concept titles are collected here
+	// so the cross-reference matcher can be built once; that check needs the
+	// complete title set before it can look at any page, hence the second walk.
 	entitySlugs := make(map[string]string) // slug -> title
 
 	cursor := ""
@@ -271,100 +323,23 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 			break
 		}
 		for _, page := range pages {
-			// Track entity/concept titles for the second pass.
 			if page.PageType == types.WikiPageTypeEntity || page.PageType == types.WikiPageTypeConcept {
 				entitySlugs[page.Slug] = page.Title
 			}
-
-			// Check 1: Orphan pages (no inbound links, excluding system pages).
-			if page.PageType != types.WikiPageTypeIndex {
-				if len(page.InLinks) == 0 {
-					issues = append(issues, WikiLintIssue{
-						Type:        LintIssueOrphanPage,
-						Severity:    SeverityWarning,
-						PageSlug:    page.Slug,
-						Description: fmt.Sprintf("Page '%s' has no inbound links — it's disconnected from the wiki", page.Title),
-						AutoFixable: false,
-						PageID:      page.ID, PageVersion: page.Version, RepairMode: types.WikiIssueRepairManual,
-					})
-				}
-			}
-
-			// Check 2: Broken links — outlinks pointing at slugs that
-			// don't exist in the live set.
-			for _, outLink := range page.OutLinks {
-				if !slugSet[outLink] {
-					issues = append(issues, WikiLintIssue{
-						Type:        LintIssueBrokenLink,
-						Severity:    SeverityError,
-						PageSlug:    page.Slug,
-						TargetSlug:  outLink,
-						Description: fmt.Sprintf("Page '%s' links to [[%s]] which does not exist", page.Title, outLink),
-						AutoFixable: true,
-						PageID:      page.ID, PageVersion: page.Version, RepairMode: types.WikiIssueRepairDeterministic,
-					})
-				}
-			}
-
-			// Check 3: Empty content.
-			content := strings.TrimSpace(page.Content)
-			contentLength := utf8.RuneCountInString(content)
-			if contentLength < 50 {
-				issues = append(issues, WikiLintIssue{
-					Type:        LintIssueEmptyContent,
-					Severity:    SeverityWarning,
-					PageSlug:    page.Slug,
-					Description: fmt.Sprintf("Page '%s' has very little content (%d chars)", page.Title, contentLength),
-					AutoFixable: false,
-					PageID:      page.ID, PageVersion: page.Version, RepairMode: types.WikiIssueRepairAgent,
-				})
-			}
-
-			// Check 4: Stale source refs — source_refs pointing at
-			// soft-deleted knowledge. Cached knowledgeLive lookup keeps
-			// per-kid checks O(1) after the first batch encounters
-			// each id.
-			if s.knowledgeService != nil && page.PageType != types.WikiPageTypeIndex {
-				for _, ref := range page.SourceRefs {
-					kid := ref
-					if i := strings.Index(ref, "|"); i > 0 {
-						kid = ref[:i]
-					}
-					if kid == "" {
-						continue
-					}
-					live, seen := knowledgeLive[kid]
-					if !seen {
-						kn, err := s.knowledgeService.GetKnowledgeByIDOnly(ctx, kid)
-						if err != nil && !errors.Is(err, repository.ErrKnowledgeNotFound) {
-							return nil, fmt.Errorf("check source knowledge %s: %w", kid, err)
-						}
-						live = err == nil && kn != nil
-						knowledgeLive[kid] = live
-					}
-					if !live {
-						issues = append(issues, WikiLintIssue{
-							Type:        LintIssueStaleRef,
-							Severity:    SeverityError,
-							PageSlug:    page.Slug,
-							TargetSlug:  kid,
-							Description: fmt.Sprintf("Page '%s' references deleted knowledge %s", page.Title, kid),
-							AutoFixable: false,
-							PageID:      page.ID, PageVersion: page.Version, RepairMode: types.WikiIssueRepairAgent,
-						})
-					}
-				}
+			if err := s.scanPageDefects(ctx, page, slugSet, knowledgeLive, emitFinding); err != nil {
+				return nil, err
 			}
 		}
+		reporter.advance(len(pages))
 		if next == "" {
 			break
 		}
 		cursor = next
 	}
 
-	// Second-pass walk: missing-cross-ref check. The matcher is built from
-	// the full entity title set and scans each page in O(content + matches),
-	// avoiding the previous O(pages × entities) nested contains loop.
+	// Second pass: advisory cross-reference suggestions. The automaton scans
+	// each page in O(content + hits) instead of the O(pages × entities) nested
+	// contains loop it replaced.
 	titleMatcher := newWikiLintTitleMatcher(entitySlugs)
 	cursor = ""
 	for {
@@ -376,116 +351,225 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 			break
 		}
 		for _, page := range pages {
-			outLinkSet := make(map[string]struct{}, len(page.OutLinks))
-			for _, l := range page.OutLinks {
-				outLinkSet[l] = struct{}{}
-			}
-			for _, match := range titleMatcher.Find(page.Content) {
-				if match.Slug == page.Slug {
-					continue
-				}
-				if _, linked := outLinkSet[match.Slug]; linked {
-					continue
-				}
-				issues = append(issues, WikiLintIssue{
-					Type:       LintIssueMissingCrossRef,
-					Severity:   SeverityInfo,
-					PageSlug:   page.Slug,
-					TargetSlug: match.Slug,
-					Description: fmt.Sprintf(
-						"Page '%s' mentions '%s' but doesn't link to [[%s]]",
-						page.Title, match.Title, match.Slug,
-					),
-					AutoFixable: false,
-					PageID:      page.ID, PageVersion: page.Version, RepairMode: types.WikiIssueRepairAgent,
-				})
+			if err := scanPageCrossRefs(page, titleMatcher, emitFinding); err != nil {
+				return nil, err
 			}
 		}
+		reporter.advance(len(pages))
 		if next == "" {
 			break
 		}
 		cursor = next
 	}
 
-	// Calculate health score
-	for i := range issues {
-		issues[i].Fingerprint = wikiIssueFingerprint(
-			kbID, issues[i].PageID, issues[i].PageSlug, string(issues[i].Type), issues[i].TargetSlug,
-		)
+	return scan, nil
+}
+
+// scanPageDefects runs the per-page defect rules. knowledgeLive is a shared
+// cache so a knowledge id referenced by many pages costs one lookup overall.
+func (s *WikiLintService) scanPageDefects(
+	ctx context.Context,
+	page *types.WikiPage,
+	slugSet map[string]bool,
+	knowledgeLive map[string]bool,
+	emit func(WikiLintIssue) error,
+) error {
+	if page.PageType != types.WikiPageTypeIndex && len(page.InLinks) == 0 {
+		if err := emit(wikiRuleOrphanPage.finding(page, "", fmt.Sprintf(
+			"Page '%s' has no inbound links — it's disconnected from the wiki", page.Title,
+		))); err != nil {
+			return err
+		}
 	}
 
-	// Calculate health score
-	if stats.TotalPages > 0 {
-		// Penalize for orphans
-		orphanPct := float64(stats.OrphanCount) / float64(stats.TotalPages) * 100
-		if orphanPct > 50 {
-			healthScore -= 25
-		} else if orphanPct > 25 {
-			healthScore -= 10
+	for _, outLink := range page.OutLinks {
+		if slugSet[outLink] {
+			continue
 		}
+		if err := emit(wikiRuleBrokenLink.finding(page, outLink, fmt.Sprintf(
+			"Page '%s' links to [[%s]] which does not exist", page.Title, outLink,
+		))); err != nil {
+			return err
+		}
+	}
 
-		// Penalize for broken links
-		brokenCount := 0
-		for _, issue := range issues {
-			if issue.Type == LintIssueBrokenLink {
-				brokenCount++
+	if runes := wikiContentRunes(page.Content); runes < wikiMinContentRunes {
+		if err := emit(wikiRuleEmptyContent.finding(page, "", fmt.Sprintf(
+			"Page '%s' has very little content (%d chars)", page.Title, runes,
+		))); err != nil {
+			return err
+		}
+	}
+
+	if s.knowledgeService == nil || page.PageType == types.WikiPageTypeIndex {
+		return nil
+	}
+	for _, ref := range page.SourceRefs {
+		kid := ref
+		if i := strings.Index(ref, "|"); i > 0 {
+			kid = ref[:i]
+		}
+		if kid == "" {
+			continue
+		}
+		live, seen := knowledgeLive[kid]
+		if !seen {
+			kn, err := s.knowledgeService.GetKnowledgeByIDOnly(ctx, kid)
+			if err != nil && !errors.Is(err, repository.ErrKnowledgeNotFound) {
+				return fmt.Errorf("check source knowledge %s: %w", kid, err)
 			}
+			live = err == nil && kn != nil
+			knowledgeLive[kid] = live
 		}
-		healthScore -= brokenCount * 5
-
-		// Penalize for no links at all
-		if stats.TotalLinks == 0 && stats.TotalPages > 2 {
-			healthScore -= 15
+		if live {
+			continue
 		}
-
-		// Penalize for empty pages
-		emptyCount := 0
-		for _, issue := range issues {
-			if issue.Type == LintIssueEmptyContent {
-				emptyCount++
-			}
-		}
-		healthScore -= emptyCount * 3
-	}
-
-	if healthScore < 0 {
-		healthScore = 0
-	}
-
-	// Generate summary
-	var summary strings.Builder
-	errorCount := 0
-	warningCount := 0
-	infoCount := 0
-	for _, issue := range issues {
-		switch issue.Severity {
-		case SeverityError:
-			errorCount++
-		case SeverityWarning:
-			warningCount++
-		case SeverityInfo:
-			infoCount++
+		if err := emit(wikiRuleStaleRef.finding(page, kid, fmt.Sprintf(
+			"Page '%s' references deleted knowledge %s", page.Title, kid,
+		))); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
-	if len(issues) == 0 {
-		summary.WriteString("Wiki is healthy! No issues found.")
-	} else {
-		fmt.Fprintf(&summary, "Found %d issues: %d errors, %d warnings, %d suggestions.",
-			len(issues), errorCount, warningCount, infoCount)
+// scanPageCrossRefs emits at most wikiCrossRefPerPageLimit suggestions for one
+// page. Matches arrive in a stable order, so the same page yields the same
+// suggestions on every run rather than a shifting sample.
+func scanPageCrossRefs(
+	page *types.WikiPage,
+	matcher *wikiLintTitleMatcher,
+	emit func(WikiLintIssue) error,
+) error {
+	outLinkSet := make(map[string]struct{}, len(page.OutLinks))
+	for _, link := range page.OutLinks {
+		outLinkSet[link] = struct{}{}
+	}
+	emitted := 0
+	for _, match := range matcher.Find(page.Content) {
+		if emitted >= wikiCrossRefPerPageLimit {
+			break
+		}
+		if match.Slug == page.Slug {
+			continue
+		}
+		if _, linked := outLinkSet[match.Slug]; linked {
+			continue
+		}
+		if err := emit(wikiRuleMissingCrossRef.finding(page, match.Slug, fmt.Sprintf(
+			"Page '%s' mentions '%s' but doesn't link to [[%s]]", page.Title, match.Title, match.Slug,
+		))); err != nil {
+			return err
+		}
+		emitted++
+	}
+	return nil
+}
+
+// RunLint performs a comprehensive health check on a wiki knowledge base and
+// returns a human-facing report. Findings beyond wikiLintReportMaxIssues are
+// counted but not materialized; Truncated tells the caller that happened.
+func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintReport, error) {
+	issues := make([]WikiLintIssue, 0, wikiLintReportMaxIssues)
+	scan, err := s.scanWiki(ctx, kbID, func(finding WikiLintIssue) error {
+		if len(issues) < wikiLintReportMaxIssues {
+			issues = append(issues, finding)
+		}
+		return nil
+	}, nil)
+	if err != nil {
+		return nil, err
 	}
 
 	report := &WikiLintReport{
 		KnowledgeBaseID: kbID,
 		Issues:          issues,
-		HealthScore:     healthScore,
-		Stats:           stats,
-		Summary:         summary.String(),
+		TotalIssues:     scan.Total,
+		Truncated:       scan.Total > len(issues),
+		HealthScore:     wikiLintHealthScore(scan),
+		Stats:           scan.Stats,
+		Summary:         wikiLintSummary(scan),
 	}
 
-	logger.Infof(ctx, "wiki lint: KB %s — health score %d/100, %d issues", kbID, healthScore, len(issues))
+	logger.Infof(ctx, "wiki lint: KB %s — health score %d/100, %d issues",
+		kbID, report.HealthScore, scan.Total)
 
 	return report, nil
+}
+
+// wikiLintHealthScore turns the scan counters into a 0-100 score. Penalties are
+// unchanged from the original inline computation; only the inputs moved from a
+// materialized issue slice to the exact per-type counters.
+func wikiLintHealthScore(scan *wikiLintScan) int {
+	score := 100
+	stats := scan.Stats
+	if stats == nil || stats.TotalPages == 0 {
+		return score
+	}
+
+	orphanPct := float64(stats.OrphanCount) / float64(stats.TotalPages) * 100
+	if orphanPct > 50 {
+		score -= 25
+	} else if orphanPct > 25 {
+		score -= 10
+	}
+
+	score -= scan.ByType[LintIssueBrokenLink] * 5
+	if stats.TotalLinks == 0 && stats.TotalPages > 2 {
+		score -= 15
+	}
+	score -= scan.ByType[LintIssueEmptyContent] * 3
+
+	if score < 0 {
+		return 0
+	}
+	return score
+}
+
+// wikiLintSummary renders the one-line verdict shown above the report.
+func wikiLintSummary(scan *wikiLintScan) string {
+	if scan.Total == 0 {
+		return "Wiki is healthy! No issues found."
+	}
+	return fmt.Sprintf("Found %d issues: %d errors, %d warnings, %d suggestions.",
+		scan.Total,
+		scan.BySeverity[SeverityError],
+		scan.BySeverity[SeverityWarning],
+		scan.BySeverity[SeverityInfo],
+	)
+}
+
+// wikiLintProgress converts "pages walked" into the coarse percentage a lint
+// run publishes. Two passes over totalPages make up the scan, and the band is
+// deliberately narrow (5-95) so the caller keeps 0 for "queued" and 100 for
+// "committed and reconciled".
+type wikiLintProgress struct {
+	totalUnits int64
+	done       int64
+	last       int
+	report     func(percent int)
+}
+
+func newWikiLintProgress(totalPages int64, report func(percent int)) *wikiLintProgress {
+	return &wikiLintProgress{totalUnits: totalPages * 2, last: -1, report: report}
+}
+
+// advance records walked pages and publishes the percentage when it moved by a
+// visible step, so a large KB does not issue one progress write per batch.
+func (p *wikiLintProgress) advance(pages int) {
+	if p == nil || p.report == nil || p.totalUnits <= 0 {
+		return
+	}
+	p.done += int64(pages)
+	percent := 5 + int(float64(p.done)/float64(p.totalUnits)*90)
+	if percent > 95 {
+		percent = 95
+	}
+	if percent-p.last < 5 {
+		return
+	}
+	p.last = percent
+	p.report(percent)
 }
 
 const wikiLintRuleVersion = "2026-07-v1"
@@ -540,7 +624,8 @@ func (s *WikiLintService) RepairPersistedIssue(
 	if issue == nil || attempt == nil {
 		return errors.New("issue and repair attempt are required")
 	}
-	if issue.IssueType != string(LintIssueBrokenLink) {
+	rule, ok := wikiLintRuleFor(issue.IssueType)
+	if !ok || rule.RepairMode != types.WikiIssueRepairDeterministic {
 		return fmt.Errorf("issue type %s does not have a deterministic repair", issue.IssueType)
 	}
 	page, err := s.wikiService.GetPageBySlug(ctx, issue.KnowledgeBaseID, issue.Slug)
@@ -587,6 +672,15 @@ func lintSeverityString(severity WikiLintIssueSeverity) string {
 }
 
 // ProcessRun scans, persists, and reconciles findings for one complete run.
+//
+// Findings stream into wikiLintUpsertBatch-sized writes rather than being
+// collected first, so a KB with many defects costs the same memory as a healthy
+// one. Only durable rules are persisted — advisory suggestions belong to the
+// synchronous report, not the problem centre.
+//
+// Reconciliation runs last and only on the success path: closing issues by
+// absence is sound only after every detector and every write has landed, and
+// because the scan is never truncated, absence really does mean absence.
 func (s *WikiLintService) ProcessRun(ctx context.Context, payload WikiLintTaskPayload) (runErr error) {
 	run, err := s.repo.GetLintRun(ctx, payload.KnowledgeBaseID, payload.RunID)
 	if err != nil {
@@ -606,82 +700,123 @@ func (s *WikiLintService) ProcessRun(ctx context.Context, payload WikiLintTaskPa
 		_ = s.repo.UpdateLintRun(context.WithoutCancel(ctx), run)
 	}()
 
-	report, err := s.RunLint(ctx, payload.KnowledgeBaseID)
+	seenAt := time.Now()
+	persisted := 0
+	batch := make([]*types.WikiPageIssue, 0, wikiLintUpsertBatch)
+	// Fingerprints are deduplicated within a batch because a single upsert
+	// statement cannot touch the same conflict target twice.
+	inBatch := make(map[string]struct{}, wikiLintUpsertBatch)
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		if err := s.repo.UpsertLintIssues(ctx, batch); err != nil {
+			return fmt.Errorf("persist lint findings: %w", err)
+		}
+		persisted += len(batch)
+		batch = batch[:0]
+		clear(inBatch)
+		return nil
+	}
+
+	scan, err := s.scanWiki(ctx, payload.KnowledgeBaseID, func(finding WikiLintIssue) error {
+		rule, ok := wikiLintRuleFor(string(finding.Type))
+		if !ok || !rule.Durable {
+			return nil
+		}
+		if _, dup := inBatch[finding.Fingerprint]; dup {
+			return nil
+		}
+		inBatch[finding.Fingerprint] = struct{}{}
+		batch = append(batch, wikiLintIssueRecord(payload, run.ID, seenAt, finding))
+		if len(batch) < wikiLintUpsertBatch {
+			return nil
+		}
+		return flush()
+	}, func(percent int) {
+		run.Progress = percent
+		_ = s.repo.UpdateLintRun(ctx, run)
+	})
 	if err != nil {
 		return err
 	}
-	run.Progress = 80
-	_ = s.repo.UpdateLintRun(ctx, run)
-	seenAt := time.Now()
-	for _, finding := range report.Issues {
-		evidence, _ := json.Marshal(map[string]interface{}{
-			"target_slug":  finding.TargetSlug,
-			"rule_version": wikiLintRuleVersion,
-		})
-		issue := &types.WikiPageIssue{
-			ID: uuid.New().String(), TenantID: payload.TenantID, KnowledgeBaseID: payload.KnowledgeBaseID,
-			PageID: finding.PageID, Slug: finding.PageSlug, IssueType: string(finding.Type),
-			Severity: lintSeverityString(finding.Severity), Source: types.WikiIssueSourceLint,
-			Fingerprint: finding.Fingerprint, Description: finding.Description, Evidence: types.JSON(evidence),
-			RepairMode: finding.RepairMode, DetectedPageVersion: finding.PageVersion,
-			LastSeenRunID: run.ID, LastSeenAt: seenAt, OccurrenceCount: 1,
-			Status: types.WikiIssueStatusOpen, ReportedBy: "wiki-lint",
-		}
-		if err := s.repo.UpsertLintIssue(ctx, issue); err != nil {
-			return fmt.Errorf("persist lint finding: %w", err)
-		}
+	if err := flush(); err != nil {
+		return err
 	}
-	// Reconcile absence only after every detector and every upsert succeeded.
+
 	if err := s.repo.ResolveMissingLintIssues(ctx, payload.KnowledgeBaseID, run.ID, seenAt); err != nil {
 		return fmt.Errorf("reconcile lint findings: %w", err)
 	}
+
 	finished := time.Now()
-	run.Status, run.Progress, run.FindingCount, run.FinishedAt = "completed", 100, len(report.Issues), &finished
+	run.Status, run.Progress, run.FindingCount, run.FinishedAt = "completed", 100, persisted, &finished
 	run.ErrorMessage = ""
+	logger.Infof(ctx, "wiki lint run %s: KB %s — %d findings scanned, %d persisted",
+		run.ID, payload.KnowledgeBaseID, scan.Total, persisted)
 	return s.repo.UpdateLintRun(ctx, run)
 }
 
-// AutoFix attempts to automatically fix fixable issues
+// wikiLintIssueRecord projects a finding onto its durable problem-centre row.
+func wikiLintIssueRecord(
+	payload WikiLintTaskPayload, runID string, seenAt time.Time, finding WikiLintIssue,
+) *types.WikiPageIssue {
+	evidence, _ := json.Marshal(map[string]interface{}{
+		"target_slug":  finding.TargetSlug,
+		"rule_version": wikiLintRuleVersion,
+	})
+	return &types.WikiPageIssue{
+		ID: uuid.New().String(), TenantID: payload.TenantID, KnowledgeBaseID: payload.KnowledgeBaseID,
+		PageID: finding.PageID, Slug: finding.PageSlug, IssueType: string(finding.Type),
+		Severity: lintSeverityString(finding.Severity), Source: types.WikiIssueSourceLint,
+		Fingerprint: finding.Fingerprint, Description: finding.Description, Evidence: types.JSON(evidence),
+		RepairMode: finding.RepairMode, DetectedPageVersion: finding.PageVersion,
+		LastSeenRunID: runID, LastSeenAt: seenAt, OccurrenceCount: 1,
+		Status: types.WikiIssueStatusOpen, ReportedBy: "wiki-lint",
+	}
+}
+
+// AutoFix applies deterministic repairs as the walk finds them. It consumes the
+// scan directly rather than RunLint's capped report so a large KB is fixed in
+// full, and a page whose links were already rewritten by an earlier finding is
+// skipped instead of written twice.
 func (s *WikiLintService) AutoFix(ctx context.Context, kbID string) (int, error) {
-	report, err := s.RunLint(ctx, kbID)
+	fixed := 0
+	repairedPages := make(map[string]struct{})
+	_, err := s.scanWiki(ctx, kbID, func(finding WikiLintIssue) error {
+		if !finding.AutoFixable || finding.TargetSlug == "" {
+			return nil
+		}
+		if _, done := repairedPages[finding.PageSlug]; done {
+			return nil
+		}
+		// Only the high-confidence rewrite helper is allowed here. A link with
+		// no unique live target stays an open finding instead of being
+		// destructively flattened into plain text.
+		page, err := s.wikiService.GetPageBySlug(ctx, kbID, finding.PageSlug)
+		if err != nil {
+			return nil
+		}
+		repaired, changed, err := s.wikiService.RepairContentLinks(ctx, kbID, page.Slug, page.Content)
+		if err != nil || !changed {
+			return nil
+		}
+		page.Content = repaired
+		pipelineCtx := types.WithWikiEditSource(ctx, types.WikiEditSourcePipeline)
+		if _, err := s.wikiService.UpdatePage(pipelineCtx, page); err != nil {
+			return nil
+		}
+		repairedPages[finding.PageSlug] = struct{}{}
+		fixed++
+		return nil
+	}, nil)
 	if err != nil {
 		return 0, err
 	}
 
-	fixed := 0
-	for _, issue := range report.Issues {
-		if !issue.AutoFixable {
-			continue
-		}
-
-		switch issue.Type {
-		case LintIssueBrokenLink:
-			// Only apply the existing high-confidence rewrite helper. A link with
-			// no unique live target remains an issue instead of being destructively
-			// flattened into plain text.
-			if issue.TargetSlug == "" {
-				continue
-			}
-			page, err := s.wikiService.GetPageBySlug(ctx, kbID, issue.PageSlug)
-			if err != nil {
-				continue
-			}
-			repaired, changed, err := s.wikiService.RepairContentLinks(ctx, kbID, page.Slug, page.Content)
-			if err == nil && changed {
-				page.Content = repaired
-				pipelineCtx := types.WithWikiEditSource(ctx, types.WikiEditSourcePipeline)
-				if _, err := s.wikiService.UpdatePage(pipelineCtx, page); err == nil {
-					fixed++
-				}
-			}
-		}
-	}
-
-	// Rebuild links after fixes
 	if fixed > 0 {
 		_ = s.wikiService.RebuildLinks(ctx, kbID)
 	}
 
-	logger.Infof(ctx, "wiki auto-fix: KB %s — fixed %d issues", kbID, fixed)
+	logger.Infof(ctx, "wiki auto-fix: KB %s — fixed %d pages", kbID, fixed)
 	return fixed, nil
 }

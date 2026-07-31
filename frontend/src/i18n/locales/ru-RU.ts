@@ -3606,7 +3606,6 @@ export default {
       issueGoFix: 'Исправить',
       healthCheck: 'Проверка состояния',
       fixAssistantTitle: 'Wiki Умный помощник исправления',
-      repairClaimed: 'Задача исправления принята',
       repairRepairing: 'Анализ и исправление',
       repairVerifying: 'Проверка исправления',
       repairResolved: 'Исправление проверено и завершено',

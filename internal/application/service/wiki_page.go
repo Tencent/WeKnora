@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -1350,7 +1349,7 @@ func (s *wikiPageService) CreateIssue(ctx context.Context, issue *types.WikiPage
 	if issue.ID == "" {
 		issue.ID = uuid.New().String()
 	}
-	if issue.Status == "" || issue.Status == "pending" {
+	if issue.Status == "" || issue.Status == types.WikiIssueStatusLegacyPending {
 		issue.Status = types.WikiIssueStatusOpen
 	}
 	if issue.Source == "" {
@@ -1400,7 +1399,7 @@ func wikiIssueFingerprint(parts ...string) string {
 
 // ListIssues retrieves issues for a knowledge base
 func (s *wikiPageService) ListIssues(ctx context.Context, kbID string, slug string, status string) ([]*types.WikiPageIssue, error) {
-	if status == "pending" {
+	if status == types.WikiIssueStatusLegacyPending {
 		status = types.WikiIssueStatusOpen
 	}
 	return s.repo.ListIssues(ctx, kbID, slug, status)
@@ -1409,7 +1408,7 @@ func (s *wikiPageService) ListIssues(ctx context.Context, kbID string, slug stri
 func (s *wikiPageService) ListIssuesPage(
 	ctx context.Context, kbID, slug, status string, page, pageSize int,
 ) (*types.WikiIssueListResponse, error) {
-	if status == "pending" {
+	if status == types.WikiIssueStatusLegacyPending {
 		status = types.WikiIssueStatusOpen
 	}
 	if page < 1 {
@@ -1433,7 +1432,7 @@ func (s *wikiPageService) GetIssue(ctx context.Context, kbID, issueID string) (*
 }
 
 func (s *wikiPageService) CountIssues(ctx context.Context, kbID, status string) (int64, error) {
-	if status == "pending" {
+	if status == types.WikiIssueStatusLegacyPending {
 		status = types.WikiIssueStatusOpen
 	}
 	return s.repo.CountIssues(ctx, kbID, status)
@@ -1450,7 +1449,7 @@ func (s *wikiPageService) BeginIssueRepair(
 		activeAttempt, attemptErr := s.repo.GetRepairAttempt(ctx, kbID, issue.ActiveAttemptID)
 		if errors.Is(attemptErr, repository.ErrWikiIssueNotFound) {
 			_ = s.repo.UpdateIssueLifecycle(ctx, kbID, issue.ID,
-				[]string{types.WikiIssueStatusClaimed, types.WikiIssueStatusRepairing, types.WikiIssueStatusVerifying},
+				types.WikiIssueInFlightStatuses,
 				map[string]interface{}{
 					"status": types.WikiIssueStatusFailed, "active_attempt_id": "",
 					"resolution_summary": "The active repair record was missing; the issue can be retried.",
@@ -1462,13 +1461,11 @@ func (s *wikiPageService) BeginIssueRepair(
 		} else if attemptErr != nil {
 			return nil, nil, attemptErr
 		} else {
-			started := activeAttempt.CreatedAt
-			if activeAttempt.StartedAt != nil {
-				started = *activeAttempt.StartedAt
-			}
-			if started.Before(time.Now().Add(-30 * time.Minute)) {
+			// Retiring the stale attempt inline (rather than waiting for the
+			// reaper) is what lets a user retry immediately after a worker died.
+			if wikiRepairAttemptStartedAt(activeAttempt).Before(time.Now().Add(-wikiRepairAttemptStaleAfter)) {
 				_ = s.repo.FailIssueRepair(ctx, kbID, issue.ID, activeAttempt.ID,
-					"Repair attempt expired before it reported a verified result.", time.Now())
+					wikiRepairAttemptExpiredMessage, time.Now())
 				issue, err = s.repo.GetIssue(ctx, kbID, issueID)
 				if err != nil {
 					return nil, nil, err
@@ -1512,6 +1509,12 @@ func (s *wikiPageService) GetRepairAttempt(
 	return s.repo.GetRepairAttempt(ctx, kbID, attemptID)
 }
 
+// ListActiveRepairAttempts returns the attempts a client may reconnect to.
+//
+// It is a pure read: attempts whose worker stopped reporting are retired by
+// WikiMaintenanceRunner, not by whoever happens to open the page. Filtering
+// them out here as well would make the endpoint's answer depend on a write
+// succeeding, which is exactly the coupling the reaper removes.
 func (s *wikiPageService) ListActiveRepairAttempts(
 	ctx context.Context, kbID string,
 ) ([]*types.WikiRepairAttempt, error) {
@@ -1519,104 +1522,52 @@ func (s *wikiPageService) ListActiveRepairAttempts(
 	if err != nil {
 		return nil, err
 	}
-	cutoff := time.Now().Add(-30 * time.Minute)
-	active := attempts[:0]
+	cutoff := time.Now().Add(-wikiRepairAttemptStaleAfter)
+	live := attempts[:0]
 	for _, attempt := range attempts {
-		started := attempt.CreatedAt
-		if attempt.StartedAt != nil {
-			started = *attempt.StartedAt
+		if wikiRepairAttemptStartedAt(attempt).Before(cutoff) {
+			continue
 		}
-		if started.Before(cutoff) {
-			if err := s.repo.FailIssueRepair(ctx, kbID, attempt.IssueID, attempt.ID,
-				"Repair attempt expired before it reported a verified result.", time.Now()); err == nil {
-				continue
-			}
-		}
-		active = append(active, attempt)
+		live = append(live, attempt)
 	}
-	return active, nil
+	return live, nil
+}
+
+// wikiRepairAttemptStartedAt falls back to CreatedAt for rows written before
+// StartedAt was populated.
+func wikiRepairAttemptStartedAt(attempt *types.WikiRepairAttempt) time.Time {
+	if attempt.StartedAt != nil {
+		return *attempt.StartedAt
+	}
+	return attempt.CreatedAt
 }
 
 func (s *wikiPageService) FailIssueRepair(ctx context.Context, kbID, issueID, attemptID, message string) error {
 	return s.repo.FailIssueRepair(ctx, kbID, issueID, attemptID, message, time.Now())
 }
 
-func containsWikiRef(refs []string, target string) bool {
-	for _, ref := range refs {
-		if ref == target || strings.HasPrefix(ref, target+"|") {
-			return true
-		}
-	}
-	return false
-}
-
+// verifyWikiIssueResolution assembles the postcondition input and defers the
+// decision to the rule registry. Keeping the rule bodies in wiki_lint_rules.go
+// means a detector and the check that closes its findings live together, so a
+// new rule cannot be added with only half of the pair.
 func (s *wikiPageService) verifyWikiIssueResolution(
 	ctx context.Context, issue *types.WikiPageIssue, page *types.WikiPage, attempt *types.WikiRepairAttempt,
 ) error {
-	if issue == nil || attempt == nil {
+	if issue == nil {
 		return errors.New("issue and repair attempt are required")
-	}
-	if page == nil {
-		if attempt.Action == "deleted" {
-			return nil
-		}
-		return errors.New("target page no longer exists without a recorded delete action")
 	}
 	evidence := map[string]interface{}{}
 	if len(issue.Evidence) > 0 {
 		_ = json.Unmarshal(issue.Evidence, &evidence)
 	}
 	target, _ := evidence["target_slug"].(string)
-	switch issue.IssueType {
-	case string(LintIssueBrokenLink):
-		if target == "" {
-			return errors.New("broken-link issue is missing target evidence")
-		}
-		if containsWikiRef(page.OutLinks, target) {
-			return fmt.Errorf("broken link %s is still present", target)
-		}
-	case string(LintIssueStaleRef):
-		if target == "" {
-			return errors.New("stale-reference issue is missing target evidence")
-		}
-		if containsWikiRef(page.SourceRefs, target) {
-			return fmt.Errorf("stale source reference %s is still present", target)
-		}
-	case string(LintIssueOrphanPage):
-		if len(page.InLinks) == 0 {
-			return errors.New("page still has no inbound links")
-		}
-	case string(LintIssueEmptyContent):
-		if utf8.RuneCountInString(strings.TrimSpace(page.Content)) < 50 {
-			return errors.New("page still has fewer than 50 content characters")
-		}
-	case string(LintIssueMissingCrossRef):
-		if target == "" {
-			return errors.New("missing-cross-reference issue is missing target evidence")
-		}
-		if containsWikiRef(page.OutLinks, target) {
-			break
-		}
-		targetPage, err := s.repo.GetBySlug(ctx, issue.KnowledgeBaseID, target)
-		if errors.Is(err, repository.ErrWikiPageNotFound) {
-			break // The referenced entity disappeared, so the finding is obsolete.
-		}
-		if err != nil {
-			return err
-		}
-		matcher := newWikiLintTitleMatcher(map[string]string{target: targetPage.Title})
-		if len(matcher.Find(page.Content)) > 0 {
-			return fmt.Errorf("page still mentions %q without linking to %s", targetPage.Title, target)
-		}
-	default:
-		// Semantic issues cannot be proven by a string status update. Require
-		// either a real edit during this attempt or evidence that the page had
-		// already advanced after the issue was detected.
-		if page.Version <= attempt.BeforeVersion && page.Version <= issue.DetectedPageVersion {
-			return errors.New("page version did not change and the issue cannot be verified as already resolved")
-		}
-	}
-	return nil
+	return verifyWikiIssuePostcondition(ctx, wikiVerifyInput{
+		Issue:      issue,
+		Page:       page,
+		Attempt:    attempt,
+		TargetSlug: target,
+		Pages:      s.repo,
+	})
 }
 
 // UpdateIssueStatus applies only legal, KB-scoped transitions. A resolved
@@ -1630,13 +1581,13 @@ func (s *wikiPageService) UpdateIssueStatus(
 		return err
 	}
 	switch status {
-	case "pending", types.WikiIssueStatusOpen:
+	case types.WikiIssueStatusLegacyPending, types.WikiIssueStatusOpen:
 		return s.repo.UpdateIssueLifecycle(ctx, kbID, issueID,
 			[]string{types.WikiIssueStatusFailed, types.WikiIssueStatusIgnored},
 			map[string]interface{}{"status": types.WikiIssueStatusOpen, "active_attempt_id": ""})
 	case types.WikiIssueStatusIgnored:
 		return s.repo.UpdateIssueLifecycle(ctx, kbID, issueID,
-			[]string{types.WikiIssueStatusOpen, types.WikiIssueStatusFailed, "pending"},
+			types.WikiIssueActionableStatuses,
 			map[string]interface{}{
 				"status": types.WikiIssueStatusIgnored, "resolution_action": "ignored",
 				"resolution_summary": summary, "active_attempt_id": "",

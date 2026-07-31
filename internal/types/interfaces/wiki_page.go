@@ -432,7 +432,16 @@ type WikiPageRepository interface {
 	GetIssue(ctx context.Context, kbID, issueID string) (*types.WikiPageIssue, error)
 	UpdateIssueLifecycle(ctx context.Context, kbID, issueID string, from []string, updates map[string]interface{}) error
 	UpsertLintIssue(ctx context.Context, issue *types.WikiPageIssue) error
+	// UpsertLintIssues persists a batch of findings in one statement. Callers
+	// must deduplicate fingerprints within the slice.
+	UpsertLintIssues(ctx context.Context, issues []*types.WikiPageIssue) error
 	ResolveMissingLintIssues(ctx context.Context, kbID, runID string, resolvedAt time.Time) error
+	// ExpireStaleRepairAttempts retires repair attempts that stopped reporting
+	// before cutoff, releasing the issues they held.
+	ExpireStaleRepairAttempts(ctx context.Context, cutoff time.Time, message string, now time.Time) (int64, error)
+	// ExpireStaleLintRuns retires lint runs abandoned before cutoff, freeing the
+	// one-active-run slot for the knowledge base.
+	ExpireStaleLintRuns(ctx context.Context, cutoff time.Time, message string, now time.Time) (int64, error)
 	ClaimIssueAndCreateAttempt(ctx context.Context, issue *types.WikiPageIssue, attempt *types.WikiRepairAttempt) error
 	CompleteIssueRepair(ctx context.Context, issue *types.WikiPageIssue, attempt *types.WikiRepairAttempt) error
 	FailIssueRepair(ctx context.Context, kbID, issueID, attemptID, message string, finishedAt time.Time) error

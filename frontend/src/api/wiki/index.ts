@@ -147,7 +147,7 @@ export interface WikiRepairAttempt {
   page_id: string;
   session_id: string;
   mode: string;
-  status: 'claimed' | 'repairing' | 'verifying' | 'resolved' | 'failed' | string;
+  status: 'repairing' | 'verifying' | 'resolved' | 'failed' | string;
   before_version: number;
   after_version: number;
   action: string;

@@ -313,6 +313,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Data source sync framework registered")
 	must(container.Invoke(startAuditLogRetention))
 	logger.Debugf(ctx, "[Container] Audit log retention runner registered")
+	must(container.Provide(service.NewWikiMaintenanceRunner))
+	must(container.Invoke(startWikiMaintenance))
+	logger.Debugf(ctx, "[Container] Wiki maintenance runner registered")
 	must(container.Provide(service.NewHousekeepingService))
 	must(container.Invoke(startHousekeepingService))
 	logger.Debugf(ctx, "[Container] Knowledge housekeeping runner registered")
@@ -1674,6 +1677,20 @@ func startAuditLogRetention(
 ) {
 	runner.Start(context.Background())
 	cleaner.RegisterWithName("AuditLogRetentionRunner", func() error {
+		runner.Stop()
+		return nil
+	})
+}
+
+// startWikiMaintenance spins up the sweep that retires abandoned wiki repair
+// attempts and lint runs. It exists so those recoveries do not have to ride
+// along inside read endpoints, which is what kept a GET mutating state and made
+// recovery depend on someone visiting the page.
+func startWikiMaintenance(
+	runner *service.WikiMaintenanceRunner, cleaner interfaces.ResourceCleaner,
+) {
+	runner.Start(context.Background())
+	cleaner.RegisterWithName("WikiMaintenanceRunner", func() error {
 		runner.Stop()
 		return nil
 	})

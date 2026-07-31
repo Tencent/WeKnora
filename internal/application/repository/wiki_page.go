@@ -1227,7 +1227,7 @@ WHERE knowledge_base_id = ? AND id IN (
 			}
 			if err := tx.Model(&types.WikiPageIssue{}).
 				Where("knowledge_base_id = ? AND page_id = ? AND active_attempt_id = ''", kbID, page.ID).
-				Where("status IN ?", []string{types.WikiIssueStatusOpen, types.WikiIssueStatusFailed, "pending"}).
+				Where("status IN ?", types.WikiIssueActionableStatuses).
 				Updates(map[string]interface{}{
 					"status": types.WikiIssueStatusResolved, "resolved_at": now,
 					"resolution_action": "page_deleted", "resolution_summary": "The affected page was deleted.",
@@ -1428,12 +1428,9 @@ func (r *wikiPageRepository) CountIssues(ctx context.Context, kbID, status strin
 func wikiIssueStatusesForFilter(status string) []string {
 	switch status {
 	case "actionable":
-		return []string{types.WikiIssueStatusOpen, types.WikiIssueStatusFailed, "pending"}
+		return types.WikiIssueActionableStatuses
 	case "unresolved":
-		return []string{
-			types.WikiIssueStatusOpen, types.WikiIssueStatusClaimed, types.WikiIssueStatusRepairing,
-			types.WikiIssueStatusVerifying, types.WikiIssueStatusFailed, "pending",
-		}
+		return types.WikiIssueUnresolvedStatuses
 	default:
 		return nil
 	}
@@ -1472,28 +1469,60 @@ func (r *wikiPageRepository) UpdateIssueLifecycle(
 	return nil
 }
 
+// wikiLintIssueUpsert is the conflict resolution shared by the single-row and
+// batch upserts.
+//
+// Incoming values are read from `excluded` rather than from a Go-side struct, so
+// the same clause is correct for a multi-row INSERT where every row carries its
+// own payload. Two columns are deliberately not straight overwrites:
+//
+//   - occurrence_count accumulates, giving "how many runs has this survived".
+//   - status only re-opens a finding that was previously closed; an ignored
+//     issue stays ignored and one under active repair keeps its lifecycle.
+//
+// deleted_at is cleared because re-detection means the finding is real again;
+// leaving it set would let a soft-deleted row absorb the upsert and hide the
+// finding for good (the fingerprint index is not partial).
+func wikiLintIssueUpsert(now time.Time) clause.OnConflict {
+	assignments := clause.AssignmentColumns([]string{
+		"page_id", "slug", "issue_type", "severity", "description",
+		"evidence", "repair_mode", "detected_page_version",
+		"last_seen_run_id", "last_seen_at",
+	})
+	assignments = append(assignments, clause.Assignments(map[string]interface{}{
+		"occurrence_count": gorm.Expr("wiki_page_issues.occurrence_count + 1"),
+		"status": gorm.Expr(
+			"CASE WHEN wiki_page_issues.status IN ? THEN ? ELSE wiki_page_issues.status END",
+			types.WikiIssueReopenableStatuses, types.WikiIssueStatusOpen,
+		),
+		"deleted_at": gorm.Expr("NULL"),
+		"updated_at": now,
+	})...)
+	return clause.OnConflict{
+		Columns:   []clause.Column{{Name: "knowledge_base_id"}, {Name: "fingerprint"}},
+		DoUpdates: assignments,
+	}
+}
+
 func (r *wikiPageRepository) UpsertLintIssue(ctx context.Context, issue *types.WikiPageIssue) error {
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "knowledge_base_id"}, {Name: "fingerprint"}},
-		DoUpdates: clause.Assignments(map[string]interface{}{
-			"page_id":               issue.PageID,
-			"slug":                  issue.Slug,
-			"issue_type":            issue.IssueType,
-			"severity":              issue.Severity,
-			"description":           issue.Description,
-			"evidence":              issue.Evidence,
-			"repair_mode":           issue.RepairMode,
-			"detected_page_version": issue.DetectedPageVersion,
-			"last_seen_run_id":      issue.LastSeenRunID,
-			"last_seen_at":          issue.LastSeenAt,
-			"occurrence_count":      gorm.Expr("wiki_page_issues.occurrence_count + 1"),
-			"status": gorm.Expr(
-				"CASE WHEN wiki_page_issues.status IN ? THEN ? ELSE wiki_page_issues.status END",
-				[]string{types.WikiIssueStatusResolved, types.WikiIssueStatusFailed, "pending"}, types.WikiIssueStatusOpen,
-			),
-			"updated_at": time.Now(),
-		}),
-	}).Create(issue).Error
+	return r.db.WithContext(ctx).
+		Clauses(wikiLintIssueUpsert(time.Now())).
+		Create(issue).Error
+}
+
+// UpsertLintIssues persists a window of findings in one statement. A full-KB
+// scan produces findings continuously, and one round-trip per finding is what
+// made large knowledge bases impractical to scan.
+//
+// Callers must not put the same fingerprint twice in one slice: a single upsert
+// cannot touch the same conflict target more than once.
+func (r *wikiPageRepository) UpsertLintIssues(ctx context.Context, issues []*types.WikiPageIssue) error {
+	if len(issues) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).
+		Clauses(wikiLintIssueUpsert(time.Now())).
+		Create(issues).Error
 }
 
 func (r *wikiPageRepository) ResolveMissingLintIssues(
@@ -1502,7 +1531,7 @@ func (r *wikiPageRepository) ResolveMissingLintIssues(
 	return r.db.WithContext(ctx).Model(&types.WikiPageIssue{}).
 		Where("knowledge_base_id = ? AND source = ?", kbID, types.WikiIssueSourceLint).
 		Where("last_seen_run_id <> ?", runID).
-		Where("status IN ?", []string{types.WikiIssueStatusOpen, types.WikiIssueStatusFailed, "pending"}).
+		Where("status IN ?", types.WikiIssueActionableStatuses).
 		Updates(map[string]interface{}{
 			"status":                types.WikiIssueStatusResolved,
 			"resolved_at":           resolvedAt,
@@ -1519,8 +1548,8 @@ func (r *wikiPageRepository) ClaimIssueAndCreateAttempt(
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&types.WikiPageIssue{}).
-			Where("id = ? AND knowledge_base_id = ? AND status IN ?", issue.ID, issue.KnowledgeBaseID,
-				[]string{types.WikiIssueStatusOpen, types.WikiIssueStatusFailed, "pending"}).
+			Where("id = ? AND knowledge_base_id = ? AND status IN ?",
+				issue.ID, issue.KnowledgeBaseID, types.WikiIssueActionableStatuses).
 			Updates(map[string]interface{}{
 				"status":            types.WikiIssueStatusRepairing,
 				"active_attempt_id": attempt.ID,
@@ -1622,29 +1651,24 @@ func (r *wikiPageRepository) ListActiveRepairAttempts(
 ) ([]*types.WikiRepairAttempt, error) {
 	var attempts []*types.WikiRepairAttempt
 	err := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ? AND status IN ?", kbID,
-			[]string{types.WikiIssueStatusClaimed, types.WikiIssueStatusRepairing, types.WikiIssueStatusVerifying}).
+		Where("knowledge_base_id = ? AND status IN ?", kbID, types.WikiIssueInFlightStatuses).
 		Order("created_at DESC").Find(&attempts).Error
 	return attempts, err
 }
 
+// wikiLintRunActiveStatuses are the states that hold the one-active-run slot.
+var wikiLintRunActiveStatuses = []string{"queued", "running"}
+
+// CreateLintRun inserts a queued run, enforcing one active run per KB.
+//
+// The count is a fast pre-check that yields a clean conflict error; the partial
+// unique index is the race-safe backstop for two starts that both passed the
+// count before either inserted. Recovering abandoned runs is not this method's
+// job — WikiMaintenanceRunner owns that, so starting a run stays a pure write.
 func (r *wikiPageRepository) CreateLintRun(ctx context.Context, run *types.WikiLintRun) error {
-	now := time.Now()
-	// A worker can disappear after claiming a run. Expire only clearly stale
-	// records so the partial unique index cannot permanently block future
-	// health checks; six hours leaves ample room for very large KB scans.
-	if err := r.db.WithContext(ctx).Model(&types.WikiLintRun{}).
-		Where("knowledge_base_id = ? AND status IN ? AND updated_at < ?",
-			run.KnowledgeBaseID, []string{"queued", "running"}, now.Add(-6*time.Hour)).
-		Updates(map[string]interface{}{
-			"status": "failed", "error_message": "Lint run expired after the worker stopped reporting progress.",
-			"finished_at": now, "updated_at": now,
-		}).Error; err != nil {
-		return err
-	}
 	var active int64
 	if err := r.db.WithContext(ctx).Model(&types.WikiLintRun{}).
-		Where("knowledge_base_id = ? AND status IN ?", run.KnowledgeBaseID, []string{"queued", "running"}).
+		Where("knowledge_base_id = ? AND status IN ?", run.KnowledgeBaseID, wikiLintRunActiveStatuses).
 		Count(&active).Error; err != nil {
 		return err
 	}
@@ -1652,15 +1676,64 @@ func (r *wikiPageRepository) CreateLintRun(ctx context.Context, run *types.WikiL
 		return ErrWikiIssueConflict
 	}
 	if err := r.db.WithContext(ctx).Create(run).Error; err != nil {
-		// The partial unique index is the race-safe backstop for two starts
-		// that both passed the count before either inserted.
-		lower := strings.ToLower(err.Error())
-		if strings.Contains(lower, "unique") || strings.Contains(lower, "duplicate") {
+		if isWikiUniqueViolation(err) {
 			return ErrWikiIssueConflict
 		}
 		return err
 	}
 	return nil
+}
+
+// isWikiUniqueViolation recognizes a unique-constraint failure across the
+// Postgres and SQLite drivers this repository supports. Both spell it
+// differently and neither exposes a shared sentinel through GORM, so the
+// message is the only portable signal.
+func isWikiUniqueViolation(err error) bool {
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "unique") || strings.Contains(lower, "duplicate")
+}
+
+// ExpireStaleRepairAttempts fails attempts that stopped reporting before cutoff
+// and releases the issues they were holding. Returns the number of attempts
+// retired.
+func (r *wikiPageRepository) ExpireStaleRepairAttempts(
+	ctx context.Context, cutoff time.Time, message string, now time.Time,
+) (int64, error) {
+	var stale []*types.WikiRepairAttempt
+	if err := r.db.WithContext(ctx).
+		Where("status IN ?", types.WikiIssueInFlightStatuses).
+		Where("COALESCE(started_at, created_at) < ?", cutoff).
+		Find(&stale).Error; err != nil {
+		return 0, err
+	}
+	// Retired one at a time on purpose: FailIssueRepair is the single place that
+	// keeps an attempt and its issue consistent, and reusing it here means the
+	// reaper cannot drift from the interactive failure path.
+	var retired int64
+	for _, attempt := range stale {
+		err := r.FailIssueRepair(
+			ctx, attempt.KnowledgeBaseID, attempt.IssueID, attempt.ID, message, now,
+		)
+		if err != nil && !errors.Is(err, ErrWikiIssueConflict) {
+			return retired, err
+		}
+		retired++
+	}
+	return retired, nil
+}
+
+// ExpireStaleLintRuns fails runs whose worker stopped reporting before cutoff,
+// freeing the one-active-run slot. Returns the number of runs retired.
+func (r *wikiPageRepository) ExpireStaleLintRuns(
+	ctx context.Context, cutoff time.Time, message string, now time.Time,
+) (int64, error) {
+	result := r.db.WithContext(ctx).Model(&types.WikiLintRun{}).
+		Where("status IN ? AND updated_at < ?", wikiLintRunActiveStatuses, cutoff).
+		Updates(map[string]interface{}{
+			"status": "failed", "error_message": message,
+			"finished_at": now, "updated_at": now,
+		})
+	return result.RowsAffected, result.Error
 }
 
 func (r *wikiPageRepository) UpdateLintRun(ctx context.Context, run *types.WikiLintRun) error {
