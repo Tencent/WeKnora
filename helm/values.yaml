@@ -48,6 +48,51 @@ serviceAccount:
   automountServiceAccountToken: false
 
 # -----------------------------------------------------------------------------
+# Database
+# -----------------------------------------------------------------------------
+database:
+  # -- Main database driver: postgres or mysql
+  driver: postgres
+  # -- PostgreSQL host used when driver=postgres. Kept at the historical key
+  # so existing Helm overrides remain compatible.
+  host: postgres
+  # -- PostgreSQL port used when driver=postgres.
+  port: "5432"
+  # External MySQL/Percona Server 8.0.16+ connection used when driver=mysql.
+  # This chart does not deploy MySQL; host is deliberately required so that a
+  # MySQL install cannot silently connect to the in-chart PostgreSQL service.
+  mysql:
+    # -- MySQL host (required when driver=mysql)
+    host: ""
+    # -- MySQL port
+    port: "3306"
+    # -- Per-app connection pool defaults for MySQL mode.
+    pool:
+      maxOpenConns: "20"
+      maxIdleConns: "10"
+      connMaxLifetime: "10m"
+      connMaxIdleTime: "5m"
+    # Driver-level MySQL deadlines. Values use Go duration syntax; leaving
+    # read/write empty preserves the driver's disabled (0) deadline.
+    timeouts:
+      connect: "10s"
+      read: ""
+      write: ""
+    # TLS for an external MySQL endpoint. Keep certificate material in an
+    # existing Kubernetes Secret, never in values files. TLS may use public
+    # system roots with no Secret; set secretName and filenames for private CA
+    # and/or mutual TLS. The mounted files are read-only.
+    tls:
+      enabled: false
+      serverName: ""
+      insecureSkipVerify: false
+      secretName: ""
+      mountPath: /run/secrets/weknora-mysql
+      caFile: ""
+      certFile: ""
+      keyFile: ""
+
+# -----------------------------------------------------------------------------
 # App (Backend API Server)
 # -----------------------------------------------------------------------------
 app:
@@ -88,8 +133,11 @@ app:
   # Ref: https://github.com/Tencent/WeKnora/blob/main/docker-compose.yml
   env:
     GIN_MODE: release
-    # -- Retrieval driver: postgres, elasticsearch_v7, elasticsearch_v8, qdrant
-    RETRIEVE_DRIVER: postgres
+    # -- Retrieval driver. Empty follows database.driver. A MySQL main database
+    # may use mysql or a non-SQL retriever such as qdrant, but not postgres.
+    # A PostgreSQL main database may use the MySQL retriever when MYSQL_* is
+    # supplied independently through app.extraEnv.
+    RETRIEVE_DRIVER: ""
     # -- Storage type: local, minio, cos, tos, s3
     STORAGE_TYPE: local
     LOCAL_STORAGE_BASE_DIR: /data/files
@@ -238,7 +286,8 @@ docreader:
 # PostgreSQL (ParadeDB - Vector + BM25 Search)
 # -----------------------------------------------------------------------------
 postgresql:
-  # -- Enable PostgreSQL
+  # -- Enable the in-chart PostgreSQL service when database.driver=postgres.
+  # It is never rendered when database.driver=mysql.
   enabled: true
 
   image:

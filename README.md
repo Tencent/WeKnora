@@ -214,6 +214,10 @@ docker compose up -d   # Start core services
 
 Once started, visit **http://localhost** to get started.
 
+For MySQL/Percona Server as the primary business database, including verified
+TLS, mutual TLS, connection deadlines, Compose, Helm, and migration guidance,
+see [MySQL primary database deployment](./docs/mysql-primary-database.md).
+
 > To use a local Ollama model, run `ollama serve > /dev/null 2>&1 &` first.
 
 ### 🔧 Optional Services (Docker Compose Profiles)

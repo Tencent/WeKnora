@@ -70,7 +70,7 @@ func (s *vectorStoreService) CreateStore(ctx context.Context, store *types.Vecto
 	}
 
 	// 2.5. Index config validation (bounds, name characters)
-	if err := types.ValidateIndexConfig(store.IndexConfig); err != nil {
+	if err := types.ValidateIndexConfigForEngine(store.EngineType, store.IndexConfig); err != nil {
 		return err
 	}
 
@@ -157,7 +157,7 @@ func (s *vectorStoreService) UpdateStore(ctx context.Context, store *types.Vecto
 //     delete are atomic with respect to other writers holding the store
 //     row lock. Default isolation is Read Committed; this is a write-lock
 //     relationship, not a "shared snapshot" relationship.
-//  2. PostgreSQL: take a row-level X-lock on the vector_stores row via
+//  2. PostgreSQL/MySQL: take a row-level X-lock on the vector_stores row via
 //     SELECT … FOR UPDATE so concurrent KB-create requests reading the
 //     same store row block until our transaction completes. SQLite
 //     serializes writes via WAL + max-open-conns=1, so the lock hint is
@@ -189,10 +189,10 @@ func (s *vectorStoreService) DeleteStore(ctx context.Context, tenantID uint64, i
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// tx inherits ctx from WithContext above; no need to re-attach.
 
-		// 1. Lock the store row (PG row-level X-lock; skipped on SQLite).
+		// 1. Lock the store row (row-level X-lock; skipped on SQLite).
 		var store types.VectorStore
 		q := tx.Where("id = ? AND tenant_id = ?", id, tenantID)
-		if s.isPostgres(tx) {
+		if supportsRowLevelLocking(tx) {
 			q = q.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		if err := q.First(&store).Error; err != nil {
@@ -245,13 +245,6 @@ func (s *vectorStoreService) unregisterSafely(ctx context.Context, storeID strin
 	if s.storeRegistry != nil {
 		s.storeRegistry.UnregisterByStoreID(storeID)
 	}
-}
-
-// isPostgres reports whether the active GORM dialector is PostgreSQL.
-// Used to gate dialect-specific clauses (e.g., SELECT FOR UPDATE) that
-// SQLite would either ignore (recent versions) or fail to compile on.
-func (s *vectorStoreService) isPostgres(db *gorm.DB) bool {
-	return db != nil && db.Dialector != nil && db.Dialector.Name() == "postgres"
 }
 
 // SaveDetectedVersion updates the connection_config.version for a stored vector store.
@@ -467,6 +460,13 @@ func validateConnectionConfig(engineType types.RetrieverEngineType, config types
 		if config.Database == "" {
 			return errors.NewValidationError("database is required for doris")
 		}
+	case types.MySQLRetrieverEngineType:
+		if config.Addr == "" {
+			return errors.NewValidationError("addr is required for mysql")
+		}
+		if config.Database == "" {
+			return errors.NewValidationError("database is required for mysql")
+		}
 	case types.OpenSearchRetrieverEngineType:
 		if config.Addr == "" {
 			return errors.NewValidationError("addr is required for opensearch")
@@ -506,9 +506,10 @@ func validateConnectionAddrSSRF(engineType types.RetrieverEngineType, config typ
 		types.OpenSearchRetrieverEngineType,
 		types.MilvusRetrieverEngineType,
 		types.TencentVectorDBRetrieverEngineType,
-		types.DorisRetrieverEngineType:
+		types.DorisRetrieverEngineType,
+		types.MySQLRetrieverEngineType:
 		// Single address field: a URL (es/opensearch) or bare host:port
-		// (milvus/tencent/doris). ValidateURLForSSRF normalises both.
+		// (milvus/tencent/doris/mysql). ValidateURLForSSRF normalises both.
 		return check(config.Addr)
 	case types.QdrantRetrieverEngineType:
 		// Host (+ optional Port) — combine so the port blocklist applies to

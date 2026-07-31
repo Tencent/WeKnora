@@ -55,7 +55,7 @@ show_help() {
     echo "用法: $0 [命令] [选项]"
     echo ""
     echo "命令:"
-    echo "  start      启动基础设施服务（postgres, redis, docreader, langfuse）"
+    echo "  start      启动基础设施服务（数据库由 DB_DRIVER 决定，另启动 redis、docreader）"
     echo "  stop       停止所有服务"
     echo "  restart    重启所有服务"
     echo "  logs       查看服务日志"
@@ -149,6 +149,13 @@ _should_enable_odl_hybrid_from_env() {
 _enable_odl_hybrid_profile() {
     PROFILES="$PROFILES --profile odl-hybrid"
     ENABLED_SERVICES="$ENABLED_SERVICES odl-hybrid"
+    _add_compose_service_if_targeted "odl-hybrid"
+}
+
+_add_compose_service_if_targeted() {
+    if [ -n "${COMPOSE_SERVICES:-}" ] && [[ " ${COMPOSE_SERVICES} " != *" $1 "* ]]; then
+        COMPOSE_SERVICES="$COMPOSE_SERVICES $1"
+    fi
 }
 
 # 等待 odl-hybrid HTTP 健康检查通过（compose 启动后服务可能仍在拉依赖）
@@ -206,33 +213,67 @@ start_services() {
         return 0
     fi
     
+    DB_DRIVER=${DB_DRIVER:-postgres}
+    COMPOSE_SERVICES=""
+    case "$DB_DRIVER" in
+        postgres)
+            if [ -z "${DB_PORT:-}" ]; then
+                export DB_PORT=5432
+            fi
+            PROFILES="--profile langfuse"
+            ENABLED_SERVICES="langfuse"
+            ;;
+        mysql)
+            if [ -z "${DB_PORT:-}" ] || [ "$DB_PORT" = "5432" ]; then
+                export DB_PORT=3306
+            fi
+            PROFILES="--profile mysql"
+            ENABLED_SERVICES="mysql"
+            COMPOSE_SERVICES="mysql redis docreader"
+            if printf ',%s,' "${RETRIEVE_DRIVER:-}" | grep -q ',postgres,'; then
+                log_warning "DB_DRIVER=mysql cannot be used with RETRIEVE_DRIVER=postgres; use mysql/qdrant/milvus/weaviate/doris/tencent_vectordb/elasticsearch_v8 instead."
+            fi
+            ;;
+        *)
+            log_error "Unsupported DB_DRIVER: ${DB_DRIVER}; supported values are postgres and mysql"
+            return 1
+            ;;
+    esac
+
     # 解析 profile 参数
     shift  # 移除 "start" 命令本身
-    # 默认启动基础设施（postgres / redis / docreader）+ langfuse，
+    # 默认启动基础设施（database / redis / docreader）。Postgres 模式默认带 Langfuse；
+    # MySQL 模式默认不带 Langfuse，因为 Langfuse 自身仍依赖 Postgres。
     # 其余可选服务通过 --minio / --qdrant / --neo4j / --dex / --full 按需开启。
-    PROFILES="--profile langfuse"
-    ENABLED_SERVICES="langfuse"
     while [ $# -gt 0 ]; do
         case "$1" in
             --minio)
                 PROFILES="$PROFILES --profile minio"
                 ENABLED_SERVICES="$ENABLED_SERVICES minio"
+                _add_compose_service_if_targeted "minio"
                 ;;
             --qdrant)
                 PROFILES="$PROFILES --profile qdrant"
                 ENABLED_SERVICES="$ENABLED_SERVICES qdrant"
+                _add_compose_service_if_targeted "qdrant"
                 ;;
             --neo4j)
                 PROFILES="$PROFILES --profile neo4j"
                 ENABLED_SERVICES="$ENABLED_SERVICES neo4j"
+                _add_compose_service_if_targeted "neo4j"
                 ;;
             --dex)
                 PROFILES="$PROFILES --profile dex"
                 ENABLED_SERVICES="$ENABLED_SERVICES dex"
+                _add_compose_service_if_targeted "dex"
                 ;;
             --langfuse)
-                PROFILES="$PROFILES --profile langfuse"
-                ENABLED_SERVICES="$ENABLED_SERVICES langfuse"
+                if [ "$DB_DRIVER" = "mysql" ]; then
+                    log_warning "MySQL development mode does not start Langfuse because Langfuse still requires Postgres. Ignoring --langfuse."
+                else
+                    PROFILES="$PROFILES --profile langfuse"
+                    ENABLED_SERVICES="$ENABLED_SERVICES langfuse"
+                fi
                 ;;
             --no-langfuse)
                 PROFILES="${PROFILES//--profile langfuse/}"
@@ -244,8 +285,16 @@ start_services() {
                 fi
                 ;;
             --full)
-                PROFILES="--profile full"
-                ENABLED_SERVICES="minio qdrant neo4j dex"
+                if [ "$DB_DRIVER" = "mysql" ]; then
+                    PROFILES="$PROFILES --profile full"
+                    ENABLED_SERVICES="$ENABLED_SERVICES minio qdrant neo4j dex opensearch milvus sandbox searxng"
+                    for svc in minio qdrant neo4j dex opensearch milvus sandbox searxng; do
+                        _add_compose_service_if_targeted "$svc"
+                    done
+                else
+                    PROFILES="--profile full"
+                    ENABLED_SERVICES="minio qdrant neo4j dex"
+                fi
                 break
                 ;;
             *)
@@ -256,7 +305,11 @@ start_services() {
     done
 
     # 启动服务（odl-hybrid 单独 --build，避免每次重建 docreader）
-    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml $PROFILES up -d
+    if [ -n "${COMPOSE_SERVICES:-}" ]; then
+        "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml $PROFILES up -d $COMPOSE_SERVICES
+    else
+        "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml $PROFILES up -d
+    fi
     local compose_rc=$?
     if [ "$compose_rc" -eq 0 ] && [[ "$ENABLED_SERVICES" == *"odl-hybrid"* ]]; then
         log_info "构建/更新 odl-hybrid 镜像..."
@@ -273,7 +326,11 @@ start_services() {
         log_success "基础设施服务已启动"
         echo ""
         log_info "服务访问地址:"
-        echo "  - PostgreSQL:    localhost:5432"
+        if [ "$DB_DRIVER" = "mysql" ]; then
+            echo "  - MySQL:         localhost:${DB_PORT:-3306}"
+        else
+            echo "  - PostgreSQL:    localhost:${DB_PORT:-5432}"
+        fi
         echo "  - Redis:         localhost:6379"
         echo "  - DocReader:     localhost:50051"
         
@@ -468,9 +525,26 @@ start_app() {
         log_error "DB_DRIVER 环境变量未设置，请检查 .env 文件"
         return 1
     fi
+
+    case "$DB_DRIVER" in
+        postgres)
+            if [ -z "${DB_PORT:-}" ]; then
+                export DB_PORT=5432
+            fi
+            ;;
+        mysql)
+            if [ -z "${DB_PORT:-}" ] || [ "$DB_PORT" = "5432" ]; then
+                export DB_PORT=3306
+            fi
+            ;;
+        *)
+            log_error "Unsupported DB_DRIVER: ${DB_DRIVER}; supported values are postgres and mysql"
+            return 1
+            ;;
+    esac
     
     log_info "环境变量已设置，启动应用..."
-    log_info "数据库地址: $DB_HOST:${DB_PORT:-5432}"
+    log_info "数据库地址: $DB_HOST:$DB_PORT"
     
     export CGO_CFLAGS="-Wno-deprecated-declarations -Wno-gnu-folding-constant"
     if [[ "$(uname)" == "Darwin" ]]; then

@@ -331,3 +331,71 @@ func TestListRecentDocumentChunksWithQuestions_UnionsExplicitKBAndKnowledge(t *t
 	require.Len(t, got, 2)
 	assert.ElementsMatch(t, []string{fromExplicitKB.ID, fromExplicitDocument.ID}, []string{got[0].ID, got[1].ID})
 }
+
+func TestListPagedChunksByKnowledgeID_FAQSearchScopesArrayFields(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+	kbID := uuid.New().String()
+	knowledgeID := uuid.New().String()
+
+	standardOnly := makeChunk(kbID, knowledgeID, types.ChunkTypeFAQ)
+	standardOnly.Content = "content without keyword"
+	standardOnly.Metadata = types.JSON(`{
+		"standard_question":"invoice keyword lives only here",
+		"similar_questions":["receipt alias"],
+		"answers":["plain answer"]
+	}`)
+	similarOnly := makeChunk(kbID, knowledgeID, types.ChunkTypeFAQ)
+	similarOnly.Content = "content without keyword"
+	similarOnly.Metadata = types.JSON(`{
+		"standard_question":"plain question",
+		"similar_questions":["invoice keyword lives here"],
+		"answers":["plain answer"]
+	}`)
+	answerOnly := makeChunk(kbID, knowledgeID, types.ChunkTypeFAQ)
+	answerOnly.Content = "content without keyword"
+	answerOnly.Metadata = types.JSON(`{
+		"standard_question":"plain question",
+		"similar_questions":["receipt alias"],
+		"answers":["invoice keyword lives here"]
+	}`)
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{standardOnly, similarOnly, answerOnly}))
+
+	page := &types.Pagination{Page: 1, PageSize: 10}
+	got, total, err := repo.ListPagedChunksByKnowledgeID(
+		ctx,
+		1,
+		knowledgeID,
+		page,
+		[]types.ChunkType{types.ChunkTypeFAQ},
+		nil,
+		"invoice",
+		"similar_questions",
+		"asc",
+		types.KnowledgeTypeFAQ,
+		nil,
+	)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, got, 1)
+	assert.Equal(t, similarOnly.ID, got[0].ID)
+
+	got, total, err = repo.ListPagedChunksByKnowledgeID(
+		ctx,
+		1,
+		knowledgeID,
+		page,
+		[]types.ChunkType{types.ChunkTypeFAQ},
+		nil,
+		"invoice",
+		"answers",
+		"asc",
+		types.KnowledgeTypeFAQ,
+		nil,
+	)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, got, 1)
+	assert.Equal(t, answerOnly.ID, got[0].ID)
+}

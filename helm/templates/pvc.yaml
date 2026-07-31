@@ -6,7 +6,7 @@ Persistent Volume Claims for stateful components.
 */}}
 
 {{/* PostgreSQL PVC */}}
-{{- if and .Values.postgresql.enabled .Values.postgresql.persistence.enabled (not .Values.postgresql.persistence.existingClaim) }}
+{{- if and .Values.postgresql.enabled (eq (include "weknora.databaseDriver" .) "postgres") .Values.postgresql.persistence.enabled (not .Values.postgresql.persistence.existingClaim) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

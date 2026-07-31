@@ -177,6 +177,36 @@ func TestList_WikiPathSortReturnsCategorizedPagesFirst(t *testing.T) {
 	assert.Equal(t, "entity/001-root", got[2].Slug)
 }
 
+func TestFindSimilarPagesUsesPortableFallbackOutsidePostgres(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	pages := []*types.WikiPage{
+		makeWikiPage("kb-similar", "entity/exact", types.WikiPageTypeEntity, types.WikiPageStatusPublished),
+		makeWikiPage("kb-similar", "entity/prefix", types.WikiPageTypeEntity, types.WikiPageStatusPublished),
+		makeWikiPage("kb-similar", "concept/contains", types.WikiPageTypeConcept, types.WikiPageStatusPublished),
+		makeWikiPage("kb-similar", "entity/archived", types.WikiPageTypeEntity, types.WikiPageStatusArchived),
+		makeWikiPage("kb-similar", "entity/unrelated", types.WikiPageTypeEntity, types.WikiPageStatusPublished),
+		makeWikiPage("kb-other", "entity/leaked", types.WikiPageTypeEntity, types.WikiPageStatusPublished),
+	}
+	pages[0].Title = "OpenAI"
+	pages[1].Title = "OpenAI Platform"
+	pages[2].Title = "Using OpenAI Today"
+	pages[3].Title = "OpenAI Archived"
+	pages[4].Title = "Different Topic"
+	pages[5].Title = "OpenAI Other KB"
+	for _, page := range pages {
+		require.NoError(t, repo.Create(ctx, page))
+	}
+
+	got, err := repo.FindSimilarPages(ctx, "kb-similar", "  openai  ", nil, 20)
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+	assert.Equal(t, []string{"OpenAI", "OpenAI Platform", "Using OpenAI Today"},
+		[]string{got[0].Title, got[1].Title, got[2].Title})
+}
+
 // TestFolderTree_CRUDAndChildListing exercises the wiki_folders repository:
 // child listing ordered by sort_order/name, find-by-name, page counting under
 // a folder, and that ListDistinctCategoryPaths reflects the folder paths.
@@ -286,9 +316,104 @@ func TestListByTypeLight_ProjectsNarrowColumnsAndExcludesArchived(t *testing.T) 
 	assert.Equal(t, "entity/beta", entries[1].Slug)
 }
 
+// TestSearch_SQLiteUsesDialectCompatibleSearch protects non-PostgreSQL wiki search.
+func TestSearch_SQLiteUsesDialectCompatibleSearch(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+	kbID := uuid.New().String()
+
+	titleHit := makeWikiPage(kbID, "entity/title-hit", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	titleHit.Title = "Alpha in title"
+	titleHit.Content = "body"
+	contentHit := makeWikiPage(kbID, "entity/content-hit", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	contentHit.Title = "Beta"
+	contentHit.Content = "Alpha in content"
+	archived := makeWikiPage(kbID, "entity/archived", types.WikiPageTypeEntity, types.WikiPageStatusArchived)
+	archived.Title = "Alpha archived"
+	for _, page := range []*types.WikiPage{contentHit, archived, titleHit} {
+		require.NoError(t, repo.Create(ctx, page))
+	}
+
+	got, err := repo.Search(ctx, kbID, "alpha", 10)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, titleHit.ID, got[0].ID)
+	assert.Equal(t, contentHit.ID, got[1].ID)
+}
+
+func TestWikiSQLiteSearchTreatsLikeMetacharactersLiterally(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+	kbID := uuid.New().String()
+
+	pages := []*types.WikiPage{
+		makeWikiPage(kbID, "entity/percent", types.WikiPageTypeEntity, types.WikiPageStatusPublished),
+		makeWikiPage(kbID, "entity/underscore", types.WikiPageTypeEntity, types.WikiPageStatusPublished),
+		makeWikiPage(kbID, "entity/backslash", types.WikiPageTypeEntity, types.WikiPageStatusPublished),
+		makeWikiPage(kbID, "entity/double-backslash", types.WikiPageTypeEntity, types.WikiPageStatusPublished),
+		makeWikiPage(kbID, "entity/plain", types.WikiPageTypeEntity, types.WikiPageStatusPublished),
+	}
+	pages[0].Title = "100% Real"
+	pages[1].Title = "snake_case"
+	pages[2].Title = `C:\Path`
+	pages[3].Title = `C:\\Double`
+	pages[4].Title = "Plain Title"
+	for _, page := range pages {
+		page.Content = "ordinary body"
+		page.Summary = "ordinary summary"
+		require.NoError(t, repo.Create(ctx, page))
+	}
+
+	tests := []struct {
+		query     string
+		wantSlugs []string
+	}{
+		{query: "%", wantSlugs: []string{"entity/percent"}},
+		{query: "_", wantSlugs: []string{"entity/underscore"}},
+		{
+			query:     `\`,
+			wantSlugs: []string{"entity/backslash", "entity/double-backslash"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(strconv.Quote(tt.query), func(t *testing.T) {
+			listed, total, err := repo.List(ctx, &types.WikiPageListRequest{
+				KnowledgeBaseID: kbID,
+				Query:           tt.query,
+				Page:            1,
+				PageSize:        20,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, int64(len(tt.wantSlugs)), total)
+			assert.ElementsMatch(t, tt.wantSlugs, wikiPageSlugs(listed))
+
+			searched, err := repo.Search(ctx, kbID, tt.query, 20)
+			require.NoError(t, err)
+			assert.ElementsMatch(t, tt.wantSlugs, wikiPageSlugs(searched))
+
+			similar, err := repo.FindSimilarPages(ctx, kbID, tt.query, nil, 20)
+			require.NoError(t, err)
+			similarSlugs := make([]string, 0, len(similar))
+			for _, page := range similar {
+				similarSlugs = append(similarSlugs, page.Slug)
+			}
+			assert.ElementsMatch(t, tt.wantSlugs, similarSlugs)
+		})
+	}
+}
+
+func wikiPageSlugs(pages []*types.WikiPage) []string {
+	slugs := make([]string, 0, len(pages))
+	for _, page := range pages {
+		slugs = append(slugs, page.Slug)
+	}
+	return slugs
+}
+
 // TestListByTypeLight_Pagination walks the type list using offsets and
-// asserts the count stays stable regardless of where in the list we
-// are — the index handler uses total to render "showing N of M".
+// asserts the count stays stable regardless of where in the list we are.
 func TestListByTypeLight_Pagination(t *testing.T) {
 	db := setupWikiPagesTestDB(t)
 	repo := NewWikiPageRepository(db)

@@ -682,6 +682,95 @@ func TestTestConnection_DorisMissingAddr(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestTestConnection_MySQLMissingAddr(t *testing.T) {
+	repo := &mockVectorStoreRepo{}
+	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+
+	_, err := svc.TestConnection(context.Background(), types.MySQLRetrieverEngineType,
+		types.ConnectionConfig{})
+	require.Error(t, err)
+}
+
+func TestTestEnvConnection_MySQLRejectsInvalidRetrieverTLSBeforeDial(t *testing.T) {
+	t.Setenv("MYSQL_USE_TLS", "not-a-boolean")
+	repo := &mockVectorStoreRepo{}
+	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+
+	_, err := svc.TestEnvConnection(context.Background(), types.VectorStore{
+		ID:         "__env_mysql__",
+		EngineType: types.MySQLRetrieverEngineType,
+		ConnectionConfig: types.ConnectionConfig{
+			Addr:     "127.0.0.1:1",
+			Username: "weknora",
+			Password: "secret",
+			Database: "weknora",
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid configuration")
+}
+
+func TestTestEnvConnection_NonMySQLDoesNotReadRetrieverTLS(t *testing.T) {
+	t.Setenv("MYSQL_USE_TLS", "not-a-boolean")
+	repo := &mockVectorStoreRepo{}
+	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+
+	version, err := svc.TestEnvConnection(context.Background(), types.VectorStore{
+		ID:         "__env_sqlite__",
+		EngineType: types.SQLiteRetrieverEngineType,
+	})
+	require.NoError(t, err)
+	assert.Empty(t, version)
+}
+
+func TestTestEnvConnection_RejectsSavedStoreID(t *testing.T) {
+	repo := &mockVectorStoreRepo{}
+	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+
+	_, err := svc.TestEnvConnection(context.Background(), types.VectorStore{
+		ID:         "saved-store",
+		EngineType: types.MySQLRetrieverEngineType,
+		ConnectionConfig: types.ConnectionConfig{
+			Addr: "127.0.0.1:1",
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "environment vector store ID is required")
+}
+
+func TestTestEnvConnection_RejectsMismatchedMySQLEnvID(t *testing.T) {
+	repo := &mockVectorStoreRepo{}
+	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+
+	_, err := svc.TestEnvConnection(context.Background(), types.VectorStore{
+		ID:         "__env_sqlite__",
+		EngineType: types.MySQLRetrieverEngineType,
+		ConnectionConfig: types.ConnectionConfig{
+			Addr: "127.0.0.1:1",
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not match MySQL")
+}
+
+func TestTestConnection_MySQLDoesNotReadRetrieverTLS(t *testing.T) {
+	t.Setenv("MYSQL_USE_TLS", "true")
+	t.Setenv("MYSQL_TLS_CA", t.TempDir()+"/missing-ca.pem")
+	repo := &mockVectorStoreRepo{}
+	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+
+	_, err := svc.TestConnection(context.Background(), types.MySQLRetrieverEngineType,
+		types.ConnectionConfig{
+			Addr:     "127.0.0.1:1",
+			Username: "weknora",
+			Password: "secret",
+			Database: "weknora",
+		})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to connect")
+	assert.NotContains(t, err.Error(), "invalid configuration")
+}
+
 // ---------------------------------------------------------------------------
 // validateConnectionConfig tests
 // ---------------------------------------------------------------------------
@@ -781,6 +870,24 @@ func TestValidateConnectionConfig(t *testing.T) {
 			name:       "doris missing database",
 			engineType: types.DorisRetrieverEngineType,
 			config:     types.ConnectionConfig{Addr: "doris-fe:9030"},
+			wantError:  true,
+		},
+		{
+			name:       "mysql valid",
+			engineType: types.MySQLRetrieverEngineType,
+			config:     types.ConnectionConfig{Addr: "mysql:3306", Database: "weknora"},
+			wantError:  false,
+		},
+		{
+			name:       "mysql missing addr",
+			engineType: types.MySQLRetrieverEngineType,
+			config:     types.ConnectionConfig{Database: "weknora"},
+			wantError:  true,
+		},
+		{
+			name:       "mysql missing database",
+			engineType: types.MySQLRetrieverEngineType,
+			config:     types.ConnectionConfig{Addr: "mysql:3306"},
 			wantError:  true,
 		},
 	}

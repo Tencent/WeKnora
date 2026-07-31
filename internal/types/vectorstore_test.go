@@ -62,6 +62,12 @@ func TestBuildEnvVectorStores(t *testing.T) {
 		"DORIS_USERNAME":              "root",
 		"DORIS_PASSWORD":              "doris-pass",
 		"DORIS_TABLE_PREFIX":          "weknora_embeddings",
+		"MYSQL_HOST":                  "mysql",
+		"MYSQL_PORT":                  "3306",
+		"MYSQL_USERNAME":              "root",
+		"MYSQL_PASSWORD":              "mysql-pass",
+		"MYSQL_DATABASE":              "weknora",
+		"MYSQL_TABLE_PREFIX":          "mysql_embeddings",
 	}
 	lookup := mockEnvLookup(envMap)
 
@@ -108,8 +114,8 @@ func TestBuildEnvVectorStores(t *testing.T) {
 	})
 
 	t.Run("all supported drivers", func(t *testing.T) {
-		stores := BuildEnvVectorStores("postgres,sqlite,elasticsearch_v8,elasticsearch_v7,qdrant,milvus,weaviate,doris,tencent_vectordb", lookup)
-		require.Len(t, stores, 9)
+		stores := BuildEnvVectorStores("postgres,sqlite,elasticsearch_v8,elasticsearch_v7,qdrant,milvus,weaviate,doris,tencent_vectordb,mysql", lookup)
+		require.Len(t, stores, 10)
 
 		ids := make([]string, len(stores))
 		for i, s := range stores {
@@ -124,6 +130,7 @@ func TestBuildEnvVectorStores(t *testing.T) {
 		assert.Contains(t, ids, "__env_weaviate__")
 		assert.Contains(t, ids, "__env_doris__")
 		assert.Contains(t, ids, "__env_tencent_vectordb__")
+		assert.Contains(t, ids, "__env_mysql__")
 	})
 
 	t.Run("qdrant env store", func(t *testing.T) {
@@ -177,6 +184,28 @@ func TestBuildEnvVectorStores(t *testing.T) {
 		stores := BuildEnvVectorStores("doris", bad)
 		require.Len(t, stores, 1)
 		assert.Equal(t, 0, stores[0].ConnectionConfig.HTTPPort) // falls back to 0 (factory will default to 8030)
+	})
+
+	t.Run("mysql env store", func(t *testing.T) {
+		stores := BuildEnvVectorStores("mysql", lookup)
+		require.Len(t, stores, 1)
+		assert.Equal(t, "__env_mysql__", stores[0].ID)
+		assert.Equal(t, MySQLRetrieverEngineType, stores[0].EngineType)
+		assert.Equal(t, "mysql:3306", stores[0].ConnectionConfig.Addr)
+		assert.Equal(t, "weknora", stores[0].ConnectionConfig.Database)
+		assert.Equal(t, "root", stores[0].ConnectionConfig.Username)
+		assert.Equal(t, "mysql-pass", stores[0].ConnectionConfig.Password)
+		assert.Equal(t, "mysql_embeddings", stores[0].IndexConfig.CollectionPrefix)
+	})
+
+	t.Run("mysql IPv6 env store", func(t *testing.T) {
+		ipv6Lookup := mockEnvLookup(map[string]string{
+			"MYSQL_HOST": "2001:db8::10",
+			"MYSQL_PORT": "3307",
+		})
+		stores := BuildEnvVectorStores("mysql", ipv6Lookup)
+		require.Len(t, stores, 1)
+		assert.Equal(t, "[2001:db8::10]:3307", stores[0].ConnectionConfig.Addr)
 	})
 }
 
@@ -246,7 +275,7 @@ func TestGetVectorStoreTypes(t *testing.T) {
 	types := GetVectorStoreTypes()
 
 	t.Run("returns supported external engine types (excludes postgres and sqlite)", func(t *testing.T) {
-		assert.Len(t, types, 7)
+		assert.Len(t, types, 8)
 	})
 
 	t.Run("type names match engine constants", func(t *testing.T) {
@@ -261,6 +290,7 @@ func TestGetVectorStoreTypes(t *testing.T) {
 		assert.Contains(t, typeNames, "weaviate")
 		assert.Contains(t, typeNames, "doris")
 		assert.Contains(t, typeNames, "opensearch")
+		assert.Contains(t, typeNames, "mysql")
 		assert.NotContains(t, typeNames, "postgres")
 		assert.NotContains(t, typeNames, "sqlite")
 	})
@@ -284,6 +314,28 @@ func TestGetVectorStoreTypes(t *testing.T) {
 		assert.True(t, seen["addr"].Required)
 		assert.True(t, seen["database"].Required)
 		assert.True(t, seen["password"].Sensitive)
+	})
+
+	t.Run("mysql has connection and index fields", func(t *testing.T) {
+		var mysqlType VectorStoreTypeInfo
+		for _, typ := range types {
+			if typ.Type == "mysql" {
+				mysqlType = typ
+				break
+			}
+		}
+		require.NotEmpty(t, mysqlType.ConnectionFields)
+		require.NotEmpty(t, mysqlType.IndexFields)
+
+		seen := map[string]VectorStoreFieldInfo{}
+		for _, f := range mysqlType.ConnectionFields {
+			seen[f.Name] = f
+		}
+		assert.True(t, seen["addr"].Required)
+		assert.True(t, seen["database"].Required)
+		assert.False(t, seen["username"].Required)
+		assert.True(t, seen["password"].Sensitive)
+		assert.Equal(t, "collection_prefix", mysqlType.IndexFields[0].Name)
 	})
 
 	t.Run("milvus exposes optional database connection field", func(t *testing.T) {
@@ -443,6 +495,7 @@ func TestIsValidEngineType(t *testing.T) {
 		WeaviateRetrieverEngineType,
 		DorisRetrieverEngineType,
 		TencentVectorDBRetrieverEngineType,
+		MySQLRetrieverEngineType,
 	}
 	for _, et := range validTypes {
 		t.Run("valid: "+string(et), func(t *testing.T) {
@@ -784,6 +837,25 @@ func TestIndexConfig_GetIndexNameOrDefault(t *testing.T) {
 			engineType: WeaviateRetrieverEngineType,
 			expected:   "Weknora_embeddings",
 		},
+		// MySQL
+		{
+			name:       "mysql with custom prefix",
+			config:     IndexConfig{CollectionPrefix: "mysql_custom"},
+			engineType: MySQLRetrieverEngineType,
+			expected:   "mysql_custom_",
+		},
+		{
+			name:       "mysql default",
+			config:     IndexConfig{},
+			engineType: MySQLRetrieverEngineType,
+			expected:   "weknora_embeddings_",
+		},
+		{
+			name:       "mysql keeps normalized prefix",
+			config:     IndexConfig{CollectionPrefix: "mysql_custom_"},
+			engineType: MySQLRetrieverEngineType,
+			expected:   "mysql_custom_",
+		},
 		// Postgres (no index config)
 		{
 			name:       "postgres returns empty (no index config)",
@@ -1092,6 +1164,24 @@ func TestValidateIndexConfig(t *testing.T) {
 		ic := IndexConfig{CollectionPrefix: "custom_prefix"}
 		assert.Equal(t, "custom_prefix", ic.GetIndexNameOrDefault(DorisRetrieverEngineType))
 	})
+}
+
+func TestValidateIndexConfigForEngineRejectsMySQLIdentifierOverflow(t *testing.T) {
+	assert.NoError(t, ValidateIndexConfigForEngine(
+		MySQLRetrieverEngineType,
+		IndexConfig{CollectionPrefix: strings.Repeat("a", 44)},
+	))
+	err := ValidateIndexConfigForEngine(
+		MySQLRetrieverEngineType,
+		IndexConfig{CollectionPrefix: strings.Repeat("a", 45)},
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "MySQL")
+
+	assert.NoError(t, ValidateIndexConfigForEngine(
+		QdrantRetrieverEngineType,
+		IndexConfig{CollectionPrefix: strings.Repeat("a", 64)},
+	))
 }
 
 // ---------------------------------------------------------------------------

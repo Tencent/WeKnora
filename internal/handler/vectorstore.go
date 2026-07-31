@@ -382,7 +382,7 @@ func (h *VectorStoreHandler) TestStoreByID(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "vector store not found"})
 			return
 		}
-		version, err := h.service.TestConnection(ctx, envStore.EngineType, envStore.ConnectionConfig)
+		version, err := h.service.TestEnvConnection(ctx, *envStore)
 		if err != nil {
 			logger.Warnf(ctx, "Vector store connection test failed: %v", err)
 			c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})

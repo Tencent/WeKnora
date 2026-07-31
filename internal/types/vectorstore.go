@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"strconv"
@@ -92,6 +93,7 @@ var validEngineTypes = map[RetrieverEngineType]bool{
 	DorisRetrieverEngineType:           true,
 	TencentVectorDBRetrieverEngineType: true,
 	OpenSearchRetrieverEngineType:      true,
+	MySQLRetrieverEngineType:           true,
 }
 
 // IsValidEngineType checks whether the given engine type is valid for VectorStore.
@@ -143,7 +145,7 @@ type ConnectionConfig struct {
 	GrpcAddress string `yaml:"grpc_address" json:"grpc_address,omitempty"`
 	Scheme      string `yaml:"scheme" json:"scheme,omitempty"`
 	// Database name used by engines that support database-level namespaces
-	// (currently Milvus, Tencent VectorDB, and Doris).
+	// (currently Milvus, Tencent VectorDB, Doris, and MySQL).
 	Database string `yaml:"database" json:"database,omitempty"`
 	// Postgres
 	UseDefaultConnection bool `yaml:"use_default_connection" json:"use_default_connection,omitempty"`
@@ -323,9 +325,30 @@ func (c IndexConfig) GetIndexNameOrDefault(engineType RetrieverEngineType) strin
 			return c.CollectionName
 		}
 		return "weknora_embeddings"
+	case MySQLRetrieverEngineType:
+		// MySQL uses the prefix as the table base name; per-dimension tables are
+		// suffixed with _<dim> at runtime by the repository layer.
+		if c.CollectionPrefix != "" {
+			return normalizeMySQLTablePrefix(c.CollectionPrefix)
+		}
+		if c.CollectionName != "" {
+			return normalizeMySQLTablePrefix(c.CollectionName)
+		}
+		return normalizeMySQLTablePrefix("")
 	default:
 		return c.IndexName
 	}
+}
+
+func normalizeMySQLTablePrefix(prefix string) string {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		prefix = "weknora_embeddings"
+	}
+	if !strings.HasSuffix(prefix, "_") {
+		prefix += "_"
+	}
+	return prefix
 }
 
 // ---------------------------------------------------------------------------
@@ -516,6 +539,31 @@ func ValidateIndexConfig(ic IndexConfig) error {
 		return errors.NewValidationError(fmt.Sprintf("replication_num must be between 0 and %d", maxReplicas))
 	}
 
+	return nil
+}
+
+// ValidateIndexConfigForEngine applies the common validation plus limits
+// imposed by the selected backend.
+func ValidateIndexConfigForEngine(engineType RetrieverEngineType, ic IndexConfig) error {
+	if err := ValidateIndexConfig(ic); err != nil {
+		return err
+	}
+	if engineType != MySQLRetrieverEngineType {
+		return nil
+	}
+
+	// MySQL identifiers are limited to 64 characters. Dimension-specific
+	// tables append a positive Go int (up to 19 decimal digits on 64-bit
+	// builds), so the normalized prefix, including its trailing underscore,
+	// must leave that suffix available.
+	const maxMySQLTablePrefixLength = 64 - 19
+	effectivePrefix := ic.GetIndexNameOrDefault(MySQLRetrieverEngineType)
+	if len(effectivePrefix) > maxMySQLTablePrefixLength {
+		return errors.NewValidationError(fmt.Sprintf(
+			"effective MySQL table prefix must be at most %d characters including the trailing underscore",
+			maxMySQLTablePrefixLength,
+		))
+	}
 	return nil
 }
 
@@ -780,6 +828,19 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 				{Name: "knn_engine", Type: "string", Required: false, Description: "k-NN backend.", Default: "lucene", Enum: []string{"lucene", "faiss"}, Immutable: true},
 			},
 		},
+		{
+			Type:        "mysql",
+			DisplayName: "MySQL",
+			ConnectionFields: []VectorStoreFieldInfo{
+				{Name: "addr", Type: "string", Required: true, Description: "MySQL Address (host:port)", Default: "mysql:3306"},
+				{Name: "database", Type: "string", Required: true, Description: "Database", Default: "weknora"},
+				{Name: "username", Type: "string", Required: false, Description: "Username", Default: "root"},
+				{Name: "password", Type: "string", Required: false, Sensitive: true, Description: "Password"},
+			},
+			IndexFields: []VectorStoreFieldInfo{
+				{Name: "collection_prefix", Type: "string", Required: false, Description: "Table Prefix", Default: "weknora_embeddings"},
+			},
+		},
 	}
 }
 
@@ -960,6 +1021,37 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 			},
 			IndexConfig: IndexConfig{
 				CollectionPrefix: envLookup("DORIS_TABLE_PREFIX"),
+			},
+		}
+	case "mysql":
+		host := strings.TrimSpace(envLookup("MYSQL_HOST"))
+		if host == "" {
+			host = "localhost"
+		}
+		port := strings.TrimSpace(envLookup("MYSQL_PORT"))
+		if port == "" {
+			port = "3306"
+		}
+		database := strings.TrimSpace(envLookup("MYSQL_DATABASE"))
+		if database == "" {
+			database = "weknora"
+		}
+		username := strings.TrimSpace(envLookup("MYSQL_USERNAME"))
+		if username == "" {
+			username = "root"
+		}
+		return &VectorStore{
+			ID:         "__env_mysql__",
+			Name:       "MySQL",
+			EngineType: MySQLRetrieverEngineType,
+			ConnectionConfig: ConnectionConfig{
+				Addr:     net.JoinHostPort(host, port),
+				Database: database,
+				Username: username,
+				Password: envLookup("MYSQL_PASSWORD"),
+			},
+			IndexConfig: IndexConfig{
+				CollectionPrefix: envLookup("MYSQL_TABLE_PREFIX"),
 			},
 		}
 	default:

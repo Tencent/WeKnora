@@ -124,6 +124,21 @@ services:
       - DB_USER=${DB_USER:-}
       - DB_PASSWORD=${DB_PASSWORD:-}
       - DB_NAME=${DB_NAME:-}
+      - DB_MAX_OPEN_CONNS=${DB_MAX_OPEN_CONNS:-}
+      - DB_MAX_IDLE_CONNS=${DB_MAX_IDLE_CONNS:-}
+      - DB_CONN_MAX_LIFETIME=${DB_CONN_MAX_LIFETIME:-}
+      - DB_CONN_MAX_IDLE_TIME=${DB_CONN_MAX_IDLE_TIME:-}
+      # MySQL main database TLS and driver deadlines. Certificate paths are
+      # mounted by docker-compose.mysql.yml when the MySQL overlay is used.
+      - DB_USE_TLS=${DB_USE_TLS:-false}
+      - DB_TLS_SERVER_NAME=${DB_TLS_SERVER_NAME:-}
+      - DB_TLS_CA=${DB_TLS_CA:-}
+      - DB_TLS_CERT=${DB_TLS_CERT:-}
+      - DB_TLS_KEY=${DB_TLS_KEY:-}
+      - DB_TLS_INSECURE_SKIP_VERIFY=${DB_TLS_INSECURE_SKIP_VERIFY:-false}
+      - DB_CONNECT_TIMEOUT=${DB_CONNECT_TIMEOUT:-}
+      - DB_READ_TIMEOUT=${DB_READ_TIMEOUT:-}
+      - DB_WRITE_TIMEOUT=${DB_WRITE_TIMEOUT:-}
       # SQLite 驱动时使用（DB_DRIVER=sqlite）；postgres 驱动忽略
       # - DB_PATH=${DB_PATH:-}
       # ========== Langfuse (optional observability) ==========
@@ -166,6 +181,17 @@ services:
       - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-}
       - OPENSEARCH_INSECURE_SKIP_VERIFY=${OPENSEARCH_INSECURE_SKIP_VERIFY:-false}
       - OPENSEARCH_INDEX=${OPENSEARCH_INDEX:-}
+      # MySQL retriever transport settings. MySQL overlays mirror DB_* by
+      # default when both components intentionally share one database.
+      - MYSQL_USE_TLS=${MYSQL_USE_TLS:-false}
+      - MYSQL_TLS_SERVER_NAME=${MYSQL_TLS_SERVER_NAME:-}
+      - MYSQL_TLS_CA=${MYSQL_TLS_CA:-}
+      - MYSQL_TLS_CERT=${MYSQL_TLS_CERT:-}
+      - MYSQL_TLS_KEY=${MYSQL_TLS_KEY:-}
+      - MYSQL_TLS_INSECURE_SKIP_VERIFY=${MYSQL_TLS_INSECURE_SKIP_VERIFY:-false}
+      - MYSQL_CONNECT_TIMEOUT=${MYSQL_CONNECT_TIMEOUT:-}
+      - MYSQL_READ_TIMEOUT=${MYSQL_READ_TIMEOUT:-}
+      - MYSQL_WRITE_TIMEOUT=${MYSQL_WRITE_TIMEOUT:-}
       # ========== 腾讯云 VectorDB（RETRIEVE_DRIVER=tencent_vectordb）==========
       - TENCENT_VECTORDB_ADDR=${TENCENT_VECTORDB_ADDR:-}
       - TENCENT_VECTORDB_USERNAME=${TENCENT_VECTORDB_USERNAME:-}

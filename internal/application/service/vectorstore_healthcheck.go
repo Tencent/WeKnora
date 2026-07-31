@@ -12,10 +12,11 @@ import (
 	"time"
 
 	openSearchRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/opensearch"
+	appdb "github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
-	"github.com/go-sql-driver/mysql"   // MySQL driver for database/sql, used by Doris connection test
+	"github.com/go-sql-driver/mysql"   // MySQL driver for database/sql, used by Doris/MySQL connection tests
 	_ "github.com/jackc/pgx/v5/stdlib" // pgx driver for database/sql
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/tencent/vectordatabase-sdk-go/tcvectordb"
@@ -25,6 +26,25 @@ import (
 )
 
 const connectionTestTimeout = 10 * time.Second
+
+// TestEnvConnection tests an environment-backed vector store using its
+// environment-only transport policy. Saved and raw stores deliberately keep
+// using TestConnection so they never inherit process-global MySQL trust roots.
+func (s *vectorStoreService) TestEnvConnection(
+	ctx context.Context,
+	store types.VectorStore,
+) (string, error) {
+	if !types.IsEnvStoreID(store.ID) {
+		return "", errors.NewBadRequestError("environment vector store ID is required")
+	}
+	if store.EngineType == types.MySQLRetrieverEngineType {
+		if store.ID != "__env_mysql__" {
+			return "", errors.NewBadRequestError("environment vector store ID does not match MySQL engine")
+		}
+		return testEnvMySQLConnection(ctx, store.ConnectionConfig)
+	}
+	return s.TestConnection(ctx, store.EngineType, store.ConnectionConfig)
+}
 
 // TestConnection tests connectivity to a vector database.
 // Returns the detected server version on success (e.g., "7.10.1"), empty string if unknown.
@@ -48,6 +68,8 @@ func (s *vectorStoreService) TestConnection(
 		return testWeaviateConnection(ctx, config)
 	case types.DorisRetrieverEngineType:
 		return testDorisConnection(ctx, config)
+	case types.MySQLRetrieverEngineType:
+		return testMySQLConnection(ctx, config)
 	case types.OpenSearchRetrieverEngineType:
 		return testOpenSearchConnection(ctx, config)
 	case types.SQLiteRetrieverEngineType:
@@ -313,6 +335,75 @@ func testDorisConnection(ctx context.Context, config types.ConnectionConfig) (st
 	}
 	if i := strings.Index(version, "Doris-"); i >= 0 {
 		return strings.TrimSpace(version[i+len("Doris-"):]), nil
+	}
+	return version, nil
+}
+
+func testMySQLConnection(ctx context.Context, config types.ConnectionConfig) (string, error) {
+	return testMySQLConnectionWithDSNBuilder(ctx, config,
+		func(username, password, addr, database string) (string, error) {
+			return appdb.BuildMySQLApplicationDSN(username, password, addr, database), nil
+		})
+}
+
+func testEnvMySQLConnection(ctx context.Context, config types.ConnectionConfig) (string, error) {
+	return testMySQLConnectionWithDSNBuilder(ctx, config,
+		func(username, password, addr, database string) (string, error) {
+			clientConfig, err := appdb.MySQLRetrieverConfigFromEnv(username, password, addr, database)
+			if err != nil {
+				return "", err
+			}
+			return clientConfig.DSN, nil
+		})
+}
+
+func testMySQLConnectionWithDSNBuilder(
+	ctx context.Context,
+	config types.ConnectionConfig,
+	buildDSN func(username, password, addr, database string) (string, error),
+) (string, error) {
+	testCtx, cancel := context.WithTimeout(ctx, connectionTestTimeout)
+	defer cancel()
+
+	if config.Addr == "" {
+		return "", errors.NewBadRequestError("failed to create mysql connection: addr is required")
+	}
+
+	database := config.Database
+	if database == "" {
+		database = "information_schema"
+	}
+
+	username := strings.TrimSpace(config.Username)
+	if username == "" {
+		username = "root"
+	}
+	dsn, err := buildDSN(username, config.Password, config.Addr, database)
+	if err != nil {
+		logger.Warnf(ctx, "MySQL connection configuration is invalid: %v", err)
+		return "", errors.NewBadRequestError("failed to create mysql connection: invalid configuration")
+	}
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return "", errors.NewBadRequestError("failed to create mysql connection: invalid configuration")
+	}
+	defer db.Close()
+
+	if err := db.PingContext(testCtx); err != nil {
+		logger.Warnf(ctx, "MySQL connection test failed: %v", err)
+		return "", errors.NewBadRequestError("failed to connect to mysql: connection refused or authentication failed")
+	}
+	if err := appdb.ValidateMySQLSession(testCtx, db); err != nil {
+		logger.Warnf(ctx, "MySQL compatibility check failed: %v", err)
+		return "", errors.NewBadRequestError(
+			"failed to connect to mysql: MySQL/Percona Server 8.0.16+ with strict SQL mode is required",
+		)
+	}
+
+	var version string
+	if err := db.QueryRowContext(testCtx, "SELECT VERSION()").Scan(&version); err != nil {
+		logger.Warnf(ctx, "MySQL version detection failed: %v", err)
+		return "", nil
 	}
 	return version, nil
 }

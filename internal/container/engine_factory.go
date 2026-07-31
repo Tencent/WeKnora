@@ -23,6 +23,7 @@ import (
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
 	milvusRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
+	mysqlRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/mysql"
 	openSearchRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/opensearch"
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
 	qdrantRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/qdrant"
@@ -31,6 +32,8 @@ import (
 	weaviateRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/weaviate"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
+	appdb "github.com/Tencent/WeKnora/internal/database"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/tencent/vectordatabase-sdk-go/tcvectordb"
@@ -77,6 +80,8 @@ func createEngineServiceFromStore(
 		return createTencentVectorDBEngine(store)
 	case types.OpenSearchRetrieverEngineType:
 		return createOpenSearchEngine(ctx, store, auditSink)
+	case types.MySQLRetrieverEngineType:
+		return createMySQLEngine(ctx, store)
 	default:
 		return nil, fmt.Errorf("unsupported engine type: %s", store.EngineType)
 	}
@@ -307,6 +312,80 @@ func hostFromAddr(addr string) string {
 		return addr[:i]
 	}
 	return addr
+}
+
+func createMySQLEngine(
+	ctx context.Context,
+	store types.VectorStore,
+) (interfaces.RetrieveEngineService, error) {
+	if err := types.ValidateIndexConfigForEngine(store.EngineType, store.IndexConfig); err != nil {
+		return nil, err
+	}
+	cc := store.ConnectionConfig
+	addr := strings.TrimSpace(cc.Addr)
+	if addr == "" {
+		addr = "localhost:3306"
+	}
+	database := strings.TrimSpace(cc.Database)
+	if database == "" {
+		database = "weknora"
+	}
+	username := strings.TrimSpace(cc.Username)
+	if username == "" {
+		username = "root"
+	}
+
+	dsn := appdb.BuildMySQLApplicationDSN(username, cc.Password, addr, database)
+	if store.ID == "__env_mysql__" {
+		clientConfig, configErr := appdb.MySQLRetrieverConfigFromEnv(
+			username, cc.Password, addr, database,
+		)
+		if configErr != nil {
+			return nil, fmt.Errorf("invalid MySQL retriever configuration: %w", configErr)
+		}
+		if clientConfig.TLSInsecureSkipVerify {
+			logger.Warnf(
+				ctx,
+				"MYSQL_TLS_INSECURE_SKIP_VERIFY=true disables MySQL retriever certificate verification; do not use this setting in production",
+			)
+		}
+		dsn = clientConfig.DSN
+	}
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("create mysql client: %w", err)
+	}
+	db.SetMaxOpenConns(20)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(time.Hour)
+
+	connectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := db.PingContext(connectCtx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("connect to mysql retriever: %w", err)
+	}
+	if err := appdb.ValidateMySQLSession(connectCtx, db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("validate mysql retriever server: %w", err)
+	}
+
+	host, port := splitMySQLAddr(addr)
+	repo := mysqlRepo.NewMysqlRetrieveEngineRepository(
+		db, host, port, username, cc.Password, database, &store.IndexConfig,
+	)
+	return retriever.NewKVHybridRetrieveEngine(repo, types.MySQLRetrieverEngineType), nil
+}
+
+func splitMySQLAddr(addr string) (string, int) {
+	host := hostFromAddr(addr)
+	port := 3306
+	if i := strings.LastIndex(addr, ":"); i > 0 {
+		if p, err := strconv.Atoi(addr[i+1:]); err == nil {
+			port = p
+		}
+	}
+	return host, port
 }
 
 func createTencentVectorDBEngine(store types.VectorStore) (interfaces.RetrieveEngineService, error) {

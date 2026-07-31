@@ -31,17 +31,17 @@ func NewWikiPageRepository(db *gorm.DB) interfaces.WikiPageRepository {
 }
 
 func (r *wikiPageRepository) wikiCategoryRankOrder() string {
-	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
+	if isSQLite(r.db) {
 		return "CASE WHEN COALESCE(json_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	}
+	if isMySQL(r.db) {
+		return "CASE WHEN COALESCE(JSON_LENGTH(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
 	}
 	return "CASE WHEN COALESCE(jsonb_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
 }
 
 func (r *wikiPageRepository) wikiEmptyInLinksPredicate() string {
-	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
-		return "(in_links IS NULL OR json_array_length(in_links) = 0)"
-	}
-	return "(in_links IS NULL OR in_links = '[]'::JSONB)"
+	return "(in_links IS NULL OR " + jsonArrayLengthExpr(r.db, "in_links") + " = 0)"
 }
 
 // Create inserts a new wiki page record
@@ -319,19 +319,28 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 		query = query.Where("status = ?", req.Status)
 	}
 	if req.Query != "" {
-		// Use PostgreSQL full-text search + ILIKE for aliases
-		query = query.Where(
-			"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
-			req.Query,
-			"%"+req.Query+"%",
-		)
+		like := "%" + escapeLikePattern(req.Query) + "%"
+		if isPostgres(r.db) {
+			// Keep PostgreSQL full-text search while making aliases case-insensitive.
+			query = query.Where(
+				"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
+				req.Query,
+				like,
+			)
+		} else {
+			query = query.Where(
+				"("+wikiEscapedLikeCondition(r.db, "title")+" OR "+
+					wikiEscapedLikeCondition(r.db, "content")+" OR "+
+					wikiEscapedLikeCondition(r.db, jsonTextCastExpr(r.db, "aliases"))+")",
+				like, like, like,
+			)
+		}
 	}
 	// Directory filters are pushed to SQL so the DB does the counting and
 	// pagination instead of loading every page of the type into memory. `depth`
 	// is a cached column (= len(category_path)); `category_path` is a JSON column
-	// whose stored text is json.Marshal of the cleaned path, so we compare
-	// against the same encoding. Postgres needs an explicit jsonb cast for array
-	// equality; SQLite stores JSON as TEXT and compares directly.
+	// whose stored value is json.Marshal of the cleaned path. PostgreSQL and
+	// MySQL compare parsed JSON values; SQLite stores JSON as TEXT.
 	if req.FolderID != nil {
 		query = query.Where("folder_id = ?", *req.FolderID)
 	}
@@ -340,11 +349,7 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 	}
 	if wantPath := types.CleanWikiCategoryPath(req.CategoryPath); len(wantPath) > 0 {
 		if encoded, err := json.Marshal([]string(wantPath)); err == nil {
-			if r.db.Dialector != nil && r.db.Dialector.Name() == "postgres" {
-				query = query.Where("category_path::jsonb = ?::jsonb", string(encoded))
-			} else {
-				query = query.Where("category_path = ?", string(encoded))
-			}
+			query = query.Where(jsonValueEqualsClause(r.db, "category_path"), string(encoded))
 		}
 	}
 
@@ -488,9 +493,9 @@ func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, s
 
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
+		Where("knowledge_base_id = ? AND ("+sourceRefsContainsClause(r.db)+" OR "+sourceRefsTextLikeClause(r.db)+")",
 			kbID,
-			string(needle),
+			sourceRefsContainsArg(r.db, sourceKnowledgeID, string(needle)),
 			likePattern,
 		).
 		Find(&pages).Error; err != nil {
@@ -526,9 +531,9 @@ func (r *wikiPageRepository) ListSlugsBySourceRef(ctx context.Context, kbID stri
 	var slugs []string
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
+		Where("knowledge_base_id = ? AND ("+sourceRefsContainsClause(r.db)+" OR "+sourceRefsTextLikeClause(r.db)+")",
 			kbID,
-			string(needle),
+			sourceRefsContainsArg(r.db, sourceKnowledgeID, string(needle)),
 			likePattern,
 		).
 		Pluck("slug", &slugs).Error; err != nil {
@@ -696,7 +701,7 @@ func (r *wikiPageRepository) DeleteFolder(ctx context.Context, kbID string, id s
 	// Keep the emptiness test in the same SQL statement as the soft delete.
 	// A page move or child-folder create can race the service's earlier checks;
 	// a check-then-delete sequence would otherwise leave a dangling folder_id.
-	result := r.db.WithContext(ctx).Exec(`
+	statement := `
 UPDATE wiki_folders
 SET deleted_at = ?
 WHERE knowledge_base_id = ? AND id = ? AND deleted_at IS NULL
@@ -707,7 +712,29 @@ WHERE knowledge_base_id = ? AND id = ? AND deleted_at IS NULL
   AND NOT EXISTS (
     SELECT 1 FROM wiki_folders AS child
     WHERE child.knowledge_base_id = ? AND child.parent_id = ? AND child.deleted_at IS NULL
-  )`, time.Now(), kbID, id, kbID, id, kbID, id)
+  )`
+	args := []interface{}{time.Now(), kbID, id, kbID, id, kbID, id}
+	if isMySQL(r.db) {
+		// MySQL rejects an UPDATE whose target table is read directly by a
+		// subquery (error 1093). A single-table UPDATE with self-joins preserves
+		// the atomic empty-folder predicate without that restriction.
+		statement = `
+UPDATE wiki_folders AS target
+LEFT JOIN wiki_pages AS page
+  ON page.knowledge_base_id = target.knowledge_base_id
+ AND page.folder_id = target.id
+ AND page.deleted_at IS NULL
+LEFT JOIN wiki_folders AS child
+  ON child.knowledge_base_id = target.knowledge_base_id
+ AND child.parent_id = target.id
+ AND child.deleted_at IS NULL
+SET target.deleted_at = ?
+WHERE target.knowledge_base_id = ? AND target.id = ? AND target.deleted_at IS NULL
+  AND page.id IS NULL
+  AND child.id IS NULL`
+		args = []interface{}{time.Now(), kbID, id}
+	}
+	result := r.db.WithContext(ctx).Exec(statement, args...)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -827,8 +854,8 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if err != nil {
 			return nil, fmt.Errorf("marshal kid needle: %w", err)
 		}
-		clauses = append(clauses, "source_refs @> ?::jsonb")
-		args = append(args, string(needle))
+		clauses = append(clauses, sourceRefsContainsClause(r.db))
+		args = append(args, sourceRefsContainsArg(r.db, kid, string(needle)))
 
 		prefix, err := json.Marshal(kid + "|")
 		if err != nil {
@@ -838,7 +865,7 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
 			prefixStr = prefixStr[:len(prefixStr)-1]
 		}
-		clauses = append(clauses, "source_refs::text LIKE ?")
+		clauses = append(clauses, sourceRefsTextLikeClause(r.db))
 		args = append(args, "%"+escapeLikePattern(prefixStr)+"%")
 	}
 	if len(clauses) == 0 {
@@ -1004,16 +1031,18 @@ func (r *wikiPageRepository) ListByTypeRecent(
 }
 
 // FindSimilarPages returns the top-k entity/concept pages whose lowercase
-// title is most similar to the given query under PostgreSQL pg_trgm
-// trigram similarity. Backed by idx_wiki_pages_title_trgm (GIN
-// gin_trgm_ops, migration 000041). Used by the dedup pre-filter to
-// surface candidate merge targets without loading every entity/concept
-// page into Go.
+// title is most similar to the given query. PostgreSQL uses pg_trgm
+// similarity backed by idx_wiki_pages_title_trgm (GIN gin_trgm_ops,
+// migration 000041). MySQL and SQLite use a portable case-insensitive
+// substring fallback ranked by exact, prefix, then contained matches.
+// Used by the dedup pre-filter to surface candidate merge targets without
+// loading every entity/concept page into Go.
 //
 // types is an optional page_type allow-list; empty means entity+concept.
 // limit is clamped to [1, 50]. Pages whose title similarity is below
 // 0.1 are dropped server-side via the `%` operator (which respects
-// pg_trgm.similarity_threshold).
+// pg_trgm.similarity_threshold). The portable fallback only returns
+// substring matches.
 func (r *wikiPageRepository) FindSimilarPages(
 	ctx context.Context,
 	kbID string,
@@ -1037,14 +1066,34 @@ func (r *wikiPageRepository) FindSimilarPages(
 	q := strings.ToLower(strings.TrimSpace(query))
 
 	var rows []types.WikiPageLite
-	if err := r.db.WithContext(ctx).
+	base := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
-		Select("slug, title, page_type, status, aliases, out_links, similarity(lower(title), ?) AS sim", q).
-		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ? AND lower(title) % ?",
-			kbID, pageTypes, types.WikiPageStatusArchived, q).
-		Order("sim DESC").
-		Limit(limit).
-		Scan(&rows).Error; err != nil {
+		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ?",
+			kbID, pageTypes, types.WikiPageStatusArchived)
+
+	var err error
+	if isPostgres(r.db) {
+		err = base.
+			Select("slug, title, page_type, status, aliases, out_links, similarity(lower(title), ?) AS sim", q).
+			Where("lower(title) % ?", q).
+			Order("sim DESC").
+			Limit(limit).
+			Scan(&rows).Error
+	} else {
+		escaped := escapeLikePattern(q)
+		err = base.
+			Select(
+				"slug, title, page_type, status, aliases, out_links, "+
+					"CASE WHEN lower(title) = ? THEN 3 "+
+					"WHEN lower(title) LIKE lower(?) ESCAPE '\\' THEN 2 ELSE 1 END AS sim",
+				q, escaped+"%",
+			).
+			Where(wikiEscapedLikeCondition(r.db, "title"), "%"+escaped+"%").
+			Order("sim DESC, lower(title) ASC, slug ASC").
+			Limit(limit).
+			Scan(&rows).Error
+	}
+	if err != nil {
 		return nil, err
 	}
 	out := make([]*types.WikiPageLite, len(rows))
@@ -1135,8 +1184,36 @@ func escapeLikePattern(s string) string {
 	return replacer.Replace(s)
 }
 
-// Search performs case-insensitive POSIX regex search on wiki pages within a knowledge base.
-// The query is interpreted as a PostgreSQL regular expression (via ~*).
+func wikiEscapedLikeCondition(db *gorm.DB, column string) string {
+	condition := caseInsensitiveLikeCondition(db, column)
+	if dialectName(db) == "sqlite" {
+		return condition + ` ESCAPE '\'`
+	}
+	return condition
+}
+
+func wikiSearchCondition(db *gorm.DB, column string) string {
+	switch dialectName(db) {
+	case "postgres":
+		return column + " ~* ?"
+	case "mysql":
+		return "REGEXP_LIKE(" + column + ", ?, 'i')"
+	default:
+		return wikiEscapedLikeCondition(db, column)
+	}
+}
+
+func wikiSearchArg(db *gorm.DB, query string) string {
+	switch dialectName(db) {
+	case "postgres", "mysql":
+		return query
+	default:
+		return "%" + escapeLikePattern(query) + "%"
+	}
+}
+
+// Search performs case-insensitive search on wiki pages within a knowledge base.
+// PostgreSQL and MySQL use their native regex operators; SQLite falls back to LIKE.
 //
 // Results are ranked by where the query hit, highest-relevance first:
 //
@@ -1158,22 +1235,29 @@ func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query stri
 		limit = 50
 	}
 
+	matchArg := wikiSearchArg(r.db, query)
+
 	// CASE expression is evaluated per-row during SELECT; we order by the
 	// alias so the DB only computes the rank once. Parameterized four
-	// times with the same regex to avoid coupling to GORM's positional
+	// times with the same search term to avoid coupling to GORM's positional
 	// arg rewriting quirks.
 	rankExpr := "CASE " +
-		"WHEN title ~* ? THEN 4 " +
-		"WHEN slug ~* ? THEN 3 " +
-		"WHEN summary ~* ? THEN 2 " +
-		"WHEN content ~* ? THEN 1 " +
+		"WHEN " + wikiSearchCondition(r.db, "title") + " THEN 4 " +
+		"WHEN " + wikiSearchCondition(r.db, "slug") + " THEN 3 " +
+		"WHEN " + wikiSearchCondition(r.db, "summary") + " THEN 2 " +
+		"WHEN " + wikiSearchCondition(r.db, "content") + " THEN 1 " +
 		"ELSE 0 END AS match_rank"
+
+	whereExpr := "knowledge_base_id = ? AND (" +
+		wikiSearchCondition(r.db, "title") + " OR " +
+		wikiSearchCondition(r.db, "content") + " OR " +
+		wikiSearchCondition(r.db, "summary") + " OR " +
+		wikiSearchCondition(r.db, "slug") + ")"
 
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
-		Select("*, "+rankExpr, query, query, query, query).
-		Where("knowledge_base_id = ? AND (title ~* ? OR content ~* ? OR summary ~* ? OR slug ~* ?)",
-			kbID, query, query, query, query).
+		Select("*, "+rankExpr, matchArg, matchArg, matchArg, matchArg).
+		Where(whereExpr, kbID, matchArg, matchArg, matchArg, matchArg).
 		Where("status != ?", "archived").
 		Order("match_rank DESC, updated_at DESC").
 		Limit(limit).
