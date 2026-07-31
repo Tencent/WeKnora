@@ -1994,6 +1994,33 @@ export default {
         'faq.import_started': 'FAQ import started',
         'faq.import_completed': 'FAQ import completed',
         'faq.import_failed': 'FAQ import failed'
+      },
+      outcomes: {
+        accepted: 'Accepted',
+        success: 'Success',
+        failed: 'Failed',
+        partial: 'Partial',
+        canceled: 'Canceled',
+        denied: 'Denied'
+      },
+      detailValues: {
+        user: 'User initiated',
+        manual: 'Manual',
+        schedule: 'Scheduled',
+        system: 'System',
+        pending: 'Pending',
+        completed: 'Completed',
+        partial: 'Partially completed',
+        canceled: 'Canceled',
+        failed: 'Failed',
+        enqueue: 'Task submission',
+        reuse_vectors: 'Reuse vectors',
+        reparse: 'Reparse',
+        viewer: 'Read-only',
+        editor: 'Can edit',
+        admin: 'Manage',
+        append: 'Append',
+        replace: 'Replace'
       }
     },
     titleCreate: 'Create Knowledge Base',
