@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -49,17 +50,22 @@ type FeedbackConfig struct {
 	RetrievalWeightEnabled bool    `yaml:"retrieval_weight_enabled" json:"retrieval_weight_enabled"`
 	MinimumSampleCount     int64   `yaml:"minimum_sample_count"     json:"minimum_sample_count"`
 	OptimizationThreshold  float64 `yaml:"optimization_threshold"   json:"optimization_threshold"`
+	LowThreshold           float64 `yaml:"low_threshold"            json:"low_threshold"`
+	HighThreshold          float64 `yaml:"high_threshold"           json:"high_threshold"`
+	LowWeight              float64 `yaml:"low_weight"               json:"low_weight"`
+	NormalWeight           float64 `yaml:"normal_weight"            json:"normal_weight"`
+	HighWeight             float64 `yaml:"high_weight"              json:"high_weight"`
 }
 
 func (c *FeedbackConfig) EffectiveMinimumSampleCount() int64 {
-	if c == nil || c.MinimumSampleCount <= 0 {
+	if c == nil {
 		return 5
 	}
 	return c.MinimumSampleCount
 }
 
 func (c *FeedbackConfig) EffectiveOptimizationThreshold() float64 {
-	if c == nil || c.OptimizationThreshold <= 0 || c.OptimizationThreshold > 1 {
+	if c == nil {
 		return 0.3
 	}
 	return c.OptimizationThreshold
@@ -524,6 +530,14 @@ func LoadConfig() (*Config, error) {
 	// 启用环境变量替换
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	viper.SetDefault("feedback.retrieval_weight_enabled", false)
+	viper.SetDefault("feedback.minimum_sample_count", 5)
+	viper.SetDefault("feedback.optimization_threshold", 0.3)
+	viper.SetDefault("feedback.low_threshold", 0.5)
+	viper.SetDefault("feedback.high_threshold", 0.8)
+	viper.SetDefault("feedback.low_weight", 0.8)
+	viper.SetDefault("feedback.normal_weight", 1.0)
+	viper.SetDefault("feedback.high_weight", 1.2)
 
 	// 读取配置文件
 	if err := viper.ReadInConfig(); err != nil {
@@ -698,6 +712,40 @@ func ValidateConfig(cfg *Config) error {
 	if cfg.Server != nil {
 		if cfg.Server.Port <= 0 || cfg.Server.Port > 65535 {
 			errs = append(errs, "server.port must be between 1 and 65535")
+		}
+	}
+
+	if feedback := cfg.Feedback; feedback != nil {
+		if feedback.MinimumSampleCount < 1 {
+			errs = append(errs, "feedback.minimum_sample_count must be >= 1")
+		}
+		for name, value := range map[string]float64{
+			"optimization_threshold": feedback.OptimizationThreshold,
+			"low_threshold":          feedback.LowThreshold,
+			"high_threshold":         feedback.HighThreshold,
+			"low_weight":             feedback.LowWeight,
+			"normal_weight":          feedback.NormalWeight,
+			"high_weight":            feedback.HighWeight,
+		} {
+			if math.IsNaN(value) || math.IsInf(value, 0) {
+				errs = append(errs, fmt.Sprintf("feedback.%s must be finite", name))
+			}
+		}
+		if feedback.OptimizationThreshold < 0 ||
+			feedback.OptimizationThreshold > feedback.LowThreshold {
+			errs = append(errs,
+				"feedback thresholds must satisfy 0 <= optimization_threshold <= low_threshold")
+		}
+		if feedback.LowThreshold < 0 || feedback.LowThreshold > feedback.HighThreshold ||
+			feedback.HighThreshold > 1 {
+			errs = append(errs,
+				"feedback thresholds must satisfy low_threshold <= high_threshold <= 1")
+		}
+		if feedback.LowWeight <= 0 ||
+			feedback.LowWeight > feedback.NormalWeight ||
+			feedback.NormalWeight > feedback.HighWeight {
+			errs = append(errs,
+				"feedback weights must satisfy high_weight >= normal_weight >= low_weight > 0")
 		}
 	}
 

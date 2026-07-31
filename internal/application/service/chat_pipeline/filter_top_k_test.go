@@ -139,11 +139,11 @@ func TestPluginFilterTopKRequiresKnowledgeBaseOptIn(t *testing.T) {
 }
 
 func TestNormalizedRecallWeightTreatsMissingAndInvalidValuesAsNeutral(t *testing.T) {
-	for _, weight := range []float64{0, -1, 0.79, 1.21, math.NaN(), math.Inf(1)} {
+	for _, weight := range []float64{0, -1, math.NaN(), math.Inf(1)} {
 		assert.Equal(t, 1.0, normalizedRecallWeight(weight))
 	}
-	assert.Equal(t, 0.8, normalizedRecallWeight(0.8))
-	assert.Equal(t, 1.2, normalizedRecallWeight(1.2))
+	assert.Equal(t, 0.7, normalizedRecallWeight(0.7))
+	assert.Equal(t, 1.3, normalizedRecallWeight(1.3))
 }
 
 func TestEntitySearchResultCarriesCanonicalScopeAndFeedbackOptIn(t *testing.T) {

@@ -132,7 +132,7 @@ func effectiveFeedbackWeight(result *types.SearchResult) float64 {
 }
 
 func normalizedRecallWeight(weight float64) float64 {
-	if math.IsNaN(weight) || math.IsInf(weight, 0) || weight < 0.8 || weight > 1.2 {
+	if math.IsNaN(weight) || math.IsInf(weight, 0) || weight <= 0 {
 		return 1
 	}
 	return weight

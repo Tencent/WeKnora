@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -68,7 +69,9 @@ func setupFeedbackTestRepository(
 		Content: "source", SourceContent: "source", RecallWeight: 1, IsEnabled: true,
 	}
 	require.NoError(t, db.Create(chunk).Error)
-	return &feedbackRepository{db: db, minimumSampleCount: 1}, db, session, message, chunk
+	policy := defaultFeedbackWeightPolicy()
+	policy.minimumSampleCount = 1
+	return &feedbackRepository{db: db, weightPolicy: policy}, db, session, message, chunk
 }
 
 func feedbackReference(chunk *types.Chunk) types.References {
@@ -304,9 +307,100 @@ func TestFeedbackLifecycleAndResetBaseline(t *testing.T) {
 	assert.Equal(t, types.FeedbackTriggerContentDelete, details.Audits[0].TriggerSource)
 }
 
+func TestFeedbackResetBoundaryDoesNotReviveReasonOnlyUpdate(t *testing.T) {
+	repo, db, session, message, chunk := setupFeedbackTestRepository(t)
+	ctx := context.Background()
+	_, err := repo.CompleteAssistantMessageWithReferences(
+		ctx, session.TenantID, message, feedbackReference(chunk),
+	)
+	require.NoError(t, err)
+
+	inaccurate := types.FeedbackReasonInaccurate
+	_, err = repo.ApplyMessageFeedback(ctx, types.ApplyMessageFeedbackInput{
+		MessageTenantID: session.TenantID,
+		ActorTenantID:   session.TenantID,
+		ActorUserID:     session.UserID,
+		SessionID:       session.ID,
+		MessageID:       message.ID,
+		Type:            types.FeedbackTypeDislike,
+		ReasonCode:      &inaccurate,
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.ResetChunkFeedback(ctx, types.ResetChunkFeedbackInput{
+		ChunkTenantID:   chunk.TenantID,
+		ActorTenantID:   session.TenantID,
+		ActorUserID:     "admin",
+		KnowledgeBaseID: chunk.KnowledgeBaseID,
+		ChunkID:         chunk.ID,
+	}))
+
+	// Simulate the coarsest supported database boundary: the old feedback and
+	// reset marker round to the exact same timestamp. A future value also
+	// proves the next explicit rating is advanced monotonically, rather than
+	// relying on the application clock already being later.
+	boundary := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)
+	require.NoError(t, db.Model(&types.MessageFeedback{}).
+		Where("tenant_id = ? AND user_id = ? AND message_id = ?",
+			session.TenantID, session.UserID, message.ID).
+		UpdateColumn("updated_at", boundary).Error)
+	require.NoError(t, db.Model(&types.Chunk{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND id = ?",
+			chunk.TenantID, chunk.KnowledgeBaseID, chunk.ID).
+		UpdateColumn("feedback_reset_at", boundary).Error)
+
+	irrelevant := types.FeedbackReasonIrrelevant
+	state, err := repo.ApplyMessageFeedback(ctx, types.ApplyMessageFeedbackInput{
+		MessageTenantID: session.TenantID,
+		ActorTenantID:   session.TenantID,
+		ActorUserID:     session.UserID,
+		SessionID:       session.ID,
+		MessageID:       message.ID,
+		Type:            types.FeedbackTypeDislike,
+		ReasonCode:      &irrelevant,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.NotNil(t, state.ReasonCode)
+	assert.Equal(t, irrelevant, *state.ReasonCode)
+
+	var persisted types.MessageFeedback
+	require.NoError(t, db.Where(
+		"tenant_id = ? AND user_id = ? AND message_id = ?",
+		session.TenantID, session.UserID, message.ID,
+	).First(&persisted).Error)
+	assert.False(t, persisted.UpdatedAt.After(boundary),
+		"a reason-only update must preserve the pre-reset scoring boundary")
+	got := loadFeedbackChunk(t, db, chunk.ID)
+	assert.Zero(t, got.LikeCount)
+	assert.Zero(t, got.DislikeCount)
+	assert.Equal(t, 1.0, got.RecallWeight)
+
+	// Repeating the now-current rating is an explicit post-reset score. Its
+	// timestamp must survive microsecond precision and re-enter aggregation.
+	_, err = repo.ApplyMessageFeedback(ctx, types.ApplyMessageFeedbackInput{
+		MessageTenantID: session.TenantID,
+		ActorTenantID:   session.TenantID,
+		ActorUserID:     session.UserID,
+		SessionID:       session.ID,
+		MessageID:       message.ID,
+		Type:            types.FeedbackTypeDislike,
+		ReasonCode:      &irrelevant,
+	})
+	require.NoError(t, err)
+	require.NoError(t, db.Where(
+		"tenant_id = ? AND user_id = ? AND message_id = ?",
+		session.TenantID, session.UserID, message.ID,
+	).First(&persisted).Error)
+	assert.True(t, persisted.UpdatedAt.After(boundary))
+	got = loadFeedbackChunk(t, db, chunk.ID)
+	assert.Zero(t, got.LikeCount)
+	assert.EqualValues(t, 1, got.DislikeCount)
+	assert.Equal(t, 0.8, got.RecallWeight)
+}
+
 func TestFeedbackWeightStaysNeutralUntilMinimumSampleCount(t *testing.T) {
 	repo, db, _, _, chunk := setupFeedbackTestRepository(t)
-	repo.minimumSampleCount = 3
+	repo.weightPolicy.minimumSampleCount = 3
 	ctx := context.Background()
 
 	for index := 1; index <= 3; index++ {
@@ -347,6 +441,47 @@ func TestFeedbackWeightStaysNeutralUntilMinimumSampleCount(t *testing.T) {
 			assert.Equal(t, 1.2, got.RecallWeight)
 		}
 	}
+}
+
+func TestFeedbackProjectionUsesConfiguredThresholdsAndWeights(t *testing.T) {
+	repo, db, session, message, chunk := setupFeedbackTestRepository(t)
+	repo.weightPolicy = feedbackWeightPolicy{
+		minimumSampleCount: 1,
+		lowThreshold:       0.4,
+		highThreshold:      0.9,
+		lowWeight:          0.7,
+		normalWeight:       1.1,
+		highWeight:         1.4,
+	}
+	ctx := context.Background()
+	_, err := repo.CompleteAssistantMessageWithReferences(
+		ctx, session.TenantID, message, feedbackReference(chunk),
+	)
+	require.NoError(t, err)
+
+	_, err = repo.ApplyMessageFeedback(ctx, types.ApplyMessageFeedbackInput{
+		MessageTenantID: session.TenantID,
+		ActorTenantID:   session.TenantID,
+		ActorUserID:     session.UserID,
+		SessionID:       session.ID,
+		MessageID:       message.ID,
+		Type:            types.FeedbackTypeLike,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1.4, loadFeedbackChunk(t, db, chunk.ID).RecallWeight)
+
+	reason := types.FeedbackReasonInaccurate
+	_, err = repo.ApplyMessageFeedback(ctx, types.ApplyMessageFeedbackInput{
+		MessageTenantID: session.TenantID,
+		ActorTenantID:   session.TenantID,
+		ActorUserID:     session.UserID,
+		SessionID:       session.ID,
+		MessageID:       message.ID,
+		Type:            types.FeedbackTypeDislike,
+		ReasonCode:      &reason,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 0.7, loadFeedbackChunk(t, db, chunk.ID).RecallWeight)
 }
 
 func TestFeedbackTransactionRollsBackOnAuditFailure(t *testing.T) {

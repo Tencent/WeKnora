@@ -44,6 +44,11 @@ feedback:
   retrieval_weight_enabled: false
   minimum_sample_count: 5
   optimization_threshold: 0.3
+  low_threshold: 0.5
+  high_threshold: 0.8
+  low_weight: 0.8
+  normal_weight: 1.0
+  high_weight: 1.2
 
 # Knowledge base configuration
 knowledge_base:

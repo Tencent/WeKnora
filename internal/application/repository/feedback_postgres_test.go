@@ -619,6 +619,79 @@ func TestFeedbackPostgresFeedbackAndLifecycleConcurrency(t *testing.T) {
 	})
 }
 
+func TestFeedbackPostgresResetPrecisionBoundary(t *testing.T) {
+	feedbackDB, _ := setupFeedbackPostgresTestDatabases(t)
+	session, message, chunks := seedFeedbackPostgresTestCase(t, feedbackDB, "reset-boundary", "a")
+	policy := defaultFeedbackWeightPolicy()
+	policy.minimumSampleCount = 1
+	repo := &feedbackRepository{db: feedbackDB, weightPolicy: policy}
+	_, err := repo.CompleteAssistantMessageWithReferences(
+		context.Background(), session.TenantID, message, feedbackPostgresReferences(chunks["a"]),
+	)
+	require.NoError(t, err)
+
+	inaccurate := types.FeedbackReasonInaccurate
+	_, err = repo.ApplyMessageFeedback(context.Background(), types.ApplyMessageFeedbackInput{
+		MessageTenantID: session.TenantID,
+		ActorTenantID:   session.TenantID,
+		ActorUserID:     session.UserID,
+		SessionID:       session.ID,
+		MessageID:       message.ID,
+		Type:            types.FeedbackTypeDislike,
+		ReasonCode:      &inaccurate,
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.ResetChunkFeedback(context.Background(), types.ResetChunkFeedbackInput{
+		ChunkTenantID:   chunks["a"].TenantID,
+		ActorTenantID:   session.TenantID,
+		ActorUserID:     "admin",
+		KnowledgeBaseID: chunks["a"].KnowledgeBaseID,
+		ChunkID:         chunks["a"].ID,
+	}))
+
+	boundary := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)
+	require.NoError(t, feedbackDB.Model(&types.MessageFeedback{}).
+		Where("tenant_id = ? AND user_id = ? AND message_id = ?",
+			session.TenantID, session.UserID, message.ID).
+		UpdateColumn("updated_at", boundary).Error)
+	require.NoError(t, feedbackDB.Model(&types.Chunk{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND id = ?",
+			chunks["a"].TenantID, chunks["a"].KnowledgeBaseID, chunks["a"].ID).
+		UpdateColumn("feedback_reset_at", boundary).Error)
+
+	irrelevant := types.FeedbackReasonIrrelevant
+	input := types.ApplyMessageFeedbackInput{
+		MessageTenantID: session.TenantID,
+		ActorTenantID:   session.TenantID,
+		ActorUserID:     session.UserID,
+		SessionID:       session.ID,
+		MessageID:       message.ID,
+		Type:            types.FeedbackTypeDislike,
+		ReasonCode:      &irrelevant,
+	}
+	_, err = repo.ApplyMessageFeedback(context.Background(), input)
+	require.NoError(t, err)
+
+	var persisted types.MessageFeedback
+	require.NoError(t, feedbackDB.Where(
+		"tenant_id = ? AND user_id = ? AND message_id = ?",
+		session.TenantID, session.UserID, message.ID,
+	).First(&persisted).Error)
+	assert.True(t, persisted.UpdatedAt.Equal(boundary),
+		"a reason-only update must stay on the reset boundary")
+	assertFeedbackPostgresCounts(t, feedbackDB, chunks["a"].ID, 0, 0)
+
+	_, err = repo.ApplyMessageFeedback(context.Background(), input)
+	require.NoError(t, err)
+	require.NoError(t, feedbackDB.Where(
+		"tenant_id = ? AND user_id = ? AND message_id = ?",
+		session.TenantID, session.UserID, message.ID,
+	).First(&persisted).Error)
+	assert.True(t, persisted.UpdatedAt.After(boundary),
+		"the first explicit post-reset rating must advance beyond database precision")
+	assertFeedbackPostgresCounts(t, feedbackDB, chunks["a"].ID, 0, 1)
+}
+
 func TestFeedbackPostgresFeedbackWriteConcurrency(t *testing.T) {
 	t.Run("reversed references use one deterministic chunk order", func(t *testing.T) {
 		firstDB, secondDB := setupFeedbackPostgresTestDatabases(t)

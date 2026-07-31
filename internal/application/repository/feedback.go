@@ -32,8 +32,61 @@ const messageFeedbackReferenceJoin = "JOIN message_chunk_references AS mcr " +
 	"ON mcr.message_tenant_id = mf.tenant_id AND mcr.message_id = mf.message_id"
 
 type feedbackRepository struct {
-	db                 *gorm.DB
+	db           *gorm.DB
+	weightPolicy feedbackWeightPolicy
+}
+
+type feedbackWeightPolicy struct {
 	minimumSampleCount int64
+	lowThreshold       float64
+	highThreshold      float64
+	lowWeight          float64
+	normalWeight       float64
+	highWeight         float64
+}
+
+func defaultFeedbackWeightPolicy() feedbackWeightPolicy {
+	return feedbackWeightPolicy{
+		minimumSampleCount: 5,
+		lowThreshold:       0.5,
+		highThreshold:      0.8,
+		lowWeight:          0.8,
+		normalWeight:       1,
+		highWeight:         1.2,
+	}
+}
+
+func feedbackWeightPolicyFromConfig(cfg *config.FeedbackConfig) feedbackWeightPolicy {
+	if cfg == nil {
+		return defaultFeedbackWeightPolicy()
+	}
+	return feedbackWeightPolicy{
+		minimumSampleCount: cfg.MinimumSampleCount,
+		lowThreshold:       cfg.LowThreshold,
+		highThreshold:      cfg.HighThreshold,
+		lowWeight:          cfg.LowWeight,
+		normalWeight:       cfg.NormalWeight,
+		highWeight:         cfg.HighWeight,
+	}
+}
+
+func (r *feedbackRepository) effectiveWeightPolicy() feedbackWeightPolicy {
+	policy := r.weightPolicy
+	if policy.minimumSampleCount < 1 ||
+		math.IsNaN(policy.lowThreshold) || math.IsInf(policy.lowThreshold, 0) ||
+		math.IsNaN(policy.highThreshold) || math.IsInf(policy.highThreshold, 0) ||
+		math.IsNaN(policy.lowWeight) || math.IsInf(policy.lowWeight, 0) ||
+		math.IsNaN(policy.normalWeight) || math.IsInf(policy.normalWeight, 0) ||
+		math.IsNaN(policy.highWeight) || math.IsInf(policy.highWeight, 0) ||
+		policy.lowThreshold < 0 ||
+		policy.highThreshold < policy.lowThreshold ||
+		policy.highThreshold > 1 ||
+		policy.lowWeight <= 0 ||
+		policy.normalWeight < policy.lowWeight ||
+		policy.highWeight < policy.normalWeight {
+		return defaultFeedbackWeightPolicy()
+	}
+	return policy
 }
 
 // NewFeedbackRepository creates a repository for feedback attribution and aggregation.
@@ -43,8 +96,8 @@ func NewFeedbackRepository(db *gorm.DB, cfg *config.Config) interfaces.FeedbackR
 		feedbackConfig = cfg.Feedback
 	}
 	return &feedbackRepository{
-		db:                 db,
-		minimumSampleCount: feedbackConfig.EffectiveMinimumSampleCount(),
+		db:           db,
+		weightPolicy: feedbackWeightPolicyFromConfig(feedbackConfig),
 	}
 }
 
@@ -419,6 +472,16 @@ func (r *feedbackRepository) ApplyMessageFeedback(
 				state = &types.MessageFeedbackState{Type: existing.FeedbackType, ReasonCode: existing.ReasonCode}
 				return nil
 			}
+			if hasExisting && !activeEverywhere && existing.FeedbackType == input.Type && !same {
+				if err := tx.Model(&types.MessageFeedback{}).
+					Where("id = ?", existing.ID).
+					UpdateColumn("reason_code", input.ReasonCode).Error; err != nil {
+					return err
+				}
+				existing.ReasonCode = input.ReasonCode
+				state = &types.MessageFeedbackState{Type: existing.FeedbackType, ReasonCode: existing.ReasonCode}
+				break
+			}
 			now := feedbackWriteTime(chunks)
 			if !hasExisting {
 				existing = types.MessageFeedback{
@@ -434,7 +497,13 @@ func (r *feedbackRepository) ApplyMessageFeedback(
 			existing.ReasonCode = input.ReasonCode
 			existing.UpdatedAt = now
 			if hasExisting {
-				if err := tx.Save(&existing).Error; err != nil {
+				if err := tx.Model(&types.MessageFeedback{}).
+					Where("id = ?", existing.ID).
+					UpdateColumns(map[string]interface{}{
+						"feedback_type": existing.FeedbackType,
+						"reason_code":   existing.ReasonCode,
+						"updated_at":    existing.UpdatedAt,
+					}).Error; err != nil {
 					return err
 				}
 			} else if err := tx.Create(&existing).Error; err != nil {
@@ -445,7 +514,7 @@ func (r *feedbackRepository) ApplyMessageFeedback(
 			return fmt.Errorf("invalid feedback type %q", input.Type)
 		}
 		return recomputeChunks(
-			tx, keys, r.minimumSampleCount,
+			tx, keys, r.effectiveWeightPolicy(),
 			input.ActorTenantID, input.ActorUserID, feedbackTriggerSource(input.Type),
 		)
 	})
@@ -531,7 +600,7 @@ func feedbackTriggerSource(feedbackType types.FeedbackType) types.FeedbackTrigge
 func recomputeChunks(
 	tx *gorm.DB,
 	keys []referenceKey,
-	minimumSampleCount int64,
+	policy feedbackWeightPolicy,
 	actorTenantID uint64,
 	actorUserID string,
 	triggerSource types.FeedbackTriggerSource,
@@ -575,16 +644,16 @@ func recomputeChunks(
 			}
 		}
 		var positiveRate *float64
-		weight := 1.0
+		weight := policy.normalWeight
 		if total := likes + dislikes; total > 0 {
 			rate := float64(likes) / float64(total)
 			positiveRate = &rate
-			if total >= minimumSampleCount {
+			if total >= policy.minimumSampleCount {
 				switch {
-				case rate >= 0.8:
-					weight = 1.2
-				case rate < 0.5:
-					weight = 0.8
+				case rate >= policy.highThreshold:
+					weight = policy.highWeight
+				case rate < policy.lowThreshold:
+					weight = policy.lowWeight
 				}
 			}
 		}
@@ -742,7 +811,7 @@ func (r *feedbackRepository) DeleteMessageWithFeedback(
 			return err
 		}
 		return deleteMessagesAndRecompute(
-			tx, tenantID, []string{messageID}, actorUserID, r.minimumSampleCount,
+			tx, tenantID, []string{messageID}, actorUserID, r.effectiveWeightPolicy(),
 		)
 	})
 }
@@ -766,7 +835,7 @@ func (r *feedbackRepository) DeleteSessionMessagesWithFeedback(
 			ids = append(ids, message.ID)
 		}
 		if err := deleteMessagesAndRecompute(
-			tx, tenantID, ids, actorUserID, r.minimumSampleCount,
+			tx, tenantID, ids, actorUserID, r.effectiveWeightPolicy(),
 		); err != nil {
 			return err
 		}
@@ -779,7 +848,7 @@ func (r *feedbackRepository) DeleteSessionMessagesWithFeedback(
 
 func deleteMessagesAndRecompute(
 	tx *gorm.DB, actorTenantID uint64, messageIDs []string, actorUserID string,
-	minimumSampleCount int64,
+	policy feedbackWeightPolicy,
 ) error {
 	if len(messageIDs) == 0 {
 		return nil
@@ -824,7 +893,7 @@ func deleteMessagesAndRecompute(
 		return err
 	}
 	return recomputeChunks(
-		tx, keys, minimumSampleCount,
+		tx, keys, policy,
 		actorTenantID, actorUserID, types.FeedbackTriggerContentDelete,
 	)
 }
