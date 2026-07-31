@@ -427,7 +427,10 @@ func (s *wikiIngestService) beginWikiSubspan(ctx context.Context, knowledgeID st
 	return s.tracker().BeginSubSpan(ctx, parent, "postprocess.wiki", types.SpanKindSubSpan, input)
 }
 
-// EnqueueWikiIngest queues a document for wiki ingestion.
+// EnqueueWikiIngest queues a document for wiki ingestion. The returned bool
+// reports whether the durable pending op was persisted. A trigger enqueue
+// error may therefore be returned together with true; callers can retry only
+// the KB-scoped trigger without appending a duplicate operation.
 //
 // Architecture: each upload inserts one row into task_pending_ops
 // (task_type="wiki:ingest", scope="knowledge_base", scope_id=kbID,
@@ -464,14 +467,39 @@ func EnqueueWikiIngest(
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	tenantID uint64,
 	kbID, knowledgeID string,
-) {
-	lang, _ := types.LanguageFromContext(ctx)
+) (bool, error) {
+	pendingOp, err := newWikiIngestPendingOp(ctx, tenantID, kbID, knowledgeID)
 
 	// Persist the pending op. A re-ingest of the same knowledge id while
 	// a previous op is still queued simply appends another row; the
 	// peekPendingList consumer collapses by dedup_key (== knowledge_id),
 	// keeping the LATEST op for each knowledge — matching the legacy
 	// "RPush + reverse-dedupe" semantics.
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to marshal pending op for %s: %v", knowledgeID, err)
+		return false, err
+	}
+	accepted, err := enqueueWikiPendingOp(ctx, pendingRepo, pendingOp)
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to enqueue pending op for %s: %v", knowledgeID, err)
+		return false, fmt.Errorf("enqueue wiki ingest pending op: %w", err)
+	}
+	if !accepted {
+		logger.Infof(ctx, "wiki ingest: skip enqueue for deleted KB %s", kbID)
+		return false, nil
+	}
+	if err := enqueueWikiIngestTrigger(ctx, task, tenantID, kbID); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+func newWikiIngestPendingOp(
+	ctx context.Context,
+	tenantID uint64,
+	kbID, knowledgeID string,
+) (*types.TaskPendingOp, error) {
+	lang, _ := types.LanguageFromContext(ctx)
 	op := WikiPendingOp{
 		Op:          WikiOpIngest,
 		KnowledgeID: knowledgeID,
@@ -479,10 +507,9 @@ func EnqueueWikiIngest(
 	}
 	payloadBytes, err := json.Marshal(op)
 	if err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to marshal pending op for %s: %v", knowledgeID, err)
-		return
+		return nil, fmt.Errorf("marshal wiki ingest pending op: %w", err)
 	}
-	accepted, err := enqueueWikiPendingOp(ctx, pendingRepo, &types.TaskPendingOp{
+	return &types.TaskPendingOp{
 		TenantID: tenantID,
 		TaskType: wikiTaskType,
 		Scope:    wikiTaskScope,
@@ -490,23 +517,30 @@ func EnqueueWikiIngest(
 		Op:       WikiOpIngest,
 		DedupKey: knowledgeID,
 		Payload:  payloadBytes,
-	})
-	if err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to enqueue pending op for %s: %v", knowledgeID, err)
-		return
-	}
-	if !accepted {
-		logger.Infof(ctx, "wiki ingest: skip enqueue for deleted KB %s", kbID)
-		return
-	}
+	}, nil
+}
 
+func enqueueWikiIngestTrigger(
+	ctx context.Context,
+	task interfaces.TaskEnqueuer,
+	tenantID uint64,
+	kbID string,
+) error {
+	lang, _ := types.LanguageFromContext(ctx)
 	trigger := WikiIngestPayload{
 		TenantID:        tenantID,
 		KnowledgeBaseID: kbID,
 		Language:        lang,
 	}
 	langfuse.InjectTracing(ctx, &trigger)
-	triggerBytes, _ := json.Marshal(trigger)
+	triggerBytes, err := json.Marshal(trigger)
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to marshal trigger task: %v", err)
+		return fmt.Errorf("marshal wiki ingest trigger: %w", err)
+	}
+	if task == nil {
+		return errors.New("enqueue wiki ingest trigger: task enqueuer is nil")
+	}
 
 	t := asynq.NewTask(types.TypeWikiIngest, triggerBytes,
 		asynq.Queue(types.QueueWiki),
@@ -516,7 +550,9 @@ func EnqueueWikiIngest(
 	)
 	if _, err := task.Enqueue(t); err != nil {
 		logger.Warnf(ctx, "wiki ingest: failed to enqueue trigger task: %v", err)
+		return fmt.Errorf("enqueue wiki ingest trigger: %w", err)
 	}
+	return nil
 }
 
 // EnqueueWikiRetract queues a wiki retraction op (a delete cleanup).

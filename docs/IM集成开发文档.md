@@ -46,6 +46,11 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置
 - 已创建至少一个 Agent（自定义智能体）
 - Agent 已配置好模型和知识库
 
+> **回复图片需公网可达**：IM 显示知识库图片需让 IM 端拿到公网 http 图片 URL，二选一——
+> (A) 存储后端本身公网可达（对象存储公网 endpoint / `MINIO_ENDPOINT` 设为公网）；
+> (B) 配 `APP_EXTERNAL_URL`，图片走 WeKnora 的 `/r/` 短链（nginx 已内置 `/r/` 代理）。
+> 默认 MinIO 部署走 (B) 最简单。详见 `.env.example` 中 `APP_EXTERNAL_URL` 说明。
+
 ### 企业微信接入
 
 企业微信提供两种接入模式，根据你的应用类型选择：

@@ -9,10 +9,11 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// mergeOverlappingChunks merges chunks with overlapping or adjacent StartAt/EndAt
-// ranges within a single knowledge source group. Chunks MUST be pre-sorted by
-// StartAt ascending, EndAt ascending. The highest score among merged chunks is kept.
-func (p *PluginMerge) mergeOverlappingChunks(
+// mergeSequentialChunks joins sequential current chunk bodies without using
+// parser StartAt/EndAt coordinates. Chunks MUST be pre-sorted by ChunkIndex.
+// Source coordinates remain useful for citations, but arbitrary user edits
+// make them unsafe for deciding whether current content can be discarded.
+func (p *PluginMerge) mergeSequentialChunks(
 	ctx context.Context,
 	knowledgeID string,
 	chunks []*types.SearchResult,
@@ -21,52 +22,46 @@ func (p *PluginMerge) mergeOverlappingChunks(
 		return nil
 	}
 
-	merged := []*types.SearchResult{chunks[0]}
+	type mergedGroup struct {
+		result    *types.SearchResult
+		lastIndex int
+	}
+	groups := []mergedGroup{{result: chunks[0], lastIndex: chunks[0].ChunkIndex}}
 	for i := 1; i < len(chunks); i++ {
-		lastChunk := merged[len(merged)-1]
-
-		// Non-overlapping: add as a new entry
-		if chunks[i].StartAt > lastChunk.EndAt {
-			merged = append(merged, chunks[i])
+		current := chunks[i]
+		last := &groups[len(groups)-1]
+		lastChunk := last.result
+		textContained := searchutil.ContainsChunkContent(lastChunk.Content, current.Content) ||
+			searchutil.ContainsChunkContent(current.Content, lastChunk.Content)
+		sequential := current.ChunkIndex == last.lastIndex+1
+		if !textContained && !sequential {
+			groups = append(groups, mergedGroup{result: current, lastIndex: current.ChunkIndex})
 			continue
 		}
 
-		// Partial overlap: append the non-overlapping suffix.
-		//
-		// 重叠去重统一交给 searchutil.AppendWithOverlap（按文本匹配），它能
-		// 兼容父子分块器补写的零宽表头，以及 HTML 实体导致的 content 长度与
-		// EndAt-StartAt 不一致——这两种情况都会让按位置裁剪错位、丢字或重复。
-		// StartAt/EndAt 仅用于估算搜索窗口大小。
-		if chunks[i].EndAt > lastChunk.EndAt {
-			lastChunk.Content = searchutil.AppendWithOverlap(
-				lastChunk.Content, chunks[i].Content, lastChunk.EndAt-chunks[i].StartAt,
-			)
-			lastChunk.EndAt = chunks[i].EndAt
-			lastChunk.SubChunkID = append(lastChunk.SubChunkID, chunks[i].ID)
-
-			if err := mergeImageInfo(ctx, lastChunk, chunks[i]); err != nil {
-				pipelineWarn(ctx, "Merge", "image_merge", map[string]interface{}{
-					"knowledge_id": knowledgeID,
-					"error":        err.Error(),
-				})
-			}
-		} else {
-			// Fully contained: track the subsumed chunk and merge its ImageInfo
-			if !containsID(lastChunk.SubChunkID, chunks[i].ID) {
-				lastChunk.SubChunkID = append(lastChunk.SubChunkID, chunks[i].ID)
-			}
-			if err := mergeImageInfo(ctx, lastChunk, chunks[i]); err != nil {
-				pipelineWarn(ctx, "Merge", "image_merge_contained", map[string]interface{}{
-					"knowledge_id": knowledgeID,
-					"error":        err.Error(),
-				})
-			}
+		lastChunk.Content = searchutil.JoinChunkContent(lastChunk.Content, current.Content, "\n\n")
+		if !containsID(lastChunk.SubChunkID, current.ID) {
+			lastChunk.SubChunkID = append(lastChunk.SubChunkID, current.ID)
+		}
+		if err := mergeImageInfo(ctx, lastChunk, current); err != nil {
+			pipelineWarn(ctx, "Merge", "image_merge", map[string]interface{}{
+				"knowledge_id": knowledgeID,
+				"error":        err.Error(),
+			})
+		}
+		if current.ChunkIndex > last.lastIndex {
+			last.lastIndex = current.ChunkIndex
 		}
 
 		// Keep the higher score
-		if chunks[i].Score > lastChunk.Score {
-			lastChunk.Score = chunks[i].Score
+		if current.Score > lastChunk.Score {
+			lastChunk.Score = current.Score
 		}
+	}
+
+	merged := make([]*types.SearchResult, 0, len(groups))
+	for _, group := range groups {
+		merged = append(merged, group.result)
 	}
 
 	// Sort merged chunks by score (highest first)

@@ -140,6 +140,9 @@ type sqlValidator struct {
 	// Hidden knowledge base filtering (is_temporary = false)
 	enableHiddenKBFilter bool
 
+	// Enabled chunk filtering (is_enabled = true)
+	enableChunkEnabledFilter bool
+
 	// Search scope filtering (restrict to specific KBs and knowledges)
 	enableSearchScopeFilter bool
 	searchScopeKBIDs        []string
@@ -624,6 +627,15 @@ func WithHiddenKBFilter() SQLValidationOption {
 	}
 }
 
+// WithChunkEnabledFilter excludes disabled chunks from model-visible SQL
+// queries. It is intentionally opt-in because administrative queries may need
+// to inspect disabled rows.
+func WithChunkEnabledFilter() SQLValidationOption {
+	return func(v *sqlValidator) {
+		v.enableChunkEnabledFilter = true
+	}
+}
+
 // WithSearchScopeFilter restricts queries to the specified knowledge bases and
 // (optionally) specific knowledge documents. For the knowledge_bases table it
 // filters by id; for knowledges it filters by knowledge_base_id (and id when
@@ -857,7 +869,8 @@ func ValidateAndSecureSQL(sql string, opts ...SQLValidationOption) (string, *SQL
 	}
 
 	// If no SQL rewriting is enabled, return original SQL
-	if !validator.enableTenantInjection && !validator.enableSoftDeleteInjection && !validator.enableHiddenKBFilter && !validator.enableSearchScopeFilter {
+	if !validator.enableTenantInjection && !validator.enableSoftDeleteInjection && !validator.enableHiddenKBFilter &&
+		!validator.enableChunkEnabledFilter && !validator.enableSearchScopeFilter {
 		return sql, validationResult, nil
 	}
 
@@ -882,6 +895,8 @@ func ValidateAndSecureSQL(sql string, opts ...SQLValidationOption) (string, *SQL
 	securedSQL = validator.injectSoftDeleteConditions(securedSQL, tablesInQuery)
 	// Inject hidden KB filter (exclude is_temporary = true knowledge bases)
 	securedSQL = validator.injectHiddenKBFilter(securedSQL, tablesInQuery)
+	// Exclude disabled chunks from model-visible query results.
+	securedSQL = validator.injectChunkEnabledFilter(securedSQL, tablesInQuery)
 	// Inject search scope filter (restrict to allowed KBs and knowledges)
 	securedSQL = validator.injectSearchScopeConditions(securedSQL, tablesInQuery)
 
@@ -1030,6 +1045,17 @@ func (v *sqlValidator) injectHiddenKBFilter(sql string, tablesInQuery map[string
 		return sql
 	}
 	return InjectAndConditions(sql, fmt.Sprintf("%s.is_temporary = false", alias))
+}
+
+func (v *sqlValidator) injectChunkEnabledFilter(sql string, tablesInQuery map[string]string) string {
+	if !v.enableChunkEnabledFilter {
+		return sql
+	}
+	alias, ok := tablesInQuery["chunks"]
+	if !ok {
+		return sql
+	}
+	return InjectAndConditions(sql, fmt.Sprintf("%s.is_enabled = true", alias))
 }
 
 // injectSearchScopeConditions restricts queries to the allowed knowledge bases

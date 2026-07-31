@@ -191,11 +191,11 @@ export const useOrganizationStore = defineStore('organization', () => {
   /**
    * Create a new organization
    */
-  async function create(name: string, description?: string) {
+  async function create(name: string, description?: string, avatar?: string) {
     loading.value = true
     error.value = null
     try {
-      const response = await createOrganization({ name, description })
+      const response = await createOrganization({ name, description, avatar })
       if (response.success && response.data) {
         upsertOrganization(response.data)
         // 创建成功后重置缓存时间戳，确保后续 fetchOrganizations() 不会被 TTL 缓存跳过，

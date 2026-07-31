@@ -223,6 +223,31 @@ func TestClassifyFactoryError_TenantInfoMissingMaps(t *testing.T) {
 	assert.Equal(t, apperrors.ErrVectorStoreBindingInvalid, app.Code)
 }
 
+// A rebuild that runs out of time is reported as an unavailable store rather
+// than falling through as a raw error, which the handler would surface as an
+// internal failure. The store exists and the caller may succeed on a retry.
+func TestClassifyFactoryError_DeadlineExceededMapsTo2201(t *testing.T) {
+	t.Parallel()
+	err := classifyFactoryError(context.Background(),
+		context.DeadlineExceeded, 7, "store-id-y")
+	app, ok := apperrors.IsAppError(err)
+	require.True(t, ok, "expected AppError, got %T", err)
+	assert.Equal(t, apperrors.ErrVectorStoreUnavailable, app.Code)
+	if strings.Contains(app.Message, "store-id-y") {
+		t.Fatalf("AppError message leaked store UUID: %q", app.Message)
+	}
+}
+
+// A caller that walked away is left as-is: there is no response to shape, and
+// turning it into a store verdict would misreport why the work stopped.
+func TestClassifyFactoryError_CancellationPassesThrough(t *testing.T) {
+	t.Parallel()
+	err := classifyFactoryError(context.Background(), context.Canceled, 1, "x")
+	require.ErrorIs(t, err, context.Canceled)
+	_, ok := apperrors.IsAppError(err)
+	assert.False(t, ok, "a cancellation is not a store verdict")
+}
+
 func TestClassifyFactoryError_GenericErrorPassesThrough(t *testing.T) {
 	t.Parallel()
 	raw := stderrors.New("generic infra failure")
@@ -438,6 +463,13 @@ func (r *fakeFanoutRegistry) GetByStoreID(id string) (interfaces.RetrieveEngineS
 		return svc, nil
 	}
 	return nil, stderrors.New("store not registered")
+}
+
+// This fake never rebuilds a missing engine, so a miss stays a miss.
+func (r *fakeFanoutRegistry) GetOrLoadByStoreID(
+	_ context.Context, _ uint64, id string,
+) (interfaces.RetrieveEngineService, error) {
+	return r.GetByStoreID(id)
 }
 
 func buildBoundComposite(t *testing.T, svc interfaces.RetrieveEngineService) *retriever.CompositeRetrieveEngine {

@@ -363,6 +363,10 @@ type SummaryGenerationPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	KnowledgeID     string `json:"knowledge_id"`
 	Language        string `json:"language,omitempty"`
+	// Refresh marks an independently queued refresh after document metadata or
+	// chunk edits. Refresh tasks are not part of the parse attempt's pending
+	// subtask counter and update existing summary chunks in place.
+	Refresh bool `json:"refresh,omitempty"`
 	// Attempt links this task to the parent parse attempt so the worker
 	// can record a postprocess.summary subspan under the right attempt's
 	// postprocess stage. See QuestionGenerationPayload.Attempt notes.
