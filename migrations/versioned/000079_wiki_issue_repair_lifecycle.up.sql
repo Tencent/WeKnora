@@ -18,11 +18,7 @@ ALTER TABLE wiki_page_issues ADD COLUMN IF NOT EXISTS resolution_action VARCHAR(
 ALTER TABLE wiki_page_issues ADD COLUMN IF NOT EXISTS resolution_summary TEXT NOT NULL DEFAULT '';
 ALTER TABLE wiki_page_issues ADD COLUMN IF NOT EXISTS resolved_page_version INT NOT NULL DEFAULT 0;
 
-UPDATE wiki_page_issues SET status = 'open' WHERE status = 'pending';
 ALTER TABLE wiki_page_issues ALTER COLUMN status SET DEFAULT 'open';
-UPDATE wiki_page_issues
-SET fingerprint = md5(knowledge_base_id || ':' || slug || ':' || issue_type || ':' || id)
-WHERE fingerprint = '';
 
 CREATE INDEX IF NOT EXISTS idx_wiki_page_issues_page_id ON wiki_page_issues(page_id);
 CREATE INDEX IF NOT EXISTS idx_wiki_page_issues_source_status ON wiki_page_issues(knowledge_base_id, source, status);

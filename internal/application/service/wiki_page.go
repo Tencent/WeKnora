@@ -1353,7 +1353,7 @@ func (s *wikiPageService) CreateIssue(ctx context.Context, issue *types.WikiPage
 	if issue.ID == "" {
 		issue.ID = uuid.New().String()
 	}
-	if issue.Status == "" || issue.Status == types.WikiIssueStatusLegacyPending {
+	if issue.Status == "" {
 		issue.Status = types.WikiIssueStatusOpen
 	}
 	if issue.Source == "" {
@@ -1408,18 +1408,12 @@ func wikiIssueFingerprint(parts ...string) string {
 
 // ListIssues retrieves issues for a knowledge base
 func (s *wikiPageService) ListIssues(ctx context.Context, kbID string, slug string, status string) ([]*types.WikiPageIssue, error) {
-	if status == types.WikiIssueStatusLegacyPending {
-		status = types.WikiIssueStatusOpen
-	}
 	return s.repo.ListIssues(ctx, kbID, slug, status)
 }
 
 func (s *wikiPageService) ListIssuesPage(
 	ctx context.Context, kbID, slug, status string, page, pageSize int,
 ) (*types.WikiIssueListResponse, error) {
-	if status == types.WikiIssueStatusLegacyPending {
-		status = types.WikiIssueStatusOpen
-	}
 	if page < 1 {
 		page = 1
 	}
@@ -1441,9 +1435,6 @@ func (s *wikiPageService) GetIssue(ctx context.Context, kbID, issueID string) (*
 }
 
 func (s *wikiPageService) CountIssues(ctx context.Context, kbID, status string) (int64, error) {
-	if status == types.WikiIssueStatusLegacyPending {
-		status = types.WikiIssueStatusOpen
-	}
 	return s.repo.CountIssues(ctx, kbID, status)
 }
 
@@ -1590,7 +1581,7 @@ func (s *wikiPageService) UpdateIssueStatus(
 		return err
 	}
 	switch status {
-	case types.WikiIssueStatusLegacyPending, types.WikiIssueStatusOpen:
+	case types.WikiIssueStatusOpen:
 		return s.repo.UpdateIssueLifecycle(ctx, kbID, issueID,
 			[]string{types.WikiIssueStatusFailed, types.WikiIssueStatusIgnored},
 			map[string]interface{}{"status": types.WikiIssueStatusOpen, "active_attempt_id": ""})

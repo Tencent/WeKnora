@@ -19,7 +19,7 @@ func NewWikiReadIssueTool(wikiService interfaces.WikiPageService, kbIDs []string
 	return &wikiReadIssueTool{
 		BaseTool: NewBaseTool(
 			ToolWikiReadIssue,
-			"Read the details of a specific wiki page issue or list pending issues for a wiki page.",
+			"Read the details of a specific wiki page issue or list actionable issues for a wiki page.",
 			json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -34,7 +34,7 @@ func NewWikiReadIssueTool(wikiService interfaces.WikiPageService, kbIDs []string
 	},
     "slug": {
       "type": "string",
-      "description": "Optional: The slug of the wiki page to list pending issues for."
+      "description": "Optional: The slug of the wiki page to list actionable issues for."
     }
   },
   "description": "Provide either issue_id or slug to read issue(s)."
@@ -106,7 +106,7 @@ func (t *wikiReadIssueTool) Execute(ctx context.Context, args json.RawMessage) (
 	}
 
 	if len(issues) == 0 {
-		return &types.ToolResult{Success: true, Output: "No pending issues found for slug: " + slug}, nil
+		return &types.ToolResult{Success: true, Output: "No actionable issues found for slug: " + slug}, nil
 	}
 
 	out, _ := json.MarshalIndent(issues, "", "  ")

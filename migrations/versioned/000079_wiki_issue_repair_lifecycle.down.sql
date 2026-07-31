@@ -8,7 +8,7 @@ DROP INDEX IF EXISTS idx_wiki_issue_fingerprint;
 DROP INDEX IF EXISTS idx_wiki_page_issues_source_status;
 DROP INDEX IF EXISTS idx_wiki_page_issues_page_id;
 
-ALTER TABLE wiki_page_issues ALTER COLUMN status SET DEFAULT 'pending';
+ALTER TABLE wiki_page_issues ALTER COLUMN status SET DEFAULT 'open';
 
 ALTER TABLE wiki_page_issues DROP COLUMN IF EXISTS resolved_page_version;
 ALTER TABLE wiki_page_issues DROP COLUMN IF EXISTS resolution_summary;

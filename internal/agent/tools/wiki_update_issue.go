@@ -29,8 +29,8 @@ func NewWikiUpdateIssueTool(wikiService interfaces.WikiPageService, kbIDs []stri
     },
     "status": {
       "type": "string",
-      "enum": ["resolved", "ignored", "open", "pending"],
-      "description": "The new status for the issue. Prefer 'open' to reopen; 'pending' is accepted as a legacy alias for 'open'."
+      "enum": ["resolved", "ignored", "open"],
+      "description": "The new status for the issue."
     },
     "summary": {
       "type": "string",

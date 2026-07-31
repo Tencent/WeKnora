@@ -750,12 +750,6 @@ const (
 	WikiIssueStatusIgnored   = "ignored"
 	WikiIssueStatusFailed    = "failed"
 
-	// WikiIssueStatusLegacyPending is the status value used before the repair
-	// lifecycle existed. Rows written back then still carry it and the
-	// update-issue agent tool still accepts it as an alias for open, so the
-	// status sets below have to keep including it until a backfill retires it.
-	WikiIssueStatusLegacyPending = "pending"
-
 	WikiIssueSourceLint  = "lint"
 	WikiIssueSourceAgent = "agent"
 	WikiIssueSourceUser  = "user"
@@ -780,7 +774,7 @@ var (
 	// the only states a repair may be claimed from. An issue already under
 	// repair, ignored, or resolved is excluded from both.
 	WikiIssueActionableStatuses = []string{
-		WikiIssueStatusOpen, WikiIssueStatusFailed, WikiIssueStatusLegacyPending,
+		WikiIssueStatusOpen, WikiIssueStatusFailed,
 	}
 
 	// WikiIssueInFlightStatuses are the states held by a live repair attempt.
@@ -799,7 +793,7 @@ var (
 	// may re-open. Ignored is absent on purpose: a user who silenced a finding
 	// should not have it come back on the next scan.
 	WikiIssueReopenableStatuses = []string{
-		WikiIssueStatusResolved, WikiIssueStatusFailed, WikiIssueStatusLegacyPending,
+		WikiIssueStatusResolved, WikiIssueStatusFailed,
 	}
 )
 

@@ -987,13 +987,12 @@ func (h *WikiPageHandler) UpdateIssueStatus(c *gin.Context) {
 	// Only the transitions a client may request. repairing and verifying are
 	// absent because they are owned by the repair lifecycle, not by callers.
 	validStatuses := map[string]bool{
-		types.WikiIssueStatusOpen:          true,
-		types.WikiIssueStatusLegacyPending: true,
-		types.WikiIssueStatusIgnored:       true,
-		types.WikiIssueStatusResolved:      true,
+		types.WikiIssueStatusOpen:    true,
+		types.WikiIssueStatusIgnored: true,
+		types.WikiIssueStatusResolved: true,
 	}
 	if !validStatuses[req.Status] {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid status. Must be open, pending, ignored, or resolved"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid status. Must be open, ignored, or resolved"})
 		return
 	}
 
