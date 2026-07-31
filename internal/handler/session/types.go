@@ -23,12 +23,16 @@ type GenerateTitleRequest struct {
 type MentionedItemRequest struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
-	Type      string `json:"type"`       // "kb", "file", "tag", "mcp", "skill"
+	Type      string `json:"type"`       // "kb", "file", "tag", "folder", "mcp", "skill"
 	KBType    string `json:"kb_type"`    // "document" or "faq" (only for kb type)
-	KBID      string `json:"kb_id"`      // Parent knowledge base for file/tag mentions
+	KBID      string `json:"kb_id"`      // Parent knowledge base for file/tag/folder mentions
 	KBName    string `json:"kb_name"`    // Display name for parent KB
 	ServiceID string `json:"service_id"` // Parent MCP service for MCP tool mentions
 	SkillName string `json:"skill_name"` // Preloaded agent skill name
+	// Recursive applies to folder mentions only. It is a pointer so an absent
+	// field keeps the "ask this folder means the whole subtree" default instead
+	// of silently collapsing to a single level.
+	Recursive *bool `json:"recursive,omitempty"`
 }
 
 // ImageAttachment represents an image in a chat request.
@@ -76,7 +80,7 @@ type SearchKnowledgeRequest struct {
 	KnowledgeBaseIDs []string               `json:"knowledge_base_ids"`                    // IDs of knowledge bases to search (multi-KB support)
 	KnowledgeIDs     []string               `json:"knowledge_ids"`                         // IDs of specific knowledge (files) to search
 	TagIDs           []string               `json:"tag_ids"`                               // Tag IDs for filtering within a single KB
-	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // Optional scoped tag mentions
+	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // Optional scoped tag/folder mentions
 }
 
 // StopSessionRequest represents the stop session request

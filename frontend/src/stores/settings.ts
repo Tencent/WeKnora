@@ -16,6 +16,7 @@ interface Settings {
   selectedFiles: string[]; // 当前选中的文件ID列表
   selectedFileKbMap: Record<string, string>; // 文件ID -> 知识库ID，用于刷新后带 kb_id 拉取共享知识库文件
   selectedTags: Array<{ id: string; name: string; kbId: string; kbName?: string }>;
+  selectedFolders: Array<{ id: string; name: string; kbId: string; kbName?: string }>;
   selectedMCPServices: string[];
   selectedSkills: string[];
   selectedTools?: string[];
@@ -85,6 +86,7 @@ const defaultSettings: Settings = {
   selectedFiles: [], // 默认为空数组
   selectedFileKbMap: {},  // 文件ID -> 知识库ID
   selectedTags: [],
+  selectedFolders: [],
   selectedMCPServices: [],
   selectedSkills: [],
   modelConfig: {
@@ -375,6 +377,25 @@ export const useSettingsStore = defineStore("settings", {
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
 
+    addFolder(folder: { id: string; name: string; kbId: string; kbName?: string }) {
+      if (!this.settings.selectedFolders) this.settings.selectedFolders = [];
+      if (!this.settings.selectedFolders.some(f => f.id === folder.id && f.kbId === folder.kbId)) {
+        this.settings.selectedFolders.push(folder);
+        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      }
+    },
+
+    removeFolder(folderId: string, kbId?: string) {
+      if (!this.settings.selectedFolders) return;
+      this.settings.selectedFolders = this.settings.selectedFolders.filter(f => !(f.id === folderId && (!kbId || f.kbId === kbId)));
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    clearFolders() {
+      this.settings.selectedFolders = [];
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
     addMCPService(serviceId: string) {
       if (!this.settings.selectedMCPServices) this.settings.selectedMCPServices = [];
       if (!this.settings.selectedMCPServices.includes(serviceId)) {
@@ -560,6 +581,11 @@ export const useSettingsStore = defineStore("settings", {
           this.settings.selectedSkills = state.mentioned_items
             .filter(item => item.type === "skill" && item.id)
             .map(item => item.skill_name || item.id);
+        }
+        if (Array.isArray(state.mentioned_items)) {
+          this.settings.selectedFolders = state.mentioned_items
+            .filter((item: any) => item.type === "folder" && item.id && item.kb_id)
+            .map((item: any) => ({ id: item.id, name: item.name || item.id, kbId: item.kb_id, kbName: item.kb_name }));
         }
         if (typeof state.web_search_enabled === "boolean") {
           this.settings.webSearchEnabled = state.web_search_enabled;

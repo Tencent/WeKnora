@@ -106,6 +106,19 @@ type KnowledgeListFilter struct {
 	UpdatedFrom time.Time
 	// UpdatedTo, when non-zero, keeps rows with updated_at <= UpdatedTo.
 	UpdatedTo time.Time
+	// FolderIDs restricts the listing to documents filed in any of these folders
+	// (OR semantics). The empty string selects the knowledge base root, so it is
+	// distinguishable from "no folder filter at all" — which is expressed by a
+	// nil slice. Callers wanting a whole subtree expand it to its descendant ids
+	// before building the filter, keeping this a flat, index-friendly IN clause.
+	FolderIDs []string
+}
+
+// HasFolderFilter reports whether a folder dimension was requested. A nil slice
+// means "all folders"; a non-nil slice — including one holding only the root
+// sentinel "" — means the caller asked for a specific set.
+func (f KnowledgeListFilter) HasFolderFilter() bool {
+	return f.FolderIDs != nil
 }
 
 // Knowledge represents a knowledge entity in the system.
@@ -118,6 +131,12 @@ type Knowledge struct {
 	TenantID uint64 `json:"tenant_id"`
 	// ID of the knowledge base
 	KnowledgeBaseID string `json:"knowledge_base_id"`
+	// FolderID places this document in the knowledge base folder tree, referencing
+	// knowledge_folders.id ("" = knowledge base root). Folders are an organisational
+	// layer only: they never change how a document is parsed, chunked or indexed,
+	// so an existing corpus keeps working unchanged with every row defaulting to
+	// the root.
+	FolderID string `json:"folder_id" gorm:"column:folder_id;type:varchar(36);index;default:''"`
 	// Tags holds the tags associated with this knowledge (populated on query, not persisted directly).
 	Tags []*KnowledgeTag `json:"tags"               gorm:"-"`
 	// Type of the knowledge

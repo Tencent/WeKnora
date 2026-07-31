@@ -38,6 +38,7 @@ type KnowledgeHandler struct {
 	agentShareService interfaces.AgentShareService
 	asynqClient       interfaces.TaskEnqueuer
 	spanRepo          repository.KnowledgeSpanRepository
+	folderService     interfaces.KnowledgeFolderService
 }
 
 // NewKnowledgeHandler creates a new knowledge handler instance
@@ -49,6 +50,7 @@ func NewKnowledgeHandler(
 	agentShareService interfaces.AgentShareService,
 	asynqClient interfaces.TaskEnqueuer,
 	spanRepo repository.KnowledgeSpanRepository,
+	folderService interfaces.KnowledgeFolderService,
 ) *KnowledgeHandler {
 	return &KnowledgeHandler{
 		cfg:               cfg,
@@ -58,6 +60,7 @@ func NewKnowledgeHandler(
 		agentShareService: agentShareService,
 		asynqClient:       asynqClient,
 		spanRepo:          spanRepo,
+		folderService:     folderService,
 	}
 }
 
@@ -925,6 +928,8 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 // @Param        source        query     string  false  "来源/渠道筛选 (web/api/feishu/notion/yuque/wechat/...，或 manual/url 按 type 过滤)"
 // @Param        start_time    query     string  false  "更新时间起点，RFC3339 格式"
 // @Param        end_time      query     string  false  "更新时间终点，RFC3339 格式"
+// @Param        folder_id     query     string  false  "文件夹筛选，逗号分隔；空值或 root 表示未归档文档；不传表示不按文件夹过滤"
+// @Param        folder_recursive query  bool    false  "是否包含子文件夹内容（默认 false，即只看当前层）"
 // @Success      200        {object}  map[string]interface{}  "知识列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -975,6 +980,31 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 			return
 		}
 		filter.UpdatedTo = t
+	}
+
+	// Folder scope. The parameter has to be checked for presence rather than
+	// for a non-empty value: "" is a meaningful selection (documents that were
+	// never filed), while an absent parameter means "do not filter at all" and
+	// keeps the pre-folder behaviour for existing clients.
+	//
+	// Browsing defaults to the current level only, like a file explorer; a
+	// client that wants a subtree rollup opts in with folder_recursive=true.
+	if raw, ok := c.GetQuery("folder_id"); ok {
+		recursive := c.Query("folder_recursive") == "true"
+		resolved, err := h.folderService.ResolveFolderIDs(
+			ctx, effectiveTenantID, kbID, parseFolderIDQuery(raw), recursive,
+		)
+		if err != nil {
+			writeKnowledgeFolderError(c, err)
+			return
+		}
+		// A non-nil empty slice would silence the listing entirely; that only
+		// happens if every requested folder was unknown, in which case an empty
+		// page is the honest answer.
+		if resolved == nil {
+			resolved = []string{}
+		}
+		filter.FolderIDs = resolved
 	}
 
 	logger.Infof(

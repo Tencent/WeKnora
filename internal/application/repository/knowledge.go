@@ -104,6 +104,20 @@ func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) 
 			filter.TagIDs,
 		)
 	}
+	// A nil FolderIDs slice means "every folder"; a non-nil one — even holding
+	// only the root sentinel "" — is an explicit request for that set. Callers
+	// asking for a whole subtree expand it to descendant ids beforehand, so this
+	// stays a flat IN clause the folder_id index can serve.
+	if filter.HasFolderFilter() {
+		if len(filter.FolderIDs) == 0 {
+			// An explicit but empty set matches nothing. Without this guard GORM
+			// would drop the condition and silently widen the query to the whole
+			// knowledge base.
+			query = query.Where("1 = 0")
+		} else {
+			query = query.Where("knowledges.folder_id IN ?", filter.FolderIDs)
+		}
+	}
 	if filter.Keyword != "" {
 		// Case-insensitive (LOWER … LIKE LOWER) so keyword search matches
 		// regardless of the stored casing — consistent with the sibling

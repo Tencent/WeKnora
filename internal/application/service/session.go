@@ -122,6 +122,7 @@ type sessionService struct {
 	webSearchStateRepo    interfaces.WebSearchStateService       // Service for web search state
 	webSearchProviderRepo interfaces.WebSearchProviderRepository // Repository for web search provider entities
 	kbShareService        interfaces.KBShareService              // Service for KB sharing operations
+	knowledgeFolderService interfaces.KnowledgeFolderService     // Service for folder-scoped retrieval
 	suggestionRepo        interfaces.MessageSuggestionRepository
 }
 
@@ -139,6 +140,7 @@ func NewSessionService(cfg *config.Config,
 	webSearchStateRepo interfaces.WebSearchStateService,
 	webSearchProviderRepo interfaces.WebSearchProviderRepository,
 	kbShareService interfaces.KBShareService,
+	knowledgeFolderService interfaces.KnowledgeFolderService,
 	suggestionRepo interfaces.MessageSuggestionRepository,
 ) interfaces.SessionService {
 	return &sessionService{
@@ -155,6 +157,7 @@ func NewSessionService(cfg *config.Config,
 		webSearchStateRepo:    webSearchStateRepo,
 		webSearchProviderRepo: webSearchProviderRepo,
 		kbShareService:        kbShareService,
+		knowledgeFolderService: knowledgeFolderService,
 		suggestionRepo:        suggestionRepo,
 	}
 }

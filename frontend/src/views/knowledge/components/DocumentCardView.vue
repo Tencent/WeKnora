@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { formatFileSize } from '@/utils/files';
 import { useTagChipsOverflow } from '@/composables/useTagChipsOverflow';
 import DocumentActionMenu from './DocumentActionMenu.vue';
+import { setDocumentDragPayload } from '../folderDrag';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
 
 interface Tag {
@@ -56,7 +57,7 @@ const emit = defineEmits<{
   (e: 'open', item: KnowledgeCard): void;
   (e: 'toggle-checkbox', id: string, checked: boolean, ctx?: { e?: Event }): void;
   (e: 'menu-visible-change', visible: boolean, item: KnowledgeCard): void;
-  (e: 'action', action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'batch-manage' | 'delete', item: KnowledgeCard): void;
+  (e: 'action', action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'move-to-folder' | 'batch-manage' | 'delete', item: KnowledgeCard): void;
   (e: 'tag-edit', item: KnowledgeCard): void;
   // Move sub-flow emits
   (e: 'move-select-target', kb: any): void;
@@ -249,8 +250,15 @@ const onCardMouseLeave = () => {
   cardPopoverElement = null;
 };
 
+// Dragging a card onto the folder tree files it (and the rest of the
+// selection, if this card is part of one) without opening a dialog.
+const onDragStart = (event: DragEvent, item: KnowledgeCard) => {
+  if (!props.canMutateKnowledge) return;
+  setDocumentDragPayload(event, item.id, props.selectedIds, item.file_name);
+};
+
 // --- Action handlers ---
-const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'batch-manage' | 'delete', item: KnowledgeCard) => {
+const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'move-to-folder' | 'batch-manage' | 'delete', item: KnowledgeCard) => {
   // Don't close menu for move — it triggers the sub-flow
   if (action !== 'move') {
     if (item.isMore !== undefined) item.isMore = false;
@@ -268,7 +276,9 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
       :data-select-id="item.id"
       v-for="(item, index) in items"
       :key="item.id"
+      :draggable="canMutateKnowledge"
       @click="onCardClick(item)"
+      @dragstart="onDragStart($event, item)"
       @mouseenter="onCardMouseEnter($event, item)"
       @mouseleave="onCardMouseLeave"
     >
@@ -313,6 +323,7 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
                   @reparse="handleAction('reparse', item)"
                   @cancel-parse="handleAction('cancel-parse', item)"
                   @move="handleAction('move', item)"
+                  @move-to-folder="handleAction('move-to-folder', item)"
                   @batch-manage="handleAction('batch-manage', item)"
                   @delete="handleAction('delete', item)"
                 />

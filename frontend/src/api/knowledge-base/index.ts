@@ -264,6 +264,15 @@ export function listKnowledgeFiles(
     source?: string;
     start_time?: string;
     end_time?: string;
+    /**
+     * Folder scope. `undefined` means "no folder filter" and preserves the
+     * pre-folder behaviour; `''` is a real value meaning the knowledge base
+     * root (documents that were never filed), so it must be sent when present
+     * rather than skipped as falsy like the filters above.
+     */
+    folder_id?: string;
+    /** Include documents in descendant folders. Defaults to false server-side. */
+    folder_recursive?: boolean;
   },
 ) {
   const query = new URLSearchParams();
@@ -276,6 +285,10 @@ export function listKnowledgeFiles(
   if (params.source) query.append('source', params.source);
   if (params.start_time) query.append('start_time', params.start_time);
   if (params.end_time) query.append('end_time', params.end_time);
+  if (params.folder_id !== undefined) {
+    query.append('folder_id', params.folder_id);
+    if (params.folder_recursive) query.append('folder_recursive', 'true');
+  }
   const qs = query.toString();
   return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${qs}`);
 }
@@ -386,6 +399,105 @@ export function upsertGeneratedQuestion(chunkId: string, question: string, quest
 
 export function regenerateGeneratedQuestions(chunkId: string) {
   return post(`/api/v1/chunks/by-id/${chunkId}/questions/regenerate`, {});
+}
+
+/**
+ * A folder inside a document knowledge base.
+ *
+ * `path` is a materialized chain of folder **ids** (`/id-a/id-b/`), not names —
+ * the display chain is `name_path`. Trees are therefore keyed by id, which
+ * keeps rendering correct when two folders share a name.
+ */
+export interface KnowledgeFolder {
+  id: string;
+  tenant_id?: number;
+  knowledge_base_id: string;
+  parent_id: string;
+  name: string;
+  path: string;
+  depth: number;
+  sort_order: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface KnowledgeFolderNode extends KnowledgeFolder {
+  /** Documents filed directly in this folder. */
+  document_count: number;
+  /** Documents in this folder and everything below it. */
+  total_document_count: number;
+  has_children: boolean;
+  name_path?: string[];
+}
+
+export interface KnowledgeFolderListResponse {
+  parent_id: string;
+  folders: KnowledgeFolderNode[];
+  /** Documents sitting at the knowledge base root, which has no folder row. */
+  root_document_count: number;
+}
+
+/**
+ * Lists folders. The default (recursive) returns the whole tree in one
+ * response: the folder set is navigation-sized, so a single request beats one
+ * round-trip per expanded level.
+ */
+export function listKnowledgeFolders(
+  kbId: string,
+  params?: { parent_id?: string; recursive?: boolean },
+) {
+  const query = new URLSearchParams();
+  if (params?.parent_id) query.append('parent_id', params.parent_id);
+  if (params?.recursive === false) query.append('recursive', 'false');
+  const qs = query.toString();
+  return get(`/api/v1/knowledge-bases/${kbId}/folders${qs ? `?${qs}` : ''}`);
+}
+
+export function createKnowledgeFolder(
+  kbId: string,
+  data: { name: string; parent_id?: string },
+) {
+  return post(`/api/v1/knowledge-bases/${kbId}/folders`, data);
+}
+
+/**
+ * Renames and/or moves a folder. The backend only reparents when
+ * `move_parent` is true, so a rename cannot relocate a folder by omitting
+ * `parent_id`.
+ */
+export function updateKnowledgeFolder(
+  kbId: string,
+  folderId: string,
+  data: { name?: string; parent_id?: string; move_parent?: boolean },
+) {
+  return put(`/api/v1/knowledge-bases/${kbId}/folders/${folderId}`, data);
+}
+
+/**
+ * Deletes a folder. The default strategy refuses when the folder still holds
+ * documents or child folders; `reparent` deletes the subtree and lifts its
+ * documents to the parent. Documents are never deleted either way.
+ */
+export function deleteKnowledgeFolder(
+  kbId: string,
+  folderId: string,
+  params?: { strategy?: 'fail' | 'reparent' },
+) {
+  const strategy = params?.strategy && params.strategy !== 'fail' ? `?strategy=${params.strategy}` : '';
+  return del(`/api/v1/knowledge-bases/${kbId}/folders/${folderId}${strategy}`);
+}
+
+/** Files documents into a folder (`''` moves them back to the root). */
+export function moveKnowledgeToFolder(
+  kbId: string,
+  knowledgeIds: string[],
+  folderId: string,
+) {
+  return put(`/api/v1/knowledge/move-to-folder`, {
+    kb_id: kbId,
+    knowledge_ids: knowledgeIds,
+    folder_id: folderId,
+  });
 }
 
 export function listKnowledgeTags(

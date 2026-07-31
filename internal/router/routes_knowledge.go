@@ -79,6 +79,18 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		kb.With(apiKeyFullAccess()).DELETE("", g.Admin(), g.KBAccessWrite("id"), handler.ClearKnowledgeBaseContents)
 	}
 
+	// 文件夹树路由组（URL :id is the KB id）。Folders only reorganise documents —
+	// they never trigger parsing — so reads follow the retrieve capability and
+	// writes the ingest capability, mirroring the document routes above.
+	folders := g.apiKeyGroup(r.Group("/knowledge-bases/:id/folders"), apiKeyIngest(apiKeyFullAccess()))
+	foldersRead := folders.With(apiKeyRetrieve(apiKeyFullAccess()))
+	{
+		foldersRead.GET("", g.Viewer(), g.KBAccessRead("id"), handler.ListKnowledgeFolders)
+		folders.POST("", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateKnowledgeFolder)
+		folders.PUT("/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateKnowledgeFolder)
+		folders.DELETE("/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.DeleteKnowledgeFolder)
+	}
+
 	// 知识路由组（URL :id is a knowledge id; the guard walks it to the parent KB）
 	kgrp := r.Group("/knowledge")
 	k := g.apiKeyGroup(kgrp, apiKeyIngest(apiKeyFullAccess()))
@@ -127,6 +139,10 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.POST("/batch-reparse", g.Contributor(), handler.BatchReparseKnowledge)
 		k.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
 		k.POST("/move", g.Contributor(), handler.MoveKnowledge)
+		// Filing documents into a folder is an in-KB reorganisation, not a
+		// cross-KB move: the handler resolves the KB from the body and applies
+		// the same ownership check the sibling batch writes use.
+		k.PUT("/move-to-folder", g.Contributor(), handler.MoveKnowledgeToFolder)
 	}
 }
 

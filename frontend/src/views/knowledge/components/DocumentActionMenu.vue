@@ -21,7 +21,10 @@ const emit = defineEmits<{
   (e: 'view-trace'): void;
   (e: 'reparse'): void;
   (e: 'cancel-parse'): void;
+  /** Move to another knowledge base. */
   (e: 'move'): void;
+  /** File into a folder inside the current knowledge base. */
+  (e: 'move-to-folder'): void;
   (e: 'batch-manage'): void;
   (e: 'delete'): void;
 }>();
@@ -80,7 +83,13 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
     </div>
   </t-popconfirm>
 
-  <!-- 移动到... -->
+  <!-- 移动到文件夹（当前知识库内） -->
+  <div v-if="canMutateKnowledge" class="doc-action-menu-item" @click.stop="emit('move-to-folder')">
+    <t-icon class="icon" name="folder" />
+    <span>{{ $t('knowledgeBase.moveToFolder') }}</span>
+  </div>
+
+  <!-- 移动到...（其他知识库） -->
   <div v-if="canMutateKnowledge" class="doc-action-menu-item" @click.stop="emit('move')">
     <t-icon class="icon" name="swap" />
     <span>{{ $t('knowledgeBase.moveDocument') }}</span>

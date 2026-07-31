@@ -7,7 +7,7 @@ import { MessagePlugin } from "tdesign-vue-next";
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
 import { useMenuStore } from '@/stores/menu';
-import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags } from '@/api/knowledge-base';
+import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags, listKnowledgeFolders } from '@/api/knowledge-base';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { stopSession } from '@/api/chat';
 import { useOrganizationStore } from '@/stores/organization';
@@ -594,6 +594,18 @@ const selectedMCPItems = computed<MentionItem[]>(() => {
     });
 });
 
+const selectedFolderItems = computed<MentionItem[]>(() => {
+  return (settingsStore.settings.selectedFolders || []).map((f: any) => ({
+    id: f.id,
+    name: f.name,
+    type: 'folder' as const,
+    kbId: f.kbId,
+    kbName: f.kbName,
+    description: f.kbName || '',
+    isAgentConfigured: false,
+  }));
+});
+
 // 合并所有选中项（用于输入框内显示）
 // 现在智能体配置的知识库也在 store 中，统一从 selectedKbs 获取
 const allSelectedItems = computed(() => {
@@ -644,7 +656,7 @@ const allSelectedItems = computed(() => {
     isAgentConfigured: false,
   }));
 
-  return [...agentConfiguredKbs, ...userSelectedKbs, ...files, ...tags, ...selectedMCPItems.value, ...skillMentionItems.value];
+  return [...agentConfiguredKbs, ...userSelectedKbs, ...files, ...tags, ...selectedFolderItems.value, ...selectedMCPItems.value, ...skillMentionItems.value];
 });
 
 // 移除选中项（智能体配置的项也可以移除）
@@ -655,6 +667,8 @@ const removeSelectedItem = (item: MentionItem) => {
     settingsStore.removeFile(item.id);
   } else if (item.type === 'tag') {
     settingsStore.removeTag(item.id, item.kbId);
+  } else if (item.type === 'folder') {
+    settingsStore.removeFolder(item.id, item.kbId);
   } else if (item.type === 'mcp') {
     settingsStore.removeMCPService(item.id);
   } else if (item.type === 'skill') {
@@ -666,6 +680,7 @@ const getMentionIcon = (item: MentionItem) => {
   switch (item.type) {
     case 'file': return 'file';
     case 'tag': return 'tag';
+    case 'folder': return 'folder-open';
     case 'mcp': return 'tools';
     case 'skill': return 'bookmark';
     default: return 'folder';
@@ -1179,6 +1194,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
   // 根据智能体的 kb_selection_mode 过滤知识库；选中共享智能体时使用该空间下的知识库，否则使用本空间 + 共享给自己的
   let kbItems: any[] = [];
   let tagItems: MentionItem[] = [];
+  let folderItems: MentionItem[] = [];
   let mcpItems: MentionItem[] = [];
   let skillItems: MentionItem[] = [];
   if (!append) {
@@ -1313,6 +1329,43 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       tagItems = [];
     }
 
+    // Folders are KB-scoped like tags. We only fetch when the user has typed a
+    // query (same trigger as tags): a recursive folder listing can be large, so
+    // loading the whole tree for every KB on each menu open is wasteful. With a
+    // query we search the flattened tree; without one the folder group simply
+    // prompts the user to type a name.
+    const folderKeyword = q.trim().toLowerCase();
+    if (folderKeyword) {
+      try {
+        const folderResults = await Promise.all(availableKbs.map(async (kb: any) => {
+          const res: any = await listKnowledgeFolders(kb.id, { recursive: true });
+          const payload = res?.data ?? res;
+          const list = Array.isArray(payload?.folders)
+            ? payload.folders
+            : (Array.isArray(payload) ? payload : []);
+          return (list as any[])
+            .filter((f: any) => (f.name || '').toLowerCase().includes(folderKeyword))
+            .slice(0, 50)
+            .map((f: any) => ({
+              id: f.id,
+              name: f.name,
+              type: 'folder' as const,
+              kbId: kb.id,
+              kbName: kb.name,
+              description: (f.name_path || []).join(' / '),
+            }));
+        }));
+        folderItems = folderResults.flat();
+        mentionGroupCounts.value.folder = folderItems.length;
+      } catch (e) {
+        console.error('[Mention] listKnowledgeFolders error:', e);
+        folderItems = [];
+      }
+    } else {
+      folderItems = [];
+      mentionGroupCounts.value.folder = 0;
+    }
+
     const mcpMode = agentMCPSelectionMode.value;
     if (mcpMode !== 'none') {
       mcpItems = mcpServices.value
@@ -1439,9 +1492,9 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     // Append file items to existing list
     mentionItems.value = [...mentionItems.value, ...fileItems];
   } else {
-    mentionItems.value = [...kbItems, ...tagItems, ...mcpItems, ...skillItems, ...fileItems];
+    mentionItems.value = [...kbItems, ...tagItems, ...folderItems, ...mcpItems, ...skillItems, ...fileItems];
   }
-  console.log('[Mention] Total items:', mentionItems.value.length, { kbItems: kbItems.length, fileItems: fileItems.length, tagItems: tagItems.length, mcpItems: mcpItems.length, skillItems: skillItems.length });
+  console.log('[Mention] Total items:', mentionItems.value.length, { kbItems: kbItems.length, fileItems: fileItems.length, tagItems: tagItems.length, folderItems: folderItems.length, mcpItems: mcpItems.length, skillItems: skillItems.length });
 
   // Only reset index if query changed or explicitly requested
   if (resetIndex || q !== lastMentionQuery) {
@@ -1659,6 +1712,10 @@ const onMentionSelect = (item: any) => {
   } else if (item.type === 'tag') {
     if (item.kbId) {
       settingsStore.addTag({ id: item.id, name: item.name, kbId: item.kbId, kbName: item.kbName });
+    }
+  } else if (item.type === 'folder') {
+    if (item.kbId) {
+      settingsStore.addFolder({ id: item.id, name: item.name, kbId: item.kbId, kbName: item.kbName });
     }
   } else if (item.type === 'mcp') {
     settingsStore.addMCPService(item.id);
@@ -2921,6 +2978,14 @@ const getImgSrc = (url: string) => {
 
 .mention-chip--tag .mention-chip__icon-wrap {
   color: #9f7aea;
+}
+
+.mention-chip--folder {
+  color: var(--td-text-color-primary);
+}
+
+.mention-chip--folder .mention-chip__icon-wrap {
+  color: #d97706;
 }
 
 .mention-chip--mcp .mention-chip__icon-wrap {

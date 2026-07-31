@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { formatFileSize, getFileIcon } from '@/utils/files';
 import { useTagChipsOverflow } from '@/composables/useTagChipsOverflow';
 import DocumentActionMenu from './DocumentActionMenu.vue';
+import { setDocumentDragPayload } from '../folderDrag';
 
 interface Tag {
   id: string;
@@ -48,7 +49,7 @@ const emit = defineEmits<{
   (e: 'open', item: KnowledgeItem): void;
   (e: 'toggle-row', id: string, checked: boolean, shiftKey: boolean): void;
   (e: 'toggle-all', checked: boolean): void;
-  (e: 'action', action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem): void;
+  (e: 'action', action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-to-folder' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem): void;
   (e: 'probe-trace', item: KnowledgeItem): void;
   (e: 'tag-edit', item: KnowledgeItem): void;
   // Move sub-flow emits
@@ -204,7 +205,14 @@ onBeforeUnmount(() => {
   stickyObserver = null;
 });
 
-const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem) => {
+// Dragging a row onto the folder tree files it (and the rest of the
+// selection, if this row is part of one) without opening a dialog.
+const onDragStart = (event: DragEvent, item: KnowledgeItem) => {
+  if (!props.canMutateKnowledge) return;
+  setDocumentDragPayload(event, item.id, props.selectedIds, item.file_name);
+};
+
+const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-to-folder' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem) => {
   // Don't close popup for move — it triggers the move sub-flow
   if (action !== 'move') {
     moreOpen.value = null;
@@ -235,7 +243,8 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
     <div class="doc-list-body">
       <div v-for="item in items" :key="item.id" class="doc-list-row"
         :class="{ selected: selectedIds.has(item.id), 'menu-open': moreOpen === item.id }" :data-select-id="item.id"
-        role="row" @click="emit('open', item)">
+        role="row" :draggable="canMutateKnowledge" @click="emit('open', item)"
+        @dragstart="onDragStart($event, item)">
         <div class="cell cell-check" @click.stop>
           <t-checkbox class="doc-list-check" size="small" :checked="selectedIds.has(item.id)" :title="item.file_name"
             @change="(c: boolean, ctx?: { e?: Event }) => onRowCheckboxChange(item, c, ctx)" />
@@ -324,6 +333,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
                   @reparse="handleAction('reparse', item)"
                   @cancel-parse="handleAction('cancel-parse', item)"
                   @move="handleAction('move', item)"
+                  @move-to-folder="handleAction('move-to-folder', item)"
                   @batch-manage="handleAction('batch-manage', item)"
                   @delete="handleAction('delete', item)"
                 />

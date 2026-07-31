@@ -160,6 +160,7 @@ func TestBuildSearchTargets_DocumentTagScopeResolvesKnowledgeIDs(t *testing.T) {
 		[]string{"doc-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -181,6 +182,7 @@ func TestBuildSearchTargets_ExplicitKnowledgeScopeDisablesRecallThresholds(t *te
 		nil,
 		[]string{"doc-1"},
 		nil,
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -199,6 +201,7 @@ func TestBuildSearchTargets_DocumentTagScopeIntersectsExplicitKnowledgeIDs(t *te
 		[]string{"doc-kb"},
 		[]string{"doc-2", "doc-3"},
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -218,6 +221,7 @@ func TestBuildSearchTargets_FAQTagScopeKeepsIndexTagFilter(t *testing.T) {
 		[]string{"faq-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "faq-kb", TagIDs: []string{"tag-a", "tag-b"}}},
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -238,6 +242,7 @@ func TestBuildSearchTargets_FullKBWithTagScopeSkipsFullKBTarget(t *testing.T) {
 		[]string{"doc-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -267,6 +272,7 @@ func TestBuildSearchTargets_DocumentTagScopeWithMissingKBMetadata(t *testing.T) 
 		[]string{"doc-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -276,8 +282,8 @@ func TestBuildSearchTargets_DocumentTagScopeWithMissingKBMetadata(t *testing.T) 
 	assert.True(t, targets[0].DisableRecallThresholds)
 }
 
-func TestMergeResolvedTagKnowledgeIDs_OnlyIncludesTagScopedTargets(t *testing.T) {
-	got := mergeResolvedTagKnowledgeIDs(
+func TestMergeResolvedScopeKnowledgeIDs_OnlyIncludesScopedTargets(t *testing.T) {
+	got := mergeResolvedScopeKnowledgeIDs(
 		[]string{"existing-doc"},
 		types.SearchTargets{
 			{Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "tag-kb", KnowledgeIDs: []string{"tag-doc-1", "tag-doc-2"}},
@@ -288,6 +294,7 @@ func TestMergeResolvedTagKnowledgeIDs_OnlyIncludesTagScopedTargets(t *testing.T)
 			{KnowledgeBaseID: "tag-kb", TagIDs: []string{"tag-a"}},
 			{KnowledgeBaseID: "faq-kb", TagIDs: []string{"faq-tag"}},
 		},
+		nil,
 	)
 
 	assert.ElementsMatch(t, []string{"existing-doc", "tag-doc-1", "tag-doc-2"}, got)
@@ -323,6 +330,7 @@ func TestBuildSearchTargets_DocumentTagScopeResolutionError(t *testing.T) {
 		[]string{"doc-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		nil,
 	)
 
 	require.Error(t, err)

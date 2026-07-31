@@ -40,6 +40,11 @@ type SearchTarget struct {
 	// document KBs this is kept for tracing after the relation-table lookup has
 	// been resolved to KnowledgeIDs; TagIDs remains the physical index filter.
 	ScopeTagIDs []string `json:"scope_tag_ids,omitempty"`
+	// ScopeFolderIDs records the logical folder scope selected by the user.
+	// Folders are an organisational layer only: they are resolved to concrete
+	// KnowledgeIDs before retrieval, so this field exists purely so the chosen
+	// scope stays visible in logs and references.
+	ScopeFolderIDs []string `json:"scope_folder_ids,omitempty"`
 	// DisableRecallThresholds keeps recall broad inside an already constrained,
 	// user-selected scope. The reranker still orders candidates, but vector and
 	// keyword thresholds cannot erase the whole explicit scope before reranking.
@@ -71,7 +76,7 @@ func (st SearchTargets) HasRecallThresholdOverride() bool {
 // HasKnowledgeRetrievalScope reports whether a request has any effective
 // knowledge retrieval scope. SearchTargets are the unified runtime form and
 // must be considered alongside the legacy/raw KB and knowledge ID fields so
-// tag-only mentions are not mistaken for pure chat.
+// tag-only or folder-only mentions are not mistaken for pure chat.
 func HasKnowledgeRetrievalScope(
 	searchTargets SearchTargets,
 	knowledgeBaseIDs []string,
@@ -92,7 +97,8 @@ func HasKnowledgeRetrievalScope(
 			continue
 		}
 		if target.Type == SearchTargetTypeKnowledgeBase || len(target.KnowledgeIDs) > 0 ||
-			len(target.TagIDs) > 0 || len(target.ScopeTagIDs) > 0 {
+			len(target.TagIDs) > 0 || len(target.ScopeTagIDs) > 0 ||
+			len(target.ScopeFolderIDs) > 0 {
 			return true
 		}
 	}

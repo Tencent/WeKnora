@@ -45,6 +45,8 @@ import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
 import BatchTagDialog from './components/BatchTagDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
+import KbFolderTree from './components/KbFolderTree.vue';
+import MoveToFolderDialog from './components/MoveToFolderDialog.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
 import WikiBrowser from './wiki/WikiBrowser.vue';
@@ -526,6 +528,17 @@ const isTagFilterPlaceholder = computed(
 );
 
 const selectedTagIds = ref<string[]>([]);
+// Folder scope for the document list.
+//   null -> no folder filter (every document, filed or not)
+//   ''   -> the knowledge base root, i.e. documents never filed
+//   id   -> that folder
+// The null/'' distinction matters: '' is a real server-side value, so it
+// cannot be collapsed into "unset" the way the other filters are.
+const selectedFolderId = ref<string | null>(null);
+const folderRecursive = ref(false);
+const folderTreeRef = ref<InstanceType<typeof KbFolderTree> | null>(null);
+const moveToFolderVisible = ref(false);
+const moveToFolderIds = ref<string[]>([]);
 const tagList = ref<any[]>([]);
 const tagLoading = ref(false);
 const tagSearchQuery = ref('');
@@ -595,6 +608,9 @@ const filterParams = computed(() => {
   const [start, end] = updatedTimeRange.value || [];
   return {
     tag_ids: selectedTagIds.value.length > 0 ? selectedTagIds.value.join(',') : undefined,
+    folder_id: selectedFolderId.value ?? undefined,
+    // Recursion is meaningless for the root bucket and for "all documents".
+    folder_recursive: selectedFolderId.value ? folderRecursive.value : undefined,
     keyword: docSearchKeyword.value ? docSearchKeyword.value.trim() : undefined,
     file_type: selectedFileType.value || undefined,
     parse_status: selectedParseStatus.value || undefined,
@@ -976,6 +992,14 @@ watch(docSearchKeyword, (newVal, oldVal) => {
 // 监听文件类型筛选变化
 watch(selectedFileType, (newVal, oldVal) => {
   if (newVal === oldVal) return;
+  if (kbId.value) {
+    resetPage();
+    loadKnowledgeFiles(kbId.value);
+  }
+});
+
+// 监听文件夹筛选变化（选中文件夹 / 是否含子文件夹）
+watch([selectedFolderId, folderRecursive], () => {
   if (kbId.value) {
     resetPage();
     loadKnowledgeFiles(kbId.value);
@@ -1916,6 +1940,30 @@ const confirmBatchDelete = async () => {
   }
 };
 
+// Opens the folder picker for one document from its row/card menu.
+const handleMoveToFolder = (item: KnowledgeCard) => {
+  if (!item?.id) return;
+  moveToFolderIds.value = [item.id];
+  moveToFolderVisible.value = true;
+};
+
+const handleBatchMoveToFolder = () => {
+  if (batchDeleting.value || batchReparsing.value || batchTagging.value || selectedIds.value.size === 0) return;
+  moveToFolderIds.value = Array.from(selectedIds.value);
+  moveToFolderVisible.value = true;
+};
+
+// Both the dialog and a drag-and-drop onto the tree land here. The counts on
+// every folder row shift after a move, so the tree is reloaded alongside the
+// list rather than patched locally.
+const onDocumentsFiled = () => {
+  clearSelection();
+  batchMode.value = false;
+  resetPage();
+  loadKnowledgeFiles(kbId.value);
+  folderTreeRef.value?.reload();
+};
+
 const handleBatchTag = () => {
   if (batchDeleting.value || batchReparsing.value || batchTagging.value || selectedIds.value.size === 0) return;
   batchTagDialogVisible.value = true;
@@ -1958,7 +2006,7 @@ const confirmCancelParseKnowledge = async (item: KnowledgeCard) => {
 
 // Bridge card-view actions back to existing per-card handlers.
 const handleCardAction = (
-  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-to-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
@@ -1969,6 +2017,7 @@ const handleCardAction = (
   }
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
   if (action === 'move') return handleMoveKnowledge(item);
+  if (action === 'move-to-folder') return handleMoveToFolder(item);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);
   if (action === 'batch-manage') return handleEnterBatchFromCard(item);
@@ -1976,7 +2025,7 @@ const handleCardAction = (
 
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
-  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-to-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
@@ -1984,6 +2033,7 @@ const handleListAction = (
   if (action === 'reparse') return confirmRebuildKnowledge(idx, item);
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
   if (action === 'move') return handleMoveKnowledge(item);
+  if (action === 'move-to-folder') return handleMoveToFolder(item);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);
   if (action === 'batch-manage') return handleEnterBatchFromCard(item);
@@ -1991,7 +2041,8 @@ const handleListAction = (
 
 // Clear selection on filter/tag/kb change to avoid acting on hidden items.
 watch(
-  [selectedTagIds, docSearchKeyword, selectedFileType, selectedParseStatus, selectedSource, updatedTimeRange, kbId],
+  [selectedTagIds, docSearchKeyword, selectedFileType, selectedParseStatus, selectedSource, updatedTimeRange,
+    selectedFolderId, folderRecursive, kbId],
   () => {
     clearSelection();
   },
@@ -2149,6 +2200,9 @@ async function createNewSession(value: string): Promise<void> {
 
       <template v-if="activeKbTab === 'documents' || !isWiki">
         <div class="knowledge-main">
+          <KbFolderTree v-if="kbId && !isFAQ" ref="folderTreeRef" v-model="selectedFolderId"
+            v-model:recursive="folderRecursive" :kb-id="kbId" :can-manage="canMutateKnowledge"
+            @documents-moved="onDocumentsFiled" />
           <div class="tag-content">
             <div class="doc-card-area">
               <div class="doc-filter-bar">
@@ -2392,7 +2446,7 @@ async function createNewSession(value: string): Promise<void> {
                 <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
                   :reparse-loading="batchReparsing" :tag-loading="batchTagging" :visible="batchMode || selectedIds.size > 0"
                   @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse"
-                  @batch-tag="handleBatchTag" />
+                  @batch-tag="handleBatchTag" @batch-move-to-folder="handleBatchMoveToFolder" />
               </div>
             </div>
           </div>
@@ -2433,6 +2487,10 @@ async function createNewSession(value: string): Promise<void> {
     :confirm-loading="batchTagging"
     @update:visible="batchTagDialogVisible = $event" @confirm="onBatchTagConfirm"
     @tag-created="loadTags(kbId, true)" @open-manage="openTagManageFromBatchDialog" />
+
+  <!-- 移动到文件夹弹窗（批量 / 单个文档共用） -->
+  <MoveToFolderDialog v-model:visible="moveToFolderVisible" :kb-id="kbId" :knowledge-ids="moveToFolderIds"
+    @moved="onDocumentsFiled" />
 
   <KbTagManageDrawer
     v-if="!isFAQ"

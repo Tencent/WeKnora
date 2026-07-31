@@ -98,6 +98,68 @@ func tagScopesFromMentionedItems(items []MentionedItemRequest) []types.TagScope 
 	return scopes
 }
 
+// folderScopesFromMentionedItems groups @folder mentions into one retrieval
+// scope per knowledge base. A folder mention without a parent KB is dropped:
+// folder ids are only unique inside a knowledge base, so an unanchored folder
+// cannot be resolved safely.
+//
+// Recursive defaults to true — "ask this folder" nearly always means the whole
+// subtree — and a single non-recursive mention cannot narrow a sibling mention
+// that asked for the subtree.
+func folderScopesFromMentionedItems(items []MentionedItemRequest) []types.KnowledgeFolderScope {
+	type folderBucket struct {
+		folderIDs []string
+		recursive bool
+	}
+	byKB := make(map[string]*folderBucket)
+	order := make([]string, 0)
+	seen := make(map[string]map[string]bool)
+	for _, item := range items {
+		if item.Type != "folder" || item.ID == "" || item.KBID == "" {
+			continue
+		}
+		bucket := byKB[item.KBID]
+		if bucket == nil {
+			bucket = &folderBucket{}
+			byKB[item.KBID] = bucket
+			order = append(order, item.KBID)
+			seen[item.KBID] = make(map[string]bool)
+		}
+		recursive := true
+		if item.Recursive != nil {
+			recursive = *item.Recursive
+		}
+		bucket.recursive = bucket.recursive || recursive
+		if seen[item.KBID][item.ID] {
+			continue
+		}
+		seen[item.KBID][item.ID] = true
+		bucket.folderIDs = append(bucket.folderIDs, item.ID)
+	}
+	scopes := make([]types.KnowledgeFolderScope, 0, len(order))
+	for _, kbID := range order {
+		bucket := byKB[kbID]
+		scopes = append(scopes, types.KnowledgeFolderScope{
+			KnowledgeBaseID: kbID,
+			FolderIDs:       bucket.folderIDs,
+			Recursive:       bucket.recursive,
+		})
+	}
+	return scopes
+}
+
+// kbIDsFromFolderScopes lists the knowledge bases a folder scope points at, so
+// a folder-only mention still binds the request to a knowledge base.
+func kbIDsFromFolderScopes(scopes []types.KnowledgeFolderScope) []string {
+	ids := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.KnowledgeBaseID != "" && len(scope.FolderIDs) > 0 {
+			ids = append(ids, scope.KnowledgeBaseID)
+		}
+	}
+	return ids
+}
+
 // orphanTagIDsForScope returns tag IDs from the request that are not already
 // covered by scoped mentions.
 func orphanTagIDsForScope(tagIDs []string, scopes []types.TagScope) []string {

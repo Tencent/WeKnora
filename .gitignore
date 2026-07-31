@@ -57,3 +57,7 @@ fix-docker.sh
 
 # WeChat Mini Program local/private configuration
 miniprogram/project.private.config.json
+
+# 个人学习资料（不提交到仓库）
+WeKnora学习资源包.pptx
+WeKnora实战训练题目.docx
