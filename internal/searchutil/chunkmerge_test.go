@@ -58,6 +58,32 @@ func TestAppendWithOverlap_NoOverlap(t *testing.T) {
 	}
 }
 
+func TestJoinChunkContentUsesCurrentTextInsteadOfSourceOffsets(t *testing.T) {
+	first := "first edited body with no original overlap"
+	second := "second independently edited body"
+	got := JoinChunkContent(first, second, "\n\n")
+	want := first + "\n\n" + second
+	if got != want {
+		t.Fatalf("edited join mismatch:\n got=%q\nwant=%q", got, want)
+	}
+}
+
+func TestJoinChunkContentRemovesRealBoundaryOverlap(t *testing.T) {
+	overlap := "shared boundary text"
+	got := JoinChunkContent("before "+overlap, overlap+" after", "\n\n")
+	want := "before " + overlap + " after"
+	if got != want {
+		t.Fatalf("overlap join mismatch:\n got=%q\nwant=%q", got, want)
+	}
+}
+
+func TestJoinChunkContentCollapsesExactContainment(t *testing.T) {
+	outer := "prefix complete current body suffix"
+	if got := JoinChunkContent(outer, "complete current body", "\n\n"); got != outer {
+		t.Fatalf("contained body should be collapsed: %q", got)
+	}
+}
+
 func TestMergeTextChunks_OrdersFiltersAndStitches(t *testing.T) {
 	header := "| a | b |\n|:--|:--|\n"
 	chunks := []*types.Chunk{

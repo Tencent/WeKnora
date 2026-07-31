@@ -37,6 +37,10 @@ func (e *AgentEngine) streamLLMToEventBus(
 	llmCtx, llmCancel := context.WithTimeout(ctx, e.getLLMCallTimeout())
 	defer llmCancel()
 
+	// Model-context encoding owns codec ordering and temporary-handle lifecycle.
+	messages = e.modelContext.EncodeMessages(messages)
+	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
+	llmCtx = types.WithLLMCallMetadata(llmCtx, "agent_round", prefixFingerprint)
 	stream, err := e.chatModel.ChatStream(llmCtx, messages, opts)
 	if err != nil {
 		logger.Errorf(ctx, "[Agent][Stream] Failed to start LLM stream: %v", err)
@@ -47,6 +51,8 @@ func (e *AgentEngine) streamLLMToEventBus(
 	chunkCount := 0
 	responseTypeCounts := make(map[string]int)
 	firstChunkTime := time.Time{}
+	answerDecoder := e.modelContext.StreamDecoder()
+	thinkingDecoder := e.modelContext.StreamDecoder()
 
 	for chunk := range stream {
 		chunkCount++
@@ -62,6 +68,18 @@ func (e *AgentEngine) streamLLMToEventBus(
 			result.StreamError = chunk.Content
 			continue
 		}
+		if chunk.ResponseType == types.ResponseTypeThinking {
+			chunk.Content = thinkingDecoder.Feed(chunk.Content)
+			if chunk.Done {
+				chunk.Content += thinkingDecoder.Flush()
+			}
+		} else {
+			chunk.Content = answerDecoder.Feed(chunk.Content)
+			if chunk.Done {
+				chunk.Content += answerDecoder.Flush()
+			}
+		}
+		e.modelContext.DecodeToolCalls(chunk.ToolCalls)
 
 		if chunk.Content != "" {
 			isExtracted := chunk.Data != nil && chunk.Data["source"] != nil
@@ -89,6 +107,35 @@ func (e *AgentEngine) streamLLMToEventBus(
 		if emitFunc != nil {
 			emitFunc(&chunk, result.Content)
 		}
+	}
+	answerTail := answerDecoder.Flush()
+	thinkingTail := thinkingDecoder.Flush()
+	result.Content += answerTail
+	result.ReasoningContent += thinkingTail
+	if emitFunc != nil {
+		if thinkingTail != "" {
+			emitFunc(&types.StreamResponse{ResponseType: types.ResponseTypeThinking, Content: thinkingTail}, result.Content)
+		}
+		if answerTail != "" {
+			emitFunc(&types.StreamResponse{ResponseType: types.ResponseTypeAnswer, Content: answerTail}, result.Content)
+		}
+	}
+	// Some providers stream tool-call argument fragments but expose the
+	// accumulated call in the final chunk. Decode once more after assembly so
+	// handles split across provider chunks cannot leak into tool execution.
+	e.modelContext.DecodeToolCalls(result.ToolCalls)
+	for _, toolCall := range result.ToolCalls {
+		if len(toolCall.UnresolvedHandles) == 0 {
+			continue
+		}
+		logger.Warnf(ctx,
+			"[Agent][Stream] Tool %s (%s) contains unresolvable model handle(s): %v",
+			toolCall.Function.Name, toolCall.ID, toolCall.UnresolvedHandles,
+		)
+	}
+	if orphans := e.modelContext.OrphanResourceHandles(result.Content); len(orphans) > 0 {
+		logger.Warnf(ctx, "[Agent][Stream] Model emitted %d unresolvable resource handle(s): %v",
+			len(orphans), orphans)
 	}
 
 	// Stream diagnostic summary: helps identify non-streaming patterns

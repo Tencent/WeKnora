@@ -29,8 +29,8 @@ type ModelResponse struct {
 	Status      types.ModelStatus  `json:"status"`
 	CreatedAt   time.Time          `json:"created_at"`
 	UpdatedAt   time.Time          `json:"updated_at"`
-	// Per-field "configured?" map. Omitted for builtin models (no
-	// per-tenant credentials). See MCPServiceResponse.Credentials.
+	// Per-field "configured?" map. Omitted for builtin models unless the
+	// caller is a system administrator. See MCPServiceResponse.Credentials.
 	Credentials map[string]CredentialFieldMetadata `json:"credentials,omitempty"`
 }
 
@@ -71,12 +71,13 @@ func NewModelResponse(ctx context.Context, m *types.Model) *ModelResponse {
 		MaxConcurrency:      m.Parameters.MaxConcurrency,
 		AppID:               m.Parameters.AppID,
 	}
-	if !CanViewIntegrationSecrets(ctx) {
+	canManageBuiltin := m.IsBuiltin && types.IsSystemAdminFromContext(ctx)
+	if !CanViewIntegrationSecrets(ctx) && !canManageBuiltin {
 		params.ExtraConfig = nil
 		params.CustomHeaders = nil
 		params.BaseURL = ""
 	}
-	if m.IsBuiltin {
+	if m.IsBuiltin && !canManageBuiltin {
 		// Builtin: strip everything that could reveal per-tenant config.
 		// EmbeddingParameters and ParameterSize / Provider / InterfaceType /
 		// SupportsVision are intentionally preserved (they describe the
@@ -87,7 +88,7 @@ func NewModelResponse(ctx context.Context, m *types.Model) *ModelResponse {
 		params.AppID = ""
 	}
 	var creds map[string]CredentialFieldMetadata
-	if !m.IsBuiltin {
+	if !m.IsBuiltin || canManageBuiltin {
 		creds = map[string]CredentialFieldMetadata{
 			"api_key":    {Configured: m.Parameters.APIKey != ""},
 			"app_secret": {Configured: m.Parameters.AppSecret != ""},

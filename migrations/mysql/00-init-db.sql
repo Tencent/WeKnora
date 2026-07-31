@@ -77,6 +77,7 @@ CREATE TABLE knowledges (
     file_hash VARCHAR(64),
     storage_size BIGINT NOT NULL DEFAULT 0,
     metadata JSON,
+    custom_metadata JSON NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL,
@@ -122,12 +123,62 @@ CREATE TABLE messages (
     knowledge_references JSON NOT NULL,
     agent_steps JSON DEFAULT NULL COMMENT 'Agent execution steps (reasoning process and tool calls)',
     is_completed BOOLEAN NOT NULL DEFAULT FALSE,
+    agent_id VARCHAR(36) NOT NULL DEFAULT '',
+    agent_tenant_id INTEGER NOT NULL DEFAULT 0,
+    model_id VARCHAR(64) NOT NULL DEFAULT '',
+    execution_context JSON NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE INDEX idx_messages_session_role ON messages(session_id, role); 
+CREATE INDEX idx_messages_agent_id ON messages(agent_id);
+
+CREATE TABLE message_suggestion_sets (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    assistant_message_id VARCHAR(36) NOT NULL,
+    agent_id VARCHAR(36) NOT NULL DEFAULT '',
+    agent_tenant_id INTEGER NOT NULL DEFAULT 0,
+    placement VARCHAR(32) NOT NULL,
+    config_hash VARCHAR(64) NOT NULL,
+    locale VARCHAR(16) NOT NULL DEFAULT '',
+    status VARCHAR(16) NOT NULL,
+    allow_regenerate BOOLEAN NOT NULL DEFAULT FALSE,
+    suppression_reason VARCHAR(64) NOT NULL DEFAULT '',
+    questions JSON NOT NULL,
+    model_id VARCHAR(64) NOT NULL DEFAULT '',
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    latency_ms BIGINT NOT NULL DEFAULT 0,
+    error_code VARCHAR(64) NOT NULL DEFAULT '',
+    lease_until TIMESTAMP NULL DEFAULT NULL,
+    generated_at TIMESTAMP NULL DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY idx_message_suggestion_sets_cache_key
+        (tenant_id, assistant_message_id, placement, config_hash, locale),
+    KEY idx_message_suggestion_sets_session (tenant_id, session_id, created_at),
+    KEY idx_message_suggestion_sets_status (status, lease_until)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE message_suggestion_events (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    suggestion_set_id VARCHAR(36) NOT NULL,
+    question_id VARCHAR(64) NOT NULL DEFAULT '',
+    event_type VARCHAR(32) NOT NULL,
+    actor_id VARCHAR(512) NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_message_suggestion_events_set (suggestion_set_id, created_at),
+    KEY idx_message_suggestion_events_session (tenant_id, session_id, created_at),
+    KEY idx_message_suggestion_events_type (event_type, created_at),
+    CONSTRAINT fk_message_suggestion_events_set
+        FOREIGN KEY (suggestion_set_id) REFERENCES message_suggestion_sets(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE chunks (
     id VARCHAR(36) PRIMARY KEY,
@@ -135,6 +186,11 @@ CREATE TABLE chunks (
     knowledge_base_id VARCHAR(36) NOT NULL,
     knowledge_id VARCHAR(36) NOT NULL,
     content TEXT NOT NULL,
+    source_content TEXT NOT NULL,
+    content_revision INT NOT NULL DEFAULT 0,
+    index_status VARCHAR(16) NOT NULL DEFAULT 'ready',
+    last_editor_id VARCHAR(64) NOT NULL DEFAULT '',
+    context_header TEXT NOT NULL,
     chunk_index INTEGER NOT NULL,
     is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     start_at INTEGER NOT NULL,
@@ -154,3 +210,20 @@ CREATE TABLE chunks (
 CREATE INDEX idx_chunks_tenant_knowledge ON chunks(tenant_id, knowledge_id);
 CREATE INDEX idx_chunks_parent_id ON chunks(parent_chunk_id);
 CREATE INDEX idx_chunks_chunk_type ON chunks(chunk_type);
+
+CREATE TABLE chunk_revisions (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    knowledge_id VARCHAR(36) NOT NULL,
+    chunk_id VARCHAR(36) NOT NULL,
+    revision INT NOT NULL,
+    content TEXT NOT NULL,
+    is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    editor_id VARCHAR(64) NOT NULL DEFAULT '',
+    edit_source VARCHAR(16) NOT NULL DEFAULT 'user',
+    edited_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY idx_chunk_revisions_chunk_revision (chunk_id, revision),
+    KEY idx_chunk_revisions_tenant_chunk (tenant_id, chunk_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

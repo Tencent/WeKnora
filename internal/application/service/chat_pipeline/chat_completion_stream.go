@@ -54,7 +54,9 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 
 	// Prepare base messages without history
 
-	chatMessages := prepareMessagesWithHistory(chatManage)
+	chatMessages, modelContext := prepareMessagesWithModelContext(ctx, chatManage)
+	chatMessages = modelContext.EncodeMessages(chatMessages)
+	ctx = withPromptCacheMetadata(ctx, chatModel, chatMessages, opt, "knowledge_qa")
 	pipelineInfo(ctx, "Stream", "messages_ready", map[string]interface{}{
 		"message_count": len(chatMessages),
 		"system_prompt": chatMessages[0].Content,
@@ -105,9 +107,12 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	// The goroutine monitors ctx.Done() to avoid leaking when the context is cancelled
 	// and the upstream channel is not closed promptly.
 	go func() {
+		answerDecoder := modelContext.StreamDecoder()
+		thinkingDecoder := modelContext.StreamDecoder()
 		thinkingID := fmt.Sprintf("%s-thinking", uuid.New().String()[:8])
 		answerID := fmt.Sprintf("%s-answer", uuid.New().String()[:8])
 		thinkingOpen := false
+		answerCompleted := false
 
 		closeThinking := func() {
 			if !thinkingOpen {
@@ -124,9 +129,36 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 			thinkingOpen = false
 		}
 
+		// flushDecoders drains any handle suffix the stream decoders held back to
+		// bridge references split across provider chunks. Both the normal close
+		// and the cancellation path must call this, otherwise a resource
+		// reference in flight at teardown is silently dropped (and never
+		// persisted, since the assistant message is saved from these events).
+		flushDecoders := func() {
+			thinkingTail := thinkingDecoder.Flush()
+			if thinkingTail != "" {
+				_ = eventBus.Emit(ctx, types.Event{
+					ID:        thinkingID,
+					Type:      types.EventType(event.EventAgentThought),
+					SessionID: chatManage.SessionID,
+					Data:      event.AgentThoughtData{Content: thinkingTail},
+				})
+			}
+			answerTail := answerDecoder.Flush()
+			if answerTail != "" {
+				_ = eventBus.Emit(ctx, types.Event{
+					ID:        answerID,
+					Type:      types.EventType(event.EventAgentFinalAnswer),
+					SessionID: chatManage.SessionID,
+					Data:      event.AgentFinalAnswerData{Content: answerTail},
+				})
+			}
+		}
+
 		for {
 			select {
 			case <-ctx.Done():
+				flushDecoders()
 				closeThinking()
 				pipelineInfo(ctx, "Stream", "context_cancelled", map[string]interface{}{
 					"session_id": chatManage.SessionID,
@@ -135,6 +167,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 
 			case response, ok := <-responseChan:
 				if !ok {
+					flushDecoders()
 					closeThinking()
 					pipelineInfo(ctx, "Stream", "channel_close", map[string]interface{}{
 						"session_id": chatManage.SessionID,
@@ -161,6 +194,10 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				}
 
 				if response.ResponseType == types.ResponseTypeThinking {
+					response.Content = thinkingDecoder.Feed(response.Content)
+					if response.Done {
+						response.Content += thinkingDecoder.Flush()
+					}
 					if response.Content != "" {
 						thinkingOpen = true
 						eventBus.Emit(ctx, types.Event{
@@ -180,6 +217,18 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				}
 
 				if response.ResponseType == types.ResponseTypeAnswer {
+					// Providers can emit a completion once for finish_reason and again
+					// for their EOF sentinel. A final answer is a terminal event for a
+					// single stream, so forwarding a later duplicate would put an answer
+					// after the session's complete event.
+					if answerCompleted {
+						continue
+					}
+					response.Content = answerDecoder.Feed(response.Content)
+					if response.Done {
+						response.Content += answerDecoder.Flush()
+						answerCompleted = true
+					}
 					closeThinking()
 					eventBus.Emit(ctx, types.Event{
 						ID:        answerID,

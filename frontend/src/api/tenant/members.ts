@@ -65,7 +65,7 @@ export interface SimpleResponse {
 }
 
 /**
- * 分页列出租户成员。
+ * 分页列出空间成员。
  * Backend: GET /api/v1/tenants/:id/members (Viewer+)。查询参数：`q`、`page`、`page_size`。
  */
 export async function listMembers(
@@ -79,7 +79,7 @@ export async function listMembers(
 }
 
 /**
- * 遍历分页拉取租户的全部成员（每页最大 100，最多 500 页兜底）。
+ * 遍历分页拉取空间的全部成员（每页最大 100，最多 500 页兜底）。
  * 用于「退出空间」等对全量成员的轻量校验；普通表格请直接使用 {@link listMembers} 分页接口。
  */
 export async function fetchAllTenantMembers(tenantId: number): Promise<TenantMember[]> {

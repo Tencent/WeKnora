@@ -79,3 +79,12 @@ func TestDocumentProcessTaskOptions_extraMaxRetry(t *testing.T) {
 	require.NotNil(t, maxRetry)
 	assert.Equal(t, 3, *maxRetry)
 }
+
+func TestKnowledgePostProcessTaskOptionsUseDedicatedQueue(t *testing.T) {
+	t.Parallel()
+	queue, timeout, maxRetry := parseDocumentProcessOpts(t, knowledgePostProcessTaskOptions())
+	assert.Equal(t, types.QueuePostProcess, queue)
+	assert.Equal(t, 30*time.Minute, timeout)
+	require.NotNil(t, maxRetry)
+	assert.Equal(t, 3, *maxRetry)
+}

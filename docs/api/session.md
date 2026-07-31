@@ -9,7 +9,7 @@
 | POST   | `/sessions`                                | 创建会话                      |
 | DELETE | `/sessions/batch`                          | 批量删除会话                  |
 | GET    | `/sessions/:id`                            | 获取会话详情                  |
-| GET    | `/sessions`                                | 获取当前租户的会话列表        |
+| GET    | `/sessions`                                | 获取当前空间的会话列表        |
 | PUT    | `/sessions/:id`                            | 更新会话                      |
 | DELETE | `/sessions/:id`                            | 删除会话                      |
 | DELETE | `/sessions/:id/messages`                   | 清空会话消息                  |
@@ -61,11 +61,11 @@ curl --location 'http://localhost:8080/api/v1/sessions' \
 }
 ```
 
-> 通过 API-Key 调用时 `user_id` 可能为空，此时会话以租户级可见。
+> 通过 API-Key 调用时 `user_id` 可能为空，此时会话以空间级可见。
 
 ## DELETE `/sessions/batch` - 批量删除会话
 
-支持两种模式：按 ID 列表批量删除，或删除当前租户的所有会话。
+支持两种模式：按 ID 列表批量删除，或删除当前空间的所有会话。
 
 **请求 - 按 ID 列表删除**:
 
@@ -97,7 +97,7 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/sessions/batch' \
 | 字段         | 类型     | 必填 | 描述                                                       |
 | ------------ | -------- | ---- | ---------------------------------------------------------- |
 | `ids`        | string[] | 否   | 要删除的会话 ID 列表（`delete_all` 为 `false` 时必填）     |
-| `delete_all` | bool     | 否   | 设为 `true` 时删除当前租户的所有会话，忽略 `ids` 字段      |
+| `delete_all` | bool     | 否   | 设为 `true` 时删除当前空间的所有会话，忽略 `ids` 字段      |
 
 **响应**:
 
@@ -148,9 +148,9 @@ curl --location 'http://localhost:8080/api/v1/sessions/ceb9babb-1e30-41d7-817d-f
 
 会话不存在时返回 `404`。
 
-## GET `/sessions` - 获取当前租户的会话列表
+## GET `/sessions` - 获取当前空间的会话列表
 
-获取当前租户的会话列表，支持分页、关键字搜索、按来源 / Agent 过滤。
+获取当前空间的会话列表，支持分页、关键字搜索、按来源 / Agent 过滤。
 
 **请求**:
 

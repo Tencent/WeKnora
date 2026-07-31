@@ -153,7 +153,7 @@ func TestAllFetchedItemsFailedError(t *testing.T) {
 	err := allFetchedItemsFailedError(&types.SyncResult{
 		Total:  2,
 		Failed: 2,
-		Errors: []string{"doc one: export failed"},
+		Errors: []types.SyncItemError{{Message: "doc one: export failed"}},
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "all fetched items failed during sync (2/2)")
@@ -181,7 +181,7 @@ func TestAllFetchedItemsFailedErrorTruncatesLongDetail(t *testing.T) {
 	err := allFetchedItemsFailedError(&types.SyncResult{
 		Total:  1,
 		Failed: 1,
-		Errors: []string{strings.Repeat("x", 600)},
+		Errors: []types.SyncItemError{{Message: strings.Repeat("x", 600)}},
 	})
 	require.Error(t, err)
 	assert.LessOrEqual(t, len(err.Error()), 560)

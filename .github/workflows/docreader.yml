@@ -1,0 +1,96 @@
+name: DocReader
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docreader/**"
+      - "go.mod"
+      - "go.sum"
+      - "testdata/**"
+      - "packages/**"
+      - "docker/Dockerfile.docreader"
+      - "docker/Dockerfile.odl-hybrid"
+      - ".github/workflows/docreader.yml"
+  pull_request:
+    paths:
+      - "docreader/**"
+      - "go.mod"
+      - "go.sum"
+      - "testdata/**"
+      - "packages/**"
+      - "docker/Dockerfile.docreader"
+      - "docker/Dockerfile.odl-hybrid"
+      - ".github/workflows/docreader.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.10.18"
+  GO_VERSION: "1.26"
+  GOPROXY: https://proxy.golang.org,direct
+
+jobs:
+  verify:
+    name: Python tests and Go client tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: docreader/uv.lock
+
+      - name: Install Python dependencies
+        run: uv sync --project docreader --locked --no-dev --python ${{ env.PYTHON_VERSION }}
+
+      - name: Compile Python sources
+        run: uv run --project docreader --python ${{ env.PYTHON_VERSION }} python -m compileall -q docreader
+
+      - name: Run Python tests
+        run: uv run --project docreader --python ${{ env.PYTHON_VERSION }} python -m unittest discover -s docreader/tests -p "test_*.py" -v
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Download Go modules
+        run: go mod download
+
+      - name: Start DocReader gRPC server
+        run: |
+          uv run --project docreader --python ${{ env.PYTHON_VERSION }} python -m docreader.main &
+          echo $! > /tmp/docreader.pid
+          for i in $(seq 1 30); do
+            if nc -z 127.0.0.1 50051 2>/dev/null; then
+              echo "DocReader gRPC server is ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "DocReader gRPC server failed to start"
+          exit 1
+
+      - name: Run Go client tests
+        run: go test ./docreader/client ./docreader/proto
+
+      - name: Stop DocReader gRPC server
+        if: always()
+        run: |
+          if [ -f /tmp/docreader.pid ]; then
+            kill "$(cat /tmp/docreader.pid)" 2>/dev/null || true
+          fi

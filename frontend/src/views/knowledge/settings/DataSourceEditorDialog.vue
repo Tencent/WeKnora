@@ -369,6 +369,26 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    // Lark is Feishu's international cloud. Same wiki/docx/drive APIs and the
+    // same scope identifiers, but a separate console, tenant and app — an app
+    // created on open.feishu.cn cannot read a Lark wiki.
+    type: 'lark',
+    available: true,
+    docUrl: 'https://open.larksuite.com/app',
+    permissionDocUrl: 'https://open.larksuite.com/document/server-docs/docs/wiki-v2/wiki-overview',
+    permissionPageUrl: 'https://open.larksuite.com/app',
+    requiredPermissions: [
+      'wiki:wiki:readonly',
+      'drive:drive:readonly',
+      'drive:export:readonly',
+      'docx:document:readonly',
+    ],
+    fields: [
+      { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+    ],
+  },
+  {
     type: 'notion',
     available: true,
     docUrl: 'https://www.notion.so/my-integrations',

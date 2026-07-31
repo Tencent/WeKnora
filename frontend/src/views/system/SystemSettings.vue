@@ -33,49 +33,10 @@
   -->
   <div class="system-settings">
     <div class="section-header">
-      <div class="section-header-row">
-        <h2>{{ t('system.globalSettings.title') }}</h2>
-        <!-- Platform audit-log entry. SystemAdmin already gated the
-             whole view via meta.requiresSystemAdmin (router/index.ts)
-             so we don't re-check role here — every visitor of this
-             page is eligible. Mirrors the audit button placement in
-             tenant settings (frontend/src/views/settings/TenantMembers.vue). -->
-        <t-button
-          variant="text"
-          size="small"
-          class="header-audit-btn"
-          @click="openAuditDrawer"
-        >
-          <template #icon><t-icon name="history" /></template>
-          {{ t('system.globalSettings.audit.tabLabel') }}
-        </t-button>
-      </div>
+      <h2>{{ t('system.globalSettings.title') }}</h2>
       <p class="section-description">
         {{ t('system.globalSettings.description') }}
       </p>
-    </div>
-
-    <!--
-      Priority hint. We surface the 3-tier resolver semantics inline so
-      operators don't have to dig through code to figure out why a value
-      they set in env "doesn't show up" — once a row is overridden in
-      the UI, env is shadowed until the row is cleared. The "已覆盖"
-      badge per row is the per-key signal; this block is the global key.
-      Hand-rolled panel rather than t-alert because the default alert
-      slot rendering hid most of the body text in TDesign's layout.
-    -->
-    <div class="priority-hint">
-      <div class="priority-hint-header">
-        <t-icon name="info-circle-filled" class="priority-hint-icon" />
-        <span class="priority-hint-title">
-          {{ t('system.globalSettings.priorityHint.title') }}
-        </span>
-      </div>
-      <ul class="priority-hint-list">
-        <li>{{ t('system.globalSettings.priorityHint.tier1') }}</li>
-        <li>{{ t('system.globalSettings.priorityHint.tier2') }}</li>
-        <li>{{ t('system.globalSettings.priorityHint.tier3') }}</li>
-      </ul>
     </div>
 
     <div v-if="loading && settings.length === 0" class="loading-state">
@@ -87,7 +48,58 @@
       <span>{{ t('system.globalSettings.empty') }}</span>
     </div>
 
-    <div v-else class="settings-group">
+    <template v-else>
+      <div class="settings-intro-panel">
+        <div class="priority-hint-title">
+          <t-icon name="info-circle" />
+          <span>{{ t('system.globalSettings.priorityHint.disclosure') }}</span>
+        </div>
+        <ul class="priority-hint-list">
+          <li>{{ t('system.globalSettings.priorityHint.tier1') }}</li>
+          <li>{{ t('system.globalSettings.priorityHint.tier2') }}</li>
+          <li>{{ t('system.globalSettings.priorityHint.tier3') }}</li>
+        </ul>
+      </div>
+
+      <t-tabs v-model="activeSettingsSection" class="settings-section-tabs">
+        <t-tab-panel value="access" :label="sectionTabLabel('access')" />
+        <t-tab-panel value="tenant" :label="sectionTabLabel('tenant')" />
+        <t-tab-panel value="runtime" :label="sectionTabLabel('runtime')" />
+        <t-tab-panel value="security" :label="sectionTabLabel('security')" />
+        <t-tab-panel
+          v-if="hasUnknownSettings"
+          value="other"
+          :label="sectionTabLabel('other')"
+        />
+      </t-tabs>
+
+      <section class="settings-section-panel" :aria-labelledby="`settings-section-${activeSettingsSection}`">
+        <div
+          class="settings-section-intro"
+          :class="{ 'settings-section-intro--runtime': activeSettingsSection === 'runtime' }"
+        >
+          <div>
+            <h3 :id="`settings-section-${activeSettingsSection}`">{{ activeSectionTitle }}</h3>
+            <p>{{ activeSectionDescription }}</p>
+          </div>
+          <t-tag v-if="activeSettingsSection === 'runtime'" theme="warning" variant="light" size="small">
+            {{ t('system.globalSettings.sections.runtime.restartHint') }}
+          </t-tag>
+        </div>
+
+        <div
+          v-if="activeSettingsSection === 'runtime'"
+          class="runtime-table-header"
+          aria-hidden="true"
+        >
+          <span>{{ t('system.globalSettings.runtimeTable.setting') }}</span>
+          <span>{{ t('system.globalSettings.runtimeTable.value') }}</span>
+        </div>
+
+        <div
+          class="settings-group"
+          :class="{ 'settings-group--runtime': activeSettingsSection === 'runtime' }"
+        >
       <!--
         System-admins management. Visually identical to SSRF whitelist
         (a tag-input with one entry per email). NOT a system_setting
@@ -98,11 +110,14 @@
         tags (they can't revoke themselves anyway, and showing a tag
         that can't be removed is worse than not showing it).
       -->
-      <div class="setting-row">
+          <div v-if="activeSettingsSection === 'access'" class="setting-row setting-row--admin">
         <div class="setting-info">
-          <label class="setting-label">
+              <div class="setting-label">
             <span>{{ t('system.globalSettings.admins.label') }}</span>
-          </label>
+                <t-tag theme="danger" variant="light" size="small" class="setting-badge">
+                  {{ t('system.globalSettings.badgeHighRisk') }}
+                </t-tag>
+              </div>
           <p class="desc">{{ t('system.globalSettings.admins.description') }}</p>
         </div>
         <div class="setting-control">
@@ -123,6 +138,7 @@
                 <t-tag-input
                   v-model="adminEmails"
                   :placeholder="t('system.globalSettings.admins.placeholder')"
+                      :aria-label="t('system.globalSettings.admins.label')"
                   :disabled="adminBusy"
                   class="setting-input setting-input--wide"
                   clearable
@@ -130,25 +146,44 @@
                 />
               </div>
             </t-popconfirm>
-            <t-loading v-if="adminBusy" size="small" class="setting-saving" />
+                <div v-if="adminBusy" class="setting-save-state" role="status">
+                  <t-loading size="small" />
+                  <span>{{ t('system.globalSettings.saving') }}</span>
+                </div>
           </div>
         </div>
       </div>
 
-      <!--
-        Flat list — no category grouping. The registry is small enough
-        (single digits) that section headers add visual noise without
-        helping discovery; if it grows past ~10 keys we'll bring back
-        grouping with a real visual treatment instead of a tiny caps
-        label.
-      -->
+          <div v-if="activeSettingsSection === 'access'" class="setting-row setting-row--password-reset">
+            <div class="setting-info">
+              <div class="setting-label">
+                <span>{{ t('system.globalSettings.passwordReset.label') }}</span>
+                <t-tag theme="danger" variant="light" size="small" class="setting-badge">
+                  {{ t('system.globalSettings.badgeHighRisk') }}
+                </t-tag>
+              </div>
+              <p class="desc">{{ t('system.globalSettings.passwordReset.description') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-button
+                theme="danger"
+                variant="text"
+                class="password-reset-trigger"
+                @click="openPasswordResetDialog"
+              >
+                <template #icon><t-icon name="lock-on" /></template>
+                {{ t('system.globalSettings.passwordReset.action') }}
+              </t-button>
+            </div>
+          </div>
+
       <div
-        v-for="item in settings"
+            v-for="item in activeSectionSettings"
         :key="item.key"
         class="setting-row"
       >
         <div class="setting-info">
-          <label class="setting-label">
+              <div class="setting-label">
             <span>{{ keyLabel(item.key) }}</span>
             <t-tag
               v-if="item.requires_restart"
@@ -165,6 +200,13 @@
               class="setting-badge"
             >{{ t('system.globalSettings.badgeSecret') }}</t-tag>
             <t-tag
+                  v-if="isHighImpactKey(item.key)"
+                  theme="danger"
+                  variant="light"
+                  size="small"
+                  class="setting-badge"
+                >{{ t('system.globalSettings.badgeHighRisk') }}</t-tag>
+                <t-tag
               v-if="hasOverride(item)"
               theme="success"
               variant="light"
@@ -172,7 +214,7 @@
               class="setting-badge"
               :title="t('system.globalSettings.badgeOverrideTooltip')"
             >{{ t('system.globalSettings.badgeOverride') }}</t-tag>
-          </label>
+              </div>
           <p v-if="settingDescription(item)" class="desc">{{ settingDescription(item) }}</p>
           <div v-if="modifiedMeta(item)" class="setting-meta">
             {{ t('system.globalSettings.modifiedAt', { value: modifiedMeta(item) }) }}
@@ -207,6 +249,7 @@
               <t-select
                 v-model="editValues[item.key]"
                 :options="enumOptions(item)"
+                    :aria-label="keyLabel(item.key)"
                 :disabled="savingKey === item.key"
                 class="setting-input"
                 @change="onHighRiskSelectChange(item)"
@@ -217,6 +260,7 @@
             v-else-if="hasEnum(item)"
             v-model="editValues[item.key]"
             :options="enumOptions(item)"
+                :aria-label="keyLabel(item.key)"
             :disabled="savingKey === item.key"
             class="setting-input"
             @change="onChange(item)"
@@ -224,6 +268,7 @@
           <t-switch
             v-else-if="item.value_type === 'bool'"
             v-model="editValues[item.key]"
+                :aria-label="keyLabel(item.key)"
             :disabled="savingKey === item.key"
             @change="onChange(item)"
           />
@@ -231,6 +276,7 @@
             v-else-if="item.value_type === 'int'"
             v-model="editValues[item.key]"
             :placeholder="placeholderFor(item)"
+                :aria-label="keyLabel(item.key)"
             :disabled="savingKey === item.key"
             theme="normal"
             :step="1"
@@ -256,6 +302,7 @@
                 :key="`ssrf-tag-${ssrfTagInputKey()}`"
                 :model-value="ssrfWhitelistModelValue()"
                 :placeholder="emptyListPlaceholder"
+                    :aria-label="keyLabel(item.key)"
                 :disabled="savingKey === item.key"
                 class="setting-input setting-input--wide"
                 clearable
@@ -267,6 +314,7 @@
             v-else
             v-model="editValues[item.key]"
             :placeholder="placeholderFor(item)"
+                :aria-label="keyLabel(item.key)"
             :disabled="savingKey === item.key"
             class="setting-input"
             clearable
@@ -278,11 +326,18 @@
             a PUT is in flight; the controls stay disabled (see
             :disabled bindings above) so concurrent edits can't race.
           -->
-          <t-loading
-            v-if="savingKey === item.key"
-            size="small"
-            class="setting-saving"
-          />
+              <div v-if="savingKey === item.key" class="setting-save-state" role="status">
+                <t-loading size="small" />
+                <span>{{ t('system.globalSettings.saving') }}</span>
+              </div>
+              <div
+                v-else-if="savedKey === item.key"
+                class="setting-save-state setting-save-state--success"
+                role="status"
+              >
+                <t-icon name="check-circle-filled" />
+                <span>{{ t('system.globalSettings.saved') }}</span>
+              </div>
           </div>
 
           <!--
@@ -350,154 +405,85 @@
           </div>
         </div>
       </div>
-    </div>
-
-    <!-- Platform audit-log drawer. Lazy-loaded on first open; closing
-         and reopening doesn't re-fetch (refresh is explicit via the
-         button inside the drawer). Backend route is SystemAdmin-gated,
-         and this whole view is too, so we don't bother with a role
-         check — any visitor here is eligible to read the feed. -->
-    <t-drawer
-      v-model:visible="auditDrawerVisible"
-      :header="t('system.globalSettings.audit.tabLabel')"
-      drawer-class-name="system-settings-audit-drawer"
-      size="880px"
-      :footer="false"
-      placement="right"
-      destroy-on-close
+        </div>
+      </section>
+      <div class="sr-only" role="status" aria-live="polite">{{ saveAnnouncement }}</div>
+    </template>
+    <t-dialog
+      v-model:visible="passwordResetVisible"
+      :header="t('system.globalSettings.passwordReset.dialogTitle')"
+      width="440px"
+      placement="center"
+      dialog-class-name="password-reset-dialog"
+      :confirm-btn="{
+        content: t('system.globalSettings.passwordReset.confirmBtn'),
+        theme: 'danger',
+        loading: passwordResetSubmitting,
+      }"
+      :cancel-btn="{
+        content: t('system.globalSettings.confirm.cancelBtn'),
+        variant: 'outline',
+      }"
+      :close-on-overlay-click="!passwordResetSubmitting"
+      :close-btn="!passwordResetSubmitting"
+      @confirm="submitPasswordReset"
+      @close="resetPasswordResetForm"
     >
-      <div class="audit-drawer-inner audit-panel audit-panel--drawer">
-        <div class="audit-header">
-          <span class="audit-desc">{{ t('system.globalSettings.audit.description') }}</span>
-          <t-button
-            variant="text"
-            size="small"
-            class="audit-refresh-btn"
-            :loading="auditLoading"
-            :disabled="auditLoading"
-            @click="reloadAuditLog"
+      <t-alert
+        theme="warning"
+        :message="t('system.globalSettings.passwordReset.warning')"
+        class="password-reset-warning"
+      />
+      <t-form
+        ref="passwordResetFormRef"
+        :data="passwordResetForm"
+        :rules="passwordResetRules"
+        label-align="top"
+        class="password-reset-form"
+      >
+        <t-form-item :label="t('system.globalSettings.passwordReset.emailLabel')" name="email">
+          <t-input
+            v-model="passwordResetForm.email"
+            type="text"
+            clearable
+            autocomplete="off"
+            :disabled="passwordResetSubmitting"
+            :placeholder="t('system.globalSettings.passwordReset.emailPlaceholder')"
+          />
+        </t-form-item>
+        <t-form-item :label="t('system.globalSettings.passwordReset.newPasswordLabel')" name="newPassword">
+          <t-input
+            v-model="passwordResetForm.newPassword"
+            type="password"
+            autocomplete="new-password"
+            :disabled="passwordResetSubmitting"
+            :placeholder="t('system.globalSettings.passwordReset.newPasswordPlaceholder')"
           >
-            <template #icon><t-icon name="refresh" /></template>
-            {{ t('system.globalSettings.audit.refresh') }}
-          </t-button>
-        </div>
-
-        <div class="audit-drawer-fill">
-          <div v-if="auditError" class="audit-drawer-branch audit-drawer-branch--error">
-            <div class="error-inline">
-              <t-alert theme="error" :message="auditError">
-                <template #operation>
-                  <t-button size="small" @click="reloadAuditLog">
-                    {{ t('system.globalSettings.audit.retry') }}
-                  </t-button>
-                </template>
-              </t-alert>
-            </div>
-          </div>
-
-          <div
-            v-else-if="!auditLoading && auditEntries.length === 0"
-            class="audit-drawer-branch audit-drawer-branch--empty empty-state empty-state--audit"
+            <template #prefix-icon><t-icon name="lock-on" /></template>
+          </t-input>
+        </t-form-item>
+        <t-form-item :label="t('system.globalSettings.passwordReset.confirmPasswordLabel')" name="confirmPassword">
+          <t-input
+            v-model="passwordResetForm.confirmPassword"
+            type="password"
+            autocomplete="new-password"
+            :disabled="passwordResetSubmitting"
+            :placeholder="t('system.globalSettings.passwordReset.confirmPasswordPlaceholder')"
+            @enter="submitPasswordReset"
           >
-            <t-empty :description="t('system.globalSettings.audit.empty')" />
-          </div>
-
-          <div v-else class="audit-scroll-area narrow-scrollbar audit-drawer-branch" ref="auditScrollRoot">
-            <div class="data-table-shell audit-table-shell">
-              <t-table
-                row-key="id"
-                :data="auditEntries"
-                :columns="auditColumns"
-                size="medium"
-                hover
-                expand-on-row-click
-                :expanded-row-keys="auditExpandedRowKeys"
-                @expand-change="onAuditExpandChange"
-              >
-                <template #created_at="{ row }">
-                  <div class="audit-time">
-                    <span class="audit-time-date">{{ formatAuditDatePart(row.created_at) }}</span>
-                    <span class="audit-time-clock">{{ formatAuditTimePart(row.created_at) }}</span>
-                  </div>
-                </template>
-                <template #actor="{ row }">
-                  <div class="audit-actor">
-                    <span class="audit-actor-name">
-                      {{ row.actor_user_id ? auditActorLabel(row.actor_user_id) :
-                        t('system.globalSettings.audit.systemActor') }}
-                    </span>
-                    <span v-if="row.actor_role" class="audit-actor-role">
-                      {{ auditActorRoleLabel(row.actor_role) }}
-                    </span>
-                  </div>
-                </template>
-                <template #action="{ row }">
-                  <t-tag :theme="auditActionTheme(row.action)" size="small" variant="light-outline">
-                    {{ formatAuditAction(row.action) }}
-                  </t-tag>
-                </template>
-                <template #target="{ row }">
-                  <div class="audit-target">
-                    <span v-if="auditTargetKey(row)" class="audit-target-key">{{ auditTargetKey(row) }}</span>
-                    <span v-if="auditTargetDiff(row)" class="audit-target-diff">{{ auditTargetDiff(row) }}</span>
-                    <span v-else-if="!auditTargetKey(row)" class="audit-target-empty">—</span>
-                  </div>
-                </template>
-                <template #outcome="{ row }">
-                  <t-tag :theme="auditOutcomeTheme(row.outcome)" size="small" variant="light">
-                    {{ t('system.globalSettings.audit.outcome.' + row.outcome) }}
-                  </t-tag>
-                </template>
-                <template #expandedRow="{ row }">
-                  <div class="audit-expanded">
-                    <div class="audit-expanded-grid">
-                      <div class="audit-expanded-cell">
-                        <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.actorId') }}</span>
-                        <span class="audit-expanded-value mono">{{ row.actor_user_id || '—' }}</span>
-                      </div>
-                      <div v-if="row.target_user_id" class="audit-expanded-cell">
-                        <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.targetUserId') }}</span>
-                        <span class="audit-expanded-value mono">{{ row.target_user_id }}</span>
-                      </div>
-                      <div v-if="row.target_type" class="audit-expanded-cell">
-                        <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.targetType') }}</span>
-                        <span class="audit-expanded-value mono">{{ row.target_type }}</span>
-                      </div>
-                      <div v-if="row.target_id" class="audit-expanded-cell">
-                        <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.targetId') }}</span>
-                        <span class="audit-expanded-value mono">{{ row.target_id }}</span>
-                      </div>
-                    </div>
-                    <div class="audit-expanded-details">
-                      <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.details') }}</span>
-                      <pre class="audit-expanded-json mono">{{ auditDetailsJSON(row) }}</pre>
-                    </div>
-                  </div>
-                </template>
-              </t-table>
-            </div>
-
-            <div ref="auditLoadSentinelEl" class="audit-load-sentinel" aria-hidden="true" />
-
-            <div v-if="auditLoading && auditEntries.length > 0" class="audit-loading-more">
-              <t-loading size="small" />
-              <span>{{ t('system.globalSettings.audit.loading') }}</span>
-            </div>
-
-            <p v-if="!auditHasMore && auditEntries.length > 0 && !auditLoading" class="audit-end-hint">
-              {{ t('system.globalSettings.audit.end') }}
-            </p>
-          </div>
-        </div>
-      </div>
-    </t-drawer>
+            <template #prefix-icon><t-icon name="lock-on" /></template>
+          </t-input>
+        </t-form-item>
+      </t-form>
+    </t-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
+import type { FormInstanceFunctions, FormRule } from 'tdesign-vue-next'
 import {
   listSystemSettings,
   updateSystemSetting,
@@ -506,11 +492,8 @@ import {
   listSystemAdmins,
   promoteUserToSystemAdmin,
   revokeSystemAdmin,
-  listSystemAuditLog,
+  resetUserPassword,
   type SystemSettingItem,
-  type AuditLog,
-  type AuditAction,
-  type AuditOutcome,
 } from '@/api/system'
 import { useAuthStore } from '@/stores/auth'
 
@@ -542,8 +525,18 @@ const HIGH_RISK_KEYS = new Set<string>([
   'auth.registration_mode',
 ])
 
+const HIGH_IMPACT_KEYS = new Set<string>([
+  'auth.registration_mode',
+  'tenant.auto_create_api_key',
+  'ssrf.whitelist',
+])
+
 function isHighRiskKey(key: string): boolean {
   return HIGH_RISK_KEYS.has(key)
+}
+
+function isHighImpactKey(key: string): boolean {
+  return HIGH_IMPACT_KEYS.has(key)
 }
 
 type PopconfirmBtn = { content: string; theme?: 'primary' | 'danger' | 'warning' }
@@ -614,6 +607,84 @@ const emptyListPlaceholder = computed(() => t('system.globalSettings.tagInputPla
 const settings = ref<SystemSettingItem[]>([])
 const loading = ref(false)
 const savingKey = ref<string | null>(null)
+const savedKey = ref<string | null>(null)
+const saveAnnouncement = ref('')
+let savedKeyTimer: ReturnType<typeof setTimeout> | null = null
+
+type SettingsSection = 'access' | 'tenant' | 'runtime' | 'security' | 'other'
+
+// Product-oriented order, rather than the registry's alphabetical key order.
+// Unknown/out-of-band rows remain visible in a conditional "Other" tab so the
+// backend's diagnostic contract is preserved when a deployment contains an
+// unexpected key.
+const SETTINGS_SECTION_KEYS: Record<Exclude<SettingsSection, 'other'>, readonly string[]> = {
+  access: [
+    'auth.registration_mode',
+    'auth.default_tenant_mode',
+    'tenant.self_service_creation_enabled',
+    'tenant.max_owned_per_user',
+  ],
+  tenant: [
+    'tenant.default_storage_quota_gb',
+    'tenant.auto_create_api_key',
+  ],
+  runtime: [
+    'asynq.core_concurrency',
+    'asynq.enrichment_concurrency',
+    'asynq.postprocess_concurrency',
+    'asynq.maintenance_concurrency',
+    'asynq.shared_concurrency',
+    'asynq.wiki_concurrency',
+    'model.max_concurrency',
+  ],
+  security: ['ssrf.whitelist'],
+}
+
+const activeSettingsSection = ref<SettingsSection>('access')
+const knownSettingKeys = new Set(Object.values(SETTINGS_SECTION_KEYS).flat())
+const settingsByKey = computed(() => new Map(settings.value.map((item) => [item.key, item])))
+const unknownSettings = computed(() => settings.value.filter((item) => !knownSettingKeys.has(item.key)))
+const hasUnknownSettings = computed(() => unknownSettings.value.length > 0)
+
+watch(hasUnknownSettings, (hasUnknown) => {
+  if (!hasUnknown && activeSettingsSection.value === 'other') {
+    activeSettingsSection.value = 'access'
+  }
+})
+
+const activeSectionSettings = computed(() => {
+  if (activeSettingsSection.value === 'other') return unknownSettings.value
+  return SETTINGS_SECTION_KEYS[activeSettingsSection.value]
+    .map((key) => settingsByKey.value.get(key))
+    .filter((item): item is SystemSettingItem => Boolean(item))
+})
+
+const activeSectionTitle = computed(() =>
+  t(`system.globalSettings.sections.${activeSettingsSection.value}.title`),
+)
+const activeSectionDescription = computed(() =>
+  t(`system.globalSettings.sections.${activeSettingsSection.value}.description`),
+)
+
+
+function sectionTabLabel(section: SettingsSection): string {
+  const count = section === 'other'
+    ? unknownSettings.value.length
+    : SETTINGS_SECTION_KEYS[section].filter((key) => settingsByKey.value.has(key)).length + (section === 'access' ? 2 : 0)
+  return t(`system.globalSettings.sections.${section}.tab`, { count })
+}
+
+function markSettingSaved(item: SystemSettingItem) {
+  savedKey.value = item.key
+  saveAnnouncement.value = t('system.globalSettings.saveAnnouncement', {
+    label: keyLabel(item.key),
+  })
+  if (savedKeyTimer) clearTimeout(savedKeyTimer)
+  savedKeyTimer = setTimeout(() => {
+    if (savedKey.value === item.key) savedKey.value = null
+    savedKeyTimer = null
+  }, 2000)
+}
 
 // Admin management state. We keep two parallel structures:
 //   - adminEmails: the v-model bound to the t-tag-input (excludes
@@ -627,6 +698,73 @@ const savingKey = ref<string | null>(null)
 const adminEmails = ref<string[]>([])
 const adminEmailToId = ref<Record<string, string>>({})
 const adminBusy = ref(false)
+
+const passwordResetVisible = ref(false)
+const passwordResetSubmitting = ref(false)
+const passwordResetFormRef = ref<FormInstanceFunctions>()
+const passwordResetForm = reactive({
+  email: '',
+  newPassword: '',
+  confirmPassword: '',
+})
+const passwordResetRules: Record<string, FormRule[]> = {
+  email: [
+    { required: true, message: t('system.globalSettings.passwordReset.validation.emailRequired'), trigger: 'blur' },
+    { email: true, message: t('system.globalSettings.passwordReset.validation.emailInvalid'), trigger: 'blur' },
+  ],
+  newPassword: [
+    { required: true, message: t('system.globalSettings.passwordReset.validation.passwordRequired'), trigger: 'blur' },
+    { min: 8, message: t('system.globalSettings.passwordReset.validation.passwordLength'), trigger: 'blur' },
+    { max: 32, message: t('system.globalSettings.passwordReset.validation.passwordLength'), trigger: 'blur' },
+    { pattern: /[a-zA-Z]/, message: t('system.globalSettings.passwordReset.validation.passwordLetter'), trigger: 'blur' },
+    { pattern: /\d/, message: t('system.globalSettings.passwordReset.validation.passwordNumber'), trigger: 'blur' },
+  ],
+  confirmPassword: [
+    { required: true, message: t('system.globalSettings.passwordReset.validation.confirmRequired'), trigger: 'blur' },
+    {
+      validator: (value: string) => value === passwordResetForm.newPassword,
+      message: t('system.globalSettings.passwordReset.validation.passwordMismatch'),
+      trigger: 'blur',
+    },
+  ],
+}
+
+function resetPasswordResetForm() {
+  passwordResetForm.email = ''
+  passwordResetForm.newPassword = ''
+  passwordResetForm.confirmPassword = ''
+  passwordResetFormRef.value?.clearValidate?.()
+}
+
+async function openPasswordResetDialog() {
+  resetPasswordResetForm()
+  passwordResetVisible.value = true
+  await nextTick()
+  passwordResetFormRef.value?.clearValidate?.()
+}
+
+async function submitPasswordReset() {
+  if (passwordResetSubmitting.value) return
+  const valid = await passwordResetFormRef.value?.validate?.()
+  if (valid !== true) return
+
+  passwordResetSubmitting.value = true
+  try {
+    await resetUserPassword({
+      email: passwordResetForm.email.trim(),
+      new_password: passwordResetForm.newPassword,
+    })
+    saveAnnouncement.value = t('system.globalSettings.passwordReset.success')
+    MessagePlugin.success(t('system.globalSettings.passwordReset.success'))
+    passwordResetVisible.value = false
+  } catch (err: any) {
+    const msg = err?.message || t('system.globalSettings.passwordReset.failed')
+    saveAnnouncement.value = msg
+    MessagePlugin.error(msg)
+  } finally {
+    passwordResetSubmitting.value = false
+  }
+}
 
 // Guards ssrf.whitelist while an async confirm roundtrip is in flight.
 const listConfirmBusyKey = ref<string | null>(null)
@@ -761,8 +899,7 @@ function placeholderFor(item: SystemSettingItem): string {
 }
 
 function minimumFor(item: SystemSettingItem): number {
-  if (item.key === 'asynq.concurrency') return 3
-  if (item.key === 'asynq.wiki_concurrency') return 1
+  if (item.key.startsWith('asynq.') && item.key.endsWith('_concurrency')) return 1
   return 0
 }
 
@@ -943,6 +1080,7 @@ function bulkActionConfirmBody(item: SystemSettingItem): string {
 
 async function runBulkAction(item: SystemSettingItem) {
   if (!hasBulkAction(item)) return
+  savedKey.value = null
   savingKey.value = item.key
   try {
     const result = await applyDefaultStorageQuotaToAllTenants()
@@ -952,8 +1090,10 @@ async function runBulkAction(item: SystemSettingItem) {
         gb: result.quota_gb,
       }),
     )
+    markSettingSaved(item)
   } catch (err: any) {
     const msg = err?.message || t('system.globalSettings.bulkApply.failed')
+    saveAnnouncement.value = msg
     MessagePlugin.error(msg)
   } finally {
     savingKey.value = null
@@ -967,13 +1107,16 @@ async function runBulkAction(item: SystemSettingItem) {
 // settings array and re-running it keeps the modified-by enrichment
 // consistent for every row in the table.
 async function resetSetting(item: SystemSettingItem) {
+  savedKey.value = null
   savingKey.value = item.key
   try {
     await resetSystemSetting(item.key)
     await loadSettings()
+    markSettingSaved(item)
     MessagePlugin.success(t('system.globalSettings.reset.success'))
   } catch (err: any) {
     const msg = err?.message || t('system.globalSettings.reset.failed')
+    saveAnnouncement.value = msg
     MessagePlugin.error(msg)
   } finally {
     savingKey.value = null
@@ -982,6 +1125,7 @@ async function resetSetting(item: SystemSettingItem) {
 
 async function persistSetting(item: SystemSettingItem) {
   const newValue = editValues[item.key]
+  savedKey.value = null
   savingKey.value = item.key
   try {
     const updated = await updateSystemSetting(item.key, newValue)
@@ -994,9 +1138,11 @@ async function persistSetting(item: SystemSettingItem) {
     editValues[item.key] = Array.isArray(updated.value)
       ? [...(updated.value as unknown[])]
       : updated.value
+    markSettingSaved(updated)
     MessagePlugin.success(t('system.globalSettings.messages.saveSuccess'))
   } catch (err: any) {
     const msg = err?.message || t('system.globalSettings.messages.saveFailed')
+    saveAnnouncement.value = msg
     MessagePlugin.error(msg)
     // Roll the input back to the canonical value on failure. Without
     // this an invalid edit (e.g. SSRF whitelist with a malformed CIDR
@@ -1120,10 +1266,12 @@ async function onAdminsChange(next: string[]) {
     }
     await loadAdmins()
     if (applied > 0) {
+      saveAnnouncement.value = t('system.globalSettings.admins.saveSuccess')
       MessagePlugin.success(t('system.globalSettings.admins.saveSuccess'))
     }
   } catch (err: any) {
     const msg = err?.message || t('system.globalSettings.admins.saveFailed')
+    saveAnnouncement.value = msg
     MessagePlugin.error(msg)
     await loadAdmins()
   } finally {
@@ -1136,353 +1284,9 @@ onMounted(() => {
   loadAdmins()
 })
 
-// ---- Platform audit log (system-scope, tenant_id=0) ---------------------
-//
-// Wired against GET /api/v1/system/admin/audit-log (SystemAdmin only).
-// The drawer mirrors the structural choices of the tenant audit drawer
-// in frontend/src/views/settings/TenantMembers.vue: cursor-paged by
-// descending id, lazy-loaded on first open, infinite-scroll via an
-// IntersectionObserver pinned to the scroll root. Refresh is explicit
-// via a button inside the drawer so closing/reopening doesn't quietly
-// fire a new fetch the operator didn't ask for.
-
-const auditDrawerVisible = ref(false)
-const auditEntries = ref<AuditLog[]>([])
-const auditLoading = ref(false)
-const auditError = ref('')
-const auditCursor = ref<number>(0) // 0 = "from the top"
-const auditHasMore = ref(true)
-const auditLoadedOnce = ref(false)
-const AUDIT_PAGE_SIZE = 50
-
-const auditScrollRoot = ref<HTMLElement | null>(null)
-const auditLoadSentinelEl = ref<HTMLElement | null>(null)
-let auditScrollObserver: IntersectionObserver | null = null
-
-// We render a stacked "date / time" cell rather than ellipsing a single
-// flat string — the screenshot review surfaced that the joined form
-// reads as a wall of identical timestamps when 50 events fall in the
-// same minute. A two-line cell also frees horizontal space for the
-// (much more important) target diff column.
-
-const auditColumns = computed(() => [
-  { colKey: 'created_at', title: t('system.globalSettings.audit.columns.time'), width: 120 },
-  { colKey: 'actor', title: t('system.globalSettings.audit.columns.actor'), width: 180 },
-  { colKey: 'action', title: t('system.globalSettings.audit.columns.action'), width: 150 },
-  {
-    colKey: 'target',
-    title: t('system.globalSettings.audit.columns.target'),
-    // No fixed width / no ellipsis: this is where the diff content
-    // lives, and clipping it to "..." negates the entire reason we
-    // synthesise the cell in the first place. CSS handles wrapping.
-    minWidth: 240,
-  },
-  { colKey: 'outcome', title: t('system.globalSettings.audit.columns.outcome'), width: 80, align: 'center' as const },
-])
-
-// Two helpers feeding the stacked time cell. Falling back to the raw
-// string keeps the table readable when Intl chokes on a malformed
-// timestamp (shouldn't happen, but cheap to defend).
-function formatAuditDatePart(s: string | undefined): string {
-  if (!s) return '-'
-  try {
-    return new Intl.DateTimeFormat(locale.value || 'zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(new Date(s))
-  } catch {
-    return s
-  }
-}
-
-function formatAuditTimePart(s: string | undefined): string {
-  if (!s) return ''
-  try {
-    return new Intl.DateTimeFormat(locale.value || 'zh-CN', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    }).format(new Date(s))
-  } catch {
-    return ''
-  }
-}
-
-// Action chip colour: promote is reassuring green; revoke / setting
-// change are worth a second look (warning orange); denied / access
-// rejections show danger so an operator can scan a chronological feed
-// and immediately spot abuse.
-function auditActionTheme(
-  action: AuditAction,
-): 'success' | 'warning' | 'danger' | 'primary' | 'default' {
-  switch (action) {
-    case 'system.admin_promoted':
-      return 'success'
-    case 'system.admin_revoked':
-    case 'system.setting_changed':
-      return 'warning'
-    case 'rbac.access_denied':
-      return 'danger'
-    default:
-      return 'default'
-  }
-}
-
-function auditOutcomeTheme(o: AuditOutcome): 'success' | 'danger' | 'default' {
-  if (o === 'denied') return 'danger'
-  if (o === 'success') return 'success'
-  return 'default'
-}
-
-// i18n 键名含点号（system.setting_changed）。用 t(path) 会按路径拆开解析，
-// 无法命中 system.globalSettings.audit.action['system.*'] — 必须 tm + 字面量键。
-function formatAuditAction(action: AuditAction): string {
-  const bag = tm('system.globalSettings.audit.action') as unknown
-  if (bag !== null && typeof bag === 'object' && typeof (bag as Record<string, string>)[action] === 'string') {
-    return (bag as Record<string, string>)[action]
-  }
-  return action
-}
-
-// Actor display: most system-admin operations are performed by humans
-// whose username we don't have a local mirror of. The audit row only
-// carries the UUID, so we fall back to a short prefix for readability.
-// If the actor is the current user, we resolve to their own profile.
-function auditActorLabel(userId: string): string {
-  const me = authStore.user
-  if (me && me.id === userId) {
-    return me.username?.trim() || me.email?.trim() || userId.slice(0, 8)
-  }
-  return userId.slice(0, 8)
-}
-
-function auditActorRoleLabel(role: string): string {
-  const key = `system.globalSettings.audit.actorRole.${role}`
-  if (te(key)) return t(key)
-  return role
-}
-
-// Target rendering is split into two pieces so the table cell can
-// show a structural "subject" (key / user) on its own line and the
-// value diff on a second, monospaced line — far more legible than a
-// single concatenated string clipped by ellipsis.
-
-function auditDetailsObject(row: AuditLog): Record<string, unknown> | null {
-  if (row.details && typeof row.details === 'object') {
-    return row.details as Record<string, unknown>
-  }
-  return null
-}
-
-// First line of the target cell — the thing being acted on.
-//   - setting_changed (regular key): the registry key
-//   - setting_changed (bulk apply):  i18n label "(bulk) default storage quota"
-//   - admin_promoted/revoked:        username (email) of the affected user
-function auditTargetKey(row: AuditLog): string {
-  const details = auditDetailsObject(row)
-  if (row.action === 'system.setting_changed') {
-    if (row.target_type === 'tenant_storage_quota') {
-      return t('system.globalSettings.audit.target.bulkQuota')
-    }
-    if (details && typeof details.key === 'string' && details.key) return details.key
-    return row.target_id || row.target_type || ''
-  }
-  if (row.action === 'system.admin_promoted' || row.action === 'system.admin_revoked') {
-    if (!details) return row.target_user_id ? row.target_user_id.slice(0, 8) : ''
-    const name = typeof details.target_username === 'string' ? details.target_username : ''
-    const mail = typeof details.target_email === 'string' ? details.target_email : ''
-    if (name && mail) return `${name} (${mail})`
-    return name || mail || (row.target_user_id ? row.target_user_id.slice(0, 8) : '')
-  }
-  if (row.target_user_id) return row.target_user_id.slice(0, 8)
-  if (row.target_id) {
-    return row.target_type ? `${row.target_type}:${row.target_id}` : row.target_id
-  }
-  return ''
-}
-
-// Second line — the change diff. Returns an empty string when there
-// is no meaningful diff to display (the expanded row still surfaces
-// the raw JSON for forensics).
-function auditTargetDiff(row: AuditLog): string {
-  const details = auditDetailsObject(row)
-  if (!details) return ''
-  if (row.action === 'system.setting_changed') {
-    if (row.target_type === 'tenant_storage_quota') {
-      const affected = typeof details.affected === 'number' ? details.affected : null
-      const gb = typeof details.quota_gb === 'number' ? details.quota_gb : null
-      if (affected !== null && gb !== null) {
-        return t('system.globalSettings.audit.target.bulkQuotaDiff', {
-          count: String(affected),
-          gb: String(gb),
-        })
-      }
-      return ''
-    }
-    return formatSettingDiff(details)
-  }
-  if (row.action === 'system.admin_promoted' && typeof details.idempotent === 'boolean') {
-    if (details.idempotent === true) {
-      return t('system.globalSettings.audit.target.promoteIdempotent')
-    }
-    return ''
-  }
-  if (row.action === 'system.admin_revoked' && typeof details.changed === 'boolean') {
-    if (details.changed === false) {
-      return t('system.globalSettings.audit.target.revokeNoop')
-    }
-    return ''
-  }
-  if (row.action === 'rbac.access_denied' && typeof details.required_role === 'string') {
-    return t('system.globalSettings.audit.target.requiredRole', { role: details.required_role })
-  }
-  return ''
-}
-
-const SETTING_DIFF_MAX_LEN = 80
-function formatSettingDiff(details: Record<string, unknown>): string {
-  const fmt = (v: unknown): string => {
-    if (v === null || v === undefined) {
-      return t('system.globalSettings.audit.target.valueNull')
-    }
-    if (typeof v === 'string') return v
-    if (typeof v === 'number' || typeof v === 'boolean') return String(v)
-    try {
-      return JSON.stringify(v)
-    } catch {
-      return String(v)
-    }
-  }
-  const truncate = (s: string): string =>
-    s.length > SETTING_DIFF_MAX_LEN ? s.slice(0, SETTING_DIFF_MAX_LEN - 1) + '…' : s
-  const oldStr = truncate(fmt(details.old_value))
-  const newStr = truncate(fmt(details.new_value))
-  if (oldStr === newStr) return ''
-  return `${oldStr} → ${newStr}`
-}
-
-// Expanded row state — local set of row ids the user has opened.
-// We keep it ephemeral (not persisted) so reopening the drawer always
-// shows a clean, collapsed view.
-const auditExpandedRowKeys = ref<number[]>([])
-
-function onAuditExpandChange(value: (string | number)[]) {
-  // t-table calls back with the *new* full list of expanded keys.
-  // Normalise to numbers because AuditLog.id is always a number.
-  auditExpandedRowKeys.value = value
-    .map((v) => (typeof v === 'number' ? v : Number(v)))
-    .filter((v) => Number.isFinite(v))
-}
-
-function auditDetailsJSON(row: AuditLog): string {
-  if (row.details === null || row.details === undefined) return '{}'
-  if (typeof row.details === 'string') return row.details
-  try {
-    return JSON.stringify(row.details, null, 2)
-  } catch {
-    return String(row.details)
-  }
-}
-
-async function loadAuditLog(reset: boolean) {
-  if (auditLoading.value) return
-  if (!reset && !auditHasMore.value) return
-
-  auditLoading.value = true
-  auditError.value = ''
-  try {
-    const resp = await listSystemAuditLog({
-      after_id: reset ? undefined : auditCursor.value || undefined,
-      limit: AUDIT_PAGE_SIZE,
-    })
-    if (resp.success) {
-      const rows = resp.data || []
-      auditEntries.value = reset ? rows : [...auditEntries.value, ...rows]
-      auditCursor.value = resp.next_cursor || 0
-      // Same convention as tenant audit: next_cursor=0 means "no
-      // older rows", regardless of whether the current page was empty.
-      auditHasMore.value = !!resp.next_cursor && rows.length > 0
-      auditLoadedOnce.value = true
-    } else {
-      auditError.value = resp.message || t('system.globalSettings.audit.errors.generic')
-    }
-  } catch (err: any) {
-    const status = err?.status
-    if (status === 403) {
-      auditError.value = t('system.globalSettings.audit.forbidden')
-    } else {
-      auditError.value = err?.message || t('system.globalSettings.audit.errors.generic')
-    }
-  } finally {
-    auditLoading.value = false
-  }
-}
-
-function detachAuditInfiniteScroll() {
-  auditScrollObserver?.disconnect()
-  auditScrollObserver = null
-}
-
-function attachAuditInfiniteScroll() {
-  detachAuditInfiniteScroll()
-  const root = auditScrollRoot.value
-  const sentinel = auditLoadSentinelEl.value
-  if (!root || !sentinel) return
-
-  auditScrollObserver = new IntersectionObserver(
-    (entries) => {
-      const hitBottom = entries.some((e) => e.isIntersecting)
-      if (!hitBottom || !auditHasMore.value || auditLoading.value) return
-      void loadAuditLog(false)
-    },
-    { root, rootMargin: '100px 0px', threshold: 0 },
-  )
-  auditScrollObserver.observe(sentinel)
-}
-
-function reloadAuditLog() {
-  auditCursor.value = 0
-  auditHasMore.value = true
-  loadAuditLog(true)
-}
-
-function openAuditDrawer() {
-  auditDrawerVisible.value = true
-  if (!auditLoadedOnce.value) {
-    loadAuditLog(true)
-  }
-}
-
-watch(
-  auditDrawerVisible,
-  async (open) => {
-    if (!open) {
-      detachAuditInfiniteScroll()
-      return
-    }
-    await nextTick()
-    attachAuditInfiniteScroll()
-  },
-  { flush: 'post' },
-)
-
-watch(
-  () => auditError.value,
-  async () => {
-    if (!auditDrawerVisible.value) return
-    await nextTick()
-    if (!auditError.value) {
-      attachAuditInfiniteScroll()
-      return
-    }
-    detachAuditInfiniteScroll()
-  },
-  { flush: 'post' },
-)
-
-onUnmounted(() => detachAuditInfiniteScroll())
+onUnmounted(() => {
+  if (savedKeyTimer) clearTimeout(savedKeyTimer)
+})
 </script>
 
 <style lang="less" scoped>
@@ -1508,357 +1312,32 @@ onUnmounted(() => detachAuditInfiniteScroll())
   }
 }
 
-/* Title + audit-log entry sit on the same row, parallel to the layout
-   used in tenant member settings — keeps secondary actions anchored to
-   the section header instead of floating loose above content. */
-.section-header-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
 
-  h2 {
-    margin: 0;
-  }
-}
-
-.header-audit-btn {
-  flex-shrink: 0;
-}
-
-/* ===== Audit drawer (mirrors TenantMembers.vue's audit panel) =========
-   Kept scoped to this view rather than extracted to a shared component:
-   the two pages render distinct action labels and target formatters,
-   and a generic <AuditLogPanel> would have to thread enough props
-   through to make the abstraction more expensive than the duplication.
-   Revisit if a third audit surface appears. */
-.audit-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding-top: 8px;
-}
-
-.audit-panel--drawer {
-  padding-top: 0;
-}
-
-.audit-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.settings-intro-panel {
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
   background: var(--td-bg-color-secondarycontainer);
-  padding: 12px 16px;
-  border-radius: 8px;
-  gap: 12px;
-
-  .audit-desc {
-    flex: 1;
-    min-width: 0;
-    font-size: 13px;
-    color: var(--td-text-color-secondary);
-  }
-
-  .audit-refresh-btn {
-    flex-shrink: 0;
-  }
-}
-
-.audit-drawer-inner {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  gap: 14px;
-  min-height: 0;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.audit-drawer-fill {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.audit-drawer-branch {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.audit-drawer-branch--error {
-  justify-content: center;
-
-  .error-inline {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 20px 0 8px;
-  }
-}
-
-.audit-drawer-branch--empty.empty-state--audit {
-  flex: 1 1 auto;
-  justify-content: center;
-  align-items: center;
-  padding: 24px 12px;
-  min-height: 0;
-}
-
-.audit-scroll-area {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-
-.audit-load-sentinel {
-  height: 1px;
-  width: 100%;
-  pointer-events: none;
-}
-
-.audit-loading-more {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 12px;
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-}
-
-.audit-end-hint {
-  text-align: center;
-  font-size: 12px;
-  color: var(--td-text-color-disabled);
-  padding: 8px 0 14px;
-  margin: 0;
-}
-
-.audit-time {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  line-height: 1.3;
-
-  .audit-time-date {
-    font-size: 12px;
-    color: var(--td-text-color-secondary);
-  }
-
-  .audit-time-clock {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-    font-variant-numeric: tabular-nums;
-  }
-}
-
-.audit-actor {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  line-height: 1.3;
-  min-width: 0;
-
-  .audit-actor-name {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .audit-actor-role {
-    font-size: 12px;
-    color: var(--td-text-color-secondary);
-  }
-}
-
-.audit-target {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  line-height: 1.35;
-  min-width: 0;
-  padding: 2px 0;
-
-  .audit-target-key {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-    word-break: break-all;
-    font-family: var(--td-font-family-mono, monospace);
-  }
-
-  .audit-target-diff {
-    font-size: 12px;
-    color: var(--td-text-color-secondary);
-    font-family: var(--td-font-family-mono, monospace);
-    word-break: break-all;
-    line-height: 1.4;
-  }
-
-  .audit-target-empty {
-    color: var(--td-text-color-placeholder);
-  }
-}
-
-/* Expanded row: surfaces the raw audit row context (UUIDs, target
-   type/id, full details JSON) so an investigator never has to hop to
-   psql for the verbatim event. Background steps off-card to make the
-   nested context visually distinct from the table rows. */
-.audit-expanded {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 12px 16px;
-  background: var(--td-bg-color-container-hover);
-}
-
-.audit-expanded-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px 18px;
-}
-
-.audit-expanded-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.audit-expanded-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--td-text-color-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.audit-expanded-value {
-  font-size: 12px;
-  color: var(--td-text-color-primary);
-  word-break: break-all;
-}
-
-.audit-expanded-details {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.audit-expanded-json {
-  margin: 0;
-  padding: 10px 12px;
-  font-size: 12px;
-  line-height: 1.55;
-  color: var(--td-text-color-primary);
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 280px;
-  overflow: auto;
-}
-
-.mono {
-  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-}
-
-.data-table-shell {
-  overflow-x: auto;
-  border-radius: 10px;
-  border: 1px solid var(--td-component-stroke);
-  background-color: var(--td-bg-color-container);
-
-  &:deep(thead th) {
-    font-weight: 600;
-    font-size: 13px;
-    background-color: var(--td-bg-color-secondarycontainer) !important;
-  }
-
-  &:deep(.t-table td),
-  &:deep(.t-table th) {
-    padding-top: 14px;
-    padding-bottom: 14px;
-    /* Center the cell content vertically: most rows have at least one
-       single-line tag column (action / outcome), and a top-aligned
-       layout floats those chips above the multi-line target cell —
-       middle keeps the row's visual weight unified. */
-    vertical-align: middle;
-  }
-}
-
-/* Audit-specific table polish: no zebra stripes (the per-row "key /
-   diff" stack already provides enough separation between rows; stripes
-   on top read as visual noise), softer hover, denser separator. */
-.audit-table-shell {
-  /* Sticky table head: long audit feeds (50+ rows) lose the column
-     labels once the user scrolls, which makes "what's this column?"
-     a constant relearn. The drawer's outer scroll container is
-     `.audit-scroll-area`, so `top: 0` here pins thead to that
-     container's top. z-index keeps it above row hover/expand
-     backgrounds, and the explicit background plus bottom border
-     prevent row content bleeding through during scroll. */
-  &:deep(thead th) {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-    box-shadow: inset 0 -1px 0 var(--td-component-stroke);
-  }
-
-  &:deep(.t-table tbody tr:hover > td) {
-    background-color: var(--td-bg-color-container-hover);
-  }
-
-  &:deep(.t-table tbody tr.t-table__expanded-row > td) {
-    padding: 0 !important;
-    background-color: transparent;
-  }
-
-  &:deep(.t-table__expandable-icon-cell) {
-    width: 36px;
-  }
-}
-
-.priority-hint {
-  margin-bottom: 24px;
-  padding: 14px 16px;
-  border-radius: 6px;
-  background: var(--td-bg-color-container-hover);
-  border-left: 3px solid var(--td-brand-color);
-}
-
-.priority-hint-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
-.priority-hint-icon {
-  color: var(--td-brand-color);
-  font-size: 16px;
 }
 
 .priority-hint-title {
-  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+  font-size: 13px;
   font-weight: 500;
-  color: var(--td-text-color-primary);
+  color: var(--td-text-color-secondary);
+
+  .t-icon {
+    color: var(--td-brand-color);
+  }
 }
 
 .priority-hint-list {
-  margin: 4px 0 0;
-  padding-left: 22px;
+  margin: 0;
+  padding: 0 0 0 20px;
   font-size: 13px;
   line-height: 1.65;
   color: var(--td-text-color-primary);
@@ -1867,6 +1346,129 @@ onUnmounted(() => detachAuditInfiniteScroll())
   li + li {
     margin-top: 4px;
   }
+}
+
+.settings-section-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0 0 18px;
+  background: var(--td-bg-color-container);
+  box-shadow: 0 1px 0 var(--td-component-stroke);
+
+  &:deep(.t-tabs__nav-item) {
+    font-weight: 500;
+  }
+}
+
+.settings-section-panel {
+  min-width: 0;
+}
+
+.settings-section-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--td-component-stroke);
+
+  h3 {
+    margin: 0 0 4px;
+    font-size: 16px;
+    line-height: 1.4;
+    color: var(--td-text-color-primary);
+  }
+
+  p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--td-text-color-secondary);
+  }
+}
+
+.settings-section-intro--runtime {
+  border-bottom: none;
+}
+
+.runtime-table-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 24px;
+  padding: 10px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+
+  span:last-child {
+    text-align: right;
+  }
+}
+
+.settings-group--runtime {
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 0 0 8px 8px;
+  overflow: hidden;
+
+  .setting-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 280px;
+    gap: 24px;
+    padding: 14px 16px;
+  }
+
+  .setting-info {
+    max-width: none;
+    padding-right: 0;
+  }
+
+  .setting-label {
+    font-size: 14px;
+  }
+
+  .desc {
+    max-width: 620px;
+    font-size: 12px;
+  }
+
+  .setting-control {
+    min-width: 0;
+  }
+
+  .setting-input {
+    width: 210px;
+  }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.setting-save-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  min-width: 52px;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+}
+
+.setting-save-state--success {
+  color: var(--td-success-color);
 }
 
 .setting-reset-btn {
@@ -1993,10 +1595,64 @@ onUnmounted(() => detachAuditInfiniteScroll())
   width: 320px;
 }
 
+.password-reset-trigger {
+  min-width: 112px;
+  height: 32px;
+  padding: 0 12px;
+  color: var(--td-error-color);
+  background: var(--td-error-color-light);
+  border: 1px solid transparent;
+  border-radius: 6px;
+
+  &:hover {
+    color: var(--td-error-color-hover);
+    background: var(--td-error-color-light-hover);
+    border-color: var(--td-error-color-focus);
+  }
+
+  &:active {
+    color: var(--td-error-color-active);
+    background: var(--td-error-color-focus);
+  }
+}
+
+.password-reset-warning {
+  margin-bottom: 20px;
+}
+
 @media (max-width: 860px) {
+  .settings-section-intro {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .runtime-table-header {
+    display: none;
+  }
+
+  .settings-group--runtime {
+    border-radius: 8px;
+
+    .setting-row {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .setting-input {
+      width: 100%;
+    }
+  }
+
   .setting-row {
     flex-direction: column;
     gap: 12px;
+  }
+
+  .setting-info {
+    width: 100%;
+    max-width: none;
+    padding-right: 0;
   }
 
   .setting-control {
@@ -2027,23 +1683,95 @@ onUnmounted(() => detachAuditInfiniteScroll())
 </style>
 
 <style lang="less">
-/* t-drawer teleports its content-wrapper to body, so the height-chain
-   needed for the internal scroll area must be declared globally. Same
-   pattern as `.tenant-members-audit-drawer` in TenantMembers.vue. */
-.t-drawer.system-settings-audit-drawer.t-drawer--right .t-drawer__content-wrapper--right {
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  max-height: 100vh;
-  height: 100%;
+/* The dialog is teleported to body, so its visual shell cannot be
+   styled from the scoped block above. Keep this class specific to the
+   password-reset flow instead of changing every TDesign dialog. */
+.password-reset-dialog {
+  padding: 0;
+  overflow: hidden;
+  border-color: var(--td-component-stroke);
+  border-radius: 12px;
+  box-shadow:
+    0 12px 32px rgba(15, 23, 42, 0.12),
+    0 2px 8px rgba(15, 23, 42, 0.08);
+
+  .t-dialog__header {
+    min-height: 64px;
+    padding: 0 24px;
+    font-size: 18px;
+    line-height: 26px;
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  .t-dialog__close {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 6px;
+  }
+
+  .t-dialog__body {
+    padding: 20px 24px 4px;
+  }
+
+  .password-reset-warning {
+    padding: 12px 14px;
+    border-radius: 8px;
+
+    .t-alert__content {
+      font-size: 13px;
+      line-height: 20px;
+    }
+  }
+
+  .password-reset-form {
+    .t-form__item {
+      margin-bottom: 16px;
+    }
+
+    .t-form__label--top {
+      min-height: 28px;
+      padding: 0;
+      font-size: 14px;
+      line-height: 22px;
+    }
+
+    .t-input {
+      border-radius: 6px;
+    }
+  }
+
+  .t-dialog__footer {
+    box-sizing: border-box;
+    padding: 16px 24px 20px;
+    border-top: 1px solid var(--td-component-stroke);
+
+    .t-button {
+      min-width: 88px;
+      border-radius: 6px;
+    }
+  }
 }
 
-.t-drawer.system-settings-audit-drawer .t-drawer__body {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-  overflow: hidden !important;
+@media (max-width: 480px) {
+  .password-reset-dialog {
+    width: calc(100vw - 24px) !important;
+
+    .t-dialog__header {
+      min-height: 56px;
+      padding: 0 20px;
+      font-size: 17px;
+    }
+
+    .t-dialog__body {
+      padding: 16px 20px 4px;
+    }
+
+    .t-dialog__footer {
+      padding: 14px 20px 18px;
+    }
+  }
 }
+
 </style>

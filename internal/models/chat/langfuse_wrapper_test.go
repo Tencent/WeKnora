@@ -32,6 +32,19 @@ func TestBuildLangfuseGenerationOutput(t *testing.T) {
 	}
 }
 
+func TestSnapshotLangfuseToolCallsKeepsModelArguments(t *testing.T) {
+	providerCalls := []types.LLMToolCall{{
+		ID:       "call_1",
+		Function: types.FunctionCall{Name: "wiki_read_page", Arguments: `{"slugs":["res://0001"]}`},
+	}}
+	snapshot := snapshotLangfuseToolCalls(providerCalls)
+	providerCalls[0].Function.Arguments = `{"slugs":["summary/uuid"]}`
+
+	if got := snapshot[0].Function.Arguments; got != `{"slugs":["res://0001"]}` {
+		t.Fatalf("Langfuse snapshot was mutated to %s", got)
+	}
+}
+
 func TestBuildLangfuseMessagesReasoningContent(t *testing.T) {
 	msgs := buildLangfuseMessages([]Message{
 		{Role: "assistant", ReasoningContent: "chain of thought", ToolCalls: []ToolCall{{ID: "tc1"}}},
@@ -41,5 +54,18 @@ func TestBuildLangfuseMessagesReasoningContent(t *testing.T) {
 	}
 	if msgs[0]["reasoning_content"] != "chain of thought" {
 		t.Fatalf("reasoning_content = %v; want chain of thought", msgs[0]["reasoning_content"])
+	}
+}
+
+func TestConvertUsageIncludesPromptCacheCounters(t *testing.T) {
+	got := convertUsage(&types.TokenUsage{
+		PromptTokens: 1000, CompletionTokens: 50, TotalTokens: 1050,
+		CacheReadTokens: 800, CacheWriteTokens: 100, CacheMissTokens: 200,
+	})
+	if got == nil {
+		t.Fatal("convertUsage returned nil")
+	}
+	if got.CacheRead != 800 || got.CacheWrite != 100 || got.CacheMiss != 200 {
+		t.Fatalf("cache usage = read:%d write:%d miss:%d", got.CacheRead, got.CacheWrite, got.CacheMiss)
 	}
 }

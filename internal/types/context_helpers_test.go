@@ -145,6 +145,14 @@ func TestLanguageFromContext(t *testing.T) {
 	}
 }
 
+func TestLLMCallMetadataContext(t *testing.T) {
+	ctx := WithLLMCallMetadata(context.Background(), "wiki_page_modify", "abc123")
+	purpose, prefix := LLMCallMetadataFromContext(ctx)
+	if purpose != "wiki_page_modify" || prefix != "abc123" {
+		t.Fatalf("metadata = (%q, %q)", purpose, prefix)
+	}
+}
+
 // BenchmarkLanguageLocaleName benchmarks the language name lookup
 func BenchmarkLanguageLocaleName(b *testing.B) {
 	testCases := []string{"zh", "en", "zh-CN", "ko", "unknown"}

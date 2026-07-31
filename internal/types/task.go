@@ -5,29 +5,43 @@ package types
 // between pools instead of being only a weighted dequeue preference.
 const (
 	WorkerPoolCore        = "core"
+	WorkerPoolPostProcess = "postprocess"
 	WorkerPoolEnrichment  = "enrichment"
 	WorkerPoolMaintenance = "maintenance"
+	WorkerPoolShared      = "shared"
 	WorkerPoolWiki        = "wiki"
 
-	// DefaultUpstreamWorkerConcurrency is split across core, enrichment,
-	// and maintenance. Wiki stays separately configurable because its model
-	// workload has a different capacity profile.
-	DefaultUpstreamWorkerConcurrency = 32
-	DefaultWikiWorkerConcurrency     = 16
+	// Upstream defaults are explicit guarantees plus an elastic pool. The
+	// shared pool may consume core and enrichment queues, so idle capacity in
+	// either stage can be borrowed without sacrificing the dedicated minimums.
+	DefaultCoreWorkerConcurrency        = 8
+	DefaultPostProcessWorkerConcurrency = 2
+	DefaultEnrichmentWorkerConcurrency  = 12
+	DefaultMaintenanceWorkerConcurrency = 4
+	DefaultSharedWorkerConcurrency      = 6
+	DefaultWikiWorkerConcurrency        = 8
+	DefaultUpstreamWorkerConcurrency    = DefaultCoreWorkerConcurrency +
+		DefaultPostProcessWorkerConcurrency + DefaultEnrichmentWorkerConcurrency +
+		DefaultMaintenanceWorkerConcurrency + DefaultSharedWorkerConcurrency
 )
 
 // Asynq queue names. QueueMaintenance intentionally keeps the physical Redis
 // name "low" so tasks enqueued by older releases remain consumable during a
 // rolling deployment. New code uses the business-semantic constant.
 const (
-	QueueDefault     = "default"
-	QueueSummary     = "summary"
-	QueueMultimodal  = "multimodal"
-	QueueGraph       = "graph"
-	QueueQuestion    = "question"
-	QueueSync        = "sync"
-	QueueMaintenance = "low"
-	QueueWiki        = "wiki"
+	QueueDefault = "default"
+	// QueueChatAttachment carries session-scoped chat attachment parsing. It
+	// lives in the core pool but with a higher weight than QueueDefault so
+	// interactive chat uploads are not starved by knowledge-base batch imports.
+	QueueChatAttachment = "chat_attachment"
+	QueuePostProcess    = "postprocess"
+	QueueSummary        = "summary"
+	QueueMultimodal     = "multimodal"
+	QueueGraph          = "graph"
+	QueueQuestion       = "question"
+	QueueSync           = "sync"
+	QueueMaintenance    = "low"
+	QueueWiki           = "wiki"
 )
 
 // QueueDefinition is the single source of truth for queue topology. Worker
@@ -35,22 +49,31 @@ const (
 // scheduling weights shown to operators from drifting from the actual server
 // configuration.
 type QueueDefinition struct {
-	Name      string
-	Pool      string
-	Weight    int
-	TaskTypes []string
+	Name         string
+	Pool         string
+	Weight       int
+	SharedWeight int
+	TaskTypes    []string
 }
 
 var queueDefinitions = []QueueDefinition{
-	{Name: QueueDefault, Pool: WorkerPoolCore, Weight: 1, TaskTypes: []string{
-		TypeDocumentProcess, TypeManualProcess, TypeKnowledgePostProcess,
+	{Name: QueueDefault, Pool: WorkerPoolCore, Weight: 1, SharedWeight: 3, TaskTypes: []string{
+		TypeDocumentProcess, TypeManualProcess,
 	}},
-	{Name: QueueSummary, Pool: WorkerPoolEnrichment, Weight: 2, TaskTypes: []string{
+	// Interactive chat attachment parsing: higher core weight than the default
+	// queue so a large KB import cannot make chat uploads queue behind it.
+	{Name: QueueChatAttachment, Pool: WorkerPoolCore, Weight: 3, SharedWeight: 3, TaskTypes: []string{
+		TypeTemporaryDocumentProcess,
+	}},
+	{Name: QueuePostProcess, Pool: WorkerPoolPostProcess, Weight: 1, TaskTypes: []string{
+		TypeKnowledgePostProcess,
+	}},
+	{Name: QueueSummary, Pool: WorkerPoolEnrichment, Weight: 2, SharedWeight: 2, TaskTypes: []string{
 		TypeSummaryGeneration, TypeDataTableSummary,
 	}},
-	{Name: QueueMultimodal, Pool: WorkerPoolEnrichment, Weight: 1, TaskTypes: []string{TypeImageMultimodal}},
-	{Name: QueueGraph, Pool: WorkerPoolEnrichment, Weight: 1, TaskTypes: []string{TypeChunkExtract}},
-	{Name: QueueQuestion, Pool: WorkerPoolEnrichment, Weight: 1, TaskTypes: []string{TypeQuestionGeneration}},
+	{Name: QueueMultimodal, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeImageMultimodal}},
+	{Name: QueueGraph, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeChunkExtract}},
+	{Name: QueueQuestion, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeQuestionGeneration}},
 	{Name: QueueSync, Pool: WorkerPoolMaintenance, Weight: 2, TaskTypes: []string{TypeDataSourceSync}},
 	{Name: QueueMaintenance, Pool: WorkerPoolMaintenance, Weight: 1, TaskTypes: []string{
 		TypeFAQImport, TypeKBClone, TypeIndexDelete, TypeKBDelete,
@@ -95,47 +118,69 @@ func QueueWeightsForPool(pool string) map[string]int {
 	return weights
 }
 
-// WorkerPoolConcurrency is the deterministic split of the total upstream
-// worker budget. Keeping this pure allocation function in types lets the
-// server constructors and the System Admin API report identical values.
-type WorkerPoolConcurrency struct {
-	Total       int
-	Core        int
-	Enrichment  int
-	Maintenance int
-}
-
-// AllocateWorkerPoolConcurrency reserves 1/2 of the upstream budget for the
-// latency-sensitive core pipeline, 3/8 for LLM/VLM enrichment, and the
-// remainder for sync/cleanup/batch work. A minimum total of three guarantees
-// every independent server has at least one worker.
-func AllocateWorkerPoolConcurrency(total int) WorkerPoolConcurrency {
-	if total < 3 {
-		total = 3
-	}
-	core := total / 2
-	enrichment := (total * 3) / 8
-	if core < 1 {
-		core = 1
-	}
-	if enrichment < 1 {
-		enrichment = 1
-	}
-	maintenance := total - core - enrichment
-	if maintenance < 1 {
-		maintenance = 1
-		if core >= enrichment && core > 1 {
-			core--
-		} else if enrichment > 1 {
-			enrichment--
+// QueueWeightsForSharedPool returns the core/enrichment queues eligible for
+// elastic capacity. Post-process and maintenance are deliberately excluded:
+// post-process needs a small latency guarantee, while long maintenance tasks
+// must not pin burst capacity intended for the user-facing pipeline.
+func QueueWeightsForSharedPool() map[string]int {
+	weights := make(map[string]int)
+	for _, definition := range queueDefinitions {
+		if definition.SharedWeight > 0 {
+			weights[definition.Name] = definition.SharedWeight
 		}
 	}
+	return weights
+}
+
+// WorkerPoolConcurrency contains the explicit per-instance pool capacities.
+// Unlike the old ratio allocator, each field is independently configurable.
+type WorkerPoolConcurrency struct {
+	Core        int
+	PostProcess int
+	Enrichment  int
+	Maintenance int
+	Shared      int
+	Wiki        int
+}
+
+func DefaultWorkerPoolConcurrency() WorkerPoolConcurrency {
 	return WorkerPoolConcurrency{
-		Total:       total,
-		Core:        core,
-		Enrichment:  enrichment,
-		Maintenance: maintenance,
+		Core:        DefaultCoreWorkerConcurrency,
+		PostProcess: DefaultPostProcessWorkerConcurrency,
+		Enrichment:  DefaultEnrichmentWorkerConcurrency,
+		Maintenance: DefaultMaintenanceWorkerConcurrency,
+		Shared:      DefaultSharedWorkerConcurrency,
+		Wiki:        DefaultWikiWorkerConcurrency,
 	}
+}
+
+// ResolveWorkerPoolConcurrency centralizes setting keys, environment names,
+// defaults, and invalid-value fallback for both server construction and the
+// runtime API. The callback lets this package stay independent of the system
+// setting service interface.
+func ResolveWorkerPoolConcurrency(read func(key, env string, fallback int) int) WorkerPoolConcurrency {
+	allocation := DefaultWorkerPoolConcurrency()
+	if read == nil {
+		return allocation
+	}
+	positive := func(key, env string, fallback int) int {
+		value := read(key, env, fallback)
+		if value < 1 {
+			return fallback
+		}
+		return value
+	}
+	allocation.Core = positive("asynq.core_concurrency", "WEKNORA_ASYNQ_CORE_CONCURRENCY", allocation.Core)
+	allocation.PostProcess = positive("asynq.postprocess_concurrency", "WEKNORA_ASYNQ_POSTPROCESS_CONCURRENCY", allocation.PostProcess)
+	allocation.Enrichment = positive("asynq.enrichment_concurrency", "WEKNORA_ASYNQ_ENRICHMENT_CONCURRENCY", allocation.Enrichment)
+	allocation.Maintenance = positive("asynq.maintenance_concurrency", "WEKNORA_ASYNQ_MAINTENANCE_CONCURRENCY", allocation.Maintenance)
+	allocation.Shared = positive("asynq.shared_concurrency", "WEKNORA_ASYNQ_SHARED_CONCURRENCY", allocation.Shared)
+	allocation.Wiki = positive("asynq.wiki_concurrency", "WEKNORA_WIKI_ASYNQ_CONCURRENCY", allocation.Wiki)
+	return allocation
+}
+
+func (c WorkerPoolConcurrency) UpstreamTotal() int {
+	return c.Core + c.PostProcess + c.Enrichment + c.Maintenance + c.Shared
 }
 
 // QueueStat is a read-only depth snapshot of a single asynq queue, used
@@ -170,25 +215,37 @@ type QueueStat struct {
 	MemoryUsageBytes int64 `json:"memory_usage_bytes"`
 }
 
+// WorkerServerStat is one live asynq server heartbeat. Queue weights identify
+// which logical pool the server belongs to; the runtime handler aggregates
+// these records across replicas so configured per-instance capacity is not
+// confused with actual cluster capacity.
+type WorkerServerStat struct {
+	Concurrency int
+	Active      int
+	Status      string
+	Queues      map[string]int
+}
+
 const (
-	TypeChunkExtract         = "chunk:extract"
-	TypeDocumentProcess      = "document:process"       // 文档处理任务
-	TypeFAQImport            = "faq:import"             // FAQ导入任务（包含dry run模式）
-	TypeQuestionGeneration   = "question:generation"    // 问题生成任务
-	TypeSummaryGeneration    = "summary:generation"     // 摘要生成任务
-	TypeKBClone              = "kb:clone"               // 知识库复制任务
-	TypeIndexDelete          = "index:delete"           // 索引删除任务
-	TypeKBDelete             = "kb:delete"              // 知识库删除任务
-	TypeKnowledgeListDelete  = "knowledge:list_delete"  // 批量删除知识任务
-	TypeKnowledgeListReparse = "knowledge:list_reparse" // 批量重解析知识任务
-	TypeKnowledgeMove        = "knowledge:move"         // 知识移动任务
-	TypeDataTableSummary     = "datatable:summary"      // 表格摘要任务
-	TypeImageMultimodal      = "image:multimodal"       // 图片多模态处理任务（OCR + VLM Caption）
-	TypeKnowledgePostProcess = "knowledge:post_process" // 知识后处理任务（统一调度）
-	TypeManualProcess        = "manual:process"         // 手工知识更新任务（cleanup + 重新索引）
-	TypeDataSourceSync       = "datasource:sync"        // 数据源同步任务
-	TypeWikiIngest           = "wiki:ingest"            // Wiki 页面同步任务
-	TypeWikiFinalize         = "wiki:finalize"          // Wiki KB 级收尾任务（防抖：索引重建/死链清理/交叉链接）
+	TypeChunkExtract             = "chunk:extract"
+	TypeDocumentProcess          = "document:process"           // 文档处理任务
+	TypeFAQImport                = "faq:import"                 // FAQ导入任务（包含dry run模式）
+	TypeQuestionGeneration       = "question:generation"        // 问题生成任务
+	TypeSummaryGeneration        = "summary:generation"         // 摘要生成任务
+	TypeKBClone                  = "kb:clone"                   // 知识库复制任务
+	TypeIndexDelete              = "index:delete"               // 索引删除任务
+	TypeKBDelete                 = "kb:delete"                  // 知识库删除任务
+	TypeKnowledgeListDelete      = "knowledge:list_delete"      // 批量删除知识任务
+	TypeKnowledgeListReparse     = "knowledge:list_reparse"     // 批量重解析知识任务
+	TypeKnowledgeMove            = "knowledge:move"             // 知识移动任务
+	TypeDataTableSummary         = "datatable:summary"          // 表格摘要任务
+	TypeImageMultimodal          = "image:multimodal"           // 图片多模态处理任务（OCR + VLM Caption）
+	TypeKnowledgePostProcess     = "knowledge:post_process"     // 知识后处理任务（统一调度）
+	TypeManualProcess            = "manual:process"             // 手工知识更新任务（cleanup + 重新索引）
+	TypeDataSourceSync           = "datasource:sync"            // 数据源同步任务
+	TypeWikiIngest               = "wiki:ingest"                // Wiki 页面同步任务
+	TypeWikiFinalize             = "wiki:finalize"              // Wiki KB 级收尾任务（防抖：索引重建/死链清理/交叉链接）
+	TypeTemporaryDocumentProcess = "temporary_document:process" // 会话临时文档解析任务
 )
 
 // ExtractChunkPayload represents the extract chunk task payload
@@ -248,6 +305,8 @@ type FAQImportPayload struct {
 	Mode        string            `json:"mode"`
 	DryRun      bool              `json:"dry_run"`     // dry run 模式只验证不导入
 	EnqueuedAt  int64             `json:"enqueued_at"` // 任务入队时间戳，用于区分同一 TaskID 的不同次提交
+	InstanceID  string            `json:"instance_id,omitempty"`
+	Initiator   TaskInitiator     `json:"initiator,omitempty"`
 }
 
 // QuestionGenerationPayload represents the question generation task payload
@@ -301,6 +360,10 @@ type SummaryGenerationPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	KnowledgeID     string `json:"knowledge_id"`
 	Language        string `json:"language,omitempty"`
+	// Refresh marks an independently queued refresh after document metadata or
+	// chunk edits. Refresh tasks are not part of the parse attempt's pending
+	// subtask counter and update existing summary chunks in place.
+	Refresh bool `json:"refresh,omitempty"`
 	// Attempt links this task to the parent parse attempt so the worker
 	// can record a postprocess.summary subspan under the right attempt's
 	// postprocess stage. See QuestionGenerationPayload.Attempt notes.
@@ -310,10 +373,11 @@ type SummaryGenerationPayload struct {
 // KBClonePayload represents the knowledge base clone task payload
 type KBClonePayload struct {
 	TracingContext
-	TenantID uint64 `json:"tenant_id"`
-	TaskID   string `json:"task_id"`
-	SourceID string `json:"source_id"`
-	TargetID string `json:"target_id"`
+	TenantID  uint64        `json:"tenant_id"`
+	TaskID    string        `json:"task_id"`
+	SourceID  string        `json:"source_id"`
+	TargetID  string        `json:"target_id"`
+	Initiator TaskInitiator `json:"initiator,omitempty"`
 }
 
 // IndexDeletePayload represents the index delete task payload
@@ -336,6 +400,7 @@ type KBDeletePayload struct {
 	TracingContext
 	TenantID         uint64                  `json:"tenant_id"`
 	KnowledgeBaseID  string                  `json:"knowledge_base_id"`
+	DataSourceIDs    []string                `json:"data_source_ids,omitempty"`
 	EffectiveEngines []RetrieverEngineParams `json:"effective_engines"`
 	// VectorStoreID is the bound store snapshot taken at enqueue time (before
 	// soft-delete) so the async worker can resolve the right store. nil means
@@ -346,8 +411,9 @@ type KBDeletePayload struct {
 // KnowledgeListDeletePayload represents the batch knowledge delete task payload
 type KnowledgeListDeletePayload struct {
 	TracingContext
-	TenantID     uint64   `json:"tenant_id"`
-	KnowledgeIDs []string `json:"knowledge_ids"`
+	TenantID     uint64        `json:"tenant_id"`
+	KnowledgeIDs []string      `json:"knowledge_ids"`
+	Initiator    TaskInitiator `json:"initiator,omitempty"`
 }
 
 // KnowledgeListReparsePayload represents the batch knowledge reparse task payload
@@ -356,17 +422,19 @@ type KnowledgeListReparsePayload struct {
 	TenantID      uint64                     `json:"tenant_id"`
 	KnowledgeIDs  []string                   `json:"knowledge_ids"`
 	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
+	Initiator     TaskInitiator              `json:"initiator,omitempty"`
 }
 
 // KnowledgeMovePayload represents the knowledge move task payload
 type KnowledgeMovePayload struct {
 	TracingContext
-	TenantID     uint64   `json:"tenant_id"`
-	TaskID       string   `json:"task_id"`
-	KnowledgeIDs []string `json:"knowledge_ids"`
-	SourceKBID   string   `json:"source_kb_id"`
-	TargetKBID   string   `json:"target_kb_id"`
-	Mode         string   `json:"mode"` // "reuse_vectors" or "reparse"
+	TenantID     uint64        `json:"tenant_id"`
+	TaskID       string        `json:"task_id"`
+	KnowledgeIDs []string      `json:"knowledge_ids"`
+	SourceKBID   string        `json:"source_kb_id"`
+	TargetKBID   string        `json:"target_kb_id"`
+	Mode         string        `json:"mode"` // "reuse_vectors" or "reparse"
+	Initiator    TaskInitiator `json:"initiator,omitempty"`
 }
 
 // KnowledgeMoveProgress represents the progress of a knowledge move task

@@ -188,7 +188,11 @@ func (h *KnowledgeHandler) resolveKnowledgeAndValidateKBAccess(c *gin.Context, k
 	if h.agentShareService != nil && requiredPermission == types.OrgRoleViewer {
 		agentID := c.Query("agent_id")
 		if agentID != "" {
-			agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, tenantID, callerTenantRole, agentID)
+			sourceTenantID, parseErr := types.ParseAgentSourceTenantID(c.Query(types.AgentSourceTenantIDParam))
+			if parseErr != nil {
+				return nil, ctx, errors.NewBadRequestError(parseErr.Error())
+			}
+			agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, tenantID, callerTenantRole, agentID, sourceTenantID)
 			if err == nil && agent != nil {
 				if knowledge.TenantID != agent.TenantID {
 					return nil, ctx, errors.NewForbiddenError("Permission denied to access this knowledge")
@@ -249,6 +253,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
 	payload := types.KnowledgeListDeletePayload{
 		TenantID:     tenantID,
 		KnowledgeIDs: ids,
+		Initiator:    types.TaskInitiatorFromContext(ctx),
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
@@ -273,6 +278,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
 		TenantID:      tenantID,
 		KnowledgeIDs:  ids,
 		ProcessConfig: processConfig,
+		Initiator:     types.TaskInitiatorFromContext(ctx),
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
@@ -680,16 +686,18 @@ func (h *KnowledgeHandler) GetKnowledgeSpans(c *gin.Context) {
 
 	rows := []types.KnowledgeProcessingSpan{}
 	currentAttempt := 0
+	latestAttempt := 0
 	if h.spanRepo != nil {
-		if requestedAttempt == 0 {
-			latest, lerr := h.spanRepo.LatestAttempt(ctx, knowledge.ID)
-			if lerr != nil {
-				logger.Warnf(ctx, "spans LatestAttempt failed for %s: %v", knowledge.ID, lerr)
-			} else {
-				currentAttempt = latest
-			}
+		latest, lerr := h.spanRepo.LatestAttempt(ctx, knowledge.ID)
+		if lerr != nil {
+			logger.Warnf(ctx, "spans LatestAttempt failed for %s: %v", knowledge.ID, lerr)
 		} else {
+			latestAttempt = latest
+		}
+		if requestedAttempt > 0 {
 			currentAttempt = requestedAttempt
+		} else {
+			currentAttempt = latestAttempt
 		}
 		if currentAttempt > 0 {
 			rows, err = h.spanRepo.ListByAttempt(ctx, knowledge.ID, currentAttempt)
@@ -713,23 +721,66 @@ func (h *KnowledgeHandler) GetKnowledgeSpans(c *gin.Context) {
 
 	resp := gin.H{
 		"knowledge_id":    knowledge.ID,
+		"attempt":         currentAttempt,
+		"latest_attempt":  latestAttempt,
 		"parse_status":    knowledge.ParseStatus,
 		"current_attempt": currentAttempt,
 		"current_stage":   currentStageName,
 		"trace":           tree,
 	}
-	if lastErr != nil {
-		resp["last_error"] = gin.H{
-			"stage":       lastErr.Name,
-			"code":        lastErr.ErrorCode,
-			"message":     lastErr.ErrorMessage,
-			"finished_at": lastErr.FinishedAt,
-		}
+	if lastError := knowledgeSpansLastError(
+		currentAttempt,
+		latestAttempt,
+		knowledge.ParseStatus,
+		knowledge.ErrorMessage,
+		knowledge.UpdatedAt,
+		lastErr,
+	); lastError != nil {
+		resp["last_error"] = lastError
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    resp,
 	})
+}
+
+// knowledgeSpansLastError builds the last_error payload for GetKnowledgeSpans.
+// Span failures win when present; otherwise a failed knowledge row without a
+// matching span error (recovery / dead-letter paths) surfaces ErrorMessage.
+func knowledgeSpansLastError(
+	currentAttempt, latestAttempt int,
+	parseStatus, knowledgeErrorMessage string,
+	knowledgeUpdatedAt time.Time,
+	spanFailure *types.KnowledgeProcessingSpan,
+) gin.H {
+	if spanFailure != nil {
+		return gin.H{
+			"stage":         spanFailure.Name,
+			"code":          spanFailure.ErrorCode,
+			"message":       spanFailure.ErrorMessage,
+			"name":          spanFailure.Name,
+			"error_code":    spanFailure.ErrorCode,
+			"error_message": spanFailure.ErrorMessage,
+			"finished_at":   spanFailure.FinishedAt,
+		}
+	}
+	if currentAttempt != latestAttempt || parseStatus != types.ParseStatusFailed || knowledgeErrorMessage == "" {
+		return nil
+	}
+	errorCode := "UNKNOWN"
+	if strings.EqualFold(strings.TrimSpace(knowledgeErrorMessage),
+		"Task interrupted due to application restart") {
+		errorCode = "SERVER_RESTART"
+	}
+	return gin.H{
+		"stage":         "knowledge_processing",
+		"code":          errorCode,
+		"message":       knowledgeErrorMessage,
+		"name":          "knowledge_processing",
+		"error_code":    errorCode,
+		"error_message": knowledgeErrorMessage,
+		"finished_at":   knowledgeUpdatedAt,
+	}
 }
 
 // buildSpanTree assembles a flat list of span rows into a parent-child
@@ -1002,7 +1053,7 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 	effectiveTenantID, _ := effCtx.Value(types.TenantIDContextKey).(uint64)
 	if effectiveTenantID == 0 {
 		logger.Error(ctx, "Effective tenant ID missing after access validation")
-		c.Error(errors.NewInternalServerError("tenant context unavailable"))
+		c.Error(errors.NewInternalServerError("workspace context unavailable"))
 		return
 	}
 
@@ -1229,7 +1280,10 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 		return
 	}
 
-	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	// Keep a handler-level Editor check in addition to the route guard. The
+	// original file is more sensitive than parsed-content reads and must not
+	// be downloadable through a read-only organization share.
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
 	if err != nil {
 		c.Error(err)
 		return
@@ -1334,20 +1388,21 @@ func (h *KnowledgeHandler) PreviewKnowledgeFile(c *gin.Context) {
 
 // GetKnowledgeBatchRequest defines parameters for batch knowledge retrieval
 type GetKnowledgeBatchRequest struct {
-	IDs     []string `form:"ids" binding:"required"` // List of knowledge IDs
-	KBID    string   `form:"kb_id"`                  // Optional: scope to this KB (validates access and uses effective tenant for shared KB)
-	AgentID string   `form:"agent_id"`               // Optional: when using a shared agent, use agent's tenant for retrieval (validates shared agent access)
+	IDs                 []string `form:"ids" binding:"required"` // List of knowledge IDs
+	KBID                string   `form:"kb_id"`                  // Optional: scope to this KB (validates access and uses effective tenant for shared KB)
+	AgentID             string   `form:"agent_id"`               // Optional: when using a shared agent, use agent's tenant for retrieval (validates shared agent access)
+	AgentSourceTenantID uint64   `form:"agent_source_tenant_id"` // Optional source selector, verified against the share relation
 }
 
 // GetKnowledgeBatch godoc
 // @Summary      批量获取知识
-// @Description  根据ID列表批量获取知识条目。可选 kb_id：指定时按该知识库校验权限并用于共享知识库的租户解析；可选 agent_id：使用共享智能体时传此参数，后端按智能体所属租户查询（用于刷新后恢复共享知识库下的文件）
+// @Description  根据ID列表批量获取知识条目。可选 kb_id：指定时按该知识库校验权限并用于共享知识库的空间解析；可选 agent_id：使用共享智能体时传此参数，后端按智能体所属空间查询（用于刷新后恢复共享知识库下的文件）
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
 // @Param        ids       query     []string  true   "知识ID列表"
 // @Param        kb_id     query     string   false  "可选，知识库ID（用于共享知识库时指定范围）"
-// @Param        agent_id  query     string   false  "可选，共享智能体ID（用于按智能体租户批量拉取文件详情）"
+// @Param        agent_id  query     string   false  "可选，共享智能体ID（用于按智能体空间批量拉取文件详情）"
 // @Success      200       {object}  map[string]interface{}  "知识列表"
 // @Failure      400       {object}  errors.AppError        "请求参数错误"
 // @Security     Bearer
@@ -1370,6 +1425,10 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
+	if _, parseErr := types.ParseAgentSourceTenantID(c.Query(types.AgentSourceTenantIDParam)); parseErr != nil {
+		c.Error(errors.NewBadRequestError(parseErr.Error()))
+		return
+	}
 
 	// agentAllowedKBIDs restricts results to the agent's configured KB scope.
 	// nil = no agent restriction; empty slice = agent has no KB access (none mode).
@@ -1389,7 +1448,7 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 			return
 		}
 		callerTenantRole := types.TenantRoleFromContext(ctx)
-		agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID)
+		agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID, req.AgentSourceTenantID)
 		if err != nil || agent == nil {
 			logger.Warnf(ctx, "GetKnowledgeBatch: invalid or inaccessible shared agent %s: %v", agentID, err)
 			c.Error(errors.NewForbiddenError("Invalid or inaccessible shared agent").WithDetails(err.Error()))
@@ -1515,12 +1574,52 @@ func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
+	updated, getErr := h.kgService.GetKnowledgeByID(effCtx, id)
+	if getErr != nil {
+		logger.Warnf(ctx, "Knowledge updated but failed to reload status for %s: %v", id, getErr)
+	}
 
 	logger.Infof(ctx, "Knowledge updated successfully, knowledge ID: %s", id)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "Knowledge chunk updated successfully",
+		"message": "Knowledge updated successfully",
+		"data":    updated,
 	})
+}
+
+// RegenerateKnowledgeSummary refreshes a stale summary after chunk or metadata edits.
+func (h *KnowledgeHandler) RegenerateKnowledgeSummary(c *gin.Context) {
+	ctx := c.Request.Context()
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	knowledge, err := h.kgService.GetKnowledgeByID(effCtx, id)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if knowledge.SummaryStatus == "" || knowledge.SummaryStatus == types.SummaryStatusNone {
+		knowledge, err = h.kgService.RegenerateKnowledgeSummary(effCtx, id)
+	} else {
+		err = h.kgService.RequestKnowledgeSummaryRefresh(effCtx, id)
+		if err == nil {
+			knowledge, err = h.kgService.GetKnowledgeByID(effCtx, id)
+		}
+	}
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": knowledge})
 }
 
 // UpdateManualKnowledge godoc
@@ -1709,7 +1808,7 @@ type knowledgeTagBatchRequest struct {
 
 // UpdateKnowledgeTagBatch godoc
 // @Summary      批量更新知识标签
-// @Description  批量更新知识条目的标签。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的租户解析
+// @Description  批量更新知识条目的标签。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的空间解析
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
@@ -1898,11 +1997,16 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 		_ = userIDVal
 		currentTenantID := c.GetUint64(types.TenantIDContextKey.String())
 		if currentTenantID == 0 {
-			c.Error(errors.NewUnauthorizedError("tenant ID not found"))
+			c.Error(errors.NewUnauthorizedError("workspace ID not found"))
 			return
 		}
 		callerTenantRole := types.TenantRoleFromContext(ctx)
-		agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID)
+		requestedSourceTenantID, parseErr := types.ParseAgentSourceTenantID(c.Query(types.AgentSourceTenantIDParam))
+		if parseErr != nil {
+			c.Error(errors.NewBadRequestError(parseErr.Error()))
+			return
+		}
+		agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID, requestedSourceTenantID)
 		if err != nil {
 			if goerrors.Is(err, service.ErrAgentShareNotFound) || goerrors.Is(err, service.ErrAgentSharePermission) || goerrors.Is(err, service.ErrAgentNotFoundForShare) {
 				c.Error(errors.NewForbiddenError("no permission for this shared agent"))
@@ -2174,6 +2278,7 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 		SourceKBID:   req.SourceKBID,
 		TargetKBID:   req.TargetKBID,
 		Mode:         req.Mode,
+		Initiator:    types.TaskInitiatorFromContext(ctx),
 	}
 	langfuse.InjectTracing(ctx, &payload)
 

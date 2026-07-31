@@ -11,6 +11,8 @@ const (
 	VolcengineChatBaseURL = "https://ark.cn-beijing.volces.com/api/v3"
 	// VolcengineEmbeddingBaseURL 火山引擎 Ark Multimodal Embedding API BaseURL
 	VolcengineEmbeddingBaseURL = "https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal"
+	// VolcengineRerankBaseURL 火山引擎知识库托管 Rerank API BaseURL
+	VolcengineRerankBaseURL = "https://api-knowledgebase.mlp.cn-beijing.volces.com"
 )
 
 // VolcengineProvider 实现火山引擎 Ark 的 Provider 接口
@@ -25,15 +27,17 @@ func (p *VolcengineProvider) Info() ProviderInfo {
 	return ProviderInfo{
 		Name:        ProviderVolcengine,
 		DisplayName: "火山引擎 Volcengine",
-		Description: "doubao-1-5-pro-32k-250115, doubao-embedding-vision-250615, etc.",
+		Description: "doubao-1-5-pro-32k-250115, doubao-embedding-vision-250615, doubao-seed-rerank, etc.",
 		DefaultURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: VolcengineChatBaseURL,
 			types.ModelTypeEmbedding:   VolcengineEmbeddingBaseURL,
+			types.ModelTypeRerank:      VolcengineRerankBaseURL,
 			types.ModelTypeVLLM:        VolcengineChatBaseURL,
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeEmbedding,
+			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
 		},
 		RequiresAuth: true,

@@ -4,11 +4,10 @@ import "maps"
 
 // PipelineRequest holds immutable configuration set once at the request entry point.
 type PipelineRequest struct {
-	SessionID    string `json:"session_id"`
-	UserID       string `json:"user_id"`
-	Query        string `json:"query,omitempty"`
-	EnableMemory bool   `json:"enable_memory"`
-	MaxRounds    int    `json:"max_rounds"`
+	SessionID string `json:"session_id"`
+	UserID    string `json:"user_id"`
+	Query     string `json:"query,omitempty"`
+	MaxRounds int    `json:"max_rounds"`
 
 	// Knowledge base retrieval parameters
 	KnowledgeBaseIDs []string      `json:"knowledge_base_ids"`
@@ -30,6 +29,9 @@ type PipelineRequest struct {
 	FallbackStrategy FallbackStrategy `json:"fallback_strategy"`
 	FallbackResponse string           `json:"fallback_response"`
 	FallbackPrompt   string           `json:"fallback_prompt"`
+	// CitationEnabled controls only final knowledge/web source citations. Nil
+	// defaults to true for requests and agents created before this option existed.
+	CitationEnabled *bool `json:"citation_enabled,omitempty"`
 
 	// Rewrite parameters
 	EnableRewrite        bool   `json:"enable_rewrite"`
@@ -71,6 +73,11 @@ type PipelineRequest struct {
 	WebFetchEnabled     bool   `json:"-"` // Auto-fetch full page content for web search results after rerank
 	WebFetchTopN        int    `json:"-"` // Max pages to fetch (default 3)
 	Language            string `json:"-"`
+}
+
+// CitationsEnabled returns the effective citation setting for this request.
+func (c *PipelineRequest) CitationsEnabled() bool {
+	return c == nil || c.CitationEnabled == nil || *c.CitationEnabled
 }
 
 // QueryIntent represents the classified intent of a user query.
@@ -167,13 +174,16 @@ func (c *ChatManage) Clone() *ChatManage {
 			copy(kidsCopy, t.KnowledgeIDs)
 			tagIDsCopy := make([]string, len(t.TagIDs))
 			copy(tagIDsCopy, t.TagIDs)
+			scopeTagIDsCopy := make([]string, len(t.ScopeTagIDs))
+			copy(scopeTagIDsCopy, t.ScopeTagIDs)
 			searchTargets[i] = &SearchTarget{
-				Type:              t.Type,
-				KnowledgeBaseID:   t.KnowledgeBaseID,
-				TenantID:          t.TenantID,
-				KnowledgeIDs:      kidsCopy,
-				TagIDs:            tagIDsCopy,
-				DisableDirectLoad: t.DisableDirectLoad,
+				Type:                    t.Type,
+				KnowledgeBaseID:         t.KnowledgeBaseID,
+				TenantID:                t.TenantID,
+				KnowledgeIDs:            kidsCopy,
+				TagIDs:                  tagIDsCopy,
+				ScopeTagIDs:             scopeTagIDsCopy,
+				DisableRecallThresholds: t.DisableRecallThresholds,
 			}
 		}
 	}
@@ -193,7 +203,6 @@ func (c *ChatManage) Clone() *ChatManage {
 			Query:                    c.Query,
 			SessionID:                c.SessionID,
 			UserID:                   c.UserID,
-			EnableMemory:             c.EnableMemory,
 			MaxRounds:                c.MaxRounds,
 			KnowledgeBaseIDs:         knowledgeBaseIDs,
 			KnowledgeIDs:             knowledgeIDs,
@@ -210,6 +219,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			FallbackStrategy:         c.FallbackStrategy,
 			FallbackResponse:         c.FallbackResponse,
 			FallbackPrompt:           c.FallbackPrompt,
+			CitationEnabled:          c.CitationEnabled,
 			EnableRewrite:            c.EnableRewrite,
 			EnableQueryExpansion:     c.EnableQueryExpansion,
 			RewritePromptSystem:      c.RewritePromptSystem,
@@ -263,8 +273,6 @@ const (
 	CHAT_COMPLETION        EventType = "chat_completion"
 	CHAT_COMPLETION_STREAM EventType = "chat_completion_stream"
 	FILTER_TOP_K           EventType = "filter_top_k"
-	MEMORY_RETRIEVAL       EventType = "memory_retrieval"
-	MEMORY_STORAGE         EventType = "memory_storage"
 )
 
 // PipelineBuilder dynamically assembles a pipeline as an ordered list of EventTypes.
@@ -309,9 +317,7 @@ var Pipeline = map[string][]EventType{
 	},
 	"chat_history_stream": {
 		LOAD_HISTORY,
-		MEMORY_RETRIEVAL,
 		CHAT_COMPLETION_STREAM,
-		MEMORY_STORAGE,
 	},
 	"rag": {
 		CHUNK_SEARCH,

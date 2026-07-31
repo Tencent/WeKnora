@@ -12,7 +12,6 @@ func TestWikiPageTypes(t *testing.T) {
 		WikiPageTypeEntity,
 		WikiPageTypeConcept,
 		WikiPageTypeIndex,
-		WikiPageTypeLog,
 		WikiPageTypeSynthesis,
 		WikiPageTypeComparison,
 	}
@@ -25,6 +24,9 @@ func TestWikiPageTypes(t *testing.T) {
 			t.Errorf("Duplicate WikiPageType: %s", pt)
 		}
 		seen[pt] = true
+	}
+	if IsValidWikiPageType("log") {
+		t.Error("removed Wiki log page type must not remain valid")
 	}
 }
 

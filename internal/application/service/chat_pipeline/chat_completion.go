@@ -50,7 +50,9 @@ func (p *PluginChatCompletion) OnEvent(
 	pipelineInfo(ctx, "Completion", "messages_ready", map[string]interface{}{
 		"message_count": len(chatManage.History) + 2,
 	})
-	chatMessages := prepareMessagesWithHistory(chatManage)
+	chatMessages, modelContext := prepareMessagesWithModelContext(ctx, chatManage)
+	chatMessages = modelContext.EncodeMessages(chatMessages)
+	ctx = withPromptCacheMetadata(ctx, chatModel, chatMessages, opt, "knowledge_qa")
 
 	// Call the chat model to generate response
 	pipelineInfo(ctx, "Completion", "model_call", map[string]interface{}{
@@ -63,6 +65,13 @@ func (p *PluginChatCompletion) OnEvent(
 			"error":      err.Error(),
 		})
 		return ErrModelCall.WithError(err)
+	}
+	modelContext.DecodeResponse(chatResponse)
+	if orphans := modelContext.OrphanResourceHandles(chatResponse.Content); len(orphans) > 0 {
+		pipelineWarn(ctx, "Completion", "orphan_resource_handles", map[string]interface{}{
+			"session_id": chatManage.SessionID,
+			"handles":    orphans,
+		})
 	}
 
 	pipelineInfo(ctx, "Completion", "output", map[string]interface{}{

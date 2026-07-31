@@ -1,4 +1,28 @@
 import { get, post, put, del } from '@/utils/request'
+import type { CreatedTenantAPIKey, TenantAPIKey, TenantAPIKeyCapability } from '@/api/tenant'
+
+export interface CreatePlatformAPIKeyPayload {
+  name: string
+  capabilities: TenantAPIKeyCapability[]
+  expires_at_unix?: number
+}
+
+export async function listPlatformAPIKeys(): Promise<{ success: boolean; data?: TenantAPIKey[] }> {
+  return await get('/api/v1/system/admin/api-keys') as unknown as { success: boolean; data?: TenantAPIKey[] }
+}
+
+export async function createPlatformAPIKey(
+  payload: CreatePlatformAPIKeyPayload,
+): Promise<{ success: boolean; data?: CreatedTenantAPIKey }> {
+  return await post('/api/v1/system/admin/api-keys', payload) as unknown as {
+    success: boolean
+    data?: CreatedTenantAPIKey
+  }
+}
+
+export async function deletePlatformAPIKey(keyId: number): Promise<{ success: boolean }> {
+  return await del(`/api/v1/system/admin/api-keys/${keyId}`) as unknown as { success: boolean }
+}
 
 export interface SystemInfo {
   version: string
@@ -71,7 +95,7 @@ export interface ParserEngineInfo {
   UnavailableReason?: string
 }
 
-/** 解析引擎配置（引擎相关存租户；docreader 地址由环境变量配置） */
+/** 解析引擎配置（引擎连接参数存空间；聊天附件解析策略在智能体中配置） */
 export interface ParserEngineConfig {
   docreader_addr?: string
   docreader_transport?: string
@@ -130,7 +154,7 @@ export function reconnectDocReader(addr: string): Promise<ParserEnginesResponse 
   return post('/api/v1/system/docreader/reconnect', { addr })
 }
 
-// ---- 存储引擎配置（租户级，供文档/图片存储与 docreader 使用） ----
+// ---- 存储引擎配置（空间级，供文档/图片存储与 docreader 使用） ----
 
 export interface StorageEngineConfig {
   default_provider: string // "local" | "minio" | "cos" | "tos" | "s3" | "oss" | "ks3" | "obs"
@@ -320,6 +344,21 @@ export async function listSystemAdmins(
   return response as unknown as ListSystemAdminsResponse
 }
 
+export interface ResetUserPasswordRequest {
+  email: string
+  new_password: string
+}
+
+/**
+ * Replace another user's password and revoke all of their active sessions.
+ * The backend route is restricted to SystemAdmin callers and rejects attempts
+ * to reset the caller's own password.
+ */
+export async function resetUserPassword(req: ResetUserPasswordRequest): Promise<{ message: string }> {
+  const response = await post('/api/v1/system/admin/users/reset-password', req)
+  return response as unknown as { message: string }
+}
+
 // ---- System Settings (P1) ----
 
 /**
@@ -507,6 +546,10 @@ export interface RuntimeWorkerPool {
   name: string
   concurrency: number
   queue_count: number
+  instances: number
+  cluster_capacity: number
+  active: number
+  utilization: number
 }
 
 export interface ModelRuntimeStat {
@@ -520,9 +563,9 @@ export interface ModelRuntimeStat {
 /**
  * Runtime queue dashboard payload. `available` is false in Lite mode
  * (no Redis/asynq) — render an "unavailable in this deployment" state
- * rather than an empty table. Pool concurrency values are CONFIGURED
- * per-process capacity (effective on next restart), not live busy-worker
- * count or cluster-wide capacity.
+ * rather than an empty table. Each pool includes both configured per-process
+ * concurrency and live cluster capacity/active workers aggregated from asynq
+ * server heartbeats.
  */
 export interface RuntimeQueuesResponse {
   available: boolean
@@ -536,6 +579,47 @@ export interface RuntimeQueuesResponse {
   timestamp: number
 }
 
+export type RuntimeTaskState = 'pending' | 'active' | 'scheduled' | 'retry' | 'archived' | 'completed'
+export type RuntimeTaskAction = 'cancel' | 'run_now' | 'delete'
+
+export interface RuntimeTask {
+  id: string
+  queue: string
+  type: string
+  state: RuntimeTaskState
+  allowed_actions: RuntimeTaskAction[]
+  last_error?: string
+  last_failed_at?: string
+  next_process_at?: string
+  started_at?: string
+  completed_at?: string
+  deadline?: string
+  enqueued_at?: string
+  retried: number
+  max_retry: number
+  is_orphaned?: boolean
+  worker?: string
+  tenant_id?: number
+  knowledge_base_id?: string
+  knowledge_id?: string
+  task_id?: string
+  source_id?: string
+  target_id?: string
+  source_kb_id?: string
+  target_kb_id?: string
+  data_source_id?: string
+  sync_log_id?: string
+  knowledge_count?: number
+}
+
+export interface RuntimeTasksResponse {
+  available: boolean
+  tasks: RuntimeTask[]
+  page_size: number
+  has_more: boolean
+  next_cursor?: string
+}
+
 /**
  * Fetch the live asynq queue depths + worker-pool concurrency.
  * Backend: GET /api/v1/system/admin/runtime/queues (SystemAdmin only).
@@ -545,4 +629,40 @@ export interface RuntimeQueuesResponse {
 export async function getRuntimeQueues(): Promise<RuntimeQueuesResponse> {
   const response = await get('/api/v1/system/admin/runtime/queues')
   return response as unknown as RuntimeQueuesResponse
+}
+
+export async function getRuntimeTasks(
+  queue: string,
+  state: RuntimeTaskState,
+  cursor = '',
+  pageSize = 20,
+): Promise<RuntimeTasksResponse> {
+  return get(`/api/v1/system/admin/runtime/queues/${encodeURIComponent(queue)}/tasks`, {
+    params: { state, ...(cursor ? { cursor } : {}), page_size: pageSize },
+  })
+}
+
+export async function mutateRuntimeTask(
+  queue: string,
+  taskID: string,
+  action: RuntimeTaskAction,
+): Promise<void> {
+  await post(
+    `/api/v1/system/admin/runtime/queues/${encodeURIComponent(queue)}/tasks/${encodeURIComponent(taskID)}/actions/${encodeURIComponent(action)}`,
+  )
+}
+
+/**
+ * Clear every archived (finally-failed) task in one queue in a single call.
+ * Only touches the archived dead-letter set — live tasks are never affected.
+ * Backend: DELETE /api/v1/system/admin/runtime/queues/{queue}/archived.
+ * Returns the object directly (no {data: ...} wrapping, see request.ts).
+ */
+export async function purgeArchivedRuntimeTasks(
+  queue: string,
+): Promise<{ success: boolean; deleted: number }> {
+  const response = await del(
+    `/api/v1/system/admin/runtime/queues/${encodeURIComponent(queue)}/archived`,
+  )
+  return response as unknown as { success: boolean; deleted: number }
 }

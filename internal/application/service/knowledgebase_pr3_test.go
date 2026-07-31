@@ -8,6 +8,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/storageallowlist"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
@@ -59,6 +60,13 @@ func (f *fakeRegistry) GetByStoreID(storeID string) (interfaces.RetrieveEngineSe
 		return nil, nil
 	}
 	return nil, stderrors.New("not registered")
+}
+
+// This fake never rebuilds a missing engine, so a miss stays a miss.
+func (f *fakeRegistry) GetOrLoadByStoreID(
+	_ context.Context, _ uint64, storeID string,
+) (interfaces.RetrieveEngineService, error) {
+	return f.GetByStoreID(storeID)
 }
 
 // fakeKBRepo is the smallest KnowledgeBaseRepository needed by
@@ -165,6 +173,20 @@ func TestCreateKnowledgeBase_DefaultStorageProviderFromTenant(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "cos", kbExplicit.GetStorageProvider())
+}
+
+func TestCreateKnowledgeBase_DefaultStorageProviderRespectsAllowList(t *testing.T) {
+	t.Setenv(storageallowlist.AllowListEnv, "minio")
+	repo := newFakeKBRepo()
+	svc := newPR3KBService(repo, &fakeRegistry{registered: map[string]struct{}{}}, &fakeOwnership{})
+
+	kb, err := svc.CreateKnowledgeBase(ctxWithTenantStorage(1, ""), &types.KnowledgeBase{Name: "kb"})
+	require.NoError(t, err)
+	assert.Equal(t, "minio", kb.GetStorageProvider())
+
+	kbDisallowedDefault, err := svc.CreateKnowledgeBase(ctxWithTenantStorage(1, "local"), &types.KnowledgeBase{Name: "kb2"})
+	require.NoError(t, err)
+	assert.Equal(t, "minio", kbDisallowedDefault.GetStorageProvider())
 }
 
 // ---------------------------------------------------------------------------

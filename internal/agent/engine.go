@@ -15,6 +15,7 @@ import (
 	appconfig "github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -49,6 +50,7 @@ type AgentEngine struct {
 	memoryConsolidator   *agentmemory.Consolidator // Memory consolidator for LLM-powered summarization (optional)
 	lastUsage            types.TokenUsage          // Token usage from the most recent LLM call
 	lastSentMsgCount     int                       // Number of messages sent in the most recent LLM call
+	modelContext         *modelcontext.Registry    // single request-local boundary for every model handle
 }
 
 // ImageDescriberFunc generates a text description of an image.
@@ -83,6 +85,7 @@ func NewAgentEngine(
 		sessionID:            sessionID,
 		systemPromptTemplate: systemPromptTemplate,
 		tokenEstimator:       tokenEst,
+		modelContext:         modelcontext.NewRegistry(config.CitationsEnabled()),
 	}
 
 	// Initialize memory consolidator if context window management is configured
@@ -113,12 +116,13 @@ func (e *AgentEngine) systemPromptOptions(ctx context.Context) *BuildSystemPromp
 }
 
 func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {
-	return BuildSystemPromptWithOptions(
+	prompt := BuildSystemPromptWithOptions(
 		e.knowledgeBasesInfo,
 		e.config.WebSearchEnabled,
 		e.systemPromptOptions(ctx),
 		e.systemPromptTemplate,
 	)
+	return strings.TrimRight(prompt, " \t\r\n") + e.modelContext.ProtocolPrompt()
 }
 
 // NewAgentEngineWithSkills creates a new agent engine with skills support
