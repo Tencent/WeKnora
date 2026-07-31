@@ -27,7 +27,8 @@ func (s *sessionService) resolveKnowledgeBases(
 	requestedKBIDs := append([]string(nil), req.KnowledgeBaseIDs...)
 	customAgent := req.CustomAgent
 
-	hasExplicitMention := len(kbIDs) > 0 || len(knowledgeIDs) > 0 || len(req.TagScopes) > 0
+	hasExplicitMention := len(kbIDs) > 0 || len(knowledgeIDs) > 0 ||
+		len(req.TagScopes) > 0 || len(req.FolderScopes) > 0
 	if customAgent != nil {
 		logger.Infof(ctx, "KB resolution: hasExplicitMention=%v, RetrieveKBOnlyWhenMentioned=%v, KBSelectionMode=%s",
 			hasExplicitMention, customAgent.Config.RetrieveKBOnlyWhenMentioned, customAgent.Config.KBSelectionMode)
@@ -40,6 +41,7 @@ func (s *sessionService) resolveKnowledgeBases(
 		if customAgent != nil && req.Session != nil && req.Session.TenantID != customAgent.TenantID {
 			kbIDs, knowledgeIDs = s.restrictMentionsToAgentScope(ctx, customAgent, req.Session.TenantID, kbIDs, knowledgeIDs)
 			req.TagScopes = s.restrictTagScopesToAgentScope(ctx, customAgent, req.Session.TenantID, req.TagScopes)
+			req.FolderScopes = s.restrictFolderScopesToAgentScope(ctx, customAgent, req.Session.TenantID, req.FolderScopes)
 		}
 	} else if customAgent != nil && customAgent.Config.RetrieveKBOnlyWhenMentioned {
 		kbIDs = nil
@@ -80,6 +82,31 @@ func (s *sessionService) restrictTagScopesToAgentScope(
 			continue
 		}
 		logger.Warnf(ctx, "Blocking @mentioned tag scope for KB %s: not in shared agent's allowed scope", scope.KnowledgeBaseID)
+	}
+	return filtered
+}
+
+func (s *sessionService) restrictFolderScopesToAgentScope(
+	ctx context.Context,
+	agent *types.CustomAgent,
+	sessionTenantID uint64,
+	folderScopes []types.FolderScope,
+) []types.FolderScope {
+	if len(folderScopes) == 0 {
+		return nil
+	}
+	allowedKBIDs := s.resolveKnowledgeBasesFromAgent(ctx, agent, sessionTenantID)
+	allowedSet := make(map[string]bool, len(allowedKBIDs))
+	for _, id := range allowedKBIDs {
+		allowedSet[id] = true
+	}
+	filtered := make([]types.FolderScope, 0, len(folderScopes))
+	for _, scope := range folderScopes {
+		if allowedSet[scope.KnowledgeBaseID] {
+			filtered = append(filtered, scope)
+			continue
+		}
+		logger.Warnf(ctx, "Blocking @mentioned folder scope for KB %s: not in shared agent's allowed scope", scope.KnowledgeBaseID)
 	}
 	return filtered
 }

@@ -292,33 +292,36 @@ func (s *sessionService) buildAgentConfig(
 	logger.Infof(ctx, "Merged agent config from tenant %d and session %s", tenantInfo.ID, req.Session.ID)
 
 	// Log knowledge bases if present
-	if len(agentConfig.KnowledgeBases) > 0 || len(req.TagScopes) > 0 {
+	if len(agentConfig.KnowledgeBases) > 0 || len(req.TagScopes) > 0 || len(req.FolderScopes) > 0 {
 		if len(agentConfig.KnowledgeBases) > 0 {
 			logger.Infof(ctx, "Agent configured with %d knowledge base(s): %v",
 				len(agentConfig.KnowledgeBases), agentConfig.KnowledgeBases)
 		} else {
-			logger.Infof(ctx, "Agent configured with %d tag-scoped search target(s)", len(req.TagScopes))
+			logger.Infof(ctx, "Agent configured with %d tag-scoped and %d folder-scoped search target(s)",
+				len(req.TagScopes), len(req.FolderScopes))
 		}
 	} else {
 		logger.Infof(ctx, "No knowledge bases specified for agent, running in pure agent mode")
 	}
 
 	// Build search targets using agent's tenant (handler has validated access for shared agent)
-	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.TagScopes)
+	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.TagScopes, req.FolderScopes)
 	if err != nil {
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}
 	agentConfig.SearchTargets = searchTargets
-	// Document tags are stored in knowledge_tag_relations, so document-KB tag
-	// scopes are resolved to concrete knowledge IDs before retrieval. Preserve
-	// those resolved IDs as this turn's pinned documents as well: otherwise the
-	// Agent tools are correctly constrained behind the scenes, but the model only
-	// sees a bound KB and does not know which documents the user explicitly chose.
-	if len(req.TagScopes) > 0 {
-		agentConfig.KnowledgeIDs = mergeResolvedTagKnowledgeIDs(
+	// Document tags and folder placements both live outside the chunk index, so
+	// their scopes are resolved to concrete knowledge IDs before retrieval.
+	// Preserve those resolved IDs as this turn's pinned documents as well:
+	// otherwise the Agent tools are correctly constrained behind the scenes, but
+	// the model only sees a bound KB and does not know which documents the user
+	// explicitly chose.
+	if len(req.TagScopes) > 0 || len(req.FolderScopes) > 0 {
+		agentConfig.KnowledgeIDs = mergeResolvedScopeKnowledgeIDs(
 			agentConfig.KnowledgeIDs,
 			searchTargets,
 			req.TagScopes,
+			req.FolderScopes,
 		)
 	}
 	logger.Infof(ctx, "Agent search targets built: %d targets", len(searchTargets))
@@ -330,24 +333,34 @@ func (s *sessionService) buildAgentConfig(
 	return agentConfig, nil
 }
 
-func mergeResolvedTagKnowledgeIDs(
+// mergeResolvedScopeKnowledgeIDs pins the documents a tag or folder scope
+// resolved to, so the model sees the concrete document set the user chose rather
+// than just a bound knowledge base. Only KBs that actually carry a scope
+// contribute — a whole-KB target must stay a whole-KB search.
+func mergeResolvedScopeKnowledgeIDs(
 	existing []string,
 	searchTargets types.SearchTargets,
 	tagScopes []types.TagScope,
+	folderScopes []types.FolderScope,
 ) []string {
-	tagKBs := make(map[string]bool, len(tagScopes))
+	scopedKBs := make(map[string]bool, len(tagScopes)+len(folderScopes))
 	for _, scope := range tagScopes {
 		if scope.KnowledgeBaseID != "" && len(scope.TagIDs) > 0 {
-			tagKBs[scope.KnowledgeBaseID] = true
+			scopedKBs[scope.KnowledgeBaseID] = true
 		}
 	}
-	if len(tagKBs) == 0 {
+	for _, scope := range folderScopes {
+		if scope.KnowledgeBaseID != "" && len(scope.FolderIDs) > 0 {
+			scopedKBs[scope.KnowledgeBaseID] = true
+		}
+	}
+	if len(scopedKBs) == 0 {
 		return uniqueNonEmptyStrings(existing)
 	}
 
 	merged := append([]string(nil), existing...)
 	for _, target := range searchTargets {
-		if target == nil || !tagKBs[target.KnowledgeBaseID] || target.Type != types.SearchTargetTypeKnowledge {
+		if target == nil || !scopedKBs[target.KnowledgeBaseID] || target.Type != types.SearchTargetTypeKnowledge {
 			continue
 		}
 		merged = append(merged, target.KnowledgeIDs...)

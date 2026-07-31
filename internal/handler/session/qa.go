@@ -37,6 +37,8 @@ type qaRequestContext struct {
 	knowledgeIDs          []string
 	tagScopes             []types.TagScope
 	tagIDs                []string
+	folderScopes          []types.FolderScope
+	folderIDs             []string
 	mcpServiceIDs         []string
 	skillNames            []string
 	summaryModelID        string
@@ -72,6 +74,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		KnowledgeBaseIDs:    rc.knowledgeBaseIDs,
 		KnowledgeIDs:        rc.knowledgeIDs,
 		TagScopes:           rc.tagScopes,
+		FolderScopes:        rc.folderScopes,
 		MCPServiceIDs:       rc.mcpServiceIDs,
 		SkillNames:          rc.skillNames,
 		ImageURLs:           imageURLs,
@@ -303,6 +306,16 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		return nil, nil, errors.NewBadRequestError(err.Error())
 	}
 	tagScopes := mergeTagScopesFromRequestIDs(mentionScopes, requestTagIDs, secutils.SanitizeForLogArray(kbIDs))
+	folderScopes, folderErr := mergeFolderScopesFromRequestIDs(
+		folderScopesFromMentionedItems(request.MentionedItems),
+		request.FolderIDs,
+		secutils.SanitizeForLogArray(kbIDs),
+	)
+	if folderErr != nil {
+		return nil, nil, errors.NewBadRequestError(folderErr.Error())
+	}
+	folderIDs := dedupRequestStrings(append(request.FolderIDs,
+		mentionedIDsByType(request.MentionedItems, "folder")...))
 	tagIDs := dedupRequestStrings(append(request.TagIDs, mentionedIDsByType(request.MentionedItems, "tag")...))
 	mcpServiceIDs := dedupRequestStrings(append(request.MCPServiceIDs, mentionedIDsByType(request.MentionedItems, "mcp")...))
 	skillNames := dedupRequestStrings(append(request.SkillNames, mentionedIDsByType(request.MentionedItems, "skill")...))
@@ -315,6 +328,8 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		secutils.SanitizeForLogArray(knowledgeIDs),
 		secutils.SanitizeForLogArray(tagIDs),
 		tagScopes,
+		secutils.SanitizeForLogArray(folderIDs),
+		folderScopes,
 		secutils.SanitizeForLogArray(mcpServiceIDs),
 		secutils.SanitizeForLogArray(skillNames),
 		request.WebSearchEnabled,
@@ -345,6 +360,8 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		knowledgeIDs:          secutils.SanitizeForLogArray(knowledgeIDs),
 		tagScopes:             tagScopes,
 		tagIDs:                secutils.SanitizeForLogArray(tagIDs),
+		folderScopes:          folderScopes,
+		folderIDs:             secutils.SanitizeForLogArray(folderIDs),
 		mcpServiceIDs:         secutils.SanitizeForLogArray(mcpServiceIDs),
 		skillNames:            secutils.SanitizeForLogArray(skillNames),
 		summaryModelID:        secutils.SanitizeForLog(request.SummaryModelID),
@@ -374,6 +391,8 @@ func buildMessageExecutionContext(
 	knowledgeIDs []string,
 	tagIDs []string,
 	tagScopes []types.TagScope,
+	folderIDs []string,
+	folderScopes []types.FolderScope,
 	mcpServiceIDs []string,
 	skillNames []string,
 	webSearchEnabled bool,
@@ -388,6 +407,8 @@ func buildMessageExecutionContext(
 		KnowledgeIDs:     knowledgeIDs,
 		TagIDs:           tagIDs,
 		TagScopes:        cloneTagScopes(tagScopes),
+		FolderIDs:        folderIDs,
+		FolderScopes:     cloneFolderScopes(folderScopes),
 		MCPServiceIDs:    mcpServiceIDs,
 		SkillNames:       skillNames,
 		WebSearchEnabled: webSearchEnabled,
@@ -422,6 +443,8 @@ func buildMessageExecutionContext(
 		KnowledgeIDs        []string                        `json:"knowledge_ids,omitempty"`
 		TagIDs              []string                        `json:"tag_ids,omitempty"`
 		TagScopes           []types.TagScope                `json:"tag_scopes,omitempty"`
+		FolderIDs           []string                        `json:"folder_ids,omitempty"`
+		FolderScopes        []types.FolderScope             `json:"folder_scopes,omitempty"`
 		ModelID             string                          `json:"model_id,omitempty"`
 	}{
 		QuestionSuggestions: snapshot.QuestionSuggestions,
@@ -429,6 +452,8 @@ func buildMessageExecutionContext(
 		KnowledgeIDs:        knowledgeIDs,
 		TagIDs:              tagIDs,
 		TagScopes:           snapshot.TagScopes,
+		FolderIDs:           folderIDs,
+		FolderScopes:        snapshot.FolderScopes,
 		ModelID:             modelID,
 	}
 	if encoded, err := json.Marshal(hashInput); err == nil {
@@ -451,6 +476,23 @@ func cloneTagScopes(scopes []types.TagScope) []types.TagScope {
 		cloned = append(cloned, types.TagScope{
 			KnowledgeBaseID: scope.KnowledgeBaseID,
 			TagIDs:          append([]string(nil), scope.TagIDs...),
+		})
+	}
+	return cloned
+}
+
+func cloneFolderScopes(scopes []types.FolderScope) []types.FolderScope {
+	if len(scopes) == 0 {
+		return nil
+	}
+	cloned := make([]types.FolderScope, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.KnowledgeBaseID == "" || len(scope.FolderIDs) == 0 {
+			continue
+		}
+		cloned = append(cloned, types.FolderScope{
+			KnowledgeBaseID: scope.KnowledgeBaseID,
+			FolderIDs:       append([]string(nil), scope.FolderIDs...),
 		})
 	}
 	return cloned
@@ -544,6 +586,16 @@ func mergeKnowledgeTargets(requestKBIDs []string, requestKnowledgeIDs []string, 
 			if !knowledgeIDSet[item.ID] {
 				knowledgeIDs = append(knowledgeIDs, item.ID)
 				knowledgeIDSet[item.ID] = true
+			}
+		case "tag", "folder":
+			// A scoped tag/folder mention carries its owning KB, and that KB
+			// must join the retrieval scope — otherwise the scope resolves
+			// against a knowledge base nobody selected and recalls nothing.
+			// buildSearchTargets then narrows this KB to the scoped documents
+			// instead of searching it whole.
+			if item.KBID != "" && !kbIDSet[item.KBID] {
+				kbIDs = append(kbIDs, item.KBID)
+				kbIDSet[item.KBID] = true
 			}
 		}
 	}
@@ -672,11 +724,31 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
+	// A scoped tag/folder mention brings its owning KB into the search scope,
+	// the same way it does on the chat path — otherwise the scope resolves
+	// against a KB that is not being searched and yields nothing.
+	folderMentionScopes := folderScopesFromMentionedItems(request.MentionedItems)
+	for _, scopeKB := range append(kbIDsFromTagScopes(mentionScopes), kbIDsFromFolderScopes(folderMentionScopes)...) {
+		if !containsString(knowledgeBaseIDs, scopeKB) {
+			knowledgeBaseIDs = append(knowledgeBaseIDs, scopeKB)
+		}
+	}
 	tagScopes := mergeTagScopesFromRequestIDs(mentionScopes, requestTagIDs, secutils.SanitizeForLogArray(knowledgeBaseIDs))
+	folderScopes, folderErr := mergeFolderScopesFromRequestIDs(
+		folderMentionScopes,
+		request.FolderIDs,
+		secutils.SanitizeForLogArray(knowledgeBaseIDs),
+	)
+	if folderErr != nil {
+		logger.Error(ctx, folderErr.Error())
+		c.Error(errors.NewBadRequestError(folderErr.Error()))
+		return
+	}
 
-	if len(knowledgeBaseIDs) == 0 && len(request.KnowledgeIDs) == 0 && len(tagScopes) == 0 {
-		logger.Error(ctx, "No knowledge base IDs, knowledge IDs, or tag scopes provided")
-		c.Error(errors.NewBadRequestError("At least one knowledge_base_id, knowledge_base_ids, knowledge_ids, or scoped tag must be provided"))
+	if len(knowledgeBaseIDs) == 0 && len(request.KnowledgeIDs) == 0 &&
+		len(tagScopes) == 0 && len(folderScopes) == 0 {
+		logger.Error(ctx, "No knowledge base IDs, knowledge IDs, tag scopes, or folder scopes provided")
+		c.Error(errors.NewBadRequestError("At least one knowledge_base_id, knowledge_base_ids, knowledge_ids, scoped tag, or scoped folder must be provided"))
 		return
 	}
 	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, knowledgeBaseIDs, request.KnowledgeIDs); err != nil {
@@ -694,7 +766,7 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	)
 
 	// Directly call knowledge retrieval service without LLM summarization
-	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs, request.KnowledgeIDs, tagScopes, request.Query)
+	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs, request.KnowledgeIDs, tagScopes, folderScopes, request.Query)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
@@ -1313,6 +1385,7 @@ func (h *Handler) persistLastRequestState(parentCtx context.Context, reqCtx *qaR
 		KnowledgeBaseIDs: reqCtx.knowledgeBaseIDs,
 		KnowledgeIDs:     reqCtx.knowledgeIDs,
 		TagIDs:           reqCtx.tagIDs,
+		FolderIDs:        reqCtx.folderIDs,
 		MCPServiceIDs:    reqCtx.mcpServiceIDs,
 		SkillNames:       reqCtx.skillNames,
 		MentionedItems:   reqCtx.mentionedItems,

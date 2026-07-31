@@ -152,6 +152,102 @@ func mergeTagScopesFromRequestIDs(scopes []types.TagScope, tagIDs, kbIDs []strin
 	return append(scopes, types.TagScope{KnowledgeBaseID: kbID, TagIDs: dedupRequestStrings(orphan)})
 }
 
+func folderScopesFromMentionedItems(items []MentionedItemRequest) []types.FolderScope {
+	byKB := make(map[string][]string)
+	seen := make(map[string]map[string]bool)
+	order := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.Type != "folder" || item.ID == "" || item.KBID == "" {
+			continue
+		}
+		if seen[item.KBID] == nil {
+			seen[item.KBID] = make(map[string]bool)
+			order = append(order, item.KBID)
+		}
+		if seen[item.KBID][item.ID] {
+			continue
+		}
+		seen[item.KBID][item.ID] = true
+		byKB[item.KBID] = append(byKB[item.KBID], item.ID)
+	}
+	scopes := make([]types.FolderScope, 0, len(byKB))
+	for _, kbID := range order {
+		scopes = append(scopes, types.FolderScope{KnowledgeBaseID: kbID, FolderIDs: byKB[kbID]})
+	}
+	return scopes
+}
+
+func orphanFolderIDsForScope(folderIDs []string, scopes []types.FolderScope) []string {
+	if len(folderIDs) == 0 {
+		return nil
+	}
+	covered := make(map[string]bool)
+	for _, scope := range scopes {
+		for _, id := range scope.FolderIDs {
+			covered[id] = true
+		}
+	}
+	orphan := make([]string, 0, len(folderIDs))
+	for _, id := range folderIDs {
+		if id != "" && !covered[id] {
+			orphan = append(orphan, id)
+		}
+	}
+	return orphan
+}
+
+// Bare folder IDs remain supported when exactly one knowledge base is selected.
+func mergeFolderScopesFromRequestIDs(
+	scopes []types.FolderScope, folderIDs, kbIDs []string,
+) ([]types.FolderScope, error) {
+	orphan := dedupRequestStrings(orphanFolderIDsForScope(dedupRequestStrings(folderIDs), scopes))
+	if len(orphan) == 0 {
+		return scopes, nil
+	}
+	if len(kbIDs) != 1 {
+		return nil, fmt.Errorf(
+			"folder_ids must be scoped via mentioned_items or exactly one knowledge_base_id")
+	}
+	kbID := kbIDs[0]
+	for i, scope := range scopes {
+		if scope.KnowledgeBaseID == kbID {
+			merged := append(append([]string(nil), scope.FolderIDs...), orphan...)
+			scopes[i].FolderIDs = dedupRequestStrings(merged)
+			return scopes, nil
+		}
+	}
+	return append(scopes, types.FolderScope{KnowledgeBaseID: kbID, FolderIDs: orphan}), nil
+}
+
+func kbIDsFromTagScopes(scopes []types.TagScope) []string {
+	out := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.KnowledgeBaseID != "" && len(scope.TagIDs) > 0 {
+			out = append(out, scope.KnowledgeBaseID)
+		}
+	}
+	return out
+}
+
+func kbIDsFromFolderScopes(scopes []types.FolderScope) []string {
+	out := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.KnowledgeBaseID != "" && len(scope.FolderIDs) > 0 {
+			out = append(out, scope.KnowledgeBaseID)
+		}
+	}
+	return out
+}
+
+func containsString(values []string, target string) bool {
+	for _, v := range values {
+		if v == target {
+			return true
+		}
+	}
+	return false
+}
+
 func mentionedIDsByType(items []MentionedItemRequest, itemType string) []string {
 	seen := make(map[string]bool)
 	result := make([]string, 0)
