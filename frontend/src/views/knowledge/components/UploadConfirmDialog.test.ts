@@ -21,6 +21,14 @@ test('keeps the selected folder when confirming file uploads', () => {
   assert.match(dialog, /folderId: props\.currentFolderId/)
 })
 
+test('renders directory uploads as a removable file tree', () => {
+  assert.match(dialog, /const isFolderUpload = computed/)
+  assert.match(dialog, /webkitRelativePath/)
+  assert.match(dialog, /:data="folderTreeData"/)
+  assert.match(dialog, /expand-all/)
+  assert.match(dialog, /removeFolderTreeNode/)
+})
+
 test('uses confirmed tags for file and URL imports instead of reading the list filter at upload time', () => {
   assert.match(knowledgeBase, /const tagIds = result\.tagIds \|\| \[\]/)
   assert.match(knowledgeBase, /executeUploadBatch\(files, \{ processConfig, tagIds, folderId \}\)/)

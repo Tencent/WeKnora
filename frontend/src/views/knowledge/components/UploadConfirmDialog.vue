@@ -41,6 +41,37 @@
                   </p>
                   <p class="manual-source-meta">{{ t('uploadConfirm.reparseHint') }}</p>
                 </div>
+                <div v-else-if="mode === 'file' && isFolderUpload" class="folder-upload-tree">
+                  <t-tree
+                    :data="folderTreeData"
+                    hover
+                    transition
+                    expand-all
+                    :expand-on-click-node="false"
+                  >
+                    <template #label="{ node }">
+                      <span class="folder-tree-row">
+                        <t-icon
+                          :name="node.data.kind === 'folder' ? (node.expanded ? 'folder-open' : 'folder') : getFileIcon(node.label)"
+                          class="folder-tree-icon"
+                          :class="{ 'folder-tree-icon--folder': node.data.kind === 'folder' }"
+                        />
+                        <span class="folder-tree-name" :title="node.label">{{ node.label }}</span>
+                        <span class="folder-tree-meta">
+                          {{ node.data.kind === 'folder' ? node.data.fileCount : formatFileSize(node.data.size || 0) }}
+                        </span>
+                        <button
+                          type="button"
+                          class="file-remove"
+                          :aria-label="t('common.remove')"
+                          @click.stop="removeFolderTreeNode(node.data)"
+                        >
+                          <t-icon name="close" />
+                        </button>
+                      </span>
+                    </template>
+                  </t-tree>
+                </div>
                 <ul v-else-if="mode === 'file' && batchItemCount > 0" class="files-list">
                   <li v-for="(url, index) in localUrls" :key="`url-${url}-${index}`" class="file-item">
                     <span class="file-icon-wrap">
@@ -678,6 +709,79 @@ function inferMediaExtsFromMarkdown(content: string): string[] {
 
 const manualCharCount = computed(() => props.manualPreview?.content?.length ?? 0)
 const batchItemCount = computed(() => localFiles.value.length + localUrls.value.length)
+
+type FolderUploadFile = File & { webkitRelativePath?: string }
+interface FolderTreeNode {
+  value: string
+  label: string
+  kind: 'folder' | 'file'
+  path: string
+  size?: number
+  fileCount?: number
+  children?: FolderTreeNode[]
+}
+
+const isFolderUpload = computed(() => localFiles.value.some((file) => {
+  const relativePath = (file as FolderUploadFile).webkitRelativePath
+  return !!relativePath && relativePath.includes('/')
+}))
+
+const folderTreeData = computed<FolderTreeNode[]>(() => {
+  const roots: FolderTreeNode[] = []
+  const folders = new Map<string, FolderTreeNode>()
+
+  for (const file of localFiles.value) {
+    const relativePath = (file as FolderUploadFile).webkitRelativePath || file.name
+    const parts = relativePath.split('/').filter(Boolean)
+    let children = roots
+    let parentPath = ''
+
+    for (const folderName of parts.slice(0, -1)) {
+      const folderPath = parentPath ? `${parentPath}/${folderName}` : folderName
+      let folder = folders.get(folderPath)
+      if (!folder) {
+        folder = {
+          value: `folder:${folderPath}`,
+          label: folderName,
+          kind: 'folder',
+          path: folderPath,
+          fileCount: 0,
+          children: [],
+        }
+        folders.set(folderPath, folder)
+        children.push(folder)
+      }
+      folder.fileCount = (folder.fileCount || 0) + 1
+      children = folder.children!
+      parentPath = folderPath
+    }
+
+    children.push({
+      value: `file:${relativePath}`,
+      label: parts.at(-1) || file.name,
+      kind: 'file',
+      path: relativePath,
+      size: file.size,
+    })
+  }
+
+  return roots
+})
+
+const removeFolderTreeNode = (node: FolderTreeNode) => {
+  if (node.kind === 'folder') {
+    localFiles.value = localFiles.value.filter((file) => {
+      const relativePath = (file as FolderUploadFile).webkitRelativePath || file.name
+      return !relativePath.startsWith(`${node.path}/`)
+    })
+    return
+  }
+
+  localFiles.value = localFiles.value.filter((file) => {
+    const relativePath = (file as FolderUploadFile).webkitRelativePath || file.name
+    return relativePath !== node.path
+  })
+}
 
 const dialogTitle = computed(() => {
   if (props.mode === 'manual') return t('uploadConfirm.titleManual')
@@ -1469,6 +1573,47 @@ const handleConfirm = () => {
   padding: 0;
   overflow-y: auto;
   list-style: none;
+}
+
+.folder-upload-tree {
+  flex: 1;
+  overflow-y: auto;
+
+  :deep(.t-tree__label) {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.folder-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.folder-tree-icon {
+  flex-shrink: 0;
+  color: var(--td-text-color-secondary);
+}
+
+.folder-tree-icon--folder {
+  color: var(--td-warning-color);
+}
+
+.folder-tree-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-tree-meta {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--td-text-color-placeholder);
 }
 
 .file-item {
