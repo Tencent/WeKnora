@@ -42,6 +42,7 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 		return nil, err
 	}
 	logger.Infof(ctx, "Chunk data fetched successfully, count: %d", len(allChunks))
+	allChunks = filterActiveGenerationChunks(allChunks, knowledgeMap)
 
 	// Build chunk map and collect enrichment IDs (parent, related, nearby)
 	chunkMap := make(map[string]*types.Chunk, len(allChunks))
@@ -57,6 +58,7 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 			if err != nil {
 				logger.Warnf(ctx, "Failed to fetch some additional chunks: %v", err)
 			} else {
+				additionalChunks = filterActiveGenerationChunks(additionalChunks, knowledgeMap)
 				for _, chunk := range additionalChunks {
 					chunkMap[chunk.ID] = chunk
 				}
@@ -71,6 +73,7 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 						if err != nil {
 							logger.Warnf(ctx, "Failed to fetch second-level parent chunks: %v", err)
 						} else {
+							parentChunks = filterActiveGenerationChunks(parentChunks, knowledgeMap)
 							for _, chunk := range parentChunks {
 								chunkMap[chunk.ID] = chunk
 							}
@@ -280,6 +283,33 @@ func (s *knowledgeBaseService) assembleSearchResults(
 	}
 
 	return searchResults
+}
+
+func filterActiveGenerationChunks(
+	chunks []*types.Chunk,
+	knowledgeMap map[string]*types.Knowledge,
+) []*types.Chunk {
+	filtered := chunks[:0]
+	for _, chunk := range chunks {
+		if chunk == nil {
+			continue
+		}
+		knowledge := knowledgeMap[chunk.KnowledgeID]
+		if knowledge == nil {
+			filtered = append(filtered, chunk)
+			continue
+		}
+		if knowledge.ActiveGenerationID == "" {
+			if chunk.GenerationID == "" {
+				filtered = append(filtered, chunk)
+			}
+			continue
+		}
+		if chunk.GenerationID == knowledge.ActiveGenerationID {
+			filtered = append(filtered, chunk)
+		}
+	}
+	return filtered
 }
 
 // collectRelatedChunkIDs extracts related chunk IDs from a chunk.

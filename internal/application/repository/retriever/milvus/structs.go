@@ -26,6 +26,8 @@ type MilvusVectorEmbedding struct {
 	ChunkID         string    `json:"chunk_id"`
 	KnowledgeID     string    `json:"knowledge_id"`
 	KnowledgeBaseID string    `json:"knowledge_base_id"`
+	GenerationID    string    `json:"generation_id"`
+	VisibilityKey   string    `json:"visibility_key"`
 	TagID           string    `json:"tag_id"`
 	Embedding       []float32 `json:"embedding"`
 	IsEnabled       bool      `json:"is_enabled"`

@@ -1087,10 +1087,26 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 	return existing, nil
 }
 
+type manualProcessOptions struct {
+	Attempt      int
+	GenerationID string
+}
+
 // enqueueManualProcessing enqueues a manual:process Asynq task for async cleanup + re-indexing.
 func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
-	knowledge *types.Knowledge, content string, needCleanup bool,
+	knowledge *types.Knowledge, content string, needCleanup bool, opts ...manualProcessOptions,
 ) (string, error) {
+	var options manualProcessOptions
+	if len(opts) > 0 {
+		options = opts[0]
+	}
+	if options.Attempt <= 0 {
+		if _, attempt, err := s.tracker().OpenAttempt(ctx, knowledge.ID, ""); err == nil && attempt > 0 {
+			options.Attempt = attempt
+		} else if err != nil {
+			logger.Warnf(ctx, "enqueueManualProcessing: OpenAttempt failed for %s: %v", knowledge.ID, err)
+		}
+	}
 	requestID, _ := types.RequestIDFromContext(ctx)
 	payload := types.ManualProcessPayload{
 		RequestId:       requestID,
@@ -1099,6 +1115,8 @@ func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
 		KnowledgeBaseID: knowledge.KnowledgeBaseID,
 		Content:         content,
 		NeedCleanup:     needCleanup,
+		Attempt:         options.Attempt,
+		GenerationID:    options.GenerationID,
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
@@ -1159,7 +1177,7 @@ func sanitizeManualDownloadFilename(title string) string {
 }
 
 func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
-	kb *types.KnowledgeBase, knowledge *types.Knowledge, content string, doSync bool,
+	kb *types.KnowledgeBase, knowledge *types.Knowledge, content string, doSync bool, generationIDs ...string,
 ) {
 	clean := strings.TrimSpace(content)
 	if clean == "" {
@@ -1198,6 +1216,9 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	opts := ProcessChunksOptions{
 		EnableMultimodel: eff.EnableMultimodel && len(resolvedImages) > 0,
 		StoredImages:     resolvedImages,
+	}
+	if len(generationIDs) > 0 {
+		opts.GenerationID = generationIDs[0]
 	}
 	if eff.QuestionGenerationConfig.Enabled {
 		opts.EnableQuestionGeneration = true

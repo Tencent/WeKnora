@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -57,7 +56,7 @@ type editableChunkKnowledgeRepo struct {
 }
 
 func (editableChunkKnowledgeRepo) GetKnowledgeByID(context.Context, uint64, string) (*types.Knowledge, error) {
-	return nil, errors.New("summary refresh not configured in unit test")
+	return &types.Knowledge{ID: "knowledge", TenantID: 1, KnowledgeBaseID: "kb"}, nil
 }
 
 type imageSyncChunkRepo struct {

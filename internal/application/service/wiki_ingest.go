@@ -14,6 +14,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent"
+	"github.com/Tencent/WeKnora/internal/artifact"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/searchutil"
@@ -288,8 +290,10 @@ const (
 // unexported and excluded from JSON so the persisted payload does not
 // duplicate the column.
 type WikiPendingOp struct {
-	Op          string `json:"op"`
-	KnowledgeID string `json:"knowledge_id"`
+	Op           string `json:"op"`
+	KnowledgeID  string `json:"knowledge_id"`
+	GenerationID string `json:"generation_id,omitempty"`
+	Attempt      int    `json:"attempt,omitempty"`
 	// Ingest fields
 	Language string `json:"language,omitempty"`
 	// Retract fields
@@ -320,17 +324,20 @@ type WikiPendingOp struct {
 // both of which are correctness-critical short-lived flags rather
 // than data the system should survive without.
 type wikiIngestService struct {
-	wikiService    interfaces.WikiPageService
-	kbService      interfaces.KnowledgeBaseService
-	knowledgeSvc   interfaces.KnowledgeService
-	knowledgeRepo  interfaces.KnowledgeRepository
-	chunkRepo      interfaces.ChunkRepository
-	modelService   interfaces.ModelService
-	task           interfaces.TaskEnqueuer
-	audit          interfaces.AuditLogService
-	pendingRepo    interfaces.TaskPendingOpsRepository
-	deadLetterRepo interfaces.TaskDeadLetterRepository
-	redisClient    *redis.Client // nil in Lite mode (no Redis)
+	config          *config.Config
+	artifactRuntime *artifact.Runtime
+	wikiService     interfaces.WikiPageService
+	kbService       interfaces.KnowledgeBaseService
+	knowledgeSvc    interfaces.KnowledgeService
+	knowledgeRepo   interfaces.KnowledgeRepository
+	generationRepo  interfaces.KnowledgeGenerationRepository
+	chunkRepo       interfaces.ChunkRepository
+	modelService    interfaces.ModelService
+	task            interfaces.TaskEnqueuer
+	audit           interfaces.AuditLogService
+	pendingRepo     interfaces.TaskPendingOpsRepository
+	deadLetterRepo  interfaces.TaskDeadLetterRepository
+	redisClient     *redis.Client // nil in Lite mode (no Redis)
 	// spanTracker lets per-document map work surface as a
 	// postprocess.wiki subspan in the knowledge trace tree. Async
 	// batch design means we look up the parent attempt by knowledge
@@ -364,6 +371,7 @@ func NewWikiIngestService(
 	kbService interfaces.KnowledgeBaseService,
 	knowledgeSvc interfaces.KnowledgeService,
 	knowledgeRepo interfaces.KnowledgeRepository,
+	generationRepo interfaces.KnowledgeGenerationRepository,
 	chunkRepo interfaces.ChunkRepository,
 	modelService interfaces.ModelService,
 	task interfaces.TaskEnqueuer,
@@ -372,20 +380,25 @@ func NewWikiIngestService(
 	deadLetterRepo interfaces.TaskDeadLetterRepository,
 	redisClient *redis.Client,
 	spanTracker SpanTracker,
+	cfg *config.Config,
+	artifactRuntime *artifact.Runtime,
 ) interfaces.TaskHandler {
 	svc := &wikiIngestService{
-		wikiService:    wikiService,
-		kbService:      kbService,
-		knowledgeSvc:   knowledgeSvc,
-		knowledgeRepo:  knowledgeRepo,
-		chunkRepo:      chunkRepo,
-		modelService:   modelService,
-		task:           task,
-		audit:          audit,
-		pendingRepo:    pendingRepo,
-		deadLetterRepo: deadLetterRepo,
-		redisClient:    redisClient,
-		spanTracker:    spanTracker,
+		config:          cfg,
+		artifactRuntime: artifactRuntime,
+		wikiService:     wikiService,
+		kbService:       kbService,
+		knowledgeSvc:    knowledgeSvc,
+		knowledgeRepo:   knowledgeRepo,
+		generationRepo:  generationRepo,
+		chunkRepo:       chunkRepo,
+		modelService:    modelService,
+		task:            task,
+		audit:           audit,
+		pendingRepo:     pendingRepo,
+		deadLetterRepo:  deadLetterRepo,
+		redisClient:     redisClient,
+		spanTracker:     spanTracker,
 	}
 	return svc
 }
@@ -465,7 +478,7 @@ func EnqueueWikiIngest(
 	tenantID uint64,
 	kbID, knowledgeID string,
 ) (bool, error) {
-	pendingOp, err := newWikiIngestPendingOp(ctx, tenantID, kbID, knowledgeID)
+	pendingOp, err := newWikiIngestPendingOp(ctx, tenantID, kbID, knowledgeID, "", 0)
 
 	// Persist the pending op. A re-ingest of the same knowledge id while
 	// a previous op is still queued simply appends another row; the
@@ -494,13 +507,16 @@ func EnqueueWikiIngest(
 func newWikiIngestPendingOp(
 	ctx context.Context,
 	tenantID uint64,
-	kbID, knowledgeID string,
+	kbID, knowledgeID, generationID string,
+	attempt int,
 ) (*types.TaskPendingOp, error) {
 	lang, _ := types.LanguageFromContext(ctx)
 	op := WikiPendingOp{
-		Op:          WikiOpIngest,
-		KnowledgeID: knowledgeID,
-		Language:    lang,
+		Op:           WikiOpIngest,
+		KnowledgeID:  knowledgeID,
+		GenerationID: generationID,
+		Attempt:      attempt,
+		Language:     lang,
 	}
 	payloadBytes, err := json.Marshal(op)
 	if err != nil {
@@ -1116,12 +1132,19 @@ func (s *wikiIngestService) trimPendingList(ctx context.Context, ids []int64) er
 // already zero: FinalizeSubtask guards both the decrement (count > 0) and
 // the promote (parse_status = finalizing AND count = 0), so an op enqueued
 // before this accounting shipped is a harmless no-op.
-func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, knowledgeID string) {
+func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, kbID string, op WikiPendingOp, publishSlugs []string) {
 	// Wiki is only finalized when its op reaches a terminal state, so this is
 	// always an intended drain (retErr=nil, final=true). Detached context: the
 	// wiki batch worker may be mid-shutdown or have a cancelled ctx when this
 	// runs; a swallowed failure would strand the parent in "finalizing".
-	finalizeSubtaskDetached(ctx, s.knowledgeRepo, knowledgeID, "wiki", nil, false, true)
+	var afterActivate func(context.Context)
+	if kbID != "" && len(publishSlugs) > 0 {
+		afterActivate = func(dctx context.Context) {
+			s.publishDraftPages(dctx, kbID, publishSlugs)
+		}
+	}
+	finalizeGenerationSubtaskDetachedWithHook(ctx, s.knowledgeRepo, s.generationRepo, s.tracker(), op.KnowledgeID, "wiki",
+		op.GenerationID, op.Attempt, nil, false, true, afterActivate)
 }
 
 // requeueFailedOps records in-batch failures.
@@ -1178,7 +1201,7 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 		// for deleted knowledge that has no counter to drain). The
 		// matching +1 was seeded by KnowledgePostProcess.SetFinalizing.
 		if op.Op == WikiOpIngest {
-			s.finalizeWikiSubtask(ctx, op.KnowledgeID)
+			s.finalizeWikiSubtask(ctx, payload.KnowledgeBaseID, op, nil)
 		}
 		logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
 		if s.deadLetterRepo != nil {
@@ -1212,9 +1235,11 @@ type wikiIngestPageRef struct {
 }
 
 type docIngestResult struct {
-	KnowledgeID string
-	DocTitle    string
-	Summary     string // one-line summary of the document (from summary page)
+	KnowledgeID  string
+	GenerationID string
+	Attempt      int
+	DocTitle     string
+	Summary      string // one-line summary of the document (from summary page)
 	// Pages records the wiki pages this document touched, carrying both
 	// the slug used for link/retract bookkeeping and its human-readable title.
 	Pages []wikiIngestPageRef
@@ -1296,15 +1321,18 @@ type SlugUpdate struct {
 	Item              extractedItem // For entity/concept
 	DocTitle          string
 	KnowledgeID       string
+	GenerationID      string
+	Attempt           int
 	SourceRef         string
 	Language          string
 	SummaryBody       string // For summary
 	SummaryLine       string // For summary
 	RetractDocContent string // For retract / retractStale
-	// SourceChunks lists the chunk IDs (within KnowledgeID) that substantively
-	// support this update. Mirrors Item.SourceChunks for convenience — the
-	// Reduce phase reads from here to avoid an extra field hop.
-	SourceChunks []string
+	// SourceChunks lists the physical chunk IDs (within KnowledgeID) that
+	// substantively support this update. SourceChunkRefs carries the reusable
+	// logical equivalent that can be rebound to a generation's physical chunks.
+	SourceChunks    []string
+	SourceChunkRefs []LogicalChunkRef
 	// DocSummary is the document-level summary body produced by
 	// WikiSummaryPrompt (everything after the SUMMARY: ... headline, falling
 	// back to the raw output if no headline could be parsed out). Carried
@@ -1972,19 +2000,23 @@ func (s *wikiIngestService) getExistingPageSlugsForKnowledge(ctx context.Context
 
 // Multi-source → remove ref, queue retract
 
+// LogicalChunkRef is an ownership-free citation pointer emitted by the wiki
+// map stage. It can be rebound to the current generation's physical chunk ID
+// without persisting stale chunk IDs inside reusable map artifacts.
+type LogicalChunkRef struct {
+	LogicalChunkKey string `json:"logical_chunk_key"`
+	ContentDigest   string `json:"content_digest"`
+}
+
 // extractedItem represents a single extracted entity or concept.
-//
-// SourceChunks holds the stable chunk IDs (from the source document) that
-// substantively discuss this item. Populated by the chunk-citation pass; when
-// non-empty the Reduce phase uses these chunks verbatim as the item's
-// evidence instead of the shorter Description/Details fields.
 type extractedItem struct {
-	Name         string   `json:"name"`
-	Slug         string   `json:"slug"`
-	Aliases      []string `json:"aliases"`
-	Description  string   `json:"description"`
-	Details      string   `json:"details"`
-	SourceChunks []string `json:"source_chunks,omitempty"`
+	Name            string            `json:"name"`
+	Slug            string            `json:"slug"`
+	Aliases         []string          `json:"aliases"`
+	Description     string            `json:"description"`
+	Details         string            `json:"details"`
+	SourceChunks    []string          `json:"source_chunks,omitempty"`
+	SourceChunkRefs []LogicalChunkRef `json:"source_chunk_refs,omitempty"`
 }
 
 // combinedExtraction represents the parsed result of the combined entity+concept extraction
@@ -2479,6 +2511,12 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 	ctx = types.WithLLMCallMetadata(ctx, purpose, prefixFingerprint)
 
 	tenantID, tenantScoped := types.TenantIDFromContext(ctx)
+	callModel := chatModel
+	if tenantScoped && s.artifactRuntime != nil &&
+		chatArtifactStageEnabled(s.config, "wiki_map") &&
+		isWikiMapArtifactPrompt(promptTpl, maskedData) {
+		callModel = newArtifactCachingChat(chatModel, s.artifactRuntime, tenantID, "wiki_map")
+	}
 	requestJSON, _ := json.Marshal(struct {
 		Messages []chat.Message    `json:"messages"`
 		Options  *chat.ChatOptions `json:"options"`
@@ -2501,7 +2539,7 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 
 		var lastErr error
 		for attempt := 1; attempt <= wikiLLMMaxAttempts; attempt++ {
-			response, callErr := chatModel.Chat(ctx, messages, opts)
+			response, callErr := callModel.Chat(ctx, messages, opts)
 			if callErr == nil && response != nil {
 				return response.Content, nil
 			}
@@ -2576,6 +2614,15 @@ func wikiPromptPurpose(promptTpl string) string {
 		return "wiki_index_intro"
 	default:
 		return "wiki_generation"
+	}
+}
+
+func isWikiMapArtifactPrompt(promptTpl string, data map[string]string) bool {
+	switch promptTpl {
+	case agent.WikiKnowledgeExtractPrompt, agent.WikiCandidateSlugPrompt, agent.WikiChunkCitationPrompt:
+		return true
+	default:
+		return strings.TrimSpace(data["InstructionScope"]) == "wiki_extraction"
 	}
 }
 

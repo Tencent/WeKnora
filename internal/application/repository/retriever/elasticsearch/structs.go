@@ -15,6 +15,8 @@ type VectorEmbedding struct {
 	ChunkID         string    `json:"chunk_id"          gorm:"column:chunk_id"`             // Unique ID of the text chunk
 	KnowledgeID     string    `json:"knowledge_id"      gorm:"column:knowledge_id"`         // ID of the knowledge item
 	KnowledgeBaseID string    `json:"knowledge_base_id" gorm:"column:knowledge_base_id"`    // ID of the knowledge base
+	GenerationID    string    `json:"generation_id"     gorm:"column:generation_id"`        // Generation snapshot ID
+	VisibilityKey   string    `json:"visibility_key"    gorm:"column:visibility_key"`       // Retrieval visibility key
 	TagID           string    `json:"tag_id"            gorm:"column:tag_id"`               // Tag ID for categorization
 	Embedding       []float32 `json:"embedding"         gorm:"column:embedding;not null"`   // Vector embedding of the content
 	IsEnabled       bool      `json:"is_enabled"`                                           // Whether the chunk is enabled
@@ -36,6 +38,8 @@ func ToDBVectorEmbedding(embedding *types.IndexInfo, additionalParams map[string
 		ChunkID:         embedding.ChunkID,
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
+		GenerationID:    embedding.GenerationID,
+		VisibilityKey:   embedding.VisibilityKey,
 		TagID:           embedding.TagID,
 		IsEnabled:       embedding.IsEnabled,
 		IsRecommended:   embedding.IsRecommended,
@@ -69,6 +73,8 @@ func FromDBVectorEmbeddingWithScore(id string,
 		ChunkID:         embedding.ChunkID,
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
+		GenerationID:    embedding.GenerationID,
+		VisibilityKey:   embedding.VisibilityKey,
 		TagID:           embedding.TagID,
 		Content:         embedding.Content,
 		Score:           embedding.Score,

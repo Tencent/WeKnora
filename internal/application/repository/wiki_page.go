@@ -317,6 +317,8 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 	}
 	if req.Status != "" {
 		query = query.Where("status = ?", req.Status)
+	} else {
+		query = query.Where("status = ?", types.WikiPageStatusPublished)
 	}
 	if req.Query != "" {
 		// Use PostgreSQL full-text search + ILIKE for aliases
@@ -412,8 +414,8 @@ func (r *wikiPageRepository) ListByType(ctx context.Context, kbID string, pageTy
 // thousands of pages — the old path loaded every row including its TEXT
 // content just to throw the content away on the way out.
 //
-// Archived pages are excluded. `limit` clamps to [1, 200]; `offset` is
-// honored as-is. Returns the total non-archived count for the type
+// Only published pages are returned. `limit` clamps to [1, 200]; `offset` is
+// honored as-is. Returns the total published count for the type
 // alongside the page so the caller can render "showing N of M".
 func (r *wikiPageRepository) ListByTypeLight(
 	ctx context.Context,
@@ -434,8 +436,8 @@ func (r *wikiPageRepository) ListByTypeLight(
 
 	base := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
-		Where("knowledge_base_id = ? AND page_type = ? AND status <> ?",
-			kbID, pageType, types.WikiPageStatusArchived)
+		Where("knowledge_base_id = ? AND page_type = ? AND status = ?",
+			kbID, pageType, types.WikiPageStatusPublished)
 
 	var total int64
 	if err := base.Count(&total).Error; err != nil {
@@ -1174,7 +1176,7 @@ func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query stri
 		Select("*, "+rankExpr, query, query, query, query).
 		Where("knowledge_base_id = ? AND (title ~* ? OR content ~* ? OR summary ~* ? OR slug ~* ?)",
 			kbID, query, query, query, query).
-		Where("status != ?", "archived").
+		Where("status = ?", types.WikiPageStatusPublished).
 		Order("match_rank DESC, updated_at DESC").
 		Limit(limit).
 		Find(&pages).Error; err != nil {

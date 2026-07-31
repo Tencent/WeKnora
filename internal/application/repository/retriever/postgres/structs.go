@@ -22,6 +22,8 @@ type pgVector struct {
 	KnowledgeID     string              `json:"knowledge_id"      gorm:"column:knowledge_id"`
 	KnowledgeBaseID string              `json:"knowledge_base_id" gorm:"column:knowledge_base_id"`
 	TagID           string              `json:"tag_id"            gorm:"column:tag_id;index"`
+	GenerationID    string              `json:"generation_id"     gorm:"column:generation_id;index"`
+	VisibilityKey   string              `json:"visibility_key"    gorm:"column:visibility_key;index"`
 	Content         string              `json:"content"           gorm:"column:content;not null"`
 	Dimension       int                 `json:"dimension"         gorm:"column:dimension;not null"`
 	Embedding       pgvector.HalfVector `json:"embedding"         gorm:"column:embedding;not null"`
@@ -39,6 +41,8 @@ type pgVectorWithScore struct {
 	KnowledgeID     string              `json:"knowledge_id"      gorm:"column:knowledge_id"`
 	KnowledgeBaseID string              `json:"knowledge_base_id" gorm:"column:knowledge_base_id"`
 	TagID           string              `json:"tag_id"            gorm:"column:tag_id;index"`
+	GenerationID    string              `json:"generation_id"     gorm:"column:generation_id;index"`
+	VisibilityKey   string              `json:"visibility_key"    gorm:"column:visibility_key;index"`
 	Content         string              `json:"content"           gorm:"column:content;not null"`
 	Dimension       int                 `json:"dimension"         gorm:"column:dimension;not null"`
 	Embedding       pgvector.HalfVector `json:"embedding"         gorm:"column:embedding;not null"`
@@ -65,6 +69,8 @@ func toDBVectorEmbedding(indexInfo *types.IndexInfo, additionalParams map[string
 		KnowledgeID:     indexInfo.KnowledgeID,
 		KnowledgeBaseID: indexInfo.KnowledgeBaseID,
 		TagID:           indexInfo.TagID,
+		GenerationID:    indexInfo.GenerationID,
+		VisibilityKey:   indexInfo.VisibilityKey,
 		Content:         common.CleanInvalidUTF8(indexInfo.Content),
 		IsEnabled:       indexInfo.IsEnabled,
 	}
@@ -96,6 +102,8 @@ func fromDBVectorEmbeddingWithScore(embedding *pgVectorWithScore, matchType type
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
 		TagID:           embedding.TagID,
+		GenerationID:    embedding.GenerationID,
+		VisibilityKey:   embedding.VisibilityKey,
 		Content:         embedding.Content,
 		Score:           embedding.Score,
 		MatchType:       matchType,

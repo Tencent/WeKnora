@@ -455,12 +455,13 @@ func TestPostprocessSubspan_MissingParentFallsThrough(t *testing.T) {
 // the JSON tag silently zero the attempt and disable span recording.
 func TestChunkExtractPayload_AttemptRoundTrip(t *testing.T) {
 	in := types.ExtractChunkPayload{
-		TenantID:    42,
-		ChunkID:     "chunk-x",
-		ModelID:     "m1",
-		KnowledgeID: "kid-7",
-		Attempt:     3,
-		ChunkIndex:  9,
+		TenantID:     42,
+		ChunkID:      "chunk-x",
+		ModelID:      "m1",
+		KnowledgeID:  "kid-7",
+		Attempt:      3,
+		GenerationID: "generation-3",
+		ChunkIndex:   9,
 	}
 	bytes, err := json.Marshal(in)
 	require.NoError(t, err)
@@ -470,6 +471,7 @@ func TestChunkExtractPayload_AttemptRoundTrip(t *testing.T) {
 
 	assert.Equal(t, in.KnowledgeID, out.KnowledgeID)
 	assert.Equal(t, in.Attempt, out.Attempt)
+	assert.Equal(t, in.GenerationID, out.GenerationID)
 	assert.Equal(t, in.ChunkIndex, out.ChunkIndex)
 }
 
@@ -482,6 +484,7 @@ func TestSummaryQuestionPayload_AttemptRoundTrip(t *testing.T) {
 		KnowledgeID:     "kid-7",
 		Language:        "zh-CN",
 		Attempt:         5,
+		GenerationID:    "generation-5",
 		Refresh:         true,
 	}
 	sumBytes, err := json.Marshal(sumIn)
@@ -489,6 +492,7 @@ func TestSummaryQuestionPayload_AttemptRoundTrip(t *testing.T) {
 	var sumOut types.SummaryGenerationPayload
 	require.NoError(t, json.Unmarshal(sumBytes, &sumOut))
 	assert.Equal(t, 5, sumOut.Attempt)
+	assert.Equal(t, "generation-5", sumOut.GenerationID)
 	assert.True(t, sumOut.Refresh)
 
 	qIn := types.QuestionGenerationPayload{
@@ -498,10 +502,12 @@ func TestSummaryQuestionPayload_AttemptRoundTrip(t *testing.T) {
 		QuestionCount:   3,
 		Language:        "zh-CN",
 		Attempt:         5,
+		GenerationID:    "generation-5",
 	}
 	qBytes, err := json.Marshal(qIn)
 	require.NoError(t, err)
 	var qOut types.QuestionGenerationPayload
 	require.NoError(t, json.Unmarshal(qBytes, &qOut))
 	assert.Equal(t, 5, qOut.Attempt)
+	assert.Equal(t, "generation-5", qOut.GenerationID)
 }

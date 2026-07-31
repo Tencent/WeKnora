@@ -24,6 +24,8 @@ const (
 	fieldChunkID         = "chunk_id"
 	fieldKnowledgeID     = "knowledge_id"
 	fieldKnowledgeBaseID = "knowledge_base_id"
+	fieldGenerationID    = "generation_id"
+	fieldVisibilityKey   = "visibility_key"
 	fieldTagID           = "tag_id"
 	fieldIsEnabled       = "is_enabled"
 )
@@ -49,6 +51,8 @@ type vectorEmbedding struct {
 	ChunkID         string
 	KnowledgeID     string
 	KnowledgeBaseID string
+	GenerationID    string
+	VisibilityKey   string
 	TagID           string
 	Embedding       []float32
 	SparseVector    []encoder.SparseVecItem

@@ -19,3 +19,12 @@ func buildKnowledgeIndexContent(knowledge *types.Knowledge, content string) stri
 	}
 	return title + "\n" + content
 }
+
+func applyChunkGenerationIndexInfo(info *types.IndexInfo, chunk *types.Chunk) *types.IndexInfo {
+	if info == nil || chunk == nil || chunk.GenerationID == "" {
+		return info
+	}
+	info.GenerationID = chunk.GenerationID
+	info.VisibilityKey = chunk.KnowledgeID + ":" + chunk.GenerationID
+	return info
+}

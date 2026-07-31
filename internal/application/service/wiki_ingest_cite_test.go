@@ -1,9 +1,12 @@
 package service
 
 import (
+	"context"
 	"sort"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/artifact"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -22,8 +25,14 @@ func TestMergeCitationsIntoItems_PopulatesSourceChunksOnCandidates(t *testing.T)
 		"entity/acme": {"chunk-1", "chunk-3"},
 		"concept/rag": {"chunk-2"},
 	}
+	logicalCitations := map[string][]LogicalChunkRef{
+		"entity/acme": {
+			{LogicalChunkKey: "lk-1", ContentDigest: "digest-1"},
+			{LogicalChunkKey: "lk-3", ContentDigest: "digest-3"},
+		},
+	}
 
-	gotE, gotC, uncited := mergeCitationsIntoItems(entities, concepts, citations, nil)
+	gotE, gotC, uncited := mergeCitationsIntoItems(entities, concepts, citations, logicalCitations, nil)
 
 	if len(gotE) != 2 || len(gotC) != 1 {
 		t.Fatalf("expected 2 entities + 1 concept, got %d + %d", len(gotE), len(gotC))
@@ -34,6 +43,9 @@ func TestMergeCitationsIntoItems_PopulatesSourceChunksOnCandidates(t *testing.T)
 	}
 	if !equalStrings(acme.SourceChunks, []string{"chunk-1", "chunk-3"}) {
 		t.Errorf("entity/acme source_chunks = %v, want [chunk-1 chunk-3]", acme.SourceChunks)
+	}
+	if len(acme.SourceChunkRefs) != 2 || acme.SourceChunkRefs[0].LogicalChunkKey != "lk-1" {
+		t.Errorf("entity/acme source_chunk_refs = %+v, want logical refs", acme.SourceChunkRefs)
 	}
 	beta := findBySlug(gotE, "entity/beta")
 	if beta == nil {
@@ -96,7 +108,7 @@ func TestMergeCitationsIntoItems_AddsNewSlugsAndUnionsChunksAcrossBatches(t *tes
 		},
 	}
 
-	gotE, gotC, _ := mergeCitationsIntoItems(entities, concepts, nil, newSlugs)
+	gotE, gotC, _ := mergeCitationsIntoItems(entities, concepts, nil, nil, newSlugs)
 
 	if len(gotE) != 2 {
 		t.Fatalf("expected 2 entities, got %d (%+v)", len(gotE), gotE)
@@ -161,6 +173,90 @@ func TestSplitChunksIntoCitationBatches_RespectsBudgetAndOrder(t *testing.T) {
 		if b.handles.Len() != len(b.chunks) {
 			t.Errorf("batch %d handle count %d != chunk count %d", bi, b.handles.Len(), len(b.chunks))
 		}
+	}
+}
+
+func TestClassifyChunkCitationsRebindsCachedHandlesToCurrentGenerationChunks(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	store := newMultimodalArtifactStore()
+	svc := &wikiIngestService{
+		config: &config.Config{ArtifactCache: &config.ArtifactCacheConfig{Stages: map[string]bool{
+			"wiki_map": true,
+		}}},
+		artifactRuntime: artifact.NewRuntime(store, artifact.RuntimeOptions{
+			ReadEnabled: true, WriteEnabled: true, MaxInlineBytes: 4096,
+		}),
+	}
+	model := &fakeArtifactChat{out: []string{`{
+		"citations": {"entity/acme": ["c000"]},
+		"new_slugs": [{
+			"type": "entity",
+			"name": "Beta",
+			"slug": "entity/beta",
+			"description": "desc",
+			"details": "details",
+			"source_chunks": ["c001"]
+		}]
+	}`}}
+	candidatesXML := "- slug: entity/acme, type: entity, name: \"Acme\", description: desc"
+	chunksForGeneration := func(generationID string) []*types.Chunk {
+		return []*types.Chunk{
+			{
+				ID:              generationID + "-physical-a",
+				GenerationID:    generationID,
+				LogicalChunkKey: "logical-a",
+				ArtifactDigest:  "digest-a",
+				ChunkIndex:      0,
+				ChunkType:       types.ChunkTypeText,
+				Content:         "Acme builds retrieval systems.",
+			},
+			{
+				ID:              generationID + "-physical-b",
+				GenerationID:    generationID,
+				LogicalChunkKey: "logical-b",
+				ArtifactDigest:  "digest-b",
+				ChunkIndex:      1,
+				ChunkType:       types.ChunkTypeText,
+				Content:         "Beta appears in the same document.",
+			},
+		}
+	}
+
+	firstCitations, firstLogical, firstNew, firstBatches := svc.classifyChunkCitations(
+		ctx, model, candidatesXML, chunksForGeneration("generation-1"), "en", nil,
+	)
+	secondCitations, secondLogical, secondNew, secondBatches := svc.classifyChunkCitations(
+		ctx, model, candidatesXML, chunksForGeneration("generation-2"), "en", nil,
+	)
+
+	if firstBatches != 1 || secondBatches != 1 {
+		t.Fatalf("batch counts = %d/%d, want one batch per generation", firstBatches, secondBatches)
+	}
+	if model.calls != 1 {
+		t.Fatalf("wiki_map provider calls = %d, want 1 total and cache hit on generation retry", model.calls)
+	}
+	if !equalStrings(firstCitations["entity/acme"], []string{"generation-1-physical-a"}) {
+		t.Fatalf("first physical citations = %v", firstCitations["entity/acme"])
+	}
+	if !equalStrings(secondCitations["entity/acme"], []string{"generation-2-physical-a"}) {
+		t.Fatalf("cached citation handles rebound to %v, want generation-2 physical chunk", secondCitations["entity/acme"])
+	}
+	wantLogical := []LogicalChunkRef{{LogicalChunkKey: "logical-a", ContentDigest: "digest-a"}}
+	if len(firstLogical["entity/acme"]) != 1 || firstLogical["entity/acme"][0] != wantLogical[0] {
+		t.Fatalf("first logical refs = %+v, want %+v", firstLogical["entity/acme"], wantLogical)
+	}
+	if len(secondLogical["entity/acme"]) != 1 || secondLogical["entity/acme"][0] != wantLogical[0] {
+		t.Fatalf("cached logical refs = %+v, want %+v", secondLogical["entity/acme"], wantLogical)
+	}
+	if len(firstNew) != 1 || !equalStrings(firstNew[0].SourceChunks, []string{"generation-1-physical-b"}) {
+		t.Fatalf("first new slug source chunks = %+v", firstNew)
+	}
+	if len(secondNew) != 1 || !equalStrings(secondNew[0].SourceChunks, []string{"generation-2-physical-b"}) {
+		t.Fatalf("cached new slug source chunks = %+v, want generation-2 physical chunk", secondNew)
+	}
+	if len(secondNew[0].SourceChunkRefs) != 1 ||
+		secondNew[0].SourceChunkRefs[0] != (LogicalChunkRef{LogicalChunkKey: "logical-b", ContentDigest: "digest-b"}) {
+		t.Fatalf("cached new slug logical refs = %+v", secondNew[0].SourceChunkRefs)
 	}
 }
 

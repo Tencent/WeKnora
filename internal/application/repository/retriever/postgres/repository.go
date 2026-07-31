@@ -37,6 +37,10 @@ func (r *pgRepository) Support() []types.RetrieverType {
 	return []types.RetrieverType{types.KeywordsRetrieverType, types.VectorRetrieverType}
 }
 
+func (r *pgRepository) SupportsGenerationFilter() bool {
+	return true
+}
+
 // calculateIndexStorageSize calculates storage size for a single index entry
 func (g *pgRepository) calculateIndexStorageSize(embeddingDB *pgVector) int64 {
 	// 1. Text content size
@@ -193,6 +197,18 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 			Values: common.ToInterfaceSlice(params.TagIDs),
 		})
 	}
+	if len(params.GenerationIDs) > 0 {
+		conds = append(conds, clause.IN{
+			Column: "generation_id",
+			Values: common.ToInterfaceSlice(params.GenerationIDs),
+		})
+	}
+	if len(params.VisibilityKeys) > 0 {
+		conds = append(conds, clause.IN{
+			Column: "visibility_key",
+			Values: common.ToInterfaceSlice(params.VisibilityKeys),
+		})
+	}
 
 	// Use ParadeDB's ||| operator for matching any token
 	conds = append(conds, clause.Expr{
@@ -221,6 +237,8 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 			"knowledge_id",
 			"knowledge_base_id",
 			"tag_id",
+			"generation_id",
+			"visibility_key",
 		}).
 		Limit(int(params.TopK)).
 		Find(&embeddingDBList).Error
@@ -329,6 +347,26 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 		whereParts = append(whereParts, fmt.Sprintf("tag_id IN (%s)",
 			strings.Join(placeholders, ", ")))
 	}
+	if len(params.GenerationIDs) > 0 {
+		placeholders := make([]string, len(params.GenerationIDs))
+		paramStart := len(allVars) + 1
+		for i := range params.GenerationIDs {
+			placeholders[i] = fmt.Sprintf("$%d", paramStart+i)
+			allVars = append(allVars, params.GenerationIDs[i])
+		}
+		whereParts = append(whereParts, fmt.Sprintf("generation_id IN (%s)",
+			strings.Join(placeholders, ", ")))
+	}
+	if len(params.VisibilityKeys) > 0 {
+		placeholders := make([]string, len(params.VisibilityKeys))
+		paramStart := len(allVars) + 1
+		for i := range params.VisibilityKeys {
+			placeholders[i] = fmt.Sprintf("$%d", paramStart+i)
+			allVars = append(allVars, params.VisibilityKeys[i])
+		}
+		whereParts = append(whereParts, fmt.Sprintf("visibility_key IN (%s)",
+			strings.Join(placeholders, ", ")))
+	}
 
 	// is_enabled filter
 	whereParts = append(whereParts, fmt.Sprintf("(is_enabled IS NULL OR is_enabled = $%d)", len(allVars)+1))
@@ -377,10 +415,12 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 	querySQL := fmt.Sprintf(`
 		SELECT 
 			id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id, tag_id,
+			generation_id, visibility_key,
 			(1 - distance) as score
 		FROM (
 			SELECT 
 				id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id, tag_id,
+				generation_id, visibility_key,
 				embedding::halfvec(%[1]d) <=> $1::halfvec(%[1]d) as distance
 			FROM embeddings
 			%[2]s

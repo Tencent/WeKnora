@@ -38,6 +38,7 @@ type GraphData struct {
 type NameSpace struct {
 	KnowledgeBase string `json:"knowledge_base"`
 	Knowledge     string `json:"knowledge"`
+	Generation    string `json:"generation,omitempty"`
 }
 
 // Labels returns the labels of the name space
@@ -48,6 +49,9 @@ func (n NameSpace) Labels() []string {
 	}
 	if n.Knowledge != "" {
 		res = append(res, n.Knowledge)
+	}
+	if n.Generation != "" {
+		res = append(res, n.Generation)
 	}
 	return res
 }

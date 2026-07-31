@@ -28,6 +28,8 @@ type sqliteEmbedding struct {
 	KnowledgeID     string    `gorm:"column:knowledge_id;index"`
 	KnowledgeBaseID string    `gorm:"column:knowledge_base_id;index"`
 	TagID           string    `gorm:"column:tag_id;index"`
+	GenerationID    string    `gorm:"column:generation_id;index"`
+	VisibilityKey   string    `gorm:"column:visibility_key;index"`
 	Content         string    `gorm:"column:content;not null"`
 	Dimension       int       `gorm:"column:dimension;not null"`
 	IsEnabled       *bool     `gorm:"column:is_enabled;default:true;index"`
@@ -139,6 +141,10 @@ func (r *sqliteRepository) EngineType() types.RetrieverEngineType {
 
 func (r *sqliteRepository) Support() []types.RetrieverType {
 	return []types.RetrieverType{types.KeywordsRetrieverType, types.VectorRetrieverType}
+}
+
+func (r *sqliteRepository) SupportsGenerationFilter() bool {
+	return true
 }
 
 func (r *sqliteRepository) Save(ctx context.Context, indexInfo *types.IndexInfo, params map[string]any) error {
@@ -296,6 +302,7 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 	sql := `
 		SELECT e.id, e.source_id, e.source_type, e.chunk_id,
 			e.knowledge_id, e.knowledge_base_id, e.tag_id,
+			e.generation_id, e.visibility_key,
 			e.content,
 			(bm25(lite_embeddings_fts) * -1000000.0) AS score
 		FROM lite_embeddings_fts
@@ -322,6 +329,8 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 		KnowledgeID     string
 		KnowledgeBaseID string
 		TagID           string
+		GenerationID    string
+		VisibilityKey   string
 		Content         string
 		Score           float64
 	}
@@ -351,6 +360,8 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 			KnowledgeID:     row.KnowledgeID,
 			KnowledgeBaseID: row.KnowledgeBaseID,
 			TagID:           row.TagID,
+			GenerationID:    row.GenerationID,
+			VisibilityKey:   row.VisibilityKey,
 			Content:         row.Content,
 			Score:           score,
 			MatchType:       types.MatchTypeKeywords,
@@ -383,6 +394,7 @@ func (r *sqliteRepository) vectorRetrieve(ctx context.Context, params types.Retr
 		SELECT v.rowid, v.distance,
 			e.source_id, e.source_type, e.chunk_id,
 			e.knowledge_id, e.knowledge_base_id,
+			e.generation_id, e.visibility_key,
 			e.tag_id, e.content
 		FROM %s v
 		JOIN lite_embeddings e ON e.id = v.rowid
@@ -416,6 +428,8 @@ func (r *sqliteRepository) vectorRetrieve(ctx context.Context, params types.Retr
 		ChunkID         string
 		KnowledgeID     string
 		KnowledgeBaseID string
+		GenerationID    string
+		VisibilityKey   string
 		TagID           string
 		Content         string
 	}
@@ -448,6 +462,8 @@ func (r *sqliteRepository) vectorRetrieve(ctx context.Context, params types.Retr
 			ChunkID:         v.ChunkID,
 			KnowledgeID:     v.KnowledgeID,
 			KnowledgeBaseID: v.KnowledgeBaseID,
+			GenerationID:    v.GenerationID,
+			VisibilityKey:   v.VisibilityKey,
 			TagID:           v.TagID,
 			Content:         v.Content,
 			Score:           score,
@@ -473,6 +489,8 @@ func toSQLiteEmbedding(info *types.IndexInfo) *sqliteEmbedding {
 		KnowledgeID:     info.KnowledgeID,
 		KnowledgeBaseID: info.KnowledgeBaseID,
 		TagID:           info.TagID,
+		GenerationID:    info.GenerationID,
+		VisibilityKey:   info.VisibilityKey,
 		Content:         common.CleanInvalidUTF8(info.Content),
 		Dimension:       0,
 		IsEnabled:       &enabled,
@@ -564,6 +582,18 @@ func buildFilterWhere(params types.RetrieveParams, tableAlias string) []whereCla
 		parts = append(parts, whereClause{
 			clause: tableAlias + ".tag_id IN (" + placeholders(len(params.TagIDs)) + ")",
 			args:   toInterfaceSlice(params.TagIDs),
+		})
+	}
+	if len(params.GenerationIDs) > 0 {
+		parts = append(parts, whereClause{
+			clause: "e.generation_id IN (" + placeholders(len(params.GenerationIDs)) + ")",
+			args:   toInterfaceSlice(params.GenerationIDs),
+		})
+	}
+	if len(params.VisibilityKeys) > 0 {
+		parts = append(parts, whereClause{
+			clause: "e.visibility_key IN (" + placeholders(len(params.VisibilityKeys)) + ")",
+			args:   toInterfaceSlice(params.VisibilityKeys),
 		})
 	}
 	return parts

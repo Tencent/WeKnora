@@ -30,6 +30,8 @@ const (
 	fieldChunkID          = "chunk_id"
 	fieldKnowledgeID      = "knowledge_id"
 	fieldKnowledgeBaseID  = "knowledge_base_id"
+	fieldGenerationID     = "generation_id"
+	fieldVisibilityKey    = "visibility_key"
 	fieldTagID            = "tag_id"
 	fieldEmbedding        = "embedding"
 	fieldIsEnabled        = "is_enabled"
@@ -39,7 +41,7 @@ const (
 
 var (
 	allFields = []string{fieldID, fieldContent, fieldSourceID, fieldSourceType, fieldChunkID,
-		fieldKnowledgeID, fieldKnowledgeBaseID, fieldTagID, fieldIsEnabled, fieldEmbedding}
+		fieldKnowledgeID, fieldKnowledgeBaseID, fieldGenerationID, fieldVisibilityKey, fieldTagID, fieldIsEnabled, fieldEmbedding}
 )
 
 // NewMilvusRetrieveEngineRepository creates and initializes a new Milvus repository.
@@ -148,6 +150,14 @@ func (m *milvusRepository) ensureCollection(ctx context.Context, dimension int) 
 					WithDataType(entity.FieldTypeVarChar).
 					WithMaxLength(255),
 				entity.NewField().
+					WithName(fieldGenerationID).
+					WithDataType(entity.FieldTypeVarChar).
+					WithMaxLength(255),
+				entity.NewField().
+					WithName(fieldVisibilityKey).
+					WithDataType(entity.FieldTypeVarChar).
+					WithMaxLength(512),
+				entity.NewField().
 					WithName(fieldTagID).
 					WithDataType(entity.FieldTypeVarChar).
 					WithMaxLength(255),
@@ -170,7 +180,7 @@ func (m *milvusRepository) ensureCollection(ctx context.Context, dimension int) 
 		indexOpts = append(indexOpts, client.NewCreateIndexOption(collectionName, fieldEmbedding, index.NewHNSWIndex(m.metricType, 16, 128)))
 		indexOpts = append(indexOpts, client.NewCreateIndexOption(collectionName, fieldContentSparse, index.NewAutoIndex(entity.BM25)))
 		// Create payload indexes for filtering
-		indexFields := []string{fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldSourceID, fieldIsEnabled}
+		indexFields := []string{fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldGenerationID, fieldVisibilityKey, fieldSourceID, fieldIsEnabled}
 		for _, fieldName := range indexFields {
 			indexOpts = append(indexOpts, client.NewCreateIndexOption(collectionName, fieldName, index.NewAutoIndex(entity.IP)))
 		}
@@ -214,6 +224,10 @@ func (m *milvusRepository) EngineType() types.RetrieverEngineType {
 
 func (m *milvusRepository) Support() []types.RetrieverType {
 	return []types.RetrieverType{types.KeywordsRetrieverType, types.VectorRetrieverType}
+}
+
+func (m *milvusRepository) SupportsGenerationFilter() bool {
+	return true
 }
 
 // EstimateStorageSize calculates the estimated storage size for a list of indices
@@ -618,6 +632,20 @@ func (m *milvusRepository) getBaseFilterForQuery(params types.RetrieveParams) (s
 			Value:    params.TagIDs,
 		})
 	}
+	if len(params.GenerationIDs) > 0 {
+		filters = append(filters, &universalFilterCondition{
+			Field:    fieldGenerationID,
+			Operator: operatorIn,
+			Value:    params.GenerationIDs,
+		})
+	}
+	if len(params.VisibilityKeys) > 0 {
+		filters = append(filters, &universalFilterCondition{
+			Field:    fieldVisibilityKey,
+			Operator: operatorIn,
+			Value:    params.VisibilityKeys,
+		})
+	}
 	if len(params.ExcludeKnowledgeIDs) > 0 {
 		filters = append(filters, &universalFilterCondition{
 			Field:    fieldKnowledgeID,
@@ -964,6 +992,8 @@ func toMilvusVectorEmbedding(embedding *types.IndexInfo, additionalParams map[st
 		ChunkID:         embedding.ChunkID,
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
+		GenerationID:    embedding.GenerationID,
+		VisibilityKey:   embedding.VisibilityKey,
 		TagID:           embedding.TagID,
 		IsEnabled:       embedding.IsEnabled,
 	}
@@ -987,6 +1017,8 @@ func fromMilvusVectorEmbedding(id string,
 		ChunkID:         embedding.ChunkID,
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
+		GenerationID:    embedding.GenerationID,
+		VisibilityKey:   embedding.VisibilityKey,
 		TagID:           embedding.TagID,
 		Content:         embedding.Content,
 		Score:           embedding.Score,
@@ -1003,6 +1035,8 @@ func createUpsert(collectionName string, embeddings []*MilvusVectorEmbedding) cl
 	chunkIDs := make([]string, 0, len(embeddings))
 	knowledgeIDs := make([]string, 0, len(embeddings))
 	knowledgeBaseIDs := make([]string, 0, len(embeddings))
+	generationIDs := make([]string, 0, len(embeddings))
+	visibilityKeys := make([]string, 0, len(embeddings))
 	tagIDs := make([]string, 0, len(embeddings))
 	isEnableds := make([]bool, 0, len(embeddings))
 	var dimension int
@@ -1015,6 +1049,8 @@ func createUpsert(collectionName string, embeddings []*MilvusVectorEmbedding) cl
 		chunkIDs = append(chunkIDs, embedding.ChunkID)
 		knowledgeIDs = append(knowledgeIDs, embedding.KnowledgeID)
 		knowledgeBaseIDs = append(knowledgeBaseIDs, embedding.KnowledgeBaseID)
+		generationIDs = append(generationIDs, embedding.GenerationID)
+		visibilityKeys = append(visibilityKeys, embedding.VisibilityKey)
 		tagIDs = append(tagIDs, embedding.TagID)
 		isEnableds = append(isEnableds, embedding.IsEnabled)
 		dimension = len(embedding.Embedding)
@@ -1028,6 +1064,8 @@ func createUpsert(collectionName string, embeddings []*MilvusVectorEmbedding) cl
 		WithVarcharColumn(fieldChunkID, chunkIDs).
 		WithVarcharColumn(fieldKnowledgeID, knowledgeIDs).
 		WithVarcharColumn(fieldKnowledgeBaseID, knowledgeBaseIDs).
+		WithVarcharColumn(fieldGenerationID, generationIDs).
+		WithVarcharColumn(fieldVisibilityKey, visibilityKeys).
 		WithVarcharColumn(fieldTagID, tagIDs).
 		WithBoolColumn(fieldIsEnabled, isEnableds)
 	return opt
@@ -1118,6 +1156,24 @@ func convertResultSet(resultSet []client.ResultSet) ([]*MilvusVectorEmbeddingWit
 					return nil, nil, err
 				}
 				docs[i].KnowledgeBaseID = val
+			}
+		}
+		if field == fieldGenerationID {
+			for i := 0; i < columns.Len(); i++ {
+				val, err := columns.GetAsString(i)
+				if err != nil {
+					return nil, nil, err
+				}
+				docs[i].GenerationID = val
+			}
+		}
+		if field == fieldVisibilityKey {
+			for i := 0; i < columns.Len(); i++ {
+				val, err := columns.GetAsString(i)
+				if err != nil {
+					return nil, nil, err
+				}
+				docs[i].VisibilityKey = val
 			}
 		}
 		if field == fieldTagID {

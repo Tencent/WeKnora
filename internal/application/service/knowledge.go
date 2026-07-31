@@ -13,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/artifact"
 	"github.com/Tencent/WeKnora/internal/config"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -62,6 +63,7 @@ type knowledgeService struct {
 	modelService    interfaces.ModelService
 	task            interfaces.TaskEnqueuer
 	taskInspector   interfaces.TaskInspector
+	generationRepo  interfaces.KnowledgeGenerationRepository
 	graphEngine     interfaces.RetrieveGraphRepository
 	redisClient     *redis.Client
 	kbShareService  interfaces.KBShareService
@@ -80,6 +82,8 @@ type knowledgeService struct {
 	// which has a no-op fallback. See knowledge_span_tracker.go.
 	spanTracker SpanTracker
 	audit       interfaces.AuditLogService
+
+	artifactRuntime *artifact.Runtime
 }
 
 const (
@@ -106,6 +110,7 @@ func NewKnowledgeService(
 	modelService interfaces.ModelService,
 	task interfaces.TaskEnqueuer,
 	taskInspector interfaces.TaskInspector,
+	generationRepo interfaces.KnowledgeGenerationRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
@@ -117,6 +122,7 @@ func NewKnowledgeService(
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
 	spanTracker SpanTracker,
 	audit interfaces.AuditLogService,
+	artifactRuntime *artifact.Runtime,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
 		config:          config,
@@ -135,6 +141,7 @@ func NewKnowledgeService(
 		modelService:    modelService,
 		task:            task,
 		taskInspector:   taskInspector,
+		generationRepo:  generationRepo,
 		graphEngine:     graphEngine,
 		retrieveEngine:  retrieveEngine,
 		ownership:       ownership,
@@ -146,6 +153,7 @@ func NewKnowledgeService(
 		taskPendingRepo: taskPendingRepo,
 		spanTracker:     spanTracker,
 		audit:           audit,
+		artifactRuntime: artifactRuntime,
 	}, nil
 }
 
@@ -192,10 +200,25 @@ func attemptFromCtx(ctx context.Context) int {
 // of 0 predates attempt tracking (or tracking is disabled) and is never treated
 // as superseded.
 func attemptSuperseded(ctx context.Context, tracker SpanTracker, knowledgeID string, attempt int) bool {
-	if attempt <= 0 || knowledgeID == "" {
+	if attempt <= 0 || knowledgeID == "" || tracker == nil {
 		return false
 	}
 	return tracker.LatestAttempt(ctx, knowledgeID) > attempt
+}
+
+func retireSupersededGeneration(
+	ctx context.Context,
+	generationRepo interfaces.KnowledgeGenerationRepository,
+	generationID string,
+	source string,
+) {
+	if generationID == "" || generationRepo == nil {
+		return
+	}
+	if err := generationRepo.MarkRetired(ctx, generationID); err != nil {
+		logger.Warnf(ctx, "mark generation retired after superseded attempt source=%s generation=%s err=%v",
+			source, generationID, err)
+	}
 }
 
 // finalizeSubtaskDetachedTimeout bounds the detached decrement so a wedged DB
@@ -240,6 +263,174 @@ func finalizeSubtaskDetached(
 	if _, _, err := repo.FinalizeSubtask(dctx, knowledgeID); err != nil {
 		logger.Warnf(ctx, "finalize subtask decrement failed source=%s knowledge=%s err=%v",
 			source, knowledgeID, err)
+	}
+}
+
+func activateGenerationIfReady(
+	ctx context.Context,
+	generationRepo interfaces.KnowledgeGenerationRepository,
+	tracker SpanTracker,
+	knowledgeID string,
+	generationID string,
+	attempt int,
+	source string,
+) (bool, error) {
+	if generationID == "" || generationRepo == nil {
+		return false, nil
+	}
+	if attemptSuperseded(ctx, tracker, knowledgeID, attempt) {
+		logger.Infof(ctx, "generation activation skipped source=%s generation=%s attempt=%d: attempt superseded",
+			source, generationID, attempt)
+		retireSupersededGeneration(ctx, generationRepo, generationID, source)
+		return false, nil
+	}
+	activated, err := generationRepo.ActivateIfCurrent(ctx, generationID, attempt)
+	if err != nil {
+		if markErr := generationRepo.MarkFailed(ctx, generationID, err.Error()); markErr != nil {
+			logger.Warnf(ctx, "mark generation failed after activation error source=%s generation=%s err=%v",
+				source, generationID, markErr)
+		}
+		return false, err
+	}
+	if !activated {
+		logger.Infof(ctx, "generation activation skipped source=%s generation=%s attempt=%d",
+			source, generationID, attempt)
+		return false, nil
+	}
+	logger.Infof(ctx, "generation activated source=%s generation=%s attempt=%d",
+		source, generationID, attempt)
+	return true, nil
+}
+
+func generationWriteAllowed(
+	ctx context.Context,
+	generationRepo interfaces.KnowledgeGenerationRepository,
+	tenantID uint64,
+	knowledgeID, generationID string,
+	attempt int,
+	source string,
+) bool {
+	if generationID == "" {
+		return true
+	}
+	if generationRepo == nil {
+		logger.Warnf(ctx, "generation write rejected source=%s generation=%s: repository unavailable",
+			source, generationID)
+		return false
+	}
+	generation, err := generationRepo.Get(ctx, tenantID, generationID)
+	if err != nil {
+		logger.Warnf(ctx, "generation write rejected source=%s generation=%s: %v",
+			source, generationID, err)
+		return false
+	}
+	if generation.KnowledgeID != knowledgeID || generation.Attempt != attempt {
+		logger.Infof(ctx, "generation write skipped source=%s generation=%s knowledge=%s/%s attempt=%d/%d",
+			source, generationID, generation.KnowledgeID, knowledgeID, generation.Attempt, attempt)
+		return false
+	}
+	latestAttempt, err := generationRepo.LatestAttempt(ctx, tenantID, knowledgeID)
+	if err != nil {
+		logger.Warnf(ctx, "generation write rejected source=%s generation=%s latest attempt lookup failed: %v",
+			source, generationID, err)
+		return false
+	}
+	if latestAttempt > attempt {
+		logger.Infof(ctx, "generation write skipped source=%s generation=%s attempt=%d latest=%d",
+			source, generationID, attempt, latestAttempt)
+		return false
+	}
+	switch generation.State {
+	case types.KnowledgeGenerationStateBuilding, types.KnowledgeGenerationStateReady:
+		return source != "wiki"
+	case types.KnowledgeGenerationStateActive:
+		return source == "wiki"
+	default:
+		logger.Infof(ctx, "generation write skipped source=%s generation=%s state=%s",
+			source, generationID, generation.State)
+		return false
+	}
+}
+
+func finalizeGenerationSubtaskDetached(
+	ctx context.Context,
+	repo interfaces.KnowledgeRepository,
+	generationRepo interfaces.KnowledgeGenerationRepository,
+	tracker SpanTracker,
+	knowledgeID, source, generationID string,
+	attempt int,
+	retErr error,
+	superseded, final bool,
+) {
+	finalizeGenerationSubtaskDetachedWithHook(
+		ctx, repo, generationRepo, tracker, knowledgeID, source, generationID, attempt,
+		retErr, superseded, final, nil)
+}
+
+func finalizeGenerationSubtaskDetachedWithHook(
+	ctx context.Context,
+	repo interfaces.KnowledgeRepository,
+	generationRepo interfaces.KnowledgeGenerationRepository,
+	tracker SpanTracker,
+	knowledgeID, source, generationID string,
+	attempt int,
+	retErr error,
+	superseded, final bool,
+	afterActivate func(context.Context),
+) {
+	if repo == nil || knowledgeID == "" {
+		return
+	}
+	willDrain := retErr == nil || final
+	if !willDrain {
+		return
+	}
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
+	defer cancel()
+	if superseded {
+		logger.Infof(ctx, "generation finalize skipped source=%s generation=%s attempt=%d: caller marked superseded",
+			source, generationID, attempt)
+		return
+	}
+	if attemptSuperseded(dctx, tracker, knowledgeID, attempt) {
+		logger.Infof(ctx, "generation finalize skipped source=%s generation=%s attempt=%d: attempt superseded",
+			source, generationID, attempt)
+		retireSupersededGeneration(dctx, generationRepo, generationID, source)
+		return
+	}
+	_, promoted, err := repo.FinalizeSubtask(dctx, knowledgeID)
+	if err != nil {
+		logger.Warnf(ctx, "finalize subtask decrement failed source=%s knowledge=%s err=%v",
+			source, knowledgeID, err)
+		return
+	}
+	if promoted {
+		activated, err := activateGenerationIfReady(dctx, generationRepo, tracker, knowledgeID, generationID, attempt, source)
+		if err != nil {
+			logger.Warnf(ctx, "generation activation failed source=%s knowledge=%s generation=%s err=%v",
+				source, knowledgeID, generationID, err)
+			return
+		}
+		if activated && afterActivate != nil {
+			afterActivate(dctx)
+		}
+	}
+}
+
+func wikiTriggerAfterActivation(
+	taskEnqueuer interfaces.TaskEnqueuer,
+	tenantID uint64,
+	kbID string,
+	generationID string,
+) func(context.Context) {
+	if taskEnqueuer == nil || tenantID == 0 || kbID == "" || generationID == "" {
+		return nil
+	}
+	return func(ctx context.Context) {
+		if err := enqueueWikiIngestTrigger(ctx, taskEnqueuer, tenantID, kbID); err != nil {
+			logger.Warnf(ctx, "generation wiki trigger enqueue failed kb=%s generation=%s err=%v",
+				kbID, generationID, err)
+		}
 	}
 }
 

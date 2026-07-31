@@ -249,12 +249,12 @@ func TestFolderTree_CRUDAndChildListing(t *testing.T) {
 	assert.ErrorIs(t, err, ErrWikiFolderNotFound)
 }
 
-// TestListByTypeLight_ProjectsNarrowColumnsAndExcludesArchived verifies
+// TestListByTypeLight_ProjectsNarrowColumnsAndShowsPublishedOnly verifies
 // that the index-view projection only emits the slug/title/summary
-// triples and respects the archived-status filter. This is the whole
+// triples and respects the published-status visibility filter. This is the whole
 // point of splitting the method off ListByType — the index reader must
 // not pay for TEXT content transport.
-func TestListByTypeLight_ProjectsNarrowColumnsAndExcludesArchived(t *testing.T) {
+func TestListByTypeLight_ProjectsNarrowColumnsAndShowsPublishedOnly(t *testing.T) {
 	db := setupWikiPagesTestDB(t)
 	repo := NewWikiPageRepository(db)
 	ctx := context.Background()
@@ -273,17 +273,14 @@ func TestListByTypeLight_ProjectsNarrowColumnsAndExcludesArchived(t *testing.T) 
 	entries, total, err := repo.ListByTypeLight(ctx, "kb-a", types.WikiPageTypeEntity, 50, 0)
 	require.NoError(t, err)
 
-	// Archived is excluded; sibling KB is excluded; everything else
-	// surfaces regardless of draft/published status (the index shows
-	// both so admins notice newly-drafted pages).
-	assert.Equal(t, int64(2), total)
-	require.Len(t, entries, 2)
+	// Draft/archived rows and sibling KB rows are excluded so generation
+	// wiki drafts are not visible in the ordinary index view before publish.
+	assert.Equal(t, int64(1), total)
+	require.Len(t, entries, 1)
 
-	// ORDER BY title ASC => alpha, beta.
 	assert.Equal(t, "entity/alpha", entries[0].Slug)
 	assert.Equal(t, "alpha", entries[0].Title)
 	assert.Equal(t, "summary of entity/alpha", entries[0].Summary)
-	assert.Equal(t, "entity/beta", entries[1].Slug)
 }
 
 // TestListByTypeLight_Pagination walks the type list using offsets and

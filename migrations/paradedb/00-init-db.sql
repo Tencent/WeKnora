@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     file_hash VARCHAR(64),
     storage_size BIGINT NOT NULL DEFAULT 0, -- 存储大小(Byte)
     metadata JSONB,
+    active_generation_id VARCHAR(36),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     processed_at TIMESTAMP WITH TIME ZONE,
@@ -103,6 +104,7 @@ CREATE INDEX IF NOT EXISTS idx_knowledges_tenant_id ON knowledges(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_knowledges_base_id ON knowledges(knowledge_base_id);
 CREATE INDEX IF NOT EXISTS idx_knowledges_parse_status ON knowledges(parse_status);
 CREATE INDEX IF NOT EXISTS idx_knowledges_enable_status ON knowledges(enable_status);
+CREATE INDEX IF NOT EXISTS idx_knowledges_active_generation ON knowledges(active_generation_id);
 
 -- Create session table
 CREATE TABLE IF NOT EXISTS sessions (
@@ -175,6 +177,9 @@ CREATE TABLE IF NOT EXISTS chunks (
     image_info TEXT,
     relation_chunks JSONB,
     indirect_relation_chunks JSONB,
+    generation_id VARCHAR(36),
+    logical_chunk_key VARCHAR(64),
+    artifact_digest VARCHAR(64),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP WITH TIME ZONE
@@ -183,6 +188,53 @@ CREATE TABLE IF NOT EXISTS chunks (
 CREATE INDEX IF NOT EXISTS idx_chunks_tenant_kg ON chunks(tenant_id, knowledge_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_parent_id ON chunks(parent_chunk_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_chunk_type ON chunks(chunk_type);
+CREATE INDEX IF NOT EXISTS idx_chunks_active_generation
+    ON chunks(tenant_id, knowledge_id, generation_id, chunk_type, chunk_index);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_chunks_generation_logical
+    ON chunks(tenant_id, knowledge_id, generation_id, logical_chunk_key)
+    WHERE generation_id IS NOT NULL AND logical_chunk_key IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS knowledge_generations (
+    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id BIGINT NOT NULL,
+    knowledge_id VARCHAR(36) NOT NULL,
+    attempt INTEGER NOT NULL,
+    base_generation_id VARCHAR(36),
+    state VARCHAR(20) NOT NULL,
+    source_digest VARCHAR(64) NOT NULL,
+    pipeline_digest VARCHAR(64) NOT NULL,
+    manifest_digest VARCHAR(64),
+    snapshot_description TEXT,
+    error_message TEXT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    ready_at TIMESTAMP WITH TIME ZONE,
+    activated_at TIMESTAMP WITH TIME ZONE,
+    retired_at TIMESTAMP WITH TIME ZONE,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, knowledge_id, attempt)
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_generations_lookup
+    ON knowledge_generations(tenant_id, knowledge_id, state);
+
+CREATE TABLE IF NOT EXISTS processing_artifacts (
+    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id BIGINT NOT NULL,
+    stage VARCHAR(64) NOT NULL,
+    key_version INTEGER NOT NULL,
+    artifact_key VARCHAR(64) NOT NULL,
+    processor_digest VARCHAR(64) NOT NULL,
+    output_digest VARCHAR(64) NOT NULL,
+    output_schema VARCHAR(64) NOT NULL,
+    codec VARCHAR(20) NOT NULL,
+    payload BYTEA,
+    payload_checksum VARCHAR(64) NOT NULL,
+    payload_size BIGINT NOT NULL,
+    hit_count BIGINT NOT NULL DEFAULT 0,
+    last_hit_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMP WITH TIME ZONE,
+    UNIQUE (tenant_id, stage, key_version, artifact_key)
+);
 
 CREATE TABLE IF NOT EXISTS embeddings (
     id SERIAL PRIMARY KEY,
@@ -194,12 +246,16 @@ CREATE TABLE IF NOT EXISTS embeddings (
     chunk_id VARCHAR(64),
     knowledge_id VARCHAR(64),
     knowledge_base_id VARCHAR(64),
+    generation_id VARCHAR(36),
+    visibility_key VARCHAR(128),
     content TEXT,
     dimension INTEGER NOT NULL,
     embedding halfvec
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS embeddings_unique_source ON embeddings(source_id, source_type);
+CREATE INDEX IF NOT EXISTS idx_embeddings_generation_id ON embeddings(generation_id);
+CREATE INDEX IF NOT EXISTS idx_embeddings_visibility_key ON embeddings(visibility_key);
 CREATE INDEX IF NOT EXISTS embeddings_search_idx ON embeddings
 USING bm25 (id, knowledge_base_id, content, knowledge_id, chunk_id)
 WITH (

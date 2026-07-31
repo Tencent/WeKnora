@@ -30,6 +30,10 @@ type ChunkRepository interface {
 	ListChunksBySeqID(ctx context.Context, tenantID uint64, seqIDs []int64) ([]*types.Chunk, error)
 	// ListChunksByKnowledgeID lists chunks by knowledge id
 	ListChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
+	// ListActiveChunksByKnowledgeID lists chunks visible through the knowledge's active generation.
+	ListActiveChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
+	// ListGenerationChunks lists chunks scoped to one generation snapshot.
+	ListGenerationChunks(ctx context.Context, tenantID uint64, knowledgeID string, generationID string) ([]*types.Chunk, error)
 	// ListPagedChunksByKnowledgeID lists paged chunks by knowledge id.
 	// When tagIDs is non-empty, results are filtered by tag_id (OR semantics).
 	// knowledgeType: "faq" or "manual" - determines sort order and search behavior
@@ -76,6 +80,8 @@ type ChunkRepository interface {
 	DeleteChunks(ctx context.Context, tenantID uint64, ids []string) error
 	// DeleteChunksByKnowledgeID deletes chunks by knowledge id
 	DeleteChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error
+	// DeleteChunksByGenerationID deletes chunks for a non-active generation during GC.
+	DeleteChunksByGenerationID(ctx context.Context, tenantID uint64, knowledgeID string, generationID string) error
 	// DeleteByKnowledgeList deletes all chunks for a knowledge list
 	DeleteByKnowledgeList(ctx context.Context, tenantID uint64, knowledgeIDs []string) error
 	// ListImageInfoByKnowledgeIDs returns non-empty (knowledge_id, image_info) pairs for image cleanup.

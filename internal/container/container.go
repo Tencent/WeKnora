@@ -50,6 +50,7 @@ import (
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/artifact"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
@@ -172,6 +173,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewWikiPageRepository))
 	must(container.Provide(repository.NewTaskPendingOpsRepository))
 	must(container.Provide(repository.NewTaskDeadLetterRepository))
+	must(container.Provide(repository.NewProcessingArtifactRepository))
+	must(container.Provide(repository.NewKnowledgeGenerationRepository))
+	must(container.Provide(newArtifactRuntime))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
@@ -186,6 +190,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewTenantInvitationService))
 	must(container.Provide(service.NewAuditLogService))
 	must(container.Provide(service.NewAuditLogRetentionRunner))
+	must(container.Provide(service.NewArtifactRetentionRunner))
 	must(container.Provide(service.NewKnowledgeBaseService))
 	must(container.Provide(service.NewOrganizationService))
 	must(container.Provide(service.NewKBShareService)) // KBShareService must be registered before KnowledgeService and KnowledgeTagService
@@ -313,9 +318,13 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Data source sync framework registered")
 	must(container.Invoke(startAuditLogRetention))
 	logger.Debugf(ctx, "[Container] Audit log retention runner registered")
+	must(container.Invoke(startArtifactRetention))
+	logger.Debugf(ctx, "[Container] Artifact retention runner registered")
 	must(container.Provide(service.NewHousekeepingService))
 	must(container.Invoke(startHousekeepingService))
 	logger.Debugf(ctx, "[Container] Knowledge housekeeping runner registered")
+	must(container.Invoke(startKnowledgeGenerationGC))
+	logger.Debugf(ctx, "[Container] Knowledge generation GC registered")
 	must(container.Provide(chatpipeline.NewEventManager))
 	must(container.Invoke(chatpipeline.NewPluginSearch))
 	must(container.Invoke(chatpipeline.NewPluginRerank))
@@ -1016,6 +1025,32 @@ func initRawFileService(_ *config.Config) (interfaces.FileService, error) {
 	}
 }
 
+func newArtifactRuntime(
+	cfg *config.Config,
+	repo interfaces.ProcessingArtifactRepository,
+) *artifact.Runtime {
+	opts := artifact.RuntimeOptions{}
+	if cfg != nil && cfg.ArtifactCache != nil {
+		opts.ReadEnabled = cfg.ArtifactCache.ReadEnabled
+		opts.WriteEnabled = cfg.ArtifactCache.WriteEnabled
+		opts.MaxInlineBytes = cfg.ArtifactCache.MaxInlineBytes
+		if cfg.ArtifactCache.RetentionDays > 0 {
+			opts.Retention = time.Duration(cfg.ArtifactCache.RetentionDays) * 24 * time.Hour
+		}
+	}
+	return artifact.NewRuntime(repository.NewArtifactStore(repo), opts)
+}
+
+func kvHybridOptions(cfg *config.Config, runtime *artifact.Runtime) []retriever.KVHybridOption {
+	if runtime == nil || cfg == nil || cfg.ArtifactCache == nil {
+		return nil
+	}
+	if enabled, ok := cfg.ArtifactCache.Stages["embedding"]; ok && !enabled {
+		return nil
+	}
+	return []retriever.KVHybridOption{retriever.WithArtifactRuntime(runtime)}
+}
+
 // initRetrieveEngineRegistry initializes the retrieval engine registry
 // Sets up and configures various search engine backends based on configuration
 // Supports multiple retrieval engines (PostgreSQL, ElasticsearchV7, ElasticsearchV8)
@@ -1029,6 +1064,7 @@ func initRawFileService(_ *config.Config) (interfaces.FileService, error) {
 func initRetrieveEngineRegistry(
 	db *gorm.DB, cfg *config.Config, auditSvc interfaces.AuditLogService,
 	storeRepo interfaces.VectorStoreRepository, engineFactory interfaces.EngineFactory,
+	artifactRuntime *artifact.Runtime,
 ) (interfaces.RetrieveEngineRegistry, error) {
 	// storeRepo and engineFactory let the registry rebuild a store engine that
 	// is absent from this process, which happens when startup skipped it after
@@ -1040,11 +1076,12 @@ func initRetrieveEngineRegistry(
 	// events fire under a tenant-scoped ctx at indexing time; the env-path
 	// registration ctx below has no tenant, so those emits self-skip.
 	auditSink := newAuditSinkAdapter(auditSvc)
+	kvOpts := kvHybridOptions(cfg, artifactRuntime)
 
 	if slices.Contains(retrieveDriver, "postgres") {
 		postgresRepo := postgresRepo.NewPostgresRetrieveEngineRepository(db)
 		if err := registry.Register(
-			retriever.NewKVHybridRetrieveEngine(postgresRepo, types.PostgresRetrieverEngineType),
+			retriever.NewKVHybridRetrieveEngine(postgresRepo, types.PostgresRetrieverEngineType, kvOpts...),
 		); err != nil {
 			log.Errorf("Register postgres retrieve engine failed: %v", err)
 		} else {
@@ -1054,7 +1091,7 @@ func initRetrieveEngineRegistry(
 	if slices.Contains(retrieveDriver, "sqlite") {
 		sqliteRepo := sqliteRetrieverRepo.NewSQLiteRetrieveEngineRepository(db)
 		if err := registry.Register(
-			retriever.NewKVHybridRetrieveEngine(sqliteRepo, types.SQLiteRetrieverEngineType),
+			retriever.NewKVHybridRetrieveEngine(sqliteRepo, types.SQLiteRetrieverEngineType, kvOpts...),
 		); err != nil {
 			log.Errorf("Register sqlite retrieve engine failed: %v", err)
 		} else {
@@ -1073,7 +1110,7 @@ func initRetrieveEngineRegistry(
 			elasticsearchRepo := elasticsearchRepoV8.NewElasticsearchEngineRepository(client, cfg, nil)
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
-					elasticsearchRepo, types.ElasticsearchRetrieverEngineType,
+					elasticsearchRepo, types.ElasticsearchRetrieverEngineType, kvOpts...,
 				),
 			); err != nil {
 				log.Errorf("Register elasticsearch_v8 retrieve engine failed: %v", err)
@@ -1095,7 +1132,7 @@ func initRetrieveEngineRegistry(
 			elasticsearchRepo := elasticsearchRepoV7.NewElasticsearchEngineRepository(client, cfg, nil)
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
-					elasticsearchRepo, types.ElasticsearchRetrieverEngineType,
+					elasticsearchRepo, types.ElasticsearchRetrieverEngineType, kvOpts...,
 				),
 			); err != nil {
 				log.Errorf("Register elasticsearch_v7 retrieve engine failed: %v", err)
@@ -1120,7 +1157,7 @@ func initRetrieveEngineRegistry(
 		); err != nil {
 			log.Errorf("Create opensearch repository failed: %v", err)
 		} else if err := registry.Register(
-			retriever.NewKVHybridRetrieveEngine(repo, types.OpenSearchRetrieverEngineType),
+			retriever.NewKVHybridRetrieveEngine(repo, types.OpenSearchRetrieverEngineType, kvOpts...),
 		); err != nil {
 			log.Errorf("Register opensearch retrieve engine failed: %v", err)
 		} else {
@@ -1166,7 +1203,7 @@ func initRetrieveEngineRegistry(
 			qdrantRepository := qdrantRepo.NewQdrantRetrieveEngineRepository(client, nil)
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
-					qdrantRepository, types.QdrantRetrieverEngineType,
+					qdrantRepository, types.QdrantRetrieverEngineType, kvOpts...,
 				),
 			); err != nil {
 				log.Errorf("Register qdrant retrieve engine failed: %v", err)
@@ -1209,7 +1246,7 @@ func initRetrieveEngineRegistry(
 			weaviateRepository := weaviateRepo.NewWeaviateRetrieveEngineRepository(weaviateClient, nil)
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
-					weaviateRepository, types.WeaviateRetrieverEngineType,
+					weaviateRepository, types.WeaviateRetrieverEngineType, kvOpts...,
 				),
 			); err != nil {
 				log.Errorf("Register weaviate retrieve engine failed: %v", err)
@@ -1246,7 +1283,7 @@ func initRetrieveEngineRegistry(
 			milvusRepository := milvusRepo.NewMilvusRetrieveEngineRepository(milvusCli, nil)
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
-					milvusRepository, types.MilvusRetrieverEngineType,
+					milvusRepository, types.MilvusRetrieverEngineType, kvOpts...,
 				),
 			); err != nil {
 				log.Errorf("Register milvus retrieve engine failed: %v", err)
@@ -1293,7 +1330,7 @@ func initRetrieveEngineRegistry(
 			)
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
-					dorisRepository, types.DorisRetrieverEngineType,
+					dorisRepository, types.DorisRetrieverEngineType, kvOpts...,
 				),
 			); err != nil {
 				log.Errorf("Register doris retrieve engine failed: %v", err)
@@ -1323,7 +1360,7 @@ func initRetrieveEngineRegistry(
 				)
 				if err := registry.Register(
 					retriever.NewKVHybridRetrieveEngine(
-						tencentRepository, types.TencentVectorDBRetrieverEngineType,
+						tencentRepository, types.TencentVectorDBRetrieverEngineType, kvOpts...,
 					),
 				); err != nil {
 					log.Errorf("Register tencent_vectordb retrieve engine failed: %v", err)
@@ -1335,7 +1372,7 @@ func initRetrieveEngineRegistry(
 	}
 	// ─── DB store registration (byStoreID) ───
 	if storeReg, ok := registry.(*retriever.RetrieveEngineRegistry); ok {
-		loadDBStoresIntoRegistry(storeReg, db, cfg, auditSink)
+		loadDBStoresIntoRegistry(storeReg, db, cfg, auditSink, artifactRuntime)
 	}
 
 	return registry, nil
@@ -1344,7 +1381,11 @@ func initRetrieveEngineRegistry(
 // loadDBStoresIntoRegistry loads VectorStore records from DB and registers them
 // in the registry's byStoreID map. Failures are logged and skipped (non-fatal).
 func loadDBStoresIntoRegistry(
-	storeRegistry interfaces.StoreRegistry, db *gorm.DB, cfg *config.Config, auditSink openSearchRepo.AuditSink,
+	storeRegistry interfaces.StoreRegistry,
+	db *gorm.DB,
+	cfg *config.Config,
+	auditSink openSearchRepo.AuditSink,
+	artifactRuntime *artifact.Runtime,
 ) {
 	ctx := context.Background()
 	log := logger.GetLogger(ctx)
@@ -1362,7 +1403,7 @@ func loadDBStoresIntoRegistry(
 
 	log.Infof("Loading %d vector store(s) from database", len(stores))
 	for _, store := range stores {
-		svc, err := createEngineServiceFromStore(ctx, store, db, cfg, auditSink)
+		svc, err := createEngineServiceFromStore(ctx, store, db, cfg, auditSink, artifactRuntime)
 		if err != nil {
 			log.Errorf("Failed to create engine for store %s (%s): %v", store.ID, store.Name, err)
 			continue
@@ -1635,6 +1676,31 @@ func startHousekeepingService(svc *service.HousekeepingService, cleaner interfac
 	})
 }
 
+func startKnowledgeGenerationGC(svc interfaces.KnowledgeService, cleaner interfaces.ResourceCleaner) {
+	if svc == nil {
+		return
+	}
+	stop := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := svc.RunGenerationGC(context.Background()); err != nil {
+					logger.Warnf(context.Background(), "[GenerationGC] cleanup failed: %v", err)
+				}
+			case <-stop:
+				return
+			}
+		}
+	}()
+	cleaner.RegisterWithName("KnowledgeGenerationGC", func() error {
+		close(stop)
+		return nil
+	})
+}
+
 // startTemporaryDocumentCleanup removes expired session attachments and their
 // extracted images. The durable expiry timestamp is the source of truth; the
 // ticker only controls how quickly storage is reclaimed.
@@ -1674,6 +1740,16 @@ func startAuditLogRetention(
 ) {
 	runner.Start(context.Background())
 	cleaner.RegisterWithName("AuditLogRetentionRunner", func() error {
+		runner.Stop()
+		return nil
+	})
+}
+
+func startArtifactRetention(
+	runner *service.ArtifactRetentionRunner, cleaner interfaces.ResourceCleaner,
+) {
+	runner.Start(context.Background())
+	cleaner.RegisterWithName("ArtifactRetentionRunner", func() error {
 		runner.Stop()
 		return nil
 	})

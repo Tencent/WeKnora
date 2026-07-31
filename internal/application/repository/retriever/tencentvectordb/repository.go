@@ -67,6 +67,10 @@ func (r *repository) Support() []types.RetrieverType {
 	return []types.RetrieverType{types.KeywordsRetrieverType, types.VectorRetrieverType}
 }
 
+func (r *repository) SupportsGenerationFilter() bool {
+	return true
+}
+
 func (r *repository) Save(ctx context.Context, indexInfo *types.IndexInfo, params map[string]any) error {
 	return r.BatchSave(ctx, []*types.IndexInfo{indexInfo}, params)
 }
@@ -420,6 +424,8 @@ func (r *repository) ensureCollection(ctx context.Context, dimension int) error 
 			{FieldName: fieldChunkID, FieldType: tcvectordb.String, IndexType: tcvectordb.FILTER},
 			{FieldName: fieldKnowledgeID, FieldType: tcvectordb.String, IndexType: tcvectordb.FILTER},
 			{FieldName: fieldKnowledgeBaseID, FieldType: tcvectordb.String, IndexType: tcvectordb.FILTER},
+			{FieldName: fieldGenerationID, FieldType: tcvectordb.String, IndexType: tcvectordb.FILTER},
+			{FieldName: fieldVisibilityKey, FieldType: tcvectordb.String, IndexType: tcvectordb.FILTER},
 			{FieldName: fieldTagID, FieldType: tcvectordb.String, IndexType: tcvectordb.FILTER},
 			{FieldName: fieldIsEnabled, FieldType: tcvectordb.Uint64, IndexType: tcvectordb.FILTER},
 		},
@@ -517,6 +523,12 @@ func (r *repository) baseFilter(params types.RetrieveParams) *tcvectordb.Filter 
 	if len(params.TagIDs) > 0 {
 		conditions = append(conditions, tcvectordb.In(fieldTagID, params.TagIDs))
 	}
+	if len(params.GenerationIDs) > 0 {
+		conditions = append(conditions, tcvectordb.In(fieldGenerationID, params.GenerationIDs))
+	}
+	if len(params.VisibilityKeys) > 0 {
+		conditions = append(conditions, tcvectordb.In(fieldVisibilityKey, params.VisibilityKeys))
+	}
 	if len(params.ExcludeKnowledgeIDs) > 0 {
 		conditions = append(conditions, tcvectordb.NotIn(fieldKnowledgeID, params.ExcludeKnowledgeIDs))
 	}
@@ -580,6 +592,8 @@ func toVectorEmbedding(indexInfo *types.IndexInfo, params map[string]any) *vecto
 		ChunkID:         indexInfo.ChunkID,
 		KnowledgeID:     indexInfo.KnowledgeID,
 		KnowledgeBaseID: indexInfo.KnowledgeBaseID,
+		GenerationID:    indexInfo.GenerationID,
+		VisibilityKey:   indexInfo.VisibilityKey,
 		TagID:           indexInfo.TagID,
 		IsEnabled:       indexInfo.IsEnabled,
 	}
@@ -645,6 +659,8 @@ func remapCopiedEmbeddings(
 		embedding.SourceID = targetSourceID
 		embedding.ChunkID = targetChunkID
 		embedding.KnowledgeBaseID = targetKnowledgeBaseID
+		embedding.GenerationID = ""
+		embedding.VisibilityKey = ""
 		if targetKBID := sourceToTargetKBIDMap[embedding.KnowledgeID]; targetKBID != "" {
 			embedding.KnowledgeID = targetKBID
 		}
@@ -698,6 +714,8 @@ func toDocument(embedding *vectorEmbedding) tcvectordb.Document {
 			fieldChunkID:         {Val: embedding.ChunkID},
 			fieldKnowledgeID:     {Val: embedding.KnowledgeID},
 			fieldKnowledgeBaseID: {Val: embedding.KnowledgeBaseID},
+			fieldGenerationID:    {Val: embedding.GenerationID},
+			fieldVisibilityKey:   {Val: embedding.VisibilityKey},
 			fieldTagID:           {Val: embedding.TagID},
 			fieldIsEnabled:       {Val: boolToUint64(embedding.IsEnabled)},
 		},
@@ -713,6 +731,8 @@ func fromDocument(doc tcvectordb.Document) *vectorEmbedding {
 		ChunkID:         fieldString(doc, fieldChunkID),
 		KnowledgeID:     fieldString(doc, fieldKnowledgeID),
 		KnowledgeBaseID: fieldString(doc, fieldKnowledgeBaseID),
+		GenerationID:    fieldString(doc, fieldGenerationID),
+		VisibilityKey:   fieldString(doc, fieldVisibilityKey),
 		TagID:           fieldString(doc, fieldTagID),
 		Embedding:       doc.Vector,
 		SparseVector:    doc.SparseVector,
@@ -730,6 +750,8 @@ func toIndexWithScore(embedding *vectorEmbedding, matchType types.MatchType) *ty
 		ChunkID:         embedding.ChunkID,
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
+		GenerationID:    embedding.GenerationID,
+		VisibilityKey:   embedding.VisibilityKey,
 		TagID:           embedding.TagID,
 		Score:           embedding.Score,
 		MatchType:       matchType,
@@ -746,6 +768,8 @@ func outputFields() []string {
 		fieldChunkID,
 		fieldKnowledgeID,
 		fieldKnowledgeBaseID,
+		fieldGenerationID,
+		fieldVisibilityKey,
 		fieldTagID,
 		fieldIsEnabled,
 	}

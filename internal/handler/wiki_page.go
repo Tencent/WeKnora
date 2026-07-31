@@ -432,6 +432,10 @@ func (h *WikiPageHandler) GetPage(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	if page.Status != types.WikiPageStatusPublished {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Wiki page not found"})
+		return
+	}
 
 	c.JSON(http.StatusOK, page)
 }

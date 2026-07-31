@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     tag_id VARCHAR(36),
     summary_status VARCHAR(32) DEFAULT 'none',
     last_faq_import_result TEXT DEFAULT NULL,
+    active_generation_id VARCHAR(36),
     channel VARCHAR(50) NOT NULL DEFAULT 'web',
     pending_subtasks_count INT NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -74,7 +75,7 @@ func (s *LocalSandbox) Execute(ctx context.Context, config *ExecuteConfig) (*Exe
 	defer cancel()
 
 	// Build command
-	args := append([]string{config.Script}, config.Args...)
+	args := append(s.getInterpreterArgs(interpreter, config.Script), config.Args...)
 	cmd := exec.CommandContext(execCtx, interpreter, args...)
 
 	// Set working directory
@@ -175,6 +176,8 @@ func (s *LocalSandbox) getInterpreter(scriptPath string) string {
 		return "python3"
 	case ".sh", ".bash":
 		return "bash"
+	case ".ps1":
+		return "powershell"
 	case ".js":
 		return "node"
 	case ".rb":
@@ -185,6 +188,15 @@ func (s *LocalSandbox) getInterpreter(scriptPath string) string {
 		return "php"
 	default:
 		return "sh"
+	}
+}
+
+func (s *LocalSandbox) getInterpreterArgs(interpreter string, scriptPath string) []string {
+	switch strings.ToLower(filepath.Base(interpreter)) {
+	case "powershell", "powershell.exe", "pwsh", "pwsh.exe":
+		return []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath}
+	default:
+		return []string{scriptPath}
 	}
 }
 
@@ -211,6 +223,10 @@ func (s *LocalSandbox) isAllowedCommand(cmd string) bool {
 
 // buildEnvironment creates a safe environment for script execution
 func (s *LocalSandbox) buildEnvironment(extra map[string]string) []string {
+	if runtime.GOOS == "windows" {
+		return s.buildWindowsEnvironment(extra)
+	}
+
 	// Start with minimal environment
 	env := []string{
 		"PATH=/usr/local/bin:/usr/bin:/bin",
@@ -239,6 +255,44 @@ func (s *LocalSandbox) buildEnvironment(extra map[string]string) []string {
 		env = append(env, fmt.Sprintf("%s=%s", key, value))
 	}
 
+	return env
+}
+
+func (s *LocalSandbox) buildWindowsEnvironment(extra map[string]string) []string {
+	dangerous := map[string]bool{
+		"PYTHONPATH":                  true,
+		"NODE_OPTIONS":                true,
+		"BASH_ENV":                    true,
+		"ENV":                         true,
+		"SHELL":                       true,
+		"PSMODULEPATH":                true,
+		"PSEXECUTIONPOLICYPREFERENCE": true,
+	}
+	env := make([]string, 0, len(os.Environ())+len(extra))
+	seen := make(map[string]struct{}, len(os.Environ())+len(extra))
+	for _, entry := range os.Environ() {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		upperKey := strings.ToUpper(key)
+		if dangerous[upperKey] {
+			continue
+		}
+		seen[upperKey] = struct{}{}
+		env = append(env, entry)
+	}
+	for key, value := range extra {
+		upperKey := strings.ToUpper(key)
+		if dangerous[upperKey] {
+			continue
+		}
+		seen[upperKey] = struct{}{}
+		env = append(env, fmt.Sprintf("%s=%s", key, value))
+	}
+	if _, ok := seen["HOME"]; !ok {
+		env = append(env, "HOME="+os.TempDir())
+	}
 	return env
 }
 

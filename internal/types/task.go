@@ -260,6 +260,8 @@ type ExtractChunkPayload struct {
 	// recording" for legacy in-flight tasks.
 	KnowledgeID string `json:"knowledge_id,omitempty"`
 	Attempt     int    `json:"attempt,omitempty"`
+	// GenerationID fences graph materialization to the generation that queued it.
+	GenerationID string `json:"generation_id,omitempty"`
 	// ChunkIndex is the 0-based ordinal of this chunk inside the parent
 	// knowledge's text-chunk set, used as the subspan name suffix
 	// ("postprocess.graph.chunk[3]") so the timeline preserves order.
@@ -290,6 +292,8 @@ type DocumentProcessPayload struct {
 	// retried spans overwrite the previous attempt's row rather than
 	// fan out into a new attempt for every retry.
 	Attempt int `json:"attempt,omitempty"`
+	// GenerationID is the hidden generation this processing task materializes.
+	GenerationID string `json:"generation_id,omitempty"`
 }
 
 // FAQImportPayload represents the FAQ import task payload (including dry run mode)
@@ -324,6 +328,8 @@ type QuestionGenerationPayload struct {
 	// tasks queued before this field shipped, or callers without a
 	// tracker).
 	Attempt int `json:"attempt,omitempty"`
+	// GenerationID fences question writes to the generation that queued them.
+	GenerationID string `json:"generation_id,omitempty"`
 	// ChunkIDs switches the handler into batched fan-out mode: the task
 	// generates questions for this ordered window of text chunks only.
 	// Batching (rather than one task per chunk) keeps the task count
@@ -368,6 +374,8 @@ type SummaryGenerationPayload struct {
 	// can record a postprocess.summary subspan under the right attempt's
 	// postprocess stage. See QuestionGenerationPayload.Attempt notes.
 	Attempt int `json:"attempt,omitempty"`
+	// GenerationID fences summary writes to the generation that queued them.
+	GenerationID string `json:"generation_id,omitempty"`
 }
 
 // KBClonePayload represents the knowledge base clone task payload
@@ -423,6 +431,7 @@ type KnowledgeListReparsePayload struct {
 	KnowledgeIDs  []string                   `json:"knowledge_ids"`
 	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
 	Initiator     TaskInitiator              `json:"initiator,omitempty"`
+	GenerationIDs map[string]string          `json:"generation_ids,omitempty"`
 }
 
 // KnowledgeMovePayload represents the knowledge move task payload
@@ -463,6 +472,8 @@ type ManualProcessPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Content         string `json:"content"`      // cleaned markdown content
 	NeedCleanup     bool   `json:"need_cleanup"` // true for update, false for create
+	Attempt         int    `json:"attempt,omitempty"`
+	GenerationID    string `json:"generation_id,omitempty"`
 }
 
 // ImageMultimodalPayload represents the image multimodal processing task payload.
@@ -482,6 +493,8 @@ type ImageMultimodalPayload struct {
 	// attempt so the worker can record its image[i] subspan under the
 	// same attempt's multimodal stage span.
 	Attempt int `json:"attempt,omitempty"`
+	// GenerationID fences multimodal writes to the generation that queued them.
+	GenerationID string `json:"generation_id,omitempty"`
 	// ImageIndex is the 0-based ordinal of this image inside the
 	// parent's image set. Used as the subspan name suffix
 	// ("multimodal.image[3]") so the timeline preserves order.
@@ -496,6 +509,7 @@ type KnowledgePostProcessPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Language        string `json:"language,omitempty"` // Request locale for {{language}} in prompt templates
 	Attempt         int    `json:"attempt,omitempty"`
+	GenerationID    string `json:"generation_id,omitempty"`
 }
 
 // KBCloneTaskStatus represents the status of a knowledge base clone task

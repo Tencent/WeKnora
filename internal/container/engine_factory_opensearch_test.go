@@ -39,7 +39,7 @@ func TestCreateOpenSearchEngine_WiresClientAndRepo(t *testing.T) {
 		EngineType:       types.OpenSearchRetrieverEngineType,
 		ConnectionConfig: types.ConnectionConfig{Addr: ts.URL},
 	}
-	svc, err := createOpenSearchEngine(context.Background(), store, nil)
+	svc, err := createOpenSearchEngine(context.Background(), store, nil, nil)
 	if err != nil {
 		t.Fatalf("createOpenSearchEngine: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestCreateOpenSearchEngine_RejectsBadCluster(t *testing.T) {
 	defer ts.Close()
 	_, err := createOpenSearchEngine(context.Background(),
 		types.VectorStore{EngineType: types.OpenSearchRetrieverEngineType,
-			ConnectionConfig: types.ConnectionConfig{Addr: ts.URL}}, nil)
+			ConnectionConfig: types.ConnectionConfig{Addr: ts.URL}}, nil, nil)
 	if err == nil {
 		t.Error("elasticsearch cluster should be rejected at engine creation")
 	}
@@ -69,7 +69,7 @@ func TestCreateEngineServiceFromStore_OpenSearchCaseReached(t *testing.T) {
 	svc, err := createEngineServiceFromStore(context.Background(),
 		types.VectorStore{EngineType: types.OpenSearchRetrieverEngineType,
 			ConnectionConfig: types.ConnectionConfig{Addr: ts.URL}},
-		nil, &config.Config{}, nil)
+		nil, &config.Config{}, nil, nil)
 	if err != nil {
 		t.Fatalf("createEngineServiceFromStore (opensearch case): %v", err)
 	}
@@ -96,7 +96,7 @@ func TestInitRetrieveEngineRegistry_OpenSearchEnvPath(t *testing.T) {
 
 	// nil store repository and engine factory: this exercises the env-driver
 	// path, which never rebuilds a database-backed store.
-	registry, err := initRetrieveEngineRegistry(db, &config.Config{}, &fakeAuditSvc{}, nil, nil)
+	registry, err := initRetrieveEngineRegistry(db, &config.Config{}, &fakeAuditSvc{}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("initRetrieveEngineRegistry: %v", err)
 	}

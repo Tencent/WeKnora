@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent"
+	"github.com/Tencent/WeKnora/internal/artifact"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -479,6 +481,66 @@ func TestGenerateWithTemplateCoalescesIdenticalConcurrentRequests(t *testing.T) 
 	}
 	if got := model.calls.Load(); got != 1 {
 		t.Fatalf("identical requests reached provider %d times, want 1", got)
+	}
+}
+
+func TestIsWikiMapArtifactPromptOnlyAllowsMapPrompts(t *testing.T) {
+	if !isWikiMapArtifactPrompt(agent.WikiKnowledgeExtractPrompt, map[string]string{"InstructionScope": "wiki_extraction"}) {
+		t.Fatal("knowledge extraction should be cacheable wiki map work")
+	}
+	if !isWikiMapArtifactPrompt(agent.WikiCandidateSlugPrompt, map[string]string{"InstructionScope": "wiki_extraction"}) {
+		t.Fatal("candidate slug extraction should be cacheable wiki map work")
+	}
+	if !isWikiMapArtifactPrompt(agent.WikiChunkCitationPrompt, nil) {
+		t.Fatal("chunk citation classification should be cacheable wiki map work")
+	}
+	if isWikiMapArtifactPrompt(agent.WikiSummaryPrompt, map[string]string{"InstructionScope": "wiki_content"}) {
+		t.Fatal("wiki summary reduce/content work must not be cached as wiki_map")
+	}
+	if isWikiMapArtifactPrompt(agent.WikiPageModifyUserPrompt, map[string]string{"InstructionScope": "wiki_content"}) {
+		t.Fatal("wiki page modify reduce work must not be cached as wiki_map")
+	}
+}
+
+func TestGenerateWithTemplateCachesOnlyWikiMapPrompts(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	svc := &wikiIngestService{
+		config: &config.Config{ArtifactCache: &config.ArtifactCacheConfig{Stages: map[string]bool{
+			"wiki_map": true,
+		}}},
+		artifactRuntime: artifact.NewRuntime(newMultimodalArtifactStore(), artifact.RuntimeOptions{
+			ReadEnabled: true, WriteEnabled: true, MaxInlineBytes: 4096,
+		}),
+	}
+	mapModel := &fakeArtifactChat{out: []string{"map once", "map twice"}}
+	mapData := map[string]string{
+		"Content":          "same document content",
+		"InstructionScope": "wiki_extraction",
+	}
+	if _, err := svc.generateWithTemplate(ctx, mapModel, agent.WikiKnowledgeExtractPrompt, mapData); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.generateWithTemplate(ctx, mapModel, agent.WikiKnowledgeExtractPrompt, mapData); err != nil {
+		t.Fatal(err)
+	}
+	if mapModel.calls != 1 {
+		t.Fatalf("wiki_map provider calls = %d, want 1 total and 0 on repeated map prompt", mapModel.calls)
+	}
+
+	reduceModel := &fakeArtifactChat{out: []string{"summary once", "summary twice"}}
+	reduceData := map[string]string{
+		"Title":            "Entity",
+		"SourceContexts":   "same source context",
+		"InstructionScope": "wiki_content",
+	}
+	if _, err := svc.generateWithTemplate(ctx, reduceModel, agent.WikiSummaryPrompt, reduceData); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.generateWithTemplate(ctx, reduceModel, agent.WikiSummaryPrompt, reduceData); err != nil {
+		t.Fatal(err)
+	}
+	if reduceModel.calls != 2 {
+		t.Fatalf("wiki reduce provider calls = %d, want 2 because reduce must stay live", reduceModel.calls)
 	}
 }
 

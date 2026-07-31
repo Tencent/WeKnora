@@ -234,6 +234,8 @@ func toDoc(info *types.IndexInfo, emb []float32, enabled bool) map[string]any {
 		"chunk_id":          info.ChunkID,
 		"knowledge_id":      info.KnowledgeID,
 		"knowledge_base_id": info.KnowledgeBaseID,
+		"generation_id":     info.GenerationID,
+		"visibility_key":    info.VisibilityKey,
 		"source_id":         info.SourceID,
 		"source_type":       int(info.SourceType),
 		"tag_id":            info.TagID,

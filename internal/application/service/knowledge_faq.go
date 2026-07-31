@@ -2024,7 +2024,7 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 	if questionIndexMode == types.FAQQuestionIndexModeCombined {
 		content := buildFAQIndexContent(meta, indexMode)
 		return []*types.IndexInfo{
-			{
+			applyChunkGenerationIndexInfo(&types.IndexInfo{
 				Content:         content,
 				SourceID:        chunk.ID,
 				SourceType:      types.ChunkSourceType,
@@ -2035,7 +2035,7 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 				TagID:           chunk.TagID,
 				IsEnabled:       chunk.IsEnabled,
 				IsRecommended:   chunk.Flags.HasFlag(types.ChunkFlagRecommended),
-			},
+			}, chunk),
 		}, nil
 	}
 
@@ -2053,7 +2053,7 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 		}
 		standardContent = builder.String()
 	}
-	indexInfoList = append(indexInfoList, &types.IndexInfo{
+	indexInfoList = append(indexInfoList, applyChunkGenerationIndexInfo(&types.IndexInfo{
 		Content:         standardContent,
 		SourceID:        chunk.ID,
 		SourceType:      types.ChunkSourceType,
@@ -2064,7 +2064,7 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 		TagID:           chunk.TagID,
 		IsEnabled:       chunk.IsEnabled,
 		IsRecommended:   chunk.Flags.HasFlag(types.ChunkFlagRecommended),
-	})
+	}, chunk))
 
 	// 每个相似问创建一个索引项
 	for i, similarQ := range meta.SimilarQuestions {
@@ -2079,7 +2079,7 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 			similarContent = builder.String()
 		}
 		sourceID := fmt.Sprintf("%s-%d", chunk.ID, i)
-		indexInfoList = append(indexInfoList, &types.IndexInfo{
+		indexInfoList = append(indexInfoList, applyChunkGenerationIndexInfo(&types.IndexInfo{
 			Content:         similarContent,
 			SourceID:        sourceID,
 			SourceType:      types.ChunkSourceType,
@@ -2090,7 +2090,7 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 			TagID:           chunk.TagID,
 			IsEnabled:       chunk.IsEnabled,
 			IsRecommended:   chunk.Flags.HasFlag(types.ChunkFlagRecommended),
-		})
+		}, chunk))
 	}
 
 	return indexInfoList, nil

@@ -2,6 +2,7 @@ package notion
 
 import (
 	"context"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -9,11 +10,12 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
-func allowNotionTestServer(t *testing.T) {
+func fakeNotionForConnector(t *testing.T) (*httptest.Server, *Config) {
 	t.Helper()
 	t.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
 	secutils.ResetSSRFWhitelistForTest()
 	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+	return fakeNotion()
 }
 
 func makeNotionConfig(cfg *Config, baseURL string, resourceIDs []string) *types.DataSourceConfig {
@@ -37,8 +39,7 @@ func TestConnectorType(t *testing.T) {
 }
 
 func TestConnectorValidate(t *testing.T) {
-	allowNotionTestServer(t)
-	ts, cfg := fakeNotion()
+	ts, cfg := fakeNotionForConnector(t)
 	defer ts.Close()
 
 	c := NewConnector()
@@ -49,7 +50,7 @@ func TestConnectorValidate(t *testing.T) {
 }
 
 func TestConnectorValidate_BadToken(t *testing.T) {
-	ts, _ := fakeNotion()
+	ts, _ := fakeNotionForConnector(t)
 	defer ts.Close()
 
 	c := NewConnector()
@@ -62,8 +63,7 @@ func TestConnectorValidate_BadToken(t *testing.T) {
 }
 
 func TestConnectorListResources(t *testing.T) {
-	allowNotionTestServer(t)
-	ts, cfg := fakeNotion()
+	ts, cfg := fakeNotionForConnector(t)
 	defer ts.Close()
 
 	c := NewConnector()
@@ -84,8 +84,7 @@ func TestConnectorListResources(t *testing.T) {
 }
 
 func TestConnectorFetchAll(t *testing.T) {
-	allowNotionTestServer(t)
-	ts, cfg := fakeNotion()
+	ts, cfg := fakeNotionForConnector(t)
 	defer ts.Close()
 
 	c := NewConnector()
@@ -120,8 +119,7 @@ func TestConnectorFetchAll(t *testing.T) {
 }
 
 func TestConnectorFetchAll_Database(t *testing.T) {
-	allowNotionTestServer(t)
-	ts, cfg := fakeNotion()
+	ts, cfg := fakeNotionForConnector(t)
 	defer ts.Close()
 
 	c := NewConnector()
@@ -164,8 +162,7 @@ func TestConnectorFetchAll_Database(t *testing.T) {
 // row by ID routes through fetchPage's record-detection branch and produces an
 // item via buildRecordItem (instead of being silently dropped as an empty page).
 func TestConnectorFetchAll_SingleRecord(t *testing.T) {
-	allowNotionTestServer(t)
-	ts, cfg := fakeNotion()
+	ts, cfg := fakeNotionForConnector(t)
 	defer ts.Close()
 
 	c := NewConnector()
@@ -188,8 +185,7 @@ func TestConnectorFetchAll_SingleRecord(t *testing.T) {
 }
 
 func TestConnectorFetchIncremental_NoChanges(t *testing.T) {
-	allowNotionTestServer(t)
-	ts, cfg := fakeNotion()
+	ts, cfg := fakeNotionForConnector(t)
 	defer ts.Close()
 
 	c := NewConnector()

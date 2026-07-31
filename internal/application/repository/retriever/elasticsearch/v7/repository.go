@@ -191,6 +191,10 @@ func (e *elasticsearchRepository) Support() []typesLocal.RetrieverType {
 	return []typesLocal.RetrieverType{typesLocal.KeywordsRetrieverType}
 }
 
+func (e *elasticsearchRepository) SupportsGenerationFilter() bool {
+	return true
+}
+
 // EstimateStorageSize 估算存储空间大小
 func (e *elasticsearchRepository) EstimateStorageSize(ctx context.Context,
 	indexInfoList []*typesLocal.IndexInfo, params map[string]any,
@@ -520,6 +524,20 @@ func (e *elasticsearchRepository) getBaseConds(params typesLocal.RetrieveParams)
 		must = append(must, map[string]interface{}{
 			"terms": map[string]interface{}{
 				e.idField("tag_id"): params.TagIDs,
+			},
+		})
+	}
+	if len(params.GenerationIDs) > 0 {
+		must = append(must, map[string]interface{}{
+			"terms": map[string]interface{}{
+				e.idField("generation_id"): params.GenerationIDs,
+			},
+		})
+	}
+	if len(params.VisibilityKeys) > 0 {
+		must = append(must, map[string]interface{}{
+			"terms": map[string]interface{}{
+				e.idField("visibility_key"): params.VisibilityKeys,
 			},
 		})
 	}

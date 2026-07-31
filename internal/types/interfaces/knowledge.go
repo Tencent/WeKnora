@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"mime/multipart"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
@@ -112,6 +113,7 @@ type KnowledgeService interface {
 		knowledgeID string,
 		processOverrides *types.KnowledgeProcessOverrides,
 	) (*types.Knowledge, error)
+	RunGenerationGC(ctx context.Context) error
 	// CancelKnowledgeParse marks an in-progress parse as cancelled by the
 	// user. The knowledge row and any partially written chunks/index are
 	// kept; downstream queued tasks for the same knowledge are best-effort
@@ -209,6 +211,29 @@ type KnowledgeService interface {
 	SearchKnowledge(ctx context.Context, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error)
 	// SearchKnowledgeForScopes searches knowledge within the given (tenant_id, kb_id) scopes (e.g. for shared agent context).
 	SearchKnowledgeForScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error)
+}
+
+// KnowledgeGenerationRepository manages generation snapshots for atomic reparse.
+type KnowledgeGenerationRepository interface {
+	Create(ctx context.Context, generation *types.KnowledgeGeneration) error
+	Get(ctx context.Context, tenantID uint64, generationID string) (*types.KnowledgeGeneration, error)
+	GetActive(ctx context.Context, tenantID uint64, knowledgeID string) (*types.KnowledgeGeneration, error)
+	LatestAttempt(ctx context.Context, tenantID uint64, knowledgeID string) (int, error)
+	MarkReady(ctx context.Context, generationID, manifestDigest string) error
+	SetSnapshotDescription(ctx context.Context, generationID, description string) error
+	ActivateIfCurrent(ctx context.Context, generationID string, attempt int) (bool, error)
+	MarkFailed(ctx context.Context, generationID, message string) error
+	MarkRetired(ctx context.Context, generationID string) error
+	MarkPurged(ctx context.Context, generationID string) error
+	ListGCEligible(ctx context.Context, before time.Time, limit int) ([]*types.KnowledgeGeneration, error)
+}
+
+// ProcessingArtifactRepository stores ownership-free reusable pipeline outputs.
+type ProcessingArtifactRepository interface {
+	PutIfAbsent(ctx context.Context, artifact *types.ProcessingArtifact) (bool, error)
+	Get(ctx context.Context, tenantID uint64, stage string, keyVersion int, artifactKey string) (*types.ProcessingArtifact, error)
+	DeleteObservedChecksum(ctx context.Context, tenantID uint64, id string, payloadChecksum string) (bool, error)
+	DeleteExpired(ctx context.Context, before time.Time, limit int) (int64, error)
 }
 
 // KnowledgeRepository defines the interface for knowledge repositories.

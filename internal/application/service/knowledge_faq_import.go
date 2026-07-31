@@ -1882,7 +1882,7 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 	stdQuestionChanged := oldStdContent != newStdContent
 	if stdQuestionChanged {
 		logger.Debugf(ctx, "incrementalIndexFAQEntry: standard question changed, sourceID=%s", chunk.ID)
-		indexInfoToUpdate = append(indexInfoToUpdate, &types.IndexInfo{
+		indexInfoToUpdate = append(indexInfoToUpdate, applyChunkGenerationIndexInfo(&types.IndexInfo{
 			Content:         newStdContent,
 			SourceID:        chunk.ID,
 			SourceType:      types.ChunkSourceType,
@@ -1893,7 +1893,7 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 			TagID:           chunk.TagID,
 			IsEnabled:       chunk.IsEnabled,
 			IsRecommended:   chunk.Flags.HasFlag(types.ChunkFlagRecommended),
-		})
+		}, chunk))
 	}
 
 	// 2. 基于内容哈希处理相似问的增删改
@@ -1929,7 +1929,7 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 		// 2. 答案变化（需要重新embedding）
 		if !existedBefore || answersChanged {
 			sourceID := fmt.Sprintf("%s-%s", chunk.ID, hashQuestion(newQ))
-			indexInfoToUpdate = append(indexInfoToUpdate, &types.IndexInfo{
+			indexInfoToUpdate = append(indexInfoToUpdate, applyChunkGenerationIndexInfo(&types.IndexInfo{
 				Content:         buildContent(newQ, normalizedNewMeta.Answers),
 				SourceID:        sourceID,
 				SourceType:      types.ChunkSourceType,
@@ -1940,7 +1940,7 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 				TagID:           chunk.TagID,
 				IsEnabled:       chunk.IsEnabled,
 				IsRecommended:   chunk.Flags.HasFlag(types.ChunkFlagRecommended),
-			})
+			}, chunk))
 			if !existedBefore {
 				addedQuestions = append(addedQuestions, newQ)
 			} else {

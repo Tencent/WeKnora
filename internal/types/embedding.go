@@ -38,4 +38,6 @@ type IndexInfo struct {
 	TagID           string     // Tag ID for categorization (used for FAQ priority filtering)
 	IsEnabled       bool       // Whether the chunk is enabled for retrieval
 	IsRecommended   bool       // Whether the chunk is recommended
+	GenerationID    string     // Generation snapshot that owns this index entry
+	VisibilityKey   string     // knowledgeID:generationID, used by generation-aware vector filters
 }

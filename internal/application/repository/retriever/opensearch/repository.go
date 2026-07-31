@@ -242,6 +242,10 @@ func (r *Repository) Support() []types.RetrieverType {
 	return []types.RetrieverType{types.KeywordsRetrieverType, types.VectorRetrieverType}
 }
 
+func (r *Repository) SupportsGenerationFilter() bool {
+	return true
+}
+
 // probeVersion sends GET / and validates the cluster is OpenSearch in
 // a supported version range:
 //   - Reject: ES (any), OS 1.x, OS 2.0~2.3 (Lucene HNSW preview).

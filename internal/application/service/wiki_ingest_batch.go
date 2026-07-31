@@ -17,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"golang.org/x/sync/errgroup"
@@ -496,6 +497,8 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 						RetractDocContent: op.DocSummary,
 						DocTitle:          op.DocTitle,
 						KnowledgeID:       op.KnowledgeID,
+						GenerationID:      op.GenerationID,
+						Attempt:           op.Attempt,
 						Language:          types.LanguageLocaleName(op.Language),
 					})
 				}
@@ -512,6 +515,16 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			mapMu.Unlock()
 
 			logger.Infof(mapCtx, "wiki ingest: processing document '%s' (%s)", op.DocTitle, op.KnowledgeID)
+			if !generationWriteAllowed(mapCtx, s.generationRepo, payload.TenantID, op.KnowledgeID,
+				op.GenerationID, op.Attempt, "wiki") {
+				logger.Infof(mapCtx, "wiki ingest: skip stale generation op knowledge=%s generation=%s",
+					op.KnowledgeID, op.GenerationID)
+				mapMu.Lock()
+				ingestFailed++
+				failedOps = append(failedOps, op)
+				mapMu.Unlock()
+				return nil
+			}
 			result, updates, err := s.mapOneDocument(mapCtx, chatModel, payload, op, batchCtx)
 			if err != nil {
 				mapMu.Lock()
@@ -555,7 +568,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				// "finalizing" until the housekeeping sweep marks it
 				// failed. The matching +1 was seeded by
 				// KnowledgePostProcess.SetFinalizing.
-				s.finalizeWikiSubtask(mapCtx, op.KnowledgeID)
+				s.finalizeWikiSubtask(mapCtx, payload.KnowledgeBaseID, op, nil)
 			}
 			return nil
 		})
@@ -716,9 +729,18 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// Publish freshly-generated pages immediately (NOT deferred to finalize):
 	// users should see a document's wiki pages as soon as their content is
 	// written, not after the debounce window. This is a cheap status flip.
-	if len(allPagesAffected) > 0 {
+	hasGenerationDocResults := false
+	for _, r := range docResults {
+		if r != nil && r.GenerationID != "" {
+			hasGenerationDocResults = true
+			break
+		}
+	}
+	if len(allPagesAffected) > 0 && !hasGenerationDocResults {
 		logger.Infof(ctx, "wiki ingest: publishing draft pages")
 		s.publishDraftPages(tailCtx, payload.KnowledgeBaseID, allPagesAffected)
+	} else if len(allPagesAffected) > 0 {
+		logger.Infof(ctx, "wiki ingest: deferring draft publish until generation finalizer")
 	}
 
 	// Defer KB-global convergence (index-intro rebuild + dead-link cleanup +
@@ -788,7 +810,21 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		// held — the retry (or the dead-letter drain in requeueFailedOps)
 		// releases it once the op reaches a real terminal state.
 		if _, unapplied := unappliedSlugKIDs[r.KnowledgeID]; !unapplied {
-			s.finalizeWikiSubtask(ctx, r.KnowledgeID)
+			publishSlugs := make([]string, 0, len(r.Pages))
+			for _, page := range r.Pages {
+				if page.Slug == "" {
+					continue
+				}
+				if _, bad := failedAdditionSlugs[page.Slug]; bad {
+					continue
+				}
+				publishSlugs = append(publishSlugs, page.Slug)
+			}
+			s.finalizeWikiSubtask(ctx, payload.KnowledgeBaseID, WikiPendingOp{
+				KnowledgeID:  r.KnowledgeID,
+				GenerationID: r.GenerationID,
+				Attempt:      r.Attempt,
+			}, publishSlugs)
 		}
 		if r.WikiSpan == nil {
 			continue
@@ -1180,7 +1216,13 @@ func (s *wikiIngestService) mapOneDocument(
 		return nil, nil, nil
 	}
 
-	chunks, err := s.chunkRepo.ListChunksByKnowledgeID(ctx, payload.TenantID, knowledgeID)
+	var chunks []*types.Chunk
+	var err error
+	if op.GenerationID != "" {
+		chunks, err = s.chunkRepo.ListGenerationChunks(ctx, payload.TenantID, knowledgeID, op.GenerationID)
+	} else {
+		chunks, err = s.chunkRepo.ListActiveChunksByKnowledgeID(ctx, payload.TenantID, knowledgeID)
+	}
 	if err != nil {
 		s.tracker().FailSpan(ctx, wikiSpan, "LIST_CHUNKS_FAILED", err.Error(), err)
 		return nil, nil, fmt.Errorf("get chunks: %w", err)
@@ -1295,11 +1337,12 @@ func (s *wikiIngestService) mapOneDocument(
 	// run them in parallel. Summary handles wiki-link injection; classification
 	// attaches concrete chunk IDs to each candidate slug.
 	var (
-		summaryContent string
-		summaryErr     error
-		citations      map[string][]string
-		newSlugs       []newSlugFromCitation
-		batchCount     int
+		summaryContent   string
+		summaryErr       error
+		citations        map[string][]string
+		logicalCitations map[string][]LogicalChunkRef
+		newSlugs         []newSlugFromCitation
+		batchCount       int
 	)
 
 	// Both calls run in parallel goroutines under the same wikiSpan
@@ -1346,10 +1389,11 @@ func (s *wikiIngestService) mapOneDocument(
 		// citations would be redundant and we'd spend LLM calls for nothing.
 		if pass0Failed {
 			citations = map[string][]string{}
+			logicalCitations = map[string][]LogicalChunkRef{}
 			return
 		}
 		candidatesXML := renderCandidateSlugsXML(extractedEntities, extractedConcepts)
-		citations, newSlugs, batchCount = s.classifyChunkCitations(ctx, chatModel, candidatesXML, chunks, lang, batchCtx)
+		citations, logicalCitations, newSlugs, batchCount = s.classifyChunkCitations(ctx, chatModel, candidatesXML, chunks, lang, batchCtx)
 		s.tracker().EndSpan(ctx, classifySpan, types.JSONMap{
 			"cited_slugs":      len(citations),
 			"new_slugs":        len(newSlugs),
@@ -1363,7 +1407,7 @@ func (s *wikiIngestService) mapOneDocument(
 	// Merge citations back into the item structs (non-failing; items without
 	// citations simply keep their Description+Details fallback).
 	var uncited int
-	extractedEntities, extractedConcepts, uncited = mergeCitationsIntoItems(extractedEntities, extractedConcepts, citations, newSlugs)
+	extractedEntities, extractedConcepts, uncited = mergeCitationsIntoItems(extractedEntities, extractedConcepts, citations, logicalCitations, newSlugs)
 
 	// Rebuild slugItems so stale entries (for slugs that did not survive the
 	// merge) and brand-new slugs discovered by the citation pass are both
@@ -1439,14 +1483,16 @@ func (s *wikiIngestService) mapOneDocument(
 		docSummary = sumLine
 	}
 	updates = append(updates, SlugUpdate{
-		Slug:        summarySlug,
-		Type:        types.WikiPageTypeSummary,
-		DocTitle:    docTitle,
-		KnowledgeID: knowledgeID,
-		SourceRef:   sourceRef,
-		Language:    lang,
-		SummaryLine: sumLine,
-		SummaryBody: sumBody,
+		Slug:         summarySlug,
+		Type:         types.WikiPageTypeSummary,
+		DocTitle:     docTitle,
+		KnowledgeID:  knowledgeID,
+		GenerationID: op.GenerationID,
+		Attempt:      op.Attempt,
+		SourceRef:    sourceRef,
+		Language:     lang,
+		SummaryLine:  sumLine,
+		SummaryBody:  sumBody,
 	})
 	extractedPages = append(extractedPages, wikiIngestPageRef{Slug: summarySlug, Title: docTitle})
 
@@ -1454,15 +1500,18 @@ func (s *wikiIngestService) mapOneDocument(
 	for _, item := range extractedEntities {
 		if item.Slug != "" {
 			updates = append(updates, SlugUpdate{
-				Slug:         item.Slug,
-				Type:         types.WikiPageTypeEntity,
-				Item:         item,
-				DocTitle:     docTitle,
-				KnowledgeID:  knowledgeID,
-				SourceRef:    sourceRef,
-				Language:     lang,
-				SourceChunks: item.SourceChunks,
-				DocSummary:   docSummary,
+				Slug:            item.Slug,
+				Type:            types.WikiPageTypeEntity,
+				Item:            item,
+				DocTitle:        docTitle,
+				KnowledgeID:     knowledgeID,
+				GenerationID:    op.GenerationID,
+				Attempt:         op.Attempt,
+				SourceRef:       sourceRef,
+				Language:        lang,
+				SourceChunks:    item.SourceChunks,
+				SourceChunkRefs: item.SourceChunkRefs,
+				DocSummary:      docSummary,
 			})
 		}
 	}
@@ -1471,15 +1520,18 @@ func (s *wikiIngestService) mapOneDocument(
 	for _, item := range extractedConcepts {
 		if item.Slug != "" {
 			updates = append(updates, SlugUpdate{
-				Slug:         item.Slug,
-				Type:         types.WikiPageTypeConcept,
-				Item:         item,
-				DocTitle:     docTitle,
-				KnowledgeID:  knowledgeID,
-				SourceRef:    sourceRef,
-				Language:     lang,
-				SourceChunks: item.SourceChunks,
-				DocSummary:   docSummary,
+				Slug:            item.Slug,
+				Type:            types.WikiPageTypeConcept,
+				Item:            item,
+				DocTitle:        docTitle,
+				KnowledgeID:     knowledgeID,
+				GenerationID:    op.GenerationID,
+				Attempt:         op.Attempt,
+				SourceRef:       sourceRef,
+				Language:        lang,
+				SourceChunks:    item.SourceChunks,
+				SourceChunkRefs: item.SourceChunkRefs,
+				DocSummary:      docSummary,
 			})
 		}
 	}
@@ -1535,6 +1587,8 @@ func (s *wikiIngestService) mapOneDocument(
 				RetractDocContent: priorContribution,
 				DocTitle:          docTitle,
 				KnowledgeID:       knowledgeID,
+				GenerationID:      op.GenerationID,
+				Attempt:           op.Attempt,
 				Language:          lang,
 			})
 			continue
@@ -1546,6 +1600,8 @@ func (s *wikiIngestService) mapOneDocument(
 			RetractDocContent: content,
 			DocTitle:          docTitle,
 			KnowledgeID:       knowledgeID,
+			GenerationID:      op.GenerationID,
+			Attempt:           op.Attempt,
 			Language:          lang,
 		})
 	}
@@ -1583,12 +1639,14 @@ func (s *wikiIngestService) mapOneDocument(
 	}
 
 	return &docIngestResult{
-		KnowledgeID: knowledgeID,
-		DocTitle:    docTitle,
-		Summary:     docSummaryLine,
-		Pages:       extractedPages,
-		MapStats:    mapStats,
-		WikiSpan:    wikiSpan,
+		KnowledgeID:  knowledgeID,
+		GenerationID: op.GenerationID,
+		Attempt:      op.Attempt,
+		DocTitle:     docTitle,
+		Summary:      docSummaryLine,
+		Pages:        extractedPages,
+		MapStats:     mapStats,
+		WikiSpan:     wikiSpan,
 	}, updates, nil
 }
 
@@ -1688,6 +1746,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	// Retract updates are kept — they actively remove refs, which is what we
 	// want when the doc is gone.
 	updates = s.filterLiveUpdates(ctx, kbID, updates)
+	updates = filterGenerationAllowedUpdates(ctx, s.generationRepo, tenantID, updates)
 	if len(updates) == 0 {
 		return false, "", false, nil
 	}
@@ -2095,6 +2154,46 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	}
 
 	return false, "", additionFailed, nil
+}
+
+func filterGenerationAllowedUpdates(
+	ctx context.Context,
+	generationRepo interfaces.KnowledgeGenerationRepository,
+	tenantID uint64,
+	updates []SlugUpdate,
+) []SlugUpdate {
+	if generationRepo == nil || len(updates) == 0 {
+		return updates
+	}
+
+	type key struct {
+		knowledgeID  string
+		generationID string
+		attempt      int
+	}
+	allowed := make(map[key]bool)
+	filtered := updates[:0]
+	for _, update := range updates {
+		if update.GenerationID == "" {
+			filtered = append(filtered, update)
+			continue
+		}
+		k := key{
+			knowledgeID:  update.KnowledgeID,
+			generationID: update.GenerationID,
+			attempt:      update.Attempt,
+		}
+		ok, found := allowed[k]
+		if !found {
+			ok = generationWriteAllowed(ctx, generationRepo, tenantID, update.KnowledgeID,
+				update.GenerationID, update.Attempt, "wiki")
+			allowed[k] = ok
+		}
+		if ok {
+			filtered = append(filtered, update)
+		}
+	}
+	return filtered
 }
 
 // mergeChunkRefs unions the chunk IDs currently on the page with the ones

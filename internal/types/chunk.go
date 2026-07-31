@@ -164,6 +164,13 @@ type Chunk struct {
 	Metadata JSON `json:"metadata"                 gorm:"type:json"`
 	// ContentHash 存储内容的 hash 值，用于快速匹配（主要用于 FAQ）
 	ContentHash string `json:"content_hash"             gorm:"type:varchar(64);index"`
+	// GenerationID scopes this physical chunk to a generation snapshot.
+	// Empty is the legacy generation used before generation-scoped reparsing.
+	GenerationID string `json:"generation_id,omitempty" gorm:"type:varchar(36);index:idx_chunks_active_generation"`
+	// LogicalChunkKey identifies the chunk's document-local logical identity.
+	LogicalChunkKey string `json:"logical_chunk_key,omitempty" gorm:"type:varchar(64)"`
+	// ArtifactDigest records the reusable artifact output used to materialize this chunk.
+	ArtifactDigest string `json:"artifact_digest,omitempty" gorm:"type:varchar(64)"`
 	// 图片信息，存储为 JSON
 	ImageInfo string `json:"image_info"               gorm:"type:text"`
 	// Chunk creation time

@@ -28,6 +28,8 @@ const (
 	fieldChunkID          = "chunk_id"
 	fieldKnowledgeID      = "knowledge_id"
 	fieldKnowledgeBaseID  = "knowledge_base_id"
+	fieldGenerationID     = "generation_id"
+	fieldVisibilityKey    = "visibility_key"
 	fieldTagID            = "tag_id"
 	fieldEmbedding        = "embedding"
 	fieldIsEnabled        = "is_enabled"
@@ -125,6 +127,16 @@ func (w *weaviateRepository) ensureCollection(ctx context.Context, dimension int
 					IndexFilterable: &enabled,
 				},
 				{
+					Name:            fieldGenerationID,
+					DataType:        []string{"text"},
+					IndexFilterable: &enabled,
+				},
+				{
+					Name:            fieldVisibilityKey,
+					DataType:        []string{"text"},
+					IndexFilterable: &enabled,
+				},
+				{
 					Name:            fieldTagID,
 					DataType:        []string{"text"},
 					IndexFilterable: &enabled,
@@ -165,6 +177,10 @@ func (w *weaviateRepository) EngineType() types.RetrieverEngineType {
 
 func (w *weaviateRepository) Support() []types.RetrieverType {
 	return []types.RetrieverType{types.KeywordsRetrieverType, types.VectorRetrieverType}
+}
+
+func (w *weaviateRepository) SupportsGenerationFilter() bool {
+	return true
 }
 
 // EstimateStorageSize calculates the estimated storage size for a list of indices
@@ -499,6 +515,18 @@ func (w *weaviateRepository) getBaseFilter(params types.RetrieveParams) *filters
 			WithPath([]string{fieldTagID}).
 			WithOperator(filters.ContainsAny).
 			WithValueText(params.TagIDs...))
+	}
+	if len(params.GenerationIDs) > 0 {
+		operands = append(operands, filters.Where().
+			WithPath([]string{fieldGenerationID}).
+			WithOperator(filters.ContainsAny).
+			WithValueText(params.GenerationIDs...))
+	}
+	if len(params.VisibilityKeys) > 0 {
+		operands = append(operands, filters.Where().
+			WithPath([]string{fieldVisibilityKey}).
+			WithOperator(filters.ContainsAny).
+			WithValueText(params.VisibilityKeys...))
 	}
 	if len(params.ExcludeKnowledgeIDs) > 0 {
 		operands = append(operands, filters.Where().
@@ -836,6 +864,8 @@ func createPayload(embedding *WeaviateVectorEmbedding) map[string]interface{} {
 		fieldChunkID:         embedding.ChunkID,
 		fieldKnowledgeID:     embedding.KnowledgeID,
 		fieldKnowledgeBaseID: embedding.KnowledgeBaseID,
+		fieldGenerationID:    embedding.GenerationID,
+		fieldVisibilityKey:   embedding.VisibilityKey,
 		fieldTagID:           embedding.TagID,
 		fieldIsEnabled:       embedding.IsEnabled,
 	}
@@ -861,6 +891,8 @@ func getKeywordsFields() []graphql.Field {
 		{Name: fieldChunkID},
 		{Name: fieldKnowledgeID},
 		{Name: fieldKnowledgeBaseID},
+		{Name: fieldGenerationID},
+		{Name: fieldVisibilityKey},
 		{Name: fieldTagID},
 		{
 			Name: "_additional",
@@ -880,6 +912,8 @@ func getEmbeddingFields() []graphql.Field {
 		{Name: fieldChunkID},
 		{Name: fieldKnowledgeID},
 		{Name: fieldKnowledgeBaseID},
+		{Name: fieldGenerationID},
+		{Name: fieldVisibilityKey},
 		{Name: fieldTagID},
 		{
 			Name: "_additional",
@@ -899,6 +933,8 @@ func getVectorFields() []graphql.Field {
 		{Name: fieldChunkID},
 		{Name: fieldKnowledgeID},
 		{Name: fieldKnowledgeBaseID},
+		{Name: fieldGenerationID},
+		{Name: fieldVisibilityKey},
 		{Name: fieldTagID},
 		{
 			Name: "_additional",
@@ -954,6 +990,8 @@ func parseGraphQLResponse(items []interface{}, collectionName string, matchType 
 				ChunkID:         getString(fieldChunkID),
 				KnowledgeID:     getString(fieldKnowledgeID),
 				KnowledgeBaseID: getString(fieldKnowledgeBaseID),
+				GenerationID:    getString(fieldGenerationID),
+				VisibilityKey:   getString(fieldVisibilityKey),
 				TagID:           getString(fieldTagID),
 			},
 			float64(score),
@@ -1006,6 +1044,8 @@ func toWeaviateVectorEmbedding(embedding *types.IndexInfo, additionalParams map[
 		ChunkID:         embedding.ChunkID,
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
+		GenerationID:    embedding.GenerationID,
+		VisibilityKey:   embedding.VisibilityKey,
 		TagID:           embedding.TagID,
 		IsEnabled:       embedding.IsEnabled,
 	}
@@ -1029,6 +1069,8 @@ func fromWeaviateVectorEmbedding(id string,
 		ChunkID:         embedding.ChunkID,
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
+		GenerationID:    embedding.GenerationID,
+		VisibilityKey:   embedding.VisibilityKey,
 		TagID:           embedding.TagID,
 		Content:         embedding.Content,
 		Score:           embedding.Score,

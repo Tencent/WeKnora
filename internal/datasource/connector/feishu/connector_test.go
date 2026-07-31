@@ -804,9 +804,22 @@ func TestFetchAll_LogsSummaryWithSkipBreakdown(t *testing.T) {
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
+	prevLogFormat, hadLogFormat := os.LookupEnv("LOG_FORMAT")
+	if err := os.Setenv("LOG_FORMAT", "%msg"); err != nil {
+		t.Fatalf("set LOG_FORMAT: %v", err)
+	}
+	logger.ConfigureFromEnv()
+	defer func() {
+		if hadLogFormat {
+			_ = os.Setenv("LOG_FORMAT", prevLogFormat)
+		} else {
+			_ = os.Unsetenv("LOG_FORMAT")
+		}
+		logger.ConfigureFromEnv()
+	}()
+
 	var buf bytes.Buffer
 	logger.SetOutput(&buf)
-	defer logger.SetOutput(os.Stderr)
 
 	c := NewConnector(RegionFeishu)
 	if _, err := c.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"}); err != nil {

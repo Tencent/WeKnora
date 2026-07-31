@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/artifact"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -94,6 +95,7 @@ func NewChunkExtractTask(
 	modelID string,
 	knowledgeID string,
 	attempt int,
+	generationID string,
 	chunkIndex int,
 ) (bool, error) {
 	if strings.ToLower(os.Getenv("NEO4J_ENABLE")) != "true" {
@@ -101,12 +103,13 @@ func NewChunkExtractTask(
 		return false, nil
 	}
 	taskPayload := types.ExtractChunkPayload{
-		TenantID:    tenantID,
-		ChunkID:     chunkID,
-		ModelID:     modelID,
-		KnowledgeID: knowledgeID,
-		Attempt:     attempt,
-		ChunkIndex:  chunkIndex,
+		TenantID:     tenantID,
+		ChunkID:      chunkID,
+		ModelID:      modelID,
+		KnowledgeID:  knowledgeID,
+		Attempt:      attempt,
+		GenerationID: generationID,
+		ChunkIndex:   chunkIndex,
 	}
 	langfuse.InjectTracing(ctx, &taskPayload)
 	payload, err := json.Marshal(taskPayload)
@@ -132,12 +135,19 @@ func NewDataTableSummaryTask(
 	knowledgeID string,
 	summaryModel string,
 	embeddingModel string,
+	opts ...dataTableSummaryTaskOptions,
 ) error {
+	options := dataTableSummaryTaskOptions{}
+	if len(opts) > 0 {
+		options = opts[0]
+	}
 	taskPayload := DataTableSummaryPayload{
 		TenantID:       tenantID,
 		KnowledgeID:    knowledgeID,
 		SummaryModel:   summaryModel,
 		EmbeddingModel: embeddingModel,
+		Attempt:        options.Attempt,
+		GenerationID:   options.GenerationID,
 	}
 	langfuse.InjectTracing(ctx, &taskPayload)
 	payload, err := json.Marshal(taskPayload)
@@ -164,6 +174,7 @@ func enqueueDataTableSummaryIfNeeded(
 	tenantID uint64,
 	knowledgeID string,
 	fileName, fileType, summaryModelID, embeddingModelID string,
+	opts ...dataTableSummaryTaskOptions,
 ) {
 	ft := normalizeFileExtension(fileType)
 	if ft == "" && fileName != "" {
@@ -172,23 +183,28 @@ func enqueueDataTableSummaryIfNeeded(
 	if !isDataTableFileType(ft) {
 		return
 	}
-	if err := NewDataTableSummaryTask(ctx, client, tenantID, knowledgeID, summaryModelID, embeddingModelID); err != nil {
+	if err := NewDataTableSummaryTask(ctx, client, tenantID, knowledgeID, summaryModelID, embeddingModelID, opts...); err != nil {
 		logger.Warnf(ctx, "Failed to enqueue data table summary task for knowledge %s: %v", knowledgeID, err)
 	}
 }
 
 // ChunkExtractService is a service for extracting chunks
 type ChunkExtractService struct {
+	config            *config.Config
 	template          *types.PromptTemplateStructured
 	modelService      interfaces.ModelService
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository
 	knowledgeRepo     interfaces.KnowledgeRepository
+	generationRepo    interfaces.KnowledgeGenerationRepository
 	chunkRepo         interfaces.ChunkRepository
 	graphEngine       interfaces.RetrieveGraphRepository
+	taskEnqueuer      interfaces.TaskEnqueuer
 	// spanTracker records this graph-extract task's subspan under the
 	// parent attempt's postprocess stage so the trace viewer shows real
 	// per-chunk graph extraction time rather than the upstream's enqueue.
 	spanTracker SpanTracker
+
+	artifactRuntime *artifact.Runtime
 }
 
 // NewChunkExtractService creates a new chunk extract service
@@ -197,18 +213,25 @@ func NewChunkExtractService(
 	modelService interfaces.ModelService,
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository,
 	knowledgeRepo interfaces.KnowledgeRepository,
+	generationRepo interfaces.KnowledgeGenerationRepository,
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
+	taskEnqueuer interfaces.TaskEnqueuer,
 	spanTracker SpanTracker,
+	artifactRuntime *artifact.Runtime,
 ) interfaces.TaskHandler {
 	return &ChunkExtractService{
+		config:            config,
 		template:          config.ExtractManager.ExtractGraph,
 		modelService:      modelService,
 		knowledgeBaseRepo: knowledgeBaseRepo,
 		knowledgeRepo:     knowledgeRepo,
+		generationRepo:    generationRepo,
 		chunkRepo:         chunkRepo,
 		graphEngine:       graphEngine,
+		taskEnqueuer:      taskEnqueuer,
 		spanTracker:       spanTracker,
+		artifactRuntime:   artifactRuntime,
 	}
 }
 
@@ -260,14 +283,16 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	}
 	var handleErr error
 	graphOut := types.JSONMap{}
+	superseded := false
+	var afterActivate func(context.Context)
 	defer func() {
 		// Decrement the parent's enrichment counter on terminal exit so a
 		// completed (or terminally-failed) per-chunk extract releases its
 		// slot in pending_subtasks_count. KnowledgeID is the new (post-#? )
 		// payload field; legacy in-flight tasks without it are skipped.
-		finalizeSubtaskDetached(ctx, s.knowledgeRepo, p.KnowledgeID,
+		finalizeGenerationSubtaskDetachedWithHook(ctx, s.knowledgeRepo, s.generationRepo, s.tracker(), p.KnowledgeID,
 			fmt.Sprintf("graph_chunk[%d]", p.ChunkIndex),
-			handleErr, false, isFinalAsynqAttempt(ctx))
+			p.GenerationID, p.Attempt, handleErr, superseded, isFinalAsynqAttempt(ctx), afterActivate)
 		if gSpan == nil {
 			return
 		}
@@ -313,6 +338,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		handleErr = err
 		return err
 	}
+	afterActivate = wikiTriggerAfterActivation(s.taskEnqueuer, p.TenantID, chunk.KnowledgeBaseID, p.GenerationID)
 
 	var processOverrides *types.KnowledgeProcessOverrides
 	knowledgeID := p.KnowledgeID
@@ -323,6 +349,12 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		if k, kerr := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, knowledgeID); kerr == nil && k != nil {
 			processOverrides, _ = k.ProcessOverrides()
 		}
+	}
+	if !generationWriteAllowed(ctx, s.generationRepo, p.TenantID, knowledgeID,
+		p.GenerationID, p.Attempt, "graph_extract") {
+		superseded = true
+		graphOut["skipped"] = "generation_write_not_allowed"
+		return nil
 	}
 	extractCfg := ResolveProcessConfig(kb, processOverrides).ExtractConfig
 	if !extractCfg.Enabled {
@@ -350,6 +382,9 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			},
 		},
 	}
+	if s.artifactRuntime != nil && p.TenantID != 0 && chatArtifactStageEnabled(s.config, "graph_extract") {
+		chatModel = newArtifactCachingChat(chatModel, s.artifactRuntime, p.TenantID, "graph_extract")
+	}
 	extractor := chatpipeline.NewExtractor(chatModel, template)
 	graph, err := extractor.Extract(ctx, chunk.Content)
 	if err != nil {
@@ -363,12 +398,22 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		graphOut["skipped"] = "chunk_disappeared"
 		return nil
 	}
+	if !generationWriteAllowed(ctx, s.generationRepo, p.TenantID, knowledgeID,
+		p.GenerationID, p.Attempt, "graph_extract") {
+		superseded = true
+		graphOut["skipped"] = "generation_write_not_allowed"
+		return nil
+	}
 
 	for _, node := range graph.Node {
 		node.Chunks = []string{chunk.ID}
 	}
+	graphGenerationID := p.GenerationID
+	if graphGenerationID == "" {
+		graphGenerationID = chunk.GenerationID
+	}
 	if err = s.graphEngine.AddGraph(ctx,
-		types.NameSpace{KnowledgeBase: chunk.KnowledgeBaseID, Knowledge: chunk.KnowledgeID},
+		types.NameSpace{KnowledgeBase: chunk.KnowledgeBaseID, Knowledge: chunk.KnowledgeID, Generation: graphGenerationID},
 		[]*types.GraphData{graph},
 	); err != nil {
 		logger.Errorf(ctx, "failed to add graph: %v", err)
@@ -406,6 +451,11 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	return nil
 }
 
+type dataTableSummaryTaskOptions struct {
+	Attempt      int
+	GenerationID string
+}
+
 // DataTableExtractPayload represents the table extract task payload
 type DataTableSummaryPayload struct {
 	types.TracingContext
@@ -413,6 +463,8 @@ type DataTableSummaryPayload struct {
 	KnowledgeID    string `json:"knowledge_id"`
 	SummaryModel   string `json:"summary_model"`
 	EmbeddingModel string `json:"embedding_model"`
+	Attempt        int    `json:"attempt,omitempty"`
+	GenerationID   string `json:"generation_id,omitempty"`
 }
 
 // DataTableSummaryService is a service for extracting tables
@@ -425,6 +477,8 @@ type DataTableSummaryService struct {
 	tenantService        interfaces.TenantService
 	retrieveEngine       interfaces.RetrieveEngineRegistry
 	ownership            retriever.TenantStoreOwnership
+	generationRepo       interfaces.KnowledgeGenerationRepository
+	spanTracker          SpanTracker
 	sqlDB                *sql.DB
 	storageResolver      interfaces.StorageBackendResolver
 }
@@ -439,6 +493,8 @@ func NewDataTableSummaryService(
 	tenantService interfaces.TenantService,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
+	generationRepo interfaces.KnowledgeGenerationRepository,
+	spanTracker SpanTracker,
 	sqlDB *sql.DB,
 	storageResolver interfaces.StorageBackendResolver,
 ) interfaces.TaskHandler {
@@ -451,9 +507,18 @@ func NewDataTableSummaryService(
 		tenantService:        tenantService,
 		retrieveEngine:       retrieveEngine,
 		ownership:            ownership,
+		generationRepo:       generationRepo,
+		spanTracker:          spanTracker,
 		sqlDB:                sqlDB,
 		storageResolver:      storageResolver,
 	}
+}
+
+func (s *DataTableSummaryService) tracker() SpanTracker {
+	if s.spanTracker == nil {
+		return noopSpanTracker{}
+	}
+	return s.spanTracker
 }
 
 // Handle implements the TaskHandler interface for table extraction
@@ -472,6 +537,17 @@ func (s *DataTableSummaryService) Handle(ctx context.Context, t *asynq.Task) err
 
 	logger.Infof(ctx, "Processing table extraction for knowledge: %s", payload.KnowledgeID)
 
+	if attemptSuperseded(ctx, s.tracker(), payload.KnowledgeID, payload.Attempt) {
+		logger.Infof(ctx, "table summary: attempt %d superseded for %s, skipping stale task",
+			payload.Attempt, payload.KnowledgeID)
+		return nil
+	}
+	if payload.GenerationID != "" &&
+		!generationWriteAllowed(ctx, s.generationRepo, payload.TenantID, payload.KnowledgeID,
+			payload.GenerationID, payload.Attempt, "datatable_summary") {
+		return nil
+	}
+
 	// 2. 准备所有必需的资源（知识、模型、引擎等）
 	resources, err := s.prepareResources(ctx, payload)
 	if err != nil {
@@ -482,6 +558,20 @@ func (s *DataTableSummaryService) Handle(ctx context.Context, t *asynq.Task) err
 	chunks, err := s.processTableData(ctx, resources)
 	if err != nil {
 		return err
+	}
+
+	if attemptSuperseded(ctx, s.tracker(), payload.KnowledgeID, payload.Attempt) {
+		logger.Infof(ctx, "table summary: attempt %d superseded before write for %s, skipping stale result",
+			payload.Attempt, payload.KnowledgeID)
+		if payload.GenerationID != "" && s.generationRepo != nil {
+			_ = s.generationRepo.MarkRetired(ctx, payload.GenerationID)
+		}
+		return nil
+	}
+	if payload.GenerationID != "" &&
+		!generationWriteAllowed(ctx, s.generationRepo, payload.TenantID, payload.KnowledgeID,
+			payload.GenerationID, payload.Attempt, "datatable_summary_write") {
+		return nil
 	}
 
 	// 4. 索引到向量数据库
@@ -499,6 +589,8 @@ type extractionResources struct {
 	knowledge      *types.Knowledge
 	knowledgeBase  *types.KnowledgeBase
 	tenant         *types.Tenant
+	attempt        int
+	generationID   string
 	chatModel      chat.Chat
 	embeddingModel embedding.Embedder
 	retrieveEngine *retriever.CompositeRetrieveEngine
@@ -570,6 +662,8 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 		knowledge:      knowledge,
 		knowledgeBase:  kb,
 		tenant:         tenantInfo,
+		attempt:        payload.Attempt,
+		generationID:   payload.GenerationID,
 		chatModel:      chatModel,
 		embeddingModel: embeddingModel,
 		retrieveEngine: retrieveEngine,
@@ -718,6 +812,15 @@ func (s *DataTableSummaryService) buildChunks(resources *extractionResources, ta
 	summaryChunk.NextChunkID = columnChunk.ID
 	columnChunk.PreChunkID = summaryChunk.ID
 
+	if resources.generationID != "" {
+		for i, chunk := range chunks {
+			applyProcessChunkGenerationFields(chunk, resources.generationID, i)
+		}
+		summaryChunk.NextChunkID = columnChunk.ID
+		columnChunk.PreChunkID = summaryChunk.ID
+		columnChunk.ParentChunkID = summaryChunk.ID
+	}
+
 	return chunks
 }
 
@@ -732,7 +835,7 @@ func (s *DataTableSummaryService) indexToVectorDB(
 	// 构建索引信息列表
 	indexInfoList := make([]*types.IndexInfo, 0, len(chunks))
 	for _, chunk := range chunks {
-		indexInfoList = append(indexInfoList, &types.IndexInfo{
+		indexInfoList = append(indexInfoList, applyChunkGenerationIndexInfo(&types.IndexInfo{
 			Content:         chunk.Content,
 			SourceID:        chunk.ID,
 			SourceType:      types.ChunkSourceType,
@@ -740,7 +843,7 @@ func (s *DataTableSummaryService) indexToVectorDB(
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
 			IsEnabled:       true,
-		})
+		}, chunk))
 	}
 
 	// 保存到数据库
@@ -774,12 +877,20 @@ func (s *DataTableSummaryService) cleanupOnFailure(ctx context.Context, resource
 	logger.Warnf(ctx, "Starting cleanup due to failure: %v", indexErr)
 
 	// 1. 更新知识状态为失败
-	resources.knowledge.ParseStatus = types.ParseStatusFailed
-	resources.knowledge.ErrorMessage = indexErr.Error()
-	if err := s.knowledgeService.UpdateKnowledge(ctx, resources.knowledge); err != nil {
-		logger.Errorf(ctx, "Failed to update knowledge status: %v", err)
+	if resources.generationID != "" && s.generationRepo != nil {
+		if err := s.generationRepo.MarkFailed(ctx, resources.generationID, indexErr.Error()); err != nil {
+			logger.Errorf(ctx, "Failed to mark generation %s failed: %v", resources.generationID, err)
+		} else {
+			logger.Infof(ctx, "Marked generation %s failed", resources.generationID)
+		}
 	} else {
-		logger.Infof(ctx, "Updated knowledge %s status to failed", resources.knowledge.ID)
+		resources.knowledge.ParseStatus = types.ParseStatusFailed
+		resources.knowledge.ErrorMessage = indexErr.Error()
+		if err := s.knowledgeService.UpdateKnowledge(ctx, resources.knowledge); err != nil {
+			logger.Errorf(ctx, "Failed to update knowledge status: %v", err)
+		} else {
+			logger.Infof(ctx, "Updated knowledge %s status to failed", resources.knowledge.ID)
+		}
 	}
 
 	// 提取chunk IDs

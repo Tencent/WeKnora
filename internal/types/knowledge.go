@@ -161,6 +161,9 @@ type Knowledge struct {
 	CustomMetadata JSON `json:"custom_metadata" gorm:"type:json;not null"`
 	// Last FAQ import result (for FAQ type knowledge only)
 	LastFAQImportResult JSON `json:"last_faq_import_result" gorm:"type:json"`
+	// ActiveGenerationID is the visible generation snapshot for ordinary reads.
+	// Empty means legacy rows whose chunks have no generation_id.
+	ActiveGenerationID string `json:"active_generation_id,omitempty" gorm:"type:varchar(36);index"`
 	// Creation time of the knowledge
 	CreatedAt time.Time `json:"created_at"`
 	// Last updated time of the knowledge

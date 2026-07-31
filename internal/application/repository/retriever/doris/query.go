@@ -18,6 +18,8 @@ const (
 	fieldChunkID         = "chunk_id"
 	fieldKnowledgeID     = "knowledge_id"
 	fieldKnowledgeBaseID = "knowledge_base_id"
+	fieldGenerationID    = "generation_id"
+	fieldVisibilityKey   = "visibility_key"
 	fieldTagID           = "tag_id"
 	fieldIsEnabled       = "is_enabled"
 	fieldEmbedding       = "embedding"
@@ -26,7 +28,7 @@ const (
 // columns 是 INSERT / SELECT 时使用的标准列序。
 var columns = []string{
 	fieldID, fieldContent, fieldSourceID, fieldSourceType,
-	fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldTagID,
+	fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldGenerationID, fieldVisibilityKey, fieldTagID,
 	fieldIsEnabled, fieldEmbedding,
 }
 
@@ -34,7 +36,7 @@ var columns = []string{
 // 不包含 embedding（向量本身查询结果中无需返回，省带宽）。
 var columnsForRetrieve = []string{
 	fieldID, fieldContent, fieldSourceID, fieldSourceType,
-	fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldTagID,
+	fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldGenerationID, fieldVisibilityKey, fieldTagID,
 	fieldIsEnabled,
 }
 
@@ -42,7 +44,7 @@ var columnsForRetrieve = []string{
 // 比 columnsForRetrieve 多 embedding，因为复制目的是搬运向量本身。
 var columnsForCopy = []string{
 	fieldID, fieldContent, fieldSourceID, fieldSourceType,
-	fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldTagID,
+	fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldGenerationID, fieldVisibilityKey, fieldTagID,
 	fieldIsEnabled, fieldEmbedding,
 }
 
@@ -133,6 +135,12 @@ func buildBaseFilter(params types.RetrieveParams) *whereBuilder {
 	}
 	if len(params.TagIDs) > 0 {
 		w.addIn(fieldTagID, params.TagIDs)
+	}
+	if len(params.GenerationIDs) > 0 {
+		w.addIn(fieldGenerationID, params.GenerationIDs)
+	}
+	if len(params.VisibilityKeys) > 0 {
+		w.addIn(fieldVisibilityKey, params.VisibilityKeys)
 	}
 	if len(params.ExcludeKnowledgeIDs) > 0 {
 		w.addNotIn(fieldKnowledgeID, params.ExcludeKnowledgeIDs)

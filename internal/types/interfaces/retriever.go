@@ -7,6 +7,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// GenerationFilterCapability is implemented by retriever backends that can
+// enforce generation visibility in the backend query instead of post-filtering.
+type GenerationFilterCapability interface {
+	SupportsGenerationFilter() bool
+}
+
 // RetrieveEngine defines the retrieve engine interface
 type RetrieveEngine interface {
 	// EngineType gets the retrieve engine type

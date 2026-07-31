@@ -25,6 +25,8 @@ type retrieveFilters struct {
 	KBIDs               []string
 	KnowledgeIDs        []string
 	TagIDs              []string
+	GenerationIDs       []string
+	VisibilityKeys      []string
 	ExcludeChunkIDs     []string
 	ExcludeKnowledgeIDs []string
 	IncludeDisabled     bool
@@ -39,6 +41,8 @@ func fromParams(p types.RetrieveParams) *retrieveFilters {
 		KBIDs:               p.KnowledgeBaseIDs,
 		KnowledgeIDs:        p.KnowledgeIDs,
 		TagIDs:              p.TagIDs,
+		GenerationIDs:       p.GenerationIDs,
+		VisibilityKeys:      p.VisibilityKeys,
 		ExcludeChunkIDs:     p.ExcludeChunkIDs,
 		ExcludeKnowledgeIDs: p.ExcludeKnowledgeIDs,
 		// IncludeDisabled stays false — set explicitly by admin callers
@@ -66,6 +70,16 @@ func (f *retrieveFilters) toBoolMust() []map[string]any {
 	if len(f.TagIDs) > 0 {
 		must = append(must, map[string]any{
 			"terms": map[string]any{"tag_id": f.TagIDs},
+		})
+	}
+	if len(f.GenerationIDs) > 0 {
+		must = append(must, map[string]any{
+			"terms": map[string]any{"generation_id": f.GenerationIDs},
+		})
+	}
+	if len(f.VisibilityKeys) > 0 {
+		must = append(must, map[string]any{
+			"terms": map[string]any{"visibility_key": f.VisibilityKeys},
 		})
 	}
 	if len(f.ExcludeChunkIDs) > 0 {

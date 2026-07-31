@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +14,8 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/artifact"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
@@ -67,6 +71,7 @@ type ImageMultimodalService struct {
 	modelService   interfaces.ModelService
 	kbService      interfaces.KnowledgeBaseService
 	knowledgeRepo  interfaces.KnowledgeRepository
+	generationRepo interfaces.KnowledgeGenerationRepository
 	tenantRepo     interfaces.TenantRepository
 	retrieveEngine interfaces.RetrieveEngineRegistry
 	ownership      retriever.TenantStoreOwnership
@@ -88,6 +93,9 @@ type ImageMultimodalService struct {
 	// spanTracker records this image's subspan under the parent attempt's
 	// multimodal stage. nil-safe — falls back to no-op via tracker().
 	spanTracker SpanTracker
+
+	config          *config.Config
+	artifactRuntime *artifact.Runtime
 }
 
 func NewImageMultimodalService(
@@ -95,6 +103,7 @@ func NewImageMultimodalService(
 	modelService interfaces.ModelService,
 	kbService interfaces.KnowledgeBaseService,
 	knowledgeRepo interfaces.KnowledgeRepository,
+	generationRepo interfaces.KnowledgeGenerationRepository,
 	tenantRepo interfaces.TenantRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
@@ -105,12 +114,15 @@ func NewImageMultimodalService(
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
 	spanTracker SpanTracker,
+	cfg *config.Config,
+	artifactRuntime *artifact.Runtime,
 ) interfaces.TaskHandler {
 	return &ImageMultimodalService{
 		chunkService:    chunkService,
 		modelService:    modelService,
 		kbService:       kbService,
 		knowledgeRepo:   knowledgeRepo,
+		generationRepo:  generationRepo,
 		tenantRepo:      tenantRepo,
 		retrieveEngine:  retrieveEngine,
 		ownership:       ownership,
@@ -121,6 +133,8 @@ func NewImageMultimodalService(
 		storageResolver: storageResolver,
 		resourceCatalog: resourceCatalog,
 		spanTracker:     spanTracker,
+		config:          cfg,
+		artifactRuntime: artifactRuntime,
 	}
 }
 
@@ -200,6 +214,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// cause of "stuck parsing" reports. Intermediate retries skip finalize
 	// so we don't double-count and prematurely trigger post-process.
 	var handleErr error
+	suppressFinalize := false
 	defer func() {
 		// Finalize the image subspan with the actual outcome — not the
 		// finalize-counter outcome. The counter logic counts a "tried"
@@ -215,7 +230,11 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 					handleErr)
 			}
 		}
-		if handleErr == nil || isFinalAsynqAttempt(ctx) {
+		if suppressFinalize {
+			logger.Infof(ctx,
+				"[ImageMultimodal] Skip finalize for stale generation task %s",
+				payload.ImageURL)
+		} else if handleErr == nil || isFinalAsynqAttempt(ctx) {
 			s.checkAndFinalizeAllImages(ctx, payload)
 		} else {
 			logger.Infof(ctx,
@@ -223,6 +242,19 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 				payload.ImageURL)
 		}
 	}()
+	if attemptSuperseded(ctx, tracker, payload.KnowledgeID, payload.Attempt) {
+		suppressFinalize = true
+		imgOut["skipped"] = "attempt_superseded"
+		logger.Infof(ctx, "[ImageMultimodal] Attempt %d superseded for %s, skipping stale image task",
+			payload.Attempt, payload.KnowledgeID)
+		return nil
+	}
+	if !generationWriteAllowed(ctx, s.generationRepo, payload.TenantID, payload.KnowledgeID,
+		payload.GenerationID, payload.Attempt, "image_multimodal") {
+		suppressFinalize = true
+		imgOut["skipped"] = "generation_write_not_allowed"
+		return nil
+	}
 
 	vlmModel, vlmCfg, err := s.resolveVLM(ctx, payload.KnowledgeBaseID, payload.KnowledgeID)
 	if err != nil {
@@ -268,16 +300,16 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 		prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+		ocrText, ocrMeta, ocrErr := s.predictVLMWithArtifact(ctx, vlmModel, payload, vlmCfg, imgBytes, prompt, "vlm_ocr")
 		if ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
 			imgOut["ocr_error"] = ocrErr.Error()
 		} else {
-			ocrText = sanitizeOCRText(ocrText)
 			if ocrText != "" {
 				imageInfo.OCRText = ocrText
 				imgOut["ocr_chars"] = len([]rune(ocrText))
 				imgOut["ocr_preview"] = previewText(ocrText, 200)
+				recordArtifactAccess(imgOut, "ocr", ocrMeta)
 			} else {
 				logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", payload.ImageURL)
 				imgOut["ocr_chars"] = 0
@@ -286,7 +318,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
+	caption, capMeta, capErr := s.predictVLMWithArtifact(ctx, vlmModel, payload, vlmCfg, imgBytes, buildVLMCaptionPrompt(ctx, vlmCfg), "vlm_caption")
 	if capErr != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
 		imgOut["caption_error"] = capErr.Error()
@@ -294,6 +326,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		imageInfo.Caption = caption
 		imgOut["caption_chars"] = len([]rune(caption))
 		imgOut["caption_preview"] = previewText(caption, 200)
+		recordArtifactAccess(imgOut, "caption", capMeta)
 	}
 
 	// Build child chunks for OCR and caption results
@@ -478,14 +511,14 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 
 	indexInfoList := make([]*types.IndexInfo, 0, len(chunks))
 	for _, chunk := range chunks {
-		indexInfoList = append(indexInfoList, &types.IndexInfo{
+		indexInfoList = append(indexInfoList, applyChunkGenerationIndexInfo(&types.IndexInfo{
 			Content:         chunk.Content,
 			SourceID:        chunk.ID,
 			SourceType:      types.ChunkSourceType,
 			ChunkID:         chunk.ID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
-		})
+		}, chunk))
 	}
 
 	if err := engine.BatchIndex(ctx, embeddingModel, indexInfoList); err != nil {
@@ -543,6 +576,140 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledge
 	// Legacy: create VLM from inline config
 	model, err := vlm.NewVLMFromLegacyConfig(vlmCfg, s.ollamaService)
 	return model, vlmCfg, err
+}
+
+var errEmptyVLMArtifact = errors.New("empty VLM artifact output")
+
+func (s *ImageMultimodalService) predictVLMWithArtifact(
+	ctx context.Context,
+	model vlm.VLM,
+	payload types.ImageMultimodalPayload,
+	cfg types.VLMConfig,
+	imgBytes []byte,
+	prompt string,
+	stage string,
+) (string, artifact.Metadata, error) {
+	compute := func(callCtx context.Context) (string, error) {
+		text, err := model.Predict(callCtx, [][]byte{imgBytes}, prompt)
+		if err != nil {
+			return "", err
+		}
+		switch stage {
+		case "vlm_ocr":
+			text = sanitizeOCRText(text)
+		default:
+			text = strings.TrimSpace(text)
+		}
+		if text == "" {
+			return "", errEmptyVLMArtifact
+		}
+		return text, nil
+	}
+
+	if s.artifactRuntime == nil || payload.TenantID == 0 || !s.artifactStageEnabled(stage) {
+		text, err := compute(ctx)
+		if errors.Is(err, errEmptyVLMArtifact) {
+			return "", artifact.Metadata{Outcome: artifact.OutcomeBypass, ProviderCalls: 1}, nil
+		}
+		return text, artifact.Metadata{Outcome: artifact.OutcomeBypass, ProviderCalls: 1}, err
+	}
+
+	material, err := s.vlmArtifactKeyMaterial(stage, cfg, imgBytes, prompt)
+	if err != nil {
+		text, computeErr := compute(ctx)
+		if errors.Is(computeErr, errEmptyVLMArtifact) {
+			return "", artifact.Metadata{Outcome: artifact.OutcomeBypass, ProviderCalls: 1}, nil
+		}
+		return text, artifact.Metadata{Outcome: artifact.OutcomeBypass, ProviderCalls: 1}, computeErr
+	}
+	encoded, meta, err := s.artifactRuntime.GetOrCompute(ctx, payload.TenantID, material, func(callCtx context.Context) ([]byte, error) {
+		text, computeErr := compute(callCtx)
+		if computeErr != nil {
+			return nil, computeErr
+		}
+		return json.Marshal(text)
+	})
+	if errors.Is(err, errEmptyVLMArtifact) {
+		return "", meta, nil
+	}
+	if err != nil {
+		return "", meta, err
+	}
+	var text string
+	if err := json.Unmarshal(encoded, &text); err != nil {
+		return "", meta, err
+	}
+	if stage == "vlm_ocr" {
+		text = sanitizeOCRText(text)
+	} else {
+		text = strings.TrimSpace(text)
+	}
+	return text, meta, nil
+}
+
+func (s *ImageMultimodalService) artifactStageEnabled(stage string) bool {
+	if s.config == nil || s.config.ArtifactCache == nil || s.config.ArtifactCache.Stages == nil {
+		return true
+	}
+	enabled, ok := s.config.ArtifactCache.Stages[stage]
+	return !ok || enabled
+}
+
+func (s *ImageMultimodalService) vlmArtifactKeyMaterial(
+	stage string,
+	cfg types.VLMConfig,
+	imgBytes []byte,
+	prompt string,
+) (artifact.KeyMaterial, error) {
+	imageSum := sha256.Sum256(imgBytes)
+	promptDigest, err := artifact.CanonicalDigest(map[string]any{"prompt": prompt})
+	if err != nil {
+		return artifact.KeyMaterial{}, err
+	}
+	modelID := strings.TrimSpace(cfg.ModelID)
+	if modelID == "" {
+		modelID = strings.TrimSpace(cfg.ModelName)
+	}
+	return artifact.KeyMaterial{
+		KeyVersion: 1,
+		Stage:      stage,
+		DirectInputs: []artifact.InputDigest{
+			{Name: "image_bytes", Digest: hex.EncodeToString(imageSum[:])},
+			{Name: "prompt", Digest: promptDigest},
+		},
+		Processor: artifact.ProcessorIdentity{
+			Name:    "vlm.predict",
+			Version: "1",
+			Model:   modelID,
+		},
+		RenderedRequest: map[string]any{
+			"prompt": prompt,
+		},
+		EffectiveOptions: map[string]any{
+			"model_id":             cfg.ModelID,
+			"model_name":           cfg.ModelName,
+			"interface_type":       cfg.InterfaceType,
+			"base_url":             cfg.BaseURL,
+			"description_language": cfg.DescriptionLanguage,
+			"custom_instructions":  cfg.CustomInstructions,
+			"api_key":              cfg.APIKey,
+		},
+		CanonicalizerVersion: "vlm-text-v1",
+		OutputSchema:         "text.json-string.v1",
+	}, nil
+}
+
+func recordArtifactAccess(out types.JSONMap, prefix string, meta artifact.Metadata) {
+	if meta.Outcome == "" {
+		return
+	}
+	out[prefix+"_artifact_outcome"] = string(meta.Outcome)
+	if meta.ArtifactKey != "" {
+		out[prefix+"_artifact_key"] = meta.ArtifactKey
+	}
+	if meta.ProviderCalls > 0 {
+		out[prefix+"_provider_calls"] = meta.ProviderCalls
+	}
 }
 
 // resolveFileServiceForPayload resolves tenant/KB scoped file service for reading provider:// URLs.
@@ -688,6 +855,8 @@ func (s *ImageMultimodalService) enqueueKnowledgePostProcessTask(ctx context.Con
 		KnowledgeID:     payload.KnowledgeID,
 		KnowledgeBaseID: payload.KnowledgeBaseID,
 		Language:        payload.Language,
+		Attempt:         payload.Attempt,
+		GenerationID:    payload.GenerationID,
 	}
 	langfuse.InjectTracing(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)

@@ -118,9 +118,49 @@ func (s *chunkService) GetChunkByID(ctx context.Context, id string) (*types.Chun
 		})
 		return nil, err
 	}
+	if err := s.ensureChunkVisible(ctx, tenantID, chunk); err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"tenant_id":    tenantID,
+			"knowledge_id": chunk.KnowledgeID,
+			"chunk_id":     chunk.ID,
+		})
+		return nil, err
+	}
 
 	logger.Info(ctx, "Chunk retrieved successfully")
 	return chunk, nil
+}
+
+func (s *chunkService) isChunkVisible(ctx context.Context, tenantID uint64, chunk *types.Chunk) (bool, error) {
+	if chunk == nil {
+		return false, nil
+	}
+	if s.knowledgeRepo == nil {
+		return true, nil
+	}
+	knowledge, err := s.knowledgeRepo.GetKnowledgeByID(ctx, tenantID, chunk.KnowledgeID)
+	if err != nil {
+		return false, err
+	}
+	if knowledge.ActiveGenerationID == "" {
+		return chunk.GenerationID == "", nil
+	}
+	return chunk.GenerationID == knowledge.ActiveGenerationID, nil
+}
+
+func (s *chunkService) ensureChunkVisible(ctx context.Context, tenantID uint64, chunk *types.Chunk) error {
+	visible, err := s.isChunkVisible(ctx, tenantID, chunk)
+	if err != nil {
+		return err
+	}
+	if !visible {
+		if chunk != nil {
+			logger.Warnf(ctx, "Chunk is not in active generation, ID: %s, knowledge ID: %s",
+				chunk.ID, chunk.KnowledgeID)
+		}
+		return ErrChunkNotFound
+	}
+	return nil
 }
 
 // GetChunkByIDOnly retrieves a chunk by ID without tenant filter (for permission resolution).
@@ -138,8 +178,9 @@ func (s *chunkService) GetChunkByIDOnly(ctx context.Context, id string) (*types.
 	return chunk, nil
 }
 
-// ListChunksByKnowledgeID lists all chunks for a knowledge ID
-// This method retrieves all chunks belonging to a specific knowledge document
+// ListChunksByKnowledgeID lists chunks visible for a knowledge ID.
+// Generation-scoped documents return only the active generation; legacy
+// documents return legacy chunks whose generation_id is empty.
 // Parameters:
 //   - ctx: Context with authentication and request information
 //   - knowledgeID: ID of the knowledge document
@@ -154,7 +195,7 @@ func (s *chunkService) ListChunksByKnowledgeID(ctx context.Context, knowledgeID 
 	tenantID := types.MustTenantIDFromContext(ctx)
 	logger.Infof(ctx, "Tenant ID: %d", tenantID)
 
-	chunks, err := s.chunkRepository.ListChunksByKnowledgeID(ctx, tenantID, knowledgeID)
+	chunks, err := s.chunkRepository.ListActiveChunksByKnowledgeID(ctx, tenantID, knowledgeID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"knowledge_id": knowledgeID,
@@ -385,6 +426,9 @@ func (s *chunkService) UpdateDocumentChunk(
 	tenantID := types.MustTenantIDFromContext(ctx)
 	chunk, err := s.chunkRepository.GetChunkByID(ctx, tenantID, chunkID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.ensureChunkVisible(ctx, tenantID, chunk); err != nil {
 		return nil, err
 	}
 	if chunk.ChunkType != types.ChunkTypeText {
@@ -667,12 +711,12 @@ func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) e
 	if err != nil {
 		return err
 	}
-	items := []*types.IndexInfo{{
+	items := []*types.IndexInfo{applyChunkGenerationIndexInfo(&types.IndexInfo{
 		Content: buildKnowledgeIndexContent(knowledge, chunk.EmbeddingContent()), SourceID: chunk.ID,
 		SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
 		KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
 		KnowledgeType: kb.Type, IsEnabled: true,
-	}}
+	}, chunk)}
 	meta, err := chunk.DocumentMetadata()
 	if err != nil {
 		return err
@@ -682,12 +726,12 @@ func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) e
 			if strings.TrimSpace(question.Question) == "" {
 				continue
 			}
-			items = append(items, &types.IndexInfo{
+			items = append(items, applyChunkGenerationIndexInfo(&types.IndexInfo{
 				Content: buildKnowledgeIndexContent(knowledge, question.Question), SourceID: types.GeneratedQuestionSourceID(chunk.ID, question.ID),
 				SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
 				KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
 				KnowledgeType: kb.Type, IsEnabled: true,
-			})
+			}, chunk))
 		}
 	}
 	return engine.BatchIndex(ctx, embedder, items)
@@ -700,8 +744,12 @@ func (s *chunkService) UpsertGeneratedQuestion(
 	if question == "" {
 		return nil, fmt.Errorf("question cannot be empty")
 	}
-	chunk, err := s.chunkRepository.GetChunkByID(ctx, types.MustTenantIDFromContext(ctx), chunkID)
+	tenantID := types.MustTenantIDFromContext(ctx)
+	chunk, err := s.chunkRepository.GetChunkByID(ctx, tenantID, chunkID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.ensureChunkVisible(ctx, tenantID, chunk); err != nil {
 		return nil, err
 	}
 	meta, err := chunk.DocumentMetadata()
@@ -763,6 +811,9 @@ func (s *chunkService) DeleteGeneratedQuestion(ctx context.Context, chunkID stri
 			"tenant_id": tenantID,
 		})
 		return fmt.Errorf("failed to get chunk: %w", err)
+	}
+	if err := s.ensureChunkVisible(ctx, tenantID, chunk); err != nil {
+		return err
 	}
 
 	// 2. Parse the metadata

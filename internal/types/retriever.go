@@ -58,6 +58,10 @@ type RetrieveParams struct {
 	Threshold float64
 	// Knowledge type (e.g., "faq", "manual") - determines which index to use
 	KnowledgeType string
+	// GenerationIDs restricts retrieval to active generation snapshots.
+	GenerationIDs []string
+	// VisibilityKeys are backend metadata filters derived from knowledge and generation IDs.
+	VisibilityKeys []string
 	// Additional parameters, different retrievers may require different parameters
 	AdditionalParams map[string]interface{}
 	// Retriever type
@@ -96,6 +100,10 @@ type IndexWithScore struct {
 	MatchType MatchType
 	// IsEnabled
 	IsEnabled bool
+	// GenerationID is the generation snapshot associated with the hit.
+	GenerationID string
+	// VisibilityKey is knowledgeID:generationID for strict post-filtering.
+	VisibilityKey string
 }
 
 // GetScore returns the score for ScoreComparable interface

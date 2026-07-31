@@ -19,32 +19,38 @@ import (
 // KnowledgePostProcessService acts as an orchestrator for all post-processing tasks
 // after a document has been parsed and split into chunks (including multimodal OCR/Caption).
 type KnowledgePostProcessService struct {
-	knowledgeRepo interfaces.KnowledgeRepository
-	kbService     interfaces.KnowledgeBaseService
-	chunkService  interfaces.ChunkService
-	taskEnqueuer  interfaces.TaskEnqueuer
-	pendingRepo   interfaces.TaskPendingOpsRepository
-	redisClient   *redis.Client
-	spanTracker   SpanTracker
+	knowledgeRepo  interfaces.KnowledgeRepository
+	generationRepo interfaces.KnowledgeGenerationRepository
+	kbService      interfaces.KnowledgeBaseService
+	chunkService   interfaces.ChunkService
+	chunkRepo      interfaces.ChunkRepository
+	taskEnqueuer   interfaces.TaskEnqueuer
+	pendingRepo    interfaces.TaskPendingOpsRepository
+	redisClient    *redis.Client
+	spanTracker    SpanTracker
 }
 
 func NewKnowledgePostProcessService(
 	knowledgeRepo interfaces.KnowledgeRepository,
+	generationRepo interfaces.KnowledgeGenerationRepository,
 	kbService interfaces.KnowledgeBaseService,
 	chunkService interfaces.ChunkService,
+	chunkRepo interfaces.ChunkRepository,
 	taskEnqueuer interfaces.TaskEnqueuer,
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	redisClient *redis.Client,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	return &KnowledgePostProcessService{
-		knowledgeRepo: knowledgeRepo,
-		kbService:     kbService,
-		chunkService:  chunkService,
-		taskEnqueuer:  taskEnqueuer,
-		pendingRepo:   pendingRepo,
-		redisClient:   redisClient,
-		spanTracker:   spanTracker,
+		knowledgeRepo:  knowledgeRepo,
+		generationRepo: generationRepo,
+		kbService:      kbService,
+		chunkService:   chunkService,
+		chunkRepo:      chunkRepo,
+		taskEnqueuer:   taskEnqueuer,
+		pendingRepo:    pendingRepo,
+		redisClient:    redisClient,
+		spanTracker:    spanTracker,
 	}
 }
 
@@ -135,6 +141,18 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 			"knowledge "+knowledge.ParseStatus+" before postprocess started")
 		return nil
 	}
+	if attemptSuperseded(ctx, s.tracker(), payload.KnowledgeID, attempt) {
+		logger.Infof(ctx, "[KnowledgePostProcess] Attempt %d superseded for %s, skipping stale post-process",
+			attempt, payload.KnowledgeID)
+		s.tracker().SkipSpan(ctx, postSpan, "attempt superseded")
+		return nil
+	}
+	if payload.GenerationID != "" &&
+		!generationWriteAllowed(ctx, s.generationRepo, payload.TenantID, payload.KnowledgeID,
+			payload.GenerationID, attempt, "postprocess") {
+		s.tracker().SkipSpan(ctx, postSpan, "generation write not allowed")
+		return nil
+	}
 
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
 	if err != nil || kb == nil {
@@ -145,7 +163,12 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	eff := ResolveProcessConfig(kb, processOverrides)
 
 	// 2. Fetch all chunks
-	chunks, err := s.chunkService.ListChunksByKnowledgeID(ctx, payload.KnowledgeID)
+	var chunks []*types.Chunk
+	if payload.GenerationID != "" && s.chunkRepo != nil {
+		chunks, err = s.chunkRepo.ListGenerationChunks(ctx, payload.TenantID, payload.KnowledgeID, payload.GenerationID)
+	} else {
+		chunks, err = s.chunkService.ListChunksByKnowledgeID(ctx, payload.KnowledgeID)
+	}
 	if err != nil {
 		return fmt.Errorf("list chunks for knowledge %s: %w", payload.KnowledgeID, err)
 	}
@@ -176,7 +199,8 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	willSpawnSummary := len(textChunks) > 0
 	willSpawnQuestion := willSpawnSummary && kb.NeedsEmbeddingModel() &&
 		eff.QuestionGenerationConfig.Enabled
-	willSpawnWiki := kb.IndexingStrategy.WikiEnabled && len(textChunks) > 0
+	generationWikiDeferred := payload.GenerationID != "" && kb.IndexingStrategy.WikiEnabled && len(textChunks) > 0
+	willSpawnWiki := kb.IndexingStrategy.WikiEnabled && len(textChunks) > 0 && !generationWikiDeferred
 
 	// Question generation now fans out one subtask per plain text chunk
 	// (mirroring the graph-extract per-chunk pattern) so each chunk's LLM
@@ -222,9 +246,10 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	// also persists the pending Wiki op in the same transaction.
 	enteredFinalizing := false
 	wikiSlotOwned := false
+	deferredWikiSeeded := false
 
 	switch {
-	case knowledge.ParseStatus == types.ParseStatusFinalizing && kb.IndexingStrategy.WikiEnabled:
+	case knowledge.ParseStatus == types.ParseStatusFinalizing && kb.IndexingStrategy.WikiEnabled && payload.GenerationID == "":
 		// A previous delivery may have persisted the Wiki op but failed to
 		// enqueue its KB-scoped trigger. Retry only the trigger: appending a
 		// second pending op would duplicate durable work and its finalizer.
@@ -258,6 +283,28 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	case expectedSubtasks == 0:
 		// Nothing to enrich — fast path keeps the previous behavior so
 		// users without summary/question/graph see 'completed' immediately.
+		if generationWikiDeferred {
+			if err := s.seedDeferredGenerationWikiOp(ctx, payload, attempt); err != nil {
+				s.tracker().FailSpan(ctx, postSpan, "WIKI_PENDING_OP_SEED_FAILED", err.Error(), err)
+				return err
+			}
+			deferredWikiSeeded = true
+		}
+		if payload.GenerationID != "" {
+			activated, err := activateGenerationIfReady(ctx, s.generationRepo, s.tracker(), payload.KnowledgeID,
+				payload.GenerationID, attempt, "postprocess_no_subtasks")
+			if err != nil {
+				s.tracker().FailSpan(ctx, postSpan, "GENERATION_ACTIVATION_FAILED", err.Error(), err)
+				return fmt.Errorf("activate generation %s: %w", payload.GenerationID, err)
+			} else if activated && generationWikiDeferred {
+				if hook := wikiTriggerAfterActivation(s.taskEnqueuer, payload.TenantID, payload.KnowledgeBaseID, payload.GenerationID); hook != nil {
+					hook(ctx)
+				}
+			} else if !activated {
+				s.tracker().SkipSpan(ctx, postSpan, "generation activation skipped")
+				return nil
+			}
+		}
 		updates := map[string]interface{}{
 			"parse_status": types.ParseStatusCompleted,
 			"updated_at":   time.Now(),
@@ -284,6 +331,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 			}
 			pendingOp, buildErr := newWikiIngestPendingOp(
 				ctx, payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID,
+				payload.GenerationID, attempt,
 			)
 			if buildErr != nil {
 				return buildErr
@@ -304,6 +352,13 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		}
 		if promoted {
 			enteredFinalizing = true
+			if generationWikiDeferred {
+				if err := s.seedDeferredGenerationWikiOp(ctx, payload, attempt); err != nil {
+					s.tracker().FailSpan(ctx, postSpan, "WIKI_PENDING_OP_SEED_FAILED", err.Error(), err)
+					return err
+				}
+				deferredWikiSeeded = true
+			}
 			// Reflect summary status separately so the UI shows the
 			// summary as queued for users who already had it visible.
 			summaryStatus := types.SummaryStatusNone
@@ -373,7 +428,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		logger.Infof(ctx, "[KnowledgePostProcess] Spawning Graph RAG extract tasks for %d text-like chunks", len(textChunks))
 		for i, chunk := range textChunks {
 			ok, err := NewChunkExtractTask(ctx, s.taskEnqueuer, payload.TenantID, chunk.ID, kb.SummaryModelID,
-				payload.KnowledgeID, attempt, i)
+				payload.KnowledgeID, attempt, payload.GenerationID, i)
 			if err != nil {
 				logger.Errorf(ctx, "[KnowledgePostProcess] Failed to create chunk extract task for %s: %v", chunk.ID, err)
 			}
@@ -434,19 +489,23 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 			actualOwned++
 		}
 		if shortfall := plannedOwned - actualOwned; shortfall > 0 {
+			var afterActivate func(context.Context)
+			if generationWikiDeferred {
+				afterActivate = wikiTriggerAfterActivation(
+					s.taskEnqueuer, payload.TenantID, payload.KnowledgeBaseID, payload.GenerationID)
+			}
 			logger.Warnf(ctx,
 				"[KnowledgePostProcess] Releasing %d un-enqueued subtask slot(s) for %s (planned=%d actual=%d)",
 				shortfall, payload.KnowledgeID, plannedOwned, actualOwned)
 			for i := 0; i < shortfall; i++ {
 				rctx, cancel := context.WithTimeout(
 					context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
-				_, _, err := s.knowledgeRepo.FinalizeSubtask(rctx, payload.KnowledgeID)
+				finalizeGenerationSubtaskDetachedWithHook(
+					rctx, s.knowledgeRepo, s.generationRepo, s.tracker(), payload.KnowledgeID,
+					fmt.Sprintf("postprocess_shortfall[%d]", i), payload.GenerationID, attempt,
+					nil, false, true, afterActivate,
+				)
 				cancel()
-				if err != nil {
-					logger.Warnf(ctx, "[KnowledgePostProcess] Failed to release subtask slot for %s: %v",
-						payload.KnowledgeID, err)
-					break
-				}
 			}
 		}
 	}
@@ -458,6 +517,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		"enqueued_question_count": enqueuedQuestionCount,
 		"enqueued_wiki":           wikiSlotOwned && wikiEnqueueErr == nil,
 		"wiki_slot_owned":         wikiSlotOwned,
+		"deferred_wiki_seeded":    deferredWikiSeeded,
 		"enqueued_graph":          enqueuedGraphCount > 0,
 		"enqueued_graph_count":    enqueuedGraphCount,
 	}
@@ -475,6 +535,27 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	return nil
 }
 
+func (s *KnowledgePostProcessService) seedDeferredGenerationWikiOp(
+	ctx context.Context,
+	payload types.KnowledgePostProcessPayload,
+	attempt int,
+) error {
+	if s.pendingRepo == nil {
+		return errors.New("generation wiki post-process requires pending op repository")
+	}
+	pendingOp, err := newWikiIngestPendingOp(
+		ctx, payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID,
+		payload.GenerationID, attempt,
+	)
+	if err != nil {
+		return err
+	}
+	if _, err := enqueueWikiPendingOp(ctx, s.pendingRepo, pendingOp); err != nil {
+		return fmt.Errorf("seed deferred generation wiki op: %w", err)
+	}
+	return nil
+}
+
 // enqueueSummaryGenerationTask enqueues the summary task. Returns true only
 // when a task was actually placed on the queue, so the caller can release the
 // seeded pending-subtask slot when enqueue is skipped or fails.
@@ -489,6 +570,7 @@ func (s *KnowledgePostProcessService) enqueueSummaryGenerationTask(ctx context.C
 		KnowledgeID:     payload.KnowledgeID,
 		Language:        payload.Language,
 		Attempt:         attempt,
+		GenerationID:    payload.GenerationID,
 	}
 	langfuse.InjectTracing(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)
@@ -574,6 +656,7 @@ func (s *KnowledgePostProcessService) enqueueQuestionGenerationTasks(
 			QuestionCount:   questionCount,
 			Language:        payload.Language,
 			Attempt:         attempt,
+			GenerationID:    payload.GenerationID,
 			ChunkIDs:        chunkIDs,
 			BatchIndex:      batchIndex,
 		}

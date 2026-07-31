@@ -22,6 +22,8 @@ const (
 	fieldChunkID          = "chunk_id"
 	fieldKnowledgeID      = "knowledge_id"
 	fieldKnowledgeBaseID  = "knowledge_base_id"
+	fieldGenerationID     = "generation_id"
+	fieldVisibilityKey    = "visibility_key"
 	fieldTagID            = "tag_id"
 	fieldEmbedding        = "embedding"
 	fieldIsEnabled        = "is_enabled"
@@ -87,7 +89,7 @@ func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) 
 		}
 
 		// Create payload indexes for filtering
-		indexFields := []string{fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldSourceID}
+		indexFields := []string{fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldGenerationID, fieldVisibilityKey, fieldSourceID}
 		for _, field := range indexFields {
 			_, err = q.client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{
 				CollectionName: collectionName,
@@ -143,6 +145,10 @@ func (q *qdrantRepository) EngineType() types.RetrieverEngineType {
 
 func (q *qdrantRepository) Support() []types.RetrieverType {
 	return []types.RetrieverType{types.KeywordsRetrieverType, types.VectorRetrieverType}
+}
+
+func (q *qdrantRepository) SupportsGenerationFilter() bool {
+	return true
 }
 
 // EstimateStorageSize calculates the estimated storage size for a list of indices
@@ -507,6 +513,12 @@ func (q *qdrantRepository) getBaseFilter(params types.RetrieveParams) *qdrant.Fi
 	if len(params.TagIDs) > 0 {
 		must = append(must, qdrant.NewMatchKeywords(fieldTagID, params.TagIDs...))
 	}
+	if len(params.GenerationIDs) > 0 {
+		must = append(must, qdrant.NewMatchKeywords(fieldGenerationID, params.GenerationIDs...))
+	}
+	if len(params.VisibilityKeys) > 0 {
+		must = append(must, qdrant.NewMatchKeywords(fieldVisibilityKey, params.VisibilityKeys...))
+	}
 
 	if len(params.ExcludeKnowledgeIDs) > 0 {
 		mustNot = append(mustNot, qdrant.NewMatchKeywords(fieldKnowledgeID, params.ExcludeKnowledgeIDs...))
@@ -595,6 +607,8 @@ func (q *qdrantRepository) VectorRetrieve(ctx context.Context,
 				ChunkID:         payload[fieldChunkID].GetStringValue(),
 				KnowledgeID:     payload[fieldKnowledgeID].GetStringValue(),
 				KnowledgeBaseID: payload[fieldKnowledgeBaseID].GetStringValue(),
+				GenerationID:    payloadString(payload, fieldGenerationID),
+				VisibilityKey:   payloadString(payload, fieldVisibilityKey),
 				TagID:           payload[fieldTagID].GetStringValue(),
 			},
 			Score: float64(point.Score),
@@ -688,6 +702,8 @@ func (q *qdrantRepository) KeywordsRetrieve(ctx context.Context,
 					ChunkID:         payload[fieldChunkID].GetStringValue(),
 					KnowledgeID:     payload[fieldKnowledgeID].GetStringValue(),
 					KnowledgeBaseID: payload[fieldKnowledgeBaseID].GetStringValue(),
+					GenerationID:    payloadString(payload, fieldGenerationID),
+					VisibilityKey:   payloadString(payload, fieldVisibilityKey),
 					TagID:           payload[fieldTagID].GetStringValue(),
 				},
 				Score: 1.0,
@@ -876,10 +892,19 @@ func createPayload(embedding *QdrantVectorEmbedding) map[string]*qdrant.Value {
 		fieldChunkID:         embedding.ChunkID,
 		fieldKnowledgeID:     embedding.KnowledgeID,
 		fieldKnowledgeBaseID: embedding.KnowledgeBaseID,
+		fieldGenerationID:    embedding.GenerationID,
+		fieldVisibilityKey:   embedding.VisibilityKey,
 		fieldTagID:           embedding.TagID,
 		fieldIsEnabled:       embedding.IsEnabled,
 	}
 	return qdrant.NewValueMap(payload)
+}
+
+func payloadString(payload map[string]*qdrant.Value, field string) string {
+	if v, ok := payload[field]; ok && v != nil {
+		return v.GetStringValue()
+	}
+	return ""
 }
 
 func buildRetrieveResult(results []*types.IndexWithScore, retrieverType types.RetrieverType) []*types.RetrieveResult {
@@ -935,6 +960,8 @@ func toQdrantVectorEmbedding(embedding *types.IndexInfo, additionalParams map[st
 		ChunkID:         embedding.ChunkID,
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
+		GenerationID:    embedding.GenerationID,
+		VisibilityKey:   embedding.VisibilityKey,
 		TagID:           embedding.TagID,
 		IsEnabled:       embedding.IsEnabled,
 	}
@@ -960,6 +987,8 @@ func fromQdrantVectorEmbedding(id string,
 		ChunkID:         embedding.ChunkID,
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
+		GenerationID:    embedding.GenerationID,
+		VisibilityKey:   embedding.VisibilityKey,
 		TagID:           embedding.TagID,
 		Content:         embedding.Content,
 		Score:           embedding.Score,

@@ -72,9 +72,11 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 			go func(knowledgeBaseID, knowledgeID string) {
 				defer wg.Done()
 
+				generationID := p.activeGenerationID(ctx, knowledgeID)
 				graph, err := p.graphRepo.SearchNode(ctx, types.NameSpace{
 					KnowledgeBase: knowledgeBaseID,
 					Knowledge:     knowledgeID,
+					Generation:    generationID,
 				}, entity)
 				if err != nil {
 					logger.Errorf(ctx, "Failed to search entity in Knowledge %s: %v", knowledgeID, err)
@@ -103,9 +105,9 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 			go func(knowledgeBaseID string) {
 				defer wg.Done()
 
-				graph, err := p.graphRepo.SearchNode(ctx, types.NameSpace{KnowledgeBase: knowledgeBaseID}, entity)
+				graph, err := p.searchKnowledgeBaseActiveGraph(ctx, knowledgeBaseID, entity)
 				if err != nil {
-					logger.Errorf(ctx, "Failed to search entity in KB %s: %v", knowledgeBaseID, err)
+					logger.Errorf(ctx, "Failed to search active generation entities in KB %s: %v", knowledgeBaseID, err)
 					return
 				}
 
@@ -182,6 +184,48 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 		chatManage.SessionID,
 	)
 	return next()
+}
+
+func (p *PluginSearchEntity) searchKnowledgeBaseActiveGraph(
+	ctx context.Context,
+	knowledgeBaseID string,
+	entity []string,
+) (*types.GraphData, error) {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	knowledges, err := p.knowledgeRepo.ListKnowledgeByKnowledgeBaseID(ctx, tenantID, knowledgeBaseID)
+	if err != nil {
+		return nil, err
+	}
+	result := &types.GraphData{}
+	for _, knowledge := range knowledges {
+		if knowledge == nil {
+			continue
+		}
+		graph, err := p.graphRepo.SearchNode(ctx, types.NameSpace{
+			KnowledgeBase: knowledgeBaseID,
+			Knowledge:     knowledge.ID,
+			Generation:    knowledge.ActiveGenerationID,
+		}, entity)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to search entity in Knowledge %s: %v", knowledge.ID, err)
+			continue
+		}
+		result.Node = append(result.Node, graph.Node...)
+		result.Relation = append(result.Relation, graph.Relation...)
+	}
+	return result, nil
+}
+
+func (p *PluginSearchEntity) activeGenerationID(ctx context.Context, knowledgeID string) string {
+	if p.knowledgeRepo == nil || knowledgeID == "" {
+		return ""
+	}
+	knowledge, err := p.knowledgeRepo.GetKnowledgeByID(ctx, types.MustTenantIDFromContext(ctx), knowledgeID)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to resolve active generation for Knowledge %s: %v", knowledgeID, err)
+		return ""
+	}
+	return knowledge.ActiveGenerationID
 }
 
 // filterSeenChunk filters seen chunks from the graph

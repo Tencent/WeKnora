@@ -78,6 +78,7 @@ CREATE TABLE knowledges (
     storage_size BIGINT NOT NULL DEFAULT 0,
     metadata JSON,
     custom_metadata JSON NOT NULL,
+    active_generation_id VARCHAR(36),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL,
@@ -86,6 +87,7 @@ CREATE TABLE knowledges (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE INDEX idx_knowledges_tenant_id ON knowledges(tenant_id, knowledge_base_id);
+CREATE INDEX idx_knowledges_active_generation ON knowledges(active_generation_id);
 
 CREATE TABLE sessions (
     id VARCHAR(36) PRIMARY KEY,
@@ -202,6 +204,9 @@ CREATE TABLE chunks (
     image_info TEXT,
     relation_chunks JSON,
     indirect_relation_chunks JSON,
+    generation_id VARCHAR(36),
+    logical_chunk_key VARCHAR(64),
+    artifact_digest VARCHAR(64),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL
@@ -210,6 +215,49 @@ CREATE TABLE chunks (
 CREATE INDEX idx_chunks_tenant_knowledge ON chunks(tenant_id, knowledge_id);
 CREATE INDEX idx_chunks_parent_id ON chunks(parent_chunk_id);
 CREATE INDEX idx_chunks_chunk_type ON chunks(chunk_type);
+CREATE INDEX idx_chunks_active_generation ON chunks(tenant_id, knowledge_id, generation_id, chunk_type, chunk_index);
+CREATE UNIQUE INDEX uk_chunks_generation_logical ON chunks(tenant_id, knowledge_id, generation_id, logical_chunk_key);
+
+CREATE TABLE knowledge_generations (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    knowledge_id VARCHAR(36) NOT NULL,
+    attempt INTEGER NOT NULL,
+    base_generation_id VARCHAR(36),
+    state VARCHAR(20) NOT NULL,
+    source_digest VARCHAR(64) NOT NULL,
+    pipeline_digest VARCHAR(64) NOT NULL,
+    manifest_digest VARCHAR(64),
+    snapshot_description TEXT,
+    error_message TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ready_at TIMESTAMP NULL DEFAULT NULL,
+    activated_at TIMESTAMP NULL DEFAULT NULL,
+    retired_at TIMESTAMP NULL DEFAULT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_knowledge_generation_attempt (tenant_id, knowledge_id, attempt),
+    KEY idx_knowledge_generations_lookup (tenant_id, knowledge_id, state)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE processing_artifacts (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    stage VARCHAR(64) NOT NULL,
+    key_version INTEGER NOT NULL,
+    artifact_key VARCHAR(64) NOT NULL,
+    processor_digest VARCHAR(64) NOT NULL,
+    output_digest VARCHAR(64) NOT NULL,
+    output_schema VARCHAR(64) NOT NULL,
+    codec VARCHAR(20) NOT NULL,
+    payload LONGBLOB,
+    payload_checksum VARCHAR(64) NOT NULL,
+    payload_size BIGINT NOT NULL,
+    hit_count BIGINT NOT NULL DEFAULT 0,
+    last_hit_at TIMESTAMP NULL DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NULL DEFAULT NULL,
+    UNIQUE KEY uk_processing_artifact_key (tenant_id, stage, key_version, artifact_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE chunk_revisions (
     id VARCHAR(36) PRIMARY KEY,

@@ -40,13 +40,14 @@ type citationBatchResult struct {
 // WikiChunkCitationPrompt. Mirrors extractedItem but also carries a "type"
 // tag because this prompt emits entities and concepts in a single array.
 type newSlugFromCitation struct {
-	Type         string   `json:"type"`
-	Name         string   `json:"name"`
-	Slug         string   `json:"slug"`
-	Aliases      []string `json:"aliases"`
-	Description  string   `json:"description"`
-	Details      string   `json:"details"`
-	SourceChunks []string `json:"source_chunks"`
+	Type            string            `json:"type"`
+	Name            string            `json:"name"`
+	Slug            string            `json:"slug"`
+	Aliases         []string          `json:"aliases"`
+	Description     string            `json:"description"`
+	Details         string            `json:"details"`
+	SourceChunks    []string          `json:"source_chunks"`
+	SourceChunkRefs []LogicalChunkRef `json:"source_chunk_refs,omitempty"`
 }
 
 // citationPipelineOutcome carries the raw numbers produced by the Pass
@@ -250,9 +251,9 @@ func renderChunksXML(batch chunkBatch) string {
 // batches are merged into a single slug → union(chunk_id) map, and any
 // "new_slugs" that Pass 0 missed are collected separately.
 //
-// Returns (citations, newSlugs, batchCount). citations is keyed by slug and
-// contains real chunk UUIDs (already translated from batch handles). newSlugs
-// likewise carry real chunk UUIDs in SourceChunks.
+// Returns (citations, logicalCitations, newSlugs, batchCount). citations is
+// keyed by slug and contains current-generation physical chunk IDs for live
+// reduce. logicalCitations carries ownership-free refs for reusable map output.
 func (s *wikiIngestService) classifyChunkCitations(
 	ctx context.Context,
 	chatModel chat.Chat,
@@ -260,16 +261,17 @@ func (s *wikiIngestService) classifyChunkCitations(
 	chunks []*types.Chunk,
 	lang string,
 	batchCtx *WikiBatchContext,
-) (map[string][]string, []newSlugFromCitation, int) {
+) (map[string][]string, map[string][]LogicalChunkRef, []newSlugFromCitation, int) {
 	batches := splitChunksIntoCitationBatches(chunks)
 	if len(batches) == 0 || strings.TrimSpace(candidatesXML) == "" {
-		return map[string][]string{}, nil, 0
+		return map[string][]string{}, map[string][]LogicalChunkRef{}, nil, 0
 	}
 
 	// Merge state. Using sets keyed by (slug, chunkID) to dedup across
 	// batches; order is re-imposed from chunk ChunkIndex at the end.
 	var mu sync.Mutex
 	citationSet := make(map[string]map[string]bool) // slug → set of real chunk IDs
+	logicalCitationSet := make(map[string]map[LogicalChunkRef]bool)
 	var newSlugsAll []newSlugFromCitation
 
 	eg, ectx := errgroup.WithContext(ctx)
@@ -300,6 +302,12 @@ func (s *wikiIngestService) classifyChunkCitations(
 			// Translate handles → real chunk UUIDs; drop unknown handles.
 			mu.Lock()
 			defer mu.Unlock()
+			chunkByID := make(map[string]*types.Chunk, len(batch.chunks))
+			for _, chunk := range batch.chunks {
+				if chunk != nil {
+					chunkByID[chunk.ID] = chunk
+				}
+			}
 
 			for slug, handleList := range parsed.Citations {
 				if slug == "" {
@@ -317,6 +325,14 @@ func (s *wikiIngestService) classifyChunkCitations(
 						continue
 					}
 					set[realID] = true
+					if ref, ok := logicalRefForChunk(chunkByID[realID]); ok {
+						refSet, ok := logicalCitationSet[slug]
+						if !ok {
+							refSet = make(map[LogicalChunkRef]bool)
+							logicalCitationSet[slug] = refSet
+						}
+						refSet[ref] = true
+					}
 				}
 			}
 
@@ -325,12 +341,17 @@ func (s *wikiIngestService) classifyChunkCitations(
 					continue
 				}
 				real := make([]string, 0, len(ns.SourceChunks))
+				logicalRefs := make([]LogicalChunkRef, 0, len(ns.SourceChunks))
 				for _, handle := range ns.SourceChunks {
 					if id, ok := batch.handles.Resolve(handle); ok {
 						real = append(real, id)
+						if ref, ok := logicalRefForChunk(chunkByID[id]); ok {
+							logicalRefs = append(logicalRefs, ref)
+						}
 					}
 				}
 				ns.SourceChunks = real
+				ns.SourceChunkRefs = logicalRefs
 				newSlugsAll = append(newSlugsAll, ns)
 			}
 			return nil
@@ -356,7 +377,37 @@ func (s *wikiIngestService) classifyChunkCitations(
 		out[slug] = ids
 	}
 
-	return out, newSlugsAll, len(batches)
+	logicalOut := make(map[string][]LogicalChunkRef, len(logicalCitationSet))
+	for slug, set := range logicalCitationSet {
+		refs := make([]LogicalChunkRef, 0, len(set))
+		for ref := range set {
+			refs = append(refs, ref)
+		}
+		sort.SliceStable(refs, func(i, j int) bool {
+			if refs[i].LogicalChunkKey == refs[j].LogicalChunkKey {
+				return refs[i].ContentDigest < refs[j].ContentDigest
+			}
+			return refs[i].LogicalChunkKey < refs[j].LogicalChunkKey
+		})
+		logicalOut[slug] = refs
+	}
+
+	return out, logicalOut, newSlugsAll, len(batches)
+}
+
+func logicalRefForChunk(chunk *types.Chunk) (LogicalChunkRef, bool) {
+	if chunk == nil || chunk.LogicalChunkKey == "" {
+		return LogicalChunkRef{}, false
+	}
+	digest := chunk.ArtifactDigest
+	if digest == "" {
+		var err error
+		digest, err = chunkArtifactDigest(chunk)
+		if err != nil {
+			return LogicalChunkRef{}, false
+		}
+	}
+	return LogicalChunkRef{LogicalChunkKey: chunk.LogicalChunkKey, ContentDigest: digest}, true
 }
 
 // resolveCitedChunks loads the content of every chunk referenced by the
@@ -449,6 +500,7 @@ func collectCitedChunkContent(chunkIDs []string, contentByID map[string]string) 
 func mergeCitationsIntoItems(
 	entities, concepts []extractedItem,
 	citations map[string][]string,
+	logicalCitations map[string][]LogicalChunkRef,
 	newSlugs []newSlugFromCitation,
 ) ([]extractedItem, []extractedItem, int) {
 	uncited := 0
@@ -456,6 +508,7 @@ func mergeCitationsIntoItems(
 	for i := range entities {
 		ids := citations[entities[i].Slug]
 		entities[i].SourceChunks = ids
+		entities[i].SourceChunkRefs = logicalCitations[entities[i].Slug]
 		if len(ids) == 0 {
 			uncited++
 		}
@@ -463,6 +516,7 @@ func mergeCitationsIntoItems(
 	for i := range concepts {
 		ids := citations[concepts[i].Slug]
 		concepts[i].SourceChunks = ids
+		concepts[i].SourceChunkRefs = logicalCitations[concepts[i].Slug]
 		if len(ids) == 0 {
 			uncited++
 		}
@@ -506,12 +560,13 @@ func mergeCitationsIntoItems(
 		if !ok {
 			existing = &mergedNew{
 				item: extractedItem{
-					Name:         ns.Name,
-					Slug:         ns.Slug,
-					Aliases:      append([]string(nil), ns.Aliases...),
-					Description:  ns.Description,
-					Details:      ns.Details,
-					SourceChunks: append([]string(nil), ns.SourceChunks...),
+					Name:            ns.Name,
+					Slug:            ns.Slug,
+					Aliases:         append([]string(nil), ns.Aliases...),
+					Description:     ns.Description,
+					Details:         ns.Details,
+					SourceChunks:    append([]string(nil), ns.SourceChunks...),
+					SourceChunkRefs: append([]LogicalChunkRef(nil), ns.SourceChunkRefs...),
 				},
 				typ: kind,
 			}
@@ -528,6 +583,16 @@ func mergeCitationsIntoItems(
 			if !seen[id] {
 				existing.item.SourceChunks = append(existing.item.SourceChunks, id)
 				seen[id] = true
+			}
+		}
+		seenRefs := make(map[LogicalChunkRef]bool, len(existing.item.SourceChunkRefs))
+		for _, ref := range existing.item.SourceChunkRefs {
+			seenRefs[ref] = true
+		}
+		for _, ref := range ns.SourceChunkRefs {
+			if !seenRefs[ref] {
+				existing.item.SourceChunkRefs = append(existing.item.SourceChunkRefs, ref)
+				seenRefs[ref] = true
 			}
 		}
 	}

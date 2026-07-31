@@ -17,7 +17,7 @@ func setupChunkTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.Chunk{}, &types.KnowledgeTag{}))
+	require.NoError(t, db.AutoMigrate(&types.Chunk{}, &types.Knowledge{}, &types.KnowledgeTag{}))
 	return db
 }
 
@@ -221,6 +221,13 @@ func TestListPagedChunksByKnowledgeID_FiltersEnabledState(t *testing.T) {
 	repo := NewChunkRepository(db)
 	ctx := context.Background()
 
+	require.NoError(t, db.Create(&types.Knowledge{
+		ID:              "faq-knowledge",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Type:            types.KnowledgeTypeFAQ,
+		ParseStatus:     types.ParseStatusCompleted,
+	}).Error)
 	enabledChunk := makeChunk("kb-1", "faq-knowledge", types.ChunkTypeFAQ)
 	disabledChunk := makeChunk("kb-1", "faq-knowledge", types.ChunkTypeFAQ)
 	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{enabledChunk, disabledChunk}))
@@ -245,6 +252,123 @@ func TestListPagedChunksByKnowledgeID_FiltersEnabledState(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), allTotal)
 	assert.Len(t, allChunks, 2)
+}
+
+func TestListPagedChunksByKnowledgeID_HidesBuildingGenerationChunks(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	knowledgeID := uuid.NewString()
+	activeGenerationID := uuid.NewString()
+	require.NoError(t, db.Create(&types.Knowledge{
+		ID:                 knowledgeID,
+		TenantID:           1,
+		KnowledgeBaseID:    "kb-1",
+		Type:               types.KnowledgeTypeManual,
+		ParseStatus:        types.ParseStatusCompleted,
+		ActiveGenerationID: activeGenerationID,
+	}).Error)
+
+	active := makeChunk("kb-1", knowledgeID, types.ChunkTypeText)
+	active.GenerationID = activeGenerationID
+	building := makeChunk("kb-1", knowledgeID, types.ChunkTypeText)
+	building.GenerationID = uuid.NewString()
+	legacy := makeChunk("kb-1", knowledgeID, types.ChunkTypeText)
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{active, building, legacy}))
+
+	got, total, err := repo.ListPagedChunksByKnowledgeID(
+		ctx, 1, knowledgeID, &types.Pagination{Page: 1, PageSize: 20},
+		[]types.ChunkType{types.ChunkTypeText}, nil, "", "", "", types.KnowledgeTypeManual, nil,
+	)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, got, 1)
+	assert.Equal(t, active.ID, got[0].ID)
+}
+
+func TestListPagedChunksByKnowledgeID_UsesLegacyChunksWhenKnowledgeHasNoActiveGeneration(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	knowledgeID := uuid.NewString()
+	require.NoError(t, db.Create(&types.Knowledge{
+		ID:              knowledgeID,
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Type:            types.KnowledgeTypeManual,
+		ParseStatus:     types.ParseStatusCompleted,
+	}).Error)
+
+	legacy := makeChunk("kb-1", knowledgeID, types.ChunkTypeText)
+	building := makeChunk("kb-1", knowledgeID, types.ChunkTypeText)
+	building.GenerationID = uuid.NewString()
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{legacy, building}))
+
+	got, total, err := repo.ListPagedChunksByKnowledgeID(
+		ctx, 1, knowledgeID, &types.Pagination{Page: 1, PageSize: 20},
+		[]types.ChunkType{types.ChunkTypeText}, nil, "", "", "", types.KnowledgeTypeManual, nil,
+	)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, got, 1)
+	assert.Equal(t, legacy.ID, got[0].ID)
+}
+
+func TestListActiveChunksByKnowledgeID_UsesLegacyChunksWhenKnowledgeHasNoActiveGeneration(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	knowledgeID := uuid.NewString()
+	require.NoError(t, db.Create(&types.Knowledge{
+		ID:              knowledgeID,
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Type:            types.KnowledgeTypeManual,
+		ParseStatus:     types.ParseStatusCompleted,
+	}).Error)
+
+	legacy := makeChunk("kb-1", knowledgeID, types.ChunkTypeText)
+	building := makeChunk("kb-1", knowledgeID, types.ChunkTypeText)
+	building.GenerationID = uuid.NewString()
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{legacy, building}))
+
+	got, err := repo.ListActiveChunksByKnowledgeID(ctx, 1, knowledgeID)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, legacy.ID, got[0].ID)
+}
+
+func TestListActiveChunksByKnowledgeID_HidesBuildingGenerationChunks(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	knowledgeID := uuid.NewString()
+	activeGenerationID := uuid.NewString()
+	buildingGenerationID := uuid.NewString()
+	require.NoError(t, db.Create(&types.Knowledge{
+		ID:                 knowledgeID,
+		TenantID:           1,
+		KnowledgeBaseID:    "kb-1",
+		Type:               types.KnowledgeTypeManual,
+		ParseStatus:        types.ParseStatusCompleted,
+		ActiveGenerationID: activeGenerationID,
+	}).Error)
+
+	active := makeChunk("kb-1", knowledgeID, types.ChunkTypeText)
+	active.GenerationID = activeGenerationID
+	building := makeChunk("kb-1", knowledgeID, types.ChunkTypeText)
+	building.GenerationID = buildingGenerationID
+	legacy := makeChunk("kb-1", knowledgeID, types.ChunkTypeText)
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{active, building, legacy}))
+
+	got, err := repo.ListActiveChunksByKnowledgeID(ctx, 1, knowledgeID)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, active.ID, got[0].ID)
 }
 
 func makeSuggestedFAQChunk(t *testing.T, kbID, knowledgeID, tagID, question string) *types.Chunk {

@@ -34,6 +34,27 @@ func TestBuildKnowledgeIndexContentWithoutTitleReturnsContent(t *testing.T) {
 	require.Equal(t, "Chunk body", buildKnowledgeIndexContent(nil, "Chunk body"))
 }
 
+func TestApplyChunkGenerationIndexInfoSetsVisibilityKey(t *testing.T) {
+	t.Parallel()
+	info := applyChunkGenerationIndexInfo(&types.IndexInfo{}, &types.Chunk{
+		KnowledgeID:  "knowledge-1",
+		GenerationID: "generation-2",
+	})
+
+	require.Equal(t, "generation-2", info.GenerationID)
+	require.Equal(t, "knowledge-1:generation-2", info.VisibilityKey)
+}
+
+func TestApplyChunkGenerationIndexInfoLeavesLegacyChunkUnchanged(t *testing.T) {
+	t.Parallel()
+	info := applyChunkGenerationIndexInfo(&types.IndexInfo{}, &types.Chunk{
+		KnowledgeID: "knowledge-1",
+	})
+
+	require.Empty(t, info.GenerationID)
+	require.Empty(t, info.VisibilityKey)
+}
+
 type metadataUpdateKnowledgeRepo struct {
 	interfaces.KnowledgeRepository
 	knowledge           *types.Knowledge

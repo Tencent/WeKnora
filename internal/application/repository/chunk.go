@@ -48,6 +48,9 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 		if chunk.IndexStatus == "" {
 			chunk.IndexStatus = "ready"
 		}
+		if chunk.GenerationID == "" && chunk.LogicalChunkKey == "" {
+			chunk.LogicalChunkKey = chunk.ID
+		}
 	}
 
 	db := r.db.WithContext(ctx)
@@ -159,6 +162,58 @@ func (r *chunkRepository) ListChunksByKnowledgeID(
 	return chunks, nil
 }
 
+func (r *chunkRepository) activeGenerationID(ctx context.Context, tenantID uint64, knowledgeID string) (string, error) {
+	var knowledge types.Knowledge
+	if err := r.db.WithContext(ctx).
+		Select("active_generation_id").
+		Where("tenant_id = ? AND id = ?", tenantID, knowledgeID).
+		First(&knowledge).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", ErrKnowledgeNotFound
+		}
+		return "", err
+	}
+	return knowledge.ActiveGenerationID, nil
+}
+
+// ListActiveChunksByKnowledgeID lists only chunks visible through the
+// knowledge row's active generation. Empty active_generation_id keeps legacy
+// behavior by returning only legacy chunks with empty generation_id.
+func (r *chunkRepository) ListActiveChunksByKnowledgeID(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+) ([]*types.Chunk, error) {
+	generationID, err := r.activeGenerationID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		return nil, err
+	}
+	query := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_id = ? AND chunk_type = ?", tenantID, knowledgeID, types.ChunkTypeText)
+	if generationID == "" {
+		query = query.Where("generation_id = '' OR generation_id IS NULL")
+	} else {
+		query = query.Where("generation_id = ?", generationID)
+	}
+	var chunks []*types.Chunk
+	if err := query.Order("chunk_index ASC").Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
+// ListGenerationChunks lists chunks for an exact generation snapshot.
+func (r *chunkRepository) ListGenerationChunks(
+	ctx context.Context, tenantID uint64, knowledgeID string, generationID string,
+) ([]*types.Chunk, error) {
+	var chunks []*types.Chunk
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_id = ? AND generation_id = ?", tenantID, knowledgeID, generationID).
+		Order("chunk_index ASC").
+		Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
 // ListPagedChunksByKnowledgeID lists chunks for a knowledge ID with pagination
 func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	ctx context.Context,
@@ -176,10 +231,19 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	var chunks []*types.Chunk
 	var total int64
 	keyword = strings.TrimSpace(keyword)
+	generationID, err := r.activeGenerationID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		return nil, 0, err
+	}
 
 	baseFilter := func(db *gorm.DB) *gorm.DB {
 		db = db.Where("tenant_id = ? AND knowledge_id = ? AND chunk_type IN (?) AND status in (?)",
 			tenantID, knowledgeID, chunkType, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)})
+		if generationID == "" {
+			db = db.Where("generation_id = '' OR generation_id IS NULL")
+		} else {
+			db = db.Where("generation_id = ?", generationID)
+		}
 		if len(tagIDs) > 0 {
 			db = db.Where("tag_id IN ?", tagIDs)
 		}
@@ -526,6 +590,15 @@ func (r *chunkRepository) DeleteChunks(ctx context.Context, tenantID uint64, ids
 func (r *chunkRepository) DeleteChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error {
 	return r.db.WithContext(ctx).Where(
 		"tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID,
+	).Delete(&types.Chunk{}).Error
+}
+
+// DeleteChunksByGenerationID deletes chunks scoped to one generation snapshot.
+func (r *chunkRepository) DeleteChunksByGenerationID(
+	ctx context.Context, tenantID uint64, knowledgeID string, generationID string,
+) error {
+	return r.db.WithContext(ctx).Where(
+		"tenant_id = ? AND knowledge_id = ? AND generation_id = ?", tenantID, knowledgeID, generationID,
 	).Delete(&types.Chunk{}).Error
 }
 

@@ -2,12 +2,15 @@ package retriever
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/artifact"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/utils"
@@ -42,19 +45,38 @@ var embeddingImagePayloadPatterns = []*regexp.Regexp{
 type KeywordsVectorHybridRetrieveEngineService struct {
 	indexRepository interfaces.RetrieveEngineRepository
 	engineType      types.RetrieverEngineType
+	artifactRuntime *artifact.Runtime
+}
+
+type KVHybridOption func(*KeywordsVectorHybridRetrieveEngineService)
+
+func WithArtifactRuntime(runtime *artifact.Runtime) KVHybridOption {
+	return func(v *KeywordsVectorHybridRetrieveEngineService) {
+		v.artifactRuntime = runtime
+	}
 }
 
 // NewKVHybridRetrieveEngine creates a new instance of the hybrid retrieval engine
 // KV stands for KeywordsVector
 func NewKVHybridRetrieveEngine(indexRepository interfaces.RetrieveEngineRepository,
 	engineType types.RetrieverEngineType,
+	opts ...KVHybridOption,
 ) interfaces.RetrieveEngineService {
-	return &KeywordsVectorHybridRetrieveEngineService{indexRepository: indexRepository, engineType: engineType}
+	service := &KeywordsVectorHybridRetrieveEngineService{indexRepository: indexRepository, engineType: engineType}
+	for _, opt := range opts {
+		opt(service)
+	}
+	return service
 }
 
 // EngineType returns the type of the retrieval engine
 func (v *KeywordsVectorHybridRetrieveEngineService) EngineType() types.RetrieverEngineType {
 	return v.engineType
+}
+
+func (v *KeywordsVectorHybridRetrieveEngineService) SupportsGenerationFilter() bool {
+	capability, ok := v.indexRepository.(interfaces.GenerationFilterCapability)
+	return ok && capability.SupportsGenerationFilter()
 }
 
 // Retrieve performs retrieval based on the provided parameters
@@ -72,11 +94,23 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Index(ctx context.Context,
 	params := make(map[string]any)
 	embeddingMap := make(map[string][]float32)
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
-		embedding, err := embedder.Embed(ctx, sanitizeForEmbedding(ctx, indexInfo.Content))
-		if err != nil {
-			return err
+		content := sanitizeForEmbedding(ctx, indexInfo.Content)
+		if _, ok := types.TenantIDFromContext(ctx); v.artifactRuntime != nil && ok {
+			embeddings, err := v.batchEmbedWithCache(ctx, embedder, []string{content})
+			if err != nil {
+				return err
+			}
+			if len(embeddings) != 1 {
+				return fmt.Errorf("embedding artifact cache returned %d vectors for 1 input", len(embeddings))
+			}
+			embeddingMap[indexInfo.SourceID] = embeddings[0]
+		} else {
+			embedding, err := embedder.Embed(ctx, content)
+			if err != nil {
+				return err
+			}
+			embeddingMap[indexInfo.SourceID] = embedding
 		}
-		embeddingMap[indexInfo.SourceID] = embedding
 	}
 	params["embedding"] = embeddingMap
 	return v.indexRepository.Save(ctx, indexInfo, params)
@@ -96,7 +130,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 		for _, indexInfo := range indexInfoList {
 			contentList = append(contentList, sanitizeForEmbedding(ctx, indexInfo.Content))
 		}
-		embeddings, err := batchEmbedWithBackoff(ctx, embedder, contentList)
+		embeddings, err := v.batchEmbedWithCache(ctx, embedder, contentList)
 		if err != nil {
 			return err
 		}
@@ -123,6 +157,78 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 		return v.concurrentBatchSaveNoEmbedding(ctx, chunks)
 	}
 	return v.boundedConcurrentBatchSaveNoEmbedding(ctx, chunks, maxConcurrency)
+}
+
+func (v *KeywordsVectorHybridRetrieveEngineService) batchEmbedWithCache(
+	ctx context.Context,
+	embedder embedding.Embedder,
+	contentList []string,
+) ([][]float32, error) {
+	if v.artifactRuntime == nil {
+		return batchEmbedWithBackoff(ctx, embedder, contentList)
+	}
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return batchEmbedWithBackoff(ctx, embedder, contentList)
+	}
+	materials := make([]artifact.KeyMaterial, len(contentList))
+	for i, content := range contentList {
+		materials[i] = embeddingArtifactKeyMaterial(embedder, content)
+	}
+	payloads, _, err := v.artifactRuntime.GetOrComputeBatch(ctx, tenantID, materials,
+		func(ctx context.Context, misses []artifact.BatchMiss) ([][]byte, error) {
+			texts := make([]string, len(misses))
+			for i, miss := range misses {
+				text, _ := miss.Material.RenderedRequest.(map[string]any)["input"].(string)
+				texts[i] = text
+			}
+			embeddings, err := batchEmbedWithBackoff(ctx, embedder, texts)
+			if err != nil {
+				return nil, err
+			}
+			payloads := make([][]byte, len(embeddings))
+			for i, vector := range embeddings {
+				payload, err := json.Marshal(vector)
+				if err != nil {
+					return nil, err
+				}
+				payloads[i] = payload
+			}
+			return payloads, nil
+		})
+	if err != nil {
+		return nil, err
+	}
+	embeddings := make([][]float32, len(payloads))
+	for i, payload := range payloads {
+		if err := json.Unmarshal(payload, &embeddings[i]); err != nil {
+			return nil, fmt.Errorf("decode cached embedding payload: %w", err)
+		}
+	}
+	return embeddings, nil
+}
+
+func embeddingArtifactKeyMaterial(embedder embedding.Embedder, content string) artifact.KeyMaterial {
+	return artifact.KeyMaterial{
+		KeyVersion: 1,
+		Stage:      "embedding",
+		DirectInputs: []artifact.InputDigest{{
+			Name:   "content",
+			Digest: artifact.Checksum([]byte(content)),
+		}},
+		Processor: artifact.ProcessorIdentity{
+			Name:    "embedding",
+			Version: embedder.GetModelID(),
+			Model:   embedder.GetModelName(),
+		},
+		RenderedRequest: map[string]any{
+			"input": content,
+		},
+		EffectiveOptions: map[string]any{
+			"dimensions": embedder.GetDimensions(),
+		},
+		OutputSchema: "embedding.float32.v1",
+	}
 }
 
 // batchEmbedWithBackoff calls BatchEmbedWithPool with exponential backoff on

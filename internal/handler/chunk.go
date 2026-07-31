@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"context"
 	stderrors "errors"
 	"net/http"
 
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -75,11 +77,44 @@ func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
+	visible, err := h.chunkVisibleInActiveGeneration(ctx, chunk)
+	if err != nil {
+		if stderrors.Is(err, apprepo.ErrKnowledgeNotFound) {
+			logger.Warnf(ctx, "Knowledge not found for chunk, chunk ID: %s", chunkID)
+			c.Error(errors.NewNotFoundError("Chunk not found"))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if !visible {
+		logger.Warnf(ctx, "Chunk not visible in active generation, chunk ID: %s", chunkID)
+		c.Error(errors.NewNotFoundError("Chunk not found"))
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    chunk,
 	})
+}
+
+func (h *ChunkHandler) chunkVisibleInActiveGeneration(ctx context.Context, chunk *types.Chunk) (bool, error) {
+	if chunk == nil {
+		return false, nil
+	}
+	if h.kgService == nil {
+		return true, nil
+	}
+	knowledge, err := h.kgService.GetKnowledgeByID(ctx, chunk.KnowledgeID)
+	if err != nil {
+		return false, err
+	}
+	if knowledge.ActiveGenerationID == "" {
+		return chunk.GenerationID == "", nil
+	}
+	return chunk.GenerationID == knowledge.ActiveGenerationID, nil
 }
 
 // ListKnowledgeChunks godoc

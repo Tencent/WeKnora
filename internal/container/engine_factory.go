@@ -30,6 +30,7 @@ import (
 	tencentVectorDBRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/tencentvectordb"
 	weaviateRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/weaviate"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/artifact"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -41,10 +42,15 @@ import (
 // injected into VectorStoreService for dynamic registry updates. The
 // EngineFactory type itself is unchanged — the audit sink is captured in the
 // closure rather than added to the signature.
-func NewEngineFactory(db *gorm.DB, cfg *config.Config, auditSvc interfaces.AuditLogService) interfaces.EngineFactory {
+func NewEngineFactory(
+	db *gorm.DB,
+	cfg *config.Config,
+	auditSvc interfaces.AuditLogService,
+	artifactRuntime *artifact.Runtime,
+) interfaces.EngineFactory {
 	sink := newAuditSinkAdapter(auditSvc)
 	return func(ctx context.Context, store types.VectorStore) (interfaces.RetrieveEngineService, error) {
-		return createEngineServiceFromStore(ctx, store, db, cfg, sink)
+		return createEngineServiceFromStore(ctx, store, db, cfg, sink, artifactRuntime)
 	}
 }
 
@@ -57,26 +63,28 @@ func createEngineServiceFromStore(
 	db *gorm.DB,
 	cfg *config.Config,
 	auditSink openSearchRepo.AuditSink,
+	artifactRuntime *artifact.Runtime,
 ) (interfaces.RetrieveEngineService, error) {
+	kvOpts := kvHybridOptions(cfg, artifactRuntime)
 	switch store.EngineType {
 	case types.PostgresRetrieverEngineType:
-		return createPostgresEngine(store, db)
+		return createPostgresEngine(store, db, kvOpts)
 	case types.ElasticsearchRetrieverEngineType:
-		return createElasticsearchEngine(store, cfg)
+		return createElasticsearchEngine(store, cfg, kvOpts)
 	case types.QdrantRetrieverEngineType:
-		return createQdrantEngine(store)
+		return createQdrantEngine(store, kvOpts)
 	case types.MilvusRetrieverEngineType:
-		return createMilvusEngine(ctx, store)
+		return createMilvusEngine(ctx, store, kvOpts)
 	case types.WeaviateRetrieverEngineType:
-		return createWeaviateEngine(store)
+		return createWeaviateEngine(store, kvOpts)
 	case types.DorisRetrieverEngineType:
-		return createDorisEngine(store)
+		return createDorisEngine(store, kvOpts)
 	case types.SQLiteRetrieverEngineType:
-		return createSQLiteEngine(store, db)
+		return createSQLiteEngine(store, db, kvOpts)
 	case types.TencentVectorDBRetrieverEngineType:
-		return createTencentVectorDBEngine(store)
+		return createTencentVectorDBEngine(store, kvOpts)
 	case types.OpenSearchRetrieverEngineType:
-		return createOpenSearchEngine(ctx, store, auditSink)
+		return createOpenSearchEngine(ctx, store, auditSink, kvOpts)
 	default:
 		return nil, fmt.Errorf("unsupported engine type: %s", store.EngineType)
 	}
@@ -88,7 +96,10 @@ func createEngineServiceFromStore(
 // (version + k-NN plugin), so an unreachable cluster fails here at
 // registration rather than on first query.
 func createOpenSearchEngine(
-	ctx context.Context, store types.VectorStore, auditSink openSearchRepo.AuditSink,
+	ctx context.Context,
+	store types.VectorStore,
+	auditSink openSearchRepo.AuditSink,
+	kvOpts []retriever.KVHybridOption,
 ) (interfaces.RetrieveEngineService, error) {
 	client, err := openSearchRepo.NewOpenSearchClient(&store.ConnectionConfig)
 	if err != nil {
@@ -106,33 +117,45 @@ func createOpenSearchEngine(
 	if err != nil {
 		return nil, fmt.Errorf("create opensearch repository: %w", err)
 	}
-	return retriever.NewKVHybridRetrieveEngine(repo, types.OpenSearchRetrieverEngineType), nil
+	return retriever.NewKVHybridRetrieveEngine(repo, types.OpenSearchRetrieverEngineType, kvOpts...), nil
 }
 
-func createPostgresEngine(store types.VectorStore, db *gorm.DB) (interfaces.RetrieveEngineService, error) {
+func createPostgresEngine(
+	store types.VectorStore,
+	db *gorm.DB,
+	kvOpts []retriever.KVHybridOption,
+) (interfaces.RetrieveEngineService, error) {
 	if store.ConnectionConfig.UseDefaultConnection {
 		repo := postgresRepo.NewPostgresRetrieveEngineRepository(db)
-		return retriever.NewKVHybridRetrieveEngine(repo, types.PostgresRetrieverEngineType), nil
+		return retriever.NewKVHybridRetrieveEngine(repo, types.PostgresRetrieverEngineType, kvOpts...), nil
 	}
 	// Phase 1: only UseDefaultConnection is supported.
 	// Custom connections require connection pool management and migration handling.
 	return nil, fmt.Errorf("custom postgres connections not yet supported; use use_default_connection=true")
 }
 
-func createSQLiteEngine(_ types.VectorStore, db *gorm.DB) (interfaces.RetrieveEngineService, error) {
+func createSQLiteEngine(
+	_ types.VectorStore,
+	db *gorm.DB,
+	kvOpts []retriever.KVHybridOption,
+) (interfaces.RetrieveEngineService, error) {
 	repo := sqliteRetrieverRepo.NewSQLiteRetrieveEngineRepository(db)
-	return retriever.NewKVHybridRetrieveEngine(repo, types.SQLiteRetrieverEngineType), nil
+	return retriever.NewKVHybridRetrieveEngine(repo, types.SQLiteRetrieverEngineType, kvOpts...), nil
 }
 
-func createElasticsearchEngine(store types.VectorStore, cfg *config.Config) (interfaces.RetrieveEngineService, error) {
+func createElasticsearchEngine(
+	store types.VectorStore,
+	cfg *config.Config,
+	kvOpts []retriever.KVHybridOption,
+) (interfaces.RetrieveEngineService, error) {
 	cc := store.ConnectionConfig
 	// Version-based v7/v8 SDK selection.
 	// Version is auto-detected by PR2's TestConnection and saved to connection_config.
 	// Empty version defaults to v8 (latest SDK).
 	if isESv7(cc.Version) {
-		return createElasticsearchV7Engine(store, cfg)
+		return createElasticsearchV7Engine(store, cfg, kvOpts)
 	}
-	return createElasticsearchV8Engine(store, cfg)
+	return createElasticsearchV8Engine(store, cfg, kvOpts)
 }
 
 // isESv7 checks if the detected ES version is 7.x.
@@ -140,7 +163,11 @@ func isESv7(version string) bool {
 	return strings.HasPrefix(version, "7.")
 }
 
-func createElasticsearchV8Engine(store types.VectorStore, cfg *config.Config) (interfaces.RetrieveEngineService, error) {
+func createElasticsearchV8Engine(
+	store types.VectorStore,
+	cfg *config.Config,
+	kvOpts []retriever.KVHybridOption,
+) (interfaces.RetrieveEngineService, error) {
 	cc := store.ConnectionConfig
 	client, err := elasticsearch.NewTypedClient(elasticsearch.Config{
 		Addresses: []string{cc.Addr},
@@ -151,10 +178,14 @@ func createElasticsearchV8Engine(store types.VectorStore, cfg *config.Config) (i
 		return nil, fmt.Errorf("create elasticsearch v8 client: %w", err)
 	}
 	repo := elasticsearchRepoV8.NewElasticsearchEngineRepository(client, cfg, &store.IndexConfig)
-	return retriever.NewKVHybridRetrieveEngine(repo, types.ElasticsearchRetrieverEngineType), nil
+	return retriever.NewKVHybridRetrieveEngine(repo, types.ElasticsearchRetrieverEngineType, kvOpts...), nil
 }
 
-func createElasticsearchV7Engine(store types.VectorStore, cfg *config.Config) (interfaces.RetrieveEngineService, error) {
+func createElasticsearchV7Engine(
+	store types.VectorStore,
+	cfg *config.Config,
+	kvOpts []retriever.KVHybridOption,
+) (interfaces.RetrieveEngineService, error) {
 	cc := store.ConnectionConfig
 	client, err := esv7.NewClient(esv7.Config{
 		Addresses: []string{cc.Addr},
@@ -165,10 +196,13 @@ func createElasticsearchV7Engine(store types.VectorStore, cfg *config.Config) (i
 		return nil, fmt.Errorf("create elasticsearch v7 client: %w", err)
 	}
 	repo := elasticsearchRepoV7.NewElasticsearchEngineRepository(client, cfg, &store.IndexConfig)
-	return retriever.NewKVHybridRetrieveEngine(repo, types.ElasticsearchRetrieverEngineType), nil
+	return retriever.NewKVHybridRetrieveEngine(repo, types.ElasticsearchRetrieverEngineType, kvOpts...), nil
 }
 
-func createQdrantEngine(store types.VectorStore) (interfaces.RetrieveEngineService, error) {
+func createQdrantEngine(
+	store types.VectorStore,
+	kvOpts []retriever.KVHybridOption,
+) (interfaces.RetrieveEngineService, error) {
 	cc := store.ConnectionConfig
 	port := cc.Port
 	if port == 0 {
@@ -185,17 +219,21 @@ func createQdrantEngine(store types.VectorStore) (interfaces.RetrieveEngineServi
 		return nil, fmt.Errorf("create qdrant client: %w", err)
 	}
 	repo := qdrantRepo.NewQdrantRetrieveEngineRepository(client, &store.IndexConfig)
-	return retriever.NewKVHybridRetrieveEngine(repo, types.QdrantRetrieverEngineType), nil
+	return retriever.NewKVHybridRetrieveEngine(repo, types.QdrantRetrieverEngineType, kvOpts...), nil
 }
 
-func createMilvusEngine(ctx context.Context, store types.VectorStore) (interfaces.RetrieveEngineService, error) {
+func createMilvusEngine(
+	ctx context.Context,
+	store types.VectorStore,
+	kvOpts []retriever.KVHybridOption,
+) (interfaces.RetrieveEngineService, error) {
 	milvusCfg := buildMilvusClientConfig(store.ConnectionConfig)
 	client, err := milvusclient.New(ctx, &milvusCfg)
 	if err != nil {
 		return nil, fmt.Errorf("create milvus client: %w", err)
 	}
 	repo := milvusRepo.NewMilvusRetrieveEngineRepository(client, &store.IndexConfig)
-	return retriever.NewKVHybridRetrieveEngine(repo, types.MilvusRetrieverEngineType), nil
+	return retriever.NewKVHybridRetrieveEngine(repo, types.MilvusRetrieverEngineType, kvOpts...), nil
 }
 
 func buildMilvusClientConfig(cc types.ConnectionConfig) milvusclient.ClientConfig {
@@ -220,7 +258,10 @@ func buildMilvusClientConfig(cc types.ConnectionConfig) milvusclient.ClientConfi
 	return milvusCfg
 }
 
-func createWeaviateEngine(store types.VectorStore) (interfaces.RetrieveEngineService, error) {
+func createWeaviateEngine(
+	store types.VectorStore,
+	kvOpts []retriever.KVHybridOption,
+) (interfaces.RetrieveEngineService, error) {
 	cc := store.ConnectionConfig
 	host := cc.Host
 	if host == "" {
@@ -253,7 +294,7 @@ func createWeaviateEngine(store types.VectorStore) (interfaces.RetrieveEngineSer
 		return nil, fmt.Errorf("create weaviate client: %w", err)
 	}
 	repo := weaviateRepo.NewWeaviateRetrieveEngineRepository(client, &store.IndexConfig)
-	return retriever.NewKVHybridRetrieveEngine(repo, types.WeaviateRetrieverEngineType), nil
+	return retriever.NewKVHybridRetrieveEngine(repo, types.WeaviateRetrieverEngineType, kvOpts...), nil
 }
 
 // createDorisEngine 创建 Apache Doris 检索引擎服务。
@@ -263,7 +304,10 @@ func createWeaviateEngine(store types.VectorStore) (interfaces.RetrieveEngineSer
 //   - HTTP（默认 FE 8030）走 Stream Load 做 partial update。
 //
 // Addr 字段承担 host:9030 的 MySQL 端点；HTTPPort + Addr 的 host 部分组成 HTTP base URL。
-func createDorisEngine(store types.VectorStore) (interfaces.RetrieveEngineService, error) {
+func createDorisEngine(
+	store types.VectorStore,
+	kvOpts []retriever.KVHybridOption,
+) (interfaces.RetrieveEngineService, error) {
 	cc := store.ConnectionConfig
 	if cc.Addr == "" {
 		return nil, fmt.Errorf("doris connection requires addr (host:port)")
@@ -298,7 +342,7 @@ func createDorisEngine(store types.VectorStore) (interfaces.RetrieveEngineServic
 	repo := dorisRepo.NewDorisRetrieveEngineRepository(
 		db, httpBase, cc.Username, cc.Password, cc.Database, &store.IndexConfig,
 	)
-	return retriever.NewKVHybridRetrieveEngine(repo, types.DorisRetrieverEngineType), nil
+	return retriever.NewKVHybridRetrieveEngine(repo, types.DorisRetrieverEngineType, kvOpts...), nil
 }
 
 // hostFromAddr 从 "host:port" 中拆出 host 部分；Addr 没有冒号时整段当作 host。
@@ -309,7 +353,10 @@ func hostFromAddr(addr string) string {
 	return addr
 }
 
-func createTencentVectorDBEngine(store types.VectorStore) (interfaces.RetrieveEngineService, error) {
+func createTencentVectorDBEngine(
+	store types.VectorStore,
+	kvOpts []retriever.KVHybridOption,
+) (interfaces.RetrieveEngineService, error) {
 	cc := store.ConnectionConfig
 	client, err := tcvectordb.NewRpcClient(cc.Addr, cc.Username, cc.APIKey, &tcvectordb.ClientOption{
 		ReadConsistency: tcvectordb.EventualConsistency,
@@ -319,5 +366,5 @@ func createTencentVectorDBEngine(store types.VectorStore) (interfaces.RetrieveEn
 		return nil, fmt.Errorf("create tencent vectordb client: %w", err)
 	}
 	repo := tencentVectorDBRepo.NewTencentVectorDBRetrieveEngineRepository(client, cc.Database, &store.IndexConfig)
-	return retriever.NewKVHybridRetrieveEngine(repo, types.TencentVectorDBRetrieverEngineType), nil
+	return retriever.NewKVHybridRetrieveEngine(repo, types.TencentVectorDBRetrieverEngineType, kvOpts...), nil
 }

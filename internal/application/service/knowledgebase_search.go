@@ -12,6 +12,8 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
+const searchRefillMaxTopK = 2000
+
 // GetQueryEmbedding computes the query embedding using the embedding model
 // associated with the given knowledge base. Callers can pre-compute and reuse
 // the result across multiple KBs that share the same embedding model to avoid
@@ -173,6 +175,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 
 	// Group KBs by (storeID, owner tenant), resolve the bound engine for
 	// each group, and build the per-group base RetrieveParams once.
+	s.populateGenerationFilters(ctx, requestTenantID, kbs, &params)
 	groups, err := s.resolveStoreGroups(ctx, kb, kbs, params, matchCount)
 	if err != nil {
 		return nil, err
@@ -185,9 +188,51 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		return nil, nil
 	}
 
-	// Execute retrieval with fan-out + score normalization (multi-store
-	// only) and a langfuse span around the entire retrieve step.
-	logger.Infof(ctx, "Starting multi-store retrieval, group count: %d", len(groups))
+	var retrievalCfg *types.RetrievalConfig
+	if tenantInfo != nil {
+		retrievalCfg = tenantInfo.RetrievalConfig
+	}
+
+	kb.EnsureDefaults()
+
+	currentTopK := matchCount
+	iterationLimit := searchRefillIterationLimit(currentTopK, searchRefillMaxTopK)
+	var searchResults []*types.SearchResult
+	for iteration := 0; iteration < iterationLimit; iteration++ {
+		var retrieved int
+		searchResults, retrieved, err = s.retrieveAndHydrateSearchResults(
+			ctx, kb, groups, params, retrievalCfg, searchKBIDs, currentTopK, iteration)
+		if err != nil {
+			return nil, err
+		}
+		if !shouldRefillSearchResults(len(searchResults), params.MatchCount, retrieved, currentTopK, searchRefillMaxTopK) {
+			break
+		}
+		nextTopK, ok := nextSearchRefillTopK(currentTopK, searchRefillMaxTopK)
+		if !ok {
+			break
+		}
+		logger.Infof(ctx, "Search generation post-filter returned %d/%d results; refilling with TopK=%d",
+			len(searchResults), params.MatchCount, nextTopK)
+		currentTopK = nextTopK
+	}
+	return limitSearchResults(searchResults, params.MatchCount), nil
+}
+
+func (s *knowledgeBaseService) retrieveAndHydrateSearchResults(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+	groups []*storeGroup,
+	params types.SearchParams,
+	retrievalCfg *types.RetrievalConfig,
+	searchKBIDs []string,
+	topK int,
+	iteration int,
+) ([]*types.SearchResult, int, error) {
+	for _, group := range groups {
+		group.TopK = topK
+	}
+	logger.Infof(ctx, "Starting multi-store retrieval, group count: %d, topK: %d", len(groups), topK)
 	retrieveCtx, retrieveSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
 		Name: "retrieve",
 		Input: map[string]interface{}{
@@ -196,12 +241,13 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 			"knowledge_ids":          params.KnowledgeIDs,
 			"tag_ids":                params.TagIDs,
 			"scope_tag_ids":          params.ScopeTagIDs,
-			"match_count":            matchCount,
+			"match_count":            topK,
 			"vector_threshold":       params.VectorThreshold,
 			"keyword_threshold":      params.KeywordThreshold,
 			"disable_vector_match":   params.DisableVectorMatch,
 			"disable_keywords_match": params.DisableKeywordsMatch,
 			"group_count":            len(groups),
+			"refill_iteration":       iteration,
 		},
 		Metadata: map[string]interface{}{
 			"primary_kb_id":       kb.ID,
@@ -217,42 +263,156 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 			"knowledge_base_ids": searchKBIDs,
 			"query_text":         params.QueryText,
 		})
-		return nil, err
+		return nil, 0, err
 	}
+	retrieved := totalHits(retrieveResults)
 
-	// Separate and fuse retrieval results.
 	vectorResults, keywordResults := classifyRetrievalResults(ctx, retrieveResults)
 	if len(vectorResults) == 0 && len(keywordResults) == 0 {
 		logger.Info(ctx, "No search results found")
-		return nil, nil
+		return nil, retrieved, nil
 	}
 	logger.Infof(ctx, "Result count before fusion: vector=%d, keyword=%d",
 		len(vectorResults), len(keywordResults))
 
-	var retrievalCfg *types.RetrievalConfig
-	if tenantInfo != nil {
-		retrievalCfg = tenantInfo.RetrievalConfig
-	}
 	deduplicatedChunks := fuseOrDeduplicate(ctx, vectorResults, keywordResults, retrievalCfg)
-
-	kb.EnsureDefaults()
-
-	// FAQ-specific post-processing now operates on storeGroups so the
-	// iterative TopK growth applies uniformly across the fan-out. An
-	// AppError from inside the iterative fan-out path (e.g. a per-group
-	// timeout surfaced as ErrVectorStoreUnavailable) must surface to the
-	// caller rather than be silently converted to a truncated chunk list.
 	deduplicatedChunks, err = s.applyFAQPostProcessing(
-		ctx, kb, deduplicatedChunks, vectorResults, groups, params, matchCount)
+		ctx, kb, deduplicatedChunks, vectorResults, groups, params, topK)
 	if err != nil {
-		return nil, err
+		return nil, retrieved, err
 	}
 
-	if len(deduplicatedChunks) > params.MatchCount {
-		deduplicatedChunks = deduplicatedChunks[:params.MatchCount]
+	searchCandidates := candidatesForSearchHydration(deduplicatedChunks, params)
+	searchResults, err := s.processSearchResults(ctx, searchCandidates, params.SkipContextEnrichment)
+	return searchResults, retrieved, err
+}
+
+func candidatesForSearchHydration(
+	chunks []*types.IndexWithScore,
+	params types.SearchParams,
+) []*types.IndexWithScore {
+	if params.MatchCount <= 0 {
+		return nil
+	}
+	return chunks
+}
+
+func shouldRefillSearchResults(resultCount int, matchCount int, retrieved int, currentTopK int, maxTopK int) bool {
+	return matchCount > 0 && resultCount < matchCount && retrieved >= currentTopK && currentTopK < maxTopK
+}
+
+func nextSearchRefillTopK(currentTopK int, maxTopK int) (int, bool) {
+	if currentTopK <= 0 || currentTopK >= maxTopK {
+		return currentTopK, false
+	}
+	next := currentTopK * 2
+	if next > maxTopK {
+		next = maxTopK
+	}
+	return next, next > currentTopK
+}
+
+func searchRefillIterationLimit(initialTopK int, maxTopK int) int {
+	if initialTopK <= 0 || maxTopK <= 0 {
+		return 1
+	}
+	iterations := 1
+	currentTopK := initialTopK
+	for currentTopK < maxTopK {
+		nextTopK, ok := nextSearchRefillTopK(currentTopK, maxTopK)
+		if !ok {
+			break
+		}
+		iterations++
+		currentTopK = nextTopK
+	}
+	return iterations
+}
+
+func limitSearchResults(results []*types.SearchResult, matchCount int) []*types.SearchResult {
+	if matchCount <= 0 {
+		return nil
+	}
+	if len(results) <= matchCount {
+		return results
+	}
+	return results[:matchCount]
+}
+
+func (s *knowledgeBaseService) populateGenerationFilters(
+	ctx context.Context,
+	tenantID uint64,
+	kbs []*types.KnowledgeBase,
+	params *types.SearchParams,
+) {
+	if params == nil || len(params.GenerationIDs) > 0 || len(params.VisibilityKeys) > 0 || s.kgRepo == nil {
+		return
 	}
 
-	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
+	var knowledges []*types.Knowledge
+	if len(params.KnowledgeIDs) > 0 {
+		knowledgeMap, err := s.fetchKnowledgeDataWithShared(ctx, tenantID, params.KnowledgeIDs)
+		if err != nil {
+			logger.Warnf(ctx, "populateGenerationFilters: failed to batch load knowledge generations: %v", err)
+			return
+		}
+		knowledges = make([]*types.Knowledge, 0, len(knowledgeMap))
+		for _, knowledge := range knowledgeMap {
+			knowledges = append(knowledges, knowledge)
+		}
+	} else {
+		for _, kb := range kbs {
+			if kb == nil {
+				continue
+			}
+			items, err := s.kgRepo.ListKnowledgeByKnowledgeBaseID(ctx, kb.TenantID, kb.ID)
+			if err != nil {
+				logger.Warnf(ctx, "populateGenerationFilters: failed to list knowledge for KB %s: %v", kb.ID, err)
+				return
+			}
+			knowledges = append(knowledges, items...)
+		}
+	}
+	if len(knowledges) == 0 {
+		return
+	}
+
+	requested := make(map[string]struct{}, len(params.KnowledgeIDs))
+	for _, id := range params.KnowledgeIDs {
+		requested[id] = struct{}{}
+	}
+	seenGeneration := make(map[string]struct{}, len(knowledges))
+	seenVisibility := make(map[string]struct{}, len(knowledges))
+	activeByID := make(map[string]struct{}, len(knowledges))
+	for _, knowledge := range knowledges {
+		if knowledge == nil || knowledge.ActiveGenerationID == "" {
+			if len(params.KnowledgeIDs) == 0 {
+				params.GenerationIDs = nil
+				params.VisibilityKeys = nil
+				return
+			}
+			continue
+		}
+		activeByID[knowledge.ID] = struct{}{}
+		if _, ok := seenGeneration[knowledge.ActiveGenerationID]; !ok {
+			params.GenerationIDs = append(params.GenerationIDs, knowledge.ActiveGenerationID)
+			seenGeneration[knowledge.ActiveGenerationID] = struct{}{}
+		}
+		visibilityKey := knowledge.ID + ":" + knowledge.ActiveGenerationID
+		if _, ok := seenVisibility[visibilityKey]; !ok {
+			params.VisibilityKeys = append(params.VisibilityKeys, visibilityKey)
+			seenVisibility[visibilityKey] = struct{}{}
+		}
+	}
+	if len(requested) > 0 {
+		for id := range requested {
+			if _, ok := activeByID[id]; !ok {
+				params.GenerationIDs = nil
+				params.VisibilityKeys = nil
+				return
+			}
+		}
+	}
 }
 
 // pickPrimary returns the KB whose ID matches id, or nil if id is not in
@@ -368,6 +528,8 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 				Threshold:        params.VectorThreshold,
 				RetrieverType:    types.VectorRetrieverType,
 				KnowledgeIDs:     params.KnowledgeIDs,
+				GenerationIDs:    params.GenerationIDs,
+				VisibilityKeys:   params.VisibilityKeys,
 				TagIDs:           params.TagIDs,
 				KnowledgeType:    knowledgeType,
 			})
@@ -397,6 +559,8 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 			Threshold:        params.KeywordThreshold,
 			RetrieverType:    types.KeywordsRetrieverType,
 			KnowledgeIDs:     params.KnowledgeIDs,
+			GenerationIDs:    params.GenerationIDs,
+			VisibilityKeys:   params.VisibilityKeys,
 			TagIDs:           params.TagIDs,
 		})
 		logger.Info(ctx, "Keyword retrieval parameters setup completed")

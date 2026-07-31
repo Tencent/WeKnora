@@ -68,6 +68,10 @@ func (r *dorisRepository) Support() []types.RetrieverType {
 	return []types.RetrieverType{types.KeywordsRetrieverType, types.VectorRetrieverType}
 }
 
+func (r *dorisRepository) SupportsGenerationFilter() bool {
+	return true
+}
+
 // EstimateStorageSize 估算给定 IndexInfo 列表的存储字节数。
 //
 // 参考 Qdrant 的算法：payload 字段长度 + 向量字节 + HNSW 邻居 + 元数据。
@@ -151,16 +155,16 @@ func (r *dorisRepository) insertRows(ctx context.Context,
 		return nil
 	}
 
-	// 9 个普通占位符 + 1 个 embedding 字面量。
-	const perRowPlaceholders = "(?, ?, ?, ?, ?, ?, ?, ?, ?, %s)"
+	// 11 个普通占位符 + 1 个 embedding 字面量。
+	const perRowPlaceholders = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, %s)"
 
 	parts := make([]string, len(rows))
-	args := make([]any, 0, len(rows)*9)
+	args := make([]any, 0, len(rows)*11)
 	for i, e := range rows {
 		parts[i] = fmt.Sprintf(perRowPlaceholders, embeddingLiteral(e.Embedding))
 		args = append(args,
 			e.ID, e.Content, e.SourceID, e.SourceType,
-			e.ChunkID, e.KnowledgeID, e.KnowledgeBaseID, e.TagID,
+			e.ChunkID, e.KnowledgeID, e.KnowledgeBaseID, e.GenerationID, e.VisibilityKey, e.TagID,
 			e.IsEnabled,
 		)
 	}
@@ -529,6 +533,8 @@ func toDorisVectorEmbedding(
 		ChunkID:         info.ChunkID,
 		KnowledgeID:     info.KnowledgeID,
 		KnowledgeBaseID: info.KnowledgeBaseID,
+		GenerationID:    info.GenerationID,
+		VisibilityKey:   info.VisibilityKey,
 		TagID:           info.TagID,
 		IsEnabled:       info.IsEnabled,
 	}
@@ -594,6 +600,7 @@ func scanRetrieveRows(rows *sql.Rows, matchType types.MatchType) ([]*types.Index
 		var (
 			id, content, sourceID, chunkID      string
 			knowledgeID, knowledgeBaseID, tagID string
+			generationID, visibilityKey         string
 			sourceType                          int
 			isEnabled                           bool
 			score                               float64
@@ -601,10 +608,10 @@ func scanRetrieveRows(rows *sql.Rows, matchType types.MatchType) ([]*types.Index
 		)
 		if withScore {
 			err = rows.Scan(&id, &content, &sourceID, &sourceType,
-				&chunkID, &knowledgeID, &knowledgeBaseID, &tagID, &isEnabled, &score)
+				&chunkID, &knowledgeID, &knowledgeBaseID, &generationID, &visibilityKey, &tagID, &isEnabled, &score)
 		} else {
 			err = rows.Scan(&id, &content, &sourceID, &sourceType,
-				&chunkID, &knowledgeID, &knowledgeBaseID, &tagID, &isEnabled)
+				&chunkID, &knowledgeID, &knowledgeBaseID, &generationID, &visibilityKey, &tagID, &isEnabled)
 			score = 1.0
 		}
 		if err != nil {
@@ -618,6 +625,8 @@ func scanRetrieveRows(rows *sql.Rows, matchType types.MatchType) ([]*types.Index
 			ChunkID:         chunkID,
 			KnowledgeID:     knowledgeID,
 			KnowledgeBaseID: knowledgeBaseID,
+			GenerationID:    generationID,
+			VisibilityKey:   visibilityKey,
 			TagID:           tagID,
 			Score:           score,
 			MatchType:       matchType,
@@ -636,12 +645,13 @@ func scanCopyRows(rows *sql.Rows) ([]*DorisVectorEmbedding, error) {
 		var (
 			id, content, sourceID, chunkID      string
 			knowledgeID, knowledgeBaseID, tagID string
+			generationID, visibilityKey         string
 			sourceType                          int
 			isEnabled                           bool
 			embeddingRaw                        sql.RawBytes
 		)
 		if err := rows.Scan(&id, &content, &sourceID, &sourceType,
-			&chunkID, &knowledgeID, &knowledgeBaseID, &tagID, &isEnabled, &embeddingRaw); err != nil {
+			&chunkID, &knowledgeID, &knowledgeBaseID, &generationID, &visibilityKey, &tagID, &isEnabled, &embeddingRaw); err != nil {
 			return nil, fmt.Errorf("scan copy row: %w", err)
 		}
 		vec, err := parseEmbeddingLiteral(embeddingRaw)
@@ -656,6 +666,8 @@ func scanCopyRows(rows *sql.Rows) ([]*DorisVectorEmbedding, error) {
 			ChunkID:         chunkID,
 			KnowledgeID:     knowledgeID,
 			KnowledgeBaseID: knowledgeBaseID,
+			GenerationID:    generationID,
+			VisibilityKey:   visibilityKey,
 			TagID:           tagID,
 			IsEnabled:       isEnabled,
 			Embedding:       vec,
@@ -684,6 +696,8 @@ func calculateStorageSize(emb *DorisVectorEmbedding) int64 {
 	payload += int64(len(emb.ChunkID))
 	payload += int64(len(emb.KnowledgeID))
 	payload += int64(len(emb.KnowledgeBaseID))
+	payload += int64(len(emb.GenerationID))
+	payload += int64(len(emb.VisibilityKey))
 	payload += int64(len(emb.TagID))
 	payload += 8 // source_type int
 

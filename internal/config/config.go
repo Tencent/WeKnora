@@ -17,28 +17,47 @@ import (
 
 // Config 应用程序总配置
 type Config struct {
-	Conversation    *ConversationConfig    `yaml:"conversation"     json:"conversation"`
-	Server          *ServerConfig          `yaml:"server"           json:"server"`
-	KnowledgeBase   *KnowledgeBaseConfig   `yaml:"knowledge_base"   json:"knowledge_base"`
-	Tenant          *TenantConfig          `yaml:"tenant"           json:"tenant"`
-	Auth            *AuthConfig            `yaml:"auth"             json:"auth"`
-	Audit           *AuditConfig           `yaml:"audit"            json:"audit"`
-	OIDCAuth        *OIDCAuthConfig        `yaml:"oidc_auth"        json:"oidc_auth"`
-	Models          []ModelConfig          `yaml:"models"           json:"models"`
-	VectorDatabase  *VectorDatabaseConfig  `yaml:"vector_database"  json:"vector_database"`
-	DocReader       *DocReaderConfig       `yaml:"docreader"        json:"docreader"`
-	StreamManager   *StreamManagerConfig   `yaml:"stream_manager"   json:"stream_manager"`
-	ExtractManager  *ExtractManagerConfig  `yaml:"extract"          json:"extract"`
-	WebSearch       *WebSearchConfig       `yaml:"web_search"       json:"web_search"`
-	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
-	IM              *IMConfig              `yaml:"im"               json:"im"`
-	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
+	Conversation      *ConversationConfig      `yaml:"conversation"     json:"conversation"`
+	Server            *ServerConfig            `yaml:"server"           json:"server"`
+	KnowledgeBase     *KnowledgeBaseConfig     `yaml:"knowledge_base"   json:"knowledge_base"`
+	Tenant            *TenantConfig            `yaml:"tenant"           json:"tenant"`
+	Auth              *AuthConfig              `yaml:"auth"             json:"auth"`
+	Audit             *AuditConfig             `yaml:"audit"            json:"audit"`
+	OIDCAuth          *OIDCAuthConfig          `yaml:"oidc_auth"        json:"oidc_auth"`
+	Models            []ModelConfig            `yaml:"models"           json:"models"`
+	VectorDatabase    *VectorDatabaseConfig    `yaml:"vector_database"  json:"vector_database"`
+	DocReader         *DocReaderConfig         `yaml:"docreader"        json:"docreader"`
+	StreamManager     *StreamManagerConfig     `yaml:"stream_manager"   json:"stream_manager"`
+	ExtractManager    *ExtractManagerConfig    `yaml:"extract"          json:"extract"`
+	WebSearch         *WebSearchConfig         `yaml:"web_search"       json:"web_search"`
+	PromptTemplates   *PromptTemplatesConfig   `yaml:"prompt_templates" json:"prompt_templates"`
+	IM                *IMConfig                `yaml:"im"               json:"im"`
+	Agent             *AgentConfig             `yaml:"agent"            json:"agent"`
+	ReparseGeneration *ReparseGenerationConfig `yaml:"reparse_generation" json:"reparse_generation"`
+	ArtifactCache     *ArtifactCacheConfig     `yaml:"artifact_cache"   json:"artifact_cache"`
 	// FrontendBaseURL is the externally-visible origin of the SPA, used
 	// to compose absolute share-link URLs. Empty falls back to a host-
 	// relative URL ("/register?token=…") which the SPA then resolves
 	// against window.location.origin — fine for typical single-origin
 	// deployments. Sourced from FRONTEND_BASE_URL env at startup.
 	FrontendBaseURL string `yaml:"frontend_base_url" json:"frontend_base_url"`
+}
+
+// ReparseGenerationConfig controls generation-scoped atomic rebuild rollout.
+type ReparseGenerationConfig struct {
+	Enabled          bool `yaml:"enabled"         json:"enabled"`
+	NoopFastPath     bool `yaml:"noop_fast_path"  json:"noop_fast_path"`
+	GCRetentionHours int  `yaml:"gc_retention_hours" json:"gc_retention_hours"`
+	GCBatchSize      int  `yaml:"gc_batch_size"  json:"gc_batch_size"`
+}
+
+// ArtifactCacheConfig controls content-addressed artifact reuse.
+type ArtifactCacheConfig struct {
+	ReadEnabled    bool            `yaml:"read_enabled"     json:"read_enabled"`
+	WriteEnabled   bool            `yaml:"write_enabled"    json:"write_enabled"`
+	MaxInlineBytes int64           `yaml:"max_inline_bytes" json:"max_inline_bytes"`
+	RetentionDays  int             `yaml:"retention_days"   json:"retention_days"`
+	Stages         map[string]bool `yaml:"stages"           json:"stages"`
 }
 
 // AgentConfig represents the global agent settings.
@@ -582,6 +601,12 @@ func LoadConfig() (*Config, error) {
 	applyKnowledgeBaseEnvOverrides(&cfg)
 	applyAuthAndTenantDefaults(&cfg)
 	applyAuditDefaults(&cfg)
+	applyReparseGenerationDefaults(&cfg,
+		viper.IsSet("reparse_generation.enabled"),
+		viper.IsSet("reparse_generation.noop_fast_path"))
+	applyArtifactCacheDefaults(&cfg,
+		viper.IsSet("artifact_cache.read_enabled"),
+		viper.IsSet("artifact_cache.write_enabled"))
 
 	if err := ValidateConfig(&cfg); err != nil {
 		return nil, err
@@ -675,6 +700,20 @@ func ValidateConfig(cfg *Config) error {
 		if cfg.Server.Port <= 0 || cfg.Server.Port > 65535 {
 			errs = append(errs, "server.port must be between 1 and 65535")
 		}
+	}
+	if cfg.ReparseGeneration != nil {
+		if cfg.ReparseGeneration.GCRetentionHours < 0 {
+			errs = append(errs, "reparse_generation.gc_retention_hours must be >= 0")
+		}
+		if cfg.ReparseGeneration.GCBatchSize < 0 {
+			errs = append(errs, "reparse_generation.gc_batch_size must be >= 0")
+		}
+	}
+	if cfg.ArtifactCache != nil && cfg.ArtifactCache.MaxInlineBytes < 0 {
+		errs = append(errs, "artifact_cache.max_inline_bytes must be >= 0")
+	}
+	if cfg.ArtifactCache != nil && cfg.ArtifactCache.RetentionDays < 0 {
+		errs = append(errs, "artifact_cache.retention_days must be >= 0")
 	}
 
 	if len(errs) > 0 {
@@ -914,6 +953,91 @@ func applyAuditDefaults(cfg *Config) {
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUDIT_RETENTION_DAYS")); value != "" {
 		if n, err := strconv.Atoi(value); err == nil && n >= 0 {
 			cfg.Audit.RetentionDays = n
+		}
+	}
+}
+
+func applyReparseGenerationDefaults(cfg *Config, enabledExplicit bool, noopFastPathExplicit bool) {
+	if cfg.ReparseGeneration == nil {
+		cfg.ReparseGeneration = &ReparseGenerationConfig{}
+	}
+	if !enabledExplicit {
+		cfg.ReparseGeneration.Enabled = true
+	}
+	if !noopFastPathExplicit {
+		cfg.ReparseGeneration.NoopFastPath = true
+	}
+	if cfg.ReparseGeneration.GCRetentionHours == 0 {
+		cfg.ReparseGeneration.GCRetentionHours = 24
+	}
+	if cfg.ReparseGeneration.GCBatchSize == 0 {
+		cfg.ReparseGeneration.GCBatchSize = 100
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_REPARSE_GENERATION_ENABLED")); value != "" {
+		if enabled, err := strconv.ParseBool(value); err == nil {
+			cfg.ReparseGeneration.Enabled = enabled
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_REPARSE_GENERATION_NOOP_FAST_PATH")); value != "" {
+		if enabled, err := strconv.ParseBool(value); err == nil {
+			cfg.ReparseGeneration.NoopFastPath = enabled
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_REPARSE_GENERATION_GC_RETENTION_HOURS")); value != "" {
+		if n, err := strconv.Atoi(value); err == nil && n >= 0 {
+			cfg.ReparseGeneration.GCRetentionHours = n
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_REPARSE_GENERATION_GC_BATCH_SIZE")); value != "" {
+		if n, err := strconv.Atoi(value); err == nil && n >= 0 {
+			cfg.ReparseGeneration.GCBatchSize = n
+		}
+	}
+}
+
+func applyArtifactCacheDefaults(cfg *Config, readEnabledExplicit bool, writeEnabledExplicit bool) {
+	if cfg.ArtifactCache == nil {
+		cfg.ArtifactCache = &ArtifactCacheConfig{}
+	}
+	if cfg.ArtifactCache.MaxInlineBytes == 0 {
+		cfg.ArtifactCache.MaxInlineBytes = 16 * 1024 * 1024
+	}
+	if cfg.ArtifactCache.Stages == nil {
+		cfg.ArtifactCache.Stages = map[string]bool{
+			"parse":         true,
+			"embedding":     true,
+			"vlm_ocr":       true,
+			"vlm_caption":   true,
+			"summary":       true,
+			"question":      true,
+			"wiki_map":      true,
+			"graph_extract": true,
+		}
+	}
+	if !readEnabledExplicit {
+		cfg.ArtifactCache.ReadEnabled = true
+	}
+	if !writeEnabledExplicit {
+		cfg.ArtifactCache.WriteEnabled = true
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_ARTIFACT_CACHE_READ_ENABLED")); value != "" {
+		if enabled, err := strconv.ParseBool(value); err == nil {
+			cfg.ArtifactCache.ReadEnabled = enabled
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_ARTIFACT_CACHE_WRITE_ENABLED")); value != "" {
+		if enabled, err := strconv.ParseBool(value); err == nil {
+			cfg.ArtifactCache.WriteEnabled = enabled
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_ARTIFACT_CACHE_MAX_INLINE_BYTES")); value != "" {
+		if n, err := strconv.ParseInt(value, 10, 64); err == nil && n >= 0 {
+			cfg.ArtifactCache.MaxInlineBytes = n
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_ARTIFACT_CACHE_RETENTION_DAYS")); value != "" {
+		if n, err := strconv.Atoi(value); err == nil && n >= 0 {
+			cfg.ArtifactCache.RetentionDays = n
 		}
 	}
 }

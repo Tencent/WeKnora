@@ -45,6 +45,10 @@ func (r *wikiEnqueueFailureKnowledgeRepo) UpdateKnowledgeColumn(
 	return nil
 }
 
+func (r *wikiEnqueueFailureKnowledgeRepo) FinalizeSubtask(context.Context, string) (int, bool, error) {
+	return 0, true, nil
+}
+
 type wikiEnqueueFailureKBService struct {
 	interfaces.KnowledgeBaseService
 	kb *types.KnowledgeBase
@@ -91,6 +95,8 @@ type wikiEnqueueFailurePendingRepo struct {
 	seedErr       error
 	seedCalls     int
 	seededOp      *types.TaskPendingOp
+	enqueueCalls  int
+	enqueuedOp    *types.TaskPendingOp
 	knowledgeRepo *wikiEnqueueFailureKnowledgeRepo
 }
 
@@ -108,6 +114,42 @@ func (r *wikiEnqueueFailurePendingRepo) SeedKnowledgeFinalizingWithPendingOp(
 	r.knowledgeRepo.expectedSubtasks = expectedSubtasks
 	r.knowledgeRepo.knowledge.ParseStatus = types.ParseStatusFinalizing
 	return true, nil
+}
+
+func (r *wikiEnqueueFailurePendingRepo) Enqueue(_ context.Context, op *types.TaskPendingOp) error {
+	r.enqueueCalls++
+	r.enqueuedOp = op
+	return nil
+}
+
+type wikiGenerationPostProcessRepo struct {
+	interfaces.KnowledgeGenerationRepository
+	generation *types.KnowledgeGeneration
+}
+
+func (r wikiGenerationPostProcessRepo) Get(context.Context, uint64, string) (*types.KnowledgeGeneration, error) {
+	return r.generation, nil
+}
+
+func (r wikiGenerationPostProcessRepo) LatestAttempt(context.Context, uint64, string) (int, error) {
+	return r.generation.Attempt, nil
+}
+
+func (r wikiGenerationPostProcessRepo) ActivateIfCurrent(context.Context, string, int) (bool, error) {
+	return true, nil
+}
+
+func (r wikiGenerationPostProcessRepo) MarkRetired(context.Context, string) error {
+	return nil
+}
+
+type wikiGenerationChunkRepo struct {
+	interfaces.ChunkRepository
+	chunks []*types.Chunk
+}
+
+func (r wikiGenerationChunkRepo) ListGenerationChunks(context.Context, uint64, string, string) ([]*types.Chunk, error) {
+	return r.chunks, nil
 }
 
 func newWikiEnqueueTestService(
@@ -147,6 +189,87 @@ func newWikiEnqueuePostProcessTask(t *testing.T, knowledgeID string) *asynq.Task
 	})
 	require.NoError(t, err)
 	return asynq.NewTask(types.TypeKnowledgePostProcess, payload)
+}
+
+func TestKnowledgePostProcessDefersGenerationWikiTriggerUntilActivation(t *testing.T) {
+	const knowledgeID = "knowledge-generation-wiki"
+	const generationID = "generation-wiki"
+	pendingRepo := &wikiEnqueueFailurePendingRepo{}
+	queue := &wikiEnqueueFailureTaskQueue{}
+	service, repo := newWikiEnqueueTestService(knowledgeID, pendingRepo, queue)
+	service.generationRepo = wikiGenerationPostProcessRepo{generation: &types.KnowledgeGeneration{
+		ID:          generationID,
+		TenantID:    7,
+		KnowledgeID: knowledgeID,
+		Attempt:     2,
+		State:       types.KnowledgeGenerationStateBuilding,
+	}}
+	service.chunkRepo = wikiGenerationChunkRepo{chunks: []*types.Chunk{
+		{ID: "chunk-generation", ChunkType: types.ChunkTypeText, GenerationID: generationID},
+	}}
+	payload, err := json.Marshal(types.KnowledgePostProcessPayload{
+		TenantID:        7,
+		KnowledgeID:     knowledgeID,
+		KnowledgeBaseID: "kb-wiki",
+		Attempt:         2,
+		GenerationID:    generationID,
+	})
+	require.NoError(t, err)
+
+	err = service.Handle(context.Background(), asynq.NewTask(types.TypeKnowledgePostProcess, payload))
+
+	require.NoError(t, err)
+	assert.Equal(t, types.ParseStatusFinalizing, repo.knowledge.ParseStatus)
+	assert.Equal(t, 1, repo.expectedSubtasks, "only summary owns a finalizing slot before generation activation")
+	assert.Equal(t, []string{types.TypeSummaryGeneration}, queue.taskTypes)
+	require.Equal(t, 1, pendingRepo.enqueueCalls)
+	require.NotNil(t, pendingRepo.enqueuedOp)
+	assert.Equal(t, knowledgeID, pendingRepo.enqueuedOp.DedupKey)
+
+	var op WikiPendingOp
+	require.NoError(t, json.Unmarshal(pendingRepo.enqueuedOp.Payload, &op))
+	assert.Equal(t, knowledgeID, op.KnowledgeID)
+	assert.Equal(t, generationID, op.GenerationID)
+	assert.Equal(t, 2, op.Attempt)
+}
+
+func TestKnowledgePostProcessDoesNotTriggerWikiAfterGenerationActivationWhenWikiDisabled(t *testing.T) {
+	const knowledgeID = "knowledge-generation-no-wiki"
+	const generationID = "generation-no-wiki"
+	t.Setenv("NEO4J_ENABLE", "false")
+	pendingRepo := &wikiEnqueueFailurePendingRepo{}
+	queue := &wikiEnqueueFailureTaskQueue{}
+	service, _ := newWikiEnqueueTestService(knowledgeID, pendingRepo, queue)
+	service.kbService = &wikiEnqueueFailureKBService{kb: &types.KnowledgeBase{
+		ID:               "kb-no-wiki",
+		SummaryModelID:   "chat-1",
+		IndexingStrategy: types.IndexingStrategy{GraphEnabled: true},
+		ExtractConfig:    &types.ExtractConfig{Enabled: true},
+	}}
+	service.generationRepo = wikiGenerationPostProcessRepo{generation: &types.KnowledgeGeneration{
+		ID:          generationID,
+		TenantID:    7,
+		KnowledgeID: knowledgeID,
+		Attempt:     2,
+		State:       types.KnowledgeGenerationStateReady,
+	}}
+	service.chunkRepo = wikiGenerationChunkRepo{chunks: []*types.Chunk{
+		{ID: "chunk-generation", ChunkType: types.ChunkTypeText, GenerationID: generationID},
+	}}
+	payload, err := json.Marshal(types.KnowledgePostProcessPayload{
+		TenantID:        7,
+		KnowledgeID:     knowledgeID,
+		KnowledgeBaseID: "kb-no-wiki",
+		Attempt:         2,
+		GenerationID:    generationID,
+	})
+	require.NoError(t, err)
+
+	err = service.Handle(context.Background(), asynq.NewTask(types.TypeKnowledgePostProcess, payload))
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{types.TypeSummaryGeneration}, queue.taskTypes)
+	assert.Zero(t, pendingRepo.enqueueCalls)
 }
 
 func TestKnowledgePostProcessAtomicallySeedsWikiSlot(t *testing.T) {

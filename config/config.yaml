@@ -46,6 +46,27 @@ knowledge_base:
   image_processing:
     enable_multimodal: true
 
+reparse_generation:
+  enabled: true
+  noop_fast_path: true
+  gc_retention_hours: 24
+  gc_batch_size: 100
+
+artifact_cache:
+  read_enabled: true
+  write_enabled: true
+  max_inline_bytes: 16777216
+  retention_days: 0
+  stages:
+    parse: true
+    embedding: true
+    vlm_ocr: true
+    vlm_caption: true
+    summary: true
+    question: true
+    wiki_map: true
+    graph_extract: true
+
 extract:
   extract_graph:
     description: |

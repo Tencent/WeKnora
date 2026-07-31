@@ -113,6 +113,10 @@ func (e *elasticsearchRepository) Support() []typesLocal.RetrieverType {
 	return []typesLocal.RetrieverType{typesLocal.KeywordsRetrieverType, typesLocal.VectorRetrieverType}
 }
 
+func (e *elasticsearchRepository) SupportsGenerationFilter() bool {
+	return true
+}
+
 // calculateStorageSize estimates the storage size in bytes for a single index document
 func (e *elasticsearchRepository) calculateStorageSize(embedding *elasticsearchRetriever.VectorEmbedding) int64 {
 	// 1. Content text size
@@ -316,6 +320,20 @@ func (e *elasticsearchRepository) getBaseConds(params typesLocal.RetrieveParams)
 		must = append(must, types.Query{Terms: &types.TermsQuery{
 			TermsQuery: map[string]types.TermsQueryField{
 				e.idField("tag_id"): params.TagIDs,
+			},
+		}})
+	}
+	if len(params.GenerationIDs) > 0 {
+		must = append(must, types.Query{Terms: &types.TermsQuery{
+			TermsQuery: map[string]types.TermsQueryField{
+				e.idField("generation_id"): params.GenerationIDs,
+			},
+		}})
+	}
+	if len(params.VisibilityKeys) > 0 {
+		must = append(must, types.Query{Terms: &types.TermsQuery{
+			TermsQuery: map[string]types.TermsQueryField{
+				e.idField("visibility_key"): params.VisibilityKeys,
 			},
 		}})
 	}
