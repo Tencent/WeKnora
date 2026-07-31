@@ -411,6 +411,76 @@ func TestRetrieveFilters_DefaultPinsIsEnabledTrue(t *testing.T) {
 	}
 }
 
+func TestRetrieveFilters_FolderSupportsKeywordAndLegacyDynamicMapping(t *testing.T) {
+	t.Parallel()
+	body, err := buildKeywordQuery("folder query", 5, 0, &retrieveFilters{
+		FolderIDs: []string{"folder-uuid"},
+	})
+	if err != nil {
+		t.Fatalf("buildKeywordQuery: %v", err)
+	}
+	for _, field := range []string{`"folder_id"`, `"folder_id.keyword"`} {
+		if !strings.Contains(string(body), field) {
+			t.Errorf("folder query must include %s: %s", field, body)
+		}
+	}
+}
+
+func TestEnsureFolderMapping_AddsKeywordFieldToLegacyIndex(t *testing.T) {
+	t.Parallel()
+	var mappingPutBody string
+	repo, ts := newTestRepo(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/legacy_alias/_mapping":
+			_, _ = w.Write([]byte(`{
+				"legacy_v1":{"mappings":{"properties":{"content":{"type":"text"}}}}
+			}`))
+		case r.Method == http.MethodPut && r.URL.Path == "/legacy_v1/_mapping":
+			body, _ := io.ReadAll(r.Body)
+			mappingPutBody = string(body)
+			_, _ = w.Write([]byte(`{"acknowledged":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer ts.Close()
+
+	if err := repo.ensureFolderMapping(context.Background(), "legacy_alias"); err != nil {
+		t.Fatalf("ensureFolderMapping: %v", err)
+	}
+	if !strings.Contains(mappingPutBody, `"folder_id":{"type":"keyword"}`) {
+		t.Fatalf("folder keyword mapping not installed: %s", mappingPutBody)
+	}
+}
+
+func TestEnsureFolderMapping_AcceptsLegacyDynamicKeywordSubfield(t *testing.T) {
+	t.Parallel()
+	var putCalls atomic.Int32
+	repo, ts := newTestRepo(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/legacy_alias/_mapping":
+			_, _ = w.Write([]byte(`{
+				"legacy_v1":{"mappings":{"properties":{
+					"folder_id":{"type":"text","fields":{"keyword":{"type":"keyword"}}}
+				}}}
+			}`))
+		case r.Method == http.MethodPut:
+			putCalls.Add(1)
+			_, _ = w.Write([]byte(`{"acknowledged":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer ts.Close()
+
+	if err := repo.ensureFolderMapping(context.Background(), "legacy_alias"); err != nil {
+		t.Fatalf("ensureFolderMapping: %v", err)
+	}
+	if got := putCalls.Load(); got != 0 {
+		t.Fatalf("compatible dynamic mapping must not be rewritten, got %d PUTs", got)
+	}
+}
+
 // ============================================================================
 // buildKNNQuery / buildKeywordQuery — min_score from threshold
 // ============================================================================

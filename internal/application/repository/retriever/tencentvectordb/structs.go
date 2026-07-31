@@ -25,6 +25,7 @@ const (
 	fieldKnowledgeID     = "knowledge_id"
 	fieldKnowledgeBaseID = "knowledge_base_id"
 	fieldTagID           = "tag_id"
+	fieldFolderID        = "folder_id"
 	fieldIsEnabled       = "is_enabled"
 )
 
@@ -35,10 +36,15 @@ type repository struct {
 	useDimensionSuffix bool
 	shardsNum          int
 	replicasNum        int
-	initialized        sync.Map
-	bm25Once           sync.Once
-	bm25               encoder.SparseEncoder
-	bm25Err            error
+	// folderSchemaPresent lets ordinary reads and writes continue while the
+	// external service builds the folder filter index. Folder-scoped reads use
+	// folderIndexReady instead and keep failing closed until construction ends.
+	folderSchemaPresent sync.Map
+	folderIndexReady    sync.Map
+	ensureMu            sync.Mutex
+	bm25Once            sync.Once
+	bm25                encoder.SparseEncoder
+	bm25Err             error
 }
 
 type vectorEmbedding struct {
@@ -50,6 +56,7 @@ type vectorEmbedding struct {
 	KnowledgeID     string
 	KnowledgeBaseID string
 	TagID           string
+	FolderID        string
 	Embedding       []float32
 	SparseVector    []encoder.SparseVecItem
 	IsEnabled       bool

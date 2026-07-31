@@ -43,6 +43,9 @@ knowledge_base:
   chunk_overlap: 50
   split_markers: ["\n\n", "\n", "。"]
   document_process_timeout: 2h
+  # Two-phase rolling upgrade gate: deploy the new app/workers with this false,
+  # then enable it only after every old pod has terminated.
+  document_folders_enabled: false
   image_processing:
     enable_multimodal: true
 

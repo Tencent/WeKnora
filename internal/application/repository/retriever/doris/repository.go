@@ -151,17 +151,17 @@ func (r *dorisRepository) insertRows(ctx context.Context,
 		return nil
 	}
 
-	// 9 个普通占位符 + 1 个 embedding 字面量。
-	const perRowPlaceholders = "(?, ?, ?, ?, ?, ?, ?, ?, ?, %s)"
+	// 10 个普通占位符 + 1 个 embedding 字面量。
+	const perRowPlaceholders = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, %s)"
 
 	parts := make([]string, len(rows))
-	args := make([]any, 0, len(rows)*9)
+	args := make([]any, 0, len(rows)*10)
 	for i, e := range rows {
 		parts[i] = fmt.Sprintf(perRowPlaceholders, embeddingLiteral(e.Embedding))
 		args = append(args,
 			e.ID, e.Content, e.SourceID, e.SourceType,
 			e.ChunkID, e.KnowledgeID, e.KnowledgeBaseID, e.TagID,
-			e.IsEnabled,
+			e.FolderID, e.IsEnabled,
 		)
 	}
 
@@ -322,6 +322,9 @@ func (r *dorisRepository) VectorRetrieve(ctx context.Context,
 		log.Warnf("[Doris] Table %s does not exist, returning empty results", table)
 		return buildRetrieveResult(nil, types.VectorRetrieverType), nil
 	}
+	if err := r.ensureExistingTable(ctx, table); err != nil {
+		return nil, fmt.Errorf("prepare Doris table %s for vector retrieval: %w", table, err)
+	}
 
 	wb := buildBaseFilter(params)
 	whereClause, whereArgs := wb.build()
@@ -385,6 +388,9 @@ func (r *dorisRepository) KeywordsRetrieve(ctx context.Context,
 
 	var all []*types.IndexWithScore
 	for _, table := range tables {
+		if err := r.ensureExistingTable(ctx, table); err != nil {
+			return nil, fmt.Errorf("prepare Doris table %s for keyword retrieval: %w", table, err)
+		}
 		stmt := fmt.Sprintf(
 			"SELECT %s FROM `%s` WHERE %s AND %s MATCH_ANY ? LIMIT %d",
 			strings.Join(columnsForRetrieve, ", "),
@@ -435,7 +441,6 @@ func (r *dorisRepository) CopyIndices(ctx context.Context,
 	if err := r.ensureTable(ctx, dimension); err != nil {
 		return err
 	}
-
 	table := r.getTableName(dimension)
 	const pageSize = 64
 	offset := 0
@@ -484,8 +489,10 @@ func (r *dorisRepository) CopyIndices(ctx context.Context,
 				KnowledgeID:     targetKnowledgeID,
 				KnowledgeBaseID: targetKnowledgeBaseID,
 				TagID:           src.TagID,
-				IsEnabled:       src.IsEnabled,
-				Embedding:       src.Embedding,
+				// Folder IDs are KB-scoped, so copied documents land at target root.
+				FolderID:  "",
+				IsEnabled: src.IsEnabled,
+				Embedding: src.Embedding,
 			})
 		}
 
@@ -530,6 +537,7 @@ func toDorisVectorEmbedding(
 		KnowledgeID:     info.KnowledgeID,
 		KnowledgeBaseID: info.KnowledgeBaseID,
 		TagID:           info.TagID,
+		FolderID:        info.FolderID,
 		IsEnabled:       info.IsEnabled,
 	}
 	if additionalParams != nil {
@@ -592,19 +600,19 @@ func scanRetrieveRows(rows *sql.Rows, matchType types.MatchType) ([]*types.Index
 	var out []*types.IndexWithScore
 	for rows.Next() {
 		var (
-			id, content, sourceID, chunkID      string
-			knowledgeID, knowledgeBaseID, tagID string
-			sourceType                          int
-			isEnabled                           bool
-			score                               float64
-			err                                 error
+			id, content, sourceID, chunkID                string
+			knowledgeID, knowledgeBaseID, tagID, folderID string
+			sourceType                                    int
+			isEnabled                                     bool
+			score                                         float64
+			err                                           error
 		)
 		if withScore {
 			err = rows.Scan(&id, &content, &sourceID, &sourceType,
-				&chunkID, &knowledgeID, &knowledgeBaseID, &tagID, &isEnabled, &score)
+				&chunkID, &knowledgeID, &knowledgeBaseID, &tagID, &folderID, &isEnabled, &score)
 		} else {
 			err = rows.Scan(&id, &content, &sourceID, &sourceType,
-				&chunkID, &knowledgeID, &knowledgeBaseID, &tagID, &isEnabled)
+				&chunkID, &knowledgeID, &knowledgeBaseID, &tagID, &folderID, &isEnabled)
 			score = 1.0
 		}
 		if err != nil {
@@ -619,6 +627,7 @@ func scanRetrieveRows(rows *sql.Rows, matchType types.MatchType) ([]*types.Index
 			KnowledgeID:     knowledgeID,
 			KnowledgeBaseID: knowledgeBaseID,
 			TagID:           tagID,
+			FolderID:        folderID,
 			Score:           score,
 			MatchType:       matchType,
 		})
@@ -634,14 +643,14 @@ func scanCopyRows(rows *sql.Rows) ([]*DorisVectorEmbedding, error) {
 	var out []*DorisVectorEmbedding
 	for rows.Next() {
 		var (
-			id, content, sourceID, chunkID      string
-			knowledgeID, knowledgeBaseID, tagID string
-			sourceType                          int
-			isEnabled                           bool
-			embeddingRaw                        sql.RawBytes
+			id, content, sourceID, chunkID                string
+			knowledgeID, knowledgeBaseID, tagID, folderID string
+			sourceType                                    int
+			isEnabled                                     bool
+			embeddingRaw                                  sql.RawBytes
 		)
 		if err := rows.Scan(&id, &content, &sourceID, &sourceType,
-			&chunkID, &knowledgeID, &knowledgeBaseID, &tagID, &isEnabled, &embeddingRaw); err != nil {
+			&chunkID, &knowledgeID, &knowledgeBaseID, &tagID, &folderID, &isEnabled, &embeddingRaw); err != nil {
 			return nil, fmt.Errorf("scan copy row: %w", err)
 		}
 		vec, err := parseEmbeddingLiteral(embeddingRaw)
@@ -657,6 +666,7 @@ func scanCopyRows(rows *sql.Rows) ([]*DorisVectorEmbedding, error) {
 			KnowledgeID:     knowledgeID,
 			KnowledgeBaseID: knowledgeBaseID,
 			TagID:           tagID,
+			FolderID:        folderID,
 			IsEnabled:       isEnabled,
 			Embedding:       vec,
 		})
@@ -685,6 +695,7 @@ func calculateStorageSize(emb *DorisVectorEmbedding) int64 {
 	payload += int64(len(emb.KnowledgeID))
 	payload += int64(len(emb.KnowledgeBaseID))
 	payload += int64(len(emb.TagID))
+	payload += int64(len(emb.FolderID))
 	payload += 8 // source_type int
 
 	var vec int64

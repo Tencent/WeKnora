@@ -37,7 +37,7 @@ func (r *Repository) createIndexAndAlias(ctx context.Context, dim int) error {
 		return fmt.Errorf("alias check %s: %w", alias, err)
 	}
 	if exists {
-		return nil // another writer already set it up
+		return r.ensureFolderMapping(ctx, alias)
 	}
 
 	body, err := buildIndexMapping(r.cfg, dim)
@@ -76,6 +76,13 @@ func (r *Repository) createIndexAndAlias(ctx context.Context, dim int) error {
 			}
 		}
 		return fmt.Errorf("put alias %s → %s: %w", alias, realIndex, err)
+	}
+	if !indexCreated {
+		// A concurrent old-version writer may have created the index without
+		// folder_id before this process won the alias race.
+		if err := r.ensureFolderMapping(ctx, alias); err != nil {
+			return err
+		}
 	}
 	if indexCreated {
 		// Emit only when we actually provisioned the index (not when a
@@ -137,6 +144,7 @@ func buildIndexMapping(cfg internalCfg, dim int) ([]byte, error) {
 		"knowledge_id":      map[string]any{"type": "keyword"},
 		"knowledge_base_id": map[string]any{"type": "keyword"},
 		"tag_id":            map[string]any{"type": "keyword"},
+		"folder_id":         map[string]any{"type": "keyword"},
 		"source_id":         map[string]any{"type": "keyword"},
 		"source_type":       map[string]any{"type": "integer"},
 		"is_enabled":        map[string]any{"type": "boolean"},
@@ -178,6 +186,7 @@ func buildKeywordsMapping(cfg internalCfg) ([]byte, error) {
 		"knowledge_id":      map[string]any{"type": "keyword"},
 		"knowledge_base_id": map[string]any{"type": "keyword"},
 		"tag_id":            map[string]any{"type": "keyword"},
+		"folder_id":         map[string]any{"type": "keyword"},
 		"source_id":         map[string]any{"type": "keyword"},
 		"source_type":       map[string]any{"type": "integer"},
 		"is_enabled":        map[string]any{"type": "boolean"},
@@ -213,6 +222,10 @@ func (r *Repository) ensureKeywordsIndex(ctx context.Context) error {
 		return err
 	}
 	if exists {
+		if err := r.ensureFolderMapping(ctx, name); err != nil {
+			r.keywordsErr = err
+			return err
+		}
 		r.keywordsReady = true
 		r.keywordsErr = nil
 		return nil
@@ -228,8 +241,12 @@ func (r *Repository) ensureKeywordsIndex(ctx context.Context) error {
 			r.keywordsErr = err
 			return err
 		}
-		// resource_already_exists_exception — race with concurrent process,
-		// treat as success.
+		// A concurrent old-version process may have won with the legacy
+		// mapping. Verify/upgrade before caching readiness.
+		if err := r.ensureFolderMapping(ctx, name); err != nil {
+			r.keywordsErr = err
+			return err
+		}
 	} else {
 		created = true
 	}
@@ -238,6 +255,93 @@ func (r *Repository) ensureKeywordsIndex(ctx context.Context) error {
 	if created {
 		// dim=0 marks the dim-less keyword-only index.
 		r.auditSink().EmitIndexCreated(ctx, name, 0)
+	}
+	return nil
+}
+
+// ensureFolderMapping upgrades indices created before folder support.
+//
+// A missing field can be added as keyword in place. If OpenSearch already
+// created the field dynamically as text, the default mapping also exposes a
+// keyword subfield; folder queries address both forms. Any other shape is
+// rejected instead of silently returning zero matches.
+func (r *Repository) ensureFolderMapping(ctx context.Context, name string) error {
+	req := osapi.MappingGetReq{Indices: []string{name}}
+	resp, err := r.client.Indices.Mapping.Get(ctx, &req)
+	if err != nil {
+		return fmt.Errorf("get folder mapping for %s: %w", name, wrapTransport(err))
+	}
+	if resp != nil && resp.Inspect().Response != nil {
+		drainAndClose(resp.Inspect().Response.Body)
+	}
+	if resp == nil || len(resp.Indices) == 0 {
+		return fmt.Errorf("get folder mapping for %s returned no indices: %w", name, ErrConfigInvalid)
+	}
+
+	for index, indexMapping := range resp.Indices {
+		missing, compatible, inspectErr := inspectFolderMapping(indexMapping.Mappings)
+		if inspectErr != nil {
+			return fmt.Errorf("inspect folder mapping for %s: %w", index, inspectErr)
+		}
+		if !compatible && !missing {
+			return fmt.Errorf(
+				"index %s has incompatible folder_id mapping; reindex required: %w",
+				index,
+				ErrConfigInvalid,
+			)
+		}
+		if missing {
+			if err := r.putFolderKeywordMapping(ctx, index); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func inspectFolderMapping(raw json.RawMessage) (missing bool, compatible bool, err error) {
+	var mapping struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &mapping); err != nil {
+		return false, false, err
+	}
+	fieldRaw, ok := mapping.Properties["folder_id"]
+	if !ok {
+		return true, false, nil
+	}
+	var field struct {
+		Type   string `json:"type"`
+		Fields map[string]struct {
+			Type string `json:"type"`
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal(fieldRaw, &field); err != nil {
+		return false, false, err
+	}
+	if field.Type == "keyword" {
+		return false, true, nil
+	}
+	if keyword, ok := field.Fields["keyword"]; field.Type == "text" && ok && keyword.Type == "keyword" {
+		return false, true, nil
+	}
+	return false, false, nil
+}
+
+func (r *Repository) putFolderKeywordMapping(ctx context.Context, index string) error {
+	body := []byte(`{"properties":{"folder_id":{"type":"keyword"}}}`)
+	resp, err := r.client.Indices.Mapping.Put(ctx, osapi.MappingPutReq{
+		Indices: []string{index},
+		Body:    bytes.NewReader(body),
+	})
+	if err != nil {
+		return fmt.Errorf("add folder_id keyword mapping to %s: %w", index, wrapTransport(err))
+	}
+	if resp != nil && resp.Inspect().Response != nil {
+		drainAndClose(resp.Inspect().Response.Body)
+	}
+	if resp == nil || !resp.Acknowledged {
+		return fmt.Errorf("add folder_id keyword mapping to %s was not acknowledged: %w", index, ErrConfigInvalid)
 	}
 	return nil
 }

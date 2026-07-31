@@ -2,6 +2,7 @@ package opensearch
 
 import (
 	"context"
+
 	"io"
 	"net/http"
 	"strings"
@@ -55,7 +56,11 @@ func TestCopyIndices_ScanThenBatchSave(t *testing.T) {
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodHead:
-			w.WriteHeader(http.StatusOK) // alias exists → ensureReady no-op
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/_mapping"):
+			_, _ = w.Write([]byte(`{
+				"weknora_test_768_v1":{"mappings":{"properties":{"folder_id":{"type":"keyword"}}}}
+			}`))
 		case strings.Contains(r.URL.Path, "_search"):
 			mu.Lock()
 			searchCnt++
@@ -97,7 +102,7 @@ func TestCopyIndices_ScanThenBatchSave(t *testing.T) {
 		t.Fatal("no bulk request captured")
 	}
 	// Target IDs present, source IDs gone from the written doc.
-	for _, want := range []string{`"chunk_id":"tgtChunk"`, `"knowledge_id":"tgtKnow"`, `"knowledge_base_id":"kbDst"`, `"source_id":"tgtChunk"`} {
+	for _, want := range []string{`"chunk_id":"tgtChunk"`, `"knowledge_id":"tgtKnow"`, `"knowledge_base_id":"kbDst"`, `"source_id":"tgtChunk"`, `"folder_id":""`} {
 		if !strings.Contains(bulkBody, want) {
 			t.Errorf("bulk body missing %q\n%s", want, bulkBody)
 		}

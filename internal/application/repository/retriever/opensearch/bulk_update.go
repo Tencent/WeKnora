@@ -68,6 +68,31 @@ func (r *Repository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMap map[
 	return nil
 }
 
+// BatchUpdateChunkFolderID sets folder_id for the given chunks, grouped by folder.
+func (r *Repository) BatchUpdateChunkFolderID(ctx context.Context, chunkFolderMap map[string]string) error {
+	if len(chunkFolderMap) == 0 {
+		return nil
+	}
+	groups := map[string][]string{}
+	for id, folder := range chunkFolderMap {
+		groups[folder] = append(groups[folder], id)
+	}
+	folders := make([]string, 0, len(groups))
+	for folder := range groups {
+		folders = append(folders, folder)
+	}
+	sort.Strings(folders)
+	for _, folder := range folders {
+		ids := groups[folder]
+		sort.Strings(ids)
+		if err := r.updateByQueryScript(ctx, ids,
+			"ctx._source.folder_id = params.v", map[string]any{"v": folder}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // updateByQueryScript runs an _update_by_query over the cross-dim <base>_*
 // pattern, matching the given chunk ids via a terms filter and applying a
 // constant Painless source with caller values flowing only through bound

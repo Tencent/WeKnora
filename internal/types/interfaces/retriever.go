@@ -19,6 +19,14 @@ type RetrieveEngine interface {
 	Support() []types.RetrieverType
 }
 
+// ChunkFolderMetadataUpdater is the narrow capability used when a folder
+// operation changes the denormalized folder_id stored in indexed chunks.
+// Keeping it separate avoids making unrelated retrieve-engine test doubles
+// implement a mutation they never exercise.
+type ChunkFolderMetadataUpdater interface {
+	BatchUpdateChunkFolderID(ctx context.Context, chunkFolderMap map[string]string) error
+}
+
 // RetrieveEngineRepository defines the retrieve engine repository interface
 type RetrieveEngineRepository interface {
 	// Save saves the index info

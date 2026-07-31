@@ -71,6 +71,25 @@ func primeCompatMode(repo *dorisRepository, mode dorisCompatMode, err error) {
 	repo.compatResolveOnce.Do(func() {})
 }
 
+func compatibleFolderColumnRows() *sqlmock.Rows {
+	return sqlmock.NewRows([]string{"COLUMN_TYPE", "IS_NULLABLE", "COLUMN_DEFAULT"}).
+		AddRow("varchar(36)", "NO", "")
+}
+
+func folderIndexRows(columnName, indexType, state string) *sqlmock.Rows {
+	return sqlmock.NewRows([]string{
+		"Table", "Key_name", "Column_name", "Index_type", "State",
+	}).AddRow(
+		"weknora_embeddings_768", "idx_folder", columnName, indexType, state,
+	)
+}
+
+func emptyFolderIndexRows() *sqlmock.Rows {
+	return sqlmock.NewRows([]string{
+		"Table", "Key_name", "Column_name", "Index_type", "State",
+	})
+}
+
 // ---------------------------------------------------------------------------
 // query.go：whereBuilder / embeddingLiteral / parseEmbeddingLiteral
 // ---------------------------------------------------------------------------
@@ -324,6 +343,7 @@ func TestDeleteByKnowledgeIDList_NoOpOnEmpty(t *testing.T) {
 func TestVectorRetrieve_SQLShape(t *testing.T) {
 	repo, mock, _, cleanup := newTestRepo(t)
 	defer cleanup()
+	repo.schemaReadyTables.Store("weknora_embeddings_3", true)
 
 	mock.ExpectQuery(`SELECT COUNT\(1\) FROM information_schema.tables`).
 		WithArgs("weknora", "weknora_embeddings_3").
@@ -337,8 +357,8 @@ func TestVectorRetrieve_SQLShape(t *testing.T) {
 			sqlmock.NewRows([]string{
 				"id", "content", "source_id", "source_type",
 				"chunk_id", "knowledge_id", "knowledge_base_id", "tag_id",
-				"is_enabled", "score",
-			}).AddRow("id1", "hello", "src", 0, "c1", "k1", "kb1", "t1", true, 0.95),
+				"folder_id", "is_enabled", "score",
+			}).AddRow("id1", "hello", "src", 0, "c1", "k1", "kb1", "t1", "f1", true, 0.95),
 		)
 
 	results, err := repo.VectorRetrieve(context.Background(), types.RetrieveParams{
@@ -359,6 +379,7 @@ func TestVectorRetrieve_SQLShape_LegacyMode(t *testing.T) {
 	repo, mock, _, cleanup := newTestRepo(t)
 	defer cleanup()
 	primeCompatMode(repo, dorisCompatModeLegacy, nil)
+	repo.schemaReadyTables.Store("weknora_embeddings_3", true)
 
 	mock.ExpectQuery(`SELECT COUNT\(1\) FROM information_schema.tables`).
 		WithArgs("weknora", "weknora_embeddings_3").
@@ -370,8 +391,8 @@ func TestVectorRetrieve_SQLShape_LegacyMode(t *testing.T) {
 			sqlmock.NewRows([]string{
 				"id", "content", "source_id", "source_type",
 				"chunk_id", "knowledge_id", "knowledge_base_id", "tag_id",
-				"is_enabled", "score",
-			}).AddRow("id1", "hello", "src", 0, "c1", "k1", "kb1", "t1", true, 0.8),
+				"folder_id", "is_enabled", "score",
+			}).AddRow("id1", "hello", "src", 0, "c1", "k1", "kb1", "t1", "f1", true, 0.8),
 		)
 
 	results, err := repo.VectorRetrieve(context.Background(), types.RetrieveParams{
@@ -405,6 +426,7 @@ func TestNormalizeEmbedding(t *testing.T) {
 func TestKeywordsRetrieve_SQLShape(t *testing.T) {
 	repo, mock, _, cleanup := newTestRepo(t)
 	defer cleanup()
+	repo.schemaReadyTables.Store("weknora_embeddings_768", true)
 
 	mock.ExpectQuery(`SELECT TABLE_NAME FROM information_schema.tables`).
 		WithArgs("weknora", "weknora_embeddings\\_%").
@@ -419,8 +441,8 @@ func TestKeywordsRetrieve_SQLShape(t *testing.T) {
 			sqlmock.NewRows([]string{
 				"id", "content", "source_id", "source_type",
 				"chunk_id", "knowledge_id", "knowledge_base_id", "tag_id",
-				"is_enabled",
-			}).AddRow("id1", "你好世界", "src", 0, "c1", "k1", "kb1", "", true),
+				"folder_id", "is_enabled",
+			}).AddRow("id1", "你好世界", "src", 0, "c1", "k1", "kb1", "", "", true),
 		)
 
 	results, err := repo.KeywordsRetrieve(context.Background(), types.RetrieveParams{
@@ -451,18 +473,18 @@ func TestBatchUpdateChunkEnabledStatus_RewritesRows(t *testing.T) {
 	mock.ExpectQuery(`SELECT TABLE_NAME FROM information_schema.tables`).
 		WithArgs("weknora", "weknora_embeddings\\_%").
 		WillReturnRows(sqlmock.NewRows([]string{"TABLE_NAME"}).AddRow("weknora_embeddings_768"))
-	mock.ExpectQuery(`SELECT id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id, tag_id, is_enabled, embedding FROM .*weknora_embeddings_768.* WHERE chunk_id IN`).
+	mock.ExpectQuery(`SELECT id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id, tag_id, folder_id, is_enabled, embedding FROM .*weknora_embeddings_768.* WHERE chunk_id IN`).
 		WithArgs("c1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "content", "source_id", "source_type",
 			"chunk_id", "knowledge_id", "knowledge_base_id", "tag_id",
-			"is_enabled", "embedding",
-		}).AddRow("row-1", "hello", "src1", 0, "c1", "k1", "kb1", "t1", true, "[1,2,3]"))
+			"folder_id", "is_enabled", "embedding",
+		}).AddRow("row-1", "hello", "src1", 0, "c1", "k1", "kb1", "t1", "f1", true, "[1,2,3]"))
 	mock.ExpectExec(`DELETE FROM .*weknora_embeddings_768.* WHERE id IN \(\?\)`).
 		WithArgs("row-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`INSERT INTO .*weknora_embeddings_768.*VALUES \(\?, \?, \?, \?, \?, \?, \?, \?, \?, \[`).
-		WithArgs("row-1", "hello", "src1", 0, "c1", "k1", "kb1", "t1", false).
+	mock.ExpectExec(`INSERT INTO .*weknora_embeddings_768.*VALUES \(\?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \[`).
+		WithArgs("row-1", "hello", "src1", 0, "c1", "k1", "kb1", "t1", "f1", false).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	require.NoError(t, repo.BatchUpdateChunkEnabledStatus(
@@ -508,6 +530,14 @@ func TestEnsureTable_DDLShape(t *testing.T) {
 	// CREATE TABLE 应包含关键属性和 Doris 支持的 inner_product ANN metric
 	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS .*weknora_embeddings_768.*metric_type"="inner_product".*DUPLICATE KEY\(id\).*BUCKETS 5.*replication_num.*=.*2`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT COUNT\(1\) FROM information_schema.columns`).
+		WithArgs("weknora", "weknora_embeddings_768", fieldFolderID).
+		WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(1))
+	mock.ExpectQuery(`SELECT COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT`).
+		WithArgs("weknora", "weknora_embeddings_768", fieldFolderID).
+		WillReturnRows(compatibleFolderColumnRows())
+	mock.ExpectQuery(`SHOW INDEX FROM .*weknora_embeddings_768.*`).
+		WillReturnRows(folderIndexRows(fieldFolderID, "INVERTED", "NORMAL"))
 	// SHOW INDEX 一次即返回 ANN 已 FINISHED
 	mock.ExpectQuery(`SHOW INDEX FROM .*weknora_embeddings_768.*`).
 		WillReturnRows(
@@ -541,6 +571,14 @@ func TestEnsureTable_DDLShape_LegacyMode(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(0))
 	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS .*weknora_embeddings_768.*metric_type"="cosine_distance".*UNIQUE KEY\(id\).*enable_unique_key_merge_on_write.*true`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT COUNT\(1\) FROM information_schema.columns`).
+		WithArgs("weknora", "weknora_embeddings_768", fieldFolderID).
+		WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(1))
+	mock.ExpectQuery(`SELECT COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT`).
+		WithArgs("weknora", "weknora_embeddings_768", fieldFolderID).
+		WillReturnRows(compatibleFolderColumnRows())
+	mock.ExpectQuery(`SHOW INDEX FROM .*weknora_embeddings_768.*`).
+		WillReturnRows(folderIndexRows(fieldFolderID, "INVERTED", "NORMAL"))
 	mock.ExpectQuery(`SHOW INDEX FROM .*weknora_embeddings_768.*`).
 		WillReturnRows(
 			sqlmock.NewRows([]string{"Table", "Key_name", "State"}).
@@ -551,6 +589,271 @@ func TestEnsureTable_DDLShape_LegacyMode(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return mock.ExpectationsWereMet() == nil
 	}, 2*time.Second, 10*time.Millisecond, "expectations should be met after async ANN poll")
+}
+
+func TestEnsureTable_UpgradesFolderSchemaAfterCreateRace(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := &dorisRepository{
+		db:             db,
+		database:       "weknora",
+		tableBaseName:  "weknora_embeddings",
+		bucketsNum:     5,
+		replicationNum: 1,
+	}
+	primeCompatMode(repo, dorisCompatModeInnerProductDuplicate, nil)
+
+	mock.ExpectQuery(`SELECT COUNT\(1\) FROM information_schema.tables`).
+		WithArgs("weknora", "weknora_embeddings_768").
+		WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(0))
+	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS .*weknora_embeddings_768`).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	// Simulate an old replica winning the CREATE race: the table now exists
+	// but still lacks the new column and index.
+	mock.ExpectQuery(`SELECT COUNT\(1\) FROM information_schema.columns`).
+		WithArgs("weknora", "weknora_embeddings_768", fieldFolderID).
+		WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(0))
+	mock.ExpectExec(`ALTER TABLE .*weknora_embeddings_768.*ADD COLUMN IF NOT EXISTS folder_id`).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT COUNT\(1\) FROM information_schema.columns`).
+		WithArgs("weknora", "weknora_embeddings_768", fieldFolderID).
+		WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(1))
+	mock.ExpectQuery(`SELECT COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT`).
+		WithArgs("weknora", "weknora_embeddings_768", fieldFolderID).
+		WillReturnRows(compatibleFolderColumnRows())
+	mock.ExpectQuery(`SHOW INDEX FROM .*weknora_embeddings_768.*`).
+		WillReturnRows(emptyFolderIndexRows())
+	mock.ExpectExec(`CREATE INDEX IF NOT EXISTS idx_folder ON .*weknora_embeddings_768.*folder_id.*USING INVERTED`).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SHOW INDEX FROM .*weknora_embeddings_768.*`).
+		WillReturnRows(folderIndexRows(fieldFolderID, "INVERTED", "NORMAL"))
+	mock.ExpectQuery(`SHOW INDEX FROM .*weknora_embeddings_768.*`).
+		WillReturnRows(
+			sqlmock.NewRows([]string{"Table", "Key_name", "State"}).
+				AddRow("weknora_embeddings_768", "idx_emb", "FINISHED"),
+		)
+
+	require.NoError(t, repo.ensureTable(context.Background(), 768))
+	require.Eventually(t, func() bool {
+		return mock.ExpectationsWereMet() == nil
+	}, 2*time.Second, 10*time.Millisecond)
+}
+
+func TestEnsureTable_UpgradesLegacyFolderSchema(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := &dorisRepository{
+		db:            db,
+		database:      "weknora",
+		tableBaseName: "weknora_embeddings",
+	}
+	primeCompatMode(repo, dorisCompatModeInnerProductDuplicate, nil)
+
+	mock.ExpectQuery(`SELECT COUNT\(1\) FROM information_schema.tables`).
+		WithArgs("weknora", "weknora_embeddings_768").
+		WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(1))
+	mock.ExpectQuery(`SELECT COUNT\(1\) FROM information_schema.columns`).
+		WithArgs("weknora", "weknora_embeddings_768", fieldFolderID).
+		WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(0))
+	mock.ExpectExec(`ALTER TABLE .*weknora_embeddings_768.*ADD COLUMN IF NOT EXISTS folder_id VARCHAR\(36\) NOT NULL DEFAULT '' AFTER tag_id`).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT COUNT\(1\) FROM information_schema.columns`).
+		WithArgs("weknora", "weknora_embeddings_768", fieldFolderID).
+		WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(1))
+	mock.ExpectQuery(`SELECT COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT`).
+		WithArgs("weknora", "weknora_embeddings_768", fieldFolderID).
+		WillReturnRows(compatibleFolderColumnRows())
+	mock.ExpectQuery(`SHOW INDEX FROM .*weknora_embeddings_768.*`).
+		WillReturnRows(emptyFolderIndexRows())
+	mock.ExpectExec(`CREATE INDEX IF NOT EXISTS idx_folder ON .*weknora_embeddings_768.*folder_id.*USING INVERTED`).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SHOW INDEX FROM .*weknora_embeddings_768.*`).
+		WillReturnRows(folderIndexRows(fieldFolderID, "INVERTED", "NORMAL"))
+
+	require.NoError(t, repo.ensureTable(context.Background(), 768))
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestEnsureTable_KeepsExistingFolderSchema(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := &dorisRepository{
+		db:            db,
+		database:      "weknora",
+		tableBaseName: "weknora_embeddings",
+	}
+	primeCompatMode(repo, dorisCompatModeInnerProductDuplicate, nil)
+
+	mock.ExpectQuery(`SELECT COUNT\(1\) FROM information_schema.tables`).
+		WithArgs("weknora", "weknora_embeddings_768").
+		WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(1))
+	mock.ExpectQuery(`SELECT COUNT\(1\) FROM information_schema.columns`).
+		WithArgs("weknora", "weknora_embeddings_768", fieldFolderID).
+		WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(1))
+	mock.ExpectQuery(`SELECT COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT`).
+		WithArgs("weknora", "weknora_embeddings_768", fieldFolderID).
+		WillReturnRows(compatibleFolderColumnRows())
+	mock.ExpectQuery(`SHOW INDEX FROM .*weknora_embeddings_768.*`).
+		WillReturnRows(folderIndexRows(fieldFolderID, "INVERTED", "NORMAL"))
+
+	require.NoError(t, repo.ensureTable(context.Background(), 768))
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestEnsureExistingTableValidatesAndCachesFolderSchema(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := &dorisRepository{
+		db:            db,
+		database:      "weknora",
+		tableBaseName: "weknora_embeddings",
+	}
+	mock.ExpectQuery(`SELECT COUNT\(1\) FROM information_schema.columns`).
+		WithArgs("weknora", "weknora_embeddings_768", fieldFolderID).
+		WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(1))
+	mock.ExpectQuery(`SELECT COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT`).
+		WithArgs("weknora", "weknora_embeddings_768", fieldFolderID).
+		WillReturnRows(compatibleFolderColumnRows())
+	mock.ExpectQuery(`SHOW INDEX FROM .*weknora_embeddings_768.*`).
+		WillReturnRows(folderIndexRows(fieldFolderID, "INVERTED", "NORMAL"))
+
+	require.NoError(t, repo.ensureExistingTable(context.Background(), "weknora_embeddings_768"))
+	require.NoError(t, repo.ensureExistingTable(context.Background(), "weknora_embeddings_768"))
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestEnsureExistingTableRejectsIncompatibleFolderColumn(t *testing.T) {
+	tests := []struct {
+		name        string
+		columnType  string
+		nullable    string
+		defaultVal  any
+		errorSubstr string
+	}{
+		{
+			name:        "wrong type",
+			columnType:  "varchar(64)",
+			nullable:    "NO",
+			defaultVal:  "",
+			errorSubstr: "type",
+		},
+		{
+			name:        "nullable",
+			columnType:  "varchar(36)",
+			nullable:    "YES",
+			defaultVal:  "",
+			errorSubstr: "nullable",
+		},
+		{
+			name:        "missing default",
+			columnType:  "varchar(36)",
+			nullable:    "NO",
+			defaultVal:  nil,
+			errorSubstr: "missing default",
+		},
+		{
+			name:        "wrong default",
+			columnType:  "varchar(36)",
+			nullable:    "NO",
+			defaultVal:  "root",
+			errorSubstr: "default",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+			require.NoError(t, err)
+			defer db.Close()
+
+			repo := &dorisRepository{db: db, database: "weknora"}
+			mock.ExpectQuery(`SELECT COUNT\(1\) FROM information_schema.columns`).
+				WithArgs("weknora", "weknora_embeddings_768", fieldFolderID).
+				WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(1))
+			mock.ExpectQuery(`SELECT COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT`).
+				WithArgs("weknora", "weknora_embeddings_768", fieldFolderID).
+				WillReturnRows(
+					sqlmock.NewRows([]string{"COLUMN_TYPE", "IS_NULLABLE", "COLUMN_DEFAULT"}).
+						AddRow(tt.columnType, tt.nullable, tt.defaultVal),
+				)
+
+			err = repo.ensureExistingTable(context.Background(), "weknora_embeddings_768")
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errorSubstr)
+			assert.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestEnsureExistingTableRejectsIncompatibleFolderIndex(t *testing.T) {
+	tests := []struct {
+		name        string
+		columnName  string
+		indexType   string
+		errorSubstr string
+	}{
+		{
+			name:        "wrong indexed column",
+			columnName:  "knowledge_base_id",
+			indexType:   "INVERTED",
+			errorSubstr: "column",
+		},
+		{
+			name:        "wrong index type",
+			columnName:  fieldFolderID,
+			indexType:   "BTREE",
+			errorSubstr: "type",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+			require.NoError(t, err)
+			defer db.Close()
+
+			repo := &dorisRepository{db: db, database: "weknora"}
+			mock.ExpectQuery(`SELECT COUNT\(1\) FROM information_schema.columns`).
+				WithArgs("weknora", "weknora_embeddings_768", fieldFolderID).
+				WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(1))
+			mock.ExpectQuery(`SELECT COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT`).
+				WithArgs("weknora", "weknora_embeddings_768", fieldFolderID).
+				WillReturnRows(compatibleFolderColumnRows())
+			mock.ExpectQuery(`SHOW INDEX FROM .*weknora_embeddings_768.*`).
+				WillReturnRows(folderIndexRows(tt.columnName, tt.indexType, "NORMAL"))
+
+			err = repo.ensureExistingTable(context.Background(), "weknora_embeddings_768")
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errorSubstr)
+			assert.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestIndexExistsRequiresReadyState(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := &dorisRepository{db: db}
+	mock.ExpectQuery(`SHOW INDEX FROM .*weknora_embeddings_768.*`).
+		WillReturnRows(folderIndexRows(fieldFolderID, "INVERTED", "BUILDING"))
+
+	ready, err := repo.indexExists(context.Background(), "weknora_embeddings_768", "idx_folder")
+
+	require.NoError(t, err)
+	assert.False(t, ready)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestBatchSave_SQLShape(t *testing.T) {
@@ -569,10 +872,10 @@ func TestBatchSave_SQLShape(t *testing.T) {
 	mock.ExpectExec(`DELETE FROM .*weknora_embeddings_3.* WHERE id IN \(\?\)`).
 		WithArgs("src1").
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(`INSERT INTO .*weknora_embeddings_3.*VALUES \(\?, \?, \?, \?, \?, \?, \?, \?, \?, \[`).
+	mock.ExpectExec(`INSERT INTO .*weknora_embeddings_3.*VALUES \(\?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \[`).
 		WithArgs(
 			"src1", "hello", "src1", 0,
-			"c1", "k1", "kb1", "",
+			"c1", "k1", "kb1", "", "",
 			true,
 		).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -609,10 +912,10 @@ func TestBatchSave_SQLShape_LegacyMode(t *testing.T) {
 	primeCompatMode(repo, dorisCompatModeLegacy, nil)
 	repo.initializedTables.Store(3, true)
 
-	mock.ExpectExec(`INSERT INTO .*weknora_embeddings_3.*VALUES \(\?, \?, \?, \?, \?, \?, \?, \?, \?, \[`).
+	mock.ExpectExec(`INSERT INTO .*weknora_embeddings_3.*VALUES \(\?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \[`).
 		WithArgs(
 			"src1", "hello", "src1", 0,
-			"c1", "k1", "kb1", "",
+			"c1", "k1", "kb1", "", "",
 			true,
 		).
 		WillReturnResult(sqlmock.NewResult(0, 1))

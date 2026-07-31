@@ -140,7 +140,7 @@ func (r *Repository) search(ctx context.Context, indexPattern string, body []byt
 // Field-by-field decode (vs map[string]any) keeps the JSON shape
 // pinned at compile time.
 type hit struct {
-	ID     string  `json:"_id"`   // equals chunk_id per the indexing invariant
+	ID     string  `json:"_id"` // equals chunk_id per the indexing invariant
 	Score  float64 `json:"_score"`
 	Source struct {
 		Content         string `json:"content"`
@@ -150,6 +150,7 @@ type hit struct {
 		SourceID        string `json:"source_id"`
 		SourceType      int    `json:"source_type"` // integer, not stringified
 		TagID           string `json:"tag_id"`
+		FolderID        string `json:"folder_id"`
 		IsEnabled       bool   `json:"is_enabled"`
 	} `json:"_source"`
 }
@@ -191,6 +192,7 @@ func wrapResults(ctx context.Context, hits []hit, rt types.RetrieverType, mt typ
 			SourceID:        h.Source.SourceID,
 			SourceType:      types.SourceType(h.Source.SourceType),
 			TagID:           h.Source.TagID,
+			FolderID:        h.Source.FolderID,
 			Content:         h.Source.Content,
 			Score:           h.Score,
 			MatchType:       mt,

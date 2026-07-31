@@ -25,6 +25,86 @@ func TestAuthorizeTenantAPIKeyKnowledgeTargetsAllowsUnspecifiedTargets(t *testin
 	}
 }
 
+func TestAuthorizeTenantAPIKeyKnowledgeTargetsWithFoldersRejectsOutOfScopeFolder(t *testing.T) {
+	ctx := WithTenantAPIKeyScope(context.Background(), TenantAPIKeyScope{
+		KnowledgeBaseIDs: StringArray{"kb-allowed"},
+	})
+	err := AuthorizeTenantAPIKeyKnowledgeTargetsWithFolders(
+		ctx,
+		nil,
+		nil,
+		nil,
+		[]FolderScope{{KnowledgeBaseID: "kb-blocked", FolderID: "folder-1"}},
+	)
+	if err == nil {
+		t.Fatal("expected forbidden for folder scope outside API key KB allow-list")
+	}
+}
+
+func TestAuthorizeTenantAPIKeyKnowledgeTargetsWithFoldersAllowsFolderInScope(t *testing.T) {
+	ctx := WithTenantAPIKeyScope(context.Background(), TenantAPIKeyScope{
+		KnowledgeBaseIDs: StringArray{"kb-allowed"},
+	})
+	err := AuthorizeTenantAPIKeyKnowledgeTargetsWithFolders(
+		ctx,
+		nil,
+		nil,
+		nil,
+		[]FolderScope{{KnowledgeBaseID: "kb-allowed", FolderID: "folder-1"}},
+	)
+	if err != nil {
+		t.Fatalf("expected allowed folder scope, got %v", err)
+	}
+}
+
+func TestAuthorizeTenantAPIKeyKnowledgeTargetsWithFoldersAllowsHintedFileInScope(t *testing.T) {
+	ctx := WithTenantAPIKeyScope(context.Background(), TenantAPIKeyScope{
+		KnowledgeBaseIDs: StringArray{"kb-allowed"},
+	})
+	err := AuthorizeTenantAPIKeyKnowledgeTargetsWithFolders(
+		ctx,
+		nil,
+		[]string{"doc-1"},
+		map[string]string{"doc-1": "kb-allowed"},
+		[]FolderScope{{KnowledgeBaseID: "kb-allowed", FolderID: "folder-1"}},
+	)
+	if err != nil {
+		t.Fatalf("expected allowed file and folder scope, got %v", err)
+	}
+}
+
+func TestAuthorizeTenantAPIKeyKnowledgeTargetsWithFoldersRejectsFileWithoutKBHint(t *testing.T) {
+	ctx := WithTenantAPIKeyScope(context.Background(), TenantAPIKeyScope{
+		KnowledgeBaseIDs: StringArray{"kb-allowed"},
+	})
+	err := AuthorizeTenantAPIKeyKnowledgeTargetsWithFolders(
+		ctx,
+		nil,
+		[]string{"doc-1"},
+		nil,
+		[]FolderScope{{KnowledgeBaseID: "kb-allowed", FolderID: "folder-1"}},
+	)
+	if err == nil {
+		t.Fatal("expected file without KB hint to be rejected")
+	}
+}
+
+func TestAuthorizeTenantAPIKeyKnowledgeTargetsWithFoldersRejectsOutOfScopeFileHint(t *testing.T) {
+	ctx := WithTenantAPIKeyScope(context.Background(), TenantAPIKeyScope{
+		KnowledgeBaseIDs: StringArray{"kb-allowed"},
+	})
+	err := AuthorizeTenantAPIKeyKnowledgeTargetsWithFolders(
+		ctx,
+		nil,
+		[]string{"doc-1"},
+		map[string]string{"doc-1": "kb-blocked"},
+		[]FolderScope{{KnowledgeBaseID: "kb-allowed", FolderID: "folder-1"}},
+	)
+	if err == nil {
+		t.Fatal("expected out-of-scope file hint to be rejected")
+	}
+}
+
 func TestAuthorizeTenantAPIKeyOptionalTagIDsRejectsTags(t *testing.T) {
 	ctx := WithTenantAPIKeyScope(context.Background(), TenantAPIKeyScope{
 		KnowledgeBaseIDs: StringArray{"kb-1"},

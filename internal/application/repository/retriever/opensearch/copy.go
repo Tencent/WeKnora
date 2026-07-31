@@ -124,8 +124,10 @@ func (r *Repository) CopyIndices(
 				KnowledgeBaseID: targetKnowledgeBaseID,
 				KnowledgeType:   knowledgeType,
 				TagID:           d.TagID,
-				IsEnabled:       d.IsEnabled,
-				IsRecommended:   d.IsRecommended,
+				// Folder IDs are KB-scoped, so copied documents land at target root.
+				FolderID:      "",
+				IsEnabled:     d.IsEnabled,
+				IsRecommended: d.IsRecommended,
 			})
 		}
 		if len(infos) > 0 {

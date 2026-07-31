@@ -16,6 +16,7 @@ type VectorEmbedding struct {
 	KnowledgeID     string    `json:"knowledge_id"      gorm:"column:knowledge_id"`         // ID of the knowledge item
 	KnowledgeBaseID string    `json:"knowledge_base_id" gorm:"column:knowledge_base_id"`    // ID of the knowledge base
 	TagID           string    `json:"tag_id"            gorm:"column:tag_id"`               // Tag ID for categorization
+	FolderID        string    `json:"folder_id"         gorm:"column:folder_id"`            // Folder ID for categorization
 	Embedding       []float32 `json:"embedding"         gorm:"column:embedding;not null"`   // Vector embedding of the content
 	IsEnabled       bool      `json:"is_enabled"`                                           // Whether the chunk is enabled
 	IsRecommended   bool      `json:"is_recommended"`                                       // Whether the chunk is recommended
@@ -37,6 +38,7 @@ func ToDBVectorEmbedding(embedding *types.IndexInfo, additionalParams map[string
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
 		TagID:           embedding.TagID,
+		FolderID:        embedding.FolderID,
 		IsEnabled:       embedding.IsEnabled,
 		IsRecommended:   embedding.IsRecommended,
 	}
@@ -70,6 +72,7 @@ func FromDBVectorEmbeddingWithScore(id string,
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
 		TagID:           embedding.TagID,
+		FolderID:        embedding.FolderID,
 		Content:         embedding.Content,
 		Score:           embedding.Score,
 		MatchType:       matchType,

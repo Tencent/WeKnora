@@ -78,6 +78,7 @@ var queueDefinitions = []QueueDefinition{
 	{Name: QueueMaintenance, Pool: WorkerPoolMaintenance, Weight: 1, TaskTypes: []string{
 		TypeFAQImport, TypeKBClone, TypeIndexDelete, TypeKBDelete,
 		TypeKnowledgeListDelete, TypeKnowledgeListReparse, TypeKnowledgeMove,
+		TypeDocumentFolderDelete,
 	}},
 	{Name: QueueWiki, Pool: WorkerPoolWiki, Weight: 1, TaskTypes: []string{TypeWikiIngest, TypeWikiFinalize}},
 }
@@ -246,6 +247,7 @@ const (
 	TypeWikiIngest               = "wiki:ingest"                // Wiki 页面同步任务
 	TypeWikiFinalize             = "wiki:finalize"              // Wiki KB 级收尾任务（防抖：索引重建/死链清理/交叉链接）
 	TypeTemporaryDocumentProcess = "temporary_document:process" // 会话临时文档解析任务
+	TypeDocumentFolderDelete     = "document_folder:delete"     // 文档目录树删除任务
 )
 
 // ExtractChunkPayload represents the extract chunk task payload
@@ -414,6 +416,16 @@ type KnowledgeListDeletePayload struct {
 	TenantID     uint64        `json:"tenant_id"`
 	KnowledgeIDs []string      `json:"knowledge_ids"`
 	Initiator    TaskInitiator `json:"initiator,omitempty"`
+}
+
+// DocumentFolderDeletePayload represents one explicit directory-tree delete.
+type DocumentFolderDeletePayload struct {
+	TracingContext
+	TenantID        uint64                   `json:"tenant_id"`
+	KnowledgeBaseID string                   `json:"knowledge_base_id"`
+	FolderID        string                   `json:"folder_id"`
+	Mode            DocumentFolderDeleteMode `json:"mode"`
+	Initiator       TaskInitiator            `json:"initiator,omitempty"`
 }
 
 // KnowledgeListReparsePayload represents the batch knowledge reparse task payload

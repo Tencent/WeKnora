@@ -23,6 +23,7 @@ type KnowledgeService interface {
 		tagIDs []string,
 		channel string,
 		processOverrides *types.KnowledgeProcessOverrides,
+		folderID string,
 	) (*types.Knowledge, error)
 	// CreateKnowledgeFromURL creates knowledge from a URL.
 	// When fileName or fileType is provided (or the URL path has a known file extension),
@@ -39,6 +40,7 @@ type KnowledgeService interface {
 		tagIDs []string,
 		channel string,
 		processOverrides *types.KnowledgeProcessOverrides,
+		folderID string,
 	) (*types.Knowledge, error)
 	// CreateKnowledgeFromPassage creates knowledge from text passages.
 	// channel identifies the ingestion channel; empty defaults to "web".
@@ -52,6 +54,7 @@ type KnowledgeService interface {
 		kbID string,
 		payload *types.ManualKnowledgePayload,
 		channel string,
+		folderID string,
 	) (*types.Knowledge, error)
 	// GetKnowledgeByID retrieves knowledge by ID (uses tenant from context).
 	GetKnowledgeByID(ctx context.Context, id string) (*types.Knowledge, error)
@@ -88,6 +91,9 @@ type KnowledgeService interface {
 	DeleteKnowledge(ctx context.Context, id string) error
 	// DeleteKnowledgeList deletes multiple knowledge entries by IDs.
 	DeleteKnowledgeList(ctx context.Context, ids []string) error
+	// UpdateKnowledgeFolderIndex updates the denormalized folder_id payload on
+	// every indexed chunk belonging to the requested documents.
+	UpdateKnowledgeFolderIndex(ctx context.Context, kbID string, knowledgeIDs []string, folderID string) error
 	// GetKnowledgeFile retrieves the file associated with the knowledge.
 	GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error)
 	// UpdateKnowledge updates knowledge information.
@@ -226,6 +232,13 @@ type KnowledgeRepository interface {
 		tenantID uint64, kbID string, page *types.Pagination, filter types.KnowledgeListFilter,
 	) ([]*types.Knowledge, int64, error)
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
+	// UpdateKnowledgePreservingFolder persists a knowledge row without changing
+	// folder_id, so stale parse/reparse snapshots cannot restore a deleted folder.
+	UpdateKnowledgePreservingFolder(ctx context.Context, knowledge *types.Knowledge) error
+	// StartKnowledgeProcessing serializes the transition to processing with
+	// folder-tree mutations, preserves folder_id, and refreshes the caller's
+	// in-memory FolderID before it builds any index payloads.
+	StartKnowledgeProcessing(ctx context.Context, knowledge *types.Knowledge) error
 	// UpdateKnowledgeBatch updates knowledge items in batch
 	UpdateKnowledgeBatch(ctx context.Context, knowledgeList []*types.Knowledge) error
 	DeleteKnowledge(ctx context.Context, tenantID uint64, id string) error

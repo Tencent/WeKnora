@@ -36,6 +36,10 @@ type SearchTarget struct {
 	KnowledgeIDs []string `json:"knowledge_ids,omitempty"`
 	// TagIDs limits retrieval to chunks/documents carrying any of these KB-local tags.
 	TagIDs []string `json:"tag_ids,omitempty"`
+	// FolderIDs limits retrieval to chunks whose payload FolderID is in this
+	// pre-expanded subtree set (issue #1311). Built at scope-resolution time by
+	// BFS-expanding the user-selected folder. Empty = no folder filter.
+	FolderIDs []string `json:"folder_ids,omitempty"`
 	// ScopeTagIDs records the logical tag scope selected by the user. For
 	// document KBs this is kept for tracing after the relation-table lookup has
 	// been resolved to KnowledgeIDs; TagIDs remains the physical index filter.
@@ -62,6 +66,17 @@ func (st *SearchTarget) RecallThresholds(vectorThreshold, keywordThreshold float
 func (st SearchTargets) HasRecallThresholdOverride() bool {
 	for _, target := range st {
 		if target != nil && target.DisableRecallThresholds {
+			return true
+		}
+	}
+	return false
+}
+
+// HasFolderScope reports whether retrieval is explicitly constrained to one
+// or more document-folder subtrees.
+func (st SearchTargets) HasFolderScope() bool {
+	for _, target := range st {
+		if target != nil && len(target.FolderIDs) > 0 {
 			return true
 		}
 	}
@@ -207,6 +222,11 @@ type SearchResult struct {
 
 	// KnowledgeBaseID is the ID of the knowledge base this result belongs to
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+
+	// FolderID is the document folder recorded on the authoritative knowledge
+	// row. It is persisted in history references so later folder-scoped turns
+	// can reject stale references from outside the active subtree.
+	FolderID string `json:"folder_id,omitempty"`
 }
 
 // SearchParams represents the search parameters
@@ -221,7 +241,8 @@ type SearchParams struct {
 	DisableKeywordsMatch bool      `json:"disable_keywords_match"`
 	DisableVectorMatch   bool      `json:"disable_vector_match"`
 	KnowledgeIDs         []string  `json:"knowledge_ids"`
-	TagIDs               []string  `json:"tag_ids"` // Tag IDs for filtering (used for FAQ priority filtering)
+	TagIDs               []string  `json:"tag_ids"`              // Tag IDs for filtering (used for FAQ priority filtering)
+	FolderIDs            []string  `json:"folder_ids,omitempty"` // Folder IDs for subtree filtering (issue #1311)
 	ScopeTagIDs          []string  `json:"scope_tag_ids,omitempty"`
 	OnlyRecommended      bool      `json:"only_recommended"`
 	// KnowledgeBaseIDs overrides the single KB ID passed to HybridSearch,

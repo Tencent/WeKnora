@@ -29,6 +29,7 @@ const (
 	fieldKnowledgeID      = "knowledge_id"
 	fieldKnowledgeBaseID  = "knowledge_base_id"
 	fieldTagID            = "tag_id"
+	fieldFolderID         = "folder_id"
 	fieldEmbedding        = "embedding"
 	fieldIsEnabled        = "is_enabled"
 	fieldID               = "id"
@@ -61,7 +62,13 @@ func (w *weaviateRepository) ensureCollection(ctx context.Context, dimension int
 	collectionName := w.getCollectionName(dimension)
 
 	//Check cache first
-	if _, ok := w.initializedCollections.Load(dimension); ok {
+	if _, ok := w.initializedCollections.Load(collectionName); ok {
+		return nil
+	}
+
+	w.ensureMu.Lock()
+	defer w.ensureMu.Unlock()
+	if _, ok := w.initializedCollections.Load(collectionName); ok {
 		return nil
 	}
 
@@ -129,6 +136,7 @@ func (w *weaviateRepository) ensureCollection(ctx context.Context, dimension int
 					DataType:        []string{"text"},
 					IndexFilterable: &enabled,
 				},
+				folderProperty(enabled),
 				{
 					Name:            fieldIsEnabled,
 					DataType:        []string{"boolean"},
@@ -154,9 +162,129 @@ func (w *weaviateRepository) ensureCollection(ctx context.Context, dimension int
 			return fmt.Errorf("failed to create collection: %w", err)
 		}
 		log.Infof("[Weaviate] Successfully created collection %s", collectionName)
+	} else if err := w.ensureFolderProperty(ctx, collectionName); err != nil {
+		return err
 	}
-	w.initializedCollections.Store(dimension, true)
+	w.initializedCollections.Store(collectionName, true)
 	return nil
+}
+
+func (w *weaviateRepository) ensureExistingCollection(ctx context.Context, collectionName string) error {
+	if _, ok := w.initializedCollections.Load(collectionName); ok {
+		return nil
+	}
+
+	w.ensureMu.Lock()
+	defer w.ensureMu.Unlock()
+	if _, ok := w.initializedCollections.Load(collectionName); ok {
+		return nil
+	}
+	if err := w.ensureFolderProperty(ctx, collectionName); err != nil {
+		return err
+	}
+	w.initializedCollections.Store(collectionName, true)
+	return nil
+}
+
+func (w *weaviateRepository) ensureFolderProperty(ctx context.Context, collectionName string) error {
+	class, err := w.client.Schema().ClassGetter().WithClassName(collectionName).Do(ctx)
+	if err != nil {
+		return fmt.Errorf("get Weaviate collection %s schema: %w", collectionName, err)
+	}
+	if property := classProperty(class, fieldFolderID); property != nil {
+		if err := validateFolderProperty(collectionName, property); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	enabled := true
+	err = w.client.Schema().PropertyCreator().
+		WithClassName(collectionName).
+		WithProperty(folderProperty(enabled)).
+		Do(ctx)
+	if err != nil && !isPropertyAlreadyExistsErr(err) {
+		return fmt.Errorf("add %s property to Weaviate collection %s: %w", fieldFolderID, collectionName, err)
+	}
+
+	// Re-read the authoritative schema even after a successful create. This
+	// also covers another replica/process winning the create race with an
+	// incompatible property definition.
+	class, err = w.client.Schema().ClassGetter().WithClassName(collectionName).Do(ctx)
+	if err != nil {
+		return fmt.Errorf("verify %s property on Weaviate collection %s: %w", fieldFolderID, collectionName, err)
+	}
+	if err := validateFolderProperty(collectionName, classProperty(class, fieldFolderID)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func folderProperty(indexFilterable bool) *models.Property {
+	return &models.Property{
+		Name:            fieldFolderID,
+		DataType:        []string{"text"},
+		IndexFilterable: &indexFilterable,
+		Tokenization:    models.PropertyTokenizationField,
+	}
+}
+
+func classHasProperty(class *models.Class, propertyName string) bool {
+	return classProperty(class, propertyName) != nil
+}
+
+func classProperty(class *models.Class, propertyName string) *models.Property {
+	if class == nil {
+		return nil
+	}
+	for _, property := range class.Properties {
+		if property != nil && property.Name == propertyName {
+			return property
+		}
+	}
+	return nil
+}
+
+func validateFolderProperty(collectionName string, property *models.Property) error {
+	if property == nil {
+		return fmt.Errorf(
+			"Weaviate collection %s is missing required %s property after schema update",
+			collectionName,
+			fieldFolderID,
+		)
+	}
+	if !slices.Equal(property.DataType, []string{"text"}) {
+		return fmt.Errorf(
+			"Weaviate collection %s has incompatible %s data type %v; expected [text], migrate or rebuild the collection",
+			collectionName,
+			fieldFolderID,
+			property.DataType,
+		)
+	}
+	if property.IndexFilterable == nil || !*property.IndexFilterable {
+		return fmt.Errorf(
+			"Weaviate collection %s has non-filterable %s property; enable filterable indexing or rebuild the collection",
+			collectionName,
+			fieldFolderID,
+		)
+	}
+	if property.Tokenization != models.PropertyTokenizationField {
+		return fmt.Errorf(
+			"Weaviate collection %s has incompatible %s tokenization %q; expected %q for exact folder matching",
+			collectionName,
+			fieldFolderID,
+			property.Tokenization,
+			models.PropertyTokenizationField,
+		)
+	}
+	return nil
+}
+
+func isPropertyAlreadyExistsErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "already exist")
 }
 
 func (w *weaviateRepository) EngineType() types.RetrieverEngineType {
@@ -474,6 +602,103 @@ func (w *weaviateRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTag
 
 }
 
+// BatchUpdateChunkFolderID updates the folder ID of chunks in batch.
+func (w *weaviateRepository) BatchUpdateChunkFolderID(ctx context.Context, chunkFolderMap map[string]string) error {
+	if len(chunkFolderMap) == 0 {
+		return nil
+	}
+	chunkIDs := slices.Collect(maps.Keys(chunkFolderMap))
+	slices.Sort(chunkIDs)
+	fields := []graphql.Field{
+		{Name: fieldChunkID},
+		{
+			Name: "_additional",
+			Fields: []graphql.Field{
+				{Name: "id"},
+			},
+		},
+	}
+	collections, err := w.ListCollections(ctx)
+	if err != nil {
+		return fmt.Errorf("list Weaviate collections: %w", err)
+	}
+	for _, collectionName := range collections {
+		if len(collectionName) <= len(w.collectionBaseName) ||
+			collectionName[:len(w.collectionBaseName)] != w.collectionBaseName {
+			continue
+		}
+
+		const pageSize = 100
+		after := ""
+		for {
+			query := w.client.GraphQL().Get().
+				WithClassName(collectionName).
+				WithWhere(filters.Where().
+					WithPath([]string{fieldChunkID}).
+					WithOperator(filters.ContainsAny).
+					WithValueText(chunkIDs...)).
+				WithLimit(pageSize).
+				WithFields(fields...)
+			if after != "" {
+				query = query.WithAfter(after)
+			}
+			result, err := query.Do(ctx)
+			if err != nil {
+				return fmt.Errorf("query Weaviate chunks in %s: %w", collectionName, err)
+			}
+			objects, err := copyQueryObjects(result, collectionName)
+			if err != nil {
+				return err
+			}
+			if len(objects) == 0 {
+				break
+			}
+
+			previousAfter := after
+			for _, rawObject := range objects {
+				object, ok := rawObject.(map[string]interface{})
+				if !ok {
+					return fmt.Errorf("query Weaviate chunks from %s returned a malformed object", collectionName)
+				}
+				chunkID, ok := object[fieldChunkID].(string)
+				if !ok || chunkID == "" {
+					return fmt.Errorf("query Weaviate chunks from %s returned no chunk_id", collectionName)
+				}
+				folderID, ok := chunkFolderMap[chunkID]
+				if !ok {
+					return fmt.Errorf("query Weaviate chunks from %s returned unexpected chunk %s", collectionName, chunkID)
+				}
+				additional, ok := object["_additional"].(map[string]interface{})
+				if !ok {
+					return fmt.Errorf("query Weaviate chunk %s from %s returned no object metadata", chunkID, collectionName)
+				}
+				objectID, ok := additional["id"].(string)
+				if !ok || objectID == "" {
+					return fmt.Errorf("query Weaviate chunk %s from %s returned no object ID", chunkID, collectionName)
+				}
+				if err := w.client.Data().Updater().
+					WithClassName(collectionName).
+					WithID(objectID).
+					WithProperties(map[string]interface{}{fieldFolderID: folderID}).
+					WithMerge().
+					Do(ctx); err != nil {
+					return fmt.Errorf(
+						"update Weaviate chunk %s folder ID in %s: %w", chunkID, collectionName, err,
+					)
+				}
+				after = objectID
+			}
+			if len(objects) < pageSize {
+				break
+			}
+			if after == previousAfter {
+				return fmt.Errorf("paginate Weaviate chunks in %s: cursor did not advance", collectionName)
+			}
+		}
+	}
+	return nil
+}
+
 func (w *weaviateRepository) getBaseFilter(params types.RetrieveParams) *filters.WhereBuilder {
 	var operands []*filters.WhereBuilder
 	operands = append(operands, filters.Where().
@@ -499,6 +724,12 @@ func (w *weaviateRepository) getBaseFilter(params types.RetrieveParams) *filters
 			WithPath([]string{fieldTagID}).
 			WithOperator(filters.ContainsAny).
 			WithValueText(params.TagIDs...))
+	}
+	if len(params.FolderIDs) > 0 {
+		operands = append(operands, filters.Where().
+			WithPath([]string{fieldFolderID}).
+			WithOperator(filters.ContainsAny).
+			WithValueText(params.FolderIDs...))
 	}
 	if len(params.ExcludeKnowledgeIDs) > 0 {
 		operands = append(operands, filters.Where().
@@ -558,6 +789,9 @@ func (w *weaviateRepository) VectorRetrieve(ctx context.Context,
 	if !hasCollection {
 		log.Warnf("[Weaviate] Collection %s does not exist, returning empty results", collectionName)
 		return buildRetrieveResult(nil, types.VectorRetrieverType), nil
+	}
+	if err := w.ensureExistingCollection(ctx, collectionName); err != nil {
+		return nil, fmt.Errorf("prepare Weaviate collection %s for vector retrieval: %w", collectionName, err)
 	}
 
 	where := w.getBaseFilter(params)
@@ -625,6 +859,13 @@ func (w *weaviateRepository) KeywordsRetrieve(ctx context.Context,
 			log.Debugf("[Weaviate] Skipping collection %s (doesn't match base name %s)", collectionName, w.collectionBaseName)
 			continue
 		}
+		if err := w.ensureExistingCollection(ctx, collectionName); err != nil {
+			return nil, fmt.Errorf(
+				"prepare Weaviate collection %s for keyword retrieval: %w",
+				collectionName,
+				err,
+			)
+		}
 
 		filter := w.getBaseFilter(params)
 
@@ -691,6 +932,9 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 	}
 
 	collectionName := w.getCollectionName(dimension)
+	if err := w.ensureExistingCollection(ctx, collectionName); err != nil {
+		return fmt.Errorf("prepare Weaviate collection %s for index copy: %w", collectionName, err)
+	}
 	batchSize := 64
 	var lastID string
 	totalCopied := 0
@@ -790,7 +1034,9 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 					fieldKnowledgeID:     targetKnowledgeID,
 					fieldKnowledgeBaseID: targetKnowledgeBaseID,
 					fieldTagID:           data[fieldTagID],
-					fieldIsEnabled:       isEnabled,
+					// Folder IDs are KB-scoped, so copied documents land at target root.
+					fieldFolderID:  "",
+					fieldIsEnabled: isEnabled,
 				},
 				Vector: vector,
 			}
@@ -815,6 +1061,47 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 	return nil
 }
 
+func copyQueryObjects(result *models.GraphQLResponse, collectionName string) ([]interface{}, error) {
+	if result == nil {
+		return nil, fmt.Errorf("query source indices from %s returned no response", collectionName)
+	}
+	if len(result.Errors) > 0 {
+		messages := make([]string, 0, len(result.Errors))
+		for _, graphQLError := range result.Errors {
+			if graphQLError == nil || graphQLError.Message == "" {
+				continue
+			}
+			messages = append(messages, graphQLError.Message)
+		}
+		if len(messages) == 0 {
+			messages = append(messages, "unknown GraphQL error")
+		}
+		return nil, fmt.Errorf("query source indices from %s: %s", collectionName, strings.Join(messages, "; "))
+	}
+
+	getValue, ok := result.Data["Get"]
+	if !ok {
+		return nil, fmt.Errorf("query source indices from %s returned no Get data", collectionName)
+	}
+	getData, ok := getValue.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("query source indices from %s returned malformed Get data (%T)", collectionName, getValue)
+	}
+	collectionValue, ok := getData[collectionName]
+	if !ok {
+		return nil, fmt.Errorf("query source indices returned no data for collection %s", collectionName)
+	}
+	objects, ok := collectionValue.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf(
+			"query source indices from %s returned malformed collection data (%T)",
+			collectionName,
+			collectionValue,
+		)
+	}
+	return objects, nil
+}
+
 func (w *weaviateRepository) ListCollections(ctx context.Context) ([]string, error) {
 	schema, err := w.client.Schema().Getter().Do(ctx)
 	if err != nil {
@@ -837,6 +1124,7 @@ func createPayload(embedding *WeaviateVectorEmbedding) map[string]interface{} {
 		fieldKnowledgeID:     embedding.KnowledgeID,
 		fieldKnowledgeBaseID: embedding.KnowledgeBaseID,
 		fieldTagID:           embedding.TagID,
+		fieldFolderID:        embedding.FolderID,
 		fieldIsEnabled:       embedding.IsEnabled,
 	}
 	return payload
@@ -862,6 +1150,7 @@ func getKeywordsFields() []graphql.Field {
 		{Name: fieldKnowledgeID},
 		{Name: fieldKnowledgeBaseID},
 		{Name: fieldTagID},
+		{Name: fieldFolderID},
 		{
 			Name: "_additional",
 			Fields: []graphql.Field{
@@ -881,6 +1170,7 @@ func getEmbeddingFields() []graphql.Field {
 		{Name: fieldKnowledgeID},
 		{Name: fieldKnowledgeBaseID},
 		{Name: fieldTagID},
+		{Name: fieldFolderID},
 		{
 			Name: "_additional",
 			Fields: []graphql.Field{
@@ -900,6 +1190,8 @@ func getVectorFields() []graphql.Field {
 		{Name: fieldKnowledgeID},
 		{Name: fieldKnowledgeBaseID},
 		{Name: fieldTagID},
+		{Name: fieldFolderID},
+		{Name: fieldIsEnabled},
 		{
 			Name: "_additional",
 			Fields: []graphql.Field{
@@ -955,6 +1247,7 @@ func parseGraphQLResponse(items []interface{}, collectionName string, matchType 
 				KnowledgeID:     getString(fieldKnowledgeID),
 				KnowledgeBaseID: getString(fieldKnowledgeBaseID),
 				TagID:           getString(fieldTagID),
+				FolderID:        getString(fieldFolderID),
 			},
 			float64(score),
 		}
@@ -1007,6 +1300,7 @@ func toWeaviateVectorEmbedding(embedding *types.IndexInfo, additionalParams map[
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
 		TagID:           embedding.TagID,
+		FolderID:        embedding.FolderID,
 		IsEnabled:       embedding.IsEnabled,
 	}
 	if additionalParams != nil && slices.Contains(slices.Collect(maps.Keys(additionalParams)), fieldEmbedding) {
@@ -1030,6 +1324,7 @@ func fromWeaviateVectorEmbedding(id string,
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
 		TagID:           embedding.TagID,
+		FolderID:        embedding.FolderID,
 		Content:         embedding.Content,
 		Score:           embedding.Score,
 		MatchType:       matchType,

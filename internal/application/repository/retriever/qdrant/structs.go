@@ -11,8 +11,9 @@ type qdrantRepository struct {
 	collectionBaseName string
 	shardNumber        int // 0 = use Qdrant server default
 	replicationFactor  int // 0 = use Qdrant server default
-	// Cache for initialized collections (dimension -> true)
+	// Cache for initialized collections (collection name -> true)
 	initializedCollections sync.Map
+	ensureMu               sync.Mutex
 }
 
 type QdrantVectorEmbedding struct {
@@ -23,6 +24,7 @@ type QdrantVectorEmbedding struct {
 	KnowledgeID     string    `json:"knowledge_id"`
 	KnowledgeBaseID string    `json:"knowledge_base_id"`
 	TagID           string    `json:"tag_id"`
+	FolderID        string    `json:"folder_id"`
 	Embedding       []float32 `json:"embedding"`
 	IsEnabled       bool      `json:"is_enabled"`
 }

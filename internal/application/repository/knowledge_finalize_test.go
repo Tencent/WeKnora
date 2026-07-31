@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     file_hash VARCHAR(64),
     storage_size BIGINT NOT NULL DEFAULT 0,
     metadata TEXT,
+    custom_metadata TEXT NOT NULL DEFAULT '{}',
     tag_id VARCHAR(36),
     summary_status VARCHAR(32) DEFAULT 'none',
     last_faq_import_result TEXT DEFAULT NULL,
@@ -47,6 +48,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     processed_at DATETIME,
     error_message TEXT,
+    folder_id VARCHAR(36) NOT NULL DEFAULT '',
     deleted_at DATETIME
 );
 `
@@ -281,6 +283,72 @@ func TestUpdateKnowledge_PendingCounterOmittedOnReset(t *testing.T) {
 	require.NoError(t, repo.UpdateKnowledgeColumn(ctx, id, "pending_subtasks_count", 0))
 	_, count = reloadKnowledgeRow(t, db, id)
 	assert.Equal(t, 0, count)
+}
+
+func TestUpdateKnowledgePreservingFolderDoesNotRestoreStalePlacement(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+	id := uuid.New().String()
+	require.NoError(t, db.Exec(`
+		INSERT INTO knowledges (
+			id, tenant_id, knowledge_base_id, type, title, source, parse_status, folder_id
+		) VALUES (?, 1, ?, 'document', 'before-reparse', 'manual', 'completed', 'folder-old')
+	`, id, uuid.New().String()).Error)
+
+	stale, err := repo.GetKnowledgeByID(ctx, 1, id)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&types.Knowledge{}).
+		Where("id = ?", id).
+		Update("folder_id", types.DocumentFolderRootID).Error)
+
+	stale.Title = "reparse-started"
+	stale.ParseStatus = types.ParseStatusPending
+	require.NoError(t, repo.UpdateKnowledgePreservingFolder(ctx, stale))
+
+	reloaded, err := repo.GetKnowledgeByID(ctx, 1, id)
+	require.NoError(t, err)
+	assert.Equal(t, types.DocumentFolderRootID, reloaded.FolderID)
+	assert.Equal(t, "reparse-started", reloaded.Title)
+	assert.Equal(t, types.ParseStatusPending, reloaded.ParseStatus)
+}
+
+func TestStartKnowledgeProcessingRefreshesPlacementAfterFolderDeletion(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+	kbID := uuid.New().String()
+	id := uuid.New().String()
+	require.NoError(t, db.Exec(`
+		CREATE TABLE knowledge_bases (
+			id VARCHAR(36) PRIMARY KEY,
+			tenant_id INTEGER NOT NULL,
+			deleted_at DATETIME
+		)
+	`).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO knowledge_bases (id, tenant_id) VALUES (?, 1)", kbID,
+	).Error)
+	require.NoError(t, db.Exec(`
+		INSERT INTO knowledges (
+			id, tenant_id, knowledge_base_id, type, title, source, parse_status, folder_id
+		) VALUES (?, 1, ?, 'document', 'retry', 'file', 'failed', 'folder-deleted')
+	`, id, kbID).Error)
+
+	stale, err := repo.GetKnowledgeByID(ctx, 1, id)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&types.Knowledge{}).
+		Where("id = ?", id).
+		Update("folder_id", types.DocumentFolderRootID).Error)
+	stale.ParseStatus = types.ParseStatusProcessing
+
+	require.NoError(t, repo.StartKnowledgeProcessing(ctx, stale))
+	assert.Equal(t, types.DocumentFolderRootID, stale.FolderID)
+
+	reloaded, err := repo.GetKnowledgeByID(ctx, 1, id)
+	require.NoError(t, err)
+	assert.Equal(t, types.DocumentFolderRootID, reloaded.FolderID)
+	assert.Equal(t, types.ParseStatusProcessing, reloaded.ParseStatus)
 }
 
 func TestUpdateActiveDeletingKnowledgeColumns_GuardsStateAndSoftDelete(t *testing.T) {

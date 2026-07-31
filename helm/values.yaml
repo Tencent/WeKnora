@@ -96,6 +96,9 @@ app:
     AUTO_RECOVER_DIRTY: "true"
     STREAM_MANAGER_TYPE: redis
     CONCURRENCY_POOL_SIZE: "5"
+    # -- Two-phase rollout gate. Keep false for the first upgrade; set true in
+    # a second Helm upgrade only after all old app/worker pods have terminated.
+    WEKNORA_DOCUMENT_FOLDERS_ENABLED: "false"
     TZ: UTC
 
   # -- Additional environment variables

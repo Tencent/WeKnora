@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	elasticsearchRetriever "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch"
@@ -25,11 +26,13 @@ import (
 )
 
 type elasticsearchRepository struct {
-	client           *elasticsearch.Client
-	index            string
-	useKeywordSuffix bool // Whether to append .keyword suffix to ID field names in queries
-	numberOfShards   int  // Shard count for index creation (0 = ES default)
-	numberOfReplicas int  // Replica count for index creation (-1 = unset, use ES default)
+	client                 *elasticsearch.Client
+	index                  string
+	useKeywordSuffix       bool   // Whether to append .keyword suffix to existing ID field names
+	folderIDQueryField     string // Exact-match field for folder_id, detected independently for upgrades
+	folderIDMappingMissing bool   // Whether folder_id still needs an explicit mapping
+	numberOfShards         int    // Shard count for index creation (0 = ES default)
+	numberOfReplicas       int    // Replica count for index creation (-1 = unset, use ES default)
 }
 
 // NewElasticsearchEngineRepository creates and initializes a new Elasticsearch v7 repository.
@@ -37,7 +40,7 @@ type elasticsearchRepository struct {
 func NewElasticsearchEngineRepository(client *elasticsearch.Client,
 	config *config.Config,
 	indexCfg *typesLocal.IndexConfig,
-) interfaces.RetrieveEngineRepository {
+) (interfaces.RetrieveEngineRepository, error) {
 	log := logger.GetLogger(context.Background())
 	log.Info("[ElasticsearchV7] Initializing Elasticsearch v7 retriever engine repository")
 
@@ -51,14 +54,15 @@ func NewElasticsearchEngineRepository(client *elasticsearch.Client,
 		numberOfReplicas: indexCfg.GetNumberOfReplicas(-1),
 	}
 	if err := res.createIndexIfNotExists(context.Background()); err != nil {
-		log.Errorf("[ElasticsearchV7] Failed to create index: %v", err)
+		return nil, fmt.Errorf("initialize Elasticsearch v7 index %s: %w", indexName, err)
 	}
-	res.detectFieldTypes(context.Background())
-	return res
+	if err := res.prepareFolderMapping(context.Background()); err != nil {
+		return nil, fmt.Errorf("initialize Elasticsearch v7 mappings for index %s: %w", indexName, err)
+	}
+	return res, nil
 }
 
-// idField returns the query field name for an ID field, appending ".keyword"
-// suffix when the index uses text-type mappings with keyword sub-fields.
+// idField preserves Elasticsearch v7's existing all-ID query behavior.
 func (e *elasticsearchRepository) idField(name string) string {
 	if e.useKeywordSuffix {
 		return name + ".keyword"
@@ -66,64 +70,108 @@ func (e *elasticsearchRepository) idField(name string) string {
 	return name
 }
 
-// detectFieldTypes inspects the index mapping to determine whether ID fields
-// are mapped as "keyword" (no suffix needed) or "text" (needs ".keyword" suffix).
-func (e *elasticsearchRepository) detectFieldTypes(ctx context.Context) {
-	log := logger.GetLogger(ctx)
+func (e *elasticsearchRepository) folderField() string {
+	if e.folderIDQueryField != "" {
+		return e.folderIDQueryField
+	}
+	return "folder_id"
+}
 
+func (e *elasticsearchRepository) prepareFolderMapping(ctx context.Context) error {
+	if err := e.detectFieldTypes(ctx); err != nil {
+		return err
+	}
+	if e.folderIDMappingMissing {
+		putErr := e.ensureFolderIDMapping(ctx)
+		// Re-read the authoritative mapping even after PUT succeeds. This also
+		// handles another process winning the mapping race with a different type.
+		if err := e.detectFieldTypes(ctx); err != nil {
+			if putErr != nil {
+				return errors.Join(putErr, err)
+			}
+			return err
+		}
+		if e.folderIDMappingMissing {
+			if putErr != nil {
+				return putErr
+			}
+			return errors.New("folder_id mapping is still missing after update")
+		}
+	}
+	return nil
+}
+
+func (e *elasticsearchRepository) ensureFolderIDMapping(ctx context.Context) error {
+	resp, err := e.client.Indices.PutMapping(
+		strings.NewReader(`{"properties":{"folder_id":{"type":"keyword"}}}`),
+		e.client.Indices.PutMapping.WithContext(ctx),
+		e.client.Indices.PutMapping.WithIndex(e.index),
+	)
+	if err != nil {
+		return fmt.Errorf("put folder_id mapping: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.IsError() {
+		return fmt.Errorf("put folder_id mapping returned status %s", resp.Status())
+	}
+	return nil
+}
+
+// detectFieldTypes preserves the legacy chunk_id-based suffix selection for
+// existing ID fields and detects only folder_id independently for upgrades.
+func (e *elasticsearchRepository) detectFieldTypes(ctx context.Context) error {
 	resp, err := e.client.Indices.GetMapping(
 		e.client.Indices.GetMapping.WithIndex(e.index),
 		e.client.Indices.GetMapping.WithContext(ctx),
 	)
 	if err != nil {
-		log.Warnf("[ElasticsearchV7] Failed to get index mapping, defaulting to .keyword suffix: %v", err)
-		e.useKeywordSuffix = true
-		return
+		return fmt.Errorf("get index mapping: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.IsError() {
-		log.Warnf("[ElasticsearchV7] GetMapping returned error: %s, defaulting to .keyword suffix", resp.String())
-		e.useKeywordSuffix = true
-		return
+		return fmt.Errorf("get index mapping returned status %s", resp.Status())
 	}
 
 	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		log.Warnf("[ElasticsearchV7] Failed to parse mapping response: %v, defaulting to .keyword suffix", err)
-		e.useKeywordSuffix = true
-		return
+		return fmt.Errorf("decode index mapping: %w", err)
 	}
 
 	indexData, _ := result[e.index].(map[string]interface{})
 	if indexData == nil {
-		log.Warnf("[ElasticsearchV7] Index %s not found in mapping response, defaulting to .keyword suffix", e.index)
-		e.useKeywordSuffix = true
-		return
+		return fmt.Errorf("index %s not found in mapping response", e.index)
 	}
 	mappings, _ := indexData["mappings"].(map[string]interface{})
 	if mappings == nil {
-		e.useKeywordSuffix = true
-		return
+		return fmt.Errorf("index %s mapping response has no mappings object", e.index)
 	}
 	properties, _ := mappings["properties"].(map[string]interface{})
 	if properties == nil {
-		log.Infof("[ElasticsearchV7] No mapping detected for ID fields (empty index?), defaulting to .keyword suffix")
 		e.useKeywordSuffix = true
-		return
+		e.folderIDQueryField = ""
+		e.folderIDMappingMissing = true
+		return nil
 	}
+
 	chunkIDProp, _ := properties["chunk_id"].(map[string]interface{})
-	if chunkIDProp == nil {
-		e.useKeywordSuffix = true
-		return
-	}
 	if fieldType, _ := chunkIDProp["type"].(string); fieldType == "keyword" {
 		e.useKeywordSuffix = false
-		log.Infof("[ElasticsearchV7] Detected keyword type for ID fields, querying without .keyword suffix")
 	} else {
 		e.useKeywordSuffix = true
-		log.Infof("[ElasticsearchV7] Detected %s type for ID fields, querying with .keyword suffix", fieldType)
 	}
+
+	folderProperty, folderMapped := properties["folder_id"]
+	e.folderIDMappingMissing = !folderMapped
+	e.folderIDQueryField = ""
+	if folderMapped {
+		field, err := elasticsearchRetriever.FolderIDQueryField(folderProperty)
+		if err != nil {
+			return fmt.Errorf("validate folder_id mapping: %w", err)
+		}
+		e.folderIDQueryField = field
+	}
+	return nil
 }
 
 // createIndexIfNotExists checks if the specified index exists and creates it if not.
@@ -520,6 +568,29 @@ func (e *elasticsearchRepository) getBaseConds(params typesLocal.RetrieveParams)
 		must = append(must, map[string]interface{}{
 			"terms": map[string]interface{}{
 				e.idField("tag_id"): params.TagIDs,
+			},
+		})
+	}
+	// Filter by folder IDs if specified
+	if len(params.FolderIDs) > 0 {
+		should := []map[string]interface{}{
+			{"terms": map[string]interface{}{
+				e.folderField(): params.FolderIDs,
+			}},
+		}
+		if slices.Contains(params.FolderIDs, typesLocal.DocumentFolderRootID) {
+			should = append(should, map[string]interface{}{
+				"bool": map[string]interface{}{
+					"must_not": map[string]interface{}{
+						"exists": map[string]interface{}{"field": "folder_id"},
+					},
+				},
+			})
+		}
+		must = append(must, map[string]interface{}{
+			"bool": map[string]interface{}{
+				"minimum_should_match": 1,
+				"should":               should,
 			},
 		})
 	}
@@ -1254,6 +1325,8 @@ func (e *elasticsearchRepository) processSingleHit(ctx context.Context,
 		IsEnabled:       isEnabled,
 		IsRecommended:   isRecommended,
 		TagID:           tagID,
+		// Folder IDs are KB-scoped, so copied documents land at target root.
+		FolderID: "",
 	}
 
 	return indexInfo, embedding, nil
@@ -1448,5 +1521,47 @@ func (e *elasticsearchRepository) BatchUpdateChunkTagID(
 	}
 
 	log.Infof("[ElasticsearchV7] Successfully batch updated chunk tag ID")
+	return nil
+}
+
+// BatchUpdateChunkFolderID updates the folder ID of chunks in batch.
+func (e *elasticsearchRepository) BatchUpdateChunkFolderID(
+	ctx context.Context,
+	chunkFolderMap map[string]string,
+) error {
+	if len(chunkFolderMap) == 0 {
+		return nil
+	}
+	folderGroups := make(map[string][]string)
+	for chunkID, folderID := range chunkFolderMap {
+		folderGroups[folderID] = append(folderGroups[folderID], chunkID)
+	}
+	for folderID, chunkIDs := range folderGroups {
+		query := map[string]interface{}{
+			"query": map[string]interface{}{
+				"terms": map[string]interface{}{e.idField("chunk_id"): chunkIDs},
+			},
+			"script": map[string]interface{}{
+				"source": "ctx._source.folder_id = params.folder_id",
+				"lang":   "painless",
+				"params": map[string]interface{}{"folder_id": folderID},
+			},
+		}
+		queryJSON, err := json.Marshal(query)
+		if err != nil {
+			return fmt.Errorf("marshal Elasticsearch folder update: %w", err)
+		}
+		res, err := esapi.UpdateByQueryRequest{
+			Index: []string{e.index},
+			Body:  strings.NewReader(string(queryJSON)),
+		}.Do(ctx, e.client)
+		if err != nil {
+			return err
+		}
+		defer res.Body.Close()
+		if res.IsError() {
+			return fmt.Errorf("elasticsearch update_by_query failed with status: %d", res.StatusCode)
+		}
+	}
 	return nil
 }

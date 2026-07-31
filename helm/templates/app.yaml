@@ -119,6 +119,8 @@ spec:
               value: {{ .Values.app.env.AUTO_RECOVER_DIRTY | quote }}
             - name: CONCURRENCY_POOL_SIZE
               value: {{ .Values.app.env.CONCURRENCY_POOL_SIZE | quote }}
+            - name: WEKNORA_DOCUMENT_FOLDERS_ENABLED
+              value: {{ .Values.app.env.WEKNORA_DOCUMENT_FOLDERS_ENABLED | quote }}
             {{- if .Values.neo4j.enabled }}
             # Neo4j configuration (for GraphRAG)
             # NEO4J_ENABLE 是知识图谱的唯一开关（Go 代码认它，不认 ENABLE_GRAPH_RAG）。

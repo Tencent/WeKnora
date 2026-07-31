@@ -308,6 +308,36 @@ func (r *dorisRepository) BatchUpdateChunkTagID(ctx context.Context,
 	}, "rewrite tag_id")
 }
 
+// BatchUpdateChunkFolderID 批量更新 chunk 的 folder_id 字段。逻辑与 TagID 一致。
+func (r *dorisRepository) BatchUpdateChunkFolderID(ctx context.Context,
+	chunkFolderMap map[string]string,
+) error {
+	if len(chunkFolderMap) == 0 {
+		return nil
+	}
+	compatMode, err := r.resolveCompatMode(ctx)
+	if err != nil {
+		return err
+	}
+	if !compatMode.usesRewriteChunkUpdates() {
+		return r.batchUpdateChunkFolderIDLegacy(ctx, chunkFolderMap)
+	}
+
+	chunkIDs := make([]string, 0, len(chunkFolderMap))
+	for id := range chunkFolderMap {
+		chunkIDs = append(chunkIDs, id)
+	}
+
+	return r.rewriteChunkRows(ctx, chunkIDs, func(row *DorisVectorEmbedding) bool {
+		folderID, ok := chunkFolderMap[row.ChunkID]
+		if !ok || row.FolderID == folderID {
+			return false
+		}
+		row.FolderID = folderID
+		return true
+	}, "rewrite folder_id")
+}
+
 func (r *dorisRepository) rewriteChunkRows(ctx context.Context,
 	chunkIDs []string,
 	mutate func(*DorisVectorEmbedding) bool,
@@ -409,6 +439,40 @@ func (r *dorisRepository) batchUpdateChunkTagIDLegacy(ctx context.Context,
 	for table, rows := range byTable {
 		if err := r.partialUpdateRows(ctx, table, []string{fieldID, fieldTagID}, rows); err != nil {
 			return fmt.Errorf("partial update tag_id in %s: %w", table, err)
+		}
+	}
+	return nil
+}
+
+func (r *dorisRepository) batchUpdateChunkFolderIDLegacy(ctx context.Context,
+	chunkFolderMap map[string]string,
+) error {
+	chunkIDs := make([]string, 0, len(chunkFolderMap))
+	for id := range chunkFolderMap {
+		chunkIDs = append(chunkIDs, id)
+	}
+
+	mapping, err := r.lookupChunkRowKeys(ctx, chunkIDs)
+	if err != nil {
+		return err
+	}
+
+	byTable := make(map[string][]map[string]any)
+	for chunkID, locations := range mapping {
+		folderID, ok := chunkFolderMap[chunkID]
+		if !ok {
+			continue
+		}
+		for _, loc := range locations {
+			byTable[loc.table] = append(byTable[loc.table], map[string]any{
+				fieldID:       loc.id,
+				fieldFolderID: folderID,
+			})
+		}
+	}
+	for table, rows := range byTable {
+		if err := r.partialUpdateRows(ctx, table, []string{fieldID, fieldFolderID}, rows); err != nil {
+			return fmt.Errorf("partial update folder_id in %s: %w", table, err)
 		}
 	}
 	return nil

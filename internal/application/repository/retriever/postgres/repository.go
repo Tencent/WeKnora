@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/pgvector/pgvector-go"
+
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -193,6 +194,14 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 			Values: common.ToInterfaceSlice(params.TagIDs),
 		})
 	}
+	// Filter by folder IDs if specified
+	if len(params.FolderIDs) > 0 {
+		logger.GetLogger(ctx).Debugf("[Postgres] Filtering by folder IDs: %v", params.FolderIDs)
+		conds = append(conds, clause.IN{
+			Column: "folder_id",
+			Values: common.ToInterfaceSlice(params.FolderIDs),
+		})
+	}
 
 	// Use ParadeDB's ||| operator for matching any token
 	conds = append(conds, clause.Expr{
@@ -221,6 +230,7 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 			"knowledge_id",
 			"knowledge_base_id",
 			"tag_id",
+			"folder_id",
 		}).
 		Limit(int(params.TopK)).
 		Find(&embeddingDBList).Error
@@ -329,6 +339,21 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 		whereParts = append(whereParts, fmt.Sprintf("tag_id IN (%s)",
 			strings.Join(placeholders, ", ")))
 	}
+	// Filter by folder IDs if specified
+	if len(params.FolderIDs) > 0 {
+		logger.GetLogger(ctx).Debugf(
+			"[Postgres] Filtering vector search by folder IDs: %v",
+			params.FolderIDs,
+		)
+		placeholders := make([]string, len(params.FolderIDs))
+		paramStart := len(allVars) + 1
+		for i := range params.FolderIDs {
+			placeholders[i] = fmt.Sprintf("$%d", paramStart+i)
+			allVars = append(allVars, params.FolderIDs[i])
+		}
+		whereParts = append(whereParts, fmt.Sprintf("folder_id IN (%s)",
+			strings.Join(placeholders, ", ")))
+	}
 
 	// is_enabled filter
 	whereParts = append(whereParts, fmt.Sprintf("(is_enabled IS NULL OR is_enabled = $%d)", len(allVars)+1))
@@ -376,11 +401,11 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 
 	querySQL := fmt.Sprintf(`
 		SELECT 
-			id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id, tag_id,
+			id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id, tag_id, folder_id,
 			(1 - distance) as score
 		FROM (
 			SELECT 
-				id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id, tag_id,
+				id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id, tag_id, folder_id,
 				embedding::halfvec(%[1]d) <=> $1::halfvec(%[1]d) as distance
 			FROM embeddings
 			%[2]s
@@ -695,5 +720,25 @@ func (g *pgRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMap ma
 	}
 
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully batch updated chunk tag ID")
+	return nil
+}
+
+// BatchUpdateChunkFolderID updates the folder ID of chunks in batch.
+func (g *pgRepository) BatchUpdateChunkFolderID(ctx context.Context, chunkFolderMap map[string]string) error {
+	if len(chunkFolderMap) == 0 {
+		return nil
+	}
+	folderGroups := make(map[string][]string)
+	for chunkID, folderID := range chunkFolderMap {
+		folderGroups[folderID] = append(folderGroups[folderID], chunkID)
+	}
+	for folderID, chunkIDs := range folderGroups {
+		result := g.db.WithContext(ctx).Model(&pgVector{}).
+			Where("chunk_id IN ?", chunkIDs).
+			Update("folder_id", folderID)
+		if result.Error != nil {
+			return result.Error
+		}
+	}
 	return nil
 }

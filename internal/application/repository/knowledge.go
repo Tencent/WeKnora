@@ -38,6 +38,14 @@ func escapeLikeKeyword(keyword string) string {
 // the column here means Save can never touch it.
 var omitFieldsOnUpdate = []string{"DeletedAt", "PendingSubtasksCount"}
 
+// Parse/reparse entry points may hold a stale in-memory FolderID while a
+// keep-documents folder deletion moves the live row to root. Those callers
+// must persist their other fields without writing the stale placement back.
+var omitFieldsOnPlacementPreservingUpdate = append(
+	append([]string(nil), omitFieldsOnUpdate...),
+	"FolderID",
+)
+
 // knowledgeRepository implements knowledge base and knowledge repository interface
 type knowledgeRepository struct {
 	db *gorm.DB
@@ -50,8 +58,36 @@ func NewKnowledgeRepository(db *gorm.DB) interfaces.KnowledgeRepository {
 
 // CreateKnowledge creates knowledge
 func (r *knowledgeRepository) CreateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
-	err := r.db.WithContext(ctx).Create(knowledge).Error
-	return err
+	if knowledge.FolderID == types.DocumentFolderRootID {
+		return r.db.WithContext(ctx).Create(knowledge).Error
+	}
+
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		knowledgeBase, err := lockKnowledgeBaseForUpdate(ctx, tx, knowledge.KnowledgeBaseID)
+		if err != nil {
+			return err
+		}
+		if knowledgeBase.TenantID != knowledge.TenantID {
+			return ErrKnowledgeBaseNotFound
+		}
+
+		var count int64
+		if err := tx.WithContext(ctx).
+			Model(&types.DocumentFolder{}).
+			Where(
+				"id = ? AND tenant_id = ? AND knowledge_base_id = ?",
+				knowledge.FolderID,
+				knowledge.TenantID,
+				knowledge.KnowledgeBaseID,
+			).
+			Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return ErrDocumentFolderNotFound
+		}
+		return tx.WithContext(ctx).Create(knowledge).Error
+	})
 }
 
 // GetKnowledgeByID gets knowledge
@@ -150,6 +186,11 @@ func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) 
 	if !filter.UpdatedTo.IsZero() {
 		query = query.Where("updated_at <= ?", filter.UpdatedTo)
 	}
+	if filter.FolderID != nil {
+		// Three-state: nil = no filter, "" = root, non-empty = specific folder.
+		// An exact equality (not IN) — list queries scope to one folder.
+		query = query.Where("folder_id = ?", *filter.FolderID)
+	}
 	return query
 }
 
@@ -196,6 +237,50 @@ func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *ty
 	}
 	err := r.db.WithContext(ctx).Omit(omit...).Save(knowledge).Error
 	return err
+}
+
+// UpdateKnowledgePreservingFolder updates a knowledge row without changing
+// folder_id. It is used when a caller loaded the row before a concurrent
+// keep-documents folder deletion moved that row to the knowledge-base root.
+func (r *knowledgeRepository) UpdateKnowledgePreservingFolder(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+) error {
+	return r.db.WithContext(ctx).
+		Omit(omitFieldsOnPlacementPreservingUpdate...).
+		Save(knowledge).Error
+}
+
+// StartKnowledgeProcessing shares the stable knowledge-base row lock used by
+// folder deletion. If deletion wins the lock, this method observes the new root
+// placement; if processing wins, deletion sees the processing status and keeps
+// the directory tree intact.
+func (r *knowledgeRepository) StartKnowledgeProcessing(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if _, err := lockKnowledgeBaseForUpdate(ctx, tx, knowledge.KnowledgeBaseID); err != nil {
+			return err
+		}
+		if err := tx.WithContext(ctx).
+			Omit(omitFieldsOnPlacementPreservingUpdate...).
+			Save(knowledge).Error; err != nil {
+			return err
+		}
+		var placement struct {
+			FolderID string `gorm:"column:folder_id"`
+		}
+		if err := tx.WithContext(ctx).
+			Model(&types.Knowledge{}).
+			Select("folder_id").
+			Where("tenant_id = ? AND id = ?", knowledge.TenantID, knowledge.ID).
+			Take(&placement).Error; err != nil {
+			return err
+		}
+		knowledge.FolderID = placement.FolderID
+		return nil
+	})
 }
 
 // UpdateKnowledgeBatch updates knowledge items in batch
@@ -643,13 +728,15 @@ func (r *knowledgeRepository) SearchKnowledge(
 	type KnowledgeWithKBName struct {
 		types.Knowledge
 		KnowledgeBaseName string `gorm:"column:knowledge_base_name"`
+		FolderPath        string `gorm:"column:folder_path"`
 	}
 
 	var results []KnowledgeWithKBName
 	query := r.db.WithContext(ctx).
 		Table("knowledges").
-		Select("knowledges.*, knowledge_bases.name as knowledge_base_name").
+		Select("knowledges.*, knowledge_bases.name as knowledge_base_name, COALESCE(document_folders.path, '') as folder_path").
 		Joins("JOIN knowledge_bases ON knowledge_bases.id = knowledges.knowledge_base_id").
+		Joins("LEFT JOIN document_folders ON document_folders.id = knowledges.folder_id AND document_folders.knowledge_base_id = knowledges.knowledge_base_id AND document_folders.tenant_id = knowledges.tenant_id AND document_folders.deleted_at IS NULL").
 		Where("knowledges.tenant_id = ?", tenantID).
 		Where("knowledge_bases.type = ?", types.KnowledgeBaseTypeDocument).
 		Where("knowledges.deleted_at IS NULL")
@@ -736,6 +823,7 @@ func (r *knowledgeRepository) SearchKnowledge(
 	for i, r := range results {
 		k := r.Knowledge
 		k.KnowledgeBaseName = r.KnowledgeBaseName
+		k.FolderPath = r.FolderPath
 		knowledges[i] = &k
 	}
 	return knowledges, hasMore, nil
@@ -756,6 +844,7 @@ func (r *knowledgeRepository) SearchKnowledgeInScopes(
 	type KnowledgeWithKBName struct {
 		types.Knowledge
 		KnowledgeBaseName string `gorm:"column:knowledge_base_name"`
+		FolderPath        string `gorm:"column:folder_path"`
 	}
 
 	placeholders := make([]string, len(scopes))
@@ -768,8 +857,9 @@ func (r *knowledgeRepository) SearchKnowledgeInScopes(
 
 	query := r.db.WithContext(ctx).
 		Table("knowledges").
-		Select("knowledges.*, knowledge_bases.name as knowledge_base_name").
+		Select("knowledges.*, knowledge_bases.name as knowledge_base_name, COALESCE(document_folders.path, '') as folder_path").
 		Joins("JOIN knowledge_bases ON knowledge_bases.id = knowledges.knowledge_base_id AND knowledge_bases.tenant_id = knowledges.tenant_id").
+		Joins("LEFT JOIN document_folders ON document_folders.id = knowledges.folder_id AND document_folders.knowledge_base_id = knowledges.knowledge_base_id AND document_folders.tenant_id = knowledges.tenant_id AND document_folders.deleted_at IS NULL").
 		Where(scopeCondition, args...).
 		Where("knowledge_bases.type = ?", types.KnowledgeBaseTypeDocument).
 		Where("knowledges.deleted_at IS NULL")
@@ -856,6 +946,7 @@ func (r *knowledgeRepository) SearchKnowledgeInScopes(
 	for i, r := range results {
 		k := r.Knowledge
 		k.KnowledgeBaseName = r.KnowledgeBaseName
+		k.FolderPath = r.FolderPath
 		knowledges[i] = &k
 	}
 	return knowledges, hasMore, total, nil

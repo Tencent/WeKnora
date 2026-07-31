@@ -3,6 +3,7 @@ package qdrant
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -23,9 +24,20 @@ const (
 	fieldKnowledgeID      = "knowledge_id"
 	fieldKnowledgeBaseID  = "knowledge_base_id"
 	fieldTagID            = "tag_id"
+	fieldFolderID         = "folder_id"
 	fieldEmbedding        = "embedding"
 	fieldIsEnabled        = "is_enabled"
 )
+
+func newCollectionKeywordPayloadIndexFields() []string {
+	return []string{
+		fieldChunkID,
+		fieldKnowledgeID,
+		fieldKnowledgeBaseID,
+		fieldSourceID,
+		fieldFolderID,
+	}
+}
 
 // NewQdrantRetrieveEngineRepository creates and initializes a new Qdrant repository.
 // indexCfg is optional — pass nil to use env var / default values (env path).
@@ -56,7 +68,13 @@ func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) 
 	collectionName := q.getCollectionName(dimension)
 
 	// Check cache first
-	if _, ok := q.initializedCollections.Load(dimension); ok {
+	if _, ok := q.initializedCollections.Load(collectionName); ok {
+		return nil
+	}
+
+	q.ensureMu.Lock()
+	defer q.ensureMu.Unlock()
+	if _, ok := q.initializedCollections.Load(collectionName); ok {
 		return nil
 	}
 
@@ -86,15 +104,22 @@ func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) 
 			return fmt.Errorf("failed to create collection: %w", err)
 		}
 
-		// Create payload indexes for filtering
-		indexFields := []string{fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldSourceID}
-		for _, field := range indexFields {
+		// Keep the legacy new-collection index setup and add folder_id.
+		for _, field := range newCollectionKeywordPayloadIndexFields() {
 			_, err = q.client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{
 				CollectionName: collectionName,
 				FieldName:      field,
 				FieldType:      qdrant.FieldType_FieldTypeKeyword.Enum(),
 			})
 			if err != nil {
+				if field == fieldFolderID {
+					return fmt.Errorf(
+						"create Qdrant keyword payload index %s on %s: %w",
+						field,
+						collectionName,
+						err,
+					)
+				}
 				log.Warnf("[Qdrant] Failed to create index for field %s: %v", field, err)
 			}
 		}
@@ -130,11 +155,79 @@ func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) 
 		}
 
 		log.Infof("[Qdrant] Successfully created collection %s", collectionName)
+	} else if err := q.ensureExistingCollectionSchema(ctx, collectionName); err != nil {
+		return err
 	}
 
 	// Mark as initialized
-	q.initializedCollections.Store(dimension, true)
+	q.initializedCollections.Store(collectionName, true)
 	return nil
+}
+
+// ensureExistingCollection prepares an existing collection for folder-scoped
+// retrieval without changing the legacy path for ordinary retrieval.
+func (q *qdrantRepository) ensureExistingCollection(ctx context.Context, collectionName string) error {
+	if _, ok := q.initializedCollections.Load(collectionName); ok {
+		return nil
+	}
+
+	q.ensureMu.Lock()
+	defer q.ensureMu.Unlock()
+	if _, ok := q.initializedCollections.Load(collectionName); ok {
+		return nil
+	}
+
+	if err := q.ensureExistingCollectionSchema(ctx, collectionName); err != nil {
+		return err
+	}
+	q.initializedCollections.Store(collectionName, true)
+	return nil
+}
+
+func (q *qdrantRepository) ensureExistingCollectionSchema(ctx context.Context, collectionName string) error {
+	info, err := q.client.GetCollectionInfo(ctx, collectionName)
+	if err != nil {
+		return fmt.Errorf("read Qdrant collection schema for %s: %w", collectionName, err)
+	}
+
+	if existing, ok := info.GetPayloadSchema()[fieldFolderID]; ok {
+		if existing.GetDataType() != qdrant.PayloadSchemaType_Keyword {
+			return fmt.Errorf(
+				"Qdrant payload field %s on %s has type %s, expected Keyword",
+				fieldFolderID,
+				collectionName,
+				existing.GetDataType(),
+			)
+		}
+		return nil
+	}
+
+	if _, err := q.client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{
+		CollectionName: collectionName,
+		FieldName:      fieldFolderID,
+		FieldType:      qdrant.FieldType_FieldTypeKeyword.Enum(),
+	}); err != nil {
+		return fmt.Errorf(
+			"create Qdrant keyword payload index %s on %s: %w",
+			fieldFolderID,
+			collectionName,
+			err,
+		)
+	}
+	return nil
+}
+
+func embeddingFromPayload(payload map[string]*qdrant.Value) QdrantVectorEmbedding {
+	return QdrantVectorEmbedding{
+		Content:         payload[fieldContent].GetStringValue(),
+		SourceID:        payload[fieldSourceID].GetStringValue(),
+		SourceType:      int(payload[fieldSourceType].GetIntegerValue()),
+		ChunkID:         payload[fieldChunkID].GetStringValue(),
+		KnowledgeID:     payload[fieldKnowledgeID].GetStringValue(),
+		KnowledgeBaseID: payload[fieldKnowledgeBaseID].GetStringValue(),
+		TagID:           payload[fieldTagID].GetStringValue(),
+		FolderID:        payload[fieldFolderID].GetStringValue(),
+	}
 }
 
 func (q *qdrantRepository) EngineType() types.RetrieverEngineType {
@@ -486,6 +579,42 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 	return nil
 }
 
+// BatchUpdateChunkFolderID updates the folder ID of chunks in batch.
+func (q *qdrantRepository) BatchUpdateChunkFolderID(ctx context.Context, chunkFolderMap map[string]string) error {
+	if len(chunkFolderMap) == 0 {
+		return nil
+	}
+	collections, err := q.client.ListCollections(ctx)
+	if err != nil {
+		return fmt.Errorf("list Qdrant collections: %w", err)
+	}
+	folderGroups := make(map[string][]string)
+	for chunkID, folderID := range chunkFolderMap {
+		folderGroups[folderID] = append(folderGroups[folderID], chunkID)
+	}
+	for _, collectionName := range collections {
+		if len(collectionName) <= len(q.collectionBaseName) ||
+			collectionName[:len(q.collectionBaseName)] != q.collectionBaseName {
+			continue
+		}
+		for folderID, chunkIDs := range folderGroups {
+			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
+				CollectionName: collectionName,
+				Payload:        qdrant.NewValueMap(map[string]any{fieldFolderID: folderID}),
+				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
+					Must: []*qdrant.Condition{qdrant.NewMatchKeywords(fieldChunkID, chunkIDs...)},
+				}),
+			})
+			if err != nil {
+				return fmt.Errorf(
+					"update Qdrant folder_id %q in %s: %w", folderID, collectionName, err,
+				)
+			}
+		}
+	}
+	return nil
+}
+
 func (q *qdrantRepository) getBaseFilter(params types.RetrieveParams) *qdrant.Filter {
 	must := make([]*qdrant.Condition, 0)
 	mustNot := make([]*qdrant.Condition, 0)
@@ -506,6 +635,21 @@ func (q *qdrantRepository) getBaseFilter(params types.RetrieveParams) *qdrant.Fi
 	// Filter by tag IDs if specified
 	if len(params.TagIDs) > 0 {
 		must = append(must, qdrant.NewMatchKeywords(fieldTagID, params.TagIDs...))
+	}
+	// Filter by folder IDs if specified
+	if len(params.FolderIDs) > 0 {
+		folderConditions := []*qdrant.Condition{
+			qdrant.NewMatchKeywords(fieldFolderID, params.FolderIDs...),
+		}
+		if slices.Contains(params.FolderIDs, types.DocumentFolderRootID) {
+			// During a rolling upgrade an older writer can still create a
+			// point without folder_id. Treat a missing payload key as root
+			// until all writers are upgraded.
+			folderConditions = append(folderConditions, qdrant.NewIsEmpty(fieldFolderID))
+		}
+		must = append(must, qdrant.NewFilterAsCondition(&qdrant.Filter{
+			Should: folderConditions,
+		}))
 	}
 
 	if len(params.ExcludeKnowledgeIDs) > 0 {
@@ -565,6 +709,11 @@ func (q *qdrantRepository) VectorRetrieve(ctx context.Context,
 		log.Warnf("[Qdrant] Collection %s does not exist, returning empty results", collectionName)
 		return buildRetrieveResult(nil, types.VectorRetrieverType), nil
 	}
+	if len(params.FolderIDs) > 0 {
+		if err := q.ensureExistingCollection(ctx, collectionName); err != nil {
+			return nil, err
+		}
+	}
 
 	filter := q.getBaseFilter(params)
 
@@ -588,16 +737,8 @@ func (q *qdrantRepository) VectorRetrieve(ctx context.Context,
 	for _, point := range searchResult {
 		payload := point.Payload
 		embedding := &QdrantVectorEmbeddingWithScore{
-			QdrantVectorEmbedding: QdrantVectorEmbedding{
-				Content:         payload[fieldContent].GetStringValue(),
-				SourceID:        payload[fieldSourceID].GetStringValue(),
-				SourceType:      int(payload[fieldSourceType].GetIntegerValue()),
-				ChunkID:         payload[fieldChunkID].GetStringValue(),
-				KnowledgeID:     payload[fieldKnowledgeID].GetStringValue(),
-				KnowledgeBaseID: payload[fieldKnowledgeBaseID].GetStringValue(),
-				TagID:           payload[fieldTagID].GetStringValue(),
-			},
-			Score: float64(point.Score),
+			QdrantVectorEmbedding: embeddingFromPayload(payload),
+			Score:                 float64(point.Score),
 		}
 
 		pointID := point.Id.GetUuid()
@@ -647,6 +788,11 @@ func (q *qdrantRepository) KeywordsRetrieve(ctx context.Context,
 			log.Debugf("[Qdrant] Skipping collection %s (doesn't match base name %s)", collectionName, q.collectionBaseName)
 			continue
 		}
+		if len(params.FolderIDs) > 0 {
+			if err := q.ensureExistingCollection(ctx, collectionName); err != nil {
+				return nil, err
+			}
+		}
 
 		filter := q.getBaseFilter(params)
 
@@ -681,16 +827,8 @@ func (q *qdrantRepository) KeywordsRetrieve(ctx context.Context,
 		for _, point := range scrollResult {
 			payload := point.Payload
 			embedding := &QdrantVectorEmbeddingWithScore{
-				QdrantVectorEmbedding: QdrantVectorEmbedding{
-					Content:         payload[fieldContent].GetStringValue(),
-					SourceID:        payload[fieldSourceID].GetStringValue(),
-					SourceType:      int(payload[fieldSourceType].GetIntegerValue()),
-					ChunkID:         payload[fieldChunkID].GetStringValue(),
-					KnowledgeID:     payload[fieldKnowledgeID].GetStringValue(),
-					KnowledgeBaseID: payload[fieldKnowledgeBaseID].GetStringValue(),
-					TagID:           payload[fieldTagID].GetStringValue(),
-				},
-				Score: 1.0,
+				QdrantVectorEmbedding: embeddingFromPayload(payload),
+				Score:                 1.0,
 			}
 
 			pointID := point.Id.GetUuid()
@@ -816,7 +954,9 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 				fieldKnowledgeID:     targetKnowledgeID,
 				fieldKnowledgeBaseID: targetKnowledgeBaseID,
 				fieldTagID:           payload[fieldTagID].GetStringValue(),
-				fieldIsEnabled:       isEnabled,
+				// Folder IDs are KB-scoped, so copied documents land at target root.
+				fieldFolderID:  "",
+				fieldIsEnabled: isEnabled,
 			})
 
 			var vectors *qdrant.Vectors
@@ -877,6 +1017,7 @@ func createPayload(embedding *QdrantVectorEmbedding) map[string]*qdrant.Value {
 		fieldKnowledgeID:     embedding.KnowledgeID,
 		fieldKnowledgeBaseID: embedding.KnowledgeBaseID,
 		fieldTagID:           embedding.TagID,
+		fieldFolderID:        embedding.FolderID,
 		fieldIsEnabled:       embedding.IsEnabled,
 	}
 	return qdrant.NewValueMap(payload)
@@ -936,6 +1077,7 @@ func toQdrantVectorEmbedding(embedding *types.IndexInfo, additionalParams map[st
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
 		TagID:           embedding.TagID,
+		FolderID:        embedding.FolderID,
 		IsEnabled:       embedding.IsEnabled,
 	}
 	if additionalParams != nil {
@@ -961,6 +1103,7 @@ func fromQdrantVectorEmbedding(id string,
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
 		TagID:           embedding.TagID,
+		FolderID:        embedding.FolderID,
 		Content:         embedding.Content,
 		Score:           embedding.Score,
 		MatchType:       matchType,

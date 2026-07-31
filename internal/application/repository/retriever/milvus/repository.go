@@ -7,9 +7,11 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
@@ -31,6 +33,7 @@ const (
 	fieldKnowledgeID      = "knowledge_id"
 	fieldKnowledgeBaseID  = "knowledge_base_id"
 	fieldTagID            = "tag_id"
+	fieldFolderID         = "folder_id"
 	fieldEmbedding        = "embedding"
 	fieldIsEnabled        = "is_enabled"
 	fieldID               = "id"
@@ -39,7 +42,7 @@ const (
 
 var (
 	allFields = []string{fieldID, fieldContent, fieldSourceID, fieldSourceType, fieldChunkID,
-		fieldKnowledgeID, fieldKnowledgeBaseID, fieldTagID, fieldIsEnabled, fieldEmbedding}
+		fieldKnowledgeID, fieldKnowledgeBaseID, fieldTagID, fieldFolderID, fieldIsEnabled, fieldEmbedding}
 )
 
 // NewMilvusRetrieveEngineRepository creates and initializes a new Milvus repository.
@@ -88,7 +91,13 @@ func (m *milvusRepository) ensureCollection(ctx context.Context, dimension int) 
 	collectionName := m.getCollectionName(dimension)
 
 	// Check cache first
-	if _, ok := m.initializedCollections.Load(dimension); ok {
+	if _, ok := m.initializedCollections.Load(collectionName); ok {
+		return nil
+	}
+
+	m.ensureMu.Lock()
+	defer m.ensureMu.Unlock()
+	if _, ok := m.initializedCollections.Load(collectionName); ok {
 		return nil
 	}
 
@@ -151,6 +160,7 @@ func (m *milvusRepository) ensureCollection(ctx context.Context, dimension int) 
 					WithName(fieldTagID).
 					WithDataType(entity.FieldTypeVarChar).
 					WithMaxLength(255),
+				newFolderField(),
 				entity.NewField().
 					WithName(fieldIsEnabled).
 					WithDataType(entity.FieldTypeBool),
@@ -170,7 +180,14 @@ func (m *milvusRepository) ensureCollection(ctx context.Context, dimension int) 
 		indexOpts = append(indexOpts, client.NewCreateIndexOption(collectionName, fieldEmbedding, index.NewHNSWIndex(m.metricType, 16, 128)))
 		indexOpts = append(indexOpts, client.NewCreateIndexOption(collectionName, fieldContentSparse, index.NewAutoIndex(entity.BM25)))
 		// Create payload indexes for filtering
-		indexFields := []string{fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldSourceID, fieldIsEnabled}
+		indexFields := []string{
+			fieldChunkID,
+			fieldKnowledgeID,
+			fieldKnowledgeBaseID,
+			fieldSourceID,
+			fieldFolderID,
+			fieldIsEnabled,
+		}
 		for _, fieldName := range indexFields {
 			indexOpts = append(indexOpts, client.NewCreateIndexOption(collectionName, fieldName, index.NewAutoIndex(entity.IP)))
 		}
@@ -187,8 +204,103 @@ func (m *milvusRepository) ensureCollection(ctx context.Context, dimension int) 
 		}
 
 		log.Infof("[Milvus] Successfully created collection %s", collectionName)
+	} else if err := m.ensureExistingCollectionSchema(ctx, collectionName); err != nil {
+		return err
 	}
 
+	if err := m.loadCollection(ctx, collectionName); err != nil {
+		return err
+	}
+
+	m.initializedCollections.Store(collectionName, true)
+	return nil
+}
+
+// ensureExistingCollection prepares an existing collection for folder-scoped
+// retrieval without creating a missing collection. Ordinary retrieval keeps
+// the legacy path and must not build a folder index in its request deadline.
+func (m *milvusRepository) ensureExistingCollection(ctx context.Context, collectionName string) error {
+	if _, ok := m.initializedCollections.Load(collectionName); ok {
+		return nil
+	}
+
+	m.ensureMu.Lock()
+	defer m.ensureMu.Unlock()
+	if _, ok := m.initializedCollections.Load(collectionName); ok {
+		return nil
+	}
+
+	if err := m.ensureExistingCollectionSchema(ctx, collectionName); err != nil {
+		return err
+	}
+	if err := m.loadCollection(ctx, collectionName); err != nil {
+		return err
+	}
+	m.initializedCollections.Store(collectionName, true)
+	return nil
+}
+
+func (m *milvusRepository) ensureExistingCollectionSchema(ctx context.Context, collectionName string) error {
+	collection, err := m.client.DescribeCollection(
+		ctx,
+		client.NewDescribeCollectionOption(collectionName),
+	)
+	if err != nil {
+		return fmt.Errorf("describe existing Milvus collection %s: %w", collectionName, err)
+	}
+	if collection == nil || collection.Schema == nil {
+		return fmt.Errorf("describe existing Milvus collection %s returned no schema", collectionName)
+	}
+
+	folderField := schemaField(collection.Schema, fieldFolderID)
+	if folderField == nil {
+		addErr := m.addFolderField(ctx, collectionName)
+		// Always re-read the authoritative schema. A concurrent process may
+		// have won the add-field race even if our request returned an error.
+		collection, err = m.client.DescribeCollection(
+			ctx,
+			client.NewDescribeCollectionOption(collectionName),
+		)
+		if err != nil {
+			if addErr != nil {
+				return errors.Join(addErr, fmt.Errorf(
+					"verify %s field on Milvus collection %s: %w",
+					fieldFolderID,
+					collectionName,
+					err,
+				))
+			}
+			return fmt.Errorf(
+				"verify %s field on Milvus collection %s: %w",
+				fieldFolderID,
+				collectionName,
+				err,
+			)
+		}
+		if collection == nil || collection.Schema == nil {
+			return fmt.Errorf(
+				"verify %s field on Milvus collection %s returned no schema",
+				fieldFolderID,
+				collectionName,
+			)
+		}
+		folderField = schemaField(collection.Schema, fieldFolderID)
+		if folderField == nil && addErr != nil {
+			return addErr
+		}
+	}
+
+	if err := validateFolderField(collectionName, folderField); err != nil {
+		return err
+	}
+	if err := m.ensureFolderIndex(ctx, collectionName); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *milvusRepository) loadCollection(ctx context.Context, collectionName string) error {
+	log := logger.GetLogger(ctx)
 	loadOpt := client.NewLoadCollectionOption(collectionName)
 	if m.replicaNumber > 0 {
 		loadOpt = loadOpt.WithReplica(m.replicaNumber)
@@ -202,10 +314,166 @@ func (m *milvusRepository) ensureCollection(ctx context.Context, dimension int) 
 		log.Errorf("[Milvus] Failed to await load collection: %v", err)
 		return fmt.Errorf("failed to await load collection: %w", err)
 	}
-
-	// Mark as initialized
-	m.initializedCollections.Store(dimension, true)
 	return nil
+}
+
+func (m *milvusRepository) addFolderField(ctx context.Context, collectionName string) error {
+	if err := m.client.AddCollectionField(
+		ctx,
+		client.NewAddCollectionFieldOption(collectionName, newFolderField()),
+	); err != nil {
+		return fmt.Errorf("add %s field to Milvus collection %s: %w", fieldFolderID, collectionName, err)
+	}
+	return nil
+}
+
+// newFolderField keeps newly-created collections writable by workers from the
+// first rollout phase. Those workers do not send folder_id, so the field must
+// use the same nullable root default as an in-place schema upgrade.
+func newFolderField() *entity.Field {
+	return entity.NewField().
+		WithName(fieldFolderID).
+		WithDataType(entity.FieldTypeVarChar).
+		WithMaxLength(36).
+		WithNullable(true).
+		WithDefaultValueString("")
+}
+
+func (m *milvusRepository) ensureFolderIndex(ctx context.Context, collectionName string) error {
+	indexNames, err := m.client.ListIndexes(
+		ctx,
+		client.NewListIndexOption(collectionName).WithFieldName(fieldFolderID),
+	)
+	if err != nil {
+		return fmt.Errorf("list %s indexes on Milvus collection %s: %w", fieldFolderID, collectionName, err)
+	}
+	if len(indexNames) > 0 {
+		for _, indexName := range indexNames {
+			description, err := m.client.DescribeIndex(
+				ctx,
+				client.NewDescribeIndexOption(collectionName, indexName),
+			)
+			if err != nil {
+				return fmt.Errorf(
+					"describe %s index %s on Milvus collection %s: %w",
+					fieldFolderID,
+					indexName,
+					collectionName,
+					err,
+				)
+			}
+			if description.Index == nil {
+				return fmt.Errorf(
+					"describe %s index %s on Milvus collection %s returned no index definition",
+					fieldFolderID,
+					indexName,
+					collectionName,
+				)
+			}
+			if !isScalarFilterIndex(description.IndexType()) {
+				return fmt.Errorf(
+					"Milvus collection %s has incompatible %s index type %s; rebuild the index as a scalar filter index",
+					collectionName,
+					fieldFolderID,
+					description.IndexType(),
+				)
+			}
+		}
+		return nil
+	}
+	indexTask, err := m.client.CreateIndex(
+		ctx,
+		client.NewCreateIndexOption(collectionName, fieldFolderID, index.NewAutoIndex(entity.IP)),
+	)
+	if err != nil {
+		return fmt.Errorf("create %s index on Milvus collection %s: %w", fieldFolderID, collectionName, err)
+	}
+	if indexTask != nil {
+		if err := indexTask.Await(ctx); err != nil {
+			return fmt.Errorf("await %s index on Milvus collection %s: %w", fieldFolderID, collectionName, err)
+		}
+	}
+	return nil
+}
+
+func isScalarFilterIndex(indexType index.IndexType) bool {
+	switch indexType {
+	case index.AUTOINDEX, index.Trie, index.Sorted, index.Inverted, index.BITMAP:
+		return true
+	default:
+		return false
+	}
+}
+
+func validateFolderField(collectionName string, field *entity.Field) error {
+	if field == nil {
+		return fmt.Errorf(
+			"Milvus collection %s is missing required %s field after schema update",
+			collectionName,
+			fieldFolderID,
+		)
+	}
+	if field.DataType != entity.FieldTypeVarChar {
+		return fmt.Errorf(
+			"Milvus collection %s has incompatible %s data type %s; expected VarChar",
+			collectionName,
+			fieldFolderID,
+			field.DataType.Name(),
+		)
+	}
+	maxLength, err := strconv.Atoi(field.TypeParams[entity.TypeParamMaxLength])
+	if err != nil || maxLength < 36 {
+		return fmt.Errorf(
+			"Milvus collection %s has incompatible %s max length %q; expected at least 36",
+			collectionName,
+			fieldFolderID,
+			field.TypeParams[entity.TypeParamMaxLength],
+		)
+	}
+
+	hasEmptyDefault := false
+	if field.DefaultValue != nil {
+		_, isStringDefault := field.DefaultValue.GetData().(*schemapb.ValueField_StringData)
+		hasEmptyDefault = isStringDefault && field.DefaultValue.GetStringData() == ""
+	}
+	if field.DefaultValue != nil && !hasEmptyDefault {
+		return fmt.Errorf(
+			"Milvus collection %s has incompatible %s default; expected an empty string",
+			collectionName,
+			fieldFolderID,
+		)
+	}
+	if !field.Nullable {
+		return fmt.Errorf(
+			"Milvus collection %s has non-nullable %s; the field must be nullable so older workers can omit it during a rolling upgrade",
+			collectionName,
+			fieldFolderID,
+		)
+	}
+	if !hasEmptyDefault {
+		return fmt.Errorf(
+			"Milvus collection %s has nullable %s without an empty-string default; backfill root rows and rebuild the field",
+			collectionName,
+			fieldFolderID,
+		)
+	}
+	return nil
+}
+
+func schemaField(schema *entity.Schema, fieldName string) *entity.Field {
+	if schema == nil || fieldName == "" {
+		return nil
+	}
+	for _, field := range schema.Fields {
+		if field != nil && field.Name == fieldName {
+			return field
+		}
+	}
+	return nil
+}
+
+func schemaHasField(schema *entity.Schema, fieldName string) bool {
+	return schemaField(schema, fieldName) != nil
 }
 
 func (m *milvusRepository) EngineType() types.RetrieverEngineType {
@@ -595,6 +863,47 @@ func (m *milvusRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 	return nil
 }
 
+// BatchUpdateChunkFolderID updates the folder ID of chunks in batch.
+func (m *milvusRepository) BatchUpdateChunkFolderID(ctx context.Context, chunkFolderMap map[string]string) error {
+	if len(chunkFolderMap) == 0 {
+		return nil
+	}
+	collections, err := m.client.ListCollections(ctx, client.NewListCollectionOption())
+	if err != nil {
+		return fmt.Errorf("list Milvus collections: %w", err)
+	}
+	folderGroups := make(map[string][]string)
+	for chunkID, folderID := range chunkFolderMap {
+		folderGroups[folderID] = append(folderGroups[folderID], chunkID)
+	}
+	for _, collectionName := range collections {
+		if len(collectionName) <= len(m.collectionBaseName) ||
+			collectionName[:len(m.collectionBaseName)] != m.collectionBaseName {
+			continue
+		}
+		for folderID, chunkIDs := range folderGroups {
+			embeddings, _, err := m.searchByFilter(ctx, collectionName, &universalFilterCondition{
+				Field: fieldChunkID, Operator: operatorIn, Value: chunkIDs,
+			}, nil, nil)
+			if err != nil {
+				return fmt.Errorf("find Milvus chunks in %s: %w", collectionName, err)
+			}
+			upserts := make([]*MilvusVectorEmbedding, 0, len(embeddings))
+			for _, embedding := range embeddings {
+				embedding.FolderID = folderID
+				upserts = append(upserts, &embedding.MilvusVectorEmbedding)
+			}
+			if len(upserts) == 0 {
+				continue
+			}
+			if _, err := m.client.Upsert(ctx, createUpsert(collectionName, upserts)); err != nil {
+				return fmt.Errorf("update Milvus chunks in %s: %w", collectionName, err)
+			}
+		}
+	}
+	return nil
+}
+
 func (m *milvusRepository) getBaseFilterForQuery(params types.RetrieveParams) (string, map[string]any, error) {
 	filters := make([]*universalFilterCondition, 0)
 	if len(params.KnowledgeBaseIDs) > 0 {
@@ -616,6 +925,13 @@ func (m *milvusRepository) getBaseFilterForQuery(params types.RetrieveParams) (s
 			Field:    fieldTagID,
 			Operator: operatorIn,
 			Value:    params.TagIDs,
+		})
+	}
+	if len(params.FolderIDs) > 0 {
+		filters = append(filters, &universalFilterCondition{
+			Field:    fieldFolderID,
+			Operator: operatorIn,
+			Value:    params.FolderIDs,
 		})
 	}
 	if len(params.ExcludeKnowledgeIDs) > 0 {
@@ -691,6 +1007,11 @@ func (m *milvusRepository) VectorRetrieve(ctx context.Context,
 		log.Warnf("[Milvus] Collection %s does not exist, returning empty results", collectionName)
 		return buildRetrieveResult(nil, types.VectorRetrieverType), nil
 	}
+	if len(params.FolderIDs) > 0 {
+		if err := m.ensureExistingCollection(ctx, collectionName); err != nil {
+			return nil, fmt.Errorf("prepare Milvus collection %s for vector retrieval: %w", collectionName, err)
+		}
+	}
 
 	expr, paramsMap, err := m.getBaseFilterForQuery(params)
 	if err != nil {
@@ -761,6 +1082,15 @@ func (m *milvusRepository) KeywordsRetrieve(ctx context.Context,
 		if len(collectionName) <= len(m.collectionBaseName) ||
 			collectionName[:len(m.collectionBaseName)] != m.collectionBaseName {
 			continue
+		}
+		if len(params.FolderIDs) > 0 {
+			if err := m.ensureExistingCollection(ctx, collectionName); err != nil {
+				return nil, fmt.Errorf(
+					"prepare Milvus collection %s for keyword retrieval: %w",
+					collectionName,
+					err,
+				)
+			}
 		}
 
 		expr, paramsMap, err := m.getBaseFilterForQuery(params)
@@ -883,8 +1213,10 @@ func (m *milvusRepository) CopyIndices(ctx context.Context,
 				KnowledgeID:     targetKnowledgeID,
 				KnowledgeBaseID: targetKnowledgeBaseID,
 				TagID:           sourceEmbedding.TagID,
-				Embedding:       sourceEmbedding.Embedding,
-				IsEnabled:       sourceEmbedding.IsEnabled,
+				// Folder IDs are KB-scoped, so copied documents land at target root.
+				FolderID:  "",
+				Embedding: sourceEmbedding.Embedding,
+				IsEnabled: sourceEmbedding.IsEnabled,
 			}
 			targetEmbeddings = append(targetEmbeddings, targetEmbedding)
 		}
@@ -965,6 +1297,7 @@ func toMilvusVectorEmbedding(embedding *types.IndexInfo, additionalParams map[st
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
 		TagID:           embedding.TagID,
+		FolderID:        embedding.FolderID,
 		IsEnabled:       embedding.IsEnabled,
 	}
 	if additionalParams != nil && slices.Contains(slices.Collect(maps.Keys(additionalParams)), fieldEmbedding) {
@@ -988,6 +1321,7 @@ func fromMilvusVectorEmbedding(id string,
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
 		TagID:           embedding.TagID,
+		FolderID:        embedding.FolderID,
 		Content:         embedding.Content,
 		Score:           embedding.Score,
 		MatchType:       matchType,
@@ -1004,6 +1338,7 @@ func createUpsert(collectionName string, embeddings []*MilvusVectorEmbedding) cl
 	knowledgeIDs := make([]string, 0, len(embeddings))
 	knowledgeBaseIDs := make([]string, 0, len(embeddings))
 	tagIDs := make([]string, 0, len(embeddings))
+	folderIDs := make([]string, 0, len(embeddings))
 	isEnableds := make([]bool, 0, len(embeddings))
 	var dimension int
 	for _, embedding := range embeddings {
@@ -1016,6 +1351,7 @@ func createUpsert(collectionName string, embeddings []*MilvusVectorEmbedding) cl
 		knowledgeIDs = append(knowledgeIDs, embedding.KnowledgeID)
 		knowledgeBaseIDs = append(knowledgeBaseIDs, embedding.KnowledgeBaseID)
 		tagIDs = append(tagIDs, embedding.TagID)
+		folderIDs = append(folderIDs, embedding.FolderID)
 		isEnableds = append(isEnableds, embedding.IsEnabled)
 		dimension = len(embedding.Embedding)
 	}
@@ -1029,6 +1365,7 @@ func createUpsert(collectionName string, embeddings []*MilvusVectorEmbedding) cl
 		WithVarcharColumn(fieldKnowledgeID, knowledgeIDs).
 		WithVarcharColumn(fieldKnowledgeBaseID, knowledgeBaseIDs).
 		WithVarcharColumn(fieldTagID, tagIDs).
+		WithVarcharColumn(fieldFolderID, folderIDs).
 		WithBoolColumn(fieldIsEnabled, isEnableds)
 	return opt
 }
@@ -1127,6 +1464,23 @@ func convertResultSet(resultSet []client.ResultSet) ([]*MilvusVectorEmbeddingWit
 					return nil, nil, err
 				}
 				docs[i].TagID = val
+			}
+		}
+		if field == fieldFolderID {
+			for i := 0; i < columns.Len(); i++ {
+				isNull, err := columns.IsNull(i)
+				if err != nil {
+					return nil, nil, err
+				}
+				if isNull {
+					docs[i].FolderID = ""
+					continue
+				}
+				val, err := columns.GetAsString(i)
+				if err != nil {
+					return nil, nil, err
+				}
+				docs[i].FolderID = val
 			}
 		}
 		if field == fieldIsEnabled {

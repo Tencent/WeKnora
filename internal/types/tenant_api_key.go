@@ -401,6 +401,37 @@ func AuthorizeTenantAPIKeyKnowledgeTargets(ctx context.Context, kbIDs, knowledge
 	return nil
 }
 
+// AuthorizeTenantAPIKeyKnowledgeTargetsWithFolders extends main's existing
+// KB/file authorization only for folder mentions introduced by #1311. Tag
+// scope authorization intentionally keeps main's behavior and belongs to a
+// separate change.
+func AuthorizeTenantAPIKeyKnowledgeTargetsWithFolders(
+	ctx context.Context,
+	kbIDs []string,
+	knowledgeIDs []string,
+	knowledgeBaseIDByKnowledgeID map[string]string,
+	folderScopes []FolderScope,
+) error {
+	scopedKBIDs := append([]string(nil), kbIDs...)
+	for _, folderScope := range folderScopes {
+		scopedKBIDs = append(scopedKBIDs, folderScope.KnowledgeBaseID)
+	}
+	// A file can participate in a folder intersection only when the request
+	// declares its owning KB. This hint is used here solely to enforce the API
+	// key allow-list; buildSearchTargetsWithHints later loads the document and
+	// verifies the real KB binding before it can become a retrieval target.
+	for _, knowledgeID := range knowledgeIDs {
+		kbID := strings.TrimSpace(knowledgeBaseIDByKnowledgeID[knowledgeID])
+		if kbID == "" {
+			return errors.NewForbiddenError(
+				"API key scope does not allow knowledge_ids without a verified knowledge base",
+			)
+		}
+		scopedKBIDs = append(scopedKBIDs, kbID)
+	}
+	return AuthorizeTenantAPIKeyKnowledgeTargets(ctx, scopedKBIDs, nil)
+}
+
 // AuthorizeTenantAPIKeyOptionalTagIDs rejects tag_ids for KB-restricted keys
 // because tag resolution can pull documents from arbitrary knowledge bases.
 func AuthorizeTenantAPIKeyOptionalTagIDs(ctx context.Context, tagIDs []string) error {

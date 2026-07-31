@@ -3,6 +3,7 @@ package opensearch
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -25,6 +26,7 @@ type retrieveFilters struct {
 	KBIDs               []string
 	KnowledgeIDs        []string
 	TagIDs              []string
+	FolderIDs           []string
 	ExcludeChunkIDs     []string
 	ExcludeKnowledgeIDs []string
 	IncludeDisabled     bool
@@ -39,6 +41,7 @@ func fromParams(p types.RetrieveParams) *retrieveFilters {
 		KBIDs:               p.KnowledgeBaseIDs,
 		KnowledgeIDs:        p.KnowledgeIDs,
 		TagIDs:              p.TagIDs,
+		FolderIDs:           p.FolderIDs,
 		ExcludeChunkIDs:     p.ExcludeChunkIDs,
 		ExcludeKnowledgeIDs: p.ExcludeKnowledgeIDs,
 		// IncludeDisabled stays false — set explicitly by admin callers
@@ -66,6 +69,27 @@ func (f *retrieveFilters) toBoolMust() []map[string]any {
 	if len(f.TagIDs) > 0 {
 		must = append(must, map[string]any{
 			"terms": map[string]any{"tag_id": f.TagIDs},
+		})
+	}
+	if len(f.FolderIDs) > 0 {
+		should := []map[string]any{
+			{"terms": map[string]any{"folder_id": f.FolderIDs}},
+			{"terms": map[string]any{"folder_id.keyword": f.FolderIDs}},
+		}
+		if slices.Contains(f.FolderIDs, types.DocumentFolderRootID) {
+			should = append(should, map[string]any{
+				"bool": map[string]any{
+					"must_not": map[string]any{
+						"exists": map[string]any{"field": "folder_id"},
+					},
+				},
+			})
+		}
+		must = append(must, map[string]any{
+			"bool": map[string]any{
+				"minimum_should_match": 1,
+				"should":               should,
+			},
 		})
 	}
 	if len(f.ExcludeChunkIDs) > 0 {

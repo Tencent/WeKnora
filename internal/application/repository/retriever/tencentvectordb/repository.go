@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -156,6 +157,9 @@ func (r *repository) CopyIndices(
 		return nil
 	}
 	collectionName := r.collectionName(dimension)
+	if err := r.ensureExistingCollection(ctx, collectionName, false); err != nil {
+		return fmt.Errorf("prepare Tencent VectorDB collection %s for index copy: %w", collectionName, err)
+	}
 	ids := slices.Collect(maps.Keys(sourceToTargetChunkIDMap))
 
 	var embeddings []*vectorEmbedding
@@ -235,6 +239,24 @@ func (r *repository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMap map[
 	return nil
 }
 
+func (r *repository) BatchUpdateChunkFolderID(ctx context.Context, chunkFolderMap map[string]string) error {
+	if len(chunkFolderMap) == 0 {
+		return nil
+	}
+	grouped := make(map[string][]string)
+	for chunkID, folderID := range chunkFolderMap {
+		grouped[folderID] = append(grouped[folderID], chunkID)
+	}
+	for folderID, chunkIDs := range grouped {
+		if err := r.updateChunkFields(
+			ctx, chunkIDs, map[string]tcvectordb.Field{fieldFolderID: {Val: folderID}},
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *repository) Retrieve(ctx context.Context, params types.RetrieveParams) ([]*types.RetrieveResult, error) {
 	switch params.RetrieverType {
 	case types.VectorRetrieverType:
@@ -259,6 +281,13 @@ func (r *repository) VectorRetrieve(ctx context.Context, params types.RetrievePa
 	}
 	if !exists {
 		return r.retrieveResult(nil, types.VectorRetrieverType), nil
+	}
+	if err := r.ensureExistingCollection(ctx, collectionName, len(params.FolderIDs) > 0); err != nil {
+		return nil, fmt.Errorf(
+			"prepare Tencent VectorDB collection %s for vector retrieval: %w",
+			collectionName,
+			err,
+		)
 	}
 
 	limit := int64(params.TopK)
@@ -329,6 +358,17 @@ func (r *repository) KeywordsRetrieve(ctx context.Context, params types.Retrieve
 			continue
 		}
 		matchedCollections++
+		if err := r.ensureExistingCollection(
+			ctx,
+			collection.CollectionName,
+			len(params.FolderIDs) > 0,
+		); err != nil {
+			return nil, fmt.Errorf(
+				"prepare Tencent VectorDB collection %s for keyword retrieval: %w",
+				collection.CollectionName,
+				err,
+			)
+		}
 
 		search, err := r.client.Database(r.databaseName).Collection(collection.CollectionName).FullTextSearch(
 			ctx,
@@ -370,7 +410,14 @@ func (r *repository) KeywordsRetrieve(ctx context.Context, params types.Retrieve
 }
 
 func (r *repository) ensureCollection(ctx context.Context, dimension int) error {
-	if _, ok := r.initialized.Load(dimension); ok {
+	collectionName := r.collectionName(dimension)
+	if r.collectionPrepared(collectionName, false) {
+		return nil
+	}
+
+	r.ensureMu.Lock()
+	defer r.ensureMu.Unlock()
+	if r.collectionPrepared(collectionName, false) {
 		return nil
 	}
 
@@ -378,13 +425,16 @@ func (r *repository) ensureCollection(ctx context.Context, dimension int) error 
 		return fmt.Errorf("tencent vectordb ensure database %s: %w", r.databaseName, err)
 	}
 
-	collectionName := r.collectionName(dimension)
 	exists, err := r.client.Database(r.databaseName).ExistsCollection(ctx, collectionName)
 	if err != nil {
 		return fmt.Errorf("tencent vectordb check collection %s: %w", collectionName, err)
 	}
 	if exists {
-		r.initialized.Store(dimension, true)
+		ready, err := r.ensureFolderIndex(ctx, collectionName, false)
+		if err != nil {
+			return err
+		}
+		r.markCollectionPrepared(collectionName, ready)
 		return nil
 	}
 
@@ -421,10 +471,11 @@ func (r *repository) ensureCollection(ctx context.Context, dimension int) error 
 			{FieldName: fieldKnowledgeID, FieldType: tcvectordb.String, IndexType: tcvectordb.FILTER},
 			{FieldName: fieldKnowledgeBaseID, FieldType: tcvectordb.String, IndexType: tcvectordb.FILTER},
 			{FieldName: fieldTagID, FieldType: tcvectordb.String, IndexType: tcvectordb.FILTER},
+			{FieldName: fieldFolderID, FieldType: tcvectordb.String, IndexType: tcvectordb.FILTER},
 			{FieldName: fieldIsEnabled, FieldType: tcvectordb.Uint64, IndexType: tcvectordb.FILTER},
 		},
 	}
-	_, err = r.client.Database(r.databaseName).CreateCollection(
+	_, createErr := r.client.Database(r.databaseName).CreateCollection(
 		ctx,
 		collectionName,
 		uint32(r.shardsNum),
@@ -432,17 +483,197 @@ func (r *repository) ensureCollection(ctx context.Context, dimension int) error 
 		fmt.Sprintf("WeKnora embeddings collection with dimension %d", dimension),
 		indexes,
 	)
-	if err != nil {
-		if isCollectionAlreadyExistsErr(err) {
-			logger.GetLogger(ctx).Infof("[TencentVectorDB] collection %s already exists, skip create", collectionName)
-			r.initialized.Store(dimension, true)
-			return nil
+	ready := false
+	if err := verifyCollectionCreateResult(collectionName, createErr, func() error {
+		if createErr != nil {
+			logger.GetLogger(ctx).Infof(
+				"[TencentVectorDB] collection %s was created concurrently; verifying folder index",
+				collectionName,
+			)
 		}
-		return fmt.Errorf("tencent vectordb create collection %s: %w", collectionName, err)
+		var err error
+		ready, err = r.ensureFolderIndex(ctx, collectionName, false)
+		return err
+	}); err != nil {
+		return err
 	}
 
-	r.initialized.Store(dimension, true)
+	r.markCollectionPrepared(collectionName, ready)
 	return nil
+}
+
+func (r *repository) ensureExistingCollection(
+	ctx context.Context,
+	collectionName string,
+	requireReady bool,
+) error {
+	if r.collectionPrepared(collectionName, requireReady) {
+		return nil
+	}
+
+	r.ensureMu.Lock()
+	defer r.ensureMu.Unlock()
+	if r.collectionPrepared(collectionName, requireReady) {
+		return nil
+	}
+	ready, err := r.ensureFolderIndex(ctx, collectionName, requireReady)
+	if err != nil {
+		return err
+	}
+	r.markCollectionPrepared(collectionName, ready)
+	return nil
+}
+
+func (r *repository) collectionPrepared(collectionName string, requireReady bool) bool {
+	cache := &r.folderSchemaPresent
+	if requireReady {
+		cache = &r.folderIndexReady
+	}
+	_, ok := cache.Load(collectionName)
+	return ok
+}
+
+func (r *repository) markCollectionPrepared(collectionName string, ready bool) {
+	r.folderSchemaPresent.Store(collectionName, true)
+	if ready {
+		r.folderIndexReady.Store(collectionName, true)
+	}
+}
+
+func (r *repository) ensureFolderIndex(
+	ctx context.Context,
+	collectionName string,
+	requireReady bool,
+) (bool, error) {
+	collection, err := r.client.Database(r.databaseName).DescribeCollection(ctx, collectionName)
+	if err != nil {
+		return false, fmt.Errorf("tencent vectordb describe collection %s: %w", collectionName, err)
+	}
+	if collection == nil {
+		return false, fmt.Errorf("tencent vectordb describe collection %s returned no schema", collectionName)
+	}
+	if folderIndex := findFilterIndex(collection.Indexes, fieldFolderID); folderIndex != nil {
+		if err := validateFolderIndex(collectionName, folderIndex); err != nil {
+			return false, err
+		}
+		return validateFolderIndexStatus(collectionName, collection.IndexStatus, requireReady)
+	}
+
+	buildExistingData := true
+	addErr := r.client.AddIndex(ctx, r.databaseName, collectionName, &tcvectordb.AddIndexParams{
+		FilterIndexs: []tcvectordb.FilterIndex{{
+			FieldName: fieldFolderID,
+			FieldType: tcvectordb.String,
+			IndexType: tcvectordb.FILTER,
+		}},
+		BuildExistedData: &buildExistingData,
+	})
+	if addErr != nil && !isIndexAlreadyExistsErr(addErr) {
+		addErr = fmt.Errorf("tencent vectordb add %s index to %s: %w", fieldFolderID, collectionName, addErr)
+	}
+
+	// AddIndex can race with another service instance and index construction
+	// is external to this process. Re-read and validate the authoritative
+	// schema before allowing reads or writes.
+	collection, err = r.client.Database(r.databaseName).DescribeCollection(ctx, collectionName)
+	if err != nil {
+		verifyErr := fmt.Errorf("verify %s index on Tencent VectorDB collection %s: %w", fieldFolderID, collectionName, err)
+		if addErr != nil {
+			return false, errors.Join(addErr, verifyErr)
+		}
+		return false, verifyErr
+	}
+	if collection == nil {
+		return false, fmt.Errorf("verify %s index on Tencent VectorDB collection %s returned no schema", fieldFolderID, collectionName)
+	}
+	folderIndex := findFilterIndex(collection.Indexes, fieldFolderID)
+	if folderIndex == nil && addErr != nil {
+		return false, addErr
+	}
+	if err := validateFolderIndex(collectionName, folderIndex); err != nil {
+		return false, err
+	}
+	return validateFolderIndexStatus(collectionName, collection.IndexStatus, requireReady)
+}
+
+func hasFilterIndex(indexes tcvectordb.Indexes, fieldName string) bool {
+	return findFilterIndex(indexes, fieldName) != nil
+}
+
+func findFilterIndex(indexes tcvectordb.Indexes, fieldName string) *tcvectordb.FilterIndex {
+	for _, filterIndex := range indexes.FilterIndex {
+		if filterIndex.FieldName == fieldName {
+			indexCopy := filterIndex
+			return &indexCopy
+		}
+	}
+	return nil
+}
+
+func validateFolderIndex(collectionName string, filterIndex *tcvectordb.FilterIndex) error {
+	if filterIndex == nil {
+		return fmt.Errorf(
+			"Tencent VectorDB collection %s is missing required %s filter index after schema update",
+			collectionName,
+			fieldFolderID,
+		)
+	}
+	if filterIndex.FieldType != tcvectordb.String {
+		return fmt.Errorf(
+			"Tencent VectorDB collection %s has incompatible %s field type %q; expected %q",
+			collectionName,
+			fieldFolderID,
+			filterIndex.FieldType,
+			tcvectordb.String,
+		)
+	}
+	if filterIndex.IndexType != tcvectordb.FILTER {
+		return fmt.Errorf(
+			"Tencent VectorDB collection %s has incompatible %s index type %q; expected %q",
+			collectionName,
+			fieldFolderID,
+			filterIndex.IndexType,
+			tcvectordb.FILTER,
+		)
+	}
+	return nil
+}
+
+func validateFolderIndexStatus(
+	collectionName string,
+	indexStatus tcvectordb.IndexStatus,
+	requireReady bool,
+) (bool, error) {
+	status := strings.ToLower(strings.TrimSpace(indexStatus.Status))
+	switch status {
+	case "ready":
+		return true, nil
+	case "building", "training":
+		if !requireReady {
+			return false, nil
+		}
+		return false, fmt.Errorf(
+			"Tencent VectorDB collection %s folder index is %s; retry after index construction completes",
+			collectionName,
+			status,
+		)
+	case "failed":
+		return false, fmt.Errorf(
+			"Tencent VectorDB collection %s folder index build failed; inspect the collection and rebuild the index",
+			collectionName,
+		)
+	case "":
+		return false, fmt.Errorf(
+			"Tencent VectorDB collection %s returned an empty folder index status; expected ready",
+			collectionName,
+		)
+	default:
+		return false, fmt.Errorf(
+			"Tencent VectorDB collection %s returned unknown folder index status %q; expected ready",
+			collectionName,
+			indexStatus.Status,
+		)
+	}
 }
 
 func isCollectionAlreadyExistsErr(err error) bool {
@@ -451,6 +682,28 @@ func isCollectionAlreadyExistsErr(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "code: 15202") || strings.Contains(msg, "already exist")
+}
+
+func verifyCollectionCreateResult(
+	collectionName string,
+	createErr error,
+	verifyReady func() error,
+) error {
+	if createErr != nil && !isCollectionAlreadyExistsErr(createErr) {
+		return fmt.Errorf(
+			"tencent vectordb create collection %s: %w",
+			collectionName,
+			createErr,
+		)
+	}
+	return verifyReady()
+}
+
+func isIndexAlreadyExistsErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "already exist")
 }
 
 func (r *repository) deleteByFilter(ctx context.Context, dimension int, cond string) error {
@@ -517,6 +770,9 @@ func (r *repository) baseFilter(params types.RetrieveParams) *tcvectordb.Filter 
 	if len(params.TagIDs) > 0 {
 		conditions = append(conditions, tcvectordb.In(fieldTagID, params.TagIDs))
 	}
+	if len(params.FolderIDs) > 0 {
+		conditions = append(conditions, tcvectordb.In(fieldFolderID, params.FolderIDs))
+	}
 	if len(params.ExcludeKnowledgeIDs) > 0 {
 		conditions = append(conditions, tcvectordb.NotIn(fieldKnowledgeID, params.ExcludeKnowledgeIDs))
 	}
@@ -581,6 +837,7 @@ func toVectorEmbedding(indexInfo *types.IndexInfo, params map[string]any) *vecto
 		KnowledgeID:     indexInfo.KnowledgeID,
 		KnowledgeBaseID: indexInfo.KnowledgeBaseID,
 		TagID:           indexInfo.TagID,
+		FolderID:        indexInfo.FolderID,
 		IsEnabled:       indexInfo.IsEnabled,
 	}
 	if embedding.ID == "" {
@@ -645,6 +902,8 @@ func remapCopiedEmbeddings(
 		embedding.SourceID = targetSourceID
 		embedding.ChunkID = targetChunkID
 		embedding.KnowledgeBaseID = targetKnowledgeBaseID
+		// Folder IDs are KB-scoped, so copied documents land at target root.
+		embedding.FolderID = ""
 		if targetKBID := sourceToTargetKBIDMap[embedding.KnowledgeID]; targetKBID != "" {
 			embedding.KnowledgeID = targetKBID
 		}
@@ -699,6 +958,7 @@ func toDocument(embedding *vectorEmbedding) tcvectordb.Document {
 			fieldKnowledgeID:     {Val: embedding.KnowledgeID},
 			fieldKnowledgeBaseID: {Val: embedding.KnowledgeBaseID},
 			fieldTagID:           {Val: embedding.TagID},
+			fieldFolderID:        {Val: embedding.FolderID},
 			fieldIsEnabled:       {Val: boolToUint64(embedding.IsEnabled)},
 		},
 	}
@@ -714,6 +974,7 @@ func fromDocument(doc tcvectordb.Document) *vectorEmbedding {
 		KnowledgeID:     fieldString(doc, fieldKnowledgeID),
 		KnowledgeBaseID: fieldString(doc, fieldKnowledgeBaseID),
 		TagID:           fieldString(doc, fieldTagID),
+		FolderID:        fieldString(doc, fieldFolderID),
 		Embedding:       doc.Vector,
 		SparseVector:    doc.SparseVector,
 		IsEnabled:       fieldUint64(doc, fieldIsEnabled) == 1,
@@ -731,6 +992,7 @@ func toIndexWithScore(embedding *vectorEmbedding, matchType types.MatchType) *ty
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
 		TagID:           embedding.TagID,
+		FolderID:        embedding.FolderID,
 		Score:           embedding.Score,
 		MatchType:       matchType,
 		IsEnabled:       embedding.IsEnabled,
@@ -747,6 +1009,7 @@ func outputFields() []string {
 		fieldKnowledgeID,
 		fieldKnowledgeBaseID,
 		fieldTagID,
+		fieldFolderID,
 		fieldIsEnabled,
 	}
 }

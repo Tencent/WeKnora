@@ -237,6 +237,7 @@ func toDoc(info *types.IndexInfo, emb []float32, enabled bool) map[string]any {
 		"source_id":         info.SourceID,
 		"source_type":       int(info.SourceType),
 		"tag_id":            info.TagID,
+		"folder_id":         info.FolderID,
 		"content":           info.Content,
 		"is_enabled":        enabled,
 		"is_recommended":    info.IsRecommended,

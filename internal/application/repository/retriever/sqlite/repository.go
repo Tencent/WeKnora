@@ -28,6 +28,7 @@ type sqliteEmbedding struct {
 	KnowledgeID     string    `gorm:"column:knowledge_id;index"`
 	KnowledgeBaseID string    `gorm:"column:knowledge_base_id;index"`
 	TagID           string    `gorm:"column:tag_id;index"`
+	FolderID        string    `gorm:"column:folder_id;not null;default:'';index"`
 	Content         string    `gorm:"column:content;not null"`
 	Dimension       int       `gorm:"column:dimension;not null"`
 	IsEnabled       *bool     `gorm:"column:is_enabled;default:true;index"`
@@ -40,11 +41,11 @@ type sqliteRepository struct {
 	vecTables map[int]bool // tracks which vec0 tables have been created (keyed by dimension)
 }
 
-func NewSQLiteRetrieveEngineRepository(db *gorm.DB) interfaces.RetrieveEngineRepository {
+func NewSQLiteRetrieveEngineRepository(db *gorm.DB) (interfaces.RetrieveEngineRepository, error) {
 	logger.GetLogger(context.Background()).Info("[SQLite] Initializing SQLite retriever engine repository with sqlite-vec")
 
 	if err := db.AutoMigrate(&sqliteEmbedding{}); err != nil {
-		logger.GetLogger(context.Background()).Errorf("[SQLite] Failed to auto-migrate lite_embeddings: %v", err)
+		return nil, fmt.Errorf("auto-migrate SQLite retriever metadata: %w", err)
 	}
 
 	initFTS5(db)
@@ -56,7 +57,7 @@ func NewSQLiteRetrieveEngineRepository(db *gorm.DB) interfaces.RetrieveEngineRep
 
 	repo.ensureExistingVecTables()
 
-	return repo
+	return repo, nil
 }
 
 func initFTS5(db *gorm.DB) {
@@ -231,9 +232,11 @@ func (r *sqliteRepository) CopyIndices(ctx context.Context,
 			KnowledgeID:     sourceToTargetKBIDMap[src.KnowledgeID],
 			KnowledgeBaseID: targetKnowledgeBaseID,
 			TagID:           src.TagID,
-			Content:         src.Content,
-			Dimension:       src.Dimension,
-			IsEnabled:       src.IsEnabled,
+			// Folder IDs are KB-scoped, so copied documents land at target root.
+			FolderID:  "",
+			Content:   src.Content,
+			Dimension: src.Dimension,
+			IsEnabled: src.IsEnabled,
 		}
 		if err := r.db.WithContext(ctx).Create(&newRow).Error; err != nil {
 			logger.GetLogger(ctx).Warnf("[SQLite] CopyIndices: failed to copy chunk %s: %v", sourceChunkID, err)
@@ -257,6 +260,18 @@ func (r *sqliteRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 func (r *sqliteRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMap map[string]string) error {
 	for chunkID, tagID := range chunkTagMap {
 		r.db.WithContext(ctx).Model(&sqliteEmbedding{}).Where("chunk_id = ?", chunkID).Update("tag_id", tagID)
+	}
+	return nil
+}
+
+func (r *sqliteRepository) BatchUpdateChunkFolderID(ctx context.Context, chunkFolderMap map[string]string) error {
+	for chunkID, folderID := range chunkFolderMap {
+		if err := r.db.WithContext(ctx).
+			Model(&sqliteEmbedding{}).
+			Where("chunk_id = ?", chunkID).
+			Update("folder_id", folderID).Error; err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -295,7 +310,7 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 
 	sql := `
 		SELECT e.id, e.source_id, e.source_type, e.chunk_id,
-			e.knowledge_id, e.knowledge_base_id, e.tag_id,
+			e.knowledge_id, e.knowledge_base_id, e.tag_id, e.folder_id,
 			e.content,
 			(bm25(lite_embeddings_fts) * -1000000.0) AS score
 		FROM lite_embeddings_fts
@@ -322,6 +337,7 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 		KnowledgeID     string
 		KnowledgeBaseID string
 		TagID           string
+		FolderID        string
 		Content         string
 		Score           float64
 	}
@@ -351,6 +367,7 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 			KnowledgeID:     row.KnowledgeID,
 			KnowledgeBaseID: row.KnowledgeBaseID,
 			TagID:           row.TagID,
+			FolderID:        row.FolderID,
 			Content:         row.Content,
 			Score:           score,
 			MatchType:       types.MatchTypeKeywords,
@@ -378,35 +395,39 @@ func (r *sqliteRepository) vectorRetrieve(ctx context.Context, params types.Retr
 
 	tbl := vecTableName(dim)
 
-	// ⚠️ sqlite-vec 要求必须有 k = ?
+	candidateSQL := `
+		SELECT candidate.id
+		FROM lite_embeddings candidate
+		WHERE (candidate.is_enabled IS NULL OR candidate.is_enabled = 1)
+	`
+	candidateArgs := make([]interface{}, 0)
+	for _, wp := range buildFilterWhere(params, "candidate") {
+		candidateSQL += " AND " + wp.clause
+		candidateArgs = append(candidateArgs, wp.args...)
+	}
+
+	// sqlite-vec applies rowid IN (...) before selecting the K nearest rows.
+	// Keeping all scope filters in this subquery prevents closer out-of-scope
+	// rows from consuming the TopK candidates.
 	vecSQL := fmt.Sprintf(`
 		SELECT v.rowid, v.distance,
 			e.source_id, e.source_type, e.chunk_id,
 			e.knowledge_id, e.knowledge_base_id,
-			e.tag_id, e.content
+			e.tag_id, e.folder_id, e.content
 		FROM %s v
 		JOIN lite_embeddings e ON e.id = v.rowid
 		WHERE v.embedding MATCH ?
 		AND k = ?
-		AND v.rowid IN (
-			SELECT filtered.id
-			FROM lite_embeddings filtered
-			WHERE (filtered.is_enabled IS NULL OR filtered.is_enabled = 1)
-	`, tbl)
+		AND v.rowid IN (%s)
+	`, tbl, candidateSQL)
 
 	args := []interface{}{
 		queryBlob,
-		params.TopK, // 这里就是 k
+		params.TopK,
 	}
+	args = append(args, candidateArgs...)
 
-	// 追加过滤条件
-	for _, wp := range buildFilterWhere(params, "filtered") {
-		vecSQL += " AND " + wp.clause
-		args = append(args, wp.args...)
-	}
-
-	// ⚠️ 这里仍然建议加 ORDER BY，虽然 vec0 已经按距离返回
-	vecSQL += ") ORDER BY v.distance ASC"
+	vecSQL += " ORDER BY v.distance ASC"
 
 	type row struct {
 		Rowid           uint
@@ -417,6 +438,7 @@ func (r *sqliteRepository) vectorRetrieve(ctx context.Context, params types.Retr
 		KnowledgeID     string
 		KnowledgeBaseID string
 		TagID           string
+		FolderID        string
 		Content         string
 	}
 
@@ -449,6 +471,7 @@ func (r *sqliteRepository) vectorRetrieve(ctx context.Context, params types.Retr
 			KnowledgeID:     v.KnowledgeID,
 			KnowledgeBaseID: v.KnowledgeBaseID,
 			TagID:           v.TagID,
+			FolderID:        v.FolderID,
 			Content:         v.Content,
 			Score:           score,
 			MatchType:       types.MatchTypeEmbedding,
@@ -473,6 +496,7 @@ func toSQLiteEmbedding(info *types.IndexInfo) *sqliteEmbedding {
 		KnowledgeID:     info.KnowledgeID,
 		KnowledgeBaseID: info.KnowledgeBaseID,
 		TagID:           info.TagID,
+		FolderID:        info.FolderID,
 		Content:         common.CleanInvalidUTF8(info.Content),
 		Dimension:       0,
 		IsEnabled:       &enabled,
@@ -548,22 +572,34 @@ type whereClause struct {
 
 func buildFilterWhere(params types.RetrieveParams, tableAlias string) []whereClause {
 	var parts []whereClause
+	column := func(name string) string {
+		if tableAlias == "" {
+			return name
+		}
+		return tableAlias + "." + name
+	}
 	if len(params.KnowledgeBaseIDs) > 0 {
 		parts = append(parts, whereClause{
-			clause: tableAlias + ".knowledge_base_id IN (" + placeholders(len(params.KnowledgeBaseIDs)) + ")",
+			clause: column("knowledge_base_id") + " IN (" + placeholders(len(params.KnowledgeBaseIDs)) + ")",
 			args:   toInterfaceSlice(params.KnowledgeBaseIDs),
 		})
 	}
 	if len(params.KnowledgeIDs) > 0 {
 		parts = append(parts, whereClause{
-			clause: tableAlias + ".knowledge_id IN (" + placeholders(len(params.KnowledgeIDs)) + ")",
+			clause: column("knowledge_id") + " IN (" + placeholders(len(params.KnowledgeIDs)) + ")",
 			args:   toInterfaceSlice(params.KnowledgeIDs),
 		})
 	}
 	if len(params.TagIDs) > 0 {
 		parts = append(parts, whereClause{
-			clause: tableAlias + ".tag_id IN (" + placeholders(len(params.TagIDs)) + ")",
+			clause: column("tag_id") + " IN (" + placeholders(len(params.TagIDs)) + ")",
 			args:   toInterfaceSlice(params.TagIDs),
+		})
+	}
+	if len(params.FolderIDs) > 0 {
+		parts = append(parts, whereClause{
+			clause: column("folder_id") + " IN (" + placeholders(len(params.FolderIDs)) + ")",
+			args:   toInterfaceSlice(params.FolderIDs),
 		})
 	}
 	return parts

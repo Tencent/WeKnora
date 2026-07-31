@@ -31,9 +31,38 @@ func newSQLiteRetrieverTestRepository(t *testing.T) *sqliteRepository {
 		require.NoError(t, sqlDB.Close())
 	})
 
-	repository, ok := NewSQLiteRetrieveEngineRepository(db).(*sqliteRepository)
+	retrieveRepository, err := NewSQLiteRetrieveEngineRepository(db)
+	require.NoError(t, err)
+	repository, ok := retrieveRepository.(*sqliteRepository)
 	require.True(t, ok)
 	return repository
+}
+
+func TestNewSQLiteRetrieveEngineRepositoryReturnsMigrationError(t *testing.T) {
+	registerSQLiteVec.Do(sqlite_vec.Auto)
+	dbPath := t.TempDir() + "/readonly.db"
+
+	writable, err := gorm.Open(gormsqlite.Open(dbPath), &gorm.Config{})
+	require.NoError(t, err)
+	writableSQL, err := writable.DB()
+	require.NoError(t, err)
+	require.NoError(t, writableSQL.Close())
+
+	readOnly, err := gorm.Open(
+		gormsqlite.Open("file:"+dbPath+"?mode=ro"),
+		&gorm.Config{},
+	)
+	require.NoError(t, err)
+	readOnlySQL, err := readOnly.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, readOnlySQL.Close())
+	})
+
+	repository, err := NewSQLiteRetrieveEngineRepository(readOnly)
+
+	require.Nil(t, repository)
+	require.ErrorContains(t, err, "auto-migrate SQLite retriever metadata")
 }
 
 func saveSQLiteTestVector(t *testing.T, repository *sqliteRepository, info *types.IndexInfo, embedding []float32) {
@@ -56,11 +85,21 @@ func sqliteTestIndex(chunkID, knowledgeBaseID, knowledgeID, tagID string, enable
 	}
 }
 
+func sqliteTestIndexInFolder(
+	chunkID, knowledgeBaseID, knowledgeID, tagID, folderID string,
+	enabled bool,
+) *types.IndexInfo {
+	info := sqliteTestIndex(chunkID, knowledgeBaseID, knowledgeID, tagID, enabled)
+	info.FolderID = folderID
+	return info
+}
+
 func TestVectorRetrieveFiltersBeforeTopK(t *testing.T) {
 	testCases := []struct {
-		name      string
-		blocker   *types.IndexInfo
-		configure func(*types.RetrieveParams)
+		name           string
+		blocker        *types.IndexInfo
+		targetFolderID string
+		configure      func(*types.RetrieveParams)
 	}{
 		{
 			name:    "knowledge base",
@@ -88,16 +127,40 @@ func TestVectorRetrieveFiltersBeforeTopK(t *testing.T) {
 			blocker:   sqliteTestIndex("blocker", "kb-target", "knowledge-target", "tag-target", false),
 			configure: func(_ *types.RetrieveParams) {},
 		},
+		{
+			name: "folder",
+			blocker: sqliteTestIndexInFolder(
+				"blocker", "kb-target", "knowledge-target", "tag-target", "sibling-folder", true,
+			),
+			targetFolderID: "target-folder",
+			configure: func(params *types.RetrieveParams) {
+				params.FolderIDs = []string{"target-folder"}
+			},
+		},
+		{
+			name: "root folder",
+			blocker: sqliteTestIndexInFolder(
+				"blocker", "kb-target", "knowledge-target", "tag-target", "child-folder", true,
+			),
+			configure: func(params *types.RetrieveParams) {
+				params.FolderIDs = []string{""}
+			},
+		},
 	}
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			repository := newSQLiteRetrieverTestRepository(t)
 			saveSQLiteTestVector(t, repository, testCase.blocker, []float32{1, 0})
-			saveSQLiteTestVector(t, repository,
-				sqliteTestIndex("target", "kb-target", "knowledge-target", "tag-target", true),
-				[]float32{0.8, 0.6},
+			target := sqliteTestIndexInFolder(
+				"target",
+				"kb-target",
+				"knowledge-target",
+				"tag-target",
+				testCase.targetFolderID,
+				true,
 			)
+			saveSQLiteTestVector(t, repository, target, []float32{0.8, 0.6})
 
 			params := types.RetrieveParams{
 				Embedding:     []float32{1, 0},
@@ -111,8 +174,41 @@ func TestVectorRetrieveFiltersBeforeTopK(t *testing.T) {
 			require.Len(t, results, 1)
 			require.Len(t, results[0].Results, 1)
 			assert.Equal(t, "target", results[0].Results[0].ChunkID)
+			assert.Equal(t, testCase.targetFolderID, results[0].Results[0].FolderID)
 		})
 	}
+}
+
+func TestCopyIndicesResetsFolderIDForTargetKnowledgeBase(t *testing.T) {
+	repository := newSQLiteRetrieverTestRepository(t)
+	enabled := true
+	source := &sqliteEmbedding{
+		SourceID:        "source-chunk",
+		SourceType:      int(types.ChunkSourceType),
+		ChunkID:         "source-chunk",
+		KnowledgeID:     "source-knowledge",
+		KnowledgeBaseID: "source-kb",
+		FolderID:        "source-folder",
+		Content:         "source content",
+		IsEnabled:       &enabled,
+	}
+	require.NoError(t, repository.db.Create(source).Error)
+
+	require.NoError(t, repository.CopyIndices(
+		context.Background(),
+		"source-kb",
+		map[string]string{"source-knowledge": "target-knowledge"},
+		map[string]string{"source-chunk": "target-chunk"},
+		"target-kb",
+		0,
+		"",
+	))
+
+	var copied sqliteEmbedding
+	require.NoError(t, repository.db.Where("chunk_id = ?", "target-chunk").First(&copied).Error)
+	assert.Equal(t, "", copied.FolderID)
+	assert.Equal(t, "target-knowledge", copied.KnowledgeID)
+	assert.Equal(t, "target-kb", copied.KnowledgeBaseID)
 }
 
 func TestVectorRetrieveZeroThresholdDoesNotFilter(t *testing.T) {

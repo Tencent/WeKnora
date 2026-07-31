@@ -48,6 +48,9 @@ type RetrieveParams struct {
 	KnowledgeIDs []string
 	// Tag IDs for filtering (used for FAQ priority filtering)
 	TagIDs []string
+	// Folder IDs for subtree filtering (issue #1311). Each chunk's payload
+	// FolderID must be in this set for the chunk to match. Empty = no filter.
+	FolderIDs []string
 	// Excluded knowledge IDs
 	ExcludeKnowledgeIDs []string
 	// Excluded chunk IDs
@@ -90,6 +93,9 @@ type IndexWithScore struct {
 	KnowledgeBaseID string
 	// Tag ID
 	TagID string
+	// Folder ID (issue #1311) — the document folder this chunk was filed
+	// under at index time. Empty = root.
+	FolderID string
 	// Score
 	Score float64
 	// Match type

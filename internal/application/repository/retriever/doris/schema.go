@@ -2,6 +2,7 @@ package doris
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -19,6 +20,9 @@ const (
 	// 只阻塞 ensureTable 自身（首次建表场景），所以 30s 是可接受的。
 	annReadyTimeout = 30 * time.Second
 	annReadyPoll    = 1 * time.Second
+
+	schemaReadyTimeout = 30 * time.Second
+	schemaReadyPoll    = 500 * time.Millisecond
 )
 
 // getTableName 返回某个维度对应的物理表名：<base>_<dim>。
@@ -38,6 +42,13 @@ func (r *dorisRepository) ensureTable(ctx context.Context, dimension int) error 
 	if _, ok := r.initializedTables.Load(dimension); ok {
 		return nil
 	}
+
+	r.ensureTableMu.Lock()
+	defer r.ensureTableMu.Unlock()
+	if _, ok := r.initializedTables.Load(dimension); ok {
+		return nil
+	}
+
 	compatMode, err := r.resolveCompatMode(ctx)
 	if err != nil {
 		return err
@@ -52,13 +63,24 @@ func (r *dorisRepository) ensureTable(ctx context.Context, dimension int) error 
 		return fmt.Errorf("check table existence: %w", err)
 	}
 
+	created := false
 	if !exists {
 		log.Infof("[Doris] Creating table %s with dimension %d in compat mode %s", tableName, dimension, compatMode)
 		if err := r.createTable(ctx, tableName, dimension, compatMode); err != nil {
 			log.Errorf("[Doris] Failed to create table: %v", err)
 			return fmt.Errorf("create table: %w", err)
 		}
+		created = true
+	}
 
+	// Always confirm the folder schema after CREATE TABLE IF NOT EXISTS.
+	// During a rolling upgrade, an old replica can create the legacy table
+	// between our existence check and DDL, turning our CREATE into a no-op.
+	if err := r.ensureFolderSchema(ctx, tableName); err != nil {
+		return fmt.Errorf("upgrade folder schema for table %s: %w", tableName, err)
+	}
+
+	if created {
 		// ANN 索引在 Doris 端异步构建。这里在后台 goroutine 里轮询就绪，
 		// 写入路径不阻塞——索引未就绪期间检索会退化为 brute-force（结果对、速度慢），
 		// 比让首批写入卡 30s 更可接受。
@@ -78,7 +100,259 @@ func (r *dorisRepository) ensureTable(ctx context.Context, dimension int) error 
 	}
 
 	r.initializedTables.Store(dimension, true)
+	r.schemaReadyTables.Store(tableName, true)
 	return nil
+}
+
+func (r *dorisRepository) ensureExistingTable(ctx context.Context, tableName string) error {
+	if _, ok := r.schemaReadyTables.Load(tableName); ok {
+		return nil
+	}
+
+	r.ensureTableMu.Lock()
+	defer r.ensureTableMu.Unlock()
+	if _, ok := r.schemaReadyTables.Load(tableName); ok {
+		return nil
+	}
+	if err := r.ensureFolderSchema(ctx, tableName); err != nil {
+		return err
+	}
+	r.schemaReadyTables.Store(tableName, true)
+	return nil
+}
+
+// ensureFolderSchema upgrades embedding tables created before folder support.
+// Existing rows receive the empty-string default and therefore remain in the
+// knowledge-base root. Both DDL statements are idempotent so concurrent service
+// instances can safely race during a rolling upgrade.
+func (r *dorisRepository) ensureFolderSchema(ctx context.Context, tableName string) error {
+	hasColumn, err := r.columnExists(ctx, tableName, fieldFolderID)
+	if err != nil {
+		return err
+	}
+	if !hasColumn {
+		ddl := fmt.Sprintf(
+			"ALTER TABLE `%s` ADD COLUMN IF NOT EXISTS %s VARCHAR(36) NOT NULL DEFAULT '' AFTER tag_id",
+			tableName,
+			fieldFolderID,
+		)
+		if _, err := r.db.ExecContext(ctx, ddl); err != nil {
+			return fmt.Errorf("add %s column: %w", fieldFolderID, err)
+		}
+		if err := r.waitColumnReady(ctx, tableName, fieldFolderID); err != nil {
+			return err
+		}
+	} else if err := r.validateFolderColumn(ctx, tableName); err != nil {
+		return err
+	}
+
+	hasIndex, err := r.indexExists(ctx, tableName, "idx_folder")
+	if err != nil {
+		return err
+	}
+	if hasIndex {
+		return nil
+	}
+	ddl := fmt.Sprintf(
+		"CREATE INDEX IF NOT EXISTS idx_folder ON `%s` (%s) USING INVERTED",
+		tableName,
+		fieldFolderID,
+	)
+	if _, err := r.db.ExecContext(ctx, ddl); err != nil {
+		return fmt.Errorf("create idx_folder: %w", err)
+	}
+	return r.waitIndexReady(ctx, tableName, "idx_folder")
+}
+
+func (r *dorisRepository) columnExists(ctx context.Context, tableName, columnName string) (bool, error) {
+	const query = `SELECT COUNT(1) FROM information_schema.columns
+		WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`
+	var count int
+	if err := r.db.QueryRowContext(ctx, query, r.database, tableName, columnName).Scan(&count); err != nil {
+		return false, fmt.Errorf("check column %s: %w", columnName, err)
+	}
+	return count > 0, nil
+}
+
+func (r *dorisRepository) validateFolderColumn(ctx context.Context, tableName string) error {
+	const query = `SELECT COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT
+		FROM information_schema.columns
+		WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`
+	var columnType string
+	var nullable string
+	var defaultValue sql.NullString
+	if err := r.db.QueryRowContext(
+		ctx,
+		query,
+		r.database,
+		tableName,
+		fieldFolderID,
+	).Scan(&columnType, &nullable, &defaultValue); err != nil {
+		return fmt.Errorf("inspect column %s: %w", fieldFolderID, err)
+	}
+
+	normalizedType := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(columnType), " ", ""))
+	if normalizedType != "varchar(36)" {
+		return fmt.Errorf(
+			"incompatible %s column on table %s: type %q, want VARCHAR(36)",
+			fieldFolderID,
+			tableName,
+			columnType,
+		)
+	}
+	if !strings.EqualFold(strings.TrimSpace(nullable), "NO") {
+		return fmt.Errorf(
+			"incompatible %s column on table %s: nullable %q, want NOT NULL",
+			fieldFolderID,
+			tableName,
+			nullable,
+		)
+	}
+	if !defaultValue.Valid {
+		return fmt.Errorf(
+			"incompatible %s column on table %s: missing default, want empty string",
+			fieldFolderID,
+			tableName,
+		)
+	}
+	normalizedDefault := strings.TrimSpace(defaultValue.String)
+	if normalizedDefault != "" && normalizedDefault != "''" {
+		return fmt.Errorf(
+			"incompatible %s column on table %s: default %q, want empty string",
+			fieldFolderID,
+			tableName,
+			defaultValue.String,
+		)
+	}
+	return nil
+}
+
+func (r *dorisRepository) waitColumnReady(ctx context.Context, tableName, columnName string) error {
+	deadline := time.Now().Add(schemaReadyTimeout)
+	for {
+		exists, err := r.columnExists(ctx, tableName, columnName)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return r.validateFolderColumn(ctx, tableName)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("column %s not ready within %s", columnName, schemaReadyTimeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(schemaReadyPoll):
+		}
+	}
+}
+
+func (r *dorisRepository) waitIndexReady(ctx context.Context, tableName, indexName string) error {
+	deadline := time.Now().Add(schemaReadyTimeout)
+	for {
+		ready, err := r.indexExists(ctx, tableName, indexName)
+		if err != nil {
+			return err
+		}
+		if ready {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("index %s not ready within %s", indexName, schemaReadyTimeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(schemaReadyPoll):
+		}
+	}
+}
+
+func (r *dorisRepository) indexExists(ctx context.Context, tableName, indexName string) (bool, error) {
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf("SHOW INDEX FROM `%s`", tableName))
+	if err != nil {
+		return false, fmt.Errorf("show indexes: %w", err)
+	}
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return false, err
+	}
+	keyNameIndex := -1
+	columnNameIndex := -1
+	indexTypeIndex := -1
+	stateIndex := -1
+	for i, columnName := range columns {
+		if strings.EqualFold(columnName, "key_name") {
+			keyNameIndex = i
+		}
+		if strings.EqualFold(columnName, "column_name") {
+			columnNameIndex = i
+		}
+		if strings.EqualFold(columnName, "index_type") {
+			indexTypeIndex = i
+		}
+		if strings.EqualFold(columnName, "state") {
+			stateIndex = i
+		}
+	}
+	if keyNameIndex < 0 {
+		return false, fmt.Errorf("SHOW INDEX result has no Key_name column")
+	}
+	if columnNameIndex < 0 {
+		return false, fmt.Errorf("SHOW INDEX result has no Column_name column")
+	}
+	if indexTypeIndex < 0 {
+		return false, fmt.Errorf("SHOW INDEX result has no Index_type column")
+	}
+
+	found := false
+	ready := true
+	for rows.Next() {
+		values := make([]any, len(columns))
+		destinations := make([]any, len(columns))
+		for i := range values {
+			destinations[i] = &values[i]
+		}
+		if err := rows.Scan(destinations...); err != nil {
+			return false, err
+		}
+		if strings.EqualFold(bytesToString(values[keyNameIndex]), indexName) {
+			found = true
+			actualColumn := bytesToString(values[columnNameIndex])
+			if !strings.EqualFold(actualColumn, fieldFolderID) {
+				return false, fmt.Errorf(
+					"incompatible %s index on table %s: column %q, want %s",
+					indexName,
+					tableName,
+					actualColumn,
+					fieldFolderID,
+				)
+			}
+			indexType := bytesToString(values[indexTypeIndex])
+			if !strings.EqualFold(indexType, "INVERTED") {
+				return false, fmt.Errorf(
+					"incompatible %s index on table %s: type %q, want INVERTED",
+					indexName,
+					tableName,
+					indexType,
+				)
+			}
+			if stateIndex >= 0 {
+				state := bytesToString(values[stateIndex])
+				if !strings.EqualFold(state, "FINISHED") &&
+					!strings.EqualFold(state, "NORMAL") {
+					ready = false
+				}
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return found && ready, nil
 }
 
 // tableExists 通过 information_schema 判断表是否存在。
@@ -151,6 +425,7 @@ func buildCreateTableDDL(tableName string, dimension, buckets, replication int, 
     source_id         VARCHAR(255),
     source_type       INT,
     tag_id            VARCHAR(64),
+    folder_id         VARCHAR(36) NOT NULL DEFAULT "",
     is_enabled        BOOLEAN,
     content           TEXT,
     embedding         ARRAY<FLOAT> NOT NULL,
@@ -159,6 +434,7 @@ func buildCreateTableDDL(tableName string, dimension, buckets, replication int, 
     INDEX idx_kid      (knowledge_id)      USING INVERTED,
     INDEX idx_src      (source_id)         USING INVERTED,
     INDEX idx_tag      (tag_id)            USING INVERTED,
+    INDEX idx_folder   (folder_id)         USING INVERTED,
     INDEX idx_enabled  (is_enabled)        USING INVERTED,
     INDEX idx_content  (content)           USING INVERTED PROPERTIES("parser"="chinese","support_phrase"="true"),
     INDEX idx_emb      (embedding)         USING ANN PROPERTIES(

@@ -106,6 +106,11 @@ type KnowledgeListFilter struct {
 	UpdatedFrom time.Time
 	// UpdatedTo, when non-zero, keeps rows with updated_at <= UpdatedTo.
 	UpdatedTo time.Time
+	// FolderID, when non-nil, filters by exact folder_id. A pointer is used so
+	// the three states are distinguishable: nil = no folder filter (list all
+	// documents regardless of folder), "" = root-level documents only,
+	// non-empty = that specific folder only. (issue #1311)
+	FolderID *string
 }
 
 // Knowledge represents a knowledge entity in the system.
@@ -169,10 +174,18 @@ type Knowledge struct {
 	ProcessedAt *time.Time `json:"processed_at"`
 	// Error message of the knowledge
 	ErrorMessage string `json:"error_message"`
+	// FolderID is the document folder this knowledge is filed under. Empty
+	// string means the root level of the KB. Only meaningful for document-type
+	// KBs; FAQ/Wiki KBs leave it empty. (issue #1311)
+	FolderID string `json:"folder_id" gorm:"type:varchar(36);default:''"`
 	// Deletion time of the knowledge
 	DeletedAt gorm.DeletedAt `json:"deleted_at"         gorm:"index"`
 	// Knowledge base name (not stored in database, populated on query)
 	KnowledgeBaseName string `json:"knowledge_base_name" gorm:"-"`
+	// FolderPath is the display path of FolderID, populated on cross-KB
+	// mention searches. Root-level documents and stale/deleted folders return
+	// an empty path.
+	FolderPath string `json:"folder_path" gorm:"-"`
 }
 
 // CustomMetadataText returns stable human-readable metadata for summaries and
@@ -250,6 +263,7 @@ type ManualKnowledgePayload struct {
 	Content       string                     `json:"content"`
 	Status        string                     `json:"status"`
 	TagIDs        []string                   `json:"tag_ids"`
+	FolderID      string                     `json:"folder_id"`
 	Channel       string                     `json:"channel"`
 	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
 }

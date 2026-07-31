@@ -22,6 +22,7 @@ type pgVector struct {
 	KnowledgeID     string              `json:"knowledge_id"      gorm:"column:knowledge_id"`
 	KnowledgeBaseID string              `json:"knowledge_base_id" gorm:"column:knowledge_base_id"`
 	TagID           string              `json:"tag_id"            gorm:"column:tag_id;index"`
+	FolderID        string              `json:"folder_id"         gorm:"column:folder_id;index"`
 	Content         string              `json:"content"           gorm:"column:content;not null"`
 	Dimension       int                 `json:"dimension"         gorm:"column:dimension;not null"`
 	Embedding       pgvector.HalfVector `json:"embedding"         gorm:"column:embedding;not null"`
@@ -39,6 +40,7 @@ type pgVectorWithScore struct {
 	KnowledgeID     string              `json:"knowledge_id"      gorm:"column:knowledge_id"`
 	KnowledgeBaseID string              `json:"knowledge_base_id" gorm:"column:knowledge_base_id"`
 	TagID           string              `json:"tag_id"            gorm:"column:tag_id;index"`
+	FolderID        string              `json:"folder_id"         gorm:"column:folder_id;index"`
 	Content         string              `json:"content"           gorm:"column:content;not null"`
 	Dimension       int                 `json:"dimension"         gorm:"column:dimension;not null"`
 	Embedding       pgvector.HalfVector `json:"embedding"         gorm:"column:embedding;not null"`
@@ -65,6 +67,7 @@ func toDBVectorEmbedding(indexInfo *types.IndexInfo, additionalParams map[string
 		KnowledgeID:     indexInfo.KnowledgeID,
 		KnowledgeBaseID: indexInfo.KnowledgeBaseID,
 		TagID:           indexInfo.TagID,
+		FolderID:        indexInfo.FolderID,
 		Content:         common.CleanInvalidUTF8(indexInfo.Content),
 		IsEnabled:       indexInfo.IsEnabled,
 	}
@@ -96,6 +99,7 @@ func fromDBVectorEmbeddingWithScore(embedding *pgVectorWithScore, matchType type
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
 		TagID:           embedding.TagID,
+		FolderID:        embedding.FolderID,
 		Content:         embedding.Content,
 		Score:           embedding.Score,
 		MatchType:       matchType,

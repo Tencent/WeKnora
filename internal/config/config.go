@@ -169,6 +169,10 @@ type KnowledgeBaseConfig struct {
 	KeepSeparator          bool                   `yaml:"keep_separator"   json:"keep_separator"`
 	ImageProcessing        *ImageProcessingConfig `yaml:"image_processing" json:"image_processing"`
 	DocumentProcessTimeout time.Duration          `yaml:"document_process_timeout"  json:"document_process_timeout"`
+	// DocumentFoldersEnabled is an expand/contract rollout gate. Keep it off
+	// during the first deployment so every API and worker instance learns the
+	// folder schema before a second deployment enables folder writes/search.
+	DocumentFoldersEnabled bool `yaml:"document_folders_enabled" json:"document_folders_enabled"`
 	// DocReaderCallTimeout caps a single DocReader RPC. Without this the
 	// gRPC call inherits the asynq task context (whole DocumentProcessTimeout,
 	// default 2h+), so a hung docreader would block a worker for hours and
@@ -188,6 +192,12 @@ func DocumentProcessTimeout(cfg *Config) time.Duration {
 		return cfg.KnowledgeBase.DocumentProcessTimeout
 	}
 	return DefaultDocumentProcessTimeout
+}
+
+// DocumentFoldersEnabled is the nil-safe capability check shared by HTTP,
+// workers and the system-info capability response.
+func DocumentFoldersEnabled(cfg *Config) bool {
+	return cfg != nil && cfg.KnowledgeBase != nil && cfg.KnowledgeBase.DocumentFoldersEnabled
 }
 
 // ImageProcessingConfig 图像处理配置
@@ -763,6 +773,17 @@ func applyKnowledgeBaseEnvOverrides(cfg *Config) {
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_DOCREADER_CALL_TIMEOUT")); value != "" {
 		if d, err := time.ParseDuration(value); err == nil && d > 0 {
 			cfg.KnowledgeBase.DocReaderCallTimeout = d
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_DOCUMENT_FOLDERS_ENABLED")); value != "" {
+		if enabled, err := strconv.ParseBool(value); err == nil {
+			cfg.KnowledgeBase.DocumentFoldersEnabled = enabled
+		} else {
+			fmt.Printf(
+				"[config] WEKNORA_DOCUMENT_FOLDERS_ENABLED=%q is not a boolean, keeping document_folders_enabled=%v\n",
+				value,
+				cfg.KnowledgeBase.DocumentFoldersEnabled,
+			)
 		}
 	}
 }
