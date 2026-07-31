@@ -1,4 +1,4 @@
-// Package interfaces defines the interface contracts for custom agent management
+﻿// Package interfaces defines the interface contracts for custom agent management
 package interfaces
 
 import (
@@ -78,7 +78,7 @@ type CustomAgentService interface {
 	// Returns:
 	//   - List of suggested questions
 	//   - Possible errors
-	GetSuggestedQuestions(ctx context.Context, agentID string, kbIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, limit int) ([]types.SuggestedQuestion, error)
+	GetSuggestedQuestions(ctx context.Context, agentID string, kbIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, folderIDs []string, includeSubfolders bool, limit int) ([]types.SuggestedQuestion, error)
 
 	// GetKnowledgeSuggestedQuestions returns only knowledge-derived candidates.
 	// It is independent of whether starter suggestions are enabled and is used

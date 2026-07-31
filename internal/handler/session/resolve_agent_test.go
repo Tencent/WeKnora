@@ -93,7 +93,7 @@ func (s *resolveOwnAgentStub) DeleteAgent(context.Context, string) error {
 func (s *resolveOwnAgentStub) CopyAgent(context.Context, string) (*types.CustomAgent, error) {
 	panic("not implemented")
 }
-func (s *resolveOwnAgentStub) GetSuggestedQuestions(context.Context, string, []string, []string, []types.TagScope, int) ([]types.SuggestedQuestion, error) {
+func (s *resolveOwnAgentStub) GetSuggestedQuestions(context.Context, string, []string, []string, []types.TagScope, []string, bool, int) ([]types.SuggestedQuestion, error) {
 	panic("not implemented")
 }
 func (s *resolveOwnAgentStub) GetKnowledgeSuggestedQuestions(context.Context, string, []string, []string, []types.TagScope, int) ([]types.SuggestedQuestion, error) {

@@ -1,4 +1,4 @@
-package chatpipeline
+﻿package chatpipeline
 
 import (
 	"context"
@@ -419,6 +419,8 @@ func (p *PluginSearch) searchByTargets(
 						VectorThreshold:       chatManage.VectorThreshold,
 						KeywordThreshold:      chatManage.KeywordThreshold,
 						MatchCount:            chatManage.EmbeddingTopK,
+						FolderIDs:             chatManage.FolderIDs,
+						IncludeSubfolders:     chatManage.IncludeSubfolders,
 						SkipContextEnrichment: true,
 					}
 					res, err := p.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], params)
@@ -492,6 +494,8 @@ func (p *PluginSearch) searchSingleTarget(
 		KeywordThreshold:      keywordThreshold,
 		MatchCount:            chatManage.EmbeddingTopK,
 		TagIDs:                t.TagIDs,
+		FolderIDs:             t.FolderIDs,
+		IncludeSubfolders:     t.IncludeSubfolders,
 		ScopeTagIDs:           t.ScopeTagIDs,
 		SkipContextEnrichment: true,
 	}

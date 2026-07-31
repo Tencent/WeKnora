@@ -1,4 +1,4 @@
-<template>
+﻿<template>
     <div class="chat" :class="{
         'is-embedded': embeddedMode,
         'is-sidebar-collapsed': uiStore.sidebarCollapsed,
@@ -400,12 +400,13 @@ const debouncedFetchSuggestions = () => {
     suggestedDebounceTimer = setTimeout(() => { fetchSuggestedQuestionsIfNeeded(); }, 300);
 };
 
-// 监听 Agent / 知识库 / 文件 / 标签 / MCP / Skill @mention，重新获取推荐问题
+// 监听 Agent / 知识库 / 文件 / 文件夹 / 标签 / MCP / Skill @mention，重新获取推荐问题
 watch(
     () => ({
         agentId: useSettingsStoreInstance.selectedAgentId,
         kbs: useSettingsStoreInstance.settings.selectedKnowledgeBases,
         files: useSettingsStoreInstance.settings.selectedFiles,
+        folders: useSettingsStoreInstance.settings.selectedFolderIds,
         tags: useSettingsStoreInstance.settings.selectedTags,
         mcps: useSettingsStoreInstance.settings.selectedMCPServices,
         skills: useSettingsStoreInstance.settings.selectedSkills,
@@ -803,6 +804,13 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
             fileIdSet.add(item.id);
         }
     }
+    // Auto-include the folder's KB in the search scope
+    const selectedFolders = (useSettingsStoreInstance.settings.selectedFolderIds || []);
+    for (const f of selectedFolders) {
+        if (f.kbId && f.id !== '__root__') {
+            kbIdSet.add(f.kbId);
+        }
+    }
     const kbIds = [...kbIdSet];
     const knowledgeIds = [...fileIdSet];
     const tagIds = [...new Set((mentionedItems || []).filter(item => item.type === 'tag' && item.id).map(item => item.id))];
@@ -813,6 +821,10 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
 
     const requestMcpServiceIds = agentEnabled ? mcpServiceIds : [];
     const requestSkillNames = agentEnabled ? skillNames : [];
+
+    const folderIds = (useSettingsStoreInstance.settings.selectedFolderIds || [])
+        .filter(f => f.id && f.kbId && kbIdSet.has(f.kbId))
+        .map(f => f.id);
 
     const suggestionAttribution = pendingSuggestionAttribution;
     pendingSuggestionAttribution = null;
@@ -829,6 +841,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         mcp_service_ids: requestMcpServiceIds,
         skill_names: requestSkillNames,
         tag_ids: tagIds,
+        folder_ids: folderIds.length > 0 ? folderIds : undefined,
         mentioned_items: mentionedItems,
         images: imageAttachments.length > 0 ? imageAttachments : undefined,
         attachment_uploads: attachmentUploads.length > 0 ? attachmentUploads : undefined,

@@ -1,4 +1,4 @@
-import { defineStore } from "pinia";
+﻿import { defineStore } from "pinia";
 import { nextTick } from "vue";
 import { BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from "@/api/agent";
 import { getApiBaseUrl } from "@/utils/api-base";
@@ -16,6 +16,7 @@ interface Settings {
   selectedFiles: string[]; // 当前选中的文件ID列表
   selectedFileKbMap: Record<string, string>; // 文件ID -> 知识库ID，用于刷新后带 kb_id 拉取共享知识库文件
   selectedTags: Array<{ id: string; name: string; kbId: string; kbName?: string }>;
+  selectedFolderIds: Array<{ id: string; name: string; kbId: string; kbName?: string }>;
   selectedMCPServices: string[];
   selectedSkills: string[];
   selectedTools?: string[];
@@ -85,6 +86,7 @@ const defaultSettings: Settings = {
   selectedFiles: [], // 默认为空数组
   selectedFileKbMap: {},  // 文件ID -> 知识库ID
   selectedTags: [],
+  selectedFolderIds: [],
   selectedMCPServices: [],
   selectedSkills: [],
   modelConfig: {
@@ -375,6 +377,27 @@ export const useSettingsStore = defineStore("settings", {
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
 
+    addFolder(folder: { id: string; name: string; kbId: string; kbName?: string }) {
+      if (!this.settings.selectedFolderIds) this.settings.selectedFolderIds = [];
+      if (!this.settings.selectedFolderIds.some(f => f.id === folder.id && f.kbId === folder.kbId)) {
+        this.settings.selectedFolderIds.push(folder);
+        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      }
+    },
+
+    removeFolder(folderId: string, kbId?: string) {
+      if (!this.settings.selectedFolderIds) return;
+      this.settings.selectedFolderIds = this.settings.selectedFolderIds.filter(
+        f => !(f.id === folderId && (!kbId || f.kbId === kbId))
+      );
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    clearFolders() {
+      this.settings.selectedFolderIds = [];
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
     addMCPService(serviceId: string) {
       if (!this.settings.selectedMCPServices) this.settings.selectedMCPServices = [];
       if (!this.settings.selectedMCPServices.includes(serviceId)) {
@@ -427,6 +450,11 @@ export const useSettingsStore = defineStore("settings", {
       const selectedKBs = this.getSelectedKnowledgeBases();
       const selectedFiles = this.getSelectedFiles();
       const tags = this.settings.selectedTags || [];
+      const tagIds = [...new Set(tags.map((t) => t.id).filter(Boolean))];
+      const tagKbIds = [...new Set(tags.map((t) => t.kbId).filter(Boolean))];
+      const kbIds = [...new Set([...selectedKBs, ...tagKbIds])];
+      const folders = this.settings.selectedFolderIds || [];
+      const folderIds = [...new Set(folders.map((f) => f.id).filter(Boolean))];
       const tagScopes = Object.entries(tags.reduce<Record<string, string[]>>((scopes, tag) => {
         if (!tag.id || !tag.kbId) return scopes;
         (scopes[tag.kbId] ||= []).push(tag.id);
@@ -441,6 +469,8 @@ export const useSettingsStore = defineStore("settings", {
         // every document in that KB.
         knowledge_base_ids: selectedKBs.length > 0 ? selectedKBs : undefined,
         knowledge_ids: selectedFiles.length > 0 ? selectedFiles : undefined,
+        tag_ids: tagIds.length > 0 ? tagIds : undefined,
+        folder_ids: folderIds.length > 0 ? folderIds : undefined,
         tag_scopes: tagScopes.length > 0 ? tagScopes : undefined,
         limit,
       };
@@ -561,6 +591,16 @@ export const useSettingsStore = defineStore("settings", {
             .filter(item => item.type === "skill" && item.id)
             .map(item => item.skill_name || item.id);
         }
+        if (Array.isArray(state.folder_ids)) {
+          // Restore folder selection from session state.
+          // Only id is known; name/kbId/kbName will be missing but the store
+          // just needs the ids for filtering — the UI can lazy-resolve names.
+          this.settings.selectedFolderIds = state.folder_ids.map(id => ({
+            id,
+            name: id,
+            kbId: "",
+          }));
+        }
         if (typeof state.web_search_enabled === "boolean") {
           this.settings.webSearchEnabled = state.web_search_enabled;
         }
@@ -589,6 +629,7 @@ export interface SessionLastRequestStatePayload {
   knowledge_base_ids?: string[];
   knowledge_ids?: string[];
   tag_ids?: string[];
+  folder_ids?: string[];
   mcp_service_ids?: string[];
   skill_names?: string[];
   mentioned_items?: Array<{

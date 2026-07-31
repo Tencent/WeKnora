@@ -325,7 +325,7 @@ func (s *embedChannelService) SuggestedQuestions(
 	// A non-positive limit is forwarded as "unspecified" so GetSuggestedQuestions
 	// falls back to the agent's configured starter count rather than a fixed 6.
 	kbIDs := s.resolveKnowledgeBaseIDs(ctx, ch)
-	return s.agentService.GetSuggestedQuestions(ctx, ch.AgentID, kbIDs, nil, nil, limit)
+	return s.agentService.GetSuggestedQuestions(ctx, ch.AgentID, kbIDs, nil, nil, nil, false, limit)
 }
 
 // EmbedDisplayTitle resolves the human-readable title for embed sessions and UI chrome.

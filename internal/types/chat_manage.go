@@ -1,4 +1,4 @@
-package types
+﻿package types
 
 import "maps"
 
@@ -17,6 +17,10 @@ type PipelineRequest struct {
 	KeywordThreshold float64       `json:"keyword_threshold"`
 	EmbeddingTopK    int           `json:"embedding_top_k"`
 	VectorDatabase   string        `json:"vector_database"`
+
+	// Folder scope parameters
+	FolderIDs        []string `json:"folder_ids,omitempty"`
+	IncludeSubfolders bool    `json:"include_subfolders,omitempty"`
 
 	// Rerank parameters
 	RerankModelID   string  `json:"rerank_model_id"`
@@ -174,6 +178,8 @@ func (c *ChatManage) Clone() *ChatManage {
 			copy(kidsCopy, t.KnowledgeIDs)
 			tagIDsCopy := make([]string, len(t.TagIDs))
 			copy(tagIDsCopy, t.TagIDs)
+			folderIDsCopy := make([]string, len(t.FolderIDs))
+			copy(folderIDsCopy, t.FolderIDs)
 			scopeTagIDsCopy := make([]string, len(t.ScopeTagIDs))
 			copy(scopeTagIDsCopy, t.ScopeTagIDs)
 			searchTargets[i] = &SearchTarget{
@@ -182,6 +188,8 @@ func (c *ChatManage) Clone() *ChatManage {
 				TenantID:                t.TenantID,
 				KnowledgeIDs:            kidsCopy,
 				TagIDs:                  tagIDsCopy,
+				FolderIDs:               folderIDsCopy,
+				IncludeSubfolders:       t.IncludeSubfolders,
 				ScopeTagIDs:             scopeTagIDsCopy,
 				DisableRecallThresholds: t.DisableRecallThresholds,
 			}
@@ -211,6 +219,8 @@ func (c *ChatManage) Clone() *ChatManage {
 			KeywordThreshold:         c.KeywordThreshold,
 			EmbeddingTopK:            c.EmbeddingTopK,
 			VectorDatabase:           c.VectorDatabase,
+			FolderIDs:                append([]string(nil), c.FolderIDs...),
+			IncludeSubfolders:        c.IncludeSubfolders,
 			RerankModelID:            c.RerankModelID,
 			RerankTopK:               c.RerankTopK,
 			RerankThreshold:          c.RerankThreshold,

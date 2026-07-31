@@ -1,4 +1,4 @@
-package handler
+﻿package handler
 
 import (
 	"context"
@@ -608,6 +608,16 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 		}
 	}
 
+	var folderIDs []string
+	if folderIDsStr := strings.TrimSpace(c.Query("folder_ids")); folderIDsStr != "" {
+		for _, id := range strings.Split(folderIDsStr, ",") {
+			if trimmed := strings.TrimSpace(id); trimmed != "" {
+				folderIDs = append(folderIDs, trimmed)
+			}
+		}
+	}
+	includeSubfolders := c.Query("include_subfolders") == "true"
+
 	// limit == 0 signals "unspecified" so the service falls back to the agent's
 	// configured starter count. A provided value is passed through unchanged and
 	// bounded by the service's safety cap.
@@ -618,10 +628,10 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 		}
 	}
 
-	logger.Infof(ctx, "Getting suggested questions for agent %s, kbIDs: %v, tagScopes: %d, limit: %d",
-		secutils.SanitizeForLog(id), kbIDs, len(tagScopes), limit)
+	logger.Infof(ctx, "Getting suggested questions for agent %s, kbIDs: %v, tagScopes: %d, folderIDs: %v, limit: %d",
+		secutils.SanitizeForLog(id), kbIDs, len(tagScopes), folderIDs, limit)
 
-	questions, err := h.service.GetSuggestedQuestions(ctx, id, kbIDs, knowledgeIDs, tagScopes, limit)
+	questions, err := h.service.GetSuggestedQuestions(ctx, id, kbIDs, knowledgeIDs, tagScopes, folderIDs, includeSubfolders, limit)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"agent_id": id,

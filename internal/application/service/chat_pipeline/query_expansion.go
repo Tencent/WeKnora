@@ -1,4 +1,4 @@
-package chatpipeline
+﻿package chatpipeline
 
 import (
 	"context"
@@ -66,6 +66,8 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 					KeywordThreshold:      keywordThreshold,
 					MatchCount:            expTopK,
 					TagIDs:                t.TagIDs,
+					FolderIDs:             t.FolderIDs,
+					IncludeSubfolders:     t.IncludeSubfolders,
 					ScopeTagIDs:           t.ScopeTagIDs,
 					DisableVectorMatch:    false,
 					DisableKeywordsMatch:  false,

@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS knowledges (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     processed_at DATETIME,
     error_message TEXT,
-    deleted_at DATETIME
+    deleted_at DATETIME,
+    folder_id VARCHAR(36)
 );
 `
 

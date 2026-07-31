@@ -1,4 +1,4 @@
-package service
+﻿package service
 
 import (
 	"context"
@@ -482,9 +482,11 @@ func (s *customAgentService) GetSuggestedQuestions(
 	kbIDs []string,
 	knowledgeIDs []string,
 	tagScopes []types.TagScope,
+	folderIDs []string,
+	includeSubfolders bool,
 	limit int,
 ) ([]types.SuggestedQuestion, error) {
-	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagScopes, limit, true)
+	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagScopes, folderIDs, includeSubfolders, limit, true)
 }
 
 func (s *customAgentService) GetKnowledgeSuggestedQuestions(
@@ -495,7 +497,7 @@ func (s *customAgentService) GetKnowledgeSuggestedQuestions(
 	tagScopes []types.TagScope,
 	limit int,
 ) ([]types.SuggestedQuestion, error) {
-	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagScopes, limit, false)
+	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagScopes, nil, false, limit, false)
 }
 
 func (s *customAgentService) getSuggestedQuestions(
@@ -504,6 +506,8 @@ func (s *customAgentService) getSuggestedQuestions(
 	kbIDs []string,
 	knowledgeIDs []string,
 	tagScopes []types.TagScope,
+	folderIDs []string,
+	includeSubfolders bool,
 	limit int,
 	includeCurated bool,
 ) ([]types.SuggestedQuestion, error) {
@@ -585,6 +589,36 @@ func (s *customAgentService) getSuggestedQuestions(
 		knowledgeIDs = mergeUniqueStrings(knowledgeIDs, resolvedTags.KnowledgeIDs)
 		if len(knowledgeIDs) == 0 && len(resolvedTags.TagIDsByTenant) == 0 {
 			return finalizeStarterSuggestions(curated, nil, starterMode, limit), nil
+		}
+	}
+
+	// Resolve folder scope — map folderIDs to knowledgeIDs so chunk queries
+	// are automatically scoped. Uses the already-loaded agent for KB resolution.
+	if len(folderIDs) > 0 {
+		var folderKnowledgeIDs []string
+		resolveKBs := kbIDs
+		if len(resolveKBs) == 0 {
+			switch agent.Config.KBSelectionMode {
+			case "all":
+				kbs, _ := s.kbService.ListKnowledgeBases(ctx)
+				for _, kb := range kbs {
+					resolveKBs = append(resolveKBs, kb.ID)
+				}
+			case "selected":
+				resolveKBs = agent.Config.KnowledgeBases
+			}
+		}
+		for _, kbID := range resolveKBs {
+			ids, err := s.knowledgeRepo.ListKnowledgeIDsByFolderIDs(ctx, tenantID, kbID, folderIDs, includeSubfolders)
+			if err != nil {
+				logger.Warnf(ctx, "Failed to resolve folder IDs for suggested questions: %v", err)
+				continue
+			}
+			folderKnowledgeIDs = append(folderKnowledgeIDs, ids...)
+		}
+		knowledgeIDs = mergeUniqueStrings(knowledgeIDs, folderKnowledgeIDs)
+		if len(knowledgeIDs) == 0 {
+			return nil, nil
 		}
 	}
 

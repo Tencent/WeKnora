@@ -1,4 +1,4 @@
-import { fetchEventSource } from '@microsoft/fetch-event-source';
+﻿import { fetchEventSource } from '@microsoft/fetch-event-source';
 import { ref, onUnmounted } from 'vue';
 import { generateRandomString } from '@/utils/index';
 import i18n from '@/i18n';
@@ -36,7 +36,7 @@ export function useStream() {
   let renderTimer: number | null = null
 
   // 启动流式请求
-  const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; tag_ids?: string[]; agent_enabled?: boolean; agent_id?: string; agent_source_tenant_id?: string | number; web_search_enabled?: boolean; summary_model_id?: string; mcp_service_ids?: string[]; skill_names?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string; kb_id?: string; kb_name?: string; service_id?: string; skill_name?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; attachment_ids?: string[]; suggestion_attribution?: { suggestion_set_id: string; question_id: string }; method: string; url: string; embed_token?: string; embed_session_sig?: string; embed_visitor_id?: string }) => {
+  const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; tag_ids?: string[]; folder_ids?: string[]; include_subfolders?: boolean; agent_enabled?: boolean; agent_id?: string; web_search_enabled?: boolean; summary_model_id?: string; mcp_service_ids?: string[]; skill_names?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string; kb_id?: string; kb_name?: string; service_id?: string; skill_name?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; attachment_ids?: string[]; suggestion_attribution?: { suggestion_set_id: string; question_id: string }; method: string; url: string; embed_token?: string; embed_session_sig?: string; embed_visitor_id?: string }) => {
     const myGeneration = ++streamGeneration
     // 重置状态
     output.value = '';
@@ -99,9 +99,6 @@ export function useStream() {
       if (params.agent_id) {
         postBody.agent_id = params.agent_id;
       }
-      if (params.agent_source_tenant_id) {
-        postBody.agent_source_tenant_id = Number(params.agent_source_tenant_id);
-      }
       // Include web_search_enabled if provided
       if (params.web_search_enabled !== undefined) {
         postBody.web_search_enabled = params.web_search_enabled;
@@ -119,6 +116,11 @@ export function useStream() {
       }
       if (params.tag_ids !== undefined && params.tag_ids.length > 0) {
         postBody.tag_ids = params.tag_ids;
+      }
+      // Include folder_ids if provided
+      if (params.folder_ids !== undefined && params.folder_ids.length > 0) {
+        postBody.folder_ids = params.folder_ids;
+        postBody.include_subfolders = params.include_subfolders !== undefined ? params.include_subfolders : true;
       }
       // Include mentioned_items if provided (for displaying @mentions in chat)
       if (params.mentioned_items !== undefined && params.mentioned_items.length > 0) {

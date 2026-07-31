@@ -1206,7 +1206,8 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			item.FileName, // customFileName — must include extension for file-type validation
 			tagIDs,        // auto-tag from data source
 			channel,
-			nil,
+			nil, // processOverrides
+			nil, // folderID
 		); err != nil {
 			var dupErr *types.DuplicateKnowledgeError
 			if errors.As(err, &dupErr) && dupIsSameNode(dupErr, item) {
@@ -1233,7 +1234,8 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			item.Title,
 			tagIDs, // auto-tag from data source
 			channel,
-			nil,
+			nil, // processOverrides
+			nil, // folderID
 		); err != nil {
 			var dupErr *types.DuplicateKnowledgeError
 			if errors.As(err, &dupErr) && dupIsSameNode(dupErr, item) {

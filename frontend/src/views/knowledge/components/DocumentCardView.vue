@@ -261,13 +261,11 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
 </script>
 
 <template>
-  <div class="doc-card-list doc-card-list-animated">
+  <template v-for="(item, index) in items" :key="item.id">
     <div
       class="knowledge-card"
       :class="{ 'is-selected': selectedIds.has(item.id), 'batch-mode': batchMode }"
       :data-select-id="item.id"
-      v-for="(item, index) in items"
-      :key="item.id"
       @click="onCardClick(item)"
       @mouseenter="onCardMouseEnter($event, item)"
       @mouseleave="onCardMouseLeave"
@@ -523,7 +521,7 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
         </div>
       </div>
     </div>
-  </div>
+  </template>
 
   <!-- Hover popover -->
   <Teleport to="body">
