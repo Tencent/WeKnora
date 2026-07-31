@@ -1,5 +1,14 @@
 import { defineStore } from 'pinia'
 
+export const MOBILE_SIDEBAR_BREAKPOINT = 600
+
+export function resolveInitialSidebarCollapsed(storedValue: string | null, viewportWidth: number): boolean {
+  if (storedValue !== null) {
+    return storedValue === 'true'
+  }
+  return viewportWidth <= MOBILE_SIDEBAR_BREAKPOINT
+}
+
 export const useUIStore = defineStore('ui', {
   state: () => ({
     showSettingsModal: false,
@@ -20,7 +29,10 @@ export const useUIStore = defineStore('ui', {
     manualEditorInitialContent: '',
     manualEditorInitialStatus: 'draft' as 'draft' | 'publish',
     manualEditorOnSuccess: null as null | ((payload: { kbId: string; knowledgeId: string; status: 'draft' | 'publish' }) => void),
-    sidebarCollapsed: localStorage.getItem('sidebar_collapsed') === 'true'
+    sidebarCollapsed: resolveInitialSidebarCollapsed(
+      localStorage.getItem('sidebar_collapsed'),
+      window.innerWidth
+    )
   }),
 
   actions: {
@@ -136,4 +148,3 @@ export const useUIStore = defineStore('ui', {
     }
   }
 })
-

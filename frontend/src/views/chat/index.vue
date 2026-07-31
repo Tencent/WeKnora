@@ -1224,6 +1224,20 @@ onBeforeRouteUpdate((to, from, next) => {
     }
 }
 
+@media (max-width: 768px) {
+    .chat,
+    .chat.is-sidebar-collapsed {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        padding: 0 8px 12px;
+    }
+
+    .input-container {
+        min-width: 0;
+    }
+}
+
 .msg_list {
     display: flex;
     flex-direction: column;
