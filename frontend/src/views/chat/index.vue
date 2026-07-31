@@ -1038,7 +1038,7 @@ onBeforeRouteUpdate((to, from, next) => {
     flex-direction: column;
     align-items: center;
     max-width: calc(100vw - 260px);
-    min-width: 400px;
+    min-width: 0;
 
     &.is-sidebar-collapsed {
         max-width: calc(100vw - 60px);
@@ -1303,5 +1303,20 @@ onBeforeRouteUpdate((to, from, next) => {
 .sq-fade-enter-from,
 .sq-fade-leave-to {
     opacity: 0;
+}
+
+@media (max-width: 768px) {
+    .chat {
+        width: 100%;
+        max-width: 100%;
+        padding: 0 12px 12px;
+    }
+
+    .chat_scroll_box,
+    .msg_list,
+    .input-container {
+        min-width: 0;
+        max-width: 100%;
+    }
 }
 </style>

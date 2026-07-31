@@ -20,7 +20,9 @@
     max-width: 860px;
     margin: 0 auto;
     width: 100%;
+    min-width: 0;
     min-height: 0;
+    box-sizing: border-box;
 
     &.has-questions {
         min-height: 64px;
@@ -200,5 +202,39 @@
     letter-spacing: 0.04em;
     text-transform: uppercase;
     color: var(--td-brand-color);
+}
+
+@media (max-width: 600px) {
+    .suggested-questions-container {
+        padding: 8px 12px;
+    }
+
+    .suggested-questions-title-row {
+        margin-bottom: 8px;
+    }
+
+    .suggested-questions-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 8px;
+    }
+
+    .suggested-question-card,
+    .suggested-question-card.sq-card-skeleton {
+        width: 100%;
+    }
+
+    .suggested-question-card {
+        justify-content: space-between;
+        padding: 8px 12px;
+    }
+
+    .suggested-question-text {
+        display: -webkit-box;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+    }
 }
 

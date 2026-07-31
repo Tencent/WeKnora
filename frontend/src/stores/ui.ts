@@ -1,5 +1,16 @@
 import { defineStore } from 'pinia'
 
+const getInitialSidebarCollapsed = () => {
+  const storedPreference = localStorage.getItem('sidebar_collapsed')
+  if (storedPreference !== null) {
+    return storedPreference === 'true'
+  }
+
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(max-width: 768px)').matches
+}
+
 export const useUIStore = defineStore('ui', {
   state: () => ({
     showSettingsModal: false,
@@ -20,7 +31,7 @@ export const useUIStore = defineStore('ui', {
     manualEditorInitialContent: '',
     manualEditorInitialStatus: 'draft' as 'draft' | 'publish',
     manualEditorOnSuccess: null as null | ((payload: { kbId: string; knowledgeId: string; status: 'draft' | 'publish' }) => void),
-    sidebarCollapsed: localStorage.getItem('sidebar_collapsed') === 'true'
+    sidebarCollapsed: getInitialSidebarCollapsed()
   }),
 
   actions: {

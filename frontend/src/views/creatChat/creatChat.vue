@@ -245,6 +245,7 @@ const handleKBEditorSuccess = (kbId: string) => {
 <style lang="less" scoped>
 .dialogue-wrap {
     flex: 1;
+    min-width: 0;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -257,6 +258,7 @@ const handleKBEditorSuccess = (kbId: string) => {
     align-items: center;
     width: 100%;
     max-width: 960px;
+    min-width: 0;
     gap: 24px;
 
     :deep(.answers-input) {
@@ -363,43 +365,22 @@ const handleKBEditorSuccess = (kbId: string) => {
     }
 }
 
-@media (max-width: 1250px) and (min-width: 1045px) {
-    .answers-input {
-        transform: translateX(-329px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 654px !important;
-    }
-}
-
-@media (max-width: 1045px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 500px !important;
-    }
-}
-
-@media (max-width: 750px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 340px !important;
-    }
-}
-
 @media (max-width: 600px) {
-    .answers-input {
-        transform: translateX(-250px);
+    .dialogue-wrap {
+        align-items: flex-start;
+        padding: clamp(24px, 8vh, 64px) 12px 16px;
+        box-sizing: border-box;
+        overflow-y: auto;
     }
 
-    :deep(.t-textarea__inner) {
-        width: 300px !important;
+    .dialogue-answers {
+        gap: 16px;
+    }
+
+    .dialogue-title {
+        font-size: 22px;
+        line-height: 30px;
+        text-align: center;
     }
 }
 </style>
