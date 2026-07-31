@@ -148,6 +148,32 @@ func (r *chunkRepository) ListChunkRecallWeights(
 	return out, nil
 }
 
+func (r *chunkRepository) ListChunkRecallWeightsByChunkIDs(
+	ctx context.Context, ids []string,
+) (map[string]float64, error) {
+	if len(ids) == 0 {
+		return map[string]float64{}, nil
+	}
+	type row struct {
+		ID           string  `gorm:"column:id"`
+		RecallWeight float64 `gorm:"column:recall_weight"`
+	}
+	var rows []row
+	if err := r.db.WithContext(ctx).
+		Table("chunks").
+		Select("id, recall_weight").
+		Where("id IN ?", ids).
+		Where("recall_weight <> 1").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[string]float64, len(rows))
+	for _, row := range rows {
+		out[row.ID] = row.RecallWeight
+	}
+	return out, nil
+}
+
 // ListChunksByIDOnly retrieves multiple chunks by their IDs without tenant filter (for shared KB resolution).
 func (r *chunkRepository) ListChunksByIDOnly(ctx context.Context, ids []string) ([]*types.Chunk, error) {
 	if len(ids) == 0 {

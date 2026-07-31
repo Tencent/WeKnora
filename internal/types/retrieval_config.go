@@ -214,6 +214,15 @@ func (c *RetrievalConfig) ValidateFeedbackPolicy() error {
 	if boost < penalty {
 		return fmt.Errorf("feedback_boost_threshold (%v) must be >= feedback_penalty_threshold (%v)", boost, penalty)
 	}
+	if c.FeedbackBoostThreshold != 0 && (c.FeedbackBoostThreshold < 0 || c.FeedbackBoostThreshold > 1) {
+		return fmt.Errorf("feedback_boost_threshold must be in [0, 1], got %v", c.FeedbackBoostThreshold)
+	}
+	if c.FeedbackPenaltyThreshold != 0 && (c.FeedbackPenaltyThreshold < 0 || c.FeedbackPenaltyThreshold > 1) {
+		return fmt.Errorf("feedback_penalty_threshold must be in [0, 1], got %v", c.FeedbackPenaltyThreshold)
+	}
+	if c.FeedbackMinSamples != 0 && c.FeedbackMinSamples < 1 {
+		return fmt.Errorf("feedback_min_samples must be >= 1, got %v", c.FeedbackMinSamples)
+	}
 	if c.FeedbackBoostFactor != 0 && c.FeedbackBoostFactor < 1 {
 		return fmt.Errorf("feedback_boost_factor must be >= 1, got %v", c.FeedbackBoostFactor)
 	}

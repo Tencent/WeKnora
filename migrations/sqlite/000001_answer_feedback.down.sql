@@ -1,7 +1,5 @@
-ALTER TABLE knowledge_bases DROP COLUMN;
 -- SQLite ALTER TABLE DROP COLUMN is supported in 3.35+. Fall back to a fresh
 -- DB rebuild if running on older SQLite.
-
 ALTER TABLE knowledge_bases DROP COLUMN feedback_reset_by;
 ALTER TABLE knowledge_bases DROP COLUMN feedback_reset_at;
 

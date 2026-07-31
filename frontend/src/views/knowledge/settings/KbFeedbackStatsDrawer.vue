@@ -151,7 +151,7 @@ function positiveRateClass(rate) {
 }
 
 function isLowQuality(row) {
-  return row.positive_rate <= props.needsOptimizationThreshold;
+  return row.needs_optimization === true;
 }
 
 function formatPercent(rate) {

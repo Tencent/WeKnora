@@ -48,7 +48,7 @@ func (s *messageFeedbackService) UpsertFeedback(
 	reasons []string,
 	comment string,
 ) (*types.MessageFeedback, error) {
-	logger.Infof(ctx, "UpsertFeedback: sessionID=%s, messageID=%s, rating=%s, reasons=%v, comment=%q", sessionID, messageID, rating, reasons, comment)
+	logger.Infof(ctx, "UpsertFeedback: sessionID=%s, messageID=%s, rating=%s", sessionID, messageID, rating)
 
 	if !types.IsValidFeedbackRating(rating) {
 		return nil, werrors.NewBadRequestError("invalid rating, must be like, dislike or none")

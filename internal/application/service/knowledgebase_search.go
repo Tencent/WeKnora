@@ -482,37 +482,35 @@ func (s *knowledgeBaseService) applyFeedbackWeightsToResults(
 		return results
 	}
 
-	// Bucket by tenant in case the multi-KB search spans shared KBs.
-	byTenant := make(map[uint64][]*types.IndexWithScore)
+	// Collect unique chunk IDs across all results. Use the tenant-agnostic
+	// lookup because a multi-KB search may include shared KBs whose chunks
+	// belong to a different tenant than the requester.
+	ids := make([]string, 0, len(results))
+	seen := make(map[string]struct{}, len(results))
 	for _, r := range results {
 		if r == nil || r.ChunkID == "" {
 			continue
 		}
-		byTenant[tenantInfo.ID] = append(byTenant[tenantInfo.ID], r)
-	}
-
-	for tid, batch := range byTenant {
-		ids := make([]string, 0, len(batch))
-		seen := make(map[string]struct{}, len(batch))
-		for _, r := range batch {
-			if _, ok := seen[r.ChunkID]; ok {
-				continue
-			}
-			seen[r.ChunkID] = struct{}{}
-			ids = append(ids, r.ChunkID)
-		}
-		weights, err := s.chunkRepo.ListChunkRecallWeights(ctx, tid, ids)
-		if err != nil {
-			logger.Warnf(ctx, "hybrid search recall weight lookup failed for tenant %d: %v", tid, err)
+		if _, ok := seen[r.ChunkID]; ok {
 			continue
 		}
-		for _, r := range batch {
-			w, ok := weights[r.ChunkID]
-			if !ok || w == 1.0 {
-				continue
-			}
-			r.Score *= w
+		seen[r.ChunkID] = struct{}{}
+		ids = append(ids, r.ChunkID)
+	}
+	weights, err := s.chunkRepo.ListChunkRecallWeightsByChunkIDs(ctx, ids)
+	if err != nil {
+		logger.Warnf(ctx, "hybrid search recall weight lookup failed: %v", err)
+		return results
+	}
+	for _, r := range results {
+		if r == nil || r.ChunkID == "" {
+			continue
 		}
+		w, ok := weights[r.ChunkID]
+		if !ok || w == 1.0 {
+			continue
+		}
+		r.Score *= w
 	}
 	return results
 }

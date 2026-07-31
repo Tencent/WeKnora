@@ -29,6 +29,10 @@ type ChunkRepository interface {
 	// from the neutral 1.0 are returned so the hot path stays small when no
 	// tenant has opted in via the tenant's feedback policy.
 	ListChunkRecallWeights(ctx context.Context, tenantID uint64, ids []string) (map[string]float64, error)
+	// ListChunkRecallWeightsByChunkIDs returns recall weights for the given
+	// chunk IDs without filtering by tenant. Used in multi-KB search where
+	// results may span shared KBs owned by different tenants.
+	ListChunkRecallWeightsByChunkIDs(ctx context.Context, ids []string) (map[string]float64, error)
 	// ListChunksByIDOnly lists chunks by ids without tenant filter (for shared KB resolution).
 	ListChunksByIDOnly(ctx context.Context, ids []string) ([]*types.Chunk, error)
 	// ListChunksBySeqID lists chunks by seq_ids
