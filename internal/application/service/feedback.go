@@ -83,20 +83,15 @@ func validFeedbackReason(reason types.FeedbackReasonCode) bool {
 }
 
 func (s *feedbackService) ResetChunkFeedback(ctx context.Context, kbID, chunkID string) error {
-	principal, err := requireFeedbackGovernancePrincipal(ctx)
+	principal, actorTenantID, sourceTenantID, err := requireFeedbackGovernanceAccess(ctx)
 	if err != nil {
 		return err
 	}
 	if kbID == "" || chunkID == "" {
 		return ErrInvalidFeedback
 	}
-	chunkTenantID := types.MustTenantIDFromContext(ctx)
-	actorTenantID := chunkTenantID
-	if tenant, ok := types.TenantInfoFromContext(ctx); ok && tenant != nil && tenant.ID != 0 {
-		actorTenantID = tenant.ID
-	}
 	return s.repo.ResetChunkFeedback(ctx, types.ResetChunkFeedbackInput{
-		ChunkTenantID:   chunkTenantID,
+		ChunkTenantID:   sourceTenantID,
 		ActorTenantID:   actorTenantID,
 		ActorUserID:     principal.ID,
 		KnowledgeBaseID: kbID,
@@ -104,6 +99,31 @@ func (s *feedbackService) ResetChunkFeedback(ctx context.Context, kbID, chunkID 
 	})
 }
 
+// requireFeedbackGovernanceAccess distinguishes the authenticated actor tenant
+// from the KB/chunk source tenant. KBAccess rewrites TenantIDContextKey for a
+// shared resource, while TenantInfo retains the tenant selected by the caller
+// during authentication. Governance is intentionally not delegable through a
+// shared Viewer or Editor grant.
+func requireFeedbackGovernanceAccess(ctx context.Context) (types.Principal, uint64, uint64, error) {
+	principal, ok := types.PrincipalFromContext(ctx)
+	if !ok || principal.Type != types.PrincipalWebUser || strings.TrimSpace(principal.ID) == "" ||
+		!types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) {
+		return types.Principal{}, 0, 0, ErrFeedbackForbidden
+	}
+	actorTenant, ok := types.TenantInfoFromContext(ctx)
+	if !ok || actorTenant == nil || actorTenant.ID == 0 {
+		return types.Principal{}, 0, 0, ErrFeedbackForbidden
+	}
+	sourceTenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || sourceTenantID == 0 || actorTenant.ID != sourceTenantID {
+		return types.Principal{}, 0, 0, ErrFeedbackForbidden
+	}
+	return principal, actorTenant.ID, sourceTenantID, nil
+}
+
+// requireFeedbackGovernancePrincipal preserves the principal-only check for
+// non-KB operations that share the same interactive-admin policy. KB/chunk
+// governance must use requireFeedbackGovernanceAccess above.
 func requireFeedbackGovernancePrincipal(ctx context.Context) (types.Principal, error) {
 	principal, ok := types.PrincipalFromContext(ctx)
 	if !ok || principal.Type != types.PrincipalWebUser || strings.TrimSpace(principal.ID) == "" ||
@@ -116,11 +136,12 @@ func requireFeedbackGovernancePrincipal(ctx context.Context) (types.Principal, e
 func (s *feedbackService) GetChunkFeedbackDetails(
 	ctx context.Context, chunkID string,
 ) (*types.ChunkFeedbackDetails, error) {
-	if _, err := requireFeedbackGovernancePrincipal(ctx); err != nil {
+	_, _, sourceTenantID, err := requireFeedbackGovernanceAccess(ctx)
+	if err != nil {
 		return nil, err
 	}
 	if chunkID == "" {
 		return nil, ErrInvalidFeedback
 	}
-	return s.repo.GetChunkFeedbackDetails(ctx, types.MustTenantIDFromContext(ctx), chunkID)
+	return s.repo.GetChunkFeedbackDetails(ctx, sourceTenantID, chunkID)
 }

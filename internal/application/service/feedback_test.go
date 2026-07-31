@@ -42,6 +42,7 @@ func (s *feedbackRepositoryStub) GetChunkFeedbackDetails(
 
 func feedbackServiceContext(principal types.Principal) context.Context {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	ctx = context.WithValue(ctx, types.TenantInfoContextKey, &types.Tenant{ID: 7})
 	return types.WithPrincipal(ctx, principal)
 }
 
@@ -162,4 +163,27 @@ func TestFeedbackGovernanceRequiresWebAdminOrOwner(t *testing.T) {
 			assert.Nil(t, repo.resetInput)
 		})
 	}
+}
+
+func TestFeedbackGovernanceRejectsCrossTenantSharedAccessWithoutSideEffects(t *testing.T) {
+	newCrossTenantContext := func() context.Context {
+		// TenantInfo is the authenticated actor tenant (A). TenantID models the
+		// source tenant (B) after KBAccess resolved a shared KB/chunk.
+		ctx := feedbackGovernanceContext(types.TenantRoleAdmin, types.PrincipalWebUser)
+		return context.WithValue(ctx, types.TenantIDContextKey, uint64(8))
+	}
+
+	t.Run("shared viewer cannot read governance details", func(t *testing.T) {
+		repo := &feedbackRepositoryStub{}
+		_, err := NewFeedbackService(repo).GetChunkFeedbackDetails(newCrossTenantContext(), "shared-viewer-chunk")
+		assert.ErrorIs(t, err, ErrFeedbackForbidden)
+		assert.Zero(t, repo.detailCalls, "cross-tenant detail must not reach the repository")
+	})
+
+	t.Run("shared editor cannot reset feedback", func(t *testing.T) {
+		repo := &feedbackRepositoryStub{}
+		err := NewFeedbackService(repo).ResetChunkFeedback(newCrossTenantContext(), "shared-editor-kb", "shared-editor-chunk")
+		assert.ErrorIs(t, err, ErrFeedbackForbidden)
+		assert.Nil(t, repo.resetInput, "cross-tenant reset must not reach the repository")
+	})
 }
