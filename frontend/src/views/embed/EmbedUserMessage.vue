@@ -63,6 +63,7 @@ const hydrateImages = async () => {
   await nextTick()
   if (!props.embedChannelId || !props.embedToken) return
   await hydrateProtectedFileImages(containerRef.value, {
+    mode: 'embed',
     channelId: props.embedChannelId,
     token: props.embedToken,
   })

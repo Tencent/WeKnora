@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -2423,9 +2422,7 @@ func (s *knowledgeService) ReparseKnowledge(
 		recordReparseStarted()
 
 		// For data tables (csv, xlsx, xls), also enqueue summary task
-		if slices.Contains([]string{"csv", "xlsx", "xls"}, getFileType(existing.FileName)) {
-			NewDataTableSummaryTask(ctx, s.task, tenantID, existing.ID, kb.SummaryModelID, kb.EmbeddingModelID)
-		}
+		enqueueDataTableSummaryIfNeeded(ctx, s.task, tenantID, existing.ID, existing.FileName, existing.FileType, kb.SummaryModelID, kb.EmbeddingModelID)
 
 		return existing, nil
 	}
@@ -2475,6 +2472,8 @@ func (s *knowledgeService) ReparseKnowledge(
 		}
 		logger.Infof(ctx, "Enqueued file URL reparse task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, existing.ID)
 		recordReparseStarted()
+
+		enqueueDataTableSummaryIfNeeded(ctx, s.task, tenantID, existing.ID, existing.FileName, existing.FileType, kb.SummaryModelID, kb.EmbeddingModelID)
 
 		return existing, nil
 	}
@@ -3185,7 +3184,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			return fmt.Errorf("failed to download file from URL: %w", err)
 		}
 
-		if resolvedFileType != "" && !allowedFileURLExtensions[strings.ToLower(resolvedFileType)] {
+		if resolvedFileType != "" && !isSupportedImportExtension(resolvedFileType) {
 			logger.Errorf(ctx, "Unsupported file type resolved from file URL: %s", resolvedFileType)
 			knowledge.ParseStatus = "failed"
 			knowledge.ErrorMessage = fmt.Sprintf("unsupported file type: %s", resolvedFileType)

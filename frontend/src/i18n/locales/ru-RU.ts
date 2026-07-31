@@ -149,18 +149,16 @@ export default {
         denied: 'Отказ'
       },
       action: {
-        rbac: {
-          member_added: 'Добавлен участник',
-          member_removed: 'Удалён участник',
-          member_role_changed: 'Изменение роли',
-          member_left: 'Участник вышел',
-          access_denied: 'Доступ запрещён',
-          invitation_sent: 'Invitation sent',
-          invitation_accepted: 'Invitation accepted',
-          invitation_declined: 'Invitation declined',
-          invitation_revoked: 'Invitation revoked',
-          invitation_expired: 'Invitation expired'
-        }
+        'rbac.member_added': 'Добавлен участник',
+        'rbac.member_removed': 'Удалён участник',
+        'rbac.member_role_changed': 'Изменение роли',
+        'rbac.member_left': 'Участник вышел',
+        'rbac.access_denied': 'Доступ запрещён',
+        'rbac.invitation_sent': 'Приглашение отправлено',
+        'rbac.invitation_accepted': 'Приглашение принято',
+        'rbac.invitation_declined': 'Приглашение отклонено',
+        'rbac.invitation_revoked': 'Приглашение отозвано',
+        'rbac.invitation_expired': 'Приглашение истекло'
       },
       columns: {
         time: 'Время',
@@ -2569,19 +2567,17 @@ export default {
           denied: 'Отказано'
         },
         action: {
-          system: {
-            setting_changed: 'Изменена системная настройка',
-            admin_promoted: 'Выдан системный администратор',
-            api_key_created: 'Создан платформенный API-ключ',
-            api_key_revoked: 'Отозван платформенный API-ключ',
-            admin_revoked: 'Отозван системный администратор',
-            user_password_reset: 'Сброшен пароль пользователя',
-            queue_task_retried: 'Повторно запущена сбойная задача',
-            queue_task_deleted: 'Удалена запись о сбойной задаче',
-            queue_task_run_now: 'Задача очереди запущена сейчас',
-            queue_task_cancelled: 'Задача очереди отменена',
-            queue_archived_purged: 'Очищены все сбойные задачи'
-          }
+          'system.setting_changed': 'Изменена системная настройка',
+          'system.admin_promoted': 'Выдан системный администратор',
+          'system.api_key_created': 'Создан платформенный API-ключ',
+          'system.api_key_revoked': 'Отозван платформенный API-ключ',
+          'system.admin_revoked': 'Отозван системный администратор',
+          'system.user_password_reset': 'Сброшен пароль пользователя',
+          'system.queue_task_retried': 'Повторно запущена сбойная задача',
+          'system.queue_task_deleted': 'Удалена запись о сбойной задаче',
+          'system.queue_task_run_now': 'Задача очереди запущена сейчас',
+          'system.queue_task_cancelled': 'Задача очереди отменена',
+          'system.queue_archived_purged': 'Очищены все сбойные задачи'
         },
         columns: {
           time: 'Время',
@@ -3478,7 +3474,13 @@ export default {
     },
     buttons: {
       create: 'Создать базу знаний',
-      save: 'Сохранить настройки'
+      save: 'Сохранить настройки',
+      saveAndClose: 'Сохранить и закрыть',
+    },
+    postCreateHint: {
+      title: 'База знаний создана',
+      footer: 'Продолжите настройку, настройте совместное использование и источники данных, затем нажмите «Сохранить и закрыть».',
+      followUpDesc: 'Настройте источники данных слева или опубликуйте базу в пространствах через «Управление общим доступом»',
     },
     wikiBrowser: {
       editBtn: 'Редактировать',
@@ -3727,53 +3729,68 @@ export default {
       countItems: '{count} элем.',
       titleWithCount: '{title} и ещё {count}',
       importSummary: 'Успешно {success} / Ошибок {failed} / Пропущено {skipped}',
+      detailValues: {
+        user: 'Запущено пользоватем',
+        manual: 'Вручную',
+        schedule: 'По расписанию',
+        system: 'Система',
+        pending: 'Ожидает',
+        completed: 'Завершено',
+        partial: 'Частично завершено',
+        canceled: 'Отменено',
+        failed: 'Ошибка',
+        enqueue: 'Постановка в очередь',
+        reuse_vectors: 'Повторное использование векторов',
+        reparse: 'Повторный разбор',
+        viewer: 'Только чтение',
+        editor: 'Редактирование',
+        admin: 'Управление',
+        append: 'Добавление',
+        replace: 'Замена'
+      },
+      outcomes: {
+        accepted: 'Принято',
+        success: 'Успешно',
+        failed: 'Ошибка',
+        partial: 'Частично',
+        canceled: 'Отменено',
+        denied: 'Отклонено'
+      },
       actions: {
-        kb: {
-          created: 'База знаний создана',
-          updated: 'База знаний обновлена',
-          deleted: 'База знаний удалена',
-          duplicated: 'База знаний скопирована',
-          clone_started: 'Клонирование начато',
-          clone_completed: 'Клонирование завершено',
-          clone_failed: 'Ошибка клонирования',
-          share_added: 'Общий доступ добавлен',
-          share_permission_changed: 'Права доступа изменены',
-          share_removed: 'Общий доступ удалён'
-        },
-        knowledge: {
-          created: 'Знание добавлено',
-          updated: 'Знание обновлено',
-          deleted: 'Знание удалено',
-          batch_deleted: 'Знания удалены пакетом',
-          reparse_started: 'Повторный разбор начат',
-          parse_canceled: 'Разбор отменён',
-          move_started: 'Перемещение начато',
-          move_completed: 'Перемещение завершено',
-          move_failed: 'Ошибка перемещения'
-        },
-        tag: {
-          created: 'Тег создан',
-          updated: 'Тег обновлён',
-          deleted: 'Тег удалён'
-        },
-        datasource: {
-          created: 'Источник данных создан',
-          updated: 'Источник данных обновлён',
-          deleted: 'Источник данных удалён',
-          sync_started: 'Синхронизация начата',
-          sync_completed: 'Синхронизация завершена',
-          sync_failed: 'Ошибка синхронизации',
-          paused: 'Источник приостановлен',
-          resumed: 'Источник возобновлён'
-        },
-        wiki: {
-          content_changed: 'Содержимое Wiki обновлено'
-        },
-        faq: {
-          import_started: 'Импорт FAQ начат',
-          import_completed: 'Импорт FAQ завершён',
-          import_failed: 'Ошибка импорта FAQ'
-        }
+        'kb.created': 'База знаний создана',
+        'kb.updated': 'База знаний обновлена',
+        'kb.deleted': 'База знаний удалена',
+        'kb.duplicated': 'База знаний скопирована',
+        'kb.clone_started': 'Клонирование начато',
+        'kb.clone_completed': 'Клонирование завершено',
+        'kb.clone_failed': 'Ошибка клонирования',
+        'knowledge.created': 'Знание добавлено',
+        'knowledge.updated': 'Знание обновлено',
+        'knowledge.deleted': 'Знание удалено',
+        'knowledge.batch_deleted': 'Знания удалены пакетом',
+        'knowledge.reparse_started': 'Повторный разбор начат',
+        'knowledge.parse_canceled': 'Разбор отменён',
+        'knowledge.move_started': 'Перемещение начато',
+        'knowledge.move_completed': 'Перемещение завершено',
+        'knowledge.move_failed': 'Ошибка перемещения',
+        'tag.created': 'Тег создан',
+        'tag.updated': 'Тег обновлён',
+        'tag.deleted': 'Тег удалён',
+        'datasource.created': 'Источник данных создан',
+        'datasource.updated': 'Источник данных обновлён',
+        'datasource.deleted': 'Источник данных удалён',
+        'datasource.sync_started': 'Синхронизация начата',
+        'datasource.sync_completed': 'Синхронизация завершена',
+        'datasource.sync_failed': 'Ошибка синхронизации',
+        'datasource.paused': 'Источник приостановлен',
+        'datasource.resumed': 'Источник возобновлён',
+        'kb.share_added': 'Общий доступ добавлен',
+        'kb.share_permission_changed': 'Права доступа изменены',
+        'kb.share_removed': 'Общий доступ удалён',
+        'wiki.content_changed': 'Содержимое Wiki обновлено',
+        'faq.import_started': 'Импорт FAQ начат',
+        'faq.import_completed': 'Импорт FAQ завершён',
+        'faq.import_failed': 'Ошибка импорта FAQ'
       },
       detailFields: {
         task_id: 'ID задачи',
@@ -4783,6 +4800,15 @@ export default {
     editor: {
       createTitle: 'Create Agent',
       editTitle: 'Edit Agent',
+      buttons: {
+        create: 'Создать агента',
+        saveAndClose: 'Сохранить и закрыть',
+      },
+      postCreateHint: {
+        title: 'Агент создан',
+        footer: 'Продолжите настройку, настройте совместное использование и публикацию, затем нажмите «Сохранить и закрыть».',
+        integrationDesc: 'Перейдите в раздел интеграций, чтобы настроить каналы IM, веб-встраивания и другие каналы публикации',
+      },
       basicInfo: 'Basic Info',
       basicInfoDesc: 'Настройка имени, описания и режима работы агента',
       promptsConfig: 'Промпты',
