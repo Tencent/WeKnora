@@ -378,3 +378,56 @@ func TestLeaderElectionFailsClosedWhenRedisUnavailable(t *testing.T) {
 		t.Fatalf("leader retry goroutines = %d, want one per channel", retryCount)
 	}
 }
+
+func TestLeadershipLossStopsAdapterAndSchedulesRecovery(t *testing.T) {
+	db := newLifecycleTestDB(t)
+	channel := createLifecycleChannel(t, db, "channel-leader-loss", "agent")
+	channel.Mode = "websocket"
+	if err := db.Model(&IMChannel{}).Where("id = ?", channel.ID).
+		Update("mode", channel.Mode).Error; err != nil {
+		t.Fatalf("persist websocket mode: %v", err)
+	}
+
+	redisServer := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() { _ = redisClient.Close() })
+
+	counters := &lifecycleFactoryCounters{}
+	svc := newLifecycleTestService(db, redisClient, "instance-one")
+	svc.RegisterAdapterFactory("test", counters.factory())
+	t.Cleanup(svc.Stop)
+
+	if err := svc.StartChannel(channel); err != nil {
+		t.Fatalf("start websocket channel: %v", err)
+	}
+	if counters.starts.Load() != 1 {
+		t.Fatalf("factory starts = %d, want 1", counters.starts.Load())
+	}
+
+	// Simulate another owner replacing the lease before the next renewal.
+	key := RedisKeyLeader + channel.ID
+	redisServer.Set(key, "instance-two")
+	svc.handleWSLeadershipLoss(channel.ID)
+
+	if _, _, ok := svc.GetChannelAdapter(channel.ID); ok {
+		t.Fatal("adapter remained active after leadership loss")
+	}
+	if counters.stops.Load() != 1 {
+		t.Fatalf("adapter stops = %d, want 1", counters.stops.Load())
+	}
+	svc.mu.RLock()
+	retryCount := len(svc.leaderRetries)
+	svc.mu.RUnlock()
+	if retryCount != 1 {
+		t.Fatalf("leader retry goroutines = %d, want one recovery path", retryCount)
+	}
+
+	// Repeated loss handling after teardown must not create duplicate retries.
+	svc.handleWSLeadershipLoss(channel.ID)
+	svc.mu.RLock()
+	retryCount = len(svc.leaderRetries)
+	svc.mu.RUnlock()
+	if retryCount != 1 {
+		t.Fatalf("leader retry goroutines after duplicate loss = %d, want one", retryCount)
+	}
+}

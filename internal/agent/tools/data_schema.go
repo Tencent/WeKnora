@@ -85,6 +85,7 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		Page:     1,
 		PageSize: 100, // Should be enough for schema chunks
 	}
+	enabled := true
 
 	chunks, _, err := t.chunkRepo.ListPagedChunksByKnowledgeID(
 		ctx,
@@ -97,6 +98,7 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		"",  // searchField
 		"",  // sortOrder
 		"",  // knowledgeType
+		&enabled,
 	)
 	if err != nil {
 		return &types.ToolResult{

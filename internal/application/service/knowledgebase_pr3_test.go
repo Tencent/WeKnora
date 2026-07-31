@@ -62,6 +62,13 @@ func (f *fakeRegistry) GetByStoreID(storeID string) (interfaces.RetrieveEngineSe
 	return nil, stderrors.New("not registered")
 }
 
+// This fake never rebuilds a missing engine, so a miss stays a miss.
+func (f *fakeRegistry) GetOrLoadByStoreID(
+	_ context.Context, _ uint64, storeID string,
+) (interfaces.RetrieveEngineService, error) {
+	return f.GetByStoreID(storeID)
+}
+
 // fakeKBRepo is the smallest KnowledgeBaseRepository needed by
 // CreateKnowledgeBase + CopyKnowledgeBase tests. It stores rows in a map
 // keyed by ID. No tenant scoping is applied — the tested paths already

@@ -2,12 +2,39 @@ package service
 
 import (
 	"context"
-	"os"
+	"strconv"
 	"strings"
 
 	werrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+const xlsxFirstRowAsHeaderOverride = "xlsx_first_row_as_header"
+
+func applyParserRuleOverrides(
+	overrides map[string]string,
+	config types.ChunkingConfig,
+	fileType string,
+) {
+	fileType = normalizeParserFileType(fileType)
+	if fileType != "xlsx" && fileType != "xls" {
+		return
+	}
+	rule := config.ResolveParserEngineRule(fileType)
+	if rule == nil || rule.XLSXFirstRowAsHeader == nil {
+		return
+	}
+	engine := strings.TrimSpace(rule.Engine)
+	if engine != "" && engine != "builtin" {
+		return
+	}
+	overrides[xlsxFirstRowAsHeaderOverride] = strconv.FormatBool(*rule.XLSXFirstRowAsHeader)
+}
+
+func normalizeParserFileType(fileType string) string {
+	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fileType)), ".")
+}
 
 // ResolveProcessConfig merges KB defaults with per-upload overrides for the parse pipeline.
 func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgeProcessOverrides) types.EffectiveProcessConfig {
@@ -66,6 +93,59 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	return eff
 }
 
+// validateDefaultFileImportRequirements enforces the VLM/ASR prerequisites that
+// ValidateProcessOverrides would otherwise cover, for imports that ship no
+// per-import overrides and therefore fall back to the KB defaults.
+func validateDefaultFileImportRequirements(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+	eff types.EffectiveProcessConfig,
+	fileType string,
+) error {
+	fileType = normalizeFileExtension(fileType)
+	if IsImageType(fileType) && !eff.VLMConfig.IsEnabled() {
+		logger.Error(ctx, "VLM model is not configured")
+		return werrors.NewBadRequestError("上传图片文件需要设置VLM模型")
+	}
+	if IsAudioType(fileType) && !kb.ASRConfig.IsASREnabled() {
+		logger.Error(ctx, "ASR model is not configured")
+		return werrors.NewBadRequestError("上传音频文件需要设置ASR语音识别模型")
+	}
+	return nil
+}
+
+// resolveFileImportProcessConfig is the single gate every file import passes
+// through: it rejects unsupported extensions, enforces the VLM/ASR
+// prerequisites for the resolved type, and returns the effective processing
+// config for task enqueue. Persisting overrides onto the knowledge record stays
+// with the caller, which owns the record's lifecycle.
+func resolveFileImportProcessConfig(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+	fileType string,
+	processOverrides *types.KnowledgeProcessOverrides,
+	enableMultimodel *bool,
+) (types.EffectiveProcessConfig, error) {
+	if err := validateImportFileType(fileType); err != nil {
+		return types.EffectiveProcessConfig{}, err
+	}
+
+	eff := ResolveProcessConfig(kb, processOverrides)
+	if enableMultimodel != nil && (processOverrides == nil || processOverrides.EnableMultimodel == nil) {
+		eff.EnableMultimodel = *enableMultimodel
+	}
+
+	if processOverrides != nil {
+		if err := ValidateProcessOverrides(ctx, kb, processOverrides, []string{fileType}); err != nil {
+			return eff, err
+		}
+	} else if err := validateDefaultFileImportRequirements(ctx, kb, eff, fileType); err != nil {
+		return eff, err
+	}
+
+	return eff, nil
+}
+
 // ValidateProcessOverrides validates batch overrides against file types in the upload.
 func ValidateProcessOverrides(
 	ctx context.Context,
@@ -91,9 +171,6 @@ func ValidateProcessOverrides(
 	eff := ResolveProcessConfig(kb, overrides)
 
 	if hasImage {
-		if err := validateImageMultimodalConfig(ctx, kb); err != nil {
-			return err
-		}
 		if !eff.VLMConfig.IsEnabled() {
 			return werrors.NewBadRequestError("上传图片文件需要设置VLM模型")
 		}
@@ -232,45 +309,6 @@ func mergeExtractConfig(base types.ExtractConfig, override *types.ExtractConfig)
 		result.CustomInstructions = override.CustomInstructions
 	}
 	return result
-}
-
-func validateImageMultimodalConfig(ctx context.Context, kb *types.KnowledgeBase) error {
-	// Concrete backends are validated and connectivity-tested when registered.
-	// The checks below only apply to unmigrated provider-only bindings.
-	if kb != nil && kb.StorageBackendID != nil && strings.TrimSpace(*kb.StorageBackendID) != "" {
-		return nil
-	}
-	provider := kb.GetStorageProvider()
-	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
-		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
-	}
-
-	switch provider {
-	case "cos":
-		if tenant == nil || tenant.StorageEngineConfig == nil || tenant.StorageEngineConfig.COS == nil ||
-			tenant.StorageEngineConfig.COS.SecretID == "" || tenant.StorageEngineConfig.COS.SecretKey == "" ||
-			tenant.StorageEngineConfig.COS.Region == "" || tenant.StorageEngineConfig.COS.BucketName == "" {
-			return werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
-		}
-	case "minio":
-		ok := false
-		if tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.MinIO != nil {
-			m := tenant.StorageEngineConfig.MinIO
-			if m.Mode == "remote" {
-				ok = m.Endpoint != "" && m.AccessKeyID != "" && m.SecretAccessKey != "" && m.BucketName != ""
-			} else {
-				ok = os.Getenv("MINIO_ENDPOINT") != "" && os.Getenv("MINIO_ACCESS_KEY_ID") != "" &&
-					os.Getenv("MINIO_SECRET_ACCESS_KEY") != "" &&
-					(m.BucketName != "" || os.Getenv("MINIO_BUCKET_NAME") != "")
-			}
-		}
-		if !ok {
-			return werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
-		}
-	}
-
-	return nil
 }
 
 // MergeParserEngineOverrides merges upload overrides on top of tenant overrides safely.

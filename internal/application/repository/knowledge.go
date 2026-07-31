@@ -188,7 +188,13 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 
 // UpdateKnowledge updates knowledge
 func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
-	err := r.db.WithContext(ctx).Omit(omitFieldsOnUpdate...).Save(knowledge).Error
+	omit := omitFieldsOnUpdate
+	// Legacy/unit-test schemas created before custom_metadata should continue
+	// to support unrelated updates when the caller did not provide the field.
+	if knowledge.CustomMetadata == nil {
+		omit = append(append([]string{}, omitFieldsOnUpdate...), "custom_metadata")
+	}
+	err := r.db.WithContext(ctx).Omit(omit...).Save(knowledge).Error
 	return err
 }
 
@@ -235,10 +241,16 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 
 	switch params.Type {
 	case "file":
-		// If file hash exists, prioritize exact match using hash
+		// File content is only a duplicate within the same file type. This keeps
+		// same-content documents with distinct formats (for example, .md and
+		// .txt) available as separate knowledge items.
 		if params.FileHash != "" {
 			var knowledge types.Knowledge
-			err := query.Where("file_hash = ?", params.FileHash).First(&knowledge).Error
+			duplicateQuery := query.Where("type = ? AND file_hash = ?", "file", params.FileHash)
+			if params.FileType != "" {
+				duplicateQuery = duplicateQuery.Where("LOWER(file_type) = ?", strings.ToLower(params.FileType))
+			}
+			err := duplicateQuery.First(&knowledge).Error
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return false, nil, nil
@@ -248,13 +260,17 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 			return true, &knowledge, nil
 		}
 
-		// If no hash or hash doesn't match, use filename and size
+		// If no hash or hash doesn't match, use filename, size, and file type.
 		if params.FileName != "" && params.FileSize > 0 {
 			var knowledge types.Knowledge
-			err := query.Where(
-				"file_name = ? AND file_size = ?",
-				params.FileName, params.FileSize,
-			).First(&knowledge).Error
+			duplicateQuery := query.Where(
+				"type = ? AND file_name = ? AND file_size = ?",
+				"file", params.FileName, params.FileSize,
+			)
+			if params.FileType != "" {
+				duplicateQuery = duplicateQuery.Where("LOWER(file_type) = ?", strings.ToLower(params.FileType))
+			}
+			err := duplicateQuery.First(&knowledge).Error
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return false, nil, nil

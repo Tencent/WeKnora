@@ -145,8 +145,9 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 		PageSize: chunkLimit,
 	}
 
+	enabled := true
 	chunks, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
-		effectiveTenantID, knowledgeID, pagination, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, nil, "", "", "", "")
+		effectiveTenantID, knowledgeID, pagination, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, nil, "", "", "", "", &enabled)
 	if err != nil {
 		return &types.ToolResult{
 			Success: false,

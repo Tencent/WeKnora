@@ -29,6 +29,7 @@ export async function listKnowledgeBaseActivity(
 // 知识库管理 API（列表、创建、获取、更新、删除、复制）
 export function listKnowledgeBases(params?: {
   agent_id?: string;
+  agent_source_tenant_id?: string;
   /**
    * Optional creator filter. Server-side semantics:
    *   - "mine"   → only KBs whose creator_id matches the caller
@@ -41,6 +42,7 @@ export function listKnowledgeBases(params?: {
 }) {
   const query = new URLSearchParams();
   if (params?.agent_id) query.set('agent_id', params.agent_id);
+  if (params?.agent_source_tenant_id) query.set('agent_source_tenant_id', params.agent_source_tenant_id);
   if (params?.creator && params.creator !== 'all') query.set('creator', params.creator);
   const qs = query.toString();
   return get(qs ? `/api/v1/knowledge-bases?${qs}` : '/api/v1/knowledge-bases');
@@ -125,9 +127,10 @@ export function createKnowledgeBase(data: {
   return post(`/api/v1/knowledge-bases`, data);
 }
 
-export function getKnowledgeBaseById(id: string, options?: { agent_id?: string }) {
+export function getKnowledgeBaseById(id: string, options?: { agent_id?: string; agent_source_tenant_id?: string }) {
   const query = new URLSearchParams();
   if (options?.agent_id) query.set('agent_id', options.agent_id);
+  if (options?.agent_source_tenant_id) query.set('agent_source_tenant_id', options.agent_source_tenant_id);
   const qs = query.toString();
   return get(qs ? `/api/v1/knowledge-bases/${id}?${qs}` : `/api/v1/knowledge-bases/${id}`);
 }
@@ -277,9 +280,10 @@ export function listKnowledgeFiles(
   return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${qs}`);
 }
 
-export function getKnowledgeDetails(id: string, options?: { agent_id?: string }) {
+export function getKnowledgeDetails(id: string, options?: { agent_id?: string; agent_source_tenant_id?: string }) {
   const query = new URLSearchParams();
   if (options?.agent_id) query.set('agent_id', options.agent_id);
+  if (options?.agent_source_tenant_id) query.set('agent_source_tenant_id', options.agent_source_tenant_id);
   const qs = query.toString();
   return get(qs ? `/api/v1/knowledge/${id}?${qs}` : `/api/v1/knowledge/${id}`);
 }
@@ -322,15 +326,45 @@ export function previewKnowledgeFile(id: string) {
 }
 
 /** @param idsQueryString - query string with ids (e.g. ids=xxx&ids=yyy) */
-export function batchQueryKnowledge(idsQueryString: string, kbId?: string, agentId?: string) {
+export function batchQueryKnowledge(idsQueryString: string, kbId?: string, agentId?: string, agentSourceTenantId?: string) {
   let qs = idsQueryString;
   if (kbId) qs += `&kb_id=${encodeURIComponent(kbId)}`;
   if (agentId) qs += `&agent_id=${encodeURIComponent(agentId)}`;
+  if (agentSourceTenantId) qs += `&agent_source_tenant_id=${encodeURIComponent(agentSourceTenantId)}`;
   return get(`/api/v1/knowledge/batch?${qs}`);
 }
 
 export function getKnowledgeDetailsCon(id: string, page: number) {
   return get(`/api/v1/chunks/${id}?page=${page}&page_size=25`);
+}
+
+export interface ChunkEditPayload {
+  content?: string;
+  is_enabled?: boolean;
+  expected_revision?: number;
+}
+
+export function updateDocumentChunk(knowledgeId: string, chunkId: string, data: ChunkEditPayload) {
+  return put(`/api/v1/chunks/${knowledgeId}/${chunkId}`, data);
+}
+
+export function listChunkRevisions(knowledgeId: string, chunkId: string) {
+  return get(`/api/v1/chunks/${knowledgeId}/${chunkId}/revisions`);
+}
+
+export function revertDocumentChunk(knowledgeId: string, chunkId: string, revision: number, expectedRevision: number) {
+  return post(`/api/v1/chunks/${knowledgeId}/${chunkId}/revert`, {
+    revision,
+    expected_revision: expectedRevision,
+  });
+}
+
+export function updateKnowledgeMetadata(knowledgeId: string, customMetadata: Record<string, unknown>) {
+  return put(`/api/v1/knowledge/${knowledgeId}`, { custom_metadata: customMetadata });
+}
+
+export function regenerateKnowledgeSummary(knowledgeId: string) {
+  return post(`/api/v1/knowledge/${knowledgeId}/regenerate-summary`, {});
 }
 
 // Get chunk by chunk_id only (new endpoint - to be added to backend)
@@ -341,6 +375,17 @@ export function getChunkByIdOnly(chunkId: string) {
 // Delete a single generated question from a chunk by question ID
 export function deleteGeneratedQuestion(chunkId: string, questionId: string) {
   return del(`/api/v1/chunks/by-id/${chunkId}/questions`, { question_id: questionId });
+}
+
+export function upsertGeneratedQuestion(chunkId: string, question: string, questionId?: string) {
+  return put(`/api/v1/chunks/by-id/${chunkId}/questions`, {
+    question_id: questionId || '',
+    question,
+  });
+}
+
+export function regenerateGeneratedQuestions(chunkId: string) {
+  return post(`/api/v1/chunks/by-id/${chunkId}/questions/regenerate`, {});
 }
 
 export function listKnowledgeTags(
@@ -499,7 +544,7 @@ export function searchKnowledge(
   offset = 0,
   limit = 20,
   fileTypes?: string[],
-  options?: { agent_id?: string; recent?: boolean }
+  options?: { agent_id?: string; agent_source_tenant_id?: string; recent?: boolean }
 ) {
   const query = new URLSearchParams();
   if (keyword) {
@@ -511,6 +556,7 @@ export function searchKnowledge(
     query.set('file_types', fileTypes.join(','));
   }
   if (options?.agent_id) query.set('agent_id', options.agent_id);
+  if (options?.agent_source_tenant_id) query.set('agent_source_tenant_id', options.agent_source_tenant_id);
   if (options?.recent) query.set('recent', 'true');
   return get(`/api/v1/knowledge/search?${query.toString()}`);
 }
