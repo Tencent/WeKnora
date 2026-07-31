@@ -160,7 +160,7 @@ func TestIngestItem_ReplacesSubtreeSweepsOnDuplicateParent(t *testing.T) {
 
 // TestIngestItem_NoSweepWhenDuplicateIsDifferentNode guards the data-loss path:
 // when an updated node's rebuilt body content-hash-collides with a DIFFERENT
-// knowledge item (dedup keys on file_hash alone), the parent row under this
+// knowledge item (dedup keys on file_hash plus file_type), the parent row under this
 // node's external_id no longer exists (it was deleted for the update and never
 // recreated), so the subtree must NOT be swept — deleting the children would
 // destroy them with no parent to replace them.

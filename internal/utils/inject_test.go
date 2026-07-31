@@ -481,6 +481,22 @@ func TestValidateAndSecureSQL_WithStructuredSearchScopes(t *testing.T) {
 	}
 }
 
+func TestValidateAndSecureSQL_WithChunkEnabledFilter(t *testing.T) {
+	securedSQL, validation, err := ValidateAndSecureSQL(
+		"SELECT c.id, c.content FROM chunks c WHERE c.chunk_type = 'faq'",
+		WithChunkEnabledFilter(),
+	)
+	if err != nil {
+		t.Fatalf("ValidateAndSecureSQL() error = %v", err)
+	}
+	if !validation.Valid {
+		t.Fatalf("expected validation to pass, got %#v", validation.Errors)
+	}
+	if !strings.Contains(securedSQL, "c.is_enabled = true") {
+		t.Fatalf("secured SQL must exclude disabled chunks:\n%s", securedSQL)
+	}
+}
+
 // A scope carrying both a document whitelist and a tag filter must apply both.
 // Emitting only one of them would admit rows the other excludes.
 func TestValidateAndSecureSQL_ScopeCombinesDocumentAndTagFilters(t *testing.T) {

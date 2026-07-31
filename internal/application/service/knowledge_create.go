@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/url"
-	"os"
 	"path"
-	"slices"
 	"strings"
 	"time"
 
@@ -61,7 +59,9 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, err
 	}
 
-	// Validate file type
+	// Early reject before the whole-file hash below. resolveFileImportProcessConfig
+	// gates the same extension set, but this path must keep returning
+	// ErrInvalidFileType rather than the shared gate's localized message.
 	logger.Infof(ctx, "Checking file type: %s", fileName)
 	if !isValidFileType(fileName) {
 		logger.Error(ctx, "Invalid file type")
@@ -82,6 +82,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
 		Type:     "file",
 		FileName: fileName,
+		FileType: getFileType(fileName),
 		FileSize: file.Size,
 		FileHash: hash,
 	})
@@ -124,65 +125,9 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, werrors.NewValidationError("文件名包含非法字符")
 	}
 
-	eff := ResolveProcessConfig(kb, processOverrides)
-	if enableMultimodel != nil && (processOverrides == nil || processOverrides.EnableMultimodel == nil) {
-		eff.EnableMultimodel = *enableMultimodel
-	}
-
-	if processOverrides != nil {
-		if err := ValidateProcessOverrides(ctx, kb, processOverrides, []string{getFileType(safeFilename)}); err != nil {
-			return nil, err
-		}
-	} else {
-		// 检查多模态配置完整性 - 只在图片文件时校验
-		if IsImageType(getFileType(safeFilename)) {
-			provider := kb.GetStorageProvider()
-			tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-			if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
-				provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
-			}
-
-			concreteBackend := kb.StorageBackendID != nil && strings.TrimSpace(*kb.StorageBackendID) != ""
-			switch {
-			case concreteBackend:
-				// Registration already validated and tested the concrete instance.
-			case provider == "cos":
-				if tenant == nil || tenant.StorageEngineConfig == nil || tenant.StorageEngineConfig.COS == nil ||
-					tenant.StorageEngineConfig.COS.SecretID == "" || tenant.StorageEngineConfig.COS.SecretKey == "" ||
-					tenant.StorageEngineConfig.COS.Region == "" || tenant.StorageEngineConfig.COS.BucketName == "" {
-					logger.Error(ctx, "COS configuration incomplete for image multimodal processing")
-					return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
-				}
-			case provider == "minio":
-				ok := false
-				if tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.MinIO != nil {
-					m := tenant.StorageEngineConfig.MinIO
-					if m.Mode == "remote" {
-						ok = m.Endpoint != "" && m.AccessKeyID != "" && m.SecretAccessKey != "" && m.BucketName != ""
-					} else {
-						ok = os.Getenv("MINIO_ENDPOINT") != "" && os.Getenv("MINIO_ACCESS_KEY_ID") != "" &&
-							os.Getenv("MINIO_SECRET_ACCESS_KEY") != "" &&
-							(m.BucketName != "" || os.Getenv("MINIO_BUCKET_NAME") != "")
-					}
-				}
-				if !ok {
-					logger.Error(ctx, "MinIO configuration incomplete for image multimodal processing")
-					return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
-				}
-			}
-
-			if !kb.VLMConfig.Enabled || kb.VLMConfig.ModelID == "" {
-				logger.Error(ctx, "VLM model is not configured")
-				return nil, werrors.NewBadRequestError("上传图片文件需要设置VLM模型")
-			}
-		}
-
-		if IsAudioType(getFileType(safeFilename)) {
-			if !kb.ASRConfig.IsASREnabled() {
-				logger.Error(ctx, "ASR model is not configured")
-				return nil, werrors.NewBadRequestError("上传音频文件需要设置ASR语音识别模型")
-			}
-		}
+	eff, err := resolveFileImportProcessConfig(ctx, kb, getFileType(safeFilename), processOverrides, enableMultimodel)
+	if err != nil {
+		return nil, err
 	}
 
 	// Prepare knowledge record
@@ -306,9 +251,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		knowledge.ID,
 	)
 
-	if slices.Contains([]string{"csv", "xlsx", "xls"}, getFileType(safeFilename)) {
-		NewDataTableSummaryTask(ctx, s.task, tenantID, knowledge.ID, kb.SummaryModelID, kb.EmbeddingModelID)
-	}
+	enqueueDataTableSummaryIfNeeded(ctx, s.task, tenantID, knowledge.ID, safeFilename, getFileType(safeFilename), kb.SummaryModelID, kb.EmbeddingModelID)
 
 	logger.Infof(ctx, "Knowledge from file created successfully, ID: %s", knowledge.ID)
 	return knowledge, nil
@@ -322,7 +265,7 @@ func isFileURL(rawURL, fileName, fileType string) bool {
 	u, err := url.Parse(rawURL)
 	if err == nil {
 		ext := strings.ToLower(strings.TrimPrefix(path.Ext(u.Path), "."))
-		if ext != "" && allowedFileURLExtensions[ext] {
+		if ext != "" && isSupportedImportExtension(ext) {
 			return true
 		}
 	}
@@ -500,20 +443,6 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	return knowledge, nil
 }
 
-// allowedFileURLExtensions defines the supported file extensions for file URL import
-var allowedFileURLExtensions = map[string]bool{
-	"txt":  true,
-	"md":   true,
-	"pdf":  true,
-	"docx": true,
-	"doc":  true,
-	"mp3":  true,
-	"wav":  true,
-	"m4a":  true,
-	"flac": true,
-	"ogg":  true,
-}
-
 // maxFileURLSize is the maximum allowed file size for file URL import (10MB)
 const maxFileURLSize = 10 * 1024 * 1024
 
@@ -571,6 +500,10 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		return nil, err
 	}
 
+	if kb.Type == types.KnowledgeBaseTypeFAQ {
+		return nil, werrors.NewBadRequestError("FAQ 知识库不支持文件上传，请使用 FAQ 导入功能")
+	}
+
 	if err := s.checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
 	}
@@ -589,19 +522,22 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 	if fileName == "" {
 		fileName = extractFileNameFromURL(fileURL)
 	}
+	if fileName != "" {
+		safeFilename, ok := secutils.ValidateInput(fileName)
+		if !ok {
+			logger.Errorf(ctx, "Invalid filename: %s", fileName)
+			return nil, werrors.NewValidationError("文件名包含非法字符")
+		}
+		fileName = safeFilename
+	}
 
-	// Resolve fileType: user-provided > inferred from fileName
-	if fileType == "" && fileName != "" {
+	// Resolve fileType: user-provided > inferred from fileName (which already
+	// falls back to the URL path above). getFileType never returns empty, so an
+	// undeterminable type surfaces as "unknown" and is rejected below.
+	if fileType == "" {
 		fileType = getFileType(fileName)
 	}
-
-	// Validate file extension against whitelist (if we can determine it)
-	if fileType != "" {
-		if !allowedFileURLExtensions[strings.ToLower(fileType)] {
-			logger.Errorf(ctx, "Unsupported file type for file URL import: %s", fileType)
-			return nil, werrors.NewBadRequestError(fmt.Sprintf("不支持的文件类型: %s，仅支持 txt, md, pdf, docx, doc", fileType))
-		}
-	}
+	fileType = normalizeFileExtension(fileType)
 
 	// Use title as display name if fileName is still empty
 	displayName := fileName
@@ -668,19 +604,15 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		knowledge.Title = displayName
 	}
 
-	resolvedFileType := fileType
-	if resolvedFileType == "" && fileName != "" {
-		resolvedFileType = getFileType(fileName)
-	}
-	if resolvedFileType == "" {
-		resolvedFileType = getFileType(extractFileNameFromURL(fileURL))
-	}
-
-	eff, err := ApplyKnowledgeProcessOverrides(
-		ctx, kb, knowledge, processOverrides, []string{resolvedFileType}, enableMultimodel,
-	)
+	eff, err := resolveFileImportProcessConfig(ctx, kb, fileType, processOverrides, enableMultimodel)
 	if err != nil {
 		return nil, err
+	}
+	if processOverrides != nil {
+		if err := knowledge.SetProcessOverrides(processOverrides); err != nil {
+			logger.Errorf(ctx, "Failed to set process overrides: %v", err)
+			return nil, err
+		}
 	}
 
 	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
@@ -750,6 +682,8 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 			"processing_status": "pending", "task_id": info.ID, "trigger": kbActivityTrigger(ctx),
 		})
 	logger.Infof(ctx, "Enqueued file URL process task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, knowledge.ID)
+
+	enqueueDataTableSummaryIfNeeded(ctx, s.task, tenantID, knowledge.ID, fileName, fileType, kb.SummaryModelID, kb.EmbeddingModelID)
 
 	logger.Infof(ctx, "Knowledge from file URL created successfully, ID: %s", knowledge.ID)
 	return knowledge, nil

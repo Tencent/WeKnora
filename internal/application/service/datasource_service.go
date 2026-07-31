@@ -1263,8 +1263,8 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 
 // dupIsSameNode reports whether a duplicate-content error means the parent still
 // exists in the KB *under this item's own external_id* — i.e. a content-dedup hit
-// against this same node, so reconciling its subtree is safe. Deduplication keys
-// on file_hash alone (CheckKnowledgeExists), so an updated node whose rebuilt body
+// against this same node, so reconciling its subtree is safe. File deduplication
+// keys on file_hash plus file_type (CheckKnowledgeExists), so an updated node whose rebuilt body
 // happens to hash-collide with a DIFFERENT knowledge item (another node, or a
 // manually-uploaded file with no external_id) would otherwise sweep this node's
 // children even though its own parent row was just deleted for the update and

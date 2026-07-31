@@ -124,7 +124,7 @@
 
         <!-- Graph page detail drawer -->
         <t-drawer v-model:visible="graphDrawerVisible" :header="graphDrawerPage?.title || ''" size="480px"
-          :footer="false" placement="right" :attach="false" :show-overlay="false" :close-btn="true" destroy-on-close
+          :footer="false" placement="right" :show-overlay="false" :close-btn="true" destroy-on-close
           class="wiki-graph-drawer">
           <template v-if="graphDrawerPage">
             <div class="wiki-reader-meta" style="margin-bottom: 8px;">
@@ -769,9 +769,14 @@ import { marked } from 'marked'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { RecycleScroller } from 'vue-virtual-scroller'
 import { hydrateProtectedFileImages, sanitizeMarkdownHTML } from '@/utils/security'
+import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess'
 import picturePreview from '@/components/picture-preview.vue'
 import WikiFolderActions from './WikiFolderActions.vue'
 import WikiRevisionDrawer from './WikiRevisionDrawer.vue'
+import {
+  expandedWikiDirectoryPaths,
+  expandWikiDirectoryPath,
+} from './wikiDirectoryState'
 import { getKnowledgeDetails } from '@/api/knowledge-base'
 import { createSessions } from '@/api/chat'
 import ChatView from '@/views/chat/index.vue'
@@ -823,6 +828,13 @@ const emit = defineEmits<{
   (e: 'status-change', payload: { pendingTasks: number; isActive: boolean; pendingIssues: number }): void
   (e: 'view-graph', slug: string): void
 }>()
+
+// Wiki content can reference objects owned by the KB's source tenant (shared
+// KBs), which the tenant-scoped /files proxy rejects as cross-tenant.
+const kbFileAccess = computed<ProtectedFileAccessContext>(() => ({
+  mode: 'knowledgeBase',
+  kbId: props.knowledgeBaseId,
+}))
 const pages = ref<WikiPage[]>([])
 const selectedPage = ref<WikiPage | null>(null)
 
@@ -1473,7 +1485,7 @@ function closeImagePreview() {
 watch(graphDrawerContent, async () => {
   await nextTick()
   if (drawerBodyRef.value) {
-    await hydrateProtectedFileImages(drawerBodyRef.value, undefined, props.knowledgeBaseId)
+    await hydrateProtectedFileImages(drawerBodyRef.value, kbFileAccess.value)
   }
 })
 
@@ -1980,7 +1992,7 @@ const indexHasMore = computed(() => {
 watch(renderedContent, async () => {
   await nextTick()
   if (readerBodyRef.value) {
-    await hydrateProtectedFileImages(readerBodyRef.value, undefined, props.knowledgeBaseId)
+    await hydrateProtectedFileImages(readerBodyRef.value, kbFileAccess.value)
   }
 })
 
@@ -1990,7 +2002,7 @@ watch(renderedContent, async () => {
 watch(renderedIndexMarkdown, async () => {
   await nextTick()
   if (indexBodyRef.value) {
-    await hydrateProtectedFileImages(indexBodyRef.value, undefined, props.knowledgeBaseId)
+    await hydrateProtectedFileImages(indexBodyRef.value, kbFileAccess.value)
   }
 })
 
@@ -2157,11 +2169,28 @@ async function loadCategoriesForType(type: string, opts: { reset?: boolean; pare
 // pages for one tab. Used after a structural mutation (move page, create /
 // rename / delete folder) so the tree reflects the new layout authoritatively
 // instead of guessing at the optimistic delta.
-async function reloadDirectoryForType(type: string) {
+async function reloadDirectoryForType(
+  type: string,
+  opts: { preserveDirectoryState?: boolean } = {},
+) {
   const refreshFlatList = sidebarViewMode.value === 'list' || ensureBucket(type).flatInitialized
-  clearDirectoryStateForType(type)
-  await loadPagesForType(type, { reset: true })
+  const expandedPaths = opts.preserveDirectoryState
+    ? expandedWikiDirectoryPaths(type, collapsedDirectories.value, touchedDirectories.value)
+    : []
+  if (!opts.preserveDirectoryState) clearDirectoryStateForType(type)
+  await loadPagesForType(type, {
+    reset: true,
+    preserveDirectoryState: opts.preserveDirectoryState,
+  })
   await loadCategoriesForType(type, { reset: true })
+  // Folder data is fetched one level at a time. Reload preserved paths in
+  // parent-first order so each child request can resolve its parent folder id.
+  for (const path of expandedPaths) {
+    await Promise.all([
+      loadPagesForType(type, { categoryPath: path }),
+      loadCategoriesForType(type, { parentPath: path }),
+    ])
+  }
   if (refreshFlatList) await loadFlatPagesForType(type, true)
 }
 
@@ -2301,16 +2330,28 @@ async function confirmPendingMove() {
 // the API call, surface a toast, and reload the affected tab so the tree
 // reflects the new layout authoritatively.
 async function createFolder(parentId: string, parentPath: string[], name: string) {
+  const type = activeTab.value
+  const scrollTop = pageListRef.value?.scrollTop
   try {
     await createWikiFolder(props.knowledgeBaseId, parentId, name)
     MessagePlugin.success(t('knowledgeEditor.wikiBrowser.createFolderSuccess'))
-    // Keep the parent expanded so the new child is visible.
+    // Keep the current path expanded so refreshing the authoritative tree does
+    // not collapse it and clamp the sidebar scroll position back to the root.
     if (parentPath.length > 0) {
-      collapsedDirectories.value = new Set(
-        [...collapsedDirectories.value].filter(k => k !== directoryPathKey(activeTab.value, parentPath)),
+      const state = expandWikiDirectoryPath(
+        type,
+        parentPath,
+        collapsedDirectories.value,
+        touchedDirectories.value,
       )
+      collapsedDirectories.value = state.collapsed
+      touchedDirectories.value = state.touched
     }
-    await reloadDirectoryForType(activeTab.value)
+    await reloadDirectoryForType(type, { preserveDirectoryState: true })
+    await nextTick()
+    if (activeTab.value === type && scrollTop !== undefined && pageListRef.value) {
+      pageListRef.value.scrollTop = scrollTop
+    }
   } catch (e: any) {
     console.error('Failed to create wiki folder:', e)
     MessagePlugin.error(e?.message || t('knowledgeEditor.wikiBrowser.createFolderFailed'))
@@ -2397,7 +2438,10 @@ async function deleteFolder(folderId: string) {
 // checks work without another round-trip. Guard against concurrent
 // invocations for the same type (e.g. scroll event fires rapidly while
 // a network request is still in flight).
-async function loadPagesForType(type: string, opts: { reset?: boolean; categoryPath?: string[] } = {}) {
+async function loadPagesForType(
+  type: string,
+  opts: { reset?: boolean; categoryPath?: string[]; preserveDirectoryState?: boolean } = {},
+) {
   const bucket = ensureBucket(type)
   const categoryPath = opts.categoryPath || []
   const scopedToCategory = categoryPath.length > 0
@@ -2446,7 +2490,7 @@ async function loadPagesForType(type: string, opts: { reset?: boolean; categoryP
         bucket.items = batch
         bucket.nextPage = 2
         bucket.directoryPages = {}
-        clearDirectoryStateForType(type)
+        if (!opts.preserveDirectoryState) clearDirectoryStateForType(type)
       } else {
         const seenItems = new Set(bucket.items.map(p => p.id))
         for (const p of batch) {
@@ -4699,7 +4743,7 @@ watch(() => props.view, (v) => {
   } else if (v === 'browser') {
     nextTick(async () => {
       if (readerBodyRef.value && renderedContent.value) {
-        await hydrateProtectedFileImages(readerBodyRef.value, undefined, props.knowledgeBaseId)
+        await hydrateProtectedFileImages(readerBodyRef.value, kbFileAccess.value)
       }
     })
   }

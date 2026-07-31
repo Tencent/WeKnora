@@ -24,3 +24,14 @@ test('selecting an agent leaves web search off until the user enables it', () =>
   assert.doesNotMatch(handleSelectAgent, /agentWebSearch/)
   assert.doesNotMatch(handleSelectAgent, /settingsStore\.toggleWebSearch/)
 })
+
+test('shared-agent web search button waits for source readiness metadata', () => {
+  const showWebSearchStart = inputField.indexOf('const showWebSearchButton = computed')
+  const showWebSearchEnd = inputField.indexOf('const showImageUploadButton', showWebSearchStart)
+  const showWebSearchButton = inputField.slice(showWebSearchStart, showWebSearchEnd)
+
+  assert.notEqual(showWebSearchStart, -1)
+  assert.notEqual(showWebSearchEnd, -1)
+  assert.match(showWebSearchButton, /isWebSearchReadinessKnown/)
+  assert.match(showWebSearchButton, /selectedSharedAgent\.value\?\.web_search_ready/)
+})
