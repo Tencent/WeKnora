@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -50,6 +51,7 @@ type wikiMapTestWikiService struct {
 	mu               sync.Mutex
 	pages            map[string]*types.WikiPage
 	creates, updates int
+	createErr        error
 }
 
 func (s *wikiMapTestWikiService) ListSlugsBySourceRef(context.Context, string, string) ([]string, error) {
@@ -70,10 +72,42 @@ func (s *wikiMapTestWikiService) GetPageBySlug(_ context.Context, _ string, slug
 func (s *wikiMapTestWikiService) CreatePage(_ context.Context, page *types.WikiPage) (*types.WikiPage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.createErr != nil {
+		return nil, s.createErr
+	}
 	cp := *page
 	s.pages[page.Slug] = &cp
 	s.creates++
 	return &cp, nil
+}
+
+func TestIngestionArtifactRecovery_WikiMapSucceededReduceFailed(t *testing.T) {
+	svc, _, wiki, model, db := newWikiMapIntegrationService(t)
+	payload := WikiIngestPayload{TenantID: 1, KnowledgeBaseID: "kb-1"}
+	op := WikiPendingOp{Op: WikiOpIngest, KnowledgeID: "doc-1", Language: "en"}
+	batch := wikiMapIntegrationBatchContext()
+	result, updates, err := svc.mapOneDocument(context.Background(), model, payload, op, batch)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	firstCalls := model.Count()
+	require.Greater(t, firstCalls, 0)
+	var artifact types.DerivedArtifact
+	require.NoError(t, db.Where("artifact_kind = ?", wikiMapArtifactKind).Take(&artifact).Error)
+	require.Equal(t, types.DerivedArtifactSucceeded, artifact.Status)
+
+	wiki.createErr = errors.New("wiki reduce materialization failed")
+	_, _, _, err = svc.reduceSlugUpdates(context.Background(), model, "kb-1", updates[0].Slug, []SlugUpdate{updates[0]}, 1, batch, nil)
+	require.ErrorContains(t, err, "wiki reduce materialization failed")
+	wiki.createErr = nil
+
+	hit, retryUpdates, err := svc.mapOneDocument(context.Background(), model, payload, op, batch)
+	require.NoError(t, err)
+	require.Equal(t, types.IngestionCacheStatusHit, hit.MapStats["cache_status"])
+	require.Equal(t, firstCalls, model.Count(), "retry must not repeat the pure map chat")
+	changed, _, _, err := svc.reduceSlugUpdates(context.Background(), model, "kb-1", retryUpdates[0].Slug, []SlugUpdate{retryUpdates[0]}, 1, batch, nil)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, 1, wiki.creates)
 }
 func (s *wikiMapTestWikiService) UpdatePage(_ context.Context, page *types.WikiPage) (*types.WikiPage, error) {
 	s.mu.Lock()
@@ -122,6 +156,9 @@ func newWikiMapIntegrationService(t *testing.T) (*wikiIngestService, *wikiMapTes
 	dsn := fmt.Sprintf("file:%s?_busy_timeout=5000&_journal_mode=WAL", filepath.ToSlash(filepath.Join(t.TempDir(), "wiki-map.db")))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	require.NoError(t, db.AutoMigrate(&types.DerivedArtifact{}))
 	chunkRepo := &wikiMapTestChunkRepo{chunks: []*types.Chunk{{ID: "row-1", TenantID: 1, KnowledgeID: "doc-1", KnowledgeBaseID: "kb-1", Content: "This is enough stable source text for wiki mapping.", ChunkIndex: 0, StartAt: 0, ChunkType: types.ChunkTypeText, IsEnabled: true, StableIdentity: "stable-1", IdentityVersion: contentkey.ChunkIdentityVersion}}}
 	wiki := &wikiMapTestWikiService{pages: make(map[string]*types.WikiPage)}
@@ -143,10 +180,10 @@ func TestWikiMapArtifactSecondRunSkipsPureMapChatAndStillReduces(t *testing.T) {
 	require.NotNil(t, first)
 	firstCalls := chatModel.Count()
 	require.Greater(t, firstCalls, 0)
-	require.Equal(t, firstCalls, first.MapStats["request_count"])
+	require.EqualValues(t, firstCalls, first.MapStats["request_count"])
 	require.Equal(t, types.IngestionCacheStatusMiss, first.MapStats["cache_status"])
-	require.Equal(t, 1, first.MapStats["computed_items"])
-	require.Equal(t, 0, first.MapStats["reused_items"])
+	require.EqualValues(t, 1, first.MapStats["computed_items"])
+	require.EqualValues(t, 0, first.MapStats["reused_items"])
 	chunks.mu.Lock()
 	chunks.chunks = append(chunks.chunks, &types.Chunk{ID: "derived-summary", IsEnabled: true, ChunkType: types.ChunkTypeSummary, Content: "changed derived content must not invalidate map"})
 	chunks.mu.Unlock()
@@ -155,7 +192,7 @@ func TestWikiMapArtifactSecondRunSkipsPureMapChatAndStillReduces(t *testing.T) {
 	require.NotNil(t, second)
 	require.Equal(t, firstCalls, chatModel.Count(), "cache hit must issue zero pure-map model requests")
 	require.Equal(t, types.IngestionCacheStatusHit, second.MapStats["cache_status"])
-	require.Equal(t, 0, second.MapStats["request_count"])
+	require.EqualValues(t, 0, second.MapStats["request_count"])
 	require.NotEmpty(t, updates)
 	changed, _, _, err := svc.reduceSlugUpdates(context.Background(), chatModel, "kb-1", updates[0].Slug, []SlugUpdate{updates[0]}, 1, wikiMapIntegrationBatchContext(), nil)
 	require.NoError(t, err)

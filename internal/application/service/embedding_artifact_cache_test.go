@@ -40,9 +40,16 @@ type embeddingProductionPathRepository struct {
 	interfaces.RetrieveEngineRepository
 	mu    sync.Mutex
 	saves []map[string][]float32
+	fail  error
 }
 
 func (r *embeddingProductionPathRepository) BatchSave(_ context.Context, _ []*types.IndexInfo, params map[string]any) error {
+	r.mu.Lock()
+	fail := r.fail
+	r.mu.Unlock()
+	if fail != nil {
+		return fail
+	}
 	embeddings := params["embedding"].(map[string][]float32)
 	copied := make(map[string][]float32, len(embeddings))
 	for key, vector := range embeddings {
@@ -52,6 +59,36 @@ func (r *embeddingProductionPathRepository) BatchSave(_ context.Context, _ []*ty
 	r.saves = append(r.saves, copied)
 	r.mu.Unlock()
 	return nil
+}
+
+func TestIngestionArtifactRecovery_EmbeddingSucceededVectorWriteFailed(t *testing.T) {
+	db := newEmbeddingArtifactTestRepo(t)
+	provider, cached := newEmbeddingArtifactTestModel(t, db, 3)
+	storage := &embeddingProductionPathRepository{fail: errors.New("vector write failed")}
+	engine := retrieversvc.NewKVHybridRetrieveEngine(storage, types.RetrieverEngineType("test"))
+	indexer := embeddingProductionPathIndexer{engine: engine}
+	ctx := embeddingArtifactTestContext(1, types.IngestionOperationEmbeddingChunk)
+	infos := []*types.IndexInfo{{Content: "durable computation", SourceID: "source", ChunkID: "chunk", KnowledgeID: "knowledge", KnowledgeBaseID: "kb"}}
+
+	_, err := executeObservedEmbeddingBatch(ctx, types.IngestionOperationEmbeddingChunk, cached, indexer, infos)
+	require.ErrorContains(t, err, "vector write failed")
+	require.Equal(t, 1, provider.Snapshot().TotalInputItems)
+	var artifact types.DerivedArtifact
+	require.NoError(t, db.Where("artifact_kind = ?", embeddingArtifactKind).Take(&artifact).Error)
+	require.Equal(t, types.DerivedArtifactSucceeded, artifact.Status)
+
+	storage.mu.Lock()
+	storage.fail = nil
+	storage.mu.Unlock()
+	observation, err := executeObservedEmbeddingBatch(ctx, types.IngestionOperationEmbeddingChunk, cached, indexer, infos)
+	require.NoError(t, err)
+	require.Equal(t, 1, provider.Snapshot().TotalInputItems, "retry must reuse the succeeded vector artifact")
+	require.Equal(t, types.IngestionCacheStatusHit, observation.CacheStatus)
+	require.Zero(t, observation.RequestCount)
+	require.Equal(t, 1, observation.ReusedItems)
+	storage.mu.Lock()
+	require.Len(t, storage.saves, 1)
+	storage.mu.Unlock()
 }
 
 type embeddingProductionPathIndexer struct {

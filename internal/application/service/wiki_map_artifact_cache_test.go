@@ -73,16 +73,16 @@ func TestBindWikiMapChunkRefsRejectsMissingDuplicateAndOldVersion(t *testing.T) 
 }
 
 func TestWikiMapSourceChunksFiltersDerivedAndRejectsUnsafeIdentitySets(t *testing.T) {
-	valid := &types.Chunk{ID: "row-a", IsEnabled: true, ChunkType: types.ChunkTypeText, StableIdentity: "stable-a", IdentityVersion: contentkey.ChunkIdentityVersion}
+	valid := &types.Chunk{ID: "row-a", IsEnabled: true, ChunkType: types.ChunkTypeText, Content: "source", StableIdentity: "stable-a", IdentityVersion: contentkey.ChunkIdentityVersion}
 	derived := &types.Chunk{ID: "summary", IsEnabled: true, ChunkType: types.ChunkTypeSummary, Content: "must not affect map key"}
 	source, stableToID, _, eligible := wikiMapSourceChunks([]*types.Chunk{derived, valid})
 	require.True(t, eligible)
 	require.Equal(t, []*types.Chunk{valid}, source)
 	require.Equal(t, "row-a", stableToID["stable-a"])
 
-	_, _, _, eligible = wikiMapSourceChunks([]*types.Chunk{valid, {ID: "row-b", IsEnabled: true, ChunkType: types.ChunkTypeText, StableIdentity: "stable-a", IdentityVersion: contentkey.ChunkIdentityVersion}})
+	_, _, _, eligible = wikiMapSourceChunks([]*types.Chunk{valid, {ID: "row-b", IsEnabled: true, ChunkType: types.ChunkTypeText, Content: "duplicate source", StableIdentity: "stable-a", IdentityVersion: contentkey.ChunkIdentityVersion}})
 	require.False(t, eligible)
-	_, _, _, eligible = wikiMapSourceChunks([]*types.Chunk{{ID: "legacy", IsEnabled: true, ChunkType: types.ChunkTypeText}})
+	_, _, _, eligible = wikiMapSourceChunks([]*types.Chunk{{ID: "legacy", IsEnabled: true, ChunkType: types.ChunkTypeText, Content: "legacy source"}})
 	require.False(t, eligible)
 }
 

@@ -25,6 +25,9 @@ func newMultimodalArtifactTestService(t *testing.T) (*ImageMultimodalService, *g
 	dsn := fmt.Sprintf("file:%s?_busy_timeout=5000&_journal_mode=WAL", filepath.ToSlash(filepath.Join(t.TempDir(), "artifacts.db")))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	require.NoError(t, db.AutoMigrate(&types.DerivedArtifact{}))
 	return &ImageMultimodalService{artifactRepo: repository.NewDerivedArtifactRepository(db)}, db
 }

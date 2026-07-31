@@ -65,6 +65,66 @@ func TestCreateChunks_SQLite_SeqIDAutoAssigned(t *testing.T) {
 	}
 }
 
+func TestChunkRepositoryCreateChunks_PersistsExplicitDisabled(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	chunk := makeChunk("kb", "knowledge", types.ChunkTypeText)
+	chunk.IsEnabled = false
+	require.NoError(t, repo.CreateChunks(context.Background(), []*types.Chunk{chunk}))
+	require.False(t, chunk.IsEnabled)
+	var saved types.Chunk
+	require.NoError(t, db.First(&saved, "id = ?", chunk.ID).Error)
+	require.False(t, saved.IsEnabled)
+}
+
+func TestChunkRepositoryCreateChunks_PreservesEnabled(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	chunk := makeChunk("kb", "knowledge", types.ChunkTypeText)
+	require.True(t, chunk.IsEnabled)
+	require.NoError(t, repo.CreateChunks(context.Background(), []*types.Chunk{chunk}))
+	var saved types.Chunk
+	require.NoError(t, db.First(&saved, "id = ?", chunk.ID).Error)
+	require.True(t, saved.IsEnabled)
+}
+
+func TestChunkRepositoryCreateChunks_MixedEnabledState(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	enabled := makeChunk("kb", "knowledge", types.ChunkTypeText)
+	disabled := makeChunk("kb", "knowledge", types.ChunkTypeText)
+	disabled.IsEnabled = false
+	require.NoError(t, repo.CreateChunks(context.Background(), []*types.Chunk{enabled, disabled}))
+	var saved []types.Chunk
+	require.NoError(t, db.Where("id IN ?", []string{enabled.ID, disabled.ID}).Order("id").Find(&saved).Error)
+	require.Len(t, saved, 2)
+	state := map[string]bool{saved[0].ID: saved[0].IsEnabled, saved[1].ID: saved[1].IsEnabled}
+	require.True(t, state[enabled.ID])
+	require.False(t, state[disabled.ID])
+}
+
+func TestChunkRepositoryCreateChunks_RollsBackOnFailure(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	first := makeChunk("kb", "knowledge", types.ChunkTypeText)
+	first.IsEnabled = false
+	conflict := makeChunk("kb", "knowledge", types.ChunkTypeText)
+	conflict.ID = first.ID
+	require.Error(t, repo.CreateChunks(context.Background(), []*types.Chunk{first, conflict}))
+	var count int64
+	require.NoError(t, db.Unscoped().Model(&types.Chunk{}).Where("id = ?", first.ID).Count(&count).Error)
+	require.Zero(t, count)
+}
+
+func TestChunkRepositoryCreateChunks_EmptyInputIsNoOp(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	require.NoError(t, repo.CreateChunks(context.Background(), nil))
+	var count int64
+	require.NoError(t, db.Model(&types.Chunk{}).Count(&count).Error)
+	require.Zero(t, count)
+}
+
 func TestCreateChunks_SQLite_SeqIDContinuesFromExisting(t *testing.T) {
 	db := setupChunkTestDB(t)
 	repo := NewChunkRepository(db)

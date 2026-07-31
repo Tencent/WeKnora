@@ -81,8 +81,9 @@ func (r *multimodalObservationKnowledgeRepo) GetKnowledgeByIDOnly(
 type multimodalObservationChunkService struct {
 	interfaces.ChunkService
 
-	mu     sync.Mutex
-	chunks map[string]*types.Chunk
+	mu        sync.Mutex
+	chunks    map[string]*types.Chunk
+	createErr error
 }
 
 func newMultimodalObservationChunkService() *multimodalObservationChunkService {
@@ -97,6 +98,9 @@ func (s *multimodalObservationChunkService) CreateChunks(
 ) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.createErr != nil {
+		return s.createErr
+	}
 
 	for _, chunk := range chunks {
 		if chunk == nil {
@@ -108,6 +112,32 @@ func (s *multimodalObservationChunkService) CreateChunks(
 	}
 
 	return nil
+}
+
+func TestIngestionArtifactRecovery_OCRAndCaptionSucceededDownstreamFailed(t *testing.T) {
+	imagePath := writeMultimodalObservationImage(t, []byte("durable multimodal image"))
+	model := modelcount.NewCountingVLM(modelcount.CountingVLMOptions{ModelID: "vlm-test", ModelName: "counting-vlm", OCRResponse: "recognized text", CaptionResponse: "image caption"})
+	chunks := newMultimodalObservationChunkService()
+	chunks.createErr = errors.New("multimodal chunk materialization failed")
+	service := newImageMultimodalObservationService(model, chunks)
+	artifactService, db := newMultimodalArtifactTestService(t)
+	service.artifactRepo = artifactService.artifactRepo
+	task := newImageMultimodalObservationTask(t, imagePath, "knowledge-test", "chunk-test")
+
+	require.ErrorContains(t, service.Handle(context.Background(), task), "multimodal chunk materialization failed")
+	require.Equal(t, 2, model.Snapshot().PredictRequestCount)
+	var succeeded int64
+	require.NoError(t, db.Model(&types.DerivedArtifact{}).Where("status = ?", types.DerivedArtifactSucceeded).Count(&succeeded).Error)
+	require.EqualValues(t, 2, succeeded)
+
+	chunks.mu.Lock()
+	chunks.createErr = nil
+	chunks.mu.Unlock()
+	require.NoError(t, service.Handle(context.Background(), task))
+	require.Equal(t, 2, model.Snapshot().PredictRequestCount, "retry must hit both OCR and caption artifacts")
+	chunks.mu.Lock()
+	require.Len(t, chunks.chunks, 2)
+	chunks.mu.Unlock()
 }
 
 func (s *multimodalObservationChunkService) GetChunkByIDOnly(

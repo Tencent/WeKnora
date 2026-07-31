@@ -33,14 +33,16 @@ func NewChunkRepository(db *gorm.DB) interfaces.ChunkRepository {
 }
 
 // CreateChunks creates multiple chunks in batches.
-// Uses Omit("SeqID") so GORM won't include the auto-increment column in the
-// INSERT, which avoids MySQL generating ON DUPLICATE KEY UPDATE and the
-// resulting gap-lock deadlocks under concurrent writes.
-// A deadlock retry wrapper is kept as defense-in-depth for any remaining
-// edge cases on secondary unique indexes.
+// SQLite receives explicit SeqIDs because it cannot auto-increment a non-PK
+// column. Other databases use their configured sequence/default behavior.
 func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chunk) error {
-	for _, chunk := range chunks {
+	if len(chunks) == 0 {
+		return nil
+	}
+	disabled := make([]bool, len(chunks))
+	for i, chunk := range chunks {
 		chunk.Content = common.CleanInvalidUTF8(chunk.Content)
+		disabled[i] = !chunk.IsEnabled
 	}
 
 	db := r.db.WithContext(ctx)
@@ -55,10 +57,31 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 		}
 	}
 
-	// Select("*") ensures zero-value fields (IsEnabled=false, Flags=0) are
-	// explicitly inserted, bypassing GORM's default value behavior.
-	// SeqID=0 is skipped by GORM automatically (autoIncrement tag).
-	return db.Select("*").CreateInBatches(chunks, 100).Error
+	// Select("*") preserves ordinary zero-value fields such as Flags. The
+	// default-tagged IsEnabled field needs the explicit restoration below.
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Select("*").CreateInBatches(chunks, 100).Error; err != nil {
+			return err
+		}
+
+		// GORM applies the `default:true` tag to a false bool before INSERT even
+		// with Select("*"). Restore the caller's explicit false values in the
+		// same transaction after create hooks have populated any missing IDs.
+		disabledIDs := make([]string, 0)
+		for i, chunk := range chunks {
+			if disabled[i] {
+				disabledIDs = append(disabledIDs, chunk.ID)
+				chunk.IsEnabled = false
+			}
+		}
+		if len(disabledIDs) == 0 {
+			return nil
+		}
+		if err := tx.Model(&types.Chunk{}).Where("id IN ?", disabledIDs).Update("is_enabled", false).Error; err != nil {
+			return fmt.Errorf("persist disabled chunks: %w", err)
+		}
+		return nil
+	})
 }
 
 // GetChunkByID retrieves a chunk by its ID and tenant ID

@@ -162,6 +162,6 @@ func TestDocReaderObservation_SpanMatchesParserCount(t *testing.T) {
 	).Take(&stored).Error)
 	require.Equal(t, types.SpanStatusDone, stored.Status)
 	require.Equal(t, string(types.IngestionOperationParseDocument), stored.Output["operation"])
-	require.Equal(t, parserRequests, stored.Output["request_count"])
+	require.EqualValues(t, parserRequests, stored.Output["request_count"])
 	require.Equal(t, "not_supported", stored.Output["cache_status"])
 }

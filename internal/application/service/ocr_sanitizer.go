@@ -8,11 +8,11 @@ import (
 )
 
 var (
-	htmlTagPattern       = regexp.MustCompile(`<[^>]+>`)
-	codeBlockPattern     = regexp.MustCompile("(?s)^\\s*```[a-zA-Z]*\\s*\n(.*?)\n\\s*```\\s*$")
-	htmlDocPattern       = regexp.MustCompile(`(?i)^\s*(<\!DOCTYPE|<html|<body|<div|<p[\s>]|<table|<h[1-6][\s>])`)
-	multipleNewlines     = regexp.MustCompile(`\n{3,}`)
-	knownEmptyReplies    = []string{
+	htmlTagPattern    = regexp.MustCompile(`<[^>]+>`)
+	codeBlockPattern  = regexp.MustCompile("(?s)^\\s*```[a-zA-Z]*\\s*\n(.*?)\n\\s*```\\s*$")
+	htmlDocPattern    = regexp.MustCompile(`(?i)^\s*(<\!DOCTYPE|<html|<body|<div|<p[\s>]|<table|<h[1-6][\s>])`)
+	multipleNewlines  = regexp.MustCompile(`\n{3,}`)
+	knownEmptyReplies = []string{
 		"无文字内容",
 		"无法识别",
 		"no text",
@@ -27,7 +27,11 @@ var (
 // sanitizeOCRText cleans up VLM OCR output by stripping HTML wrappers,
 // converting HTML to markdown, and filtering out useless responses.
 func sanitizeOCRText(raw string) string {
-	text := strings.TrimSpace(raw)
+	// Persist one platform-independent canonical representation. Providers may
+	// return CRLF (or lone CR) regardless of the server OS.
+	text := strings.ReplaceAll(raw, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	text = strings.TrimSpace(text)
 	if text == "" {
 		return ""
 	}

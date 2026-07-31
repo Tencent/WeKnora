@@ -55,6 +55,12 @@ func setupSpanTrackerTest(t *testing.T) (SpanTracker, *gorm.DB) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	// A SQLite :memory: database belongs to one connection. Keep the tracker
+	// repository on that connection so asynchronous span writes see the DDL.
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	require.NoError(t, db.Exec(spanTrackerTestDDL).Error)
 	// Pass nil for the heartbeat db: these tests don't exercise
 	// heartbeat side-effects (those are covered in the housekeeping

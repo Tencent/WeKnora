@@ -27,6 +27,9 @@ func newGraphExtractCacheService(t *testing.T) (*ChunkExtractService, *gorm.DB) 
 	dsn := fmt.Sprintf("file:%s?_busy_timeout=5000&_journal_mode=WAL", filepath.ToSlash(filepath.Join(t.TempDir(), "graph-cache.db")))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	require.NoError(t, db.AutoMigrate(&types.DerivedArtifact{}))
 	return &ChunkExtractService{artifactRepo: repository.NewDerivedArtifactRepository(db)}, db
 }
@@ -453,21 +456,63 @@ func (s *graphHandleModelService) GetChatModel(context.Context, string) (chat.Ch
 	return s.model, nil
 }
 
+func (*graphHandleModelService) GetModelByID(context.Context, string) (*types.Model, error) {
+	return nil, nil
+}
+
 type graphHandleEngine struct {
 	interfaces.RetrieveGraphRepository
 	mu     sync.Mutex
 	graphs []*types.GraphData
+	fail   error
 }
 
 func (e *graphHandleEngine) AddGraph(_ context.Context, _ types.NameSpace, graphs []*types.GraphData) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.fail != nil {
+		return e.fail
+	}
 	data, _ := graphExtractCandidate(graphs[0])
 	for i, node := range graphs[0].Node {
 		data.Node[i].Chunks = append([]string(nil), node.Chunks...)
 	}
 	e.graphs = append(e.graphs, data)
 	return nil
+}
+
+func TestIngestionArtifactRecovery_GraphExtractSucceededAddGraphFailed(t *testing.T) {
+	svc, db := newGraphExtractCacheService(t)
+	model := &graphObservationChat{response: `[{"entity":"Alice","entity_attributes":["person"]}]`}
+	chunks := &graphHandleChunkRepo{chunks: map[string]*types.Chunk{
+		"current-id": {ID: "current-id", TenantID: 1, KnowledgeID: "doc", KnowledgeBaseID: "kb", Content: "same durable graph content"},
+	}}
+	engine := &graphHandleEngine{fail: errors.New("graph materialization failed")}
+	svc.template = graphExtractCacheTemplate()
+	svc.chunkRepo = chunks
+	svc.knowledgeBaseRepo = &graphHandleKBRepo{kb: &types.KnowledgeBase{ID: "kb", ExtractConfig: &types.ExtractConfig{Enabled: true}, IndexingStrategy: types.IndexingStrategy{GraphEnabled: true}}}
+	svc.modelService = &graphHandleModelService{model: model}
+	svc.graphEngine = engine
+	payload, err := json.Marshal(types.ExtractChunkPayload{TenantID: 1, ChunkID: "current-id", ModelID: "model", KnowledgeID: "doc", Attempt: 1})
+	require.NoError(t, err)
+	task := asynq.NewTask(types.TypeChunkExtract, payload)
+	require.ErrorContains(t, svc.Handle(context.Background(), task), "graph materialization failed")
+	requests, _ := model.Snapshot()
+	require.Equal(t, 1, requests)
+	var artifact types.DerivedArtifact
+	require.NoError(t, db.Where("artifact_kind = ?", graphExtractArtifactKind).Take(&artifact).Error)
+	require.Equal(t, types.DerivedArtifactSucceeded, artifact.Status)
+
+	engine.mu.Lock()
+	engine.fail = nil
+	engine.mu.Unlock()
+	require.NoError(t, svc.Handle(context.Background(), task))
+	requests, _ = model.Snapshot()
+	require.Equal(t, 1, requests, "retry must hit the extraction artifact")
+	engine.mu.Lock()
+	require.Len(t, engine.graphs, 1)
+	require.Equal(t, []string{"current-id"}, engine.graphs[0].Node[0].Chunks)
+	engine.mu.Unlock()
 }
 
 type graphHandleSpanTracker struct {
