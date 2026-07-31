@@ -232,7 +232,7 @@ type WikiPageService interface {
 	// ListIssues retrieves issues for a knowledge base, optionally filtered by slug and status.
 	ListIssues(ctx context.Context, kbID string, slug string, status string) ([]*types.WikiPageIssue, error)
 	ListIssuesPage(
-		ctx context.Context, kbID, slug, status string, page, pageSize int,
+		ctx context.Context, kbID, slug, status, issueType, source string, page, pageSize int,
 	) (*types.WikiIssueListResponse, error)
 	GetIssue(ctx context.Context, kbID, issueID string) (*types.WikiPageIssue, error)
 	CountIssues(ctx context.Context, kbID, status string) (int64, error)
@@ -426,7 +426,7 @@ type WikiPageRepository interface {
 	// ListIssues retrieves issues with optional filtering by slug and status.
 	ListIssues(ctx context.Context, kbID string, slug string, status string) ([]*types.WikiPageIssue, error)
 	ListIssuesPage(
-		ctx context.Context, kbID, slug, status string, page, pageSize int,
+		ctx context.Context, kbID, slug, status, issueType, source string, page, pageSize int,
 	) ([]*types.WikiPageIssue, int64, error)
 	CountIssues(ctx context.Context, kbID, status string) (int64, error)
 	GetIssue(ctx context.Context, kbID, issueID string) (*types.WikiPageIssue, error)

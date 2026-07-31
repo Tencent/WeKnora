@@ -282,10 +282,11 @@ func (s *WikiLintService) scanWiki(
 	if err != nil {
 		return nil, fmt.Errorf("list all slugs: %w", err)
 	}
-	slugSet := make(map[string]bool, len(liveSlugs))
-	for _, slug := range liveSlugs {
-		slugSet[slug] = true
-	}
+	// Out_links are stored normalized (lowercase, spaces→hyphens) by parseOutLinks,
+	// while page rows keep the canonical slug casing from ingest. Index live pages
+	// under the same normalization so [[entity/Disco Elysium: The Final Cut]] and
+	// entity/disco-elysium:-the-final-cut resolve to the same target.
+	slugSet := wikiLintLiveSlugSet(liveSlugs)
 
 	scan := &wikiLintScan{
 		ByType:     make(map[WikiLintIssueType]int),
@@ -363,6 +364,19 @@ func (s *WikiLintService) scanWiki(
 	}
 
 	return scan, nil
+}
+
+// wikiLintLiveSlugSet indexes live KB slugs the same way parseOutLinks
+// normalizes [[wiki-link]] targets, so broken-link detection agrees with how
+// out_links are stored on each page row.
+func wikiLintLiveSlugSet(liveSlugs []string) map[string]bool {
+	set := make(map[string]bool, len(liveSlugs))
+	for _, slug := range liveSlugs {
+		if norm := normalizeSlug(slug); norm != "" {
+			set[norm] = true
+		}
+	}
+	return set
 }
 
 // scanPageDefects runs the per-page defect rules. knowledgeLive is a shared

@@ -188,7 +188,7 @@ func TestIssueUpsertDeduplicatesAndClaimIsCompareAndSwap(t *testing.T) {
 	second.LastSeenRunID = "run-two"
 	require.NoError(t, repo.UpsertLintIssue(ctx, &second))
 
-	items, total, err := repo.ListIssuesPage(ctx, issue.KnowledgeBaseID, "", "", 1, 20)
+	items, total, err := repo.ListIssuesPage(ctx, issue.KnowledgeBaseID, "", "", "", "", 1, 20)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), total)
 	require.Len(t, items, 1)

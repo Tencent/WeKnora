@@ -384,13 +384,32 @@ export function searchWikiPages(kbId: string, q: string, limit?: number) {
   return get(`/api/v1/knowledgebase/${kbId}/wiki/search?${params.toString()}`);
 }
 
-export function listWikiIssues(kbId: string, slug?: string, status?: string, page = 1, pageSize = 20) {
-  const params = new URLSearchParams();
-  if (slug) params.set('slug', slug);
-  if (status) params.set('status', status);
-  params.set('page', String(page));
-  params.set('page_size', String(pageSize));
-  return get(`/api/v1/knowledgebase/${kbId}/wiki/issues?${params.toString()}`);
+export interface WikiIssueListParams {
+  slug?: string;
+  status?: string;
+  issueType?: string;
+  source?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export function listWikiIssues(kbId: string, params: WikiIssueListParams = {}) {
+  const {
+    slug,
+    status,
+    issueType,
+    source,
+    page = 1,
+    pageSize = 20,
+  } = params;
+  const query = new URLSearchParams();
+  if (slug) query.set('slug', slug);
+  if (status) query.set('status', status);
+  if (issueType) query.set('issue_type', issueType);
+  if (source) query.set('source', source);
+  query.set('page', String(page));
+  query.set('page_size', String(pageSize));
+  return get(`/api/v1/knowledgebase/${kbId}/wiki/issues?${query.toString()}`);
 }
 
 export function updateWikiIssueStatus(kbId: string, issueId: string, status: string, summary = '') {

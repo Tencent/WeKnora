@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWikiLintTitleMatcherFindsOverlappingTitlesOnce(t *testing.T) {
@@ -52,4 +54,39 @@ func TestWikiIssueVerifierUsesTypedOrphanAndEmptyPostconditions(t *testing.T) {
 	page.Content = "这是一段超过五十个字符的内容，用来确认空页面规则按照字符而不是 UTF-8 字节数进行验证。" +
 		"修复结果必须真正达到规则阈值之后才能关闭问题。"
 	assert.NoError(t, service.verifyWikiIssueResolution(context.Background(), empty, page, attempt))
+}
+
+func TestWikiLintLiveSlugSetMatchesNormalizedOutLinks(t *testing.T) {
+	set := wikiLintLiveSlugSet([]string{
+		"entity/宝可梦传说：Z-A",
+		"entity/Disco Elysium: The Final Cut",
+	})
+	assert.True(t, set["entity/宝可梦传说：z-a"])
+	assert.True(t, set["entity/disco-elysium:-the-final-cut"])
+}
+
+func TestScanPageDefectsSkipsBrokenLinkWhenLiveSlugDiffersOnlyByNormalization(t *testing.T) {
+	svc := &WikiLintService{}
+	live := wikiLintLiveSlugSet([]string{
+		"entity/宝可梦传说：Z-A",
+		"entity/Disco Elysium: The Final Cut",
+	})
+	page := &types.WikiPage{
+		ID: "page-tga", Slug: "entity/tga", Title: "TGA", Version: 1,
+		InLinks: types.StringArray{"index"},
+		OutLinks: types.StringArray{
+			"entity/宝可梦传说：z-a",
+			"entity/disco-elysium:-the-final-cut",
+		},
+		Content: strings.Repeat("x", wikiMinContentRunes),
+	}
+	var findings []WikiLintIssue
+	emit := func(f WikiLintIssue) error {
+		findings = append(findings, f)
+		return nil
+	}
+	require.NoError(t, svc.scanPageDefects(context.Background(), page, live, nil, emit))
+	for _, f := range findings {
+		assert.NotEqual(t, LintIssueBrokenLink, f.Type, "unexpected broken link: %s", f.TargetSlug)
+	}
 }

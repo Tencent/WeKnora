@@ -1412,7 +1412,7 @@ func (s *wikiPageService) ListIssues(ctx context.Context, kbID string, slug stri
 }
 
 func (s *wikiPageService) ListIssuesPage(
-	ctx context.Context, kbID, slug, status string, page, pageSize int,
+	ctx context.Context, kbID, slug, status, issueType, source string, page, pageSize int,
 ) (*types.WikiIssueListResponse, error) {
 	if page < 1 {
 		page = 1
@@ -1423,7 +1423,7 @@ func (s *wikiPageService) ListIssuesPage(
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	items, total, err := s.repo.ListIssuesPage(ctx, kbID, slug, status, page, pageSize)
+	items, total, err := s.repo.ListIssuesPage(ctx, kbID, slug, status, issueType, source, page, pageSize)
 	if err != nil {
 		return nil, err
 	}

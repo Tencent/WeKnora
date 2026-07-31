@@ -911,9 +911,11 @@ func (h *WikiPageHandler) GetStats(c *gin.Context) {
 // @Produce      json
 // @Param        kb_id  path   string  true   "Knowledge base ID"
 // @Param        slug   query  string  false  "Filter by page slug"
-// @Param        status    query  string  false  "Filter by status (open, actionable, unresolved, ignored, resolved)"
-// @Param        page      query  int     false  "Page number (omit with page_size for legacy bare-array response)"
-// @Param        page_size query  int     false  "Page size (max 100)"
+// @Param        status     query  string  false  "Filter by status (open, actionable, unresolved, ignored, resolved)"
+// @Param        issue_type query  string  false  "Filter by issue type (e.g. broken_link, orphan_page)"
+// @Param        source     query  string  false  "Filter by source bucket (lint, agent)"
+// @Param        page       query  int     false  "Page number (omit with page_size for legacy bare-array response)"
+// @Param        page_size  query  int     false  "Page size (max 100)"
 // @Success      200  {object}  types.WikiIssueListResponse
 // @Security     Bearer
 // @Router       /knowledgebase/{kb_id}/wiki/issues [get]
@@ -941,7 +943,9 @@ func (h *WikiPageHandler) ListIssues(c *gin.Context) {
 
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	issues, err := h.wikiService.ListIssuesPage(c.Request.Context(), kbID, slug, status, page, pageSize)
+	issueType := c.Query("issue_type")
+	source := c.Query("source")
+	issues, err := h.wikiService.ListIssuesPage(c.Request.Context(), kbID, slug, status, issueType, source, page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

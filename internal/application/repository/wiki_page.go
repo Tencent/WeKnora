@@ -1382,7 +1382,7 @@ func (r *wikiPageRepository) ListIssues(ctx context.Context, kbID string, slug s
 }
 
 func (r *wikiPageRepository) ListIssuesPage(
-	ctx context.Context, kbID, slug, status string, page, pageSize int,
+	ctx context.Context, kbID, slug, status, issueType, source string, page, pageSize int,
 ) ([]*types.WikiPageIssue, int64, error) {
 	if page < 1 {
 		page = 1
@@ -1397,6 +1397,15 @@ func (r *wikiPageRepository) ListIssuesPage(
 		Where("knowledge_base_id = ?", kbID)
 	if slug != "" {
 		query = query.Where("slug = ?", slug)
+	}
+	if issueType != "" {
+		query = query.Where("issue_type = ?", issueType)
+	}
+	switch source {
+	case "lint":
+		query = query.Where("(source = ? OR reported_by = ?)", "lint", "wiki-lint")
+	case "agent":
+		query = query.Where("reported_by = ?", "wiki-researcher-agent")
 	}
 	if statuses := wikiIssueStatusesForFilter(status); len(statuses) > 0 {
 		query = query.Where("status IN ?", statuses)

@@ -40,7 +40,7 @@ func TestUpsertLintIssuesBatchMatchesSingleRowSemantics(t *testing.T) {
 	}
 	require.NoError(t, repo.UpsertLintIssues(ctx, first))
 
-	_, total, err := repo.ListIssuesPage(ctx, kbID, "", "", 1, 20)
+	_, total, err := repo.ListIssuesPage(ctx, kbID, "", "", "", "", 1, 20)
 	require.NoError(t, err)
 	require.Equal(t, int64(3), total)
 
@@ -55,7 +55,7 @@ func TestUpsertLintIssuesBatchMatchesSingleRowSemantics(t *testing.T) {
 	}
 	require.NoError(t, repo.UpsertLintIssues(ctx, second))
 
-	items, total, err := repo.ListIssuesPage(ctx, kbID, "", "", 1, 20)
+	items, total, err := repo.ListIssuesPage(ctx, kbID, "", "", "", "", 1, 20)
 	require.NoError(t, err)
 	require.Equal(t, int64(3), total, "re-detection must update, not duplicate")
 	for _, item := range items {
@@ -85,7 +85,7 @@ func TestUpsertLintIssueRevivesSoftDeletedFinding(t *testing.T) {
 	require.NoError(t, repo.UpsertLintIssue(ctx, issue))
 	require.NoError(t, db.Delete(&types.WikiPageIssue{}, "id = ?", issue.ID).Error)
 
-	_, total, err := repo.ListIssuesPage(ctx, kbID, "", "", 1, 20)
+	_, total, err := repo.ListIssuesPage(ctx, kbID, "", "", "", "", 1, 20)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), total)
 
@@ -93,7 +93,7 @@ func TestUpsertLintIssueRevivesSoftDeletedFinding(t *testing.T) {
 	again.ID = "issue-revived"
 	require.NoError(t, repo.UpsertLintIssue(ctx, again))
 
-	items, total, err := repo.ListIssuesPage(ctx, kbID, "", "", 1, 20)
+	items, total, err := repo.ListIssuesPage(ctx, kbID, "", "", "", "", 1, 20)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), total, "a re-detected finding must become visible again")
 	assert.Equal(t, issue.ID, items[0].ID)

@@ -35,20 +35,24 @@
               </template>
             </t-popup>
           </div>
-          <div v-if="stats && stats.pending_issues > 0" class="wiki-global-issues-status graph-issues-badge"
-            @click="showGlobalIssuesDrawer = true">
-            <t-icon name="error-circle" style="color: var(--td-warning-color);" />
-            <span class="queue-text">{{ $t('knowledgeEditor.wikiBrowser.globalIssuesCount', {
-              count:
-                stats.pending_issues
-            })
-            }}</span>
+          <div
+            v-if="showHealthEntry"
+            :class="['wiki-health-entry', { 'wiki-health-entry--alert': healthEntryAlert, 'wiki-health-entry--graph': true }]"
+            role="button"
+            tabindex="0"
+            @click="openHealthDrawer"
+            @keydown.enter.prevent="openHealthDrawer"
+            @keydown.space.prevent="openHealthDrawer"
+          >
+            <div class="wiki-health-entry-main">
+              <t-icon :name="healthEntryAlert ? 'error-circle' : 'task-checked'" class="wiki-health-entry-icon" />
+              <div class="wiki-health-entry-text">
+                <span class="wiki-health-entry-title">{{ healthEntryTitle }}</span>
+                <span v-if="healthEntrySubtitle" class="wiki-health-entry-sub">{{ healthEntrySubtitle }}</span>
+              </div>
+            </div>
+            <t-icon name="chevron-right" class="wiki-health-entry-arrow" />
           </div>
-          <t-button v-if="props.canEdit" size="small" variant="outline" theme="default"
-            @click="showGlobalIssuesDrawer = true">
-            <template #icon><t-icon name="check-circle" /></template>
-            {{ $t('knowledgeEditor.wikiBrowser.healthCheck') }}
-          </t-button>
         </div>
 
         <!-- Legend Overlay -->
@@ -173,20 +177,24 @@
               count: stats.pending_tasks || 0
             }) }}</span>
           </div>
-          <!-- Global Issues -->
-          <div v-if="stats && stats.pending_issues > 0" class="wiki-global-issues-status"
-            @click="showGlobalIssuesDrawer = true">
-            <t-icon name="error-circle" style="color: var(--td-warning-color);" />
-            <span class="queue-text">{{ $t('knowledgeEditor.wikiBrowser.globalIssuesCount', {
-              count:
-                stats.pending_issues
-            }) }}</span>
+          <div
+            v-if="showHealthEntry"
+            :class="['wiki-health-entry', { 'wiki-health-entry--alert': healthEntryAlert }]"
+            role="button"
+            tabindex="0"
+            @click="openHealthDrawer"
+            @keydown.enter.prevent="openHealthDrawer"
+            @keydown.space.prevent="openHealthDrawer"
+          >
+            <div class="wiki-health-entry-main">
+              <t-icon :name="healthEntryAlert ? 'error-circle' : 'task-checked'" class="wiki-health-entry-icon" />
+              <div class="wiki-health-entry-text">
+                <span class="wiki-health-entry-title">{{ healthEntryTitle }}</span>
+                <span v-if="healthEntrySubtitle" class="wiki-health-entry-sub">{{ healthEntrySubtitle }}</span>
+              </div>
+            </div>
+            <t-icon name="chevron-right" class="wiki-health-entry-arrow" />
           </div>
-          <t-button v-if="props.canEdit" size="small" variant="text" theme="default"
-            @click="showGlobalIssuesDrawer = true">
-            <template #icon><t-icon name="check-circle" /></template>
-            {{ $t('knowledgeEditor.wikiBrowser.healthCheck') }}
-          </t-button>
           <t-input v-model="searchQuery" :placeholder="$t('knowledgeEditor.wikiBrowser.searchPlaceholder')" clearable
             @enter="doSearch" @clear="searchResults = null">
             <template #prefixIcon><t-icon name="search" /></template>
@@ -648,76 +656,242 @@
     </Teleport>
 
     <!-- Global Issues Drawer -->
-    <t-drawer v-model:visible="showGlobalIssuesDrawer" :header="$t('knowledgeEditor.wikiBrowser.globalIssuesTitle')"
-      size="480px" :footer="false" class="wiki-global-issues-drawer">
-      <div class="wiki-lint-toolbar">
-        <div class="wiki-lint-state">
-          <span>{{ lintRun ? lintRunStatusLabel(lintRun.status) : $t('knowledgeEditor.wikiBrowser.lintNotRun') }}</span>
-          <span v-if="lintRun && (lintRun.status === 'queued' || lintRun.status === 'running')">
-            {{ lintRun.progress }}%
+    <SettingDrawer
+      v-model:visible="showGlobalIssuesDrawer"
+      :title="$t('knowledgeEditor.wikiBrowser.globalIssuesTitle')"
+      icon="task-checked"
+      width="560px"
+      :min-width="480"
+      :max-width="960"
+      resizable
+      storage-key="setting-drawer:width:wiki-health"
+      hide-footer
+      class="wiki-health-drawer"
+    >
+      <template #headerIcon>
+        <t-icon :name="lintRunBusy ? 'loading' : 'task-checked'" />
+      </template>
+      <template #subtitle>
+        <div class="wiki-health-header-meta">
+          <span class="wiki-health-header-status" :class="{ 'is-error': lintRun?.status === 'failed' }">
+            {{ healthDrawerLintSubtitle }}
           </span>
-          <span v-else-if="lintRun?.status === 'completed'">
-            {{ $t('knowledgeEditor.wikiBrowser.lintFindings', { count: lintRun.finding_count }) }}
-          </span>
-          <span v-else-if="lintRun?.error_message" class="wiki-lint-error">{{ lintRun.error_message }}</span>
+          <t-progress
+            v-if="lintRunBusy"
+            :percentage="lintRun?.progress || 0"
+            theme="plump"
+            size="small"
+            class="wiki-health-header-progress"
+          />
         </div>
-        <t-button v-if="props.canEdit" size="small" theme="primary" :loading="lintRunBusy"
-          :disabled="lintRunBusy" @click="runWikiLint">
-          {{ $t('knowledgeEditor.wikiBrowser.runLint') }}
-        </t-button>
-      </div>
-      <div class="wiki-issue-popup-list">
-        <div v-for="issue in globalIssues" :key="issue.id" class="wiki-issue-popup-item">
-          <div class="wiki-issue-popup-main">
-            <div class="wiki-issue-popup-tags">
-              <t-tag v-if="issue.issue_type === 'mixed_entities'" theme="warning" variant="light" size="small">{{
-                $t('knowledgeEditor.wikiBrowser.issueMixed') }}</t-tag>
-              <t-tag v-else-if="issue.issue_type === 'contradictory_facts'" theme="danger" variant="light"
-                size="small">{{
-                  $t('knowledgeEditor.wikiBrowser.issueConflict') }}</t-tag>
-              <t-tag v-else-if="issue.issue_type === 'out_of_date'" theme="default" variant="light" size="small">{{
-                $t('knowledgeEditor.wikiBrowser.issueOutdated') }}</t-tag>
-              <t-tag v-else theme="primary" variant="light" size="small">{{
-                $t('knowledgeEditor.wikiBrowser.issueAttention')
-              }}</t-tag>
+      </template>
+
+      <div class="wiki-health-shell">
+        <section class="wiki-health-controls">
+        <div class="wiki-health-controls-head">
+          <div class="wiki-health-controls-left">
+            <div class="wiki-health-controls-title">
+              <span>{{ $t('knowledgeEditor.wikiBrowser.healthDrawerIssuesSection') }}</span>
+              <span v-if="globalIssueTotal > 0" class="wiki-health-section-count">{{ globalIssueTotal }}</span>
             </div>
-            <div class="wiki-issue-popup-desc">
-              <div style="font-weight: 500; margin-bottom: 4px; color: var(--td-brand-color); cursor: pointer;"
-                @click="navigateToSlugAndFix(issue.slug)">
-                <t-icon name="link" size="12px" /> {{ $t('knowledgeEditor.wikiBrowser.issuePagePrefix') }}{{
-                  slugDisplayName(issue.slug) }}
-              </div>
-              {{ issue.description }}
+            <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.runLintTooltip')" placement="top">
+              <t-button
+                v-if="props.canEdit"
+                size="small"
+                variant="outline"
+                :loading="lintRunBusy"
+                :disabled="lintRunBusy"
+                class="wiki-health-scan-btn"
+                @click="runWikiLint"
+              >
+                {{ $t('knowledgeEditor.wikiBrowser.runLint') }}
+              </t-button>
+            </t-tooltip>
+          </div>
+          <div v-if="props.canEdit && globalIssues.length > 0" class="wiki-health-batch-bar">
+            <t-checkbox
+              size="small"
+              :checked="healthIssueSelectAll"
+              :indeterminate="healthIssueSelectIndeterminate"
+              @change="toggleHealthIssueSelectAll"
+            >
+              {{ $t('knowledgeEditor.wikiBrowser.healthDrawerSelectAll') }}
+            </t-checkbox>
+            <span class="wiki-health-batch-divider" aria-hidden="true" />
+            <button
+              type="button"
+              class="wiki-health-batch-btn"
+              :disabled="healthIssueSelectedIds.length === 0 || healthBatchBusy"
+              @click="batchIgnoreSelectedIssues"
+            >
+              <t-icon name="close-circle" />
+              <span>{{ $t('knowledgeEditor.wikiBrowser.healthDrawerBatchIgnore') }}</span>
+              <em v-if="healthIssueSelectedIds.length > 0">{{ healthIssueSelectedIds.length }}</em>
+            </button>
+            <button
+              type="button"
+              class="wiki-health-batch-btn wiki-health-batch-btn--primary"
+              :disabled="healthIssueSelectedIds.length === 0 || healthBatchBusy || !hasRepairableSelected"
+              @click="batchRepairSelectedIssues"
+            >
+              <t-icon name="tools" />
+              <span>{{ $t('knowledgeEditor.wikiBrowser.healthDrawerBatchRepair') }}</span>
+            </button>
+            <button
+              type="button"
+              class="wiki-health-batch-btn"
+              :disabled="healthBatchBusy || globalIssueTotal === 0"
+              @click="confirmIgnoreAllFilteredIssues"
+            >
+              <t-icon name="clear" />
+              <span>{{ $t('knowledgeEditor.wikiBrowser.healthDrawerBatchIgnoreAll') }}</span>
+            </button>
+          </div>
+        </div>
+        <p class="wiki-health-scan-hint">{{ $t('knowledgeEditor.wikiBrowser.healthDrawerScanHint') }}</p>
+
+        <div class="wiki-health-filters">
+          <div class="wiki-health-filter-row">
+            <span class="wiki-health-filter-label">{{ $t('knowledgeEditor.wikiBrowser.healthDrawerFilterType') }}</span>
+            <div class="wiki-health-filter-chips">
+              <button
+                v-for="opt in healthIssueTypeOptions"
+                :key="`type-${opt.value || 'all'}`"
+                type="button"
+                class="wiki-health-filter-chip"
+                :class="{ 'is-active': globalIssueTypeFilter === opt.value }"
+                @click.stop="setGlobalIssueTypeFilter(opt.value)"
+              >
+                {{ opt.label }}
+              </button>
             </div>
-            <div class="wiki-issue-popup-meta">
-              <span class="wiki-issue-popup-reporter">
-                {{ issue.reported_by === 'wiki-researcher-agent' ? $t('knowledgeEditor.wikiBrowser.issueAiLinter') :
-                  $t('knowledgeEditor.wikiBrowser.issueReportedBy', { reporter: issue.reported_by }) }}
-              </span>
-              <div class="wiki-issue-popup-actions">
-                <span class="wiki-issue-popup-action" @click="navigateToSlugAndFix(issue.slug)"
-                  style="margin-right: 12px; font-weight: 500;">
-                  <t-icon name="arrow-right-circle" style="margin-right: 4px;" />{{
-                    $t('knowledgeEditor.wikiBrowser.issueGoFix') }}
-                </span>
-                <span class="wiki-issue-popup-action" style="color: var(--td-text-color-placeholder);"
-                  @click="handleGlobalIssueIgnore(issue.id)">{{ $t('knowledgeEditor.wikiBrowser.issueIgnore') }}</span>
-              </div>
+          </div>
+          <div class="wiki-health-filter-row">
+            <span class="wiki-health-filter-label">{{ $t('knowledgeEditor.wikiBrowser.healthDrawerFilterSource') }}</span>
+            <div class="wiki-health-filter-chips">
+              <button
+                v-for="opt in healthIssueSourceOptions"
+                :key="`source-${opt.value || 'all'}`"
+                type="button"
+                class="wiki-health-filter-chip"
+                :class="{ 'is-active': globalIssueSourceFilter === opt.value }"
+                @click.stop="setGlobalIssueSourceFilter(opt.value)"
+              >
+                {{ opt.label }}
+              </button>
             </div>
           </div>
         </div>
-        <div v-if="globalIssues.length === 0"
-          style="padding: 40px; text-align: center; color: var(--td-text-color-placeholder);">
-          {{ $t('knowledgeEditor.wikiBrowser.globalIssuesEmpty') }}
+      </section>
+
+      <div
+        ref="healthIssuesScrollRef"
+        class="wiki-health-issues-scroll"
+        @scroll="onHealthIssuesScroll"
+      >
+        <div v-if="globalIssuesLoading && globalIssues.length === 0" class="wiki-health-loading">
+          <t-loading size="small" />
         </div>
-        <t-button v-else-if="globalIssues.length < globalIssueTotal" variant="outline" theme="default"
-          :loading="globalIssuesLoading" @click="loadMoreGlobalIssues">
-          {{ $t('knowledgeEditor.wikiBrowser.loadMoreIssues', {
-            loaded: globalIssues.length, total: globalIssueTotal
-          }) }}
-        </t-button>
+
+        <div v-else-if="globalIssues.length === 0" class="wiki-health-empty">
+          <div class="wiki-health-empty-icon">
+            <t-icon name="check-circle" />
+          </div>
+          <div class="wiki-health-empty-title">{{ $t('knowledgeEditor.wikiBrowser.healthDrawerEmptyTitle') }}</div>
+          <div class="wiki-health-empty-hint">{{ $t('knowledgeEditor.wikiBrowser.healthDrawerEmptyHint') }}</div>
+        </div>
+
+        <div v-else class="wiki-health-issue-list">
+          <article
+            v-for="issue in globalIssues"
+            :key="issue.id"
+            class="wiki-health-issue-row"
+            :class="{ 'is-selected': healthIssueSelectedIds.includes(issue.id) }"
+          >
+            <div class="wiki-health-issue-row__inner">
+              <div class="wiki-health-issue-row__head">
+                <t-checkbox
+                  v-if="props.canEdit"
+                  class="wiki-health-issue-row__check"
+                  :checked="healthIssueSelectedIds.includes(issue.id)"
+                  @change="(checked: boolean) => toggleHealthIssueSelected(issue.id, checked)"
+                />
+                <button
+                  type="button"
+                  class="wiki-health-issue-row__title"
+                  @click="navigateToSlugAndFix(issue.slug)"
+                >
+                  {{ slugDisplayName(issue.slug) }}
+                </button>
+                <div class="wiki-health-issue-row__actions">
+                  <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.issueGoFix')" placement="top">
+                    <button
+                      type="button"
+                      class="wiki-health-row-btn"
+                      :aria-label="$t('knowledgeEditor.wikiBrowser.issueGoFix')"
+                      @click.stop="navigateToSlugAndFix(issue.slug)"
+                    >
+                      <t-icon name="jump" />
+                    </button>
+                  </t-tooltip>
+                  <t-tooltip
+                    v-if="props.canEdit && issueCanAutoRepair(issue)"
+                    :content="$t('knowledgeEditor.wikiBrowser.issueFixBtn')"
+                    placement="top"
+                  >
+                    <button
+                      type="button"
+                      class="wiki-health-row-btn"
+                      :aria-label="$t('knowledgeEditor.wikiBrowser.issueFixBtn')"
+                      @click.stop="startGlobalIssueRepair(issue)"
+                    >
+                      <t-icon name="tools" />
+                    </button>
+                  </t-tooltip>
+                  <t-tooltip
+                    v-if="props.canEdit"
+                    :content="$t('knowledgeEditor.wikiBrowser.issueIgnore')"
+                    placement="top"
+                  >
+                    <button
+                      type="button"
+                      class="wiki-health-row-btn wiki-health-row-btn--muted"
+                      :aria-label="$t('knowledgeEditor.wikiBrowser.issueIgnore')"
+                      @click.stop="handleGlobalIssueIgnore(issue.id)"
+                    >
+                      <t-icon name="close" />
+                    </button>
+                  </t-tooltip>
+                </div>
+              </div>
+              <p class="wiki-health-issue-row__desc">{{ issue.description }}</p>
+              <div class="wiki-health-issue-row__meta">
+                <span
+                  class="wiki-health-issue-row__type"
+                  :class="`is-${wikiIssueTypeMeta(issue).theme}`"
+                >
+                  {{ wikiIssueTypeMeta(issue).label }}
+                </span>
+                <span class="wiki-health-issue-row__sep" aria-hidden="true">·</span>
+                <span class="wiki-health-issue-row__source">{{ wikiIssueSourceLabel(issue) }}</span>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <div v-if="globalIssuesLoading && globalIssues.length > 0" class="wiki-health-loading-more">
+          <t-loading size="small" />
+          <span>{{ $t('knowledgeEditor.wikiBrowser.healthDrawerLoadingMore') }}</span>
+        </div>
+        <p
+          v-else-if="globalIssues.length > 0 && !globalIssueHasMore"
+          class="wiki-health-end-hint"
+        >
+          {{ $t('knowledgeEditor.wikiBrowser.healthDrawerAllLoaded', { count: globalIssues.length }) }}
+        </p>
       </div>
-    </t-drawer>
+      </div>
+    </SettingDrawer>
 
     <!-- Fix Chat Drawer -->
     <t-drawer v-model:visible="showFixDrawer" :header="$t('knowledgeEditor.wikiBrowser.fixAssistantTitle')" size="700px"
@@ -804,12 +978,13 @@ import { ref, computed, reactive, onMounted, onUnmounted, watch, nextTick } from
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { RecycleScroller } from 'vue-virtual-scroller'
 import { hydrateProtectedFileImages, sanitizeMarkdownHTML } from '@/utils/security'
 import picturePreview from '@/components/picture-preview.vue'
 import WikiFolderActions from './WikiFolderActions.vue'
 import WikiRevisionDrawer from './WikiRevisionDrawer.vue'
+import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import {
   expandedWikiDirectoryPaths,
   expandWikiDirectoryPath,
@@ -986,6 +1161,12 @@ const globalIssues = ref<WikiPageIssue[]>([])
 const globalIssuePage = ref(1)
 const globalIssueTotal = ref(0)
 const globalIssuesLoading = ref(false)
+const globalIssueTypeFilter = ref('')
+const globalIssueSourceFilter = ref('')
+const healthIssueSelectedIds = ref<string[]>([])
+const healthBatchBusy = ref(false)
+const healthIssuesScrollRef = ref<HTMLElement | null>(null)
+let globalIssuesLoadSeq = 0
 const lintRun = ref<WikiLintRun | null>(null)
 const currentFixSessionId = ref('')
 const currentRepairAttempt = ref<WikiRepairAttempt | null>(null)
@@ -1016,18 +1197,123 @@ const GRAPH_OVERVIEW_LIMIT = 500
 const GRAPH_EGO_LIMIT = 500
 const GRAPH_EGO_DEFAULT_DEPTH = 1
 
-function issueItems(response: any): WikiPageIssue[] {
-  const data = response?.data ?? response
-  if (Array.isArray(data)) return data
-  return Array.isArray(data?.items) ? data.items : []
+function issueItems(response: unknown): WikiPageIssue[] {
+  if (Array.isArray(response)) return response
+  const payload = response as { items?: WikiPageIssue[] } | null | undefined
+  if (Array.isArray(payload?.items)) return payload.items
+  return []
 }
 
-function issueTotal(response: any): number {
-  const data = response?.data ?? response
-  return Number(data?.total ?? (Array.isArray(data) ? data.length : 0))
+function issueTotal(response: unknown): number {
+  if (Array.isArray(response)) return response.length
+  const payload = response as { total?: number; items?: WikiPageIssue[] } | null | undefined
+  const raw = payload?.total
+  if (raw != null) return Number(raw) || 0
+  if (Array.isArray(payload?.items)) return payload.items.length
+  return 0
+}
+
+function globalIssueListParams(page: number, pageSize: number) {
+  return {
+    status: 'actionable' as const,
+    issueType: globalIssueTypeFilter.value || undefined,
+    source: globalIssueSourceFilter.value || undefined,
+    page,
+    pageSize,
+  }
+}
+
+async function fetchAllMatchingIssueIds(): Promise<string[]> {
+  const ids: string[] = []
+  let page = 1
+  let total = 0
+  do {
+    const res = await listWikiIssues(props.knowledgeBaseId, globalIssueListParams(page, 100))
+    const items = issueItems(res)
+    total = issueTotal(res)
+    ids.push(...items.map((item) => item.id))
+    if (items.length === 0) break
+    page += 1
+  } while (ids.length < total)
+  return ids
 }
 
 const lintRunBusy = computed(() => lintRun.value?.status === 'queued' || lintRun.value?.status === 'running')
+
+const showHealthEntry = computed(() => props.canEdit || (stats.value?.pending_issues ?? 0) > 0)
+const healthEntryAlert = computed(() => (stats.value?.pending_issues ?? 0) > 0)
+const healthEntryTitle = computed(() => {
+  if (healthEntryAlert.value) {
+    return t('knowledgeEditor.wikiBrowser.globalIssuesCount', { count: stats.value!.pending_issues })
+  }
+  return t('knowledgeEditor.wikiBrowser.healthCheck')
+})
+const healthEntrySubtitle = computed(() => {
+  if (healthEntryAlert.value) {
+    return t('knowledgeEditor.wikiBrowser.healthCheckOpenHint')
+  }
+  if (lintRunBusy.value && lintRun.value) {
+    const label = lintRunStatusLabel(lintRun.value.status)
+    return lintRun.value.progress > 0 ? `${label} · ${lintRun.value.progress}%` : label
+  }
+  if (lintRun.value?.status === 'completed') {
+    return t('knowledgeEditor.wikiBrowser.lintFindings', { count: lintRun.value.finding_count })
+  }
+  if (lintRun.value?.status === 'failed') {
+    return lintRun.value.error_message || t('knowledgeEditor.wikiBrowser.lintFailed')
+  }
+  return t('knowledgeEditor.wikiBrowser.lintNotRun')
+})
+
+function openHealthDrawer() {
+  showGlobalIssuesDrawer.value = true
+}
+
+const healthDrawerLintSubtitle = computed(() => {
+  if (lintRunBusy.value && lintRun.value) {
+    return t('knowledgeEditor.wikiBrowser.lintRunning')
+  }
+  if (lintRun.value?.status === 'completed') {
+    return t('knowledgeEditor.wikiBrowser.lintFindings', { count: lintRun.value.finding_count })
+  }
+  if (lintRun.value?.status === 'failed') {
+    return lintRun.value.error_message || t('knowledgeEditor.wikiBrowser.lintFailed')
+  }
+  if (lintRun.value?.status === 'queued') {
+    return t('knowledgeEditor.wikiBrowser.lintQueued')
+  }
+  return t('knowledgeEditor.wikiBrowser.healthDrawerDesc')
+})
+
+type WikiIssueTagTheme = 'default' | 'primary' | 'warning' | 'danger' | 'success'
+
+function wikiIssueTypeMeta(issue: WikiPageIssue): { label: string; theme: WikiIssueTagTheme } {
+  const presets: Record<string, { key: string; theme: WikiIssueTagTheme }> = {
+    mixed_entities: { key: 'issueMixed', theme: 'warning' },
+    contradictory_facts: { key: 'issueConflict', theme: 'danger' },
+    out_of_date: { key: 'issueOutdated', theme: 'default' },
+    broken_link: { key: 'issueBrokenLink', theme: 'danger' },
+    orphan_page: { key: 'issueOrphanPage', theme: 'warning' },
+    empty_content: { key: 'issueEmptyContent', theme: 'warning' },
+    stale_ref: { key: 'issueStaleRef', theme: 'danger' },
+    missing_cross_ref: { key: 'issueMissingCrossRef', theme: 'primary' },
+  }
+  const preset = presets[issue.issue_type] || { key: 'issueAttention', theme: 'primary' as const }
+  return {
+    label: t(`knowledgeEditor.wikiBrowser.${preset.key}`),
+    theme: preset.theme,
+  }
+}
+
+function wikiIssueSourceLabel(issue: WikiPageIssue): string {
+  if (issue.source === 'lint' || issue.reported_by === 'wiki-lint') {
+    return t('knowledgeEditor.wikiBrowser.issueLintScan')
+  }
+  if (issue.reported_by === 'wiki-researcher-agent') {
+    return t('knowledgeEditor.wikiBrowser.issueAiLinter')
+  }
+  return t('knowledgeEditor.wikiBrowser.issueReportedBy', { reporter: issue.reported_by })
+}
 
 function lintRunStatusLabel(status: string) {
   const labels: Record<string, string> = {
@@ -1039,23 +1325,195 @@ function lintRunStatusLabel(status: string) {
   return labels[status] || status
 }
 
-async function loadGlobalIssues(reset = true) {
-  if (globalIssuesLoading.value) return
+async function loadGlobalIssues(reset = true, bumpSeq = true) {
+  if (!reset && globalIssuesLoading.value) return
+  if (reset) {
+    if (bumpSeq) globalIssuesLoadSeq += 1
+    globalIssues.value = []
+  }
+  const seq = globalIssuesLoadSeq
   globalIssuesLoading.value = true
   try {
     const page = reset ? 1 : globalIssuePage.value + 1
-    const res = await listWikiIssues(props.knowledgeBaseId, '', 'actionable', page, 50)
+    const res = await listWikiIssues(props.knowledgeBaseId, globalIssueListParams(page, 50))
+    if (seq !== globalIssuesLoadSeq) return
     const items = issueItems(res)
     globalIssues.value = reset ? items : [...globalIssues.value, ...items]
     globalIssuePage.value = page
     globalIssueTotal.value = issueTotal(res)
+    if (reset) {
+      healthIssueSelectedIds.value = []
+      if (healthIssuesScrollRef.value) {
+        healthIssuesScrollRef.value.scrollTop = 0
+      }
+    }
+  } catch (e) {
+    console.error('Failed to load global wiki issues:', e)
+    if (reset) {
+      globalIssues.value = []
+      globalIssueTotal.value = 0
+    }
   } finally {
-    globalIssuesLoading.value = false
+    if (seq === globalIssuesLoadSeq) {
+      globalIssuesLoading.value = false
+    }
   }
 }
 
-function loadMoreGlobalIssues() {
-  return loadGlobalIssues(false)
+function setGlobalIssueTypeFilter(value: string) {
+  if (globalIssueTypeFilter.value === value) return
+  globalIssueTypeFilter.value = value
+  void reloadGlobalIssuesForFilters()
+}
+
+function setGlobalIssueSourceFilter(value: string) {
+  if (globalIssueSourceFilter.value === value) return
+  globalIssueSourceFilter.value = value
+  void reloadGlobalIssuesForFilters()
+}
+
+async function reloadGlobalIssuesForFilters() {
+  globalIssuesLoadSeq += 1
+  globalIssues.value = []
+  await loadGlobalIssues(true, false)
+}
+
+function maybeLoadMoreGlobalIssues() {
+  const el = healthIssuesScrollRef.value
+  if (!el || globalIssuesLoading.value || !globalIssueHasMore.value) return
+  // Only paginate after the list overflows and the user scrolls near the bottom.
+  if (el.scrollHeight <= el.clientHeight + 1) return
+  const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 96
+  if (nearBottom) {
+    void loadGlobalIssues(false)
+  }
+}
+
+function onHealthIssuesScroll() {
+  maybeLoadMoreGlobalIssues()
+}
+
+const globalIssueHasMore = computed(() => globalIssues.value.length < globalIssueTotal.value)
+
+const healthIssueTypeOptions = computed(() => {
+  const types = [
+    'broken_link', 'orphan_page', 'empty_content', 'stale_ref', 'missing_cross_ref',
+    'mixed_entities', 'contradictory_facts', 'out_of_date',
+  ]
+  return [
+    { label: t('knowledgeEditor.wikiBrowser.healthDrawerFilterTypeAll'), value: '' },
+    ...types.map((value) => ({
+      label: wikiIssueTypeMeta({ issue_type: value } as WikiPageIssue).label,
+      value,
+    })),
+  ]
+})
+
+const healthIssueSourceOptions = computed(() => [
+  { label: t('knowledgeEditor.wikiBrowser.healthDrawerFilterSourceAll'), value: '' },
+  { label: t('knowledgeEditor.wikiBrowser.healthDrawerFilterSourceLint'), value: 'lint' },
+  { label: t('knowledgeEditor.wikiBrowser.healthDrawerFilterSourceAgent'), value: 'agent' },
+])
+
+const healthIssueSelectAll = computed(
+  () => globalIssues.value.length > 0 && healthIssueSelectedIds.value.length === globalIssues.value.length,
+)
+
+const healthIssueSelectIndeterminate = computed(
+  () => healthIssueSelectedIds.value.length > 0 && !healthIssueSelectAll.value,
+)
+
+const hasRepairableSelected = computed(() =>
+  globalIssues.value.some(
+    (issue) => healthIssueSelectedIds.value.includes(issue.id) && issueCanAutoRepair(issue),
+  ),
+)
+
+function issueCanAutoRepair(issue: WikiPageIssue): boolean {
+  return issue.repair_mode === 'deterministic' || issue.repair_mode === 'agent'
+}
+
+function toggleHealthIssueSelected(issueId: string, checked: boolean) {
+  if (checked) {
+    if (!healthIssueSelectedIds.value.includes(issueId)) {
+      healthIssueSelectedIds.value = [...healthIssueSelectedIds.value, issueId]
+    }
+    return
+  }
+  healthIssueSelectedIds.value = healthIssueSelectedIds.value.filter((id) => id !== issueId)
+}
+
+function toggleHealthIssueSelectAll(checked: boolean) {
+  healthIssueSelectedIds.value = checked ? globalIssues.value.map((issue) => issue.id) : []
+}
+
+async function batchIgnoreIssueIds(ids: string[]) {
+  if (ids.length === 0) return
+  healthBatchBusy.value = true
+  try {
+    const chunkSize = 10
+    for (let i = 0; i < ids.length; i += chunkSize) {
+      const chunk = ids.slice(i, i + chunkSize)
+      await Promise.all(
+        chunk.map((id) => updateWikiIssueStatus(
+          props.knowledgeBaseId,
+          id,
+          'ignored',
+          'Ignored by a Wiki editor.',
+        )),
+      )
+    }
+    healthIssueSelectedIds.value = healthIssueSelectedIds.value.filter((id) => !ids.includes(id))
+    await Promise.all([loadGlobalIssues(true), loadStats()])
+    MessagePlugin.success(t('knowledgeEditor.wikiBrowser.healthDrawerBatchIgnoreDone', { count: ids.length }))
+  } catch (e) {
+    console.error('Failed to batch ignore wiki issues:', e)
+    MessagePlugin.error(t('knowledgeEditor.wikiBrowser.healthDrawerBatchIgnoreFailed'))
+  } finally {
+    healthBatchBusy.value = false
+  }
+}
+
+function batchIgnoreSelectedIssues() {
+  return batchIgnoreIssueIds([...healthIssueSelectedIds.value])
+}
+
+function confirmIgnoreAllFilteredIssues() {
+  const count = globalIssueTotal.value
+  if (count === 0) return
+  const dialog = DialogPlugin.confirm({
+    header: t('knowledgeEditor.wikiBrowser.healthDrawerIgnoreAllConfirmTitle'),
+    body: t('knowledgeEditor.wikiBrowser.healthDrawerIgnoreAllConfirmBody', { count }),
+    confirmBtn: t('knowledgeEditor.wikiBrowser.healthDrawerBatchIgnoreAll'),
+    cancelBtn: t('common.cancel'),
+    onConfirm: async () => {
+      dialog.hide()
+      try {
+        const ids = await fetchAllMatchingIssueIds()
+        await batchIgnoreIssueIds(ids)
+      } catch (e) {
+        console.error('Failed to ignore all filtered wiki issues:', e)
+        MessagePlugin.error(t('knowledgeEditor.wikiBrowser.healthDrawerBatchIgnoreFailed'))
+      }
+    },
+  })
+}
+
+async function batchRepairSelectedIssues() {
+  const selected = globalIssues.value.filter(
+    (issue) => healthIssueSelectedIds.value.includes(issue.id) && issueCanAutoRepair(issue),
+  )
+  if (selected.length === 0) return
+  showGlobalIssuesDrawer.value = false
+  await startIssueRepair(selected[0])
+  if (selected.length > 1) {
+    MessagePlugin.info(t('knowledgeEditor.wikiBrowser.healthDrawerBatchRepairHint', { count: selected.length }))
+  }
+}
+
+async function startGlobalIssueRepair(issue: WikiPageIssue) {
+  showGlobalIssuesDrawer.value = false
+  await startIssueRepair(issue)
 }
 
 let lintPollTimer: ReturnType<typeof setInterval> | null = null
@@ -1196,6 +1654,10 @@ watch(showGlobalIssuesDrawer, async (val) => {
       console.error('Failed to load global wiki issues:', e)
       globalIssues.value = []
     }
+  } else {
+    healthIssueSelectedIds.value = []
+    globalIssueTypeFilter.value = ''
+    globalIssueSourceFilter.value = ''
   }
 })
 
@@ -3665,7 +4127,7 @@ async function growFrontier() {
 
 async function loadPageIssues(slug: string) {
   try {
-    const res = await listWikiIssues(props.knowledgeBaseId, slug, 'actionable', 1, 100)
+    const res = await listWikiIssues(props.knowledgeBaseId, { slug, status: 'actionable', page: 1, pageSize: 100 })
     pageIssues.value = issueItems(res)
     showIssuesBox.value = false
   } catch (e) {
@@ -5030,26 +5492,95 @@ onUnmounted(() => {
   }
 }
 
-.wiki-global-issues-status {
+.wiki-health-entry {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  padding: 8px 12px;
-  background: var(--td-warning-color-light);
-  border-radius: 6px;
-  color: var(--td-warning-color-8);
-  font-size: 13px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--td-component-stroke);
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
   cursor: pointer;
-  transition: filter 0.2s;
+  transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+  user-select: none;
 
   &:hover {
-    filter: brightness(0.95);
+    background: var(--td-bg-color-container-hover);
+    border-color: var(--td-component-border);
   }
 
-  .queue-text {
-    line-height: 1.2;
-    font-weight: 500;
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 2px;
   }
+
+  &--alert {
+    border-color: transparent;
+    background: var(--td-warning-color-light);
+    color: var(--td-warning-color-8);
+
+    &:hover {
+      filter: brightness(0.98);
+      background: var(--td-warning-color-light);
+    }
+
+    .wiki-health-entry-icon {
+      color: var(--td-warning-color);
+    }
+
+    .wiki-health-entry-sub {
+      color: var(--td-warning-color-7);
+    }
+  }
+
+  &--graph {
+    box-shadow: var(--td-shadow-1);
+    opacity: 0.98;
+  }
+}
+
+.wiki-health-entry-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.wiki-health-entry-icon {
+  flex-shrink: 0;
+  font-size: 18px;
+  color: var(--td-brand-color);
+}
+
+.wiki-health-entry-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wiki-health-entry-title {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.wiki-health-entry-sub {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wiki-health-entry-arrow {
+  flex-shrink: 0;
+  font-size: 16px;
+  color: var(--td-text-color-placeholder);
 }
 
 .wiki-page-list {
@@ -6181,11 +6712,6 @@ onUnmounted(() => {
   border-radius: 4px;
 }
 
-.graph-issues-badge {
-  box-shadow: var(--td-shadow-1);
-  opacity: 0.95;
-}
-
 :deep(.wiki-graph-drawer) {
   box-shadow: -4px 0 16px rgba(0, 0, 0, 0.08);
 }
@@ -6482,31 +7008,6 @@ onUnmounted(() => {
   padding: 8px 12px;
 }
 
-.wiki-lint-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 0 12px 8px;
-  padding: 12px;
-  border-radius: 6px;
-  background: var(--td-bg-color-secondarycontainer);
-}
-
-.wiki-lint-state {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-}
-
-.wiki-lint-error {
-  color: var(--td-error-color);
-  word-break: break-word;
-}
-
 .wiki-issue-popup-item {
   display: flex;
   padding: 16px;
@@ -6592,6 +7093,546 @@ onUnmounted(() => {
 </style>
 
 <style lang="less">
+/* Health drawer attaches to body — keep styles unscoped */
+.wiki-health-drawer.setting-drawer {
+  .t-drawer__content-wrapper {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    max-height: 100vh;
+    overflow: hidden;
+  }
+
+  .t-drawer__content {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .t-drawer__header {
+    flex-shrink: 0;
+  }
+
+  .t-drawer__body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 0 !important;
+    overflow: hidden;
+  }
+
+  .setting-drawer__body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 0 !important;
+    overflow: hidden;
+    gap: 0;
+    animation: none;
+  }
+
+  .setting-drawer__subtitle {
+    width: 100%;
+  }
+}
+
+.wiki-health-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wiki-health-header-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.wiki-health-header-status {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--td-text-color-secondary);
+
+  &.is-error {
+    color: var(--td-error-color);
+  }
+}
+
+.wiki-health-header-progress {
+  margin: 0;
+  max-width: 220px;
+}
+
+.wiki-health-controls {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 18px 14px;
+  border-bottom: 1px solid var(--td-component-stroke);
+  background: var(--td-bg-color-container);
+}
+
+.wiki-health-controls-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.wiki-health-controls-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  min-width: 0;
+}
+
+.wiki-health-scan-btn {
+  flex-shrink: 0;
+}
+
+.wiki-health-scan-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-placeholder);
+}
+
+.wiki-health-controls-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+  line-height: 1.4;
+}
+
+.wiki-health-batch-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px 6px;
+  flex-shrink: 0;
+
+  :deep(.t-checkbox) {
+    margin-right: 2px;
+  }
+
+  :deep(.t-checkbox__label) {
+    font-size: 12px;
+    color: var(--td-text-color-secondary);
+  }
+}
+
+.wiki-health-batch-divider {
+  width: 1px;
+  height: 14px;
+  margin: 0 2px;
+  background: var(--td-component-stroke);
+  flex-shrink: 0;
+}
+
+.wiki-health-batch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  .t-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
+  em {
+    font-style: normal;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: var(--td-bg-color-component);
+    color: var(--td-text-color-primary);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 16px;
+    text-align: center;
+  }
+
+  &:hover:not(:disabled) {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
+  }
+
+  &--primary {
+    color: var(--td-brand-color);
+
+    &:hover:not(:disabled) {
+      background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
+    }
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+}
+
+.wiki-health-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid color-mix(in srgb, var(--td-component-stroke) 70%, transparent);
+}
+
+.wiki-health-filter-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wiki-health-filter-label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--td-text-color-placeholder);
+}
+
+.wiki-health-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wiki-health-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+
+  &:hover:not(.is-active) {
+    color: var(--td-text-color-primary);
+    border-color: var(--td-component-stroke);
+  }
+
+  &.is-active {
+    border-color: color-mix(in srgb, var(--td-brand-color) 40%, var(--td-component-stroke));
+    background: color-mix(in srgb, var(--td-brand-color) 8%, var(--td-bg-color-container));
+    color: var(--td-brand-color);
+    font-weight: 500;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+}
+
+.wiki-health-issues-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px 18px 20px;
+  background: var(--td-bg-color-secondarycontainer);
+  -webkit-overflow-scrolling: touch;
+}
+
+.wiki-health-section-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--td-warning-color) 14%, var(--td-bg-color-container));
+  color: var(--td-warning-color-8);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.wiki-health-loading {
+  display: flex;
+  justify-content: center;
+  padding: 32px 0;
+}
+
+.wiki-health-loading-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 0 4px;
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+}
+
+.wiki-health-end-hint {
+  margin: 0;
+  padding: 10px 0 4px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--td-text-color-disabled);
+}
+
+.wiki-health-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 40px 16px;
+  border: 1px dashed color-mix(in srgb, var(--td-component-stroke) 80%, transparent);
+  border-radius: 12px;
+  background: var(--td-bg-color-container);
+}
+
+.wiki-health-empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 10px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--td-success-color) 12%, transparent);
+  color: var(--td-success-color);
+  font-size: 22px;
+}
+
+.wiki-health-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+}
+
+.wiki-health-empty-hint {
+  margin-top: 6px;
+  max-width: 300px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--td-text-color-placeholder);
+}
+
+.wiki-health-issue-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--td-bg-color-container);
+}
+
+.wiki-health-issue-row {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--td-component-stroke);
+  transition: background-color 0.15s ease;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:hover {
+    background: var(--td-bg-color-secondarycontainer);
+  }
+
+  &.is-selected {
+    background: color-mix(in srgb, var(--td-brand-color) 5%, var(--td-bg-color-container));
+  }
+
+  &.is-selected:hover {
+    background: color-mix(in srgb, var(--td-brand-color) 8%, var(--td-bg-color-container));
+  }
+}
+
+.wiki-health-issue-row__inner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.wiki-health-issue-row__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wiki-health-issue-row__check {
+  flex-shrink: 0;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  height: 20px;
+  margin: 0;
+
+  :deep(.t-checkbox__label) {
+    display: none;
+  }
+
+  :deep(.t-checkbox) {
+    display: inline-flex;
+    align-items: center;
+    line-height: 1;
+    margin: 0;
+  }
+
+  :deep(.t-checkbox__former) {
+    margin: 0;
+  }
+}
+
+.wiki-health-issue-row__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--td-text-color-primary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &:hover {
+    color: var(--td-brand-color);
+  }
+}
+
+.wiki-health-issue-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.wiki-health-row-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+
+  .t-icon {
+    font-size: 15px;
+  }
+
+  &:hover {
+    background: var(--td-bg-color-component);
+    color: var(--td-text-color-primary);
+  }
+
+  &--muted:hover {
+    color: var(--td-text-color-placeholder);
+  }
+}
+
+.wiki-health-issue-row__desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--td-text-color-secondary);
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.wiki-health-issue-row__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--td-text-color-placeholder);
+}
+
+.wiki-health-issue-row__type {
+  flex-shrink: 0;
+  font-weight: 500;
+
+  &.is-danger {
+    color: var(--td-error-color);
+  }
+
+  &.is-warning {
+    color: var(--td-warning-color-8);
+  }
+
+  &.is-primary {
+    color: var(--td-brand-color);
+  }
+
+  &.is-success {
+    color: var(--td-success-color);
+  }
+
+  &.is-default {
+    color: var(--td-text-color-secondary);
+  }
+}
+
+.wiki-health-issue-row__sep {
+  flex-shrink: 0;
+  opacity: 0.65;
+}
+
+.wiki-health-issue-row__source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Fix Embedded Chat UI (unscoped because drawer attaches to body) */
 .wiki-fix-drawer {
   .t-drawer__body {
