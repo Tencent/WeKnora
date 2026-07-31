@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -54,6 +55,11 @@ type WikiPageService interface {
 
 	// DeletePage soft-deletes a wiki page and removes its chunk sync.
 	DeletePage(ctx context.Context, kbID string, slug string) error
+
+	// RenamePage changes only the stable page entity's slug. Its ID and
+	// revision history remain intact, while hierarchy, issue bindings and
+	// reverse-link metadata are migrated atomically.
+	RenamePage(ctx context.Context, kbID string, slug string, newSlug string) (*types.WikiPage, error)
 
 	// GetIndex returns the index page for a knowledge base.
 	// Creates a default one if it doesn't exist.
@@ -225,9 +231,20 @@ type WikiPageService interface {
 
 	// ListIssues retrieves issues for a knowledge base, optionally filtered by slug and status.
 	ListIssues(ctx context.Context, kbID string, slug string, status string) ([]*types.WikiPageIssue, error)
+	ListIssuesPage(
+		ctx context.Context, kbID, slug, status string, page, pageSize int,
+	) (*types.WikiIssueListResponse, error)
+	GetIssue(ctx context.Context, kbID, issueID string) (*types.WikiPageIssue, error)
+	CountIssues(ctx context.Context, kbID, status string) (int64, error)
+	BeginIssueRepair(
+		ctx context.Context, kbID, issueID, sessionID, mode string,
+	) (*types.WikiRepairAttempt, *types.WikiPageIssue, error)
+	GetRepairAttempt(ctx context.Context, kbID, attemptID string) (*types.WikiRepairAttempt, error)
+	ListActiveRepairAttempts(ctx context.Context, kbID string) ([]*types.WikiRepairAttempt, error)
+	FailIssueRepair(ctx context.Context, kbID, issueID, attemptID, message string) error
 
-	// UpdateIssueStatus updates the status of an issue (e.g. pending -> resolved/ignored).
-	UpdateIssueStatus(ctx context.Context, issueID string, status string) error
+	// UpdateIssueStatus validates and applies a KB-scoped lifecycle transition.
+	UpdateIssueStatus(ctx context.Context, kbID, issueID, status, summary string) error
 }
 
 // WikiPageRepository defines the wiki page data persistence interface.
@@ -385,6 +402,10 @@ type WikiPageRepository interface {
 	// present (page_id, version) pair is a silent no-op.
 	UpdateWithRevision(ctx context.Context, page *types.WikiPage, rev *types.WikiPageRevision) error
 
+	// RenameWithRevision snapshots the current version and atomically moves
+	// every slug-keyed relationship to newSlug without replacing the page ID.
+	RenameWithRevision(ctx context.Context, page *types.WikiPage, newSlug string, rev *types.WikiPageRevision) error
+
 	// ListRevisions returns snapshots for a page newest-first (content
 	// column omitted) plus the total snapshot count.
 	ListRevisions(ctx context.Context, kbID string, pageID string, limit int, offset int) ([]*types.WikiPageRevision, int64, error)
@@ -404,7 +425,21 @@ type WikiPageRepository interface {
 
 	// ListIssues retrieves issues with optional filtering by slug and status.
 	ListIssues(ctx context.Context, kbID string, slug string, status string) ([]*types.WikiPageIssue, error)
-
-	// UpdateIssueStatus updates an issue's status.
-	UpdateIssueStatus(ctx context.Context, issueID string, status string) error
+	ListIssuesPage(
+		ctx context.Context, kbID, slug, status string, page, pageSize int,
+	) ([]*types.WikiPageIssue, int64, error)
+	CountIssues(ctx context.Context, kbID, status string) (int64, error)
+	GetIssue(ctx context.Context, kbID, issueID string) (*types.WikiPageIssue, error)
+	UpdateIssueLifecycle(ctx context.Context, kbID, issueID string, from []string, updates map[string]interface{}) error
+	UpsertLintIssue(ctx context.Context, issue *types.WikiPageIssue) error
+	ResolveMissingLintIssues(ctx context.Context, kbID, runID string, resolvedAt time.Time) error
+	ClaimIssueAndCreateAttempt(ctx context.Context, issue *types.WikiPageIssue, attempt *types.WikiRepairAttempt) error
+	CompleteIssueRepair(ctx context.Context, issue *types.WikiPageIssue, attempt *types.WikiRepairAttempt) error
+	FailIssueRepair(ctx context.Context, kbID, issueID, attemptID, message string, finishedAt time.Time) error
+	GetRepairAttempt(ctx context.Context, kbID, attemptID string) (*types.WikiRepairAttempt, error)
+	ListActiveRepairAttempts(ctx context.Context, kbID string) ([]*types.WikiRepairAttempt, error)
+	CreateLintRun(ctx context.Context, run *types.WikiLintRun) error
+	UpdateLintRun(ctx context.Context, run *types.WikiLintRun) error
+	GetLintRun(ctx context.Context, kbID, runID string) (*types.WikiLintRun, error)
+	GetLatestLintRun(ctx context.Context, kbID string) (*types.WikiLintRun, error)
 }

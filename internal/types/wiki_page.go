@@ -707,16 +707,105 @@ type WikiStats struct {
 type WikiPageIssue struct {
 	ID                    string         `json:"id" gorm:"type:varchar(36);primaryKey"`
 	TenantID              uint64         `json:"tenant_id" gorm:"index"`
-	KnowledgeBaseID       string         `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
+	KnowledgeBaseID       string         `json:"knowledge_base_id" gorm:"type:varchar(36);index;uniqueIndex:ui_wi_fp"`
+	PageID                string         `json:"page_id" gorm:"type:varchar(36);index"`
 	Slug                  string         `json:"slug" gorm:"type:varchar(255);index"`
 	IssueType             string         `json:"issue_type" gorm:"type:varchar(50)"`
+	Severity              string         `json:"severity" gorm:"type:varchar(20);default:'warning';index"`
+	Source                string         `json:"source" gorm:"type:varchar(20);default:'agent';index"`
+	Fingerprint           string         `json:"fingerprint" gorm:"type:varchar(64);index;uniqueIndex:ui_wi_fp"`
 	Description           string         `json:"description" gorm:"type:text"`
 	SuspectedKnowledgeIDs StringArray    `json:"suspected_knowledge_ids" gorm:"type:json"`
-	Status                string         `json:"status" gorm:"type:varchar(20);default:'pending';index"`
+	Evidence              JSON           `json:"evidence" gorm:"type:json"`
+	RepairMode            string         `json:"repair_mode" gorm:"type:varchar(20);default:'agent'"`
+	DetectedPageVersion   int            `json:"detected_page_version" gorm:"default:0"`
+	LastSeenRunID         string         `json:"last_seen_run_id" gorm:"type:varchar(36);index"`
+	LastSeenAt            time.Time      `json:"last_seen_at"`
+	OccurrenceCount       int            `json:"occurrence_count" gorm:"default:1"`
+	Status                string         `json:"status" gorm:"type:varchar(20);default:'open';index"`
+	ActiveAttemptID       string         `json:"active_attempt_id" gorm:"type:varchar(36);index"`
+	ClaimedAt             *time.Time     `json:"claimed_at"`
+	ResolvedAt            *time.Time     `json:"resolved_at"`
+	ResolutionAction      string         `json:"resolution_action" gorm:"type:varchar(32)"`
+	ResolutionSummary     string         `json:"resolution_summary" gorm:"type:text"`
+	ResolvedPageVersion   int            `json:"resolved_page_version" gorm:"default:0"`
 	ReportedBy            string         `json:"reported_by" gorm:"type:varchar(100)"`
 	CreatedAt             time.Time      `json:"created_at"`
 	UpdatedAt             time.Time      `json:"updated_at"`
 	DeletedAt             gorm.DeletedAt `json:"deleted_at" gorm:"index"`
+}
+
+// Wiki issue lifecycle, provenance, and repair-mode values.
+const (
+	WikiIssueStatusOpen      = "open"
+	WikiIssueStatusClaimed   = "claimed"
+	WikiIssueStatusRepairing = "repairing"
+	WikiIssueStatusVerifying = "verifying"
+	WikiIssueStatusResolved  = "resolved"
+	WikiIssueStatusIgnored   = "ignored"
+	WikiIssueStatusFailed    = "failed"
+
+	WikiIssueSourceLint  = "lint"
+	WikiIssueSourceAgent = "agent"
+	WikiIssueSourceUser  = "user"
+
+	WikiIssueRepairDeterministic = "deterministic"
+	WikiIssueRepairAgent         = "agent"
+	WikiIssueRepairManual        = "manual"
+)
+
+// WikiLintRun records one complete, restart-observable health scan. Findings
+// are reconciled only after a run reaches completed, so a partial walk can
+// never make old issues disappear.
+type WikiLintRun struct {
+	ID              string     `json:"id" gorm:"type:varchar(36);primaryKey"`
+	TenantID        uint64     `json:"tenant_id" gorm:"index"`
+	KnowledgeBaseID string     `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
+	Status          string     `json:"status" gorm:"type:varchar(20);index"`
+	RuleVersion     string     `json:"rule_version" gorm:"type:varchar(32)"`
+	Progress        int        `json:"progress"`
+	FindingCount    int        `json:"finding_count"`
+	ErrorMessage    string     `json:"error_message" gorm:"type:text"`
+	StartedAt       *time.Time `json:"started_at"`
+	FinishedAt      *time.Time `json:"finished_at"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+// TableName returns the lint-run table name.
+func (WikiLintRun) TableName() string { return "wiki_lint_runs" }
+
+// WikiRepairAttempt is the durable bridge between an issue, an optional Agent
+// session, and the exact page versions changed while resolving it.
+type WikiRepairAttempt struct {
+	ID              string     `json:"id" gorm:"type:varchar(36);primaryKey"`
+	TenantID        uint64     `json:"tenant_id" gorm:"index"`
+	KnowledgeBaseID string     `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
+	IssueID         string     `json:"issue_id" gorm:"type:varchar(36);index"`
+	PageID          string     `json:"page_id" gorm:"type:varchar(36);index"`
+	SessionID       string     `json:"session_id" gorm:"type:varchar(36);index"`
+	Mode            string     `json:"mode" gorm:"type:varchar(20)"`
+	Status          string     `json:"status" gorm:"type:varchar(20);index"`
+	BeforeVersion   int        `json:"before_version"`
+	AfterVersion    int        `json:"after_version"`
+	Action          string     `json:"action" gorm:"type:varchar(32)"`
+	Summary         string     `json:"summary" gorm:"type:text"`
+	ErrorMessage    string     `json:"error_message" gorm:"type:text"`
+	StartedAt       *time.Time `json:"started_at"`
+	FinishedAt      *time.Time `json:"finished_at"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+// TableName returns the repair-attempt table name.
+func (WikiRepairAttempt) TableName() string { return "wiki_repair_attempts" }
+
+// WikiIssueListResponse is the paginated issue-list API payload.
+type WikiIssueListResponse struct {
+	Items    []*WikiPageIssue `json:"items"`
+	Total    int64            `json:"total"`
+	Page     int              `json:"page"`
+	PageSize int              `json:"page_size"`
 }
 
 // TableName specifies the database table name

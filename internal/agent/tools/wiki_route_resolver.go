@@ -266,25 +266,17 @@ func resolveWikiIssue(
 	}
 	var match *types.WikiPageIssue
 	for _, kbID := range dedupNonEmptyStrings(kbIDs) {
-		issues, err := service.ListIssues(ctx, kbID, "", "")
+		issue, err := service.GetIssue(ctx, kbID, issueID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to list issues in knowledge base %s: %w", kbID, err)
-		}
-		for _, issue := range issues {
-			if issue == nil || issue.ID != issueID {
+			if errors.Is(err, repository.ErrWikiIssueNotFound) {
 				continue
 			}
-			if issue.KnowledgeBaseID != "" && issue.KnowledgeBaseID != kbID {
-				return nil, fmt.Errorf(
-					"issue_id %s returned knowledge base %s while resolving allowed scope %s",
-					issueID, issue.KnowledgeBaseID, kbID,
-				)
-			}
-			if match != nil {
-				return nil, fmt.Errorf("issue_id %s is ambiguous across current Wiki scopes", issueID)
-			}
-			match = issue
+			return nil, fmt.Errorf("failed to read issue in knowledge base %s: %w", kbID, err)
 		}
+		if match != nil {
+			return nil, fmt.Errorf("issue_id %s is ambiguous across current Wiki scopes", issueID)
+		}
+		match = issue
 	}
 	if match == nil {
 		return nil, fmt.Errorf("issue_id %s is not within the current Wiki scope", issueID)

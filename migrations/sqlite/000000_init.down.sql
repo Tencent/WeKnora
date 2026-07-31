@@ -1,5 +1,7 @@
 DROP TABLE IF EXISTS tenant_invitations;
 DROP TABLE IF EXISTS tenant_api_keys;
+DROP TABLE IF EXISTS wiki_repair_attempts;
+DROP TABLE IF EXISTS wiki_lint_runs;
 DROP TABLE IF EXISTS wiki_page_revisions;
 DROP TABLE IF EXISTS wiki_page_issues;
 DROP TABLE IF EXISTS wiki_pages;

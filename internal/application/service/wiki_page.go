@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -10,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -420,6 +424,30 @@ func (s *wikiPageService) DeletePage(ctx context.Context, kbID string, slug stri
 	s.deleteChunkForPage(ctx, page)
 
 	return nil
+}
+
+// RenamePage changes the stable page entity in place. Incoming page bodies are
+// rewritten by the caller before this operation; this method owns the atomic
+// identity/history/metadata migration for the renamed page itself.
+func (s *wikiPageService) RenamePage(
+	ctx context.Context, kbID string, slug string, newSlug string,
+) (*types.WikiPage, error) {
+	page, err := s.repo.GetBySlug(ctx, kbID, slug)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.repo.GetBySlug(ctx, kbID, newSlug); err == nil {
+		return nil, repository.ErrWikiPageConflict
+	} else if !errors.Is(err, repository.ErrWikiPageNotFound) {
+		return nil, err
+	}
+	page.LastEditSource = types.WikiEditSourceFromContext(ctx)
+	page.LastEditorID, _ = types.UserIDFromContext(ctx)
+	if err := s.repo.RenameWithRevision(ctx, page, newSlug, revisionFromPage(page)); err != nil {
+		return nil, fmt.Errorf("rename wiki page: %w", err)
+	}
+	s.pruneRevisions(ctx, page.ID, page.Version)
+	return page, nil
 }
 
 // GetIndex returns the index page for a knowledge base
@@ -852,8 +880,7 @@ func (s *wikiPageService) GetStats(ctx context.Context, kbID string) (*types.Wik
 		isActive = activeFlag > 0
 	}
 
-	issues, _ := s.ListIssues(ctx, kbID, "", "pending")
-	pendingIssues = int64(len(issues))
+	pendingIssues, _ = s.CountIssues(ctx, kbID, "unresolved")
 
 	return &types.WikiStats{
 		TotalPages:    total,
@@ -1323,20 +1350,335 @@ func (s *wikiPageService) CreateIssue(ctx context.Context, issue *types.WikiPage
 	if issue.ID == "" {
 		issue.ID = uuid.New().String()
 	}
-	if err := s.repo.CreateIssue(ctx, issue); err != nil {
+	if issue.Status == "" || issue.Status == "pending" {
+		issue.Status = types.WikiIssueStatusOpen
+	}
+	if issue.Source == "" {
+		issue.Source = types.WikiIssueSourceAgent
+	}
+	if issue.Severity == "" {
+		issue.Severity = "warning"
+	}
+	if issue.RepairMode == "" {
+		issue.RepairMode = types.WikiIssueRepairAgent
+	}
+	if issue.LastSeenAt.IsZero() {
+		issue.LastSeenAt = time.Now()
+	}
+	if issue.OccurrenceCount == 0 {
+		issue.OccurrenceCount = 1
+	}
+	if issue.Fingerprint == "" {
+		identity := ""
+		if len(issue.SuspectedKnowledgeIDs) > 0 {
+			ids := append([]string(nil), issue.SuspectedKnowledgeIDs...)
+			sort.Strings(ids)
+			identity = strings.Join(ids, ",")
+		} else if issue.IssueType == "other" {
+			// The catch-all type may represent multiple unrelated findings on
+			// one page, so retain normalized description as its differentiator.
+			identity = issue.Description
+		}
+		issue.Fingerprint = wikiIssueFingerprint(
+			issue.KnowledgeBaseID, issue.PageID, issue.Slug, issue.IssueType, identity,
+		)
+	}
+	if err := s.repo.UpsertLintIssue(ctx, issue); err != nil {
 		return nil, fmt.Errorf("create wiki page issue: %w", err)
 	}
 	return issue, nil
 }
 
+func wikiIssueFingerprint(parts ...string) string {
+	h := sha256.New()
+	for _, part := range parts {
+		h.Write([]byte(strings.TrimSpace(strings.ToLower(part))))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 // ListIssues retrieves issues for a knowledge base
 func (s *wikiPageService) ListIssues(ctx context.Context, kbID string, slug string, status string) ([]*types.WikiPageIssue, error) {
+	if status == "pending" {
+		status = types.WikiIssueStatusOpen
+	}
 	return s.repo.ListIssues(ctx, kbID, slug, status)
 }
 
-// UpdateIssueStatus updates an issue's status
-func (s *wikiPageService) UpdateIssueStatus(ctx context.Context, issueID string, status string) error {
-	return s.repo.UpdateIssueStatus(ctx, issueID, status)
+func (s *wikiPageService) ListIssuesPage(
+	ctx context.Context, kbID, slug, status string, page, pageSize int,
+) (*types.WikiIssueListResponse, error) {
+	if status == "pending" {
+		status = types.WikiIssueStatusOpen
+	}
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	items, total, err := s.repo.ListIssuesPage(ctx, kbID, slug, status, page, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	return &types.WikiIssueListResponse{Items: items, Total: total, Page: page, PageSize: pageSize}, nil
+}
+
+func (s *wikiPageService) GetIssue(ctx context.Context, kbID, issueID string) (*types.WikiPageIssue, error) {
+	return s.repo.GetIssue(ctx, kbID, issueID)
+}
+
+func (s *wikiPageService) CountIssues(ctx context.Context, kbID, status string) (int64, error) {
+	if status == "pending" {
+		status = types.WikiIssueStatusOpen
+	}
+	return s.repo.CountIssues(ctx, kbID, status)
+}
+
+func (s *wikiPageService) BeginIssueRepair(
+	ctx context.Context, kbID, issueID, sessionID, mode string,
+) (*types.WikiRepairAttempt, *types.WikiPageIssue, error) {
+	issue, err := s.repo.GetIssue(ctx, kbID, issueID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if issue.ActiveAttemptID != "" {
+		activeAttempt, attemptErr := s.repo.GetRepairAttempt(ctx, kbID, issue.ActiveAttemptID)
+		if errors.Is(attemptErr, repository.ErrWikiIssueNotFound) {
+			_ = s.repo.UpdateIssueLifecycle(ctx, kbID, issue.ID,
+				[]string{types.WikiIssueStatusClaimed, types.WikiIssueStatusRepairing, types.WikiIssueStatusVerifying},
+				map[string]interface{}{
+					"status": types.WikiIssueStatusFailed, "active_attempt_id": "",
+					"resolution_summary": "The active repair record was missing; the issue can be retried.",
+				})
+			issue, err = s.repo.GetIssue(ctx, kbID, issueID)
+			if err != nil {
+				return nil, nil, err
+			}
+		} else if attemptErr != nil {
+			return nil, nil, attemptErr
+		} else {
+			started := activeAttempt.CreatedAt
+			if activeAttempt.StartedAt != nil {
+				started = *activeAttempt.StartedAt
+			}
+			if started.Before(time.Now().Add(-30 * time.Minute)) {
+				_ = s.repo.FailIssueRepair(ctx, kbID, issue.ID, activeAttempt.ID,
+					"Repair attempt expired before it reported a verified result.", time.Now())
+				issue, err = s.repo.GetIssue(ctx, kbID, issueID)
+				if err != nil {
+					return nil, nil, err
+				}
+			}
+		}
+	}
+	if mode == "" || mode == "auto" {
+		mode = issue.RepairMode
+	}
+	if mode == "" {
+		mode = types.WikiIssueRepairAgent
+	}
+	page, pageErr := s.GetPageBySlug(ctx, kbID, issue.Slug)
+	if pageErr == nil && page != nil {
+		issue.PageID = page.ID
+		if issue.DetectedPageVersion == 0 {
+			issue.DetectedPageVersion = page.Version
+		}
+	}
+	now := time.Now()
+	attempt := &types.WikiRepairAttempt{
+		ID: uuid.New().String(), TenantID: issue.TenantID, KnowledgeBaseID: kbID,
+		IssueID: issue.ID, PageID: issue.PageID, SessionID: sessionID,
+		Mode: mode, Status: types.WikiIssueStatusRepairing, StartedAt: &now,
+	}
+	if page != nil {
+		attempt.BeforeVersion = page.Version
+	}
+	if err := s.repo.ClaimIssueAndCreateAttempt(ctx, issue, attempt); err != nil {
+		return nil, nil, err
+	}
+	issue.Status = types.WikiIssueStatusRepairing
+	issue.ActiveAttemptID = attempt.ID
+	return attempt, issue, nil
+}
+
+func (s *wikiPageService) GetRepairAttempt(
+	ctx context.Context, kbID, attemptID string,
+) (*types.WikiRepairAttempt, error) {
+	return s.repo.GetRepairAttempt(ctx, kbID, attemptID)
+}
+
+func (s *wikiPageService) ListActiveRepairAttempts(
+	ctx context.Context, kbID string,
+) ([]*types.WikiRepairAttempt, error) {
+	attempts, err := s.repo.ListActiveRepairAttempts(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+	cutoff := time.Now().Add(-30 * time.Minute)
+	active := attempts[:0]
+	for _, attempt := range attempts {
+		started := attempt.CreatedAt
+		if attempt.StartedAt != nil {
+			started = *attempt.StartedAt
+		}
+		if started.Before(cutoff) {
+			if err := s.repo.FailIssueRepair(ctx, kbID, attempt.IssueID, attempt.ID,
+				"Repair attempt expired before it reported a verified result.", time.Now()); err == nil {
+				continue
+			}
+		}
+		active = append(active, attempt)
+	}
+	return active, nil
+}
+
+func (s *wikiPageService) FailIssueRepair(ctx context.Context, kbID, issueID, attemptID, message string) error {
+	return s.repo.FailIssueRepair(ctx, kbID, issueID, attemptID, message, time.Now())
+}
+
+func containsWikiRef(refs []string, target string) bool {
+	for _, ref := range refs {
+		if ref == target || strings.HasPrefix(ref, target+"|") {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *wikiPageService) verifyWikiIssueResolution(
+	ctx context.Context, issue *types.WikiPageIssue, page *types.WikiPage, attempt *types.WikiRepairAttempt,
+) error {
+	if issue == nil || attempt == nil {
+		return errors.New("issue and repair attempt are required")
+	}
+	if page == nil {
+		if attempt.Action == "deleted" {
+			return nil
+		}
+		return errors.New("target page no longer exists without a recorded delete action")
+	}
+	evidence := map[string]interface{}{}
+	if len(issue.Evidence) > 0 {
+		_ = json.Unmarshal(issue.Evidence, &evidence)
+	}
+	target, _ := evidence["target_slug"].(string)
+	switch issue.IssueType {
+	case string(LintIssueBrokenLink):
+		if target == "" {
+			return errors.New("broken-link issue is missing target evidence")
+		}
+		if containsWikiRef(page.OutLinks, target) {
+			return fmt.Errorf("broken link %s is still present", target)
+		}
+	case string(LintIssueStaleRef):
+		if target == "" {
+			return errors.New("stale-reference issue is missing target evidence")
+		}
+		if containsWikiRef(page.SourceRefs, target) {
+			return fmt.Errorf("stale source reference %s is still present", target)
+		}
+	case string(LintIssueOrphanPage):
+		if len(page.InLinks) == 0 {
+			return errors.New("page still has no inbound links")
+		}
+	case string(LintIssueEmptyContent):
+		if utf8.RuneCountInString(strings.TrimSpace(page.Content)) < 50 {
+			return errors.New("page still has fewer than 50 content characters")
+		}
+	case string(LintIssueMissingCrossRef):
+		if target == "" {
+			return errors.New("missing-cross-reference issue is missing target evidence")
+		}
+		if containsWikiRef(page.OutLinks, target) {
+			break
+		}
+		targetPage, err := s.repo.GetBySlug(ctx, issue.KnowledgeBaseID, target)
+		if errors.Is(err, repository.ErrWikiPageNotFound) {
+			break // The referenced entity disappeared, so the finding is obsolete.
+		}
+		if err != nil {
+			return err
+		}
+		matcher := newWikiLintTitleMatcher(map[string]string{target: targetPage.Title})
+		if len(matcher.Find(page.Content)) > 0 {
+			return fmt.Errorf("page still mentions %q without linking to %s", targetPage.Title, target)
+		}
+	default:
+		// Semantic issues cannot be proven by a string status update. Require
+		// either a real edit during this attempt or evidence that the page had
+		// already advanced after the issue was detected.
+		if page.Version <= attempt.BeforeVersion && page.Version <= issue.DetectedPageVersion {
+			return errors.New("page version did not change and the issue cannot be verified as already resolved")
+		}
+	}
+	return nil
+}
+
+// UpdateIssueStatus applies only legal, KB-scoped transitions. A resolved
+// transition closes the active repair attempt only after a typed postcondition
+// check; callers can no longer mark arbitrary issue IDs as resolved.
+func (s *wikiPageService) UpdateIssueStatus(
+	ctx context.Context, kbID, issueID, status, summary string,
+) error {
+	issue, err := s.repo.GetIssue(ctx, kbID, issueID)
+	if err != nil {
+		return err
+	}
+	switch status {
+	case "pending", types.WikiIssueStatusOpen:
+		return s.repo.UpdateIssueLifecycle(ctx, kbID, issueID,
+			[]string{types.WikiIssueStatusFailed, types.WikiIssueStatusIgnored},
+			map[string]interface{}{"status": types.WikiIssueStatusOpen, "active_attempt_id": ""})
+	case types.WikiIssueStatusIgnored:
+		return s.repo.UpdateIssueLifecycle(ctx, kbID, issueID,
+			[]string{types.WikiIssueStatusOpen, types.WikiIssueStatusFailed, "pending"},
+			map[string]interface{}{
+				"status": types.WikiIssueStatusIgnored, "resolution_action": "ignored",
+				"resolution_summary": summary, "active_attempt_id": "",
+			})
+	case types.WikiIssueStatusResolved:
+		if issue.ActiveAttemptID == "" {
+			return repository.ErrWikiIssueConflict
+		}
+		attempt, err := s.repo.GetRepairAttempt(ctx, kbID, issue.ActiveAttemptID)
+		if err != nil {
+			return err
+		}
+		if err := s.repo.UpdateIssueLifecycle(ctx, kbID, issueID,
+			[]string{types.WikiIssueStatusRepairing},
+			map[string]interface{}{"status": types.WikiIssueStatusVerifying}); err != nil {
+			return err
+		}
+		page, pageErr := s.GetPageBySlug(ctx, kbID, issue.Slug)
+		if pageErr != nil && !errors.Is(pageErr, repository.ErrWikiPageNotFound) {
+			return pageErr
+		}
+		if err := s.verifyWikiIssueResolution(ctx, issue, page, attempt); err != nil {
+			_ = s.repo.FailIssueRepair(ctx, kbID, issueID, attempt.ID, err.Error(), time.Now())
+			return err
+		}
+		if page != nil {
+			attempt.AfterVersion = page.Version
+		}
+		if attempt.Action == "" {
+			if attempt.AfterVersion > attempt.BeforeVersion {
+				attempt.Action = "edited"
+			} else {
+				attempt.Action = "noop_already_resolved"
+			}
+		}
+		attempt.Summary = summary
+		now := time.Now()
+		attempt.FinishedAt = &now
+		return s.repo.CompleteIssueRepair(ctx, issue, attempt)
+	default:
+		return fmt.Errorf("invalid issue status %q", status)
+	}
 }
 
 // --- Folder tree (wiki_folders) ---

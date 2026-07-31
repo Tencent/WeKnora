@@ -169,7 +169,9 @@ const props = defineProps({
     agentId: { type: String, default: '' },
     kbIds: { type: Array, default: () => [] },
     embeddedMode: { type: Boolean, default: false },
+    initialQuery: { type: String, default: '' },
 });
+const emit = defineEmits(['initial-query-consumed']);
 
 const usemenuStore = useMenuStore();
 const useSettingsStoreInstance = useSettingsStore();
@@ -971,7 +973,8 @@ onMounted(async () => {
     loading.value = false;
     isReplying.value = false;
 
-    if (firstQuery.value) {
+    const initialQuery = props.initialQuery || firstQuery.value;
+    if (initialQuery) {
         scrollLock.value = true;
         historyLoading.value = false;
         if (firstModelId.value) {
@@ -981,8 +984,9 @@ onMounted(async () => {
                 rerankModelId: '',
             });
         }
-        sendMsg(firstQuery.value, firstModelId.value || '', firstMentionedItems.value || [], firstImageFiles.value || [], firstAttachmentFiles.value || []);
-        usemenuStore.changeFirstQuery('', [], '', [], []);
+        if (props.initialQuery) emit('initial-query-consumed');
+        else usemenuStore.changeFirstQuery('', [], '', [], []);
+        sendMsg(initialQuery, firstModelId.value || '', firstMentionedItems.value || [], firstImageFiles.value || [], firstAttachmentFiles.value || []);
     } else {
         scrollLock.value = false;
         hasMoreHistory.value = true;

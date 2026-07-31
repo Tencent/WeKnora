@@ -99,14 +99,62 @@ export interface WikiPageIssue {
   id: string;
   tenant_id: number;
   knowledge_base_id: string;
+  page_id: string;
   slug: string;
   issue_type: string;
+  severity: string;
+  source: string;
+  fingerprint: string;
   description: string;
   suspected_knowledge_ids: string[];
   status: string;
+  evidence?: Record<string, any>;
+  repair_mode: 'deterministic' | 'agent' | 'manual' | string;
+  detected_page_version: number;
+  last_seen_at: string;
+  occurrence_count: number;
+  active_attempt_id: string;
+  resolution_action?: string;
+  resolution_summary?: string;
+  resolved_page_version?: number;
   reported_by: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface WikiIssueListResponse {
+  items: WikiPageIssue[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface WikiLintRun {
+  id: string;
+  knowledge_base_id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | string;
+  progress: number;
+  finding_count: number;
+  error_message: string;
+  created_at: string;
+  finished_at?: string;
+}
+
+export interface WikiRepairAttempt {
+  id: string;
+  issue_id: string;
+  knowledge_base_id: string;
+  page_id: string;
+  session_id: string;
+  mode: string;
+  status: 'claimed' | 'repairing' | 'verifying' | 'resolved' | 'failed' | string;
+  before_version: number;
+  after_version: number;
+  action: string;
+  summary: string;
+  error_message: string;
+  created_at: string;
+  finished_at?: string;
 }
 
 // Wiki API Functions
@@ -336,15 +384,37 @@ export function searchWikiPages(kbId: string, q: string, limit?: number) {
   return get(`/api/v1/knowledgebase/${kbId}/wiki/search?${params.toString()}`);
 }
 
-export function listWikiIssues(kbId: string, slug?: string, status?: string) {
+export function listWikiIssues(kbId: string, slug?: string, status?: string, page = 1, pageSize = 20) {
   const params = new URLSearchParams();
   if (slug) params.set('slug', slug);
   if (status) params.set('status', status);
+  params.set('page', String(page));
+  params.set('page_size', String(pageSize));
   return get(`/api/v1/knowledgebase/${kbId}/wiki/issues?${params.toString()}`);
 }
 
-export function updateWikiIssueStatus(kbId: string, issueId: string, status: string) {
-  return put(`/api/v1/knowledgebase/${kbId}/wiki/issues/${issueId}/status`, { status });
+export function updateWikiIssueStatus(kbId: string, issueId: string, status: string, summary = '') {
+  return put(`/api/v1/knowledgebase/${kbId}/wiki/issues/${issueId}/status`, { status, summary });
+}
+
+export function startWikiLintRun(kbId: string) {
+  return post(`/api/v1/knowledgebase/${kbId}/wiki/lint-runs`, {});
+}
+
+export function getWikiLintRun(kbId: string, runId = 'latest') {
+  return get(`/api/v1/knowledgebase/${kbId}/wiki/lint-runs/${runId}`);
+}
+
+export function startWikiIssueRepair(kbId: string, issueId: string, mode = 'auto') {
+  return post(`/api/v1/knowledgebase/${kbId}/wiki/issues/${issueId}/repair`, { mode });
+}
+
+export function getWikiRepairAttempt(kbId: string, attemptId: string) {
+  return get(`/api/v1/knowledgebase/${kbId}/wiki/repair-attempts/${attemptId}`);
+}
+
+export function listActiveWikiRepairAttempts(kbId: string) {
+  return get(`/api/v1/knowledgebase/${kbId}/wiki/repair-attempts/active`);
 }
 
 export function rebuildWikiLinks(kbId: string) {

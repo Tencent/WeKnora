@@ -322,10 +322,21 @@ func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHan
 		wikiRead.GET("/search", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.SearchPages)
 		wiki.POST("/rebuild-links", g.OwnedWikiKBOrAdmin(), g.KBAccessWrite("kb_id"), wikiHandler.RebuildLinks)
 		wikiRead.GET("/lint", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.Lint)
+		wiki.POST("/lint-runs", g.OwnedWikiKBOrAdmin(), g.KBAccessWrite("kb_id"), wikiHandler.StartLintRun)
+		wikiRead.GET("/lint-runs/:run_id", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.GetLintRun)
 		wiki.POST("/auto-fix", g.OwnedWikiKBOrAdmin(), g.KBAccessWrite("kb_id"), wikiHandler.AutoFix)
 
 		// Issues
 		wikiRead.GET("/issues", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.ListIssues)
 		wiki.PUT("/issues/:issue_id/status", g.OwnedWikiKBOrAdmin(), g.KBAccessWrite("kb_id"), wikiHandler.UpdateIssueStatus)
+		wiki.POST("/issues/:issue_id/repair", g.OwnedWikiKBOrAdmin(), g.KBAccessWrite("kb_id"), wikiHandler.StartIssueRepair)
+		wiki.GET(
+			"/repair-attempts/active", g.OwnedWikiKBOrAdmin(),
+			g.KBAccessWrite("kb_id"), wikiHandler.ListActiveRepairAttempts,
+		)
+		wiki.GET(
+			"/repair-attempts/:attempt_id", g.OwnedWikiKBOrAdmin(),
+			g.KBAccessWrite("kb_id"), wikiHandler.GetRepairAttempt,
+		)
 	}
 }

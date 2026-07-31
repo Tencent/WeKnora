@@ -79,7 +79,10 @@ var queueDefinitions = []QueueDefinition{
 		TypeFAQImport, TypeKBClone, TypeIndexDelete, TypeKBDelete,
 		TypeKnowledgeListDelete, TypeKnowledgeListReparse, TypeKnowledgeMove,
 	}},
-	{Name: QueueWiki, Pool: WorkerPoolWiki, Weight: 1, TaskTypes: []string{TypeWikiIngest, TypeWikiFinalize}},
+	{
+		Name: QueueWiki, Pool: WorkerPoolWiki, Weight: 1,
+		TaskTypes: []string{TypeWikiIngest, TypeWikiFinalize, TypeWikiLint},
+	},
 }
 
 // QueueDefinitions returns a copy so callers cannot mutate global topology.
@@ -245,6 +248,7 @@ const (
 	TypeDataSourceSync           = "datasource:sync"            // 数据源同步任务
 	TypeWikiIngest               = "wiki:ingest"                // Wiki 页面同步任务
 	TypeWikiFinalize             = "wiki:finalize"              // Wiki KB 级收尾任务（防抖：索引重建/死链清理/交叉链接）
+	TypeWikiLint                 = "wiki:lint"                  // Wiki 全量健康巡检与问题对账
 	TypeTemporaryDocumentProcess = "temporary_document:process" // 会话临时文档解析任务
 )
 

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"net/http"
@@ -16,14 +17,17 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
+	"github.com/hibiken/asynq"
 )
 
 // WikiPageHandler handles HTTP requests for wiki page operations
 type WikiPageHandler struct {
-	wikiService  interfaces.WikiPageService
-	kbService    interfaces.KnowledgeBaseService
-	lintService  *service.WikiLintService
-	auditService interfaces.AuditLogService
+	wikiService    interfaces.WikiPageService
+	kbService      interfaces.KnowledgeBaseService
+	lintService    *service.WikiLintService
+	auditService   interfaces.AuditLogService
+	taskEnqueuer   interfaces.TaskEnqueuer
+	sessionService interfaces.SessionService
 }
 
 // NewWikiPageHandler creates a new wiki page handler
@@ -32,12 +36,16 @@ func NewWikiPageHandler(
 	kbService interfaces.KnowledgeBaseService,
 	lintService *service.WikiLintService,
 	auditService interfaces.AuditLogService,
+	taskEnqueuer interfaces.TaskEnqueuer,
+	sessionService interfaces.SessionService,
 ) *WikiPageHandler {
 	return &WikiPageHandler{
-		wikiService:  wikiService,
-		kbService:    kbService,
-		lintService:  lintService,
-		auditService: auditService,
+		wikiService:    wikiService,
+		kbService:      kbService,
+		lintService:    lintService,
+		auditService:   auditService,
+		taskEnqueuer:   taskEnqueuer,
+		sessionService: sessionService,
 	}
 }
 
@@ -903,8 +911,10 @@ func (h *WikiPageHandler) GetStats(c *gin.Context) {
 // @Produce      json
 // @Param        kb_id  path   string  true   "Knowledge base ID"
 // @Param        slug   query  string  false  "Filter by page slug"
-// @Param        status query  string  false  "Filter by status (pending, ignored, resolved)"
-// @Success      200  {array}  types.WikiPageIssue
+// @Param        status    query  string  false  "Filter by status (open, actionable, unresolved, ignored, resolved)"
+// @Param        page      query  int     false  "Page number"
+// @Param        page_size query  int     false  "Page size (max 100)"
+// @Success      200  {object}  types.WikiIssueListResponse
 // @Security     Bearer
 // @Router       /knowledgebase/{kb_id}/wiki/issues [get]
 func (h *WikiPageHandler) ListIssues(c *gin.Context) {
@@ -916,8 +926,10 @@ func (h *WikiPageHandler) ListIssues(c *gin.Context) {
 
 	slug := c.Query("slug")
 	status := c.Query("status")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 
-	issues, err := h.wikiService.ListIssues(c.Request.Context(), kbID, slug, status)
+	issues, err := h.wikiService.ListIssuesPage(c.Request.Context(), kbID, slug, status, page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -940,7 +952,7 @@ func (h *WikiPageHandler) ListIssues(c *gin.Context) {
 // @Security     Bearer
 // @Router       /knowledgebase/{kb_id}/wiki/issues/{issue_id}/status [put]
 func (h *WikiPageHandler) UpdateIssueStatus(c *gin.Context) {
-	_, _, err := h.validateWikiKB(c)
+	kbID, _, err := h.validateWikiKB(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -953,25 +965,174 @@ func (h *WikiPageHandler) UpdateIssueStatus(c *gin.Context) {
 	}
 
 	var req struct {
-		Status string `json:"status" binding:"required"`
+		Status  string `json:"status" binding:"required"`
+		Summary string `json:"summary"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
 		return
 	}
 
-	validStatuses := map[string]bool{"pending": true, "ignored": true, "resolved": true}
+	validStatuses := map[string]bool{"open": true, "pending": true, "ignored": true, "resolved": true}
 	if !validStatuses[req.Status] {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid status. Must be pending, ignored, or resolved"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid status. Must be open, pending, ignored, or resolved"})
 		return
 	}
 
-	if err := h.wikiService.UpdateIssueStatus(c.Request.Context(), issueID, req.Status); err != nil {
+	if err := h.wikiService.UpdateIssueStatus(c.Request.Context(), kbID, issueID, req.Status, req.Summary); err != nil {
+		if stderrors.Is(err, repository.ErrWikiIssueNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		if stderrors.Is(err, repository.ErrWikiIssueConflict) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Issue status updated successfully"})
+}
+
+// StartLintRun queues a durable full-KB lint scan.
+func (h *WikiPageHandler) StartLintRun(c *gin.Context) {
+	kbID, tenantID, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	run, err := h.lintService.StartRun(c.Request.Context(), tenantID, kbID)
+	if err != nil {
+		if stderrors.Is(err, repository.ErrWikiIssueConflict) {
+			c.JSON(http.StatusConflict, gin.H{"error": "a wiki lint run is already active"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	payload, _ := json.Marshal(service.WikiLintTaskPayload{TenantID: tenantID, KnowledgeBaseID: kbID, RunID: run.ID})
+	task := asynq.NewTask(types.TypeWikiLint, payload)
+	// A lint run is itself a durable retry unit. Mark the run failed once and
+	// let the user explicitly retry, instead of replaying the same run while a
+	// newer run may already have started.
+	if _, err := h.taskEnqueuer.Enqueue(task, asynq.Queue(types.QueueWiki), asynq.MaxRetry(0)); err != nil {
+		_ = h.lintService.FailRun(c.Request.Context(), kbID, run.ID, "failed to enqueue lint task: "+err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusAccepted, run)
+}
+
+// GetLintRun returns one lint run or the latest run for a KB.
+func (h *WikiPageHandler) GetLintRun(c *gin.Context) {
+	kbID, _, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	runID := strings.TrimSpace(c.Param("run_id"))
+	var run *types.WikiLintRun
+	if runID == "latest" {
+		run, err = h.lintService.GetLatestRun(c.Request.Context(), kbID)
+	} else {
+		run, err = h.lintService.GetRun(c.Request.Context(), kbID, runID)
+	}
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, run)
+}
+
+// StartIssueRepair atomically claims an issue and starts its repair path.
+func (h *WikiPageHandler) StartIssueRepair(c *gin.Context) {
+	kbID, tenantID, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	issueID := strings.TrimSpace(c.Param("issue_id"))
+	issue, err := h.wikiService.GetIssue(c.Request.Context(), kbID, issueID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	var req struct {
+		Mode string `json:"mode"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	mode := req.Mode
+	if mode == "" || mode == "auto" {
+		mode = issue.RepairMode
+	}
+	if mode == "" {
+		mode = types.WikiIssueRepairAgent
+	}
+
+	sessionID := ""
+	if mode != types.WikiIssueRepairDeterministic {
+		session := &types.Session{
+			TenantID: tenantID, Title: "Wiki Repair: " + issue.Slug,
+			Description: "Wiki repair session for issue " + issue.ID,
+			UserID:      types.SessionOwnerIDFromContext(c.Request.Context()),
+		}
+		created, createErr := h.sessionService.CreateSession(c.Request.Context(), session)
+		if createErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": createErr.Error()})
+			return
+		}
+		sessionID = created.ID
+	}
+	attempt, claimedIssue, err := h.wikiService.BeginIssueRepair(c.Request.Context(), kbID, issueID, sessionID, mode)
+	if err != nil {
+		if sessionID != "" {
+			_ = h.sessionService.DeleteSession(c.Request.Context(), sessionID)
+		}
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+	if mode == types.WikiIssueRepairDeterministic {
+		if err := h.lintService.RepairPersistedIssue(c.Request.Context(), claimedIssue, attempt); err != nil {
+			_ = h.wikiService.FailIssueRepair(c.Request.Context(), kbID, issueID, attempt.ID, err.Error())
+		}
+	}
+	attempt, _ = h.wikiService.GetRepairAttempt(c.Request.Context(), kbID, attempt.ID)
+	c.JSON(http.StatusAccepted, gin.H{
+		"attempt":        attempt,
+		"session_id":     sessionID,
+		"initial_prompt": fmt.Sprintf("请修复 Wiki 页面 [[%s]] 的问题，问题 ID：%s。请先读取问题和页面，核对来源后执行修复。", issue.Slug, issue.ID),
+	})
+}
+
+// GetRepairAttempt returns a KB-scoped repair attempt.
+func (h *WikiPageHandler) GetRepairAttempt(c *gin.Context) {
+	kbID, _, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	attempt, err := h.wikiService.GetRepairAttempt(c.Request.Context(), kbID, strings.TrimSpace(c.Param("attempt_id")))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, attempt)
+}
+
+// ListActiveRepairAttempts returns reconnectable repair attempts for a KB.
+func (h *WikiPageHandler) ListActiveRepairAttempts(c *gin.Context) {
+	kbID, _, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	attempts, err := h.wikiService.ListActiveRepairAttempts(c.Request.Context(), kbID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, attempts)
 }
 
 // SearchPages godoc

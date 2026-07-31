@@ -116,7 +116,7 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 		sourceOutput: true,
 	},
 	toolWikiReadIssue: {
-		decodedIssueIDKeys:  map[string]struct{}{"issue_id": {}},
+		decodedIssueIDKeys:  map[string]struct{}{"issue_id": {}, "issue_ids": {}},
 		encodedIssueIDKeys:  map[string]struct{}{"id": {}},
 		encodeKnownIssueIDs: true,
 		sourceOutput:        true,

@@ -20,6 +20,12 @@ var ErrWikiPageNotFound = errors.New("wiki page not found")
 // ErrWikiPageConflict is returned when an optimistic lock conflict is detected
 var ErrWikiPageConflict = errors.New("wiki page version conflict")
 
+// ErrWikiIssueNotFound is returned when a KB-scoped issue or run cannot be found.
+var ErrWikiIssueNotFound = errors.New("wiki issue not found")
+
+// ErrWikiIssueConflict is returned when an issue or lint lifecycle CAS fails.
+var ErrWikiIssueConflict = errors.New("wiki issue lifecycle conflict")
+
 // wikiPageRepository implements the WikiPageRepository interface
 type wikiPageRepository struct {
 	db *gorm.DB
@@ -84,6 +90,109 @@ func (r *wikiPageRepository) UpdateWithRevision(
 		}
 		return updateWikiPageRow(tx, page)
 	})
+}
+
+// RenameWithRevision preserves page identity while moving every relationship
+// that uses the slug as a denormalized address. The page row, its children,
+// open issue bindings and reverse-link metadata advance in one transaction.
+func (r *wikiPageRepository) RenameWithRevision(
+	ctx context.Context, page *types.WikiPage, newSlug string, rev *types.WikiPageRevision,
+) error {
+	oldSlug := page.Slug
+	expectedVersion := page.Version
+	now := time.Now()
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var conflictCount int64
+		if err := tx.Model(&types.WikiPage{}).
+			Where("knowledge_base_id = ? AND slug = ?", page.KnowledgeBaseID, newSlug).
+			Count(&conflictCount).Error; err != nil {
+			return err
+		}
+		if conflictCount > 0 {
+			return ErrWikiPageConflict
+		}
+		if rev != nil {
+			if err := tx.Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "page_id"}, {Name: "version"}}, DoNothing: true,
+			}).Create(rev).Error; err != nil {
+				return err
+			}
+		}
+
+		// This page is the source named in each target's in_links. Keep that
+		// denormalized reverse edge aligned with the new slug.
+		for _, targetSlug := range page.OutLinks {
+			var target types.WikiPage
+			if err := tx.Where("knowledge_base_id = ? AND slug = ?", page.KnowledgeBaseID, targetSlug).
+				First(&target).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					continue
+				}
+				return err
+			}
+			changed := false
+			for i := range target.InLinks {
+				if target.InLinks[i] == oldSlug {
+					target.InLinks[i] = newSlug
+					changed = true
+				}
+			}
+			if changed {
+				if err := tx.Model(&types.WikiPage{}).Where("id = ?", target.ID).
+					Updates(map[string]interface{}{"in_links": target.InLinks, "updated_at": now}).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		result := tx.Model(&types.WikiPage{}).
+			Where("id = ? AND knowledge_base_id = ? AND slug = ? AND version = ?",
+				page.ID, page.KnowledgeBaseID, oldSlug, expectedVersion).
+			Updates(map[string]interface{}{
+				"slug": newSlug, "version": expectedVersion + 1,
+				"last_edit_source": page.LastEditSource, "last_editor_id": page.LastEditorID,
+				"updated_at": now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrWikiPageConflict
+		}
+		if err := tx.Model(&types.WikiPage{}).
+			Where("knowledge_base_id = ? AND parent_slug = ?", page.KnowledgeBaseID, oldSlug).
+			Updates(map[string]interface{}{"parent_slug": newSlug, "updated_at": now}).Error; err != nil {
+			return err
+		}
+
+		// Record the mutation before moving the issue slug so a repairing issue
+		// can later pass the typed postcondition verifier. The table guard keeps
+		// rolling upgrades safe while migration 79 is still being applied.
+		if tx.Migrator().HasTable(&types.WikiRepairAttempt{}) && tx.Migrator().HasTable(&types.WikiPageIssue{}) {
+			if err := tx.Exec(`
+UPDATE wiki_repair_attempts
+SET action = ?, updated_at = ?
+WHERE knowledge_base_id = ? AND id IN (
+  SELECT active_attempt_id FROM wiki_page_issues
+  WHERE knowledge_base_id = ? AND page_id = ? AND active_attempt_id <> ''
+)`, "renamed", now, page.KnowledgeBaseID, page.KnowledgeBaseID, page.ID).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&types.WikiPageIssue{}).
+				Where("knowledge_base_id = ? AND page_id = ?", page.KnowledgeBaseID, page.ID).
+				Updates(map[string]interface{}{"slug": newSlug, "updated_at": now}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	page.Slug = newSlug
+	page.Version = expectedVersion + 1
+	page.UpdatedAt = now
+	return nil
 }
 
 // updateWikiPageRow performs the versioned page write on the given handle
@@ -1097,16 +1206,45 @@ func (r *wikiPageRepository) ListRecentForSuggestions(
 
 // Delete soft-deletes a wiki page by knowledge base ID and slug
 func (r *wikiPageRepository) Delete(ctx context.Context, kbID string, slug string) error {
-	result := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ? AND slug = ?", kbID, slug).
-		Delete(&types.WikiPage{})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return ErrWikiPageNotFound
-	}
-	return nil
+	now := time.Now()
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var page types.WikiPage
+		if err := tx.Where("knowledge_base_id = ? AND slug = ?", kbID, slug).First(&page).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrWikiPageNotFound
+			}
+			return err
+		}
+		if tx.Migrator().HasTable(&types.WikiRepairAttempt{}) && tx.Migrator().HasTable(&types.WikiPageIssue{}) {
+			if err := tx.Exec(`
+UPDATE wiki_repair_attempts
+SET action = ?, updated_at = ?
+WHERE knowledge_base_id = ? AND id IN (
+  SELECT active_attempt_id FROM wiki_page_issues
+  WHERE knowledge_base_id = ? AND page_id = ? AND active_attempt_id <> ''
+)`, "deleted", now, kbID, kbID, page.ID).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&types.WikiPageIssue{}).
+				Where("knowledge_base_id = ? AND page_id = ? AND active_attempt_id = ''", kbID, page.ID).
+				Where("status IN ?", []string{types.WikiIssueStatusOpen, types.WikiIssueStatusFailed, "pending"}).
+				Updates(map[string]interface{}{
+					"status": types.WikiIssueStatusResolved, "resolved_at": now,
+					"resolution_action": "page_deleted", "resolution_summary": "The affected page was deleted.",
+					"updated_at": now,
+				}).Error; err != nil {
+				return err
+			}
+		}
+		result := tx.Where("knowledge_base_id = ? AND slug = ?", kbID, slug).Delete(&types.WikiPage{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrWikiPageNotFound
+		}
+		return nil
+	})
 }
 
 // DeleteByID soft-deletes a wiki page by ID
@@ -1230,7 +1368,9 @@ func (r *wikiPageRepository) ListIssues(ctx context.Context, kbID string, slug s
 	if slug != "" {
 		query = query.Where("slug = ?", slug)
 	}
-	if status != "" {
+	if statuses := wikiIssueStatusesForFilter(status); len(statuses) > 0 {
+		query = query.Where("status IN ?", statuses)
+	} else if status != "" {
 		query = query.Where("status = ?", status)
 	}
 
@@ -1241,8 +1381,319 @@ func (r *wikiPageRepository) ListIssues(ctx context.Context, kbID string, slug s
 	return issues, nil
 }
 
-func (r *wikiPageRepository) UpdateIssueStatus(ctx context.Context, issueID string, status string) error {
+func (r *wikiPageRepository) ListIssuesPage(
+	ctx context.Context, kbID, slug, status string, page, pageSize int,
+) ([]*types.WikiPageIssue, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	query := r.db.WithContext(ctx).Model(&types.WikiPageIssue{}).
+		Where("knowledge_base_id = ?", kbID)
+	if slug != "" {
+		query = query.Where("slug = ?", slug)
+	}
+	if statuses := wikiIssueStatusesForFilter(status); len(statuses) > 0 {
+		query = query.Where("status IN ?", statuses)
+	} else if status != "" {
+		query = query.Where("status = ?", status)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var issues []*types.WikiPageIssue
+	err := query.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&issues).Error
+	return issues, total, err
+}
+
+func (r *wikiPageRepository) CountIssues(ctx context.Context, kbID, status string) (int64, error) {
+	query := r.db.WithContext(ctx).Model(&types.WikiPageIssue{}).
+		Where("knowledge_base_id = ?", kbID)
+	if statuses := wikiIssueStatusesForFilter(status); len(statuses) > 0 {
+		query = query.Where("status IN ?", statuses)
+	} else if status != "" {
+		query = query.Where("status = ?", status)
+	}
+	var count int64
+	err := query.Count(&count).Error
+	return count, err
+}
+
+func wikiIssueStatusesForFilter(status string) []string {
+	switch status {
+	case "actionable":
+		return []string{types.WikiIssueStatusOpen, types.WikiIssueStatusFailed, "pending"}
+	case "unresolved":
+		return []string{
+			types.WikiIssueStatusOpen, types.WikiIssueStatusClaimed, types.WikiIssueStatusRepairing,
+			types.WikiIssueStatusVerifying, types.WikiIssueStatusFailed, "pending",
+		}
+	default:
+		return nil
+	}
+}
+
+func (r *wikiPageRepository) GetIssue(ctx context.Context, kbID, issueID string) (*types.WikiPageIssue, error) {
+	var issue types.WikiPageIssue
+	err := r.db.WithContext(ctx).
+		Where("knowledge_base_id = ? AND id = ?", kbID, issueID).
+		First(&issue).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrWikiIssueNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &issue, nil
+}
+
+func (r *wikiPageRepository) UpdateIssueLifecycle(
+	ctx context.Context, kbID, issueID string, from []string, updates map[string]interface{},
+) error {
+	query := r.db.WithContext(ctx).Model(&types.WikiPageIssue{}).
+		Where("knowledge_base_id = ? AND id = ?", kbID, issueID)
+	if len(from) > 0 {
+		query = query.Where("status IN ?", from)
+	}
+	updates["updated_at"] = time.Now()
+	result := query.Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrWikiIssueConflict
+	}
+	return nil
+}
+
+func (r *wikiPageRepository) UpsertLintIssue(ctx context.Context, issue *types.WikiPageIssue) error {
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "knowledge_base_id"}, {Name: "fingerprint"}},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"page_id":               issue.PageID,
+			"slug":                  issue.Slug,
+			"issue_type":            issue.IssueType,
+			"severity":              issue.Severity,
+			"description":           issue.Description,
+			"evidence":              issue.Evidence,
+			"repair_mode":           issue.RepairMode,
+			"detected_page_version": issue.DetectedPageVersion,
+			"last_seen_run_id":      issue.LastSeenRunID,
+			"last_seen_at":          issue.LastSeenAt,
+			"occurrence_count":      gorm.Expr("wiki_page_issues.occurrence_count + 1"),
+			"status": gorm.Expr(
+				"CASE WHEN wiki_page_issues.status IN ? THEN ? ELSE wiki_page_issues.status END",
+				[]string{types.WikiIssueStatusResolved, types.WikiIssueStatusFailed, "pending"}, types.WikiIssueStatusOpen,
+			),
+			"updated_at": time.Now(),
+		}),
+	}).Create(issue).Error
+}
+
+func (r *wikiPageRepository) ResolveMissingLintIssues(
+	ctx context.Context, kbID, runID string, resolvedAt time.Time,
+) error {
 	return r.db.WithContext(ctx).Model(&types.WikiPageIssue{}).
-		Where("id = ?", issueID).
-		Update("status", status).Error
+		Where("knowledge_base_id = ? AND source = ?", kbID, types.WikiIssueSourceLint).
+		Where("last_seen_run_id <> ?", runID).
+		Where("status IN ?", []string{types.WikiIssueStatusOpen, types.WikiIssueStatusFailed, "pending"}).
+		Updates(map[string]interface{}{
+			"status":                types.WikiIssueStatusResolved,
+			"resolved_at":           resolvedAt,
+			"resolution_action":     "lint_no_longer_detected",
+			"resolution_summary":    "The issue was not present in a complete subsequent lint run.",
+			"active_attempt_id":     "",
+			"resolved_page_version": gorm.Expr("detected_page_version"),
+			"updated_at":            resolvedAt,
+		}).Error
+}
+
+func (r *wikiPageRepository) ClaimIssueAndCreateAttempt(
+	ctx context.Context, issue *types.WikiPageIssue, attempt *types.WikiRepairAttempt,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&types.WikiPageIssue{}).
+			Where("id = ? AND knowledge_base_id = ? AND status IN ?", issue.ID, issue.KnowledgeBaseID,
+				[]string{types.WikiIssueStatusOpen, types.WikiIssueStatusFailed, "pending"}).
+			Updates(map[string]interface{}{
+				"status":            types.WikiIssueStatusRepairing,
+				"active_attempt_id": attempt.ID,
+				"claimed_at":        attempt.StartedAt,
+				"updated_at":        time.Now(),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrWikiIssueConflict
+		}
+		return tx.Create(attempt).Error
+	})
+}
+
+func (r *wikiPageRepository) CompleteIssueRepair(
+	ctx context.Context, issue *types.WikiPageIssue, attempt *types.WikiRepairAttempt,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&types.WikiRepairAttempt{}).
+			Where("id = ? AND knowledge_base_id = ? AND issue_id = ?", attempt.ID, issue.KnowledgeBaseID, issue.ID).
+			Updates(map[string]interface{}{
+				"status":        types.WikiIssueStatusResolved,
+				"after_version": attempt.AfterVersion,
+				"action":        attempt.Action,
+				"summary":       attempt.Summary,
+				"error_message": "",
+				"finished_at":   attempt.FinishedAt,
+				"updated_at":    time.Now(),
+			})
+		if result.Error != nil || result.RowsAffected != 1 {
+			if result.Error != nil {
+				return result.Error
+			}
+			return ErrWikiIssueConflict
+		}
+		result = tx.Model(&types.WikiPageIssue{}).
+			Where("id = ? AND knowledge_base_id = ? AND active_attempt_id = ?", issue.ID, issue.KnowledgeBaseID, attempt.ID).
+			Updates(map[string]interface{}{
+				"status":                types.WikiIssueStatusResolved,
+				"active_attempt_id":     "",
+				"resolved_at":           attempt.FinishedAt,
+				"resolution_action":     attempt.Action,
+				"resolution_summary":    attempt.Summary,
+				"resolved_page_version": attempt.AfterVersion,
+				"updated_at":            time.Now(),
+			})
+		if result.Error != nil || result.RowsAffected != 1 {
+			if result.Error != nil {
+				return result.Error
+			}
+			return ErrWikiIssueConflict
+		}
+		return nil
+	})
+}
+
+func (r *wikiPageRepository) FailIssueRepair(
+	ctx context.Context, kbID, issueID, attemptID, message string, finishedAt time.Time,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&types.WikiRepairAttempt{}).
+			Where("id = ? AND knowledge_base_id = ? AND issue_id = ?", attemptID, kbID, issueID).
+			Updates(map[string]interface{}{
+				"status": types.WikiIssueStatusFailed, "error_message": message,
+				"finished_at": finishedAt, "updated_at": finishedAt,
+			}).Error; err != nil {
+			return err
+		}
+		result := tx.Model(&types.WikiPageIssue{}).
+			Where("id = ? AND knowledge_base_id = ? AND active_attempt_id = ?", issueID, kbID, attemptID).
+			Updates(map[string]interface{}{
+				"status": types.WikiIssueStatusFailed, "active_attempt_id": "", "updated_at": finishedAt,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrWikiIssueConflict
+		}
+		return nil
+	})
+}
+
+func (r *wikiPageRepository) GetRepairAttempt(
+	ctx context.Context, kbID, attemptID string,
+) (*types.WikiRepairAttempt, error) {
+	var attempt types.WikiRepairAttempt
+	err := r.db.WithContext(ctx).Where("knowledge_base_id = ? AND id = ?", kbID, attemptID).First(&attempt).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrWikiIssueNotFound
+	}
+	return &attempt, err
+}
+
+func (r *wikiPageRepository) ListActiveRepairAttempts(
+	ctx context.Context, kbID string,
+) ([]*types.WikiRepairAttempt, error) {
+	var attempts []*types.WikiRepairAttempt
+	err := r.db.WithContext(ctx).
+		Where("knowledge_base_id = ? AND status IN ?", kbID,
+			[]string{types.WikiIssueStatusClaimed, types.WikiIssueStatusRepairing, types.WikiIssueStatusVerifying}).
+		Order("created_at DESC").Find(&attempts).Error
+	return attempts, err
+}
+
+func (r *wikiPageRepository) CreateLintRun(ctx context.Context, run *types.WikiLintRun) error {
+	now := time.Now()
+	// A worker can disappear after claiming a run. Expire only clearly stale
+	// records so the partial unique index cannot permanently block future
+	// health checks; six hours leaves ample room for very large KB scans.
+	if err := r.db.WithContext(ctx).Model(&types.WikiLintRun{}).
+		Where("knowledge_base_id = ? AND status IN ? AND updated_at < ?",
+			run.KnowledgeBaseID, []string{"queued", "running"}, now.Add(-6*time.Hour)).
+		Updates(map[string]interface{}{
+			"status": "failed", "error_message": "Lint run expired after the worker stopped reporting progress.",
+			"finished_at": now, "updated_at": now,
+		}).Error; err != nil {
+		return err
+	}
+	var active int64
+	if err := r.db.WithContext(ctx).Model(&types.WikiLintRun{}).
+		Where("knowledge_base_id = ? AND status IN ?", run.KnowledgeBaseID, []string{"queued", "running"}).
+		Count(&active).Error; err != nil {
+		return err
+	}
+	if active > 0 {
+		return ErrWikiIssueConflict
+	}
+	if err := r.db.WithContext(ctx).Create(run).Error; err != nil {
+		// The partial unique index is the race-safe backstop for two starts
+		// that both passed the count before either inserted.
+		lower := strings.ToLower(err.Error())
+		if strings.Contains(lower, "unique") || strings.Contains(lower, "duplicate") {
+			return ErrWikiIssueConflict
+		}
+		return err
+	}
+	return nil
+}
+
+func (r *wikiPageRepository) UpdateLintRun(ctx context.Context, run *types.WikiLintRun) error {
+	result := r.db.WithContext(ctx).Model(&types.WikiLintRun{}).
+		Where("id = ? AND knowledge_base_id = ?", run.ID, run.KnowledgeBaseID).
+		Updates(map[string]interface{}{
+			"status": run.Status, "progress": run.Progress, "finding_count": run.FindingCount,
+			"error_message": run.ErrorMessage, "started_at": run.StartedAt,
+			"finished_at": run.FinishedAt, "updated_at": time.Now(),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrWikiIssueNotFound
+	}
+	return nil
+}
+
+func (r *wikiPageRepository) GetLintRun(ctx context.Context, kbID, runID string) (*types.WikiLintRun, error) {
+	var run types.WikiLintRun
+	err := r.db.WithContext(ctx).Where("knowledge_base_id = ? AND id = ?", kbID, runID).First(&run).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrWikiIssueNotFound
+	}
+	return &run, err
+}
+
+func (r *wikiPageRepository) GetLatestLintRun(ctx context.Context, kbID string) (*types.WikiLintRun, error) {
+	var run types.WikiLintRun
+	err := r.db.WithContext(ctx).Where("knowledge_base_id = ?", kbID).Order("created_at DESC").First(&run).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrWikiIssueNotFound
+	}
+	return &run, err
 }

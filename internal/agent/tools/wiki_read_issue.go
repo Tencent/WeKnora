@@ -27,6 +27,11 @@ func NewWikiReadIssueTool(wikiService interfaces.WikiPageService, kbIDs []string
       "type": "string",
       "description": "Optional: The short iN ID of a specific issue from an earlier wiki_read_issue result."
     },
+	"issue_ids": {
+	  "type": "array",
+	  "items": {"type": "string"},
+	  "description": "Optional list of short iN issue IDs to read in one call."
+	},
     "slug": {
       "type": "string",
       "description": "Optional: The slug of the wiki page to list pending issues for."
@@ -42,17 +47,22 @@ func NewWikiReadIssueTool(wikiService interfaces.WikiPageService, kbIDs []string
 
 func (t *wikiReadIssueTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	var params struct {
-		IssueID string `json:"issue_id"`
-		Slug    string `json:"slug"`
+		IssueID  string   `json:"issue_id"`
+		IssueIDs []string `json:"issue_ids"`
+		Slug     string   `json:"slug"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return &types.ToolResult{Success: false, Error: "Invalid parameters: " + err.Error()}, nil
 	}
 
 	issueID := strings.TrimSpace(params.IssueID)
+	issueIDs := append([]string(nil), params.IssueIDs...)
+	if issueID != "" {
+		issueIDs = append(issueIDs, issueID)
+	}
 	slug := strings.TrimSpace(params.Slug)
 
-	if issueID == "" && slug == "" {
+	if len(issueIDs) == 0 && slug == "" {
 		return &types.ToolResult{Success: false, Error: "Either issue_id or slug is required"}, nil
 	}
 
@@ -60,18 +70,26 @@ func (t *wikiReadIssueTool) Execute(ctx context.Context, args json.RawMessage) (
 		return &types.ToolResult{Success: false, Error: "No knowledge bases available"}, nil
 	}
 
-	if issueID != "" {
-		issue, err := resolveWikiIssue(ctx, t.wikiService, issueID, t.kbIDs)
-		if err != nil {
-			return &types.ToolResult{Success: false, Error: err.Error()}, nil
+	if len(issueIDs) > 0 {
+		resolved := make([]*types.WikiPageIssue, 0, len(issueIDs))
+		for _, id := range dedupNonEmptyStrings(issueIDs) {
+			issue, err := resolveWikiIssue(ctx, t.wikiService, id, t.kbIDs)
+			if err != nil {
+				return &types.ToolResult{Success: false, Error: err.Error()}, nil
+			}
+			resolved = append(resolved, issue)
 		}
-		out, _ := json.MarshalIndent(issue, "", "  ")
+		var payload interface{} = resolved
+		if len(resolved) == 1 {
+			payload = resolved[0]
+		}
+		out, _ := json.MarshalIndent(payload, "", "  ")
 		return &types.ToolResult{Success: true, Output: string(out)}, nil
 	}
 
 	var issues []*types.WikiPageIssue
 	for _, kbID := range dedupNonEmptyStrings(t.kbIDs) {
-		kbIssues, err := t.wikiService.ListIssues(ctx, kbID, slug, "pending")
+		kbIssues, err := t.wikiService.ListIssues(ctx, kbID, slug, "actionable")
 		if err != nil {
 			return &types.ToolResult{Success: false, Error: "Failed to list issues: " + err.Error()}, nil
 		}

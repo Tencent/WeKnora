@@ -1054,11 +1054,27 @@ CREATE TABLE IF NOT EXISTS wiki_page_issues (
     id                    VARCHAR(36) PRIMARY KEY,
     tenant_id             INTEGER NOT NULL,
     knowledge_base_id     VARCHAR(36) NOT NULL,
+    page_id               VARCHAR(36) NOT NULL DEFAULT '',
     slug                  VARCHAR(255) NOT NULL,
     issue_type            VARCHAR(50) NOT NULL,
+    severity              VARCHAR(20) NOT NULL DEFAULT 'warning',
+    source                VARCHAR(20) NOT NULL DEFAULT 'agent',
+    fingerprint           VARCHAR(64) NOT NULL DEFAULT '',
     description           TEXT NOT NULL,
     suspected_knowledge_ids TEXT,
-    status                VARCHAR(20) NOT NULL DEFAULT 'pending',
+    evidence              TEXT NOT NULL DEFAULT '{}',
+    repair_mode           VARCHAR(20) NOT NULL DEFAULT 'agent',
+    detected_page_version INTEGER NOT NULL DEFAULT 0,
+    last_seen_run_id      VARCHAR(36) NOT NULL DEFAULT '',
+    last_seen_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+    occurrence_count      INTEGER NOT NULL DEFAULT 1,
+    status                VARCHAR(20) NOT NULL DEFAULT 'open',
+    active_attempt_id     VARCHAR(36) NOT NULL DEFAULT '',
+    claimed_at            DATETIME,
+    resolved_at           DATETIME,
+    resolution_action     VARCHAR(32) NOT NULL DEFAULT '',
+    resolution_summary    TEXT NOT NULL DEFAULT '',
+    resolved_page_version INTEGER NOT NULL DEFAULT 0,
     reported_by           VARCHAR(100) NOT NULL,
     created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -1076,6 +1092,55 @@ CREATE INDEX IF NOT EXISTS idx_wiki_page_issues_slug
 
 CREATE INDEX IF NOT EXISTS idx_wiki_page_issues_status
     ON wiki_page_issues(status);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_page_issues_fingerprint
+    ON wiki_page_issues(knowledge_base_id, fingerprint);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wiki_issue_fingerprint
+    ON wiki_page_issues(knowledge_base_id, fingerprint);
+
+CREATE TABLE IF NOT EXISTS wiki_lint_runs (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    rule_version VARCHAR(32) NOT NULL DEFAULT '',
+    progress INTEGER NOT NULL DEFAULT 0,
+    finding_count INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT NOT NULL DEFAULT '',
+    started_at DATETIME,
+    finished_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS wiki_repair_attempts (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    issue_id VARCHAR(36) NOT NULL,
+    page_id VARCHAR(36) NOT NULL DEFAULT '',
+    session_id VARCHAR(36) NOT NULL DEFAULT '',
+    mode VARCHAR(20) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    before_version INTEGER NOT NULL DEFAULT 0,
+    after_version INTEGER NOT NULL DEFAULT 0,
+    action VARCHAR(32) NOT NULL DEFAULT '',
+    summary TEXT NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    started_at DATETIME,
+    finished_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_lint_runs_kb_created
+    ON wiki_lint_runs(knowledge_base_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wiki_lint_runs_one_active
+    ON wiki_lint_runs(knowledge_base_id) WHERE status IN ('queued', 'running');
+CREATE INDEX IF NOT EXISTS idx_wiki_repair_attempts_issue_created
+    ON wiki_repair_attempts(issue_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wiki_repair_attempts_active
+    ON wiki_repair_attempts(knowledge_base_id, status);
 
 CREATE TABLE IF NOT EXISTS wiki_page_revisions (
     id                VARCHAR(36) PRIMARY KEY,

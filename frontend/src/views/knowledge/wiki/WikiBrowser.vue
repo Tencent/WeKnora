@@ -44,6 +44,11 @@
             })
             }}</span>
           </div>
+          <t-button v-if="props.canEdit" size="small" variant="outline" theme="default"
+            @click="showGlobalIssuesDrawer = true">
+            <template #icon><t-icon name="check-circle" /></template>
+            {{ $t('knowledgeEditor.wikiBrowser.healthCheck') }}
+          </t-button>
         </div>
 
         <!-- Legend Overlay -->
@@ -177,6 +182,11 @@
                 stats.pending_issues
             }) }}</span>
           </div>
+          <t-button v-if="props.canEdit" size="small" variant="text" theme="default"
+            @click="showGlobalIssuesDrawer = true">
+            <template #icon><t-icon name="check-circle" /></template>
+            {{ $t('knowledgeEditor.wikiBrowser.healthCheck') }}
+          </t-button>
           <t-input v-model="searchQuery" :placeholder="$t('knowledgeEditor.wikiBrowser.searchPlaceholder')" clearable
             @enter="doSearch" @clear="searchResults = null">
             <template #prefixIcon><t-icon name="search" /></template>
@@ -640,6 +650,22 @@
     <!-- Global Issues Drawer -->
     <t-drawer v-model:visible="showGlobalIssuesDrawer" :header="$t('knowledgeEditor.wikiBrowser.globalIssuesTitle')"
       size="480px" :footer="false" class="wiki-global-issues-drawer">
+      <div class="wiki-lint-toolbar">
+        <div class="wiki-lint-state">
+          <span>{{ lintRun ? lintRunStatusLabel(lintRun.status) : $t('knowledgeEditor.wikiBrowser.lintNotRun') }}</span>
+          <span v-if="lintRun && (lintRun.status === 'queued' || lintRun.status === 'running')">
+            {{ lintRun.progress }}%
+          </span>
+          <span v-else-if="lintRun?.status === 'completed'">
+            {{ $t('knowledgeEditor.wikiBrowser.lintFindings', { count: lintRun.finding_count }) }}
+          </span>
+          <span v-else-if="lintRun?.error_message" class="wiki-lint-error">{{ lintRun.error_message }}</span>
+        </div>
+        <t-button v-if="props.canEdit" size="small" theme="primary" :loading="lintRunBusy"
+          :disabled="lintRunBusy" @click="runWikiLint">
+          {{ $t('knowledgeEditor.wikiBrowser.runLint') }}
+        </t-button>
+      </div>
       <div class="wiki-issue-popup-list">
         <div v-for="issue in globalIssues" :key="issue.id" class="wiki-issue-popup-item">
           <div class="wiki-issue-popup-main">
@@ -684,14 +710,28 @@
           style="padding: 40px; text-align: center; color: var(--td-text-color-placeholder);">
           {{ $t('knowledgeEditor.wikiBrowser.globalIssuesEmpty') }}
         </div>
+        <t-button v-else-if="globalIssues.length < globalIssueTotal" variant="outline" theme="default"
+          :loading="globalIssuesLoading" @click="loadMoreGlobalIssues">
+          {{ $t('knowledgeEditor.wikiBrowser.loadMoreIssues', {
+            loaded: globalIssues.length, total: globalIssueTotal
+          }) }}
+        </t-button>
       </div>
     </t-drawer>
 
     <!-- Fix Chat Drawer -->
     <t-drawer v-model:visible="showFixDrawer" :header="$t('knowledgeEditor.wikiBrowser.fixAssistantTitle')" size="700px"
       :footer="false" class="wiki-fix-drawer">
-      <ChatView v-if="showFixDrawer" :session_id="currentFixSessionId" agentId="builtin-wiki-fixer"
-        :kbIds="[props.knowledgeBaseId]" :embeddedMode="true" />
+      <div v-if="currentRepairAttempt" class="wiki-repair-status">
+        <t-tag :theme="currentRepairAttempt.status === 'failed' ? 'danger' : currentRepairAttempt.status === 'resolved' ? 'success' : 'primary'">
+          {{ repairStatusLabel(currentRepairAttempt.status) }}
+        </t-tag>
+        <span v-if="currentRepairAttempt.error_message">{{ currentRepairAttempt.error_message }}</span>
+        <span v-else-if="currentRepairAttempt.summary">{{ currentRepairAttempt.summary }}</span>
+      </div>
+      <ChatView v-if="showFixDrawer && currentFixSessionId" :session_id="currentFixSessionId"
+        agentId="builtin-wiki-fixer" :kbIds="[props.knowledgeBaseId]" :embeddedMode="true"
+        :initialQuery="repairInitialPrompt" @initial-query-consumed="repairInitialPrompt = ''" />
     </t-drawer>
 
     <!-- Revision history drawer -->
@@ -761,9 +801,7 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
-import { useMenuStore } from '@/stores/menu'
-import { useSettingsStore } from '@/stores/settings'
+import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import { MessagePlugin } from 'tdesign-vue-next'
@@ -777,7 +815,6 @@ import {
   expandWikiDirectoryPath,
 } from './wikiDirectoryState'
 import { getKnowledgeDetails } from '@/api/knowledge-base'
-import { createSessions } from '@/api/chat'
 import ChatView from '@/views/chat/index.vue'
 import {
   listWikiPages,
@@ -796,19 +833,23 @@ import {
   searchWikiPages,
   listWikiIssues,
   updateWikiIssueStatus,
+  startWikiIssueRepair,
+  getWikiRepairAttempt,
+  listActiveWikiRepairAttempts,
+  startWikiLintRun,
+  getWikiLintRun,
   type WikiPage,
   type WikiFolderNode,
   type WikiGraphData,
   type WikiStats,
   type WikiPageIssue,
+  type WikiRepairAttempt,
+  type WikiLintRun,
   type WikiIndexGroup,
   type WikiIndexEntryDTO,
 } from '@/api/wiki'
 
-const router = useRouter()
 const route = useRoute()
-const menuStore = useMenuStore()
-const settingsStore = useSettingsStore()
 
 const { t } = useI18n()
 
@@ -942,7 +983,13 @@ const showIssuesBox = ref(false)
 const showFixDrawer = ref(false)
 const showGlobalIssuesDrawer = ref(false)
 const globalIssues = ref<WikiPageIssue[]>([])
+const globalIssuePage = ref(1)
+const globalIssueTotal = ref(0)
+const globalIssuesLoading = ref(false)
+const lintRun = ref<WikiLintRun | null>(null)
 const currentFixSessionId = ref('')
+const currentRepairAttempt = ref<WikiRepairAttempt | null>(null)
+const repairInitialPrompt = ref('')
 const stats = ref<WikiStats | null>(null)
 const graphData = ref<WikiGraphData | null>(null)
 const searchQuery = ref('')
@@ -969,11 +1016,183 @@ const GRAPH_OVERVIEW_LIMIT = 500
 const GRAPH_EGO_LIMIT = 500
 const GRAPH_EGO_DEFAULT_DEPTH = 1
 
+function issueItems(response: any): WikiPageIssue[] {
+  const data = response?.data ?? response
+  if (Array.isArray(data)) return data
+  return Array.isArray(data?.items) ? data.items : []
+}
+
+function issueTotal(response: any): number {
+  const data = response?.data ?? response
+  return Number(data?.total ?? (Array.isArray(data) ? data.length : 0))
+}
+
+const lintRunBusy = computed(() => lintRun.value?.status === 'queued' || lintRun.value?.status === 'running')
+
+function lintRunStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    queued: t('knowledgeEditor.wikiBrowser.lintQueued'),
+    running: t('knowledgeEditor.wikiBrowser.lintRunning'),
+    completed: t('knowledgeEditor.wikiBrowser.lintCompleted'),
+    failed: t('knowledgeEditor.wikiBrowser.lintFailed'),
+  }
+  return labels[status] || status
+}
+
+async function loadGlobalIssues(reset = true) {
+  if (globalIssuesLoading.value) return
+  globalIssuesLoading.value = true
+  try {
+    const page = reset ? 1 : globalIssuePage.value + 1
+    const res = await listWikiIssues(props.knowledgeBaseId, '', 'actionable', page, 50)
+    const items = issueItems(res)
+    globalIssues.value = reset ? items : [...globalIssues.value, ...items]
+    globalIssuePage.value = page
+    globalIssueTotal.value = issueTotal(res)
+  } finally {
+    globalIssuesLoading.value = false
+  }
+}
+
+function loadMoreGlobalIssues() {
+  return loadGlobalIssues(false)
+}
+
+let lintPollTimer: ReturnType<typeof setInterval> | null = null
+
+function stopLintPolling() {
+  if (lintPollTimer) {
+    clearInterval(lintPollTimer)
+    lintPollTimer = null
+  }
+}
+
+async function pollLintRun() {
+  const runId = lintRun.value?.id || 'latest'
+  try {
+    const res = await getWikiLintRun(props.knowledgeBaseId, runId)
+    lintRun.value = ((res as any).data || res) as WikiLintRun
+    if (!lintRunBusy.value) {
+      stopLintPolling()
+      await Promise.all([loadGlobalIssues(true), loadStats()])
+      if (lintRun.value.status === 'completed') {
+        MessagePlugin.success(t('knowledgeEditor.wikiBrowser.lintCompleted'))
+      } else if (lintRun.value.status === 'failed') {
+        MessagePlugin.error(lintRun.value.error_message || t('knowledgeEditor.wikiBrowser.lintFailed'))
+      }
+    }
+  } catch (e) {
+    console.error('Failed to poll Wiki lint run:', e)
+  }
+}
+
+function startLintPolling() {
+  stopLintPolling()
+  lintPollTimer = setInterval(pollLintRun, 1500)
+}
+
+async function runWikiLint() {
+  if (lintRunBusy.value) return
+  try {
+    const res = await startWikiLintRun(props.knowledgeBaseId)
+    lintRun.value = ((res as any).data || res) as WikiLintRun
+    startLintPolling()
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeEditor.wikiBrowser.lintFailed'))
+  }
+}
+
+async function restoreLatestLintRun() {
+  try {
+    const res = await getWikiLintRun(props.knowledgeBaseId)
+    lintRun.value = ((res as any).data || res) as WikiLintRun
+    if (lintRunBusy.value) startLintPolling()
+  } catch {
+    lintRun.value = null
+  }
+}
+
+function repairStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    claimed: t('knowledgeEditor.wikiBrowser.repairClaimed'),
+    repairing: t('knowledgeEditor.wikiBrowser.repairRepairing'),
+    verifying: t('knowledgeEditor.wikiBrowser.repairVerifying'),
+    resolved: t('knowledgeEditor.wikiBrowser.repairResolved'),
+    failed: t('knowledgeEditor.wikiBrowser.repairFailed'),
+  }
+  return labels[status] || status
+}
+
+let repairPollTimer: ReturnType<typeof setInterval> | null = null
+
+function stopRepairPolling() {
+  if (repairPollTimer) {
+    clearInterval(repairPollTimer)
+    repairPollTimer = null
+  }
+}
+
+async function refreshWikiAfterRepair() {
+  if (selectedPage.value) {
+    try {
+      const slug = selectedPage.value.slug
+      const res = await getWikiPage(props.knowledgeBaseId, slug)
+      selectedPage.value = (res as any).data || res as any
+      await loadPageIssues(slug)
+    } catch {
+      selectedPage.value = null
+      pageIssues.value = []
+    }
+  }
+  await Promise.all([loadPages(), loadStats()])
+  if (showGlobalIssuesDrawer.value) {
+    await loadGlobalIssues(true)
+  }
+  if (props.view === 'graph') await loadGraph()
+}
+
+async function pollRepairAttempt() {
+  const attemptId = currentRepairAttempt.value?.id
+  if (!attemptId) return
+  try {
+    const res = await getWikiRepairAttempt(props.knowledgeBaseId, attemptId)
+    const attempt = ((res as any).data || res) as WikiRepairAttempt
+    currentRepairAttempt.value = attempt
+    if (attempt.status === 'resolved' || attempt.status === 'failed') {
+      stopRepairPolling()
+      await refreshWikiAfterRepair()
+      if (attempt.status === 'resolved') MessagePlugin.success(t('knowledgeEditor.wikiBrowser.repairResolved'))
+      else MessagePlugin.error(attempt.error_message || t('knowledgeEditor.wikiBrowser.repairFailed'))
+    }
+  } catch (e) {
+    console.error('Failed to poll Wiki repair attempt:', e)
+  }
+}
+
+function startRepairPolling() {
+  stopRepairPolling()
+  repairPollTimer = setInterval(pollRepairAttempt, 1500)
+}
+
+async function restoreActiveRepair() {
+  if (!props.canEdit) return
+  try {
+    const res = await listActiveWikiRepairAttempts(props.knowledgeBaseId)
+    const attempts = ((res as any).data || res) as WikiRepairAttempt[]
+    if (!Array.isArray(attempts) || attempts.length === 0) return
+    currentRepairAttempt.value = attempts[0]
+    currentFixSessionId.value = attempts[0].session_id || ''
+    showFixDrawer.value = true
+    startRepairPolling()
+  } catch (e) {
+    console.error('Failed to restore active Wiki repair:', e)
+  }
+}
+
 watch(showGlobalIssuesDrawer, async (val) => {
   if (val) {
     try {
-      const res = await listWikiIssues(props.knowledgeBaseId, '', 'pending')
-      globalIssues.value = (res as any).data || res as any || []
+      await Promise.all([loadGlobalIssues(true), restoreLatestLintRun()])
     } catch (e) {
       console.error('Failed to load global wiki issues:', e)
       globalIssues.value = []
@@ -993,10 +1212,9 @@ async function navigateToSlugAndFix(slug: string) {
 
 async function handleGlobalIssueIgnore(issueId: string) {
   try {
-    await updateWikiIssueStatus(props.knowledgeBaseId, issueId, 'ignored')
+    await updateWikiIssueStatus(props.knowledgeBaseId, issueId, 'ignored', 'Ignored by a Wiki editor.')
     // Refresh list
-    const res = await listWikiIssues(props.knowledgeBaseId, '', 'pending')
-    globalIssues.value = (res as any).data || res as any || []
+    await loadGlobalIssues(true)
     loadStats()
   } catch (e) {
     console.error('Failed to update issue status:', e)
@@ -3448,8 +3666,8 @@ async function growFrontier() {
 
 async function loadPageIssues(slug: string) {
   try {
-    const res = await listWikiIssues(props.knowledgeBaseId, slug, 'pending')
-    pageIssues.value = (res as any).data || res as any || []
+    const res = await listWikiIssues(props.knowledgeBaseId, slug, 'actionable', 1, 100)
+    pageIssues.value = issueItems(res)
     showIssuesBox.value = false
   } catch (e) {
     console.error('Failed to load wiki issues:', e)
@@ -3516,7 +3734,7 @@ function goBack() {
 
 async function handleIssueIgnore(issueId: string) {
   try {
-    await updateWikiIssueStatus(props.knowledgeBaseId, issueId, 'ignored')
+    await updateWikiIssueStatus(props.knowledgeBaseId, issueId, 'ignored', 'Ignored by a Wiki editor.')
     if (selectedPage.value) {
       await loadPageIssues(selectedPage.value.slug)
     }
@@ -3525,56 +3743,36 @@ async function handleIssueIgnore(issueId: string) {
   }
 }
 
-async function startFixSession(prompt: string) {
+async function startIssueRepair(issue: WikiPageIssue) {
   try {
-    const res = await createSessions({})
-    if (res && (res as any).data && (res as any).data.id) {
-      const sessionId = (res as any).data.id
-      const now = new Date().toISOString()
-
-      menuStore.updataMenuChildren({
-        title: t('knowledgeEditor.wikiBrowser.fixAssistantTitle'),
-        path: `chat/${sessionId}`,
-        id: sessionId,
-        isMore: false,
-        isNoTitle: true,
-        created_at: now,
-        updated_at: now
-      })
-
-      menuStore.changeIsFirstSession(true)
-      menuStore.changeFirstQuery(prompt, [], '', [])
-
-      currentFixSessionId.value = sessionId
+    const res = await startWikiIssueRepair(props.knowledgeBaseId, issue.id, 'auto')
+    const data = (res as any).data || res as any
+    currentRepairAttempt.value = data.attempt as WikiRepairAttempt
+    currentFixSessionId.value = data.session_id || ''
+    repairInitialPrompt.value = data.initial_prompt || ''
+    showIssuesBox.value = false
+    if (currentFixSessionId.value) {
       showFixDrawer.value = true
-      showIssuesBox.value = false // Hide issues box
-    } else {
-      MessagePlugin.error(t('knowledgeEditor.wikiBrowser.fixStartError'))
+    }
+    await pollRepairAttempt()
+    if (currentRepairAttempt.value && !['resolved', 'failed'].includes(currentRepairAttempt.value.status)) {
+      startRepairPolling()
     }
   } catch (e) {
-    console.error('Failed to create fix session', e)
+    console.error('Failed to start Wiki repair', e)
     MessagePlugin.error(t('knowledgeEditor.wikiBrowser.fixStartError'))
   }
 }
 
 function triggerFixIssue(issue: WikiPageIssue) {
-  if (!selectedPage.value) return
-  const prompt = t('knowledgeEditor.wikiBrowser.issueFixPromptSingle', {
-    slug: selectedPage.value.slug,
-    id: issue.id
-  })
-  startFixSession(prompt)
+  startIssueRepair(issue)
 }
 
 function triggerAutoFix() {
   if (!selectedPage.value || pageIssues.value.length === 0) return
-  let prompt = t('knowledgeEditor.wikiBrowser.issueFixPromptAutoStart', { slug: selectedPage.value.slug }) + '\n\n'
-
-  pageIssues.value.forEach((issue, idx) => {
-    prompt += `${idx + 1}. Issue ID: ${issue.id}\n`
-  })
-
-  startFixSession(prompt)
+  // Repairs on one page are intentionally serialized. Start the oldest
+  // visible issue; completion refreshes the list before another can run.
+  startIssueRepair(pageIssues.value[pageIssues.value.length - 1])
 }
 
 async function doSearch() {
@@ -4756,10 +4954,14 @@ watch(() => route.query.slug, (newSlug) => {
 onMounted(() => {
   loadPages()
   loadStats()
+  restoreActiveRepair()
+  restoreLatestLintRun()
   if (props.view === 'graph') loadGraph()
 })
 
 onUnmounted(() => {
+  stopRepairPolling()
+  stopLintPolling()
   if (statsTimer) {
     clearInterval(statsTimer)
   }
@@ -6281,6 +6483,31 @@ onUnmounted(() => {
   padding: 8px 12px;
 }
 
+.wiki-lint-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 12px 8px;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.wiki-lint-state {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+}
+
+.wiki-lint-error {
+  color: var(--td-error-color);
+  word-break: break-word;
+}
+
 .wiki-issue-popup-item {
   display: flex;
   padding: 16px;
@@ -6374,6 +6601,19 @@ onUnmounted(() => {
     flex-direction: column;
     height: 100%;
     overflow: hidden;
+  }
+
+  .wiki-repair-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 0 0 auto;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: 8px;
+    color: var(--td-text-color-secondary);
+    font-size: 13px;
   }
 
   .chat {

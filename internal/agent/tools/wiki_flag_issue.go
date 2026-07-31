@@ -115,12 +115,17 @@ func (t *wikiFlagIssueTool) Execute(ctx context.Context, args json.RawMessage) (
 	issue := &types.WikiPageIssue{
 		TenantID:              page.TenantID,
 		KnowledgeBaseID:       kbID,
+		PageID:                page.ID,
 		Slug:                  slug,
 		IssueType:             params.IssueType,
 		Description:           params.Description,
 		SuspectedKnowledgeIDs: suspectedKnowledgeIDs,
+		Severity:              "warning",
+		Source:                types.WikiIssueSourceAgent,
+		RepairMode:            types.WikiIssueRepairAgent,
+		DetectedPageVersion:   page.Version,
 		ReportedBy:            "wiki-researcher-agent",
-		Status:                "pending",
+		Status:                types.WikiIssueStatusOpen,
 	}
 
 	_, err = t.wikiService.CreateIssue(ctx, issue)

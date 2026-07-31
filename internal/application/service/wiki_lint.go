@@ -2,12 +2,19 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
+	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 )
 
 // WikiLintIssueType defines the type of lint issue
@@ -40,8 +47,12 @@ type WikiLintIssue struct {
 	// broken link target, or the entity slug for a missing cross-ref). It is
 	// the structured field used by AutoFix instead of parsing Description.
 	TargetSlug  string `json:"target_slug,omitempty"`
+	PageID      string `json:"page_id,omitempty"`
+	PageVersion int    `json:"page_version,omitempty"`
 	Description string `json:"description"`
 	AutoFixable bool   `json:"auto_fixable"`
+	RepairMode  string `json:"repair_mode"`
+	Fingerprint string `json:"fingerprint"`
 }
 
 // WikiLintReport is the complete lint report for a wiki KB
@@ -58,6 +69,7 @@ type WikiLintService struct {
 	wikiService      interfaces.WikiPageService
 	kbService        interfaces.KnowledgeBaseService
 	knowledgeService interfaces.KnowledgeService
+	repo             interfaces.WikiPageRepository
 }
 
 // NewWikiLintService creates a new wiki lint service
@@ -65,11 +77,13 @@ func NewWikiLintService(
 	wikiService interfaces.WikiPageService,
 	kbService interfaces.KnowledgeBaseService,
 	knowledgeService interfaces.KnowledgeService,
+	repo interfaces.WikiPageRepository,
 ) *WikiLintService {
 	return &WikiLintService{
 		wikiService:      wikiService,
 		kbService:        kbService,
 		knowledgeService: knowledgeService,
+		repo:             repo,
 	}
 }
 
@@ -78,6 +92,120 @@ func NewWikiLintService(
 // and 200 rows × ~20KB ≈ 4MB resident at a time, which is well within
 // what we want to hold while running per-page checks.
 const lintCursorBatch = 200
+
+type wikiLintTitlePattern struct {
+	Slug       string
+	Title      string
+	RuneLength int
+}
+
+type wikiLintTitleNode struct {
+	next    map[rune]int
+	fail    int
+	outputs []int
+}
+
+// wikiLintTitleMatcher is a compact Aho-Corasick matcher. It replaces the
+// old per-page × per-entity strings.Contains loop with one linear scan per
+// page while preserving the same case-insensitive substring semantics.
+type wikiLintTitleMatcher struct {
+	nodes    []wikiLintTitleNode
+	patterns []wikiLintTitlePattern
+}
+
+func newWikiLintTitleMatcher(entitySlugs map[string]string) *wikiLintTitleMatcher {
+	m := &wikiLintTitleMatcher{nodes: []wikiLintTitleNode{{next: make(map[rune]int)}}}
+	for slug, title := range entitySlugs {
+		normalized := []rune(strings.ToLower(strings.TrimSpace(title)))
+		if len(normalized) == 0 {
+			continue
+		}
+		patternIndex := len(m.patterns)
+		m.patterns = append(m.patterns, wikiLintTitlePattern{Slug: slug, Title: title, RuneLength: len(normalized)})
+		state := 0
+		for _, ch := range normalized {
+			next, ok := m.nodes[state].next[ch]
+			if !ok {
+				next = len(m.nodes)
+				m.nodes[state].next[ch] = next
+				m.nodes = append(m.nodes, wikiLintTitleNode{next: make(map[rune]int)})
+			}
+			state = next
+		}
+		m.nodes[state].outputs = append(m.nodes[state].outputs, patternIndex)
+	}
+	queue := make([]int, 0, len(m.nodes))
+	for _, child := range m.nodes[0].next {
+		queue = append(queue, child)
+	}
+	for head := 0; head < len(queue); head++ {
+		state := queue[head]
+		for ch, child := range m.nodes[state].next {
+			queue = append(queue, child)
+			fallback := m.nodes[state].fail
+			for fallback != 0 {
+				if next, ok := m.nodes[fallback].next[ch]; ok {
+					fallback = next
+					break
+				}
+				fallback = m.nodes[fallback].fail
+			}
+			if fallback == 0 {
+				if next, ok := m.nodes[0].next[ch]; ok && next != child {
+					fallback = next
+				}
+			}
+			m.nodes[child].fail = fallback
+			m.nodes[child].outputs = append(m.nodes[child].outputs, m.nodes[fallback].outputs...)
+		}
+	}
+	return m
+}
+
+func (m *wikiLintTitleMatcher) Find(content string) []wikiLintTitlePattern {
+	if m == nil || len(m.patterns) == 0 || content == "" {
+		return nil
+	}
+	state := 0
+	seen := make(map[int]struct{})
+	contentRunes := []rune(strings.ToLower(content))
+	for position, ch := range contentRunes {
+		for state != 0 {
+			if _, ok := m.nodes[state].next[ch]; ok {
+				break
+			}
+			state = m.nodes[state].fail
+		}
+		if next, ok := m.nodes[state].next[ch]; ok {
+			state = next
+		}
+		for _, patternIndex := range m.nodes[state].outputs {
+			pattern := m.patterns[patternIndex]
+			start := position - pattern.RuneLength + 1
+			// ASCII entity names need token boundaries so "AI" does not
+			// create a second finding inside "OpenAI". CJK adjacency remains
+			// valid because those languages do not require spaces around names.
+			if start > 0 && isASCIIAlphaNumeric(contentRunes[start-1]) {
+				continue
+			}
+			if position+1 < len(contentRunes) && isASCIIAlphaNumeric(contentRunes[position+1]) {
+				continue
+			}
+			seen[patternIndex] = struct{}{}
+		}
+	}
+	matches := make([]wikiLintTitlePattern, 0, len(seen))
+	for i, pattern := range m.patterns {
+		if _, ok := seen[i]; ok {
+			matches = append(matches, pattern)
+		}
+	}
+	return matches
+}
+
+func isASCIIAlphaNumeric(ch rune) bool {
+	return ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9'
+}
 
 // RunLint performs a comprehensive health check on a wiki knowledge base.
 //
@@ -128,9 +256,8 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 	// issues per-batch and the cursor walk keeps memory bounded.
 	//
 	// We collect entity / concept titles in this pass too so the
-	// missing-cross-ref check (which is intrinsically O(N×M) in
-	// distinct entities × pages) doesn't need a second walk to find
-	// candidates. The check itself runs in a second walk because it
+	// missing-cross-ref matcher can be built once. The check itself runs
+	// in a second walk because it
 	// needs the full entity-title set to compare against any page.
 	entitySlugs := make(map[string]string) // slug -> title
 
@@ -158,6 +285,7 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 						PageSlug:    page.Slug,
 						Description: fmt.Sprintf("Page '%s' has no inbound links — it's disconnected from the wiki", page.Title),
 						AutoFixable: false,
+						PageID:      page.ID, PageVersion: page.Version, RepairMode: types.WikiIssueRepairManual,
 					})
 				}
 			}
@@ -173,19 +301,22 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 						TargetSlug:  outLink,
 						Description: fmt.Sprintf("Page '%s' links to [[%s]] which does not exist", page.Title, outLink),
 						AutoFixable: true,
+						PageID:      page.ID, PageVersion: page.Version, RepairMode: types.WikiIssueRepairDeterministic,
 					})
 				}
 			}
 
 			// Check 3: Empty content.
 			content := strings.TrimSpace(page.Content)
-			if len(content) < 50 {
+			contentLength := utf8.RuneCountInString(content)
+			if contentLength < 50 {
 				issues = append(issues, WikiLintIssue{
 					Type:        LintIssueEmptyContent,
 					Severity:    SeverityWarning,
 					PageSlug:    page.Slug,
-					Description: fmt.Sprintf("Page '%s' has very little content (%d chars)", page.Title, len(content)),
-					AutoFixable: true,
+					Description: fmt.Sprintf("Page '%s' has very little content (%d chars)", page.Title, contentLength),
+					AutoFixable: false,
+					PageID:      page.ID, PageVersion: page.Version, RepairMode: types.WikiIssueRepairAgent,
 				})
 			}
 
@@ -205,6 +336,9 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 					live, seen := knowledgeLive[kid]
 					if !seen {
 						kn, err := s.knowledgeService.GetKnowledgeByIDOnly(ctx, kid)
+						if err != nil && !errors.Is(err, repository.ErrKnowledgeNotFound) {
+							return nil, fmt.Errorf("check source knowledge %s: %w", kid, err)
+						}
 						live = err == nil && kn != nil
 						knowledgeLive[kid] = live
 					}
@@ -215,7 +349,8 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 							PageSlug:    page.Slug,
 							TargetSlug:  kid,
 							Description: fmt.Sprintf("Page '%s' references deleted knowledge %s", page.Title, kid),
-							AutoFixable: true,
+							AutoFixable: false,
+							PageID:      page.ID, PageVersion: page.Version, RepairMode: types.WikiIssueRepairAgent,
 						})
 					}
 				}
@@ -227,9 +362,10 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 		cursor = next
 	}
 
-	// Second-pass walk: missing-cross-ref check. This needs the full
-	// entitySlugs map (built in pass 1), so it has to be a separate
-	// pass — but it's still streaming.
+	// Second-pass walk: missing-cross-ref check. The matcher is built from
+	// the full entity title set and scans each page in O(content + matches),
+	// avoiding the previous O(pages × entities) nested contains loop.
+	titleMatcher := newWikiLintTitleMatcher(entitySlugs)
 	cursor = ""
 	for {
 		pages, next, err := s.wikiService.ListPagesCursor(ctx, kbID, cursor, lintCursorBatch)
@@ -240,28 +376,28 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 			break
 		}
 		for _, page := range pages {
-			lowerContent := strings.ToLower(page.Content)
 			outLinkSet := make(map[string]struct{}, len(page.OutLinks))
 			for _, l := range page.OutLinks {
 				outLinkSet[l] = struct{}{}
 			}
-			for slug, title := range entitySlugs {
-				if slug == page.Slug || title == "" {
+			for _, match := range titleMatcher.Find(page.Content) {
+				if match.Slug == page.Slug {
 					continue
 				}
-				if !strings.Contains(lowerContent, strings.ToLower(title)) {
-					continue
-				}
-				if _, linked := outLinkSet[slug]; linked {
+				if _, linked := outLinkSet[match.Slug]; linked {
 					continue
 				}
 				issues = append(issues, WikiLintIssue{
-					Type:        LintIssueMissingCrossRef,
-					Severity:    SeverityInfo,
-					PageSlug:    page.Slug,
-					TargetSlug:  slug,
-					Description: fmt.Sprintf("Page '%s' mentions '%s' but doesn't link to [[%s]]", page.Title, title, slug),
+					Type:       LintIssueMissingCrossRef,
+					Severity:   SeverityInfo,
+					PageSlug:   page.Slug,
+					TargetSlug: match.Slug,
+					Description: fmt.Sprintf(
+						"Page '%s' mentions '%s' but doesn't link to [[%s]]",
+						page.Title, match.Title, match.Slug,
+					),
 					AutoFixable: false,
+					PageID:      page.ID, PageVersion: page.Version, RepairMode: types.WikiIssueRepairAgent,
 				})
 			}
 		}
@@ -269,6 +405,13 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 			break
 		}
 		cursor = next
+	}
+
+	// Calculate health score
+	for i := range issues {
+		issues[i].Fingerprint = wikiIssueFingerprint(
+			kbID, issues[i].PageID, issues[i].PageSlug, string(issues[i].Type), issues[i].TargetSlug,
+		)
 	}
 
 	// Calculate health score
@@ -345,6 +488,159 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 	return report, nil
 }
 
+const wikiLintRuleVersion = "2026-07-v1"
+
+// WikiLintTaskPayload identifies one durable lint run queued for execution.
+type WikiLintTaskPayload struct {
+	TenantID        uint64 `json:"tenant_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	RunID           string `json:"run_id"`
+}
+
+// StartRun creates a queued lint run while enforcing one active run per KB.
+func (s *WikiLintService) StartRun(
+	ctx context.Context, tenantID uint64, kbID string,
+) (*types.WikiLintRun, error) {
+	run := &types.WikiLintRun{
+		ID: uuid.New().String(), TenantID: tenantID, KnowledgeBaseID: kbID,
+		Status: "queued", RuleVersion: wikiLintRuleVersion,
+	}
+	if err := s.repo.CreateLintRun(ctx, run); err != nil {
+		return nil, err
+	}
+	return run, nil
+}
+
+// GetRun returns a KB-scoped lint run.
+func (s *WikiLintService) GetRun(ctx context.Context, kbID, runID string) (*types.WikiLintRun, error) {
+	return s.repo.GetLintRun(ctx, kbID, runID)
+}
+
+// GetLatestRun returns the most recently created lint run for a KB.
+func (s *WikiLintService) GetLatestRun(ctx context.Context, kbID string) (*types.WikiLintRun, error) {
+	return s.repo.GetLatestLintRun(ctx, kbID)
+}
+
+// FailRun records an enqueue or execution failure on a durable lint run.
+func (s *WikiLintService) FailRun(ctx context.Context, kbID, runID, message string) error {
+	run, err := s.repo.GetLintRun(ctx, kbID, runID)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	run.Status, run.ErrorMessage, run.FinishedAt = "failed", message, &now
+	return s.repo.UpdateLintRun(ctx, run)
+}
+
+// RepairPersistedIssue executes only deterministic, typed repairs. Everything
+// else stays bound to the Wiki Fixer session created by the repair endpoint.
+func (s *WikiLintService) RepairPersistedIssue(
+	ctx context.Context, issue *types.WikiPageIssue, attempt *types.WikiRepairAttempt,
+) error {
+	if issue == nil || attempt == nil {
+		return errors.New("issue and repair attempt are required")
+	}
+	if issue.IssueType != string(LintIssueBrokenLink) {
+		return fmt.Errorf("issue type %s does not have a deterministic repair", issue.IssueType)
+	}
+	page, err := s.wikiService.GetPageBySlug(ctx, issue.KnowledgeBaseID, issue.Slug)
+	if err != nil {
+		return err
+	}
+	repaired, changed, err := s.wikiService.RepairContentLinks(
+		ctx, issue.KnowledgeBaseID, page.Slug, page.Content,
+	)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return errors.New("no unique high-confidence replacement exists for the broken link")
+	}
+	page.Content = repaired
+	if _, err := s.wikiService.UpdatePage(types.WithWikiEditSource(ctx, types.WikiEditSourcePipeline), page); err != nil {
+		return err
+	}
+	return s.wikiService.UpdateIssueStatus(
+		ctx, issue.KnowledgeBaseID, issue.ID, types.WikiIssueStatusResolved,
+		"Rewrote the broken link to its unique high-confidence live target and verified the target is no longer dangling.",
+	)
+}
+
+// Handle decodes and executes an asynchronous Wiki lint task.
+func (s *WikiLintService) Handle(ctx context.Context, task *asynq.Task) error {
+	var payload WikiLintTaskPayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return fmt.Errorf("decode wiki lint task: %w", err)
+	}
+	return s.ProcessRun(ctx, payload)
+}
+
+func lintSeverityString(severity WikiLintIssueSeverity) string {
+	switch severity {
+	case SeverityError:
+		return "high"
+	case SeverityInfo:
+		return "low"
+	default:
+		return "warning"
+	}
+}
+
+// ProcessRun scans, persists, and reconciles findings for one complete run.
+func (s *WikiLintService) ProcessRun(ctx context.Context, payload WikiLintTaskPayload) (runErr error) {
+	run, err := s.repo.GetLintRun(ctx, payload.KnowledgeBaseID, payload.RunID)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	run.Status, run.Progress, run.StartedAt = "running", 5, &now
+	if err := s.repo.UpdateLintRun(ctx, run); err != nil {
+		return err
+	}
+	defer func() {
+		if runErr == nil {
+			return
+		}
+		finished := time.Now()
+		run.Status, run.ErrorMessage, run.FinishedAt = "failed", runErr.Error(), &finished
+		_ = s.repo.UpdateLintRun(context.WithoutCancel(ctx), run)
+	}()
+
+	report, err := s.RunLint(ctx, payload.KnowledgeBaseID)
+	if err != nil {
+		return err
+	}
+	run.Progress = 80
+	_ = s.repo.UpdateLintRun(ctx, run)
+	seenAt := time.Now()
+	for _, finding := range report.Issues {
+		evidence, _ := json.Marshal(map[string]interface{}{
+			"target_slug":  finding.TargetSlug,
+			"rule_version": wikiLintRuleVersion,
+		})
+		issue := &types.WikiPageIssue{
+			ID: uuid.New().String(), TenantID: payload.TenantID, KnowledgeBaseID: payload.KnowledgeBaseID,
+			PageID: finding.PageID, Slug: finding.PageSlug, IssueType: string(finding.Type),
+			Severity: lintSeverityString(finding.Severity), Source: types.WikiIssueSourceLint,
+			Fingerprint: finding.Fingerprint, Description: finding.Description, Evidence: types.JSON(evidence),
+			RepairMode: finding.RepairMode, DetectedPageVersion: finding.PageVersion,
+			LastSeenRunID: run.ID, LastSeenAt: seenAt, OccurrenceCount: 1,
+			Status: types.WikiIssueStatusOpen, ReportedBy: "wiki-lint",
+		}
+		if err := s.repo.UpsertLintIssue(ctx, issue); err != nil {
+			return fmt.Errorf("persist lint finding: %w", err)
+		}
+	}
+	// Reconcile absence only after every detector and every upsert succeeded.
+	if err := s.repo.ResolveMissingLintIssues(ctx, payload.KnowledgeBaseID, run.ID, seenAt); err != nil {
+		return fmt.Errorf("reconcile lint findings: %w", err)
+	}
+	finished := time.Now()
+	run.Status, run.Progress, run.FindingCount, run.FinishedAt = "completed", 100, len(report.Issues), &finished
+	run.ErrorMessage = ""
+	return s.repo.UpdateLintRun(ctx, run)
+}
+
 // AutoFix attempts to automatically fix fixable issues
 func (s *WikiLintService) AutoFix(ctx context.Context, kbID string) (int, error) {
 	report, err := s.RunLint(ctx, kbID)
@@ -360,8 +656,9 @@ func (s *WikiLintService) AutoFix(ctx context.Context, kbID string) (int, error)
 
 		switch issue.Type {
 		case LintIssueBrokenLink:
-			// Replace [[broken-slug]] with plain text so the reference text is
-			// preserved but no longer renders as a dangling wiki link.
+			// Only apply the existing high-confidence rewrite helper. A link with
+			// no unique live target remains an issue instead of being destructively
+			// flattened into plain text.
 			if issue.TargetSlug == "" {
 				continue
 			}
@@ -369,51 +666,11 @@ func (s *WikiLintService) AutoFix(ctx context.Context, kbID string) (int, error)
 			if err != nil {
 				continue
 			}
-			target := issue.TargetSlug
-			page.Content = strings.ReplaceAll(page.Content, "[["+target+"]]", target)
-			if err := s.wikiService.UpdateAutoLinkedContent(ctx, page); err == nil {
-				fixed++
-			}
-
-		case LintIssueEmptyContent:
-			// Archive pages with very little content instead of deleting
-			page, err := s.wikiService.GetPageBySlug(ctx, kbID, issue.PageSlug)
-			if err != nil {
-				continue
-			}
-			// Don't archive the index page.
-			if page.PageType == types.WikiPageTypeIndex {
-				continue
-			}
-			page.Status = types.WikiPageStatusArchived
-			if _, err := s.wikiService.UpdatePage(ctx, page); err == nil {
-				fixed++
-			}
-
-		case LintIssueStaleRef:
-			// Strip source_refs that point at soft-deleted knowledge. If the
-			// page has no other live sources, delete it outright — leaving
-			// an orphan summary page is worse than removing it, because the
-			// model would still link to it from other pages and the
-			// wiki_read_source_doc drill-down would always fail.
-			if issue.TargetSlug == "" {
-				continue
-			}
-			page, err := s.wikiService.GetPageBySlug(ctx, kbID, issue.PageSlug)
-			if err != nil || page == nil {
-				continue
-			}
-			if page.PageType == types.WikiPageTypeIndex {
-				continue
-			}
-			remaining := removeSourceRef(page.SourceRefs, issue.TargetSlug)
-			if len(remaining) == 0 {
-				if err := s.wikiService.DeletePage(ctx, kbID, page.Slug); err == nil {
-					fixed++
-				}
-			} else if len(remaining) != len(page.SourceRefs) {
-				page.SourceRefs = remaining
-				if err := s.wikiService.UpdatePageMeta(ctx, page); err == nil {
+			repaired, changed, err := s.wikiService.RepairContentLinks(ctx, kbID, page.Slug, page.Content)
+			if err == nil && changed {
+				page.Content = repaired
+				pipelineCtx := types.WithWikiEditSource(ctx, types.WikiEditSourcePipeline)
+				if _, err := s.wikiService.UpdatePage(pipelineCtx, page); err == nil {
 					fixed++
 				}
 			}

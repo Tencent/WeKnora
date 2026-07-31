@@ -105,7 +105,106 @@ func setupWikiPagesTestDB(t *testing.T) *gorm.DB {
 		}
 		require.NoError(t, db.Exec(stmt).Error)
 	}
+	require.NoError(t, db.AutoMigrate(&types.WikiPageIssue{}, &types.WikiRepairAttempt{}, &types.WikiLintRun{}))
 	return db
+}
+
+func TestRenameWithRevisionPreservesIdentityAndRelationships(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+	kbID := "kb-rename"
+
+	page := makeWikiPage(kbID, "concept/old", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	page.OutLinks = types.StringArray{"concept/target"}
+	target := makeWikiPage(kbID, "concept/target", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	target.InLinks = types.StringArray{page.Slug}
+	child := makeWikiPage(kbID, "concept/child", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	child.ParentSlug = page.Slug
+	require.NoError(t, repo.Create(ctx, page))
+	require.NoError(t, repo.Create(ctx, target))
+	require.NoError(t, repo.Create(ctx, child))
+
+	now := time.Now()
+	issue := &types.WikiPageIssue{
+		ID: "issue-rename", TenantID: 1, KnowledgeBaseID: kbID, PageID: page.ID,
+		Slug: page.Slug, IssueType: "mixed_entities", Status: types.WikiIssueStatusRepairing,
+		ActiveAttemptID: "attempt-rename", Fingerprint: "rename-fingerprint", CreatedAt: now, UpdatedAt: now,
+	}
+	attempt := &types.WikiRepairAttempt{
+		ID: "attempt-rename", TenantID: 1, KnowledgeBaseID: kbID, IssueID: issue.ID,
+		PageID: page.ID, Status: types.WikiIssueStatusRepairing, BeforeVersion: page.Version,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, db.Create(issue).Error)
+	require.NoError(t, db.Create(attempt).Error)
+
+	revision := &types.WikiPageRevision{
+		ID: uuid.New().String(), TenantID: page.TenantID, KnowledgeBaseID: kbID,
+		PageID: page.ID, Slug: page.Slug, Version: page.Version, Title: page.Title,
+		PageType: page.PageType, Status: page.Status, Content: page.Content, CreatedAt: now,
+	}
+	require.NoError(t, repo.RenameWithRevision(ctx, page, "concept/new", revision))
+
+	renamed, err := repo.GetBySlug(ctx, kbID, "concept/new")
+	require.NoError(t, err)
+	assert.Equal(t, page.ID, renamed.ID)
+	assert.Equal(t, 2, renamed.Version)
+	_, err = repo.GetBySlug(ctx, kbID, "concept/old")
+	assert.ErrorIs(t, err, ErrWikiPageNotFound)
+
+	updatedTarget, err := repo.GetBySlug(ctx, kbID, target.Slug)
+	require.NoError(t, err)
+	assert.Equal(t, types.StringArray{"concept/new"}, updatedTarget.InLinks)
+	updatedChild, err := repo.GetBySlug(ctx, kbID, child.Slug)
+	require.NoError(t, err)
+	assert.Equal(t, "concept/new", updatedChild.ParentSlug)
+
+	persistedIssue, err := repo.GetIssue(ctx, kbID, issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "concept/new", persistedIssue.Slug)
+	persistedAttempt, err := repo.GetRepairAttempt(ctx, kbID, attempt.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "renamed", persistedAttempt.Action)
+}
+
+func TestIssueUpsertDeduplicatesAndClaimIsCompareAndSwap(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+	now := time.Now()
+	issue := &types.WikiPageIssue{
+		ID: "issue-one", TenantID: 1, KnowledgeBaseID: "kb-issues", PageID: "page-one",
+		Slug: "concept/one", IssueType: "broken_link", Fingerprint: "same-fingerprint",
+		Description: "first", Source: types.WikiIssueSourceLint, Status: types.WikiIssueStatusResolved,
+		RepairMode: types.WikiIssueRepairDeterministic, LastSeenAt: now, OccurrenceCount: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, repo.UpsertLintIssue(ctx, issue))
+
+	second := *issue
+	second.ID = "issue-two"
+	second.Description = "seen again"
+	second.LastSeenRunID = "run-two"
+	require.NoError(t, repo.UpsertLintIssue(ctx, &second))
+
+	items, total, err := repo.ListIssuesPage(ctx, issue.KnowledgeBaseID, "", "", 1, 20)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, items, 1)
+	assert.Equal(t, issue.ID, items[0].ID)
+	assert.Equal(t, types.WikiIssueStatusOpen, items[0].Status)
+	assert.Equal(t, 2, items[0].OccurrenceCount)
+
+	firstAttempt := &types.WikiRepairAttempt{
+		ID: "attempt-one", TenantID: 1, KnowledgeBaseID: issue.KnowledgeBaseID,
+		IssueID: issue.ID, PageID: issue.PageID, Status: types.WikiIssueStatusRepairing,
+		StartedAt: &now, CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, repo.ClaimIssueAndCreateAttempt(ctx, items[0], firstAttempt))
+	secondAttempt := *firstAttempt
+	secondAttempt.ID = "attempt-two"
+	assert.ErrorIs(t, repo.ClaimIssueAndCreateAttempt(ctx, items[0], &secondAttempt), ErrWikiIssueConflict)
 }
 
 // makeWikiPage builds a minimal WikiPage suitable for insert. Title is

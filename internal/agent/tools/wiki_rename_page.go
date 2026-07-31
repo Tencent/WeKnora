@@ -90,28 +90,13 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 	inLinks := make([]string, len(existingPage.InLinks))
 	copy(inLinks, existingPage.InLinks)
 
-	// Create new page with new slug but same content
-	newPage := &types.WikiPage{
-		TenantID:        existingPage.TenantID,
-		KnowledgeBaseID: kbID,
-		Slug:            params.NewSlug,
-		Title:           existingPage.Title,
-		Summary:         existingPage.Summary,
-		Content:         existingPage.Content,
-		PageType:        existingPage.PageType,
-		Status:          existingPage.Status,
-		Aliases:         append(types.StringArray(nil), existingPage.Aliases...),
-		ParentSlug:      existingPage.ParentSlug,
-		FolderID:        existingPage.FolderID,
-		SortOrder:       existingPage.SortOrder,
-		SourceRefs:      append(types.StringArray(nil), existingPage.SourceRefs...),
-		ChunkRefs:       append(types.StringArray(nil), existingPage.ChunkRefs...),
-		InLinks:         append(types.StringArray(nil), existingPage.InLinks...),
-		PageMetadata:    append(types.JSON(nil), existingPage.PageMetadata...),
-	}
-	_, err = t.wikiPageService.CreatePage(ctx, newPage)
-	if err != nil {
-		return &types.ToolResult{Success: false, Error: "Failed to create renamed page: " + err.Error()}, nil
+	// Move the stable target first. Incoming page updates can then resolve
+	// new_slug immediately and preserve the target's in_links metadata.
+	if _, err = t.wikiPageService.RenamePage(ctx, kbID, params.Slug, params.NewSlug); err != nil {
+		return &types.ToolResult{
+			Success: false,
+			Error:   "Rename aborted because the page slug could not be changed: " + err.Error(),
+		}, nil
 	}
 
 	changes, updatedSlugs, rewriteErr := applyIncomingWikiContentRewrite(
@@ -127,27 +112,18 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 		},
 	)
 	if rewriteErr != nil {
+		var renameRollbackErr error
+		if _, err := t.wikiPageService.RenamePage(ctx, kbID, params.NewSlug, params.Slug); err != nil {
+			renameRollbackErr = err
+		}
 		rollbackErr := rollbackWikiContentChanges(ctx, t.wikiPageService, changes)
-		cleanupErr := t.wikiPageService.DeletePage(ctx, kbID, params.NewSlug)
 		return &types.ToolResult{
 			Success: false,
 			Error: "Rename aborted while updating incoming links: " +
-				joinWikiMutationErrors(rewriteErr, rollbackErr, cleanupErr),
+				joinWikiMutationErrors(rewriteErr, renameRollbackErr, rollbackErr),
 		}, nil
 	}
 	updatedCount := len(updatedSlugs)
-
-	// Delete old page
-	err = t.wikiPageService.DeletePage(ctx, kbID, params.Slug)
-	if err != nil {
-		rollbackErr := rollbackWikiContentChanges(ctx, t.wikiPageService, changes)
-		cleanupErr := t.wikiPageService.DeletePage(ctx, kbID, params.NewSlug)
-		return &types.ToolResult{
-			Success: false,
-			Error: "Rename aborted because the old page could not be deleted: " +
-				joinWikiMutationErrors(err, rollbackErr, cleanupErr),
-		}, nil
-	}
 	t.routes.forget(params.Slug, kbID)
 	t.routes.remember(params.NewSlug, kbID)
 

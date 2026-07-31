@@ -208,6 +208,22 @@ func TestRegistryDecodesWikiReadIssueHandleArgument(t *testing.T) {
 	require.Equal(t, []string{"i9"}, unknown[0].UnresolvedHandles)
 }
 
+func TestRegistryDecodesWikiReadIssueHandleArray(t *testing.T) {
+	registry := NewRegistry(true)
+	registry.ModelToolResultForTool("wiki_read_issue", &types.ToolResult{
+		Success: true,
+		Output:  `[{"id":"issue-a"},{"id":"issue-b"}]`,
+	})
+
+	calls := []types.LLMToolCall{{Function: types.FunctionCall{
+		Name:      "wiki_read_issue",
+		Arguments: `{"issue_ids":["i1","i2"]}`,
+	}}}
+	registry.DecodeToolCalls(calls)
+	require.JSONEq(t, `{"issue_ids":["issue-a","issue-b"]}`, calls[0].Function.Arguments)
+	require.Equal(t, ArgumentResolutionResolved, calls[0].ArgumentResolution)
+}
+
 func TestRegistryReportsUnknownWikiIssueHandle(t *testing.T) {
 	registry := NewRegistry(true)
 	calls := []types.LLMToolCall{{Function: types.FunctionCall{

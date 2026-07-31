@@ -27,11 +27,15 @@ func NewWikiUpdateIssueTool(wikiService interfaces.WikiPageService, kbIDs []stri
       "type": "string",
       "description": "The short iN issue ID from wiki_read_issue."
     },
-    "status": {
+		"status": {
       "type": "string",
       "enum": ["resolved", "ignored", "pending"],
       "description": "The new status for the issue."
-    }
+		}
+		,"summary": {
+		  "type": "string",
+		  "description": "Concise evidence-based explanation of the repair or why no edit was required."
+		}
   },
   "required": ["issue_id", "status"]
 }`),
@@ -45,6 +49,7 @@ func (t *wikiUpdateIssueTool) Execute(ctx context.Context, args json.RawMessage)
 	var params struct {
 		IssueID string `json:"issue_id"`
 		Status  string `json:"status"`
+		Summary string `json:"summary"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return &types.ToolResult{Success: false, Error: "Invalid parameters: " + err.Error()}, nil
@@ -60,12 +65,13 @@ func (t *wikiUpdateIssueTool) Execute(ctx context.Context, args json.RawMessage)
 	if len(t.kbIDs) == 0 {
 		return &types.ToolResult{Success: false, Error: "No knowledge bases available"}, nil
 	}
-	if _, err := resolveWikiIssue(ctx, t.wikiService, params.IssueID, t.kbIDs); err != nil {
+	issue, err := resolveWikiIssue(ctx, t.wikiService, params.IssueID, t.kbIDs)
+	if err != nil {
 		return &types.ToolResult{Success: false, Error: err.Error()}, nil
 	}
 
 	// Update only after the issue has been proven to belong to an allowed KB.
-	err := t.wikiService.UpdateIssueStatus(ctx, params.IssueID, params.Status)
+	err = t.wikiService.UpdateIssueStatus(ctx, issue.KnowledgeBaseID, params.IssueID, params.Status, params.Summary)
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: "Failed to update issue status: " + err.Error()}, nil
 	}
