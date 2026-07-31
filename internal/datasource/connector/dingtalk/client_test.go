@@ -1159,8 +1159,15 @@ func TestClientPingStopsAfterFirstAccessibleWorkspace(t *testing.T) {
 	}
 }
 
-func TestClientPingRejectsNoAccessibleWorkspaces(t *testing.T) {
+func TestClientPingAllowsNoAccessibleWorkspaces(t *testing.T) {
+	requests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path != "/v2.0/wiki/workspaces" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"workspaces":[]}`)
 	}))
@@ -1173,9 +1180,11 @@ func TestClientPingRejectsNoAccessibleWorkspaces(t *testing.T) {
 		httpClient:  srv.Client(),
 	}
 
-	err := c.Ping(context.Background(), "operator-123")
-	if err == nil || !strings.Contains(err.Error(), "no accessible DingTalk workspaces") {
-		t.Fatalf("Ping() error = %v, want actionable empty-workspace error", err)
+	if err := c.Ping(context.Background(), "operator-123"); err != nil {
+		t.Fatalf("Ping() error = %v, want authentication success with empty resources", err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
 	}
 }
 

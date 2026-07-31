@@ -12,6 +12,9 @@
 // Known limitations (v1):
 //   - Only syncs native type=FILE, category=ALIDOC / extension=adoc nodes
 //   - Folders are listed as resources but not synced as content
+//   - The document blocks endpoint is consumed as returned by DingTalk; nested
+//     children are rendered when present, but hidden child/media blocks are not
+//     claimed as exhaustively recoverable
 //   - Incremental sync based on node modifiedTime
 package dingtalk
 
@@ -28,7 +31,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/utils"
 )
 
-// DefaultBaseURL is the DingTalk OpenAPI base URL.
+// DefaultBaseURL is the DingTalk OpenAPI base URL used by the existing
+// DingTalk integrations in this repo. Some current Help Center pages show
+// api.dingtalk.io; deployments can set base_url if their tenant requires it.
 const DefaultBaseURL = "https://api.dingtalk.com"
 
 // Config holds DingTalk-specific configuration.

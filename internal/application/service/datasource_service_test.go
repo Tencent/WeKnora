@@ -187,3 +187,14 @@ func TestAllFetchedItemsFailedErrorTruncatesLongDetail(t *testing.T) {
 	assert.LessOrEqual(t, len(err.Error()), 560)
 	assert.Contains(t, err.Error(), "...")
 }
+
+func TestBatchSyncCompletionStatusMarksPartialWhenItemsFailed(t *testing.T) {
+	status, msg := batchSyncCompletionStatus(&types.SyncResult{
+		Total:   2,
+		Created: 1,
+		Failed:  1,
+	}, nil)
+
+	require.Equal(t, types.SyncLogStatusPartial, status)
+	assert.Contains(t, msg, "1 item(s) failed to sync")
+}

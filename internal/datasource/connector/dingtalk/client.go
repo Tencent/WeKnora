@@ -559,8 +559,9 @@ func (b *traversalBudget) record(depth int) error {
 	return nil
 }
 
-// Ping verifies that the configured app/operator pair can access at least one
-// workspace, because an empty result cannot produce a usable data source.
+// Ping verifies that the configured app/operator pair can authenticate against
+// the workspace endpoint. An empty workspace list is still a successful
+// connection; the resource picker surfaces the no-resources/permission guidance.
 func (c *client) Ping(ctx context.Context, operatorID string) error {
 	nextToken := ""
 	guard := newPaginationGuard("ping DingTalk workspaces")
@@ -588,9 +589,7 @@ func (c *client) Ping(ctx context.Context, operatorID string) error {
 		}
 		nextToken = resp.NextToken
 	}
-	return fmt.Errorf(
-		"no accessible DingTalk workspaces for operator_id; verify that the UnionID belongs to the app organization and can read at least one knowledge base",
-	)
+	return nil
 }
 
 // ListWorkspaces returns all accessible knowledge bases.

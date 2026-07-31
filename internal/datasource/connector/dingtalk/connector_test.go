@@ -792,6 +792,34 @@ func TestRenderBlocksMarkdown_LiveResponseShapes(t *testing.T) {
 	}
 }
 
+func TestRenderBlocksMarkdown_RendersReturnedNestedChildren(t *testing.T) {
+	var blocks []docBlock
+	body := `[
+		{
+			"blockId": "quote-1",
+			"blockType": "blockquote",
+			"blockquote": {"text": "Parent quote"},
+			"children": [
+				{
+					"blockId": "child-1",
+					"blockType": "paragraph",
+					"paragraph": {"text": "Nested child text"}
+				}
+			]
+		}
+	]`
+	if err := json.Unmarshal([]byte(body), &blocks); err != nil {
+		t.Fatalf("unmarshal blocks: %v", err)
+	}
+
+	got := renderBlocksMarkdown("Doc", blocks)
+	for _, want := range []string{"> Parent quote", "Nested child text"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("markdown missing returned child content %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestConnectorFetchIncremental_NoResourceIDs(t *testing.T) {
 	_, _, err := NewConnector().FetchIncremental(context.Background(), makeDingTalkConfig("id", "secret", "", nil), nil)
 	if err == nil {
