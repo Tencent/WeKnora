@@ -61,13 +61,14 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 	}
 
 	var req struct {
-		Platform        string     `json:"platform" binding:"required"`
-		Name            string     `json:"name"`
-		Mode            string     `json:"mode"`
-		OutputMode      string     `json:"output_mode"`
-		KnowledgeBaseID string     `json:"knowledge_base_id"`
-		Credentials     types.JSON `json:"credentials"`
-		Enabled         *bool      `json:"enabled"`
+		Platform              string     `json:"platform" binding:"required"`
+		Name                  string     `json:"name"`
+		Mode                  string     `json:"mode"`
+		OutputMode            string     `json:"output_mode"`
+		KnowledgeBaseID       string     `json:"knowledge_base_id"`
+		MessageStorageEnabled *bool      `json:"message_storage_enabled"`
+		Credentials           types.JSON `json:"credentials"`
+		Enabled               *bool      `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -89,6 +90,9 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		KnowledgeBaseID: req.KnowledgeBaseID,
 		Credentials:     req.Credentials,
 		Enabled:         true,
+	}
+	if req.MessageStorageEnabled != nil {
+		channel.MessageStorageEnabled = *req.MessageStorageEnabled
 	}
 	if req.Enabled != nil {
 		channel.Enabled = *req.Enabled
@@ -115,6 +119,10 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 
 	if err := h.imService.CreateChannel(channel); err != nil {
 		logger.Errorf(c.Request.Context(), "[IM] Create channel failed: %v", err)
+		if errors.Is(err, im.ErrInvalidMessageStorage) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid message storage target"})
+			return
+		}
 		if strings.HasPrefix(err.Error(), "duplicate_bot:") {
 			c.JSON(http.StatusConflict, gin.H{"error": strings.TrimPrefix(err.Error(), "duplicate_bot: ")})
 			return
@@ -172,12 +180,12 @@ func (h *IMHandler) ListAllIMChannels(c *gin.Context) {
 //
 // UpdateIMChannel godoc
 // @Summary      更新 IM 渠道
-// @Description  更新指定 IM 渠道的名称、模式、知识库、凭证或启用状态
+// @Description  更新指定 IM 渠道的名称、模式、消息存储、知识库、凭证或启用状态
 // @Tags         IM 渠道
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string                  true  "渠道 ID"
-// @Param        request  body      map[string]interface{}  true  "更新字段（name/mode/output_mode/knowledge_base_id/credentials/enabled）"
+// @Param        request  body      map[string]interface{}  true  "更新字段（name/mode/output_mode/knowledge_base_id/message_storage_enabled/credentials/enabled）"
 // @Success      200      {object}  map[string]interface{}  "更新后的渠道"
 // @Failure      400      {object}  map[string]interface{}  "请求参数错误"
 // @Failure      404      {object}  map[string]interface{}  "渠道不存在"
@@ -204,13 +212,14 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 	}
 
 	var req struct {
-		Name            *string    `json:"name"`
-		Mode            *string    `json:"mode"`
-		OutputMode      *string    `json:"output_mode"`
-		KnowledgeBaseID *string    `json:"knowledge_base_id"`
-		Credentials     types.JSON `json:"credentials"`
-		Enabled         *bool      `json:"enabled"`
-		AgentID         *string    `json:"agent_id"`
+		Name                  *string    `json:"name"`
+		Mode                  *string    `json:"mode"`
+		OutputMode            *string    `json:"output_mode"`
+		KnowledgeBaseID       *string    `json:"knowledge_base_id"`
+		MessageStorageEnabled *bool      `json:"message_storage_enabled"`
+		Credentials           types.JSON `json:"credentials"`
+		Enabled               *bool      `json:"enabled"`
+		AgentID               *string    `json:"agent_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -228,6 +237,9 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 	}
 	if req.KnowledgeBaseID != nil {
 		channel.KnowledgeBaseID = *req.KnowledgeBaseID
+	}
+	if req.MessageStorageEnabled != nil {
+		channel.MessageStorageEnabled = *req.MessageStorageEnabled
 	}
 	if req.Credentials != nil {
 		channel.Credentials = req.Credentials
@@ -248,6 +260,10 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 
 	if err := h.imService.UpdateChannel(channel); err != nil {
 		logger.Errorf(c.Request.Context(), "[IM] Update channel failed: %v", err)
+		if errors.Is(err, im.ErrInvalidMessageStorage) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid message storage target"})
+			return
+		}
 		if strings.HasPrefix(err.Error(), "duplicate_bot:") {
 			c.JSON(http.StatusConflict, gin.H{"error": strings.TrimPrefix(err.Error(), "duplicate_bot: ")})
 			return

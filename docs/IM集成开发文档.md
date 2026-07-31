@@ -917,7 +917,7 @@ type FileDownloader interface {
 }
 ```
 
-实现此接口后，当用户发送文件/图片消息且渠道配置了 `knowledge_base_id` 时，Service 会自动下载文件并保存到指定知识库。
+实现此接口后，文件和图片会作为当前 IM 问答的附件下载并解析。渠道开启“消息存储”时，同一份附件会在问答完成后与该轮 Q&A Passage 异步保存到渠道配置的 `knowledge_base_id`。
 
 ### im.AdapterFactory — 适配器工厂
 
@@ -1539,21 +1539,24 @@ QA 管道 ──chunk──chunk──chunk──▶ EventBus
 
 ## 文件消息处理
 
-当用户在 IM 中发送文件或图片消息时，如果渠道配置了 `knowledge_base_id`，Service 会自动将文件保存到对应知识库：
+当用户在 IM 中发送文本、文件或图片消息时，它们都会进入统一的 Agent 问答流程。渠道启用消息存储且配置了 `knowledge_base_id` 后，成功完成的每轮 Q&A 会异步保存一条 Passage；文件和图片原件也会保存到同一知识库。
 
 ```
 用户发送文件/图片消息
         │
         ▼
-  消息类型 = file/image？
-  渠道配置了 knowledge_base_id？
-  Adapter 实现了 FileDownloader？
-        │ 全部满足
+ Adapter.DownloadFile（仅下载一次）
         ▼
-  1. adapter.DownloadFile(msg) → io.ReadCloser + fileName
-  2. 通知用户 "正在处理文件..."
-  3. knowledgeService.Save(file, knowledgeBaseID)
-  4. 通知用户 "文件已保存到知识库"
+  文档解析 / OCR；图片同时传给视觉模型
+        │
+        ▼
+  正常 Agent 问答并回复用户
+        │
+        ▼
+  渠道开启消息存储且配置了 knowledge_base_id？
+        │ 是
+        ▼
+  异步保存附件原件 + 本轮 Q&A Passage
 ```
 
 **各平台文件下载方式：**

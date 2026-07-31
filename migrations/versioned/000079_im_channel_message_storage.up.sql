@@ -1,0 +1,2 @@
+ALTER TABLE im_channels
+    ADD COLUMN IF NOT EXISTS message_storage_enabled BOOLEAN NOT NULL DEFAULT FALSE;

@@ -34,14 +34,17 @@ const (
 
 // qaRequest represents a QA request waiting in the queue.
 type qaRequest struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	msg       *IncomingMessage
-	session   *types.Session
-	agent     *types.CustomAgent
-	adapter   Adapter
-	channel   *IMChannel
-	channelID string
+	ctx             context.Context
+	cancel          context.CancelFunc
+	msg             *IncomingMessage
+	session         *types.Session
+	agent           *types.CustomAgent
+	attachments     types.MessageAttachments
+	attachmentFiles []imAttachmentFile
+	imageURLs       []string
+	adapter         Adapter
+	channel         *IMChannel
+	channelID       string
 
 	// tenant is used to resolve provider:// URLs in outbound replies (scheme-aware).
 	tenant *types.Tenant

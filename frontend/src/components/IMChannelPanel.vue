@@ -223,14 +223,20 @@
         </section>
       </div>
 
-      <!-- Step 3: File knowledge base -->
+      <!-- Step 3: Message storage -->
       <div v-else-if="wizardStep === 2" class="im-step-body">
         <section class="setting-drawer__section im-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('agentEditor.im.sectionKnowledge') }}</h4>
           <div class="form-item">
+            <label class="form-label">{{ $t('agentEditor.im.messageStorage') }}</label>
+            <t-switch v-model="formData.message_storage_enabled" />
+            <p class="form-desc">{{ $t('agentEditor.im.messageStorageHint') }}</p>
+          </div>
+          <div class="form-item">
             <label class="form-label">{{ $t('agentEditor.im.fileKnowledgeBase') }}</label>
             <t-select v-model="formData.knowledge_base_id"
-              :placeholder="$t('agentEditor.im.fileKnowledgeBasePlaceholder')" clearable filterable>
+              :placeholder="$t('agentEditor.im.fileKnowledgeBasePlaceholder')" clearable filterable
+              :disabled="!formData.message_storage_enabled">
               <t-option v-for="kb in knowledgeBases" :key="kb.id" :value="kb.id" :label="kb.name" />
             </t-select>
             <p class="form-desc">{{ $t('agentEditor.im.fileKnowledgeBaseHint') }}</p>
@@ -687,6 +693,10 @@ function validateWizardStep(step: number): boolean {
     MessagePlugin.warning(t('integrations.selectAgentHint'));
     return false;
   }
+  if (step === 2 && formData.value.message_storage_enabled && !formData.value.knowledge_base_id) {
+    MessagePlugin.warning(t('agentEditor.im.fileKnowledgeBaseRequired'));
+    return false;
+  }
   return true;
 }
 
@@ -725,6 +735,7 @@ const formData = ref({
   output_mode: 'stream' as 'stream' | 'full',
   session_mode: 'user' as 'user' | 'thread',
   knowledge_base_id: '',
+  message_storage_enabled: false,
   credentials: defaultCredentials(),
 });
 
@@ -997,6 +1008,7 @@ async function editChannel(channel: IMChannel | IMChannelOverview) {
     output_mode: fullChannel.output_mode,
     session_mode: fullChannel.session_mode || 'user',
     knowledge_base_id: fullChannel.knowledge_base_id || '',
+    message_storage_enabled: fullChannel.message_storage_enabled || false,
     credentials: { ...fullChannel.credentials },
   };
   normalizeYunzhijiaCredentials();
@@ -1021,6 +1033,7 @@ function resetForm() {
     output_mode: 'stream',
     session_mode: 'user',
     knowledge_base_id: '',
+    message_storage_enabled: false,
     credentials: defaultCredentials(),
   };
 }
@@ -1050,6 +1063,7 @@ async function handleSave() {
         output_mode: formData.value.output_mode,
         session_mode: formData.value.session_mode,
         knowledge_base_id: formData.value.knowledge_base_id,
+        message_storage_enabled: formData.value.message_storage_enabled,
         credentials: formData.value.credentials,
         enabled: editingEnabled.value,
         ...(formData.value.target_agent_id ? { agent_id: formData.value.target_agent_id } : {}),
@@ -1068,6 +1082,7 @@ async function handleSave() {
         output_mode: formData.value.output_mode,
         session_mode: formData.value.session_mode,
         knowledge_base_id: formData.value.knowledge_base_id,
+        message_storage_enabled: formData.value.message_storage_enabled,
         credentials: formData.value.credentials,
       });
       MessagePlugin.success(t('common.createSuccess'));

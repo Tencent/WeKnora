@@ -16,21 +16,22 @@ import (
 // IMChannel represents an IM channel configuration stored in the database.
 // Each channel binds to an agent and contains platform-specific credentials.
 type IMChannel struct {
-	ID              string         `json:"id"          gorm:"type:varchar(36);primaryKey;default:uuid_generate_v4()"`
-	TenantID        uint64         `json:"tenant_id"   gorm:"not null;index:idx_im_channels_tenant"`
-	AgentID         string         `json:"agent_id"    gorm:"type:varchar(36);not null;index:idx_im_channels_agent"`
-	Platform        string         `json:"platform"    gorm:"type:varchar(20);not null"`
-	Name            string         `json:"name"        gorm:"type:varchar(255);not null;default:''"`
-	Enabled         bool           `json:"enabled"     gorm:"not null;default:true"`
-	Mode            string         `json:"mode"        gorm:"type:varchar(20);not null;default:'websocket'"`
-	OutputMode      string         `json:"output_mode"       gorm:"type:varchar(20);not null;default:'stream'"`
-	KnowledgeBaseID string         `json:"knowledge_base_id" gorm:"type:varchar(36);default:''"`
-	BotIdentity     string         `json:"bot_identity"      gorm:"type:varchar(255);not null;default:'';uniqueIndex:idx_im_channels_bot_identity,where:deleted_at IS NULL AND bot_identity != ''"`
-	SessionMode     string         `json:"session_mode"      gorm:"type:varchar(20);not null;default:'user'"`
-	Credentials     types.JSON     `json:"credentials"       gorm:"type:jsonb;not null;default:'{}'"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
-	DeletedAt       gorm.DeletedAt `json:"deleted_at"  gorm:"index"`
+	ID                    string         `json:"id"          gorm:"type:varchar(36);primaryKey;default:uuid_generate_v4()"`
+	TenantID              uint64         `json:"tenant_id"   gorm:"not null;index:idx_im_channels_tenant"`
+	AgentID               string         `json:"agent_id"    gorm:"type:varchar(36);not null;index:idx_im_channels_agent"`
+	Platform              string         `json:"platform"    gorm:"type:varchar(20);not null"`
+	Name                  string         `json:"name"        gorm:"type:varchar(255);not null;default:''"`
+	Enabled               bool           `json:"enabled"     gorm:"not null;default:true"`
+	Mode                  string         `json:"mode"        gorm:"type:varchar(20);not null;default:'websocket'"`
+	OutputMode            string         `json:"output_mode"       gorm:"type:varchar(20);not null;default:'stream'"`
+	KnowledgeBaseID       string         `json:"knowledge_base_id" gorm:"type:varchar(36);default:''"`
+	MessageStorageEnabled bool           `json:"message_storage_enabled" gorm:"not null;default:false"`
+	BotIdentity           string         `json:"bot_identity"      gorm:"type:varchar(255);not null;default:'';uniqueIndex:idx_im_channels_bot_identity,where:deleted_at IS NULL AND bot_identity != ''"`
+	SessionMode           string         `json:"session_mode"      gorm:"type:varchar(20);not null;default:'user'"`
+	Credentials           types.JSON     `json:"credentials"       gorm:"type:jsonb;not null;default:'{}'"`
+	CreatedAt             time.Time      `json:"created_at"`
+	UpdatedAt             time.Time      `json:"updated_at"`
+	DeletedAt             gorm.DeletedAt `json:"deleted_at"  gorm:"index"`
 }
 
 func (IMChannel) TableName() string {
@@ -50,6 +51,7 @@ type IMChannelSummary struct {
 	Mode                  string    `json:"mode"`
 	OutputMode            string    `json:"output_mode"`
 	KnowledgeBaseID       string    `json:"knowledge_base_id"`
+	MessageStorageEnabled bool      `json:"message_storage_enabled"`
 	BotIdentity           string    `json:"bot_identity"`
 	SessionMode           string    `json:"session_mode"`
 	CredentialsConfigured bool      `json:"credentials_configured"`
@@ -69,6 +71,7 @@ func SummarizeIMChannel(ch IMChannel) IMChannelSummary {
 		Mode:                  ch.Mode,
 		OutputMode:            ch.OutputMode,
 		KnowledgeBaseID:       ch.KnowledgeBaseID,
+		MessageStorageEnabled: ch.MessageStorageEnabled,
 		BotIdentity:           ch.BotIdentity,
 		SessionMode:           ch.SessionMode,
 		CredentialsConfigured: imCredentialsConfigured(ch.Credentials),

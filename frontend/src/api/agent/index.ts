@@ -303,6 +303,7 @@ export interface IMChannel {
   output_mode: 'stream' | 'full';
   session_mode?: 'user' | 'thread';
   knowledge_base_id?: string;
+  message_storage_enabled?: boolean;
   credentials: Record<string, any>;
   created_at?: string;
   updated_at?: string;
@@ -325,6 +326,7 @@ export interface IMChannelOverview {
   mode: IMChannel['mode'];
   output_mode: IMChannel['output_mode'];
   session_mode?: IMChannel['session_mode'];
+  message_storage_enabled?: boolean;
   bot_identity: string;
   created_at: string;
   updated_at: string;

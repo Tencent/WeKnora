@@ -2,13 +2,17 @@ package im
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -27,6 +31,26 @@ func (*lifecycleTestAdapter) SendReply(context.Context, *IncomingMessage, *Reply
 	return nil
 }
 func (*lifecycleTestAdapter) HandleURLVerification(*gin.Context) bool { return false }
+
+type attachmentTestAdapter struct {
+	lifecycleTestAdapter
+	name string
+	data string
+}
+
+type messageStorageKBServiceStub struct {
+	interfaces.KnowledgeBaseService
+	kb  *types.KnowledgeBase
+	err error
+}
+
+func (s *messageStorageKBServiceStub) GetKnowledgeBaseByID(context.Context, string) (*types.KnowledgeBase, error) {
+	return s.kb, s.err
+}
+
+func (a *attachmentTestAdapter) DownloadFile(context.Context, *IncomingMessage) (io.ReadCloser, string, error) {
+	return io.NopCloser(strings.NewReader(a.data)), a.name, nil
+}
 
 type lifecycleFactoryCounters struct {
 	starts atomic.Int32
@@ -62,6 +86,7 @@ func newLifecycleTestDB(t *testing.T) *gorm.DB {
 		mode TEXT NOT NULL DEFAULT 'websocket',
 		output_mode TEXT NOT NULL DEFAULT 'stream',
 		knowledge_base_id TEXT DEFAULT '',
+		message_storage_enabled NUMERIC NOT NULL DEFAULT 0,
 		bot_identity TEXT NOT NULL DEFAULT '',
 		session_mode TEXT NOT NULL DEFAULT 'user',
 		credentials TEXT NOT NULL DEFAULT '{}',
@@ -83,6 +108,51 @@ func newLifecycleTestService(db *gorm.DB, redisClient *redis.Client, instanceID 
 		redis:            redisClient,
 		instanceID:       instanceID,
 		stopCh:           make(chan struct{}),
+	}
+}
+
+func TestPrepareIMAttachmentsReusesDownloadedImageForVision(t *testing.T) {
+	svc := &Service{}
+	adapter := &attachmentTestAdapter{name: "diagram.png", data: "image-bytes"}
+	attachments, files, imageURLs, err := svc.prepareIMAttachments(context.Background(), &IncomingMessage{
+		MessageType: MessageTypeImage,
+		FileName:    "diagram.png",
+	}, adapter)
+	if err != nil {
+		t.Fatalf("prepareIMAttachments() error = %v", err)
+	}
+	if len(attachments) != 1 || attachments[0].FileName != "diagram.png" {
+		t.Fatalf("attachments = %#v", attachments)
+	}
+	if len(files) != 1 || string(files[0].content) != "image-bytes" {
+		t.Fatalf("attachment files = %#v", files)
+	}
+	if len(imageURLs) != 1 || !strings.HasPrefix(imageURLs[0], "data:image/png;base64,") {
+		t.Fatalf("image URLs = %#v", imageURLs)
+	}
+}
+
+func TestPrepareIMAttachmentsRejectsOversizedFileBeforeDownload(t *testing.T) {
+	svc := &Service{}
+	_, _, _, err := svc.prepareIMAttachments(context.Background(), &IncomingMessage{
+		MessageType: MessageTypeFile,
+		FileSize:    maxIMAttachmentBytes + 1,
+	}, &attachmentTestAdapter{})
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("prepareIMAttachments() error = %v, want size-limit error", err)
+	}
+}
+
+func TestValidateMessageStorageRequiresSameTenantKnowledgeBase(t *testing.T) {
+	channel := &IMChannel{TenantID: 7, MessageStorageEnabled: true, KnowledgeBaseID: "kb-1"}
+	svc := &Service{kbService: &messageStorageKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 8}}}
+	if err := svc.validateMessageStorage(channel); !errors.Is(err, ErrInvalidMessageStorage) {
+		t.Fatalf("validateMessageStorage() error = %v, want invalid storage error", err)
+	}
+
+	svc.kbService = &messageStorageKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7}}
+	if err := svc.validateMessageStorage(channel); err != nil {
+		t.Fatalf("validateMessageStorage() error = %v, want nil", err)
 	}
 }
 

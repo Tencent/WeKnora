@@ -3,13 +3,16 @@ package im
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/textproto"
 	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
@@ -22,6 +25,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	mcppkg "github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -42,6 +46,12 @@ const (
 	maxContentLength = 4096
 	// maxQuoteContentLength is the max runes to include from a quoted message.
 	maxQuoteContentLength = 500
+	// maxIMAttachmentBytes bounds an attachment buffered for IM Q&A. The bytes
+	// are also reused for asynchronous storage and image data-URI generation.
+	maxIMAttachmentBytes = 32 << 20 // 32 MiB
+	// maxIMVisionAttachmentBytes prevents large images from expanding into an
+	// oversized data URI in a model request.
+	maxIMVisionAttachmentBytes = 8 << 20 // 8 MiB
 	// streamFlushInterval is how often buffered stream content is flushed to the IM platform.
 	// This prevents API rate-limiting while keeping perceived latency low.
 	streamFlushInterval = 300 * time.Millisecond
@@ -368,7 +378,10 @@ const (
 
 // ErrChannelDisabled reports that a channel row exists but is disabled, so
 // callers can tell it apart from a missing channel or a transient failure.
-var ErrChannelDisabled = errors.New("channel is disabled")
+var (
+	ErrChannelDisabled       = errors.New("channel is disabled")
+	ErrInvalidMessageStorage = errors.New("invalid message storage configuration")
+)
 
 // channelState holds runtime state for a running IM channel.
 type channelState struct {
@@ -433,6 +446,7 @@ type Service struct {
 	// defaultFileSvc is the process-wide storage backend (STORAGE_TYPE / env).
 	// Used when tenant StorageEngineConfig cannot build a service for the URL scheme.
 	defaultFileSvc  interfaces.FileService
+	documentReader  interfaces.DocumentReader
 	storageResolver interfaces.StorageBackendResolver
 
 	// cmdRegistry holds all registered slash-commands.
@@ -648,12 +662,17 @@ func buildIMQARequest(
 	customAgent *types.CustomAgent,
 	kbIDs []string,
 	quote *QuotedMessage,
+	attachments ...types.MessageAttachments,
 ) *types.QARequest {
 	// WebSearchEnabled: the web handler passes this per-request from the
 	// frontend toggle; for IM channels the user has no per-message toggle,
 	// so we derive it from the agent config (the single source of truth).
 	webSearchEnabled := customAgent != nil && customAgent.Config.WebSearchEnabled
 	quotedContext := formatQuotedContext(quote)
+	var requestAttachments types.MessageAttachments
+	if len(attachments) > 0 {
+		requestAttachments = attachments[0]
+	}
 	return &types.QARequest{
 		Session:            session,
 		Query:              query,
@@ -663,6 +682,7 @@ func buildIMQARequest(
 		UserMessageID:      userMessageID,
 		WebSearchEnabled:   webSearchEnabled,
 		QuotedContext:      quotedContext,
+		Attachments:        requestAttachments,
 	}
 }
 
@@ -686,7 +706,11 @@ func buildIMLastRequestState(agentID string, customAgent *types.CustomAgent, kbI
 	return state
 }
 
-func createIMUserMessagePayload(sessionID, content, requestID string) *types.Message {
+func createIMUserMessagePayload(sessionID, content, requestID string, attachments ...types.MessageAttachments) *types.Message {
+	var messageAttachments types.MessageAttachments
+	if len(attachments) > 0 {
+		messageAttachments = attachments[0]
+	}
 	return &types.Message{
 		SessionID:   sessionID,
 		Role:        "user",
@@ -695,7 +719,92 @@ func createIMUserMessagePayload(sessionID, content, requestID string) *types.Mes
 		CreatedAt:   time.Now(),
 		IsCompleted: true,
 		Channel:     "im",
+		Attachments: messageAttachments,
 	}
+}
+
+// imAttachmentFile keeps the bytes downloaded from the IM platform. The same
+// download is used for the current Q&A turn and optional asynchronous storage.
+type imAttachmentFile struct {
+	fileName string
+	content  []byte
+}
+
+// prepareIMAttachments downloads an incoming attachment once and reuses those
+// bytes for the current Q&A turn and optional channel-level message storage.
+// Image data is passed directly to vision-capable models; the regular document
+// parser still supplies text/OCR content for models without vision support.
+func (s *Service) prepareIMAttachments(ctx context.Context, msg *IncomingMessage, adapter Adapter) (types.MessageAttachments, []imAttachmentFile, []string, error) {
+	if msg.MessageType != MessageTypeFile && msg.MessageType != MessageTypeImage {
+		return nil, nil, nil, nil
+	}
+	if msg.FileSize > maxIMAttachmentBytes {
+		return nil, nil, nil, fmt.Errorf("attachment exceeds the %d MiB limit", maxIMAttachmentBytes>>20)
+	}
+	downloader, ok := adapter.(FileDownloader)
+	if !ok {
+		return nil, nil, nil, fmt.Errorf("platform %s does not support attachment download", msg.Platform)
+	}
+	reader, fileName, err := downloader.DownloadFile(ctx, msg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	defer reader.Close()
+	content, err := io.ReadAll(io.LimitReader(reader, maxIMAttachmentBytes+1))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(content) > maxIMAttachmentBytes {
+		return nil, nil, nil, fmt.Errorf("attachment exceeds the %d MiB limit", maxIMAttachmentBytes>>20)
+	}
+	if fileName == "" {
+		fileName = msg.FileName
+	}
+	if msg.MessageType == MessageTypeImage && filepath.Ext(fileName) == "" {
+		fileName += ".png"
+	}
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(fileName), "."))
+	if ext == "" {
+		return nil, nil, nil, fmt.Errorf("attachment has no file extension")
+	}
+	attachment := types.MessageAttachment{FileName: fileName, FileType: "." + ext, FileSize: int64(len(content))}
+	request := &types.ReadRequest{FileContent: content, FileName: fileName, FileType: ext}
+	var result *types.ReadResult
+	isImage := msg.MessageType == MessageTypeImage || docparser.IsImageFormat(ext)
+	// Prefer the configured document reader for images so its OCR/VLM parsing
+	// can produce text for models without native vision. If it is unavailable,
+	// preserve the normal Q&A flow and rely on direct vision input where
+	// supported instead of rejecting the user message.
+	if isImage && s.documentReader != nil {
+		result, err = s.documentReader.Read(ctx, request)
+		if err != nil {
+			logger.Warnf(ctx, "[IM] image OCR/document parsing failed, continuing with vision input: %v", err)
+			err = nil
+			result = nil
+		}
+	}
+	if result == nil && docparser.IsSimpleFormat(attachment.FileType) {
+		result, err = (&docparser.SimpleFormatReader{}).Read(ctx, request)
+	} else if result == nil && !isImage && s.documentReader != nil {
+		result, err = s.documentReader.Read(ctx, request)
+	}
+	if err != nil {
+		logger.Warnf(ctx, "[IM] attachment parsing failed, continuing with attachment metadata: %v", err)
+	}
+	if result != nil {
+		attachment.Content = result.MarkdownContent
+	}
+	var imageURLs []string
+	if isImage && len(content) <= maxIMVisionAttachmentBytes {
+		mediaType := mime.TypeByExtension("." + ext)
+		if mediaType == "" {
+			mediaType = "image/png"
+		}
+		imageURLs = []string{"data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(content)}
+	} else if isImage {
+		logger.Warnf(ctx, "[IM] image is too large for direct vision input: size=%d limit=%d", len(content), maxIMVisionAttachmentBytes)
+	}
+	return types.MessageAttachments{attachment}, []imAttachmentFile{{fileName: fileName, content: content}}, imageURLs, nil
 }
 
 func createIMAssistantMessagePayload(sessionID, requestID string) *types.Message {
@@ -847,6 +956,7 @@ func NewService(
 	modelService interfaces.ModelService,
 	streamManager interfaces.StreamManager,
 	defaultFileSvc interfaces.FileService,
+	documentReader interfaces.DocumentReader,
 	oauthManager *mcppkg.OAuthManager,
 	redisClient *redis.Client,
 	appCfg *config.Config,
@@ -875,6 +985,7 @@ func NewService(
 		modelService:     modelService,
 		streamManager:    streamManager,
 		defaultFileSvc:   defaultFileSvc,
+		documentReader:   documentReader,
 		storageResolver:  storageResolver,
 		oauthManager:     oauthManager,
 		cmdRegistry:      registry,
@@ -1731,28 +1842,6 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	logger.Debugf(ctx, "[IM] HandleMessage detail: msgid=%s filekey=%s filename=%s",
 		msg.MessageID, msg.FileKey, msg.FileName)
 
-	// ── File/Image message shortcut ──
-	// If the message is a file or image and the channel has a knowledge_base_id configured,
-	// handle it separately without entering the QA pipeline.
-	if (msg.MessageType == MessageTypeFile || msg.MessageType == MessageTypeImage) && channel.KnowledgeBaseID != "" {
-		return s.handleFileMessage(ctx, msg, adapter, channel)
-	}
-
-	// ── Non-text message without text content ──
-	// If the message is an image/file/video but has no text content, the QA pipeline
-	// cannot do anything useful (no vision support in IM yet). Sending an empty query
-	// to KB retrieval would return irrelevant results and cause hallucination.
-	if msg.Content == "" && (msg.MessageType == MessageTypeImage || msg.MessageType == MessageTypeFile) {
-		logger.Infof(ctx, "[IM] Skipping QA for non-text message without content: type=%s", msg.MessageType)
-		if err := adapter.SendReply(ctx, msg, &ReplyMessage{
-			Content: "当前渠道未配置文件知识库，无法处理图片/文件消息。请在渠道设置中配置文件知识库后再发送，或直接用文字描述您的问题。",
-			IsFinal: true,
-		}); err != nil {
-			logger.Warnf(ctx, "[IM] Failed to send non-text hint reply: %v", err)
-		}
-		return nil
-	}
-
 	// 1. Get tenant
 	tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
 	if err != nil {
@@ -1776,6 +1865,18 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		} else {
 			customAgent = agent
 		}
+	}
+
+	if msg.Content == "" && (msg.MessageType == MessageTypeFile || msg.MessageType == MessageTypeImage) {
+		fileName := msg.FileName
+		if fileName == "" {
+			fileName = "附件"
+		}
+		msg.Content = fmt.Sprintf("请分析附件「%s」并回答。", fileName)
+	}
+	if msg.Content == "" {
+		_ = adapter.SendReply(ctx, msg, &ReplyMessage{Content: "请发送文字、文件或图片。", IsFinal: true})
+		return nil
 	}
 
 	// ── Slash-command dispatch ──
@@ -1907,6 +2008,18 @@ func (s *Service) executeQARequest(req *qaRequest) {
 		return
 	}
 
+	attachments, attachmentFiles, imageURLs, err := s.prepareIMAttachments(ctx, req.msg, req.adapter)
+	if err != nil {
+		logger.Warnf(ctx, "[IM] attachment preparation failed: %v", err)
+		if sendErr := req.adapter.SendReply(ctx, req.msg, &ReplyMessage{Content: "❌ 无法读取此附件，请重试或改用文字描述。", IsFinal: true}); sendErr != nil {
+			logger.Warnf(ctx, "[IM] Failed to send attachment error reply: %v", sendErr)
+		}
+		return
+	}
+	req.attachments = attachments
+	req.attachmentFiles = attachmentFiles
+	req.imageURLs = imageURLs
+
 	// NOTE: StreamManager-based stop detection is started inside handleMessageStream /
 	// runQA after the assistant message is created (that's when we have the
 	// sessionID + messageID needed to poll StreamManager).
@@ -1920,7 +2033,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	// If the adapter supports streaming and output is not "full", use streaming.
 	if !streamDisabled {
 		if streamer, ok := req.adapter.(StreamSender); ok {
-			if err := s.handleMessageStream(ctx, req.msg, req.session, req.agent, kbIDs, streamer, req.adapter, req.userKey, req.tenant); err != nil {
+			if err := s.handleMessageStream(ctx, req.msg, req.session, req.agent, kbIDs, req.attachments, req.attachmentFiles, req.imageURLs, streamer, req.adapter, req.channel, req.userKey, req.tenant); err != nil {
 				logger.Errorf(ctx, "[IM] Stream QA failed: %v", err)
 			}
 			return
@@ -1928,7 +2041,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	}
 
 	// Non-streaming fallback: collect full answer then send.
-	answer, err := s.runQA(ctx, req.session, req.msg.Content, req.agent, kbIDs, req.userKey, req.msg.Quote)
+	answer, err := s.runQA(ctx, req.session, req.msg.Content, req.agent, kbIDs, req.attachments, req.imageURLs, req.userKey, req.msg.Quote)
 	if err != nil {
 		logger.Errorf(ctx, "[IM] QA failed: %v, sending fallback reply", err)
 		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
@@ -1941,6 +2054,9 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	if err := req.adapter.SendReply(ctx, req.msg, reply); err != nil {
 		logger.Errorf(ctx, "[IM] Send reply failed: %v", err)
 		return
+	}
+	if err == nil {
+		go s.storeIMQARound(context.WithoutCancel(ctx), req.channel, req.msg, req.msg.Content, answer, req.attachmentFiles)
 	}
 
 	logger.Infof(ctx, "[IM] Reply sent: channel=%s platform=%s user=%s answer_len=%d",
@@ -2351,12 +2467,12 @@ func briefToolSummary(output string) string {
 // handleMessageStream runs the QA pipeline and streams answer chunks to the IM platform
 // in real-time via the StreamSender interface. Chunks are batched at streamFlushInterval
 // to avoid API rate-limiting.
-func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, streamer StreamSender, adapter Adapter, userKey string, tenant *types.Tenant) error {
+func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, attachments types.MessageAttachments, attachmentFiles []imAttachmentFile, imageURLs []string, streamer StreamSender, adapter Adapter, channel *IMChannel, userKey string, tenant *types.Tenant) error {
 	// Start the stream on the IM platform (e.g., create Feishu streaming card)
 	streamID, err := streamer.StartStream(ctx, msg)
 	if err != nil {
 		logger.Warnf(ctx, "[IM] StartStream failed, falling back to non-streaming: %v", err)
-		return s.fallbackNonStream(ctx, msg, session, customAgent, kbIDs, adapter, userKey, tenant)
+		return s.fallbackNonStream(ctx, msg, session, customAgent, kbIDs, attachments, attachmentFiles, imageURLs, adapter, channel, userKey, tenant)
 	}
 
 	// Prepare the QA pipeline
@@ -2622,7 +2738,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	requestID := uuid.New().String()
 
 	// Create user message
-	userMsg, err := s.messageService.CreateMessage(qaCtx, createIMUserMessagePayload(session.ID, msg.Content, requestID))
+	userMsg, err := s.messageService.CreateMessage(qaCtx, createIMUserMessagePayload(session.ID, msg.Content, requestID, attachments))
 	if err != nil {
 		return fmt.Errorf("create user message: %w", err)
 	}
@@ -2650,7 +2766,8 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	// Run QA async
 	go func() {
 		var err error
-		req := buildIMQARequest(session, msg.Content, assistantMsg.ID, userMsg.ID, customAgent, kbIDs, msg.Quote)
+		req := buildIMQARequest(session, msg.Content, assistantMsg.ID, userMsg.ID, customAgent, kbIDs, msg.Quote, attachments)
+		req.ImageURLs = imageURLs
 		if req.QuotedContext != "" {
 			logger.Debugf(qaCtx, "[IM] QuotedContext set: length=%d", len(req.QuotedContext))
 		}
@@ -2745,13 +2862,16 @@ loop:
 		answer = appendIMAuthNotice(answer, notice)
 	}
 
+	deliverySucceeded := true
 	if err := streamer.FinalizeStream(ctx, msg, streamID, finalDisplay); err != nil {
 		logger.Warnf(ctx, "[IM] FinalizeStream failed: %v", err)
+		deliverySucceeded = false
 	}
 
 	// End the stream
 	if err := streamer.EndStream(ctx, msg, streamID); err != nil {
 		logger.Warnf(ctx, "[IM] EndStream failed: %v", err)
+		deliverySucceeded = false
 	}
 
 	if answer == "" {
@@ -2763,24 +2883,33 @@ loop:
 	if err := s.messageService.UpdateMessage(ctx, assistantMsg); err != nil {
 		logger.Warnf(ctx, "[IM] Failed to update assistant message: %v", err)
 	}
+	if finalErr == nil && deliverySucceeded {
+		go s.storeIMQARound(context.WithoutCancel(ctx), channel, msg, msg.Content, answer, attachmentFiles)
+	}
 
 	logger.Infof(ctx, "[IM] Stream reply sent: platform=%s user=%s answer_len=%d", msg.Platform, msg.UserID, len(answer))
 	return nil
 }
 
 // fallbackNonStream is used when streaming initialization fails.
-func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, adapter Adapter, userKey string, tenant *types.Tenant) error {
-	answer, err := s.runQA(ctx, session, msg.Content, customAgent, kbIDs, userKey, msg.Quote)
+func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, attachments types.MessageAttachments, attachmentFiles []imAttachmentFile, imageURLs []string, adapter Adapter, channel *IMChannel, userKey string, tenant *types.Tenant) error {
+	answer, err := s.runQA(ctx, session, msg.Content, customAgent, kbIDs, attachments, imageURLs, userKey, msg.Quote)
 	if err != nil {
 		logger.Errorf(ctx, "[IM] QA fallback failed: %v", err)
 		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
 	}
 
-	return adapter.SendReply(ctx, msg, &ReplyMessage{Content: formatIMOutboundAnswer(ctx, answer, tenant, s.defaultFileSvc, s.storageResolver), IsFinal: true})
+	if sendErr := adapter.SendReply(ctx, msg, &ReplyMessage{Content: formatIMOutboundAnswer(ctx, answer, tenant, s.defaultFileSvc, s.storageResolver), IsFinal: true}); sendErr != nil {
+		return sendErr
+	}
+	if err == nil {
+		go s.storeIMQARound(context.WithoutCancel(ctx), channel, msg, msg.Content, answer, attachmentFiles)
+	}
+	return nil
 }
 
 // runQA executes the WeKnora QA pipeline and returns the full answer text.
-func (s *Service) runQA(ctx context.Context, session *types.Session, query string, customAgent *types.CustomAgent, kbIDs []string, userKey string, quote *QuotedMessage) (string, error) {
+func (s *Service) runQA(ctx context.Context, session *types.Session, query string, customAgent *types.CustomAgent, kbIDs []string, attachments types.MessageAttachments, imageURLs []string, userKey string, quote *QuotedMessage) (string, error) {
 	// Cancellable context (no hard deadline): each agent round has its own
 	// LLMCallTimeout. The context can still be cancelled by /stop.
 	ctx, cancel := context.WithCancel(ctx)
@@ -2852,7 +2981,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	requestID := uuid.New().String()
 
 	// Create user message so it appears in conversation history
-	userMsg, err := s.messageService.CreateMessage(ctx, createIMUserMessagePayload(session.ID, query, requestID))
+	userMsg, err := s.messageService.CreateMessage(ctx, createIMUserMessagePayload(session.ID, query, requestID, attachments))
 	if err != nil {
 		return "", fmt.Errorf("create user message: %w", err)
 	}
@@ -2906,7 +3035,8 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	// Run QA async
 	go func() {
 		var err error
-		req := buildIMQARequest(session, query, assistantMsg.ID, userMsg.ID, customAgent, kbIDs, quote)
+		req := buildIMQARequest(session, query, assistantMsg.ID, userMsg.ID, customAgent, kbIDs, quote, attachments)
+		req.ImageURLs = imageURLs
 		if req.QuotedContext != "" {
 			logger.Debugf(ctx, "[IM] QuotedContext set: length=%d", len(req.QuotedContext))
 		}
@@ -2969,6 +3099,40 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	return answer, nil
 }
 
+// storeIMQARound persists a successful IM turn without affecting the reply
+// path. Attachments use the bytes already downloaded for the Q&A request.
+func (s *Service) storeIMQARound(ctx context.Context, channel *IMChannel, msg *IncomingMessage, question, answer string, attachmentFiles []imAttachmentFile) {
+	if channel == nil || !channel.MessageStorageEnabled || strings.TrimSpace(channel.KnowledgeBaseID) == "" || s.knowledgeService == nil {
+		return
+	}
+	tenant, err := s.tenantService.GetTenantByID(ctx, channel.TenantID)
+	if err != nil {
+		logger.Warnf(ctx, "[IM] skip message storage: get tenant failed: %v", err)
+		return
+	}
+	storageCtx := context.WithValue(ctx, types.TenantIDContextKey, channel.TenantID)
+	storageCtx = context.WithValue(storageCtx, types.TenantInfoContextKey, tenant)
+
+	attachmentLines := make([]string, 0, len(attachmentFiles))
+	for _, attachment := range attachmentFiles {
+		file := newInMemoryFileHeader(attachment.fileName, attachment.content)
+		if _, err := s.knowledgeService.CreateKnowledgeFromFile(storageCtx, channel.KnowledgeBaseID, file, nil, nil, "", nil, "im", nil); err != nil {
+			logger.Warnf(ctx, "[IM] store attachment %s failed: %v", attachment.fileName, err)
+			continue
+		}
+		attachmentLines = append(attachmentLines, "- "+attachment.fileName)
+	}
+
+	passage := fmt.Sprintf("[IM 平台: %s]\n[渠道: %s]\n[消息 ID: %s]\n\nQ: %s", msg.Platform, channel.Name, msg.MessageID, question)
+	if len(attachmentLines) > 0 {
+		passage += "\n\n附件:\n" + strings.Join(attachmentLines, "\n")
+	}
+	passage += "\n\nA: " + answer
+	if _, err := s.knowledgeService.CreateKnowledgeFromPassage(storageCtx, channel.KnowledgeBaseID, []string{passage}, "im"); err != nil {
+		logger.Warnf(ctx, "[IM] store Q&A passage failed: %v", err)
+	}
+}
+
 // ── CRUD operations for IM channels ──
 
 // ListChannelsByAgent returns all channels for a given agent within a tenant.
@@ -2986,19 +3150,20 @@ func (s *Service) ListChannelsByAgent(agentID string, tenantID uint64) ([]IMChan
 // tenant-scoped list endpoint; callers that need credentials must use the
 // per-agent endpoint which enforces the same tenant scope anyway.
 type ChannelWithAgent struct {
-	ID          string    `json:"id"`
-	TenantID    uint64    `json:"tenant_id"`
-	AgentID     string    `json:"agent_id"`
-	AgentName   string    `json:"agent_name"`
-	Platform    string    `json:"platform"`
-	Name        string    `json:"name"`
-	Enabled     bool      `json:"enabled"`
-	Mode        string    `json:"mode"`
-	OutputMode  string    `json:"output_mode"`
-	SessionMode string    `json:"session_mode"`
-	BotIdentity string    `json:"bot_identity"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID                    string    `json:"id"`
+	TenantID              uint64    `json:"tenant_id"`
+	AgentID               string    `json:"agent_id"`
+	AgentName             string    `json:"agent_name"`
+	Platform              string    `json:"platform"`
+	Name                  string    `json:"name"`
+	Enabled               bool      `json:"enabled"`
+	Mode                  string    `json:"mode"`
+	OutputMode            string    `json:"output_mode"`
+	SessionMode           string    `json:"session_mode"`
+	MessageStorageEnabled bool      `json:"message_storage_enabled"`
+	BotIdentity           string    `json:"bot_identity"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
 }
 
 // ListChannelsByTenant returns all non-deleted IM channels in the given tenant,
@@ -3012,8 +3177,8 @@ func (s *Service) ListChannelsByTenant(tenantID uint64) ([]ChannelWithAgent, err
 	q := s.db.Table("im_channels AS c").
 		Select(`c.id, c.tenant_id, c.agent_id,
                 COALESCE(a.name, '') AS agent_name,
-                c.platform, c.name, c.enabled, c.mode, c.output_mode,
-                c.session_mode, c.bot_identity, c.created_at, c.updated_at`).
+				c.platform, c.name, c.enabled, c.mode, c.output_mode,
+				c.session_mode, c.message_storage_enabled, c.bot_identity, c.created_at, c.updated_at`).
 		Joins(`LEFT JOIN custom_agents AS a
                ON a.id = c.agent_id AND a.tenant_id = c.tenant_id AND a.deleted_at IS NULL`).
 		Where("c.tenant_id = ? AND c.deleted_at IS NULL", tenantID)
@@ -3032,6 +3197,9 @@ func (s *Service) ListChannelsByTenant(tenantID uint64) ([]ChannelWithAgent, err
 // CreateChannel creates a new IM channel and optionally starts it.
 // Returns a duplicate_bot error if the bot identity is already used by another channel.
 func (s *Service) CreateChannel(channel *IMChannel) error {
+	if err := s.validateMessageStorage(channel); err != nil {
+		return err
+	}
 	if err := s.checkDuplicateBot(channel, ""); err != nil {
 		return err
 	}
@@ -3067,6 +3235,9 @@ func (s *Service) SetChannelAgentID(ctx context.Context, channel *IMChannel, age
 // UpdateChannel updates a channel and restarts it if needed.
 // Returns a duplicate_bot error if the bot identity is already used by another channel.
 func (s *Service) UpdateChannel(channel *IMChannel) error {
+	if err := s.validateMessageStorage(channel); err != nil {
+		return err
+	}
 	if err := s.checkDuplicateBot(channel, channel.ID); err != nil {
 		return err
 	}
@@ -3081,6 +3252,26 @@ func (s *Service) UpdateChannel(channel *IMChannel) error {
 		}
 	}
 	s.publishChannelConfigChange(channel.ID)
+	return nil
+}
+
+// validateMessageStorage ensures a channel can only persist IM messages into
+// a knowledge base owned by the same tenant. GetKnowledgeBaseByID is
+// intentionally not tenant-filtered, so this explicit comparison is required.
+func (s *Service) validateMessageStorage(channel *IMChannel) error {
+	if channel == nil || !channel.MessageStorageEnabled {
+		return nil
+	}
+	if strings.TrimSpace(channel.KnowledgeBaseID) == "" {
+		return fmt.Errorf("%w: knowledge_base_id is required", ErrInvalidMessageStorage)
+	}
+	if s.kbService == nil {
+		return fmt.Errorf("%w: knowledge base service is unavailable", ErrInvalidMessageStorage)
+	}
+	kb, err := s.kbService.GetKnowledgeBaseByID(context.Background(), channel.KnowledgeBaseID)
+	if err != nil || kb == nil || kb.TenantID != channel.TenantID {
+		return fmt.Errorf("%w: target knowledge base is unavailable", ErrInvalidMessageStorage)
+	}
 	return nil
 }
 
@@ -3165,132 +3356,6 @@ func (s *Service) checkDuplicateBot(channel *IMChannel, excludeID string) error 
 		return fmt.Errorf("check duplicate bot: %w", err)
 	}
 	return fmt.Errorf("duplicate_bot: this bot is already bound to channel %q (%s); each bot can only be connected to one channel", existing.Name, existing.ID)
-}
-
-// ── File message handling ──────────────────────────────────────────────
-// These methods handle file messages received via IM platforms.
-// Files are downloaded from the IM platform, validated, and saved to the
-// configured knowledge base asynchronously. The user receives a notification
-// at the start and end of processing.
-// ────────────────────────────────────────────────────────────────────────
-
-// supportedKBFileExts is the set of file extensions that can be saved to a knowledge base.
-var supportedKBFileExts = map[string]bool{
-	"pdf": true, "txt": true, "docx": true, "doc": true,
-	"md": true, "markdown": true,
-	"png": true, "jpg": true, "jpeg": true, "gif": true,
-	"csv": true, "xlsx": true, "xls": true,
-	"pptx": true, "ppt": true,
-}
-
-// handleFileMessage processes a file message by downloading it from the IM platform
-// and saving it to the channel's configured knowledge base. Sends start/end
-// notifications to the user via the adapter.
-func (s *Service) handleFileMessage(ctx context.Context, msg *IncomingMessage, adapter Adapter, channel *IMChannel) error {
-	// Check if the adapter supports file downloading
-	downloader, ok := adapter.(FileDownloader)
-	if !ok {
-		logger.Infof(ctx, "[IM] Adapter for platform %s does not support file download, ignoring file message", msg.Platform)
-		return s.sendSmartReply(ctx, adapter, msg, channel,
-			"用户尝试发送文件，但当前平台暂不支持文件消息处理。",
-			"❌ 当前平台暂不支持文件消息处理。")
-	}
-
-	// For image messages, ensure a proper file extension is present.
-	// IM platforms may only provide a hash/key as filename without extension.
-	if msg.MessageType == MessageTypeImage && fileExtension(msg.FileName) == "" {
-		msg.FileName = msg.FileName + ".png"
-	}
-
-	// Validate file extension (pre-download).
-	// Some platforms (e.g. WeCom aibot) do not provide original filenames in the
-	// callback JSON — only a hash ID. For such cases we defer extension validation
-	// to after the file is downloaded, where the real name may be obtained from
-	// HTTP Content-Disposition or Content-Type headers.
-	ext := fileExtension(msg.FileName)
-	if ext != "" && !supportedKBFileExts[ext] {
-		logger.Infof(ctx, "[IM] Unsupported file type: %s (file=%s)", ext, msg.FileName)
-		return s.sendSmartReply(ctx, adapter, msg, channel,
-			fmt.Sprintf("用户上传了一个不支持的文件类型「%s」。目前支持的类型包括：PDF、Word、TXT、Markdown、Excel、CSV、PPT、图片。", ext),
-			fmt.Sprintf("❌ 不支持的文件类型「%s」。\n\n支持的类型：PDF、Word、TXT、Markdown、Excel、CSV、PPT、图片。", ext))
-	}
-
-	// Process asynchronously to avoid blocking the message handler
-	go s.processFileToKnowledgeBase(context.WithoutCancel(ctx), msg, downloader, adapter, channel)
-
-	return nil
-}
-
-// processFileToKnowledgeBase is the async worker that downloads a file from the
-// IM platform and creates a knowledge entry in the configured knowledge base.
-func (s *Service) processFileToKnowledgeBase(ctx context.Context, msg *IncomingMessage, downloader FileDownloader, adapter Adapter, channel *IMChannel) {
-	kbID := channel.KnowledgeBaseID
-	tenantID := channel.TenantID
-
-	// Build context with tenant info for the knowledge service
-	tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
-	if err != nil {
-		logger.Errorf(ctx, "[IM] Failed to get tenant %d for file processing: %v", tenantID, err)
-		s.sendFileResult(ctx, adapter, msg, msg.FileName, false, "获取空间信息失败", channel)
-		return
-	}
-	kbCtx := context.WithValue(ctx, types.TenantIDContextKey, tenantID)
-	kbCtx = context.WithValue(kbCtx, types.TenantInfoContextKey, tenant)
-
-	// Download file from IM platform
-	reader, fileName, err := downloader.DownloadFile(ctx, msg)
-	if err != nil {
-		logger.Errorf(ctx, "[IM] Failed to download file from %s: %v", msg.Platform, err)
-		s.sendFileResult(ctx, adapter, msg, msg.FileName, false, "下载文件失败", channel)
-		return
-	}
-	defer reader.Close()
-
-	logger.Debugf(ctx, "[IM] Downloaded file: original_name=%s resolved_name=%s", msg.FileName, fileName)
-
-	// Post-download extension validation: if the pre-download name had no extension
-	// (e.g. WeCom file messages only provide a hash), check the resolved name now.
-	ext := fileExtension(fileName)
-	if !supportedKBFileExts[ext] {
-		logger.Infof(ctx, "[IM] Unsupported file type after download: %s (file=%s)", ext, fileName)
-		s.sendFileResult(ctx, adapter, msg, fileName, false,
-			fmt.Sprintf("不支持的文件类型「%s」。支持：PDF、Word、TXT、Markdown、Excel、CSV、PPT、图片", ext), channel)
-		return
-	}
-
-	// Read file content into memory for multipart upload
-	content, err := io.ReadAll(reader)
-	if err != nil {
-		logger.Errorf(ctx, "[IM] Failed to read file content: %v", err)
-		s.sendFileResult(ctx, adapter, msg, fileName, false, "读取文件内容失败", channel)
-		return
-	}
-
-	// Create a multipart.FileHeader compatible wrapper
-	fh := newInMemoryFileHeader(fileName, content)
-
-	// Create knowledge entry via the knowledge service
-	knowledge, err := s.knowledgeService.CreateKnowledgeFromFile(kbCtx, kbID, fh, nil, nil, "", nil, imPlatformToChannel(channel.Platform), nil)
-	if err != nil {
-		errMsg := err.Error()
-		// Check for duplicate file
-		if strings.Contains(errMsg, "duplicate") || strings.Contains(errMsg, "already exists") {
-			logger.Infof(ctx, "[IM] File already exists in knowledge base: %s", fileName)
-			s.sendFileResult(ctx, adapter, msg, fileName, false, "文件已存在于知识库中", channel)
-			return
-		}
-		logger.Errorf(ctx, "[IM] Failed to create knowledge from file: %v", err)
-		s.sendFileResult(ctx, adapter, msg, fileName, false, "保存到知识库失败", channel)
-		return
-	}
-
-	logger.Infof(ctx, "[IM] File saved to knowledge base: kb=%s knowledge=%s file=%s", kbID, knowledge.ID, fileName)
-	s.sendFileResult(ctx, adapter, msg, fileName, true, "", channel)
-
-	// Start a background watcher to send the document summary once Asynq
-	// finishes parsing + summary generation. This is intentionally decoupled
-	// from the Asynq task pipeline to avoid modifying any existing logic.
-	go s.watchAndSendSummary(ctx, kbCtx, adapter, msg, knowledge.ID, fileName, channel)
 }
 
 // sendFileResult sends a notification about the file processing result.
