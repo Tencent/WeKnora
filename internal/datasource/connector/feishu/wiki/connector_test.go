@@ -1287,6 +1287,7 @@ func fakeFeishuWithBlocks(nodes []core.WikiNode, docToken, attToken, attName str
 // TestFetchDocxWithBlocks_MultiItem verifies that a docx node returns a main
 // Markdown item plus an attachment sub-item when the blocks API succeeds.
 func TestFetchDocxWithBlocks_MultiItem(t *testing.T) {
+	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const (
 		nodeToken = "nt-docx"
 		objToken  = "obj-docx"
@@ -1408,6 +1409,7 @@ func fakeFeishuWithBlocksAndDownloadStatus(nodes []core.WikiNode, docToken, attT
 // subtree sweep is suppressed so a transient failure never deletes the good prior
 // copy of the attachment. One bad attachment must not block the whole document.
 func TestFetchDocxWithBlocks_AttachmentDownloadFailure(t *testing.T) {
+	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const (
 		nodeToken = "nt-docx-fail"
 		objToken  = "obj-docx-fail"
@@ -1493,6 +1495,7 @@ func TestFetchDocxWithBlocks_AttachmentDownloadFailure(t *testing.T) {
 // the KB has multimodal enabled, but their external_id is ALWAYS kept in
 // SubtreeKeep so toggling VLM off later does not sweep previously OCR'd images.
 func TestFetchDocxWithBlocks_EmbeddedImage(t *testing.T) {
+	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const (
 		nodeToken = "nt-docx-img"
 		objToken  = "obj-docx-img"
@@ -1622,6 +1625,7 @@ func TestFetchDocxWithBlocks_EmbeddedImage(t *testing.T) {
 // download, rather than being silently dropped to a server log. The image is
 // still kept in SubtreeKeep so any prior OCR'd copy is preserved.
 func TestFetchDocxWithBlocks_ImageDownloadFailure(t *testing.T) {
+	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const (
 		nodeToken = "nt-docx-img-fail"
 		objToken  = "obj-docx-img-fail"
@@ -1727,6 +1731,7 @@ func TestFetchDocxWithBlocks_ImageDownloadFailure(t *testing.T) {
 // whose extension is not in the parseable-attachment whitelist (e.g. .png) is NOT
 // promoted to a sub-item, but its inline reference IS present in the main document.
 func TestFetchDocxWithBlocks_NonWhitelistedExtNotPromoted(t *testing.T) {
+	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const (
 		nodeToken = "nt-docx-png"
 		objToken  = "obj-docx-png"
@@ -1766,6 +1771,7 @@ func TestFetchDocxWithBlocks_NonWhitelistedExtNotPromoted(t *testing.T) {
 // whitelisted-extension file block whose download is smaller than core.MinAttachmentBytes
 // is NOT promoted to a sub-item, but its inline reference IS present in the main doc.
 func TestFetchDocxWithBlocks_WhitelistedTinyAttachmentNotPromoted(t *testing.T) {
+	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const (
 		nodeToken = "nt-docx-tiny"
 		objToken  = "obj-docx-tiny"

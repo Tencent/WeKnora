@@ -305,6 +305,7 @@ func TestFetchStream_EmitErrorAborts(t *testing.T) {
 // no export endpoint is registered, so any accidental fall-through to the export
 // path would 404 and surface as a core.Fetch error.
 func TestFetchStream_DocxMultiItem(t *testing.T) {
+	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const (
 		nodeToken = "nt-blocks"
 		objToken  = "obj-blocks"
@@ -440,6 +441,7 @@ func fakeFeishuWithBlocksFallback(nodes []core.WikiNode, docToken string) (*http
 // "application/octet-stream", not "text/markdown". No hard failure occurs —
 // the sync completes successfully with the exported binary.
 func TestFetchStream_DocxBlocksFallback(t *testing.T) {
+	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const (
 		nodeToken = "nt-fallback"
 		objToken  = "obj-fallback"

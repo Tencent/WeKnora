@@ -130,6 +130,7 @@ func fakeFeishuGolden(nodes []core.WikiNode, docToken string, blocks []core.Docx
 }
 
 func TestGolden_RichDocxAllCapabilities(t *testing.T) {
+	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const docToken = "obj-golden"
 	bigPDF := bytes.Repeat([]byte("A"), core.MinAttachmentBytes+512) // kept
 	tinyPDF := bytes.Repeat([]byte("B"), 100)                        // whitelisted but too small → dropped

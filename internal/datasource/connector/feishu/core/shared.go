@@ -304,14 +304,22 @@ type DocxFetchInput struct {
 // sub-items. Falls back to the export API if the blocks API errors or renders
 // empty. Shared by the wiki Connector and the Drive DriveConnector.
 func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput) ([]*types.FetchedItem, error) {
-	// FEISHU_DOCX_PARSE_MODE=export forces the async export API (docx binary ->
-	// docreader) instead of the blocks API. The blocks path renders image blocks
-	// as empty `![图片]()` placeholders and fans images out into separate knowledge
-	// items, which breaks image↔document association in retrieval/wiki/agent. The
-	// export path yields a .docx that docreader parses inline, so images are bound
-	// to the parent document via parent_chunk_id (same as a regular docx upload).
-	// Default (unset / "blocks") keeps the existing blocks-first behaviour.
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("FEISHU_DOCX_PARSE_MODE")), "export") {
+	// FEISHU_DOCX_PARSE_MODE selects the docx parsing path. The blocks path
+	// renders image blocks as empty `![图片]()` placeholders and fans images out
+	// into separate knowledge items, which breaks image↔document association in
+	// retrieval/wiki/agent. The export path yields a .docx that docreader parses
+	// inline, so images are bound to the parent document via parent_chunk_id
+	// (same as a regular docx upload). Default (unset / "export") uses export so
+	// images associate with the document; set "blocks" for the blocks-first
+	// behaviour (faster, keeps docx attachments, but images are detached).
+
+	// This is a temporary solution. If a better parsing solution is available later, this environment variable will be removed and replaced with a better one.
+	parsingMode := strings.TrimSpace(os.Getenv("FEISHU_DOCX_PARSE_MODE"))
+	if parsingMode == "" {
+		parsingMode = "export"
+	}
+
+	if strings.EqualFold(parsingMode, "export") {
 		item, err := exportDocxFallback(ctx, client, in)
 		if err != nil {
 			return nil, err

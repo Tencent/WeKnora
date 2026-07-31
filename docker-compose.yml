@@ -350,6 +350,8 @@ services:
       - OIDC_AUTH_SCOPES=${OIDC_AUTH_SCOPES:-}
       - OIDC_USER_INFO_MAPPING_USER_NAME=${OIDC_USER_INFO_MAPPING_USER_NAME:-}
       - OIDC_USER_INFO_MAPPING_EMAIL=${OIDC_USER_INFO_MAPPING_EMAIL:-}
+      # 飞书云文档解析模式 export：导出为docx，blocks：根据飞书云文档块解析为markdown。默认为:export
+      - FEISHU_DOCX_PARSE_MODE=${FEISHU_DOCX_PARSE_MODE:-export}
     depends_on:
       redis:
         condition: service_started

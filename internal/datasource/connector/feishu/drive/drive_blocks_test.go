@@ -131,6 +131,7 @@ func driveDocxFile() core.DriveFile {
 // A drive docx goes through the blocks path: main Markdown item (external_id =
 // file token, channel = feishu_drive) plus the attachment sub-item.
 func TestDriveFetchStream_DocxBlocksMultiItem(t *testing.T) {
+	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const (
 		attToken = "ft-drv-att"
 		attName  = "report.pdf"
@@ -184,6 +185,7 @@ func TestDriveFetchStream_DocxBlocksMultiItem(t *testing.T) {
 // Blocks API failure falls back to export: exactly one octet-stream item, no
 // ReplacesSubtree (must not sweep good prior children on a transient failure).
 func TestDriveFetchStream_DocxBlocksFailFallsBackToExport(t *testing.T) {
+	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	_, cfg := fakeFeishuDriveDocx(t, []core.DriveFile{driveDocxFile()}, driveDocxFileToken, nil, "fail", nil)
 
 	c := NewDriveConnector(core.RegionFeishuDrive)
@@ -214,6 +216,7 @@ func TestDriveFetchStream_DocxBlocksFailFallsBackToExport(t *testing.T) {
 // Blocks rendering to empty Markdown also falls back to export (a blank page
 // would otherwise ingest as a login-gated URL core.Fetch and fail).
 func TestDriveFetchStream_DocxBlocksEmptyFallsBackToExport(t *testing.T) {
+	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	_, cfg := fakeFeishuDriveDocx(t, []core.DriveFile{driveDocxFile()}, driveDocxFileToken, nil, "empty", nil)
 
 	c := NewDriveConnector(core.RegionFeishuDrive)
@@ -239,6 +242,7 @@ func TestDriveFetchStream_DocxBlocksEmptyFallsBackToExport(t *testing.T) {
 // but its external_id is still in SubtreeKeep so a later toggle-on does not
 // sweep it, and toggling VLM off later does not delete previously OCR'd images.
 func TestDriveFetchStream_DocxImageMultimodalOff(t *testing.T) {
+	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const imgToken = "img-drv-1"
 	blocks := []core.DocxBlock{
 		{BlockID: "b1", BlockType: core.BlockTypePage},
