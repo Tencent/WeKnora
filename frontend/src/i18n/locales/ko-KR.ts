@@ -3455,7 +3455,13 @@ export default {
     },
     buttons: {
       create: '지식베이스 생성',
-      save: '설정 저장'
+      save: '설정 저장',
+      saveAndClose: '저장 후 닫기',
+    },
+    postCreateHint: {
+      title: '생성 완료',
+      footer: '설정을 계속 조정하고 공유·데이터 소스를 구성한 뒤 "저장 후 닫기"를 클릭하세요.',
+      followUpDesc: '왼쪽에서 데이터 소스를 구성하거나 "공유 관리"에서 스페이스에 게시할 수 있습니다',
     },
     wikiBrowser: {
       editBtn: '편집',
@@ -4760,6 +4766,15 @@ export default {
     editor: {
       createTitle: '에이전트 만들기',
       editTitle: '에이전트 편집',
+      buttons: {
+        create: '에이전트 만들기',
+        saveAndClose: '저장 후 닫기',
+      },
+      postCreateHint: {
+        title: '생성 완료',
+        footer: '설정을 계속 조정하고 공유·배포 채널을 구성한 뒤 "저장 후 닫기"를 클릭하세요.',
+        integrationDesc: '통합 센터에서 IM, 웹 임베드 등 배포 채널을 설정하세요',
+      },
       basicInfo: '기본정보',
       basicInfoDesc: '에이전트 이름, 설명 및 실행 모드 구성',
       promptsConfig: '프롬프트',
