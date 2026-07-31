@@ -289,7 +289,7 @@ func isFileURL(rawURL, fileName, fileType string) bool {
 	u, err := url.Parse(rawURL)
 	if err == nil {
 		ext := strings.ToLower(strings.TrimPrefix(path.Ext(u.Path), "."))
-		if ext != "" && allowedFileURLExtensions[ext] {
+		if ext != "" && isAllowedFileURLExtension(ext) {
 			return true
 		}
 	}
@@ -467,20 +467,6 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	return knowledge, nil
 }
 
-// allowedFileURLExtensions defines the supported file extensions for file URL import
-var allowedFileURLExtensions = map[string]bool{
-	"txt":  true,
-	"md":   true,
-	"pdf":  true,
-	"docx": true,
-	"doc":  true,
-	"mp3":  true,
-	"wav":  true,
-	"m4a":  true,
-	"flac": true,
-	"ogg":  true,
-}
-
 // maxFileURLSize is the maximum allowed file size for file URL import (10MB)
 const maxFileURLSize = 10 * 1024 * 1024
 
@@ -564,9 +550,9 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 
 	// Validate file extension against whitelist (if we can determine it)
 	if fileType != "" {
-		if !allowedFileURLExtensions[strings.ToLower(fileType)] {
+		if !isAllowedFileURLExtension(fileType) {
 			logger.Errorf(ctx, "Unsupported file type for file URL import: %s", fileType)
-			return nil, werrors.NewBadRequestError(fmt.Sprintf("不支持的文件类型: %s，仅支持 txt, md, pdf, docx, doc", fileType))
+			return nil, werrors.NewBadRequestError(fmt.Sprintf("不支持的文件类型: %s", fileType))
 		}
 	}
 
