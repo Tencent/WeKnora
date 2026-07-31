@@ -7,30 +7,44 @@ const host = readFileSync(new URL('../../../components/UploadConfirmHost.vue', i
 const knowledgeBase = readFileSync(new URL('../KnowledgeBase.vue', import.meta.url), 'utf8')
 const platform = readFileSync(new URL('../../platform/index.vue', import.meta.url), 'utf8')
 
-test('uses the current folder as the upload destination', () => {
+test('selects multiple document tags and returns them with the confirmation result', () => {
+  assert.match(host, /:tag-ids="uploadConfirmStore\.tagIds"/)
+  assert.match(dialog, /v-model="selectedTagIds"/)
+  assert.match(dialog, /multiple/)
+  assert.match(dialog, /listKnowledgeTags\(kbId, \{ page: 1, page_size: 1000 \}\)/)
+  assert.match(dialog, /tagIds: \[\.\.\.selectedTagIds\.value\]/)
+})
+
+test('keeps the selected folder when confirming file uploads', () => {
   assert.match(host, /:current-folder-id="uploadConfirmStore\.currentFolderId"/)
-  assert.match(dialog, /const selectedFolderId = ref<string \| null>\(props\.currentFolderId\)/)
-  assert.match(dialog, /folderId: selectedFolderId\.value/)
+  assert.match(dialog, /currentFolderId\?: string \| null/)
+  assert.match(dialog, /folderId: props\.currentFolderId/)
 })
 
-test('uses the confirmed folder for file and URL imports', () => {
-  assert.match(knowledgeBase, /const folderId = result\.folderId/)
-  assert.match(knowledgeBase, /executeUploadBatch\(files, \{ processConfig, folderId \}\)/)
-  assert.match(knowledgeBase, /executeUrlImport\(url, processConfig, folderId\)/)
+test('uses confirmed tags for file and URL imports instead of reading the list filter at upload time', () => {
+  assert.match(knowledgeBase, /const tagIds = result\.tagIds \|\| \[\]/)
+  assert.match(knowledgeBase, /executeUploadBatch\(files, \{ processConfig, tagIds, folderId \}\)/)
+  assert.match(knowledgeBase, /executeUrlImport\(url, processConfig, tagIds, folderId\)/)
+  assert.doesNotMatch(
+    knowledgeBase,
+    /const tagIdsToUpload = selectedTagIds\.value\.length > 0 \? \[\.\.\.selectedTagIds\.value\] : undefined/,
+  )
 })
 
-test('dispatches global knowledge file drops and exposes the local upload confirmation flow', () => {
+test('routes global knowledge file drops through the upload confirmation flow', () => {
   assert.match(platform, /weknora:knowledge-file-drop/)
-  assert.match(knowledgeBase, /const handleUploadSourceFiles = \(files: File\[\]\)/)
-  assert.match(knowledgeBase, /openUploadConfirmDialog\(files\)/)
+  assert.match(knowledgeBase, /handleKnowledgeFileDrop/)
+  assert.match(knowledgeBase, /handleUploadSourceFiles\(files\)/)
 })
 
-test('uses section navigation with shared parser settings and advanced options grouped', () => {
-  assert.match(dialog, /<KBParserSettings/)
-  assert.match(dialog, /:parser-engine-rules="uiState\.chunkingConfig\.parserEngineRules"/)
-  assert.match(dialog, /@update:parser-engine-rules="handleParserEngineRulesUpdate"/)
+test('uses section navigation with inline chunking controls and advanced options grouped', () => {
+  assert.match(dialog, /v-model="uiState\.chunkingConfig\.strategy"/)
+  assert.match(dialog, /v-model="uiState\.chunkingConfig\.chunkSize"/)
+  assert.match(dialog, /v-model="uiState\.chunkingConfig\.chunkOverlap"/)
+  assert.match(dialog, /chunkingMoreOpen/)
   assert.match(dialog, /activeSection === 'graph'/)
   assert.match(dialog, /class="files-panel"/)
-  assert.match(dialog, /activeSection === 'multimodal'/)
-  assert.match(dialog, /<KBChunkingSettings/)
+  assert.match(dialog, /statusFull/)
+  assert.match(dialog, /data-section="multimodal"/)
+  assert.doesNotMatch(dialog, /<KBChunkingSettings/)
 })

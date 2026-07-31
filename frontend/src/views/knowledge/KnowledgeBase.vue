@@ -1140,6 +1140,15 @@ const handleOpenURLImportDialog = (event: CustomEvent) => {
   }
 };
 
+// Global file drops are captured by the platform shell. Route them through
+// the same confirmation flow as the page upload button.
+const handleKnowledgeFileDrop = (event: CustomEvent) => {
+  const eventKbId = event.detail?.kbId;
+  const files = Array.isArray(event.detail?.files) ? event.detail.files : [];
+  if (eventKbId !== kbId.value || isFAQ.value || files.length === 0) return;
+  handleUploadSourceFiles(files);
+};
+
 // Auto-open document detail when navigated with ?knowledge_id=xxx.
 // Note: this runs both when the KB page mounts with a query param AND when a
 // subsequent in-page navigation (e.g. from the global command palette) only
@@ -1193,12 +1202,14 @@ onMounted(() => {
 
   window.addEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.addEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
+  window.addEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
   window.addEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
 });
 
 onUnmounted(() => {
   window.removeEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.removeEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
+  window.removeEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
   window.removeEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
   stopMovePoll();
   if (timeout !== null) {
@@ -1596,14 +1607,16 @@ const buildFolderStructure = async (
 
 const executeUploadBatch = async (
   files: File[],
-  options: { processConfig?: KnowledgeProcessOverrides; folderId?: string | null } = {},
+  options: { processConfig?: KnowledgeProcessOverrides; tagIds?: string[]; folderId?: string | null } = {},
 ) => {
   const targetKbId = kbId.value;
   if (!targetKbId || files.length === 0) {
     return { successCount: 0, failCount: files.length };
   }
 
-  const tagIdsToUpload = selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : undefined;
+  const tagIdsToUpload = options.tagIds && options.tagIds.length > 0
+    ? [...options.tagIds]
+    : undefined;
   let successCount = 0;
   let failCount = 0;
   const totalCount = files.length;
@@ -1698,14 +1711,19 @@ const executeUploadBatch = async (
   return { successCount, failCount };
 };
 
-const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOverrides, folderId?: string | null) => {
+const executeUrlImport = async (
+  url: string,
+  processConfig?: KnowledgeProcessOverrides,
+  tagIds?: string[],
+  folderId?: string | null,
+) => {
   const targetKbId = kbId.value;
   if (!targetKbId) {
     MessagePlugin.error(t('error.missingKbId'));
     return;
   }
 
-  const tagIdsToUpload = selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : undefined;
+  const tagIdsToUpload = tagIds && tagIds.length > 0 ? [...tagIds] : undefined;
   try {
     const urlData: { url: string; enable_multimodel?: boolean; tag_ids?: string[]; folder_id?: string; process_config?: KnowledgeProcessOverrides } = {
       url,
@@ -1751,14 +1769,15 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
   const files = result.files || [];
   const urls = result.urls || [];
   const processConfig = result.processConfig;
+  const tagIds = result.tagIds || [];
   const folderId = result.folderId;
 
   if (files.length > 0) {
-    await executeUploadBatch(files, { processConfig, folderId });
+    await executeUploadBatch(files, { processConfig, tagIds, folderId });
   }
 
   for (const url of urls) {
-    await executeUrlImport(url, processConfig, folderId);
+    await executeUrlImport(url, processConfig, tagIds, folderId);
   }
 
   // Refresh current directory view
