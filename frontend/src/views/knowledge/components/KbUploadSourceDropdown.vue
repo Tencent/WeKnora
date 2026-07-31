@@ -65,11 +65,13 @@ import { ref, computed, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
 import { filterUploadFiles } from '../utils/uploadSources'
+import dingtalkIcon from '@/assets/img/im/dingtalk.svg'
 
 const props = withDefaults(defineProps<{
   acceptFileTypes?: string
   supportedFileTypes?: string[]
   includeManual?: boolean
+  includeDingtalk?: boolean
   triggerIcon?: string
   triggerClass?: string
   dataGuide?: string
@@ -79,6 +81,7 @@ const props = withDefaults(defineProps<{
   acceptFileTypes: '',
   supportedFileTypes: () => [],
   includeManual: false,
+  includeDingtalk: false,
   triggerIcon: 'file-add',
   triggerClass: '',
   dataGuide: '',
@@ -90,6 +93,7 @@ const emit = defineEmits<{
   files: [files: File[]]
   url: [url: string]
   manual: []
+  dingtalk: []
 }>()
 
 const { t } = useI18n()
@@ -126,6 +130,13 @@ const dropdownOptions = computed(() => {
       prefixIcon: () => h(TIcon, { name: 'edit', size: '16px' }),
     })
   }
+  if (props.includeDingtalk) {
+    options.push({
+      content: t('knowledgeBase.importFromDingtalk'),
+      value: 'importDingtalk',
+      prefixIcon: () => h('img', { src: dingtalkIcon, class: 'dropdown-dingtalk-icon', alt: '' }),
+    })
+  }
   return options
 })
 
@@ -143,6 +154,9 @@ const handleActionSelect = (data: { value: string }) => {
       break
     case 'manualCreate':
       emit('manual')
+      break
+    case 'importDingtalk':
+      emit('dingtalk')
       break
     default:
       break
@@ -213,7 +227,11 @@ const openUrlDialog = () => {
   urlDialogVisible.value = true
 }
 
-defineExpose({ openUrlDialog })
+const openFileDialog = () => {
+  fileInputRef.value?.click()
+}
+
+defineExpose({ openUrlDialog, openFileDialog })
 </script>
 
 <style lang="less" scoped>
@@ -247,5 +265,11 @@ defineExpose({ openUrlDialog })
     line-height: 1.5;
     color: var(--td-text-color-placeholder);
   }
+}
+
+:deep(.dropdown-dingtalk-icon) {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
 }
 </style>
