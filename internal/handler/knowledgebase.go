@@ -361,7 +361,12 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
-	if !feedbackWeightUpdateAllowed(ctx, types.IndexingStrategy{}, &req.IndexingStrategy) {
+	if !feedbackWeightUpdateAllowed(
+		ctx,
+		c.GetUint64(types.TenantIDContextKey.String()),
+		types.IndexingStrategy{},
+		&req.IndexingStrategy,
+	) {
 		_ = c.Error(apperrors.NewForbiddenError(
 			"Only workspace owners and admins may enable feedback retrieval weighting",
 		))
@@ -879,7 +884,7 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		return
 	}
 	if req.Config != nil {
-		if !feedbackWeightUpdateAllowed(ctx, kb.IndexingStrategy, req.Config.IndexingStrategy) {
+		if !feedbackWeightUpdateAllowed(ctx, kb.TenantID, kb.IndexingStrategy, req.Config.IndexingStrategy) {
 			_ = c.Error(apperrors.NewForbiddenError(
 				"Only workspace owners and admins may change feedback retrieval weighting",
 			))
@@ -918,14 +923,18 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 
 func feedbackWeightUpdateAllowed(
 	ctx context.Context,
+	knowledgeBaseTenantID uint64,
 	current types.IndexingStrategy,
 	requested *types.IndexingStrategy,
 ) bool {
 	if requested == nil || requested.FeedbackWeightEnabled == current.FeedbackWeightEnabled {
 		return true
 	}
+	callerTenantID, hasCallerTenant := types.TenantIDFromContext(ctx)
 	principal, ok := types.PrincipalFromContext(ctx)
-	return ok &&
+	return hasCallerTenant &&
+		callerTenantID == knowledgeBaseTenantID &&
+		ok &&
 		principal.Type == types.PrincipalWebUser &&
 		strings.TrimSpace(principal.ID) != "" &&
 		types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin)

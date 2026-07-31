@@ -17,30 +17,62 @@ func TestFeedbackWeightOptInUpdateRequiresWebAdminOrOwner(t *testing.T) {
 		name          string
 		role          types.TenantRole
 		principalType string
+		callerTenant  uint64
+		kbTenant      uint64
 		allowed       bool
 	}{
-		{name: "viewer", role: types.TenantRoleViewer, principalType: types.PrincipalWebUser},
-		{name: "contributor", role: types.TenantRoleContributor, principalType: types.PrincipalWebUser},
-		{name: "api key", role: types.TenantRoleOwner, principalType: types.PrincipalAPITenant},
-		{name: "admin", role: types.TenantRoleAdmin, principalType: types.PrincipalWebUser, allowed: true},
-		{name: "owner", role: types.TenantRoleOwner, principalType: types.PrincipalWebUser, allowed: true},
+		{
+			name: "viewer", role: types.TenantRoleViewer, principalType: types.PrincipalWebUser,
+			callerTenant: 11, kbTenant: 11,
+		},
+		{
+			name: "contributor", role: types.TenantRoleContributor, principalType: types.PrincipalWebUser,
+			callerTenant: 11, kbTenant: 11,
+		},
+		{
+			name: "api key", role: types.TenantRoleOwner, principalType: types.PrincipalAPITenant,
+			callerTenant: 11, kbTenant: 11,
+		},
+		{
+			name: "admin", role: types.TenantRoleAdmin, principalType: types.PrincipalWebUser,
+			callerTenant: 11, kbTenant: 11, allowed: true,
+		},
+		{
+			name: "owner", role: types.TenantRoleOwner, principalType: types.PrincipalWebUser,
+			callerTenant: 11, kbTenant: 11, allowed: true,
+		},
+		{
+			name: "cross tenant admin with shared editor access",
+			role: types.TenantRoleAdmin, principalType: types.PrincipalWebUser,
+			callerTenant: 11, kbTenant: 22,
+		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			ctx := types.WithPrincipal(
-				context.WithValue(context.Background(), types.TenantRoleContextKey, testCase.role),
+				context.WithValue(
+					context.WithValue(context.Background(), types.TenantRoleContextKey, testCase.role),
+					types.TenantIDContextKey,
+					testCase.callerTenant,
+				),
 				types.Principal{Type: testCase.principalType, ID: "caller"},
 			)
-			if got := feedbackWeightUpdateAllowed(ctx, current, requested); got != testCase.allowed {
+			if got := feedbackWeightUpdateAllowed(
+				ctx,
+				testCase.kbTenant,
+				current,
+				requested,
+			); got != testCase.allowed {
 				t.Fatalf("allowed = %v, want %v", got, testCase.allowed)
 			}
 		})
 	}
 
-	if !feedbackWeightUpdateAllowed(context.Background(), current, &current) {
+	if !feedbackWeightUpdateAllowed(context.Background(), 22, current, &current) {
 		t.Fatal("an unchanged opt-in value must not block unrelated KB updates")
 	}
 	if feedbackWeightUpdateAllowed(
 		feedbackGovernanceRequestContext(types.TenantRoleContributor, types.PrincipalWebUser),
+		11,
 		types.IndexingStrategy{},
 		&types.IndexingStrategy{FeedbackWeightEnabled: true},
 	) {
@@ -50,7 +82,11 @@ func TestFeedbackWeightOptInUpdateRequiresWebAdminOrOwner(t *testing.T) {
 
 func feedbackGovernanceRequestContext(role types.TenantRole, principalType string) context.Context {
 	return types.WithPrincipal(
-		context.WithValue(context.Background(), types.TenantRoleContextKey, role),
+		context.WithValue(
+			context.WithValue(context.Background(), types.TenantRoleContextKey, role),
+			types.TenantIDContextKey,
+			uint64(11),
+		),
 		types.Principal{Type: principalType, ID: "caller"},
 	)
 }
