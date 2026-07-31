@@ -5,6 +5,32 @@ const STREAMING_IMAGE_PLACEHOLDER = '<span class="streaming-image-loading"><span
 const STREAMING_MERMAID_PLACEHOLDER = buildMermaidLoadingHtml();
 const MERMAID_FENCE_START = '```mermaid';
 
+interface ChatMentionDisplayItem {
+  type?: string;
+  kb_type?: string;
+  kb_name?: string;
+  name?: string;
+}
+
+export const mentionTagClass = (item: ChatMentionDisplayItem): string => {
+  if (item.type === 'kb') return item.kb_type === 'faq' ? 'faq-tag' : 'kb-tag';
+  return `${item.type || 'file'}-tag`;
+};
+
+export const mentionTagIcon = (item: ChatMentionDisplayItem): string => {
+  if (item.type === 'tag') return 'tag';
+  if (item.type === 'folder') return 'folder-open';
+  if (item.type === 'mcp') return 'tools';
+  if (item.type === 'skill') return 'bookmark';
+  return 'file';
+};
+
+export const mentionTagLabel = (item: ChatMentionDisplayItem): string => {
+  const name = item.name || '';
+  if (item.type === 'folder' && item.kb_name) return `${name} · ${item.kb_name}`;
+  return name;
+};
+
 export const replaceIncompleteImageWithPlaceholder = (content: string): string => {
   if (!content) return '';
 

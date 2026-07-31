@@ -9,7 +9,7 @@
                     <t-icon v-if="item.type === 'kb'" :name="item.kb_type === 'faq' ? 'chat-bubble-help' : 'folder'" />
                     <t-icon v-else :name="mentionTagIcon(item)" />
                 </span>
-                <span class="tag_name">{{ item.name }}</span>
+                <span class="tag_name">{{ mentionTagLabel(item) }}</span>
             </span>
         </div>
         <!-- 显示上传的图片 -->
@@ -53,20 +53,13 @@ import picturePreview from '@/components/picture-preview.vue';
 import { useI18n } from 'vue-i18n';
 import { useChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
 import { isPreviewableAttachment, resolveAttachmentFileType } from '@/utils/attachmentPreview';
+import {
+    mentionTagClass,
+    mentionTagIcon,
+    mentionTagLabel,
+} from '@/utils/chatMessageShared';
 
 const { t } = useI18n();
-
-const mentionTagClass = (item) => {
-    if (item.type === 'kb') return item.kb_type === 'faq' ? 'faq-tag' : 'kb-tag';
-    return `${item.type || 'file'}-tag`;
-};
-
-const mentionTagIcon = (item) => {
-    if (item.type === 'tag') return 'tag';
-    if (item.type === 'mcp') return 'tools';
-    if (item.type === 'skill') return 'bookmark';
-    return 'file';
-};
 
 const props = defineProps({
     content: {

@@ -7,7 +7,13 @@ import { MessagePlugin } from "tdesign-vue-next";
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
 import { useMenuStore } from '@/stores/menu';
-import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags } from '@/api/knowledge-base';
+import {
+  listKnowledgeBases,
+  searchKnowledge,
+  batchQueryKnowledge,
+  listKnowledgeTags,
+  searchDocumentFolders,
+} from '@/api/knowledge-base';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { stopSession } from '@/api/chat';
 import { useOrganizationStore } from '@/stores/organization';
@@ -41,7 +47,13 @@ import {
   type AgentNotReadyReasonKey,
 } from '@/utils/agent-readiness';
 import { formatLocalizedList } from '@/utils/format-list';
+import {
+  applyDocumentFolderSelectionChange,
+  getDocumentFolderMentionBlockReason,
+  runDocumentFolderCapabilityCheck,
+} from '@/utils/documentFolderCapability';
 import type { MentionItem, MentionItemType, MentionRequestItem } from '@/types/mention';
+import { mapMentionFolderSearchPage } from './mentionFolderSearch';
 
 const route = useRoute();
 const router = useRouter();
@@ -51,6 +63,10 @@ const orgStore = useOrganizationStore();
 const menuStore = useMenuStore();
 const chatResources = useChatResourcesStore();
 const editorResources = useEditorResourcesStore();
+const documentFoldersEnabled = computed(
+  () => editorResources.systemInfo?.capabilities?.document_folders === true,
+);
+const folderCapabilityCheckPending = ref(false);
 const {
   agents,
   disabledOwnAgentIds,
@@ -475,14 +491,25 @@ const mentionSelectorRef = ref<any>(null);
 const mentionStartPos = ref(0);
 const isComposing = ref(false);
 const isMentionTriggeredByButton = ref(false);
-const mentionHasMore = ref(false);
+const mentionFileHasMore = ref(false);
+const mentionFolderHasMore = ref(false);
+const mentionHasMore = computed(() => mentionFileHasMore.value || mentionFolderHasMore.value);
 const mentionGroupCounts = ref<Partial<Record<MentionItemType, number>>>({});
 // 当前 @ 会话可见的 KB ID 集合（含工具兼容性过滤），分页加载文件时复用，
 // 避免 append 请求把不兼容 KB 的文件漏进来。`null` 表示"不受限制"（非智能体场景）
 const mentionAllowedKbIds = ref<Set<string> | null>(null);
 const mentionLoading = ref(false);
+const mentionFolderSearchLoading = ref(false);
+const mentionSearchPending = ref(false);
 const mentionOffset = ref(0);
+const mentionFolderOffset = ref(0);
+let mentionFolderKbIds: string[] = [];
+let mentionFolderAgentId: string | undefined;
+let mentionFolderAgentSourceTenantId: string | undefined;
 const MENTION_PAGE_SIZE = 20;
+let mentionLoadGeneration = 0;
+let mentionFolderCapabilityGeneration = -1;
+let mentionSearchTimer: ReturnType<typeof setTimeout> | null = null;
 
 // 共享智能体时用于标识「共享空间」的展示名（组织名或共享者），供 @ 列表与已选标签显示角标
 const sharedAgentOrgName = computed(() => {
@@ -494,6 +521,16 @@ const sharedAgentOrgName = computed(() => {
   );
   return shared?.org_name || shared?.shared_by_username || '';
 });
+
+const buildSharedKnowledgeBaseOrgNameMap = () => {
+  const orgNameByKbId: Record<string, string> = {};
+  (orgStore.sharedKnowledgeBases || []).forEach((shared: any) => {
+    if (shared.knowledge_base?.id != null && shared.org_name) {
+      orgNameByKbId[String(shared.knowledge_base.id)] = shared.org_name;
+    }
+  });
+  return orgNameByKbId;
+};
 
 const props = defineProps({
   isReplying: {
@@ -519,6 +556,7 @@ const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
 const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || []);
 const selectedFileIds = computed(() => settingsStore.settings.selectedFiles || []);
 const selectedTags = computed(() => settingsStore.settings.selectedTags || []);
+const selectedFolders = computed(() => settingsStore.settings.selectedFolders || []);
 const selectedMCPServiceIds = computed(() => settingsStore.settings.selectedMCPServices || []);
 const selectedSkillNames = computed(() => settingsStore.settings.selectedSkills || []);
 
@@ -609,12 +647,7 @@ const allSelectedItems = computed(() => {
   }));
 
   // 用户选择的文件（根据 fileIdToKbId + 共享列表/共享智能体补全 org_name，用于角标）
-  const sharedKbOrgMap: Record<string, string> = {};
-  (orgStore.sharedKnowledgeBases || []).forEach((s: any) => {
-    if (s.knowledge_base?.id != null && s.org_name) {
-      sharedKbOrgMap[String(s.knowledge_base.id)] = s.org_name;
-    }
-  });
+  const sharedKbOrgMap = buildSharedKnowledgeBaseOrgNameMap();
   if (sharedAgentOrgName.value) {
     (sharedAgentKbList.value || []).forEach((kb) => {
       sharedKbOrgMap[String(kb.id)] = sharedAgentOrgName.value;
@@ -626,6 +659,7 @@ const allSelectedItems = computed(() => {
     return {
       ...f,
       type: 'file' as const,
+      kbId,
       isAgentConfigured: false,
       org_name
     };
@@ -644,8 +678,51 @@ const allSelectedItems = computed(() => {
     isAgentConfigured: false,
   }));
 
-  return [...agentConfiguredKbs, ...userSelectedKbs, ...files, ...tags, ...selectedMCPItems.value, ...skillMentionItems.value];
+  const folders = selectedFolders.value.map((f: any) => ({
+    id: f.id,
+    name: f.name,
+    type: 'folder' as const,
+    kbId: f.kbId,
+    kbName: f.kbName,
+    folderPath: f.folderPath || f.name,
+    isAgentConfigured: false,
+  }));
+
+  return [...agentConfiguredKbs, ...userSelectedKbs, ...files, ...tags, ...folders, ...selectedMCPItems.value, ...skillMentionItems.value];
 });
+
+type SelectedFolder = {
+  id: string;
+  name: string;
+  kbId: string;
+  kbName?: string;
+  folderPath?: string;
+};
+
+const addSelectedFolder = (folder: SelectedFolder) => {
+  applyDocumentFolderSelectionChange(
+    Boolean(settingsStore._defaultsSnapshot),
+    () => {
+      const folders = settingsStore.settings.selectedFolders || [];
+      if (folders.some(item => item.id === folder.id && item.kbId === folder.kbId)) return;
+      settingsStore.settings.selectedFolders = [...folders, folder];
+    },
+    () => settingsStore.addFolder(folder),
+  );
+};
+
+const removeSelectedFolder = (folderId: string, kbId?: string) => {
+  applyDocumentFolderSelectionChange(
+    Boolean(settingsStore._defaultsSnapshot),
+    () => {
+      const folders = settingsStore.settings.selectedFolders || [];
+      settingsStore.settings.selectedFolders = folders.filter(
+        item => !(item.id === folderId && (!kbId || item.kbId === kbId)),
+      );
+    },
+    () => settingsStore.removeFolder(folderId, kbId),
+  );
+};
 
 // 移除选中项（智能体配置的项也可以移除）
 const removeSelectedItem = (item: MentionItem) => {
@@ -655,6 +732,8 @@ const removeSelectedItem = (item: MentionItem) => {
     settingsStore.removeFile(item.id);
   } else if (item.type === 'tag') {
     settingsStore.removeTag(item.id, item.kbId);
+  } else if (item.type === 'folder') {
+    removeSelectedFolder(item.id, item.kbId);
   } else if (item.type === 'mcp') {
     settingsStore.removeMCPService(item.id);
   } else if (item.type === 'skill') {
@@ -666,10 +745,21 @@ const getMentionIcon = (item: MentionItem) => {
   switch (item.type) {
     case 'file': return 'file';
     case 'tag': return 'tag';
+    case 'folder': return 'folder-open';
     case 'mcp': return 'tools';
     case 'skill': return 'bookmark';
     default: return 'folder';
   }
+};
+
+const getMentionChipTitle = (item: MentionItem) => {
+  if (item.type !== 'folder') return item.name;
+  return [item.kbName, item.folderPath || item.name].filter(Boolean).join(' / ');
+};
+
+const getMentionChipLabel = (item: MentionItem) => {
+  if (item.type !== 'folder') return item.name;
+  return item.kbName ? `${item.name} · ${item.kbName}` : item.name;
 };
 
 const getMentionChipClass = (item: MentionItem) => {
@@ -776,6 +866,7 @@ const loadFiles = async () => {
     });
 
     const allNewFiles: Array<{ id: string; name: string }> = [];
+    const recoveredFileKbMap: Record<string, string> = {};
     const agentIdForBatch = settingsStore.selectedAgentSourceTenantId ? settingsStore.selectedAgentId : undefined;
     const runBatch = async (batchIds: string[], kbId?: string, agentId?: string) => {
       const query = new URLSearchParams();
@@ -783,7 +874,13 @@ const loadFiles = async () => {
       const sourceTenantId = agentId ? settingsStore.selectedAgentSourceTenantId ?? undefined : undefined;
       const res: any = await batchQueryKnowledge(query.toString(), kbId, agentId, sourceTenantId);
       if (res.data && Array.isArray(res.data)) {
-        res.data.forEach((f: any) => allNewFiles.push({ id: f.id, name: f.title || f.file_name }));
+        res.data.forEach((f: any) => {
+          allNewFiles.push({ id: f.id, name: f.title || f.file_name });
+          const resolvedKbId = f.knowledge_base_id || kbId;
+          if (f.id && resolvedKbId) {
+            recoveredFileKbMap[f.id] = resolvedKbId;
+          }
+        });
       }
     };
 
@@ -795,6 +892,10 @@ const loadFiles = async () => {
     }
     if (allNewFiles.length > 0) {
       fileList.value = [...fileList.value, ...allNewFiles];
+    }
+    if (Object.keys(recoveredFileKbMap).length > 0) {
+      Object.assign(fileIdToKbId.value, recoveredFileKbMap);
+      settingsStore.setFileKbMap(recoveredFileKbMap);
     }
   } catch (e) {
     console.error("Failed to load files", e);
@@ -1169,13 +1270,93 @@ const updateModelDropdownPosition = () => {
 
 // Mention Logic
 let lastMentionQuery = '';
+
+const invalidateMentionSearchResults = () => {
+  mentionLoadGeneration += 1;
+  mentionItems.value = [];
+  mentionGroupCounts.value = {};
+  mentionFileHasMore.value = false;
+  mentionFolderHasMore.value = false;
+  mentionAllowedKbIds.value = null;
+  mentionOffset.value = 0;
+  mentionFolderOffset.value = 0;
+  mentionFolderKbIds = [];
+  mentionFolderAgentId = undefined;
+  mentionFolderAgentSourceTenantId = undefined;
+  mentionActiveIndex.value = 0;
+  mentionLoading.value = false;
+  mentionFolderSearchLoading.value = false;
+  mentionSearchPending.value = true;
+  return mentionLoadGeneration;
+};
+
+const searchMentionFolders = async (
+  keyword: string,
+  kbIds: string[],
+  offset: number,
+  agentId?: string,
+  agentSourceTenantId?: string,
+) => {
+  if (kbIds.length === 0) {
+    return { items: [] as MentionItem[], total: 0, hasMore: false, consumed: 0 };
+  }
+  const response: any = await searchDocumentFolders(
+    keyword,
+    offset,
+    MENTION_PAGE_SIZE,
+    {
+      ...(agentId ? { agent_id: agentId } : {}),
+      ...(agentSourceTenantId ? { agent_source_tenant_id: agentSourceTenantId } : {}),
+      kb_ids: kbIds,
+    },
+  );
+  return mapMentionFolderSearchPage(response || {}, {
+    allowedKbIds: kbIds,
+    orgNameByKbId: buildSharedKnowledgeBaseOrgNameMap(),
+    agentOrgName: agentId ? sharedAgentOrgName.value : '',
+  });
+};
+
 const loadMentionItems = async (q: string, resetIndex = true, append = false) => {
   console.log('[Mention] loadMentionItems called with query:', q, 'append:', append);
 
-  if (!append) {
-    mentionOffset.value = 0;
+  // Keep a request-local capability snapshot. If system info turns available
+  // while this request is awaiting KB metadata, the capability watcher starts
+  // a new generation instead of letting this older generation launch a folder
+  // request with state it did not begin with.
+  const documentFoldersEnabledForRequest = documentFoldersEnabled.value;
+  const requestGeneration = append
+    ? mentionLoadGeneration
+    : invalidateMentionSearchResults();
+  if (!append && documentFoldersEnabledForRequest) {
+    mentionFolderCapabilityGeneration = requestGeneration;
   }
+  if (!append) {
+    // Invalidate pagination synchronously. Otherwise the old result set can
+    // emit loadMore while this query is still awaiting KB/tag metadata, and
+    // that append would incorrectly reuse the new generation.
+    mentionFileHasMore.value = false;
+    mentionFolderHasMore.value = false;
+  }
+  const requestOffset = append ? mentionOffset.value : 0;
+  const folderRequestOffset = append ? mentionFolderOffset.value : 0;
+  const nextGroupCounts: Partial<Record<MentionItemType, number>> = append
+    ? { ...mentionGroupCounts.value }
+    : {};
+  let allowedKbIdsForRequest = append ? mentionAllowedKbIds.value : null;
+  let folderKbIdsForRequest = append ? mentionFolderKbIds : [];
+  let folderAgentIdForRequest = append ? mentionFolderAgentId : undefined;
+  let folderAgentSourceTenantIdForRequest = append
+    ? mentionFolderAgentSourceTenantId
+    : undefined;
+  let folderSearchPromise: ReturnType<typeof searchMentionFolders> | null = null;
+  let folderItems: MentionItem[] = [];
+  let consumedFileResults = 0;
+  let consumedFolderResults = 0;
+  let nextFileHasMore = append ? mentionFileHasMore.value : false;
+  let nextFolderHasMore = append ? mentionFolderHasMore.value : false;
 
+  try {
   // 根据智能体的 kb_selection_mode 过滤知识库；选中共享智能体时使用该空间下的知识库，否则使用本空间 + 共享给自己的
   let kbItems: any[] = [];
   let tagItems: MentionItem[] = [];
@@ -1262,9 +1443,28 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     }
 
     // 非智能体场景不限制文件过滤；智能体场景按当前 availableKbs 的 ID 集合过滤文件
-    mentionAllowedKbIds.value = hasAgentConfig.value
+    allowedKbIdsForRequest = hasAgentConfig.value
       ? new Set(availableKbs.map((kb: any) => String(kb.id)))
       : null;
+
+    const folderKeyword = q.trim();
+    if (folderKeyword && agentMode.value !== 'smart-reasoning') {
+      folderKbIdsForRequest = availableKbs
+        .filter((kb: any) => (
+          (kb.type || 'document') !== 'faq'
+          && kb.capabilities?.wiki !== true
+          && kb.indexing_strategy?.wiki_enabled !== true
+        ))
+        .map((kb: any) => String(kb.id));
+      folderAgentIdForRequest = sourceTenantId && agentId ? agentId : undefined;
+      folderAgentSourceTenantIdForRequest = sourceTenantId && agentId
+        ? sourceTenantId
+        : undefined;
+    } else {
+      folderKbIdsForRequest = [];
+      folderAgentIdForRequest = undefined;
+      folderAgentSourceTenantIdForRequest = undefined;
+    }
 
     const kbs = availableKbs.filter((kb: any) =>
       !q || (kb.name && kb.name.toLowerCase().includes(q.toLowerCase()))
@@ -1286,10 +1486,13 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
         type: 'kb' as const,
         kbType: kbType === 'faq' ? 'faq' as const : 'document' as const,
         count,
-        orgName: kb.org_name || sharedAgentOrgName.value || undefined
+        orgName: kb.org_name || sharedAgentOrgName.value || undefined,
+        supportsDocumentFolders: kbType !== 'faq'
+          && kb.capabilities?.wiki !== true
+          && kb.indexing_strategy?.wiki_enabled !== true,
       };
     }));
-    mentionGroupCounts.value.kb = kbItems.length;
+    nextGroupCounts.kb = kbItems.length;
 
     const tagKeyword = q.trim();
     const tagSources = availableKbs;
@@ -1307,7 +1510,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
         }));
       }));
       tagItems = tagResults.flat();
-      mentionGroupCounts.value.tag = tagItems.length;
+      nextGroupCounts.tag = tagItems.length;
     } catch (e) {
       console.error('[Mention] listKnowledgeTags error:', e);
       tagItems = [];
@@ -1347,6 +1550,31 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     }
   }
 
+  // The initial branch awaits KB/tag/detail data before starting network
+  // searches. A newer keyword may already have completed during those awaits;
+  // stale requests must not mutate either loading flag or launch extra pages.
+  if (requestGeneration !== mentionLoadGeneration) return;
+
+  const folderKeyword = q.trim();
+  const shouldLoadFolders = Boolean(folderKeyword)
+    && documentFoldersEnabledForRequest
+    && agentMode.value !== 'smart-reasoning'
+    && folderKbIdsForRequest.length > 0
+    && (!append || mentionFolderHasMore.value);
+  if (shouldLoadFolders) {
+    mentionFolderSearchLoading.value = true;
+    folderSearchPromise = searchMentionFolders(
+      folderKeyword,
+      folderKbIdsForRequest,
+      folderRequestOffset,
+      folderAgentIdForRequest,
+      folderAgentSourceTenantIdForRequest,
+    );
+  } else {
+    mentionFolderSearchLoading.value = false;
+    if (!append) nextFolderHasMore = false;
+  }
+
   // Fetch Files from API
   // 仅当满足以下两点才加载文件：
   //   1. 智能体确实会用到知识库（kb_selection_mode !== 'none'）；
@@ -1360,8 +1588,8 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
   // 空关键词时显式请求最近文件；有关键词时返回匹配文件。
   // `recent=true` 只用于浏览态，避免其他搜索调用漏传关键词时静默退化为最近列表。
   const fileSearchKeyword = q.trim();
-  if (shouldLoadFiles) {
-    mentionLoading.value = true;
+  if (shouldLoadFiles && (!append || mentionFileHasMore.value)) {
+    if (requestGeneration === mentionLoadGeneration) mentionLoading.value = true;
     try {
       const fileTypesParam = agentSupportedFileTypes.value.length > 0 ? agentSupportedFileTypes.value : undefined;
       const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
@@ -1369,10 +1597,13 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       const searchOptions = {
         ...(sourceTenantId && agentId ? { agent_id: agentId, agent_source_tenant_id: sourceTenantId } : {}),
         recent: !fileSearchKeyword,
+        ...(allowedKbIdsForRequest
+          ? { kb_ids: [...allowedKbIdsForRequest] }
+          : {}),
       };
       const res: any = await searchKnowledge(
         fileSearchKeyword,
-        mentionOffset.value,
+        requestOffset,
         MENTION_PAGE_SIZE,
         fileTypesParam,
         searchOptions
@@ -1382,24 +1613,20 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
         let files = res.data;
         const rawTotal = typeof res.total === 'number' ? res.total : undefined;
         const apiPageSize = res.data.length;
+        consumedFileResults = apiPageSize;
         // 按当前 @ 会话的兼容 KB 集合过滤：
         //   - 非智能体场景：`mentionAllowedKbIds` 为 null，跳过；
         //   - 智能体场景（含 shared agent）：'selected' 会把 ID 收敛到用户勾的 KB，
         //     'all' 会收敛到"兼容"的 KB，'none' 根本走不到这里（shouldLoadFiles=false）。
         //   这样分页 append 也能用同一份集合，不再只兜住 'selected' + 非共享的分支。
-        if (mentionAllowedKbIds.value) {
-          const allowed = mentionAllowedKbIds.value;
+        if (allowedKbIdsForRequest) {
+          const allowed = allowedKbIdsForRequest;
           files = files.filter((f: any) => {
             const kbId = f.knowledge_base_id ?? f.kb_id;
             return kbId != null && allowed.has(String(kbId));
           });
         }
-        const sharedKbOrgMap: Record<string, string> = {};
-        (orgStore.sharedKnowledgeBases || []).forEach((s: any) => {
-          if (s.knowledge_base?.id != null && s.org_name) {
-            sharedKbOrgMap[String(s.knowledge_base.id)] = s.org_name;
-          }
-        });
+        const sharedKbOrgMap = buildSharedKnowledgeBaseOrgNameMap();
         const agentOrgLabel = sourceTenantId && agentId ? sharedAgentOrgName.value : '';
         fileItems = files.map((f: any) => {
           const kbId = f.knowledge_base_id ?? f.kb_id;
@@ -1411,38 +1638,76 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
             type: 'file' as const,
             kbName: f.knowledge_base_name || '',
             kbId: kbId || undefined,
-            orgName: fileOrgName || undefined
+            orgName: fileOrgName || undefined,
+            folderId: f.folder_id || undefined,
+            folderPath: f.folder_path || undefined,
           };
         });
         if (!append) {
-          const clientFiltered = !!mentionAllowedKbIds.value && fileItems.length < apiPageSize;
+          const clientFiltered = !!allowedKbIdsForRequest && fileItems.length < apiPageSize;
           if (!clientFiltered && rawTotal != null) {
-            mentionGroupCounts.value.file = rawTotal;
+            nextGroupCounts.file = rawTotal;
           } else {
-            delete mentionGroupCounts.value.file;
+            delete nextGroupCounts.file;
           }
         }
       }
-      mentionHasMore.value = res.has_more || false;
-      mentionOffset.value += fileItems.length;
+      nextFileHasMore = res.has_more || false;
     } catch (e) {
       console.error('[Mention] searchKnowledge error:', e);
-      mentionHasMore.value = false;
+      nextFileHasMore = false;
     } finally {
-      mentionLoading.value = false;
+      if (requestGeneration === mentionLoadGeneration) mentionLoading.value = false;
     }
   } else {
-    mentionHasMore.value = false;
+    if (!append) nextFileHasMore = false;
   }
+
+  if (folderSearchPromise) {
+    try {
+      const folderSearchResult = await folderSearchPromise;
+      folderItems = folderSearchResult.items;
+      consumedFolderResults = folderSearchResult.consumed;
+      nextFolderHasMore = folderSearchResult.hasMore;
+      nextGroupCounts.folder = folderSearchResult.total;
+    } catch (error) {
+      console.error('[Mention] searchDocumentFolders error:', error);
+      folderItems = [];
+      nextFolderHasMore = false;
+      delete nextGroupCounts.folder;
+    } finally {
+      if (requestGeneration === mentionLoadGeneration) {
+        mentionFolderSearchLoading.value = false;
+      }
+    }
+  }
+
+  if (requestGeneration !== mentionLoadGeneration) return;
+
+  mentionAllowedKbIds.value = allowedKbIdsForRequest;
+  mentionGroupCounts.value = nextGroupCounts;
+  mentionFileHasMore.value = nextFileHasMore;
+  mentionFolderHasMore.value = nextFolderHasMore;
+  mentionOffset.value = requestOffset + consumedFileResults;
+  mentionFolderOffset.value = folderRequestOffset + consumedFolderResults;
+  mentionFolderKbIds = folderKbIdsForRequest;
+  mentionFolderAgentId = folderAgentIdForRequest;
+  mentionFolderAgentSourceTenantId = folderAgentSourceTenantIdForRequest;
 
   if (append) {
-    // Append file items to existing list
-    mentionItems.value = [...mentionItems.value, ...fileItems];
+    mentionItems.value = [...mentionItems.value, ...folderItems, ...fileItems];
   } else {
-    mentionItems.value = [...kbItems, ...tagItems, ...mcpItems, ...skillItems, ...fileItems];
+    // Browsing remains hierarchical when the query is empty. With a query,
+    // server-side folder results join KB/file results in one typed surface.
+    mentionItems.value = [
+      ...kbItems,
+      ...tagItems,
+      ...folderItems,
+      ...mcpItems,
+      ...skillItems,
+      ...fileItems,
+    ];
   }
-  console.log('[Mention] Total items:', mentionItems.value.length, { kbItems: kbItems.length, fileItems: fileItems.length, tagItems: tagItems.length, mcpItems: mcpItems.length, skillItems: skillItems.length });
-
   // Only reset index if query changed or explicitly requested
   if (resetIndex || q !== lastMentionQuery) {
     mentionActiveIndex.value = 0;
@@ -1452,13 +1717,45 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     mentionActiveIndex.value = Math.max(0, mentionItems.value.length - 1);
   }
   lastMentionQuery = q;
+  } finally {
+    if (!append && requestGeneration === mentionLoadGeneration) {
+      mentionSearchPending.value = false;
+    }
+  }
 };
 
 const loadMoreMentionItems = () => {
-  if (mentionHasMore.value && !mentionLoading.value) {
+  if (mentionHasMore.value && !mentionLoading.value && !mentionFolderSearchLoading.value) {
     loadMentionItems(lastMentionQuery, false, true);
   }
 };
+
+const scheduleMentionSearch = (keyword: string) => {
+  if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
+  // Invalidate and hide the previous keyword's rows before the debounce starts.
+  // This prevents mouse/keyboard selection from committing a stale result.
+  invalidateMentionSearchResults();
+  mentionSearchTimer = setTimeout(() => {
+    mentionSearchTimer = null;
+    void loadMentionItems(keyword, true);
+  }, 120);
+};
+
+watch(documentFoldersEnabled, (enabled, previous) => {
+  if (!enabled || previous) return;
+
+  const keyword = mentionQuery.value.trim();
+  const folderSearchAllowed = agentMode.value !== 'smart-reasoning'
+    && (!hasAgentConfig.value || agentKBSelectionMode.value !== 'none');
+  if (!showMention.value || !keyword || !folderSearchAllowed) return;
+
+  // A queued search has not captured the capability yet and will observe the
+  // enabled value when it starts. Likewise, an active generation that already
+  // captured `true` needs no duplicate request.
+  if (mentionSearchTimer || mentionFolderCapabilityGeneration === mentionLoadGeneration) return;
+
+  scheduleMentionSearch(mentionQuery.value);
+});
 
 const getTextareaEl = () => {
   if (!textareaRef.value) return null;
@@ -1517,7 +1814,7 @@ const onInput = (val: string | InputEvent) => {
     // Only reload if query changed
     if (q !== mentionQuery.value) {
       mentionQuery.value = q;
-      loadMentionItems(q, true); // Reset index when query changes
+      scheduleMentionSearch(q);
     }
   } else {
     if (textBeforeCursor.endsWith('@')) {
@@ -1531,6 +1828,10 @@ const onInput = (val: string | InputEvent) => {
       mentionStartPos.value = cursor - 1;
       showMention.value = true;
       mentionQuery.value = "";
+      if (mentionSearchTimer) {
+        clearTimeout(mentionSearchTimer);
+        mentionSearchTimer = null;
+      }
 
       const coords = getCaretCoordinates(textarea, cursor);
       // Normalize coordinates to CSS pixels (root <html> may carry `zoom`).
@@ -1611,6 +1912,10 @@ const triggerMention = () => {
   showMention.value = true;
   isMentionTriggeredByButton.value = true;
   mentionQuery.value = "";
+  if (mentionSearchTimer) {
+    clearTimeout(mentionSearchTimer);
+    mentionSearchTimer = null;
+  }
   mentionStartPos.value = textarea.selectionStart;
 
   // Normalize coordinates to CSS pixels (root <html> may carry `zoom`).
@@ -1660,6 +1965,10 @@ const onMentionSelect = (item: any) => {
     if (item.kbId) {
       settingsStore.addTag({ id: item.id, name: item.name, kbId: item.kbId, kbName: item.kbName });
     }
+  } else if (item.type === 'folder') {
+    if (item.kbId) {
+      addSelectedFolder({ id: item.id, name: item.name, kbId: item.kbId, kbName: item.kbName, folderPath: item.folderPath });
+    }
   } else if (item.type === 'mcp') {
     settingsStore.addMCPService(item.id);
   } else if (item.type === 'skill') {
@@ -1699,6 +2008,11 @@ const onMentionSelect = (item: any) => {
   }
 
   showMention.value = false;
+  mentionSearchPending.value = false;
+  if (mentionSearchTimer) {
+    clearTimeout(mentionSearchTimer);
+    mentionSearchTimer = null;
+  }
 };
 
 const removeFile = (id: string) => {
@@ -1751,6 +2065,11 @@ const closeMentionSelector = (e: MouseEvent) => {
     return;
   }
   showMention.value = false;
+  mentionSearchPending.value = false;
+  if (mentionSearchTimer) {
+    clearTimeout(mentionSearchTimer);
+    mentionSearchTimer = null;
+  }
 };
 
 // 窗口事件处理器
@@ -1758,6 +2077,9 @@ let resizeHandler: (() => void) | null = null;
 let scrollHandler: (() => void) | null = null;
 
 onMounted(() => {
+  void editorResources.ensureSystemInfo().catch(() => {
+    // Missing capability data is intentionally fail-closed during rollouts.
+  });
   // Embed 渠道由宿主注入 agent/KB，勿拉取需 JWT 的平台资源
   if (props.embeddedMode) return;
 
@@ -1826,6 +2148,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
   window.removeEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
   document.removeEventListener('click', closeAgentModeSelector);
   document.removeEventListener('click', closeModelSelector);
@@ -1913,6 +2236,20 @@ const createSession = async (val: string) => {
     await loadChatModels()
   }
 
+  const hasSelectedFolders = selectedFolders.value.length > 0;
+  if (hasSelectedFolders) {
+    try {
+      const checkCompleted = await runDocumentFolderCapabilityCheck(
+        folderCapabilityCheckPending,
+        () => editorResources.ensureSystemInfo(),
+      );
+      if (!checkCompleted) return;
+    } catch {
+      MessagePlugin.error(t('input.messages.folderCapabilityUnavailable'));
+      return;
+    }
+  }
+
   // 发送前校验当前选中的智能体（含默认快速问答）是否已配置完成
   const agentToCheck = selectedAgent.value;
   let actualAgent = agentToCheck;
@@ -1925,6 +2262,19 @@ const createSession = async (val: string) => {
     actualAgent = builtin || agentToCheck;
   }
   const isAgentMode = actualAgent.config?.agent_mode === 'smart-reasoning';
+  const folderMentionBlockReason = getDocumentFolderMentionBlockReason(
+    hasSelectedFolders,
+    documentFoldersEnabled.value,
+    isAgentMode,
+  );
+  if (folderMentionBlockReason === 'capability-unavailable') {
+    MessagePlugin.error(t('input.messages.folderCapabilityUnavailable'));
+    return;
+  }
+  if (folderMentionBlockReason === 'smart-reasoning') {
+    MessagePlugin.warning(t('input.messages.folderUnsupportedInSmartReasoning'));
+    return;
+  }
   const { keys: notReadyKeys, labels: notReadyReasons } = collectAgentNotReadyReasons(
     actualAgent,
     isAgentMode,
@@ -2507,7 +2857,7 @@ defineExpose({
 
       <!-- 选中的知识库和文件标签（显示在输入框内顶部） -->
       <div v-if="allSelectedItems.length > 0" class="selected-tags-inline">
-        <span v-for="item in allSelectedItems" :key="`${item.type}:${item.id}`" class="mention-chip" :class="[
+        <span v-for="item in allSelectedItems" :key="`${item.type}:${item.kbId || ''}:${item.id}`" class="mention-chip" :class="[
           getMentionChipClass(item),
           { 'mention-chip--agent': item.isAgentConfigured }
         ]">
@@ -2521,7 +2871,7 @@ defineExpose({
                 class="mention-chip__org-img" alt="" aria-hidden="true" />
             </span>
           </span>
-          <span class="mention-chip__name" :title="item.name">{{ item.name }}</span>
+          <span class="mention-chip__name" :title="getMentionChipTitle(item)">{{ getMentionChipLabel(item) }}</span>
           <span class="mention-chip__remove" @click.stop="removeSelectedItem(item)"
             :aria-label="$t('common.remove')">×</span>
         </span>
@@ -2722,7 +3072,8 @@ defineExpose({
     <!-- Mention Selector -->
     <Teleport to="body">
       <MentionSelector ref="mentionSelectorRef" :visible="showMention" :style="mentionStyle" :items="mentionItems" :hasMore="mentionHasMore"
-        :loading="mentionLoading" :emptyHint="mentionEmptyHint" :query="mentionQuery" :group-counts="mentionGroupCounts" v-model:activeIndex="mentionActiveIndex"
+        :loading="mentionSearchPending || mentionLoading || mentionFolderSearchLoading" :emptyHint="mentionEmptyHint" :query="mentionQuery" :group-counts="mentionGroupCounts"
+        :folder-enabled="documentFoldersEnabled && agentMode !== 'smart-reasoning'" v-model:activeIndex="mentionActiveIndex"
         @select="onMentionSelect" @loadMore="loadMoreMentionItems" />
     </Teleport>
 
@@ -2911,6 +3262,18 @@ const getImgSrc = (url: string) => {
 
 .mention-chip--file .mention-chip__icon-wrap {
   color: var(--td-text-color-secondary, #6b7280);
+}
+
+.mention-chip--folder {
+  color: var(--td-text-color-primary);
+}
+
+.mention-chip--folder .mention-chip__icon-wrap {
+  color: var(--td-brand-color, #07c05f);
+}
+
+.mention-chip--folder .mention-chip__name {
+  max-width: 170px;
 }
 
 .mention-chip--tag,

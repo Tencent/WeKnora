@@ -1,4 +1,4 @@
-export type MentionItemType = 'kb' | 'file' | 'tag' | 'mcp' | 'skill';
+export type MentionItemType = 'kb' | 'file' | 'tag' | 'folder' | 'mcp' | 'skill';
 
 export interface MentionItem {
   id: string;
@@ -15,6 +15,14 @@ export interface MentionItem {
   serviceName?: string;
   skillName?: string;
   isAgentConfigured?: boolean;
+  // folder-specific: the materialized path for display (e.g. "Root/Sub/Folder")
+  folderPath?: string;
+  // file-specific: direct folder membership, used to resolve the visible path
+  folderId?: string;
+  parentId?: string;
+  documentCount?: number;
+  hasChildren?: boolean;
+  supportsDocumentFolders?: boolean;
 }
 
 export interface MentionRequestItem {

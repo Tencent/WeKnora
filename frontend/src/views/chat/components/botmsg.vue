@@ -11,7 +11,7 @@
                             :name="item.kb_type === 'faq' ? 'chat-bubble-help' : 'folder'" />
                         <t-icon v-else :name="mentionTagIcon(item)" />
                     </span>
-                    <span class="tag_name">{{ item.name }}</span>
+                    <span class="tag_name">{{ mentionTagLabel(item) }}</span>
                 </span>
             </div>
             <div v-if="session.isRagMode" class="rag-answer-stack">
@@ -89,6 +89,9 @@ import {
     buildManualMarkdown,
     copyTextToClipboard,
     formatManualTitle,
+    mentionTagClass,
+    mentionTagIcon,
+    mentionTagLabel,
 } from '@/utils/chatMessageShared';
 import {
     createChatMarkdownRenderer,
@@ -106,18 +109,6 @@ import { useTypewriter } from '@/composables/useTypewriter';
 import { vStableHtml } from '@/directives/stableHtml';
 
 ensureMermaidInitialized();
-
-const mentionTagClass = (item) => {
-    if (item.type === 'kb') return item.kb_type === 'faq' ? 'faq-tag' : 'kb-tag';
-    return `${item.type || 'file'}-tag`;
-};
-
-const mentionTagIcon = (item) => {
-    if (item.type === 'tag') return 'tag';
-    if (item.type === 'mcp') return 'tools';
-    if (item.type === 'skill') return 'bookmark';
-    return 'file';
-};
 
 const emit = defineEmits(['scroll-bottom', 'render-complete-change'])
 const { t } = useI18n()

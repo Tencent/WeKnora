@@ -69,6 +69,7 @@ import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import KnowledgeBaseEditorModal from '@/views/knowledge/KnowledgeBaseEditorModal.vue';
 import { useKnowledgeBaseCreationNavigation } from '@/hooks/useKnowledgeBaseCreationNavigation';
+import { shouldFetchStarterSuggestions } from '@/utils/documentFolderCapability';
 
 const router = useRouter();
 const route = useRoute();
@@ -90,6 +91,21 @@ const sqRenderKey = ref(0);
 const sqContainerRef = ref<HTMLElement | null>(null);
 let suggestedQuestionsFetchId = 0;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+const canFetchStarterSuggestions = () => shouldFetchStarterSuggestions(
+    settingsStore.settings.selectedFolders?.length || 0,
+);
+
+const cancelSuggestedQuestionsFetch = () => {
+    suggestedQuestionsFetchId++;
+    sqLoading.value = false;
+    sqCardsRevealed.value = false;
+    suggestedQuestions.value = [];
+    if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+    }
+};
 
 // --- 高度平滑过渡钩子 ---
 const onBeforeLeave = () => {
@@ -134,6 +150,10 @@ const onQuestionsEntered = () => {
 };
 
 const fetchSuggestedQuestions = async () => {
+    if (!canFetchStarterSuggestions()) {
+        cancelSuggestedQuestionsFetch();
+        return;
+    }
     const fetchId = ++suggestedQuestionsFetchId;
     sqLoading.value = true;
     try {
@@ -159,6 +179,10 @@ const fetchSuggestedQuestions = async () => {
 
 // 防抖包装，切换知识库/文件时300ms内不重复请求
 const debouncedFetch = () => {
+    if (!canFetchStarterSuggestions()) {
+        cancelSuggestedQuestionsFetch();
+        return;
+    }
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => { fetchSuggestedQuestions(); }, 300);
 };
@@ -170,6 +194,7 @@ watch(
         kbs: settingsStore.settings.selectedKnowledgeBases,
         files: settingsStore.settings.selectedFiles,
         tags: settingsStore.settings.selectedTags,
+        folders: settingsStore.settings.selectedFolders,
         mcps: settingsStore.settings.selectedMCPServices,
         skills: settingsStore.settings.selectedSkills,
     }),

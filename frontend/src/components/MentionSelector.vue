@@ -1,7 +1,118 @@
 <template>
-  <div v-if="visible" class="mention-menu" :style="style" ref="menuRef" @click.stop>
+  <div
+    v-if="visible"
+    ref="menuRef"
+    class="mention-menu"
+    :class="{
+      'mention-menu--folder-browser': showFolderBrowser,
+      'mention-menu--unified-search': isFlatMode,
+    }"
+    :style="style"
+    @click.stop
+  >
     <div class="mention-list" ref="listRef" @scroll="onScroll">
-      <template v-if="!currentGroupType && !isFlatMode">
+      <template v-if="isFlatMode">
+        <div class="mention-search-intro">
+          <span>
+            <strong>{{ $t('mentionDetail.unifiedSearchTitle') }}</strong>
+            <small>{{ $t('mentionDetail.unifiedSearchHint') }}</small>
+          </span>
+          <span v-if="items.length > 0" class="mention-search-intro__count">
+            {{ items.length }}
+          </span>
+        </div>
+
+        <div v-if="items.length > 0" class="mention-search-results">
+          <t-popup
+            v-for="(item, index) in items"
+            :key="`${item.type}:${item.id}`"
+            placement="right-start"
+            trigger="hover"
+            :show-arrow="false"
+            :delay="[320, 80]"
+            :disabled="isScrolling"
+            :overlay-class-name="'mention-detail-popup'"
+            :overlay-inner-class-name="'mention-detail-popup-wrap'"
+            @visible-change="(visible: boolean) => visible && preloadMentionDetail(item)"
+          >
+            <button
+              type="button"
+              class="mention-item mention-search-result"
+              :class="{ active: index === activeIndex }"
+              @click="$emit('select', item)"
+              @mouseenter="$emit('update:activeIndex', index)"
+            >
+              <span class="mention-search-result__icon" :class="`mention-search-result__icon--${item.type}`">
+                <t-icon :name="mentionTypeIcon(item)" />
+              </span>
+              <span class="mention-search-result__main">
+                <span class="mention-search-result__title">
+                  <strong>{{ item.name }}</strong>
+                  <span class="mention-search-result__type" :class="`mention-search-result__type--${item.type}`">
+                    {{ mentionTypeLabel(item) }}
+                  </span>
+                </span>
+                <small v-if="mentionResultContext(item)" :title="mentionResultContext(item)">
+                  {{ mentionResultContext(item) }}
+                </small>
+              </span>
+            </button>
+
+            <template #content>
+              <div class="mention-detail-content">
+                <template v-if="detailCache[item.id]?.loading">
+                  <div class="detail-loading"><t-loading size="small" /></div>
+                </template>
+                <template v-else-if="detailCache[item.id]?.error">
+                  <div class="detail-error">{{ detailCache[item.id].error }}</div>
+                </template>
+                <template v-else>
+                  <div class="detail-header">
+                    <span class="detail-name">{{ mentionDetailName(item) }}</span>
+                    <span class="detail-type-badge doc">{{ mentionTypeLabel(item) }}</span>
+                  </div>
+                  <p v-if="mentionDetailDescription(item)" class="detail-desc">
+                    {{ mentionDetailDescription(item) }}
+                  </p>
+                  <p v-if="item.folderPath" class="detail-folder-path">
+                    <t-icon name="tree-round-dot-vertical" />
+                    <span>{{ item.folderPath }}</span>
+                  </p>
+                  <div class="detail-meta">
+                    <span v-if="item.type === 'kb'">
+                      {{ mentionResultContext(item) }}
+                    </span>
+                    <span v-else-if="item.kbName" class="detail-kb">
+                      <t-icon name="folder" class="detail-icon" />
+                      <span class="detail-label">{{ $t('mentionDetail.belongsToKb') }}</span>
+                      <span class="detail-value clickable" @click.stop="handleKbClick(item.kbId)">
+                        {{ item.kbName }}
+                      </span>
+                    </span>
+                    <span v-if="item.orgName" class="detail-org">
+                      <img src="@/assets/img/organization-green.svg" class="detail-icon-img" alt="" aria-hidden="true" />
+                      <span class="detail-label">{{ $t('mentionDetail.belongsToOrg') }}</span>
+                      <span class="detail-value clickable" @click.stop="handleOrgClick(item.orgName)">
+                        {{ item.orgName }}
+                      </span>
+                    </span>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </t-popup>
+        </div>
+
+        <div v-if="loading" class="loading-more mention-search-loading">
+          <t-loading size="small" />
+          <span>{{ $t('mentionDetail.searchingAllTypes') }}</span>
+        </div>
+        <div v-else-if="items.length === 0" class="empty">
+          {{ emptyHint || $t('common.noResult') }}
+        </div>
+      </template>
+
+      <template v-else-if="!currentGroupType">
         <button
           v-for="(group, index) in groupRows"
           :key="group.type"
@@ -14,8 +125,13 @@
           <span class="mention-group-entry__icon">
             <t-icon :name="group.icon" />
           </span>
-          <span class="mention-group-entry__label">{{ group.label }}</span>
-          <span class="mention-group-entry__count">{{ formatGroupCount(group) }}</span>
+          <span class="mention-group-entry__copy">
+            <span class="mention-group-entry__label">{{ group.label }}</span>
+            <small v-if="groupDescription(group.type)">{{ groupDescription(group.type) }}</small>
+          </span>
+          <span v-if="formatGroupCount(group) !== ''" class="mention-group-entry__count">
+            {{ formatGroupCount(group) }}
+          </span>
           <t-icon class="mention-group-entry__arrow" name="chevron-right" />
         </button>
         <div v-if="groupRows.length === 0 && !loading" class="empty">
@@ -24,19 +140,18 @@
       </template>
 
       <template v-else>
-        <button v-if="!isFlatMode" type="button" class="mention-back-row" @click.stop="leaveGroup">
+        <button
+          v-if="!showFolderBrowser"
+          type="button"
+          class="mention-back-row"
+          @click.stop="leaveGroup"
+        >
           <t-icon name="chevron-left" />
-          <span>{{ currentGroup?.label }}</span>
+          <span>{{ backRowLabel }}</span>
         </button>
 
-      <div
-        v-if="isFlatMode && groupTabs.length > 1 && kbItems.length > 0"
-        class="mention-group-header"
-      >
-        {{ $t('common.knowledgeBase') }}
-      </div>
       <!-- Knowledge Bases Group -->
-      <div v-if="(isFlatMode || currentGroupType === 'kb') && kbItems.length > 0" class="mention-group" data-group-type="kb">
+      <div v-if="currentGroupType === 'kb' && kbItems.length > 0" class="mention-group" data-group-type="kb">
         <t-popup
           v-for="(item, index) in kbItems"
           :key="item.id"
@@ -108,13 +223,18 @@
         </t-popup>
       </div>
 
+      <MentionFolderBrowser
+        v-if="showFolderBrowser"
+        ref="folderBrowserRef"
+        :knowledge-bases="folderSourceKbs"
+        :empty-hint="emptyHint"
+        :agent-id="agentIdForDetail"
+        :agent-source-tenant-id="agentSourceTenantIdForDetail"
+        @select="emit('select', $event)"
+        @back="leaveFolderGroup"
+      />
+
       <template v-for="group in activeExtraGroups" :key="group.type">
-        <div
-          v-if="isFlatMode && groupTabs.length > 1"
-          class="mention-group-header"
-        >
-          {{ group.label }}
-        </div>
         <div class="mention-group" :data-group-type="group.type">
         <t-popup
           v-for="(item, index) in group.items"
@@ -171,14 +291,8 @@
         </div>
       </template>
 
-      <div
-        v-if="isFlatMode && groupTabs.length > 1 && fileItems.length > 0"
-        class="mention-group-header"
-      >
-        {{ $t('common.file') }}
-      </div>
       <!-- Files Group -->
-      <div v-if="(isFlatMode || currentGroupType === 'file') && fileItems.length > 0" class="mention-group" data-group-type="file">
+      <div v-if="currentGroupType === 'file' && fileItems.length > 0" class="mention-group" data-group-type="file">
         <t-popup
           v-for="(item, index) in fileItems"
           :key="item.id"
@@ -202,7 +316,12 @@
                 <t-icon name="file" />
               </div>
             </div>
-            <span class="name">{{ item.name }}</span>
+            <div class="item-main item-main--folder">
+              <span class="name">{{ item.name }}</span>
+              <span v-if="mentionResultContext(item)" class="folder-context" :title="mentionResultContext(item)">
+                {{ mentionResultContext(item) }}
+              </span>
+            </div>
           </div>
           <template #content>
             <div class="mention-detail-content">
@@ -261,13 +380,22 @@
 import { computed, watch, ref, nextTick, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { getKnowledgeBaseById } from '@/api/knowledge-base';
-import { getKnowledgeDetails } from '@/api/knowledge-base';
+import {
+  getKnowledgeBaseById,
+  getKnowledgeDetails,
+} from '@/api/knowledge-base';
 import { useOrganizationStore } from '@/stores/organization';
 import { useSettingsStore } from '@/stores/settings';
 import type { MentionItem, MentionItemType } from '@/types/mention';
+import MentionFolderBrowser from './MentionFolderBrowser.vue';
 
 type DetailState = { loading: boolean; error?: string; data?: any };
+type MentionFolderBrowserExpose = {
+  back: () => void;
+  confirmActive: () => void;
+  moveActive: (delta: number) => void;
+  reset: () => void;
+};
 
 const props = defineProps<{
   visible: boolean;
@@ -282,6 +410,9 @@ const props = defineProps<{
   query?: string;
   // 分组入口展示用的总数（如文件搜索的 total），避免仅用首屏已加载条数
   groupCounts?: Partial<Record<MentionItemType, number>>;
+  // Folder scope is unavailable in smart-reasoning mode. The caller keeps
+  // that backend constraint out of the selector while this flag controls UI.
+  folderEnabled?: boolean;
 }>();
 
 const emit = defineEmits(['select', 'update:activeIndex', 'loadMore']);
@@ -296,6 +427,7 @@ const detailCache = ref<Record<string, DetailState>>({});
 const isScrolling = ref(false);
 const currentGroupType = ref<MentionItemType | null>(null);
 const groupActiveIndex = ref(0);
+const folderBrowserRef = ref<MentionFolderBrowserExpose | null>(null);
 let scrollTimer: ReturnType<typeof setTimeout> | null = null;
 
 onBeforeUnmount(() => {
@@ -312,10 +444,18 @@ const agentSourceTenantIdForDetail = computed(() => settingsStore.selectedAgentS
 
 const kbItems = computed(() => props.items.filter(item => item.type === 'kb'));
 const fileItems = computed(() => props.items.filter(item => item.type === 'file'));
+const folderSourceKbs = computed(() => (
+  props.folderEnabled === false
+    ? []
+    : kbItems.value.filter((item) => (
+      item.kbType !== 'faq' && item.supportsDocumentFolders !== false
+    ))
+));
 
 const mentionGroupDefs = computed<Array<{ type: MentionItemType; label: string; icon: string }>>(() => [
   { type: 'kb', label: t('common.knowledgeBase'), icon: 'folder' },
   { type: 'tag', label: '标签', icon: 'tag' },
+  { type: 'folder', label: t('knowledgeBase.folderPanelTitle'), icon: 'folder-open' },
   { type: 'mcp', label: 'MCP', icon: 'tools' },
   { type: 'skill', label: 'Skills', icon: 'bookmark' },
   { type: 'file', label: t('common.file'), icon: 'file' },
@@ -326,7 +466,9 @@ const mentionGroups = computed(() => {
   return mentionGroupDefs.value.map(def => {
     const items = props.items.filter(item => item.type === def.type);
     const loadedCount = items.length;
-    const count = props.groupCounts?.[def.type] ?? loadedCount;
+    const count = def.type === 'folder'
+      ? (props.folderEnabled === false ? 0 : Math.max(loadedCount, folderSourceKbs.value.length))
+      : (props.groupCounts?.[def.type] ?? loadedCount);
     const group = { ...def, items, offset, count, loadedCount };
     offset += items.length;
     return group;
@@ -334,6 +476,7 @@ const mentionGroups = computed(() => {
 });
 
 const formatGroupCount = (group: { type: MentionItemType; count: number; loadedCount: number }) => {
+  if (group.type === 'folder') return '';
   if (props.groupCounts?.[group.type] != null) {
     return props.groupCounts[group.type]!;
   }
@@ -350,18 +493,92 @@ const currentGroup = computed(() => mentionGroups.value.find(group => group.type
 const extraGroups = computed(() => mentionGroups.value.filter(group =>
   group.type !== 'kb' && group.type !== 'file' && group.count > 0
 ));
-const activeExtraGroups = computed(() => {
-  if (isFlatMode.value) return extraGroups.value;
-  return extraGroups.value.filter(group => group.type === currentGroupType.value);
-});
+const activeExtraGroups = computed(() => extraGroups.value.filter(group => (
+  group.type !== 'folder' && group.type === currentGroupType.value
+)));
 const fileGroupOffset = computed(() => mentionGroups.value.find(group => group.type === 'file')?.offset || 0);
+const showFolderBrowser = computed(() => (
+  !isFlatMode.value && currentGroupType.value === 'folder'
+));
+const backRowLabel = computed(() => currentGroup.value?.label || '');
+
+const groupDescription = (type: MentionItemType) => {
+  if (type === 'folder') return t('knowledgeBase.folderMentionDescription');
+  return '';
+};
+
+const mentionTypeLabel = (item: MentionItem) => {
+  const labels: Record<MentionItemType, string> = {
+    kb: t('mentionDetail.typeKnowledgeBase'),
+    folder: t('mentionDetail.typeFolder'),
+    file: t('mentionDetail.typeFile'),
+    tag: t('mentionDetail.typeTag'),
+    mcp: 'MCP',
+    skill: 'Skill',
+  };
+  return labels[item.type];
+};
+
+const mentionTypeIcon = (item: MentionItem) => {
+  const icons: Record<MentionItemType, string> = {
+    kb: item.kbType === 'faq' ? 'chat-bubble-help' : 'folder',
+    folder: 'folder-open',
+    file: 'file',
+    tag: 'tag',
+    mcp: 'tools',
+    skill: 'bookmark',
+  };
+  return icons[item.type];
+};
+
+const mentionResultContext = (item: MentionItem) => {
+  if (item.type === 'kb') {
+    return item.kbType === 'faq'
+      ? t('mentionDetail.faqCount', { count: item.count || 0 })
+      : t('mentionDetail.kbCount', { count: item.count || 0 });
+  }
+  if (item.type === 'folder') {
+    return [item.kbName, item.folderPath || item.name].filter(Boolean).join(' / ');
+  }
+  if (item.type === 'file') {
+    const location = item.folderPath || (item.folderId ? '' : t('knowledgeBase.rootFolder'));
+    return [
+      item.kbName,
+      location,
+    ].filter(Boolean).join(' / ');
+  }
+  if (item.type === 'tag') return item.kbName || '';
+  return item.description || '';
+};
+
+const preloadMentionDetail = (item: MentionItem) => {
+  if (item.type === 'kb') {
+    void fetchKbDetail(item);
+  } else if (item.type === 'file') {
+    void fetchFileDetail(item);
+  }
+};
+
+const mentionDetailName = (item: MentionItem) => {
+  const data = detailCache.value[item.id]?.data;
+  if (item.type === 'file') {
+    return data?.title || data?.file_name || item.name;
+  }
+  return data?.name || item.name;
+};
+
+const mentionDetailDescription = (item: MentionItem) => (
+  detailCache.value[item.id]?.data?.description || item.description || ''
+);
 
 const enterGroup = (type: MentionItemType) => {
   const group = mentionGroups.value.find(item => item.type === type && item.count > 0);
   if (!group || !listRef.value) return;
 
   currentGroupType.value = type;
-  emit('update:activeIndex', group.offset);
+  if (type !== 'folder') {
+    emit('update:activeIndex', group.offset);
+  }
 
   nextTick(() => {
     if (!listRef.value) return;
@@ -371,20 +588,39 @@ const enterGroup = (type: MentionItemType) => {
   });
 };
 
-const leaveGroup = () => {
-  if (isFlatMode.value) return false;
-  if (!currentGroupType.value) return false;
+const exitCurrentGroup = () => {
+  if (!currentGroupType.value) return;
   const rowIndex = groupRows.value.findIndex(group => group.type === currentGroupType.value);
   groupActiveIndex.value = Math.max(0, rowIndex);
   currentGroupType.value = null;
   nextTick(() => {
     if (listRef.value) listRef.value.scrollTop = 0;
   });
+};
+
+const leaveFolderGroup = () => {
+  if (currentGroupType.value === 'folder') exitCurrentGroup();
+};
+
+const leaveGroup = () => {
+  if (isFlatMode.value) return false;
+  if (!currentGroupType.value) return false;
+
+  if (showFolderBrowser.value) {
+    folderBrowserRef.value?.back();
+    return true;
+  }
+
+  exitCurrentGroup();
   return true;
 };
 
 const updateActiveGroupFromIndex = (index: number) => {
-  const group = groupTabs.value.find(item => index >= item.offset && index < item.offset + item.count);
+  const group = groupTabs.value.find(item => (
+    item.loadedCount > 0
+    && index >= item.offset
+    && index < item.offset + item.loadedCount
+  ));
   if (group) currentGroupType.value = group.type;
 };
 
@@ -402,6 +638,11 @@ const moveActive = (delta: number) => {
     return;
   }
 
+  if (showFolderBrowser.value) {
+    folderBrowserRef.value?.moveActive(delta);
+    return;
+  }
+
   if (!currentGroupType.value) {
     const maxIndex = Math.max(0, groupRows.value.length - 1);
     groupActiveIndex.value = Math.min(maxIndex, Math.max(0, groupActiveIndex.value + delta));
@@ -411,7 +652,7 @@ const moveActive = (delta: number) => {
   const group = currentGroup.value;
   if (!group) return;
   const currentLocalIndex = props.activeIndex - group.offset;
-  const nextLocalIndex = Math.min(group.count - 1, Math.max(0, currentLocalIndex + delta));
+  const nextLocalIndex = Math.min(group.loadedCount - 1, Math.max(0, currentLocalIndex + delta));
   emit('update:activeIndex', group.offset + nextLocalIndex);
   scrollToItem(nextLocalIndex);
 };
@@ -420,6 +661,11 @@ const confirmActive = () => {
   if (isFlatMode.value) {
     const item = props.items[props.activeIndex];
     if (item) emit('select', item);
+    return;
+  }
+
+  if (showFolderBrowser.value) {
+    folderBrowserRef.value?.confirmActive();
     return;
   }
 
@@ -511,6 +757,7 @@ watch(() => props.activeIndex, (newIndex) => {
     scrollToItem(newIndex);
     return;
   }
+  if (showFolderBrowser.value) return;
   if (currentGroupType.value) {
     updateActiveGroupFromIndex(newIndex);
     const group = currentGroup.value;
@@ -537,34 +784,28 @@ watch(() => props.visible, (newVisible) => {
   }
 });
 
-const scrollToItem = (index: number) => {
+const scrollToItem = (index: number, selector = '.mention-item') => {
   nextTick(() => {
     if (!listRef.value) return;
-    
-    const items = listRef.value.querySelectorAll('.mention-item');
-    if (!items || items.length <= index) return;
-    
+
+    const items = listRef.value.querySelectorAll(selector);
+    if (items.length <= index) return;
+
     const activeItem = items[index] as HTMLElement;
     const menu = listRef.value;
-    
-    if (activeItem) {
-      const menuRect = menu.getBoundingClientRect();
-      const itemRect = activeItem.getBoundingClientRect();
-      
-      // 检查是否在上方被遮挡
-      if (itemRect.top < menuRect.top) {
-        menu.scrollTop -= (menuRect.top - itemRect.top);
-      }
-      // 检查是否在下方被遮挡
-      else if (itemRect.bottom > menuRect.bottom) {
-        menu.scrollTop += (itemRect.bottom - menuRect.bottom);
-      }
+    const menuRect = menu.getBoundingClientRect();
+    const itemRect = activeItem.getBoundingClientRect();
+
+    if (itemRect.top < menuRect.top) {
+      menu.scrollTop -= menuRect.top - itemRect.top;
+    } else if (itemRect.bottom > menuRect.bottom) {
+      menu.scrollTop += itemRect.bottom - menuRect.bottom;
     }
   });
 };
 </script>
 
-<style scoped>
+<style scoped lang="less">
 .mention-menu {
   position: fixed;
   z-index: 10000;
@@ -572,11 +813,19 @@ const scrollToItem = (index: number) => {
   border: 1px solid var(--td-component-stroke, #e7e9eb);
   border-radius: var(--td-radius-extraLarge, 12px);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.04);
-  width: 220px;
-  max-height: 388px;
+  width: 244px;
+  max-height: 420px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+.mention-menu--folder-browser {
+  width: min(360px, calc(100vw - 24px));
+}
+
+.mention-menu--unified-search {
+  width: min(390px, calc(100vw - 24px));
 }
 
 .mention-list {
@@ -584,6 +833,144 @@ const scrollToItem = (index: number) => {
   min-height: 0;
   overflow-y: auto;
   padding: 4px 0;
+}
+
+.mention-search-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 2px 6px 5px;
+  padding: 8px 9px;
+  border-bottom: 1px solid var(--td-component-stroke, #f0f0f0);
+
+  > span:first-child {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+  }
+
+  strong {
+    color: var(--td-text-color-primary, #333);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 18px;
+  }
+
+  small {
+    color: var(--td-text-color-placeholder, #999);
+    font-size: 10px;
+    line-height: 15px;
+  }
+}
+
+.mention-search-intro__count {
+  display: inline-flex;
+  min-width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--td-bg-color-secondarycontainer, #f3f3f3);
+  color: var(--td-text-color-placeholder, #999);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mention-search-results {
+  padding: 1px 0 3px;
+}
+
+.mention-search-result {
+  width: calc(100% - 12px);
+  min-height: 52px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.mention-search-result__icon {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--td-bg-color-secondarycontainer, #f3f3f3);
+  color: var(--td-text-color-secondary, #666);
+  font-size: 16px;
+}
+
+.mention-search-result.active .mention-search-result__icon,
+.mention-search-result:hover .mention-search-result__icon {
+  background: color-mix(in srgb, var(--td-brand-color) 10%, var(--td-bg-color-container));
+  color: var(--td-brand-color);
+}
+
+.mention-search-result__main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mention-search-result__title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+
+  strong {
+    min-width: 0;
+    overflow: hidden;
+    flex: 1;
+    color: var(--td-text-color-primary, #333);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 18px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.mention-search-result__type {
+  display: inline-flex;
+  height: 18px;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 0 6px;
+  border: 1px solid var(--td-component-stroke, #e7e9eb);
+  border-radius: 5px;
+  background: var(--td-bg-color-container, #fff);
+  color: var(--td-text-color-placeholder, #999);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.mention-search-result__type--kb,
+.mention-search-result__type--folder {
+  border-color: color-mix(in srgb, var(--td-brand-color) 18%, var(--td-component-stroke));
+  background: color-mix(in srgb, var(--td-brand-color) 5%, var(--td-bg-color-container));
+  color: var(--td-brand-color);
+}
+
+.mention-search-result__main > small {
+  overflow: hidden;
+  color: var(--td-text-color-placeholder, #999);
+  font-size: 10px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mention-search-loading {
+  align-items: center;
+  gap: 7px;
+  color: var(--td-text-color-placeholder, #999);
+  font-size: 10px;
 }
 
 .mention-group-entry,
@@ -635,6 +1022,26 @@ const scrollToItem = (index: number) => {
   white-space: nowrap;
   font-size: inherit;
   font-weight: inherit;
+}
+
+.mention-group-entry__copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: flex-start;
+  flex-direction: column;
+  text-align: left;
+
+  small {
+    max-width: 165px;
+    overflow: hidden;
+    color: var(--td-text-color-placeholder, #999);
+    font-size: 10px;
+    font-weight: 400;
+    line-height: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 .mention-group-entry__count {
@@ -772,6 +1179,22 @@ const scrollToItem = (index: number) => {
   gap: 4px;
 }
 
+.item-main--folder {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 0;
+}
+
+.folder-context {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--td-text-color-placeholder, #999);
+  font-size: 10px;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .name {
   font-weight: 400;
   overflow: hidden;
@@ -893,6 +1316,21 @@ const scrollToItem = (index: number) => {
   -webkit-box-orient: vertical;
   overflow: hidden;
   word-break: break-word;
+}
+.mention-detail-content .detail-folder-path {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0 0 8px;
+  color: var(--td-text-color-secondary, #666);
+  font-size: var(--td-font-size-body-small, 12px);
+  line-height: 1.5;
+  word-break: break-word;
+}
+.mention-detail-content .detail-folder-path .t-icon {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--td-brand-color);
 }
 .mention-detail-content .detail-meta {
   font-size: var(--td-font-size-mark-small, 12px);

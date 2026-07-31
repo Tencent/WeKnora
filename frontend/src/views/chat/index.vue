@@ -144,6 +144,7 @@ import { useKnowledgeBaseCreationNavigation } from '@/hooks/useKnowledgeBaseCrea
 import { useChatStreamHandler } from '@/composables/useChatStreamHandler';
 import { useStickyBottomOnResize } from '@/composables/useStickyBottomOnResize';
 import { clearCitationChunkCache } from '@/utils/citationChunkCache';
+import { shouldFetchStarterSuggestions } from '@/utils/documentFolderCapability';
 import ChatReferencesDrawer from '@/components/ChatReferencesDrawer.vue';
 import ChatAttachmentPreviewDrawer from '@/components/ChatAttachmentPreviewDrawer.vue';
 import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue';
@@ -292,8 +293,16 @@ const cancelSuggestedQuestionsFetch = () => {
     }
 };
 
+const canFetchStarterSuggestions = () => shouldFetchStarterSuggestions(
+    useSettingsStoreInstance.settings.selectedFolders?.length || 0,
+);
+
 const fetchSuggestedQuestionsIfNeeded = async () => {
     if (props.embeddedMode) return;
+    if (!canFetchStarterSuggestions()) {
+        cancelSuggestedQuestionsFetch();
+        return;
+    }
     // 初始历史尚未拉完时不能判断是否有消息，避免有历史的会话误请求推荐问法
     if (historyLoading.value || messagesList.length > 0) {
         if (messagesList.length > 0) {
@@ -305,6 +314,10 @@ const fetchSuggestedQuestionsIfNeeded = async () => {
 };
 
 const fetchSuggestedQuestions = async () => {
+    if (!canFetchStarterSuggestions()) {
+        cancelSuggestedQuestionsFetch();
+        return;
+    }
     if (historyLoading.value || messagesList.length > 0) {
         return;
     }
@@ -395,6 +408,10 @@ const dismissSuggestions = (message, set) => {
 
 // 防抖包装，切换知识库/文件时300ms内不重复请求
 const debouncedFetchSuggestions = () => {
+    if (!canFetchStarterSuggestions()) {
+        cancelSuggestedQuestionsFetch();
+        return;
+    }
     if (historyLoading.value || messagesList.length > 0) return;
     if (suggestedDebounceTimer) clearTimeout(suggestedDebounceTimer);
     suggestedDebounceTimer = setTimeout(() => { fetchSuggestedQuestionsIfNeeded(); }, 300);
@@ -407,6 +424,7 @@ watch(
         kbs: useSettingsStoreInstance.settings.selectedKnowledgeBases,
         files: useSettingsStoreInstance.settings.selectedFiles,
         tags: useSettingsStoreInstance.settings.selectedTags,
+        folders: useSettingsStoreInstance.settings.selectedFolders,
         mcps: useSettingsStoreInstance.settings.selectedMCPServices,
         skills: useSettingsStoreInstance.settings.selectedSkills,
     }),
