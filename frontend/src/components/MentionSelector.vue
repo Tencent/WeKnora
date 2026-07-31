@@ -140,6 +140,7 @@
             </div>
             <div class="item-main">
               <span class="name">{{ item.name }}</span>
+              <span v-if="item.count != null" class="count">{{ item.count }}</span>
             </div>
           </div>
           <template #content>
@@ -274,7 +275,7 @@ const props = defineProps<{
   style: any;
   items: MentionItem[];
   activeIndex: number;
-  hasMore?: boolean;
+  groupHasMore?: Partial<Record<MentionItemType, boolean>>;
   loading?: boolean;
   // 空态下替换默认 "无结果" 文案，用于给上游（如"被智能体工具兼容性过滤掉了"）透传具体原因
   emptyHint?: string;
@@ -284,7 +285,11 @@ const props = defineProps<{
   groupCounts?: Partial<Record<MentionItemType, number>>;
 }>();
 
-const emit = defineEmits(['select', 'update:activeIndex', 'loadMore']);
+const emit = defineEmits<{
+  (e: 'select', item: MentionItem): void;
+  (e: 'update:activeIndex', index: number): void;
+  (e: 'loadMore', type: MentionItemType): void;
+}>();
 
 const router = useRouter();
 const { t } = useI18n();
@@ -316,6 +321,7 @@ const fileItems = computed(() => props.items.filter(item => item.type === 'file'
 const mentionGroupDefs = computed<Array<{ type: MentionItemType; label: string; icon: string }>>(() => [
   { type: 'kb', label: t('common.knowledgeBase'), icon: 'folder' },
   { type: 'tag', label: '标签', icon: 'tag' },
+  { type: 'folder', label: t('common.folder'), icon: 'folder-open' },
   { type: 'mcp', label: 'MCP', icon: 'tools' },
   { type: 'skill', label: 'Skills', icon: 'bookmark' },
   { type: 'file', label: t('common.file'), icon: 'file' },
@@ -337,7 +343,7 @@ const formatGroupCount = (group: { type: MentionItemType; count: number; loadedC
   if (props.groupCounts?.[group.type] != null) {
     return props.groupCounts[group.type]!;
   }
-  if (group.type === 'file' && props.hasMore) {
+  if (props.groupHasMore?.[group.type]) {
     return `${group.loadedCount}+`;
   }
   return group.count;
@@ -501,9 +507,9 @@ const onScroll = (e: Event) => {
 
   const target = e.target as HTMLElement;
   const { scrollTop, scrollHeight, clientHeight } = target;
-  if ((currentGroupType.value === 'file' || isFlatMode.value) && scrollHeight - scrollTop - clientHeight < 50 && props.hasMore && !props.loading) {
-    emit('loadMore');
-  }
+  if (scrollHeight - scrollTop - clientHeight >= 50 || props.loading) return;
+  const type = currentGroupType.value ?? (props.groupHasMore?.file ? 'file' : 'folder');
+  if (type && props.groupHasMore?.[type]) emit('loadMore', type);
 };
 
 watch(() => props.activeIndex, (newIndex) => {
@@ -754,6 +760,12 @@ const scrollToItem = (index: number) => {
 .file-icon {
   background: transparent;
   color: var(--td-text-color-secondary, #666);
+}
+
+/* 文件夹范围沿用输入区 chip 的琥珀色，便于和标签/MCP 区分 */
+.folder-icon {
+  background: transparent;
+  color: #d97706;
 }
 
 .mention-item.active .icon {

@@ -177,7 +177,17 @@ watch(
     { deep: true },
 );
 
-onMounted(() => { fetchSuggestedQuestions(); });
+const applyFolderEntry = () => {
+    const folderId = typeof route.query.folder_id === 'string' ? route.query.folder_id : '';
+    const kbIdParam = typeof route.params.kbId === 'string' ? route.params.kbId : '';
+    if (!folderId || !kbIdParam) return;
+    const folderName = typeof route.query.folder_name === 'string' ? route.query.folder_name : folderId;
+    settingsStore.clearFolders();
+    settingsStore.selectKnowledgeBases([kbIdParam]);
+    settingsStore.addFolder({ id: folderId, name: folderName, kbId: kbIdParam });
+};
+
+onMounted(() => { applyFolderEntry(); fetchSuggestedQuestions(); });
 
 const inputFieldRef = ref();
 

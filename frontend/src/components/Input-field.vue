@@ -7,7 +7,7 @@ import { MessagePlugin } from "tdesign-vue-next";
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
 import { useMenuStore } from '@/stores/menu';
-import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags } from '@/api/knowledge-base';
+import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags, searchKnowledgeFolders } from '@/api/knowledge-base';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { stopSession } from '@/api/chat';
 import { useOrganizationStore } from '@/stores/organization';
@@ -476,6 +476,8 @@ const mentionStartPos = ref(0);
 const isComposing = ref(false);
 const isMentionTriggeredByButton = ref(false);
 const mentionHasMore = ref(false);
+const folderMentionHasMore = ref(false);
+const folderMentionOffset = ref(0);
 const mentionGroupCounts = ref<Partial<Record<MentionItemType, number>>>({});
 // 当前 @ 会话可见的 KB ID 集合（含工具兼容性过滤），分页加载文件时复用，
 // 避免 append 请求把不兼容 KB 的文件漏进来。`null` 表示"不受限制"（非智能体场景）
@@ -519,6 +521,7 @@ const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
 const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || []);
 const selectedFileIds = computed(() => settingsStore.settings.selectedFiles || []);
 const selectedTags = computed(() => settingsStore.settings.selectedTags || []);
+const selectedFolders = computed(() => settingsStore.settings.selectedFolders || []);
 const selectedMCPServiceIds = computed(() => settingsStore.settings.selectedMCPServices || []);
 const selectedSkillNames = computed(() => settingsStore.settings.selectedSkills || []);
 
@@ -644,7 +647,17 @@ const allSelectedItems = computed(() => {
     isAgentConfigured: false,
   }));
 
-  return [...agentConfiguredKbs, ...userSelectedKbs, ...files, ...tags, ...selectedMCPItems.value, ...skillMentionItems.value];
+  const folders = selectedFolders.value.map((folder: any) => ({
+    id: folder.id,
+    name: folder.name,
+    type: 'folder' as const,
+    kbId: folder.kbId,
+    kbName: folder.kbName,
+    description: folder.kbName || '',
+    isAgentConfigured: false,
+  }));
+
+  return [...agentConfiguredKbs, ...userSelectedKbs, ...files, ...tags, ...folders, ...selectedMCPItems.value, ...skillMentionItems.value];
 });
 
 // 移除选中项（智能体配置的项也可以移除）
@@ -655,6 +668,8 @@ const removeSelectedItem = (item: MentionItem) => {
     settingsStore.removeFile(item.id);
   } else if (item.type === 'tag') {
     settingsStore.removeTag(item.id, item.kbId);
+  } else if (item.type === 'folder') {
+    settingsStore.removeFolder(item.id, item.kbId);
   } else if (item.type === 'mcp') {
     settingsStore.removeMCPService(item.id);
   } else if (item.type === 'skill') {
@@ -666,6 +681,7 @@ const getMentionIcon = (item: MentionItem) => {
   switch (item.type) {
     case 'file': return 'file';
     case 'tag': return 'tag';
+    case 'folder': return 'folder-open';
     case 'mcp': return 'tools';
     case 'skill': return 'bookmark';
     default: return 'folder';
@@ -1174,11 +1190,14 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
 
   if (!append) {
     mentionOffset.value = 0;
+    folderMentionOffset.value = 0;
+    folderMentionHasMore.value = false;
   }
 
   // 根据智能体的 kb_selection_mode 过滤知识库；选中共享智能体时使用该空间下的知识库，否则使用本空间 + 共享给自己的
   let kbItems: any[] = [];
   let tagItems: MentionItem[] = [];
+  let folderItems: MentionItem[] = [];
   let mcpItems: MentionItem[] = [];
   let skillItems: MentionItem[] = [];
   if (!append) {
@@ -1313,6 +1332,38 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       tagItems = [];
     }
 
+    try {
+      const res: any = await searchKnowledgeFolders(tagKeyword, 0, MENTION_PAGE_SIZE);
+      const list = Array.isArray(res?.data) ? res.data : [];
+      const scoped = mentionAllowedKbIds.value
+        ? list.filter((f: any) => {
+            const kbId = f.knowledge_base_id;
+            return kbId != null && mentionAllowedKbIds.value!.has(String(kbId));
+          })
+        : list;
+      folderItems = scoped.map((folder: any) => ({
+        id: folder.id,
+        name: folder.path || folder.name,
+        type: 'folder' as const,
+        kbId: folder.knowledge_base_id,
+        kbName: folder.knowledge_base_name || '',
+        count: folder.knowledge_count ?? 0,
+      }));
+      folderMentionHasMore.value = !!res?.has_more;
+      folderMentionOffset.value = list.length;
+      const clientFiltered = scoped.length < list.length;
+      if (!clientFiltered && typeof res?.total === 'number') {
+        mentionGroupCounts.value.folder = res.total;
+      } else {
+        mentionGroupCounts.value.folder = folderItems.length;
+      }
+    } catch (e) {
+      console.error('[Mention] searchKnowledgeFolders error:', e);
+      folderItems = [];
+      folderMentionHasMore.value = false;
+      delete mentionGroupCounts.value.folder;
+    }
+
     const mcpMode = agentMCPSelectionMode.value;
     if (mcpMode !== 'none') {
       mcpItems = mcpServices.value
@@ -1439,9 +1490,9 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     // Append file items to existing list
     mentionItems.value = [...mentionItems.value, ...fileItems];
   } else {
-    mentionItems.value = [...kbItems, ...tagItems, ...mcpItems, ...skillItems, ...fileItems];
+    mentionItems.value = [...kbItems, ...tagItems, ...folderItems, ...mcpItems, ...skillItems, ...fileItems];
   }
-  console.log('[Mention] Total items:', mentionItems.value.length, { kbItems: kbItems.length, fileItems: fileItems.length, tagItems: tagItems.length, mcpItems: mcpItems.length, skillItems: skillItems.length });
+  console.log('[Mention] Total items:', mentionItems.value.length, { kbItems: kbItems.length, fileItems: fileItems.length, tagItems: tagItems.length, folderItems: folderItems.length, mcpItems: mcpItems.length, skillItems: skillItems.length });
 
   // Only reset index if query changed or explicitly requested
   if (resetIndex || q !== lastMentionQuery) {
@@ -1454,9 +1505,53 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
   lastMentionQuery = q;
 };
 
-const loadMoreMentionItems = () => {
-  if (mentionHasMore.value && !mentionLoading.value) {
+const loadMoreMentionItems = async (type: MentionItemType) => {
+  if (mentionLoading.value) return;
+  if (type === 'file' && mentionHasMore.value) {
     loadMentionItems(lastMentionQuery, false, true);
+    return;
+  }
+  if (type !== 'folder' || !folderMentionHasMore.value) return;
+
+  mentionLoading.value = true;
+  try {
+    const res: any = await searchKnowledgeFolders(
+      lastMentionQuery.trim(),
+      folderMentionOffset.value,
+      MENTION_PAGE_SIZE,
+    );
+    const list = Array.isArray(res?.data) ? res.data : [];
+    const allowed = mentionAllowedKbIds.value;
+    const scoped = allowed
+      ? list.filter((folder: any) => allowed.has(String(folder.knowledge_base_id)))
+      : list;
+    const items: MentionItem[] = scoped.map((folder: any) => ({
+      id: folder.id,
+      name: folder.path || folder.name,
+      type: 'folder',
+      kbId: folder.knowledge_base_id,
+      kbName: folder.knowledge_base_name || '',
+      count: folder.knowledge_count ?? 0,
+    }));
+    const firstFollowingGroup = mentionItems.value.findIndex(item =>
+      item.type === 'mcp' || item.type === 'skill' || item.type === 'file',
+    );
+    if (firstFollowingGroup === -1) {
+      mentionItems.value = [...mentionItems.value, ...items];
+    } else {
+      mentionItems.value = [
+        ...mentionItems.value.slice(0, firstFollowingGroup),
+        ...items,
+        ...mentionItems.value.slice(firstFollowingGroup),
+      ];
+    }
+    folderMentionOffset.value += list.length;
+    folderMentionHasMore.value = !!res?.has_more;
+  } catch (e) {
+    console.error('[Mention] searchKnowledgeFolders load more error:', e);
+    folderMentionHasMore.value = false;
+  } finally {
+    mentionLoading.value = false;
   }
 };
 
@@ -1659,6 +1754,10 @@ const onMentionSelect = (item: any) => {
   } else if (item.type === 'tag') {
     if (item.kbId) {
       settingsStore.addTag({ id: item.id, name: item.name, kbId: item.kbId, kbName: item.kbName });
+    }
+  } else if (item.type === 'folder') {
+    if (item.kbId) {
+      settingsStore.addFolder({ id: item.id, name: item.name, kbId: item.kbId, kbName: item.kbName });
     }
   } else if (item.type === 'mcp') {
     settingsStore.addMCPService(item.id);
@@ -2721,8 +2820,11 @@ defineExpose({
 
     <!-- Mention Selector -->
     <Teleport to="body">
-      <MentionSelector ref="mentionSelectorRef" :visible="showMention" :style="mentionStyle" :items="mentionItems" :hasMore="mentionHasMore"
-        :loading="mentionLoading" :emptyHint="mentionEmptyHint" :query="mentionQuery" :group-counts="mentionGroupCounts" v-model:activeIndex="mentionActiveIndex"
+      <MentionSelector ref="mentionSelectorRef" :visible="showMention" :style="mentionStyle" :items="mentionItems"
+        :loading="mentionLoading" :emptyHint="mentionEmptyHint" :query="mentionQuery"
+        :group-counts="mentionGroupCounts"
+        :group-has-more="{ file: mentionHasMore, folder: folderMentionHasMore }"
+        v-model:activeIndex="mentionActiveIndex"
         @select="onMentionSelect" @loadMore="loadMoreMentionItems" />
     </Teleport>
 
@@ -2914,6 +3016,7 @@ const getImgSrc = (url: string) => {
 }
 
 .mention-chip--tag,
+.mention-chip--folder,
 .mention-chip--mcp,
 .mention-chip--tool {
   color: var(--td-text-color-primary);
@@ -2921,6 +3024,10 @@ const getImgSrc = (url: string) => {
 
 .mention-chip--tag .mention-chip__icon-wrap {
   color: #9f7aea;
+}
+
+.mention-chip--folder .mention-chip__icon-wrap {
+  color: #d97706;
 }
 
 .mention-chip--mcp .mention-chip__icon-wrap {

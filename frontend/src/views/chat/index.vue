@@ -801,10 +801,17 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
             kbIdSet.add(item.id);
         } else if (item.type === 'file' && !fileIdSet.has(item.id)) {
             fileIdSet.add(item.id);
+        } else if ((item.type === 'tag' || item.type === 'folder') && item.kb_id) {
+            kbIdSet.add(item.kb_id);
         }
     }
     const kbIds = [...kbIdSet];
     const knowledgeIds = [...fileIdSet];
+    const folderIds = [...new Set(
+        (mentionedItems || [])
+            .filter(item => item.type === 'folder' && item.id && item.kb_id)
+            .map(item => item.id),
+    )];
     const tagIds = [...new Set((mentionedItems || []).filter(item => item.type === 'tag' && item.id).map(item => item.id))];
     const mcpServiceIds = [...new Set((mentionedItems || []).filter(item => item.type === 'mcp' && item.id).map(item => item.id))];
     const skillNames = [...new Set((mentionedItems || []).filter(item => item.type === 'skill' && item.id).map(item => item.skill_name || item.id))];
@@ -829,6 +836,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         mcp_service_ids: requestMcpServiceIds,
         skill_names: requestSkillNames,
         tag_ids: tagIds,
+        folder_ids: folderIds.length > 0 ? folderIds : undefined,
         mentioned_items: mentionedItems,
         images: imageAttachments.length > 0 ? imageAttachments : undefined,
         attachment_uploads: attachmentUploads.length > 0 ? attachmentUploads : undefined,
