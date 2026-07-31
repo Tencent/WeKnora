@@ -77,6 +77,7 @@ CREATE TABLE knowledges (
     file_hash VARCHAR(64),
     storage_size BIGINT NOT NULL DEFAULT 0,
     metadata JSON,
+    custom_metadata JSON NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL,
@@ -185,6 +186,11 @@ CREATE TABLE chunks (
     knowledge_base_id VARCHAR(36) NOT NULL,
     knowledge_id VARCHAR(36) NOT NULL,
     content TEXT NOT NULL,
+    source_content TEXT NOT NULL,
+    content_revision INT NOT NULL DEFAULT 0,
+    index_status VARCHAR(16) NOT NULL DEFAULT 'ready',
+    last_editor_id VARCHAR(64) NOT NULL DEFAULT '',
+    context_header TEXT NOT NULL,
     chunk_index INTEGER NOT NULL,
     is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     start_at INTEGER NOT NULL,
@@ -228,4 +234,21 @@ CREATE TABLE derived_artifacts (
     KEY idx_derived_artifacts_kind_status (artifact_kind, status),
     KEY idx_derived_artifacts_lease (status, lease_expires_at),
     CONSTRAINT chk_derived_artifacts_status CHECK (status IN ('pending','computing','succeeded','failed'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE chunk_revisions (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    knowledge_id VARCHAR(36) NOT NULL,
+    chunk_id VARCHAR(36) NOT NULL,
+    revision INT NOT NULL,
+    content TEXT NOT NULL,
+    is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    editor_id VARCHAR(64) NOT NULL DEFAULT '',
+    edit_source VARCHAR(16) NOT NULL DEFAULT 'user',
+    edited_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY idx_chunk_revisions_chunk_revision (chunk_id, revision),
+    KEY idx_chunk_revisions_tenant_chunk (tenant_id, chunk_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

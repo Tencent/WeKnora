@@ -110,7 +110,7 @@
 
                   <h5 v-if="shouldShowItemTitle(item)" class="reference-item__title">{{ item.title }}</h5>
 
-                  <p v-if="item.snippet && !expandedKeys.has(item.key)" class="reference-item__snippet">
+                  <p v-if="item.kind !== 'tool' && item.snippet && !expandedKeys.has(item.key)" class="reference-item__snippet">
                     {{ formatReferenceSnippet(item.snippet) }}
                   </p>
                   <div v-if="item.kind === 'tool' && item.content" class="reference-item__content">

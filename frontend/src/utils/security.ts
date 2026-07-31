@@ -10,14 +10,16 @@ import {
   markdownDomPurifyConfig,
   markdownDomPurifySecurityHooks,
 } from './markdownDomPurify.ts';
+import {
+  buildProtectedFileRequest,
+  isProtectedFileProxyPath,
+  isProviderFileURL,
+  PROVIDER_SCHEME_PATTERN,
+  resolveProtectedFileAccess,
+  type ProtectedFileAccessContext,
+} from './protectedFileAccess.ts';
 
 const PROVIDER_IMAGE_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
-const PROVIDER_SCHEME_PATTERN = 'resource|local|minio|cos|tos|s3|oss|ks3|obs';
-const PROVIDER_FILE_SCHEME_RE = new RegExp(`^(${PROVIDER_SCHEME_PATTERN}):\\/\\/\\S+$`, 'i');
-const STORAGE_BACKEND_FILE_SCHEME_RE = new RegExp(
-  `^storage:\\/\\/[0-9A-Za-z_-]+\\/(${PROVIDER_SCHEME_PATTERN}):\\/\\/\\S+$`,
-  'i',
-);
 const PROVIDER_IMG_SRC_RE = new RegExp(
   `<img\\b([^>]*?)\\ssrc=(["'])(${PROVIDER_SCHEME_PATTERN}):(?:\\/\\/|&#x2f;&#x2f;|&#47;&#47;)([^"']+)\\2([^>]*)>`,
   'gi',
@@ -190,11 +192,6 @@ function decodeProviderURL(raw: string): string {
     .replace(/&quot;/g, '"');
 }
 
-function isProviderFileURL(url: string): boolean {
-  const trimmed = url.trim();
-  return PROVIDER_FILE_SCHEME_RE.test(trimmed) || STORAGE_BACKEND_FILE_SCHEME_RE.test(trimmed);
-}
-
 function providerSourceFromImageSrc(src: string): string | null {
   const decodedSrc = decodeProviderURL(src);
   if (isProviderFileURL(decodedSrc)) {
@@ -204,10 +201,7 @@ function providerSourceFromImageSrc(src: string): string | null {
   try {
     const baseURL = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
     const url = new URL(decodedSrc, baseURL);
-    const isFileProxy =
-      url.pathname === '/files' ||
-      /^\/api\/v1\/embed\/[^/]+\/files$/.test(url.pathname);
-    if (!isFileProxy) {
+    if (!isProtectedFileProxyPath(url.pathname)) {
       return null;
     }
 
@@ -416,30 +410,6 @@ const protectedFileFailureCache = protectedFileCacheState.failures;
 const protectedFileInflight = protectedFileCacheState.inflight;
 const PROTECTED_FILE_RETRY_COOLDOWN_MS = 5000;
 
-function getProtectedFileRequestHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
-  try {
-    const token = (localStorage.getItem('weknora_token') || '').trim();
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    const selectedTenantId = (localStorage.getItem('weknora_selected_tenant_id') || '').trim();
-    if (selectedTenantId) {
-      // Always attach when a selected tenant is set. Same rationale as
-      // utils/request.ts / api/chat/streame.ts: the
-      // "selectedTenantId === defaultTenantId → skip" short-circuit
-      // silently drops the header whenever any code path writes the
-      // active tenant into weknora_tenant, leaving authenticated file
-      // fetches landing on the home tenant.
-      headers['X-Tenant-ID'] = selectedTenantId;
-    }
-  } catch {
-    // ignore localStorage read errors
-  }
-  return headers;
-}
-
 /**
  * 将 Markdown 里通过 /files 代理的图片，改为用带鉴权 Header 的 fetch 拉取后再显示。
  * 用于避免在 URL 中暴露 token。
@@ -489,10 +459,17 @@ function applyHydratedProtectedImage(root: ParentNode, sourceURL: string, blobUR
   });
 }
 
+/**
+ * 将内容里的受保护图片（resource:// 等）通过对应的文件代理带鉴权拉取，
+ * 再以 blob URL 替换显示。
+ *
+ * 走哪条代理由 {@link resolveProtectedFileAccess} 决定：应用入口注册的默认
+ * 上下文（如嵌入应用的 Embed 平面）优先，组件只在同一鉴权平面内用
+ * `access` 细化作用域（如知识库）。
+ */
 export async function hydrateProtectedFileImages(
   root: ParentNode | null | undefined,
-  embed?: { channelId: string; token: string },
-  kbId?: string,
+  access?: ProtectedFileAccessContext,
 ): Promise<void> {
   if (!root || typeof window === 'undefined') {
     return;
@@ -505,11 +482,7 @@ export async function hydrateProtectedFileImages(
     return;
   }
 
-  // Embed visitors carry no Bearer/tenant context; route through the
-  // embed-scoped file proxy (auth via the Embed header, tenant from the channel).
-  const headers = embed
-    ? { Authorization: `Embed ${embed.token}` }
-    : getProtectedFileRequestHeaders();
+  const resolvedAccess = resolveProtectedFileAccess(access);
 
   await Promise.all(Array.from(images).map(async (img) => {
     const normalizedSourceURL = normalizeProtectedImageElement(img);
@@ -528,30 +501,15 @@ export async function hydrateProtectedFileImages(
     }
     img.dataset.authHydrated = '1';
 
-    const isProviderScheme = isProviderFileURL(sourceURL);
-    // When a KB context is known, route through the KB-scoped proxy. It is
-    // authorized via RequireKBAccess (own / org-shared / agent-visible) and
-    // serves objects owned by the KB's source tenant — so images in a shared
-    // KB (local://<owner-tenant>/...) load for the borrowing tenant, which the
-    // tenant-scoped /files route rejects as a cross-tenant path.
-    const fileProxyBase = embed
-      ? `/api/v1/embed/${embed.channelId}/files`
-      : kbId
-        ? `/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/files`
-        : '/files';
-    const requestURL = isProviderScheme
-      ? `${fileProxyBase}?${new URLSearchParams({ file_path: sourceURL }).toString()}`
-      : sourceURL;
-
-    const isProxyRequest =
-      requestURL.includes('file_path=') &&
-      (requestURL.startsWith('/files?') ||
-        /^\/api\/v1\/knowledge-bases\/[^/]+\/files\?/.test(requestURL) ||
-        /^\/api\/v1\/embed\/[^/]+\/files\?/.test(requestURL));
-    if (!isProxyRequest) {
+    // A null request means this source cannot be fetched under the current
+    // access context (not a storage path, or the embed token has not arrived
+    // yet). Leave the placeholder so a later pass can retry.
+    const request = buildProtectedFileRequest(sourceURL, resolvedAccess);
+    if (!request) {
       img.dataset.authHydrated = '0';
       return;
     }
+    const { url: requestURL, headers } = request;
 
     const cachedBlobURL = protectedFileBlobCache.get(requestURL);
     if (cachedBlobURL) {

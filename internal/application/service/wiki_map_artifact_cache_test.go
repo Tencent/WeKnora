@@ -22,7 +22,7 @@ func TestAppendWikiReconciliationRecomputesLiveState(t *testing.T) {
 	base := []SlugUpdate{{Slug: "summary/doc-1", Type: types.WikiPageTypeSummary}, {Slug: "entity/live", Type: types.WikiPageTypeEntity}}
 	got := appendWikiReconciliation(
 		map[string]bool{"summary/doc-1": true, "entity/live": true, "concept/stale": true},
-		[]types.WikiLogPageRef{{Slug: "summary/doc-1"}, {Slug: "entity/live"}},
+		[]wikiIngestPageRef{{Slug: "summary/doc-1"}, {Slug: "entity/live"}},
 		base, "doc-1", "Doc", "English", "new content", "prior contribution",
 	)
 	require.Len(t, got, 4)

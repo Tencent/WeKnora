@@ -655,7 +655,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "返回数量上限（默认6）",
+                        "description": "返回数量上限（未传时使用智能体配置的开场问题数量，最大30）",
                         "name": "limit",
                         "in": "query"
                     }
@@ -3962,6 +3962,76 @@ const docTemplate = `{
                 }
             }
         },
+        "/knowledge-bases/{id}/activity": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "返回知识库的重要变更与后台任务入口。仅知识库创建者或所属空间管理员可读，共享空间不可读。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识库"
+                ],
+                "summary": "获取知识库活动记录",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "游标：返回 id 小于此值的记录",
+                        "name": "after_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页大小，1-100，默认 50",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "按 action 精确过滤",
+                        "name": "action",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "按 outcome 精确过滤",
+                        "name": "outcome",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "按 actor_user_id 精确过滤",
+                        "name": "actor",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.auditLogListResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/knowledge-bases/{id}/duplicate": {
             "post": {
                 "security": [
@@ -4049,8 +4119,14 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "标签ID筛选(seq_id)",
+                        "description": "标签ID筛选(seq_id)，兼容旧版单标签",
                         "name": "tag_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "标签UUID筛选，逗号分隔（OR语义）",
+                        "name": "tag_ids",
                         "in": "query"
                     },
                     {
@@ -4215,12 +4291,13 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "将所有FAQ条目导出为CSV文件",
+                "description": "将所有FAQ条目导出为 CSV（默认）或 JSON。?format=json 返回与 FAQEntryPayload 结构兼容的数组。",
                 "consumes": [
                     "application/json"
                 ],
                 "produces": [
-                    "text/csv"
+                    "text/csv",
+                    "application/json"
                 ],
                 "tags": [
                     "FAQ管理"
@@ -4233,11 +4310,17 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "导出格式：csv（默认）或 json",
+                        "name": "format",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "CSV文件",
+                        "description": "导出文件",
                         "schema": {
                             "type": "file"
                         }
@@ -7166,52 +7249,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/knowledgebase/{kb_id}/wiki/log": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns a paginated feed of wiki operation events (ingest, retract, ...)\nnewest-first. Pagination is cursor-based: pass ` + "`" + `next_cursor` + "`" + ` from the\nprevious response back as ` + "`" + `cursor` + "`" + ` to fetch the next page.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Wiki"
-                ],
-                "summary": "Get wiki operation log",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Knowledge base ID",
-                        "name": "kb_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Opaque cursor from the previous page (empty = newest)",
-                        "name": "cursor",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "Page size, 1-200 (default 50)",
-                        "name": "limit",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiLogEntryListResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/knowledgebase/{kb_id}/wiki/move-page": {
             "put": {
                 "security": [
@@ -7448,7 +7485,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "Update an existing wiki page by slug",
+                "description": "Partially update a wiki page by slug. Absent fields keep\ntheir stored value. When ` + "`" + `version` + "`" + ` is \u003e 0 it acts as an\noptimistic-lock guard: a mismatch with the stored version\nreturns 409 together with the current version so the client\ncan reload and re-apply.",
                 "consumes": [
                     "application/json"
                 ],
@@ -7475,12 +7512,12 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Updated wiki page data",
+                        "description": "Fields to update",
                         "name": "page",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageUpdateRequest"
                         }
                     }
                 ],
@@ -7491,8 +7528,20 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
                         }
                     },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -7568,6 +7617,135 @@ const docTemplate = `{
                             "additionalProperties": {
                                 "type": "string"
                             }
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledgebase/{kb_id}/wiki/revert": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Rolls the page (slug in the body, like move-page) back to\nthe content of the given stored revision. Applied as a\nregular edit: the pre-revert state is snapshotted and the\nversion advances.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Revert a wiki page to an earlier revision",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Revert target",
+                        "name": "revert",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageRevertRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledgebase/{kb_id}/wiki/revisions/{slug}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Returns the stored historical snapshots for a page, newest\nfirst (content omitted), plus the current version. Passing\n` + "`" + `version` + "`" + ` returns that single snapshot with full content.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "List wiki page revisions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Page slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Return this single revision with content",
+                        "name": "version",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Offset into the newest-first list",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageRevisionListResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8077,7 +8255,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "{authorization_url: string}",
+                        "description": "{authorization_url: string, authorization_attempt: string}",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -8099,7 +8277,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "返回当前用户对指定 MCP 服务是否已完成 OAuth 授权",
+                "description": "返回当前用户的 OAuth Token 生命周期状态；传 authorization_attempt 时只检查本次授权流程",
                 "produces": [
                     "application/json"
                 ],
@@ -8114,11 +8292,17 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "本次授权尝试 ID；传入后不会接受历史 Token",
+                        "name": "authorization_attempt",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "{authorized: bool}",
+                        "description": "{authorized: bool, state: string, refresh_available: bool, expires_at?: string}",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -9898,7 +10082,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "搜索空间（排除已加入的空间）用于邀请加入组织；按空间去重，附带代表用户",
+                "description": "按空间名搜索可邀请的空间（排除已加入的空间）用于邀请加入组织；按空间去重",
                 "produces": [
                     "application/json"
                 ],
@@ -9916,7 +10100,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "搜索关键词（空间名、用户名或邮箱）",
+                        "description": "搜索关键词（空间名）",
                         "name": "q",
                         "in": "query",
                         "required": true
@@ -11878,6 +12062,35 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/internal_handler.RuntimeQueuesResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/system/admin/runtime/queues/{queue}/archived": {
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "Purge all archived tasks in a queue",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Queue name",
+                        "name": "queue",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -14849,7 +15062,42 @@ const docTemplate = `{
                 "system.queue_task_retried",
                 "system.queue_task_deleted",
                 "system.queue_task_run_now",
-                "system.queue_task_cancelled"
+                "system.queue_task_cancelled",
+                "system.queue_archived_purged",
+                "kb.created",
+                "kb.updated",
+                "kb.deleted",
+                "kb.duplicated",
+                "kb.clone_started",
+                "kb.clone_completed",
+                "kb.clone_failed",
+                "knowledge.created",
+                "knowledge.updated",
+                "knowledge.deleted",
+                "knowledge.batch_deleted",
+                "knowledge.reparse_started",
+                "knowledge.parse_canceled",
+                "knowledge.move_started",
+                "knowledge.move_completed",
+                "knowledge.move_failed",
+                "tag.created",
+                "tag.updated",
+                "tag.deleted",
+                "datasource.created",
+                "datasource.updated",
+                "datasource.deleted",
+                "datasource.sync_started",
+                "datasource.sync_completed",
+                "datasource.sync_failed",
+                "datasource.paused",
+                "datasource.resumed",
+                "kb.share_added",
+                "kb.share_permission_changed",
+                "kb.share_removed",
+                "wiki.content_changed",
+                "faq.import_started",
+                "faq.import_completed",
+                "faq.import_failed"
             ],
             "x-enum-varnames": [
                 "AuditActionMemberAdded",
@@ -14877,7 +15125,42 @@ const docTemplate = `{
                 "AuditActionSystemQueueTaskRetried",
                 "AuditActionSystemQueueTaskDeleted",
                 "AuditActionSystemQueueTaskRunNow",
-                "AuditActionSystemQueueTaskCancelled"
+                "AuditActionSystemQueueTaskCancelled",
+                "AuditActionSystemQueueArchivedPurged",
+                "AuditActionKBCreated",
+                "AuditActionKBUpdated",
+                "AuditActionKBDeleted",
+                "AuditActionKBDuplicated",
+                "AuditActionKBCloneStarted",
+                "AuditActionKBCloneCompleted",
+                "AuditActionKBCloneFailed",
+                "AuditActionKnowledgeCreated",
+                "AuditActionKnowledgeUpdated",
+                "AuditActionKnowledgeDeleted",
+                "AuditActionKnowledgeBatchDeleted",
+                "AuditActionKnowledgeReparseStarted",
+                "AuditActionKnowledgeParseCanceled",
+                "AuditActionKnowledgeMoveStarted",
+                "AuditActionKnowledgeMoveCompleted",
+                "AuditActionKnowledgeMoveFailed",
+                "AuditActionTagCreated",
+                "AuditActionTagUpdated",
+                "AuditActionTagDeleted",
+                "AuditActionDataSourceCreated",
+                "AuditActionDataSourceUpdated",
+                "AuditActionDataSourceDeleted",
+                "AuditActionDataSourceSyncStarted",
+                "AuditActionDataSourceSyncCompleted",
+                "AuditActionDataSourceSyncFailed",
+                "AuditActionDataSourcePaused",
+                "AuditActionDataSourceResumed",
+                "AuditActionKBShareAdded",
+                "AuditActionKBSharePermissionChanged",
+                "AuditActionKBShareRemoved",
+                "AuditActionWikiContentChanged",
+                "AuditActionFAQImportStarted",
+                "AuditActionFAQImportCompleted",
+                "AuditActionFAQImportFailed"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.AuditLog": {
@@ -14913,6 +15196,12 @@ const docTemplate = `{
                 "request_path": {
                     "type": "string"
                 },
+                "scope_id": {
+                    "type": "string"
+                },
+                "scope_type": {
+                    "type": "string"
+                },
                 "target_id": {
                     "type": "string"
                 },
@@ -14931,11 +15220,19 @@ const docTemplate = `{
             "type": "string",
             "enum": [
                 "success",
-                "denied"
+                "accepted",
+                "denied",
+                "failed",
+                "partial",
+                "canceled"
             ],
             "x-enum-varnames": [
                 "AuditOutcomeSuccess",
-                "AuditOutcomeDenied"
+                "AuditOutcomeAccepted",
+                "AuditOutcomeDenied",
+                "AuditOutcomeFailed",
+                "AuditOutcomePartial",
+                "AuditOutcomeCanceled"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.COSEngineConfig": {
@@ -18253,6 +18550,7 @@ const docTemplate = `{
                     }
                 },
                 "query_text": {
+                    "description": "QueryText is required unless query_embedding is provided, keyword matching is disabled,\nand vector matching remains enabled.",
                     "type": "string"
                 },
                 "scope_tag_ids": {
@@ -19762,75 +20060,6 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_WeKnora_internal_types.WikiLogEntry": {
-            "type": "object",
-            "properties": {
-                "action": {
-                    "description": "Short operation tag: \"ingest\", \"retract\", etc. Matches the ` + "`" + `action` + "`" + `\nargument historically passed to appendLogEntry.",
-                    "type": "string"
-                },
-                "created_at": {
-                    "description": "Server-side timestamp (UTC).",
-                    "type": "string"
-                },
-                "doc_title": {
-                    "description": "Document title at the time of the event. Stored verbatim rather than\njoined at read time so deleted knowledge still has a human-readable\nlabel in the log.",
-                    "type": "string"
-                },
-                "id": {
-                    "description": "Auto-increment identifier. Monotonic within a single database, so\nfrontend pagination uses it as a stable cursor without needing to\ndisambiguate identical created_at values.",
-                    "type": "integer"
-                },
-                "knowledge_base_id": {
-                    "description": "Knowledge base this event belongs to.",
-                    "type": "string"
-                },
-                "knowledge_id": {
-                    "description": "Knowledge ID the event was about (may be empty for KB-level events).",
-                    "type": "string"
-                },
-                "pages_affected": {
-                    "description": "Wiki pages affected by this event. Each ref carries both slug (for\nnavigation) and title (for display) so the log renders human-\nreadable text without a post-hoc slug→title lookup that might fail\nfor now-deleted pages.",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiLogPageRef"
-                    }
-                },
-                "summary": {
-                    "description": "One-line summary of the change, as it was when the event was logged.",
-                    "type": "string"
-                },
-                "tenant_id": {
-                    "description": "Workspace scope, mirrored from the enclosing knowledge base.",
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_Tencent_WeKnora_internal_types.WikiLogEntryListResponse": {
-            "type": "object",
-            "properties": {
-                "entries": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiLogEntry"
-                    }
-                },
-                "next_cursor": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_Tencent_WeKnora_internal_types.WikiLogPageRef": {
-            "type": "object",
-            "properties": {
-                "slug": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                }
-            }
-        },
         "github_com_Tencent_WeKnora_internal_types.WikiPage": {
             "type": "object",
             "properties": {
@@ -19894,6 +20123,14 @@ const docTemplate = `{
                     "description": "Knowledge base this page belongs to",
                     "type": "string"
                 },
+                "last_edit_source": {
+                    "description": "LastEditSource records who authored the CURRENT version: pipeline |\nagent | user | revert. Empty for legacy rows (treated as pipeline).\nWhen the version is superseded this value travels into the revision\nsnapshot, so each historical version keeps its own author kind.",
+                    "type": "string"
+                },
+                "last_editor_id": {
+                    "description": "LastEditorID is the user id of the caller that produced the current\nversion (empty for background pipeline writes).",
+                    "type": "string"
+                },
                 "out_links": {
                     "description": "Slugs of pages this page links to (outbound links)",
                     "type": "array",
@@ -19909,7 +20146,7 @@ const docTemplate = `{
                     }
                 },
                 "page_type": {
-                    "description": "Page type: summary, entity, concept, index, log, synthesis, comparison",
+                    "description": "Page type: summary, entity, concept, index, synthesis, comparison",
                     "type": "string"
                 },
                 "parent_slug": {
@@ -20039,6 +20276,126 @@ const docTemplate = `{
                 },
                 "slug": {
                     "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiPageRevertRequest": {
+            "type": "object",
+            "required": [
+                "slug",
+                "version"
+            ],
+            "properties": {
+                "slug": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiPageRevision": {
+            "type": "object",
+            "properties": {
+                "aliases": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "edit_source": {
+                    "description": "Author of THIS version (same semantics as WikiPage.LastEditSource).",
+                    "type": "string"
+                },
+                "edited_at": {
+                    "description": "When this version was authored (the page's updated_at while current).",
+                    "type": "string"
+                },
+                "editor_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "page_id": {
+                    "type": "string"
+                },
+                "page_type": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "tenant_id": {
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiPageRevisionListResponse": {
+            "type": "object",
+            "properties": {
+                "current_version": {
+                    "type": "integer"
+                },
+                "revisions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageRevision"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiPageUpdateRequest": {
+            "type": "object",
+            "properties": {
+                "aliases": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "content": {
+                    "type": "string"
+                },
+                "page_type": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "version": {
+                    "description": "Version is the optimistic-lock guard: when \u003e 0 the update is rejected\nwith a conflict if the stored version differs (someone else edited the\npage since the client loaded it). 0 skips the check (legacy clients).",
+                    "type": "integer"
                 }
             }
         },

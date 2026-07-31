@@ -85,6 +85,21 @@ type RetrieveEngineRegistry interface {
 	// rather than calling this directly. The factories wrap GetByStoreID with
 	// tenant ownership verification (defense-in-depth against cross-tenant IDOR).
 	GetByStoreID(storeID string) (RetrieveEngineService, error)
+
+	// GetOrLoadByStoreID returns the engine for storeID, rebuilding it from the
+	// database when this process has no entry for it. The registry is per-process:
+	// an engine registered on one instance is missing on every other until that
+	// instance restarts, and an engine whose creation failed during startup stays
+	// missing even across restarts. Rebuilding on demand lets both cases recover
+	// without an operator-driven rollout.
+	//
+	// Unlike GetByStoreID, this method scopes its database lookup to tenantID, so
+	// it cannot hydrate a store belonging to another tenant. Callers should still
+	// verify ownership first: the tenant scope is defense-in-depth, not a
+	// replacement for the ownership check.
+	GetOrLoadByStoreID(
+		ctx context.Context, tenantID uint64, storeID string,
+	) (RetrieveEngineService, error)
 }
 
 // RetrieveEngineService defines the retrieve engine service interface

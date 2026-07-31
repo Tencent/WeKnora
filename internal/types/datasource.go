@@ -218,6 +218,14 @@ type DataSourceConfig struct {
 
 	// Connector-specific configuration
 	Settings map[string]interface{} `json:"settings"`
+
+	// MultimodalEnabled mirrors the target knowledge base's VLM/multimodal
+	// setting for the current sync run. The service populates it before each fetch
+	// and it is never persisted (json:"-") — the KB owns the setting. Connectors
+	// use it to decide whether extracting embedded images for OCR is worthwhile:
+	// ingesting an image into a KB without VLM is rejected, so image extraction is
+	// skipped when this is false.
+	MultimodalEnabled bool `json:"-"`
 }
 
 // HasCredentials reports whether the credentials map carries any value at
@@ -323,6 +331,62 @@ type FetchedItem struct {
 
 	// Source resource ID (e.g., folder ID this document belongs to)
 	SourceResourceID string `json:"source_resource_id"`
+
+	// ReplacesSubtree, when true, tells ingestion to reconcile this item's
+	// sub-items: after the parent is (re)ingested, every existing knowledge item
+	// whose external_id starts with SubtreeChildPrefix(ExternalID) that is NOT
+	// listed in SubtreeKeep is deleted as stale. Used by connectors that fan one
+	// source node out into a parent document plus attachment/image sub-items
+	// (e.g. Feishu docx).
+	//
+	// PRECONDITIONS the sweep relies on — a connector setting this MUST honour:
+	//   1. Child external_ids are built with SubtreeChildID, so they share the
+	//      '#' prefix the sweep matches. A child ID without that prefix is never
+	//      swept (silently orphaned); an unrelated item that happens to start
+	//      with the prefix would be wrongly swept.
+	//   2. The parent is emitted (streaming) / listed (batch) no later than its
+	//      children, and SubtreeKeep already names every still-present child when
+	//      the parent is ingested. The sweep runs at parent-ingest time against
+	//      the PRIOR sync's children, so a child emitted after its parent's sweep
+	//      but absent from SubtreeKeep could be deleted right after being added.
+	ReplacesSubtree bool `json:"replaces_subtree,omitempty"`
+
+	// SubtreeKeep lists the external_ids of sub-items that still exist in the
+	// source this sync. Consulted only when ReplacesSubtree is true: the sweep
+	// preserves these children even if they could not be re-ingested this cycle
+	// (transient download/parse failure, or an unclassifiable filename), so a
+	// still-present attachment never loses its previously-synced good copy. Only
+	// children absent from this set — genuinely removed from the source — are
+	// swept.
+	//
+	// CONTRACT: an empty (or nil) SubtreeKeep with ReplacesSubtree=true means
+	// "keep nothing" and sweeps EVERY existing child under the prefix. That is
+	// correct for a node whose attachments all vanished, so a connector setting
+	// ReplacesSubtree MUST populate SubtreeKeep with every child still present.
+	// The field is consumed in-process (fetch → ingest, no serialization), so
+	// nil and empty are equivalent here; the omitempty tag is for API/debug
+	// exposure only and must not be relied on to distinguish "unset" from "empty".
+	SubtreeKeep []string `json:"subtree_keep,omitempty"`
+}
+
+// SubtreeChildID builds the external_id of a sub-item fanned out from a parent
+// source node — e.g. a docx node's attachment or embedded image. The shape is
+// "<parentExternalID>#<kind>#<token>". The '#' separator is the contract the
+// subtree sweep depends on (see SubtreeChildPrefix and FetchedItem.ReplacesSubtree):
+// producers MUST build child IDs with this helper so the producer and the sweep
+// consumer share one source of truth. kind is a short discriminator ("file",
+// "image"); token is the source system's id for the child and is assumed to be
+// '#'-free (Feishu/Notion/etc. tokens are).
+func SubtreeChildID(parentExternalID, kind, token string) string {
+	return parentExternalID + "#" + kind + "#" + token
+}
+
+// SubtreeChildPrefix is the external_id prefix that matches every child of a
+// parent node built with SubtreeChildID. The sweep deletes prior children whose
+// external_id starts with this prefix and are absent from SubtreeKeep. It must
+// move in lockstep with SubtreeChildID: both encode the same '#' separator.
+func SubtreeChildPrefix(parentExternalID string) string {
+	return parentExternalID + "#"
 }
 
 // SyncCursor represents the position/state for incremental sync
@@ -415,6 +479,9 @@ func (e *SyncItemError) UnmarshalJSON(b []byte) error {
 // DataSourceSyncPayload represents the asynq task payload for data source sync
 type DataSourceSyncPayload struct {
 	TracingContext
+	Initiator TaskInitiator `json:"initiator,omitempty"`
+	// Trigger distinguishes a user-requested run from a scheduler-created run.
+	Trigger string `json:"trigger,omitempty"`
 
 	// Data source ID to sync
 	DataSourceID string `json:"data_source_id"`

@@ -488,12 +488,14 @@ func TestSummaryQuestionPayload_AttemptRoundTrip(t *testing.T) {
 		KnowledgeID:     "kid-7",
 		Language:        "zh-CN",
 		Attempt:         5,
+		Refresh:         true,
 	}
 	sumBytes, err := json.Marshal(sumIn)
 	require.NoError(t, err)
 	var sumOut types.SummaryGenerationPayload
 	require.NoError(t, json.Unmarshal(sumBytes, &sumOut))
 	assert.Equal(t, 5, sumOut.Attempt)
+	assert.True(t, sumOut.Refresh)
 
 	qIn := types.QuestionGenerationPayload{
 		TenantID:        42,

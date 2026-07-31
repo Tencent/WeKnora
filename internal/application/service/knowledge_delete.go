@@ -197,6 +197,9 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 	if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, -knowledge.StorageSize); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update tenant storage used failed")
 	}
+	recordKBActivity(ctx, s.audit, tenantID, knowledge.KnowledgeBaseID, types.AuditActionKnowledgeDeleted,
+		"knowledge", knowledge.ID, types.AuditOutcomeSuccess,
+		map[string]any{"title": knowledge.Title, "type": knowledge.Type})
 	return nil
 }
 
@@ -274,7 +277,7 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 	var retractSlugs []string
 	var affectedFolderIDs []string
 	for _, page := range pages {
-		if page.PageType == types.WikiPageTypeIndex || page.PageType == types.WikiPageTypeLog {
+		if page.PageType == types.WikiPageTypeIndex {
 			continue
 		}
 		if page.FolderID != "" {
@@ -310,7 +313,7 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 	// (3) Unconditionally enqueue the retract task. See function comment —
 	// an empty PageSlugs is not a bug, it's the signal "re-query at run
 	// time". The handler will ListPagesBySourceRef again, pick up any
-	// pages that materialised after we looked, and also rebuild index/log
+	// pages that materialised after we looked, and also rebuild the index
 	// so the knowledge's disappearance is reflected in the UI.
 	lang, _ := types.LanguageFromContext(ctx)
 	tenantID, _ := types.TenantIDFromContext(ctx)
@@ -392,7 +395,7 @@ func (s *knowledgeService) scrubWikiPendingIngest(ctx context.Context, kbID, kno
 // actual swap happens asynchronously inside mapOneDocument (see its
 // oldPageSlugs handling) — that's where we have both the old page set and
 // the freshly extracted candidate slugs, which is exactly the information
-// the WikiPageModifyPrompt needs to do a correct replace-not-append.
+// the WikiPageModifyUserPrompt needs to do a correct replace-not-append.
 //
 // So the only thing worth doing synchronously at reparse time is keeping
 // the Redis pending list clean so the re-ingest enqueued by
@@ -438,6 +441,52 @@ func removeChunkRefs(refs types.StringArray, removed map[string]bool) types.Stri
 	return result
 }
 
+type knowledgeVectorDeleteGroup struct {
+	VectorStoreID    string
+	EmbeddingModelID string
+	Type             string
+	KnowledgeIDs     []string
+}
+
+func buildKnowledgeVectorDeleteGroups(
+	knowledges []*types.Knowledge,
+	knowledgeBases map[string]*types.KnowledgeBase,
+) []knowledgeVectorDeleteGroup {
+	type groupKey struct {
+		VectorStoreID    string
+		EmbeddingModelID string
+		Type             string
+	}
+
+	grouped := make(map[groupKey][]string)
+	for _, knowledge := range knowledges {
+		if knowledge == nil {
+			continue
+		}
+		var vectorStoreID string
+		if kb := knowledgeBases[knowledge.KnowledgeBaseID]; kb != nil && kb.VectorStoreID != nil {
+			vectorStoreID = strings.TrimSpace(*kb.VectorStoreID)
+		}
+		key := groupKey{
+			VectorStoreID:    vectorStoreID,
+			EmbeddingModelID: knowledge.EmbeddingModelID,
+			Type:             knowledge.Type,
+		}
+		grouped[key] = append(grouped[key], knowledge.ID)
+	}
+
+	groups := make([]knowledgeVectorDeleteGroup, 0, len(grouped))
+	for key, knowledgeIDs := range grouped {
+		groups = append(groups, knowledgeVectorDeleteGroup{
+			VectorStoreID:    key.VectorStoreID,
+			EmbeddingModelID: key.EmbeddingModelID,
+			Type:             key.Type,
+			KnowledgeIDs:     knowledgeIDs,
+		})
+	}
+	return groups
+}
+
 // DeleteKnowledgeList deletes a knowledge entry and all related resources
 func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
@@ -476,11 +525,13 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		s.dequeueKnowledgeTasks(ctx, kid)
 	}
 
-	// Pre-resolve file services per KB so goroutines don't need DB access
+	// Pre-resolve KB metadata and file services so goroutines don't need DB access.
+	knowledgeBases := make(map[string]*types.KnowledgeBase)
 	kbFileServices := make(map[string]interfaces.FileService)
 	for _, knowledge := range knowledgeList {
 		if _, ok := kbFileServices[knowledge.KnowledgeBaseID]; !ok {
 			kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+			knowledgeBases[knowledge.KnowledgeBaseID] = kb
 			kbFileServices[knowledge.KnowledgeBaseID] = s.resolveFileService(ctx, kb)
 		}
 	}
@@ -508,41 +559,32 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 	// 2. Delete knowledge embeddings from vector store
 	wg.Go(func() error {
 		tenantID := types.MustTenantIDFromContext(ctx)
-		// Batch cleanup spans multiple KBs that may be bound to different
-		// VectorStores; routing this batch through tenant effective engines
-		// keeps the legacy behavior intact.
-		// TODO: fan out the batch per-store using each KB's own
-		// VectorStoreID so cleanup hits the right backend for bound KBs.
-		retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
-			ctx, s.retrieveEngine, s.ownership, tenantID, nil)
-		if err != nil {
-			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge embedding failed")
-			return err
-		}
-		// Group by EmbeddingModelID and Type
-		type groupKey struct {
-			EmbeddingModelID string
-			Type             string
-		}
-		group := map[groupKey][]string{}
-		for _, knowledge := range knowledgeList {
-			key := groupKey{EmbeddingModelID: knowledge.EmbeddingModelID, Type: knowledge.Type}
-			group[key] = append(group[key], knowledge.ID)
-		}
-		for key, knowledgeIDs := range group {
+		for _, group := range buildKnowledgeVectorDeleteGroups(knowledgeList, knowledgeBases) {
 			// Wiki-only knowledge never had embeddings written to the vector store,
 			// and its EmbeddingModelID is intentionally empty. Skip the whole group
 			// to avoid the spurious "model ID cannot be empty" failure.
-			if strings.TrimSpace(key.EmbeddingModelID) == "" {
-				logger.Infof(ctx, "Skipping vector store cleanup for %d knowledge entries without embedding model", len(knowledgeIDs))
+			if strings.TrimSpace(group.EmbeddingModelID) == "" {
+				logger.Infof(ctx, "Skipping vector store cleanup for %d knowledge entries without embedding model", len(group.KnowledgeIDs))
 				continue
 			}
-			embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, key.EmbeddingModelID)
+
+			var vectorStoreID *string
+			if group.VectorStoreID != "" {
+				storeID := group.VectorStoreID
+				vectorStoreID = &storeID
+			}
+			retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+				ctx, s.retrieveEngine, s.ownership, tenantID, vectorStoreID)
+			if err != nil {
+				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge embedding failed")
+				return err
+			}
+			embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, group.EmbeddingModelID)
 			if err != nil {
 				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge get embedding model failed")
 				return err
 			}
-			if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, knowledgeIDs, embeddingModel.GetDimensions(), key.Type); err != nil {
+			if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, group.KnowledgeIDs, embeddingModel.GetDimensions(), group.Type); err != nil {
 				logger.GetLogger(ctx).
 					WithField("error", err).
 					Errorf("DeleteKnowledge delete knowledge embedding failed")
@@ -625,6 +667,26 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 	tenantInfo.StorageUsed += storageAdjust
 	if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, storageAdjust); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update tenant storage used failed")
+	}
+	byKB := make(map[string][]*types.Knowledge)
+	for i := range knowledgeList {
+		knowledge := knowledgeList[i]
+		byKB[knowledge.KnowledgeBaseID] = append(byKB[knowledge.KnowledgeBaseID], knowledge)
+	}
+	for kbID, knowledges := range byKB {
+		knowledgeIDs := make([]string, 0, len(knowledges))
+		titles := make([]string, 0, len(knowledges))
+		for _, knowledge := range knowledges {
+			knowledgeIDs = append(knowledgeIDs, knowledge.ID)
+			titles = append(titles, knowledge.Title)
+		}
+		details := map[string]any{"count": len(knowledgeIDs)}
+		if len(knowledgeIDs) <= 20 {
+			details["knowledge_ids"] = knowledgeIDs
+		}
+		kbActivityAppendSampleTitles(details, titles...)
+		recordKBActivity(ctx, s.audit, tenantInfo.ID, kbID, types.AuditActionKnowledgeBatchDeleted,
+			"knowledge", "", types.AuditOutcomeSuccess, details)
 	}
 	return nil
 }
@@ -723,6 +785,9 @@ func (s *knowledgeService) ProcessKnowledgeListDelete(ctx context.Context, t *as
 		logger.Errorf(ctx, "Failed to unmarshal knowledge list delete payload: %v", err)
 		return err
 	}
+	ctx = payload.Initiator.Apply(ctx)
+	taskID, _ := asynq.GetTaskID(ctx)
+	ctx = withKBActivityTask(ctx, taskID, kbActivityTrigger(ctx))
 
 	logger.Infof(ctx, "Processing knowledge list delete task for %d knowledge items", len(payload.KnowledgeIDs))
 

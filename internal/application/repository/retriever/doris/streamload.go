@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // Stream Load 相关常量。
@@ -52,7 +54,47 @@ type streamLoadResponse struct {
 // streamLoadURL 拼装某张表的 Stream Load HTTP 端点。
 func (r *dorisRepository) streamLoadURL(table string) string {
 	return fmt.Sprintf("%s/api/%s/%s/_stream_load",
-		r.feHTTPBase, r.database, table)
+		r.feHTTPBase, url.PathEscape(r.database), url.PathEscape(table))
+}
+
+// newDorisStreamLoadHTTPClient protects both the initial FE request and every
+// FE -> BE redirect at connection time. Doris requires Basic auth to survive
+// the 307 redirect, so redirect targets on another host must be explicitly
+// trusted through the SSRF whitelist before credentials are forwarded.
+func newDorisStreamLoadHTTPClient() *http.Client {
+	cfg := secutils.DefaultSSRFSafeHTTPClientConfig()
+	// Stream Load calls carry their own context deadline. Preserve the previous
+	// client behaviour instead of imposing the generic 30-second HTTP timeout.
+	cfg.Timeout = 0
+
+	client := secutils.NewSSRFSafeHTTPClient(cfg)
+	ssrfCheckRedirect := client.CheckRedirect
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		// Keep the shared client's redirect limit, scheme/target validation and
+		// sensitive-header stripping as the authoritative SSRF behaviour.
+		if err := ssrfCheckRedirect(req, via); err != nil {
+			return err
+		}
+		if len(via) == 0 {
+			return nil
+		}
+
+		sourceHost := via[len(via)-1].URL.Hostname()
+		targetHost := req.URL.Hostname()
+		if !strings.EqualFold(sourceHost, targetHost) && !secutils.IsSSRFWhitelisted(targetHost) {
+			return fmt.Errorf(
+				"stream load redirect blocked: target host %q is not trusted to receive credentials",
+				targetHost,
+			)
+		}
+
+		// The shared client deliberately strips Authorization on cross-host
+		// redirects. Doris is the exceptional case where an explicitly trusted
+		// BE needs the same Basic credentials after the FE's 307 response.
+		req.Header.Set(headerAuthorization, via[0].Header.Get(headerAuthorization))
+		return nil
+	}
+	return client
 }
 
 // partialUpdateRows 把若干行通过 Stream Load 的 partial update 模式写回目标表。
@@ -96,6 +138,12 @@ func (r *dorisRepository) streamLoadOnce(ctx context.Context,
 	}
 
 	url := r.streamLoadURL(table)
+	// Validate at the final outbound boundary as well as when user-supplied
+	// vector-store configuration is created. This covers stored/env configs and
+	// keeps the tainted value from reaching http.Client.Do unchecked.
+	if err := secutils.ValidateURLForSSRF(url); err != nil {
+		return fmt.Errorf("stream load URL blocked by SSRF validation: %w", err)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build stream load request: %w", err)

@@ -302,6 +302,11 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
+	precomputedVectorOnly := len(req.QueryEmbedding) > 0 && req.DisableKeywordsMatch && !req.DisableVectorMatch
+	if strings.TrimSpace(req.QueryText) == "" && !precomputedVectorOnly {
+		_ = c.Error(apperrors.NewBadRequestError("query_text is required"))
+		return
+	}
 
 	logger.Infof(ctx, "Executing hybrid search, knowledge base ID: %s, query: %s, effectiveTenantID: %d",
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.QueryText), effectiveTenantID)
@@ -469,7 +474,11 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*typ
 		currentTenantID := tenantID.(uint64)
 		agentID := c.Query("agent_id")
 		if agentID != "" {
-			agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID)
+			sourceTenantID, parseErr := types.ParseAgentSourceTenantID(c.Query(types.AgentSourceTenantIDParam))
+			if parseErr != nil {
+				return kb, id, 0, types.OrgMemberRole(""), apperrors.NewBadRequestError(parseErr.Error())
+			}
+			agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID, sourceTenantID)
 			if err == nil && agent != nil {
 				if kb.TenantID != agent.TenantID {
 					logger.Warnf(ctx, "Shared agent workspace mismatch, KB %s tenant: %d, agent tenant: %d", id, kb.TenantID, agent.TenantID)
@@ -576,7 +585,12 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 			return
 		}
 		callerTenantRole := types.TenantRoleFromContext(ctx)
-		agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID)
+		requestedSourceTenantID, parseErr := types.ParseAgentSourceTenantID(c.Query(types.AgentSourceTenantIDParam))
+		if parseErr != nil {
+			c.Error(apperrors.NewBadRequestError(parseErr.Error()))
+			return
+		}
+		agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID, requestedSourceTenantID)
 		if err != nil {
 			if stderrors.Is(err, service.ErrAgentShareNotFound) || stderrors.Is(err, service.ErrAgentSharePermission) || stderrors.Is(err, service.ErrAgentNotFoundForShare) {
 				c.Error(apperrors.NewForbiddenError("no permission for this shared agent"))
@@ -1081,10 +1095,11 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 
 	// Create KB clone payload
 	payload := types.KBClonePayload{
-		TenantID: tenantID.(uint64),
-		TaskID:   taskID,
-		SourceID: req.SourceID,
-		TargetID: req.TargetID,
+		TenantID:  tenantID.(uint64),
+		TaskID:    taskID,
+		SourceID:  req.SourceID,
+		TargetID:  req.TargetID,
+		Initiator: types.TaskInitiatorFromContext(ctx),
 	}
 	langfuse.InjectTracing(ctx, &payload)
 

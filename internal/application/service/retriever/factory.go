@@ -19,10 +19,20 @@ var (
 	// context (synchronous, unbound KB path) and none is present.
 	ErrTenantInfoMissing = errors.New("tenant info not found in context")
 
-	// ErrVectorStoreNotFound is returned when the store ID is not registered
-	// (or an internal lookup for ownership failed). Async workers should treat
-	// this as non-retryable.
+	// ErrVectorStoreNotFound is returned when the store does not exist for the
+	// tenant. Async workers should treat this as non-retryable: no amount of
+	// waiting brings back a store that is not in the database.
 	ErrVectorStoreNotFound = errors.New("vector store not available")
+
+	// ErrVectorStoreUnavailable is returned when the store exists but its
+	// engine could not be produced right now — the metadata database was
+	// unreachable, or building the engine failed against a backend that may
+	// simply be down. Async workers should retry rather than discard the task,
+	// which is why this is a separate sentinel: reporting it as not-found
+	// would turn a passing outage into permanently dropped work. It carries no
+	// detail because the underlying errors embed endpoints and credentials;
+	// the cause is logged where it happens.
+	ErrVectorStoreUnavailable = errors.New("vector store engine unavailable")
 
 	// ErrVectorStoreForbidden is returned when the resolved store is not
 	// owned by the given tenant. This guards against cross-tenant access
@@ -83,10 +93,35 @@ func VerifyBinding(
 	if !owned {
 		return ErrVectorStoreForbidden
 	}
-	if _, err := registry.GetByStoreID(storeID); err != nil {
-		return ErrVectorStoreNotFound
+	if _, err := registry.GetOrLoadByStoreID(ctx, tenantID, storeID); err != nil {
+		return classifyLookupError(err)
 	}
 	return nil
+}
+
+// classifyLookupError narrows an engine-lookup failure to what the caller is
+// allowed to see, while preserving the distinction that decides whether work
+// gets retried or discarded. Context errors and the store sentinels pass
+// through; anything unexpected is reported as retryable, because treating an
+// unknown failure as permanent is what silently drops work.
+func classifyLookupError(err error) error {
+	switch {
+	case isContextError(err),
+		errors.Is(err, ErrVectorStoreNotFound),
+		errors.Is(err, ErrVectorStoreUnavailable),
+		errors.Is(err, ErrVectorStoreForbidden):
+		return err
+	default:
+		return ErrVectorStoreUnavailable
+	}
+}
+
+// isContextError reports whether err is the caller giving up rather than a
+// verdict about the store. The distinction matters because async workers treat
+// the store sentinels as permanent and stop retrying, so a cancelled or
+// timed-out request must not be reported as one.
+func isContextError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // CreateRetrieveEngineForKB returns a CompositeRetrieveEngine resolved from
@@ -165,14 +200,22 @@ func resolveBoundEngine(
 ) (*CompositeRetrieveEngine, error) {
 	owned, err := ownership.StoreOwnedBy(ctx, storeID, tenantID)
 	if err != nil {
+		// This lookup queries the database with the caller's context, so it is
+		// where a shutdown or a disconnect is usually noticed first. Reporting
+		// that as a store verdict would let async workers discard work that
+		// only needs running again.
+		if isContextError(err) {
+			return nil, err
+		}
 		// Infrastructure failure — record the raw error for operators but
-		// do not leak internals to the caller.
+		// do not leak internals to the caller. The store itself may be fine,
+		// so this is retryable rather than not-found.
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,
 			"store_id":  storeID,
 			"reason":    "ownership lookup failed",
 		})
-		return nil, ErrVectorStoreNotFound
+		return nil, ErrVectorStoreUnavailable
 	}
 	if !owned {
 		// Cross-tenant attempt (or the store has been deleted in the
@@ -183,14 +226,17 @@ func resolveBoundEngine(
 		return nil, ErrVectorStoreForbidden
 	}
 
-	svc, err := registry.GetByStoreID(storeID)
+	svc, err := registry.GetOrLoadByStoreID(ctx, tenantID, storeID)
 	if err != nil {
+		if isContextError(err) {
+			return nil, err
+		}
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,
 			"store_id":  storeID,
-			"reason":    "store not registered",
+			"reason":    "store engine could not be resolved",
 		})
-		return nil, ErrVectorStoreNotFound
+		return nil, classifyLookupError(err)
 	}
 
 	// Build the composite directly from the resolved service.

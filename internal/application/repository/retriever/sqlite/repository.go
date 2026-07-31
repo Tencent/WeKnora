@@ -300,27 +300,17 @@ func (r *sqliteRepository) Retrieve(ctx context.Context, params types.RetrievePa
 	if params.RetrieverType == types.KeywordsRetrieverType || params.RetrieverType == "" {
 		res, err := r.keywordsRetrieve(ctx, params)
 		if err != nil {
-			results = append(results, &types.RetrieveResult{
-				RetrieverEngineType: types.SQLiteRetrieverEngineType,
-				RetrieverType:       types.KeywordsRetrieverType,
-				Error:               err,
-			})
-		} else {
-			results = append(results, res...)
+			return nil, err
 		}
+		results = append(results, res...)
 	}
 
 	if params.RetrieverType == types.VectorRetrieverType || params.RetrieverType == "" {
 		res, err := r.vectorRetrieve(ctx, params)
 		if err != nil {
-			results = append(results, &types.RetrieveResult{
-				RetrieverEngineType: types.SQLiteRetrieverEngineType,
-				RetrieverType:       types.VectorRetrieverType,
-				Error:               err,
-			})
-		} else {
-			results = append(results, res...)
+			return nil, err
 		}
+		results = append(results, res...)
 	}
 
 	return results, nil
@@ -347,7 +337,7 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 
 	args := []interface{}{ftsQuery}
 
-	for _, wp := range buildFilterWhere(params) {
+	for _, wp := range buildFilterWhere(params, "e") {
 		sql += " AND " + wp.clause
 		args = append(args, wp.args...)
 	}
@@ -429,7 +419,10 @@ func (r *sqliteRepository) vectorRetrieve(ctx context.Context, params types.Retr
 		JOIN lite_embeddings e ON e.id = v.rowid
 		WHERE v.embedding MATCH ?
 		AND k = ?
-		AND (e.is_enabled IS NULL OR e.is_enabled = 1)
+		AND v.rowid IN (
+			SELECT filtered.id
+			FROM lite_embeddings filtered
+			WHERE (filtered.is_enabled IS NULL OR filtered.is_enabled = 1)
 	`, tbl)
 
 	args := []interface{}{
@@ -438,13 +431,13 @@ func (r *sqliteRepository) vectorRetrieve(ctx context.Context, params types.Retr
 	}
 
 	// 追加过滤条件
-	for _, wp := range buildFilterWhere(params) {
+	for _, wp := range buildFilterWhere(params, "filtered") {
 		vecSQL += " AND " + wp.clause
 		args = append(args, wp.args...)
 	}
 
 	// ⚠️ 这里仍然建议加 ORDER BY，虽然 vec0 已经按距离返回
-	vecSQL += " ORDER BY v.distance ASC"
+	vecSQL += ") ORDER BY v.distance ASC"
 
 	type row struct {
 		Rowid           uint
@@ -472,6 +465,9 @@ func (r *sqliteRepository) vectorRetrieve(ctx context.Context, params types.Retr
 	for i, v := range rows {
 		// cosine distance = 1 - cosine_similarity
 		score := 1 - v.Distance
+		if params.Threshold > 0 && score < params.Threshold {
+			continue
+		}
 
 		logger.GetLogger(ctx).Infof("[SQLite] vectorRetrieve: #%d chunk_id=%s, distance=%.4f, score=%.4f, content_preview=%.60s",
 			i+1, v.ChunkID, v.Distance, score, v.Content)
@@ -598,23 +594,23 @@ type whereClause struct {
 	args   []interface{}
 }
 
-func buildFilterWhere(params types.RetrieveParams) []whereClause {
+func buildFilterWhere(params types.RetrieveParams, tableAlias string) []whereClause {
 	var parts []whereClause
 	if len(params.KnowledgeBaseIDs) > 0 {
 		parts = append(parts, whereClause{
-			clause: "e.knowledge_base_id IN (" + placeholders(len(params.KnowledgeBaseIDs)) + ")",
+			clause: tableAlias + ".knowledge_base_id IN (" + placeholders(len(params.KnowledgeBaseIDs)) + ")",
 			args:   toInterfaceSlice(params.KnowledgeBaseIDs),
 		})
 	}
 	if len(params.KnowledgeIDs) > 0 {
 		parts = append(parts, whereClause{
-			clause: "e.knowledge_id IN (" + placeholders(len(params.KnowledgeIDs)) + ")",
+			clause: tableAlias + ".knowledge_id IN (" + placeholders(len(params.KnowledgeIDs)) + ")",
 			args:   toInterfaceSlice(params.KnowledgeIDs),
 		})
 	}
 	if len(params.TagIDs) > 0 {
 		parts = append(parts, whereClause{
-			clause: "e.tag_id IN (" + placeholders(len(params.TagIDs)) + ")",
+			clause: tableAlias + ".tag_id IN (" + placeholders(len(params.TagIDs)) + ")",
 			args:   toInterfaceSlice(params.TagIDs),
 		})
 	}

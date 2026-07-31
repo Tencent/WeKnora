@@ -84,13 +84,13 @@ func wikiCanonicalMap(ctx context.Context) bool {
 }
 
 type wikiMapArtifactPayload struct {
-	SchemaVersion string                 `json:"schema_version"`
-	KnowledgeID   string                 `json:"knowledge_id"`
-	DocTitle      string                 `json:"doc_title"`
-	Summary       string                 `json:"summary"`
-	Pages         []types.WikiLogPageRef `json:"pages"`
-	Updates       []wikiMapCachedUpdate  `json:"updates"`
-	MapStats      types.JSONMap          `json:"map_stats,omitempty"`
+	SchemaVersion string                `json:"schema_version"`
+	KnowledgeID   string                `json:"knowledge_id"`
+	DocTitle      string                `json:"doc_title"`
+	Summary       string                `json:"summary"`
+	Pages         []wikiIngestPageRef   `json:"pages"`
+	Updates       []wikiMapCachedUpdate `json:"updates"`
+	MapStats      types.JSONMap         `json:"map_stats,omitempty"`
 }
 
 // wikiMapCachedUpdate is deliberately limited to additions. Retracts and
@@ -584,9 +584,9 @@ func mergeWikiMapChunkRefs(a, b []wikiMapChunkRef) []wikiMapChunkRef {
 	return out
 }
 
-func normalizeWikiMapPages(in []types.WikiLogPageRef) []types.WikiLogPageRef {
+func normalizeWikiMapPages(in []wikiIngestPageRef) []wikiIngestPageRef {
 	seen := make(map[string]bool, len(in))
-	out := make([]types.WikiLogPageRef, 0, len(in))
+	out := make([]wikiIngestPageRef, 0, len(in))
 	for _, page := range in {
 		if page.Slug == "" || seen[page.Slug] {
 			continue
@@ -612,13 +612,13 @@ func mergeStableStrings(a, b []string) []string {
 	return out
 }
 
-func (s *wikiIngestService) appendCurrentWikiReconciliation(ctx context.Context, kbID, knowledgeID, docTitle, lang, content string, pages []types.WikiLogPageRef, updates []SlugUpdate, batchCtx *WikiBatchContext) []SlugUpdate {
+func (s *wikiIngestService) appendCurrentWikiReconciliation(ctx context.Context, kbID, knowledgeID, docTitle, lang, content string, pages []wikiIngestPageRef, updates []SlugUpdate, batchCtx *WikiBatchContext) []SlugUpdate {
 	old := s.getExistingPageSlugsForKnowledge(ctx, kbID, knowledgeID)
 	prior := batchCtx.SummaryContentByKnowledgeID(ctx, knowledgeID)
 	return appendWikiReconciliation(old, pages, updates, knowledgeID, docTitle, lang, content, prior)
 }
 
-func appendWikiReconciliation(old map[string]bool, pages []types.WikiLogPageRef, updates []SlugUpdate, knowledgeID, docTitle, lang, content, prior string) []SlugUpdate {
+func appendWikiReconciliation(old map[string]bool, pages []wikiIngestPageRef, updates []SlugUpdate, knowledgeID, docTitle, lang, content, prior string) []SlugUpdate {
 	current := make(map[string]bool, len(pages))
 	for _, page := range pages {
 		current[page.Slug] = true

@@ -373,7 +373,7 @@ func extractImageRefsFromContent(content string) []string {
 			refs = append(refs, strings.TrimSpace(match[2]))
 		}
 	}
-	for _, match := range imgHTMLRelativeSrc.FindAllStringSubmatch(content, -1) {
+	for _, match := range imgHTMLSrc.FindAllStringSubmatch(content, -1) {
 		if len(match) >= 3 {
 			refs = append(refs, match[2])
 		}

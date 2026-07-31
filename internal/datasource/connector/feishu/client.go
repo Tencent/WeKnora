@@ -23,6 +23,9 @@ type Client struct {
 	appID     string
 	appSecret string
 
+	// location renders bitable date cells in the table's timezone (default GMT+8).
+	location *time.Location
+
 	httpClient *http.Client
 
 	// Token cache (thread-safe)
@@ -51,12 +54,22 @@ func (e *partialWikiNodeListError) Error() string {
 	return strings.Join(parts, "; ")
 }
 
+// tz returns the client's date-rendering location, defaulting to GMT+8 when a
+// Client was constructed without one (e.g. in tests that build Client directly).
+func (c *Client) tz() *time.Location {
+	if c.location != nil {
+		return c.location
+	}
+	return time.FixedZone("GMT+8", defaultTimezoneOffsetSeconds)
+}
+
 // NewClient creates a new Feishu API client.
 func NewClient(config *Config) *Client {
 	return &Client{
 		baseURL:    config.GetBaseURL(),
 		appID:      config.AppID,
 		appSecret:  config.AppSecret,
+		location:   resolveLocation(config.Timezone),
 		httpClient: datasource.NewConnectorHTTPClient(30 * time.Second),
 	}
 }
@@ -125,6 +138,10 @@ const (
 	feishuMax5xxRetries = 1
 	feishuRetry5xxDelay = 2 * time.Second
 )
+
+// maxFeishuDownloadBytes bounds a single file download to protect the sync
+// worker from adversarial or pathological oversized responses.
+const maxFeishuDownloadBytes = 512 * 1024 * 1024 // 512 MB
 
 var feishuRetryBackoff = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 
@@ -650,6 +667,15 @@ func (c *Client) DownloadDriveFile(ctx context.Context, fileToken string) ([]byt
 	return c.downloadRawBytes(ctx, path)
 }
 
+// DownloadMediaFile downloads embedded media (attachments/images referenced by
+// document File/Image blocks) by its media token. Embedded block media live in a
+// different token space than standalone Drive files and must use the /medias/
+// endpoint rather than /files/.
+func (c *Client) DownloadMediaFile(ctx context.Context, fileToken string) ([]byte, error) {
+	path := fmt.Sprintf("/open-apis/drive/v1/medias/%s/download", url.PathEscape(fileToken))
+	return c.downloadRawBytes(ctx, path)
+}
+
 // downloadRawBytes performs an authenticated GET and returns the raw response body.
 func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, error) {
 	token, err := c.getTenantAccessToken(ctx)
@@ -719,7 +745,11 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 			return nil, fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, string(body))
 		}
 
-		data, readErr := io.ReadAll(resp.Body)
+		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxFeishuDownloadBytes+1))
+		if readErr == nil && int64(len(data)) > maxFeishuDownloadBytes {
+			resp.Body.Close()
+			return nil, fmt.Errorf("download exceeds max size (%d bytes): %s", maxFeishuDownloadBytes, path)
+		}
 		resp.Body.Close()
 		if readErr != nil {
 			lastErr = fmt.Errorf("read download body: %w", readErr)

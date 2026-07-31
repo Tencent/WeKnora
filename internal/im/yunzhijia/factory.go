@@ -24,11 +24,13 @@ func NewFactory() im.AdapterFactory {
 		}
 
 		secret := im.GetString(creds, "secret")
+		appID := im.GetString(creds, "app_id")
+		appSecret := im.GetString(creds, "app_secret")
 		allowedHostSuffix := im.GetString(creds, "allowed_webhook_host_suffix")
 
 		timeoutSeconds := positiveIntCredential(creds, "timeout_seconds", 10)
 
-		adapter := NewAdapter(sendMsgURL, secret, timeoutSeconds, allowedHostSuffix)
+		adapter := NewAdapter(sendMsgURL, secret, appID, appSecret, timeoutSeconds, allowedHostSuffix)
 		if err := adapter.validateSendURL(); err != nil {
 			return nil, nil, err
 		}

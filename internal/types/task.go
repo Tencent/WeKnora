@@ -305,6 +305,8 @@ type FAQImportPayload struct {
 	Mode        string            `json:"mode"`
 	DryRun      bool              `json:"dry_run"`     // dry run 模式只验证不导入
 	EnqueuedAt  int64             `json:"enqueued_at"` // 任务入队时间戳，用于区分同一 TaskID 的不同次提交
+	InstanceID  string            `json:"instance_id,omitempty"`
+	Initiator   TaskInitiator     `json:"initiator,omitempty"`
 }
 
 // QuestionGenerationPayload represents the question generation task payload
@@ -358,6 +360,10 @@ type SummaryGenerationPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	KnowledgeID     string `json:"knowledge_id"`
 	Language        string `json:"language,omitempty"`
+	// Refresh marks an independently queued refresh after document metadata or
+	// chunk edits. Refresh tasks are not part of the parse attempt's pending
+	// subtask counter and update existing summary chunks in place.
+	Refresh bool `json:"refresh,omitempty"`
 	// Attempt links this task to the parent parse attempt so the worker
 	// can record a postprocess.summary subspan under the right attempt's
 	// postprocess stage. See QuestionGenerationPayload.Attempt notes.
@@ -367,10 +373,11 @@ type SummaryGenerationPayload struct {
 // KBClonePayload represents the knowledge base clone task payload
 type KBClonePayload struct {
 	TracingContext
-	TenantID uint64 `json:"tenant_id"`
-	TaskID   string `json:"task_id"`
-	SourceID string `json:"source_id"`
-	TargetID string `json:"target_id"`
+	TenantID  uint64        `json:"tenant_id"`
+	TaskID    string        `json:"task_id"`
+	SourceID  string        `json:"source_id"`
+	TargetID  string        `json:"target_id"`
+	Initiator TaskInitiator `json:"initiator,omitempty"`
 }
 
 // IndexDeletePayload represents the index delete task payload
@@ -393,6 +400,7 @@ type KBDeletePayload struct {
 	TracingContext
 	TenantID         uint64                  `json:"tenant_id"`
 	KnowledgeBaseID  string                  `json:"knowledge_base_id"`
+	DataSourceIDs    []string                `json:"data_source_ids,omitempty"`
 	EffectiveEngines []RetrieverEngineParams `json:"effective_engines"`
 	// VectorStoreID is the bound store snapshot taken at enqueue time (before
 	// soft-delete) so the async worker can resolve the right store. nil means
@@ -403,8 +411,9 @@ type KBDeletePayload struct {
 // KnowledgeListDeletePayload represents the batch knowledge delete task payload
 type KnowledgeListDeletePayload struct {
 	TracingContext
-	TenantID     uint64   `json:"tenant_id"`
-	KnowledgeIDs []string `json:"knowledge_ids"`
+	TenantID     uint64        `json:"tenant_id"`
+	KnowledgeIDs []string      `json:"knowledge_ids"`
+	Initiator    TaskInitiator `json:"initiator,omitempty"`
 }
 
 // KnowledgeListReparsePayload represents the batch knowledge reparse task payload
@@ -413,17 +422,19 @@ type KnowledgeListReparsePayload struct {
 	TenantID      uint64                     `json:"tenant_id"`
 	KnowledgeIDs  []string                   `json:"knowledge_ids"`
 	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
+	Initiator     TaskInitiator              `json:"initiator,omitempty"`
 }
 
 // KnowledgeMovePayload represents the knowledge move task payload
 type KnowledgeMovePayload struct {
 	TracingContext
-	TenantID     uint64   `json:"tenant_id"`
-	TaskID       string   `json:"task_id"`
-	KnowledgeIDs []string `json:"knowledge_ids"`
-	SourceKBID   string   `json:"source_kb_id"`
-	TargetKBID   string   `json:"target_kb_id"`
-	Mode         string   `json:"mode"` // "reuse_vectors" or "reparse"
+	TenantID     uint64        `json:"tenant_id"`
+	TaskID       string        `json:"task_id"`
+	KnowledgeIDs []string      `json:"knowledge_ids"`
+	SourceKBID   string        `json:"source_kb_id"`
+	TargetKBID   string        `json:"target_kb_id"`
+	Mode         string        `json:"mode"` // "reuse_vectors" or "reparse"
+	Initiator    TaskInitiator `json:"initiator,omitempty"`
 }
 
 // KnowledgeMoveProgress represents the progress of a knowledge move task

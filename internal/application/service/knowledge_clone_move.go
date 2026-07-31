@@ -317,11 +317,12 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 				PageSize: chunkPageSize,
 			},
 			chunkType,
+			nil,
 			"",
 			"",
 			"",
 			"",
-			"",
+			nil,
 		)
 		chunkPage++
 		if err != nil {
@@ -459,6 +460,8 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
 		return fmt.Errorf("failed to unmarshal KB clone payload: %w", err)
 	}
+	ctx = payload.Initiator.Apply(ctx)
+	ctx = withKBActivityTask(ctx, payload.TaskID, kbActivityTrigger(ctx))
 
 	// Add tenant ID to context
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
@@ -487,6 +490,9 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 			progress.Message = message
 			progress.UpdatedAt = time.Now().Unix()
 			_ = s.saveKBCloneProgress(ctx, progress)
+			recordKBActivity(ctx, s.audit, payload.TenantID, payload.TargetID, types.AuditActionKBCloneFailed,
+				"knowledge_base", payload.TargetID, types.AuditOutcomeFailed,
+				map[string]any{"source_kb_id": payload.SourceID, "task_id": payload.TaskID})
 		}
 	}
 
@@ -511,10 +517,21 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 		handleError(progress, err, "Failed to copy knowledge base configuration")
 		return err
 	}
+	if retryCount == 0 {
+		recordKBActivity(ctx, s.audit, payload.TenantID, payload.TargetID, types.AuditActionKBCloneStarted,
+			"knowledge_base", payload.TargetID, types.AuditOutcomeAccepted,
+			map[string]any{"source_kb_id": payload.SourceID, "task_id": payload.TaskID})
+	}
 
 	// Use different sync strategies based on knowledge base type
 	if srcKB.Type == types.KnowledgeBaseTypeFAQ {
-		return s.cloneFAQKnowledgeBase(ctx, srcKB, dstKB, progress, handleError)
+		if err := s.cloneFAQKnowledgeBase(ctx, srcKB, dstKB, progress, handleError); err != nil {
+			return err
+		}
+		recordKBActivity(ctx, s.audit, payload.TenantID, payload.TargetID, types.AuditActionKBCloneCompleted,
+			"knowledge_base", payload.TargetID, types.AuditOutcomeSuccess,
+			map[string]any{"source_kb_id": payload.SourceID, "task_id": payload.TaskID, "total": progress.Total})
+		return nil
 	}
 
 	// Document type: use Knowledge-level diff based on file_hash
@@ -616,6 +633,9 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 	}
 
 	logger.Infof(ctx, "KB clone task completed: %s", payload.TaskID)
+	recordKBActivity(ctx, s.audit, payload.TenantID, payload.TargetID, types.AuditActionKBCloneCompleted,
+		"knowledge_base", payload.TargetID, types.AuditOutcomeSuccess,
+		map[string]any{"source_kb_id": payload.SourceID, "task_id": payload.TaskID, "total": totalOperations})
 	return nil
 }
 
@@ -656,23 +676,47 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 	}
 	srcKnowledge := srcKnowledgeList[0]
 
-	// Get chunk-level differences based on content_hash
-	chunksToAdd, chunksToDelete, err := s.chunkRepo.FAQChunkDiff(ctx, srcKB.TenantID, srcKB.ID, dstKB.TenantID, dstKB.ID)
+	// Get chunk-level differences based on content_hash.
+	diff, err := s.chunkRepo.FAQChunkDiff(ctx, srcKB.TenantID, srcKB.ID, dstKB.TenantID, dstKB.ID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to calculate FAQ chunk difference: %v", err)
 		handleError(progress, err, "Failed to calculate FAQ chunk difference")
 		return err
 	}
+	chunksToAdd := diff.ChunksToAdd
+	chunksToDelete := diff.ChunksToDelete
 
-	totalOperations := len(chunksToAdd) + len(chunksToDelete)
+	tagIDMapping := map[string]string{}
+	resolveFAQTag := func(srcTagID string) string {
+		if srcTagID == "" {
+			return ""
+		}
+		if id, ok := tagIDMapping[srcTagID]; ok {
+			return id
+		}
+		return s.getOrCreateTagInTarget(ctx, srcKB.TenantID, dstKB.TenantID, dstKB.ID, srcTagID, tagIDMapping)
+	}
+
+	syncPlan, err := s.buildFAQStatusSyncPlan(ctx, srcKB.TenantID, dstKB.TenantID, diff.MatchedPairs, resolveFAQTag)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to build FAQ status sync plan: %v", err)
+		handleError(progress, err, "Failed to build FAQ status sync plan")
+		return err
+	}
+	chunksToUpdate := syncPlan.Pairs
+
+	totalOperations := len(chunksToAdd) + len(chunksToDelete) + len(chunksToUpdate)
 	progress.Total = totalOperations
-	progress.Message = fmt.Sprintf("Found %d FAQ entries to add, %d to delete", len(chunksToAdd), len(chunksToDelete))
+	progress.Message = fmt.Sprintf(
+		"Found %d FAQ entries to add, %d to delete, %d to update status",
+		len(chunksToAdd), len(chunksToDelete), len(chunksToUpdate),
+	)
 	progress.UpdatedAt = time.Now().Unix()
 	_ = s.saveKBCloneProgress(ctx, progress)
 
-	logger.Infof(ctx, "FAQ chunks to add: %d, delete: %d", len(chunksToAdd), len(chunksToDelete))
+	logger.Infof(ctx, "FAQ chunks to add: %d, delete: %d, update status: %d",
+		len(chunksToAdd), len(chunksToDelete), len(chunksToUpdate))
 
-	// If nothing to do, mark as completed
 	if totalOperations == 0 {
 		progress.Status = types.KBCloneStatusCompleted
 		progress.Progress = 100
@@ -741,7 +785,6 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 
 	// Clone FAQ chunks from source to destination
 	batch := 50
-	tagIDMapping := map[string]string{} // srcTagID -> dstTagID
 	for i := 0; i < len(chunksToAdd); i += batch {
 		end := i + batch
 		if end > len(chunksToAdd) {
@@ -763,19 +806,11 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 			// Map TagID to target knowledge base
 			targetTagID := ""
 			if srcChunk.TagID != "" {
-				if mappedTagID, ok := tagIDMapping[srcChunk.TagID]; ok {
-					targetTagID = mappedTagID
-				} else {
-					// Try to find or create the tag in target knowledge base
-					targetTagID = s.getOrCreateTagInTarget(ctx, srcKB.TenantID, dstKB.TenantID, dstKB.ID, srcChunk.TagID, tagIDMapping)
-				}
+				targetTagID = resolveFAQTag(srcChunk.TagID)
 			}
 
 			// Deep-copy extracted images into objects owned by the destination
-			// FAQ knowledge so deleting the source never breaks this clone. A FAQ
-			// chunk is self-contained (its own Content + image_info), so its
-			// ![](url) references can be rewritten immediately using the mapping
-			// just accumulated in imageURLCache.
+			// FAQ knowledge so deleting the source never breaks this clone.
 			newImageInfo, copied, copyErr := cloneChunkImageInfo(
 				ctx, dstSvc, srcChunk.ImageInfo, dstKB.TenantID, dstKnowledge.ID, imageURLCache)
 			if copyErr != nil {
@@ -837,6 +872,27 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 		}
 		progress.Processed = processedCount
 		progress.Message = fmt.Sprintf("Added %d/%d FAQ entries", processedCount-len(chunksToDelete), len(chunksToAdd))
+		progress.UpdatedAt = time.Now().Unix()
+		_ = s.saveKBCloneProgress(ctx, progress)
+	}
+
+	for i := 0; i < len(chunksToUpdate); i += batch {
+		end := i + batch
+		if end > len(chunksToUpdate) {
+			end = len(chunksToUpdate)
+		}
+		if err := s.syncFAQChunkStatusBatch(
+			ctx, dstKB, chunksToUpdate[i:end], syncPlan.SrcByID, syncPlan.DstByID, resolveFAQTag); err != nil {
+			logger.Errorf(ctx, "Failed to sync FAQ status fields: %v", err)
+			handleError(progress, err, "Failed to sync FAQ status fields")
+			return err
+		}
+		processedCount += end - i
+		if totalOperations > 0 {
+			progress.Progress = processedCount * 100 / totalOperations
+		}
+		progress.Processed = processedCount
+		progress.Message = fmt.Sprintf("Updated %d/%d FAQ status fields", processedCount-len(chunksToDelete)-len(chunksToAdd), len(chunksToUpdate))
 		progress.UpdatedAt = time.Now().Unix()
 		_ = s.saveKBCloneProgress(ctx, progress)
 	}
@@ -975,6 +1031,8 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
 		return fmt.Errorf("failed to unmarshal knowledge move payload: %w", err)
 	}
+	ctx = payload.Initiator.Apply(ctx)
+	ctx = withKBActivityTask(ctx, payload.TaskID, kbActivityTrigger(ctx))
 
 	// Add tenant ID to context
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
@@ -1003,6 +1061,20 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 			progress.Message = message
 			progress.UpdatedAt = time.Now().Unix()
 			_ = s.saveKnowledgeMoveProgress(ctx, progress)
+			for _, kbID := range []string{payload.SourceKBID, payload.TargetKBID} {
+				recordKBActivity(ctx, s.audit, payload.TenantID, kbID, types.AuditActionKnowledgeMoveFailed,
+					"knowledge_move", payload.TaskID, types.AuditOutcomeFailed,
+					map[string]any{"source_kb_id": payload.SourceKBID, "target_kb_id": payload.TargetKBID,
+						"task_id": payload.TaskID, "count": len(payload.KnowledgeIDs), "mode": payload.Mode})
+			}
+		}
+	}
+	if retryCount == 0 {
+		for _, kbID := range []string{payload.SourceKBID, payload.TargetKBID} {
+			recordKBActivity(ctx, s.audit, payload.TenantID, kbID, types.AuditActionKnowledgeMoveStarted,
+				"knowledge_move", payload.TaskID, types.AuditOutcomeAccepted,
+				map[string]any{"source_kb_id": payload.SourceKBID, "target_kb_id": payload.TargetKBID,
+					"task_id": payload.TaskID, "count": len(payload.KnowledgeIDs), "mode": payload.Mode})
 		}
 	}
 
@@ -1072,6 +1144,20 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 	_ = s.saveKnowledgeMoveProgress(ctx, progress)
 
 	logger.Infof(ctx, "ProcessKnowledgeMove: task=%s completed, processed=%d, failed=%d", payload.TaskID, progress.Processed, progress.Failed)
+	outcome := types.AuditOutcomeSuccess
+	action := types.AuditActionKnowledgeMoveCompleted
+	if progress.Failed == progress.Total && progress.Total > 0 {
+		outcome = types.AuditOutcomeFailed
+		action = types.AuditActionKnowledgeMoveFailed
+	} else if progress.Failed > 0 {
+		outcome = types.AuditOutcomePartial
+	}
+	for _, kbID := range []string{payload.SourceKBID, payload.TargetKBID} {
+		recordKBActivity(ctx, s.audit, payload.TenantID, kbID, action,
+			"knowledge_move", payload.TaskID, outcome,
+			map[string]any{"source_kb_id": payload.SourceKBID, "target_kb_id": payload.TargetKBID,
+				"task_id": payload.TaskID, "count": progress.Total, "failed": progress.Failed, "mode": payload.Mode})
+	}
 	return nil
 }
 
@@ -1113,9 +1199,28 @@ func (s *knowledgeService) moveOneKnowledge(
 		return fmt.Errorf("failed to mark knowledge as processing: %w", err)
 	}
 
+	// From the source KB's point of view the document is leaving for good, so it
+	// needs the same wiki reconciliation a delete performs: wiki_pages carry
+	// source_refs back to this knowledge and are what the folder tree and the
+	// wiki graph are built from, and nothing below touches them. This must run
+	// while KnowledgeBaseID still points at the source and before any chunk is
+	// removed, since the cleanup matches pages by chunk_refs.
+	if sourceKB.IsWikiEnabled() {
+		s.cleanupWikiOnKnowledgeDelete(ctx, knowledge)
+	}
+
 	switch mode {
 	case "reuse_vectors":
-		return s.moveKnowledgeReuseVectors(ctx, knowledge, sourceKB, targetKB)
+		if err := s.moveKnowledgeReuseVectors(ctx, knowledge, sourceKB, targetKB); err != nil {
+			return err
+		}
+		// reparse re-ingests through KnowledgePostProcess once the new chunks
+		// land; reuse_vectors keeps the existing chunks and never re-enters that
+		// pipeline, so the target KB has to be told about the document here.
+		if targetKB.IsWikiEnabled() {
+			EnqueueWikiIngest(ctx, s.task, s.taskPendingRepo, tenantID, targetKB.ID, knowledge.ID)
+		}
+		return nil
 	case "reparse":
 		return s.moveKnowledgeReparse(ctx, knowledge, sourceKB, targetKB)
 	default:

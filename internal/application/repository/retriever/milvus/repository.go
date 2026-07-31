@@ -2,6 +2,7 @@ package milvus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -446,23 +447,42 @@ func (m *milvusRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 		}
 	}
 
-	// Update in all matching collections
-	for _, collectionName := range collections {
-		// Only process collections that start with our base name
-		if len(collectionName) <= len(m.collectionBaseName) ||
-			collectionName[:len(m.collectionBaseName)] != m.collectionBaseName {
-			continue
-		}
-		if err := m.updateChunkEnabledStatusInCollection(ctx, collectionName, enabledChunkIDs, true); err != nil {
-			log.Warnf("[Milvus] Failed to update enabled chunks in %s: %v", collectionName, err)
-		}
-		if err := m.updateChunkEnabledStatusInCollection(ctx, collectionName, disabledChunkIDs, false); err != nil {
-			log.Warnf("[Milvus] Failed to update disabled chunks in %s: %v", collectionName, err)
-		}
+	// A disabled row in the primary DB must never remain searchable because an
+	// index update failed silently.
+	if err := updateChunkEnabledStatusInCollections(
+		ctx, collections, m.collectionBaseName, enabledChunkIDs, disabledChunkIDs,
+		m.updateChunkEnabledStatusInCollection,
+	); err != nil {
+		log.Warnf("[Milvus] Failed to update chunk enabled status: %v", err)
+		return err
 	}
 
 	log.Infof("[Milvus] Batch update chunk enabled status completed")
 	return nil
+}
+
+func updateChunkEnabledStatusInCollections(
+	ctx context.Context,
+	collections []string,
+	collectionBaseName string,
+	enabledChunkIDs []string,
+	disabledChunkIDs []string,
+	update func(context.Context, string, []string, bool) error,
+) error {
+	var updateErrs []error
+	for _, collectionName := range collections {
+		if len(collectionName) <= len(collectionBaseName) ||
+			collectionName[:len(collectionBaseName)] != collectionBaseName {
+			continue
+		}
+		if err := update(ctx, collectionName, enabledChunkIDs, true); err != nil {
+			updateErrs = append(updateErrs, fmt.Errorf("update enabled chunks in %s: %w", collectionName, err))
+		}
+		if err := update(ctx, collectionName, disabledChunkIDs, false); err != nil {
+			updateErrs = append(updateErrs, fmt.Errorf("update disabled chunks in %s: %w", collectionName, err))
+		}
+	}
+	return errors.Join(updateErrs...)
 }
 
 func (m *milvusRepository) updateChunkEnabledStatusInCollection(

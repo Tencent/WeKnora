@@ -92,6 +92,12 @@ type KnowledgeService interface {
 	GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error)
 	// UpdateKnowledge updates knowledge information.
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
+	// RegenerateKnowledgeSummary refreshes the document description and summary retrieval chunk.
+	RegenerateKnowledgeSummary(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
+	// RequestKnowledgeSummaryRefresh enqueues an async summary refresh.
+	RequestKnowledgeSummaryRefresh(ctx context.Context, knowledgeID string) error
+	// RegenerateChunkQuestions rebuilds the auxiliary questions for one current chunk revision.
+	RegenerateChunkQuestions(ctx context.Context, chunkID string) ([]types.GeneratedQuestion, error)
 	// UpdateManualKnowledge updates manual Markdown knowledge content.
 	UpdateManualKnowledge(
 		ctx context.Context,
@@ -119,14 +125,15 @@ type KnowledgeService interface {
 	// UpdateImageInfo updates image information for a knowledge chunk.
 	UpdateImageInfo(ctx context.Context, knowledgeID string, chunkID string, imageInfo string) error
 	// ListFAQEntries lists FAQ entries under a FAQ knowledge base.
-	// When tagSeqID is non-zero, results are filtered by tag seq_id on FAQ chunks.
+	// When tagUUIDs is non-empty, results are filtered by tag UUID on FAQ chunks (OR semantics).
 	// searchField: specifies which field to search in ("standard_question", "similar_questions", "answers", "" for all)
 	// sortOrder: "asc" for time ascending (updated_at ASC), default is time descending (updated_at DESC)
 	ListFAQEntries(
 		ctx context.Context,
 		kbID string,
 		page *types.Pagination,
-		tagSeqID int64,
+		tagUUIDs []string,
+		legacyTagSeqID int64,
 		keyword string,
 		searchField string,
 		sortOrder string,
@@ -152,6 +159,8 @@ type KnowledgeService interface {
 	SearchFAQEntries(ctx context.Context, kbID string, req *types.FAQSearchRequest) ([]*types.FAQEntry, error)
 	// ExportFAQEntries exports all FAQ entries for a knowledge base as CSV data.
 	ExportFAQEntries(ctx context.Context, kbID string) ([]byte, error)
+	// ExportFAQEntriesJSON exports all FAQ entries as a JSON array compatible with FAQEntryPayload.
+	ExportFAQEntriesJSON(ctx context.Context, kbID string) ([]byte, error)
 	// UpdateKnowledgeTagBatch updates tag for document knowledge items in batch.
 	// authorizedKBID restricts all updates to knowledge items belonging to this KB;
 	// pass empty string to skip (caller must ensure authorization by other means).
@@ -266,6 +275,9 @@ type KnowledgeRepository interface {
 	// FindByMetadataKey finds a knowledge item by a key-value pair in the metadata JSON column.
 	// Used by data source sync to locate existing items by external_id.
 	FindByMetadataKey(ctx context.Context, tenantID uint64, kbID string, key string, value string) (*types.Knowledge, error)
+	// FindByMetadataKeyPrefix finds knowledge items whose metadata[key] starts
+	// with the given prefix. Used to sweep an external node's attachment sub-items.
+	FindByMetadataKeyPrefix(ctx context.Context, tenantID uint64, kbID string, key string, prefix string) ([]*types.Knowledge, error)
 	// SearchKnowledgeInScopes searches knowledge items by keyword within the given (tenant_id, kb_id) scopes (own + shared).
 	SearchKnowledgeInScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error)
 	// ListIDsByTagIDs returns all knowledge IDs that have any of the specified tag IDs (OR semantics).
