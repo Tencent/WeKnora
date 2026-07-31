@@ -464,6 +464,10 @@ const visible = computed(() => {
 
 // 关闭弹窗
 const handleClose = () => {
+  // Blur before unmount so TDesign textarea autosize won't run on a detached node.
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+  }
   uiStore.closeSettings()
   // 如果当前路由是设置页，返回上一页
   if (route.path === '/platform/settings') {
@@ -548,6 +552,12 @@ const handleSettingsNav = (e: CustomEvent) => {
 onMounted(() => {
   window.addEventListener('keydown', handleEscape)
   window.addEventListener('settings-nav', handleSettingsNav as EventListener)
+})
+
+watch(currentSection, () => {
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+  }
 })
 
 onUnmounted(() => {

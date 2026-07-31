@@ -83,7 +83,7 @@ export function buildBucketDefinitions(
   },
   options: { includeAdminChannelBuckets?: boolean } = {},
 ): BucketDefinition[] {
-  const includeChannels = options.includeAdminChannelBuckets ?? options.includeApiBucket ?? false
+  const includeChannels = options.includeAdminChannelBuckets ?? false
   const imDefs = includeChannels
     ? imPlatforms.map((platform) => ({
         key: `im:${platform}`,

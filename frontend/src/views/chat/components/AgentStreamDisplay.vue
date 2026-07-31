@@ -520,6 +520,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
 import { hydrateProtectedFileImages, clearProtectedFileFailureCache, sanitizeMarkdownHTML } from '@/utils/security';
+import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
 import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
@@ -731,7 +732,7 @@ const wikiDrawerContent = computed(() => {
 watch(wikiDrawerContent, async () => {
   await nextTick();
   if (wikiDrawerBodyRef.value) {
-    await hydrateProtectedFileImages(wikiDrawerBodyRef.value);
+    await hydrateProtectedFileImages(wikiDrawerBodyRef.value, protectedFileAccess.value);
   }
 });
 
@@ -863,6 +864,15 @@ function onUserFeedbackReasonsChange(reasons: string[]) {
 function onUserFeedbackCommentChange(comment: string) {
   userFeedback.comment = comment || '';
 }
+
+// Agent answers embed exported charts and knowledge-base images as
+// `resource://` handles. An embed visitor has no Bearer token, so they must be
+// fetched through the channel-scoped proxy rather than the tenant one.
+const protectedFileAccess = computed<ProtectedFileAccessContext | undefined>(() =>
+  props.embeddedMode && props.embedChannelId && props.embedToken
+    ? { mode: 'embed', channelId: props.embedChannelId, token: props.embedToken }
+    : undefined,
+);
 
 const {
   float: citationFloat,
@@ -1271,7 +1281,7 @@ watch(eventStream, (stream) => {
   activeThinkingVersion.value++;
 
   nextTick(async () => {
-    await hydrateProtectedFileImages(rootElement.value);
+    await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
     await enhanceMarkdownContainer(rootElement.value);
     // Auto-scroll thinking detail content to bottom during streaming
     if (newActiveIds.size > 0 && rootElement.value) {
@@ -1448,7 +1458,7 @@ watch(answerFullyRendered, (ready) => {
   // suppressed by the missing-source cache.
   clearProtectedFileFailureCache();
   nextTick(async () => {
-    await hydrateProtectedFileImages(rootElement.value);
+    await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
   });
 }, { immediate: true });
 
@@ -1918,7 +1928,7 @@ const toggleIntermediateSteps = () => {
   showIntermediateSteps.value = !showIntermediateSteps.value;
   nextTick(async () => {
     if (rootElement.value) {
-      await hydrateProtectedFileImages(rootElement.value);
+      await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
     }
   });
 };
@@ -2238,7 +2248,7 @@ onMounted(() => {
     (root as any).__citationKeydown__ = keydownListener;
     root.addEventListener('keydown', keydownListener, true);
     rebindCitations();
-    await hydrateProtectedFileImages(rootElement.value);
+    await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
   });
 });
 
@@ -2262,7 +2272,7 @@ onUpdated(() => {
     // and idempotent: blob results are cached per URL, in-flight fetches are
     // de-duped, and failures back off for a cooldown — so a not-yet-ready file
     // simply retries later (and the answerFullyRendered pass is the backstop).
-    await hydrateProtectedFileImages(rootElement.value);
+    await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
   });
 });
 

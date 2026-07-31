@@ -812,7 +812,10 @@ const runMarkdownPostRenderPipeline = async () => {
   if (!renderRoot) {
     return;
   }
-  await hydrateProtectedFileImages(renderRoot, undefined, props.kbId);
+  await hydrateProtectedFileImages(
+    renderRoot,
+    props.kbId ? { mode: 'knowledgeBase', kbId: props.kbId } : undefined,
+  );
   const images = renderRoot?.querySelectorAll?.('img.markdown-image') as NodeListOf<HTMLImageElement> | undefined;
   if (images) {
     images.forEach(async item => {

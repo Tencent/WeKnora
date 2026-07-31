@@ -180,6 +180,8 @@ import {
   type AuditOutcome,
 } from '@/api/system'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import { AUDIT_ACTION_I18N_ROOTS } from '@/i18n/auditActionRegistry'
+import { auditActionLabel } from '@/i18n/auditActionLabel'
 import { useAuthStore } from '@/stores/auth'
 
 interface AuditDetailField {
@@ -274,11 +276,7 @@ function auditOutcomeTheme(o: AuditOutcome): 'success' | 'danger' | 'default' {
 }
 
 function formatAuditAction(action: AuditAction): string {
-  const bag = tm('system.globalSettings.audit.action') as unknown
-  if (bag !== null && typeof bag === 'object' && typeof (bag as Record<string, string>)[action] === 'string') {
-    return (bag as Record<string, string>)[action]
-  }
-  return action
+  return auditActionLabel({ tm }, AUDIT_ACTION_I18N_ROOTS.systemGlobal, action)
 }
 
 function auditActorLabel(userId: string): string {

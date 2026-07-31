@@ -1641,6 +1641,291 @@ export default {
       loadFailed: "加载配置失败: {message}",
     },
   },
+  integrations: {
+    title: '发布集成',
+    selectAgentPlaceholder: '请选择智能体',
+    selectAgentHint: '请先选择一个智能体',
+    boundAgent: '绑定智能体',
+    filterByAgent: '按智能体筛选',
+    filterByAgentWithName: '按智能体筛选：{name}',
+    filterAllAgents: '全部智能体',
+    claw: {
+      title: 'WeKnora Skill',
+      subtitle: '通过 WeKnora REST API 导入文档并执行混合检索（向量 + 关键词）。适用于上传文件/URL/Markdown 到知识库、跨库检索与浏览知识内容。',
+      capabilitiesTitle: 'Skill 能力',
+      stepsTitle: '配置步骤',
+      openApiSettings: '打开 API 信息',
+      copy: '复制',
+      copyEnvSuccess: '已复制环境变量示例',
+      copyCmdSuccess: '已复制安装命令',
+      ecosystemNote: 'Skill 托管于 ClawHub（{\'@\'}lyingbug/weknora），完整 API 说明与版本历史请参见 ClawHub 页面。',
+      installCta: '前往 ClawHub',
+      installCtaHint: '安装 WeKnora Skill · 将在新标签页打开',
+      hubMeta: 'ClawHub · {\'@\'}lyingbug/weknora · MIT-0',
+      steps: {
+        verify: {
+          title: '验证连接',
+          desc: '安装后让 Agent 列出知识库或执行一次检索，确认 API 凭证与网络可达。'
+        },
+        install: {
+          title: '安装 Skill',
+          desc: '在已安装 OpenClaw CLI 的环境中执行下方命令，或前往 ClawHub 页面按指引安装。'
+        },
+        env: {
+          title: '配置环境变量',
+          desc: '在终端或 ~/.zshrc、~/.bashrc 中设置 WEKNORA_BASE_URL 与 WEKNORA_API_KEY。下方示例已填入当前 API 地址，请将 API Key 替换为实际值。'
+        },
+        api: {
+          title: '获取 API 凭证',
+          desc: '在「设置 → API 信息」中复制 API Key 与 API 地址。'
+        }
+      },
+      capabilities: {
+        browse: {
+          title: '浏览知识库',
+          desc: '列出知识库与条目、查看详情，管理已导入的知识内容。'
+        },
+        search: {
+          title: '混合检索',
+          desc: '单库 hybrid-search 与跨库 knowledge-search，结合向量与关键词召回。'
+        },
+        manual: {
+          title: '写入 Markdown',
+          desc: '以 Markdown 形式创建或编辑知识条目，适合会议记录与结构化笔记。'
+        },
+        url: {
+          title: '导入网页',
+          desc: '通过 URL 抓取网页内容并写入知识库，支持解析状态轮询。'
+        },
+        upload: {
+          title: '上传文件',
+          desc: '将 PDF、Word、Excel 等文档上传至知识库，自动解析与向量化。'
+        }
+      }
+    },
+    chrome: {
+      title: '知识管理助手',
+      subtitle: '配合 WeKnora 自建服务使用：在任意网页侧边栏提问、剪藏内容、Markdown 速记，将浏览中的知识沉淀到你的知识库。',
+      capabilitiesTitle: '核心能力',
+      stepsTitle: '配置步骤',
+      openApiSettings: '打开 API 信息',
+      copy: '复制',
+      copySuccess: '已复制 API 地址',
+      installCta: '前往 Chrome 应用商店',
+      installCtaHint: '官方扩展 · 将在新标签页打开',
+      storeMeta: 'Chrome 应用商店 · v1.0.0',
+      steps: {
+        connect: {
+          title: '在插件中完成连接',
+          desc: '打开插件设置，选择「企业/开发者」模式，填入服务 API 地址与 API Key。下方为当前服务地址。'
+        },
+        install: {
+          title: '安装 Chrome 插件',
+          desc: '前往 Chrome 应用商店安装「知识管理助手」。'
+        },
+        port: {
+          title: '桌面版配置固定端口（推荐）',
+          desc: '使用 WeKnora 桌面版时，在 API 信息中设置固定端口（如 37841），避免每次启动后地址变化导致插件断连。'
+        },
+        api: {
+          title: '获取 API 凭证',
+          desc: '在「设置 → API 信息」中复制 API Key 与 API 地址。'
+        }
+      },
+      scenarios: {
+        research: '日常资料调研',
+        learning: '学习笔记整理',
+        tech: '技术资料收集',
+        work: '工作知识沉淀'
+      },
+      capabilities: {
+        shortcuts: {
+          title: '高效快捷键',
+          desc: '可自定义快捷键快速提问、打开侧边栏等操作，提升日常效率。'
+        },
+        notes: {
+          title: 'Markdown 速记',
+          desc: '内置 Markdown 编辑器，随时记录灵感与笔记，一键保存到知识库。'
+        },
+        clip: {
+          title: '网页内容一键采集',
+          desc: '保存页面 URL、AI 智能剪藏正文，或手动框选区域，精准写入指定知识库。'
+        },
+        qa: {
+          title: '知识库智能问答',
+          desc: '侧边栏对话面板，支持多知识库切换与快速/深度/精确三种回答模式，边浏览边提问不打断工作流。'
+        }
+      }
+    },
+    agentEditor: {
+      label: '发布渠道',
+      desc: '将智能体发布到 IM 平台或网站，在集成中心统一管理'
+    },
+    embedOverview: {
+      title: '网页嵌入渠道'
+    },
+    imOverview: {
+      title: '已接入的 IM'
+    },
+    api: {
+      title: 'API 集成',
+      subtitle: '通过 REST API 接入服务，并配置请求如何携带终端用户身份。',
+      loading: '正在加载 API 集成设置...',
+      retry: '重试',
+      copy: '复制',
+      copySuccess: '已复制',
+      baseUrl: 'API 地址',
+      baseUrlDesc: '与 REST API 路径拼接使用。',
+      apiKeys: 'API Keys',
+      apiKeysDesc: '为不同集成创建独立 Key，并限制操作权限与可访问知识库范围。',
+      createApiKey: '创建 API Key',
+      createApiKeyDialogDesc: '选择该 API Key 可用的能力和知识库范围。',
+      noApiKeys: '暂无 API Key',
+      apiKeyName: '名称',
+      apiKeyValue: 'API Key',
+      apiKeyNamePlaceholder: '例如：MCP 只读访问',
+      apiKeyNameRequired: '请输入 API Key 名称',
+      apiKeyAccessMode: '授权方式',
+      apiKeyScopedAccess: '能力授权',
+      apiKeyAccessType: '访问类型',
+      apiKeyAccessTypeHint: '「知识库」按下方权限级别在知识库范围内操作；「空间完全访问」额外开放模型、数据源等全部空间级接口。',
+      apiKeyCapabilities: '可用能力',
+      apiKeyCapabilityGroupKnowledge: '知识库数据',
+      apiKeyCapabilityGroupAutomation: '智能体与集成',
+      apiKeyCapabilityGroupCollaboration: '成员与空间',
+      apiKeyCapabilityGroupTenant: '空间配置',
+      apiKeyCapabilitySelectGroup: '全选',
+      apiKeyCapabilityClearGroup: '清空',
+      capabilityTenantFull: '空间完全访问',
+      capabilityTenantFullHint: '允许调用模型、向量库、数据源、渠道等全部空间级接口；知识库范围不再生效。',
+      capabilityRetrieve: '检索知识库',
+      capabilityRetrieveHint: '允许读取、查询和检索所选知识库范围内的数据；不创建会话，也不修改内容。',
+      capabilityChat: '对话能力',
+      capabilityChatHint: '允许该密钥发起对话并管理自己的会话；不修改知识库内容。',
+      capabilityReadAgents: '读取智能体',
+      capabilityReadAgentsHint: '允许列出智能体、查看智能体详情、读取智能体预设和建议问题；不允许发起对话或修改智能体。',
+      capabilityIngest: '写入知识库内容',
+      capabilityIngestHint: '允许向授权范围内的知识库写入内容（上传文档、编辑分块/FAQ/标签/wiki）；不能新建知识库、不能新建智能体、不能清空知识库，且仅限所选知识库范围。',
+      capabilityManageKbs: '管理知识库',
+      capabilityManageKbsHint: '允许管理知识库全生命周期：新建、复制、修改、删除知识库并调整初始化/配置信息。针对已有知识库的操作（复制/更新/删除）仍受所选知识库范围限制；新建不受限（新知识库归本空间）。',
+      capabilityManageAgents: '管理智能体',
+      capabilityManageAgentsHint: '允许创建、修改、删除、复制智能体。智能体配置可能含模型/MCP 等敏感绑定，默认关闭，按需开启。',
+      capabilityMessageHistory: '消息历史',
+      capabilityMessageHistoryHint: '允许检索空间聊天历史并读取聊天历史统计；不授予空间配置权限。',
+      capabilityManageModels: '管理模型',
+      capabilityManageModelsHint: '允许管理模型配置、模型凭据、模型连通性测试和 WeKnoraCloud 凭据。',
+      capabilityManageMcpServices: '管理 MCP 服务',
+      capabilityManageMcpServicesHint: '允许管理 MCP 服务、凭据、工具审批策略和该主体的 OAuth 授权状态。',
+      capabilityManageDatasources: '管理数据源',
+      capabilityManageDatasourcesHint: '允许管理数据源连接器、凭据、资源选择和同步任务；绑定知识库时仍受知识库范围限制。',
+      capabilityManageChannels: '管理渠道',
+      capabilityManageChannelsHint: '允许管理智能体的嵌入渠道、IM 渠道和微信扫码绑定流程。',
+      capabilityManageVectorStores: '管理检索基础设施',
+      capabilityManageVectorStoresHint: '允许管理向量库配置，以及解析器、文档读取器和存储引擎连通性检查。',
+      capabilityManageStorageBackends: '管理存储后端',
+      capabilityManageStorageBackendsHint: '允许管理对象/文件存储后端实例（如 S3 兼容或本地文件存储）的增删改查、连通性测试及空间默认存储设置。',
+      capabilityManageWebSearch: '管理联网搜索',
+      capabilityManageWebSearchHint: '允许管理联网搜索供应商配置、凭据和连接测试。',
+      capabilityRunEvaluations: '运行评测',
+      capabilityRunEvaluationsHint: '允许运行评测任务并读取评测结果。',
+      capabilityManageMembers: '管理成员',
+      capabilityManageMembersHint: '允许查看和管理空间成员、角色、邀请和邀请链接；不包含 API Key 管理、空间删除或所有权转移。',
+      capabilityManageSpaces: '管理空间',
+      capabilityManageSpacesHint: '允许管理组织空间、加入流程、空间成员、邀请和共享空间可见性；不授予知识库或智能体分享管理权限。',
+      capabilityManageTenantSettings: '管理空间设置',
+      capabilityManageTenantSettingsHint: '允许读取和更新空间级集成设置，例如 API 终端用户身份模式、请求头配置、空间 KV 配置等；不包含 API Key 管理、成员管理、空间删除或所有权转移。',
+      apiKeyKnowledgeScope: '知识库范围',
+      apiKeyKnowledgeScopePlaceholder: '留空表示允许访问全部知识库',
+      allKnowledgeBases: '全部知识库',
+      createdAt: '创建时间',
+      actions: '操作',
+      deleteApiKey: '删除',
+      deleteApiKeyConfirm: '删除后该 API Key 会立即失效，已部署的集成将无法继续使用它。',
+      deleteApiKeySuccess: 'API Key 已删除',
+      deleteApiKeyFailed: '删除 API Key 失败',
+      createApiKeyFailed: '创建 API Key 失败',
+      loadApiKeysFailed: '加载 API Key 列表失败',
+      apiKeyCreated: 'API Key 已创建',
+      principalMode: '用户身份模式',
+      principalModeDesc: '配置 API 请求如何识别终端用户。该身份会同时用于区分不同用户的对话 Session 与 MCP 工具授权。',
+      principalScope: '终端用户身份负责隔离 Session 与 MCP OAuth；API Key 自身的操作权限和知识库范围由上方 API Keys 管理。',
+      modeTenant: '仅空间',
+      modeDirect: '直接传用户 ID',
+      modeSigned: '签名 Token',
+      directWarning: '直接传用户 ID 会信任调用方请求头，仅适用于可信服务端到服务端调用。',
+      directWarningDetail: '任何持有 API Key 的调用方都可以通过修改用户 ID 请求头冒充其他外部用户，从而共用或劫持其 MCP OAuth 授权。请勿用于浏览器或不可信客户端；面向终端用户请使用「签名 Token」。',
+      signedRecommended: '推荐给面向用户的应用：由你的业务后端为外部用户签发短期 HS256 JWT。',
+      signedFlowDetail: 'HMAC 密钥仅保存在 WeKnora 与你的可信后端，切勿放入请求或下发给浏览器。请求头里传的是用该密钥签出的 JWT 字符串（每次签发或过期后会变），不是密钥本身。JWT 须包含 sub（外部用户 ID）、tenant_id、aud=weknora、exp（有效期不超过 24 小时）。',
+      directHeader: '用户 ID 请求头',
+      requireDirectHeader: '必须携带用户 ID',
+      requireDirectHeaderDesc: '开启后，缺少用户 ID 请求头会请求将被拒绝；关闭则按整个空间统一处理，不区分具体终端用户。',
+      tokenHeader: 'Token 请求头',
+      tokenHeaderDesc: '客户端在该固定请求头中携带后端签发的 JWT。',
+      hmacSecret: 'HMAC 密钥',
+      hmacSecretDesc: '与 WeKnora 保存的同一份密钥；仅用于后端签发 JWT，不要作为请求头发送。',
+      secretConfigured: '已配置密钥（不可回看）；输入新值可轮换',
+      secretSavedCopyHint: '密钥已保存，请立即复制到后端配置。离开本页后将无法再次查看。',
+      generateSecret: '生成密钥',
+      hmacSecretResetConfirmTitle: '确认重置 HMAC 密钥？',
+      hmacSecretResetConfirmBody: '重置后，旧的 HMAC 密钥会立即失效，所有使用旧密钥签发 JWT 的后端服务必须更换为新密钥才可继续通过签名 Token 调用。此操作不可撤销。',
+      hmacSecretResetConfirmOk: '确认重置',
+      hmacSecretResetConfirmCancel: '取消',
+      tokenSignExample: '后端签发 JWT 示例（Go）',
+      signedRequestStep0: '# 0. 在你的后端签发 JWT（HS256，aud=weknora，sub=用户 ID，tenant_id={tenantId}，exp 不超过 24 小时）',
+      signedRequestStep0Hint: '#    将 JWT 放入 {headerName} 请求头，不要传 HMAC 密钥',
+      requestExampleCreateSession: '# 1. 创建会话',
+      requestExampleAgentChat: '# 2. Agent 对话（SSE；将 <session_id> 替换为第 1 步返回的 id）',
+      requestExampleJwtPlaceholder: '<后端签发的 JWT>',
+      requestExample: '请求示例',
+      playgroundTitle: 'API Playground',
+      playgroundDesc: '用当前 API Key 和身份模式发起真实请求，验证会话创建、智能体对话和 SSE 返回。',
+      playgroundOpen: '打开 Playground',
+      playgroundDrawerDesc: '按真实 API 集成方式调试 Session、Agent Chat 和 SSE 返回',
+      playgroundSectionRequest: '请求配置',
+      playgroundSectionPreview: '请求预览',
+      playgroundSectionResult: '运行结果',
+      playgroundAgent: '测试智能体',
+      playgroundAgentPlaceholder: '选择要测试的智能体',
+      playgroundBuiltin: '内置',
+      playgroundAgentsLoadFailed: '智能体列表加载失败',
+      playgroundExternalUser: '外部用户 ID',
+      playgroundExternalUserPlaceholder: 'user_123',
+      playgroundTenantModeHint: '仅空间模式不会发送外部用户身份，所有 API 会话归属同一个空间级主体。',
+      playgroundDirectModeHint: '将通过 {headerName} 请求头发送此用户 ID。',
+      playgroundSignedModeHint: '签名模式由 JWT 的 sub 代表外部用户；Playground 会用这里的用户 ID 自动签出短期测试 JWT。',
+      playgroundQuestion: '测试问题',
+      playgroundQuestionPlaceholder: '输入要发送给智能体的问题',
+      playgroundRequestPreview: '请求预览（已遮蔽密钥）',
+      playgroundRun: '运行测试',
+      playgroundStop: '停止',
+      playgroundNeedApiKey: '当前空间没有 API Key。',
+      playgroundNeedAgent: '请选择测试智能体。',
+      playgroundNeedQuestion: '请输入测试问题。',
+      playgroundNeedExternalUser: '请输入外部用户 ID。',
+      playgroundMintTokenFailed: '生成短期测试 JWT 失败。',
+      playgroundMissingSessionId: '创建会话成功，但响应中没有 session id。',
+      playgroundNoStream: '对话接口没有返回可读取的 SSE 流。',
+      playgroundGeneratedToken: '本次生成的测试 Token',
+      playgroundStepSession: '步骤 1：创建 Session',
+      playgroundStepChat: '步骤 2：Agent Chat SSE',
+      playgroundFinalAnswer: '提取出的回答',
+      playgroundEmptyResult: '运行后将在这里显示 Session 响应、SSE 原始输出和提取出的回答。',
+      playgroundSuccess: '测试完成（{ms}ms）',
+      playgroundStopped: '测试已停止',
+      playgroundFailed: 'API Playground 测试失败',
+      loadFailed: '加载 API 集成设置失败',
+      saveFailed: '保存 API 集成设置失败',
+      saveSuccess: 'API 集成设置已保存',
+      autoSaveNeedSecret: '签名 Token 模式需要填写 HMAC 密钥后才能自动保存。'
+    },
+    tabs: {
+      im: 'IM 集成',
+      embed: '网页嵌入',
+      api: 'API 集成',
+      chrome: 'Chrome 插件',
+      claw: 'Claw Skill'
+    }
+  },
   retrievalSettings: {
     title: "搜索设置",
     description: "配置知识库搜索和消息搜索的全局检索参数",

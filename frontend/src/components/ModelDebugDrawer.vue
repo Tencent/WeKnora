@@ -192,7 +192,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
@@ -455,6 +455,12 @@ const copyResult = async () => {
     MessagePlugin.error(t('common.copyFailed'))
   }
 }
+
+onBeforeUnmount(() => {
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+  }
+})
 </script>
 
 <style scoped lang="less">
