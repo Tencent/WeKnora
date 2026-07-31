@@ -867,6 +867,15 @@ export default {
     editor: {
       createTitle: 'Create Agent',
       editTitle: 'Edit Agent',
+      buttons: {
+        create: 'Create Agent',
+        saveAndClose: 'Save and Close',
+      },
+      postCreateHint: {
+        title: 'Created successfully',
+        footer: 'Keep adjusting settings, configure sharing and publishing, then click "Save and Close".',
+        integrationDesc: 'Go to Integrations to configure IM, web embed, and other publishing channels',
+      },
       basicInfo: 'Basic Info',
       basicInfoDesc: 'Configure agent name, description, and run mode',
       promptsConfig: 'Prompts',
@@ -1994,6 +2003,33 @@ export default {
         'faq.import_started': 'FAQ import started',
         'faq.import_completed': 'FAQ import completed',
         'faq.import_failed': 'FAQ import failed'
+      },
+      outcomes: {
+        accepted: 'Accepted',
+        success: 'Success',
+        failed: 'Failed',
+        partial: 'Partial',
+        canceled: 'Canceled',
+        denied: 'Denied'
+      },
+      detailValues: {
+        user: 'User initiated',
+        manual: 'Manual',
+        schedule: 'Scheduled',
+        system: 'System',
+        pending: 'Pending',
+        completed: 'Completed',
+        partial: 'Partially completed',
+        canceled: 'Canceled',
+        failed: 'Failed',
+        enqueue: 'Task submission',
+        reuse_vectors: 'Reuse vectors',
+        reparse: 'Reparse',
+        viewer: 'Read-only',
+        editor: 'Can edit',
+        admin: 'Manage',
+        append: 'Append',
+        replace: 'Replace'
       }
     },
     titleCreate: 'Create Knowledge Base',
@@ -2229,7 +2265,13 @@ export default {
     },
     buttons: {
       create: 'Create Knowledge Base',
-      save: 'Save Configuration'
+      save: 'Save Configuration',
+      saveAndClose: 'Save and Close',
+    },
+    postCreateHint: {
+      title: 'Created successfully',
+      footer: 'Keep adjusting settings, configure sharing and data sources, then click "Save and Close".',
+      followUpDesc: 'Configure data sources on the left, or use Share Management to publish to spaces',
     },
     share: {
       description: 'Share the knowledge base with spaces so members can access and use it',

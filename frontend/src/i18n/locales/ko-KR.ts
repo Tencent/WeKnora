@@ -149,18 +149,16 @@ export default {
         denied: '거부'
       },
       action: {
-        rbac: {
-          member_added: '멤버 추가',
-          member_removed: '멤버 제거',
-          member_role_changed: '역할 변경',
-          member_left: '멤버 탈퇴',
-          access_denied: '접근 거부',
-          invitation_sent: '초대 전송',
-          invitation_accepted: '초대 수락',
-          invitation_declined: '초대 거절',
-          invitation_revoked: '초대 취소',
-          invitation_expired: '초대 만료'
-        }
+        'rbac.member_added': '멤버 추가',
+        'rbac.member_removed': '멤버 제거',
+        'rbac.member_role_changed': '역할 변경',
+        'rbac.member_left': '멤버 탈퇴',
+        'rbac.access_denied': '접근 거부',
+        'rbac.invitation_sent': '초대 전송',
+        'rbac.invitation_accepted': '초대 수락',
+        'rbac.invitation_declined': '초대 거절',
+        'rbac.invitation_revoked': '초대 취소',
+        'rbac.invitation_expired': '초대 만료'
       },
       columns: {
         time: '시간',
@@ -2546,19 +2544,17 @@ export default {
           denied: '거부'
         },
         action: {
-          system: {
-            setting_changed: '시스템 설정 변경',
-            admin_promoted: '시스템 관리자 부여',
-            api_key_created: '플랫폼 API 키 생성',
-            api_key_revoked: '플랫폼 API 키 폐기',
-            admin_revoked: '시스템 관리자 회수',
-            user_password_reset: '사용자 비밀번호 재설정',
-            queue_task_retried: '실패 작업 다시 실행',
-            queue_task_deleted: '실패 작업 기록 삭제',
-            queue_task_run_now: '큐 작업 즉시 실행',
-            queue_task_cancelled: '큐 작업 취소',
-            queue_archived_purged: '실패 작업 모두 지우기'
-          }
+          'system.setting_changed': '시스템 설정 변경',
+          'system.admin_promoted': '시스템 관리자 부여',
+          'system.api_key_created': '플랫폼 API 키 생성',
+          'system.api_key_revoked': '플랫폼 API 키 폐기',
+          'system.admin_revoked': '시스템 관리자 회수',
+          'system.user_password_reset': '사용자 비밀번호 재설정',
+          'system.queue_task_retried': '실패 작업 다시 실행',
+          'system.queue_task_deleted': '실패 작업 기록 삭제',
+          'system.queue_task_run_now': '큐 작업 즉시 실행',
+          'system.queue_task_cancelled': '큐 작업 취소',
+          'system.queue_archived_purged': '실패 작업 모두 지우기'
         },
         columns: {
           time: '시간',
@@ -3455,7 +3451,13 @@ export default {
     },
     buttons: {
       create: '지식베이스 생성',
-      save: '설정 저장'
+      save: '설정 저장',
+      saveAndClose: '저장 후 닫기',
+    },
+    postCreateHint: {
+      title: '생성 완료',
+      footer: '설정을 계속 조정하고 공유·데이터 소스를 구성한 뒤 "저장 후 닫기"를 클릭하세요.',
+      followUpDesc: '왼쪽에서 데이터 소스를 구성하거나 "공유 관리"에서 스페이스에 게시할 수 있습니다',
     },
     wikiBrowser: {
       editBtn: '편집',
@@ -3704,53 +3706,68 @@ export default {
       countItems: '{count}개 항목',
       titleWithCount: '{title} 외 {count}개',
       importSummary: '성공 {success} / 실패 {failed} / 건너뜀 {skipped}',
+      detailValues: {
+        user: '사용자 시작',
+        manual: '수동',
+        schedule: '예약',
+        system: '시스템',
+        pending: '대기 중',
+        completed: '완료',
+        partial: '일부 완료',
+        canceled: '취소됨',
+        failed: '실패',
+        enqueue: '작업 제출',
+        reuse_vectors: '벡터 재사용',
+        reparse: '재분석',
+        viewer: '읽기 전용',
+        editor: '편집 가능',
+        admin: '관리',
+        append: '추가',
+        replace: '덮어쓰기'
+      },
+      outcomes: {
+        accepted: '접수됨',
+        success: '성공',
+        failed: '실패',
+        partial: '일부 완료',
+        canceled: '취소됨',
+        denied: '거부됨'
+      },
       actions: {
-        kb: {
-          created: '지식 베이스 생성',
-          updated: '지식 베이스 업데이트',
-          deleted: '지식 베이스 삭제',
-          duplicated: '지식 베이스 복제',
-          clone_started: '복제 시작',
-          clone_completed: '복제 완료',
-          clone_failed: '복제 실패',
-          share_added: '공유 추가',
-          share_permission_changed: '공유 권한 변경',
-          share_removed: '공유 제거'
-        },
-        knowledge: {
-          created: '지식 추가',
-          updated: '지식 업데이트',
-          deleted: '지식 삭제',
-          batch_deleted: '지식 일괄 삭제',
-          reparse_started: '재분석 시작',
-          parse_canceled: '분석 취소',
-          move_started: '지식 이동 시작',
-          move_completed: '지식 이동 완료',
-          move_failed: '지식 이동 실패'
-        },
-        tag: {
-          created: '태그 생성',
-          updated: '태그 업데이트',
-          deleted: '태그 삭제'
-        },
-        datasource: {
-          created: '데이터 소스 생성',
-          updated: '데이터 소스 업데이트',
-          deleted: '데이터 소스 삭제',
-          sync_started: '데이터 소스 동기화 시작',
-          sync_completed: '데이터 소스 동기화 완료',
-          sync_failed: '데이터 소스 동기화 실패',
-          paused: '데이터 소스 일시 중지',
-          resumed: '데이터 소스 재개'
-        },
-        wiki: {
-          content_changed: 'Wiki 콘텐츠 업데이트'
-        },
-        faq: {
-          import_started: 'FAQ 가져오기 시작',
-          import_completed: 'FAQ 가져오기 완료',
-          import_failed: 'FAQ 가져오기 실패'
-        }
+        'kb.created': '지식 베이스 생성',
+        'kb.updated': '지식 베이스 업데이트',
+        'kb.deleted': '지식 베이스 삭제',
+        'kb.duplicated': '지식 베이스 복제',
+        'kb.clone_started': '복제 시작',
+        'kb.clone_completed': '복제 완료',
+        'kb.clone_failed': '복제 실패',
+        'knowledge.created': '지식 추가',
+        'knowledge.updated': '지식 업데이트',
+        'knowledge.deleted': '지식 삭제',
+        'knowledge.batch_deleted': '지식 일괄 삭제',
+        'knowledge.reparse_started': '재분석 시작',
+        'knowledge.parse_canceled': '분석 취소',
+        'knowledge.move_started': '지식 이동 시작',
+        'knowledge.move_completed': '지식 이동 완료',
+        'knowledge.move_failed': '지식 이동 실패',
+        'tag.created': '태그 생성',
+        'tag.updated': '태그 업데이트',
+        'tag.deleted': '태그 삭제',
+        'datasource.created': '데이터 소스 생성',
+        'datasource.updated': '데이터 소스 업데이트',
+        'datasource.deleted': '데이터 소스 삭제',
+        'datasource.sync_started': '데이터 소스 동기화 시작',
+        'datasource.sync_completed': '데이터 소스 동기화 완료',
+        'datasource.sync_failed': '데이터 소스 동기화 실패',
+        'datasource.paused': '데이터 소스 일시 중지',
+        'datasource.resumed': '데이터 소스 재개',
+        'kb.share_added': '공유 추가',
+        'kb.share_permission_changed': '공유 권한 변경',
+        'kb.share_removed': '공유 제거',
+        'wiki.content_changed': 'Wiki 콘텐츠 업데이트',
+        'faq.import_started': 'FAQ 가져오기 시작',
+        'faq.import_completed': 'FAQ 가져오기 완료',
+        'faq.import_failed': 'FAQ 가져오기 실패'
       },
       detailFields: {
         task_id: '작업 ID',
@@ -4760,6 +4777,15 @@ export default {
     editor: {
       createTitle: '에이전트 만들기',
       editTitle: '에이전트 편집',
+      buttons: {
+        create: '에이전트 만들기',
+        saveAndClose: '저장 후 닫기',
+      },
+      postCreateHint: {
+        title: '생성 완료',
+        footer: '설정을 계속 조정하고 공유·배포 채널을 구성한 뒤 "저장 후 닫기"를 클릭하세요.',
+        integrationDesc: '통합 센터에서 IM, 웹 임베드 등 배포 채널을 설정하세요',
+      },
       basicInfo: '기본정보',
       basicInfoDesc: '에이전트 이름, 설명 및 실행 모드 구성',
       promptsConfig: '프롬프트',
