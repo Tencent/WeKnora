@@ -412,6 +412,59 @@ func TestValidateProcessOverrides_ImageAllowsStorageFallback(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestValidateImportFileType(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, validateImportFileType("xlsx"))
+	require.NoError(t, validateImportFileType(".XLSX"))
+	require.Error(t, validateImportFileType("exe"))
+	require.Error(t, validateImportFileType("mp4"))
+	require.Error(t, validateImportFileType(""))
+}
+
+func TestResolveKnowledgeFileImportConfig_ImageRequiresVLM(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		VLMConfig: types.VLMConfig{Enabled: false},
+	}
+	_, err := resolveKnowledgeFileImportConfig(context.Background(), kb, "png", nil, nil)
+	require.Error(t, err)
+	var badReq *werrors.AppError
+	require.ErrorAs(t, err, &badReq)
+}
+
+func TestResolveKnowledgeFileImportConfig_AudioRequiresASR(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ASRConfig: types.ASRConfig{Enabled: false},
+	}
+	_, err := resolveKnowledgeFileImportConfig(context.Background(), kb, "mp3", nil, nil)
+	require.Error(t, err)
+}
+
+func TestApplyKnowledgeProcessOverrides_DefaultImageValidation(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		VLMConfig: types.VLMConfig{Enabled: false},
+	}
+	knowledge := &types.Knowledge{}
+	_, err := ApplyKnowledgeProcessOverrides(context.Background(), kb, knowledge, nil, []string{"png"}, nil)
+	require.Error(t, err)
+}
+
+func TestApplyKnowledgeProcessOverrides_XLSXAllowed(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{}
+	knowledge := &types.Knowledge{}
+	eff, err := ApplyKnowledgeProcessOverrides(context.Background(), kb, knowledge, nil, []string{"xlsx"}, nil)
+	require.NoError(t, err)
+	require.NotNil(t, eff)
+}
+
 func TestMergeParserEngineOverrides(t *testing.T) {
 	t.Parallel()
 
