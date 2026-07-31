@@ -10,7 +10,13 @@
           </button>
 
           <div class="upload-confirm-container">
-            <aside class="files-panel">
+            <aside
+              class="files-panel"
+              :class="{
+                'files-panel--folder-upload':
+                  mode === 'file' && createDocumentFolders && folderUploadDirectoryCount > 0,
+              }"
+            >
               <div class="sidebar-header">
                 <div class="sidebar-header-row">
                   <h2 class="sidebar-title">{{ dialogTitle }}</h2>
@@ -27,7 +33,47 @@
                   </div>
                 </div>
               </div>
-
+              <div
+                v-if="mode === 'file' && createDocumentFolders && folderUploadDirectoryCount > 0"
+                class="folder-upload-summary"
+              >
+                <t-icon name="folder-open" />
+                <span>
+                  {{ t('uploadConfirm.folderStructureHint', {
+                    count: folderUploadDirectoryCount,
+                    destination: destinationName || t('knowledgeBase.rootFolder'),
+                  }) }}
+                </span>
+              </div>
+              <div
+                v-if="mode === 'file' && createDocumentFolders && folderUploadDirectoryCount > 0"
+                class="folder-conflict-setting"
+              >
+                <span class="folder-conflict-setting__label">
+                  {{ t('uploadConfirm.folderConflictTitle') }}
+                </span>
+                <t-radio-group
+                  v-model="folderConflictStrategy"
+                  variant="default-filled"
+                  size="small"
+                >
+                  <t-radio-button value="merge">
+                    {{ t('uploadConfirm.folderConflictMerge') }}
+                  </t-radio-button>
+                  <t-radio-button value="skip">
+                    {{ t('uploadConfirm.folderConflictSkip') }}
+                  </t-radio-button>
+                  <t-radio-button value="rename">
+                    {{ t('uploadConfirm.folderConflictRename') }}
+                  </t-radio-button>
+                </t-radio-group>
+                <small>{{ folderConflictHint }}</small>
+                <small>{{ t('uploadConfirm.emptyFoldersNotPreserved') }}</small>
+              </div>
+              <div v-if="mode === 'file'" class="upload-conflict-hint">
+                <t-icon name="info-circle" />
+                <span>{{ t('uploadConfirm.duplicateStrategyHint') }}</span>
+              </div>
               <div class="files-list-wrap">
                 <div v-if="mode === 'manual' && manualPreview" class="manual-source-panel">
                   <p class="manual-source-title" :title="manualPreview.title">{{ manualPreview.title }}</p>
@@ -41,8 +87,14 @@
                   </p>
                   <p class="manual-source-meta">{{ t('uploadConfirm.reparseHint') }}</p>
                 </div>
-                <ul v-else-if="mode === 'file' && batchItemCount > 0" class="files-list">
-                  <li v-for="(url, index) in localUrls" :key="`url-${url}-${index}`" class="file-item">
+                <ul v-else-if="mode === 'file' && batchItemCount > 0" class="files-list" role="tree">
+                  <li
+                    v-for="(url, index) in localUrls"
+                    :key="`url-${url}-${index}`"
+                    class="file-item"
+                    role="treeitem"
+                    :aria-level="1"
+                  >
                     <span class="file-icon-wrap">
                       <t-icon name="link" class="file-icon" />
                     </span>
@@ -50,16 +102,24 @@
                       <span class="file-name" :title="url">{{ url }}</span>
                       <span class="file-size">{{ t('uploadConfirm.urlItemLabel') }}</span>
                     </div>
-                    <button
-                      type="button"
-                      class="file-remove"
+                    <t-button
+                      theme="default"
+                      variant="text"
+                      size="small"
+                      shape="square"
                       :aria-label="t('common.remove')"
                       @click="removeUrl(index)"
                     >
                       <t-icon name="close" />
-                    </button>
+                    </t-button>
                   </li>
-                  <li v-for="(file, index) in localFiles" :key="`${file.name}-${index}`" class="file-item">
+                  <li
+                    v-for="{ file, fileIndex } in ordinaryUploadFiles"
+                    :key="`${file.name}-${fileIndex}`"
+                    class="file-item"
+                    role="treeitem"
+                    :aria-level="1"
+                  >
                     <span class="file-icon-wrap">
                       <t-icon :name="getFileIcon(file.name)" class="file-icon" />
                     </span>
@@ -67,14 +127,50 @@
                       <span class="file-name" :title="file.name">{{ file.name }}</span>
                       <span class="file-size">{{ formatFileSize(file.size) }}</span>
                     </div>
-                    <button
-                      type="button"
-                      class="file-remove"
+                    <t-button
+                      theme="default"
+                      variant="text"
+                      size="small"
+                      shape="square"
                       :aria-label="t('common.remove')"
-                      @click="removeFile(index)"
+                      @click="removeFile(fileIndex)"
                     >
                       <t-icon name="close" />
-                    </button>
+                    </t-button>
+                  </li>
+                  <li
+                    v-for="treeItem in folderUploadTreeRows"
+                    :key="treeItem.key"
+                    class="file-item file-item--tree"
+                    :class="{ 'file-item--folder': treeItem.kind === 'folder' }"
+                    :style="{ paddingLeft: `${8 + treeItem.depth * 14}px` }"
+                    role="treeitem"
+                    :aria-level="treeItem.depth + 1"
+                    :aria-expanded="treeItem.kind === 'folder' ? true : undefined"
+                  >
+                    <span class="file-icon-wrap">
+                      <t-icon
+                        :name="treeItem.kind === 'folder' ? 'folder-open' : getFileIcon(treeItem.file.name)"
+                        class="file-icon"
+                      />
+                    </span>
+                    <div class="file-meta">
+                      <span class="file-name" :title="treeItem.path">{{ treeItem.name }}</span>
+                      <span v-if="treeItem.kind === 'file'" class="file-size">
+                        {{ formatFileSize(treeItem.file.size) }}
+                      </span>
+                    </div>
+                    <t-button
+                      v-if="treeItem.kind === 'file'"
+                      theme="default"
+                      variant="text"
+                      size="small"
+                      shape="square"
+                      :aria-label="t('common.remove')"
+                      @click="removeFile(treeItem.fileIndex)"
+                    >
+                      <t-icon name="close" />
+                    </t-button>
                   </li>
                 </ul>
                 <div v-else-if="mode === 'file'" class="files-empty">{{ t('uploadConfirm.noItems') }}</div>
@@ -521,6 +617,11 @@ import { useUIStore } from '@/stores/ui'
 import { formatFileSize, getFileIcon } from '@/utils/files'
 import { getUploadFileKey } from '../utils/uploadSources'
 import { listKnowledgeTags } from '@/api/knowledge-base'
+import {
+  buildUploadDirectoryTreeRows,
+  countUploadDirectories,
+  getUploadDirectorySegments,
+} from '../utils/folderUploadPaths'
 import KbUploadSourceDropdown from './KbUploadSourceDropdown.vue'
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
 import type {
@@ -528,6 +629,7 @@ import type {
   UploadConfirmMode,
   UploadConfirmReparseSource,
   UploadConfirmResult,
+  UploadFolderConflictStrategy,
 } from '@/stores/uploadConfirm'
 
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']
@@ -578,6 +680,8 @@ const props = withDefaults(defineProps<{
   files?: File[]
   urls?: string[]
   tagIds?: string[]
+  destinationName?: string
+  createDocumentFolders?: boolean
   manualPreview?: UploadConfirmManualSource | null
   reparsePreview?: UploadConfirmReparseSource | null
   tagId?: string
@@ -588,6 +692,8 @@ const props = withDefaults(defineProps<{
   files: () => [],
   urls: () => [],
   tagIds: () => [],
+  destinationName: '',
+  createDocumentFolders: false,
   manualPreview: null,
   reparsePreview: null,
   acceptFileTypes: '',
@@ -615,6 +721,7 @@ const tagsLoadFailed = ref(false)
 const chunkingMoreOpen = ref(false)
 const activeSection = ref<ConfigSectionKey>('tags')
 const uiState = ref<UploadUIState>(createDefaultUIState())
+const folderConflictStrategy = ref<UploadFolderConflictStrategy>('merge')
 
 const dialogVisible = computed({
   get: () => props.visible,
@@ -676,6 +783,19 @@ function inferMediaExtsFromMarkdown(content: string): string[] {
 
 const manualCharCount = computed(() => props.manualPreview?.content?.length ?? 0)
 const batchItemCount = computed(() => localFiles.value.length + localUrls.value.length)
+const folderUploadDirectoryCount = computed(() => countUploadDirectories(localFiles.value))
+const folderUploadTreeRows = computed(() => buildUploadDirectoryTreeRows(localFiles.value))
+const ordinaryUploadFiles = computed(() => localFiles.value
+  .map((file, fileIndex) => ({ file, fileIndex }))
+  .filter(({ file }) => getUploadDirectorySegments(file).length === 0))
+const folderConflictHint = computed(() => {
+  const keyByStrategy: Record<UploadFolderConflictStrategy, string> = {
+    merge: 'uploadConfirm.folderConflictMergeHint',
+    skip: 'uploadConfirm.folderConflictSkipHint',
+    rename: 'uploadConfirm.folderConflictRenameHint',
+  }
+  return t(keyByStrategy[folderConflictStrategy.value])
+})
 
 const dialogTitle = computed(() => {
   if (props.mode === 'manual') return t('uploadConfirm.titleManual')
@@ -1195,6 +1315,7 @@ watch(
     }
     activeSection.value = getDefaultSection()
     chunkingMoreOpen.value = false
+    folderConflictStrategy.value = 'merge'
     loadModels()
     loadSystemInfo()
     loadTags()
@@ -1330,6 +1451,7 @@ const handleConfirm = () => {
       tagIds: [...selectedTagIds.value],
       files: [...localFiles.value],
       urls: [...localUrls.value],
+      folderConflictStrategy: folderConflictStrategy.value,
     })
   }
   emit('update:visible', false)
@@ -1495,9 +1617,87 @@ const handleConfirm = () => {
   height: 24px;
 }
 
+.folder-upload-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 12px 8px;
+  padding: 9px 10px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--td-brand-color) 8%, var(--td-bg-color-container));
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 18px;
+
+  .t-icon {
+    flex: 0 0 auto;
+    margin-top: 1px;
+    color: var(--td-brand-color);
+    font-size: 16px;
+  }
+}
+
+.folder-conflict-setting {
+  display: grid;
+  gap: 7px;
+  margin: 0 12px 8px;
+  padding: 10px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 7px;
+  background: var(--td-bg-color-secondarycontainer);
+
+  &__label {
+    color: var(--td-text-color-primary);
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  :deep(.t-radio-group) {
+    width: 100%;
+  }
+
+  :deep(.t-radio-button) {
+    flex: 1;
+    min-width: 0;
+  }
+
+  small {
+    color: var(--td-text-color-placeholder);
+    font-size: 11px;
+    line-height: 16px;
+  }
+}
+
+.upload-conflict-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0 12px 8px;
+  padding: 0 2px;
+  color: var(--td-text-color-placeholder);
+  font-size: 11px;
+  line-height: 17px;
+
+  .t-icon {
+    flex: 0 0 auto;
+    margin-top: 1px;
+  }
+}
+
 .file-icon {
   font-size: 16px;
   color: var(--td-text-color-secondary);
+}
+
+.file-item--folder {
+  .file-icon,
+  &:hover .file-icon {
+    color: var(--td-brand-color);
+  }
+
+  .file-name {
+    font-weight: 600;
+  }
 }
 
 .file-item:hover .file-icon {
@@ -1981,6 +2181,12 @@ const handleConfirm = () => {
     max-height: 140px;
     border-right: none;
     border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  .files-panel--folder-upload {
+    height: clamp(280px, 36vh, 340px);
+    max-height: none;
+    overflow: hidden;
   }
 
   .settings-sidebar {

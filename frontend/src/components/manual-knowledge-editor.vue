@@ -77,6 +77,9 @@ const form = reactive({
   title: '',
   content: '',
   status: 'draft' as ManualStatus,
+  // Preset folder for newly created manual knowledge (issue #1311).
+  // Only sent on create — edits keep the existing folder. "" = root.
+  folderId: '' as string,
 })
 
 const initialLoaded = ref(false)
@@ -555,6 +558,7 @@ const resetForm = () => {
   form.title = uiStore.manualEditorInitialTitle || ''
   form.content = uiStore.manualEditorInitialContent || ''
   form.status = uiStore.manualEditorInitialStatus || 'draft'
+  form.folderId = uiStore.manualEditorInitialFolderId || ''
   activeTab.value = 'edit'
   lastUpdatedAt.value = ''
   initialLoaded.value = false
@@ -623,12 +627,17 @@ const handleSave = async (targetStatus: ManualStatus) => {
       status: string
       tag_ids?: string[]
       process_config?: KnowledgeProcessOverrides
+      folder_id?: string
     } = {
       title: form.title.trim(),
       content: form.content,
       status: targetStatus,
     }
     payload.tag_ids = [...manualTagIds.value]
+    // Only stamp folder_id on create — edits retain the existing folder.
+    if (mode.value !== 'edit') {
+      payload.folder_id = form.folderId
+    }
 
     if (targetStatus === 'publish') {
       let kbInfo: any

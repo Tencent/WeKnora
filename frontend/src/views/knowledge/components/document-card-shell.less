@@ -1,0 +1,42 @@
+.document-card-shell() {
+  position: relative;
+  display: flex;
+  min-width: 240px;
+  height: 136px;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 1px solid var(--td-component-border);
+  border-radius: 8px;
+  background: var(--td-bg-color-container);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .06);
+  cursor: pointer;
+  transition: border-color .2s ease, box-shadow .2s ease, background-color .2s ease;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--td-component-stroke) 55%, var(--td-brand-color));
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .07);
+  }
+}
+
+.document-card-content-shell() {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  padding: 10px 14px 8px;
+}
+
+.document-card-bottom-shell() {
+  display: flex;
+  width: 100%;
+  height: 32px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+  margin-top: auto;
+  padding: 0 14px;
+  border-top: 1px solid var(--td-component-stroke);
+  background: var(--td-bg-color-container);
+}

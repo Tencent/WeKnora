@@ -593,6 +593,8 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
 </template>
 
 <style scoped lang="less">
+@import (reference) "./document-card-shell.less";
+
 @keyframes contentFadeIn {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
@@ -612,24 +614,7 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
 }
 
 .knowledge-card {
-  min-width: 240px;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--td-component-border);
-  height: 136px;
-  border-radius: 8px;
-  overflow: hidden;
-  box-sizing: border-box;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-  background: var(--td-bg-color-container);
-  position: relative;
-  cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
-
-  &:hover {
-    border-color: color-mix(in srgb, var(--td-component-stroke) 55%, var(--td-brand-color));
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.07);
-  }
+  .document-card-shell();
 
   .card-nav-check {
     flex-shrink: 0;
@@ -653,11 +638,7 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
   }
 
   .card-content {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    padding: 10px 14px 8px;
+    .document-card-content-shell();
   }
 
   .card-analyze {
@@ -772,17 +753,7 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
   }
 
   .card-bottom {
-    flex-shrink: 0;
-    margin-top: auto;
-    padding: 0 14px;
-    box-sizing: border-box;
-    height: 32px;
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    background: var(--td-bg-color-container);
-    border-top: 1px solid var(--td-component-stroke);
+    .document-card-bottom-shell();
   }
 
   .card-time {

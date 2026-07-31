@@ -21,6 +21,8 @@ const handleCancel = () => {
     :files="uploadConfirmStore.files"
     :urls="uploadConfirmStore.urls"
     :tag-ids="uploadConfirmStore.tagIds"
+    :destination-name="uploadConfirmStore.destinationName"
+    :create-document-folders="uploadConfirmStore.createDocumentFolders"
     :manual-preview="uploadConfirmStore.manual"
     :reparse-preview="uploadConfirmStore.reparse"
     :accept-file-types="uploadConfirmStore.acceptFileTypes"

@@ -17,7 +17,10 @@ test('selects multiple document tags and returns them with the confirmation resu
 
 test('uses confirmed tags for file and URL imports instead of reading the list filter at upload time', () => {
   assert.match(knowledgeBase, /const tagIds = result\.tagIds \|\| \[\]/)
-  assert.match(knowledgeBase, /executeUploadBatch\(files, \{ processConfig, tagIds \}\)/)
+  assert.match(
+    knowledgeBase,
+    /executeUploadBatch\(files, \{[\s\S]*?processConfig,[\s\S]*?tagIds,[\s\S]*?\}\)/,
+  )
   assert.match(knowledgeBase, /executeUrlImport\(url, processConfig, tagIds\)/)
   assert.doesNotMatch(
     knowledgeBase,
@@ -41,4 +44,15 @@ test('uses section navigation with inline chunking controls and advanced options
   assert.match(dialog, /statusFull/)
   assert.match(dialog, /data-section="multimodal"/)
   assert.doesNotMatch(dialog, /<KBChunkingSettings/)
+})
+
+test('keeps the folder tree visible in the narrow stacked dialog', () => {
+  assert.match(
+    dialog,
+    /'files-panel--folder-upload':\s*mode === 'file' && createDocumentFolders && folderUploadDirectoryCount > 0/,
+  )
+  assert.match(
+    dialog,
+    /\.files-panel--folder-upload\s*\{[\s\S]*?height:\s*clamp\(280px,\s*36vh,\s*340px\);[\s\S]*?max-height:\s*none;/,
+  )
 })

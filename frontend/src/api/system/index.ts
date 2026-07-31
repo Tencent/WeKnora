@@ -43,6 +43,11 @@ export interface SystemInfo {
   started_at?: string
   /** Seconds since process start. */
   uptime_seconds?: number
+  /** Runtime capabilities. Missing keys mean false so a new frontend remains
+   * safe when a rolling request reaches an older backend pod. */
+  capabilities?: {
+    document_folders?: boolean
+  }
 }
 
 export interface PlaceholderDefinition {

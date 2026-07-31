@@ -19,6 +19,9 @@ export const useUIStore = defineStore('ui', {
     manualEditorInitialTitle: '',
     manualEditorInitialContent: '',
     manualEditorInitialStatus: 'draft' as 'draft' | 'publish',
+    // Preset folder for newly created manual knowledge (issue #1311).
+    // Empty string = root. Only applied on create, not edit.
+    manualEditorInitialFolderId: '',
     manualEditorOnSuccess: null as null | ((payload: { kbId: string; knowledgeId: string; status: 'draft' | 'publish' }) => void),
     sidebarCollapsed: localStorage.getItem('sidebar_collapsed') === 'true'
   }),
@@ -74,6 +77,7 @@ export const useUIStore = defineStore('ui', {
       title?: string
       content?: string
       status?: 'draft' | 'publish'
+      folderId?: string
       onSuccess?: (payload: { kbId: string; knowledgeId: string; status: 'draft' | 'publish' }) => void
     } = {}) {
       this.manualEditorMode = options.mode || 'create'
@@ -82,6 +86,7 @@ export const useUIStore = defineStore('ui', {
       this.manualEditorInitialTitle = options.title || ''
       this.manualEditorInitialContent = options.content || ''
       this.manualEditorInitialStatus = options.status || 'draft'
+      this.manualEditorInitialFolderId = options.folderId ?? ''
       this.manualEditorOnSuccess = options.onSuccess || null
       this.manualEditorVisible = true
     },
@@ -92,6 +97,7 @@ export const useUIStore = defineStore('ui', {
       this.manualEditorInitialContent = ''
       this.manualEditorInitialTitle = ''
       this.manualEditorInitialStatus = 'draft'
+      this.manualEditorInitialFolderId = ''
       this.manualEditorOnSuccess = null
     },
 

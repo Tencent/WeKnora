@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatFileSize, getFileIcon } from '@/utils/files';
 import { useTagChipsOverflow } from '@/composables/useTagChipsOverflow';
 import DocumentActionMenu from './DocumentActionMenu.vue';
+import DocumentResourceListHeader from './DocumentResourceListHeader.vue';
 
 interface Tag {
   id: string;
@@ -27,7 +28,7 @@ interface KnowledgeItem {
   isMore?: boolean;
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   items: KnowledgeItem[];
   selectedIds: Set<string>;
   canEdit: boolean;
@@ -42,7 +43,10 @@ const props = defineProps<{
   moveSelectedTargetName: string;
   moveMode: 'reuse_vectors' | 'reparse';
   moveSubmitting: boolean;
-}>();
+  attached?: boolean;
+}>(), {
+  attached: false,
+});
 
 const emit = defineEmits<{
   (e: 'open', item: KnowledgeItem): void;
@@ -185,25 +189,6 @@ const onMoreVisible = (id: string, visible: boolean) => {
   }
 };
 
-// 吸顶检测：哨兵离开视口说明 header 已吸附在滚动容器顶部
-const stickySentinel = ref<HTMLElement | null>(null);
-const headerStuck = ref(false);
-let stickyObserver: IntersectionObserver | null = null;
-onMounted(() => {
-  if (!stickySentinel.value || typeof IntersectionObserver === 'undefined') return;
-  stickyObserver = new IntersectionObserver(
-    (entries) => {
-      headerStuck.value = !entries[0].isIntersecting;
-    },
-    { threshold: 0 },
-  );
-  stickyObserver.observe(stickySentinel.value);
-});
-onBeforeUnmount(() => {
-  stickyObserver?.disconnect();
-  stickyObserver = null;
-});
-
 const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem) => {
   // Don't close popup for move — it triggers the move sub-flow
   if (action !== 'move') {
@@ -216,26 +201,19 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
 </script>
 
 <template>
-  <div class="doc-list-view" :class="{ 'is-loading': loading }">
-    <div ref="stickySentinel" class="doc-list-sticky-sentinel" aria-hidden="true"></div>
-    <div class="doc-list-header" :class="{ 'is-stuck': headerStuck }" role="row">
-      <div class="cell cell-check" role="columnheader" @click.stop>
-        <t-checkbox class="doc-list-check" size="small" :checked="allSelected" :indeterminate="someSelected"
-          :disabled="!items.length" :title="t('knowledgeBase.selectAll')" @change="onHeaderCheckboxChange" />
-      </div>
-      <div class="cell cell-name" role="columnheader">{{ t('knowledgeBase.columnName') }}</div>
-      <div class="cell cell-tag" role="columnheader">{{ t('knowledgeBase.columnTag') }}</div>
-      <div class="cell cell-source" role="columnheader">{{ t('knowledgeBase.columnSource') }}</div>
-      <div class="cell cell-size" role="columnheader">{{ t('knowledgeBase.columnSize') }}</div>
-      <div class="cell cell-status" role="columnheader">{{ t('knowledgeBase.columnStatus') }}</div>
-      <div class="cell cell-time" role="columnheader">{{ t('knowledgeBase.columnUpdatedAt') }}</div>
-      <div class="cell cell-actions" role="columnheader" v-if="canEdit"></div>
-    </div>
+  <div class="doc-list-view" :class="{ 'is-loading': loading, 'is-attached': attached }">
+    <DocumentResourceListHeader
+      v-if="!attached"
+      :checked="allSelected"
+      :indeterminate="someSelected"
+      :disabled="!items.length"
+      @toggle-all="onHeaderCheckboxChange"
+    />
 
     <div class="doc-list-body">
       <div v-for="item in items" :key="item.id" class="doc-list-row"
         :class="{ selected: selectedIds.has(item.id), 'menu-open': moreOpen === item.id }" :data-select-id="item.id"
-        role="row" @click="emit('open', item)">
+        @click="emit('open', item)">
         <div class="cell cell-check" @click.stop>
           <t-checkbox class="doc-list-check" size="small" :checked="selectedIds.has(item.id)" :title="item.file_name"
             @change="(c: boolean, ctx?: { e?: Event }) => onRowCheckboxChange(item, c, ctx)" />
@@ -396,6 +374,8 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
 </template>
 
 <style scoped lang="less">
+@import (reference) "./document-resource-list.less";
+
 @keyframes doc-list-fade-in {
   from {
     opacity: 0;
@@ -412,64 +392,26 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
   display: flex;
   flex-direction: column;
   width: 100%;
+  min-width: @document-resource-list-min-width;
   background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 9px;
-  /* 不能用 overflow:hidden，否则表头 position:sticky 相对外层滚动区失效 */
   overflow: visible;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   animation: doc-list-fade-in 0.32s ease-out;
-}
 
-.doc-list-header,
-.doc-list-row {
-  display: grid;
-  grid-template-columns:
-    44px // checkbox
-    minmax(260px, 2.6fr) // name
-    minmax(100px, 0.9fr) // tag
-    minmax(96px, 0.8fr) // source
-    96px // size
-    minmax(96px, 0.7fr) // status
-    140px // updated_at
-    48px; // actions
-  align-items: center;
-  column-gap: 0;
-  padding: 0 16px;
-}
-
-.doc-list-sticky-sentinel {
-  height: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  pointer-events: none;
-}
-
-.doc-list-header {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  height: 40px;
-  font-size: 12px;
-  font-weight: 500;
-  font-family: var(--app-font-family);
-  color: var(--td-text-color-secondary);
-  background: var(--td-bg-color-secondarycontainer);
-  border-bottom: 1px solid var(--td-component-stroke);
-  border-radius: 8px 8px 0 0;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-  transition: border-radius 0.15s ease, box-shadow 0.2s ease;
-
-  &.is-stuck {
-    border-radius: 0;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+  &.is-attached {
+    box-shadow: none;
   }
+}
+
+.doc-list-row {
+  .document-resource-list-grid();
 }
 
 .doc-list-body {
   display: flex;
   flex-direction: column;
+  border: 1px solid var(--td-component-stroke);
+  border-top: 0;
   border-radius: 0 0 8px 8px;
   overflow: hidden;
 }
@@ -500,18 +442,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
 }
 
 .cell {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  padding: 0 8px;
-
-  &:first-child {
-    padding-left: 0;
-  }
-
-  &:last-child {
-    padding-right: 0;
-  }
+  .document-resource-list-cell();
 }
 
 .cell-check {
@@ -535,27 +466,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
 
 /* TDesign 勾选框：去掉空白 label、与表格行对齐 */
 .doc-list-check {
-  margin: 0;
-
-  :deep(.t-checkbox) {
-    align-items: center;
-  }
-
-  :deep(.t-checkbox__label) {
-    display: none !important;
-    width: 0 !important;
-    min-width: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-  }
-
-  :deep(.t-checkbox__input) {
-    margin: 0;
-  }
-
-  :deep(.t-checkbox__input-wrapper) {
-    margin: 0;
-  }
+  .document-resource-list-checkbox();
 }
 
 .row-file-icon-wrap {

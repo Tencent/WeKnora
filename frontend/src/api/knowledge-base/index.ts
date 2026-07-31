@@ -209,9 +209,13 @@ export function uploadKnowledgeFile(
     tag_ids?: string[]
     fileName?: string
     process_config?: KnowledgeProcessOverrides | string
+    // Optional folder scoping for the uploaded document (issue #1311).
+    // Empty string = root. Omitted = let the backend default.
+    folder_id?: string
     [key: string]: any
   } = { file: new File([], '') },
   onProgress?: (progressEvent: any) => void,
+  signal?: AbortSignal,
 ) {
   const formData = new FormData();
   Object.keys(data).forEach(key => {
@@ -221,24 +225,35 @@ export function uploadKnowledgeFile(
       formData.append(key, value.join(','));
     } else if (key === 'process_config' && value && typeof value !== 'string') {
       formData.append(key, JSON.stringify(value));
+    } else if (key === 'folder_id') {
+      // Unconditional append — "" (root) must reach the backend so the
+      // document lands at root instead of "wherever the backend defaults".
+      formData.append(key, String(value));
     } else {
       formData.append(key, value);
     }
   });
-  return postUpload(`/api/v1/knowledge-bases/${kbId}/knowledge/file`, formData, onProgress);
+  return postUpload(
+    `/api/v1/knowledge-bases/${kbId}/knowledge/file`,
+    formData,
+    onProgress,
+    signal ? { signal } : undefined,
+  );
 }
 
 // 从URL创建知识
 // data.tag_ids: 可选，指定知识所属的多个标签 ID
+// data.folder_id: 可选，指定知识所属文件夹（issue #1311）。空串 = 根目录。
 export function createKnowledgeFromURL(
   kbId: string,
-  data: { url: string; enable_multimodel?: boolean; tag_ids?: string[]; process_config?: KnowledgeProcessOverrides },
+  data: { url: string; enable_multimodel?: boolean; tag_ids?: string[]; process_config?: KnowledgeProcessOverrides; folder_id?: string },
 ) {
   return post(`/api/v1/knowledge-bases/${kbId}/knowledge/url`, data);
 }
 
 // 手工创建知识
 // data.tag_ids: 可选，指定知识所属的标签 ID
+// data.folder_id: 可选，指定知识所属文件夹（issue #1311）。空串 = 根目录。
 export function createManualKnowledge(
   kbId: string,
   data: {
@@ -247,6 +262,7 @@ export function createManualKnowledge(
     status: string
     tag_ids?: string[]
     process_config?: KnowledgeProcessOverrides
+    folder_id?: string
   },
 ) {
   return post(`/api/v1/knowledge-bases/${kbId}/knowledge/manual`, data);
@@ -264,6 +280,7 @@ export function listKnowledgeFiles(
     source?: string;
     start_time?: string;
     end_time?: string;
+    folder_id?: string;
   },
 ) {
   const query = new URLSearchParams();
@@ -276,6 +293,11 @@ export function listKnowledgeFiles(
   if (params.source) query.append('source', params.source);
   if (params.start_time) query.append('start_time', params.start_time);
   if (params.end_time) query.append('end_time', params.end_time);
+  // folder_id is unconditionally appended when the caller provided it —
+  // including the empty-string root case. A truthy check (if (params.folder_id))
+  // would drop the empty string and silently fall back to "list all folders",
+  // which is a scope leak. (issue #1311)
+  if (params.folder_id !== undefined) query.append('folder_id', params.folder_id);
   const qs = query.toString();
   return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${qs}`);
 }
@@ -544,7 +566,12 @@ export function searchKnowledge(
   offset = 0,
   limit = 20,
   fileTypes?: string[],
-  options?: { agent_id?: string; agent_source_tenant_id?: string; recent?: boolean }
+  options?: {
+    agent_id?: string
+    agent_source_tenant_id?: string
+    recent?: boolean
+    kb_ids?: string[]
+  }
 ) {
   const query = new URLSearchParams();
   if (keyword) {
@@ -558,6 +585,7 @@ export function searchKnowledge(
   if (options?.agent_id) query.set('agent_id', options.agent_id);
   if (options?.agent_source_tenant_id) query.set('agent_source_tenant_id', options.agent_source_tenant_id);
   if (options?.recent) query.set('recent', 'true');
+  if (options?.kb_ids?.length) query.set('kb_ids', options.kb_ids.join(','));
   return get(`/api/v1/knowledge/search?${query.toString()}`);
 }
 
@@ -575,4 +603,142 @@ export function batchReparseKnowledge(kbId: string, ids: string[], processConfig
     ids,
     process_config: processConfig,
   });
+}
+
+// --- Document folder tree (issue #1311) ---
+// The folder tree uses the /knowledgebase/:kb_id namespace to match the
+// router's KB-scoped guards (OwnedKBOrAdminFromKbIDParam + KBAccessWrite).
+
+export interface DocumentFolder {
+  id: string;
+  tenant_id: number;
+  knowledge_base_id: string;
+  parent_id: string;
+  name: string;
+  path: string;
+  depth: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentFolderNode extends DocumentFolder {
+  document_count: number;
+  has_children: boolean;
+}
+
+export interface DocumentFolderListResponse {
+  parent_id: string;
+  folders: DocumentFolderNode[];
+  next_cursor?: string;
+  has_more: boolean;
+}
+
+export interface DocumentFolderSearchResult {
+  id: string;
+  name: string;
+  path: string;
+  parent_id: string;
+  knowledge_base_id: string;
+  knowledge_base_name: string;
+}
+
+export function listDocumentFolders(
+  kbId: string,
+  parentId = '',
+  options?: {
+    keyword?: string
+    cursor?: string
+    page_size?: number
+    agent_id?: string
+    agent_source_tenant_id?: string
+  },
+) {
+  const query = new URLSearchParams();
+  // Unconditional append — same three-state rule as listKnowledgeFiles.
+  query.append('parent_id', parentId);
+  if (options?.keyword) query.set('keyword', options.keyword);
+  if (options?.cursor) query.set('cursor', options.cursor);
+  if (options?.page_size) query.set('page_size', String(options.page_size));
+  if (options?.agent_id) query.set('agent_id', options.agent_id);
+  if (options?.agent_source_tenant_id) {
+    query.set('agent_source_tenant_id', options.agent_source_tenant_id);
+  }
+  return get<DocumentFolderListResponse>(
+    `/api/v1/knowledgebase/${kbId}/document-folders?${query.toString()}`,
+  );
+}
+
+export function searchDocumentFolders(
+  keyword: string,
+  offset = 0,
+  limit = 20,
+  options?: {
+    agent_id?: string
+    agent_source_tenant_id?: string
+    kb_ids?: string[]
+  },
+) {
+  const query = new URLSearchParams({
+    keyword,
+    offset: String(offset),
+    limit: String(limit),
+  });
+  if (options?.agent_id) query.set('agent_id', options.agent_id);
+  if (options?.agent_source_tenant_id) {
+    query.set('agent_source_tenant_id', options.agent_source_tenant_id);
+  }
+  if (options?.kb_ids?.length) query.set('kb_ids', options.kb_ids.join(','));
+  return get<{
+    success: boolean;
+    data: DocumentFolderSearchResult[];
+    has_more: boolean;
+    total: number;
+  }>(`/api/v1/knowledge/folders/search?${query.toString()}`);
+}
+
+export function createDocumentFolder(kbId: string, parentId: string, name: string) {
+  return post<DocumentFolder>(
+    `/api/v1/knowledgebase/${kbId}/document-folders`,
+    { parent_id: parentId, name },
+  );
+}
+
+export function updateDocumentFolder(
+  kbId: string,
+  folderId: string,
+  data: { name: string },
+) {
+  return put<DocumentFolder>(
+    `/api/v1/knowledgebase/${kbId}/document-folders/${folderId}`,
+    data,
+  );
+}
+
+export type DocumentFolderDeleteMode = 'keep_documents' | 'delete_all';
+
+export interface DocumentFolderDeleteImpact {
+  folder_count: number;
+  document_count: number;
+  active_document_count: number;
+}
+
+export interface DocumentFolderDeleteTaskResponse {
+  task_id: string;
+}
+
+export function getDocumentFolderDeleteImpact(kbId: string, folderId: string) {
+  return get<DocumentFolderDeleteImpact>(
+    `/api/v1/knowledgebase/${kbId}/document-folders/${folderId}/delete-impact`,
+  );
+}
+
+export function deleteDocumentFolder(
+  kbId: string,
+  folderId: string,
+  mode?: DocumentFolderDeleteMode,
+) {
+  const query = mode ? `?mode=${encodeURIComponent(mode)}` : '';
+  return del<DocumentFolderDeleteTaskResponse | void>(
+    `/api/v1/knowledgebase/${kbId}/document-folders/${folderId}${query}`,
+  );
 }

@@ -5,15 +5,18 @@
       type="file"
       class="hidden-file-input"
       multiple
+      :disabled="disabled"
       :accept="acceptFileTypes || undefined"
       @change="(e) => handleFilesChange(e, false)"
     />
     <input
+      v-if="includeFolder"
       ref="folderInputRef"
       type="file"
       class="hidden-file-input"
       webkitdirectory
       multiple
+      :disabled="disabled"
       @change="(e) => handleFilesChange(e, true)"
     />
 
@@ -22,6 +25,7 @@
         :options="dropdownOptions"
         trigger="click"
         :placement="placement"
+        :disabled="disabled"
         @click="handleActionSelect"
       >
         <t-button
@@ -30,8 +34,10 @@
           :class="['kb-upload-source-trigger', triggerClass]"
           :data-guide="dataGuide || undefined"
           size="small"
+          :disabled="disabled"
         >
           <template #icon><t-icon :name="triggerIcon" size="16px" /></template>
+          <span v-if="triggerLabel">{{ triggerLabel }}</span>
         </t-button>
       </t-dropdown>
     </t-tooltip>
@@ -70,20 +76,26 @@ const props = withDefaults(defineProps<{
   acceptFileTypes?: string
   supportedFileTypes?: string[]
   includeManual?: boolean
+  includeFolder?: boolean
   triggerIcon?: string
+  triggerLabel?: string
   triggerClass?: string
   dataGuide?: string
   tooltip?: string
   placement?: 'top' | 'bottom' | 'bottom-right' | 'bottom-left'
+  disabled?: boolean
 }>(), {
   acceptFileTypes: '',
   supportedFileTypes: () => [],
   includeManual: false,
+  includeFolder: true,
   triggerIcon: 'file-add',
+  triggerLabel: '',
   triggerClass: '',
   dataGuide: '',
   tooltip: '',
   placement: 'bottom-right',
+  disabled: false,
 })
 
 const emit = defineEmits<{
@@ -102,23 +114,29 @@ const urlInputValue = ref('')
 const tooltipText = computed(() => props.tooltip || t('knowledgeBase.addDocument'))
 
 const dropdownOptions = computed(() => {
-  const options = [
+  const options: Array<{
+    content: string
+    value: string
+    prefixIcon: () => ReturnType<typeof h>
+  }> = [
     {
       content: t('upload.uploadDocument'),
       value: 'upload',
       prefixIcon: () => h(TIcon, { name: 'upload', size: '16px' }),
     },
-    {
+  ]
+  if (props.includeFolder) {
+    options.push({
       content: t('upload.uploadFolder'),
       value: 'uploadFolder',
       prefixIcon: () => h(TIcon, { name: 'folder-add', size: '16px' }),
-    },
-    {
+    })
+  }
+  options.push({
       content: t('knowledgeBase.importURL'),
       value: 'importURL',
       prefixIcon: () => h(TIcon, { name: 'link', size: '16px' }),
-    },
-  ]
+  })
   if (props.includeManual) {
     options.push({
       content: t('upload.onlineEdit'),
@@ -130,6 +148,7 @@ const dropdownOptions = computed(() => {
 })
 
 const handleActionSelect = (data: { value: string }) => {
+  if (props.disabled) return
   switch (data.value) {
     case 'upload':
       fileInputRef.value?.click()

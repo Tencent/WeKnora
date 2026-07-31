@@ -1,4 +1,5 @@
 import { kbFileTypeVerification } from '@/utils'
+import { getUploadRelativePath } from './folderUploadPaths'
 
 export const UPLOAD_VIDEO_EXTENSIONS = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv', 'flv']
 
@@ -9,7 +10,7 @@ export function getUploadFileExt(file: File): string {
 }
 
 export function getUploadFileKey(file: File): string {
-  const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || ''
+  const path = getUploadRelativePath(file)
   return `${path || file.name}\0${file.size}`
 }
 

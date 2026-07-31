@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
 
 export type UploadConfirmMode = 'file' | 'url' | 'manual' | 'reparse'
+export type UploadFolderConflictStrategy = 'merge' | 'skip' | 'rename'
 
 export interface UploadConfirmManualSource {
   kbId: string
@@ -24,6 +25,7 @@ export interface UploadConfirmResult {
   tagIds?: string[]
   files?: File[]
   urls?: string[]
+  folderConflictStrategy?: UploadFolderConflictStrategy
   manual?: UploadConfirmManualSource
   reparse?: UploadConfirmReparseSource
 }
@@ -34,6 +36,8 @@ export interface OpenUploadConfirmOptions {
   tagIds?: string[]
   files?: File[]
   urls?: string[]
+  destinationName?: string
+  createDocumentFolders?: boolean
   manual?: UploadConfirmManualSource
   reparse?: UploadConfirmReparseSource
   acceptFileTypes?: string
@@ -48,6 +52,8 @@ export const useUploadConfirmStore = defineStore('uploadConfirm', {
     files: [] as File[],
     urls: [] as string[],
     tagIds: [] as string[],
+    destinationName: '',
+    createDocumentFolders: false,
     manual: null as UploadConfirmManualSource | null,
     reparse: null as UploadConfirmReparseSource | null,
     acceptFileTypes: '',
@@ -67,6 +73,8 @@ export const useUploadConfirmStore = defineStore('uploadConfirm', {
         this.tagIds = options.tagIds
           ? [...options.tagIds]
           : [...(options.manual?.tagIds || [])]
+        this.destinationName = options.destinationName || ''
+        this.createDocumentFolders = options.createDocumentFolders === true
         this.manual = options.manual || null
         this.reparse = options.reparse || null
         this.acceptFileTypes = options.acceptFileTypes || ''
@@ -93,6 +101,8 @@ export const useUploadConfirmStore = defineStore('uploadConfirm', {
       this.files = []
       this.urls = []
       this.tagIds = []
+      this.destinationName = ''
+      this.createDocumentFolders = false
       this.manual = null
       this.reparse = null
       this.acceptFileTypes = ''
