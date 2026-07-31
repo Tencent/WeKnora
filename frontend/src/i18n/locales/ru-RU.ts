@@ -596,6 +596,14 @@ export default {
     prereqStep3Brief_yuque: '(Опционально) Для Enterprise укажите Base URL',
     prereqStep3Desc_yuque: 'Пользователям публичного облака указывать не нужно. Для Yuque Enterprise или приватного развёртывания укажите корпоративный домен',
     prereqOpenConsole_yuque: 'Перейти к настройкам Yuque Token',
+    prereqBarText_dingtalk: 'Впервые? Нажмите, чтобы увидеть руководство по настройке приложения DingTalk',
+    prereqStep1Brief_dingtalk: 'Создайте внутреннее корпоративное приложение DingTalk',
+    prereqStep1Desc_dingtalk: 'Открытая платформа DingTalk → Разработка приложений → Корпоративное внутреннее приложение → Создать приложение',
+    prereqStep2Brief_dingtalk: 'Предоставьте разрешения для базы знаний',
+    prereqStep2Desc_dingtalk: 'Включите: Чтение базы знаний, Чтение узлов базы знаний, Чтение файлов корпоративного хранилища',
+    prereqStep3Brief_dingtalk: 'Получите Client ID, Client Secret и unionId оператора',
+    prereqStep3Desc_dingtalk: 'Получите Client ID и Client Secret со страницы учётных данных приложения; получите unionId из данных участника в Контактах.',
+    prereqOpenConsole_dingtalk: 'Открыть консоль разработчика DingTalk',
     prereqBotBrief: 'Добавьте приложению возможность «Бот»',
     prereqBotDesc: 'Открытая платформа → Добавить возможность приложения → Бот → Создать версию и опубликовать',
     prereqPermBrief: 'Включите права API',
@@ -637,21 +645,27 @@ export default {
       feedUrls: 'Адреса лент',
       feedUrlsHint: 'По одному адресу ленты RSS / Atom в строке; можно указать несколько.',
       authHeaders: 'Пользовательские заголовки (необязательно)',
-      authHeadersHint: 'Для приватных лент. По одному в строке в формате «Имя: Значение», например Authorization: Bearer xxxx'
+      authHeadersHint: 'Для приватных лент. По одному в строке в формате «Имя: Значение», например Authorization: Bearer xxxx',
+      clientId: 'Client ID',
+      clientSecret: 'Client Secret',
+      operatorId: 'ID оператора (unionId)',
+      operatorIdHint: 'Найдите unionId в консоли администратора DingTalk → Контакты → данные участника или получите через API.'
     },
     connectorDesc: {
       feishu: 'Синхронизация документов, таблиц и файлов из Feishu Wiki',
       lark: 'Синхронизация документов, таблиц и файлов из Lark Wiki',
       notion: 'Синхронизация страниц и баз данных из Notion',
       yuque: 'Синхронизация документов из баз знаний Yuque',
-      rss: 'Синхронизация статей из лент RSS / Atom'
+      rss: 'Синхронизация статей из лент RSS / Atom',
+      dingtalk: 'Синхронизация документов из баз знаний DingTalk'
     },
     connector: {
       feishu: 'Feishu (Фэйшу)',
       lark: 'Lark',
       notion: 'Notion',
       yuque: 'Yuque (Юйцюэ)',
-      rss: 'RSS / Atom лента'
+      rss: 'RSS / Atom лента',
+      dingtalk: 'DingTalk'
     },
     logDetail: {
       startTime: 'Время начала',

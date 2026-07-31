@@ -596,6 +596,14 @@ export default {
     prereqStep3Brief_yuque: '(선택) Enterprise 사용 시 Base URL 입력',
     prereqStep3Desc_yuque: '퍼블릭 클라우드 사용자는 입력하지 않아도 됩니다. Yuque Enterprise 또는 사설 배포 시 기업 도메인을 입력하세요',
     prereqOpenConsole_yuque: 'Yuque Token 설정으로 이동',
+    prereqBarText_dingtalk: '처음이신가요? 딩톡 앱 설정 가이드를 확인하세요',
+    prereqStep1Brief_dingtalk: '딩톡 기업 내부 앱 만들기',
+    prereqStep1Desc_dingtalk: '딩톡 오픈 플랫폼 → 앱 개발 → 기업 내부 앱 → 앱 만들기',
+    prereqStep2Brief_dingtalk: '지식베이스 권한 부여',
+    prereqStep2Desc_dingtalk: '활성화: 지식베이스 읽기, 지식베이스 노드 읽기, 기업 저장소 파일 읽기',
+    prereqStep3Brief_dingtalk: '클라이언트 ID, 클라이언트 시크릿 및 운영자 unionId 획득',
+    prereqStep3Desc_dingtalk: '앱 자격 증명 페이지에서 클라이언트 ID와 시크릿을 얻고, 연락처 구성원 세부정보에서 unionId를 획득',
+    prereqOpenConsole_dingtalk: '딩톡 개발자 콘솔 열기',
     prereqBotBrief: '앱에 \'봇\' 기능 추가',
     prereqBotDesc: '오픈 플랫폼 → 앱 기능 추가 → 봇 → 버전 생성 후 게시',
     prereqPermBrief: 'API 권한 활성화',
@@ -637,21 +645,27 @@ export default {
       feedUrls: '피드 주소',
       feedUrlsHint: '한 줄에 하나씩 RSS / Atom 피드 주소를 입력하세요. 여러 개를 함께 입력할 수 있습니다.',
       authHeaders: '사용자 지정 헤더 (선택)',
-      authHeadersHint: '비공개 피드 접근용. 한 줄에 하나씩 「이름: 값」 형식으로 입력하세요. 예: Authorization: Bearer xxxx'
+      authHeadersHint: '비공개 피드 접근용. 한 줄에 하나씩 「이름: 값」 형식으로 입력하세요. 예: Authorization: Bearer xxxx',
+      clientId: '클라이언트 ID',
+      clientSecret: '클라이언트 시크릿',
+      operatorId: '운영자 ID (unionId)',
+      operatorIdHint: '딩톡 관리 콘솔 → 연락처 → 구성원 세부정보에서 unionId를 찾거나 API를 통해 획득'
     },
     connectorDesc: {
       feishu: '페이슈 위키에서 문서, 스프레드시트, 파일 동기화',
       lark: 'Lark 위키에서 문서, 스프레드시트, 파일 동기화',
       notion: 'Notion에서 페이지 및 데이터베이스 동기화',
       yuque: '위큐 지식베이스에서 문서 동기화',
-      rss: 'RSS / Atom 피드에서 글 동기화'
+      rss: 'RSS / Atom 피드에서 글 동기화',
+      dingtalk: '딩톡 지식베이스에서 문서 동기화'
     },
     connector: {
       feishu: '페이슈 (Feishu)',
       lark: 'Lark (Feishu 글로벌)',
       notion: 'Notion',
       yuque: '위큐 (Yuque)',
-      rss: 'RSS / Atom 피드'
+      rss: 'RSS / Atom 피드',
+      dingtalk: '딩톡'
     },
     logDetail: {
       startTime: '시작 시간',

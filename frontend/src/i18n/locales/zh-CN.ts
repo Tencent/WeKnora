@@ -596,6 +596,14 @@ export default {
     prereqStep3Brief_yuque: '（可选）企业版填写 Base URL',
     prereqStep3Desc_yuque: '公有云用户无需填写；语雀企业版或私有部署请填写企业域名',
     prereqOpenConsole_yuque: '前往语雀 Token 设置',
+    prereqBarText_dingtalk: '首次使用？点击查看钉钉应用配置指南',
+    prereqStep1Brief_dingtalk: '创建钉钉企业内部应用',
+    prereqStep1Desc_dingtalk: '钉钉开放平台 → 应用开发 → 企业内部应用 → 创建应用',
+    prereqStep2Brief_dingtalk: '授予知识库权限',
+    prereqStep2Desc_dingtalk: '开启：知识库读取、知识库节点读取、企业存储文件读取',
+    prereqStep3Brief_dingtalk: '获取 Client ID、Client Secret 和操作者 unionId',
+    prereqStep3Desc_dingtalk: '从应用凭证页获取 Client ID 和 Client Secret；从通讯录成员详情获取 unionId',
+    prereqOpenConsole_dingtalk: '打开钉钉开发者控制台',
     prereqBotBrief: '为应用添加「机器人」能力',
     prereqBotDesc: '开放平台 → 添加应用能力 → 机器人 → 创建版本并发布',
     prereqPermBrief: '开通 API 权限',
@@ -637,21 +645,27 @@ export default {
       feedUrls: '订阅源地址',
       feedUrlsHint: '每行一个 RSS / Atom 订阅源地址，支持同时填写多个',
       authHeaders: '自定义请求头（可选）',
-      authHeadersHint: '用于访问私有订阅源，每行一个，格式为「名称: 值」，例如 Authorization: Bearer xxxx'
+      authHeadersHint: '用于访问私有订阅源，每行一个，格式为「名称: 值」，例如 Authorization: Bearer xxxx',
+      clientId: 'Client ID',
+      clientSecret: 'Client Secret',
+      operatorId: '操作者 ID (unionId)',
+      operatorIdHint: '在钉钉管理后台 → 通讯录 → 成员详情中查看 unionId，或通过 API 获取'
     },
     connectorDesc: {
       feishu: '同步飞书知识库中的文档、表格、文件',
       lark: '同步 Lark 知识库中的文档、表格、文件（飞书国际版）',
       notion: '同步 Notion 中的页面和数据库',
       yuque: '同步语雀知识库中的文档',
-      rss: '同步 RSS / Atom 订阅源中的文章'
+      rss: '同步 RSS / Atom 订阅源中的文章',
+      dingtalk: '同步钉钉知识库中的文档'
     },
     connector: {
       feishu: '飞书',
       lark: 'Lark（飞书国际版）',
       notion: 'Notion',
       yuque: '语雀',
-      rss: 'RSS / Atom 订阅'
+      rss: 'RSS / Atom 订阅',
+      dingtalk: '钉钉'
     },
     logDetail: {
       startTime: '开始时间',
