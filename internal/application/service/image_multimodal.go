@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,7 +21,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
-	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 )
@@ -59,6 +60,16 @@ func buildVLMCaptionPrompt(ctx context.Context, cfg types.VLMConfig) string {
 	return types.AppendCustomPromptInstructions(prompt, cfg.CustomInstructions, "image_description")
 }
 
+// vlmResult is the frozen OCR/Caption output for one image, keyed by
+// hash(image bytes) + vlm model id + effective prompt text. Freezing VLM
+// output at this layer isolates model nondeterminism: downstream chunk IDs,
+// embeddings, wiki maps and graph extractions are all derived from this
+// canonical text, so they remain cache-stable across reparses.
+type vlmResult struct {
+	OCRText string `json:"ocr_text"`
+	Caption string `json:"caption"`
+}
+
 // ImageMultimodalService handles image:multimodal asynq tasks.
 // It reads images from storage (via FileService for provider:// URLs),
 // performs OCR and VLM caption, and creates child chunks.
@@ -88,6 +99,11 @@ type ImageMultimodalService struct {
 	// spanTracker records this image's subspan under the parent attempt's
 	// multimodal stage. nil-safe — falls back to no-op via tracker().
 	spanTracker SpanTracker
+
+	// cache is the content-addressed VLM result cache (OCR/Caption frozen by
+	// image bytes + model + prompt fingerprint). nil-safe: a missing store
+	// behaves as a permanent miss.
+	cache *contentCache
 }
 
 func NewImageMultimodalService(
@@ -104,6 +120,7 @@ func NewImageMultimodalService(
 	fileSvc interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
+	cacheRepo interfaces.ContentCacheRepository,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	return &ImageMultimodalService{
@@ -121,6 +138,7 @@ func NewImageMultimodalService(
 		storageResolver: storageResolver,
 		resourceCatalog: resourceCatalog,
 		spanTracker:     spanTracker,
+		cache:           &contentCache{repo: cacheRepo},
 	}
 }
 
@@ -257,52 +275,100 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		OriginalURL: payload.ImageURL,
 	}
 
+	// VLM cache: OCR/Caption is a pure function of (image bytes, model,
+	// prompts). Successful results are frozen under a content-addressed key
+	// (image hash + model id + effective prompt text), so a reparse or
+	// crash-retry of an unchanged image never re-runs the VLM, and VLM output
+	// nondeterminism is isolated at the source: downstream content hashes
+	// (chunk IDs, wiki maps, embeddings) stay stable across reruns.
+	ocrPrompt := ""
 	if payload.EnableOCR {
-		prompt := vlmOCRPrompt
+		ocrPrompt = vlmOCRPrompt
 		if payload.ImageSourceType == "scanned_pdf" {
-			prompt = vlmOCRScannedPDFPrompt
-			logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", payload.ImageURL)
+			ocrPrompt = vlmOCRScannedPDFPrompt
 			imgOut["ocr_prompt"] = "scanned_pdf"
 		} else {
 			imgOut["ocr_prompt"] = "default"
 		}
-		prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
+		ocrPrompt = types.AppendCustomPromptInstructions(ocrPrompt, vlmCfg.CustomInstructions, "image_ocr")
+	}
+	captionPrompt := buildVLMCaptionPrompt(ctx, vlmCfg)
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
-		if ocrErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
-			imgOut["ocr_error"] = ocrErr.Error()
+	imgHash := sha256.Sum256(imgBytes)
+	vlmModelID := strings.TrimSpace(vlmCfg.ModelID)
+	if vlmModelID == "" {
+		vlmModelID = "legacy_inline"
+	}
+	vlmKey := types.ContentCacheKey(types.ContentCacheKindVLM,
+		hex.EncodeToString(imgHash[:]), vlmModelID, ocrPrompt, captionPrompt)
+	var cachedVLM vlmResult
+	if hit, _ := s.cache.get(ctx, vlmKey, &cachedVLM); hit {
+		// Cache hit: freeze the canonical OCR/Caption text. No VLM call.
+		imageInfo.OCRText = cachedVLM.OCRText
+		imageInfo.Caption = cachedVLM.Caption
+		imgOut["vlm_cache"] = "hit"
+		if imageInfo.OCRText != "" {
+			imgOut["ocr_chars"] = len([]rune(imageInfo.OCRText))
+			imgOut["ocr_preview"] = previewText(imageInfo.OCRText, 200)
 		} else {
-			ocrText = sanitizeOCRText(ocrText)
-			if ocrText != "" {
-				imageInfo.OCRText = ocrText
-				imgOut["ocr_chars"] = len([]rune(ocrText))
-				imgOut["ocr_preview"] = previewText(ocrText, 200)
+			imgOut["ocr_chars"] = 0
+		}
+		if imageInfo.Caption != "" {
+			imgOut["caption_chars"] = len([]rune(imageInfo.Caption))
+			imgOut["caption_preview"] = previewText(imageInfo.Caption, 200)
+		}
+	} else {
+		imgOut["vlm_cache"] = "miss"
+		var ocrErr, capErr error
+		if payload.EnableOCR {
+			var ocrText string
+			ocrText, ocrErr = vlmModel.Predict(ctx, [][]byte{imgBytes}, ocrPrompt)
+			if ocrErr != nil {
+				logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
+				imgOut["ocr_error"] = ocrErr.Error()
 			} else {
-				logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", payload.ImageURL)
-				imgOut["ocr_chars"] = 0
-				imgOut["ocr_skipped"] = "empty_or_invalid"
+				ocrText = sanitizeOCRText(ocrText)
+				if ocrText != "" {
+					imageInfo.OCRText = ocrText
+					imgOut["ocr_chars"] = len([]rune(ocrText))
+					imgOut["ocr_preview"] = previewText(ocrText, 200)
+				} else {
+					logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", payload.ImageURL)
+					imgOut["ocr_chars"] = 0
+					imgOut["ocr_skipped"] = "empty_or_invalid"
+				}
 			}
 		}
-	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
-	if capErr != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
-		imgOut["caption_error"] = capErr.Error()
-	} else if caption != "" {
-		imageInfo.Caption = caption
-		imgOut["caption_chars"] = len([]rune(caption))
-		imgOut["caption_preview"] = previewText(caption, 200)
-	}
+		var caption string
+		caption, capErr = vlmModel.Predict(ctx, [][]byte{imgBytes}, captionPrompt)
+		if capErr != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
+			imgOut["caption_error"] = capErr.Error()
+		} else if caption != "" {
+			imageInfo.Caption = caption
+			imgOut["caption_chars"] = len([]rune(caption))
+			imgOut["caption_preview"] = previewText(caption, 200)
+		}
 
+		// Freeze the result only when every VLM call succeeded. Any error is
+		// treated as transient and left uncached so a retry (asynq redelivery
+		// / crash recovery) re-runs the failed call instead of permanently
+		// freezing an empty OCR/Caption.
+		if ocrErr == nil && capErr == nil {
+			s.cache.set(ctx, vlmKey, types.ContentCacheKindVLM, vlmResult{
+				OCRText: imageInfo.OCRText,
+				Caption: imageInfo.Caption,
+			})
+		}
+	}
 	// Build child chunks for OCR and caption results
 	imageInfoJSON, _ := json.Marshal([]types.ImageInfo{imageInfo})
 	var newChunks []*types.Chunk
 
 	if imageInfo.OCRText != "" {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              types.StableChunkID(payload.KnowledgeID, string(types.ChunkTypeImageOCR), payload.ChunkID, imageInfo.OCRText),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
@@ -319,7 +385,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if imageInfo.Caption != "" {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              types.StableChunkID(payload.KnowledgeID, string(types.ChunkTypeImageCaption), payload.ChunkID, imageInfo.Caption),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
@@ -341,18 +407,39 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		return nil
 	}
 
-	// Persist chunks
-	if err := s.chunkService.CreateChunks(ctx, newChunks); err != nil {
+	// Persist chunks. With content-addressed chunk IDs a retried delivery may
+	// already have written the same children (asynq redelivery after a crash);
+	// skip existing rows instead of failing on duplicate primary keys.
+	var toCreate []*types.Chunk
+	reusedChunks := 0
+	chunkRepo := s.chunkService.GetRepository()
+	for _, c := range newChunks {
+		if chunkRepo != nil {
+			if existing, gerr := chunkRepo.GetChunkByID(ctx, payload.TenantID, c.ID); gerr == nil && existing != nil {
+				reusedChunks++
+				logger.Infof(ctx, "[ImageMultimodal] Reused existing %s chunk %s for image %s",
+					c.ChunkType, c.ID, payload.ImageURL)
+				continue
+			}
+		}
+		toCreate = append(toCreate, c)
+	}
+	imgOut["reused_chunks"] = reusedChunks
+	if len(toCreate) == 0 {
+		imgOut["skipped"] = "chunks_already_exist"
+		return nil
+	}
+	if err := s.chunkService.CreateChunks(ctx, toCreate); err != nil {
 		handleErr = fmt.Errorf("create multimodal chunks: %w", err)
 		return handleErr
 	}
-	for _, c := range newChunks {
+	for _, c := range toCreate {
 		logger.Infof(ctx, "[ImageMultimodal] Created %s chunk %s for image %s, len=%d",
 			c.ChunkType, c.ID, payload.ImageURL, len(c.Content))
 	}
 
 	// Index chunks so they can be retrieved
-	s.indexChunks(ctx, payload, newChunks)
+	s.indexChunks(ctx, payload, toCreate)
 	imgOut["indexed"] = true
 
 	// Enqueue question generation for the caption/OCR content if KB has it enabled.

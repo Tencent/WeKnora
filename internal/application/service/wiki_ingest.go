@@ -331,6 +331,9 @@ type wikiIngestService struct {
 	pendingRepo    interfaces.TaskPendingOpsRepository
 	deadLetterRepo interfaces.TaskDeadLetterRepository
 	redisClient    *redis.Client // nil in Lite mode (no Redis)
+	// cache is the content-addressed store for per-document wiki maps
+	// (candidate slugs / summary / chunk-citation classification). nil-safe.
+	cache *contentCache
 	// spanTracker lets per-document map work surface as a
 	// postprocess.wiki subspan in the knowledge trace tree. Async
 	// batch design means we look up the parent attempt by knowledge
@@ -371,6 +374,7 @@ func NewWikiIngestService(
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	deadLetterRepo interfaces.TaskDeadLetterRepository,
 	redisClient *redis.Client,
+	cacheRepo interfaces.ContentCacheRepository,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	svc := &wikiIngestService{
@@ -385,6 +389,7 @@ func NewWikiIngestService(
 		pendingRepo:    pendingRepo,
 		deadLetterRepo: deadLetterRepo,
 		redisClient:    redisClient,
+		cache:          &contentCache{repo: cacheRepo},
 		spanTracker:    spanTracker,
 	}
 	return svc

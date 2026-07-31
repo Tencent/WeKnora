@@ -164,6 +164,9 @@ type ChunkExtractService struct {
 	knowledgeRepo     interfaces.KnowledgeRepository
 	chunkRepo         interfaces.ChunkRepository
 	graphEngine       interfaces.RetrieveGraphRepository
+	// cache is the content-addressed store for per-chunk graph extractions.
+	// nil-safe: a missing store behaves as a permanent miss.
+	cache *contentCache
 	// spanTracker records this graph-extract task's subspan under the
 	// parent attempt's postprocess stage so the trace viewer shows real
 	// per-chunk graph extraction time rather than the upstream's enqueue.
@@ -178,6 +181,7 @@ func NewChunkExtractService(
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
+	cacheRepo interfaces.ContentCacheRepository,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	return &ChunkExtractService{
@@ -187,6 +191,7 @@ func NewChunkExtractService(
 		knowledgeRepo:     knowledgeRepo,
 		chunkRepo:         chunkRepo,
 		graphEngine:       graphEngine,
+		cache:             &contentCache{repo: cacheRepo},
 		spanTracker:       spanTracker,
 	}
 }
@@ -330,10 +335,27 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		},
 	}
 	extractor := chatpipeline.NewExtractor(chatModel, template)
-	graph, err := extractor.Extract(ctx, chunk.Content)
-	if err != nil {
-		handleErr = err
-		return err
+
+	// Per-chunk graph cache: extraction is a pure function of (chunk content,
+	// model, template). The key embeds the effective template (custom
+	// instructions, tags, examples) plus the model id, so a reparse of an
+	// unchanged chunk reuses the extracted nodes/relations instead of burning
+	// another Chat call; a config or model change invalidates this layer only.
+	templateJSON, _ := json.Marshal(template)
+	graphKey := types.ContentCacheKey(types.ContentCacheKindGraph,
+		p.ModelID, promptFingerprint(string(templateJSON), chunk.Content))
+	var graph *types.GraphData
+	if hit, _ := s.cache.get(ctx, graphKey, &graph); hit {
+		graphOut["graph_cache"] = "hit"
+		logger.Infof(ctx, "graph extract: cache hit for chunk %s", p.ChunkID)
+	} else {
+		graphOut["graph_cache"] = "miss"
+		graph, err = extractor.Extract(ctx, chunk.Content)
+		if err != nil {
+			handleErr = err
+			return err
+		}
+		s.cache.set(ctx, graphKey, types.ContentCacheKindGraph, graph)
 	}
 
 	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)

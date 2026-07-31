@@ -209,6 +209,22 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	} else if resSummary.RowsAffected > 0 {
 		logger.Infof(ctx, "[Housekeeping] recovered %d stuck summary rows", resSummary.RowsAffected)
 	}
+
+	// Sweep C: prune the content-addressed pipeline cache. Cache keys embed
+	// content hashes and config/model/prompt versions, so entries naturally
+	// become unreachable after any content or config change; this sweep only
+	// bounds table growth. 30 days is far longer than any realistic reparse
+	// window, so it never evicts a still-reachable entry.
+	cacheCutoff := time.Now().Add(-30 * 24 * time.Hour)
+	resCache := h.db.WithContext(ctx).
+		Where("updated_at < ?", cacheCutoff).
+		Limit(5000).
+		Delete(&types.ContentCache{})
+	if resCache.Error != nil {
+		logger.Warnf(ctx, "[Housekeeping] content cache sweep failed: %v", resCache.Error)
+	} else if resCache.RowsAffected > 0 {
+		logger.Infof(ctx, "[Housekeeping] pruned %d stale content cache rows", resCache.RowsAffected)
+	}
 }
 
 // filterByLastSpanActivity returns the subset of candidates whose most

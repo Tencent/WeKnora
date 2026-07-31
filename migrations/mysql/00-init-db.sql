@@ -227,3 +227,16 @@ CREATE TABLE chunk_revisions (
     UNIQUE KEY idx_chunk_revisions_chunk_revision (chunk_id, revision),
     KEY idx_chunk_revisions_tenant_chunk (tenant_id, chunk_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- Content-addressed cache for deterministic pipeline products (VLM OCR/Caption,
+-- embeddings, wiki per-document maps, per-chunk graph extractions, summaries,
+-- questions). Keys embed content hash + model id + prompt/config version so an
+-- unchanged input always hits and a changed input (or model) misses.
+CREATE TABLE content_cache (
+    cache_key VARCHAR(128) PRIMARY KEY,
+    kind VARCHAR(32) NOT NULL DEFAULT '',
+    payload LONGTEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_content_cache_kind (kind),
+    KEY idx_content_cache_updated_at (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

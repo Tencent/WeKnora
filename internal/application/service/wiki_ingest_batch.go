@@ -1148,6 +1148,49 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 	return nil
 }
 
+// wikiMapCachePayload is the frozen per-document wiki map: everything the
+// map phase computes from LLM calls (candidate slugs, dedup output, summary,
+// chunk citations) with no cross-document state. The reduce/merge phase is
+// deliberately NOT cached — it depends on the live state of other pages.
+type wikiMapCachePayload struct {
+	Pass0Failed       bool                     `json:"pass0_failed"`
+	ExtractedEntities []extractedItem          `json:"extracted_entities"`
+	ExtractedConcepts []extractedItem          `json:"extracted_concepts"`
+	SlugItems         map[string]extractedItem `json:"slug_items"`
+	SummaryContent    string                   `json:"summary_content"`
+	Citations         map[string][]string      `json:"citations"`
+	NewSlugs          []newSlugFromCitation    `json:"new_slugs"`
+	BatchCount        int                      `json:"batch_count"`
+}
+
+// wikiMapCacheKey derives the content-addressed key for a document's wiki map.
+// Every LLM-facing input is embedded in the key: the frozen document content,
+// language, the document's current page set (which shapes slug continuity),
+// extraction granularity / custom instructions, the chat model id and the
+// prompt templates. Changing any of them invalidates exactly this layer; a
+// reparse of an unchanged document therefore hits and skips extract/dedup/
+// summary/classify.
+func wikiMapCacheKey(modelID, content, lang string, oldPageSlugs map[string]bool, batchCtx *WikiBatchContext) string {
+	slugs := make([]string, 0, len(oldPageSlugs))
+	for slug := range oldPageSlugs {
+		slugs = append(slugs, slug)
+	}
+	sort.Strings(slugs)
+	granularity := batchCtx.ExtractionGranularity.Normalize()
+	return types.ContentCacheKey(types.ContentCacheKindWikiMap,
+		content, lang, strings.Join(slugs, "\n"),
+		string(granularity),
+		batchCtx.ContentInstructions,
+		batchCtx.ExtractionInstructions,
+		modelID,
+		promptFingerprint(
+			agent.WikiCandidateSlugPrompt,
+			agent.WikiDeduplicationPrompt,
+			agent.WikiSummaryPrompt,
+			agent.WikiChunkCitationPrompt,
+		),
+	)
+}
 func (s *wikiIngestService) mapOneDocument(
 	ctx context.Context,
 	chatModel chat.Chat,
@@ -1233,39 +1276,58 @@ func (s *wikiIngestService) mapOneDocument(
 	sourceRef := knowledgeID
 	oldPageSlugs := s.getExistingPageSlugsForKnowledge(ctx, payload.KnowledgeBaseID, knowledgeID)
 
-	// Pass 0: lightweight candidate slug extraction (skeleton only).
-	// On failure we fall back to the legacy single-shot extractor so the doc
-	// still gets ingested, just without chunk-level citations.
 	var (
 		extractedEntities []extractedItem
 		extractedConcepts []extractedItem
 		slugItems         map[string]extractedItem
 		pass0Failed       bool
 	)
-	logger.Infof(ctx, "wiki ingest: pass 0 — extracting candidate slugs for %s", knowledgeID)
-	extractSpan := s.tracker().BeginSubSpan(ctx, wikiSpan, "postprocess.wiki.extract", types.SpanKindSubSpan, types.JSONMap{
-		"content_chars": utf8.RuneCountInString(content),
-		"old_pages":     len(oldPageSlugs),
-	})
-	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
-	if err != nil {
-		logger.Warnf(ctx, "wiki ingest: pass 0 failed for %s (%v) — falling back to legacy extractor", knowledgeID, err)
-		pass0Failed = true
-		extractedEntities, extractedConcepts, slugItems, err = s.extractEntitiesAndConceptsNoUpsert(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
-		if err != nil {
-			logger.Warnf(ctx, "wiki ingest: legacy fallback also failed for %s: %v", knowledgeID, err)
-			s.tracker().FailSpan(ctx, extractSpan, "EXTRACT_FAILED", err.Error(), err)
-			s.tracker().FailSpan(ctx, wikiSpan, "EXTRACT_FAILED", err.Error(), err)
-			return nil, nil, err
-		}
+
+	// Map cache: the wiki per-document map (candidate slugs + dedup + summary
+	// + chunk citations) is a pure function of the frozen document content and
+	// the extraction configuration. On a hit we skip every per-doc LLM call
+	// and go straight to the (deliberately uncached) reduce/merge phase.
+	wikiMapKey := wikiMapCacheKey(chatModel.GetModelID(), content, lang, oldPageSlugs, batchCtx)
+	var cachedMap wikiMapCachePayload
+	mapCacheHit := false
+	if hit, _ := s.cache.get(ctx, wikiMapKey, &cachedMap); hit {
+		mapCacheHit = true
+		extractedEntities = cachedMap.ExtractedEntities
+		extractedConcepts = cachedMap.ExtractedConcepts
+		slugItems = cachedMap.SlugItems
+		pass0Failed = cachedMap.Pass0Failed
+		logger.Infof(ctx, "wiki ingest: map cache hit for %s (skipping extract/dedup/summary/classify)", knowledgeID)
 	}
-	s.tracker().EndSpan(ctx, extractSpan, types.JSONMap{
-		"entities":         len(extractedEntities),
-		"concepts":         len(extractedConcepts),
-		"pass0_fallback":   pass0Failed,
-		"entities_preview": previewExtractedItems(extractedEntities, 8),
-		"concepts_preview": previewExtractedItems(extractedConcepts, 8),
-	})
+
+	if !mapCacheHit {
+		// Pass 0: lightweight candidate slug extraction (skeleton only).
+		// On failure we fall back to the legacy single-shot extractor so the doc
+		// still gets ingested, just without chunk-level citations.
+		logger.Infof(ctx, "wiki ingest: pass 0 extracting candidate slugs for %s", knowledgeID)
+		extractSpan := s.tracker().BeginSubSpan(ctx, wikiSpan, "postprocess.wiki.extract", types.SpanKindSubSpan, types.JSONMap{
+			"content_chars": utf8.RuneCountInString(content),
+			"old_pages":     len(oldPageSlugs),
+		})
+		extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
+		if err != nil {
+			logger.Warnf(ctx, "wiki ingest: pass 0 failed for %s (%v) falling back to legacy extractor", knowledgeID, err)
+			pass0Failed = true
+			extractedEntities, extractedConcepts, slugItems, err = s.extractEntitiesAndConceptsNoUpsert(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
+			if err != nil {
+				logger.Warnf(ctx, "wiki ingest: legacy fallback also failed for %s: %v", knowledgeID, err)
+				s.tracker().FailSpan(ctx, extractSpan, "EXTRACT_FAILED", err.Error(), err)
+				s.tracker().FailSpan(ctx, wikiSpan, "EXTRACT_FAILED", err.Error(), err)
+				return nil, nil, err
+			}
+		}
+		s.tracker().EndSpan(ctx, extractSpan, types.JSONMap{
+			"entities":         len(extractedEntities),
+			"concepts":         len(extractedConcepts),
+			"pass0_fallback":   pass0Failed,
+			"entities_preview": previewExtractedItems(extractedEntities, 8),
+			"concepts_preview": previewExtractedItems(extractedConcepts, 8),
+		})
+	}
 
 	// Build slug listing for Summary's wiki-link input.
 	var summaryExtractedPages []string
@@ -1302,6 +1364,16 @@ func (s *wikiIngestService) mapOneDocument(
 		batchCount     int
 	)
 
+	// On a map cache hit the parallel goroutines below skip every LLM call;
+	// restore the frozen summary/citation halves so the reduce phase and the
+	// summary page reuse the exact cached text instead of empty values.
+	if mapCacheHit {
+		summaryContent = cachedMap.SummaryContent
+		citations = cachedMap.Citations
+		newSlugs = cachedMap.NewSlugs
+		batchCount = cachedMap.BatchCount
+	}
+
 	// Both calls run in parallel goroutines under the same wikiSpan
 	// parent — their subspans will visually overlap in the trace view,
 	// which correctly reflects their wall-clock concurrency.
@@ -1321,6 +1393,17 @@ func (s *wikiIngestService) mapOneDocument(
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
+		if mapCacheHit {
+			// Summary is part of the frozen per-doc map; reuse it verbatim.
+			sumLine, sumBody := splitSummaryLine(summaryContent)
+			s.tracker().EndSpan(ctx, summarySpan, types.JSONMap{
+				"cache_hit":    true,
+				"chars":        utf8.RuneCountInString(summaryContent),
+				"summary_line": previewText(sumLine, 160),
+				"body_preview": previewText(sumBody, 320),
+			})
+			return
+		}
 		summaryContent, summaryErr = s.generateWithTemplate(ctx, chatModel, agent.WikiSummaryPrompt, map[string]string{
 			"Content":            content,
 			"Language":           lang,
@@ -1344,6 +1427,16 @@ func (s *wikiIngestService) mapOneDocument(
 		// Skip citation pass when Pass 0 has fallen back to the legacy path —
 		// the legacy output already contains paraphrased Details, so chunk
 		// citations would be redundant and we'd spend LLM calls for nothing.
+		if mapCacheHit {
+			// Chunk citations are part of the frozen per-doc map; reuse them.
+			s.tracker().EndSpan(ctx, classifySpan, types.JSONMap{
+				"cache_hit":   true,
+				"cited_slugs": len(citations),
+				"new_slugs":   len(newSlugs),
+				"batches":     batchCount,
+			})
+			return
+		}
 		if pass0Failed {
 			citations = map[string][]string{}
 			return
@@ -1359,6 +1452,21 @@ func (s *wikiIngestService) mapOneDocument(
 		})
 	}()
 	wg.Wait()
+
+	// Freeze the map result. Only stored after a full LLM pass so a
+	// partially-failed run (summary error) never poisons the cache.
+	if !mapCacheHit {
+		s.cache.set(ctx, wikiMapKey, types.ContentCacheKindWikiMap, wikiMapCachePayload{
+			Pass0Failed:       pass0Failed,
+			ExtractedEntities: extractedEntities,
+			ExtractedConcepts: extractedConcepts,
+			SlugItems:         slugItems,
+			SummaryContent:    summaryContent,
+			Citations:         citations,
+			NewSlugs:          newSlugs,
+			BatchCount:        batchCount,
+		})
+	}
 
 	// Merge citations back into the item structs (non-failing; items without
 	// citations simply keep their Description+Details fallback).
@@ -1565,8 +1673,13 @@ func (s *wikiIngestService) mapOneDocument(
 	// been written. That way the span's duration reflects the full
 	// "wiki processing for this knowledge" time the user sees in the
 	// trace viewer, not just the LLM extraction slice.
+	mapCacheLabel := "miss"
+	if mapCacheHit {
+		mapCacheLabel = "hit"
+	}
 	mapStats := types.JSONMap{
 		"doc_title":        previewText(docTitle, 120),
+		"map_cache":        mapCacheLabel,
 		"chunks":           len(chunks),
 		"candidate_slugs":  len(slugItems),
 		"cited_chunks":     len(citedChunkSet),

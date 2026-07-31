@@ -80,6 +80,10 @@ type knowledgeService struct {
 	// which has a no-op fallback. See knowledge_span_tracker.go.
 	spanTracker SpanTracker
 	audit       interfaces.AuditLogService
+	// contentCache is the content-addressed cache for deterministic pipeline
+	// products (VLM OCR/Caption, embeddings, summaries, questions, wiki maps,
+	// graph extractions). nil-safe: absent in test harnesses / minimal wiring.
+	contentCache *contentCache
 }
 
 const (
@@ -117,6 +121,7 @@ func NewKnowledgeService(
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
 	spanTracker SpanTracker,
 	audit interfaces.AuditLogService,
+	contentCacheRepo interfaces.ContentCacheRepository,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
 		config:          config,
@@ -146,6 +151,7 @@ func NewKnowledgeService(
 		taskPendingRepo: taskPendingRepo,
 		spanTracker:     spanTracker,
 		audit:           audit,
+		contentCache:    &contentCache{repo: contentCacheRepo},
 	}, nil
 }
 

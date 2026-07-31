@@ -8,6 +8,7 @@ import (
 	"io"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -283,6 +284,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks get embedding model failed")
 			return
 		}
+		// Content-addressed embedding cache: embeddings are a pure function of
+		// (normalized text, model, dimensions), so unchanged chunks across a
+		// reparse reuse the cached vectors instead of re-calling the provider.
+		embeddingModel = s.contentCache.wrapEmbedder(embeddingModel)
 	} else {
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping embedding model", kb.ID)
 	}
@@ -389,7 +394,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		parentDBChunks = make([]*types.Chunk, len(options.ParentChunks))
 		for i, pc := range options.ParentChunks {
 			parentDBChunks[i] = &types.Chunk{
-				ID:              uuid.New().String(),
+				// Content-addressed ID: the same parsed content yields the same
+				// chunk ID across reparses, keeping vector / wiki / graph
+				// references alive when nothing changed.
+				ID:              types.StableChunkID(knowledge.ID, string(types.ChunkTypeParentText), strconv.Itoa(pc.Seq), pc.Content),
 				TenantID:        knowledge.TenantID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
@@ -428,7 +436,8 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 		// 创建主文本Chunk
 		textChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			// Content-addressed ID (see StableChunkID above).
+			ID:              types.StableChunkID(knowledge.ID, string(types.ChunkTypeText), strconv.Itoa(int(chunkData.Seq)), chunkData.Content),
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
@@ -872,6 +881,19 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	summaryPrompt := types.RenderPromptPlaceholders(s.config.Conversation.GenerateSummaryPrompt, types.PlaceholderValues{
 		"language": types.LanguageNameFromContext(ctx),
 	})
+
+	// Summary cache: the document summary is a pure function of (content,
+	// model, prompt, language, max tokens). A reparse of unchanged content
+	// reuses the cached summary instead of re-running the Chat call.
+	summaryKey := types.ContentCacheKey(types.ContentCacheKindSummary,
+		summaryModel.GetModelID(),
+		promptFingerprint(summaryPrompt, contentWithMetadata, itoa(maxTokens)))
+	var cachedSummary string
+	if hit, _ := s.contentCache.get(ctx, summaryKey, &cachedSummary); hit {
+		logger.GetLogger(ctx).WithField("summary", cachedSummary).Infof("GetSummary cache hit for knowledge %s", knowledge.ID)
+		return cachedSummary, nil
+	}
+
 	thinking := false
 	modelCtx := types.WithLLMCallMetadata(ctx, "document_summary", "")
 	summary, err := summaryModel.Chat(modelCtx, []chat.Message{
@@ -892,6 +914,7 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		logger.GetLogger(ctx).WithField("error", err).Errorf("GetSummary failed")
 		return "", err
 	}
+	s.contentCache.set(ctx, summaryKey, types.ContentCacheKindSummary, summary.Content)
 	logger.GetLogger(ctx).WithField("summary", summary.Content).Infof("GetSummary success")
 	return summary.Content, nil
 }
@@ -1201,7 +1224,9 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// and surfacing them in retrieved RAG context can re-introduce the
 		// hallucination vector this branch is meant to close.
 		summaryChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			// Content-addressed slot ID: stable across reparses of the same
+			// document (the summary content itself is cached separately).
+			ID:              types.StableChunkID(knowledge.ID, string(types.ChunkTypeSummary), strconv.Itoa(maxChunkIndex+1), ""),
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
@@ -1246,6 +1271,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			summaryErr = err
 			return fmt.Errorf("failed to get embedding model: %w", err)
 		}
+		embeddingModel = s.contentCache.wrapEmbedder(embeddingModel)
 
 		indexInfo := []*types.IndexInfo{{
 			Content:         summaryChunk.Content,
@@ -1516,6 +1542,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		logger.Errorf(ctx, "Failed to get embedding model: %v", err)
 		return fmt.Errorf("failed to get embedding model: %w", err)
 	}
+	embeddingModel = s.contentCache.wrapEmbedder(embeddingModel)
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
@@ -1826,6 +1853,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		logger.Errorf(ctx, "Failed to get embedding model: %v", err)
 		return fmt.Errorf("failed to get embedding model: %w", err)
 	}
+	embeddingModel = s.contentCache.wrapEmbedder(embeddingModel)
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
@@ -2026,6 +2054,18 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	})
 	prompt = types.AppendCustomPromptInstructions(prompt, customInstructions, "question_generation")
 
+	// Question cache: per-chunk question generation is a pure function of
+	// (chunk content + surrounding context, model, prompt, question count).
+	// The final rendered prompt already embeds every input, so it is hashed
+	// directly into the key; a reparse of unchanged chunks reuses the cached
+	// questions instead of re-running the Chat call per chunk.
+	questionKey := types.ContentCacheKey(types.ContentCacheKindQuestion,
+		chatModel.GetModelID(), promptFingerprint(prompt, langName, itoa(questionCount)))
+	var cachedQuestions []string
+	if hit, _ := s.contentCache.get(ctx, questionKey, &cachedQuestions); hit {
+		return cachedQuestions, nil
+	}
+
 	thinking := false
 	modelCtx := types.WithLLMCallMetadata(ctx, "question_generation", "")
 	response, err := chatModel.Chat(modelCtx, []chat.Message{
@@ -2058,6 +2098,9 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 				break
 			}
 		}
+	}
+	if len(questions) > 0 {
+		s.contentCache.set(ctx, questionKey, types.ContentCacheKindQuestion, questions)
 	}
 
 	return questions, nil
@@ -2233,7 +2276,8 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 		}
 		if !found {
 			summaryChunk := &types.Chunk{
-				ID: uuid.NewString(), TenantID: tenantID, KnowledgeID: knowledge.ID,
+				ID:       types.StableChunkID(knowledge.ID, string(types.ChunkTypeSummary), strconv.Itoa(maxIndex+1), ""),
+				TenantID: tenantID, KnowledgeID: knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID, Content: "# Summary\n" + summary,
 				ChunkIndex: maxIndex + 1, IsEnabled: true, ChunkType: types.ChunkTypeSummary,
 				ParentChunkID: textChunks[0].ID, CreatedAt: time.Now(), UpdatedAt: time.Now(),
@@ -2672,6 +2716,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 	if err != nil {
 		return err
 	}
+	embeddingModel = s.contentCache.wrapEmbedder(embeddingModel)
 
 	// Initialize composite retrieve engine from tenant configuration
 	indexInfo := make([]*types.IndexInfo, 0, len(chunks))
@@ -2826,7 +2871,9 @@ func (s *knowledgeService) UpdateImageInfo(
 	// Create a new caption chunk if it doesn't exist and we have caption data
 	if !hasCaptionChunk && image.Caption != "" {
 		captionChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			// Content-addressed ID so a re-upload of the same image content
+			// reuses the same child chunk (and its downstream references).
+			ID:              types.StableChunkID(chunk.KnowledgeID, string(types.ChunkTypeImageCaption), chunk.ID, image.Caption),
 			TenantID:        tenantID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
@@ -2842,7 +2889,7 @@ func (s *knowledgeService) UpdateImageInfo(
 	// Create a new OCR chunk if it doesn't exist and we have OCR data
 	if !hasOCRChunk && image.OCRText != "" {
 		ocrChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              types.StableChunkID(chunk.KnowledgeID, string(types.ChunkTypeImageOCR), chunk.ID, image.OCRText),
 			TenantID:        tenantID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
