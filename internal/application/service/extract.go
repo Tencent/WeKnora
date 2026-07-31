@@ -225,7 +225,7 @@ func (s *ChunkExtractService) tracker() SpanTracker {
 }
 
 func graphExtractionContentKey(content string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(content)))
+	sum := sha256.Sum256([]byte(content))
 	return hex.EncodeToString(sum[:])
 }
 

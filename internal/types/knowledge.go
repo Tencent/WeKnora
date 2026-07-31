@@ -385,7 +385,63 @@ func (p ManualKnowledgePayload) IsDraft() bool {
 	return p.Status == "" || p.Status == ManualKnowledgeStatusDraft
 }
 
-const metadataKeyProcessOverrides = "process_overrides"
+const (
+	metadataKeyProcessOverrides = "process_overrides"
+	metadataKeySummaryCache     = "summary_cache"
+)
+
+// KnowledgeSummaryCacheMetadata records which deterministic summary input
+// produced Description. ContentHash prevents a manually edited description
+// from being mistaken for the cached model output.
+type KnowledgeSummaryCacheMetadata struct {
+	Key         string `json:"key"`
+	ContentHash string `json:"content_hash"`
+	Content     string `json:"content"`
+}
+
+func (k *Knowledge) SummaryCacheMetadata() (*KnowledgeSummaryCacheMetadata, error) {
+	if k == nil || len(k.Metadata) == 0 {
+		return nil, nil
+	}
+	metadataMap, err := k.Metadata.Map()
+	if err != nil {
+		return nil, err
+	}
+	raw, ok := metadataMap[metadataKeySummaryCache]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	bytes, err := json.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	var cache KnowledgeSummaryCacheMetadata
+	if err := json.Unmarshal(bytes, &cache); err != nil {
+		return nil, err
+	}
+	return &cache, nil
+}
+
+func (k *Knowledge) SetSummaryCacheMetadata(cache *KnowledgeSummaryCacheMetadata) error {
+	if k == nil {
+		return nil
+	}
+	metadataMap, err := k.Metadata.Map()
+	if err != nil {
+		return err
+	}
+	if cache == nil {
+		delete(metadataMap, metadataKeySummaryCache)
+	} else {
+		metadataMap[metadataKeySummaryCache] = cache
+	}
+	bytes, err := json.Marshal(metadataMap)
+	if err != nil {
+		return err
+	}
+	k.Metadata = JSON(bytes)
+	return nil
+}
 
 // ProcessOverrides parses process config overrides from knowledge metadata.
 func (k *Knowledge) ProcessOverrides() (*KnowledgeProcessOverrides, error) {

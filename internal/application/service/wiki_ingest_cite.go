@@ -280,9 +280,11 @@ func (s *wikiIngestService) classifyChunkCitations(
 		eg.Go(func() error {
 			chunksXML := renderChunksXML(batch)
 			raw, cacheHit, err := s.generateWikiMapWithCache(ectx, tenantID, chatModel, "wiki_chunk_citation", agent.WikiChunkCitationPrompt, map[string]string{
-				"CandidateSlugs": candidatesXML,
-				"ChunksXML":      chunksXML,
-				"Language":       lang,
+				"CandidateSlugs":     candidatesXML,
+				"ChunksXML":          chunksXML,
+				"Language":           lang,
+				"CustomInstructions": batchCtx.ExtractionInstructions,
+				"InstructionScope":   "wiki_extraction",
 			}, validateWikiCitationJSON)
 			if err != nil {
 				logger.Warnf(ectx, "wiki ingest: citation batch %d failed: %v", batchIdx, err)

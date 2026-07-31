@@ -285,6 +285,7 @@ type DocumentProcessPayload struct {
 	Language                 string   `json:"language,omitempty"`         // Request locale for {{language}} in prompt templates
 	ReuseUnchangedChunks     bool     `json:"reuse_unchanged_chunks,omitempty"`
 	AllowLegacyChunkReuse    bool     `json:"allow_legacy_chunk_reuse,omitempty"`
+	ReindexReusedChunks      bool     `json:"reindex_reused_chunks,omitempty"`
 	// Attempt is the per-knowledge attempt number this task belongs to.
 	// Set on enqueue (initial parse → attempt 1; reparse → max+1) so
 	// every span recorded by this task lands on the right attempt
@@ -459,12 +460,15 @@ type KnowledgeMoveProgress struct {
 // Used for both create (publish) and update operations.
 type ManualProcessPayload struct {
 	TracingContext
-	RequestId       string `json:"request_id"`
-	TenantID        uint64 `json:"tenant_id"`
-	KnowledgeID     string `json:"knowledge_id"`
-	KnowledgeBaseID string `json:"knowledge_base_id"`
-	Content         string `json:"content"`      // cleaned markdown content
-	NeedCleanup     bool   `json:"need_cleanup"` // true for update, false for create
+	RequestId             string `json:"request_id"`
+	TenantID              uint64 `json:"tenant_id"`
+	KnowledgeID           string `json:"knowledge_id"`
+	KnowledgeBaseID       string `json:"knowledge_base_id"`
+	Content               string `json:"content"`      // cleaned markdown content
+	NeedCleanup           bool   `json:"need_cleanup"` // true for update, false for create
+	ReuseUnchangedChunks  bool   `json:"reuse_unchanged_chunks,omitempty"`
+	AllowLegacyChunkReuse bool   `json:"allow_legacy_chunk_reuse,omitempty"`
+	ReindexReusedChunks   bool   `json:"reindex_reused_chunks,omitempty"`
 }
 
 // ImageMultimodalPayload represents the image multimodal processing task payload.

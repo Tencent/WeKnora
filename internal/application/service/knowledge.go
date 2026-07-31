@@ -66,6 +66,7 @@ type knowledgeService struct {
 	redisClient     *redis.Client
 	kbShareService  interfaces.KBShareService
 	imageResolver   *docparser.ImageResolver
+	parseCacheRepo  interfaces.DocumentParseCacheRepository
 	taskPendingRepo interfaces.TaskPendingOpsRepository
 
 	// In-memory fallbacks for Lite mode (no Redis)
@@ -112,6 +113,7 @@ func NewKnowledgeService(
 	redisClient *redis.Client,
 	kbShareService interfaces.KBShareService,
 	imageResolver *docparser.ImageResolver,
+	parseCacheRepo interfaces.DocumentParseCacheRepository,
 	wikiRepo interfaces.WikiPageRepository,
 	wikiService interfaces.WikiPageService,
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
@@ -141,6 +143,7 @@ func NewKnowledgeService(
 		redisClient:     redisClient,
 		kbShareService:  kbShareService,
 		imageResolver:   imageResolver,
+		parseCacheRepo:  parseCacheRepo,
 		wikiRepo:        wikiRepo,
 		wikiService:     wikiService,
 		taskPendingRepo: taskPendingRepo,

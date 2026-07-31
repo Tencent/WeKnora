@@ -357,7 +357,9 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 				logger.Warnf(ctx, "[ImageMultimodal] Cache payload invalid for image %s: %v", payload.ImageURL, err)
 				imgOut["cache_error"] = err.Error()
 			} else {
-				imgOut["cache_hit"] = true
+				imgOut["cache_hit"] =
+					(!payload.EnableOCR || cachePayload.HasOCR) &&
+						(!payload.EnableCaption || cachePayload.HasCaption)
 			}
 		}
 	}
@@ -396,27 +398,29 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	if cachePayload.HasCaption {
-		imageInfo.Caption = cachePayload.Caption
-		imgOut["caption_cache_hit"] = true
-		imgOut["caption_chars"] = len([]rune(cachePayload.Caption))
-		if cachePayload.Caption != "" {
-			imgOut["caption_preview"] = previewText(cachePayload.Caption, 200)
-		}
-	} else {
-		imgOut["caption_cache_hit"] = false
-		caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, captionPrompt)
-		if capErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
-			imgOut["caption_error"] = capErr.Error()
+	if payload.EnableCaption {
+		if cachePayload.HasCaption {
+			imageInfo.Caption = cachePayload.Caption
+			imgOut["caption_cache_hit"] = true
+			imgOut["caption_chars"] = len([]rune(cachePayload.Caption))
+			if cachePayload.Caption != "" {
+				imgOut["caption_preview"] = previewText(cachePayload.Caption, 200)
+			}
 		} else {
-			cachePayload.HasCaption = true
-			cachePayload.Caption = caption
-			cacheDirty = true
-			if caption != "" {
-				imageInfo.Caption = caption
-				imgOut["caption_chars"] = len([]rune(caption))
-				imgOut["caption_preview"] = previewText(caption, 200)
+			imgOut["caption_cache_hit"] = false
+			caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, captionPrompt)
+			if capErr != nil {
+				logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
+				imgOut["caption_error"] = capErr.Error()
+			} else {
+				cachePayload.HasCaption = true
+				cachePayload.Caption = caption
+				cacheDirty = true
+				if caption != "" {
+					imageInfo.Caption = caption
+					imgOut["caption_chars"] = len([]rune(caption))
+					imgOut["caption_preview"] = previewText(caption, 200)
+				}
 			}
 		}
 	}

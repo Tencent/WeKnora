@@ -63,6 +63,13 @@ type DocumentChunkMetadata struct {
 	GeneratedQuestions []GeneratedQuestion `json:"generated_questions,omitempty"`
 	// GeneratedQuestionsRevision ties the questions to Chunk.ContentRevision.
 	GeneratedQuestionsRevision int `json:"generated_questions_revision,omitempty"`
+	// GeneratedQuestionsCacheKey identifies the exact model, prompt, config,
+	// content, and surrounding context used to generate the questions.
+	GeneratedQuestionsCacheKey string `json:"generated_questions_cache_key,omitempty"`
+	// GeneratedQuestionsIndexKey identifies the embedding/index contract for
+	// GeneratedQuestions. It changes independently from generation so switching
+	// embedding models does not call the chat model again.
+	GeneratedQuestionsIndexKey string `json:"generated_questions_index_key,omitempty"`
 }
 
 // IsQuestionCurrent reports whether a generated question was authored for the

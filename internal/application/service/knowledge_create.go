@@ -1089,7 +1089,7 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 
 // enqueueManualProcessing enqueues a manual:process Asynq task for async cleanup + re-indexing.
 func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
-	knowledge *types.Knowledge, content string, needCleanup bool,
+	knowledge *types.Knowledge, content string, needCleanup bool, reuseOptions ...ProcessChunksOptions,
 ) (string, error) {
 	requestID, _ := types.RequestIDFromContext(ctx)
 	payload := types.ManualProcessPayload{
@@ -1099,6 +1099,11 @@ func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
 		KnowledgeBaseID: knowledge.KnowledgeBaseID,
 		Content:         content,
 		NeedCleanup:     needCleanup,
+	}
+	if len(reuseOptions) > 0 {
+		payload.ReuseUnchangedChunks = reuseOptions[0].ReuseUnchangedChunks
+		payload.AllowLegacyChunkReuse = reuseOptions[0].AllowLegacyChunkReuse
+		payload.ReindexReusedChunks = reuseOptions[0].ReindexReusedChunks
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
@@ -1160,6 +1165,7 @@ func sanitizeManualDownloadFilename(title string) string {
 
 func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, content string, doSync bool,
+	reuseOptions ...ProcessChunksOptions,
 ) {
 	clean := strings.TrimSpace(content)
 	if clean == "" {
@@ -1198,6 +1204,11 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	opts := ProcessChunksOptions{
 		EnableMultimodel: eff.EnableMultimodel && len(resolvedImages) > 0,
 		StoredImages:     resolvedImages,
+	}
+	if len(reuseOptions) > 0 {
+		opts.ReuseUnchangedChunks = reuseOptions[0].ReuseUnchangedChunks
+		opts.AllowLegacyChunkReuse = reuseOptions[0].AllowLegacyChunkReuse
+		opts.ReindexReusedChunks = reuseOptions[0].ReindexReusedChunks
 	}
 	if eff.QuestionGenerationConfig.Enabled {
 		opts.EnableQuestionGeneration = true

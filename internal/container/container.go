@@ -150,6 +150,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewGraphExtractionCacheRepository))
 	must(container.Provide(repository.NewWikiMapCacheRepository))
 	must(container.Provide(repository.NewImageMultimodalCacheRepository))
+	must(container.Provide(repository.NewDocumentParseCacheRepository))
 	must(container.Provide(repository.NewKnowledgeTagRepository))
 	must(container.Provide(repository.NewSessionRepository))
 	must(container.Provide(repository.NewMessageRepository))
