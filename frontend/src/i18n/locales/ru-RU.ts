@@ -1,4 +1,7 @@
+import enUS from './en-US'
+
 export default {
+  knowledgeFolder: enUS.knowledgeFolder,
   platformApiKeys: {
     title: 'Платформенные API-ключи',
     description: 'Учетные данные для автоматизации между рабочими пространствами. Для API пространства используйте X-Tenant-ID.',
