@@ -102,6 +102,13 @@ func (s *sessionService) resolveChatModelID(
 	customAgent := req.CustomAgent
 	session := req.Session
 
+	if customAgent != nil && customAgent.ID == types.BuiltinWikiFixerID {
+		if len(knowledgeBaseIDs) != 1 {
+			return "", fmt.Errorf("wiki fixer requires exactly one knowledge base")
+		}
+		return ResolveWikiRepairModelID(ctx, s.knowledgeBaseService, s.modelService, knowledgeBaseIDs[0])
+	}
+
 	if customAgent != nil {
 		configuredModelID := strings.TrimSpace(customAgent.Config.ModelID)
 		if configuredModelID == "" {

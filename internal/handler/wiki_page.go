@@ -1120,6 +1120,15 @@ func (h *WikiPageHandler) StartIssueRepair(c *gin.Context) {
 
 	sessionID := ""
 	if mode != types.WikiIssueRepairDeterministic {
+		kb, kbErr := h.kbService.GetKnowledgeBaseByID(c.Request.Context(), kbID)
+		if kbErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": kbErr.Error()})
+			return
+		}
+		if service.WikiRepairModelID(kb) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "wiki repair model is not configured for this knowledge base"})
+			return
+		}
 		session := &types.Session{
 			TenantID: tenantID, Title: "Wiki Repair: " + issue.Slug,
 			Description: "Wiki repair session for issue " + issue.ID,
@@ -1228,6 +1237,49 @@ func (h *WikiPageHandler) ListActiveRepairAttempts(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, attempts)
+}
+
+// CancelRepairAttempt marks an in-flight repair attempt as failed and releases
+// the issue so the client can retry after a stream error or user abort.
+func (h *WikiPageHandler) CancelRepairAttempt(c *gin.Context) {
+	kbID, _, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	attemptID := strings.TrimSpace(c.Param("attempt_id"))
+	attempt, err := h.wikiService.GetRepairAttempt(c.Request.Context(), kbID, attemptID)
+	if err != nil {
+		writeWikiIssueError(c, err)
+		return
+	}
+	if attempt.Status == types.WikiIssueStatusResolved || attempt.Status == types.WikiIssueStatusFailed {
+		c.JSON(http.StatusOK, attempt)
+		return
+	}
+	var body struct {
+		Message string `json:"message"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	message := strings.TrimSpace(body.Message)
+	if message == "" {
+		message = "Repair was cancelled."
+	}
+	if err := h.wikiService.FailIssueRepair(
+		c.Request.Context(), kbID, attempt.IssueID, attemptID, message,
+	); err != nil {
+		writeWikiIssueError(c, err)
+		return
+	}
+	refreshed, refreshErr := h.wikiService.GetRepairAttempt(c.Request.Context(), kbID, attemptID)
+	if refreshErr != nil {
+		c.JSON(http.StatusOK, attempt)
+		return
+	}
+	c.JSON(http.StatusOK, refreshed)
 }
 
 // SearchPages godoc

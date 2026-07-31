@@ -170,8 +170,9 @@ const props = defineProps({
     kbIds: { type: Array, default: () => [] },
     embeddedMode: { type: Boolean, default: false },
     initialQuery: { type: String, default: '' },
+    summaryModelId: { type: String, default: '' },
 });
-const emit = defineEmits(['initial-query-consumed']);
+const emit = defineEmits(['initial-query-consumed', 'wiki-repair-stream-failed']);
 
 const usemenuStore = useMenuStore();
 const useSettingsStoreInstance = useSettingsStore();
@@ -665,6 +666,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     prepareForNewOutgoingMessage();
     isReplying.value = true;
     loading.value = true;
+    const effectiveModelId = modelId || (props.embeddedMode ? props.summaryModelId : '');
     const selectedAgentId = props.embeddedMode ? props.agentId : (useSettingsStoreInstance.selectedAgentId || '');
     const selectedAgentSourceTenantId = props.embeddedMode
         ? undefined
@@ -827,7 +829,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         agent_id: selectedAgentId,
         agent_source_tenant_id: selectedAgentSourceTenantId,
         web_search_enabled: webSearchEnabled,
-        summary_model_id: modelId,
+        summary_model_id: effectiveModelId,
         mcp_service_ids: requestMcpServiceIds,
         skill_names: requestSkillNames,
         tag_ids: tagIds,
@@ -904,8 +906,11 @@ watch(error, (newError) => {
     MessagePlugin.error(newError);
     isReplying.value = false;
     loading.value = false;
-    // 清空当前 assistant message ID
+  // 清空当前 assistant message ID
     currentAssistantMessageId.value = '';
+    if (props.embeddedMode && props.agentId === 'builtin-wiki-fixer') {
+        emit('wiki-repair-stream-failed', newError);
+    }
 });
 
 onChunk((data) => {
@@ -961,6 +966,14 @@ onBeforeMount(async () => {
         useSettingsStoreInstance.selectKnowledgeBases(props.kbIds);
     }
 
+    if (props.embeddedMode && props.summaryModelId) {
+        useSettingsStoreInstance.updateConversationModels({
+            summaryModelId: props.summaryModelId,
+            selectedChatModelId: props.summaryModelId,
+            rerankModelId: '',
+        });
+    }
+
     // 必须在 Input-field onMounted 之前完成：按 session.last_request_state 恢复输入栏
     await loadSessionAndHydrate(session_id.value);
 });
@@ -977,7 +990,10 @@ onMounted(async () => {
     if (initialQuery) {
         scrollLock.value = true;
         historyLoading.value = false;
-        if (firstModelId.value) {
+        const initialModelId = props.embeddedMode
+            ? (props.summaryModelId || firstModelId.value || '')
+            : (firstModelId.value || '');
+        if (firstModelId.value && !props.embeddedMode) {
             useSettingsStoreInstance.updateConversationModels({
                 summaryModelId: firstModelId.value,
                 selectedChatModelId: firstModelId.value,
@@ -986,7 +1002,12 @@ onMounted(async () => {
         }
         if (props.initialQuery) emit('initial-query-consumed');
         else usemenuStore.changeFirstQuery('', [], '', [], []);
-        sendMsg(initialQuery, firstModelId.value || '', firstMentionedItems.value || [], firstImageFiles.value || [], firstAttachmentFiles.value || []);
+        if (props.embeddedMode && props.agentId === 'builtin-wiki-fixer' && !initialModelId) {
+            emit('wiki-repair-stream-failed', t('knowledgeEditor.wikiBrowser.repairModelRequired'));
+            scrollLock.value = false;
+            return;
+        }
+        sendMsg(initialQuery, initialModelId, firstMentionedItems.value || [], firstImageFiles.value || [], firstAttachmentFiles.value || []);
     } else {
         scrollLock.value = false;
         hasMoreHistory.value = true;

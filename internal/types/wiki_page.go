@@ -500,6 +500,9 @@ func (g WikiExtractionGranularity) Normalize() WikiExtractionGranularity {
 type WikiConfig struct {
 	// SynthesisModelID is the LLM model ID used for wiki page generation and updates
 	SynthesisModelID string `yaml:"synthesis_model_id" json:"synthesis_model_id"`
+	// RepairModelID is the LLM model ID used by the built-in wiki fixer agent when
+	// repairing issues on this knowledge base. Required for agent-mode repairs.
+	RepairModelID string `yaml:"repair_model_id" json:"repair_model_id"`
 	// MaxPagesPerIngest limits pages created/updated per ingest operation (0 = no limit)
 	MaxPagesPerIngest int `yaml:"max_pages_per_ingest" json:"max_pages_per_ingest"`
 	// ExtractionGranularity controls how many candidate slugs Pass 0 extracts

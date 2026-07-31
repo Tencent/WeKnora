@@ -338,5 +338,9 @@ func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHan
 			"/repair-attempts/:attempt_id", g.OwnedWikiKBOrAdmin(),
 			g.KBAccessWrite("kb_id"), wikiHandler.GetRepairAttempt,
 		)
+		wiki.POST(
+			"/repair-attempts/:attempt_id/cancel", g.OwnedWikiKBOrAdmin(),
+			g.KBAccessWrite("kb_id"), wikiHandler.CancelRepairAttempt,
+		)
 	}
 }

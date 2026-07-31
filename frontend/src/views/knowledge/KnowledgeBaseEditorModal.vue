@@ -742,6 +742,7 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       llmModelId: '',
       embeddingModelId: '',
       wikiSynthesisModelId: '',
+      wikiRepairModelId: '',
     },
     chunkingConfig: {
       chunkSize: 512,
@@ -864,7 +865,8 @@ const loadKBData = async (kbIdOverride?: string) => {
       modelConfig: {
         llmModelId: kb.summary_model_id || '',
         embeddingModelId: kb.embedding_model_id || '',
-        wikiSynthesisModelId: kb.wiki_config?.synthesis_model_id || ''
+        wikiSynthesisModelId: kb.wiki_config?.synthesis_model_id || '',
+        wikiRepairModelId: kb.wiki_config?.repair_model_id || ''
       },
       chunkingConfig: {
         chunkSize: kb.chunking_config?.chunk_size || 512,
@@ -1278,6 +1280,7 @@ const buildSubmitData = () => {
   if (formData.value.type !== 'faq') {
     data.wiki_config = {
       synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
+      repair_model_id: formData.value.modelConfig?.wikiRepairModelId || '',
       max_pages_per_ingest: formData.value.wikiConfig?.maxPagesPerIngest || 0,
       extraction_granularity: formData.value.wikiConfig?.extractionGranularity || 'standard',
       content_instructions: formData.value.wikiConfig?.contentInstructions || '',
@@ -1383,6 +1386,7 @@ const doSubmit = async () => {
       if (formData.value.wikiConfig && formData.value.type !== 'faq') {
         updateConfig.wiki_config = {
           synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
+          repair_model_id: formData.value.modelConfig?.wikiRepairModelId || '',
           max_pages_per_ingest: formData.value.wikiConfig.maxPagesPerIngest || 0,
           extraction_granularity: formData.value.wikiConfig.extractionGranularity || 'standard',
           content_instructions: formData.value.wikiConfig.contentInstructions || '',

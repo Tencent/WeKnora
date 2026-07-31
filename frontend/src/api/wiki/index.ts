@@ -133,10 +133,12 @@ export interface WikiLintRun {
   id: string;
   knowledge_base_id: string;
   status: 'queued' | 'running' | 'completed' | 'failed' | string;
+  rule_version?: string;
   progress: number;
   finding_count: number;
   error_message: string;
   created_at: string;
+  started_at?: string;
   finished_at?: string;
 }
 
@@ -434,6 +436,12 @@ export function getWikiRepairAttempt(kbId: string, attemptId: string) {
 
 export function listActiveWikiRepairAttempts(kbId: string) {
   return get(`/api/v1/knowledgebase/${kbId}/wiki/repair-attempts/active`);
+}
+
+export function cancelWikiRepairAttempt(kbId: string, attemptId: string, message?: string) {
+  return post(`/api/v1/knowledgebase/${kbId}/wiki/repair-attempts/${attemptId}/cancel`, {
+    message: message || '',
+  });
 }
 
 export function rebuildWikiLinks(kbId: string) {
