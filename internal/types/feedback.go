@@ -92,8 +92,8 @@ func (MessageChunkReference) TableName() string { return "message_chunk_referenc
 type ChunkFeedbackAudit struct {
 	ID                   uint64                   `json:"id" gorm:"primaryKey;autoIncrement"`
 	ChunkTenantID        uint64                   `json:"chunk_tenant_id" gorm:"not null;index:idx_feedback_audit"`
-	ChunkKnowledgeBaseID string                   `json:"chunk_knowledge_base_id" gorm:"type:varchar(36);not null;index:idx_feedback_audit"`
-	ChunkID              string                   `json:"chunk_id" gorm:"type:varchar(36);not null;index:idx_feedback_audit"`
+	ChunkKnowledgeBaseID string                   `json:"chunk_knowledge_base_id" gorm:"not null;index:idx_feedback_audit"`
+	ChunkID              string                   `json:"chunk_id" gorm:"not null;index:idx_feedback_audit"`
 	ActorTenantID        uint64                   `json:"-" gorm:"not null"`
 	ActorUserID          string                   `json:"-" gorm:"type:varchar(64);not null"`
 	Action               ChunkFeedbackAuditAction `json:"action" gorm:"type:varchar(32);not null"`

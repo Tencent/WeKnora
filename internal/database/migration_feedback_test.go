@@ -33,7 +33,8 @@ func TestChunkFeedbackSQLiteMigrationUpDownUp(t *testing.T) {
 	for i, triggerSource := range allowed {
 		if _, err := db.Exec(`
 			INSERT INTO chunk_feedback_audits
-				(chunk_tenant_id, chunk_knowledge_base_id, chunk_id, actor_tenant_id, actor_user_id, action, trigger_source, old_weight, new_weight)
+				(chunk_tenant_id, chunk_knowledge_base_id, chunk_id, actor_tenant_id,
+				 actor_user_id, action, trigger_source, old_weight, new_weight)
 			VALUES (1, 'kb', printf('chunk-%d', ?), 1, 'user', 'feedback_weight_changed', ?, 1.0, 1.0)
 		`, i, triggerSource); err != nil {
 			t.Fatalf("insert trigger source %q: %v", triggerSource, err)
@@ -41,7 +42,8 @@ func TestChunkFeedbackSQLiteMigrationUpDownUp(t *testing.T) {
 	}
 	if _, err := db.Exec(`
 		INSERT INTO chunk_feedback_audits
-			(chunk_tenant_id, chunk_knowledge_base_id, chunk_id, actor_tenant_id, actor_user_id, action, trigger_source, old_weight, new_weight)
+			(chunk_tenant_id, chunk_knowledge_base_id, chunk_id, actor_tenant_id,
+			 actor_user_id, action, trigger_source, old_weight, new_weight)
 		VALUES (1, 'kb', 'invalid-chunk', 1, 'user', 'feedback_weight_changed', 'invalid', 1.0, 1.0)
 	`); err == nil {
 		t.Fatal("invalid trigger source unexpectedly passed the migration constraint")
