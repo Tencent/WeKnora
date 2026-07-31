@@ -248,7 +248,13 @@ const handleKBEditorSuccess = (kbId: string) => {
     display: flex;
     justify-content: center;
     align-items: center;
-    // position: relative;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    padding: 32px clamp(16px, 4vw, 48px);
+    box-sizing: border-box;
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 
 .dialogue-answers {
@@ -256,6 +262,7 @@ const handleKBEditorSuccess = (kbId: string) => {
     flex-flow: column;
     align-items: center;
     width: 100%;
+    min-width: 0;
     max-width: 960px;
     gap: 24px;
 
@@ -272,7 +279,10 @@ const handleKBEditorSuccess = (kbId: string) => {
     font-size: 28px;
     font-weight: 600;
     align-items: center;
+    max-width: 100%;
     margin-bottom: 0;
+    line-height: 1.35;
+    text-align: center;
 
     .icon {
         display: flex;
@@ -305,6 +315,8 @@ const handleKBEditorSuccess = (kbId: string) => {
 }
 
 .suggested-questions-container {
+    box-sizing: border-box;
+    width: 100%;
     max-width: 960px;
     margin: 0;
     padding: 0 16px;
@@ -363,43 +375,33 @@ const handleKBEditorSuccess = (kbId: string) => {
     }
 }
 
-@media (max-width: 1250px) and (min-width: 1045px) {
-    .answers-input {
-        transform: translateX(-329px);
+@media screen and (min-width: 768px) and (max-width: 1199px) {
+    .dialogue-wrap {
+        padding-inline: 24px;
     }
 
-    :deep(.t-textarea__inner) {
-        width: 654px !important;
-    }
-}
-
-@media (max-width: 1045px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 500px !important;
+    .dialogue-title {
+        font-size: 24px;
     }
 }
 
-@media (max-width: 750px) {
-    .answers-input {
-        transform: translateX(-250px);
+@media screen and (max-width: 767px) {
+    .dialogue-wrap {
+        align-items: flex-start;
+        padding: clamp(24px, 10dvh, 72px) 12px max(20px, env(safe-area-inset-bottom));
     }
 
-    :deep(.t-textarea__inner) {
-        width: 340px !important;
-    }
-}
-
-@media (max-width: 600px) {
-    .answers-input {
-        transform: translateX(-250px);
+    .dialogue-answers {
+        gap: 16px;
+        margin-block: auto;
     }
 
-    :deep(.t-textarea__inner) {
-        width: 300px !important;
+    .dialogue-title {
+        font-size: 22px;
+    }
+
+    .suggested-questions-container {
+        padding-inline: 0;
     }
 }
 </style>

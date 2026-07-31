@@ -202,3 +202,27 @@
     color: var(--td-brand-color);
 }
 
+@media screen and (max-width: 767px) {
+    .suggested-questions-container {
+        padding: 8px 0;
+    }
+
+    .suggested-questions-title-row {
+        margin-bottom: 8px;
+    }
+
+    .suggested-questions-grid {
+        gap: 8px;
+    }
+
+    .suggested-question-card,
+    .suggested-question-card.sq-card-skeleton {
+        width: 100%;
+        padding: 8px 12px;
+    }
+
+    .suggested-question-text {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+}

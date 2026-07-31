@@ -1031,8 +1031,9 @@ onBeforeRouteUpdate((to, from, next) => {
     display: flex;
     flex-direction: column;
     align-items: center;
+    width: 100%;
     max-width: calc(100vw - 260px);
-    min-width: 400px;
+    min-width: 0;
 
     &.is-sidebar-collapsed {
         max-width: calc(100vw - 60px);
@@ -1264,6 +1265,43 @@ onBeforeRouteUpdate((to, from, next) => {
         border-top-color: var(--td-text-color-secondary);
         border-radius: 50%;
         animation: chatGlobalWaitSpin 0.8s linear infinite;
+    }
+}
+
+@media screen and (min-width: 768px) and (max-width: 1199px) {
+    .chat {
+        padding-left: 16px;
+    }
+
+    .input-container,
+    .msg_list {
+        max-width: min(960px, 100%);
+    }
+}
+
+@media screen and (max-width: 767px) {
+    .chat:not(.is-embedded) {
+        max-width: calc(100vw - 60px);
+        padding: 0 12px max(12px, env(safe-area-inset-bottom));
+        overflow-x: hidden;
+    }
+
+    .chat_scroll_box {
+        padding-top: 4px;
+    }
+
+    .input-container {
+        min-height: 99px;
+    }
+
+    .msg_list {
+        gap: 12px;
+    }
+
+    .scroll-to-bottom-btn {
+        bottom: 112px;
+        width: 32px;
+        height: 32px;
     }
 }
 
