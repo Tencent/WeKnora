@@ -12,7 +12,8 @@
   </teleport>
   <t-drawer v-model:visible="drawerVisible" v-bind="drawerPassthroughAttrs" :size="effectiveWidth" :z-index="2500" placement="right"
     attach="body" destroy-on-close :footer="!hideFooter"
-    :class="drawerClass">
+    :close-on-esc-keydown="!cancelDisabled" :close-on-overlay-click="!cancelDisabled"
+    :class="drawerClass" @before-close="blurActiveElementBeforeClose">
     <!--
       Custom header. We replace TDesign's default header so we can put a leading
       icon badge and an optional subtitle (description) right next to the title,
@@ -140,7 +141,10 @@ const drawerPassthroughAttrs = computed(() => {
 // ---------- visibility ----------
 const drawerVisible = computed({
   get: () => props.visible,
-  set: (val) => emit('update:visible', val)
+  set: (val) => {
+    if (!val && props.cancelDisabled) return
+    emit('update:visible', val)
+  }
 })
 
 // ---------- width state ----------
@@ -267,9 +271,19 @@ onUnmounted(() => {
   cleanupResize()
 })
 
+function blurActiveElementBeforeClose() {
+  // TDesign textarea autosize calls getComputedStyle on blur/resize; if the
+  // drawer is already tearing down (destroy-on-close), that node may no longer
+  // be an Element and the promise rejects uncaught.
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+  }
+}
+
 const handleConfirm = () => emit('confirm')
 const handleCancel = () => {
   if (props.cancelDisabled) return
+  blurActiveElementBeforeClose()
   emit('cancel')
   emit('update:visible', false)
 }

@@ -213,11 +213,12 @@ class WeKnoraClient:
     )
 
     def resolve_agent_id(self, agent_id_or_name: str) -> str:
-        """Resolve an agent name to its UUID if needed.
+        """Resolve an agent ID or name to its canonical ID.
 
         If *agent_id_or_name* is already a UUID it is returned unchanged.
-        Otherwise all agents are listed and the first one whose
-        ``name`` matches (case-insensitive) is returned.
+        Otherwise all agents are listed and the first one whose ``id``
+        matches exactly or whose ``name`` matches case-insensitively is
+        returned.
         Raises ValueError when no match is found.
         """
         if self._UUID_RE.match(agent_id_or_name):
@@ -228,7 +229,11 @@ class WeKnoraClient:
             agents = agents.get("list", agents.get("items", []))
         needle = agent_id_or_name.lower()
         for agent in (agents or []):
-            if isinstance(agent, dict) and agent.get("name", "").lower() == needle:
+            if not isinstance(agent, dict):
+                continue
+            if agent.get("id") == agent_id_or_name:
+                return agent["id"]
+            if agent.get("name", "").lower() == needle:
                 return agent["id"]
         raise ValueError(
             f"Agent {agent_id_or_name!r} not found. "

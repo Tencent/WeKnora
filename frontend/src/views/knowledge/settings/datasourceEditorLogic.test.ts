@@ -202,6 +202,15 @@ test('all supported locales and icon routing contain DingTalk UI contracts', () 
     'prereqStep3Brief_dingtalk',
     'prereqStep3Desc_dingtalk',
     'prereqOpenConsole_dingtalk',
+    'resumeFailed',
+    'syncError.feishu_auth_or_permission',
+    'syncError.feishu_rate_limited',
+    'syncError.feishu_timeout',
+    'syncError.feishu_server_unavailable',
+    'syncError.feishu_api_error',
+    'syncError.feishu_api_error_generic',
+    'syncError.sync_failed',
+    'syncError.ingest_failed',
     'syncError.delete_failed',
   ]
 

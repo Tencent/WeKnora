@@ -400,6 +400,63 @@ func TestGetSessionAllowsIMRuntimeToReadIMSession(t *testing.T) {
 	require.Equal(t, "feishu", got.IMPlatform)
 }
 
+func TestGetSessionAllowsEmbedRuntimeToReadOwnEmbedSession(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+
+	// An embed-widget session: description marks the channel, user_id is the
+	// per-session principal's storage id (see CreateEmbedSession).
+	principal := types.EmbedSessionPrincipal(1, "ch-1", "sess-1")
+	ownSession := &types.Session{
+		TenantID:    1,
+		Title:       "embed chat",
+		Description: types.EmbedSessionMarkerPrefix + "ch-1",
+		UserID:      principal.StorageID(),
+	}
+	require.NoError(t, db.Create(ownSession).Error)
+
+	// The embed widget authenticates as a Viewer (embed_auth.go) but is the
+	// legitimate owner of its own channel session — symmetric to the IM and
+	// API-tenant runtimes above.
+	ctx := context.WithValue(
+		testSessionScopeContext(1, "system-1"),
+		types.TenantRoleContextKey,
+		types.TenantRoleViewer,
+	)
+	ctx = types.WithPrincipal(ctx, principal)
+
+	got, err := svc.GetSession(ctx, ownSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, ownSession.ID, got.ID)
+}
+
+func TestGetSessionDeniesEmbedRuntimeFromReadingForeignEmbedSession(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+
+	// A session owned by a different embed session principal.
+	owner := types.EmbedSessionPrincipal(1, "ch-1", "sess-other")
+	foreignSession := &types.Session{
+		TenantID:    1,
+		Title:       "foreign embed chat",
+		Description: types.EmbedSessionMarkerPrefix + "ch-1",
+		UserID:      owner.StorageID(),
+	}
+	require.NoError(t, db.Create(foreignSession).Error)
+
+	// A different embed session principal must not read it — the owner scope
+	// keeps each visitor's conversation isolated even after the bypass is granted.
+	ctx := context.WithValue(
+		testSessionScopeContext(1, "system-1"),
+		types.TenantRoleContextKey,
+		types.TenantRoleViewer,
+	)
+	ctx = types.WithPrincipal(ctx, types.EmbedSessionPrincipal(1, "ch-1", "sess-attacker"))
+
+	_, err := svc.GetSession(ctx, foreignSession.ID)
+	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
+}
+
 // testListSessionsIMChannelSession lets QueryPaged's LEFT JOIN resolve against a
 // real table in the in-memory SQLite database.
 type testListSessionsIMChannelSession struct {

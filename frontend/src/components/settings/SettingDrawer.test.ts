@@ -12,6 +12,12 @@ test('设置抽屉保留可访问的显式关闭入口', () => {
   assert.match(drawerSource, /:aria-label="t\('common\.close'\)"/)
   assert.match(drawerSource, /:disabled="cancelDisabled"/)
   assert.match(drawerSource, /@click="handleCancel"/)
+  assert.match(drawerSource, /@before-close="blurActiveElementBeforeClose"/)
+  assert.match(drawerSource, /document\.activeElement instanceof HTMLElement/)
+  assert.match(drawerSource, /if \(props\.cancelDisabled\) return\s+blurActiveElementBeforeClose\(\)/)
+  assert.match(drawerSource, /:close-on-esc-keydown="!cancelDisabled"/)
+  assert.match(drawerSource, /:close-on-overlay-click="!cancelDisabled"/)
+  assert.match(drawerSource, /if \(!val && props\.cancelDisabled\) return/)
 })
 
 test('设置抽屉在常见移动端宽度保持紧凑单行页脚', () => {
