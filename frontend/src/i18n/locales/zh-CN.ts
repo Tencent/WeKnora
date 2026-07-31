@@ -595,6 +595,7 @@ export default {
     prereqStep2Desc_yuque: '至少勾选 repo:read 和 doc:read（读取知识库和文档内容）',
     prereqStep3Brief_yuque: '（可选）企业版填写 Base URL',
     prereqStep3Desc_yuque: '公有云用户无需填写；语雀企业版或私有部署请填写企业域名',
+    prereqOpenConsole_yuque: '前往语雀 Token 设置',
     prereqStep1Brief_feishu: "创建飞书自建应用",
     prereqStep1Desc_feishu: "登录飞书开放平台 → 创建企业自建应用",
     prereqStep2Brief_feishu: "添加机器人能力",
