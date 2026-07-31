@@ -425,76 +425,97 @@
                     </span>
 
                     <template #content>
-                      <div class="wiki-issue-popup-content">
-                        <div class="wiki-issue-popup-header">
-                          <div class="wiki-issue-popup-title">
-                            <span>{{ $t('knowledgeEditor.wikiBrowser.issueFixSuggestions', { count: pageIssues.length })
-                            }}</span>
-                          </div>
-                          <t-tooltip
-                            v-if="props.canEdit"
-                            :content="pageHasRepairableIssues
-                              ? $t('knowledgeEditor.wikiBrowser.issueFixBtn')
-                              : $t('knowledgeEditor.wikiBrowser.repairModelRequired')"
-                            placement="top"
-                          >
-                            <t-button size="small" theme="primary" variant="base"
-                              :disabled="!pageHasRepairableIssues"
-                              @click="triggerAutoFix">
-                              <template #icon><t-icon name="tools" /></template>
-                              {{ $t('knowledgeEditor.wikiBrowser.issueFixBtn') }}
-                            </t-button>
-                          </t-tooltip>
-                        </div>
-                        <div class="wiki-issue-popup-list">
-                          <div v-for="issue in pageIssues" :key="issue.id" class="wiki-issue-popup-item">
-                            <div class="wiki-issue-popup-main">
-                              <div class="wiki-issue-popup-tags">
-                                <t-tag v-if="issue.issue_type === 'mixed_entities'" theme="warning" variant="light"
-                                  size="small">{{
-                                    $t('knowledgeEditor.wikiBrowser.issueMixed') }}</t-tag>
-                                <t-tag v-else-if="issue.issue_type === 'contradictory_facts'" theme="danger"
-                                  variant="light" size="small">{{
-                                    $t('knowledgeEditor.wikiBrowser.issueConflict') }}</t-tag>
-                                <t-tag v-else-if="issue.issue_type === 'out_of_date'" theme="default" variant="light"
-                                  size="small">{{
-                                    $t('knowledgeEditor.wikiBrowser.issueOutdated') }}</t-tag>
-                                <t-tag v-else theme="primary" variant="light" size="small">{{
-                                  $t('knowledgeEditor.wikiBrowser.issueAttention') }}</t-tag>
-                              </div>
-                              <div class="wiki-issue-popup-desc">
-                                {{ issue.description }}
-                              </div>
-                              <div class="wiki-issue-popup-meta">
-                                <span class="wiki-issue-popup-reporter">
-                                  {{ issue.reported_by === 'wiki-researcher-agent' ?
-                                    $t('knowledgeEditor.wikiBrowser.issueAiLinter') :
-                                    $t('knowledgeEditor.wikiBrowser.issueReportedBy', { reporter: issue.reported_by }) }}
-                                </span>
-                                <div v-if="props.canEdit" class="wiki-issue-popup-actions">
-                                  <t-tooltip
-                                    :content="issueCanStartRepair(issue)
-                                      ? $t('knowledgeEditor.wikiBrowser.issueFixSingle')
-                                      : issueRepairBlockedReason(issue)"
-                                    placement="top"
-                                  >
-                                    <span
-                                      class="wiki-issue-popup-action"
-                                      :class="{ 'is-disabled': !issueCanStartRepair(issue) }"
-                                      @click="issueCanStartRepair(issue) && triggerFixIssue(issue)"
-                                      style="margin-right: 12px; font-weight: 500;"
-                                    >
-                                      <t-icon name="tools" style="margin-right: 4px;" />{{
-                                        $t('knowledgeEditor.wikiBrowser.issueFixSingle') }}
-                                    </span>
-                                  </t-tooltip>
-                                  <span class="wiki-issue-popup-action" style="color: var(--td-text-color-placeholder);"
-                                    @click="handleIssueIgnore(issue.id)">{{
-                                      $t('knowledgeEditor.wikiBrowser.issueIgnore') }}</span>
-                                </div>
-                              </div>
+                      <div class="wiki-page-issues-popup">
+                        <header class="wiki-page-issues-popup__head">
+                          <div class="wiki-page-issues-popup__title">
+                            <span class="wiki-page-issues-popup__icon">
+                              <t-icon name="task-checked" />
+                            </span>
+                            <div class="wiki-page-issues-popup__title-text">
+                              <strong>{{ $t('knowledgeEditor.wikiBrowser.pageIssuesTitle', { count: pageIssues.length }) }}</strong>
+                              <p>{{ $t('knowledgeEditor.wikiBrowser.pageIssuesSubtitle') }}</p>
                             </div>
                           </div>
+                          <button
+                            v-if="props.canEdit && pageHasRepairableIssues"
+                            type="button"
+                            class="wiki-page-issues-popup__fix-all"
+                            @click="triggerAutoFix"
+                          >
+                            <t-icon name="tools" />
+                            <span>{{ $t('knowledgeEditor.wikiBrowser.issueFixBtn') }}</span>
+                          </button>
+                        </header>
+
+                        <p
+                          v-if="props.canEdit && !pageHasRepairableIssues && pageIssues.length > 0"
+                          class="wiki-page-issues-popup__hint"
+                        >
+                          {{ pageRepairBlockedReason }}
+                        </p>
+
+                        <div class="wiki-page-issues-popup__list">
+                          <article
+                            v-for="issue in pageIssues"
+                            :key="issue.id"
+                            class="wiki-health-card wiki-page-issues-card"
+                          >
+                            <header class="wiki-health-card__header">
+                              <div class="wiki-health-card__tags">
+                                <span
+                                  class="wiki-health-tag wiki-health-tag--type"
+                                  :class="`is-${wikiIssueTypeMeta(issue).theme}`"
+                                >
+                                  <t-icon :name="wikiIssueTypeIcon(issue.issue_type)" />
+                                  {{ wikiIssueTypeMeta(issue).label }}
+                                </span>
+                                <span
+                                  class="wiki-health-tag wiki-health-tag--severity"
+                                  :class="`is-${wikiIssueSeverityMeta(issue).theme}`"
+                                >
+                                  {{ wikiIssueSeverityMeta(issue).label }}
+                                </span>
+                                <span class="wiki-health-tag wiki-health-tag--neutral">
+                                  {{ wikiIssueRepairModeLabel(issue) }}
+                                </span>
+                              </div>
+                            </header>
+
+                            <p class="wiki-page-issues-card__desc">{{ issue.description }}</p>
+
+                            <footer class="wiki-page-issues-card__footer">
+                              <span class="wiki-page-issues-card__source">
+                                {{ wikiIssueSourceLabel(issue) }}
+                              </span>
+                              <div v-if="props.canEdit" class="wiki-page-issues-card__actions">
+                                <t-tooltip
+                                  v-if="issueCanAutoRepair(issue)"
+                                  :content="issueCanStartRepair(issue)
+                                    ? $t('knowledgeEditor.wikiBrowser.issueFixBtn')
+                                    : issueRepairBlockedReason(issue)"
+                                  placement="top"
+                                >
+                                  <button
+                                    type="button"
+                                    class="wiki-health-card__action wiki-health-card__action--primary"
+                                    :class="{ 'is-disabled': !issueCanStartRepair(issue) }"
+                                    :disabled="!issueCanStartRepair(issue)"
+                                    @click="triggerFixIssue(issue)"
+                                  >
+                                    <t-icon name="tools" />
+                                    <span>{{ $t('knowledgeEditor.wikiBrowser.issueFixBtn') }}</span>
+                                  </button>
+                                </t-tooltip>
+                                <button
+                                  type="button"
+                                  class="wiki-health-card__action wiki-health-card__action--ghost"
+                                  @click="handleIssueIgnore(issue.id)"
+                                >
+                                  {{ $t('knowledgeEditor.wikiBrowser.issueIgnore') }}
+                                </button>
+                              </div>
+                            </footer>
+                          </article>
                         </div>
                       </div>
                     </template>
@@ -1060,7 +1081,7 @@
       </div>
       <ChatView v-if="showFixDrawer && currentFixSessionId" :session_id="currentFixSessionId"
         agentId="builtin-wiki-fixer" :kbIds="[props.knowledgeBaseId]" :embeddedMode="true"
-        :summary-model-id="props.wikiRepairModelId || ''"
+        :summary-model-id="effectiveWikiRepairModelId"
         :initialQuery="repairInitialPrompt" @initial-query-consumed="repairInitialPrompt = ''"
         @wiki-repair-stream-failed="handleRepairStreamFailed" />
     </t-drawer>
@@ -1146,7 +1167,7 @@ import {
   expandedWikiDirectoryPaths,
   expandWikiDirectoryPath,
 } from './wikiDirectoryState'
-import { getKnowledgeDetails } from '@/api/knowledge-base'
+import { getKnowledgeDetails, getKnowledgeBaseById } from '@/api/knowledge-base'
 import ChatView from '@/views/chat/index.vue'
 import {
   listWikiPages,
@@ -1572,12 +1593,15 @@ function wikiIssueTypeMeta(issue: WikiPageIssue): { label: string; theme: WikiIs
 
 function wikiIssueSourceLabel(issue: WikiPageIssue): string {
   if (issue.source === 'lint' || issue.reported_by === 'wiki-lint') {
-    return t('knowledgeEditor.wikiBrowser.issueLintScan')
+    return t('knowledgeEditor.wikiBrowser.issueSourceLintReport')
   }
   if (issue.reported_by === 'wiki-researcher-agent') {
     return t('knowledgeEditor.wikiBrowser.issueAiLinter')
   }
-  return t('knowledgeEditor.wikiBrowser.issueReportedBy', { reporter: issue.reported_by })
+  if (issue.reported_by) {
+    return t('knowledgeEditor.wikiBrowser.issueReportedBy', { reporter: issue.reported_by })
+  }
+  return t('knowledgeEditor.wikiBrowser.issueSourceLintReport')
 }
 
 function wikiIssueSeverityMeta(issue: WikiPageIssue): { label: string; theme: WikiIssueTagTheme } {
@@ -1780,7 +1804,25 @@ function issueNeedsAgentRepair(issue: WikiPageIssue): boolean {
   return issue.repair_mode === 'agent'
 }
 
-const wikiRepairModelConfigured = computed(() => !!(props.wikiRepairModelId || '').trim())
+const wikiRepairModelIdLocal = ref('')
+
+const effectiveWikiRepairModelId = computed(
+  () => (wikiRepairModelIdLocal.value || props.wikiRepairModelId || '').trim(),
+)
+
+const wikiRepairModelConfigured = computed(() => !!effectiveWikiRepairModelId.value)
+
+async function loadWikiRepairModelConfig() {
+  if (!props.knowledgeBaseId) return
+  try {
+    const res: any = await getKnowledgeBaseById(props.knowledgeBaseId)
+    const kb = res?.data ?? res
+    const modelId = (kb?.wiki_config?.repair_model_id || '').trim()
+    if (modelId) wikiRepairModelIdLocal.value = modelId
+  } catch (e) {
+    console.error('Failed to load Wiki repair model config:', e)
+  }
+}
 
 function issueCanStartRepair(issue: WikiPageIssue): boolean {
   if (!issueCanAutoRepair(issue)) return false
@@ -1789,6 +1831,12 @@ function issueCanStartRepair(issue: WikiPageIssue): boolean {
 }
 
 function issueRepairBlockedReason(issue: WikiPageIssue): string {
+  if (!issueCanAutoRepair(issue)) {
+    if (issue.issue_type === 'orphan_page') {
+      return t('knowledgeEditor.wikiBrowser.issueOrphanManualHint')
+    }
+    return t('knowledgeEditor.wikiBrowser.issueRepairManualOnly')
+  }
   if (issueNeedsAgentRepair(issue) && !wikiRepairModelConfigured.value) {
     return t('knowledgeEditor.wikiBrowser.repairModelRequired')
   }
@@ -1798,6 +1846,20 @@ function issueRepairBlockedReason(issue: WikiPageIssue): string {
 const pageHasRepairableIssues = computed(() =>
   pageIssues.value.some((issue) => issueCanStartRepair(issue)),
 )
+
+const pageRepairBlockedReason = computed(() => {
+  if (pageHasRepairableIssues.value || pageIssues.value.length === 0) return ''
+  if (!pageIssues.value.some((issue) => issueCanAutoRepair(issue))) {
+    if (pageIssues.value.some((issue) => issue.issue_type === 'orphan_page')) {
+      return t('knowledgeEditor.wikiBrowser.issueOrphanManualHint')
+    }
+    return t('knowledgeEditor.wikiBrowser.issueRepairManualOnly')
+  }
+  if (pageIssues.value.some((issue) => issueNeedsAgentRepair(issue)) && !wikiRepairModelConfigured.value) {
+    return t('knowledgeEditor.wikiBrowser.repairModelRequired')
+  }
+  return t('knowledgeEditor.wikiBrowser.issueRepairManualOnly')
+})
 
 function toggleHealthIssueSelected(issueId: string, checked: boolean) {
   if (checked) {
@@ -4765,7 +4827,9 @@ function triggerAutoFix() {
   if (!selectedPage.value || pageIssues.value.length === 0) return
   const repairable = pageIssues.value.filter((issue) => issueCanStartRepair(issue))
   if (repairable.length === 0) {
-    MessagePlugin.warning(t('knowledgeEditor.wikiBrowser.repairModelRequired'))
+    MessagePlugin.warning(
+      pageRepairBlockedReason.value || t('knowledgeEditor.wikiBrowser.issueRepairManualOnly'),
+    )
     return
   }
   // Repairs on one page are intentionally serialized. Start the oldest
@@ -5952,9 +6016,18 @@ watch(() => route.query.slug, (newSlug) => {
 onMounted(() => {
   loadPages()
   loadStats()
+  loadWikiRepairModelConfig()
   restoreActiveRepair()
   restoreLatestLintRun()
   if (props.view === 'graph') loadGraph()
+})
+
+watch(() => props.wikiRepairModelId, (modelId) => {
+  if ((modelId || '').trim()) wikiRepairModelIdLocal.value = modelId.trim()
+})
+
+watch(() => props.knowledgeBaseId, () => {
+  loadWikiRepairModelConfig()
 })
 
 onUnmounted(() => {
@@ -7490,11 +7563,11 @@ onUnmounted(() => {
   animation: node-active-pulse 1.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) infinite;
 }
 
-// ── Issues Popup ──
+// ── Page issues popup (reader title) ──
 .wiki-issue-trigger {
   margin-left: 8px;
   cursor: pointer;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   font-size: 20px;
@@ -7505,137 +7578,151 @@ onUnmounted(() => {
   }
 }
 
-.wiki-issue-popup-content {
+.wiki-page-issues-popup {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  max-height: min(70vh, 520px);
   background: var(--td-bg-color-container);
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
 }
 
-.wiki-issue-popup-header {
+.wiki-page-issues-popup__head {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  align-items: center;
-  padding: 12px 16px;
-  background: var(--td-bg-color-secondarycontainer);
+  gap: 12px;
+  padding: 14px 16px;
   border-bottom: 1px solid var(--td-component-stroke);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--td-brand-color) 4%, var(--td-bg-color-container)) 0%,
+    var(--td-bg-color-container) 100%
+  );
 }
 
-.wiki-issue-popup-title {
+.wiki-page-issues-popup__title {
   display: flex;
-  align-items: center;
-  font-weight: 500;
-  font-size: 14px;
-  color: var(--td-text-color-primary);
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
 
-  .wiki-issue-popup-icon {
-    color: var(--td-brand-color);
-    margin-right: 8px;
+.wiki-page-issues-popup__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--td-brand-color);
+  background: color-mix(in srgb, var(--td-brand-color) 10%, var(--td-bg-color-container));
+  flex-shrink: 0;
+
+  .t-icon {
     font-size: 16px;
   }
 }
 
-.wiki-issue-popup-list {
-  display: flex;
-  flex-direction: column;
-  max-height: 400px;
-  overflow-y: auto;
-  gap: 12px;
-  padding: 8px 12px;
-}
+.wiki-page-issues-popup__title-text {
+  min-width: 0;
 
-.wiki-issue-popup-item {
-  display: flex;
-  padding: 16px;
-  gap: 12px;
-  border: 1px solid var(--td-component-border);
-  border-radius: 6px;
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
-  background: var(--td-bg-color-container);
+  strong {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--td-text-color-primary);
+    line-height: 1.4;
+  }
 
-  &:hover {
-    border-color: var(--td-brand-color-light);
+  p {
+    margin: 4px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--td-text-color-secondary);
   }
 }
 
-.wiki-issue-popup-main {
-  flex: 1;
+.wiki-page-issues-popup__fix-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--td-brand-color) 35%, var(--td-component-stroke));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--td-brand-color) 8%, var(--td-bg-color-container));
+  color: var(--td-brand-color);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--td-brand-color) 14%, var(--td-bg-color-container));
+  }
+}
+
+.wiki-page-issues-popup__hint {
+  margin: 0;
+  padding: 10px 16px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--td-text-color-secondary);
+  background: color-mix(in srgb, var(--td-warning-color) 8%, var(--td-bg-color-container));
+  border-bottom: 1px solid color-mix(in srgb, var(--td-warning-color) 18%, var(--td-component-stroke));
+}
+
+.wiki-page-issues-popup__list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-
-.wiki-issue-popup-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.wiki-issue-popup-desc {
-  font-size: 13px;
-  color: var(--td-text-color-primary);
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 150px;
+  gap: 10px;
+  padding: 12px;
   overflow-y: auto;
-  padding-right: 4px;
 }
 
-/* 优化描述区域的滚动条样式 */
-.wiki-issue-popup-desc::-webkit-scrollbar {
-  width: 4px;
+.wiki-page-issues-card {
+  gap: 8px;
+  padding: 12px 14px;
+  box-shadow: none;
+
+  .wiki-health-card__header {
+    margin-bottom: 0;
+  }
 }
 
-.wiki-issue-popup-desc::-webkit-scrollbar-thumb {
-  background: var(--td-scrollbar-color);
-  border-radius: 4px;
+.wiki-page-issues-card__desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--td-text-color-primary);
+  word-break: break-word;
 }
 
-.wiki-issue-popup-desc::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.wiki-issue-popup-meta {
+.wiki-page-issues-card__footer {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-top: 8px;
-  padding-top: 12px;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 8px;
+  margin-top: 2px;
   border-top: 1px dashed var(--td-component-stroke);
 }
 
-.wiki-issue-popup-reporter {
-  font-size: 12px;
+.wiki-page-issues-card__source {
+  font-size: 11px;
   color: var(--td-text-color-placeholder);
-  flex: 1;
 }
 
-.wiki-issue-popup-actions {
+.wiki-page-issues-card__actions {
   display: flex;
   align-items: center;
-}
-
-.wiki-issue-popup-action {
-  font-size: 12px;
-  color: var(--td-brand-color);
-  cursor: pointer;
-  transition: opacity 0.2s ease;
-
-  &:hover {
-    opacity: 0.8;
-  }
-
-  &.is-disabled {
-    color: var(--td-text-color-disabled);
-    cursor: not-allowed;
-    opacity: 0.6;
-
-    &:hover {
-      opacity: 0.6;
-    }
-  }
+  gap: 8px;
+  flex-shrink: 0;
 }
 </style>
 

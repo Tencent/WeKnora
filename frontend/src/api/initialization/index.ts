@@ -161,6 +161,8 @@ export interface KBModelConfigRequest {
         questionCount: number
         customInstructions?: string
     }
+    wikiSynthesisModelId?: string
+    wikiRepairModelId?: string
 }
 
 export function updateKBConfig(kbId: string, config: KBModelConfigRequest): Promise<any> {

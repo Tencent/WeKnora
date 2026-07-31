@@ -145,6 +145,10 @@ type KBModelConfigRequest struct {
 		QuestionCount      int    `json:"questionCount"`
 		CustomInstructions string `json:"customInstructions"`
 	} `json:"questionGeneration"`
+
+	// Wiki LLM bindings (optional; merged into wiki_config when wiki indexing is enabled)
+	WikiSynthesisModelID string `json:"wikiSynthesisModelId"`
+	WikiRepairModelID    string `json:"wikiRepairModelId"`
 }
 
 // InitializationRequest 初始化请求结构
@@ -364,6 +368,15 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	if req.VLMConfig != nil {
 		kb.VLMConfig.DescriptionLanguage = strings.TrimSpace(req.VLMConfig.DescriptionLanguage)
 		kb.VLMConfig.CustomInstructions = strings.TrimSpace(req.VLMConfig.CustomInstructions)
+	}
+
+	if kb.IndexingStrategy.WikiEnabled || strings.TrimSpace(req.WikiSynthesisModelID) != "" ||
+		strings.TrimSpace(req.WikiRepairModelID) != "" {
+		if kb.WikiConfig == nil {
+			kb.WikiConfig = &types.WikiConfig{}
+		}
+		kb.WikiConfig.SynthesisModelID = strings.TrimSpace(req.WikiSynthesisModelID)
+		kb.WikiConfig.RepairModelID = strings.TrimSpace(req.WikiRepairModelID)
 	}
 
 	// Bind the concrete storage instance. Provider remains a compatibility

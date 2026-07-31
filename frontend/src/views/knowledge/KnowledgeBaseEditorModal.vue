@@ -1446,7 +1446,9 @@ const doSubmit = async () => {
           enabled: data.question_generation_config?.enabled || false,
           questionCount: data.question_generation_config?.question_count || 3,
           customInstructions: data.question_generation_config?.custom_instructions || ''
-        }
+        },
+        wikiSynthesisModelId: formData.value.modelConfig?.wikiSynthesisModelId || '',
+        wikiRepairModelId: formData.value.modelConfig?.wikiRepairModelId || '',
       }
 
       await updateKBConfig(kbId, config)
