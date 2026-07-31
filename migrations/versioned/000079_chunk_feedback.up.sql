@@ -7,7 +7,7 @@ ALTER TABLE chunks ADD COLUMN IF NOT EXISTS feedback_reset_at TIMESTAMP WITH TIM
 
 ALTER TABLE chunks ADD CONSTRAINT chk_chunks_feedback_counts CHECK (like_count >= 0 AND dislike_count >= 0);
 ALTER TABLE chunks ADD CONSTRAINT chk_chunks_positive_rate CHECK (positive_rate IS NULL OR (positive_rate >= 0 AND positive_rate <= 1));
-ALTER TABLE chunks ADD CONSTRAINT chk_chunks_recall_weight CHECK (recall_weight >= 0.8 AND recall_weight <= 1.2);
+ALTER TABLE chunks ADD CONSTRAINT chk_chunks_recall_weight CHECK (recall_weight > 0);
 
 CREATE TABLE message_chunk_references (
     id VARCHAR(36) PRIMARY KEY,

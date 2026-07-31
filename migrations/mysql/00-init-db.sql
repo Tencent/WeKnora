@@ -212,7 +212,7 @@ CREATE TABLE chunks (
     deleted_at TIMESTAMP NULL DEFAULT NULL,
     CONSTRAINT chk_chunks_feedback_counts CHECK (like_count >= 0 AND dislike_count >= 0),
     CONSTRAINT chk_chunks_positive_rate CHECK (positive_rate IS NULL OR (positive_rate >= 0 AND positive_rate <= 1)),
-    CONSTRAINT chk_chunks_recall_weight CHECK (recall_weight >= 0.8 AND recall_weight <= 1.2)
+    CONSTRAINT chk_chunks_recall_weight CHECK (recall_weight > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE INDEX idx_chunks_tenant_knowledge ON chunks(tenant_id, knowledge_id);

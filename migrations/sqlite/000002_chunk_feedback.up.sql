@@ -1,7 +1,7 @@
 ALTER TABLE chunks ADD COLUMN like_count INTEGER NOT NULL DEFAULT 0 CHECK (like_count >= 0);
 ALTER TABLE chunks ADD COLUMN dislike_count INTEGER NOT NULL DEFAULT 0 CHECK (dislike_count >= 0);
 ALTER TABLE chunks ADD COLUMN positive_rate REAL CHECK (positive_rate IS NULL OR (positive_rate >= 0 AND positive_rate <= 1));
-ALTER TABLE chunks ADD COLUMN recall_weight REAL NOT NULL DEFAULT 1.0 CHECK (recall_weight >= 0.8 AND recall_weight <= 1.2);
+ALTER TABLE chunks ADD COLUMN recall_weight REAL NOT NULL DEFAULT 1.0 CHECK (recall_weight > 0);
 ALTER TABLE chunks ADD COLUMN feedback_reset_at DATETIME;
 
 CREATE TABLE message_chunk_references (

@@ -178,7 +178,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     like_count BIGINT NOT NULL DEFAULT 0 CHECK (like_count >= 0),
     dislike_count BIGINT NOT NULL DEFAULT 0 CHECK (dislike_count >= 0),
     positive_rate DOUBLE PRECISION CHECK (positive_rate IS NULL OR (positive_rate >= 0 AND positive_rate <= 1)),
-    recall_weight DOUBLE PRECISION NOT NULL DEFAULT 1.0 CHECK (recall_weight >= 0.8 AND recall_weight <= 1.2),
+    recall_weight DOUBLE PRECISION NOT NULL DEFAULT 1.0 CHECK (recall_weight > 0),
     feedback_reset_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,

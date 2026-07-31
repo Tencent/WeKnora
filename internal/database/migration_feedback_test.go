@@ -51,6 +51,7 @@ func TestChunkFeedbackSQLiteMigrationUpDownUp(t *testing.T) {
 	assertSQLiteColumn(t, db, "message_feedbacks", "feedback_revision", false)
 	assertSQLiteFeedbackUniqueConstraints(t, db)
 	assertSQLiteFeedbackReasonConstraint(t, db)
+	assertSQLiteFeedbackWeightConstraint(t, db)
 
 	execMigrationFile(t, db, migrationDir, "000002_chunk_feedback.down.sql")
 	assertSQLiteColumn(t, db, "chunks", "feedback_reset_at", false)
@@ -62,6 +63,27 @@ func TestChunkFeedbackSQLiteMigrationUpDownUp(t *testing.T) {
 	assertSQLiteColumn(t, db, "chunks", "feedback_reset_at", true)
 	assertSQLiteColumn(t, db, "message_chunk_references", "chunk_knowledge_base_id", true)
 	assertSQLiteTable(t, db, "message_feedbacks", true)
+}
+
+func assertSQLiteFeedbackWeightConstraint(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.Exec(`
+		INSERT INTO chunks
+			(id, tenant_id, knowledge_base_id, knowledge_id, content, chunk_index, start_at, end_at, recall_weight)
+		VALUES ('weight-policy', 1, 'kb', 'knowledge', 'content', 0, 0, 7, 1.4)
+	`); err != nil {
+		t.Fatalf("configured high weight outside the former fixed range was rejected: %v", err)
+	}
+	if _, err := db.Exec(
+		"UPDATE chunks SET recall_weight = 0.7 WHERE id = 'weight-policy'",
+	); err != nil {
+		t.Fatalf("configured low weight outside the former fixed range was rejected: %v", err)
+	}
+	if _, err := db.Exec(
+		"UPDATE chunks SET recall_weight = 0 WHERE id = 'weight-policy'",
+	); err == nil {
+		t.Fatal("non-positive recall weight unexpectedly passed the migration constraint")
+	}
 }
 
 func assertSQLiteFeedbackReasonConstraint(t *testing.T, db *sql.DB) {
