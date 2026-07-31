@@ -46,6 +46,18 @@
                     :title="$t('agent.addToKnowledgeBase')">
                     <t-icon name="bookmark-add" />
                 </t-button>
+
+                <!-- ========== 新增点赞点踩按钮开始 ========== -->
+                <t-button size="small" variant="outline" shape="round" @click.stop="handleLike"
+                    :type="messageUserFeedback === 'like' ? 'primary' : 'default'" title="点赞回答">
+                    <t-icon name="thumb-up" />
+                </t-button>
+                <t-button size="small" variant="outline" shape="round" @click.stop="handleDislike"
+                    :type="messageUserFeedback === 'dislike' ? 'primary' : 'default'" title="点踩回答">
+                    <t-icon name="thumb-down" />
+                </t-button>
+                <!-- ========== 新增点赞点踩按钮结束 ========== -->
+
                 <!-- Fallback 提示图标 -->
                 <t-tooltip v-if="session.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                     <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
@@ -104,6 +116,41 @@ import { refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useTypewriter } from '@/composables/useTypewriter';
 import { vStableHtml } from '@/directives/stableHtml';
+
+// 用户当前对此消息的反馈状态 like / dislike / ''
+const messageUserFeedback = ref('')
+
+// 点赞
+const handleLike = async () => {
+    await submitFeedback('like', '')
+}
+
+// 点踩，弹出输入框填写反馈
+const handleDislike = async () => {
+    const feedbackText = window.prompt(t('chat.inputFeedback'), '')
+    if (feedbackText === null) return
+    await submitFeedback('dislike', feedbackText)
+}
+
+// 统一提交反馈接口
+const submitFeedback = async (type, feedback) => {
+    try {
+        const res = await $fetch(`/api/v1/messages/${sessionId}/${session.id}/feedback`, {
+            method: 'POST',
+            body: {
+                type,
+                feedback
+            }
+        })
+        if (res.success) {
+            messageUserFeedback.value = type
+            MessagePlugin.success(t('chat.feedbackSuccess'))
+        }
+    } catch (err) {
+        MessagePlugin.error(t('chat.feedbackFailed'))
+        console.error('提交反馈失败', err)
+    }
+}
 
 ensureMermaidInitialized();
 

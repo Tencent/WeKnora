@@ -127,6 +127,12 @@ CREATE TABLE messages (
     agent_tenant_id INTEGER NOT NULL DEFAULT 0,
     model_id VARCHAR(64) NOT NULL DEFAULT '',
     execution_context JSON NOT NULL,
+
+    like_count INT NOT NULL DEFAULT 0 COMMENT '点赞数量',
+    dislike_count INT NOT NULL DEFAULT 0 COMMENT '点踩数量',
+    feedback TEXT NULL COMMENT '用户反馈内容（点踩附带文字）',
+
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL
@@ -227,3 +233,4 @@ CREATE TABLE chunk_revisions (
     UNIQUE KEY idx_chunk_revisions_chunk_revision (chunk_id, revision),
     KEY idx_chunk_revisions_tenant_chunk (tenant_id, chunk_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+

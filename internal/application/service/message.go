@@ -885,3 +885,8 @@ func groupByRequestID(items []*types.MessageSearchResultItem) []*types.MessageSe
 
 	return result
 }
+
+func (s *messageService) MessageFeedback(ctx context.Context, sessionID, messageID, feedbackType, feedbackText string) error {
+	msgModel := models.NewMessageModel(s.db)
+	return msgModel.MessageFeedback(ctx, sessionID, messageID, feedbackType, feedbackText)
+}

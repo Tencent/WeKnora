@@ -305,3 +305,53 @@ func parseMessageBeforeTime(raw string) (time.Time, error) {
 	}
 	return time.Time{}, lastErr
 }
+
+
+// FeedbackRequest 点赞/点踩请求结构体
+type FeedbackRequest struct {
+	Type     string `json:"type" binding:"required,oneof=like dislike"` // like / dislike
+	Feedback string `json:"feedback,omitempty"`                        // 点踩附带反馈文字
+}
+
+// MessageFeedback godoc
+// @Summary      消息点赞/点踩反馈
+// @Description  对AI消息进行点赞或者点踩，支持填写反馈文本
+// @Tags         消息
+// @Accept       json
+// @Produce      json
+// @Param        session_id   path      string  true   "会话ID"
+// @Param        id           path      string  true   "消息ID"
+// @Param        request      body      FeedbackRequest true "反馈参数"
+// @Success      200          {object}  map[string]interface{}
+// @Failure      400          {object}  errors.AppError
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /messages/{session_id}/{id}/feedback [post]
+func (h *MessageHandler) MessageFeedback(c *gin.Context) {
+	ctx := c.Request.Context()
+	sessionID := secutils.SanitizeForLog(c.Param("session_id"))
+	messageID := secutils.SanitizeForLog(c.Param("id"))
+
+	var req FeedbackRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Error(ctx, "parse feedback request failed", err)
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	err := h.MessageService.MessageFeedback(ctx, sessionID, messageID, req.Type, req.Feedback)
+	if err != nil {
+		if stderrors.Is(err, errors.ErrSessionNotFound) || stderrors.Is(err, gorm.ErrRecordNotFound) {
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "feedback submit success",
+	})
+}

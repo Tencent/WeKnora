@@ -441,3 +441,21 @@ type ChatHistoryKBStats struct {
 	// Whether there are any indexed messages (used by frontend to lock embedding model)
 	HasIndexedMessages bool `json:"has_indexed_messages"`
 }
+
+
+// MessageFeedback 更新消息点赞、点踩与反馈内容
+func (m *Message) MessageFeedback(ctx context.Context, sessionID, messageID, feedbackType, feedbackText string) error {
+	updateMap := make(map[string]any)
+	switch feedbackType {
+	case "like":
+		updateMap["like_count"] = gorm.Expr("like_count + 1")
+	case "dislike":
+		updateMap["dislike_count"] = gorm.Expr("dislike_count + 1")
+		updateMap["feedback"] = feedbackText
+	}
+
+	return m.db.WithContext(ctx).
+		Table("messages").
+		Where("session_id = ? AND id = ?", sessionID, messageID).
+		Updates(updateMap).Error
+}
