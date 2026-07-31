@@ -72,6 +72,8 @@ type KnowledgeService interface {
 	// ListKnowledgeIDsByTagIDs returns document knowledge IDs carrying any of
 	// the specified KB-local tags.
 	ListKnowledgeIDsByTagIDs(ctx context.Context, tenantID uint64, kbID string, tagIDs []string) ([]string, error)
+	// ListKnowledgeIDsByFolderIDs returns document knowledge IDs belonging to any of the specified folder IDs.
+	ListKnowledgeIDsByFolderIDs(ctx context.Context, tenantID uint64, kbID string, folderIDs []string) ([]string, error)
 	// ListKnowledgeByKnowledgeBaseID lists all knowledge under a knowledge base.
 	ListKnowledgeByKnowledgeBaseID(ctx context.Context, kbID string) ([]*types.Knowledge, error)
 	// ListPagedKnowledgeByKnowledgeBaseID lists all knowledge under a knowledge base
@@ -282,6 +284,8 @@ type KnowledgeRepository interface {
 	SearchKnowledgeInScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error)
 	// ListIDsByTagIDs returns all knowledge IDs that have any of the specified tag IDs (OR semantics).
 	ListIDsByTagIDs(ctx context.Context, tenantID uint64, kbID string, tagIDs []string) ([]string, error)
+	// ListIDsByFolderIDs returns all knowledge IDs that belong to any of the specified folder IDs.
+	ListIDsByFolderIDs(ctx context.Context, tenantID uint64, kbID string, folderIDs []string) ([]string, error)
 	// SetKnowledgeTags replaces all tags for a single knowledge entry (deletes old, inserts new).
 	SetKnowledgeTags(ctx context.Context, knowledgeID string, tagIDs []string) error
 	// GetKnowledgeTags returns tags for multiple knowledge IDs.

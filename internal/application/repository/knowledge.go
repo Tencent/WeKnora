@@ -150,6 +150,9 @@ func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) 
 	if !filter.UpdatedTo.IsZero() {
 		query = query.Where("updated_at <= ?", filter.UpdatedTo)
 	}
+	if filter.FolderID != "" {
+		query = query.Where("folder_id = ?", filter.FolderID)
+	}
 	return query
 }
 
@@ -878,5 +881,20 @@ func (r *knowledgeRepository) ListIDsByTagIDs(
 			tenantID, kbID, tagIDs).
 		Distinct("knowledges.id").
 		Pluck("knowledges.id", &ids).Error
+	return ids, err
+}
+
+// ListIDsByFolderIDs returns all knowledge IDs that belong to any of the specified folder IDs.
+func (r *knowledgeRepository) ListIDsByFolderIDs(
+	ctx context.Context, tenantID uint64, kbID string, folderIDs []string,
+) ([]string, error) {
+	if len(folderIDs) == 0 {
+		return nil, nil
+	}
+	var ids []string
+	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("knowledges.tenant_id = ? AND knowledges.knowledge_base_id = ? AND knowledges.folder_id IN (?) AND knowledges.deleted_at IS NULL",
+			tenantID, kbID, folderIDs).
+		Distinct("knowledges.id").Pluck("knowledges.id", &ids).Error
 	return ids, err
 }

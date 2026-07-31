@@ -279,6 +279,24 @@ func RegisterKnowledgeTagRoutes(r *gin.RouterGroup, tagHandler *handler.TagHandl
 	}
 }
 
+// RegisterFolderRoutes registers knowledge folder-related routes.
+func RegisterFolderRoutes(r *gin.RouterGroup, folderHandler *handler.FolderHandler, g *rbacGuards) {
+	if folderHandler == nil {
+		return
+	}
+	kbFolders := g.apiKeyGroup(r.Group("/knowledge-bases/:id/folders"), apiKeyIngest(apiKeyFullAccess()))
+	kbFoldersRead := kbFolders.With(apiKeyRetrieve(apiKeyFullAccess()))
+	{
+		kbFoldersRead.GET("", g.Viewer(), g.KBAccessRead("id"), folderHandler.ListFolders)
+		kbFoldersRead.GET("/tree", g.Viewer(), g.KBAccessRead("id"), folderHandler.GetFolderTree)
+		kbFolders.POST("", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), folderHandler.CreateFolder)
+		kbFolders.PUT("/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), folderHandler.UpdateFolder)
+		kbFolders.DELETE("/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), folderHandler.DeleteFolder)
+	}
+	moveGroup := g.apiKeyGroup(r.Group("/knowledge/folders"), apiKeyIngest(apiKeyFullAccess()))
+	moveGroup.POST("/move", g.Contributor(), folderHandler.MoveKnowledgeToFolder)
+}
+
 // RegisterWikiPageRoutes registers wiki page related routes.
 //
 // Wiki pages are KB content (wiki mode): reads are Viewer+ and gated by

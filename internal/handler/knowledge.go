@@ -407,6 +407,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 
 	// 获取分类ID列表（如果提供），逗号分隔，用于知识多标签分类管理
 	tagIDs := parseCommaSeparatedTagIDs(c.PostForm("tag_ids"))
+	folderID := c.PostForm("folder_id")
 
 	channel := c.PostForm("channel")
 
@@ -424,6 +425,14 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
+	}
+
+	if folderID != "" {
+		if err := h.kgService.GetRepository().UpdateKnowledgeColumn(ctx, knowledge.ID, "folder_id", folderID); err != nil {
+			logger.Warnf(ctx, "Failed to set folder_id: %v", err)
+		} else {
+			knowledge.FolderID = folderID
+		}
 	}
 
 	logger.Infof(
@@ -478,6 +487,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		EnableMultimodel *bool                            `json:"enable_multimodel"`
 		Title            string                           `json:"title"`
 		TagIDs           []string                         `json:"tag_ids"`
+		FolderID         string                           `json:"folder_id"`
 		Channel          string                           `json:"channel"`
 		ProcessConfig    *types.KnowledgeProcessOverrides `json:"process_config"`
 	}
@@ -522,6 +532,14 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
+	}
+
+	if req.FolderID != "" {
+		if err := h.kgService.GetRepository().UpdateKnowledgeColumn(ctx, knowledge.ID, "folder_id", req.FolderID); err != nil {
+			logger.Warnf(ctx, "Failed to set folder_id: %v", err)
+		} else {
+			knowledge.FolderID = req.FolderID
+		}
 	}
 
 	logger.Infof(
@@ -585,6 +603,14 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 		})
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
+	}
+
+	if req.FolderID != "" {
+		if err := h.kgService.GetRepository().UpdateKnowledgeColumn(ctx, knowledge.ID, "folder_id", req.FolderID); err != nil {
+			logger.Warnf(ctx, "Failed to set folder_id: %v", err)
+		} else {
+			knowledge.FolderID = req.FolderID
+		}
 	}
 
 	logger.Infof(ctx, "Manual knowledge created successfully, knowledge ID: %s",
@@ -959,6 +985,7 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		FileType:    c.Query("file_type"),
 		ParseStatus: c.Query("parse_status"),
 		Source:      c.Query("source"),
+		FolderID:    c.Query("folder_id"),
 	}
 	if raw := c.Query("start_time"); raw != "" {
 		t, err := parseFilterTime(raw)

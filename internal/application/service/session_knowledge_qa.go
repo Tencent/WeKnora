@@ -87,7 +87,7 @@ func (s *sessionService) KnowledgeQA(
 	retrievalTenantID := s.resolveRetrievalTenantID(ctx, req)
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.TagScopes)
+	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.TagScopes, nil)
 	if err != nil {
 		return fmt.Errorf("build search targets: %w", err)
 	}
@@ -432,6 +432,7 @@ func (s *sessionService) buildSearchTargets(
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
 	tagScopes []types.TagScope,
+	folderScopes []types.FolderScope,
 ) (types.SearchTargets, error) {
 	var targets types.SearchTargets
 	tagIDsByKB := mergeTagScopesByKB(tagScopes)
@@ -599,6 +600,30 @@ func (s *sessionService) buildSearchTargets(
 
 	logger.Infof(ctx, "Built %d search targets: %d full KB, %d partial/tag KB, kbTenantMap=%v",
 		len(targets), len(knowledgeBaseIDs), len(targets)-len(knowledgeBaseIDs), kbTenantMap)
+
+	// Process folder scopes: resolve folder + descendants to knowledge IDs
+	for _, fs := range folderScopes {
+		if fs.KnowledgeBaseID == "" || fs.FolderID == "" {
+			continue
+		}
+		kbTenant := resolveKBTenant(fs.KnowledgeBaseID)
+		kb := kbByID[fs.KnowledgeBaseID]
+		if kb != nil && kb.Type == types.KnowledgeBaseTypeFAQ {
+			continue
+		}
+		descendantIDs, err := s.folderRepo.GetDescendantIDs(ctx, kbTenant, fs.KnowledgeBaseID, fs.FolderID)
+		if err != nil || len(descendantIDs) == 0 {
+			continue
+		}
+		folderKnowledgeIDs, err := s.knowledgeService.ListKnowledgeIDsByFolderIDs(ctx, kbTenant, fs.KnowledgeBaseID, descendantIDs)
+		if err != nil || len(folderKnowledgeIDs) == 0 {
+			continue
+		}
+		targets = append(targets, &types.SearchTarget{
+			Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: fs.KnowledgeBaseID, TenantID: kbTenant,
+			KnowledgeIDs: folderKnowledgeIDs, FolderScope: &fs, DisableRecallThresholds: true,
+		})
+	}
 
 	return targets, nil
 }
@@ -812,7 +837,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, tagScopes)
+	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, tagScopes, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}

@@ -526,6 +526,7 @@ const isTagFilterPlaceholder = computed(
 );
 
 const selectedTagIds = ref<string[]>([]);
+const selectedFolderId = ref<string>('');
 const tagList = ref<any[]>([]);
 const tagLoading = ref(false);
 const tagSearchQuery = ref('');
@@ -599,6 +600,7 @@ const filterParams = computed(() => {
     file_type: selectedFileType.value || undefined,
     parse_status: selectedParseStatus.value || undefined,
     source: selectedSource.value || undefined,
+    folder_id: selectedFolderId.value || undefined,
     start_time: start ? `${start} 00:00:00` : undefined,
     end_time: end ? `${end} 23:59:59` : undefined,
   };
@@ -2149,6 +2151,16 @@ async function createNewSession(value: string): Promise<void> {
 
       <template v-if="activeKbTab === 'documents' || !isWiki">
         <div class="knowledge-main">
+          <FolderTree
+            v-if="kbId"
+            :kb-id="kbId"
+            v-model="selectedFolderId"
+            :can-edit="canEdit"
+            :selected-knowledge-ids="selectedIds"
+            @select="loadKnowledgeFiles(kbId)"
+            @refresh="loadKnowledgeFiles(kbId)"
+            class="folder-sidebar"
+          />
           <div class="tag-content">
             <div class="doc-card-area">
               <div class="doc-filter-bar">
@@ -2551,6 +2563,11 @@ async function createNewSession(value: string): Promise<void> {
   min-height: 0;
   background: transparent;
   border: none;
+}
+
+.folder-sidebar {
+  flex-shrink: 0;
+  height: 100%;
 }
 
 // 标签筛选浮层：点击工具栏入口展开，不占文档列表横向空间

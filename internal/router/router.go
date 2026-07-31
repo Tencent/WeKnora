@@ -84,6 +84,7 @@ type RouterParams struct {
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	WikiPageHandler              *handler.WikiPageHandler
+	FolderHandler                *handler.FolderHandler
 }
 
 // NewRouter 创建新的路由
@@ -241,6 +242,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 			params.ResourceCatalog,
 		)
 		RegisterKnowledgeTagRoutes(v1, params.TagHandler, rbacGuards)
+		RegisterFolderRoutes(v1, params.FolderHandler, rbacGuards)
 		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)
 		RegisterFAQRoutes(v1, params.FAQHandler, rbacGuards)
 		RegisterChunkRoutes(v1, params.ChunkHandler, rbacGuards)

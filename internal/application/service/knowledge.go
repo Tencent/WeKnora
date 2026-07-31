@@ -727,6 +727,13 @@ func (s *knowledgeService) ListKnowledgeIDsByTagIDs(
 	return s.repo.ListIDsByTagIDs(ctx, tenantID, kbID, tagIDs)
 }
 
+// ListKnowledgeIDsByFolderIDs returns knowledge IDs belonging to given folder IDs.
+func (s *knowledgeService) ListKnowledgeIDsByFolderIDs(
+	ctx context.Context, tenantID uint64, kbID string, folderIDs []string,
+) ([]string, error) {
+	return s.repo.ListIDsByFolderIDs(ctx, tenantID, kbID, folderIDs)
+}
+
 // validateKnowledgeTagIDs ensures every tag exists and belongs to the given knowledge base.
 func (s *knowledgeService) validateKnowledgeTagIDs(
 	ctx context.Context,

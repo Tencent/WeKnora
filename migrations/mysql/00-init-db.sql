@@ -82,10 +82,29 @@ CREATE TABLE knowledges (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL,
     processed_at TIMESTAMP,
-    error_message TEXT
+    error_message TEXT,
+    folder_id VARCHAR(36) NOT NULL DEFAULT ''
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE INDEX idx_knowledges_tenant_id ON knowledges(tenant_id, knowledge_base_id);
+CREATE INDEX idx_knowledges_folder_id ON knowledges(folder_id);
+
+CREATE TABLE knowledge_folders (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INT NOT NULL DEFAULT 0,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    parent_id VARCHAR(36) NOT NULL DEFAULT '',
+    name VARCHAR(255) NOT NULL,
+    path VARCHAR(1024) NOT NULL DEFAULT '',
+    depth INT NOT NULL DEFAULT 0,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_knowledge_folders_tenant_kb ON knowledge_folders(tenant_id, knowledge_base_id);
+CREATE INDEX idx_knowledge_folders_parent ON knowledge_folders(parent_id);
 
 CREATE TABLE sessions (
     id VARCHAR(36) PRIMARY KEY,
