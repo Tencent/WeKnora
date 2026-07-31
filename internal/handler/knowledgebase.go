@@ -362,7 +362,7 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 		return
 	}
 	if !feedbackWeightUpdateAllowed(ctx, types.IndexingStrategy{}, &req.IndexingStrategy) {
-		c.Error(apperrors.NewForbiddenError(
+		_ = c.Error(apperrors.NewForbiddenError(
 			"Only workspace owners and admins may enable feedback retrieval weighting",
 		))
 		return
@@ -880,7 +880,7 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	}
 	if req.Config != nil {
 		if !feedbackWeightUpdateAllowed(ctx, kb.IndexingStrategy, req.Config.IndexingStrategy) {
-			c.Error(apperrors.NewForbiddenError(
+			_ = c.Error(apperrors.NewForbiddenError(
 				"Only workspace owners and admins may change feedback retrieval weighting",
 			))
 			return

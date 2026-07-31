@@ -6,6 +6,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// FeedbackRepository persists canonical answer attribution, user feedback, and derived chunk projections.
 type FeedbackRepository interface {
 	CompleteAssistantMessageWithReferences(
 		ctx context.Context, messageTenantID uint64, message *types.Message,
@@ -22,8 +23,14 @@ type FeedbackRepository interface {
 	) error
 }
 
+// FeedbackService validates interactive feedback and scoped governance operations.
 type FeedbackService interface {
-	ApplyMessageFeedback(ctx context.Context, sessionID, messageID string, feedbackType types.FeedbackType, reason *types.FeedbackReasonCode) (*types.MessageFeedbackState, error)
+	ApplyMessageFeedback(
+		ctx context.Context,
+		sessionID, messageID string,
+		feedbackType types.FeedbackType,
+		reason *types.FeedbackReasonCode,
+	) (*types.MessageFeedbackState, error)
 	ResetChunkFeedback(ctx context.Context, kbID, chunkID string) error
 	GetChunkFeedbackDetails(ctx context.Context, chunkID string) (*types.ChunkFeedbackDetails, error)
 }

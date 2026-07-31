@@ -77,11 +77,11 @@ func (MessageFeedback) TableName() string { return "message_feedbacks" }
 // MessageChunkReference stores immutable attribution from a message to a chunk.
 type MessageChunkReference struct {
 	ID                   string    `json:"id" gorm:"type:varchar(36);primaryKey"`
-	MessageTenantID      uint64    `json:"message_tenant_id" gorm:"not null;uniqueIndex:idx_msg_chunk_ref"`
-	ChunkTenantID        uint64    `json:"chunk_tenant_id" gorm:"not null;uniqueIndex:idx_msg_chunk_ref"`
-	ChunkKnowledgeBaseID string    `json:"chunk_knowledge_base_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_msg_chunk_ref"`
-	MessageID            string    `json:"message_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_msg_chunk_ref"`
-	ChunkID              string    `json:"chunk_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_msg_chunk_ref"`
+	MessageTenantID      uint64    `json:"message_tenant_id" gorm:"not null;uniqueIndex:idx_ref"`
+	ChunkTenantID        uint64    `json:"chunk_tenant_id" gorm:"not null;uniqueIndex:idx_ref"`
+	ChunkKnowledgeBaseID string    `json:"chunk_knowledge_base_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_ref"`
+	MessageID            string    `json:"message_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_ref"`
+	ChunkID              string    `json:"chunk_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_ref"`
 	CreatedAt            time.Time `json:"created_at"`
 }
 

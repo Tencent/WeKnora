@@ -57,6 +57,7 @@ type FeedbackConfig struct {
 	HighWeight             float64 `yaml:"high_weight"              json:"high_weight"`
 }
 
+// EffectiveMinimumSampleCount returns the configured sample floor or the safe default for absent legacy config.
 func (c *FeedbackConfig) EffectiveMinimumSampleCount() int64 {
 	if c == nil {
 		return 5
@@ -64,6 +65,7 @@ func (c *FeedbackConfig) EffectiveMinimumSampleCount() int64 {
 	return c.MinimumSampleCount
 }
 
+// EffectiveOptimizationThreshold returns the pending-optimization threshold or its safe default.
 func (c *FeedbackConfig) EffectiveOptimizationThreshold() float64 {
 	if c == nil {
 		return 0.3
