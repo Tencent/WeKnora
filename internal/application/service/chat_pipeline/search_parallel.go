@@ -50,6 +50,7 @@ func NewPluginSearchParallel(
 		knowledgeBaseService:  knowledgeBaseService,
 		knowledgeService:      knowledgeService,
 		chunkService:          chunkService,
+		chunkRepo:             chunkRepository,
 		config:                config,
 		webSearchService:      webSearchService,
 		tenantService:         tenantService,

@@ -428,6 +428,10 @@
                 <div v-if="editorMode === 'edit' && activeKbId && canViewActivity && currentSection === 'activity'" class="section">
                   <KnowledgeBaseActivitySettings :kb-id="activeKbId" :active="currentSection === 'activity'" />
                 </div>
+
+                <div v-if="editorMode === 'edit' && activeKbId && canViewActivity && currentSection === 'feedback'" class="section">
+                  <ChunkFeedbackSettings :kb-id="activeKbId" :active="currentSection === 'feedback'" />
+                </div>
               </div>
 
               <!-- 保存按钮 -->
@@ -482,6 +486,7 @@ import GraphSettings from './settings/GraphSettings.vue'
 import KBShareSettings from './settings/KBShareSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
 import KnowledgeBaseActivitySettings from './settings/KnowledgeBaseActivitySettings.vue'
+import ChunkFeedbackSettings from './settings/ChunkFeedbackSettings.vue'
 import { useI18n } from 'vue-i18n'
 
 const uiStore = useUIStore()
@@ -643,6 +648,7 @@ const navItems = computed(() => {
   }
   if (canViewActivity.value) {
     items.push({ key: 'activity', icon: 'history', label: t('knowledgeEditor.sidebar.activity') })
+    items.push({ key: 'feedback', icon: 'thumb-up', label: t('knowledgeEditor.sidebar.feedback') })
   }
   return items
 })
@@ -676,7 +682,7 @@ const navGroups = computed(() => {
     {
       key: 'management',
       label: t('knowledgeEditor.navGroups.management'),
-      items: pickItems(['activity']),
+      items: pickItems(['activity', 'feedback']),
     },
   ].filter((group) => group.items.length > 0)
 })

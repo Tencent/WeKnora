@@ -52,6 +52,7 @@
                         <t-icon name="info-circle" />
                     </t-button>
                 </t-tooltip>
+                <AnswerFeedback :session-id="sessionId" :message-id="session?.id || session?.assistant_message_id" :initial-rating="session?.my_rating" />
                 <ChatRequestInfoButton v-if="showRequestInfo" :session="session" :session-id="sessionId" />
                 <transition name="follow-up-toolbar-loading">
                     <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
@@ -80,6 +81,7 @@ import AgentStreamDisplay from './AgentStreamDisplay.vue';
 import RagPipelineProgress from './RagPipelineProgress.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
+import AnswerFeedback from './AnswerFeedback.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import { sanitizeMarkdownHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
 import { useI18n } from 'vue-i18n';

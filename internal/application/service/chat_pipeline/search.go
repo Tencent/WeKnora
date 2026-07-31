@@ -19,6 +19,7 @@ type PluginSearch struct {
 	knowledgeBaseService  interfaces.KnowledgeBaseService
 	knowledgeService      interfaces.KnowledgeService
 	chunkService          interfaces.ChunkService
+	chunkRepo             interfaces.ChunkRepository
 	config                *config.Config
 	webSearchService      interfaces.WebSearchService
 	tenantService         interfaces.TenantService
@@ -31,6 +32,7 @@ func NewPluginSearch(eventManager *EventManager,
 	knowledgeBaseService interfaces.KnowledgeBaseService,
 	knowledgeService interfaces.KnowledgeService,
 	chunkService interfaces.ChunkService,
+	chunkRepo interfaces.ChunkRepository,
 	config *config.Config,
 	webSearchService interfaces.WebSearchService,
 	tenantService interfaces.TenantService,
@@ -42,6 +44,7 @@ func NewPluginSearch(eventManager *EventManager,
 		knowledgeBaseService:  knowledgeBaseService,
 		knowledgeService:      knowledgeService,
 		chunkService:          chunkService,
+		chunkRepo:             chunkRepo,
 		config:                config,
 		webSearchService:      webSearchService,
 		tenantService:         tenantService,
@@ -51,6 +54,53 @@ func NewPluginSearch(eventManager *EventManager,
 	}
 	eventManager.Register(res)
 	return res
+}
+
+// attachRecallWeights batch-loads chunk recall weights and stamps them onto
+// search results so downstream ranking can honour user-feedback tuning.
+// Failures degrade gracefully (weights stay 1.0).
+func (p *PluginSearch) attachRecallWeights(ctx context.Context, results []*types.SearchResult) {
+	if p.chunkRepo == nil || len(results) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(results))
+	seen := make(map[string]struct{}, len(results))
+	for _, r := range results {
+		if r == nil || r.ID == "" {
+			continue
+		}
+		if _, ok := seen[r.ID]; ok {
+			continue
+		}
+		seen[r.ID] = struct{}{}
+		ids = append(ids, r.ID)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	chunks, err := p.chunkRepo.ListChunksByIDOnly(ctx, ids)
+	if err != nil {
+		pipelineWarn(ctx, "Search", "recall_weight_load_error", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return
+	}
+	weights := make(map[string]float64, len(chunks))
+	for _, c := range chunks {
+		if c != nil {
+			weights[c.ID] = c.RecallWeight
+		}
+	}
+	for _, r := range results {
+		if r == nil {
+			continue
+		}
+		if w, ok := weights[r.ID]; ok && w > 0 {
+			r.RecallWeight = w
+		} else {
+			r.RecallWeight = 1.0
+		}
+	}
 }
 
 // ActivationEvents returns the event types this plugin handles
@@ -132,6 +182,10 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	}
 
 	logSearchScoreSample(ctx, "final_score", chatManage.SearchResult)
+
+	// Attach chunk-level recall weights (derived from user feedback) so the
+	// rerank/merge stages can order better-reviewed chunks first.
+	p.attachRecallWeights(ctx, chatManage.SearchResult)
 
 	// Return if we have results
 	if len(chatManage.SearchResult) != 0 {

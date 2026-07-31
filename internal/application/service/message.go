@@ -22,13 +22,14 @@ var regThinkIndex = regexp.MustCompile(`(?s)<think>.*?</think>`)
 // It reads the chat history knowledge base configuration from the tenant's ChatHistoryConfig,
 // which is managed via the settings UI.
 type messageService struct {
-	messageRepo    interfaces.MessageRepository    // Repository for message storage operations
-	sessionRepo    interfaces.SessionRepository    // Repository for session validation
-	tenantService  interfaces.TenantService        // Service for tenant operations (read ChatHistoryConfig)
-	kbService      interfaces.KnowledgeBaseService // Service for knowledge base operations (search chat history KB)
-	knowService    interfaces.KnowledgeService     // Service for knowledge operations (index/delete passages)
-	modelService   interfaces.ModelService         // Service for model operations (rerank model)
-	suggestionRepo interfaces.MessageSuggestionRepository
+	messageRepo       interfaces.MessageRepository    // Repository for message storage operations
+	sessionRepo       interfaces.SessionRepository    // Repository for session validation
+	tenantService     interfaces.TenantService        // Service for tenant operations (read ChatHistoryConfig)
+	kbService         interfaces.KnowledgeBaseService // Service for knowledge base operations (search chat history KB)
+	knowService       interfaces.KnowledgeService     // Service for knowledge operations (index/delete passages)
+	modelService      interfaces.ModelService         // Service for model operations (rerank model)
+	suggestionRepo    interfaces.MessageSuggestionRepository
+	chunkFeedbackRepo interfaces.ChunkFeedbackRepository // Repository for answer <-> chunk link persistence
 }
 
 // NewMessageService creates a new message service instance with the required repositories
@@ -39,15 +40,17 @@ func NewMessageService(messageRepo interfaces.MessageRepository,
 	knowService interfaces.KnowledgeService,
 	modelService interfaces.ModelService,
 	suggestionRepo interfaces.MessageSuggestionRepository,
+	chunkFeedbackRepo interfaces.ChunkFeedbackRepository,
 ) interfaces.MessageService {
 	return &messageService{
-		messageRepo:    messageRepo,
-		sessionRepo:    sessionRepo,
-		tenantService:  tenantService,
-		kbService:      kbService,
-		knowService:    knowService,
-		modelService:   modelService,
-		suggestionRepo: suggestionRepo,
+		messageRepo:       messageRepo,
+		sessionRepo:       sessionRepo,
+		tenantService:     tenantService,
+		kbService:         kbService,
+		knowService:       knowService,
+		modelService:      modelService,
+		suggestionRepo:    suggestionRepo,
+		chunkFeedbackRepo: chunkFeedbackRepo,
 	}
 }
 
@@ -98,6 +101,15 @@ func (s *messageService) CreateMessage(ctx context.Context, message *types.Messa
 	}
 
 	logger.Infof(ctx, "Message created successfully, ID: %s", createdMessage.ID)
+
+	// Persist answer <-> chunk links so later user feedback can be attributed
+	// back to the cited knowledge chunks. Best effort: a link write failure
+	// must never fail the chat itself.
+	if createdMessage.Role == "assistant" && len(createdMessage.KnowledgeReferences) > 0 {
+		if err := s.recordMessageChunkLinks(ctx, createdMessage); err != nil {
+			logger.Warnf(ctx, "record chunk links for message %s failed: %v", createdMessage.ID, err)
+		}
+	}
 	return createdMessage, nil
 }
 
@@ -249,7 +261,25 @@ func (s *messageService) UpdateMessage(ctx context.Context, message *types.Messa
 	}
 
 	logger.Info(ctx, "Message updated successfully")
+
+	// Re-snapshot chunk links on update: the assistant message may only carry
+	// its knowledge references once the stream has finished.
+	if message.Role == "assistant" && len(message.KnowledgeReferences) > 0 {
+		if err := s.recordMessageChunkLinks(ctx, message); err != nil {
+			logger.Warnf(ctx, "record chunk links for message %s failed: %v", message.ID, err)
+		}
+	}
 	return nil
+}
+
+// recordMessageChunkLinks persists the message's knowledge references as
+// message_chunk_links rows (idempotent upsert).
+func (s *messageService) recordMessageChunkLinks(ctx context.Context, message *types.Message) error {
+	if s.chunkFeedbackRepo == nil {
+		return nil
+	}
+	tenantID, _ := sessionTenantIDForLookup(ctx)
+	return s.chunkFeedbackRepo.RecordMessageChunkLinks(ctx, buildMessageChunkLinks(message, tenantID))
 }
 
 // UpdateMessageImages updates only the images JSONB column for a message.
