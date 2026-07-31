@@ -125,8 +125,6 @@ func (h *KnowledgeFolderHandler) GetFolder(c *gin.Context) {
 		c.JSON(http.StatusNotFound, errors.NewNotFoundError("Folder not found"))
 		return
 	}
-
-	// Verify folder belongs to this KB
 	if folder.KnowledgeBaseID != kbID {
 		c.JSON(http.StatusForbidden, errors.NewForbiddenError("Folder does not belong to this knowledge base"))
 		return
@@ -261,6 +259,17 @@ func (h *KnowledgeFolderHandler) UpdateFolder(c *gin.Context) {
 		return
 	}
 
+	// Verify ownership before performing any mutation.
+	existingFolder, err := h.folderService.GetFolder(ctx, folderID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, errors.NewNotFoundError("Folder not found"))
+		return
+	}
+	if existingFolder.KnowledgeBaseID != kbID {
+		c.JSON(http.StatusForbidden, errors.NewForbiddenError("Folder does not belong to this knowledge base"))
+		return
+	}
+
 	// Parse request body
 	var req types.UpdateFolderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -279,19 +288,13 @@ func (h *KnowledgeFolderHandler) UpdateFolder(c *gin.Context) {
 		return
 	}
 
-	// Verify folder belongs to this KB
-	if folder.KnowledgeBaseID != kbID {
-		c.JSON(http.StatusForbidden, errors.NewForbiddenError("Folder does not belong to this knowledge base"))
-		return
-	}
-
 	logger.Infof(ctx, "Folder updated: %s (id=%s)", folder.Name, folder.ID)
 	c.JSON(http.StatusOK, folder)
 }
 
 // DeleteFolder godoc
 // @Summary      Delete folder
-// @Description  Delete a folder (soft delete by default, use force=true for cascade delete)
+// @Description  Delete a folder. With force=true, descendant folders are deleted and contained knowledge is moved to the knowledge-base root.
 // @Tags         Folders
 // @Accept       json
 // @Produce      json

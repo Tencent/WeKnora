@@ -979,11 +979,11 @@ func (s *knowledgeService) SearchKnowledgeForScopes(ctx context.Context, scopes 
 func (s *knowledgeService) MoveToFolder(ctx context.Context, knowledgeID string, folderID *string) error {
 	tenantID := types.MustTenantIDFromContext(ctx)
 	// Verify the knowledge entry exists and belongs to the tenant
-	_, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
 	if err != nil {
 		return err
 	}
-	return s.repo.UpdateKnowledgeFolderID(ctx, knowledgeID, folderID)
+	return s.repo.UpdateKnowledgeFolderID(ctx, tenantID, knowledge.KnowledgeBaseID, knowledgeID, folderID)
 }
 
 // BatchMoveToFolder moves multiple knowledge entries to a specified folder or to root.
@@ -991,7 +991,21 @@ func (s *knowledgeService) BatchMoveToFolder(ctx context.Context, knowledgeIDs [
 	if len(knowledgeIDs) == 0 {
 		return nil
 	}
-	return s.repo.BatchUpdateKnowledgeFolderID(ctx, knowledgeIDs, folderID)
+	tenantID := types.MustTenantIDFromContext(ctx)
+	items, err := s.repo.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
+	if err != nil {
+		return err
+	}
+	if len(items) != len(knowledgeIDs) {
+		return repository.ErrKnowledgeNotFound
+	}
+	kbID := items[0].KnowledgeBaseID
+	for _, item := range items[1:] {
+		if item.KnowledgeBaseID != kbID {
+			return errors.New("knowledge entries must belong to the same knowledge base")
+		}
+	}
+	return s.repo.BatchUpdateKnowledgeFolderID(ctx, tenantID, kbID, knowledgeIDs, folderID)
 }
 
 // ListKnowledgeIDsByFolderIDs returns knowledge IDs belonging to the specified folders.

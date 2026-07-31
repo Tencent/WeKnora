@@ -29,6 +29,10 @@ func NewKnowledgeFolderRepository(db *gorm.DB) interfaces.KnowledgeFolderReposit
 	return &knowledgeFolderRepository{db: db}
 }
 
+func (r *knowledgeFolderRepository) WithTx(tx *gorm.DB) interfaces.KnowledgeFolderRepository {
+	return &knowledgeFolderRepository{db: tx}
+}
+
 // Create inserts a new folder record.
 func (r *knowledgeFolderRepository) Create(ctx context.Context, folder *types.KnowledgeFolder) error {
 	return r.db.WithContext(ctx).Create(folder).Error
@@ -107,13 +111,15 @@ func (r *knowledgeFolderRepository) Delete(ctx context.Context, tenantID uint64,
 // Move updates the parent_folder_id, path, and depth of a folder.
 func (r *knowledgeFolderRepository) Move(
 	ctx context.Context,
+	tenantID uint64,
+	kbID string,
 	id string,
 	newParentID *string,
 	newPath string,
 	newDepth int,
 ) error {
 	return r.db.WithContext(ctx).Model(&types.KnowledgeFolder{}).
-		Where("id = ?", id).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND id = ?", tenantID, kbID, id).
 		Updates(map[string]interface{}{
 			"parent_folder_id": newParentID,
 			"path":             newPath,
@@ -143,13 +149,15 @@ func (r *knowledgeFolderRepository) GetByPath(
 // GetDescendants returns all descendant folders of the given folder.
 func (r *knowledgeFolderRepository) GetDescendants(
 	ctx context.Context,
+	tenantID uint64,
+	kbID string,
 	folderID string,
 ) ([]*types.KnowledgeFolder, error) {
 	// First get the folder's path
 	var folder types.KnowledgeFolder
 	if err := r.db.WithContext(ctx).
 		Select("path").
-		Where("id = ?", folderID).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND id = ?", tenantID, kbID, folderID).
 		First(&folder).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrFolderNotFound
@@ -160,7 +168,7 @@ func (r *knowledgeFolderRepository) GetDescendants(
 	var descendants []*types.KnowledgeFolder
 	// Use LIKE on the path to find all descendants
 	if err := r.db.WithContext(ctx).
-		Where("path LIKE ?", folder.Path+"%").
+		Where("tenant_id = ? AND knowledge_base_id = ? AND path LIKE ?", tenantID, kbID, folder.Path+"%").
 		Where("id != ?", folderID).
 		Find(&descendants).Error; err != nil {
 		return nil, err
@@ -279,6 +287,8 @@ func (r *knowledgeFolderRepository) CheckNameExists(
 // BatchUpdateDescendantPaths updates path and depth for all descendants of a folder.
 func (r *knowledgeFolderRepository) BatchUpdateDescendantPaths(
 	ctx context.Context,
+	tenantID uint64,
+	kbID string,
 	oldPath string,
 	newPath string,
 	depthDelta int,
@@ -287,7 +297,7 @@ func (r *knowledgeFolderRepository) BatchUpdateDescendantPaths(
 	// PostgreSQL: REPLACE(path, oldPath, newPath)
 	// SQLite: REPLACE(path, oldPath, newPath) — both support REPLACE.
 	query := r.db.WithContext(ctx).Model(&types.KnowledgeFolder{}).
-		Where("path LIKE ?", oldPath+"%").
+		Where("tenant_id = ? AND knowledge_base_id = ? AND path LIKE ?", tenantID, kbID, oldPath+"%").
 		Where("path != ?", oldPath). // Don't update the folder itself (handled separately)
 		Updates(map[string]interface{}{
 			"path":  gorm.Expr("REPLACE(path, ?, ?)", oldPath, newPath),

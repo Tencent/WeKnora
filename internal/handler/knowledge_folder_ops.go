@@ -40,10 +40,17 @@ func (h *KnowledgeHandler) MoveKnowledgeToFolder(c *gin.Context) {
 	}
 
 	// Validate access
-	_, effectiveCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, knowledgeID, types.OrgRoleEditor)
+	knowledge, effectiveCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, knowledgeID, types.OrgRoleEditor)
 	if err != nil {
 		c.JSON(http.StatusForbidden, errors.NewForbiddenError("Permission denied"))
 		return
+	}
+	if req.FolderID != nil && *req.FolderID != "" {
+		folder, folderErr := h.folderService.GetFolder(effectiveCtx, *req.FolderID)
+		if folderErr != nil || folder.KnowledgeBaseID != knowledge.KnowledgeBaseID {
+			c.JSON(http.StatusBadRequest, errors.NewBadRequestError("Target folder does not belong to this knowledge base"))
+			return
+		}
 	}
 
 	// Move to folder
@@ -109,6 +116,25 @@ func (h *KnowledgeHandler) BatchMoveKnowledgeToFolder(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusForbidden, errors.NewForbiddenError("Permission denied"))
 		return
+	}
+	tenantID := types.MustTenantIDFromContext(effectiveCtx)
+	items, err := h.kgService.GetKnowledgeBatch(effectiveCtx, tenantID, req.KnowledgeIDs)
+	if err != nil || len(items) != len(req.KnowledgeIDs) {
+		c.JSON(http.StatusBadRequest, errors.NewBadRequestError("One or more knowledge entries were not found"))
+		return
+	}
+	for _, item := range items {
+		if item.KnowledgeBaseID != firstKnowledge.KnowledgeBaseID {
+			c.JSON(http.StatusBadRequest, errors.NewBadRequestError("All knowledge entries must belong to the same knowledge base"))
+			return
+		}
+	}
+	if req.FolderID != nil && *req.FolderID != "" {
+		folder, folderErr := h.folderService.GetFolder(effectiveCtx, *req.FolderID)
+		if folderErr != nil || folder.KnowledgeBaseID != firstKnowledge.KnowledgeBaseID {
+			c.JSON(http.StatusBadRequest, errors.NewBadRequestError("Target folder does not belong to this knowledge base"))
+			return
+		}
 	}
 
 	// Batch move

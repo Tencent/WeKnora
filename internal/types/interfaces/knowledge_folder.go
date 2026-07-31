@@ -4,10 +4,13 @@ import (
 	"context"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"gorm.io/gorm"
 )
 
 // KnowledgeFolderRepository defines the data access interface for knowledge folders.
 type KnowledgeFolderRepository interface {
+	// WithTx returns a repository bound to the supplied transaction.
+	WithTx(tx *gorm.DB) KnowledgeFolderRepository
 	// Create creates a new folder.
 	Create(ctx context.Context, folder *types.KnowledgeFolder) error
 	// GetByID retrieves a folder by its ID, scoped to tenant.
@@ -22,11 +25,11 @@ type KnowledgeFolderRepository interface {
 	// Delete soft-deletes a folder by ID, scoped to tenant.
 	Delete(ctx context.Context, tenantID uint64, id string) error
 	// Move updates the parent_folder_id, path, and depth of a folder (used internally in transactions).
-	Move(ctx context.Context, id string, newParentID *string, newPath string, newDepth int) error
+	Move(ctx context.Context, tenantID uint64, kbID, id string, newParentID *string, newPath string, newDepth int) error
 	// GetByPath retrieves a folder by its exact path within a knowledge base.
 	GetByPath(ctx context.Context, tenantID uint64, kbID string, path string) (*types.KnowledgeFolder, error)
 	// GetDescendants returns all descendant folders of the given folder (any depth).
-	GetDescendants(ctx context.Context, folderID string) ([]*types.KnowledgeFolder, error)
+	GetDescendants(ctx context.Context, tenantID uint64, kbID, folderID string) ([]*types.KnowledgeFolder, error)
 	// CountKnowledge counts knowledge entries directly in a folder.
 	CountKnowledge(ctx context.Context, tenantID uint64, folderID string) (int64, error)
 	// CountKnowledgeByKB returns a map from folder_id to knowledge count for all folders in a KB.
@@ -38,7 +41,7 @@ type KnowledgeFolderRepository interface {
 	// BatchUpdateDescendantPaths updates path and depth for all descendants of a folder,
 	// replacing oldPath prefix with newPath prefix and adjusting depth by the delta.
 	// Must be called within a transaction.
-	BatchUpdateDescendantPaths(ctx context.Context, oldPath string, newPath string, depthDelta int) error
+	BatchUpdateDescendantPaths(ctx context.Context, tenantID uint64, kbID, oldPath string, newPath string, depthDelta int) error
 }
 
 // KnowledgeFolderService defines the business logic interface for knowledge folders.

@@ -21,6 +21,8 @@ type fakeFolderRepo struct {
 	knowledge map[string]*types.Knowledge
 }
 
+func (r *fakeFolderRepo) WithTx(_ *gorm.DB) interfaces.KnowledgeFolderRepository { return r }
+
 func newFakeFolderRepo() *fakeFolderRepo {
 	return &fakeFolderRepo{
 		folders:   make(map[string]*types.KnowledgeFolder),
@@ -88,9 +90,9 @@ func (r *fakeFolderRepo) Delete(ctx context.Context, tenantID uint64, id string)
 	return nil
 }
 
-func (r *fakeFolderRepo) Move(ctx context.Context, id string, newParentID *string, newPath string, newDepth int) error {
+func (r *fakeFolderRepo) Move(ctx context.Context, tenantID uint64, kbID, id string, newParentID *string, newPath string, newDepth int) error {
 	f, ok := r.folders[id]
-	if !ok {
+	if !ok || f.TenantID != tenantID || f.KnowledgeBaseID != kbID {
 		return repository.ErrFolderNotFound
 	}
 	f.ParentFolderID = newParentID
@@ -110,13 +112,16 @@ func (r *fakeFolderRepo) GetByPath(ctx context.Context, tenantID uint64, kbID st
 	return nil, nil
 }
 
-func (r *fakeFolderRepo) GetDescendants(ctx context.Context, folderID string) ([]*types.KnowledgeFolder, error) {
+func (r *fakeFolderRepo) GetDescendants(ctx context.Context, tenantID uint64, kbID, folderID string) ([]*types.KnowledgeFolder, error) {
 	self, ok := r.folders[folderID]
-	if !ok {
+	if !ok || self.TenantID != tenantID || self.KnowledgeBaseID != kbID {
 		return nil, repository.ErrFolderNotFound
 	}
 	var result []*types.KnowledgeFolder
 	for _, f := range r.folders {
+		if f.TenantID != tenantID || f.KnowledgeBaseID != kbID {
+			continue
+		}
 		if f.ID == folderID {
 			continue
 		}
@@ -190,8 +195,11 @@ func (r *fakeFolderRepo) CheckNameExists(ctx context.Context, tenantID uint64, k
 	return false, nil
 }
 
-func (r *fakeFolderRepo) BatchUpdateDescendantPaths(ctx context.Context, oldPath string, newPath string, depthDelta int) error {
+func (r *fakeFolderRepo) BatchUpdateDescendantPaths(ctx context.Context, tenantID uint64, kbID, oldPath string, newPath string, depthDelta int) error {
 	for _, f := range r.folders {
+		if f.TenantID != tenantID || f.KnowledgeBaseID != kbID {
+			continue
+		}
 		if len(f.Path) >= len(oldPath) && f.Path[:len(oldPath)] == oldPath && f.Path != oldPath {
 			f.Path = newPath + f.Path[len(oldPath):]
 			f.Depth += depthDelta
@@ -554,6 +562,55 @@ func TestGetBreadcrumb_NestedFolder(t *testing.T) {
 	breadcrumb, err := svc.GetBreadcrumb(ctx, childID)
 	require.NoError(t, err)
 	assert.Len(t, breadcrumb, 2)
+}
+
+func TestCreateFolder_RejectsParentFromAnotherKnowledgeBase(t *testing.T) {
+	svc, repo := setupServiceTest(t)
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	parentID := uuid.New().String()
+	repo.folders[parentID] = &types.KnowledgeFolder{
+		ID: parentID, TenantID: 1, KnowledgeBaseID: "kb-2", Name: "foreign", Path: "/" + parentID + "/", Depth: 1,
+	}
+
+	_, err := svc.CreateFolder(ctx, "kb-1", &types.CreateFolderRequest{Name: "child", ParentFolderID: ptr(parentID)})
+	assert.ErrorIs(t, err, repository.ErrFolderNotFound)
+}
+
+func TestUpdateFolder_RejectsWhitespaceOnlyName(t *testing.T) {
+	svc, repo := setupServiceTest(t)
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	id := uuid.New().String()
+	repo.folders[id] = &types.KnowledgeFolder{
+		ID: id, TenantID: 1, KnowledgeBaseID: "kb-1", Name: "original", Path: "/" + id + "/", Depth: 1,
+	}
+	name := "   "
+
+	_, err := svc.UpdateFolder(ctx, id, &types.UpdateFolderRequest{Name: &name})
+	require.Error(t, err)
+	assert.Equal(t, "original", repo.folders[id].Name)
+}
+
+func TestMoveFolder_RejectsParentFromAnotherKnowledgeBase(t *testing.T) {
+	svc, repo := setupServiceTest(t)
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	sourceID, targetID := uuid.New().String(), uuid.New().String()
+	repo.folders[sourceID] = &types.KnowledgeFolder{ID: sourceID, TenantID: 1, KnowledgeBaseID: "kb-1", Name: "source", Path: "/" + sourceID + "/", Depth: 1}
+	repo.folders[targetID] = &types.KnowledgeFolder{ID: targetID, TenantID: 1, KnowledgeBaseID: "kb-2", Name: "target", Path: "/" + targetID + "/", Depth: 1}
+
+	_, err := svc.MoveFolder(ctx, sourceID, &types.MoveFolderRequest{TargetParentFolderID: ptr(targetID)})
+	assert.ErrorIs(t, err, repository.ErrFolderNotFound)
+}
+
+func TestMoveFolder_RejectsSubtreeBeyondMaximumDepth(t *testing.T) {
+	svc, repo := setupServiceTest(t)
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	sourceID, childID, targetID := uuid.New().String(), uuid.New().String(), uuid.New().String()
+	repo.folders[sourceID] = &types.KnowledgeFolder{ID: sourceID, TenantID: 1, KnowledgeBaseID: "kb-1", Name: "source", Path: "/" + sourceID + "/", Depth: 1}
+	repo.folders[childID] = &types.KnowledgeFolder{ID: childID, TenantID: 1, KnowledgeBaseID: "kb-1", Name: "child", ParentFolderID: ptr(sourceID), Path: "/" + sourceID + "/" + childID + "/", Depth: 3}
+	repo.folders[targetID] = &types.KnowledgeFolder{ID: targetID, TenantID: 1, KnowledgeBaseID: "kb-1", Name: "target", Path: "/" + targetID + "/", Depth: types.MaxFolderDepth - 1}
+
+	_, err := svc.MoveFolder(ctx, sourceID, &types.MoveFolderRequest{TargetParentFolderID: ptr(targetID)})
+	assert.ErrorIs(t, err, repository.ErrMaxDepthExceeded)
 }
 
 // --- buildFolderTree ---

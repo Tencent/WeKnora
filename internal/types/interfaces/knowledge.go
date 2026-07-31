@@ -311,10 +311,10 @@ type KnowledgeRepository interface {
 	) ([]*types.Knowledge, int64, error)
 	// UpdateKnowledgeFolderID moves a single knowledge entry to a folder.
 	// folderID can be nil to move the entry to root.
-	UpdateKnowledgeFolderID(ctx context.Context, knowledgeID string, folderID *string) error
+	UpdateKnowledgeFolderID(ctx context.Context, tenantID uint64, kbID, knowledgeID string, folderID *string) error
 	// BatchUpdateKnowledgeFolderID moves multiple knowledge entries to a folder.
 	// folderID can be nil to move entries to root.
-	BatchUpdateKnowledgeFolderID(ctx context.Context, knowledgeIDs []string, folderID *string) error
+	BatchUpdateKnowledgeFolderID(ctx context.Context, tenantID uint64, kbID string, knowledgeIDs []string, folderID *string) error
 	// ListKnowledgeIDsByFolderIDs returns knowledge IDs that belong to the specified folders.
 	// When recursive is true, it also includes knowledge from all descendant subfolders.
 	// Use "__root__" as a folderID to include knowledge with folder_id IS NULL.

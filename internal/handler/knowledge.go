@@ -1195,22 +1195,16 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 			}
 		}
 
-		// Delete folders (force=true to cascade-delete subfolders; root-level
-		// knowledge is already collected above and will be async-deleted below).
-		for _, folderID := range folderIDs {
-			if err := h.folderService.DeleteFolder(ctx, folderID, true); err != nil {
-				logger.ErrorWithFields(ctx, err, map[string]interface{}{
-					"folder_id": secutils.SanitizeForLog(folderID),
-				})
-				c.Error(errors.NewBadRequestError(
-					fmt.Sprintf("Failed to delete folder: %s", err.Error())))
-				return
-			}
-		}
 	}
 
 	// If there are no knowledge IDs to delete, we're done.
 	if len(knowledgeIDs) == 0 {
+		for _, folderID := range folderIDs {
+			if err := h.folderService.DeleteFolder(ctx, folderID, true); err != nil {
+				c.Error(errors.NewBadRequestError(fmt.Sprintf("Failed to delete folder: %s", err.Error())))
+				return
+			}
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "Batch delete completed",
@@ -1250,6 +1244,19 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 		logger.Errorf(ctx, "Failed to enqueue batch knowledge delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue batch delete task"))
 		return
+	}
+
+	// Only remove the folder tree after validation and task enqueue succeed.
+	// The queued task owns deletion of the knowledge collected above.
+	for _, folderID := range folderIDs {
+		if err := h.folderService.DeleteFolder(ctx, folderID, true); err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"folder_id": secutils.SanitizeForLog(folderID),
+				"task_id":   taskID,
+			})
+			c.Error(errors.NewBadRequestError(fmt.Sprintf("Delete task %s was queued, but folder cleanup failed: %s", taskID, err.Error())))
+			return
+		}
 	}
 
 	totalCount := len(knowledgeIDs) + len(folderIDs)

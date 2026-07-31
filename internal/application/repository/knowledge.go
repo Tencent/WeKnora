@@ -953,11 +953,13 @@ func (r *knowledgeRepository) ListPagedKnowledgeByFolderID(
 // UpdateKnowledgeFolderID moves a single knowledge entry to a folder or to root.
 func (r *knowledgeRepository) UpdateKnowledgeFolderID(
 	ctx context.Context,
+	tenantID uint64,
+	kbID string,
 	knowledgeID string,
 	folderID *string,
 ) error {
 	result := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Where("id = ?", knowledgeID).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND id = ?", tenantID, kbID, knowledgeID).
 		Update("folder_id", folderID)
 	if result.Error != nil {
 		return result.Error
@@ -971,6 +973,8 @@ func (r *knowledgeRepository) UpdateKnowledgeFolderID(
 // BatchUpdateKnowledgeFolderID moves multiple knowledge entries to a folder or to root.
 func (r *knowledgeRepository) BatchUpdateKnowledgeFolderID(
 	ctx context.Context,
+	tenantID uint64,
+	kbID string,
 	knowledgeIDs []string,
 	folderID *string,
 ) error {
@@ -978,7 +982,7 @@ func (r *knowledgeRepository) BatchUpdateKnowledgeFolderID(
 		return nil
 	}
 	return r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Where("id IN ?", knowledgeIDs).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND id IN ?", tenantID, kbID, knowledgeIDs).
 		Update("folder_id", folderID).Error
 }
 

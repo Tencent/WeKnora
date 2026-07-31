@@ -66,6 +66,9 @@ func (s *knowledgeFolderService) CreateFolder(
 		if parent.Depth >= types.MaxFolderDepth {
 			return nil, repository.ErrMaxDepthExceeded
 		}
+		if parent.KnowledgeBaseID != kbID {
+			return nil, repository.ErrFolderNotFound
+		}
 		depth = parent.Depth + 1
 		path = parent.Path
 	} else {
@@ -83,13 +86,14 @@ func (s *knowledgeFolderService) CreateFolder(
 		Description:     req.Description,
 	}
 
-	if err := s.repo.Create(ctx, folder); err != nil {
-		return nil, err
-	}
-
-	// Update path to include the folder's own ID
-	folder.Path = path + folder.ID + "/"
-	if err := s.repo.Update(ctx, folder); err != nil {
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		txRepo := s.repo.WithTx(tx)
+		if err := txRepo.Create(ctx, folder); err != nil {
+			return err
+		}
+		folder.Path = path + folder.ID + "/"
+		return txRepo.Update(ctx, folder)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -212,8 +216,11 @@ func (s *knowledgeFolderService) UpdateFolder(
 
 	oldPath := folder.Path
 
-	if req.Name != nil && *req.Name != "" {
+	if req.Name != nil {
 		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			return nil, errors.New("folder name cannot be empty")
+		}
 		if name != folder.Name {
 			// Check uniqueness
 			exists, err := s.repo.CheckNameExists(ctx, tenantID, folder.KnowledgeBaseID,
@@ -275,7 +282,8 @@ func (s *knowledgeFolderService) DeleteFolder(ctx context.Context, id string, fo
 	if force && (len(children) > 0 || knowledgeCount > 0) {
 		err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			// Get all descendant folders
-			descendants, err := s.repo.GetDescendants(ctx, id)
+			txRepo := s.repo.WithTx(tx)
+			descendants, err := txRepo.GetDescendants(ctx, tenantID, folder.KnowledgeBaseID, id)
 			if err != nil {
 				return err
 			}
@@ -289,20 +297,20 @@ func (s *knowledgeFolderService) DeleteFolder(ctx context.Context, id string, fo
 
 			// Move knowledge entries in all these folders to root
 			if err := tx.Model(&types.Knowledge{}).
-				Where("folder_id IN ?", allFolderIDs).
+				Where("tenant_id = ? AND knowledge_base_id = ? AND folder_id IN ?", tenantID, folder.KnowledgeBaseID, allFolderIDs).
 				Update("folder_id", nil).Error; err != nil {
 				return err
 			}
 
 			// Delete descendant folders first (reverse depth order to avoid FK issues)
 			for i := len(descendants) - 1; i >= 0; i-- {
-				if err := tx.Where("id = ?", descendants[i].ID).Delete(&types.KnowledgeFolder{}).Error; err != nil {
+				if err := tx.Where("tenant_id = ? AND knowledge_base_id = ? AND id = ?", tenantID, folder.KnowledgeBaseID, descendants[i].ID).Delete(&types.KnowledgeFolder{}).Error; err != nil {
 					return err
 				}
 			}
 
 			// Delete the folder itself
-			if err := tx.Where("id = ?", id).Delete(&types.KnowledgeFolder{}).Error; err != nil {
+			if err := tx.Where("tenant_id = ? AND knowledge_base_id = ? AND id = ?", tenantID, folder.KnowledgeBaseID, id).Delete(&types.KnowledgeFolder{}).Error; err != nil {
 				return err
 			}
 			return nil
@@ -345,8 +353,11 @@ func (s *knowledgeFolderService) MoveFolder(
 		if err != nil {
 			return nil, err
 		}
+		if targetParent.KnowledgeBaseID != folder.KnowledgeBaseID {
+			return nil, repository.ErrFolderNotFound
+		}
 		// Prevent circular reference: target must not be a descendant of source
-		descendants, err := s.repo.GetDescendants(ctx, id)
+		descendants, err := s.repo.GetDescendants(ctx, tenantID, folder.KnowledgeBaseID, id)
 		if err != nil {
 			return nil, err
 		}
@@ -355,7 +366,14 @@ func (s *knowledgeFolderService) MoveFolder(
 				return nil, repository.ErrCircularReference
 			}
 		}
-		if targetParent.Depth >= types.MaxFolderDepth {
+		maxDescendantDepth := folder.Depth
+		for _, d := range descendants {
+			if d.Depth > maxDescendantDepth {
+				maxDescendantDepth = d.Depth
+			}
+		}
+		subtreeHeight := maxDescendantDepth - folder.Depth
+		if targetParent.Depth+1+subtreeHeight > types.MaxFolderDepth {
 			return nil, repository.ErrMaxDepthExceeded
 		}
 		newParentPath = targetParent.Path
@@ -382,10 +400,11 @@ func (s *knowledgeFolderService) MoveFolder(
 
 	// Execute in transaction: update self + batch update descendants
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := s.repo.Move(ctx, id, req.TargetParentFolderID, newPath, newDepth); err != nil {
+		txRepo := s.repo.WithTx(tx)
+		if err := txRepo.Move(ctx, tenantID, folder.KnowledgeBaseID, id, req.TargetParentFolderID, newPath, newDepth); err != nil {
 			return err
 		}
-		if err := s.repo.BatchUpdateDescendantPaths(ctx, oldPath, newPath, depthDelta); err != nil {
+		if err := txRepo.BatchUpdateDescendantPaths(ctx, tenantID, folder.KnowledgeBaseID, oldPath, newPath, depthDelta); err != nil {
 			return err
 		}
 		return nil
