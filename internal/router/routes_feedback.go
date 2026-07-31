@@ -14,7 +14,9 @@ func RegisterFeedbackRoutes(r *gin.RouterGroup, handler *handler.FeedbackHandler
 	// Feedback and governance are human actions. Raw groups deliberately stay
 	// undeclared in the API-key authorizer, whose default is deny.
 	sessions := r.Group("/sessions")
-	sessions.PUT("/:session_id/messages/:message_id/feedback", g.Viewer(), handler.PutMessageFeedback)
+	// Existing PUT session routes use :id. Gin requires one wildcard name per
+	// radix-tree position, so reuse it to keep full-router registration valid.
+	sessions.PUT("/:id/messages/:message_id/feedback", g.Viewer(), handler.PutMessageFeedback)
 
 	chunkRead := r.Group("/chunks")
 	chunkRead.GET(

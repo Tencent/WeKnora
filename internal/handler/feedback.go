@@ -36,7 +36,7 @@ func (h *FeedbackHandler) PutMessageFeedback(c *gin.Context) {
 		return
 	}
 	state, err := h.service.ApplyMessageFeedback(
-		c.Request.Context(), c.Param("session_id"), c.Param("message_id"),
+		c.Request.Context(), c.Param("id"), c.Param("message_id"),
 		request.Type, request.ReasonCode,
 	)
 	if err != nil {
