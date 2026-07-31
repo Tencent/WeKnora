@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -154,6 +155,26 @@ func NewDataTableSummaryTask(
 	logger.Infof(ctx, "enqueued data table summary task: id=%s queue=%s knowledge=%s",
 		info.ID, info.Queue, knowledgeID)
 	return nil
+}
+
+// enqueueDataTableSummaryIfNeeded enqueues table summary work for spreadsheet imports.
+func enqueueDataTableSummaryIfNeeded(
+	ctx context.Context,
+	client interfaces.TaskEnqueuer,
+	tenantID uint64,
+	knowledgeID string,
+	fileName, fileType, summaryModelID, embeddingModelID string,
+) {
+	ft := strings.ToLower(strings.TrimPrefix(fileType, "."))
+	if ft == "" && fileName != "" {
+		ft = getFileType(fileName)
+	}
+	if !slices.Contains([]string{"csv", "xlsx", "xls"}, ft) {
+		return
+	}
+	if err := NewDataTableSummaryTask(ctx, client, tenantID, knowledgeID, summaryModelID, embeddingModelID); err != nil {
+		logger.Warnf(ctx, "Failed to enqueue data table summary task for knowledge %s: %v", knowledgeID, err)
+	}
 }
 
 // ChunkExtractService is a service for extracting chunks

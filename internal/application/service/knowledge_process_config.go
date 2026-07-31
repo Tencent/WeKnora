@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 
 	werrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -92,6 +94,68 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	return eff
 }
 
+// validateImportFileType checks file extension constraints shared by direct upload and file-URL import.
+func validateImportFileType(fileType string) error {
+	fileType = strings.ToLower(strings.TrimPrefix(fileType, "."))
+	if fileType == "" || fileType == "unknown" {
+		return werrors.NewBadRequestError("无法确定文件类型")
+	}
+	if IsVideoType(fileType) {
+		return werrors.NewBadRequestError("暂不支持上传视频文件")
+	}
+	if !isAllowedFileURLExtension(fileType) {
+		return werrors.NewBadRequestError(fmt.Sprintf("不支持的文件类型: %s", fileType))
+	}
+	return nil
+}
+
+// validateDefaultFileImportRequirements enforces VLM/ASR prerequisites when no per-import overrides are provided.
+func validateDefaultFileImportRequirements(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+	eff types.EffectiveProcessConfig,
+	fileType string,
+) error {
+	fileType = strings.ToLower(strings.TrimPrefix(fileType, "."))
+	if IsImageType(fileType) && !eff.VLMConfig.IsEnabled() {
+		logger.Error(ctx, "VLM model is not configured")
+		return werrors.NewBadRequestError("上传图片文件需要设置VLM模型")
+	}
+	if IsAudioType(fileType) && !kb.ASRConfig.IsASREnabled() {
+		logger.Error(ctx, "ASR model is not configured")
+		return werrors.NewBadRequestError("上传音频文件需要设置ASR语音识别模型")
+	}
+	return nil
+}
+
+// resolveKnowledgeFileImportConfig validates import prerequisites and resolves effective processing config.
+func resolveKnowledgeFileImportConfig(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+	fileType string,
+	processOverrides *types.KnowledgeProcessOverrides,
+	enableMultimodel *bool,
+) (types.EffectiveProcessConfig, error) {
+	if err := validateImportFileType(fileType); err != nil {
+		return types.EffectiveProcessConfig{}, err
+	}
+
+	eff := ResolveProcessConfig(kb, processOverrides)
+	if enableMultimodel != nil && (processOverrides == nil || processOverrides.EnableMultimodel == nil) {
+		eff.EnableMultimodel = *enableMultimodel
+	}
+
+	if processOverrides != nil {
+		if err := ValidateProcessOverrides(ctx, kb, processOverrides, []string{fileType}); err != nil {
+			return eff, err
+		}
+	} else if err := validateDefaultFileImportRequirements(ctx, kb, eff, fileType); err != nil {
+		return eff, err
+	}
+
+	return eff, nil
+}
+
 // ValidateProcessOverrides validates batch overrides against file types in the upload.
 func ValidateProcessOverrides(
 	ctx context.Context,
@@ -143,18 +207,32 @@ func ApplyKnowledgeProcessOverrides(
 	fileTypes []string,
 	enableMultimodel *bool,
 ) (types.EffectiveProcessConfig, error) {
-	eff := ResolveProcessConfig(kb, processOverrides)
-	if enableMultimodel != nil && (processOverrides == nil || processOverrides.EnableMultimodel == nil) {
-		eff.EnableMultimodel = *enableMultimodel
+	fileType := ""
+	if len(fileTypes) > 0 {
+		fileType = fileTypes[0]
 	}
-	if processOverrides == nil {
-		return eff, nil
+
+	var eff types.EffectiveProcessConfig
+	var err error
+	if fileType != "" {
+		eff, err = resolveKnowledgeFileImportConfig(ctx, kb, fileType, processOverrides, enableMultimodel)
+	} else {
+		eff = ResolveProcessConfig(kb, processOverrides)
+		if enableMultimodel != nil && (processOverrides == nil || processOverrides.EnableMultimodel == nil) {
+			eff.EnableMultimodel = *enableMultimodel
+		}
+		if processOverrides != nil {
+			err = ValidateProcessOverrides(ctx, kb, processOverrides, fileTypes)
+		}
 	}
-	if err := ValidateProcessOverrides(ctx, kb, processOverrides, fileTypes); err != nil {
+	if err != nil {
 		return eff, err
 	}
-	if err := knowledge.SetProcessOverrides(processOverrides); err != nil {
-		return eff, err
+
+	if processOverrides != nil && knowledge != nil {
+		if err := knowledge.SetProcessOverrides(processOverrides); err != nil {
+			return eff, err
+		}
 	}
 	return eff, nil
 }
