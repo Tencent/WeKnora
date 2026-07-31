@@ -59,7 +59,9 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, err
 	}
 
-	// Validate file type
+	// Early reject before the whole-file hash below. resolveFileImportProcessConfig
+	// gates the same extension set, but this path must keep returning
+	// ErrInvalidFileType rather than the shared gate's localized message.
 	logger.Infof(ctx, "Checking file type: %s", fileName)
 	if !isValidFileType(fileName) {
 		logger.Error(ctx, "Invalid file type")
@@ -123,7 +125,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, werrors.NewValidationError("文件名包含非法字符")
 	}
 
-	eff, err := resolveKnowledgeFileImportConfig(ctx, kb, getFileType(safeFilename), processOverrides, enableMultimodel)
+	eff, err := resolveFileImportProcessConfig(ctx, kb, getFileType(safeFilename), processOverrides, enableMultimodel)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +265,7 @@ func isFileURL(rawURL, fileName, fileType string) bool {
 	u, err := url.Parse(rawURL)
 	if err == nil {
 		ext := strings.ToLower(strings.TrimPrefix(path.Ext(u.Path), "."))
-		if ext != "" && isAllowedFileURLExtension(ext) {
+		if ext != "" && isSupportedImportExtension(ext) {
 			return true
 		}
 	}
@@ -529,15 +531,13 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		fileName = safeFilename
 	}
 
-	// Resolve fileType: user-provided > inferred from fileName
-	if fileType == "" && fileName != "" {
+	// Resolve fileType: user-provided > inferred from fileName (which already
+	// falls back to the URL path above). getFileType never returns empty, so an
+	// undeterminable type surfaces as "unknown" and is rejected below.
+	if fileType == "" {
 		fileType = getFileType(fileName)
 	}
-
-	resolvedFileType := fileType
-	if resolvedFileType == "" {
-		resolvedFileType = getFileType(extractFileNameFromURL(fileURL))
-	}
+	fileType = normalizeFileExtension(fileType)
 
 	// Use title as display name if fileName is still empty
 	displayName := fileName
@@ -604,23 +604,13 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		knowledge.Title = displayName
 	}
 
-	var eff types.EffectiveProcessConfig
-	if resolvedFileType != "" {
-		eff, err = resolveKnowledgeFileImportConfig(ctx, kb, resolvedFileType, processOverrides, enableMultimodel)
-		if err != nil {
-			return nil, err
-		}
-		if processOverrides != nil {
-			if err := knowledge.SetProcessOverrides(processOverrides); err != nil {
-				logger.Errorf(ctx, "Failed to set process overrides: %v", err)
-				return nil, err
-			}
-		}
-	} else {
-		eff, err = ApplyKnowledgeProcessOverrides(
-			ctx, kb, knowledge, processOverrides, nil, enableMultimodel,
-		)
-		if err != nil {
+	eff, err := resolveFileImportProcessConfig(ctx, kb, fileType, processOverrides, enableMultimodel)
+	if err != nil {
+		return nil, err
+	}
+	if processOverrides != nil {
+		if err := knowledge.SetProcessOverrides(processOverrides); err != nil {
+			logger.Errorf(ctx, "Failed to set process overrides: %v", err)
 			return nil, err
 		}
 	}

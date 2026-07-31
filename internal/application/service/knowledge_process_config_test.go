@@ -412,39 +412,55 @@ func TestValidateProcessOverrides_ImageAllowsStorageFallback(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestValidateImportFileType(t *testing.T) {
-	t.Parallel()
-
-	require.NoError(t, validateImportFileType("xlsx"))
-	require.NoError(t, validateImportFileType(".XLSX"))
-	require.Error(t, validateImportFileType("exe"))
-	require.Error(t, validateImportFileType("mp4"))
-	require.Error(t, validateImportFileType(""))
-}
-
-func TestResolveKnowledgeFileImportConfig_ImageRequiresVLM(t *testing.T) {
+func TestResolveFileImportProcessConfig_ImageRequiresVLM(t *testing.T) {
 	t.Parallel()
 
 	kb := &types.KnowledgeBase{
 		VLMConfig: types.VLMConfig{Enabled: false},
 	}
-	_, err := resolveKnowledgeFileImportConfig(context.Background(), kb, "png", nil, nil)
+	_, err := resolveFileImportProcessConfig(context.Background(), kb, "png", nil, nil)
 	require.Error(t, err)
 	var badReq *werrors.AppError
 	require.ErrorAs(t, err, &badReq)
 }
 
-func TestResolveKnowledgeFileImportConfig_AudioRequiresASR(t *testing.T) {
+func TestResolveFileImportProcessConfig_AudioRequiresASR(t *testing.T) {
 	t.Parallel()
 
 	kb := &types.KnowledgeBase{
 		ASRConfig: types.ASRConfig{Enabled: false},
 	}
-	_, err := resolveKnowledgeFileImportConfig(context.Background(), kb, "mp3", nil, nil)
+	_, err := resolveFileImportProcessConfig(context.Background(), kb, "mp3", nil, nil)
 	require.Error(t, err)
 }
 
-func TestApplyKnowledgeProcessOverrides_DefaultImageValidation(t *testing.T) {
+// The regression behind #2447: spreadsheets must clear the shared import gate
+// even when the caller sends no per-import overrides.
+func TestResolveFileImportProcessConfig_SpreadsheetAllowedWithoutOverrides(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{ChunkingConfig: types.ChunkingConfig{ChunkSize: 512}}
+	for _, ext := range []string{"xlsx", "xls", "csv"} {
+		eff, err := resolveFileImportProcessConfig(context.Background(), kb, ext, nil, nil)
+		require.NoErrorf(t, err, "ext=%s", ext)
+		require.Equal(t, 512, eff.ChunkingConfig.ChunkSize)
+	}
+}
+
+func TestResolveFileImportProcessConfig_RejectsUnsupportedAndUndeterminable(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{}
+	for _, ext := range []string{"exe", "mp4", "", unknownFileType} {
+		_, err := resolveFileImportProcessConfig(context.Background(), kb, ext, nil, nil)
+		require.Errorf(t, err, "ext=%s should be rejected", ext)
+	}
+}
+
+// ApplyKnowledgeProcessOverrides stays scoped to overrides: import-time file
+// type gating belongs to resolveFileImportProcessConfig, so callers that pass
+// no overrides (reparse, connector sync) keep their existing behaviour.
+func TestApplyKnowledgeProcessOverrides_NoOverridesSkipsImportGate(t *testing.T) {
 	t.Parallel()
 
 	kb := &types.KnowledgeBase{
@@ -452,17 +468,7 @@ func TestApplyKnowledgeProcessOverrides_DefaultImageValidation(t *testing.T) {
 	}
 	knowledge := &types.Knowledge{}
 	_, err := ApplyKnowledgeProcessOverrides(context.Background(), kb, knowledge, nil, []string{"png"}, nil)
-	require.Error(t, err)
-}
-
-func TestApplyKnowledgeProcessOverrides_XLSXAllowed(t *testing.T) {
-	t.Parallel()
-
-	kb := &types.KnowledgeBase{}
-	knowledge := &types.Knowledge{}
-	eff, err := ApplyKnowledgeProcessOverrides(context.Background(), kb, knowledge, nil, []string{"xlsx"}, nil)
 	require.NoError(t, err)
-	require.NotNil(t, eff)
 }
 
 func TestMergeParserEngineOverrides(t *testing.T) {

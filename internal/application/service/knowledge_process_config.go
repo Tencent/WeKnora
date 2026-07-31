@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -94,29 +93,16 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	return eff
 }
 
-// validateImportFileType checks file extension constraints shared by direct upload and file-URL import.
-func validateImportFileType(fileType string) error {
-	fileType = strings.ToLower(strings.TrimPrefix(fileType, "."))
-	if fileType == "" || fileType == "unknown" {
-		return werrors.NewBadRequestError("无法确定文件类型")
-	}
-	if IsVideoType(fileType) {
-		return werrors.NewBadRequestError("暂不支持上传视频文件")
-	}
-	if !isAllowedFileURLExtension(fileType) {
-		return werrors.NewBadRequestError(fmt.Sprintf("不支持的文件类型: %s", fileType))
-	}
-	return nil
-}
-
-// validateDefaultFileImportRequirements enforces VLM/ASR prerequisites when no per-import overrides are provided.
+// validateDefaultFileImportRequirements enforces the VLM/ASR prerequisites that
+// ValidateProcessOverrides would otherwise cover, for imports that ship no
+// per-import overrides and therefore fall back to the KB defaults.
 func validateDefaultFileImportRequirements(
 	ctx context.Context,
 	kb *types.KnowledgeBase,
 	eff types.EffectiveProcessConfig,
 	fileType string,
 ) error {
-	fileType = strings.ToLower(strings.TrimPrefix(fileType, "."))
+	fileType = normalizeFileExtension(fileType)
 	if IsImageType(fileType) && !eff.VLMConfig.IsEnabled() {
 		logger.Error(ctx, "VLM model is not configured")
 		return werrors.NewBadRequestError("上传图片文件需要设置VLM模型")
@@ -128,8 +114,12 @@ func validateDefaultFileImportRequirements(
 	return nil
 }
 
-// resolveKnowledgeFileImportConfig validates import prerequisites and resolves effective processing config.
-func resolveKnowledgeFileImportConfig(
+// resolveFileImportProcessConfig is the single gate every file import passes
+// through: it rejects unsupported extensions, enforces the VLM/ASR
+// prerequisites for the resolved type, and returns the effective processing
+// config for task enqueue. Persisting overrides onto the knowledge record stays
+// with the caller, which owns the record's lifecycle.
+func resolveFileImportProcessConfig(
 	ctx context.Context,
 	kb *types.KnowledgeBase,
 	fileType string,
@@ -207,32 +197,18 @@ func ApplyKnowledgeProcessOverrides(
 	fileTypes []string,
 	enableMultimodel *bool,
 ) (types.EffectiveProcessConfig, error) {
-	fileType := ""
-	if len(fileTypes) > 0 {
-		fileType = fileTypes[0]
+	eff := ResolveProcessConfig(kb, processOverrides)
+	if enableMultimodel != nil && (processOverrides == nil || processOverrides.EnableMultimodel == nil) {
+		eff.EnableMultimodel = *enableMultimodel
 	}
-
-	var eff types.EffectiveProcessConfig
-	var err error
-	if fileType != "" {
-		eff, err = resolveKnowledgeFileImportConfig(ctx, kb, fileType, processOverrides, enableMultimodel)
-	} else {
-		eff = ResolveProcessConfig(kb, processOverrides)
-		if enableMultimodel != nil && (processOverrides == nil || processOverrides.EnableMultimodel == nil) {
-			eff.EnableMultimodel = *enableMultimodel
-		}
-		if processOverrides != nil {
-			err = ValidateProcessOverrides(ctx, kb, processOverrides, fileTypes)
-		}
+	if processOverrides == nil {
+		return eff, nil
 	}
-	if err != nil {
+	if err := ValidateProcessOverrides(ctx, kb, processOverrides, fileTypes); err != nil {
 		return eff, err
 	}
-
-	if processOverrides != nil && knowledge != nil {
-		if err := knowledge.SetProcessOverrides(processOverrides); err != nil {
-			return eff, err
-		}
+	if err := knowledge.SetProcessOverrides(processOverrides); err != nil {
+		return eff, err
 	}
 	return eff, nil
 }
