@@ -27,6 +27,8 @@ func (s *suggestedQuestionsAgentService) GetSuggestedQuestions(
 	_ []string,
 	_ []string,
 	tagScopes []types.TagScope,
+	_ []string,
+	_ bool,
 	_ int,
 ) ([]types.SuggestedQuestion, error) {
 	s.tagScopes = tagScopes

@@ -1,4 +1,4 @@
-﻿package types
+package types
 
 import "maps"
 
@@ -19,8 +19,8 @@ type PipelineRequest struct {
 	VectorDatabase   string        `json:"vector_database"`
 
 	// Folder scope parameters
-	FolderIDs        []string `json:"folder_ids,omitempty"`
-	IncludeSubfolders bool    `json:"include_subfolders,omitempty"`
+	FolderIDs         []string `json:"folder_ids,omitempty"`
+	IncludeSubfolders bool     `json:"include_subfolders,omitempty"`
 
 	// Rerank parameters
 	RerankModelID   string  `json:"rerank_model_id"`

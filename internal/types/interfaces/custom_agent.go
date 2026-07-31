@@ -1,4 +1,4 @@
-﻿// Package interfaces defines the interface contracts for custom agent management
+// Package interfaces defines the interface contracts for custom agent management
 package interfaces
 
 import (

@@ -1,4 +1,4 @@
-﻿package chatpipeline
+package chatpipeline
 
 import (
 	"context"

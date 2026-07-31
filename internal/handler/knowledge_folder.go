@@ -408,8 +408,8 @@ func (h *KnowledgeFolderHandler) MoveFolder(c *gin.Context) {
 	updatedFolder, err := h.folderService.MoveFolder(ctx, folderID, &req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"folder_id":       folderID,
-			"target_parent":   req.TargetParentFolderID,
+			"folder_id":     folderID,
+			"target_parent": req.TargetParentFolderID,
 		})
 		c.JSON(http.StatusBadRequest, errors.NewBadRequestError(err.Error()))
 		return

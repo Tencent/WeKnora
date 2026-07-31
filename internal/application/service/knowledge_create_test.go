@@ -228,7 +228,7 @@ func TestCreateKnowledgeFromImageFallsBackWhenLegacyStorageConfigIsIncomplete(t 
 		nil,
 		"",
 		nil,
-t	nil,
+		nil,
 	)
 
 	require.NoError(t, err)
