@@ -10,8 +10,9 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
+	gomysql "github.com/go-sql-driver/mysql"
 
+	appdb "github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -20,6 +21,20 @@ func TestMySQLVectorRetrieveIntegration(t *testing.T) {
 	if dsn == "" {
 		t.Skip("set WEKNORA_MYSQL_TEST_DSN to run the real MySQL integration test")
 	}
+	baseConfig, err := gomysql.ParseDSN(dsn)
+	if err != nil {
+		t.Fatalf("parse WEKNORA_MYSQL_TEST_DSN: %v", err)
+	}
+	clientConfig, err := appdb.MySQLRetrieverConfigFromEnv(
+		baseConfig.User,
+		baseConfig.Passwd,
+		baseConfig.Addr,
+		baseConfig.DBName,
+	)
+	if err != nil {
+		t.Fatalf("build MySQL retriever connection config: %v", err)
+	}
+	dsn = clientConfig.DSN
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()

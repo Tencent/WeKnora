@@ -1,0 +1,57 @@
+# External MySQL/Percona primary-database overlay. It intentionally does not
+# start the in-repository PostgreSQL or MySQL services. Requires Docker Compose
+# 2.24.4+ for !override, as does docker-compose.mysql.yml.
+services:
+  app:
+    volumes:
+      # Empty by default. When DB_USE_TLS=true, set DB_TLS_MOUNT_DIR to a host
+      # directory containing the provider CA and optional client credentials.
+      - ${DB_TLS_MOUNT_DIR:-./config/mysql-tls}:/run/secrets/weknora-mysql:ro
+    environment:
+      - DB_DRIVER=mysql
+      - DB_HOST=${DB_HOST:?Set DB_HOST to the external MySQL endpoint}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_USER=${DB_USER:?Set DB_USER for the external MySQL endpoint}
+      - DB_PASSWORD=${DB_PASSWORD:?Set DB_PASSWORD for the external MySQL endpoint}
+      - DB_NAME=${DB_NAME:?Set DB_NAME for the external MySQL endpoint}
+      - DB_MAX_OPEN_CONNS=${DB_MAX_OPEN_CONNS:-20}
+      - DB_MAX_IDLE_CONNS=${DB_MAX_IDLE_CONNS:-10}
+      - DB_CONN_MAX_LIFETIME=${DB_CONN_MAX_LIFETIME:-10m}
+      - DB_CONN_MAX_IDLE_TIME=${DB_CONN_MAX_IDLE_TIME:-5m}
+      - DB_USE_TLS=${DB_USE_TLS:-false}
+      - DB_TLS_SERVER_NAME=${DB_TLS_SERVER_NAME:-}
+      - DB_TLS_CA=${DB_TLS_CA:-}
+      - DB_TLS_CERT=${DB_TLS_CERT:-}
+      - DB_TLS_KEY=${DB_TLS_KEY:-}
+      - DB_TLS_INSECURE_SKIP_VERIFY=${DB_TLS_INSECURE_SKIP_VERIFY:-false}
+      - DB_CONNECT_TIMEOUT=${DB_CONNECT_TIMEOUT:-10s}
+      - DB_READ_TIMEOUT=${DB_READ_TIMEOUT:-}
+      - DB_WRITE_TIMEOUT=${DB_WRITE_TIMEOUT:-}
+      - AUTO_RECOVER_DIRTY=false
+      - RETRIEVE_DRIVER=${MYSQL_RETRIEVE_DRIVER:-mysql}
+      - MYSQL_HOST=${DB_HOST:?Set DB_HOST to the external MySQL endpoint}
+      - MYSQL_PORT=${DB_PORT:-3306}
+      - MYSQL_USERNAME=${DB_USER:?Set DB_USER for the external MySQL endpoint}
+      - MYSQL_PASSWORD=${DB_PASSWORD:?Set DB_PASSWORD for the external MySQL endpoint}
+      - MYSQL_DATABASE=${DB_NAME:?Set DB_NAME for the external MySQL endpoint}
+      - MYSQL_TABLE_PREFIX=${MYSQL_TABLE_PREFIX:-weknora_embeddings}
+      - MYSQL_USE_TLS=${MYSQL_USE_TLS:-${DB_USE_TLS:-false}}
+      - MYSQL_TLS_SERVER_NAME=${MYSQL_TLS_SERVER_NAME:-${DB_TLS_SERVER_NAME:-}}
+      - MYSQL_TLS_CA=${MYSQL_TLS_CA:-${DB_TLS_CA:-}}
+      - MYSQL_TLS_CERT=${MYSQL_TLS_CERT:-${DB_TLS_CERT:-}}
+      - MYSQL_TLS_KEY=${MYSQL_TLS_KEY:-${DB_TLS_KEY:-}}
+      - MYSQL_TLS_INSECURE_SKIP_VERIFY=${MYSQL_TLS_INSECURE_SKIP_VERIFY:-${DB_TLS_INSECURE_SKIP_VERIFY:-false}}
+      - MYSQL_CONNECT_TIMEOUT=${MYSQL_CONNECT_TIMEOUT:-${DB_CONNECT_TIMEOUT:-10s}}
+      - MYSQL_READ_TIMEOUT=${MYSQL_READ_TIMEOUT:-${DB_READ_TIMEOUT:-}}
+      - MYSQL_WRITE_TIMEOUT=${MYSQL_WRITE_TIMEOUT:-${DB_WRITE_TIMEOUT:-}}
+    depends_on: !override
+      redis:
+        condition: service_started
+      docreader:
+        condition: service_healthy
+
+  # The external-database app has no dependency on the in-chart PostgreSQL
+  # service, so keep it out of the default combined Compose project.
+  postgres:
+    profiles:
+      - internal

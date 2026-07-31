@@ -4,15 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	gomysql "github.com/go-sql-driver/mysql"
 	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/mysql"
+	mysqlmigrate "github.com/golang-migrate/migrate/v4/database/mysql"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -110,6 +110,13 @@ type MigrationOptions struct {
 	// parsing a URL-based DSN, which avoids breakage when the path contains
 	// spaces (e.g. macOS "Application Support").
 	SQLiteDBPath string
+
+	// MySQLDSN is the native go-sql-driver DSN used to create the migration
+	// driver with an existing TLS registry entry. It must have
+	// multiStatements=true. Keeping this separate from the migration URL avoids
+	// golang-migrate rebuilding and weakening the application's custom CA/SNI
+	// policy.
+	MySQLDSN string
 }
 
 // RunMigrationsWithOptions executes all pending database migrations with custom options
@@ -118,41 +125,12 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 
 	logger.Infof(ctx, "Starting database migration...")
 
-	migrationsPath := migrationSourceForDSN(dsn)
-
-	var m *migrate.Migrate
-	if opts.SQLiteDBPath != "" {
-		sqlDB, err := sql.Open("sqlite3", opts.SQLiteDBPath)
-		if err != nil {
-			logger.Errorf(ctx, "Failed to open sqlite db for migration: %v", err)
-			wrapped := fmt.Errorf("failed to open sqlite db for migration: %w", err)
-			setMigrationState(0, false, wrapped.Error(), false)
-			return wrapped
-		}
-		driver, err := sqlite3migrate.WithInstance(sqlDB, &sqlite3migrate.Config{})
-		if err != nil {
-			sqlDB.Close()
-			logger.Errorf(ctx, "Failed to create sqlite3 migrate driver: %v", err)
-			wrapped := fmt.Errorf("failed to create sqlite3 migrate driver: %w", err)
-			setMigrationState(0, false, wrapped.Error(), false)
-			return wrapped
-		}
-		m, err = migrate.NewWithDatabaseInstance(migrationsPath, "sqlite3", driver)
-		if err != nil {
-			logger.Errorf(ctx, "Failed to create migrate instance: %v", err)
-			wrapped := fmt.Errorf("failed to create migrate instance: %w", err)
-			setMigrationState(0, false, wrapped.Error(), false)
-			return wrapped
-		}
-	} else {
-		var err error
-		m, err = migrate.New(migrationsPath, dsn)
-		if err != nil {
-			logger.Errorf(ctx, "Failed to create migrate instance: %v", err)
-			wrapped := fmt.Errorf("failed to create migrate instance: %w", err)
-			setMigrationState(0, false, wrapped.Error(), false)
-			return wrapped
-		}
+	m, err := newMigrationInstance(dsn, opts)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to create migrate instance: %v", err)
+		wrapped := fmt.Errorf("failed to create migrate instance: %w", err)
+		setMigrationState(0, false, wrapped.Error(), false)
+		return wrapped
 	}
 	defer m.Close()
 
@@ -172,7 +150,7 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 	// If database is in dirty state, try to recover or return error
 	if oldDirty {
 		logger.Warnf(ctx, "Database is in dirty state at version %d", oldVersion)
-		if isMySQLMigrationDSN(dsn) {
+		if isMySQLMigration(dsn, opts) {
 			return captureMigrationFailure(m, mysqlDirtyStateError(oldVersion, nil))
 		}
 		if opts.AutoRecoverDirty && dirtyAutoRecoveryAllowed(dsn) {
@@ -213,7 +191,7 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 		currentVersion, currentDirty, versionCheckErr := m.Version()
 		if versionCheckErr == nil && currentDirty {
 			logger.Warnf(ctx, "Migration caused dirty state at version %d", currentVersion)
-			if isMySQLMigrationDSN(dsn) {
+			if isMySQLMigration(dsn, opts) {
 				return captureMigrationFailure(m, mysqlDirtyStateError(currentVersion, err))
 			}
 			if opts.AutoRecoverDirty && dirtyAutoRecoveryAllowed(dsn) {
@@ -275,6 +253,54 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 	return nil
 }
 
+func newMigrationInstance(dsn string, opts MigrationOptions) (*migrate.Migrate, error) {
+	migrationsPath := migrationSourceForDSN(dsn)
+	if opts.MySQLDSN != "" {
+		cfg, err := gomysql.ParseDSN(opts.MySQLDSN)
+		if err != nil {
+			return nil, fmt.Errorf("parse native MySQL migration DSN: %w", err)
+		}
+		if !cfg.MultiStatements {
+			return nil, fmt.Errorf("native MySQL migration DSN must enable multiStatements")
+		}
+		sqlDB, err := sql.Open("mysql", opts.MySQLDSN)
+		if err != nil {
+			return nil, fmt.Errorf("open MySQL database for migration: %w", err)
+		}
+		driver, err := mysqlmigrate.WithInstance(sqlDB, &mysqlmigrate.Config{DatabaseName: cfg.DBName})
+		if err != nil {
+			_ = sqlDB.Close()
+			return nil, fmt.Errorf("create MySQL migrate driver: %w", err)
+		}
+		m, err := migrate.NewWithDatabaseInstance(migrationsPath, "mysql", driver)
+		if err != nil {
+			_ = driver.Close()
+			return nil, err
+		}
+		return m, nil
+	}
+
+	if opts.SQLiteDBPath != "" {
+		sqlDB, err := sql.Open("sqlite3", opts.SQLiteDBPath)
+		if err != nil {
+			return nil, fmt.Errorf("open sqlite db for migration: %w", err)
+		}
+		driver, err := sqlite3migrate.WithInstance(sqlDB, &sqlite3migrate.Config{})
+		if err != nil {
+			_ = sqlDB.Close()
+			return nil, fmt.Errorf("create sqlite3 migrate driver: %w", err)
+		}
+		m, err := migrate.NewWithDatabaseInstance(migrationsPath, "sqlite3", driver)
+		if err != nil {
+			_ = driver.Close()
+			return nil, err
+		}
+		return m, nil
+	}
+
+	return migrate.New(migrationsPath, dsn)
+}
+
 // recoverFromDirtyState attempts to recover from a dirty migration state
 // by forcing to the previous version and allowing the migration to be retried
 func recoverFromDirtyState(ctx context.Context, m *migrate.Migrate, dirtyVersion uint) error {
@@ -318,13 +344,12 @@ func recoverFromDirtyState(ctx context.Context, m *migrate.Migrate, dirtyVersion
 
 // GetMigrationVersion returns the current migration version
 func GetMigrationVersion() (uint, bool, error) {
-	dbURL, err := migrationDSNFromEnv()
+	dbURL, opts, err := migrationRuntimeConfigFromEnv()
 	if err != nil {
 		return 0, false, err
 	}
 
-	migrationsPath := migrationSourceForDSN(dbURL)
-	m, err := migrate.New(migrationsPath, dbURL)
+	m, err := newMigrationInstance(dbURL, opts)
 	if err != nil {
 		return 0, false, fmt.Errorf("failed to create migrate instance: %w", err)
 	}
@@ -353,6 +378,10 @@ func isMySQLMigrationDSN(dsn string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(dsn)), "mysql://")
 }
 
+func isMySQLMigration(dsn string, opts MigrationOptions) bool {
+	return opts.MySQLDSN != "" || isMySQLMigrationDSN(dsn)
+}
+
 func dirtyAutoRecoveryAllowed(dsn string) bool {
 	return !isMySQLMigrationDSN(dsn)
 }
@@ -371,24 +400,24 @@ func mysqlDirtyStateError(version uint, migrationErr error) error {
 }
 
 func migrationDSNFromEnv() (string, error) {
+	dsn, _, err := migrationRuntimeConfigFromEnv()
+	return dsn, err
+}
+
+func migrationRuntimeConfigFromEnv() (string, MigrationOptions, error) {
 	switch os.Getenv("DB_DRIVER") {
 	case "mysql":
-		dbPort := os.Getenv("DB_PORT")
-		if dbPort == "" {
-			dbPort = "3306"
+		cfg, err := MySQLMainDatabaseConfigFromEnv()
+		if err != nil {
+			return "", MigrationOptions{}, err
 		}
-		return BuildMySQLMigrationDSN(
-			os.Getenv("DB_USER"),
-			os.Getenv("DB_PASSWORD"),
-			net.JoinHostPort(os.Getenv("DB_HOST"), dbPort),
-			os.Getenv("DB_NAME"),
-		), nil
+		return cfg.MigrationURL, MigrationOptions{MySQLDSN: cfg.MigrationDSN}, nil
 	case "sqlite":
 		dbPath := os.Getenv("DB_PATH")
 		if dbPath == "" {
 			dbPath = "./data/weknora.db"
 		}
-		return "sqlite3://" + dbPath, nil
+		return "sqlite3://" + dbPath, MigrationOptions{SQLiteDBPath: dbPath}, nil
 	case "postgres", "":
 		return fmt.Sprintf(
 			"postgres://%s:%s@%s:%s/%s?sslmode=disable",
@@ -397,8 +426,8 @@ func migrationDSNFromEnv() (string, error) {
 			os.Getenv("DB_HOST"),
 			os.Getenv("DB_PORT"),
 			os.Getenv("DB_NAME"),
-		), nil
+		), MigrationOptions{}, nil
 	default:
-		return "", fmt.Errorf("unsupported database driver: %s", os.Getenv("DB_DRIVER"))
+		return "", MigrationOptions{}, fmt.Errorf("unsupported database driver: %s", os.Getenv("DB_DRIVER"))
 	}
 }

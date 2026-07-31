@@ -19,6 +19,25 @@ func TestComposeMySQLOverlayStaticSemantics(t *testing.T) {
 	root := filepath.Join("..", "..")
 	base := readYAMLRoot(t, filepath.Join(root, "docker-compose.yml"))
 	overlay := readYAMLRoot(t, filepath.Join(root, "docker-compose.mysql.yml"))
+	for _, name := range []string{"docker-compose.mysql.yml", "docker-compose.mysql.external.yml"} {
+		body := readText(t, filepath.Join(root, name))
+		for mysqlName, dbName := range map[string]string{
+			"USE_TLS":                  "USE_TLS:-false",
+			"TLS_SERVER_NAME":          "TLS_SERVER_NAME:-",
+			"TLS_CA":                   "TLS_CA:-",
+			"TLS_CERT":                 "TLS_CERT:-",
+			"TLS_KEY":                  "TLS_KEY:-",
+			"TLS_INSECURE_SKIP_VERIFY": "TLS_INSECURE_SKIP_VERIFY:-false",
+			"CONNECT_TIMEOUT":          "CONNECT_TIMEOUT:-10s",
+			"READ_TIMEOUT":             "READ_TIMEOUT:-",
+			"WRITE_TIMEOUT":            "WRITE_TIMEOUT:-",
+		} {
+			want := "MYSQL_" + mysqlName + "=${MYSQL_" + mysqlName + ":-${DB_" + dbName + "}}"
+			if !strings.Contains(body, want) {
+				t.Errorf("%s does not safely mirror the same-endpoint retriever setting %q", name, want)
+			}
+		}
+	}
 
 	baseServices := yamlMapValue(t, base, "services")
 	overlayServices := yamlMapValue(t, overlay, "services")
@@ -124,6 +143,157 @@ func TestComposeMySQLOverlayStaticSemantics(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAppWorkflowMySQLIntegrationContract(t *testing.T) {
+	root := filepath.Join("..", "..")
+	workflow := readYAMLRoot(t, filepath.Join(root, ".github", "workflows", "app.yml"))
+	triggers := yamlMapValue(t, workflow, "on")
+	for _, event := range []string{"push", "pull_request"} {
+		paths := yamlStringSequence(t, yamlMapValue(t, yamlMapValue(t, triggers, event), "paths"))
+		for _, want := range []string{".env.example", "docker-compose*.yml", "helm/**"} {
+			if !containsString(paths, want) {
+				t.Errorf("%s paths do not trigger deployment-contract tests for %q", event, want)
+			}
+		}
+	}
+	jobs := yamlMapValue(t, workflow, "jobs")
+	job := yamlMapValue(t, jobs, "mysql-integration")
+
+	if got := yamlMapValue(t, job, "runs-on").Value; got != "ubuntu-latest" {
+		t.Fatalf("mysql integration runner = %q, want ubuntu-latest", got)
+	}
+	services := yamlMapValue(t, job, "services")
+	mysql := yamlMapValue(t, services, "mysql")
+	if got := yamlMapValue(t, mysql, "image").Value; got != "mysql:8.4" {
+		t.Fatalf("mysql integration image = %q, want mysql:8.4", got)
+	}
+	mysqlEnv := yamlMapValue(t, mysql, "env")
+	for key, want := range map[string]string{
+		"MYSQL_DATABASE": "weknora_mysql_test_ci",
+		"MYSQL_USER":     "weknora",
+		"MYSQL_PASSWORD": "weknora_ci",
+	} {
+		if got := yamlMapValue(t, mysqlEnv, key).Value; got != want {
+			t.Errorf("mysql service %s = %q, want %q", key, got, want)
+		}
+	}
+	if got := yamlMapValue(t, mysqlEnv, "MYSQL_ROOT_PASSWORD").Value; got == "" || got == "weknora_ci" {
+		t.Errorf("MYSQL_ROOT_PASSWORD must be present and distinct from the non-root test user password")
+	}
+	if options := yamlMapValue(t, mysql, "options").Value; !strings.Contains(options, "mysqladmin ping") {
+		t.Errorf("mysql service health check must wait for mysqladmin ping, got %q", options)
+	}
+
+	env := yamlMapValue(t, job, "env")
+	dsn := yamlMapValue(t, env, "WEKNORA_MYSQL_TEST_DSN").Value
+	for _, want := range []string{
+		"weknora:weknora_ci@tcp(127.0.0.1:3306)/weknora_mysql_test_ci",
+		"parseTime=true",
+		"loc=UTC",
+		"multiStatements=true",
+	} {
+		if !strings.Contains(dsn, want) {
+			t.Errorf("WEKNORA_MYSQL_TEST_DSN missing %q: %q", want, dsn)
+		}
+	}
+	migrationDSN := yamlMapValue(t, env, "WEKNORA_MYSQL_MIGRATION_TEST_DSN").Value
+	if migrationDSN != dsn {
+		t.Errorf("migration DSN = %q, want the same isolated database as repository DSN %q", migrationDSN, dsn)
+	}
+
+	steps := yamlMapValue(t, job, "steps")
+	if steps.Kind != yaml.SequenceNode {
+		t.Fatalf("mysql integration steps kind = %d, want sequence", steps.Kind)
+	}
+	var runScript string
+	for _, step := range steps.Content {
+		if step.Kind != yaml.MappingNode {
+			continue
+		}
+		if run := yamlMapValueOptional(step, "run"); run != nil {
+			runScript += run.Value + "\n"
+		}
+	}
+	for _, want := range []string{
+		"go test -count=1 ./internal/application/repository -run 'Test.*MySQL'",
+		"go test -count=1 ./internal/application/repository/retriever/mysql",
+		"go test -count=1 ./internal/database -run 'Test.*MySQL|TestMigration'",
+		"go test -count=1 ./internal/types -run 'TestGetVectorStoreTypes|TestVectorStore'",
+		"go test -count=1 ./internal/container -run 'Test.*MySQL|Test.*Database|Test.*Engine'",
+		"go test -count=1 ./internal/application/service -run 'Test.*MySQL'",
+	} {
+		if !strings.Contains(runScript, want) {
+			t.Errorf("mysql integration matrix missing %q", want)
+		}
+	}
+	databaseTest := "go test -count=1 ./internal/database -run 'Test.*MySQL|TestMigration'"
+	repositoryTest := "go test -count=1 ./internal/application/repository -run 'Test.*MySQL'"
+	if databaseIndex, repositoryIndex := strings.Index(runScript, databaseTest), strings.Index(runScript, repositoryTest); databaseIndex < 0 || repositoryIndex < 0 || databaseIndex > repositoryIndex {
+		t.Errorf("MySQL migrations must finish before repository tests; script was:\n%s", runScript)
+	}
+}
+
+func TestMigrationScriptPreservesExistingMySQLTLSWhenToggleUnset(t *testing.T) {
+	bash := findGNUBash()
+	if bash == "" {
+		t.Skip("bash is unavailable; migration script runtime contract cannot be exercised")
+	}
+
+	root := filepath.Join("..", "..")
+	scriptBody, err := os.ReadFile(filepath.Join(root, "scripts", "migrate.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	testRoot := t.TempDir()
+	scriptDir := filepath.Join(testRoot, "scripts")
+	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	scriptPath := filepath.Join(scriptDir, "migrate.sh")
+	if err := os.WriteFile(scriptPath, scriptBody, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeBin := filepath.Join(testRoot, "bin")
+	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fakeBin, "migrate"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	providedURL := "mysql://weknora:secret@tcp(mysql.example:3306)/weknora?tls=true&x-tls-ca=%2Frun%2Fca.pem"
+	cmd := exec.Command(bash, filepath.ToSlash(scriptPath), "version")
+	cmd.Dir = testRoot
+	cmd.Env = append(environmentWithoutPrefixes(os.Environ(), "DB_", "MIGRATIONS_DIR="),
+		"DB_DRIVER=mysql",
+		"DB_URL="+providedURL,
+		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("migration script failed: %v\n%s", err, output)
+	}
+	if strings.Contains(string(output), "tls=false") {
+		t.Fatalf("migration script silently downgraded an existing TLS URL:\n%s", output)
+	}
+	for _, want := range []string{"tls=true", "x-tls-ca=%2Frun%2Fca.pem"} {
+		if !strings.Contains(string(output), want) {
+			t.Errorf("migration URL did not preserve %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestMigrationScriptUsesBash3CompatibleBooleanParsing(t *testing.T) {
+	body := readText(t, filepath.Join("..", "..", "scripts", "migrate.sh"))
+	if strings.Contains(body, `${1,,}`) {
+		t.Fatal("migration script uses Bash 4-only lowercase expansion")
+	}
+	for _, want := range []string{"[Tt][Rr][Uu][Ee]", "[Ff][Aa][Ll][Ss][Ee]"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("migration script portable boolean parser missing %q", want)
+		}
 	}
 }
 
@@ -307,12 +477,29 @@ func TestHelmMySQLModeStaticContract(t *testing.T) {
 		}
 	}
 	mysqlPoolPattern := regexp.MustCompile(
-		`(?s)if eq \(include "weknora\.databaseDriver" \.\) "mysql".{0,900}` +
-			`name: DB_MAX_OPEN_CONNS.{0,700}` +
-			`name: DB_CONN_MAX_IDLE_TIME.{0,300}\{\{- end \}\}`,
+		`(?s)if eq \(include "weknora\.databaseDriver" \.\) "mysql".{0,1000}` +
+			`name: DB_MAX_OPEN_CONNS.{0,900}` +
+			`name: DB_CONN_MAX_IDLE_TIME.{0,900}` +
+			`name: DB_CONNECT_TIMEOUT.{0,1000}\{\{- end \}\}`,
 	)
 	if !mysqlPoolPattern.MatchString(appTemplate) {
 		t.Error("Helm connection-pool defaults are not confined to database.driver=mysql")
+	}
+	for _, want := range []string{
+		"name: MYSQL_USE_TLS",
+		"name: MYSQL_TLS_SERVER_NAME",
+		"name: MYSQL_TLS_INSECURE_SKIP_VERIFY",
+		"name: MYSQL_CONNECT_TIMEOUT",
+		"name: MYSQL_READ_TIMEOUT",
+		"name: MYSQL_WRITE_TIMEOUT",
+		"name: MYSQL_TLS_CA",
+		"name: MYSQL_TLS_CERT",
+		"name: MYSQL_TLS_KEY",
+		"defaultMode: 0400",
+	} {
+		if !strings.Contains(appTemplate, want) {
+			t.Errorf("Helm same-endpoint MySQL retriever transport is missing %q", want)
+		}
 	}
 
 	postgresGuard := `(eq (include "weknora.databaseDriver" .) "postgres")`
@@ -632,6 +819,44 @@ func readText(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(body)
+}
+
+func environmentWithoutPrefixes(environment []string, prefixes ...string) []string {
+	filtered := make([]string, 0, len(environment))
+	for _, entry := range environment {
+		skip := false
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(entry, prefix) {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
+}
+
+func findGNUBash() string {
+	var candidates []string
+	if bash, err := exec.LookPath("bash"); err == nil {
+		candidates = append(candidates, bash)
+	}
+	candidates = append(candidates,
+		filepath.Join(os.Getenv("ProgramFiles"), "Git", "bin", "bash.exe"),
+		filepath.Join(os.Getenv("ProgramFiles"), "Git", "usr", "bin", "bash.exe"),
+	)
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		output, err := exec.Command(candidate, "--version").CombinedOutput()
+		if err == nil && strings.Contains(string(output), "GNU bash") {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func decodeYAMLDocuments(t *testing.T, body []byte) []map[string]any {

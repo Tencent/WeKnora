@@ -5,6 +5,10 @@
 # .env.example before rendering or starting the stack.
 services:
   app:
+    volumes:
+      # This directory is empty by default. For DB_USE_TLS=true, mount the
+      # provider CA and optional client certificate/key here; it is read-only.
+      - ${DB_TLS_MOUNT_DIR:-./config/mysql-tls}:/run/secrets/weknora-mysql:ro
     environment:
       - DB_DRIVER=mysql
       - DB_HOST=mysql
@@ -16,6 +20,15 @@ services:
       - DB_MAX_IDLE_CONNS=${DB_MAX_IDLE_CONNS:-10}
       - DB_CONN_MAX_LIFETIME=${DB_CONN_MAX_LIFETIME:-10m}
       - DB_CONN_MAX_IDLE_TIME=${DB_CONN_MAX_IDLE_TIME:-5m}
+      - DB_USE_TLS=${DB_USE_TLS:-false}
+      - DB_TLS_SERVER_NAME=${DB_TLS_SERVER_NAME:-}
+      - DB_TLS_CA=${DB_TLS_CA:-}
+      - DB_TLS_CERT=${DB_TLS_CERT:-}
+      - DB_TLS_KEY=${DB_TLS_KEY:-}
+      - DB_TLS_INSECURE_SKIP_VERIFY=${DB_TLS_INSECURE_SKIP_VERIFY:-false}
+      - DB_CONNECT_TIMEOUT=${DB_CONNECT_TIMEOUT:-10s}
+      - DB_READ_TIMEOUT=${DB_READ_TIMEOUT:-}
+      - DB_WRITE_TIMEOUT=${DB_WRITE_TIMEOUT:-}
       - AUTO_RECOVER_DIRTY=false
       - RETRIEVE_DRIVER=${MYSQL_RETRIEVE_DRIVER:-mysql}
       - MYSQL_HOST=mysql
@@ -24,6 +37,15 @@ services:
       - MYSQL_PASSWORD=${DB_PASSWORD:-weknora123!@#}
       - MYSQL_DATABASE=${DB_NAME:-WeKnora}
       - MYSQL_TABLE_PREFIX=${MYSQL_TABLE_PREFIX:-weknora_embeddings}
+      - MYSQL_USE_TLS=${MYSQL_USE_TLS:-${DB_USE_TLS:-false}}
+      - MYSQL_TLS_SERVER_NAME=${MYSQL_TLS_SERVER_NAME:-${DB_TLS_SERVER_NAME:-}}
+      - MYSQL_TLS_CA=${MYSQL_TLS_CA:-${DB_TLS_CA:-}}
+      - MYSQL_TLS_CERT=${MYSQL_TLS_CERT:-${DB_TLS_CERT:-}}
+      - MYSQL_TLS_KEY=${MYSQL_TLS_KEY:-${DB_TLS_KEY:-}}
+      - MYSQL_TLS_INSECURE_SKIP_VERIFY=${MYSQL_TLS_INSECURE_SKIP_VERIFY:-${DB_TLS_INSECURE_SKIP_VERIFY:-false}}
+      - MYSQL_CONNECT_TIMEOUT=${MYSQL_CONNECT_TIMEOUT:-${DB_CONNECT_TIMEOUT:-10s}}
+      - MYSQL_READ_TIMEOUT=${MYSQL_READ_TIMEOUT:-${DB_READ_TIMEOUT:-}}
+      - MYSQL_WRITE_TIMEOUT=${MYSQL_WRITE_TIMEOUT:-${DB_WRITE_TIMEOUT:-}}
     depends_on: !override
       redis:
         condition: service_started

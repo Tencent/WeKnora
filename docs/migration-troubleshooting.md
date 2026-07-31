@@ -25,6 +25,9 @@ The app container's startup error containing `database migration failed`
 Copy the log and inspect the live schema before changing the recorded migration
 version.
 
+For external MySQL TLS, certificate delivery, and the limits of the manual
+`make migrate-up` path, see [MySQL primary database deployment](./mysql-primary-database.md).
+
 ---
 
 ## Common causes

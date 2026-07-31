@@ -171,6 +171,30 @@ helm install weknora ./helm \
 | `app.env` | Environment variables | See values.yaml |
 | `app.extraEnv` | Additional env vars | `[]` |
 
+### External MySQL TLS
+
+When `database.driver=mysql`, the chart can connect to an external MySQL or
+Percona Server endpoint with verified TLS. Certificate material stays in a
+separate existing Kubernetes Secret and is mounted read-only into the app only
+when `database.mysql.tls.enabled=true`. When the selected retrieval driver
+includes MySQL, it receives the same TLS files and deadlines. See
+[MySQL primary database deployment](../docs/mysql-primary-database.md) for a
+complete Secret and values example.
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `database.mysql.timeouts.connect` | MySQL connection deadline | `"10s"` |
+| `database.mysql.timeouts.read` | Optional MySQL read deadline | `""` |
+| `database.mysql.timeouts.write` | Optional MySQL write deadline | `""` |
+| `database.mysql.tls.enabled` | Enable TLS for the main MySQL database | `false` |
+| `database.mysql.tls.serverName` | Certificate DNS name / SNI override | `""` |
+| `database.mysql.tls.insecureSkipVerify` | Disable certificate verification (development only) | `false` |
+| `database.mysql.tls.secretName` | Existing Secret containing TLS files | `""` |
+| `database.mysql.tls.mountPath` | Read-only mount path in the app container | `/run/secrets/weknora-mysql` |
+| `database.mysql.tls.caFile` | Secret key/file containing CA PEM | `""` |
+| `database.mysql.tls.certFile` | Secret key/file containing client certificate PEM | `""` |
+| `database.mysql.tls.keyFile` | Secret key/file containing client private key PEM | `""` |
+
 ### Frontend
 
 | Parameter | Description | Default |

@@ -126,10 +126,121 @@ set_query_param() {
 MYSQL_TIME_ZONE_VALUE="%27%2B00%3A00%27"
 MYSQL_SQL_MODE_VALUE="%27ONLY_FULL_GROUP_BY%2CSTRICT_TRANS_TABLES%2CNO_ZERO_IN_DATE%2CNO_ZERO_DATE%2CERROR_FOR_DIVISION_BY_ZERO%2CNO_ENGINE_SUBSTITUTION%27"
 
+is_true() {
+    # Character classes preserve case-insensitive parsing on Bash 3.2 (the
+    # version still shipped by macOS); ${value,,} requires Bash 4 or newer.
+    case "$1" in
+        [Tt][Rr][Uu][Ee]) return 0 ;;
+        [Ff][Aa][Ll][Ss][Ee]|"") return 1 ;;
+        *)
+            echo "Error: expected a boolean value, got: $1" >&2
+            exit 1
+            ;;
+    esac
+}
+
+configure_mysql_transport() {
+    # golang-migrate's MySQL driver supports x-tls-ca/cert/key only with a
+    # named TLS config. tls=true uses system roots; tls=skip-verify is the
+    # explicit insecure mode. Unlike the application driver, this CLI cannot
+    # set a custom TLS ServerName, so reject that configuration rather than
+    # silently verifying the wrong hostname.
+    local tls_name=""
+    local has_tls_ca=false
+    local has_client_cert=false
+
+    if [ -n "${DB_CONNECT_TIMEOUT:-}" ]; then
+        DB_URL="$(set_query_param "$DB_URL" "timeout" "$(urlencode "$DB_CONNECT_TIMEOUT")")"
+    fi
+    if [ -n "${DB_READ_TIMEOUT:-}" ]; then
+        DB_URL="$(set_query_param "$DB_URL" "readTimeout" "$(urlencode "$DB_READ_TIMEOUT")")"
+    fi
+    if [ -n "${DB_WRITE_TIMEOUT:-}" ]; then
+        DB_URL="$(set_query_param "$DB_URL" "writeTimeout" "$(urlencode "$DB_WRITE_TIMEOUT")")"
+    fi
+
+    # A pre-existing DB_URL may already carry a named TLS config or the
+    # standard tls=true/skip-verify policy. Preserve it unless the operator
+    # explicitly sets DB_USE_TLS; silently replacing it with tls=false would
+    # downgrade older deployments that predate the DB_TLS_* variables.
+    if [ "$DB_URL_WAS_PROVIDED" = true ] && [ -z "${DB_USE_TLS:-}" ]; then
+        if [ -n "${DB_TLS_SERVER_NAME:-}" ] || [ -n "${DB_TLS_CA:-}" ] || \
+           [ -n "${DB_TLS_CERT:-}" ] || [ -n "${DB_TLS_KEY:-}" ] || \
+           is_true "${DB_TLS_INSECURE_SKIP_VERIFY:-false}"; then
+            echo "Error: DB_USE_TLS must be explicitly true before DB_TLS_* settings can be used." >&2
+            exit 1
+        fi
+        return
+    fi
+
+    if ! is_true "${DB_USE_TLS:-false}"; then
+        if [ -n "${DB_TLS_SERVER_NAME:-}" ] || [ -n "${DB_TLS_CA:-}" ] || \
+           [ -n "${DB_TLS_CERT:-}" ] || [ -n "${DB_TLS_KEY:-}" ] || \
+           is_true "${DB_TLS_INSECURE_SKIP_VERIFY:-false}"; then
+            echo "Error: DB_USE_TLS must be true before DB_TLS_* settings can be used." >&2
+            exit 1
+        fi
+        DB_URL="$(set_query_param "$DB_URL" "tls" "false")"
+        return
+    fi
+
+    if [ -n "${DB_TLS_SERVER_NAME:-}" ]; then
+        echo "Error: DB_TLS_SERVER_NAME is not supported by scripts/migrate.sh." >&2
+        echo "Run startup migrations through the WeKnora app, or use DB_HOST matching the certificate DNS name." >&2
+        exit 1
+    fi
+
+    if [ -n "${DB_TLS_CA:-}" ]; then
+        if [ ! -r "$DB_TLS_CA" ]; then
+            echo "Error: DB_TLS_CA is not a readable file: $DB_TLS_CA" >&2
+            exit 1
+        fi
+        has_tls_ca=true
+    fi
+
+    if [ -n "${DB_TLS_CERT:-}" ] || [ -n "${DB_TLS_KEY:-}" ]; then
+        if [ -z "${DB_TLS_CERT:-}" ] || [ -z "${DB_TLS_KEY:-}" ]; then
+            echo "Error: DB_TLS_CERT and DB_TLS_KEY must be set together." >&2
+            exit 1
+        fi
+        if [ ! -r "$DB_TLS_CERT" ] || [ ! -r "$DB_TLS_KEY" ]; then
+            echo "Error: DB_TLS_CERT and DB_TLS_KEY must name readable files." >&2
+            exit 1
+        fi
+        has_client_cert=true
+    fi
+
+    if [ "$has_client_cert" = true ] && [ "$has_tls_ca" = false ]; then
+        echo "Error: scripts/migrate.sh requires DB_TLS_CA with client TLS credentials." >&2
+        echo "The golang-migrate MySQL driver cannot combine a client certificate with system roots." >&2
+        exit 1
+    fi
+
+    if [ "$has_tls_ca" = true ]; then
+        tls_name="weknora-migrate"
+        DB_URL="$(set_query_param "$DB_URL" "tls" "$tls_name")"
+        DB_URL="$(set_query_param "$DB_URL" "x-tls-ca" "$(urlencode "$DB_TLS_CA")")"
+        if [ "$has_client_cert" = true ]; then
+            DB_URL="$(set_query_param "$DB_URL" "x-tls-cert" "$(urlencode "$DB_TLS_CERT")")"
+            DB_URL="$(set_query_param "$DB_URL" "x-tls-key" "$(urlencode "$DB_TLS_KEY")")"
+        fi
+        if is_true "${DB_TLS_INSECURE_SKIP_VERIFY:-false}"; then
+            DB_URL="$(set_query_param "$DB_URL" "x-tls-insecure-skip-verify" "true")"
+        fi
+    elif is_true "${DB_TLS_INSECURE_SKIP_VERIFY:-false}"; then
+        DB_URL="$(set_query_param "$DB_URL" "tls" "skip-verify")"
+    else
+        DB_URL="$(set_query_param "$DB_URL" "tls" "true")"
+    fi
+
+}
+
 # Construct the database URL.
 # If DB_URL is already set in .env, use it and normalize required local defaults.
 # Otherwise, construct it from individual components.
-if [ -n "$DB_URL" ]; then
+DB_URL_WAS_PROVIDED=false
+if [ -n "${DB_URL:-}" ]; then
+    DB_URL_WAS_PROVIDED=true
     if [ "$DB_DRIVER" = "postgres" ]; then
         if [[ "$DB_URL" != *"sslmode="* ]]; then
             DB_URL="$(append_query_param "$DB_URL" "sslmode=disable")"
@@ -160,7 +271,11 @@ else
             DB_PATH=${DB_PATH:-./data/weknora.db}
             DB_URL="sqlite3://${DB_PATH}"
             ;;
-    esac
+esac
+fi
+
+if [ "$DB_DRIVER" = "mysql" ]; then
+    configure_mysql_transport
 fi
 
 # Execute migration based on command

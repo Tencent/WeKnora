@@ -2,15 +2,19 @@ package container
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/types"
+	gomysql "github.com/go-sql-driver/mysql"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -271,6 +275,105 @@ func TestResetPendingTasks_SyncLogLiteMode(t *testing.T) {
 		`SELECT status FROM sync_logs WHERE id = ?`, "sync-lite",
 	).Row().Scan(&status))
 	assert.Equal(t, types.SyncLogStatusFailed, status)
+}
+
+func TestMySQLResetPendingTasksIntegration(t *testing.T) {
+	dsn := os.Getenv("WEKNORA_MYSQL_TEST_DSN")
+	if dsn == "" {
+		t.Skip("set WEKNORA_MYSQL_TEST_DSN to run the real MySQL startup reset test")
+	}
+	cfg, err := gomysql.ParseDSN(dsn)
+	require.NoError(t, err)
+	require.True(t,
+		strings.HasPrefix(strings.ToLower(strings.TrimSpace(cfg.DBName)), "weknora_mysql_test_") &&
+			len(strings.TrimSpace(cfg.DBName)) > len("weknora_mysql_test_"),
+		"WEKNORA_MYSQL_TEST_DSN must name a disposable weknora_mysql_test_* database, got %q", cfg.DBName,
+	)
+
+	db, err := gorm.Open(gormmysql.Open(dsn), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	t.Cleanup(func() { _ = tx.Rollback().Error })
+
+	prefix := fmt.Sprintf("r%d-%d", os.Getpid(), time.Now().UnixNano())
+	stuckID := prefix + "-p"
+	summaryID := prefix + "-s"
+	wikiID := prefix + "-w"
+	syncID := prefix + "-l"
+	knowledgeBaseID := prefix + "-kb"
+	dataSourceID := prefix + "-ds"
+	insertKnowledge := func(id, parseStatus, summaryStatus string, pending int) {
+		t.Helper()
+		require.NoError(t, tx.Exec(`
+			INSERT INTO knowledges
+				(id, tenant_id, knowledge_base_id, type, title, source,
+				 parse_status, pending_subtasks_count, summary_status, enable_status)
+			VALUES (?, 1904, ?, 'file', ?, 'integration-test', ?, ?, ?, 'enabled')`,
+			id, knowledgeBaseID, id, parseStatus, pending, summaryStatus,
+		).Error)
+	}
+	insertKnowledge(stuckID, types.ParseStatusProcessing, types.SummaryStatusNone, 2)
+	insertKnowledge(summaryID, types.ParseStatusCompleted, types.SummaryStatusProcessing, 0)
+	insertKnowledge(wikiID, types.ParseStatusFinalizing, types.SummaryStatusNone, 1)
+	require.NoError(t, tx.Exec(`
+		INSERT INTO task_pending_ops
+			(tenant_id, task_type, scope, scope_id, op, dedup_key, payload)
+		VALUES (1904, ?, ?, ?, 'ingest', ?, JSON_OBJECT())`,
+		types.TypeWikiIngest, types.TaskScopeKnowledgeBase, knowledgeBaseID, wikiID,
+	).Error)
+	require.NoError(t, tx.Exec(`
+		INSERT INTO sync_logs (id, data_source_id, tenant_id, status, started_at)
+		VALUES (?, ?, 1904, ?, ?)`,
+		syncID, dataSourceID, types.SyncLogStatusRunning, time.Now(),
+	).Error)
+
+	t.Setenv("REDIS_ADDR", "")
+	resetPendingTasks(tx)
+
+	var stuck struct {
+		ParseStatus          string
+		PendingSubtasksCount int
+		ErrorMessage         string
+	}
+	require.NoError(t, tx.Raw(`
+		SELECT parse_status, pending_subtasks_count, error_message
+		FROM knowledges WHERE id = ?`, stuckID).Scan(&stuck).Error)
+	assert.Equal(t, types.ParseStatusFailed, stuck.ParseStatus)
+	assert.Zero(t, stuck.PendingSubtasksCount)
+	assert.Equal(t, restartInterruptedMessage, stuck.ErrorMessage)
+
+	var summaryStatus string
+	require.NoError(t, tx.Raw(
+		`SELECT summary_status FROM knowledges WHERE id = ?`, summaryID,
+	).Scan(&summaryStatus).Error)
+	assert.Equal(t, types.SummaryStatusFailed, summaryStatus)
+
+	var wiki struct {
+		ParseStatus          string
+		PendingSubtasksCount int
+	}
+	require.NoError(t, tx.Raw(`
+		SELECT parse_status, pending_subtasks_count
+		FROM knowledges WHERE id = ?`, wikiID).Scan(&wiki).Error)
+	assert.Equal(t, types.ParseStatusFinalizing, wiki.ParseStatus)
+	assert.Equal(t, 1, wiki.PendingSubtasksCount)
+
+	var syncLog struct {
+		Status       string
+		ErrorMessage string
+		FinishedAt   *time.Time
+	}
+	require.NoError(t, tx.Raw(`
+		SELECT status, error_message, finished_at
+		FROM sync_logs WHERE id = ?`, syncID).Scan(&syncLog).Error)
+	assert.Equal(t, types.SyncLogStatusFailed, syncLog.Status)
+	assert.Equal(t, "Sync interrupted due to application restart", syncLog.ErrorMessage)
+	assert.NotNil(t, syncLog.FinishedAt)
 }
 
 func TestStuckKnowledgeParseQuery_ReuseAfterFindDoesNotBreakUpdate(t *testing.T) {

@@ -41,6 +41,11 @@ type VectorStoreService interface {
 	// configs already validated at create time). Handlers receiving raw
 	// user input MUST use TestRawConnection instead.
 	TestConnection(ctx context.Context, engineType types.RetrieverEngineType, config types.ConnectionConfig) (string, error)
+	// TestEnvConnection tests an environment-derived VectorStore. The store ID
+	// is required so the service can enforce that environment-only transport
+	// policy (currently MYSQL_TLS_* and MYSQL_*_TIMEOUT) never leaks into a
+	// saved or raw user-managed vector store of the same engine type.
+	TestEnvConnection(ctx context.Context, store types.VectorStore) (string, error)
 	// TestRawConnection validates raw user-supplied connection config
 	// (engine-type allowlist, required fields, SSRF policy) and then delegates
 	// to TestConnection. This is the entry point for unpersisted user input.

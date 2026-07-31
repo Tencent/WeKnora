@@ -33,6 +33,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	appdb "github.com/Tencent/WeKnora/internal/database"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/tencent/vectordatabase-sdk-go/tcvectordb"
@@ -334,12 +335,23 @@ func createMySQLEngine(
 		username = "root"
 	}
 
-	db, err := sql.Open("mysql", appdb.BuildMySQLApplicationDSN(
-		username,
-		cc.Password,
-		addr,
-		database,
-	))
+	dsn := appdb.BuildMySQLApplicationDSN(username, cc.Password, addr, database)
+	if store.ID == "__env_mysql__" {
+		clientConfig, configErr := appdb.MySQLRetrieverConfigFromEnv(
+			username, cc.Password, addr, database,
+		)
+		if configErr != nil {
+			return nil, fmt.Errorf("invalid MySQL retriever configuration: %w", configErr)
+		}
+		if clientConfig.TLSInsecureSkipVerify {
+			logger.Warnf(
+				ctx,
+				"MYSQL_TLS_INSECURE_SKIP_VERIFY=true disables MySQL retriever certificate verification; do not use this setting in production",
+			)
+		}
+		dsn = clientConfig.DSN
+	}
+	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("create mysql client: %w", err)
 	}

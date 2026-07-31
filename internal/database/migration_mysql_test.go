@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	gomysql "github.com/go-sql-driver/mysql"
 )
 
 func TestMigrationSourceForDSNUsesMySQLDirectory(t *testing.T) {
@@ -53,6 +54,28 @@ func TestMigrationDSNFromEnvBuildsMySQLURL(t *testing.T) {
 		if !strings.Contains(dsn, want) {
 			t.Fatalf("mysql migration dsn missing %q in %s", want, dsn)
 		}
+	}
+}
+
+func TestMigrationRuntimeConfigFromEnvUsesNativeMySQLDSN(t *testing.T) {
+	setMySQLMainDatabaseEnv(t)
+
+	dsn, opts, err := migrationRuntimeConfigFromEnv()
+	if err != nil {
+		t.Fatalf("migrationRuntimeConfigFromEnv() error = %v", err)
+	}
+	if !strings.HasPrefix(dsn, "mysql://") {
+		t.Fatalf("migration marker/source DSN = %q", dsn)
+	}
+	if opts.MySQLDSN == "" {
+		t.Fatal("native MySQL migration DSN is empty")
+	}
+	cfg, err := gomysql.ParseDSN(opts.MySQLDSN)
+	if err != nil {
+		t.Fatalf("parse native MySQL migration DSN: %v", err)
+	}
+	if !cfg.MultiStatements {
+		t.Fatal("native MySQL migration DSN must enable multiStatements")
 	}
 }
 

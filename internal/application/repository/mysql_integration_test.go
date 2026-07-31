@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	appdb "github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/types"
 	gomysql "github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/assert"
@@ -30,6 +31,20 @@ func openMySQLRepositoryIntegrationDB(t *testing.T) *gorm.DB {
 			"refusing MySQL repository integration test for database %q; name must start with weknora_mysql_test_",
 			cfg.DBName,
 		)
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("DB_DRIVER")), "mysql") {
+		mainConfig, configErr := appdb.MySQLMainDatabaseConfigFromEnv()
+		require.NoError(t, configErr)
+		parsedMain, parseErr := gomysql.ParseDSN(mainConfig.ApplicationDSN)
+		require.NoError(t, parseErr)
+		if parsedMain.DBName != cfg.DBName || parsedMain.Addr != cfg.Addr || parsedMain.User != cfg.User {
+			t.Fatalf(
+				"DB_* TLS integration endpoint %s@%s/%s does not match WEKNORA_MYSQL_TEST_DSN %s@%s/%s",
+				parsedMain.User, parsedMain.Addr, parsedMain.DBName,
+				cfg.User, cfg.Addr, cfg.DBName,
+			)
+		}
+		dsn = mainConfig.ApplicationDSN
 	}
 
 	db, err := gorm.Open(mysqlgorm.Open(dsn), &gorm.Config{})

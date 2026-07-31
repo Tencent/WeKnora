@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"strconv"
@@ -1044,7 +1045,7 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 			Name:       "MySQL",
 			EngineType: MySQLRetrieverEngineType,
 			ConnectionConfig: ConnectionConfig{
-				Addr:     host + ":" + port,
+				Addr:     net.JoinHostPort(host, port),
 				Database: database,
 				Username: username,
 				Password: envLookup("MYSQL_PASSWORD"),

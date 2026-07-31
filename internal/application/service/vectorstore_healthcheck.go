@@ -27,6 +27,25 @@ import (
 
 const connectionTestTimeout = 10 * time.Second
 
+// TestEnvConnection tests an environment-backed vector store using its
+// environment-only transport policy. Saved and raw stores deliberately keep
+// using TestConnection so they never inherit process-global MySQL trust roots.
+func (s *vectorStoreService) TestEnvConnection(
+	ctx context.Context,
+	store types.VectorStore,
+) (string, error) {
+	if !types.IsEnvStoreID(store.ID) {
+		return "", errors.NewBadRequestError("environment vector store ID is required")
+	}
+	if store.EngineType == types.MySQLRetrieverEngineType {
+		if store.ID != "__env_mysql__" {
+			return "", errors.NewBadRequestError("environment vector store ID does not match MySQL engine")
+		}
+		return testEnvMySQLConnection(ctx, store.ConnectionConfig)
+	}
+	return s.TestConnection(ctx, store.EngineType, store.ConnectionConfig)
+}
+
 // TestConnection tests connectivity to a vector database.
 // Returns the detected server version on success (e.g., "7.10.1"), empty string if unknown.
 func (s *vectorStoreService) TestConnection(
@@ -321,6 +340,28 @@ func testDorisConnection(ctx context.Context, config types.ConnectionConfig) (st
 }
 
 func testMySQLConnection(ctx context.Context, config types.ConnectionConfig) (string, error) {
+	return testMySQLConnectionWithDSNBuilder(ctx, config,
+		func(username, password, addr, database string) (string, error) {
+			return appdb.BuildMySQLApplicationDSN(username, password, addr, database), nil
+		})
+}
+
+func testEnvMySQLConnection(ctx context.Context, config types.ConnectionConfig) (string, error) {
+	return testMySQLConnectionWithDSNBuilder(ctx, config,
+		func(username, password, addr, database string) (string, error) {
+			clientConfig, err := appdb.MySQLRetrieverConfigFromEnv(username, password, addr, database)
+			if err != nil {
+				return "", err
+			}
+			return clientConfig.DSN, nil
+		})
+}
+
+func testMySQLConnectionWithDSNBuilder(
+	ctx context.Context,
+	config types.ConnectionConfig,
+	buildDSN func(username, password, addr, database string) (string, error),
+) (string, error) {
 	testCtx, cancel := context.WithTimeout(ctx, connectionTestTimeout)
 	defer cancel()
 
@@ -337,12 +378,12 @@ func testMySQLConnection(ctx context.Context, config types.ConnectionConfig) (st
 	if username == "" {
 		username = "root"
 	}
-	db, err := sql.Open("mysql", appdb.BuildMySQLApplicationDSN(
-		username,
-		config.Password,
-		config.Addr,
-		database,
-	))
+	dsn, err := buildDSN(username, config.Password, config.Addr, database)
+	if err != nil {
+		logger.Warnf(ctx, "MySQL connection configuration is invalid: %v", err)
+		return "", errors.NewBadRequestError("failed to create mysql connection: invalid configuration")
+	}
+	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return "", errors.NewBadRequestError("failed to create mysql connection: invalid configuration")
 	}

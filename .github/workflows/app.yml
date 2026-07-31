@@ -9,6 +9,9 @@ on:
       - "go.mod"
       - "go.sum"
       - "Makefile"
+      - ".env.example"
+      - "docker-compose*.yml"
+      - "helm/**"
       - "config/**"
       - "migrations/**"
       - "scripts/**"
@@ -22,6 +25,9 @@ on:
       - "go.mod"
       - "go.sum"
       - "Makefile"
+      - ".env.example"
+      - "docker-compose*.yml"
+      - "helm/**"
       - "config/**"
       - "migrations/**"
       - "scripts/**"
@@ -96,3 +102,48 @@ jobs:
 
       - name: Build server
         run: go build ./cmd/server
+
+  mysql-integration:
+    name: MySQL 8.4 integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: weknora_mysql_test_ci
+          MYSQL_USER: weknora
+          MYSQL_PASSWORD: weknora_ci
+          MYSQL_ROOT_PASSWORD: weknora_ci_root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      WEKNORA_MYSQL_TEST_DSN: >-
+        weknora:weknora_ci@tcp(127.0.0.1:3306)/weknora_mysql_test_ci?charset=utf8mb4&parseTime=true&loc=UTC&multiStatements=true
+      WEKNORA_MYSQL_MIGRATION_TEST_DSN: >-
+        weknora:weknora_ci@tcp(127.0.0.1:3306)/weknora_mysql_test_ci?charset=utf8mb4&parseTime=true&loc=UTC&multiStatements=true
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Run MySQL integration matrix
+        shell: bash
+        run: |
+          go test -count=1 ./internal/database -run 'Test.*MySQL|TestMigration'
+          go test -count=1 ./internal/application/repository -run 'Test.*MySQL'
+          go test -count=1 ./internal/application/repository/retriever/mysql
+          go test -count=1 ./internal/types -run 'TestGetVectorStoreTypes|TestVectorStore'
+          go test -count=1 ./internal/container -run 'Test.*MySQL|Test.*Database|Test.*Engine'
+          go test -count=1 ./internal/application/service -run 'Test.*MySQL'

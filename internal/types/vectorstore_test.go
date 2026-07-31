@@ -197,6 +197,16 @@ func TestBuildEnvVectorStores(t *testing.T) {
 		assert.Equal(t, "mysql-pass", stores[0].ConnectionConfig.Password)
 		assert.Equal(t, "mysql_embeddings", stores[0].IndexConfig.CollectionPrefix)
 	})
+
+	t.Run("mysql IPv6 env store", func(t *testing.T) {
+		ipv6Lookup := mockEnvLookup(map[string]string{
+			"MYSQL_HOST": "2001:db8::10",
+			"MYSQL_PORT": "3307",
+		})
+		stores := BuildEnvVectorStores("mysql", ipv6Lookup)
+		require.Len(t, stores, 1)
+		assert.Equal(t, "[2001:db8::10]:3307", stores[0].ConnectionConfig.Addr)
+	})
 }
 
 func TestFindEnvVectorStore(t *testing.T) {

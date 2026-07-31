@@ -573,6 +573,7 @@ func initRedisClient() (*redis.Client, error) {
 func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	var dialector gorm.Dialector
 	var migrateDSN string
+	var mysqlMigrationDSN string
 	var sqliteDBPath string
 	switch os.Getenv("DB_DRIVER") {
 	case "postgres":
@@ -619,24 +620,23 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 			os.Getenv("DB_NAME"),
 		)
 	case "mysql":
-		dbPort := os.Getenv("DB_PORT")
+		dbPort := strings.TrimSpace(os.Getenv("DB_PORT"))
 		if dbPort == "" {
 			dbPort = "3306"
 		}
-		hostPort := net.JoinHostPort(os.Getenv("DB_HOST"), dbPort)
-
-		dialector = gormmysql.Open(database.BuildMySQLApplicationDSN(
-			os.Getenv("DB_USER"),
-			os.Getenv("DB_PASSWORD"),
-			hostPort,
-			os.Getenv("DB_NAME"),
-		))
-		migrateDSN = database.BuildMySQLMigrationDSN(
-			os.Getenv("DB_USER"),
-			os.Getenv("DB_PASSWORD"),
-			hostPort,
-			os.Getenv("DB_NAME"),
-		)
+		mysqlConfig, err := database.MySQLMainDatabaseConfigFromEnv()
+		if err != nil {
+			return nil, fmt.Errorf("invalid MySQL database configuration: %w", err)
+		}
+		dialector = gormmysql.Open(mysqlConfig.ApplicationDSN)
+		migrateDSN = mysqlConfig.MigrationURL
+		mysqlMigrationDSN = mysqlConfig.MigrationDSN
+		if mysqlConfig.TLSInsecureSkipVerify {
+			logger.Warnf(
+				context.Background(),
+				"DB_TLS_INSECURE_SKIP_VERIFY=true disables MySQL server certificate verification; do not use this setting in production",
+			)
+		}
 
 		logger.Infof(context.Background(), "DB Config: driver=mysql user=%s host=%s port=%s dbname=%s",
 			os.Getenv("DB_USER"),
@@ -755,6 +755,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		migrationOpts := database.MigrationOptions{
 			AutoRecoverDirty: autoRecover,
 			SQLiteDBPath:     sqliteDBPath,
+			MySQLDSN:         mysqlMigrationDSN,
 		}
 
 		// Run base migrations (all versioned migrations including embeddings)
@@ -795,8 +796,12 @@ func migrationStartupPolicy(driver string, autoRecoverEnv string) (autoRecover, 
 	return !strings.EqualFold(strings.TrimSpace(autoRecoverEnv), "false"), false
 }
 
-func buildMySQLRetrieverDSN(host string, port int, username, password, databaseName string) string {
-	return database.BuildMySQLApplicationDSN(
+func buildMySQLRetrieverConfig(
+	host string,
+	port int,
+	username, password, databaseName string,
+) (database.MySQLClientConfig, error) {
+	return database.MySQLRetrieverConfigFromEnv(
 		username,
 		password,
 		net.JoinHostPort(host, strconv.Itoa(port)),
@@ -1427,8 +1432,19 @@ func initRetrieveEngineRegistry(
 			return nil, fmt.Errorf("invalid MySQL retriever index config: %w", err)
 		}
 
-		dsn := buildMySQLRetrieverDSN(mysqlHost, mysqlPort, mysqlUsername, mysqlPassword, mysqlDatabase)
-		mysqlDB, err := sql.Open("mysql", dsn)
+		mysqlClientConfig, err := buildMySQLRetrieverConfig(
+			mysqlHost, mysqlPort, mysqlUsername, mysqlPassword, mysqlDatabase,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("invalid MySQL retriever configuration: %w", err)
+		}
+		if mysqlClientConfig.TLSInsecureSkipVerify {
+			logger.Warnf(
+				context.Background(),
+				"MYSQL_TLS_INSECURE_SKIP_VERIFY=true disables MySQL retriever certificate verification; do not use this setting in production",
+			)
+		}
+		mysqlDB, err := sql.Open("mysql", mysqlClientConfig.DSN)
 		if err != nil {
 			return nil, fmt.Errorf("create MySQL retriever client: %w", err)
 		} else {

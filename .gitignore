@@ -4,6 +4,8 @@
 !.env.example
 !.gitignore
 !.github/
+!config/mysql-tls/
+!config/mysql-tls/.gitkeep
 
 # 敏感文件
 *.pem

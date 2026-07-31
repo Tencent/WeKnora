@@ -27,7 +27,17 @@ func TestSplitMySQLAddr(t *testing.T) {
 }
 
 func TestBuildMySQLRetrieverDSNIncludesSafeOptions(t *testing.T) {
-	dsn := buildMySQLRetrieverDSN("mysql", 3306, "user:name", "p@ss/word:1", "weknora")
+	for _, key := range []string{
+		"MYSQL_USE_TLS", "MYSQL_TLS_SERVER_NAME", "MYSQL_TLS_CA", "MYSQL_TLS_CERT", "MYSQL_TLS_KEY",
+		"MYSQL_TLS_INSECURE_SKIP_VERIFY", "MYSQL_CONNECT_TIMEOUT", "MYSQL_READ_TIMEOUT", "MYSQL_WRITE_TIMEOUT",
+	} {
+		t.Setenv(key, "")
+	}
+	clientConfig, err := buildMySQLRetrieverConfig("mysql", 3306, "user.name", "p@ss/word:1", "weknora")
+	if err != nil {
+		t.Fatalf("buildMySQLRetrieverConfig() error = %v", err)
+	}
+	dsn := clientConfig.DSN
 	for _, want := range []string{"tcp(mysql:3306)", "/weknora", "charset=utf8mb4"} {
 		if !strings.Contains(dsn, want) {
 			t.Fatalf("dsn missing %q in %s", want, dsn)
@@ -41,6 +51,30 @@ func TestBuildMySQLRetrieverDSNIncludesSafeOptions(t *testing.T) {
 		cfg.Params["time_zone"] != "'"+database.MySQLSessionTimeZone+"'" ||
 		cfg.Params["sql_mode"] != "'"+database.MySQLSessionSQLMode+"'" {
 		t.Fatalf("retriever DSN does not enforce the shared MySQL session contract: %#v", cfg)
+	}
+}
+
+func TestBuildMySQLRetrieverConfigAppliesTLSAndTimeouts(t *testing.T) {
+	for _, key := range []string{
+		"MYSQL_TLS_CA", "MYSQL_TLS_CERT", "MYSQL_TLS_KEY", "MYSQL_READ_TIMEOUT", "MYSQL_WRITE_TIMEOUT",
+	} {
+		t.Setenv(key, "")
+	}
+	t.Setenv("MYSQL_USE_TLS", "true")
+	t.Setenv("MYSQL_TLS_SERVER_NAME", "retriever.mysql.example")
+	t.Setenv("MYSQL_TLS_INSECURE_SKIP_VERIFY", "false")
+	t.Setenv("MYSQL_CONNECT_TIMEOUT", "6s")
+
+	clientConfig, err := buildMySQLRetrieverConfig("127.0.0.1", 3306, "u", "p", "vectors")
+	if err != nil {
+		t.Fatalf("buildMySQLRetrieverConfig() error = %v", err)
+	}
+	cfg, err := gomysql.ParseDSN(clientConfig.DSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TLS == nil || cfg.TLS.ServerName != "retriever.mysql.example" || cfg.Timeout != 6*time.Second {
+		t.Fatalf("retriever transport config = TLS:%#v timeout:%s", cfg.TLS, cfg.Timeout)
 	}
 }
 
@@ -120,6 +154,7 @@ func TestCreateMySQLEngineIntegration(t *testing.T) {
 		t.Fatalf("ParseDSN() error = %v", err)
 	}
 	store := types.VectorStore{
+		ID:         "__env_mysql__",
 		EngineType: types.MySQLRetrieverEngineType,
 		ConnectionConfig: types.ConnectionConfig{
 			Addr:     cfg.Addr,

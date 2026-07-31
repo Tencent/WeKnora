@@ -82,6 +82,30 @@ spec:
               value: {{ .Values.database.mysql.pool.connMaxLifetime | quote }}
             - name: DB_CONN_MAX_IDLE_TIME
               value: {{ .Values.database.mysql.pool.connMaxIdleTime | quote }}
+            - name: DB_USE_TLS
+              value: {{ ternary "true" "false" .Values.database.mysql.tls.enabled | quote }}
+            - name: DB_TLS_SERVER_NAME
+              value: {{ .Values.database.mysql.tls.serverName | quote }}
+            - name: DB_TLS_INSECURE_SKIP_VERIFY
+              value: {{ ternary "true" "false" .Values.database.mysql.tls.insecureSkipVerify | quote }}
+            - name: DB_CONNECT_TIMEOUT
+              value: {{ .Values.database.mysql.timeouts.connect | quote }}
+            - name: DB_READ_TIMEOUT
+              value: {{ .Values.database.mysql.timeouts.read | quote }}
+            - name: DB_WRITE_TIMEOUT
+              value: {{ .Values.database.mysql.timeouts.write | quote }}
+            {{- if and .Values.database.mysql.tls.enabled .Values.database.mysql.tls.secretName .Values.database.mysql.tls.caFile }}
+            - name: DB_TLS_CA
+              value: {{ printf "%s/%s" .Values.database.mysql.tls.mountPath .Values.database.mysql.tls.caFile | quote }}
+            {{- end }}
+            {{- if and .Values.database.mysql.tls.enabled .Values.database.mysql.tls.secretName .Values.database.mysql.tls.certFile }}
+            - name: DB_TLS_CERT
+              value: {{ printf "%s/%s" .Values.database.mysql.tls.mountPath .Values.database.mysql.tls.certFile | quote }}
+            {{- end }}
+            {{- if and .Values.database.mysql.tls.enabled .Values.database.mysql.tls.secretName .Values.database.mysql.tls.keyFile }}
+            - name: DB_TLS_KEY
+              value: {{ printf "%s/%s" .Values.database.mysql.tls.mountPath .Values.database.mysql.tls.keyFile | quote }}
+            {{- end }}
             {{- end }}
             # Redis configuration
             - name: REDIS_ADDR
@@ -140,6 +164,30 @@ spec:
                 secretKeyRef:
                   name: {{ include "weknora.secretName" . }}
                   key: DB_NAME
+            - name: MYSQL_USE_TLS
+              value: {{ ternary "true" "false" .Values.database.mysql.tls.enabled | quote }}
+            - name: MYSQL_TLS_SERVER_NAME
+              value: {{ .Values.database.mysql.tls.serverName | quote }}
+            - name: MYSQL_TLS_INSECURE_SKIP_VERIFY
+              value: {{ ternary "true" "false" .Values.database.mysql.tls.insecureSkipVerify | quote }}
+            - name: MYSQL_CONNECT_TIMEOUT
+              value: {{ .Values.database.mysql.timeouts.connect | quote }}
+            - name: MYSQL_READ_TIMEOUT
+              value: {{ .Values.database.mysql.timeouts.read | quote }}
+            - name: MYSQL_WRITE_TIMEOUT
+              value: {{ .Values.database.mysql.timeouts.write | quote }}
+            {{- if and .Values.database.mysql.tls.enabled .Values.database.mysql.tls.secretName .Values.database.mysql.tls.caFile }}
+            - name: MYSQL_TLS_CA
+              value: {{ printf "%s/%s" .Values.database.mysql.tls.mountPath .Values.database.mysql.tls.caFile | quote }}
+            {{- end }}
+            {{- if and .Values.database.mysql.tls.enabled .Values.database.mysql.tls.secretName .Values.database.mysql.tls.certFile }}
+            - name: MYSQL_TLS_CERT
+              value: {{ printf "%s/%s" .Values.database.mysql.tls.mountPath .Values.database.mysql.tls.certFile | quote }}
+            {{- end }}
+            {{- if and .Values.database.mysql.tls.enabled .Values.database.mysql.tls.secretName .Values.database.mysql.tls.keyFile }}
+            - name: MYSQL_TLS_KEY
+              value: {{ printf "%s/%s" .Values.database.mysql.tls.mountPath .Values.database.mysql.tls.keyFile | quote }}
+            {{- end }}
             {{- end }}
             - name: STORAGE_TYPE
               value: {{ .Values.app.env.STORAGE_TYPE | quote }}
@@ -179,6 +227,11 @@ spec:
           volumeMounts:
             - name: data-files
               mountPath: /data/files
+            {{- if and (eq (include "weknora.databaseDriver" .) "mysql") .Values.database.mysql.tls.enabled .Values.database.mysql.tls.secretName }}
+            - name: mysql-tls
+              mountPath: {{ .Values.database.mysql.tls.mountPath | quote }}
+              readOnly: true
+            {{- end }}
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}
           {{- with .Values.app.livenessProbe }}
@@ -197,6 +250,25 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+      {{- if and (eq (include "weknora.databaseDriver" .) "mysql") .Values.database.mysql.tls.enabled .Values.database.mysql.tls.secretName }}
+        - name: mysql-tls
+          secret:
+            secretName: {{ .Values.database.mysql.tls.secretName | quote }}
+            defaultMode: 0400
+            items:
+            {{- if .Values.database.mysql.tls.caFile }}
+              - key: {{ .Values.database.mysql.tls.caFile | quote }}
+                path: {{ .Values.database.mysql.tls.caFile | quote }}
+            {{- end }}
+            {{- if .Values.database.mysql.tls.certFile }}
+              - key: {{ .Values.database.mysql.tls.certFile | quote }}
+                path: {{ .Values.database.mysql.tls.certFile | quote }}
+            {{- end }}
+            {{- if .Values.database.mysql.tls.keyFile }}
+              - key: {{ .Values.database.mysql.tls.keyFile | quote }}
+                path: {{ .Values.database.mysql.tls.keyFile | quote }}
+            {{- end }}
+      {{- end }}
       {{- with .Values.app.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

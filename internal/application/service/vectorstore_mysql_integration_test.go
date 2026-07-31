@@ -28,11 +28,23 @@ func TestMySQLVectorStoreConnectionIntegration(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	version, err := testMySQLConnection(ctx, types.ConnectionConfig{
+	connectionConfig := types.ConnectionConfig{
 		Addr:     cfg.Addr,
 		Username: username,
 		Password: cfg.Passwd,
 		Database: cfg.DBName,
+	}
+	if !strings.EqualFold(os.Getenv("MYSQL_USE_TLS"), "true") {
+		version, err := testMySQLConnection(ctx, connectionConfig)
+		require.NoError(t, err)
+		assert.NotEmpty(t, version)
+	}
+
+	svc := NewVectorStoreService(nil, nil, nil, nil, nil)
+	version, err := svc.TestEnvConnection(ctx, types.VectorStore{
+		ID:               "__env_mysql__",
+		EngineType:       types.MySQLRetrieverEngineType,
+		ConnectionConfig: connectionConfig,
 	})
 	require.NoError(t, err)
 	assert.NotEmpty(t, version)

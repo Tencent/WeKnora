@@ -72,6 +72,25 @@ database:
       maxIdleConns: "10"
       connMaxLifetime: "10m"
       connMaxIdleTime: "5m"
+    # Driver-level MySQL deadlines. Values use Go duration syntax; leaving
+    # read/write empty preserves the driver's disabled (0) deadline.
+    timeouts:
+      connect: "10s"
+      read: ""
+      write: ""
+    # TLS for an external MySQL endpoint. Keep certificate material in an
+    # existing Kubernetes Secret, never in values files. TLS may use public
+    # system roots with no Secret; set secretName and filenames for private CA
+    # and/or mutual TLS. The mounted files are read-only.
+    tls:
+      enabled: false
+      serverName: ""
+      insecureSkipVerify: false
+      secretName: ""
+      mountPath: /run/secrets/weknora-mysql
+      caFile: ""
+      certFile: ""
+      keyFile: ""
 
 # -----------------------------------------------------------------------------
 # App (Backend API Server)

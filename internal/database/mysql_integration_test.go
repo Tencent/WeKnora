@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,196 @@ import (
 	gomysql "github.com/go-sql-driver/mysql"
 	"github.com/golang-migrate/migrate/v4"
 )
+
+func TestValidateMySQLIntegrationDatabaseName(t *testing.T) {
+	for _, name := range []string{"weknora", "production", "", "weknora_mysql_test"} {
+		if err := validateMySQLIntegrationDatabaseName(name); err == nil {
+			t.Errorf("database name %q was accepted for a destructive integration test", name)
+		}
+	}
+	for _, name := range []string{"weknora_mysql_test_tls", "WEKNORA_MYSQL_TEST_CI"} {
+		if err := validateMySQLIntegrationDatabaseName(name); err != nil {
+			t.Errorf("safe test database name %q was rejected: %v", name, err)
+		}
+	}
+}
+
+func validateMySQLIntegrationDatabaseName(name string) error {
+	const safePrefix = "weknora_mysql_test_"
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(name)), safePrefix) ||
+		len(strings.TrimSpace(name)) <= len(safePrefix) {
+		return fmt.Errorf("name must start with %s and include a non-empty suffix", safePrefix)
+	}
+	return nil
+}
+
+func requireMySQLIntegrationDatabaseName(t *testing.T, envName, name string) {
+	t.Helper()
+	if err := validateMySQLIntegrationDatabaseName(name); err != nil {
+		t.Fatalf("refusing destructive MySQL integration test for %s=%q: %v", envName, name, err)
+	}
+}
+
+func TestMySQLTLSMainDatabaseAndRetrieverIntegration(t *testing.T) {
+	if os.Getenv("WEKNORA_MYSQL_TLS_TEST") != "1" {
+		t.Skip("set WEKNORA_MYSQL_TLS_TEST=1 with DB_* and MYSQL_* TLS settings to run")
+	}
+	requireMySQLIntegrationDatabaseName(t, "DB_NAME", os.Getenv("DB_NAME"))
+	requireMySQLIntegrationDatabaseName(t, "MYSQL_DATABASE", os.Getenv("MYSQL_DATABASE"))
+
+	mainConfig, err := MySQLMainDatabaseConfigFromEnv()
+	if err != nil {
+		t.Fatalf("build primary TLS config: %v", err)
+	}
+	if mainConfig.TLSConfigName == "" {
+		t.Fatal("primary TLS integration test requires DB_USE_TLS=true")
+	}
+	mainDB, err := sql.Open("mysql", mainConfig.ApplicationDSN)
+	if err != nil {
+		t.Fatalf("open primary TLS connection: %v", err)
+	}
+	defer mainDB.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := mainDB.PingContext(ctx); err != nil {
+		t.Fatalf("ping primary TLS connection: %v", err)
+	}
+	assertMySQLTLSActive(t, ctx, mainDB, "primary")
+	if err := ValidateMySQLSession(ctx, mainDB); err != nil {
+		t.Fatalf("validate primary TLS session: %v", err)
+	}
+
+	// Run the production migration path over its own native DSN. It must use
+	// the same registered CA/SNI/mTLS policy as the application pool.
+	t.Chdir(filepath.Join("..", ".."))
+	migrationOpts := MigrationOptions{MySQLDSN: mainConfig.MigrationDSN}
+	if err := RunMigrationsWithOptions(mainConfig.MigrationURL, migrationOpts); err != nil {
+		t.Fatalf("run TLS startup migrations: %v", err)
+	}
+	var head uint
+	if err := mainDB.QueryRowContext(ctx, "SELECT version FROM schema_migrations LIMIT 1").Scan(&head); err != nil {
+		t.Fatalf("read migrated head: %v", err)
+	}
+	if head < 65 {
+		t.Fatalf("unexpected MySQL migration head %d", head)
+	}
+	migrator, err := newMigrationInstance(mainConfig.MigrationURL, migrationOpts)
+	if err != nil {
+		t.Fatalf("create TLS migrator for rollback: %v", err)
+	}
+	if err := migrator.Steps(-1); err != nil {
+		_, _ = migrator.Close()
+		t.Fatalf("roll TLS schema back one version: %v", err)
+	}
+	rolledBack, dirty, err := migrator.Version()
+	if err != nil || dirty || rolledBack != head-1 {
+		_, _ = migrator.Close()
+		t.Fatalf("rollback version = %d dirty=%v err=%v, want %d/false", rolledBack, dirty, err, head-1)
+	}
+	if err := migrator.Up(); err != nil && err != migrate.ErrNoChange {
+		_, _ = migrator.Close()
+		t.Fatalf("restore TLS schema to head: %v", err)
+	}
+	if sourceErr, databaseErr := migrator.Close(); sourceErr != nil || databaseErr != nil {
+		t.Fatalf("close TLS migrator: source=%v database=%v", sourceErr, databaseErr)
+	}
+
+	probeName := fmt.Sprintf("TLS runtime probe %d", time.Now().UnixNano())
+	result, err := mainDB.ExecContext(
+		ctx,
+		"INSERT INTO tenants (name) VALUES (?)",
+		probeName,
+	)
+	if err != nil {
+		t.Fatalf("write representative tenant over TLS: %v", err)
+	}
+	tenantID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatalf("read tenant insert id: %v", err)
+	}
+	defer mainDB.Exec("DELETE FROM tenants WHERE id = ?", tenantID)
+	var gotName string
+	if err := mainDB.QueryRowContext(ctx, "SELECT name FROM tenants WHERE id = ?", tenantID).Scan(&gotName); err != nil || gotName != probeName {
+		t.Fatalf("read representative tenant over TLS: name=%q err=%v", gotName, err)
+	}
+
+	retrieverConfig, err := MySQLRetrieverConfigFromEnv(
+		os.Getenv("MYSQL_USERNAME"),
+		os.Getenv("MYSQL_PASSWORD"),
+		net.JoinHostPort(os.Getenv("MYSQL_HOST"), os.Getenv("MYSQL_PORT")),
+		os.Getenv("MYSQL_DATABASE"),
+	)
+	if err != nil {
+		t.Fatalf("build retriever TLS config: %v", err)
+	}
+	if retrieverConfig.TLSConfigName == "" {
+		t.Fatal("retriever TLS integration test requires MYSQL_USE_TLS=true")
+	}
+	retrieverDB, err := sql.Open("mysql", retrieverConfig.DSN)
+	if err != nil {
+		t.Fatalf("open retriever TLS connection: %v", err)
+	}
+	defer retrieverDB.Close()
+	if err := retrieverDB.PingContext(ctx); err != nil {
+		t.Fatalf("ping retriever TLS connection: %v", err)
+	}
+	assertMySQLTLSActive(t, ctx, retrieverDB, "retriever")
+	if err := ValidateMySQLSession(ctx, retrieverDB); err != nil {
+		t.Fatalf("validate retriever TLS session: %v", err)
+	}
+
+	caPath := os.Getenv("DB_TLS_CA")
+	certPath := os.Getenv("DB_TLS_CERT")
+	keyPath := os.Getenv("DB_TLS_KEY")
+	t.Setenv("DB_USE_TLS", "false")
+	t.Setenv("DB_TLS_SERVER_NAME", "")
+	t.Setenv("DB_TLS_CA", "")
+	t.Setenv("DB_TLS_CERT", "")
+	t.Setenv("DB_TLS_KEY", "")
+	plainConfig, err := MySQLMainDatabaseConfigFromEnv()
+	if err != nil {
+		t.Fatalf("build plaintext negative-control config: %v", err)
+	}
+	plainDB, err := sql.Open("mysql", plainConfig.ApplicationDSN)
+	if err != nil {
+		t.Fatalf("open plaintext negative-control connection: %v", err)
+	}
+	plainErr := plainDB.PingContext(ctx)
+	_ = plainDB.Close()
+	if plainErr == nil {
+		t.Fatal("plaintext connection unexpectedly succeeded against require_secure_transport=ON")
+	}
+
+	t.Setenv("DB_USE_TLS", "true")
+	t.Setenv("DB_TLS_CA", caPath)
+	t.Setenv("DB_TLS_CERT", certPath)
+	t.Setenv("DB_TLS_KEY", keyPath)
+	t.Setenv("DB_TLS_SERVER_NAME", "wrong-hostname.invalid")
+	wrongHostConfig, err := MySQLMainDatabaseConfigFromEnv()
+	if err != nil {
+		t.Fatalf("build wrong-hostname negative-control config: %v", err)
+	}
+	wrongHostDB, err := sql.Open("mysql", wrongHostConfig.ApplicationDSN)
+	if err != nil {
+		t.Fatalf("open wrong-hostname negative-control connection: %v", err)
+	}
+	wrongHostErr := wrongHostDB.PingContext(ctx)
+	_ = wrongHostDB.Close()
+	if wrongHostErr == nil {
+		t.Fatal("TLS connection unexpectedly accepted a certificate for the wrong hostname")
+	}
+}
+
+func assertMySQLTLSActive(t *testing.T, ctx context.Context, db *sql.DB, label string) {
+	t.Helper()
+	var variable, cipher string
+	if err := db.QueryRowContext(ctx, "SHOW SESSION STATUS LIKE 'Ssl_cipher'").Scan(&variable, &cipher); err != nil {
+		t.Fatalf("query %s TLS cipher: %v", label, err)
+	}
+	if cipher == "" {
+		t.Fatalf("%s connection has an empty TLS cipher", label)
+	}
+}
 
 func TestMySQLSessionContractIntegration(t *testing.T) {
 	dsn := os.Getenv("WEKNORA_MYSQL_TEST_DSN")
@@ -54,12 +245,7 @@ func TestMySQLMigrationRoundTripIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse WEKNORA_MYSQL_MIGRATION_TEST_DSN: %v", err)
 	}
-	if !strings.HasPrefix(strings.ToLower(cfg.DBName), "weknora_mysql_test_") {
-		t.Fatalf(
-			"refusing destructive migration test for database %q; name must start with weknora_mysql_test_",
-			cfg.DBName,
-		)
-	}
+	requireMySQLIntegrationDatabaseName(t, "WEKNORA_MYSQL_MIGRATION_TEST_DSN", cfg.DBName)
 
 	migrationDSN := BuildMySQLMigrationDSN(cfg.User, cfg.Passwd, cfg.Addr, cfg.DBName)
 	migrationsPath, err := filepath.Abs(filepath.Join("..", "..", "migrations", "mysql"))

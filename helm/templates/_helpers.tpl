@@ -83,6 +83,16 @@ database may still use the MySQL retriever with independent MYSQL_* settings.
 {{- if eq $driver "mysql" -}}
 {{- $host := include "weknora.databaseHost" . -}}
 {{- $port := include "weknora.databasePort" . -}}
+{{- $tls := .Values.database.mysql.tls -}}
+{{- if and $tls.enabled (ne $tls.certFile "") (eq $tls.keyFile "") -}}
+{{- fail "database.mysql.tls.keyFile is required when database.mysql.tls.certFile is set" -}}
+{{- end -}}
+{{- if and $tls.enabled (eq $tls.certFile "") (ne $tls.keyFile "") -}}
+{{- fail "database.mysql.tls.certFile is required when database.mysql.tls.keyFile is set" -}}
+{{- end -}}
+{{- if and $tls.enabled (or (ne $tls.caFile "") (ne $tls.certFile "") (ne $tls.keyFile "")) (eq $tls.secretName "") -}}
+{{- fail "database.mysql.tls.secretName is required when a MySQL TLS file is configured" -}}
+{{- end -}}
 {{- end -}}
 {{- end }}
 
