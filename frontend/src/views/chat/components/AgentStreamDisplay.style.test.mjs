@@ -86,12 +86,14 @@ test('rag mode keeps model thinking out of the answer stream component', () => {
   )
 })
 
-test('standard QA RAG history keeps answer feedback in the rendered toolbar', () => {
+test('shared history renderer exposes feedback only for eligible standard QA RAG', () => {
   assert.match(source, /import AnswerFeedbackControls from '\.\/AnswerFeedbackControls\.vue'/)
+  assert.equal((source.match(/<AnswerFeedbackControls/g) || []).length, 1)
   assert.match(
     source,
     /v-if="ragMode && session\.feedback_eligible === true && sessionId && session\.id"/,
   )
+  assert.match(source, /ragMode is[\s\S]*false for Agent mode/)
   assert.match(source, /@update:feedback="emit\('feedback-change', \$event\)"/)
   assert.match(
     botMessageSource,

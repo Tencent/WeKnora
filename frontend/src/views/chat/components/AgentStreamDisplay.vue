@@ -315,6 +315,8 @@
                   :title="$t('agent.addToKnowledgeBase')">
                   <t-icon name="bookmark-add" />
                 </t-button>
+                <!-- This renderer is shared by standard-QA history. ragMode is
+                     false for Agent mode, so Agent answers cannot expose feedback. -->
                 <AnswerFeedbackControls
                   v-if="ragMode && session.feedback_eligible === true && sessionId && session.id"
                   :session-id="sessionId"

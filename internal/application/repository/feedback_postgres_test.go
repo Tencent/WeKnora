@@ -254,6 +254,7 @@ func setupFeedbackPostgresTestDatabases(t *testing.T) (*gorm.DB, *gorm.DB) {
 		CREATE TABLE chunk_feedback_audits (
 			id bigserial PRIMARY KEY,
 			chunk_tenant_id bigint NOT NULL,
+			chunk_knowledge_base_id varchar(36) NOT NULL,
 			chunk_id varchar(36) NOT NULL,
 			actor_tenant_id bigint NOT NULL,
 			actor_user_id varchar(64) NOT NULL,

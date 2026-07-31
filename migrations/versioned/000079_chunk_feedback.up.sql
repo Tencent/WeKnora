@@ -50,6 +50,7 @@ CREATE INDEX idx_message_feedback_message ON message_feedbacks (tenant_id, messa
 CREATE TABLE chunk_feedback_audits (
     id BIGSERIAL PRIMARY KEY,
     chunk_tenant_id BIGINT NOT NULL,
+    chunk_knowledge_base_id VARCHAR(36) NOT NULL,
     chunk_id VARCHAR(36) NOT NULL,
     actor_tenant_id BIGINT NOT NULL,
     actor_user_id VARCHAR(64) NOT NULL,
@@ -63,4 +64,5 @@ CREATE TABLE chunk_feedback_audits (
         trigger_source IN ('like', 'dislike', 'cancel', 'admin_reset', 'content_delete', 'legacy')
     )
 );
-CREATE INDEX idx_chunk_feedback_audit_chunk ON chunk_feedback_audits (chunk_tenant_id, chunk_id, created_at DESC);
+CREATE INDEX idx_chunk_feedback_audit_chunk
+    ON chunk_feedback_audits (chunk_tenant_id, chunk_knowledge_base_id, chunk_id, created_at DESC);

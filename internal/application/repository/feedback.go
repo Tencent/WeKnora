@@ -38,22 +38,18 @@ type feedbackRepository struct {
 
 type feedbackWeightPolicy struct {
 	minimumSampleCount int64
-	lowThreshold       float64
-	highThreshold      float64
-	lowWeight          float64
-	normalWeight       float64
-	highWeight         float64
 }
 
+const (
+	feedbackLowThreshold  = 0.5
+	feedbackHighThreshold = 0.8
+	feedbackLowWeight     = 0.8
+	feedbackNormalWeight  = 1.0
+	feedbackHighWeight    = 1.2
+)
+
 func defaultFeedbackWeightPolicy() feedbackWeightPolicy {
-	return feedbackWeightPolicy{
-		minimumSampleCount: 5,
-		lowThreshold:       0.5,
-		highThreshold:      0.8,
-		lowWeight:          0.8,
-		normalWeight:       1,
-		highWeight:         1.2,
-	}
+	return feedbackWeightPolicy{minimumSampleCount: 5}
 }
 
 func feedbackWeightPolicyFromConfig(cfg *config.FeedbackConfig) feedbackWeightPolicy {
@@ -62,28 +58,12 @@ func feedbackWeightPolicyFromConfig(cfg *config.FeedbackConfig) feedbackWeightPo
 	}
 	return feedbackWeightPolicy{
 		minimumSampleCount: cfg.MinimumSampleCount,
-		lowThreshold:       cfg.LowThreshold,
-		highThreshold:      cfg.HighThreshold,
-		lowWeight:          cfg.LowWeight,
-		normalWeight:       cfg.NormalWeight,
-		highWeight:         cfg.HighWeight,
 	}
 }
 
 func (r *feedbackRepository) effectiveWeightPolicy() feedbackWeightPolicy {
 	policy := r.weightPolicy
-	if policy.minimumSampleCount < 1 ||
-		math.IsNaN(policy.lowThreshold) || math.IsInf(policy.lowThreshold, 0) ||
-		math.IsNaN(policy.highThreshold) || math.IsInf(policy.highThreshold, 0) ||
-		math.IsNaN(policy.lowWeight) || math.IsInf(policy.lowWeight, 0) ||
-		math.IsNaN(policy.normalWeight) || math.IsInf(policy.normalWeight, 0) ||
-		math.IsNaN(policy.highWeight) || math.IsInf(policy.highWeight, 0) ||
-		policy.lowThreshold < 0 ||
-		policy.highThreshold < policy.lowThreshold ||
-		policy.highThreshold > 1 ||
-		policy.lowWeight <= 0 ||
-		policy.normalWeight < policy.lowWeight ||
-		policy.highWeight < policy.normalWeight {
+	if policy.minimumSampleCount < 1 {
 		return defaultFeedbackWeightPolicy()
 	}
 	return policy
@@ -644,16 +624,16 @@ func recomputeChunks(
 			}
 		}
 		var positiveRate *float64
-		weight := policy.normalWeight
+		weight := feedbackNormalWeight
 		if total := likes + dislikes; total > 0 {
 			rate := float64(likes) / float64(total)
 			positiveRate = &rate
 			if total >= policy.minimumSampleCount {
 				switch {
-				case rate >= policy.highThreshold:
-					weight = policy.highWeight
-				case rate < policy.lowThreshold:
-					weight = policy.lowWeight
+				case rate >= feedbackHighThreshold:
+					weight = feedbackHighWeight
+				case rate < feedbackLowThreshold:
+					weight = feedbackLowWeight
 				}
 			}
 		}
@@ -676,15 +656,16 @@ func recomputeChunks(
 		}
 		if math.Abs(oldWeight-weight) > 1e-9 {
 			if err := tx.Create(&types.ChunkFeedbackAudit{
-				ChunkTenantID: key.tenantID,
-				ChunkID:       key.chunkID,
-				ActorTenantID: actorTenantID,
-				ActorUserID:   actorUserID,
-				Action:        types.ChunkFeedbackAuditActionWeightChanged,
-				TriggerSource: triggerSource,
-				OldWeight:     oldWeight,
-				NewWeight:     weight,
-				CreatedAt:     time.Now(),
+				ChunkTenantID:        key.tenantID,
+				ChunkKnowledgeBaseID: key.kbID,
+				ChunkID:              key.chunkID,
+				ActorTenantID:        actorTenantID,
+				ActorUserID:          actorUserID,
+				Action:               types.ChunkFeedbackAuditActionWeightChanged,
+				TriggerSource:        triggerSource,
+				OldWeight:            oldWeight,
+				NewWeight:            weight,
+				CreatedAt:            time.Now(),
 			}).Error; err != nil {
 				return err
 			}
@@ -747,15 +728,16 @@ func (r *feedbackRepository) ResetChunkFeedback(
 			return err
 		}
 		return tx.Create(&types.ChunkFeedbackAudit{
-			ChunkTenantID: input.ChunkTenantID,
-			ChunkID:       input.ChunkID,
-			ActorTenantID: input.ActorTenantID,
-			ActorUserID:   input.ActorUserID,
-			Action:        types.ChunkFeedbackAuditActionReset,
-			TriggerSource: types.FeedbackTriggerAdminReset,
-			OldWeight:     oldWeight,
-			NewWeight:     1,
-			CreatedAt:     time.Now(),
+			ChunkTenantID:        input.ChunkTenantID,
+			ChunkKnowledgeBaseID: input.KnowledgeBaseID,
+			ChunkID:              input.ChunkID,
+			ActorTenantID:        input.ActorTenantID,
+			ActorUserID:          input.ActorUserID,
+			Action:               types.ChunkFeedbackAuditActionReset,
+			TriggerSource:        types.FeedbackTriggerAdminReset,
+			OldWeight:            oldWeight,
+			NewWeight:            1,
+			CreatedAt:            time.Now(),
 		}).Error
 	})
 }
@@ -792,7 +774,10 @@ func (r *feedbackRepository) GetChunkFeedbackDetails(
 		result.ReasonCounts[row.ReasonCode] = row.Count
 	}
 	if err := r.db.WithContext(ctx).
-		Where("chunk_tenant_id = ? AND chunk_id = ?", tenantID, chunkID).
+		Where(
+			"chunk_tenant_id = ? AND chunk_knowledge_base_id = ? AND chunk_id = ?",
+			tenantID, chunk.KnowledgeBaseID, chunkID,
+		).
 		Order("id DESC").Limit(50).Find(&result.Audits).Error; err != nil {
 		return nil, err
 	}

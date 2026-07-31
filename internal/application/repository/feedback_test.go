@@ -443,16 +443,9 @@ func TestFeedbackWeightStaysNeutralUntilMinimumSampleCount(t *testing.T) {
 	}
 }
 
-func TestFeedbackProjectionUsesConfiguredThresholdsAndWeights(t *testing.T) {
+func TestFeedbackProjectionUsesFixedIssueTiersAndWeights(t *testing.T) {
 	repo, db, session, message, chunk := setupFeedbackTestRepository(t)
-	repo.weightPolicy = feedbackWeightPolicy{
-		minimumSampleCount: 1,
-		lowThreshold:       0.4,
-		highThreshold:      0.9,
-		lowWeight:          0.7,
-		normalWeight:       1.1,
-		highWeight:         1.4,
-	}
+	repo.weightPolicy = feedbackWeightPolicy{minimumSampleCount: 1}
 	ctx := context.Background()
 	_, err := repo.CompleteAssistantMessageWithReferences(
 		ctx, session.TenantID, message, feedbackReference(chunk),
@@ -468,7 +461,7 @@ func TestFeedbackProjectionUsesConfiguredThresholdsAndWeights(t *testing.T) {
 		Type:            types.FeedbackTypeLike,
 	})
 	require.NoError(t, err)
-	assert.Equal(t, 1.4, loadFeedbackChunk(t, db, chunk.ID).RecallWeight)
+	assert.Equal(t, 1.2, loadFeedbackChunk(t, db, chunk.ID).RecallWeight)
 
 	reason := types.FeedbackReasonInaccurate
 	_, err = repo.ApplyMessageFeedback(ctx, types.ApplyMessageFeedbackInput{
@@ -481,7 +474,7 @@ func TestFeedbackProjectionUsesConfiguredThresholdsAndWeights(t *testing.T) {
 		ReasonCode:      &reason,
 	})
 	require.NoError(t, err)
-	assert.Equal(t, 0.7, loadFeedbackChunk(t, db, chunk.ID).RecallWeight)
+	assert.Equal(t, 0.8, loadFeedbackChunk(t, db, chunk.ID).RecallWeight)
 }
 
 func TestFeedbackTransactionRollsBackOnAuditFailure(t *testing.T) {
@@ -560,6 +553,55 @@ func TestFeedbackAuditTriggerSourcesAndIdempotency(t *testing.T) {
 		assert.Equal(t, types.ChunkFeedbackAuditActionWeightChanged, audit.Action)
 	}
 	assert.Equal(t, types.ChunkFeedbackAuditActionReset, details.Audits[0].Action)
+}
+
+func TestFeedbackAuditHistoryStaysInOriginalKnowledgeBaseScope(t *testing.T) {
+	repo, db, session, message, chunk := setupFeedbackTestRepository(t)
+	ctx := context.Background()
+	_, err := repo.CompleteAssistantMessageWithReferences(
+		ctx, session.TenantID, message, feedbackReference(chunk),
+	)
+	require.NoError(t, err)
+	_, err = repo.ApplyMessageFeedback(ctx, types.ApplyMessageFeedbackInput{
+		MessageTenantID: session.TenantID,
+		ActorTenantID:   session.TenantID,
+		ActorUserID:     session.UserID,
+		SessionID:       session.ID,
+		MessageID:       message.ID,
+		Type:            types.FeedbackTypeLike,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, db.Model(&types.Chunk{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND id = ?",
+			chunk.TenantID, chunk.KnowledgeBaseID, chunk.ID).
+		Update("knowledge_base_id", "kb-b").Error)
+	chunk.KnowledgeBaseID = "kb-b"
+
+	details, err := repo.GetChunkFeedbackDetails(ctx, chunk.TenantID, chunk.ID)
+	require.NoError(t, err)
+	assert.Empty(t, details.Audits, "a moved chunk must not inherit its former KB audit history")
+
+	require.NoError(t, repo.ResetChunkFeedback(ctx, types.ResetChunkFeedbackInput{
+		ChunkTenantID:   chunk.TenantID,
+		ActorTenantID:   session.TenantID,
+		ActorUserID:     "admin",
+		KnowledgeBaseID: chunk.KnowledgeBaseID,
+		ChunkID:         chunk.ID,
+	}))
+	details, err = repo.GetChunkFeedbackDetails(ctx, chunk.TenantID, chunk.ID)
+	require.NoError(t, err)
+	require.Len(t, details.Audits, 1)
+	assert.Equal(t, "kb-b", details.Audits[0].ChunkKnowledgeBaseID)
+
+	var originalScopeCount int64
+	require.NoError(t, db.Model(&types.ChunkFeedbackAudit{}).
+		Where(
+			"chunk_tenant_id = ? AND chunk_knowledge_base_id = ? AND chunk_id = ?",
+			chunk.TenantID, "kb-a", chunk.ID,
+		).
+		Count(&originalScopeCount).Error)
+	assert.EqualValues(t, 1, originalScopeCount)
 }
 
 func TestCompletionExcludesWebOnlyReferences(t *testing.T) {

@@ -33,16 +33,16 @@ func TestChunkFeedbackSQLiteMigrationUpDownUp(t *testing.T) {
 	for i, triggerSource := range allowed {
 		if _, err := db.Exec(`
 			INSERT INTO chunk_feedback_audits
-				(chunk_tenant_id, chunk_id, actor_tenant_id, actor_user_id, action, trigger_source, old_weight, new_weight)
-			VALUES (1, printf('chunk-%d', ?), 1, 'user', 'feedback_weight_changed', ?, 1.0, 1.0)
+				(chunk_tenant_id, chunk_knowledge_base_id, chunk_id, actor_tenant_id, actor_user_id, action, trigger_source, old_weight, new_weight)
+			VALUES (1, 'kb', printf('chunk-%d', ?), 1, 'user', 'feedback_weight_changed', ?, 1.0, 1.0)
 		`, i, triggerSource); err != nil {
 			t.Fatalf("insert trigger source %q: %v", triggerSource, err)
 		}
 	}
 	if _, err := db.Exec(`
 		INSERT INTO chunk_feedback_audits
-			(chunk_tenant_id, chunk_id, actor_tenant_id, actor_user_id, action, trigger_source, old_weight, new_weight)
-		VALUES (1, 'invalid-chunk', 1, 'user', 'feedback_weight_changed', 'invalid', 1.0, 1.0)
+			(chunk_tenant_id, chunk_knowledge_base_id, chunk_id, actor_tenant_id, actor_user_id, action, trigger_source, old_weight, new_weight)
+		VALUES (1, 'kb', 'invalid-chunk', 1, 'user', 'feedback_weight_changed', 'invalid', 1.0, 1.0)
 	`); err == nil {
 		t.Fatal("invalid trigger source unexpectedly passed the migration constraint")
 	}
@@ -62,6 +62,7 @@ func TestChunkFeedbackSQLiteMigrationUpDownUp(t *testing.T) {
 	execMigrationFile(t, db, migrationDir, "000002_chunk_feedback.up.sql")
 	assertSQLiteColumn(t, db, "chunks", "feedback_reset_at", true)
 	assertSQLiteColumn(t, db, "message_chunk_references", "chunk_knowledge_base_id", true)
+	assertSQLiteColumn(t, db, "chunk_feedback_audits", "chunk_knowledge_base_id", true)
 	assertSQLiteTable(t, db, "message_feedbacks", true)
 }
 
@@ -72,12 +73,12 @@ func assertSQLiteFeedbackWeightConstraint(t *testing.T, db *sql.DB) {
 			(id, tenant_id, knowledge_base_id, knowledge_id, content, chunk_index, start_at, end_at, recall_weight)
 		VALUES ('weight-policy', 1, 'kb', 'knowledge', 'content', 0, 0, 7, 1.4)
 	`); err != nil {
-		t.Fatalf("configured high weight outside the former fixed range was rejected: %v", err)
+		t.Fatalf("valid positive projection weight was rejected: %v", err)
 	}
 	if _, err := db.Exec(
 		"UPDATE chunks SET recall_weight = 0.7 WHERE id = 'weight-policy'",
 	); err != nil {
-		t.Fatalf("configured low weight outside the former fixed range was rejected: %v", err)
+		t.Fatalf("valid positive projection weight was rejected: %v", err)
 	}
 	if _, err := db.Exec(
 		"UPDATE chunks SET recall_weight = 0 WHERE id = 'weight-policy'",

@@ -41,6 +41,7 @@ CREATE INDEX idx_message_feedback_message ON message_feedbacks (tenant_id, messa
 CREATE TABLE chunk_feedback_audits (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chunk_tenant_id INTEGER NOT NULL,
+    chunk_knowledge_base_id VARCHAR(36) NOT NULL,
     chunk_id VARCHAR(36) NOT NULL,
     actor_tenant_id INTEGER NOT NULL,
     actor_user_id VARCHAR(64) NOT NULL,
@@ -52,4 +53,5 @@ CREATE TABLE chunk_feedback_audits (
     new_weight REAL NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_chunk_feedback_audit_chunk ON chunk_feedback_audits (chunk_tenant_id, chunk_id, created_at DESC);
+CREATE INDEX idx_chunk_feedback_audit_chunk
+    ON chunk_feedback_audits (chunk_tenant_id, chunk_knowledge_base_id, chunk_id, created_at DESC);

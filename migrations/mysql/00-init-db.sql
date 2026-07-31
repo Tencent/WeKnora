@@ -259,6 +259,7 @@ CREATE TABLE message_feedbacks (
 CREATE TABLE chunk_feedback_audits (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     chunk_tenant_id BIGINT NOT NULL,
+    chunk_knowledge_base_id VARCHAR(36) NOT NULL,
     chunk_id VARCHAR(36) NOT NULL,
     actor_tenant_id BIGINT NOT NULL,
     actor_user_id VARCHAR(64) NOT NULL,
@@ -267,7 +268,7 @@ CREATE TABLE chunk_feedback_audits (
     old_weight DOUBLE NOT NULL,
     new_weight DOUBLE NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    KEY idx_chunk_feedback_audit_chunk (chunk_tenant_id, chunk_id, created_at),
+    KEY idx_chunk_feedback_audit_chunk (chunk_tenant_id, chunk_knowledge_base_id, chunk_id, created_at),
     CONSTRAINT chk_chunk_feedback_audit_action CHECK (action IN ('feedback_weight_changed', 'feedback_reset')),
     CONSTRAINT chk_chunk_feedback_audit_trigger_source CHECK (
         trigger_source IN ('like', 'dislike', 'cancel', 'admin_reset', 'content_delete', 'legacy')
