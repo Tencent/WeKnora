@@ -592,13 +592,17 @@ export const useSettingsStore = defineStore("settings", {
             .map(item => item.skill_name || item.id);
         }
         if (Array.isArray(state.folder_ids)) {
-          // Restore folder selection from session state.
-          // Only id is known; name/kbId/kbName will be missing but the store
-          // just needs the ids for filtering — the UI can lazy-resolve names.
+          const existingFolders = new Map(
+            (this.settings.selectedFolderIds || []).map(folder => [folder.id, folder]),
+          );
+          const restoredKbIds = Array.isArray(state.knowledge_base_ids)
+            ? [...new Set(state.knowledge_base_ids.filter(Boolean))]
+            : [];
           this.settings.selectedFolderIds = state.folder_ids.map(id => ({
             id,
-            name: id,
-            kbId: "",
+            name: existingFolders.get(id)?.name || id,
+            kbId: existingFolders.get(id)?.kbId || (restoredKbIds.length === 1 ? restoredKbIds[0] : ""),
+            kbName: existingFolders.get(id)?.kbName,
           }));
         }
         if (typeof state.web_search_enabled === "boolean") {

@@ -823,7 +823,9 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     const requestSkillNames = agentEnabled ? skillNames : [];
 
     const folderIds = (useSettingsStoreInstance.settings.selectedFolderIds || [])
-        .filter(f => f.id && f.kbId && kbIdSet.has(f.kbId))
+        // Older session state stores folder IDs without their KB mapping. The
+        // folder UUID remains sufficient for the backend to resolve its scope.
+        .filter(f => f.id && (!f.kbId || kbIdSet.has(f.kbId)))
         .map(f => f.id);
 
     const suggestionAttribution = pendingSuggestionAttribution;

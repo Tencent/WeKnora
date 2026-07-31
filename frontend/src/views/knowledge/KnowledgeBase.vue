@@ -15,6 +15,7 @@ import { useOrganizationStore } from '@/stores/organization';
 import { useAuthStore } from '@/stores/auth';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
+import { useSettingsStore } from '@/stores/settings';
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue';
 const usemenuStore = useMenuStore();
 const uiStore = useUIStore();
@@ -22,6 +23,7 @@ const orgStore = useOrganizationStore();
 const authStore = useAuthStore();
 const chatResources = useChatResourcesStore();
 const editorResources = useEditorResourcesStore();
+const settingsStore = useSettingsStore();
 const router = useRouter();
 import {
   batchQueryKnowledge,
@@ -2238,6 +2240,21 @@ const getTitle = (session_id: string, value: string) => {
 };
 
 async function createNewSession(value: string): Promise<void> {
+  // Questions started from a KB page use the visible directory as their
+  // retrieval scope instead of inheriting unrelated chat selections.
+  settingsStore.selectKnowledgeBases([kbId.value]);
+  settingsStore.clearFiles();
+  settingsStore.clearTags();
+  settingsStore.clearFolders();
+  if (currentFolderId.value) {
+    settingsStore.addFolder({
+      id: currentFolderId.value,
+      name: currentFolderPath.value,
+      kbId: kbId.value,
+      kbName: kbInfo.value?.name,
+    });
+  }
+
   // Session 不再和知识库绑定，直接创建 Session
   createSessions({}).then(res => {
     if (res.data && res.data.id) {
