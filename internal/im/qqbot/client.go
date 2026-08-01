@@ -123,10 +123,10 @@ func (c *Client) SendGroupMessage(ctx context.Context, groupOpenID, content, msg
 
 func (c *Client) sendText(ctx context.Context, path, content, msgID string) error {
 	body := sendMessageRequest{
-		Content: content,
-		MsgType: 0,
-		MsgID:   msgID,
-		MsgSeq:  1,
+		MsgType:  2,
+		Markdown: &markdownMessage{Content: content},
+		MsgID:    msgID,
+		MsgSeq:   1,
 	}
 	return c.doJSON(ctx, http.MethodPost, c.apiBaseURL+path, body, nil)
 }
