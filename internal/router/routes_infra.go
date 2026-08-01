@@ -14,6 +14,7 @@ import (
 func RegisterModelRoutes(
 	r *gin.RouterGroup,
 	handler *handler.ModelHandler,
+	usageHandler *handler.ModelUsageHandler,
 	credHandler *handler.ModelCredentialsHandler,
 	g *rbacGuards,
 ) {
@@ -22,6 +23,9 @@ func RegisterModelRoutes(
 	{
 		// 获取模型厂商列表 — Viewer+
 		models.GET("/providers", g.Viewer(), handler.ListModelProviders)
+		// 获取模型用量统计 — Viewer+。必须注册在 /:id 之前，否则 Gin 会把
+		// "usage" 当成模型 id。
+		models.GET("/usage", g.Viewer(), usageHandler.GetUsage)
 		// 创建模型 — Admin+
 		models.POST("", g.Admin(), handler.CreateModel)
 		// 获取模型列表 — Viewer+
