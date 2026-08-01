@@ -33,13 +33,25 @@ type ossFileService struct {
 const ossScheme = "oss://"
 
 // newOSSClient creates an OSS client using the official Aliyun SDK v2.
-func newOSSClient(endpoint, region, accessKey, secretKey string) (*oss.Client, error) {
+// Signature version can be specified via OSS_SIGNATURE_VERSION environment variable (v1/v4).
+// If not specified, defaults to v4.
+func newOSSClient(endpoint, region, accessKey, secretKey, signatureVersion string) (*oss.Client, error) {
 	creds := credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")
 
 	cfg := oss.LoadDefaultConfig().
 		WithCredentialsProvider(creds).
 		WithRegion(region).
 		WithEndpoint(endpoint)
+
+	if strings.EqualFold(signatureVersion, "v1") {
+		cfg = oss.LoadDefaultConfig().
+			WithCredentialsProvider(creds).
+			WithRegion(region).
+			WithEndpoint(endpoint).
+			WithUsePathStyle(true)
+		cfg = cfg.WithSignatureVersion(oss.SignatureVersionV1)
+		logger.Infof(context.Background(), "using OSS signature version v1")
+	}
 
 	return oss.NewClient(cfg), nil
 }
@@ -69,13 +81,13 @@ func ossEnsureBucket(client *oss.Client, bucketName string) error {
 
 // NewOssFileService creates an Aliyun OSS file service.
 // It verifies that the bucket exists and creates it if missing.
-func NewOssFileService(endpoint, region, accessKey, secretKey, bucketName, pathPrefix string) (interfaces.FileService, error) {
-	return NewOssFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, "", "")
+func NewOssFileService(endpoint, region, accessKey, secretKey, bucketName, signatureVersion, pathPrefix string) (interfaces.FileService, error) {
+	return NewOssFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, bucketName, signatureVersion, pathPrefix, "", "")
 }
 
 // NewOssFileServiceWithTempBucket creates an Aliyun OSS file service with optional temp bucket.
-func NewOssFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, tempBucketName, tempRegion string) (interfaces.FileService, error) {
-	client, err := newOSSClient(endpoint, region, accessKey, secretKey)
+func NewOssFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, bucketName, signatureVersion, pathPrefix, tempBucketName, tempRegion string) (interfaces.FileService, error) {
+	client, err := newOSSClient(endpoint, region, accessKey, secretKey, signatureVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +101,7 @@ func NewOssFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, buc
 		if tempRegion == "" {
 			tempRegion = region
 		}
-		tempClient, err = newOSSClient(endpoint, tempRegion, accessKey, secretKey)
+		tempClient, err = newOSSClient(endpoint, tempRegion, accessKey, secretKey, signatureVersion)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize OSS temp client: %w", err)
 		}
@@ -113,8 +125,8 @@ func NewOssFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, buc
 }
 
 // CheckOssConnectivity tests OSS connectivity using the provided credentials.
-func CheckOssConnectivity(ctx context.Context, endpoint, region, accessKey, secretKey, bucketName string) error {
-	client, err := newOSSClient(endpoint, region, accessKey, secretKey)
+func CheckOssConnectivity(ctx context.Context, endpoint, region, accessKey, secretKey, bucketName, signatureVersion string) error {
+	client, err := newOSSClient(endpoint, region, accessKey, secretKey, signatureVersion)
 	if err != nil {
 		return err
 	}

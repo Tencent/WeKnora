@@ -127,7 +127,7 @@ func TestNewOSSClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, err := newOSSClient(tt.endpoint, tt.region, tt.accessKey, tt.secretKey)
+			client, err := newOSSClient(tt.endpoint, tt.region, tt.accessKey, tt.secretKey, "")
 			if tt.wantErr {
 				if err == nil {
 					t.Error("expected error but got nil")
@@ -156,6 +156,7 @@ func TestCheckOssConnectivity_InvalidEndpoint(t *testing.T) {
 		"invalid-access-key",
 		"invalid-secret-key",
 		"nonexistent-bucket",
+		"",
 	)
 
 	if err == nil {
@@ -169,6 +170,7 @@ func TestOssEnsureBucket_NonExistent(t *testing.T) {
 		"cn-hangzhou",
 		"test-invalid-key",
 		"test-invalid-secret",
+		"",
 	)
 	if err != nil {
 		t.Fatalf("newOSSClient() error: %v", err)
@@ -187,6 +189,7 @@ func TestOssEnsureBucket_CreateFails(t *testing.T) {
 		"cn-hangzhou",
 		"test-invalid-key",
 		"test-invalid-secret",
+		"",
 	)
 	if err != nil {
 		t.Fatalf("newOSSClient() error: %v", err)
