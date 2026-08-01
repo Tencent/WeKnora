@@ -1123,6 +1123,35 @@ func (r *wikiPageRepository) DeleteByID(ctx context.Context, id string) error {
 	return nil
 }
 
+// DeleteByKnowledgeBase removes every wiki row a knowledge base owns when the
+// KB itself is deleted. Pages, folders and issues carry gorm.DeletedAt, so
+// they follow the soft-delete semantics of the per-row Delete/DeleteFolder
+// methods above; revisions have no deleted_at column, so they are hard-deleted
+// exactly like DeleteRevisionsByPage. The sweep runs in one transaction so a
+// retried KB-delete task never observes a half-cleaned wiki. An empty kbID is
+// a no-op — it must never degrade into a table-wide delete.
+func (r *wikiPageRepository) DeleteByKnowledgeBase(ctx context.Context, kbID string) error {
+	if kbID == "" {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("knowledge_base_id = ?", kbID).
+			Delete(&types.WikiPageRevision{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("knowledge_base_id = ?", kbID).
+			Delete(&types.WikiPage{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("knowledge_base_id = ?", kbID).
+			Delete(&types.WikiFolder{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("knowledge_base_id = ?", kbID).
+			Delete(&types.WikiPageIssue{}).Error
+	})
+}
+
 // escapeLikePattern escapes LIKE / ILIKE metacharacters so the returned string
 // can be safely concatenated with % wildcards without unintended matches.
 // Order matters: escape the backslash first, then the wildcards.
