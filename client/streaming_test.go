@@ -263,6 +263,73 @@ func TestKnowledgeQAStream_TerminalErrorEndsStream(t *testing.T) {
 	}
 }
 
+func TestProcessAgentSSEStream_MultilineDataFrame(t *testing.T) {
+	frame := "data: {\"response_type\":\"answer\",\n" +
+		"data: \"content\":\"hello\",\"done\":false}\n\n"
+	c := &Client{}
+	var got *AgentStreamResponse
+	err := c.processAgentSSEStream(strings.NewReader(frame), func(resp *AgentStreamResponse) error {
+		got = resp
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("multiline SSE data frame failed: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected callback invocation")
+	}
+	if got.ResponseType != AgentResponseTypeAnswer || got.Content != "hello" || got.Done {
+		t.Fatalf("got %+v, want answer/hello/done=false", got)
+	}
+}
+
+func TestKnowledgeQAStream_MultilineDataFrame(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"response_type\":\"answer\",\n"+
+			"data: \"content\":\"hello\",\"done\":false}\n\n")
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	var got *StreamResponse
+	err := c.KnowledgeQAStream(context.Background(), "sess", &KnowledgeQARequest{Query: "q"},
+		func(resp *StreamResponse) error {
+			got = resp
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("multiline knowledge SSE data frame failed: %v", err)
+	}
+	if got == nil || got.ResponseType != ResponseTypeAnswer || got.Content != "hello" || got.Done {
+		t.Fatalf("got %+v, want answer/hello/done=false", got)
+	}
+}
+
+func TestContinueStream_MultilineDataFrame(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event:message\n"+
+			"data: {\"response_type\":\"answer\",\n"+
+			"data: \"content\":\"hello\",\"done\":false}\n\n")
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	var got *StreamResponse
+	err := c.ContinueStream(context.Background(), "sess", "msg",
+		func(resp *StreamResponse) error {
+			got = resp
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("multiline continue SSE data frame failed: %v", err)
+	}
+	if got == nil || got.ResponseType != ResponseTypeAnswer || got.Content != "hello" || got.Done {
+		t.Fatalf("got %+v, want answer/hello/done=false", got)
+	}
+}
+
 // TestSearchResult_DecodesReferenceIndexes guards the KB and chunk-hierarchy
 // fields used by the CLI's bounded reference projection.
 func TestSearchResult_DecodesReferenceIndexes(t *testing.T) {
