@@ -58,6 +58,7 @@ import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/
 import { useI18n } from 'vue-i18n';
 import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
 import type { ParserEngineInfo } from '@/api/system';
+import { crawlUrls } from './utils/crawlUtils';
 const route = useRoute();
 const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
@@ -1613,9 +1614,40 @@ const handleUploadSourceFiles = (files: File[]) => {
   openUploadConfirmDialog(files);
 };
 
-const handleUploadSourceUrl = (url: string) => {
+const handleUploadSourceUrl = async (payload: { url: string; crawlDepth: number }) => {
   if (!ensureDocumentKbReady()) return;
-  openUploadConfirmDialog([], [url]);
+
+  if (payload.crawlDepth > 0) {
+    // Crawl sub-pages first, then import each URL individually
+    const maxDepth = Math.min(payload.crawlDepth, 3);
+    try {
+      const results = await crawlUrls(payload.url, {
+        maxDepth,
+        maxPages: 50,
+        domainOnly: true,
+        timeoutMs: 15000,
+        delayMs: 300,
+        onProgress: (depth, current, total, url) => {
+          if (current === 0) {
+            MessagePlugin.info(t('knowledgeBase.crawlingPages'));
+          }
+        },
+      });
+      const urls = results.map(r => r.url);
+      if (urls.length === 0) {
+        MessagePlugin.warning(t('knowledgeBase.crawlFailed'));
+        return;
+      }
+      MessagePlugin.success(t('knowledgeBase.crawlCompleted', { count: urls.length }));
+      openUploadConfirmDialog([], urls);
+    } catch (err) {
+      // If crawl fails, fall back to importing just the seed URL
+      MessagePlugin.warning(t('knowledgeBase.crawlFailed'));
+      openUploadConfirmDialog([], [payload.url]);
+    }
+  } else {
+    openUploadConfirmDialog([], [payload.url]);
+  }
 };
 
 const handleManualCreate = () => {
