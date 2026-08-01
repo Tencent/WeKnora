@@ -3477,6 +3477,10 @@ export default {
           label: 'Requesty',
           description: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4-5, etc.'
         },
+        orcarouter: {
+          label: 'OrcaRouter',
+          description: 'orcarouter/auto, openai/gpt-5.5, anthropic/claude-sonnet-4.6, etc.'
+        },
         generic: {
           label: 'Custom (OpenAI-compatible)',
           description: 'Generic API endpoint'
