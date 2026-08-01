@@ -188,7 +188,7 @@ func (e *elasticsearchRepository) EngineType() typesLocal.RetrieverEngineType {
 }
 
 func (e *elasticsearchRepository) Support() []typesLocal.RetrieverType {
-	return []typesLocal.RetrieverType{typesLocal.KeywordsRetrieverType}
+	return []typesLocal.RetrieverType{typesLocal.KeywordsRetrieverType, typesLocal.VectorRetrieverType}
 }
 
 // EstimateStorageSize 估算存储空间大小
@@ -590,6 +590,8 @@ func (e *elasticsearchRepository) Retrieve(ctx context.Context,
 	switch params.RetrieverType {
 	case typesLocal.KeywordsRetrieverType:
 		return e.KeywordsRetrieve(ctx, params)
+	case typesLocal.VectorRetrieverType:
+		return e.VectorRetrieve(ctx, params)
 	}
 
 	err := fmt.Errorf("invalid retriever type: %v", params.RetrieverType)
