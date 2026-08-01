@@ -168,10 +168,14 @@ func (s *wikiIngestService) newWikiBatchContext(
 	granularity := types.WikiExtractionStandard
 	contentInstructions := ""
 	extractionInstructions := ""
+	maxPageContentBytes := 0
+	maxRefs := 0
 	if wikiConfig != nil {
 		granularity = wikiConfig.ExtractionGranularity.Normalize()
 		contentInstructions = wikiConfig.ContentInstructions
 		extractionInstructions = wikiConfig.ExtractionInstructions
+		maxPageContentBytes = wikiConfig.MaxPageContentBytes
+		maxRefs = wikiConfig.MaxRefs
 	}
 	return &WikiBatchContext{
 		SlugTitle: func(ctx context.Context, slug string) string {
@@ -186,6 +190,8 @@ func (s *wikiIngestService) newWikiBatchContext(
 		ExtractionGranularity:  granularity,
 		ContentInstructions:    contentInstructions,
 		ExtractionInstructions: extractionInstructions,
+		MaxPageContentBytes:    maxPageContentBytes,
+		MaxRefs:                maxRefs,
 	}
 }
 
@@ -1960,7 +1966,19 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		}
 	}
 
-	if len(additions) > 0 || len(retracts) > 0 {
+	// Hub-page write-amplification guard: when a page is already at/over the
+	// configured content cap and this batch only ADDS information (no
+	// retractions), skip the LLM re-synthesis and the content rewrite. The
+	// page keeps its existing body, so UpdatePage detects "content unchanged"
+	// and routes to the content-preserving UpdateMeta path — the expensive
+	// fulltext-GIN reindex is never triggered. Only the bookkeeping refs
+	// below are refreshed. Retractions are never capped: they shrink the
+	// page and must regenerate it.
+	contentCapped := batchCtx != nil && batchCtx.MaxPageContentBytes > 0 && exists &&
+		len(retracts) == 0 && len(additions) > 0 &&
+		len(page.Content) >= batchCtx.MaxPageContentBytes
+
+	if (len(additions) > 0 || len(retracts) > 0) && !contentCapped {
 		titles := batchCtx.SlugTitleMany(ctx, []string(page.OutLinks))
 
 		// slugHandles escape high-entropy slugs behind short reference handles
@@ -2069,6 +2087,18 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		}
 	}
 
+	if contentCapped {
+		// Bookkeeping-only update: the existing content is intentionally left
+		// untouched (so UpdatePage routes to UpdateMeta and the fulltext GIN
+		// is preserved), but the freshly-cited source/chunk refs below still
+		// need to land for retrieval grounding and delete reconciliation.
+		// Mark changed so the persist block runs.
+		logger.Infof(ctx,
+			"wiki ingest: page %s content %d bytes >= cap %d; skipping re-synthesis (bookkeeping-only, fulltext GIN preserved)",
+			slug, len(page.Content), batchCtx.MaxPageContentBytes)
+		changed = true
+	}
+
 	// Apply the batch taxonomy plan, but only to pages that aren't already
 	// filed — so brand-new pages get a coherent folder while previously-filed
 	// or user-moved pages keep their placement (manual edits are authoritative).
@@ -2086,6 +2116,9 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		// the existing refs; addition rounds append the newly-cited chunks
 		// on top of what was already there, deduplicated.
 		page.ChunkRefs = mergeChunkRefs(page.ChunkRefs, additions)
+		if batchCtx != nil && batchCtx.MaxRefs > 0 {
+			page.ChunkRefs = capRecentStringArray(page.ChunkRefs, batchCtx.MaxRefs)
+		}
 		if exists {
 			_, err = s.wikiService.UpdatePage(ctx, page)
 		} else {
@@ -2126,4 +2159,19 @@ func mergeChunkRefs(current types.StringArray, additions []SlugUpdate) types.Str
 		}
 	}
 	return out
+}
+
+// capRecentStringArray bounds a string array to its most-recent `max` entries
+// (the tail), returning it unchanged when max <= 0 or already within bounds.
+// mergeChunkRefs appends newly-cited chunks after the existing ones, so
+// keeping the tail preserves the freshest evidence while trimming the
+// oldest. Used to stop hub-page chunk_refs from growing into the thousands
+// and bloating the per-row JSONB / TOAST write on every ingest.
+func capRecentStringArray(a types.StringArray, max int) types.StringArray {
+	if max <= 0 || len(a) <= max {
+		return a
+	}
+	trimmed := make(types.StringArray, max)
+	copy(trimmed, a[len(a)-max:])
+	return trimmed
 }
