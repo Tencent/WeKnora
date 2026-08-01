@@ -106,6 +106,12 @@ const router = createRouter({
           meta: { requiresInit: true, requiresAuth: true }
         },
         {
+          path: "model-usage",
+          name: "modelUsage",
+          component: () => import("../views/model-usage/ModelUsageView.vue"),
+          meta: { requiresInit: true, requiresAuth: true }
+        },
+        {
           path: "knowledge-bases",
           name: "knowledgeBaseList",
           component: () => import("../views/knowledge/KnowledgeBaseList.vue"),
@@ -293,6 +299,12 @@ let liteDeepLinkRestoreDone = false
 // 路由守卫：检查认证状态和系统初始化状态
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
+
+  // 模型用量已从设置页迁出为独立看板页，深链重定向。
+  if (to.path === '/platform/settings' && to.query.section === 'modelUsage') {
+    next('/platform/model-usage')
+    return
+  }
 
   // OIDC 回跳登录结果依赖 App.vue 在挂载后消费 URL hash。
   // 如果这里先按“未登录”拦截到 /login，会导致回调结果没有机会落盘。

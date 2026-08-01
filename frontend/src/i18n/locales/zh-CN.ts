@@ -1795,6 +1795,71 @@ export default {
       urlInvalid: '请输入有效的 URL'
     }
   },
+  modelUsage: {
+    title: '模型统计',
+    description: '实时查看当前空间各类模型的调用次数、Token 消耗、错误和最近调用情况。',
+    loadFailed: '加载模型消耗失败',
+    empty: '当前时间范围内暂无模型调用记录',
+    autoRefresh: '自动刷新',
+    autoRefreshOn: '5 秒自动刷新',
+    autoRefreshOff: '已暂停自动刷新',
+    ranges: {
+      '15m': '15 分钟',
+      '1h': '1 小时',
+      '24h': '24 小时',
+      '7d': '7 天',
+    },
+    types: {
+      KnowledgeQA: '对话',
+      Embedding: 'Embedding',
+      Rerank: 'ReRank',
+      VLLM: '视觉',
+      ASR: '语音',
+    },
+    usageSource: {
+      provider: '供应商',
+      estimated: '估算',
+      missing: '未返回',
+      not_applicable: '不适用',
+    },
+    metrics: {
+      totalTokens: '总 Token',
+      cached: '缓存命中 {count}',
+      calls: '调用次数',
+      errors: '错误 {count}',
+      promptCompletion: '输入 / 输出',
+      promptCompletionHint: 'Prompt / Completion Token',
+      successRate: '成功率',
+    },
+    timeline: {
+      title: '消耗时间轴',
+      subtitle: '按当前时间范围聚合',
+    },
+    table: {
+      title: '模型排行',
+      subtitle: '按 Token 消耗排序',
+    },
+    recent: {
+      title: '最近调用',
+      subtitle: '仅展示调用元数据',
+      success: '成功',
+      failed: '失败',
+    },
+    columns: {
+      model: '模型',
+      type: '类型',
+      provider: '来源',
+      calls: '调用',
+      totalTokens: '总 Token',
+      breakdown: 'Token 结构',
+      promptShort: '输入',
+      completionShort: '输出',
+      cachedShort: '缓存',
+      errors: '错误',
+      successRate: '成功率',
+      lastUsed: '最近调用',
+    },
+  },
   ollamaSettings: {
     title: 'Ollama 配置',
     description: '管理本地 Ollama 服务，查看和下载模型',
@@ -4492,6 +4557,7 @@ export default {
   },
   settings: {
     modelManagement: '模型管理',
+    modelUsage: '模型统计',
     webSearchConfig: '网络搜索',
     autoCheckUpdate: '自动下载更新',
     autoCheckUpdateDesc: '开启后自动检查并在后台下载最新版本安装包。',
@@ -5697,6 +5763,7 @@ export default {
   menu: {
     knowledgeBase: '知识库',
     agents: '智能体',
+    modelUsage: '模型统计',
     organizations: '共享空间',
     newChat: '新对话',
     settings: '系统设置',

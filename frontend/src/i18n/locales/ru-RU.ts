@@ -1795,6 +1795,71 @@ export default {
       urlInvalid: 'Введите корректный URL'
     }
   },
+  modelUsage: {
+    title: 'Использование моделей',
+    description: 'Отслеживайте вызовы, использование токенов, ошибки и последнюю активность каждой модели в этом пространстве.',
+    loadFailed: 'Не удалось загрузить использование моделей',
+    empty: 'Нет вызовов моделей в выбранном диапазоне времени',
+    autoRefresh: 'Автообновление',
+    autoRefreshOn: 'Автообновление каждые 5 секунд',
+    autoRefreshOff: 'Автообновление приостановлено',
+    ranges: {
+      '15m': '15 мин',
+      '1h': '1 час',
+      '24h': '24 часа',
+      '7d': '7 дней',
+    },
+    types: {
+      KnowledgeQA: 'Чат',
+      Embedding: 'Embedding',
+      Rerank: 'ReRank',
+      VLLM: 'Зрение',
+      ASR: 'Речь',
+    },
+    usageSource: {
+      provider: 'Провайдер',
+      estimated: 'Оценка',
+      missing: 'Нет данных',
+      not_applicable: 'Н/Д',
+    },
+    metrics: {
+      totalTokens: 'Всего токенов',
+      cached: 'Из кэша {count}',
+      calls: 'Вызовы',
+      errors: 'Ошибки {count}',
+      promptCompletion: 'Ввод / Вывод',
+      promptCompletionHint: 'Токены Prompt / Completion',
+      successRate: 'Успешность',
+    },
+    timeline: {
+      title: 'Шкала использования',
+      subtitle: 'Агрегация по выбранному диапазону времени',
+    },
+    table: {
+      title: 'Рейтинг моделей',
+      subtitle: 'Сортировка по использованию токенов',
+    },
+    recent: {
+      title: 'Последние вызовы',
+      subtitle: 'Только метаданные',
+      success: 'Успех',
+      failed: 'Ошибка',
+    },
+    columns: {
+      model: 'Модель',
+      type: 'Тип',
+      provider: 'Источник',
+      calls: 'Вызовы',
+      totalTokens: 'Всего токенов',
+      breakdown: 'Структура токенов',
+      promptShort: 'Ввод',
+      completionShort: 'Вывод',
+      cachedShort: 'Кэш',
+      errors: 'Ошибки',
+      successRate: 'Успешность',
+      lastUsed: 'Последний вызов',
+    },
+  },
   ollamaSettings: {
     title: 'Настройки Ollama',
     description: 'Управление локальным сервисом Ollama и моделями',
@@ -4492,6 +4557,7 @@ export default {
   },
   settings: {
     modelManagement: 'Управление моделями',
+    modelUsage: 'Использование моделей',
     webSearchConfig: 'Сетевой поиск',
     autoCheckUpdate: 'Автоматическая загрузка обновлений',
     autoCheckUpdateDesc: 'При включении автоматически проверять и скачивать последнюю версию в фоновом режиме при запуске.',
@@ -5697,6 +5763,7 @@ export default {
   menu: {
     knowledgeBase: 'База знаний',
     agents: 'Агенты',
+    modelUsage: 'Использование моделей',
     organizations: 'Общие пространства',
     newChat: 'Новый диалог',
     settings: 'Настройки системы',
