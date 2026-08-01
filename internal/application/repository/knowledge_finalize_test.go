@@ -91,6 +91,13 @@ func reloadKnowledgeRow(t *testing.T, db *gorm.DB, id string) (status string, co
 	return status, count
 }
 
+func reloadKnowledgeErrorMessage(t *testing.T, db *gorm.DB, id string) string {
+	t.Helper()
+	var msg string
+	require.NoError(t, db.Raw(`SELECT COALESCE(error_message, '') FROM knowledges WHERE id = ?`, id).Scan(&msg).Error)
+	return msg
+}
+
 func insertKnowledgeWithStatus(t *testing.T, db *gorm.DB, status string, deleted bool) string {
 	t.Helper()
 	id := uuid.New().String()
@@ -204,6 +211,41 @@ func TestFinalizeSubtask_DecrementClampedAtZero(t *testing.T) {
 	status, count := reloadKnowledgeRow(t, db, id)
 	assert.Equal(t, types.ParseStatusCompleted, status)
 	assert.Equal(t, 0, count, "pending_subtasks_count must be clamped at zero")
+}
+
+// TestSetFinalizingAndFinalizeSubtask_ClearStaleErrorMessage is the
+// regression test for stale error_message: a row that failed once keeps
+// error_message set, and both entering finalizing (a new attempt) and
+// promoting to completed (a successful finish) must clear it so the UI
+// no longer shows an outdated failure.
+func TestSetFinalizingAndFinalizeSubtask_ClearStaleErrorMessage(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+
+	id := insertProcessingKnowledge(t, db)
+	require.NoError(t, db.Exec(
+		`UPDATE knowledges SET error_message = ? WHERE id = ?`,
+		"Task interrupted due to application restart",
+		id,
+	).Error)
+
+	transitioned, err := repo.SetFinalizing(ctx, id, 1)
+	require.NoError(t, err)
+	require.True(t, transitioned)
+	assert.Empty(t, reloadKnowledgeErrorMessage(t, db, id),
+		"SetFinalizing must clear error_message from the previous attempt")
+
+	require.NoError(t, db.Exec(
+		`UPDATE knowledges SET error_message = ? WHERE id = ?`,
+		"stale finalizing failure",
+		id,
+	).Error)
+	_, promoted, err := repo.FinalizeSubtask(ctx, id)
+	require.NoError(t, err)
+	require.True(t, promoted)
+	assert.Empty(t, reloadKnowledgeErrorMessage(t, db, id),
+		"promotion to completed must clear error_message")
 }
 
 // TestUpdateKnowledge_DoesNotClobberPendingCounter is the regression test
