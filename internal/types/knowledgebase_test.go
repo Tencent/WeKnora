@@ -315,3 +315,103 @@ func TestEffectiveStorageProvider_CrossBackendDetection(t *testing.T) {
 			dstSame.EffectiveStorageProvider(tenantDefault), sp)
 	}
 }
+
+func TestVLMConfig_ModelChainIDs(t *testing.T) {
+	cfg := VLMConfig{
+		Enabled:          true,
+		ModelID:          "vlm-primary",
+		FallbackModelIDs: []string{"vlm-fallback-1", "vlm-fallback-2"},
+	}
+	want := []string{"vlm-primary", "vlm-fallback-1", "vlm-fallback-2"}
+	got := cfg.ModelChainIDs()
+	if len(got) != len(want) {
+		t.Fatalf("chain length = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("chain[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	if got := (VLMConfig{}).ModelChainIDs(); got != nil {
+		t.Fatalf("empty config chain = %v, want nil", got)
+	}
+}
+
+func TestVLMConfig_NormalizeModelChainDedupesAndCaps(t *testing.T) {
+	cfg := VLMConfig{
+		Enabled: true,
+		ModelID: " primary ",
+		FallbackModelIDs: []string{
+			" fallback-1 ",
+			"primary",
+			"",
+			"fallback-2",
+			"fallback-1",
+			"fallback-3",
+			"fallback-4",
+			"fallback-5",
+		},
+	}
+	cfg.NormalizeModelChain()
+	want := []string{"primary", "fallback-1", "fallback-2", "fallback-3", "fallback-4"}
+	got := cfg.ModelChainIDs()
+	if len(got) != len(want) {
+		t.Fatalf("chain length = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("chain[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	if cfg.ModelID != "primary" {
+		t.Fatalf("model_id = %q, want primary", cfg.ModelID)
+	}
+}
+
+func TestVLMConfig_ClearModelChainKeepsLegacyInline(t *testing.T) {
+	cfg := VLMConfig{
+		Enabled:          true,
+		ModelID:          "vlm-primary",
+		FallbackModelIDs: []string{"vlm-fallback"},
+		ModelName:        "legacy-model",
+		BaseURL:          "http://localhost:8000",
+	}
+	cfg.ClearModelChain()
+	if cfg.ModelID != "" || cfg.FallbackModelIDs != nil {
+		t.Fatalf("expected cleared chain, got model_id=%q fallback_model_ids=%v", cfg.ModelID, cfg.FallbackModelIDs)
+	}
+	if cfg.ModelName != "legacy-model" || cfg.BaseURL != "http://localhost:8000" {
+		t.Fatalf("legacy inline fields must survive ClearModelChain: %+v", cfg)
+	}
+}
+
+func TestVLMConfig_ValueNormalizesChain(t *testing.T) {
+	cfg := VLMConfig{
+		Enabled:          true,
+		ModelID:          " vlm-primary ",
+		FallbackModelIDs: []string{"vlm-primary", " vlm-fallback "},
+	}
+	v, err := cfg.Value()
+	if err != nil {
+		t.Fatalf("Value returned error: %v", err)
+	}
+	b, ok := v.([]byte)
+	if !ok {
+		t.Fatalf("Value returned %T, want []byte", v)
+	}
+	var roundTripped VLMConfig
+	if err := roundTripped.Scan(b); err != nil {
+		t.Fatalf("Scan returned error: %v", err)
+	}
+	want := []string{"vlm-primary", "vlm-fallback"}
+	got := roundTripped.ModelChainIDs()
+	if len(got) != len(want) {
+		t.Fatalf("chain length = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("chain[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}

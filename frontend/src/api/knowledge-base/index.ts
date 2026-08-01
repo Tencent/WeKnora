@@ -98,6 +98,7 @@ export function createKnowledgeBase(data: {
   vlm_config?: {
     enabled: boolean;
     model_id?: string;
+    fallback_model_ids?: string[];
     description_language?: string;
     custom_instructions?: string;
   };

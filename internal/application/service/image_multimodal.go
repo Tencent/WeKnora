@@ -90,6 +90,35 @@ type ImageMultimodalService struct {
 	spanTracker SpanTracker
 }
 
+// resolvedImageVLM is the ordered VLM candidate chain resolved from the KB's
+// VLMConfig. Candidates are tried in order until one returns usable text.
+type resolvedImageVLM struct {
+	candidates        []imageVLMCandidate
+	requestedModelIDs []string
+	resolveErrors     []string
+}
+
+type imageVLMCandidate struct {
+	model   vlm.VLM
+	modelID string
+}
+
+// vlmPredictionAttempt records one candidate's outcome for the span output.
+type vlmPredictionAttempt struct {
+	ModelID   string `json:"model_id"`
+	ModelName string `json:"model_name,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+// vlmPredictionTrace summarizes a predictWithVLMChain run: which model
+// produced the text and how earlier candidates failed.
+type vlmPredictionTrace struct {
+	UsedModelID    string
+	UsedModelName  string
+	Attempts       []vlmPredictionAttempt
+	AllFailedError string
+}
+
 func NewImageMultimodalService(
 	chunkService interfaces.ChunkService,
 	modelService interfaces.ModelService,
@@ -224,7 +253,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}()
 
-	vlmModel, vlmCfg, err := s.resolveVLM(ctx, payload.KnowledgeBaseID, payload.KnowledgeID)
+	imageVLM, vlmCfg, err := s.resolveVLM(ctx, payload.KnowledgeBaseID, payload.KnowledgeID)
 	if err != nil {
 		handleErr = fmt.Errorf("resolve VLM: %w", err)
 		return handleErr
@@ -237,6 +266,12 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		imgOut["vlm_model_id"] = id
 	} else {
 		imgOut["vlm_model_id"] = "legacy_inline"
+	}
+	if ids := imageVLM.requestedModelIDs; len(ids) > 1 {
+		imgOut["vlm_model_chain_ids"] = ids
+	}
+	if len(imageVLM.resolveErrors) > 0 {
+		imgOut["vlm_resolve_errors"] = imageVLM.resolveErrors
 	}
 
 	// Read image bytes. A provider:// URL must be resolved via FileService —
@@ -268,7 +303,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 		prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+		ocrText, ocrTrace, ocrErr := predictWithVLMChain(ctx, imageVLM, [][]byte{imgBytes}, prompt)
+		recordVLMTrace(imgOut, "ocr", ocrTrace)
 		if ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
 			imgOut["ocr_error"] = ocrErr.Error()
@@ -286,7 +322,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
+	caption, capTrace, capErr := predictWithVLMChain(ctx, imageVLM, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
+	recordVLMTrace(imgOut, "caption", capTrace)
 	if capErr != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
 		imgOut["caption_error"] = capErr.Error()
@@ -511,10 +548,14 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 	logger.Infof(ctx, "[ImageMultimodal] Indexed %d multimodal chunks for image %s", len(chunks), payload.ImageURL)
 }
 
-// resolveVLM creates a vlm.VLM instance for the given knowledge base,
-// supporting both new-style (ModelID) and legacy (inline BaseURL) configs.
-// Per-upload process_overrides on the knowledge entry take precedence over KB defaults.
-func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledgeID string) (vlm.VLM, types.VLMConfig, error) {
+// resolveVLM builds the ordered VLM candidate chain for the given knowledge
+// base, supporting both new-style (ModelID) and legacy (inline BaseURL)
+// configs. Per-upload process_overrides on the knowledge entry take precedence
+// over KB defaults. A candidate that fails to resolve is skipped with a
+// recorded error; only when no candidate resolves at all is an error returned.
+func (s *ImageMultimodalService) resolveVLM(
+	ctx context.Context, kbID, knowledgeID string,
+) (*resolvedImageVLM, types.VLMConfig, error) {
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, kbID)
 	if err != nil {
 		return nil, types.VLMConfig{}, fmt.Errorf("get knowledge base %s: %w", kbID, err)
@@ -534,15 +575,119 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledge
 		return nil, types.VLMConfig{}, fmt.Errorf("VLM is not enabled for knowledge base %s", kbID)
 	}
 
-	// New-style: resolve model through ModelService
+	// New-style: resolve the configured model chain through ModelService
 	if vlmCfg.ModelID != "" {
-		model, err := s.modelService.GetVLMModel(ctx, vlmCfg.ModelID)
-		return model, vlmCfg, err
+		chainIDs := vlmCfg.ModelChainIDs()
+		resolved := &resolvedImageVLM{requestedModelIDs: chainIDs}
+		for _, modelID := range chainIDs {
+			model, merr := s.modelService.GetVLMModel(ctx, modelID)
+			if merr != nil {
+				msg := fmt.Sprintf("VLM model %s unavailable: %v", modelID, merr)
+				logger.Warnf(ctx, "[ImageMultimodal] %s", msg)
+				resolved.resolveErrors = append(resolved.resolveErrors, msg)
+				continue
+			}
+			if model == nil {
+				msg := fmt.Sprintf("VLM model %s resolved to nil", modelID)
+				logger.Warnf(ctx, "[ImageMultimodal] %s", msg)
+				resolved.resolveErrors = append(resolved.resolveErrors, msg)
+				continue
+			}
+			resolved.candidates = append(resolved.candidates, imageVLMCandidate{
+				model:   model,
+				modelID: modelID,
+			})
+		}
+		if len(resolved.candidates) == 0 {
+			if len(resolved.resolveErrors) > 0 {
+				return nil, vlmCfg, fmt.Errorf("no VLM models resolved from chain %v: %s",
+					chainIDs, strings.Join(resolved.resolveErrors, "; "))
+			}
+			return nil, vlmCfg, fmt.Errorf("no VLM models configured for knowledge base %s", kbID)
+		}
+		return resolved, vlmCfg, nil
 	}
 
 	// Legacy: create VLM from inline config
 	model, err := vlm.NewVLMFromLegacyConfig(vlmCfg, s.ollamaService)
-	return model, vlmCfg, err
+	if err != nil {
+		return nil, vlmCfg, err
+	}
+	return &resolvedImageVLM{
+		requestedModelIDs: []string{"legacy_inline"},
+		candidates: []imageVLMCandidate{{
+			model:   model,
+			modelID: "legacy_inline",
+		}},
+	}, vlmCfg, nil
+}
+
+// predictWithVLMChain tries each candidate in order and returns the first
+// usable text. An error or an empty/whitespace response counts as a failure
+// and moves on to the next candidate; only when every candidate fails is an
+// aggregated error returned.
+func predictWithVLMChain(
+	ctx context.Context,
+	imageVLM *resolvedImageVLM,
+	imgBytesList [][]byte,
+	prompt string,
+) (string, vlmPredictionTrace, error) {
+	trace := vlmPredictionTrace{}
+	if imageVLM == nil || len(imageVLM.candidates) == 0 {
+		return "", trace, fmt.Errorf("VLM model chain is not resolved")
+	}
+
+	failures := make([]string, 0, len(imageVLM.candidates))
+	for _, candidate := range imageVLM.candidates {
+		modelID := strings.TrimSpace(candidate.modelID)
+		if modelID == "" {
+			modelID = strings.TrimSpace(candidate.model.GetModelID())
+		}
+		attempt := vlmPredictionAttempt{
+			ModelID:   modelID,
+			ModelName: strings.TrimSpace(candidate.model.GetModelName()),
+		}
+
+		text, err := candidate.model.Predict(ctx, imgBytesList, prompt)
+		switch {
+		case err != nil:
+			attempt.Error = err.Error()
+		case strings.TrimSpace(text) == "":
+			attempt.Error = "empty VLM response"
+		default:
+			trace.Attempts = append(trace.Attempts, attempt)
+			trace.UsedModelID = modelID
+			trace.UsedModelName = attempt.ModelName
+			return text, trace, nil
+		}
+
+		trace.Attempts = append(trace.Attempts, attempt)
+		failures = append(failures, fmt.Sprintf("%s: %s", modelID, attempt.Error))
+	}
+
+	trace.AllFailedError = strings.Join(failures, "; ")
+	return "", trace, fmt.Errorf("all VLM models failed: %s", trace.AllFailedError)
+}
+
+// recordVLMTrace surfaces the chain outcome into the image span output so the
+// trace viewer can see which model actually answered and why earlier
+// candidates were skipped.
+func recordVLMTrace(out types.JSONMap, prefix string, trace vlmPredictionTrace) {
+	if trace.UsedModelID != "" {
+		out["vlm_used_model_id"] = trace.UsedModelID
+		out[prefix+"_vlm_used_model_id"] = trace.UsedModelID
+	}
+	if trace.UsedModelName != "" {
+		out[prefix+"_vlm_used_model_name"] = trace.UsedModelName
+	}
+	// A single successful attempt carries no fallback signal; only record the
+	// attempt list when the chain was actually exercised.
+	if len(trace.Attempts) > 1 {
+		out[prefix+"_vlm_attempts"] = trace.Attempts
+	}
+	if trace.AllFailedError != "" {
+		out[prefix+"_vlm_all_failed_error"] = previewText(trace.AllFailedError, 600)
+	}
 }
 
 // resolveFileServiceForPayload resolves tenant/KB scoped file service for reading provider:// URLs.
