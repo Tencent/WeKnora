@@ -295,21 +295,14 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		return fmt.Errorf("wiki ingest: KB %s is not wiki type", kb.ID)
 	}
 
-	var synthesisModelID string
-	if kb.WikiConfig != nil {
-		synthesisModelID = kb.WikiConfig.SynthesisModelID
-	}
-	if synthesisModelID == "" {
-		synthesisModelID = kb.SummaryModelID
-	}
-	if synthesisModelID == "" {
-		exitStatus = "missing_synthesis_model"
-		return fmt.Errorf("wiki ingest: no synthesis model configured for KB %s", kb.ID)
-	}
-	chatModel, err := s.modelService.GetChatModel(ctx, synthesisModelID)
+	chatModel, err := s.resolveWikiSynthesisModelChain(ctx, kb)
 	if err != nil {
-		exitStatus = "get_chat_model_failed"
-		return fmt.Errorf("wiki ingest: get chat model: %w", err)
+		exitStatus = "get_synthesis_model_chain_failed"
+		return fmt.Errorf("wiki ingest: get synthesis model chain: %w", err)
+	}
+	if len(chatModel.resolveErrors) > 0 {
+		logger.Warnf(ctx, "wiki ingest: synthesis model chain resolved with skipped models: %s",
+			strings.Join(chatModel.resolveErrors, "; "))
 	}
 
 	// Resolve per-KB tunables once. WikiConfig.IngestBatchSize /
@@ -413,6 +406,8 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 
 	batchCtx := s.newWikiBatchContext(payload.KnowledgeBaseID, wikiConfig)
+	batchCtx.SynthesisModelChainIDs = chatModel.modelChainTraceIDs()
+	batchCtx.SynthesisModelResolveErrors = chatModel.resolveErrorTrace()
 
 	// 1. MAP PHASE (Parallel extraction and generation of updates)
 	var mapMu sync.Mutex
@@ -1043,27 +1038,18 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 		return nil
 	}
 
-	synthesisModelID := ""
-	if kb.WikiConfig != nil {
-		synthesisModelID = kb.WikiConfig.SynthesisModelID
-	}
-	if synthesisModelID == "" {
-		synthesisModelID = kb.SummaryModelID
-	}
-	if synthesisModelID == "" {
-		// No model to rebuild the index with; still run the pure-text passes,
-		// then drain. Missing model is a config gap, not a transient error.
-		logger.Warnf(ctx, "wiki finalize: no synthesis model for KB %s, skipping index rebuild", payload.KnowledgeBaseID)
-	}
-
 	batchCtx := s.newWikiBatchContext(payload.KnowledgeBaseID, kb.WikiConfig)
 	lang := types.LanguageNameFromContext(ctx)
 
 	indexRebuilt := false
-	if changeDesc.Len() > 0 && synthesisModelID != "" {
-		chatModel, mErr := s.modelService.GetChatModel(ctx, synthesisModelID)
+	if changeDesc.Len() > 0 {
+		chatModel, mErr := s.resolveWikiSynthesisModelChain(ctx, kb)
 		if mErr != nil {
-			logger.Warnf(ctx, "wiki finalize: get chat model failed: %v", mErr)
+			// No usable model to rebuild the index with; still run the
+			// pure-text passes, then drain. A missing model is a config gap,
+			// not a transient error.
+			logger.Warnf(ctx, "wiki finalize: no synthesis model for KB %s, skipping index rebuild: %v",
+				payload.KnowledgeBaseID, mErr)
 		} else if err := s.rebuildIndexPage(ctx, chatModel, payload, changeDesc.String(), lang,
 			batchCtx.ContentInstructions); err != nil {
 			logger.Warnf(ctx, "wiki finalize: rebuild index failed: %v", err)
@@ -1165,8 +1151,10 @@ func (s *wikiIngestService) mapOneDocument(
 	// nil when the parent attempt is gone (no panic on missing
 	// lookups — span tracker is best-effort).
 	wikiSpan := s.beginWikiSubspan(ctx, knowledgeID, types.JSONMap{
-		"language":          lang,
-		"knowledge_base_id": payload.KnowledgeBaseID,
+		"language":                       lang,
+		"knowledge_base_id":              payload.KnowledgeBaseID,
+		"synthesis_model_chain_ids":      batchCtx.SynthesisModelChainIDs,
+		"synthesis_model_resolve_errors": batchCtx.SynthesisModelResolveErrors,
 	})
 
 	// Guard against the ingest/delete race: if the user deleted the doc while

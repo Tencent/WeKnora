@@ -1272,6 +1272,14 @@ type WikiBatchContext struct {
 	// three valid values.
 	ExtractionGranularity types.WikiExtractionGranularity
 
+	// SynthesisModelChainIDs records the ordered model chain used by this
+	// batch so per-document trace spans show which fallback set was active.
+	SynthesisModelChainIDs []string
+
+	// SynthesisModelResolveErrors records model IDs that were configured but
+	// could not be instantiated at batch start.
+	SynthesisModelResolveErrors []string
+
 	// ContentInstructions and ExtractionInstructions are KB-scoped business
 	// guidance. Stable citation, merge, taxonomy and JSON rules remain in the
 	// system templates and cannot be replaced by these fields.
@@ -2414,17 +2422,169 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	return entities, concepts
 }
 
+// wikiSynthesisModelCandidate is one resolved entry of the Wiki synthesis
+// model chain: an instantiated chat model plus the configured model ID it was
+// built from (kept separately because chat implementations may report an
+// empty or provider-level ID).
+type wikiSynthesisModelCandidate struct {
+	model   chat.Chat
+	modelID string
+}
+
+// wikiSynthesisModelChain wraps the ordered Wiki synthesis models (primary +
+// configured fallbacks) behind the chat.Chat interface so every existing
+// call site keeps a single-model shape. Resolution order is fixed at batch
+// start; generateWithTemplate walks the candidates in order and advances to
+// the next one whenever a model call fails (rate limit, timeout, 5xx, or
+// model-specific hard errors), only surfacing an error once the whole chain
+// is exhausted.
+type wikiSynthesisModelChain struct {
+	candidates        []wikiSynthesisModelCandidate
+	requestedModelIDs []string
+	resolveErrors     []string
+}
+
+func (c *wikiSynthesisModelChain) Chat(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
+	if c == nil || len(c.candidates) == 0 {
+		return nil, fmt.Errorf("wiki synthesis model chain is empty")
+	}
+	return c.candidates[0].model.Chat(ctx, messages, opts)
+}
+
+func (c *wikiSynthesisModelChain) ChatStream(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (<-chan types.StreamResponse, error) {
+	if c == nil || len(c.candidates) == 0 {
+		return nil, fmt.Errorf("wiki synthesis model chain is empty")
+	}
+	return c.candidates[0].model.ChatStream(ctx, messages, opts)
+}
+
+func (c *wikiSynthesisModelChain) GetModelName() string {
+	if c == nil || len(c.candidates) == 0 || c.candidates[0].model == nil {
+		return ""
+	}
+	return c.candidates[0].model.GetModelName()
+}
+
+func (c *wikiSynthesisModelChain) GetModelID() string {
+	if c == nil || len(c.candidates) == 0 {
+		return ""
+	}
+	if c.candidates[0].modelID != "" {
+		return c.candidates[0].modelID
+	}
+	if c.candidates[0].model == nil {
+		return ""
+	}
+	return c.candidates[0].model.GetModelID()
+}
+
+// modelChainTraceIDs returns the configured chain in requested order,
+// including models that failed to resolve, for trace/span attribution.
+func (c *wikiSynthesisModelChain) modelChainTraceIDs() []string {
+	if c == nil {
+		return nil
+	}
+	if len(c.requestedModelIDs) > 0 {
+		return append([]string(nil), c.requestedModelIDs...)
+	}
+	ids := make([]string, 0, len(c.candidates))
+	for _, candidate := range c.candidates {
+		if candidate.modelID != "" {
+			ids = append(ids, candidate.modelID)
+		}
+	}
+	return ids
+}
+
+// resolveErrorTrace returns one "modelID: error" entry per configured model
+// that could not be instantiated at batch start.
+func (c *wikiSynthesisModelChain) resolveErrorTrace() []string {
+	if c == nil || len(c.resolveErrors) == 0 {
+		return nil
+	}
+	return append([]string(nil), c.resolveErrors...)
+}
+
+// singleWikiSynthesisModelChain adapts a plain chat.Chat (e.g. a model built
+// outside the batch chain resolution) into the chain shape so
+// generateWithTemplate only has one code path.
+func singleWikiSynthesisModelChain(model chat.Chat) *wikiSynthesisModelChain {
+	if model == nil {
+		return &wikiSynthesisModelChain{}
+	}
+	modelID := strings.TrimSpace(model.GetModelID())
+	return &wikiSynthesisModelChain{
+		candidates: []wikiSynthesisModelCandidate{{
+			model:   model,
+			modelID: modelID,
+		}},
+		requestedModelIDs: []string{modelID},
+	}
+}
+
+// resolveWikiSynthesisModelChain builds the ordered synthesis model chain for
+// a Wiki KB. The primary is WikiConfig.SynthesisModelID (falling back to the
+// KB summary model, matching the legacy single-model behavior), followed by
+// the configured fallbacks. Models that fail to instantiate are skipped and
+// recorded in resolveErrors; an error is returned only when nothing usable
+// remains.
+func (s *wikiIngestService) resolveWikiSynthesisModelChain(ctx context.Context, kb *types.KnowledgeBase) (*wikiSynthesisModelChain, error) {
+	if kb == nil {
+		return nil, fmt.Errorf("knowledge base is nil")
+	}
+
+	var chainIDs []string
+	if kb.WikiConfig != nil {
+		chainIDs = kb.WikiConfig.SynthesisModelChainIDs(kb.SummaryModelID)
+	} else {
+		chainIDs = (types.WikiConfig{}).SynthesisModelChainIDs(kb.SummaryModelID)
+	}
+	if len(chainIDs) == 0 {
+		return nil, fmt.Errorf("no synthesis model configured for KB %s", kb.ID)
+	}
+
+	chain := &wikiSynthesisModelChain{
+		requestedModelIDs: append([]string(nil), chainIDs...),
+		candidates:        make([]wikiSynthesisModelCandidate, 0, len(chainIDs)),
+	}
+	for _, modelID := range chainIDs {
+		chatModel, err := s.modelService.GetChatModel(ctx, modelID)
+		if err != nil {
+			chain.resolveErrors = append(chain.resolveErrors, fmt.Sprintf("%s: %v", modelID, err))
+			logger.Warnf(ctx, "wiki ingest: get synthesis model %s failed, trying next configured model: %v", modelID, err)
+			continue
+		}
+		chain.candidates = append(chain.candidates, wikiSynthesisModelCandidate{
+			model:   chatModel,
+			modelID: modelID,
+		})
+	}
+	if len(chain.candidates) == 0 {
+		if len(chain.resolveErrors) > 0 {
+			return nil, fmt.Errorf("get wiki synthesis models failed: %s", strings.Join(chain.resolveErrors, "; "))
+		}
+		return nil, fmt.Errorf("no usable synthesis model configured for KB %s", kb.ID)
+	}
+	return chain, nil
+}
+
 // generateWithTemplate executes a prompt template and calls the LLM with
 // bounded exponential-backoff retries for transient infrastructure errors.
 //
-// Retry policy:
+// Retry policy (per model):
 //   - Up to wikiLLMMaxAttempts total attempts (initial + retries).
 //   - Only retry errors classified as transient by isTransientLLMError:
 //     HTTP 408/429/5xx, context deadline exceeded (when the parent ctx is
 //     still alive), or generic "timeout"/"connection reset" wording.
-//     4xx (except 408/429) is a caller-side fault and fails fast.
 //   - Backoff is exponential base 2s: 2s, 4s, 8s — roughly wikiLLMBackoffBase
 //   - 2^(attempt-1). Honors ctx cancellation so the task can abort.
+//
+// Fallback policy: when chatModel is a *wikiSynthesisModelChain (the normal
+// batch path), a model that exhausts its attempts — or fails fast on a
+// non-transient, model-specific error such as 4xx — advances to the next
+// configured fallback model, which gets its own full attempt budget. An
+// error is surfaced only once every model in the chain has failed. Context
+// cancellation always aborts immediately instead of falling through.
 //
 // This exists because wiki ingest makes several independent LLM calls per
 // document (extraction, summary, dedup, citations, intro) and a single
@@ -2499,36 +2659,80 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 		}
 		defer releaseWarmup()
 
+		modelChain, ok := chatModel.(*wikiSynthesisModelChain)
+		if !ok {
+			modelChain = singleWikiSynthesisModelChain(chatModel)
+		}
+		if modelChain == nil || len(modelChain.candidates) == 0 {
+			return "", fmt.Errorf("wiki synthesis model chain is empty")
+		}
+
 		var lastErr error
-		for attempt := 1; attempt <= wikiLLMMaxAttempts; attempt++ {
-			response, callErr := chatModel.Chat(ctx, messages, opts)
-			if callErr == nil && response != nil {
-				return response.Content, nil
+		var primaryErr error
+		for modelIdx, candidate := range modelChain.candidates {
+			if candidate.model == nil {
+				continue
 			}
-			if callErr == nil {
-				callErr = errors.New("LLM returned nil response")
+			modelID := candidate.modelID
+			if modelID == "" {
+				modelID = candidate.model.GetModelID()
 			}
-			lastErr = callErr
+			var modelErr error
+			for attempt := 1; attempt <= wikiLLMMaxAttempts; attempt++ {
+				response, callErr := candidate.model.Chat(ctx, messages, opts)
+				if callErr == nil && response != nil {
+					if modelIdx > 0 {
+						logger.Infof(ctx, "wiki ingest: LLM call succeeded with fallback model %s", modelID)
+					}
+					return response.Content, nil
+				}
+				if callErr == nil {
+					callErr = errors.New("LLM returned nil response")
+				}
+				modelErr = callErr
+				lastErr = callErr
+				if modelIdx == 0 && primaryErr == nil {
+					primaryErr = callErr
+				}
 
-			if !isTransientLLMError(ctx, callErr) {
-				return "", fmt.Errorf("LLM call failed: %w", callErr)
-			}
-			if attempt == wikiLLMMaxAttempts {
-				break
-			}
+				// Abort immediately on context cancellation. Other
+				// non-transient model-call failures still advance to the
+				// next configured model below.
+				if ctx.Err() != nil {
+					return "", fmt.Errorf("LLM call failed: %w", callErr)
+				}
+				if !isTransientLLMError(ctx, callErr) {
+					break
+				}
+				if attempt == wikiLLMMaxAttempts {
+					break
+				}
 
-			backoff := wikiLLMBackoffBase << (attempt - 1)
-			logger.Warnf(ctx, "wiki ingest: LLM call failed (attempt %d/%d), retrying in %s: %v",
-				attempt, wikiLLMMaxAttempts, backoff, callErr)
-			timer := time.NewTimer(backoff)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return "", fmt.Errorf("LLM call aborted during backoff: %w", ctx.Err())
-			case <-timer.C:
+				backoff := wikiLLMBackoffBase << (attempt - 1)
+				logger.Warnf(ctx, "wiki ingest: LLM call failed on model %s (attempt %d/%d), retrying in %s: %v",
+					modelID, attempt, wikiLLMMaxAttempts, backoff, callErr)
+				timer := time.NewTimer(backoff)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return "", fmt.Errorf("LLM call aborted during backoff: %w", ctx.Err())
+				case <-timer.C:
+				}
+			}
+			if modelIdx < len(modelChain.candidates)-1 {
+				nextID := modelChain.candidates[modelIdx+1].modelID
+				if nextID == "" && modelChain.candidates[modelIdx+1].model != nil {
+					nextID = modelChain.candidates[modelIdx+1].model.GetModelID()
+				}
+				logger.Warnf(ctx, "wiki ingest: LLM model %s failed after retries, trying fallback model %s: %v",
+					modelID, nextID, modelErr)
 			}
 		}
-		return "", fmt.Errorf("LLM call failed after %d attempts: %w", wikiLLMMaxAttempts, lastErr)
+		if primaryErr != nil && lastErr != nil && primaryErr.Error() != lastErr.Error() {
+			return "", fmt.Errorf("LLM call failed across %d models (primary: %v; last: %w)",
+				len(modelChain.candidates), primaryErr, lastErr)
+		}
+		return "", fmt.Errorf("LLM call failed across %d models: %w", len(modelChain.candidates), lastErr)
 	}
 
 	// Missing tenant context is unexpected for production Wiki work. Fail safe

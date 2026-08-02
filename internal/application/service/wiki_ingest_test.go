@@ -341,6 +341,9 @@ type templateCaptureChatModel struct {
 	options  chat.ChatOptions
 	purpose  string
 	prefix   string
+	err      error
+	modelID  string
+	calls    int
 }
 
 func (m *templateCaptureChatModel) Chat(
@@ -348,6 +351,7 @@ func (m *templateCaptureChatModel) Chat(
 	messages []chat.Message,
 	opts *chat.ChatOptions,
 ) (*types.ChatResponse, error) {
+	m.calls++
 	if len(messages) > 0 {
 		m.prompt = messages[0].Content
 	}
@@ -356,6 +360,9 @@ func (m *templateCaptureChatModel) Chat(
 		m.options = *opts
 	}
 	m.purpose, m.prefix = types.LLMCallMetadataFromContext(ctx)
+	if m.err != nil {
+		return nil, m.err
+	}
 	return &types.ChatResponse{Content: m.response}, nil
 }
 
@@ -368,7 +375,157 @@ func (m *templateCaptureChatModel) ChatStream(
 }
 
 func (m *templateCaptureChatModel) GetModelName() string { return "capture" }
-func (m *templateCaptureChatModel) GetModelID() string   { return "capture" }
+func (m *templateCaptureChatModel) GetModelID() string {
+	if m.modelID != "" {
+		return m.modelID
+	}
+	return "capture"
+}
+
+func TestGenerateWithTemplateFallsBackToNextSynthesisModel(t *testing.T) {
+	primary := &templateCaptureChatModel{
+		modelID: "primary",
+		err:     errors.New("API request failed with status 403: model unavailable for tenant"),
+	}
+	fallback := &templateCaptureChatModel{
+		modelID:  "fallback",
+		response: "fallback result",
+	}
+	service := &wikiIngestService{}
+
+	got, err := service.generateWithTemplate(
+		context.Background(),
+		&wikiSynthesisModelChain{
+			requestedModelIDs: []string{"primary", "fallback"},
+			candidates: []wikiSynthesisModelCandidate{
+				{model: primary, modelID: "primary"},
+				{model: fallback, modelID: "fallback"},
+			},
+		},
+		`Content={{.Content}}`,
+		map[string]string{"Content": "hello"},
+	)
+	if err != nil {
+		t.Fatalf("generateWithTemplate() error = %v", err)
+	}
+	if got != "fallback result" {
+		t.Fatalf("got %q, want fallback result", got)
+	}
+	if primary.calls != 1 {
+		t.Fatalf("primary calls = %d, want 1 (non-transient errors fail fast)", primary.calls)
+	}
+	if fallback.calls != 1 {
+		t.Fatalf("fallback calls = %d, want 1", fallback.calls)
+	}
+}
+
+func TestGenerateWithTemplatePrimarySuccessDoesNotFallBack(t *testing.T) {
+	primary := &templateCaptureChatModel{
+		modelID:  "primary",
+		response: "primary result",
+	}
+	fallback := &templateCaptureChatModel{
+		modelID:  "fallback",
+		response: "fallback result",
+	}
+	service := &wikiIngestService{}
+
+	got, err := service.generateWithTemplate(
+		context.Background(),
+		&wikiSynthesisModelChain{
+			requestedModelIDs: []string{"primary", "fallback"},
+			candidates: []wikiSynthesisModelCandidate{
+				{model: primary, modelID: "primary"},
+				{model: fallback, modelID: "fallback"},
+			},
+		},
+		`Content={{.Content}}`,
+		map[string]string{"Content": "hello"},
+	)
+	if err != nil {
+		t.Fatalf("generateWithTemplate() error = %v", err)
+	}
+	if got != "primary result" {
+		t.Fatalf("got %q, want primary result", got)
+	}
+	if fallback.calls != 0 {
+		t.Fatalf("fallback calls = %d, want 0", fallback.calls)
+	}
+}
+
+func TestGenerateWithTemplateAllSynthesisModelsFailAggregatesError(t *testing.T) {
+	primary := &templateCaptureChatModel{
+		modelID: "primary",
+		err:     errors.New("API request failed with status 403: primary denied"),
+	}
+	fallback := &templateCaptureChatModel{
+		modelID: "fallback",
+		err:     errors.New("API request failed with status 400: fallback invalid"),
+	}
+	service := &wikiIngestService{}
+
+	_, err := service.generateWithTemplate(
+		context.Background(),
+		&wikiSynthesisModelChain{
+			requestedModelIDs: []string{"primary", "fallback"},
+			candidates: []wikiSynthesisModelCandidate{
+				{model: primary, modelID: "primary"},
+				{model: fallback, modelID: "fallback"},
+			},
+		},
+		`Content={{.Content}}`,
+		map[string]string{"Content": "hello"},
+	)
+	if err == nil {
+		t.Fatal("generateWithTemplate() error = nil, want aggregated failure")
+	}
+	if !strings.Contains(err.Error(), "across 2 models") {
+		t.Fatalf("error should mention chain size, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "primary denied") || !strings.Contains(err.Error(), "fallback invalid") {
+		t.Fatalf("error should aggregate primary and last model errors, got: %v", err)
+	}
+	if primary.calls != 1 || fallback.calls != 1 {
+		t.Fatalf("calls = (%d, %d), want (1, 1)", primary.calls, fallback.calls)
+	}
+}
+
+func TestGenerateWithTemplateEmptySynthesisModelChainFails(t *testing.T) {
+	service := &wikiIngestService{}
+	_, err := service.generateWithTemplate(
+		context.Background(),
+		&wikiSynthesisModelChain{},
+		`Content={{.Content}}`,
+		map[string]string{"Content": "hello"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "wiki synthesis model chain is empty") {
+		t.Fatalf("generateWithTemplate() error = %v, want empty chain error", err)
+	}
+}
+
+func TestGenerateWithTemplateSingleModelStillFailsFast(t *testing.T) {
+	model := &templateCaptureChatModel{
+		modelID: "single",
+		err:     errors.New("API request failed with status 400: invalid request"),
+	}
+	service := &wikiIngestService{}
+
+	_, err := service.generateWithTemplate(
+		context.Background(),
+		model,
+		`Content={{.Content}}`,
+		map[string]string{"Content": "hello"},
+	)
+	if err == nil {
+		t.Fatal("generateWithTemplate() error = nil, want failure")
+	}
+	if !strings.Contains(err.Error(), "invalid request") {
+		t.Fatalf("error should wrap the model error, got: %v", err)
+	}
+	if model.calls != 1 {
+		t.Fatalf("single model calls = %d, want 1 (no fallback configured)", model.calls)
+	}
+}
 
 func TestGenerateWikiPageModifyUsesCacheableMessageLayout(t *testing.T) {
 	model := &templateCaptureChatModel{response: "SUMMARY: page\n# Alpha"}
