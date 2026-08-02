@@ -32,6 +32,7 @@
 | `knowledge_ids` | string[] | 否 | 知识文件 ID 列表，指定具体文件进行检索 |
 | `agent_id` | string | 否 | 自定义 Agent ID，指定使用的智能体 |
 | `summary_model_id` | string | 否 | 覆盖默认的摘要模型 ID |
+| `rerank_model_id` | string | 否 | 检索重排序使用的 Rerank 模型。接受模型 ID 或当前 Tenant 可访问 Rerank 模型中的唯一名称；传入但无法解析时返回 400/403。不传时按 Agent 配置 > Tenant RetrievalConfig > 自动探测第一个可用 Rerank 模型 的顺序解析。与 `summary_model_id` 不同：无效的 `rerank_model_id` 硬失败而非回退 |
 | `mentioned_items` | object[] | 否 | @提及的知识库和文件列表 |
 | `disable_title` | bool | 否 | 是否禁用自动标题生成（默认 false） |
 | `images` | object[] | 否 | 附带的图片（base64 格式），需要 Agent 启用图片上传 |
@@ -82,6 +83,7 @@ Agent 模式支持更智能的问答，包括工具调用、网络搜索、多�
 | `agent_id` | string | 否 | 自定义 Agent ID，指定使用的智能体（支持共享 Agent） |
 | `web_search_enabled` | bool | 否 | 是否启用网络搜索（默认 false） |
 | `summary_model_id` | string | 否 | 覆盖默认的摘要模型 ID |
+| `rerank_model_id` | string | 否 | 检索重排序使用的 Rerank 模型。接受模型 ID 或当前 Tenant 可访问 Rerank 模型中的唯一名称；传入但无法解析时返回 400/403。不传时按 Agent 配置 > Tenant RetrievalConfig > 自动探测第一个可用 Rerank 模型 的顺序解析。与 `summary_model_id` 不同：无效的 `rerank_model_id` 硬失败而非回退 |
 | `mentioned_items` | object[] | 否 | @提及的知识库和文件列表 |
 | `disable_title` | bool | 否 | 是否禁用自动标题生成（默认 false） |
 | `images` | object[] | 否 | 附带的图片（base64 格式），需要 Agent 启用图片上传 |
