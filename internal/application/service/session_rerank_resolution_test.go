@@ -159,7 +159,8 @@ func TestResolveRerankModel_ModelServiceNil_InternalError(t *testing.T) {
 func TestResolveRerankModelID_RequestBeatsAgentAndTenant(t *testing.T) {
 	svc := newRerankResolutionService(&rerankResolutionModelService{models: activeRerankModels()})
 
-	got, err := svc.resolveRerankModelID(context.Background(), "rerank-1", "rerank-2", &types.RetrievalConfig{RerankModelID: "rerank-3"})
+	got, err := svc.resolveRerankModelID(context.Background(),
+		"rerank-1", "rerank-2", &types.RetrievalConfig{RerankModelID: "rerank-3"})
 	require.NoError(t, err)
 	assert.Equal(t, "rerank-1", got)
 }
@@ -169,7 +170,8 @@ func TestResolveRerankModelID_RequestBeatsAgentAndTenant(t *testing.T) {
 func TestResolveRerankModelID_AgentBeatsTenant(t *testing.T) {
 	svc := newRerankResolutionService(&rerankResolutionModelService{models: activeRerankModels()})
 
-	got, err := svc.resolveRerankModelID(context.Background(), "", "rerank-2", &types.RetrievalConfig{RerankModelID: "rerank-3"})
+	got, err := svc.resolveRerankModelID(context.Background(),
+		"", "rerank-2", &types.RetrievalConfig{RerankModelID: "rerank-3"})
 	require.NoError(t, err)
 	assert.Equal(t, "rerank-2", got)
 }
@@ -216,7 +218,8 @@ func TestResolveRerankModelID_RequestInvalid_HardFailsNoFallback(t *testing.T) {
 	ms := &rerankResolutionModelService{models: activeRerankModels()}
 	svc := newRerankResolutionService(ms)
 
-	_, err := svc.resolveRerankModelID(context.Background(), "no-such-model", "", &types.RetrievalConfig{RerankModelID: "rerank-3"})
+	_, err := svc.resolveRerankModelID(context.Background(),
+		"no-such-model", "", &types.RetrievalConfig{RerankModelID: "rerank-3"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found or not accessible")
 }
@@ -228,7 +231,8 @@ func TestResolveRerankModelID_RequestInvalid_HardFailsNoFallback(t *testing.T) {
 func TestResolveRerankModelID_AgentInvalid_HardFails(t *testing.T) {
 	svc := newRerankResolutionService(&rerankResolutionModelService{models: activeRerankModels()})
 
-	_, err := svc.resolveRerankModelID(context.Background(), "", "agent-stale-model", &types.RetrievalConfig{RerankModelID: "rerank-3"})
+	_, err := svc.resolveRerankModelID(context.Background(),
+		"", "agent-stale-model", &types.RetrievalConfig{RerankModelID: "rerank-3"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found or not accessible")
 }
@@ -241,7 +245,8 @@ func TestResolveRerankModelID_TenantConfigNotValidated(t *testing.T) {
 	ms := &rerankResolutionModelService{models: activeRerankModels()}
 	svc := newRerankResolutionService(ms)
 
-	got, err := svc.resolveRerankModelID(context.Background(), "", "", &types.RetrievalConfig{RerankModelID: "stale-or-invalid-id"})
+	got, err := svc.resolveRerankModelID(context.Background(),
+		"", "", &types.RetrievalConfig{RerankModelID: "stale-or-invalid-id"})
 	require.NoError(t, err)
 	assert.Equal(t, "stale-or-invalid-id", got)
 	assert.Equal(t, 0, ms.listCalls, "tenant config path must not consult the model list")

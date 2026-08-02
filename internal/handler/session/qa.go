@@ -718,7 +718,8 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	)
 
 	// Directly call knowledge retrieval service without LLM summarization
-	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs, request.KnowledgeIDs, tagScopes, request.Query, request.RerankModelID)
+	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs,
+		request.KnowledgeIDs, tagScopes, request.Query, request.RerankModelID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
