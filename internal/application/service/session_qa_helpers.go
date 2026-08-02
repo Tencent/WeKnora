@@ -210,9 +210,6 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 		cm.RerankTopK = customAgent.Config.RerankTopK
 	}
 	cm.RerankThreshold = customAgent.Config.RerankThreshold
-	if customAgent.Config.RerankModelID != "" {
-		cm.RerankModelID = customAgent.Config.RerankModelID
-	}
 
 	// Override rewrite settings
 	cm.EnableRewrite = customAgent.Config.EnableRewrite
@@ -335,12 +332,38 @@ func (s *sessionService) restrictMentionsToAgentScope(
 // resolveRerankModelID resolves the effective rerank model ID for a request.
 // Precedence mirrors resolveChatModelID: requested override, then agent
 // config, then tenant RetrievalConfig, then auto-detect.
-// TODO: implement full resolution. See session_rerank_resolution_test.go.
 func (s *sessionService) resolveRerankModelID(
 	ctx context.Context,
 	requested string,
 	agentRerankModelID string,
 	rc *types.RetrievalConfig,
 ) (string, error) {
+	if requested != "" {
+		resolved, err := s.ResolveRerankModel(ctx, requested)
+		if err != nil {
+			return "", err
+		}
+		return resolved, nil
+	}
+	if agentRerankModelID != "" {
+		resolved, err := s.ResolveRerankModel(ctx, agentRerankModelID)
+		if err != nil {
+			return "", err
+		}
+		return resolved, nil
+	}
+	if rc != nil && rc.RerankModelID != "" {
+		return rc.RerankModelID, nil
+	}
+	if s.modelService == nil {
+		return "", nil
+	}
+	if models, err := s.modelService.ListModels(ctx); err == nil {
+		for _, model := range models {
+			if model != nil && model.Type == types.ModelTypeRerank && model.Status == types.ModelStatusActive {
+				return model.ID, nil
+			}
+		}
+	}
 	return "", nil
 }
