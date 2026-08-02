@@ -84,7 +84,15 @@ func (c *SearchCommand) Execute(ctx context.Context, cmdCtx *CommandContext, arg
 		}
 	}
 
-	results, err := c.sessionService.SearchKnowledge(ctx, kbIDs, nil, nil, query)
+	// Resolve the rerank model from the agent config, mirroring the QA
+	// pipeline (empty when no agent; the chain falls back to tenant config /
+	// auto-detect).
+	var rerankModelID string
+	if cmdCtx.CustomAgent != nil {
+		rerankModelID = cmdCtx.CustomAgent.Config.RerankModelID
+	}
+
+	results, err := c.sessionService.SearchKnowledge(ctx, kbIDs, nil, nil, query, rerankModelID)
 	if err != nil {
 		return nil, fmt.Errorf("search knowledge: %w", err)
 	}
