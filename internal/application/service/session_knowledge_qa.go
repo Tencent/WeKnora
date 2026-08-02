@@ -86,6 +86,12 @@ func (s *sessionService) KnowledgeQA(
 	// Resolve retrieval tenant scope using shared helper
 	retrievalTenantID := s.resolveRetrievalTenantID(ctx, req)
 
+	// Load tenant-level retrieval config (nil is safe; used for rerank model fallback)
+	var rc *types.RetrievalConfig
+	if tenant, err2 := s.tenantService.GetTenantByID(ctx, retrievalTenantID); err2 == nil {
+		rc = tenant.RetrievalConfig
+	}
+
 	// Build unified search targets (computed once, used throughout pipeline)
 	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.TagScopes)
 	if err != nil {
@@ -147,6 +153,17 @@ func (s *sessionService) KnowledgeQA(
 			MessageID:     req.AssistantMessageID,
 			UserMessageID: req.UserMessageID,
 		},
+	}
+
+	// Resolve the rerank model: request override (hard-failing 400/403) then
+	// agent config, then tenant RetrievalConfig, then auto-detect.
+	var agentRerankModelID string
+	if req.CustomAgent != nil {
+		agentRerankModelID = req.CustomAgent.Config.RerankModelID
+	}
+	chatManage.RerankModelID, err = s.resolveRerankModelID(ctx, req.RerankModelID, agentRerankModelID, rc)
+	if err != nil {
+		return err
 	}
 
 	// Apply custom agent overrides (system prompt, temperature, retrieval params,
@@ -798,7 +815,7 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 // knowledgeBaseIDs: list of knowledge base IDs to search (supports multi-KB)
 // knowledgeIDs: list of specific knowledge (file) IDs to search
 func (s *sessionService) SearchKnowledge(ctx context.Context,
-	knowledgeBaseIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, query string,
+	knowledgeBaseIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, query string, rerankModelID string,
 ) ([]*types.SearchResult, error) {
 	logger.Info(ctx, "Start knowledge base search without LLM summary")
 	logger.Infof(ctx, "Knowledge base search parameters, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, query: %s",
@@ -850,26 +867,11 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 		},
 	}
 
-	// Get default models
-	models, err := s.modelService.ListModels(ctx)
+	// Resolve the rerank model: request override (hard-failing) then tenant
+	// RetrievalConfig, then auto-detect the first active rerank model.
+	chatManage.RerankModelID, err = s.resolveRerankModelID(ctx, rerankModelID, "", rc)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get models: %v", err)
 		return nil, err
-	}
-
-	// Use rerank model from RetrievalConfig if set, otherwise auto-select the first available
-	if rc != nil && rc.RerankModelID != "" {
-		chatManage.RerankModelID = rc.RerankModelID
-	} else {
-		for _, model := range models {
-			if model == nil {
-				continue
-			}
-			if model.Type == types.ModelTypeRerank {
-				chatManage.RerankModelID = model.ID
-				break
-			}
-		}
 	}
 
 	// Use specific event list, only including retrieval-related events, not LLM summarization
