@@ -317,6 +317,9 @@ func (r *Runtime) LoadOrCompute(
 		if err != nil {
 			return Value{}, err
 		}
+		if err := InjectFault(ctx, FaultAfterProviderCall); err != nil {
+			return Value{}, err
+		}
 		if expected.Validate != nil {
 			if err := expected.Validate(payload); err != nil {
 				return Value{}, fmt.Errorf("validate processing artifact output: %w", err)
@@ -343,7 +346,7 @@ func (r *Runtime) LoadOrCompute(
 		if err != nil {
 			return Value{}, err
 		}
-		return r.freeze(ctx, expected, candidate), nil
+		return r.freeze(ctx, expected, candidate)
 	})
 
 	select {
@@ -502,7 +505,7 @@ func (r *Runtime) freeze(
 	ctx context.Context,
 	expected Expected,
 	candidate *types.ProcessingArtifact,
-) Value {
+) (Value, error) {
 	fallback := Value{
 		Payload:      append([]byte(nil), candidate.Payload...),
 		OutputDigest: candidate.OutputDigest,
@@ -516,7 +519,7 @@ func (r *Runtime) freeze(
 				Reason:       "write_disabled",
 			})
 		}
-		return fallback
+		return fallback, nil
 	}
 	winner, created, err := r.repository.PutIfAbsent(ctx, candidate)
 	if err != nil {
@@ -527,7 +530,7 @@ func (r *Runtime) freeze(
 			Reason:       "write_error",
 			Err:          err,
 		})
-		return fallback
+		return fallback, nil
 	}
 	if winner == nil {
 		r.emit(Event{
@@ -537,7 +540,10 @@ func (r *Runtime) freeze(
 			Reason:       "winner_missing",
 			Err:          errors.New("artifact repository returned a nil winner"),
 		})
-		return fallback
+		return fallback, nil
+	}
+	if err := InjectFault(ctx, FaultAfterArtifactPut); err != nil {
+		return Value{}, err
 	}
 	payload, err := DecodeInline(
 		winner,
@@ -565,7 +571,7 @@ func (r *Runtime) freeze(
 				Err:          deleteErr,
 			})
 		}
-		return fallback
+		return fallback, nil
 	}
 	if created {
 		r.emit(Event{
@@ -586,7 +592,7 @@ func (r *Runtime) freeze(
 		Payload:      payload,
 		OutputDigest: winner.OutputDigest,
 		CacheHit:     !created,
-	}
+	}, nil
 }
 
 func uncachedValue(payload []byte, validate func([]byte) error, err error) (Value, error) {

@@ -288,7 +288,13 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			return
 		}
 		if handleErr != nil {
-			s.tracker().FailSpan(ctx, gSpan, "GRAPH_EXTRACT_FAILED", handleErr.Error(), handleErr)
+			s.tracker().FailSpan(
+				ctx,
+				gSpan,
+				"GRAPH_EXTRACT_FAILED",
+				fmt.Sprintf("%T", handleErr),
+				nil,
+			)
 		} else {
 			s.tracker().EndSpan(ctx, gSpan, graphOut)
 		}
@@ -316,12 +322,9 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		handleErr = err
 		return err
 	}
-	// Capture chunk content shape on output — lets traces answer "WHAT
-	// did the LLM call see?" without joining back to the chunk store.
-	// Preview is truncated to keep span rows reasonable.
+	// Capture only chunk shape; body content must not enter traces.
 	if gSpan != nil {
 		graphOut["chunk_chars"] = len([]rune(chunk.Content))
-		graphOut["chunk_preview"] = previewText(chunk.Content, 200)
 	}
 	kb, err := s.knowledgeBaseRepo.GetKnowledgeBaseByID(ctx, chunk.KnowledgeBaseID)
 	if err != nil {
@@ -369,6 +372,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	extractor := chatpipeline.NewExtractor(chatModel, template)
 	graph, err := extractor.Extract(ctx, chunk.Content)
 	if err != nil {
+		logger.Warnf(ctx, "graph extraction provider failed: error_class=%T", err)
 		handleErr = err
 		return err
 	}
@@ -421,6 +425,10 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		handleErr = err
 		return err
 	}
+	if err := artifact.InjectFault(ctx, artifact.FaultAfterGraphBinding); err != nil {
+		handleErr = err
+		return err
+	}
 	if attemptSuperseded(ctx, s.tracker(), p.KnowledgeID, p.Attempt) {
 		superseded = true
 		graphOut["status"] = "superseded_after_graph_publish"
@@ -428,32 +436,6 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	}
 	graphOut["nodes_added"] = len(graph.Node)
 	graphOut["relations_added"] = len(graph.Relation)
-	// Capture a couple of sample nodes/relations so the trace viewer can
-	// answer "what did the LLM actually extract?" without round-tripping
-	// to the graph store. Cap to two each — anything more bloats span
-	// rows and the full graph is queryable elsewhere.
-	if len(graph.Node) > 0 {
-		samples := graph.Node
-		if len(samples) > 2 {
-			samples = samples[:2]
-		}
-		names := make([]string, 0, len(samples))
-		for _, n := range samples {
-			names = append(names, n.Name)
-		}
-		graphOut["sample_nodes"] = names
-	}
-	if len(graph.Relation) > 0 {
-		samples := graph.Relation
-		if len(samples) > 2 {
-			samples = samples[:2]
-		}
-		out := make([]string, 0, len(samples))
-		for _, r := range samples {
-			out = append(out, fmt.Sprintf("%s --[%s]--> %s", r.Node1, r.Type, r.Node2))
-		}
-		graphOut["sample_relations"] = out
-	}
 	return nil
 }
 
@@ -749,7 +731,8 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 		logger.Errorf(ctx, "failed to generate table description: %v", err)
 		return nil, err
 	}
-	logger.Debugf(ctx, "table describe of knowledge %s: %s", resources.knowledge.ID, tableDescription)
+	logger.Debugf(ctx, "generated table description for knowledge %s: chars=%d",
+		resources.knowledge.ID, len([]rune(tableDescription)))
 
 	columnDescription, err := s.generateColumnDescriptions(ctx, resources.chatModel, tableSchema.TableName,
 		schemaDesc, sampleDesc, customInstructions)
@@ -757,7 +740,8 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 		logger.Errorf(ctx, "failed to generate column descriptions: %v", err)
 		return nil, err
 	}
-	logger.Debugf(ctx, "column describe of knowledge %s: %s", resources.knowledge.ID, columnDescription)
+	logger.Debugf(ctx, "generated column descriptions for knowledge %s: chars=%d",
+		resources.knowledge.ID, len([]rune(columnDescription)))
 
 	// 构建chunks：一个表格摘要chunk + 多个列描述chunks
 	chunks, err := s.buildChunks(resources, tableDescription, columnDescription)

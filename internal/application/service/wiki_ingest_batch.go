@@ -205,7 +205,6 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	retractHandled := 0
 	followUpScheduled := false
 	totalPagesAffected := 0
-	docPreview := make([]string, 0, 6)
 	// Tunables resolved from KB.WikiConfig once we've loaded the KB.
 	// Captured up here so the deferred stats log can observe them
 	// regardless of which exit path we took. (Index-intro rebuild moved to
@@ -219,7 +218,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	defer func() {
 		logger.Infof(
 			ctx,
-			"wiki ingest stats: kb=%s tenant=%d retry=%d/%d status=%s elapsed=%s mode=%s pending_ops=%d ops(ingest=%d,retract=%d) ingest(success=%d,failed=%d) retract_handled=%d pages(total=%d) followup=%v tunables(batch=%d,map_par=%d,reduce_par=%d,max_inflight=%d) preview=%s",
+			"wiki ingest stats: kb=%s tenant=%d retry=%d/%d status=%s elapsed=%s mode=%s pending_ops=%d ops(ingest=%d,retract=%d) ingest(success=%d,failed=%d) retract_handled=%d pages(total=%d) followup=%v tunables(batch=%d,map_par=%d,reduce_par=%d,max_inflight=%d)",
 			payload.KnowledgeBaseID,
 			payload.TenantID,
 			retryCount,
@@ -239,7 +238,6 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			loggedMapPar,
 			loggedReducePar,
 			loggedMaxInflight,
-			previewStringSlice(docPreview, 6),
 		)
 	}()
 
@@ -487,7 +485,6 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				mapMu.Lock()
 				retractOps++
 				retractHandled++
-				docPreview = append(docPreview, fmt.Sprintf("retract[%s]: %s (%d slugs)", previewText(op.KnowledgeID, 24), previewText(op.DocTitle, 48), len(slugSet)))
 
 				for slug := range slugSet {
 					slugUpdates[slug] = append(slugUpdates[slug], SlugUpdate{
@@ -511,7 +508,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			ingestOps++
 			mapMu.Unlock()
 
-			logger.Infof(mapCtx, "wiki ingest: processing document '%s' (%s)", op.DocTitle, op.KnowledgeID)
+			logger.Infof(mapCtx, "wiki ingest: processing knowledge %s", op.KnowledgeID)
 			result, updates, err := s.mapOneDocument(mapCtx, chatModel, payload, op, batchCtx)
 			if err != nil {
 				mapMu.Lock()
@@ -529,7 +526,6 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				mapMu.Lock()
 				ingestSucceeded++
 				docResults = append(docResults, result)
-				docPreview = append(docPreview, fmt.Sprintf("ingest[%s]: title=%s summary=%s", previewText(result.KnowledgeID, 24), previewText(result.DocTitle, 40), previewText(result.Summary, 64)))
 				for _, u := range updates {
 					slugUpdates[u.Slug] = append(slugUpdates[u.Slug], u)
 				}
@@ -793,28 +789,20 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		if r.WikiSpan == nil {
 			continue
 		}
-		writtenPages := make([]map[string]string, 0, len(r.Pages))
-		droppedPages := make([]map[string]string, 0)
+		writtenPages := 0
+		droppedPages := 0
 		for _, p := range r.Pages {
-			entry := map[string]string{
-				"slug":  p.Slug,
-				"title": previewText(p.Title, 80),
-			}
 			if _, bad := failedAdditionSlugs[p.Slug]; bad {
-				droppedPages = append(droppedPages, entry)
+				droppedPages++
 				continue
 			}
-			writtenPages = append(writtenPages, entry)
+			writtenPages++
 		}
 		output := types.JSONMap{
-			"pages_written":         len(writtenPages),
-			"pages_dropped":         len(droppedPages),
-			"pages_total":           len(r.Pages),
-			"failed_slug_writes":    failedAdditionSlugCount,
-			"pages_written_preview": writtenPages,
-		}
-		if len(droppedPages) > 0 {
-			output["pages_dropped_preview"] = droppedPages
+			"pages_written":      writtenPages,
+			"pages_dropped":      droppedPages,
+			"pages_total":        len(r.Pages),
+			"failed_slug_writes": failedAdditionSlugCount,
 		}
 		for k, v := range r.MapStats {
 			output[k] = v
@@ -1182,7 +1170,7 @@ func (s *wikiIngestService) mapOneDocument(
 
 	chunks, err := s.chunkRepo.ListChunksByKnowledgeID(ctx, payload.TenantID, knowledgeID)
 	if err != nil {
-		s.tracker().FailSpan(ctx, wikiSpan, "LIST_CHUNKS_FAILED", err.Error(), err)
+		s.tracker().FailSpan(ctx, wikiSpan, "LIST_CHUNKS_FAILED", fmt.Sprintf("%T", err), nil)
 		return nil, nil, fmt.Errorf("get chunks: %w", err)
 	}
 	if len(chunks) == 0 {
@@ -1254,17 +1242,15 @@ func (s *wikiIngestService) mapOneDocument(
 		extractedEntities, extractedConcepts, slugItems, err = s.extractEntitiesAndConceptsNoUpsert(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
 		if err != nil {
 			logger.Warnf(ctx, "wiki ingest: legacy fallback also failed for %s: %v", knowledgeID, err)
-			s.tracker().FailSpan(ctx, extractSpan, "EXTRACT_FAILED", err.Error(), err)
-			s.tracker().FailSpan(ctx, wikiSpan, "EXTRACT_FAILED", err.Error(), err)
+			s.tracker().FailSpan(ctx, extractSpan, "EXTRACT_FAILED", fmt.Sprintf("%T", err), nil)
+			s.tracker().FailSpan(ctx, wikiSpan, "EXTRACT_FAILED", fmt.Sprintf("%T", err), nil)
 			return nil, nil, err
 		}
 	}
 	s.tracker().EndSpan(ctx, extractSpan, types.JSONMap{
-		"entities":         len(extractedEntities),
-		"concepts":         len(extractedConcepts),
-		"pass0_fallback":   pass0Failed,
-		"entities_preview": previewExtractedItems(extractedEntities, 8),
-		"concepts_preview": previewExtractedItems(extractedConcepts, 8),
+		"entities":       len(extractedEntities),
+		"concepts":       len(extractedConcepts),
+		"pass0_fallback": pass0Failed,
 	})
 
 	// Build slug listing for Summary's wiki-link input.
@@ -1329,13 +1315,10 @@ func (s *wikiIngestService) mapOneDocument(
 			"InstructionScope":   "wiki_content",
 		})
 		if summaryErr != nil {
-			s.tracker().FailSpan(ctx, summarySpan, "SUMMARY_FAILED", summaryErr.Error(), summaryErr)
+			s.tracker().FailSpan(ctx, summarySpan, "SUMMARY_FAILED", fmt.Sprintf("%T", summaryErr), nil)
 		} else {
-			sumLine, sumBody := splitSummaryLine(summaryContent)
 			s.tracker().EndSpan(ctx, summarySpan, types.JSONMap{
-				"chars":        utf8.RuneCountInString(summaryContent),
-				"summary_line": previewText(sumLine, 160),
-				"body_preview": previewText(sumBody, 320),
+				"chars": utf8.RuneCountInString(summaryContent),
 			})
 		}
 	}()
@@ -1351,11 +1334,9 @@ func (s *wikiIngestService) mapOneDocument(
 		candidatesXML := renderCandidateSlugsXML(extractedEntities, extractedConcepts)
 		citations, newSlugs, batchCount = s.classifyChunkCitations(ctx, chatModel, candidatesXML, chunks, lang, batchCtx)
 		s.tracker().EndSpan(ctx, classifySpan, types.JSONMap{
-			"cited_slugs":      len(citations),
-			"new_slugs":        len(newSlugs),
-			"batches":          batchCount,
-			"top_cited":        topCitedSlugs(citations, 8),
-			"new_slugs_sample": previewNewSlugs(newSlugs, 8),
+			"cited_slugs": len(citations),
+			"new_slugs":   len(newSlugs),
+			"batches":     batchCount,
 		})
 	}()
 	wg.Wait()
@@ -1422,8 +1403,9 @@ func (s *wikiIngestService) mapOneDocument(
 		// appends back onto the pending list so the next batch retries.
 		// The internal retries in generateWithTemplate already exhaust
 		// the LLM's own transient-error budget before we give up here.
-		logger.Errorf(ctx, "wiki ingest: generate summary failed for %s, will requeue: %v", knowledgeID, summaryErr)
-		s.tracker().FailSpan(ctx, wikiSpan, "SUMMARY_FAILED", summaryErr.Error(), summaryErr)
+		logger.Errorf(ctx, "wiki ingest: generate summary failed for %s, will requeue: error_class=%T",
+			knowledgeID, summaryErr)
+		s.tracker().FailSpan(ctx, wikiSpan, "SUMMARY_FAILED", fmt.Sprintf("%T", summaryErr), nil)
 		return nil, nil, fmt.Errorf("generate summary: %w", summaryErr)
 	}
 	sumLine, sumBody := splitSummaryLine(summaryContent)
@@ -1551,8 +1533,8 @@ func (s *wikiIngestService) mapOneDocument(
 	}
 
 	logger.Infof(ctx,
-		"wiki ingest: mapped knowledge %s title=%q candidates=%d chunks=%d batches=%d cited_chunks=%d uncited_slugs=%d new_slugs=%d updates=%d reparse_slugs=%d stale_slugs=%d pass0_fallback=%v elapsed=%s",
-		knowledgeID, previewText(docTitle, 80),
+		"wiki ingest: mapped knowledge %s candidates=%d chunks=%d batches=%d cited_chunks=%d uncited_slugs=%d new_slugs=%d updates=%d reparse_slugs=%d stale_slugs=%d pass0_fallback=%v elapsed=%s",
+		knowledgeID,
 		len(slugItems), len(chunks), batchCount, len(citedChunkSet), uncited, len(newSlugs),
 		len(updates), reparseOverlap, staleCount, pass0Failed,
 		time.Since(docStartedAt).Round(time.Millisecond),
@@ -1566,7 +1548,6 @@ func (s *wikiIngestService) mapOneDocument(
 	// "wiki processing for this knowledge" time the user sees in the
 	// trace viewer, not just the LLM extraction slice.
 	mapStats := types.JSONMap{
-		"doc_title":        previewText(docTitle, 120),
 		"chunks":           len(chunks),
 		"candidate_slugs":  len(slugItems),
 		"cited_chunks":     len(citedChunkSet),
@@ -1579,7 +1560,6 @@ func (s *wikiIngestService) mapOneDocument(
 		"summary_chars":    utf8.RuneCountInString(docSummary),
 		"pass0_fallback":   pass0Failed,
 		"classify_batches": batchCount,
-		"summary_preview":  previewText(docSummaryLine, 160),
 	}
 
 	return &docIngestResult{
@@ -1634,7 +1614,8 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 
 	var result combinedExtraction
 	if err := json.Unmarshal([]byte(extractionJSON), &result); err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to parse combined extraction JSON: %v\nRaw: %s", err, extractionJSON)
+		logger.Warnf(ctx, "wiki ingest: failed to parse combined extraction JSON: error_class=%T chars=%d",
+			err, utf8.RuneCountInString(extractionJSON))
 		return nil, nil, nil, fmt.Errorf("parse combined extraction JSON: %w", err)
 	}
 
@@ -1737,7 +1718,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			return
 		}
 		if err != nil {
-			s.tracker().FailSpan(ctx, pageSpan, "REDUCE_FAILED", err.Error(), err)
+			s.tracker().FailSpan(ctx, pageSpan, "REDUCE_FAILED", fmt.Sprintf("%T", err), nil)
 			return
 		}
 		if !changed {
@@ -1750,13 +1731,13 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			"contributors":    contributors,
 		}
 		if page != nil {
-			out["page_title"] = previewText(page.Title, 160)
 			out["page_type"] = string(page.PageType)
-			out["page_summary"] = previewText(page.Summary, 200)
-			out["content_preview"] = previewText(page.Content, 320)
+			out["page_title_chars"] = utf8.RuneCountInString(page.Title)
+			out["page_summary_chars"] = utf8.RuneCountInString(page.Summary)
+			out["content_chars"] = utf8.RuneCountInString(page.Content)
 			out["source_refs"] = len(page.SourceRefs)
 			out["chunk_refs"] = len(page.ChunkRefs)
-			out["aliases"] = []string(page.Aliases)
+			out["aliases"] = len(page.Aliases)
 		}
 		s.tracker().EndSpan(ctx, pageSpan, out)
 	}()

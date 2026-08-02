@@ -282,7 +282,10 @@ func (s *knowledgeService) failStage(ctx context.Context, kid, name, code, msg s
 	if span == nil {
 		return
 	}
-	s.tracker().FailSpan(ctx, span, code, msg, err)
+	if err != nil {
+		msg = fmt.Sprintf("%s (error_class=%T)", msg, err)
+	}
+	s.tracker().FailSpan(ctx, span, code, msg, nil)
 }
 
 func (s *knowledgeService) skipStage(ctx context.Context, kid, name, reason string) {

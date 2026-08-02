@@ -13,7 +13,7 @@ func TestSQLiteProcessingArtifactMigrationAndTenantBoundary(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
-	up, err := os.ReadFile("../../migrations/sqlite/000001_processing_artifacts.up.sql")
+	up, err := os.ReadFile("../../migrations/sqlite/000002_processing_artifacts.up.sql")
 	require.NoError(t, err)
 	_, err = db.Exec(string(up))
 	require.NoError(t, err)
@@ -47,7 +47,7 @@ func TestSQLiteProcessingArtifactMigrationAndTenantBoundary(t *testing.T) {
 	)
 	require.Error(t, err, "each knowledge must have exactly one attempt allocator row")
 
-	down, err := os.ReadFile("../../migrations/sqlite/000001_processing_artifacts.down.sql")
+	down, err := os.ReadFile("../../migrations/sqlite/000002_processing_artifacts.down.sql")
 	require.NoError(t, err)
 	_, err = db.Exec(string(down))
 	require.NoError(t, err)

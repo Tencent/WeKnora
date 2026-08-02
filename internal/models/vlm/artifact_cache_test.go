@@ -68,8 +68,12 @@ func TestArtifactCachedVLMUsesExactImagesAndPrompt(t *testing.T) {
 
 	_, err = cached.Predict(ctx, [][]byte{[]byte{0, 1, 3}}, " describe ")
 	require.NoError(t, err)
-	_, err = cached.Predict(ctx, [][]byte{[]byte{0, 1, 2}}, "describe")
+	provider.mu.Lock()
+	provider.response = "changed caption"
+	provider.mu.Unlock()
+	changed, err := cached.Predict(ctx, [][]byte{[]byte{0, 1, 2}}, "describe")
 	require.NoError(t, err)
+	assert.Equal(t, "changed caption", changed)
 	assert.Equal(t, 3, provider.callCount())
 }
 

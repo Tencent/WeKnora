@@ -32,8 +32,8 @@ source bytes
   -> desired-state diff
   -> add/update/index
   -> attempt fence
+  -> conditional knowledge publication + storage accounting
   -> delete stale vector, graph, and chunk state
-  -> conditional knowledge publication
 ```
 
 `internal/artifact` owns canonical keys, codecs, payload validation, immutable
@@ -61,8 +61,8 @@ cleaned up.
 
 Migration locations:
 
-- PostgreSQL: `migrations/versioned/000077_processing_artifacts.{up,down}.sql`
-- SQLite: `migrations/sqlite/000001_processing_artifacts.{up,down}.sql`
+- PostgreSQL: `migrations/versioned/000079_processing_artifacts.{up,down}.sql`
+- SQLite: `migrations/sqlite/000002_processing_artifacts.{up,down}.sql`
 - MySQL bootstrap: `migrations/mysql/00-init-db.sql`
 - ParadeDB bootstrap: `migrations/paradedb/00-init-db.sql`
 
@@ -80,9 +80,14 @@ frozen together. This keeps one provider call for concurrent identical batches
 without changing caller output order.
 
 Knowledge processing allocates an attempt before work begins. Final publication
-and destructive stale cleanup recheck that attempt. Graph storage uses
-per-chunk contributions so stale chunks can be removed exactly without deleting
-unchanged contributions.
+and destructive stale cleanup recheck that attempt. A per-knowledge mutation
+lock spans chunk/vector/graph binding through exact stale cleanup (local gate in
+Lite mode, ownership-token Redis lease in standard mode), preventing a newer
+generation from being deleted between a fence check and an external-store
+delete. Knowledge publication and tenant storage accounting share one database
+transaction; retries calculate the delta from the already-published row and
+therefore cannot double-charge. Graph storage uses per-chunk contributions so
+stale chunks can be removed exactly without deleting unchanged contributions.
 
 ## Compatibility and rollback
 
@@ -109,7 +114,7 @@ To roll back:
 1. disable artifact reads, then writes, and restart or drain workers;
 2. deploy the previous application version;
 3. verify no process reads or writes artifact/attempt tables;
-4. optionally run migration `000077` down.
+4. optionally run migration `000079` down.
 
 Dropping the new tables discards only reusable artifacts and attempt counters;
 it does not delete knowledge, chunks, vectors, or graph data. Do not run the
@@ -122,9 +127,10 @@ version, output schema, provider calls, singleflight wait time, and embedding
 batch totals/hits/misses/deduplication. Outcomes use `hit`, `miss`, `computed`,
 `wait`, `bypass`, `corrupt`, and `error_fallback`.
 
-Logs intentionally omit tenant IDs, complete artifact keys, payloads, prompts,
-URLs, and raw database error strings. Database errors are represented only by
-their concrete error class because driver messages can contain SQL arguments.
+The artifact observer never receives request or payload bytes. New DAG logs and
+span fields omit complete artifact keys, bodies, prompts, file/image references,
+and provider error details; they retain IDs, booleans, lengths, counts, and
+concrete error classes.
 
 ## Validation
 
@@ -137,7 +143,12 @@ The implementation has focused tests for:
 - exact input bytes, duplicate input ordering, partial batch hits, and invalid
   provider response rejection;
 - stable chunk/generated IDs, desired-state diffs, and stale-attempt fencing;
+- all eight crash boundaries, with final DB/vector/Wiki/Graph snapshots equal
+  to a clean run after retry;
+- local and Redis per-knowledge mutation-lock ownership and wait behavior;
+- atomic, idempotent knowledge publication plus tenant storage accounting;
 - SQLite migration up/down and uniqueness behavior;
+- duplicate migration-version rejection for PostgreSQL and SQLite directories;
 - DocReader, chat, embedding, VLM, wiki, multimodal, and graph stage adapters.
 
 Run the focused suite with:
@@ -155,6 +166,7 @@ go test -count=1 \
 go test -race -count=1 \
   ./internal/artifact \
   ./internal/application/repository \
+  ./internal/application/service \
   ./internal/models/embedding
 ```
 

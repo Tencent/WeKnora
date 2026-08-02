@@ -58,6 +58,19 @@ func TestBuildStableMultimodalChunkUsesExactInputsAndUniqueLegacyMatch(t *testin
 	require.NoError(t, err)
 	assert.Equal(t, first.ID, second.ID)
 
+	signedURLChanged := payload
+	signedURLChanged.ImageURL = "https://objects.example/image.png?signature=rotated"
+	sameBytes, err := buildStableMultimodalChunk(
+		signedURLChanged,
+		types.ChunkTypeImageOCR,
+		"exact OCR",
+		"[]",
+		[]byte{0, 1, 2},
+		nil,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, first.ID, sameBytes.ID, "signed URL rotation must not change byte-addressed identity")
+
 	changed, err := buildStableMultimodalChunk(
 		payload,
 		types.ChunkTypeImageOCR,
@@ -68,6 +81,17 @@ func TestBuildStableMultimodalChunkUsesExactInputsAndUniqueLegacyMatch(t *testin
 	)
 	require.NoError(t, err)
 	assert.NotEqual(t, first.ID, changed.ID)
+
+	changedOutput, err := buildStableMultimodalChunk(
+		payload,
+		types.ChunkTypeImageOCR,
+		"changed OCR",
+		"[]",
+		[]byte{0, 1, 2},
+		nil,
+	)
+	require.NoError(t, err)
+	assert.NotEqual(t, first.ID, changedOutput.ID)
 
 	legacyID := uuid.New().String()
 	reused, err := buildStableMultimodalChunk(

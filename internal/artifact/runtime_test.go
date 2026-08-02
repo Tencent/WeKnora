@@ -164,6 +164,61 @@ func TestRuntimeCorruptEntrySelfHeals(t *testing.T) {
 	assert.Equal(t, 1, repository.deleted)
 }
 
+func TestRuntimeRecoveryAfterProviderCallFaultRecomputes(t *testing.T) {
+	repository := newMemoryArtifactRepository()
+	runtime := NewRuntime(repository, nil)
+	expected := testExpected(t)
+	var calls atomic.Int32
+	injected := errors.New("injected after provider call")
+	ctx := WithFaultInjector(context.Background(), func(point FaultPoint) error {
+		if point == FaultAfterProviderCall {
+			return injected
+		}
+		return nil
+	})
+	compute := func(context.Context) ([]byte, error) {
+		calls.Add(1)
+		return []byte(`{"value":"computed"}`), nil
+	}
+
+	_, err := runtime.LoadOrCompute(ctx, expected, compute)
+	require.ErrorIs(t, err, injected)
+	assert.Empty(t, repository.values)
+
+	value, err := runtime.LoadOrCompute(context.Background(), expected, compute)
+	require.NoError(t, err)
+	assert.Equal(t, `{"value":"computed"}`, string(value.Payload))
+	assert.Equal(t, int32(2), calls.Load())
+}
+
+func TestRuntimeRecoveryAfterArtifactPutFaultUsesCommittedArtifact(t *testing.T) {
+	repository := newMemoryArtifactRepository()
+	runtime := NewRuntime(repository, nil)
+	expected := testExpected(t)
+	var calls atomic.Int32
+	injected := errors.New("injected after artifact put")
+	ctx := WithFaultInjector(context.Background(), func(point FaultPoint) error {
+		if point == FaultAfterArtifactPut {
+			return injected
+		}
+		return nil
+	})
+	compute := func(context.Context) ([]byte, error) {
+		calls.Add(1)
+		return []byte(`{"value":"computed"}`), nil
+	}
+
+	_, err := runtime.LoadOrCompute(ctx, expected, compute)
+	require.ErrorIs(t, err, injected)
+	require.Len(t, repository.values, 1)
+
+	value, err := runtime.LoadOrCompute(context.Background(), expected, compute)
+	require.NoError(t, err)
+	assert.True(t, value.CacheHit)
+	assert.Equal(t, `{"value":"computed"}`, string(value.Payload))
+	assert.Equal(t, int32(1), calls.Load())
+}
+
 func TestRuntimeSingleflightComputesOnce(t *testing.T) {
 	repository := newMemoryArtifactRepository()
 	runtime := NewRuntime(repository, nil)

@@ -141,6 +141,24 @@ func TestArtifactCachedEmbeddingUsesPartialHits(t *testing.T) {
 	assert.Equal(t, [][]string{{"missing"}}, provider.calls())
 }
 
+func TestArtifactCachedEmbeddingModelIdentityInvalidatesOnlyEmbedding(t *testing.T) {
+	runtime, _ := setupEmbeddingArtifactRuntime(t)
+	provider := &countingEmbedder{dimensions: 3}
+	firstConfig := embeddingArtifactConfig()
+	first := NewArtifactCachedEmbedder(provider, runtime, firstConfig)
+	_, err := first.Embed(documentEmbeddingContext(), "same canonical chunk")
+	require.NoError(t, err)
+	_, err = first.Embed(documentEmbeddingContext(), "same canonical chunk")
+	require.NoError(t, err)
+
+	secondConfig := firstConfig
+	secondConfig.Processor.ModelID = "model-id-v2"
+	second := NewArtifactCachedEmbedder(provider, runtime, secondConfig)
+	_, err = second.Embed(documentEmbeddingContext(), "same canonical chunk")
+	require.NoError(t, err)
+	assert.Len(t, provider.calls(), 2)
+}
+
 func TestArtifactCachedEmbeddingBatchSuppressesConcurrentProviderCalls(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})

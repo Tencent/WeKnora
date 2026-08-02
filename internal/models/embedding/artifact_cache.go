@@ -230,6 +230,12 @@ func (e *artifactCachedEmbedder) batchEmbed(
 					if providerErr != nil {
 						return nil, providerErr
 					}
+					if faultErr := artifact.InjectFault(
+						computeContext,
+						artifact.FaultAfterProviderCall,
+					); faultErr != nil {
+						return nil, faultErr
+					}
 					providerCalled = true
 					if validateErr := ValidateEmbeddingBatch(
 						vectors,

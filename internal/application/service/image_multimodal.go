@@ -141,8 +141,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		return fmt.Errorf("unmarshal image multimodal payload: %w", err)
 	}
 
-	logger.Infof(ctx, "[ImageMultimodal] Processing image: chunk=%s, url=%s, ocr=%v, caption=%v",
-		payload.ChunkID, payload.ImageURL, payload.EnableOCR, payload.EnableCaption)
+	logger.Infof(ctx, "[ImageMultimodal] Processing image: chunk=%s, has_url=%v, ocr=%v, caption=%v",
+		payload.ChunkID, payload.ImageURL != "", payload.EnableOCR, payload.EnableCaption)
 
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 	if payload.Language != "" {
@@ -167,8 +167,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 	if drop {
 		logger.Infof(ctx,
-			"[ImageMultimodal] Dropping task chunk=%s knowledge=%s kb=%s image=%s",
-			payload.ChunkID, payload.KnowledgeID, payload.KnowledgeBaseID, payload.ImageURL)
+			"[ImageMultimodal] Dropping task chunk=%s knowledge=%s kb=%s",
+			payload.ChunkID, payload.KnowledgeID, payload.KnowledgeBaseID)
 		// Still count this image toward the parent finalize gate so a batch
 		// of dropped orphans cannot strand multimodal:pending forever.
 		s.checkAndFinalizeAllImages(ctx, payload)
@@ -187,7 +187,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		if parent != nil {
 			name := fmt.Sprintf("multimodal.image[%d]", payload.ImageIndex)
 			imgSpan = tracker.BeginSubSpan(ctx, parent, name, types.SpanKindGeneration, types.JSONMap{
-				"image_url":         payload.ImageURL,
+				"has_image_url":     payload.ImageURL != "",
 				"image_source_type": payload.ImageSourceType,
 				"enable_ocr":        payload.EnableOCR,
 				"enable_caption":    payload.EnableCaption,
@@ -197,10 +197,9 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 
 	// Output map populated as we go — the deferred close picks it up.
-	// Captures real VLM results (model id, byte count, OCR/caption
-	// previews, downstream chunk counts) so the trace viewer can answer
-	// "what did this image actually produce?" without joining back to
-	// the chunks table.
+	// Captures safe VLM result metadata (model id, byte count, output
+	// lengths, downstream chunk counts) without placing image references
+	// or generated content in the trace.
 	imgOut := types.JSONMap{}
 
 	// finalize-once semantics: on success we always decrement the parent's
@@ -221,8 +220,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			} else if isFinalAsynqAttempt(ctx) {
 				tracker.FailSpan(ctx, imgSpan,
 					"MULTIMODAL_VLM_FAILED",
-					handleErr.Error(),
-					handleErr)
+					fmt.Sprintf("%T", handleErr),
+					nil)
 			}
 		}
 		if attemptSuperseded(ctx, tracker, payload.KnowledgeID, payload.Attempt) {
@@ -236,8 +235,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			s.checkAndFinalizeAllImages(ctx, payload)
 		} else {
 			logger.Infof(ctx,
-				"[ImageMultimodal] Skip finalize on retryable error for %s (will count on last attempt)",
-				payload.ImageURL)
+				"[ImageMultimodal] Skip finalize on retryable error (will count on last attempt)")
 		}
 	}()
 
@@ -262,9 +260,9 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// image, skip it (deferred finalize will count it).
 	imgBytes, readErr := s.readImageBytes(ctx, payload)
 	if readErr != nil {
-		logger.Errorf(ctx, "[ImageMultimodal] Skip unreadable image %s: %v", payload.ImageURL, readErr)
+		logger.Errorf(ctx, "[ImageMultimodal] Skip unreadable image: error_class=%T", readErr)
 		imgOut["skipped"] = "unreadable_image"
-		imgOut["read_error"] = readErr.Error()
+		imgOut["read_error_class"] = fmt.Sprintf("%T", readErr)
 		return nil
 	}
 	imgOut["image_bytes"] = len(imgBytes)
@@ -280,7 +278,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		prompt := vlmOCRPrompt
 		if payload.ImageSourceType == "scanned_pdf" {
 			prompt = vlmOCRScannedPDFPrompt
-			logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", payload.ImageURL)
+			logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR")
 			imgOut["ocr_prompt"] = "scanned_pdf"
 		} else {
 			imgOut["ocr_prompt"] = "default"
@@ -293,17 +291,16 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		})
 		ocrText, ocrErr := vlmModel.Predict(ocrCtx, [][]byte{imgBytes}, prompt)
 		if ocrErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
-			imgOut["ocr_error"] = ocrErr.Error()
+			logger.Warnf(ctx, "[ImageMultimodal] OCR failed: error_class=%T", ocrErr)
+			imgOut["ocr_error_class"] = fmt.Sprintf("%T", ocrErr)
 		} else {
 			ocrDesiredKnown = true
 			ocrText = sanitizeOCRText(ocrText)
 			if ocrText != "" {
 				imageInfo.OCRText = ocrText
 				imgOut["ocr_chars"] = len([]rune(ocrText))
-				imgOut["ocr_preview"] = previewText(ocrText, 200)
 			} else {
-				logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", payload.ImageURL)
+				logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content, discarded")
 				imgOut["ocr_chars"] = 0
 				imgOut["ocr_skipped"] = "empty_or_invalid"
 			}
@@ -321,14 +318,13 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			buildVLMCaptionPrompt(ctx, vlmCfg),
 		)
 		if capErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
-			imgOut["caption_error"] = capErr.Error()
+			logger.Warnf(ctx, "[ImageMultimodal] Caption failed: error_class=%T", capErr)
+			imgOut["caption_error_class"] = fmt.Sprintf("%T", capErr)
 		} else {
 			captionDesiredKnown = true
 			if caption != "" {
 				imageInfo.Caption = caption
 				imgOut["caption_chars"] = len([]rune(caption))
-				imgOut["caption_preview"] = previewText(caption, 200)
 			}
 		}
 	}
@@ -339,6 +335,25 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		logger.Infof(
 			ctx,
 			"[ImageMultimodal] Attempt %d superseded after VLM for knowledge %s",
+			payload.Attempt,
+			payload.KnowledgeID,
+		)
+		return nil
+	}
+	ctx, releaseReconcile, lockErr := acquireKnowledgeReconcileLock(
+		ctx,
+		s.redisClient,
+		payload.KnowledgeID,
+	)
+	if lockErr != nil {
+		handleErr = fmt.Errorf("acquire multimodal reconciliation lock: %w", lockErr)
+		return handleErr
+	}
+	defer releaseReconcile()
+	if attemptSuperseded(ctx, tracker, payload.KnowledgeID, payload.Attempt) {
+		logger.Infof(
+			ctx,
+			"[ImageMultimodal] Attempt %d superseded while waiting for reconciliation lock on %s",
 			payload.Attempt,
 			payload.KnowledgeID,
 		)
@@ -449,8 +464,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 	for _, c := range newChunks {
-		logger.Infof(ctx, "[ImageMultimodal] Created %s chunk %s for image %s, len=%d",
-			c.ChunkType, c.ID, payload.ImageURL, len(c.Content))
+		logger.Infof(ctx, "[ImageMultimodal] Created %s chunk %s, len=%d",
+			c.ChunkType, c.ID, len(c.Content))
 	}
 
 	// Index desired chunks before exact stale cleanup.
@@ -724,7 +739,7 @@ func (s *ImageMultimodalService) indexChunks(
 		}
 	}
 
-	logger.Infof(ctx, "[ImageMultimodal] Indexed %d multimodal chunks for image %s", len(chunks), payload.ImageURL)
+	logger.Infof(ctx, "[ImageMultimodal] Indexed %d multimodal chunks", len(chunks))
 	return result, nil
 }
 
@@ -783,7 +798,7 @@ func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Contex
 	// stored on a different backend (multi-backend / post-migration).
 	if _, isResourceRef := types.ParseResourcePath(payload.ImageURL); isResourceRef && s.resourceCatalog != nil {
 		if resource, resErr := s.resourceCatalog.Resolve(ctx, payload.ImageURL); resErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] resolve resource reference failed: url=%s err=%v", payload.ImageURL, resErr)
+			logger.Warnf(ctx, "[ImageMultimodal] resolve resource reference failed: error_class=%T", resErr)
 		} else if resource != nil {
 			backendID = resource.StorageBackendID
 			provider = strings.ToLower(strings.TrimSpace(resource.Provider))
@@ -806,8 +821,8 @@ func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Contex
 	}
 
 	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
-	logger.Infof(ctx, "[ImageMultimodal] resolving file service: tenant=%d provider=%q LOCAL_STORAGE_BASE_DIR=%q imageURL=%s",
-		payload.TenantID, provider, baseDir, payload.ImageURL)
+	logger.Infof(ctx, "[ImageMultimodal] resolving file service: tenant=%d provider=%q has_backend=%v",
+		payload.TenantID, provider, backendID != "")
 	fileSvc, _, svcErr := s.storageResolver.ResolveFileService(ctx, tenant, backendID, provider, baseDir)
 	if svcErr != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] resolve file service failed (falling back to default): tenant=%d provider=%s err=%v",
@@ -829,16 +844,16 @@ func (s *ImageMultimodalService) readImageBytes(ctx context.Context, payload typ
 	if isResourceRef || types.ParseProviderScheme(payload.ImageURL) != "" {
 		fileSvc := s.resolveFileServiceForPayload(ctx, payload)
 		if fileSvc == nil {
-			return nil, fmt.Errorf("no file service available for %s", payload.ImageURL)
+			return nil, fmt.Errorf("no file service available for image reference")
 		}
 		reader, err := fileSvc.GetFile(ctx, payload.ImageURL)
 		if err != nil {
-			return nil, fmt.Errorf("file service get %s: %w", payload.ImageURL, err)
+			return nil, fmt.Errorf("file service get image: %T", err)
 		}
 		defer reader.Close()
 		data, err := io.ReadAll(reader)
 		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", payload.ImageURL, err)
+			return nil, fmt.Errorf("read image: %T", err)
 		}
 		return data, nil
 	}
@@ -847,13 +862,13 @@ func (s *ImageMultimodalService) readImageBytes(ctx context.Context, payload typ
 		if data, err := os.ReadFile(payload.ImageLocalPath); err == nil {
 			return data, nil
 		} else {
-			logger.Warnf(ctx, "[ImageMultimodal] Local file %s not available (%v), falling back to URL", payload.ImageLocalPath, err)
+			logger.Warnf(ctx, "[ImageMultimodal] Local image unavailable: error_class=%T; falling back to URL", err)
 		}
 	}
 
 	data, err := downloadImageFromURL(payload.ImageURL)
 	if err != nil {
-		return nil, fmt.Errorf("download %s: %w", payload.ImageURL, err)
+		return nil, fmt.Errorf("download image: %T", err)
 	}
 	logger.Infof(ctx, "[ImageMultimodal] Image downloaded from URL, len=%d", len(data))
 	return data, nil

@@ -1352,7 +1352,7 @@ func (s *knowledgeService) moveKnowledgeReparse(
 		if err != nil || meta == nil {
 			return fmt.Errorf("failed to get manual metadata for reparse: %w", err)
 		}
-		s.triggerManualProcessing(ctx, targetKB, knowledge, meta.Content, false)
+		_ = s.triggerManualProcessing(ctx, targetKB, knowledge, meta.Content, false)
 		return nil
 	}
 

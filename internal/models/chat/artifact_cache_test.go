@@ -109,6 +109,29 @@ func TestArtifactCachedChatDoesNotCacheInvalidOutput(t *testing.T) {
 	assert.Equal(t, 2, provider.callCount())
 }
 
+func TestArtifactCachedChatStageSchemaAndPromptInvalidateExactly(t *testing.T) {
+	provider := &countingChat{response: "canonical"}
+	cached := NewArtifactCachedChat(provider, setupChatArtifactRuntime(t), chatArtifactConfig())
+	call := func(stage, schema, prompt string) {
+		_, err := cached.Chat(
+			WithArtifactStage(context.Background(), ArtifactStage{
+				Stage:        stage,
+				OutputSchema: schema,
+			}),
+			[]Message{{Role: "user", Content: prompt}},
+			&ChatOptions{Temperature: 0},
+		)
+		require.NoError(t, err)
+	}
+
+	call("wiki_map", "wiki.map.v1", "prompt-v1")
+	call("wiki_map", "wiki.map.v1", "prompt-v1")
+	call("wiki_map", "wiki.map.v1", "prompt-v2")
+	call("wiki_map", "wiki.map.v2", "prompt-v2")
+	call("graph_extract", "graph.v1", "prompt-v2")
+	assert.Equal(t, 4, provider.callCount())
+}
+
 func TestChatArtifactConfigExcludesCredentialRotation(t *testing.T) {
 	model := &types.Model{
 		ID:     "chat-id",
