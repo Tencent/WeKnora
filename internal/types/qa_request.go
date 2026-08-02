@@ -8,6 +8,7 @@ type QARequest struct {
 	Query               string             // User query text
 	AssistantMessageID  string             // Pre-created assistant message ID
 	SummaryModelID      string             // Optional model override; empty = use agent/KB default
+	RerankModelID       string             // Optional rerank model ID or unique name; empty = tenant config / auto-detect
 	CustomAgent         *CustomAgent       // Optional custom agent for config override
 	SharedAgentReadOnly bool               // True only when access came from an agent share; source-workspace writes are forbidden
 	KnowledgeBaseIDs    []string           // Knowledge base IDs to search (from request + @mentions)

@@ -331,3 +331,16 @@ func (s *sessionService) restrictMentionsToAgentScope(
 
 	return filteredKBs, filteredKnowledge
 }
+
+// resolveRerankModelID resolves the effective rerank model ID for a request.
+// Precedence mirrors resolveChatModelID: requested override, then agent
+// config, then tenant RetrievalConfig, then auto-detect.
+// TODO: implement full resolution. See session_rerank_resolution_test.go.
+func (s *sessionService) resolveRerankModelID(
+	ctx context.Context,
+	requested string,
+	agentRerankModelID string,
+	rc *types.RetrievalConfig,
+) (string, error) {
+	return "", nil
+}

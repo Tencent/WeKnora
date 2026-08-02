@@ -794,3 +794,10 @@ func (s *sessionService) GenerateTitleAsync(
 		}
 	}()
 }
+
+// ResolveRerankModel resolves a requested rerank model ID or name to a model ID.
+// Empty requested returns empty; resolution is left to the caller's chain.
+// TODO: implement full resolution. See session_rerank_resolution_test.go.
+func (s *sessionService) ResolveRerankModel(ctx context.Context, requested string) (string, error) {
+	return "", nil
+}

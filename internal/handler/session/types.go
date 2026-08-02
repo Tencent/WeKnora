@@ -50,6 +50,7 @@ type CreateKnowledgeQARequest struct {
 	AgentSourceTenantID   uint64                       `json:"agent_source_tenant_id,omitempty"`      // Optional disambiguator; backend still verifies the share relation
 	WebSearchEnabled      bool                         `json:"web_search_enabled"`                    // Whether web search is enabled for this request
 	SummaryModelID        string                       `json:"summary_model_id"`                      // Optional summary model ID for this request (overrides session default)
+	RerankModelID         string                       `json:"rerank_model_id,omitempty"`             // Optional rerank model ID or unique name for this request
 	MCPServiceIDs         []string                     `json:"mcp_service_ids"`                       // Per-request MCP services selected via @mention
 	SkillNames            []string                     `json:"skill_names"`                           // Per-request Skills selected via @mention
 	TagIDs                []string                     `json:"tag_ids"`                               // @mentioned tag IDs (display/debug; scoped via MentionedItems)
@@ -77,6 +78,7 @@ type SearchKnowledgeRequest struct {
 	KnowledgeIDs     []string               `json:"knowledge_ids"`                         // IDs of specific knowledge (files) to search
 	TagIDs           []string               `json:"tag_ids"`                               // Tag IDs for filtering within a single KB
 	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // Optional scoped tag mentions
+	RerankModelID    string                 `json:"rerank_model_id,omitempty"`             // Optional rerank model ID or unique name for this request
 }
 
 // StopSessionRequest represents the stop session request
