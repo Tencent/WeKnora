@@ -33,7 +33,8 @@ func newRerankResolutionService(ms *rerankResolutionModelService) *sessionServic
 	return &sessionService{modelService: ms}
 }
 
-// rerankModel returns a ready-made rerank model; status overrides to inactive.
+// rerankModel returns a rerank model with the given ID/name; a false
+// active flag sets a non-active status.
 func rerankModel(id, name string, active bool) *types.Model {
 	status := types.ModelStatusActive
 	if !active {
@@ -52,7 +53,7 @@ func activeRerankModels() []*types.Model {
 // --- ResolveRerankModel (low-level helper) ---
 
 // An empty requested string means "no override": returns empty with no
-// error, leaving resolution to the chain (tenant config -> auto-detect).
+// error, leaving fallback to resolveRerankModelID.
 func TestResolveRerankModel_EmptyRequest_ReturnsEmpty(t *testing.T) {
 	svc := newRerankResolutionService(&rerankResolutionModelService{models: activeRerankModels()})
 
@@ -104,8 +105,7 @@ func TestResolveRerankModel_NotFound_403(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found or not accessible")
 }
 
-// Non-active models are invisible to resolution: unreachable by ID or
-// name, and never auto-selected.
+// Non-active models are invisible to resolution: unreachable by ID or name.
 func TestResolveRerankModel_InactiveExcluded(t *testing.T) {
 	svc := newRerankResolutionService(&rerankResolutionModelService{models: []*types.Model{
 		rerankModel("rerank-inactive", "inactive-name", false),
@@ -120,8 +120,8 @@ func TestResolveRerankModel_InactiveExcluded(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found or not accessible")
 }
 
-// A model-list failure propagates; the tenant-configured model path must
-// not depend on ListModels succeeding.
+// A model-list failure propagates to the caller; when the tenant config
+// supplies the model, ListModels must not be consulted.
 func TestResolveRerankModel_ListError_Propagates(t *testing.T) {
 	ms := &rerankResolutionModelService{listErr: assert.AnError}
 	svc := newRerankResolutionService(ms)
@@ -145,8 +145,8 @@ func TestResolveRerankModel_ModelServiceNil_InternalError(t *testing.T) {
 //
 // Mirrors resolveChatModelID precedence:
 // request override > agent config > tenant RetrievalConfig > auto-detect.
-// Request and agent values are validated hard (400/403); the tenant value
-// is used verbatim (matching the retrieve API path); auto-detect picks the
+// Request and agent values fail hard (400/403); the tenant value is used
+// without validation (same as SearchKnowledge); auto-detect picks the
 // first active rerank model.
 //
 // Structural rule: applyAgentOverridesToChatManage must NOT overwrite
@@ -237,10 +237,9 @@ func TestResolveRerankModelID_AgentInvalid_HardFails(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found or not accessible")
 }
 
-// The tenant RetrievalConfig value is used verbatim without
-// existence/active validation (matching the retrieve API path). A stale
-// value fails later at the rerank stage (GetRerankModel ->
-// ErrGetRerankModel), not here.
+// The tenant RetrievalConfig value is used without existence/active
+// validation (same as SearchKnowledge). A stale value fails later at the
+// rerank stage (GetRerankModel -> ErrGetRerankModel), not here.
 func TestResolveRerankModelID_TenantConfigNotValidated(t *testing.T) {
 	ms := &rerankResolutionModelService{models: activeRerankModels()}
 	svc := newRerankResolutionService(ms)
@@ -252,10 +251,10 @@ func TestResolveRerankModelID_TenantConfigNotValidated(t *testing.T) {
 	assert.Equal(t, 0, ms.listCalls, "tenant config path must not consult the model list")
 }
 
-// When auto-detect is reached and ListModels fails, the error is swallowed
-// and resolution returns empty (matching the retrieve API auto-detect
-// behavior). The rerank stage then skips (empty_model_id) instead of
-// failing the whole request.
+// When auto-detect is reached and ListModels fails, the error is ignored
+// and resolution returns empty (same as SearchKnowledge's auto-detect).
+// The rerank stage then skips (empty_model_id) instead of failing the
+// whole request.
 func TestResolveRerankModelID_AutoDetectListError_Swallowed(t *testing.T) {
 	ms := &rerankResolutionModelService{listErr: assert.AnError}
 	svc := newRerankResolutionService(ms)
@@ -269,8 +268,9 @@ func TestResolveRerankModelID_AutoDetectListError_Swallowed(t *testing.T) {
 
 // applyAgentOverridesToChatManage must NOT touch RerankModelID: resolution
 // is owned by resolveRerankModelID so the request > agent > tenant >
-// auto-detect precedence holds (agent in the blanket pass would win over an
-// explicit request override, contradicting the summary_model_id semantics).
+// auto-detect precedence holds. If the agent value were still applied
+// last, it would win over an explicit request override, contradicting the
+// summary_model_id semantics.
 func TestApplyAgentOverrides_RerankModelIDUntouched(t *testing.T) {
 	svc := &sessionService{}
 	cm := &types.ChatManage{}
