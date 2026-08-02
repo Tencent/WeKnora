@@ -313,8 +313,11 @@ type ParserEngineConfig struct {
 	MinerUVLMServerURL  string `json:"mineru_vlm_server_url,omitempty"` // vLLM 服务器地址 (vlm-http-client / hybrid-http-client)
 	MinerUEnableFormula *bool  `json:"mineru_enable_formula,omitempty"`
 	MinerUEnableTable   *bool  `json:"mineru_enable_table,omitempty"`
-	MinerUEnableOCR     *bool  `json:"mineru_enable_ocr,omitempty"`
-	MinerULanguage      string `json:"mineru_language,omitempty"`
+	MinerUParseMethod   string `json:"mineru_parse_method,omitempty"`
+	// MinerUEnableOCR is retained for compatibility with configurations saved
+	// before parse_method supported auto/ocr/txt.
+	MinerUEnableOCR *bool  `json:"mineru_enable_ocr,omitempty"`
+	MinerULanguage  string `json:"mineru_language,omitempty"`
 
 	// MinerU 云 API 解析参数
 	MinerUCloudModel         string `json:"mineru_cloud_model,omitempty"` // model_version: pipeline, vlm, MinerU-HTML
@@ -340,6 +343,32 @@ type ParserEngineConfig struct {
 	PaddleOCRVLCloudModel               string `json:"paddleocr_vl_cloud_model,omitempty"` // e.g. PaddleOCR-VL-1.6
 	PaddleOCRVLCloudUseSealRecognition  *bool  `json:"paddleocr_vl_cloud_use_seal_recognition,omitempty"`
 	PaddleOCRVLCloudUseChartRecognition *bool  `json:"paddleocr_vl_cloud_use_chart_recognition,omitempty"`
+}
+
+const (
+	MinerUParseMethodAuto = "auto"
+	MinerUParseMethodOCR  = "ocr"
+	MinerUParseMethodText = "txt"
+)
+
+// ResolveMinerUParseMethod normalizes the explicit MinerU parse method and
+// maps the legacy OCR toggle to the closest safe behavior. The old enabled
+// value maps to auto instead of ocr so digital PDFs keep their native text
+// layer while scanned PDFs are still detected and OCRed by MinerU.
+func ResolveMinerUParseMethod(method string, legacyOCREnabled *bool) string {
+	switch strings.ToLower(strings.TrimSpace(method)) {
+	case MinerUParseMethodAuto:
+		return MinerUParseMethodAuto
+	case MinerUParseMethodOCR:
+		return MinerUParseMethodOCR
+	case MinerUParseMethodText:
+		return MinerUParseMethodText
+	}
+
+	if legacyOCREnabled != nil && !*legacyOCREnabled {
+		return MinerUParseMethodText
+	}
+	return MinerUParseMethodAuto
 }
 
 func (c *ParserEngineConfig) ResolveChatParserEngine(fileType string) string {
@@ -381,6 +410,9 @@ func (c *ParserEngineConfig) ToOverridesMap() map[string]string {
 	}
 	if c.MinerUEnableTable != nil {
 		m["mineru_enable_table"] = fmt.Sprintf("%v", *c.MinerUEnableTable)
+	}
+	if c.MinerUParseMethod != "" || c.MinerUEnableOCR != nil {
+		m["mineru_parse_method"] = ResolveMinerUParseMethod(c.MinerUParseMethod, c.MinerUEnableOCR)
 	}
 	if c.MinerUEnableOCR != nil {
 		m["mineru_enable_ocr"] = fmt.Sprintf("%v", *c.MinerUEnableOCR)
