@@ -1527,10 +1527,10 @@ func (h *OrganizationHandler) listSpaceKnowledgeBasesInOrganization(ctx context.
 		return nil, err
 	}
 
-	directKbIDs := make(map[string]bool)
+	itemsByKbID := make(map[string]*types.OrganizationSharedKnowledgeBaseItem)
 	for _, item := range directList {
 		if item.KnowledgeBase != nil && item.KnowledgeBase.ID != "" {
-			directKbIDs[item.KnowledgeBase.ID] = true
+			itemsByKbID[item.KnowledgeBase.ID] = item
 		}
 	}
 
@@ -1594,7 +1594,18 @@ func (h *OrganizationHandler) listSpaceKnowledgeBasesInOrganization(ctx context.
 		sourceTenantID := agent.TenantID
 
 		for _, kbID := range kbIDs {
-			if kbID == "" || directKbIDs[kbID] {
+			if kbID == "" {
+				continue
+			}
+			source := types.SourceFromAgentInfo{
+				AgentID:         agent.ID,
+				AgentName:       agentName,
+				KBSelectionMode: agent.Config.KBSelectionMode,
+			}
+			if existing, ok := itemsByKbID[kbID]; ok {
+				if existing.SourceTenantID == sourceTenantID {
+					addKnowledgeBaseAgentSource(existing, source)
+				}
 				continue
 			}
 			kb, err := h.kbService.GetKnowledgeBaseByIDOnly(ctx, kbID)
@@ -1604,8 +1615,6 @@ func (h *OrganizationHandler) listSpaceKnowledgeBasesInOrganization(ctx context.
 			if kb.TenantID != sourceTenantID {
 				continue
 			}
-			directKbIDs[kbID] = true
-
 			switch kb.Type {
 			case types.KnowledgeBaseTypeDocument:
 				if count, err := h.knowledgeRepo.CountKnowledgeByKnowledgeBaseID(ctx, sourceTenantID, kb.ID); err == nil {
@@ -1617,7 +1626,7 @@ func (h *OrganizationHandler) listSpaceKnowledgeBasesInOrganization(ctx context.
 				}
 			}
 
-			merged = append(merged, &types.OrganizationSharedKnowledgeBaseItem{
+			item := &types.OrganizationSharedKnowledgeBaseItem{
 				SharedKnowledgeBaseInfo: types.SharedKnowledgeBaseInfo{
 					KnowledgeBase:  kb,
 					ShareID:        "",
@@ -1631,16 +1640,30 @@ func (h *OrganizationHandler) listSpaceKnowledgeBasesInOrganization(ctx context.
 				// 就应该归到「我共享的」分组——否则用户会在共享空间里看到
 				// 自己的 KB 出现在「共享给我·仅查看」组里，非常迷惑。
 				IsMine: sourceTenantID == tenantID,
-				SourceFromAgent: &types.SourceFromAgentInfo{
-					AgentID:         agent.ID,
-					AgentName:       agentName,
-					KBSelectionMode: agent.Config.KBSelectionMode,
-				},
-			})
+			}
+			addKnowledgeBaseAgentSource(item, source)
+			itemsByKbID[kbID] = item
+			merged = append(merged, item)
 		}
 	}
 
 	return merged, nil
+}
+
+// addKnowledgeBaseAgentSource records every shared agent that carries a KB.
+// SourceFromAgent remains reserved for agent-only rows so existing list-page
+// rendering continues to distinguish direct shares from agent-only access.
+func addKnowledgeBaseAgentSource(item *types.OrganizationSharedKnowledgeBaseItem, source types.SourceFromAgentInfo) {
+	for _, existing := range item.SourceFromAgents {
+		if existing.AgentID == source.AgentID {
+			return
+		}
+	}
+	item.SourceFromAgents = append(item.SourceFromAgents, source)
+	if item.ShareID == "" && item.SourceFromAgent == nil {
+		primarySource := source
+		item.SourceFromAgent = &primarySource
+	}
 }
 
 // ListOrganizationSharedKnowledgeBases lists all knowledge bases in the given organization (including those shared by the current tenant and those from shared agents), for the list page when a space is selected.
@@ -1683,6 +1706,9 @@ func (h *OrganizationHandler) ListOrganizationSharedKnowledgeBases(c *gin.Contex
 		extras := map[string]interface{}{"is_mine": item.IsMine}
 		if item.SourceFromAgent != nil {
 			extras["source_from_agent"] = item.SourceFromAgent
+		}
+		if len(item.SourceFromAgents) > 0 {
+			extras["source_from_agents"] = item.SourceFromAgents
 		}
 		rows = append(rows, sharedKBRow(&item.SharedKnowledgeBaseInfo, extras))
 	}
