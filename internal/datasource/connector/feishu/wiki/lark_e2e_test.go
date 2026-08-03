@@ -1,10 +1,11 @@
-package feishu
+package wiki
 
 import (
 	"context"
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -14,15 +15,15 @@ import (
 //
 // The fake server stands in for the Open Platform (base_url points at it), but
 // the resource URL is built from the region's web host, so this exercises the
-// real ListResources → wikiNodeToResource → region.wikiURL path.
+// real ListResources → wikiNodeToResource → region.WikiURL path.
 func TestListResources_ResourceURLFollowsRegion(t *testing.T) {
 	cases := []struct {
-		region      Region
+		region      core.Region
 		wantURL     string
 		forbiddenIn string
 	}{
-		{RegionFeishu, "https://feishu.cn/wiki/space1", "larksuite"},
-		{RegionLark, "https://larksuite.com/wiki/space1", "feishu"},
+		{core.RegionFeishu, "https://feishu.cn/wiki/space1", "larksuite"},
+		{core.RegionLark, "https://larksuite.com/wiki/space1", "feishu"},
 	}
 
 	for _, c := range cases {
@@ -53,22 +54,21 @@ func TestListResources_ResourceURLFollowsRegion(t *testing.T) {
 // region is the only thing standing between a Lark app and the wrong cloud.
 func TestClient_ResolvesRegionHostWithoutOverride(t *testing.T) {
 	cases := []struct {
-		region Region
+		region core.Region
 		want   string
 	}{
-		{RegionFeishu, "https://open.feishu.cn"},
-		{RegionLark, "https://open.larksuite.com"},
+		{core.RegionFeishu, "https://open.feishu.cn"},
+		{core.RegionLark, "https://open.larksuite.com"},
 	}
 
 	for _, c := range cases {
 		t.Run(c.region.Label, func(t *testing.T) {
-			cfg, err := parseFeishuConfig(makeConfigNoBaseURL(), c.region)
+			cfg, err := core.ParseFeishuConfig(makeConfigNoBaseURL(), c.region)
 			if err != nil {
-				t.Fatalf("parseFeishuConfig: %v", err)
+				t.Fatalf("ParseFeishuConfig: %v", err)
 			}
-			client := NewClient(cfg)
-			if client.baseURL != c.want {
-				t.Errorf("client baseURL = %q, want %q", client.baseURL, c.want)
+			if cfg.GetBaseURL() != c.want {
+				t.Errorf("baseURL = %q, want %q", cfg.GetBaseURL(), c.want)
 			}
 		})
 	}

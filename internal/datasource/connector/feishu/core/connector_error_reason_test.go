@@ -1,4 +1,4 @@
-package feishu
+package core
 
 import (
 	"errors"
@@ -40,7 +40,7 @@ func TestFeishuFailure(t *testing.T) {
 		},
 		{
 			name:          "api error carries the feishu code as a param",
-			err:           errors.New("feishu api error: status=500 body={\"code\":1663,\"msg\":\"internal error\",\"error\":{\"log_id\":\"20260\"}}"),
+			err:           errors.New("feishu api error: status=500 body={\"code\":1663,\"msg\":\"internal error\",\"Error\":{\"log_id\":\"20260\"}}"),
 			wantCode:      "feishu_api_error",
 			wantCodeValue: "1663",
 			noLeak:        []string{"log_id", "body=", "{"},

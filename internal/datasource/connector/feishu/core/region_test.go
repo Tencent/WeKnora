@@ -1,4 +1,4 @@
-package feishu
+package core
 
 import (
 	"strings"
@@ -25,27 +25,21 @@ func TestRegions_AreDistinct(t *testing.T) {
 	}
 }
 
-func TestConnectorType_FollowsRegion(t *testing.T) {
-	if got := NewConnector(RegionFeishu).Type(); got != types.ConnectorTypeFeishu {
-		t.Errorf("Feishu connector Type() = %q, want %q", got, types.ConnectorTypeFeishu)
-	}
-	if got := NewConnector(RegionLark).Type(); got != types.ConnectorTypeLark {
-		t.Errorf("Lark connector Type() = %q, want %q", got, types.ConnectorTypeLark)
-	}
-}
+// TestConnectorType_FollowsRegion lives in package wiki (it exercises
+// wiki.NewConnector); see wiki/connector_test.go TestConnectorType.
 
 // The wiki link shown in the resource picker must point at the cloud the data
 // actually lives on. Feishu's value is the pre-existing one and must not drift.
 func TestRegion_WikiURL(t *testing.T) {
-	if got, want := RegionFeishu.wikiURL("spc123"), "https://feishu.cn/wiki/spc123"; got != want {
-		t.Errorf("Feishu wikiURL = %q, want %q", got, want)
+	if got, want := RegionFeishu.WikiURL("spc123"), "https://feishu.cn/wiki/spc123"; got != want {
+		t.Errorf("Feishu WikiURL = %q, want %q", got, want)
 	}
-	if got, want := RegionLark.wikiURL("spc123"), "https://larksuite.com/wiki/spc123"; got != want {
-		t.Errorf("Lark wikiURL = %q, want %q", got, want)
+	if got, want := RegionLark.WikiURL("spc123"), "https://larksuite.com/wiki/spc123"; got != want {
+		t.Errorf("Lark WikiURL = %q, want %q", got, want)
 	}
 	// A Lark link must never point at the Feishu host — that was the bug.
-	if strings.Contains(RegionLark.wikiURL("x"), "feishu") {
-		t.Errorf("Lark wikiURL leaks the Feishu host: %q", RegionLark.wikiURL("x"))
+	if strings.Contains(RegionLark.WikiURL("x"), "feishu") {
+		t.Errorf("Lark WikiURL leaks the Feishu host: %q", RegionLark.WikiURL("x"))
 	}
 }
 
@@ -70,9 +64,9 @@ func TestParseFeishuConfig_BaseURLDefaultsToRegion(t *testing.T) {
 			if c.baseURL != "" {
 				creds["base_url"] = c.baseURL
 			}
-			cfg, err := parseFeishuConfig(&types.DataSourceConfig{Credentials: creds}, c.region)
+			cfg, err := ParseFeishuConfig(&types.DataSourceConfig{Credentials: creds}, c.region)
 			if err != nil {
-				t.Fatalf("parseFeishuConfig: %v", err)
+				t.Fatalf("ParseFeishuConfig: %v", err)
 			}
 			if got := cfg.GetBaseURL(); got != c.want {
 				t.Errorf("GetBaseURL() = %q, want %q", got, c.want)

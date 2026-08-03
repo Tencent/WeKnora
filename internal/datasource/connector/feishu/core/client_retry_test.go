@@ -1,4 +1,4 @@
-package feishu
+package core
 
 import (
 	"context"
@@ -10,12 +10,12 @@ import (
 )
 
 // retryTestServer builds a server that always answers the auth-token call and
-// routes the given target path to h, so tests can drive doRequest's retry loop.
+// routes the given target path to h, so tests can drive DoRequest's retry loop.
 func retryTestServer(target string, h http.HandlerFunc) (*httptest.Server, *Config) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, tokenResponse{
-			apiResponse:       apiResponse{Code: 0},
+		writeJSON(w, TokenResponse{
+			ApiResponse:       ApiResponse{Code: 0},
 			TenantAccessToken: "fake-token",
 			Expire:            7200,
 		})
@@ -36,13 +36,13 @@ func TestDoRequest_RetriesOn429ThenSucceeds(t *testing.T) {
 			_, _ = io.WriteString(w, `{"code":99991400,"msg":"rate limited"}`)
 			return
 		}
-		writeJSON(w, apiResponse{Code: 0})
+		writeJSON(w, ApiResponse{Code: 0})
 	})
 	defer ts.Close()
 
 	c := NewClient(cfg)
-	var resp apiResponse
-	if err := c.doRequest(context.Background(), http.MethodGet, "/target", nil, &resp); err != nil {
+	var resp ApiResponse
+	if err := c.DoRequest(context.Background(), http.MethodGet, "/target", nil, &resp); err != nil {
 		t.Fatalf("expected success after retry, got %v", err)
 	}
 	if attempts < 2 {
@@ -61,7 +61,7 @@ func TestDoRequest_429ExhaustsRetries(t *testing.T) {
 	defer ts.Close()
 
 	c := NewClient(cfg)
-	err := c.doRequest(context.Background(), http.MethodGet, "/target", nil, nil)
+	err := c.DoRequest(context.Background(), http.MethodGet, "/target", nil, nil)
 	if err == nil {
 		t.Fatal("expected error when 429s exceed the retry budget")
 	}
@@ -83,7 +83,7 @@ func TestDoRequest_5xxRetriesOnce(t *testing.T) {
 	defer cancel()
 
 	c := NewClient(cfg)
-	if err := c.doRequest(ctx, http.MethodGet, "/target", nil, nil); err == nil {
+	if err := c.DoRequest(ctx, http.MethodGet, "/target", nil, nil); err == nil {
 		t.Fatal("expected error after 5xx exhaustion")
 	}
 	if attempts != 2 { // initial + 1 retry
@@ -101,7 +101,7 @@ func TestDoRequest_4xxNotRetried(t *testing.T) {
 	defer ts.Close()
 
 	c := NewClient(cfg)
-	if err := c.doRequest(context.Background(), http.MethodGet, "/target", nil, nil); err == nil {
+	if err := c.DoRequest(context.Background(), http.MethodGet, "/target", nil, nil); err == nil {
 		t.Fatal("expected error on 400")
 	}
 	if attempts != 1 {

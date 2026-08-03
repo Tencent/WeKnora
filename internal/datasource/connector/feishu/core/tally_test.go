@@ -1,4 +1,4 @@
-package feishu
+package core
 
 import (
 	"strings"
@@ -10,9 +10,9 @@ func TestFetchTally_CountsAndSummary(t *testing.T) {
 	tally.fetch()
 	tally.fetch()
 	tally.fetch()
-	tally.skip("mindnote")
-	tally.skip("mindnote")
-	tally.skip("slides")
+	tally.Skip("mindnote")
+	tally.Skip("mindnote")
+	tally.Skip("slides")
 	tally.fail()
 
 	if got := tally.skipped(); got != 3 {
