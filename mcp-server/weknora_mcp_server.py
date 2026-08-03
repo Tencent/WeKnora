@@ -254,17 +254,19 @@ class WeKnoraClient:
         """
         if self._UUID_RE.match(kb_id_or_name):
             return kb_id_or_name
-        resp = self.list_knowledge_bases()
-        kbs = resp.get("data", resp) if isinstance(resp, dict) else resp
-        if isinstance(kbs, dict):
-            kbs = kbs.get("list", kbs.get("items", []))
+        # Search own + shared knowledge bases for a name match
         needle = kb_id_or_name.lower()
-        for kb in (kbs or []):
-            if isinstance(kb, dict) and kb.get("name", "").lower() == needle:
-                return kb["id"]
+        for source in (self.list_knowledge_bases, self.list_shared_knowledge_bases):
+            resp = source()
+            kbs = resp.get("data", resp) if isinstance(resp, dict) else resp
+            if isinstance(kbs, dict):
+                kbs = kbs.get("list", kbs.get("items", []))
+            for kb in (kbs or []):
+                if isinstance(kb, dict) and kb.get("name", "").lower() == needle:
+                    return kb["id"]
         raise ValueError(
             f"Knowledge base {kb_id_or_name!r} not found. "
-            "Use list_knowledge_bases to see available IDs and names."
+            "Use list_knowledge_bases or list_shared_knowledge_bases to see available IDs and names."
         )
 
     def hybrid_search(self, kb_id: str, query: str, config: Dict) -> Dict:
@@ -661,7 +663,7 @@ def hybrid_search(
     """Perform hybrid (vector + keyword) search in a knowledge base.
 
     kb_id may be a UUID or a knowledge-base name (resolved automatically).
-    Use list_knowledge_bases to discover available knowledge bases.
+    Use list_knowledge_bases or list_shared_knowledge_bases to discover available knowledge bases.
     """
     config = {
         "vector_threshold": vector_threshold,
@@ -791,7 +793,7 @@ async def chat(
 
     ALWAYS provide knowledge_base_ids (names like 'my-knowledge-base' or UUIDs) so
     retrieval can run — without them the answer is based on LLM knowledge only.
-    Use list_knowledge_bases to discover available knowledge bases.
+    Use list_knowledge_bases or list_shared_knowledge_bases to discover available knowledge bases.
     For multi-step reasoning or tool-calling use agent_chat instead.
     """
     kb_ids = (
@@ -847,12 +849,17 @@ async def agent_chat(
             )
             if needs_kbs:
                 kb_list = client.list_knowledge_bases()
+                shared_list = client.list_shared_knowledge_bases()
                 kbs = kb_list.get("data") or kb_list
+                shared_kbs = shared_list.get("data") or shared_list
                 if isinstance(kbs, dict):
                     kbs = kbs.get("list", kbs.get("items", []))
+                if isinstance(shared_kbs, dict):
+                    shared_kbs = shared_kbs.get("list", shared_kbs.get("items", []))
+                all_kbs = (kbs or []) + (shared_kbs or [])
                 kb_summary = ", ".join(
                     f"{kb.get('name')} ({kb.get('id')})"
-                    for kb in (kbs or [])[:10]
+                    for kb in all_kbs[:10]
                     if isinstance(kb, dict)
                 )
                 raise ValueError(
