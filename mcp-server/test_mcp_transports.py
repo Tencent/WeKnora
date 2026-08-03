@@ -86,7 +86,7 @@ class StdioToolsListTest(unittest.TestCase):
                     return len(tools.tools)
 
         count = asyncio.run(_run())
-        self.assertEqual(count, 28)
+        self.assertEqual(count, 29)
 
 
 class HttpStatelessSmokeTest(unittest.TestCase):
