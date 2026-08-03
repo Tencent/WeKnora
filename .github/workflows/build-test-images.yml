@@ -1,0 +1,145 @@
+name: Build Test Images (tar.gz)
+
+# Builds linux/amd64 Docker images for the current branch and exports them as
+# .tar.gz artifacts you can download from the Actions run page and transfer
+# to a test server. No Docker Hub push, no secrets required.
+#
+# Trigger: manual only (Actions tab -> Run workflow). This keeps it off every
+# push so you control when the (slow, CGO-heavy) app build runs.
+on:
+  workflow_dispatch:
+    inputs:
+      images:
+        description: "Images to build (app, ui, or both)"
+        required: true
+        default: "both"
+        type: choice
+        options:
+          - both
+          - app
+          - ui
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  # ── Frontend (ui) ─────────────────────────────────────────────────────────
+  build-ui:
+    if: ${{ github.event.inputs.images == 'both' || github.event.inputs.images == 'ui' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Prepare version info
+        id: version
+        run: |
+          eval "$(./scripts/get_version.sh env)"
+          echo "commit_id=$COMMIT_ID" >> $GITHUB_OUTPUT
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend dist
+        env:
+          VITE_IS_DOCKER: true
+          VITE_FRONTEND_COMMIT: ${{ steps.version.outputs.commit_id }}
+        run: ./scripts/build_frontend_dist.sh
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build ui image (linux/amd64)
+        uses: docker/build-push-action@v7
+        with:
+          push: false
+          load: true
+          platforms: linux/amd64
+          file: frontend/Dockerfile
+          context: ./frontend
+          tags: wechatopenai/weknora-ui:latest
+          cache-from: type=gha,scope=build-ui
+          cache-to: type=gha,scope=build-ui,mode=max
+
+      - name: Export ui image to tar.gz
+        run: |
+          mkdir -p out
+          docker save wechatopenai/weknora-ui:latest | gzip > out/weknora-ui-linux-amd64.tar.gz
+          ls -lh out/
+
+      - name: Upload ui tar.gz
+        uses: actions/upload-artifact@v7
+        with:
+          name: weknora-ui-linux-amd64
+          path: out/weknora-ui-linux-amd64.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  # ── Backend (app) ────────────────────────────────────────────────────────
+  build-app:
+    if: ${{ github.event.inputs.images == 'both' || github.event.inputs.images == 'app' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Prepare version info
+        id: version
+        run: |
+          eval "$(./scripts/get_version.sh env)"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "commit_id=$COMMIT_ID" >> $GITHUB_OUTPUT
+          echo "build_time=$BUILD_TIME" >> $GITHUB_OUTPUT
+          echo "go_version=$GO_VERSION" >> $GITHUB_OUTPUT
+          ./scripts/get_version.sh info
+
+      - name: Build app image (linux/amd64)
+        uses: docker/build-push-action@v7
+        with:
+          push: false
+          load: true
+          platforms: linux/amd64
+          file: docker/Dockerfile.app
+          context: .
+          build-args: |
+            VERSION_ARG=${{ steps.version.outputs.version }}
+            COMMIT_ID_ARG=${{ steps.version.outputs.commit_id }}
+            BUILD_TIME_ARG=${{ steps.version.outputs.build_time }}
+            GO_VERSION_ARG=${{ steps.version.outputs.go_version }}
+          tags: wechatopenai/weknora-app:latest
+          cache-from: type=gha,scope=build-app
+          cache-to: type=gha,scope=build-app,mode=max
+
+      - name: Export app image to tar.gz
+        run: |
+          mkdir -p out
+          docker save wechatopenai/weknora-app:latest | gzip > out/weknora-app-linux-amd64.tar.gz
+          ls -lh out/
+
+      - name: Upload app tar.gz
+        uses: actions/upload-artifact@v7
+        with:
+          name: weknora-app-linux-amd64
+          path: out/weknora-app-linux-amd64.tar.gz
+          if-no-files-found: error
+          retention-days: 7
