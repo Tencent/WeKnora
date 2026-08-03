@@ -2,7 +2,6 @@ package confluence
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -103,181 +102,51 @@ func (c *Connector) ResolveResourceAncestors(
 }
 
 // FetchAll performs a full sync of all pages in the specified spaces.
+// It runs the same traversal as FetchStream: a nil cursor skips nothing, so a
+// full sync is just a stream that starts without prior state.
 func (c *Connector) FetchAll(
 	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
 ) ([]types.FetchedItem, error) {
-	items, _, err := c.walk(ctx, config, resourceIDs, nil, false)
-	return items, err
+	scoped := *config
+	scoped.ResourceIDs = resourceIDs
+
+	collector := &itemCollector{}
+	if _, err := c.FetchStream(ctx, &scoped, nil, collector); err != nil {
+		return nil, err
+	}
+	return collector.items, nil
 }
 
 // FetchIncremental returns items changed (or deleted) since the prior cursor.
-// Deletion detection: pages present in the prior cursor but absent from the
-// current listing are emitted as IsDeleted=true placeholder items.
+// Deletion detection: pages present in the prior cursor but absent from a
+// complete current listing are emitted as IsDeleted=true placeholder items.
 func (c *Connector) FetchIncremental(
 	ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor,
 ) ([]types.FetchedItem, *types.SyncCursor, error) {
-	resourceIDs := config.ResourceIDs
-	if len(resourceIDs) == 0 {
-		return nil, nil, fmt.Errorf("no resource IDs (space IDs) configured")
-	}
-
-	// Decode prior cursor (if any).
-	var prev *confluenceCursor
-	if cursor != nil && cursor.ConnectorCursor != nil {
-		prev = unmarshalCursor(cursor.ConnectorCursor)
-	}
-
-	items, newCursor, err := c.walk(ctx, config, resourceIDs, prev, true)
+	collector := &itemCollector{}
+	next, err := c.FetchStream(ctx, config, cursor, collector)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	// Marshal newCursor into a generic map for the SyncCursor wrapper.
-	cursorMap := make(map[string]interface{})
-	b, _ := json.Marshal(newCursor)
-	_ = json.Unmarshal(b, &cursorMap)
-
-	return items, &types.SyncCursor{
-		LastSyncTime:    newCursor.LastSyncTime,
-		ConnectorCursor: cursorMap,
-	}, nil
+	return collector.items, next, nil
 }
 
-// walk is the shared implementation for FetchAll / FetchIncremental.
-// Follows the same pattern as the Yuque connector's walk method:
-//  1. For each resource (space), list all pages via CQL
-//  2. Compare each page's version.when against the prior cursor
-//  3. Export changed pages as PDF
-//  4. Detect deletions (pages in prior cursor but absent now)
-//
-// If incremental is false, prev is ignored and no cursor is returned.
-func (c *Connector) walk(
-	ctx context.Context,
-	config *types.DataSourceConfig,
-	resourceIDs []string,
-	prev *confluenceCursor,
-	incremental bool,
-) ([]types.FetchedItem, *confluenceCursor, error) {
-	cfg, err := parseConfluenceConfig(config)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	client, err := NewClient(cfg)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	newCursor := &confluenceCursor{
-		LastSyncTime:   time.Now(),
-		SpacePageTimes: make(map[string]map[string]string),
-	}
-
-	var out []types.FetchedItem
-
-	// Fetch space list once and build a lookup map to avoid repeated API calls.
-	spaces, err := client.ListSpaces(ctx)
-	if err != nil {
-		return nil, nil, fmt.Errorf("list spaces: %w", err)
-	}
-	spaceMap := make(map[string]*confluenceSpace, len(spaces))
-	for i := range spaces {
-		spaceMap[spaces[i].ID] = &spaces[i]
-	}
-
-	for _, resourceID := range resourceIDs {
-		prefix, id := parseResourceID(resourceID)
-		if prefix != "s" {
-			logger.Warnf(ctx, "[Confluence] skipping unsupported resource type %q (only space-level sync is supported)", prefix)
-			continue
-		}
-
-		// Look up the space from the cached map
-		space, ok := spaceMap[id]
-		if !ok {
-			logger.Warnf(ctx, "[Confluence] space %s not found, skipping (may have been deleted)", id)
-			continue
-		}
-
-		// List all pages in this space
-		var pages []confluencePage
-		if cfg.IsCloud() {
-			// Cloud: use v2 API to list pages (v1 CQL search may not work on Cloud)
-			pages, err = client.GetAllPagesInSpaceV2(ctx, space.ID, space.Key, space.Name)
-		} else {
-			// Server / DC: use v1 CQL search
-			pages, err = client.GetAllPagesInSpace(ctx, space.Key)
-		}
-		if err != nil {
-			logger.Warnf(ctx, "[Confluence] failed to list pages in space %s: %v", space.Key, err)
-			continue
-		}
-
-		currentPages := make(map[string]bool)
-		newCursor.SpacePageTimes[resourceID] = make(map[string]string)
-
-		for _, page := range pages {
-			currentPages[page.ID] = true
-			newCursor.SpacePageTimes[resourceID][page.ID] = page.Version.When
-
-			// Incremental: skip if page hasn't changed since last sync
-			if incremental && prev != nil && prev.SpacePageTimes != nil {
-				if prevTimes, ok := prev.SpacePageTimes[resourceID]; ok {
-					if prevTime, exists := prevTimes[page.ID]; exists {
-						if prevTime == page.Version.When {
-							// Page unchanged, skip
-							continue
-						}
-					}
-				}
-			}
-
-			// Page is new or changed — export as PDF
-			item, err := c.fetchPageAsPDF(ctx, client, cfg, page, resourceID)
-			if err != nil {
-				out = append(out, types.FetchedItem{
-					ExternalID:       page.ID,
-					Title:            page.Title,
-					SourceResourceID: resourceID,
-					Metadata: map[string]string{
-						"error":   err.Error(),
-						"channel": types.ChannelConfluence,
-					},
-				})
-				continue
-			}
-			if item != nil {
-				out = append(out, *item)
-			}
-		}
-
-		logger.Infof(ctx, "[Confluence] space %s (key=%s): total pages=%d",
-			space.Name, space.Key, len(pages))
-
-		// Deletion detection (incremental only): pages in prior cursor but absent now
-		if incremental && prev != nil && prev.SpacePageTimes != nil {
-			if prevTimes, ok := prev.SpacePageTimes[resourceID]; ok {
-				for prevPageID := range prevTimes {
-					if !currentPages[prevPageID] {
-						out = append(out, types.FetchedItem{
-							ExternalID:       prevPageID,
-							IsDeleted:        true,
-							SourceResourceID: resourceID,
-							Metadata: map[string]string{
-								"channel": types.ChannelConfluence,
-							},
-						})
-					}
-				}
-			}
-		}
-	}
-
-	if !incremental {
-		return out, nil, nil
-	}
-	return out, newCursor, nil
+// itemCollector adapts a streaming fetch back to the batch FetchAll /
+// FetchIncremental signatures by buffering every emitted item. Both APIs then
+// share a single traversal, so cursor advancement and deletion detection cannot
+// drift between the streaming and non-streaming paths.
+type itemCollector struct {
+	items []types.FetchedItem
 }
+
+func (c *itemCollector) Emit(_ context.Context, item types.FetchedItem) error {
+	c.items = append(c.items, item)
+	return nil
+}
+
+// Checkpoint is a no-op: batch callers only persist the cursor FetchStream
+// returns at the end.
+func (c *itemCollector) Checkpoint(context.Context, *types.SyncCursor) error { return nil }
 
 // fetchPageAsPDF exports a single Confluence page.
 // For Server edition: uses the native PDF export action.
@@ -377,6 +246,8 @@ func (c *Connector) FetchStream(
 	lastCheckpoint := time.Now()
 
 	for _, resourceID := range resourceIDs {
+		prevTimes := prev.pageTimes(resourceID)
+
 		prefix, id := parseResourceID(resourceID)
 		if prefix != "s" {
 			logger.Warnf(ctx, "[Confluence] skipping unsupported resource type %q", prefix)
@@ -385,55 +256,72 @@ func (c *Connector) FetchStream(
 
 		space, ok := spaceMap[id]
 		if !ok {
-			logger.Warnf(ctx, "[Confluence] space %s not found, skipping", id)
+			// The space may be temporarily invisible (permission change, API
+			// hiccup) rather than deleted, so keep its recorded state instead of
+			// dropping it — see retain.
+			logger.Warnf(ctx, "[Confluence] space %s not found, skipping (retaining %d cursor entries)",
+				id, len(prevTimes))
+			newCursor.retain(resourceID, prevTimes)
 			continue
 		}
 
-		// List all pages in this space.
-		var pages []confluencePage
-		if cfg.IsCloud() {
-			pages, err = client.GetAllPagesInSpaceV2(ctx, space.ID, space.Key, space.Name)
-		} else {
-			pages, err = client.GetAllPagesInSpace(ctx, space.Key)
-		}
-		if err != nil {
-			logger.Warnf(ctx, "[Confluence] failed to list pages in space %s: %v", space.Key, err)
+		pages, lerr := c.listSpacePages(ctx, client, cfg, space)
+		if lerr != nil {
+			logger.Warnf(ctx, "[Confluence] failed to list pages in space %s: %v", space.Key, lerr)
+			newCursor.retain(resourceID, prevTimes)
 			continue
 		}
 
-		currentPages := make(map[string]bool)
-		newCursor.SpacePageTimes[resourceID] = make(map[string]string)
+		// A space that comes back empty but was synced before is treated as a
+		// failed listing rather than as "every page was deleted": Confluence
+		// answers 200 with no results while its search index rebuilds or when
+		// page-level permissions change, and mirror sync would turn those
+		// phantom deletions into real knowledge-base deletions. Reconciling a
+		// genuinely emptied space needs an explicit full sync.
+		if len(pages) == 0 && len(prevTimes) > 0 {
+			logger.Warnf(ctx,
+				"[Confluence] space %s returned 0 pages but %d were synced before; "+
+					"treating as a listing failure and skipping deletion detection",
+				space.Key, len(prevTimes))
+			newCursor.retain(resourceID, prevTimes)
+			continue
+		}
+
+		pageTimes := make(map[string]string, len(pages))
+		newCursor.SpacePageTimes[resourceID] = pageTimes
+		currentPages := make(map[string]bool, len(pages))
 
 		for i, page := range pages {
 			currentPages[page.ID] = true
-			newCursor.SpacePageTimes[resourceID][page.ID] = page.Version.When
+			prevWhen, hadPrev := prevTimes[page.ID]
 
-			// Skip unchanged pages (resume/incremental fast-path).
-			if prev != nil && prev.SpacePageTimes != nil {
-				if prevTimes, ok := prev.SpacePageTimes[resourceID]; ok {
-					if prevTime, exists := prevTimes[page.ID]; exists && prevTime == page.Version.When {
-						continue
-					}
-				}
+			// Resume/incremental fast-path: a page recorded at its current
+			// version was already exported, so keep the record and skip it.
+			if hadPrev && prevWhen == page.Version.When {
+				pageTimes[page.ID] = page.Version.When
+				continue
 			}
 
 			// Page is new or changed — export as PDF and emit immediately.
 			item, ferr := c.fetchPageAsPDF(ctx, client, cfg, page, resourceID)
 			if ferr != nil {
-				if eerr := h.Emit(ctx, types.FetchedItem{
-					ExternalID:       page.ID,
-					Title:            page.Title,
-					SourceResourceID: resourceID,
-					Metadata: map[string]string{
-						"error":   ferr.Error(),
-						"channel": types.ChannelConfluence,
-					},
-				}); eerr != nil {
+				// Do NOT record the current version: the PDF was never
+				// exported. Retaining the prior version keeps prev != current
+				// on the next run so the page is retried, instead of being
+				// skipped forever after one transient export failure. The
+				// service relies on this to converge (Tencent/WeKnora#2136).
+				if hadPrev {
+					pageTimes[page.ID] = prevWhen
+				}
+				if eerr := h.Emit(ctx, pageErrorItem(page, resourceID, ferr)); eerr != nil {
 					return nil, eerr
 				}
-			} else if item != nil {
-				if eerr := h.Emit(ctx, *item); eerr != nil {
-					return nil, eerr
+			} else {
+				pageTimes[page.ID] = page.Version.When
+				if item != nil {
+					if eerr := h.Emit(ctx, *item); eerr != nil {
+						return nil, eerr
+					}
 				}
 			}
 
@@ -454,28 +342,52 @@ func (c *Connector) FetchStream(
 		logger.Infof(ctx, "[Confluence] space %s (key=%s): total pages=%d",
 			space.Name, space.Key, len(pages))
 
-		// Deletion detection: pages in prior cursor but absent now.
-		if prev != nil && prev.SpacePageTimes != nil {
-			if prevTimes, ok := prev.SpacePageTimes[resourceID]; ok {
-				for prevPageID := range prevTimes {
-					if !currentPages[prevPageID] {
-						if eerr := h.Emit(ctx, types.FetchedItem{
-							ExternalID:       prevPageID,
-							IsDeleted:        true,
-							SourceResourceID: resourceID,
-							Metadata: map[string]string{
-								"channel": types.ChannelConfluence,
-							},
-						}); eerr != nil {
-							return nil, eerr
-						}
-					}
-				}
+		// Deletion detection: pages recorded last run but absent from this
+		// (complete) listing.
+		for prevPageID := range prevTimes {
+			if currentPages[prevPageID] {
+				continue
+			}
+			if eerr := h.Emit(ctx, types.FetchedItem{
+				ExternalID:       prevPageID,
+				IsDeleted:        true,
+				SourceResourceID: resourceID,
+				Metadata: map[string]string{
+					"channel": types.ChannelConfluence,
+				},
+			}); eerr != nil {
+				return nil, eerr
 			}
 		}
 	}
 
 	return newCursor.toSyncCursor(), nil
+}
+
+// listSpacePages lists every current page in a space using the API the
+// configured edition supports.
+func (c *Connector) listSpacePages(
+	ctx context.Context, client *Client, cfg *Config, space *confluenceSpace,
+) ([]confluencePage, error) {
+	if cfg.IsCloud() {
+		// Cloud: v1 CQL search is unreliable there, so use the v2 page listing.
+		return client.GetAllPagesInSpaceV2(ctx, space.ID, space.Key, space.Name)
+	}
+	return client.GetAllPagesInSpace(ctx, space.Key)
+}
+
+// pageErrorItem builds the placeholder emitted for a page whose export failed,
+// so the sync log reports the failure per page instead of losing it silently.
+func pageErrorItem(page confluencePage, resourceID string, err error) types.FetchedItem {
+	return types.FetchedItem{
+		ExternalID:       page.ID,
+		Title:            page.Title,
+		SourceResourceID: resourceID,
+		Metadata: map[string]string{
+			"error":   err.Error(),
+			"channel": types.ChannelConfluence,
+		},
+	}
 }
 
 // --- Resource ID helpers ---

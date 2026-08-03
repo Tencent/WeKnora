@@ -966,6 +966,261 @@ func TestFetchIncremental_NoResourceIDs(t *testing.T) {
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// FetchStream tests
+// ──────────────────────────────────────────────────────────────────────
+
+// mutableConfluence is a fake Confluence Server whose page list, listing health
+// and per-page export health can be changed between syncs, so a test can assert
+// what a second sync does with the cursor the first one produced. Its base URL
+// stays stable across syncs, unlike newFakeConfluence which needs a new server.
+type mutableConfluence struct {
+	server     *httptest.Server
+	pages      []fakeConfluencePage
+	listFails  bool
+	exportFail map[string]bool
+	exports    map[string]int
+}
+
+func newMutableConfluence(t *testing.T, pages []fakeConfluencePage) *mutableConfluence {
+	t.Helper()
+
+	f := &mutableConfluence{
+		pages:      pages,
+		exportFail: map[string]bool{},
+		exports:    map[string]int{},
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/rest/api/space", func(w http.ResponseWriter, _ *http.Request) {
+		spaces := defaultSpaces()
+		writeJSON(w, confluenceSpaceListResponse{Results: spaces, Start: 0, Limit: 50, Size: len(spaces)})
+	})
+	mux.HandleFunc("/rest/api/content/search", func(w http.ResponseWriter, _ *http.Request) {
+		if f.listFails {
+			// 404 rather than 5xx: the client retries 5xx with backoff, which
+			// would make this test sleep for seconds.
+			http.Error(w, "space not searchable", http.StatusNotFound)
+			return
+		}
+		results := make([]confluencePage, 0, len(f.pages))
+		for _, p := range f.pages {
+			results = append(results, p.toConfluencePage())
+		}
+		writeJSON(w, confluenceSearchResponse{Results: results, Start: 0, Limit: 100, Size: len(results)})
+	})
+	mux.HandleFunc("/spaces/flyingpdf/pdfpageexport.action", func(w http.ResponseWriter, r *http.Request) {
+		pageID := r.URL.Query().Get("pageId")
+		f.exports[pageID]++
+		if f.exportFail[pageID] {
+			// A 200 that is not a PDF fails export validation without tripping
+			// the client's 5xx retry/backoff loop.
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte("<html>export queued</html>"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/pdf")
+		_, _ = w.Write(fakePDF)
+	})
+
+	f.server = httptest.NewServer(mux)
+	t.Cleanup(f.server.Close)
+	return f
+}
+
+func (f *mutableConfluence) dsConfig() *types.DataSourceConfig {
+	return &types.DataSourceConfig{
+		Type: types.ConnectorTypeConfluence,
+		Credentials: map[string]interface{}{
+			"edition":  "server",
+			"base_url": f.server.URL,
+			"username": "u",
+			"password": "p",
+		},
+		ResourceIDs: []string{"1001"},
+	}
+}
+
+// toConfluencePage expands the fake's compact page description into the API shape.
+func (p fakeConfluencePage) toConfluencePage() confluencePage {
+	var page confluencePage
+	page.ID = p.ID
+	page.Title = p.Title
+	page.Type = "page"
+	page.Status = "current"
+	page.Space.ID = 1001
+	page.Space.Key = p.SpaceKey
+	page.Space.Name = p.SpaceKey
+	page.Version.By.DisplayName = p.Creator
+	page.Version.When = p.VersionWhen
+	page.Links.WebUI = "/display/" + p.SpaceKey + "/" + p.ID
+	return page
+}
+
+// recordingHandler captures everything a streaming fetch emits.
+type recordingHandler struct {
+	items       []types.FetchedItem
+	checkpoints []*confluenceCursor
+}
+
+func (h *recordingHandler) Emit(_ context.Context, item types.FetchedItem) error {
+	h.items = append(h.items, item)
+	return nil
+}
+
+func (h *recordingHandler) Checkpoint(_ context.Context, cursor *types.SyncCursor) error {
+	// Snapshot: the connector keeps mutating its backing maps after this call.
+	h.checkpoints = append(h.checkpoints, unmarshalCursor(cursor.ConnectorCursor))
+	return nil
+}
+
+// errorItemIDs returns the external IDs of the error placeholders in items.
+func errorItemIDs(items []types.FetchedItem) []string {
+	var ids []string
+	for _, item := range items {
+		if item.Metadata["error"] != "" {
+			ids = append(ids, item.ExternalID)
+		}
+	}
+	return ids
+}
+
+// deletedItemIDs returns the external IDs of the deletion placeholders in items.
+func deletedItemIDs(items []types.FetchedItem) []string {
+	var ids []string
+	for _, item := range items {
+		if item.IsDeleted {
+			ids = append(ids, item.ExternalID)
+		}
+	}
+	return ids
+}
+
+// A page whose PDF export failed must not be recorded at its current version,
+// otherwise the next run sees "version unchanged", skips it, and the page is
+// never ingested (Tencent/WeKnora#2136).
+func TestFetchStream_ExportFailureIsRetriedNextRun(t *testing.T) {
+	f := newMutableConfluence(t, defaultPages())
+	f.exportFail["102"] = true
+
+	c := NewConnector()
+	first := &recordingHandler{}
+	cursor, err := c.FetchStream(context.Background(), f.dsConfig(), nil, first)
+	if err != nil {
+		t.Fatalf("first FetchStream() error: %v", err)
+	}
+
+	if got := errorItemIDs(first.items); len(got) != 1 || got[0] != "102" {
+		t.Fatalf("first sync error items = %v, want [102]", got)
+	}
+
+	recorded := unmarshalCursor(cursor.ConnectorCursor).pageTimes("1001")
+	if _, ok := recorded["102"]; ok {
+		t.Errorf("cursor recorded page 102 despite a failed export: %v", recorded)
+	}
+	if recorded["101"] == "" {
+		t.Errorf("cursor should record the page that exported successfully: %v", recorded)
+	}
+
+	// Second run over unchanged data: 101 is skipped, 102 is retried.
+	f.exportFail["102"] = false
+	second := &recordingHandler{}
+	if _, err := c.FetchStream(context.Background(), f.dsConfig(), cursor, second); err != nil {
+		t.Fatalf("second FetchStream() error: %v", err)
+	}
+
+	if len(second.items) != 1 || second.items[0].ExternalID != "102" {
+		t.Fatalf("second sync items = %+v, want only page 102 retried", second.items)
+	}
+	if len(second.items[0].Content) == 0 {
+		t.Error("retried page should carry exported PDF content")
+	}
+	if f.exports["101"] != 1 {
+		t.Errorf("page 101 exported %d times, want 1 (unchanged pages must be skipped)", f.exports["101"])
+	}
+	if f.exports["102"] != 2 {
+		t.Errorf("page 102 exported %d times, want 2 (failed export must be retried)", f.exports["102"])
+	}
+}
+
+// Confluence answers 200 with no results while its search index rebuilds or when
+// page permissions change. Mirror sync deletes knowledge for IsDeleted items, so
+// an empty listing must never be reported as "every page was deleted".
+func TestFetchStream_EmptyListingDoesNotDeleteKnownPages(t *testing.T) {
+	f := newMutableConfluence(t, defaultPages())
+
+	c := NewConnector()
+	cursor, err := c.FetchStream(context.Background(), f.dsConfig(), nil, &recordingHandler{})
+	if err != nil {
+		t.Fatalf("first FetchStream() error: %v", err)
+	}
+
+	f.pages = nil
+	h := &recordingHandler{}
+	next, err := c.FetchStream(context.Background(), f.dsConfig(), cursor, h)
+	if err != nil {
+		t.Fatalf("second FetchStream() error: %v", err)
+	}
+
+	if got := deletedItemIDs(h.items); len(got) != 0 {
+		t.Errorf("empty listing emitted deletions for %v", got)
+	}
+	if recorded := unmarshalCursor(next.ConnectorCursor).pageTimes("1001"); len(recorded) != 2 {
+		t.Errorf("cursor kept %d entries, want the 2 already-synced pages: %v", len(recorded), recorded)
+	}
+}
+
+// A space whose page listing fails is skipped, but its recorded state must
+// survive: dropping it would re-export every page next run and then report the
+// pages as deleted on the run after that.
+func TestFetchStream_ListingFailureRetainsCursor(t *testing.T) {
+	f := newMutableConfluence(t, defaultPages())
+
+	c := NewConnector()
+	cursor, err := c.FetchStream(context.Background(), f.dsConfig(), nil, &recordingHandler{})
+	if err != nil {
+		t.Fatalf("first FetchStream() error: %v", err)
+	}
+
+	f.listFails = true
+	h := &recordingHandler{}
+	next, err := c.FetchStream(context.Background(), f.dsConfig(), cursor, h)
+	if err != nil {
+		t.Fatalf("a failed space listing must not abort the sync: %v", err)
+	}
+
+	if len(h.items) != 0 {
+		t.Errorf("failed listing emitted %d items, want none: %+v", len(h.items), h.items)
+	}
+	if recorded := unmarshalCursor(next.ConnectorCursor).pageTimes("1001"); len(recorded) != 2 {
+		t.Errorf("cursor kept %d entries, want the 2 already-synced pages: %v", len(recorded), recorded)
+	}
+}
+
+func TestFetchStream_CheckpointsProgress(t *testing.T) {
+	orig := confluenceStreamCheckpointInterval
+	confluenceStreamCheckpointInterval = 1
+	t.Cleanup(func() { confluenceStreamCheckpointInterval = orig })
+
+	f := newMutableConfluence(t, defaultPages())
+
+	c := NewConnector()
+	h := &recordingHandler{}
+	if _, err := c.FetchStream(context.Background(), f.dsConfig(), nil, h); err != nil {
+		t.Fatalf("FetchStream() error: %v", err)
+	}
+
+	if len(h.checkpoints) != 2 {
+		t.Fatalf("got %d checkpoints, want one per page", len(h.checkpoints))
+	}
+	if got := len(h.checkpoints[0].pageTimes("1001")); got != 1 {
+		t.Errorf("first checkpoint recorded %d pages, want 1", got)
+	}
+	if got := len(h.checkpoints[1].pageTimes("1001")); got != 2 {
+		t.Errorf("second checkpoint recorded %d pages, want 2", got)
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // Client tests
 // ──────────────────────────────────────────────────────────────────────
 

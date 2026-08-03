@@ -314,6 +314,32 @@ type confluenceCursor struct {
 	SpacePageTimes map[string]map[string]string `json:"space_page_times,omitempty"`
 }
 
+// pageTimes returns the recorded page_id -> version.when map for a resource, or
+// nil when there is no state for it. Nil-receiver safe so a missing prior cursor
+// (first sync) can be passed straight through.
+func (c *confluenceCursor) pageTimes(resourceID string) map[string]string {
+	if c == nil || c.SpacePageTimes == nil {
+		return nil
+	}
+	return c.SpacePageTimes[resourceID]
+}
+
+// retain carries a resource's previously recorded page times into this cursor
+// unchanged. Used when the current listing for that resource cannot be trusted
+// (space missing, listing error, or an empty result for an already-synced
+// space): dropping the entries would re-export every page on the next run and,
+// worse, make the following sync see the pages as newly deleted.
+func (c *confluenceCursor) retain(resourceID string, prevTimes map[string]string) {
+	if len(prevTimes) == 0 {
+		return
+	}
+	kept := make(map[string]string, len(prevTimes))
+	for pageID, when := range prevTimes {
+		kept[pageID] = when
+	}
+	c.SpacePageTimes[resourceID] = kept
+}
+
 // normalizeLastModified converts Confluence ISO 8601 time to a comparable string.
 // Input: "2026-07-16T11:25:00.000+08:00" → Output: "2026-07-16 11:25"
 func normalizeLastModified(isoStr string) string {
