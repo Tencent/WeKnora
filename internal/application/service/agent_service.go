@@ -438,6 +438,9 @@ func (s *agentService) registerTools(
 		allowedTools = tools.DefaultAllowedTools()
 		logger.Infof(ctx, "Using default allowed tools: %v", allowedTools)
 	}
+	if config.SharedAgentReadOnly {
+		allowedTools = filterSharedAgentWriteTools(allowedTools)
+	}
 
 	// ---- Capability detection from SearchTargets ----
 	var hasVectorKB bool
@@ -677,6 +680,27 @@ func (s *agentService) registerTools(
 
 	logger.Infof(ctx, "Registered %d tools", len(registry.ListTools()))
 	return nil
+}
+
+// filterSharedAgentWriteTools enforces the read-only contract of AgentShare.
+// These tools write source-workspace Wiki state and otherwise bypass the HTTP
+// KB permission middleware because they execute inside the agent engine.
+func filterSharedAgentWriteTools(allowed []string) []string {
+	sourceWorkspaceWrites := map[string]bool{
+		tools.ToolWikiFlagIssue:   true,
+		tools.ToolWikiUpdateIssue: true,
+		tools.ToolWikiWritePage:   true,
+		tools.ToolWikiReplaceText: true,
+		tools.ToolWikiRenamePage:  true,
+		tools.ToolWikiDeletePage:  true,
+	}
+	filtered := make([]string, 0, len(allowed))
+	for _, name := range allowed {
+		if !sourceWorkspaceWrites[name] {
+			filtered = append(filtered, name)
+		}
+	}
+	return filtered
 }
 
 // ValidateConfig validates the agent configuration

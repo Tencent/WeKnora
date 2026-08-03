@@ -4,7 +4,13 @@ name: Build & Publish (mcp-server)
 # Publishing uses PyPI Trusted Publishing (OIDC) — no API token required,
 # only the GitHub→PyPI OIDC trust configured on the repo.
 #
-# Release tags: mcp-server-v* (e.g. mcp-server-v1.0.1)
+# Release policy: publishing does NOT depend on tags. Bump the version in
+# mcp-server/pyproject.toml (and the synced version strings in setup.py,
+# __init__.py, weknora_mcp_server.py server_version, main.py --version),
+# merge to main, and the pipeline builds + publishes automatically.
+# A pre-publish check queries PyPI and skips upload if that version is
+# already published, so re-running on an unchanged version stays green.
+# Releases also still trigger on mcp-server-v* tags (back-compat).
 
 on:
   push:
@@ -48,13 +54,15 @@ jobs:
 
       - name: Run tests
         # unittest avoids pytest importing __init__.py as a broken package root.
+        # Manual diagnostics live in check_imports.py (not matched by test_*.py).
         run: uv run --python ${{ matrix.python-version }} python -m unittest discover -s . -p "test_*.py" -v
 
   build:
     name: Build sdist + wheel
     needs: test
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/mcp-server-v')
+    # Build on push to main, manual runs, and release tags — but never on PRs.
+    if: github.event_name != 'pull_request'
     defaults:
       run:
         working-directory: mcp-server
@@ -89,18 +97,53 @@ jobs:
     name: Publish to PyPI
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/mcp-server-v')
+    # Publish on push to main, manual runs (main/tags only), and release tags — never on PRs.
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/mcp-server-v'))
     permissions:
       id-token: write
     environment:
       name: pypi
-      url: https://pypi.org/project/weknora-mcp/
+      url: https://pypi.org/project/tencent-weknora-mcp/
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if version is already published
+        id: check_pypi
+        working-directory: mcp-server
+        # Read the version from pyproject.toml and query PyPI. If that exact
+        # version already exists, skip publishing (so re-runs on an unchanged
+        # version stay green instead of failing with "File already exists").
+        run: |
+          set -e
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          echo "packaged version: $version"
+          exists="$(python3 -c '
+          import json, sys, urllib.request
+          v = sys.argv[1]
+          try:
+              d = json.load(urllib.request.urlopen("https://pypi.org/pypi/tencent-weknora-mcp/json"))
+              print("true" if v in d.get("releases", {}) else "false")
+          except Exception:
+              # If PyPI is unreachable or the project is brand-new (404), treat as unpublished.
+              print("false")
+          ' "$version")"
+          echo "already on PyPI: $exists"
+          if [ "$exists" = "true" ]; then
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::tencent-weknora-mcp $version is already on PyPI; skipping publish. Bump pyproject.toml (and synced version strings) to release new changes."
+          else
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Download artifacts
+        if: steps.check_pypi.outputs.should_publish == 'true'
         uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist/
 
       - name: Publish to PyPI
+        if: steps.check_pypi.outputs.should_publish == 'true'
         uses: pypa/gh-action-pypi-publish@release/v1

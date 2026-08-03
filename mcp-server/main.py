@@ -85,7 +85,7 @@ def parse_arguments():
     parser.add_argument("--verbose", "-v", action="store_true", help="启用详细日志输出")
 
     parser.add_argument(
-        "--version", action="version", version="WeKnora MCP Server 1.0.1"
+        "--version", action="version", version="WeKnora MCP Server 1.1.1"
     )
 
     parser.add_argument(

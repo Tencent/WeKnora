@@ -3,8 +3,8 @@ requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "weknora-mcp"
-version = "1.0.1"
+name = "tencent-weknora-mcp"
+version = "1.1.1"
 description = "WeKnora MCP Server - Model Context Protocol server for WeKnora API"
 readme = "README.md"
 license = {text = "MIT"}
@@ -30,7 +30,7 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "mcp>=1.28,<2",
+    "mcp>=2,<3",
     "requests>=2.31.0",
     "starlette>=0.27.0",
     "uvicorn>=0.24.0",
@@ -51,11 +51,11 @@ test = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/NannaOlympicBroadcast/WeKnoraMCP"
+Homepage = "https://github.com/Tencent/WeKnora"
 Documentation = "https://docs.weknora.com"
-Repository = "https://github.com/NannaOlympicBroadcast/WeKnoraMCP"
-"Bug Reports" = "https://github.com/NannaOlympicBroadcast/WeKnoraMCP/issues"
-Changelog = "https://github.com/NannaOlympicBroadcast/WeKnoraMCP/blob/main/CHANGELOG.md"
+Repository = "https://github.com/Tencent/WeKnora/tree/main/mcp-server"
+"Bug Reports" = "https://github.com/Tencent/WeKnora/issues"
+Changelog = "https://github.com/Tencent/WeKnora/blob/main/mcp-server/CHANGELOG.md"
 
 [project.scripts]
 weknora-mcp-server = "main:sync_main"

@@ -10,4 +10,3 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_revisions_content_hash
         parse_attempt,
         revision_no DESC
     );
-

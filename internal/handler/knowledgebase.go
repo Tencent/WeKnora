@@ -474,7 +474,11 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*typ
 		currentTenantID := tenantID.(uint64)
 		agentID := c.Query("agent_id")
 		if agentID != "" {
-			agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID)
+			sourceTenantID, parseErr := types.ParseAgentSourceTenantID(c.Query(types.AgentSourceTenantIDParam))
+			if parseErr != nil {
+				return kb, id, 0, types.OrgMemberRole(""), apperrors.NewBadRequestError(parseErr.Error())
+			}
+			agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID, sourceTenantID)
 			if err == nil && agent != nil {
 				if kb.TenantID != agent.TenantID {
 					logger.Warnf(ctx, "Shared agent workspace mismatch, KB %s tenant: %d, agent tenant: %d", id, kb.TenantID, agent.TenantID)
@@ -581,7 +585,12 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 			return
 		}
 		callerTenantRole := types.TenantRoleFromContext(ctx)
-		agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID)
+		requestedSourceTenantID, parseErr := types.ParseAgentSourceTenantID(c.Query(types.AgentSourceTenantIDParam))
+		if parseErr != nil {
+			c.Error(apperrors.NewBadRequestError(parseErr.Error()))
+			return
+		}
+		agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID, requestedSourceTenantID)
 		if err != nil {
 			if stderrors.Is(err, service.ErrAgentShareNotFound) || stderrors.Is(err, service.ErrAgentSharePermission) || stderrors.Is(err, service.ErrAgentNotFoundForShare) {
 				c.Error(apperrors.NewForbiddenError("no permission for this shared agent"))
