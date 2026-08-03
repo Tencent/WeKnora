@@ -184,14 +184,29 @@ func finalizeIndexedKnowledgeState(
 		knowledge.SummaryStatus = types.SummaryStatusNone
 	} else {
 		// No text chunks and no pending multimodal work: there is nothing for
-		// post-process to enrich, so complete immediately.
+		// post-process to enrich, so complete immediately. This is the only
+		// route to 'completed' that bypasses FinalizeSubtask, so it has to
+		// clear error_message itself — otherwise a successfully indexed row
+		// keeps reporting a failure from an earlier attempt.
 		knowledge.ParseStatus = types.ParseStatusCompleted
 		knowledge.SummaryStatus = types.SummaryStatusNone
+		knowledge.ErrorMessage = ""
 	}
 
 	knowledge.EnableStatus = "enabled"
 	knowledge.StorageSize = totalStorageSize
 	knowledge.ProcessedAt = &now
+	knowledge.UpdatedAt = now
+}
+
+// markKnowledgeProcessing makes the top-level knowledge state describe the
+// attempt that is starting now. Clearing error_message is part of that: the
+// column is only meaningful for the attempt that produced it, so a row
+// re-entering processing must not keep surfacing the previous attempt's
+// failure while it is visibly running again.
+func markKnowledgeProcessing(knowledge *types.Knowledge, now time.Time) {
+	knowledge.ParseStatus = types.ParseStatusProcessing
+	knowledge.ErrorMessage = ""
 	knowledge.UpdatedAt = now
 }
 
@@ -2976,8 +2991,7 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 		return nil
 	}
 	// Update status to processing
-	knowledge.ParseStatus = "processing"
-	knowledge.UpdatedAt = time.Now()
+	markKnowledgeProcessing(knowledge, time.Now())
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "ProcessManualUpdate: failed to update status to processing: %v", err)
 		return nil
@@ -3112,9 +3126,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		logger.Infof(ctx, "Knowledge aborted (%s) before marking processing: %s", status, knowledge.ID)
 		return nil
 	}
-	knowledge.ParseStatus = "processing"
-	knowledge.ErrorMessage = ""
-	knowledge.UpdatedAt = time.Now()
+	markKnowledgeProcessing(knowledge, time.Now())
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "failed to update knowledge status to processing: %v", err)
 		return nil
