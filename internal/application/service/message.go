@@ -22,13 +22,14 @@ var regThinkIndex = regexp.MustCompile(`(?s)<think>.*?</think>`)
 // It reads the chat history knowledge base configuration from the tenant's ChatHistoryConfig,
 // which is managed via the settings UI.
 type messageService struct {
-	messageRepo    interfaces.MessageRepository    // Repository for message storage operations
-	sessionRepo    interfaces.SessionRepository    // Repository for session validation
-	tenantService  interfaces.TenantService        // Service for tenant operations (read ChatHistoryConfig)
-	kbService      interfaces.KnowledgeBaseService // Service for knowledge base operations (search chat history KB)
-	knowService    interfaces.KnowledgeService     // Service for knowledge operations (index/delete passages)
-	modelService   interfaces.ModelService         // Service for model operations (rerank model)
-	suggestionRepo interfaces.MessageSuggestionRepository
+	messageRepo     interfaces.MessageRepository     // Repository for message storage operations
+	sessionRepo     interfaces.SessionRepository     // Repository for session validation
+	tenantService   interfaces.TenantService         // Service for tenant operations (read ChatHistoryConfig)
+	kbService       interfaces.KnowledgeBaseService  // Service for knowledge base operations (search chat history KB)
+	knowService     interfaces.KnowledgeService      // Service for knowledge operations (index/delete passages)
+	modelService    interfaces.ModelService          // Service for model operations (rerank model)
+	suggestionRepo  interfaces.MessageSuggestionRepository
+	feedbackService interfaces.MessageFeedbackService // Hydrates UserFeedback on assistant messages.
 }
 
 // NewMessageService creates a new message service instance with the required repositories
@@ -39,15 +40,17 @@ func NewMessageService(messageRepo interfaces.MessageRepository,
 	knowService interfaces.KnowledgeService,
 	modelService interfaces.ModelService,
 	suggestionRepo interfaces.MessageSuggestionRepository,
+	feedbackService interfaces.MessageFeedbackService,
 ) interfaces.MessageService {
 	return &messageService{
-		messageRepo:    messageRepo,
-		sessionRepo:    sessionRepo,
-		tenantService:  tenantService,
-		kbService:      kbService,
-		knowService:    knowService,
-		modelService:   modelService,
-		suggestionRepo: suggestionRepo,
+		messageRepo:     messageRepo,
+		sessionRepo:     sessionRepo,
+		tenantService:   tenantService,
+		kbService:       kbService,
+		knowService:     knowService,
+		modelService:    modelService,
+		suggestionRepo:  suggestionRepo,
+		feedbackService: feedbackService,
 	}
 }
 
@@ -73,6 +76,17 @@ func sessionUserIDForLookup(ctx context.Context) string {
 		return ""
 	}
 	return types.SessionOwnerIDFromContext(ctx)
+}
+
+// hydrateMessageFeedback attaches the current caller's rating onto assistant
+// messages so the chat UI can render the like/dislike selection on history
+// reload. Failures are non-fatal: the chat thread must still render even if
+// the feedback service is degraded, so we log and continue.
+func (s *messageService) hydrateMessageFeedback(ctx context.Context, messages []*types.Message) {
+	if s.feedbackService == nil || len(messages) == 0 {
+		return
+	}
+	s.feedbackService.AttachUserFeedback(ctx, messages)
 }
 
 // CreateMessage creates a new message within an existing session
@@ -125,6 +139,7 @@ func (s *messageService) GetMessage(ctx context.Context, sessionID string, messa
 	}
 
 	logger.Info(ctx, "Message retrieved successfully")
+	s.hydrateMessageFeedback(ctx, []*types.Message{message})
 	return message, nil
 }
 
@@ -155,6 +170,7 @@ func (s *messageService) GetMessagesBySession(ctx context.Context,
 	}
 
 	logger.Infof(ctx, "Retrieved %d messages successfully", len(messages))
+	s.hydrateMessageFeedback(ctx, messages)
 	return messages, nil
 }
 
@@ -188,6 +204,7 @@ func (s *messageService) GetRecentMessagesBySession(ctx context.Context,
 	}
 
 	logger.Infof(ctx, "Retrieved %d recent messages successfully", len(messages))
+	s.hydrateMessageFeedback(ctx, messages)
 	return messages, nil
 }
 
@@ -222,6 +239,7 @@ func (s *messageService) GetMessagesBySessionBeforeTime(ctx context.Context,
 	}
 
 	logger.Infof(ctx, "Retrieved %d messages before time successfully", len(messages))
+	s.hydrateMessageFeedback(ctx, messages)
 	return messages, nil
 }
 

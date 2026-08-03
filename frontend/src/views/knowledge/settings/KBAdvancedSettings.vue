@@ -76,11 +76,38 @@
       </div>
 
     </div>
+
+    <!-- #1248: feedback analytics entry point. Lives in the advanced tab so
+         it stays in the same admin surface as the rest of the KB tuning
+         controls. The drawer is gated on KB ownership / admin on the
+         backend, so we just check the authenticated role here. -->
+    <div v-if="!embedded && kbId" class="setting-row">
+      <div class="setting-info">
+        <label>{{ $t('feedback.kbStats.title') }}</label>
+        <p class="desc">{{ $t('feedback.kbStats.weightLogTitle') }}</p>
+      </div>
+      <div class="setting-control">
+        <KbFeedbackStatsDrawer
+          v-model:visible="feedbackDrawerVisible"
+          :kb-id="kbId"
+          :title="$t('feedback.kbStats.title')"
+        />
+        <t-button
+          variant="outline"
+          shape="round"
+          data-test="kb-feedback-stats-btn"
+          @click="feedbackDrawerVisible = true"
+        >
+          {{ $t('feedback.kbStats.title') }}
+        </t-button>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import KbFeedbackStatsDrawer from './KbFeedbackStatsDrawer.vue'
 
 interface QuestionGenerationConfig {
   enabled: boolean
@@ -94,11 +121,17 @@ interface Props {
   allModels?: any[]
   embedded?: boolean
   tableMetadataInstructions?: string
+  // #1248: the KB id is required for the feedback analytics entry point.
+  // Optional so the upload-preview variant (which has no persisted KB yet)
+  // keeps compiling. When empty, the entry is hidden.
+  kbId?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
   embedded: false,
 })
+
+const feedbackDrawerVisible = ref(false)
 
 const emit = defineEmits<{
   'update:questionGeneration': [value: QuestionGenerationConfig]

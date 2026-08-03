@@ -52,6 +52,8 @@ CREATE TABLE knowledge_bases (
     cos_config JSON NOT NULL,
     vlm_config JSON NOT NULL,
     extract_config JSON NULL,
+    feedback_reset_at DATETIME NULL DEFAULT NULL,
+    feedback_reset_by VARCHAR(64) NULL DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL
@@ -202,6 +204,10 @@ CREATE TABLE chunks (
     image_info TEXT,
     relation_chunks JSON,
     indirect_relation_chunks JSON,
+    like_count INTEGER NOT NULL DEFAULT 0,
+    dislike_count INTEGER NOT NULL DEFAULT 0,
+    positive_rate DOUBLE NOT NULL DEFAULT 0,
+    recall_weight DOUBLE NOT NULL DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL

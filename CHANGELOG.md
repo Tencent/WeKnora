@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### New Features
+
+- **NEW**: **Answer Feedback Attribution & Chunk Weighting** — AI answer like/dislike feedback is now attributed to cited knowledge chunks, with per-chunk positive rate, recall-weight auto-adjustment, admin statistics, weight change logs, and reset. (migration `000075_answer_feedback`)
+
 ## [0.7.1] - 2026-07-24
 
 ### New Features

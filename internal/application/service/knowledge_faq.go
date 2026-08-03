@@ -80,6 +80,7 @@ func (s *knowledgeService) ListFAQEntries(ctx context.Context,
 	chunks, total, err := s.chunkRepo.ListPagedChunksByKnowledgeID(
 		ctx, effectiveTenantID, faqKnowledge.ID, page, chunkType, tagUUIDs, keyword, searchField, sortOrder, types.KnowledgeTypeFAQ,
 		nil,
+		nil,
 	)
 	if err != nil {
 		return nil, err

@@ -124,6 +124,14 @@ type KnowledgeBase struct {
 	// PinnedAt records when the current caller pinned this knowledge
 	// base; nil when they have not.
 	PinnedAt *time.Time `yaml:"pinned_at"               json:"pinned_at"               gorm:"-"`
+	// FeedbackResetAt is the feedback epoch: any feedback updated before
+	// this instant does not contribute to per-chunk statistics. Advances on
+	// every successful admin reset so historical user feedback survives the
+	// reset for auditability while chunk counters restart from zero.
+	FeedbackResetAt *time.Time `yaml:"feedback_reset_at"     json:"feedback_reset_at,omitempty" gorm:"column:feedback_reset_at"`
+	// FeedbackResetBy records the principal that performed the most recent
+	// admin reset; surfaced in weight-change logs for audit.
+	FeedbackResetBy string `yaml:"feedback_reset_by"      json:"feedback_reset_by,omitempty" gorm:"column:feedback_reset_by;type:varchar(64);default:''"`
 	// Creation time of the knowledge base
 	CreatedAt time.Time `yaml:"created_at"              json:"created_at"`
 	// Last updated time of the knowledge base

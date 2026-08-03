@@ -322,6 +322,18 @@
                 </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo && isConversationDone" :session="session"
                   :session-id="sessionId" />
+                <!-- Answer like/dislike (#1248) -->
+                <FeedbackButtons
+                  v-if="session?.id && isConversationDone"
+                  :session-id="sessionId"
+                  :message-id="session.id"
+                  :model-value="userFeedback.rating"
+                  :reasons="userFeedback.reasons"
+                  :comment="userFeedback.comment"
+                  @update:model-value="onUserFeedbackRatingChange"
+                  @update:reasons="onUserFeedbackReasonsChange"
+                  @update:comment="onUserFeedbackCommentChange"
+                />
                 <transition name="follow-up-toolbar-loading">
                   <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
                     aria-live="polite">
@@ -482,7 +494,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, onUpdated, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount, onUpdated, nextTick, reactive } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { marked } from 'marked';
 import 'katex/dist/katex.min.css';
@@ -490,6 +502,7 @@ import ToolResultRenderer from './ToolResultRenderer.vue';
 import ToolApprovalCard from './ToolApprovalCard.vue';
 import McpOAuthCard from './McpOAuthCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
+import FeedbackButtons from '@/components/chat/FeedbackButtons.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
@@ -817,6 +830,40 @@ const embedAuthProps = computed(() => ({
 const showRequestInfo = computed(
   () => !props.embeddedMode && !!(props.session?.request_id || props.session?.id),
 );
+
+// Interactive feedback state for the answer like/dislike toolbar (#1248).
+// Mirrors the user_feedback hydration returned by the backend message load
+// and is mutated in place by FeedbackButtons; freshly created sessions start
+// with no rating so the toolbar shows the unselected state.
+const userFeedback = reactive({
+  rating: '' as 'like' | 'dislike' | '',
+  reasons: [] as string[],
+  comment: '',
+});
+watch(
+  () => props.session?.user_feedback,
+  (next) => {
+    if (!next) {
+      userFeedback.rating = '';
+      userFeedback.reasons = [];
+      userFeedback.comment = '';
+      return;
+    }
+    userFeedback.rating = next.rating || '';
+    userFeedback.reasons = Array.isArray(next.reasons) ? [...next.reasons] : [];
+    userFeedback.comment = next.comment || '';
+  },
+  { immediate: true, deep: true },
+);
+function onUserFeedbackRatingChange(rating: string) {
+  userFeedback.rating = (rating || '') as 'like' | 'dislike' | '';
+}
+function onUserFeedbackReasonsChange(reasons: string[]) {
+  userFeedback.reasons = Array.isArray(reasons) ? [...reasons] : [];
+}
+function onUserFeedbackCommentChange(comment: string) {
+  userFeedback.comment = comment || '';
+}
 
 // Agent answers embed exported charts and knowledge-base images as
 // `resource://` handles. An embed visitor has no Bearer token, so they must be

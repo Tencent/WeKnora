@@ -25,17 +25,21 @@ import (
 // Provides functionality for creating, retrieving, updating, and deleting tenants
 // through the REST API endpoints
 type TenantHandler struct {
-	service       interfaces.TenantService
-	apiKeyService interfaces.TenantAPIKeyService
-	userService   interfaces.UserService
-	memberService interfaces.TenantMemberService
-	kbService     interfaces.KnowledgeBaseService
-	config        *config.Config
+	service          interfaces.TenantService
+	apiKeyService    interfaces.TenantAPIKeyService
+	userService      interfaces.UserService
+	memberService    interfaces.TenantMemberService
+	kbService        interfaces.KnowledgeBaseService
+	config           *config.Config
 	// systemSettingSvc resolves runtime tenant policies and limits.
 	// Reading goes DB > ENV >
 	// in-code default, so a SystemAdmin's UI override applies on the
 	// very next CreateTenant call.
 	systemSettingSvc interfaces.SystemSettingService
+	// feedbackService triggers a tenant-wide recall-weight recompute when
+	// the feedback policy portion of retrieval-config changes. May be
+	// nil in lite/test setups where the feedback repo is not wired.
+	feedbackService interfaces.MessageFeedbackService
 }
 
 // NewTenantHandler creates a new tenant handler instance with the provided service
@@ -63,6 +67,7 @@ func NewTenantHandler(
 	kbService interfaces.KnowledgeBaseService,
 	config *config.Config,
 	systemSettingSvc interfaces.SystemSettingService,
+	feedbackService interfaces.MessageFeedbackService,
 ) *TenantHandler {
 	return &TenantHandler{
 		service:          service,
@@ -72,6 +77,7 @@ func NewTenantHandler(
 		kbService:        kbService,
 		config:           config,
 		systemSettingSvc: systemSettingSvc,
+		feedbackService:  feedbackService,
 	}
 }
 
@@ -1697,6 +1703,14 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("rerank_top_k must be between 0 and 200"))
 		return
 	}
+	// #1248: feedback policy validation. Performed here (instead of only on
+	// the type) so a 400 surfaces cross-field consistency errors with the
+	// full configuration key the UI just submitted. The repo will recompute
+	// weights against this validated config after the save commits.
+	if err := cfg.ValidateFeedbackPolicy(); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
 
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
@@ -1716,6 +1730,32 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 		}
 		return
 	}
+
+	// Feedback-weight recompute is fire-and-forget so the response is not
+	// blocked behind the per-chunk walk. Failures are logged because the
+	// primary effect (the user saving the policy) has already happened; a
+	// later mutation (like/dislike) or admin recompute will eventually
+	// catch up. We only recompute when the saved policy actually differs
+	// from the prior one — a no-op write should not pay the cost of a
+	// full tenant walk.
+	previous := tenant.RetrievalConfig
+	if h.feedbackService != nil &&
+		(previous == nil ||
+			previous.FeedbackRankingEnabled != cfg.FeedbackRankingEnabled ||
+			previous.FeedbackBoostThreshold != cfg.FeedbackBoostThreshold ||
+			previous.FeedbackPenaltyThreshold != cfg.FeedbackPenaltyThreshold ||
+			previous.FeedbackBoostFactor != cfg.FeedbackBoostFactor ||
+			previous.FeedbackPenaltyFactor != cfg.FeedbackPenaltyFactor ||
+			previous.FeedbackMinSamples != cfg.FeedbackMinSamples ||
+			previous.FeedbackNeedsOptimizationThreshold != cfg.FeedbackNeedsOptimizationThreshold) {
+		bgCtx := context.WithoutCancel(ctx)
+		go func() {
+			if _, err := h.feedbackService.RecomputeTenantFeedbackWeights(bgCtx, tenant.ID); err != nil {
+				logger.Warnf(bgCtx, "feedback weight recompute after retrieval-config save failed: %v", err)
+			}
+		}()
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    updatedTenant.RetrievalConfig,

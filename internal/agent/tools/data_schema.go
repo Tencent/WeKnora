@@ -99,6 +99,8 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		"",  // sortOrder
 		"",  // knowledgeType
 		&enabled,
+		nil, // feedbackFilter
+
 	)
 	if err != nil {
 		return &types.ToolResult{

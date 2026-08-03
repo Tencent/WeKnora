@@ -235,6 +235,15 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	}
 	deduplicatedChunks := fuseOrDeduplicate(ctx, vectorResults, keywordResults, retrievalCfg)
 
+	// Apply the per-chunk recall weight maintained by the answer-feedback
+	// path (#1248) so a KB / agent search that reaches this surface directly
+	// (rather than via the chat pipeline plugin) still respects user-rejection
+	// signals. We do this BEFORE the FAQ post-processing and final
+	// truncation so the feedback-adjusted order is the one that survives.
+	// Failures are non-fatal: a missing chunk repo leaves the original
+	// scoring untouched.
+	deduplicatedChunks = s.applyFeedbackWeightsToResults(ctx, tenantInfo, requestTenantID, deduplicatedChunks)
+
 	kb.EnsureDefaults()
 
 	// FAQ-specific post-processing now operates on storeGroups so the
@@ -446,4 +455,62 @@ func (s *knowledgeBaseService) resolveQueryEmbedding(
 	}
 	logger.Infof(ctx, "Query embedding generated successfully, embedding vector length: %d", len(queryEmbedding))
 	return queryEmbedding, nil
+}
+
+// applyFeedbackWeightsToResults multiplies each result's score by the
+// per-chunk recall weight (#1248) before the downstream FAQ post-processing
+// and match-count truncation. The application is gated on the tenant's
+// FeedbackRankingEnabled flag; non-opt-in tenants get the original ordering
+// so existing behaviour is preserved bit-for-bit. Failures are isolated —
+// the chunk repo / weight lookup is best-effort and never escalates.
+func (s *knowledgeBaseService) applyFeedbackWeightsToResults(
+	ctx context.Context,
+	tenantInfo *types.Tenant,
+	requestTenantID uint64,
+	results []*types.IndexWithScore,
+) []*types.IndexWithScore {
+	if len(results) == 0 || s.chunkRepo == nil {
+		return results
+	}
+	// requestTenantID is treated as the "owner tenant" for the recall
+	// policy because the retrieval config is stored per tenant. Cross-tenant
+	// (shared KB) traffic still reads the request tenant's policy so the
+	// caller's experience is consistent.
+	_ = requestTenantID
+	if tenantInfo == nil || tenantInfo.RetrievalConfig == nil ||
+		!tenantInfo.RetrievalConfig.GetEffectiveFeedbackRankingEnabled() {
+		return results
+	}
+
+	// Collect unique chunk IDs across all results. Use the tenant-agnostic
+	// lookup because a multi-KB search may include shared KBs whose chunks
+	// belong to a different tenant than the requester.
+	ids := make([]string, 0, len(results))
+	seen := make(map[string]struct{}, len(results))
+	for _, r := range results {
+		if r == nil || r.ChunkID == "" {
+			continue
+		}
+		if _, ok := seen[r.ChunkID]; ok {
+			continue
+		}
+		seen[r.ChunkID] = struct{}{}
+		ids = append(ids, r.ChunkID)
+	}
+	weights, err := s.chunkRepo.ListChunkRecallWeightsByChunkIDs(ctx, ids)
+	if err != nil {
+		logger.Warnf(ctx, "hybrid search recall weight lookup failed: %v", err)
+		return results
+	}
+	for _, r := range results {
+		if r == nil || r.ChunkID == "" {
+			continue
+		}
+		w, ok := weights[r.ChunkID]
+		if !ok || w == 1.0 {
+			continue
+		}
+		r.Score *= w
+	}
+	return results
 }

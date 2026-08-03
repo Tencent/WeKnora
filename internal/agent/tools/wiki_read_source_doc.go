@@ -219,6 +219,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 			pagination,
 			[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ},
 			nil, "", "", "", "", &enabled,
+			nil,
 		)
 		if err != nil {
 			return &types.ToolResult{Success: false, Error: fmt.Sprintf("Failed to list chunks: %v", err)}, nil

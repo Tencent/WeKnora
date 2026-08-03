@@ -24,6 +24,15 @@ type ChunkRepository interface {
 	GetChunkBySeqID(ctx context.Context, tenantID uint64, seqID int64) (*types.Chunk, error)
 	// ListChunksByID lists chunks by ids
 	ListChunksByID(ctx context.Context, tenantID uint64, ids []string) ([]*types.Chunk, error)
+	// ListChunkRecallWeights returns the per-chunk recall multiplier maintained
+	// by the answer-feedback path (#1248). Only chunks whose weight differs
+	// from the neutral 1.0 are returned so the hot path stays small when no
+	// tenant has opted in via the tenant's feedback policy.
+	ListChunkRecallWeights(ctx context.Context, tenantID uint64, ids []string) (map[string]float64, error)
+	// ListChunkRecallWeightsByChunkIDs returns recall weights for the given
+	// chunk IDs without filtering by tenant. Used in multi-KB search where
+	// results may span shared KBs owned by different tenants.
+	ListChunkRecallWeightsByChunkIDs(ctx context.Context, ids []string) (map[string]float64, error)
 	// ListChunksByIDOnly lists chunks by ids without tenant filter (for shared KB resolution).
 	ListChunksByIDOnly(ctx context.Context, ids []string) ([]*types.Chunk, error)
 	// ListChunksBySeqID lists chunks by seq_ids
@@ -51,6 +60,10 @@ type ChunkRepository interface {
 		sortOrder string,
 		knowledgeType string,
 		isEnabled *bool,
+		// feedbackFilter optionally restricts results by feedback-driven
+		// metrics (positive rate, needs-optimization). A nil value disables
+		// the filter so existing call sites are unaffected.
+		feedbackFilter *types.ChunkFeedbackFilter,
 	) ([]*types.Chunk, int64, error)
 	ListChunkByParentID(ctx context.Context, tenantID uint64, parentID string) ([]*types.Chunk, error)
 	// ListChunksByParentIDs lists chunks whose parent_chunk_id is in the given list

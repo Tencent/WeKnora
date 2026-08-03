@@ -64,6 +64,8 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     cos_config JSONB NOT NULL DEFAULT '{}',
     vlm_config JSONB NOT NULL DEFAULT '{}',
     extract_config JSONB NULL DEFAULT NULL,
+    feedback_reset_at TIMESTAMP WITH TIME ZONE,
+    feedback_reset_by VARCHAR(64),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP WITH TIME ZONE
@@ -175,6 +177,10 @@ CREATE TABLE IF NOT EXISTS chunks (
     image_info TEXT,
     relation_chunks JSONB,
     indirect_relation_chunks JSONB,
+    like_count INTEGER NOT NULL DEFAULT 0,
+    dislike_count INTEGER NOT NULL DEFAULT 0,
+    positive_rate DOUBLE PRECISION NOT NULL DEFAULT 0,
+    recall_weight DOUBLE PRECISION NOT NULL DEFAULT 1,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP WITH TIME ZONE

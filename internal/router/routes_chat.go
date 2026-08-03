@@ -1,6 +1,8 @@
 package router
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/Tencent/WeKnora/internal/handler"
@@ -43,6 +45,7 @@ func RegisterSessionRoutes(
 	r *gin.RouterGroup,
 	handler *session.Handler,
 	suggestionHandler *handler.MessageSuggestionHandler,
+	feedbackHandler *handler.MessageFeedbackHandler,
 	g *rbacGuards,
 ) {
 	// Sessions are per-user chat state, not knowledge-base content. The
@@ -79,7 +82,53 @@ func RegisterSessionRoutes(
 			sessions.POST("/:session_id/messages/:message_id/suggestions", suggestionHandler.Ensure)
 			sessions.POST("/:session_id/suggestion-events", suggestionHandler.RecordEvent)
 		}
+		// Answer like/dislike — issue #1248. Lives on the session because
+		// the route is keyed by (session, message) and is otherwise a
+		// sibling of the suggestions surface. Per-session ownership is
+		// enforced by the service (the user must own the session).
+		if feedbackHandler != nil {
+			// The PUT verb maps to "submit or replace" so the same URL
+			// transparently handles like, dislike and cancel (rating="none").
+			// gin enforces that all wildcards on a given verb share the same
+			// name. Other PUT routes on /sessions use :id, so we keep that
+			// name. The handler reads :id as the session id.
+			sessions.PUT(
+				"/:id/messages/:message_id/feedback",
+				feedbackHandler.Set,
+			)
+		}
 	}
+}
+
+// RegisterMessageFeedbackRoutes wires the admin/owner-side endpoints of the
+// answer-feedback feature: per-KB chunk stats, recall-weight change audit,
+// admin reset and tenant-wide recompute. Auth is enforced inside the handlers
+// (KB ownership) and at the middleware layer for `system/feedback/recompute`
+// which is Admin-only.
+func RegisterMessageFeedbackRoutes(
+	r *gin.RouterGroup,
+	feedbackHandler *handler.MessageFeedbackHandler,
+	g *rbacGuards,
+) {
+	if feedbackHandler == nil {
+		return
+	}
+	// Per-KB surfaces. KBAccessRead is left out because stats disclosure
+	// is gated on KB ownership — sharing a KB should not unlock its
+	// hidden user-rejection distribution. OwnedKBOrAdmin + KBAccessRead
+	// composes to (owner OR Admin+) AND KB visibility; that is the same
+	// matrix used elsewhere for "owner-only KB metadata" endpoints.
+	kbStats := g.apiKeyGroup(r.Group("/knowledge-bases/:id/feedback"), apiKeyManageKnowledgeBases(apiKeyFullAccess()))
+	{
+		kbStats.GET("/chunk-stats", g.OwnedKBOrAdmin(), g.KBAccessRead("id"), feedbackHandler.ListChunkStats)
+		kbStats.GET("/weight-logs", g.OwnedKBOrAdmin(), g.KBAccessRead("id"), feedbackHandler.ListWeightLogs)
+		kbStats.POST("/reset", g.OwnedKBOrAdmin(), g.KBAccessRead("id"), feedbackHandler.ResetFeedback)
+	}
+	// Tenant-wide recompute. Admin only — power-tool that walks every
+	// chunk in the tenant. Kept under the system namespace for future
+	// expansion.
+	g.apiKeyRoute(r, http.MethodPost, "/system/feedback/recompute",
+		apiKeyManageTenantSettings(apiKeyFullAccess()), g.Admin(), feedbackHandler.RecomputeTenantWeights)
 }
 
 // RegisterChatRoutes 注册路由。Chat endpoints are tenant-member usage

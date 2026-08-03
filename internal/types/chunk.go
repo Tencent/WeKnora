@@ -166,6 +166,24 @@ type Chunk struct {
 	ContentHash string `json:"content_hash"             gorm:"type:varchar(64);index"`
 	// 图片信息，存储为 JSON
 	ImageInfo string `json:"image_info"               gorm:"type:text"`
+	// LikeCount is the cumulative number of likes the chunk has received from
+	// rated assistant answers. Only ratings updated after the parent KB's
+	// feedback_reset_at instant contribute (so admin resets can clear the
+	// counters without losing the underlying user feedback).
+	LikeCount int `json:"like_count"                  gorm:"type:int;not null;default:0"`
+	// DislikeCount is the cumulative number of dislikes the chunk has
+	// received. Same epoch semantics as LikeCount.
+	DislikeCount int `json:"dislike_count"               gorm:"type:int;not null;default:0"`
+	// PositiveRate is the cached like / (like + dislike) fraction, in [0, 1].
+	// Stored alongside the counters so the admin stats surface does not have
+	// to re-derive it on every list query. Recomputed on every counter
+	// mutation inside the same transaction.
+	PositiveRate float64 `json:"positive_rate"              gorm:"type:double precision;not null;default:0"`
+	// RecallWeight is the multiplier applied to retrieval candidate scores
+	// when FeedbackRankingEnabled is on. Stored as 1.0 by default; adjusted
+	// by the feedback repo when counters cross the configured thresholds,
+	// and recomputed for the whole tenant on retrieval-config changes.
+	RecallWeight float64 `json:"recall_weight"               gorm:"type:double precision;not null;default:1"`
 	// Chunk creation time
 	CreatedAt time.Time `json:"created_at"`
 	// Chunk last update time

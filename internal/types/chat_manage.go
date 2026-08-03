@@ -273,6 +273,12 @@ const (
 	CHAT_COMPLETION        EventType = "chat_completion"
 	CHAT_COMPLETION_STREAM EventType = "chat_completion_stream"
 	FILTER_TOP_K           EventType = "filter_top_k"
+	// FEEDBACK_WEIGHT applies the per-chunk RecallWeight multiplier that the
+	// like/dislike feedback path (#1248) maintains. Runs after rerank so the
+	// downstream filter / context window inherits the user-rejection signal,
+	// and before into-chat-message so both the merge branch and the rerank
+	// branch meet before context assembly sees the weighted ordering.
+	FEEDBACK_WEIGHT EventType = "feedback_weight"
 )
 
 // PipelineBuilder dynamically assembles a pipeline as an ordered list of EventTypes.
@@ -323,6 +329,7 @@ var Pipeline = map[string][]EventType{
 		CHUNK_SEARCH,
 		CHUNK_RERANK,
 		CHUNK_MERGE,
+		FEEDBACK_WEIGHT,
 		INTO_CHAT_MESSAGE,
 		CHAT_COMPLETION,
 	},
@@ -332,6 +339,7 @@ var Pipeline = map[string][]EventType{
 		CHUNK_SEARCH_PARALLEL,
 		CHUNK_RERANK,
 		CHUNK_MERGE,
+		FEEDBACK_WEIGHT,
 		FILTER_TOP_K,
 		DATA_ANALYSIS,
 		INTO_CHAT_MESSAGE,

@@ -1531,6 +1531,18 @@ definitions:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FAQConfig'
         description: FAQConfig stores FAQ specific configuration such as indexing
           strategy
+      feedback_reset_at:
+        description: |-
+          FeedbackResetAt is the feedback epoch: any feedback updated before
+          this instant does not contribute to per-chunk statistics. Advances on
+          every successful admin reset so historical user feedback survives the
+          reset for auditability while chunk counters restart from zero.
+        type: string
+      feedback_reset_by:
+        description: |-
+          FeedbackResetBy records the principal that performed the most recent
+          admin reset; surfaced in weight-change logs for audit.
+        type: string
       id:
         description: Unique identifier of the knowledge base
         type: string
@@ -2187,6 +2199,14 @@ definitions:
       updated_at:
         description: Last update timestamp
         type: string
+      user_feedback:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MessageFeedbackView'
+        description: |-
+          UserFeedback is the current caller's rating of this assistant message,
+          hydrated by MessageFeedbackService.AttachUserFeedback on load. Empty
+          when the message is not an assistant message or the caller has not
+          rated it. Not persisted.
     type: object
   github_com_Tencent_WeKnora_internal_types.MessageAttachment:
     properties:
@@ -2223,6 +2243,19 @@ definitions:
       total_chunks:
         description: Total parsed chunks
         type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.MessageFeedbackView:
+    properties:
+      comment:
+        type: string
+      rating:
+        type: string
+      reasons:
+        items:
+          type: string
+        type: array
+      updated_at:
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.MessageImage:
     properties:
@@ -2787,6 +2820,45 @@ definitions:
         description: 'EmbeddingTopK is the maximum number of chunks returned by vector
           search (default: 50)'
         type: integer
+      feedback_boost_factor:
+        description: |-
+          FeedbackBoostFactor multiplies candidate scores of boosted chunks
+          (>= 1, default: 1.2).
+        type: number
+      feedback_boost_threshold:
+        description: |-
+          FeedbackBoostThreshold is the positive rate at or above which a chunk's
+          recall weight is boosted (0-1, default: 0.8).
+        type: number
+      feedback_min_samples:
+        description: |-
+          FeedbackMinSamples is the minimum number of ratings a chunk needs
+          before its weight deviates from neutral (default: 3). Without this
+          floor a single early rating could swing retrieval.
+        type: integer
+      feedback_needs_optimization_threshold:
+        description: |-
+          FeedbackNeedsOptimizationThreshold is the positive rate below which a
+          chunk is flagged as needing optimization in the admin stats panel
+          (0-1, default: 0.2). Must not exceed FeedbackPenaltyThreshold.
+        type: number
+      feedback_penalty_factor:
+        description: |-
+          FeedbackPenaltyFactor multiplies candidate scores of penalized chunks
+          (< 1, default: 0.8).
+        type: number
+      feedback_penalty_threshold:
+        description: |-
+          FeedbackPenaltyThreshold is the positive rate below which a chunk's
+          recall weight is penalized (0-1, default: 0.5).
+        type: number
+      feedback_ranking_enabled:
+        description: |-
+          FeedbackRankingEnabled gates whether stored chunk recall weights (from
+          answer like/dislike feedback) are applied to retrieval candidate
+          ordering. Weights are always maintained; this only controls application,
+          so enabling later takes effect immediately. Default: false.
+        type: boolean
       keyword_threshold:
         description: 'KeywordThreshold is the minimum keyword match score (0-1, default:
           0.3)'
@@ -5215,6 +5287,19 @@ definitions:
         type: array
     required:
     - query
+    type: object
+  internal_handler.SetMessageFeedbackRequest:
+    properties:
+      comment:
+        type: string
+      rating:
+        type: string
+      reasons:
+        items:
+          type: string
+        type: array
+    required:
+    - rating
     type: object
   internal_handler.StorageCheckRequest:
     properties:
@@ -8778,6 +8863,115 @@ paths:
       summary: 搜索FAQ
       tags:
       - FAQ管理
+  /knowledge-bases/{id}/feedback/chunk-stats:
+    get:
+      consumes:
+      - application/json
+      description: KB owner / admin only。返回每条 chunk 的累计点赞、点踩、好评率与最近评价时间，支持按好评率升序/降序、低质筛选与按关键词搜索。
+      parameters:
+      - description: 知识库 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 页码，从 1 开始
+        in: query
+        name: page
+        type: integer
+      - description: 每页大小
+        in: query
+        name: page_size
+        type: integer
+      - description: 排序：positive_rate_asc/positive_rate_desc/feedback_count_desc/last_feedback_desc
+        in: query
+        name: sort_by
+        type: string
+      - description: 只看低质片段（好评率低于 needs-optimization 阈值）
+        in: query
+        name: low_quality
+        type: boolean
+      - description: 按内容预览模糊匹配
+        in: query
+        name: keyword
+        type: string
+      - description: 按文档 ID 过滤
+        in: query
+        name: knowledge_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取知识库片段维度的反馈统计
+      tags:
+      - 知识库
+  /knowledge-bases/{id}/feedback/reset:
+    post:
+      description: 推进反馈 epoch，使所有历史用户反馈不再计入统计；同步清空所有 chunk 的累计赞踩计数。KB owner / admin
+        only。
+      parameters:
+      - description: 知识库 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 重置知识库用户反馈
+      tags:
+      - 知识库
+  /knowledge-bases/{id}/feedback/weight-logs:
+    get:
+      consumes:
+      - application/json
+      description: KB owner / admin only。可按 chunk_id 过滤，分页加载。
+      parameters:
+      - description: 知识库 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 仅看该片段的权重变更日志
+        in: query
+        name: chunk_id
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页大小
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取知识库召回权重变更日志
+      tags:
+      - 知识库
   /knowledge-bases/{id}/hybrid-search:
     get:
       consumes:
@@ -12591,6 +12785,52 @@ paths:
       summary: 知识问答
       tags:
       - 问答
+  /sessions/{session_id}/messages/{message_id}/feedback:
+    put:
+      consumes:
+      - application/json
+      description: |-
+        对助手消息提交点赞、点踩或取消评价。"none" 等同于取消当前评价。
+        rating=dislike 时可附带 reasons（白名单内原因）与 comment。
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 助手消息 ID
+        in: path
+        name: message_id
+        required: true
+        type: string
+      - description: 反馈
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.SetMessageFeedbackRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 提交/取消问答反馈
+      tags:
+      - 会话
   /sessions/{session_id}/messages/{message_id}/suggestions:
     get:
       parameters:
@@ -13752,6 +13992,23 @@ paths:
         "200":
           description: OK
       summary: 重连文档解析服务
+      tags:
+      - 系统
+  /system/feedback/recompute:
+    post:
+      description: 根据当前 retrieval_config 中的 feedback policy 重新计算所有受影响 chunk 的 recall_weight。
+        Admin only。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 触发租户级反馈权重重算
       tags:
       - 系统
   /system/info:

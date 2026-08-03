@@ -543,5 +543,171 @@ func (e *AgentEngine) runToolCall(
 		logger.Debugf(ctx, "%s Tool error: %s", toolTag, toolCall.Result.Error)
 	}
 
+	// Surface retrieved chunks to the feedback attribution pipeline so a
+	// later like/dislike can be credited to the chunks the LLM actually
+	// read. The KB pipeline emits the same event before the answer stream
+	// (#1248); the agent path skipped it because each tool call carries its
+	// own Data["results"] payload instead of one merged search result, so
+	// we re-emit here per call. The downstream handler in qa.go accumulates
+	// refs across events, so multiple knowledge_search / hybrid_search calls
+	// in the same session still produce the union of contributing chunks.
+	if refs := chunksFromToolResult(ctx, toolCall); len(refs) > 0 {
+		e.eventBus.Emit(ctx, event.Event{
+			ID:        toolCall.ID + "-refs",
+			Type:      event.EventAgentReferences,
+			SessionID: sessionID,
+			Data: event.AgentReferencesData{
+				References: types.References(refs),
+				Iteration:  iteration,
+			},
+		})
+	}
+
 	return toolCall
+}
+
+// chunksFromToolResult extracts SearchResult rows out of a tool call's
+// structured Data payload. Only retrieval-shaped tools contribute; document
+// metadata tools (get_document_info) either omit chunk ids or carry them in
+// a non-uniform shape that breaks the chunk-level unique index, so we skip
+// them and rely on knowledge_search / list_knowledge_chunks to cover the
+// answers that actually quote chunk content.
+func chunksFromToolResult(ctx context.Context, tc types.ToolCall) []*types.SearchResult {
+	if tc.Result == nil || !tc.Result.Success || len(tc.Result.Data) == 0 {
+		return nil
+	}
+	switch tc.Name {
+	case agenttools.ToolKnowledgeSearch:
+		// ToolKnowledgeSearch is also the registry name for the
+		// hybrid_search backend, so it covers both surfaces.
+		return searchResultsFromMap(tc.Result.Data, "results")
+	case agenttools.ToolListKnowledgeChunks:
+		// list_knowledge_chunks returns the full chunk set under Data["chunks"];
+		// the persistence sanitiser strips that field for db size, but the
+		// in-memory tool result still carries it, so emit here before storage.
+		// Different chunk-id keys per codepath: list_by_knowledge uses "id",
+		// the single-chunk (faq_id / chunk_id) path also uses "id".
+		rawChunks := tc.Result.Data["chunks"]
+		rows := toChunkRowSlice(rawChunks)
+		if len(rows) == 0 {
+			return nil
+		}
+		out := make([]*types.SearchResult, 0, len(rows))
+		for _, m := range rows {
+			id := stringField(m, "chunk_id")
+			if id == "" {
+				id = stringField(m, "id")
+			}
+			kbID := stringField(m, "knowledge_base")
+			if kbID == "" {
+				kbID = stringField(m, "knowledge_base_id")
+			}
+			if id == "" || kbID == "" {
+				continue
+			}
+			out = append(out, &types.SearchResult{
+				ID:              id,
+				KnowledgeID:     stringField(m, "knowledge_id"),
+				KnowledgeBaseID: kbID,
+				Content:         stringField(m, "content"),
+			})
+		}
+		return out
+	case agenttools.ToolGrepChunks:
+		// grep_chunks returns per-KB rollups (Data["knowledge_results"]) but
+		// not individual chunk ids in the persisted payload, so it cannot
+		// contribute chunk-level attribution. Skip; knowledge_search covers
+		// the answers that follow a grep.
+		return nil
+	}
+	return nil
+}
+
+// searchResultsFromMap converts a slice of map-shaped chunk rows under the
+// given key into *types.SearchResult values. Rows missing chunk_id or
+// knowledge_base_id are skipped — MessageChunkReference requires both.
+func searchResultsFromMap(data map[string]interface{}, key string) []*types.SearchResult {
+	rows := toChunkRowSlice(data[key])
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]*types.SearchResult, 0, len(rows))
+	for _, m := range rows {
+		id, _ := m["chunk_id"].(string)
+		kbID, _ := m["knowledge_base_id"].(string)
+		if id == "" || kbID == "" {
+			continue
+		}
+		sr := &types.SearchResult{
+			ID:              id,
+			KnowledgeID:     stringField(m, "knowledge_id"),
+			KnowledgeBaseID: kbID,
+			KnowledgeTitle:  stringField(m, "knowledge_title"),
+		}
+		if idx, ok := m["chunk_index"].(float64); ok {
+			sr.ChunkIndex = int(idx)
+		}
+		if content, ok := m["content"].(string); ok {
+			sr.Content = content
+		}
+		out = append(out, sr)
+	}
+	return out
+}
+
+// isKnowledgeTool reports whether the tool name is one of the
+// retrieval-shaped tools we care about for chunk attribution. Used purely
+// for diagnostic logging — chunk extraction itself lives in
+// chunksFromToolResult.
+func isKnowledgeTool(name string) bool {
+	switch name {
+	case agenttools.ToolKnowledgeSearch,
+		agenttools.ToolListKnowledgeChunks,
+		agenttools.ToolGrepChunks:
+		return true
+	}
+	return false
+}
+
+// truncatedForLog is a tiny helper to keep the rawChunks diagnostic line
+// bounded; the chunks payload can include full chunk text and run into KB.
+func truncatedForLog(v interface{}, maxRows int) interface{} {
+	switch x := v.(type) {
+	case []interface{}:
+		if len(x) <= maxRows {
+			return x
+		}
+		return append([]interface{}{}, x[:maxRows]...)
+	}
+	return v
+}
+
+// toChunkRowSlice normalises whatever shape the tool Data field uses for the
+// chunks array. Across tools and test fixtures it shows up as []interface{},
+// []map[string]interface{}, or even typed []*types.Chunk-shaped slices, so
+// flatten them all to []map[string]interface{} before the row conversion
+// in chunksFromToolResult.
+func toChunkRowSlice(v interface{}) []map[string]interface{} {
+	switch x := v.(type) {
+	case []map[string]interface{}:
+		return x
+	case []interface{}:
+		out := make([]map[string]interface{}, 0, len(x))
+		for _, r := range x {
+			if m, ok := r.(map[string]interface{}); ok {
+				out = append(out, m)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// stringField returns the string value of a map entry. Used to keep the
+// conversion helpers above resilient to the json.Unmarshal default types
+// (string for strings, float64 for numbers).
+func stringField(m map[string]interface{}, key string) string {
+	s, _ := m[key].(string)
+	return s
 }

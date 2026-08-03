@@ -53,6 +53,18 @@
                     </t-button>
                 </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo" :session="session" :session-id="sessionId" />
+                <!-- Answer like/dislike (#1248) -->
+                <FeedbackButtons
+                  v-if="session.id"
+                  :session-id="sessionId"
+                  :message-id="session.id"
+                  :model-value="userFeedback.rating"
+                  :reasons="userFeedback.reasons"
+                  :comment="userFeedback.comment"
+                  @update:model-value="onUserFeedbackRatingChange"
+                  @update:reasons="onUserFeedbackReasonsChange"
+                  @update:comment="onUserFeedbackCommentChange"
+                />
                 <transition name="follow-up-toolbar-loading">
                     <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
                         aria-live="polite">
@@ -80,6 +92,7 @@ import AgentStreamDisplay from './AgentStreamDisplay.vue';
 import RagPipelineProgress from './RagPipelineProgress.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
+import FeedbackButtons from '@/components/chat/FeedbackButtons.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import { sanitizeMarkdownHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
 import { useI18n } from 'vue-i18n';
@@ -164,6 +177,44 @@ const props = defineProps({
 });
 
 const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
+
+// User-feedback mirror (#1248). Seeded from the backend's user_feedback
+// hydration on the assistant message; mutated in place by FeedbackButtons
+// when the user submits a rating. The mirror lives per-bubble because
+// sharing one global value across multiple botmsg components would let
+// an unrelated bubble inherit the rating that was just saved for a
+// different assistant message.
+const userFeedback = reactive({
+  rating: '',
+  reasons: [],
+  comment: '',
+});
+
+watch(
+  () => props.session?.user_feedback,
+  (next) => {
+    if (!next) {
+      userFeedback.rating = '';
+      userFeedback.reasons = [];
+      userFeedback.comment = '';
+      return;
+    }
+    userFeedback.rating = next.rating || '';
+    userFeedback.reasons = Array.isArray(next.reasons) ? [...next.reasons] : [];
+    userFeedback.comment = next.comment || '';
+  },
+  { immediate: true, deep: true },
+);
+
+function onUserFeedbackRatingChange(rating) {
+  userFeedback.rating = rating || '';
+}
+function onUserFeedbackReasonsChange(reasons) {
+  userFeedback.reasons = Array.isArray(reasons) ? [...reasons] : [];
+}
+function onUserFeedbackCommentChange(comment) {
+  userFeedback.comment = comment || '';
+}
 
 const preview = (url) => {
     nextTick(() => {
