@@ -48,9 +48,20 @@ type Config struct {
 	APIToken string `json:"api_token"`
 }
 
+// Supported Confluence editions.
+const (
+	editionServer = "server"
+	editionCloud  = "cloud"
+)
+
+// editionSettingKey is where the editor persists the selected edition. It lives
+// in settings rather than credentials because credentials are stripped from API
+// responses and therefore cannot survive an edit round-trip.
+const editionSettingKey = "confluence_edition"
+
 // IsCloud reports whether this config targets Confluence Cloud.
 func (c *Config) IsCloud() bool {
-	return c.Edition == "cloud"
+	return c.Edition == editionCloud
 }
 
 // parseConfluenceConfig extracts and validates Confluence config from DataSourceConfig.
@@ -61,36 +72,30 @@ func parseConfluenceConfig(config *types.DataSourceConfig) (*Config, error) {
 
 	creds := config.Credentials
 
-	edition, _ := creds["edition"].(string)
-	if edition == "" {
-		edition = "server"
-	}
-
-	baseURL, _ := creds["base_url"].(string)
+	baseURL := stringValue(creds, "base_url")
 	if baseURL == "" {
 		return nil, fmt.Errorf("%w: missing base_url", datasource.ErrInvalidCredentials)
 	}
 
-	username, _ := creds["username"].(string)
+	username := stringValue(creds, "username")
 	if username == "" {
 		return nil, fmt.Errorf("%w: missing username", datasource.ErrInvalidCredentials)
 	}
 
 	cfg := &Config{
-		Edition:  edition,
+		Edition:  resolveEdition(config),
 		BaseURL:  baseURL,
 		Username: username,
 	}
 
-	switch edition {
-	case "cloud":
-		apiToken, _ := creds["api_token"].(string)
+	if cfg.IsCloud() {
+		apiToken := stringValue(creds, "api_token")
 		if apiToken == "" {
 			return nil, fmt.Errorf("%w: missing api_token", datasource.ErrInvalidCredentials)
 		}
 		cfg.APIToken = apiToken
-	default: // "server"
-		password, _ := creds["password"].(string)
+	} else {
+		password := stringValue(creds, "password")
 		if password == "" {
 			return nil, fmt.Errorf("%w: missing password", datasource.ErrInvalidCredentials)
 		}
@@ -98,6 +103,34 @@ func parseConfluenceConfig(config *types.DataSourceConfig) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// resolveEdition determines which Confluence flavour a data source targets.
+//
+// Settings win over credentials: an edit that only switches the edition never
+// resends credentials (the stored ones are preserved server-side), so the
+// credentials copy still holds the previous value. The credentials copy remains
+// the fallback for the stateless validate-credentials endpoint, which posts
+// credentials without settings. Anything unrecognised means Server, matching the
+// default applied to rows written before the field existed.
+func resolveEdition(config *types.DataSourceConfig) string {
+	for _, edition := range []string{
+		stringValue(config.Settings, editionSettingKey),
+		stringValue(config.Credentials, "edition"),
+	} {
+		switch edition {
+		case editionCloud, editionServer:
+			return edition
+		}
+	}
+	return editionServer
+}
+
+// stringValue reads a string entry out of an untyped config map, returning ""
+// when the key is absent or holds another type.
+func stringValue(m map[string]interface{}, key string) string {
+	s, _ := m[key].(string)
+	return s
 }
 
 // --- API response types ---

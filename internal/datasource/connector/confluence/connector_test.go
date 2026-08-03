@@ -340,6 +340,47 @@ func TestParseConfluenceConfig(t *testing.T) {
 			t.Fatal("expected error for missing api_token")
 		}
 	})
+
+	// Switching the edition from the editor only rewrites settings: credentials
+	// are never resent, so the stored copy still says "server".
+	t.Run("settings edition wins over stale credentials copy", func(t *testing.T) {
+		cfg, err := parseConfluenceConfig(&types.DataSourceConfig{
+			Credentials: map[string]interface{}{
+				"edition":   "server",
+				"base_url":  "https://my.atlassian.net/wiki",
+				"username":  "user@example.com",
+				"api_token": "tok123",
+			},
+			Settings: map[string]interface{}{editionSettingKey: "cloud"},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !cfg.IsCloud() {
+			t.Errorf("Edition = %q, want cloud", cfg.Edition)
+		}
+		if cfg.APIToken != "tok123" {
+			t.Errorf("APIToken = %q", cfg.APIToken)
+		}
+	})
+
+	t.Run("unrecognised settings edition falls back to credentials", func(t *testing.T) {
+		cfg, err := parseConfluenceConfig(&types.DataSourceConfig{
+			Credentials: map[string]interface{}{
+				"edition":   "cloud",
+				"base_url":  "https://my.atlassian.net/wiki",
+				"username":  "user@example.com",
+				"api_token": "tok123",
+			},
+			Settings: map[string]interface{}{editionSettingKey: 42},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !cfg.IsCloud() {
+			t.Errorf("Edition = %q, want cloud", cfg.Edition)
+		}
+	})
 }
 
 func TestParseConfluenceTimestamp(t *testing.T) {
