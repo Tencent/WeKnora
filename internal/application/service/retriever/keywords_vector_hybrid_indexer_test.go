@@ -16,6 +16,10 @@ type capturingEmbedder struct {
 	batchTexts []string
 }
 
+func (e *capturingEmbedder) GetDimensions() int {
+	return 1
+}
+
 func (e *capturingEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	e.text = text
 	return []float32{1}, nil
