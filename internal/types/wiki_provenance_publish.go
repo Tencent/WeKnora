@@ -9,6 +9,9 @@ var (
 	// ErrWikiPublishScopeNotFound covers missing rows and ownership mismatches
 	// without revealing whether another tenant owns the requested object.
 	ErrWikiPublishScopeNotFound = errors.New("wiki provenance publish scope not found")
+	// ErrWikiPublishVersionConflict means a manual page edit was built from a
+	// page version that is no longer current.
+	ErrWikiPublishVersionConflict = errors.New("wiki provenance page version conflict")
 )
 
 // WikiProvenancePublishRequest is one atomic page/source publication.

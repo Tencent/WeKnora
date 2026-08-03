@@ -31,6 +31,7 @@ type WikiPageProvenanceBlock struct {
 	BlockType        WikiBlockType              `json:"block_type"`
 	SortOrder        int                        `json:"sort_order"`
 	Content          string                     `json:"content"`
+	AuthorType       WikiBlockAuthorType        `json:"author_type"`
 	ProvenanceStatus WikiProvenanceStatus       `json:"provenance_status"`
 	Sources          []WikiPageProvenanceSource `json:"sources"`
 }
@@ -48,6 +49,8 @@ type WikiPageProvenanceSource struct {
 	FileType            string                     `json:"file_type,omitempty"`
 	ChunkID             *string                    `json:"chunk_id,omitempty"`
 	ChunkIndex          *int                       `json:"chunk_index,omitempty"`
+	SourceStart         int                        `json:"source_start"`
+	SourceEnd           int                        `json:"source_end"`
 	EvidenceExcerpt     string                     `json:"evidence_excerpt,omitempty"`
 	EvidenceHash        string                     `json:"evidence_hash,omitempty"`
 	SourceRole          WikiSourceRole             `json:"source_role"`

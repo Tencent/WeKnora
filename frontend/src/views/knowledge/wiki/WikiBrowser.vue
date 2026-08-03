@@ -540,6 +540,9 @@
                   <section v-for="block in pageProvenance!.blocks" :key="block.id" class="wiki-provenance-block"
                     :data-logical-block-id="block.logical_block_id">
                     <div class="wiki-provenance-block-content" v-html="renderProvenanceBlock(block)"></div>
+                    <span v-if="block.author_type === 'manual'" class="wiki-block-manual-label">
+                      {{ $t('knowledgeEditor.wikiBrowser.sourceManualCreated') }}
+                    </span>
                     <button v-if="block.sources.length" type="button" class="wiki-block-source-toggle"
                       :aria-expanded="isSourceBlockExpanded(block.id)" @click.stop="toggleSourceBlock(block.id)">
                       <t-icon name="link" size="14px" />
@@ -1998,6 +2001,7 @@ const renderedContent = computed(() => {
 const provenanceHasMissingBlockSources = computed(() => {
   const provenance = pageProvenance.value
   return !!provenance && provenance.blocks.some(block =>
+    block.author_type === 'generated' &&
     block.block_type !== 'heading' &&
     !block.sources.some(source => source.source_role === 'supporting'),
   )
@@ -5917,6 +5921,18 @@ onUnmounted(() => {
 
 .wiki-provenance-block-content {
   min-width: 0;
+}
+
+.wiki-block-manual-label {
+  display: inline-flex;
+  align-items: center;
+  margin-top: -6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .wiki-block-source-toggle {

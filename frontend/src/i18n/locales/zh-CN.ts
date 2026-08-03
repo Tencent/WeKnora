@@ -4197,6 +4197,7 @@ export default {
       blockSources: "来源 {count}",
       sourceChunk: "片段 {index}",
       sourceUnavailable: "来源已不可用",
+      sourceManualCreated: "[手工创建]",
       sourceFallbackUnavailable: "逐段来源加载失败（{reason}），已按整页显示。",
       sourceFallbackNoData: "此页面没有可用的逐段来源数据，已按整页显示。",
       sourceFallbackPageEdited: "此页面已被手动、智能体或回退操作编辑；原逐段来源只对应编辑前版本，已按当前整页显示。下次 Wiki 重新生成后会恢复逐段来源。",

@@ -49,6 +49,8 @@ export interface WikiPageProvenanceSource {
   file_type?: string;
   chunk_id?: string;
   chunk_index?: number;
+  source_start: number;
+  source_end: number;
   evidence_excerpt?: string;
   evidence_hash?: string;
   source_role: string;
@@ -63,6 +65,7 @@ export interface WikiPageProvenanceBlock {
   block_type: string;
   sort_order: number;
   content: string;
+  author_type: 'generated' | 'manual' | 'agent' | 'unknown';
   provenance_status: string;
   sources: WikiPageProvenanceSource[];
 }

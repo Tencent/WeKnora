@@ -4133,6 +4133,7 @@ export default {
       blockSources: "출처 {count}",
       sourceChunk: "청크 {index}",
       sourceUnavailable: "출처를 사용할 수 없음",
+      sourceManualCreated: "[수동 작성]",
       sourceFallbackUnavailable: "블록별 출처를 불러오지 못했습니다({reason}). 전체 페이지를 표시합니다.",
       sourceFallbackNoData: "사용 가능한 블록별 출처 데이터가 없어 전체 페이지를 표시합니다.",
       sourceFallbackPageEdited: "이 페이지는 수동, 에이전트 또는 되돌리기로 편집되었습니다. 블록별 출처는 편집 전 버전에만 해당하므로 현재 전체 페이지를 표시합니다. Wiki가 다시 생성되면 블록별 출처가 복원됩니다.",

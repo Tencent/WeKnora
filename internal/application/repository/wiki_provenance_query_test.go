@@ -115,6 +115,7 @@ func TestWikiProvenanceQueryReturnsCurrentBlockSourcesAndEnforcesScope(t *testin
 	require.Equal(t, types.WikiProvenanceVerified, got.ProvenanceStatus)
 	require.Len(t, got.Blocks, 1)
 	require.Equal(t, "fact-founded", got.Blocks[0].LogicalBlockID)
+	require.Equal(t, types.WikiBlockAuthorGenerated, got.Blocks[0].AuthorType)
 	require.Len(t, got.Blocks[0].Sources, 1)
 	gotSource := got.Blocks[0].Sources[0]
 	require.Equal(t, "Acme source", gotSource.KnowledgeTitle)
@@ -123,6 +124,8 @@ func TestWikiProvenanceQueryReturnsCurrentBlockSourcesAndEnforcesScope(t *testin
 	require.Equal(t, 4, gotSource.ParseAttempt)
 	require.NotNil(t, gotSource.ChunkIndex)
 	require.Equal(t, 3, *gotSource.ChunkIndex)
+	require.Equal(t, -1, gotSource.SourceStart)
+	require.Equal(t, -1, gotSource.SourceEnd)
 	require.Contains(t, gotSource.EvidenceExcerpt, "founded in 2020")
 	require.True(t, gotSource.SourceAvailable)
 	require.Equal(t, 2, got.CurrentPageVersion)
@@ -229,6 +232,8 @@ func TestWikiProvenancePublishSnapshotsAndAdvancesExistingPageVersion(t *testing
 	projection.Title = revision.Title
 	projection.Summary = revision.Summary
 	projection.Content = revision.RenderedContent
+	projection.LastEditSource = types.WikiEditSourcePipeline
+	projection.LastEditorID = ""
 	require.NoError(t, repo.UpdateCurrentPage(
 		context.Background(), 7, "kb-1", &projection, revision, publishedAt,
 	))

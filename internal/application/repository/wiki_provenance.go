@@ -49,6 +49,8 @@ type wikiProvenanceSourceReadRow struct {
 	FileType            string
 	ChunkID             *string
 	ChunkIndex          *int
+	SourceStart         int
+	SourceEnd           int
 	EvidenceContent     string
 	EvidenceHash        string
 	SourceRole          types.WikiSourceRole
@@ -133,6 +135,7 @@ func (r *wikiProvenanceRepository) GetPageProvenance(
 			BlockType:        block.BlockType,
 			SortOrder:        block.SortOrder,
 			Content:          block.Content,
+			AuthorType:       block.AuthorType,
 			ProvenanceStatus: block.ProvenanceStatus,
 			Sources:          []types.WikiPageProvenanceSource{},
 		})
@@ -152,6 +155,8 @@ func (r *wikiProvenanceRepository) GetPageProvenance(
 			k.file_type,
 			s.chunk_id,
 			c.chunk_index,
+			s.source_start,
+			s.source_end,
 			COALESCE(c.content, '') AS evidence_content,
 			s.evidence_hash,
 			s.source_role,
@@ -186,6 +191,8 @@ func (r *wikiProvenanceRepository) GetPageProvenance(
 			FileType:            row.FileType,
 			ChunkID:             row.ChunkID,
 			ChunkIndex:          row.ChunkIndex,
+			SourceStart:         row.SourceStart,
+			SourceEnd:           row.SourceEnd,
 			EvidenceExcerpt:     truncateWikiEvidenceExcerpt(row.EvidenceContent),
 			EvidenceHash:        row.EvidenceHash,
 			SourceRole:          row.SourceRole,
@@ -378,13 +385,26 @@ func (r *wikiProvenanceRepository) EnsureCurrentPage(ctx context.Context, page *
 		candidate.SourceRefs = types.StringArray{}
 		candidate.ChunkRefs = types.StringArray{}
 		candidate.PageMetadata = types.JSON(`{}`)
-		candidate.Version = 0
-		candidate.CreatedAt = time.Time{}
-		candidate.UpdatedAt = time.Time{}
-		candidate.DeletedAt = (types.WikiPage{}).DeletedAt
-		if err := r.db.WithContext(ctx).
+		// Use a map so GORM does not replace the explicit version=0 shell with
+		// WikiPage's default version=1. The first atomic publication must become
+		// revision 1, not revision 2.
+		now := time.Now().UTC()
+		if err := r.db.WithContext(ctx).Model(&types.WikiPage{}).
 			Clauses(clause.OnConflict{DoNothing: true}).
-			Create(&candidate).Error; err != nil {
+			Create(map[string]any{
+				"id": candidate.ID, "tenant_id": candidate.TenantID,
+				"knowledge_base_id": candidate.KnowledgeBaseID, "slug": candidate.Slug,
+				"title": candidate.Title, "page_type": candidate.PageType,
+				"status": candidate.Status, "content": "", "summary": "",
+				"aliases": candidate.Aliases, "parent_slug": candidate.ParentSlug,
+				"folder_id": candidate.FolderID, "category_path": candidate.CategoryPath,
+				"wiki_path": candidate.WikiPath, "depth": candidate.Depth,
+				"sort_order": candidate.SortOrder, "source_refs": types.StringArray{},
+				"chunk_refs": types.StringArray{}, "in_links": candidate.InLinks,
+				"out_links": candidate.OutLinks, "page_metadata": types.JSON(`{}`),
+				"version": 0, "last_edit_source": "", "last_editor_id": "",
+				"created_at": now, "updated_at": now,
+			}).Error; err != nil {
 			return fmt.Errorf("create current wiki page shell: %w", err)
 		}
 	}
@@ -735,6 +755,9 @@ func (r *wikiProvenanceRepository) UpdateCurrentPage(
 		}
 		return fmt.Errorf("load current wiki page for snapshot: %w", err)
 	}
+	if page.LastEditSource == types.WikiEditSourceUser && current.Version != page.Version {
+		return types.ErrWikiPublishVersionConflict
+	}
 	if revision.RevisionNo <= current.Version {
 		return fmt.Errorf(
 			"wiki provenance revision %d does not advance current page version %d",
@@ -767,6 +790,11 @@ func (r *wikiProvenanceRepository) UpdateCurrentPage(
 			return fmt.Errorf("snapshot current wiki page: %w", err)
 		}
 	}
+	editSource := types.NormalizeWikiEditSource(page.LastEditSource)
+	editorID := page.LastEditorID
+	if editSource == types.WikiEditSourcePipeline {
+		editorID = ""
+	}
 	result := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
 		Where(
@@ -793,8 +821,8 @@ func (r *wikiProvenanceRepository) UpdateCurrentPage(
 			"out_links":        page.OutLinks,
 			"page_metadata":    page.PageMetadata,
 			"version":          revision.RevisionNo,
-			"last_edit_source": types.WikiEditSourcePipeline,
-			"last_editor_id":   "",
+			"last_edit_source": editSource,
+			"last_editor_id":   editorID,
 			"updated_at":       at,
 		})
 	if result.Error != nil {

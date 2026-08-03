@@ -42,11 +42,13 @@ func stripWikiPageInlineChunkCitations(page *types.WikiPage) {
 
 // wikiPageService implements the WikiPageService interface
 type wikiPageService struct {
-	repo            interfaces.WikiPageRepository
-	chunkRepo       interfaces.ChunkRepository
-	kbService       interfaces.KnowledgeBaseService
-	taskPendingRepo interfaces.TaskPendingOpsRepository
-	redisClient     *redis.Client
+	repo                interfaces.WikiPageRepository
+	chunkRepo           interfaces.ChunkRepository
+	kbService           interfaces.KnowledgeBaseService
+	taskPendingRepo     interfaces.TaskPendingOpsRepository
+	redisClient         *redis.Client
+	provenancePublisher interfaces.WikiProvenancePublishService
+	provenanceQuery     interfaces.WikiProvenanceQueryService
 }
 
 // NewWikiPageService creates a new wiki page service
@@ -56,13 +58,17 @@ func NewWikiPageService(
 	kbService interfaces.KnowledgeBaseService,
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
 	redisClient *redis.Client,
+	provenancePublisher interfaces.WikiProvenancePublishService,
+	provenanceQuery interfaces.WikiProvenanceQueryService,
 ) interfaces.WikiPageService {
 	return &wikiPageService{
-		repo:            repo,
-		chunkRepo:       chunkRepo,
-		kbService:       kbService,
-		taskPendingRepo: taskPendingRepo,
-		redisClient:     redisClient,
+		repo:                repo,
+		chunkRepo:           chunkRepo,
+		kbService:           kbService,
+		taskPendingRepo:     taskPendingRepo,
+		redisClient:         redisClient,
+		provenancePublisher: provenancePublisher,
+		provenanceQuery:     provenanceQuery,
 	}
 }
 
@@ -80,11 +86,17 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 	if page.Status == "" {
 		page.Status = types.WikiPageStatusPublished
 	}
-	if page.Version == 0 {
-		page.Version = 1
-	}
 	page.LastEditSource = types.WikiEditSourceFromContext(ctx)
 	page.LastEditorID, _ = types.UserIDFromContext(ctx)
+	manualPublication := page.LastEditSource == types.WikiEditSourceUser &&
+		s.provenancePublisher != nil && s.provenanceQuery != nil
+	if manualPublication {
+		// Version zero is the unpublished FK shell. The atomic provenance
+		// publisher advances it to version one together with the first blocks.
+		page.Version = 0
+	} else if page.Version == 0 {
+		page.Version = 1
+	}
 	stripWikiPageInlineChunkCitations(page)
 
 	// Parse outbound links from content
@@ -98,7 +110,13 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 	page.CreatedAt = now
 	page.UpdatedAt = now
 
-	if err := s.repo.Create(ctx, page); err != nil {
+	if manualPublication {
+		published, err := s.publishManualWikiPage(ctx, nil, page)
+		if err != nil {
+			return nil, fmt.Errorf("create manual wiki page provenance: %w", err)
+		}
+		page = published
+	} else if err := s.repo.Create(ctx, page); err != nil {
 		return nil, fmt.Errorf("create wiki page: %w", err)
 	}
 
@@ -171,10 +189,22 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 		existing.LastEditSource = types.WikiEditSourceFromContext(ctx)
 		existing.LastEditorID, _ = types.UserIDFromContext(ctx)
 
-		// Snapshot the superseded version and write the new one atomically,
-		// so the content of every past version is preserved and a failed
-		// update leaves no snapshot behind.
-		if err := s.repo.UpdateWithRevision(ctx, existing, revisionFromPage(&prev)); err != nil {
+		if existing.LastEditSource == types.WikiEditSourceUser &&
+			s.provenancePublisher != nil && s.provenanceQuery != nil {
+			// Manual page edits publish the page, its new block set, and copied
+			// sources for unchanged blocks in one provenance transaction.
+			published, publishErr := s.publishManualWikiPage(ctx, &prev, existing)
+			if errors.Is(publishErr, types.ErrWikiPublishVersionConflict) {
+				return nil, repository.ErrWikiPageConflict
+			}
+			if publishErr != nil {
+				return nil, fmt.Errorf("update manual wiki page provenance: %w", publishErr)
+			}
+			existing = published
+		} else if err := s.repo.UpdateWithRevision(ctx, existing, revisionFromPage(&prev)); err != nil {
+			// Snapshot the superseded version and write the new one atomically,
+			// so the content of every past version is preserved and a failed
+			// update leaves no snapshot behind.
 			return nil, fmt.Errorf("update wiki page: %w", err)
 		}
 		// Bound per-page history; best-effort — a failed prune only means

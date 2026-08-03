@@ -157,6 +157,8 @@ func buildWikiFactPublishRequest(
 
 	projection := *page
 	projection.Status = types.WikiPageStatusPublished
+	projection.LastEditSource = types.WikiEditSourcePipeline
+	projection.LastEditorID = ""
 	projection.Content = renderWikiFactOutput(output)
 	projection.Summary = output.Summary
 	projection.ChunkRefs = wikiFactChunkIDs(output)

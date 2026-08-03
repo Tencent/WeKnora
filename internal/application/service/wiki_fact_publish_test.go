@@ -58,6 +58,8 @@ func TestBuildWikiFactPublishRequestMapsBlocksAndTrustedSources(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, page.ID, request.PageID)
 	require.Equal(t, types.WikiPageStatusPublished, request.PageProjection.Status)
+	require.Equal(t, types.WikiEditSourcePipeline, request.PageProjection.LastEditSource)
+	require.Empty(t, request.PageProjection.LastEditorID)
 	require.Equal(t, renderWikiFactOutput(output), request.PageProjection.Content)
 	require.Equal(t, types.StringArray{"chunk-1"}, request.PageProjection.ChunkRefs)
 	require.Len(t, request.KnowledgeRevisions, 1)
