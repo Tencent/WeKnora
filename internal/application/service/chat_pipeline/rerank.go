@@ -559,10 +559,10 @@ var (
 	reMarkdownLink = regexp.MustCompile(`\[([^\]]+)\]\([^()\s]*(?:\([^)]*\)[^()\s]*)*\)`)
 	// reRawURL matches standalone http(s) URLs.
 	reRawURL = regexp.MustCompile(`https?://[^\s)\]>]+`)
-	// reCodeBlock matches fenced code blocks (```...```).
-	reCodeBlock = regexp.MustCompile("(?s)```(?:\\w*)\n?.*?```")
-	// reLatexBlock matches block-level LaTeX ($$...$$).
-	reLatexBlock = regexp.MustCompile(`(?s)\$\$.*?\$\$`)
+	// reCodeBlock captures the semantic body of fenced code blocks.
+	reCodeBlock = regexp.MustCompile("(?s)```[^\\r\\n]*\\r?\\n(.*?)\\r?\\n?```")
+	// reLatexBlock captures the semantic body of block-level LaTeX ($$...$$).
+	reLatexBlock = regexp.MustCompile(`(?s)\$\$(.*?)\$\$`)
 	// reTableSep matches table separator rows like |---|---|.
 	// Uses [ \t] instead of \s to avoid consuming newlines across rows.
 	reTableSep = regexp.MustCompile(`(?m)^[ \t]*\|[ \t:|-]+\|[ \t]*$`)
@@ -589,13 +589,13 @@ var (
 
 // cleanPassageForRerank strips markdown/structural noise from text to produce
 // a clean semantic passage for the rerank model. The cleaning is designed to
-// preserve all meaningful natural-language content while removing formatting
+// preserve all meaningful semantic content while removing formatting
 // that would confuse text-similarity scoring.
 func cleanPassageForRerank(text string) string {
-	// 1. Remove code blocks (before other patterns to avoid partial matches)
-	text = reCodeBlock.ReplaceAllString(text, "")
-	// 2. Remove LaTeX block math
-	text = reLatexBlock.ReplaceAllString(text, "")
+	// 1. Unwrap code blocks so code-only candidates remain rerankable.
+	text = reCodeBlock.ReplaceAllString(text, "$1")
+	// 2. Unwrap LaTeX blocks so formula-only candidates remain rerankable.
+	text = reLatexBlock.ReplaceAllString(text, "$1")
 	// 3. Remove HTML tags
 	text = reHTMLTag.ReplaceAllString(text, "")
 	// 3.5. Unwrap nested [![alt](img_url)](link_url) → ![alt](img_url)
