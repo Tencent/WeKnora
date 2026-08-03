@@ -132,7 +132,7 @@ const (
 
 	// wikiDeletedKeyPrefix is the Redis key prefix for "recently deleted
 	// knowledge" tombstones. Key: wiki:deleted:{kbID}:{knowledgeID}. Written
-	// by cleanupWikiOnKnowledgeDelete so that any wiki_ingest task still in
+	// by cleanupWikiProvenanceOnKnowledgeDelete so that any wiki_ingest task still in
 	// flight (or queued) for this knowledge can fast-path skip without
 	// hitting the DB. TTL > wikiIngestDelay so it's guaranteed to outlast
 	// any in-flight ingest.
@@ -239,7 +239,7 @@ type wikiFinalizeRow struct {
 
 // WikiDeletedTombstoneKey returns the Redis key used to mark a knowledge as
 // recently deleted, so wiki_ingest tasks in flight can short-circuit. Exposed
-// so knowledgeService.cleanupWikiOnKnowledgeDelete can write the same key
+// so knowledgeService.cleanupWikiProvenanceOnKnowledgeDelete can write the same key
 // without duplicating the format string.
 func WikiDeletedTombstoneKey(kbID, knowledgeID string) string {
 	return wikiDeletedKeyPrefix + kbID + ":" + knowledgeID
@@ -607,6 +607,10 @@ func EnqueueWikiRetract(
 		TenantID:        payload.TenantID,
 		KnowledgeBaseID: payload.KnowledgeBaseID,
 		Language:        payload.Language,
+	}
+	if task == nil {
+		logger.Warnf(ctx, "wiki retract: pending op persisted but task enqueuer is nil")
+		return
 	}
 	langfuse.InjectTracing(ctx, &trigger)
 	triggerBytes, _ := json.Marshal(trigger)
@@ -2673,7 +2677,7 @@ func isTransientLLMError(ctx context.Context, err error) bool {
 
 // isKnowledgeGone returns true if the given knowledge has been deleted or is
 // in the middle of being deleted. It first consults the Redis tombstone
-// (written by cleanupWikiOnKnowledgeDelete) as a fast path, then falls back
+// (written by cleanupWikiProvenanceOnKnowledgeDelete) as a fast path, then falls back
 // to the DB. A nil result from GetKnowledgeByIDOnly also counts as gone: the
 // repo layer uses GORM First() which filters soft-deleted rows, so a
 // soft-deleted knowledge surfaces as "not found" here — exactly what we want.

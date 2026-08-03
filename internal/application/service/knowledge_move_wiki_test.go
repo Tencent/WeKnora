@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -11,10 +13,7 @@ import (
 )
 
 // Moving a document out of a wiki-enabled KB must reconcile that KB's wiki
-// state the same way a delete does. wiki_pages hold source_refs back to the
-// knowledge and are what both the folder tree and the wiki graph are rendered
-// from, so skipping the cleanup leaves the source KB showing pages for a
-// document it no longer owns.
+// state through the same authoritative provenance lifecycle as delete.
 
 type moveWikiKnowledgeRepo struct {
 	interfaces.KnowledgeRepository
@@ -38,16 +37,20 @@ func (r *moveWikiKnowledgeRepo) DeleteKnowledgeTagRelations(_ context.Context, _
 	return nil
 }
 
-type moveWikiPageRepo struct {
-	interfaces.WikiPageRepository
-	listedKBs []string
+type moveWikiProvenanceLifecycle struct {
+	interfaces.WikiProvenanceLifecycleService
+	cleanedKBs []string
+	err        error
 }
 
-func (r *moveWikiPageRepo) ListBySourceRef(
-	_ context.Context, kbID, _ string,
-) ([]*types.WikiPage, error) {
-	r.listedKBs = append(r.listedKBs, kbID)
-	return nil, nil
+func (s *moveWikiProvenanceLifecycle) DeleteKnowledgeSources(
+	_ context.Context, _ uint64, kbID, _ string, _ time.Time,
+) (*types.WikiKnowledgeSourceCleanupResult, error) {
+	s.cleanedKBs = append(s.cleanedKBs, kbID)
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &types.WikiKnowledgeSourceCleanupResult{}, nil
 }
 
 type moveWikiPendingRepo struct {
@@ -101,10 +104,10 @@ func opsFor(ops []*types.TaskPendingOp, kbID string) []*types.TaskPendingOp {
 }
 
 func newMoveWikiService(t *testing.T) (
-	*knowledgeService, *moveWikiPageRepo, *moveWikiPendingRepo, *moveWikiChunkRepo,
+	*knowledgeService, *moveWikiProvenanceLifecycle, *moveWikiPendingRepo, *moveWikiChunkRepo,
 ) {
 	t.Helper()
-	wikiRepo := &moveWikiPageRepo{}
+	provenance := &moveWikiProvenanceLifecycle{}
 	pendingRepo := &moveWikiPendingRepo{}
 	chunkRepo := &moveWikiChunkRepo{}
 	svc := &knowledgeService{
@@ -115,12 +118,12 @@ func newMoveWikiService(t *testing.T) (
 			KnowledgeBaseID: "kb-src",
 			ParseStatus:     types.ParseStatusCompleted,
 		}},
-		wikiRepo:        wikiRepo,
+		wikiProvenance:  provenance,
 		taskPendingRepo: pendingRepo,
 		task:            &wikiGuardTaskQueue{},
 		chunkRepo:       chunkRepo,
 	}
-	return svc, wikiRepo, pendingRepo, chunkRepo
+	return svc, provenance, pendingRepo, chunkRepo
 }
 
 func moveWikiCtx() context.Context {
@@ -131,13 +134,13 @@ func TestMoveOneKnowledgeRetractsWikiFromSourceKB(t *testing.T) {
 	// An unknown mode makes the move itself a no-op, which pins the cleanup as
 	// unconditional: it runs before the mode dispatch, while the knowledge still
 	// belongs to the source KB.
-	svc, wikiRepo, pendingRepo, _ := newMoveWikiService(t)
+	svc, provenance, pendingRepo, _ := newMoveWikiService(t)
 
 	err := svc.moveOneKnowledge(moveWikiCtx(), "kn-1",
 		wikiEnabledKB("kb-src"), wikiEnabledKB("kb-dst"), "bogus")
 
 	require.Error(t, err)
-	assert.Equal(t, []string{"kb-src"}, wikiRepo.listedKBs)
+	assert.Equal(t, []string{"kb-src"}, provenance.cleanedKBs)
 
 	srcOps := opsFor(pendingRepo.ops, "kb-src")
 	require.Len(t, srcOps, 1)
@@ -163,12 +166,25 @@ func TestMoveOneKnowledgeReuseVectorsIngestsIntoTargetKB(t *testing.T) {
 }
 
 func TestMoveOneKnowledgeSkipsWikiWorkForNonWikiKBs(t *testing.T) {
-	svc, wikiRepo, pendingRepo, _ := newMoveWikiService(t)
+	svc, provenance, pendingRepo, _ := newMoveWikiService(t)
 
 	err := svc.moveOneKnowledge(moveWikiCtx(), "kn-1",
 		&types.KnowledgeBase{ID: "kb-src"}, &types.KnowledgeBase{ID: "kb-dst"}, "reuse_vectors")
 
 	require.NoError(t, err)
-	assert.Empty(t, wikiRepo.listedKBs)
+	assert.Empty(t, provenance.cleanedKBs)
 	assert.Empty(t, pendingRepo.ops)
+}
+
+func TestMoveOneKnowledgeStopsWhenProvenanceCleanupFails(t *testing.T) {
+	svc, provenance, pendingRepo, chunkRepo := newMoveWikiService(t)
+	provenance.err = errors.New("ledger unavailable")
+
+	err := svc.moveOneKnowledge(moveWikiCtx(), "kn-1",
+		wikiEnabledKB("kb-src"), wikiEnabledKB("kb-dst"), "reuse_vectors")
+
+	require.ErrorContains(t, err, "cleanup source wiki provenance before move")
+	assert.Equal(t, []string{"kb-src"}, provenance.cleanedKBs)
+	assert.Empty(t, chunkRepo.movedToKB)
+	assert.Empty(t, opsFor(pendingRepo.ops, "kb-dst"))
 }

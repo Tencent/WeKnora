@@ -225,6 +225,8 @@ func (s *knowledgeService) CloneKnowledgeBase(ctx context.Context, srcID, dstID 
 	g, gctx := errgroup.WithContext(ctx)
 	for ids := range slices.Chunk(delKnowledge, batch) {
 		g.Go(func() error {
+			// DeleteKnowledgeList owns the same provenance-ledger lifecycle used
+			// by ordinary deletes; clone reconciliation must not bypass it.
 			err := s.DeleteKnowledgeList(gctx, ids)
 			if err != nil {
 				logger.Errorf(gctx, "delete partial knowledge %v: %v", ids, err)
@@ -564,6 +566,7 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 	g, gctx := errgroup.WithContext(ctx)
 	for ids := range slices.Chunk(delKnowledge, batch) {
 		g.Go(func() error {
+			// Keep clone cleanup on the authoritative provenance lifecycle.
 			err := s.DeleteKnowledgeList(gctx, ids)
 			if err != nil {
 				logger.Errorf(gctx, "delete partial knowledge %v: %v", ids, err)
@@ -1200,13 +1203,12 @@ func (s *knowledgeService) moveOneKnowledge(
 	}
 
 	// From the source KB's point of view the document is leaving for good, so it
-	// needs the same wiki reconciliation a delete performs: wiki_pages carry
-	// source_refs back to this knowledge and are what the folder tree and the
-	// wiki graph are built from, and nothing below touches them. This must run
-	// while KnowledgeBaseID still points at the source and before any chunk is
-	// removed, since the cleanup matches pages by chunk_refs.
+	// must use the same authoritative provenance-ledger cleanup as delete. Run
+	// it while KnowledgeBaseID still points at the source and before chunks move.
 	if sourceKB.IsWikiEnabled() {
-		s.cleanupWikiOnKnowledgeDelete(ctx, knowledge)
+		if err := s.cleanupWikiProvenanceOnKnowledgeDelete(ctx, knowledge); err != nil {
+			return fmt.Errorf("cleanup source wiki provenance before move: %w", err)
+		}
 	}
 
 	switch mode {

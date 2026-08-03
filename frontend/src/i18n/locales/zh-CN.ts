@@ -4199,6 +4199,7 @@ export default {
       sourceUnavailable: "来源已不可用",
       sourceFallbackUnavailable: "逐段来源加载失败（{reason}），已按整页显示。",
       sourceFallbackNoData: "此页面没有可用的逐段来源数据，已按整页显示。",
+      sourceFallbackPageEdited: "此页面已被手动、智能体或回退操作编辑；原逐段来源只对应编辑前版本，已按当前整页显示。下次 Wiki 重新生成后会恢复逐段来源。",
       sourceFallbackVersionMismatch: "来源数据与当前页面版本不一致，已按整页显示。",
       sourceFallbackLegacy: "这是旧版页面，尚无可验证的逐段来源，已按整页显示。",
       sourceFallbackNoBlocks: "来源数据不完整（没有事实块），已按整页显示。",

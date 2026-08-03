@@ -4,12 +4,25 @@ package types
 // with the smallest user-visible blocks that can be attributed independently.
 // Legacy pages may legitimately return an empty block list.
 type WikiPageProvenanceResponse struct {
-	PageID           string                    `json:"page_id"`
-	PageRevisionID   string                    `json:"page_revision_id,omitempty"`
-	RevisionNo       int                       `json:"revision_no"`
-	ProvenanceStatus WikiProvenanceStatus      `json:"provenance_status,omitempty"`
-	Blocks           []WikiPageProvenanceBlock `json:"blocks"`
+	PageID             string                    `json:"page_id"`
+	PageRevisionID     string                    `json:"page_revision_id,omitempty"`
+	RevisionNo         int                       `json:"revision_no"`
+	CurrentPageVersion int                       `json:"current_page_version"`
+	CurrentEditSource  string                    `json:"current_edit_source,omitempty"`
+	StaleReason        string                    `json:"stale_reason,omitempty"`
+	ProvenanceStatus   WikiProvenanceStatus      `json:"provenance_status,omitempty"`
+	Blocks             []WikiPageProvenanceBlock `json:"blocks"`
 }
+
+const (
+	// WikiProvenanceStalePageEdited means the current page was authored outside
+	// the ingest pipeline. The older block ledger remains valid for history but
+	// must not be attached to the edited current text.
+	WikiProvenanceStalePageEdited = "page_edited"
+	// WikiProvenanceStaleVersionMismatch is the defensive fallback for a
+	// pipeline-authored page whose current version and ledger revision diverge.
+	WikiProvenanceStaleVersionMismatch = "version_mismatch"
+)
 
 // WikiPageProvenanceBlock is one rendered page block plus its evidence edges.
 type WikiPageProvenanceBlock struct {

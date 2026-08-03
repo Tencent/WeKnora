@@ -66,19 +66,22 @@ func (r *wikiProvenanceRepository) GetPageProvenance(
 		return nil, errors.New("wiki provenance query requires tenant, knowledge base and page")
 	}
 
-	var pageCount int64
-	if err := r.db.WithContext(ctx).Model(&types.WikiPage{}).
+	var page types.WikiPage
+	if err := r.db.WithContext(ctx).
+		Select("id", "version", "last_edit_source").
 		Where("tenant_id = ? AND knowledge_base_id = ? AND id = ?", tenantID, kbID, pageID).
-		Count(&pageCount).Error; err != nil {
+		First(&page).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, types.ErrWikiPublishScopeNotFound
+		}
 		return nil, fmt.Errorf("verify wiki provenance page scope: %w", err)
-	}
-	if pageCount != 1 {
-		return nil, types.ErrWikiPublishScopeNotFound
 	}
 
 	response := &types.WikiPageProvenanceResponse{
-		PageID: pageID,
-		Blocks: []types.WikiPageProvenanceBlock{},
+		PageID:             pageID,
+		CurrentPageVersion: page.Version,
+		CurrentEditSource:  types.NormalizeWikiEditSource(page.LastEditSource),
+		Blocks:             []types.WikiPageProvenanceBlock{},
 	}
 	var revision types.WikiProvenancePageRevision
 	err := r.db.WithContext(ctx).
@@ -97,6 +100,13 @@ func (r *wikiProvenanceRepository) GetPageProvenance(
 	response.PageRevisionID = revision.ID
 	response.RevisionNo = revision.RevisionNo
 	response.ProvenanceStatus = revision.ProvenanceStatus
+	if revision.RevisionNo != page.Version {
+		if response.CurrentEditSource != types.WikiEditSourcePipeline {
+			response.StaleReason = types.WikiProvenanceStalePageEdited
+		} else {
+			response.StaleReason = types.WikiProvenanceStaleVersionMismatch
+		}
+	}
 
 	var blocks []types.WikiPageBlock
 	if err := r.db.WithContext(ctx).

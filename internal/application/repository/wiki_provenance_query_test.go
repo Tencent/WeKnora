@@ -125,6 +125,37 @@ func TestWikiProvenanceQueryReturnsCurrentBlockSourcesAndEnforcesScope(t *testin
 	require.Equal(t, 3, *gotSource.ChunkIndex)
 	require.Contains(t, gotSource.EvidenceExcerpt, "founded in 2020")
 	require.True(t, gotSource.SourceAvailable)
+	require.Equal(t, 2, got.CurrentPageVersion)
+	require.Equal(t, types.WikiEditSourcePipeline, got.CurrentEditSource)
+	require.Empty(t, got.StaleReason)
+
+	// A human-authored current version must not inherit citations from the
+	// older generated text. The ledger remains queryable for history, while
+	// the response explicitly tells the reader to render the current page as
+	// one uncited fallback until the pipeline publishes a fresh revision.
+	require.NoError(t, db.Model(&types.WikiPage{}).
+		Where("id = ?", page.ID).
+		Updates(map[string]any{
+			"version":          3,
+			"last_edit_source": types.WikiEditSourceUser,
+		}).Error)
+	edited, err := repo.GetPageProvenance(context.Background(), 7, "kb-1", "page-1")
+	require.NoError(t, err)
+	require.Equal(t, 3, edited.CurrentPageVersion)
+	require.Equal(t, types.WikiEditSourceUser, edited.CurrentEditSource)
+	require.Equal(t, types.WikiProvenanceStalePageEdited, edited.StaleReason)
+	require.Equal(t, 2, edited.RevisionNo)
+	require.Len(t, edited.Blocks, 1)
+
+	// A mismatch on a pipeline-authored page is unexpected and gets a
+	// separate defensive reason so operators can distinguish data drift from
+	// an intentional manual edit.
+	require.NoError(t, db.Model(&types.WikiPage{}).
+		Where("id = ?", page.ID).
+		Update("last_edit_source", types.WikiEditSourcePipeline).Error)
+	drifted, err := repo.GetPageProvenance(context.Background(), 7, "kb-1", "page-1")
+	require.NoError(t, err)
+	require.Equal(t, types.WikiProvenanceStaleVersionMismatch, drifted.StaleReason)
 
 	_, err = repo.GetPageProvenance(context.Background(), 8, "kb-1", "page-1")
 	require.True(t, errors.Is(err, types.ErrWikiPublishScopeNotFound))
@@ -148,6 +179,8 @@ func TestWikiProvenanceQueryReturnsEmptyForPageWithoutPublishedRevision(t *testi
 	got, err := repo.GetPageProvenance(context.Background(), 9, "kb-legacy", "legacy-page")
 	require.NoError(t, err)
 	require.Equal(t, "legacy-page", got.PageID)
+	require.Equal(t, 1, got.CurrentPageVersion)
+	require.Equal(t, types.WikiEditSourcePipeline, got.CurrentEditSource)
 	require.Empty(t, got.PageRevisionID)
 	require.Empty(t, got.Blocks)
 }

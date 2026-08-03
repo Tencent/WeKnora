@@ -2024,7 +2024,13 @@ const provenanceFallbackReason = computed(() => {
   }
   const provenance = pageProvenance.value
   if (!provenance) return t('knowledgeEditor.wikiBrowser.sourceFallbackNoData')
-  if (provenance.page_id !== page.id || provenance.revision_no !== page.version) {
+  if (provenance.page_id !== page.id) {
+    return t('knowledgeEditor.wikiBrowser.sourceFallbackVersionMismatch')
+  }
+  if (provenance.stale_reason === 'page_edited' && provenance.current_page_version === page.version) {
+    return t('knowledgeEditor.wikiBrowser.sourceFallbackPageEdited')
+  }
+  if (provenance.revision_no !== page.version) {
     return t('knowledgeEditor.wikiBrowser.sourceFallbackVersionMismatch')
   }
   if (provenance.provenance_status === 'legacy_inferred') {

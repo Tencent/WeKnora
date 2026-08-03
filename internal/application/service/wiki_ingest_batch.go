@@ -434,7 +434,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		eg.Go(func() error {
 			if op.Op == WikiOpRetract {
 				// Resolve the authoritative page set at run-time. The caller
-				// (knowledgeService.cleanupWikiOnKnowledgeDelete) captures
+				// (knowledgeService.cleanupWikiProvenanceOnKnowledgeDelete) captures
 				// PageSlugs from a DB snapshot taken *before* this task fires,
 				// but there is a window where:
 				//   - cleanup ran before ingest → snapshot is empty, but a
@@ -446,7 +446,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				// no page is left un-retracted. It also lets us support
 				// callers that deliberately enqueue retract with empty
 				// PageSlugs as "figure it out yourself" — see
-				// cleanupWikiOnKnowledgeDelete's comment (3).
+				// cleanupWikiProvenanceOnKnowledgeDelete's retract guarantee.
 				slugSet := make(map[string]struct{}, len(op.PageSlugs))
 				folderSet := make(map[string]struct{}, len(op.FolderIDs))
 				for _, slug := range op.PageSlugs {
@@ -1678,7 +1678,10 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 //     AND the WikiPageFactMergePrompt LLM call failed, so no page exists/was
 //     refreshed for it. Callers use this to sanitize dead [[slug]] links
 //     elsewhere (e.g. in the doc's summary page).
-//   - err:              transport / repo error from the persisted upsert.
+//   - err:              LLM/JSON validation, provenance publish, or repo error.
+//     The caller requeues every contributing document through the bounded
+//     fail_count/dead-letter path, so invalid structured output is never
+//     silently accepted as a successful reduce.
 func (s *wikiIngestService) reduceSlugUpdates(
 	ctx context.Context,
 	chatModel chat.Chat,
@@ -1940,6 +1943,9 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			if len(additions) > 0 {
 				additionFailed = true
 			}
+			return false, "", additionFailed, fmt.Errorf(
+				"generate validated fact blocks for slug %s: %w", slug, generateErr,
+			)
 		}
 	}
 

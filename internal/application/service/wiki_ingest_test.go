@@ -12,6 +12,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSlugify(t *testing.T) {
@@ -332,6 +334,87 @@ func TestGenerateWithTemplateMasksImageURLsBeforeLLM(t *testing.T) {
 	if !strings.Contains(got, realURL) {
 		t.Fatalf("returned content does not contain restored real URL: %q", got)
 	}
+}
+
+type invalidFactWikiService struct {
+	interfaces.WikiPageService
+	page        *types.WikiPage
+	updateCalls int
+}
+
+func (s *invalidFactWikiService) GetPageBySlug(
+	_ context.Context, _, _ string,
+) (*types.WikiPage, error) {
+	clone := *s.page
+	clone.SourceRefs = append(types.StringArray(nil), s.page.SourceRefs...)
+	clone.ChunkRefs = append(types.StringArray(nil), s.page.ChunkRefs...)
+	return &clone, nil
+}
+
+func (s *invalidFactWikiService) UpdatePage(
+	_ context.Context, _ *types.WikiPage,
+) (*types.WikiPage, error) {
+	s.updateCalls++
+	return nil, nil
+}
+
+type liveKnowledgeService struct {
+	interfaces.KnowledgeService
+}
+
+func (s *liveKnowledgeService) GetKnowledgeByIDOnly(
+	_ context.Context, id string,
+) (*types.Knowledge, error) {
+	return &types.Knowledge{ID: id, ParseStatus: types.ParseStatusCompleted}, nil
+}
+
+func TestReduceSlugUpdatesReturnsInvalidFactJSONForRetry(t *testing.T) {
+	pageService := &invalidFactWikiService{page: &types.WikiPage{
+		ID:              "page-1",
+		TenantID:        7,
+		KnowledgeBaseID: "kb-1",
+		Slug:            "entity/acme",
+		Title:           "Acme",
+		PageType:        types.WikiPageTypeEntity,
+		Content:         "Existing validated content",
+		SourceRefs:      types.StringArray{"knowledge-old|Old source"},
+	}}
+	service := &wikiIngestService{
+		wikiService:  pageService,
+		knowledgeSvc: &liveKnowledgeService{},
+	}
+	model := &templateCaptureChatModel{response: "not structured json"}
+	batchCtx := &WikiBatchContext{
+		SlugTitleMany:   func(context.Context, []string) map[string]string { return map[string]string{} },
+		PlannedFolderID: map[string]string{},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	changed, _, additionFailed, err := service.reduceSlugUpdates(
+		ctx,
+		model,
+		"kb-1",
+		"entity/acme",
+		[]SlugUpdate{{
+			Slug:        "entity/acme",
+			Type:        types.WikiPageTypeEntity,
+			KnowledgeID: "knowledge-new",
+			SourceRef:   "knowledge-new|New source",
+			Item: extractedItem{
+				Name: "Acme",
+				Slug: "entity/acme",
+			},
+		}},
+		7,
+		batchCtx,
+		nil,
+	)
+
+	require.ErrorContains(t, err, "generate validated fact blocks for slug entity/acme")
+	require.False(t, changed)
+	require.True(t, additionFailed)
+	require.Zero(t, pageService.updateCalls)
+	require.Equal(t, "Existing validated content", pageService.page.Content)
 }
 
 type templateCaptureChatModel struct {

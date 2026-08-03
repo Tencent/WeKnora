@@ -2895,6 +2895,7 @@ export default {
       sourceUnavailable: 'Source unavailable',
       sourceFallbackUnavailable: 'Block-level sources could not be loaded ({reason}); showing the complete page.',
       sourceFallbackNoData: 'No block-level source data is available; showing the complete page.',
+      sourceFallbackPageEdited: 'This page was edited manually, by an agent, or by reverting. Its block-level sources apply only to the earlier version, so the complete current page is shown. Block-level sources will return after the Wiki is regenerated.',
       sourceFallbackVersionMismatch: 'Source data does not match this page version; showing the complete page.',
       sourceFallbackLegacy: 'This legacy page has no verifiable block-level sources; showing the complete page.',
       sourceFallbackNoBlocks: 'Source data is incomplete (no fact blocks); showing the complete page.',

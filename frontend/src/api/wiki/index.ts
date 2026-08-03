@@ -71,6 +71,9 @@ export interface WikiPageProvenanceResponse {
   page_id: string;
   page_revision_id?: string;
   revision_no: number;
+  current_page_version: number;
+  current_edit_source?: 'pipeline' | 'agent' | 'user' | 'revert';
+  stale_reason?: 'page_edited' | 'version_mismatch';
   provenance_status?: string;
   blocks: WikiPageProvenanceBlock[];
 }
