@@ -221,6 +221,21 @@ func TestLLMCallMetadataContext(t *testing.T) {
 	}
 }
 
+func TestTaskRetryMetadataContext(t *testing.T) {
+	if _, _, ok := TaskRetryMetadataFromContext(nil); ok {
+		t.Fatal("nil context should not contain task retry metadata")
+	}
+	if _, _, ok := TaskRetryMetadataFromContext(context.Background()); ok {
+		t.Fatal("background context should not contain task retry metadata")
+	}
+
+	ctx := WithTaskRetryMetadata(context.Background(), 2, 3)
+	retried, maxRetry, ok := TaskRetryMetadataFromContext(ctx)
+	if !ok || retried != 2 || maxRetry != 3 {
+		t.Fatalf("retry metadata = (%d, %d, %v), want (2, 3, true)", retried, maxRetry, ok)
+	}
+}
+
 // BenchmarkLanguageLocaleName benchmarks the language name lookup
 func BenchmarkLanguageLocaleName(b *testing.B) {
 	testCases := []string{"zh", "en", "zh-CN", "ko", "unknown"}

@@ -3,7 +3,10 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // TestCheckSufficientSummaryContent verifies the gate that prevents getSummary
@@ -41,8 +44,8 @@ func TestCheckSufficientSummaryContent(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name: "scanned PDF with empty <image> wrapper rejected",
-			content: `<image url="x"><image_original>![a](x)</image_original></image>`,
+			name:      "scanned PDF with empty <image> wrapper rejected",
+			content:   `<image url="x"><image_original>![a](x)</image_original></image>`,
 			wantError: true,
 		},
 		{
@@ -101,5 +104,138 @@ func TestCheckSufficientSummaryContent_ThresholdOverride(t *testing.T) {
 	err := checkSufficientSummaryContent(ctx, "kid", content)
 	if !errors.Is(err, errInsufficientSummaryContent) {
 		t.Fatalf("tightened threshold: expected errInsufficientSummaryContent, got %v", err)
+	}
+}
+
+func TestValidateSummaryOutput(t *testing.T) {
+	tests := []struct {
+		name      string
+		response  *types.ChatResponse
+		want      string
+		wantError bool
+	}{
+		{name: "nil response rejected", response: nil, wantError: true},
+		{name: "empty response rejected", response: &types.ChatResponse{}, wantError: true},
+		{
+			name:      "whitespace response rejected",
+			response:  &types.ChatResponse{Content: " \n\t "},
+			wantError: true,
+		},
+		{
+			name:     "valid response is trimmed",
+			response: &types.ChatResponse{Content: "  useful summary \n"},
+			want:     "useful summary",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := validateSummaryOutput(tt.response)
+			if tt.wantError {
+				if !errors.Is(err, errEmptySummaryOutput) {
+					t.Fatalf("expected errEmptySummaryOutput, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("summary = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFirstTextChunkSummaryFallback(t *testing.T) {
+	t.Run("uses only the first chunk", func(t *testing.T) {
+		got := firstTextChunkSummaryFallback([]*types.Chunk{
+			{Content: "  first chunk  "},
+			{Content: "second chunk"},
+		})
+		if got != "first chunk" {
+			t.Fatalf("fallback = %q, want first chunk", got)
+		}
+	})
+
+	t.Run("does not skip an empty first chunk", func(t *testing.T) {
+		got := firstTextChunkSummaryFallback([]*types.Chunk{
+			{Content: " \n\t "},
+			{Content: "second chunk"},
+		})
+		if got != "" {
+			t.Fatalf("fallback = %q, want empty", got)
+		}
+	})
+
+	t.Run("caps unicode content by runes", func(t *testing.T) {
+		got := firstTextChunkSummaryFallback([]*types.Chunk{{
+			Content: strings.Repeat("摘", summaryFallbackMaxRunes+25),
+		}})
+		if len([]rune(got)) != summaryFallbackMaxRunes {
+			t.Fatalf("fallback rune count = %d, want %d", len([]rune(got)), summaryFallbackMaxRunes)
+		}
+	})
+
+	t.Run("empty input stays empty", func(t *testing.T) {
+		if got := firstTextChunkSummaryFallback(nil); got != "" {
+			t.Fatalf("fallback = %q, want empty", got)
+		}
+	})
+}
+
+func TestApplyRetryableSummaryFailureState(t *testing.T) {
+	chunks := []*types.Chunk{{Content: "first body chunk"}}
+
+	t.Run("retry keeps existing description", func(t *testing.T) {
+		knowledge := &types.Knowledge{
+			Description:   "previous summary",
+			SummaryStatus: types.SummaryStatusProcessing,
+		}
+		fallback := applyRetryableSummaryFailureState(knowledge, chunks, true)
+		if fallback != "" {
+			t.Fatalf("retry fallback = %q, want empty", fallback)
+		}
+		if knowledge.Description != "previous summary" {
+			t.Fatalf("retry changed description to %q", knowledge.Description)
+		}
+		if knowledge.SummaryStatus != types.SummaryStatusPending {
+			t.Fatalf("retry status = %q, want pending", knowledge.SummaryStatus)
+		}
+	})
+
+	t.Run("terminal failure publishes fallback and fails summary", func(t *testing.T) {
+		knowledge := &types.Knowledge{
+			Description:   "previous summary",
+			SummaryStatus: types.SummaryStatusProcessing,
+		}
+		fallback := applyRetryableSummaryFailureState(knowledge, chunks, false)
+		if fallback != "first body chunk" {
+			t.Fatalf("terminal fallback = %q", fallback)
+		}
+		if knowledge.Description != fallback {
+			t.Fatalf("description = %q, want %q", knowledge.Description, fallback)
+		}
+		if knowledge.SummaryStatus != types.SummaryStatusFailed {
+			t.Fatalf("terminal status = %q, want failed", knowledge.SummaryStatus)
+		}
+	})
+}
+
+func TestSummaryRetryStateSupportsLiteExecutorContext(t *testing.T) {
+	retryCtx := types.WithTaskRetryMetadata(context.Background(), 1, 3)
+	if !summaryTaskWillRetry(retryCtx) {
+		t.Fatal("attempt 1 of maxRetry 3 should have another retry")
+	}
+	if isFinalAsynqAttempt(retryCtx) {
+		t.Fatal("attempt 1 of maxRetry 3 should not be final")
+	}
+
+	finalCtx := types.WithTaskRetryMetadata(context.Background(), 3, 3)
+	if summaryTaskWillRetry(finalCtx) {
+		t.Fatal("attempt 3 of maxRetry 3 should not retry")
+	}
+	if !isFinalAsynqAttempt(finalCtx) {
+		t.Fatal("attempt 3 of maxRetry 3 should be final")
 	}
 }
