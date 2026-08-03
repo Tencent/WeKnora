@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
@@ -12,6 +13,10 @@ import (
 )
 
 const (
+	// LKEAPMaxDocumentsPerRequest is the maximum number of documents accepted by RunRerank.
+	LKEAPMaxDocumentsPerRequest = 60
+	// LKEAPMaxRequestCharacters is the maximum combined length of Query and Docs accepted by RunRerank.
+	LKEAPMaxRequestCharacters = 2000
 	// LKEAPRerankEndpoint 腾讯云知识引擎原子能力 Rerank API 域名
 	LKEAPRerankEndpoint = "lkeap.tencentcloudapi.com"
 	// LKEAPDefaultRegion RunRerank 支持的地域，默认广州
@@ -72,10 +77,62 @@ func (r *LKEAPReranker) Rerank(ctx context.Context, query string, documents []st
 	if len(documents) == 0 {
 		return []RankResult{}, nil
 	}
-	if len(documents) > 60 {
-		return nil, fmt.Errorf("LKEAP rerank supports at most 60 documents, got %d", len(documents))
+
+	batches, err := lkeapRerankBatches(query, documents)
+	if err != nil {
+		return nil, err
 	}
 
+	results := make([]RankResult, 0, len(documents))
+	for _, batch := range batches {
+		batchResults, err := r.rerankBatch(ctx, query, batch.documents)
+		if err != nil {
+			return nil, err
+		}
+		for i := range batchResults {
+			batchResults[i].Index += batch.start
+		}
+		results = append(results, batchResults...)
+	}
+	return results, nil
+}
+
+type lkeapRerankBatch struct {
+	start     int
+	documents []string
+}
+
+func lkeapRerankBatches(query string, documents []string) ([]lkeapRerankBatch, error) {
+	queryLength := utf8.RuneCountInString(query)
+	if queryLength >= LKEAPMaxRequestCharacters {
+		return nil, fmt.Errorf("LKEAP rerank query is %d characters; Query and Docs together support at most %d characters", queryLength, LKEAPMaxRequestCharacters)
+	}
+
+	batches := make([]lkeapRerankBatch, 0, (len(documents)+LKEAPMaxDocumentsPerRequest-1)/LKEAPMaxDocumentsPerRequest)
+	batchStart := 0
+	batchLength := queryLength
+	batchDocuments := make([]string, 0, LKEAPMaxDocumentsPerRequest)
+	for index, document := range documents {
+		documentLength := utf8.RuneCountInString(document)
+		if queryLength+documentLength > LKEAPMaxRequestCharacters {
+			return nil, fmt.Errorf("LKEAP rerank document at index %d is %d characters; Query and each document together support at most %d characters", index, documentLength, LKEAPMaxRequestCharacters)
+		}
+		if len(batchDocuments) == LKEAPMaxDocumentsPerRequest || batchLength+documentLength > LKEAPMaxRequestCharacters {
+			batches = append(batches, lkeapRerankBatch{start: batchStart, documents: batchDocuments})
+			batchStart = index
+			batchLength = queryLength
+			batchDocuments = make([]string, 0, LKEAPMaxDocumentsPerRequest)
+		}
+		batchDocuments = append(batchDocuments, document)
+		batchLength += documentLength
+	}
+	if len(batchDocuments) > 0 {
+		batches = append(batches, lkeapRerankBatch{start: batchStart, documents: batchDocuments})
+	}
+	return batches, nil
+}
+
+func (r *LKEAPReranker) rerankBatch(ctx context.Context, query string, documents []string) ([]RankResult, error) {
 	req := lkeap.NewRunRerankRequest()
 	req.Query = common.StringPtr(query)
 	req.Docs = common.StringPtrs(documents)
