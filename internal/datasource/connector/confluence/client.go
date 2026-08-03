@@ -60,6 +60,27 @@ func (c *Client) Ping(ctx context.Context) error {
 // maxRetries is the number of retry attempts for transient errors (429, 5xx).
 const maxRetries = 3
 
+// Response bodies are read fully into memory, so both paths are capped to keep a
+// single oversized page or attachment from exhausting the worker. JSON responses
+// are page metadata and export_view HTML; raw responses are PDF exports and
+// image attachments, which are legitimately larger.
+const (
+	maxJSONResponseBytes = 32 * 1024 * 1024
+	maxRawResponseBytes  = 100 * 1024 * 1024
+)
+
+// readLimited reads r fully, failing if it carries more than maxBytes.
+func readLimited(r io.Reader, maxBytes int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("response exceeds maximum size (%d MB)", maxBytes/(1024*1024))
+	}
+	return data, nil
+}
+
 // doRequest performs an authenticated HTTP request to the Confluence API.
 // Transient failures (HTTP 429 / 5xx) are retried with exponential backoff.
 func (c *Client) doRequest(ctx context.Context, method, path string, result interface{}) ([]byte, error) {
@@ -98,7 +119,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, result inte
 			continue // network error → retry
 		}
 
-		body, err := io.ReadAll(resp.Body)
+		body, err := readLimited(resp.Body, maxJSONResponseBytes)
 		_ = resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("read response body: %w", err)
@@ -149,7 +170,7 @@ func (c *Client) doRequestRaw(ctx context.Context, path string) ([]byte, string,
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readLimited(resp.Body, maxRawResponseBytes)
 	if err != nil {
 		return nil, "", fmt.Errorf("read response body: %w", err)
 	}
