@@ -798,6 +798,7 @@ func (s *sessionService) GenerateTitleAsync(
 // ResolveRerankModel resolves a requested rerank model ID or name to a model ID.
 // An empty requested string returns empty, leaving fallback to resolveRerankModelID.
 func (s *sessionService) ResolveRerankModel(ctx context.Context, requested string) (string, error) {
+	requested = strings.TrimSpace(requested)
 	if requested == "" {
 		return "", nil
 	}
