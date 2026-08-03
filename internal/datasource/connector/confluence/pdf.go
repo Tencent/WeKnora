@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -382,11 +383,22 @@ func hasSystemCJKFonts() bool {
 	return err == nil && len(bytes.TrimSpace(out)) > 0
 }
 
-// ensureCJKFonts downloads a CJK font to the user's local font directory if
+// cjkFontsOnce keeps font setup to a single attempt per process: it shells out
+// to fc-list / fc-cache, which is far too expensive to repeat for every page of
+// a space, and Chromium only reads the font directory when it starts anyway.
+var cjkFontsOnce sync.Once
+
+// ensureCJKFonts makes CJK fonts available to Chromium, at most once per
+// process. It must run before the browser starts for the fonts to be picked up.
+func ensureCJKFonts(ctx context.Context) {
+	cjkFontsOnce.Do(func() { installCJKFonts(ctx) })
+}
+
+// installCJKFonts downloads a CJK font to the user's local font directory if
 // no system CJK fonts are found. This ensures Confluence pages with Chinese,
 // Japanese, or Korean content render correctly in the generated PDF.
 // The font is cached in ~/.local/share/fonts/ and only downloaded once.
-func ensureCJKFonts(ctx context.Context) {
+func installCJKFonts(ctx context.Context) {
 	if hasSystemCJKFonts() {
 		return
 	}
@@ -453,15 +465,81 @@ func ensureCJKFonts(ctx context.Context) {
 // renderPDFTimeout is the maximum time allowed for a single page PDF render.
 const renderPDFTimeout = 60 * time.Second
 
+// Chromium costs seconds to start, ~100MB of RSS, and a temporary profile
+// directory, so one browser is shared by every render: a space with hundreds of
+// pages would otherwise start (and leave behind) one browser per page. Pages are
+// cheap by comparison and can be opened concurrently on the shared instance, so
+// the mutex only guards start-up and teardown.
+var (
+	browserMu      sync.Mutex
+	sharedBrowser  *rod.Browser
+	sharedLauncher *launcher.Launcher
+)
+
+// acquireBrowser returns the process-wide headless browser, starting it on first
+// use. go-rod downloads a Chromium build when the host has no browser, so this
+// still needs no manual installation.
+func acquireBrowser() (*rod.Browser, error) {
+	browserMu.Lock()
+	defer browserMu.Unlock()
+
+	if sharedBrowser != nil {
+		return sharedBrowser, nil
+	}
+
+	browserPath, err := launcher.NewBrowser().Get()
+	if err != nil {
+		return nil, fmt.Errorf("locate/download browser: %w", err)
+	}
+
+	l := launcher.New().
+		Bin(browserPath).
+		Headless(true).
+		NoSandbox(true).
+		Set("disable-gpu")
+
+	controlURL, err := l.Launch()
+	if err != nil {
+		l.Cleanup()
+		return nil, fmt.Errorf("launch browser: %w", err)
+	}
+
+	browser := rod.New().ControlURL(controlURL)
+	if err := browser.Connect(); err != nil {
+		l.Kill()
+		l.Cleanup()
+		return nil, fmt.Errorf("connect to browser: %w", err)
+	}
+
+	sharedBrowser, sharedLauncher = browser, l
+	return browser, nil
+}
+
+// releaseBrowser tears the shared browser down so the next render starts a fresh
+// one, and removes its temporary profile. Called after a failed render: a browser
+// that crashed or wedged would otherwise fail every remaining page of the sync.
+func releaseBrowser() {
+	browserMu.Lock()
+	defer browserMu.Unlock()
+
+	if sharedBrowser != nil {
+		_ = sharedBrowser.Close()
+		sharedBrowser = nil
+	}
+	if sharedLauncher != nil {
+		sharedLauncher.Kill()
+		sharedLauncher.Cleanup()
+		sharedLauncher = nil
+	}
+}
+
 // renderToPDF renders an HTML string to PDF using headless Chrome.
-// Uses go-rod which automatically downloads a browser binary if none is found,
-// requiring zero manual installation from the user.
 func renderToPDF(ctx context.Context, htmlContent string) ([]byte, error) {
 	// Enforce a per-page timeout so a stuck render cannot block the entire sync.
 	ctx, cancel := context.WithTimeout(ctx, renderPDFTimeout)
 	defer cancel()
 
-	// Ensure CJK fonts are available before rendering
+	// Fonts must be in place before the browser starts.
 	ensureCJKFonts(ctx)
 
 	tmpFile, err := os.CreateTemp("", "confluence-*.html")
@@ -476,40 +554,33 @@ func renderToPDF(ctx context.Context, htmlContent string) ([]byte, error) {
 	}
 	_ = tmpFile.Close()
 
-	fileURL := "file://" + tmpFile.Name()
-
-	// launcher.NewBrowser() auto-downloads Chromium to ~/.cache/rod/browser/
-	// if no system browser is found. This makes the feature work out-of-the-box
-	// on any platform without manual Chrome installation.
-	browserPath, err := launcher.NewBrowser().Get()
+	pdfData, err := renderFileToPDF(ctx, "file://"+tmpFile.Name())
 	if err != nil {
-		return nil, fmt.Errorf("locate/download browser: %w", err)
+		releaseBrowser()
+		return nil, err
 	}
+	return pdfData, nil
+}
 
-	l := launcher.New().
-		Bin(browserPath).
-		Headless(true).
-		NoSandbox(true).
-		Set("disable-gpu")
-
-	controlURL, err := l.Launch()
+// renderFileToPDF opens fileURL in the shared browser and prints it to PDF.
+func renderFileToPDF(ctx context.Context, fileURL string) ([]byte, error) {
+	browser, err := acquireBrowser()
 	if err != nil {
-		return nil, fmt.Errorf("launch browser: %w", err)
+		return nil, err
 	}
 
-	browser := rod.New().ControlURL(controlURL)
-	if err := browser.Connect(); err != nil {
-		return nil, fmt.Errorf("connect to browser: %w", err)
-	}
-	defer func() { _ = browser.Close() }()
-
-	page, err := browser.Page(proto.TargetCreateTarget{URL: fileURL})
+	tab, err := browser.Page(proto.TargetCreateTarget{URL: fileURL})
 	if err != nil {
 		return nil, fmt.Errorf("create page: %w", err)
 	}
+	// Close the un-scoped handle: the browser outlives this render, so a tab
+	// leaked on timeout would stay open for the rest of the process.
+	defer func() { _ = tab.Close() }()
+
+	page := tab.Context(ctx)
 
 	// Wait for body to be ready (respects context timeout)
-	if err := page.Context(ctx).WaitElementsMoreThan("body", 0); err != nil {
+	if err := page.WaitElementsMoreThan("body", 0); err != nil {
 		return nil, fmt.Errorf("wait for body: %w", err)
 	}
 
@@ -524,7 +595,7 @@ func renderToPDF(ctx context.Context, htmlContent string) ([]byte, error) {
 	paperW := 8.27  // A4 width in inches
 	paperH := 11.69 // A4 height in inches
 	margin := 0.787 // 20mm in inches
-	reader, err := page.Context(ctx).PDF(&proto.PagePrintToPDF{
+	reader, err := page.PDF(&proto.PagePrintToPDF{
 		PaperWidth:      &paperW,
 		PaperHeight:     &paperH,
 		PrintBackground: true,
