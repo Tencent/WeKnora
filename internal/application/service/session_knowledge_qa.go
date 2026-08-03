@@ -155,21 +155,6 @@ func (s *sessionService) KnowledgeQA(
 		},
 	}
 
-	// Resolve the rerank model: request override (hard-failing 400/403) then
-	// agent config, then tenant RetrievalConfig, then auto-detect.
-	var agentRerankModelID string
-	if req.CustomAgent != nil {
-		agentRerankModelID = req.CustomAgent.Config.RerankModelID
-	}
-	chatManage.RerankModelID, err = s.resolveRerankModelID(ctx, req.RerankModelID, agentRerankModelID, rc)
-	if err != nil {
-		return err
-	}
-
-	// Apply custom agent overrides (system prompt, temperature, retrieval params,
-	// rewrite, fallback, FAQ strategy, history turns)
-	s.applyAgentOverridesToChatManage(ctx, req.CustomAgent, chatManage)
-
 	// Determine pipeline based on the effective knowledge retrieval scope and
 	// web search setting. Tag-only mentions leave the raw KB/knowledge ID slices
 	// empty but produce SearchTargets, so the unified targets must participate in
@@ -177,6 +162,24 @@ func (s *sessionService) KnowledgeQA(
 	hasKB := types.HasKnowledgeRetrievalScope(searchTargets, knowledgeBaseIDs, knowledgeIDs)
 	needsRAG := hasKB || req.WebSearchEnabled
 	hasHistory := chatManage.MaxRounds > 0
+
+	// Resolve the rerank model: request override (hard-failing 400/403) then
+	// agent config, then tenant RetrievalConfig, then auto-detect.
+	// Only when retrieval actually runs.
+	var agentRerankModelID string
+	if req.CustomAgent != nil {
+		agentRerankModelID = req.CustomAgent.Config.RerankModelID
+	}
+	if needsRAG {
+		chatManage.RerankModelID, err = s.resolveRerankModelID(ctx, req.RerankModelID, agentRerankModelID, rc)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Apply custom agent overrides (system prompt, temperature, retrieval params,
+	// rewrite, fallback, FAQ strategy, history turns)
+	s.applyAgentOverridesToChatManage(ctx, req.CustomAgent, chatManage)
 
 	var pipeline []types.EventType
 	if !needsRAG {
