@@ -66,7 +66,7 @@ class TransportRegressionTest(unittest.TestCase):
 
 
 class StdioToolsListTest(unittest.TestCase):
-    def test_tools_list_returns_28_tools(self):
+    def test_tools_list_returns_29_tools(self):
         async def _run() -> int:
             from mcp import ClientSession, StdioServerParameters
             from mcp.client.stdio import stdio_client
