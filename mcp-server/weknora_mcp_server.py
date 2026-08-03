@@ -194,6 +194,10 @@ class WeKnoraClient:
         """List all knowledge bases"""
         return self._request("GET", "/knowledge-bases")
 
+    def list_shared_knowledge_bases(self) -> Dict:
+        """List knowledge bases shared from other workspaces"""
+        return self._request("GET", "/shared-knowledge-bases")
+
     def get_knowledge_base(self, kb_id: str) -> Dict:
         """Get knowledge base details"""
         return self._request("GET", f"/knowledge-bases/{kb_id}")
@@ -624,8 +628,14 @@ def create_knowledge_base(
 
 @mcp.tool()
 def list_knowledge_bases() -> dict:
-    """List all knowledge bases."""
+    """List all knowledge bases in the current workspace."""
     return client.list_knowledge_bases()
+
+
+@mcp.tool()
+def list_shared_knowledge_bases() -> dict:
+    """List knowledge bases shared from other workspaces."""
+    return client.list_shared_knowledge_bases()
 
 
 @mcp.tool()
