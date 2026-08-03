@@ -197,6 +197,34 @@ func IsBackgroundTask(ctx context.Context) bool {
 	return v
 }
 
+type taskRetryMetadata struct {
+	retried  int
+	maxRetry int
+}
+
+// WithTaskRetryMetadata records retry counters for task executors that do not
+// provide Asynq's native worker context, notably the Lite synchronous executor.
+func WithTaskRetryMetadata(ctx context.Context, retried, maxRetry int) context.Context {
+	return context.WithValue(ctx, taskRetryMetadataContextKey{}, taskRetryMetadata{
+		retried: retried, maxRetry: maxRetry,
+	})
+}
+
+// TaskRetryMetadataFromContext returns retry counters supplied by a non-Asynq
+// task executor. The boolean is false for ordinary request contexts.
+func TaskRetryMetadataFromContext(ctx context.Context) (retried, maxRetry int, ok bool) {
+	if ctx == nil {
+		return 0, 0, false
+	}
+	metadata, ok := ctx.Value(taskRetryMetadataContextKey{}).(taskRetryMetadata)
+	if !ok {
+		return 0, 0, false
+	}
+	return metadata.retried, metadata.maxRetry, true
+}
+
+type taskRetryMetadataContextKey struct{}
+
 // WithLLMCallMetadata annotates a provider call for cache observability. The
 // fingerprint must be a hash, never raw prompt content.
 func WithLLMCallMetadata(ctx context.Context, purpose, prefixFingerprint string) context.Context {

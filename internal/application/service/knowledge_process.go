@@ -712,7 +712,70 @@ const imageDominatedTextThreshold = 200
 // (typical for scanned PDFs where VLM OCR yielded nothing). Callers should
 // mark the knowledge's summary as failed instead of falling back to the first
 // chunk's raw content (which would just be a bare image reference).
-var errInsufficientSummaryContent = errors.New("insufficient text content for summary generation")
+var (
+	errInsufficientSummaryContent = errors.New("insufficient text content for summary generation")
+	errEmptySummaryOutput         = errors.New("summary model returned empty output")
+)
+
+const summaryFallbackMaxRunes = 500
+
+// validateSummaryOutput rejects successful model responses that contain no
+// user-visible text. Treating whitespace-only output as an error lets Asynq
+// retry the summary task instead of persisting description="" as completed.
+func validateSummaryOutput(response *types.ChatResponse) (string, error) {
+	if response == nil {
+		return "", errEmptySummaryOutput
+	}
+	content := strings.TrimSpace(response.Content)
+	if content == "" {
+		return "", errEmptySummaryOutput
+	}
+	return content, nil
+}
+
+// firstTextChunkSummaryFallback preserves the existing deterministic fallback:
+// use the first already-ordered text chunk and cap it by runes so Chinese and
+// emoji are never cut in the middle of a UTF-8 sequence.
+func firstTextChunkSummaryFallback(textChunks []*types.Chunk) string {
+	if len(textChunks) == 0 || textChunks[0] == nil {
+		return ""
+	}
+	fallback := strings.TrimSpace(textChunks[0].Content)
+	runes := []rune(fallback)
+	if len(runes) > summaryFallbackMaxRunes {
+		fallback = string(runes[:summaryFallbackMaxRunes])
+	}
+	return fallback
+}
+
+// applyRetryableSummaryFailureState keeps an existing description visible
+// while another attempt is queued, then publishes the deterministic fallback
+// and marks only the summary subtask failed after the retry budget is exhausted.
+func applyRetryableSummaryFailureState(
+	knowledge *types.Knowledge, textChunks []*types.Chunk, willRetry bool,
+) string {
+	knowledge.UpdatedAt = time.Now()
+	if willRetry {
+		knowledge.SummaryStatus = types.SummaryStatusPending
+		return ""
+	}
+	fallback := firstTextChunkSummaryFallback(textChunks)
+	knowledge.Description = fallback
+	knowledge.SummaryStatus = types.SummaryStatusFailed
+	return fallback
+}
+
+// summaryTaskWillRetry reports whether the current Asynq delivery has another
+// configured attempt remaining. Calls outside an Asynq worker are terminal.
+func summaryTaskWillRetry(ctx context.Context) bool {
+	retried, retryOK := asynq.GetRetryCount(ctx)
+	maxRetry, maxRetryOK := asynq.GetMaxRetry(ctx)
+	if retryOK && maxRetryOK {
+		return retried < maxRetry
+	}
+	retried, maxRetry, ok := types.TaskRetryMetadataFromContext(ctx)
+	return ok && retried < maxRetry
+}
 
 // checkSufficientSummaryContent returns errInsufficientSummaryContent if the
 // given content does not carry enough real text (after stripping image markup)
@@ -891,8 +954,13 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		logger.GetLogger(ctx).WithField("error", err).Errorf("GetSummary failed")
 		return "", err
 	}
-	logger.GetLogger(ctx).WithField("summary", summary.Content).Infof("GetSummary success")
-	return summary.Content, nil
+	content, err := validateSummaryOutput(summary)
+	if err != nil {
+		logger.GetLogger(ctx).WithField("error", err).Warnf("GetSummary returned no usable content")
+		return "", err
+	}
+	logger.GetLogger(ctx).WithField("summary", content).Infof("GetSummary success")
+	return content, nil
 }
 
 // sampleLongContent returns content that fits within maxChars.
@@ -975,7 +1043,10 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 				return nil
 			}
 			logger.Warnf(ctx, "Summary refresh failed for knowledge %s: %v", payload.KnowledgeID, err)
-			_ = s.repo.UpdateKnowledgeColumn(ctx, payload.KnowledgeID, "summary_status", types.SummaryStatusFailed)
+			if errors.Is(err, errInsufficientSummaryContent) {
+				return nil
+			}
+			return err
 		}
 		return nil
 	}
@@ -1087,8 +1158,8 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 
 	if len(textChunks) == 0 {
 		logger.Infof(ctx, "No text chunks found for knowledge: %s", payload.KnowledgeID)
-		// Mark as completed since there's nothing to summarize
-		knowledge.SummaryStatus = types.SummaryStatusCompleted
+		knowledge.Description = ""
+		knowledge.SummaryStatus = types.SummaryStatusFailed
 		knowledge.UpdatedAt = time.Now()
 		s.repo.UpdateKnowledge(ctx, knowledge)
 		summaryOut["skipped"] = "no_text_chunks"
@@ -1100,17 +1171,64 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		return textChunks[i].ChunkIndex < textChunks[j].ChunkIndex
 	})
 
-	// Initialize chat model for summary
+	summaryMetadataVersion := string(knowledge.CustomMetadata)
+	handleRetryableSummaryFailure := func(generationErr error) error {
+		summaryErr = generationErr
+		summaryOut["error"] = previewText(generationErr.Error(), 500)
+		summaryOut["error_type"] = fmt.Sprintf("%T", generationErr)
+
+		if summaryTaskWillRetry(ctx) {
+			applyRetryableSummaryFailureState(knowledge, textChunks, true)
+			if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
+				logger.Warnf(ctx, "Failed to mark summary pending for retry: %v", updateErr)
+			}
+			summaryOut["retrying"] = true
+			return fmt.Errorf("summary generation attempt failed: %w", generationErr)
+		}
+
+		// Before publishing the terminal fallback, make sure its source still
+		// matches the chunks and metadata captured for this attempt.
+		stale, staleErr := summarySourceChanged(
+			ctx, s.repo, s.chunkRepo, payload.TenantID, payload.KnowledgeID,
+			summaryMetadataVersion, textChunks,
+		)
+		if staleErr != nil {
+			logger.Errorf(ctx, "Failed to verify summary fallback freshness for knowledge %s: %v",
+				payload.KnowledgeID, staleErr)
+			markSummaryFailed()
+			summaryErr = staleErr
+			return fmt.Errorf("verify summary fallback freshness: %w", staleErr)
+		}
+		if stale {
+			logger.Infof(ctx, "Discarding stale summary fallback for knowledge %s", payload.KnowledgeID)
+			summaryOut["skipped"] = "content_revision_changed"
+			return nil
+		}
+
+		fallback := applyRetryableSummaryFailureState(knowledge, textChunks, false)
+		if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
+			logger.Errorf(ctx, "Failed to save terminal summary fallback: %v", updateErr)
+			summaryErr = updateErr
+			return fmt.Errorf("save terminal summary fallback: %w", updateErr)
+		}
+		if fallback == "" {
+			summaryOut["fallback"] = "empty"
+		} else {
+			summaryOut["fallback"] = "first_chunk"
+		}
+		summaryOut["fallback_chars"] = len([]rune(fallback))
+		return fmt.Errorf("summary generation exhausted retries: %w", generationErr)
+	}
+
+	// Initialize chat model for summary. Model resolution failures use the same
+	// retry budget and terminal first-chunk fallback as LLM request failures.
 	chatModel, err := s.modelService.GetChatModel(ctx, kb.SummaryModelID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get chat model: %v", err)
-		markSummaryFailed()
-		summaryErr = err
-		return fmt.Errorf("failed to get chat model: %w", err)
+		return handleRetryableSummaryFailure(fmt.Errorf("get chat model: %w", err))
 	}
 
 	// Generate summary
-	summaryMetadataVersion := string(knowledge.CustomMetadata)
 	summary, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate summary for knowledge %s: %v", payload.KnowledgeID, err)
@@ -1138,17 +1256,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			summaryErr = err
 			return nil
 		}
-		// For other errors (LLM API issues etc.), fall back to the first chunk.
-		if len(textChunks) > 0 {
-			summary = textChunks[0].Content
-			if len(summary) > 500 {
-				runes := []rune(summary)
-				if len(runes) > 500 {
-					summary = string(runes[:500])
-				}
-			}
-			summaryOut["fallback"] = "first_chunk"
-		}
+		return handleRetryableSummaryFailure(err)
 	}
 	// Do not publish an answer derived from a superseded chunk or metadata
 	// version. A user can explicitly refresh again from the latest revision.
@@ -2177,22 +2285,66 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 		}
 	}
 	if len(textChunks) == 0 {
-		return nil, fmt.Errorf("no enabled text chunks to summarize")
+		knowledge.Description = ""
+		knowledge.SummaryStatus = types.SummaryStatusFailed
+		knowledge.UpdatedAt = time.Now()
+		if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
+			return knowledge, updateErr
+		}
+		return knowledge, errInsufficientSummaryContent
 	}
-	chatModel, err := s.modelService.GetChatModel(ctx, kb.SummaryModelID)
-	if err != nil {
-		return nil, err
-	}
+	sort.Slice(textChunks, func(i, j int) bool {
+		return textChunks[i].ChunkIndex < textChunks[j].ChunkIndex
+	})
 	metadataVersion := string(knowledge.CustomMetadata)
 	knowledge.SummaryStatus = types.SummaryStatusProcessing
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		return nil, err
 	}
+	handleGenerationFailure := func(generationErr error) (*types.Knowledge, error) {
+		if errors.Is(generationErr, errInsufficientSummaryContent) {
+			knowledge.Description = ""
+			knowledge.SummaryStatus = types.SummaryStatusFailed
+			knowledge.UpdatedAt = time.Now()
+			if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
+				return knowledge, updateErr
+			}
+			return knowledge, generationErr
+		}
+		if summaryTaskWillRetry(ctx) {
+			applyRetryableSummaryFailureState(knowledge, textChunks, true)
+			if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
+				logger.Warnf(ctx, "Failed to mark summary refresh pending for retry: %v", updateErr)
+			}
+			return knowledge, generationErr
+		}
+
+		stale, staleErr := summarySourceChanged(
+			ctx, s.repo, s.chunkRepo, tenantID, knowledgeID, metadataVersion, textChunks,
+		)
+		if staleErr != nil {
+			knowledge.SummaryStatus = types.SummaryStatusFailed
+			_ = s.repo.UpdateKnowledge(ctx, knowledge)
+			return knowledge, fmt.Errorf("verify summary fallback freshness: %w", staleErr)
+		}
+		if stale {
+			return knowledge, ErrSummaryRefreshStale
+		}
+
+		applyRetryableSummaryFailureState(knowledge, textChunks, false)
+		if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
+			return knowledge, updateErr
+		}
+		return knowledge, generationErr
+	}
+
+	chatModel, err := s.modelService.GetChatModel(ctx, kb.SummaryModelID)
+	if err != nil {
+		return handleGenerationFailure(fmt.Errorf("get chat model: %w", err))
+	}
 	summary, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
 	if err != nil {
-		knowledge.SummaryStatus = types.SummaryStatusFailed
-		_ = s.repo.UpdateKnowledge(ctx, knowledge)
-		return nil, err
+		return handleGenerationFailure(err)
 	}
 	stale, err := summarySourceChanged(
 		ctx, s.repo, s.chunkRepo, tenantID, knowledgeID, metadataVersion, textChunks,
