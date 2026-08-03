@@ -4856,6 +4856,7 @@ export default {
       consoleTip: 'to get credentials',
       wecomWSEndpointHint: 'Optional. For private WeCom deployments, enter a custom WebSocket address. Leave empty to use the default public cloud endpoint. For internal network addresses, add the hostname to the SSRF_WHITELIST env var.',
       wecomAPIBaseURLHint: 'Optional. For private WeCom deployments, enter a custom API base URL. Leave empty to use the default public cloud endpoint. For internal network addresses, add the hostname to the SSRF_WHITELIST env var.',
+      feishuAPIBaseURLHint: 'Optional. For internal deployments, enter a reverse proxy URL (e.g. nginx). Leave empty to use the default public cloud endpoint. For internal network addresses, add the hostname to the SSRF_WHITELIST env var.',
       fileKnowledgeBase: 'File Storage Knowledge Base',
       fileKnowledgeBasePlaceholder: 'Select a knowledge base (optional)',
       fileKnowledgeBaseHint: 'When configured, files sent by users will be automatically saved to this knowledge base',
