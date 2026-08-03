@@ -33,6 +33,36 @@ func (r *reparseFailureKnowledgeRepo) UpdateKnowledge(
 	return nil
 }
 
+func (r *reparseFailureKnowledgeRepo) UpdateKnowledgeIfAttemptCurrent(
+	_ context.Context,
+	knowledge *types.Knowledge,
+	_ int,
+) (bool, error) {
+	r.knowledge = knowledge
+	r.updateCalls++
+	return true, nil
+}
+
+func (r *reparseFailureKnowledgeRepo) UpdateKnowledgeColumnsIfAttemptCurrent(
+	_ context.Context,
+	_ uint64,
+	_ string,
+	_ int,
+	values map[string]interface{},
+) (bool, error) {
+	if status, ok := values["parse_status"].(string); ok {
+		r.knowledge.ParseStatus = status
+	}
+	if message, ok := values["error_message"].(string); ok {
+		r.knowledge.ErrorMessage = message
+	}
+	if pending, ok := values["pending_subtasks_count"].(int); ok {
+		r.knowledge.PendingSubtasksCount = pending
+	}
+	r.updateCalls++
+	return true, nil
+}
+
 func (r *reparseFailureKnowledgeRepo) UpdateKnowledgeColumn(
 	_ context.Context,
 	_ string,
@@ -91,7 +121,9 @@ func TestReparseKnowledgeManualEnqueueFailureIsVisible(t *testing.T) {
 	require.Error(t, err)
 	require.Same(t, knowledge, got)
 	require.Equal(t, types.ParseStatusFailed, knowledge.ParseStatus)
-	require.Equal(t, "disabled", knowledge.EnableStatus)
+	// Reparse is non-destructive: an enqueue failure must leave the last
+	// published generation available even though the new attempt failed.
+	require.Equal(t, "enabled", knowledge.EnableStatus)
 	require.Equal(t, "Failed to enqueue processing task", knowledge.ErrorMessage)
 	require.GreaterOrEqual(t, repo.updateCalls, 2, "pending and failed states must both be persisted")
 }
