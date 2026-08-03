@@ -167,8 +167,10 @@ const currentStageLabel = computed(() => {
 const currentStageIndex = computed(() => {
   const idx = stages.value.findIndex((s) => s.status === 'running' || s.status === 'failed')
   if (idx >= 0) return idx + 1
-  const done = stages.value.filter((s) => s.status === 'done').length
-  return Math.min(done + 1, stages.value.length)
+  const traversed = stages.value.filter(
+    (s) => s.status === 'done' || s.status === 'skipped',
+  ).length
+  return Math.min(traversed + 1, stages.value.length)
 })
 
 function formatDuration(ms?: number): string {
@@ -1182,7 +1184,9 @@ const showLastError = computed(() =>
 
 const stagesStatDisplay = computed(() => {
   const total = stages.value.length
-  const doneCount = stages.value.filter((s) => s.status === 'done').length
+  const completedCount = stages.value.filter(
+    (s) => s.status === 'done' || s.status === 'skipped',
+  ).length
   const inProgress = stages.value.some(
     (s) => s.status === 'running' || s.status === 'failed' || s.status === 'pending',
   )
@@ -1194,7 +1198,7 @@ const stagesStatDisplay = computed(() => {
   }
   return {
     label: t('knowledgeStages.head.stagesDone'),
-    value: `${doneCount}/${total}`,
+    value: `${completedCount}/${total}`,
   }
 })
 
