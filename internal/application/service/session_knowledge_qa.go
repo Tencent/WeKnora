@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // KnowledgeQA performs knowledge base question answering with LLM summarization
@@ -870,10 +871,10 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 		},
 	}
 
-	// Resolve the rerank model: request override (hard-failing) then tenant
-	// RetrievalConfig, then auto-detect the first active rerank model.
+	// Resolve the rerank model
 	chatManage.RerankModelID, err = s.resolveRerankModelID(ctx, rerankModelID, "", rc)
 	if err != nil {
+		logger.Errorf(ctx, "Failed to resolve rerank model ID '%s': %v", secutils.SanitizeForLog(rerankModelID), err)
 		return nil, err
 	}
 

@@ -84,9 +84,7 @@ func (c *SearchCommand) Execute(ctx context.Context, cmdCtx *CommandContext, arg
 		}
 	}
 
-	// Resolve the rerank model from the agent config, mirroring the QA
-	// pipeline (empty when no agent; the chain falls back to tenant config /
-	// auto-detect).
+	// Resolve the rerank model from the agent config.
 	var rerankModelID string
 	if cmdCtx.CustomAgent != nil {
 		rerankModelID = cmdCtx.CustomAgent.Config.RerankModelID

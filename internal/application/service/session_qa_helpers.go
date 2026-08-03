@@ -7,6 +7,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // ---------------------------------------------------------------------------
@@ -343,6 +344,7 @@ func (s *sessionService) resolveRerankModelID(
 		if err != nil {
 			return "", err
 		}
+		logger.Infof(ctx, "Using request's rerank model override: %s", secutils.SanitizeForLog(resolved))
 		return resolved, nil
 	}
 	if agentRerankModelID != "" {
@@ -350,9 +352,11 @@ func (s *sessionService) resolveRerankModelID(
 		if err != nil {
 			return "", err
 		}
+		logger.Infof(ctx, "Using custom agent's rerank model: %s", secutils.SanitizeForLog(resolved))
 		return resolved, nil
 	}
 	if rc != nil && rc.RerankModelID != "" {
+		logger.Infof(ctx, "Using tenant retrieval config rerank model: %s", rc.RerankModelID)
 		return rc.RerankModelID, nil
 	}
 	if s.modelService == nil {
@@ -361,9 +365,12 @@ func (s *sessionService) resolveRerankModelID(
 	if models, err := s.modelService.ListModels(ctx); err == nil {
 		for _, model := range models {
 			if model != nil && model.Type == types.ModelTypeRerank && model.Status == types.ModelStatusActive {
+				logger.Infof(ctx, "Auto-detected first active rerank model: %s", model.ID)
 				return model.ID, nil
 			}
 		}
+	} else {
+		logger.Warnf(ctx, "Failed to list rerank models for auto-detect, skipping rerank: %v", err)
 	}
 	return "", nil
 }
