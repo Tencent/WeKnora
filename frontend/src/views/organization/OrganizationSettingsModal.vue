@@ -1372,7 +1372,7 @@ const toSettingsKnowledgeBaseRows = (
 ): SettingsKnowledgeBaseRow[] => {
   const directByKnowledgeBaseID = new Map(directShares.map(share => [share.knowledge_base_id, share]))
 
-  return items.flatMap((item) => {
+  return items.flatMap<SettingsKnowledgeBaseRow>((item) => {
     if (!item.knowledge_base) return []
 
     const directShare = directByKnowledgeBaseID.get(item.knowledge_base.id)

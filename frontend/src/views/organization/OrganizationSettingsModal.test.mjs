@@ -22,6 +22,7 @@ test('space settings labels every KB source and protects every agent-carried KB 
   assert.match(source, /organization\.settings\.directKbSource/)
   assert.match(source, /organization\.settings\.agentKbSource/)
   assert.match(source, /organization\.settings\.directAndAgentKbSource/)
+  assert.match(source, /items\.flatMap<SettingsKnowledgeBaseRow>\(\(item\) => \{/)
   assert.match(source, /v-if="isAdmin && !hasAgentSources\(row\)"/)
   assert.match(source, /if \(!props\.orgId \|\| hasAgentSources\(share\)\) return/)
 })
