@@ -32,12 +32,25 @@
 | `knowledge_ids` | string[] | 否 | 知识文件 ID 列表，指定具体文件进行检索 |
 | `agent_id` | string | 否 | 自定义 Agent ID，指定使用的智能体 |
 | `summary_model_id` | string | 否 | 覆盖默认的摘要模型 ID |
-| `rerank_model_id` | string | 否 | 检索重排序使用的 Rerank 模型。接受模型 ID 或当前 Tenant 可访问 Rerank 模型中的唯一名称；传入但无法解析时返回 400/403。不传时按 Agent 配置 > Tenant RetrievalConfig > 自动探测第一个可用 Rerank 模型 的顺序解析。与 `summary_model_id` 不同：无效的 `rerank_model_id` 硬失败而非回退 |
+| `rerank_model_id` | string | 否 | 检索重排序使用的 Rerank 模型（模型 ID 或唯一名称） |
 | `mentioned_items` | object[] | 否 | @提及的知识库和文件列表 |
 | `disable_title` | bool | 否 | 是否禁用自动标题生成（默认 false） |
 | `images` | object[] | 否 | 附带的图片（base64 格式），需要 Agent 启用图片上传 |
 | `channel` | string | 否 | 来源渠道标识：`web`、`api`、`im`、`browser_extension` |
 | `suggestion_attribution` | object | 否 | 用户从推荐问题发起本轮时传入 `{suggestion_set_id, question_id}`；服务端会校验归属 |
+
+**模型解析规则**：
+
+`summary_model_id` 与 `rerank_model_id` 均为可选覆盖，解析顺序如下：
+
+| 字段 | 解析顺序 | 无效值处理 |
+|------|---------|-----------|
+| `summary_model_id` | 请求值 > Agent 的 `model_id` > 知识库配置 > 自动探测可用的 KnowledgeQA 模型 | 忽略并回退 |
+| `rerank_model_id` | 请求值 > Agent 配置 > Tenant 检索配置 > 自动探测第一个可用的 Rerank 模型 | 返回 400/403，不回退 |
+
+- 有 Agent 时其 `model_id` 必须有值且有效，否则请求失败。
+- `rerank_model_id` 仅当请求实际触发检索时解析；纯聊天请求不解析。
+- Agent 模式下 `rerank_model_id` 请求值不生效，Rerank 模型取 Agent 配置。
 
 **请求**:
 
@@ -83,7 +96,7 @@ Agent 模式支持更智能的问答，包括工具调用、网络搜索、多�
 | `agent_id` | string | 否 | 自定义 Agent ID，指定使用的智能体（支持共享 Agent） |
 | `web_search_enabled` | bool | 否 | 是否启用网络搜索（默认 false） |
 | `summary_model_id` | string | 否 | 覆盖默认的摘要模型 ID |
-| `rerank_model_id` | string | 否 | 检索重排序使用的 Rerank 模型。接受模型 ID 或当前 Tenant 可访问 Rerank 模型中的唯一名称；传入但无法解析时返回 400/403。不传时按 Agent 配置 > Tenant RetrievalConfig > 自动探测第一个可用 Rerank 模型 的顺序解析。与 `summary_model_id` 不同：无效的 `rerank_model_id` 硬失败而非回退。Agent 模式下该字段不生效 |
+| `rerank_model_id` | string | 否 | 同上；Agent 模式下该字段不生效 |
 | `mentioned_items` | object[] | 否 | @提及的知识库和文件列表 |
 | `disable_title` | bool | 否 | 是否禁用自动标题生成（默认 false） |
 | `images` | object[] | 否 | 附带的图片（base64 格式），需要 Agent 启用图片上传 |
