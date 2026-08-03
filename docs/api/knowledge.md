@@ -23,6 +23,7 @@
 | PUT    | `/knowledge/image/:id/:chunk_id`           | 更新分块图像信息                           |
 | PUT    | `/knowledge/tags`                          | 批量更新知识标签                           |
 | GET    | `/knowledge/search`                        | 跨知识库搜索/过滤知识                      |
+| POST   | `/knowledge/batch-reparse`                 | 同一知识库内批量重新解析知识（异步任务）   |
 | POST   | `/knowledge/batch-delete`                  | 同一知识库内批量删除知识（异步任务）       |
 | POST   | `/knowledge/move`                          | 迁移知识到另一知识库（异步任务）           |
 | GET    | `/knowledge/move/progress/:task_id`        | 查询知识迁移任务进度                       |
@@ -781,6 +782,50 @@ curl --location --get 'http://localhost:8080/api/v1/knowledge/search' \
 > 注意：与其他列表接口不同，此处的 `data` 是**数组**而非 `{data, has_more}` 嵌套对象；`has_more` 与 `data` 同级。
 
 `agent_id=...&` 且该 Agent 的 KB 选择模式为 `none` 时，将直接返回 `data: []` 与 `has_more: false`。
+
+## POST `/knowledge/batch-reparse` - 同一知识库内批量重新解析
+
+按 ID 列表在单个知识库内批量重新解析知识（异步任务）。单次最多 200 个 ID；服务侧会校验所有 ID 存在并属于同一 `kb_id`。
+
+**请求体**:
+
+| 字段             | 类型     | 必填 | 说明                                             |
+| ---------------- | -------- | ---- | ------------------------------------------------ |
+| `kb_id`          | string   | 是   | 目标知识库 ID                                    |
+| `ids`            | string[] | 是   | 待重新解析的知识 ID 列表（≤ 200）                |
+| `process_config` | object   | 否   | 本批次共用的处理配置覆盖；省略时沿用各知识原配置 |
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge/batch-reparse' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "kb_id": "kb-00000001",
+    "ids": [
+        "4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5",
+        "9c8af585-ae15-44ce-8f73-45ad18394651"
+    ]
+}'
+```
+
+**响应**:
+
+```json
+{
+    "success": true,
+    "message": "Batch reparse task submitted",
+    "data": {
+        "task_id": "a1b2c3d4",
+        "reparse_count": 2
+    }
+}
+```
+
+HTTP 成功表示批处理包装任务已入队。后台会尝试提交列表中的每个知识；单项提交失败时，该知识会进入 `failed` 状态并保留错误信息，批处理任务也会在运行队列中标记失败。为避免重复清理已成功提交的知识，出现部分失败后不会自动重试整个批次；可筛选失败知识后再次批量重新解析。
+
+任一 ID 不属于 `kb_id` 或不存在时，返回 400 并整批拒绝。
 
 ## POST `/knowledge/batch-delete` - 同一知识库内批量删除
 
