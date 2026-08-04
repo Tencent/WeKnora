@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	stderrors "errors"
 	"net/http"
 	"strconv"
@@ -20,7 +21,8 @@ import (
 // MessageHandler handles HTTP requests related to messages within chat sessions
 // It provides endpoints for loading and managing message history
 type MessageHandler struct {
-	MessageService interfaces.MessageService // Service that implements message business logic
+	MessageService  interfaces.MessageService       // Service that implements message business logic
+	FeedbackService interfaces.ChunkFeedbackService // Service for answer feedback state
 }
 
 // NewMessageHandler creates a new message handler instance with the required service
@@ -28,9 +30,44 @@ type MessageHandler struct {
 //   - messageService: Service that implements message business logic
 //
 // Returns a pointer to a new MessageHandler
-func NewMessageHandler(messageService interfaces.MessageService) *MessageHandler {
+func NewMessageHandler(messageService interfaces.MessageService, feedbackService interfaces.ChunkFeedbackService) *MessageHandler {
 	return &MessageHandler{
-		MessageService: messageService,
+		MessageService:  messageService,
+		FeedbackService: feedbackService,
+	}
+}
+
+// enrichMyRatings stamps the current user's feedback rating onto each message
+// so the chat UI can restore the like/dislike state after a history reload.
+func (h *MessageHandler) enrichMyRatings(ctx context.Context, messages []*types.Message) {
+	if h.FeedbackService == nil || len(messages) == 0 {
+		return
+	}
+	userID, ok := types.UserIDFromContext(ctx)
+	if !ok || userID == "" {
+		return
+	}
+	ids := make([]string, 0, len(messages))
+	for _, m := range messages {
+		if m != nil && m.ID != "" {
+			ids = append(ids, m.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	ratings, err := h.FeedbackService.GetMyRatingsForMessages(ctx, userID, ids)
+	if err != nil {
+		logger.Warnf(ctx, "enrich message feedback ratings failed: %v", err)
+		return
+	}
+	for _, m := range messages {
+		if m == nil {
+			continue
+		}
+		if r, ok := ratings[m.ID]; ok {
+			m.MyRating = r
+		}
 	}
 }
 
@@ -92,6 +129,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 			"Successfully retrieved recent messages, session ID: %s, message count: %d",
 			sessionID, len(messages),
 		)
+		h.enrichMyRatings(ctx, messages)
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data":    messages,
@@ -132,6 +170,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 		"Successfully retrieved messages before time, session ID: %s, message count: %d",
 		sessionID, len(messages),
 	)
+	h.enrichMyRatings(ctx, messages)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    messages,

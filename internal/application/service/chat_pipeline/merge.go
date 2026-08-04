@@ -106,6 +106,16 @@ func (p *PluginMerge) selectInputResults(ctx context.Context, chatManage *types.
 		"reason": "empty_rerank_result",
 	})
 	result := chatManage.SearchResult
+	// Without a reranker the raw retrieval score is the only signal, so apply
+	// the chunk recall weight here to keep user-feedback tuning effective.
+	for _, r := range result {
+		if r == nil {
+			continue
+		}
+		if w := r.RecallWeight; w > 0 && w != 1.0 {
+			r.Score = r.Score * w
+		}
+	}
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Score > result[j].Score
 	})

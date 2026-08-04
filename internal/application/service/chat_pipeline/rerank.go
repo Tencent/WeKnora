@@ -217,6 +217,19 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 			})
 		}
 
+		// Apply the chunk's recall weight (derived from user feedback) so
+		// better-reviewed chunks rank first and low-rated chunks are less
+		// likely to pass the threshold / top-K cut.
+		if weight := sr.RecallWeight; weight > 0 && math.Abs(weight-1.0) > 1e-9 {
+			weighted := sr.Score * weight
+			if weighted > 1.0 {
+				weighted = 1.0
+			}
+			sr.Metadata["recall_weight"] = fmt.Sprintf("%.4f", weight)
+			sr.Metadata["recall_weighted_score"] = fmt.Sprintf("%.4f", weighted)
+			sr.Score = weighted
+		}
+
 		reranked = append(reranked, sr)
 	}
 

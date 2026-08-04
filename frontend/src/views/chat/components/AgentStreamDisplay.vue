@@ -320,6 +320,8 @@
                     <t-icon name="info-circle" />
                   </t-button>
                 </t-tooltip>
+                <AnswerFeedback :session-id="sessionId" :message-id="String(session?.id || session?.assistant_message_id || '')"
+                  :initial-rating="String(session?.my_rating || '')" />
                 <ChatRequestInfoButton v-if="showRequestInfo && isConversationDone" :session="session"
                   :session-id="sessionId" />
                 <transition name="follow-up-toolbar-loading">
@@ -490,6 +492,7 @@ import ToolResultRenderer from './ToolResultRenderer.vue';
 import ToolApprovalCard from './ToolApprovalCard.vue';
 import McpOAuthCard from './McpOAuthCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
+import AnswerFeedback from './AnswerFeedback.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
