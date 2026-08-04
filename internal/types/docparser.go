@@ -81,6 +81,10 @@ type ParsedChunk struct {
 	End           int
 	Images        []ParsedImage
 	ChunkID       string // populated by processChunks with the actual DB UUID
+	// Page is the 1-based source page number this chunk originated from,
+	// resolved from page-boundary markers injected by the parser. 0 means
+	// unknown (parser did not provide page information).
+	Page int
 
 	// ParentIndex is set when using parent-child chunking strategy.
 	// -1 (or unset/0 for flat chunks) means this is a top-level chunk.
@@ -110,6 +114,8 @@ type ParsedParentChunk struct {
 	Seq     int
 	Start   int
 	End     int
+	// Page is the 1-based source page number; 0 means unknown.
+	Page int
 }
 
 type ParsedImage struct {

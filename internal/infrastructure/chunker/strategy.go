@@ -28,10 +28,27 @@ const (
 // always returns a non-nil result: on tier failure the chain falls through
 // to the legacy splitter, which is the original Tier 3 implementation.
 //
+// Page-boundary markers (<!--wk:page:N-->) injected by the parser are
+// stripped before splitting so they never leak into chunk Content; each
+// returned Chunk carries the 1-based Page resolved from its Start offset.
+//
 // Hot path: avoids the Diagnostics struct allocation that
 // SplitWithDiagnostics performs (matters in SplitParentChild where
 // Split is called once per parent).
 func Split(text string, cfg SplitterConfig) []Chunk {
+	if text == "" {
+		return nil
+	}
+	cleaned, boundaries := stripPageMarkers(text)
+	out := splitCore(cleaned, cfg)
+	applyPages(out, boundaries)
+	return out
+}
+
+// splitCore is the marker-agnostic strategy chain. Callers that have already
+// stripped markers (or do not care about page tracking) may invoke it
+// directly; Split is the public entry point that handles page markers.
+func splitCore(text string, cfg SplitterConfig) []Chunk {
 	if text == "" {
 		return nil
 	}
@@ -126,6 +143,9 @@ func SplitWithDiagnostics(text string, cfg SplitterConfig) ([]Chunk, *Diagnostic
 // It runs the tier selector for parent splitting, then re-splits each
 // parent into children with the small-chunk config.
 //
+// Page-boundary markers are stripped once up front; both parent and child
+// chunks carry the 1-based Page resolved from their Start offset.
+//
 // Child splitting honours childCfg.Strategy. If it is empty/auto and a
 // parent has its own internal structure (sub-headings, numbered sub-
 // sections), the appropriate tier picks it up so child chunks carry a
@@ -136,10 +156,25 @@ func SplitParentChild(text string, parentCfg, childCfg SplitterConfig) ParentChi
 	if text == "" {
 		return ParentChildResult{}
 	}
+	cleaned, boundaries := stripPageMarkers(text)
+	res := splitParentChildCore(cleaned, parentCfg, childCfg)
+	applyPages(res.Parents, boundaries)
+	for i := range res.Children {
+		res.Children[i].Page = resolvePage(boundaries, res.Children[i].Start)
+	}
+	return res
+}
+
+// splitParentChildCore is the marker-agnostic parent/child splitter. It
+// operates on text already stripped of page markers.
+func splitParentChildCore(text string, parentCfg, childCfg SplitterConfig) ParentChildResult {
+	if text == "" {
+		return ParentChildResult{}
+	}
 	parentCfg = ensureDefaults(parentCfg)
 	childCfg = ensureDefaults(childCfg)
 
-	parents := Split(text, parentCfg)
+	parents := splitCore(text, parentCfg)
 	if len(parents) == 0 {
 		return ParentChildResult{}
 	}
@@ -148,7 +183,7 @@ func SplitParentChild(text string, parentCfg, childCfg SplitterConfig) ParentChi
 	var children []ChildChunk
 	childSeq := 0
 	for _, parent := range parents {
-		subs := Split(parent.Content, childCfg)
+		subs := splitCore(parent.Content, childCfg)
 
 		parentIndex := -1
 		if len(subs) > 1 || (len(subs) == 1 && subs[0].Content != parent.Content) {

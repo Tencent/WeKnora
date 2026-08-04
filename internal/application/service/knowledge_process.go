@@ -403,19 +403,22 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		parentDBChunks = make([]*types.Chunk, len(options.ParentChunks))
 		for i, pc := range options.ParentChunks {
 			parentDBChunks[i] = &types.Chunk{
-				ID:              uuid.New().String(),
-				TenantID:        knowledge.TenantID,
-				KnowledgeID:     knowledge.ID,
-				KnowledgeBaseID: knowledge.KnowledgeBaseID,
-				Content:         pc.Content,
-				ChunkIndex:      pc.Seq,
-				IsEnabled:       true,
-				CreatedAt:       time.Now(),
-				UpdatedAt:       time.Now(),
-				StartAt:         pc.Start,
-				EndAt:           pc.End,
-				ChunkType:       types.ChunkTypeParentText,
-			}
+			ID:              uuid.New().String(),
+			TenantID:        knowledge.TenantID,
+			KnowledgeID:     knowledge.ID,
+			KnowledgeBaseID: knowledge.KnowledgeBaseID,
+			Content:         pc.Content,
+			ChunkIndex:      pc.Seq,
+			IsEnabled:       true,
+			CreatedAt:       time.Now(),
+			UpdatedAt:       time.Now(),
+			StartAt:         pc.Start,
+			EndAt:           pc.End,
+			ChunkType:       types.ChunkTypeParentText,
+		}
+		if pc.Page > 0 {
+			_ = parentDBChunks[i].SetDocumentMetadata(&types.DocumentChunkMetadata{Page: pc.Page})
+		}
 		}
 		// Set prev/next links for parent chunks
 		for i := range parentDBChunks {
@@ -455,6 +458,9 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			StartAt:         int(chunkData.Start),
 			EndAt:           int(chunkData.End),
 			ChunkType:       types.ChunkTypeText,
+		}
+		if chunkData.Page > 0 {
+			_ = textChunk.SetDocumentMetadata(&types.DocumentChunkMetadata{Page: chunkData.Page})
 		}
 
 		// Wire up ParentChunkID for child chunks
@@ -1628,9 +1634,9 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 				ContentRevision: &questionRevision,
 			}
 		}
-		meta := &types.DocumentChunkMetadata{
-			GeneratedQuestions: generatedQuestions, GeneratedQuestionsRevision: chunk.ContentRevision,
-		}
+		meta := chunk.EnsureDocumentMetadata()
+		meta.GeneratedQuestions = generatedQuestions
+		meta.GeneratedQuestionsRevision = chunk.ContentRevision
 		if err := chunk.SetDocumentMetadata(meta); err != nil {
 			chunkMetadataSetFailed++
 			logger.Warnf(ctx, "Failed to set document metadata for chunk %s: %v", chunk.ID, err)
@@ -1964,9 +1970,9 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 				ContentRevision: &questionRevision,
 			}
 		}
-		meta := &types.DocumentChunkMetadata{
-			GeneratedQuestions: generatedQuestions, GeneratedQuestionsRevision: chunk.ContentRevision,
-		}
+		meta := chunk.EnsureDocumentMetadata()
+		meta.GeneratedQuestions = generatedQuestions
+		meta.GeneratedQuestionsRevision = chunk.ContentRevision
 		if err := chunk.SetDocumentMetadata(meta); err != nil {
 			logger.Warnf(ctx, "Failed to set document metadata for chunk %s: %v", chunk.ID, err)
 			continue
@@ -2148,9 +2154,9 @@ func (s *knowledgeService) RegenerateChunkQuestions(
 			ID: uuid.NewString(), Question: question, ContentRevision: &questionRevision,
 		})
 	}
-	meta := &types.DocumentChunkMetadata{
-		GeneratedQuestions: generated, GeneratedQuestionsRevision: chunk.ContentRevision,
-	}
+	meta := chunk.EnsureDocumentMetadata()
+	meta.GeneratedQuestions = generated
+	meta.GeneratedQuestionsRevision = chunk.ContentRevision
 	if err := chunk.SetDocumentMetadata(meta); err != nil {
 		return nil, err
 	}
@@ -3411,11 +3417,12 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 				Start:         c.Start,
 				End:           c.End,
 				ParentIndex:   c.ParentIndex,
+				Page:          c.Page,
 			}
 		}
 		parentChunks := make([]types.ParsedParentChunk, len(pcResult.Parents))
 		for i, p := range pcResult.Parents {
-			parentChunks[i] = types.ParsedParentChunk{Content: p.Content, Seq: p.Seq, Start: p.Start, End: p.End}
+			parentChunks[i] = types.ParsedParentChunk{Content: p.Content, Seq: p.Seq, Start: p.Start, End: p.End, Page: p.Page}
 		}
 		processOpts.ParentChunks = parentChunks
 		logger.Infof(ctx, "Split document into %d parent + %d child chunks for knowledge %s",
@@ -3430,6 +3437,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 				Seq:           c.Seq,
 				Start:         c.Start,
 				End:           c.End,
+				Page:          c.Page,
 			}
 		}
 		logger.Infof(ctx, "Split document into %d chunks for knowledge %s", len(chunks), knowledge.ID)

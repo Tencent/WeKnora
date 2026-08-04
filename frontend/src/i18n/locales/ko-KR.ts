@@ -5200,6 +5200,7 @@ export default {
     clickToViewFull: '전체 텍스트와 세그먼트를 보려면 카드를 클릭하세요.',
     characters: '자',
     segment: '조각',
+    page: '{n}페이지',
     chunkCount: '총 {count}개 조각',
     viewChunks: '청크 보기',
     viewMerged: '전체 텍스트',

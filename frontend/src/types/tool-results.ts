@@ -39,6 +39,8 @@ export interface SearchResultItem {
     knowledge_title: string;
     match_type: string;
     knowledge_base_type?: string;
+    // 1-based source page number (0/undefined when parser did not provide it)
+    page?: number;
     // FAQ entries share the owning document's title; the standard question
     // gives each entry a distinct, human-readable label.
     faq_standard_question?: string;

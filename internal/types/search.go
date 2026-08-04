@@ -195,6 +195,11 @@ type SearchResult struct {
 	// ChunkMetadata stores chunk-level metadata (e.g., generated questions)
 	ChunkMetadata JSON `json:"chunk_metadata,omitempty"`
 
+	// Page is the 1-based source page number this chunk originated from,
+	// surfaced as a top-level field so the frontend can render it without
+	// parsing ChunkMetadata. 0 means unknown (parser did not provide it).
+	Page int `json:"page,omitempty"`
+
 	// MatchedContent is the actual content that was matched in vector search
 	// For FAQ: this is the matched question text (standard or similar question)
 	MatchedContent string `json:"matched_content,omitempty"`

@@ -5200,6 +5200,7 @@ export default {
     clickToViewFull: 'Нажмите для полного просмотра',
     characters: 'символов',
     segment: 'Фрагмент',
+    page: 'Стр. {n}',
     chunkCount: 'Всего {count} фрагментов',
     viewChunks: 'Просмотр фрагментов',
     viewMerged: 'Полный текст',

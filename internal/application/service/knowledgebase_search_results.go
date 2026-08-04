@@ -306,6 +306,10 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 	matchType types.MatchType,
 	matchedContent string,
 ) *types.SearchResult {
+	page := 0
+	if meta, _ := chunk.DocumentMetadata(); meta != nil {
+		page = meta.Page
+	}
 	return &types.SearchResult{
 		ID:                      chunk.ID,
 		Content:                 chunk.Content,
@@ -329,6 +333,7 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 		ChunkMetadata:           chunk.Metadata,
 		MatchedContent:          matchedContent,
 		KnowledgeBaseID:         knowledge.KnowledgeBaseID,
+		Page:                    page,
 	}
 }
 

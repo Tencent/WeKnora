@@ -57,6 +57,9 @@ type DocumentChunkMetadata struct {
 	GeneratedQuestions []GeneratedQuestion `json:"generated_questions,omitempty"`
 	// GeneratedQuestionsRevision ties the questions to Chunk.ContentRevision.
 	GeneratedQuestionsRevision int `json:"generated_questions_revision,omitempty"`
+	// Page 是该 Chunk 在源文档中的页码（1-based），用于溯源定位。
+	// 0 表示未知（解析器未提供页码信息）。
+	Page int `json:"page,omitempty"`
 }
 
 // IsQuestionCurrent reports whether a generated question was authored for the
@@ -109,6 +112,20 @@ func (c *Chunk) SetDocumentMetadata(meta *DocumentChunkMetadata) error {
 	}
 	c.Metadata = JSON(bytes)
 	return nil
+}
+
+// EnsureDocumentMetadata 返回 Chunk 现有的文档元数据；不存在时返回一个新的空结构。
+// 需要修改部分元数据字段（如问题生成）的调用方应使用本方法，避免覆盖 Page
+// 等无关字段。
+func (c *Chunk) EnsureDocumentMetadata() *DocumentChunkMetadata {
+	if c == nil {
+		return &DocumentChunkMetadata{}
+	}
+	meta, err := c.DocumentMetadata()
+	if err != nil || meta == nil {
+		return &DocumentChunkMetadata{}
+	}
+	return meta
 }
 
 // Sanitize 对元数据进行基础清理（去除首尾空白、去重），保留原始内容

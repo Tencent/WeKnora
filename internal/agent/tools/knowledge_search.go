@@ -1288,8 +1288,12 @@ func (t *KnowledgeSearchTool) formatOutput(
 					xmlEscape(result.SourceQuery),
 				))
 			} else {
+				pageAttr := ""
+				if result.Page > 0 {
+					pageAttr = fmt.Sprintf(" page=\"%d\"", result.Page)
+				}
 				ob.WriteString(fmt.Sprintf(
-					"<chunk rank=\"%d\" chunk_id=\"%s\" chunk_index=\"%d\" knowledge_id=\"%s\" knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\" source_query=\"%s\">\n",
+					"<chunk rank=\"%d\" chunk_id=\"%s\" chunk_index=\"%d\" knowledge_id=\"%s\" knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\" source_query=\"%s\"%s>\n",
 					i+1,
 					xmlEscape(result.ID),
 					result.ChunkIndex,
@@ -1298,6 +1302,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 					xmlEscape(result.KnowledgeTitle),
 					result.Score,
 					xmlEscape(result.SourceQuery),
+					pageAttr,
 				))
 			}
 			snippet := ""
@@ -1343,6 +1348,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 			"source_query":        result.SourceQuery,
 			"query_type":          result.QueryType,
 			"knowledge_base_type": result.KnowledgeBaseType,
+			"page":                result.Page,
 		})
 
 		last := formattedResults[len(formattedResults)-1]

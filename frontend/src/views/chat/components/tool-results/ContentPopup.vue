@@ -7,7 +7,10 @@
       <!-- Merged chunks from the same document -->
       <template v-else-if="blocks.length > 1">
         <div v-for="(block, idx) in blocks" :key="block.chunk_id || idx" class="chunk-block">
-          <div class="chunk-block__label">{{ $t('chat.chunkOrdinal', { index: idx + 1 }) }}</div>
+          <div class="chunk-block__label">
+            {{ $t('chat.chunkOrdinal', { index: idx + 1 }) }}
+            <span v-if="block.page" class="chunk-block__page">{{ $t('knowledgeBase.page', { n: block.page }) }}</span>
+          </div>
           <div class="full-content" v-html="block.html"></div>
         </div>
       </template>
@@ -37,6 +40,7 @@ interface ChunkContent {
   content: string;
   chunk_id?: string;
   knowledge_id?: string;
+  page?: number;
 }
 
 interface Props {
@@ -73,7 +77,7 @@ const blocks = computed(() => {
       ? [{ content: props.content, chunk_id: props.chunkId, knowledge_id: props.knowledgeId }]
       : [];
   return source
-    .map((c) => ({ chunk_id: c.chunk_id, html: renderBlock(c.content) }))
+    .map((c) => ({ chunk_id: c.chunk_id, page: c.page, html: renderBlock(c.content) }))
     .filter((b) => b.html.trim() !== '');
 });
 </script>
@@ -129,6 +133,12 @@ const blocks = computed(() => {
       font-weight: 600;
       color: var(--td-text-color-placeholder);
       margin-bottom: 4px;
+    }
+
+    .chunk-block__page {
+      margin-left: 6px;
+      font-weight: 400;
+      color: var(--td-text-color-disabled);
     }
   }
 

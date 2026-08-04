@@ -38,6 +38,7 @@ interface ChunkContent {
   content: string;
   chunk_id?: string;
   knowledge_id?: string;
+  page?: number;
 }
 
 withDefaults(

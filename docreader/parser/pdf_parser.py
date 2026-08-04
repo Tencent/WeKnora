@@ -1350,6 +1350,9 @@ class PDFScannedParser(BaseParser):
             for i in range(page_count):
                 page_filename = f"{base_name}_page_{i+1}.jpg"
                 ref_path = f"images/{page_filename}"
+                # Page-boundary marker consumed by the Go chunker to attribute
+                # each chunk to its source page for citation/provenance (#928).
+                markdown_lines.append(f"<!--wk:page:{i+1}-->")
                 markdown_lines.append(f"![{page_filename}]({ref_path})")
                 images[ref_path] = base64.b64encode(rendered[i]).decode("utf-8")
 
@@ -1533,18 +1536,31 @@ class PDFParser(BaseParser):
         vector_figure_count = 0
         blocks = []
         for i in range(page_count):
+            # Page-boundary marker consumed by the Go chunker to attribute
+            # each chunk to its source page for citation/provenance (#928).
+            page_started = False
+
+            def _mark_page():
+                nonlocal page_started
+                if not page_started:
+                    blocks.append(f"<!--wk:page:{i+1}-->")
+                    page_started = True
+
             if classes[i] == "scanned":
                 page_filename = f"{base_name}_page_{i+1}.jpg"
+                _mark_page()
                 blocks.append(f"![{page_filename}](images/{page_filename})")
             else:
                 stripped = texts[i].strip()
                 if stripped:
+                    _mark_page()
                     blocks.append(stripped)
                 vector_figure_count += len(vector_clips.get(i, []))
                 page_images = list(embedded.get(i, []))
                 page_images.sort(key=lambda item: item[2], reverse=True)
                 for ref_path, _b64, _y in page_images:
                     fname = os.path.basename(ref_path)
+                    _mark_page()
                     blocks.append(f"![{fname}]({ref_path})")
                     embedded_count += 1
 

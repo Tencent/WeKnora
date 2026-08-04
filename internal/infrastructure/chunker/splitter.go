@@ -5,6 +5,7 @@ package chunker
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -29,6 +30,11 @@ type Chunk struct {
 	Seq           int
 	Start         int
 	End           int
+	// Page is the 1-based source page number this chunk originated from,
+	// resolved from page-boundary markers (<!--wk:page:N-->) injected by
+	// the document parser. 0 means unknown. Set by Split / SplitParentChild
+	// after stripping markers from the source text.
+	Page int
 }
 
 // EmbeddingContent returns the text that should be fed to the embedding
@@ -266,6 +272,80 @@ func splitBySeparators(text string, separators []string, chunkSize int) []string
 // runeLen returns the number of runes in s.
 func runeLen(s string) int {
 	return utf8.RuneCountInString(s)
+}
+
+// pageMarkerRe matches a parser-injected page-boundary marker
+// <!--wk:page:N--> plus an optional single trailing newline (consumed to
+// avoid leaving an extra blank line after the marker). Markers carry the
+// 1-based source page number so chunks can be traced back to their page
+// for citation/provenance (issue #928).
+var pageMarkerRe = regexp.MustCompile(`<!--wk:page:(\d+)-->\n?`)
+
+// pageBoundary records where a page begins in the marker-stripped text.
+type pageBoundary struct {
+	offset int // rune offset into the cleaned text
+	page   int // 1-based page number
+}
+
+// stripPageMarkers removes all page-boundary markers from text and returns
+// the cleaned text plus a sorted list of page boundaries (rune offsets into
+// the cleaned text). When the cleaned text has leading content before the
+// first marker, an implicit page-1 boundary at offset 0 is prepended so
+// that content is still attributable. Returns (text, nil) when no markers
+// are present, leaving Split/SplitParentChild behaviour unchanged.
+func stripPageMarkers(text string) (string, []pageBoundary) {
+	matches := pageMarkerRe.FindAllStringSubmatchIndex(text, -1)
+	if len(matches) == 0 {
+		return text, nil
+	}
+	var cleaned strings.Builder
+	cleaned.Grow(len(text))
+	var boundaries []pageBoundary
+	cleanedRunes := 0
+	last := 0
+	for _, m := range matches {
+		segment := text[last:m[0]]
+		cleaned.WriteString(segment)
+		cleanedRunes += utf8.RuneCountInString(segment)
+		pageNo, _ := strconv.Atoi(text[m[2]:m[3]])
+		boundaries = append(boundaries, pageBoundary{offset: cleanedRunes, page: pageNo})
+		last = m[1]
+	}
+	cleaned.WriteString(text[last:])
+
+	// Attribute any leading content (before the first marker) to page 1.
+	if len(boundaries) > 0 && boundaries[0].offset > 0 {
+		boundaries = append([]pageBoundary{{offset: 0, page: 1}}, boundaries...)
+	}
+	return cleaned.String(), boundaries
+}
+
+// resolvePage returns the 1-based page number covering the given rune offset,
+// or 0 when no boundaries are available.
+func resolvePage(boundaries []pageBoundary, offset int) int {
+	if len(boundaries) == 0 {
+		return 0
+	}
+	page := boundaries[0].page
+	for _, b := range boundaries {
+		if b.offset <= offset {
+			page = b.page
+		} else {
+			break
+		}
+	}
+	return page
+}
+
+// applyPages stamps each chunk's Page from its Start offset. No-op when no
+// boundaries were extracted (e.g. parser did not emit markers).
+func applyPages(chunks []Chunk, boundaries []pageBoundary) {
+	if len(boundaries) == 0 {
+		return
+	}
+	for i := range chunks {
+		chunks[i].Page = resolvePage(boundaries, chunks[i].Start)
+	}
 }
 
 // SplitText splits text into chunks with overlap, respecting protected patterns.

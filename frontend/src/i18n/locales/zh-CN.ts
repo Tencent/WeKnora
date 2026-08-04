@@ -5200,6 +5200,7 @@ export default {
     clickToViewFull: '点击卡片查看全文与分段',
     characters: '字符',
     segment: '片段',
+    page: '第 {n} 页',
     chunkCount: '共 {count} 个片段',
     viewChunks: '查看分块',
     viewMerged: '全文',
