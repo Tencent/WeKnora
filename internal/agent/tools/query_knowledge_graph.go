@@ -155,8 +155,9 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	kbResults := make(map[string]*graphQueryResult)
 
 	searchParams := types.SearchParams{
-		QueryText:  query,
-		MatchCount: 10,
+		QueryText:         query,
+		MatchCount:        10,
+		ApplyRecallWeight: true,
 	}
 
 	for _, kbID := range input.KnowledgeBaseIDs {
@@ -237,6 +238,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	// Convert map to slice and sort by score
 	allResults := make([]*types.SearchResult, 0, len(seenChunks))
 	for _, result := range seenChunks {
+		applyRecallWeightToAgentResult(result)
 		allResults = append(allResults, result)
 	}
 
@@ -365,8 +367,9 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	graphData := buildGraphVisualizationData(allResults)
 
 	return &types.ToolResult{
-		Success: true,
-		Output:  output,
+		Success:             true,
+		Output:              output,
+		KnowledgeReferences: allResults,
 		Data: map[string]interface{}{
 			"knowledge_base_ids": input.KnowledgeBaseIDs,
 			"query":              query,

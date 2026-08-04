@@ -184,6 +184,8 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 
 	var chunksOutput strings.Builder
 	formattedChunks := make([]map[string]interface{}, 0)
+	knowledgeReferences := make([]*types.SearchResult, 0)
+	referencedChunkIDs := make(map[string]struct{})
 	totalChunks := int64(0)
 	reachedMax := false
 
@@ -193,6 +195,12 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 	appendFormattedChunk := func(chunk *types.Chunk, content string) {
 		if chunk == nil {
 			return
+		}
+		if _, exists := referencedChunkIDs[chunk.ID]; !exists {
+			if reference := chunkKnowledgeReference(chunk, knowledge.Title, content); reference != nil {
+				knowledgeReferences = append(knowledgeReferences, reference)
+				referencedChunkIDs[chunk.ID] = struct{}{}
+			}
 		}
 		formattedChunks = append(formattedChunks, map[string]interface{}{
 			"chunk_id":        chunk.ID,
@@ -355,8 +363,9 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 	sb.WriteString("</source_document>")
 
 	return &types.ToolResult{
-		Success: true,
-		Output:  sb.String(),
+		Success:             true,
+		Output:              sb.String(),
+		KnowledgeReferences: knowledgeReferences,
 		Data: map[string]interface{}{
 			"display_type":    "knowledge_chunks_list",
 			"knowledge_id":    knowledgeID,

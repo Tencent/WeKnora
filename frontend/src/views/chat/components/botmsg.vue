@@ -46,6 +46,54 @@
                     :title="$t('agent.addToKnowledgeBase')">
                     <t-icon name="bookmark-add" />
                 </t-button>
+                <!-- 点赞/点踩按钮 -->
+                <div class="feedback-actions" v-if="session.id">
+                    <t-tooltip :content="$t('chunkFeedback.like')" placement="top">
+                        <t-button size="small" variant="outline" shape="round"
+                            :class="{ 'is-active': currentFeedback === true }"
+                            :disabled="feedbackMutationPending"
+                            @click.stop="handleFeedback(true)">
+                            <template #icon>
+                                <t-icon name="thumb-up" />
+                            </template>
+                        </t-button>
+                    </t-tooltip>
+                    <t-tooltip :content="$t('chunkFeedback.dislike')" placement="top">
+                        <t-button size="small" variant="outline" shape="round"
+                            :class="{ 'is-active': currentFeedback === false }"
+                            :disabled="feedbackMutationPending"
+                            @click.stop="handleDislike">
+                            <template #icon>
+                                <t-icon name="thumb-down" />
+                            </template>
+                        </t-button>
+                    </t-tooltip>
+                </div>
+                <!-- 点踩原因弹窗 -->
+                <t-dialog v-model:visible="dislikeDialogVisible" :header="$t('chunkFeedback.dislikeReasonTitle')" :footer="false" width="400px">
+                    <div class="dislike-reasons">
+                        <t-radio-group v-model="selectedReason">
+                            <t-radio value="inaccurate">{{ $t('chunkFeedback.dislikeReasons.inaccurate') }}</t-radio>
+                            <t-radio value="incomplete">{{ $t('chunkFeedback.dislikeReasons.incomplete') }}</t-radio>
+                            <t-radio value="unclear">{{ $t('chunkFeedback.dislikeReasons.unclear') }}</t-radio>
+                            <t-radio value="irrelevant">{{ $t('chunkFeedback.dislikeReasons.unrelated') }}</t-radio>
+                            <t-radio value="other">{{ $t('chunkFeedback.dislikeReasons.other') }}</t-radio>
+                        </t-radio-group>
+                        <t-input v-if="selectedReason === 'other'" v-model="customReason"
+                            :placeholder="$t('chunkFeedback.dislikeReasonPlaceholder')" :maxlength="255"
+                            style="margin-top: 12px" />
+                        <div style="margin-top: 16px; text-align: right;">
+                            <t-button theme="primary" :loading="feedbackMutationPending"
+                                :disabled="feedbackMutationPending" @click="submitDislike">
+                                {{ $t('chunkFeedback.submitReason') }}
+                            </t-button>
+                            <t-button style="margin-left: 8px" :disabled="feedbackMutationPending"
+                                @click="dislikeDialogVisible = false">
+                                {{ $t('chunkFeedback.cancel') }}
+                            </t-button>
+                        </div>
+                    </div>
+                </t-dialog>
                 <!-- Fallback 提示图标 -->
                 <t-tooltip v-if="session.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                     <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
@@ -64,6 +112,54 @@
             <div v-if="isImgLoading" class="img_loading"><t-loading size="small"></t-loading><span>{{
                 $t('common.loading') }}</span></div>
         </div>
+        <div v-if="session.isAgentMode && showFeedbackActions" class="answer-toolbar agent-feedback-toolbar">
+            <div class="feedback-actions">
+                <t-tooltip :content="$t('chunkFeedback.like')" placement="top">
+                    <t-button size="small" variant="outline" shape="round"
+                        :class="{ 'is-active': currentFeedback === true }"
+                        :disabled="feedbackMutationPending"
+                        @click.stop="handleFeedback(true)">
+                        <template #icon>
+                            <t-icon name="thumb-up" />
+                        </template>
+                    </t-button>
+                </t-tooltip>
+                <t-tooltip :content="$t('chunkFeedback.dislike')" placement="top">
+                    <t-button size="small" variant="outline" shape="round"
+                        :class="{ 'is-active': currentFeedback === false }"
+                        :disabled="feedbackMutationPending"
+                        @click.stop="handleDislike">
+                        <template #icon>
+                            <t-icon name="thumb-down" />
+                        </template>
+                    </t-button>
+                </t-tooltip>
+            </div>
+        </div>
+        <t-dialog v-if="session.isAgentMode" v-model:visible="dislikeDialogVisible" :header="$t('chunkFeedback.dislikeReasonTitle')" :footer="false" width="400px">
+            <div class="dislike-reasons">
+                <t-radio-group v-model="selectedReason">
+                    <t-radio value="inaccurate">{{ $t('chunkFeedback.dislikeReasons.inaccurate') }}</t-radio>
+                    <t-radio value="incomplete">{{ $t('chunkFeedback.dislikeReasons.incomplete') }}</t-radio>
+                    <t-radio value="unclear">{{ $t('chunkFeedback.dislikeReasons.unclear') }}</t-radio>
+                    <t-radio value="irrelevant">{{ $t('chunkFeedback.dislikeReasons.unrelated') }}</t-radio>
+                    <t-radio value="other">{{ $t('chunkFeedback.dislikeReasons.other') }}</t-radio>
+                </t-radio-group>
+                <t-input v-if="selectedReason === 'other'" v-model="customReason"
+                    :placeholder="$t('chunkFeedback.dislikeReasonPlaceholder')" :maxlength="255"
+                    style="margin-top: 12px" />
+                <div style="margin-top: 16px; text-align: right;">
+                    <t-button theme="primary" :loading="feedbackMutationPending"
+                        :disabled="feedbackMutationPending" @click="submitDislike">
+                        {{ $t('chunkFeedback.submitReason') }}
+                    </t-button>
+                    <t-button style="margin-left: 8px" :disabled="feedbackMutationPending"
+                        @click="dislikeDialogVisible = false">
+                        {{ $t('chunkFeedback.cancel') }}
+                    </t-button>
+                </div>
+            </div>
+        </t-dialog>
         <picturePreview :reviewImg="reviewImg" :reviewUrl="reviewUrl" @closePreImg="closePreImg"></picturePreview>
         <Teleport to="body">
             <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose"
@@ -72,7 +168,7 @@
     </div>
 </template>
 <script setup>
-import { onMounted, onBeforeUnmount, watch, computed, ref, reactive, nextTick, onUpdated } from 'vue';
+import { onMounted, onBeforeUnmount, watch, computed, ref, nextTick, onUpdated } from 'vue';
 import 'katex/dist/katex.min.css';
 import docInfo from './docInfo.vue';
 import deepThink from './deepThink.vue';
@@ -104,8 +200,17 @@ import { refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useTypewriter } from '@/composables/useTypewriter';
 import { vStableHtml } from '@/directives/stableHtml';
+import { cancelFeedback, getUserFeedback, submitFeedback } from '@/api/feedback';
+import { createChatFeedbackStateController } from '@/utils/chatFeedbackState';
 
 ensureMermaidInitialized();
+
+// 反馈相关状态
+const currentFeedback = ref(null);
+const dislikeDialogVisible = ref(false);
+const selectedReason = ref('');
+const customReason = ref('');
+const feedbackMutationPending = ref(false);
 
 const mentionTagClass = (item) => {
     if (item.type === 'kb') return item.kb_type === 'faq' ? 'faq-tag' : 'kb-tag';
@@ -163,7 +268,46 @@ const props = defineProps({
     }
 });
 
+const feedbackController = createChatFeedbackStateController({
+    read: async (messageId) => {
+        const res = await getUserFeedback(messageId);
+        return res?.data?.is_positive ?? null;
+    },
+    submit: async (messageId, isPositive, dislikeReason) => {
+        await submitFeedback({
+            message_id: messageId,
+            is_positive: isPositive,
+            dislike_reason: dislikeReason,
+        });
+    },
+    cancel: async (messageId) => {
+        await cancelFeedback(messageId);
+    },
+    onValueChange: (value) => {
+        currentFeedback.value = value;
+    },
+    onPendingChange: (pending) => {
+        feedbackMutationPending.value = pending;
+    },
+    onMutationSuccess: (intent) => {
+        if (intent.value === null) {
+            MessagePlugin.success(t('chunkFeedback.feedbackCanceled'));
+            return;
+        }
+        if (intent.value === false) dislikeDialogVisible.value = false;
+        MessagePlugin.success(t('chunkFeedback.feedbackSubmitted'));
+    },
+    onMutationError: (error) => {
+        console.error('更新反馈失败:', error);
+        MessagePlugin.error(t('chunkFeedback.feedbackFailed'));
+    },
+    onLoadError: (error) => {
+        console.warn('获取反馈状态失败:', error);
+    },
+});
+
 const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
+const showFeedbackActions = computed(() => Boolean(props.session?.id && props.session?.is_completed));
 
 const preview = (url) => {
     nextTick(() => {
@@ -278,6 +422,53 @@ const handleAddToKnowledge = () => {
     MessagePlugin.info(t('chat.editorOpened'));
 };
 
+// 反馈相关函数
+const handleFeedback = async (isPositive) => {
+    if (!props.session?.id) return;
+
+    await feedbackController.request({
+        value: currentFeedback.value === isPositive ? null : isPositive,
+    });
+};
+
+const handleDislike = () => {
+    if (feedbackMutationPending.value) return;
+    if (currentFeedback.value === false) {
+        // 已经点踩，点击取消
+        void handleFeedback(false);
+    } else {
+        // 打开点踩原因弹窗
+        selectedReason.value = '';
+        customReason.value = '';
+        dislikeDialogVisible.value = true;
+    }
+};
+
+const submitDislike = async () => {
+    if (!props.session?.id || feedbackMutationPending.value) return;
+
+    const reason = (selectedReason.value === 'other' ? customReason.value : selectedReason.value).trim();
+    if (!reason) {
+        MessagePlugin.warning(t('chunkFeedback.dislikeReasonPlaceholder'));
+        return;
+    }
+
+    await feedbackController.request({
+        value: false,
+        dislikeReason: reason,
+    });
+};
+
+const loadCurrentFeedback = async () => {
+    const messageId = props.session?.id || '';
+    const feedbackLoaded = props.session?.user_feedback_loaded === true;
+    feedbackController.setMessage(
+        messageId,
+        feedbackLoaded ? (props.session?.user_feedback ?? null) : undefined,
+    );
+    if (messageId && !feedbackLoaded) await feedbackController.load();
+};
+
 // 处理 markdown-content 中图片的点击事件
 const handleMarkdownImageClick = (e) => {
     const target = e.target;
@@ -308,6 +499,8 @@ onUpdated(() => {
     });
 });
 
+watch(() => props.session?.id, loadCurrentFeedback, { immediate: true });
+
 onMounted(async () => {
     // 为 markdown-content 中的图片添加点击事件
     nextTick(async () => {
@@ -321,6 +514,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+    feedbackController.dispose();
     if (parentMd.value) {
         parentMd.value.removeEventListener('click', handleMarkdownImageClick, true);
     }

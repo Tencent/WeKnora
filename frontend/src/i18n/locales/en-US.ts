@@ -2065,6 +2065,80 @@ export default {
       vectorStoreBindingInvalid: 'The selected vector store cannot be used. Choose a different store or use the system default.',
       vectorStoreUnavailable: 'The selected vector store is currently unavailable. Check its connection configuration in Settings → Vector Stores.'
     },
+    feedback: {
+      title: 'Knowledge Feedback',
+      description: 'Review answer feedback, identify low-quality chunks, and reset chunk feedback stats.',
+      lowQualityChunks: 'Low-quality Chunks',
+      lowQualityChunksDesc: 'Find chunks with low positive feedback rates.',
+      viewLowQuality: 'View Low-quality Chunks',
+      allRatedChunks: 'All rated chunks',
+      statsOverview: 'Feedback Overview',
+      statsOverviewDesc: 'Refresh feedback statistics for all knowledge chunks.',
+      totalChunks: 'Total chunks',
+      highQualityChunks: 'High-quality Chunks',
+      totalFeedbacks: 'Total Feedback',
+      lowQualityList: 'Low-quality Chunk List',
+      maxRate: 'Maximum positive rate',
+      viewDetails: 'View',
+      reset: 'Reset',
+      resetConfirm: 'Reset this chunk feedback and weight? Existing answer associations remain for traceability, but earlier ratings will no longer affect this chunk.',
+      chunkDetail: 'Chunk Detail',
+      chunkId: 'Chunk ID',
+      likeCount: 'Likes',
+      dislikeCount: 'Dislikes',
+      positiveRate: 'Positive Rate',
+      recallWeight: 'Recall Weight',
+      qualityStatus: 'Quality Status',
+      relatedSessions: 'Related Sessions',
+      dislikeReasons: 'Dislike Reasons',
+      weightLogs: 'Weight Change Logs',
+      weightLogsSummary: 'Latest {shown} / {total} total',
+      columns: {
+        content: 'Content',
+        likeCount: 'Likes',
+        dislikeCount: 'Dislikes',
+        positiveRate: 'Positive Rate',
+        recallWeight: 'Weight',
+        qualityStatus: 'Status',
+        operations: 'Actions',
+        action: 'Action',
+        trigger: 'Trigger',
+        operator: 'Operator',
+        weightChange: 'Weight Change',
+        createdAt: 'Time'
+      },
+      status: {
+        high_quality: 'High Quality',
+        low_quality: 'Low Quality',
+        normal: 'Normal',
+        pending_optimization: 'Needs Optimization',
+        needs_optimization: 'Needs Optimization',
+        optimizing: 'Optimizing',
+        optimized: 'Optimized'
+      },
+      weightLogActions: {
+        adjust_weight: 'Auto adjusted',
+        increase: 'Weight increased',
+        decrease: 'Weight decreased',
+        reset: 'Reset',
+        manual_set: 'Manual set'
+      },
+      weightLogTriggers: {
+        user_feedback: 'User feedback',
+        user_like: 'User like',
+        user_dislike: 'User dislike',
+        user_cancel: 'User cancel',
+        admin_reset: 'Admin reset'
+      },
+      messages: {
+        loadFailed: 'Failed to load feedback data',
+        overviewLoadFailed: 'Failed to load feedback overview',
+        chunkStatsLoadFailed: 'Failed to load chunk statistics',
+        weightLogsLoadFailed: 'Failed to load weight change logs',
+        resetSuccess: 'Feedback stats reset',
+        resetFailed: 'Failed to reset feedback stats'
+      }
+    },
     basic: {
       title: 'Basic Information',
       description: 'Configure the knowledge base name and description',
@@ -5678,6 +5752,24 @@ export default {
       notFound: 'Invitation not found or already withdrawn.',
       generic: 'Something went wrong. Please try again.'
     }
+  },
+  chunkFeedback: {
+    like: 'Helpful',
+    dislike: 'Not helpful',
+    feedbackSubmitted: 'Thank you for your feedback',
+    feedbackCanceled: 'Feedback canceled',
+    feedbackFailed: 'Failed to submit feedback, please try again later',
+    dislikeReasonTitle: 'Select a reason',
+    dislikeReasonPlaceholder: 'Please select or enter a reason',
+    dislikeReasons: {
+      inaccurate: 'Inaccurate answer',
+      incomplete: 'Incomplete information',
+      unclear: 'Unclear explanation',
+      unrelated: 'Not related to the question',
+      other: 'Other'
+    },
+    submitReason: 'Submit',
+    cancel: 'Cancel'
   },
   platformApiKeys: {
     title: 'Platform API Keys',

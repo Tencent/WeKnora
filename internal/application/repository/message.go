@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -266,4 +267,61 @@ func (r *messageRepository) UpdateMessageKnowledgeID(
 		Model(&types.Message{}).
 		Where("id = ?", messageID).
 		Update("knowledge_id", knowledgeID).Error
+}
+
+// GetMessageByID retrieves a tenant- and user-scoped message by its ID.
+func (r *messageRepository) GetMessageByID(
+	ctx context.Context, tenantID uint64, userID, messageID string,
+) (*types.Message, error) {
+	var message types.Message
+	query := r.db.WithContext(ctx).
+		Table("messages").
+		Select("messages.*").
+		Joins("INNER JOIN sessions ON sessions.id = messages.session_id AND sessions.deleted_at IS NULL").
+		Where("messages.id = ? AND sessions.tenant_id = ? AND messages.deleted_at IS NULL", messageID, tenantID)
+	if userID != "" {
+		query = query.Where("(sessions.user_id = ? OR sessions.user_id IS NULL OR sessions.user_id = '')", userID)
+	}
+	if err := query.First(&message).Error; err != nil {
+		return nil, err
+	}
+	return &message, nil
+}
+
+func (r *messageRepository) LockMessageForFeedback(
+	ctx context.Context, tenantID uint64, userID, messageID string,
+) (*types.Message, error) {
+	var message types.Message
+	query := r.db.WithContext(ctx).
+		Table("messages").
+		Select("messages.*").
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Joins("INNER JOIN sessions ON sessions.id = messages.session_id AND sessions.deleted_at IS NULL").
+		Where("messages.id = ? AND sessions.tenant_id = ? AND messages.deleted_at IS NULL", messageID, tenantID)
+	if userID != "" {
+		query = query.Where("(sessions.user_id = ? OR sessions.user_id IS NULL OR sessions.user_id = '')", userID)
+	}
+	if err := query.First(&message).Error; err != nil {
+		return nil, err
+	}
+	return &message, nil
+}
+
+// UpdateMessageFeedbackStats updates tenant- and user-scoped message feedback counters.
+func (r *messageRepository) UpdateMessageFeedbackStats(ctx context.Context, tenantID uint64, userID, messageID string, likeCount, dislikeCount int) error {
+	sessionScope := r.db.
+		Table("sessions").
+		Select("id").
+		Where("tenant_id = ? AND deleted_at IS NULL", tenantID)
+	if userID != "" {
+		sessionScope = sessionScope.Where("(user_id = ? OR user_id IS NULL OR user_id = '')", userID)
+	}
+
+	return r.db.WithContext(ctx).
+		Model(&types.Message{}).
+		Where("id = ? AND session_id IN (?)", messageID, sessionScope).
+		Updates(map[string]interface{}{
+			"like_count":    likeCount,
+			"dislike_count": dislikeCount,
+		}).Error
 }

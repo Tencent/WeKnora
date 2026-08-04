@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sort"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -248,11 +249,77 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		return nil, err
 	}
 
+	s.rankCandidatesByRecallWeight(ctx, deduplicatedChunks, params.ApplyRecallWeight)
 	if len(deduplicatedChunks) > params.MatchCount {
 		deduplicatedChunks = deduplicatedChunks[:params.MatchCount]
 	}
 
 	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
+}
+
+// rankCandidatesByRecallWeight applies feedback weights to candidate ordering
+// before MatchCount truncation. It intentionally leaves raw scores untouched:
+// the chat pipeline applies the weight once to the final score after optional
+// reranking.
+func (s *knowledgeBaseService) rankCandidatesByRecallWeight(
+	ctx context.Context,
+	candidates []*types.IndexWithScore,
+	enabled bool,
+) {
+	if !enabled || len(candidates) < 2 || s.chunkRepo == nil {
+		return
+	}
+
+	chunkIDs := make([]string, 0, len(candidates))
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == nil || candidate.ChunkID == "" {
+			continue
+		}
+		if _, ok := seen[candidate.ChunkID]; ok {
+			continue
+		}
+		seen[candidate.ChunkID] = struct{}{}
+		chunkIDs = append(chunkIDs, candidate.ChunkID)
+	}
+	if len(chunkIDs) == 0 {
+		return
+	}
+
+	chunks, err := s.chunkRepo.ListChunksByIDOnly(ctx, chunkIDs)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to rank search candidates by recall weight: %v", err)
+		return
+	}
+	weights := make(map[string]float64, len(chunks))
+	for _, chunk := range chunks {
+		if chunk == nil || chunk.ID == "" {
+			continue
+		}
+		weight := chunk.RecallWeight
+		if weight <= 0 {
+			weight = 1
+		}
+		weights[chunk.ID] = weight
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i] == nil {
+			return false
+		}
+		if candidates[j] == nil {
+			return true
+		}
+		leftWeight := weights[candidates[i].ChunkID]
+		if leftWeight == 0 {
+			leftWeight = 1
+		}
+		rightWeight := weights[candidates[j].ChunkID]
+		if rightWeight == 0 {
+			rightWeight = 1
+		}
+		return candidates[i].Score*leftWeight > candidates[j].Score*rightWeight
+	})
 }
 
 // pickPrimary returns the KB whose ID matches id, or nil if id is not in

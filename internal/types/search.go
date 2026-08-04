@@ -207,6 +207,53 @@ type SearchResult struct {
 
 	// KnowledgeBaseID is the ID of the knowledge base this result belongs to
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+
+	// RecallWeight is the persisted feedback weight for this chunk
+	// (1.0 = default, >1.0 boosted, <1.0 penalized).
+	RecallWeight float64 `json:"recall_weight,omitempty"`
+}
+
+// CollectSearchResultChunkIDs returns every chunk ID represented by search
+// results, including chunks absorbed during merge or short-context expansion.
+func CollectSearchResultChunkIDs(results []*SearchResult) []string {
+	seen := make(map[string]struct{})
+	ids := make([]string, 0, len(results))
+	add := func(id string) {
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+
+	for _, result := range results {
+		if result == nil {
+			continue
+		}
+		if !IsFeedbackTrackableSearchResult(result) {
+			continue
+		}
+		add(result.ID)
+		for _, subID := range result.SubChunkID {
+			add(subID)
+		}
+	}
+	return ids
+}
+
+func IsFeedbackTrackableSearchResult(result *SearchResult) bool {
+	if result == nil {
+		return false
+	}
+	switch result.MatchType {
+	case MatchTypeWebSearch, MatchTypeDataAnalysis, MatchTypeHistory:
+		return false
+	default:
+		return true
+	}
 }
 
 // SearchParams represents the search parameters
@@ -232,6 +279,10 @@ type SearchParams struct {
 	// in processSearchResults. Used by the chat pipeline where context assembly
 	// is handled separately in the merge stage.
 	SkipContextEnrichment bool `json:"skip_context_enrichment,omitempty"`
+	// ApplyRecallWeight ranks the over-retrieved candidate pool by persisted
+	// feedback weight before MatchCount truncation. Chat retrieval enables this;
+	// administrative and diagnostic searches retain their historical ordering.
+	ApplyRecallWeight bool `json:"apply_recall_weight,omitempty"`
 }
 
 // Value implements the driver.Valuer interface, used to convert SearchResult to database value

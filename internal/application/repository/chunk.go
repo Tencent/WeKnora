@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrChunkRevisionConflict = errors.New("chunk revision conflict")
@@ -54,7 +55,7 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 
 	// SQLite doesn't support autoIncrement on non-PK columns,
 	// so we must pre-assign SeqIDs manually (safe: single connection).
-	// PostgreSQL / MySQL use DB sequences — skip to avoid duplicate key
+	// PostgreSQL and MySQL use DB sequences, so skip preassignment there.
 	// races under concurrent inserts.
 	if db.Dialector.Name() == "sqlite" {
 		if err := types.AssignChunkSeqIDs(db, chunks); err != nil {
@@ -72,6 +73,20 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 func (r *chunkRepository) GetChunkByID(ctx context.Context, tenantID uint64, id string) (*types.Chunk, error) {
 	var chunk types.Chunk
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).First(&chunk).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrChunkNotFound
+		}
+		return nil, err
+	}
+	return &chunk, nil
+}
+
+func (r *chunkRepository) LockChunkForFeedback(ctx context.Context, tenantID uint64, id string) (*types.Chunk, error) {
+	var chunk types.Chunk
+	if err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("tenant_id = ? AND id = ?", tenantID, id).
+		First(&chunk).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrChunkNotFound
 		}
@@ -153,6 +168,20 @@ func (r *chunkRepository) ListChunksByKnowledgeID(
 	if err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND knowledge_id = ? and chunk_type = ?", tenantID, knowledgeID, "text").
 		Order("chunk_index ASC").
+		Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
+// ListAllChunksByKnowledgeID lists every chunk type for a knowledge ID.
+func (r *chunkRepository) ListAllChunksByKnowledgeID(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+) ([]*types.Chunk, error) {
+	var chunks []*types.Chunk
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID).
+		Order("chunk_index ASC, created_at ASC").
 		Find(&chunks).Error; err != nil {
 		return nil, err
 	}
@@ -530,7 +559,7 @@ func (r *chunkRepository) DeleteChunksByKnowledgeID(ctx context.Context, tenantI
 }
 
 // ListImageInfoByKnowledgeIDs returns non-empty image_info values for the given knowledge IDs.
-// No chunk_type filter — collects from text, image_ocr, and image_caption chunks.
+// No chunk_type filter; collects from text, image_ocr, and image_caption chunks.
 func (r *chunkRepository) ListImageInfoByKnowledgeIDs(
 	ctx context.Context, tenantID uint64, knowledgeIDs []string,
 ) ([]interfaces.ChunkImageInfo, error) {
@@ -646,7 +675,7 @@ func (r *chunkRepository) ListAllFAQChunksByKnowledgeID(
 	tenantID uint64,
 	knowledgeID string,
 ) ([]*types.Chunk, error) {
-	const batchSize = 1000 // 每批查询1000条
+	const batchSize = 1000
 	var allChunks []*types.Chunk
 	offset := 0
 
@@ -668,7 +697,7 @@ func (r *chunkRepository) ListAllFAQChunksByKnowledgeID(
 
 		allChunks = append(allChunks, batchChunks...)
 
-		// 如果返回的数据少于批次大小，说明已经是最后一批
+		// Last partial batch means the scan is complete.
 		if len(batchChunks) < batchSize {
 			break
 		}
@@ -687,7 +716,7 @@ func (r *chunkRepository) ListAllFAQChunksWithMetadataByKnowledgeBaseID(
 	tenantID uint64,
 	kbID string,
 ) ([]*types.Chunk, error) {
-	const batchSize = 1000 // 每批查询1000条
+	const batchSize = 1000
 	var allChunks []*types.Chunk
 	offset := 0
 
@@ -710,7 +739,7 @@ func (r *chunkRepository) ListAllFAQChunksWithMetadataByKnowledgeBaseID(
 
 		allChunks = append(allChunks, batchChunks...)
 
-		// 如果返回的数据少于批次大小，说明已经是最后一批
+		// Last partial batch means the scan is complete.
 		if len(batchChunks) < batchSize {
 			break
 		}
@@ -788,7 +817,7 @@ func (r *chunkRepository) ListAllFAQChunksForExport(
 	tenantID uint64,
 	knowledgeID string,
 ) ([]*types.Chunk, error) {
-	const batchSize = 1000 // 每批查询1000条
+	const batchSize = 1000
 	var allChunks []*types.Chunk
 	offset := 0
 
@@ -812,7 +841,7 @@ func (r *chunkRepository) ListAllFAQChunksForExport(
 
 		allChunks = append(allChunks, batchChunks...)
 
-		// 如果返回的数据少于批次大小，说明已经是最后一批
+		// Last partial batch means the scan is complete.
 		if len(batchChunks) < batchSize {
 			break
 		}
@@ -1237,7 +1266,7 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 	if len(kbIDs) > 0 && len(knowledgeIDs) > 0 {
 		baseQuery = baseQuery.Where("knowledge_base_id IN ? OR knowledge_id IN ?", kbIDs, knowledgeIDs)
 	} else if len(knowledgeIDs) > 0 {
-		// 指定了具体知识文档，直接按 knowledge_id 过滤（忽略 kbIDs）
+		// When knowledge IDs are provided, filter by them directly.
 		baseQuery = baseQuery.Where("knowledge_id IN ?", knowledgeIDs)
 	} else if len(kbIDs) > 0 {
 		baseQuery = baseQuery.Where("knowledge_base_id IN ?", kbIDs)
@@ -1277,4 +1306,167 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 	}
 
 	return chunks, nil
+}
+
+// UpdateChunkFeedbackStats updates feedback stats for a chunk.
+func (r *chunkRepository) UpdateChunkFeedbackStats(ctx context.Context, tenantID uint64, chunkID string, likeCount, dislikeCount int, positiveRate float64, recallWeight float64, qualityStatus types.ChunkQualityStatus) error {
+	updates := map[string]interface{}{
+		"like_count":     likeCount,
+		"dislike_count":  dislikeCount,
+		"positive_rate":  positiveRate,
+		"recall_weight":  recallWeight,
+		"quality_status": qualityStatus,
+	}
+	return r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("tenant_id = ? AND id = ?", tenantID, chunkID).
+		Updates(updates).Error
+}
+
+// IncrementLikeCount increments like_count.
+func (r *chunkRepository) IncrementLikeCount(ctx context.Context, chunkID string) error {
+	return r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("id = ?", chunkID).
+		UpdateColumn("like_count", gorm.Expr("like_count + ?", 1)).Error
+}
+
+// DecrementLikeCount decrements like_count.
+func (r *chunkRepository) DecrementLikeCount(ctx context.Context, chunkID string) error {
+	return r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("id = ? AND like_count > 0", chunkID).
+		UpdateColumn("like_count", gorm.Expr("like_count - ?", 1)).Error
+}
+
+// IncrementDislikeCount increments dislike_count.
+func (r *chunkRepository) IncrementDislikeCount(ctx context.Context, chunkID string) error {
+	return r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("id = ?", chunkID).
+		UpdateColumn("dislike_count", gorm.Expr("dislike_count + ?", 1)).Error
+}
+
+// DecrementDislikeCount decrements dislike_count.
+func (r *chunkRepository) DecrementDislikeCount(ctx context.Context, chunkID string) error {
+	return r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("id = ? AND dislike_count > 0", chunkID).
+		UpdateColumn("dislike_count", gorm.Expr("dislike_count - ?", 1)).Error
+}
+
+// UpdateChunkRecallWeight updates recall_weight.
+func (r *chunkRepository) UpdateChunkRecallWeight(ctx context.Context, chunkID string, weight float64) error {
+	return r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("id = ?", chunkID).
+		Update("recall_weight", weight).Error
+}
+
+// UpdateChunkQualityStatus updates quality_status.
+func (r *chunkRepository) UpdateChunkQualityStatus(ctx context.Context, chunkID string, status types.ChunkQualityStatus) error {
+	return r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("id = ?", chunkID).
+		Update("quality_status", status).Error
+}
+
+// UpdateChunkLastFeedbackAt updates last_feedback_at.
+func (r *chunkRepository) UpdateChunkLastFeedbackAt(ctx context.Context, tenantID uint64, chunkID string) error {
+	now := time.Now()
+	return r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("tenant_id = ? AND id = ?", tenantID, chunkID).
+		Update("last_feedback_at", now).Error
+}
+
+// ListLowQualityChunks lists chunks below maxRate.
+func (r *chunkRepository) ListLowQualityChunks(ctx context.Context, tenantID uint64, knowledgeBaseID string, maxRate float64, limit, offset int) ([]*types.Chunk, error) {
+	var chunks []*types.Chunk
+	query := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND positive_rate < ? AND (like_count + dislike_count) > 0", tenantID, maxRate).
+		Order("positive_rate ASC, updated_at DESC")
+	if knowledgeBaseID != "" {
+		query = query.Where("knowledge_base_id = ?", knowledgeBaseID)
+	}
+
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
+	}
+
+	err := query.Find(&chunks).Error
+	return chunks, err
+}
+
+// CountLowQualityChunks counts chunks below maxRate.
+func (r *chunkRepository) CountLowQualityChunks(ctx context.Context, tenantID uint64, knowledgeBaseID string, maxRate float64) (int64, error) {
+	var count int64
+	query := r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("tenant_id = ? AND positive_rate < ? AND (like_count + dislike_count) > 0", tenantID, maxRate)
+	if knowledgeBaseID != "" {
+		query = query.Where("knowledge_base_id = ?", knowledgeBaseID)
+	}
+	err := query.Count(&count).Error
+	return count, err
+}
+
+// GetChunkFeedbackOverview returns aggregate feedback stats.
+func (r *chunkRepository) GetChunkFeedbackOverview(ctx context.Context, tenantID uint64, knowledgeBaseID string, highThreshold, lowThreshold float64) (*types.ChunkFeedbackOverviewResponse, error) {
+	var overview types.ChunkFeedbackOverviewResponse
+	query := r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Select(`
+			COUNT(*) AS total_chunks,
+			COALESCE(SUM(CASE WHEN (like_count + dislike_count) > 0 AND positive_rate >= ? THEN 1 ELSE 0 END), 0) AS high_quality_count,
+			COALESCE(SUM(CASE WHEN (like_count + dislike_count) > 0 AND positive_rate < ? THEN 1 ELSE 0 END), 0) AS low_quality_count,
+			COALESCE(SUM(like_count + dislike_count), 0) AS total_feedbacks
+		`, highThreshold, lowThreshold).
+		Where("tenant_id = ?", tenantID)
+	if knowledgeBaseID != "" {
+		query = query.Where("knowledge_base_id = ?", knowledgeBaseID)
+	}
+	err := query.Scan(&overview).Error
+	if err != nil {
+		return nil, err
+	}
+	return &overview, nil
+}
+
+// ResetChunkFeedback resets feedback counters for a chunk.
+func (r *chunkRepository) ResetChunkFeedback(ctx context.Context, tenantID uint64, chunkID string) error {
+	updates := map[string]interface{}{
+		"like_count":       0,
+		"dislike_count":    0,
+		"positive_rate":    0.0,
+		"recall_weight":    1.0,
+		"quality_status":   types.ChunkQualityStatusNormal,
+		"dislike_reasons":  "[]",
+		"last_feedback_at": nil,
+	}
+	return r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("tenant_id = ? AND id = ?", tenantID, chunkID).
+		Updates(updates).Error
+}
+
+// GetChunkStats returns feedback stats for a chunk.
+func (r *chunkRepository) GetChunkStats(ctx context.Context, chunkID string) (*types.ChunkStatsResponse, error) {
+	var chunk types.Chunk
+	if err := r.db.WithContext(ctx).Where("id = ?", chunkID).First(&chunk).Error; err != nil {
+		return nil, err
+	}
+
+	return &types.ChunkStatsResponse{
+		ChunkID:        chunk.ID,
+		LikeCount:      chunk.LikeCount,
+		DislikeCount:   chunk.DislikeCount,
+		PositiveRate:   chunk.PositiveRate,
+		RecallWeight:   chunk.RecallWeight,
+		QualityStatus:  string(chunk.QualityStatus),
+		LastFeedbackAt: chunk.LastFeedbackAt,
+	}, nil
 }

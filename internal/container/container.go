@@ -147,6 +147,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewKnowledgeRepository))
 	must(container.Provide(repository.NewKnowledgeSpanRepository))
 	must(container.Provide(repository.NewChunkRepository))
+	must(container.Provide(repository.NewQAReplyChunkRefRepository))
+	must(container.Provide(repository.NewChunkFeedbackRepository))
+	must(container.Provide(repository.NewChunkWeightLogRepository))
+	must(container.Provide(repository.NewChunkFeedbackUnitOfWork))
 	must(container.Provide(repository.NewKnowledgeTagRepository))
 	must(container.Provide(repository.NewSessionRepository))
 	must(container.Provide(repository.NewMessageRepository))
@@ -318,6 +322,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Knowledge housekeeping runner registered")
 	must(container.Provide(chatpipeline.NewEventManager))
 	must(container.Invoke(chatpipeline.NewPluginSearch))
+	must(container.Invoke(chatpipeline.NewChunkWeightLoader))
+	must(container.Invoke(chatpipeline.NewRecallWeightApplier))
 	must(container.Invoke(chatpipeline.NewPluginRerank))
 	must(container.Invoke(chatpipeline.NewPluginWebFetch))
 	must(container.Invoke(chatpipeline.NewPluginMerge))
@@ -332,6 +338,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipeline.NewPluginSearchEntity))
 	must(container.Invoke(chatpipeline.NewPluginSearchParallel))
 	must(container.Invoke(chatpipeline.NewPluginWikiBoost))
+	must(container.Invoke(chatpipeline.NewChunkFeedbackRecorder))
 	logger.Debugf(ctx, "[Container] Chat pipeline plugins registered")
 
 	// HTTP handlers layer
@@ -368,6 +375,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewSkillService))
 	must(container.Provide(handler.NewSkillHandler))
 	must(container.Provide(handler.NewOrganizationHandler))
+	// Chunk feedback handler
+	must(container.Provide(func(cfg *config.Config) *types.ChunkFeedbackConfig {
+		return cfg.ChunkFeedback
+	}))
+	must(container.Provide(service.NewConfiguredChunkFeedbackServiceWithUnitOfWork))
+	must(container.Provide(handler.NewChunkFeedbackHandler))
 
 	// Data source handler
 	must(container.Provide(handler.NewDataSourceHandler))

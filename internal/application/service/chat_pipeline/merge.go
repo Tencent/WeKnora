@@ -136,6 +136,10 @@ func (p *PluginMerge) injectHistoryResults(
 	if len(historyResults) == 0 {
 		return current
 	}
+	historyResults = p.refreshHistoryRecallWeights(ctx, chatManage, historyResults)
+	if len(historyResults) == 0 {
+		return current
+	}
 	pipelineInfo(ctx, "Merge", "history_inject", map[string]interface{}{
 		"session_id":   chatManage.SessionID,
 		"history_hits": len(historyResults),

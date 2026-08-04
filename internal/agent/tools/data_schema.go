@@ -107,27 +107,31 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		}, err
 	}
 
-	var summaryContent, columnContent string
+	var summaryChunk, columnChunk *types.Chunk
 	for _, chunk := range chunks {
 		if chunk.ChunkType == types.ChunkTypeTableSummary {
-			summaryContent = chunk.Content
+			summaryChunk = chunk
 		} else if chunk.ChunkType == types.ChunkTypeTableColumn {
-			columnContent = chunk.Content
+			columnChunk = chunk
 		}
 	}
 
-	if summaryContent == "" || columnContent == "" {
+	if summaryChunk == nil || summaryChunk.Content == "" || columnChunk == nil || columnChunk.Content == "" {
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("No table schema information found for knowledge ID '%s'", input.KnowledgeID),
 		}, fmt.Errorf("no schema info found")
 	}
 
+	summaryContent := summaryChunk.Content
+	columnContent := columnChunk.Content
 	output := fmt.Sprintf("%s\n\n%s", summaryContent, columnContent)
+	references := chunkKnowledgeReferences([]*types.Chunk{summaryChunk, columnChunk}, knowledge.Title)
 
 	return &types.ToolResult{
-		Success: true,
-		Output:  output,
+		Success:             true,
+		Output:              output,
+		KnowledgeReferences: references,
 		Data: map[string]interface{}{
 			"summary": summaryContent,
 			"columns": columnContent,

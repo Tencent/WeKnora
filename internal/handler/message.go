@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	stderrors "errors"
 	"net/http"
 	"strconv"
@@ -21,6 +22,16 @@ import (
 // It provides endpoints for loading and managing message history
 type MessageHandler struct {
 	MessageService interfaces.MessageService // Service that implements message business logic
+	feedbackReader messageFeedbackBatchReader
+}
+
+type messageFeedbackBatchReader interface {
+	GetByMessageIDsAndUser(
+		ctx context.Context,
+		tenantID uint64,
+		messageIDs []string,
+		userID string,
+	) ([]*types.ChunkFeedback, error)
 }
 
 // NewMessageHandler creates a new message handler instance with the required service
@@ -28,9 +39,61 @@ type MessageHandler struct {
 //   - messageService: Service that implements message business logic
 //
 // Returns a pointer to a new MessageHandler
-func NewMessageHandler(messageService interfaces.MessageService) *MessageHandler {
+func NewMessageHandler(
+	messageService interfaces.MessageService,
+	feedbackRepo interfaces.ChunkFeedbackRepository,
+) *MessageHandler {
+	reader, _ := feedbackRepo.(messageFeedbackBatchReader)
 	return &MessageHandler{
 		MessageService: messageService,
+		feedbackReader: reader,
+	}
+}
+
+func (h *MessageHandler) hydrateUserFeedback(ctx context.Context, messages []*types.Message) {
+	if h.feedbackReader == nil || len(messages) == 0 {
+		return
+	}
+	messageIDs := make([]string, 0, len(messages))
+	for _, message := range messages {
+		if message != nil && message.Role == "assistant" && message.ID != "" {
+			messageIDs = append(messageIDs, message.ID)
+		}
+	}
+	if len(messageIDs) == 0 {
+		return
+	}
+
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return
+	}
+	userID := types.SessionOwnerIDFromContext(ctx)
+	feedbacks, err := h.feedbackReader.GetByMessageIDsAndUser(ctx, tenantID, messageIDs, userID)
+	if err != nil {
+		// History remains available and the client can fall back to the
+		// single-message endpoint when batch hydration is unavailable.
+		logger.Warnf(ctx, "Failed to hydrate message feedback state: %v", err)
+		return
+	}
+	byMessageID := make(map[string]*types.ChunkFeedback, len(feedbacks))
+	for _, feedback := range feedbacks {
+		if feedback != nil {
+			byMessageID[feedback.MessageID] = feedback
+		}
+	}
+	for _, message := range messages {
+		if message == nil || message.Role != "assistant" {
+			continue
+		}
+		message.UserFeedbackLoaded = true
+		feedback := byMessageID[message.ID]
+		if feedback == nil {
+			continue
+		}
+		value := feedback.IsPositive
+		message.UserFeedback = &value
+		message.UserFeedbackReason = feedback.DislikeReason
 	}
 }
 
@@ -92,6 +155,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 			"Successfully retrieved recent messages, session ID: %s, message count: %d",
 			sessionID, len(messages),
 		)
+		h.hydrateUserFeedback(ctx, messages)
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data":    messages,
@@ -132,6 +196,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 		"Successfully retrieved messages before time, session ID: %s, message count: %d",
 		sessionID, len(messages),
 	)
+	h.hydrateUserFeedback(ctx, messages)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    messages,

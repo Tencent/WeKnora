@@ -49,6 +49,24 @@ export default {
       auditRead: 'Просмотр аудита'
     }
   },
+  chunkFeedback: {
+    like: 'Полезно',
+    dislike: 'Не полезно',
+    feedbackSubmitted: 'Спасибо за ваш отзыв',
+    feedbackCanceled: 'Отзыв отменён',
+    feedbackFailed: 'Не удалось отправить отзыв. Повторите попытку позже',
+    dislikeReasonTitle: 'Выберите причину',
+    dislikeReasonPlaceholder: 'Выберите или укажите причину',
+    submitReason: 'Отправить',
+    cancel: 'Отмена',
+    dislikeReasons: {
+      inaccurate: 'Ответ неточен',
+      incomplete: 'Информация неполная',
+      unclear: 'Объяснение непонятно',
+      unrelated: 'Не относится к вопросу',
+      other: 'Другое'
+    }
+  },
   tenantInvitation: {
     inboxTooltip: 'View pending invitations',
     pendingSectionTitle: 'Pending invitations',
@@ -3664,6 +3682,80 @@ export default {
       namePlaceholder: 'Введите название базы знаний',
       descriptionLabel: 'Описание базы знаний',
       descriptionPlaceholder: 'Введите описание базы знаний (необязательно)'
+    },
+    feedback: {
+      title: 'Отзывы о знаниях',
+      description: 'Просматривайте отзывы об ответах, находите некачественные фрагменты и сбрасывайте их статистику.',
+      lowQualityChunks: 'Некачественные фрагменты',
+      lowQualityChunksDesc: 'Найдите фрагменты знаний с низкой долей положительных оценок.',
+      viewLowQuality: 'Показать некачественные фрагменты',
+      allRatedChunks: 'Все оценённые фрагменты',
+      statsOverview: 'Сводка отзывов',
+      statsOverviewDesc: 'Обновить статистику отзывов по всем фрагментам знаний.',
+      totalChunks: 'Всего фрагментов',
+      highQualityChunks: 'Качественные фрагменты',
+      totalFeedbacks: 'Всего отзывов',
+      lowQualityList: 'Список некачественных фрагментов',
+      maxRate: 'Максимальная доля положительных оценок',
+      viewDetails: 'Открыть',
+      reset: 'Сбросить',
+      resetConfirm: 'Сбросить отзывы и вес этого фрагмента? Связи с ответами сохранятся для аудита, но прежние оценки больше не будут влиять на фрагмент.',
+      chunkDetail: 'Сведения о фрагменте',
+      chunkId: 'ID фрагмента',
+      likeCount: 'Положительные оценки',
+      dislikeCount: 'Отрицательные оценки',
+      positiveRate: 'Доля положительных',
+      recallWeight: 'Вес поиска',
+      qualityStatus: 'Статус качества',
+      relatedSessions: 'Связанные сессии',
+      dislikeReasons: 'Причины отрицательных оценок',
+      weightLogs: 'Журнал изменения веса',
+      weightLogsSummary: 'Последние: {shown} / всего: {total}',
+      messages: {
+        loadFailed: 'Не удалось загрузить данные отзывов',
+        overviewLoadFailed: 'Не удалось загрузить сводку отзывов',
+        chunkStatsLoadFailed: 'Не удалось загрузить статистику фрагмента',
+        weightLogsLoadFailed: 'Не удалось загрузить журнал изменения веса',
+        resetSuccess: 'Статистика отзывов сброшена',
+        resetFailed: 'Не удалось сбросить статистику отзывов'
+      },
+      weightLogTriggers: {
+        user_feedback: 'Отзыв пользователя',
+        user_like: 'Положительная оценка',
+        user_dislike: 'Отрицательная оценка',
+        user_cancel: 'Отмена оценки',
+        admin_reset: 'Сброс администратором'
+      },
+      weightLogActions: {
+        adjust_weight: 'Автокоррекция',
+        increase: 'Вес увеличен',
+        decrease: 'Вес уменьшен',
+        reset: 'Сброс',
+        manual_set: 'Задан вручную'
+      },
+      status: {
+        high_quality: 'Высокое качество',
+        low_quality: 'Низкое качество',
+        normal: 'Нормальный',
+        pending_optimization: 'Требует улучшения',
+        needs_optimization: 'Требует улучшения',
+        optimizing: 'Улучшается',
+        optimized: 'Улучшен'
+      },
+      columns: {
+        content: 'Содержимое',
+        likeCount: 'Положительные',
+        dislikeCount: 'Отрицательные',
+        positiveRate: 'Доля положительных',
+        recallWeight: 'Вес',
+        qualityStatus: 'Статус',
+        operations: 'Действия',
+        action: 'Действие',
+        trigger: 'Источник',
+        operator: 'Оператор',
+        weightChange: 'Изменение веса',
+        createdAt: 'Время'
+      }
     },
     errors: {
       vectorStoreBindingInvalid: 'The selected vector store cannot be used. Choose a different store or use the system default.',

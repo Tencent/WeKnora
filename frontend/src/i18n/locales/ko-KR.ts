@@ -49,6 +49,24 @@ export default {
       auditRead: '시스템 감사 조회'
     }
   },
+  chunkFeedback: {
+    like: '도움이 됨',
+    dislike: '도움이 안 됨',
+    feedbackSubmitted: '피드백을 보내 주셔서 감사합니다',
+    feedbackCanceled: '피드백을 취소했습니다',
+    feedbackFailed: '피드백을 제출하지 못했습니다. 잠시 후 다시 시도해 주세요',
+    dislikeReasonTitle: '사유 선택',
+    dislikeReasonPlaceholder: '사유를 선택하거나 입력하세요',
+    submitReason: '제출',
+    cancel: '취소',
+    dislikeReasons: {
+      inaccurate: '답변이 정확하지 않음',
+      incomplete: '정보가 불완전함',
+      unclear: '설명이 명확하지 않음',
+      unrelated: '질문과 관련 없음',
+      other: '기타'
+    }
+  },
   tenantInvitation: {
     inboxTooltip: '대기 중인 초대 보기',
     pendingSectionTitle: '대기 중인 초대',
@@ -3664,6 +3682,80 @@ export default {
       namePlaceholder: '지식베이스 이름을 입력해주세요',
       descriptionLabel: '지식베이스 설명',
       descriptionPlaceholder: '지식베이스 설명을 입력해주세요 (선택)'
+    },
+    feedback: {
+      title: '지식 피드백',
+      description: '답변 피드백을 검토하고 품질이 낮은 청크를 찾아 피드백 통계를 재설정합니다.',
+      lowQualityChunks: '저품질 청크',
+      lowQualityChunksDesc: '긍정 평가 비율이 낮은 지식 청크를 찾습니다.',
+      viewLowQuality: '저품질 청크 보기',
+      allRatedChunks: '평가가 있는 모든 청크',
+      statsOverview: '피드백 개요',
+      statsOverviewDesc: '모든 지식 청크의 피드백 통계를 새로고침합니다.',
+      totalChunks: '전체 청크',
+      highQualityChunks: '고품질 청크',
+      totalFeedbacks: '전체 피드백',
+      lowQualityList: '저품질 청크 목록',
+      maxRate: '최대 긍정 평가율',
+      viewDetails: '보기',
+      reset: '재설정',
+      resetConfirm: '이 청크의 피드백과 가중치를 재설정할까요? 답변 연결은 추적을 위해 유지되지만 이전 평가는 더 이상 이 청크에 영향을 주지 않습니다.',
+      chunkDetail: '청크 상세',
+      chunkId: '청크 ID',
+      likeCount: '좋아요',
+      dislikeCount: '싫어요',
+      positiveRate: '긍정 평가율',
+      recallWeight: '검색 가중치',
+      qualityStatus: '품질 상태',
+      relatedSessions: '관련 세션',
+      dislikeReasons: '부정 평가 사유',
+      weightLogs: '가중치 변경 로그',
+      weightLogsSummary: '최근 {shown}개 / 전체 {total}개',
+      messages: {
+        loadFailed: '피드백 데이터를 불러오지 못했습니다',
+        overviewLoadFailed: '피드백 개요를 불러오지 못했습니다',
+        chunkStatsLoadFailed: '청크 통계를 불러오지 못했습니다',
+        weightLogsLoadFailed: '가중치 변경 로그를 불러오지 못했습니다',
+        resetSuccess: '피드백 통계를 재설정했습니다',
+        resetFailed: '피드백 통계를 재설정하지 못했습니다'
+      },
+      weightLogTriggers: {
+        user_feedback: '사용자 피드백',
+        user_like: '사용자 좋아요',
+        user_dislike: '사용자 싫어요',
+        user_cancel: '사용자 취소',
+        admin_reset: '관리자 재설정'
+      },
+      weightLogActions: {
+        adjust_weight: '자동 조정',
+        increase: '가중치 증가',
+        decrease: '가중치 감소',
+        reset: '재설정',
+        manual_set: '수동 설정'
+      },
+      status: {
+        high_quality: '고품질',
+        low_quality: '저품질',
+        normal: '정상',
+        pending_optimization: '최적화 필요',
+        needs_optimization: '최적화 필요',
+        optimizing: '최적화 중',
+        optimized: '최적화됨'
+      },
+      columns: {
+        content: '내용',
+        likeCount: '좋아요',
+        dislikeCount: '싫어요',
+        positiveRate: '긍정 평가율',
+        recallWeight: '가중치',
+        qualityStatus: '상태',
+        operations: '작업',
+        action: '동작',
+        trigger: '트리거',
+        operator: '작업자',
+        weightChange: '가중치 변경',
+        createdAt: '시간'
+      }
     },
     errors: {
       vectorStoreBindingInvalid: '선택한 벡터 스토어를 사용할 수 없습니다. 다른 스토어를 선택하거나 시스템 기본값을 사용하세요.',

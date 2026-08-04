@@ -7,20 +7,23 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-func TestDatabaseQueryInjectsEnabledChunkFilter(t *testing.T) {
+func TestDatabaseQueryRejectsUnattributableChunkTable(t *testing.T) {
 	tool := NewDatabaseQueryTool(nil, types.SearchTargets{{
 		Type:            types.SearchTargetTypeKnowledgeBase,
 		KnowledgeBaseID: "kb-1",
 	}})
 
-	securedSQL, err := tool.validateAndSecureSQL(
-		"SELECT c.id, c.content FROM chunks c WHERE c.chunk_type = 'faq'",
-		1,
-	)
-	if err != nil {
-		t.Fatalf("validateAndSecureSQL() error = %v", err)
-	}
-	if !strings.Contains(securedSQL, "c.is_enabled = true") {
-		t.Fatalf("Agent SQL must exclude disabled chunks:\n%s", securedSQL)
+	for _, query := range []string{
+		"SELECT c.id, c.chunk_index FROM chunks c",
+		"SELECT c.content FROM chunks c",
+		"SELECT CONCAT(c.content, '') AS excerpt FROM chunks c",
+		"SELECT * FROM chunks",
+		"SELECT c FROM chunks c",
+		"SELECT row_to_json(c) FROM chunks c",
+	} {
+		_, err := tool.validateAndSecureSQL(query, 1)
+		if err == nil || !strings.Contains(err.Error(), "feedback attribution") {
+			t.Fatalf("validateAndSecureSQL(%q) error = %v, want attribution rejection", query, err)
+		}
 	}
 }

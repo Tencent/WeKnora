@@ -175,6 +175,15 @@ type Chunk struct {
 	// ContextHeader is a Markdown heading breadcrumb prepended when indexing.
 	// It is persisted so a later content edit can rebuild the same index input.
 	ContextHeader string `json:"-" gorm:"type:text"`
+
+	// Feedback-derived quality statistics.
+	LikeCount      int                `json:"like_count" gorm:"default:0"`
+	DislikeCount   int                `json:"dislike_count" gorm:"default:0"`
+	PositiveRate   float64            `json:"positive_rate" gorm:"type:float;default:0"`
+	RecallWeight   float64            `json:"recall_weight" gorm:"type:float;default:1.0"`
+	QualityStatus  ChunkQualityStatus `json:"quality_status" gorm:"type:varchar(50);default:'normal'"`
+	DislikeReasons JSON               `json:"dislike_reasons" gorm:"type:json;default:'[]'"`
+	LastFeedbackAt *time.Time         `json:"last_feedback_at"`
 }
 
 // ChunkRevision is an immutable snapshot of a superseded chunk revision.

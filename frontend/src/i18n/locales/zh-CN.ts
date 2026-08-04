@@ -49,6 +49,24 @@ export default {
       auditRead: '查看系统审计'
     }
   },
+  chunkFeedback: {
+    like: '有帮助',
+    dislike: '没帮助',
+    feedbackSubmitted: '感谢您的反馈',
+    feedbackCanceled: '已取消反馈',
+    feedbackFailed: '反馈提交失败，请稍后重试',
+    dislikeReasonTitle: '选择原因',
+    dislikeReasonPlaceholder: '请选择或输入原因',
+    submitReason: '提交原因',
+    cancel: '取消',
+    dislikeReasons: {
+      inaccurate: '回答不准确',
+      incomplete: '信息不完整',
+      unclear: '表述不清晰',
+      unrelated: '与问题无关',
+      other: '其他'
+    }
+  },
   tenantInvitation: {
     inboxTooltip: '查看待接受的邀请',
     pendingSectionTitle: '待接受的邀请',
@@ -3664,6 +3682,80 @@ export default {
       namePlaceholder: '请输入知识库名称',
       descriptionLabel: '知识库描述',
       descriptionPlaceholder: '请输入知识库描述（可选）'
+    },
+    feedback: {
+      title: '知识反馈',
+      description: '查看问答反馈，定位低质量片段，并可重置片段反馈统计。',
+      lowQualityChunks: '低质量片段',
+      lowQualityChunksDesc: '查找好评率较低的知识片段。',
+      viewLowQuality: '查看低质量片段',
+      allRatedChunks: '全部有反馈片段',
+      statsOverview: '反馈概览',
+      statsOverviewDesc: '刷新全部知识片段的反馈统计数据。',
+      totalChunks: '全部片段',
+      highQualityChunks: '高质量片段',
+      totalFeedbacks: '总反馈数',
+      lowQualityList: '低质量片段列表',
+      maxRate: '最高好评率',
+      viewDetails: '查看',
+      reset: '重置',
+      resetConfirm: '确定要重置该片段的反馈统计和权重吗？回答关联会保留用于追溯，但历史评价将不再影响该片段。',
+      chunkDetail: '片段详情',
+      chunkId: '片段 ID',
+      likeCount: '点赞数',
+      dislikeCount: '点踩数',
+      positiveRate: '好评率',
+      recallWeight: '召回权重',
+      qualityStatus: '质量状态',
+      relatedSessions: '关联会话',
+      dislikeReasons: '点踩原因',
+      weightLogs: '权重变更日志',
+      weightLogsSummary: '最近 {shown} 条 / 共 {total} 条',
+      messages: {
+        loadFailed: '加载反馈数据失败',
+        overviewLoadFailed: '加载反馈概览失败',
+        chunkStatsLoadFailed: '加载片段统计失败',
+        weightLogsLoadFailed: '加载权重变更日志失败',
+        resetSuccess: '反馈统计已重置',
+        resetFailed: '重置反馈统计失败'
+      },
+      weightLogTriggers: {
+        user_feedback: '用户反馈',
+        user_like: '用户点赞',
+        user_dislike: '用户点踩',
+        user_cancel: '用户取消',
+        admin_reset: '管理员重置'
+      },
+      weightLogActions: {
+        adjust_weight: '自动调整',
+        increase: '权重上调',
+        decrease: '权重下调',
+        reset: '重置',
+        manual_set: '手动设置'
+      },
+      status: {
+        high_quality: '高质量',
+        low_quality: '低质量',
+        normal: '正常',
+        pending_optimization: '待优化',
+        needs_optimization: '待优化',
+        optimizing: '优化中',
+        optimized: '已优化'
+      },
+      columns: {
+        content: '内容',
+        likeCount: '点赞',
+        dislikeCount: '点踩',
+        positiveRate: '好评率',
+        recallWeight: '权重',
+        qualityStatus: '状态',
+        operations: '操作',
+        action: '动作',
+        trigger: '触发来源',
+        operator: '操作人',
+        weightChange: '权重变化',
+        createdAt: '时间'
+      }
     },
     errors: {
       vectorStoreBindingInvalid: '无法使用所选向量存储。请选择其他存储或使用系统默认值。',

@@ -321,6 +321,15 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 		filteredResults = deduplicatedBeforeRerank
 	}
 
+	// HybridSearch uses recall weight to choose the pre-truncation candidate
+	// set while preserving raw scores. Apply it exactly once to the final
+	// agent score (raw or reranked) before MMR and final sorting.
+	for _, result := range filteredResults {
+		if result != nil {
+			applyRecallWeightToAgentResult(result.SearchResult)
+		}
+	}
+
 	// Apply MMR (Maximal Marginal Relevance) to reduce redundancy and improve diversity
 	// Note: composite scoring is already applied inside rerankResults
 	if len(filteredResults) > 0 {
@@ -539,12 +548,13 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 					go func() {
 						defer innerWg.Done()
 						searchParams := types.SearchParams{
-							QueryText:        q,
-							QueryEmbedding:   queryEmbedding,
-							KnowledgeBaseIDs: fullKBIDs,
-							MatchCount:       topK,
-							VectorThreshold:  vectorThreshold,
-							KeywordThreshold: keywordThreshold,
+							QueryText:         q,
+							QueryEmbedding:    queryEmbedding,
+							KnowledgeBaseIDs:  fullKBIDs,
+							MatchCount:        topK,
+							VectorThreshold:   vectorThreshold,
+							KeywordThreshold:  keywordThreshold,
+							ApplyRecallWeight: true,
 						}
 						kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], searchParams)
 						if err != nil {
@@ -576,14 +586,15 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 							keywordThreshold,
 						)
 						searchParams := types.SearchParams{
-							QueryText:        q,
-							QueryEmbedding:   queryEmbedding,
-							MatchCount:       topK,
-							VectorThreshold:  stVectorThreshold,
-							KeywordThreshold: stKeywordThreshold,
-							KnowledgeIDs:     st.KnowledgeIDs,
-							TagIDs:           st.TagIDs,
-							ScopeTagIDs:      st.ScopeTagIDs,
+							QueryText:         q,
+							QueryEmbedding:    queryEmbedding,
+							MatchCount:        topK,
+							VectorThreshold:   stVectorThreshold,
+							KeywordThreshold:  stKeywordThreshold,
+							KnowledgeIDs:      st.KnowledgeIDs,
+							TagIDs:            st.TagIDs,
+							ScopeTagIDs:       st.ScopeTagIDs,
+							ApplyRecallWeight: true,
 						}
 						kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, st.KnowledgeBaseID, searchParams)
 						if err != nil {
@@ -1419,10 +1430,22 @@ func (t *KnowledgeSearchTool) formatOutput(
 	}
 
 	return &types.ToolResult{
-		Success: true,
-		Output:  output,
-		Data:    data,
+		Success:             true,
+		Output:              output,
+		Data:                data,
+		KnowledgeReferences: knowledgeSearchReferences(results),
 	}, nil
+}
+
+func knowledgeSearchReferences(results []*searchResultWithMeta) []*types.SearchResult {
+	references := make([]*types.SearchResult, 0, len(results))
+	for _, result := range results {
+		if result == nil || result.SearchResult == nil || result.ID == "" {
+			continue
+		}
+		references = append(references, result.SearchResult)
+	}
+	return references
 }
 
 // chunkRange represents a continuous range of chunk indices

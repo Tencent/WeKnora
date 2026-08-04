@@ -17,22 +17,23 @@ import (
 
 // Config 应用程序总配置
 type Config struct {
-	Conversation    *ConversationConfig    `yaml:"conversation"     json:"conversation"`
-	Server          *ServerConfig          `yaml:"server"           json:"server"`
-	KnowledgeBase   *KnowledgeBaseConfig   `yaml:"knowledge_base"   json:"knowledge_base"`
-	Tenant          *TenantConfig          `yaml:"tenant"           json:"tenant"`
-	Auth            *AuthConfig            `yaml:"auth"             json:"auth"`
-	Audit           *AuditConfig           `yaml:"audit"            json:"audit"`
-	OIDCAuth        *OIDCAuthConfig        `yaml:"oidc_auth"        json:"oidc_auth"`
-	Models          []ModelConfig          `yaml:"models"           json:"models"`
-	VectorDatabase  *VectorDatabaseConfig  `yaml:"vector_database"  json:"vector_database"`
-	DocReader       *DocReaderConfig       `yaml:"docreader"        json:"docreader"`
-	StreamManager   *StreamManagerConfig   `yaml:"stream_manager"   json:"stream_manager"`
-	ExtractManager  *ExtractManagerConfig  `yaml:"extract"          json:"extract"`
-	WebSearch       *WebSearchConfig       `yaml:"web_search"       json:"web_search"`
-	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
-	IM              *IMConfig              `yaml:"im"               json:"im"`
-	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
+	Conversation    *ConversationConfig        `yaml:"conversation"     json:"conversation"`
+	Server          *ServerConfig              `yaml:"server"           json:"server"`
+	KnowledgeBase   *KnowledgeBaseConfig       `yaml:"knowledge_base"   json:"knowledge_base"`
+	Tenant          *TenantConfig              `yaml:"tenant"           json:"tenant"`
+	Auth            *AuthConfig                `yaml:"auth"             json:"auth"`
+	Audit           *AuditConfig               `yaml:"audit"            json:"audit"`
+	OIDCAuth        *OIDCAuthConfig            `yaml:"oidc_auth"        json:"oidc_auth"`
+	Models          []ModelConfig              `yaml:"models"           json:"models"`
+	VectorDatabase  *VectorDatabaseConfig      `yaml:"vector_database"  json:"vector_database"`
+	DocReader       *DocReaderConfig           `yaml:"docreader"        json:"docreader"`
+	StreamManager   *StreamManagerConfig       `yaml:"stream_manager"   json:"stream_manager"`
+	ExtractManager  *ExtractManagerConfig      `yaml:"extract"          json:"extract"`
+	WebSearch       *WebSearchConfig           `yaml:"web_search"       json:"web_search"`
+	PromptTemplates *PromptTemplatesConfig     `yaml:"prompt_templates" json:"prompt_templates"`
+	IM              *IMConfig                  `yaml:"im"               json:"im"`
+	Agent           *AgentConfig               `yaml:"agent"            json:"agent"`
+	ChunkFeedback   *types.ChunkFeedbackConfig `yaml:"chunk_feedback" json:"chunk_feedback"`
 	// FrontendBaseURL is the externally-visible origin of the SPA, used
 	// to compose absolute share-link URLs. Empty falls back to a host-
 	// relative URL ("/register?token=…") which the SPA then resolves
@@ -527,8 +528,13 @@ func LoadConfig() (*Config, error) {
 	// 使用处理后的配置内容
 	viper.ReadConfig(strings.NewReader(result))
 
-	// 解析配置到结构体
-	var cfg Config
+	// Seed nested policies before decoding so a partial chunk_feedback
+	// section inherits safe defaults instead of turning omitted factors into
+	// zero values. Explicitly configured zero thresholds still overwrite the
+	// defaults and remain valid where validation permits them.
+	cfg := Config{
+		ChunkFeedback: types.DefaultChunkFeedbackConfig(),
+	}
 	if err := viper.Unmarshal(&cfg, func(dc *mapstructure.DecoderConfig) {
 		dc.TagName = "yaml"
 	}); err != nil {
@@ -582,6 +588,7 @@ func LoadConfig() (*Config, error) {
 	applyKnowledgeBaseEnvOverrides(&cfg)
 	applyAuthAndTenantDefaults(&cfg)
 	applyAuditDefaults(&cfg)
+	applyChunkFeedbackDefaults(&cfg)
 
 	if err := ValidateConfig(&cfg); err != nil {
 		return nil, err
@@ -659,6 +666,33 @@ func ValidateConfig(cfg *Config) error {
 		}
 	}
 
+	if feedback := cfg.ChunkFeedback; feedback != nil {
+		if feedback.LowQualityThreshold < 0 || feedback.LowQualityThreshold > 1 {
+			errs = append(errs, "chunk_feedback.low_quality_threshold must be between 0 and 1")
+		}
+		if feedback.HighQualityThreshold < 0 || feedback.HighQualityThreshold > 1 {
+			errs = append(errs, "chunk_feedback.high_quality_threshold must be between 0 and 1")
+		}
+		if feedback.HighQualityThreshold < feedback.LowQualityThreshold {
+			errs = append(errs, "chunk_feedback.high_quality_threshold must be >= low_quality_threshold")
+		}
+		if feedback.AutoMarkThreshold < 0 || feedback.AutoMarkThreshold > feedback.LowQualityThreshold {
+			errs = append(errs, "chunk_feedback.auto_mark_threshold must be between 0 and low_quality_threshold")
+		}
+		if feedback.AutoMarkMinFeedbacks < 1 {
+			errs = append(errs, "chunk_feedback.auto_mark_min_feedbacks must be >= 1")
+		}
+		if feedback.WeightBoostFactor <= 1 {
+			errs = append(errs, "chunk_feedback.weight_boost_factor must be > 1")
+		}
+		if feedback.WeightPenaltyFactor <= 0 || feedback.WeightPenaltyFactor >= 1 {
+			errs = append(errs, "chunk_feedback.weight_penalty_factor must be between 0 and 1")
+		}
+		if feedback.MinWeight <= 0 || feedback.MaxWeight < feedback.MinWeight {
+			errs = append(errs, "chunk_feedback weights must satisfy 0 < min_weight <= max_weight")
+		}
+	}
+
 	if cfg.KnowledgeBase != nil {
 		if cfg.KnowledgeBase.ChunkSize <= 0 {
 			errs = append(errs, "knowledge_base.chunk_size must be > 0")
@@ -681,6 +715,12 @@ func ValidateConfig(cfg *Config) error {
 		return fmt.Errorf("config validation errors: %s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+func applyChunkFeedbackDefaults(cfg *Config) {
+	if cfg.ChunkFeedback == nil {
+		cfg.ChunkFeedback = types.DefaultChunkFeedbackConfig()
+	}
 }
 
 func applyOIDCEnvOverrides(cfg *Config) {

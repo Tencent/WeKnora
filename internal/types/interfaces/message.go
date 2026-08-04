@@ -95,4 +95,8 @@ type MessageRepository interface {
 	GetKnowledgeIDsBySessionID(ctx context.Context, sessionID string) ([]string, error)
 	// UpdateMessageKnowledgeID updates the knowledge_id field for a message
 	UpdateMessageKnowledgeID(ctx context.Context, messageID string, knowledgeID string) error
+	// GetMessageByID gets a tenant- and user-scoped message by its ID.
+	GetMessageByID(ctx context.Context, tenantID uint64, userID, messageID string) (*types.Message, error)
+	// UpdateMessageFeedbackStats updates tenant- and user-scoped message feedback counters.
+	UpdateMessageFeedbackStats(ctx context.Context, tenantID uint64, userID, messageID string, likeCount, dislikeCount int) error
 }

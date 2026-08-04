@@ -252,6 +252,22 @@ type Message struct {
 	// KnowledgeID links this message to a Knowledge entry in the chat history knowledge base
 	// Used for vector search indexing: when set, the message content has been indexed as a Knowledge passage
 	KnowledgeID string `json:"knowledge_id,omitempty" gorm:"type:varchar(36);index"`
+
+	// ============================================
+	// 反馈统计字段 - 用于知识库问答-点赞点踩功能
+	// ============================================
+	// LikeCount 点赞数量
+	LikeCount int `json:"like_count" gorm:"default:0"`
+	// DislikeCount 点踩数量
+	DislikeCount int `json:"dislike_count" gorm:"default:0"`
+	// UserFeedback is the current caller's vote. It is hydrated in one batch
+	// when message history is returned and is never persisted on messages.
+	UserFeedback       *bool  `json:"user_feedback" gorm:"-"`
+	UserFeedbackReason string `json:"user_feedback_reason,omitempty" gorm:"-"`
+	// UserFeedbackLoaded distinguishes an authoritative "no vote" (nil) from
+	// a response path where batch hydration was unavailable.
+	UserFeedbackLoaded bool `json:"user_feedback_loaded,omitempty" gorm:"-"`
+
 	// Message creation timestamp
 	CreatedAt time.Time `json:"created_at"`
 	// Last update timestamp

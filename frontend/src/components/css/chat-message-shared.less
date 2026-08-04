@@ -86,6 +86,36 @@
         opacity: 1;
       }
     }
+
+    // 点赞/点踩按钮激活状态
+    &.is-active {
+      color: var(--td-brand-color);
+
+      .t-icon {
+        opacity: 1;
+      }
+    }
+  }
+
+  // 反馈按钮组
+  .feedback-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+
+    .t-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+
+      .t-button__text {
+        display: inline-flex !important;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        font-size: 12px;
+      }
+    }
   }
 }
 

@@ -29,6 +29,28 @@ type stubMessageService struct {
 	deleteMessage func(ctx context.Context, sessionID, id string) error
 }
 
+type stubMessageFeedbackReader struct {
+	interfaces.ChunkFeedbackRepository
+	calls     int
+	tenantID  uint64
+	userID    string
+	messageID []string
+	feedbacks []*types.ChunkFeedback
+}
+
+func (r *stubMessageFeedbackReader) GetByMessageIDsAndUser(
+	_ context.Context,
+	tenantID uint64,
+	messageIDs []string,
+	userID string,
+) ([]*types.ChunkFeedback, error) {
+	r.calls++
+	r.tenantID = tenantID
+	r.userID = userID
+	r.messageID = append([]string(nil), messageIDs...)
+	return r.feedbacks, nil
+}
+
 func (s *stubMessageService) GetRecentMessagesBySession(
 	ctx context.Context, sessionID string, limit int,
 ) ([]*types.Message, error) {
@@ -120,6 +142,44 @@ func TestLoadMessagesAcceptsRFC3339BeforeTime(t *testing.T) {
 	}
 	if !capturedBefore.Equal(expected) {
 		t.Fatalf("parsed before_time = %v, want %v", capturedBefore, expected)
+	}
+}
+
+func TestHydrateUserFeedbackUsesOneTenantAndUserScopedBatch(t *testing.T) {
+	positive := true
+	reader := &stubMessageFeedbackReader{
+		feedbacks: []*types.ChunkFeedback{
+			{MessageID: "assistant-liked", IsPositive: positive},
+		},
+	}
+	h := &MessageHandler{feedbackReader: reader}
+	messages := []*types.Message{
+		{ID: "user-message", Role: "user"},
+		{ID: "assistant-liked", Role: "assistant"},
+		{ID: "assistant-none", Role: "assistant"},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	ctx = context.WithValue(ctx, types.UserIDContextKey, "user-1")
+
+	h.hydrateUserFeedback(ctx, messages)
+
+	if reader.calls != 1 {
+		t.Fatalf("batch reader calls = %d, want 1", reader.calls)
+	}
+	if reader.tenantID != 7 || reader.userID != "user-1" {
+		t.Fatalf("batch scope = tenant:%d user:%q, want tenant:7 user:user-1", reader.tenantID, reader.userID)
+	}
+	if got := strings.Join(reader.messageID, ","); got != "assistant-liked,assistant-none" {
+		t.Fatalf("batch message IDs = %q", got)
+	}
+	if messages[1].UserFeedback == nil || !*messages[1].UserFeedback || !messages[1].UserFeedbackLoaded {
+		t.Fatalf("liked assistant feedback not hydrated: %#v", messages[1])
+	}
+	if messages[2].UserFeedback != nil || !messages[2].UserFeedbackLoaded {
+		t.Fatalf("authoritative no-feedback state not hydrated: %#v", messages[2])
+	}
+	if messages[0].UserFeedbackLoaded {
+		t.Fatal("user messages must not be marked as feedback-hydrated")
 	}
 }
 

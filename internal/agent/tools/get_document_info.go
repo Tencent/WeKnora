@@ -249,12 +249,21 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 	}
 
 	formattedDocs := make([]map[string]interface{}, 0, len(successDocs))
+	knowledgeReferences := make([]*types.SearchResult, 0, len(successDocs))
+	referencedChunkIDs := make(map[string]struct{})
 	for i, doc := range successDocs {
 		output += fmt.Sprintf("[Entry #%d]\n", i+1)
 
 		if doc.chunk != nil {
 			formatted := formatFAQEntryInfo(&output, doc.chunk, doc.faqMeta)
 			formattedDocs = append(formattedDocs, formatted)
+			if _, exists := referencedChunkIDs[doc.chunk.ID]; !exists {
+				title, _ := formatted["title"].(string)
+				if reference := chunkKnowledgeReference(doc.chunk, title, ""); reference != nil {
+					knowledgeReferences = append(knowledgeReferences, reference)
+					referencedChunkIDs[doc.chunk.ID] = struct{}{}
+				}
+			}
 			continue
 		}
 
@@ -312,8 +321,9 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 	}
 
 	return &types.ToolResult{
-		Success: true,
-		Output:  output,
+		Success:             true,
+		Output:              output,
+		KnowledgeReferences: knowledgeReferences,
 		Data: map[string]interface{}{
 			"documents":    formattedDocs,
 			"total_docs":   len(successDocs),

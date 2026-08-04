@@ -37,6 +37,18 @@ conversation:
   extract_relationships_prompt_id: "default_extract_relationships"  # from prompt_templates/graph_extraction.yaml
   generate_questions_prompt_id: "default_generate_questions"        # from prompt_templates/generate_questions.yaml
 
+# Chunk feedback quality and retrieval-weight policy.
+# >= high boosts, < low penalizes, and <= auto_mark marks pending optimization.
+chunk_feedback:
+  high_quality_threshold: 0.8
+  low_quality_threshold: 0.5
+  auto_mark_threshold: 0.3
+  auto_mark_min_feedbacks: 5
+  weight_boost_factor: 1.5
+  weight_penalty_factor: 0.5
+  min_weight: 0.1
+  max_weight: 2.0
+
 # Knowledge base configuration
 knowledge_base:
   chunk_size: 512

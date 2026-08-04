@@ -13,8 +13,9 @@ import (
 )
 
 type stubKnowledgeBaseService struct {
-	kb      *types.KnowledgeBase
-	results []*types.SearchResult
+	kb           *types.KnowledgeBase
+	results      []*types.SearchResult
+	searchParams []types.SearchParams
 }
 
 func (s *stubKnowledgeBaseService) CreateKnowledgeBase(context.Context, *types.KnowledgeBase) (*types.KnowledgeBase, error) {
@@ -63,7 +64,8 @@ func (s *stubKnowledgeBaseService) TogglePinKnowledgeBase(context.Context, strin
 	return nil, nil
 }
 
-func (s *stubKnowledgeBaseService) HybridSearch(context.Context, string, types.SearchParams) ([]*types.SearchResult, error) {
+func (s *stubKnowledgeBaseService) HybridSearch(_ context.Context, _ string, params types.SearchParams) ([]*types.SearchResult, error) {
+	s.searchParams = append(s.searchParams, params)
 	return s.results, nil
 }
 
@@ -99,7 +101,7 @@ func (s *stubKnowledgeBaseService) ProcessKBDelete(context.Context, *asynq.Task)
 }
 
 func TestQueryKnowledgeGraph_ReportsConfiguredEntityAndRelationTypes(t *testing.T) {
-	tool := NewQueryKnowledgeGraphTool(&stubKnowledgeBaseService{
+	service := &stubKnowledgeBaseService{
 		kb: &types.KnowledgeBase{
 			ID: "kb-1",
 			ExtractConfig: &types.ExtractConfig{
@@ -148,7 +150,8 @@ func TestQueryKnowledgeGraph_ReportsConfiguredEntityAndRelationTypes(t *testing.
 				MatchType:      types.MatchTypeEmbedding,
 			},
 		},
-	})
+	}
+	tool := NewQueryKnowledgeGraphTool(service)
 
 	args, err := json.Marshal(QueryKnowledgeGraphInput{
 		KnowledgeBaseIDs: []string{"kb-1"},
@@ -160,6 +163,9 @@ func TestQueryKnowledgeGraph_ReportsConfiguredEntityAndRelationTypes(t *testing.
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.True(t, result.Success)
+	require.Len(t, service.searchParams, 1)
+	require.True(t, service.searchParams[0].ApplyRecallWeight)
+	require.ElementsMatch(t, service.results, result.KnowledgeReferences)
 	t.Logf("tool output:\n%s", result.Output)
 
 	assert.Contains(t, result.Output, "Entity Types (3)")
