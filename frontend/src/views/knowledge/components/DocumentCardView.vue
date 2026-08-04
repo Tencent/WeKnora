@@ -19,6 +19,7 @@ interface KnowledgeCard {
   summary_status?: string;
   description?: string;
   file_name?: string;
+  folder_path?: string;
   original_file_name?: string;
   display_name?: string;
   title?: string;
@@ -43,6 +44,11 @@ const props = defineProps<{
   canMutateKnowledge: boolean;
   traceAvailableById: Record<string, boolean>;
   tagList: Tag[];
+  /**
+   * Replace the updated-at line with the card's folder. Only meaningful when
+   * the grid spans several folders (all documents / recursive browse).
+   */
+  showFolderPath?: boolean;
   // Move sub-flow state
   moveMenuMode: 'normal' | 'targets' | 'confirm';
   moveTargetKbs: any[];
@@ -58,6 +64,7 @@ const emit = defineEmits<{
   (e: 'menu-visible-change', visible: boolean, item: KnowledgeCard): void;
   (e: 'action', action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'batch-manage' | 'delete', item: KnowledgeCard): void;
   (e: 'tag-edit', item: KnowledgeCard): void;
+  (e: 'open-folder', path: string): void;
   // Move sub-flow emits
   (e: 'move-select-target', kb: any): void;
   (e: 'move-back'): void;
@@ -451,7 +458,12 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
       </div>
 
       <div class="card-bottom">
-        <span class="card-time">{{ formatDocTime(item.updated_at) }}</span>
+        <button v-if="showFolderPath && item.folder_path" type="button" class="card-folder"
+          :title="item.folder_path" @click.stop="emit('open-folder', item.folder_path)">
+          <t-icon name="folder" />
+          <span>{{ item.folder_path }}</span>
+        </button>
+        <span v-else class="card-time">{{ formatDocTime(item.updated_at) }}</span>
         <div class="card-bottom-right">
           <div v-if="tagList.length" class="card-tag-selector" @click.stop>
             <!-- Editable mode -->
@@ -792,6 +804,38 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
     font-size: 12px;
     font-weight: 400;
     white-space: nowrap;
+  }
+
+  .card-folder {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    max-width: 60%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--td-text-color-secondary);
+    font-family: var(--app-font-family);
+    font-size: 12px;
+    cursor: pointer;
+    transition: color 0.15s ease;
+
+    &:hover {
+      color: var(--td-brand-color);
+    }
+
+    span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .t-icon {
+      flex: 0 0 auto;
+      font-size: 13px;
+    }
   }
 
   .card-type {
