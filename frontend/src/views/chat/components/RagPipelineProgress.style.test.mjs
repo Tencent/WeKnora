@@ -59,10 +59,14 @@ test('rag pipeline uses a native pending step and lets the thinking title shimme
 })
 
 test('rag pipeline shows a pending model-answer step after retrieval completes', () => {
-  assert.match(source, /showModelAnswerWait/)
-  assert.match(source, /shouldShowRagModelAnswerWait/)
+  assert.match(source, /showWaitStep/)
+  assert.match(source, /getRagPipelineWaitKind/)
+  assert.match(source, /createRagWaitController/)
   assert.match(source, /t\('chat\.connectingModelAndGeneratingAnswer'\)/)
+  assert.match(source, /t\('chat\.modelStillResponding'\)/)
   assert.match(source, /rag-model-wait-step/)
+  assert.match(source, /'action-pending': !waitStepStalled/)
+  assert.match(source, /waitController\.dispose\(\)/)
 })
 
 test('done row appears only after the full turn completes', () => {

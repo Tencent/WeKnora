@@ -2560,6 +2560,7 @@ export default {
     thinkingAlt: 'Thinking in progress',
     preparingAnswer: 'Preparing an answer…',
     connectingModelAndGeneratingAnswer: 'Connecting to the model and generating an answer…',
+    modelStillResponding: 'The model is taking longer than usual, still waiting…',
     deepThoughtCompleted: 'Deep thinking completed',
     deepThoughtAlt: 'Deep thinking finished',
     referencesTitle: 'Referenced {count} related item(s)',

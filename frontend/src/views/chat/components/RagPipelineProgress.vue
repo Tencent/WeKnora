@@ -20,7 +20,7 @@
       <div v-for="(step, index) in steps" :key="step.id" class="tree-child" :class="{
         'tree-child-last':
           !showDoneRow
-          && !showModelAnswerWait
+          && !showWaitStep
           && !showThinkingStep
           && index === steps.length - 1,
       }">
@@ -54,19 +54,17 @@
       </div>
 
       <div
-        v-if="showModelAnswerWait"
+        v-if="showWaitStep"
         class="tree-child tree-child-last streaming-loading-node rag-model-wait-step"
-        role="status"
-        aria-live="polite"
       >
         <div class="tree-branch" />
         <div class="tree-child-content">
           <div class="tool-event">
-            <div class="action-card action-pending">
+            <div class="action-card" :class="{ 'action-pending': !waitStepStalled }">
               <div class="action-header no-results">
                 <div class="action-title">
                   <t-icon class="action-title-icon" name="lightbulb" />
-                  <span class="action-name">{{ t('chat.connectingModelAndGeneratingAnswer') }}</span>
+                  <span class="action-name">{{ waitStepText }}</span>
                 </div>
               </div>
             </div>
@@ -219,10 +217,14 @@ import {
   getRetrievalSearchSource,
 } from '@/utils/agent-tool-display'
 import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay'
-import { RAG_TIMELINE_TOOL_NAMES } from '@/utils/rag-pipeline-history'
+import { RAG_RETRIEVAL_TOOL_NAMES, RAG_TIMELINE_TOOL_NAMES } from '@/utils/rag-pipeline-history'
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
 import { buildReferenceSections } from '@/utils/referenceSources'
-import { shouldShowRagModelAnswerWait } from '@/utils/rag-pipeline-state'
+import {
+  createRagWaitController,
+  getRagPipelineWaitKind,
+  type RagWaitView,
+} from '@/utils/rag-pipeline-state'
 
 const props = defineProps<{
   session?: {
@@ -240,8 +242,10 @@ const referencesDrawer = useChatReferencesDrawer()
 const userExpanded = ref(false)
 const thinkingExpanded = ref(true)
 const rootElement = ref<HTMLElement | null>(null)
-const showModelAnswerWait = ref(false)
-let modelAnswerWaitTimer: ReturnType<typeof setTimeout> | undefined
+const waitView = ref<RagWaitView>({ kind: 'none', stalled: false })
+const waitController = createRagWaitController((view) => {
+  waitView.value = view
+})
 
 const thinkingContent = computed(() => {
   const stream = props.session?.agentEventStream
@@ -299,7 +303,7 @@ const steps = computed(() => {
           ? (event.tool_data as Record<string, unknown>)
           : null
 
-      const isSearchTool = toolName === 'knowledge_search' || toolName === 'search_knowledge'
+      const isSearchTool = RAG_RETRIEVAL_TOOL_NAMES.has(toolName)
       const isAttachmentTool = toolName === 'attachment_parsing' || toolName === 'image_analysis'
       const searchSource = isSearchTool
         ? getRetrievalSearchSource(event.arguments, toolData)
@@ -335,12 +339,10 @@ const allStepsDone = computed(
 )
 
 const hasCompletedRetrievalStep = computed(() => steps.value.some(
-  (step) =>
-    (step.toolName === 'knowledge_search' || step.toolName === 'search_knowledge') &&
-    !step.pending,
+  (step) => RAG_RETRIEVAL_TOOL_NAMES.has(step.toolName) && !step.pending,
 ))
 
-const shouldShowModelAnswerWait = computed(() => shouldShowRagModelAnswerWait({
+const waitKind = computed(() => getRagPipelineWaitKind({
   isCompleted: Boolean(props.session?.is_completed),
   hasAnswer: hasAnswer.value,
   hasThinkingEvent: hasThinkingEvent.value,
@@ -348,6 +350,17 @@ const shouldShowModelAnswerWait = computed(() => shouldShowRagModelAnswerWait({
   allStepsDone: allStepsDone.value,
   hasCompletedRetrievalStep: hasCompletedRetrievalStep.value,
 }))
+
+const showWaitStep = computed(() => waitView.value.kind !== 'none')
+
+const waitStepStalled = computed(() => waitView.value.stalled)
+
+const waitStepText = computed(() => {
+  if (waitView.value.stalled) return t('chat.modelStillResponding')
+  return waitView.value.kind === 'model'
+    ? t('chat.connectingModelAndGeneratingAnswer')
+    : t('chat.preparingAnswer')
+})
 
 const showCollapsedRoot = computed(
   () =>
@@ -463,26 +476,7 @@ watch(thinkingPending, (pending) => {
   }
 })
 
-watch(shouldShowModelAnswerWait, (shouldShow) => {
-  if (modelAnswerWaitTimer) {
-    clearTimeout(modelAnswerWaitTimer)
-    modelAnswerWaitTimer = undefined
-  }
-
-  if (!shouldShow) {
-    showModelAnswerWait.value = false
-    return
-  }
-
-  // Avoid flashing the model-wait row when the first answer token arrives
-  // immediately after retrieval completes.
-  modelAnswerWaitTimer = setTimeout(() => {
-    modelAnswerWaitTimer = undefined
-    if (shouldShowModelAnswerWait.value) {
-      showModelAnswerWait.value = true
-    }
-  }, 250)
-}, { immediate: true })
+watch(waitKind, (kind) => waitController.update(kind), { immediate: true })
 
 watch(hasAnswer, (answered) => {
   if (answered && hasThinking.value) {
@@ -501,7 +495,7 @@ watch(thinkingExpanded, (expanded) => {
 })
 
 onBeforeUnmount(() => {
-  if (modelAnswerWaitTimer) clearTimeout(modelAnswerWaitTimer)
+  waitController.dispose()
 })
 </script>
 
