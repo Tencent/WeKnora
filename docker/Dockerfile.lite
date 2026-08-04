@@ -18,6 +18,9 @@ WORKDIR /app
 COPY .duckdb /root/.duckdb
 
 # Copy gojieba dictionary files required at runtime by gojieba.NewJieba()
+# (Copy to both /home/runner/go/... and /go/... to satisfy build-time path embedded by CGO)
+RUN mkdir -p /home/runner/go/pkg/mod/github.com/yanyiwu /go/pkg/mod/github.com/yanyiwu
+COPY yanyiwu /home/runner/go/pkg/mod/github.com/yanyiwu
 COPY yanyiwu /go/pkg/mod/github.com/yanyiwu
 
 # Copy pre-compiled Go binary
