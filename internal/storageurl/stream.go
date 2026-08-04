@@ -100,6 +100,15 @@ func (s *StreamRewriter) Enabled() bool {
 	return s != nil && s.rewriter.Enabled()
 }
 
+// Rewriter exposes the underlying Rewriter for stream fields that arrive whole
+// (references, metadata) and therefore need no holdback.
+func (s *StreamRewriter) Rewriter() *Rewriter {
+	if s == nil {
+		return nil
+	}
+	return s.rewriter
+}
+
 // Push feeds the next chunk of the stream identified by key and returns the
 // rewritten content that is ready to emit. Set flush on the stream's terminal
 // chunk to release any held tail.
