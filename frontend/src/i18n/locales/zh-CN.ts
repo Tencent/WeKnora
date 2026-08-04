@@ -2834,6 +2834,27 @@ export default {
             retry: '重试中',
             archived: '最终失败',
             completed: '已完成'
+          },
+          taskTypes: {
+            documentProcess: '文档解析',
+            manualProcess: '手工重新处理',
+            temporaryDocumentProcess: '聊天附件解析',
+            postProcess: '文档后处理',
+            summary: '摘要生成',
+            tableSummary: '表格摘要生成',
+            question: '问题生成',
+            multimodal: '图片多模态处理',
+            graph: '知识图谱抽取',
+            sync: '数据源同步',
+            faqImport: 'FAQ 导入',
+            batchReparse: '批量重新解析',
+            batchDelete: '批量删除',
+            move: '文档移动',
+            indexDelete: '索引删除',
+            kbClone: '知识库复制',
+            kbDelete: '知识库删除',
+            wikiIngest: 'Wiki 内容生成',
+            wikiFinalize: 'Wiki 收尾处理'
           }
         },
         failedNotice: {
@@ -2865,6 +2886,46 @@ export default {
           pending: '排队中',
           retry: '重试中',
           archived: '最终失败'
+        },
+        pools: {
+          core: '核心解析',
+          postprocess: '后处理编排',
+          enrichment: '内容富化',
+          maintenance: '维护与同步',
+          shared: '共享弹性',
+          wiki: 'Wiki 池'
+        },
+        poolDescriptions: {
+          core: '文档解析与手工重解析的保底容量',
+          postprocess: '解析完成后的收尾与富化扇出',
+          enrichment: '摘要、图片、图谱与问题生成',
+          maintenance: '数据源同步、批处理与删除清理',
+          shared: '由核心解析与内容富化按积压借用',
+          wiki: 'Wiki 内容生成与全局收尾'
+        },
+        queueNames: {
+          default: '文档解析',
+          chat_attachment: '对话附件解析',
+          postprocess: '后处理编排',
+          summary: '摘要生成',
+          sync: '数据源同步',
+          low: '维护与批处理',
+          multimodal: '多模态处理',
+          graph: '图谱抽取',
+          question: '问题生成',
+          wiki: 'Wiki 处理'
+        },
+        queueDescriptions: {
+          default: '文档解析、手工重解析',
+          chat_attachment: '会话内上传附件解析',
+          postprocess: '解析收尾、富化扇出',
+          summary: '文档摘要、表格摘要',
+          sync: '手动与定时同步',
+          low: 'FAQ 导入、批量重解析、删除清理',
+          multimodal: '图片 OCR、视觉描述',
+          graph: '分块图谱抽取',
+          question: '分块问题生成',
+          wiki: '内容生成、索引收尾'
         },
         errors: {
           generic: '获取队列状态失败'

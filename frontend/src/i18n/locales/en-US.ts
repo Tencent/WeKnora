@@ -3069,6 +3069,27 @@ export default {
             cancel: 'Failed to cancel task',
             run_now: 'Failed to run task',
             delete: 'Failed to clear record'
+          },
+          taskTypes: {
+            documentProcess: 'Document parsing',
+            manualProcess: 'Manual reprocessing',
+            temporaryDocumentProcess: 'Chat attachment parsing',
+            postProcess: 'Document post-processing',
+            summary: 'Summary generation',
+            tableSummary: 'Table summary generation',
+            question: 'Question generation',
+            multimodal: 'Image multimodal processing',
+            graph: 'Knowledge graph extraction',
+            sync: 'Data-source sync',
+            faqImport: 'FAQ import',
+            batchReparse: 'Batch reparse',
+            batchDelete: 'Batch delete',
+            move: 'Document move',
+            indexDelete: 'Index deletion',
+            kbClone: 'Knowledge-base clone',
+            kbDelete: 'Knowledge-base deletion',
+            wikiIngest: 'Wiki content generation',
+            wikiFinalize: 'Wiki finalization'
           }
         },
         models: {
@@ -3088,6 +3109,46 @@ export default {
             queued: 'Throttling',
             full: 'At limit'
           }
+        },
+        pools: {
+          core: 'Core parsing',
+          postprocess: 'Post-process orchestration',
+          enrichment: 'Enrichment',
+          maintenance: 'Maintenance & sync',
+          shared: 'Shared elastic',
+          wiki: 'Wiki pool'
+        },
+        poolDescriptions: {
+          core: 'Guaranteed document and manual parsing capacity',
+          postprocess: 'Parse finalization and enrichment fan-out',
+          enrichment: 'Summaries, images, graph, and question generation',
+          maintenance: 'Source sync, batch work, and deletion cleanup',
+          shared: 'Borrowed by core or enrichment according to backlog',
+          wiki: 'Wiki content generation and global finalization'
+        },
+        queueNames: {
+          default: 'Document parsing',
+          chat_attachment: 'Chat attachments',
+          postprocess: 'Post-process',
+          summary: 'Summaries',
+          sync: 'Source sync',
+          low: 'Maintenance & batch',
+          multimodal: 'Multimodal',
+          graph: 'Graph extraction',
+          question: 'Questions',
+          wiki: 'Wiki pipeline'
+        },
+        queueDescriptions: {
+          default: 'Document parse, manual reparse',
+          chat_attachment: 'Session-scoped chat upload parsing',
+          postprocess: 'Parse finalization, enrichment fan-out',
+          summary: 'Document & table summaries',
+          sync: 'Manual & scheduled sync',
+          low: 'FAQ import, batch reparse, cleanup',
+          multimodal: 'Image OCR, vision captions',
+          graph: 'Chunk-level graph extraction',
+          question: 'Chunk-level question generation',
+          wiki: 'Content generation, index finalize'
         }
       },
       keyLabels: {

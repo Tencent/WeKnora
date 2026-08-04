@@ -2834,6 +2834,27 @@ export default {
             retry: '재시도 중',
             archived: '최종 실패',
             completed: '완료'
+          },
+          taskTypes: {
+            documentProcess: '문서 파싱',
+            manualProcess: '수동 재처리',
+            temporaryDocumentProcess: '채팅 첨부 파일 파싱',
+            postProcess: '문서 후처리',
+            summary: '요약 생성',
+            tableSummary: '표 요약 생성',
+            question: '질문 생성',
+            multimodal: '이미지 멀티모달 처리',
+            graph: '지식 그래프 추출',
+            sync: '데이터 소스 동기화',
+            faqImport: 'FAQ 가져오기',
+            batchReparse: '일괄 재파싱',
+            batchDelete: '일괄 삭제',
+            move: '문서 이동',
+            indexDelete: '인덱스 삭제',
+            kbClone: '지식 베이스 복제',
+            kbDelete: '지식 베이스 삭제',
+            wikiIngest: 'Wiki 콘텐츠 생성',
+            wikiFinalize: 'Wiki 마무리'
           }
         },
         failedNotice: {
@@ -2865,6 +2886,46 @@ export default {
           pending: '대기 중',
           retry: '재시도 중',
           archived: '최종 실패'
+        },
+        pools: {
+          core: '핵심 파싱',
+          postprocess: '후처리 오케스트레이션',
+          enrichment: '콘텐츠 보강',
+          maintenance: '유지 관리 및 동기화',
+          shared: '공유 탄력 풀',
+          wiki: 'Wiki 풀'
+        },
+        poolDescriptions: {
+          core: '문서 및 수동 파싱 보장 용량',
+          postprocess: '파싱 마무리 및 보강 작업 분배',
+          enrichment: '요약, 이미지, 그래프 및 질문 생성',
+          maintenance: '데이터 소스 동기화, 일괄 작업 및 삭제 정리',
+          shared: '적체에 따라 핵심 파싱 또는 보강이 공유',
+          wiki: 'Wiki 콘텐츠 생성 및 전체 마무리'
+        },
+        queueNames: {
+          default: '문서 파싱',
+          chat_attachment: '대화 첨부파일 파싱',
+          postprocess: '후처리 오케스트레이션',
+          summary: '요약 생성',
+          sync: '데이터 소스 동기화',
+          low: '유지 관리 및 일괄 작업',
+          multimodal: '멀티모달 처리',
+          graph: '그래프 추출',
+          question: '질문 생성',
+          wiki: 'Wiki 처리'
+        },
+        queueDescriptions: {
+          default: '문서 파싱, 수동 재파싱',
+          chat_attachment: '세션 내 업로드 첨부파일 파싱',
+          postprocess: '파싱 마무리, 보강 분배',
+          summary: '문서 요약, 테이블 요약',
+          sync: '수동 및 예약 동기화',
+          low: 'FAQ 가져오기, 일괄 재파싱, 삭제 정리',
+          multimodal: '이미지 OCR, 시각 설명',
+          graph: '청크 단위 그래프 추출',
+          question: '청크 단위 질문 생성',
+          wiki: '콘텐츠 생성, 인덱스 마무리'
         },
         errors: {
           generic: '큐 상태를 불러오지 못했습니다'
