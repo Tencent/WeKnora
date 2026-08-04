@@ -950,7 +950,7 @@ func (r *wikiPageRepository) ListPagesCursor(
 		limit = 500
 	}
 	q := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ?", kbID).
+		Where("knowledge_base_id = ? AND status <> ?", kbID, types.WikiPageStatusArchived).
 		Order("id ASC").
 		Limit(limit)
 	if cursor != "" {
