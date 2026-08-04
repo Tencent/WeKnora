@@ -13,6 +13,9 @@ import (
 
 var ErrKnowledgeNotFound = errors.New("knowledge not found")
 
+// likeEscapeChar is the SQL ESCAPE character paired with escapeLikeKeyword.
+const likeEscapeChar = `\`
+
 // escapeLikeKeyword escapes SQL LIKE wildcards (%, _) in a keyword
 // so they are treated as literal characters.
 func escapeLikeKeyword(keyword string) string {
@@ -150,6 +153,21 @@ func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) 
 	if !filter.UpdatedTo.IsZero() {
 		query = query.Where("updated_at <= ?", filter.UpdatedTo)
 	}
+	switch filter.FolderScope {
+	case types.FolderScopeExact:
+		query = query.Where("folder_path = ?", filter.FolderPath)
+	case types.FolderScopeSubtree:
+		// An empty path means "the whole knowledge base", so no predicate is
+		// needed; otherwise match the folder itself plus everything below it.
+		if filter.FolderPath != "" {
+			query = query.Where(
+				"(folder_path = ? OR folder_path LIKE ? ESCAPE ?)",
+				filter.FolderPath,
+				escapeLikeKeyword(filter.FolderPath)+"/%",
+				likeEscapeChar,
+			)
+		}
+	}
 	return query
 }
 
@@ -184,6 +202,106 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	}
 
 	return knowledges, total, nil
+}
+
+// ListKnowledgeFolderCounts aggregates how many knowledge entries live directly
+// in each folder of a knowledge base. Rows mid-deletion are excluded so the
+// sidebar tree counts match the document list.
+func (r *knowledgeRepository) ListKnowledgeFolderCounts(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+) ([]*types.KnowledgeFolderCount, error) {
+	var counts []*types.KnowledgeFolderCount
+	if err := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Select("folder_path AS folder_path, COUNT(*) AS count").
+		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ?",
+			tenantID, kbID, types.ParseStatusDeleting).
+		Group("folder_path").
+		Find(&counts).Error; err != nil {
+		return nil, err
+	}
+	return counts, nil
+}
+
+// UpdateKnowledgeFolderPath files the given knowledge entries under folderPath.
+// Only the display/navigation column is touched: chunks, embeddings and the
+// stored file are unaffected, which is why re-filing needs no re-processing.
+// Returns the number of affected rows.
+func (r *knowledgeRepository) UpdateKnowledgeFolderPath(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	ids []string,
+	folderPath string,
+) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	result := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND id IN (?)", tenantID, kbID, ids).
+		Updates(map[string]interface{}{"folder_path": folderPath, "updated_at": time.Now()})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
+// RenameKnowledgeFolderPath rewrites folder_path for a folder and every folder
+// below it, which is how a folder rename or move is applied. Renaming onto an
+// existing path merges the two folders. Returns the number of affected rows.
+func (r *knowledgeRepository) RenameKnowledgeFolderPath(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	from string,
+	to string,
+) (int64, error) {
+	if from == "" {
+		return 0, errors.New("source folder path is required")
+	}
+
+	// The rewrite is done row by row rather than with SQL string functions so it
+	// behaves identically on PostgreSQL and SQLite.
+	var rows []*types.Knowledge
+	if err := r.db.WithContext(ctx).
+		Select("id", "folder_path").
+		Where("tenant_id = ? AND knowledge_base_id = ? AND (folder_path = ? OR folder_path LIKE ? ESCAPE ?)",
+			tenantID, kbID, from, escapeLikeKeyword(from)+"/%", likeEscapeChar).
+		Find(&rows).Error; err != nil {
+		return 0, err
+	}
+	if len(rows) == 0 {
+		return 0, nil
+	}
+
+	// Group by destination so each distinct rewrite is a single UPDATE.
+	byTarget := map[string][]string{}
+	for _, row := range rows {
+		suffix := strings.TrimPrefix(row.FolderPath, from)
+		byTarget[types.NormalizeKnowledgeFolderPath(to+suffix)] = append(
+			byTarget[types.NormalizeKnowledgeFolderPath(to+suffix)], row.ID)
+	}
+
+	var affected int64
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for target, targetIDs := range byTarget {
+			result := tx.Model(&types.Knowledge{}).
+				Where("tenant_id = ? AND knowledge_base_id = ? AND id IN (?)", tenantID, kbID, targetIDs).
+				Updates(map[string]interface{}{"folder_path": target, "updated_at": time.Now()})
+			if result.Error != nil {
+				return result.Error
+			}
+			affected += result.RowsAffected
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return affected, nil
 }
 
 // UpdateKnowledge updates knowledge
