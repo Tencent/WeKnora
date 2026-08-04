@@ -31,6 +31,8 @@ test('shared KB permission guidance is visible without hover', () => {
   assert.match(source, /class="section-description shared-kb-permission-tip">\s*\{\{ \$t\('organization\.settings\.permissionCalcFormula'\) \}\}/)
   const sharedKbHeader = source.slice(source.indexOf('<!-- 共享知识库 -->'), source.indexOf('<!-- 共享智能体 -->'))
   assert.doesNotMatch(sharedKbHeader, /trigger="hover"/)
+})
+  
 test('organization settings use one outer content scroller and reset it on navigation', () => {
   assert.match(source, /ref="contentWrapperRef" class="content-wrapper"/)
   assert.match(source, /class="data-table-shell members-table-shell"/)
