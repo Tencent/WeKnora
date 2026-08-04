@@ -8,7 +8,7 @@
             <div class="action-header no-results">
               <div class="action-title">
                 <t-icon class="action-title-icon" name="lightbulb" />
-                <span class="action-name">{{ t('chat.thinkingAlt') }}</span>
+                <span class="action-name">{{ t('chat.preparingAnswer') }}</span>
               </div>
             </div>
           </div>
@@ -20,6 +20,7 @@
       <div v-for="(step, index) in steps" :key="step.id" class="tree-child" :class="{
         'tree-child-last':
           !showDoneRow
+          && !showModelAnswerWait
           && !showThinkingStep
           && index === steps.length - 1,
       }">
@@ -46,6 +47,27 @@
               </div>
               <div v-if="step.summaryHtml" class="search-results-summary-fixed">
                 <div class="results-summary-text" v-html="step.summaryHtml" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div
+        v-if="showModelAnswerWait"
+        class="tree-child tree-child-last streaming-loading-node rag-model-wait-step"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="tree-branch" />
+        <div class="tree-child-content">
+          <div class="tool-event">
+            <div class="action-card action-pending">
+              <div class="action-header no-results">
+                <div class="action-title">
+                  <t-icon class="action-title-icon" name="lightbulb" />
+                  <span class="action-name">{{ t('chat.connectingModelAndGeneratingAnswer') }}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -188,7 +210,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getAgentToolIconName } from '@/utils/agent-tool-icons'
 import {
@@ -200,6 +222,7 @@ import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDispla
 import { RAG_TIMELINE_TOOL_NAMES } from '@/utils/rag-pipeline-history'
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
 import { buildReferenceSections } from '@/utils/referenceSources'
+import { shouldShowRagModelAnswerWait } from '@/utils/rag-pipeline-state'
 
 const props = defineProps<{
   session?: {
@@ -217,6 +240,8 @@ const referencesDrawer = useChatReferencesDrawer()
 const userExpanded = ref(false)
 const thinkingExpanded = ref(true)
 const rootElement = ref<HTMLElement | null>(null)
+const showModelAnswerWait = ref(false)
+let modelAnswerWaitTimer: ReturnType<typeof setTimeout> | undefined
 
 const thinkingContent = computed(() => {
   const stream = props.session?.agentEventStream
@@ -289,6 +314,7 @@ const steps = computed(() => {
 
       return {
         id: String(event.tool_call_id || `${toolName}-${event.timestamp || 0}`),
+        toolName,
         pending,
         iconName: getAgentToolIconName(toolName, searchSource),
         title: getRagPipelineStepTitle(t, {
@@ -307,6 +333,21 @@ const steps = computed(() => {
 const allStepsDone = computed(
   () => steps.value.length > 0 && steps.value.every((step) => !step.pending),
 )
+
+const hasCompletedRetrievalStep = computed(() => steps.value.some(
+  (step) =>
+    (step.toolName === 'knowledge_search' || step.toolName === 'search_knowledge') &&
+    !step.pending,
+))
+
+const shouldShowModelAnswerWait = computed(() => shouldShowRagModelAnswerWait({
+  isCompleted: Boolean(props.session?.is_completed),
+  hasAnswer: hasAnswer.value,
+  hasThinkingEvent: hasThinkingEvent.value,
+  stepCount: steps.value.length,
+  allStepsDone: allStepsDone.value,
+  hasCompletedRetrievalStep: hasCompletedRetrievalStep.value,
+}))
 
 const showCollapsedRoot = computed(
   () =>
@@ -422,6 +463,27 @@ watch(thinkingPending, (pending) => {
   }
 })
 
+watch(shouldShowModelAnswerWait, (shouldShow) => {
+  if (modelAnswerWaitTimer) {
+    clearTimeout(modelAnswerWaitTimer)
+    modelAnswerWaitTimer = undefined
+  }
+
+  if (!shouldShow) {
+    showModelAnswerWait.value = false
+    return
+  }
+
+  // Avoid flashing the model-wait row when the first answer token arrives
+  // immediately after retrieval completes.
+  modelAnswerWaitTimer = setTimeout(() => {
+    modelAnswerWaitTimer = undefined
+    if (shouldShowModelAnswerWait.value) {
+      showModelAnswerWait.value = true
+    }
+  }, 250)
+}, { immediate: true })
+
 watch(hasAnswer, (answered) => {
   if (answered && hasThinking.value) {
     thinkingExpanded.value = false
@@ -436,6 +498,10 @@ watch(thinkingContent, () => {
 watch(thinkingExpanded, (expanded) => {
   if (!expanded || !isThinkingStreaming.value) return
   scrollThinkingDetailToBottom()
+})
+
+onBeforeUnmount(() => {
+  if (modelAnswerWaitTimer) clearTimeout(modelAnswerWaitTimer)
 })
 </script>
 

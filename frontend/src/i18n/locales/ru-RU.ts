@@ -3046,6 +3046,8 @@ export default {
     refreshSuggestedQuestions: 'Ещё',
     thinking: 'Думаю...',
     thinkingAlt: 'Обдумывание...',
+    preparingAnswer: 'Подготовка ответа…',
+    connectingModelAndGeneratingAnswer: 'Подключение к модели и создание ответа…',
     deepThoughtCompleted: 'Глубокий анализ завершён',
     deepThoughtAlt: 'Глубокий анализ',
     referencesTitle: 'Использовано {count} связанного материала',
