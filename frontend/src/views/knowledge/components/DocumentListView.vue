@@ -14,6 +14,7 @@ interface Tag {
 interface KnowledgeItem {
   id: string;
   file_name: string;
+  folder_path?: string;
   file_type?: string;
   file_size?: number | string;
   type?: string;
@@ -35,6 +36,12 @@ const props = defineProps<{
   traceVisibleIds: Record<string, boolean>;
   tagList: Tag[];
   loading?: boolean;
+  /**
+   * Show each row's folder under its name. Only useful when the list spans
+   * several folders (the "all documents" view or a recursive folder browse);
+   * inside a single folder the path would be the same on every row.
+   */
+  showFolderPath?: boolean;
   // Move sub-flow state
   moveMenuMode: 'normal' | 'targets' | 'confirm';
   moveTargetKbs: any[];
@@ -51,6 +58,7 @@ const emit = defineEmits<{
   (e: 'action', action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem): void;
   (e: 'probe-trace', item: KnowledgeItem): void;
   (e: 'tag-edit', item: KnowledgeItem): void;
+  (e: 'open-folder', path: string): void;
   // Move sub-flow emits
   (e: 'move-select-target', kb: any): void;
   (e: 'move-back'): void;
@@ -247,6 +255,11 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
           </span>
           <div class="row-file-text">
             <span class="row-file-name" :title="item.file_name">{{ item.file_name }}</span>
+            <button v-if="showFolderPath && item.folder_path" type="button" class="row-file-folder"
+              :title="item.folder_path" @click.stop="emit('open-folder', item.folder_path)">
+              <t-icon name="folder" />
+              <span>{{ item.folder_path }}</span>
+            </button>
             <span v-if="item.description" class="row-file-desc" :title="item.description">{{ item.description }}</span>
           </div>
         </div>
@@ -597,6 +610,38 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
   text-overflow: ellipsis;
   font-size: 12px;
   color: var(--td-text-color-placeholder);
+}
+
+.row-file-folder {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  font-family: var(--app-font-family);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s ease;
+
+  &:hover {
+    color: var(--td-brand-color);
+  }
+
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .t-icon {
+    flex: 0 0 auto;
+    font-size: 13px;
+  }
 }
 
 .cell-source {

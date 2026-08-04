@@ -264,6 +264,14 @@ export function listKnowledgeFiles(
     source?: string;
     start_time?: string;
     end_time?: string;
+    /**
+     * Folder to browse. An empty string means the knowledge base root, so the
+     * parameter is only sent when it is defined — leaving it out lists every
+     * folder (the flat view).
+     */
+    folder_path?: string;
+    /** Include documents stored in sub-folders of folder_path. */
+    folder_recursive?: boolean;
   },
 ) {
   const query = new URLSearchParams();
@@ -276,8 +284,37 @@ export function listKnowledgeFiles(
   if (params.source) query.append('source', params.source);
   if (params.start_time) query.append('start_time', params.start_time);
   if (params.end_time) query.append('end_time', params.end_time);
+  if (params.folder_path !== undefined) {
+    query.append('folder_path', params.folder_path);
+    if (params.folder_recursive) query.append('folder_recursive', 'true');
+  }
   const qs = query.toString();
   return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${qs}`);
+}
+
+/** One node of the knowledge base folder tree. */
+export interface KnowledgeFolderNode {
+  /** Canonical folder path, e.g. "docs/spec". */
+  path: string;
+  /** Last segment of the path, used as the row label. */
+  name: string;
+  /** Documents stored directly in this folder. */
+  document_count: number;
+  /** Documents in this folder plus every descendant folder. */
+  total_count: number;
+  children?: KnowledgeFolderNode[];
+}
+
+export interface KnowledgeFolderTree {
+  /** Documents that are not part of any uploaded folder. */
+  root_document_count: number;
+  /** Documents in the whole knowledge base. */
+  total_document_count: number;
+  folders: KnowledgeFolderNode[];
+}
+
+export function listKnowledgeFolders(kbId: string) {
+  return get(`/api/v1/knowledge-bases/${kbId}/knowledge/folders`);
 }
 
 export function getKnowledgeDetails(id: string, options?: { agent_id?: string; agent_source_tenant_id?: string }) {
