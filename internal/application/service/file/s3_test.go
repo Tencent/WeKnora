@@ -8,7 +8,7 @@ import (
 
 func TestNewS3Client_Credentials(t *testing.T) {
 	t.Run("static credentials remain supported", func(t *testing.T) {
-		svc, err := newS3Client("", "static-ak", "static-sk", "bucket", "us-east-1", "")
+		svc, err := newS3Client("", "static-ak", "static-sk", "bucket", "us-east-1", "", false)
 		if err != nil {
 			t.Fatalf("newS3Client() error = %v", err)
 		}
@@ -24,7 +24,7 @@ func TestNewS3Client_Credentials(t *testing.T) {
 	t.Run("empty keys use the AWS default credential chain", func(t *testing.T) {
 		t.Setenv("AWS_ACCESS_KEY_ID", "role-ak")
 		t.Setenv("AWS_SECRET_ACCESS_KEY", "role-sk")
-		svc, err := newS3Client("", "", "", "bucket", "us-east-1", "")
+		svc, err := newS3Client("", "", "", "bucket", "us-east-1", "", false)
 		if err != nil {
 			t.Fatalf("newS3Client() error = %v", err)
 		}
@@ -38,7 +38,7 @@ func TestNewS3Client_Credentials(t *testing.T) {
 	})
 
 	t.Run("partial static credentials are rejected", func(t *testing.T) {
-		_, err := newS3Client("", "only-ak", "", "bucket", "us-east-1", "")
+		_, err := newS3Client("", "only-ak", "", "bucket", "us-east-1", "", false)
 		if err == nil {
 			t.Fatal("newS3Client() expected an error")
 		}
