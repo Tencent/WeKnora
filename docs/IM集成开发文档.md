@@ -240,6 +240,33 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置
 
 ---
 
+#### API Base URL（可选，内网代理）
+
+渠道配置里的 **API Base URL** 是可选字段，用于让 WeKnora 通过反向代理访问飞书开放平台：
+
+- **服务器能直连外网** → **留空**即可，默认访问 `https://open.feishu.cn`
+- **服务器需要代理才能访问外网**（如内网部署）→ 填写反向代理地址（如 nginx，`http://10.0.0.1:8080/feishu`）
+
+该地址同时覆盖飞书 IM 的所有出站调用，一个字段统一管控：
+
+| 出站 | 说明 |
+|---|---|
+| WebSocket bootstrap | SDK 拿 wss 地址的请求 |
+| wss 长连接 | 收消息的 WebSocket（经改写后的地址） |
+| HTTP API | token、发消息、下载文件、CardKit 流式卡片 |
+
+**nginx 反向代理要点**（WebSocket 模式）：
+
+- bootstrap 端点（`/callback/ws/endpoint`）需用 `sub_filter` 把飞书返回的 wss URL 域名改写成你的 nginx 地址，否则 SDK 会直连飞书 wss（内网连不上）
+- wss 长连接 + HTTP API（`/open-apis/`）走标准反向代理（WebSocket 升级头 + path 透传），**不需要 nginx 支持 CONNECT**
+
+**SSRF 白名单**：若 `api_base_url` 是内网地址，需把主机名加入 `SSRF_WHITELIST` 环境变量，否则 SSRF 防护会拦截。
+
+> Webhook 模式下，`api_base_url` 只影响出站 HTTP API；飞书回调 WeKnora 的入站路径不受影响（回调地址在渠道卡片上单独配置）。
+> Lark 国际版同理，只是默认域名换成 `https://open.larksuite.com`。
+
+---
+
 ### Lark 接入
 
 Lark 是飞书的国际版。两者是同一产品部署在两朵相互隔离的云上，**IM 的 API 接口、事件结构、
