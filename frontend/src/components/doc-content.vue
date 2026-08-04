@@ -1040,6 +1040,10 @@ const getChunkClass = (index: number) => {
 const getChunkMeta = (item: any) => {
   if (!item) return '';
   const parts = [];
+  const page = getChunkMetadata(item).page;
+  if (page) {
+    parts.push(t('knowledgeBase.page', { n: page }));
+  }
   if (item.char_count) {
     parts.push(`${item.char_count} ${t('knowledgeBase.characters')}`);
   }

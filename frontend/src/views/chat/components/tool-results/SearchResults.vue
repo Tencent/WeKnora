@@ -7,7 +7,7 @@
         :key="group.key"
         :index="idx + 1"
         :title="group.title"
-        :meta="$t('agentStream.grepResults.chunkHits', { count: group.chunks.length })"
+        :meta="groupMeta(group)"
         :popup-key="group.knowledge_id"
         :chunks="group.chunks"
         :chunk-id="group.chunks.length === 1 ? group.chunks[0].chunk_id : undefined"
@@ -40,11 +40,21 @@ const { t } = useI18n();
 const results = computed(() => props.data.results || []);
 const kbCounts = computed(() => props.data.kb_counts);
 
+// Build the meta string for a grouped result. When the group has a single
+// chunk with a known page, show the page label directly; otherwise fall back
+// to the chunk-count label (page info remains available inside the popup).
+const groupMeta = (group: GroupedResult): string => {
+  if (group.chunks.length === 1 && group.chunks[0].page) {
+    return t('knowledgeBase.page', { n: group.chunks[0].page });
+  }
+  return t('agentStream.grepResults.chunkHits', { count: group.chunks.length });
+};
+
 interface GroupedResult {
   key: string;
   knowledge_id: string;
   title: string;
-  chunks: { content: string; chunk_id: string; knowledge_id: string }[];
+  chunks: { content: string; chunk_id: string; knowledge_id: string; page?: number }[];
 }
 
 // Hybrid retrieval can return several chunks from the same document; collapse
@@ -71,6 +81,7 @@ const groupedResults = computed<GroupedResult[]>(() => {
       content: r.content,
       chunk_id: r.chunk_id,
       knowledge_id: r.knowledge_id,
+      page: r.page,
     });
   }
   return order.map((k) => map.get(k)!);

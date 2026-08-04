@@ -446,6 +446,7 @@ export default {
     clickToViewFull: 'Click card to view full text and chunks',
     characters: 'chars',
     segment: 'Segment',
+    page: 'Page {n}',
     chunkCount: 'Total {count} segments',
     viewChunks: 'View Chunks',
     viewMerged: 'Full Text',

@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -76,10 +78,15 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 
 	logger.Infof(context.Background(), "[MinerU] Parsing file=%s size=%d via %s", req.FileName, len(content), c.endpoint)
 
-	mdContent, imagesB64, err := c.callFileParse(ctx, content)
+	mdContent, imagesB64, contentList, err := c.callFileParse(ctx, content)
 	if err != nil {
 		return nil, fmt.Errorf("MinerU file_parse: %w", err)
 	}
+
+	// Recover per-page boundaries from content_list (MinerU computes page_idx
+	// but does not embed it in md_content). Alignment is best-effort: when it
+	// fails the markdown is returned unchanged and chunks simply carry no page.
+	mdContent = injectMinerUPageMarkers(mdContent, contentList)
 
 	// MinerU already returns markdown with embedded HTML blocks (e.g. <table>, <details>).
 	// Re-running the whole document through html-to-markdown corrupts valid markdown
@@ -103,17 +110,31 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 type mineruFileParseResponse struct {
 	Results struct {
 		Document struct {
-			MDContent string            `json:"md_content"`
-			Images    map[string]string `json:"images"` // path -> "data:image/png;base64,..." or raw base64
+			MDContent    string              `json:"md_content"`
+			Images       map[string]string   `json:"images"` // path -> "data:image/png;base64,..." or raw base64
+			ContentList  []mineruContentItem `json:"content_list"`
 		} `json:"document"`
 		Files struct {
-			MDContent string            `json:"md_content"`
-			Images    map[string]string `json:"images"` // path -> "data:image/png;base64,..." or raw base64
+			MDContent   string              `json:"md_content"`
+			Images      map[string]string   `json:"images"` // path -> "data:image/png;base64,..." or raw base64
+			ContentList []mineruContentItem `json:"content_list"`
 		} `json:"files"`
 	} `json:"results"`
 }
 
-func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (string, map[string]string, error) {
+// mineruContentItem mirrors one entry of MinerU's content_list. Each item
+// carries a page_idx (0-based) which MinerU computes but the prior pipeline
+// discarded. We align items back onto md_content to recover page boundaries
+// so chunks can be attributed to their source page (#928).
+type mineruContentItem struct {
+	Type      string   `json:"type"`
+	Text      string   `json:"text"`
+	PageIdx   int      `json:"page_idx"`
+	ImagePath string   `json:"image_path"`
+	ImgCaption []string `json:"img_caption"`
+}
+
+func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (string, map[string]string, []mineruContentItem, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
@@ -145,16 +166,16 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 	// File part
 	part, err := writer.CreateFormFile("files", "document")
 	if err != nil {
-		return "", nil, fmt.Errorf("create form file: %w", err)
+		return "", nil, nil, fmt.Errorf("create form file: %w", err)
 	}
 	if _, err := part.Write(content); err != nil {
-		return "", nil, fmt.Errorf("write file content: %w", err)
+		return "", nil, nil, fmt.Errorf("write file content: %w", err)
 	}
 	writer.Close()
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint+"/file_parse", &body)
 	if err != nil {
-		return "", nil, fmt.Errorf("create request: %w", err)
+		return "", nil, nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
 
@@ -164,18 +185,18 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 	})
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		return "", nil, fmt.Errorf("HTTP request: %w", err)
+		return "", nil, nil, fmt.Errorf("HTTP request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return "", nil, fmt.Errorf("MinerU API status %d: %s", resp.StatusCode, string(respBody))
+		return "", nil, nil, fmt.Errorf("MinerU API status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", nil, fmt.Errorf("read response body: %w", err)
+		return "", nil, nil, fmt.Errorf("read response body: %w", err)
 	}
 
 	// Dump raw response for debugging (truncate if too large)
@@ -194,7 +215,7 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 
 	var result mineruFileParseResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", nil, fmt.Errorf("decode response: %w", err)
+		return "", nil, nil, fmt.Errorf("decode response: %w", err)
 	}
 
 	// MinerU response schema differs by version/deployment:
@@ -203,15 +224,15 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 	// Prefer document when available, then fallback to files.
 	if result.Results.Document.MDContent != "" || len(result.Results.Document.Images) > 0 {
 		logger.Infof(context.Background(), "[MinerU] Using response path: results.document")
-		return result.Results.Document.MDContent, result.Results.Document.Images, nil
+		return result.Results.Document.MDContent, result.Results.Document.Images, result.Results.Document.ContentList, nil
 	}
 	if result.Results.Files.MDContent != "" || len(result.Results.Files.Images) > 0 {
 		logger.Infof(context.Background(), "[MinerU] Using response path: results.files")
-		return result.Results.Files.MDContent, result.Results.Files.Images, nil
+		return result.Results.Files.MDContent, result.Results.Files.Images, result.Results.Files.ContentList, nil
 	}
 
 	logger.Errorf(context.Background(), "[MinerU] Response has no markdown/images under results.document or results.files")
-	return "", nil, nil
+	return "", nil, nil, nil
 }
 
 // processImages decodes base64 images from MinerU response and returns ImageRef list.
@@ -271,6 +292,160 @@ func (c *MinerUReader) processImages(mdContent string, imagesB64 map[string]stri
 // logMinerUResponseStructure logs the structure of the MinerU API response.
 func (c *MinerUReader) logMinerUResponseStructure(obj interface{}, prefix string) {
 	logResponseStructure("MinerU", obj, prefix)
+}
+
+// injectMinerUPageMarkers inserts <!--wk:page:N--> markers into mdContent at
+// the page boundaries recovered from contentList. MinerU computes page_idx
+// per block but does not embed page numbers in md_content; we align each
+// content_list item back to its position in mdContent by a whitespace-
+// insensitive prefix search and record a boundary wherever page_idx changes.
+// Alignment is best-effort: on any failure the original mdContent is
+// returned unchanged so behaviour degrades to the pre-page-tracking state.
+func injectMinerUPageMarkers(mdContent string, items []mineruContentItem) string {
+	if len(items) == 0 || strings.TrimSpace(mdContent) == "" {
+		return mdContent
+	}
+	squashed, idxMap := squashWithIndex(mdContent)
+	if len(squashed) == 0 || len(idxMap) == 0 {
+		return mdContent
+	}
+
+	type boundary struct {
+		byteOff int
+		page    int
+	}
+	var boundaries []boundary
+	cursor := 0 // byte offset into squashed
+	prevPage := -1
+	for _, it := range items {
+		needle := mineruAlignNeedle(it)
+		if needle == "" {
+			continue
+		}
+		sNeedle := squashWhitespace(needle)
+		if r := []rune(sNeedle); len(r) > 40 {
+			// Bounded prefix: a single mismatched trailing char must not
+			// fail the whole block, and we only need the start offset.
+			sNeedle = string(r[:40])
+		}
+		if sNeedle == "" {
+			continue
+		}
+		pos := strings.Index(squashed[cursor:], sNeedle)
+		if pos < 0 {
+			// Needle not found in the remaining text; skip this item. cursor
+			// never moves backward, so boundaries stay monotonic (required
+			// for correct page resolution downstream).
+			continue
+		}
+		absPos := cursor + pos
+		if absPos < len(idxMap) && it.PageIdx != prevPage {
+			boundaries = append(boundaries, boundary{byteOff: idxMap[absPos], page: it.PageIdx + 1})
+			prevPage = it.PageIdx
+		}
+		cursor = absPos + len(sNeedle)
+		if cursor > len(squashed) {
+			cursor = len(squashed)
+		}
+	}
+	if len(boundaries) == 0 {
+		return mdContent
+	}
+	// Make page 1 explicit for any leading content before the first marker.
+	if boundaries[0].byteOff > 0 {
+		boundaries = append([]boundary{{byteOff: 0, page: 1}}, boundaries...)
+	}
+
+	// Insert markers in reverse so earlier byte offsets remain valid. Each
+	// marker is placed on its own line so the chunker regex consumes it.
+	out := mdContent
+	for i := len(boundaries) - 1; i >= 0; i-- {
+		bd := boundaries[i]
+		if bd.byteOff < 0 || bd.byteOff > len(out) {
+			continue
+		}
+		marker := fmt.Sprintf("<!--wk:page:%d-->", bd.page)
+		prefix := ""
+		if bd.byteOff > 0 && out[bd.byteOff-1] != '\n' {
+			prefix = "\n"
+		}
+		suffix := ""
+		if bd.byteOff < len(out) && out[bd.byteOff] != '\n' {
+			suffix = "\n"
+		}
+		out = out[:bd.byteOff] + prefix + marker + suffix + out[bd.byteOff:]
+	}
+	return out
+}
+
+// mineruAlignNeedle returns the text used to align a content_list item back
+// to its position in md_content.
+func mineruAlignNeedle(it mineruContentItem) string {
+	if strings.TrimSpace(it.Text) != "" {
+		return it.Text
+	}
+	if it.ImagePath != "" {
+		return it.ImagePath
+	}
+	return ""
+}
+
+// squashWhitespace collapses every run of whitespace into a single space and
+// trims the ends, enabling tolerant alignment between content_list text and
+// md_content (whose line breaks / indentation differ).
+func squashWhitespace(s string) string {
+	var sb strings.Builder
+	inWS := false
+	for _, r := range s {
+		if unicode.IsSpace(r) {
+			if !inWS {
+				sb.WriteRune(' ')
+				inWS = true
+			}
+			continue
+		}
+		inWS = false
+		sb.WriteRune(r)
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+// squashWithIndex returns squashWhitespace(s) plus idxMap, where idxMap[b] is
+// the byte offset in the original s of the rune that squashed byte b belongs
+// to. idxMap is indexed by squashed byte offset, so a byte offset returned
+// by strings.Index on the squashed string can be mapped back to the original.
+func squashWithIndex(s string) (string, []int) {
+	var sb strings.Builder
+	var idxMap []int
+	inWS := false
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if unicode.IsSpace(r) {
+			if !inWS {
+				sb.WriteByte(' ')
+				idxMap = append(idxMap, i)
+				inWS = true
+			}
+			i += size
+			continue
+		}
+		inWS = false
+		sb.WriteString(s[i : i+size])
+		for b := 0; b < size; b++ {
+			idxMap = append(idxMap, i)
+		}
+		i += size
+	}
+	out := sb.String()
+	if len(out) > 0 && out[0] == ' ' {
+		out = out[1:]
+		idxMap = idxMap[1:]
+	}
+	if len(out) > 0 && out[len(out)-1] == ' ' {
+		out = out[:len(out)-1]
+		idxMap = idxMap[:len(idxMap)-1]
+	}
+	return out, idxMap
 }
 
 // validateMinerUOutboundURL rejects MinerU endpoints that would reach private
