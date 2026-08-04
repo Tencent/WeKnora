@@ -29,19 +29,19 @@ const (
 // name "low" so tasks enqueued by older releases remain consumable during a
 // rolling deployment. New code uses the business-semantic constant.
 const (
-	QueueDefault     = "default"
+	QueueDefault = "default"
 	// QueueChatAttachment carries session-scoped chat attachment parsing. It
 	// lives in the core pool but with a higher weight than QueueDefault so
 	// interactive chat uploads are not starved by knowledge-base batch imports.
 	QueueChatAttachment = "chat_attachment"
 	QueuePostProcess    = "postprocess"
-	QueueSummary     = "summary"
-	QueueMultimodal  = "multimodal"
-	QueueGraph       = "graph"
-	QueueQuestion    = "question"
-	QueueSync        = "sync"
-	QueueMaintenance = "low"
-	QueueWiki        = "wiki"
+	QueueSummary        = "summary"
+	QueueMultimodal     = "multimodal"
+	QueueGraph          = "graph"
+	QueueQuestion       = "question"
+	QueueSync           = "sync"
+	QueueMaintenance    = "low"
+	QueueWiki           = "wiki"
 )
 
 // QueueDefinition is the single source of truth for queue topology. Worker
@@ -74,7 +74,9 @@ var queueDefinitions = []QueueDefinition{
 	{Name: QueueMultimodal, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeImageMultimodal}},
 	{Name: QueueGraph, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeChunkExtract}},
 	{Name: QueueQuestion, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeQuestionGeneration}},
-	{Name: QueueSync, Pool: WorkerPoolMaintenance, Weight: 2, TaskTypes: []string{TypeDataSourceSync}},
+	{Name: QueueSync, Pool: WorkerPoolMaintenance, Weight: 2, TaskTypes: []string{
+		TypeDataSourceSync, TypeDataSourceFinalize,
+	}},
 	{Name: QueueMaintenance, Pool: WorkerPoolMaintenance, Weight: 1, TaskTypes: []string{
 		TypeFAQImport, TypeKBClone, TypeIndexDelete, TypeKBDelete,
 		TypeKnowledgeListDelete, TypeKnowledgeListReparse, TypeKnowledgeMove,
@@ -243,6 +245,7 @@ const (
 	TypeKnowledgePostProcess     = "knowledge:post_process"     // 知识后处理任务（统一调度）
 	TypeManualProcess            = "manual:process"             // 手工知识更新任务（cleanup + 重新索引）
 	TypeDataSourceSync           = "datasource:sync"            // 数据源同步任务
+	TypeDataSourceFinalize       = "datasource:finalize"        // 数据源异步入库完成确认
 	TypeWikiIngest               = "wiki:ingest"                // Wiki 页面同步任务
 	TypeWikiFinalize             = "wiki:finalize"              // Wiki KB 级收尾任务（防抖：索引重建/死链清理/交叉链接）
 	TypeTemporaryDocumentProcess = "temporary_document:process" // 会话临时文档解析任务

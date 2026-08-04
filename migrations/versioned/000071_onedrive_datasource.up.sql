@@ -1,8 +1,11 @@
--- OneDrive delegated OAuth state and durable drive-item membership projection.
+-- Generic deferred-sync checkpoint plus OneDrive OAuth and drive-item state.
 DO $$ BEGIN RAISE NOTICE '[Migration 000071] Creating OneDrive data source state'; END $$;
 
 ALTER TABLE data_sources
     ADD COLUMN IF NOT EXISTS connection_version BIGINT NOT NULL DEFAULT 1;
+
+ALTER TABLE sync_logs
+    ADD COLUMN IF NOT EXISTS checkpoint JSONB;
 
 CREATE TABLE IF NOT EXISTS data_source_oauth_tokens (
     id VARCHAR(36) PRIMARY KEY,

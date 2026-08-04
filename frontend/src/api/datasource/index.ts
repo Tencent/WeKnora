@@ -11,7 +11,7 @@ export interface DataSource {
   config: any
   sync_schedule: string
   sync_mode: 'incremental' | 'full'
-  status: 'active' | 'paused' | 'error' | 'reauthorization_required'
+  status: 'active' | 'paused' | 'connecting' | 'error' | 'reauthorization_required'
   conflict_strategy: 'overwrite' | 'skip'
   sync_deletions: boolean
   last_sync_at: string | null

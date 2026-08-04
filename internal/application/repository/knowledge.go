@@ -516,7 +516,7 @@ func (r *knowledgeRepository) FindByMetadataKey(
 
 // FindByMetadataFilters finds one knowledge row matching all metadata values.
 // It is intentionally an optional repository extension so existing test fakes
-// implementing KnowledgeRepository do not need to grow OneDrive-specific API.
+// implementing KnowledgeRepository do not need to grow data-source-specific API.
 func (r *knowledgeRepository) FindByMetadataFilters(
 	ctx context.Context, tenantID uint64, kbID string, filters map[string]string,
 ) (*types.Knowledge, error) {
@@ -528,7 +528,7 @@ func (r *knowledgeRepository) FindByMetadataFilters(
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		if r.db.Dialector.Name() == "sqlite" {
+		if r.db.Name() == "sqlite" {
 			query = query.Where("json_extract(metadata, ?) = ?", "$."+key, filters[key])
 		} else {
 			query = query.Where("metadata->>? = ?", key, filters[key])

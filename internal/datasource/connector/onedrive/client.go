@@ -1,3 +1,4 @@
+// Package onedrive implements delegated Microsoft Graph synchronization.
 package onedrive
 
 import (
@@ -58,7 +59,10 @@ func newGraphClient(
 	if httpClient == nil {
 		httpClient = utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 2 * time.Minute, MaxRedirects: 5})
 	}
-	return &graphClient{baseURL: strings.TrimRight(baseURL, "/"), httpClient: httpClient, accessToken: token, refreshToken: refresh}
+	return &graphClient{
+		baseURL: strings.TrimRight(baseURL, "/"), httpClient: httpClient,
+		accessToken: token, refreshToken: refresh,
+	}
 }
 
 func (c *graphClient) getDrive(ctx context.Context) (*drive, error) {
@@ -72,14 +76,16 @@ func (c *graphClient) getDrive(ctx context.Context) (*drive, error) {
 func (c *graphClient) getItem(ctx context.Context, driveID, itemID string) (*driveItem, error) {
 	path := c.itemURL(driveID, itemID)
 	var result driveItem
-	if err := c.getJSON(ctx, path+"?$select=id,name,size,webUrl,lastModifiedDateTime,parentReference,file,folder", &result); err != nil {
+	fields := "?$select=id,name,size,webUrl,lastModifiedDateTime,parentReference,file,folder"
+	if err := c.getJSON(ctx, path+fields, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
 func (c *graphClient) listChildren(ctx context.Context, driveID, itemID string) ([]driveItem, error) {
-	return c.listAll(ctx, c.itemURL(driveID, itemID)+"/children?$select=id,name,size,webUrl,lastModifiedDateTime,parentReference,file,folder")
+	fields := "?$select=id,name,size,webUrl,lastModifiedDateTime,parentReference,file,folder"
+	return c.listAll(ctx, c.itemURL(driveID, itemID)+"/children"+fields)
 }
 
 func (c *graphClient) listAll(ctx context.Context, firstURL string) ([]driveItem, error) {
@@ -89,10 +95,10 @@ func (c *graphClient) listAll(ctx context.Context, firstURL string) ([]driveItem
 	pages := 0
 	for next != "" {
 		if pages >= maxGraphPages {
-			return nil, fmt.Errorf("Microsoft Graph pagination exceeded %d pages", maxGraphPages)
+			return nil, fmt.Errorf("microsoft Graph pagination exceeded %d pages", maxGraphPages)
 		}
 		if _, duplicate := seen[next]; duplicate {
-			return nil, fmt.Errorf("Microsoft Graph pagination cycle detected")
+			return nil, fmt.Errorf("microsoft Graph pagination cycle detected")
 		}
 		seen[next] = struct{}{}
 		pages++
@@ -112,10 +118,10 @@ func (c *graphClient) latestDelta(ctx context.Context, driveID string) (string, 
 	pages := 0
 	for endpoint != "" {
 		if pages >= maxGraphPages {
-			return "", fmt.Errorf("Microsoft Graph delta pagination exceeded %d pages", maxGraphPages)
+			return "", fmt.Errorf("microsoft Graph delta pagination exceeded %d pages", maxGraphPages)
 		}
 		if _, duplicate := seen[endpoint]; duplicate {
-			return "", fmt.Errorf("Microsoft Graph delta pagination cycle detected")
+			return "", fmt.Errorf("microsoft Graph delta pagination cycle detected")
 		}
 		seen[endpoint] = struct{}{}
 		pages++
@@ -128,7 +134,7 @@ func (c *graphClient) latestDelta(ctx context.Context, driveID string) (string, 
 		}
 		endpoint = page.NextLink
 	}
-	return "", fmt.Errorf("Microsoft Graph delta response did not include a delta link")
+	return "", fmt.Errorf("microsoft Graph delta response did not include a delta link")
 }
 
 func (c *graphClient) delta(ctx context.Context, deltaURL string) ([]driveItem, string, error) {
@@ -138,10 +144,10 @@ func (c *graphClient) delta(ctx context.Context, deltaURL string) ([]driveItem, 
 	pages := 0
 	for next != "" {
 		if pages >= maxGraphPages {
-			return nil, "", fmt.Errorf("Microsoft Graph delta pagination exceeded %d pages", maxGraphPages)
+			return nil, "", fmt.Errorf("microsoft Graph delta pagination exceeded %d pages", maxGraphPages)
 		}
 		if _, duplicate := seen[next]; duplicate {
-			return nil, "", fmt.Errorf("Microsoft Graph delta pagination cycle detected")
+			return nil, "", fmt.Errorf("microsoft Graph delta pagination cycle detected")
 		}
 		seen[next] = struct{}{}
 		pages++
@@ -155,7 +161,7 @@ func (c *graphClient) delta(ctx context.Context, deltaURL string) ([]driveItem, 
 		}
 		next = page.NextLink
 	}
-	return nil, "", fmt.Errorf("Microsoft Graph delta response did not include a delta link")
+	return nil, "", fmt.Errorf("microsoft Graph delta response did not include a delta link")
 }
 
 func (c *graphClient) download(ctx context.Context, driveID, itemID string, maxBytes int64) ([]byte, error) {
@@ -164,7 +170,7 @@ func (c *graphClient) download(ctx context.Context, driveID, itemID string, maxB
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, decodeGraphError(resp)
 	}
@@ -186,7 +192,7 @@ func (c *graphClient) getJSON(ctx context.Context, endpoint string, target inter
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return decodeGraphError(resp)
 	}
@@ -195,12 +201,15 @@ func (c *graphClient) getJSON(ctx context.Context, endpoint string, target inter
 		return err
 	}
 	if len(body) > maxJSONBody {
-		return fmt.Errorf("Microsoft Graph response exceeds %d bytes", maxJSONBody)
+		return fmt.Errorf("microsoft Graph response exceeds %d bytes", maxJSONBody)
 	}
 	return json.Unmarshal(body, target)
 }
 
 func (c *graphClient) do(ctx context.Context, endpoint string) (*http.Response, error) {
+	if err := c.validateEndpoint(endpoint); err != nil {
+		return nil, err
+	}
 	var lastErr error
 	var forcedToken string
 	refreshed401 := false
@@ -226,9 +235,9 @@ func (c *graphClient) do(ctx context.Context, endpoint string) (*http.Response, 
 		if err != nil {
 			// net/http errors include the full request URL, which may be an
 			// opaque delta link containing a secret query token.
-			lastErr = errors.New("Microsoft Graph transport error")
+			lastErr = errors.New("microsoft Graph transport error")
 		} else if resp.StatusCode == http.StatusUnauthorized {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if refreshed401 || c.refreshToken == nil {
 				return nil, datasource.ErrOAuthReauthorizationRequired
 			}
@@ -242,7 +251,7 @@ func (c *graphClient) do(ctx context.Context, endpoint string) (*http.Response, 
 			return resp, nil
 		} else {
 			graphErr := decodeGraphError(resp)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			lastErr = graphErr
 			if attempt == maxGraphAttempts-1 {
 				break
@@ -269,7 +278,20 @@ func (c *graphClient) do(ctx context.Context, endpoint string) (*http.Response, 
 			}
 		}
 	}
-	return nil, fmt.Errorf("Microsoft Graph request failed after retries: %w", lastErr)
+	return nil, fmt.Errorf("microsoft Graph request failed after retries: %w", lastErr)
+}
+
+func (c *graphClient) validateEndpoint(endpoint string) error {
+	base, baseErr := url.Parse(c.baseURL)
+	target, targetErr := url.Parse(endpoint)
+	if baseErr != nil || targetErr != nil || base.Scheme == "" || base.Host == "" ||
+		target.Scheme == "" || target.Host == "" || target.User != nil || target.Fragment != "" {
+		return errors.New("invalid Microsoft Graph endpoint")
+	}
+	if !strings.EqualFold(base.Scheme, target.Scheme) || !strings.EqualFold(base.Host, target.Host) {
+		return errors.New("microsoft Graph endpoint changed origin")
+	}
+	return nil
 }
 
 func graphBackoff(attempt int) time.Duration {
@@ -335,7 +357,9 @@ func isDeltaExpired(err error) bool {
 	if !errors.As(err, &graphErr) {
 		return false
 	}
-	return graphErr.StatusCode == http.StatusGone || graphErr.Code == "resyncRequired" || graphErr.Code == "syncStateNotFound"
+	return graphErr.StatusCode == http.StatusGone ||
+		graphErr.Code == "resyncRequired" ||
+		graphErr.Code == "syncStateNotFound"
 }
 
 func randomRequestID() (string, error) {

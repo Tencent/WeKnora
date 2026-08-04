@@ -5907,6 +5907,7 @@ export default {
     status: {
       active: 'Подключено',
       paused: 'Приостановлено',
+      connecting: 'Завершение подключения',
       error: 'Ошибка',
       reauthorization_required: 'Требуется повторная авторизация',
     },

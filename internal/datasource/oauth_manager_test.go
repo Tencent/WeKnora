@@ -1,3 +1,4 @@
+//nolint:errcheck,lll // Test handlers write compact JSON fixtures to in-memory response recorders.
 package datasource
 
 import (
@@ -19,7 +20,9 @@ import (
 	"gorm.io/gorm"
 )
 
-func newOAuthManagerTest(t *testing.T, upstream *httptest.Server) (*DataSourceOAuthManager, *types.DataSource) {
+func newOAuthManagerTest(
+	t *testing.T, upstream *httptest.Server,
+) (*OneDriveOAuthManager, *types.DataSource) {
 	t.Helper()
 	t.Setenv("EDITION", "lite")
 	t.Setenv("SYSTEM_AES_KEY", "0123456789abcdef0123456789abcdef")
@@ -30,9 +33,14 @@ func newOAuthManagerTest(t *testing.T, upstream *httptest.Server) (*DataSourceOA
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&types.DataSource{}, &types.DataSourceOAuthToken{}, &types.DataSourceItem{}))
-	ds := &types.DataSource{TenantID: 9, KnowledgeBaseID: "kb", Name: "OneDrive", Type: types.ConnectorTypeOneDrive, Status: types.DataSourceStatusPaused}
+	ds := &types.DataSource{
+		TenantID: 9, KnowledgeBaseID: "kb", Name: "OneDrive",
+		Type: types.ConnectorTypeOneDrive, Status: types.DataSourceStatusPaused,
+	}
 	require.NoError(t, db.Create(ds).Error)
-	manager := NewDataSourceOAuthManager(repository.NewDataSourceOAuthRepository(db), repository.NewDataSourceRepository(db), nil)
+	manager := NewOneDriveOAuthManager(
+		repository.NewDataSourceOAuthRepository(db), repository.NewDataSourceRepository(db), nil,
+	)
 	manager.loginBase = upstream.URL
 	manager.graphBase = upstream.URL
 	manager.httpClient = upstream.Client()
@@ -81,6 +89,9 @@ func TestDataSourceOAuthAuthorizationAndRefresh(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, status.Authorized)
 	require.Equal(t, "drive-1", status.AuthorizedDriveID)
+	published, err := manager.Status(context.Background(), ds.TenantID, ds.ID)
+	require.NoError(t, err)
+	require.True(t, published.Authorized)
 
 	_, err = manager.CompleteAuthorization(context.Background(), state, "code", "")
 	require.ErrorContains(t, err, "not found or expired")
@@ -143,6 +154,10 @@ func TestDataSourceOAuthRejectsDifferentAccountWithoutReplacement(t *testing.T) 
 	require.NoError(t, err)
 	require.True(t, status.ReplacedConnection)
 	require.Equal(t, uint64(2), status.ConnectionVersion)
+	published, err := manager.Status(context.Background(), ds.TenantID, ds.ID)
+	require.NoError(t, err)
+	require.False(t, published.Authorized)
+	require.Equal(t, uint64(2), published.ConnectionVersion)
 }
 
 func TestDataSourceOAuthRequiresSharedStateOutsideLite(t *testing.T) {
@@ -168,7 +183,7 @@ func TestOAuthRefreshSkewIsPositive(t *testing.T) {
 }
 
 func TestOAuthInvalidGrantRequiresReauthorization(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprint(w, `{"error":"invalid_grant","error_description":"interaction required"}`)
@@ -187,7 +202,7 @@ func TestOAuthInvalidGrantRequiresReauthorization(t *testing.T) {
 
 func TestOAuthCallbackRejectsStaleConnectionVersionBeforeExchange(t *testing.T) {
 	var tokenCalls atomic.Int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		tokenCalls.Add(1)
 		http.Error(w, "must not be called", http.StatusInternalServerError)
 	}))
@@ -201,4 +216,71 @@ func TestOAuthCallbackRejectsStaleConnectionVersionBeforeExchange(t *testing.T) 
 	_, err = manager.CompleteAuthorization(context.Background(), parsed.Query().Get("state"), "code", "")
 	require.ErrorIs(t, err, ErrOAuthConnectionChanged)
 	require.Zero(t, tokenCalls.Load())
+}
+
+func TestOAuthProviderCancellationConsumesState(t *testing.T) {
+	upstream := httptest.NewServer(http.NotFoundHandler())
+	defer upstream.Close()
+	manager, ds := newOAuthManagerTest(t, upstream)
+	authorizeURL, err := manager.AuthorizeURL(context.Background(), ds.TenantID, ds.ID, "admin", false)
+	require.NoError(t, err)
+	parsed, err := url.Parse(authorizeURL)
+	require.NoError(t, err)
+	state := parsed.Query().Get("state")
+
+	_, err = manager.CompleteAuthorization(context.Background(), state, "", "access_denied")
+	require.ErrorContains(t, err, "canceled")
+	_, err = manager.CompleteAuthorization(context.Background(), state, "code", "")
+	require.ErrorContains(t, err, "not found or expired")
+}
+
+func TestOAuthStateExpiryAndTamperingFailClosed(t *testing.T) {
+	store := newDataSourceOAuthStateStore(nil)
+	store.mem["expired"] = dataSourceOAuthStateEntry{
+		value:     dataSourceOAuthState{TenantID: 1, DataSourceID: "ds"},
+		expiresAt: time.Now().Add(-time.Second),
+	}
+	_, err := store.take(context.Background(), "expired")
+	require.ErrorContains(t, err, "not found or expired")
+	_, err = store.take(context.Background(), "attacker-controlled-state")
+	require.ErrorContains(t, err, "not found or expired")
+}
+
+func TestOAuthCallbackRejectsStateForAnotherTenant(t *testing.T) {
+	var tokenCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		tokenCalls.Add(1)
+		http.Error(w, "must not be called", http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
+	manager, ds := newOAuthManagerTest(t, upstream)
+	require.NoError(t, manager.states.put(context.Background(), "cross-tenant", dataSourceOAuthState{
+		TenantID: ds.TenantID + 1, DataSourceID: ds.ID, AuthorizedBy: "attacker",
+		ConnectionVersion: ds.ConnectionVersion, CodeVerifier: "verifier",
+	}))
+
+	_, err := manager.CompleteAuthorization(context.Background(), "cross-tenant", "code", "")
+	require.ErrorIs(t, err, ErrDataSourceNotFound)
+	require.Zero(t, tokenCalls.Load())
+}
+
+func TestOAuthTokenExchangeDoesNotFollowRedirectWithClientSecret(t *testing.T) {
+	attackerRequests := 0
+	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attackerRequests++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer attacker.Close()
+	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, attacker.URL+"/steal", http.StatusTemporaryRedirect)
+	}))
+	defer identity.Close()
+	manager := &OneDriveOAuthManager{httpClient: identity.Client(), loginBase: identity.URL}
+
+	_, err := manager.exchange(context.Background(), "common", url.Values{
+		"client_id": {"client"}, "client_secret": {"secret"},
+		"grant_type": {"authorization_code"}, "code": {"code"},
+	})
+	require.Error(t, err)
+	require.Zero(t, attackerRequests)
 }

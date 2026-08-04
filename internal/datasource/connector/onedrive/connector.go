@@ -31,24 +31,173 @@ var supportedExtensions = map[string]struct{}{
 	".htm": {}, ".json": {}, ".mp3": {}, ".wav": {}, ".m4a": {}, ".flac": {}, ".ogg": {},
 }
 
+// Connector synchronizes a delegated user's OneDrive into a knowledge base.
 type Connector struct {
 	items      interfaces.DataSourceItemRepository
+	oauth      *datasource.OneDriveOAuthManager
 	graphBase  string
 	httpClient *http.Client
 }
 
-func NewConnector(items interfaces.DataSourceItemRepository) *Connector {
-	return &Connector{items: items, graphBase: defaultGraphBase}
+var (
+	_ datasource.OAuthConnector               = (*Connector)(nil)
+	_ datasource.RuntimeConnector             = (*Connector)(nil)
+	_ datasource.ConnectionLifecycleConnector = (*Connector)(nil)
+	_ datasource.SyncLifecycleConnector       = (*Connector)(nil)
+	_ datasource.DeferredCommitConnector      = (*Connector)(nil)
+	_ datasource.FetchResultConnector         = (*Connector)(nil)
+)
+
+// NewConnector creates a production OneDrive connector.
+func NewConnector(items interfaces.DataSourceItemRepository, oauth *datasource.OneDriveOAuthManager) *Connector {
+	return &Connector{items: items, oauth: oauth, graphBase: defaultGraphBase}
 }
 
-func NewConnectorWithClient(items interfaces.DataSourceItemRepository, graphBase string, client *http.Client) *Connector {
+// NewConnectorWithClient creates a connector with an injected Graph endpoint for tests.
+func NewConnectorWithClient(
+	items interfaces.DataSourceItemRepository, graphBase string, client *http.Client,
+) *Connector {
 	return &Connector{items: items, graphBase: strings.TrimRight(graphBase, "/"), httpClient: client}
 }
 
+// Type returns the connector registry key.
 func (c *Connector) Type() string { return types.ConnectorTypeOneDrive }
 
+// OAuthProvider returns the provider key used by data-source OAuth routes.
 func (c *Connector) OAuthProvider() string { return "onedrive" }
 
+// DeferCursorUntilIngestionCompletes prevents delta commits before parsing finishes.
+func (c *Connector) DeferCursorUntilIngestionCompletes() bool { return true }
+
+// PrepareRuntime injects data-source-scoped token callbacks into a sync run.
+func (c *Connector) PrepareRuntime(
+	_ context.Context, dataSource *types.DataSource, config *types.DataSourceConfig,
+) error {
+	if dataSource == nil || config == nil {
+		return datasource.ErrInvalidConfig
+	}
+	if c.oauth == nil {
+		return datasource.ErrOAuthNotConfigured
+	}
+	config.Runtime = &types.DataSourceRuntime{
+		DataSourceID: dataSource.ID, TenantID: dataSource.TenantID,
+		ConnectionVersion: dataSource.ConnectionVersion,
+		AccessToken: func(ctx context.Context) (string, error) {
+			return c.oauth.AccessToken(ctx, dataSource.TenantID, dataSource.ID, dataSource.ConnectionVersion)
+		},
+		RefreshAccessToken: func(ctx context.Context) (string, error) {
+			return c.oauth.RefreshAccessToken(ctx, dataSource.TenantID, dataSource.ID, dataSource.ConnectionVersion)
+		},
+	}
+	return nil
+}
+
+// EnsureReady verifies that the current connection is authorized and usable.
+func (c *Connector) EnsureReady(ctx context.Context, dataSource *types.DataSource) error {
+	if c.oauth == nil {
+		return datasource.ErrOAuthNotConfigured
+	}
+	status, err := c.oauth.Status(ctx, dataSource.TenantID, dataSource.ID)
+	if err != nil {
+		return err
+	}
+	if status == nil || !status.Authorized || status.ReauthorizationNeeded ||
+		status.ConnectionVersion != dataSource.ConnectionVersion {
+		return datasource.ErrOAuthReauthorizationRequired
+	}
+	return nil
+}
+
+// Disconnect revokes local authorization state and invalidates queued work.
+func (c *Connector) Disconnect(ctx context.Context, dataSource *types.DataSource) error {
+	if c.oauth == nil {
+		return datasource.ErrOAuthNotConfigured
+	}
+	return c.oauth.Revoke(ctx, dataSource.TenantID, dataSource.ID)
+}
+
+// IsRunCurrent reports whether a sync run still owns the active connection generation.
+func (c *Connector) IsRunCurrent(ctx context.Context, dataSource *types.DataSource) (bool, error) {
+	if c.oauth == nil {
+		return false, datasource.ErrOAuthNotConfigured
+	}
+	status, err := c.oauth.Status(ctx, dataSource.TenantID, dataSource.ID)
+	if err != nil {
+		return false, err
+	}
+	return status != nil && status.Authorized && status.ConnectionVersion == dataSource.ConnectionVersion, nil
+}
+
+// ReconcileItems replays retained source deletions when deletion sync is re-enabled.
+func (c *Connector) ReconcileItems(
+	ctx context.Context, dataSource *types.DataSource, fetched []types.FetchedItem,
+) ([]types.FetchedItem, error) {
+	if !dataSource.SyncDeletions || c.items == nil {
+		return fetched, nil
+	}
+	retained, err := c.items.ListRetainedDeleted(
+		ctx, dataSource.TenantID, dataSource.ID, dataSource.ConnectionVersion,
+	)
+	if err != nil {
+		return nil, err
+	}
+	seenDeletes := make(map[string]struct{})
+	for _, item := range fetched {
+		if item.IsDeleted {
+			seenDeletes[item.ExternalID] = struct{}{}
+		}
+	}
+	for _, retainedItem := range retained {
+		if _, exists := seenDeletes[retainedItem.ExternalID]; exists {
+			continue
+		}
+		fetched = append(fetched, types.FetchedItem{
+			ExternalID: retainedItem.ExternalID, IsDeleted: true,
+			SourceResourceID: retainedItem.SelectedRootID,
+			Metadata:         map[string]string{"drive_id": retainedItem.DriveID, "item_id": retainedItem.ItemID},
+		})
+	}
+	return fetched, nil
+}
+
+// MarkItemDeleted records that a source deletion was handled or retained.
+func (c *Connector) MarkItemDeleted(
+	ctx context.Context, dataSource *types.DataSource, item *types.FetchedItem,
+) error {
+	if c.items == nil {
+		return nil
+	}
+	driveID, itemID := item.Metadata["drive_id"], item.Metadata["item_id"]
+	if driveID == "" || itemID == "" {
+		return fmt.Errorf("onedrive deletion is missing drive/item identity")
+	}
+	if err := c.items.MarkDeleted(ctx, dataSource.TenantID, dataSource.ID,
+		dataSource.ConnectionVersion, driveID, itemID, time.Now().UTC()); err != nil {
+		return err
+	}
+	if dataSource.SyncDeletions {
+		return c.items.SetIngested(ctx, dataSource.TenantID, dataSource.ID,
+			dataSource.ConnectionVersion, driveID, itemID, false)
+	}
+	return nil
+}
+
+// MarkItemIngested records successful handoff to the knowledge pipeline.
+func (c *Connector) MarkItemIngested(
+	ctx context.Context, dataSource *types.DataSource, item *types.FetchedItem,
+) error {
+	if c.items == nil {
+		return nil
+	}
+	driveID, itemID := item.Metadata["drive_id"], item.Metadata["item_id"]
+	if driveID == "" || itemID == "" {
+		return fmt.Errorf("onedrive item is missing drive/item identity")
+	}
+	return c.items.SetIngested(ctx, dataSource.TenantID, dataSource.ID,
+		dataSource.ConnectionVersion, driveID, itemID, true)
+}
+
+// ValidateStaticConfig validates persisted configuration without requiring OAuth.
 func (c *Connector) ValidateStaticConfig(config *types.DataSourceConfig) error {
 	if config == nil || config.Type != "" && config.Type != types.ConnectorTypeOneDrive {
 		return datasource.ErrInvalidConfig
@@ -56,6 +205,7 @@ func (c *Connector) ValidateStaticConfig(config *types.DataSourceConfig) error {
 	return nil
 }
 
+// Validate verifies the delegated Graph connection.
 func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig) error {
 	client, err := c.client(config)
 	if err != nil {
@@ -65,6 +215,7 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 	return err
 }
 
+// ListResources lists a drive or one folder level for the resource picker.
 func (c *Connector) ListResources(
 	ctx context.Context, config *types.DataSourceConfig, parentID string,
 ) ([]types.Resource, error) {
@@ -101,6 +252,7 @@ func (c *Connector) ListResources(
 	return result, nil
 }
 
+// ResolveResourceAncestors returns ancestors needed to reveal saved selections.
 func (c *Connector) ResolveResourceAncestors(
 	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
 ) ([]string, error) {
@@ -136,6 +288,7 @@ func (c *Connector) ResolveResourceAncestors(
 	return result, nil
 }
 
+// FetchAll performs a full scan using the legacy connector result shape.
 func (c *Connector) FetchAll(
 	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
 ) ([]types.FetchedItem, error) {
@@ -146,6 +299,7 @@ func (c *Connector) FetchAll(
 	return result.Items, err
 }
 
+// FetchIncremental consumes a delta cursor using the legacy connector result shape.
 func (c *Connector) FetchIncremental(
 	ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor,
 ) ([]types.FetchedItem, *types.SyncCursor, error) {
@@ -156,6 +310,7 @@ func (c *Connector) FetchIncremental(
 	return result.Items, result.NextCursor, err
 }
 
+// FetchAllResult performs a full scan, catches up concurrent delta changes, and returns a cursor.
 func (c *Connector) FetchAllResult(
 	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
 ) (*types.FetchResult, error) {
@@ -222,12 +377,22 @@ func (c *Connector) FetchAllResult(
 	for _, item := range missing {
 		if item.SelectedRootID != "" && item.Ingested && item.DeletedAt == nil {
 			result.Items = append(result.Items, deletedFetchedItem(item))
+		} else if item.DeletedAt == nil {
+			// Folders and never-ingested files have no knowledge-side effect to
+			// defer, but must still leave the live hierarchy projection.
+			if err := c.items.MarkDeleted(
+				ctx, item.TenantID, item.DataSourceID, item.ConnectionVersion,
+				item.DriveID, item.ItemID, time.Now().UTC(),
+			); err != nil {
+				return result, err
+			}
 		}
 	}
 	result.NextCursor, err = buildCursor(deltaLink, selectionHash(canonicalIDs), config.Runtime.ConnectionVersion)
 	return result, err
 }
 
+// FetchIncrementalResult applies changes since the last committed delta cursor.
 func (c *Connector) FetchIncrementalResult(
 	ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor,
 ) (*types.FetchResult, error) {
@@ -275,7 +440,18 @@ func (c *Connector) walk(
 	if item == nil {
 		return nil
 	}
-	if err := c.upsertRemoteItem(ctx, config, driveID, item, selectedRoot, generation, false); err != nil {
+	ingested := false
+	existing, err := c.items.Find(
+		ctx, config.Runtime.TenantID, config.Runtime.DataSourceID,
+		config.Runtime.ConnectionVersion, driveID, item.ID,
+	)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		ingested = existing.Ingested
+	}
+	if err := c.upsertRemoteItem(ctx, config, driveID, item, selectedRoot, generation, ingested); err != nil {
 		return err
 	}
 	if item.Folder != nil {
@@ -313,6 +489,7 @@ func (c *Connector) applyChanges(
 	result *types.FetchResult,
 ) error {
 	last := make(map[string]driveItem)
+	liveChanges := make(map[string]struct{})
 	order := make([]string, 0, len(changes))
 	for _, item := range changes {
 		driveID := item.ParentReference.DriveID
@@ -325,6 +502,12 @@ func (c *Connector) applyChanges(
 		}
 		last[key] = item
 	}
+	for key, item := range last {
+		if item.Deleted == nil {
+			liveChanges[key] = struct{}{}
+		}
+	}
+	queuedDeletes := make(map[string]struct{})
 	for _, key := range order {
 		item := last[key]
 		driveID := item.ParentReference.DriveID
@@ -338,19 +521,10 @@ func (c *Connector) applyChanges(
 		}
 		if item.Deleted != nil {
 			if existing != nil && existing.SelectedRootID != "" {
-				if existing.Ingested {
-					result.Items = append(result.Items, deletedFetchedItem(existing))
-				}
-				if existing.ItemType == "folder" {
-					descendants, err := c.descendants(ctx, config, existing.ItemID)
-					if err != nil {
-						return err
-					}
-					for _, child := range descendants {
-						if child.Ingested {
-							result.Items = append(result.Items, deletedFetchedItem(child))
-						}
-					}
+				if err := c.queueRemoval(
+					ctx, config, existing, liveChanges, queuedDeletes, result,
+				); err != nil {
+					return err
 				}
 			}
 			continue
@@ -362,19 +536,10 @@ func (c *Connector) applyChanges(
 		}
 		if selectedRoot == "" {
 			if existing != nil && existing.SelectedRootID != "" {
-				if existing.Ingested {
-					result.Items = append(result.Items, deletedFetchedItem(existing))
-				}
-				if existing.ItemType == "folder" {
-					descendants, err := c.descendants(ctx, config, existing.ItemID)
-					if err != nil {
-						return err
-					}
-					for _, child := range descendants {
-						if child.Ingested {
-							result.Items = append(result.Items, deletedFetchedItem(child))
-						}
-					}
+				if err := c.queueRemoval(
+					ctx, config, existing, liveChanges, queuedDeletes, result,
+				); err != nil {
+					return err
 				}
 			}
 			if err := c.upsertRemoteItem(ctx, config, driveID, &item, "", generation, false); err != nil {
@@ -388,7 +553,8 @@ func (c *Connector) applyChanges(
 			}
 			continue
 		}
-		if err := c.upsertRemoteItem(ctx, config, driveID, &item, selectedRoot, generation, existing != nil && existing.Ingested); err != nil {
+		ingested := existing != nil && existing.Ingested
+		if err := c.upsertRemoteItem(ctx, config, driveID, &item, selectedRoot, generation, ingested); err != nil {
 			return err
 		}
 		fetched, warning := c.fetchFile(ctx, client, driveID, &item, selectedRoot)
@@ -399,6 +565,69 @@ func (c *Connector) applyChanges(
 		result.Items = append(result.Items, *fetched)
 	}
 	return nil
+}
+
+func (c *Connector) queueRemoval(
+	ctx context.Context,
+	config *types.DataSourceConfig,
+	root *types.DataSourceItem,
+	liveChanges map[string]struct{},
+	queued map[string]struct{},
+	result *types.FetchResult,
+) error {
+	items := []*types.DataSourceItem{root}
+	if root.ItemType == "folder" {
+		descendants, err := c.descendants(ctx, config, root.ItemID)
+		if err != nil {
+			return err
+		}
+		items = append(items, descendants...)
+	}
+	byID := make(map[string]*types.DataSourceItem, len(items))
+	for _, item := range items {
+		byID[item.ItemID] = item
+	}
+	deletedAt := time.Now().UTC()
+	for _, item := range items {
+		if item != root && survivesDeletedAncestor(item, root.ItemID, liveChanges, byID) {
+			continue
+		}
+		if item.Ingested {
+			if _, exists := queued[item.ExternalID]; !exists {
+				result.Items = append(result.Items, deletedFetchedItem(item))
+				queued[item.ExternalID] = struct{}{}
+			}
+			continue
+		}
+		if err := c.items.MarkDeleted(
+			ctx, config.Runtime.TenantID, config.Runtime.DataSourceID,
+			config.Runtime.ConnectionVersion, item.DriveID, item.ItemID, deletedAt,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func survivesDeletedAncestor(
+	item *types.DataSourceItem,
+	deletedRootID string,
+	liveChanges map[string]struct{},
+	byID map[string]*types.DataSourceItem,
+) bool {
+	current := item
+	seen := make(map[string]struct{})
+	for current != nil && current.ItemID != deletedRootID {
+		if _, live := liveChanges[current.DriveID+":"+current.ItemID]; live {
+			return true
+		}
+		if _, cycle := seen[current.ItemID]; cycle {
+			return false
+		}
+		seen[current.ItemID] = struct{}{}
+		current = byID[current.ParentItemID]
+	}
+	return false
 }
 
 func (c *Connector) resolveSelectedRoot(
@@ -462,11 +691,17 @@ func (c *Connector) fetchFile(
 ) (*types.FetchedItem, *types.FetchWarning) {
 	ext := strings.ToLower(filepath.Ext(item.Name))
 	if _, ok := supportedExtensions[ext]; !ok {
-		return nil, &types.FetchWarning{Code: "unsupported_file_type", ExternalID: externalID(driveID, item.ID), Message: "unsupported file type: " + ext}
+		return nil, &types.FetchWarning{
+			Code: "unsupported_file_type", ExternalID: externalID(driveID, item.ID),
+			Message: "unsupported file type: " + ext,
+		}
 	}
 	maxSize := utils.GetMaxFileSize()
 	if item.Size > maxSize {
-		return nil, &types.FetchWarning{Code: "file_too_large", ExternalID: externalID(driveID, item.ID), Message: fmt.Sprintf("file exceeds %d bytes", maxSize)}
+		return nil, &types.FetchWarning{
+			Code: "file_too_large", ExternalID: externalID(driveID, item.ID),
+			Message: fmt.Sprintf("file exceeds %d bytes", maxSize),
+		}
 	}
 	content, err := client.download(ctx, driveID, item.ID, maxSize)
 	if err != nil {
@@ -551,11 +786,12 @@ func (c *Connector) client(config *types.DataSourceConfig) (*graphClient, error)
 	if err := c.ValidateStaticConfig(config); err != nil {
 		return nil, err
 	}
-	if config.Runtime == nil || config.Runtime.AccessToken == nil || config.Runtime.DataSourceID == "" || config.Runtime.TenantID == 0 {
+	if config.Runtime == nil || config.Runtime.AccessToken == nil ||
+		config.Runtime.DataSourceID == "" || config.Runtime.TenantID == 0 {
 		return nil, datasource.ErrOAuthReauthorizationRequired
 	}
 	if c.items == nil {
-		return nil, fmt.Errorf("OneDrive item repository is not configured")
+		return nil, fmt.Errorf("onedrive item repository is not configured")
 	}
 	return newGraphClient(c.graphBase, c.httpClient, config.Runtime.AccessToken, config.Runtime.RefreshAccessToken), nil
 }
@@ -577,7 +813,8 @@ func (c *Connector) normalizeRefs(
 		seen[encoded] = struct{}{}
 		refs = append(refs, ref)
 	}
-	if _, wholeDriveSelected := seen[encodeRef(resourceRef{DriveID: authorizedDriveID, ItemID: rootItemID})]; wholeDriveSelected {
+	rootRef := resourceRef{DriveID: authorizedDriveID, ItemID: rootItemID}
+	if _, wholeDriveSelected := seen[encodeRef(rootRef)]; wholeDriveSelected {
 		root := resourceRef{DriveID: authorizedDriveID, ItemID: rootItemID}
 		encoded := encodeRef(root)
 		return []resourceRef{root}, []string{encoded}, nil

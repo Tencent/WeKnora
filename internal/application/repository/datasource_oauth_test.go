@@ -68,6 +68,23 @@ func TestDataSourceOAuthRepositoryFailsClosedWithoutAESKey(t *testing.T) {
 	require.ErrorContains(t, err, "SYSTEM_AES_KEY")
 }
 
+func TestDataSourceOAuthRepositoryFailsClosedWithWrongAESKey(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", "0123456789abcdef0123456789abcdef")
+	db := newDataSourceOAuthTestDB(t)
+	ds := &types.DataSource{TenantID: 2, KnowledgeBaseID: "kb", Name: "OneDrive", Type: types.ConnectorTypeOneDrive}
+	require.NoError(t, db.Create(ds).Error)
+	repo := NewDataSourceOAuthRepository(db)
+	require.NoError(t, repo.Save(context.Background(), &types.DataSourceOAuthToken{
+		TenantID: 2, DataSourceID: ds.ID, Provider: "onedrive", AccessToken: "access",
+		RefreshToken: "refresh", ExpiresAt: time.Now().Add(time.Hour), ProviderAccountID: "account",
+		AuthorizedDriveID: "drive", AuthorizedByUserID: "user", ConnectionVersion: 1,
+	}))
+
+	t.Setenv("SYSTEM_AES_KEY", "abcdef0123456789abcdef0123456789")
+	_, err := repo.Get(context.Background(), 2, ds.ID)
+	require.Error(t, err)
+}
+
 func TestDataSourceItemRepositoryUpsertAndTenantIsolation(t *testing.T) {
 	t.Setenv("SYSTEM_AES_KEY", "0123456789abcdef0123456789abcdef")
 	db := newDataSourceOAuthTestDB(t)
@@ -130,6 +147,57 @@ func TestRevokeAuthorizationInvalidatesConnectionStateAtomically(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, token)
 	item, err := NewDataSourceItemRepository(db).Find(context.Background(), 9, ds.ID, 3, "drive", "item")
+	require.NoError(t, err)
+	require.Nil(t, item)
+}
+
+func TestReplaceAuthorizationRotatesConnectionAndClearsOldSyncState(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", "0123456789abcdef0123456789abcdef")
+	db := newDataSourceOAuthTestDB(t)
+	configJSON, err := (&types.DataSourceConfig{
+		Type: types.ConnectorTypeOneDrive, ResourceIDs: []string{"old-root"},
+	}).ToJSON()
+	require.NoError(t, err)
+	ds := &types.DataSource{
+		TenantID: 15, KnowledgeBaseID: "kb", Name: "OneDrive", Type: types.ConnectorTypeOneDrive,
+		Status: types.DataSourceStatusActive, ConnectionVersion: 1, Config: configJSON,
+		LastSyncCursor: types.JSON(`{"connector_cursor":{"delta_link":"old-secret"}}`),
+	}
+	require.NoError(t, db.Create(ds).Error)
+	repo := NewDataSourceOAuthRepository(db)
+	require.NoError(t, repo.Save(context.Background(), &types.DataSourceOAuthToken{
+		TenantID: 15, DataSourceID: ds.ID, Provider: "onedrive", AccessToken: "old-access",
+		RefreshToken: "old-refresh", ExpiresAt: time.Now().Add(time.Hour), ProviderAccountID: "old-account",
+		AuthorizedDriveID: "old-drive", AuthorizedByUserID: "admin", ConnectionVersion: 1,
+	}))
+	require.NoError(t, NewDataSourceItemRepository(db).Upsert(context.Background(), &types.DataSourceItem{
+		TenantID: 15, DataSourceID: ds.ID, ConnectionVersion: 1, DriveID: "old-drive", ItemID: "old-item",
+		ItemType: "file", ExternalID: "old-external", Ingested: true,
+	}))
+	resetConfig, err := (&types.DataSourceConfig{Type: types.ConnectorTypeOneDrive}).ToJSON()
+	require.NoError(t, err)
+
+	version, err := repo.SaveAuthorization(context.Background(), &types.DataSourceOAuthToken{
+		TenantID: 15, DataSourceID: ds.ID, Provider: "onedrive", AccessToken: "new-access",
+		RefreshToken: "new-refresh", ExpiresAt: time.Now().Add(time.Hour), ProviderAccountID: "new-account",
+		AuthorizedDriveID: "new-drive", AuthorizedByUserID: "admin",
+	}, 1, true, resetConfig)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), version)
+
+	var stored types.DataSource
+	require.NoError(t, db.First(&stored, "id = ?", ds.ID).Error)
+	require.Equal(t, uint64(2), stored.ConnectionVersion)
+	require.Equal(t, types.DataSourceStatusConnecting, stored.Status)
+	require.Empty(t, stored.LastSyncCursor)
+	parsed, err := stored.ParseConfig()
+	require.NoError(t, err)
+	require.Empty(t, parsed.ResourceIDs)
+	token, err := repo.Get(context.Background(), 15, ds.ID)
+	require.NoError(t, err)
+	require.Equal(t, "new-account", token.ProviderAccountID)
+	require.Equal(t, uint64(2), token.ConnectionVersion)
+	item, err := NewDataSourceItemRepository(db).Find(context.Background(), 15, ds.ID, 1, "old-drive", "old-item")
 	require.NoError(t, err)
 	require.Nil(t, item)
 }

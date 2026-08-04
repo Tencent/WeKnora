@@ -25,10 +25,6 @@ type DataSourceService interface {
 	// DeleteDataSource deletes a data source (soft delete)
 	DeleteDataSource(ctx context.Context, id string) error
 
-	// DeleteDataSourceKnowledge removes knowledge created by exactly this data
-	// source and returns the number removed. It is idempotent.
-	DeleteDataSourceKnowledge(ctx context.Context, id string) (int, error)
-
 	// UpdateDataSourceCredentials replaces the connector credential map.
 	// DataSource credentials are per-connector atomic — there is no
 	// individual-field PUT, the whole map gets replaced. Returns the updated
@@ -75,6 +71,10 @@ type DataSourceService interface {
 
 	// ProcessSync handles the actual sync operation (called by asynq task)
 	ProcessSync(ctx context.Context, task *asynq.Task) error
+
+	// ProcessSyncFinalize commits a candidate cursor after asynchronous
+	// knowledge ingestion reaches a terminal state.
+	ProcessSyncFinalize(ctx context.Context, task *asynq.Task) error
 }
 
 // DataSourceRepository defines database access patterns for data sources
@@ -134,13 +134,33 @@ type DataSourceOAuthRepository interface {
 // hierarchy used to scope drive-level delta events to selected resources.
 type DataSourceItemRepository interface {
 	Upsert(ctx context.Context, item *types.DataSourceItem) error
-	Find(ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64, driveID, itemID string) (*types.DataSourceItem, error)
-	ListByParent(ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64, parentItemID string) ([]*types.DataSourceItem, error)
-	ListBySelectedRoot(ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64, selectedRootID string) ([]*types.DataSourceItem, error)
-	ListNotSeen(ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64, generation string) ([]*types.DataSourceItem, error)
-	ListRetainedDeleted(ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64) ([]*types.DataSourceItem, error)
-	MarkDeleted(ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64, driveID, itemID string, deletedAt time.Time) error
-	SetIngested(ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64, driveID, itemID string, ingested bool) error
+	Find(
+		ctx context.Context, tenantID uint64, dataSourceID string,
+		connectionVersion uint64, driveID, itemID string,
+	) (*types.DataSourceItem, error)
+	ListByParent(
+		ctx context.Context, tenantID uint64, dataSourceID string,
+		connectionVersion uint64, parentItemID string,
+	) ([]*types.DataSourceItem, error)
+	ListBySelectedRoot(
+		ctx context.Context, tenantID uint64, dataSourceID string,
+		connectionVersion uint64, selectedRootID string,
+	) ([]*types.DataSourceItem, error)
+	ListNotSeen(
+		ctx context.Context, tenantID uint64, dataSourceID string,
+		connectionVersion uint64, generation string,
+	) ([]*types.DataSourceItem, error)
+	ListRetainedDeleted(
+		ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64,
+	) ([]*types.DataSourceItem, error)
+	MarkDeleted(
+		ctx context.Context, tenantID uint64, dataSourceID string,
+		connectionVersion uint64, driveID, itemID string, deletedAt time.Time,
+	) error
+	SetIngested(
+		ctx context.Context, tenantID uint64, dataSourceID string,
+		connectionVersion uint64, driveID, itemID string, ingested bool,
+	) error
 	DeleteConnection(ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64) error
 }
 
