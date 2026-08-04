@@ -3048,6 +3048,7 @@ export default {
     thinkingAlt: 'Обдумывание...',
     preparingAnswer: 'Подготовка ответа…',
     connectingModelAndGeneratingAnswer: 'Подключение к модели и создание ответа…',
+    modelStillResponding: 'Модель отвечает дольше обычного, продолжаем ждать…',
     deepThoughtCompleted: 'Глубокий анализ завершён',
     deepThoughtAlt: 'Глубокий анализ',
     referencesTitle: 'Использовано {count} связанного материала',
