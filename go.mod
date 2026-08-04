@@ -1,6 +1,6 @@
 module github.com/Tencent/WeKnora
 
-go 1.24.0
+go 1.24
 
 require (
 	codeberg.org/readeck/go-readability/v2 v2.1.2
@@ -39,7 +39,7 @@ require (
 	github.com/minio/minio-go/v7 v7.1.0
 	github.com/mmcdole/gofeed v1.3.0
 	github.com/neo4j/neo4j-go-driver/v6 v6.0.0
-	github.com/ollama/ollama v0.23.2
+	github.com/ollama/ollama v0.11.4
 	github.com/open-dingtalk/dingtalk-stream-sdk-go v0.9.1
 	github.com/opensearch-project/opensearch-go/v4 v4.6.0
 	github.com/panjf2000/ants/v2 v2.12.0
