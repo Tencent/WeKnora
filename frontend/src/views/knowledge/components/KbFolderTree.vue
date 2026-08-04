@@ -113,7 +113,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { KnowledgeFolderNode, KnowledgeFolderTree } from '@/api/knowledge-base/index'
+import type { KnowledgeFolderTree } from '@/api/knowledge-base/index'
+import { flattenFolderRows, folderAncestorPaths } from '../folderTree'
 
 const props = withDefaults(defineProps<{
   tree: KnowledgeFolderTree | null
@@ -144,21 +145,7 @@ const expanded = ref(new Set<string>())
  */
 const showRootRow = computed(() => (props.tree?.folders?.length ?? 0) > 0)
 
-type FolderRow = { node: KnowledgeFolderNode; depth: number }
-
-const rows = computed<FolderRow[]>(() => {
-  const result: FolderRow[] = []
-  const walk = (nodes: KnowledgeFolderNode[], depth: number) => {
-    nodes.forEach((node) => {
-      result.push({ node, depth })
-      if (node.children?.length && expanded.value.has(node.path)) {
-        walk(node.children, depth + 1)
-      }
-    })
-  }
-  walk(props.tree?.folders ?? [], 0)
-  return result
-})
+const rows = computed(() => flattenFolderRows(props.tree?.folders ?? [], expanded.value))
 
 const toggle = (path: string) => {
   const next = new Set(expanded.value)
@@ -173,13 +160,10 @@ const toggle = (path: string) => {
 watch(
   () => [props.selectedPath, props.tree] as const,
   () => {
-    const path = props.selectedPath
-    if (!path) return
+    const ancestors = folderAncestorPaths(props.selectedPath)
+    if (ancestors.length === 0) return
     const next = new Set(expanded.value)
-    const segments = path.split('/')
-    for (let i = 1; i <= segments.length; i++) {
-      next.add(segments.slice(0, i).join('/'))
-    }
+    ancestors.forEach((path) => next.add(path))
     expanded.value = next
   },
   { immediate: true },
