@@ -257,6 +257,122 @@ func (s *partialSearchKnowledgeBaseService) HybridSearch(
 	return []*types.SearchResult{{ID: "chunk-good", Content: "可用结果", KnowledgeID: "knowledge-good"}}, nil
 }
 
+type stubWebSearchService struct {
+	interfaces.WebSearchService
+	results []*types.WebSearchResult
+}
+
+func (s *stubWebSearchService) Search(
+	_ context.Context, _ string, _ *types.WebSearchConfig, _ string,
+) ([]*types.WebSearchResult, error) {
+	return s.results, nil
+}
+
+func TestSearchKeepsWebResultsWhenKnowledgeBaseFails(t *testing.T) {
+	rootCause := errors.New("kb store unavailable")
+	plugin := &PluginSearch{
+		knowledgeBaseService: &failingSearchKnowledgeBaseService{err: rootCause},
+		webSearchService: &stubWebSearchService{
+			results: []*types.WebSearchResult{{
+				URL:     "https://example.com/doc",
+				Title:   "Web hit",
+				Content: "web content",
+			}},
+		},
+		tenantService: &struct{ interfaces.TenantService }{},
+	}
+	chatManage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			SearchTargets: types.SearchTargets{{
+				Type:            types.SearchTargetTypeKnowledgeBase,
+				KnowledgeBaseID: "kb-1",
+			}},
+			EmbeddingTopK:       10,
+			WebSearchEnabled:    true,
+			WebSearchProviderID: "provider-1",
+		},
+		PipelineState: types.PipelineState{RewriteQuery: "并发检索"},
+	}
+	nextCalled := false
+
+	err := plugin.OnEvent(context.Background(), types.CHUNK_SEARCH, chatManage, func() *PluginError {
+		nextCalled = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("expected web results to keep pipeline alive, got %#v", err)
+	}
+	if !nextCalled {
+		t.Fatal("expected pipeline to continue with web results")
+	}
+	if len(chatManage.SearchResult) != 1 || chatManage.SearchResult[0].ID != "https://example.com/doc" {
+		t.Fatalf("expected web search result, got %#v", chatManage.SearchResult)
+	}
+}
+
+type wikiOnlySearchKnowledgeBaseService struct {
+	interfaces.KnowledgeBaseService
+	embedErr     error
+	hybridCalled bool
+}
+
+func (s *wikiOnlySearchKnowledgeBaseService) GetKnowledgeBasesByIDsOnly(
+	context.Context, []string,
+) ([]*types.KnowledgeBase, error) {
+	return []*types.KnowledgeBase{{
+		ID:               "wiki-1",
+		Type:             types.KnowledgeBaseTypeDocument,
+		EmbeddingModelID: "embedding-1",
+		IndexingStrategy: types.IndexingStrategy{WikiEnabled: true},
+	}}, nil
+}
+
+func (s *wikiOnlySearchKnowledgeBaseService) ResolveEmbeddingModelKeys(
+	context.Context, []*types.KnowledgeBase,
+) map[string]string {
+	return map[string]string{"wiki-1": "doubao|https://ark.cn-beijing.volces.com/api/v3"}
+}
+
+func (s *wikiOnlySearchKnowledgeBaseService) GetQueryEmbedding(
+	context.Context, string, string,
+) ([]float32, error) {
+	return nil, s.embedErr
+}
+
+func (s *wikiOnlySearchKnowledgeBaseService) HybridSearch(
+	context.Context, string, types.SearchParams,
+) ([]*types.SearchResult, error) {
+	s.hybridCalled = true
+	return nil, nil
+}
+
+func TestSearchEmbeddingFailureOnWikiOnlyTargetReportsNoResults(t *testing.T) {
+	svc := &wikiOnlySearchKnowledgeBaseService{
+		embedErr: errors.New("embedding endpoint unavailable"),
+	}
+	plugin := &PluginSearch{knowledgeBaseService: svc}
+	chatManage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			SearchTargets: types.SearchTargets{{
+				Type:            types.SearchTargetTypeKnowledgeBase,
+				KnowledgeBaseID: "wiki-1",
+			}},
+			EmbeddingTopK: 10,
+		},
+		PipelineState: types.PipelineState{RewriteQuery: "wiki only"},
+	}
+
+	err := plugin.OnEvent(context.Background(), types.CHUNK_SEARCH, chatManage, func() *PluginError {
+		return nil
+	})
+	if err != ErrSearchNothing {
+		t.Fatalf("expected search_nothing for wiki-only KB, got %#v", err)
+	}
+	if !svc.hybridCalled {
+		t.Fatal("wiki-only target should still delegate empty recall to HybridSearch")
+	}
+}
+
 func TestSearchKeepsSuccessfulResultsWhenAnotherTargetFails(t *testing.T) {
 	rootCause := errors.New("one store unavailable")
 	plugin := &PluginSearch{knowledgeBaseService: &partialSearchKnowledgeBaseService{rootCause: rootCause}}
