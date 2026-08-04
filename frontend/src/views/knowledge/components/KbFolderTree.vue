@@ -4,16 +4,21 @@
       <template v-if="!collapsed">
         <span class="kb-folder-tree__title">{{ t('knowledgeBase.folderTree.title') }}</span>
         <div class="kb-folder-tree__header-actions">
-          <t-tooltip :content="t('knowledgeBase.folderTree.includeSubfolders')" placement="top">
+          <t-tooltip
+            :content="recursive
+              ? t('knowledgeBase.folderTree.scopeSubtreeTip')
+              : t('knowledgeBase.folderTree.scopeDirectTip')"
+            placement="top"
+          >
             <button
               type="button"
               class="kb-folder-tree__icon-btn"
               :class="{ active: recursive }"
               :aria-pressed="recursive"
-              :aria-label="t('knowledgeBase.folderTree.includeSubfolders')"
+              :aria-label="t('knowledgeBase.folderTree.scopeToggle')"
               @click="emit('update:recursive', !recursive)"
             >
-              <t-icon name="tree-round-dot-vertical" size="15px" />
+              <t-icon :name="recursive ? 'tree-round-dot-vertical' : 'file-1'" size="15px" />
             </button>
           </t-tooltip>
           <t-tooltip :content="t('knowledgeBase.folderTree.collapse')" placement="top">
@@ -41,70 +46,38 @@
     </div>
 
     <div v-if="!collapsed" class="kb-folder-tree__body">
-      <template v-if="loading && !rows.length">
+      <template v-if="loading && !tree">
         <div v-for="n in 5" :key="'folder-skel-' + n" class="kb-folder-tree__skeleton">
           <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '16px' }]" />
         </div>
       </template>
       <template v-else>
         <button
-          type="button"
-          class="kb-folder-row kb-folder-row--all"
-          :class="{ active: selectedPath === null }"
-          @click="emit('select', null)"
-        >
-          <t-icon name="folder-open" class="kb-folder-row__icon" />
-          <span class="kb-folder-row__label">{{ t('knowledgeBase.folderTree.allDocuments') }}</span>
-          <span class="kb-folder-row__count">{{ tree?.total_document_count ?? 0 }}</span>
-        </button>
-
-        <button
-          v-if="showRootRow"
-          type="button"
-          class="kb-folder-row"
-          :class="{ active: selectedPath === '' }"
-          :style="{ '--kb-folder-depth': 0 }"
-          @click="emit('select', '')"
-        >
-          <span class="kb-folder-row__toggle-placeholder" aria-hidden="true" />
-          <t-icon name="folder" class="kb-folder-row__icon" />
-          <span class="kb-folder-row__label">{{ t('knowledgeBase.folderTree.rootFolder') }}</span>
-          <span class="kb-folder-row__count">{{ tree?.root_document_count ?? 0 }}</span>
-        </button>
-
-        <button
           v-for="row in rows"
-          :key="row.node.path"
+          :key="row.path || '__root__'"
           type="button"
           class="kb-folder-row"
-          :class="{ active: selectedPath === row.node.path }"
+          :class="{ active: selectedPath === row.path, 'is-root': row.kind === 'root' }"
           :style="{ '--kb-folder-depth': row.depth }"
-          :title="row.node.path"
-          @click="emit('select', row.node.path)"
+          :title="rowTitle(row)"
+          @click="emit('select', row.path)"
         >
           <span
-            v-if="row.node.children?.length"
+            v-if="row.hasChildren"
             class="kb-folder-row__toggle"
             role="button"
-            :aria-label="t(expanded.has(row.node.path)
+            :aria-label="t(isExpanded(row.path)
               ? 'knowledgeBase.folderTree.collapseFolder'
               : 'knowledgeBase.folderTree.expandFolder')"
-            @click.stop="toggle(row.node.path)"
+            @click.stop="toggle(row.path)"
           >
-            <t-icon :name="expanded.has(row.node.path) ? 'chevron-down' : 'chevron-right'" />
+            <t-icon :name="isExpanded(row.path) ? 'chevron-down' : 'chevron-right'" />
           </span>
           <span v-else class="kb-folder-row__toggle-placeholder" aria-hidden="true" />
-          <t-icon
-            :name="expanded.has(row.node.path) && row.node.children?.length ? 'folder-open' : 'folder'"
-            class="kb-folder-row__icon"
-          />
-          <span class="kb-folder-row__label">{{ row.node.name }}</span>
-          <span class="kb-folder-row__count">{{ recursive ? row.node.total_count : row.node.document_count }}</span>
+          <t-icon :name="rowIcon(row)" class="kb-folder-row__icon" />
+          <span class="kb-folder-row__label">{{ rowLabel(row) }}</span>
+          <span class="kb-folder-row__count">{{ folderRowCount(row, recursive) }}</span>
         </button>
-
-        <p v-if="!rows.length && !loading" class="kb-folder-tree__empty">
-          {{ t('knowledgeBase.folderTree.empty') }}
-        </p>
       </template>
     </div>
   </aside>
@@ -114,38 +87,53 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { KnowledgeFolderTree } from '@/api/knowledge-base/index'
-import { flattenFolderRows, folderAncestorPaths } from '../folderTree'
+import {
+  buildFolderRows,
+  folderAncestorPaths,
+  folderRowCount,
+  ROOT_FOLDER_PATH,
+  type FolderRow,
+} from '../folderTree'
 
 const props = withDefaults(defineProps<{
   tree: KnowledgeFolderTree | null
-  /** `null` = every folder, `''` = knowledge base root, otherwise a folder path. */
-  selectedPath: string | null
+  /** Selected folder path; the empty string is the knowledge base root. */
+  selectedPath: string
   loading?: boolean
   collapsed?: boolean
+  /** When true a folder lists its sub-folders' documents too. */
   recursive?: boolean
 }>(), {
   loading: false,
   collapsed: false,
-  recursive: false,
+  recursive: true,
 })
 
 const emit = defineEmits<{
-  select: [path: string | null]
+  select: [path: string]
   'update:collapsed': [collapsed: boolean]
   'update:recursive': [recursive: boolean]
 }>()
 
 const { t } = useI18n()
 
-const expanded = ref(new Set<string>())
+// The root starts expanded so the uploaded structure is visible without a click.
+const expanded = ref(new Set<string>([ROOT_FOLDER_PATH]))
 
-/**
- * The root row only makes sense once folders exist: without it a knowledge base
- * with no folder upload would show a redundant second "all documents" row.
- */
-const showRootRow = computed(() => (props.tree?.folders?.length ?? 0) > 0)
+const rows = computed(() => buildFolderRows(props.tree, expanded.value))
 
-const rows = computed(() => flattenFolderRows(props.tree?.folders ?? [], expanded.value))
+const isExpanded = (path: string) => expanded.value.has(path)
+
+const rowLabel = (row: FolderRow) =>
+  row.kind === 'root' ? t('knowledgeBase.folderTree.rootRow') : row.name
+
+const rowIcon = (row: FolderRow) => {
+  if (row.kind === 'root') return 'folder-open'
+  return row.hasChildren && isExpanded(row.path) ? 'folder-open' : 'folder'
+}
+
+const rowTitle = (row: FolderRow) =>
+  row.kind === 'root' ? t('knowledgeBase.folderTree.rootRowTip') : row.path
 
 const toggle = (path: string) => {
   const next = new Set(expanded.value)
@@ -154,27 +142,28 @@ const toggle = (path: string) => {
   expanded.value = next
 }
 
-// Keep the selected folder reachable: every ancestor of the active path is
-// expanded, both on first load and when the selection changes from elsewhere
-// (e.g. clicking a document's folder chip in the list).
+// Keep the selected folder reachable: expand the root and every folder above
+// the active path, both on first load and when the selection changes from
+// elsewhere (e.g. clicking a document's folder chip in the list).
 watch(
   () => [props.selectedPath, props.tree] as const,
   () => {
-    const ancestors = folderAncestorPaths(props.selectedPath)
-    if (ancestors.length === 0) return
     const next = new Set(expanded.value)
-    ancestors.forEach((path) => next.add(path))
+    folderAncestorPaths(props.selectedPath).forEach((path) => next.add(path))
     expanded.value = next
   },
   { immediate: true },
 )
 
-// First load auto-expands the top level so folders are visible without a click.
+// First load also opens the top-level folders, so a two-level upload is visible
+// in full without any expanding.
 watch(
   () => props.tree,
   (tree) => {
-    if (!tree?.folders?.length || expanded.value.size > 0) return
-    expanded.value = new Set(tree.folders.map((folder) => folder.path))
+    if (!tree?.folders?.length || expanded.value.size > 1) return
+    const next = new Set(expanded.value)
+    tree.folders.forEach((folder) => next.add(folder.path))
+    expanded.value = next
   },
   { immediate: true },
 )
@@ -308,10 +297,10 @@ watch(
       color: var(--td-brand-color);
     }
   }
-}
 
-.kb-folder-row--all {
-  margin-bottom: 2px;
+  &.is-root .kb-folder-row__label {
+    font-weight: 500;
+  }
 }
 
 .kb-folder-row__toggle,
@@ -358,12 +347,5 @@ watch(
   font-size: 11px;
   color: var(--td-text-color-placeholder);
   font-variant-numeric: tabular-nums;
-}
-
-.kb-folder-tree__empty {
-  margin: 8px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--td-text-color-placeholder);
 }
 </style>
