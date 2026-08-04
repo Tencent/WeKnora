@@ -1211,6 +1211,94 @@ func (h *KnowledgeHandler) RenameKnowledgeFolder(c *gin.Context) {
 	})
 }
 
+type DeleteKnowledgeFolderRequest struct {
+	Path      string `json:"path" binding:"required"`
+	Recursive bool   `json:"recursive"`
+}
+
+// DeleteKnowledgeFolder godoc
+// @Summary      删除文件夹
+// @Description  删除一个文件夹。空文件夹或不存在的路径为空操作；文件夹内还有文档时需 recursive=true，此时子目录下所有文档会走异步删除管线一并清理（含分块、向量与文件）。根目录不可删（清空知识库另有接口）
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                        true  "知识库ID"
+// @Param        request  body      DeleteKnowledgeFolderRequest  true  "删除请求"
+// @Success      200      {object}  map[string]interface{}        "删除任务已提交"
+// @Failure      400      {object}  errors.AppError               "请求参数错误或文件夹非空"
+// @Failure      403      {object}  errors.AppError               "权限不足"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/knowledge/folders [delete]
+func (h *KnowledgeHandler) DeleteKnowledgeFolder(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req DeleteKnowledgeFolderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
+		return
+	}
+
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("No permission to delete knowledge"))
+		return
+	}
+	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
+		c.Error(err)
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	// The repository query is scoped to this tenant and KB, so every resolved id
+	// belongs to kbID - no per-id cross-KB guard is needed here.
+	ids, err := h.kgService.ListKnowledgeIDsInFolder(ctx, kbID, req.Path)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if len(ids) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    gin.H{"deleted_count": 0},
+		})
+		return
+	}
+	if !req.Recursive {
+		c.Error(errors.NewBadRequestError(
+			fmt.Sprintf("folder is not empty (%d documents); pass recursive=true to delete", len(ids))))
+		return
+	}
+
+	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, ids)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to enqueue folder delete task: %v", err)
+		c.Error(errors.NewInternalServerError("Failed to enqueue folder delete task"))
+		return
+	}
+
+	logger.Infof(ctx, "Folder delete task enqueued: %s, kb_id: %s, folder: %s, count: %d",
+		taskID, secutils.SanitizeForLog(kbID), secutils.SanitizeForLog(req.Path), len(ids))
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Folder delete task submitted",
+		"data": gin.H{
+			"task_id":       taskID,
+			"deleted_count": len(ids),
+		},
+	})
+}
+
 // dedupeKnowledgeIDs trims, drops empty and de-duplicates a batch of IDs while
 // preserving the caller's order.
 func dedupeKnowledgeIDs(raw []string) []string {

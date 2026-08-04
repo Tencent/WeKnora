@@ -99,6 +99,10 @@ type KnowledgeService interface {
 	) (int64, error)
 	// RenameKnowledgeFolder moves a folder and everything below it to a new path.
 	RenameKnowledgeFolder(ctx context.Context, kbID string, from string, to string) (int64, error)
+	// ListKnowledgeIDsInFolder returns the IDs of every document in a folder and
+	// its subtree, so a folder delete can route them through the normal delete
+	// pipeline. The empty root path is rejected.
+	ListKnowledgeIDsInFolder(ctx context.Context, kbID string, folderPath string) ([]string, error)
 	// DeleteKnowledge deletes knowledge by ID.
 	DeleteKnowledge(ctx context.Context, id string) error
 	// DeleteKnowledgeList deletes multiple knowledge entries by IDs.
@@ -280,6 +284,15 @@ type KnowledgeRepository interface {
 		from string,
 		to string,
 	) (int64, error)
+	// ListKnowledgeIDsByFolderPath returns the IDs of every entry in a folder and
+	// its descendants, so a folder delete can route them through the normal
+	// knowledge delete pipeline.
+	ListKnowledgeIDsByFolderPath(
+		ctx context.Context,
+		tenantID uint64,
+		kbID string,
+		folderPath string,
+	) ([]string, error)
 	// AminusB returns the IDs of knowledge in A that have no counterpart in B,
 	// comparing file_hash as a multiset (so duplicate-count differences and
 	// NULL/empty hashes are handled correctly, letting a clone converge).

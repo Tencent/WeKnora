@@ -638,6 +638,21 @@ func (s *knowledgeService) RenameKnowledgeFolder(ctx context.Context,
 	return affected, nil
 }
 
+// ListKnowledgeIDsInFolder returns the IDs of every document in folderPath and
+// its subtree. The empty root path is rejected so a folder delete can never be
+// turned into a whole-knowledge-base wipe - clearing a knowledge base is what
+// ClearKnowledgeBaseContents is for.
+func (s *knowledgeService) ListKnowledgeIDsInFolder(ctx context.Context,
+	kbID string, folderPath string,
+) ([]string, error) {
+	source := types.NormalizeKnowledgeFolderPath(folderPath)
+	if source == "" {
+		return nil, werrors.NewBadRequestError("根目录不能作为文件夹删除")
+	}
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	return s.repo.ListKnowledgeIDsByFolderPath(ctx, tenantID, kbID, source)
+}
+
 // normalizeTargetFolderPath canonicalizes a caller-supplied destination folder
 // and applies the same input validation as the upload path, since the value ends
 // up rendered as sidebar tree labels.

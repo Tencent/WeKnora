@@ -249,6 +249,32 @@ func (r *knowledgeRepository) UpdateKnowledgeFolderPath(
 	return result.RowsAffected, nil
 }
 
+// ListKnowledgeIDsByFolderPath returns the IDs of every knowledge entry stored
+// in folderPath or any folder below it, skipping rows already mid-deletion. It
+// is the resolver behind a folder delete: the caller routes the IDs through the
+// normal knowledge delete pipeline so chunks, embeddings and files are torn down
+// instead of being orphaned by a bare folder-column wipe.
+func (r *knowledgeRepository) ListKnowledgeIDsByFolderPath(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	folderPath string,
+) ([]string, error) {
+	if folderPath == "" {
+		return nil, errors.New("folder path is required")
+	}
+	var ids []string
+	if err := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ? AND (folder_path = ? OR folder_path LIKE ? ESCAPE ?)",
+			tenantID, kbID, types.ParseStatusDeleting,
+			folderPath, escapeLikeKeyword(folderPath)+"/%", likeEscapeChar).
+		Pluck("id", &ids).Error; err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 // RenameKnowledgeFolderPath rewrites folder_path for a folder and every folder
 // below it, which is how a folder rename or move is applied. Renaming onto an
 // existing path merges the two folders. Returns the number of affected rows.
