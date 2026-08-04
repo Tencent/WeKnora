@@ -181,6 +181,51 @@ func TestDefaultMode(t *testing.T) {
 	assert.Equal(t, ModeHandle, DefaultMode(ctx), "a typo must degrade to the safe default")
 }
 
+// Anonymous surfaces (embed channels) pin the mode: neither the query parameter
+// nor the deployment default may hand a visitor a credential-free URL. The
+// downgrade is silent so a client that forwards the parameter keeps working.
+func TestResolveMode_ForcedHandleModeWins(t *testing.T) {
+	t.Setenv(EnvVar, "public")
+	ctx := WithForcedHandleMode(context.Background())
+
+	for _, queryValue := range []string{"", "public", "handle", "nonsense"} {
+		mode, err := ResolveMode(ctx, queryValue)
+		require.NoError(t, err, "queryValue=%q", queryValue)
+		assert.Equal(t, ModeHandle, mode, "queryValue=%q", queryValue)
+	}
+}
+
+// A KB-restricted API key is denied the /files proxy, so it must not receive
+// anonymous file URLs through this parameter either.
+func TestResolveMode_RejectsPublicForKBRestrictedKey(t *testing.T) {
+	ctx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
+		KnowledgeBaseIDs: types.StringArray{"kb-1"},
+	})
+
+	_, err := ResolveMode(ctx, "public")
+	assert.ErrorIs(t, err, ErrPublicModeForbidden)
+
+	// The deployment default must not smuggle it in either.
+	t.Setenv(EnvVar, "public")
+	_, err = ResolveMode(ctx, "")
+	assert.ErrorIs(t, err, ErrPublicModeForbidden)
+
+	// The default mode stays available: only public URLs are off limits.
+	mode, err := ResolveMode(ctx, "handle")
+	require.NoError(t, err)
+	assert.Equal(t, ModeHandle, mode)
+}
+
+// A full-access or tenant-wide key is unaffected.
+func TestResolveMode_AllowsPublicForUnrestrictedKey(t *testing.T) {
+	ctx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
+		Capabilities: types.StringArray{string(types.APIKeyCapabilityRetrieve)},
+	})
+	mode, err := ResolveMode(ctx, "public")
+	require.NoError(t, err)
+	assert.Equal(t, ModePublic, mode)
+}
+
 func TestResolveMode_QueryWinsOverDeployment(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv(EnvVar, "public")

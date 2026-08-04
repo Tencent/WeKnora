@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 // ── Incomplete-reference detection ──
@@ -35,7 +36,18 @@ func FindIncompleteRef(s string) int {
 // (the parenthesized part) is not yet closed — e.g. "![alt](minio://part" or
 // "![alt](". Holding back only from "minio://" would flush "![alt](" to the
 // client and break the image once the URL arrives in the next chunk.
-var incompleteMarkdownImageSuffixRe = regexp.MustCompile(`!\[[^\]]*\]\([^)]*$`)
+//
+// The destination must be whitespace-free, and FindIncompleteMarkdownImage caps
+// its length: a URL contains neither whitespace nor a newline, and even a
+// presigned URL stays well under the cap. Without those limits, prose that
+// merely mentions an unclosed "…](" (an answer explaining Markdown syntax, or a
+// code sample) would look forever-unclosed and stall the rest of the stream.
+var incompleteMarkdownImageSuffixRe = regexp.MustCompile(`!\[[^\]]*\]\([^)\s]*$`)
+
+// maxIncompleteImageBytes bounds how much trailing text may be treated as an
+// unfinished Markdown image. Beyond it the text is not plausibly a link, so it
+// is flushed instead of buffered.
+const maxIncompleteImageBytes = 2048
 
 // FindIncompleteMarkdownImage returns the byte offset of an unclosed
 // `![alt](url` suffix at the end of s, or -1 if none.
@@ -50,7 +62,7 @@ func FindIncompleteMarkdownImage(s string) int {
 		}
 	}
 	loc := incompleteMarkdownImageSuffixRe.FindStringIndex(s)
-	if loc == nil {
+	if loc == nil || len(s)-loc[0] > maxIncompleteImageBytes {
 		return -1
 	}
 	return loc[0]
@@ -87,12 +99,27 @@ type StreamRewriter struct {
 	rewriter *Rewriter
 
 	mu   sync.Mutex
-	held map[string]string
+	held map[string]heldContent
+}
+
+// heldContent is a retained tail plus the metadata of the event it came from, so
+// a tail released after its stream ended can be re-emitted as an equivalent
+// event rather than a bare fragment.
+type heldContent struct {
+	content string
+	meta    interface{}
+}
+
+// Held is one released tail: the rewritten content and the metadata carried by
+// the last Push that contributed to it.
+type Held struct {
+	Content string
+	Meta    interface{}
 }
 
 // NewStreamRewriter wraps rewriter with per-stream holdback state.
 func NewStreamRewriter(rewriter *Rewriter) *StreamRewriter {
-	return &StreamRewriter{rewriter: rewriter, held: make(map[string]string)}
+	return &StreamRewriter{rewriter: rewriter, held: make(map[string]heldContent)}
 }
 
 // Enabled reports whether this StreamRewriter can rewrite anything.
@@ -111,14 +138,16 @@ func (s *StreamRewriter) Rewriter() *Rewriter {
 
 // Push feeds the next chunk of the stream identified by key and returns the
 // rewritten content that is ready to emit. Set flush on the stream's terminal
-// chunk to release any held tail.
-func (s *StreamRewriter) Push(ctx context.Context, key, chunk string, flush bool) string {
+// chunk to release any held tail. meta is retained opaquely alongside the tail
+// and handed back by FlushAll so a late release can carry the same metadata as
+// the event it was cut from.
+func (s *StreamRewriter) Push(ctx context.Context, key, chunk string, flush bool, meta interface{}) string {
 	if !s.Enabled() {
 		return chunk
 	}
 
 	s.mu.Lock()
-	pending := s.held[key] + chunk
+	pending := s.held[key].content + chunk
 	cutoff := len(pending)
 	if !flush {
 		cutoff = HoldbackCutoff(pending)
@@ -126,24 +155,34 @@ func (s *StreamRewriter) Push(ctx context.Context, key, chunk string, flush bool
 		// contain a partial reference, which is what an un-rewritten stream
 		// would have shown anyway.
 		if len(pending)-cutoff > maxHeldBytes {
-			cutoff = len(pending) - maxHeldBytes
+			cutoff = runeStart(pending, len(pending)-maxHeldBytes)
 		}
 	}
 	emit := pending[:cutoff]
 	if remainder := pending[cutoff:]; remainder == "" {
 		delete(s.held, key)
 	} else {
-		s.held[key] = remainder
+		s.held[key] = heldContent{content: remainder, meta: meta}
 	}
 	s.mu.Unlock()
 
 	return s.rewriter.String(ctx, emit)
 }
 
+// runeStart moves idx back to the nearest UTF-8 sequence boundary so a byte-based
+// cut never splits a character in half. Pattern-derived cutoffs already land on
+// ASCII delimiters; this only matters for the maxHeldBytes safety valve.
+func runeStart(s string, idx int) int {
+	for idx > 0 && !utf8.RuneStart(s[idx]) {
+		idx--
+	}
+	return idx
+}
+
 // FlushAll releases every held tail, rewritten, keyed by stream. Callers use it
 // when a stream ends without a terminal chunk (for example a client
 // disconnect) so buffered content is not silently dropped.
-func (s *StreamRewriter) FlushAll(ctx context.Context) map[string]string {
+func (s *StreamRewriter) FlushAll(ctx context.Context) map[string]Held {
 	if !s.Enabled() {
 		return nil
 	}
@@ -153,12 +192,12 @@ func (s *StreamRewriter) FlushAll(ctx context.Context) map[string]string {
 		return nil
 	}
 	pending := s.held
-	s.held = make(map[string]string)
+	s.held = make(map[string]heldContent)
 	s.mu.Unlock()
 
-	out := make(map[string]string, len(pending))
-	for key, content := range pending {
-		out[key] = s.rewriter.String(ctx, content)
+	out := make(map[string]Held, len(pending))
+	for key, held := range pending {
+		out[key] = Held{Content: s.rewriter.String(ctx, held.content), Meta: held.meta}
 	}
 	return out
 }

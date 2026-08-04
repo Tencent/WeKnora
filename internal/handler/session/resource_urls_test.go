@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -186,6 +187,56 @@ func TestEmitStreamEvent_FlushesHeldContentBeforeCompletion(t *testing.T) {
 		indexOf(body, `"response_type":"answer"`),
 		indexOf(body, `"response_type":"complete"`),
 		"held content must precede the completion marker",
+	)
+}
+
+// An error can be the last event of a run, so it must release the buffer too —
+// otherwise the tail generated before the failure is lost.
+func TestEmitStreamEvent_FlushesHeldContentOnError(t *testing.T) {
+	rewriter := publicStreamRewriter()
+	ctx := context.Background()
+	c, recorder := newTestGinContext(t, "?resource_urls=public")
+
+	buildStreamResponseFor(ctx, interfaces.StreamEvent{
+		ID:      "answer-1",
+		Type:    types.ResponseTypeAnswer,
+		Content: "tail ![fig](resource://xifDo7",
+		Data:    map[string]interface{}{"event_id": "answer-1", "is_fallback": true},
+	}, "req-1", rewriter)
+
+	emitStreamEvent(ctx, c, interfaces.StreamEvent{
+		ID: "err-1", Type: types.ResponseTypeError, Content: "upstream failed", Done: true,
+	}, "req-1", rewriter)
+
+	body := recorder.Body.String()
+	assert.Contains(t, body, `![fig](resource://xifDo7`, "the tail must not be swallowed")
+	assert.Contains(t, body, `"is_fallback":true`,
+		"a released tail must carry the metadata of the event it was cut from")
+	assert.Less(t,
+		indexOf(body, `"response_type":"answer"`),
+		indexOf(body, `"response_type":"error"`),
+		"held content must precede the error",
+	)
+}
+
+// A user-requested stop ends the stream without a completion event, and the text
+// generated before it is still the user's content.
+func TestHandleAgentEventsForSSE_FlushesHeldContentOnStop(t *testing.T) {
+	h := &Handler{streamManager: &stubStreamManager{events: []interfaces.StreamEvent{
+		{ID: "answer-1", Type: types.ResponseTypeAnswer, Content: "tail ![fig](resource://xifDo7"},
+		{ID: "stop-1", Type: types.ResponseType(event.EventStop), Done: true},
+	}}}
+	c, recorder := newTestGinContext(t, "?resource_urls=public")
+
+	h.handleAgentEventsForSSE(
+		context.Background(), c, "sess1", "msg1", "req-1", nil, false, publicStreamRewriter())
+
+	body := recorder.Body.String()
+	assert.Contains(t, body, `![fig](resource://xifDo7`, "the tail must not be swallowed")
+	assert.Less(t,
+		indexOf(body, `"response_type":"answer"`),
+		indexOf(body, `"response_type":"stop"`),
+		"held content must precede the stop notification",
 	)
 }
 

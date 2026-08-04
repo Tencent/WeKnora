@@ -56,6 +56,11 @@ type Resolver interface {
 // or per outbound message: a `resource://` handle costs one access-grant row per
 // resolution, and a streamed answer repeats the same image across many chunks.
 //
+// Safe for concurrent use: mu covers both the memo and the resolver, which is
+// itself single-threaded. Resolution therefore serialises across goroutines,
+// which is what we want — two chunks naming the same image must not each pay for
+// a signature.
+//
 // Logging policy:
 //   - A successful rewrite logs at INFO with the full signed URL so operators
 //     can copy it out of logs and verify public reachability directly. The
@@ -109,19 +114,18 @@ func (w *Rewriter) Ref(ctx context.Context, ref string) string {
 	return w.String(ctx, ref)
 }
 
+// ref resolves one reference. The lock is held across resolve because Resolver
+// implementations (FileServiceResolver in particular) keep an unsynchronised
+// per-provider cache, and because it collapses a concurrent duplicate into one
+// signature instead of two.
 func (w *Rewriter) ref(ctx context.Context, ref string) string {
 	w.mu.Lock()
-	cached, ok := w.memo[ref]
-	w.mu.Unlock()
-	if ok {
+	defer w.mu.Unlock()
+	if cached, ok := w.memo[ref]; ok {
 		return cached
 	}
-
 	resolved := w.resolve(ctx, ref)
-
-	w.mu.Lock()
 	w.memo[ref] = resolved
-	w.mu.Unlock()
 	return resolved
 }
 
