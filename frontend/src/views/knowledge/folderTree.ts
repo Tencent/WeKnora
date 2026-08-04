@@ -147,3 +147,24 @@ export function buildFolderRows(
 export function folderRowCount(row: FolderRow, recursive: boolean): number {
   return recursive ? row.totalCount : row.documentCount
 }
+
+/**
+ * i18n key for the root row's label. The root is the only row whose contents
+ * change meaning with the scope: recursively it is the whole knowledge base,
+ * directly it is exactly the documents that are not inside any folder — which
+ * single-file uploads are, and which would otherwise have no visible home in a
+ * tree that can only show folders. Naming the row after what it currently lists
+ * keeps one mechanism instead of adding a second pseudo-folder for them.
+ */
+export function rootRowLabelKey(recursive: boolean): string {
+  return recursive
+    ? 'knowledgeBase.folderTree.rootRow'
+    : 'knowledgeBase.folderTree.rootRowDirect'
+}
+
+/** i18n key for the root row's tooltip, following the same rule as its label. */
+export function rootRowTitleKey(recursive: boolean): string {
+  return recursive
+    ? 'knowledgeBase.folderTree.rootRowTip'
+    : 'knowledgeBase.folderTree.rootRowDirectTip'
+}

@@ -3,35 +3,16 @@
     <div class="kb-folder-tree__header">
       <template v-if="!collapsed">
         <span class="kb-folder-tree__title">{{ t('knowledgeBase.folderTree.title') }}</span>
-        <div class="kb-folder-tree__header-actions">
-          <t-tooltip
-            :content="recursive
-              ? t('knowledgeBase.folderTree.scopeSubtreeTip')
-              : t('knowledgeBase.folderTree.scopeDirectTip')"
-            placement="top"
+        <t-tooltip :content="t('knowledgeBase.folderTree.collapse')" placement="top">
+          <button
+            type="button"
+            class="kb-folder-tree__icon-btn"
+            :aria-label="t('knowledgeBase.folderTree.collapse')"
+            @click="emit('update:collapsed', true)"
           >
-            <button
-              type="button"
-              class="kb-folder-tree__icon-btn"
-              :class="{ active: recursive }"
-              :aria-pressed="recursive"
-              :aria-label="t('knowledgeBase.folderTree.scopeToggle')"
-              @click="emit('update:recursive', !recursive)"
-            >
-              <t-icon :name="recursive ? 'tree-round-dot-vertical' : 'file-1'" size="15px" />
-            </button>
-          </t-tooltip>
-          <t-tooltip :content="t('knowledgeBase.folderTree.collapse')" placement="top">
-            <button
-              type="button"
-              class="kb-folder-tree__icon-btn"
-              :aria-label="t('knowledgeBase.folderTree.collapse')"
-              @click="emit('update:collapsed', true)"
-            >
-              <t-icon name="chevron-left-double" size="15px" />
-            </button>
-          </t-tooltip>
-        </div>
+            <t-icon name="chevron-left-double" size="15px" />
+          </button>
+        </t-tooltip>
       </template>
       <t-tooltip v-else :content="t('knowledgeBase.folderTree.expand')" placement="right">
         <button
@@ -41,6 +22,25 @@
           @click="emit('update:collapsed', false)"
         >
           <t-icon name="chevron-right-double" size="15px" />
+        </button>
+      </t-tooltip>
+    </div>
+
+    <!-- Labeled rather than an icon toggle: this switch is what makes the
+         documents outside every folder reachable, so it must be readable at a
+         glance instead of hiding behind a tooltip. -->
+    <div v-if="!collapsed" class="kb-folder-scope" role="group"
+      :aria-label="t('knowledgeBase.folderTree.scopeToggle')">
+      <t-tooltip :content="t('knowledgeBase.folderTree.scopeSubtreeTip')" placement="bottom">
+        <button type="button" class="kb-folder-scope__btn" :class="{ active: recursive }"
+          :aria-pressed="recursive" @click="emit('update:recursive', true)">
+          {{ t('knowledgeBase.folderTree.scopeSubtree') }}
+        </button>
+      </t-tooltip>
+      <t-tooltip :content="t('knowledgeBase.folderTree.scopeDirectTip')" placement="bottom">
+        <button type="button" class="kb-folder-scope__btn" :class="{ active: !recursive }"
+          :aria-pressed="!recursive" @click="emit('update:recursive', false)">
+          {{ t('knowledgeBase.folderTree.scopeDirect') }}
         </button>
       </t-tooltip>
     </div>
@@ -91,6 +91,8 @@ import {
   buildFolderRows,
   folderAncestorPaths,
   folderRowCount,
+  rootRowLabelKey,
+  rootRowTitleKey,
   ROOT_FOLDER_PATH,
   type FolderRow,
 } from '../folderTree'
@@ -125,15 +127,17 @@ const rows = computed(() => buildFolderRows(props.tree, expanded.value))
 const isExpanded = (path: string) => expanded.value.has(path)
 
 const rowLabel = (row: FolderRow) =>
-  row.kind === 'root' ? t('knowledgeBase.folderTree.rootRow') : row.name
+  row.kind === 'root' ? t(rootRowLabelKey(props.recursive)) : row.name
 
 const rowIcon = (row: FolderRow) => {
-  if (row.kind === 'root') return 'folder-open'
+  // Direct scope on the root lists the loose documents rather than the whole
+  // base, so the icon drops the "folder" metaphor it no longer stands for.
+  if (row.kind === 'root') return props.recursive ? 'folder-open' : 'file-1'
   return row.hasChildren && isExpanded(row.path) ? 'folder-open' : 'folder'
 }
 
 const rowTitle = (row: FolderRow) =>
-  row.kind === 'root' ? t('knowledgeBase.folderTree.rootRowTip') : row.path
+  row.kind === 'root' ? t(rootRowTitleKey(props.recursive)) : row.path
 
 const toggle = (path: string) => {
   const next = new Set(expanded.value)
@@ -207,11 +211,43 @@ watch(
   text-overflow: ellipsis;
 }
 
-.kb-folder-tree__header-actions {
+.kb-folder-scope {
   display: flex;
-  align-items: center;
-  gap: 2px;
   flex-shrink: 0;
+  gap: 2px;
+  margin-top: 2px;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.kb-folder-scope__btn {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font-family: var(--app-font-family);
+  font-size: 12px;
+  line-height: 22px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+
+  &:hover:not(.active) {
+    color: var(--td-text-color-primary);
+  }
+
+  &.active {
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-container);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  }
 }
 
 .kb-folder-tree__icon-btn {
