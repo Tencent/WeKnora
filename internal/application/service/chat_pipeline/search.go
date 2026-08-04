@@ -93,12 +93,14 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	allResults := make([]*types.SearchResult, 0)
+	var kbSearchErr error
 
 	wg.Add(2)
 	// Goroutine 1: Knowledge base search using SearchTargets
 	go func() {
 		defer wg.Done()
-		kbResults := p.searchByTargets(ctx, chatManage)
+		kbResults, err := p.searchByTargets(ctx, chatManage)
+		kbSearchErr = err
 		if len(kbResults) > 0 {
 			mu.Lock()
 			allResults = append(allResults, kbResults...)
@@ -118,6 +120,18 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	}()
 
 	wg.Wait()
+	if kbSearchErr != nil && len(allResults) == 0 {
+		pipelineError(ctx, "Search", "kb_search_failed", map[string]interface{}{
+			"error": kbSearchErr.Error(),
+		})
+		return ErrSearch.WithError(kbSearchErr)
+	}
+	if kbSearchErr != nil {
+		pipelineWarn(ctx, "Search", "kb_search_partial_failure", map[string]interface{}{
+			"error":        kbSearchErr.Error(),
+			"result_count": len(allResults),
+		})
+	}
 
 	chatManage.SearchResult = allResults
 
@@ -317,9 +331,9 @@ func logSearchScoreSample(ctx context.Context, action string, results []*types.S
 func (p *PluginSearch) searchByTargets(
 	ctx context.Context,
 	chatManage *types.ChatManage,
-) []*types.SearchResult {
+) ([]*types.SearchResult, error) {
 	if len(chatManage.SearchTargets) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	queryText := strings.TrimSpace(chatManage.RewriteQuery)
@@ -364,22 +378,45 @@ func (p *PluginSearch) searchByTargets(
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var results []*types.SearchResult
+	var firstErr error
+	var errOnce sync.Once
+	recordError := func(err error) {
+		if err != nil {
+			errOnce.Do(func() { firstErr = err })
+		}
+	}
 
 	for modelKey, targets := range groups {
 		wg.Add(1)
 		go func(modelKey string, targets []*types.SearchTarget) {
 			defer wg.Done()
 
-			// Compute embedding once for this model group.
+			// Compute embedding once for this model group. When that fails, retain
+			// only targets that have a real keyword index; vector-only targets must
+			// propagate the embedding failure instead of looking like empty recall.
 			var queryEmbedding []float32
+			disableVector := false
+			searchableTargets := targets
 			if modelKey != "" {
 				emb, err := p.knowledgeBaseService.GetQueryEmbedding(ctx, targets[0].KnowledgeBaseID, queryText)
 				if err != nil {
-					pipelineWarn(ctx, "Search", "group_embed_error", map[string]interface{}{
-						"model_key": modelKey,
-						"kb_id":     targets[0].KnowledgeBaseID,
-						"error":     err.Error(),
+					searchableTargets = make([]*types.SearchTarget, 0, len(targets))
+					for _, target := range targets {
+						kb := kbMap[target.KnowledgeBaseID]
+						if kb != nil && kb.Type != types.KnowledgeBaseTypeFAQ && kb.IsKeywordEnabled() {
+							searchableTargets = append(searchableTargets, target)
+							continue
+						}
+						recordError(fmt.Errorf("knowledge base %s has no keyword fallback: %w", target.KnowledgeBaseID, err))
+					}
+					pipelineWarn(ctx, "Search", "group_embed_degrade_keyword", map[string]interface{}{
+						"model_key":        modelKey,
+						"kb_id":            targets[0].KnowledgeBaseID,
+						"error":            err.Error(),
+						"fallback_targets": len(searchableTargets),
+						"failed_targets":   len(targets) - len(searchableTargets),
 					})
+					disableVector = true
 				} else {
 					queryEmbedding = emb
 				}
@@ -389,7 +426,7 @@ func (p *PluginSearch) searchByTargets(
 			// from specific-knowledge targets (need per-target direct loading).
 			var fullKBIDs []string
 			var knowledgeTargets []*types.SearchTarget
-			for _, t := range targets {
+			for _, t := range searchableTargets {
 				if t.Type == types.SearchTargetTypeKnowledgeBase && len(t.TagIDs) == 0 {
 					fullKBIDs = append(fullKBIDs, t.KnowledgeBaseID)
 				} else {
@@ -420,6 +457,7 @@ func (p *PluginSearch) searchByTargets(
 						KeywordThreshold:      chatManage.KeywordThreshold,
 						MatchCount:            chatManage.EmbeddingTopK,
 						SkipContextEnrichment: true,
+						DisableVectorMatch:    disableVector,
 					}
 					res, err := p.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], params)
 					if err != nil {
@@ -427,6 +465,7 @@ func (p *PluginSearch) searchByTargets(
 							"kb_ids": fullKBIDs,
 							"error":  err.Error(),
 						})
+						recordError(err)
 						return
 					}
 					pipelineInfo(ctx, "Search", "combined_kb_result", map[string]interface{}{
@@ -444,7 +483,9 @@ func (p *PluginSearch) searchByTargets(
 				innerWg.Add(1)
 				go func(t *types.SearchTarget) {
 					defer innerWg.Done()
-					p.searchSingleTarget(ctx, chatManage, t, queryText, queryEmbedding, &mu, &results)
+					recordError(p.searchSingleTarget(
+						ctx, chatManage, t, queryText, queryEmbedding, disableVector, &mu, &results,
+					))
 				}(target)
 			}
 
@@ -457,7 +498,7 @@ func (p *PluginSearch) searchByTargets(
 	pipelineInfo(ctx, "Search", "kb_result_summary", map[string]interface{}{
 		"total_hits": len(results),
 	})
-	return results
+	return results, firstErr
 }
 
 // searchSingleTarget performs hybrid retrieval inside one constrained target.
@@ -467,11 +508,12 @@ func (p *PluginSearch) searchSingleTarget(
 	t *types.SearchTarget,
 	queryText string,
 	queryEmbedding []float32,
+	disableVector bool,
 	mu *sync.Mutex,
 	results *[]*types.SearchResult,
-) {
+) error {
 	if t.Type == types.SearchTargetTypeKnowledge && len(t.KnowledgeIDs) == 0 {
-		return
+		return nil
 	}
 
 	vectorThreshold, keywordThreshold := t.RecallThresholds(
@@ -494,6 +536,7 @@ func (p *PluginSearch) searchSingleTarget(
 		TagIDs:                t.TagIDs,
 		ScopeTagIDs:           t.ScopeTagIDs,
 		SkipContextEnrichment: true,
+		DisableVectorMatch:    disableVector,
 	}
 	if t.Type == types.SearchTargetTypeKnowledge {
 		params.KnowledgeIDs = t.KnowledgeIDs
@@ -506,7 +549,7 @@ func (p *PluginSearch) searchSingleTarget(
 			"query":       params.QueryText,
 			"error":       err.Error(),
 		})
-		return
+		return err
 	}
 	pipelineInfo(ctx, "Search", "kb_result", map[string]interface{}{
 		"kb_id":       t.KnowledgeBaseID,
@@ -516,6 +559,7 @@ func (p *PluginSearch) searchSingleTarget(
 	mu.Lock()
 	*results = append(*results, res...)
 	mu.Unlock()
+	return nil
 }
 
 // searchWebIfEnabled executes web search when enabled and returns converted results
