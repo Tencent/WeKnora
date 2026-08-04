@@ -63,6 +63,7 @@ import {
   folderBreadcrumbs as buildFolderBreadcrumbs,
   folderPathExists as folderExistsInTree,
   isFolderUpload,
+  rootRowLabelKey,
   ROOT_FOLDER_PATH,
 } from './folderTree';
 import { useI18n } from 'vue-i18n';
@@ -638,6 +639,8 @@ const showFolderTree = computed(() => !isFAQ.value && hasFolders.value);
 // Rows only need their folder shown when the current list can span folders.
 const showDocumentFolderPath = computed(() => hasFolders.value && folderRecursive.value);
 const folderBreadcrumbs = computed(() => buildFolderBreadcrumbs(selectedFolderPath.value));
+// Leading crumb mirrors the sidebar's root row, whose label depends on the scope.
+const folderRootLabel = computed(() => t(rootRowLabelKey(folderRecursive.value)));
 
 const filterParams = computed(() => {
   const [start, end] = updatedTimeRange.value || [];
@@ -2269,7 +2272,7 @@ async function createNewSession(value: string): Promise<void> {
               <nav v-if="showFolderTree && folderBreadcrumbs.length" class="doc-folder-path"
                 :aria-label="$t('knowledgeBase.folderTree.title')">
                 <button type="button" class="doc-folder-path__crumb" @click="handleFolderSelect('')">
-                  {{ $t('knowledgeBase.folderTree.rootRow') }}
+                  {{ folderRootLabel }}
                 </button>
                 <template v-for="(crumb, index) in folderBreadcrumbs" :key="crumb.path">
                   <t-icon name="chevron-right" class="doc-folder-path__sep" />

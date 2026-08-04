@@ -10,6 +10,8 @@ import {
   folderRowCount,
   isFolderUpload,
   ROOT_FOLDER_PATH,
+  rootRowLabelKey,
+  rootRowTitleKey,
 } from './folderTree.ts'
 
 const folders = [
@@ -148,4 +150,13 @@ test('row counts follow the recursive scope', () => {
   assert.equal(folderRowCount(root, false), 2)
   assert.equal(folderRowCount(handbook, true), 4)
   assert.equal(folderRowCount(handbook, false), 1)
+})
+
+// Single-file uploads sit outside every folder, so a folder-only tree can give
+// them no node of their own. The root row is named after what it actually lists
+// so they are still findable, without inventing a second pseudo-folder row.
+test('the root row is named after what the current scope makes it list', () => {
+  assert.equal(rootRowLabelKey(true), 'knowledgeBase.folderTree.rootRow')
+  assert.equal(rootRowLabelKey(false), 'knowledgeBase.folderTree.rootRowDirect')
+  assert.notEqual(rootRowTitleKey(true), rootRowTitleKey(false))
 })
