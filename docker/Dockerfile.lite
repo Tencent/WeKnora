@@ -1,5 +1,7 @@
-# Fast Production Runtime (expects pre-built binary in ./weknora and dist in ./frontend/dist)
-FROM debian:12-slim AS runner
+# Fast Production Runtime matching Ubuntu 24.04 (runs binary compiled on ubuntu-latest)
+FROM ubuntu:24.04 AS runner
+
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -7,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     fuse \
     libsqlite3-0 \
+    libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
