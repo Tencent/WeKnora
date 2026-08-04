@@ -177,6 +177,30 @@ def _classify_page(image_area_ratio: float, text_len: int) -> str:
     return "text"
 
 
+def _classify_page_with_text_layer_fallback(
+    image_area_ratio: float,
+    plain_text: str,
+    prefer_text_layer: bool = False,
+) -> str:
+    """Classify a page, optionally retaining a demonstrably usable text layer.
+
+    The normal scanned-page route intentionally favours the full-page image:
+    scan PDFs often ship an inaccurate hidden OCR layer. When the caller has
+    no OCR/VLM available, however, discarding a well-formed native text layer
+    would leave the document with no searchable content at all. This fallback
+    is opt-in and deliberately uses the stricter text-quality check below
+    instead of a character-count threshold.
+    """
+    classification = _classify_page(image_area_ratio, len((plain_text or "").strip()))
+    if (
+        classification == "scanned"
+        and prefer_text_layer
+        and _plain_is_well_formed(plain_text)
+    ):
+        return "text"
+    return classification
+
+
 def _page_image_area_ratio(page, raw) -> float:
     """Return the fraction of the page area covered by image objects.
 
@@ -924,6 +948,12 @@ def _plain_is_well_formed(plain: str) -> bool:
         return True
     if plain.count(" . . ") >= 2:
         return True
+    # Chinese/Japanese/Korean text usually has no whitespace-delimited words,
+    # so the Latin token heuristic below would reject a healthy text layer.
+    non_space = [ch for ch in plain if not ch.isspace()]
+    cjk_count = sum("\u3400" <= ch <= "\u9fff" for ch in non_space)
+    if len(non_space) >= 80 and cjk_count / len(non_space) >= 0.7:
+        return True
     words = re.findall(r"\S+", plain)
     if len(words) < 30:
         return False
@@ -1381,11 +1411,17 @@ class PDFParser(BaseParser):
     Force-scanned mode (``pdf_force_scanned=true`` override or
     ``DOCREADER_PDF_FORCE_SCANNED=true`` env) skips classification and
     renders every page as an image.
+
+    ``pdf_prefer_text_layer=true`` is a request-scoped fallback used when OCR
+    is unavailable. It only keeps scanned-classified pages whose text layer
+    passes ``_plain_is_well_formed``; the default remains the safer image/OCR
+    path for potentially garbled scan OCR layers.
     """
 
     def __init__(self, file_name: str = "", file_type=None, **kwargs):
         # Capture per-upload override before BaseParser consumes kwargs.
         raw = kwargs.pop("pdf_force_scanned", None)
+        prefer_text_layer = kwargs.pop("pdf_prefer_text_layer", None)
         super().__init__(file_name=file_name, file_type=file_type, **kwargs)
         # Priority: per-upload override > global env > default (False).
         if raw is not None:
@@ -1394,6 +1430,9 @@ class PDFParser(BaseParser):
             }
         else:
             self._force_scanned = FORCE_SCANNED_PDF
+        self._prefer_text_layer = str(prefer_text_layer).strip().lower() in {
+            "1", "true", "yes", "y", "on",
+        }
 
     def parse_into_text(self, content: bytes) -> Document:
         # Force-scanned short-circuit: render every page as an image.
@@ -1452,13 +1491,21 @@ class PDFParser(BaseParser):
             # Pass 1: cheap text extraction + image-area classification.
             texts: list = []
             classes: list = []
+            text_layer_fallback_indices: list = []
             vector_clips: dict = {}
             for i in range(page_count):
                 page = pdf[i]
                 try:
                     plain = _extract_page_text(page)
                     ratio = _page_image_area_ratio(page, pdfium_r)
-                    cls = _classify_page(ratio, len(plain.strip()))
+                    original_cls = _classify_page(ratio, len(plain.strip()))
+                    cls = _classify_page_with_text_layer_fallback(
+                        ratio,
+                        plain,
+                        self._prefer_text_layer,
+                    )
+                    if cls == "text" and original_cls == "scanned":
+                        text_layer_fallback_indices.append(i)
                     # Layout reconstruction only pays off (and is only spent) on
                     # native text pages; scanned pages are rendered, not read.
                     if cls == "text" and LAYOUT_ORDERING:
@@ -1556,17 +1603,19 @@ class PDFParser(BaseParser):
             "text_page_count": page_count - len(scanned_indices),
             "embedded_image_count": embedded_count,
             "vector_figure_count": vector_figure_count,
+            "text_layer_fallback_page_count": len(text_layer_fallback_indices),
             "image_source_type": "scanned_pdf" if scanned_indices else "pdf_text_layer",
         }
 
         logger.info(
             "PDFParser: %s -> %d pages (%d scanned, %d text), "
-            "embedded_images=%d, content_len=%d",
+            "embedded_images=%d, text_layer_fallback=%d, content_len=%d",
             self.file_name,
             page_count,
             len(scanned_indices),
             page_count - len(scanned_indices),
             embedded_count,
+            len(text_layer_fallback_indices),
             len(content_text),
         )
         return Document(content=content_text, images=images, metadata=metadata)

@@ -4997,6 +4997,8 @@ export default {
     totalDuration: '총 소요시간: {d}',
     total: '총 {d}',
     errorCode: {
+      MULTIMODAL_OCR_REQUIRED: '스캔 PDF에 OCR 필요',
+      MULTIMODAL_OCR_REQUIRED_SUGGESTION: '사용 가능한 텍스트를 추출하지 못했습니다. 멀티모달을 활성화하고 VLM/OCR 모델을 구성한 뒤 다시 파싱하세요.',
       UNKNOWN_SUGGESTION: '자세한 내용은 애플리케이션 로그를 확인하세요.'
     },
     status: {
