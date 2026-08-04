@@ -31,4 +31,21 @@ test('shared KB permission guidance is visible without hover', () => {
   assert.match(source, /class="section-description shared-kb-permission-tip">\s*\{\{ \$t\('organization\.settings\.permissionCalcFormula'\) \}\}/)
   const sharedKbHeader = source.slice(source.indexOf('<!-- 共享知识库 -->'), source.indexOf('<!-- 共享智能体 -->'))
   assert.doesNotMatch(sharedKbHeader, /trigger="hover"/)
+test('organization settings use one outer content scroller and reset it on navigation', () => {
+  assert.match(source, /ref="contentWrapperRef" class="content-wrapper"/)
+  assert.match(source, /class="data-table-shell members-table-shell"/)
+  assert.match(source, /contentWrapperRef\.value\?\.scrollTo\(\{ top: 0, behavior: 'auto' \}\)/)
+  assert.match(source, /watch\(\(\) => props\.visible,[\s\S]*?void scrollContentToTop\(\)/)
+  assert.match(source, /\}, \{ immediate: true \}\)\s*\n\s*watch\(\(\) => props\.orgId/)
+  assert.match(source, /watch\(\(\) => props\.orgId,[\s\S]*?void scrollContentToTop\(\)/)
+  assert.match(source, /watch\(currentSection,[\s\S]*?void scrollContentToTop\(\)/)
+  assert.match(source, /\.members-table-shell\s*\{[\s\S]*?overflow: visible;[\s\S]*?\.t-table__content/)
+})
+
+test('organization settings lock and restore background scrolling', () => {
+  assert.match(source, /document\.body\.style\.overflow = 'hidden'/)
+  assert.match(source, /document\.body\.style\.overflow = previousBodyOverflow/)
+  assert.match(source, /onBeforeUnmount\(\(\) => \{\s*unlockBackgroundScroll\(\)/)
+  assert.match(source, /\.settings-overlay\s*\{[\s\S]*?overscroll-behavior: none;/)
+  assert.match(source, /\.content-wrapper\s*\{[\s\S]*?overscroll-behavior: contain;/)
 })
