@@ -23,6 +23,7 @@ import { getDatasourceIconUrl } from './datasourceIcons'
 const props = defineProps<{
   kbId: string
   dataSource: DataSource | null
+  initialType?: string
 }>()
 
 const visible = defineModel<boolean>('visible', { default: false })
@@ -30,6 +31,7 @@ const emit = defineEmits<{ saved: [] }>()
 const { t } = useI18n()
 
 const isEdit = computed(() => !!props.dataSource)
+const isInitialTypeCreate = computed(() => !isEdit.value && !!props.initialType)
 const step = ref(0)
 const submitting = ref(false)
 
@@ -323,6 +325,7 @@ const tempDsId = ref('')
 
 // Schedule presets
 const schedulePresets = computed(() => [
+  { label: t('datasource.schedule15min'), value: '0 */15 * * * *' },
   { label: t('datasource.schedule30min'), value: '0 */30 * * * *' },
   { label: t('datasource.schedule1h'), value: '0 0 * * * *' },
   { label: t('datasource.schedule6h'), value: '0 0 */6 * * *' },
@@ -425,6 +428,25 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'auth_headers', labelKey: 'datasource.field.authHeaders', placeholder: '', optional: true, hintKey: 'datasource.field.authHeadersHint', fieldType: 'custom_headers' },
     ],
   },
+  {
+    type: 'dingtalk',
+    available: true,
+    docUrl: 'https://open-dev.dingtalk.com/',
+    permissionDocUrl: 'https://open.dingtalk.com/document/orgapp-server/authorization-overview',
+    permissionPageUrl: 'https://open-dev.dingtalk.com/',
+    requiredPermissions: [
+      'qyapi_base',
+      'Drive.Space.Read',
+      'Storage.File.Read',
+      'Drive.DownloadInfo.Read',
+      'Document.WorkspaceDocument.Read',
+    ],
+    fields: [
+      { key: 'client_id', labelKey: 'datasource.field.clientId', placeholder: 'dingxxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'union_id', labelKey: 'datasource.field.unionId', placeholder: '50qorRtuCvi...' },
+    ],
+  },
 ])
 
 
@@ -495,6 +517,12 @@ watch(visible, async (v) => {
       conflict_strategy: 'overwrite',
       sync_deletions: true,
     }
+    const def = connectorDefs.value.find(
+      item => item.type === props.initialType && item.available,
+    )
+    if (def) {
+      selectType(def)
+    }
   }
 })
 
@@ -536,6 +564,9 @@ function selectType(def: ConnectorDef) {
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
   form.value.config.credentials = {}
+  if (def.type === 'dingtalk') {
+    form.value.sync_schedule = '0 */15 * * * *'
+  }
   rssAuthHeaders.value = []
   step.value = 1
 }
@@ -944,7 +975,9 @@ const stepTitles = computed(() => [
 ])
 
 const drawerTitle = computed(() =>
-  isEdit.value ? t('datasource.editTitle') : t('datasource.createTitle'),
+  !isEdit.value && props.initialType === 'dingtalk'
+    ? t('knowledgeBase.connectDingtalk')
+    : (isEdit.value ? t('datasource.editTitle') : t('datasource.createTitle')),
 )
 
 const drawerDescription = computed(() => stepTitles.value[step.value] ?? '')
@@ -981,7 +1014,7 @@ const drawerConfirmText = computed(() => {
     </template>
 
     <template v-if="step === 1" #footer-left>
-      <t-button v-if="!isEdit" variant="outline" @click="step = 0">
+      <t-button v-if="!isEdit && !isInitialTypeCreate" variant="outline" @click="step = 0">
         {{ t('datasource.back') }}
       </t-button>
       <t-button variant="outline" :loading="testing" @click="testConnection">

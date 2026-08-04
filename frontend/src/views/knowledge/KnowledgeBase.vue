@@ -42,6 +42,7 @@ import DocumentListView from './components/DocumentListView.vue';
 import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
+import DataSourceEditorDialog from './settings/DataSourceEditorDialog.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
 import BatchTagDialog from './components/BatchTagDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
@@ -282,6 +283,10 @@ const canManage = computed(() => {
   if (authStore.hasRole('admin')) return true;
   return orgStore.canManageKB(kbId.value, false);
 });
+
+const canManageDataSource = computed(() =>
+  authStore.hasRole('admin')
+);
 
 // The activity feed exposes owner-side actor and configuration summaries.
 // It lives in KB settings (KnowledgeBaseEditorModal) for Owner/Admin in the home tenant.
@@ -1090,6 +1095,7 @@ onUnmounted(() => {
   window.removeEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
   window.removeEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
   stopMovePoll();
+  stopDingtalkImportPolling();
   if (timeout !== null) {
     clearTimeout(timeout);
     timeout = null;
@@ -1627,6 +1633,61 @@ const handleManualCreate = () => {
     onSuccess: manualEditorSuccess,
   });
 };
+
+const dingtalkImportVisible = ref(false);
+let dingtalkImportPollTimer: ReturnType<typeof setInterval> | null = null;
+let dingtalkImportPollCount = 0;
+let dingtalkImportBaselineTotal = 0;
+
+function stopDingtalkImportPolling() {
+  if (dingtalkImportPollTimer) {
+    clearInterval(dingtalkImportPollTimer);
+    dingtalkImportPollTimer = null;
+  }
+}
+
+function openLocalUploadFromEmpty() {
+  if (!ensureDocumentKbReady()) return;
+  (uploadSourceRef.value as any)?.openFileDialog?.();
+}
+
+function openDingtalkImport() {
+  if (!kbId.value) return;
+  dingtalkImportVisible.value = true;
+}
+
+async function pollDingtalkImportOnce() {
+  if (!kbId.value) return;
+  dingtalkImportPollCount += 1;
+  resetPage();
+  await loadKnowledgeFiles(kbId.value);
+  if (total.value > dingtalkImportBaselineTotal) {
+    stopDingtalkImportPolling();
+    MessagePlugin.success(t('knowledgeBase.dingtalkSyncCompleted'));
+    return;
+  }
+  if (dingtalkImportPollCount >= 20) {
+    stopDingtalkImportPolling();
+    MessagePlugin.info(t('knowledgeBase.dingtalkSyncTimeout'));
+  }
+}
+
+async function handleDingtalkImportSaved() {
+  dingtalkImportVisible.value = false;
+  MessagePlugin.info(t('knowledgeBase.dingtalkSyncStarted'));
+  dingtalkImportBaselineTotal = total.value || 0;
+  dingtalkImportPollCount = 0;
+  stopDingtalkImportPolling();
+  resetPage();
+  await loadKnowledgeFiles(kbId.value);
+  if (total.value > dingtalkImportBaselineTotal) {
+    MessagePlugin.success(t('knowledgeBase.dingtalkSyncCompleted'));
+    return;
+  }
+  dingtalkImportPollTimer = setInterval(() => {
+    void pollDingtalkImportOnce();
+  }, 3000);
+}
 
 const handleOpenKBSettings = () => {
   if (!kbId.value) {
@@ -2310,7 +2371,8 @@ async function createNewSession(value: string): Promise<void> {
                       :supported-file-types="[...supportedFileTypes]" include-manual trigger-icon="file-add"
                       trigger-class="content-bar-icon-btn" data-guide="kb-detail-add-doc"
                       :tooltip="t('knowledgeBase.addDocument')" placement="bottom-right" @files="handleUploadSourceFiles"
-                      @url="handleUploadSourceUrl" @manual="handleManualCreate" />
+                      :include-dingtalk="canManageDataSource"
+                      @url="handleUploadSourceUrl" @manual="handleManualCreate" @dingtalk="openDingtalkImport" />
                   </div>
                 </div>
               </div>
@@ -2384,7 +2446,12 @@ async function createNewSession(value: string): Promise<void> {
                 </template>
                 <template v-else-if="!docListLoading">
                   <div class="doc-empty-state">
-                    <EmptyKnowledge />
+                    <EmptyKnowledge
+                      :show-actions="canEdit"
+                      :show-dingtalk-import="canManageDataSource"
+                      @upload-local="openLocalUploadFromEmpty"
+                      @import-dingtalk="openDingtalkImport"
+                    />
                   </div>
                 </template>
               </div>
@@ -2416,6 +2483,14 @@ async function createNewSession(value: string): Promise<void> {
   <KnowledgeBaseEditorModal :visible="uiStore.showKBEditorModal" :mode="uiStore.kbEditorMode"
     :kb-id="uiStore.currentKBId || undefined" :initial-type="uiStore.kbEditorType"
     @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
+
+  <DataSourceEditorDialog
+    v-model:visible="dingtalkImportVisible"
+    :kb-id="kbId"
+    :data-source="null"
+    initial-type="dingtalk"
+    @saved="handleDingtalkImportSaved"
+  />
 
   <ContextualGuide tour="kbDetail" :when="showKbDetailContextualGuide" />
 

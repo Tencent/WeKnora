@@ -1,13 +1,35 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+
+withDefaults(defineProps<{
+    showActions?: boolean
+    showDingtalkImport?: boolean
+}>(), {
+    showActions: false,
+    showDingtalkImport: false,
+})
+
+const emit = defineEmits<{
+    uploadLocal: []
+    importDingtalk: []
+}>()
+
 const { t } = useI18n()
 </script>
 <template>
     <div class="empty">
         <img class="empty-img" src="@/assets/img/upload.svg" alt="">
-        <span class="empty-txt">{{ $t('knowledgeBase.emptyKnowledgeDragDrop') }}</span>
-        <span class="empty-type-txt">{{ $t('knowledgeBase.pdfDocFormat') }}</span>
-        <span class="empty-type-txt">{{ $t('knowledgeBase.textMarkdownFormat') }}</span>
+        <span class="empty-txt">{{ t('knowledgeBase.emptyKnowledgeDragDrop') }}</span>
+        <span class="empty-type-txt">{{ t('knowledgeBase.pdfDocFormat') }}</span>
+        <span class="empty-type-txt">{{ t('knowledgeBase.textMarkdownFormat') }}</span>
+        <div v-if="showActions" class="empty-actions">
+            <t-button theme="primary" @click="emit('uploadLocal')">
+                {{ t('knowledgeBase.uploadLocalFile') }}
+            </t-button>
+            <t-button v-if="showDingtalkImport" variant="outline" @click="emit('importDingtalk')">
+                {{ t('knowledgeBase.importFromDingtalk') }}
+            </t-button>
+        </div>
     </div>
 </template>
 <style scoped lang="less">
@@ -40,5 +62,13 @@ const { t } = useI18n()
 .empty-img {
     width: 162px;
     height: 162px;
+}
+
+.empty-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 20px;
 }
 </style>

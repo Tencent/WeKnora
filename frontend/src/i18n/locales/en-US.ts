@@ -406,7 +406,13 @@ export default {
     videosFilteredNoVLM: 'Skipped {count} video file(s) (video upload is not supported)',
     unsupportedTypesHint: 'Some document types ({types}) have no available parser engine and cannot be processed',
     goToParserSettings: 'Configure',
+    uploadLocalFile: 'Upload local file',
     importURL: 'Import from URL',
+    importFromDingtalk: 'Import from DingTalk',
+    connectDingtalk: 'Connect DingTalk',
+    dingtalkSyncStarted: 'DingTalk content is being synchronized',
+    dingtalkSyncCompleted: 'DingTalk content synchronized',
+    dingtalkSyncTimeout: 'Synchronization is still running in the background',
     addDocument: 'Add Document',
     importURLTitle: 'Import from URL',
     urlRequired: 'Please enter a URL',
@@ -867,15 +873,6 @@ export default {
     editor: {
       createTitle: 'Create Agent',
       editTitle: 'Edit Agent',
-      buttons: {
-        create: 'Create Agent',
-        saveAndClose: 'Save and Close',
-      },
-      postCreateHint: {
-        title: 'Created successfully',
-        footer: 'Keep adjusting settings, configure sharing and publishing, then click "Save and Close".',
-        integrationDesc: 'Go to Integrations to configure IM, web embed, and other publishing channels',
-      },
       basicInfo: 'Basic Info',
       basicInfoDesc: 'Configure agent name, description, and run mode',
       promptsConfig: 'Prompts',
@@ -2008,33 +2005,6 @@ export default {
         'faq.import_started': 'FAQ import started',
         'faq.import_completed': 'FAQ import completed',
         'faq.import_failed': 'FAQ import failed'
-      },
-      outcomes: {
-        accepted: 'Accepted',
-        success: 'Success',
-        failed: 'Failed',
-        partial: 'Partial',
-        canceled: 'Canceled',
-        denied: 'Denied'
-      },
-      detailValues: {
-        user: 'User initiated',
-        manual: 'Manual',
-        schedule: 'Scheduled',
-        system: 'System',
-        pending: 'Pending',
-        completed: 'Completed',
-        partial: 'Partially completed',
-        canceled: 'Canceled',
-        failed: 'Failed',
-        enqueue: 'Task submission',
-        reuse_vectors: 'Reuse vectors',
-        reparse: 'Reparse',
-        viewer: 'Read-only',
-        editor: 'Can edit',
-        admin: 'Manage',
-        append: 'Append',
-        replace: 'Replace'
       }
     },
     titleCreate: 'Create Knowledge Base',
@@ -2270,13 +2240,7 @@ export default {
     },
     buttons: {
       create: 'Create Knowledge Base',
-      save: 'Save Configuration',
-      saveAndClose: 'Save and Close',
-    },
-    postCreateHint: {
-      title: 'Created successfully',
-      footer: 'Keep adjusting settings, configure sharing and data sources, then click "Save and Close".',
-      followUpDesc: 'Configure data sources on the left, or use Share Management to publish to spaces',
+      save: 'Save Configuration'
     },
     share: {
       description: 'Share the knowledge base with spaces so members can access and use it',
@@ -5136,14 +5100,16 @@ export default {
       lark: 'Lark',
       notion: 'Notion',
       yuque: 'Yuque',
-      rss: 'RSS / Atom Feed'
+      rss: 'RSS / Atom Feed',
+      dingtalk: 'DingTalk'
     },
     connectorDesc: {
       feishu: 'Sync documents, spreadsheets and files from Feishu Wiki',
       lark: 'Sync documents, spreadsheets and files from Lark Wiki (Feishu international)',
       notion: 'Sync pages and databases from Notion',
       yuque: 'Sync documents from Yuque knowledge bases',
-      rss: 'Sync articles from RSS / Atom feeds'
+      rss: 'Sync articles from RSS / Atom feeds',
+      dingtalk: 'Sync DingTalk drive files and online documents'
     },
     field: {
       appId: 'App ID',
