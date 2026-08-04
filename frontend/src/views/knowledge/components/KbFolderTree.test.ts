@@ -18,6 +18,8 @@ test('the rename sentinel cannot collide with the root folder path', () => {
 
 test('only real folders expose a rename affordance', () => {
   assert.match(tree, /v-if="canEdit && row\.kind === 'folder'"/)
+  assert.match(tree, /popup-menu-item/)
+  assert.match(tree, /onFolderMenuRename/)
 })
 
 // Picking a folder is a small, reversible action, so it stays a popup: in the row
@@ -29,5 +31,17 @@ test('the folder picker is a popup rather than a modal', () => {
   assert.match(batchBar, /<t-popup[^>]*v-model:visible="folderPickerVisible"/)
   for (const source of [cardView, listView, batchBar]) {
     assert.doesNotMatch(source, /MoveToFolderDialog/)
+  }
+})
+
+// The folder picker must render ahead of the normal action menu; otherwise
+// moveMenuMode === 'normal' keeps the menu visible and clicks look dead.
+test('the folder picker wins over the normal action menu', () => {
+  for (const source of [cardView, listView]) {
+    const pickerIdx = source.indexOf('v-if="folderPickerItemId === item.id"')
+    const normalIdx = source.indexOf('v-else-if="moveMenuMode === \'normal\'"')
+    assert.ok(pickerIdx >= 0)
+    assert.ok(normalIdx >= 0)
+    assert.ok(pickerIdx < normalIdx)
   }
 })

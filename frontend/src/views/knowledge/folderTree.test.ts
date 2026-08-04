@@ -8,12 +8,14 @@ import {
   childFolders,
   folderAncestorPaths,
   folderBreadcrumbs,
+  folderOptionFromPath,
   folderPathExists,
   isFilteringDocuments,
   isFolderUpload,
   joinFolderPath,
   normalizeFolderPath,
   ROOT_FOLDER_PATH,
+  sortFolderOptions,
 } from './folderTree.ts'
 
 const folders = [
@@ -203,4 +205,20 @@ test('a folder cannot be moved inside itself', () => {
   assert.equal(canMoveFolderTo('docs', 'docs'), false)
   assert.equal(canMoveFolderTo('docs', ''), false)
   assert.equal(canMoveFolderTo('', 'docs'), false)
+})
+
+test('folderOptionFromPath derives picker row metadata from a canonical path', () => {
+  assert.deepEqual(folderOptionFromPath('handbook/onboarding'), {
+    path: 'handbook/onboarding',
+    name: 'onboarding',
+    depth: 1,
+  })
+  assert.deepEqual(
+    sortFolderOptions([
+      { path: 'handbook/onboarding' },
+      { path: 'handbook' },
+      { path: 'archive' },
+    ]).map((row) => row.path),
+    ['archive', 'handbook', 'handbook/onboarding'],
+  )
 })

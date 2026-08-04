@@ -37,7 +37,12 @@
           v-for="row in rows"
           :key="row.path || '__root__'"
           class="kb-folder-row"
-          :class="{ active: selectedPath === row.path, 'is-root': row.kind === 'root' }"
+          :class="{
+            active: selectedPath === row.path,
+            'is-root': row.kind === 'root',
+            'is-editable': canEdit && row.kind === 'folder',
+            'is-menu-open': menuOpenPath === row.path,
+          }"
           :style="{ '--kb-folder-depth': row.depth }"
           :title="row.kind === 'root' ? t('knowledgeBase.folderTree.rootRowTip') : row.path"
           role="button"
@@ -78,14 +83,36 @@
             <span class="kb-folder-row__label">
               {{ row.kind === 'root' ? t('knowledgeBase.folderTree.rootRow') : row.name }}
             </span>
-            <t-tooltip v-if="canEdit && row.kind === 'folder'"
-              :content="t('knowledgeBase.folderTree.rename')" placement="top">
-              <button type="button" class="kb-folder-row__action"
-                :aria-label="t('knowledgeBase.folderTree.rename')" @click.stop="startRename(row)">
-                <t-icon name="edit" />
-              </button>
-            </t-tooltip>
-            <span class="kb-folder-row__count">{{ row.totalCount }}</span>
+            <span class="kb-folder-row__trailing">
+              <span class="kb-folder-row__count">{{ row.totalCount }}</span>
+              <t-popup
+                v-if="canEdit && row.kind === 'folder'"
+                :visible="menuOpenPath === row.path"
+                trigger="click"
+                placement="bottom-right"
+                destroy-on-close
+                overlay-class-name="card-more-popup"
+                @visible-change="(visible: boolean) => onFolderMenuVisible(row.path, visible)"
+              >
+                <button
+                  type="button"
+                  class="kb-folder-row__more"
+                  :class="{ 'is-open': menuOpenPath === row.path }"
+                  :aria-label="t('knowledgeBase.moreOptions')"
+                  @click.stop
+                >
+                  <t-icon name="more" />
+                </button>
+                <template #content>
+                  <div class="popup-menu kb-folder-row__menu" @click.stop>
+                    <div class="popup-menu-item" @click="onFolderMenuRename(row)">
+                      <t-icon name="edit" class="menu-icon" />
+                      <span>{{ t('knowledgeBase.folderTree.rename') }}</span>
+                    </div>
+                  </div>
+                </template>
+              </t-popup>
+            </span>
           </template>
         </div>
       </template>
@@ -131,6 +158,7 @@ const expanded = ref(new Set<string>([ROOT_FOLDER_PATH]))
 // null, not '', because '' is the root's own path: a falsy sentinel would put
 // the root row into rename mode permanently.
 const renamingPath = ref<string | null>(null)
+const menuOpenPath = ref<string | null>(null)
 const renameValue = ref('')
 const renameInputRef = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
 
@@ -156,6 +184,15 @@ const startRename = async (row: FolderRow) => {
   const input = Array.isArray(renameInputRef.value) ? renameInputRef.value[0] : renameInputRef.value
   input?.focus()
   input?.select()
+}
+
+const onFolderMenuVisible = (path: string, visible: boolean) => {
+  menuOpenPath.value = visible ? path : null
+}
+
+const onFolderMenuRename = async (row: FolderRow) => {
+  menuOpenPath.value = null
+  await startRename(row)
 }
 
 const cancelRename = () => {
@@ -202,11 +239,11 @@ watch(
 
 <style scoped lang="less">
 .kb-folder-tree {
-  --kb-folder-indent: 14px;
+  --kb-folder-indent: 10px;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  width: 232px;
+  width: 268px;
   min-height: 0;
   padding-right: 12px;
   margin-right: 12px;
@@ -283,11 +320,11 @@ watch(
 .kb-folder-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   box-sizing: border-box;
   width: 100%;
   height: 30px;
-  padding: 0 8px 0 calc(var(--kb-folder-depth, 0) * var(--kb-folder-indent) + 8px);
+  padding: 0 8px 0 calc(var(--kb-folder-depth, 0) * var(--kb-folder-indent));
   border-radius: 6px;
   background: transparent;
   color: var(--td-text-color-primary);
@@ -300,10 +337,6 @@ watch(
 
   &:hover {
     background: var(--td-bg-color-container-hover);
-
-    .kb-folder-row__action {
-      opacity: 1;
-    }
   }
 
   &:focus-visible {
@@ -364,8 +397,25 @@ watch(
   white-space: nowrap;
 }
 
-.kb-folder-row__action {
+.kb-folder-row__trailing {
   flex: 0 0 auto;
+  width: 22px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 2px;
+}
+
+.kb-folder-row__count {
+  font-size: 11px;
+  color: var(--td-text-color-placeholder);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.kb-folder-row__more {
+  display: none;
   width: 20px;
   height: 20px;
   padding: 0;
@@ -373,12 +423,10 @@ watch(
   border-radius: 4px;
   background: transparent;
   color: var(--td-text-color-placeholder);
-  display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+  transition: color 0.15s ease, background-color 0.15s ease;
 
   &:hover {
     color: var(--td-brand-color);
@@ -386,8 +434,27 @@ watch(
   }
 
   .t-icon {
-    font-size: 13px;
+    font-size: 14px;
   }
+}
+
+.kb-folder-row.is-editable:hover,
+.kb-folder-row.is-menu-open {
+  .kb-folder-row__count {
+    display: none;
+  }
+
+  .kb-folder-row__more {
+    display: inline-flex;
+  }
+}
+
+.kb-folder-row__more.is-open {
+  color: var(--td-brand-color);
+}
+
+.kb-folder-row__menu {
+  min-width: 140px;
 }
 
 .kb-folder-row__rename {
@@ -402,12 +469,5 @@ watch(
   font-family: var(--app-font-family);
   font-size: 13px;
   outline: none;
-}
-
-.kb-folder-row__count {
-  flex: 0 0 auto;
-  font-size: 11px;
-  color: var(--td-text-color-placeholder);
-  font-variant-numeric: tabular-nums;
 }
 </style>

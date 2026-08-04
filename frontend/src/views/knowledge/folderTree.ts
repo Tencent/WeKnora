@@ -212,6 +212,34 @@ export function joinFolderPath(parent: string, name: string): string {
   return normalizeFolderPath(parent ? `${parent}/${name}` : name)
 }
 
+/** Flat picker row for a canonical folder path (used for optimistic create rows). */
+export function folderOptionFromPath(path: string): { path: string; name: string; depth: number } {
+  const segments = path.split('/').filter(Boolean)
+  return {
+    path,
+    name: segments[segments.length - 1] || path,
+    depth: Math.max(segments.length - 1, 0),
+  }
+}
+
+/** Sort folder picker rows in tree order (parent before child, siblings lexicographic). */
+export function sortFolderOptions<T extends { path: string }>(options: T[]): T[] {
+  return [...options].sort((a, b) => {
+    const aParts = a.path.split('/').filter(Boolean)
+    const bParts = b.path.split('/').filter(Boolean)
+    const max = Math.max(aParts.length, bParts.length)
+    for (let i = 0; i < max; i += 1) {
+      const aSeg = aParts[i]
+      const bSeg = bParts[i]
+      if (aSeg === undefined) return -1
+      if (bSeg === undefined) return 1
+      const cmp = aSeg.localeCompare(bSeg)
+      if (cmp !== 0) return cmp
+    }
+    return 0
+  })
+}
+
 /**
  * Whether a folder can be renamed/moved to `to`: a folder cannot land inside its
  * own subtree, which would make that subtree unreachable.
