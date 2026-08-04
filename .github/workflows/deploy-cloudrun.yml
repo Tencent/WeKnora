@@ -55,7 +55,9 @@ jobs:
           mkdir -p .duckdb yanyiwu
           CGO_ENABLED=1 go run cmd/download/duckdb/duckdb.go
           cp -r ~/.duckdb/* .duckdb/ 2>/dev/null || true
-          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o weknora ./cmd/server
+          export EDITION=lite
+          LDFLAGS="-w -s $(./scripts/get_version.sh ldflags)"
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o weknora ./cmd/server
           cp -r ~/go/pkg/mod/github.com/yanyiwu/* yanyiwu/ 2>/dev/null || true
 
       - name: Authenticate to GCP via Workload Identity Federation
