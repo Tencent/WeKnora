@@ -639,6 +639,7 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 // @Accept       json
 // @Produce      json
 // @Param        request  body      SearchKnowledgeRequest  true  "搜索请求"
+// @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
 // @Success      200      {object}  map[string]interface{}  "搜索结果"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -719,7 +720,7 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	rewriter, err := h.resolveResourceRewriter(c)
 	if err != nil {
 		logger.Warnf(ctx, "Invalid resource URL mode: %v", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -736,6 +737,7 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 // @Produce      text/event-stream
 // @Param        session_id  path      string                   true  "会话ID"
 // @Param        request     body      CreateKnowledgeQARequest true  "问答请求"
+// @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
 // @Success      200         {object}  map[string]interface{}   "问答结果（SSE流）"
 // @Failure      400         {object}  errors.AppError          "请求参数错误"
 // @Security     Bearer
@@ -761,6 +763,7 @@ func (h *Handler) KnowledgeQA(c *gin.Context) {
 // @Produce      text/event-stream
 // @Param        session_id  path      string                   true  "会话ID"
 // @Param        request     body      CreateKnowledgeQARequest true  "问答请求"
+// @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
 // @Success      200         {object}  map[string]interface{}   "问答结果（SSE流）"
 // @Failure      400         {object}  errors.AppError          "请求参数错误"
 // @Security     Bearer

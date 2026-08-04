@@ -11528,6 +11528,14 @@ paths:
         in: query
         name: before_time
         type: string
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
       produces:
       - application/json
       responses:
@@ -12697,6 +12705,14 @@ paths:
         required: true
         schema:
           $ref: '#/definitions/internal_handler_session.CreateKnowledgeQARequest'
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
       produces:
       - text/event-stream
       responses:
@@ -12732,6 +12748,14 @@ paths:
         required: true
         schema:
           $ref: '#/definitions/internal_handler_session.CreateKnowledgeQARequest'
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
       produces:
       - text/event-stream
       responses:
@@ -12985,6 +13009,14 @@ paths:
         name: message_id
         required: true
         type: string
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
       produces:
       - text/event-stream
       responses:
@@ -13015,6 +13047,14 @@ paths:
         required: true
         schema:
           $ref: '#/definitions/internal_handler_session.SearchKnowledgeRequest'
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
       produces:
       - application/json
       responses:

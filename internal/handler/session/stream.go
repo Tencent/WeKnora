@@ -24,9 +24,10 @@ import (
 // @Tags         问答
 // @Accept       json
 // @Produce      text/event-stream
-// @Param        session_id  path      string  true  "会话ID"
-// @Param        message_id  query     string  true  "消息ID"
-// @Success      200         {object}  map[string]interface{}  "流式响应"
+// @Param        session_id     path      string  true   "会话ID"
+// @Param        message_id     query     string  true   "消息ID"
+// @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
+// @Success      200            {object}  map[string]interface{}  "流式响应"
 // @Failure      404         {object}  errors.AppError         "会话或消息不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -59,7 +60,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 	resourceRewriter, err := h.resolveStreamRewriter(c)
 	if err != nil {
 		logger.Warnf(ctx, "Invalid resource URL mode: %v", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
