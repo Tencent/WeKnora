@@ -29,6 +29,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/dig"
 	"google.golang.org/grpc"
+	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -572,23 +573,35 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	var dialector gorm.Dialector
 	var migrateDSN string
 	var sqliteDBPath string
-	switch os.Getenv("DB_DRIVER") {
+	dbCfg, err := database.LoadConfig(os.Getenv)
+	if err != nil {
+		return nil, err
+	}
+	retrieveDrivers, err := database.ParseRetrieveDrivers(os.Getenv("RETRIEVE_DRIVER"))
+	if err != nil {
+		return nil, err
+	}
+	if err := database.ValidateDriverCombination(dbCfg.Driver, retrieveDrivers); err != nil {
+		return nil, err
+	}
+
+	switch dbCfg.Driver {
 	case "postgres":
 		// DSN for GORM (key-value format)
 		gormDSN := fmt.Sprintf(
 			"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=UTC",
-			os.Getenv("DB_HOST"),
-			os.Getenv("DB_PORT"),
-			os.Getenv("DB_USER"),
-			os.Getenv("DB_PASSWORD"),
-			os.Getenv("DB_NAME"),
+			dbCfg.Host,
+			strconv.Itoa(dbCfg.Port),
+			dbCfg.User,
+			dbCfg.Password,
+			dbCfg.Name,
 			"disable",
 		)
 		dialector = postgres.Open(gormDSN)
 
 		// DSN for golang-migrate (URL format)
 		// URL-encode password to handle special characters like !@#
-		dbPassword := os.Getenv("DB_PASSWORD")
+		dbPassword := dbCfg.Password
 		encodedPassword := url.QueryEscape(dbPassword)
 
 		// Check if postgres is in RETRIEVE_DRIVER to determine skip_embedding
@@ -601,20 +614,20 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 
 		migrateDSN = fmt.Sprintf(
 			"postgres://%s:%s@%s:%s/%s?sslmode=disable&options=-c%%20app.skip_embedding=%s",
-			os.Getenv("DB_USER"),
+			dbCfg.User,
 			encodedPassword, // Use encoded password
-			os.Getenv("DB_HOST"),
-			os.Getenv("DB_PORT"),
-			os.Getenv("DB_NAME"),
+			dbCfg.Host,
+			strconv.Itoa(dbCfg.Port),
+			dbCfg.Name,
 			skipEmbedding,
 		)
 
 		// Debug log (don't log password)
 		logger.Infof(context.Background(), "DB Config: user=%s host=%s port=%s dbname=%s",
-			os.Getenv("DB_USER"),
-			os.Getenv("DB_HOST"),
-			os.Getenv("DB_PORT"),
-			os.Getenv("DB_NAME"),
+			dbCfg.User,
+			dbCfg.Host,
+			strconv.Itoa(dbCfg.Port),
+			dbCfg.Name,
 		)
 	case "sqlite":
 		dbPath := os.Getenv("DB_PATH")
@@ -632,8 +645,19 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		sqliteDBPath = dbPath
 		migrateDSN = "sqlite3://" + dbPath
 		logger.Infof(context.Background(), "DB Config: driver=sqlite path=%s", dbPath)
+	case "mysql":
+		appDSN, err := database.MySQLApplicationDSN(dbCfg)
+		if err != nil {
+			return nil, err
+		}
+		migrateDSN, err = database.MySQLMigrationDSN(dbCfg)
+		if err != nil {
+			return nil, err
+		}
+		dialector = gormmysql.Open(appDSN)
+		logger.Infof(context.Background(), "DB Config: %s", dbCfg.SafeSummary())
 	default:
-		return nil, fmt.Errorf("unsupported database driver: %s", os.Getenv("DB_DRIVER"))
+		return nil, fmt.Errorf("unsupported database driver: %s", dbCfg.Driver)
 	}
 	db, err := gorm.Open(dialector, &gorm.Config{
 		NowFunc: func() time.Time {
@@ -650,19 +674,24 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	// different name (e.g., a wrapper dialect for managed PG) would silently
 	// fall back to the SQLite path, dropping the row-level X-lock. Catching
 	// the mismatch at startup is loud and inexpensive.
-	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" {
+	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" && name != "mysql" {
 		return nil, fmt.Errorf(
-			"unsupported gorm dialector %q; expected postgres or sqlite "+
+			"unsupported gorm dialector %q; expected postgres, sqlite, or mysql "+
 				"(see vectorStoreService.isPostgres for impact)", name)
 	}
 
-	if os.Getenv("DB_DRIVER") == "sqlite" {
+	if dbCfg.Driver == database.DriverSQLite || dbCfg.Driver == database.DriverMySQL {
 		sqlDB, err := db.DB()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get underlying sql.DB: %w", err)
 		}
 		if err := sqlDB.Ping(); err != nil {
-			return nil, fmt.Errorf("failed to ping SQLite database: %w", err)
+			return nil, fmt.Errorf("failed to ping %s database: %w", dbCfg.Driver, err)
+		}
+		if dbCfg.Driver == database.DriverMySQL {
+			if err := database.ValidateMySQLServer(context.Background(), sqlDB); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -673,6 +702,9 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		logger.Infof(context.Background(), "Running database migrations...")
 
 		autoRecover := os.Getenv("AUTO_RECOVER_DIRTY") != "false"
+		if dbCfg.Driver == database.DriverMySQL {
+			autoRecover = false
+		}
 		migrationOpts := database.MigrationOptions{
 			AutoRecoverDirty: autoRecover,
 			SQLiteDBPath:     sqliteDBPath,
@@ -681,6 +713,9 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		// Run base migrations (all versioned migrations including embeddings)
 		// The embeddings migration will be conditionally executed based on skip_embedding parameter in DSN
 		if err := database.RunMigrationsWithOptions(migrateDSN, migrationOpts); err != nil {
+			if dbCfg.Driver == database.DriverMySQL {
+				return nil, fmt.Errorf("database migration failed for mysql: %w", err)
+			}
 			// Log warning but don't fail startup - migrations might be handled externally
 			logger.Warnf(context.Background(), "Database migration failed: %v", err)
 			logger.Warnf(
@@ -710,7 +745,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	}
 
 	// Configure connection pool parameters
-	if os.Getenv("DB_DRIVER") == "sqlite" {
+	if dbCfg.Driver == database.DriverSQLite {
 		// SQLite only supports one concurrent writer even in WAL mode.
 		// Limiting to a single open connection serialises all DB access and
 		// prevents "database is locked" errors from concurrent goroutines.

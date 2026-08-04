@@ -190,6 +190,14 @@ helm install weknora ./helm \
 | `postgresql.persistence.enabled` | Enable persistence | `true` |
 | `postgresql.persistence.size` | PVC size | `10Gi` |
 
+### Database Connection
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `database.driver` | Metadata database driver (`postgres`, `mysql`, or `sqlite`) | `postgres` |
+| `database.host` | Metadata database host | `postgres` |
+| `database.port` | Metadata database port | `5432` |
+
 ### Redis
 
 | Parameter | Description | Default |

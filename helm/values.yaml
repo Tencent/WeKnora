@@ -235,6 +235,17 @@ docreader:
   affinity: {}
 
 # -----------------------------------------------------------------------------
+# Application Database
+# -----------------------------------------------------------------------------
+database:
+  # -- Main metadata database driver: postgres, mysql, or sqlite
+  driver: postgres
+  # -- Database service host. Use "postgres" for the bundled PostgreSQL chart.
+  host: postgres
+  # -- Database service port. PostgreSQL default is 5432; MySQL default is 3306.
+  port: 5432
+
+# -----------------------------------------------------------------------------
 # PostgreSQL (ParadeDB - Vector + BM25 Search)
 # -----------------------------------------------------------------------------
 postgresql:

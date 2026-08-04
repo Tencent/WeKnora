@@ -1,4 +1,4 @@
-.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger build-lite run-lite package-lite
+.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down migrate-check mysql-migration-check docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger build-lite run-lite package-lite
 
 # Show help
 help:
@@ -34,6 +34,8 @@ help:
 	@echo "数据库:"
 	@echo "  migrate-up        执行数据库迁移"
 	@echo "  migrate-down      回滚数据库迁移"
+	@echo "  migrate-check     检查 PostgreSQL/MySQL 迁移版本配套"
+	@echo "  mysql-migration-check  使用 WEKNORA_MYSQL_TEST_DSN 执行 MySQL 迁移验证"
 	@echo ""
 	@echo "开发工具:"
 	@echo "  fmt               格式化代码"
@@ -181,6 +183,12 @@ migrate-up:
 
 migrate-down:
 	./scripts/migrate.sh down
+
+migrate-check:
+	go run ./cmd/migration-parity
+
+mysql-migration-check:
+	go run ./cmd/mysql-migration-check
 
 migrate-version:
 	./scripts/migrate.sh version
