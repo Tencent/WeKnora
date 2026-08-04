@@ -14,11 +14,16 @@ RUN npm run build
 FROM golang:1.26-bookworm AS backend-builder
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y git build-essential libsqlite3-dev
+
 COPY go.mod go.sum ./
 RUN go mod download
 
+COPY cmd/download cmd/download
+RUN go run cmd/download/duckdb/duckdb.go
+
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /app/bin/weknora ./cmd/server
+RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-w -s" -o /app/bin/weknora ./cmd/server
 
 # Stage 3: Lightweight Production Runtime
 FROM debian:12-slim AS runner
@@ -28,9 +33,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tzdata \
     curl \
     fuse \
+    libsqlite3-0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# Copy DuckDB extensions downloaded in build stage
+COPY --from=backend-builder /root/.duckdb /root/.duckdb
 
 # Copy compiled backend binary
 COPY --from=backend-builder /app/bin/weknora /app/weknora
