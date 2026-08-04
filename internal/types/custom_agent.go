@@ -226,6 +226,14 @@ type CustomAgentConfig struct {
 	// WebSearchProviderID references a specific WebSearchProviderEntity.
 	// If empty, the workspace's default provider (is_default=true) is used.
 	WebSearchProviderID string `yaml:"web_search_provider_id" json:"web_search_provider_id,omitempty"`
+	// Maximum web_search calls per request. Nil uses the default of 2.
+	WebSearchMaxCalls *int `yaml:"web_search_max_calls,omitempty" json:"web_search_max_calls,omitempty"`
+	// Retries allowed per failed URL. Nil uses the default of 1; zero disables retries.
+	WebFetchMaxRetries *int `yaml:"web_fetch_max_retries,omitempty" json:"web_fetch_max_retries,omitempty"`
+	// Maximum URL fetch attempts per request. Nil uses the default of 10.
+	WebFetchMaxURLs *int `yaml:"web_fetch_max_urls,omitempty" json:"web_fetch_max_urls,omitempty"`
+	// Web research time budget in seconds. Nil uses the default of 90.
+	WebResearchTimeoutSec *int `yaml:"web_research_timeout_seconds,omitempty" json:"web_research_timeout_seconds,omitempty"`
 	// Whether to auto-fetch full page content for reranked web search results
 	WebFetchEnabled bool `yaml:"web_fetch_enabled" json:"web_fetch_enabled"`
 	// Max number of pages to fetch after rerank (default: 3)

@@ -20,15 +20,19 @@ type AgentConfig struct {
 	KnowledgeIDs   []string `json:"knowledge_ids"`           // Accessible knowledge IDs (individual documents)
 	SystemPrompt   string   `json:"system_prompt,omitempty"` // Unified system prompt (uses web_search_status placeholder for dynamic behavior)
 	// Deprecated: Use SystemPrompt instead. Kept for backward compatibility during migration.
-	SystemPromptWebEnabled  string        `json:"system_prompt_web_enabled,omitempty"`  // Deprecated: Custom prompt when web search is enabled
-	SystemPromptWebDisabled string        `json:"system_prompt_web_disabled,omitempty"` // Deprecated: Custom prompt when web search is disabled
-	UseCustomSystemPrompt   bool          `json:"use_custom_system_prompt"`             // Whether to use custom system prompt instead of default
-	WebSearchEnabled        bool          `json:"web_search_enabled"`                   // Whether web search tool is enabled
-	WebSearchMaxResults     int           `json:"web_search_max_results"`               // Maximum number of web search results (default: 5)
-	WebSearchProviderID     string        `json:"web_search_provider_id,omitempty"`     // WebSearchProviderEntity ID (resolved from agent config)
-	MultiTurnEnabled        bool          `json:"multi_turn_enabled"`                   // Whether multi-turn conversation is enabled
-	HistoryTurns            int           `json:"history_turns"`                        // Number of history turns to keep in context
-	SearchTargets           SearchTargets `json:"-"`                                    // Pre-computed unified search targets (runtime only)
+	SystemPromptWebEnabled  string        `json:"system_prompt_web_enabled,omitempty"`    // Deprecated: Custom prompt when web search is enabled
+	SystemPromptWebDisabled string        `json:"system_prompt_web_disabled,omitempty"`   // Deprecated: Custom prompt when web search is disabled
+	UseCustomSystemPrompt   bool          `json:"use_custom_system_prompt"`               // Whether to use custom system prompt instead of default
+	WebSearchEnabled        bool          `json:"web_search_enabled"`                     // Whether web search tool is enabled
+	WebSearchMaxResults     int           `json:"web_search_max_results"`                 // Maximum number of web search results (default: 5)
+	WebSearchProviderID     string        `json:"web_search_provider_id,omitempty"`       // WebSearchProviderEntity ID (resolved from agent config)
+	WebSearchMaxCalls       *int          `json:"web_search_max_calls,omitempty"`         // Maximum web_search calls per request (default: 2)
+	WebFetchMaxRetries      *int          `json:"web_fetch_max_retries,omitempty"`        // Retries allowed per failed URL (default: 1)
+	WebFetchMaxURLs         *int          `json:"web_fetch_max_urls,omitempty"`           // Maximum URL fetch attempts per request (default: 10)
+	WebResearchTimeoutSec   *int          `json:"web_research_timeout_seconds,omitempty"` // Web research time budget in seconds (default: 90)
+	MultiTurnEnabled        bool          `json:"multi_turn_enabled"`                     // Whether multi-turn conversation is enabled
+	HistoryTurns            int           `json:"history_turns"`                          // Number of history turns to keep in context
+	SearchTargets           SearchTargets `json:"-"`                                      // Pre-computed unified search targets (runtime only)
 	// MCP service selection
 	MCPSelectionMode string   `json:"mcp_selection_mode"` // MCP selection mode: "all", "selected", "none"
 	MCPServices      []string `json:"mcp_services"`       // Selected MCP service IDs (when mode is "selected")
