@@ -647,10 +647,13 @@ const isFiltering = computed(() =>
   }),
 );
 // Sub-folder entries shown at the top of the list while browsing. Search results
-// are flat, so they are dropped as soon as a filter is active.
-const currentChildFolders = computed(() =>
-  isFiltering.value ? [] : childFolders(folderTree.value, selectedFolderPath.value),
-);
+// are flat, so they are dropped as soon as a filter is active. When the sidebar
+// tree is open it already lists the same folders, so skip the duplicate rows.
+const currentChildFolders = computed(() => {
+  if (isFiltering.value) return [];
+  if (showFolderTree.value && !folderTreeCollapsed.value) return [];
+  return childFolders(folderTree.value, selectedFolderPath.value);
+});
 // A row's folder is worth showing only when the list can span folders.
 const showDocumentFolderPath = computed(() => hasFolders.value && isFiltering.value);
 const folderBreadcrumbs = computed(() => buildFolderBreadcrumbs(selectedFolderPath.value));
@@ -1775,8 +1778,9 @@ const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
       acceptFileTypes: acceptFileTypes.value,
       supportedFileTypes: [...supportedFileTypes.value],
       // Pre-fill the destination with the folder being browsed; the dialog shows
-      // it and lets the user send the batch to the root instead.
+      // it and lets the user pick another folder (or the root) before confirming.
       targetFolder: selectedFolderPath.value,
+      folderOptions: folderOptions.value,
     });
     await handleUploadConfirmResult(result);
   } catch {
@@ -2327,15 +2331,25 @@ async function createNewSession(value: string): Promise<void> {
 
       <template v-if="activeKbTab === 'documents' || !isWiki">
         <div class="knowledge-main">
-          <KbFolderTree v-if="showFolderTree" :tree="folderTree" :selected-path="selectedFolderPath"
-            :loading="folderTreeLoading" :collapsed="folderTreeCollapsed" :can-edit="canEdit"
+          <KbFolderTree v-if="showFolderTree && !folderTreeCollapsed" :tree="folderTree" :selected-path="selectedFolderPath"
+            :loading="folderTreeLoading" :can-edit="canEdit"
             @select="handleFolderSelect" @update:collapsed="handleFolderTreeCollapsedChange"
             @rename="handleFolderRename" />
           <div class="tag-content">
             <div class="doc-card-area">
-              <nav v-if="showFolderTree && (folderBreadcrumbs.length || isFiltering)" class="doc-folder-path"
+              <nav v-if="showFolderTree" class="doc-folder-path"
                 :aria-label="$t('knowledgeBase.folderTree.title')">
-                <button type="button" class="doc-folder-path__crumb" :class="{ 'is-current': !folderBreadcrumbs.length }"
+                <t-tooltip v-if="folderTreeCollapsed" :content="$t('knowledgeBase.folderTree.expand')" placement="top">
+                  <button type="button" class="doc-folder-path__tree-toggle"
+                    :aria-label="$t('knowledgeBase.folderTree.expand')"
+                    @click="handleFolderTreeCollapsedChange(false)">
+                    <t-icon name="folder" size="14px" />
+                  </button>
+                </t-tooltip>
+                <span v-if="!folderBreadcrumbs.length" class="doc-folder-path__crumb is-current">
+                  {{ $t('knowledgeBase.folderTree.rootRow') }}
+                </span>
+                <button v-else type="button" class="doc-folder-path__crumb"
                   @click="handleFolderSelect('')">
                   {{ $t('knowledgeBase.folderTree.rootRow') }}
                 </button>
@@ -2517,13 +2531,16 @@ async function createNewSession(value: string): Promise<void> {
                 </div>
               </div>
               <div class="doc-scroll-container"
-                :class="{ 'is-empty': !cardList.length && !docListLoading, 'is-marquee-active': docMarqueeVisible }"
+                :class="{
+                  'is-empty': !cardList.length && !currentChildFolders.length && !docListLoading,
+                  'is-marquee-active': docMarqueeVisible,
+                }"
                 ref="knowledgeScroll" @scroll="handleScroll" @mousedown="onDocMarqueeMouseDown">
                 <div v-if="docMarqueeVisible" class="doc-marquee-box"
                   :class="{ 'is-add': docMarqueeMode === 'add', 'is-subtract': docMarqueeMode === 'subtract' }"
                   :style="docMarqueeBoxStyle" aria-hidden="true" />
                 <!-- 文档骨架屏 -->
-                <div v-if="docListLoading && cardList.length === 0" class="doc-card-list doc-card-list-animated">
+                <div v-if="docListLoading && cardList.length === 0 && !currentChildFolders.length" class="doc-card-list doc-card-list-animated">
                   <div v-for="n in 8" :key="'doc-skel-' + n" class="knowledge-card knowledge-card-skeleton">
                     <div class="card-content">
                       <div class="card-content-nav">
@@ -3012,6 +3029,29 @@ async function createNewSession(value: string): Promise<void> {
   gap: 2px;
   padding: 0 0 8px;
   flex-shrink: 0;
+
+  &__tree-toggle {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    margin-right: 4px;
+    padding: 0;
+    border: 1px solid var(--td-component-border);
+    border-radius: 6px;
+    background: var(--td-bg-color-container);
+    color: var(--td-text-color-secondary);
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+
+    &:hover {
+      border-color: var(--td-brand-color);
+      color: var(--td-brand-color);
+      background: var(--td-bg-color-container-hover);
+    }
+  }
 
   &__crumb {
     max-width: 220px;

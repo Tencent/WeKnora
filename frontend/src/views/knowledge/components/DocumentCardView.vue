@@ -100,6 +100,7 @@ const openMenu = (index: number) => {
 const onMenuVisibleChange = (visible: boolean, item: KnowledgeCard) => {
   if (!visible) {
     activeMenuIndex.value = -1;
+    folderPickerItemId.value = null;
   }
   emit('menu-visible-change', visible, item);
 };
@@ -291,26 +292,26 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
 </script>
 
 <template>
-  <div class="doc-card-list doc-card-list-animated">
-    <!-- Sub-folders of the folder being browsed, listed first the way a file
-         manager does, so navigating down does not require the sidebar. -->
-    <div
-      v-for="folder in folders"
-      :key="'folder-' + folder.path"
-      class="folder-card"
-      :title="folder.path"
-      role="button"
-      tabindex="0"
-      @click="emit('open-folder', folder.path)"
-      @keydown.enter="emit('open-folder', folder.path)"
-    >
-      <t-icon name="folder" class="folder-card__icon" />
-      <div class="folder-card__text">
-        <span class="folder-card__name">{{ folder.name }}</span>
-        <span class="folder-card__meta">{{ t('knowledgeBase.folderTree.folderCardCount', { count: folder.total_count }) }}</span>
+  <div class="doc-card-view">
+    <div class="doc-card-list doc-card-list-animated">
+      <div
+        v-for="folder in folders"
+        :key="'folder-' + folder.path"
+        class="folder-card"
+        :title="folder.path"
+        role="button"
+        tabindex="0"
+        @click="emit('open-folder', folder.path)"
+        @keydown.enter="emit('open-folder', folder.path)"
+      >
+        <div class="folder-card__body">
+          <t-icon name="folder" class="folder-card__icon" />
+          <span class="folder-card__title">{{ folder.name }}</span>
+        </div>
+        <div class="folder-card__footer">
+          {{ t('knowledgeBase.folderTree.folderCardCount', { count: folder.total_count }) }}
+        </div>
       </div>
-      <t-icon name="chevron-right" class="folder-card__chevron" />
-    </div>
 
     <div
       class="knowledge-card"
@@ -352,8 +353,19 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
               <img class="more-icon" src="@/assets/img/more.png" alt="" />
             </div>
             <template #content>
+              <!-- Move: folder picker (must win over the normal menu while open) -->
+              <div v-if="folderPickerItemId === item.id" class="card-menu move-menu">
+                <FolderPickerMenu
+                  :options="folderOptions || []"
+                  :current-path="item.folder_path || ''"
+                  show-back
+                  @back="folderPickerItemId = null"
+                  @confirm="(path: string) => onFolderPicked(item, path)"
+                />
+              </div>
+
               <!-- Normal menu -->
-              <div v-if="moveMenuMode === 'normal'" class="card-menu">
+              <div v-else-if="moveMenuMode === 'normal'" class="card-menu">
                 <DocumentActionMenu
                   :item="item"
                   :can-mutate-knowledge="canMutateKnowledge"
@@ -366,17 +378,6 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
                   @move-folder="handleAction('move-folder', item)"
                   @batch-manage="handleAction('batch-manage', item)"
                   @delete="handleAction('delete', item)"
-                />
-              </div>
-
-              <!-- Move: folder picker -->
-              <div v-else-if="folderPickerItemId === item.id" class="card-menu move-menu">
-                <FolderPickerMenu
-                  :options="folderOptions || []"
-                  :current-path="item.folder_path || ''"
-                  show-back
-                  @back="folderPickerItemId = null"
-                  @confirm="(path: string) => onFolderPicked(item, path)"
                 />
               </div>
 
@@ -590,6 +591,7 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
         </div>
       </div>
     </div>
+    </div>
   </div>
 
   <!-- Hover popover -->
@@ -665,6 +667,10 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
   to { opacity: 1; transform: translateY(0); }
 }
 
+.doc-card-view {
+  width: 100%;
+}
+
 .doc-card-list {
   box-sizing: border-box;
   display: grid;
@@ -678,29 +684,23 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
   }
 }
 
-// Folder entries share the grid with the document cards but are deliberately
-// shorter: they are navigation, not content.
 .folder-card {
   min-width: 240px;
-  height: 56px;
+  height: 136px;
   box-sizing: border-box;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 12px;
+  flex-direction: column;
   border: 1px solid var(--td-component-border);
-  border-radius: 6px;
+  border-radius: 8px;
+  overflow: hidden;
   background: var(--td-bg-color-container);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 
   &:hover {
-    border-color: var(--td-brand-color);
-    background: var(--td-bg-color-container-hover);
-
-    .folder-card__chevron {
-      color: var(--td-brand-color);
-    }
+    border-color: color-mix(in srgb, var(--td-component-stroke) 55%, var(--td-brand-color));
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.07);
   }
 
   &:focus-visible {
@@ -709,39 +709,47 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
   }
 }
 
-.folder-card__icon {
-  flex: 0 0 auto;
-  font-size: 20px;
-  color: var(--td-brand-color);
-}
-
-.folder-card__text {
+.folder-card__body {
   flex: 1;
-  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  overflow: hidden;
 }
 
-.folder-card__name {
+.folder-card__icon {
+  flex-shrink: 0;
+  font-size: 28px;
+  line-height: 1;
+  color: var(--td-brand-color);
+  opacity: 0.88;
+}
+
+.folder-card__title {
+  flex: 1;
+  min-height: 0;
   font-size: 14px;
   font-weight: 500;
+  line-height: 20px;
+  max-height: 40px;
   color: var(--td-text-color-primary);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-all;
 }
 
-.folder-card__meta {
+.folder-card__footer {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  border-top: 1px solid var(--td-component-stroke);
   font-size: 12px;
+  line-height: 1.4;
   color: var(--td-text-color-placeholder);
-}
-
-.folder-card__chevron {
-  flex: 0 0 auto;
-  font-size: 16px;
-  color: var(--td-text-color-placeholder);
-  transition: color 0.15s ease;
 }
 
 .knowledge-card {

@@ -30,11 +30,35 @@ test('uses confirmed tags for file and URL imports instead of reading the list f
 // selection as it stands when the uploads actually start.
 test('takes the upload destination folder from the confirmation result', () => {
   assert.match(host, /:target-folder="uploadConfirmStore\.targetFolder"/)
+  assert.match(host, /:folder-options="uploadConfirmStore\.folderOptions"/)
   assert.match(dialog, /class="destination-row"/)
+  assert.match(dialog, /attach="body"/)
+  assert.match(dialog, /overlay-class-name="upload-destination-popup"/)
+  assert.match(dialog, /FolderPickerMenu/)
+  assert.match(dialog, /onDestinationPicked/)
   assert.match(dialog, /targetFolder: localTargetFolder\.value/)
-  assert.match(dialog, /@click="localTargetFolder = ''"/)
   assert.match(knowledgeBase, /targetFolder: result\.targetFolder \|\| ROOT_FOLDER_PATH/)
   assert.match(knowledgeBase, /targetFolder: selectedFolderPath\.value/)
+  assert.match(knowledgeBase, /folderOptions: folderOptions\.value/)
+})
+
+test('creates sub-folders from per-row actions without changing the selected destination', () => {
+  const picker = readFileSync(new URL('./FolderPickerMenu.vue', import.meta.url), 'utf8')
+  assert.match(picker, /startCreatingUnder/)
+  assert.match(picker, /folder-picker__add/)
+  assert.match(picker, /folder-picker__item--create/)
+  assert.match(picker, /@keydown\.enter\.stop="commitNewFolder"/)
+  assert.doesNotMatch(picker, /newFolderHintText/)
+  assert.doesNotMatch(picker, /folder-picker__create-actions/)
+  assert.doesNotMatch(picker, /newFolderParent/)
+  assert.match(dialog, /pendingFolderPaths/)
+  assert.match(dialog, /pickerFolderOptions/)
+  assert.match(dialog, /@create="onDestinationCreated"/)
+})
+
+test('calls out directory uploads via relative paths in the file list', () => {
+  assert.match(dialog, /fileRelativeDir/)
+  assert.doesNotMatch(dialog, /folder-upload-banner/)
 })
 
 test('routes global knowledge file drops through the upload confirmation flow', () => {

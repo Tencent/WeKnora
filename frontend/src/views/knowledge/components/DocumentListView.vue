@@ -194,6 +194,7 @@ const onMoreVisible = (id: string, visible: boolean) => {
     const it = props.items.find(i => i.id === id);
     if (it) emit('probe-trace', it);
   } else {
+    folderPickerItemId.value = null;
     // Reset move state when popup closes naturally
     emit('reset-move-state');
   }
@@ -264,10 +265,14 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'mo
     </div>
 
     <div class="doc-list-body">
-      <!-- Sub-folders of the folder being browsed, listed above the documents
-           the way a file manager does. -->
-      <div v-for="folder in folders" :key="'folder-' + folder.path" class="doc-list-row doc-list-row--folder"
-        :title="folder.path" role="row" @click="emit('open-folder', folder.path)">
+      <div
+        v-for="folder in folders"
+        :key="'folder-' + folder.path"
+        class="doc-list-row doc-list-row--folder"
+        :title="folder.path"
+        role="row"
+        @click="emit('open-folder', folder.path)"
+      >
         <div class="cell cell-check" aria-hidden="true"></div>
         <div class="cell cell-name">
           <span class="row-file-icon-wrap">
@@ -286,9 +291,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'mo
         <div class="cell cell-size"></div>
         <div class="cell cell-status"></div>
         <div class="cell cell-time"></div>
-        <div v-if="canEdit" class="cell cell-actions">
-          <t-icon name="chevron-right" class="row-folder-chevron" />
-        </div>
+        <div v-if="canEdit" class="cell cell-actions" aria-hidden="true"></div>
       </div>
 
       <div v-for="item in items" :key="item.id" class="doc-list-row"
@@ -376,8 +379,19 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'mo
               <t-icon name="more" size="16px" />
             </button>
             <template #content>
+              <!-- Move: folder picker (must win over the normal menu while open) -->
+              <div v-if="folderPickerItemId === item.id" class="card-menu move-menu">
+                <FolderPickerMenu
+                  :options="folderOptions || []"
+                  :current-path="item.folder_path || ''"
+                  show-back
+                  @back="folderPickerItemId = null"
+                  @confirm="(path: string) => onFolderPicked(item, path)"
+                />
+              </div>
+
               <!-- Normal menu -->
-              <div v-if="moveMenuMode === 'normal'" class="card-menu">
+              <div v-else-if="moveMenuMode === 'normal'" class="card-menu">
                 <DocumentActionMenu
                   :item="item"
                   :can-mutate-knowledge="canMutateKnowledge"
@@ -390,17 +404,6 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'mo
                   @move-folder="handleAction('move-folder', item)"
                   @batch-manage="handleAction('batch-manage', item)"
                   @delete="handleAction('delete', item)"
-                />
-              </div>
-
-              <!-- Move: folder picker -->
-              <div v-else-if="folderPickerItemId === item.id" class="card-menu move-menu">
-                <FolderPickerMenu
-                  :options="folderOptions || []"
-                  :current-path="item.folder_path || ''"
-                  show-back
-                  @back="folderPickerItemId = null"
-                  @confirm="(path: string) => onFolderPicked(item, path)"
                 />
               </div>
 
@@ -677,8 +680,8 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'mo
 .doc-list-row--folder {
   cursor: pointer;
 
-  &:hover .row-folder-chevron {
-    color: var(--td-brand-color);
+  .row-file-name {
+    font-weight: 500;
   }
 }
 
