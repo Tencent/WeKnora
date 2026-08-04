@@ -47,7 +47,6 @@ import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import KbFolderTree from './components/KbFolderTree.vue';
-import MoveToFolderDialog from './components/MoveToFolderDialog.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
 import BatchTagDialog from './components/BatchTagDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
@@ -804,23 +803,24 @@ const handleFolderSelect = (path: string) => {
 // ── Re-filing documents and renaming folders ──
 // folder_path is display-only, so both operations are a plain column update:
 // nothing is re-parsed, re-chunked or re-embedded.
-const moveFolderDialogVisible = ref(false);
-const moveFolderSubmitting = ref(false);
-const moveFolderTargets = ref<string[]>([]);
 
-const openMoveToFolderDialog = (ids: string[]) => {
-  if (!ids.length) return;
-  moveFolderTargets.value = [...ids];
-  moveFolderDialogVisible.value = true;
-};
+// Flat folder list shared by every "move to folder" picker.
+const folderOptions = computed(() => {
+  const result: Array<{ path: string; name: string; depth: number }> = [];
+  const walk = (nodes: KnowledgeFolderTree['folders'], depth: number) => {
+    nodes.forEach((node) => {
+      result.push({ path: node.path, name: node.name, depth });
+      walk(node.children || [], depth + 1);
+    });
+  };
+  walk(folderTree.value?.folders || [], 0);
+  return result;
+});
 
-const handleMoveToFolderConfirm = async (folderPath: string) => {
-  const ids = moveFolderTargets.value;
+const moveKnowledgeIntoFolder = async (ids: string[], folderPath: string) => {
   if (!kbId.value || ids.length === 0) return;
-  moveFolderSubmitting.value = true;
   try {
     await moveKnowledgeToFolder(kbId.value, ids, folderPath);
-    moveFolderDialogVisible.value = false;
     MessagePlugin.success(t('knowledgeBase.moveToFolder.success', { count: ids.length }));
     clearSelection();
     batchMode.value = false;
@@ -829,8 +829,6 @@ const handleMoveToFolderConfirm = async (folderPath: string) => {
     await loadFolderTree(kbId.value);
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('knowledgeBase.moveToFolder.failed'));
-  } finally {
-    moveFolderSubmitting.value = false;
   }
 };
 
@@ -2149,7 +2147,6 @@ const handleCardAction = (
   }
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
   if (action === 'move') return handleMoveKnowledge(item);
-  if (action === 'move-folder') return openMoveToFolderDialog([item.id]);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);
   if (action === 'batch-manage') return handleEnterBatchFromCard(item);
@@ -2165,7 +2162,6 @@ const handleListAction = (
   if (action === 'reparse') return confirmRebuildKnowledge(idx, item);
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
   if (action === 'move') return handleMoveKnowledge(item);
-  if (action === 'move-folder') return openMoveToFolderDialog([item.id]);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);
   if (action === 'batch-manage') return handleEnterBatchFromCard(item);
@@ -2545,7 +2541,7 @@ async function createNewSession(value: string): Promise<void> {
                 <template v-else-if="(cardList.length || currentChildFolders.length) && viewMode === 'grid'">
                   <DocumentCardView
                     :items="cardList"
-                    :folders="currentChildFolders"
+                    :folders="currentChildFolders" :folder-options="folderOptions"
                     :selected-ids="selectedIds"
                     :batch-mode="batchMode"
                     :can-edit="canEdit"
@@ -2561,6 +2557,7 @@ async function createNewSession(value: string): Promise<void> {
                     :show-folder-path="showDocumentFolderPath"
                     @open="(item: any) => openKnowledgeItem(item)"
                     @open-folder="handleFolderSelect"
+                    @move-to-folder="(item: any, path: string) => moveKnowledgeIntoFolder([item.id], path)"
                     @toggle-checkbox="onCardGridCheckboxChange"
                     @menu-visible-change="(visible: boolean, item: any) => onCardMoreVisibleChange(visible, item)"
                     @action="(action: any, item: any) => handleCardAction(action, item)"
@@ -2572,7 +2569,8 @@ async function createNewSession(value: string): Promise<void> {
                   />
                 </template>
                 <template v-else-if="(cardList.length || currentChildFolders.length) && viewMode === 'list'">
-                  <DocumentListView :items="cardList" :folders="currentChildFolders" :selected-ids="selectedIds" :tag-list="tagList"
+                  <DocumentListView :items="cardList" :folders="currentChildFolders" :folder-options="folderOptions"
+                    :selected-ids="selectedIds" :tag-list="tagList"
                     :can-edit="canEdit" :can-mutate-knowledge="canMutateKnowledge"
                     :trace-visible-ids="traceAvailableById"
                     :move-menu-mode="moveMenuMode"
@@ -2583,6 +2581,7 @@ async function createNewSession(value: string): Promise<void> {
                     :move-submitting="moveSubmitting"
                     :show-folder-path="showDocumentFolderPath"
                     @open-folder="handleFolderSelect"
+                    @move-to-folder="(item: any, path: string) => moveKnowledgeIntoFolder([item.id], path)"
                     @open="(item: any) => openKnowledgeItem(item)" @toggle-row="toggleSelectRow"
                     @toggle-all="toggleSelectAll" @action="(action: any, item: any) => handleListAction(action, item)"
                     @probe-trace="(item: any) => probeTraceAvailable(item)"
@@ -2607,10 +2606,10 @@ async function createNewSession(value: string): Promise<void> {
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
                 <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
                   :reparse-loading="batchReparsing" :tag-loading="batchTagging" :visible="batchMode || selectedIds.size > 0"
-                  :show-move-to-folder="canEdit"
+                  :show-move-to-folder="canEdit" :folder-options="folderOptions"
                   @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse"
                   @batch-tag="handleBatchTag"
-                  @move-to-folder="openMoveToFolderDialog(Array.from(selectedIds))" />
+                  @move-to-folder="(path: string) => moveKnowledgeIntoFolder(Array.from(selectedIds), path)" />
               </div>
             </div>
           </div>
@@ -2651,15 +2650,6 @@ async function createNewSession(value: string): Promise<void> {
     :confirm-loading="batchTagging"
     @update:visible="batchTagDialogVisible = $event" @confirm="onBatchTagConfirm"
     @tag-created="loadTags(kbId, true)" @open-manage="openTagManageFromBatchDialog" />
-
-  <MoveToFolderDialog
-    v-model:visible="moveFolderDialogVisible"
-    :tree="folderTree"
-    :count="moveFolderTargets.length"
-    :submitting="moveFolderSubmitting"
-    :current-path="selectedFolderPath"
-    @confirm="handleMoveToFolderConfirm"
-  />
 
   <KbTagManageDrawer
     v-if="!isFAQ"

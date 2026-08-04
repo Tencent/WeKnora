@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { formatFileSize, getFileIcon } from '@/utils/files';
 import { useTagChipsOverflow } from '@/composables/useTagChipsOverflow';
 import DocumentActionMenu from './DocumentActionMenu.vue';
+import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue';
 
 interface Tag {
   id: string;
@@ -38,6 +39,8 @@ const props = defineProps<{
   loading?: boolean;
   /** Sub-folders of the folder currently being browsed. */
   folders?: Array<{ path: string; name: string; total_count: number }>;
+  /** Every folder of the knowledge base, for the "move to folder" picker. */
+  folderOptions?: FolderOption[];
   /**
    * Show each row's folder under its name. Only useful when the list spans
    * several folders, i.e. while filtering; inside one folder the path would be
@@ -61,6 +64,7 @@ const emit = defineEmits<{
   (e: 'probe-trace', item: KnowledgeItem): void;
   (e: 'tag-edit', item: KnowledgeItem): void;
   (e: 'open-folder', path: string): void;
+  (e: 'move-to-folder', item: KnowledgeItem, folderPath: string): void;
   // Move sub-flow emits
   (e: 'move-select-target', kb: any): void;
   (e: 'move-back'): void;
@@ -214,7 +218,24 @@ onBeforeUnmount(() => {
   stickyObserver = null;
 });
 
+// Which row's action popup is currently showing the folder picker. Kept local so
+// picking a folder stays inside the menu the user already opened, exactly like
+// the "move to knowledge base" sub-menu next to it.
+const folderPickerItemId = ref<string | null>(null);
+
+const onFolderPicked = (item: KnowledgeItem, path: string) => {
+  folderPickerItemId.value = null;
+  moreOpen.value = null;
+  item.isMore = false;
+  emit('move-to-folder', item, path);
+};
+
 const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem) => {
+  // The folder picker opens inside this same popup, so keep the menu open.
+  if (action === 'move-folder') {
+    folderPickerItemId.value = item.id;
+    return;
+  }
   // Don't close popup for move — it triggers the move sub-flow
   if (action !== 'move') {
     moreOpen.value = null;
@@ -369,6 +390,17 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'mo
                   @move-folder="handleAction('move-folder', item)"
                   @batch-manage="handleAction('batch-manage', item)"
                   @delete="handleAction('delete', item)"
+                />
+              </div>
+
+              <!-- Move: folder picker -->
+              <div v-else-if="folderPickerItemId === item.id" class="card-menu move-menu">
+                <FolderPickerMenu
+                  :options="folderOptions || []"
+                  :current-path="item.folder_path || ''"
+                  show-back
+                  @back="folderPickerItemId = null"
+                  @confirm="(path: string) => onFolderPicked(item, path)"
                 />
               </div>
 
