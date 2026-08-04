@@ -194,19 +194,57 @@ export async function deleteMCPCredentialField(
 // to avoid a route conflict, and allow-listed for no-auth in the backend).
 export const MCP_OAUTH_CALLBACK_PATH = '/api/v1/mcp-oauth/callback'
 
-// Begin authorization for the current user. Returns the URL to open in a popup.
+export interface MCPOAuthAuthorization {
+  authorizationUrl: string
+  authorizationAttempt: string
+}
+
+export type MCPOAuthTokenState = 'authorized' | 'refreshable' | 'reauth_required' | 'pending'
+
+export interface MCPOAuthStatus {
+  authorized: boolean
+  state: MCPOAuthTokenState
+  refresh_available: boolean
+  expires_at?: string
+}
+
+// Begin authorization for the current user. The attempt id binds polling to
+// this popup, so an older stored token cannot be mistaken for fresh consent.
 export async function getMCPOAuthAuthorizeURL(
   serviceId: string,
   body: { redirect_uri: string; frontend_redirect?: string }
-): Promise<string> {
+): Promise<MCPOAuthAuthorization> {
   const response: any = await post(`/api/v1/mcp-services/${serviceId}/oauth/authorize-url`, body)
-  return (response.data ?? response)?.authorization_url ?? ''
+  const data = response.data ?? response
+  return {
+    authorizationUrl: data?.authorization_url ?? '',
+    authorizationAttempt: data?.authorization_attempt ?? '',
+  }
 }
 
 // Whether the current user has authorized this service.
-export async function getMCPOAuthStatus(serviceId: string): Promise<boolean> {
-  const response: any = await get(`/api/v1/mcp-services/${serviceId}/oauth/status`)
+export async function getMCPOAuthStatus(
+  serviceId: string,
+  authorizationAttempt?: string,
+): Promise<boolean> {
+  const query = authorizationAttempt
+    ? `?authorization_attempt=${encodeURIComponent(authorizationAttempt)}`
+    : ''
+  const response: any = await get(`/api/v1/mcp-services/${serviceId}/oauth/status${query}`)
   return Boolean((response.data ?? response)?.authorized)
+}
+
+// Full lifecycle status for management surfaces. Expired access tokens with a
+// refresh token are "refreshable", not falsely presented as already usable.
+export async function getMCPOAuthAuthorizationStatus(serviceId: string): Promise<MCPOAuthStatus> {
+  const response: any = await get(`/api/v1/mcp-services/${serviceId}/oauth/status`)
+  const data = response.data ?? response
+  return {
+    authorized: Boolean(data?.authorized),
+    state: data?.state ?? 'reauth_required',
+    refresh_available: Boolean(data?.refresh_available),
+    expires_at: data?.expires_at,
+  }
 }
 
 // Revoke the current user's token (forces re-authorization).

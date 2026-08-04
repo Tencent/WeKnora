@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ErrWikiPageNotFound is returned when a wiki page is not found
@@ -35,6 +37,13 @@ func (r *wikiPageRepository) wikiCategoryRankOrder() string {
 	return "CASE WHEN COALESCE(jsonb_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
 }
 
+func (r *wikiPageRepository) wikiEmptyInLinksPredicate() string {
+	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
+		return "(in_links IS NULL OR json_array_length(in_links) = 0)"
+	}
+	return "(in_links IS NULL OR in_links = '[]'::JSONB)"
+}
+
 // Create inserts a new wiki page record
 func (r *wikiPageRepository) Create(ctx context.Context, page *types.WikiPage) error {
 	return r.db.WithContext(ctx).Create(page).Error
@@ -43,27 +52,171 @@ func (r *wikiPageRepository) Create(ctx context.Context, page *types.WikiPage) e
 // Update updates an existing wiki page record with optimistic locking.
 // Increments version — use only for content changes visible to the user.
 // The caller must set page.Version to the expected current version.
+//
+// The write goes through an explicit column map (not GORM's struct Updates)
+// so cleared fields persist: struct Updates skips zero values, which used to
+// make "empty the summary" silently not stick while the follow-up UpdateMeta
+// map call *did* write empty status — one inconsistent half-update. The map
+// covers every column UpdatePage mutates, so no UpdateMeta chaser is needed.
 func (r *wikiPageRepository) Update(ctx context.Context, page *types.WikiPage) error {
+	return updateWikiPageRow(r.db.WithContext(ctx), page)
+}
+
+// UpdateWithRevision snapshots the version being superseded and applies the
+// update atomically. Doing both in one transaction is what makes the history
+// trustworthy: a failed update can no longer leave behind a snapshot of a
+// version that is still current, which would show up twice in the history
+// and be un-revertable.
+func (r *wikiPageRepository) UpdateWithRevision(
+	ctx context.Context, page *types.WikiPage, rev *types.WikiPageRevision,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if rev != nil {
+			// An already-present (page_id, version) pair means a concurrent
+			// writer snapshotted the same version first; its copy is
+			// identical, so leaving it alone is correct.
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "page_id"}, {Name: "version"}},
+				DoNothing: true,
+			}).Create(rev).Error; err != nil {
+				return err
+			}
+		}
+		return updateWikiPageRow(tx, page)
+	})
+}
+
+// updateWikiPageRow performs the versioned page write on the given handle
+// (plain connection or transaction). On failure page.Version is restored so
+// the caller never observes a bumped version for a write that did not land.
+func updateWikiPageRow(db *gorm.DB, page *types.WikiPage) error {
 	expectedVersion := page.Version
 	page.Version = expectedVersion + 1
 
-	result := r.db.WithContext(ctx).
+	result := db.
 		Model(page).
 		Where("id = ? AND version = ?", page.ID, expectedVersion).
-		Updates(page)
+		Updates(map[string]interface{}{
+			"title":            page.Title,
+			"content":          page.Content,
+			"summary":          page.Summary,
+			"page_type":        page.PageType,
+			"status":           page.Status,
+			"aliases":          page.Aliases,
+			"out_links":        page.OutLinks,
+			"source_refs":      page.SourceRefs,
+			"chunk_refs":       page.ChunkRefs,
+			"page_metadata":    page.PageMetadata,
+			"parent_slug":      page.ParentSlug,
+			"folder_id":        page.FolderID,
+			"category_path":    page.CategoryPath,
+			"wiki_path":        page.WikiPath,
+			"depth":            page.Depth,
+			"sort_order":       page.SortOrder,
+			"last_edit_source": page.LastEditSource,
+			"last_editor_id":   page.LastEditorID,
+			"version":          page.Version,
+			"updated_at":       page.UpdatedAt,
+		})
 	if result.Error != nil {
+		page.Version = expectedVersion
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
+		page.Version = expectedVersion
 		// Could be not found or version conflict — check which
 		var count int64
-		r.db.WithContext(ctx).Model(&types.WikiPage{}).Where("id = ?", page.ID).Count(&count)
+		db.Model(&types.WikiPage{}).Where("id = ?", page.ID).Count(&count)
 		if count == 0 {
 			return ErrWikiPageNotFound
 		}
 		return ErrWikiPageConflict
 	}
 	return nil
+}
+
+// wikiRevisionListColumns is the projection for revision listings — every
+// column except the potentially multi-hundred-KB content body.
+const wikiRevisionListColumns = "id, tenant_id, knowledge_base_id, page_id, slug, version, " +
+	"title, page_type, status, summary, aliases, edit_source, editor_id, edited_at, created_at"
+
+// ListRevisions returns snapshots for a page newest-first, content omitted.
+func (r *wikiPageRepository) ListRevisions(
+	ctx context.Context, kbID string, pageID string, limit int, offset int,
+) ([]*types.WikiPageRevision, int64, error) {
+	base := r.db.WithContext(ctx).Model(&types.WikiPageRevision{}).
+		Where("knowledge_base_id = ? AND page_id = ?", kbID, pageID)
+
+	var total int64
+	if err := base.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var revs []*types.WikiPageRevision
+	if err := base.
+		Select(wikiRevisionListColumns).
+		Order("version DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&revs).Error; err != nil {
+		return nil, 0, err
+	}
+	return revs, total, nil
+}
+
+// GetRevision returns one snapshot with content.
+func (r *wikiPageRepository) GetRevision(
+	ctx context.Context, kbID string, pageID string, version int,
+) (*types.WikiPageRevision, error) {
+	var rev types.WikiPageRevision
+	if err := r.db.WithContext(ctx).
+		Where("knowledge_base_id = ? AND page_id = ? AND version = ?", kbID, pageID, version).
+		First(&rev).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrWikiPageNotFound
+		}
+		return nil, err
+	}
+	return &rev, nil
+}
+
+// PruneRevisions applies the two-tier retention described by req: the soft
+// cap only touches snapshots whose author is listed as prunable, the hard cap
+// applies to everything.
+func (r *wikiPageRepository) PruneRevisions(ctx context.Context, req types.WikiRevisionPruneRequest) error {
+	if req.PageID == "" {
+		return nil
+	}
+	db := r.db.WithContext(ctx)
+	if req.KeepFromVersion > 0 && len(req.PrunableSources) > 0 {
+		if err := db.
+			Where("page_id = ? AND version < ? AND edit_source IN ?",
+				req.PageID, req.KeepFromVersion, req.PrunableSources).
+			Delete(&types.WikiPageRevision{}).Error; err != nil {
+			return err
+		}
+	}
+	if req.HardKeepFromVersion > 0 {
+		if err := db.
+			Where("page_id = ? AND version < ?", req.PageID, req.HardKeepFromVersion).
+			Delete(&types.WikiPageRevision{}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DeleteRevisionsByPage hard-deletes a page's whole snapshot history. Pages
+// themselves are soft-deleted, but a soft-deleted page is unreachable through
+// every read path, so its snapshots would be dead weight — and they are the
+// bulkiest rows the wiki stores.
+func (r *wikiPageRepository) DeleteRevisionsByPage(ctx context.Context, pageID string) error {
+	if pageID == "" {
+		return nil
+	}
+	return r.db.WithContext(ctx).
+		Where("page_id = ?", pageID).
+		Delete(&types.WikiPageRevision{}).Error
 }
 
 // UpdateAutoLinkedContent persists content changes produced by the automatic
@@ -104,6 +257,7 @@ func (r *wikiPageRepository) UpdateMeta(ctx context.Context, page *types.WikiPag
 		Updates(map[string]interface{}{
 			"in_links":      page.InLinks,
 			"out_links":     page.OutLinks,
+			"aliases":       page.Aliases,
 			"status":        page.Status,
 			"source_refs":   page.SourceRefs,
 			"chunk_refs":    page.ChunkRefs,
@@ -455,6 +609,10 @@ var ErrWikiFolderNotFound = errors.New("wiki folder not found")
 // already exists under the same parent.
 var ErrWikiFolderConflict = errors.New("wiki folder name conflict")
 
+// ErrWikiFolderNotEmpty is returned when a folder still has a live page or
+// child folder at the instant an atomic delete is attempted.
+var ErrWikiFolderNotEmpty = errors.New("wiki folder is not empty")
+
 func (r *wikiPageRepository) CreateFolder(ctx context.Context, folder *types.WikiFolder) error {
 	return r.db.WithContext(ctx).Create(folder).Error
 }
@@ -535,14 +693,34 @@ func (r *wikiPageRepository) UpdateFolder(ctx context.Context, folder *types.Wik
 }
 
 func (r *wikiPageRepository) DeleteFolder(ctx context.Context, kbID string, id string) error {
-	result := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ? AND id = ?", kbID, id).
-		Delete(&types.WikiFolder{})
+	// Keep the emptiness test in the same SQL statement as the soft delete.
+	// A page move or child-folder create can race the service's earlier checks;
+	// a check-then-delete sequence would otherwise leave a dangling folder_id.
+	result := r.db.WithContext(ctx).Exec(`
+UPDATE wiki_folders
+SET deleted_at = ?
+WHERE knowledge_base_id = ? AND id = ? AND deleted_at IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM wiki_pages
+    WHERE knowledge_base_id = ? AND folder_id = ? AND deleted_at IS NULL
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM wiki_folders AS child
+    WHERE child.knowledge_base_id = ? AND child.parent_id = ? AND child.deleted_at IS NULL
+  )`, time.Now(), kbID, id, kbID, id, kbID, id)
 	if result.Error != nil {
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return ErrWikiFolderNotFound
+		var count int64
+		if err := r.db.WithContext(ctx).Model(&types.WikiFolder{}).
+			Where("knowledge_base_id = ? AND id = ?", kbID, id).Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return ErrWikiFolderNotFound
+		}
+		return ErrWikiFolderNotEmpty
 	}
 	return nil
 }
@@ -772,7 +950,7 @@ func (r *wikiPageRepository) ListPagesCursor(
 		limit = 500
 	}
 	q := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ?", kbID).
+		Where("knowledge_base_id = ? AND status <> ?", kbID, types.WikiPageStatusArchived).
 		Order("id ASC").
 		Limit(limit)
 	if cursor != "" {
@@ -892,7 +1070,7 @@ func (r *wikiPageRepository) ListAll(ctx context.Context, kbID string) ([]*types
 // ListRecentForSuggestions returns recent user-visible wiki pages across the given
 // knowledge bases, used as a fallback source for agent suggested questions when
 // the KB has no FAQ entries or AI-generated document questions (typical for
-// Wiki-only KBs). Excludes index/log pages and archived pages.
+// Wiki-only KBs). Excludes the index page and archived pages.
 func (r *wikiPageRepository) ListRecentForSuggestions(
 	ctx context.Context,
 	tenantID uint64,
@@ -906,7 +1084,7 @@ func (r *wikiPageRepository) ListRecentForSuggestions(
 	if err := r.db.WithContext(ctx).
 		Where("tenant_id = ?", tenantID).
 		Where("knowledge_base_id IN ?", kbIDs).
-		Where("page_type NOT IN ?", []string{types.WikiPageTypeIndex, types.WikiPageTypeLog}).
+		Where("page_type <> ?", types.WikiPageTypeIndex).
 		Where("status = ?", types.WikiPageStatusPublished).
 		Where("title <> ''").
 		Order("updated_at DESC").
@@ -1034,9 +1212,9 @@ func (r *wikiPageRepository) CountOrphans(ctx context.Context, kbID string) (int
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
 		Where("knowledge_base_id = ?", kbID).
-		Where("(in_links IS NULL OR in_links = '[]'::JSONB)").
-		// Exclude index and log pages as they are naturally root pages
-		Where("page_type NOT IN ?", []string{types.WikiPageTypeIndex, types.WikiPageTypeLog}).
+		Where(r.wikiEmptyInLinksPredicate()).
+		// Exclude the index page because it is naturally a root page.
+		Where("page_type <> ?", types.WikiPageTypeIndex).
 		Count(&count).Error; err != nil {
 		return 0, err
 	}

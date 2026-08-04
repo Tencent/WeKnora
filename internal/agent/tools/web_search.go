@@ -41,7 +41,7 @@ var webSearchTool = BaseTool{
 **Parameters**:
 - query (required): Search query string
 
-**Returns**: Web search results with title, URL, snippet, and content (up to %d results)
+**Returns**: Web search results with title, short wN page ID, snippet, and content (up to %d results)
 
 ## Examples
 
@@ -57,13 +57,14 @@ var webSearchTool = BaseTool{
 }
 ` + "`" + `
 
-## Tips
+## Evidence and Fallback
 
 - Results are automatically compressed using RAG to extract relevant content
 - Search results are stored in a temporary knowledge base for the session
-- Use this tool when knowledge bases don't have the information you need
-- Results include URL, title, snippet, and content snippet (may be truncated)
-- **CRITICAL**: If content is truncated or you need full details, use **web_fetch** to fetch complete page content
+- Titles, URLs, snippets, and content snippets are usable search-summary evidence
+- Use web_fetch only when the snippet is insufficient or full-page verification is important
+- If web_fetch fails, keep the search evidence, disclose that page content was not verified, and lower confidence for dynamic facts
+- Do not repeat equivalent searches merely because a page could not be fetched
 - Maximum %d results will be returned per search`,
 	schema: utils.GenerateSchema[WebSearchInput](),
 }
@@ -250,12 +251,14 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		output += "\n"
 
 		resultData := map[string]interface{}{
-			"result_index": i + 1,
-			"title":        result.Title,
-			"url":          result.URL,
-			"snippet":      result.Snippet,
-			"content":      result.Content,
-			"source":       result.Source,
+			"result_index":  i + 1,
+			"title":         result.Title,
+			"url":           result.URL,
+			"snippet":       result.Snippet,
+			"content":       result.Content,
+			"source":        result.Source,
+			"evidence_type": "search_summary",
+			"page_verified": false,
 		}
 		if result.PublishedAt != nil {
 			resultData["published_at"] = result.PublishedAt.Format(time.RFC3339)
@@ -266,9 +269,9 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	// Add guidance for next steps
 	output += "\n=== Next Steps ===\n"
 	if len(webResults) > 0 {
-		output += "- ⚠️ Content may be truncated (showing first 500 chars). Use web_fetch to get full page content.\n"
-		output += "- Extract URLs from results above and use web_fetch with appropriate prompts to get detailed information.\n"
-		output += "- Synthesize information from multiple sources for comprehensive answers.\n"
+		output += "- Titles, URLs, snippets, and content snippets are usable search-summary evidence.\n"
+		output += "- If the evidence is sufficient, answer now. Use web_fetch only for claims that need full-page verification.\n"
+		output += "- If fetching fails, retain these results, disclose that page content was not verified, and avoid presenting dynamic facts as certain.\n"
 	} else {
 		output += "- No web search results found. Consider:\n"
 		output += "  - Try different search queries or keywords\n"

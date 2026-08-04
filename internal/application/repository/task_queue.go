@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // taskPendingOpsRepository implements interfaces.TaskPendingOpsRepository.
@@ -26,6 +27,13 @@ func NewTaskPendingOpsRepository(db *gorm.DB) interfaces.TaskPendingOpsRepositor
 // Scope/ScopeID/Op (Payload optional). ID, FailCount default to zero;
 // EnqueuedAt is filled with the DB-side default if left zero.
 func (r *taskPendingOpsRepository) Enqueue(ctx context.Context, op *types.TaskPendingOp) error {
+	if err := preparePendingOp(op); err != nil {
+		return err
+	}
+	return r.db.WithContext(ctx).Create(op).Error
+}
+
+func preparePendingOp(op *types.TaskPendingOp) error {
 	if op == nil {
 		return errors.New("task pending ops: nil op")
 	}
@@ -41,7 +49,112 @@ func (r *taskPendingOpsRepository) Enqueue(ctx context.Context, op *types.TaskPe
 		// driver-level default handling.
 		op.Payload = []byte("{}")
 	}
-	return r.db.WithContext(ctx).Create(op).Error
+	return nil
+}
+
+// EnqueueIfKnowledgeBaseActive prevents detached wiki cleanup from writing new
+// durable work after a KB was soft-deleted. On Postgres the share lock
+// serializes this check+insert transaction against the row update performed by
+// soft deletion: whichever operation acquires the row first determines the
+// order, and the deletion path's subsequent scope scrub removes any insert
+// that committed before it.
+func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
+	ctx context.Context,
+	op *types.TaskPendingOp,
+) (bool, error) {
+	if err := preparePendingOp(op); err != nil {
+		return false, err
+	}
+	if op.Scope != types.TaskScopeKnowledgeBase {
+		return false, errors.New("task pending ops: guarded enqueue requires knowledge_base scope")
+	}
+	accepted := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Model(&types.KnowledgeBase{}).
+			Select("id").
+			Where("id = ? AND tenant_id = ?", op.ScopeID, op.TenantID)
+		dialector := tx.Dialector
+		if dialector.Name() == "postgres" {
+			query = query.Clauses(clause.Locking{Strength: "SHARE"})
+		}
+		var kb types.KnowledgeBase
+		if err := query.Take(&kb).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		if err := tx.Create(op).Error; err != nil {
+			return err
+		}
+		accepted = true
+		return nil
+	})
+	return accepted, err
+}
+
+// SeedKnowledgeFinalizingWithPendingOp commits the finalizing counter and the
+// durable operation that owns one slot in the same transaction. This closes
+// the crash window where a knowledge row could enter finalizing before its
+// Wiki operation existed.
+func (r *taskPendingOpsRepository) SeedKnowledgeFinalizingWithPendingOp(
+	ctx context.Context,
+	knowledgeID string,
+	expectedSubtasks int,
+	op *types.TaskPendingOp,
+) (bool, error) {
+	if knowledgeID == "" {
+		return false, errors.New("task pending ops: knowledge_id is required")
+	}
+	if expectedSubtasks <= 0 {
+		return false, errors.New("task pending ops: expected_subtasks must be positive")
+	}
+	if err := preparePendingOp(op); err != nil {
+		return false, err
+	}
+	if op.Scope != types.TaskScopeKnowledgeBase {
+		return false, errors.New("task pending ops: finalizing seed requires knowledge_base scope")
+	}
+
+	promoted := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Model(&types.KnowledgeBase{}).
+			Select("id").
+			Where("id = ? AND tenant_id = ?", op.ScopeID, op.TenantID)
+		if tx.Dialector.Name() == "postgres" {
+			query = query.Clauses(clause.Locking{Strength: "SHARE"})
+		}
+		var kb types.KnowledgeBase
+		if err := query.Take(&kb).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+
+		res := tx.Model(&types.Knowledge{}).
+			Where(
+				"id = ? AND tenant_id = ? AND knowledge_base_id = ? AND parse_status = ?",
+				knowledgeID, op.TenantID, op.ScopeID, types.ParseStatusProcessing,
+			).
+			Updates(map[string]interface{}{
+				"parse_status":           types.ParseStatusFinalizing,
+				"pending_subtasks_count": expectedSubtasks,
+				"updated_at":             time.Now(),
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return nil
+		}
+		if err := tx.Create(op).Error; err != nil {
+			return err
+		}
+		promoted = true
+		return nil
+	})
+	return promoted, err
 }
 
 // PeekBatch returns up to `limit` rows for the (task_type, scope, scope_id)
@@ -225,6 +338,18 @@ func (r *taskPendingOpsRepository) DeleteByIDs(ctx context.Context, ids []int64)
 	}
 	return r.db.WithContext(ctx).
 		Where("id IN ?", ids).
+		Delete(&types.TaskPendingOp{}).Error
+}
+
+// DeleteByScope removes every pending operation owned by a scope, regardless
+// of task type. Both scope fields are required so a malformed lifecycle call
+// can never turn into an unbounded queue deletion.
+func (r *taskPendingOpsRepository) DeleteByScope(ctx context.Context, scope, scopeID string) error {
+	if scope == "" || scopeID == "" {
+		return errors.New("task pending ops: scope and scope_id are required")
+	}
+	return r.db.WithContext(ctx).
+		Where("scope = ? AND scope_id = ?", scope, scopeID).
 		Delete(&types.TaskPendingOp{}).Error
 }
 

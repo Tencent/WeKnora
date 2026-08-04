@@ -1,5 +1,8 @@
 export const RAG_PIPELINE_TOOL_NAMES = new Set(['query_understand', 'knowledge_search'])
 
+/** Retrieval tools that can produce citations. `search_knowledge` is the legacy alias. */
+export const RAG_RETRIEVAL_TOOL_NAMES = new Set(['knowledge_search', 'search_knowledge'])
+
 /** Tools rendered on the quick-answer timeline (includes pre-RAG attachment prep). */
 export const RAG_TIMELINE_TOOL_NAMES = new Set([
   ...RAG_PIPELINE_TOOL_NAMES,

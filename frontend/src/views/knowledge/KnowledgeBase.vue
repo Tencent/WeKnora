@@ -43,6 +43,7 @@ import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
+import BatchTagDialog from './components/BatchTagDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
@@ -282,6 +283,9 @@ const canManage = computed(() => {
   return orgStore.canManageKB(kbId.value, false);
 });
 
+// The activity feed exposes owner-side actor and configuration summaries.
+// It lives in KB settings (KnowledgeBaseEditorModal) for Owner/Admin in the home tenant.
+
 // Can mutate knowledge (move / batch-delete): the backend gate for these
 // two endpoints is g.Contributor(), so the caller MUST be Contributor+
 // in their tenant on top of having KB edit permission. Without the extra
@@ -299,6 +303,16 @@ const canMutateKnowledge = computed(() => {
 
 // Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
 const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value) || kbInfo.value?.my_permission || '');
+
+// Downloading returns the original source file, which is intentionally more
+// restrictive than viewing parsed content or using the preview tab. A tenant
+// Viewer can never download; for cross-tenant KBs the effective share
+// permission must additionally be Editor or Admin.
+const canDownloadKnowledge = computed(() => {
+  if (!authStore.hasRole('contributor')) return false;
+  const permission = effectiveKBPermission.value;
+  return !permission || permission === 'owner' || permission === 'admin' || permission === 'editor';
+});
 
 const knowledgeList = ref<Array<{ id: string; name: string; type?: string }>>([]);
 let { cardList, total, moreIndex, details, getKnowled, delKnowledge, openMore, onVisibleChange: _onVisibleChange, getCardDetails, getfDetails } = useKnowledgeBase(kbId.value)
@@ -407,6 +421,24 @@ const selectedIds = ref<Set<string>>(new Set());
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
 const batchReparsing = ref(false);
+const batchTagging = ref(false);
+const batchTagDialogVisible = ref(false);
+const batchTagPreSelectedIds = computed(() => {
+  const ids = Array.from(selectedIds.value);
+  if (ids.length === 0) return [];
+  const cards = ids
+    .map((id) => cardList.value.find((c) => c.id === id))
+    .filter((c): c is KnowledgeCard => Boolean(c));
+  if (cards.length === 0) return [];
+  const firstTagIds = new Set((cards[0].tags || []).map((t) => t.id));
+  for (let i = 1; i < cards.length; i++) {
+    const cur = new Set((cards[i].tags || []).map((t) => t.id));
+    for (const tid of firstTagIds) {
+      if (!cur.has(tid)) firstTagIds.delete(tid);
+    }
+  }
+  return Array.from(firstTagIds);
+});
 // IDs submitted for async batch reparse; hold optimistic pending until the worker updates DB.
 const pendingReparseAck = ref<Set<string>>(new Set());
 
@@ -766,6 +798,11 @@ const openTagManageFromEditDialog = () => {
   tagManageDrawerVisible.value = true;
 };
 
+const openTagManageFromBatchDialog = () => {
+  batchTagDialogVisible.value = false;
+  tagManageDrawerVisible.value = true;
+};
+
 const onTagManageChanged = (payload?: { deletedTagId?: string }) => {
   if (!kbId.value) return;
   void loadTags(kbId.value, true);
@@ -980,6 +1017,16 @@ const handleOpenURLImportDialog = (event: CustomEvent) => {
   }
 };
 
+// Global file drops are captured by the platform shell. Route them back into
+// the same confirmation flow as the page upload button so tags and per-batch
+// processing settings are never skipped.
+const handleKnowledgeFileDrop = (event: CustomEvent) => {
+  const eventKbId = event.detail?.kbId;
+  const files = Array.isArray(event.detail?.files) ? event.detail.files : [];
+  if (eventKbId !== kbId.value || isFAQ.value || files.length === 0) return;
+  handleUploadSourceFiles(files);
+};
+
 // Auto-open document detail when navigated with ?knowledge_id=xxx.
 // Note: this runs both when the KB page mounts with a query param AND when a
 // subsequent in-page navigation (e.g. from the global command palette) only
@@ -1033,12 +1080,14 @@ onMounted(() => {
 
   window.addEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.addEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
+  window.addEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
   window.addEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
 });
 
 onUnmounted(() => {
   window.removeEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.removeEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
+  window.removeEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
   window.removeEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
   stopMovePoll();
   if (timeout !== null) {
@@ -1394,14 +1443,16 @@ const showUploadResultMessages = (
 
 const executeUploadBatch = async (
   files: File[],
-  options: { processConfig?: KnowledgeProcessOverrides } = {},
+  options: { processConfig?: KnowledgeProcessOverrides; tagIds?: string[] } = {},
 ) => {
   const targetKbId = kbId.value;
   if (!targetKbId || files.length === 0) {
     return { successCount: 0, failCount: files.length };
   }
 
-  const tagIdsToUpload = selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : undefined;
+  const tagIdsToUpload = options.tagIds && options.tagIds.length > 0
+    ? [...options.tagIds]
+    : undefined;
   let successCount = 0;
   let failCount = 0;
   const totalCount = files.length;
@@ -1466,14 +1517,18 @@ const executeUploadBatch = async (
   return { successCount, failCount };
 };
 
-const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOverrides) => {
+const executeUrlImport = async (
+  url: string,
+  processConfig?: KnowledgeProcessOverrides,
+  tagIds?: string[],
+) => {
   const targetKbId = kbId.value;
   if (!targetKbId) {
     MessagePlugin.error(t('error.missingKbId'));
     return;
   }
 
-  const tagIdsToUpload = selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : undefined;
+  const tagIdsToUpload = tagIds && tagIds.length > 0 ? [...tagIds] : undefined;
   try {
     const responseData: any = await createKnowledgeFromURL(targetKbId, {
       url,
@@ -1515,6 +1570,7 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
   const files = result.files || [];
   const urls = result.urls || [];
   const processConfig = result.processConfig;
+  const tagIds = result.tagIds || [];
 
   if (files.length > 0) {
     const hasFolderPaths = files.some((file) => {
@@ -1524,11 +1580,11 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
     if (hasFolderPaths) {
       MessagePlugin.info(t('knowledgeBase.uploadingFolder', { total: files.length }));
     }
-    await executeUploadBatch(files, { processConfig });
+    await executeUploadBatch(files, { processConfig, tagIds });
   }
 
   for (const url of urls) {
-    await executeUrlImport(url, processConfig);
+    await executeUrlImport(url, processConfig, tagIds);
   }
 };
 
@@ -1539,6 +1595,7 @@ const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
     const result = await uploadConfirmStore.open({
       mode: 'file',
       kbInfo: kbInfo.value,
+      tagIds: [...selectedTagIds.value],
       files,
       urls,
       acceptFileTypes: acceptFileTypes.value,
@@ -1719,6 +1776,18 @@ const getDoc = (page: number) => {
   getfDetails(details.id, page)
 };
 
+const syncDocumentSummaryState = (state: { id?: string; summary_status?: string; description?: string }) => {
+  if (!state?.id) return;
+  const card = cardList.value.find((item: KnowledgeCard) => item.id === state.id);
+  if (!card) return;
+  if (typeof state.summary_status === 'string' && state.summary_status) {
+    card.summary_status = state.summary_status;
+  }
+  if (typeof state.description === 'string') {
+    card.description = state.description;
+  }
+};
+
 const toggleSelectRow = (id: string, checked: boolean, shiftKey?: boolean) => {
   const items = cardList.value || [];
   const idx = items.findIndex((i: KnowledgeCard) => i.id === id);
@@ -1844,6 +1913,35 @@ const confirmBatchDelete = async () => {
     MessagePlugin.error(e?.message || t('knowledgeBase.batchDeleteFailed'));
   } finally {
     batchDeleting.value = false;
+  }
+};
+
+const handleBatchTag = () => {
+  if (batchDeleting.value || batchReparsing.value || batchTagging.value || selectedIds.value.size === 0) return;
+  batchTagDialogVisible.value = true;
+};
+
+const onBatchTagConfirm = async (tagIds: string[]) => {
+  if (batchTagging.value || selectedIds.value.size === 0) return;
+  const ids = Array.from(selectedIds.value);
+  const updateMap: Record<string, string[]> = {};
+  for (const id of ids) {
+    updateMap[id] = tagIds;
+  }
+  batchTagging.value = true;
+  try {
+    await updateKnowledgeTagBatch({ updates: updateMap });
+    MessagePlugin.success(t('knowledgeBase.batchTagSuccess', { count: ids.length }));
+    batchTagDialogVisible.value = false;
+    clearSelection();
+    batchMode.value = false;
+    resetPage();
+    loadKnowledgeFiles(kbId.value);
+    loadTags(kbId.value, true);
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeBase.batchTagFailed'));
+  } finally {
+    batchTagging.value = false;
   }
 };
 
@@ -2292,8 +2390,9 @@ async function createNewSession(value: string): Promise<void> {
               </div>
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
                 <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
-                  :reparse-loading="batchReparsing" :visible="batchMode || selectedIds.size > 0"
-                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
+                  :reparse-loading="batchReparsing" :tag-loading="batchTagging" :visible="batchMode || selectedIds.size > 0"
+                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse"
+                  @batch-tag="handleBatchTag" />
               </div>
             </div>
           </div>
@@ -2301,8 +2400,9 @@ async function createNewSession(value: string): Promise<void> {
       </template>
 
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
-      <DocContent ref="docContentRef" :visible="isCardDetails" :details="details" :canEditKB="canEdit" :kbId="kbId"
-        @closeDoc="closeDoc" @getDoc="getDoc">
+      <DocContent ref="docContentRef" :visible="isCardDetails" :details="details" :canEditKB="canEdit"
+        :canDownloadKB="canDownloadKnowledge" :kbId="kbId"
+        @closeDoc="closeDoc" @getDoc="getDoc" @summaryStateChange="syncDocumentSummaryState">
       </DocContent>
     </div>
   </template>
@@ -2326,7 +2426,16 @@ async function createNewSession(value: string): Promise<void> {
     @update:visible="tagEditDialogVisible = $event" @confirm="onTagEditConfirm" @tag-created="loadTags(kbId, true)"
     @open-manage="openTagManageFromEditDialog" />
 
+  <!-- 批量打标签弹窗 -->
+  <BatchTagDialog :visible="batchTagDialogVisible"
+    :count="selectedIds.size" :kb-id="kbId" :tag-list="tagList"
+    :pre-selected-tag-ids="batchTagPreSelectedIds" :can-manage="canEdit"
+    :confirm-loading="batchTagging"
+    @update:visible="batchTagDialogVisible = $event" @confirm="onBatchTagConfirm"
+    @tag-created="loadTags(kbId, true)" @open-manage="openTagManageFromBatchDialog" />
+
   <KbTagManageDrawer
+    v-if="!isFAQ"
     v-model:visible="tagManageDrawerVisible"
     :kb-id="kbId"
     :is-faq="isFAQ"

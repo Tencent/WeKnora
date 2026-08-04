@@ -75,7 +75,7 @@
                     <div v-if="editorMode === 'edit' && editorAgent?.id" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('integrations.agentEditor.label') }}</label>
-                        <p class="desc">{{ $t('integrations.agentEditor.desc') }}</p>
+                        <p class="desc">{{ isPostCreateSession ? $t('agent.editor.postCreateHint.integrationDesc') : $t('integrations.agentEditor.desc') }}</p>
                       </div>
                       <div class="setting-control">
                         <div class="integration-inline">
@@ -617,6 +617,17 @@
                       </div>
                       <div class="setting-control">
                         <t-switch v-model="thinkingEnabled" />
+                      </div>
+                    </div>
+
+                    <!-- 来源引用 -->
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.citationEnabled') }}</label>
+                        <p class="desc">{{ $t('agent.editor.citationEnabledDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.citation_enabled" />
                       </div>
                     </div>
 
@@ -1601,13 +1612,22 @@
 
               <!-- 底部操作栏 -->
               <div class="settings-footer">
-                <t-button variant="outline" @click="handleClose">{{ props.readOnly ? $t('common.close') :
-                  $t('common.cancel')
-                  }}</t-button>
-                <t-button v-if="!props.readOnly" theme="primary" data-guide="agent-create-submit" :loading="saving"
-                  @click="handleSave">{{
-                  $t('common.save')
-                  }}</t-button>
+                <p v-if="isPostCreateSession" class="settings-footer-note">
+                  <t-icon name="check-circle-filled" class="settings-footer-note__icon" />
+                  <span>
+                    <strong>{{ $t('agent.editor.postCreateHint.title') }}</strong>
+                    {{ $t('agent.editor.postCreateHint.footer') }}
+                  </span>
+                </p>
+                <div class="settings-footer-actions">
+                  <t-button variant="outline" @click="handleClose">{{ props.readOnly ? $t('common.close') :
+                    $t('common.cancel')
+                    }}</t-button>
+                  <t-button v-if="!props.readOnly" theme="primary" data-guide="agent-create-submit" :loading="saving"
+                    @click="handleSave">{{
+                    saveButtonLabel
+                    }}</t-button>
+                </div>
               </div>
             </div>
           </div>
@@ -1703,6 +1723,12 @@ const emit = defineEmits<{
 const savedAgent = ref<CustomAgent | null>(null);
 const editorMode = computed(() => (savedAgent.value ? 'edit' : props.mode));
 const editorAgent = computed(() => savedAgent.value ?? props.agent ?? null);
+const isPostCreateSession = computed(() => !!savedAgent.value);
+const saveButtonLabel = computed(() =>
+  editorMode.value === 'create'
+    ? t('agent.editor.buttons.create')
+    : t('agent.editor.buttons.saveAndClose')
+);
 
 const copyAgentId = async () => {
   const id = editorAgent.value?.id;
@@ -1821,7 +1847,7 @@ type McpSelectOption = { label: string; value: string; disabled?: boolean };
 
 const mcpOptions = computed<McpSelectOption[]>(() => {
   const services = editorResources.mcpServices || [];
-  const selectedIds = new Set(formData.value.config.mcp_services || []);
+  const selectedIds = new Set<string>(formData.value.config.mcp_services || []);
   const serviceById = new Map(services.map((mcp) => [mcp.id, mcp]));
   const options: McpSelectOption[] = [];
 
@@ -2274,6 +2300,7 @@ const defaultFormData = {
     temperature: 0.7,
     max_completion_tokens: 2048,
     thinking: false, // 默认禁用思考模式
+    citation_enabled: true, // 默认输出知识库/网页来源引用
     // Agent模式设置
     max_iterations: 10,
     llm_call_timeout: 120,  // 120 seconds
@@ -4255,12 +4282,15 @@ const handleSave = async () => {
       savedAgent.value = created;
       formData.value.id = created.id;
       markContextualGuideDone('agentCreate')
+      currentSection.value = 'basic';
+      void loadAgentIntegrationCounts(created.id);
       MessagePlugin.success(t('agent.messages.created'));
       emit('success', created);
     } else {
       await updateAgent(formData.value.id, formData.value);
       MessagePlugin.success(t('agent.messages.updated'));
       emit('success');
+      handleClose();
     }
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('agent.messages.saveFailed'));
@@ -4916,10 +4946,43 @@ const handleSave = async () => {
   padding: 12px 40px;
   border-top: 1px solid var(--td-component-stroke);
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 16px;
   flex-shrink: 0;
   background-color: var(--td-bg-color-container);
+}
+
+.settings-footer-note {
+  margin: 0;
+  margin-right: auto;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--td-text-color-secondary);
+
+  strong {
+    margin-right: 4px;
+    color: var(--td-text-color-primary);
+    font-weight: 500;
+  }
+
+  &__icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+    font-size: 14px;
+    color: var(--td-success-color);
+  }
+}
+
+.settings-footer-actions {
+  display: flex;
+  gap: 12px;
+  flex-shrink: 0;
 }
 
 /* 滚动条：与设置弹窗一致 */

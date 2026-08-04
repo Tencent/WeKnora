@@ -77,9 +77,23 @@ export function getFaviconUrl(urlOrDomain: string): string {
 }
 
 function truncateText(text: string, maxLen: number): string {
-  const normalized = String(text || '').replace(/\s+/g, ' ').trim()
+  const normalized = formatReferenceSnippet(text)
   if (normalized.length <= maxLen) return normalized
   return `${normalized.slice(0, maxLen)}…`
+}
+
+export function formatReferenceSnippet(text: string | undefined): string {
+  let value = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!value) return ''
+  value = value.replace(/^(\.{3}|…+)\s*/, '')
+  value = value.replace(/!\[[^\]]*]\([^)]*\)/g, ' ')
+  value = value.replace(/\[([^\]]+)]\([^)]*\)/g, '$1')
+  value = value.replace(/`([^`]+)`/g, '$1')
+  value = value.replace(/\*\*([^*]+)\*\*/g, '$1')
+  value = value.replace(/\*([^*]+)\*/g, '$1')
+  value = value.replace(/(^|\s)#+\s*/g, '$1')
+  value = value.replace(/\s+/g, ' ').trim()
+  return value
 }
 
 function isWebReference(item: KnowledgeReferenceLike): boolean {
@@ -90,18 +104,45 @@ function isToolReference(item: KnowledgeReferenceLike): boolean {
   return item.chunk_type === 'tool_result'
 }
 
+function isLikelyUrl(text: string): boolean {
+  const trimmed = String(text || '').trim()
+  if (!trimmed) return false
+  return /^https?:\/\//i.test(trimmed) || /^www\./i.test(trimmed)
+}
+
+function isSameReferenceUrl(a: string, b: string): boolean {
+  const left = String(a || '').trim()
+  const right = String(b || '').trim()
+  if (!left || !right) return false
+  if (left === right) return true
+  return normalizeReferenceUrl(left) === normalizeReferenceUrl(right)
+}
+
+function resolveWebTitle(item: KnowledgeReferenceLike, url: string, domain: string): string {
+  const metaTitle = item.metadata?.title?.trim()
+  if (metaTitle && !isLikelyUrl(metaTitle)) return metaTitle
+
+  const knowledgeTitle = item.knowledge_title?.trim()
+  if (
+    knowledgeTitle &&
+    !isLikelyUrl(knowledgeTitle) &&
+    !isSameReferenceUrl(knowledgeTitle, url) &&
+    knowledgeTitle !== domain
+  ) {
+    return knowledgeTitle
+  }
+
+  return domain || 'Web page'
+}
+
 function buildWebItem(item: KnowledgeReferenceLike, index: number): ReferenceListItem | null {
   const url = getWebSearchUrl(item)
   if (!url) return null
-  const title =
-    item.knowledge_title ||
-    item.metadata?.title ||
-    getDomainFromUrl(url) ||
-    url
+  const domain = getDomainFromUrl(url)
+  const title = resolveWebTitle(item, url, domain)
   const snippet =
     item.metadata?.snippet ||
     truncateText(item.content || '', 220)
-  const domain = getDomainFromUrl(url)
   const normalizedUrl = normalizeReferenceUrl(url)
   return {
     key: `web:${normalizedUrl}`,
@@ -275,6 +316,8 @@ export function buildReferenceList(
 export type ReferenceHighlightTarget = {
   url?: string
   chunkId?: string
+  documentTitle?: string
+  knowledgeBaseId?: string
   key?: string
 }
 
@@ -306,6 +349,22 @@ export function resolveReferenceHighlightKey(
         (item.kind === 'web' && (item.chunkId === raw || item.url === raw)),
     )
     if (hit) return hit.key
+  }
+
+  // Defensive fallback for historical/partially streamed Agent messages whose
+  // tool replay payload no longer contains the exact cited chunk. The public
+  // citation still carries the full document title and KB id, which identify
+  // the same document-level drawer card.
+  if (target.documentTitle) {
+    const title = target.documentTitle.trim().toLowerCase()
+    const candidates = items.filter(
+      (item) => item.kind === 'document' && item.title.trim().toLowerCase() === title,
+    )
+    const scoped = target.knowledgeBaseId
+      ? candidates.find((item) => item.knowledgeBaseId === target.knowledgeBaseId)
+      : undefined
+    if (scoped) return scoped.key
+    if (candidates.length === 1) return candidates[0].key
   }
 
   return null

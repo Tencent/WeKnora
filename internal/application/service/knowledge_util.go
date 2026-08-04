@@ -13,28 +13,82 @@ import (
 	"time"
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
-// isValidFileType checks if a file type is supported
-func isValidFileType(filename string) bool {
-	switch strings.ToLower(getFileType(filename)) {
-	case "pdf", "txt", "docx", "doc", "epub", "mhtml", "md", "markdown", "png", "jpg", "jpeg", "gif", "csv", "xlsx", "xls", "pptx", "ppt", "json",
-		"mp3", "wav", "m4a", "flac", "ogg":
-		return true
-	default:
+// unknownFileType is returned by getFileType when a name carries no extension.
+const unknownFileType = "unknown"
+
+// supportedImportFileExtensions is the single source of truth for extensions
+// accepted by every knowledge import path: direct upload, file-URL download,
+// and the worker's post-download re-check. Keeping one set avoids the drift
+// that let direct upload accept xlsx while URL import rejected it (#2447).
+var supportedImportFileExtensions = map[string]struct{}{
+	"pdf": {}, "txt": {}, "docx": {}, "doc": {}, "epub": {},
+	"html": {}, "htm": {}, "mhtml": {}, "md": {}, "markdown": {},
+	"png": {}, "jpg": {}, "jpeg": {}, "gif": {},
+	"csv": {}, "xlsx": {}, "xls": {}, "pptx": {}, "ppt": {}, "json": {},
+	"mp3": {}, "wav": {}, "m4a": {}, "flac": {}, "ogg": {},
+}
+
+// dataTableFileExtensions are the spreadsheet formats that get an extra
+// table-summary task after their document-process task.
+var dataTableFileExtensions = map[string]struct{}{
+	"csv": {}, "xlsx": {}, "xls": {},
+}
+
+// normalizeFileExtension lowercases an extension and strips a leading dot so
+// callers can pass either "xlsx", ".XLSX", or a raw user-supplied file_type.
+func normalizeFileExtension(ext string) string {
+	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
+}
+
+// isSupportedImportExtension reports whether a bare extension can be imported.
+func isSupportedImportExtension(ext string) bool {
+	ext = normalizeFileExtension(ext)
+	if ext == "" || ext == unknownFileType {
 		return false
 	}
+	_, ok := supportedImportFileExtensions[ext]
+	return ok
+}
+
+// isValidFileType checks if a filename's extension is supported for import.
+func isValidFileType(filename string) bool {
+	return isSupportedImportExtension(getFileType(filename))
+}
+
+// isDataTableFileType reports whether an extension is a spreadsheet format.
+func isDataTableFileType(ext string) bool {
+	_, ok := dataTableFileExtensions[normalizeFileExtension(ext)]
+	return ok
+}
+
+// validateImportFileType applies the extension constraints shared by every
+// file import path and reports a user-facing reason when one is violated.
+func validateImportFileType(fileType string) error {
+	fileType = normalizeFileExtension(fileType)
+	if fileType == "" || fileType == unknownFileType {
+		return werrors.NewBadRequestError("无法确定文件类型")
+	}
+	if IsVideoType(fileType) {
+		return werrors.NewBadRequestError("暂不支持上传视频文件")
+	}
+	if !isSupportedImportExtension(fileType) {
+		return werrors.NewBadRequestError(fmt.Sprintf("不支持的文件类型: %s", fileType))
+	}
+	return nil
 }
 
 // getFileType extracts the file extension from a filename
 func getFileType(filename string) string {
 	ext := strings.Split(filename, ".")
 	if len(ext) < 2 {
-		return "unknown"
+		return unknownFileType
 	}
 	return ext[len(ext)-1]
 }
@@ -310,6 +364,24 @@ func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.Kno
 // the provider inferred from the file path. This protects historical data when
 // tenant/KB config changes but files were stored under the old provider.
 func (s *knowledgeService) resolveFileServiceForPath(ctx context.Context, kb *types.KnowledgeBase, filePath string) interfaces.FileService {
+	// A resource:// reference belongs to the tenant that registered it. Shared
+	// KB requests use the viewer's effective tenant in ctx, which can otherwise
+	// select the wrong storage backend and pass the resource URL to local disk.
+	if _, ok := types.ParseResourcePath(filePath); ok && s.resourceCatalog != nil && s.storageResolver != nil && s.tenantRepo != nil {
+		resource, err := s.resourceCatalog.Resolve(ctx, filePath)
+		if err == nil && resource != nil {
+			ownerTenant, tenantErr := s.tenantRepo.GetTenantByID(ctx, resource.TenantID)
+			if tenantErr == nil && ownerTenant != nil {
+				baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+				if resolved, _, resolveErr := s.storageResolver.ResolveFileService(ctx, ownerTenant, resource.StorageBackendID, resource.Provider, baseDir); resolveErr == nil && resolved != nil {
+					return resolved
+				} else if resolveErr != nil {
+					logger.Warnf(ctx, "[storage] failed to resolve resource owner backend: resource=%s tenant=%d err=%v", resource.Handle, resource.TenantID, resolveErr)
+				}
+			}
+		}
+	}
+
 	if backendID, inner, ok := types.ParseStorageBackendPath(filePath); ok && s.storageResolver != nil {
 		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 		if tenant != nil {

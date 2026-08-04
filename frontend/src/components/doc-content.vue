@@ -8,11 +8,16 @@ import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import mermaid from "mermaid";
 import { onMounted, ref, nextTick, onUnmounted, watch, computed } from "vue";
-import { downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile } from "@/api/knowledge-base/index";
-import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
+import {
+  downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile,
+  updateDocumentChunk, listChunkRevisions, revertDocumentChunk, updateKnowledgeMetadata,
+  regenerateKnowledgeSummary, upsertGeneratedQuestion, regenerateGeneratedQuestions, getKnowledgeDetails,
+} from "@/api/knowledge-base/index";
+import { MessagePlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
 import { normalizeSpuriousTablePrefixes } from '@/utils/markdownTableNormalize';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
+import { diffWikiLines, type WikiDiffLine } from '@/utils/wikiLineDiff';
 import { useI18n } from 'vue-i18n';
 import { useAuthStore } from '@/stores/auth';
 import DocumentPreview from '@/components/document-preview.vue';
@@ -30,6 +35,126 @@ const canDeleteGeneratedQuestion = computed(() => {
   if (props.canEditKB === true) return true;
   return authStore.hasRole('admin');
 });
+const canEditContent = canDeleteGeneratedQuestion;
+
+type MetadataValueType = 'text' | 'number' | 'boolean' | 'null';
+interface MetadataDraftRow {
+  id: number;
+  key: string;
+  value: string;
+  type: MetadataValueType;
+}
+
+let metadataRowSeed = 0;
+const metadataEditing = ref(false);
+const metadataDraft = ref<MetadataDraftRow[]>([]);
+const metadataSaving = ref(false);
+const summaryRefreshing = ref(false);
+
+const metadataTypeOptions = computed(() => [
+  { label: t('knowledgeBase.metadataTypeText'), value: 'text' },
+  { label: t('knowledgeBase.metadataTypeNumber'), value: 'number' },
+  { label: t('knowledgeBase.metadataTypeBoolean'), value: 'boolean' },
+  { label: t('knowledgeBase.metadataTypeNull'), value: 'null' },
+]);
+
+const makeMetadataRow = (key = '', value: unknown = ''): MetadataDraftRow => {
+  let type: MetadataValueType = 'text';
+  if (value === null) type = 'null';
+  else if (typeof value === 'number') type = 'number';
+  else if (typeof value === 'boolean') type = 'boolean';
+  return {
+    id: ++metadataRowSeed,
+    key,
+    value: value === null ? '' : String(value),
+    type,
+  };
+};
+
+const syncMetadataDraft = () => {
+  metadataDraft.value = Object.entries(props.details?.custom_metadata || {})
+    .map(([key, value]) => makeMetadataRow(key, value));
+};
+
+const startMetadataEdit = () => {
+  syncMetadataDraft();
+  if (!metadataDraft.value.length) metadataDraft.value.push(makeMetadataRow());
+  metadataEditing.value = true;
+};
+
+const addMetadataRow = () => {
+  if (metadataDraft.value.length >= 20) return;
+  metadataDraft.value.push(makeMetadataRow());
+};
+
+const removeMetadataRow = (id: number) => {
+  metadataDraft.value = metadataDraft.value.filter((row) => row.id !== id);
+};
+
+const parseMetadataValue = (row: MetadataDraftRow): unknown => {
+  if (row.type === 'null') return null;
+  if (row.type === 'boolean') return row.value === 'true';
+  if (row.type === 'number') {
+    const value = Number(row.value);
+    if (!row.value.trim() || !Number.isFinite(value)) {
+      throw new Error(t('knowledgeBase.metadataNumberRequired', { key: row.key }));
+    }
+    return value;
+  }
+  return row.value;
+};
+
+const formatMetadataValue = (value: unknown) => {
+  if (value === null) return 'null';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return String(value);
+};
+
+const saveMetadata = async () => {
+  try {
+    const value: Record<string, unknown> = {};
+    for (const row of metadataDraft.value) {
+      const key = row.key.trim();
+      if (!key) throw new Error(t('knowledgeBase.metadataKeyRequired'));
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        throw new Error(t('knowledgeBase.metadataKeyDuplicate', { key }));
+      }
+      value[key] = parseMetadataValue(row);
+    }
+    metadataSaving.value = true;
+    const result: any = await updateKnowledgeMetadata(props.details.id, value);
+    props.details.custom_metadata = value;
+    metadataEditing.value = false;
+    if (result?.data) {
+      applySummaryState(result.data.summary_status, result.data.description);
+    }
+    MessagePlugin.success(t('common.saveSuccess'));
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.saveFailed'));
+  } finally {
+    metadataSaving.value = false;
+  }
+};
+
+const refreshSummary = async () => {
+  summaryRefreshing.value = true;
+  try {
+    const result: any = await regenerateKnowledgeSummary(props.details.id);
+    if (result?.data) {
+      applySummaryState(result.data.summary_status, result.data.description);
+    }
+    const status = result?.data?.summary_status;
+    if (status === 'pending' || status === 'processing') {
+      MessagePlugin.success(t('knowledgeBase.summaryRefreshQueued'));
+    } else {
+      MessagePlugin.success(t('knowledgeBase.summaryRefreshed'));
+    }
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.error'));
+  } finally {
+    summaryRefreshing.value = false;
+  }
+};
 
 const detailTags = computed(() => {
   const tags = props.details?.tags;
@@ -50,7 +175,8 @@ const headerIconName = computed(() => {
 const showSummarySection = computed(() =>
   Boolean(props.details?.description)
   || props.details?.summary_status === 'pending'
-  || props.details?.summary_status === 'processing',
+  || props.details?.summary_status === 'processing'
+  || Boolean(props.details?.id && canEditContent.value),
 );
 
 // Mermaid 初始化计数器，用于生成唯一ID
@@ -84,8 +210,75 @@ mermaid.initialize({
     topPadding: 50
   }
 });
-const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "parse_status", "kbId"]);
-const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
+const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "canDownloadKB", "parse_status", "kbId"]);
+const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted", "summaryStateChange"]);
+
+const applySummaryState = (summaryStatus?: string, description?: string) => {
+  if (typeof summaryStatus === 'string' && summaryStatus) {
+    props.details.summary_status = summaryStatus;
+  }
+  if (typeof description === 'string') {
+    props.details.description = description;
+  }
+  if (props.details?.id) {
+    emit('summaryStateChange', {
+      id: props.details.id,
+      summary_status: props.details.summary_status,
+      description: props.details.description,
+    });
+  }
+};
+
+const isSummaryStatusInFlight = (status?: string) => status === 'pending' || status === 'processing';
+const summaryStatusRefreshing = computed(() => isSummaryStatusInFlight(props.details?.summary_status));
+let summaryStatusPollTimer: ReturnType<typeof setTimeout> | null = null;
+let summaryStatusPollGeneration = 0;
+
+const stopSummaryStatusPolling = () => {
+  summaryStatusPollGeneration++;
+  if (summaryStatusPollTimer !== null) {
+    clearTimeout(summaryStatusPollTimer);
+    summaryStatusPollTimer = null;
+  }
+};
+
+const scheduleSummaryStatusPoll = () => {
+  if (summaryStatusPollTimer !== null || !props.visible || !props.details?.id ||
+    !isSummaryStatusInFlight(props.details?.summary_status)) return;
+
+  const knowledgeID = props.details.id;
+  const generation = summaryStatusPollGeneration;
+  summaryStatusPollTimer = setTimeout(async () => {
+    summaryStatusPollTimer = null;
+    if (generation !== summaryStatusPollGeneration || !props.visible || props.details?.id !== knowledgeID) return;
+    try {
+      const result: any = await getKnowledgeDetails(knowledgeID);
+      if (generation !== summaryStatusPollGeneration || props.details?.id !== knowledgeID) return;
+      if (result?.success && result.data) {
+        applySummaryState(result.data.summary_status, result.data.description);
+      }
+    } catch {
+      // Keep the current status visible and retry while the drawer remains open.
+    }
+    if (generation === summaryStatusPollGeneration && props.visible && props.details?.id === knowledgeID &&
+      isSummaryStatusInFlight(props.details?.summary_status)) {
+      scheduleSummaryStatusPoll();
+    }
+  }, 1500);
+};
+
+watch(
+  () => [props.visible, props.details?.id, props.details?.summary_status],
+  ([visible, knowledgeID, summaryStatus]) => {
+    if (visible && knowledgeID && isSummaryStatusInFlight(summaryStatus as string)) {
+      scheduleSummaryStatusPoll();
+    } else {
+      stopSummaryStatusPolling();
+    }
+  },
+  { immediate: true },
+);
+watch(() => props.details?.id, syncMetadataDraft, { immediate: true });
 
 const hasTimelineSpans = ref(false);
 const timelineDrawerVisible = ref(false);
@@ -454,6 +647,7 @@ watch(() => props.details?.chunkLoading, (val) => {
   }
 });
 onUnmounted(() => {
+  stopSummaryStatusPolling();
   window.removeEventListener('resize', onTraceDrawerWindowResize);
   cleanupTraceDrawerResize();
   cleanupMainDrawerResize();
@@ -618,7 +812,10 @@ const runMarkdownPostRenderPipeline = async () => {
   if (!renderRoot) {
     return;
   }
-  await hydrateProtectedFileImages(renderRoot, undefined, props.kbId);
+  await hydrateProtectedFileImages(
+    renderRoot,
+    props.kbId ? { mode: 'knowledgeBase', kbId: props.kbId } : undefined,
+  );
   const images = renderRoot?.querySelectorAll?.('img.markdown-image') as NodeListOf<HTMLImageElement> | undefined;
   if (images) {
     images.forEach(async item => {
@@ -856,6 +1053,7 @@ const getChunkMeta = (item: any) => {
 interface GeneratedQuestion {
   id: string;
   question: string;
+  content_revision?: number;
 }
 
 // 解析生成的问题
@@ -877,20 +1075,357 @@ const getGeneratedQuestions = (item: any): GeneratedQuestion[] => {
   }
 };
 
-// 展开状态管理
-const expandedChunks = ref<Set<number>>(new Set());
-
-const toggleQuestions = (index: number) => {
-  if (expandedChunks.value.has(index)) {
-    expandedChunks.value.delete(index);
-  } else {
-    expandedChunks.value.add(index);
+const hasStaleGeneratedQuestions = (item: any) => {
+  const questions = getGeneratedQuestions(item);
+  if (!questions.length) return false;
+  try {
+    const metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata || '{}') : (item.metadata || {});
+    const fallbackRevision = metadata.generated_questions_revision || 0;
+    const currentRevision = item.content_revision || 0;
+    return questions.some((question) => (question.content_revision ?? fallbackRevision) !== currentRevision);
+  } catch {
+    return false;
   }
-  // 触发响应式更新
-  expandedChunks.value = new Set(expandedChunks.value);
 };
 
-const isExpanded = (index: number) => expandedChunks.value.has(index);
+const editingChunkId = ref('');
+const chunkDraft = ref('');
+const savingChunkId = ref('');
+const chunkStatusLoading = ref('');
+
+const getChunkMetadata = (item: any): Record<string, any> => (
+  typeof item.metadata === 'string'
+    ? JSON.parse(item.metadata || '{}')
+    : { ...(item.metadata || {}) }
+);
+
+const setChunkMetadata = (item: any, metadata: Record<string, any>) => {
+  item.metadata = metadata;
+};
+
+const upsertChunkGeneratedQuestion = (item: any, questionData: GeneratedQuestion) => {
+  const metadata = getChunkMetadata(item);
+  const questions: GeneratedQuestion[] = [...(metadata.generated_questions || [])];
+  const index = questions.findIndex((q) => q.id === questionData.id);
+  if (index >= 0) {
+    questions[index] = questionData;
+  } else {
+    questions.push(questionData);
+  }
+  metadata.generated_questions = questions;
+  setChunkMetadata(item, metadata);
+};
+
+const notifyChunkMutationOutcome = (item: any, result: any, successMessage?: string) => {
+  Object.assign(item, result.data);
+  applySummaryState(result.summary_status, result.description);
+  if (item.index_status === 'failed') {
+    MessagePlugin.warning(t('knowledgeBase.chunkSavedIndexFailed'));
+    return;
+  }
+  if (successMessage) {
+    MessagePlugin.success(successMessage);
+  }
+};
+
+const reloadChunksFromStart = () => {
+  page = 1;
+  loadingChunks = true;
+  pendingRequestedPage = 1;
+  pendingChunksBeforeLoad = 0;
+  editingChunkId.value = '';
+  chunkDraft.value = '';
+  emit('getDoc', 1);
+};
+
+const handleChunkEditError = (error: any, fallbackMessage: string) => {
+  if (error?.status === 409) {
+    MessagePlugin.warning(error?.message || t('knowledgeBase.chunkEditConflict'));
+    reloadChunksFromStart();
+    return;
+  }
+  MessagePlugin.error(error?.message || fallbackMessage);
+};
+
+const startChunkEdit = (item: any) => {
+  if (editingChunkId.value === item.id) {
+    editingChunkId.value = '';
+    chunkDraft.value = '';
+    return;
+  }
+  editingChunkId.value = item.id;
+  chunkDraft.value = item.content || '';
+};
+
+const saveChunkEdit = async (item: any) => {
+  if (!chunkDraft.value.trim()) {
+    MessagePlugin.warning(t('knowledgeBase.chunkContentRequired'));
+    return;
+  }
+  savingChunkId.value = item.id;
+  try {
+    const result: any = await updateDocumentChunk(props.details.id, item.id, {
+      content: chunkDraft.value,
+      expected_revision: item.content_revision || 0,
+    });
+    editingChunkId.value = '';
+    notifyChunkMutationOutcome(item, result, t('common.saveSuccess'));
+    void refreshChunkHistoryAfterMutation(item);
+  } catch (error: any) {
+    handleChunkEditError(error, t('common.saveFailed'));
+  } finally {
+    savingChunkId.value = '';
+  }
+};
+
+const toggleChunkEnabled = async (item: any, isEnabled: boolean) => {
+  chunkStatusLoading.value = item.id;
+  try {
+    const result: any = await updateDocumentChunk(props.details.id, item.id, {
+      is_enabled: isEnabled,
+      expected_revision: item.content_revision || 0,
+    });
+    notifyChunkMutationOutcome(item, result);
+    void refreshChunkHistoryAfterMutation(item);
+  } catch (error: any) {
+    handleChunkEditError(error, t('common.error'));
+  } finally {
+    chunkStatusLoading.value = '';
+  }
+};
+
+const retryChunkIndex = async (item: any) => {
+  try {
+    const result: any = await updateDocumentChunk(props.details.id, item.id, {
+      expected_revision: item.content_revision || 0,
+    });
+    Object.assign(item, result.data);
+    if (item.index_status === 'failed') throw new Error(t('knowledgeBase.indexFailed'));
+    MessagePlugin.success(t('knowledgeBase.indexRetrySuccess'));
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.error'));
+  }
+};
+
+type ChunkDiffLine = WikiDiffLine | { type: 'skip'; text: string };
+
+const chunkHistoryPopup = ref('');
+const chunkHistoryLoading = ref('');
+const chunkHistories = ref<Record<string, any[]>>({});
+const selectedChunkRevision = ref<Record<string, number | null>>({});
+const chunkHistoryRequestSequence = ref<Record<string, number>>({});
+const revertingRevision = ref('');
+
+const loadChunkHistory = async (item: any, force = false, silent = false) => {
+  if (!force && Object.prototype.hasOwnProperty.call(chunkHistories.value, item.id)) return;
+
+  const requestSequence = (chunkHistoryRequestSequence.value[item.id] || 0) + 1;
+  chunkHistoryRequestSequence.value[item.id] = requestSequence;
+  chunkHistoryLoading.value = item.id;
+  try {
+    const result: any = await listChunkRevisions(props.details.id, item.id);
+    if (chunkHistoryRequestSequence.value[item.id] === requestSequence) {
+      chunkHistories.value[item.id] = result?.data || [];
+    }
+  } catch (error: any) {
+    if (!silent) MessagePlugin.error(error?.message || t('common.error'));
+  } finally {
+    if (chunkHistoryRequestSequence.value[item.id] === requestSequence) {
+      chunkHistoryLoading.value = '';
+    }
+  }
+};
+
+const showChunkHistory = async (item: any) => loadChunkHistory(item);
+
+const refreshChunkHistoryAfterMutation = async (item: any) => {
+  const wasLoaded = Object.prototype.hasOwnProperty.call(chunkHistories.value, item.id);
+  const shouldReload = wasLoaded || chunkHistoryPopup.value === item.id;
+  // Invalidate both the cached list and any older request still in flight.
+  chunkHistoryRequestSequence.value[item.id] = (chunkHistoryRequestSequence.value[item.id] || 0) + 1;
+  delete chunkHistories.value[item.id];
+  selectedChunkRevision.value[item.id] = null;
+  if (shouldReload) {
+    await loadChunkHistory(item, true, true);
+  } else if (chunkHistoryLoading.value === item.id) {
+    chunkHistoryLoading.value = '';
+  }
+};
+
+const setChunkHistoryPopupVisible = (item: any, visible: boolean) => {
+  chunkHistoryPopup.value = visible ? item.id : '';
+  if (visible) {
+    parentContextPopup.value = '';
+    questionPopupChunk.value = '';
+    showChunkHistory(item);
+  }
+};
+
+const selectChunkRevision = (item: any, revision: number) => {
+  selectedChunkRevision.value[item.id] = selectedChunkRevision.value[item.id] === revision ? null : revision;
+};
+
+const getSelectedChunkRevision = (item: any) => {
+  const revision = selectedChunkRevision.value[item.id];
+  return (chunkHistories.value[item.id] || []).find((entry: any) => entry.revision === revision) || null;
+};
+
+const compactChunkDiff = (item: any): ChunkDiffLine[] => {
+  const revision = getSelectedChunkRevision(item);
+  if (!revision) return [];
+  const lines = diffWikiLines(revision.content || '', item.content || '');
+  const changed = new Set<number>();
+  lines.forEach((line, index) => {
+    if (line.type !== 'same') {
+      for (let i = Math.max(0, index - 2); i <= Math.min(lines.length - 1, index + 2); i++) changed.add(i);
+    }
+  });
+  if (!changed.size) return [];
+
+  const compact: ChunkDiffLine[] = [];
+  let lastIndex = -2;
+  [...changed].sort((a, b) => a - b).forEach((index) => {
+    if (index > lastIndex + 1) compact.push({ type: 'skip', text: '…' });
+    compact.push(lines[index]);
+    lastIndex = index;
+  });
+  return compact;
+};
+
+const diffLinePrefix = (type: ChunkDiffLine['type']) => {
+  if (type === 'add') return '+ ';
+  if (type === 'del') return '- ';
+  return type === 'same' ? '  ' : '';
+};
+
+const revisionStatusChanged = (item: any, revisionIndex: number) => {
+  const revisions = chunkHistories.value[item.id] || [];
+  const newerEnabled = revisionIndex === 0 ? item.is_enabled : revisions[revisionIndex - 1]?.is_enabled;
+  return revisions[revisionIndex]?.is_enabled !== newerEnabled;
+};
+
+const revertChunk = async (item: any, revision: number) => {
+  revertingRevision.value = `${item.id}:${revision}`;
+  try {
+    const result: any = await revertDocumentChunk(props.details.id, item.id, revision, item.content_revision || 0);
+    notifyChunkMutationOutcome(item, result, t('knowledgeBase.chunkReverted'));
+    await refreshChunkHistoryAfterMutation(item);
+  } catch (error: any) {
+    handleChunkEditError(error, t('common.error'));
+  } finally {
+    revertingRevision.value = '';
+  }
+};
+
+const questionDrafts = ref<Record<string, string>>({});
+const savingQuestionChunk = ref('');
+const regeneratingQuestionChunk = ref('');
+const questionPopupChunk = ref('');
+const questionComposerChunk = ref('');
+const editingQuestionKey = ref('');
+const questionEditDraft = ref('');
+const savingQuestionKey = ref('');
+
+watch(() => props.details?.id, () => {
+  metadataEditing.value = false;
+  editingChunkId.value = '';
+  chunkHistoryPopup.value = '';
+  chunkHistoryLoading.value = '';
+  chunkHistories.value = {};
+  selectedChunkRevision.value = {};
+  chunkHistoryRequestSequence.value = {};
+  parentContextPopup.value = '';
+  questionPopupChunk.value = '';
+  questionComposerChunk.value = '';
+  editingQuestionKey.value = '';
+});
+
+const setQuestionPopupVisible = (item: any, visible: boolean) => {
+  questionPopupChunk.value = visible ? item.id : '';
+  if (visible) {
+    parentContextPopup.value = '';
+    chunkHistoryPopup.value = '';
+  } else {
+    closeQuestionComposer(item);
+    cancelQuestionEdit();
+  }
+};
+
+const openQuestionComposer = (item: any) => {
+  questionPopupChunk.value = item.id;
+  questionComposerChunk.value = item.id;
+};
+
+const closeQuestionComposer = (item: any) => {
+  questionComposerChunk.value = '';
+  questionDrafts.value[item.id] = '';
+};
+
+const addQuestion = async (item: any) => {
+  const question = (questionDrafts.value[item.id] || '').trim();
+  if (!question) return;
+  savingQuestionChunk.value = item.id;
+  try {
+    const result: any = await upsertGeneratedQuestion(item.id, question);
+    questionDrafts.value[item.id] = '';
+    questionComposerChunk.value = '';
+    upsertChunkGeneratedQuestion(item, result.data);
+    MessagePlugin.success(t('common.saveSuccess'));
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.error'));
+  } finally {
+    savingQuestionChunk.value = '';
+  }
+};
+
+const startQuestionEdit = (item: any, question: GeneratedQuestion) => {
+  editingQuestionKey.value = `${item.id}:${question.id}`;
+  questionEditDraft.value = question.question;
+};
+
+const cancelQuestionEdit = () => {
+  editingQuestionKey.value = '';
+  questionEditDraft.value = '';
+};
+
+const saveQuestionEdit = async (item: any, question: GeneratedQuestion) => {
+  const value = questionEditDraft.value.trim();
+  if (!value) return;
+  if (value === question.question) {
+    cancelQuestionEdit();
+    return;
+  }
+  savingQuestionKey.value = `${item.id}:${question.id}`;
+  try {
+    const result: any = await upsertGeneratedQuestion(item.id, value, question.id);
+    if (result?.data) {
+      upsertChunkGeneratedQuestion(item, result.data);
+    }
+    cancelQuestionEdit();
+    MessagePlugin.success(t('common.saveSuccess'));
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.error'));
+  } finally {
+    savingQuestionKey.value = '';
+  }
+};
+
+const regenerateQuestions = async (item: any) => {
+  regeneratingQuestionChunk.value = item.id;
+  try {
+    const result: any = await regenerateGeneratedQuestions(item.id);
+    const metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata || '{}') : (item.metadata || {});
+    metadata.generated_questions = result?.data || [];
+    metadata.generated_questions_revision = item.content_revision || 0;
+    item.metadata = metadata;
+    questionComposerChunk.value = '';
+    MessagePlugin.success(t('knowledgeBase.questionsRegenerated'));
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.error'));
+  } finally {
+    regeneratingQuestionChunk.value = '';
+  }
+};
 
 // 删除中的状态
 const deletingQuestion = ref<{ chunkIndex: number; questionId: string } | null>(null);
@@ -908,40 +1443,28 @@ const handleDeleteQuestion = async (item: any, chunkIndex: number, question: Gen
     return;
   }
 
-  const confirmDialog = DialogPlugin.confirm({
-    header: t('common.confirmDelete'),
-    body: t('knowledgeBase.confirmDeleteQuestion'),
-    confirmBtn: t('common.confirm'),
-    cancelBtn: t('common.cancel'),
-    onConfirm: async () => {
-      confirmDialog.hide();
-      deletingQuestion.value = { chunkIndex, questionId: question.id };
-      try {
-        await deleteGeneratedQuestion(item.id, question.id);
-        MessagePlugin.success(t('common.deleteSuccess'));
+  deletingQuestion.value = { chunkIndex, questionId: question.id };
+  try {
+    await deleteGeneratedQuestion(item.id, question.id);
+    MessagePlugin.success(t('common.deleteSuccess'));
 
-        // 更新本地数据
-        const metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata;
-        if (metadata && metadata.generated_questions) {
-          const idx = metadata.generated_questions.findIndex((q: GeneratedQuestion) => q.id === question.id);
-          if (idx > -1) {
-            metadata.generated_questions.splice(idx, 1);
-          }
-          item.metadata = typeof item.metadata === 'string' ? JSON.stringify(metadata) : metadata;
-        }
-
-        // 通知父组件刷新数据
-        emit('questionDeleted', { chunkId: item.id, questionId: question.id });
-      } catch (error: any) {
-        MessagePlugin.error(error?.message || t('common.deleteFailed'));
-      } finally {
-        deletingQuestion.value = null;
+    // 更新本地数据
+    const metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata;
+    if (metadata && metadata.generated_questions) {
+      const idx = metadata.generated_questions.findIndex((q: GeneratedQuestion) => q.id === question.id);
+      if (idx > -1) {
+        metadata.generated_questions.splice(idx, 1);
       }
-    },
-    onClose: () => {
-      confirmDialog.hide();
+      item.metadata = typeof item.metadata === 'string' ? JSON.stringify(metadata) : metadata;
     }
-  });
+
+    // 通知父组件刷新数据
+    emit('questionDeleted', { chunkId: item.id, questionId: question.id });
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.deleteFailed'));
+  } finally {
+    deletingQuestion.value = null;
+  }
 };
 
 // 检查是否正在删除某个问题
@@ -949,22 +1472,14 @@ const isDeleting = (chunkIndex: number, questionId: string) => {
   return deletingQuestion.value?.chunkIndex === chunkIndex && deletingQuestion.value?.questionId === questionId;
 };
 
-// 父 Chunk 上下文展开状态
-const parentContextExpanded = ref<Set<number>>(new Set());
+// 父 Chunk 上下文通过 Header Popup 展示，避免在每个分块下方占用高度。
+const parentContextPopup = ref('');
 const parentContextCache = ref<Map<string, string>>(new Map());
 const parentContextLoading = ref<Set<number>>(new Set());
 
 const hasParentChunk = (item: any) => !!item?.parent_chunk_id;
 
-const isParentExpanded = (index: number) => parentContextExpanded.value.has(index);
-
-const toggleParentContext = async (item: any, index: number) => {
-  if (parentContextExpanded.value.has(index)) {
-    parentContextExpanded.value.delete(index);
-    parentContextExpanded.value = new Set(parentContextExpanded.value);
-    return;
-  }
-
+const loadParentContext = async (item: any, index: number) => {
   const parentId = item.parent_chunk_id;
   if (!parentContextCache.value.has(parentId)) {
     parentContextLoading.value.add(index);
@@ -977,6 +1492,7 @@ const toggleParentContext = async (item: any, index: number) => {
       }
     } catch (err) {
       MessagePlugin.error(t('knowledgeBase.parentContextLoadFailed'));
+      parentContextPopup.value = '';
       return;
     } finally {
       parentContextLoading.value.delete(index);
@@ -984,9 +1500,17 @@ const toggleParentContext = async (item: any, index: number) => {
     }
   }
 
-  parentContextExpanded.value.add(index);
-  parentContextExpanded.value = new Set(parentContextExpanded.value);
+  await nextTick();
   await runMarkdownPostRenderPipeline();
+};
+
+const setParentContextPopupVisible = (item: any, index: number, visible: boolean) => {
+  parentContextPopup.value = visible ? item.id : '';
+  if (visible) {
+    questionPopupChunk.value = '';
+    chunkHistoryPopup.value = '';
+    loadParentContext(item, index);
+  }
 };
 
 const getParentContent = (item: any) => {
@@ -1095,7 +1619,7 @@ const handleDetailsScroll = () => {
             <div class="doc-drawer-header-title">{{ getDisplayTitle() }}</div>
           </div>
           <div class="header-actions">
-            <t-button v-if="details.type === 'file' || details.type === 'manual'" class="header-action-btn" size="small"
+            <t-button v-if="canDownloadKB && (details.type === 'file' || details.type === 'manual')" class="header-action-btn" size="small"
               variant="text" shape="square" theme="default" :title="$t('common.download') || 'Download'"
               @click="downloadFile()">
               <template #icon>
@@ -1177,6 +1701,69 @@ const handleDetailsScroll = () => {
           </div>
         </section>
 
+        <section v-if="details.id" class="setting-drawer__section metadata-section">
+          <div class="section-title-actions">
+            <h4 class="setting-drawer__section-title">
+              <span>{{ $t('knowledgeBase.customMetadata') }}</span>
+              <t-tooltip :content="$t('knowledgeBase.metadataCapabilityHint')" placement="top">
+                <t-icon name="info-circle" size="14px" class="metadata-capability-icon" />
+              </t-tooltip>
+              <span v-if="Object.keys(details.custom_metadata || {}).length" class="metadata-count">
+                {{ Object.keys(details.custom_metadata || {}).length }}/20
+              </span>
+            </h4>
+            <t-tooltip v-if="canEditContent && !metadataEditing" :content="$t('common.edit')" placement="top">
+              <t-button class="icon-action-btn" size="small" variant="text" shape="square" @click="startMetadataEdit">
+                <template #icon><t-icon name="edit" size="15px" /></template>
+              </t-button>
+            </t-tooltip>
+          </div>
+
+          <div v-if="!metadataEditing" class="metadata-display">
+            <div v-if="Object.keys(details.custom_metadata || {}).length" class="metadata-grid">
+              <div v-for="(value, key) in (details.custom_metadata || {})" :key="key" class="metadata-item">
+                <span class="metadata-item-key">{{ key }}</span>
+                <span class="metadata-item-value">{{ formatMetadataValue(value) }}</span>
+              </div>
+            </div>
+            <button v-else-if="canEditContent" type="button" class="metadata-empty-action" @click="startMetadataEdit">
+              <t-icon name="add" size="15px" />
+              <span>{{ $t('knowledgeBase.addMetadataField') }}</span>
+            </button>
+            <span v-else class="metadata-empty">{{ $t('knowledgeBase.noCustomMetadata') }}</span>
+          </div>
+
+          <div v-else class="metadata-editor">
+            <div v-for="row in metadataDraft" :key="row.id" class="metadata-editor-row">
+              <t-input v-model="row.key" class="metadata-key-input" :placeholder="$t('knowledgeBase.metadataKeyPlaceholder')" />
+              <t-select v-model="row.type" class="metadata-type-select" :options="metadataTypeOptions" />
+              <t-select v-if="row.type === 'boolean'" v-model="row.value" class="metadata-value-input"
+                :options="[{ label: 'true', value: 'true' }, { label: 'false', value: 'false' }]" />
+              <t-input v-else-if="row.type !== 'null'" v-model="row.value" class="metadata-value-input"
+                :placeholder="$t('knowledgeBase.metadataValuePlaceholder')" />
+              <div v-else class="metadata-null-value">null</div>
+              <t-tooltip :content="$t('common.delete')" placement="top">
+                <t-button class="icon-action-btn metadata-remove-btn" size="small" variant="text" shape="square"
+                  @click="removeMetadataRow(row.id)">
+                  <template #icon><t-icon name="delete" size="15px" /></template>
+                </t-button>
+              </t-tooltip>
+            </div>
+            <button v-if="metadataDraft.length < 20" type="button" class="metadata-add-row" @click="addMetadataRow">
+              <t-icon name="add" size="15px" />
+              <span>{{ $t('knowledgeBase.addMetadataField') }}</span>
+            </button>
+            <div class="metadata-actions">
+              <t-button size="small" variant="outline" :disabled="metadataSaving" @click="metadataEditing = false; syncMetadataDraft()">
+                {{ $t('common.cancel') }}
+              </t-button>
+              <t-button size="small" theme="primary" :loading="metadataSaving" @click="saveMetadata">
+                {{ $t('common.save') }}
+              </t-button>
+            </div>
+          </div>
+        </section>
+
         <section v-if="details.type === 'url'" class="setting-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.urlSource') }}</h4>
           <div class="url_link_box">
@@ -1189,8 +1776,22 @@ const handleDetailsScroll = () => {
           </div>
         </section>
 
-        <section v-if="showSummarySection" class="setting-drawer__section">
-          <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.documentSummary') }}</h4>
+        <section v-if="showSummarySection" class="setting-drawer__section summary-section">
+          <div class="section-title-actions">
+            <div class="summary-section-heading">
+              <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.documentSummary') }}</h4>
+              <span v-if="details.description && summaryStatusRefreshing" class="summary-refreshing-indicator">
+                <t-loading size="small" />
+                <span>{{ $t('knowledgeBase.generatingSummary') }}</span>
+              </span>
+            </div>
+            <t-tooltip v-if="canEditContent" :content="$t('knowledgeBase.regenerateSummary')" placement="top">
+              <t-button class="icon-action-btn" size="small" variant="text" shape="square"
+                :loading="summaryRefreshing" @click="refreshSummary">
+                <template #icon><t-icon name="refresh" size="15px" /></template>
+              </t-button>
+            </t-tooltip>
+          </div>
           <div v-if="details.description" class="summary_wrapper"
             :class="{ 'summary_clickable': summaryOverflow || summaryExpanded }"
             @click="(summaryOverflow || summaryExpanded) && (summaryExpanded = !summaryExpanded)">
@@ -1203,8 +1804,18 @@ const handleDetailsScroll = () => {
             </div>
           </div>
           <div v-else class="summary_loading">
-            <t-loading size="small" />
-            <span>{{ $t('knowledgeBase.generatingSummary') }}</span>
+            <template v-if="details.summary_status === 'pending' || details.summary_status === 'processing'">
+              <t-loading size="small" />
+              <span>{{ $t('knowledgeBase.generatingSummary') }}</span>
+            </template>
+            <template v-else>
+              <t-icon name="file-unknown" size="18px" />
+              <span>{{ $t('knowledgeBase.noDocumentSummary') }}</span>
+              <t-button v-if="canEditContent" size="small" variant="text" :loading="summaryRefreshing" @click="refreshSummary">
+                <template #icon><t-icon name="refresh" size="14px" /></template>
+                {{ $t('knowledgeBase.generateSummary') }}
+              </t-button>
+            </template>
           </div>
         </section>
 
@@ -1256,54 +1867,255 @@ const handleDetailsScroll = () => {
           <div v-else-if="viewMode === 'chunks'">
             <div v-if="!processedChunks.length" class="no_content">{{ $t('common.noData') }}</div>
             <div v-else class="chunk-list">
-              <div class="chunk-item" v-for="(chunk, index) in processedChunks" :key="index">
+              <div class="chunk-item" :class="{ 'chunk-item--disabled': !chunk.original.is_enabled }"
+                v-for="(chunk, index) in processedChunks" :key="chunk.original.id || index">
                 <div class="chunk-header">
-                  <span class="chunk-index">{{ $t('knowledgeBase.segment') }} {{ index + 1 }}</span>
-                  <div class="chunk-header-right">
-                    <t-tag v-if="chunk.hasParent" size="small" theme="primary" variant="light">
-                      {{ $t('knowledgeBase.childChunk') }}
-                    </t-tag>
-                    <t-tag v-if="chunk.questions.length > 0" size="small" theme="success" variant="light">
-                      {{ $t('knowledgeBase.questions') }} {{ chunk.questions.length }}
-                    </t-tag>
+                  <div class="chunk-heading">
+                    <span class="chunk-index">{{ $t('knowledgeBase.segment') }} {{ index + 1 }}</span>
                     <span class="chunk-meta">{{ chunk.meta }}</span>
                   </div>
-                </div>
-                <div class="md-content" v-html="chunk.processedContent"></div>
-
-                <!-- 父 Chunk 上下文展开 -->
-                <div v-if="chunk.hasParent" class="parent-context-section">
-                  <div class="parent-context-toggle" @click="toggleParentContext(chunk.original, index)">
-                    <t-icon v-if="!parentContextLoading.has(index)"
-                      :name="isParentExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
-                    <t-loading v-else size="small" style="width: 14px; height: 14px;" />
-                    <span>{{ $t('knowledgeBase.viewParentContext') }}</span>
-                  </div>
-                  <div v-show="isParentExpanded(index)" class="parent-context-content">
-                    <div class="md-content" v-html="processMarkdown(getParentContent(chunk.original))"></div>
-                  </div>
-                </div>
-
-                <!-- 生成的问题展示 -->
-                <div v-if="chunk.questions.length > 0" class="questions-section">
-                  <div class="questions-toggle" @click="toggleQuestions(index)">
-                    <t-icon :name="isExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
-                    <span>{{ $t('knowledgeBase.generatedQuestions') }} ({{ chunk.questions.length }})</span>
-                  </div>
-                  <div v-show="isExpanded(index)" class="questions-list">
-                    <div v-for="question in chunk.questions" :key="question.id" class="question-item">
-                      <t-icon name="help-circle" size="14px" class="question-icon" />
-                      <span class="question-text">{{ question.question }}</span>
-                      <t-button v-if="canDeleteGeneratedQuestion" theme="default" variant="text" size="small"
-                        class="delete-question-btn" :loading="isDeleting(index, question.id)"
-                        @click.stop="handleDeleteQuestion(chunk.original, index, question)">
-                        <template #icon>
-                          <t-icon name="delete" size="14px" />
-                        </template>
+                  <div class="chunk-header-right">
+                    <t-tooltip v-if="chunk.original.index_status === 'failed' && canEditContent"
+                      :content="$t('knowledgeBase.retryIndex')" placement="top">
+                      <t-button class="icon-action-btn" size="small" theme="danger" variant="text" shape="square"
+                        @click="retryChunkIndex(chunk.original)">
+                        <template #icon><t-icon name="refresh" size="15px" /></template>
                       </t-button>
-                    </div>
+                    </t-tooltip>
+                    <t-popup v-if="chunk.hasParent" :visible="parentContextPopup === chunk.original.id"
+                      trigger="click" placement="bottom-right" :show-arrow="true" destroy-on-close
+                      :overlay-inner-style="{ padding: 0 }" overlay-class-name="chunk-context-popup-overlay"
+                      @visible-change="(visible: boolean) => setParentContextPopupVisible(chunk.original, index, visible)">
+                      <t-button class="icon-action-btn" :class="{ 'is-active': parentContextPopup === chunk.original.id }"
+                        size="small" variant="text" shape="square" :title="$t('knowledgeBase.viewParentContext')">
+                        <template #icon><t-icon name="git-branch" size="15px" /></template>
+                      </t-button>
+                      <template #content>
+                        <div class="chunk-context-popup" @click.stop>
+                          <div class="chunk-popup-head">
+                            <div class="chunk-popup-title">
+                              <t-icon name="git-branch" size="15px" />
+                              <span>{{ $t('knowledgeBase.viewParentContext') }}</span>
+                            </div>
+                          </div>
+                          <div v-if="parentContextLoading.has(index)" class="chunk-popup-state">
+                            <t-loading size="small" />
+                            <span>{{ $t('common.loading') }}</span>
+                          </div>
+                          <div v-else class="chunk-context-popup-body md-content"
+                            v-html="processMarkdown(getParentContent(chunk.original))"></div>
+                        </div>
+                      </template>
+                    </t-popup>
+                    <t-popup v-if="chunk.questions.length > 0 || canEditContent"
+                      :visible="questionPopupChunk === chunk.original.id" trigger="click" placement="bottom-right"
+                      :show-arrow="true" destroy-on-close :overlay-inner-style="{ padding: 0 }"
+                      overlay-class-name="chunk-questions-popup-overlay"
+                      @visible-change="(visible: boolean) => setQuestionPopupVisible(chunk.original, visible)">
+                      <t-button class="icon-action-btn chunk-question-entry"
+                        :class="{ 'is-active': questionPopupChunk === chunk.original.id }" size="small" variant="text"
+                        shape="square" :title="$t('knowledgeBase.generatedQuestions')">
+                        <template #icon><t-icon name="help-circle" size="15px" /></template>
+                      </t-button>
+                      <template #content>
+                        <div class="chunk-questions-popup" @click.stop>
+                          <div class="chunk-popup-head">
+                            <div class="chunk-popup-title">
+                              <t-icon name="help-circle" size="15px" />
+                              <span>{{ $t('knowledgeBase.generatedQuestions') }}</span>
+                              <span class="chunk-popup-count">{{ chunk.questions.length }}</span>
+                              <span v-if="hasStaleGeneratedQuestions(chunk.original)" class="chunk-question-stale-hint">
+                                {{ $t('knowledgeBase.staleGeneratedQuestions') }}
+                              </span>
+                            </div>
+                            <div v-if="canEditContent" class="chunk-popup-actions">
+                              <t-tooltip :content="$t('knowledgeBase.addGeneratedQuestion')" placement="top">
+                                <t-button class="icon-action-btn" size="small" variant="text" shape="square"
+                                  @click.stop="openQuestionComposer(chunk.original)">
+                                  <template #icon><t-icon name="add" size="15px" /></template>
+                                </t-button>
+                              </t-tooltip>
+                              <t-tooltip :content="$t('knowledgeBase.regenerateQuestions')" placement="top">
+                                <t-button class="icon-action-btn" size="small" variant="text" shape="square"
+                                  :loading="regeneratingQuestionChunk === chunk.original.id"
+                                  @click.stop="regenerateQuestions(chunk.original)">
+                                  <template #icon><t-icon name="refresh" size="15px" /></template>
+                                </t-button>
+                              </t-tooltip>
+                            </div>
+                          </div>
+                          <div class="chunk-questions-popup-body">
+                            <div v-if="canEditContent && questionComposerChunk === chunk.original.id" class="question-composer">
+                              <t-input v-model="questionDrafts[chunk.original.id]" autofocus
+                                :placeholder="$t('knowledgeBase.addGeneratedQuestion')" @enter="addQuestion(chunk.original)" />
+                              <t-tooltip :content="$t('common.cancel')" placement="top">
+                                <t-button class="icon-action-btn" size="small" variant="text" shape="square"
+                                  :disabled="savingQuestionChunk === chunk.original.id"
+                                  @click="closeQuestionComposer(chunk.original)">
+                                  <template #icon><t-icon name="close" size="14px" /></template>
+                                </t-button>
+                              </t-tooltip>
+                              <t-button size="small" theme="primary" :loading="savingQuestionChunk === chunk.original.id"
+                                :disabled="!(questionDrafts[chunk.original.id] || '').trim()" @click="addQuestion(chunk.original)">
+                                {{ $t('common.add') }}
+                              </t-button>
+                            </div>
+                            <div v-if="chunk.questions.length" class="questions-list">
+                              <div v-for="question in chunk.questions" :key="question.id" class="question-item">
+                                <span class="question-leading-icon"><t-icon name="help-circle" size="14px" /></span>
+                                <div v-if="editingQuestionKey === `${chunk.original.id}:${question.id}`" class="question-inline-editor">
+                                  <t-input v-model="questionEditDraft" autofocus
+                                    @enter="saveQuestionEdit(chunk.original, question)" />
+                                  <t-button size="small" variant="text" @click="cancelQuestionEdit">{{ $t('common.cancel') }}</t-button>
+                                  <t-button size="small" theme="primary"
+                                    :loading="savingQuestionKey === `${chunk.original.id}:${question.id}`"
+                                    @click="saveQuestionEdit(chunk.original, question)">{{ $t('common.save') }}</t-button>
+                                </div>
+                                <template v-else>
+                                  <span class="question-text">{{ question.question }}</span>
+                                  <div class="question-actions">
+                                    <t-tooltip v-if="canEditContent && !question.id.startsWith('legacy-')"
+                                      :content="$t('common.edit')" placement="top">
+                                      <t-button class="icon-action-btn" theme="default" variant="text" shape="square"
+                                        size="small" @click.stop="startQuestionEdit(chunk.original, question)">
+                                        <template #icon><t-icon name="edit" size="14px" /></template>
+                                      </t-button>
+                                    </t-tooltip>
+                                    <t-popconfirm v-if="canDeleteGeneratedQuestion && !question.id.startsWith('legacy-')"
+                                      theme="warning" :content="$t('knowledgeBase.confirmDeleteQuestion')"
+                                      @confirm="handleDeleteQuestion(chunk.original, index, question)">
+                                      <t-button class="icon-action-btn delete-question-btn" theme="default" variant="text"
+                                        shape="square" size="small" :loading="isDeleting(index, question.id)">
+                                        <template #icon><t-icon name="delete" size="14px" /></template>
+                                      </t-button>
+                                    </t-popconfirm>
+                                  </div>
+                                </template>
+                              </div>
+                            </div>
+                            <div v-else-if="questionComposerChunk !== chunk.original.id" class="questions-empty">
+                              <t-icon name="chat-bubble-help" size="20px" />
+                              <span>{{ $t('knowledgeBase.noGeneratedQuestions') }}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </template>
+                    </t-popup>
+                    <template v-if="canEditContent">
+                      <t-tooltip :content="$t('common.edit')" placement="top">
+                        <t-button class="icon-action-btn" :class="{ 'is-active': editingChunkId === chunk.original.id }"
+                          size="small" variant="text" shape="square" @click="startChunkEdit(chunk.original)">
+                          <template #icon><t-icon name="edit" size="15px" /></template>
+                        </t-button>
+                      </t-tooltip>
+                      <t-popup :visible="chunkHistoryPopup === chunk.original.id" trigger="click" placement="bottom-right"
+                        :show-arrow="true" destroy-on-close :overlay-inner-style="{ padding: 0 }"
+                        overlay-class-name="chunk-history-popup-overlay"
+                        @visible-change="(visible: boolean) => setChunkHistoryPopupVisible(chunk.original, visible)">
+                        <t-button class="icon-action-btn" :class="{ 'is-active': chunkHistoryPopup === chunk.original.id }"
+                          size="small" variant="text" shape="square" :title="$t('knowledgeBase.chunkHistory')">
+                          <template #icon><t-icon name="history" size="15px" /></template>
+                        </t-button>
+                        <template #content>
+                          <div class="chunk-history-popup" @click.stop>
+                            <div class="chunk-history-popup-head">
+                              <div>
+                                <div class="chunk-history-popup-title">
+                                  <t-icon name="history" size="15px" />
+                                  <span>{{ $t('knowledgeBase.chunkHistory') }}</span>
+                                </div>
+                                <div class="chunk-history-current">
+                                  v{{ chunk.original.content_revision || 0 }} · {{ $t('knowledgeBase.currentVersion') }} ·
+                                  {{ chunk.original.is_enabled ? $t('knowledgeBase.enabledStatus') : $t('knowledgeBase.disabledStatus') }}
+                                </div>
+                              </div>
+                              <div class="chunk-history-diff-legend">
+                                <span class="chunk-history-diff-legend-item chunk-history-diff-legend-item--add">
+                                  <i />{{ $t('knowledgeBase.diffAddedInCurrent') }}
+                                </span>
+                                <span class="chunk-history-diff-legend-item chunk-history-diff-legend-item--del">
+                                  <i />{{ $t('knowledgeBase.diffRemovedFromCurrent') }}
+                                </span>
+                              </div>
+                            </div>
+                            <div v-if="chunkHistoryLoading === chunk.original.id" class="chunk-history-popup-state">
+                              <t-loading size="small" />
+                              <span>{{ $t('common.loading') }}</span>
+                            </div>
+                            <div v-else-if="!(chunkHistories[chunk.original.id] || []).length" class="chunk-history-popup-state">
+                              {{ $t('knowledgeBase.noChunkHistory') }}
+                            </div>
+                            <div v-else class="chunk-history-popup-list">
+                              <div v-for="(revision, revisionIndex) in chunkHistories[chunk.original.id]" :key="revision.id"
+                                class="chunk-history-popup-item"
+                                :class="{ 'is-selected': selectedChunkRevision[chunk.original.id] === revision.revision }">
+                                <button type="button" class="chunk-history-version-row"
+                                  @click="selectChunkRevision(chunk.original, revision.revision)">
+                                  <span class="chunk-history-version">v{{ revision.revision }}</span>
+                                  <span class="chunk-history-time">{{ new Date(revision.edited_at).toLocaleString() }}</span>
+                                  <span v-if="revisionStatusChanged(chunk.original, revisionIndex)" class="chunk-history-status-change">
+                                    <t-icon :name="revision.is_enabled ? 'play-circle' : 'stop-circle'" size="13px" />
+                                    {{ revision.is_enabled ? $t('knowledgeBase.enabledStatus') : $t('knowledgeBase.disabledStatus') }}
+                                  </span>
+                                  <t-icon :name="selectedChunkRevision[chunk.original.id] === revision.revision ? 'chevron-up' : 'chevron-down'"
+                                    size="14px" class="chunk-history-row-chevron" />
+                                </button>
+                                <div v-if="selectedChunkRevision[chunk.original.id] === revision.revision" class="chunk-history-diff">
+                                  <div class="chunk-history-diff-head">
+                                    <span>{{ $t('knowledgeBase.compareRevisionWithCurrent', {
+                                      revision: revision.revision,
+                                      current: chunk.original.content_revision || 0,
+                                    }) }}</span>
+                                    <t-popconfirm theme="warning"
+                                      :content="$t('knowledgeBase.revertRevisionConfirm', { revision: revision.revision })"
+                                      @confirm="revertChunk(chunk.original, revision.revision)">
+                                      <t-button class="icon-action-btn" size="small" variant="text" shape="square"
+                                        :title="$t('knowledgeBase.revertRevision')"
+                                        :loading="revertingRevision === `${chunk.original.id}:${revision.revision}`">
+                                        <template #icon><t-icon name="rollback" size="14px" /></template>
+                                      </t-button>
+                                    </t-popconfirm>
+                                  </div>
+                                  <div v-if="!compactChunkDiff(chunk.original).length" class="chunk-history-no-diff">
+                                    {{ $t('knowledgeBase.noContentChanges') }}
+                                  </div>
+                                  <pre v-else class="chunk-history-diff-body"><span
+                                    v-for="(line, lineIndex) in compactChunkDiff(chunk.original)" :key="lineIndex"
+                                    :class="['chunk-history-diff-line', `chunk-history-diff-line--${line.type}`]">{{ diffLinePrefix(line.type) }}{{ line.text }}
+</span></pre>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </template>
+                      </t-popup>
+                      <span class="chunk-toolbar-divider" />
+                      <t-tooltip
+                        :content="chunk.original.is_enabled ? $t('knowledgeBase.disableChunk') : $t('knowledgeBase.enableChunk')"
+                        placement="top">
+                        <t-switch :key="`${chunk.original.id}-${chunk.original.is_enabled}`" size="small"
+                          :value="chunk.original.is_enabled" :loading="chunkStatusLoading === chunk.original.id"
+                          :disabled="chunkStatusLoading === chunk.original.id"
+                          @change="(value: boolean) => toggleChunkEnabled(chunk.original, value)" />
+                      </t-tooltip>
+                    </template>
                   </div>
                 </div>
+                <div v-if="editingChunkId === chunk.original.id" class="chunk-editor">
+                  <div class="chunk-editor-label">
+                    <t-icon name="edit" size="14px" />
+                    <span>{{ $t('knowledgeBase.editChunkContent') }}</span>
+                  </div>
+                  <t-textarea v-model="chunkDraft" :autosize="{ minRows: 6, maxRows: 20 }" autofocus />
+                  <div class="chunk-editor-actions">
+                    <t-button size="small" variant="outline" :disabled="savingChunkId === chunk.original.id"
+                      @click="editingChunkId = ''">{{ $t('common.cancel') }}</t-button>
+                    <t-button size="small" theme="primary" :loading="savingChunkId === chunk.original.id"
+                      @click="saveChunkEdit(chunk.original)">{{ $t('common.save') }}</t-button>
+                  </div>
+                </div>
+                <div v-else class="md-content" :class="{ 'chunk-disabled': !chunk.original.is_enabled }" v-html="chunk.processedContent"></div>
+
               </div>
             </div>
           </div>
@@ -1321,6 +2133,34 @@ const handleDetailsScroll = () => {
 </template>
 <style scoped lang="less">
 @import "./css/markdown.less";
+
+.section-title-actions,
+.metadata-actions,
+.chunk-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-title-actions { justify-content: space-between; }
+.metadata-empty { color: var(--td-text-color-placeholder); }
+.metadata-actions, .chunk-editor-actions { margin-top: 8px; justify-content: flex-end; }
+.chunk-disabled { opacity: .5; }
+
+.icon-action-btn {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--td-text-color-secondary);
+  border-radius: 4px;
+
+  &:hover,
+  &.is-active {
+    color: var(--td-brand-color);
+    background: var(--td-brand-color-light);
+  }
+}
 
 /* Drawer widths are now driven by the `:size` prop on each <t-drawer>
    (see mainDrawerSize / timelineDrawerSize in <script>). CSS rules with
@@ -1483,6 +2323,157 @@ const handleDetailsScroll = () => {
   word-break: break-word;
 }
 
+.metadata-editor-row {
+  display: flex;
+  align-items: center;
+}
+
+.metadata-capability-icon {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+  cursor: help;
+}
+
+.metadata-count {
+  color: var(--td-text-color-placeholder);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.metadata-display {
+  min-width: 0;
+}
+
+.summary-section-heading,
+.summary-refreshing-indicator {
+  display: flex;
+  align-items: center;
+}
+
+.summary-section-heading {
+  min-width: 0;
+  gap: 10px;
+}
+
+.summary-refreshing-indicator {
+  gap: 5px;
+  color: var(--td-text-color-placeholder);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.metadata-grid {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px 18px;
+}
+
+.metadata-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+
+.metadata-item-key,
+.metadata-item-value {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metadata-item-key {
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+
+  &::after {
+    content: ':';
+  }
+}
+
+.metadata-item-value {
+  color: var(--td-text-color-primary);
+  font-size: 13px;
+}
+
+.metadata-empty-action,
+.metadata-add-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 5px;
+  width: fit-content;
+  min-height: 28px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 4px;
+  color: var(--td-text-color-secondary);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+
+  &:hover {
+    color: var(--td-brand-color);
+    background: var(--td-brand-color-light);
+  }
+}
+
+.metadata-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.metadata-editor-row {
+  gap: 6px;
+}
+
+.metadata-key-input {
+  flex: 0 1 30%;
+  min-width: 100px;
+}
+
+.metadata-type-select {
+  flex: 0 0 92px;
+}
+
+.metadata-value-input,
+.metadata-null-value {
+  flex: 1;
+  min-width: 110px;
+}
+
+.metadata-null-value {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--td-component-border);
+  border-radius: 3px;
+  color: var(--td-text-color-placeholder);
+  background: var(--td-bg-color-component-disabled);
+  font-size: 13px;
+  line-height: 30px;
+}
+
+.metadata-remove-btn:hover {
+  color: var(--td-error-color);
+  background: var(--td-error-color-light);
+}
+
+@media (max-width: 720px) {
+  .metadata-editor-row {
+    flex-wrap: wrap;
+  }
+
+  .metadata-key-input,
+  .metadata-value-input,
+  .metadata-null-value {
+    flex: 1 1 calc(50% - 50px);
+  }
+}
+
 .doc-content-section-head {
   display: flex;
   align-items: center;
@@ -1570,8 +2561,9 @@ const handleDetailsScroll = () => {
 // 文档摘要区域
 .summary_wrapper {
   position: relative;
-  background: var(--td-bg-color-container-hover);
-  border-radius: 4px;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-border);
+  border-radius: 6px;
 
   &.summary_clickable {
     cursor: pointer;
@@ -1604,8 +2596,8 @@ const handleDetailsScroll = () => {
     left: 0;
     right: 0;
     height: 28px;
-    background: linear-gradient(transparent, var(--td-bg-color-container-hover) 80%);
-    border-radius: 0 0 4px 4px;
+    background: linear-gradient(transparent, var(--td-bg-color-container) 80%);
+    border-radius: 0 0 6px 6px;
     align-items: flex-end;
   }
 }
@@ -1619,8 +2611,10 @@ const handleDetailsScroll = () => {
   align-items: center;
   gap: 8px;
   padding: 12px;
-  background: var(--td-bg-color-container-hover);
-  border-radius: 4px;
+  min-height: 42px;
+  background: var(--td-bg-color-container);
+  border: 1px dashed var(--td-component-border);
+  border-radius: 6px;
   color: var(--td-text-color-placeholder);
   font-size: 13px;
 }
@@ -1715,131 +2709,443 @@ const handleDetailsScroll = () => {
 }
 
 .chunk-item {
-  border-radius: 4px;
-  padding: 12px 16px;
+  border-radius: 6px;
+  padding: 12px 14px;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-border);
+
+  &.chunk-item--disabled {
+    background: var(--td-bg-color-secondarycontainer);
+  }
 }
 
 .chunk-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
-  padding-bottom: 6px;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 28px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--td-component-stroke);
 
+  .chunk-heading {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 0;
+  }
+
   .chunk-index {
-    color: var(--td-text-color-placeholder);
+    color: var(--td-text-color-secondary);
     font-size: 12px;
     font-weight: 600;
-    letter-spacing: 0.5px;
   }
 
   .chunk-header-right {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 2px;
+    flex-shrink: 0;
   }
 
   .chunk-meta {
-    color: var(--td-text-color-disabled);
+    color: var(--td-text-color-placeholder);
     font-size: 11px;
   }
 }
 
-// 父 Chunk 上下文样式
-.parent-context-section {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--td-component-stroke);
+.chunk-toolbar-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 6px;
+  background: var(--td-component-stroke);
 }
 
-.parent-context-toggle {
+.chunk-editor {
+  margin: 4px 0 10px;
+  padding: 12px;
+  border-radius: 5px;
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.chunk-editor-label {
   display: flex;
   align-items: center;
   gap: 6px;
-  cursor: pointer;
-  color: var(--td-brand-color);
+  margin-bottom: 8px;
+  color: var(--td-text-color-secondary);
   font-size: 12px;
   font-weight: 500;
-  padding: 4px 0;
 }
 
-.parent-context-content {
-  margin-top: 8px;
-  padding: 10px 12px;
-  background: var(--td-brand-color-light);
-  border-radius: 4px;
-  border-left: 3px solid var(--td-brand-color);
+.chunk-history-popup {
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(620px, calc(100vh - 96px));
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--td-bg-color-container);
+}
 
-  .md-content {
-    color: var(--td-text-color-secondary);
-    font-size: 13px;
+.chunk-history-popup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 12px 7px;
+  border-bottom: 1px solid var(--td-component-stroke);
+}
+
+.chunk-history-popup-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--td-text-color-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chunk-history-current {
+  margin-top: 2px;
+  color: var(--td-text-color-placeholder);
+  font-size: 11px;
+}
+
+.chunk-history-popup-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 100px;
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+}
+
+.chunk-history-popup-list {
+  max-height: min(520px, calc(100vh - 180px));
+  overflow-y: auto;
+}
+
+.chunk-history-popup-item {
+  border-bottom: 1px solid var(--td-component-stroke);
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &.is-selected {
+    background: var(--td-bg-color-secondarycontainer);
   }
 }
 
-// 生成的问题样式
-.questions-section {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--td-component-stroke);
-}
-
-.questions-toggle {
+.chunk-history-version-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: none;
+  color: var(--td-text-color-secondary);
+  background: transparent;
   cursor: pointer;
-  color: var(--td-brand-color-active);
+  font: inherit;
+  text-align: left;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+  }
+}
+
+.chunk-history-version {
+  min-width: 32px;
+  color: var(--td-text-color-primary);
   font-size: 12px;
-  font-weight: 500;
-  padding: 4px 0;
+  font-weight: 600;
+}
+
+.chunk-history-time {
+  color: var(--td-text-color-placeholder);
+  font-size: 11px;
+}
+
+.chunk-history-status-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--td-text-color-secondary);
+  font-size: 11px;
+}
+
+.chunk-history-row-chevron {
+  margin-left: auto;
+  color: var(--td-text-color-placeholder);
+}
+
+.chunk-history-status-change + .chunk-history-row-chevron {
+  margin-left: 0;
+}
+
+.chunk-history-diff {
+  padding: 0 12px 10px;
+}
+
+.chunk-history-diff-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 30px;
+  color: var(--td-text-color-placeholder);
+  font-size: 11px;
+}
+
+.chunk-history-diff-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+  font-size: 10px;
+}
+
+.chunk-history-diff-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  i {
+    width: 7px;
+    height: 7px;
+    border-radius: 2px;
+  }
+
+  &--add i {
+    background: var(--td-success-color);
+  }
+
+  &--del i {
+    background: var(--td-error-color);
+  }
+}
+
+.chunk-history-no-diff {
+  padding: 12px;
+  border-radius: 4px;
+  color: var(--td-text-color-placeholder);
+  background: var(--td-bg-color-container);
+  text-align: center;
+  font-size: 12px;
+}
+
+.chunk-history-diff-body {
+  max-height: 240px;
+  margin: 0;
+  padding: 8px 0;
+  overflow: auto;
+  border: 1px solid var(--td-component-border);
+  border-radius: 4px;
+  background: var(--td-bg-color-container);
+  font-family: var(--app-font-family-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chunk-history-diff-line {
+  display: block;
+  min-height: 17px;
+  padding: 0 10px;
+
+  &--add {
+    color: var(--td-success-color-active);
+    background: var(--td-success-color-light);
+  }
+
+  &--del {
+    color: var(--td-error-color-active);
+    background: var(--td-error-color-light);
+  }
+
+  &--same {
+    color: var(--td-text-color-secondary);
+  }
+
+  &--skip {
+    color: var(--td-text-color-placeholder);
+  }
+}
+
+.chunk-context-popup,
+.chunk-questions-popup {
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(560px, calc(100vh - 96px));
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--td-bg-color-container);
+}
+
+.chunk-popup-head,
+.chunk-popup-title,
+.chunk-popup-actions,
+.chunk-popup-state {
+  display: flex;
+  align-items: center;
+}
+
+.chunk-popup-head {
+  justify-content: space-between;
+  min-height: 38px;
+  padding: 4px 8px 4px 12px;
+  border-bottom: 1px solid var(--td-component-stroke);
+}
+
+.chunk-popup-title {
+  gap: 7px;
+  color: var(--td-text-color-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chunk-popup-count {
+  color: var(--td-text-color-placeholder);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.chunk-question-stale-hint {
+  color: var(--td-warning-color);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.chunk-popup-actions {
+  gap: 2px;
+}
+
+.chunk-popup-state {
+  justify-content: center;
+  gap: 8px;
+  min-height: 120px;
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+}
+
+.chunk-context-popup-body {
+  max-height: min(480px, calc(100vh - 170px));
+  padding: 14px 16px;
+  overflow: auto;
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
+}
+
+.chunk-questions-popup-body {
+  max-height: min(480px, calc(100vh - 170px));
+  padding: 0 10px 8px;
+  overflow-y: auto;
+}
+
+.question-item,
+.question-inline-editor,
+.question-composer,
+.questions-empty {
+  display: flex;
+  align-items: center;
 }
 
 .questions-list {
-  margin-top: 8px;
-  padding-left: 4px;
+  padding-top: 0;
 }
 
 .question-item {
-  display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
-  padding: 6px 8px;
-  margin-bottom: 4px;
-  background: var(--td-success-color-light);
+  min-height: 34px;
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--td-component-stroke);
   border-radius: 4px;
+  background: transparent;
   font-size: 13px;
   color: var(--td-text-color-primary);
-  line-height: 1.5;
+  line-height: 20px;
 
   &:hover {
-    .delete-question-btn {
+    background: var(--td-bg-color-container-hover);
+
+    .question-actions {
       opacity: 1;
     }
   }
 
-  .question-icon {
-    color: var(--td-brand-color-active);
-    flex-shrink: 0;
-    margin-top: 2px;
-  }
-
   .question-text {
     flex: 1;
+    line-height: 20px;
     word-break: break-word;
   }
 
   .delete-question-btn {
-    opacity: 0;
-    flex-shrink: 0;
     color: var(--td-text-color-placeholder);
 
     &:hover {
       color: var(--td-error-color);
+      background: var(--td-error-color-light);
     }
   }
+}
+
+.question-leading-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 20px;
+  color: var(--td-text-color-secondary);
+  flex-shrink: 0;
+}
+
+.question-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+
+  &:focus-within {
+    opacity: 1;
+  }
+}
+
+.question-inline-editor {
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.question-inline-editor :deep(.t-input) {
+  flex: 1;
+}
+
+.questions-empty {
+  justify-content: center;
+  gap: 8px;
+  padding: 20px 8px 12px;
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+}
+
+.question-composer {
+  gap: 6px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--td-component-stroke);
+}
+
+.question-composer :deep(.t-input) {
+  flex: 1;
 }
 
 // 音频播放器样式

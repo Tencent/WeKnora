@@ -23,6 +23,7 @@ const (
 	WebSearchProviderTypeBaidu      WebSearchProviderType = "baidu"
 	WebSearchProviderTypeSearxng    WebSearchProviderType = "searxng"
 	WebSearchProviderTypeKeenable   WebSearchProviderType = "keenable"
+	WebSearchProviderTypeZhipu      WebSearchProviderType = "zhipu"
 )
 
 // WebSearchProviderEntity represents a configured web search provider instance for a workspace.
@@ -141,6 +142,29 @@ type WebSearchProviderTypeInfo struct {
 	Description string `json:"description"`
 	// URL to the provider's official website or documentation for obtaining credentials
 	DocsURL string `json:"docs_url,omitempty"`
+	// Provider-specific non-secret configuration rendered dynamically by the frontend.
+	ConfigFields []WebSearchProviderConfigField `json:"config_fields,omitempty"`
+}
+
+// WebSearchProviderConfigField describes a non-secret provider-specific form field.
+// Values are persisted in WebSearchProviderParameters.ExtraConfig.
+type WebSearchProviderConfigField struct {
+	Key            string                               `json:"key"`
+	Label          string                               `json:"label"`
+	LabelKey       string                               `json:"label_key,omitempty"`
+	Type           string                               `json:"type"`
+	Required       bool                                 `json:"required,omitempty"`
+	Default        string                               `json:"default,omitempty"`
+	Description    string                               `json:"description,omitempty"`
+	DescriptionKey string                               `json:"description_key,omitempty"`
+	Options        []WebSearchProviderConfigFieldOption `json:"options,omitempty"`
+}
+
+// WebSearchProviderConfigFieldOption describes a selectable config field value.
+type WebSearchProviderConfigFieldOption struct {
+	Label    string `json:"label"`
+	LabelKey string `json:"label_key,omitempty"`
+	Value    string `json:"value"`
 }
 
 // GetWebSearchProviderTypes returns metadata for all supported provider types.
@@ -210,6 +234,46 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 			SupportsProxy:          true,
 			Description:            "Keenable web search built for AI agents (keyless by default; an optional API key lifts the rate limit)",
 			DocsURL:                "https://keenable.ai/",
+		},
+		{
+			ID:             "zhipu",
+			Name:           "Zhipu AI",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "Zhipu AI Web Search API (requires API key)",
+			DocsURL:        "https://docs.bigmodel.cn/cn/guide/tools/web-search",
+			ConfigFields: []WebSearchProviderConfigField{
+				{
+					Key:            "search_engine",
+					Label:          "Search engine",
+					LabelKey:       "webSearchSettings.configFields.searchEngine",
+					Type:           "select",
+					Required:       true,
+					Default:        "search_std",
+					Description:    "Select the Zhipu search engine and per-request price tier.",
+					DescriptionKey: "webSearchSettings.configFields.searchEngineDesc",
+					Options: []WebSearchProviderConfigFieldOption{
+						{Label: "Standard · ¥0.01/request", LabelKey: "webSearchSettings.configFields.searchStd", Value: "search_std"},
+						{Label: "Pro · ¥0.03/request", LabelKey: "webSearchSettings.configFields.searchPro", Value: "search_pro"},
+						{Label: "Sogou · ¥0.05/request", LabelKey: "webSearchSettings.configFields.searchSogou", Value: "search_pro_sogou"},
+						{Label: "Quark · ¥0.05/request", LabelKey: "webSearchSettings.configFields.searchQuark", Value: "search_pro_quark"},
+					},
+				},
+				{
+					Key:            "content_size",
+					Label:          "Content size",
+					LabelKey:       "webSearchSettings.configFields.contentSize",
+					Type:           "select",
+					Required:       true,
+					Default:        "medium",
+					Description:    "Medium returns concise summaries; high returns more context.",
+					DescriptionKey: "webSearchSettings.configFields.contentSizeDesc",
+					Options: []WebSearchProviderConfigFieldOption{
+						{Label: "Medium", LabelKey: "webSearchSettings.configFields.contentMedium", Value: "medium"},
+						{Label: "High", LabelKey: "webSearchSettings.configFields.contentHigh", Value: "high"},
+					},
+				},
+			},
 		},
 	}
 }

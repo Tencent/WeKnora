@@ -1707,7 +1707,7 @@ const handleKBEditorSuccess = (kbId: string) => {
   // 列表页编辑同样要让单 KB 详情缓存失效，否则侧栏 / 详情页 60s 内仍显示旧信息
   chatResources.invalidateKnowledgeBaseDetail(kbId)
   fetchList(true).then(() => {
-    if (shouldOpenDetailForUploadGuide && kbId) {
+    if (shouldOpenDetailForUploadGuide && kbId && !uiStore.showKBEditorModal) {
       goDetail(kbId)
     }
     // 如果是从路由参数中获取的高亮ID，触发闪烁效果
@@ -1899,6 +1899,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   border-radius: 6px !important;
   color: var(--td-text-color-secondary);
   cursor: pointer;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--td-bg-color-container) 72%, transparent);
   transition: background 0.2s, border-color 0.2s, color 0.2s;
 
   &:hover {

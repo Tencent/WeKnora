@@ -3,26 +3,16 @@ import { ref, reactive, onMounted, onBeforeUnmount, watch, computed, nextTick } 
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { getKnowledgeSpans, reparseKnowledge, cancelKnowledgeParse, getKnowledgeDetails } from '@/api/knowledge-base/index'
-import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace'
+import {
+  groupPostprocessGraphSpans,
+  knowledgeSpansPayloadHasTrace,
+  summarizePostprocessTasks,
+  type KnowledgeTraceNode,
+} from '@/utils/knowledgeTrace'
 import { resolveTimelineHeaderStatus } from '@/utils/knowledgeProcessingStatus'
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
 
-interface SpanNode {
-  span_id?: string
-  parent_span_id?: string
-  name: string
-  kind: string
-  status: string
-  started_at?: string | null
-  finished_at?: string | null
-  duration_ms?: number
-  error_code?: string
-  error_message?: string
-  input?: any
-  output?: any
-  metadata?: any
-  children?: SpanNode[]
-}
+type SpanNode = KnowledgeTraceNode
 
 interface LastError {
   name: string
@@ -160,7 +150,9 @@ const stages = computed<SpanNode[]>(() => {
   const children = trace?.children || []
   const byName = new Map<string, SpanNode>()
   for (const c of children) {
-    if (c && c.kind === 'stage' && c.name) byName.set(c.name, c)
+    if (c && c.kind === 'stage' && c.name) {
+      byName.set(c.name, c.name === 'postprocess' ? groupPostprocessGraphSpans(c) : c)
+    }
   }
   return STAGES.map((n) => byName.get(n) || ({ name: n, kind: 'stage', status: 'pending' } as SpanNode))
 })
@@ -175,8 +167,10 @@ const currentStageLabel = computed(() => {
 const currentStageIndex = computed(() => {
   const idx = stages.value.findIndex((s) => s.status === 'running' || s.status === 'failed')
   if (idx >= 0) return idx + 1
-  const done = stages.value.filter((s) => s.status === 'done').length
-  return Math.min(done + 1, stages.value.length)
+  const traversed = stages.value.filter(
+    (s) => s.status === 'done' || s.status === 'skipped',
+  ).length
+  return Math.min(traversed + 1, stages.value.length)
 })
 
 function formatDuration(ms?: number): string {
@@ -195,6 +189,13 @@ function formatRelativeTime(ts: number): string {
   if (sec < 60) return t('knowledgeStages.secondsAgo', { n: sec })
   const min = Math.floor(sec / 60)
   return t('knowledgeStages.minutesAgo', { n: min })
+}
+
+// A skipped stage did not execute. Its tiny bookkeeping interval is not
+// processing time, so do not present it as (for example) multimodal time.
+function formatSpanDuration(node: SpanNode): string {
+  if (node.status === 'skipped' || node.status === 'pending') return '—'
+  return formatDuration(node.duration_ms)
 }
 
 function isPolling(status?: string): boolean {
@@ -954,6 +955,9 @@ function localizedStatus(status: string): string {
 function rowLabel(row: FlatRow): string {
   if (row.isRoot) return t('knowledgeStages.root')
   if (row.isStage) return t(`knowledgeStages.stage.${row.node.name}`)
+  if (row.node.name === 'postprocess.graph') return t('knowledgeStages.processConfig.graph')
+  const graphChunk = /^postprocess\.graph\.chunk\[(\d+)\]$/.exec(row.node.name)
+  if (graphChunk) return `${t('knowledgeStages.processConfig.graph')} #${Number(graphChunk[1]) + 1}`
   return row.node.name
 }
 
@@ -1180,7 +1184,9 @@ const showLastError = computed(() =>
 
 const stagesStatDisplay = computed(() => {
   const total = stages.value.length
-  const doneCount = stages.value.filter((s) => s.status === 'done').length
+  const completedCount = stages.value.filter(
+    (s) => s.status === 'done' || s.status === 'skipped',
+  ).length
   const inProgress = stages.value.some(
     (s) => s.status === 'running' || s.status === 'failed' || s.status === 'pending',
   )
@@ -1192,9 +1198,13 @@ const stagesStatDisplay = computed(() => {
   }
   return {
     label: t('knowledgeStages.head.stagesDone'),
-    value: `${doneCount}/${total}`,
+    value: `${completedCount}/${total}`,
   }
 })
+
+const postprocessTaskStats = computed(() =>
+  summarizePostprocessTasks(data.value?.trace),
+)
 
 const headMetaParts = computed(() => {
   if (!data.value) return []
@@ -1204,6 +1214,19 @@ const headMetaParts = computed(() => {
   }
   const st = stagesStatDisplay.value
   parts.push(`${st.label} ${st.value}`)
+  const postprocess = postprocessTaskStats.value
+  if (postprocess.total > 0) {
+    parts.push(t('knowledgeStages.head.postprocessTasks', {
+      running: postprocess.running,
+      failed: postprocess.failed,
+      completed: postprocess.completed,
+    }))
+  }
+  if (data.value.parse_status === 'completed' && postprocess.running > 0) {
+    parts.push(t('knowledgeStages.head.completedWithActiveTrace', {
+      n: postprocess.running,
+    }))
+  }
   if (attemptTabs.value.length === 0 && data.value.current_attempt) {
     parts.push(t('knowledgeStages.attempt', { n: data.value.current_attempt }))
   }
@@ -1558,7 +1581,7 @@ const processConfigLines = computed<string[]>(() => {
                     <span class="kp-running-time">{{ formatDuration(liveElapsedMs(row.node)) }}</span>
                   </template>
                   <template v-else>
-                    {{ formatDuration(row.node.duration_ms) }}
+                    {{ formatSpanDuration(row.node) }}
                   </template>
                 </div>
 
@@ -1587,8 +1610,9 @@ const processConfigLines = computed<string[]>(() => {
                       <span class="kp-bar-tip">
                         <span class="kp-bar-tip-name">{{ rowLabel(row) }}</span>
                         <span class="kp-bar-tip-sep">·</span>
-                        <span class="kp-mono">{{ formatDuration(row.node.status === 'running' ? liveElapsedMs(row.node)
-                          : row.node.duration_ms) }}</span>
+                        <span class="kp-mono">{{ row.node.status === 'running'
+                          ? formatDuration(liveElapsedMs(row.node))
+                          : formatSpanDuration(row.node) }}</span>
                         <span class="kp-bar-tip-sep">·</span>
                         <span>{{ localizedStatus(row.node.status) }}</span>
                       </span>
@@ -1674,7 +1698,7 @@ const processConfigLines = computed<string[]>(() => {
                           <span class="kp-kv-tag-live">{{ t('knowledgeStages.detail.elapsed') }}</span>
                         </template>
                         <template v-else>
-                          {{ formatDuration(selectedRow.node.duration_ms) }}
+                          {{ formatSpanDuration(selectedRow.node) }}
                         </template>
                       </span>
                     </div>
@@ -1726,7 +1750,9 @@ const processConfigLines = computed<string[]>(() => {
                       <div class="kp-breakdown-track">
                         <div class="kp-breakdown-bar" :class="['kp-bar-' + s.status]" :style="{ width: s.pct + '%' }" />
                       </div>
-                      <span class="kp-breakdown-dur kp-mono">{{ formatDuration(s.duration_ms) }}</span>
+                      <span class="kp-breakdown-dur kp-mono">{{ s.status === 'skipped' || s.status === 'pending'
+                        ? '—'
+                        : formatDuration(s.duration_ms) }}</span>
                     </div>
                   </div>
                 </div>

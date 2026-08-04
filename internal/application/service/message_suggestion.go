@@ -425,7 +425,7 @@ func (s *messageSuggestionService) generateFromKnowledge(
 		message.AgentID,
 		message.ExecutionContext.KnowledgeBaseIDs,
 		knowledgeIDs,
-		message.ExecutionContext.TagIDs,
+		message.ExecutionContext.TagScopes,
 		poolSize,
 	)
 	if err != nil {
@@ -439,7 +439,7 @@ func (s *messageSuggestionService) generateFromKnowledge(
 			message.AgentID,
 			message.ExecutionContext.KnowledgeBaseIDs,
 			message.ExecutionContext.KnowledgeIDs,
-			message.ExecutionContext.TagIDs,
+			message.ExecutionContext.TagScopes,
 			poolSize,
 		)
 		if err != nil {

@@ -91,23 +91,6 @@
         </button>
       </div>
 
-      <section v-if="engines.length > 0 && authStore.hasRole('admin')" class="chat-parser-policy">
-        <div class="chat-parser-policy__header">
-          <div>
-            <h3>{{ $t('settings.parser.chatPolicyTitle') }}</h3>
-            <p>{{ $t('settings.parser.chatPolicyDescription') }}</p>
-          </div>
-          <t-button :loading="savingPolicy" @click="saveChatParserPolicy">
-            {{ $t('common.save') }}
-          </t-button>
-        </div>
-        <KBParserSettings
-          embedded
-          :parser-engine-rules="chatParserEngineRules"
-          :relevant-extensions="CHAT_PARSER_EXTENSIONS"
-          @update:parser-engine-rules="chatParserEngineRules = $event"
-        />
-      </section>
     </template>
 
     <!-- 配置抽屉 — 用 SettingDrawer 包装，保持与 ModelEditorDialog 同款视觉/交互 -->
@@ -272,11 +255,19 @@
             <p class="form-desc">{{ $t('settings.parser.vlmServerUrlHint') }}</p>
           </div>
           <div class="form-item">
+            <label class="form-label">{{ $t('settings.parser.parseMethodLabel') }}</label>
+            <t-select v-model="config.mineru_parse_method">
+              <t-option value="auto" :label="$t('settings.parser.parseMethodAuto')" />
+              <t-option value="ocr" :label="$t('settings.parser.parseMethodOCR')" />
+              <t-option value="txt" :label="$t('settings.parser.parseMethodText')" />
+            </t-select>
+            <p class="form-desc">{{ $t('settings.parser.parseMethodHint') }}</p>
+          </div>
+          <div class="form-item">
             <label class="form-label">{{ $t('settings.parser.featuresLabel', '识别选项') }}</label>
             <div class="form-toggles">
               <t-checkbox v-model="config.mineru_enable_formula">{{ $t('settings.parser.formulaRecognition') }}</t-checkbox>
               <t-checkbox v-model="config.mineru_enable_table">{{ $t('settings.parser.tableRecognition') }}</t-checkbox>
-              <t-checkbox v-model="config.mineru_enable_ocr">OCR</t-checkbox>
             </div>
           </div>
           <div class="form-item">
@@ -395,7 +386,6 @@ import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import { MessagePlugin } from 'tdesign-vue-next'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
-import KBParserSettings, { type ParserEngineRule } from '@/views/knowledge/settings/KBParserSettings.vue'
 import {
   getParserEngines,
   getParserEngineConfig,
@@ -411,11 +401,6 @@ const uiStore = useUIStore()
 const authStore = useAuthStore()
 
 const CONFIGURABLE_ENGINES = new Set(['mineru', 'mineru_cloud', 'paddleocr_vl', 'paddleocr_vl_cloud'])
-const CHAT_PARSER_EXTENSIONS = [
-  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'epub', 'mhtml',
-  'txt', 'md', 'markdown', 'csv', 'json', 'xml', 'html', 'yaml', 'yml', 'log',
-  'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp',
-]
 
 /** 各解析引擎的项目/官方文档地址 */
 const ENGINE_DOC_LINKS: Record<string, string> = {
@@ -437,6 +422,7 @@ const DEFAULT_PARSER_CONFIG: ParserEngineConfig = {
   mineru_vlm_server_url: '',
   mineru_enable_formula: true,
   mineru_enable_table: true,
+  mineru_parse_method: 'auto',
   mineru_enable_ocr: true,
   mineru_language: 'ch',
   mineru_cloud_model: 'pipeline',
@@ -462,8 +448,6 @@ const error = ref('')
 
 const config = ref<ParserEngineConfig>({ ...DEFAULT_PARSER_CONFIG })
 const saving = ref(false)
-const savingPolicy = ref(false)
-const chatParserEngineRules = ref<ParserEngineRule[]>([])
 const saveMessage = ref('')
 const saveSuccess = ref(false)
 const checking = ref(false)
@@ -576,6 +560,7 @@ async function loadConfig() {
       mineru_vlm_server_url: data?.mineru_vlm_server_url ?? DEFAULT_PARSER_CONFIG.mineru_vlm_server_url ?? '',
       mineru_enable_formula: data?.mineru_enable_formula ?? DEFAULT_PARSER_CONFIG.mineru_enable_formula ?? true,
       mineru_enable_table: data?.mineru_enable_table ?? DEFAULT_PARSER_CONFIG.mineru_enable_table ?? true,
+      mineru_parse_method: data?.mineru_parse_method ?? (data?.mineru_enable_ocr === false ? 'txt' : 'auto'),
       mineru_enable_ocr: data?.mineru_enable_ocr ?? DEFAULT_PARSER_CONFIG.mineru_enable_ocr ?? true,
       mineru_language: data?.mineru_language ?? DEFAULT_PARSER_CONFIG.mineru_language ?? 'ch',
       mineru_cloud_model: data?.mineru_cloud_model ?? DEFAULT_PARSER_CONFIG.mineru_cloud_model ?? '',
@@ -590,9 +575,7 @@ async function loadConfig() {
       paddleocr_vl_cloud_model: data?.paddleocr_vl_cloud_model ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_cloud_model ?? 'PaddleOCR-VL-1.6',
       paddleocr_vl_cloud_use_seal_recognition: data?.paddleocr_vl_cloud_use_seal_recognition ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_cloud_use_seal_recognition ?? true,
       paddleocr_vl_cloud_use_chart_recognition: data?.paddleocr_vl_cloud_use_chart_recognition ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_cloud_use_chart_recognition ?? false,
-      chat_parser_engine_rules: data?.chat_parser_engine_rules ?? [],
     }
-    chatParserEngineRules.value = [...(data?.chat_parser_engine_rules ?? [])]
   } catch {
     config.value = { ...DEFAULT_PARSER_CONFIG }
   }
@@ -607,7 +590,6 @@ async function loadAll() {
 
 function buildConfigPayload(): ParserEngineConfig {
   return {
-    chat_parser_engine_rules: chatParserEngineRules.value,
     docreader_addr: config.value.docreader_addr?.trim() ?? '',
     docreader_transport: (config.value.docreader_transport ?? 'grpc').trim() || 'grpc',
     mineru_endpoint: config.value.mineru_endpoint?.trim() ?? '',
@@ -616,7 +598,9 @@ function buildConfigPayload(): ParserEngineConfig {
     mineru_vlm_server_url: config.value.mineru_vlm_server_url?.trim() ?? '',
     mineru_enable_formula: config.value.mineru_enable_formula,
     mineru_enable_table: config.value.mineru_enable_table,
-    mineru_enable_ocr: config.value.mineru_enable_ocr,
+    mineru_parse_method: config.value.mineru_parse_method ?? 'auto',
+    // Keep the legacy toggle during rolling upgrades. New servers prefer parse_method.
+    mineru_enable_ocr: config.value.mineru_parse_method !== 'txt',
     mineru_language: config.value.mineru_language?.trim() ?? '',
     mineru_cloud_model: config.value.mineru_cloud_model?.trim() ?? '',
     mineru_cloud_enable_formula: config.value.mineru_cloud_enable_formula,
@@ -630,19 +614,6 @@ function buildConfigPayload(): ParserEngineConfig {
     paddleocr_vl_cloud_model: config.value.paddleocr_vl_cloud_model?.trim() ?? '',
     paddleocr_vl_cloud_use_seal_recognition: config.value.paddleocr_vl_cloud_use_seal_recognition,
     paddleocr_vl_cloud_use_chart_recognition: config.value.paddleocr_vl_cloud_use_chart_recognition,
-  }
-}
-
-async function saveChatParserPolicy() {
-  savingPolicy.value = true
-  try {
-    const res = await updateParserEngineConfig(buildConfigPayload())
-    if (res?.data) config.value = { ...config.value, ...res.data }
-    MessagePlugin.success(t('settings.parser.chatPolicySaved'))
-  } catch (e: any) {
-    MessagePlugin.error(e?.message || t('settings.parser.saveFailed'))
-  } finally {
-    savingPolicy.value = false
   }
 }
 
@@ -781,33 +752,6 @@ onMounted(loadAll)
 
 .error-inline {
   padding: 16px 0;
-}
-
-.chat-parser-policy {
-  margin-top: 28px;
-  padding-top: 24px;
-  border-top: 1px solid var(--td-component-stroke);
-
-  &__header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 20px;
-    margin-bottom: 16px;
-
-    h3 {
-      margin: 0 0 6px;
-      font-size: 16px;
-      color: var(--td-text-color-primary);
-    }
-
-    p {
-      margin: 0;
-      color: var(--td-text-color-secondary);
-      font-size: 13px;
-      line-height: 1.5;
-    }
-  }
 }
 
 .empty-state {

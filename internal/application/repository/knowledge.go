@@ -137,6 +137,13 @@ func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) 
 	}
 	if filter.ParseStatus != "" {
 		query = query.Where("parse_status = ?", filter.ParseStatus)
+	} else {
+		// Hide rows that are mid-deletion so an async delete never lingers in the
+		// document list as if it were a normal entry (issue #2192). The delete
+		// pipeline marks the row `deleting` before tearing down its resources; a
+		// row whose delete task exhausts its retries is flipped to `failed` by the
+		// dead-letter callback and stays visible so the failure remains actionable.
+		query = query.Where("parse_status <> ?", types.ParseStatusDeleting)
 	}
 	if !filter.UpdatedFrom.IsZero() {
 		query = query.Where("updated_at >= ?", filter.UpdatedFrom)
@@ -182,7 +189,13 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 
 // UpdateKnowledge updates knowledge
 func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
-	err := r.db.WithContext(ctx).Omit(omitFieldsOnUpdate...).Save(knowledge).Error
+	omit := omitFieldsOnUpdate
+	// Legacy/unit-test schemas created before custom_metadata should continue
+	// to support unrelated updates when the caller did not provide the field.
+	if knowledge.CustomMetadata == nil {
+		omit = append(append([]string{}, omitFieldsOnUpdate...), "custom_metadata")
+	}
+	err := r.db.WithContext(ctx).Omit(omit...).Save(knowledge).Error
 	return err
 }
 
@@ -229,10 +242,16 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 
 	switch params.Type {
 	case "file":
-		// If file hash exists, prioritize exact match using hash
+		// File content is only a duplicate within the same file type. This keeps
+		// same-content documents with distinct formats (for example, .md and
+		// .txt) available as separate knowledge items.
 		if params.FileHash != "" {
 			var knowledge types.Knowledge
-			err := query.Where("file_hash = ?", params.FileHash).First(&knowledge).Error
+			duplicateQuery := query.Where("type = ? AND file_hash = ?", "file", params.FileHash)
+			if params.FileType != "" {
+				duplicateQuery = duplicateQuery.Where("LOWER(file_type) = ?", strings.ToLower(params.FileType))
+			}
+			err := duplicateQuery.First(&knowledge).Error
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return false, nil, nil
@@ -242,13 +261,17 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 			return true, &knowledge, nil
 		}
 
-		// If no hash or hash doesn't match, use filename and size
+		// If no hash or hash doesn't match, use filename, size, and file type.
 		if params.FileName != "" && params.FileSize > 0 {
 			var knowledge types.Knowledge
-			err := query.Where(
-				"file_name = ? AND file_size = ?",
-				params.FileName, params.FileSize,
-			).First(&knowledge).Error
+			duplicateQuery := query.Where(
+				"type = ? AND file_name = ? AND file_size = ?",
+				"file", params.FileName, params.FileSize,
+			)
+			if params.FileType != "" {
+				duplicateQuery = duplicateQuery.Where("LOWER(file_type) = ?", strings.ToLower(params.FileType))
+			}
+			err := duplicateQuery.First(&knowledge).Error
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return false, nil, nil
@@ -287,23 +310,84 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 	return false, nil, nil
 }
 
+// AminusB returns the IDs of knowledge in A that have no counterpart in B,
+// comparing by file_hash as a MULTISET rather than a plain set.
+//
+// A plain "file_hash NOT IN (SELECT file_hash FROM B)" only asks whether a
+// hash exists in B at all, so once a KB accumulates several rows sharing the
+// same file_hash (e.g. the same file ingested multiple times), the diff can
+// never reconcile the *count* difference: two KBs with identical distinct-hash
+// sets but different row counts produce an empty diff in both directions, and
+// a clone target can never converge to the source. This also breaks on MySQL
+// when B contains a NULL file_hash, because NOT IN then yields no rows at all.
+//
+// The multiset diff is computed in Go rather than SQL: we only pull
+// (id, file_hash) for A plus per-hash counts for B, then keep A's surplus
+// copies. This avoids window functions (unsupported on MySQL 5.7 / MariaDB)
+// and the O(n^2) correlated-subquery ranking that would otherwise be needed
+// there. Clone is a background job over at most a few thousand rows, so the
+// two lightweight two-column reads are cheap.
+//
+// Rows with a NULL/empty file_hash carry no reliable identity (unparsed /
+// passage knowledge), so they are always treated as present-only-in-A to
+// avoid collapsing distinct rows into one.
 func (r *knowledgeRepository) AminusB(
 	ctx context.Context,
 	Atenant uint64, A string,
 	Btenant uint64, B string,
 ) ([]string, error) {
-	knowledgeIDs := []string{}
-	subQuery := r.db.Model(&types.Knowledge{}).
-		Where("tenant_id = ? AND knowledge_base_id = ?", Btenant, B).Select("file_hash")
-	err := r.db.Model(&types.Knowledge{}).
-		Where("tenant_id = ? AND knowledge_base_id = ?", Atenant, A).
-		Where("file_hash NOT IN (?)", subQuery).
-		Pluck("id", &knowledgeIDs).
-		Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return knowledgeIDs, nil
+	type hashRow struct {
+		ID       string
+		FileHash string
 	}
-	return knowledgeIDs, err
+	// Order so the retained (matched) copies are the earliest ones and the
+	// surplus we return is deterministic across runs.
+	var aRows []hashRow
+	if err := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Select("id, file_hash").
+		Where("tenant_id = ? AND knowledge_base_id = ?", Atenant, A).
+		Order("file_hash, created_at, id").
+		Find(&aRows).Error; err != nil {
+		return nil, err
+	}
+
+	type hashCount struct {
+		FileHash string
+		Cnt      int
+	}
+	var bCounts []hashCount
+	if err := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Select("file_hash, COUNT(*) AS cnt").
+		Where("tenant_id = ? AND knowledge_base_id = ?", Btenant, B).
+		Group("file_hash").
+		Find(&bCounts).Error; err != nil {
+		return nil, err
+	}
+
+	// remaining[h] is how many copies of hash h in B are still unmatched.
+	remaining := make(map[string]int, len(bCounts))
+	for _, c := range bCounts {
+		if c.FileHash != "" {
+			remaining[c.FileHash] = c.Cnt
+		}
+	}
+
+	knowledgeIDs := make([]string, 0)
+	for _, row := range aRows {
+		// NULL scans into "" here, so this also covers NULL hashes.
+		if row.FileHash == "" {
+			knowledgeIDs = append(knowledgeIDs, row.ID)
+			continue
+		}
+		if remaining[row.FileHash] > 0 {
+			remaining[row.FileHash]-- // matched by an existing copy in B
+			continue
+		}
+		knowledgeIDs = append(knowledgeIDs, row.ID) // surplus copy in A
+	}
+	return knowledgeIDs, nil
 }
 
 func (r *knowledgeRepository) UpdateKnowledgeColumn(
@@ -354,7 +438,10 @@ func (r *knowledgeRepository) UpdateActiveDeletingKnowledgeColumns(
 // FinalizeSubtask atomically decrements pending_subtasks_count and, when
 // the counter reaches zero while parse_status is still 'finalizing',
 // flips the row to 'completed' in the same statement so concurrent
-// subtask completions can't race the promotion.
+// subtask completions can't race the promotion. Both this promotion and
+// SetFinalizing clear error_message: a row that re-enters processing or
+// finishes successfully must not keep displaying a failure from a
+// previous attempt.
 //
 // Returns (newCount, promoted, error). promoted is true iff this caller
 // was the one whose UPDATE flipped 'finalizing'→'completed'.
@@ -398,9 +485,10 @@ func (r *knowledgeRepository) FinalizeSubtask(
 		Where("id = ? AND parse_status = ? AND pending_subtasks_count = 0",
 			id, types.ParseStatusFinalizing).
 		Updates(map[string]interface{}{
-			"parse_status": types.ParseStatusCompleted,
-			"processed_at": now,
-			"updated_at":   now,
+			"parse_status":  types.ParseStatusCompleted,
+			"error_message": "",
+			"processed_at":  now,
+			"updated_at":    now,
 		})
 	if promoteRes.Error != nil {
 		return 0, false, promoteRes.Error
@@ -443,6 +531,7 @@ func (r *knowledgeRepository) SetFinalizing(
 		Updates(map[string]interface{}{
 			"parse_status":           types.ParseStatusFinalizing,
 			"pending_subtasks_count": expectedSubtasks,
+			"error_message":          "",
 			"updated_at":             now,
 		})
 	if res.Error != nil {
@@ -540,6 +629,41 @@ func (r *knowledgeRepository) FindByMetadataFilters(
 		return nil, nil
 	}
 	return &knowledge, err
+}
+
+// FindByMetadataKeyPrefix finds knowledge items whose metadata[key] starts with
+// the given prefix. Used to sweep an external node's attachment sub-items on re-sync.
+func (r *knowledgeRepository) FindByMetadataKeyPrefix(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	key string,
+	prefix string,
+) ([]*types.Knowledge, error) {
+	escaped := escapeLikeKeyword(prefix)
+	var items []*types.Knowledge
+	// The JSON key is embedded as a SQL literal (metadata->>'external_id'), NOT a
+	// bind parameter. PostgreSQL only uses the expression index
+	// idx_knowledges_kb_metadata_external_id (built on the literal expression
+	// (metadata->>'external_id')) when that exact expression appears in the query;
+	// a bound metadata->>$1 is a structurally different expression the planner
+	// cannot match, so it would silently fall back to a heap scan. key is an
+	// internal, caller-supplied field name (always "external_id"); single-quotes
+	// are doubled defensively so the literal is always well-formed.
+	//
+	// The prefix pattern stays a bind parameter: an unnamed prepared statement is
+	// custom-planned with the actual value, so LIKE 'prefix%' still extracts the
+	// prefix and drives the index. The explicit ESCAPE '\' keeps backslash-escaped
+	// wildcards (e.g. \_) literal on both PostgreSQL and SQLite.
+	keyExpr := "metadata->>'" + strings.ReplaceAll(key, "'", "''") + "'"
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
+		Where(keyExpr+" LIKE ? ESCAPE ?", escaped+"%", `\`).
+		Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 func (r *knowledgeRepository) SearchKnowledge(

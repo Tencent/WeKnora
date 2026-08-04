@@ -229,7 +229,7 @@ Wiki 模式允许 Agent 根据原始文档自动生成并维护一套结构化�
 - 只读用户 → `Viewer`
 - 普通成员（上传文档、维护「自己」的 KB / Agent）→ `Contributor`
 - 运维人员（管理共享模型、向量库、解析器等基础设施）→ `Admin`
-- 空间所有者（拥有删除空间权限，每空间唯一）→ `Owner`
+- 空间所有者（拥有删除空间权限；每空间至少一位，可以有多位，最后一位不能被降级或移除）→ `Owner`
 
 如果你希望开启「invite-only」（不允许自助注册到本空间），可在空间设置里打开邀请制，并通过「邀请」入口签发邀请码或链接。
 
@@ -316,6 +316,66 @@ Wiki 模式允许 Agent 根据原始文档自动生成并维护一套结构化�
 ## 27. Agent 提示「模型未就绪」无法对话？
 
 0.6.3 在 Agent 选择器引入**模型就绪校验**：绑定的 LLM / Embedding / Rerank / VLM 缺失或配置无效时会阻断对话并给出修复指引。可在模型卡片打开 **调试抽屉** 先测试连通性；确认 KB 与 Agent 引用的模型均存在且可用。
+
+## 28. 如何创建并限制权限范围 API Key？
+
+0.7.0 引入**权限范围 API Key 与 Principal 模型**（迁移 `000064_principal_model`、`000065_tenant_api_keys`）。API Key 不再等同于某个人类用户，而是独立的 Principal，携带显式角色与能力（capability）授权：
+
+- 在 **设置 → API 集成**（Owner 可见）中创建 Key，可勾选能力（如 `manage_kbs` 覆盖 KB 全生命周期、`manage_storage_backends` 等），并可限制到指定知识库。
+- Key 的 `last_used_at` 按节流更新，避免高频写库。
+- 路由级守卫会拒绝越权访问；管理类接口对 API Key Principal 默认拒绝，请为集成使用具备对应能力的 Key，而非全权 Key。
+- MCP OAuth 与嵌入会话按 Principal 隔离，不同集成之间互不串号。
+
+### 如何用一个 API Key 自动化管理多个空间？
+
+SystemAdmin 可在 **系统管理 → 平台 API Key** 创建 `scope_type=platform` 的 Key。平台 Key 不绑定单一空间：调用普通空间 API 时必须携带 `X-Tenant-ID`，并继续受原有 capability 和知识库范围守卫约束；调用开放的系统控制面接口则需要对应的 `system_*` capability。平台 Key 不支持 `full_access`，也不能创建、轮换或吊销其他平台 Key。
+
+## 29. 一个空间如何绑定多个对象存储实例？
+
+0.7.0 支持**多实例存储后端**（迁移 `000068_storage_backends`）。一个空间可注册多个存储实例（`local` / `minio` / `cos` / `tos` / `s3` / `oss` / `ks3` / `obs`），不同知识库绑定到不同实例，空间维度还有一个默认实例：
+
+- 在 **设置 → 存储后端** 创建/测试/设为默认（需 Admin+；API Key 需 `manage_storage_backends` 能力）。
+- 未显式绑定的新知识库使用空间默认实例；响应中的 `access_key_id` / `secret_access_key` 会被掩码，更新时提交掩码占位符不会覆盖库中真实凭据。
+- 若创建知识库时提示存储引擎不可用，请确认目标 provider 在 `STORAGE_ALLOW_LIST` 允许范围内。详见 [`docs/api/storage-backend.md`](./api/storage-backend.md)。
+
+## 30. 后台解析/入库任务积压或需要排查失败任务怎么办？
+
+0.7.0 新增系统管理员的**运行时任务队列面板**与 **Worker 池治理**。文档处理从单一聚合池改为分阶段独立池（core / 后处理 / enrichment / maintenance）+ 弹性共享池，Wiki 独立治理：
+
+- 在 **系统设置 → 运行时队列** 查看队列深度、按模型并发统计、失败任务详情，并可手动重试。
+- 可通过 `WEKNORA_ASYNQ_*_CONCURRENCY` 与 `asynq.*_concurrency` 系统设置调整各池并发（需重启服务）；`model.max_concurrency` 用于约束单模型后台并发。
+- 详见 [`docs/worker-pool-governance.md`](./worker-pool-governance.md)。注意：Worker 并发只是调度预算，仍受模型配额、DocReader 容量、向量库与数据库连接数限制。
+
+## 31. 对话中如何临时上传图片/文档做一次性问答？
+
+0.7.0 支持**会话级临时附件**（迁移 `000070_temporary_documents`）。在对话输入区上传图片或文档，系统异步解析后仅用于当前会话的问答，不会写入知识库。图片与附件共享一个合并数量上限；附件内容会在多轮对话中保留。
+
+## 32. 如何接入 QQBot / Lark（飞书国际版）？
+
+0.7.0 新增 **QQBot** 平台集成，并支持飞书国际版 **Lark**（区域感知路由）。在 **设置 → IM 集成** 添加对应渠道并填写凭据即可；飞书回复通过 reply-message 接口发送，回复会落在原消息线程内。
+
+## 33. 如何为 Redis 启用 TLS？
+
+0.7.0 支持 Redis 的 **TLS 连接**（#1930）。按环境变量启用 TLS 后，启动日志会打印 TLS 配置状态便于确认。若连接失败，请核对证书/CA 配置与 Redis 服务端是否要求 TLS。
+
+## 34. 升级到 0.7.0 后 `weknora` CLI 命令找不到或行为变化？
+
+0.7.0 随附 **CLI v0.10**（Agent 优先，破坏性变更）：新增 `model` / `message` / `config` / `skills` 命令组，`doc reparse` / `doc update`，`kb config` / `kb config set`；`session continue` 更名为 `session resume`，新增 `session tool-approval`；提供 agent-first 的 chat 与 `session ask` 输出模式，并强化了 SSE 可靠性与类型化错误。详见 [`cli/CHANGELOG.md`](../cli/CHANGELOG.md)。
+
+## 35. 如何接入云之家（Yunzhijia）？
+
+0.7.1 新增 **云之家 IM 集成**。在 **设置 → IM 集成** 添加云之家渠道并填写应用凭据即可；集成基于 WebSocket 长连接接收消息，支持图片消息入库（带 SSRF 安全下载），默认以 **Markdown** 格式回复。若图片无法下载，请检查出站网络与凭据是否具备下载权限。
+
+## 36. 如何使用火山引擎 Rerank / 智谱 AI 网络搜索？
+
+0.7.1 新增两个供应商：
+
+- **火山引擎 Rerank**：在 **设置 → 模型** 中添加 Rerank 模型并选择火山引擎。当单次请求文档数超过 API 上限时，客户端会自动分批发送并合并结果。vLLM Rerank 现默认不再发送 `truncate_prompt_tokens` 以提升兼容性。
+- **智谱 AI 网络搜索**：在 **设置 → 网络搜索** 中选择智谱 AI 作为搜索供应商并填写凭据即可，用于 Agent 联网检索。
+
+## 37. 升级到 0.7.1 后对话记忆（Memory）设置消失了？还需要 Neo4j 吗？
+
+0.7.1 **移除了基于 Neo4j 的会话记忆（episodic memory）** 功能，相关 API 字段、设置项与嵌入开关一并下线，对话不再依赖 Neo4j 做记忆召回。**注意：知识图谱（GraphRAG / 图检索）仍然使用 Neo4j**，因此若你启用了图谱检索，Neo4j 依旧是必需组件，无需移除部署。若你此前仅为记忆功能部署 Neo4j 且未使用图谱，可按需精简。
 
 ## P.S.
 如果以上方式未解决问题，请在issue中描述您的问题，并提供必要的日志信息辅助我们进行问题排查

@@ -585,7 +585,7 @@ func (s *userService) RevokeSystemAdmin(ctx context.Context, userID, actorID str
 // UpdateUserPreferences applies a partial update over the user's
 // preferences blob. PATCH semantics: only keys present in `patch`
 // (non-nil pointer fields) replace the existing value; everything else
-// is preserved. This lets the front-end PUT only the toggle that
+// is preserved. This lets the front-end PUT only the preference that
 // changed without having to read-modify-write the whole struct, and
 // also makes the endpoint forward-compatible — older clients that
 // don't know about newer keys won't accidentally erase them.
@@ -600,10 +600,6 @@ func (s *userService) UpdateUserPreferences(
 	}
 
 	merged := user.Preferences
-	if patch.EnableMemory != nil {
-		v := *patch.EnableMemory
-		merged.EnableMemory = &v
-	}
 	if patch.LastActiveTenantID != nil {
 		// *0 = "forget my preference, fall back to home on next login";
 		// any positive value = set/replace. We do not validate membership

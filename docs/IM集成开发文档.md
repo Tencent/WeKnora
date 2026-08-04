@@ -1,6 +1,6 @@
 # IM 集成开发文档
 
-WeKnora 的 IM 集成模块将企业即时通讯平台（企业微信、飞书、Slack、Telegram、钉钉、Mattermost）接入 WeKnora 知识问答管道，支持在 IM 中直接向 AI 提问并获得实时流式回答。
+WeKnora 的 IM 集成模块将企业即时通讯平台（企业微信、飞书、Lark、Slack、Telegram、钉钉、Mattermost）接入 WeKnora 知识问答管道，支持在 IM 中直接向 AI 提问并获得实时流式回答。
 
 IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置通过前端 Agent 编辑器管理，存储在数据库中。
 
@@ -9,6 +9,7 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置
 - [快速接入指南](#快速接入指南)
   - [企业微信接入](#企业微信接入)
   - [飞书接入](#飞书接入)
+  - [Lark 接入](#lark-接入)
   - [Slack 接入](#slack-接入)
   - [Telegram 接入](#telegram-接入)
   - [钉钉接入](#钉钉接入)
@@ -22,7 +23,7 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置
 - [接口定义](#接口定义)
 - [平台适配器详解](#平台适配器详解)
   - [企业微信 (WeCom)](#企业微信-wecom)
-  - [飞书 (Feishu)](#飞书-feishu)
+  - [飞书 (Feishu) 与 Lark](#飞书-feishu-与-lark)
   - [Slack](#slack)
   - [Telegram](#telegram)
   - [钉钉 (DingTalk)](#钉钉-dingtalk)
@@ -44,6 +45,11 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置
 - WeKnora 已部署并运行
 - 已创建至少一个 Agent（自定义智能体）
 - Agent 已配置好模型和知识库
+
+> **回复图片需公网可达**：IM 显示知识库图片需让 IM 端拿到公网 http 图片 URL，二选一——
+> (A) 存储后端本身公网可达（对象存储公网 endpoint / `MINIO_ENDPOINT` 设为公网）；
+> (B) 配 `APP_EXTERNAL_URL`，图片走 WeKnora 的 `/r/` 短链（nginx 已内置 `/r/` 代理）。
+> 默认 MinIO 部署走 (B) 最简单。详见 `.env.example` 中 `APP_EXTERNAL_URL` 说明。
 
 ### 企业微信接入
 
@@ -231,6 +237,64 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置
 2. **请求地址**：粘贴从 WeKnora 复制的回调地址
 3. 添加事件 `im.message.receive_v1`
 4. 点击保存时飞书会发送 URL 验证请求（challenge），WeKnora 会自动响应
+
+---
+
+### Lark 接入
+
+Lark 是飞书的国际版。两者是同一产品部署在两朵相互隔离的云上，**IM 的 API 接口、事件结构、
+凭证字段、接入模式一致**，因此 WeKnora 中 Lark 与飞书共用同一套适配器代码。
+
+但「代码一致」不等于「配置一致」，接入时有三处差别：
+
+| | 飞书 | Lark |
+|---|---|---|
+| 开放平台 | <https://open.feishu.cn/> | <https://open.larksuite.com/> |
+| 添加渠道时的**平台**选项 | 「飞书」 | 「Lark（飞书国际版）」 |
+| 权限清单 | [飞书接入](#飞书接入)一节的 JSON | [Lark 权限配置](#lark-权限配置)一节的 JSON（**不可套用飞书的**） |
+
+创建应用、添加机器人能力、订阅 `im.message.receive_v1` 事件、发布版本、填写
+App ID / App Secret 等步骤与[飞书接入](#飞书接入)一节相同。**唯独权限配置不同，见下。**
+
+#### Lark 权限配置
+
+在 Lark 开放平台 **权限管理 → 批量导入** 粘贴下面的 JSON，覆盖 IM 机器人与知识库（Wiki）
+数据源两块功能：
+
+```json
+{
+  "scopes": {
+    "tenant": [
+      "im:message",
+      "im:message:send_as_bot",
+      "im:resource",
+      "im:message.p2p_msg:readonly",
+      "im:message.group_at_msg:readonly",
+      "cardkit:card:write",
+      "wiki:wiki:readonly",
+      "drive:export:readonly",
+      "drive:drive:readonly",
+      "docx:document:readonly"
+    ],
+    "user": []
+  }
+}
+```
+
+> 不要套用[飞书接入](#飞书接入)一节的 JSON：其中 `aily:file:*`、`corehr:file:download`
+> 在 Lark 不存在，整份导入会失败。
+
+> **注意**：飞书应用与 Lark 应用互不通用。在 open.feishu.cn 创建的应用无法用于 Lark 渠道，
+> 反之亦然——凭证只在创建它的那朵云上有效，跨云调用会认证失败。
+
+WebSocket 模式启动后日志出现以下内容表示连接成功：
+
+```
+[IM] Lark WebSocket connecting (app_id=xxx)...
+```
+
+同一个 App ID 在两朵云上分别注册时，WeKnora 通过 `平台:app_id` 区分（如 `feishu:cli_xxx`
+与 `lark:cli_xxx`），两个渠道可以并存，会话互不干扰。
 
 ---
 
@@ -520,7 +584,7 @@ IM 渠道在 Agent 编辑器的 **IM 集成** 标签页中管理（仅编辑模�
 ### 渠道列表
 
 每个渠道以卡片形式展示，包含：
-- **平台标识**：企业微信（绿色）/ 飞书（蓝色）/ Slack（紫色）/ Telegram（蓝色）/ 钉钉（蓝色）/ Mattermost（蓝色）
+- **平台标识**：企业微信（绿色）/ 飞书（青色）/ Lark（蓝色）/ Slack（紫色）/ Telegram（蓝色）/ 钉钉（蓝色）/ Mattermost（蓝色）
 - **渠道名称**：用户自定义
 - **接入模式**：WebSocket / Webhook
 - **输出模式**：流式输出 / 完整输出
@@ -615,7 +679,7 @@ CREATE TABLE im_channels (
     id                VARCHAR(36) PRIMARY KEY,
     tenant_id         BIGINT NOT NULL,
     agent_id          VARCHAR(36) NOT NULL,       -- 绑定的 Agent ID
-    platform          VARCHAR(20) NOT NULL,       -- 'wecom' | 'feishu' | 'slack' | 'telegram' | 'dingtalk' | 'mattermost'
+    platform          VARCHAR(20) NOT NULL,       -- 'wecom' | 'feishu' | 'lark' | 'slack' | 'telegram' | 'dingtalk' | 'mattermost'
     name              VARCHAR(255) NOT NULL DEFAULT '',
     enabled           BOOLEAN NOT NULL DEFAULT true,
     mode              VARCHAR(20) NOT NULL DEFAULT 'websocket',  -- 'webhook' | 'websocket'
@@ -635,8 +699,8 @@ CREATE TABLE im_channels (
 |------|------|------|
 | 企业微信 | WebSocket | `bot_id`, `bot_secret` |
 | 企业微信 | Webhook | `corp_id`, `agent_secret`, `token`, `encoding_aes_key`, `corp_agent_id` |
-| 飞书 | WebSocket | `app_id`, `app_secret` |
-| 飞书 | Webhook | `app_id`, `app_secret`, `verification_token`, `encrypt_key` |
+| 飞书 / Lark | WebSocket | `app_id`, `app_secret` |
+| 飞书 / Lark | Webhook | `app_id`, `app_secret`, `verification_token`, `encrypt_key` |
 | Slack | WebSocket | `app_token`, `bot_token` |
 | Slack | Webhook | `bot_token`, `signing_secret` |
 | Telegram | WebSocket | `bot_token` |
@@ -697,7 +761,7 @@ CREATE TABLE im_channels (
 
 ```go
 type IncomingMessage struct {
-    Platform    Platform          // "wecom" | "feishu" | "slack" | "telegram" | "dingtalk" | "mattermost"
+    Platform    Platform          // "wecom" | "feishu" | "lark" | "slack" | "telegram" | "dingtalk" | "mattermost"
     MessageType MessageType       // "text" | "file" | "image"
     UserID      string            // 平台用户标识
     UserName    string            // 显示名 (可选)
@@ -921,9 +985,70 @@ LongConnClient ══WebSocket══▶ wss://openws.work.weixin.qq.com
 
 ---
 
-### 飞书 (Feishu)
+### 飞书 (Feishu) 与 Lark
 
 统一适配器同时支持 Webhook 和 WebSocket 模式，且原生实现 `StreamSender` 和 `FileDownloader` 接口。
+
+#### 双云共用一套适配器
+
+飞书与 Lark 是同一产品部署在两朵隔离的云上，API 与事件结构完全一致，因此 `internal/im/feishu`
+包同时服务两个平台，由 `Region` 决定具体连哪朵云：
+
+```go
+// internal/im/feishu/region.go
+type Region struct {
+    Platform           im.Platform  // "feishu" | "lark"，写入 IncomingMessage
+    OpenBaseURL        string       // https://open.feishu.cn | https://open.larksuite.com
+    Label              string       // 日志前缀 [Feishu] / [Lark]
+    ThinkingText       string       // 流式卡片占位文案（中文 / 英文）
+    ImageFallbackLabel string       // 图片上传失败时降级链接的文案
+}
+
+var (
+    RegionFeishu = Region{Platform: im.PlatformFeishu, OpenBaseURL: "https://open.feishu.cn", ...}
+    RegionLark   = Region{Platform: im.PlatformLark,   OpenBaseURL: "https://open.larksuite.com", ...}
+)
+```
+
+容器中注册为两个平台：
+
+```go
+// internal/container/container.go
+imService.RegisterAdapterFactory("feishu", feishu.NewFactory(feishu.RegionFeishu))
+imService.RegisterAdapterFactory("lark", feishu.NewFactory(feishu.RegionLark))
+```
+
+适配器所有 API 调用经 `a.api(path, args...)` 拼接 `region.OpenBaseURL`；WebSocket 模式通过
+`larkws.WithDomain(region.OpenBaseURL)` 指向对应云（SDK 默认连 open.feishu.cn，Lark 不指定会认证失败）。
+
+> **跨云资源不通用**：`tenant_access_token`、`image_key`、`file_key`、`card_id` 均由单朵云的
+> 单个应用签发，跨云或跨应用使用会被拒绝。图片上传缓存因此以 `app_id` 为前缀分区。
+
+#### IM 适配器实际调用的接口与所需权限
+
+下表说明适配器**实际**依赖哪些权限。表中的权限标识已对照 Lark 官方 API 文档逐条核对，
+飞书侧同名。
+
+> **两朵云的权限清单并不等价。** API 与事件结构一致，不代表权限目录一致——飞书开放平台
+> 上存在的部分权限，Lark 开放平台并没有。因此各自的配置清单请分别参照
+> [飞书接入](#飞书接入)与 [Lark 权限配置](#lark-权限配置)，不要跨云复制粘贴。
+>
+> 飞书一节的 JSON 还同时覆盖了**飞书数据源连接器**（Wiki 同步），所以包含
+> `wiki:wiki:readonly`、`docs:document.content:read`、`sheets:spreadsheet` 等 IM 用不到的权限。
+
+| 适配器调用 | 用途 | 所需权限（满足其一即可） |
+|---|---|---|
+| `POST /auth/v3/tenant_access_token/internal` | 换取 tenant access token | 无需权限（凭 App ID / Secret） |
+| `POST /im/v1/messages/{id}/reply` | 回复消息（主路径） | `im:message`、`im:message:send_as_bot` 或 `im:message:send` |
+| `POST /im/v1/messages` | 发送消息（回复失败时降级） | 同上 |
+| `GET /im/v1/messages/{id}/resources/{key}` | 下载用户发来的文件 / 图片 | `im:message` 或 `im:message:readonly` |
+| `POST /im/v1/images` | 上传图片以取得 `image_key` | `im:resource` 或 `im:resource:upload` |
+| `POST /cardkit/v1/cards`<br>`PUT /cardkit/v1/cards/{id}/elements/{eid}/content`<br>`PATCH /cardkit/v1/cards/{id}/settings` | 流式卡片（仅流式输出模式需要） | `cardkit:card:write` |
+| 订阅事件 `im.message.receive_v1`（单聊） | 接收私聊消息 | `im:message.p2p_msg` 或 `im:message.p2p_msg:readonly` |
+| 订阅事件 `im.message.receive_v1`（群聊 @） | 接收群内 @机器人 消息 | `im:message.group_at_msg` 或 `im:message.group_at_msg:readonly` |
+
+因此 IM 功能全开（私聊 + 群聊 @ + 文件 + 图片 + 流式卡片）最少需要 5 类权限：收私聊、收群 @、
+发消息、读写资源、写卡片。若关闭流式输出（输出模式选「完整输出」），`cardkit:card:write` 可省略。
 
 #### Webhook 模式
 
@@ -974,14 +1099,21 @@ EndStream:
 > [thinking content line 2]
 ```
 
+> **已知限制**：`Region.ThinkingText` 只本地化了卡片的初始占位文案（Lark 显示 `Thinking...`）。
+> 一旦开始流式输出，think 块标题来自共享的 `MarkdownThinkStyle`，目前对所有平台
+> （Lark、Slack、Telegram、Mattermost 等）都是中文。本地化它需要把 locale 贯穿到
+> `FormatIMDisplayContent`，属于跨平台改动，不在 Lark 接入范围内。
+
 **孤立流清理：** 后台协程每 1 分钟扫描超过 5 分钟未关闭的流式卡片，自动调用 `EndStream` 关闭（防止内存泄漏）。
 
 #### 源码文件
 
 | 文件 | 职责 |
 |------|------|
+| `internal/im/feishu/region.go` | `Region` 定义（飞书 / Lark 的域名、平台标识、日志前缀、本地化文案） |
 | `internal/im/feishu/adapter.go` | 事件解析、CardKit 流式实现、Token 缓存、AES 解密、Think 块转换、文件下载 |
 | `internal/im/feishu/longconn.go` | WebSocket 长连接（封装飞书 SDK）、事件分发 |
+| `internal/im/feishu/factory.go` | 按 `Region` 构造适配器与长连接客户端 |
 
 ---
 

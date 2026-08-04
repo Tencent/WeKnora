@@ -152,3 +152,28 @@ func TestDataSourceConfig_HasConfiguredCredentials_RSS(t *testing.T) {
 		assert.False(t, cfg.HasCredentials())
 	})
 }
+
+// TestSubtreeChildID_MatchesPrefix locks the producer/consumer contract: a child
+// ID built by SubtreeChildID must start with the parent's SubtreeChildPrefix
+// (what the sweep queries), and the prefix must not match a sibling node whose
+// external_id merely shares a leading substring.
+func TestSubtreeChildID_MatchesPrefix(t *testing.T) {
+	parent := "node123"
+	prefix := SubtreeChildPrefix(parent)
+	assert.Equal(t, "node123#", prefix)
+
+	fileChild := SubtreeChildID(parent, "file", "tokABC")
+	imageChild := SubtreeChildID(parent, "image", "tokXYZ")
+	assert.Equal(t, "node123#file#tokABC", fileChild)
+	assert.Equal(t, "node123#image#tokXYZ", imageChild)
+
+	// Every child of this node is swept by the prefix.
+	assert.True(t, strings.HasPrefix(fileChild, prefix))
+	assert.True(t, strings.HasPrefix(imageChild, prefix))
+
+	// A sibling node "node1234" (shares the "node123" leading substring but is a
+	// different node) must NOT be caught by node123's prefix — the '#' guards it.
+	sibling := SubtreeChildID("node1234", "file", "tokABC")
+	assert.False(t, strings.HasPrefix(sibling, prefix),
+		"sibling node whose id shares a leading substring must not match the prefix")
+}

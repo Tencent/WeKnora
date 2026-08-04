@@ -36,21 +36,77 @@ type SearchTarget struct {
 	KnowledgeIDs []string `json:"knowledge_ids,omitempty"`
 	// TagIDs limits retrieval to chunks/documents carrying any of these KB-local tags.
 	TagIDs []string `json:"tag_ids,omitempty"`
-	// DisableDirectLoad forces the target through retrieval even when it is
-	// represented as specific knowledge IDs. Tag-derived document scopes need
-	// this so tag filtering limits the candidate documents without loading every
-	// matching document chunk as context.
-	DisableDirectLoad bool `json:"disable_direct_load,omitempty"`
+	// ScopeTagIDs records the logical tag scope selected by the user. For
+	// document KBs this is kept for tracing after the relation-table lookup has
+	// been resolved to KnowledgeIDs; TagIDs remains the physical index filter.
+	ScopeTagIDs []string `json:"scope_tag_ids,omitempty"`
+	// DisableRecallThresholds keeps recall broad inside an already constrained,
+	// user-selected scope. The reranker still orders candidates, but vector and
+	// keyword thresholds cannot erase the whole explicit scope before reranking.
+	DisableRecallThresholds bool `json:"disable_recall_thresholds,omitempty"`
 }
 
 // SearchTargets is a list of search targets, pre-computed at request entry point
 type SearchTargets []*SearchTarget
+
+// RecallThresholds returns the effective recall thresholds for this target.
+func (st *SearchTarget) RecallThresholds(vectorThreshold, keywordThreshold float64) (float64, float64) {
+	if st != nil && st.DisableRecallThresholds {
+		return 0, 0
+	}
+	return vectorThreshold, keywordThreshold
+}
+
+// HasRecallThresholdOverride reports whether any target represents an
+// authoritative scope whose candidates must reach reranking before filtering.
+func (st SearchTargets) HasRecallThresholdOverride() bool {
+	for _, target := range st {
+		if target != nil && target.DisableRecallThresholds {
+			return true
+		}
+	}
+	return false
+}
+
+// HasKnowledgeRetrievalScope reports whether a request has any effective
+// knowledge retrieval scope. SearchTargets are the unified runtime form and
+// must be considered alongside the legacy/raw KB and knowledge ID fields so
+// tag-only mentions are not mistaken for pure chat.
+func HasKnowledgeRetrievalScope(
+	searchTargets SearchTargets,
+	knowledgeBaseIDs []string,
+	knowledgeIDs []string,
+) bool {
+	for _, id := range knowledgeBaseIDs {
+		if id != "" {
+			return true
+		}
+	}
+	for _, id := range knowledgeIDs {
+		if id != "" {
+			return true
+		}
+	}
+	for _, target := range searchTargets {
+		if target == nil || target.KnowledgeBaseID == "" {
+			continue
+		}
+		if target.Type == SearchTargetTypeKnowledgeBase || len(target.KnowledgeIDs) > 0 ||
+			len(target.TagIDs) > 0 || len(target.ScopeTagIDs) > 0 {
+			return true
+		}
+	}
+	return false
+}
 
 // GetAllKnowledgeBaseIDs returns all unique knowledge base IDs from the search targets
 func (st SearchTargets) GetAllKnowledgeBaseIDs() []string {
 	seen := make(map[string]bool)
 	var result []string
 	for _, t := range st {
+		if t == nil || t.KnowledgeBaseID == "" {
+			continue
+		}
 		if !seen[t.KnowledgeBaseID] {
 			seen[t.KnowledgeBaseID] = true
 			result = append(result, t.KnowledgeBaseID)
@@ -63,7 +119,7 @@ func (st SearchTargets) GetAllKnowledgeBaseIDs() []string {
 func (st SearchTargets) GetKBTenantMap() map[string]uint64 {
 	result := make(map[string]uint64)
 	for _, t := range st {
-		if t.KnowledgeBaseID != "" {
+		if t != nil && t.KnowledgeBaseID != "" {
 			result[t.KnowledgeBaseID] = t.TenantID
 		}
 	}
@@ -74,7 +130,7 @@ func (st SearchTargets) GetKBTenantMap() map[string]uint64 {
 // Returns 0 if not found
 func (st SearchTargets) GetTenantIDForKB(kbID string) uint64 {
 	for _, t := range st {
-		if t.KnowledgeBaseID == kbID {
+		if t != nil && t.KnowledgeBaseID == kbID {
 			return t.TenantID
 		}
 	}
@@ -84,7 +140,7 @@ func (st SearchTargets) GetTenantIDForKB(kbID string) uint64 {
 // ContainsKB checks if the search targets contain a given knowledge base ID
 func (st SearchTargets) ContainsKB(kbID string) bool {
 	for _, t := range st {
-		if t.KnowledgeBaseID == kbID {
+		if t != nil && t.KnowledgeBaseID == kbID {
 			return true
 		}
 	}
@@ -146,12 +202,17 @@ type SearchResult struct {
 	// KnowledgeDescription is the description of the knowledge document
 	KnowledgeDescription string `json:"knowledge_description,omitempty"`
 
+	// KnowledgeCustomMetadata is user-authored context safe to expose to models.
+	KnowledgeCustomMetadata string `json:"knowledge_custom_metadata,omitempty"`
+
 	// KnowledgeBaseID is the ID of the knowledge base this result belongs to
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
 }
 
 // SearchParams represents the search parameters
 type SearchParams struct {
+	// QueryText is required unless query_embedding is provided, keyword matching is disabled,
+	// and vector matching remains enabled.
 	QueryText            string    `json:"query_text"`
 	QueryEmbedding       []float32 `json:"query_embedding,omitempty"`
 	VectorThreshold      float64   `json:"vector_threshold"`
@@ -161,6 +222,7 @@ type SearchParams struct {
 	DisableVectorMatch   bool      `json:"disable_vector_match"`
 	KnowledgeIDs         []string  `json:"knowledge_ids"`
 	TagIDs               []string  `json:"tag_ids"` // Tag IDs for filtering (used for FAQ priority filtering)
+	ScopeTagIDs          []string  `json:"scope_tag_ids,omitempty"`
 	OnlyRecommended      bool      `json:"only_recommended"`
 	// KnowledgeBaseIDs overrides the single KB ID passed to HybridSearch,
 	// allowing a single retrieval call to span multiple KBs that share the

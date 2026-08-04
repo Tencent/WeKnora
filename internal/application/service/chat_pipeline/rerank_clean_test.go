@@ -1,8 +1,64 @@
 package chatpipeline
 
 import (
+	"context"
+	"encoding/json"
+	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
+
+func TestGetEnrichedPassageKeepsQuestionsFromEarlierRevision(t *testing.T) {
+	metadata, err := json.Marshal(types.DocumentChunkMetadata{
+		GeneratedQuestionsRevision: 1,
+		GeneratedQuestions: []types.GeneratedQuestion{{
+			ID: "old", Question: "question generated before the edit",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	passage := getEnrichedPassage(context.Background(), &types.SearchResult{
+		Content:       "edited chunk body",
+		ChunkMetadata: types.JSON(metadata),
+	})
+	if !strings.Contains(passage, "question generated before the edit") {
+		t.Fatalf("earlier generated question was excluded from rerank passage: %q", passage)
+	}
+}
+
+func TestGetEnrichedPassageKeepsCodeAndMathCandidates(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "code only",
+			content: "```go\nfunc answer() int { return 42 }\n```",
+			want:    "func answer() int { return 42 }",
+		},
+		{
+			name:    "math only",
+			content: "$$\nE = mc^2\n$$",
+			want:    "E = mc^2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			passage := getEnrichedPassage(context.Background(), &types.SearchResult{Content: tt.content})
+			if strings.TrimSpace(passage) == "" {
+				t.Fatal("semantic-only candidate was removed from the rerank passage")
+			}
+			if !strings.Contains(passage, tt.want) {
+				t.Fatalf("rerank passage %q does not preserve %q", passage, tt.want)
+			}
+		})
+	}
+}
 
 func TestCleanPassageForRerank(t *testing.T) {
 	tests := []struct {
@@ -31,14 +87,14 @@ func TestCleanPassageForRerank(t *testing.T) {
 			expect: "访问  获取更多信息",
 		},
 		{
-			name:   "remove code blocks",
+			name:   "unwrap code blocks",
 			input:  "示例代码：\n```python\nprint('hello')\n```\n以上是示例",
-			expect: "示例代码：\n\n以上是示例",
+			expect: "示例代码：\nprint('hello')\n以上是示例",
 		},
 		{
-			name:   "remove LaTeX blocks",
+			name:   "unwrap LaTeX blocks",
 			input:  "公式如下 $$E=mc^2$$ 其中E是能量",
-			expect: "公式如下  其中E是能量",
+			expect: "公式如下 E=mc^2 其中E是能量",
 		},
 		{
 			name:   "remove table separator rows and convert data rows",
@@ -89,7 +145,7 @@ func TestCleanPassageForRerank(t *testing.T) {
 - 功能二
 
 ` + "```json\n{\"key\": \"value\"}\n```",
-			expect: "产品介绍\n\n这是一个 重要的 产品。详见 产品页面。\n\n用户评价：非常好用\n\n功能一\n功能二",
+			expect: "产品介绍\n\n这是一个 重要的 产品。详见 产品页面。\n\n用户评价：非常好用\n\n功能一\n功能二\n\n{\"key\": \"value\"}",
 		},
 		{
 			name:   "convert table data rows to plain text",

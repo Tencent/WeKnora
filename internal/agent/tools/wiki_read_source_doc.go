@@ -16,10 +16,16 @@ type wikiReadSourceDocTool struct {
 	BaseTool
 	knowledgeService interfaces.KnowledgeService
 	chunkService     interfaces.ChunkService
+	searchTargets    types.SearchTargets
+	scopeEnforced    bool
 }
 
-func NewWikiReadSourceDocTool(knowledgeService interfaces.KnowledgeService, chunkService interfaces.ChunkService) types.Tool {
-	return &wikiReadSourceDocTool{
+func NewWikiReadSourceDocTool(
+	knowledgeService interfaces.KnowledgeService,
+	chunkService interfaces.ChunkService,
+	searchTargets ...types.SearchTargets,
+) types.Tool {
+	tool := &wikiReadSourceDocTool{
 		BaseTool: NewBaseTool(
 			ToolWikiReadSourceDoc,
 			`Read or search within a specific source document to drill down for details omitted from the wiki.
@@ -31,7 +37,7 @@ If neither query nor range is provided, it returns the beginning of the document
   "properties": {
     "knowledge_id": {
       "type": "string",
-      "description": "The ID of the source document to read"
+      "description": "The short dN source document ID from the <sources> block"
     },
     "query": {
       "type": "string",
@@ -52,6 +58,13 @@ If neither query nor range is provided, it returns the beginning of the document
 		knowledgeService: knowledgeService,
 		chunkService:     chunkService,
 	}
+	// Presence of the variadic argument — not its length — enables the Agent
+	// authorization boundary, so an empty scope fails closed.
+	if len(searchTargets) > 0 {
+		tool.searchTargets = searchTargets[0]
+		tool.scopeEnforced = true
+	}
+	return tool
 }
 
 // enrichChunkImageInfo populates chunk.ImageInfo for a batch of parent text
@@ -123,8 +136,17 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 		return &types.ToolResult{Success: false, Error: "knowledge_id is required"}, nil
 	}
 
-	knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
-	if err != nil {
+	var knowledge *types.Knowledge
+	var err error
+	if t.scopeEnforced {
+		knowledge, err = authorizeKnowledgeInSearchTargets(ctx, t.searchTargets, knowledgeID, t.knowledgeService)
+	} else {
+		knowledge, err = t.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
+	}
+	if err != nil || knowledge == nil {
+		if err == nil {
+			err = fmt.Errorf("knowledge service returned an empty result")
+		}
 		return &types.ToolResult{Success: false, Error: fmt.Sprintf("Document not found: %v", err)}, nil
 	}
 
@@ -161,14 +183,30 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 	}
 
 	var chunksOutput strings.Builder
+	formattedChunks := make([]map[string]interface{}, 0)
 	totalChunks := int64(0)
 	reachedMax := false
 
 	var prevChunk *types.Chunk
 	var forceOutputNext bool
 	outputtedIndices := make(map[int]bool)
+	appendFormattedChunk := func(chunk *types.Chunk, content string) {
+		if chunk == nil {
+			return
+		}
+		formattedChunks = append(formattedChunks, map[string]interface{}{
+			"chunk_id":        chunk.ID,
+			"chunk_index":     chunk.ChunkIndex,
+			"chunk_type":      chunk.ChunkType,
+			"content":         content,
+			"knowledge_id":    knowledgeID,
+			"knowledge_base":  knowledge.KnowledgeBaseID,
+			"knowledge_title": knowledge.Title,
+		})
+	}
 
 	for {
+		enabled := true
 		pagination := &types.Pagination{
 			Page:     page,
 			PageSize: pageSize,
@@ -180,7 +218,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 			knowledgeID,
 			pagination,
 			[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ},
-			"", "", "", "", "",
+			nil, "", "", "", "", &enabled,
 		)
 		if err != nil {
 			return &types.ToolResult{Success: false, Error: fmt.Sprintf("Failed to list chunks: %v", err)}, nil
@@ -213,6 +251,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 					break
 				}
 				fmt.Fprintf(&chunksOutput, "<chunk index=\"%d\" type=\"range\">\n%s\n</chunk>\n", chunkNum, chunkContent)
+				appendFormattedChunk(c, chunkContent)
 				matchCount++
 				continue
 			}
@@ -232,6 +271,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 					if prevChunk != nil && !outputtedIndices[prevChunk.ChunkIndex] {
 						prevContent := enrichChunkContent(prevChunk)
 						fmt.Fprintf(&chunksOutput, "<chunk index=\"%d\" type=\"context_before\">\n%s\n</chunk>\n", prevChunk.ChunkIndex+1, prevContent)
+						appendFormattedChunk(prevChunk, prevContent)
 						outputtedIndices[prevChunk.ChunkIndex] = true
 					}
 				}
@@ -242,6 +282,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 						matchAttr = ` type="match"`
 					}
 					fmt.Fprintf(&chunksOutput, "<chunk index=\"%d\"%s>\n%s\n</chunk>\n", c.ChunkIndex+1, matchAttr, chunkContent)
+					appendFormattedChunk(c, chunkContent)
 					outputtedIndices[c.ChunkIndex] = true
 				}
 
@@ -251,6 +292,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 			} else if forceOutputNext {
 				if !outputtedIndices[c.ChunkIndex] {
 					fmt.Fprintf(&chunksOutput, "<chunk index=\"%d\" type=\"context_after\">\n%s\n</chunk>\n", c.ChunkIndex+1, chunkContent)
+					appendFormattedChunk(c, chunkContent)
 					outputtedIndices[c.ChunkIndex] = true
 				}
 				forceOutputNext = false
@@ -312,5 +354,16 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 
 	sb.WriteString("</source_document>")
 
-	return &types.ToolResult{Success: true, Output: sb.String()}, nil
+	return &types.ToolResult{
+		Success: true,
+		Output:  sb.String(),
+		Data: map[string]interface{}{
+			"display_type":    "knowledge_chunks_list",
+			"knowledge_id":    knowledgeID,
+			"knowledge_title": knowledge.Title,
+			"total_chunks":    totalChunks,
+			"fetched_chunks":  len(formattedChunks),
+			"chunks":          formattedChunks,
+		},
+	}, nil
 }

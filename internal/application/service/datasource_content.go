@@ -3,9 +3,11 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/textproto"
+	"slices"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -161,11 +163,16 @@ func (m *DataSourceContentManager) Ingest(
 			item.FileName, tagIDs, dataSource.Type, nil,
 		)
 		if err != nil {
+			var duplicate *types.DuplicateKnowledgeError
+			if errors.As(err, &duplicate) && duplicateMatchesItem(duplicate, item) {
+				m.sweepStaleSubtree(ctx, dataSource, item)
+			}
 			return isUpdate, "", err
 		}
 		if knowledge == nil {
 			return isUpdate, "", fmt.Errorf("knowledge service returned no created item")
 		}
+		m.sweepStaleSubtree(ctx, dataSource, item)
 		return isUpdate, knowledge.ID, nil
 	}
 
@@ -175,15 +182,66 @@ func (m *DataSourceContentManager) Ingest(
 			item.Title, tagIDs, dataSource.Type, nil,
 		)
 		if err != nil {
+			var duplicate *types.DuplicateKnowledgeError
+			if errors.As(err, &duplicate) && duplicateMatchesItem(duplicate, item) {
+				m.sweepStaleSubtree(ctx, dataSource, item)
+			}
 			return isUpdate, "", err
 		}
 		if knowledge == nil {
 			return isUpdate, "", fmt.Errorf("knowledge service returned no created item")
 		}
+		m.sweepStaleSubtree(ctx, dataSource, item)
 		return isUpdate, knowledge.ID, nil
 	}
 
 	return isUpdate, "", fmt.Errorf("item has neither content nor URL")
+}
+
+type metadataPrefixFinder interface {
+	FindByMetadataKeyPrefix(context.Context, uint64, string, string, string) ([]*types.Knowledge, error)
+}
+
+func duplicateMatchesItem(duplicate *types.DuplicateKnowledgeError, item *types.FetchedItem) bool {
+	return duplicate != nil && duplicate.Knowledge != nil &&
+		duplicate.Knowledge.GetMetadata()["external_id"] == item.ExternalID
+}
+
+// sweepStaleSubtree reconciles child items only after the parent was written or
+// confirmed by a same-node duplicate. This preserves the upstream datasource
+// subtree contract without leaking it back into the generic sync orchestrator.
+func (m *DataSourceContentManager) sweepStaleSubtree(
+	ctx context.Context, dataSource *types.DataSource, item *types.FetchedItem,
+) {
+	if !item.ReplacesSubtree || item.ExternalID == "" {
+		return
+	}
+	finder, ok := m.knowledgeService.GetRepository().(metadataPrefixFinder)
+	if !ok {
+		return
+	}
+	children, err := finder.FindByMetadataKeyPrefix(
+		ctx, dataSource.TenantID, dataSource.KnowledgeBaseID,
+		"external_id", types.SubtreeChildPrefix(item.ExternalID),
+	)
+	if err != nil {
+		logger.Warnf(ctx, "failed to list subtree of external_id=%s: %v", item.ExternalID, err)
+		return
+	}
+	ids := make([]string, 0, len(children))
+	for _, child := range children {
+		if child == nil || slices.Contains(item.SubtreeKeep, child.GetMetadata()["external_id"]) {
+			continue
+		}
+		ids = append(ids, child.ID)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	if err := m.knowledgeService.DeleteKnowledgeList(ctx, ids); err != nil {
+		logger.Warnf(ctx, "failed to delete %d stale sub-item(s) of external_id=%s: %v",
+			len(ids), item.ExternalID, err)
+	}
 }
 
 // Status returns the ingestion state for knowledge created by a sync run.

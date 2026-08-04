@@ -47,6 +47,73 @@ func TestConversationRoutesDeclareChatCapability(t *testing.T) {
 	}
 }
 
+func TestPlatformControlPlaneRoutesDeclarePlatformCapabilities(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+	RegisterSystemAdminRoutes(v1, &handler.SystemHandler{}, nil, g)
+
+	cases := []struct {
+		method     string
+		path       string
+		capability types.APIKeyCapability
+	}{
+		{http.MethodGet, "/api/v1/system/admin/settings", types.APIKeyCapabilitySystemSettingsRead},
+		{http.MethodPut, "/api/v1/system/admin/settings/:key", types.APIKeyCapabilitySystemSettingsManage},
+		{http.MethodGet, "/api/v1/system/admin/runtime/queues", types.APIKeyCapabilitySystemRuntimeRead},
+		{http.MethodPost, "/api/v1/system/admin/runtime/queues/:queue/tasks/:task_id/actions/:action", types.APIKeyCapabilitySystemRuntimeManage},
+		{http.MethodDelete, "/api/v1/system/admin/runtime/queues/:queue/archived", types.APIKeyCapabilitySystemRuntimeManage},
+	}
+	for _, tc := range cases {
+		policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
+		if !policy.PlatformOnly {
+			t.Fatalf("%s %s must be platform-only", tc.method, tc.path)
+		}
+		if !policyHasCapability(policy, tc.capability) {
+			t.Fatalf("%s %s capabilities = %#v, want %s", tc.method, tc.path, policy.Capabilities, tc.capability)
+		}
+	}
+	if _, ok := g.apiKeyAuthorizer.Lookup(http.MethodPost, "/api/v1/system/admin/api-keys"); ok {
+		t.Fatal("platform API keys must not create other platform API keys")
+	}
+}
+
+func TestPlatformTenantLifecycleRoutesDeclarePlatformCapabilities(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+	RegisterTenantRoutes(
+		v1,
+		&handler.TenantHandler{},
+		&handler.TenantMemberHandler{},
+		&handler.TenantInvitationHandler{},
+		nil,
+		g,
+	)
+
+	cases := []struct {
+		method     string
+		path       string
+		capability types.APIKeyCapability
+	}{
+		{http.MethodGet, "/api/v1/tenants/all", types.APIKeyCapabilitySystemTenantsRead},
+		{http.MethodGet, "/api/v1/tenants/search", types.APIKeyCapabilitySystemTenantsRead},
+		{http.MethodPost, "/api/v1/tenants", types.APIKeyCapabilitySystemTenantsManage},
+		{http.MethodGet, "/api/v1/tenants/:id", types.APIKeyCapabilitySystemTenantsRead},
+		{http.MethodPut, "/api/v1/tenants/:id", types.APIKeyCapabilitySystemTenantsManage},
+		{http.MethodDelete, "/api/v1/tenants/:id", types.APIKeyCapabilitySystemTenantsManage},
+	}
+	for _, tc := range cases {
+		policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
+		if !policy.PlatformOnly {
+			t.Fatalf("%s %s must be platform-only", tc.method, tc.path)
+		}
+		if !policyHasCapability(policy, tc.capability) {
+			t.Fatalf("%s %s capabilities = %#v, want %s", tc.method, tc.path, policy.Capabilities, tc.capability)
+		}
+	}
+}
+
 func TestMessageHistoryRoutesDeclareMessageHistoryCapability(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	g := &rbacGuards{}
@@ -241,6 +308,7 @@ func TestKnowledgeReadRoutesDeclareRetrieveCapability(t *testing.T) {
 		{http.MethodPost, "/api/v1/knowledge-bases/:id/hybrid-search"},
 		{http.MethodGet, "/api/v1/knowledge-bases/:id/knowledge"},
 		{http.MethodGet, "/api/v1/knowledge/:id"},
+		{http.MethodGet, "/api/v1/knowledge/:id/download"},
 		{http.MethodPost, "/api/v1/knowledge-bases/:id/faq/search"},
 		{http.MethodGet, "/api/v1/knowledge-bases/:id/tags"},
 		{http.MethodPost, "/api/v1/knowledge-search"},
@@ -431,6 +499,39 @@ func TestChunkerPreviewRouteRequiresRetrieveOrIngestCapability(t *testing.T) {
 	}
 	if !policyHasCapability(policy, types.APIKeyCapabilityIngest) {
 		t.Fatalf("policy capabilities = %#v, want ingest", policy.Capabilities)
+	}
+}
+
+// The batch / cross-KB content-write routes bind themselves to a single (or
+// source+target) KB and enforce the API key's KB allow-list downstream, so
+// they are reachable by an ingest-capable (or full-access) key — matching
+// their single-document siblings.
+func TestKnowledgeBatchWriteRoutesDeclareIngestCapability(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+
+	RegisterKnowledgeRoutes(v1, &handler.KnowledgeHandler{}, g)
+
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/v1/knowledge/move"},
+		{http.MethodPost, "/api/v1/knowledge/batch-delete"},
+		{http.MethodPost, "/api/v1/knowledge/batch-reparse"},
+		{http.MethodPut, "/api/v1/knowledge/tags"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
+			if !policy.RequireFullAccess {
+				t.Fatal("policy should require full access without a matching capability")
+			}
+			if !policyHasCapability(policy, types.APIKeyCapabilityIngest) {
+				t.Fatalf("policy capabilities = %#v, want ingest", policy.Capabilities)
+			}
+		})
 	}
 }
 

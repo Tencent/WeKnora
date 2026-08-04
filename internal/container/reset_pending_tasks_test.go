@@ -78,6 +78,14 @@ CREATE TABLE IF NOT EXISTS task_pending_ops (
 );
 `
 
+const resetPendingKnowledgeBasesDDL = `
+CREATE TABLE IF NOT EXISTS knowledge_bases (
+    id          VARCHAR(64) PRIMARY KEY,
+    tenant_id   INTEGER NOT NULL DEFAULT 0,
+    deleted_at  DATETIME
+);
+`
+
 func setupResetPendingDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -86,6 +94,7 @@ func setupResetPendingDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.Exec(resetPendingSyncLogDDL).Error)
 	require.NoError(t, db.Exec(resetPendingSpansDDL).Error)
 	require.NoError(t, db.Exec(resetPendingOpsDDL).Error)
+	require.NoError(t, db.Exec(resetPendingKnowledgeBasesDDL).Error)
 	return db
 }
 
@@ -295,6 +304,11 @@ func (r *recordingTaskEnqueuer) Enqueue(task *asynq.Task, _ ...asynq.Option) (*a
 
 func TestRecoverPendingWikiTasks_RecreatesOneTriggerPerLaneAndKB(t *testing.T) {
 	db := setupResetPendingDB(t)
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledge_bases (id, tenant_id, deleted_at)
+		 VALUES (?, ?, NULL), (?, ?, NULL), (?, ?, ?)`,
+		"kb-a", 7, "kb-b", 8, "kb-deleted", 9, time.Now(),
+	).Error)
 	rows := []struct {
 		tenantID uint64
 		taskType string
@@ -305,6 +319,8 @@ func TestRecoverPendingWikiTasks_RecreatesOneTriggerPerLaneAndKB(t *testing.T) {
 		{7, types.TypeWikiIngest, "kb-a", "k-2"}, // same lane: one trigger
 		{7, types.TypeWikiFinalize, "kb-a", "slug-a"},
 		{8, types.TypeWikiIngest, "kb-b", "k-3"},
+		{9, types.TypeWikiIngest, "kb-deleted", "k-deleted"},
+		{10, types.TypeWikiFinalize, "kb-missing", "k-missing"},
 	}
 	for _, row := range rows {
 		require.NoError(t, db.Exec(
@@ -328,4 +344,10 @@ func TestRecoverPendingWikiTasks_RecreatesOneTriggerPerLaneAndKB(t *testing.T) {
 	assert.Equal(t, uint64(7), seen[types.TypeWikiIngest+":kb-a"].TenantID)
 	assert.Equal(t, uint64(7), seen[types.TypeWikiFinalize+":kb-a"].TenantID)
 	assert.Equal(t, uint64(8), seen[types.TypeWikiIngest+":kb-b"].TenantID)
+
+	var orphaned int64
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).
+		Where("scope_id IN ?", []string{"kb-deleted", "kb-missing"}).
+		Count(&orphaned).Error)
+	assert.Zero(t, orphaned)
 }

@@ -173,6 +173,13 @@ const selectedAgent = computed(() => {
     config: { agent_mode: 'quick-answer' as const }
   } as CustomAgent;
 });
+const selectedSharedAgent = computed(() => {
+  const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
+  if (!sourceTenantId) return undefined;
+  return orgStore.sharedAgents?.find(
+    s => s.agent.id === selectedAgentId.value && String(s.source_tenant_id) === sourceTenantId
+  );
+});
 
 // 判断是否为自定义智能体（非内置）
 const isCustomAgent = computed(() => {
@@ -221,7 +228,7 @@ const agentKBSelectionMode = computed(() => {
 // 共享智能体下的知识库列表（来自 listKnowledgeBases(agent_id)），用于已选知识库展示与 org 角标
 const sharedAgentKbList = ref<Array<{ id: string; name: string; type?: string; knowledge_count?: number; chunk_count?: number }>>([]);
 
-// 当智能体改变时，模型、网络搜索、可@知识库列表均跟随新智能体配置
+// 当智能体改变时，模型、可@知识库列表均跟随新智能体配置；网络搜索由用户主动开启
 // 知识库：用新智能体配置的列表替换当前选中，使已选与可@列表一致（含共享智能体）
 watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId, newAgentKbs, newKbMode], [oldAgentId]) => {
   if (settingsStore._isApplyingSessionState) return;
@@ -247,7 +254,7 @@ watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId
 watch([selectedAgentId, () => settingsStore.selectedAgentSourceTenantId], async ([agentId, sourceTenantId]) => {
   if (sourceTenantId && agentId) {
     try {
-      const list = await chatResources.ensureAgentKnowledgeBases(agentId);
+      const list = await chatResources.ensureAgentKnowledgeBases(agentId, sourceTenantId);
       sharedAgentKbList.value = list.map((kb: any) => ({
         id: kb.id,
         name: kb.name,
@@ -435,10 +442,17 @@ const isImageUploadEnabledByAgent = computed(() => {
 
 // Input 工具栏：仅当智能体已启用且搜索引擎可用时才显示
 const showWebSearchButton = computed(() => {
+  if (hasAgentConfig.value && settingsStore.selectedAgentSourceTenantId && !isWebSearchReadinessKnown.value) {
+    return false;
+  }
   if (!hasAgentConfig.value) {
     return isTenantWebSearchReady(webSearchProviders.value);
   }
-  return isAgentWebSearchReady(currentAgentConfig.value, webSearchProviders.value);
+  return isAgentWebSearchReady(
+    currentAgentConfig.value,
+    webSearchProviders.value,
+    selectedSharedAgent.value?.web_search_ready,
+  );
 });
 const showImageUploadButton = computed(() => isImageUploadEnabledByAgent.value);
 
@@ -721,7 +735,7 @@ const loadKnowledgeBases = async (force = false) => {
     const agentId = settingsStore.selectedAgentId;
     if (sourceTenantId && agentId) {
       try {
-        const list = await chatResources.ensureAgentKnowledgeBases(agentId, force);
+        const list = await chatResources.ensureAgentKnowledgeBases(agentId, sourceTenantId, force);
         list.forEach((kb: any) => kb?.id && sharedAgentKbIdSet.add(kb.id));
       } catch {
         sharedAgentKbIdSet = new Set();
@@ -766,7 +780,8 @@ const loadFiles = async () => {
     const runBatch = async (batchIds: string[], kbId?: string, agentId?: string) => {
       const query = new URLSearchParams();
       batchIds.forEach((id: string) => query.append('ids', id));
-      const res: any = await batchQueryKnowledge(query.toString(), kbId, agentId);
+      const sourceTenantId = agentId ? settingsStore.selectedAgentSourceTenantId ?? undefined : undefined;
+      const res: any = await batchQueryKnowledge(query.toString(), kbId, agentId, sourceTenantId);
       if (res.data && Array.isArray(res.data)) {
         res.data.forEach((f: any) => allNewFiles.push({ id: f.id, name: f.title || f.file_name }));
       }
@@ -801,22 +816,29 @@ watch(selectedFileIds, () => {
 
 const isWebSearchConfigured = computed(() => {
   if (hasAgentConfig.value) {
-    return isAgentWebSearchReady(currentAgentConfig.value, webSearchProviders.value);
+    return isAgentWebSearchReady(
+      currentAgentConfig.value,
+      webSearchProviders.value,
+      selectedSharedAgent.value?.web_search_ready,
+    );
   }
   return isTenantWebSearchReady(webSearchProviders.value);
 });
+const isWebSearchReadinessKnown = computed(
+  () => !settingsStore.selectedAgentSourceTenantId || selectedSharedAgent.value !== undefined
+);
 
 const loadWebSearchConfig = async (force = false) => {
   try {
     await chatResources.ensureWebSearchProviders(force);
 
-    if (!isWebSearchConfigured.value && settingsStore.isWebSearchEnabled) {
+    if (isWebSearchReadinessKnown.value && !isWebSearchConfigured.value && settingsStore.isWebSearchEnabled) {
       settingsStore.toggleWebSearch(false);
     }
   } catch (error) {
     console.error('Failed to load web search config:', error);
     chatResources.invalidate('webSearchProviders');
-    if (settingsStore.isWebSearchEnabled) {
+    if (!settingsStore.selectedAgentSourceTenantId && settingsStore.isWebSearchEnabled) {
       settingsStore.toggleWebSearch(false);
     }
   }
@@ -1166,7 +1188,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     if (sourceTenantId && agentId) {
       // 共享智能体：按 agent_id 拉取该智能体配置的知识库范围（后端从共享关系解析空间）
       try {
-        const list = await chatResources.ensureAgentKnowledgeBases(agentId);
+        const list = await chatResources.ensureAgentKnowledgeBases(agentId, sourceTenantId);
         const orgLabel = sharedAgentOrgName.value || '';
         // 保留 capabilities / indexing_strategy，后面过滤时要用
         availableKbs = list.map((kb: any) => ({
@@ -1345,7 +1367,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
       const agentId = selectedAgentId.value;
       const searchOptions = {
-        ...(sourceTenantId && agentId ? { agent_id: agentId } : {}),
+        ...(sourceTenantId && agentId ? { agent_id: agentId, agent_source_tenant_id: sourceTenantId } : {}),
         recent: !fileSearchKeyword,
       };
       const res: any = await searchKnowledge(
@@ -2124,16 +2146,8 @@ const handleSelectAgent = async (agent: CustomAgent, sourceTenantId?: string) =>
   settingsStore.selectAgent(agent.id, sourceTenantId);
   settingsStore.toggleAgent(!!isAgentType);
 
-  // 同步智能体的配置状态（含内置、自定义、共享智能体）：模型、网络搜索、知识库由 watch 同步
-  // 1. 同步网络搜索状态
-  const agentWebSearch = agent.config?.web_search_enabled;
-  if (agentWebSearch !== undefined) {
-    settingsStore.toggleWebSearch(agentWebSearch);
-  } else if (agent.is_builtin) {
-    // 内置智能体未配置时保留当前用户设置
-  }
-
-  // 2. 同步模型（选中的对话模型随智能体切换，含共享智能体）
+  // 同步模型（选中的对话模型随智能体切换，含共享智能体）。
+  // 网络搜索已由 selectAgent 重置为关闭，智能体配置只控制该开关是否可用。
   const agentModel = agent.config?.model_id;
   if (agentModel && agentModel.trim() !== '') {
     selectedModelId.value = agentModel;
@@ -2488,6 +2502,7 @@ defineExpose({
       <!-- 附件列表区域 (由 AttachmentUpload 组件渲染) -->
       <AttachmentUpload ref="attachmentUploadRef" :max-files="5"
         :session-id="sessionId" :agent-id="selectedAgentId"
+        :agent-source-tenant-id="settingsStore.selectedAgentSourceTenantId ?? undefined"
         @update:files="uploadedAttachments = $event" />
 
       <!-- 选中的知识库和文件标签（显示在输入框内顶部） -->
@@ -2752,7 +2767,7 @@ const getImgSrc = (url: string) => {
 .rich-input-container {
   position: relative;
   width: 100%;
-  max-width: 800px;
+  max-width: 960px;
   background: var(--td-bg-color-container, #FFF);
   border-radius: 12px;
   border: 1px solid var(--td-component-stroke, #dcdcdc);

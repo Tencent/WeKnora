@@ -43,20 +43,20 @@ Do not use when:
 - Can check document processing status (parse_status)
 
 ## IDs
-- knowledge_ids: regular documents knowledges
-- faq_ids: individual FAQ entries. Returns the standard question and answers, not the container title.`,
+- knowledge_ids: regular documents, using the short dN IDs from retrieval results
+- faq_ids: individual FAQ entries, using the short cN chunk IDs. Returns the standard question and answers, not the container title.`,
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {
     "knowledge_ids": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Document/knowledge IDs for regular documents"
+      "description": "Short dN document IDs for regular documents"
     },
     "faq_ids": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "FAQ entry IDs (= chunk_id from grep_chunks). Use instead of knowledge_ids for a single FAQ Q&A."
+      "description": "Short cN FAQ chunk IDs from retrieval results. Use instead of knowledge_ids for a single FAQ Q&A."
     }
   }
 }`),
@@ -122,6 +122,7 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	results := make(map[string]*docInfo)
+	enabled := true
 
 	for _, faqID := range faqIDs {
 		faqID = strings.TrimSpace(faqID)
@@ -131,27 +132,12 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
-			chunk, err := t.chunkService.GetChunkByIDOnly(ctx, id)
-			if err != nil || chunk == nil {
+			chunk, err := authorizeChunkInSearchTargets(
+				ctx, t.searchTargets, id, t.chunkService, t.knowledgeService,
+			)
+			if err != nil {
 				mu.Lock()
-				results["faq:"+id] = &docInfo{err: fmt.Errorf("faq entry not found: %v", err)}
-				mu.Unlock()
-				return
-			}
-			if !t.searchTargets.ContainsKB(chunk.KnowledgeBaseID) {
-				mu.Lock()
-				results["faq:"+id] = &docInfo{err: fmt.Errorf("knowledge base %s is not accessible", chunk.KnowledgeBaseID)}
-				mu.Unlock()
-				return
-			}
-			allowed, scopeErr := searchTargetsAllowKnowledgeID(ctx, t.searchTargets, chunk.KnowledgeID, chunk.KnowledgeBaseID, t.knowledgeService)
-			if scopeErr != nil || !allowed {
-				mu.Lock()
-				if scopeErr != nil {
-					results["faq:"+id] = &docInfo{err: fmt.Errorf("failed to validate FAQ scope: %v", scopeErr)}
-				} else {
-					results["faq:"+id] = &docInfo{err: fmt.Errorf("FAQ entry %s is not within the current @mention scope", id)}
-				}
+				results["faq:"+id] = &docInfo{err: fmt.Errorf("FAQ entry is not accessible: %v", err)}
 				mu.Unlock()
 				return
 			}
@@ -170,33 +156,13 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 		go func(id string) {
 			defer wg.Done()
 
-			// Get knowledge metadata without tenant filter to support shared KB
-			knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, id)
+			knowledge, err := authorizeKnowledgeInSearchTargets(
+				ctx, t.searchTargets, id, t.knowledgeService,
+			)
 			if err != nil {
 				mu.Lock()
 				results[id] = &docInfo{
 					err: fmt.Errorf("failed to get document info: %v", err),
-				}
-				mu.Unlock()
-				return
-			}
-
-			// Verify the knowledge's KB is in searchTargets (permission check)
-			if !t.searchTargets.ContainsKB(knowledge.KnowledgeBaseID) {
-				mu.Lock()
-				results[id] = &docInfo{
-					err: fmt.Errorf("knowledge base %s is not accessible", knowledge.KnowledgeBaseID),
-				}
-				mu.Unlock()
-				return
-			}
-			allowed, scopeErr := searchTargetsAllowKnowledgeID(ctx, t.searchTargets, knowledge.ID, knowledge.KnowledgeBaseID, t.knowledgeService)
-			if scopeErr != nil || !allowed {
-				mu.Lock()
-				if scopeErr != nil {
-					results[id] = &docInfo{err: fmt.Errorf("failed to validate document scope: %v", scopeErr)}
-				} else {
-					results[id] = &docInfo{err: fmt.Errorf("document %s is not within the current @mention scope", knowledge.ID)}
 				}
 				mu.Unlock()
 				return
@@ -209,7 +175,7 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 				ListPagedChunksByKnowledgeID(ctx, knowledge.TenantID, id, &types.Pagination{
 					Page:     1,
 					PageSize: 1,
-				}, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, "", "", "", "", "")
+				}, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, nil, "", "", "", "", &enabled)
 			if err != nil {
 				mu.Lock()
 				results[id] = &docInfo{

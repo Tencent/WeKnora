@@ -126,6 +126,27 @@ curl --location --request POST 'http://localhost:8080/api/v1/web-search-provider
 { "success": false, "error": "google api: 403 forbidden" }
 ```
 
+### 智谱 AI 配置
+
+智谱使用独立的 Web Search API。`search_engine` 和 `content_size` 存放在
+`parameters.extra_config` 中；未指定时分别使用 `search_std` 和 `medium`。
+
+```json
+{
+    "provider": "zhipu",
+    "parameters": {
+        "api_key": "your-zhipu-api-key",
+        "extra_config": {
+            "search_engine": "search_std",
+            "content_size": "medium"
+        }
+    }
+}
+```
+
+`search_engine` 支持 `search_std`、`search_pro`、`search_pro_sogou` 和
+`search_pro_quark`；`content_size` 支持 `medium` 和 `high`。
+
 ## POST `/web-search-providers` - 创建 Provider
 
 **参数说明（请求体）**:

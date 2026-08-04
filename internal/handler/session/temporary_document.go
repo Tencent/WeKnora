@@ -20,7 +20,9 @@ import (
 func (h *Handler) UploadTemporaryDocument(c *gin.Context) {
 	ctx := c.Request.Context()
 	sessionID := c.Param("session_id")
-	if _, err := h.sessionService.GetSession(ctx, sessionID); err != nil {
+	// Uploading attaches content to the session, so use the strict owner scope:
+	// a tenant admin may read an API-key session but must not add attachments.
+	if _, err := h.sessionService.GetOwnedSession(ctx, sessionID); err != nil {
 		c.Error(apperrors.NewNotFoundError("Session not found"))
 		return
 	}
@@ -38,10 +40,20 @@ func (h *Handler) UploadTemporaryDocument(c *gin.Context) {
 	}
 	defer file.Close()
 
-	agent, _ := h.resolveAgent(ctx, c, c.PostForm("agent_id"))
+	sourceTenantID, parseErr := types.ParseAgentSourceTenantID(c.PostForm(types.AgentSourceTenantIDParam))
+	if parseErr != nil {
+		c.Error(apperrors.NewBadRequestError(parseErr.Error()))
+		return
+	}
+	agent, resourceTenantID, _ := h.resolveAgent(ctx, c, c.PostForm("agent_id"), sourceTenantID)
+	if sourceTenantID != 0 && agent == nil {
+		c.Error(apperrors.NewNotFoundError("Shared agent not found"))
+		return
+	}
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileHeader.Filename)), ".")
 	options := types.TemporaryDocumentCreateOptions{ParserEngine: strings.TrimSpace(c.PostForm("parser_engine"))}
 	if agent != nil {
+		options.ResourceTenantID = resourceTenantID
 		if len(agent.Config.SupportedFileTypes) > 0 && !containsFileType(agent.Config.SupportedFileTypes, ext) {
 			c.Error(apperrors.NewBadRequestError("file type is not supported by this agent"))
 			return
@@ -163,7 +175,9 @@ func (h *Handler) PreviewTemporaryDocument(c *gin.Context) {
 func (h *Handler) DeleteTemporaryDocument(c *gin.Context) {
 	ctx := c.Request.Context()
 	sessionID := sessionIDParam(c)
-	if _, err := h.sessionService.GetSession(ctx, sessionID); err != nil {
+	// Deleting mutates the session's attachments, so use the strict owner scope:
+	// a tenant admin may read an API-key session but must not remove attachments.
+	if _, err := h.sessionService.GetOwnedSession(ctx, sessionID); err != nil {
 		c.Error(apperrors.NewNotFoundError("Session not found"))
 		return
 	}

@@ -2,16 +2,33 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
 
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type countingTool struct {
+	agenttools.BaseTool
+	calls int
+}
+
+func newCountingTool(name string) *countingTool {
+	return &countingTool{BaseTool: agenttools.NewBaseTool(name, "test", json.RawMessage(`{"type":"object"}`))}
+}
+
+func (t *countingTool) Execute(context.Context, json.RawMessage) (*types.ToolResult, error) {
+	t.calls++
+	return &types.ToolResult{Success: true, Output: "executed"}, nil
+}
 
 // ---------------------------------------------------------------------------
 // Mock: chat.Chat
@@ -69,6 +86,139 @@ func TestStreamLLMResourceAliasesRoundTrip(t *testing.T) {
 	require.Equal(t, "source=res://0001", model.calls[0][0].Content)
 }
 
+// TestStreamLLMSummarySlugSurvivesDocumentCompaction is the regression guard for
+// the mangled `summary/<uuid>` → `summary/d1` bug. A wiki summary-page slug
+// embeds a document's UUID. The unified model-context registry owns the
+// resource-before-source encoding order so the slug cannot become summary/d1.
+func TestStreamLLMSummarySlugSurvivesDocumentCompaction(t *testing.T) {
+	const knowledgeID = "07a20bb1-a662-47cf-9929-06fb5d5b5b5e"
+	const summarySlug = "summary/" + knowledgeID
+
+	// The model copies the protected token it saw back into a wiki_read call.
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+		{
+			ResponseType: types.ResponseTypeAnswer,
+			Content:      "reading the summary",
+			ToolCalls: []types.LLMToolCall{{
+				Type: "function",
+				Function: types.FunctionCall{
+					Name:      "wiki_read_page",
+					Arguments: `{"slugs":["res://0001"]}`,
+				},
+			}},
+			Done:         true,
+			FinishReason: "tool_calls",
+		},
+	}}}}
+
+	engine := newTestEngine(t, model)
+	// The document UUID is registered as citation alias d1, exactly as the RAG
+	// context (<document id="d1">…) would have registered it upstream.
+	require.Equal(t, "d1", engine.modelContext.RegisterDocument(knowledgeID))
+
+	toolMsg := chat.Message{
+		Role:    "tool",
+		Content: `<link>[[` + summarySlug + `|Weknora 试错记录.md - Summary]]</link>`,
+	}
+	result, err := engine.streamLLMToEventBus(context.Background(),
+		[]chat.Message{toolMsg}, nil, nil)
+	require.NoError(t, err)
+
+	// What the model actually saw must NOT contain the mangled slug; the UUID
+	// must have been aliased to a res:// token before citation compaction ran.
+	require.Len(t, model.calls, 1)
+	sent := model.calls[0][0].Content
+	require.NotContains(t, sent, "summary/d1",
+		"summary slug was clobbered by document-id compaction (encode ordering regressed)")
+	require.Contains(t, sent, "res://", "summary slug must be protected as a res:// token")
+
+	// The model's tool call echoing the token must decode back to the real slug.
+	require.Len(t, result.ToolCalls, 1)
+	require.Contains(t, result.ToolCalls[0].Function.Arguments, summarySlug)
+	require.NotContains(t, result.ToolCalls[0].Function.Arguments, "res://")
+}
+
+func TestStreamLLMChunkReferenceExpandsBeforeEmission(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: `answer <ref id="`},
+		{ResponseType: types.ResponseTypeAnswer, Content: `c1"/>`, Done: true},
+	}}}}
+	engine := newTestEngine(t, model)
+	engine.modelContext.RegisterChunk(modelcontext.ChunkReference{
+		ChunkID:         "chunk-1",
+		KnowledgeBaseID: "kb-1",
+		DocumentTitle:   "Doc",
+	})
+	result, err := engine.streamLLMToEventBus(context.Background(), nil, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, `answer <kb doc="Doc" chunk_id="chunk-1" kb_id="kb-1" />`, result.Content)
+}
+
+func TestRunToolCallRejectsUnresolvedHandlesBeforeExecution(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	engine.toolRegistry = agenttools.NewToolRegistry()
+	tool := newCountingTool("test_unresolved")
+	engine.toolRegistry.RegisterTool(tool)
+
+	result := engine.runToolCall(
+		context.Background(),
+		types.LLMToolCall{
+			ID: "call-1",
+			Function: types.FunctionCall{
+				Name:      tool.Name(),
+				Arguments: `{"knowledge_id":"d99"}`,
+			},
+			ModelArguments:     `{"knowledge_id":"d99"}`,
+			ArgumentResolution: modelcontext.ArgumentResolutionUnresolved,
+			UnresolvedHandles:  []string{"d99"},
+		},
+		0, 0, 1, "session", "message",
+	)
+	require.Zero(t, tool.calls)
+	require.NotNil(t, result.Result)
+	require.False(t, result.Result.Success)
+	require.Contains(t, result.Result.Error, "unresolved model handles")
+}
+
+func TestRunToolCallDecodesHandlesAfterJSONRepair(t *testing.T) {
+	newEngine := func() (*AgentEngine, *countingTool) {
+		engine := newTestEngine(t, &mockChat{})
+		engine.toolRegistry = agenttools.NewToolRegistry()
+		tool := newCountingTool(agenttools.ToolListKnowledgeChunks)
+		engine.toolRegistry.RegisterTool(tool)
+		return engine, tool
+	}
+
+	unknownEngine, unknownTool := newEngine()
+	unknown := unknownEngine.runToolCall(
+		context.Background(),
+		types.LLMToolCall{
+			ID:             "call-unknown",
+			Function:       types.FunctionCall{Name: unknownTool.Name(), Arguments: `{"knowledge_id":"d99",}`},
+			ModelArguments: `{"knowledge_id":"d99",}`,
+		},
+		0, 0, 1, "session", "message",
+	)
+	require.Zero(t, unknownTool.calls)
+	require.False(t, unknown.Result.Success)
+	require.Contains(t, unknown.Result.Error, "unresolved model handles")
+
+	knownEngine, knownTool := newEngine()
+	knownEngine.modelContext.RegisterDocument("doc-real")
+	known := knownEngine.runToolCall(
+		context.Background(),
+		types.LLMToolCall{
+			ID:             "call-known",
+			Function:       types.FunctionCall{Name: knownTool.Name(), Arguments: `{"knowledge_id":"d1",}`},
+			ModelArguments: `{"knowledge_id":"d1",}`,
+		},
+		0, 0, 1, "session", "message",
+	)
+	require.Equal(t, 1, knownTool.calls)
+	require.True(t, known.Result.Success)
+	require.Equal(t, "doc-real", known.Args["knowledge_id"])
+}
+
 func (m *mockChat) Chat(_ context.Context, _ []chat.Message, _ *chat.ChatOptions) (*types.ChatResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
@@ -86,6 +236,23 @@ func withMaxIterations(n int) testEngineOption {
 	return func(cfg *types.AgentConfig) {
 		cfg.MaxIterations = n
 	}
+}
+
+func withCitationsEnabled(enabled bool) testEngineOption {
+	return func(cfg *types.AgentConfig) {
+		cfg.CitationEnabled = &enabled
+	}
+}
+
+func TestBuildSystemPromptUsesInternalCitationSetting(t *testing.T) {
+	model := &mockChat{}
+	enabledEngine := newTestEngine(t, model)
+	require.Contains(t, enabledEngine.buildSystemPrompt(context.Background()), "Source citations are enabled")
+
+	disabledEngine := newTestEngine(t, model, withCitationsEnabled(false))
+	prompt := disabledEngine.buildSystemPrompt(context.Background())
+	require.Contains(t, prompt, "Source citations are disabled")
+	require.NotContains(t, prompt, "Source citations are enabled")
 }
 
 func newTestEngine(t *testing.T, chatModel chat.Chat, opts ...testEngineOption) *AgentEngine {
@@ -412,9 +579,9 @@ func TestStreamFinalAnswerToEventBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *
 
 	require.NoError(t, err)
 	require.Len(t, finalAnswerEvents, 2)
-	assert.Equal(t, "final answer", finalAnswerEvents[0].Content)
 	assert.False(t, finalAnswerEvents[0].Done)
-	assert.Empty(t, finalAnswerEvents[1].Content)
 	assert.True(t, finalAnswerEvents[1].Done)
+	assert.Equal(t, "final answer", finalAnswerEvents[0].Content+finalAnswerEvents[1].Content,
+		"a decoder may hold a short suffix until Done to rule out a split model handle")
 	assert.Equal(t, "final answer", state.FinalAnswer)
 }

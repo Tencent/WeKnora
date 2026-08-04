@@ -27,9 +27,11 @@ RBAC 引入前，只要通过 `X-API-Key` 或 JWT 认证成功，调用方在空
 | 只读 | `viewer` | 仅读 |
 | 贡献者 | `contributor` | 可变更 `creator_id == 自己` 的资源；他人资源按 Viewer |
 | 管理员 | `admin` | 可变更空间内任意资源；管理成员、共享基础设施 |
-| Owner | `owner` | Admin + 可删空间；每个空间唯一 |
+| Owner | `owner` | Admin + 可删空间；每个空间至少一位，可以有多位 |
 
 层级 `viewer < contributor < admin < owner`，高角色继承低角色。
+
+Owner 的数量约束是“至少一位”，而不是“只能一位”。系统允许同一空间存在多个活跃 Owner；降级或移除 Owner 时，只有会导致空间失去最后一位 Owner 的操作才会被拒绝。
 
 ### 鉴权层的例外
 

@@ -32,7 +32,7 @@ func (f *flowEmbedSvc) ListByAgent(context.Context, uint64, string) ([]*types.Em
 func (f *flowEmbedSvc) ListByTenant(context.Context, uint64) ([]*types.EmbedChannel, error) {
 	return nil, nil
 }
-func (f *flowEmbedSvc) Update(context.Context, uint64, string, *types.EmbedChannel, *bool, *bool, *bool, *bool, *bool, *string, *string, *string) (*types.EmbedChannel, error) {
+func (f *flowEmbedSvc) Update(context.Context, uint64, string, *types.EmbedChannel, *bool, *bool, *bool, *bool, *string, *string, *string) (*types.EmbedChannel, error) {
 	return nil, nil
 }
 func (f *flowEmbedSvc) GetOwnedChannel(_ context.Context, tenantID uint64, id string) (*types.EmbedChannel, error) {
@@ -214,7 +214,7 @@ func TestPatchEmbedChatPayloadInjectsAgentID(t *testing.T) {
 
 func TestPatchEmbedChatPayloadWebSearchRequiresClientOptIn(t *testing.T) {
 	ch := &types.EmbedChannel{AgentID: "agent-1", AllowWebSearch: true}
-	body := `{"query":"hello","web_search_enabled":false,"enable_memory":true}`
+	body := `{"query":"hello","web_search_enabled":false}`
 
 	patched, err := patchEmbedChatPayload(strings.NewReader(body), ch, false)
 	if err != nil {
@@ -226,9 +226,6 @@ func TestPatchEmbedChatPayloadWebSearchRequiresClientOptIn(t *testing.T) {
 	}
 	if payload["web_search_enabled"] != false {
 		t.Fatalf("web_search_enabled = %v, want false when visitor did not opt in", payload["web_search_enabled"])
-	}
-	if payload["enable_memory"] != false {
-		t.Fatalf("enable_memory = %v, want false (embed memory is disabled)", payload["enable_memory"])
 	}
 
 	bodyOn := `{"query":"hello","web_search_enabled":true}`
