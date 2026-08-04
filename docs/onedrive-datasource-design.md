@@ -103,7 +103,9 @@ ONEDRIVE_REDIRECT_URL=https://weknora.example.com/api/v1/datasource-oauth/onedri
 - `common` 可覆盖个人账号及工作/学校账号，但 App Registration 必须启用对应的 supported account types。
 - 企业可设置具体 Entra directory ID，限制只能由该组织目录授权。
 - redirect URL 必须来自服务端配置，不能信任前端传入的任意绝对 URL。
-- client secret 属于部署级秘密，不随数据源 API 返回。PKCE 仍应启用，作为 authorization code 被截获时的额外保护。
+- callback 不要求公网域名：本地开发可使用 Microsoft 允许的 `http://localhost:<port>/...`，内网部署可使用用户浏览器能够解析、访问且证书受信任的内部 HTTPS 地址；远端部署不能把用户电脑的 `localhost` 当作服务端回调地址。注册值必须与 `ONEDRIVE_REDIRECT_URL` 完全一致。
+- 当前回调由 WeKnora 后端交换 authorization code，因此 Entra 平台类型是 confidential **Web** application，`ONEDRIVE_CLIENT_SECRET` 是部署级必需秘密，不是用户或数据源级配置，也不得随数据源 API 返回。若未来要取消 secret，必须改用 public-client/SPA/桌面应用的安全边界并重新评估 token 所有权、回调与多实例后台同步，不属于本次贡献范围。
+- PKCE 仍应启用，作为 authorization code 被截获时的额外保护；PKCE 不替代 confidential client 的服务端身份认证。
 
 面向部署管理员和最终用户的操作、恢复与排障说明见 [Microsoft OneDrive 数据源](onedrive-datasource.md)。
 
