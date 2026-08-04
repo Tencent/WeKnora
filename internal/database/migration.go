@@ -11,7 +11,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	postgresmigrate "github.com/golang-migrate/migrate/v4/database/postgres"
 	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 )
@@ -127,6 +127,44 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 			return wrapped
 		}
 		m, err = migrate.NewWithDatabaseInstance(migrationsPath, "sqlite3", driver)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to create migrate instance: %v", err)
+			wrapped := fmt.Errorf("failed to create migrate instance: %w", err)
+			setMigrationState(0, false, wrapped.Error(), false)
+			return wrapped
+		}
+	} else if strings.HasPrefix(dsn, "postgres://") {
+		dbSchema := os.Getenv("DB_SCHEMA")
+		if dbSchema == "" {
+			dbSchema = "public"
+		}
+		sqlDB, err := sql.Open("postgres", dsn)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to open postgres db for migration: %v", err)
+			wrapped := fmt.Errorf("failed to open postgres db for migration: %w", err)
+			setMigrationState(0, false, wrapped.Error(), false)
+			return wrapped
+		}
+		if dbSchema != "" && dbSchema != "public" {
+			if _, err := sqlDB.Exec("CREATE SCHEMA IF NOT EXISTS " + dbSchema + ";"); err != nil {
+				logger.Warnf(ctx, "Failed to create schema %s: %v", dbSchema, err)
+			}
+			if _, err := sqlDB.Exec("SET search_path TO " + dbSchema + ", public;"); err != nil {
+				logger.Warnf(ctx, "Failed to set search_path: %v", err)
+			}
+		}
+		driver, err := postgresmigrate.WithInstance(sqlDB, &postgresmigrate.Config{
+			SchemaName:     dbSchema,
+			SearchPathName: fmt.Sprintf("%s,public", dbSchema),
+		})
+		if err != nil {
+			sqlDB.Close()
+			logger.Errorf(ctx, "Failed to create postgres migrate driver: %v", err)
+			wrapped := fmt.Errorf("failed to create postgres migrate driver: %w", err)
+			setMigrationState(0, false, wrapped.Error(), false)
+			return wrapped
+		}
+		m, err = migrate.NewWithDatabaseInstance(migrationsPath, "postgres", driver)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to create migrate instance: %v", err)
 			wrapped := fmt.Errorf("failed to create migrate instance: %w", err)
@@ -305,21 +343,15 @@ func GetMigrationVersion() (uint, bool, error) {
 	if dbSSLMode == "" {
 		dbSSLMode = "disable"
 	}
-	dbSchema := os.Getenv("DB_SCHEMA")
-	if dbSchema == "" {
-		dbSchema = "public"
-	}
 
 	dbURL := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=%s&search_path=%s&options=-c%%20search_path=%s,public",
+		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
 		os.Getenv("DB_USER"),
 		url.QueryEscape(os.Getenv("DB_PASSWORD")),
 		os.Getenv("DB_HOST"),
 		os.Getenv("DB_PORT"),
 		os.Getenv("DB_NAME"),
 		dbSSLMode,
-		dbSchema,
-		dbSchema,
 	)
 
 	migrationsPath := "file://migrations/versioned"

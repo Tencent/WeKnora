@@ -572,6 +572,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	var dialector gorm.Dialector
 	var migrateDSN string
 	var sqliteDBPath string
+	var dbSchema string
 
 	dbDriver := os.Getenv("DB_DRIVER")
 	dbURL := os.Getenv("SUPABASE_DB_URL")
@@ -588,7 +589,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		if dbSSLMode == "" {
 			dbSSLMode = "disable"
 		}
-		dbSchema := os.Getenv("DB_SCHEMA")
+		dbSchema = os.Getenv("DB_SCHEMA")
 		if dbSchema == "" {
 			dbSchema = "public"
 		}
@@ -619,14 +620,13 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 
 		// DSN for GORM (key-value format)
 		gormDSN := fmt.Sprintf(
-			"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s search_path=%s TimeZone=UTC",
+			"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=UTC",
 			dbHost,
 			dbPort,
 			dbUser,
 			dbPassword,
 			dbName,
 			dbSSLMode,
-			dbSchema,
 		)
 		dialector = postgres.Open(gormDSN)
 
@@ -634,25 +634,14 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		// URL-encode password to handle special characters like !@#
 		encodedPassword := url.QueryEscape(dbPassword)
 
-		// Check if postgres is in RETRIEVE_DRIVER to determine skip_embedding
-		retrieveDriver := strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",")
-		skipEmbedding := "true"
-		if slices.Contains(retrieveDriver, "postgres") {
-			skipEmbedding = "false"
-		}
-		logger.Infof(context.Background(), "Skip embedding: %s", skipEmbedding)
-
 		migrateDSN = fmt.Sprintf(
-			"postgres://%s:%s@%s:%s/%s?sslmode=%s&search_path=%s&options=-c%%20app.skip_embedding=%s%%20-c%%20search_path=%s,public",
+			"postgres://%s:%s@%s:%s/%s?sslmode=%s&x-multi-statement=true",
 			dbUser,
 			encodedPassword, // Use encoded password
 			dbHost,
 			dbPort,
 			dbName,
 			dbSSLMode,
-			dbSchema,
-			skipEmbedding,
-			dbSchema,
 		)
 
 		// Debug log (don't log password)
@@ -690,6 +679,11 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	if dbDriver == "postgres" && dbSchema != "" && dbSchema != "public" {
+		db.Exec("CREATE SCHEMA IF NOT EXISTS " + dbSchema + ";")
+		db.Exec("SET search_path TO " + dbSchema + ", public;")
 	}
 
 	// Sanity check: dialect-specific code in services (notably the
