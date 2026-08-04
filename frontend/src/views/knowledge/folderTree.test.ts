@@ -4,14 +4,16 @@ import test from 'node:test'
 import {
   buildFolderRows,
   buildUploadFileName,
+  canMoveFolderTo,
+  childFolders,
   folderAncestorPaths,
   folderBreadcrumbs,
   folderPathExists,
-  folderRowCount,
+  isFilteringDocuments,
   isFolderUpload,
+  joinFolderPath,
+  normalizeFolderPath,
   ROOT_FOLDER_PATH,
-  rootRowLabelKey,
-  rootRowTitleKey,
 } from './folderTree.ts'
 
 const folders = [
@@ -142,21 +144,63 @@ test('an unloaded tree still yields a root row so the sidebar never renders empt
   assert.deepEqual(rows.map((row) => [row.kind, row.totalCount]), [['root', 0]])
 })
 
-// The count on a row must match what selecting it puts in the list, otherwise
-// the sidebar and the document list contradict each other.
-test('row counts follow the recursive scope', () => {
+test('tree rows carry the recursive total, which is how much a folder contains', () => {
   const [root, handbook] = buildFolderRows(tree, new Set([ROOT_FOLDER_PATH]))
-  assert.equal(folderRowCount(root, true), 7)
-  assert.equal(folderRowCount(root, false), 2)
-  assert.equal(folderRowCount(handbook, true), 4)
-  assert.equal(folderRowCount(handbook, false), 1)
+  assert.equal(root.totalCount, 7)
+  assert.equal(handbook.totalCount, 4)
+  assert.equal(handbook.documentCount, 1)
 })
 
-// Single-file uploads sit outside every folder, so a folder-only tree can give
-// them no node of their own. The root row is named after what it actually lists
-// so they are still findable, without inventing a second pseudo-folder row.
-test('the root row is named after what the current scope makes it list', () => {
-  assert.equal(rootRowLabelKey(true), 'knowledgeBase.folderTree.rootRow')
-  assert.equal(rootRowLabelKey(false), 'knowledgeBase.folderTree.rootRowDirect')
-  assert.notEqual(rootRowTitleKey(true), rootRowTitleKey(false))
+// Browsing a folder shows its own sub-folders as list entries, which is what
+// lets a document uploaded on its own simply sit at the top level next to the
+// folders instead of needing a mode switch to be found.
+test('the list shows the direct sub-folders of the browsed folder', () => {
+  assert.deepEqual(
+    childFolders(tree, ROOT_FOLDER_PATH).map((node) => node.path),
+    ['handbook', 'design'],
+  )
+  assert.deepEqual(
+    childFolders(tree, 'handbook').map((node) => node.path),
+    ['handbook/onboarding'],
+  )
+  // A leaf folder and an unknown path both have nothing to descend into.
+  assert.deepEqual(childFolders(tree, 'design'), [])
+  assert.deepEqual(childFolders(tree, 'nope'), [])
+  assert.deepEqual(childFolders(null, ROOT_FOLDER_PATH), [])
+})
+
+// The browse/search distinction replaces the scope switch: it is derived from
+// what the user is already doing rather than from a control they must interpret.
+test('any active filter turns browsing into a subtree search', () => {
+  assert.equal(isFilteringDocuments({}), false)
+  assert.equal(isFilteringDocuments({ keyword: '   ' }), false, 'whitespace is not a search')
+  assert.equal(isFilteringDocuments({ timeRange: [] }), false)
+  assert.equal(isFilteringDocuments({ timeRange: ['', ''] }), false)
+
+  assert.equal(isFilteringDocuments({ keyword: 'spec' }), true)
+  assert.equal(isFilteringDocuments({ tagIds: ['t1'] }), true)
+  assert.equal(isFilteringDocuments({ fileType: 'pdf' }), true)
+  assert.equal(isFilteringDocuments({ parseStatus: 'failed' }), true)
+  assert.equal(isFilteringDocuments({ source: 'web' }), true)
+  assert.equal(isFilteringDocuments({ timeRange: ['2026-01-01', ''] }), true)
+})
+
+test('folder paths typed by the user are canonicalized like the server does', () => {
+  assert.equal(normalizeFolderPath(' docs / spec '), 'docs/spec')
+  assert.equal(normalizeFolderPath('docs//spec/'), 'docs/spec')
+  assert.equal(normalizeFolderPath('../../docs'), 'docs')
+  assert.equal(normalizeFolderPath('docs\\spec'), 'docs/spec')
+  assert.equal(normalizeFolderPath('///'), '')
+  assert.equal(joinFolderPath('handbook', 'policies '), 'handbook/policies')
+  assert.equal(joinFolderPath('', 'handbook'), 'handbook')
+})
+
+// Moving a folder into its own subtree would make that subtree unreachable.
+test('a folder cannot be moved inside itself', () => {
+  assert.equal(canMoveFolderTo('docs', 'handbook'), true)
+  assert.equal(canMoveFolderTo('docs', 'docsets'), true, 'a shared prefix is not containment')
+  assert.equal(canMoveFolderTo('docs', 'docs/spec'), false)
+  assert.equal(canMoveFolderTo('docs', 'docs'), false)
+  assert.equal(canMoveFolderTo('docs', ''), false)
+  assert.equal(canMoveFolderTo('', 'docs'), false)
 })

@@ -141,30 +141,85 @@ export function buildFolderRows(
 }
 
 /**
- * The count a row should display, which must match what selecting it puts in
- * the document list — otherwise the sidebar and the list disagree.
+ * Direct sub-folders of a folder, i.e. what the document list shows as folder
+ * entries while browsing it. The root's children are the top-level folders.
  */
-export function folderRowCount(row: FolderRow, recursive: boolean): number {
-  return recursive ? row.totalCount : row.documentCount
+export function childFolders(
+  tree: KnowledgeFolderTree | null,
+  path: string,
+): KnowledgeFolderNode[] {
+  const folders = tree?.folders ?? []
+  if (path === ROOT_FOLDER_PATH) return folders
+  const find = (nodes: KnowledgeFolderNode[]): KnowledgeFolderNode | undefined => {
+    for (const node of nodes) {
+      if (node.path === path) return node
+      const found = find(node.children || [])
+      if (found) return found
+    }
+    return undefined
+  }
+  return find(folders)?.children ?? []
 }
 
 /**
- * i18n key for the root row's label. The root is the only row whose contents
- * change meaning with the scope: recursively it is the whole knowledge base,
- * directly it is exactly the documents that are not inside any folder — which
- * single-file uploads are, and which would otherwise have no visible home in a
- * tree that can only show folders. Naming the row after what it currently lists
- * keeps one mechanism instead of adding a second pseudo-folder for them.
+ * Whether the document list is filtering rather than browsing.
+ *
+ * This is the single input that decides how a folder selection is read, and it
+ * comes from what the user is already doing instead of from a mode switch they
+ * have to understand:
+ *
+ * - Browsing (no filter active) lists the selected folder's own contents — its
+ *   sub-folders as entries plus the documents directly inside it, the way a file
+ *   manager does. A document uploaded on its own therefore sits at the top level
+ *   next to the folders, which is exactly where it belongs.
+ * - Filtering searches the selected folder and everything below it, returning a
+ *   flat result set, because a search that stopped at one level would hide
+ *   matches for no good reason.
  */
-export function rootRowLabelKey(recursive: boolean): string {
-  return recursive
-    ? 'knowledgeBase.folderTree.rootRow'
-    : 'knowledgeBase.folderTree.rootRowDirect'
+export function isFilteringDocuments(filters: {
+  keyword?: string
+  tagIds?: string[]
+  fileType?: string
+  parseStatus?: string
+  source?: string
+  timeRange?: string[]
+}): boolean {
+  return !!(
+    filters.keyword?.trim() ||
+    filters.tagIds?.length ||
+    filters.fileType ||
+    filters.parseStatus ||
+    filters.source ||
+    filters.timeRange?.filter(Boolean).length
+  )
 }
 
-/** i18n key for the root row's tooltip, following the same rule as its label. */
-export function rootRowTitleKey(recursive: boolean): string {
-  return recursive
-    ? 'knowledgeBase.folderTree.rootRowTip'
-    : 'knowledgeBase.folderTree.rootRowDirectTip'
+/**
+ * Canonicalize a user-typed folder path the same way the server does, so the
+ * move dialog can preview and compare the destination it is about to send.
+ */
+export function normalizeFolderPath(path: string): string {
+  return path
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((segment) => segment.trim().replace(/[. ]+$/, ''))
+    .filter((segment) => segment && segment !== '.' && segment !== '..')
+    .join('/')
+}
+
+/** Destination path for a new sub-folder of `parent`. */
+export function joinFolderPath(parent: string, name: string): string {
+  return normalizeFolderPath(parent ? `${parent}/${name}` : name)
+}
+
+/**
+ * Whether a folder can be renamed/moved to `to`: a folder cannot land inside its
+ * own subtree, which would make that subtree unreachable.
+ */
+export function canMoveFolderTo(from: string, to: string): boolean {
+  const source = normalizeFolderPath(from)
+  const target = normalizeFolderPath(to)
+  if (!source || !target) return false
+  if (target === source) return false
+  return !target.startsWith(`${source}/`)
 }

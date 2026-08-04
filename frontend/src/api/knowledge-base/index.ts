@@ -317,6 +317,24 @@ export function listKnowledgeFolders(kbId: string) {
   return get(`/api/v1/knowledge-bases/${kbId}/knowledge/folders`);
 }
 
+/**
+ * Re-file documents under `folderPath` ('' = knowledge base top level). Folders
+ * are derived from the stored paths, so a path that does not exist yet is
+ * created by this call. Only the grouping changes; documents are not re-parsed.
+ */
+export function moveKnowledgeToFolder(kbId: string, ids: string[], folderPath: string) {
+  return post('/api/v1/knowledge/folder', {
+    kb_id: kbId,
+    knowledge_ids: ids,
+    folder_path: folderPath,
+  });
+}
+
+/** Rename or move a folder together with everything below it. */
+export function renameKnowledgeFolder(kbId: string, from: string, to: string) {
+  return put(`/api/v1/knowledge-bases/${kbId}/knowledge/folders`, { from, to });
+}
+
 export function getKnowledgeDetails(id: string, options?: { agent_id?: string; agent_source_tenant_id?: string }) {
   const query = new URLSearchParams();
   if (options?.agent_id) query.set('agent_id', options.agent_id);

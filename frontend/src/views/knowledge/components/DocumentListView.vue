@@ -36,10 +36,12 @@ const props = defineProps<{
   traceVisibleIds: Record<string, boolean>;
   tagList: Tag[];
   loading?: boolean;
+  /** Sub-folders of the folder currently being browsed. */
+  folders?: Array<{ path: string; name: string; total_count: number }>;
   /**
    * Show each row's folder under its name. Only useful when the list spans
-   * several folders (the "all documents" view or a recursive folder browse);
-   * inside a single folder the path would be the same on every row.
+   * several folders, i.e. while filtering; inside one folder the path would be
+   * identical on every row.
    */
   showFolderPath?: boolean;
   // Move sub-flow state
@@ -55,7 +57,7 @@ const emit = defineEmits<{
   (e: 'open', item: KnowledgeItem): void;
   (e: 'toggle-row', id: string, checked: boolean, shiftKey: boolean): void;
   (e: 'toggle-all', checked: boolean): void;
-  (e: 'action', action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem): void;
+  (e: 'action', action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem): void;
   (e: 'probe-trace', item: KnowledgeItem): void;
   (e: 'tag-edit', item: KnowledgeItem): void;
   (e: 'open-folder', path: string): void;
@@ -212,7 +214,7 @@ onBeforeUnmount(() => {
   stickyObserver = null;
 });
 
-const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem) => {
+const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem) => {
   // Don't close popup for move — it triggers the move sub-flow
   if (action !== 'move') {
     moreOpen.value = null;
@@ -241,6 +243,33 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
     </div>
 
     <div class="doc-list-body">
+      <!-- Sub-folders of the folder being browsed, listed above the documents
+           the way a file manager does. -->
+      <div v-for="folder in folders" :key="'folder-' + folder.path" class="doc-list-row doc-list-row--folder"
+        :title="folder.path" role="row" @click="emit('open-folder', folder.path)">
+        <div class="cell cell-check" aria-hidden="true"></div>
+        <div class="cell cell-name">
+          <span class="row-file-icon-wrap">
+            <t-icon name="folder" class="row-folder-icon" />
+          </span>
+          <div class="row-file-text">
+            <span class="row-file-name">{{ folder.name }}</span>
+          </div>
+        </div>
+        <div class="cell cell-tag"></div>
+        <div class="cell cell-source">
+          <span class="row-folder-meta">
+            {{ t('knowledgeBase.folderTree.folderCardCount', { count: folder.total_count }) }}
+          </span>
+        </div>
+        <div class="cell cell-size"></div>
+        <div class="cell cell-status"></div>
+        <div class="cell cell-time"></div>
+        <div v-if="canEdit" class="cell cell-actions">
+          <t-icon name="chevron-right" class="row-folder-chevron" />
+        </div>
+      </div>
+
       <div v-for="item in items" :key="item.id" class="doc-list-row"
         :class="{ selected: selectedIds.has(item.id), 'menu-open': moreOpen === item.id }" :data-select-id="item.id"
         role="row" @click="emit('open', item)">
@@ -337,6 +366,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
                   @reparse="handleAction('reparse', item)"
                   @cancel-parse="handleAction('cancel-parse', item)"
                   @move="handleAction('move', item)"
+                  @move-folder="handleAction('move-folder', item)"
                   @batch-manage="handleAction('batch-manage', item)"
                   @delete="handleAction('delete', item)"
                 />
@@ -610,6 +640,25 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
   text-overflow: ellipsis;
   font-size: 12px;
   color: var(--td-text-color-placeholder);
+}
+
+.doc-list-row--folder {
+  cursor: pointer;
+
+  &:hover .row-folder-chevron {
+    color: var(--td-brand-color);
+  }
+}
+
+.row-folder-icon {
+  color: var(--td-brand-color);
+}
+
+.row-folder-meta,
+.row-folder-chevron {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+  transition: color 0.15s ease;
 }
 
 .row-file-folder {
