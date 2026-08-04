@@ -259,6 +259,7 @@ func (t *DatabaseQueryTool) validateAndSecureSQL(sqlQuery string, tenantID uint6
 		utils.WithSecurityDefaults(tenantID),
 		utils.WithSoftDeleteFilter("knowledge_bases", "knowledges", "chunks"),
 		utils.WithHiddenKBFilter(),
+		utils.WithChunkEnabledFilter(),
 		utils.WithInjectionRiskCheck(),
 		utils.WithSearchScopes(searchScopes),
 	)

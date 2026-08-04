@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -13,6 +14,30 @@ import (
 
 // MarkdownImageRegex matches Markdown image links: ![alt](url)
 var MarkdownImageRegex = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
+
+// HTMLImageSrcRegex matches an HTML <img> tag with a quoted src attribute.
+// Documents that rely on surrounding markup for layout embed their screenshots
+// this way, so image-derived text has to be matched back to these tags as well
+// as to Markdown image links.
+//
+// Submatches: 1 = attributes before src, 2 = the src value, 3 = attributes
+// after. Callers index the value through HTMLImageSrcURLGroup rather than
+// assuming a position.
+//
+// src must be preceded by whitespace so that data-src and other hyphenated
+// attribute names are not mistaken for it — matching those would capture a
+// lazy-loading placeholder and leave the real src unvisited. An unquoted src
+// and a srcset-only tag are deliberately out of scope; both are rare in
+// authored documents and matching them reliably needs an HTML parser.
+//
+// Both this package and the document parser share this one definition. Two
+// copies would be free to drift, and an image the parser stores but the
+// enricher cannot match back is exactly the kind of gap this exists to close.
+var HTMLImageSrcRegex = regexp.MustCompile(`(?i)<img\b([^>]*?)\ssrc\s*=\s*['"]([^'"]+)['"]([^>]*)>`)
+
+// HTMLImageSrcURLGroup is the submatch index of the src value in
+// HTMLImageSrcRegex.
+const HTMLImageSrcURLGroup = 2
 
 // CollectImageInfoByChunkIDs collects merged image_info JSON for each given
 // chunk ID by querying child chunks (image_ocr / image_caption). It supports
@@ -288,22 +313,52 @@ func EnrichContentWithImageInfoForChat(content string, imageInfoJSON string) str
 		}
 	}
 
-	content = MarkdownImageRegex.ReplaceAllStringFunc(content, func(markdownImage string) string {
-		match := MarkdownImageRegex.FindStringSubmatch(markdownImage)
-		if len(match) < 3 {
-			return markdownImage
+	// Screenshots embedded as HTML carry their image_info the same way as
+	// Markdown links: without covering both, a document that keeps its images in
+	// <img> tags reaches the model as bare markup with the caption and OCR text
+	// stripped out, even though the analysis ran and the entry is right here.
+	//
+	// Both syntaxes are located against the ORIGINAL content and spliced in one
+	// right-to-left pass. Running one regex over the other's output would let a
+	// metadata block that itself quotes an image reference be rescanned, cutting
+	// the OCR sentence in half and injecting the same block twice.
+	type injection struct {
+		at   int
+		text string
+	}
+	var injections []injection
+
+	// trim is applied to HTML only. An attribute value may be padded, while a
+	// Markdown target is looked up exactly as written so that the keys this
+	// function matches on stay the ones it has always matched on.
+	appendFor := func(locs [][]int, urlGroup int, trim bool) {
+		for _, loc := range locs {
+			start, end := loc[2*urlGroup], loc[2*urlGroup+1]
+			if start < 0 {
+				continue
+			}
+			key := content[start:end]
+			if trim {
+				key = strings.TrimSpace(key)
+			}
+			imgInfo, found := imageInfoMap[key]
+			if !found || imgInfo == nil {
+				continue
+			}
+			metadata := buildImageInfoMarkdownMetadata(imgInfo)
+			if metadata == "" {
+				continue
+			}
+			injections = append(injections, injection{at: loc[1], text: "\n\n" + metadata})
 		}
-		imgURL := match[2]
-		imgInfo, found := imageInfoMap[imgURL]
-		if !found || imgInfo == nil {
-			return markdownImage
-		}
-		metadata := buildImageInfoMarkdownMetadata(imgInfo)
-		if metadata == "" {
-			return markdownImage
-		}
-		return markdownImage + "\n\n" + metadata
-	})
+	}
+	appendFor(MarkdownImageRegex.FindAllStringSubmatchIndex(content, -1), 2, false)
+	appendFor(HTMLImageSrcRegex.FindAllStringSubmatchIndex(content, -1), HTMLImageSrcURLGroup, true)
+
+	sort.Slice(injections, func(i, j int) bool { return injections[i].at > injections[j].at })
+	for _, inj := range injections {
+		content = content[:inj.at] + inj.text + content[inj.at:]
+	}
 	return content
 }
 

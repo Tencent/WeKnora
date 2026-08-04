@@ -63,7 +63,14 @@ func NewFactory() im.AdapterFactory {
 			}()
 
 			adapter := NewWSAdapter(client)
-			return adapter, wsCancel, nil
+			// Cancelling the context alone does not unblock gorilla/websocket's
+			// ReadMessage. Close the socket first so disabling, reconfiguring, or
+			// shutting down a channel stops message delivery synchronously.
+			stop := func() {
+				client.Stop()
+				wsCancel()
+			}
+			return adapter, stop, nil
 
 		default:
 			return nil, nil, fmt.Errorf("unknown WeCom mode: %s", mode)

@@ -101,13 +101,10 @@ func (s *wikiIngestService) newWikiBatchContext(
 			fetchMu.Lock()
 			for _, slug := range need {
 				if p, ok := pages[slug]; ok && p != nil {
-					if p.Status == types.WikiPageStatusArchived ||
-						p.PageType == types.WikiPageTypeIndex ||
-						p.PageType == types.WikiPageTypeLog {
+					if p.Status == types.WikiPageStatusArchived || p.PageType == types.WikiPageTypeIndex {
 						// Treat archived / system pages as missing from the
 						// title-resolution map: cleanDeadLinks shouldn't link
-						// to them, and the log-feed slug-title fallback
-						// should degrade to slug-only display.
+						// to them or surface them as cross-link candidates.
 						slugTitleCache[slug] = ""
 						continue
 					}
@@ -473,10 +470,10 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 							if p == nil || p.Slug == "" {
 								continue
 							}
-							// Index/log pages never carry real source_refs;
+							// Index pages never carry real source_refs;
 							// if they somehow surface here, skip — the
 							// reduce stage would be a no-op anyway.
-							if p.PageType == types.WikiPageTypeIndex || p.PageType == types.WikiPageTypeLog {
+							if p.PageType == types.WikiPageTypeIndex {
 								continue
 							}
 							slugSet[p.Slug] = struct{}{}
@@ -583,10 +580,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	var retractPagesAffected []string
 	// failedAdditionSlugs collects entity/concept slugs whose page
 	// generation LLM call failed (so the page was never written). The
-	// post-reduce cleanup step uses this set to (a) strip dead [[slug]]
-	// references from the same batch's summary pages, and (b) prune the
-	// slugs out of the wiki log feed so users don't see clickable entries
-	// pointing at missing pages.
+	// post-reduce cleanup step uses this set to strip dead [[slug]]
+	// references from the same batch's summary pages and exclude failed
+	// pages from finalize processing.
 	failedAdditionSlugs := make(map[string]struct{})
 	// unappliedSlugKIDs collects the knowledge_ids that contributed to a
 	// slug whose update never landed — either because we could NOT acquire
@@ -690,7 +686,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	defer tailCancel()
 
 	// Sanitize the doc summary pages produced by this batch BEFORE we
-	// build log entries / rebuild the index. The summary LLM (run during
+	// rebuild the index. The summary LLM (run during
 	// map) was free to inject [[entity/foo|name]] links to every slug it
 	// saw extracted, but reduce may have failed to materialize some of
 	// those slugs into actual pages. Rewrite those dead links to plain
@@ -701,57 +697,21 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 
 	totalPagesAffected = len(allPagesAffected)
 
-	// Collect log entries for this batch and flush them in a single INSERT.
-	// Historically each op triggered its own `GetLog + UpdatePage` round
-	// trip, which rewrote the entire log page TEXT column and caused O(n^2)
-	// write amplification as the log grew. AppendBatch writes one row per
-	// event into wiki_log_entries instead.
-	//
-	// slugsToRefs resolves each retract slug against the batch-start
-	// snapshot (batchCtx.SlugTitleMap) so the log feed carries titles for
-	// pages that existed when the batch began. Pages created or renamed
-	// during this batch fall through the map lookup and log as slug-only
-	// refs, which the frontend renders as the slug itself — a sensible
-	// fallback given retracts only touch pre-existing pages.
-	slugsToRefs := func(slugs []string) []types.WikiLogPageRef {
-		if len(slugs) == 0 {
-			return nil
-		}
-		titles := batchCtx.SlugTitleMany(tailCtx, slugs)
-		out := make([]types.WikiLogPageRef, 0, len(slugs))
-		for _, slug := range slugs {
-			out = append(out, types.WikiLogPageRef{Slug: slug, Title: titles[slug]})
-		}
-		return out
-	}
-	logEntries := make([]*types.WikiLogEntry, 0, len(pendingOps)+len(docResults))
+	// Project one bounded summary into the knowledge-base activity feed.
+	// Detailed per-document Wiki log rows duplicated that feed and were never
+	// consumed by retrieval, so the activity record is now written directly.
+	wikiActivityActions := make(map[string]int, 2)
 	for _, op := range pendingOps {
 		if op.Op == WikiOpRetract {
-			logEntries = append(logEntries, s.buildLogEntry(payload.TenantID, payload.KnowledgeBaseID, "retract", op.KnowledgeID, op.DocTitle, op.DocSummary, slugsToRefs(op.PageSlugs)))
+			wikiActivityActions["retract"]++
 		}
 	}
 	for _, r := range docResults {
-		// Drop any slugs whose page generation failed in reduce so the
-		// log feed never offers a clickable entry that 404s. The summary
-		// page itself (slug = summary/<knowledgeID>) is always created
-		// unconditionally upstream, so it survives the filter.
-		pages := r.Pages
-		if len(failedAdditionSlugs) > 0 {
-			pages = pages[:0:0]
-			for _, ref := range r.Pages {
-				if _, bad := failedAdditionSlugs[ref.Slug]; bad {
-					continue
-				}
-				pages = append(pages, ref)
-			}
-		}
-		logEntries = append(logEntries, s.buildLogEntry(payload.TenantID, payload.KnowledgeBaseID, "ingest", r.KnowledgeID, r.DocTitle, r.Summary, pages))
-	}
-	if len(logEntries) > 0 && s.logEntrySvc != nil {
-		if err := s.logEntrySvc.AppendBatch(tailCtx, logEntries); err != nil {
-			logger.Warnf(ctx, "wiki ingest: failed to append %d log entries: %v", len(logEntries), err)
+		if r != nil {
+			wikiActivityActions["ingest"]++
 		}
 	}
+	RecordWikiContentActivity(tailCtx, s.audit, payload.TenantID, payload.KnowledgeBaseID, wikiActivityActions)
 
 	// Publish freshly-generated pages immediately (NOT deferred to finalize):
 	// users should see a document's wiki pages as soon as their content is
@@ -1422,16 +1382,15 @@ func (s *wikiIngestService) mapOneDocument(
 
 	// extractedPages records every wiki page this document materialized
 	// (entities, concepts, plus the summary page appended below). The
-	// slug is used for link/retract bookkeeping; the title is captured
-	// for the log feed so the user sees "提供本学位在线验证报告查询…"
-	// rather than "entity/xue-xin-wang".
-	extractedPages := make([]types.WikiLogPageRef, 0, len(slugItems)+1)
+	// slug is used for link/retract bookkeeping; the title is retained for
+	// trace output and finalize processing.
+	extractedPages := make([]wikiIngestPageRef, 0, len(slugItems)+1)
 	for slug, item := range slugItems {
 		title := item.Name
 		if title == "" {
 			title = slug
 		}
-		extractedPages = append(extractedPages, types.WikiLogPageRef{Slug: slug, Title: title})
+		extractedPages = append(extractedPages, wikiIngestPageRef{Slug: slug, Title: title})
 	}
 
 	// Count total distinct chunks cited across all slugs for logging.
@@ -1489,7 +1448,7 @@ func (s *wikiIngestService) mapOneDocument(
 		SummaryLine: sumLine,
 		SummaryBody: sumBody,
 	})
-	extractedPages = append(extractedPages, types.WikiLogPageRef{Slug: summarySlug, Title: docTitle})
+	extractedPages = append(extractedPages, wikiIngestPageRef{Slug: summarySlug, Title: docTitle})
 
 	// Entities
 	for _, item := range extractedEntities {
@@ -2096,9 +2055,8 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		} else if err != nil {
 			logger.Warnf(ctx, "wiki ingest: update/retract failed for slug %s: %v", slug, err)
 			// Flag addition failures so the batch can sanitize stale
-			// [[slug]] references in the doc's summary page and prune
-			// the slug from log entries — otherwise the wiki feed shows
-			// a clickable entry whose target page doesn't exist.
+			// [[slug]] references in the doc's summary page and keep the
+			// missing page out of finalize processing.
 			// Retract-only failures don't poison anything (they leave
 			// the existing page unchanged), so don't flag those.
 			if len(additions) > 0 {

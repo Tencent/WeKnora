@@ -311,6 +311,8 @@ export interface SharedAgentInfo {
   shared_at: string
   shared_by_user_id?: string
   shared_by_username?: string
+  /** 由后端在源空间解析，不与当前空间的搜索引擎列表比较 */
+  web_search_ready: boolean
   /** 当前用户是否已停用该共享智能体（仅影响本人对话下拉显示） */
   disabled_by_me?: boolean
 }

@@ -298,47 +298,6 @@ export function getWikiIndex(
   return get(`/api/v1/knowledgebase/${kbId}/wiki/index${suffix}`);
 }
 
-export interface WikiLogPageRef {
-  slug: string;
-  title?: string;
-}
-
-export interface WikiLogEntry {
-  id: number;
-  tenant_id: number;
-  knowledge_base_id: string;
-  action: string;
-  knowledge_id: string;
-  doc_title: string;
-  summary: string;
-  // Each ref carries both slug (for navigation) and title (captured at
-  // ingest time for display). Legacy rows written before the title
-  // column was added surface as refs with an empty title; render falls
-  // back to the slug in that case.
-  pages_affected: WikiLogPageRef[];
-  created_at: string;
-}
-
-export interface WikiLogListResponse {
-  entries: WikiLogEntry[];
-  next_cursor?: string;
-}
-
-// getWikiLog fetches a page of wiki operation events (newest first). Pass the
-// `next_cursor` from the previous response back as `cursor` to load more;
-// an empty / missing `next_cursor` signals end-of-feed. `limit` is clamped
-// server-side to [1, 200] and defaults to 50.
-export function getWikiLog(kbId: string, params?: { cursor?: string; limit?: number }) {
-  const query = new URLSearchParams();
-  if (params) {
-    if (params.cursor) query.set('cursor', params.cursor);
-    if (params.limit !== undefined) query.set('limit', String(params.limit));
-  }
-  const qs = query.toString();
-  const suffix = qs ? `?${qs}` : '';
-  return get(`/api/v1/knowledgebase/${kbId}/wiki/log${suffix}`);
-}
-
 export interface WikiGraphQueryParams {
   mode?: 'overview' | 'ego';
   center?: string;

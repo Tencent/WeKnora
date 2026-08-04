@@ -156,6 +156,27 @@ func NewDataTableSummaryTask(
 	return nil
 }
 
+// enqueueDataTableSummaryIfNeeded enqueues table summary work for spreadsheet
+// imports. fileName is a fallback for older records whose FileType is empty.
+func enqueueDataTableSummaryIfNeeded(
+	ctx context.Context,
+	client interfaces.TaskEnqueuer,
+	tenantID uint64,
+	knowledgeID string,
+	fileName, fileType, summaryModelID, embeddingModelID string,
+) {
+	ft := normalizeFileExtension(fileType)
+	if ft == "" && fileName != "" {
+		ft = getFileType(fileName)
+	}
+	if !isDataTableFileType(ft) {
+		return
+	}
+	if err := NewDataTableSummaryTask(ctx, client, tenantID, knowledgeID, summaryModelID, embeddingModelID); err != nil {
+		logger.Warnf(ctx, "Failed to enqueue data table summary task for knowledge %s: %v", knowledgeID, err)
+	}
+}
+
 // ChunkExtractService is a service for extracting chunks
 type ChunkExtractService struct {
 	template          *types.PromptTemplateStructured

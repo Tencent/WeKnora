@@ -188,7 +188,13 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 
 // UpdateKnowledge updates knowledge
 func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
-	err := r.db.WithContext(ctx).Omit(omitFieldsOnUpdate...).Save(knowledge).Error
+	omit := omitFieldsOnUpdate
+	// Legacy/unit-test schemas created before custom_metadata should continue
+	// to support unrelated updates when the caller did not provide the field.
+	if knowledge.CustomMetadata == nil {
+		omit = append(append([]string{}, omitFieldsOnUpdate...), "custom_metadata")
+	}
+	err := r.db.WithContext(ctx).Omit(omit...).Save(knowledge).Error
 	return err
 }
 
@@ -235,10 +241,16 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 
 	switch params.Type {
 	case "file":
-		// If file hash exists, prioritize exact match using hash
+		// File content is only a duplicate within the same file type. This keeps
+		// same-content documents with distinct formats (for example, .md and
+		// .txt) available as separate knowledge items.
 		if params.FileHash != "" {
 			var knowledge types.Knowledge
-			err := query.Where("file_hash = ?", params.FileHash).First(&knowledge).Error
+			duplicateQuery := query.Where("type = ? AND file_hash = ?", "file", params.FileHash)
+			if params.FileType != "" {
+				duplicateQuery = duplicateQuery.Where("LOWER(file_type) = ?", strings.ToLower(params.FileType))
+			}
+			err := duplicateQuery.First(&knowledge).Error
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return false, nil, nil
@@ -248,13 +260,17 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 			return true, &knowledge, nil
 		}
 
-		// If no hash or hash doesn't match, use filename and size
+		// If no hash or hash doesn't match, use filename, size, and file type.
 		if params.FileName != "" && params.FileSize > 0 {
 			var knowledge types.Knowledge
-			err := query.Where(
-				"file_name = ? AND file_size = ?",
-				params.FileName, params.FileSize,
-			).First(&knowledge).Error
+			duplicateQuery := query.Where(
+				"type = ? AND file_name = ? AND file_size = ?",
+				"file", params.FileName, params.FileSize,
+			)
+			if params.FileType != "" {
+				duplicateQuery = duplicateQuery.Where("LOWER(file_type) = ?", strings.ToLower(params.FileType))
+			}
+			err := duplicateQuery.First(&knowledge).Error
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return false, nil, nil
@@ -421,7 +437,10 @@ func (r *knowledgeRepository) UpdateActiveDeletingKnowledgeColumns(
 // FinalizeSubtask atomically decrements pending_subtasks_count and, when
 // the counter reaches zero while parse_status is still 'finalizing',
 // flips the row to 'completed' in the same statement so concurrent
-// subtask completions can't race the promotion.
+// subtask completions can't race the promotion. Both this promotion and
+// SetFinalizing clear error_message: a row that re-enters processing or
+// finishes successfully must not keep displaying a failure from a
+// previous attempt.
 //
 // Returns (newCount, promoted, error). promoted is true iff this caller
 // was the one whose UPDATE flipped 'finalizing'→'completed'.
@@ -465,9 +484,10 @@ func (r *knowledgeRepository) FinalizeSubtask(
 		Where("id = ? AND parse_status = ? AND pending_subtasks_count = 0",
 			id, types.ParseStatusFinalizing).
 		Updates(map[string]interface{}{
-			"parse_status": types.ParseStatusCompleted,
-			"processed_at": now,
-			"updated_at":   now,
+			"parse_status":  types.ParseStatusCompleted,
+			"error_message": "",
+			"processed_at":  now,
+			"updated_at":    now,
 		})
 	if promoteRes.Error != nil {
 		return 0, false, promoteRes.Error
@@ -510,6 +530,7 @@ func (r *knowledgeRepository) SetFinalizing(
 		Updates(map[string]interface{}{
 			"parse_status":           types.ParseStatusFinalizing,
 			"pending_subtasks_count": expectedSubtasks,
+			"error_message":          "",
 			"updated_at":             now,
 		})
 	if res.Error != nil {

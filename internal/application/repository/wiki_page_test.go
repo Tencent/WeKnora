@@ -340,6 +340,45 @@ func TestListByTypeLight_EmptyType_ReturnsZero(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
+func TestListPagesCursorExcludesArchivedPages(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	mk := func(id, slug, status string) *types.WikiPage {
+		page := makeWikiPage("kb-lint", slug, types.WikiPageTypeConcept, status)
+		page.ID = id
+		return page
+	}
+	pages := []*types.WikiPage{
+		mk("001", "concept/live-a", types.WikiPageStatusPublished),
+		mk("002", "concept/archived", types.WikiPageStatusArchived),
+		mk("003", "concept/live-b", types.WikiPageStatusDraft),
+		mk("004", "concept/other-kb", types.WikiPageStatusPublished),
+	}
+	pages[3].KnowledgeBaseID = "kb-other"
+	for _, p := range pages {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	first, next, err := repo.ListPagesCursor(ctx, "kb-lint", "", 1)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	assert.Equal(t, "concept/live-a", first[0].Slug)
+	assert.Equal(t, "001", next)
+
+	second, next, err := repo.ListPagesCursor(ctx, "kb-lint", next, 1)
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+	assert.Equal(t, "concept/live-b", second[0].Slug)
+	assert.Equal(t, "003", next)
+
+	third, next, err := repo.ListPagesCursor(ctx, "kb-lint", next, 1)
+	require.NoError(t, err)
+	assert.Empty(t, third)
+	assert.Empty(t, next)
+}
+
 // TestListByTypeLight_ClampsLimit verifies the [1, 200] clamp. We don't
 // want a client passing limit=100000 and forcing the DB to return a
 // multi-MB response.
@@ -378,12 +417,10 @@ func TestCountOrphans_SQLiteCountsEmptyInLinks(t *testing.T) {
 	linked.InLinks = types.StringArray{"entity/source"}
 	indexPage := makeWikiPage("kb-orphans", "index", types.WikiPageTypeIndex, types.WikiPageStatusPublished)
 	indexPage.InLinks = types.StringArray{}
-	logPage := makeWikiPage("kb-orphans", "log", types.WikiPageTypeLog, types.WikiPageStatusPublished)
-	logPage.InLinks = types.StringArray{}
 	otherKB := makeWikiPage("kb-other", "entity/other", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
 	otherKB.InLinks = types.StringArray{}
 
-	for _, p := range []*types.WikiPage{orphan, linked, indexPage, logPage, otherKB} {
+	for _, p := range []*types.WikiPage{orphan, linked, indexPage, otherKB} {
 		require.NoError(t, repo.Create(ctx, p))
 	}
 

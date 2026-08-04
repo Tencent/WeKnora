@@ -950,7 +950,7 @@ func (r *wikiPageRepository) ListPagesCursor(
 		limit = 500
 	}
 	q := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ?", kbID).
+		Where("knowledge_base_id = ? AND status <> ?", kbID, types.WikiPageStatusArchived).
 		Order("id ASC").
 		Limit(limit)
 	if cursor != "" {
@@ -1070,7 +1070,7 @@ func (r *wikiPageRepository) ListAll(ctx context.Context, kbID string) ([]*types
 // ListRecentForSuggestions returns recent user-visible wiki pages across the given
 // knowledge bases, used as a fallback source for agent suggested questions when
 // the KB has no FAQ entries or AI-generated document questions (typical for
-// Wiki-only KBs). Excludes index/log pages and archived pages.
+// Wiki-only KBs). Excludes the index page and archived pages.
 func (r *wikiPageRepository) ListRecentForSuggestions(
 	ctx context.Context,
 	tenantID uint64,
@@ -1084,7 +1084,7 @@ func (r *wikiPageRepository) ListRecentForSuggestions(
 	if err := r.db.WithContext(ctx).
 		Where("tenant_id = ?", tenantID).
 		Where("knowledge_base_id IN ?", kbIDs).
-		Where("page_type NOT IN ?", []string{types.WikiPageTypeIndex, types.WikiPageTypeLog}).
+		Where("page_type <> ?", types.WikiPageTypeIndex).
 		Where("status = ?", types.WikiPageStatusPublished).
 		Where("title <> ''").
 		Order("updated_at DESC").
@@ -1213,8 +1213,8 @@ func (r *wikiPageRepository) CountOrphans(ctx context.Context, kbID string) (int
 		Model(&types.WikiPage{}).
 		Where("knowledge_base_id = ?", kbID).
 		Where(r.wikiEmptyInLinksPredicate()).
-		// Exclude index and log pages as they are naturally root pages
-		Where("page_type NOT IN ?", []string{types.WikiPageTypeIndex, types.WikiPageTypeLog}).
+		// Exclude the index page because it is naturally a root page.
+		Where("page_type <> ?", types.WikiPageTypeIndex).
 		Count(&count).Error; err != nil {
 		return 0, err
 	}
