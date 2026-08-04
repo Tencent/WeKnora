@@ -393,9 +393,6 @@ func (h *Handler) handleAgentEventsForSSE(
 					return
 				}
 
-				// Build StreamResponse from StreamEvent
-				response := buildStreamResponseFor(ctx, evt, requestID, resourceRewriter)
-
 				// Check for completion event
 				if evt.Type == "complete" {
 					streamCompleted = true
@@ -406,20 +403,16 @@ func (h *Handler) handleAgentEventsForSSE(
 					titleReceived = true
 				}
 
-				// Check if connection is still alive before writing
+				// Check if connection is still alive before writing. Build the
+				// payload only after this check: in public resource URL mode
+				// building consumes the chunk into the holdback buffer, so an
+				// early return here would drop it.
 				if c.Request.Context().Err() != nil {
 					log.Info("Connection closed during event sending, stopping")
 					return
 				}
 
-				// Any content still held back must precede the completion marker,
-				// which clients treat as the end of the message.
-				if streamCompleted {
-					flushHeldStreamContent(ctx, c, requestID, resourceRewriter)
-				}
-
-				c.SSEvent("message", response)
-				c.Writer.Flush()
+				emitStreamEvent(ctx, c, evt, requestID, resourceRewriter)
 			}
 
 			// Update offset
