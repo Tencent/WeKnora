@@ -2160,6 +2160,7 @@ export default {
   language: {
     zhCN: '简体中文',
     enUS: 'English',
+    ptBR: 'Português',
     ruRU: 'Русский',
     koKR: '한국어',
     selectLanguage: 'Выбрать язык',

@@ -2160,6 +2160,7 @@ export default {
   language: {
     zhCN: '简体中文',
     enUS: 'English',
+    ptBR: 'Português',
     ruRU: 'Русский',
     koKR: '한국어',
     selectLanguage: '选择语言',
@@ -3187,7 +3188,7 @@ export default {
         vllmDescription: '用于多模态理解的视觉语言模型（必选）',
         vllmPlaceholder: '请选择 VLLM 模型（必选）',
         descriptionLanguageLabel: '图片描述语言',
-        descriptionLanguageDescription: '留空时跟随文档语言；不再强制使用中文',
+        descriptionLanguageDescription: '留空时自动跟随文档语言',
         descriptionLanguageAuto: '自动跟随文档语言',
         customInstructionsLabel: '图片解析要求',
         customInstructionsDescription: '补充需要重点识别的视觉信息，OCR 和 Markdown 格式协议保持不变',

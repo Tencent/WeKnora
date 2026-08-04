@@ -39,9 +39,9 @@ func Language() gin.HandlerFunc {
 			lang = parseFirstLanguageTag(acceptLang)
 		}
 
-		// 3. Fallback to hardcoded default
+		// 3. Fallback to default language
 		if lang == "" {
-			lang = "zh-CN"
+			lang = types.DefaultLanguage()
 		}
 
 		// Inject into context

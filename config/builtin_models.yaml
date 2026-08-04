@@ -1,0 +1,69 @@
+builtin_models:
+  - id: openrouter-gemini-25-flash
+    name: google/gemini-2.5-flash
+    type: KnowledgeQA
+    source: remote
+    description: "Google Gemini 2.5 Flash via OpenRouter"
+    is_default: true
+    parameters:
+      base_url: https://openrouter.ai/api/v1
+      api_key: ${OPENROUTER_API_KEY}
+      provider: openrouter
+
+  - id: openrouter-gemini-36-flash
+    name: google/gemini-3.6-flash
+    type: KnowledgeQA
+    source: remote
+    description: "Google Gemini 3.6 Flash via OpenRouter"
+    is_default: false
+    parameters:
+      base_url: https://openrouter.ai/api/v1
+      api_key: ${OPENROUTER_API_KEY}
+      provider: openrouter
+
+  - id: openrouter-claude-35-sonnet
+    name: anthropic/claude-3.5-sonnet
+    type: KnowledgeQA
+    source: remote
+    description: "Claude 3.5 Sonnet via OpenRouter"
+    is_default: false
+    parameters:
+      base_url: https://openrouter.ai/api/v1
+      api_key: ${OPENROUTER_API_KEY}
+      provider: openrouter
+
+  - id: openrouter-deepseek-r1
+    name: deepseek/deepseek-r1
+    type: KnowledgeQA
+    source: remote
+    description: "DeepSeek R1 via OpenRouter"
+    is_default: false
+    parameters:
+      base_url: https://openrouter.ai/api/v1
+      api_key: ${OPENROUTER_API_KEY}
+      provider: openrouter
+
+  - id: openrouter-embedding-small
+    name: text-embedding-3-small
+    type: Embedding
+    source: remote
+    description: "Text Embedding 3 Small via OpenRouter"
+    is_default: true
+    parameters:
+      base_url: https://openrouter.ai/api/v1
+      api_key: ${OPENROUTER_API_KEY}
+      provider: openrouter
+      embedding_parameters:
+        dimension: 1536
+        truncate_prompt_tokens: 0
+
+  - id: native-gemini-flash
+    name: gemini-2.5-flash
+    type: KnowledgeQA
+    source: remote
+    description: "Google Gemini 2.5 Flash (Google Direct API)"
+    is_default: false
+    parameters:
+      base_url: https://generativelanguage.googleapis.com/v1beta/openai
+      api_key: ${GEMINI_API_KEY}
+      provider: gemini

@@ -2543,7 +2543,7 @@ export default {
         vllmDescription: 'Vision-language model required for multimodal understanding',
         vllmPlaceholder: 'Select a VLLM model (required)',
         descriptionLanguageLabel: 'Image Description Language',
-        descriptionLanguageDescription: 'Leave empty to follow the document language instead of forcing Chinese',
+        descriptionLanguageDescription: 'Leave empty to follow the document language',
         descriptionLanguageAuto: 'Follow document language',
         customInstructionsLabel: 'Image Processing Instructions',
         customInstructionsDescription: 'Add visual priorities while OCR and Markdown output contracts remain fixed',
@@ -3561,6 +3561,7 @@ export default {
   language: {
     zhCN: '简体中文',
     enUS: 'English',
+    ptBR: 'Português',
     ruRU: 'Русский',
     koKR: '한국어',
     selectLanguage: 'Select Language',

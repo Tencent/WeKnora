@@ -322,8 +322,9 @@
                         <div class="setting-control">
                           <t-select v-model="formData.multimodalConfig.descriptionLanguage" clearable
                             :placeholder="$t('knowledgeEditor.advanced.multimodal.descriptionLanguageAuto')">
-                            <t-option value="Chinese" :label="$t('language.zhCN')" />
+                            <t-option value="Portuguese" :label="$t('language.ptBR')" />
                             <t-option value="English" :label="$t('language.enUS')" />
+                            <t-option value="Chinese" :label="$t('language.zhCN')" />
                             <t-option value="Korean" :label="$t('language.koKR')" />
                             <t-option value="Russian" :label="$t('language.ruRU')" />
                           </t-select>
