@@ -572,7 +572,17 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	var dialector gorm.Dialector
 	var migrateDSN string
 	var sqliteDBPath string
-	switch os.Getenv("DB_DRIVER") {
+
+	dbDriver := os.Getenv("DB_DRIVER")
+	dbURL := os.Getenv("SUPABASE_DB_URL")
+	if dbURL == "" {
+		dbURL = os.Getenv("DATABASE_URL")
+	}
+	if dbDriver == "" && dbURL != "" {
+		dbDriver = "postgres"
+	}
+
+	switch dbDriver {
 	case "postgres":
 		dbSSLMode := os.Getenv("DB_SSLMODE")
 		if dbSSLMode == "" {
@@ -583,14 +593,38 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 			dbSchema = "public"
 		}
 
+		dbHost := os.Getenv("DB_HOST")
+		dbPort := os.Getenv("DB_PORT")
+		dbUser := os.Getenv("DB_USER")
+		dbPassword := os.Getenv("DB_PASSWORD")
+		dbName := os.Getenv("DB_NAME")
+
+		if dbURL != "" && os.Getenv("DB_HOST") == "" {
+			if u, err := url.Parse(dbURL); err == nil {
+				dbHost = u.Hostname()
+				dbPort = u.Port()
+				if dbPort == "" {
+					dbPort = "5432"
+				}
+				if u.User != nil {
+					dbUser = u.User.Username()
+					dbPassword, _ = u.User.Password()
+				}
+				dbName = strings.TrimPrefix(u.Path, "/")
+				if querySSL := u.Query().Get("sslmode"); querySSL != "" && os.Getenv("DB_SSLMODE") == "" {
+					dbSSLMode = querySSL
+				}
+			}
+		}
+
 		// DSN for GORM (key-value format)
 		gormDSN := fmt.Sprintf(
 			"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s search_path=%s TimeZone=UTC",
-			os.Getenv("DB_HOST"),
-			os.Getenv("DB_PORT"),
-			os.Getenv("DB_USER"),
-			os.Getenv("DB_PASSWORD"),
-			os.Getenv("DB_NAME"),
+			dbHost,
+			dbPort,
+			dbUser,
+			dbPassword,
+			dbName,
 			dbSSLMode,
 			dbSchema,
 		)
@@ -598,7 +632,6 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 
 		// DSN for golang-migrate (URL format)
 		// URL-encode password to handle special characters like !@#
-		dbPassword := os.Getenv("DB_PASSWORD")
 		encodedPassword := url.QueryEscape(dbPassword)
 
 		// Check if postgres is in RETRIEVE_DRIVER to determine skip_embedding
@@ -611,11 +644,11 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 
 		migrateDSN = fmt.Sprintf(
 			"postgres://%s:%s@%s:%s/%s?sslmode=%s&search_path=%s&options=-c%%20app.skip_embedding=%s%%20-c%%20search_path=%s,public",
-			os.Getenv("DB_USER"),
+			dbUser,
 			encodedPassword, // Use encoded password
-			os.Getenv("DB_HOST"),
-			os.Getenv("DB_PORT"),
-			os.Getenv("DB_NAME"),
+			dbHost,
+			dbPort,
+			dbName,
 			dbSSLMode,
 			dbSchema,
 			skipEmbedding,
@@ -624,10 +657,10 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 
 		// Debug log (don't log password)
 		logger.Infof(context.Background(), "DB Config: user=%s host=%s port=%s dbname=%s sslmode=%s schema=%s",
-			os.Getenv("DB_USER"),
-			os.Getenv("DB_HOST"),
-			os.Getenv("DB_PORT"),
-			os.Getenv("DB_NAME"),
+			dbUser,
+			dbHost,
+			dbPort,
+			dbName,
 			dbSSLMode,
 			dbSchema,
 		)
@@ -648,7 +681,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		migrateDSN = "sqlite3://" + dbPath
 		logger.Infof(context.Background(), "DB Config: driver=sqlite path=%s", dbPath)
 	default:
-		return nil, fmt.Errorf("unsupported database driver: %s", os.Getenv("DB_DRIVER"))
+		return nil, fmt.Errorf("unsupported database driver: %s", dbDriver)
 	}
 	db, err := gorm.Open(dialector, &gorm.Config{
 		NowFunc: func() time.Time {
@@ -671,7 +704,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 				"(see vectorStoreService.isPostgres for impact)", name)
 	}
 
-	if os.Getenv("DB_DRIVER") == "sqlite" {
+	if dbDriver == "sqlite" {
 		sqlDB, err := db.DB()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get underlying sql.DB: %w", err)
@@ -725,7 +758,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	}
 
 	// Configure connection pool parameters
-	if os.Getenv("DB_DRIVER") == "sqlite" {
+	if dbDriver == "sqlite" {
 		// SQLite only supports one concurrent writer even in WAL mode.
 		// Limiting to a single open connection serialises all DB access and
 		// prevents "database is locked" errors from concurrent goroutines.
