@@ -399,6 +399,7 @@ export default {
       newFolderHintUnder: 'Will be created under “{folder}”',
       success: 'Moved {count} documents',
       failed: 'Could not move the documents',
+      duplicate: 'That folder already exists',
     },
     tagFilterTitle: 'Filter by tag',
     tagFilterPlaceholder: 'Tags',

@@ -842,7 +842,13 @@ const handleFolderRename = async ({ from, to }: { from: string; to: string }) =>
     return;
   }
   try {
-    await renameKnowledgeFolder(kbId.value, from, to);
+    const res: any = await renameKnowledgeFolder(kbId.value, from, to);
+    const movedCount = res?.data?.moved_count ?? 0;
+    if (movedCount === 0) {
+      MessagePlugin.warning(t('knowledgeBase.folderTree.renameFailed'));
+      await loadFolderTree(kbId.value);
+      return;
+    }
     MessagePlugin.success(t('knowledgeBase.folderTree.renameSuccess'));
     // Follow the folder to its new path so the user stays where they were.
     if (selectedFolderPath.value === from) {

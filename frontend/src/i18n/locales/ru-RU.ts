@@ -5158,6 +5158,7 @@ export default {
       newFolderHintUnder: 'Будет создана внутри «{folder}»',
       success: 'Перемещено документов: {count}',
       failed: 'Не удалось переместить документы',
+      duplicate: 'Такая папка уже существует',
     },
     tagFilterTitle: 'Фильтр по тегу',
     tagFilterPlaceholder: 'Теги',

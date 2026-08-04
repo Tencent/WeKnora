@@ -57,6 +57,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { folderOptionFromPath, joinFolderPath, normalizeFolderPath, sortFolderOptions } from '../folderTree'
 
@@ -219,7 +220,10 @@ const commitNewFolder = async () => {
   const name = normalizeFolderPath(newFolderName.value)
   if (!name) return
   const path = joinFolderPath(creatingUnder.value, name)
-  if (displayOptions.value.some((option) => option.path === path)) return
+  if (displayOptions.value.some((option) => option.path === path)) {
+    MessagePlugin.warning(t('knowledgeBase.moveToFolder.duplicate'))
+    return
+  }
 
   if (!localCreatedPaths.value.includes(path)) {
     localCreatedPaths.value = [...localCreatedPaths.value, path]

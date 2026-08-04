@@ -13,6 +13,9 @@ import {
   isFilteringDocuments,
   isFolderUpload,
   joinFolderPath,
+  MAX_FOLDER_DEPTH,
+  MAX_FOLDER_PATH_LENGTH,
+  MAX_FOLDER_SEGMENT_LENGTH,
   normalizeFolderPath,
   ROOT_FOLDER_PATH,
   sortFolderOptions,
@@ -195,6 +198,18 @@ test('folder paths typed by the user are canonicalized like the server does', ()
   assert.equal(normalizeFolderPath('///'), '')
   assert.equal(joinFolderPath('handbook', 'policies '), 'handbook/policies')
   assert.equal(joinFolderPath('', 'handbook'), 'handbook')
+})
+
+test('folder paths typed by the user respect the same depth and length caps as the server', () => {
+  const deep = `${'a/'.repeat(MAX_FOLDER_DEPTH + 5)}a`
+  const normalizedDeep = normalizeFolderPath(deep)
+  assert.equal(normalizedDeep.split('/').filter(Boolean).length, MAX_FOLDER_DEPTH)
+
+  const longSegment = 'x'.repeat(MAX_FOLDER_SEGMENT_LENGTH + 50)
+  assert.equal(normalizeFolderPath(longSegment).length, MAX_FOLDER_SEGMENT_LENGTH)
+
+  const wide = 'y'.repeat(100).concat('/').repeat(12).slice(0, -1)
+  assert.ok(normalizeFolderPath(wide).length <= MAX_FOLDER_PATH_LENGTH)
 })
 
 // Moving a folder into its own subtree would make that subtree unreachable.

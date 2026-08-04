@@ -1185,6 +1185,10 @@ func (h *KnowledgeHandler) RenameKnowledgeFolder(c *gin.Context) {
 		c.Error(errors.NewForbiddenError("No permission to modify knowledge"))
 		return
 	}
+	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
+		c.Error(err)
+		return
+	}
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
 
 	affected, err := h.kgService.RenameKnowledgeFolder(ctx, kbID, req.From, req.To)
