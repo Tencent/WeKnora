@@ -109,6 +109,31 @@ func (w *Rewriter) copyValue(ctx context.Context, value interface{}, depth int) 
 	case string:
 		out := w.String(ctx, typed)
 		return out, out != typed
+	// The references event carries its results twice: once in
+	// StreamResponse.KnowledgeReferences and once in Data. With an in-memory
+	// stream manager these arrive as the typed slice rather than the decoded
+	// []interface{} a Redis round-trip produces, so both forms need a case or
+	// the Data copy leaks handles the caller asked to have resolved.
+	case types.References:
+		return types.References(w.CopyReferences(ctx, typed)), true
+	case []*types.SearchResult:
+		return w.CopyReferences(ctx, typed), true
+	case []string:
+		out := make([]string, len(typed))
+		changed := false
+		for i, item := range typed {
+			out[i] = w.String(ctx, item)
+			changed = changed || out[i] != item
+		}
+		return out, changed
+	case map[string]string:
+		out := make(map[string]string, len(typed))
+		changed := false
+		for key, item := range typed {
+			out[key] = w.String(ctx, item)
+			changed = changed || out[key] != item
+		}
+		return out, changed
 	case map[string]interface{}:
 		out := make(map[string]interface{}, len(typed))
 		changed := false
