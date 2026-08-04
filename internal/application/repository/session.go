@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/database"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -142,18 +143,17 @@ func (r *sessionRepository) GetPagedByTenantID(
 func (r *sessionRepository) QueryPaged(
 	ctx context.Context, q *types.SessionListQuery,
 ) ([]*types.SessionListItem, int64, error) {
-	// Dialect-aware bits so the same query works on Postgres and SQLite (Lite build).
-	isPostgres := r.db.Dialector.Name() == "postgres"
-	titleLikeExpr := "LOWER(s.title) LIKE LOWER(?)"
-	if isPostgres {
-		titleLikeExpr = "s.title ILIKE ?"
-	}
+	dialect := r.db.Dialector.Name()
+	isPostgres := dialect == "postgres"
+	titleLikeExpr := database.CaseInsensitiveMatch(dialect, "s.title")
 	// SQLite (the driver used by Lite) does not support NULLS LAST; its default
 	// nulls ordering puts NULLs first for DESC, which is actually what we want
 	// for pinned_at (rows with pinned_at=NULL are never pinned, so they get
 	// filtered to the tail by the preceding is_pinned DESC anyway).
 	orderClause := "s.is_pinned DESC, s.pinned_at DESC NULLS LAST, s.updated_at DESC"
-	if !isPostgres {
+	if dialect == "mysql" {
+		orderClause = "s.is_pinned DESC, CASE WHEN s.pinned_at IS NULL THEN 1 ELSE 0 END, s.pinned_at DESC, s.updated_at DESC"
+	} else if !isPostgres {
 		orderClause = "s.is_pinned DESC, s.pinned_at DESC, s.updated_at DESC"
 	}
 
