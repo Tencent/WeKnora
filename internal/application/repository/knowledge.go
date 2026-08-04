@@ -150,6 +150,20 @@ func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) 
 	if !filter.UpdatedTo.IsZero() {
 		query = query.Where("updated_at <= ?", filter.UpdatedTo)
 	}
+	switch filter.FolderScope {
+	case types.FolderScopeExact:
+		query = query.Where("folder_path = ?", filter.FolderPath)
+	case types.FolderScopeSubtree:
+		// An empty path means "the whole knowledge base", so no predicate is
+		// needed; otherwise match the folder itself plus everything below it.
+		if filter.FolderPath != "" {
+			query = query.Where(
+				"(folder_path = ? OR folder_path LIKE ?)",
+				filter.FolderPath,
+				escapeLikeKeyword(filter.FolderPath)+"/%",
+			)
+		}
+	}
 	return query
 }
 
@@ -184,6 +198,27 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	}
 
 	return knowledges, total, nil
+}
+
+// ListKnowledgeFolderCounts aggregates how many knowledge entries live directly
+// in each folder of a knowledge base. Rows mid-deletion are excluded so the
+// sidebar tree counts match the document list.
+func (r *knowledgeRepository) ListKnowledgeFolderCounts(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+) ([]*types.KnowledgeFolderCount, error) {
+	var counts []*types.KnowledgeFolderCount
+	if err := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Select("folder_path AS folder_path, COUNT(*) AS count").
+		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ?",
+			tenantID, kbID, types.ParseStatusDeleting).
+		Group("folder_path").
+		Find(&counts).Error; err != nil {
+		return nil, err
+	}
+	return counts, nil
 }
 
 // UpdateKnowledge updates knowledge

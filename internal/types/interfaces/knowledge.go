@@ -84,6 +84,10 @@ type KnowledgeService interface {
 		page *types.Pagination,
 		filter types.KnowledgeListFilter,
 	) (*types.PageResult, error)
+	// ListKnowledgeFolderTree returns the folder hierarchy derived from the
+	// folder_path of every knowledge entry in a knowledge base, with per-folder
+	// document counts. It powers the document sidebar tree.
+	ListKnowledgeFolderTree(ctx context.Context, kbID string) (*types.KnowledgeFolderTree, error)
 	// DeleteKnowledge deletes knowledge by ID.
 	DeleteKnowledge(ctx context.Context, id string) error
 	// DeleteKnowledgeList deletes multiple knowledge entries by IDs.
@@ -241,6 +245,13 @@ type KnowledgeRepository interface {
 		kbID string,
 		params *types.KnowledgeCheckParams,
 	) (bool, *types.Knowledge, error)
+	// ListKnowledgeFolderCounts aggregates the number of knowledge entries
+	// stored directly in each folder_path of a knowledge base.
+	ListKnowledgeFolderCounts(
+		ctx context.Context,
+		tenantID uint64,
+		kbID string,
+	) ([]*types.KnowledgeFolderCount, error)
 	// AminusB returns the IDs of knowledge in A that have no counterpart in B,
 	// comparing file_hash as a multiset (so duplicate-count differences and
 	// NULL/empty hashes are handled correctly, letting a clone converge).

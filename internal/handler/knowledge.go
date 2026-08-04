@@ -925,6 +925,8 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 // @Param        source        query     string  false  "来源/渠道筛选 (web/api/feishu/notion/yuque/wechat/...，或 manual/url 按 type 过滤)"
 // @Param        start_time    query     string  false  "更新时间起点，RFC3339 格式"
 // @Param        end_time      query     string  false  "更新时间终点，RFC3339 格式"
+// @Param        folder_path      query     string  false  "文件夹路径筛选，空字符串表示知识库根目录；不传该参数则不按文件夹过滤"
+// @Param        folder_recursive query     bool    false  "为 true 时同时返回子文件夹内的文档"
 // @Success      200        {object}  map[string]interface{}  "知识列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -976,10 +978,20 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		}
 		filter.UpdatedTo = t
 	}
+	// The folder dimension is opt-in by parameter *presence*: an empty
+	// folder_path is meaningful (the knowledge base root), so it cannot be
+	// distinguished from "no folder filter" by value alone.
+	if raw, ok := c.GetQuery("folder_path"); ok {
+		filter.FolderPath = types.NormalizeKnowledgeFolderPath(raw)
+		filter.FolderScope = types.FolderScopeExact
+		if recursive, err := strconv.ParseBool(c.DefaultQuery("folder_recursive", "false")); err == nil && recursive {
+			filter.FolderScope = types.FolderScopeSubtree
+		}
+	}
 
 	logger.Infof(
 		ctx,
-		"Retrieving knowledge list under knowledge base, kb_id=%s tag_ids=%s keyword=%s file_type=%s parse_status=%s source=%s start_time=%s end_time=%s page=%d page_size=%d effectiveTenantID=%d",
+		"Retrieving knowledge list under knowledge base, kb_id=%s tag_ids=%s keyword=%s file_type=%s parse_status=%s source=%s start_time=%s end_time=%s folder_path=%s folder_scope=%s page=%d page_size=%d effectiveTenantID=%d",
 		secutils.SanitizeForLog(kbID),
 		secutils.SanitizeForLog(strings.Join(filter.TagIDs, ",")),
 		secutils.SanitizeForLog(filter.Keyword),
@@ -988,6 +1000,8 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		secutils.SanitizeForLog(filter.Source),
 		secutils.SanitizeForLog(c.Query("start_time")),
 		secutils.SanitizeForLog(c.Query("end_time")),
+		secutils.SanitizeForLog(filter.FolderPath),
+		string(filter.FolderScope),
 		pagination.Page,
 		pagination.PageSize,
 		effectiveTenantID,
@@ -1013,6 +1027,45 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		"total":     result.Total,
 		"page":      result.Page,
 		"page_size": result.PageSize,
+	})
+}
+
+// ListKnowledgeFolders godoc
+// @Summary      获取知识库文件夹目录树
+// @Description  返回知识库内由文件夹上传形成的目录树，包含每个文件夹的直接文档数与含子目录的总数
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "知识库ID"
+// @Success      200  {object}  map[string]interface{}  "目录树"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/knowledge/folders [get]
+func (h *KnowledgeHandler) ListKnowledgeFolders(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// Read access mirrors ListKnowledge so the sidebar tree is available to
+	// every viewer of a shared knowledge base.
+	_, kbID, effectiveTenantID, _, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	tree, err := h.kgService.ListKnowledgeFolderTree(ctx, kbID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Knowledge folder tree retrieved, kb_id=%s folders=%d",
+		secutils.SanitizeForLog(kbID), len(tree.Folders))
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    tree,
 	})
 }
 
