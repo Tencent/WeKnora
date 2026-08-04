@@ -2558,6 +2558,7 @@ export default {
     refreshSuggestedQuestions: 'More',
     thinking: 'Thinking...',
     thinkingAlt: 'Thinking in progress',
+    restoringGenerationProgress: 'Restoring generation progress…',
     deepThoughtCompleted: 'Deep thinking completed',
     deepThoughtAlt: 'Deep thinking finished',
     referencesTitle: 'Referenced {count} related item(s)',

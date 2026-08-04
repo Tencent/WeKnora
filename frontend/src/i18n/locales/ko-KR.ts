@@ -3046,6 +3046,7 @@ export default {
     refreshSuggestedQuestions: '다른 질문',
     thinking: '생각 중...',
     thinkingAlt: '생각 중',
+    restoringGenerationProgress: '생성 진행 상황을 복원하고 있습니다…',
     deepThoughtCompleted: '심층 분석 완료',
     deepThoughtAlt: '심층 분석 완료',
     referencesTitle: '{count}개의 관련 내용 참조',

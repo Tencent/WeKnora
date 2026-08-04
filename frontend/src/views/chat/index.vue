@@ -83,13 +83,14 @@
                         </usermsg>
                     </div>
                     <div v-if="session.role == 'assistant' && shouldRenderAssistantMessage(session)">
-                        <botmsg :content="session.content" :session="session" :session-id="session_id"
+                        <StreamRecoveryProgress v-if="session.isRecoveringStream" />
+                        <botmsg v-else :content="session.content" :session="session" :session-id="session_id"
                             :user-query="getUserQuery(index)" @scroll-bottom="scrollToBottom"
                             :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"
                             :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
                             @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
                         </botmsg>
-                        <FollowUpSuggestions v-if="session.answerFullyRendered && !session.suggestionsDismissed"
+                        <FollowUpSuggestions v-if="!session.isRecoveringStream && session.answerFullyRendered && !session.suggestionsDismissed"
                             :suggestion-set="session.suggestionSet"
                             :loading="session.suggestionLoading"
                             :allow-regenerate="session.suggestionSet?.allow_regenerate"
@@ -147,6 +148,7 @@ import { clearCitationChunkCache } from '@/utils/citationChunkCache';
 import ChatReferencesDrawer from '@/components/ChatReferencesDrawer.vue';
 import ChatAttachmentPreviewDrawer from '@/components/ChatAttachmentPreviewDrawer.vue';
 import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue';
+import StreamRecoveryProgress from '@/components/chat/StreamRecoveryProgress.vue';
 import ChatHeader from '@/components/ChatHeader.vue';
 import {
     notifySessionMutation,
@@ -537,6 +539,7 @@ const {
     processStreamChunk,
     prepareForNewOutgoingMessage,
     markInFlightAssistantStopped,
+    clearActiveStreamRecovery,
 } = useChatStreamHandler({
     messagesList,
     loading,
@@ -851,7 +854,12 @@ const recoverIncompleteMessage = () => {
     const targetSession = session_id.value;
     const targetMessageId = currentAssistantMessageId.value;
     if (recoverPollTimer) { clearTimeout(recoverPollTimer); recoverPollTimer = null; }
-    if (!targetMessageId) { isReplying.value = false; isImRecovering.value = false; return; }
+    if (!targetMessageId) {
+        clearActiveStreamRecovery();
+        isReplying.value = false;
+        isImRecovering.value = false;
+        return;
+    }
     isImRecovering.value = true; // show the "generating" indicator while we poll
     let attempts = 0;
     const poll = async () => {
@@ -877,6 +885,7 @@ const recoverIncompleteMessage = () => {
             // The IM reply never completed — don't hide it; surface the standard
             // stream-failure message (reuses the existing i18n key, no raw HTTP code).
             MessagePlugin.error(t('error.streamFailed'));
+            clearActiveStreamRecovery();
             isReplying.value = false;
             isImRecovering.value = false;
             currentAssistantMessageId.value = '';
@@ -900,6 +909,7 @@ watch(error, (newError) => {
         return;
     }
     MessagePlugin.error(newError);
+    clearActiveStreamRecovery();
     isReplying.value = false;
     loading.value = false;
     // 清空当前 assistant message ID
