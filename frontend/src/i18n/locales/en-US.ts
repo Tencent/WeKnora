@@ -5136,18 +5136,21 @@ export default {
       lark: 'Lark',
       notion: 'Notion',
       yuque: 'Yuque',
-      rss: 'RSS / Atom Feed'
+      dingtalk: 'DingTalk Docs',
+      rss: 'RSS / Atom Feed',
     },
     connectorDesc: {
       feishu: 'Sync documents, spreadsheets and files from Feishu Wiki',
       lark: 'Sync documents, spreadsheets and files from Lark Wiki (Feishu international)',
       notion: 'Sync pages and databases from Notion',
       yuque: 'Sync documents from Yuque knowledge bases',
-      rss: 'Sync articles from RSS / Atom feeds'
+      dingtalk: 'Sync documents from DingTalk document spaces',
+      rss: 'Sync articles from RSS / Atom feeds',
     },
     field: {
       appId: 'App ID',
       appSecret: 'App Secret',
+      appKey: 'AppKey',
       integrationToken: 'Integration Token',
       apiToken: 'API Token',
       baseUrl: 'Base URL (optional)',
@@ -5193,7 +5196,8 @@ export default {
     resourceType: {
       wikiSpace: 'Wiki Space',
       docCategory: 'Document Tag',
-      book: 'Yuque Book'
+      book: 'Yuque Book',
+      space: 'DingTalk Space',
     },
     neverSynced: 'Never synced',
     justNow: 'Just now',
