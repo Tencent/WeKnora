@@ -67,10 +67,11 @@ func (h *MessageHandler) resolveResourceRewriter(c *gin.Context) (*storageurl.Re
 // @Tags         消息
 // @Accept       json
 // @Produce      json
-// @Param        session_id   path      string  true   "会话ID"
-// @Param        limit        query     int     false  "返回数量"  default(20)
-// @Param        before_time  query     string  false  "在此时间之前的消息（RFC3339Nano格式）"
-// @Success      200          {object}  map[string]interface{}  "消息列表"
+// @Param        session_id     path      string  true   "会话ID"
+// @Param        limit          query     int     false  "返回数量"  default(20)
+// @Param        before_time    query     string  false  "在此时间之前的消息（RFC3339Nano格式）"
+// @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
+// @Success      200            {object}  map[string]interface{}  "消息列表"
 // @Failure      400          {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -91,7 +92,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 	rewriter, err := h.resolveResourceRewriter(c)
 	if err != nil {
 		logger.Warnf(ctx, "Invalid resource URL mode: %v", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
