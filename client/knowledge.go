@@ -321,7 +321,9 @@ func (c *Client) ListKnowledge(ctx context.Context,
 
 // KnowledgeListFilter mirrors the server-side filters accepted by GET
 // /api/v1/knowledge-bases/{id}/knowledge. Empty / zero fields are omitted from
-// the request.
+// the request. FolderPath, when non-nil, selects a folder scope; the empty
+// string means the knowledge base root. Omit FolderPath entirely for a flat
+// listing across every folder.
 type KnowledgeListFilter struct {
 	TagID       string
 	Keyword     string
@@ -332,6 +334,8 @@ type KnowledgeListFilter struct {
 	// They are serialized in RFC3339 format.
 	StartTime time.Time
 	EndTime   time.Time
+	FolderPath      *string
+	FolderRecursive bool
 }
 
 // ListKnowledgeWithFilter lists knowledge entries with the full filter surface.
@@ -367,6 +371,12 @@ func (c *Client) ListKnowledgeWithFilter(ctx context.Context,
 	if !filter.EndTime.IsZero() {
 		queryParams.Add("end_time", filter.EndTime.Format(time.RFC3339))
 	}
+	if filter.FolderPath != nil {
+		queryParams.Add("folder_path", *filter.FolderPath)
+		if filter.FolderRecursive {
+			queryParams.Add("folder_recursive", "true")
+		}
+	}
 
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, queryParams)
 	if err != nil {
@@ -379,6 +389,105 @@ func (c *Client) ListKnowledgeWithFilter(ctx context.Context,
 	}
 
 	return response.Data, response.Total, nil
+}
+
+// KnowledgeFolderNode is one node of the knowledge base folder tree.
+type KnowledgeFolderNode struct {
+	Path          string                 `json:"path"`
+	Name          string                 `json:"name"`
+	DocumentCount int64                  `json:"document_count"`
+	TotalCount    int64                  `json:"total_count"`
+	Children      []*KnowledgeFolderNode `json:"children,omitempty"`
+}
+
+// KnowledgeFolderTree is returned by ListKnowledgeFolders.
+type KnowledgeFolderTree struct {
+	RootDocumentCount  int64                  `json:"root_document_count"`
+	TotalDocumentCount int64                  `json:"total_document_count"`
+	Folders            []*KnowledgeFolderNode `json:"folders"`
+}
+
+// ListKnowledgeFolders returns the folder hierarchy of a knowledge base.
+func (c *Client) ListKnowledgeFolders(ctx context.Context, knowledgeBaseID string) (*KnowledgeFolderTree, error) {
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/folders", knowledgeBaseID)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool                 `json:"success"`
+		Data    *KnowledgeFolderTree `json:"data"`
+	}
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+	return response.Data, nil
+}
+
+// MoveKnowledgeToFolderRequest re-files knowledge entries under a folder path.
+type MoveKnowledgeToFolderRequest struct {
+	KBID       string   `json:"kb_id"`
+	IDs        []string `json:"knowledge_ids"`
+	FolderPath string   `json:"folder_path"`
+}
+
+// MoveKnowledgeToFolderResponse is the payload of POST /knowledge/folder.
+type MoveKnowledgeToFolderResponse struct {
+	MovedCount int64  `json:"moved_count"`
+	FolderPath string `json:"folder_path"`
+}
+
+// MoveKnowledgeToFolder updates folder_path for the given knowledge entries.
+// An empty FolderPath moves documents back to the knowledge base root.
+func (c *Client) MoveKnowledgeToFolder(ctx context.Context, req *MoveKnowledgeToFolderRequest) (*MoveKnowledgeToFolderResponse, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/knowledge/folder", req, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool                           `json:"success"`
+		Data    *MoveKnowledgeToFolderResponse `json:"data"`
+	}
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+	return response.Data, nil
+}
+
+// RenameKnowledgeFolderRequest moves a folder and its subtree to a new path.
+type RenameKnowledgeFolderRequest struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// RenameKnowledgeFolderResponse is the payload of PUT .../knowledge/folders.
+type RenameKnowledgeFolderResponse struct {
+	MovedCount int64  `json:"moved_count"`
+	FolderPath string `json:"folder_path"`
+}
+
+// RenameKnowledgeFolder rewrites folder_path for a folder and every descendant.
+func (c *Client) RenameKnowledgeFolder(
+	ctx context.Context,
+	knowledgeBaseID string,
+	req *RenameKnowledgeFolderRequest,
+) (*RenameKnowledgeFolderResponse, error) {
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/folders", knowledgeBaseID)
+	resp, err := c.doRequest(ctx, http.MethodPut, path, req, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool                           `json:"success"`
+		Data    *RenameKnowledgeFolderResponse `json:"data"`
+	}
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+	return response.Data, nil
 }
 
 // DeleteKnowledge enqueues an asynchronous delete for the given knowledge entry.

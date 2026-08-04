@@ -5158,6 +5158,7 @@ export default {
       newFolderHintUnder: '将在「{folder}」下创建',
       success: '已移动 {count} 个文档',
       failed: '移动失败',
+      duplicate: '该目录已存在',
     },
     tagFilterTitle: '按标签筛选',
     tagFilterPlaceholder: '标签',

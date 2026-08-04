@@ -10,6 +10,8 @@
 | POST   | `/knowledge-bases/:id/knowledge/url`       | 从 URL 创建知识（网页抓取或文件下载）       |
 | POST   | `/knowledge-bases/:id/knowledge/manual`    | 创建手工 Markdown 知识                     |
 | GET    | `/knowledge-bases/:id/knowledge`           | 列出知识库下的知识（支持分页/筛选）         |
+| GET    | `/knowledge-bases/:id/knowledge/folders`   | 获取知识库文件夹目录树                       |
+| PUT    | `/knowledge-bases/:id/knowledge/folders`   | 重命名或移动文件夹（含子目录）               |
 | DELETE | `/knowledge-bases/:id/knowledge`           | 清空知识库下的所有知识（异步任务）         |
 | GET    | `/knowledge/batch`                         | 按 ID 列表批量获取知识                     |
 | GET    | `/knowledge/:id`                           | 获取知识详情                               |
@@ -25,6 +27,7 @@
 | GET    | `/knowledge/search`                        | 跨知识库搜索/过滤知识                      |
 | POST   | `/knowledge/batch-reparse`                 | 同一知识库内批量重新解析知识（异步任务）   |
 | POST   | `/knowledge/batch-delete`                  | 同一知识库内批量删除知识（异步任务）       |
+| POST   | `/knowledge/folder`                        | 批量移动知识到指定文件夹（仅改归类）       |
 | POST   | `/knowledge/move`                          | 迁移知识到另一知识库（异步任务）           |
 | GET    | `/knowledge/move/progress/:task_id`        | 查询知识迁移任务进度                       |
 
@@ -276,6 +279,10 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 | `source`       | string  | -    | 按来源/渠道过滤：`web` / `api` / `browser_extension` / `feishu` / `notion` / `yuque` / `wechat` 等； 特殊值 `manual` / `url` 命中 `type` 列 |
 | `start_time`   | string  | -    | 更新时间起点，接受 RFC3339 (`2024-05-01T00:00:00+08:00`) 或 `YYYY-MM-DD HH:MM:SS` / `YYYY-MM-DD`     |
 | `end_time`     | string  | -    | 更新时间终点，格式同 `start_time`                                                                   |
+| `folder_path`  | string  | -    | 按文件夹路径筛选；**仅当传入该参数时启用文件夹维度**。空字符串表示知识库根目录（不含子文件夹中的文档）；不传则列出全部文件夹下的文档（扁平视图） |
+| `folder_recursive` | bool | false | 为 `true` 时同时返回 `folder_path` 子目录内的文档；仅在传入 `folder_path` 时生效 |
+
+> **文件夹筛选语义**：`folder_path` 是否出现在 query 中决定列表模式，不能仅凭空字符串区分「根目录」与「不按文件夹过滤」。集成方若需要浏览某一文件夹，应显式传 `folder_path`（根目录传 `folder_path=`）；若需要全库扁平列表，则省略该参数。
 
 **请求**:
 
@@ -304,6 +311,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
             "enable_status": "disabled",
             "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
             "file_name": "",
+            "folder_path": "",
             "file_type": "",
             "file_size": 0,
             "file_hash": "",
@@ -321,6 +329,88 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
     "page_size": 1,
     "total": 2,
     "success": true
+}
+```
+
+## GET `/knowledge-bases/:id/knowledge/folders` - 获取文件夹目录树
+
+返回由 `folder_path` 聚合而成的目录树，包含每个文件夹的直接文档数与含子目录的总数。只读，权限与列出知识相同（Viewer+ 且对 KB 有 read 权限）。
+
+**响应**:
+
+```json
+{
+    "success": true,
+    "data": {
+        "root_document_count": 2,
+        "total_document_count": 10,
+        "folders": [
+            {
+                "path": "docs",
+                "name": "docs",
+                "document_count": 0,
+                "total_count": 4,
+                "children": [
+                    {
+                        "path": "docs/spec",
+                        "name": "spec",
+                        "document_count": 3,
+                        "total_count": 4,
+                        "children": []
+                    }
+                ]
+            }
+        ]
+    }
+}
+```
+
+## PUT `/knowledge-bases/:id/knowledge/folders` - 重命名或移动文件夹
+
+把一个文件夹及其所有子目录改到新路径。目标路径已存在时两个文件夹合并；不能移动到自身子目录下。需要 KB **创建者**或 Admin+，且对 KB 有 write 权限。
+
+**请求体**:
+
+| 字段   | 类型   | 必填 | 说明                         |
+| ------ | ------ | ---- | ---------------------------- |
+| `from` | string | 是   | 源文件夹路径（不能为空）     |
+| `to`   | string | 是   | 目标文件夹路径（不能为空）   |
+
+**响应**:
+
+```json
+{
+    "success": true,
+    "data": {
+        "moved_count": 3,
+        "folder_path": "handbook"
+    }
+}
+```
+
+`moved_count` 为 0 表示源文件夹不存在或已是 no-op。
+
+## POST `/knowledge/folder` - 批量移动知识到文件夹
+
+批量修改知识条目的 `folder_path`，仅调整归类，**不会**重新解析、分块或向量化。目标路径不存在时会自动创建；空路径表示移回知识库根目录。需要 editor/admin 且为 KB 创建者或 Admin+。
+
+**请求体**:
+
+| 字段            | 类型     | 必填 | 说明                                      |
+| --------------- | -------- | ---- | ----------------------------------------- |
+| `kb_id`         | string   | 是   | 知识库 ID                                 |
+| `knowledge_ids` | string[] | 是   | 知识 ID 列表（最多 200 条）               |
+| `folder_path`   | string   | 否   | 目标文件夹路径；省略或空字符串表示根目录 |
+
+**响应**:
+
+```json
+{
+    "success": true,
+    "data": {
+        "moved_count": 2,
+        "folder_path": "archive/2026"
+    }
 }
 ```
 

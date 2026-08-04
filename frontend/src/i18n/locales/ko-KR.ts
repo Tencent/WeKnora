@@ -5158,6 +5158,7 @@ export default {
       newFolderHintUnder: '「{folder}」 아래에 생성됩니다',
       success: '문서 {count}개를 이동했습니다',
       failed: '문서를 이동할 수 없습니다',
+      duplicate: '이미 존재하는 폴더입니다',
     },
     tagFilterTitle: '태그로 필터',
     tagFilterPlaceholder: '태그',

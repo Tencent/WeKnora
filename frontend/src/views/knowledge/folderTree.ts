@@ -10,6 +10,13 @@ import type { KnowledgeFolderNode, KnowledgeFolderTree } from '@/api/knowledge-b
  */
 export const ROOT_FOLDER_PATH = ''
 
+/** Keep in sync with types.MaxKnowledgeFolderDepth on the server. */
+export const MAX_FOLDER_DEPTH = 16
+/** Keep in sync with types.MaxKnowledgeFolderSegmentLength on the server. */
+export const MAX_FOLDER_SEGMENT_LENGTH = 128
+/** Keep in sync with types.MaxKnowledgeFolderPathLength on the server. */
+export const MAX_FOLDER_PATH_LENGTH = 1024
+
 /** Minimal shape of the browser File objects the upload flow deals with. */
 export type UploadFileLike = {
   name: string
@@ -199,12 +206,23 @@ export function isFilteringDocuments(filters: {
  * move dialog can preview and compare the destination it is about to send.
  */
 export function normalizeFolderPath(path: string): string {
-  return path
-    .replace(/\\/g, '/')
-    .split('/')
-    .map((segment) => segment.trim().replace(/[. ]+$/, ''))
-    .filter((segment) => segment && segment !== '.' && segment !== '..')
-    .join('/')
+  const segments: string[] = []
+  for (const raw of path.replace(/\\/g, '/').split('/')) {
+    let segment = raw.trim().replace(/[. ]+$/, '')
+    if (!segment || segment === '.' || segment === '..') continue
+    if (segment.length > MAX_FOLDER_SEGMENT_LENGTH) {
+      segment = segment.slice(0, MAX_FOLDER_SEGMENT_LENGTH).trim()
+    }
+    if (!segment) continue
+    segments.push(segment)
+    if (segments.length >= MAX_FOLDER_DEPTH) break
+  }
+  let normalized = segments.join('/')
+  while (normalized.length > MAX_FOLDER_PATH_LENGTH && segments.length > 0) {
+    segments.pop()
+    normalized = segments.join('/')
+  }
+  return normalized
 }
 
 /** Destination path for a new sub-folder of `parent`. */
