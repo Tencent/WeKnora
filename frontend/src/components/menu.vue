@@ -1885,6 +1885,83 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 .menu_box {
     position: relative;
 }
+
+/*
+ * 手机端保留可用的图标导航栏，同时释放聊天内容宽度。这里沿用桌面端的
+ * collapsed 布局尺寸，但不改写用户保存在 localStorage 中的桌面侧栏偏好。
+ */
+@media screen and (max-width: 767px) {
+    .aside_box {
+        min-width: 60px;
+        width: 60px;
+        padding: max(8px, env(safe-area-inset-top)) 3px max(6px, env(safe-area-inset-bottom));
+        overflow: visible;
+
+        :deep(.tenant-selector),
+        .submenu,
+        .batch-inline-footer,
+        .menu_title,
+        .menu-pending-badge {
+            display: none;
+        }
+
+        .logo_row {
+            justify-content: center;
+            height: 44px;
+            padding: 0;
+
+            .logo_box,
+            .sidebar-toggle {
+                display: none;
+            }
+
+            .logo_actions {
+                gap: 0;
+            }
+        }
+
+        .menu_item {
+            justify-content: center;
+            padding: 9px 0;
+
+            .menu_item-box {
+                justify-content: center;
+                width: auto;
+            }
+        }
+
+        .menu_icon {
+            margin-right: 0;
+        }
+
+        .menu_top {
+            margin-right: 0;
+            padding-right: 0;
+        }
+
+        .menu_bottom {
+            align-items: center;
+        }
+
+        :deep(.user-menu .user-button) {
+            justify-content: center;
+            gap: 0;
+            padding: 6px 3px;
+        }
+
+        :deep(.user-menu .user-info),
+        :deep(.user-menu .dropdown-icon) {
+            display: none;
+        }
+
+        :deep(.user-menu .user-dropdown) {
+            left: calc(100% + 8px);
+            right: auto;
+            bottom: 0;
+            min-width: min(260px, calc(100vw - 76px));
+        }
+    }
+}
 </style>
 <style lang="less">
 // Dark mode: invert dark logo to light

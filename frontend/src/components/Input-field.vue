@@ -2746,7 +2746,9 @@ const getImgSrc = (url: string) => {
   bottom: 60px;
   left: 50%;
   transform: translateX(-50%);
-  width: 100%;
+  width: min(960px, 100%);
+  min-width: 0;
+  box-sizing: border-box;
   display: flex;
   justify-content: center;
 
@@ -2767,7 +2769,9 @@ const getImgSrc = (url: string) => {
 .rich-input-container {
   position: relative;
   width: 100%;
+  min-width: 0;
   max-width: 960px;
+  box-sizing: border-box;
   background: var(--td-bg-color-container, #FFF);
   border-radius: 12px;
   border: 1px solid var(--td-component-stroke, #dcdcdc);
@@ -3766,6 +3770,112 @@ const getImgSrc = (url: string) => {
   &:hover {
     color: var(--td-brand-color-active);
     text-decoration: underline;
+  }
+}
+
+/* 平板与手机共享父容器的可用宽度，不再依赖固定像素宽度或水平位移。 */
+@media screen and (max-width: 1199px) {
+  .answers-input {
+    width: 100%;
+    padding-inline: 16px;
+  }
+
+  .answers-input.is-embedded {
+    padding-inline: 0;
+  }
+}
+
+@media screen and (max-width: 767px) {
+  .answers-input {
+    bottom: max(12px, env(safe-area-inset-bottom));
+    padding-inline: 12px;
+  }
+
+  .answers-input.is-embedded {
+    padding-inline: 0;
+  }
+
+  .rich-input-container {
+    max-width: none;
+    border-radius: 10px;
+  }
+
+  :deep(.t-textarea__inner) {
+    min-height: 96px !important;
+    max-height: min(160px, 32dvh) !important;
+    padding: 10px 12px 50px;
+    border-radius: 0 0 10px 10px;
+  }
+
+  .rich-input-container:not(:has(.selected-tags-inline)) :deep(.t-textarea__inner) {
+    padding-top: 12px;
+    border-radius: 10px;
+  }
+
+  .selected-tags-inline {
+    max-height: 72px;
+    padding: 6px 10px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .control-bar {
+    bottom: 8px;
+    left: 10px;
+    right: 10px;
+    gap: 4px;
+    flex-wrap: nowrap;
+    max-height: 36px;
+    padding-top: 4px;
+  }
+
+  .control-left {
+    min-width: 0;
+    gap: 4px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
+  .control-right {
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  .control-btn {
+    padding-inline: 6px;
+  }
+
+  .agent-mode-btn {
+    max-width: 112px;
+    padding-inline: 6px;
+  }
+
+  .agent-mode-text {
+    max-width: 76px;
+    margin-inline: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .model-display {
+    margin-left: 0;
+  }
+
+  .model-selector-trigger {
+    min-width: 72px;
+    max-width: 104px;
+    padding-inline: 6px;
+  }
+
+  .image-preview-item {
+    width: 48px;
+    height: 48px;
   }
 }
 </style>
