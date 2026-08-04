@@ -26,7 +26,8 @@
 # 其它镜像(app/docreader/sandbox)的 Dockerfile 都不引用 frontend/,
 # 所以这里可以直接排除整个 frontend/ 目录。
 **/node_modules/
-frontend/
+frontend/node_modules/
+frontend/dist/
 WeKnora-Chrome-Extension/
 
 # 日志 / 临时文件
