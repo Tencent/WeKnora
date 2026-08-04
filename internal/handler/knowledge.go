@@ -1069,6 +1069,208 @@ func (h *KnowledgeHandler) ListKnowledgeFolders(c *gin.Context) {
 	})
 }
 
+// MoveKnowledgeToFolderRequest is the body schema for POST /knowledge/folder.
+type MoveKnowledgeToFolderRequest struct {
+	KBID string   `json:"kb_id" binding:"required"`
+	IDs  []string `json:"knowledge_ids" binding:"required"`
+	// FolderPath is the destination folder; the empty string is the knowledge
+	// base top level. It is deliberately not `binding:"required"` so documents
+	// can be moved back out of every folder.
+	FolderPath string `json:"folder_path"`
+}
+
+// MoveKnowledgeToFolder godoc
+// @Summary      移动知识到文件夹
+// @Description  批量修改知识条目所属文件夹。文件夹由路径推导而来，因此目标路径不存在时会自动创建；空路径表示知识库顶层。仅调整归类，不会重新解析文档
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      MoveKnowledgeToFolderRequest  true  "移动请求"
+// @Success      200      {object}  map[string]interface{}        "移动成功"
+// @Failure      400      {object}  errors.AppError               "请求参数错误"
+// @Failure      403      {object}  errors.AppError               "权限不足"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/folder [post]
+func (h *KnowledgeHandler) MoveKnowledgeToFolder(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req MoveKnowledgeToFolderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
+		return
+	}
+
+	ids := dedupeKnowledgeIDs(req.IDs)
+	if len(ids) == 0 {
+		c.Error(errors.NewBadRequestError("knowledge_ids cannot be empty"))
+		return
+	}
+	const maxBatch = 200
+	if len(ids) > maxBatch {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("too many ids (max %d per batch)", maxBatch)))
+		return
+	}
+
+	kbID, effectiveTenantID, err := h.requireKnowledgeWriteAccess(c, req.KBID)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	// Guard against cross-KB moves: the service layer scopes by tenant, so the
+	// handler must confirm every entry belongs to the requested knowledge base.
+	if err := h.requireKnowledgeInKB(ctx, effectiveTenantID, kbID, ids); err != nil {
+		c.Error(err)
+		return
+	}
+
+	affected, err := h.kgService.MoveKnowledgeToFolder(ctx, kbID, ids, req.FolderPath)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"moved_count": affected,
+			"folder_path": types.NormalizeKnowledgeFolderPath(req.FolderPath),
+		},
+	})
+}
+
+// RenameKnowledgeFolderRequest is the body schema for
+// PUT /knowledge-bases/:id/knowledge/folders.
+type RenameKnowledgeFolderRequest struct {
+	From string `json:"from" binding:"required"`
+	To   string `json:"to"   binding:"required"`
+}
+
+// RenameKnowledgeFolder godoc
+// @Summary      重命名或移动文件夹
+// @Description  把一个文件夹及其所有子目录改到新路径。目标路径已存在时两个文件夹合并；不能移动到自身子目录下
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                        true  "知识库ID"
+// @Param        request  body      RenameKnowledgeFolderRequest  true  "重命名请求"
+// @Success      200      {object}  map[string]interface{}        "重命名成功"
+// @Failure      400      {object}  errors.AppError               "请求参数错误"
+// @Failure      403      {object}  errors.AppError               "权限不足"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/knowledge/folders [put]
+func (h *KnowledgeHandler) RenameKnowledgeFolder(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req RenameKnowledgeFolderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
+		return
+	}
+
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("No permission to modify knowledge"))
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	affected, err := h.kgService.RenameKnowledgeFolder(ctx, kbID, req.From, req.To)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"moved_count": affected,
+			"folder_path": types.NormalizeKnowledgeFolderPath(req.To),
+		},
+	})
+}
+
+// dedupeKnowledgeIDs trims, drops empty and de-duplicates a batch of IDs while
+// preserving the caller's order.
+func dedupeKnowledgeIDs(raw []string) []string {
+	seen := make(map[string]struct{}, len(raw))
+	ids := make([]string, 0, len(raw))
+	for _, item := range raw {
+		id := strings.TrimSpace(item)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// requireKnowledgeWriteAccess resolves a knowledge base from a request body and
+// enforces the editor-or-admin plus ownership gate shared by the batch routes.
+func (h *KnowledgeHandler) requireKnowledgeWriteAccess(
+	c *gin.Context,
+	requestedKBID string,
+) (string, uint64, error) {
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, requestedKBID)
+	if err != nil {
+		return "", 0, err
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		return "", 0, errors.NewForbiddenError("No permission to modify knowledge")
+	}
+	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
+		return "", 0, err
+	}
+	return kbID, effectiveTenantID, nil
+}
+
+// requireKnowledgeInKB verifies every ID exists and belongs to the given
+// knowledge base, so a batch operation cannot reach across knowledge bases.
+func (h *KnowledgeHandler) requireKnowledgeInKB(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	ids []string,
+) error {
+	knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, tenantID, ids)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		return errors.NewInternalServerError(err.Error())
+	}
+	if len(knowledgeList) != len(ids) {
+		return errors.NewBadRequestError("One or more knowledge entries not found")
+	}
+	for _, k := range knowledgeList {
+		if k.KnowledgeBaseID != kbID {
+			return errors.NewBadRequestError(
+				fmt.Sprintf("Knowledge %s does not belong to knowledge base %s",
+					secutils.SanitizeForLog(k.ID), secutils.SanitizeForLog(kbID)))
+		}
+	}
+	return nil
+}
+
 // DeleteKnowledge godoc
 // @Summary      删除知识
 // @Description  根据ID异步删除知识条目。请求会被入队到与批量删除相同的异步管道（asynq）；
@@ -1156,20 +1358,7 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 		return
 	}
 
-	// Deduplicate and drop empty IDs.
-	seen := make(map[string]struct{}, len(req.IDs))
-	ids := make([]string, 0, len(req.IDs))
-	for _, raw := range req.IDs {
-		id := strings.TrimSpace(raw)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
-	}
+	ids := dedupeKnowledgeIDs(req.IDs)
 	if len(ids) == 0 {
 		c.Error(errors.NewBadRequestError("ids cannot be empty"))
 		return

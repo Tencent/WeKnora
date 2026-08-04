@@ -26,25 +26,6 @@
       </t-tooltip>
     </div>
 
-    <!-- Labeled rather than an icon toggle: this switch is what makes the
-         documents outside every folder reachable, so it must be readable at a
-         glance instead of hiding behind a tooltip. -->
-    <div v-if="!collapsed" class="kb-folder-scope" role="group"
-      :aria-label="t('knowledgeBase.folderTree.scopeToggle')">
-      <t-tooltip :content="t('knowledgeBase.folderTree.scopeSubtreeTip')" placement="bottom">
-        <button type="button" class="kb-folder-scope__btn" :class="{ active: recursive }"
-          :aria-pressed="recursive" @click="emit('update:recursive', true)">
-          {{ t('knowledgeBase.folderTree.scopeSubtree') }}
-        </button>
-      </t-tooltip>
-      <t-tooltip :content="t('knowledgeBase.folderTree.scopeDirectTip')" placement="bottom">
-        <button type="button" class="kb-folder-scope__btn" :class="{ active: !recursive }"
-          :aria-pressed="!recursive" @click="emit('update:recursive', false)">
-          {{ t('knowledgeBase.folderTree.scopeDirect') }}
-        </button>
-      </t-tooltip>
-    </div>
-
     <div v-if="!collapsed" class="kb-folder-tree__body">
       <template v-if="loading && !tree">
         <div v-for="n in 5" :key="'folder-skel-' + n" class="kb-folder-tree__skeleton">
@@ -52,15 +33,17 @@
         </div>
       </template>
       <template v-else>
-        <button
+        <div
           v-for="row in rows"
           :key="row.path || '__root__'"
-          type="button"
           class="kb-folder-row"
           :class="{ active: selectedPath === row.path, 'is-root': row.kind === 'root' }"
           :style="{ '--kb-folder-depth': row.depth }"
-          :title="rowTitle(row)"
+          :title="row.kind === 'root' ? t('knowledgeBase.folderTree.rootRowTip') : row.path"
+          role="button"
+          tabindex="0"
           @click="emit('select', row.path)"
+          @keydown.enter="emit('select', row.path)"
         >
           <span
             v-if="row.hasChildren"
@@ -74,70 +57,84 @@
             <t-icon :name="isExpanded(row.path) ? 'chevron-down' : 'chevron-right'" />
           </span>
           <span v-else class="kb-folder-row__toggle-placeholder" aria-hidden="true" />
-          <t-icon :name="rowIcon(row)" class="kb-folder-row__icon" />
-          <span class="kb-folder-row__label">{{ rowLabel(row) }}</span>
-          <span class="kb-folder-row__count">{{ folderRowCount(row, recursive) }}</span>
-        </button>
+
+          <t-icon
+            :name="row.kind === 'root' || (row.hasChildren && isExpanded(row.path)) ? 'folder-open' : 'folder'"
+            class="kb-folder-row__icon"
+          />
+
+          <input
+            v-if="renamingPath === row.path"
+            ref="renameInputRef"
+            v-model="renameValue"
+            class="kb-folder-row__rename"
+            :placeholder="t('knowledgeBase.folderTree.renamePlaceholder')"
+            @click.stop
+            @keydown.enter="commitRename(row)"
+            @keydown.esc="cancelRename"
+            @blur="commitRename(row)"
+          />
+          <template v-else>
+            <span class="kb-folder-row__label">
+              {{ row.kind === 'root' ? t('knowledgeBase.folderTree.rootRow') : row.name }}
+            </span>
+            <t-tooltip v-if="canEdit && row.kind === 'folder'"
+              :content="t('knowledgeBase.folderTree.rename')" placement="top">
+              <button type="button" class="kb-folder-row__action"
+                :aria-label="t('knowledgeBase.folderTree.rename')" @click.stop="startRename(row)">
+                <t-icon name="edit" />
+              </button>
+            </t-tooltip>
+            <span class="kb-folder-row__count">{{ row.totalCount }}</span>
+          </template>
+        </div>
       </template>
     </div>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { KnowledgeFolderTree } from '@/api/knowledge-base/index'
 import {
   buildFolderRows,
   folderAncestorPaths,
-  folderRowCount,
-  rootRowLabelKey,
-  rootRowTitleKey,
+  joinFolderPath,
   ROOT_FOLDER_PATH,
   type FolderRow,
 } from '../folderTree'
 
 const props = withDefaults(defineProps<{
   tree: KnowledgeFolderTree | null
-  /** Selected folder path; the empty string is the knowledge base root. */
+  /** Selected folder path; the empty string is the knowledge base top level. */
   selectedPath: string
   loading?: boolean
   collapsed?: boolean
-  /** When true a folder lists its sub-folders' documents too. */
-  recursive?: boolean
+  canEdit?: boolean
 }>(), {
   loading: false,
   collapsed: false,
-  recursive: true,
+  canEdit: false,
 })
 
 const emit = defineEmits<{
   select: [path: string]
   'update:collapsed': [collapsed: boolean]
-  'update:recursive': [recursive: boolean]
+  rename: [payload: { from: string; to: string }]
 }>()
 
 const { t } = useI18n()
 
 // The root starts expanded so the uploaded structure is visible without a click.
 const expanded = ref(new Set<string>([ROOT_FOLDER_PATH]))
+const renamingPath = ref('')
+const renameValue = ref('')
+const renameInputRef = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
 
 const rows = computed(() => buildFolderRows(props.tree, expanded.value))
 
 const isExpanded = (path: string) => expanded.value.has(path)
-
-const rowLabel = (row: FolderRow) =>
-  row.kind === 'root' ? t(rootRowLabelKey(props.recursive)) : row.name
-
-const rowIcon = (row: FolderRow) => {
-  // Direct scope on the root lists the loose documents rather than the whole
-  // base, so the icon drops the "folder" metaphor it no longer stands for.
-  if (row.kind === 'root') return props.recursive ? 'folder-open' : 'file-1'
-  return row.hasChildren && isExpanded(row.path) ? 'folder-open' : 'folder'
-}
-
-const rowTitle = (row: FolderRow) =>
-  row.kind === 'root' ? t(rootRowTitleKey(props.recursive)) : row.path
 
 const toggle = (path: string) => {
   const next = new Set(expanded.value)
@@ -146,9 +143,33 @@ const toggle = (path: string) => {
   expanded.value = next
 }
 
+const startRename = async (row: FolderRow) => {
+  renamingPath.value = row.path
+  renameValue.value = row.name
+  await nextTick()
+  const input = Array.isArray(renameInputRef.value) ? renameInputRef.value[0] : renameInputRef.value
+  input?.focus()
+  input?.select()
+}
+
+const cancelRename = () => {
+  renamingPath.value = ''
+  renameValue.value = ''
+}
+
+const commitRename = (row: FolderRow) => {
+  if (renamingPath.value !== row.path) return
+  const name = renameValue.value.trim()
+  cancelRename()
+  // Only the last segment is edited here; the folder keeps its place in the tree.
+  if (!name || name === row.name) return
+  const parent = row.path.slice(0, Math.max(0, row.path.length - row.name.length - 1))
+  emit('rename', { from: row.path, to: joinFolderPath(parent, name) })
+}
+
 // Keep the selected folder reachable: expand the root and every folder above
 // the active path, both on first load and when the selection changes from
-// elsewhere (e.g. clicking a document's folder chip in the list).
+// elsewhere (e.g. opening a folder from the document list).
 watch(
   () => [props.selectedPath, props.tree] as const,
   () => {
@@ -211,45 +232,6 @@ watch(
   text-overflow: ellipsis;
 }
 
-.kb-folder-scope {
-  display: flex;
-  flex-shrink: 0;
-  gap: 2px;
-  margin-top: 2px;
-  padding: 2px;
-  border-radius: 6px;
-  background: var(--td-bg-color-secondarycontainer);
-}
-
-.kb-folder-scope__btn {
-  flex: 1;
-  min-width: 0;
-  height: 22px;
-  padding: 0 6px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--td-text-color-secondary);
-  font-family: var(--app-font-family);
-  font-size: 12px;
-  line-height: 22px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
-
-  &:hover:not(.active) {
-    color: var(--td-text-color-primary);
-  }
-
-  &.active {
-    color: var(--td-brand-color);
-    background: var(--td-bg-color-container);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-  }
-}
-
 .kb-folder-tree__icon-btn {
   width: 24px;
   height: 24px;
@@ -267,11 +249,6 @@ watch(
   &:hover {
     color: var(--td-brand-color);
     background: var(--td-bg-color-container-hover);
-  }
-
-  &.active {
-    color: var(--td-brand-color);
-    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
   }
 }
 
@@ -305,7 +282,6 @@ watch(
   width: 100%;
   height: 30px;
   padding: 0 8px 0 calc(var(--kb-folder-depth, 0) * var(--kb-folder-indent) + 8px);
-  border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--td-text-color-primary);
@@ -318,6 +294,10 @@ watch(
 
   &:hover {
     background: var(--td-bg-color-container-hover);
+
+    .kb-folder-row__action {
+      opacity: 1;
+    }
   }
 
   &:focus-visible {
@@ -376,6 +356,46 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.kb-folder-row__action {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+
+  &:hover {
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-secondarycontainer);
+  }
+
+  .t-icon {
+    font-size: 13px;
+  }
+}
+
+.kb-folder-row__rename {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--td-brand-color);
+  border-radius: 4px;
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
+  font-family: var(--app-font-family);
+  font-size: 13px;
+  outline: none;
 }
 
 .kb-folder-row__count {

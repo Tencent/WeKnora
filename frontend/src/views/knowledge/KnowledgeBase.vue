@@ -36,6 +36,8 @@ import {
   getKnowledgeSpans,
   getKnowledgeDetails,
   listKnowledgeFolders,
+  moveKnowledgeToFolder,
+  renameKnowledgeFolder,
   type KnowledgeFolderTree,
 } from "@/api/knowledge-base/index";
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
@@ -45,6 +47,7 @@ import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import KbFolderTree from './components/KbFolderTree.vue';
+import MoveToFolderDialog from './components/MoveToFolderDialog.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
 import BatchTagDialog from './components/BatchTagDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
@@ -60,10 +63,12 @@ import {
 import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
 import {
   buildUploadFileName,
+  canMoveFolderTo,
+  childFolders,
   folderBreadcrumbs as buildFolderBreadcrumbs,
   folderPathExists as folderExistsInTree,
+  isFilteringDocuments,
   isFolderUpload,
-  rootRowLabelKey,
   ROOT_FOLDER_PATH,
 } from './folderTree';
 import { useI18n } from 'vue-i18n';
@@ -605,7 +610,6 @@ const disableFutureDate = { after: new Date(new Date().setHours(23, 59, 59, 999)
 
 // ── Folder tree (documents uploaded as a folder keep their relative path) ──
 const FOLDER_TREE_COLLAPSED_KEY = 'weknora.kbFolderTreeCollapsed';
-const FOLDER_TREE_RECURSIVE_KEY = 'weknora.kbFolderRecursive';
 const readStoredFlag = (key: string, fallback = false) => {
   try {
     const raw = localStorage.getItem(key);
@@ -623,24 +627,34 @@ const writeStoredFlag = (key: string, value: boolean) => {
 };
 const folderTree = ref<KnowledgeFolderTree | null>(null);
 const folderTreeLoading = ref(false);
-// The selected folder path; ROOT_FOLDER_PATH ('') is the knowledge base root,
-// which is a real node of the tree rather than a separate "all documents" mode.
-// Combined with folderRecursive it covers both "everything" (root + recursive)
-// and "documents not inside any folder" (root + direct only).
+// The folder being browsed; ROOT_FOLDER_PATH ('') is the knowledge base top
+// level, a real node of the tree rather than a separate mode.
 const selectedFolderPath = ref<string>(ROOT_FOLDER_PATH);
 const folderTreeCollapsed = ref(readStoredFlag(FOLDER_TREE_COLLAPSED_KEY));
-// Recursive by default: a freshly opened knowledge base should list everything,
-// and a folder that only holds sub-folders would otherwise look empty.
-const folderRecursive = ref(readStoredFlag(FOLDER_TREE_RECURSIVE_KEY, true));
 const hasFolders = computed(() => (folderTree.value?.folders?.length ?? 0) > 0);
 // The folder column only earns its space once the knowledge base actually has
 // folders, so knowledge bases filled with single-file uploads look unchanged.
 const showFolderTree = computed(() => !isFAQ.value && hasFolders.value);
-// Rows only need their folder shown when the current list can span folders.
-const showDocumentFolderPath = computed(() => hasFolders.value && folderRecursive.value);
+// Browsing lists one folder's own contents; filtering searches its whole
+// subtree. There is no mode switch: the list follows what the user is doing.
+const isFiltering = computed(() =>
+  isFilteringDocuments({
+    keyword: docSearchKeyword.value,
+    tagIds: selectedTagIds.value,
+    fileType: selectedFileType.value,
+    parseStatus: selectedParseStatus.value,
+    source: selectedSource.value,
+    timeRange: updatedTimeRange.value,
+  }),
+);
+// Sub-folder entries shown at the top of the list while browsing. Search results
+// are flat, so they are dropped as soon as a filter is active.
+const currentChildFolders = computed(() =>
+  isFiltering.value ? [] : childFolders(folderTree.value, selectedFolderPath.value),
+);
+// A row's folder is worth showing only when the list can span folders.
+const showDocumentFolderPath = computed(() => hasFolders.value && isFiltering.value);
 const folderBreadcrumbs = computed(() => buildFolderBreadcrumbs(selectedFolderPath.value));
-// Leading crumb mirrors the sidebar's root row, whose label depends on the scope.
-const folderRootLabel = computed(() => t(rootRowLabelKey(folderRecursive.value)));
 
 const filterParams = computed(() => {
   const [start, end] = updatedTimeRange.value || [];
@@ -652,10 +666,10 @@ const filterParams = computed(() => {
     source: selectedSource.value || undefined,
     start_time: start ? `${start} 00:00:00` : undefined,
     end_time: end ? `${end} 23:59:59` : undefined,
-    // The root folder with the recursive scope is equivalent to no folder filter
-    // at all, so knowledge bases without folders behave exactly as before.
     folder_path: selectedFolderPath.value,
-    folder_recursive: folderRecursive.value,
+    // Searching descends into sub-folders; browsing shows one level, with the
+    // sub-folders themselves rendered as entries in the list.
+    folder_recursive: isFiltering.value,
   };
 });
 const tagMap = computed<Record<string, any>>(() => {
@@ -787,9 +801,60 @@ const handleFolderSelect = (path: string) => {
   selectedFolderPath.value = path;
 };
 
-const handleFolderRecursiveChange = (value: boolean) => {
-  folderRecursive.value = value;
-  writeStoredFlag(FOLDER_TREE_RECURSIVE_KEY, value);
+// ── Re-filing documents and renaming folders ──
+// folder_path is display-only, so both operations are a plain column update:
+// nothing is re-parsed, re-chunked or re-embedded.
+const moveFolderDialogVisible = ref(false);
+const moveFolderSubmitting = ref(false);
+const moveFolderTargets = ref<string[]>([]);
+
+const openMoveToFolderDialog = (ids: string[]) => {
+  if (!ids.length) return;
+  moveFolderTargets.value = [...ids];
+  moveFolderDialogVisible.value = true;
+};
+
+const handleMoveToFolderConfirm = async (folderPath: string) => {
+  const ids = moveFolderTargets.value;
+  if (!kbId.value || ids.length === 0) return;
+  moveFolderSubmitting.value = true;
+  try {
+    await moveKnowledgeToFolder(kbId.value, ids, folderPath);
+    moveFolderDialogVisible.value = false;
+    MessagePlugin.success(t('knowledgeBase.moveToFolder.success', { count: ids.length }));
+    clearSelection();
+    batchMode.value = false;
+    resetPage();
+    await loadKnowledgeFiles(kbId.value);
+    await loadFolderTree(kbId.value);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.moveToFolder.failed'));
+  } finally {
+    moveFolderSubmitting.value = false;
+  }
+};
+
+const handleFolderRename = async ({ from, to }: { from: string; to: string }) => {
+  if (!kbId.value || !to || from === to) return;
+  if (!canMoveFolderTo(from, to)) {
+    MessagePlugin.warning(t('knowledgeBase.folderTree.renameInvalid'));
+    return;
+  }
+  try {
+    await renameKnowledgeFolder(kbId.value, from, to);
+    MessagePlugin.success(t('knowledgeBase.folderTree.renameSuccess'));
+    // Follow the folder to its new path so the user stays where they were.
+    if (selectedFolderPath.value === from) {
+      selectedFolderPath.value = to;
+    } else if (selectedFolderPath.value.startsWith(`${from}/`)) {
+      selectedFolderPath.value = to + selectedFolderPath.value.slice(from.length);
+    }
+    resetPage();
+    await loadKnowledgeFiles(kbId.value);
+    await loadFolderTree(kbId.value);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.folderTree.renameFailed'));
+  }
 };
 
 const handleFolderTreeCollapsedChange = (value: boolean) => {
@@ -1090,8 +1155,9 @@ watch([selectedParseStatus, selectedSource, updatedTimeRange], () => {
   }
 }, { deep: true });
 
-// 目录树选择与"包含子目录"开关都只改变文档列表的筛选范围，行为与其他筛选一致。
-watch([selectedFolderPath, folderRecursive], () => {
+// 切换目录只改变列表范围，行为与其他筛选一致。浏览态与筛选态之间的切换由各筛选项
+// 自身的 watcher 触发刷新，这里不重复请求。
+watch(selectedFolderPath, () => {
   if (!kbId.value || isFAQ.value) return;
   clearSelection();
   resetPage();
@@ -2072,7 +2138,7 @@ const confirmCancelParseKnowledge = async (item: KnowledgeCard) => {
 
 // Bridge card-view actions back to existing per-card handlers.
 const handleCardAction = (
-  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
@@ -2083,6 +2149,7 @@ const handleCardAction = (
   }
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
   if (action === 'move') return handleMoveKnowledge(item);
+  if (action === 'move-folder') return openMoveToFolderDialog([item.id]);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);
   if (action === 'batch-manage') return handleEnterBatchFromCard(item);
@@ -2090,7 +2157,7 @@ const handleCardAction = (
 
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
-  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
@@ -2098,6 +2165,7 @@ const handleListAction = (
   if (action === 'reparse') return confirmRebuildKnowledge(idx, item);
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
   if (action === 'move') return handleMoveKnowledge(item);
+  if (action === 'move-folder') return openMoveToFolderDialog([item.id]);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);
   if (action === 'batch-manage') return handleEnterBatchFromCard(item);
@@ -2264,15 +2332,16 @@ async function createNewSession(value: string): Promise<void> {
       <template v-if="activeKbTab === 'documents' || !isWiki">
         <div class="knowledge-main">
           <KbFolderTree v-if="showFolderTree" :tree="folderTree" :selected-path="selectedFolderPath"
-            :loading="folderTreeLoading" :collapsed="folderTreeCollapsed" :recursive="folderRecursive"
+            :loading="folderTreeLoading" :collapsed="folderTreeCollapsed" :can-edit="canEdit"
             @select="handleFolderSelect" @update:collapsed="handleFolderTreeCollapsedChange"
-            @update:recursive="handleFolderRecursiveChange" />
+            @rename="handleFolderRename" />
           <div class="tag-content">
             <div class="doc-card-area">
-              <nav v-if="showFolderTree && folderBreadcrumbs.length" class="doc-folder-path"
+              <nav v-if="showFolderTree && (folderBreadcrumbs.length || isFiltering)" class="doc-folder-path"
                 :aria-label="$t('knowledgeBase.folderTree.title')">
-                <button type="button" class="doc-folder-path__crumb" @click="handleFolderSelect('')">
-                  {{ folderRootLabel }}
+                <button type="button" class="doc-folder-path__crumb" :class="{ 'is-current': !folderBreadcrumbs.length }"
+                  @click="handleFolderSelect('')">
+                  {{ $t('knowledgeBase.folderTree.rootRow') }}
                 </button>
                 <template v-for="(crumb, index) in folderBreadcrumbs" :key="crumb.path">
                   <t-icon name="chevron-right" class="doc-folder-path__sep" />
@@ -2283,6 +2352,10 @@ async function createNewSession(value: string): Promise<void> {
                     {{ crumb.name }}
                   </button>
                 </template>
+                <!-- Filtering silently widens the scope to sub-folders, so say so. -->
+                <span v-if="isFiltering" class="doc-folder-path__scope">
+                  {{ $t('knowledgeBase.folderTree.searchingSubtree') }}
+                </span>
               </nav>
               <div class="doc-filter-bar">
                 <t-input v-model.trim="docSearchKeyword" :placeholder="$t('knowledgeBase.docSearchPlaceholder')"
@@ -2469,9 +2542,10 @@ async function createNewSession(value: string): Promise<void> {
                     </div>
                   </div>
                 </div>
-                <template v-else-if="cardList.length && viewMode === 'grid'">
+                <template v-else-if="(cardList.length || currentChildFolders.length) && viewMode === 'grid'">
                   <DocumentCardView
                     :items="cardList"
+                    :folders="currentChildFolders"
                     :selected-ids="selectedIds"
                     :batch-mode="batchMode"
                     :can-edit="canEdit"
@@ -2497,8 +2571,8 @@ async function createNewSession(value: string): Promise<void> {
                     @update:move-mode="(mode: any) => moveMode = mode"
                   />
                 </template>
-                <template v-else-if="cardList.length && viewMode === 'list'">
-                  <DocumentListView :items="cardList" :selected-ids="selectedIds" :tag-list="tagList"
+                <template v-else-if="(cardList.length || currentChildFolders.length) && viewMode === 'list'">
+                  <DocumentListView :items="cardList" :folders="currentChildFolders" :selected-ids="selectedIds" :tag-list="tagList"
                     :can-edit="canEdit" :can-mutate-knowledge="canMutateKnowledge"
                     :trace-visible-ids="traceAvailableById"
                     :move-menu-mode="moveMenuMode"
@@ -2521,15 +2595,22 @@ async function createNewSession(value: string): Promise<void> {
                 </template>
                 <template v-else-if="!docListLoading">
                   <div class="doc-empty-state">
-                    <EmptyKnowledge />
+                    <p v-if="selectedFolderPath || isFiltering" class="doc-empty-folder">
+                      {{ isFiltering
+                        ? $t('knowledgeBase.folderTree.emptySearch')
+                        : $t('knowledgeBase.folderTree.emptyFolder') }}
+                    </p>
+                    <EmptyKnowledge v-else />
                   </div>
                 </template>
               </div>
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
                 <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
                   :reparse-loading="batchReparsing" :tag-loading="batchTagging" :visible="batchMode || selectedIds.size > 0"
+                  :show-move-to-folder="canEdit"
                   @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse"
-                  @batch-tag="handleBatchTag" />
+                  @batch-tag="handleBatchTag"
+                  @move-to-folder="openMoveToFolderDialog(Array.from(selectedIds))" />
               </div>
             </div>
           </div>
@@ -2570,6 +2651,15 @@ async function createNewSession(value: string): Promise<void> {
     :confirm-loading="batchTagging"
     @update:visible="batchTagDialogVisible = $event" @confirm="onBatchTagConfirm"
     @tag-created="loadTags(kbId, true)" @open-manage="openTagManageFromBatchDialog" />
+
+  <MoveToFolderDialog
+    v-model:visible="moveFolderDialogVisible"
+    :tree="folderTree"
+    :count="moveFolderTargets.length"
+    :submitting="moveFolderSubmitting"
+    :current-path="selectedFolderPath"
+    @confirm="handleMoveToFolderConfirm"
+  />
 
   <KbTagManageDrawer
     v-if="!isFAQ"

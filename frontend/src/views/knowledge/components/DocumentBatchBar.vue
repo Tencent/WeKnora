@@ -9,6 +9,8 @@ defineProps<{
   // When true the bar stays visible even with 0 selections, so users can exit
   // batch mode from here without selecting anything first.
   visible?: boolean;
+  /** Hidden when the knowledge base has no folder structure to file into. */
+  showMoveToFolder?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -16,6 +18,7 @@ const emit = defineEmits<{
   (e: 'delete'): void;
   (e: 'reparse'): void;
   (e: 'batchTag'): void;
+  (e: 'moveToFolder'): void;
 }>();
 
 const { t } = useI18n();
@@ -48,6 +51,13 @@ const { t } = useI18n();
             @click="emit('batchTag')">
             <template #icon><t-icon name="discount" size="14px" /></template>
             {{ t('knowledgeBase.batchTag') }}
+          </t-button>
+
+          <t-button v-if="showMoveToFolder" theme="default" variant="outline" size="small"
+            :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading"
+            @click="emit('moveToFolder')">
+            <template #icon><t-icon name="folder" size="14px" /></template>
+            {{ t('knowledgeBase.moveToFolder.action') }}
           </t-button>
 
           <t-popconfirm theme="warning" :content="t('knowledgeBase.confirmBatchDeleteDocument', { count })"

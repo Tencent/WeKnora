@@ -44,9 +44,11 @@ const props = defineProps<{
   canMutateKnowledge: boolean;
   traceAvailableById: Record<string, boolean>;
   tagList: Tag[];
+  /** Sub-folders of the folder currently being browsed. */
+  folders?: Array<{ path: string; name: string; total_count: number }>;
   /**
    * Replace the updated-at line with the card's folder. Only meaningful when
-   * the grid spans several folders (all documents / recursive browse).
+   * the grid spans several folders, i.e. while filtering.
    */
   showFolderPath?: boolean;
   // Move sub-flow state
@@ -62,7 +64,7 @@ const emit = defineEmits<{
   (e: 'open', item: KnowledgeCard): void;
   (e: 'toggle-checkbox', id: string, checked: boolean, ctx?: { e?: Event }): void;
   (e: 'menu-visible-change', visible: boolean, item: KnowledgeCard): void;
-  (e: 'action', action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'batch-manage' | 'delete', item: KnowledgeCard): void;
+  (e: 'action', action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'batch-manage' | 'delete', item: KnowledgeCard): void;
   (e: 'tag-edit', item: KnowledgeCard): void;
   (e: 'open-folder', path: string): void;
   // Move sub-flow emits
@@ -257,7 +259,7 @@ const onCardMouseLeave = () => {
 };
 
 // --- Action handlers ---
-const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'batch-manage' | 'delete', item: KnowledgeCard) => {
+const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'batch-manage' | 'delete', item: KnowledgeCard) => {
   // Don't close menu for move — it triggers the sub-flow
   if (action !== 'move') {
     if (item.isMore !== undefined) item.isMore = false;
@@ -269,6 +271,26 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
 
 <template>
   <div class="doc-card-list doc-card-list-animated">
+    <!-- Sub-folders of the folder being browsed, listed first the way a file
+         manager does, so navigating down does not require the sidebar. -->
+    <div
+      v-for="folder in folders"
+      :key="'folder-' + folder.path"
+      class="folder-card"
+      :title="folder.path"
+      role="button"
+      tabindex="0"
+      @click="emit('open-folder', folder.path)"
+      @keydown.enter="emit('open-folder', folder.path)"
+    >
+      <t-icon name="folder" class="folder-card__icon" />
+      <div class="folder-card__text">
+        <span class="folder-card__name">{{ folder.name }}</span>
+        <span class="folder-card__meta">{{ t('knowledgeBase.folderTree.folderCardCount', { count: folder.total_count }) }}</span>
+      </div>
+      <t-icon name="chevron-right" class="folder-card__chevron" />
+    </div>
+
     <div
       class="knowledge-card"
       :class="{ 'is-selected': selectedIds.has(item.id), 'batch-mode': batchMode }"
@@ -320,6 +342,7 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
                   @reparse="handleAction('reparse', item)"
                   @cancel-parse="handleAction('cancel-parse', item)"
                   @move="handleAction('move', item)"
+                  @move-folder="handleAction('move-folder', item)"
                   @batch-manage="handleAction('batch-manage', item)"
                   @delete="handleAction('delete', item)"
                 />
@@ -621,6 +644,72 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
   &.doc-card-list-animated {
     animation: contentFadeIn 0.32s ease-out;
   }
+}
+
+// Folder entries share the grid with the document cards but are deliberately
+// shorter: they are navigation, not content.
+.folder-card {
+  min-width: 240px;
+  height: 56px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border: 1px solid var(--td-component-border);
+  border-radius: 6px;
+  background: var(--td-bg-color-container);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+
+  &:hover {
+    border-color: var(--td-brand-color);
+    background: var(--td-bg-color-container-hover);
+
+    .folder-card__chevron {
+      color: var(--td-brand-color);
+    }
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 30%, transparent);
+  }
+}
+
+.folder-card__icon {
+  flex: 0 0 auto;
+  font-size: 20px;
+  color: var(--td-brand-color);
+}
+
+.folder-card__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.folder-card__name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-card__meta {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+}
+
+.folder-card__chevron {
+  flex: 0 0 auto;
+  font-size: 16px;
+  color: var(--td-text-color-placeholder);
+  transition: color 0.15s ease;
 }
 
 .knowledge-card {
