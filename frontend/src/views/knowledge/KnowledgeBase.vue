@@ -58,6 +58,12 @@ import {
   shouldRefreshWikiStatusAfterKnowledgePoll,
 } from './wikiStatusRefresh';
 import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
+import {
+  buildUploadFileName,
+  folderBreadcrumbs as buildFolderBreadcrumbs,
+  folderPathExists as folderExistsInTree,
+  isFolderUpload,
+} from './folderTree';
 import { useI18n } from 'vue-i18n';
 import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
 import type { ParserEngineInfo } from '@/api/system';
@@ -627,15 +633,7 @@ const showFolderTree = computed(() => !isFAQ.value && (hasFolders.value || selec
 const showDocumentFolderPath = computed(
   () => hasFolders.value && (selectedFolderPath.value === null || folderRecursive.value),
 );
-const folderBreadcrumbs = computed(() => {
-  const path = selectedFolderPath.value;
-  if (!path) return [];
-  const segments = path.split('/');
-  return segments.map((name, index) => ({
-    name,
-    path: segments.slice(0, index + 1).join('/'),
-  }));
-});
+const folderBreadcrumbs = computed(() => buildFolderBreadcrumbs(selectedFolderPath.value));
 // Uploads land in the folder currently being browsed; "all documents" and the
 // root row both mean "no prefix".
 const uploadTargetFolder = computed(() => selectedFolderPath.value || '');
@@ -765,7 +763,7 @@ const loadFolderTree = async (kbIdValue: string) => {
     // A folder can disappear (its last document was deleted or moved); fall
     // back to the flat list instead of leaving an empty, unreachable view.
     const path = selectedFolderPath.value;
-    if (path && !folderPathExists(path)) {
+    if (path && !folderExistsInTree(folderTree.value?.folders || [], path)) {
       selectedFolderPath.value = null;
     }
   } catch (error) {
@@ -777,12 +775,6 @@ const loadFolderTree = async (kbIdValue: string) => {
       folderTreeLoading.value = false;
     }
   }
-};
-
-const folderPathExists = (path: string): boolean => {
-  const walk = (nodes: KnowledgeFolderTree['folders']): boolean =>
-    nodes.some((node) => node.path === path || walk(node.children || []));
-  return walk(folderTree.value?.folders || []);
 };
 
 const handleFolderSelect = (path: string | null) => {
@@ -1515,32 +1507,8 @@ const AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
 
 const uploadConfirmStore = useUploadConfirmStore();
 
-// A browser only sets webkitRelativePath when the file came from a directory
-// picker or a dropped directory, which is exactly what distinguishes a folder
-// upload from picking individual files.
-const isFolderUpload = (file: File) =>
-  !!(file as File & { webkitRelativePath?: string }).webkitRelativePath;
-
-/**
- * Build the path-qualified `fileName` the backend splits into folder_path +
- * file_name. Two sources are combined: the folder currently open in the sidebar
- * (so uploads land where the user is looking) and the browser's
- * webkitRelativePath for folder uploads, whose picked directory becomes the
- * top-level tree node. Returns undefined for a plain single-file upload at the
- * knowledge base root, which keeps that request byte-identical to before.
- */
-const getFolderUploadFileName = (file: File) => {
-  const segments: string[] = [];
-  if (uploadTargetFolder.value) {
-    segments.push(uploadTargetFolder.value);
-  }
-  const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-  if (relativePath) {
-    segments.push(...relativePath.split('/').filter(Boolean).slice(0, -1));
-  }
-  if (segments.length === 0) return undefined;
-  return `${segments.join('/')}/${file.name}`;
-};
+const getFolderUploadFileName = (file: File) =>
+  buildUploadFileName(file, uploadTargetFolder.value);
 
 const showUploadResultMessages = (
   successCount: number,
