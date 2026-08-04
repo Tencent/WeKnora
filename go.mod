@@ -1,6 +1,6 @@
 module github.com/Tencent/WeKnora
 
-go 1.26.0
+go 1.24.0
 
 require (
 	codeberg.org/readeck/go-readability/v2 v2.1.2

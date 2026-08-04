@@ -14,7 +14,7 @@ env:
   WIF_PROVIDER: projects/442122035369/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider
   WIF_SERVICE_ACCOUNT: sa-beemotik-infra-deployer@beemotik.iam.gserviceaccount.com
   NODE_VERSION: "22"
-  GO_VERSION: "1.26"
+  GO_VERSION: "1.24"
 
 jobs:
   deploy:

@@ -154,8 +154,7 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 			}
 		}
 		driver, err := postgresmigrate.WithInstance(sqlDB, &postgresmigrate.Config{
-			SchemaName:     dbSchema,
-			SearchPathName: fmt.Sprintf("%s,public", dbSchema),
+			SchemaName: dbSchema,
 		})
 		if err != nil {
 			sqlDB.Close()
