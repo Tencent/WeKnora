@@ -323,6 +323,23 @@ func logSearchScoreSample(ctx context.Context, action string, results []*types.S
 	}
 }
 
+// targetReportsEmbedFailure reports whether an embedding failure for a KB should
+// be recorded as a retrieval error. Wiki/graph-only KBs have no vector or keyword
+// index to degrade into; HybridSearch returns empty without error. When KB metadata
+// is unavailable, callers still attempt keyword-degraded search.
+func targetReportsEmbedFailure(kb *types.KnowledgeBase) bool {
+	if kb == nil {
+		return false
+	}
+	if kb.Type == types.KnowledgeBaseTypeFAQ {
+		return true
+	}
+	if kb.IsKeywordEnabled() {
+		return false
+	}
+	return kb.IsVectorEnabled()
+}
+
 // searchByTargets performs KB searches using pre-computed SearchTargets.
 // Targets sharing the same underlying embedding model (identified by model
 // name + endpoint, not just model ID) are grouped so the query embedding is
@@ -403,7 +420,7 @@ func (p *PluginSearch) searchByTargets(
 					searchableTargets = make([]*types.SearchTarget, 0, len(targets))
 					for _, target := range targets {
 						kb := kbMap[target.KnowledgeBaseID]
-						if kb != nil && kb.Type != types.KnowledgeBaseTypeFAQ && kb.IsKeywordEnabled() {
+						if !targetReportsEmbedFailure(kb) {
 							searchableTargets = append(searchableTargets, target)
 							continue
 						}
