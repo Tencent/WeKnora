@@ -69,6 +69,14 @@ test('rag pipeline shows a pending model-answer step after retrieval completes',
   assert.match(source, /waitController\.dispose\(\)/)
 })
 
+test('rag pipeline announces wait status from a region that outlives each row', () => {
+  const template = source.split('<script')[0]
+  assert.match(template, /class="sr-only" role="status" aria-live="polite"/)
+  assert.equal((template.match(/aria-live/g) || []).length, 1)
+  assert.match(source, /liveStatusText/)
+  assert.match(source, /\.sr-only \{[\s\S]*clip: rect\(0, 0, 0, 0\)/)
+})
+
 test('done row appears only after the full turn completes', () => {
   assert.match(source, /const showDoneRow = computed\(\(\) => \{[\s\S]*hasAnswer\.value/)
 })

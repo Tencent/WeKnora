@@ -1,5 +1,9 @@
 <template>
   <div v-if="visible" ref="rootElement" class="rag-pipeline-progress">
+    <!-- Announcements need a region that outlives each wait row, otherwise screen
+         readers miss a live region that appears together with its own text. -->
+    <div class="sr-only" role="status" aria-live="polite">{{ liveStatusText }}</div>
+
     <div v-if="showPrePipelineWait" class="tree-children">
       <div class="tree-child tree-child-last streaming-loading-node">
         <div class="tree-branch" />
@@ -411,6 +415,12 @@ const visible = computed(
   () => steps.value.length > 0 || showPrePipelineWait.value || showThinkingStep.value,
 )
 
+const liveStatusText = computed(() => {
+  if (showPrePipelineWait.value) return t('chat.preparingAnswer')
+  if (showWaitStep.value) return waitStepText.value
+  return ''
+})
+
 const collapsedStatusText = computed(() => {
   if (steps.value.length === 0) {
     return hasThinking.value ? t('agentStream.toolStatus.thinkingDone') : ''
@@ -509,6 +519,18 @@ onBeforeUnmount(() => {
   --agent-step-icon-color: var(--td-text-color-placeholder);
 
   margin: 0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .tree-container {
