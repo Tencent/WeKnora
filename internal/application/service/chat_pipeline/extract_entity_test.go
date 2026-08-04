@@ -259,3 +259,112 @@ func TestIsLikelyLanguageTag(t *testing.T) {
 		})
 	}
 }
+
+// TestFormater_ParseGraph_AliasNormalization verifies that common LLM output
+// variations of the same triple schema are normalized to the canonical
+// entity/entity1/entity2/relation keys and extracted, instead of being dropped
+// as "Unsupported graph group". This fixes the upstream graph-extraction
+// contract mismatch where the parser only accepted canonical keys.
+func TestFormater_ParseGraph_AliasNormalization(t *testing.T) {
+	cases := []struct {
+		name         string
+		input        string
+		wantNodes    int
+		wantRels     int
+		wantRelation [3]string
+	}{
+		{
+			name:         "RDF triple subject/predicate/object",
+			input:        `[{"subject": "Alice", "predicate": "knows", "object": "Bob"}]`,
+			wantNodes:    2,
+			wantRels:     1,
+			wantRelation: [3]string{"Alice", "Bob", "knows"},
+		},
+		{
+			name: "head/tail entity with relationship_type",
+			input: `[{"head_entity":"Patients",` +
+				`"tail_entity":"Antimicrobial De-escalation Therapy",` +
+				`"relationship_type":"Patient_Treatment",` +
+				`"related_attributes":"Based on negative result"}]`,
+			wantNodes:    2,
+			wantRels:     1,
+			wantRelation: [3]string{"Patients", "Antimicrobial De-escalation Therapy", "Patient_Treatment"},
+		},
+		{
+			name:         "source/target/relation_type",
+			input:        `[{"source": "Alice", "target": "Bob", "relation_type": "knows"}]`,
+			wantNodes:    2,
+			wantRels:     1,
+			wantRelation: [3]string{"Alice", "Bob", "knows"},
+		},
+		{
+			name: "nested head/tail objects use text",
+			input: `[{"head":{"id":"E1","text":"blood culture","type":"Test"},` +
+				`"relation":"Comparison",` +
+				`"tail":{"id":"E2","text":"ddPCR","type":"Test"}}]`,
+			wantNodes:    2,
+			wantRels:     1,
+			wantRelation: [3]string{"blood culture", "ddPCR", "Comparison"},
+		},
+		{
+			name:         "canonical keys still work",
+			input:        `[{"entity": "Alice"}, {"entity1": "Alice", "entity2": "Bob", "relation": "knows"}]`,
+			wantNodes:    2,
+			wantRels:     1,
+			wantRelation: [3]string{"Alice", "Bob", "knows"},
+		},
+		{
+			name:      "standalone subject node",
+			input:     `[{"subject": "Alice"}]`,
+			wantNodes: 1,
+			wantRels:  0,
+		},
+		{
+			name:      "node with attrs alias",
+			input:     `[{"node": "Alice", "attrs": ["person"]}]`,
+			wantNodes: 1,
+			wantRels:  0,
+		},
+		{
+			name:      "genuinely unrecognized keys still dropped",
+			input:     `[{"foo": "bar"}]`,
+			wantNodes: 0,
+			wantRels:  0,
+		},
+	}
+
+	ctx := context.Background()
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			f := NewFormater()
+			graph, err := f.ParseGraph(ctx, tc.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if graph == nil {
+				t.Fatalf("expected non-nil graph")
+			}
+			if got := len(graph.Node); got != tc.wantNodes {
+				t.Errorf("nodes: got %d, want %d (graph=%+v)", got, tc.wantNodes, graph)
+			}
+			if got := len(graph.Relation); got != tc.wantRels {
+				t.Errorf("relations: got %d, want %d (graph=%+v)", got, tc.wantRels, graph)
+			}
+			if tc.wantRels == 0 {
+				return
+			}
+			if len(graph.Relation) != 1 {
+				t.Fatalf("expected one relation, got %d", len(graph.Relation))
+			}
+			relation := graph.Relation[0]
+			if relation.Node1 != tc.wantRelation[0] ||
+				relation.Node2 != tc.wantRelation[1] ||
+				relation.Type != tc.wantRelation[2] {
+				t.Fatalf("relation = %s --[%s]--> %s, want %s --[%s]--> %s",
+					relation.Node1, relation.Type, relation.Node2,
+					tc.wantRelation[0], tc.wantRelation[2], tc.wantRelation[1])
+			}
+		})
+	}
+}
