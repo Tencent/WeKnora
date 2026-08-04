@@ -17,6 +17,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// An empty user-selected scope must still be represented as an explicit document
+// filter. Several retrieval backends interpret an empty KnowledgeIDs slice as
+// "no document filter", so use the nil UUID, which is never a valid knowledge
+// ID, to preserve an empty result across both chat and Agent tools.
+const emptyKnowledgeScopeID = "00000000-0000-0000-0000-000000000000"
+
 // KnowledgeQA performs knowledge base question answering with LLM summarization
 // Events are emitted through eventBus (references, answer chunks, completion)
 // customAgent is optional - if provided, uses custom agent configuration for multiTurnEnabled and historyTurns
@@ -90,6 +96,10 @@ func (s *sessionService) KnowledgeQA(
 	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.TagScopes)
 	if err != nil {
 		return fmt.Errorf("build search targets: %w", err)
+	}
+	searchTargets, err = s.applyKnowledgeFolderScopes(ctx, searchTargets, req.FolderScopes)
+	if err != nil {
+		return fmt.Errorf("apply folder scopes: %w", err)
 	}
 
 	// Create chat management object with session settings
@@ -600,6 +610,51 @@ func (s *sessionService) buildSearchTargets(
 	logger.Infof(ctx, "Built %d search targets: %d full KB, %d partial/tag KB, kbTenantMap=%v",
 		len(targets), len(knowledgeBaseIDs), len(targets)-len(knowledgeBaseIDs), kbTenantMap)
 
+	return targets, nil
+}
+
+func (s *sessionService) applyKnowledgeFolderScopes(
+	ctx context.Context,
+	targets types.SearchTargets,
+	scopes []types.KnowledgeFolderScope,
+) (types.SearchTargets, error) {
+	if len(scopes) == 0 {
+		return targets, nil
+	}
+	if s.knowledgeFolderService == nil {
+		return nil, fmt.Errorf("knowledge folder service is unavailable")
+	}
+
+	targetByKB := make(map[string]*types.SearchTarget, len(targets))
+	for _, target := range targets {
+		if target != nil && target.KnowledgeBaseID != "" {
+			targetByKB[target.KnowledgeBaseID] = target
+		}
+	}
+	for _, scope := range scopes {
+		target := targetByKB[scope.KnowledgeBaseID]
+		if target == nil {
+			return nil, fmt.Errorf("folder scope knowledge base is not authorized")
+		}
+		folderKnowledgeIDs, err := s.knowledgeFolderService.ResolveKnowledgeIDs(
+			ctx,
+			target.TenantID,
+			target.KnowledgeBaseID,
+			scope.FolderIDs,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if target.Type == types.SearchTargetTypeKnowledge {
+			folderKnowledgeIDs = intersectStrings(folderKnowledgeIDs, target.KnowledgeIDs)
+		}
+		if len(folderKnowledgeIDs) == 0 {
+			folderKnowledgeIDs = []string{emptyKnowledgeScopeID}
+		}
+		target.Type = types.SearchTargetTypeKnowledge
+		target.KnowledgeIDs = uniqueNonEmptyStrings(folderKnowledgeIDs)
+		target.DisableRecallThresholds = true
+	}
 	return targets, nil
 }
 

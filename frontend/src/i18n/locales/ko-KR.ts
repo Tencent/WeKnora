@@ -5111,6 +5111,30 @@ export default {
       description: '웹 인쇄, 스캔본, 이미지 위주 PDF에 적합합니다. 모든 페이지를 이미지로 렌더링한 뒤 OCR/VLM으로 처리합니다. 처리 시간과 모델 호출 비용이 늘어날 수 있습니다.'
     }
   },
+  knowledgeFolder: {
+    title: '폴더',
+    root: '루트',
+    empty: '폴더 없음',
+    create: '새 폴더',
+    rename: '폴더 이름 변경',
+    move: '폴더 이동',
+    delete: '폴더 삭제',
+    moveDocument: '폴더로 이동',
+    selectTarget: '대상 폴더 선택',
+    namePlaceholder: '폴더 이름',
+    deleteConfirm: '「{name}」 폴더를 삭제하시겠습니까?',
+    notEmpty: '빈 폴더만 삭제할 수 있습니다',
+    operationFailed: '폴더 작업에 실패했습니다',
+    created: '폴더가 생성되었습니다',
+    renamed: '폴더 이름이 변경되었습니다',
+    moved: '폴더가 이동되었습니다',
+    deleted: '폴더가 삭제되었습니다',
+    documentsMoved: '문서가 이동되었습니다',
+    scopeTitle: '폴더 범위 선택',
+    scopeHint: '선택한 폴더와 모든 하위 폴더에서 질문을 검색합니다.',
+    entireKnowledgeBase: '전체 지식베이스',
+    selectedCount: '폴더 {count}개 선택됨'
+  },
   knowledgeBase: {
     title: '지식베이스',
     fileContent: '파일 내용',

@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id INTEGER NOT NULL,
     knowledge_base_id VARCHAR(36) NOT NULL,
+    folder_id VARCHAR(36),
     type VARCHAR(50) NOT NULL DEFAULT '',
     title VARCHAR(255) NOT NULL DEFAULT '',
     description TEXT,
@@ -292,6 +293,44 @@ func TestUpdateKnowledge_DoesNotClobberPendingCounter(t *testing.T) {
 	reloaded, err := repo.GetKnowledgeByID(ctx, 1, id)
 	require.NoError(t, err)
 	assert.Equal(t, "renamed-after-stale-load", reloaded.Title)
+}
+
+// TestUpdateKnowledge_DoesNotClobberFolderAssignment verifies that a
+// processing worker cannot undo a concurrent folder move by saving the stale
+// Knowledge value it loaded before the move. FolderID is owned by the
+// knowledge-folder repository and must not be written by generic full-row
+// updates.
+func TestUpdateKnowledge_DoesNotClobberFolderAssignment(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	folderRepo := &knowledgeFolderRepository{db: db}
+	ctx := context.Background()
+
+	id := insertProcessingKnowledge(t, db)
+	stale, err := repo.GetKnowledgeByID(ctx, 1, id)
+	require.NoError(t, err)
+	require.Nil(t, stale.FolderID)
+
+	folderID := uuid.NewString()
+	moved, err := folderRepo.MoveKnowledge(
+		ctx,
+		1,
+		stale.KnowledgeBaseID,
+		[]string{id},
+		&folderID,
+	)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), moved)
+
+	stale.Title = "updated-by-processing-worker"
+	require.NoError(t, repo.UpdateKnowledge(ctx, stale))
+
+	var persistedFolderID string
+	require.NoError(t, db.Raw(
+		"SELECT folder_id FROM knowledges WHERE id = ?",
+		id,
+	).Scan(&persistedFolderID).Error)
+	assert.Equal(t, folderID, persistedFolderID)
 }
 
 // TestUpdateKnowledge_PendingCounterOmittedOnReset verifies the inverse

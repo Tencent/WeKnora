@@ -308,6 +308,10 @@ func (s *sessionService) buildAgentConfig(
 	if err != nil {
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}
+	searchTargets, err = s.applyKnowledgeFolderScopes(ctx, searchTargets, req.FolderScopes)
+	if err != nil {
+		return nil, fmt.Errorf("apply folder scopes: %w", err)
+	}
 	agentConfig.SearchTargets = searchTargets
 	// Document tags are stored in knowledge_tag_relations, so document-KB tag
 	// scopes are resolved to concrete knowledge IDs before retrieval. Preserve

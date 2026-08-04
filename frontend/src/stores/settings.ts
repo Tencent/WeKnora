@@ -13,6 +13,7 @@ interface Settings {
   isAgentEnabled: boolean;
   agentConfig: AgentConfig;
   selectedKnowledgeBases: string[];  // 当前选中的知识库ID列表
+  selectedFolderScopes: Record<string, string[]>; // KB ID -> selected folder IDs
   selectedFiles: string[]; // 当前选中的文件ID列表
   selectedFileKbMap: Record<string, string>; // 文件ID -> 知识库ID，用于刷新后带 kb_id 拉取共享知识库文件
   selectedTags: Array<{ id: string; name: string; kbId: string; kbName?: string }>;
@@ -82,6 +83,7 @@ const defaultSettings: Settings = {
     system_prompt: "",
   },
   selectedKnowledgeBases: [],  // 默认为空数组
+  selectedFolderScopes: {},
   selectedFiles: [], // 默认为空数组
   selectedFileKbMap: {},  // 文件ID -> 知识库ID
   selectedTags: [],
@@ -292,7 +294,13 @@ export const useSettingsStore = defineStore("settings", {
     
     // 选择知识库（替换整个列表）
     selectKnowledgeBases(kbIds: string[]) {
-      this.settings.selectedKnowledgeBases = kbIds;
+      const selected = [...new Set(kbIds.filter(Boolean))];
+      const selectedSet = new Set(selected);
+      this.settings.selectedKnowledgeBases = selected;
+      this.settings.selectedFolderScopes = Object.fromEntries(
+        Object.entries(this.settings.selectedFolderScopes || {})
+          .filter(([kbId]) => selectedSet.has(kbId)),
+      );
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
     
@@ -308,18 +316,27 @@ export const useSettingsStore = defineStore("settings", {
     removeKnowledgeBase(kbId: string) {
       this.settings.selectedKnowledgeBases = 
         this.settings.selectedKnowledgeBases.filter((id: string) => id !== kbId);
+      delete this.settings.selectedFolderScopes[kbId];
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
     
     // 清空知识库选择
     clearKnowledgeBases() {
       this.settings.selectedKnowledgeBases = [];
+      this.settings.selectedFolderScopes = {};
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
     
     // 获取选中的知识库列表
     getSelectedKnowledgeBases(): string[] {
       return this.settings.selectedKnowledgeBases || [];
+    },
+
+    setFolderScope(kbId: string, folderIds: string[]) {
+      const normalized = [...new Set(folderIds.filter(Boolean))];
+      if (normalized.length > 0) this.settings.selectedFolderScopes[kbId] = normalized;
+      else delete this.settings.selectedFolderScopes[kbId];
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
     
     // 启用/禁用网络搜索
@@ -464,6 +481,7 @@ export const useSettingsStore = defineStore("settings", {
       // 切换智能体时重置知识库和文件选择状态
       // 因为不同智能体关联的知识库不同，需要清空用户之前的选择
       this.settings.selectedKnowledgeBases = [];
+      this.settings.selectedFolderScopes = {};
       this.settings.selectedFiles = [];
       this.settings.selectedFileKbMap = {};
       this.settings.selectedTags = [];

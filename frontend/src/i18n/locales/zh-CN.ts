@@ -5111,6 +5111,30 @@ export default {
       description: '适用于网页打印、扫描件、图片型 PDF。开启后会逐页 OCR，解析更完整但耗时和模型调用更多。'
     }
   },
+  knowledgeFolder: {
+    title: '目录',
+    root: '根目录',
+    empty: '暂无目录',
+    create: '新建目录',
+    rename: '重命名目录',
+    move: '移动目录',
+    delete: '删除目录',
+    moveDocument: '移动到目录',
+    selectTarget: '请选择目标目录',
+    namePlaceholder: '请输入目录名称',
+    deleteConfirm: '确定删除目录「{name}」吗？',
+    notEmpty: '只能删除空目录',
+    operationFailed: '目录操作失败',
+    created: '目录已创建',
+    renamed: '目录已重命名',
+    moved: '目录已移动',
+    deleted: '目录已删除',
+    documentsMoved: '文档已移动',
+    scopeTitle: '选择目录范围',
+    scopeHint: '问答将检索所选目录及其全部子目录。',
+    entireKnowledgeBase: '整个知识库',
+    selectedCount: '已选 {count} 个目录'
+  },
   knowledgeBase: {
     title: '知识库',
     fileContent: '文件内容',

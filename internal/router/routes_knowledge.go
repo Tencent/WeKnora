@@ -130,6 +130,38 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 	}
 }
 
+// RegisterKnowledgeFolderRoutes exposes folder navigation and document
+// placement under a knowledge-base-scoped RBAC boundary.
+func RegisterKnowledgeFolderRoutes(
+	r *gin.RouterGroup,
+	handler *handler.KnowledgeFolderHandler,
+	g *rbacGuards,
+) {
+	if handler == nil {
+		return
+	}
+
+	base := g.apiKeyGroup(r.Group("/knowledge-bases/:id"), apiKeyIngest(apiKeyFullAccess()))
+	read := base.With(apiKeyRetrieve(apiKeyFullAccess()))
+
+	read.GET("/folders", g.Viewer(), g.KBAccessRead("id"), handler.List)
+	base.POST("/folders", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.Create)
+	base.PUT("/folders/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.Update)
+	base.DELETE("/folders/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.Delete)
+	base.PUT(
+		"/knowledge/:knowledge_id/folder",
+		g.OwnedKBOrAdmin(),
+		g.KBAccessWrite("id"),
+		handler.MoveKnowledge,
+	)
+	base.POST(
+		"/knowledge/batch-folder",
+		g.OwnedKBOrAdmin(),
+		g.KBAccessWrite("id"),
+		handler.BatchMoveKnowledge,
+	)
+}
+
 // RegisterFAQRoutes 注册 FAQ 相关路由
 //
 // FAQ entries are KB content: reads are Viewer+, all mutations

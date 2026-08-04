@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,6 +37,7 @@ type qaRequestContext struct {
 	knowledgeBaseIDs      []string
 	knowledgeIDs          []string
 	tagScopes             []types.TagScope
+	folderScopes          []types.KnowledgeFolderScope
 	tagIDs                []string
 	mcpServiceIDs         []string
 	skillNames            []string
@@ -72,6 +74,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		KnowledgeBaseIDs:    rc.knowledgeBaseIDs,
 		KnowledgeIDs:        rc.knowledgeIDs,
 		TagScopes:           rc.tagScopes,
+		FolderScopes:        rc.folderScopes,
 		MCPServiceIDs:       rc.mcpServiceIDs,
 		SkillNames:          rc.skillNames,
 		ImageURLs:           imageURLs,
@@ -303,6 +306,10 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		return nil, nil, errors.NewBadRequestError(err.Error())
 	}
 	tagScopes := mergeTagScopesFromRequestIDs(mentionScopes, requestTagIDs, secutils.SanitizeForLogArray(kbIDs))
+	folderScopes, err := normalizeKnowledgeFolderScopes(request.FolderScopes, kbIDs)
+	if err != nil {
+		return nil, nil, errors.NewBadRequestError(err.Error())
+	}
 	tagIDs := dedupRequestStrings(append(request.TagIDs, mentionedIDsByType(request.MentionedItems, "tag")...))
 	mcpServiceIDs := dedupRequestStrings(append(request.MCPServiceIDs, mentionedIDsByType(request.MentionedItems, "mcp")...))
 	skillNames := dedupRequestStrings(append(request.SkillNames, mentionedIDsByType(request.MentionedItems, "skill")...))
@@ -315,6 +322,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		secutils.SanitizeForLogArray(knowledgeIDs),
 		secutils.SanitizeForLogArray(tagIDs),
 		tagScopes,
+		folderScopes,
 		secutils.SanitizeForLogArray(mcpServiceIDs),
 		secutils.SanitizeForLogArray(skillNames),
 		request.WebSearchEnabled,
@@ -344,6 +352,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		knowledgeBaseIDs:      secutils.SanitizeForLogArray(kbIDs),
 		knowledgeIDs:          secutils.SanitizeForLogArray(knowledgeIDs),
 		tagScopes:             tagScopes,
+		folderScopes:          folderScopes,
 		tagIDs:                secutils.SanitizeForLogArray(tagIDs),
 		mcpServiceIDs:         secutils.SanitizeForLogArray(mcpServiceIDs),
 		skillNames:            secutils.SanitizeForLogArray(skillNames),
@@ -374,6 +383,7 @@ func buildMessageExecutionContext(
 	knowledgeIDs []string,
 	tagIDs []string,
 	tagScopes []types.TagScope,
+	folderScopes []types.KnowledgeFolderScope,
 	mcpServiceIDs []string,
 	skillNames []string,
 	webSearchEnabled bool,
@@ -388,6 +398,7 @@ func buildMessageExecutionContext(
 		KnowledgeIDs:     knowledgeIDs,
 		TagIDs:           tagIDs,
 		TagScopes:        cloneTagScopes(tagScopes),
+		FolderScopes:     cloneKnowledgeFolderScopes(folderScopes),
 		MCPServiceIDs:    mcpServiceIDs,
 		SkillNames:       skillNames,
 		WebSearchEnabled: webSearchEnabled,
@@ -422,6 +433,7 @@ func buildMessageExecutionContext(
 		KnowledgeIDs        []string                        `json:"knowledge_ids,omitempty"`
 		TagIDs              []string                        `json:"tag_ids,omitempty"`
 		TagScopes           []types.TagScope                `json:"tag_scopes,omitempty"`
+		FolderScopes        []types.KnowledgeFolderScope    `json:"folder_scopes,omitempty"`
 		ModelID             string                          `json:"model_id,omitempty"`
 	}{
 		QuestionSuggestions: snapshot.QuestionSuggestions,
@@ -429,6 +441,7 @@ func buildMessageExecutionContext(
 		KnowledgeIDs:        knowledgeIDs,
 		TagIDs:              tagIDs,
 		TagScopes:           snapshot.TagScopes,
+		FolderScopes:        snapshot.FolderScopes,
 		ModelID:             modelID,
 	}
 	if encoded, err := json.Marshal(hashInput); err == nil {
@@ -437,6 +450,72 @@ func buildMessageExecutionContext(
 	}
 
 	return snapshot, agent.ID, agentTenantID, modelID
+}
+
+func cloneKnowledgeFolderScopes(scopes []types.KnowledgeFolderScope) []types.KnowledgeFolderScope {
+	if len(scopes) == 0 {
+		return nil
+	}
+	cloned := make([]types.KnowledgeFolderScope, 0, len(scopes))
+	for _, scope := range scopes {
+		cloned = append(cloned, types.KnowledgeFolderScope{
+			KnowledgeBaseID: scope.KnowledgeBaseID,
+			FolderIDs:       append([]string(nil), scope.FolderIDs...),
+		})
+	}
+	return cloned
+}
+
+func normalizeKnowledgeFolderScopes(
+	scopes []types.KnowledgeFolderScope,
+	knowledgeBaseIDs []string,
+) ([]types.KnowledgeFolderScope, error) {
+	if len(scopes) == 0 {
+		return nil, nil
+	}
+	allowed := make(map[string]struct{}, len(knowledgeBaseIDs))
+	for _, kbID := range knowledgeBaseIDs {
+		allowed[kbID] = struct{}{}
+	}
+	byKB := make(map[string]map[string]struct{}, len(scopes))
+	for _, scope := range scopes {
+		kbID := strings.TrimSpace(scope.KnowledgeBaseID)
+		if _, ok := allowed[kbID]; !ok {
+			return nil, fmt.Errorf("folder scope knowledge base is not selected")
+		}
+		if byKB[kbID] == nil {
+			byKB[kbID] = make(map[string]struct{})
+		}
+		for _, rawFolderID := range scope.FolderIDs {
+			folderID := strings.TrimSpace(rawFolderID)
+			parsed, err := uuid.Parse(folderID)
+			if err != nil || parsed == uuid.Nil {
+				return nil, fmt.Errorf("invalid folder scope")
+			}
+			byKB[kbID][folderID] = struct{}{}
+		}
+		if len(byKB[kbID]) == 0 {
+			return nil, fmt.Errorf("folder scope must contain at least one folder")
+		}
+	}
+	kbOrder := make([]string, 0, len(byKB))
+	for kbID := range byKB {
+		kbOrder = append(kbOrder, kbID)
+	}
+	sort.Strings(kbOrder)
+	result := make([]types.KnowledgeFolderScope, 0, len(kbOrder))
+	for _, kbID := range kbOrder {
+		folderIDs := make([]string, 0, len(byKB[kbID]))
+		for folderID := range byKB[kbID] {
+			folderIDs = append(folderIDs, folderID)
+		}
+		sort.Strings(folderIDs)
+		result = append(result, types.KnowledgeFolderScope{
+			KnowledgeBaseID: kbID,
+			FolderIDs:       folderIDs,
+		})
+	}
+	return result, nil
 }
 
 func cloneTagScopes(scopes []types.TagScope) []types.TagScope {

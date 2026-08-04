@@ -51,6 +51,8 @@ export default function (knowledgeBaseId?: string) {
       source?: string;
       start_time?: string;
       end_time?: string;
+      folder_id?: string | null;
+      include_descendants?: boolean;
     } = { page: 1, page_size: 35 },
     kbId?: string,
   ): Promise<void> => {
