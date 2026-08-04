@@ -36,6 +36,7 @@ type Knowledge struct {
 	EnableStatus     string          `json:"enable_status"`
 	EmbeddingModelID string          `json:"embedding_model_id"`
 	FileName         string          `json:"file_name"`
+	FolderPath       string          `json:"folder_path"`
 	FileType         string          `json:"file_type"`
 	FileSize         int64           `json:"file_size"`
 	FileHash         string          `json:"file_hash"`

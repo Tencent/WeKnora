@@ -564,6 +564,20 @@ func (s *knowledgeService) ListPagedKnowledgeByKnowledgeBaseID(ctx context.Conte
 	return types.NewPageResult(total, page, knowledges), nil
 }
 
+// ListKnowledgeFolderTree returns the folder hierarchy of a knowledge base with
+// per-folder document counts, derived from the folder_path stored on each
+// knowledge entry.
+func (s *knowledgeService) ListKnowledgeFolderTree(ctx context.Context,
+	kbID string,
+) (*types.KnowledgeFolderTree, error) {
+	counts, err := s.repo.ListKnowledgeFolderCounts(ctx,
+		ctx.Value(types.TenantIDContextKey).(uint64), kbID)
+	if err != nil {
+		return nil, err
+	}
+	return types.BuildKnowledgeFolderTree(counts), nil
+}
+
 // GetKnowledgeFile retrieves the physical file associated with a knowledge entry
 func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error) {
 	// Get knowledge record
