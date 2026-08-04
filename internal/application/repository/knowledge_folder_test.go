@@ -79,6 +79,34 @@ func TestListPagedKnowledgeFolderScope(t *testing.T) {
 	assert.Equal(t, []string{specID}, ids)
 }
 
+func TestListPagedKnowledgeFolderScopeUnderscoreInPath(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+
+	const tenantID = uint64(1)
+	kbID := uuid.New().String()
+
+	parentID := insertKnowledgeInFolder(t, db, tenantID, kbID, "my_docs", "intro.md")
+	childID := insertKnowledgeInFolder(t, db, tenantID, kbID, "my_docs/spec", "design.md")
+	// A sibling whose name merely shares a prefix must not be swept into subtree scope.
+	lookalikeID := insertKnowledgeInFolder(t, db, tenantID, kbID, "myXdocs/spec", "other.md")
+
+	page := &types.Pagination{Page: 1, PageSize: 100}
+	rows, total, err := repo.ListPagedKnowledgeByKnowledgeBaseID(ctx, tenantID, kbID, page, types.KnowledgeListFilter{
+		FolderPath:  "my_docs",
+		FolderScope: types.FolderScopeSubtree,
+	})
+	require.NoError(t, err)
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	assert.ElementsMatch(t, []string{parentID, childID}, ids)
+	assert.Equal(t, int64(2), total)
+	assert.NotContains(t, ids, lookalikeID)
+}
+
 func TestListKnowledgeFolderCounts(t *testing.T) {
 	db := setupKnowledgeTestDB(t)
 	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
