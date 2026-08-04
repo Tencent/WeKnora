@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue';
 
 defineProps<{
   count: number;
@@ -11,6 +13,7 @@ defineProps<{
   visible?: boolean;
   /** Hidden when the knowledge base has no folder structure to file into. */
   showMoveToFolder?: boolean;
+  folderOptions?: FolderOption[];
 }>();
 
 const emit = defineEmits<{
@@ -18,10 +21,12 @@ const emit = defineEmits<{
   (e: 'delete'): void;
   (e: 'reparse'): void;
   (e: 'batchTag'): void;
-  (e: 'moveToFolder'): void;
+  (e: 'moveToFolder', folderPath: string): void;
 }>();
 
 const { t } = useI18n();
+
+const folderPickerVisible = ref(false);
 </script>
 
 <template>
@@ -53,12 +58,20 @@ const { t } = useI18n();
             {{ t('knowledgeBase.batchTag') }}
           </t-button>
 
-          <t-button v-if="showMoveToFolder" theme="default" variant="outline" size="small"
-            :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading"
-            @click="emit('moveToFolder')">
-            <template #icon><t-icon name="folder" size="14px" /></template>
-            {{ t('knowledgeBase.moveToFolder.action') }}
-          </t-button>
+          <t-popup v-if="showMoveToFolder" v-model:visible="folderPickerVisible" trigger="click"
+            placement="top" overlay-class-name="card-more" destroy-on-close>
+            <t-button theme="default" variant="outline" size="small"
+              :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading">
+              <template #icon><t-icon name="folder" size="14px" /></template>
+              {{ t('knowledgeBase.moveToFolder.action') }}
+            </t-button>
+            <template #content>
+              <div class="card-menu">
+                <FolderPickerMenu :options="folderOptions || []"
+                  @confirm="(path: string) => { folderPickerVisible = false; emit('moveToFolder', path) }" />
+              </div>
+            </template>
+          </t-popup>
 
           <t-popconfirm theme="warning" :content="t('knowledgeBase.confirmBatchDeleteDocument', { count })"
             :confirm-btn="{ content: t('knowledgeBase.confirmDelete'), theme: 'danger' }"

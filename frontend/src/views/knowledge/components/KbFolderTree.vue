@@ -64,7 +64,7 @@
           />
 
           <input
-            v-if="renamingPath === row.path"
+            v-if="isRenaming(row)"
             ref="renameInputRef"
             v-model="renameValue"
             class="kb-folder-row__rename"
@@ -128,13 +128,19 @@ const { t } = useI18n()
 
 // The root starts expanded so the uploaded structure is visible without a click.
 const expanded = ref(new Set<string>([ROOT_FOLDER_PATH]))
-const renamingPath = ref('')
+// null, not '', because '' is the root's own path: a falsy sentinel would put
+// the root row into rename mode permanently.
+const renamingPath = ref<string | null>(null)
 const renameValue = ref('')
 const renameInputRef = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
 
 const rows = computed(() => buildFolderRows(props.tree, expanded.value))
 
 const isExpanded = (path: string) => expanded.value.has(path)
+
+// The root has no name of its own to edit, and excluding it here means no
+// sentinel value can ever put it into rename mode.
+const isRenaming = (row: FolderRow) => row.kind === 'folder' && renamingPath.value === row.path
 
 const toggle = (path: string) => {
   const next = new Set(expanded.value)
@@ -153,12 +159,12 @@ const startRename = async (row: FolderRow) => {
 }
 
 const cancelRename = () => {
-  renamingPath.value = ''
+  renamingPath.value = null
   renameValue.value = ''
 }
 
 const commitRename = (row: FolderRow) => {
-  if (renamingPath.value !== row.path) return
+  if (!isRenaming(row)) return
   const name = renameValue.value.trim()
   cancelRename()
   // Only the last segment is edited here; the folder keeps its place in the tree.

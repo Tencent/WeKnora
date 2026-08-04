@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { formatFileSize } from '@/utils/files';
 import { useTagChipsOverflow } from '@/composables/useTagChipsOverflow';
 import DocumentActionMenu from './DocumentActionMenu.vue';
+import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
 
 interface Tag {
@@ -46,6 +47,8 @@ const props = defineProps<{
   tagList: Tag[];
   /** Sub-folders of the folder currently being browsed. */
   folders?: Array<{ path: string; name: string; total_count: number }>;
+  /** Every folder of the knowledge base, for the "move to folder" picker. */
+  folderOptions?: FolderOption[];
   /**
    * Replace the updated-at line with the card's folder. Only meaningful when
    * the grid spans several folders, i.e. while filtering.
@@ -67,6 +70,7 @@ const emit = defineEmits<{
   (e: 'action', action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'batch-manage' | 'delete', item: KnowledgeCard): void;
   (e: 'tag-edit', item: KnowledgeCard): void;
   (e: 'open-folder', path: string): void;
+  (e: 'move-to-folder', item: KnowledgeCard, folderPath: string): void;
   // Move sub-flow emits
   (e: 'move-select-target', kb: any): void;
   (e: 'move-back'): void;
@@ -82,6 +86,11 @@ const {
   hasTagOverflow,
   getOverflowCount,
 } = useTagChipsOverflow('tagItemId');
+
+// Which row's action popup is currently showing the folder picker. Kept local so
+// picking a folder stays inside the menu the user already opened, exactly like
+// the "move to knowledge base" sub-menu next to it.
+const folderPickerItemId = ref<string | null>(null);
 
 // --- Menu index tracking ---
 const activeMenuIndex = ref(-1);
@@ -258,8 +267,20 @@ const onCardMouseLeave = () => {
   cardPopoverElement = null;
 };
 
+const onFolderPicked = (item: KnowledgeCard, path: string) => {
+  folderPickerItemId.value = null;
+  if (item.isMore !== undefined) item.isMore = false;
+  activeMenuIndex.value = -1;
+  emit('move-to-folder', item, path);
+};
+
 // --- Action handlers ---
 const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'batch-manage' | 'delete', item: KnowledgeCard) => {
+  // The folder picker opens inside this same popup, so keep the menu open.
+  if (action === 'move-folder') {
+    folderPickerItemId.value = item.id;
+    return;
+  }
   // Don't close menu for move — it triggers the sub-flow
   if (action !== 'move') {
     if (item.isMore !== undefined) item.isMore = false;
@@ -345,6 +366,17 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
                   @move-folder="handleAction('move-folder', item)"
                   @batch-manage="handleAction('batch-manage', item)"
                   @delete="handleAction('delete', item)"
+                />
+              </div>
+
+              <!-- Move: folder picker -->
+              <div v-else-if="folderPickerItemId === item.id" class="card-menu move-menu">
+                <FolderPickerMenu
+                  :options="folderOptions || []"
+                  :current-path="item.folder_path || ''"
+                  show-back
+                  @back="folderPickerItemId = null"
+                  @confirm="(path: string) => onFolderPicked(item, path)"
                 />
               </div>
 

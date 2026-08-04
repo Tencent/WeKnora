@@ -28,22 +28,18 @@
                 </div>
               </div>
 
-              <!-- Where the batch lands. Shown for every file upload so browsing
-                   a folder never silently decides the destination. -->
-              <div v-if="mode === 'file'" class="destination-row">
-                <t-icon :name="localTargetFolder ? 'folder' : 'folder-open'" class="destination-icon" />
-                <span class="destination-label">{{ t('uploadConfirm.destinationLabel') }}</span>
-                <span class="destination-path" :title="destinationTitle">{{ destinationText }}</span>
-                <t-tooltip v-if="localTargetFolder" :content="t('uploadConfirm.destinationToRoot')" placement="top">
-                  <button
-                    type="button"
-                    class="destination-clear"
-                    :aria-label="t('uploadConfirm.destinationToRoot')"
-                    @click="localTargetFolder = ''"
-                  >
-                    <t-icon name="close-circle-filled" />
-                  </button>
-                </t-tooltip>
+              <!-- Where the batch lands. Only shown when it is somewhere other
+                   than the top level, i.e. when browsing a folder made the
+                   destination non-obvious. -->
+              <div v-if="mode === 'file' && localTargetFolder" class="destination-row">
+                <t-icon name="folder" class="destination-icon" />
+                <span class="destination-text">
+                  {{ t('uploadConfirm.destinationLabel') }}
+                  <strong class="destination-path" :title="localTargetFolder">{{ destinationLeaf }}</strong>
+                </span>
+                <button type="button" class="destination-reset" @click="localTargetFolder = ''">
+                  {{ t('uploadConfirm.destinationToRoot') }}
+                </button>
               </div>
 
               <div class="files-list-wrap">
@@ -650,15 +646,13 @@ const dialogVisible = computed({
   set: (value: boolean) => emit('update:visible', value),
 })
 
-const destinationText = computed(() =>
-  localTargetFolder.value || t('uploadConfirm.destinationRoot'),
-)
-
-const destinationTitle = computed(() =>
-  localTargetFolder.value
-    ? t('uploadConfirm.destinationTip', { folder: localTargetFolder.value })
-    : t('uploadConfirm.destinationRootTip'),
-)
+// Deep paths are shown by their last segment; the full path stays in the title.
+// Truncating from the left with `direction: rtl` mangled CJK folder names.
+const destinationLeaf = computed(() => {
+  const path = localTargetFolder.value
+  const idx = path.lastIndexOf('/')
+  return idx >= 0 ? path.slice(idx + 1) : path
+})
 
 /**
  * Directory a folder-upload file came from, shown under its name so a batch of
@@ -1503,62 +1497,54 @@ const handleConfirm = () => {
   color: var(--td-text-color-secondary);
 }
 
+// A quiet line rather than a banner: it is a fact about the batch, not a control
+// that should compete with the file list.
 .destination-row {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 6px;
   flex-shrink: 0;
-  margin: 0 8px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: var(--td-bg-color-secondarycontainer);
+  margin: 0 10px;
   font-size: 12px;
   line-height: 18px;
+  color: var(--td-text-color-placeholder);
 }
 
 .destination-icon {
   flex-shrink: 0;
-  font-size: 14px;
-  color: var(--td-text-color-placeholder);
+  align-self: center;
+  font-size: 13px;
 }
 
-.destination-label {
-  flex-shrink: 0;
-  color: var(--td-text-color-placeholder);
-}
-
-.destination-path {
+.destination-text {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  direction: rtl;
-  text-align: left;
-  color: var(--td-text-color-primary);
 }
 
-.destination-clear {
-  display: flex;
+.destination-path {
+  color: var(--td-text-color-primary);
+  font-weight: 500;
+}
+
+.destination-reset {
   flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
   padding: 0;
   border: 0;
-  border-radius: 50%;
   background: transparent;
   color: var(--td-text-color-placeholder);
+  font-family: var(--app-font-family);
+  font-size: 12px;
+  text-decoration: underline;
+  text-decoration-color: transparent;
   cursor: pointer;
-  transition: color 0.15s ease;
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
 
   &:hover {
-    color: var(--td-text-color-secondary);
-  }
-
-  .t-icon {
-    font-size: 14px;
+    color: var(--td-brand-color);
+    text-decoration-color: currentColor;
   }
 }
 
