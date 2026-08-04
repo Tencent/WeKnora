@@ -51,12 +51,16 @@ func NewMessageHandler(
 
 // resolveResourceRewriter builds the storage-reference rewriter for one response
 // from the request's `resource_urls` parameter, falling back to the deployment
-// default. An invalid value is a client error the caller must turn into a 400.
+// default. The returned error is already an AppError the caller can hand to
+// c.Error: a rejected scope is a 403, a typo in the parameter is a 400.
 func (h *MessageHandler) resolveResourceRewriter(c *gin.Context) (*storageurl.Rewriter, error) {
 	ctx := c.Request.Context()
 	mode, err := storageurl.ResolveMode(ctx, c.Query(storageurl.QueryParam))
 	if err != nil {
-		return nil, err
+		if stderrors.Is(err, storageurl.ErrPublicModeForbidden) {
+			return nil, errors.NewForbiddenError(err.Error())
+		}
+		return nil, errors.NewBadRequestError(err.Error())
 	}
 	return storageurl.NewRequestRewriter(ctx, mode, h.FileService, h.StorageResolver), nil
 }
@@ -91,8 +95,8 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 
 	rewriter, err := h.resolveResourceRewriter(c)
 	if err != nil {
-		logger.Warnf(ctx, "Invalid resource URL mode: %v", err)
-		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		logger.Warnf(ctx, "Rejected resource URL mode: %v", err)
+		_ = c.Error(err)
 		return
 	}
 

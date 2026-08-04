@@ -17,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
+	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -671,7 +672,14 @@ func (h *EmbedChannelHandler) ensureEmbedSession(c *gin.Context) error {
 		ctx = types.WithEmbedVisitorID(ctx, visitorID)
 	}
 	c.Set(types.PrincipalContextKey.String(), principal)
-	c.Request = c.Request.WithContext(types.WithPrincipal(ctx, principal))
+	// Embed visitors are anonymous, so every delegated handler must keep
+	// returning `resource://` handles: their images stay behind the
+	// channel-scoped /embed/:channel_id/files proxy instead of being handed out
+	// as shareable, credential-free URLs. Pinning it here covers both the
+	// `?resource_urls=public` query parameter and a deployment-wide
+	// RESOURCE_URL_MODE=public default.
+	ctx = storageurl.WithForcedHandleMode(types.WithPrincipal(ctx, principal))
+	c.Request = c.Request.WithContext(ctx)
 	return nil
 }
 

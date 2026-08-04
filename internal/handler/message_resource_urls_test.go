@@ -134,3 +134,35 @@ func TestLoadMessages_ParameterOverridesDeploymentDefault(t *testing.T) {
 	assert.Equal(t, "see ![fig]("+testResourceHandle+")",
 		loadMessageContent(t, router, "?resource_urls=handle"))
 }
+
+// A knowledge-base-restricted API key is denied the /files proxy because a raw
+// storage path cannot be bound to its allow-list. Handing it anonymous file URLs
+// instead would reopen exactly that hole, so public mode is refused outright.
+func TestLoadMessages_RejectsPublicModeForKBRestrictedAPIKey(t *testing.T) {
+	router := newResourceURLTestRouter(t, nil)
+	req := httptest.NewRequest(http.MethodGet, "/messages/sess1/load?resource_urls=public", nil)
+	req = req.WithContext(types.WithTenantAPIKeyScope(req.Context(), types.TenantAPIKeyScope{
+		Capabilities:     types.StringArray{string(types.APIKeyCapabilityRetrieve)},
+		KnowledgeBaseIDs: types.StringArray{"kb-1"},
+	}))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusForbidden, w.Code, "body=%s", w.Body.String())
+}
+
+// A KB-restricted key keeps working in the default mode: only the public URLs
+// are off limits, not the endpoint.
+func TestLoadMessages_KBRestrictedAPIKeyStillReadsHandles(t *testing.T) {
+	router := newResourceURLTestRouter(t, []*types.Message{
+		{Content: "see ![fig](" + testResourceHandle + ")"},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/messages/sess1/load", nil)
+	req = req.WithContext(types.WithTenantAPIKeyScope(req.Context(),
+		types.TenantAPIKeyScope{KnowledgeBaseIDs: types.StringArray{"kb-1"}}))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "resource://")
+}

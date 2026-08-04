@@ -2,8 +2,11 @@ package storageurl
 
 import (
 	"context"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -80,6 +83,12 @@ func TestFindIncompleteMarkdownImage(t *testing.T) {
 		{"two images complete", "![a](local://1/a.png) ![b](local://1/b.png)", -1},
 		{"first complete second incomplete", "![a](local://1/a.png) ![b](minio://part", 22},
 		{"bracket inside alt text", "![a[b]](minio://wizard-test/10000/part", 0},
+		{"destination with whitespace is prose, not a link", "![alt](see the figure below", -1},
+		{
+			"destination too long to be a link",
+			"![alt](" + strings.Repeat("x", maxIncompleteImageBytes),
+			-1,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -117,13 +126,13 @@ func TestStreamRewriter_HoldsSplitReference(t *testing.T) {
 	sr := NewStreamRewriter(NewRewriter(stubResolver("https://cdn.example.com/x.png"), "TEST"))
 	ctx := context.Background()
 
-	first := sr.Push(ctx, "answer-1", "here it is: ![img](resource://xifDo7", false)
+	first := sr.Push(ctx, "answer-1", "here it is: ![img](resource://xifDo7", false, nil)
 	assert.Equal(t, "here it is: ", first, "the incomplete image must be held back")
 
-	second := sr.Push(ctx, "answer-1", "NTSL300Lp1goVutw) done", false)
+	second := sr.Push(ctx, "answer-1", "NTSL300Lp1goVutw) done", false, nil)
 	assert.Equal(t, "![img](https://cdn.example.com/x.png) done", second)
 
-	assert.Empty(t, sr.Push(ctx, "answer-1", "", true))
+	assert.Empty(t, sr.Push(ctx, "answer-1", "", true, nil))
 	assert.Empty(t, sr.FlushAll(ctx), "nothing should remain held")
 }
 
@@ -133,11 +142,11 @@ func TestStreamRewriter_KeysAreIndependent(t *testing.T) {
 	sr := NewStreamRewriter(NewRewriter(stubResolver("https://cdn.example.com/x.png"), "TEST"))
 	ctx := context.Background()
 
-	assert.Empty(t, sr.Push(ctx, "a", "![x](resource://aaaa", false))
-	assert.Equal(t, "plain b", sr.Push(ctx, "b", "plain b", false))
+	assert.Empty(t, sr.Push(ctx, "a", "![x](resource://aaaa", false, nil))
+	assert.Equal(t, "plain b", sr.Push(ctx, "b", "plain b", false, nil))
 	assert.Equal(t,
 		"![x](https://cdn.example.com/x.png)",
-		sr.Push(ctx, "a", "bbbbccccdddddd)", false),
+		sr.Push(ctx, "a", "bbbbccccdddddd)", false, nil),
 	)
 }
 
@@ -146,27 +155,42 @@ func TestStreamRewriter_FlushAllReleasesHeldTail(t *testing.T) {
 	sr := NewStreamRewriter(NewRewriter(stubResolver("https://cdn.example.com/x.png"), "TEST"))
 	ctx := context.Background()
 
-	assert.Equal(t, "tail ", sr.Push(ctx, "answer-1", "tail ![img](resource://partial", false))
+	meta := map[string]interface{}{"event_id": "answer-1", "is_fallback": true}
+	assert.Equal(t, "tail ",
+		sr.Push(ctx, "answer-1", "tail ![img](resource://partial", false, meta))
 	assert.Equal(t,
-		map[string]string{"answer-1": "![img](https://cdn.example.com/x.png"},
+		map[string]Held{"answer-1": {
+			Content: "![img](https://cdn.example.com/x.png",
+			Meta:    meta,
+		}},
 		sr.FlushAll(ctx),
-		"the held tail must still reach the client, rewritten where possible",
+		"the held tail must still reach the client, rewritten, with its metadata",
 	)
 }
 
-// Holdback must be bounded so a stream that never closes a Markdown image
-// cannot buffer the whole answer.
+// Text that merely looks like an unfinished image must not stall the stream:
+// prose can contain a literal "](", and a URL never runs this long.
+func TestStreamRewriter_LongUnclosedImageIsNotHeld(t *testing.T) {
+	sr := NewStreamRewriter(NewRewriter(stubResolver("https://cdn.example.com/x.png"), "TEST"))
+	chunk := "![never closed](" + strings.Repeat("x", maxIncompleteImageBytes)
+	assert.Equal(t, chunk, sr.Push(context.Background(), "answer-1", chunk, false, nil))
+}
+
+// Holdback must be bounded so a stream that never terminates a reference cannot
+// buffer the whole answer, and the byte-based release must not split a rune.
 func TestStreamRewriter_HoldbackIsBounded(t *testing.T) {
 	sr := NewStreamRewriter(NewRewriter(stubResolver("https://cdn.example.com/x.png"), "TEST"))
 	ctx := context.Background()
 
 	var emitted strings.Builder
-	emitted.WriteString(sr.Push(ctx, "answer-1", "![never closed](", false))
+	emitted.WriteString(sr.Push(ctx, "answer-1", "开头 resource://", false, nil))
 	for i := 0; i < 20; i++ {
-		emitted.WriteString(sr.Push(ctx, "answer-1", strings.Repeat("x", 1024), false))
+		emitted.WriteString(sr.Push(ctx, "answer-1", strings.Repeat("中", 1024), false, nil))
 	}
 	assert.Greater(t, emitted.Len(), 0, "bounded holdback must release the excess")
-	assert.LessOrEqual(t, len(sr.held["answer-1"]), maxHeldBytes)
+	assert.LessOrEqual(t, len(sr.held["answer-1"].content), maxHeldBytes)
+	assert.True(t, utf8.ValidString(emitted.String()), "the release must not split a rune")
+	assert.True(t, utf8.ValidString(sr.held["answer-1"].content), "the retained tail must stay valid")
 }
 
 // A disabled rewriter is a pass-through: the default API mode must not add
@@ -174,6 +198,30 @@ func TestStreamRewriter_HoldbackIsBounded(t *testing.T) {
 func TestStreamRewriter_DisabledIsPassThrough(t *testing.T) {
 	sr := NewStreamRewriter(NewRewriter(nil, "TEST"))
 	in := "![img](resource://xifDo7"
-	assert.Equal(t, in, sr.Push(context.Background(), "answer-1", in, false))
+	assert.Equal(t, in, sr.Push(context.Background(), "answer-1", in, false, nil))
 	assert.False(t, sr.Enabled())
+}
+
+// Two goroutines pushing different streams share one resolver, so resolution
+// must be serialised — this fails under -race if it is not.
+func TestStreamRewriter_ConcurrentPushIsSafe(t *testing.T) {
+	sr := NewStreamRewriter(NewRewriter(stubResolver("https://cdn.example.com/x.png"), "TEST"))
+	ctx := context.Background()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			key := "answer-" + strconv.Itoa(i)
+			for j := 0; j < 20; j++ {
+				// A distinct reference per push so every call really reaches the
+				// resolver instead of hitting the memo.
+				ref := "minio://bucket/10000/" + strconv.Itoa(i) + "-" + strconv.Itoa(j) + ".png"
+				sr.Push(ctx, key, "![x]("+ref+") ", false, nil)
+			}
+		}(i)
+	}
+	wg.Wait()
+	assert.Empty(t, sr.FlushAll(ctx))
 }

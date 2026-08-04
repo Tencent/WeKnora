@@ -59,8 +59,8 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 	// is still reportable as a normal 400 JSON error.
 	resourceRewriter, err := h.resolveStreamRewriter(c)
 	if err != nil {
-		logger.Warnf(ctx, "Invalid resource URL mode: %v", err)
-		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		logger.Warnf(ctx, "Rejected resource URL mode: %v", err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -175,6 +175,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 			newEvents, newOffset, err := h.streamManager.GetEvents(ctx, sessionID, messageID, currentOffset)
 			if err != nil {
 				logger.Errorf(ctx, "Failed to get new events: %v", err)
+				flushHeldStreamContent(ctx, c, message.RequestID, resourceRewriter)
 				return
 			}
 
@@ -381,6 +382,12 @@ func (h *Handler) handleAgentEventsForSSE(
 							},
 						})
 					}
+
+					// Release any buffered tail first: the answer generated
+					// before the stop is still the user's content, and in
+					// public resource URL mode part of it may be sitting in
+					// the holdback buffer.
+					flushHeldStreamContent(ctx, c, requestID, resourceRewriter)
 
 					// Send stop notification to frontend
 					c.SSEvent("message", &types.StreamResponse{

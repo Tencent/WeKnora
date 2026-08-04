@@ -119,8 +119,8 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	// has started an invalid value can no longer be reported as a 400.
 	resourceRewriter, err := h.resolveStreamRewriter(c)
 	if err != nil {
-		logger.Warnf(ctx, "Invalid resource URL mode: %v", err)
-		return nil, nil, errors.NewBadRequestError(err.Error())
+		logger.Warnf(ctx, "Rejected resource URL mode: %v", err)
+		return nil, nil, err
 	}
 	if h.suggestionService != nil && request.SuggestionAttribution != nil {
 		if err := h.suggestionService.ValidateAttribution(ctx, sessionID, request.Query, request.SuggestionAttribution); err != nil {
@@ -664,6 +664,15 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		return
 	}
 
+	// Resolve the storage-reference representation before retrieving, so a typo
+	// or a rejected scope costs nothing.
+	rewriter, err := h.resolveResourceRewriter(c)
+	if err != nil {
+		logger.Warnf(ctx, "Rejected resource URL mode: %v", err)
+		_ = c.Error(err)
+		return
+	}
+
 	// Merge single knowledge_base_id into knowledge_base_ids for backward compatibility
 	knowledgeBaseIDs := request.KnowledgeBaseIDs
 	if request.KnowledgeBaseID != "" {
@@ -717,12 +726,6 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "Knowledge search completed, found %d results", len(searchResults))
-	rewriter, err := h.resolveResourceRewriter(c)
-	if err != nil {
-		logger.Warnf(ctx, "Invalid resource URL mode: %v", err)
-		_ = c.Error(errors.NewBadRequestError(err.Error()))
-		return
-	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    rewriter.CopyReferences(ctx, searchResults),
