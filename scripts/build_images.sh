@@ -12,6 +12,9 @@ NC='\033[0m' # 无颜色
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
 
+# 启用 BuildKit
+export DOCKER_BUILDKIT=1
+
 # 版本信息
 VERSION="1.0.0"
 SCRIPT_NAME=$(basename "$0")
