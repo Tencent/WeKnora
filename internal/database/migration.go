@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/mysql"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -106,6 +107,8 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 	migrationsPath := "file://migrations/versioned"
 	if strings.HasPrefix(dsn, "sqlite3://") {
 		migrationsPath = "file://migrations/sqlite"
+	} else if strings.HasPrefix(dsn, "mysql://") {
+		migrationsPath = "file://migrations/mysql"
 	}
 
 	var m *migrate.Migrate

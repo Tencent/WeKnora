@@ -455,6 +455,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 	}
 
 	isPostgres := r.db.Dialector.Name() == "postgres"
+	isMySQL := r.db.Dialector.Name() == "mysql"
 
 	var sql string
 	if isPostgres {
@@ -465,6 +466,24 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 				tag_id = CASE %s END,
 				flags = (CASE %s END)::integer,
 				status = (CASE %s END)::integer,
+				updated_at = NOW()
+			WHERE id IN (%s)
+		`,
+			strings.Join(contentCases, " "),
+			strings.Join(isEnabledCases, " "),
+			strings.Join(tagIDCases, " "),
+			strings.Join(flagsCases, " "),
+			strings.Join(statusCases, " "),
+			strings.Join(inPlaceholders, ","),
+		)
+	} else if isMySQL {
+		sql = fmt.Sprintf(`
+			UPDATE chunks SET
+				content = CASE %s END,
+				is_enabled = CASE %s END,
+				tag_id = CASE %s END,
+				flags = CASE %s END,
+				status = CASE %s END,
 				updated_at = NOW()
 			WHERE id IN (%s)
 		`,

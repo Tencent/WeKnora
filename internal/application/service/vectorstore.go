@@ -251,7 +251,7 @@ func (s *vectorStoreService) unregisterSafely(ctx context.Context, storeID strin
 // Used to gate dialect-specific clauses (e.g., SELECT FOR UPDATE) that
 // SQLite would either ignore (recent versions) or fail to compile on.
 func (s *vectorStoreService) isPostgres(db *gorm.DB) bool {
-	return db != nil && db.Dialector != nil && db.Dialector.Name() == "postgres"
+	return db != nil && db.Dialector != nil && (db.Dialector.Name() == "postgres" || db.Dialector.Name() == "mysql")
 }
 
 // SaveDetectedVersion updates the connection_config.version for a stored vector store.

@@ -29,6 +29,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/dig"
 	"google.golang.org/grpc"
+	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -39,6 +40,7 @@ import (
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
 	milvusRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
+	mysqlRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/mysql"
 	neo4jRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/neo4j"
 	openSearchRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/opensearch"
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
@@ -632,6 +634,25 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		sqliteDBPath = dbPath
 		migrateDSN = "sqlite3://" + dbPath
 		logger.Infof(context.Background(), "DB Config: driver=sqlite path=%s", dbPath)
+	case "mysql":
+		dbPassword := os.Getenv("DB_PASSWORD")
+		gormDSN := fmt.Sprintf(
+			"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=UTC&multiStatements=true",
+			os.Getenv("DB_USER"), dbPassword,
+			os.Getenv("DB_HOST"), os.Getenv("DB_PORT"),
+			os.Getenv("DB_NAME"),
+		)
+		dialector = mysql.Open(gormDSN)
+		encodedPassword := url.QueryEscape(dbPassword)
+		migrateDSN = fmt.Sprintf(
+			"mysql://%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=true&multiStatements=true",
+			os.Getenv("DB_USER"), encodedPassword,
+			os.Getenv("DB_HOST"), os.Getenv("DB_PORT"),
+			os.Getenv("DB_NAME"),
+		)
+		logger.Infof(context.Background(), "DB Config: driver=mysql user=%s host=%s port=%s dbname=%s",
+			os.Getenv("DB_USER"), os.Getenv("DB_HOST"), os.Getenv("DB_PORT"), os.Getenv("DB_NAME"),
+		)
 	default:
 		return nil, fmt.Errorf("unsupported database driver: %s", os.Getenv("DB_DRIVER"))
 	}
@@ -650,9 +671,9 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	// different name (e.g., a wrapper dialect for managed PG) would silently
 	// fall back to the SQLite path, dropping the row-level X-lock. Catching
 	// the mismatch at startup is loud and inexpensive.
-	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" {
+	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" && name != "mysql" {
 		return nil, fmt.Errorf(
-			"unsupported gorm dialector %q; expected postgres or sqlite "+
+			"unsupported gorm dialector %q; expected postgres, sqlite or mysql "+
 				"(see vectorStoreService.isPostgres for impact)", name)
 	}
 
@@ -1059,6 +1080,16 @@ func initRetrieveEngineRegistry(
 			log.Errorf("Register sqlite retrieve engine failed: %v", err)
 		} else {
 			log.Infof("Register sqlite retrieve engine success")
+		}
+	}
+	if slices.Contains(retrieveDriver, "mysql") {
+		mySQLRepo := mysqlRepo.NewMySQLRetrieveEngineRepository(db)
+		if err := registry.Register(
+			retriever.NewKVHybridRetrieveEngine(mySQLRepo, types.PostgresRetrieverEngineType),
+		); err != nil {
+			log.Errorf("Register mysql retrieve engine failed: %v", err)
+		} else {
+			log.Infof("Register mysql retrieve engine success")
 		}
 	}
 	if slices.Contains(retrieveDriver, "elasticsearch_v8") {
