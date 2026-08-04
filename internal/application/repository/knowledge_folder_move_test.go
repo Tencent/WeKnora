@@ -95,3 +95,21 @@ func TestRenameKnowledgeFolderPath(t *testing.T) {
 	_, err = repo.RenameKnowledgeFolderPath(ctx, tenantID, kbID, "", "whatever")
 	assert.Error(t, err, "renaming the root itself is meaningless and must be rejected")
 }
+
+func TestRenameKnowledgeFolderPathUnderscoreInPath(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+
+	const tenantID = uint64(1)
+	kbID := uuid.New().String()
+
+	parent := insertKnowledgeInFolder(t, db, tenantID, kbID, "my_docs", "intro.md")
+	child := insertKnowledgeInFolder(t, db, tenantID, kbID, "my_docs/spec", "design.md")
+
+	affected, err := repo.RenameKnowledgeFolderPath(ctx, tenantID, kbID, "my_docs", "handbook")
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), affected)
+	assert.Equal(t, "handbook", folderPathOf(t, db, parent))
+	assert.Equal(t, "handbook/spec", folderPathOf(t, db, child))
+}

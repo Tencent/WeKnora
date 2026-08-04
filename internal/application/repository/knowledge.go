@@ -13,6 +13,9 @@ import (
 
 var ErrKnowledgeNotFound = errors.New("knowledge not found")
 
+// likeEscapeChar is the SQL ESCAPE character paired with escapeLikeKeyword.
+const likeEscapeChar = `\`
+
 // escapeLikeKeyword escapes SQL LIKE wildcards (%, _) in a keyword
 // so they are treated as literal characters.
 func escapeLikeKeyword(keyword string) string {
@@ -158,9 +161,10 @@ func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) 
 		// needed; otherwise match the folder itself plus everything below it.
 		if filter.FolderPath != "" {
 			query = query.Where(
-				"(folder_path = ? OR folder_path LIKE ?)",
+				"(folder_path = ? OR folder_path LIKE ? ESCAPE ?)",
 				filter.FolderPath,
 				escapeLikeKeyword(filter.FolderPath)+"/%",
+				likeEscapeChar,
 			)
 		}
 	}
@@ -264,8 +268,8 @@ func (r *knowledgeRepository) RenameKnowledgeFolderPath(
 	var rows []*types.Knowledge
 	if err := r.db.WithContext(ctx).
 		Select("id", "folder_path").
-		Where("tenant_id = ? AND knowledge_base_id = ? AND (folder_path = ? OR folder_path LIKE ?)",
-			tenantID, kbID, from, escapeLikeKeyword(from)+"/%").
+		Where("tenant_id = ? AND knowledge_base_id = ? AND (folder_path = ? OR folder_path LIKE ? ESCAPE ?)",
+			tenantID, kbID, from, escapeLikeKeyword(from)+"/%", likeEscapeChar).
 		Find(&rows).Error; err != nil {
 		return 0, err
 	}
