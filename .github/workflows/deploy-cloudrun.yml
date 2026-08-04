@@ -13,6 +13,8 @@ env:
   SERVICE_NAME: weknora-app
   WIF_PROVIDER: projects/442122035369/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider
   WIF_SERVICE_ACCOUNT: sa-beemotik-infra-deployer@beemotik.iam.gserviceaccount.com
+  NODE_VERSION: "22"
+  GO_VERSION: "1.26"
 
 jobs:
   deploy:
@@ -25,6 +27,35 @@ jobs:
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build Frontend SPA
+        working-directory: frontend
+        env:
+          VITE_IS_DOCKER: "true"
+        run: |
+          npm ci
+          npm run build
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build Go Backend
+        run: |
+          mkdir -p .duckdb yanyiwu
+          CGO_ENABLED=1 go run cmd/download/duckdb/duckdb.go
+          cp -r ~/.duckdb/* .duckdb/ 2>/dev/null || true
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o weknora ./cmd/server
+          cp -r ~/go/pkg/mod/github.com/yanyiwu/* yanyiwu/ 2>/dev/null || true
 
       - name: Authenticate to GCP via Workload Identity Federation
         id: auth
@@ -56,8 +87,6 @@ jobs:
           tags: |
             ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/weknora-app:latest
             ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/weknora-app:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Deploy Image to GCP Cloud Run
         uses: google-github-actions/deploy-cloudrun@v2
