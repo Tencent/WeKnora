@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     enable_status VARCHAR(50) NOT NULL DEFAULT 'enabled',
     embedding_model_id VARCHAR(64),
     file_name VARCHAR(255),
+    folder_path VARCHAR(1024) NOT NULL DEFAULT '',
     file_type VARCHAR(50),
     file_size BIGINT,
     file_path TEXT,

@@ -68,6 +68,51 @@ const PARSER_ENGINE_NAMES = [
   'opendataloader',
 ] as const
 
+/** Worker pools / queues use dynamic te() paths in RuntimeQueues.vue; keep in sync with internal/types/task.go. */
+const RUNTIME_WORKER_POOL_NAMES = [
+  'core',
+  'postprocess',
+  'enrichment',
+  'maintenance',
+  'shared',
+  'wiki',
+] as const
+
+const RUNTIME_QUEUE_NAMES = [
+  'default',
+  'chat_attachment',
+  'postprocess',
+  'summary',
+  'sync',
+  'low',
+  'multimodal',
+  'graph',
+  'question',
+  'wiki',
+] as const
+
+const RUNTIME_TASK_TYPE_KEYS = [
+  'documentProcess',
+  'manualProcess',
+  'temporaryDocumentProcess',
+  'postProcess',
+  'summary',
+  'tableSummary',
+  'question',
+  'multimodal',
+  'graph',
+  'sync',
+  'faqImport',
+  'batchReparse',
+  'batchDelete',
+  'move',
+  'indexDelete',
+  'kbClone',
+  'kbDelete',
+  'wikiIngest',
+  'wikiFinalize',
+] as const
+
 test('registered audit action labels exist as flat keys in every locale', () => {
   const failures: string[] = []
 
@@ -176,6 +221,42 @@ test('prune rebuild restores registered audit keys from baked-in English default
     getLocaleValueAtPath(en, `${KB_ACTIVITY_I18N_ROOTS.outcomes}.success`),
     'Success',
   )
+})
+
+test('runtime queue worker pool and queue labels exist in every locale', () => {
+  const failures: string[] = []
+
+  for (const pool of RUNTIME_WORKER_POOL_NAMES) {
+    for (const [localeName, keys] of Object.entries(localeKeysByName) as Array<[LocaleName, Set<string>]>) {
+      if (!keys.has(`system.globalSettings.runtime.pools.${pool}`)) {
+        failures.push(`${localeName}: missing system.globalSettings.runtime.pools.${pool}`)
+      }
+      if (!keys.has(`system.globalSettings.runtime.poolDescriptions.${pool}`)) {
+        failures.push(`${localeName}: missing system.globalSettings.runtime.poolDescriptions.${pool}`)
+      }
+    }
+  }
+
+  for (const queue of RUNTIME_QUEUE_NAMES) {
+    for (const [localeName, keys] of Object.entries(localeKeysByName) as Array<[LocaleName, Set<string>]>) {
+      if (!keys.has(`system.globalSettings.runtime.queueNames.${queue}`)) {
+        failures.push(`${localeName}: missing system.globalSettings.runtime.queueNames.${queue}`)
+      }
+      if (!keys.has(`system.globalSettings.runtime.queueDescriptions.${queue}`)) {
+        failures.push(`${localeName}: missing system.globalSettings.runtime.queueDescriptions.${queue}`)
+      }
+    }
+  }
+
+  for (const taskType of RUNTIME_TASK_TYPE_KEYS) {
+    for (const [localeName, keys] of Object.entries(localeKeysByName) as Array<[LocaleName, Set<string>]>) {
+      if (!keys.has(`system.globalSettings.runtime.tasks.taskTypes.${taskType}`)) {
+        failures.push(`${localeName}: missing system.globalSettings.runtime.tasks.taskTypes.${taskType}`)
+      }
+    }
+  }
+
+  assert.deepEqual(failures, [], failures.slice(0, 20).join('\n'))
 })
 
 test('parser engine display keys exist in every locale', () => {

@@ -816,6 +816,28 @@ func migrateLegacyStorageBackends(db *gorm.DB) {
 		logger.Warnf(context.Background(), "Failed to load workspaces for storage backend migration: %v", err)
 		return
 	}
+	if len(tenants) == 0 {
+		return
+	}
+
+	// Load every alias in a single query. Probing each tenant/provider pair with
+	// First() makes GORM log "record not found" for every miss, which floods the
+	// startup log with workspaces × providers lines on fresh installs.
+	var aliases []*types.StorageBackend
+	if err := db.Where("legacy_alias = ?", true).Find(&aliases).Error; err != nil {
+		logger.Warnf(context.Background(), "Failed to load legacy storage aliases: %v", err)
+		return
+	}
+	existingAliases := make(map[uint64]map[string]*types.StorageBackend, len(aliases))
+	for _, alias := range aliases {
+		byProvider := existingAliases[alias.TenantID]
+		if byProvider == nil {
+			byProvider = make(map[string]*types.StorageBackend)
+			existingAliases[alias.TenantID] = byProvider
+		}
+		byProvider[alias.Provider] = alias
+	}
+
 	for _, tenant := range tenants {
 		legacy := tenant.StorageEngineConfig
 		defaultProvider := ""
@@ -831,9 +853,7 @@ func migrateLegacyStorageBackends(db *gorm.DB) {
 
 		backendIDs := make(map[string]string)
 		for _, provider := range storageallowlist.Supported() {
-			var existing types.StorageBackend
-			err := db.Where("tenant_id = ? AND provider = ? AND legacy_alias = ?", tenant.ID, provider, true).First(&existing).Error
-			if err == nil {
+			if existing := existingAliases[tenant.ID][provider]; existing != nil {
 				// Environment-backed aliases are snapshots, not user-owned config.
 				// Refresh them at every startup so credential rotation does not
 				// leave the persisted resolver on stale values. If the workspace

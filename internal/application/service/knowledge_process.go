@@ -49,6 +49,7 @@ func (s *knowledgeService) cloneKnowledge(
 		EnableStatus:     "disabled",
 		EmbeddingModelID: targetKB.EmbeddingModelID,
 		FileName:         src.FileName,
+		FolderPath:       src.FolderPath,
 		FileType:         src.FileType,
 		FileSize:         src.FileSize,
 		FileHash:         src.FileHash,
