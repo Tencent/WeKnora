@@ -1801,6 +1801,14 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     }
 }
 
+@media (max-width: 768px) {
+    .aside_box:not(.aside_box--collapsed) {
+        position: fixed;
+        inset: 0 auto 0 0;
+        z-index: 300;
+    }
+}
+
 .menu_item-box {
     display: flex;
     align-items: center;
