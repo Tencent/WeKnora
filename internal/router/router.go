@@ -265,7 +265,10 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler, rbacGuards)
 		RegisterIMChannelRoutes(v1, params.IMHandler, rbacGuards)
 		RegisterEmbedChannelRoutes(v1, params.EmbedChannelHandler, rbacGuards)
-		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, params.DataSourceOAuthHandler, rbacGuards)
+		RegisterDataSourceRoutes(
+			v1, params.DataSourceHandler, params.DataSourceCredentialsHandler,
+			params.DataSourceOAuthHandler, rbacGuards,
+		)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
 		RegisterChunkerDebugRoutes(v1, rbacGuards)

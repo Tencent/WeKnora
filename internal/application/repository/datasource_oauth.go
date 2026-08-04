@@ -16,6 +16,7 @@ type dataSourceOAuthRepository struct {
 	db *gorm.DB
 }
 
+// NewDataSourceOAuthRepository creates persistent storage for delegated OAuth grants.
 func NewDataSourceOAuthRepository(db *gorm.DB) interfaces.DataSourceOAuthRepository {
 	return &dataSourceOAuthRepository{db: db}
 }
@@ -92,14 +93,17 @@ func (r *dataSourceOAuthRepository) SaveAuthorization(
 		if replaceConnection && existingErr == nil {
 			newVersion++
 			if err := tx.Model(&types.DataSource{}).
-				Where("id = ? AND tenant_id = ? AND connection_version = ?", token.DataSourceID, token.TenantID, expectedConnectionVersion).
+				Where(
+					"id = ? AND tenant_id = ? AND connection_version = ?",
+					token.DataSourceID, token.TenantID, expectedConnectionVersion,
+				).
 				Updates(map[string]interface{}{
 					"connection_version": newVersion,
 					"config":             resetConfig,
 					"last_sync_cursor":   nil,
 					"last_sync_result":   nil,
 					"last_sync_at":       nil,
-					"status":             types.DataSourceStatusPaused,
+					"status":             types.DataSourceStatusConnecting,
 					"error_message":      "",
 					"updated_at":         time.Now().UTC(),
 				}).Error; err != nil {
@@ -112,7 +116,10 @@ func (r *dataSourceOAuthRepository) SaveAuthorization(
 		}
 		if !replaceConnection && ds.Status == types.DataSourceStatusReauthorizationRequired {
 			if err := tx.Model(&types.DataSource{}).
-				Where("id = ? AND tenant_id = ? AND connection_version = ?", token.DataSourceID, token.TenantID, expectedConnectionVersion).
+				Where(
+					"id = ? AND tenant_id = ? AND connection_version = ?",
+					token.DataSourceID, token.TenantID, expectedConnectionVersion,
+				).
 				Updates(map[string]interface{}{
 					"status": types.DataSourceStatusPaused, "error_message": "", "updated_at": time.Now().UTC(),
 				}).Error; err != nil {
@@ -217,6 +224,7 @@ type dataSourceItemRepository struct {
 	db *gorm.DB
 }
 
+// NewDataSourceItemRepository creates storage for the durable remote-item projection.
 func NewDataSourceItemRepository(db *gorm.DB) interfaces.DataSourceItemRepository {
 	return &dataSourceItemRepository{db: db}
 }

@@ -30,7 +30,8 @@ const (
 	oauthHTTPTimeout     = 30 * time.Second
 )
 
-type DataSourceOAuthManager struct {
+// OneDriveOAuthManager owns delegated OAuth state and refresh-token rotation.
+type OneDriveOAuthManager struct {
 	tokens     interfaces.DataSourceOAuthRepository
 	dataSource interfaces.DataSourceRepository
 	states     *dataSourceOAuthStateStore
@@ -40,7 +41,8 @@ type DataSourceOAuthManager struct {
 	refreshMu  sync.Mutex
 }
 
-type DataSourceOAuthStatus struct {
+// OAuthStatus is the non-secret connection status exposed to administrators.
+type OAuthStatus struct {
 	Authorized            bool      `json:"authorized"`
 	Provider              string    `json:"provider,omitempty"`
 	AccountDisplayName    string    `json:"account_display_name,omitempty"`
@@ -73,12 +75,13 @@ type microsoftDriveResponse struct {
 	} `json:"owner"`
 }
 
-func NewDataSourceOAuthManager(
+// NewOneDriveOAuthManager creates a data-source-scoped OneDrive OAuth manager.
+func NewOneDriveOAuthManager(
 	tokens interfaces.DataSourceOAuthRepository,
 	dataSource interfaces.DataSourceRepository,
 	rdb *redis.Client,
-) *DataSourceOAuthManager {
-	return &DataSourceOAuthManager{
+) *OneDriveOAuthManager {
+	return &OneDriveOAuthManager{
 		tokens: tokens, dataSource: dataSource, states: newDataSourceOAuthStateStore(rdb),
 		httpClient: &http.Client{Timeout: oauthHTTPTimeout},
 		loginBase:  oneDriveDefaultLogin,
@@ -86,7 +89,8 @@ func NewDataSourceOAuthManager(
 	}
 }
 
-func (m *DataSourceOAuthManager) AuthorizeURL(
+// AuthorizeURL creates a single-use PKCE authorization request.
+func (m *OneDriveOAuthManager) AuthorizeURL(
 	ctx context.Context,
 	tenantID uint64,
 	dataSourceID string,
@@ -98,7 +102,7 @@ func (m *DataSourceOAuthManager) AuthorizeURL(
 		return "", err
 	}
 	if m.states.rdb == nil && !strings.EqualFold(strings.TrimSpace(os.Getenv("EDITION")), "lite") {
-		return "", fmt.Errorf("OneDrive OAuth requires Redis outside Lite single-instance mode")
+		return "", fmt.Errorf("onedrive OAuth requires Redis outside Lite single-instance mode")
 	}
 	ds, err := m.dataSource.FindByID(ctx, dataSourceID)
 	if err != nil || ds == nil || ds.TenantID != tenantID || ds.Type != types.ConnectorTypeOneDrive {
@@ -137,18 +141,19 @@ func (m *DataSourceOAuthManager) AuthorizeURL(
 	return fmt.Sprintf("%s/%s/oauth2/v2.0/authorize?%s", m.loginBase, url.PathEscape(tenant), q.Encode()), nil
 }
 
-func (m *DataSourceOAuthManager) CompleteAuthorization(
+// CompleteAuthorization consumes callback state and persists an authorized drive identity.
+func (m *OneDriveOAuthManager) CompleteAuthorization(
 	ctx context.Context, stateValue, code, providerError string,
-) (*DataSourceOAuthStatus, error) {
+) (*OAuthStatus, error) {
 	state, err := m.states.take(ctx, stateValue)
 	if err != nil {
 		return nil, err
 	}
 	if providerError != "" {
 		if providerError == "access_denied" {
-			return nil, fmt.Errorf("Microsoft authorization was canceled")
+			return nil, fmt.Errorf("microsoft authorization was canceled")
 		}
-		return nil, fmt.Errorf("Microsoft authorization failed: %s", safeOAuthError(providerError))
+		return nil, fmt.Errorf("microsoft authorization failed: %s", safeOAuthError(providerError))
 	}
 	if code == "" {
 		return nil, fmt.Errorf("authorization code is missing")
@@ -182,7 +187,7 @@ func (m *DataSourceOAuthManager) CompleteAuthorization(
 		return nil, err
 	}
 	if drive.ID == "" || drive.Owner.User.ID == "" {
-		return nil, fmt.Errorf("Microsoft did not return a stable drive/account identity")
+		return nil, fmt.Errorf("microsoft did not return a stable drive/account identity")
 	}
 
 	ds, err := m.dataSource.FindByID(ctx, state.DataSourceID)
@@ -231,9 +236,10 @@ func (m *DataSourceOAuthManager) CompleteAuthorization(
 	return status, nil
 }
 
-func (m *DataSourceOAuthManager) Status(
+// Status returns non-secret connection state scoped to a workspace and data source.
+func (m *OneDriveOAuthManager) Status(
 	ctx context.Context, tenantID uint64, dataSourceID string,
-) (*DataSourceOAuthStatus, error) {
+) (*OAuthStatus, error) {
 	ds, err := m.dataSource.FindByID(ctx, dataSourceID)
 	if err != nil || ds == nil || ds.TenantID != tenantID || ds.Type != types.ConnectorTypeOneDrive {
 		return nil, ErrDataSourceNotFound
@@ -243,12 +249,20 @@ func (m *DataSourceOAuthManager) Status(
 		return nil, err
 	}
 	if token == nil {
-		return &DataSourceOAuthStatus{ConnectionVersion: ds.ConnectionVersion}, nil
+		return &OAuthStatus{ConnectionVersion: ds.ConnectionVersion}, nil
 	}
-	return statusFromToken(token, ds.Status == types.DataSourceStatusReauthorizationRequired), nil
+	status := statusFromToken(token, ds.Status == types.DataSourceStatusReauthorizationRequired)
+	// A replacement token is persisted before provider-independent knowledge
+	// cleanup runs. Do not publish it as ready until the callback completes that
+	// cleanup and transitions the data source back to paused.
+	if ds.Status == types.DataSourceStatusConnecting {
+		status.Authorized = false
+	}
+	return status, nil
 }
 
-func (m *DataSourceOAuthManager) Revoke(ctx context.Context, tenantID uint64, dataSourceID string) error {
+// Revoke deletes local tokens and invalidates the current connection generation.
+func (m *OneDriveOAuthManager) Revoke(ctx context.Context, tenantID uint64, dataSourceID string) error {
 	ds, err := m.dataSource.FindByID(ctx, dataSourceID)
 	if err != nil || ds == nil || ds.TenantID != tenantID || ds.Type != types.ConnectorTypeOneDrive {
 		return ErrDataSourceNotFound
@@ -269,19 +283,21 @@ func (m *DataSourceOAuthManager) Revoke(ctx context.Context, tenantID uint64, da
 	return err
 }
 
-func (m *DataSourceOAuthManager) AccessToken(
+// AccessToken returns a usable token, refreshing it under a database lock when needed.
+func (m *OneDriveOAuthManager) AccessToken(
 	ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64,
 ) (string, error) {
 	return m.accessToken(ctx, tenantID, dataSourceID, connectionVersion, false)
 }
 
-func (m *DataSourceOAuthManager) RefreshAccessToken(
+// RefreshAccessToken forces a serialized token refresh after a Graph 401 response.
+func (m *OneDriveOAuthManager) RefreshAccessToken(
 	ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64,
 ) (string, error) {
 	return m.accessToken(ctx, tenantID, dataSourceID, connectionVersion, true)
 }
 
-func (m *DataSourceOAuthManager) accessToken(
+func (m *OneDriveOAuthManager) accessToken(
 	ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64, force bool,
 ) (string, error) {
 	token, err := m.tokens.Get(ctx, tenantID, dataSourceID)
@@ -334,7 +350,7 @@ func (m *DataSourceOAuthManager) accessToken(
 	return refreshed.AccessToken, nil
 }
 
-func (m *DataSourceOAuthManager) exchange(
+func (m *OneDriveOAuthManager) exchange(
 	ctx context.Context, tenant string, values url.Values,
 ) (*microsoftTokenResponse, error) {
 	endpoint := fmt.Sprintf("%s/%s/oauth2/v2.0/token", m.loginBase, url.PathEscape(tenant))
@@ -343,17 +359,17 @@ func (m *DataSourceOAuthManager) exchange(
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := m.httpClient.Do(req)
+	resp, err := m.doWithoutRedirects(req)
 	if err != nil {
-		return nil, fmt.Errorf("Microsoft token request failed: %w", err)
+		return nil, fmt.Errorf("microsoft token request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
 	if err != nil {
 		return nil, fmt.Errorf("read Microsoft token response: %w", err)
 	}
 	if len(body) > 1<<20 {
-		return nil, fmt.Errorf("Microsoft token response is too large")
+		return nil, fmt.Errorf("microsoft token response is too large")
 	}
 	var token microsoftTokenResponse
 	if err := json.Unmarshal(body, &token); err != nil {
@@ -363,7 +379,7 @@ func (m *DataSourceOAuthManager) exchange(
 		return nil, &oauthProviderError{Code: token.Error, Description: safeOAuthError(token.Description)}
 	}
 	if token.AccessToken == "" || (values.Get("grant_type") == "authorization_code" && token.RefreshToken == "") {
-		return nil, fmt.Errorf("Microsoft token response is incomplete")
+		return nil, fmt.Errorf("microsoft token response is incomplete")
 	}
 	if token.ExpiresIn <= 0 {
 		token.ExpiresIn = 3600
@@ -371,17 +387,17 @@ func (m *DataSourceOAuthManager) exchange(
 	return &token, nil
 }
 
-func (m *DataSourceOAuthManager) getDrive(ctx context.Context, accessToken string) (*microsoftDriveResponse, error) {
+func (m *OneDriveOAuthManager) getDrive(ctx context.Context, accessToken string) (*microsoftDriveResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(m.graphBase, "/")+"/me/drive", nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
-	resp, err := m.httpClient.Do(req)
+	resp, err := m.doWithoutRedirects(req)
 	if err != nil {
 		return nil, fmt.Errorf("validate OneDrive authorization: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("validate OneDrive authorization: Microsoft Graph returned %d", resp.StatusCode)
 	}
@@ -390,7 +406,7 @@ func (m *DataSourceOAuthManager) getDrive(ctx context.Context, accessToken strin
 		return nil, err
 	}
 	if len(body) > 1<<20 {
-		return nil, fmt.Errorf("Microsoft Graph drive response is too large")
+		return nil, fmt.Errorf("microsoft Graph drive response is too large")
 	}
 	var drive microsoftDriveResponse
 	if err := json.Unmarshal(body, &drive); err != nil {
@@ -399,7 +415,18 @@ func (m *DataSourceOAuthManager) getDrive(ctx context.Context, accessToken strin
 	return &drive, nil
 }
 
-func (m *DataSourceOAuthManager) configuration() (clientID, clientSecret, tenant, redirectURI string, err error) {
+func (m *OneDriveOAuthManager) doWithoutRedirects(req *http.Request) (*http.Response, error) {
+	if m.httpClient == nil {
+		return nil, errors.New("oauth HTTP client is not configured")
+	}
+	client := *m.httpClient
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return client.Do(req)
+}
+
+func (m *OneDriveOAuthManager) configuration() (clientID, clientSecret, tenant, redirectURI string, err error) {
 	clientID = strings.TrimSpace(os.Getenv("ONEDRIVE_CLIENT_ID"))
 	clientSecret = strings.TrimSpace(os.Getenv("ONEDRIVE_CLIENT_SECRET"))
 	tenant = strings.TrimSpace(os.Getenv("ONEDRIVE_TENANT"))
@@ -408,11 +435,17 @@ func (m *DataSourceOAuthManager) configuration() (clientID, clientSecret, tenant
 		tenant = "common"
 	}
 	if clientID == "" || clientSecret == "" || redirectURI == "" {
-		return "", "", "", "", fmt.Errorf("%w: ONEDRIVE_CLIENT_ID, ONEDRIVE_CLIENT_SECRET and ONEDRIVE_REDIRECT_URL are required", ErrOAuthNotConfigured)
+		return "", "", "", "", fmt.Errorf(
+			"%w: ONEDRIVE_CLIENT_ID, ONEDRIVE_CLIENT_SECRET and ONEDRIVE_REDIRECT_URL are required",
+			ErrOAuthNotConfigured,
+		)
 	}
 	parsed, parseErr := url.Parse(redirectURI)
 	if parseErr != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.Fragment != "" {
-		return "", "", "", "", fmt.Errorf("%w: ONEDRIVE_REDIRECT_URL must be an absolute URL without a fragment", ErrOAuthNotConfigured)
+		return "", "", "", "", fmt.Errorf(
+			"%w: ONEDRIVE_REDIRECT_URL must be an absolute URL without a fragment",
+			ErrOAuthNotConfigured,
+		)
 	}
 	if !strings.EqualFold(parsed.Scheme, "https") && !isLoopbackHost(parsed.Hostname()) {
 		return "", "", "", "", fmt.Errorf("%w: ONEDRIVE_REDIRECT_URL must use HTTPS", ErrOAuthNotConfigured)
@@ -448,11 +481,11 @@ func isReauthorizationError(err error) bool {
 	}
 }
 
-func statusFromToken(token *types.DataSourceOAuthToken, reauthorization bool) *DataSourceOAuthStatus {
+func statusFromToken(token *types.DataSourceOAuthToken, reauthorization bool) *OAuthStatus {
 	if token == nil {
-		return &DataSourceOAuthStatus{ReauthorizationNeeded: reauthorization}
+		return &OAuthStatus{ReauthorizationNeeded: reauthorization}
 	}
-	return &DataSourceOAuthStatus{
+	return &OAuthStatus{
 		Authorized: token != nil, Provider: token.Provider,
 		AccountDisplayName: token.AccountDisplayName, ProviderTenantID: token.ProviderTenantID,
 		AuthorizedDriveID: token.AuthorizedDriveID, ExpiresAt: token.ExpiresAt,

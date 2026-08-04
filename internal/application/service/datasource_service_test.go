@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -61,7 +60,6 @@ func TestProcessSyncCancelsWhenKnowledgeBaseDeleted(t *testing.T) {
 
 type processSyncKBService struct {
 	getErr error
-	kb     *types.KnowledgeBase
 }
 
 func (s *processSyncKBService) CreateKnowledgeBase(context.Context, *types.KnowledgeBase) (*types.KnowledgeBase, error) {
@@ -69,11 +67,11 @@ func (s *processSyncKBService) CreateKnowledgeBase(context.Context, *types.Knowl
 }
 
 func (s *processSyncKBService) GetKnowledgeBaseByID(context.Context, string) (*types.KnowledgeBase, error) {
-	return s.kb, s.getErr
+	return nil, s.getErr
 }
 
 func (s *processSyncKBService) GetKnowledgeBaseByIDOnly(context.Context, string) (*types.KnowledgeBase, error) {
-	return s.kb, s.getErr
+	return nil, s.getErr
 }
 
 func (s *processSyncKBService) GetKnowledgeBasesByIDsOnly(context.Context, []string) ([]*types.KnowledgeBase, error) {
@@ -93,7 +91,7 @@ func (s *processSyncKBService) ListKnowledgeBasesByTenantID(context.Context, uin
 }
 
 func (s *processSyncKBService) UpdateKnowledgeBase(
-	context.Context, string, string, string, *types.KnowledgeBaseConfig, *types.VLMConfig,
+	context.Context, string, string, string, *types.KnowledgeBaseConfig,
 ) (*types.KnowledgeBase, error) {
 	return nil, nil
 }
@@ -103,17 +101,6 @@ func (s *processSyncKBService) TogglePinKnowledgeBase(context.Context, string) (
 }
 
 func (s *processSyncKBService) HybridSearch(context.Context, string, types.SearchParams) ([]*types.SearchResult, error) {
-	return nil, nil
-}
-
-func (s *processSyncKBService) HybridSearchWithRerank(
-	ctx context.Context, id string, params types.SearchParams,
-) (*types.RetrievalResult, error) {
-	results, err := s.HybridSearch(ctx, id, params)
-	return &types.RetrievalResult{Results: results}, err
-}
-
-func (s *processSyncKBService) ReadChunkImage(context.Context, *types.SearchResult) ([]byte, error) {
 	return nil, nil
 }
 
@@ -186,7 +173,7 @@ func TestAllFetchedItemsFailedError(t *testing.T) {
 	err := allFetchedItemsFailedError(&types.SyncResult{
 		Total:  2,
 		Failed: 2,
-		Errors: []types.SyncItemError{{Message: "doc one: export failed"}},
+		Errors: []string{"doc one: export failed"},
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "all fetched items failed during sync (2/2)")
@@ -214,562 +201,252 @@ func TestAllFetchedItemsFailedErrorTruncatesLongDetail(t *testing.T) {
 	err := allFetchedItemsFailedError(&types.SyncResult{
 		Total:  1,
 		Failed: 1,
-		Errors: []types.SyncItemError{{Message: strings.Repeat("x", 600)}},
+		Errors: []string{strings.Repeat("x", 600)},
 	})
 	require.Error(t, err)
 	assert.LessOrEqual(t, len(err.Error()), 560)
 	assert.Contains(t, err.Error(), "...")
 }
 
-const deletedItemConnectorType = "test-sync-deletion"
+type finalizeDataSourceRepo struct {
+	interfaces.DataSourceRepository
+	dataSource *types.DataSource
+}
 
-type deletedItemConnector struct{}
+func (r *finalizeDataSourceRepo) FindByID(context.Context, string) (*types.DataSource, error) {
+	return r.dataSource, nil
+}
 
-func (deletedItemConnector) Type() string { return deletedItemConnectorType }
-func (deletedItemConnector) Validate(context.Context, *types.DataSourceConfig) error {
+func (r *finalizeDataSourceRepo) UpdateSyncState(_ context.Context, dataSource *types.DataSource) error {
+	*r.dataSource = *dataSource
 	return nil
 }
 
-func (deletedItemConnector) ListResources(context.Context, *types.DataSourceConfig, string) ([]types.Resource, error) {
-	return nil, nil
-}
-
-func (deletedItemConnector) ResolveResourceAncestors(
-	context.Context, *types.DataSourceConfig, []string,
-) ([]string, error) {
-	return nil, nil
-}
-
-func (deletedItemConnector) FetchAll(context.Context, *types.DataSourceConfig, []string) ([]types.FetchedItem, error) {
-	return []types.FetchedItem{{
-		ExternalID:       "file:gone",
-		SourceResourceID: "folder:1",
-		IsDeleted:        true,
-	}}, nil
-}
-
-func (deletedItemConnector) FetchIncremental(
-	context.Context, *types.DataSourceConfig, *types.SyncCursor,
-) ([]types.FetchedItem, *types.SyncCursor, error) {
-	items, err := (deletedItemConnector{}).FetchAll(context.Background(), nil, nil)
-	return items, nil, err
-}
-
-type processSyncTenantRepo struct {
-	interfaces.TenantRepository
-	tenant *types.Tenant
-}
-
-func (r *processSyncTenantRepo) GetTenantByID(context.Context, uint64) (*types.Tenant, error) {
-	return r.tenant, nil
-}
-
-type processSyncTagService struct {
-	interfaces.KnowledgeTagService
-	ctx context.Context
-}
-
-func (s *processSyncTagService) FindOrCreateTagByName(
-	ctx context.Context,
-	_ string,
-	_ string,
-) (*types.KnowledgeTag, error) {
-	s.ctx = ctx
-	return nil, nil
-}
-
-type deletionLookupKnowledgeRepo struct {
+type finalizeKnowledgeRepo struct {
 	interfaces.KnowledgeRepository
-	knowledge         *types.Knowledge
-	lookupErr         error
-	metadataUpdates   []map[string]string // metadata persisted via UpdateKnowledge / UpdateKnowledgeColumn
-	metadataUpdateErr error
-	hardDeleted       []string
-	hardDeleteErr     error
-	tenantID          uint64
-	knowledgeBaseID   string
-	dataSourceID      string
-	externalID        string
+	knowledge *types.Knowledge
+	err       error
 }
 
-func (r *deletionLookupKnowledgeRepo) UpdateKnowledge(_ context.Context, knowledge *types.Knowledge) error {
-	if r.metadataUpdateErr != nil {
-		return r.metadataUpdateErr
-	}
-	metadata := map[string]string{}
-	if len(knowledge.Metadata) > 0 {
-		if err := json.Unmarshal(knowledge.Metadata, &metadata); err != nil {
-			return err
-		}
-	}
-	r.metadataUpdates = append(r.metadataUpdates, metadata)
-	return nil
+func (r *finalizeKnowledgeRepo) GetKnowledgeByID(context.Context, uint64, string) (*types.Knowledge, error) {
+	return r.knowledge, r.err
 }
 
-func (r *deletionLookupKnowledgeRepo) UpdateKnowledgeColumn(
-	ctx context.Context, id string, column string, value interface{},
-) error {
-	if column != "metadata" {
-		return fmt.Errorf("unexpected column update %q", column)
-	}
-	raw, ok := value.(types.JSON)
-	if !ok {
-		return fmt.Errorf("unexpected metadata value %T", value)
-	}
-	return r.UpdateKnowledge(ctx, &types.Knowledge{ID: id, Metadata: raw})
+type finalizeKnowledgeService struct {
+	interfaces.KnowledgeService
+	repository interfaces.KnowledgeRepository
 }
 
-func (r *deletionLookupKnowledgeRepo) FindByDataSourceExternalID(
-	_ context.Context, tenantID uint64, knowledgeBaseID, dataSourceID, externalID string,
-) (*types.Knowledge, error) {
-	if r.lookupErr != nil {
-		return nil, r.lookupErr
+func (s *finalizeKnowledgeService) GetRepository() interfaces.KnowledgeRepository {
+	return s.repository
+}
+
+type finalizeConnector struct{ datasource.Connector }
+
+func (finalizeConnector) Type() string { return "finalize-test" }
+
+func TestProcessSyncFinalizeDefersAndThenCommitsCursor(t *testing.T) {
+	dataSource := &types.DataSource{
+		ID: "ds-finalize", TenantID: 7, Type: "finalize-test",
+		ConnectionVersion: 3, Status: types.DataSourceStatusActive,
 	}
-	r.tenantID = tenantID
-	r.knowledgeBaseID = knowledgeBaseID
-	r.dataSourceID = dataSourceID
-	r.externalID = externalID
-	return r.knowledge, nil
-}
-
-func (r *deletionLookupKnowledgeRepo) HardDeleteKnowledge(_ context.Context, _ uint64, id string) error {
-	if r.hardDeleteErr != nil {
-		return r.hardDeleteErr
-	}
-	r.hardDeleted = append(r.hardDeleted, id)
-	return nil
-}
-
-func (r *deletionLookupKnowledgeRepo) HardDeleteKnowledgeList(_ context.Context, _ uint64, ids []string) error {
-	for _, id := range ids {
-		if err := r.HardDeleteKnowledge(context.Background(), 0, id); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// scopedDeletionRepo models two data sources sharing the same external_id.
-type scopedDeletionRepo struct {
-	interfaces.KnowledgeRepository
-	live        map[string]*types.Knowledge
-	hardDeleted []string
-}
-
-func (r *scopedDeletionRepo) FindByDataSourceExternalID(
-	_ context.Context, _ uint64, _, dataSourceID, externalID string,
-) (*types.Knowledge, error) {
-	if r.live == nil {
-		return nil, nil
-	}
-	return r.live[dataSourceID+"|"+externalID], nil
-}
-
-func (r *scopedDeletionRepo) HardDeleteKnowledge(_ context.Context, _ uint64, id string) error {
-	r.hardDeleted = append(r.hardDeleted, id)
-	return nil
-}
-
-func (r *scopedDeletionRepo) HardDeleteKnowledgeList(_ context.Context, _ uint64, ids []string) error {
-	r.hardDeleted = append(r.hardDeleted, ids...)
-	return nil
-}
-
-// keyedDeletionRepo maps external_id to live knowledge for multi-item sync tests.
-type keyedDeletionRepo struct {
-	interfaces.KnowledgeRepository
-	items         map[string]*types.Knowledge
-	hardDeleted   []string
-	hardDeleteErr error
-}
-
-func (r *keyedDeletionRepo) FindByDataSourceExternalID(
-	_ context.Context, _ uint64, _, _, externalID string,
-) (*types.Knowledge, error) {
-	if r.items == nil {
-		return nil, nil
-	}
-	return r.items[externalID], nil
-}
-
-func (r *keyedDeletionRepo) HardDeleteKnowledge(_ context.Context, _ uint64, id string) error {
-	if r.hardDeleteErr != nil {
-		return r.hardDeleteErr
-	}
-	r.hardDeleted = append(r.hardDeleted, id)
-	return nil
-}
-
-func (r *keyedDeletionRepo) HardDeleteKnowledgeList(_ context.Context, _ uint64, ids []string) error {
-	for _, id := range ids {
-		if err := r.HardDeleteKnowledge(context.Background(), 0, id); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// syncDeletionHarness wires a DataSourceService around a connector that always
-// reports one deleted item, with overridable lookup/delete fakes.
-type syncDeletionHarness struct {
-	ds            *types.DataSource
-	syncLogID     string
-	syncLogRepo   *processSyncSyncLogRepo
-	knowledgeRepo *deletionLookupKnowledgeRepo
-	knowledgeSvc  *sweepFakeKS
-	svc           *DataSourceService
-}
-
-// newSyncDeletionHarness builds a full-sync ProcessSync fixture. Passing nil
-// for repo/ks selects the happy-path defaults: an existing knowledge item and
-// no lookup/delete errors.
-func newSyncDeletionHarness(
-	t *testing.T, syncDeletions bool, dsID, logID string,
-	repo *deletionLookupKnowledgeRepo, ks *sweepFakeKS,
-) *syncDeletionHarness {
-	t.Helper()
-	configJSON, err := (&types.DataSourceConfig{Type: deletedItemConnectorType}).ToJSON()
-	require.NoError(t, err)
-
-	ds := &types.DataSource{
-		ID:              dsID,
-		TenantID:        1,
-		KnowledgeBaseID: "kb-1",
-		Name:            "Sync Deletion",
-		Type:            deletedItemConnectorType,
-		Config:          configJSON,
-		SyncMode:        types.SyncModeFull,
-		Status:          types.DataSourceStatusActive,
-		SyncDeletions:   syncDeletions,
-	}
-	syncLog := &types.SyncLog{
-		ID:           logID,
-		DataSourceID: ds.ID,
-		TenantID:     ds.TenantID,
-		Status:       types.SyncLogStatusRunning,
-		StartedAt:    time.Now().UTC(),
-	}
-	if repo == nil {
-		repo = &deletionLookupKnowledgeRepo{knowledge: &types.Knowledge{ID: "knowledge-gone"}}
-	}
-	if ks == nil {
-		ks = &sweepFakeKS{repo: repo}
-	}
-	syncLogRepo := &processSyncSyncLogRepo{logs: map[string]*types.SyncLog{syncLog.ID: syncLog}}
-	registry := datasource.NewConnectorRegistry()
-	require.NoError(t, registry.Register(deletedItemConnector{}))
-
-	return &syncDeletionHarness{
-		ds:            ds,
-		syncLogID:     syncLog.ID,
-		syncLogRepo:   syncLogRepo,
-		knowledgeRepo: repo,
-		knowledgeSvc:  ks,
-		svc: &DataSourceService{
-			dsRepo:            newKBDeleteDSRepo(ds.KnowledgeBaseID, ds),
-			syncLogRepo:       syncLogRepo,
-			knowledgeService:  ks,
-			kbService:         &processSyncKBService{kb: &types.KnowledgeBase{ID: ds.KnowledgeBaseID, TenantID: ds.TenantID}},
-			connectorRegistry: registry,
-			tenantRepo:        &processSyncTenantRepo{tenant: &types.Tenant{ID: ds.TenantID}},
-			tagService:        &processSyncTagService{},
-		},
-	}
-}
-
-// run executes a full sync and returns the persisted sync log plus the error
-// ProcessSync returned (non-nil when every fetched item failed).
-func (h *syncDeletionHarness) run(t *testing.T) (*types.SyncLog, error) {
-	t.Helper()
-	payload, err := json.Marshal(types.DataSourceSyncPayload{
-		DataSourceID: h.ds.ID,
-		TenantID:     h.ds.TenantID,
-		SyncLogID:    h.syncLogID,
-		ForceFull:    true,
+	deadline := time.Now().UTC().Add(time.Hour)
+	resultJSON, err := json.Marshal(&types.DataSourceSyncCheckpoint{
+		Result:           types.SyncResult{Total: 1, Created: 1},
+		NextCursor:       &types.SyncCursor{ConnectorCursor: map[string]interface{}{"delta": "next"}},
+		PendingKnowledge: []types.DataSourcePendingKnowledge{{KnowledgeID: "knowledge-1", Title: "doc"}},
+		FinalizeDeadline: deadline,
 	})
 	require.NoError(t, err)
-	err = h.svc.ProcessSync(context.Background(), asynq.NewTask(types.TypeDataSourceSync, payload))
-
-	updated := h.syncLogRepo.logs[h.syncLogID]
-	require.NotNil(t, updated)
-	return updated, err
-}
-
-// deletionFailedCount extracts the SyncResult.deletion_failed counter without
-// referencing the SyncResult type, so these tests stay independent of the
-// field's commit.
-func deletionFailedCount(t *testing.T, log *types.SyncLog) int {
-	t.Helper()
-	var counters struct {
-		DeletionFailed int `json:"deletion_failed"`
-	}
-	require.NoError(t, json.Unmarshal(log.Result, &counters))
-	return counters.DeletionFailed
-}
-
-// TestProcessSync_SyncDeletionsDeletesMatchingKnowledge verifies that a
-// deleted source item removes the matching KB knowledge (counted as Deleted),
-// and that the lookup is scoped to tenant, KB, data source and external ID.
-// TestIngestItem_URLCreationAttachesDataSourceMetadata verifies that a
-// URL-only item gets its datasource scoping keys attached right after
-// creation, so a later source-side deletion can find it via
-// FindByDataSourceExternalID (CreateKnowledgeFromURL itself persists no
-// metadata).
-func TestIngestItem_URLCreationAttachesDataSourceMetadata(t *testing.T) {
-	ds := &types.DataSource{ID: "ds-1", TenantID: 1, KnowledgeBaseID: "kb-1"}
-	repo := &deletionLookupKnowledgeRepo{}
-	ks := &sweepFakeKS{repo: repo, createURLKnowledge: &types.Knowledge{ID: "url-knowledge-1"}}
-	svc := &DataSourceService{knowledgeService: ks}
-
-	isUpdate, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
-		ExternalID: "url:1",
-		URL:        "https://example.com/doc",
-	}, nil)
-	require.NoError(t, err)
-	assert.False(t, isUpdate)
-	require.Len(t, repo.metadataUpdates, 1)
-	assert.Equal(t, ds.ID, repo.metadataUpdates[0]["datasource_id"])
-	assert.Equal(t, "url:1", repo.metadataUpdates[0]["external_id"])
-}
-
-// TestIngestItem_PersistsSourceUpdatedAt verifies that the connector-supplied
-// last-modified time reaches the persisted metadata as an RFC3339 UTC string,
-// and that an item without one gets no key rather than a zero time.
-func TestIngestItem_PersistsSourceUpdatedAt(t *testing.T) {
-	ds := &types.DataSource{ID: "ds-1", TenantID: 1, KnowledgeBaseID: "kb-1"}
-	edited := time.Date(2023, 4, 5, 6, 7, 8, 0, time.FixedZone("CST", 8*3600))
-
-	repo := &deletionLookupKnowledgeRepo{}
-	ks := &sweepFakeKS{repo: repo, createURLKnowledge: &types.Knowledge{ID: "url-knowledge-1"}}
-	svc := &DataSourceService{knowledgeService: ks}
-	created := time.Date(2021, 1, 2, 3, 4, 5, 0, time.UTC)
-	_, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
-		ExternalID: "url:1",
-		URL:        "https://example.com/doc",
-		UpdatedAt:  edited,
-		CreatedAt:  created,
-	}, nil)
-	require.NoError(t, err)
-	require.Len(t, repo.metadataUpdates, 1)
-	assert.Equal(t, "2023-04-04T22:07:08Z", repo.metadataUpdates[0]["source_updated_at"])
-	assert.Equal(t, "2021-01-02T03:04:05Z", repo.metadataUpdates[0]["source_created_at"])
-
-	repo = &deletionLookupKnowledgeRepo{}
-	ks = &sweepFakeKS{repo: repo, createURLKnowledge: &types.Knowledge{ID: "url-knowledge-2"}}
-	svc = &DataSourceService{knowledgeService: ks}
-	_, err = svc.ingestItem(context.Background(), ds, &types.FetchedItem{
-		ExternalID: "url:2",
-		URL:        "https://example.com/doc2",
-	}, nil)
-	require.NoError(t, err)
-	require.Len(t, repo.metadataUpdates, 1)
-	_, present := repo.metadataUpdates[0]["source_updated_at"]
-	assert.False(t, present)
-	_, present = repo.metadataUpdates[0]["source_created_at"]
-	assert.False(t, present)
-}
-
-func TestProcessSync_SyncDeletionsDeletesMatchingKnowledge(t *testing.T) {
-	h := newSyncDeletionHarness(t, true, "ds-delete-characterization", "log-delete-characterization", nil, nil)
-	updated, err := h.run(t)
-	require.NoError(t, err)
-
-	assert.Equal(t, 1, updated.ItemsDeleted)
-	assert.Equal(t, []string{"knowledge-gone"}, h.knowledgeSvc.deleted)
-	assert.Equal(t, h.ds.TenantID, h.knowledgeRepo.tenantID)
-	assert.Equal(t, h.ds.KnowledgeBaseID, h.knowledgeRepo.knowledgeBaseID)
-	assert.Equal(t, h.ds.ID, h.knowledgeRepo.dataSourceID)
-	assert.Equal(t, "file:gone", h.knowledgeRepo.externalID)
-}
-
-// TestProcessSync_SyncDeletionsDisabledSkipsDeletion verifies that with
-// SyncDeletions off the item is neither deleted nor counted (Deleted=0,
-// Skipped=0, no DeleteKnowledge call).
-func TestProcessSync_SyncDeletionsDisabledSkipsDeletion(t *testing.T) {
-	h := newSyncDeletionHarness(t, false, "ds-delete-disabled", "log-delete-disabled", nil, nil)
-	updated, err := h.run(t)
-	require.NoError(t, err)
-
-	assert.Empty(t, h.knowledgeSvc.deleted)
-	assert.Equal(t, 0, updated.ItemsDeleted)
-	assert.Equal(t, 0, updated.ItemsSkipped)
-}
-
-// TestProcessSync_SyncDeletionsAlreadyGoneCountsSkipped verifies the
-// idempotent path: the source item reports deletion but no KB knowledge
-// matches, so the item counts as Skipped and nothing is deleted.
-func TestProcessSync_SyncDeletionsAlreadyGoneCountsSkipped(t *testing.T) {
-	h := newSyncDeletionHarness(t, true, "ds-delete-gone", "log-delete-gone", &deletionLookupKnowledgeRepo{}, nil)
-	updated, err := h.run(t)
-	require.NoError(t, err)
-
-	assert.Empty(t, h.knowledgeSvc.deleted)
-	assert.Equal(t, 0, updated.ItemsDeleted)
-	assert.Equal(t, 1, updated.ItemsSkipped)
-}
-
-// TestProcessSync_SyncDeletionsLookupFailureCountsFailed verifies that a
-// failing scoped lookup surfaces as a Failed item with the
-// deletion_lookup_failed code, increments DeletionFailed, and never calls
-// DeleteKnowledge.
-func TestProcessSync_SyncDeletionsLookupFailureCountsFailed(t *testing.T) {
-	repo := &deletionLookupKnowledgeRepo{lookupErr: errors.New("lookup failed")}
-	h := newSyncDeletionHarness(t, true, "ds-delete-lookup-fail", "log-delete-lookup-fail", repo, nil)
-	updated, err := h.run(t)
-	require.Error(t, err)
-
-	assert.Empty(t, h.knowledgeSvc.deleted)
-	assert.Equal(t, 0, updated.ItemsDeleted)
-	assert.Equal(t, 1, updated.ItemsFailed)
-	result, err := updated.ParseResult()
-	require.NoError(t, err)
-	require.Len(t, result.Errors, 1)
-	assert.Equal(t, "deletion_lookup_failed", result.Errors[0].Code)
-	assert.Equal(t, 1, deletionFailedCount(t, updated))
-}
-
-// TestProcessSync_SyncDeletionsDeleteFailureCountsFailed verifies that a
-// failing DeleteKnowledge call surfaces as a Failed item with the
-// deletion_failed code and increments DeletionFailed without counting
-// the item as Deleted.
-func TestProcessSync_SyncDeletionsDeleteFailureCountsFailed(t *testing.T) {
-	h := newSyncDeletionHarness(t, true, "ds-delete-fail", "log-delete-fail", nil, nil)
-	h.knowledgeSvc.deleteErr = errors.New("delete failed")
-	updated, err := h.run(t)
-	require.Error(t, err)
-
-	assert.Equal(t, []string{"knowledge-gone"}, h.knowledgeSvc.deleted)
-	assert.Equal(t, 0, updated.ItemsDeleted)
-	assert.Equal(t, 1, updated.ItemsFailed)
-	result, err := updated.ParseResult()
-	require.NoError(t, err)
-	require.Len(t, result.Errors, 1)
-	assert.Equal(t, "deletion_failed", result.Errors[0].Code)
-	assert.Equal(t, 1, deletionFailedCount(t, updated))
-}
-
-func TestProcessSync_SyncDeletionsHardDeletesRow(t *testing.T) {
-	h := newSyncDeletionHarness(t, true, "ds-delete-hard", "log-delete-hard", nil, nil)
-	updated, err := h.run(t)
-	require.NoError(t, err)
-
-	assert.Equal(t, 1, updated.ItemsDeleted)
-	assert.Equal(t, []string{"knowledge-gone"}, h.knowledgeSvc.deleted)
-	assert.Equal(t, []string{"knowledge-gone"}, h.knowledgeRepo.hardDeleted)
-}
-
-func TestApplyFetchedItem_SyncDeletionScopedPerDataSource(t *testing.T) {
-	repo := &scopedDeletionRepo{live: map[string]*types.Knowledge{
-		"ds-a|file:shared": {ID: "knowledge-a"},
-		"ds-b|file:shared": {ID: "knowledge-b"},
-	}}
-	ks := &sweepFakeKS{repo: repo}
-	svc := &DataSourceService{knowledgeService: ks}
-
-	result := &types.SyncResult{}
-	dsA := &types.DataSource{
-		ID: "ds-a", TenantID: 1, KnowledgeBaseID: "kb-1", SyncDeletions: true,
-	}
-	svc.applyFetchedItem(context.Background(), dsA, &types.FetchedItem{
-		ExternalID: "file:shared",
-		IsDeleted:  true,
-	}, nil, result)
-
-	assert.Equal(t, 1, result.Deleted)
-	assert.Equal(t, []string{"knowledge-a"}, ks.deleted)
-	assert.Equal(t, []string{"knowledge-a"}, repo.hardDeleted)
-	assert.NotContains(t, ks.deleted, "knowledge-b")
-}
-
-type mixedSyncConnector struct{}
-
-func (mixedSyncConnector) Type() string { return "test-sync-mixed" }
-func (mixedSyncConnector) Validate(context.Context, *types.DataSourceConfig) error {
-	return nil
-}
-
-func (mixedSyncConnector) ListResources(context.Context, *types.DataSourceConfig, string) ([]types.Resource, error) {
-	return nil, nil
-}
-
-func (mixedSyncConnector) ResolveResourceAncestors(
-	context.Context, *types.DataSourceConfig, []string,
-) ([]string, error) {
-	return nil, nil
-}
-
-func (mixedSyncConnector) FetchAll(context.Context, *types.DataSourceConfig, []string) ([]types.FetchedItem, error) {
-	return []types.FetchedItem{
-		{ExternalID: "file:gone", IsDeleted: true},
-		{ExternalID: "file:new", Content: []byte("hello"), FileName: "new.txt"},
-	}, nil
-}
-
-func (mixedSyncConnector) FetchIncremental(
-	context.Context, *types.DataSourceConfig, *types.SyncCursor,
-) ([]types.FetchedItem, *types.SyncCursor, error) {
-	items, err := (mixedSyncConnector{}).FetchAll(context.Background(), nil, nil)
-	return items, nil, err
-}
-
-func TestProcessSync_SyncDeletionsPartialWhenMixedResults(t *testing.T) {
-	configJSON, err := (&types.DataSourceConfig{Type: "test-sync-mixed"}).ToJSON()
-	require.NoError(t, err)
-
-	ds := &types.DataSource{
-		ID: "ds-mixed", TenantID: 1, KnowledgeBaseID: "kb-1",
-		Type: "test-sync-mixed", Config: configJSON,
-		SyncMode: types.SyncModeFull, Status: types.DataSourceStatusActive,
-		SyncDeletions: true,
-	}
 	syncLog := &types.SyncLog{
-		ID: "log-mixed", DataSourceID: ds.ID, TenantID: ds.TenantID,
-		Status: types.SyncLogStatusRunning, StartedAt: time.Now().UTC(),
+		ID: "log-finalize", DataSourceID: dataSource.ID, TenantID: dataSource.TenantID,
+		Status: types.SyncLogStatusRunning, Checkpoint: resultJSON,
 	}
-	repo := &keyedDeletionRepo{
-		items:         map[string]*types.Knowledge{"file:gone": {ID: "knowledge-gone"}},
-		hardDeleteErr: errors.New("hard delete failed"),
+	syncLogs := &processSyncSyncLogRepo{logs: map[string]*types.SyncLog{syncLog.ID: syncLog}}
+	knowledge := &types.Knowledge{
+		ID: "knowledge-1", TenantID: dataSource.TenantID, ParseStatus: types.ParseStatusProcessing,
 	}
-	ks := &sweepFakeKS{repo: repo}
-	syncLogRepo := &processSyncSyncLogRepo{logs: map[string]*types.SyncLog{syncLog.ID: syncLog}}
+	knowledgeRepo := &finalizeKnowledgeRepo{knowledge: knowledge}
 	registry := datasource.NewConnectorRegistry()
-	require.NoError(t, registry.Register(mixedSyncConnector{}))
-
-	svc := &DataSourceService{
-		dsRepo:            newKBDeleteDSRepo(ds.KnowledgeBaseID, ds),
-		syncLogRepo:       syncLogRepo,
-		knowledgeService:  ks,
-		kbService:         &processSyncKBService{kb: &types.KnowledgeBase{ID: ds.KnowledgeBaseID, TenantID: ds.TenantID}},
+	require.NoError(t, registry.Register(finalizeConnector{}))
+	service := &DataSourceService{
+		dsRepo: &finalizeDataSourceRepo{dataSource: dataSource}, syncLogRepo: syncLogs,
 		connectorRegistry: registry,
-		tenantRepo:        &processSyncTenantRepo{tenant: &types.Tenant{ID: ds.TenantID}},
-		tagService:        &processSyncTagService{},
+		content:           NewDataSourceContentManager(&finalizeKnowledgeService{repository: knowledgeRepo}, nil),
 	}
-
-	payload, err := json.Marshal(types.DataSourceSyncPayload{
-		DataSourceID: ds.ID, TenantID: ds.TenantID, SyncLogID: syncLog.ID, ForceFull: true,
+	payload, err := json.Marshal(types.DataSourceFinalizePayload{
+		DataSourceID: dataSource.ID, TenantID: dataSource.TenantID,
+		ConnectionVersion: dataSource.ConnectionVersion, SyncLogID: syncLog.ID,
 	})
 	require.NoError(t, err)
-	err = svc.ProcessSync(context.Background(), asynq.NewTask(types.TypeDataSourceSync, payload))
-	require.NoError(t, err, "partial failure must not fail the whole sync")
+	task := asynq.NewTask(types.TypeDataSourceFinalize, payload)
 
-	updated := syncLogRepo.logs[syncLog.ID]
-	require.NotNil(t, updated)
-	assert.Equal(t, types.SyncLogStatusPartial, updated.Status)
-	assert.Equal(t, 1, updated.ItemsFailed)
-	assert.Equal(t, 1, updated.ItemsCreated)
-	assert.Contains(t, updated.ErrorMessage, "deletion failure(s) will only retry on the next full sync")
+	err = service.ProcessSyncFinalize(context.Background(), task)
+	require.ErrorIs(t, err, ErrDataSourceIngestionPending)
+	assert.Empty(t, dataSource.LastSyncCursor)
+	assert.Equal(t, types.SyncLogStatusRunning, syncLog.Status)
+
+	knowledge.ParseStatus = types.ParseStatusCompleted
+	require.NoError(t, service.ProcessSyncFinalize(context.Background(), task))
+	assert.NotEmpty(t, dataSource.LastSyncCursor)
+	assert.Equal(t, types.SyncLogStatusSuccess, syncLog.Status)
+	assert.Empty(t, syncLog.Checkpoint)
+	require.NotNil(t, syncLog.FinishedAt)
 }
 
-func TestIngestItem_URLCreationMetadataAttachFailure(t *testing.T) {
-	ds := &types.DataSource{ID: "ds-1", TenantID: 1, KnowledgeBaseID: "kb-1"}
-	repo := &deletionLookupKnowledgeRepo{metadataUpdateErr: errors.New("db unavailable")}
-	ks := &sweepFakeKS{repo: repo, createURLKnowledge: &types.Knowledge{ID: "url-knowledge-1"}}
-	svc := &DataSourceService{knowledgeService: ks}
+func TestProcessSyncFinalizeDoesNotCommitCursorAfterParseFailure(t *testing.T) {
+	dataSource := &types.DataSource{
+		ID: "ds-failed", TenantID: 9, Type: "finalize-test",
+		ConnectionVersion: 1, Status: types.DataSourceStatusActive,
+	}
+	deadline := time.Now().UTC().Add(time.Hour)
+	resultJSON, err := json.Marshal(&types.DataSourceSyncCheckpoint{
+		Result:           types.SyncResult{Total: 1, Created: 1},
+		NextCursor:       &types.SyncCursor{ConnectorCursor: map[string]interface{}{"delta": "unsafe"}},
+		PendingKnowledge: []types.DataSourcePendingKnowledge{{KnowledgeID: "knowledge-failed", Title: "broken"}},
+		FinalizeDeadline: deadline,
+	})
+	require.NoError(t, err)
+	syncLog := &types.SyncLog{ID: "log-failed", Status: types.SyncLogStatusRunning, Checkpoint: resultJSON}
+	syncLogs := &processSyncSyncLogRepo{logs: map[string]*types.SyncLog{syncLog.ID: syncLog}}
+	knowledgeRepo := &finalizeKnowledgeRepo{knowledge: &types.Knowledge{
+		ID: "knowledge-failed", TenantID: dataSource.TenantID,
+		ParseStatus: types.ParseStatusFailed, ErrorMessage: "parser failed",
+	}}
+	registry := datasource.NewConnectorRegistry()
+	require.NoError(t, registry.Register(finalizeConnector{}))
+	service := &DataSourceService{
+		dsRepo: &finalizeDataSourceRepo{dataSource: dataSource}, syncLogRepo: syncLogs,
+		connectorRegistry: registry,
+		content:           NewDataSourceContentManager(&finalizeKnowledgeService{repository: knowledgeRepo}, nil),
+	}
+	payload, err := json.Marshal(types.DataSourceFinalizePayload{
+		DataSourceID: dataSource.ID, TenantID: dataSource.TenantID,
+		ConnectionVersion: dataSource.ConnectionVersion, SyncLogID: syncLog.ID,
+	})
+	require.NoError(t, err)
 
-	_, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
-		ExternalID: "url:1",
-		URL:        "https://example.com/doc",
-	}, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "attach datasource metadata")
+	require.NoError(t, service.ProcessSyncFinalize(
+		context.Background(), asynq.NewTask(types.TypeDataSourceFinalize, payload),
+	))
+	assert.Empty(t, dataSource.LastSyncCursor)
+	assert.Equal(t, types.SyncLogStatusPartial, syncLog.Status)
+	assert.Equal(t, 1, syncLog.ItemsFailed)
+	assert.Empty(t, syncLog.Checkpoint)
+	assert.Contains(t, syncLog.ErrorMessage, "cursor was not advanced")
+}
+
+func TestProcessSyncFinalizeCancelsStaleConnectionVersion(t *testing.T) {
+	dataSource := &types.DataSource{
+		ID: "ds-new-connection", TenantID: 12, Type: "finalize-test",
+		ConnectionVersion: 4, Status: types.DataSourceStatusActive,
+	}
+	syncLog := &types.SyncLog{
+		ID: "log-old-connection", DataSourceID: dataSource.ID, TenantID: dataSource.TenantID,
+		Status: types.SyncLogStatusRunning, Checkpoint: types.JSON(`{"next_cursor":{"connector_cursor":{"delta":"old"}}}`),
+	}
+	syncLogs := &processSyncSyncLogRepo{logs: map[string]*types.SyncLog{syncLog.ID: syncLog}}
+	service := &DataSourceService{
+		dsRepo: &finalizeDataSourceRepo{dataSource: dataSource}, syncLogRepo: syncLogs,
+	}
+	payload, err := json.Marshal(types.DataSourceFinalizePayload{
+		DataSourceID: dataSource.ID, TenantID: dataSource.TenantID,
+		ConnectionVersion: 3, SyncLogID: syncLog.ID,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, service.ProcessSyncFinalize(
+		context.Background(), asynq.NewTask(types.TypeDataSourceFinalize, payload),
+	))
+	assert.Empty(t, dataSource.LastSyncCursor)
+	assert.Equal(t, types.SyncLogStatusCanceled, syncLog.Status)
+	assert.Empty(t, syncLog.Checkpoint)
+	assert.Contains(t, syncLog.ErrorMessage, "connection changed")
+}
+
+func TestProcessSyncFinalizeTimesOutWithoutAdvancingCursor(t *testing.T) {
+	dataSource := &types.DataSource{
+		ID: "ds-timeout", TenantID: 13, Type: "finalize-test",
+		ConnectionVersion: 2, Status: types.DataSourceStatusActive,
+	}
+	checkpoint, err := json.Marshal(&types.DataSourceSyncCheckpoint{
+		Result:           types.SyncResult{Total: 1, Created: 1},
+		NextCursor:       &types.SyncCursor{ConnectorCursor: map[string]interface{}{"delta": "unsafe"}},
+		PendingKnowledge: []types.DataSourcePendingKnowledge{{KnowledgeID: "knowledge-slow", Title: "slow.md"}},
+		FinalizeDeadline: time.Now().UTC().Add(-time.Second),
+	})
+	require.NoError(t, err)
+	syncLog := &types.SyncLog{
+		ID: "log-timeout", DataSourceID: dataSource.ID, TenantID: dataSource.TenantID,
+		Status: types.SyncLogStatusRunning, Checkpoint: checkpoint,
+	}
+	syncLogs := &processSyncSyncLogRepo{logs: map[string]*types.SyncLog{syncLog.ID: syncLog}}
+	registry := datasource.NewConnectorRegistry()
+	require.NoError(t, registry.Register(finalizeConnector{}))
+	service := &DataSourceService{
+		dsRepo: &finalizeDataSourceRepo{dataSource: dataSource}, syncLogRepo: syncLogs,
+		connectorRegistry: registry,
+		content: NewDataSourceContentManager(&finalizeKnowledgeService{repository: &finalizeKnowledgeRepo{
+			knowledge: &types.Knowledge{
+				ID: "knowledge-slow", TenantID: dataSource.TenantID,
+				ParseStatus: types.ParseStatusProcessing,
+			},
+		}}, nil),
+	}
+	payload, err := json.Marshal(types.DataSourceFinalizePayload{
+		DataSourceID: dataSource.ID, TenantID: dataSource.TenantID,
+		ConnectionVersion: dataSource.ConnectionVersion, SyncLogID: syncLog.ID,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, service.ProcessSyncFinalize(
+		context.Background(), asynq.NewTask(types.TypeDataSourceFinalize, payload),
+	))
+	assert.Empty(t, dataSource.LastSyncCursor)
+	assert.Equal(t, types.SyncLogStatusPartial, syncLog.Status)
+	assert.Equal(t, 1, syncLog.ItemsFailed)
+	assert.Empty(t, syncLog.Checkpoint)
+	assert.Contains(t, syncLog.ErrorMessage, "cursor was not advanced")
+}
+
+func TestProcessSyncFinalizeClosesExpiredCheckpointAfterStatusReadFailure(t *testing.T) {
+	dataSource := &types.DataSource{
+		ID: "ds-status-error", TenantID: 14, Type: "finalize-test",
+		ConnectionVersion: 2, Status: types.DataSourceStatusActive,
+	}
+	checkpoint, err := json.Marshal(&types.DataSourceSyncCheckpoint{
+		Result:           types.SyncResult{Total: 1, Created: 1},
+		NextCursor:       &types.SyncCursor{ConnectorCursor: map[string]interface{}{"delta": "unsafe"}},
+		PendingKnowledge: []types.DataSourcePendingKnowledge{{KnowledgeID: "missing", Title: "missing.md"}},
+		FinalizeDeadline: time.Now().UTC().Add(-time.Second),
+	})
+	require.NoError(t, err)
+	syncLog := &types.SyncLog{
+		ID: "log-status-error", DataSourceID: dataSource.ID, TenantID: dataSource.TenantID,
+		Status: types.SyncLogStatusRunning, Checkpoint: checkpoint,
+	}
+	syncLogs := &processSyncSyncLogRepo{logs: map[string]*types.SyncLog{syncLog.ID: syncLog}}
+	registry := datasource.NewConnectorRegistry()
+	require.NoError(t, registry.Register(finalizeConnector{}))
+	service := &DataSourceService{
+		dsRepo: &finalizeDataSourceRepo{dataSource: dataSource}, syncLogRepo: syncLogs,
+		connectorRegistry: registry,
+		content: NewDataSourceContentManager(&finalizeKnowledgeService{repository: &finalizeKnowledgeRepo{
+			err: errors.New("database unavailable"),
+		}}, nil),
+	}
+	payload, err := json.Marshal(types.DataSourceFinalizePayload{
+		DataSourceID: dataSource.ID, TenantID: dataSource.TenantID,
+		ConnectionVersion: dataSource.ConnectionVersion, SyncLogID: syncLog.ID,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, service.ProcessSyncFinalize(
+		context.Background(), asynq.NewTask(types.TypeDataSourceFinalize, payload),
+	))
+	assert.Empty(t, dataSource.LastSyncCursor)
+	assert.Equal(t, types.SyncLogStatusPartial, syncLog.Status)
+	assert.Equal(t, 1, syncLog.ItemsFailed)
+	assert.Empty(t, syncLog.Checkpoint)
+	assert.Contains(t, syncLog.ErrorMessage, "cursor was not advanced")
 }

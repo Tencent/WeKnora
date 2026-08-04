@@ -59,13 +59,54 @@ type OAuthConnector interface {
 	OAuthProvider() string
 }
 
+// RuntimeConnector owns the runtime dependencies needed by a connector. The
+// application service deliberately does not know whether those dependencies
+// come from OAuth, workload identity, a vault, or another mechanism.
+type RuntimeConnector interface {
+	Connector
+	PrepareRuntime(ctx context.Context, dataSource *types.DataSource, config *types.DataSourceConfig) error
+	EnsureReady(ctx context.Context, dataSource *types.DataSource) error
+}
+
+// ConnectionLifecycleConnector owns connection teardown. It lets an OAuth or
+// otherwise stateful connector invalidate provider-specific state without
+// adding provider branches to the generic data-source service.
+type ConnectionLifecycleConnector interface {
+	Connector
+	Disconnect(ctx context.Context, dataSource *types.DataSource) error
+}
+
+// SyncLifecycleConnector participates in generic ingestion bookkeeping. A
+// connector can use these hooks for a remote hierarchy projection, retained
+// deletions, or connection-generation fencing while the sync runner remains
+// provider agnostic.
+type SyncLifecycleConnector interface {
+	Connector
+	ReconcileItems(
+		ctx context.Context, dataSource *types.DataSource, items []types.FetchedItem,
+	) ([]types.FetchedItem, error)
+	IsRunCurrent(ctx context.Context, dataSource *types.DataSource) (bool, error)
+	MarkItemDeleted(ctx context.Context, dataSource *types.DataSource, item *types.FetchedItem) error
+	MarkItemIngested(ctx context.Context, dataSource *types.DataSource, item *types.FetchedItem) error
+}
+
+// DeferredCommitConnector requires the candidate cursor to be committed only
+// after the asynchronous knowledge-ingestion jobs have reached a terminal
+// success state. Finalization runs as a separate short-lived task.
+type DeferredCommitConnector interface {
+	Connector
+	DeferCursorUntilIngestionCompletes() bool
+}
+
 // FetchResultConnector opts into the reliable cursor protocol without forcing
 // legacy connectors to change atomically. DataSourceService treats NextCursor
 // as a candidate and commits it only after all required item work succeeds.
 type FetchResultConnector interface {
 	Connector
 	FetchAllResult(ctx context.Context, config *types.DataSourceConfig, resourceIDs []string) (*types.FetchResult, error)
-	FetchIncrementalResult(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) (*types.FetchResult, error)
+	FetchIncrementalResult(
+		ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor,
+	) (*types.FetchResult, error)
 }
 
 // ConnectorRegistry manages the registration and lookup of available connectors

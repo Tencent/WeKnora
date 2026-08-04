@@ -6086,6 +6086,7 @@ export default {
     status: {
       active: "연결됨",
       paused: "일시정지",
+      connecting: "연결 마무리 중",
       error: "오류",
       reauthorization_required: "재인증 필요",
     },

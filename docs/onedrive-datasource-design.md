@@ -27,7 +27,7 @@ MVP 暂不包含：
 - OAuth 创建、授权、刷新、重新授权、断开连接和数据源删除形成完整生命周期。
 - 整个 drive、文件夹和单文件三种选择均支持全量、可靠增量、移动和真实删除。
 - 任何文件抓取、解析或入库失败都不能因 cursor 前进而永久漏同步。
-- 多租户鉴权、token 加密、日志脱敏、并发刷新和多实例部署约束有自动测试覆盖。
+- 多工作区隔离、token 加密、日志脱敏、并发刷新和多实例部署约束有自动测试覆盖。
 - 后端 API、任务状态、前端状态和用户可见错误使用一致的结构化语义。
 
 若实现阶段无法完成独立成员索引、真实删除或可靠 cursor 提交，应显式缩小 MVP 为“整个 OneDrive 同步”，而不是宣称支持任意文件夹/文件的可靠增量同步。
@@ -39,7 +39,7 @@ MVP 暂不包含：
 需要明确区分 OAuth 与 MFA：
 
 - **OAuth 授权是必需的**：Microsoft Graph 读取私有 OneDrive 内容必须取得 access token。
-- **Authenticator/MFA 是可选的**：是否出现动态码、推送确认或其他二次验证，由 Microsoft 账号和租户策略决定。
+- **Authenticator/MFA 是可选的**：是否出现动态码、推送确认或其他二次验证，由 Microsoft 账号和组织目录策略决定。
 - WeKnora 使用同一个 OAuth 流程覆盖两种账号，不增加 `mfa_enabled` 配置，也不要求用户预先声明是否开启 Authenticator。
 
 使用 Microsoft identity platform 的 OAuth 2.0 Authorization Code Flow，并启用 PKCE：
@@ -81,7 +81,7 @@ WeKnora 不增加“账号密码”“动态验证码”“是否开启 MFA”�
 后台同步通常不需要重复输入验证码。以下情况可能使 refresh token 失效或要求再次交互：
 
 - 用户或管理员撤销授权；
-- 账号禁用、密码重置或租户策略变化；
+- 账号禁用、密码重置或组织目录策略变化；
 - Conditional Access 的登录频率、设备合规或风险策略要求重新登录；
 - Microsoft 返回 `invalid_grant`、`interaction_required` 或 claims challenge。
 
@@ -101,7 +101,7 @@ ONEDRIVE_REDIRECT_URL=https://weknora.example.com/api/v1/datasource-oauth/onedri
 ```
 
 - `common` 可覆盖个人账号及工作/学校账号，但 App Registration 必须启用对应的 supported account types。
-- 企业可设置具体 tenant ID，限制只能由该租户授权。
+- 企业可设置具体 Entra directory ID，限制只能由该组织目录授权。
 - redirect URL 必须来自服务端配置，不能信任前端传入的任意绝对 URL。
 - client secret 属于部署级秘密，不随数据源 API 返回。PKCE 仍应启用，作为 authorization code 被截获时的额外保护。
 
@@ -113,7 +113,7 @@ OneDrive 数据源会被定时任务和空间内其他管理员操作，因此 t
 
 不建议复用 `mcp_oauth_tokens`。MCP token 是每个 principal 隔离的交互式身份，而数据源 token 是后台任务共享的连接身份，生命周期和权限语义不同。
 
-新增表：
+新增 OAuth 表，并为同步日志增加私有 checkpoint 列：
 
 ```text
 data_source_oauth_tokens
@@ -134,6 +134,9 @@ data_source_oauth_tokens
   connection_version    # 每次替换连接递增，隔离旧任务
   created_at
   updated_at
+
+sync_logs
+  checkpoint            # 私有的 deferred cursor/knowledge 状态，API 永不序列化
 ```
 
 要求：
@@ -218,7 +221,7 @@ type DataSourceConfig struct {
 }
 ```
 
-`DataSourceService` 在 Validate、ListResources、ResolveResourceAncestors、FetchAll 和 FetchIncremental 之前统一注入 runtime token provider。token provider 负责：
+通用 `DataSourceService` 只探测 `RuntimeConnector` capability，并调用 connector 的 `PrepareRuntime`；它不持有 OAuth manager，也不判断 OneDrive 类型。OneDrive connector 自己注入 runtime token provider。token provider 负责：
 
 - access token 距过期不足 5 分钟时刷新；
 - 原子保存轮换后的 refresh token；
@@ -226,7 +229,7 @@ type DataSourceConfig struct {
 - 将需要交互式登录的错误转换为 `ErrOAuthReauthorizationRequired`；
 - 在刷新、抓取、入库和提交 cursor 前验证 `connection_version` 未变化。
 
-这样可以统一已有连接器的运行时调用方式，也不会把持久化职责塞进 OneDrive HTTP client。
+这样既统一运行时调用方式，也不会把 token 持久化职责塞进 OneDrive HTTP client 或通用数据源服务。后续 Google Drive、SharePoint 等连接器可以实现同一 capability，而不修改同步主流程。
 
 ### 5.1 统一抓取结果与 cursor 提交协议
 
@@ -243,15 +246,27 @@ FetchAll(ctx context.Context, config *types.DataSourceConfig, resourceIDs []stri
 FetchIncremental(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) (*FetchResult, error)
 ```
 
-cursor 是消费进度，不能仅以“Graph 请求成功”为提交条件。`DataSourceService` 必须遵守：
+cursor 是消费进度，不能仅以“Graph 请求成功”为提交条件。通用同步 runner 必须遵守：
 
 1. connector 返回 items 和候选 `NextCursor`，但不直接持久化 cursor。
-2. 对每个 item 完成真实删除或知识入库；失败项进入持久化的 pending/retry 队列，或令整个批次失败。
+2. 对每个 item 完成真实删除或创建知识入库任务；需要解析终态保证的 connector 通过 `DeferredCommitConnector` capability 请求延迟提交。
 3. 只有本批所有必须处理的 item 成功，或失败项已经可靠持久化并保证重试后，才原子提交 `NextCursor`。
 4. fetch error、部分解析失败、部分入库失败和进程退出都不能提交一个会跳过未处理变更的 cursor。
 5. 重放同一批次必须幂等；同一个 `ExternalID` 的更新、删除重复执行不会产生重复知识或错误删除。
 
-不得沿用当前“fetch 失败也保存 cursor”或“只要不是全部 item 失败就保存 cursor”的通用行为到 OneDrive。若采用 pending 队列方案，PR 必须同时包含其表结构、重试策略、幂等键、清理策略和可观测性。
+不得沿用“fetch 失败也保存 cursor”或“只要不是全部 item 失败就保存 cursor”的旧行为。实现把候选 cursor、待确认 knowledge ID 和 90 分钟 deadline 持久化在 sync log 的私有 `checkpoint` 列中，并投递独立的 `datasource:finalize` checkpoint 任务；该列带 `json:"-"`，不会通过同步日志 API 泄露 delta link。finalizer 每次只检查一次状态：仍在处理中则短延迟重试并立即释放 worker；全部成功才以 `connection_version` CAS 提交 cursor；失败、超时、进程重启或连接变化均不提交。无需新增 provider-specific pending 表。
+
+### 5.2 Connector capability 边界
+
+通用服务只依赖可选能力接口：
+
+- `RuntimeConnector`：注入运行时身份并判断连接是否可用；
+- `ConnectionLifecycleConnector`：断开连接并清理 provider 状态；
+- `FetchResultConnector`：返回统一抓取结果和候选 cursor；
+- `SyncLifecycleConnector`：维护远端成员投影、删除状态和连接代次 fence；
+- `DeferredCommitConnector`：要求等待异步知识解析成功后才提交 cursor。
+
+OneDrive 实现这些接口；通用服务中不得出现 `ConnectorTypeOneDrive` 分支。知识创建、精确查找和删除通过独立 `DataSourceContentManager` adapter 完成，connector 不依赖知识仓储，知识服务也不依赖 Microsoft Graph。
 
 ## 6. OneDrive 连接器结构
 
@@ -278,6 +293,8 @@ internal/datasource/connector/onedrive/
 - `GET /drives/{drive-id}/root/delta`
 
 所有列表都必须跟随 `@odata.nextLink`。下载接口会返回 302 到短期有效的预认证地址，HTTP client 应允许受控重定向，但不得记录 `Location` 或 `@microsoft.graph.downloadUrl`。
+
+`@odata.nextLink`、`@odata.deltaLink` 虽由 Graph 返回，仍按不可信输入处理：每次请求前必须校验其 scheme、host 和 port 与配置的 Graph API origin 完全一致，禁止把 Bearer token 发送到响应中注入的其他主机。OAuth token 交换和授权验证不跟随 HTTP redirect，避免 307/308 将 client secret 或 access token 带到新地址；文件下载重定向则沿用全局 SSRF 防护并在跨 origin 时剥离认证头。
 
 Microsoft Graph 资料：
 
@@ -391,7 +408,7 @@ cursor 保存：
 ## 8. 错误、限流与可观测性
 
 - 401：刷新 token 后重试一次；再次失败则要求重新授权。
-- 403：区分 consent 不足、Conditional Access、文件自身无权限和租户策略阻止。
+- 403：区分 consent 不足、Conditional Access、文件自身无权限和组织目录策略阻止。
 - 404：同步期间文件已删除时按删除处理，资源选择阶段则提示资源不存在。
 - 429：优先遵循 `Retry-After`，否则指数退避加 jitter。
 - 5xx：有限次数指数退避；禁止在单次任务内无限重试。
@@ -498,18 +515,32 @@ MFA 本身不在自动测试中模拟；自动测试 mock Microsoft authorize/to
 - PR 描述包含权限 scope、迁移影响、配置方式、安全分析、失败恢复方式、验收证据和明确的非目标。
 - 至少完成上述账号/MFA 矩阵和端到端数据正确性验收，并附关键场景的可复现记录。
 
-实现采用“同步任务内解析终态屏障”而不是新增 pending 表：文件创建后等待知识进入 `completed`，或进入已完成主解析的 `finalizing`；`failed`、`cancelled`、状态读取失败、任务取消和 90 分钟超时都计为本批失败并阻止 cursor 前进。不支持扩展名和超限文件属于明确的非必处理项，会记录带稳定 code 与 item ID 的 partial warning，但不阻止其他已成功变更的 cursor 提交。
+实现采用“私有持久化 checkpoint + 独立 finalizer”，不在同步任务内轮询：文件创建后，同步日志的非 API 字段保存候选 cursor、待确认 knowledge ID 和 deadline，`datasource:finalize` 短任务检查知识是否进入 `completed` 或完成主解析的 `finalizing`。仍在处理时任务短延迟重试并释放 worker；`failed`、`cancelled`、状态读取失败、连接变化和 90 分钟超时都阻止 cursor 前进。应用重启导致任务失败时，候选 cursor 仍未提交，后续同步可以安全重放。不支持扩展名和超限文件属于明确的非必处理项，会记录带稳定 code 与 item ID 的 partial warning，但不阻止其他已成功变更的 cursor 提交。
+
+### 10.4 PR 验收证据要求
+
+代码提交前至少附上以下可复现证据：
+
+- 本次差异的 Go 格式化和 lint 为 0 issue；OneDrive、OAuth、repository、同步 finalizer、路由/鉴权相关单元测试通过。
+- OneDrive 相关 race 测试通过；SQLite migration 完成 up/down 验证；前端 OneDrive 定向测试、生产构建通过。
+- 若仓库主分支已有与本功能无关的全量检查失败，PR 中必须给出失败用例、复现命令以及“该文件/断言相对主分支未变化”的证据，不能把它描述成本功能已修复，也不能夹带无关修复。
+- UI 变更按 PR 模板附资源选择、已连接、需要重新授权和换绑确认等关键截图或录屏。
+- 真实 Microsoft 环境完成第 10 节账号/MFA 矩阵和第 10.1 节关键数据正确性场景，并记录账号类型、策略、操作、预期和结果；任何真实 token、code、邮箱和预认证 URL 都必须打码。
+- PostgreSQL 部署执行 versioned migration 的升级/回滚演练；SQLite/Lite 部署执行对应 migration 演练。
+
+本地 mock、静态检查和构建通过只能证明代码达到可审查状态，不能替代微软账号、MFA、Conditional Access、真实 Graph delta 和生产数据库的外部验收。缺少这些外部证据时应创建 Draft PR，并在描述中明确列为未完成项；不得勾选“完整端到端验收”。
 
 ## 11. 建议拆分提交
 
 为便于上游审查，建议按以下顺序提交：
 
-1. `refactor(datasource): add reliable fetch result and cursor commit protocol`
-2. `feat(datasource): add generic oauth token lifecycle`
-3. `feat(datasource): add source item index and real deletion`
-4. `feat(datasource): implement onedrive graph connector`
-5. `feat(frontend): add onedrive oauth and resource picker`
-6. `docs(datasource): document onedrive deployment, recovery and mfa`
+1. `refactor(datasource): add connector lifecycle capabilities and content adapter`
+2. `refactor(datasource): add deferred cursor checkpoint finalizer`
+3. `feat(datasource): add OneDrive OAuth token lifecycle`
+4. `feat(datasource): add source item index and real deletion`
+5. `feat(datasource): implement onedrive graph connector`
+6. `feat(frontend): add onedrive oauth and resource picker`
+7. `docs(datasource): document onedrive deployment, recovery and mfa`
 
 PR 第一阶段保持 OneDrive MVP 边界，不同时加入 SharePoint 和 app-only 权限。后续 PR 再扩展：
 

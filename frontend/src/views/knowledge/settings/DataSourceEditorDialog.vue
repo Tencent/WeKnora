@@ -23,6 +23,13 @@ import {
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { getDatasourceIconUrl } from './datasourceIcons'
+import {
+  buildResourceIndexes,
+  computeResourceCheckStates,
+  toggleResourceSelection,
+  type ResourceCheckState,
+} from './resourceSelection'
+import { waitForOneDriveAuthorization } from './oneDriveOAuthFlow'
 
 const props = defineProps<{
   kbId: string
@@ -209,51 +216,18 @@ const treeFullyLoaded = ref(false)
 
 // Shared children/parent indexes — used by tree rendering and selection logic
 const childrenMap = computed(() => {
-  const map = new Map<string, Resource[]>()
-  for (const r of resources.value) {
-    if (r.parent_id) {
-      const siblings = map.get(r.parent_id)
-      if (siblings) siblings.push(r)
-      else map.set(r.parent_id, [r])
-    }
-  }
-  return map
+	return buildResourceIndexes(resources.value).children
 })
 
 const parentMap = computed(() => {
-  const map = new Map<string, string>()
-  for (const r of resources.value) {
-    if (r.parent_id) map.set(r.external_id, r.parent_id)
-  }
-  return map
+	return buildResourceIndexes(resources.value).parents
 })
 
 // `selectedResourceIds` is a MINIMAL COVER SET: only the roots of fully-selected
 // subtrees. Sending this to the backend gives "sync these IDs and all descendants"
 // semantics — including any pages added later under a selected parent.
-type CheckState = 'checked' | 'indeterminate' | 'unchecked'
-
 const checkStates = computed(() => {
-  const states = new Map<string, CheckState>()
-  const cover = new Set(selectedResourceIds.value)
-
-  // Single post-order walk: a node is `checked` if itself or any ancestor is
-  // in the cover set; otherwise `indeterminate` if any descendant is checked;
-  // otherwise `unchecked`. Returns whether the subtree contains a checked node.
-  function walk(node: Resource, ancestorChecked: boolean): boolean {
-    const selfChecked = ancestorChecked || cover.has(node.external_id)
-    let descendantChecked = false
-    for (const c of childrenMap.value.get(node.external_id) || []) {
-      if (walk(c, selfChecked)) descendantChecked = true
-    }
-    if (selfChecked) states.set(node.external_id, 'checked')
-    else states.set(node.external_id, descendantChecked ? 'indeterminate' : 'unchecked')
-    return selfChecked || descendantChecked
-  }
-  for (const r of resources.value) {
-    if (!r.parent_id) walk(r, false)
-  }
-  return states
+	return computeResourceCheckStates(resources.value, childrenMap.value, selectedResourceIds.value)
 })
 
 function toggleExpand(id: string) {
@@ -561,10 +535,6 @@ async function ensureTemporaryDataSource(): Promise<string> {
   return created.id
 }
 
-function wait(ms: number) {
-  return new Promise(resolve => window.setTimeout(resolve, ms))
-}
-
 async function connectOneDrive(replaceConnection = false) {
   if (oauthConnecting.value) return
   oauthConnecting.value = true
@@ -577,30 +547,15 @@ async function connectOneDrive(replaceConnection = false) {
     oauthAuthorizationURL.value = authorizationURL
     if (popup) popup.location.href = authorizationURL
 
-    const deadline = Date.now() + 10 * 60 * 1000
-    let closedAt = 0
-    while (Date.now() < deadline) {
-      const status = await getDataSourceOAuthStatus(dsId)
-      oauthStatus.value = status
-      if (status.authorized && !status.reauthorization_required) {
-        // The token becomes visible before replacement cleanup finishes. When
-        // we own the popup, wait for the callback response to close it; that
-        // response is written only after cleanup completes.
-        if (popup && !popup.closed) {
-          await wait(300)
-          continue
-        }
-        testResult.value = 'success'
-        MessagePlugin.success(t('datasource.oauthConnected'))
-        return
-      }
-      if (popup?.closed) {
-        if (!closedAt) closedAt = Date.now()
-        if (Date.now() - closedAt > 5000) break
-      }
-      await wait(800)
-    }
-    throw new Error(t('datasource.oauthNotCompleted'))
+    await waitForOneDriveAuthorization({
+      popup,
+      getStatus: () => getDataSourceOAuthStatus(dsId),
+      onStatus: status => { oauthStatus.value = status },
+      wait: milliseconds => new Promise(resolve => window.setTimeout(resolve, milliseconds)),
+      notCompletedMessage: t('datasource.oauthNotCompleted'),
+    })
+    testResult.value = 'success'
+    MessagePlugin.success(t('datasource.oauthConnected'))
   } catch (e: any) {
     popup?.close()
     testResult.value = 'error'
@@ -742,74 +697,14 @@ async function revealExistingSelections(hiddenIds: string[]) {
   }
 }
 
-function getDescendantIds(id: string): string[] {
-  const ids: string[] = []
-  const children = childrenMap.value.get(id) || []
-  for (const c of children) {
-    ids.push(c.external_id)
-    ids.push(...getDescendantIds(c.external_id))
-  }
-  return ids
-}
-
-function getAncestorChain(id: string): string[] {
-  const chain = [id]
-  for (let p = parentMap.value.get(id); p; p = parentMap.value.get(p)) {
-    chain.push(p)
-  }
-  return chain
-}
-
-function isCovered(id: string, cover: Set<string>): boolean {
-  for (let cur: string | undefined = id; cur; cur = parentMap.value.get(cur)) {
-    if (cover.has(cur)) return true
-  }
-  return false
-}
-
-function checkResource(id: string, cover: Set<string>) {
-  if (isCovered(id, cover)) return
-  const descendants = new Set(getDescendantIds(id))
-  for (const d of [...cover]) {
-    if (descendants.has(d)) cover.delete(d)
-  }
-  cover.add(id)
-}
-
-// Removes id from the cover set. If id is covered transitively (an ancestor is
-// in the cover set), the ancestor is replaced with explicit entries for each
-// sibling along the path so the rest of the subtree stays selected.
-function uncheckResource(id: string, cover: Set<string>) {
-  const chain = getAncestorChain(id) // [id, parent, ..., root]
-  let highestIdx = -1
-  for (let i = chain.length - 1; i >= 0; i--) {
-    if (cover.has(chain[i])) { highestIdx = i; break }
-  }
-  if (highestIdx > 0) {
-    cover.delete(chain[highestIdx])
-    for (let i = highestIdx; i > 0; i--) {
-      const parent = chain[i]
-      const next = chain[i - 1]
-      for (const sib of childrenMap.value.get(parent) || []) {
-        if (sib.external_id !== next) cover.add(sib.external_id)
-      }
-    }
-  }
-  cover.delete(id)
-  const descendants = new Set(getDescendantIds(id))
-  for (const d of [...cover]) {
-    if (descendants.has(d)) cover.delete(d)
-  }
-}
-
 function toggleResource(id: string) {
-  const cover = new Set(selectedResourceIds.value)
-  if ((checkStates.value.get(id) || 'unchecked') === 'unchecked') {
-    checkResource(id, cover)
-  } else {
-    uncheckResource(id, cover)
-  }
-  selectedResourceIds.value = [...cover]
+  selectedResourceIds.value = toggleResourceSelection(
+    id,
+    selectedResourceIds.value,
+    childrenMap.value,
+    parentMap.value,
+    checkStates.value.get(id) || 'unchecked',
+  )
 }
 
 function validateRssFeedUrls(): boolean {
@@ -1026,7 +921,7 @@ function shouldShowResourceType(type: string): boolean {
   return !!resourceTypeLabelMap[type]
 }
 
-function resourceRowState(id: string): CheckState {
+function resourceRowState(id: string): ResourceCheckState {
   return checkStates.value.get(id) || 'unchecked'
 }
 

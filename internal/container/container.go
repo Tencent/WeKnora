@@ -316,8 +316,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering data source sync framework...")
 	must(container.Provide(initConnectorRegistry))
 	must(container.Provide(datasource.NewScheduler))
-	must(container.Provide(service.NewDataSourceServiceWithOAuth))
-	must(container.Provide(datasource.NewDataSourceOAuthManager))
+	must(container.Provide(service.NewDataSourceService))
+	must(container.Provide(service.NewDataSourceContentManager))
+	must(container.Provide(datasource.NewOneDriveOAuthManager))
 	must(container.Provide(handler.NewDataSourceOAuthHandler))
 	must(container.Invoke(startDataSourceScheduler))
 	logger.Debugf(ctx, "[Container] Data source sync framework registered")
@@ -1572,7 +1573,10 @@ func registerIMAdapterFactories(imService *imPkg.Service) {
 // initConnectorRegistry creates and populates the connector registry with all available connectors.
 // Aggregates registration errors via errors.Join so a misconfigured or duplicated connector fails
 // container initialization loudly instead of silently disabling the feature at runtime.
-func initConnectorRegistry(items interfaces.DataSourceItemRepository) (*datasource.ConnectorRegistry, error) {
+func initConnectorRegistry(
+	items interfaces.DataSourceItemRepository,
+	oauth *datasource.OneDriveOAuthManager,
+) (*datasource.ConnectorRegistry, error) {
 	registry := datasource.NewConnectorRegistry()
 
 	var errs error
@@ -1588,7 +1592,7 @@ func initConnectorRegistry(items interfaces.DataSourceItemRepository) (*datasour
 	if err := registry.Register(rssConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register rss connector: %w", err))
 	}
-	if err := registry.Register(onedriveConnector.NewConnector(items)); err != nil {
+	if err := registry.Register(onedriveConnector.NewConnector(items, oauth)); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register onedrive connector: %w", err))
 	}
 

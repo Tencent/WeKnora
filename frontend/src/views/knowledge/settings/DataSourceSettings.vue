@@ -525,6 +525,10 @@ onBeforeUnmount(stopPolling)
       color: var(--td-warning-color);
     }
 
+    &--connecting {
+      color: var(--td-brand-color);
+    }
+
     &--error {
       color: var(--td-error-color);
     }

@@ -36,6 +36,7 @@ const (
 	// Data source status
 	DataSourceStatusActive                  = "active"
 	DataSourceStatusPaused                  = "paused"
+	DataSourceStatusConnecting              = "connecting"
 	DataSourceStatusError                   = "error"
 	DataSourceStatusReauthorizationRequired = "reauthorization_required"
 	DataSourceStatusDeleted                 = "deleted"
@@ -143,8 +144,9 @@ func (d *DataSource) BeforeCreate(tx *gorm.DB) error {
 // Secrets fail closed: unlike legacy connector credentials, plaintext fallback
 // is forbidden because refresh tokens can provide long-lived drive access.
 type DataSourceOAuthToken struct {
-	ID                 string    `json:"id" gorm:"type:varchar(36);primaryKey"`
-	TenantID           uint64    `json:"tenant_id" gorm:"not null;uniqueIndex:idx_ds_oauth_token_tenant_source"`
+	ID       string `json:"id" gorm:"type:varchar(36);primaryKey"`
+	TenantID uint64 `json:"tenant_id" gorm:"not null;uniqueIndex:idx_ds_oauth_token_tenant_source"`
+	//nolint:lll // The complete GORM index definition must remain in one struct tag.
 	DataSourceID       string    `json:"data_source_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_ds_oauth_token_tenant_source;index"`
 	Provider           string    `json:"provider" gorm:"type:varchar(32);not null"`
 	AccessToken        string    `json:"-" gorm:"type:text;not null"`
@@ -162,8 +164,10 @@ type DataSourceOAuthToken struct {
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 
+// TableName returns the OAuth token table name.
 func (DataSourceOAuthToken) TableName() string { return "data_source_oauth_tokens" }
 
+// BeforeCreate initializes the token ID and encrypts its secrets.
 func (t *DataSourceOAuthToken) BeforeCreate(_ *gorm.DB) error {
 	if t.ID == "" {
 		t.ID = uuid.NewString()
@@ -171,8 +175,10 @@ func (t *DataSourceOAuthToken) BeforeCreate(_ *gorm.DB) error {
 	return t.encryptSecrets()
 }
 
+// BeforeSave encrypts token secrets before persistence.
 func (t *DataSourceOAuthToken) BeforeSave(_ *gorm.DB) error { return t.encryptSecrets() }
 
+// AfterFind decrypts token secrets after loading the record.
 func (t *DataSourceOAuthToken) AfterFind(_ *gorm.DB) error {
 	var err error
 	if t.AccessToken, err = utils.DecryptStoredSecret(t.AccessToken); err != nil {
@@ -202,11 +208,15 @@ func (t *DataSourceOAuthToken) encryptSecrets() error {
 // DataSourceItem is the durable projection used to map a drive-level delta
 // stream onto selected folders/files without relying on mutable paths.
 type DataSourceItem struct {
-	ID                 string     `json:"id" gorm:"type:varchar(36);primaryKey"`
-	TenantID           uint64     `json:"tenant_id" gorm:"not null;index:idx_ds_item_scope,priority:1"`
-	DataSourceID       string     `json:"data_source_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_ds_item_identity,priority:1;index:idx_ds_item_scope,priority:2"`
-	ConnectionVersion  uint64     `json:"connection_version" gorm:"not null;uniqueIndex:idx_ds_item_identity,priority:2;index:idx_ds_item_scope,priority:3"`
-	DriveID            string     `json:"drive_id" gorm:"type:varchar(255);not null;uniqueIndex:idx_ds_item_identity,priority:3"`
+	ID       string `json:"id" gorm:"type:varchar(36);primaryKey"`
+	TenantID uint64 `json:"tenant_id" gorm:"not null;index:idx_ds_item_scope,priority:1"`
+	//nolint:lll // The complete GORM index definition must remain in one struct tag.
+	DataSourceID string `json:"data_source_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_ds_item_identity,priority:1;index:idx_ds_item_scope,priority:2"`
+	//nolint:lll // The complete GORM index definition must remain in one struct tag.
+	ConnectionVersion uint64 `json:"connection_version" gorm:"not null;uniqueIndex:idx_ds_item_identity,priority:2;index:idx_ds_item_scope,priority:3"`
+	//nolint:lll // The complete GORM index definition must remain in one struct tag.
+	DriveID string `json:"drive_id" gorm:"type:varchar(255);not null;uniqueIndex:idx_ds_item_identity,priority:3"`
+	//nolint:lll // The complete GORM index definition must remain in one struct tag.
 	ItemID             string     `json:"item_id" gorm:"type:varchar(255);not null;uniqueIndex:idx_ds_item_identity,priority:4"`
 	ParentItemID       string     `json:"parent_item_id" gorm:"type:varchar(255);index"`
 	ItemType           string     `json:"item_type" gorm:"type:varchar(16);not null"`
@@ -220,8 +230,10 @@ type DataSourceItem struct {
 	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
+// TableName returns the durable data-source item table name.
 func (DataSourceItem) TableName() string { return "data_source_items" }
 
+// BeforeCreate initializes the item ID.
 func (i *DataSourceItem) BeforeCreate(_ *gorm.DB) error {
 	if i.ID == "" {
 		i.ID = uuid.NewString()
@@ -273,6 +285,11 @@ type SyncLog struct {
 	// Detailed sync result (JSON-encoded)
 	Result JSON `json:"result" gorm:"type:jsonb"`
 
+	// Checkpoint is private worker state for deferred cursor commits. It may
+	// contain an opaque provider cursor and is therefore never serialized by
+	// API handlers.
+	Checkpoint JSON `json:"-" gorm:"type:jsonb"`
+
 	// Creation timestamp (usually same as StartedAt)
 	CreatedAt time.Time `json:"created_at"`
 
@@ -321,6 +338,7 @@ type DataSourceConfig struct {
 	Runtime *DataSourceRuntime `json:"-"`
 }
 
+// DataSourceRuntime carries request-scoped OAuth state into a connector.
 type DataSourceRuntime struct {
 	DataSourceID       string
 	TenantID           uint64
@@ -474,12 +492,30 @@ type SyncResult struct {
 	NextCursor *SyncCursor `json:"next_cursor,omitempty"`
 }
 
+// DataSourcePendingKnowledge identifies ingestion work awaiting finalization.
+type DataSourcePendingKnowledge struct {
+	KnowledgeID string `json:"knowledge_id"`
+	Title       string `json:"title"`
+	IsUpdate    bool   `json:"is_update"`
+}
+
+// DataSourceSyncCheckpoint is private worker state stored in SyncLog.Checkpoint.
+// It is intentionally separate from the public SyncResult representation.
+type DataSourceSyncCheckpoint struct {
+	Result           SyncResult                   `json:"result"`
+	NextCursor       *SyncCursor                  `json:"next_cursor,omitempty"`
+	PendingKnowledge []DataSourcePendingKnowledge `json:"pending_knowledge"`
+	FinalizeDeadline time.Time                    `json:"finalize_deadline"`
+}
+
+// FetchWarning describes a non-fatal connector fetch problem.
 type FetchWarning struct {
 	Code       string `json:"code"`
 	ExternalID string `json:"external_id,omitempty"`
 	Message    string `json:"message"`
 }
 
+// FetchResult contains fetched items, the candidate cursor and non-fatal warnings.
 type FetchResult struct {
 	Items      []FetchedItem  `json:"items"`
 	NextCursor *SyncCursor    `json:"-"`
@@ -506,6 +542,16 @@ type DataSourceSyncPayload struct {
 
 	// Maximum number of items to fetch (0 = unlimited)
 	MaxItems int `json:"max_items,omitempty"`
+}
+
+// DataSourceFinalizePayload identifies a sync awaiting asynchronous ingestion completion.
+type DataSourceFinalizePayload struct {
+	TracingContext
+	DataSourceID      string `json:"data_source_id"`
+	TenantID          uint64 `json:"tenant_id"`
+	ConnectionVersion uint64 `json:"connection_version"`
+	SyncLogID         string `json:"sync_log_id"`
+	WasPaused         bool   `json:"was_paused"`
 }
 
 // ToJSON converts a DataSourceConfig to the JSON blob stored in

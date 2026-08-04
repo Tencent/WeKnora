@@ -6081,6 +6081,7 @@ export default {
     status: {
       active: 'Connected',
       paused: 'Paused',
+      connecting: 'Finishing connection',
       error: 'Error',
       reauthorization_required: 'Reauthorization required',
     },

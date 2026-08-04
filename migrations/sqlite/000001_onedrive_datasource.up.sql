@@ -1,4 +1,5 @@
 ALTER TABLE data_sources ADD COLUMN connection_version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE sync_logs ADD COLUMN checkpoint JSON;
 
 CREATE TABLE IF NOT EXISTS data_source_oauth_tokens (
     id VARCHAR(36) PRIMARY KEY,

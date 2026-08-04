@@ -292,6 +292,7 @@ func (r *SyncLogRepository) UpdateResult(ctx context.Context, log *types.SyncLog
 			"items_failed":  log.ItemsFailed,
 			"error_message": log.ErrorMessage,
 			"result":        log.Result,
+			"checkpoint":    log.Checkpoint,
 			"updated_at":    time.Now().UTC(),
 		}).Error; err != nil {
 		return err
@@ -313,6 +314,7 @@ func (r *SyncLogRepository) CancelPendingByDataSource(ctx context.Context, dsID 
 			"status":        types.SyncLogStatusCanceled,
 			"finished_at":   &now,
 			"error_message": "data source deleted",
+			"checkpoint":    nil,
 		}).Error
 }
 

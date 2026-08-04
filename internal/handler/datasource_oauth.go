@@ -7,24 +7,29 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 )
 
+// DataSourceOAuthHandler serves the OneDrive OAuth lifecycle endpoints.
 type DataSourceOAuthHandler struct {
-	manager   *datasource.DataSourceOAuthManager
+	manager   *datasource.OneDriveOAuthManager
 	service   interfaces.DataSourceService
 	kbService interfaces.KnowledgeBaseService
+	content   *service.DataSourceContentManager
 }
 
+// NewDataSourceOAuthHandler constructs the OneDrive OAuth endpoint handler.
 func NewDataSourceOAuthHandler(
-	manager *datasource.DataSourceOAuthManager,
+	manager *datasource.OneDriveOAuthManager,
 	service interfaces.DataSourceService,
 	kbService interfaces.KnowledgeBaseService,
+	content *service.DataSourceContentManager,
 ) *DataSourceOAuthHandler {
-	return &DataSourceOAuthHandler{manager: manager, service: service, kbService: kbService}
+	return &DataSourceOAuthHandler{manager: manager, service: service, kbService: kbService, content: content}
 }
 
 func (h *DataSourceOAuthHandler) own(c *gin.Context) (*types.DataSource, bool) {
@@ -50,6 +55,7 @@ func (h *DataSourceOAuthHandler) own(c *gin.Context) (*types.DataSource, bool) {
 	return ds, true
 }
 
+// AuthorizeURL creates a short-lived Microsoft authorization URL.
 func (h *DataSourceOAuthHandler) AuthorizeURL(c *gin.Context) {
 	ds, ok := h.own(c)
 	if !ok {
@@ -75,6 +81,7 @@ func (h *DataSourceOAuthHandler) AuthorizeURL(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"authorization_url": url})
 }
 
+// Status returns the non-secret OneDrive connection state.
 func (h *DataSourceOAuthHandler) Status(c *gin.Context) {
 	ds, ok := h.own(c)
 	if !ok {
@@ -88,6 +95,7 @@ func (h *DataSourceOAuthHandler) Status(c *gin.Context) {
 	c.JSON(http.StatusOK, status)
 }
 
+// Revoke disconnects OneDrive and removes knowledge owned by this data source.
 func (h *DataSourceOAuthHandler) Revoke(c *gin.Context) {
 	ds, ok := h.own(c)
 	if !ok {
@@ -97,7 +105,7 @@ func (h *DataSourceOAuthHandler) Revoke(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to disconnect OneDrive"})
 		return
 	}
-	if _, err := h.service.DeleteDataSourceKnowledge(c.Request.Context(), ds.ID); err != nil {
+	if _, err := h.content.DeleteByDataSource(c.Request.Context(), ds); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "OneDrive disconnected but failed to delete synced knowledge"})
 		return
 	}
@@ -110,6 +118,7 @@ func (h *DataSourceOAuthHandler) Revoke(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// Callback completes Microsoft OAuth and renders a closeable popup response.
 func (h *DataSourceOAuthHandler) Callback(c *gin.Context) {
 	status, err := h.manager.CompleteAuthorization(
 		c.Request.Context(), c.Query("state"), c.Query("code"), c.Query("error"),
@@ -117,7 +126,21 @@ func (h *DataSourceOAuthHandler) Callback(c *gin.Context) {
 	if err == nil && status != nil && status.ReplacedConnection {
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 30*time.Minute)
 		defer cancel()
-		_, err = h.service.DeleteDataSourceKnowledge(cleanupCtx, status.DataSourceID)
+		if dataSource, getErr := h.service.GetDataSource(cleanupCtx, status.DataSourceID); getErr != nil {
+			err = getErr
+		} else {
+			_, err = h.content.DeleteByDataSource(cleanupCtx, dataSource)
+			if err == nil {
+				err = h.service.PauseDataSource(cleanupCtx, dataSource.ID)
+			}
+		}
+		if err != nil {
+			// Fail closed: a replacement whose cleanup did not finish must not
+			// remain usable or appear connected through the status endpoint.
+			if dataSource, getErr := h.service.GetDataSource(cleanupCtx, status.DataSourceID); getErr == nil {
+				_ = h.manager.Revoke(cleanupCtx, dataSource.TenantID, dataSource.ID)
+			}
+		}
 	}
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.Header("Cache-Control", "no-store")

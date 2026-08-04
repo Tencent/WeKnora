@@ -46,6 +46,17 @@ func TestDataSourceConfig_ToJSON_EncryptsStringCredentials(t *testing.T) {
 	assert.Equal(t, "cs-real-secret", cfg.Credentials["client_secret"])
 }
 
+func TestSyncLogCheckpointIsNeverSerialized(t *testing.T) {
+	encoded, err := json.Marshal(&SyncLog{
+		ID: "log", Result: JSON(`{"visible":true}`),
+		Checkpoint: JSON(`{"delta_link":"secret"}`),
+	})
+	assert.NoError(t, err)
+	assert.Contains(t, string(encoded), "visible")
+	assert.NotContains(t, string(encoded), "checkpoint")
+	assert.NotContains(t, string(encoded), "delta_link")
+}
+
 func TestDataSourceConfig_ToJSON_PassthroughWhenNoKey(t *testing.T) {
 	withAESKey(t, "")
 	cfg := &DataSourceConfig{

@@ -6106,6 +6106,7 @@ export default {
     status: {
       active: "已连接",
       paused: "已暂停",
+      connecting: "正在完成连接",
       error: "异常",
       reauthorization_required: "需要重新授权",
     },

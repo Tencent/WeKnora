@@ -1,11 +1,15 @@
+//nolint:errcheck,lll // Test handlers write compact JSON fixtures to in-memory response recorders.
 package onedrive
 
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/datasource"
@@ -24,7 +28,7 @@ func newConnectorTestRepo(t *testing.T) (*gorm.DB, *types.DataSource, *Connector
 	ds := &types.DataSource{TenantID: 7, KnowledgeBaseID: "kb", Name: "drive", Type: types.ConnectorTypeOneDrive}
 	require.NoError(t, db.Create(ds).Error)
 	items := repository.NewDataSourceItemRepository(db)
-	return db, ds, NewConnector(items)
+	return db, ds, NewConnector(items, nil)
 }
 
 func TestResourceRefRoundTrip(t *testing.T) {
@@ -126,8 +130,10 @@ func TestConnectorSkipsUnsupportedAndOversizedFilesWithWarnings(t *testing.T) {
 	root := encodeRef(resourceRef{DriveID: "drive", ItemID: rootItemID})
 	result, err := connector.FetchAllResult(context.Background(), &types.DataSourceConfig{
 		Type: types.ConnectorTypeOneDrive, ResourceIDs: []string{root},
-		Runtime: &types.DataSourceRuntime{DataSourceID: ds.ID, TenantID: ds.TenantID, ConnectionVersion: 1,
-			AccessToken: func(context.Context) (string, error) { return "token", nil }},
+		Runtime: &types.DataSourceRuntime{
+			DataSourceID: ds.ID, TenantID: ds.TenantID, ConnectionVersion: 1,
+			AccessToken: func(context.Context) (string, error) { return "token", nil },
+		},
 	}, []string{root})
 	require.NoError(t, err)
 	require.Empty(t, result.Items)
@@ -161,7 +167,7 @@ func TestNormalizeRefsRemovesChildrenCoveredBySelectedParent(t *testing.T) {
 
 func TestGraphClientRefreshes401OnceAndFailsClosedOnSecond401(t *testing.T) {
 	requests := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests++
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
@@ -181,7 +187,7 @@ func TestGraphClientRefreshes401OnceAndFailsClosedOnSecond401(t *testing.T) {
 
 func TestGraphPaginationCycleIsRejected(t *testing.T) {
 	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"value":[],"@odata.nextLink":%q}`, server.URL+"/page")
 	}))
@@ -220,8 +226,10 @@ func TestExpiredDeltaCursorFallsBackToControlledFullScan(t *testing.T) {
 	root := encodeRef(resourceRef{DriveID: "drive", ItemID: rootItemID})
 	config := &types.DataSourceConfig{
 		Type: types.ConnectorTypeOneDrive, ResourceIDs: []string{root},
-		Runtime: &types.DataSourceRuntime{DataSourceID: ds.ID, TenantID: ds.TenantID, ConnectionVersion: 1,
-			AccessToken: func(context.Context) (string, error) { return "token", nil }},
+		Runtime: &types.DataSourceRuntime{
+			DataSourceID: ds.ID, TenantID: ds.TenantID, ConnectionVersion: 1,
+			AccessToken: func(context.Context) (string, error) { return "token", nil },
+		},
 	}
 	cursor, err := buildCursor(server.URL+"/expired", selectionHash([]string{root}), 1)
 	require.NoError(t, err)
@@ -231,4 +239,278 @@ func TestExpiredDeltaCursorFallsBackToControlledFullScan(t *testing.T) {
 	state, err := parseCursor(result.NextCursor)
 	require.NoError(t, err)
 	require.Equal(t, server.URL+"/fresh", state.DeltaLink)
+}
+
+func TestConnectorSingleFileSelection(t *testing.T) {
+	_, ds, connector := newConnectorTestRepo(t)
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/me/drive":
+			fmt.Fprint(w, `{"id":"drive","owner":{"user":{"id":"user"}}}`)
+		case "/drives/drive/items/file":
+			fmt.Fprint(w, `{"id":"file","name":"only.md","size":4,"file":{"mimeType":"text/markdown"},"parentReference":{"driveId":"drive","id":"root"}}`)
+		case "/drives/drive/root/delta":
+			fmt.Fprintf(w, `{"value":[],"@odata.deltaLink":%q}`, server.URL+"/delta")
+		case "/drives/drive/items/file/content":
+			fmt.Fprint(w, "only")
+		case "/delta":
+			fmt.Fprintf(w, `{"value":[],"@odata.deltaLink":%q}`, server.URL+"/next")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	connector.graphBase, connector.httpClient = server.URL, server.Client()
+	selected := encodeRef(resourceRef{DriveID: "drive", ItemID: "file"})
+	result, err := connector.FetchAllResult(context.Background(), &types.DataSourceConfig{
+		Type: types.ConnectorTypeOneDrive, ResourceIDs: []string{selected},
+		Runtime: &types.DataSourceRuntime{
+			DataSourceID: ds.ID, TenantID: ds.TenantID, ConnectionVersion: ds.ConnectionVersion,
+			AccessToken: func(context.Context) (string, error) { return "token", nil },
+		},
+	}, []string{selected})
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, "file", result.Items[0].Metadata["item_id"])
+	require.Equal(t, []byte("only"), result.Items[0].Content)
+}
+
+func TestConnectorFolderMoveOutDeletesIndexedDescendants(t *testing.T) {
+	_, ds, connector := newConnectorTestRepo(t)
+	selected := encodeRef(resourceRef{DriveID: "drive", ItemID: "selected"})
+	for _, item := range []*types.DataSourceItem{
+		{
+			TenantID: ds.TenantID, DataSourceID: ds.ID, ConnectionVersion: ds.ConnectionVersion,
+			DriveID: "drive", ItemID: "selected", ParentItemID: rootItemID, ItemType: "folder",
+			SelectedRootID: selected, ExternalID: externalID("drive", "selected"),
+		},
+		{
+			TenantID: ds.TenantID, DataSourceID: ds.ID, ConnectionVersion: ds.ConnectionVersion,
+			DriveID: "drive", ItemID: "moved", ParentItemID: "selected", ItemType: "folder",
+			SelectedRootID: selected, ExternalID: externalID("drive", "moved"),
+		},
+		{
+			TenantID: ds.TenantID, DataSourceID: ds.ID, ConnectionVersion: ds.ConnectionVersion,
+			DriveID: "drive", ItemID: "child", ParentItemID: "moved", ItemType: "file",
+			SelectedRootID: selected, ExternalID: externalID("drive", "child"), Ingested: true,
+		},
+	} {
+		require.NoError(t, connector.items.Upsert(context.Background(), item))
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/drives/drive/items/outside" {
+			fmt.Fprint(w, `{"id":"outside","folder":{},"parentReference":{"driveId":"drive","id":"root"}}`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	client := newGraphClient(server.URL, server.Client(), func(context.Context) (string, error) { return "token", nil }, nil)
+	config := &types.DataSourceConfig{Runtime: &types.DataSourceRuntime{
+		DataSourceID: ds.ID, TenantID: ds.TenantID, ConnectionVersion: ds.ConnectionVersion,
+	}}
+	result := &types.FetchResult{}
+	change := driveItem{ID: "moved", Name: "Moved"}
+	change.Folder = &struct {
+		ChildCount int `json:"childCount"`
+	}{}
+	change.ParentReference.DriveID = "drive"
+	change.ParentReference.ID = "outside"
+	err := connector.applyChanges(context.Background(), client, config, "drive",
+		[]resourceRef{{DriveID: "drive", ItemID: "selected"}}, "",
+		[]driveItem{change}, result)
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	require.True(t, result.Items[0].IsDeleted)
+	require.Equal(t, "child", result.Items[0].Metadata["item_id"])
+}
+
+func TestConnectorFolderMoveIntoSelectionWalksDescendants(t *testing.T) {
+	_, ds, connector := newConnectorTestRepo(t)
+	selected := encodeRef(resourceRef{DriveID: "drive", ItemID: "selected"})
+	require.NoError(t, connector.items.Upsert(context.Background(), &types.DataSourceItem{
+		TenantID: ds.TenantID, DataSourceID: ds.ID, ConnectionVersion: ds.ConnectionVersion,
+		DriveID: "drive", ItemID: "selected", ParentItemID: rootItemID, ItemType: "folder",
+		SelectedRootID: selected, ExternalID: externalID("drive", "selected"),
+	}))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/drives/drive/items/moved/children":
+			fmt.Fprint(w, `{"value":[{"id":"child","name":"child.txt","size":5,"file":{"mimeType":"text/plain"},"parentReference":{"driveId":"drive","id":"moved"}}]}`)
+		case "/drives/drive/items/child/content":
+			fmt.Fprint(w, "child")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := newGraphClient(server.URL, server.Client(), func(context.Context) (string, error) { return "token", nil }, nil)
+	config := &types.DataSourceConfig{Runtime: &types.DataSourceRuntime{
+		DataSourceID: ds.ID, TenantID: ds.TenantID, ConnectionVersion: ds.ConnectionVersion,
+	}}
+	result := &types.FetchResult{}
+	change := driveItem{ID: "moved", Name: "Moved"}
+	change.Folder = &struct {
+		ChildCount int `json:"childCount"`
+	}{}
+	change.ParentReference.DriveID = "drive"
+	change.ParentReference.ID = "selected"
+	err := connector.applyChanges(context.Background(), client, config, "drive",
+		[]resourceRef{{DriveID: "drive", ItemID: "selected"}}, "generation",
+		[]driveItem{change}, result)
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, "child", result.Items[0].Metadata["item_id"])
+	require.Equal(t, []byte("child"), result.Items[0].Content)
+}
+
+func TestGraphDownloadFollowsRedirectAndEnforcesStreamingLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/drives/drive/items/file/content":
+			http.Redirect(w, r, "/download", http.StatusFound)
+		case "/download":
+			w.Header().Set("Content-Length", "")
+			_, _ = io.WriteString(w, strings.Repeat("x", 9))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := newGraphClient(server.URL, server.Client(), func(context.Context) (string, error) { return "token", nil }, nil)
+	_, err := client.download(context.Background(), "drive", "file", 8)
+	require.ErrorContains(t, err, "exceeds maximum size")
+}
+
+func TestDecodeGraphErrorSanitizesOpaqueURLAndParsesRetryAfter(t *testing.T) {
+	response := &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{"Retry-After": []string{"3"}},
+		Body: io.NopCloser(strings.NewReader(
+			`{"error":{"code":"throttled","message":"retry https://graph.test/delta?$deltatoken=secret"}}`,
+		)),
+	}
+	err := decodeGraphError(response)
+	require.Equal(t, 3*time.Second, err.RetryAfter)
+	require.Equal(t, "request rejected by Microsoft Graph", err.Message)
+	require.NotContains(t, err.Error(), "secret")
+}
+
+func TestGraphPaginationRejectsCrossOriginNextLinkWithoutSendingToken(t *testing.T) {
+	attackerRequests := 0
+	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attackerRequests++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer attacker.Close()
+
+	graph := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"value":[],"@odata.nextLink":%q}`, attacker.URL+"/steal")
+	}))
+	defer graph.Close()
+	client := newGraphClient(graph.URL, graph.Client(), func(context.Context) (string, error) {
+		return "secret-token", nil
+	}, nil)
+
+	_, err := client.listAll(context.Background(), graph.URL+"/page")
+	require.ErrorContains(t, err, "changed origin")
+	require.Zero(t, attackerRequests)
+}
+
+func TestFullWalkPreservesExistingIngestedStateUntilReplacementSucceeds(t *testing.T) {
+	_, ds, connector := newConnectorTestRepo(t)
+	require.NoError(t, connector.items.Upsert(context.Background(), &types.DataSourceItem{
+		TenantID: ds.TenantID, DataSourceID: ds.ID, ConnectionVersion: ds.ConnectionVersion,
+		DriveID: "drive", ItemID: "file", ParentItemID: rootItemID, ItemType: "file",
+		SelectedRootID: "selected", ExternalID: externalID("drive", "file"), Ingested: true,
+	}))
+	config := &types.DataSourceConfig{Runtime: &types.DataSourceRuntime{
+		TenantID: ds.TenantID, DataSourceID: ds.ID, ConnectionVersion: ds.ConnectionVersion,
+	}}
+	item := &driveItem{ID: "file", Name: "unsupported.bin", File: &struct {
+		MimeType string `json:"mimeType"`
+	}{}}
+	item.ParentReference.ID = rootItemID
+	result := &types.FetchResult{}
+
+	err := connector.walk(context.Background(), nil, config, "drive", item, "selected", "generation", result)
+	require.NoError(t, err)
+	require.Len(t, result.Warnings, 1)
+	indexed, err := connector.items.Find(
+		context.Background(), ds.TenantID, ds.ID, ds.ConnectionVersion, "drive", "file",
+	)
+	require.NoError(t, err)
+	require.True(t, indexed.Ingested)
+}
+
+func TestFolderDeletionDoesNotDeleteChildReparentedInSameDeltaBatch(t *testing.T) {
+	_, ds, connector := newConnectorTestRepo(t)
+	deletedRoot := encodeRef(resourceRef{DriveID: "drive", ItemID: "deleted-folder"})
+	survivingRoot := encodeRef(resourceRef{DriveID: "drive", ItemID: "surviving-folder"})
+	for _, item := range []*types.DataSourceItem{
+		{
+			TenantID: ds.TenantID, DataSourceID: ds.ID, ConnectionVersion: ds.ConnectionVersion,
+			DriveID: "drive", ItemID: "deleted-folder", ParentItemID: rootItemID,
+			ItemType: "folder", SelectedRootID: deletedRoot,
+		},
+		{
+			TenantID: ds.TenantID, DataSourceID: ds.ID, ConnectionVersion: ds.ConnectionVersion,
+			DriveID: "drive", ItemID: "child", ParentItemID: "deleted-folder", ItemType: "file",
+			SelectedRootID: deletedRoot, ExternalID: externalID("drive", "child"), Ingested: true,
+		},
+	} {
+		require.NoError(t, connector.items.Upsert(context.Background(), item))
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/drives/drive/items/child/content" {
+			fmt.Fprint(w, "updated")
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	client := newGraphClient(server.URL, server.Client(), func(context.Context) (string, error) {
+		return "token", nil
+	}, nil)
+	config := &types.DataSourceConfig{Runtime: &types.DataSourceRuntime{
+		TenantID: ds.TenantID, DataSourceID: ds.ID, ConnectionVersion: ds.ConnectionVersion,
+	}}
+	deleted := driveItem{ID: "deleted-folder", Deleted: &struct {
+		State string `json:"state"`
+	}{State: "deleted"}}
+	moved := driveItem{ID: "child", Name: "child.txt", Size: 7, File: &struct {
+		MimeType string `json:"mimeType"`
+	}{MimeType: "text/plain"}}
+	moved.ParentReference.DriveID = "drive"
+	moved.ParentReference.ID = "surviving-folder"
+	result := &types.FetchResult{}
+
+	err := connector.applyChanges(
+		context.Background(), client, config, "drive",
+		[]resourceRef{
+			{DriveID: "drive", ItemID: "deleted-folder"},
+			{DriveID: "drive", ItemID: "surviving-folder"},
+		},
+		"generation", []driveItem{deleted, moved}, result,
+	)
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	require.False(t, result.Items[0].IsDeleted)
+	require.Equal(t, []byte("updated"), result.Items[0].Content)
+	indexedRoot, err := connector.items.Find(
+		context.Background(), ds.TenantID, ds.ID, ds.ConnectionVersion, "drive", "deleted-folder",
+	)
+	require.NoError(t, err)
+	require.NotNil(t, indexedRoot.DeletedAt)
+	indexedChild, err := connector.items.Find(
+		context.Background(), ds.TenantID, ds.ID, ds.ConnectionVersion, "drive", "child",
+	)
+	require.NoError(t, err)
+	require.Nil(t, indexedChild.DeletedAt)
+	require.Equal(t, survivingRoot, indexedChild.SelectedRootID)
 }
