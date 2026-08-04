@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -300,13 +301,25 @@ func recoverFromDirtyState(ctx context.Context, m *migrate.Migrate, dirtyVersion
 
 // GetMigrationVersion returns the current migration version
 func GetMigrationVersion() (uint, bool, error) {
+	dbSSLMode := os.Getenv("DB_SSLMODE")
+	if dbSSLMode == "" {
+		dbSSLMode = "disable"
+	}
+	dbSchema := os.Getenv("DB_SCHEMA")
+	if dbSchema == "" {
+		dbSchema = "public"
+	}
+
 	dbURL := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
+		"postgres://%s:%s@%s:%s/%s?sslmode=%s&search_path=%s&options=-c%%20search_path=%s,public",
 		os.Getenv("DB_USER"),
-		os.Getenv("DB_PASSWORD"),
+		url.QueryEscape(os.Getenv("DB_PASSWORD")),
 		os.Getenv("DB_HOST"),
 		os.Getenv("DB_PORT"),
 		os.Getenv("DB_NAME"),
+		dbSSLMode,
+		dbSchema,
+		dbSchema,
 	)
 
 	migrationsPath := "file://migrations/versioned"

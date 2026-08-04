@@ -1,0 +1,57 @@
+# Stage 1: Build React/Vite Frontend
+FROM node:22-alpine AS frontend-builder
+WORKDIR /app/frontend
+
+COPY frontend/package*.json ./
+RUN npm ci
+
+COPY frontend/ ./
+ENV VITE_IS_DOCKER=true
+RUN npm run build
+
+# Stage 2: Build Go Backend
+FROM golang:1.26-bookworm AS backend-builder
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y git build-essential
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=1 GOOS=linux go build -tags "sqlite_fts5" -ldflags="-w -s" -o /app/bin/weknora ./cmd/server
+
+# Stage 3: Lightweight Production Runtime
+FROM debian:12-slim AS runner
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    tzdata \
+    curl \
+    fuse \
+    libsqlite3-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy compiled backend binary
+COPY --from=backend-builder /app/bin/weknora /app/weknora
+
+# Copy config, migrations and scripts
+COPY --from=backend-builder /app/config ./config
+COPY --from=backend-builder /app/migrations ./migrations
+COPY --from=backend-builder /app/scripts ./scripts
+
+# Copy frontend static assets (served by Go backend on /app/web)
+COPY --from=frontend-builder /app/frontend/dist /app/web
+
+# Create data directory for GCS FUSE mount
+RUN mkdir -p /data/files && chmod 777 /data/files
+
+ENV PORT=8080
+ENV STORAGE_TYPE=local
+ENV LOCAL_STORAGE_BASE_DIR=/data/files
+
+EXPOSE 8080
+
+ENTRYPOINT ["/app/weknora"]

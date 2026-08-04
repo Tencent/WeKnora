@@ -1184,7 +1184,7 @@ const ruEmbedPublish = {
   },
 } as const
 
-const SUPPORTED_LOCALES = ['zh-CN', 'en-US', 'ko-KR', 'ru-RU'] as const
+const SUPPORTED_LOCALES = ['zh-CN', 'en-US', 'ko-KR', 'ru-RU', 'pt-BR'] as const
 export type EmbedLocale = (typeof SUPPORTED_LOCALES)[number]
 
 /** Isolated from the main app `locale` key so embed preview never hijacks admin UI language. */
@@ -1194,6 +1194,7 @@ export const EMBED_LOCALE_STORAGE_KEY = 'weknora-embed-locale'
 export function normalizeEmbedLocale(raw: string): EmbedLocale {
   const s = raw.trim().toLowerCase()
   if (s.startsWith('en')) return 'en-US'
+  if (s.startsWith('pt')) return 'pt-BR'
   if (s.startsWith('ko')) return 'ko-KR'
   if (s.startsWith('ru')) return 'ru-RU'
   if (s.startsWith('zh')) return 'zh-CN'
@@ -1240,6 +1241,7 @@ const i18n = createI18n({
     'en-US': messages['en-US'],
     'ko-KR': deepMerge(messages['en-US'], koEmbedPublish),
     'ru-RU': deepMerge(messages['en-US'], ruEmbedPublish),
+    'pt-BR': messages['en-US'],
   },
 })
 
