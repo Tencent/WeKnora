@@ -50,12 +50,19 @@ test('rag pipeline opens references from search steps and the drawer composable'
 test('rag pipeline uses a native pending step and lets the thinking title shimmer while pending', () => {
   assert.match(source, /showPrePipelineWait/)
   assert.match(source, /class="action-card action-pending"/)
-  assert.match(source, /t\('chat\.thinkingAlt'\)/)
+  assert.match(source, /t\('chat\.preparingAnswer'\)/)
   assert.match(source, /showThinkingStep/)
   assert.match(source, /'action-pending': thinkingPending/)
   assert.match(source, /hasThinkingEvent/)
   assert.doesNotMatch(source, /thinking-loading/)
   assert.doesNotMatch(source, /showActivityIndicator/)
+})
+
+test('rag pipeline shows a pending model-answer step after retrieval completes', () => {
+  assert.match(source, /showModelAnswerWait/)
+  assert.match(source, /shouldShowRagModelAnswerWait/)
+  assert.match(source, /t\('chat\.connectingModelAndGeneratingAnswer'\)/)
+  assert.match(source, /rag-model-wait-step/)
 })
 
 test('done row appears only after the full turn completes', () => {

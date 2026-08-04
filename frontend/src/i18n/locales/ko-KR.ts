@@ -3046,6 +3046,8 @@ export default {
     refreshSuggestedQuestions: '다른 질문',
     thinking: '생각 중...',
     thinkingAlt: '생각 중',
+    preparingAnswer: '답변을 준비하고 있습니다…',
+    connectingModelAndGeneratingAnswer: '모델에 연결하여 답변을 생성하고 있습니다…',
     deepThoughtCompleted: '심층 분석 완료',
     deepThoughtAlt: '심층 분석 완료',
     referencesTitle: '{count}개의 관련 내용 참조',

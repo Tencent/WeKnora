@@ -3046,6 +3046,8 @@ export default {
     refreshSuggestedQuestions: '换一批',
     thinking: '思考中...',
     thinkingAlt: '正在思考',
+    preparingAnswer: '正在准备回答…',
+    connectingModelAndGeneratingAnswer: '正在连接模型并生成回答…',
     deepThoughtCompleted: '已深度思考',
     deepThoughtAlt: '深度思考完成',
     referencesTitle: '参考了{count}个相关内容',

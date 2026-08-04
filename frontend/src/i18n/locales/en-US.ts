@@ -2558,6 +2558,8 @@ export default {
     refreshSuggestedQuestions: 'More',
     thinking: 'Thinking...',
     thinkingAlt: 'Thinking in progress',
+    preparingAnswer: 'Preparing an answer…',
+    connectingModelAndGeneratingAnswer: 'Connecting to the model and generating an answer…',
     deepThoughtCompleted: 'Deep thinking completed',
     deepThoughtAlt: 'Deep thinking finished',
     referencesTitle: 'Referenced {count} related item(s)',
