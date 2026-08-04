@@ -63,6 +63,7 @@ import {
   folderBreadcrumbs as buildFolderBreadcrumbs,
   folderPathExists as folderExistsInTree,
   isFolderUpload,
+  ROOT_FOLDER_PATH,
 } from './folderTree';
 import { useI18n } from 'vue-i18n';
 import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
@@ -604,11 +605,12 @@ const disableFutureDate = { after: new Date(new Date().setHours(23, 59, 59, 999)
 // ── Folder tree (documents uploaded as a folder keep their relative path) ──
 const FOLDER_TREE_COLLAPSED_KEY = 'weknora.kbFolderTreeCollapsed';
 const FOLDER_TREE_RECURSIVE_KEY = 'weknora.kbFolderRecursive';
-const readStoredFlag = (key: string) => {
+const readStoredFlag = (key: string, fallback = false) => {
   try {
-    return localStorage.getItem(key) === 'true';
+    const raw = localStorage.getItem(key);
+    return raw === null ? fallback : raw === 'true';
   } catch {
-    return false;
+    return fallback;
   }
 };
 const writeStoredFlag = (key: string, value: boolean) => {
@@ -620,23 +622,22 @@ const writeStoredFlag = (key: string, value: boolean) => {
 };
 const folderTree = ref<KnowledgeFolderTree | null>(null);
 const folderTreeLoading = ref(false);
-// `null` browses every folder (the historical flat list), `''` is the knowledge
-// base root, any other value is a folder path.
-const selectedFolderPath = ref<string | null>(null);
+// The selected folder path; ROOT_FOLDER_PATH ('') is the knowledge base root,
+// which is a real node of the tree rather than a separate "all documents" mode.
+// Combined with folderRecursive it covers both "everything" (root + recursive)
+// and "documents not inside any folder" (root + direct only).
+const selectedFolderPath = ref<string>(ROOT_FOLDER_PATH);
 const folderTreeCollapsed = ref(readStoredFlag(FOLDER_TREE_COLLAPSED_KEY));
-const folderRecursive = ref(readStoredFlag(FOLDER_TREE_RECURSIVE_KEY));
+// Recursive by default: a freshly opened knowledge base should list everything,
+// and a folder that only holds sub-folders would otherwise look empty.
+const folderRecursive = ref(readStoredFlag(FOLDER_TREE_RECURSIVE_KEY, true));
 const hasFolders = computed(() => (folderTree.value?.folders?.length ?? 0) > 0);
 // The folder column only earns its space once the knowledge base actually has
 // folders, so knowledge bases filled with single-file uploads look unchanged.
-const showFolderTree = computed(() => !isFAQ.value && (hasFolders.value || selectedFolderPath.value !== null));
+const showFolderTree = computed(() => !isFAQ.value && hasFolders.value);
 // Rows only need their folder shown when the current list can span folders.
-const showDocumentFolderPath = computed(
-  () => hasFolders.value && (selectedFolderPath.value === null || folderRecursive.value),
-);
+const showDocumentFolderPath = computed(() => hasFolders.value && folderRecursive.value);
 const folderBreadcrumbs = computed(() => buildFolderBreadcrumbs(selectedFolderPath.value));
-// Uploads land in the folder currently being browsed; "all documents" and the
-// root row both mean "no prefix".
-const uploadTargetFolder = computed(() => selectedFolderPath.value || '');
 
 const filterParams = computed(() => {
   const [start, end] = updatedTimeRange.value || [];
@@ -648,7 +649,9 @@ const filterParams = computed(() => {
     source: selectedSource.value || undefined,
     start_time: start ? `${start} 00:00:00` : undefined,
     end_time: end ? `${end} 23:59:59` : undefined,
-    folder_path: selectedFolderPath.value === null ? undefined : selectedFolderPath.value,
+    // The root folder with the recursive scope is equivalent to no folder filter
+    // at all, so knowledge bases without folders behave exactly as before.
+    folder_path: selectedFolderPath.value,
     folder_recursive: folderRecursive.value,
   };
 });
@@ -761,10 +764,9 @@ const loadFolderTree = async (kbIdValue: string) => {
     if (!isCurrentKb(kbIdValue)) return;
     folderTree.value = (res?.data as KnowledgeFolderTree) || null;
     // A folder can disappear (its last document was deleted or moved); fall
-    // back to the flat list instead of leaving an empty, unreachable view.
-    const path = selectedFolderPath.value;
-    if (path && !folderExistsInTree(folderTree.value?.folders || [], path)) {
-      selectedFolderPath.value = null;
+    // back to the root instead of leaving an empty, unreachable view.
+    if (!folderExistsInTree(folderTree.value?.folders || [], selectedFolderPath.value)) {
+      selectedFolderPath.value = ROOT_FOLDER_PATH;
     }
   } catch (error) {
     if (!isCurrentKb(kbIdValue)) return;
@@ -777,7 +779,7 @@ const loadFolderTree = async (kbIdValue: string) => {
   }
 };
 
-const handleFolderSelect = (path: string | null) => {
+const handleFolderSelect = (path: string) => {
   if (selectedFolderPath.value === path) return;
   selectedFolderPath.value = path;
 };
@@ -1030,7 +1032,7 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
     tagPage.value = 1;
     uiStore.clearSelectedTagIds();
     folderTree.value = null;
-    selectedFolderPath.value = null;
+    selectedFolderPath.value = ROOT_FOLDER_PATH;
   }
   loadKnowledgeBaseInfo(newKbId);
 }, { immediate: true });
@@ -1507,8 +1509,8 @@ const AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
 
 const uploadConfirmStore = useUploadConfirmStore();
 
-const getFolderUploadFileName = (file: File) =>
-  buildUploadFileName(file, uploadTargetFolder.value);
+const getFolderUploadFileName = (file: File, targetFolder: string) =>
+  buildUploadFileName(file, targetFolder);
 
 const showUploadResultMessages = (
   successCount: number,
@@ -1545,7 +1547,12 @@ const showUploadResultMessages = (
 
 const executeUploadBatch = async (
   files: File[],
-  options: { processConfig?: KnowledgeProcessOverrides; tagIds?: string[] } = {},
+  options: {
+    processConfig?: KnowledgeProcessOverrides;
+    tagIds?: string[];
+    /** Destination folder confirmed in the upload dialog; '' is the root. */
+    targetFolder?: string;
+  } = {},
 ) => {
   const targetKbId = kbId.value;
   if (!targetKbId || files.length === 0) {
@@ -1569,7 +1576,7 @@ const executeUploadBatch = async (
         process_config?: KnowledgeProcessOverrides
       } = { file, tag_ids: tagIdsToUpload };
 
-      const fileName = getFolderUploadFileName(file);
+      const fileName = getFolderUploadFileName(file, options.targetFolder || ROOT_FOLDER_PATH);
       if (fileName) uploadData.fileName = fileName;
       if (options.processConfig) {
         uploadData.process_config = options.processConfig;
@@ -1676,7 +1683,11 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
     if (hasFolderPaths) {
       MessagePlugin.info(t('knowledgeBase.uploadingFolder', { total: files.length }));
     }
-    await executeUploadBatch(files, { processConfig, tagIds });
+    await executeUploadBatch(files, {
+      processConfig,
+      tagIds,
+      targetFolder: result.targetFolder || ROOT_FOLDER_PATH,
+    });
   }
 
   for (const url of urls) {
@@ -1696,6 +1707,9 @@ const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
       urls,
       acceptFileTypes: acceptFileTypes.value,
       supportedFileTypes: [...supportedFileTypes.value],
+      // Pre-fill the destination with the folder being browsed; the dialog shows
+      // it and lets the user send the batch to the root instead.
+      targetFolder: selectedFolderPath.value,
     });
     await handleUploadConfirmResult(result);
   } catch {
@@ -2252,14 +2266,11 @@ async function createNewSession(value: string): Promise<void> {
             @update:recursive="handleFolderRecursiveChange" />
           <div class="tag-content">
             <div class="doc-card-area">
-              <nav v-if="selectedFolderPath !== null" class="doc-folder-path" :aria-label="$t('knowledgeBase.folderTree.title')">
-                <button type="button" class="doc-folder-path__crumb" @click="handleFolderSelect(null)">
-                  {{ $t('knowledgeBase.folderTree.allDocuments') }}
+              <nav v-if="showFolderTree && folderBreadcrumbs.length" class="doc-folder-path"
+                :aria-label="$t('knowledgeBase.folderTree.title')">
+                <button type="button" class="doc-folder-path__crumb" @click="handleFolderSelect('')">
+                  {{ $t('knowledgeBase.folderTree.rootRow') }}
                 </button>
-                <template v-if="!folderBreadcrumbs.length">
-                  <t-icon name="chevron-right" class="doc-folder-path__sep" />
-                  <span class="doc-folder-path__crumb is-current">{{ $t('knowledgeBase.folderTree.rootFolder') }}</span>
-                </template>
                 <template v-for="(crumb, index) in folderBreadcrumbs" :key="crumb.path">
                   <t-icon name="chevron-right" class="doc-folder-path__sep" />
                   <span v-if="index === folderBreadcrumbs.length - 1" class="doc-folder-path__crumb is-current">

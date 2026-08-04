@@ -28,6 +28,24 @@
                 </div>
               </div>
 
+              <!-- Where the batch lands. Shown for every file upload so browsing
+                   a folder never silently decides the destination. -->
+              <div v-if="mode === 'file'" class="destination-row">
+                <t-icon :name="localTargetFolder ? 'folder' : 'folder-open'" class="destination-icon" />
+                <span class="destination-label">{{ t('uploadConfirm.destinationLabel') }}</span>
+                <span class="destination-path" :title="destinationTitle">{{ destinationText }}</span>
+                <t-tooltip v-if="localTargetFolder" :content="t('uploadConfirm.destinationToRoot')" placement="top">
+                  <button
+                    type="button"
+                    class="destination-clear"
+                    :aria-label="t('uploadConfirm.destinationToRoot')"
+                    @click="localTargetFolder = ''"
+                  >
+                    <t-icon name="close-circle-filled" />
+                  </button>
+                </t-tooltip>
+              </div>
+
               <div class="files-list-wrap">
                 <div v-if="mode === 'manual' && manualPreview" class="manual-source-panel">
                   <p class="manual-source-title" :title="manualPreview.title">{{ manualPreview.title }}</p>
@@ -65,7 +83,12 @@
                     </span>
                     <div class="file-meta">
                       <span class="file-name" :title="file.name">{{ file.name }}</span>
-                      <span class="file-size">{{ formatFileSize(file.size) }}</span>
+                      <span class="file-size">
+                        {{ formatFileSize(file.size) }}
+                        <template v-if="fileRelativeDir(file)">
+                          · <span class="file-relative-dir" :title="fileRelativeDir(file)">{{ fileRelativeDir(file) }}</span>
+                        </template>
+                      </span>
                     </div>
                     <button
                       type="button"
@@ -583,6 +606,8 @@ const props = withDefaults(defineProps<{
   tagId?: string
   acceptFileTypes?: string
   supportedFileTypes?: string[]
+  /** Folder the batch will be uploaded into; '' means the knowledge base root. */
+  targetFolder?: string
 }>(), {
   mode: 'file',
   files: () => [],
@@ -592,6 +617,7 @@ const props = withDefaults(defineProps<{
   reparsePreview: null,
   acceptFileTypes: '',
   supportedFileTypes: () => [],
+  targetFolder: '',
 })
 
 const emit = defineEmits<{
@@ -615,11 +641,35 @@ const tagsLoadFailed = ref(false)
 const chunkingMoreOpen = ref(false)
 const activeSection = ref<ConfigSectionKey>('tags')
 const uiState = ref<UploadUIState>(createDefaultUIState())
+// Destination folder for this batch. Pre-filled from the sidebar tree, but
+// editable here so browsing a folder never silently decides where files land.
+const localTargetFolder = ref('')
 
 const dialogVisible = computed({
   get: () => props.visible,
   set: (value: boolean) => emit('update:visible', value),
 })
+
+const destinationText = computed(() =>
+  localTargetFolder.value || t('uploadConfirm.destinationRoot'),
+)
+
+const destinationTitle = computed(() =>
+  localTargetFolder.value
+    ? t('uploadConfirm.destinationTip', { folder: localTargetFolder.value })
+    : t('uploadConfirm.destinationRootTip'),
+)
+
+/**
+ * Directory a folder-upload file came from, shown under its name so a batch of
+ * same-named files (README.md in five folders) stays distinguishable and the
+ * resulting structure is visible before confirming.
+ */
+function fileRelativeDir(file: File): string {
+  const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath
+  if (!relativePath) return ''
+  return relativePath.split('/').filter(Boolean).slice(0, -1).join('/')
+}
 
 function getModelName(modelId: string): string {
   if (!modelId) return t('uploadConfirm.notSet')
@@ -1189,6 +1239,7 @@ watch(
     localFiles.value = props.mode === 'file' ? [...(props.files || [])] : []
     localUrls.value = props.mode === 'file' ? [...(props.urls || [])] : []
     selectedTagIds.value = props.mode === 'reparse' ? [] : [...(props.tagIds || [])]
+    localTargetFolder.value = props.mode === 'file' ? (props.targetFolder || '') : ''
     initFromKbInfo(props.kbInfo)
     if (props.mode === 'reparse') {
       applyOverridesToState(props.reparsePreview?.processOverrides)
@@ -1330,6 +1381,7 @@ const handleConfirm = () => {
       tagIds: [...selectedTagIds.value],
       files: [...localFiles.value],
       urls: [...localUrls.value],
+      targetFolder: localTargetFolder.value,
     })
   }
   emit('update:visible', false)
@@ -1451,6 +1503,65 @@ const handleConfirm = () => {
   color: var(--td-text-color-secondary);
 }
 
+.destination-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin: 0 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--td-bg-color-secondarycontainer);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.destination-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: var(--td-text-color-placeholder);
+}
+
+.destination-label {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+}
+
+.destination-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  color: var(--td-text-color-primary);
+}
+
+.destination-clear {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  cursor: pointer;
+  transition: color 0.15s ease;
+
+  &:hover {
+    color: var(--td-text-color-secondary);
+  }
+
+  .t-icon {
+    font-size: 14px;
+  }
+}
+
 .files-list-wrap {
   display: flex;
   flex: 1;
@@ -1526,6 +1637,13 @@ const handleConfirm = () => {
   font-size: 11px;
   line-height: 1.3;
   color: var(--td-text-color-placeholder);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-relative-dir {
+  color: var(--td-text-color-secondary);
 }
 
 .file-remove {
