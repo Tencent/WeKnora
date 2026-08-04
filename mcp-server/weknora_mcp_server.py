@@ -99,6 +99,30 @@ class MCPAuthMiddleware:
         await self.app(scope, receive, send)
 
 
+def _normalize_kb_entries(resp: object) -> list[Dict]:
+    """Flatten owned and shared knowledge-base list API responses.
+
+    GET /knowledge-bases returns ``data: [{id, name, ...}, ...]`` (see
+    KnowledgeBaseHandler.buildKBListResponse).
+
+    GET /shared-knowledge-bases returns ``data: [{knowledge_base: {id, name,
+    ...}, share_id, ...}, ...]`` (see organization handler sharedKBRow).
+    """
+    data = resp.get("data", resp) if isinstance(resp, dict) else resp
+    if isinstance(data, dict):
+        data = data.get("list", data.get("items", []))
+    out: list[Dict] = []
+    for item in (data or []):
+        if not isinstance(item, dict):
+            continue
+        nested = item.get("knowledge_base")
+        if isinstance(nested, dict) and nested.get("id"):
+            out.append(nested)
+        elif item.get("id"):
+            out.append(item)
+    return out
+
+
 class WeKnoraClient:
     """Client for interacting with WeKnora API"""
 
@@ -194,6 +218,10 @@ class WeKnoraClient:
         """List all knowledge bases"""
         return self._request("GET", "/knowledge-bases")
 
+    def list_shared_knowledge_bases(self) -> Dict:
+        """List knowledge bases shared from other workspaces"""
+        return self._request("GET", "/shared-knowledge-bases")
+
     def get_knowledge_base(self, kb_id: str) -> Dict:
         """Get knowledge base details"""
         return self._request("GET", f"/knowledge-bases/{kb_id}")
@@ -250,17 +278,15 @@ class WeKnoraClient:
         """
         if self._UUID_RE.match(kb_id_or_name):
             return kb_id_or_name
-        resp = self.list_knowledge_bases()
-        kbs = resp.get("data", resp) if isinstance(resp, dict) else resp
-        if isinstance(kbs, dict):
-            kbs = kbs.get("list", kbs.get("items", []))
+        # Search own + shared knowledge bases for a name match
         needle = kb_id_or_name.lower()
-        for kb in (kbs or []):
-            if isinstance(kb, dict) and kb.get("name", "").lower() == needle:
-                return kb["id"]
+        for source in (self.list_knowledge_bases, self.list_shared_knowledge_bases):
+            for kb in _normalize_kb_entries(source()):
+                if kb.get("name", "").lower() == needle:
+                    return kb["id"]
         raise ValueError(
             f"Knowledge base {kb_id_or_name!r} not found. "
-            "Use list_knowledge_bases to see available IDs and names."
+            "Use list_knowledge_bases or list_shared_knowledge_bases to see available IDs and names."
         )
 
     def hybrid_search(self, kb_id: str, query: str, config: Dict) -> Dict:
@@ -624,8 +650,14 @@ def create_knowledge_base(
 
 @mcp.tool()
 def list_knowledge_bases() -> dict:
-    """List all knowledge bases."""
+    """List all knowledge bases in the current workspace."""
     return client.list_knowledge_bases()
+
+
+@mcp.tool()
+def list_shared_knowledge_bases() -> dict:
+    """List knowledge bases shared from other workspaces."""
+    return client.list_shared_knowledge_bases()
 
 
 @mcp.tool()
@@ -651,7 +683,7 @@ def hybrid_search(
     """Perform hybrid (vector + keyword) search in a knowledge base.
 
     kb_id may be a UUID or a knowledge-base name (resolved automatically).
-    Use list_knowledge_bases to discover available knowledge bases.
+    Use list_knowledge_bases or list_shared_knowledge_bases to discover available knowledge bases.
     """
     config = {
         "vector_threshold": vector_threshold,
@@ -781,7 +813,7 @@ async def chat(
 
     ALWAYS provide knowledge_base_ids (names like 'my-knowledge-base' or UUIDs) so
     retrieval can run — without them the answer is based on LLM knowledge only.
-    Use list_knowledge_bases to discover available knowledge bases.
+    Use list_knowledge_bases or list_shared_knowledge_bases to discover available knowledge bases.
     For multi-step reasoning or tool-calling use agent_chat instead.
     """
     kb_ids = (
@@ -836,14 +868,18 @@ async def agent_chat(
                 mode in ("selected", "") and not built_in_kbs
             )
             if needs_kbs:
-                kb_list = client.list_knowledge_bases()
-                kbs = kb_list.get("data") or kb_list
-                if isinstance(kbs, dict):
-                    kbs = kbs.get("list", kbs.get("items", []))
+                all_kbs = _normalize_kb_entries(
+                    client.list_knowledge_bases()
+                ) + _normalize_kb_entries(client.list_shared_knowledge_bases())
+                seen_ids: set[str] = set()
+                unique_kbs: list[Dict] = []
+                for kb in all_kbs:
+                    kb_id = kb.get("id")
+                    if kb_id and kb_id not in seen_ids:
+                        seen_ids.add(kb_id)
+                        unique_kbs.append(kb)
                 kb_summary = ", ".join(
-                    f"{kb.get('name')} ({kb.get('id')})"
-                    for kb in (kbs or [])[:10]
-                    if isinstance(kb, dict)
+                    f"{kb.get('name')} ({kb.get('id')})" for kb in unique_kbs[:10]
                 )
                 raise ValueError(
                     f"Agent '{agent_id}' has kb_selection_mode='{mode}' with no built-in "

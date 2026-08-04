@@ -96,6 +96,8 @@ export interface ParserEngineInfo {
 }
 
 /** 解析引擎配置（引擎连接参数存空间；聊天附件解析策略在智能体中配置） */
+export type MinerUParseMethod = 'auto' | 'ocr' | 'txt'
+
 export interface ParserEngineConfig {
   docreader_addr?: string
   docreader_transport?: string
@@ -106,6 +108,7 @@ export interface ParserEngineConfig {
   mineru_vlm_server_url?: string
   mineru_enable_formula?: boolean | null
   mineru_enable_table?: boolean | null
+  mineru_parse_method?: MinerUParseMethod
   mineru_enable_ocr?: boolean | null
   mineru_language?: string
   // MinerU 云 API 参数
