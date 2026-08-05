@@ -1094,7 +1094,7 @@ function initFromKbInfo(kb: any) {
   uiState.value = {
     chunkingConfig: {
       chunkSize: kb.chunking_config?.chunk_size || 512,
-      chunkOverlap: kb.chunking_config?.chunk_overlap || 80,
+      chunkOverlap: kb.chunking_config?.chunk_overlap ?? 80,
       separators: kb.chunking_config?.separators || ['\n\n', '\n', '。', '！', '？', ';', '；'],
       parserEngineRules: kb.chunking_config?.parser_engine_rules || undefined,
       enableParentChild: kb.chunking_config?.enable_parent_child ?? false,

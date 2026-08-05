@@ -16,6 +16,10 @@ func processConfigBoolPtr(v bool) *bool {
 	return &v
 }
 
+func processConfigIntPtr(v int) *int {
+	return &v
+}
+
 func testKBWithGraphEnabled(enabled bool) *types.KnowledgeBase {
 	return &types.KnowledgeBase{
 		IndexingStrategy: types.IndexingStrategy{GraphEnabled: enabled},
@@ -30,11 +34,27 @@ func TestResolveProcessConfig_OverridesChunkSize(t *testing.T) {
 		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 50},
 	}
 	overrides := &types.KnowledgeProcessOverrides{
-		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 2048},
+		ChunkingConfig: &types.ChunkingConfigOverride{ChunkSize: 2048},
 	}
 	eff := ResolveProcessConfig(kb, overrides)
 	require.Equal(t, 2048, eff.ChunkingConfig.ChunkSize)
 	require.Equal(t, 50, eff.ChunkingConfig.ChunkOverlap)
+}
+
+func TestResolveProcessConfig_ExplicitZeroChunkOverlap(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 80},
+	}
+	overrides := &types.KnowledgeProcessOverrides{
+		ChunkingConfig: &types.ChunkingConfigOverride{
+			ChunkOverlap: processConfigIntPtr(0),
+		},
+	}
+
+	eff := ResolveProcessConfig(kb, overrides)
+	require.Zero(t, eff.ChunkingConfig.ChunkOverlap)
 }
 
 func TestResolveProcessConfig_OverrideTogglesParentChild(t *testing.T) {
@@ -45,7 +65,7 @@ func TestResolveProcessConfig_OverrideTogglesParentChild(t *testing.T) {
 		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, EnableParentChild: true},
 	}
 	effOff := ResolveProcessConfig(kbOn, &types.KnowledgeProcessOverrides{
-		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 512, EnableParentChild: false},
+		ChunkingConfig: &types.ChunkingConfigOverride{ChunkSize: 512, EnableParentChild: false},
 	})
 	require.False(t, effOff.ChunkingConfig.EnableParentChild)
 
@@ -54,7 +74,7 @@ func TestResolveProcessConfig_OverrideTogglesParentChild(t *testing.T) {
 		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, EnableParentChild: false},
 	}
 	effOn := ResolveProcessConfig(kbOff, &types.KnowledgeProcessOverrides{
-		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 512, EnableParentChild: true},
+		ChunkingConfig: &types.ChunkingConfigOverride{ChunkSize: 512, EnableParentChild: true},
 	})
 	require.True(t, effOn.ChunkingConfig.EnableParentChild)
 }
@@ -117,7 +137,9 @@ func TestBuildSplitterConfigFromChunking_UsesEffectiveChunkingConfig(t *testing.
 		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 50, Strategy: "token"},
 	}
 	overrides := &types.KnowledgeProcessOverrides{
-		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 1500, ChunkOverlap: 120, Strategy: "character"},
+		ChunkingConfig: &types.ChunkingConfigOverride{
+			ChunkSize: 1500, ChunkOverlap: processConfigIntPtr(120), Strategy: "character",
+		},
 	}
 	eff := ResolveProcessConfig(kb, overrides)
 	cfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
@@ -125,6 +147,18 @@ func TestBuildSplitterConfigFromChunking_UsesEffectiveChunkingConfig(t *testing.
 	require.Equal(t, 1500, cfg.ChunkSize)
 	require.Equal(t, 120, cfg.ChunkOverlap)
 	require.Equal(t, "character", cfg.Strategy)
+}
+
+func TestBuildSplitterConfigFromChunking_PreservesZeroOverlap(t *testing.T) {
+	t.Parallel()
+
+	cfg := buildSplitterConfigFromChunking(types.ChunkingConfig{
+		ChunkSize:    512,
+		ChunkOverlap: 0,
+		Separators:   []string{"\n"},
+	})
+
+	require.Zero(t, cfg.ChunkOverlap)
 }
 
 func TestEffectiveChunkingConfig_ResolveParserEngineFromOverrides(t *testing.T) {
@@ -303,7 +337,7 @@ func TestResolveProcessConfig_PreservesKnowledgeBasePromptInstructions(t *testin
 		ExtractConfig: &types.ExtractConfig{Enabled: true, CustomInstructions: "contract entities"},
 	}
 	overrides := &types.KnowledgeProcessOverrides{
-		ChunkingConfig:           &types.ChunkingConfig{ChunkSize: 256},
+		ChunkingConfig:           &types.ChunkingConfigOverride{ChunkSize: 256},
 		VLMConfig:                &types.VLMConfig{Enabled: true, ModelID: "vlm-2"},
 		QuestionGenerationConfig: &types.QuestionGenerationConfig{Enabled: true, QuestionCount: 5},
 		ExtractConfig:            &types.ExtractConfig{Enabled: true},
@@ -524,4 +558,20 @@ func TestBuildParentChildConfigs_PropagatesStrategy(t *testing.T) {
 	require.Equal(t, 512/5, child.ChunkOverlap)
 	require.Equal(t, base.Separators, parent.Separators)
 	require.Equal(t, base.Separators, child.Separators)
+}
+
+func TestBuildParentChildConfigs_ZeroOverlapDisablesBothLevels(t *testing.T) {
+	t.Parallel()
+
+	base := chunker.SplitterConfig{
+		ChunkSize:    1000,
+		ChunkOverlap: 0,
+		Separators:   []string{"\n\n", "\n"},
+	}
+	cc := types.ChunkingConfig{ParentChunkSize: 4096, ChildChunkSize: 512}
+
+	parent, child := buildParentChildConfigs(cc, base)
+
+	require.Zero(t, parent.ChunkOverlap)
+	require.Zero(t, child.ChunkOverlap)
 }

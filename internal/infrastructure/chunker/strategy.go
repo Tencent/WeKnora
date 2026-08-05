@@ -238,9 +238,9 @@ func runTier(tier StrategyTier, text string, cfg SplitterConfig, profile *DocPro
 	return SplitText(text, cfg)
 }
 
-// ensureDefaults fills in zero-value config fields with sane defaults.
-// Mirrors buildSplitterConfig in internal/application/service/knowledge.go
-// so direct callers of this package get the same numbers.
+// ensureDefaults fills in unset config fields with sane defaults. ChunkOverlap
+// is excluded because zero is a valid setting that disables overlap; callers
+// wanting the recommended overlap should start from DefaultConfig.
 //
 // When cfg.TokenLimit is set, ChunkSize is clamped to the character budget
 // that fits within that token limit (with a 10% safety factor). This makes
@@ -249,8 +249,8 @@ func ensureDefaults(cfg SplitterConfig) SplitterConfig {
 	if cfg.ChunkSize <= 0 {
 		cfg.ChunkSize = DefaultChunkSize
 	}
-	if cfg.ChunkOverlap <= 0 {
-		cfg.ChunkOverlap = DefaultChunkOverlap
+	if cfg.ChunkOverlap < 0 {
+		cfg.ChunkOverlap = 0
 	}
 	if len(cfg.Separators) == 0 {
 		cfg.Separators = []string{"\n\n", "\n", "。"}

@@ -90,16 +90,8 @@ type SplitterConfig struct {
 // strictly atomic data (FAQ, JSON records), 150–200 for long narratives
 // where reasoning crosses chunks.
 //
-// MIGRATION NOTE: Prior versions had three different overlap defaults
-// (Go DefaultConfig: 64, knowledge.go buildSplitterConfig: 50, Python
-// docreader: 100). All consolidated to 80 here.
-//
-// Existing knowledge bases that stored ChunkOverlap=0 in the DB pick
-// this 80 up on next re-index; their previously-indexed embeddings will
-// not match new ones bit-for-bit. Recall stays similar but search
-// ranking can shift slightly. To freeze the old behavior on a per-KB
-// basis, explicitly set ChunkingConfig.ChunkOverlap to 64 before
-// re-indexing.
+// Callers wanting these recommended defaults should use DefaultConfig. A
+// literal ChunkOverlap=0 is preserved because it explicitly disables overlap.
 const (
 	DefaultChunkSize    = 512
 	DefaultChunkOverlap = 80

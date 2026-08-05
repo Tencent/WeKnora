@@ -211,16 +211,34 @@ func TestSplitParentChild_LegacyStrategy(t *testing.T) {
 	}
 }
 
-func TestEnsureDefaults(t *testing.T) {
+func TestEnsureDefaults_PreservesZeroOverlap(t *testing.T) {
 	cfg := ensureDefaults(SplitterConfig{})
 	if cfg.ChunkSize != DefaultChunkSize {
 		t.Errorf("expected default ChunkSize %d, got %d", DefaultChunkSize, cfg.ChunkSize)
 	}
-	if cfg.ChunkOverlap != DefaultChunkOverlap {
-		t.Errorf("expected default ChunkOverlap %d, got %d", DefaultChunkOverlap, cfg.ChunkOverlap)
+	if cfg.ChunkOverlap != 0 {
+		t.Errorf("expected explicit zero ChunkOverlap to be preserved, got %d", cfg.ChunkOverlap)
 	}
 	if len(cfg.Separators) == 0 {
 		t.Error("expected default separators")
+	}
+}
+
+func TestSplit_PreservesZeroOverlap(t *testing.T) {
+	text := strings.Repeat("abcdefghij\n", 20)
+	chunks := Split(text, SplitterConfig{
+		ChunkSize:    30,
+		ChunkOverlap: 0,
+		Separators:   []string{"\n"},
+		Strategy:     StrategyLegacy,
+	})
+	if len(chunks) < 2 {
+		t.Fatalf("expected multiple chunks, got %d", len(chunks))
+	}
+	for i := 1; i < len(chunks); i++ {
+		if chunks[i].Start < chunks[i-1].End {
+			t.Fatalf("chunks overlap at %d: previous end=%d, current start=%d", i, chunks[i-1].End, chunks[i].Start)
+		}
 	}
 }
 

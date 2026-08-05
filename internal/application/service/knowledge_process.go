@@ -212,9 +212,8 @@ func markKnowledgeProcessing(knowledge *types.Knowledge, now time.Time) {
 }
 
 // buildSplitterConfig creates a SplitterConfig with fallbacks from a KnowledgeBase.
-// Defaults mirror chunker.DefaultChunkSize / DefaultChunkOverlap so behavior is
-// identical whether callers come through this path or invoke the chunker
-// directly with a zero-value config.
+// ChunkOverlap deliberately has no zero-value fallback: zero is a valid setting
+// that disables overlap.
 func buildSplitterConfig(kb *types.KnowledgeBase) chunker.SplitterConfig {
 	return buildSplitterConfigFromChunking(kb.ChunkingConfig)
 }
@@ -231,8 +230,8 @@ func buildSplitterConfigFromChunking(cc types.ChunkingConfig) chunker.SplitterCo
 	if chunkCfg.ChunkSize <= 0 {
 		chunkCfg.ChunkSize = chunker.DefaultChunkSize
 	}
-	if chunkCfg.ChunkOverlap <= 0 {
-		chunkCfg.ChunkOverlap = chunker.DefaultChunkOverlap
+	if chunkCfg.ChunkOverlap < 0 {
+		chunkCfg.ChunkOverlap = 0
 	}
 	if len(chunkCfg.Separators) == 0 {
 		chunkCfg.Separators = []string{"\n\n", "\n", "。"}
@@ -261,9 +260,13 @@ func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfi
 		Separators:   base.Separators,
 		Strategy:     base.Strategy,
 	}
+	childOverlap := childSize / 5 // ~20% overlap for child chunks
+	if base.ChunkOverlap == 0 {
+		childOverlap = 0
+	}
 	child = chunker.SplitterConfig{
 		ChunkSize:    childSize,
-		ChunkOverlap: childSize / 5, // ~20% overlap for child chunks
+		ChunkOverlap: childOverlap,
 		Separators:   base.Separators,
 		Strategy:     base.Strategy,
 	}

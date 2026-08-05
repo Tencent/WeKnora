@@ -246,7 +246,7 @@ func derefExtractConfig(cfg *types.ExtractConfig) types.ExtractConfig {
 	return *cfg
 }
 
-func mergeChunkingConfig(base types.ChunkingConfig, override *types.ChunkingConfig) types.ChunkingConfig {
+func mergeChunkingConfig(base types.ChunkingConfig, override *types.ChunkingConfigOverride) types.ChunkingConfig {
 	if override == nil {
 		return base
 	}
@@ -254,8 +254,8 @@ func mergeChunkingConfig(base types.ChunkingConfig, override *types.ChunkingConf
 	if override.ChunkSize != 0 {
 		result.ChunkSize = override.ChunkSize
 	}
-	if override.ChunkOverlap != 0 {
-		result.ChunkOverlap = override.ChunkOverlap
+	if override.ChunkOverlap != nil {
+		result.ChunkOverlap = *override.ChunkOverlap
 	}
 	if len(override.Separators) > 0 {
 		result.Separators = override.Separators

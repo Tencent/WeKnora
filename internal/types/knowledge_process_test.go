@@ -14,7 +14,7 @@ func TestKnowledgeProcessOverridesRoundtrip(t *testing.T) {
 	k := &Knowledge{}
 	overrides := &KnowledgeProcessOverrides{
 		EnableMultimodel:      boolPtr(true),
-		ChunkingConfig:        &ChunkingConfig{ChunkSize: 1024},
+		ChunkingConfig:        &ChunkingConfigOverride{ChunkSize: 1024},
 		ParserEngineOverrides: map[string]string{"pdf_force_scanned": "true"},
 	}
 	require.NoError(t, k.SetProcessOverrides(overrides))
@@ -23,7 +23,24 @@ func TestKnowledgeProcessOverridesRoundtrip(t *testing.T) {
 	require.NotNil(t, got)
 	require.True(t, *got.EnableMultimodel)
 	require.Equal(t, 1024, got.ChunkingConfig.ChunkSize)
+	require.Nil(t, got.ChunkingConfig.ChunkOverlap)
 	require.Equal(t, "true", got.ParserEngineOverrides["pdf_force_scanned"])
+}
+
+func TestKnowledgeProcessOverridesRoundtripPreservesZeroChunkOverlap(t *testing.T) {
+	k := &Knowledge{}
+	zero := 0
+	overrides := &KnowledgeProcessOverrides{
+		ChunkingConfig: &ChunkingConfigOverride{ChunkOverlap: &zero},
+	}
+
+	require.NoError(t, k.SetProcessOverrides(overrides))
+	got, err := k.ProcessOverrides()
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.NotNil(t, got.ChunkingConfig)
+	require.NotNil(t, got.ChunkingConfig.ChunkOverlap)
+	require.Zero(t, *got.ChunkingConfig.ChunkOverlap)
 }
 
 func TestSetProcessOverridesPreservesOtherMetadata(t *testing.T) {
