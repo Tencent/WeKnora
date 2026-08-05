@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"gorm.io/gorm"
 )
 
 const defaultResourceGrantTTL = 2 * time.Hour
@@ -248,8 +250,14 @@ func (s *resourceCatalog) reuseOrCreateDerivedGrant(
 	case err == nil:
 		return token, nil
 	case isUniqueViolation(err):
-		// The row exists but the lookup above rejected it, so it is revoked:
-		// reviving it via a fresh insert would defeat the revocation.
+		// Another request may have won the race; a revoked row blocks re-insert.
+		winner, lookupErr := s.repo.GetValidGrant(ctx, tokenHash, now)
+		if lookupErr != nil {
+			return "", lookupErr
+		}
+		if winner != nil && winner.ResourceID == resourceID {
+			return token, nil
+		}
 		return "", nil
 	default:
 		return "", err
@@ -276,10 +284,18 @@ func derivedGrantToken(resourceID string, ttl time.Duration) (string, time.Time,
 	return token, windowStart.Add(ttl), true
 }
 
-// isUniqueViolation reports whether err is a duplicate-key error. The repository
-// returns driver errors verbatim, so the text is all we have.
+// isUniqueViolation reports whether err is a duplicate-key error. Prefer
+// gorm.ErrDuplicatedKey when TranslateError is enabled; fall back to the
+// driver message for raw errors.
 func isUniqueViolation(err error) bool {
-	return err != nil && strings.Contains(strings.ToLower(err.Error()), "unique")
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "duplicate") || strings.Contains(msg, "unique constraint")
 }
 
 func (s *resourceCatalog) ResolveAccessGrant(ctx context.Context, token string) (*types.StoredResource, error) {

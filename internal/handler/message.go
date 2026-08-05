@@ -131,10 +131,9 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 			"Successfully retrieved recent messages, session ID: %s, message count: %d",
 			sessionID, len(messages),
 		)
-		rewriter.RewriteMessages(ctx, messages)
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
-			"data":    messages,
+			"data":    rewriter.RewriteMessagesResponse(ctx, messages),
 		})
 		return
 	}
@@ -172,10 +171,9 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 		"Successfully retrieved messages before time, session ID: %s, message count: %d",
 		sessionID, len(messages),
 	)
-	rewriter.RewriteMessages(ctx, messages)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    messages,
+		"data":    rewriter.RewriteMessagesResponse(ctx, messages),
 	})
 }
 

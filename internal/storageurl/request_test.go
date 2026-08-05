@@ -71,6 +71,26 @@ func TestRewriteMessages_DisabledLeavesHandles(t *testing.T) {
 	assert.Equal(t, "![a](resource://xifDo7NTSL300Lp1goVutw)", messages[0].Content)
 }
 
+func TestRewriteMessagesResponse_DoesNotMutateOriginals(t *testing.T) {
+	w := publicRewriter("https://cdn.example.com/x.png")
+	original := &types.Message{
+		Content: "![a](resource://xifDo7NTSL300Lp1goVutw)",
+		KnowledgeReferences: types.References{{
+			Content: "chunk ![c](resource://xifDo7NTSL300Lp1goVutw)",
+		}},
+	}
+	messages := []*types.Message{original}
+
+	out := w.RewriteMessagesResponse(context.Background(), messages)
+
+	require.Len(t, out, 1)
+	assert.NotSame(t, original, out[0])
+	assert.Equal(t, "![a](resource://xifDo7NTSL300Lp1goVutw)", original.Content)
+	assert.Equal(t, "![a](https://cdn.example.com/x.png)", out[0].Content)
+	assert.Equal(t, "chunk ![c](resource://xifDo7NTSL300Lp1goVutw)", original.KnowledgeReferences[0].Content)
+	assert.Equal(t, "chunk ![c](https://cdn.example.com/x.png)", out[0].KnowledgeReferences[0].Content)
+}
+
 // SSE references payloads share their *SearchResult pointers with the stream
 // replay buffer and the assistant message being persisted, so rewriting must not
 // mutate the originals.

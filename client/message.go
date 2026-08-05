@@ -60,12 +60,15 @@ type MessageListResponse struct {
 	Data    []Message `json:"data"`
 }
 
-// LoadMessages loads session messages, supports pagination and time filtering
+// LoadMessages loads session messages, supports pagination and time filtering.
+// Pass ResourceURLOptions to request public HTTP(S) file URLs instead of
+// resource:// handles.
 func (c *Client) LoadMessages(
 	ctx context.Context,
 	sessionID string,
 	limit int,
 	beforeTime *time.Time,
+	opts ...ResourceURLOptions,
 ) ([]Message, error) {
 	path := fmt.Sprintf("/api/v1/messages/%s/load", sessionID)
 
@@ -74,6 +77,9 @@ func (c *Client) LoadMessages(
 
 	if beforeTime != nil {
 		queryParams.Add("before_time", beforeTime.Format(time.RFC3339Nano))
+	}
+	if len(opts) > 0 {
+		applyResourceURLQuery(queryParams, &opts[0])
 	}
 
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, queryParams)
