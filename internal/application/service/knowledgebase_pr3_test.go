@@ -428,10 +428,11 @@ func TestDuplicateKnowledgeBase_CreatesSettingsOnlyDuplicate(t *testing.T) {
 		QuestionGenerationConfig: &types.QuestionGenerationConfig{Enabled: true, QuestionCount: 5},
 		WikiConfig:               &types.WikiConfig{SynthesisModelID: "wiki-llm", MaxPagesPerIngest: 12},
 		IndexingStrategy: types.IndexingStrategy{
-			VectorEnabled:  true,
-			KeywordEnabled: true,
-			WikiEnabled:    true,
-			GraphEnabled:   true,
+			VectorEnabled:         true,
+			KeywordEnabled:        true,
+			WikiEnabled:           true,
+			GraphEnabled:          true,
+			FeedbackWeightEnabled: true,
 		},
 		IsPinned:        true,
 		KnowledgeCount:  9,
@@ -467,7 +468,9 @@ func TestDuplicateKnowledgeBase_CreatesSettingsOnlyDuplicate(t *testing.T) {
 	assert.Equal(t, 5, target.QuestionGenerationConfig.QuestionCount)
 	require.NotNil(t, target.WikiConfig)
 	assert.Equal(t, "wiki-llm", target.WikiConfig.SynthesisModelID)
-	assert.Equal(t, source.IndexingStrategy, target.IndexingStrategy)
+	expectedIndexingStrategy := source.IndexingStrategy
+	expectedIndexingStrategy.FeedbackWeightEnabled = false
+	assert.Equal(t, expectedIndexingStrategy, target.IndexingStrategy)
 
 	assert.False(t, target.IsTemporary)
 	assert.False(t, target.IsPinned)
@@ -479,6 +482,14 @@ func TestDuplicateKnowledgeBase_CreatesSettingsOnlyDuplicate(t *testing.T) {
 	assert.Zero(t, target.ShareCount)
 	assert.Empty(t, target.CreatorName)
 	require.Same(t, target, repo.rows[target.ID])
+
+	adminCtx := types.WithPrincipal(
+		context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleAdmin),
+		types.Principal{Type: types.PrincipalWebUser, ID: "admin-user"},
+	)
+	adminTarget, err := svc.DuplicateKnowledgeBase(adminCtx, "src")
+	require.NoError(t, err)
+	assert.True(t, adminTarget.IndexingStrategy.FeedbackWeightEnabled)
 }
 
 func TestDuplicateKnowledgeBase_UsesDistinctNameWhenDuplicateExists(t *testing.T) {

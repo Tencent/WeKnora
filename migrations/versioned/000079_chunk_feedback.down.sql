@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS chunk_feedback_audits;
+DROP TABLE IF EXISTS message_feedbacks;
+DROP TABLE IF EXISTS message_chunk_references;
+ALTER TABLE chunks DROP CONSTRAINT IF EXISTS chk_chunks_recall_weight;
+ALTER TABLE chunks DROP CONSTRAINT IF EXISTS chk_chunks_positive_rate;
+ALTER TABLE chunks DROP CONSTRAINT IF EXISTS chk_chunks_feedback_counts;
+ALTER TABLE chunks DROP COLUMN IF EXISTS feedback_reset_at;
+ALTER TABLE chunks DROP COLUMN IF EXISTS recall_weight;
+ALTER TABLE chunks DROP COLUMN IF EXISTS positive_rate;
+ALTER TABLE chunks DROP COLUMN IF EXISTS dislike_count;
+ALTER TABLE chunks DROP COLUMN IF EXISTS like_count;

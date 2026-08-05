@@ -361,6 +361,17 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
+	if !feedbackWeightUpdateAllowed(
+		ctx,
+		c.GetUint64(types.TenantIDContextKey.String()),
+		types.IndexingStrategy{},
+		&req.IndexingStrategy,
+	) {
+		_ = c.Error(apperrors.NewForbiddenError(
+			"Only workspace owners and admins may enable feedback retrieval weighting",
+		))
+		return
+	}
 	if err := validateExtractConfig(req.ExtractConfig); err != nil {
 		logger.Error(ctx, "Invalid extract configuration", err)
 		c.Error(err)
@@ -853,7 +864,7 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	logger.Info(ctx, "Start updating knowledge base")
 
 	// Validate and get the knowledge base
-	_, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
+	kb, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
 	if err != nil {
 		c.Error(err)
 		return
@@ -873,6 +884,12 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		return
 	}
 	if req.Config != nil {
+		if !feedbackWeightUpdateAllowed(ctx, kb.TenantID, kb.IndexingStrategy, req.Config.IndexingStrategy) {
+			_ = c.Error(apperrors.NewForbiddenError(
+				"Only workspace owners and admins may change feedback retrieval weighting",
+			))
+			return
+		}
 		probe := &types.KnowledgeBase{
 			ChunkingConfig:        req.Config.ChunkingConfig,
 			ImageProcessingConfig: req.Config.ImageProcessingConfig,
@@ -888,7 +905,7 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.Name))
 
 	// Update the knowledge base
-	kb, err := h.service.UpdateKnowledgeBase(ctx, id, req.Name, req.Description, req.Config)
+	kb, err = h.service.UpdateKnowledgeBase(ctx, id, req.Name, req.Description, req.Config)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(apperrors.NewInternalServerError(err.Error()))
@@ -902,6 +919,25 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		"success": true,
 		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
 	})
+}
+
+func feedbackWeightUpdateAllowed(
+	ctx context.Context,
+	knowledgeBaseTenantID uint64,
+	current types.IndexingStrategy,
+	requested *types.IndexingStrategy,
+) bool {
+	if requested == nil || requested.FeedbackWeightEnabled == current.FeedbackWeightEnabled {
+		return true
+	}
+	callerTenantID, hasCallerTenant := types.TenantIDFromContext(ctx)
+	principal, ok := types.PrincipalFromContext(ctx)
+	return hasCallerTenant &&
+		callerTenantID == knowledgeBaseTenantID &&
+		ok &&
+		principal.Type == types.PrincipalWebUser &&
+		strings.TrimSpace(principal.ID) != "" &&
+		types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin)
 }
 
 // DeleteKnowledgeBase godoc

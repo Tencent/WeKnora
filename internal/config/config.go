@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -33,12 +34,38 @@ type Config struct {
 	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
 	IM              *IMConfig              `yaml:"im"               json:"im"`
 	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
+	Feedback        *FeedbackConfig        `yaml:"feedback"         json:"feedback"`
 	// FrontendBaseURL is the externally-visible origin of the SPA, used
 	// to compose absolute share-link URLs. Empty falls back to a host-
 	// relative URL ("/register?token=…") which the SPA then resolves
 	// against window.location.origin — fine for typical single-origin
 	// deployments. Sourced from FRONTEND_BASE_URL env at startup.
 	FrontendBaseURL string `yaml:"frontend_base_url" json:"frontend_base_url"`
+}
+
+// FeedbackConfig controls the minimal answer-feedback integration. Feedback
+// collection itself is message-scoped; only retrieval weighting is gated so
+// operators can immediately restore legacy ranking without deleting data.
+type FeedbackConfig struct {
+	RetrievalWeightEnabled bool    `yaml:"retrieval_weight_enabled" json:"retrieval_weight_enabled"`
+	MinimumSampleCount     int64   `yaml:"minimum_sample_count"     json:"minimum_sample_count"`
+	OptimizationThreshold  float64 `yaml:"optimization_threshold"   json:"optimization_threshold"`
+}
+
+// EffectiveMinimumSampleCount returns the configured sample floor or the safe default for absent legacy config.
+func (c *FeedbackConfig) EffectiveMinimumSampleCount() int64 {
+	if c == nil {
+		return 5
+	}
+	return c.MinimumSampleCount
+}
+
+// EffectiveOptimizationThreshold returns the pending-optimization threshold or its safe default.
+func (c *FeedbackConfig) EffectiveOptimizationThreshold() float64 {
+	if c == nil {
+		return 0.3
+	}
+	return c.OptimizationThreshold
 }
 
 // AgentConfig represents the global agent settings.
@@ -500,6 +527,9 @@ func LoadConfig() (*Config, error) {
 	// 启用环境变量替换
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	viper.SetDefault("feedback.retrieval_weight_enabled", false)
+	viper.SetDefault("feedback.minimum_sample_count", 5)
+	viper.SetDefault("feedback.optimization_threshold", 0.3)
 
 	// 读取配置文件
 	if err := viper.ReadInConfig(); err != nil {
@@ -674,6 +704,20 @@ func ValidateConfig(cfg *Config) error {
 	if cfg.Server != nil {
 		if cfg.Server.Port <= 0 || cfg.Server.Port > 65535 {
 			errs = append(errs, "server.port must be between 1 and 65535")
+		}
+	}
+
+	if feedback := cfg.Feedback; feedback != nil {
+		if feedback.MinimumSampleCount < 1 {
+			errs = append(errs, "feedback.minimum_sample_count must be >= 1")
+		}
+		if math.IsNaN(feedback.OptimizationThreshold) ||
+			math.IsInf(feedback.OptimizationThreshold, 0) {
+			errs = append(errs, "feedback.optimization_threshold must be finite")
+		}
+		if feedback.OptimizationThreshold < 0 ||
+			feedback.OptimizationThreshold > 1 {
+			errs = append(errs, "feedback.optimization_threshold must be between 0 and 1")
 		}
 	}
 

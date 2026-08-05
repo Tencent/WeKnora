@@ -123,6 +123,7 @@ type sessionService struct {
 	webSearchProviderRepo interfaces.WebSearchProviderRepository // Repository for web search provider entities
 	kbShareService        interfaces.KBShareService              // Service for KB sharing operations
 	suggestionRepo        interfaces.MessageSuggestionRepository
+	feedbackRepo          interfaces.FeedbackRepository
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -140,6 +141,7 @@ func NewSessionService(cfg *config.Config,
 	webSearchProviderRepo interfaces.WebSearchProviderRepository,
 	kbShareService interfaces.KBShareService,
 	suggestionRepo interfaces.MessageSuggestionRepository,
+	feedbackRepo interfaces.FeedbackRepository,
 ) interfaces.SessionService {
 	return &sessionService{
 		cfg:                   cfg,
@@ -156,6 +158,7 @@ func NewSessionService(cfg *config.Config,
 		webSearchProviderRepo: webSearchProviderRepo,
 		kbShareService:        kbShareService,
 		suggestionRepo:        suggestionRepo,
+		feedbackRepo:          feedbackRepo,
 	}
 }
 
@@ -438,6 +441,41 @@ func (s *sessionService) UpdateSessionLastRequestState(
 	return nil
 }
 
+func (s *sessionService) prepareSessionKnowledgeCleanup(
+	ctx context.Context, sessionIDs []string,
+) func() {
+	seen := make(map[string]struct{})
+	knowledgeIDs := make([]string, 0)
+	for _, sessionID := range sessionIDs {
+		ids, err := s.messageRepo.GetKnowledgeIDsBySessionID(ctx, sessionID)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to get knowledge IDs for session %s: %v", sessionID, err)
+			continue
+		}
+		for _, knowledgeID := range ids {
+			if knowledgeID == "" {
+				continue
+			}
+			if _, ok := seen[knowledgeID]; ok {
+				continue
+			}
+			seen[knowledgeID] = struct{}{}
+			knowledgeIDs = append(knowledgeIDs, knowledgeID)
+		}
+	}
+	if len(knowledgeIDs) == 0 {
+		return func() {}
+	}
+	bgCtx := context.WithoutCancel(ctx)
+	return func() {
+		go func() {
+			if err := s.knowledgeService.DeleteKnowledgeList(bgCtx, knowledgeIDs); err != nil {
+				logger.Warnf(bgCtx, "Failed to delete chat history knowledge: %v", err)
+			}
+		}()
+	}
+}
+
 // DeleteSession removes a session by its ID
 func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	// Validate session ID
@@ -454,39 +492,23 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 		return err
 	}
 
-	// Cleanup chat history knowledge entries for this session (async, best-effort).
-	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.
-	bgCtx := context.WithoutCancel(ctx)
-	go func() {
-		knowledgeIDs, err := s.messageRepo.GetKnowledgeIDsBySessionID(bgCtx, id)
-		if err != nil {
-			logger.Warnf(bgCtx, "Failed to get knowledge IDs for session %s: %v", id, err)
-			return
-		}
-		if len(knowledgeIDs) > 0 {
-			if err := s.knowledgeService.DeleteKnowledgeList(bgCtx, knowledgeIDs); err != nil {
-				logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", id, err)
-			}
-		}
-	}()
+	cleanupKnowledge := s.prepareSessionKnowledgeCleanup(ctx, []string{id})
 
 	// Cleanup temporary KB stored in Redis for this session
 	if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, id); err != nil {
 		logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
 	}
 
-	// Delete session from repository
-	rows, err := s.sessionRepo.Delete(ctx, tenantID, userID, id)
-	if err != nil {
+	if err := s.feedbackRepo.DeleteSessionMessagesWithFeedback(
+		ctx, tenantID, []string{id}, userID, true,
+	); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": id,
 			"tenant_id":  tenantID,
 		})
 		return err
 	}
-	if rows == 0 {
-		return apperrors.ErrSessionNotFound
-	}
+	cleanupKnowledge()
 	if s.suggestionRepo != nil {
 		if err := s.suggestionRepo.DeleteBySessionID(ctx, tenantID, id); err != nil {
 			logger.Warnf(ctx, "Failed to delete suggestions for session %s: %v", id, err)
@@ -519,36 +541,23 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 		return apperrors.ErrSessionNotFound
 	}
 
-	// Cleanup associated resources for each session
-	bgCtx := context.WithoutCancel(ctx)
+	cleanupKnowledge := s.prepareSessionKnowledgeCleanup(ctx, visibleIDs)
 	for _, id := range visibleIDs {
-		// Cleanup chat history knowledge entries (async, best-effort)
-		go func(sessionID string) {
-			knowledgeIDs, err := s.messageRepo.GetKnowledgeIDsBySessionID(bgCtx, sessionID)
-			if err != nil {
-				logger.Warnf(bgCtx, "Failed to get knowledge IDs for session %s: %v", sessionID, err)
-				return
-			}
-			if len(knowledgeIDs) > 0 {
-				if err := s.knowledgeService.DeleteKnowledgeList(bgCtx, knowledgeIDs); err != nil {
-					logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", sessionID, err)
-				}
-			}
-		}(id)
-
 		if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, id); err != nil {
 			logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
 		}
 	}
 
-	// Batch delete sessions from repository
-	if _, err := s.sessionRepo.BatchDelete(ctx, tenantID, userID, visibleIDs); err != nil {
+	if err := s.feedbackRepo.DeleteSessionMessagesWithFeedback(
+		ctx, tenantID, visibleIDs, userID, true,
+	); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_ids": visibleIDs,
 			"tenant_id":   tenantID,
 		})
 		return err
 	}
+	cleanupKnowledge()
 	if s.suggestionRepo != nil {
 		for _, id := range visibleIDs {
 			if err := s.suggestionRepo.DeleteBySessionID(ctx, tenantID, id); err != nil {
@@ -568,36 +577,25 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 
 	sessions, err := s.sessionRepo.GetByTenantID(ctx, tenantID, userID)
 	if err != nil {
-		logger.Warnf(ctx, "Failed to list sessions for cleanup: %v", err)
-	} else {
-		bgCtx := context.WithoutCancel(ctx)
-		for _, session := range sessions {
-			// Cleanup chat history knowledge entries (async, best-effort)
-			go func(sessionID string) {
-				knowledgeIDs, err := s.messageRepo.GetKnowledgeIDsBySessionID(bgCtx, sessionID)
-				if err != nil {
-					logger.Warnf(bgCtx, "Failed to get knowledge IDs for session %s: %v", sessionID, err)
-					return
-				}
-				if len(knowledgeIDs) > 0 {
-					if err := s.knowledgeService.DeleteKnowledgeList(bgCtx, knowledgeIDs); err != nil {
-						logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", sessionID, err)
-					}
-				}
-			}(session.ID)
-
-			if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, session.ID); err != nil {
-				logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", session.ID, err)
-			}
+		return err
+	}
+	sessionIDs := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		sessionIDs = append(sessionIDs, session.ID)
+		if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, session.ID); err != nil {
+			logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", session.ID, err)
 		}
 	}
-
-	if _, err := s.sessionRepo.DeleteAllByTenantID(ctx, tenantID, userID); err != nil {
+	cleanupKnowledge := s.prepareSessionKnowledgeCleanup(ctx, sessionIDs)
+	if err := s.feedbackRepo.DeleteSessionMessagesWithFeedback(
+		ctx, tenantID, sessionIDs, userID, true,
+	); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,
 		})
 		return err
 	}
+	cleanupKnowledge()
 	if s.suggestionRepo != nil && sessions != nil {
 		for _, session := range sessions {
 			if err := s.suggestionRepo.DeleteBySessionID(ctx, tenantID, session.ID); err != nil {

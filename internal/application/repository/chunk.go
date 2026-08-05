@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrChunkRevisionConflict = errors.New("chunk revision conflict")
@@ -303,11 +305,20 @@ func (r *chunkRepository) ListChunksByParentIDs(
 	return chunks, nil
 }
 
-// UpdateChunk updates a chunk using GORM Save, which updates ALL fields
-// except SeqID (auto-increment, must not be overwritten).
-// Make sure the chunk object is complete (e.g., fetched from DB) before calling this method.
+var chunkWritableFields = []string{
+	"TenantID", "KnowledgeID", "KnowledgeBaseID", "TagID",
+	"Content", "SourceContent", "ContentRevision", "IndexStatus", "LastEditorID",
+	"ChunkIndex", "IsEnabled", "Flags", "Status", "StartAt", "EndAt",
+	"PreChunkID", "NextChunkID", "ChunkType", "ParentChunkID",
+	"RelationChunks", "IndirectRelationChunks", "Metadata", "ContentHash",
+	"ImageInfo", "UpdatedAt", "ContextHeader",
+}
+
+// UpdateChunk updates ordinary chunk content through an explicit allowlist.
+// Feedback projection fields are intentionally absent: only FeedbackRepository
+// may write them, so a stale full Chunk object cannot roll aggregates back.
 func (r *chunkRepository) UpdateChunk(ctx context.Context, chunk *types.Chunk) error {
-	return r.db.WithContext(ctx).Omit("SeqID").Save(chunk).Error
+	return r.db.WithContext(ctx).Select(chunkWritableFields).Save(chunk).Error
 }
 
 func (r *chunkRepository) CreateChunkRevision(ctx context.Context, revision *types.ChunkRevision) error {
@@ -360,14 +371,14 @@ func (r *chunkRepository) GetChunkRevision(
 	return &item, err
 }
 
-// SaveChunks persists full chunk objects in a single transaction using GORM Save (UPDATE).
+// SaveChunks persists ordinary chunk fields without touching feedback projections.
 func (r *chunkRepository) SaveChunks(ctx context.Context, chunks []*types.Chunk) error {
 	if len(chunks) == 0 {
 		return nil
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, chunk := range chunks {
-			if err := tx.Omit("SeqID").Save(chunk).Error; err != nil {
+			if err := tx.Select(chunkWritableFields).Save(chunk).Error; err != nil {
 				return err
 			}
 		}
@@ -500,7 +511,8 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 
 // DeleteChunk deletes a chunk by its ID
 func (r *chunkRepository) DeleteChunk(ctx context.Context, tenantID uint64, id string) error {
-	return r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).Delete(&types.Chunk{}).Error
+	_, err := r.deleteChunksWithFeedback(ctx, tenantID, []string{id}, "id = ?", id)
+	return err
 }
 
 // DeleteChunks deletes chunks by IDs in batch.
@@ -509,24 +521,14 @@ func (r *chunkRepository) DeleteChunks(ctx context.Context, tenantID uint64, ids
 	if len(ids) == 0 {
 		return nil
 	}
-	const batchSize = 5000
-	for i := 0; i < len(ids); i += batchSize {
-		end := i + batchSize
-		if end > len(ids) {
-			end = len(ids)
-		}
-		if err := r.db.WithContext(ctx).Where("tenant_id = ? AND id IN ?", tenantID, ids[i:end]).Delete(&types.Chunk{}).Error; err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := r.deleteChunksWithFeedback(ctx, tenantID, ids, "id IN ?", ids)
+	return err
 }
 
 // DeleteChunksByKnowledgeID deletes all chunks for a knowledge ID
 func (r *chunkRepository) DeleteChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error {
-	return r.db.WithContext(ctx).Where(
-		"tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID,
-	).Delete(&types.Chunk{}).Error
+	_, err := r.deleteChunksWithFeedback(ctx, tenantID, nil, "knowledge_id = ?", knowledgeID)
+	return err
 }
 
 // ListImageInfoByKnowledgeIDs returns non-empty image_info values for the given knowledge IDs.
@@ -545,9 +547,11 @@ func (r *chunkRepository) ListImageInfoByKnowledgeIDs(
 
 // DeleteByKnowledgeList deletes all chunks for a knowledge list
 func (r *chunkRepository) DeleteByKnowledgeList(ctx context.Context, tenantID uint64, knowledgeIDs []string) error {
-	return r.db.WithContext(ctx).Where(
-		"tenant_id = ? AND knowledge_id in ?", tenantID, knowledgeIDs,
-	).Delete(&types.Chunk{}).Error
+	if len(knowledgeIDs) == 0 {
+		return nil
+	}
+	_, err := r.deleteChunksWithFeedback(ctx, tenantID, nil, "knowledge_id IN ?", knowledgeIDs)
+	return err
 }
 
 // MoveChunksByKnowledgeID updates knowledge_base_id for all chunks of a knowledge item
@@ -586,22 +590,99 @@ func (r *chunkRepository) DeleteChunksByTagID(ctx context.Context, tenantID uint
 		return nil, nil
 	}
 
-	// Delete in batches
-	const batchSize = 1000
-	for i := 0; i < len(toDelete); i += batchSize {
-		end := i + batchSize
-		if end > len(toDelete) {
-			end = len(toDelete)
-		}
-		batch := toDelete[i:end]
-
-		if err := r.db.WithContext(ctx).Where("id IN ?", batch).Delete(&types.Chunk{}).Error; err != nil {
-			// Return already planned deletions up to this point for index cleanup
-			return toDelete[:i], err
-		}
+	if _, err := r.deleteChunksWithFeedback(ctx, tenantID, toDelete, "id IN ?", toDelete); err != nil {
+		return nil, err
 	}
 
 	return toDelete, nil
+}
+
+func (r *chunkRepository) deleteChunksWithFeedback(
+	ctx context.Context,
+	tenantID uint64,
+	explicitReferenceIDs []string,
+	where string,
+	args ...interface{},
+) ([]*types.Chunk, error) {
+	var activeChunks []*types.Chunk
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		const batchSize = 1000
+		referenceIDs := sortedUniqueStrings(append([]string(nil), explicitReferenceIDs...))
+		var matchedChunks []*types.Chunk
+		if len(referenceIDs) > 0 {
+			for start := 0; start < len(referenceIDs); start += batchSize {
+				end := min(start+batchSize, len(referenceIDs))
+				var batch []*types.Chunk
+				if err := tx.Unscoped().
+					Where("tenant_id = ? AND id IN ?", tenantID, referenceIDs[start:end]).
+					Order("id").
+					Clauses(clause.Locking{Strength: "UPDATE"}).
+					Find(&batch).Error; err != nil {
+					return err
+				}
+				matchedChunks = append(matchedChunks, batch...)
+			}
+		} else {
+			query := tx.Unscoped().Where("tenant_id = ?", tenantID)
+			if where != "" {
+				query = query.Where(where, args...)
+			}
+			if err := query.Order("id").
+				Clauses(clause.Locking{Strength: "UPDATE"}).
+				Find(&matchedChunks).Error; err != nil {
+				return err
+			}
+		}
+
+		if len(referenceIDs) == 0 {
+			referenceIDs = make([]string, 0, len(matchedChunks))
+			for _, chunk := range matchedChunks {
+				referenceIDs = append(referenceIDs, chunk.ID)
+			}
+			referenceIDs = sortedUniqueStrings(referenceIDs)
+		}
+
+		activeIDs := make([]string, 0, len(matchedChunks))
+		activeChunks = make([]*types.Chunk, 0, len(matchedChunks))
+		for _, chunk := range matchedChunks {
+			if chunk.DeletedAt.Valid {
+				continue
+			}
+			activeIDs = append(activeIDs, chunk.ID)
+			activeChunks = append(activeChunks, chunk)
+		}
+
+		for start := 0; start < len(referenceIDs); start += batchSize {
+			end := min(start+batchSize, len(referenceIDs))
+			if err := tx.Where(
+				"chunk_tenant_id = ? AND chunk_id IN ?", tenantID, referenceIDs[start:end],
+			).Delete(&types.MessageChunkReference{}).Error; err != nil {
+				return err
+			}
+		}
+		for start := 0; start < len(activeIDs); start += batchSize {
+			end := min(start+batchSize, len(activeIDs))
+			if err := tx.Where(
+				"tenant_id = ? AND id IN ?", tenantID, activeIDs[start:end],
+			).Delete(&types.Chunk{}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return activeChunks, err
+}
+
+func sortedUniqueStrings(values []string) []string {
+	sort.Strings(values)
+	unique := values[:0]
+	for _, value := range values {
+		if value == "" || (len(unique) > 0 && unique[len(unique)-1] == value) {
+			continue
+		}
+		unique = append(unique, value)
+	}
+	return unique
 }
 
 // CountChunksByKnowledgeBaseID counts the number of chunks in a knowledge base
@@ -623,20 +704,10 @@ func (r *chunkRepository) DeleteUnindexedChunks(
 	tenantID uint64,
 	knowledgeID string,
 ) ([]*types.Chunk, error) {
-	var chunks []*types.Chunk
-	if err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND knowledge_id = ? AND status = ?", tenantID, knowledgeID, types.ChunkStatusStored).
-		Find(&chunks).Error; err != nil {
-		return nil, err
-	}
-	if len(chunks) > 0 {
-		if err := r.db.WithContext(ctx).
-			Where("tenant_id = ? AND knowledge_id = ? AND status = ?", tenantID, knowledgeID, types.ChunkStatusStored).
-			Delete(&types.Chunk{}).Error; err != nil {
-			return nil, err
-		}
-	}
-	return chunks, nil
+	return r.deleteChunksWithFeedback(
+		ctx, tenantID, nil,
+		"knowledge_id = ? AND status = ?", knowledgeID, types.ChunkStatusStored,
+	)
 }
 
 // ListAllFAQChunksByKnowledgeID lists all FAQ chunks for a knowledge ID (only essential fields for efficiency)

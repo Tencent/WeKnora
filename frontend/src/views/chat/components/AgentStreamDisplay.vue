@@ -315,6 +315,14 @@
                   :title="$t('agent.addToKnowledgeBase')">
                   <t-icon name="bookmark-add" />
                 </t-button>
+                <!-- This renderer is shared by standard-QA history. ragMode is
+                     false for Agent mode, so Agent answers cannot expose feedback. -->
+                <AnswerFeedbackControls
+                  v-if="ragMode && session.feedback_eligible === true && sessionId && session.id"
+                  :session-id="sessionId"
+                  :message="session"
+                  @update:feedback="emit('feedback-change', $event)"
+                />
                 <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
                     <t-icon name="info-circle" />
@@ -490,6 +498,7 @@ import ToolResultRenderer from './ToolResultRenderer.vue';
 import ToolApprovalCard from './ToolApprovalCard.vue';
 import McpOAuthCard from './McpOAuthCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
+import AnswerFeedbackControls from './AnswerFeedbackControls.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
@@ -803,6 +812,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'render-complete-change', ready: boolean): void;
+  (event: 'feedback-change', feedback: unknown): void;
 }>();
 
 const embedAuthProps = computed(() => ({

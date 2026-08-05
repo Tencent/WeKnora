@@ -44,6 +44,7 @@ func NewPluginSearchParallel(
 	graphRepository interfaces.RetrieveGraphRepository,
 	chunkRepository interfaces.ChunkRepository,
 	knowledgeRepository interfaces.KnowledgeRepository,
+	knowledgeBaseRepository interfaces.KnowledgeBaseRepository,
 ) *PluginSearchParallel {
 	// Create internal plugins without registering them
 	searchPlugin := &PluginSearch{
@@ -62,6 +63,8 @@ func NewPluginSearchParallel(
 		graphRepo:     graphRepository,
 		chunkRepo:     chunkRepository,
 		knowledgeRepo: knowledgeRepository,
+		kbRepo:        knowledgeBaseRepository,
+		weightEnabled: config != nil && config.Feedback != nil && config.Feedback.RetrievalWeightEnabled,
 	}
 
 	res := &PluginSearchParallel{

@@ -6,6 +6,7 @@ import test from 'node:test'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const source = readFileSync(join(here, 'AgentStreamDisplay.vue'), 'utf8')
+const botMessageSource = readFileSync(join(here, 'botmsg.vue'), 'utf8')
 
 test('agent steps use compact muted timeline styling', () => {
   assert.match(source, /--agent-step-text-size:\s*14px/)
@@ -82,6 +83,21 @@ test('rag mode keeps model thinking out of the answer stream component', () => {
   assert.doesNotMatch(
     displayEventsBlock,
     /if \(props\.ragMode\)\s*\{[\s\S]*e\.type === 'answer' \|\| e\.type === 'thinking'/,
+  )
+})
+
+test('shared history renderer exposes feedback only for eligible standard QA RAG', () => {
+  assert.match(source, /import AnswerFeedbackControls from '\.\/AnswerFeedbackControls\.vue'/)
+  assert.equal((source.match(/<AnswerFeedbackControls/g) || []).length, 1)
+  assert.match(
+    source,
+    /v-if="ragMode && session\.feedback_eligible === true && sessionId && session\.id"/,
+  )
+  assert.match(source, /ragMode is[\s\S]*false for Agent mode/)
+  assert.match(source, /@update:feedback="emit\('feedback-change', \$event\)"/)
+  assert.match(
+    botMessageSource,
+    /@feedback-change="emit\('feedback-change', \$event\)"/,
   )
 })
 

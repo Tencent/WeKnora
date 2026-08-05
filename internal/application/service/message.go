@@ -29,6 +29,7 @@ type messageService struct {
 	knowService    interfaces.KnowledgeService     // Service for knowledge operations (index/delete passages)
 	modelService   interfaces.ModelService         // Service for model operations (rerank model)
 	suggestionRepo interfaces.MessageSuggestionRepository
+	feedbackRepo   interfaces.FeedbackRepository
 }
 
 // NewMessageService creates a new message service instance with the required repositories
@@ -39,6 +40,7 @@ func NewMessageService(messageRepo interfaces.MessageRepository,
 	knowService interfaces.KnowledgeService,
 	modelService interfaces.ModelService,
 	suggestionRepo interfaces.MessageSuggestionRepository,
+	feedbackRepo interfaces.FeedbackRepository,
 ) interfaces.MessageService {
 	return &messageService{
 		messageRepo:    messageRepo,
@@ -48,7 +50,23 @@ func NewMessageService(messageRepo interfaces.MessageRepository,
 		knowService:    knowService,
 		modelService:   modelService,
 		suggestionRepo: suggestionRepo,
+		feedbackRepo:   feedbackRepo,
 	}
+}
+
+func feedbackWebUserID(ctx context.Context) string {
+	principal, ok := types.PrincipalFromContext(ctx)
+	if !ok || principal.Type != types.PrincipalWebUser {
+		return ""
+	}
+	return principal.ID
+}
+
+func (s *messageService) hydrateFeedback(ctx context.Context, tenantID uint64, messages []*types.Message) error {
+	if s.feedbackRepo == nil || len(messages) == 0 {
+		return nil
+	}
+	return s.feedbackRepo.HydrateMessages(ctx, tenantID, feedbackWebUserID(ctx), messages)
 }
 
 // sessionTenantIDForLookup returns the tenant ID to use for session lookup.
@@ -87,7 +105,6 @@ func (s *messageService) CreateMessage(ctx context.Context, message *types.Messa
 		logger.Errorf(ctx, "Failed to get session: %v", err)
 		return nil, err
 	}
-
 	logger.Info(ctx, "Session exists, creating message")
 	createdMessage, err := s.messageRepo.CreateMessage(ctx, message)
 	if err != nil {
@@ -96,7 +113,6 @@ func (s *messageService) CreateMessage(ctx context.Context, message *types.Messa
 		})
 		return nil, err
 	}
-
 	logger.Infof(ctx, "Message created successfully, ID: %s", createdMessage.ID)
 	return createdMessage, nil
 }
@@ -113,7 +129,6 @@ func (s *messageService) GetMessage(ctx context.Context, sessionID string, messa
 		logger.Errorf(ctx, "Failed to get session: %v", err)
 		return nil, err
 	}
-
 	logger.Info(ctx, "Session exists, getting message")
 	message, err := s.messageRepo.GetMessage(ctx, sessionID, messageID)
 	if err != nil {
@@ -121,6 +136,9 @@ func (s *messageService) GetMessage(ctx context.Context, sessionID string, messa
 			"session_id": sessionID,
 			"message_id": messageID,
 		})
+		return nil, err
+	}
+	if err := s.hydrateFeedback(ctx, tenantID, []*types.Message{message}); err != nil {
 		return nil, err
 	}
 
@@ -151,6 +169,9 @@ func (s *messageService) GetMessagesBySession(ctx context.Context,
 			"page":       page,
 			"page_size":  pageSize,
 		})
+		return nil, err
+	}
+	if err := s.hydrateFeedback(ctx, tenantID, messages); err != nil {
 		return nil, err
 	}
 
@@ -184,6 +205,9 @@ func (s *messageService) GetRecentMessagesBySession(ctx context.Context,
 			"session_id": sessionID,
 			"limit":      limit,
 		})
+		return nil, err
+	}
+	if err := s.hydrateFeedback(ctx, tenantID, messages); err != nil {
 		return nil, err
 	}
 
@@ -220,6 +244,9 @@ func (s *messageService) GetMessagesBySessionBeforeTime(ctx context.Context,
 		})
 		return nil, err
 	}
+	if err := s.hydrateFeedback(ctx, tenantID, messages); err != nil {
+		return nil, err
+	}
 
 	logger.Infof(ctx, "Retrieved %d messages before time successfully", len(messages))
 	return messages, nil
@@ -250,6 +277,19 @@ func (s *messageService) UpdateMessage(ctx context.Context, message *types.Messa
 
 	logger.Info(ctx, "Message updated successfully")
 	return nil
+}
+
+func (s *messageService) CompleteAssistantMessageWithReferences(
+	ctx context.Context,
+	message *types.Message,
+) (bool, error) {
+	tenantID, ok := sessionTenantIDForLookup(ctx)
+	if !ok {
+		return false, errors.New("workspace ID not found in context")
+	}
+	return s.feedbackRepo.CompleteAssistantMessageWithReferences(
+		ctx, tenantID, message, message.KnowledgeReferences,
+	)
 }
 
 // UpdateMessageImages updates only the images JSONB column for a message.
@@ -284,7 +324,9 @@ func (s *messageService) DeleteMessage(ctx context.Context, sessionID string, me
 
 	// Delete the message from the repository
 	logger.Info(ctx, "Session exists, deleting message")
-	err = s.messageRepo.DeleteMessage(ctx, sessionID, messageID)
+	err = s.feedbackRepo.DeleteMessageWithFeedback(
+		ctx, tenantID, sessionID, messageID, feedbackWebUserID(ctx),
+	)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": sessionID,
@@ -319,13 +361,24 @@ func (s *messageService) ClearSessionMessages(ctx context.Context, sessionID str
 		return err
 	}
 
-	// Async cleanup: delete associated Knowledge entries from the chat history KB
-	bgCtx := context.WithoutCancel(ctx)
-	go s.DeleteSessionKnowledge(bgCtx, sessionID)
+	knowledgeIDs, err := s.messageRepo.GetKnowledgeIDsBySessionID(ctx, sessionID)
+	if err != nil {
+		return err
+	}
 
-	if err := s.messageRepo.DeleteMessagesBySessionID(ctx, sessionID); err != nil {
+	if err := s.feedbackRepo.DeleteSessionMessagesWithFeedback(
+		ctx, tenantID, []string{sessionID}, "", false,
+	); err != nil {
 		logger.Errorf(ctx, "Failed to delete messages for session %s: %v", sessionID, err)
 		return err
+	}
+	if len(knowledgeIDs) > 0 {
+		bgCtx := context.WithoutCancel(ctx)
+		go func() {
+			if err := s.knowService.DeleteKnowledgeList(bgCtx, knowledgeIDs); err != nil {
+				logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", sessionID, err)
+			}
+		}()
 	}
 	if s.suggestionRepo != nil {
 		if err := s.suggestionRepo.DeleteBySessionID(ctx, tenantID, sessionID); err != nil {

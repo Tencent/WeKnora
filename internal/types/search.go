@@ -207,6 +207,14 @@ type SearchResult struct {
 
 	// KnowledgeBaseID is the ID of the knowledge base this result belongs to
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+	// TenantID is the authoritative owner tenant of the referenced chunk.
+	// It is server-only attribution scope and must never be accepted from clients.
+	TenantID uint64 `json:"-"`
+	// RecallWeight is the persisted chunk feedback projection. It is kept
+	// separate from Score so retrieval relevance is never mutated.
+	RecallWeight float64 `json:"-"`
+	// FeedbackWeightEnabled records the source KB's explicit retrieval opt-in.
+	FeedbackWeightEnabled bool `json:"-"`
 }
 
 // SearchParams represents the search parameters

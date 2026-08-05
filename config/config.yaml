@@ -37,6 +37,14 @@ conversation:
   extract_relationships_prompt_id: "default_extract_relationships"  # from prompt_templates/graph_extraction.yaml
   generate_questions_prompt_id: "default_generate_questions"        # from prompt_templates/generate_questions.yaml
 
+# Answer feedback is collected for eligible completed knowledge answers.
+# Retrieval weighting is deliberately disabled by default so existing ranking
+# remains byte-for-byte compatible until an operator opts in.
+feedback:
+  retrieval_weight_enabled: false
+  minimum_sample_count: 5
+  optimization_threshold: 0.3
+
 # Knowledge base configuration
 knowledge_base:
   chunk_size: 512
