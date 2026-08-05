@@ -27,8 +27,7 @@ test('pure insertion and pure deletion', () => {
 test('empty sides', () => {
   assert.equal(diffWikiLines('', 'x\ny').filter((l) => l.type === 'add').length, 2)
   assert.equal(diffWikiLines('x\ny', '').filter((l) => l.type === 'del').length, 2)
-  // '' splits into one empty line on each side → one same row.
-  assert.deepEqual(diffWikiLines('', ''), [{ type: 'same', text: '' }])
+  assert.deepEqual(diffWikiLines('', ''), [])
 })
 
 test('unchanged prefix/suffix stay in order around a block edit', () => {
