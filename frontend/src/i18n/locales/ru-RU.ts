@@ -535,6 +535,7 @@ export default {
     edit: 'Редактировать',
     delete: 'Удалить',
     deleteConfirm: 'Удалить этот источник данных? Синхронизированные знания не будут удалены.',
+    deleteConfirmOneDrive: 'Удалить этот источник OneDrive и синхронизированные им знания? Это действие нельзя отменить.',
     deleteSuccess: 'Источник данных удалён',
     deleteFailed: 'Не удалось удалить',
     syncNow: 'Синхронизировать',
@@ -557,6 +558,23 @@ export default {
     testFailed: 'Подключение не удалось',
     connected: 'Подключено',
     connectionFailed: 'Подключение не удалось',
+    oauthAuthorization: 'Авторизация Microsoft',
+    oauthAuthorized: 'OneDrive авторизован',
+    oauthUnauthorized: 'OneDrive не подключён',
+    oauthReauthorizationRequired: 'Срок авторизации истёк. Выполните её повторно.',
+    oauthConnect: 'Подключить OneDrive',
+    oauthReconnect: 'Авторизовать повторно',
+    oauthConnecting: 'Ожидание авторизации…',
+    oauthConnected: 'OneDrive подключён',
+    oauthNotCompleted: 'Авторизация OneDrive не завершена',
+    oauthDisconnect: 'Отключить',
+    oauthDisconnected: 'OneDrive отключён',
+    oauthDisconnectFailed: 'Не удалось отключить OneDrive',
+    oauthDisconnectConfirm: 'Отключение приостановит синхронизацию, очистит выбор и удалит знания этого подключения. Продолжить?',
+    oauthReplaceAccount: 'Сменить аккаунт',
+    oauthReplaceConfirm: 'Смена аккаунта сбросит курсор и удалит индекс старого подключения и синхронизированные им знания. Продолжить?',
+    oauthPopupFallback: 'Окно авторизации не открылось? Продолжить здесь',
+    oauthPermissionHint: 'Запрашиваются только чтение файлов и автономное обновление. WeKnora не может записывать в OneDrive.',
     isRequired: 'обязательно для заполнения',
     credentialsLabel: 'учётные данные',
     resourceHint: 'Выберите пространства или папки для синхронизации',
@@ -589,6 +607,13 @@ export default {
     openDoc: 'Открыть документацию',
     prereqBarText: 'Используете впервые? Нажмите, чтобы открыть руководство по настройке приложения Feishu',
     prereqBarText_yuque: 'Используете впервые? Нажмите, чтобы открыть руководство по настройке Yuque Token',
+    prereqBarText_onedrive: 'Используете впервые? Откройте требования авторизации OneDrive',
+    prereqStep1Brief_onedrive: 'Зарегистрируйте приложение Microsoft Entra',
+    prereqStep1Desc_onedrive: 'Redirect URI должен точно совпадать с ONEDRIVE_REDIRECT_URL сервера',
+    prereqStep2Brief_onedrive: 'Настройте минимальные делегированные права',
+    prereqStep2Desc_onedrive: 'Нужен только Files.Read; offline_access обновляет авторизацию для расписания',
+    prereqStep3Brief_onedrive: 'Пройдите вход и MFA на стороне Microsoft',
+    prereqStep3Desc_onedrive: 'WeKnora не читает и не хранит пароли или коды Authenticator',
     prereqStep1Brief_yuque: 'Создайте персональный Yuque Token',
     prereqStep1Desc_yuque: 'Войдите в Yuque → значок профиля → Настройки → Token → Создать новый Token',
     prereqStep2Brief_yuque: 'Назначьте Token необходимые права',
@@ -644,6 +669,7 @@ export default {
       lark: 'Синхронизация документов, таблиц и файлов из Lark Wiki',
       notion: 'Синхронизация страниц и баз данных из Notion',
       yuque: 'Синхронизация документов из баз знаний Yuque',
+      onedrive: 'Синхронизация выбранных папок и файлов OneDrive через авторизацию Microsoft',
       rss: 'Синхронизация статей из лент RSS / Atom'
     },
     connector: {
@@ -651,6 +677,7 @@ export default {
       lark: 'Lark',
       notion: 'Notion',
       yuque: 'Yuque (Юйцюэ)',
+      onedrive: 'OneDrive',
       rss: 'RSS / Atom лента'
     },
     logDetail: {
@@ -691,7 +718,9 @@ export default {
     status: {
       active: 'Подключено',
       paused: 'Приостановлено',
-      error: 'Ошибка'
+      connecting: 'Завершение подключения',
+      error: 'Ошибка',
+      reauthorization_required: 'Требуется повторная авторизация'
     },
     syncMode: {
       incremental: 'Инкрементная',

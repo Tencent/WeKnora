@@ -91,9 +91,9 @@ func (r *DataSourceRepository) UpdateSyncState(ctx context.Context, ds *types.Da
 	if ds.ID == "" {
 		return errors.New("data source id is empty")
 	}
-	if err := r.db.WithContext(ctx).
+	result := r.db.WithContext(ctx).
 		Model(&types.DataSource{}).
-		Where("id = ?", ds.ID).
+		Where("id = ? AND tenant_id = ? AND connection_version = ?", ds.ID, ds.TenantID, ds.ConnectionVersion).
 		Updates(map[string]interface{}{
 			"status":           ds.Status,
 			"last_sync_at":     ds.LastSyncAt,
@@ -101,8 +101,12 @@ func (r *DataSourceRepository) UpdateSyncState(ctx context.Context, ds *types.Da
 			"last_sync_result": ds.LastSyncResult,
 			"error_message":    ds.ErrorMessage,
 			"updated_at":       time.Now().UTC(),
-		}).Error; err != nil {
-		return err
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("data source connection version changed")
 	}
 	return nil
 }
@@ -269,6 +273,7 @@ func (r *SyncLogRepository) UpdateResult(ctx context.Context, log *types.SyncLog
 			"items_failed":  log.ItemsFailed,
 			"error_message": log.ErrorMessage,
 			"result":        log.Result,
+			"checkpoint":    log.Checkpoint,
 			"updated_at":    time.Now().UTC(),
 		}).Error; err != nil {
 		return err
@@ -290,6 +295,7 @@ func (r *SyncLogRepository) CancelPendingByDataSource(ctx context.Context, dsID 
 			"status":        types.SyncLogStatusCanceled,
 			"finished_at":   &now,
 			"error_message": "data source deleted",
+			"checkpoint":    nil,
 		}).Error
 }
 

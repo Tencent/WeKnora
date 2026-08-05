@@ -225,7 +225,10 @@ onBeforeUnmount(stopPolling)
                   <template #dropdown>
                     <t-dropdown-menu>
                       <t-dropdown-item v-if="canManageDataSource" @click="openEdit(ds)">
-                        <t-icon name="edit" /> {{ t('datasource.edit') }}
+                        <t-icon :name="ds.status === 'reauthorization_required' ? 'link' : 'edit'" />
+                        {{ ds.status === 'reauthorization_required'
+                          ? t('datasource.oauthReconnect')
+                          : t('datasource.edit') }}
                       </t-dropdown-item>
                       <t-dropdown-item
                         v-if="canManageDataSource"
@@ -256,7 +259,9 @@ onBeforeUnmount(stopPolling)
                         class="ds-dropdown-delete-item"
                       >
                         <t-popconfirm
-                          :content="t('datasource.deleteConfirm')"
+                          :content="t(ds.type === 'onedrive'
+                            ? 'datasource.deleteConfirmOneDrive'
+                            : 'datasource.deleteConfirm')"
                           :confirm-btn="{ content: t('datasource.delete'), theme: 'danger' }"
                           :cancel-btn="{ content: t('common.cancel') }"
                           placement="left"
@@ -464,6 +469,7 @@ onBeforeUnmount(stopPolling)
   &--feishu .ds-card__badge,
   &--notion .ds-card__badge,
   &--yuque .ds-card__badge,
+  &--onedrive .ds-card__badge,
   &--rss .ds-card__badge {
     background: var(--td-bg-color-container, #fff);
     box-shadow: inset 0 0 0 1px var(--td-component-stroke);
@@ -519,7 +525,15 @@ onBeforeUnmount(stopPolling)
       color: var(--td-warning-color);
     }
 
+    &--connecting {
+      color: var(--td-brand-color);
+    }
+
     &--error {
+      color: var(--td-error-color);
+    }
+
+    &--reauthorization_required {
       color: var(--td-error-color);
     }
   }

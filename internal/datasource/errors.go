@@ -14,9 +14,13 @@ var (
 	ErrConnectorNotFound  = errors.New("connector type not found in registry")
 
 	// DataSource errors
-	ErrDataSourceNotFound  = errors.New("data source not found")
-	ErrDataSourceInvalid   = errors.New("data source configuration is invalid")
-	ErrDataSourceNotActive = errors.New("data source is not active")
+	ErrDataSourceNotFound           = errors.New("data source not found")
+	ErrDataSourceInvalid            = errors.New("data source configuration is invalid")
+	ErrDataSourceNotActive          = errors.New("data source is not active")
+	ErrOAuthNotConfigured           = errors.New("data source oauth is not configured")
+	ErrOAuthReauthorizationRequired = errors.New("oauth reauthorization required")
+	ErrOAuthConnectionChanged       = errors.New("oauth connection version changed")
+	ErrOAuthAccountMismatch         = errors.New("oauth account does not match the existing data source connection")
 
 	// Configuration errors
 	ErrInvalidConfig      = errors.New("invalid configuration")

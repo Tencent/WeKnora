@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
@@ -70,6 +71,10 @@ type DataSourceService interface {
 
 	// ProcessSync handles the actual sync operation (called by asynq task)
 	ProcessSync(ctx context.Context, task *asynq.Task) error
+
+	// ProcessSyncFinalize commits a candidate cursor after asynchronous
+	// knowledge ingestion reaches a terminal state.
+	ProcessSyncFinalize(ctx context.Context, task *asynq.Task) error
 }
 
 // DataSourceRepository defines database access patterns for data sources
@@ -94,6 +99,69 @@ type DataSourceRepository interface {
 
 	// FindActive retrieves all active data sources (used for scheduling)
 	FindActive(ctx context.Context) ([]*types.DataSource, error)
+}
+
+// DataSourceOAuthRepository owns delegated OAuth grants used by background
+// data-source tasks. RefreshWithLock serializes refresh-token rotation across
+// processes by holding a database row lock while refreshFn executes.
+type DataSourceOAuthRepository interface {
+	Get(ctx context.Context, tenantID uint64, dataSourceID string) (*types.DataSourceOAuthToken, error)
+	Save(ctx context.Context, token *types.DataSourceOAuthToken) error
+	SaveAuthorization(
+		ctx context.Context,
+		token *types.DataSourceOAuthToken,
+		expectedConnectionVersion uint64,
+		replaceConnection bool,
+		resetConfig types.JSON,
+	) (uint64, error)
+	RefreshWithLock(
+		ctx context.Context,
+		tenantID uint64,
+		dataSourceID string,
+		connectionVersion uint64,
+		refreshFn func(*types.DataSourceOAuthToken) error,
+	) (*types.DataSourceOAuthToken, error)
+	// RevokeAuthorization atomically removes the grant, advances the connection
+	// generation and clears connection-scoped sync state so queued work is stale.
+	RevokeAuthorization(
+		ctx context.Context, tenantID uint64, dataSourceID string,
+		expectedConnectionVersion uint64, resetConfig types.JSON,
+	) (uint64, error)
+	Delete(ctx context.Context, tenantID uint64, dataSourceID string) error
+}
+
+// DataSourceItemRepository persists the local projection of a remote drive
+// hierarchy used to scope drive-level delta events to selected resources.
+type DataSourceItemRepository interface {
+	Upsert(ctx context.Context, item *types.DataSourceItem) error
+	Find(
+		ctx context.Context, tenantID uint64, dataSourceID string,
+		connectionVersion uint64, driveID, itemID string,
+	) (*types.DataSourceItem, error)
+	ListByParent(
+		ctx context.Context, tenantID uint64, dataSourceID string,
+		connectionVersion uint64, parentItemID string,
+	) ([]*types.DataSourceItem, error)
+	ListBySelectedRoot(
+		ctx context.Context, tenantID uint64, dataSourceID string,
+		connectionVersion uint64, selectedRootID string,
+	) ([]*types.DataSourceItem, error)
+	ListNotSeen(
+		ctx context.Context, tenantID uint64, dataSourceID string,
+		connectionVersion uint64, generation string,
+	) ([]*types.DataSourceItem, error)
+	ListRetainedDeleted(
+		ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64,
+	) ([]*types.DataSourceItem, error)
+	MarkDeleted(
+		ctx context.Context, tenantID uint64, dataSourceID string,
+		connectionVersion uint64, driveID, itemID string, deletedAt time.Time,
+	) error
+	SetIngested(
+		ctx context.Context, tenantID uint64, dataSourceID string,
+		connectionVersion uint64, driveID, itemID string, ingested bool,
+	) error
+	DeleteConnection(ctx context.Context, tenantID uint64, dataSourceID string, connectionVersion uint64) error
 }
 
 // SyncLogRepository defines database access patterns for sync logs

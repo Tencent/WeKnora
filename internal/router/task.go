@@ -116,6 +116,9 @@ const wikiIngestRetryDelay = 15 * time.Second
 // progress for 7–10 minutes while the orphan lock expires AND the retry
 // schedule catches up.
 func asynqRetryDelayFunc(n int, e error, t *asynq.Task) time.Duration {
+	if errors.Is(e, service.ErrDataSourceIngestionPending) {
+		return 5 * time.Second
+	}
 	if errors.Is(e, service.ErrWikiIngestConcurrent) {
 		return wikiIngestRetryDelay
 	}
@@ -303,6 +306,7 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 
 	// Register data source sync handler
 	mux.HandleFunc(types.TypeDataSourceSync, params.DataSourceService.ProcessSync)
+	mux.HandleFunc(types.TypeDataSourceFinalize, params.DataSourceService.ProcessSyncFinalize)
 
 	// Register wiki ingest handler + the debounced KB-global finalize handler.
 	// Both route to the same dispatch (WikiIngest.Handle switches on task type)

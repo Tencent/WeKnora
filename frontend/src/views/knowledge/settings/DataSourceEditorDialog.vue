@@ -13,12 +13,23 @@ import {
   deleteDataSource,
   putDataSourceCredentials,
   deleteDataSourceCredentials,
+  getDataSourceOAuthAuthorizeURL,
+  getDataSourceOAuthStatus,
+  disconnectDataSourceOAuth,
   type DataSource,
   type Resource,
+  type DataSourceOAuthStatus,
 } from '@/api/datasource'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { getDatasourceIconUrl } from './datasourceIcons'
+import {
+  buildResourceIndexes,
+  computeResourceCheckStates,
+  toggleResourceSelection,
+  type ResourceCheckState,
+} from './resourceSelection'
+import { waitForOneDriveAuthorization } from './oneDriveOAuthFlow'
 
 const props = defineProps<{
   kbId: string
@@ -32,6 +43,9 @@ const { t } = useI18n()
 const isEdit = computed(() => !!props.dataSource)
 const step = ref(0)
 const submitting = ref(false)
+const oauthStatus = ref<DataSourceOAuthStatus | null>(null)
+const oauthConnecting = ref(false)
+const oauthAuthorizationURL = ref('')
 
 // In edit mode the credential "configured?" flag travels on the main
 // DataSource response (DataSource.credentials.credentials.configured —
@@ -106,6 +120,8 @@ function cancelReplaceCredentials() {
   rssAuthHeaders.value = []
   testResult.value = credentialsConfigured.value ? 'success' : ''
   testErrorMsg.value = ''
+  oauthStatus.value = null
+  oauthAuthorizationURL.value = ''
 }
 
 interface CustomHeaderItem {
@@ -156,6 +172,7 @@ function removeRssAuthHeader(idx: number) {
 }
 
 function needsConnectionTest(): boolean {
+  if (isOAuthConnector.value) return false
   return !(isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value)
 }
 
@@ -180,6 +197,7 @@ const form = ref({
   conflict_strategy: 'overwrite' as 'overwrite' | 'skip',
   sync_deletions: true,
 })
+const isOAuthConnector = computed(() => form.value.type === 'onedrive')
 
 // Step 2: Resources
 const resources = ref<Resource[]>([])
@@ -198,51 +216,18 @@ const treeFullyLoaded = ref(false)
 
 // Shared children/parent indexes — used by tree rendering and selection logic
 const childrenMap = computed(() => {
-  const map = new Map<string, Resource[]>()
-  for (const r of resources.value) {
-    if (r.parent_id) {
-      const siblings = map.get(r.parent_id)
-      if (siblings) siblings.push(r)
-      else map.set(r.parent_id, [r])
-    }
-  }
-  return map
+	return buildResourceIndexes(resources.value).children
 })
 
 const parentMap = computed(() => {
-  const map = new Map<string, string>()
-  for (const r of resources.value) {
-    if (r.parent_id) map.set(r.external_id, r.parent_id)
-  }
-  return map
+	return buildResourceIndexes(resources.value).parents
 })
 
 // `selectedResourceIds` is a MINIMAL COVER SET: only the roots of fully-selected
 // subtrees. Sending this to the backend gives "sync these IDs and all descendants"
 // semantics — including any pages added later under a selected parent.
-type CheckState = 'checked' | 'indeterminate' | 'unchecked'
-
 const checkStates = computed(() => {
-  const states = new Map<string, CheckState>()
-  const cover = new Set(selectedResourceIds.value)
-
-  // Single post-order walk: a node is `checked` if itself or any ancestor is
-  // in the cover set; otherwise `indeterminate` if any descendant is checked;
-  // otherwise `unchecked`. Returns whether the subtree contains a checked node.
-  function walk(node: Resource, ancestorChecked: boolean): boolean {
-    const selfChecked = ancestorChecked || cover.has(node.external_id)
-    let descendantChecked = false
-    for (const c of childrenMap.value.get(node.external_id) || []) {
-      if (walk(c, selfChecked)) descendantChecked = true
-    }
-    if (selfChecked) states.set(node.external_id, 'checked')
-    else states.set(node.external_id, descendantChecked ? 'indeterminate' : 'unchecked')
-    return selfChecked || descendantChecked
-  }
-  for (const r of resources.value) {
-    if (!r.parent_id) walk(r, false)
-  }
-  return states
+	return computeResourceCheckStates(resources.value, childrenMap.value, selectedResourceIds.value)
 })
 
 function toggleExpand(id: string) {
@@ -415,6 +400,15 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'onedrive',
+    available: true,
+    docUrl: 'https://learn.microsoft.com/entra/identity-platform/quickstart-register-app',
+    permissionDocUrl: 'https://learn.microsoft.com/graph/permissions-reference#filesread',
+    permissionPageUrl: '',
+    requiredPermissions: ['Files.Read', 'offline_access'],
+    fields: [],
+  },
+  {
     type: 'rss',
     available: true,
     docUrl: '',
@@ -483,6 +477,14 @@ watch(visible, async (v) => {
     }
     selectedResourceIds.value = form.value.config?.resource_ids || []
     tempDsId.value = props.dataSource.id
+    if (props.dataSource.type === 'onedrive') {
+      try {
+        oauthStatus.value = await getDataSourceOAuthStatus(props.dataSource.id)
+        testResult.value = oauthStatus.value.authorized ? 'success' : ''
+      } catch (e: any) {
+        testErrorMsg.value = e?.message || e?.error || ''
+      }
+    }
   } else {
     replaceCredentialsMode.value = false
     credentialsConfigured.value = false
@@ -540,8 +542,74 @@ function selectType(def: ConnectorDef) {
   step.value = 1
 }
 
+async function ensureTemporaryDataSource(): Promise<string> {
+  if (tempDsId.value) return tempDsId.value
+  const res = await createDataSource({
+    ...form.value,
+    config: buildConfigPayload(),
+    knowledge_base_id: props.kbId,
+    status: 'paused',
+  } as any)
+  const created = res?.data || res
+  tempDsId.value = created.id
+  return created.id
+}
+
+async function connectOneDrive(replaceConnection = false) {
+  if (oauthConnecting.value) return
+  oauthConnecting.value = true
+  testErrorMsg.value = ''
+  oauthAuthorizationURL.value = ''
+  const popup = window.open('about:blank', 'weknora-onedrive-oauth', 'popup,width=720,height=760')
+  try {
+    const dsId = await ensureTemporaryDataSource()
+    const authorizationURL = await getDataSourceOAuthAuthorizeURL(dsId, replaceConnection)
+    oauthAuthorizationURL.value = authorizationURL
+    if (popup) popup.location.href = authorizationURL
+
+    await waitForOneDriveAuthorization({
+      popup,
+      getStatus: () => getDataSourceOAuthStatus(dsId),
+      onStatus: status => { oauthStatus.value = status },
+      wait: milliseconds => new Promise(resolve => window.setTimeout(resolve, milliseconds)),
+      notCompletedMessage: t('datasource.oauthNotCompleted'),
+    })
+    testResult.value = 'success'
+    MessagePlugin.success(t('datasource.oauthConnected'))
+  } catch (e: any) {
+    popup?.close()
+    testResult.value = 'error'
+    testErrorMsg.value = e?.message || e?.error || t('datasource.oauthNotCompleted')
+    MessagePlugin.error(testErrorMsg.value)
+  } finally {
+    oauthConnecting.value = false
+  }
+}
+
+async function disconnectOneDrive() {
+  if (!tempDsId.value) return
+  try {
+    await disconnectDataSourceOAuth(tempDsId.value)
+    oauthStatus.value = await getDataSourceOAuthStatus(tempDsId.value)
+    testResult.value = ''
+    MessagePlugin.success(t('datasource.oauthDisconnected'))
+  } catch (e: any) {
+    try {
+      oauthStatus.value = await getDataSourceOAuthStatus(tempDsId.value)
+      if (!oauthStatus.value.authorized) testResult.value = ''
+    } catch {
+      // Preserve the original disconnect error.
+    }
+    MessagePlugin.error(e?.message || e?.error || t('datasource.oauthDisconnectFailed'))
+  }
+}
+
 // --- Test connection (stateless, no DB write) ---
 async function testConnection() {
+  if (isOAuthConnector.value) {
+    await connectOneDrive(false)
+    return
+  }
   syncRssAuthHeadersToCredentials()
   if (!validateRssFeedUrls()) return
   if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
@@ -588,13 +656,7 @@ async function loadResources() {
   loadingResources.value = true
   try {
     if (!tempDsId.value) {
-      const res = await createDataSource({
-        ...form.value,
-        knowledge_base_id: props.kbId,
-        status: 'paused',
-      } as any)
-      const created = res?.data || res
-      tempDsId.value = created.id
+      await ensureTemporaryDataSource()
     } else if (!isEdit.value) {
       await updateDataSource(tempDsId.value, {
         ...form.value,
@@ -655,74 +717,14 @@ async function revealExistingSelections(hiddenIds: string[]) {
   }
 }
 
-function getDescendantIds(id: string): string[] {
-  const ids: string[] = []
-  const children = childrenMap.value.get(id) || []
-  for (const c of children) {
-    ids.push(c.external_id)
-    ids.push(...getDescendantIds(c.external_id))
-  }
-  return ids
-}
-
-function getAncestorChain(id: string): string[] {
-  const chain = [id]
-  for (let p = parentMap.value.get(id); p; p = parentMap.value.get(p)) {
-    chain.push(p)
-  }
-  return chain
-}
-
-function isCovered(id: string, cover: Set<string>): boolean {
-  for (let cur: string | undefined = id; cur; cur = parentMap.value.get(cur)) {
-    if (cover.has(cur)) return true
-  }
-  return false
-}
-
-function checkResource(id: string, cover: Set<string>) {
-  if (isCovered(id, cover)) return
-  const descendants = new Set(getDescendantIds(id))
-  for (const d of [...cover]) {
-    if (descendants.has(d)) cover.delete(d)
-  }
-  cover.add(id)
-}
-
-// Removes id from the cover set. If id is covered transitively (an ancestor is
-// in the cover set), the ancestor is replaced with explicit entries for each
-// sibling along the path so the rest of the subtree stays selected.
-function uncheckResource(id: string, cover: Set<string>) {
-  const chain = getAncestorChain(id) // [id, parent, ..., root]
-  let highestIdx = -1
-  for (let i = chain.length - 1; i >= 0; i--) {
-    if (cover.has(chain[i])) { highestIdx = i; break }
-  }
-  if (highestIdx > 0) {
-    cover.delete(chain[highestIdx])
-    for (let i = highestIdx; i > 0; i--) {
-      const parent = chain[i]
-      const next = chain[i - 1]
-      for (const sib of childrenMap.value.get(parent) || []) {
-        if (sib.external_id !== next) cover.add(sib.external_id)
-      }
-    }
-  }
-  cover.delete(id)
-  const descendants = new Set(getDescendantIds(id))
-  for (const d of [...cover]) {
-    if (descendants.has(d)) cover.delete(d)
-  }
-}
-
 function toggleResource(id: string) {
-  const cover = new Set(selectedResourceIds.value)
-  if ((checkStates.value.get(id) || 'unchecked') === 'unchecked') {
-    checkResource(id, cover)
-  } else {
-    uncheckResource(id, cover)
-  }
-  selectedResourceIds.value = [...cover]
+  selectedResourceIds.value = toggleResourceSelection(
+    id,
+    selectedResourceIds.value,
+    childrenMap.value,
+    parentMap.value,
+    checkStates.value.get(id) || 'unchecked',
+  )
 }
 
 function validateRssFeedUrls(): boolean {
@@ -754,10 +756,17 @@ function validateStep1Fields(): boolean {
 
 async function nextStep() {
   if (step.value === 1) {
-    if (!validateStep1Fields()) return
-    if (needsConnectionTest() && testResult.value !== 'success') {
-      await testConnection()
-      if ((testResult.value as string) !== 'success') return
+    if (isOAuthConnector.value) {
+      if (!oauthStatus.value?.authorized || oauthStatus.value.reauthorization_required) {
+        await connectOneDrive(false)
+        if (!oauthStatus.value?.authorized || oauthStatus.value.reauthorization_required) return
+      }
+    } else {
+      if (!validateStep1Fields()) return
+      if (needsConnectionTest() && testResult.value !== 'success') {
+        await testConnection()
+        if ((testResult.value as string) !== 'success') return
+      }
     }
   }
   step.value++
@@ -932,7 +941,7 @@ function shouldShowResourceType(type: string): boolean {
   return !!resourceTypeLabelMap[type]
 }
 
-function resourceRowState(id: string): CheckState {
+function resourceRowState(id: string): ResourceCheckState {
   return checkStates.value.get(id) || 'unchecked'
 }
 
@@ -966,7 +975,7 @@ const drawerConfirmText = computed(() => {
     :class="form.type ? `datasource-editor-drawer datasource-editor-drawer--${form.type}` : 'datasource-editor-drawer'"
     :hide-footer="step === 0"
     :confirm-text="drawerConfirmText"
-    :confirm-loading="submitting || (step === 1 && testing)"
+    :confirm-loading="submitting || (step === 1 && (testing || oauthConnecting))"
     storage-key="setting-drawer:width:datasource-editor"
     width="640px"
     @confirm="handleDrawerConfirm"
@@ -984,7 +993,24 @@ const drawerConfirmText = computed(() => {
       <t-button v-if="!isEdit" variant="outline" @click="step = 0">
         {{ t('datasource.back') }}
       </t-button>
-      <t-button variant="outline" :loading="testing" @click="testConnection">
+      <t-button
+        v-if="isOAuthConnector"
+        variant="outline"
+        :loading="oauthConnecting"
+        @click="connectOneDrive(false)"
+      >
+        <template #icon>
+          <t-icon
+            v-if="!oauthConnecting && oauthStatus?.authorized && !oauthStatus.reauthorization_required"
+            name="check-circle-filled"
+            class="status-icon available"
+          />
+        </template>
+        {{ oauthConnecting
+          ? t('datasource.oauthConnecting')
+          : (oauthStatus?.authorized ? t('datasource.oauthReconnect') : t('datasource.oauthConnect')) }}
+      </t-button>
+      <t-button v-else variant="outline" :loading="testing" @click="testConnection">
         <template #icon>
           <t-icon
             v-if="!testing && testResult === 'success'"
@@ -1000,7 +1026,7 @@ const drawerConfirmText = computed(() => {
         {{ testing ? t('model.editor.testing') : t('datasource.testConnection') }}
       </t-button>
       <span
-        v-if="testResult"
+        v-if="!isOAuthConnector && testResult"
         :class="['footer-test-message', testResult === 'success' ? 'success' : 'error']"
         :title="testResult === 'error' ? testErrorMsg : t('datasource.connected')"
       >
@@ -1119,6 +1145,74 @@ const drawerConfirmText = computed(() => {
         </div>
       </div>
 
+      <section v-if="isOAuthConnector" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.oauthAuthorization') }}</h4>
+        <div
+          class="onedrive-connection-card"
+          :class="{ 'is-connected': oauthStatus?.authorized && !oauthStatus.reauthorization_required }"
+        >
+          <div class="onedrive-connection-card__status">
+            <t-icon
+              :name="oauthStatus?.authorized && !oauthStatus.reauthorization_required
+                ? 'check-circle-filled'
+                : 'error-circle-filled'"
+              :class="oauthStatus?.authorized && !oauthStatus.reauthorization_required ? 'success' : 'warn'"
+            />
+            <div>
+              <div class="onedrive-connection-card__title">
+                {{ oauthStatus?.authorized && !oauthStatus.reauthorization_required
+                  ? t('datasource.oauthAuthorized')
+                  : (oauthStatus?.reauthorization_required
+                    ? t('datasource.oauthReauthorizationRequired')
+                    : t('datasource.oauthUnauthorized')) }}
+              </div>
+              <div v-if="oauthStatus?.account_display_name" class="onedrive-connection-card__account">
+                {{ oauthStatus.account_display_name }}
+              </div>
+            </div>
+          </div>
+          <div class="onedrive-connection-card__actions">
+            <t-button
+              size="small"
+              theme="primary"
+              :loading="oauthConnecting"
+              @click="connectOneDrive(false)"
+            >
+              {{ oauthStatus?.authorized ? t('datasource.oauthReconnect') : t('datasource.oauthConnect') }}
+            </t-button>
+            <t-popconfirm
+              v-if="oauthStatus?.authorized"
+              :content="t('datasource.oauthReplaceConfirm')"
+              @confirm="connectOneDrive(true)"
+            >
+              <t-button size="small" variant="outline" theme="warning">
+                {{ t('datasource.oauthReplaceAccount') }}
+              </t-button>
+            </t-popconfirm>
+            <t-popconfirm
+              v-if="oauthStatus?.authorized"
+              :content="t('datasource.oauthDisconnectConfirm')"
+              @confirm="disconnectOneDrive"
+            >
+              <t-button size="small" variant="text" theme="danger">
+                {{ t('datasource.oauthDisconnect') }}
+              </t-button>
+            </t-popconfirm>
+          </div>
+        </div>
+        <a
+          v-if="oauthAuthorizationURL && oauthConnecting"
+          :href="oauthAuthorizationURL"
+          target="_blank"
+          rel="noopener"
+          class="doc-link onedrive-oauth-fallback"
+        >
+          {{ t('datasource.oauthPopupFallback') }}
+          <t-icon name="link" class="link-icon" />
+        </a>
+        <p class="form-desc">{{ t('datasource.oauthPermissionHint') }}</p>
+      </section>
+
       <section class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('datasource.sectionBasic') }}</h4>
 
@@ -1157,7 +1251,7 @@ const drawerConfirmText = computed(() => {
         </div>
       </section>
 
-      <section class="setting-drawer__section">
+      <section v-if="!isOAuthConnector" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('datasource.credentialsLabel') }}</h4>
 
         <div v-if="isEdit && credentialsConfigured && !replaceCredentialsMode" class="form-item">
@@ -2077,6 +2171,71 @@ const drawerConfirmText = computed(() => {
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+
+.onedrive-connection-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid var(--td-warning-color-3);
+  border-radius: 8px;
+  background: var(--td-warning-color-1);
+}
+
+.onedrive-connection-card.is-connected {
+  border-color: var(--td-success-color-3);
+  background: var(--td-success-color-1);
+}
+
+.onedrive-connection-card__status,
+.onedrive-connection-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.onedrive-connection-card__status > .success {
+  color: var(--td-success-color);
+}
+
+.onedrive-connection-card__status > .warn {
+  color: var(--td-warning-color);
+}
+
+.onedrive-connection-card__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+}
+
+.onedrive-connection-card__account {
+  margin-top: 2px;
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.onedrive-oauth-fallback {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+@media (max-width: 680px) {
+  .onedrive-connection-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .onedrive-connection-card__actions {
+    flex-wrap: wrap;
+  }
 }
 
 .resource-picker__name {

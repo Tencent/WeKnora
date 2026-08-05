@@ -51,6 +51,64 @@ type Connector interface {
 	FetchIncremental(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error)
 }
 
+// OAuthConnector allows an OAuth-backed data source to be created in a
+// paused, not-yet-authorized state after validating only non-secret settings.
+type OAuthConnector interface {
+	Connector
+	ValidateStaticConfig(config *types.DataSourceConfig) error
+	OAuthProvider() string
+}
+
+// RuntimeConnector owns the runtime dependencies needed by a connector. The
+// application service deliberately does not know whether those dependencies
+// come from OAuth, workload identity, a vault, or another mechanism.
+type RuntimeConnector interface {
+	Connector
+	PrepareRuntime(ctx context.Context, dataSource *types.DataSource, config *types.DataSourceConfig) error
+	EnsureReady(ctx context.Context, dataSource *types.DataSource) error
+}
+
+// ConnectionLifecycleConnector owns connection teardown. It lets an OAuth or
+// otherwise stateful connector invalidate provider-specific state without
+// adding provider branches to the generic data-source service.
+type ConnectionLifecycleConnector interface {
+	Connector
+	Disconnect(ctx context.Context, dataSource *types.DataSource) error
+}
+
+// SyncLifecycleConnector participates in generic ingestion bookkeeping. A
+// connector can use these hooks for a remote hierarchy projection, retained
+// deletions, or connection-generation fencing while the sync runner remains
+// provider agnostic.
+type SyncLifecycleConnector interface {
+	Connector
+	ReconcileItems(
+		ctx context.Context, dataSource *types.DataSource, items []types.FetchedItem,
+	) ([]types.FetchedItem, error)
+	IsRunCurrent(ctx context.Context, dataSource *types.DataSource) (bool, error)
+	MarkItemDeleted(ctx context.Context, dataSource *types.DataSource, item *types.FetchedItem) error
+	MarkItemIngested(ctx context.Context, dataSource *types.DataSource, item *types.FetchedItem) error
+}
+
+// DeferredCommitConnector requires the candidate cursor to be committed only
+// after the asynchronous knowledge-ingestion jobs have reached a terminal
+// success state. Finalization runs as a separate short-lived task.
+type DeferredCommitConnector interface {
+	Connector
+	DeferCursorUntilIngestionCompletes() bool
+}
+
+// FetchResultConnector opts into the reliable cursor protocol without forcing
+// legacy connectors to change atomically. DataSourceService treats NextCursor
+// as a candidate and commits it only after all required item work succeeds.
+type FetchResultConnector interface {
+	Connector
+	FetchAllResult(ctx context.Context, config *types.DataSourceConfig, resourceIDs []string) (*types.FetchResult, error)
+	FetchIncrementalResult(
+		ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor,
+	) (*types.FetchResult, error)
+}
+
 // StreamHandler receives items and progress checkpoints emitted during a
 // streaming fetch. The service implements it to ingest each item as it arrives
 // (bounding memory to one item instead of the whole wiki) and to persist the
@@ -207,11 +265,11 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 	},
 	types.ConnectorTypeOneDrive: {
 		Type:         types.ConnectorTypeOneDrive,
-		Name:         "OneDrive / SharePoint",
+		Name:         "Microsoft OneDrive",
 		Description:  "Sync documents and files from Microsoft OneDrive",
 		Priority:     6,
 		AuthType:     "oauth2",
-		Capabilities: []string{"incremental"},
+		Capabilities: []string{"incremental", "deletion_sync"},
 	},
 	types.ConnectorTypeDingTalk: {
 		Type:         types.ConnectorTypeDingTalk,

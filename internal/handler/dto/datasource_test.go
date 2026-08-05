@@ -110,3 +110,17 @@ func TestDataSourceResponse_NoConfig(t *testing.T) {
 	// No config jsonb stored → no config object in the response.
 	assert.NotContains(t, string(body), `"config":`)
 }
+
+func TestDataSourceResponse_HidesOpaqueSyncCursor(t *testing.T) {
+	ds := &types.DataSource{
+		ID: "onedrive", Name: "OneDrive", Type: types.ConnectorTypeOneDrive,
+		LastSyncCursor:    types.JSON(`{"connector_cursor":{"delta_link":"https://graph.example/delta?token=secret"}}`),
+		ConnectionVersion: 4,
+	}
+	body, err := json.Marshal(NewDataSourceResponse(ds))
+	assert.NoError(t, err)
+	assert.NotContains(t, string(body), "delta_link")
+	assert.NotContains(t, string(body), "token=secret")
+	assert.Contains(t, string(body), `"has_sync_cursor":true`)
+	assert.Contains(t, string(body), `"connection_version":4`)
+}

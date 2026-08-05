@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -718,6 +719,34 @@ func (r *knowledgeRepository) FindByMetadataKey(
 		return nil, err
 	}
 	return &knowledge, nil
+}
+
+// FindByMetadataFilters finds one knowledge row matching all metadata values.
+// It is intentionally an optional repository extension so existing test fakes
+// implementing KnowledgeRepository do not need to grow data-source-specific API.
+func (r *knowledgeRepository) FindByMetadataFilters(
+	ctx context.Context, tenantID uint64, kbID string, filters map[string]string,
+) (*types.Knowledge, error) {
+	query := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID)
+	keys := make([]string, 0, len(filters))
+	for key := range filters {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if r.db.Name() == "sqlite" {
+			query = query.Where("json_extract(metadata, ?) = ?", "$."+key, filters[key])
+		} else {
+			query = query.Where("metadata->>? = ?", key, filters[key])
+		}
+	}
+	var knowledge types.Knowledge
+	err := query.First(&knowledge).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &knowledge, err
 }
 
 // FindByMetadataKeyPrefix finds knowledge items whose metadata[key] starts with
