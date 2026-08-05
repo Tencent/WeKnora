@@ -26,6 +26,41 @@
                     />
                   </div>
                 </div>
+
+                <div v-if="mode === 'file'" class="destination-row">
+                  <t-popup
+                    v-model:visible="destinationPickerVisible"
+                    trigger="click"
+                    placement="bottom-left"
+                    attach="body"
+                    :z-index="3100"
+                    overlay-class-name="upload-destination-popup"
+                    destroy-on-close
+                  >
+                    <button
+                      type="button"
+                      class="destination-crumb"
+                      :title="destinationFullLabel"
+                      :aria-label="t('uploadConfirm.destinationChange')"
+                      :aria-expanded="destinationPickerVisible"
+                    >
+                      <span class="destination-crumb__label">{{ t('uploadConfirm.destinationLabel') }}</span>
+                      <span class="destination-crumb__path">{{ destinationBreadcrumb }}</span>
+                      <t-icon name="chevron-down" class="destination-crumb__caret" />
+                    </button>
+                    <template #content>
+                      <div class="card-menu" @click.stop>
+                        <FolderPickerMenu
+                          :options="pickerFolderOptions"
+                          :current-path="localTargetFolder"
+                          allow-reselect
+                          @create="onDestinationCreated"
+                          @confirm="onDestinationPicked"
+                        />
+                      </div>
+                    </template>
+                  </t-popup>
+                </div>
               </div>
 
               <div class="files-list-wrap">
@@ -64,8 +99,14 @@
                       <t-icon :name="getFileIcon(file.name)" class="file-icon" />
                     </span>
                     <div class="file-meta">
-                      <span class="file-name" :title="file.name">{{ file.name }}</span>
-                      <span class="file-size">{{ formatFileSize(file.size) }}</span>
+                      <span class="file-name" :title="fileDisplayTitle(file)">{{ file.name }}</span>
+                      <span class="file-size">
+                        <template v-if="fileRelativeDir(file)">
+                          <span class="file-relative-dir" :title="fileRelativeDir(file)">{{ fileRelativeDir(file) }}</span>
+                          <span class="file-meta-sep">·</span>
+                        </template>
+                        {{ formatFileSize(file.size) }}
+                      </span>
                     </div>
                     <button
                       type="button"
@@ -522,6 +563,8 @@ import { formatFileSize, getFileIcon } from '@/utils/files'
 import { getUploadFileKey } from '../utils/uploadSources'
 import { listKnowledgeTags } from '@/api/knowledge-base'
 import KbUploadSourceDropdown from './KbUploadSourceDropdown.vue'
+import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue'
+import { folderOptionFromPath, sortFolderOptions } from '../folderTree'
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
 import type {
   UploadConfirmManualSource,
@@ -583,6 +626,10 @@ const props = withDefaults(defineProps<{
   tagId?: string
   acceptFileTypes?: string
   supportedFileTypes?: string[]
+  /** Folder the batch will be uploaded into; '' means the knowledge base root. */
+  targetFolder?: string
+  /** Existing folders offered as upload destinations. */
+  folderOptions?: FolderOption[]
 }>(), {
   mode: 'file',
   files: () => [],
@@ -592,6 +639,8 @@ const props = withDefaults(defineProps<{
   reparsePreview: null,
   acceptFileTypes: '',
   supportedFileTypes: () => [],
+  targetFolder: '',
+  folderOptions: () => [],
 })
 
 const emit = defineEmits<{
@@ -615,11 +664,64 @@ const tagsLoadFailed = ref(false)
 const chunkingMoreOpen = ref(false)
 const activeSection = ref<ConfigSectionKey>('tags')
 const uiState = ref<UploadUIState>(createDefaultUIState())
+// Destination folder for this batch. Pre-filled from the sidebar tree, but
+// editable here so browsing a folder never silently decides where files land.
+const localTargetFolder = ref('')
+const destinationPickerVisible = ref(false)
+// Folders created in this dialog before upload; the server tree only gains them
+// once files land, so keep them here across picker open/close cycles.
+const pendingFolderPaths = ref<string[]>([])
+
+const pickerFolderOptions = computed(() => {
+  const byPath = new Map<string, FolderOption>()
+  ;(props.folderOptions || []).forEach((option) => byPath.set(option.path, option))
+  pendingFolderPaths.value.forEach((path) => {
+    if (!byPath.has(path)) byPath.set(path, folderOptionFromPath(path))
+  })
+  return sortFolderOptions([...byPath.values()])
+})
 
 const dialogVisible = computed({
   get: () => props.visible,
   set: (value: boolean) => emit('update:visible', value),
 })
+
+// Deep paths are shown as root / segment / segment in the picker row.
+const destinationBreadcrumb = computed(() => {
+  if (!localTargetFolder.value) return t('knowledgeBase.folderTree.rootRow')
+  const parts = localTargetFolder.value.split('/').filter(Boolean)
+  return [t('knowledgeBase.folderTree.rootRow'), ...parts].join(' / ')
+})
+
+const destinationFullLabel = computed(() =>
+  localTargetFolder.value || t('knowledgeBase.folderTree.rootRow'),
+)
+
+/**
+ * Directory a folder-upload file came from, shown under its name so a batch of
+ * same-named files (README.md in five folders) stays distinguishable and the
+ * resulting structure is visible before confirming.
+ */
+function fileRelativeDir(file: File): string {
+  const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath
+  if (!relativePath) return ''
+  return relativePath.split('/').filter(Boolean).slice(0, -1).join('/')
+}
+
+function fileDisplayTitle(file: File): string {
+  const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath
+  return relativePath || file.name
+}
+
+function onDestinationCreated(path: string) {
+  if (!path || pendingFolderPaths.value.includes(path)) return
+  pendingFolderPaths.value = [...pendingFolderPaths.value, path]
+}
+
+function onDestinationPicked(path: string) {
+  localTargetFolder.value = path
+  destinationPickerVisible.value = false
+}
 
 function getModelName(modelId: string): string {
   if (!modelId) return t('uploadConfirm.notSet')
@@ -1189,6 +1291,9 @@ watch(
     localFiles.value = props.mode === 'file' ? [...(props.files || [])] : []
     localUrls.value = props.mode === 'file' ? [...(props.urls || [])] : []
     selectedTagIds.value = props.mode === 'reparse' ? [] : [...(props.tagIds || [])]
+    localTargetFolder.value = props.mode === 'file' ? (props.targetFolder || '') : ''
+    pendingFolderPaths.value = []
+    destinationPickerVisible.value = false
     initFromKbInfo(props.kbInfo)
     if (props.mode === 'reparse') {
       applyOverridesToState(props.reparsePreview?.processOverrides)
@@ -1330,6 +1435,7 @@ const handleConfirm = () => {
       tagIds: [...selectedTagIds.value],
       files: [...localFiles.value],
       urls: [...localUrls.value],
+      targetFolder: localTargetFolder.value,
     })
   }
   emit('update:visible', false)
@@ -1405,9 +1511,15 @@ const handleConfirm = () => {
   flex-shrink: 0;
   align-items: center;
   box-sizing: border-box;
-  height: 56px;
-  padding: 0 12px;
+  min-height: 56px;
+  padding: 12px;
   border-bottom: 1px solid var(--td-component-stroke);
+}
+
+.sidebar-header {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
 }
 
 .sidebar-header-row {
@@ -1449,6 +1561,62 @@ const handleConfirm = () => {
   text-align: center;
   background: var(--td-bg-color-component);
   color: var(--td-text-color-secondary);
+}
+
+// Destination sits under the title inside the header block.
+.destination-row {
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.destination-row :deep(.t-popup__reference) {
+  display: block;
+  max-width: 100%;
+}
+
+.destination-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: var(--app-font-family);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+  transition: color 0.15s ease;
+
+  &:hover {
+    color: var(--td-brand-color);
+
+    .destination-crumb__path,
+    .destination-crumb__caret {
+      color: var(--td-brand-color);
+    }
+  }
+}
+
+.destination-crumb__label {
+  flex-shrink: 0;
+}
+
+.destination-crumb__path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--td-text-color-primary);
+  font-weight: 500;
+}
+
+.destination-crumb__caret {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
 }
 
 .files-list-wrap {
@@ -1525,6 +1693,18 @@ const handleConfirm = () => {
   margin-top: 1px;
   font-size: 11px;
   line-height: 1.3;
+  color: var(--td-text-color-placeholder);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-relative-dir {
+  color: var(--td-text-color-secondary);
+}
+
+.file-meta-sep {
+  margin: 0 4px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -2033,5 +2213,26 @@ const handleConfirm = () => {
 .modal-enter-from,
 .modal-leave-to {
   opacity: 0;
+}
+</style>
+
+<style lang="less">
+// Must sit above the upload modal (z-index 3000). Do not reuse card-more-popup here —
+// its global z-index: 99 !important would hide the menu behind the modal overlay.
+.upload-destination-popup {
+  z-index: 3100 !important;
+
+  .t-popup__content {
+    padding: 4px !important;
+    margin-top: 6px !important;
+    min-width: 208px;
+    border-radius: 10px !important;
+    background: var(--td-bg-color-container) !important;
+    border: 0.5px solid var(--td-component-stroke) !important;
+    box-shadow:
+      0 0 0 0.5px rgba(0, 0, 0, 0.03),
+      0 2px 4px rgba(0, 0, 0, 0.04),
+      0 8px 24px rgba(0, 0, 0, 0.1) !important;
+  }
 }
 </style>

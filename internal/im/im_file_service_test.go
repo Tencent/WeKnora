@@ -79,11 +79,11 @@ func TestIMFileServiceResolver_CachesPerProvider(t *testing.T) {
 	}
 	r := newIMFileServiceResolver(tenant, stub)
 
-	svc1 := r.resolve("minio://wizard-test/10000/a.png")
-	svc2 := r.resolve("minio://wizard-test/10000/b.png")
+	svc1 := r.ResolveFileService("minio://wizard-test/10000/a.png")
+	svc2 := r.ResolveFileService("minio://wizard-test/10000/b.png")
 	assert.Same(t, svc1, svc2, "same provider should reuse cached FileService")
 
-	svc3 := r.resolve("local://10000/c.png")
+	svc3 := r.ResolveFileService("local://10000/c.png")
 	assert.NotSame(t, svc1, svc3, "different provider should use a different service")
 }
 

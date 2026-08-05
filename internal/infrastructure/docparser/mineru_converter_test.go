@@ -6,6 +6,28 @@ import (
 	"testing"
 )
 
+func TestNewMinerUReaderResolvesParseMethod(t *testing.T) {
+	tests := []struct {
+		name      string
+		overrides map[string]string
+		want      string
+	}{
+		{name: "default is auto", overrides: map[string]string{}, want: "auto"},
+		{name: "legacy enabled becomes auto", overrides: map[string]string{"mineru_enable_ocr": "true"}, want: "auto"},
+		{name: "legacy disabled becomes text", overrides: map[string]string{"mineru_enable_ocr": "false"}, want: "txt"},
+		{name: "explicit method wins", overrides: map[string]string{"mineru_parse_method": "ocr", "mineru_enable_ocr": "false"}, want: "ocr"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := NewMinerUReader(tt.overrides)
+			if reader.parseMethod != tt.want {
+				t.Fatalf("parseMethod = %q, want %q", reader.parseMethod, tt.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeMinerUMarkdownPreservesMarkdownAndHTML(t *testing.T) {
 	input := strings.Join([]string{
 		"# Heading",

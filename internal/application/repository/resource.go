@@ -90,8 +90,11 @@ func (r *resourceRepository) GetValidGrant(
 	return &grant, err
 }
 
+// DeleteExpiredGrants drops grants that are past their expiry. A revoked grant
+// is kept until then on purpose: it is the tombstone that stops a token derived
+// for the same resource and window from re-creating the row and reviving access.
 func (r *resourceRepository) DeleteExpiredGrants(ctx context.Context, before time.Time) error {
 	return r.db.WithContext(ctx).
-		Where("expires_at <= ? OR revoked_at IS NOT NULL", before).
+		Where("expires_at <= ?", before).
 		Delete(&types.ResourceAccessGrant{}).Error
 }

@@ -987,7 +987,7 @@ func (h *SystemHandler) isS3Configured(c *gin.Context) bool {
 	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
 		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.S3 != nil {
 			s3Conf := tenant.StorageEngineConfig.S3
-			return s3Conf.Endpoint != "" && s3Conf.Region != "" && s3Conf.AccessKey != "" && s3Conf.SecretKey != "" && s3Conf.BucketName != ""
+			return s3Conf.Region != "" && s3Conf.BucketName != "" && (s3Conf.AccessKey == "") == (s3Conf.SecretKey == "")
 		}
 	}
 	return false
@@ -1133,15 +1133,21 @@ func (h *SystemHandler) checkS3(c *gin.Context, ctx context.Context, cfg *types.
 		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "未提供 S3 配置"}})
 		return
 	}
-	if cfg.Endpoint == "" || cfg.Region == "" || cfg.AccessKey == "" || cfg.SecretKey == "" || cfg.BucketName == "" {
-		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "Endpoint、Region、Access Key、Secret Key、Bucket 名称不能为空"}})
+	if cfg.Region == "" || cfg.BucketName == "" {
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "Region、Bucket 名称不能为空"}})
+		return
+	}
+	if (cfg.AccessKey == "") != (cfg.SecretKey == "") {
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "Access Key 与 Secret Key 必须同时填写或同时留空（使用 AWS 默认凭证链）"}})
 		return
 	}
 
-	if blocked, reason := isBlockedStorageEndpoint(cfg.Endpoint); blocked {
-		logger.Warnf(ctx, "Storage check: S3 endpoint blocked by SSRF protection, endpoint: %s", cfg.Endpoint)
-		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: reason}})
-		return
+	if cfg.Endpoint != "" {
+		if blocked, reason := isBlockedStorageEndpoint(cfg.Endpoint); blocked {
+			logger.Warnf(ctx, "Storage check: S3 endpoint blocked by SSRF protection, endpoint: %s", cfg.Endpoint)
+			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: reason}})
+			return
+		}
 	}
 
 	err := file.CheckS3Connectivity(ctx, cfg.Endpoint, cfg.AccessKey, cfg.SecretKey, cfg.BucketName, cfg.Region)
@@ -1149,7 +1155,7 @@ func (h *SystemHandler) checkS3(c *gin.Context, ctx context.Context, cfg *types.
 		logger.Errorf(ctx, "Storage check: S3 connectivity failed, bucket: %s, error: %v", cfg.BucketName, err)
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "403") {
-			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "认证失败，请检查 Access Key / Secret Key 是否正确"}})
+			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "认证失败，请检查静态密钥或 AWS IAM Role / 默认凭证链权限"}})
 			return
 		}
 		if strings.Contains(errMsg, "404") || strings.Contains(errMsg, "NotFound") {

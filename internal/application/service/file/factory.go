@@ -92,7 +92,7 @@ func NewFileServiceFromStorageConfig(
 		svc, err := NewTosFileServiceWithTempBucket(sec.TOS.Endpoint, sec.TOS.Region, sec.TOS.AccessKey, sec.TOS.SecretKey, sec.TOS.BucketName, sec.TOS.PathPrefix, sec.TOS.TempBucketName, sec.TOS.TempRegion)
 		return svc, p, err
 	case "s3":
-		if sec == nil || sec.S3 == nil || sec.S3.Endpoint == "" || sec.S3.Region == "" || sec.S3.AccessKey == "" || sec.S3.SecretKey == "" || sec.S3.BucketName == "" {
+		if sec == nil || sec.S3 == nil || sec.S3.Region == "" || sec.S3.BucketName == "" || (sec.S3.AccessKey == "") != (sec.S3.SecretKey == "") {
 			return nil, p, fmt.Errorf("incomplete s3 config")
 		}
 		pathPrefix := strings.TrimSpace(sec.S3.PathPrefix)

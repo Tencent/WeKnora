@@ -124,9 +124,13 @@ const addFiles = async (files: File[]) => {
     };
 
     attachments.value.push(attachment);
+    // Vue wraps objects inserted into a ref-backed array with a reactive proxy.
+    // Keep using that proxy in async upload/poll callbacks; mutating the raw
+    // object above does not trigger the attachment status UI to re-render.
+    const reactiveAttachment = attachments.value[attachments.value.length - 1];
     emit('update:files', [...attachments.value]);
     if (props.sessionId) {
-      void uploadAttachment(attachment);
+      void uploadAttachment(reactiveAttachment);
     }
   }
 };

@@ -6,6 +6,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { compile, type CompileError } from '@intlify/core-base'
 
+import {
+  FLAT_KEY_BAG_PATHS,
+  KB_ACTIVITY_DETAIL_VALUES,
+  KB_ACTIVITY_I18N_ROOTS,
+  KB_ACTIVITY_OUTCOMES,
+  REGISTERED_AUDIT_ACTION_ENTRIES,
+} from './auditActionRegistry.ts'
+import { AUDIT_ACTION_LOCALE_DEFAULTS, getAuditActionLocaleDefault } from './auditActionLocaleDefaults.ts'
 import { writeLocaleModule } from './localeSerialize.ts'
 
 import enUS from './locales/en-US.ts'
@@ -64,6 +72,8 @@ const EXTRA_PREFIXES = [
   'system.globalSettings.audit.action.',
   'system.globalSettings.audit.actorRole.',
   'knowledgeEditor.activity.detailFields.',
+  'knowledgeEditor.activity.detailValues.',
+  'knowledgeEditor.activity.outcomes.',
   'knowledgeEditor.activity.actions.',
   'knowledgeEditor.activity.targets.',
   'tenantMember.audit.action.',
@@ -81,6 +91,11 @@ const EXTRA_PREFIXES = [
   'integrations.tabs.',
   'knowledgeStages.stage.',
   'knowledgeStages.status.',
+  'system.globalSettings.runtime.pools.',
+  'system.globalSettings.runtime.poolDescriptions.',
+  'system.globalSettings.runtime.queueNames.',
+  'system.globalSettings.runtime.queueDescriptions.',
+  'system.globalSettings.runtime.tasks.taskTypes.',
   'organization.role.',
   'inviteRegister.',
   'modelSettings.builtinModels.',
@@ -553,7 +568,33 @@ export function getLocaleValueAtPath(root: unknown, path: string): unknown {
 
 export function setLocaleValueAtPath(root: LocaleTree, path: string, value: string): void {
   if (!path) return
+  if (setLocaleFlatBagValueIfApplicable(root, path, value)) return
   setLocaleValueAtPathParts(root, path.split('.'), value)
+}
+
+/** Write flat keys (e.g. `kb.created`) under audit action bags without nesting. */
+function setLocaleFlatBagValueIfApplicable(root: LocaleTree, path: string, value: string): boolean {
+  for (const bagPath of FLAT_KEY_BAG_PATHS) {
+    const prefix = `${bagPath}.`
+    if (!path.startsWith(prefix)) continue
+
+    const actionKey = path.slice(prefix.length)
+    if (!actionKey) return false
+
+    const bagParts = bagPath.split('.')
+    let node: Record<string, unknown> = root
+    for (const part of bagParts) {
+      let child = node[part]
+      if (child == null || typeof child !== 'object' || Array.isArray(child)) {
+        child = {}
+        node[part] = child
+      }
+      node = child as Record<string, unknown>
+    }
+    node[actionKey] = value
+    return true
+  }
+  return false
 }
 
 export function mergeLocaleKeysFromSource(
@@ -563,17 +604,32 @@ export function mergeLocaleKeysFromSource(
 ): void {
   for (const key of keys) {
     if (collectLocaleKeys(target).has(key)) continue
-    const value = getLocaleValueAtPath(source, key)
+    const value =
+      getLocaleValueAtPath(source, key) ??
+      getAuditActionLocaleDefault(key) ??
+      AUDIT_ACTION_LOCALE_DEFAULTS[key]
     if (typeof value === 'string') setLocaleValueAtPath(target, key, value)
   }
 }
 
 export function collectRequiredLocaleKeys(usage: I18nUsage, referenceBundle: unknown): Set<string> {
-  return new Set([
+  const required = new Set([
     ...collectReferencedLocaleKeys(referenceBundle, usage),
     ...usage.staticKeys,
     ...CRITICAL_LOCALE_KEYS,
   ])
+
+  for (const { root, actions } of REGISTERED_AUDIT_ACTION_ENTRIES) {
+    for (const action of actions) required.add(`${root}.${action}`)
+  }
+  for (const outcome of KB_ACTIVITY_OUTCOMES) {
+    required.add(`${KB_ACTIVITY_I18N_ROOTS.outcomes}.${outcome}`)
+  }
+  for (const value of KB_ACTIVITY_DETAIL_VALUES) {
+    required.add(`${KB_ACTIVITY_I18N_ROOTS.detailValues}.${value}`)
+  }
+
+  return required
 }
 
 export function alignLocaleBundleToReferenceKeys(
@@ -596,10 +652,10 @@ export function rebuildPrunedLocales(
   const requiredKeys = collectRequiredLocaleKeys(usage, fullBundles['en-US'])
   const enFull = structuredClone(fullBundles['en-US'])
   const enPruned = pruneLocaleTree(enFull, usage)
-  if (!enPruned || typeof enPruned !== 'object' || Array.isArray(enPruned)) {
-    throw new Error('prune removed entire en-US locale bundle')
-  }
-  const enTree = enPruned as LocaleTree
+  const enTree: LocaleTree =
+    enPruned && typeof enPruned === 'object' && !Array.isArray(enPruned)
+      ? (enPruned as LocaleTree)
+      : {}
   mergeLocaleKeysFromSource(enTree, fullBundles['en-US'], requiredKeys)
   const referenceKeys = collectLocaleKeys(enTree)
 
@@ -626,6 +682,18 @@ export function writePrunedLocaleFiles(
 }
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../..')
+
+export async function loadLocaleBundlesFromDisk(
+  localesDir = LOCALES_DIR,
+): Promise<Record<LocaleName, LocaleTree>> {
+  const bundles = {} as Record<LocaleName, LocaleTree>
+  for (const localeName of LOCALE_ORDER) {
+    const filePath = join(localesDir, `${localeName}.ts`)
+    const mod = await import(`${pathToFileURL(filePath).href}?disk=${Date.now()}`)
+    bundles[localeName] = structuredClone(mod.default) as LocaleTree
+  }
+  return bundles
+}
 
 export async function loadFullLocaleBundlesFromGit(
   ref = 'HEAD',
@@ -655,7 +723,7 @@ export async function regeneratePrunedLocaleFiles(localesDir = LOCALES_DIR): Pro
   after: number
 }> {
   const usage = collectI18nUsageFromSources()
-  const sourceBundles = await loadFullLocaleBundlesFromGit()
+  const sourceBundles = await loadLocaleBundlesFromDisk(localesDir)
   const before = collectLocaleKeys(sourceBundles['en-US']).size
   const rebuilt = rebuildPrunedLocales(sourceBundles, usage)
   writePrunedLocaleFiles(rebuilt, localesDir)

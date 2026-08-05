@@ -396,138 +396,165 @@
               <!-- Page header -->
               <div class="wiki-reader-header">
                 <div class="wiki-reader-title-row">
-                  <h2 class="wiki-reader-title">
-                    <span class="wiki-reader-title-text">{{ selectedPage.title }}</span>
+                  <div class="wiki-reader-title-block">
+                    <h2 v-if="!editingPage" class="wiki-reader-title">
+                      <span class="wiki-reader-title-text">{{ selectedPage.title }}</span>
 
-                    <t-popup v-if="pageIssues.length > 0" v-model="showIssuesBox" placement="bottom-left" trigger="click"
-                    :overlayInnerStyle="{ padding: 0, boxShadow: 'var(--td-shadow-3)', borderRadius: '8px', width: '560px', maxWidth: '90vw' }">
-                    <span class="wiki-issue-trigger"
-                      :title="$t('knowledgeEditor.wikiBrowser.issueTitle', { count: pageIssues.length })">
-                      <t-icon name="error-circle-filled" style="color: var(--td-warning-color);" />
-                    </span>
+                      <t-popup v-if="pageIssues.length > 0" v-model="showIssuesBox" placement="bottom-left"
+                        trigger="click"
+                        :overlayInnerStyle="{ padding: 0, boxShadow: 'var(--td-shadow-3)', borderRadius: '8px', width: '560px', maxWidth: '90vw' }">
+                        <span class="wiki-issue-trigger"
+                          :title="$t('knowledgeEditor.wikiBrowser.issueTitle', { count: pageIssues.length })">
+                          <t-icon name="error-circle-filled" style="color: var(--td-warning-color);" />
+                        </span>
 
-                    <template #content>
-                      <div class="wiki-issue-popup-content">
-                        <div class="wiki-issue-popup-header">
-                          <div class="wiki-issue-popup-title">
-                            <span>{{ $t('knowledgeEditor.wikiBrowser.issueFixSuggestions', { count: pageIssues.length })
-                            }}</span>
-                          </div>
-                          <t-button v-if="props.canEdit" size="small" theme="primary" variant="base"
-                            @click="triggerAutoFix">
-                            <template #icon><t-icon name="tools" /></template>
-                            {{ $t('knowledgeEditor.wikiBrowser.issueFixBtn') }}
-                          </t-button>
-                        </div>
-                        <div class="wiki-issue-popup-list">
-                          <div v-for="issue in pageIssues" :key="issue.id" class="wiki-issue-popup-item">
-                            <div class="wiki-issue-popup-main">
-                              <div class="wiki-issue-popup-tags">
-                                <t-tag v-if="issue.issue_type === 'mixed_entities'" theme="warning" variant="light"
-                                  size="small">{{
-                                    $t('knowledgeEditor.wikiBrowser.issueMixed') }}</t-tag>
-                                <t-tag v-else-if="issue.issue_type === 'contradictory_facts'" theme="danger"
-                                  variant="light" size="small">{{
-                                    $t('knowledgeEditor.wikiBrowser.issueConflict') }}</t-tag>
-                                <t-tag v-else-if="issue.issue_type === 'out_of_date'" theme="default" variant="light"
-                                  size="small">{{
-                                    $t('knowledgeEditor.wikiBrowser.issueOutdated') }}</t-tag>
-                                <t-tag v-else theme="primary" variant="light" size="small">{{
-                                  $t('knowledgeEditor.wikiBrowser.issueAttention') }}</t-tag>
+                        <template #content>
+                          <div class="wiki-issue-popup-content">
+                            <div class="wiki-issue-popup-header">
+                              <div class="wiki-issue-popup-title">
+                                <span>{{ $t('knowledgeEditor.wikiBrowser.issueFixSuggestions', {
+                                  count:
+                                    pageIssues.length
+                                })
+                                }}</span>
                               </div>
-                              <div class="wiki-issue-popup-desc">
-                                {{ issue.description }}
-                              </div>
-                              <div class="wiki-issue-popup-meta">
-                                <span class="wiki-issue-popup-reporter">
-                                  {{ issue.reported_by === 'wiki-researcher-agent' ?
-                                    $t('knowledgeEditor.wikiBrowser.issueAiLinter') :
-                                    $t('knowledgeEditor.wikiBrowser.issueReportedBy', { reporter: issue.reported_by }) }}
-                                </span>
-                                <div v-if="props.canEdit" class="wiki-issue-popup-actions">
-                                  <span class="wiki-issue-popup-action" @click="triggerFixIssue(issue)"
-                                    style="margin-right: 12px; font-weight: 500;">
-                                    <t-icon name="tools" style="margin-right: 4px;" />{{
-                                      $t('knowledgeEditor.wikiBrowser.issueFixSingle') }}
-                                  </span>
-                                  <span class="wiki-issue-popup-action" style="color: var(--td-text-color-placeholder);"
-                                    @click="handleIssueIgnore(issue.id)">{{
-                                      $t('knowledgeEditor.wikiBrowser.issueIgnore') }}</span>
+                              <t-button v-if="props.canEdit" size="small" theme="primary" variant="base"
+                                @click="triggerAutoFix">
+                                <template #icon><t-icon name="tools" /></template>
+                                {{ $t('knowledgeEditor.wikiBrowser.issueFixBtn') }}
+                              </t-button>
+                            </div>
+                            <div class="wiki-issue-popup-list">
+                              <div v-for="issue in pageIssues" :key="issue.id" class="wiki-issue-popup-item">
+                                <div class="wiki-issue-popup-main">
+                                  <div class="wiki-issue-popup-tags">
+                                    <t-tag v-if="issue.issue_type === 'mixed_entities'" theme="warning" variant="light"
+                                      size="small">{{
+                                        $t('knowledgeEditor.wikiBrowser.issueMixed') }}</t-tag>
+                                    <t-tag v-else-if="issue.issue_type === 'contradictory_facts'" theme="danger"
+                                      variant="light" size="small">{{
+                                        $t('knowledgeEditor.wikiBrowser.issueConflict') }}</t-tag>
+                                    <t-tag v-else-if="issue.issue_type === 'out_of_date'" theme="default" variant="light"
+                                      size="small">{{
+                                        $t('knowledgeEditor.wikiBrowser.issueOutdated') }}</t-tag>
+                                    <t-tag v-else theme="primary" variant="light" size="small">{{
+                                      $t('knowledgeEditor.wikiBrowser.issueAttention') }}</t-tag>
+                                  </div>
+                                  <div class="wiki-issue-popup-desc">
+                                    {{ issue.description }}
+                                  </div>
+                                  <div class="wiki-issue-popup-meta">
+                                    <span class="wiki-issue-popup-reporter">
+                                      {{ issue.reported_by === 'wiki-researcher-agent' ?
+                                        $t('knowledgeEditor.wikiBrowser.issueAiLinter') :
+                                        $t('knowledgeEditor.wikiBrowser.issueReportedBy', {
+                                          reporter:
+                                            issue.reported_by
+                                        }) }}
+                                    </span>
+                                    <div v-if="props.canEdit" class="wiki-issue-popup-actions">
+                                      <span class="wiki-issue-popup-action" @click="triggerFixIssue(issue)"
+                                        style="margin-right: 12px; font-weight: 500;">
+                                        <t-icon name="tools" style="margin-right: 4px;" />{{
+                                          $t('knowledgeEditor.wikiBrowser.issueFixSingle') }}
+                                      </span>
+                                      <span class="wiki-issue-popup-action"
+                                        style="color: var(--td-text-color-placeholder);"
+                                        @click="handleIssueIgnore(issue.id)">{{
+                                          $t('knowledgeEditor.wikiBrowser.issueIgnore') }}</span>
+                                    </div>
+                                  </div>
                                 </div>
                               </div>
                             </div>
                           </div>
-                        </div>
-                      </div>
-                    </template>
-                  </t-popup>
-                  </h2>
-                  <div class="wiki-reader-header-actions">
-                    <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.historyBtn')" placement="top">
-                      <button type="button" class="wiki-reader-action-btn"
-                        :aria-label="$t('knowledgeEditor.wikiBrowser.historyBtn')" @click="openRevisionDrawer">
-                        <t-icon name="history" />
-                      </button>
-                    </t-tooltip>
-                    <t-tooltip v-if="props.canEdit && !editingPage"
-                      :content="$t('knowledgeEditor.wikiBrowser.editBtn')" placement="top">
-                      <button type="button" class="wiki-reader-action-btn"
-                        :aria-label="$t('knowledgeEditor.wikiBrowser.editBtn')" @click="startEditPage">
-                        <t-icon name="edit" />
-                      </button>
-                    </t-tooltip>
-                    <t-popconfirm v-if="props.canEdit" theme="danger"
-                      :content="$t('knowledgeEditor.wikiBrowser.deletePageConfirm', { title: selectedPage.title })"
-                      @confirm="confirmDeletePage">
-                      <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.deletePageBtn')" placement="top">
-                        <button type="button" class="wiki-reader-action-btn wiki-reader-action-btn--danger"
-                          :aria-label="$t('knowledgeEditor.wikiBrowser.deletePageBtn')">
-                          <t-icon name="delete" />
-                        </button>
+                        </template>
+                      </t-popup>
+                    </h2>
+                    <t-input v-else v-model="editForm.title" class="wiki-edit-field wiki-edit-field--title"
+                      :placeholder="$t('knowledgeEditor.wikiBrowser.editTitlePlaceholder')" />
+                    <div class="wiki-reader-title-badges wiki-reader-title-badges--secondary">
+                      <span v-if="editingPage" class="wiki-badge wiki-badge--editing">
+                        {{ $t('knowledgeEditor.wikiBrowser.editingBadge') }}
+                      </span>
+                      <span class="wiki-badge wiki-badge--type">
+                        <t-icon :name="getPageIcon(selectedPage)" />
+                        {{ getTypeLabel(selectedPage.page_type) }}
+                      </span>
+                      <span class="wiki-badge wiki-badge--ver">
+                        {{ $t('knowledgeEditor.wikiBrowser.version', { ver: selectedPage.version }) }}
+                      </span>
+                      <t-tooltip v-if="editSourceVisible(selectedPage.last_edit_source)"
+                        :content="editSourceLabel(selectedPage.last_edit_source)">
+                        <span class="wiki-badge wiki-badge--source">
+                          <t-icon :name="editSourceIcon(selectedPage.last_edit_source)" />
+                          {{ editSourceLabel(selectedPage.last_edit_source) }}
+                        </span>
                       </t-tooltip>
-                    </t-popconfirm>
+                      <span v-for="alias in (selectedPage.aliases || [])" :key="alias"
+                        class="wiki-badge wiki-badge--alias"
+                        :title="`${$t('knowledgeEditor.wikiBrowser.aliases')} ${alias}`">
+                        <t-icon name="link" />
+                        {{ alias }}
+                      </span>
+                    </div>
+                    <p v-if="!editingPage && selectedPage.summary" class="wiki-reader-lead">{{ selectedPage.summary }}</p>
+                    <t-textarea v-if="editingPage" v-model="editForm.summary"
+                      class="wiki-edit-field wiki-edit-field--summary" :autosize="{ minRows: 2, maxRows: 4 }"
+                      :placeholder="$t('knowledgeEditor.wikiBrowser.editSummaryPlaceholder')" />
+                  </div>
+                  <div class="wiki-reader-aside">
+                    <div class="wiki-reader-actions" role="toolbar"
+                      :aria-label="$t('knowledgeEditor.wikiBrowser.pageActions')">
+                      <template v-if="editingPage">
+                        <t-button theme="primary" size="small" :loading="savingPage" @click="savePageEdit()">
+                          {{ $t('common.save') }}
+                        </t-button>
+                        <t-button variant="text" size="small" :disabled="savingPage" @click="cancelEditPage">
+                          {{ $t('common.cancel') }}
+                        </t-button>
+                      </template>
+                      <template v-else>
+                        <t-tooltip v-if="props.canEdit" :content="$t('knowledgeEditor.wikiBrowser.editBtn')"
+                          placement="top">
+                          <button type="button" class="wiki-action-btn"
+                            :aria-label="$t('knowledgeEditor.wikiBrowser.editBtn')" @click="startEditPage">
+                            <t-icon name="edit" />
+                          </button>
+                        </t-tooltip>
+                        <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.historyBtn')" placement="top">
+                          <button type="button" class="wiki-action-btn"
+                            :aria-label="$t('knowledgeEditor.wikiBrowser.historyBtn')" @click="openRevisionDrawer">
+                            <t-icon name="history" />
+                          </button>
+                        </t-tooltip>
+                        <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.viewInGraph')" placement="top">
+                          <button type="button" class="wiki-action-btn"
+                            :aria-label="$t('knowledgeEditor.wikiBrowser.viewInGraph')"
+                            @click="emit('view-graph', selectedPage.slug)">
+                            <t-icon name="chart-bubble" />
+                          </button>
+                        </t-tooltip>
+                        <t-popconfirm v-if="props.canEdit" theme="danger"
+                          :content="$t('knowledgeEditor.wikiBrowser.deletePageConfirm', { title: selectedPage.title })"
+                          @confirm="confirmDeletePage">
+                          <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.deletePageBtn')" placement="top">
+                            <button type="button" class="wiki-action-btn wiki-action-btn--danger"
+                              :aria-label="$t('knowledgeEditor.wikiBrowser.deletePageBtn')">
+                              <t-icon name="delete" />
+                            </button>
+                          </t-tooltip>
+                        </t-popconfirm>
+                      </template>
+                    </div>
+                    <div v-if="!editingPage" class="wiki-reader-aside-meta">
+                      <span class="wiki-reader-aside-meta-item">
+                        <t-icon name="time" size="14px" />
+                        {{ formatDate(selectedPage.updated_at) }}
+                      </span>
+                    </div>
                   </div>
                 </div>
-                <div v-if="selectedPage.aliases && selectedPage.aliases.length" class="wiki-reader-aliases">
-                  <span class="wiki-alias-label">{{ $t('knowledgeEditor.wikiBrowser.aliases') }}:</span>
-                  <t-tag v-for="alias in selectedPage.aliases" :key="alias" size="small" variant="light"
-                    class="wiki-alias-tag">
-                    {{ alias }}
-                  </t-tag>
-                </div>
-                <div class="wiki-reader-meta">
-                  <t-tag size="small" :theme="getTypeTheme(selectedPage.page_type)" variant="light-outline">
-                    {{ getTypeLabel(selectedPage.page_type) }}
-                  </t-tag>
-                  <span class="wiki-reader-meta-text">{{ $t('knowledgeEditor.wikiBrowser.version', {
-                    ver:
-                      selectedPage.version
-                  })
-                  }}</span>
-                  <!-- Provenance of the current version; only surfaced when a
-                       human / agent / revert touched it — pipeline is the
-                       default and would just be noise. -->
-                  <t-tag v-if="editSourceVisible(selectedPage.last_edit_source)" size="small"
-                    :theme="editSourceTheme(selectedPage.last_edit_source)" variant="light">
-                    {{ editSourceLabel(selectedPage.last_edit_source) }}
-                  </t-tag>
-                  <span class="wiki-reader-meta-text">{{ formatDate(selectedPage.updated_at) }}</span>
-                  <t-link theme="primary" hover="color" class="wiki-reader-graph-link"
-                    @click="emit('view-graph', selectedPage.slug)">
-                    <template #prefixIcon><t-icon name="chart-bubble" /></template>
-                    {{ $t('knowledgeEditor.wikiBrowser.viewInGraph') }}
-                  </t-link>
-                </div>
-              </div>
-
-              <!-- Backlinks (in_links) -->
-              <div v-if="selectedPage.in_links?.length" class="wiki-reader-backlinks">
-                <span class="wiki-backlink-label">
-                  <t-icon name="link" size="14px" />
-                  {{ $t('knowledgeEditor.wikiBrowser.linkedFrom') }}
-                </span>
-                <a v-for="link in selectedPage.in_links" :key="'in-' + link" href="#" class="wiki-backlink-tag"
-                  @click.prevent="navigateToSlug(link)">{{ slugDisplayName(link) }}</a>
               </div>
 
               <!-- Content -->
@@ -539,12 +566,7 @@
                    the page version captured at edit start; the backend answers
                    409 when someone (or the pipeline) edited in between. -->
               <div v-else class="wiki-page-editor">
-                <t-input v-model="editForm.title" class="wiki-page-editor-title"
-                  :placeholder="$t('knowledgeEditor.wikiBrowser.editTitlePlaceholder')" />
-                <t-textarea v-model="editForm.summary" class="wiki-page-editor-summary"
-                  :autosize="{ minRows: 2, maxRows: 4 }"
-                  :placeholder="$t('knowledgeEditor.wikiBrowser.editSummaryPlaceholder')" />
-                <t-textarea v-model="editForm.content" class="wiki-page-editor-content"
+                <t-textarea v-model="editForm.content" class="wiki-edit-field wiki-edit-field--content"
                   :autosize="{ minRows: 16, maxRows: 40 }"
                   :placeholder="$t('knowledgeEditor.wikiBrowser.editContentPlaceholder')" />
                 <t-alert v-if="editConflictVersion !== null" theme="warning" class="wiki-page-editor-conflict"
@@ -560,25 +582,30 @@
                     </span>
                   </template>
                 </t-alert>
-                <div class="wiki-page-editor-footer">
-                  <t-button theme="primary" :loading="savingPage" @click="savePageEdit()">
-                    {{ $t('common.save') }}
-                  </t-button>
-                  <t-button variant="outline" :disabled="savingPage" @click="cancelEditPage">
-                    {{ $t('common.cancel') }}
-                  </t-button>
-                </div>
               </div>
 
-              <!-- Source refs -->
-              <div v-if="parsedSourceRefs.length" class="wiki-reader-sources">
-                <span class="wiki-link-label">{{ $t('knowledgeEditor.wikiBrowser.sources') }}</span>
-                <a v-for="ref in parsedSourceRefs" :key="ref.id" href="#" class="wiki-source-ref"
-                  @click.prevent="emit('open-source-doc', ref.id)">
-                  <t-icon name="file" size="14px" />
-                  {{ ref.title }}
-                </a>
-              </div>
+              <!-- Page footer: backlinks + sources -->
+              <footer v-if="!editingPage && (selectedPage.in_links?.length || parsedSourceRefs.length)"
+                class="wiki-reader-footer">
+                <div v-if="selectedPage.in_links?.length" class="wiki-reader-footer-row">
+                  <span class="wiki-reader-footer-label">{{ $t('knowledgeEditor.wikiBrowser.linkedFrom') }}</span>
+                  <span class="wiki-reader-footer-value">
+                    <a v-for="link in selectedPage.in_links" :key="'in-' + link" href="#"
+                      class="wiki-content-link" @click.prevent="navigateToSlug(link)">
+                      {{ slugDisplayName(link) }}
+                    </a>
+                  </span>
+                </div>
+                <div v-if="parsedSourceRefs.length" class="wiki-reader-footer-row">
+                  <span class="wiki-reader-footer-label">{{ $t('knowledgeEditor.wikiBrowser.sources') }}</span>
+                  <span class="wiki-reader-footer-value">
+                    <a v-for="ref in parsedSourceRefs" :key="ref.id" href="#" class="wiki-content-link"
+                      @click.prevent="emit('open-source-doc', ref.id)">
+                      {{ ref.title }}
+                    </a>
+                  </span>
+                </div>
+              </footer>
             </template>
 
             <!-- System view: index overview rendered as markdown. Starts
@@ -769,6 +796,7 @@ import { marked } from 'marked'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { RecycleScroller } from 'vue-virtual-scroller'
 import { hydrateProtectedFileImages, sanitizeMarkdownHTML } from '@/utils/security'
+import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess'
 import picturePreview from '@/components/picture-preview.vue'
 import WikiFolderActions from './WikiFolderActions.vue'
 import WikiRevisionDrawer from './WikiRevisionDrawer.vue'
@@ -827,6 +855,13 @@ const emit = defineEmits<{
   (e: 'status-change', payload: { pendingTasks: number; isActive: boolean; pendingIssues: number }): void
   (e: 'view-graph', slug: string): void
 }>()
+
+// Wiki content can reference objects owned by the KB's source tenant (shared
+// KBs), which the tenant-scoped /files proxy rejects as cross-tenant.
+const kbFileAccess = computed<ProtectedFileAccessContext>(() => ({
+  mode: 'knowledgeBase',
+  kbId: props.knowledgeBaseId,
+}))
 const pages = ref<WikiPage[]>([])
 const selectedPage = ref<WikiPage | null>(null)
 
@@ -1477,7 +1512,7 @@ function closeImagePreview() {
 watch(graphDrawerContent, async () => {
   await nextTick()
   if (drawerBodyRef.value) {
-    await hydrateProtectedFileImages(drawerBodyRef.value, undefined, props.knowledgeBaseId)
+    await hydrateProtectedFileImages(drawerBodyRef.value, kbFileAccess.value)
   }
 })
 
@@ -1948,8 +1983,25 @@ function getPageIcon(page: WikiPage): string {
 
 const renderedContent = computed(() => {
   if (!selectedPage.value) return ''
-  return renderMarkdown(selectedPage.value.content)
+  const body = stripDuplicateLeadingTitle(selectedPage.value.content || '', selectedPage.value.title)
+  return renderMarkdown(body)
 })
+
+function stripDuplicateLeadingTitle(content: string, title: string): string {
+  if (!content || !title) return content
+  const lines = content.split('\n')
+  let i = 0
+  while (i < lines.length && lines[i].trim() === '') i++
+  if (i >= lines.length) return content
+  const headingMatch = lines[i].match(/^#\s+(.+?)\s*$/)
+  if (!headingMatch) return content
+  const heading = headingMatch[1].trim()
+  const pageTitle = title.trim()
+  if (heading !== pageTitle && heading.toLowerCase() !== pageTitle.toLowerCase()) return content
+  i++
+  while (i < lines.length && lines[i].trim() === '') i++
+  return lines.slice(i).join('\n')
+}
 
 // Label shown next to the back arrow on page headers. Prefers the
 // nearest page-history entry when available so the user sees where
@@ -1984,7 +2036,7 @@ const indexHasMore = computed(() => {
 watch(renderedContent, async () => {
   await nextTick()
   if (readerBodyRef.value) {
-    await hydrateProtectedFileImages(readerBodyRef.value, undefined, props.knowledgeBaseId)
+    await hydrateProtectedFileImages(readerBodyRef.value, kbFileAccess.value)
   }
 })
 
@@ -1994,7 +2046,7 @@ watch(renderedContent, async () => {
 watch(renderedIndexMarkdown, async () => {
   await nextTick()
   if (indexBodyRef.value) {
-    await hydrateProtectedFileImages(indexBodyRef.value, undefined, props.knowledgeBaseId)
+    await hydrateProtectedFileImages(indexBodyRef.value, kbFileAccess.value)
   }
 })
 
@@ -3032,6 +3084,19 @@ function editSourceLabel(source?: string): string {
       return t('knowledgeEditor.wikiBrowser.editSourceRevert')
     default:
       return t('knowledgeEditor.wikiBrowser.editSourcePipeline')
+  }
+}
+
+function editSourceIcon(source?: string): string {
+  switch (source) {
+    case 'user':
+      return 'user'
+    case 'agent':
+      return 'tools'
+    case 'revert':
+      return 'rollback'
+    default:
+      return 'file-code'
   }
 }
 
@@ -4735,7 +4800,7 @@ watch(() => props.view, (v) => {
   } else if (v === 'browser') {
     nextTick(async () => {
       if (readerBodyRef.value && renderedContent.value) {
-        await hydrateProtectedFileImages(readerBodyRef.value, undefined, props.knowledgeBaseId)
+        await hydrateProtectedFileImages(readerBodyRef.value, kbFileAccess.value)
       }
     })
   }
@@ -5359,7 +5424,85 @@ onUnmounted(() => {
 }
 
 .wiki-reader-header {
-  margin-bottom: 12px;
+  margin-bottom: 24px;
+}
+
+.wiki-reader-lead {
+  margin: 10px 0 0;
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--td-text-color-secondary);
+}
+
+.wiki-reader-title-block {
+  flex: 1;
+  min-width: 0;
+}
+
+.wiki-reader-aside {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.wiki-reader-aside-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: 220px;
+}
+
+.wiki-reader-aside-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--td-text-color-placeholder);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wiki-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-secondarycontainer);
+
+  .t-icon {
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+}
+
+.wiki-badge--ver {
+  font-family: var(--td-font-family-mono, monospace);
+  font-variant-numeric: tabular-nums;
+}
+
+.wiki-badge--editing {
+  color: var(--td-warning-color);
+  background: var(--td-warning-color-1);
+}
+
+.wiki-badge--source {
+  cursor: default;
+}
+
+.wiki-badge--alias {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wiki-nav-bar {
@@ -5388,8 +5531,7 @@ onUnmounted(() => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: 20px;
 }
 
 .wiki-reader-title {
@@ -5398,7 +5540,6 @@ onUnmounted(() => {
   font-weight: 600;
   line-height: 1.3;
   color: var(--td-text-color-primary);
-  flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -5409,41 +5550,101 @@ onUnmounted(() => {
   min-width: 0;
 }
 
-.wiki-reader-header-actions {
-  display: flex;
+.wiki-reader-title-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   flex-shrink: 0;
-  margin-top: 2px;
 }
 
-.wiki-reader-action-btn {
+.wiki-reader-title-badges--secondary {
+  margin-top: 8px;
+}
+
+.wiki-edit-field {
+  width: 100%;
+
+  :deep(.t-input),
+  :deep(.t-textarea) {
+    border-radius: 8px;
+    background: var(--td-bg-color-container);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  :deep(.t-input:focus-within),
+  :deep(.t-textarea:focus-within) {
+    border-color: var(--td-brand-color);
+    box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
+  }
+}
+
+.wiki-edit-field--title {
+  width: 100%;
+
+  :deep(.t-input__inner) {
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1.35;
+    padding: 10px 12px;
+    height: auto;
+    min-height: 44px;
+  }
+}
+
+.wiki-edit-field--summary {
+  margin: 10px 0 0;
+
+  :deep(.t-textarea__inner) {
+    font-size: 14px;
+    line-height: 1.6;
+    padding: 10px 12px;
+    resize: vertical;
+  }
+}
+
+.wiki-edit-field--content {
+  :deep(.t-textarea__inner) {
+    font-family: var(--td-font-family-mono, monospace);
+    font-size: 14px;
+    line-height: 1.7;
+    padding: 12px 14px;
+    resize: vertical;
+  }
+}
+
+.wiki-reader-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.wiki-action-btn {
   width: 32px;
   height: 32px;
   padding: 0;
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--td-text-color-secondary);
+  color: var(--td-text-color-placeholder);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: color 0.15s ease;
 
   .t-icon {
     font-size: 16px;
   }
 
   &:hover {
-    color: var(--td-brand-color);
-    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
   }
 
-  &.wiki-reader-action-btn--danger:hover {
+  &.wiki-action-btn--danger:hover {
     color: var(--td-error-color);
-    background: var(--td-error-color-1);
   }
 }
 
@@ -5452,7 +5653,7 @@ onUnmounted(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 6px 8px;
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   font-size: 13px;
   line-height: 1.4;
 }
@@ -5471,8 +5672,9 @@ onUnmounted(() => {
 .wiki-reader-meta {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .wiki-reader-meta-text {
@@ -5480,41 +5682,11 @@ onUnmounted(() => {
   color: var(--td-text-color-placeholder);
 }
 
-.wiki-reader-graph-link {
-  margin-left: auto;
-  font-size: 13px;
-}
-
 .wiki-page-editor {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  margin-top: 8px;
-  padding: 16px;
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-
-  .wiki-page-editor-title :deep(.t-input__inner) {
-    font-size: 18px;
-    font-weight: 600;
-    background: transparent;
-  }
-
-  .wiki-page-editor-title :deep(.t-input) {
-    background: transparent;
-  }
-
-  .wiki-page-editor-summary :deep(textarea) {
-    font-size: 13px;
-    line-height: 1.6;
-  }
-
-  .wiki-page-editor-content :deep(textarea) {
-    font-family: var(--td-font-family-mono, monospace);
-    font-size: 13px;
-    line-height: 1.7;
-  }
+  margin-top: 16px;
 }
 
 .wiki-page-editor-conflict {
@@ -5525,12 +5697,6 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 12px;
-}
-
-.wiki-page-editor-footer {
-  display: flex;
-  gap: 8px;
-  padding-top: 4px;
 }
 
 .wiki-create-page-form {
@@ -5775,69 +5941,48 @@ onUnmounted(() => {
   }
 }
 
-.wiki-reader-backlinks {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--td-component-stroke);
-  margin-bottom: 24px;
-}
-
-.wiki-backlink-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--td-text-color-placeholder);
-  font-weight: 500;
-  flex-shrink: 0;
-  margin-right: 4px;
-}
-
-.wiki-backlink-tag {
-  color: var(--td-text-color-secondary);
-  text-decoration: none;
-  font-size: 13px;
-  padding: 2px 8px;
-  background: var(--td-bg-color-secondarycontainer);
-  border-radius: 4px;
-  transition: all 0.15s;
-
-  &:hover {
-    color: var(--td-brand-color);
-    background: var(--td-brand-color-light);
-  }
-}
-
-.wiki-reader-sources {
-  margin-top: 24px;
-  padding-top: 16px;
+.wiki-reader-footer {
+  margin-top: 32px;
+  padding-top: 18px;
   border-top: 1px solid var(--td-component-stroke);
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  font-size: 13px;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.wiki-source-ref {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 10px;
-  background: var(--td-bg-color-secondarycontainer);
-  border-radius: 4px;
-  color: var(--td-text-color-secondary);
+.wiki-reader-footer-row {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.wiki-reader-footer-label {
+  flex: 0 0 64px;
   font-size: 12px;
+  color: var(--td-text-color-placeholder);
+}
+
+.wiki-reader-footer-value {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+}
+
+.wiki-reader-footer .wiki-content-link {
+  color: var(--td-brand-color);
   text-decoration: none;
+  border-bottom: 1px dashed var(--td-brand-color);
   cursor: pointer;
-  transition: color 0.15s, background 0.15s;
+  font-weight: 500;
 
   &:hover {
-    color: var(--td-brand-color);
-    background: var(--td-bg-color-container-hover);
+    border-bottom-style: solid;
+    text-decoration: none !important;
   }
 }
 

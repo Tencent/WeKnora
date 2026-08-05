@@ -315,7 +315,7 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 	// time". The handler will ListPagesBySourceRef again, pick up any
 	// pages that materialised after we looked, and also rebuild the index
 	// so the knowledge's disappearance is reflected in the UI.
-	lang, _ := types.LanguageFromContext(ctx)
+	lang := types.LanguageFromContextOrDefault(ctx)
 	tenantID, _ := types.TenantIDFromContext(ctx)
 	EnqueueWikiRetract(ctx, s.task, s.taskPendingRepo, WikiRetractPayload{
 		TenantID:        tenantID,
