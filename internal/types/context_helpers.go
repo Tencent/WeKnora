@@ -227,15 +227,46 @@ func LanguageFromContext(ctx context.Context) (string, bool) {
 	return v, ok && v != ""
 }
 
+// ResolveLanguage resolves the effective locale for work that may carry its own
+// language, in descending precedence: the explicit locale, the locale in ctx,
+// then DefaultLanguage().
+//
+// Async workers must use this rather than reading a payload field directly: a
+// task payload persisted before the language field existed, or enqueued from a
+// background path that never passed through the HTTP language middleware,
+// carries an empty locale. Interpolating that empty value into a prompt yields
+// instructions like "Write in ." and lets the model pick a language at random.
+func ResolveLanguage(ctx context.Context, locale string) string {
+	if locale = strings.TrimSpace(locale); locale != "" {
+		return locale
+	}
+	if ctxLocale, ok := LanguageFromContext(ctx); ok {
+		return ctxLocale
+	}
+	return DefaultLanguage()
+}
+
+// ResolveLanguageName is ResolveLanguage rendered as the human-readable name
+// that prompt templates interpolate (e.g. "Chinese (Simplified)").
+//
+// It is idempotent over already-resolved names: LanguageLocaleName passes
+// unknown values through, so re-resolving a display name returns it unchanged.
+func ResolveLanguageName(ctx context.Context, locale string) string {
+	return LanguageLocaleName(ResolveLanguage(ctx, locale))
+}
+
+// LanguageFromContextOrDefault returns the locale carried by ctx, falling back
+// to DefaultLanguage(). Use it when persisting a locale onto an async task
+// payload so downstream workers never inherit an empty language.
+func LanguageFromContextOrDefault(ctx context.Context) string {
+	return ResolveLanguage(ctx, "")
+}
+
 // LanguageNameFromContext returns the human-readable language name for use in prompts.
 // e.g. "zh-CN" -> "Chinese (Simplified)", "en-US" -> "English", "ko-KR" -> "Korean"
 // Falls back to DefaultLanguage() (WEKNORA_LANGUAGE env, then "zh-CN").
 func LanguageNameFromContext(ctx context.Context) string {
-	lang, ok := LanguageFromContext(ctx)
-	if !ok {
-		lang = DefaultLanguage()
-	}
-	return LanguageLocaleName(lang)
+	return ResolveLanguageName(ctx, "")
 }
 
 // LanguageLocaleName maps a locale code to a human-readable language name for LLM prompts.

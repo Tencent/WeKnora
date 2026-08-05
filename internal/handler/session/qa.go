@@ -392,10 +392,7 @@ func buildMessageExecutionContext(
 	skillNames []string,
 	webSearchEnabled bool,
 ) (types.MessageExecutionContext, string, uint64, string) {
-	locale, ok := types.LanguageFromContext(ctx)
-	if !ok {
-		locale = types.DefaultLanguage()
-	}
+	locale := types.LanguageFromContextOrDefault(ctx)
 
 	snapshot := types.MessageExecutionContext{
 		KnowledgeBaseIDs: knowledgeBaseIDs,
