@@ -165,6 +165,22 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "oauth2",
 		Capabilities: []string{"incremental", "deletion_sync"},
 	},
+	types.ConnectorTypeFeishuDrive: {
+		Type:         types.ConnectorTypeFeishuDrive,
+		Name:         "Feishu Drive (飞书云盘)",
+		Description:  "Sync documents and files from a Feishu Drive folder",
+		Priority:     0,
+		AuthType:     "oauth2",
+		Capabilities: []string{"incremental", "deletion_sync"},
+	},
+	types.ConnectorTypeLarkDrive: {
+		Type:         types.ConnectorTypeLarkDrive,
+		Name:         "Lark Drive",
+		Description:  "Sync documents and files from a Lark Drive folder",
+		Priority:     0,
+		AuthType:     "oauth2",
+		Capabilities: []string{"incremental", "deletion_sync"},
+	},
 	types.ConnectorTypeNotion: {
 		Type:         types.ConnectorTypeNotion,
 		Name:         "Notion",

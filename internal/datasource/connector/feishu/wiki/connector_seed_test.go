@@ -8,6 +8,7 @@
 // and delete them afterwards. Requires app write scopes:
 //   - wiki:wiki           (create wiki nodes)
 //   - docx:document       (write docx content)
+//
 // plus the app being a member of the space.
 //
 // Run:
@@ -16,7 +17,7 @@
 //	FEISHU_APP_ID=... FEISHU_APP_SECRET=... FEISHU_TEST_SPACE_ID=... FEISHU_SEED_COUNT=3 \
 //	  go test -tags feishu_integration -run TestRealAPI_SeedDocs -v \
 //	  ./internal/datasource/connector/feishu/
-package feishu
+package wiki
 
 import (
 	"context"
@@ -25,6 +26,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -52,7 +54,7 @@ func TestRealAPI_CreateSpace(t *testing.T) {
 		t.Skip("set FEISHU_APP_ID, FEISHU_APP_SECRET to run")
 	}
 	utils.SetSSRFWhitelistFromRaw("*.feishu.cn,*.larksuite.com")
-	client := NewClient(&Config{AppID: appID, AppSecret: appSecret, BaseURL: os.Getenv("FEISHU_BASE_URL")})
+	client := core.NewClient(&core.Config{AppID: appID, AppSecret: appSecret, BaseURL: os.Getenv("FEISHU_BASE_URL")})
 
 	var resp struct {
 		Code int    `json:"code"`
@@ -64,7 +66,7 @@ func TestRealAPI_CreateSpace(t *testing.T) {
 			} `json:"space"`
 		} `json:"data"`
 	}
-	err := client.doRequest(context.Background(), "POST", "/open-apis/wiki/v2/spaces",
+	err := client.DoRequest(context.Background(), "POST", "/open-apis/wiki/v2/spaces",
 		map[string]interface{}{
 			"name":        "WeKnora Resilience Test KB",
 			"description": "Auto-created for connector resilience testing (#2136). Safe to delete.",
@@ -95,7 +97,7 @@ func TestRealAPI_SeedDocs(t *testing.T) {
 	utils.SetSSRFWhitelistFromRaw("*.feishu.cn,*.larksuite.com")
 
 	baseURL := os.Getenv("FEISHU_BASE_URL")
-	client := NewClient(&Config{AppID: appID, AppSecret: appSecret, BaseURL: baseURL})
+	client := core.NewClient(&core.Config{AppID: appID, AppSecret: appSecret, BaseURL: baseURL})
 	ctx := context.Background()
 
 	for i := 1; i <= count; i++ {
@@ -103,7 +105,7 @@ func TestRealAPI_SeedDocs(t *testing.T) {
 
 		// 1) Create a docx wiki node.
 		var created wikiNodeCreateResp
-		err := client.doRequest(ctx, "POST",
+		err := client.DoRequest(ctx, "POST",
 			fmt.Sprintf("/open-apis/wiki/v2/spaces/%s/nodes", spaceID),
 			map[string]interface{}{
 				"obj_type":  "docx",
@@ -123,7 +125,7 @@ func TestRealAPI_SeedDocs(t *testing.T) {
 			Code int    `json:"code"`
 			Msg  string `json:"msg"`
 		}
-		berr := client.doRequest(ctx, "POST",
+		berr := client.DoRequest(ctx, "POST",
 			fmt.Sprintf("/open-apis/docx/v1/documents/%s/blocks/%s/children", docID, docID),
 			map[string]interface{}{
 				"index": 0,

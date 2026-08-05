@@ -16,7 +16,7 @@
 // wiki space but never creates, edits or deletes anything. It whitelists
 // *.feishu.cn / *.larksuite.com for SSRF in-process so it works from a dev
 // machine behind a fake-ip proxy without any production code change.
-package feishu
+package wiki
 
 import (
 	"context"
@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
@@ -74,7 +75,7 @@ func nodeTimes(t *testing.T, cur *types.SyncCursor) map[string]map[string]string
 	if cur == nil {
 		return nil
 	}
-	var fc feishuCursor
+	var fc core.FeishuCursor
 	b, _ := json.Marshal(cur.ConnectorCursor)
 	_ = json.Unmarshal(b, &fc)
 	return fc.SpaceNodeTimes
@@ -98,7 +99,7 @@ func TestRealAPI_ListSpaces(t *testing.T) {
 	}
 	utils.SetSSRFWhitelistFromRaw("*.feishu.cn,*.larksuite.com")
 
-	client := NewClient(&Config{AppID: appID, AppSecret: appSecret, BaseURL: os.Getenv("FEISHU_BASE_URL")})
+	client := core.NewClient(&core.Config{AppID: appID, AppSecret: appSecret, BaseURL: os.Getenv("FEISHU_BASE_URL")})
 	spaces, err := client.ListWikiSpaces(context.Background())
 	if err != nil {
 		t.Fatalf("ListWikiSpaces: %v", err)
@@ -133,7 +134,7 @@ func TestRealAPI_FetchStreamResumeConverges(t *testing.T) {
 		},
 		ResourceIDs: []string{spaceID},
 	}
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 
 	// ---- Pass 1: full sync against the real space.
 	h1 := &collectHandler{}
@@ -151,7 +152,7 @@ func TestRealAPI_FetchStreamResumeConverges(t *testing.T) {
 	// also ingests child items whose external_id is "<node>#file#..." or
 	// "<node>#image#...". Those are not wiki nodes: they ride their parent node's
 	// edit-time and intentionally carry no independent cursor entry (the parent's
-	// edit-time gates re-fetch of the whole subtree). Only node-level ids are
+	// edit-time gates re-core.Fetch of the whole subtree). Only node-level ids are
 	// required to be present.
 	nt1 := nodeTimes(t, cur1)[spaceID]
 	for _, id := range h1.ingested {
@@ -173,7 +174,7 @@ func TestRealAPI_FetchStreamResumeConverges(t *testing.T) {
 	}
 	t.Logf("pass 2: re-ingested=%d (want 0)", len(h2.ingested))
 	if len(h2.ingested) != 0 {
-		t.Errorf("pass 2 re-ingested %v — real edit-time is unstable or skip logic is broken", h2.ingested)
+		t.Errorf("pass 2 re-ingested %v — real edit-time is unstable or core.Skip logic is broken", h2.ingested)
 	}
 	if got := countNodes(nodeTimes(t, cur2)); got != countNodes(nt1AsMap(nt1)) {
 		t.Logf("note: cursor node count changed between passes (%d→%d) — space may have been edited concurrently", countNodes(nt1AsMap(nt1)), got)
@@ -185,9 +186,9 @@ func TestRealAPI_FetchStreamResumeConverges(t *testing.T) {
 		t.Logf("only %d doc(s); skipping interrupt/resume convergence sub-test (needs >=2)", n)
 		return
 	}
-	prevN := feishuStreamCheckpointInterval
-	feishuStreamCheckpointInterval = 1 // checkpoint every node so resume is precise
-	defer func() { feishuStreamCheckpointInterval = prevN }()
+	prevN := core.FeishuStreamCheckpointInterval
+	core.FeishuStreamCheckpointInterval = 1 // Checkpoint every node so resume is precise
+	defer func() { core.FeishuStreamCheckpointInterval = prevN }()
 
 	ctx3, cancel3 := context.WithCancel(context.Background())
 	h3 := &collectHandler{cancelAfter: 1, cancel: cancel3} // abort after 1 success
@@ -197,12 +198,12 @@ func TestRealAPI_FetchStreamResumeConverges(t *testing.T) {
 		t.Fatalf("pass 3 expected an abort error from the simulated timeout")
 	}
 	if len(h3.checkpoints) == 0 {
-		t.Fatalf("pass 3 wrote no checkpoint — resume would restart from scratch")
+		t.Fatalf("pass 3 wrote no Checkpoint — resume would restart from scratch")
 	}
 	persisted := h3.checkpoints[len(h3.checkpoints)-1]
 	t.Logf("pass 3: ingested=%d before abort, persisted cursor nodes=%d", len(h3.ingested), countNodes(nodeTimes(t, persisted)))
 
-	// Resume from the persisted checkpoint; must converge to full coverage.
+	// Resume from the persisted Checkpoint; must converge to full coverage.
 	h4 := &collectHandler{}
 	_, err = c.FetchStream(context.Background(), cfg, persisted, h4)
 	if err != nil {

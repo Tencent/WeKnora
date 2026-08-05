@@ -1,4 +1,4 @@
-package feishu
+package core
 
 import (
 	"context"
@@ -15,101 +15,116 @@ import (
 // Feishu docx block_type integer enum (subset this connector handles).
 // https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/docx-structure
 const (
-	blockTypePage      = 1
-	blockTypeText      = 2
-	blockTypeHeading1  = 3
+	BlockTypePage      = 1
+	BlockTypeText      = 2
+	BlockTypeHeading1  = 3
 	blockTypeHeading9  = 11
-	blockTypeBullet    = 12
-	blockTypeOrdered   = 13
-	blockTypeCode      = 14
-	blockTypeQuote     = 15
-	blockTypeTodo      = 17
-	blockTypeBitable   = 18
-	blockTypeCallout   = 19
-	blockTypeDivider   = 22
-	blockTypeFile      = 23
-	blockTypeImage     = 27
-	blockTypeSheet     = 30
-	blockTypeTable     = 31
-	blockTypeTableCell = 32
+	BlockTypeBullet    = 12
+	BlockTypeOrdered   = 13
+	BlockTypeCode      = 14
+	BlockTypeQuote     = 15
+	BlockTypeTodo      = 17
+	BlockTypeBitable   = 18
+	BlockTypeCallout   = 19
+	BlockTypeDivider   = 22
+	BlockTypeFile      = 23
+	BlockTypeImage     = 27
+	BlockTypeSheet     = 30
+	BlockTypeTable     = 31
+	BlockTypeTableCell = 32
 )
 
 // maxDocumentBlocks caps how many blocks a single document contributes, guarding
 // against pathological/adversarial documents. Far above any real Feishu doc.
 const maxDocumentBlocks = 50000
 
-// textElement is one inline run inside a text-bearing block.
-type textElement struct {
-	TextRun *struct {
-		Content string `json:"content"`
-	} `json:"text_run"`
+// TextElement is one inline run inside a text-bearing block.
+// TextRun is the text_run payload of a TextElement.
+type TextRun struct {
+	Content string `json:"content"`
 }
 
-// blockText is the shared shape of text-bearing blocks (text, headingN, bullet…).
-type blockText struct {
-	Elements []textElement `json:"elements"`
+type TextElement struct {
+	TextRun *TextRun `json:"text_run"`
 }
 
-// docxBlock is one node in the flat block array returned by the blocks API.
-type docxBlock struct {
+// BlockText is the shared shape of text-bearing blocks (text, headingN, bullet…).
+type BlockText struct {
+	Elements []TextElement `json:"elements"`
+}
+
+// BlockTokenRef is the shared shape of sheet/bitable/image block payloads
+// (the JSON tag differs per field; only the token matters).
+type BlockTokenRef struct {
+	Token string `json:"token"`
+}
+
+// BlockFileRef is the file block payload: the attachment token plus its name.
+type BlockFileRef struct {
+	Token string `json:"token"`
+	Name  string `json:"name"`
+}
+
+// BlockTableProperty carries the table grid shape.
+type BlockTableProperty struct {
+	ColumnSize int `json:"column_size"`
+}
+
+// BlockTable is the table block payload: cell block IDs plus grid property.
+type BlockTable struct {
+	Cells    []string            `json:"cells"`
+	Property *BlockTableProperty `json:"property"`
+}
+
+// DocxBlock is one node in the flat block array returned by the blocks API.
+type DocxBlock struct {
 	BlockID   string   `json:"block_id"`
 	ParentID  string   `json:"parent_id"`
 	BlockType int      `json:"block_type"`
 	Children  []string `json:"children"`
 
-	Text     *blockText `json:"text"`
-	Heading1 *blockText `json:"heading1"`
-	Heading2 *blockText `json:"heading2"`
-	Heading3 *blockText `json:"heading3"`
-	Heading4 *blockText `json:"heading4"`
-	Heading5 *blockText `json:"heading5"`
-	Heading6 *blockText `json:"heading6"`
-	Heading7 *blockText `json:"heading7"`
-	Heading8 *blockText `json:"heading8"`
-	Heading9 *blockText `json:"heading9"`
-	Bullet   *blockText `json:"bullet"`
-	Ordered  *blockText `json:"ordered"`
-	Code     *blockText `json:"code"`
-	Quote    *blockText `json:"quote"`
-	Todo     *blockText `json:"todo"`
-	Callout  *blockText `json:"callout"`
+	Text     *BlockText `json:"text"`
+	Heading1 *BlockText `json:"heading1"`
+	Heading2 *BlockText `json:"heading2"`
+	Heading3 *BlockText `json:"heading3"`
+	Heading4 *BlockText `json:"heading4"`
+	Heading5 *BlockText `json:"heading5"`
+	Heading6 *BlockText `json:"heading6"`
+	Heading7 *BlockText `json:"heading7"`
+	Heading8 *BlockText `json:"heading8"`
+	Heading9 *BlockText `json:"heading9"`
+	Bullet   *BlockText `json:"bullet"`
+	Ordered  *BlockText `json:"ordered"`
+	Code     *BlockText `json:"code"`
+	Quote    *BlockText `json:"quote"`
+	Todo     *BlockText `json:"todo"`
+	Callout  *BlockText `json:"callout"`
 
-	Sheet *struct {
-		Token string `json:"token"`
-	} `json:"sheet"`
-	Bitable *struct {
-		Token string `json:"token"`
-	} `json:"bitable"`
-	File *struct {
-		Token string `json:"token"`
-		Name  string `json:"name"`
-	} `json:"file"`
-	Image *struct {
-		Token string `json:"token"`
-	} `json:"image"`
+	Sheet   *BlockTokenRef `json:"sheet"`
+	Bitable *BlockTokenRef `json:"bitable"`
+	File    *BlockFileRef  `json:"file"`
+	Image   *BlockTokenRef `json:"image"`
 
-	Table *struct {
-		Cells    []string `json:"cells"`
-		Property *struct {
-			ColumnSize int `json:"column_size"`
-		} `json:"property"`
-	} `json:"table"`
+	Table *BlockTable `json:"table"`
 }
 
-// docxBlocksResponse is the response for GET .../documents/:id/blocks.
-type docxBlocksResponse struct {
-	apiResponse
-	Data struct {
-		Items     []docxBlock `json:"items"`
-		HasMore   bool        `json:"has_more"`
-		PageToken string      `json:"page_token"`
-	} `json:"data"`
+// DocxBlocksData is the data payload of DocxBlocksResponse.
+type DocxBlocksData struct {
+	Items     []DocxBlock `json:"items"`
+	HasMore   bool        `json:"has_more"`
+	PageToken string      `json:"page_token"`
 }
 
-// ListDocumentBlocks returns every block of a docx document as a flat,
+// DocxBlocksResponse is the response for GET .../documents/:id/blocks.
+type DocxBlocksResponse struct {
+	ApiResponse
+	Data DocxBlocksData `json:"data"`
+}
+
+// listDocumentBlocks returns every block of a docx document as a flat,
 // pre-order array. Paginates at 500 blocks/page. documentID is the obj_token.
-func (c *Client) ListDocumentBlocks(ctx context.Context, documentID string) ([]docxBlock, error) {
-	var all []docxBlock
+func (c *Client) listDocumentBlocks(ctx context.Context, documentID string) ([]DocxBlock, error) {
+	var all []DocxBlock
 	pageToken := ""
 	for {
 		path := fmt.Sprintf("/open-apis/docx/v1/documents/%s/blocks?page_size=500&document_revision_id=-1",
@@ -117,8 +132,8 @@ func (c *Client) ListDocumentBlocks(ctx context.Context, documentID string) ([]d
 		if pageToken != "" {
 			path += "&page_token=" + url.QueryEscape(pageToken)
 		}
-		var resp docxBlocksResponse
-		if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		var resp DocxBlocksResponse
+		if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
 			return nil, fmt.Errorf("list document blocks: %w", err)
 		}
 		if resp.Code != 0 {
@@ -148,21 +163,27 @@ func (c *Client) ListDocumentBlocks(ctx context.Context, documentID string) ([]d
 // is truncated and the caller annotates the omission.
 const maxTableRows = 500
 
-// sheetValuesResponse is the response for sheets-v2 values read.
-type sheetValuesResponse struct {
-	apiResponse
-	Data struct {
-		ValueRange struct {
-			Values [][]any `json:"values"`
-		} `json:"valueRange"`
-	} `json:"data"`
+// sheetValueRange is the valueRange payload of sheetValuesData.
+type sheetValueRange struct {
+	Values [][]any `json:"values"`
 }
 
-// ReadSheetRange reads the cell values of an embedded spreadsheet block.
+// sheetValuesData is the data payload of sheetValuesResponse.
+type sheetValuesData struct {
+	ValueRange sheetValueRange `json:"valueRange"`
+}
+
+// sheetValuesResponse is the response for sheets-v2 values read.
+type sheetValuesResponse struct {
+	ApiResponse
+	Data sheetValuesData `json:"data"`
+}
+
+// readSheetRange reads the cell values of an embedded spreadsheet block.
 // embedToken is the block's sheet.token, formatted "spreadsheetToken_sheetId".
 // Cells are stringified (display value) for RAG text retrieval. Rows are capped
 // at maxTableRows; truncated is true when the source had more rows than that.
-func (c *Client) ReadSheetRange(ctx context.Context, embedToken string) ([][]string, bool, error) {
+func (c *Client) readSheetRange(ctx context.Context, embedToken string) ([][]string, bool, error) {
 	idx := strings.LastIndex(embedToken, "_")
 	if idx < 0 {
 		return nil, false, fmt.Errorf("invalid sheet embed token: %q", embedToken)
@@ -171,7 +192,7 @@ func (c *Client) ReadSheetRange(ctx context.Context, embedToken string) ([][]str
 	path := fmt.Sprintf("/open-apis/sheets/v2/spreadsheets/%s/values/%s?valueRenderOption=ToString",
 		url.PathEscape(spreadsheetToken), url.PathEscape(sheetID))
 	var resp sheetValuesResponse
-	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
 		return nil, false, fmt.Errorf("read sheet range: %w", err)
 	}
 	if resp.Code != 0 {
@@ -293,20 +314,29 @@ func bitableCellToString(v any) string {
 	}
 }
 
+// bitableFieldProperty carries a field's type-specific settings.
+type bitableFieldProperty struct {
+	// DateFormatter distinguishes a date-only column from a datetime one.
+	DateFormatter string `json:"date_formatter"`
+}
+
+// bitableField is one entry of bitableFieldsData.Items.
+type bitableField struct {
+	FieldName string                `json:"field_name"`
+	Type      int                   `json:"type"`
+	Property  *bitableFieldProperty `json:"property"`
+}
+
+// bitableFieldsData is the data payload of bitableFieldsResponse.
+type bitableFieldsData struct {
+	HasMore   bool           `json:"has_more"`
+	PageToken string         `json:"page_token"`
+	Items     []bitableField `json:"items"`
+}
+
 type bitableFieldsResponse struct {
-	apiResponse
-	Data struct {
-		HasMore   bool   `json:"has_more"`
-		PageToken string `json:"page_token"`
-		Items     []struct {
-			FieldName string `json:"field_name"`
-			Type      int    `json:"type"`
-			Property  *struct {
-				// DateFormatter distinguishes a date-only column from a datetime one.
-				DateFormatter string `json:"date_formatter"`
-			} `json:"property"`
-		} `json:"items"`
-	} `json:"data"`
+	ApiResponse
+	Data bitableFieldsData `json:"data"`
 }
 
 // maxBitableFieldPageSize is the documented per-page cap for the bitable
@@ -314,22 +344,28 @@ type bitableFieldsResponse struct {
 // page_size here is rejected, so fields must be fetched 100 at a time and paged.
 const maxBitableFieldPageSize = 100
 
-type bitableRecordsResponse struct {
-	apiResponse
-	Data struct {
-		HasMore   bool   `json:"has_more"`
-		PageToken string `json:"page_token"`
-		Items     []struct {
-			Fields map[string]any `json:"fields"`
-		} `json:"items"`
-	} `json:"data"`
+// bitableRecord is one entry of bitableRecordsData.Items.
+type bitableRecord struct {
+	Fields map[string]any `json:"fields"`
 }
 
-// ReadBitableRecords reads an embedded bitable block as a table: a header row of
+// bitableRecordsData is the data payload of bitableRecordsResponse.
+type bitableRecordsData struct {
+	HasMore   bool            `json:"has_more"`
+	PageToken string          `json:"page_token"`
+	Items     []bitableRecord `json:"items"`
+}
+
+type bitableRecordsResponse struct {
+	ApiResponse
+	Data bitableRecordsData `json:"data"`
+}
+
+// readBitableRecords reads an embedded bitable block as a table: a header row of
 // field names followed by one row per record. embedToken is the block's
 // bitable.token, formatted "appToken_tableId". Record rows are capped at
 // maxTableRows; truncated is true when the source had more records than that.
-func (c *Client) ReadBitableRecords(ctx context.Context, embedToken string) ([][]string, bool, error) {
+func (c *Client) readBitableRecords(ctx context.Context, embedToken string) ([][]string, bool, error) {
 	idx := strings.LastIndex(embedToken, "_")
 	if idx < 0 {
 		return nil, false, fmt.Errorf("invalid bitable embed token: %q", embedToken)
@@ -346,7 +382,7 @@ func (c *Client) ReadBitableRecords(ctx context.Context, embedToken string) ([][
 			fpath += "&page_token=" + url.QueryEscape(fieldPageToken)
 		}
 		var fieldsResp bitableFieldsResponse
-		if err := c.doRequest(ctx, http.MethodGet, fpath, nil, &fieldsResp); err != nil {
+		if err := c.DoRequest(ctx, http.MethodGet, fpath, nil, &fieldsResp); err != nil {
 			return nil, false, fmt.Errorf("read bitable fields: %w", err)
 		}
 		if fieldsResp.Code != 0 {
@@ -392,7 +428,7 @@ func (c *Client) ReadBitableRecords(ctx context.Context, embedToken string) ([][
 			rpath += "&page_token=" + url.QueryEscape(pageToken)
 		}
 		var rec bitableRecordsResponse
-		if err := c.doRequest(ctx, http.MethodPost, rpath, map[string]any{}, &rec); err != nil {
+		if err := c.DoRequest(ctx, http.MethodPost, rpath, map[string]any{}, &rec); err != nil {
 			return nil, false, fmt.Errorf("search bitable records: %w", err)
 		}
 		if rec.Code != 0 {

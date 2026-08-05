@@ -1,4 +1,4 @@
-package feishu
+package core
 
 import (
 	"context"
@@ -38,9 +38,9 @@ func TestListDocumentBlocks_Paginates(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	blocks, err := c.ListDocumentBlocks(context.Background(), "doc123")
+	blocks, err := c.listDocumentBlocks(context.Background(), "doc123")
 	if err != nil {
-		t.Fatalf("ListDocumentBlocks: %v", err)
+		t.Fatalf("listDocumentBlocks: %v", err)
 	}
 	if len(blocks) != 3 {
 		t.Fatalf("got %d blocks, want 3", len(blocks))
@@ -68,9 +68,9 @@ func TestReadSheetRange_SplitsTokenAndReadsValues(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, truncated, err := c.ReadSheetRange(context.Background(), "sht_abc_0")
+	rows, truncated, err := c.readSheetRange(context.Background(), "sht_abc_0")
 	if err != nil {
-		t.Fatalf("ReadSheetRange: %v", err)
+		t.Fatalf("readSheetRange: %v", err)
 	}
 	if gotPath != "/open-apis/sheets/v2/spreadsheets/sht_abc/values/0" {
 		t.Errorf("path = %q", gotPath)
@@ -99,7 +99,7 @@ func TestReadSheetRange_TruncatesLargeTable(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, truncated, err := c.ReadSheetRange(context.Background(), "sht_x_0")
+	rows, truncated, err := c.readSheetRange(context.Background(), "sht_x_0")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -209,20 +209,22 @@ func TestReadBitableRecords_DateColumnUsesFormatterAndTimezone(t *testing.T) {
 				"items": []map[string]any{
 					{"field_name": "截止日期", "type": 5, "property": map[string]any{"date_formatter": "yyyy/MM/dd"}},
 					{"field_name": "提醒时间", "type": 5, "property": map[string]any{"date_formatter": "yyyy-MM-dd HH:mm"}},
-				}}})
+				},
+			}})
 		case strings.HasSuffix(r.URL.Path, "/records/search"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
 				"has_more": false, "items": []map[string]any{
 					{"fields": map[string]any{"截止日期": float64(1711900800000), "提醒时间": float64(1719802800000)}},
-				}}})
+				},
+			}})
 		}
 	}))
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client(), location: resolveLocation("")}
-	rows, _, err := c.ReadBitableRecords(context.Background(), "bascabc_tblxyz")
+	rows, _, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz")
 	if err != nil {
-		t.Fatalf("ReadBitableRecords: %v", err)
+		t.Fatalf("readBitableRecords: %v", err)
 	}
 	if len(rows) != 2 {
 		t.Fatalf("rows = %+v, want header + 1 record", rows)
@@ -242,7 +244,8 @@ func TestReadBitableRecords_SplitsTokenAndBuildsTable(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "t", "expire": 7200})
 		case strings.HasSuffix(r.URL.Path, "/fields"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"items": []map[string]any{{"field_name": "任务"}, {"field_name": "状态"}}}})
+				"items": []map[string]any{{"field_name": "任务"}, {"field_name": "状态"}},
+			}})
 		case strings.HasSuffix(r.URL.Path, "/records/search"):
 			// Must use the current Search-records endpoint (POST), not the
 			// deprecated GET .../records legacy interface.
@@ -256,15 +259,16 @@ func TestReadBitableRecords_SplitsTokenAndBuildsTable(t *testing.T) {
 				"has_more": false,
 				"items": []map[string]any{
 					{"fields": map[string]any{"任务": "写文档", "状态": "进行中"}},
-				}}})
+				},
+			}})
 		}
 	}))
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, truncated, err := c.ReadBitableRecords(context.Background(), "bascabc_tblxyz")
+	rows, truncated, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz")
 	if err != nil {
-		t.Fatalf("ReadBitableRecords: %v", err)
+		t.Fatalf("readBitableRecords: %v", err)
 	}
 	if truncated {
 		t.Errorf("did not expect truncation")
@@ -305,18 +309,20 @@ func TestReadBitableRecords_PaginatesFieldsAtMax100(t *testing.T) {
 				}
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"items": items, "has_more": hasMore, "page_token": nextTok}})
+				"items": items, "has_more": hasMore, "page_token": nextTok,
+			}})
 		case strings.HasSuffix(r.URL.Path, "/records/search"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"has_more": false, "items": []map[string]any{}}})
+				"has_more": false, "items": []map[string]any{},
+			}})
 		}
 	}))
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, _, err := c.ReadBitableRecords(context.Background(), "bascabc_tblxyz")
+	rows, _, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz")
 	if err != nil {
-		t.Fatalf("ReadBitableRecords: %v", err)
+		t.Fatalf("readBitableRecords: %v", err)
 	}
 	if len(rows) < 1 {
 		t.Fatal("expected at least a header row")
@@ -352,26 +358,29 @@ func TestReadBitableRecords_PaginatesAndTruncatesRecords(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "t", "expire": 7200})
 		case strings.HasSuffix(r.URL.Path, "/fields"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"items": []map[string]any{{"field_name": "col"}}}})
+				"items": []map[string]any{{"field_name": "col"}},
+			}})
 		case strings.HasSuffix(r.URL.Path, "/records/search"):
 			if tok := r.URL.Query().Get("page_token"); tok == "" {
 				// Page 1: 300 records, more to come.
 				_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-					"has_more": true, "page_token": "r2", "items": bitableRows(300)}})
+					"has_more": true, "page_token": "r2", "items": bitableRows(300),
+				}})
 			} else {
 				secondPageToken = tok
 				// Page 2: 250 more → 550 total, capped to maxTableRows.
 				_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-					"has_more": false, "items": bitableRows(250)}})
+					"has_more": false, "items": bitableRows(250),
+				}})
 			}
 		}
 	}))
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, truncated, err := c.ReadBitableRecords(context.Background(), "bascabc_tblxyz")
+	rows, truncated, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz")
 	if err != nil {
-		t.Fatalf("ReadBitableRecords: %v", err)
+		t.Fatalf("readBitableRecords: %v", err)
 	}
 	if secondPageToken != "r2" {
 		t.Errorf("second records page must be fetched with page_token=r2, got %q", secondPageToken)
@@ -393,18 +402,20 @@ func TestReadBitableRecords_Exactly500NotTruncated(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "t", "expire": 7200})
 		case strings.HasSuffix(r.URL.Path, "/fields"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"items": []map[string]any{{"field_name": "col"}}}})
+				"items": []map[string]any{{"field_name": "col"}},
+			}})
 		case strings.HasSuffix(r.URL.Path, "/records/search"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"has_more": false, "items": bitableRows(maxTableRows)}})
+				"has_more": false, "items": bitableRows(maxTableRows),
+			}})
 		}
 	}))
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, truncated, err := c.ReadBitableRecords(context.Background(), "bascabc_tblxyz")
+	rows, truncated, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz")
 	if err != nil {
-		t.Fatalf("ReadBitableRecords: %v", err)
+		t.Fatalf("readBitableRecords: %v", err)
 	}
 	if truncated {
 		t.Error("exactly maxTableRows records must not be flagged truncated")
@@ -427,11 +438,13 @@ func TestReadBitableRecords_EmptyRecordPageTerminates(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "t", "expire": 7200})
 		case strings.HasSuffix(r.URL.Path, "/fields"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"items": []map[string]any{{"field_name": "col"}}}})
+				"items": []map[string]any{{"field_name": "col"}},
+			}})
 		case strings.HasSuffix(r.URL.Path, "/records/search"):
 			recordCalls++
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"has_more": true, "page_token": "loop", "items": []map[string]any{}}})
+				"has_more": true, "page_token": "loop", "items": []map[string]any{},
+			}})
 		}
 	}))
 	defer srv.Close()
@@ -439,7 +452,7 @@ func TestReadBitableRecords_EmptyRecordPageTerminates(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, _, err := c.ReadBitableRecords(ctx, "bascabc_tblxyz")
+	rows, _, err := c.readBitableRecords(ctx, "bascabc_tblxyz")
 	if err != nil {
 		t.Fatalf("empty-page pagination must terminate cleanly, got err: %v", err)
 	}
@@ -462,10 +475,12 @@ func TestReadBitableRecords_EmptyFieldsPageTerminates(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/fields"):
 			fieldCalls++
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"has_more": true, "page_token": "loop", "items": []map[string]any{}}})
+				"has_more": true, "page_token": "loop", "items": []map[string]any{},
+			}})
 		case strings.HasSuffix(r.URL.Path, "/records/search"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"has_more": false, "items": []map[string]any{}}})
+				"has_more": false, "items": []map[string]any{},
+			}})
 		}
 	}))
 	defer srv.Close()
@@ -473,7 +488,7 @@ func TestReadBitableRecords_EmptyFieldsPageTerminates(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	if _, _, err := c.ReadBitableRecords(ctx, "bascabc_tblxyz"); err != nil {
+	if _, _, err := c.readBitableRecords(ctx, "bascabc_tblxyz"); err != nil {
 		t.Fatalf("empty fields page must terminate cleanly, got err: %v", err)
 	}
 	if fieldCalls != 1 {
@@ -491,7 +506,8 @@ func TestListDocumentBlocks_EmptyPageTerminates(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/blocks"):
 			blockCalls++
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"has_more": true, "page_token": "loop", "items": []map[string]any{}}})
+				"has_more": true, "page_token": "loop", "items": []map[string]any{},
+			}})
 		}
 	}))
 	defer srv.Close()
@@ -499,7 +515,7 @@ func TestListDocumentBlocks_EmptyPageTerminates(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	blocks, err := c.ListDocumentBlocks(ctx, "doc-1")
+	blocks, err := c.listDocumentBlocks(ctx, "doc-1")
 	if err != nil {
 		t.Fatalf("empty blocks page must terminate cleanly, got err: %v", err)
 	}
