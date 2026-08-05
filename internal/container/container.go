@@ -635,7 +635,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		encodedPassword := url.QueryEscape(dbPassword)
 
 		migrateDSN = fmt.Sprintf(
-			"postgres://%s:%s@%s:%s/%s?sslmode=%s&x-multi-statement=true",
+			"postgres://%s:%s@%s:%s/%s?sslmode=%s",
 			dbUser,
 			encodedPassword, // Use encoded password
 			dbHost,

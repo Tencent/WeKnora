@@ -138,7 +138,16 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 		if dbSchema == "" {
 			dbSchema = "public"
 		}
-		sqlDB, err := sql.Open("postgres", dsn)
+		// Strip x-multi-statement parameter before calling sql.Open — lib/pq passes unknown
+		// query params as server GUCs, causing "unrecognized configuration parameter" errors.
+		cleanDSN := dsn
+		if u, err := url.Parse(dsn); err == nil {
+			q := u.Query()
+			q.Del("x-multi-statement")
+			u.RawQuery = q.Encode()
+			cleanDSN = u.String()
+		}
+		sqlDB, err := sql.Open("postgres", cleanDSN)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to open postgres db for migration: %v", err)
 			wrapped := fmt.Errorf("failed to open postgres db for migration: %w", err)

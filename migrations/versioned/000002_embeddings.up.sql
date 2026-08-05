@@ -15,7 +15,11 @@ BEGIN
     -- Create required extensions
     CREATE EXTENSION IF NOT EXISTS vector;
     CREATE EXTENSION IF NOT EXISTS pg_trgm;
-    CREATE EXTENSION IF NOT EXISTS pg_search;
+    IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_search') THEN
+        CREATE EXTENSION IF NOT EXISTS pg_search;
+    ELSE
+        RAISE NOTICE '[Conditional Migration: embeddings] pg_search extension not available, skipping...';
+    END IF;
 
     -- Create embeddings table
     RAISE NOTICE '[Conditional Migration: embeddings] Creating indexes for embeddings (this may take a while)...';
@@ -37,21 +41,25 @@ BEGIN
 
     CREATE UNIQUE INDEX IF NOT EXISTS embeddings_unique_source ON embeddings(source_id, source_type);
 
-    -- Create BM25 search index (check if exists first)
-    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'embeddings_search_idx') THEN
-        CREATE INDEX embeddings_search_idx ON embeddings
-        USING bm25 (id, knowledge_base_id, content, knowledge_id, chunk_id)
-        WITH (
-            key_field = 'id',
-            text_fields = '{
-                "content": {
-                  "tokenizer": {"type": "chinese_lindera"}
-                }
-            }'
-        );
-        RAISE NOTICE '[Conditional Migration: embeddings] Created BM25 index embeddings_search_idx';
+    -- Create BM25 search index (only if pg_search extension exists)
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_search') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'embeddings_search_idx') THEN
+            CREATE INDEX embeddings_search_idx ON embeddings
+            USING bm25 (id, knowledge_base_id, content, knowledge_id, chunk_id)
+            WITH (
+                key_field = 'id',
+                text_fields = '{
+                    "content": {
+                      "tokenizer": {"type": "chinese_lindera"}
+                    }
+                }'
+            );
+            RAISE NOTICE '[Conditional Migration: embeddings] Created BM25 index embeddings_search_idx';
+        ELSE
+            RAISE NOTICE '[Conditional Migration: embeddings] BM25 index embeddings_search_idx already exists';
+        END IF;
     ELSE
-        RAISE NOTICE '[Conditional Migration: embeddings] BM25 index embeddings_search_idx already exists';
+        RAISE NOTICE '[Conditional Migration: embeddings] pg_search not installed, skipping BM25 index creation';
     END IF;
 
     -- Create HNSW indexes for vector search (check if exists first)

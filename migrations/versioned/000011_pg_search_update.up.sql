@@ -8,5 +8,7 @@ BEGIN
         RETURN;
     END IF;
 
-    ALTER EXTENSION pg_search UPDATE;
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_search') THEN
+        ALTER EXTENSION pg_search UPDATE;
+    END IF;
 END $$;
