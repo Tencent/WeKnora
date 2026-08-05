@@ -2,6 +2,7 @@ package storageurl
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -35,6 +36,31 @@ func NewRequestRewriter(
 	}
 	resolver := NewFileServiceResolver(tenant, defaultSvc, resolvers...).WithContext(ctx)
 	return NewRewriter(resolver, "API")
+}
+
+// RewriteMessagesResponse returns rewritten message copies so callers can keep
+// the originals untouched (for example objects returned from a service cache).
+func (w *Rewriter) RewriteMessagesResponse(ctx context.Context, messages []*types.Message) []*types.Message {
+	if !w.Enabled() || len(messages) == 0 {
+		return messages
+	}
+	out := cloneMessages(messages)
+	w.RewriteMessages(ctx, out)
+	return out
+}
+
+// cloneMessages deep-copies messages via JSON so nested slices and agent steps
+// are independent of the source slice.
+func cloneMessages(messages []*types.Message) []*types.Message {
+	data, err := json.Marshal(messages)
+	if err != nil {
+		return messages
+	}
+	var out []*types.Message
+	if err := json.Unmarshal(data, &out); err != nil {
+		return messages
+	}
+	return out
 }
 
 // RewriteMessages replaces storage references in a message history response so

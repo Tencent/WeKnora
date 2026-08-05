@@ -62,10 +62,9 @@ type Resolver interface {
 // a signature.
 //
 // Logging policy:
-//   - A successful rewrite logs at INFO with the full signed URL so operators
-//     can copy it out of logs and verify public reachability directly. The
-//     trade-off: anyone with log access can use a signed URL until it expires
-//     (WeKnora grants 2h, MinIO 24h). Acceptable for diagnosability.
+//   - A successful rewrite logs the source reference at INFO. The signed URL
+//     is DEBUG-only so log aggregation cannot hand out anonymously readable
+//     links; operators can raise the log level when verifying reachability.
 //   - Failure or no-op logs at WARN. The no-op case usually means
 //     APP_EXTERNAL_URL is unset, the most common cause of "image broken in the
 //     IM channel / in my app" reports.
@@ -150,7 +149,8 @@ func (w *Rewriter) resolve(ctx context.Context, ref string) string {
 			w.logPrefix, httpURL, ref)
 		return ref
 	}
-	logger.Infof(ctx, "[%s] storage URL rewrite: src=%s dst=%s", w.logPrefix, ref, httpURL)
+	logger.Infof(ctx, "[%s] storage URL rewrite: src=%s", w.logPrefix, ref)
+	logger.Debugf(ctx, "[%s] storage URL rewrite dst=%s", w.logPrefix, httpURL)
 	return httpURL
 }
 
