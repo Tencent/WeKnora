@@ -53,8 +53,9 @@ type UserService interface {
 	BuildLoginMemberships(ctx context.Context, user *types.User, activeTenant *types.Tenant) []types.Membership
 	// SwitchTenant issues a new token pair scoped to targetTenantID and
 	// returns the corresponding LoginResponse. The caller's previous
-	// refresh token (passed in for revocation) is invalidated. Membership
-	// is verified via the TenantMember service before tokens are issued.
+	// refresh token (passed in for revocation) is invalidated. Active
+	// membership is required unless both CanAccessAllTenants and the
+	// cluster-wide EnableCrossTenantAccess switch are enabled.
 	SwitchTenant(ctx context.Context, user *types.User, targetTenantID uint64, currentRefreshToken string) (*types.LoginResponse, error)
 	// ValidateToken validates an access token. It returns the user
 	// referenced by the token plus the active tenant ID encoded in the

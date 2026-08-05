@@ -27,9 +27,9 @@ type UserPreferences struct {
 	// refresh token) lands them back in that workspace instead of always
 	// bouncing to their home workspace. Login / RefreshToken validate that
 	// the workspace still exists and the user still has an active membership
-	// (or CanAccessAllTenants) before honouring this preference; an
-	// invalid pointer is best-effort cleared and the user falls back to
-	// home.
+	// (or CanAccessAllTenants while EnableCrossTenantAccess is enabled)
+	// before honouring this preference; an invalid pointer is best-effort
+	// cleared and the user falls back to home.
 	//
 	// nil  = no preference (use user.TenantID, i.e. home)
 	// *0   = "clear preference" sentinel for the partial-update endpoint

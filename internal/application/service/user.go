@@ -717,9 +717,10 @@ func (s *userService) GenerateTokens(
 //     this repairs partial invitation/admin-assignment flows.
 //  2. Otherwise validate the preference: the tenant must still exist and
 //     the user must still have an active membership (or be a cross-tenant
-//     superuser). Validation failure logs a warning, best-effort clears
-//     the stale preference (so we don't waste a DB round-trip on every
-//     subsequent login), and falls back to home.
+//     superuser while EnableCrossTenantAccess is enabled). Validation failure
+//     logs a warning, best-effort clears the stale preference (so we don't
+//     waste a DB round-trip on every subsequent login), and falls back to
+//     home.
 //
 // This is intentionally a private method on userService so it can reach
 // memberService / tenantService / userRepo. Errors from the validation
@@ -746,9 +747,11 @@ func (s *userService) resolveLoginTenantID(ctx context.Context, user *types.User
 		}
 	}
 
-	// Membership (or cross-tenant superuser) must still be valid. Mirrors
-	// the gate in SwitchTenant so the two entry points stay consistent.
-	if !user.CanAccessAllTenants {
+	// Membership (or an enabled cross-tenant superuser bypass) must still
+	// be valid. Mirrors the gate in SwitchTenant so login / refresh cannot
+	// restore a foreign-tenant preference after the cluster-wide switch has
+	// been turned off.
+	if !s.canBypassTenantMembership(user, preferred) {
 		if s.memberService == nil {
 			logger.Warnf(ctx,
 				"resolveLoginTenantID: member service unavailable; falling back to home for user %s",
@@ -767,6 +770,21 @@ func (s *userService) resolveLoginTenantID(ctx context.Context, user *types.User
 	}
 
 	return preferred
+}
+
+// canBypassTenantMembership reports whether user may enter targetTenantID
+// without an active tenant_members row. The per-user database flag is
+// deliberately dormant unless the cluster-wide switch is enabled. Keeping
+// this decision in one service helper prevents SwitchTenant and login/refresh
+// preference restoration from drifting apart again.
+func (s *userService) canBypassTenantMembership(user *types.User, targetTenantID uint64) bool {
+	if user == nil || targetTenantID == 0 || targetTenantID == user.TenantID {
+		return false
+	}
+	return s.config != nil &&
+		s.config.Tenant != nil &&
+		s.config.Tenant.EnableCrossTenantAccess &&
+		user.CanAccessAllTenants
 }
 
 // homeOrFirstMembershipTenant returns the user's home tenant, or — for a
@@ -914,8 +932,9 @@ func (s *userService) generateTokensForTenant(
 // can no longer roll forward into the source tenant.
 //
 // Returns ErrMembershipNotFound when the user is not a member of the
-// target tenant. Cross-tenant superuser access (CanAccessAllTenants)
-// is allowed without a membership row, mirroring the auth middleware's
+// target tenant. Cross-tenant superuser access is allowed without a
+// membership row only when both CanAccessAllTenants and the cluster-wide
+// EnableCrossTenantAccess switch are enabled, mirroring the auth middleware's
 // resolveTenantRole behaviour.
 func (s *userService) SwitchTenant(
 	ctx context.Context,
@@ -930,9 +949,9 @@ func (s *userService) SwitchTenant(
 		return nil, errors.New("target workspace ID is required")
 	}
 
-	// Verify membership unless the caller is a cross-tenant superuser
-	// switching outside their home tenant.
-	if !user.CanAccessAllTenants || targetTenantID == user.TenantID {
+	// Verify membership unless the caller is an explicitly enabled
+	// cross-tenant superuser switching outside their home tenant.
+	if !s.canBypassTenantMembership(user, targetTenantID) {
 		if s.memberService == nil {
 			return nil, errors.New("workspace membership service unavailable")
 		}

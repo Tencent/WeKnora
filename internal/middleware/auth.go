@@ -723,12 +723,13 @@ func principalTenantIDFromClaims(claims jwt.MapClaims) uint64 {
 //
 // Order of resolution:
 //  1. Active TenantMember row → return that role.
-//  2. Cross-tenant superuser switch (X-Tenant-ID with CanAccessAllTenants=true)
-//     → grant Admin in the target tenant. Org admins are intentionally not
-//     promoted to Owner; tenant deletion / API-key rotation should always
-//     stay with a real Owner inside the target tenant. Cross-tenant access
-//     is also never allowed to trigger the orphan-tenant auto-promotion
-//     below — a superuser only visits, never claims ownership.
+//  2. Cross-tenant superuser switch (X-Tenant-ID or a JWT tenant claim with
+//     CanAccessAllTenants=true AND EnableCrossTenantAccess=true) → grant Admin
+//     in the target tenant. Org admins are intentionally not promoted to
+//     Owner; tenant deletion / API-key rotation should always stay with a real
+//     Owner inside the target tenant. Cross-tenant access is also never
+//     allowed to trigger the orphan-tenant auto-promotion below — a superuser
+//     only visits, never claims ownership.
 //  3. No membership but the tenant currently has zero active members AND
 //     the caller is authenticating into their own home tenant (i.e.
 //     targetTenantID == user.TenantID and this is not a cross-tenant
@@ -779,14 +780,27 @@ func resolveTenantRole(
 			user.ID, targetTenantID, statusInfo)
 	}
 
-	// 2. 跨空间超管直通：CanAccessAllTenants 用户切到别的空间时不强制要求 membership。
-	//    注意：这里只授予临时 Admin 角色，不写入 tenant_members，避免"看一眼别人空间"
-	//    意外升级为持久化所有权。
-	if crossTenantSwitch && user.CanAccessAllTenants {
-		logger.Infof(ctx,
-			"[auth] resolveTenantRole step2 (cross-tenant superuser) -> Admin: user=%s tenant=%d",
-			user.ID, targetTenantID)
-		return types.TenantRoleAdmin, true
+	// 2. 跨空间请求始终 fail-closed：只有总开关和用户标志同时开启，才允许在没有
+	//    membership 时获得临时 Admin。不能落入下面 EnableRBAC=false 的 fail-open，
+	//    因为跨空间总开关是独立且更高优先级的安全边界。
+	if crossTenantSwitch {
+		if cfg != nil &&
+			cfg.Tenant != nil &&
+			cfg.Tenant.EnableCrossTenantAccess &&
+			user.CanAccessAllTenants {
+			logger.Infof(ctx,
+				"[auth] resolveTenantRole step2 (cross-tenant superuser) -> Admin: user=%s tenant=%d",
+				user.ID, targetTenantID)
+			return types.TenantRoleAdmin, true
+		}
+		logger.Warnf(ctx,
+			"[auth] resolveTenantRole step2 blocked cross-tenant request: user=%s tenant=%d enabled=%t privileged=%t",
+			user.ID,
+			targetTenantID,
+			cfg != nil && cfg.Tenant != nil && cfg.Tenant.EnableCrossTenantAccess,
+			user.CanAccessAllTenants,
+		)
+		return "", false
 	}
 
 	// 3. 孤儿空间自愈：仅当用户登录的是自己的 home tenant、且该空间尚无任何活跃成员时

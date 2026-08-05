@@ -145,6 +145,13 @@ func cfgWithRBAC(enabled bool) *config.Config {
 	return &config.Config{Tenant: &config.TenantConfig{EnableRBAC: &enabled}}
 }
 
+func cfgWithRBACAndCrossTenant(rbacEnabled, crossTenantEnabled bool) *config.Config {
+	return &config.Config{Tenant: &config.TenantConfig{
+		EnableRBAC:              &rbacEnabled,
+		EnableCrossTenantAccess: crossTenantEnabled,
+	}}
+}
+
 func TestResolveTenantRole_ActiveMembershipWins(t *testing.T) {
 	svc := newFakeMemberService()
 	svc.seedActive("u1", 10, types.TenantRoleContributor)
@@ -164,7 +171,10 @@ func TestResolveTenantRole_CrossTenantSuperuserGetsAdmin_NoAutoPromote(t *testin
 	svc := newFakeMemberService()
 	user := &types.User{ID: "super", TenantID: 1, CanAccessAllTenants: true}
 
-	got, ok := resolveTenantRole(context.Background(), svc, user, 99, true, cfgWithRBAC(true))
+	got, ok := resolveTenantRole(
+		context.Background(), svc, user, 99, true,
+		cfgWithRBACAndCrossTenant(true, true),
+	)
 	if !ok || got != types.TenantRoleAdmin {
 		t.Fatalf("got (%v, %v), want (admin, true)", got, ok)
 	}
@@ -179,12 +189,55 @@ func TestResolveTenantRole_AutoPromoteRequiresHomeTenant(t *testing.T) {
 	svc := newFakeMemberService() // 空 — 任何空间都是孤儿
 	user := &types.User{ID: "u1", TenantID: 1, CanAccessAllTenants: true}
 
-	got, ok := resolveTenantRole(context.Background(), svc, user, 42, true, cfgWithRBAC(true))
+	got, ok := resolveTenantRole(
+		context.Background(), svc, user, 42, true,
+		cfgWithRBACAndCrossTenant(true, true),
+	)
 	if !ok || got != types.TenantRoleAdmin {
 		t.Fatalf("cross-tenant superuser should still get visitor Admin, got (%v, %v)", got, ok)
 	}
 	if len(svc.addCalls) != 0 {
 		t.Fatalf("auto-promote must skip cross-tenant target, got %+v", svc.addCalls)
+	}
+}
+
+func TestResolveTenantRole_CrossTenantSuperuserBlockedWhenGlobalFlagDisabled(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		rbacEnabled bool
+	}{
+		{name: "rbac-enabled", rbacEnabled: true},
+		{name: "rbac-disabled", rbacEnabled: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newFakeMemberService()
+			user := &types.User{ID: "super", TenantID: 1, CanAccessAllTenants: true}
+
+			got, ok := resolveTenantRole(
+				context.Background(), svc, user, 99, true,
+				cfgWithRBACAndCrossTenant(tc.rbacEnabled, false),
+			)
+			if ok || got != "" {
+				t.Fatalf(
+					"disabled global flag must reject foreign JWT even when RBAC fail-open is configured, got (%v, %v)",
+					got, ok,
+				)
+			}
+		})
+	}
+}
+
+func TestResolveTenantRole_CrossTenantActiveMemberAllowedWhenGlobalFlagDisabled(t *testing.T) {
+	svc := newFakeMemberService()
+	svc.seedActive("super", 99, types.TenantRoleContributor)
+	user := &types.User{ID: "super", TenantID: 1, CanAccessAllTenants: true}
+
+	got, ok := resolveTenantRole(
+		context.Background(), svc, user, 99, true,
+		cfgWithRBACAndCrossTenant(true, false),
+	)
+	if !ok || got != types.TenantRoleContributor {
+		t.Fatalf("active membership should remain usable with global flag disabled, got (%v, %v)", got, ok)
 	}
 }
 
