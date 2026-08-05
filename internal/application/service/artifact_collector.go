@@ -92,6 +92,10 @@ type ArtifactCollector struct {
 	// not tracked as owned resources.
 	catalog interfaces.ResourceCatalog
 	config  ArtifactCollectorConfig
+	// resolver lets Collect use the workspace's own sandbox backend. Optional:
+	// nil keeps the process-wide source for every workspace.
+	resolver sandbox.TenantSandboxResolver
+	pinner   *SessionSandboxPinner
 }
 
 // NewArtifactCollector wires up an ArtifactCollector. Callers keep a single
@@ -120,26 +124,70 @@ func NewArtifactCollector(
 // returned *ArtifactCollector is nil, which the AgentStreamHandler treats
 // as "no artifacts to attach" — matching the graceful-degradation contract
 // documented in the design spec.
+// The resolver is consulted per turn so a workspace whose own backend supports
+// artifacts still gets them even when the process-wide default does not. The
+// collector is therefore built whenever either side could supply a source, and
+// Collect degrades to "nothing to attach" when neither does.
 func NewArtifactCollectorFromSandboxManager(
 	sandboxMgr sandbox.Manager,
+	sandboxResolver sandbox.TenantSandboxResolver,
+	pinner *SessionSandboxPinner,
 	fileService interfaces.FileService,
 	repo interfaces.MessageRepository,
 	catalog interfaces.ResourceCatalog,
 ) *ArtifactCollector {
-	if sandboxMgr == nil || fileService == nil {
+	if fileService == nil {
 		return nil
 	}
-	source, ok := sandboxMgr.(SandboxArtifactSource)
-	if !ok {
+	source, _ := sandboxMgr.(SandboxArtifactSource)
+	if source == nil && sandboxResolver == nil {
 		return nil
 	}
-	return NewArtifactCollector(
+	collector := NewArtifactCollector(
 		source,
 		fileService,
 		NewMessageRepoArtifactStore(repo),
 		catalog,
 		ArtifactCollectorConfig{},
 	)
+	collector.resolver = sandboxResolver
+	collector.pinner = pinner
+	return collector
+}
+
+// sessionSource returns the artifact source for the sandbox pinned to
+// sessionID, never the one the agent points at today: the sandbox being drained
+// was created earlier and may live on a config the agent no longer selects.
+//
+// Returns nil when the session has no pin, which Collect treats as "nothing to
+// attach".
+func (c *ArtifactCollector) sessionSource(ctx context.Context, sessionID string) SandboxArtifactSource {
+	if c.resolver == nil {
+		return c.source
+	}
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	configID, err := sandboxConfigForExistingSandbox(ctx, c.pinner, sessionID)
+	if err != nil {
+		logger.Warnf(ctx, "[ArtifactCollector] read sandbox pin failed: %v", err)
+		return nil
+	}
+	if configID == "" {
+		return nil
+	}
+	mgr, err := resolveTenantSandboxForConfig(ctx, c.resolver, nil, tenantID, configID)
+	if err != nil {
+		// Refusing to read is the safe failure: substituting another backend
+		// would look in the wrong provider account and report "no artifacts".
+		logger.Warnf(ctx, "[ArtifactCollector] resolve sandbox failed: %v", err)
+		return nil
+	}
+	if mgr == nil {
+		// The pin names the deployment-wide default, which has no per-config
+		// manager of its own; the injected process-wide source IS that backend.
+		return c.source
+	}
+	source, _ := mgr.(SandboxArtifactSource)
+	return source
 }
 
 // newBoundedConfig fills in defaults so callers can pass a zero
@@ -170,8 +218,15 @@ func (c *ArtifactCollector) Collect(
 	tenantID uint64,
 	outputDir string,
 ) (types.MessageArtifacts, error) {
-	if c == nil || c.source == nil || c.fileService == nil {
+	if c == nil || c.fileService == nil {
 		logger.Infof(ctx, "[ArtifactCollector] skipped: collector or dependencies nil (session=%s)", sessionID)
+		return nil, nil
+	}
+	source := c.sessionSource(ctx, sessionID)
+	if source == nil {
+		logger.Infof(ctx,
+			"[ArtifactCollector] skipped: sandbox backend has no session filesystem (session=%s)",
+			sessionID)
 		return nil, nil
 	}
 	if sessionID == "" {
@@ -190,7 +245,7 @@ func (c *ArtifactCollector) Collect(
 
 	logger.Infof(ctx, "[ArtifactCollector] begin session=%s dir=%s", sessionID, outputDir)
 
-	entries, err := c.source.ListSessionFiles(ctx, sessionID, outputDir)
+	entries, err := source.ListSessionFiles(ctx, sessionID, outputDir)
 	if err != nil {
 		logger.Warnf(ctx, "[ArtifactCollector] list sandbox files failed: session=%s dir=%s err=%v",
 			sessionID, outputDir, err)
@@ -217,7 +272,7 @@ func (c *ArtifactCollector) Collect(
 
 	artifacts := make(types.MessageArtifacts, 0, len(entries))
 	for _, entry := range entries {
-		art, ok := c.maybePersist(ctx, sessionID, messageID, tenantID, entry, known)
+		art, ok := c.maybePersist(ctx, source, sessionID, messageID, tenantID, entry, known)
 		if !ok {
 			continue
 		}
@@ -258,6 +313,7 @@ func (c *ArtifactCollector) loadKnownSet(ctx context.Context, sessionID string) 
 // logged so operators can diagnose empty artifact panels.
 func (c *ArtifactCollector) maybePersist(
 	ctx context.Context,
+	source SandboxArtifactSource,
 	sessionID string,
 	messageID string,
 	tenantID uint64,
@@ -285,7 +341,7 @@ func (c *ArtifactCollector) maybePersist(
 		return types.MessageArtifact{}, false
 	}
 
-	data, err := c.source.ReadSessionFile(ctx, sessionID, entry.Path)
+	data, err := source.ReadSessionFile(ctx, sessionID, entry.Path)
 	if err != nil {
 		logger.Warnf(ctx, "[ArtifactCollector] read artifact failed: session=%s path=%s err=%v",
 			sessionID, entry.Path, err)

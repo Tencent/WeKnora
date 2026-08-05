@@ -105,6 +105,8 @@ type agentService struct {
 	storageResolver       interfaces.StorageBackendResolver
 	toolApprovalGate      approval.MCPApproval
 	sandboxMgr            sandbox.Manager
+	sandboxResolver       sandbox.TenantSandboxResolver
+	sandboxPinner         *SessionSandboxPinner
 }
 
 // NewAgentService creates a new agent service
@@ -127,6 +129,8 @@ func NewAgentService(
 	storageResolver interfaces.StorageBackendResolver,
 	toolApprovalGate approval.MCPApproval,
 	sandboxMgr sandbox.Manager,
+	sandboxResolver sandbox.TenantSandboxResolver,
+	sandboxPinner *SessionSandboxPinner,
 ) interfaces.AgentService {
 	return &agentService{
 		cfg:                   cfg,
@@ -147,6 +151,8 @@ func NewAgentService(
 		storageResolver:       storageResolver,
 		toolApprovalGate:      toolApprovalGate,
 		sandboxMgr:            sandboxMgr,
+		sandboxResolver:       sandboxResolver,
+		sandboxPinner:         sandboxPinner,
 	}
 }
 
@@ -221,7 +227,7 @@ func (s *agentService) CreateAgentEngine(
 
 	// Initialize skills manager if skills are enabled
 	if config.SkillsEnabled && len(config.SkillDirs) > 0 {
-		skillsManager, err := s.initializeSkillsManager(ctx, config, toolRegistry)
+		skillsManager, err := s.initializeSkillsManager(ctx, sessionID, config, toolRegistry)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to initialize skills manager: %v", err)
 		} else if skillsManager != nil {
@@ -341,14 +347,27 @@ func (s *agentService) resolveKBAndDocInfos(
 }
 
 // initializeSkillsManager creates and initializes the skills manager.
-// The sandbox.Manager is injected via NewAgentService so all callers
-// (session_service, skills tools, reaper) share the same Cube MicroVM pool.
+//
+// The sandbox manager is resolved per workspace: backends differ in
+// capability (E2B exposes a session file store, local does not), so tool
+// registration below must inspect this workspace's real manager rather than a
+// process-wide singleton. Workspaces without their own sandbox configuration
+// resolve to the injected default.
 func (s *agentService) initializeSkillsManager(
 	ctx context.Context,
+	sessionID string,
 	config *types.AgentConfig,
 	toolRegistry *tools.ToolRegistry,
 ) (*skills.Manager, error) {
-	sandboxMgr := s.sandboxMgr
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	configID, err := sandboxConfigForExecution(ctx, s.sandboxPinner, sessionID, config.SandboxConfigID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve sandbox config for session %s: %w", sessionID, err)
+	}
+	sandboxMgr, err := resolveTenantSandboxForConfig(ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID)
+	if err != nil {
+		return nil, err
+	}
 	if sandboxMgr == nil {
 		sandboxMgr = sandbox.NewDisabledManager()
 	}

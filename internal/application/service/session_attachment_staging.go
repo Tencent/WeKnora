@@ -49,12 +49,24 @@ func sessionSandboxShellExecutor(mgr sandbox.Manager) sandbox.SessionShellExecut
 func (s *agentService) stageSessionAttachments(
 	ctx context.Context,
 	sessionID string,
+	agentSandboxConfigID string,
 	attachments types.MessageAttachments,
 ) ([]stagedSessionAttachment, error) {
 	if s == nil {
 		return nil, nil
 	}
-	store := sessionSandboxFileStore(s.sandboxMgr)
+	// The capability depends on the workspace's own backend, so probe the
+	// resolved manager rather than the process-wide default.
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	configID, err := sandboxConfigForExecution(ctx, s.sandboxPinner, sessionID, agentSandboxConfigID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve sandbox config for session %s: %w", sessionID, err)
+	}
+	mgr, err := resolveTenantSandboxForConfig(ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID)
+	if err != nil {
+		return nil, err
+	}
+	store := sessionSandboxFileStore(mgr)
 	if store == nil {
 		return nil, nil
 	}

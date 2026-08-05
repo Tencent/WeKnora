@@ -124,7 +124,9 @@ type sessionService struct {
 	webSearchProviderRepo interfaces.WebSearchProviderRepository // Repository for web search provider entities
 	kbShareService        interfaces.KBShareService              // Service for KB sharing operations
 	suggestionRepo        interfaces.MessageSuggestionRepository
-	sandboxMgr            sandbox.Manager // Sandbox backend; used to reclaim per-session Cube MicroVMs on delete
+	sandboxMgr            sandbox.Manager // Default sandbox backend; used to reclaim per-session MicroVMs on delete
+	sandboxResolver       sandbox.TenantSandboxResolver
+	sandboxPinner         *SessionSandboxPinner
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -143,6 +145,8 @@ func NewSessionService(cfg *config.Config,
 	kbShareService interfaces.KBShareService,
 	suggestionRepo interfaces.MessageSuggestionRepository,
 	sandboxMgr sandbox.Manager,
+	sandboxResolver sandbox.TenantSandboxResolver,
+	sandboxPinner *SessionSandboxPinner,
 ) interfaces.SessionService {
 	return &sessionService{
 		cfg:                   cfg,
@@ -160,6 +164,8 @@ func NewSessionService(cfg *config.Config,
 		kbShareService:        kbShareService,
 		suggestionRepo:        suggestionRepo,
 		sandboxMgr:            sandboxMgr,
+		sandboxResolver:       sandboxResolver,
+		sandboxPinner:         sandboxPinner,
 	}
 }
 
@@ -654,10 +660,32 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 // the primary session deletion, which is already committed by the time we
 // get here.
 func (s *sessionService) destroyBoundSandbox(ctx context.Context, sessionID string) {
-	if s.sandboxMgr == nil || sessionID == "" {
+	if sessionID == "" {
 		return
 	}
-	destroyer, ok := s.sandboxMgr.(interface {
+	// Resolve the workspace's own manager: the sandbox to release lives on
+	// whichever backend that workspace is configured for, not necessarily the
+	// process-wide default.
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	configID, err := sandboxConfigForExistingSandbox(ctx, s.sandboxPinner, sessionID)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to read sandbox pin for session %s cleanup: %v", sessionID, err)
+		return
+	}
+	// An empty pin normally means there is nothing to destroy, but sessions
+	// whose sandbox predates the pin column also read as empty. Falling through
+	// to the default manager keeps those reachable: DestroySession is a cheap
+	// binding lookup that no-ops when the session truly has no sandbox, whereas
+	// skipping would abandon a paused instance that keeps billing.
+	mgr, err := resolveTenantSandboxForConfig(ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to resolve sandbox for session %s cleanup: %v", sessionID, err)
+		return
+	}
+	if mgr == nil {
+		return
+	}
+	destroyer, ok := mgr.(interface {
 		DestroySession(context.Context, string) error
 	})
 	if !ok {
@@ -665,6 +693,15 @@ func (s *sessionService) destroyBoundSandbox(ctx context.Context, sessionID stri
 	}
 	if err := destroyer.DestroySession(ctx, sessionID); err != nil {
 		logger.Warnf(ctx, "Failed to destroy sandbox for session %s: %v", sessionID, err)
+		return
+	}
+	// Delete paths soft-delete the session before cleanup, so this is usually a
+	// no-op under GORM's default scope. Keeping it here makes any future
+	// live-session destroy path release the pin immediately.
+	if s.sandboxPinner != nil {
+		if err := s.sandboxPinner.Clear(ctx, sessionID); err != nil {
+			logger.Warnf(ctx, "Failed to clear sandbox pin for session %s: %v", sessionID, err)
+		}
 	}
 }
 
