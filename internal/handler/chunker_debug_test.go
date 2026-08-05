@@ -298,3 +298,45 @@ func TestPreviewChunking_ParentChildDefaultSizes(t *testing.T) {
 		t.Fatalf("chunk count: got %d want %d", len(got), len(want.Children))
 	}
 }
+
+func TestPreviewChunking_LineEndingsMatchUpload(t *testing.T) {
+	uploaded := strings.Repeat("## Record\r\n"+strings.Repeat("A sufficiently long entry body. ", 10)+"\r\n\r\n", 12)
+	pasted := strings.ReplaceAll(uploaded, "\r\n", "\n") // HTML textarea normalization
+	payload := PreviewChunkingPayload{
+		ChunkSize:    500,
+		ChunkOverlap: 20,
+		Separators:   []string{"\n\n", "\n", "。", "！", "？", ";", "；"},
+		Strategy:     chunker.StrategyHeading,
+	}
+	actual := chunker.Split(chunker.NormalizeLineEndings(uploaded), chunker.NormalizeSplitterConfig(chunker.SplitterConfig{
+		ChunkSize:    payload.ChunkSize,
+		ChunkOverlap: payload.ChunkOverlap,
+		Separators:   payload.Separators,
+		Strategy:     payload.Strategy,
+	}))
+	for name, text := range map[string]string{
+		"uploaded CRLF": uploaded,
+		"pasted LF":     pasted,
+	} {
+		t.Run(name, func(t *testing.T) {
+			w, parsed := postPreview(t, PreviewChunkingRequest{Text: text, ChunkingConfig: payload})
+			if w.Code != http.StatusOK {
+				t.Fatalf("status %d body=%s", w.Code, w.Body.String())
+			}
+			data := parsed["data"].(map[string]any)
+			preview := data["chunks"].([]any)
+			if len(preview) != len(actual) {
+				t.Fatalf("chunk count: got %d want %d", len(preview), len(actual))
+			}
+			for i, chunk := range actual {
+				previewChunk := preview[i].(map[string]any)
+				if previewChunk["content"] != chunk.Content {
+					t.Errorf("chunk %d content differs", i)
+				}
+				if int(previewChunk["start"].(float64)) != chunk.Start || int(previewChunk["end"].(float64)) != chunk.End {
+					t.Errorf("chunk %d span: got %v-%v want %d-%d", i, previewChunk["start"], previewChunk["end"], chunk.Start, chunk.End)
+				}
+			}
+		})
+	}
+}

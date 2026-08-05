@@ -3350,7 +3350,10 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		logger.Infof(ctx, "Resolved %d total images for knowledge %s", len(storedImages), knowledge.ID)
 	}
 
-	// Step 3: Split into chunks using Go chunker
+	// Step 3: Split into chunks using Go chunker. Browser textareas normalize
+	// pasted content to LF, so normalize uploaded source text before calculating
+	// chunk boundaries as well.
+	convertResult.MarkdownContent = chunker.NormalizeLineEndings(convertResult.MarkdownContent)
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
 
 	processOpts := ProcessChunksOptions{

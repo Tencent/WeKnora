@@ -146,6 +146,7 @@ func PreviewChunking(c *gin.Context) {
 		})
 		return
 	}
+	text := chunker.NormalizeLineEndings(req.Text)
 
 	cfg := chunker.NormalizeSplitterConfig(chunker.SplitterConfig{
 		ChunkSize:    req.ChunkingConfig.ChunkSize,
@@ -173,14 +174,14 @@ func PreviewChunking(c *gin.Context) {
 				req.ChunkingConfig.ParentChunkSize,
 				req.ChunkingConfig.ChildChunkSize,
 			)
-			result, parentDiag := chunker.SplitParentChildWithDiagnostics(req.Text, parentCfg, childCfg)
+			result, parentDiag := chunker.SplitParentChildWithDiagnostics(text, parentCfg, childCfg)
 			chunks = make([]chunker.Chunk, len(result.Children))
 			for i, child := range result.Children {
 				chunks[i] = child.Chunk
 			}
 			diag = parentDiag
 		} else {
-			chunks, diag = chunker.SplitWithDiagnostics(req.Text, cfg)
+			chunks, diag = chunker.SplitWithDiagnostics(text, cfg)
 		}
 		resCh <- splitResult{chunks: chunks, diag: diag}
 	}()
@@ -203,7 +204,7 @@ func PreviewChunking(c *gin.Context) {
 	// can still show document stats. Avoids the previous double-pass.
 	profile := diag.Profile
 	if profile == nil {
-		profile = chunker.ProfileDocument(req.Text)
+		profile = chunker.ProfileDocument(text)
 	}
 
 	logger.Debugf(ctx, "chunker preview: tier=%s chunks=%d", diag.SelectedTier, len(chunks))

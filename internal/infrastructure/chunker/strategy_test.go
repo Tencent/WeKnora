@@ -237,6 +237,13 @@ func TestNormalizeSplitterConfig_MatchesIngestionDefaults(t *testing.T) {
 	}
 }
 
+func TestNormalizeLineEndings(t *testing.T) {
+	input := "first\r\nsecond\rthird\nfourth"
+	if got, want := NormalizeLineEndings(input), "first\nsecond\nthird\nfourth"; got != want {
+		t.Errorf("NormalizeLineEndings() = %q, want %q", got, want)
+	}
+}
+
 func TestDeriveParentChildConfigs_DefaultSizes(t *testing.T) {
 	base := SplitterConfig{
 		ChunkSize:    1000,
