@@ -545,6 +545,7 @@ export default {
     paused: '已暂停',
     resumed: '已恢复',
     pauseFailed: '暂停失败',
+    resumeFailed: '恢复失败',
     logs: '日志',
     syncModeLabel: '同步模式',
     createTitle: '添加数据源',
@@ -559,7 +560,7 @@ export default {
     connectionFailed: '连接失败',
     isRequired: '为必填项',
     credentialsLabel: '凭证',
-    resourceHint: '选择要同步的内容空间/文件夹',
+    resourceHint: '选择要同步的内容空间、文件夹或在线文档',
     untitled: '无标题',
     resourceLoadFailed: '加载资源列表失败',
     noResources: '未找到可同步的知识库空间',
@@ -615,10 +616,51 @@ export default {
     minutesAgo: '{n} 分钟前',
     hoursAgo: '{n} 小时前',
     daysAgo: '{n} 天前',
+    createTitleWithType: '添加{type}数据源',
+    editTitleWithType: '编辑{type}数据源',
+    resourceRequired: '请至少选择一个要同步的钉钉资源',
+    resourceLoadFailedDesc: '请检查网络与应用权限后重试；已填写的配置不会丢失',
+    noResources_dingtalk: '未找到可同步的钉钉内容',
+    noResourcesDesc_dingtalk: '当前操作人无可访问的知识库，或应用权限尚未生效',
+    guideStep1_dingtalk: '确认企业内部应用已开通知识库与文件只读权限',
+    guideStep2_dingtalk: '确认操作人 Union ID 可以访问目标知识库',
+    guideStep3_dingtalk: '发布权限变更后，返回此处重新加载',
+    permissionDocLink_dingtalk: '查看钉钉知识库权限文档',
+    selectedScopeCount: '已选 {count} 个同步范围',
+    stepProgress: '第 {current}/{total} 步 · {description}',
+    prereqBarText_dingtalk: '首次使用？点击查看钉钉企业内部应用配置指引',
+    prereqStep1Brief_dingtalk: '创建钉钉企业内部应用',
+    prereqStep1Desc_dingtalk: '在钉钉开发者后台创建企业内部应用，并复制 AppKey 和 AppSecret',
+    prereqStep2Brief_dingtalk: '开通知识库只读权限',
+    prereqStep2Desc_dingtalk: '开通 Wiki.Workspace.Read、Wiki.Node.Read、Storage.File.Read，并发布权限变更',
+    prereqStep3Brief_dingtalk: '选择有知识库访问权的操作人',
+    prereqStep3Desc_dingtalk: '填写该用户的 Union ID；连接器只能列出并读取此操作人可见的资源',
+    prereqOpenConsole_dingtalk: '前往钉钉开发者后台',
+    stepDescription: {
+      selectType: '选择要接入的外部内容来源',
+      credentials: '安全配置访问凭证并验证连接',
+      resources: '勾选需要持续同步的空间与文档',
+      strategy: '设置更新频率与内容冲突处理方式'
+    },
+    syncError: {
+      delete_failed: '删除失败，详情见服务日志',
+      feishu_auth_or_permission: '应用鉴权或权限不足，请检查凭证与应用权限',
+      feishu_rate_limited: '飞书接口限流，下次同步时将重试',
+      feishu_timeout: '文档导出或请求超时，下次同步时将重试',
+      feishu_server_unavailable: '飞书服务暂时不可用，下次同步时将重试',
+      feishu_api_error: '飞书接口错误（code={code}），下次同步时将重试',
+      feishu_api_error_generic: '飞书接口错误，下次同步时将重试',
+      sync_failed: '同步失败，下次同步时将重试',
+      ingest_failed: '入库失败，详情见服务日志'
+    },
     resourceType: {
       wikiSpace: '知识库空间',
       docCategory: '文档标签',
-      book: '语雀知识库'
+      book: '语雀知识库',
+      space: '知识库',
+      folder: '文件夹',
+      document: '在线文档',
+      unsupported: '此连接器暂不支持'
     },
     scheduleHuman: {
       '30min': '每 30 分钟',
@@ -637,21 +679,26 @@ export default {
       feedUrls: '订阅源地址',
       feedUrlsHint: '每行一个 RSS / Atom 订阅源地址，支持同时填写多个',
       authHeaders: '自定义请求头（可选）',
-      authHeadersHint: '用于访问私有订阅源，每行一个，格式为「名称: 值」，例如 Authorization: Bearer xxxx'
+      authHeadersHint: '用于访问私有订阅源，每行一个，格式为「名称: 值」，例如 Authorization: Bearer xxxx',
+      appKey: 'AppKey（Client ID）',
+      operatorId: '操作人 Union ID',
+      operatorIdHint: '填写可访问所选钉钉知识库的用户 Union ID；接口可见范围遵循该用户权限'
     },
     connectorDesc: {
       feishu: '同步飞书知识库中的文档、表格、文件',
       lark: '同步 Lark 知识库中的文档、表格、文件（飞书国际版）',
       notion: '同步 Notion 中的页面和数据库',
       yuque: '同步语雀知识库中的文档',
-      rss: '同步 RSS / Atom 订阅源中的文章'
+      rss: '同步 RSS / Atom 订阅源中的文章',
+      dingtalk: '同步钉钉知识库中的在线文档'
     },
     connector: {
       feishu: '飞书',
       lark: 'Lark（飞书国际版）',
       notion: 'Notion',
       yuque: '语雀',
-      rss: 'RSS / Atom 订阅'
+      rss: 'RSS / Atom 订阅',
+      dingtalk: '钉钉文档'
     },
     logDetail: {
       startTime: '开始时间',
@@ -686,7 +733,9 @@ export default {
     },
     conflict: {
       overwrite: '覆盖更新',
-      skip: '跳过已存在'
+      skip: '跳过已存在',
+      overwriteDesc: '源端内容有变化时更新知识库条目',
+      skipDesc: '保留知识库中已经存在的同名内容'
     },
     status: {
       active: '已连接',
@@ -695,7 +744,9 @@ export default {
     },
     syncMode: {
       incremental: '增量同步',
-      full: '全量同步'
+      full: '全量同步',
+      incrementalDesc: '仅处理新增或更新内容，适合日常同步',
+      fullDesc: '重新扫描全部范围，适合首次导入或完整校准'
     }
   },
   ollama: {
@@ -3513,15 +3564,14 @@ export default {
       tip1: '共享后，空间成员将根据设定的权限访问此知识库',
       tip2: '可编辑权限允许成员修改知识库内容，只读权限仅允许检索和问答'
     },
-    buttons: {
-      create: '创建知识库',
-      save: '保存配置',
-      saveAndClose: '保存并关闭',
-    },
     postCreateHint: {
       title: '创建成功',
       footer: '可继续调整配置，设置共享与数据源，完成后点击「保存并关闭」。',
-      followUpDesc: '可在左侧配置数据源，或在「共享管理」中发布到空间',
+      followUpDesc: '可在左侧配置数据源，或在「共享管理」中发布到空间'
+    },
+    buttons: {
+      create: '创建知识库',
+      saveAndClose: '保存并关闭'
     },
     wikiBrowser: {
       editBtn: '编辑',
@@ -4846,15 +4896,6 @@ export default {
     editor: {
       createTitle: '创建智能体',
       editTitle: '编辑智能体',
-      buttons: {
-        create: '创建智能体',
-        saveAndClose: '保存并关闭',
-      },
-      postCreateHint: {
-        title: '创建成功',
-        footer: '可继续调整配置，设置共享与发布渠道，完成后点击「保存并关闭」。',
-        integrationDesc: '前往集成中心配置 IM、网页嵌入等发布渠道',
-      },
       basicInfo: '基本信息',
       basicInfoDesc: '配置智能体的名称、描述与运行模式',
       promptsConfig: '提示词',
@@ -4948,7 +4989,16 @@ export default {
       selectSkillsDesc: '选择要启用的 Skills',
       noSkillsAvailable: '暂无预装 Skills',
       skillsInfoTitle: '什么是 Skills？',
-      skillsInfoContent: 'Skills 是预装的专业知识模块，可以为 Agent 提供特定领域的指令、工作流程和工具支持。启用 Skills 后，Agent 会在需要时自动加载相关知识。'
+      skillsInfoContent: 'Skills 是预装的专业知识模块，可以为 Agent 提供特定领域的指令、工作流程和工具支持。启用 Skills 后，Agent 会在需要时自动加载相关知识。',
+      postCreateHint: {
+        title: '创建成功',
+        footer: '可继续调整配置，设置共享与发布渠道，完成后点击「保存并关闭」。',
+        integrationDesc: '前往集成中心配置 IM、网页嵌入等发布渠道'
+      },
+      buttons: {
+        create: '创建智能体',
+        saveAndClose: '保存并关闭'
+      }
     },
     messages: {
       created: '智能体创建成功',

@@ -85,7 +85,7 @@ func (h *DataSourceHandler) getOwnedDataSource(
 // @Accept json
 // @Produce json
 // @Param request body types.DataSource true "Data source configuration"
-// @Success 201 {object} types.DataSource
+// @Success 201 {object} dto.DataSourceResponse
 // @Failure 400 {object} map[string]string
 // @Router /datasource [post]
 func (h *DataSourceHandler) CreateDataSource(c *gin.Context) {
@@ -127,7 +127,7 @@ func (h *DataSourceHandler) CreateDataSource(c *gin.Context) {
 // @Tags DataSource
 // @Produce json
 // @Param id path string true "Data source ID"
-// @Success 200 {object} types.DataSource
+// @Success 200 {object} dto.DataSourceResponse
 // @Failure 404 {object} map[string]string
 // @Router /datasource/{id} [get]
 func (h *DataSourceHandler) GetDataSource(c *gin.Context) {
@@ -155,7 +155,7 @@ func (h *DataSourceHandler) GetDataSource(c *gin.Context) {
 // @Tags DataSource
 // @Produce json
 // @Param kb_id query string true "Knowledge base ID"
-// @Success 200 {object} []types.DataSource
+// @Success 200 {object} []dto.DataSourceResponse
 // @Failure 400 {object} map[string]string
 // @Router /datasource [get]
 func (h *DataSourceHandler) ListDataSources(c *gin.Context) {
@@ -187,13 +187,13 @@ func (h *DataSourceHandler) ListDataSources(c *gin.Context) {
 
 // UpdateDataSource godoc
 // @Summary Update a data source
-// @Description Update an existing data source configuration
+// @Description Update non-secret data source settings. Credentials in this payload are ignored; use the atomic reconfigure endpoint to replace credentials.
 // @Tags DataSource
 // @Accept json
 // @Produce json
 // @Param id path string true "Data source ID"
 // @Param request body types.DataSource true "Updated configuration"
-// @Success 200 {object} types.DataSource
+// @Success 200 {object} dto.DataSourceResponse
 // @Failure 400 {object} map[string]string
 // @Router /datasource/{id} [put]
 func (h *DataSourceHandler) UpdateDataSource(c *gin.Context) {
@@ -228,6 +228,53 @@ func (h *DataSourceHandler) UpdateDataSource(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, dto.NewDataSourceResponse(ds))
+}
+
+// ReconfigureDataSource godoc
+// @Summary Atomically reconfigure a data source
+// @Description Validate candidate credentials and configuration together, then persist them in one update
+// @Tags DataSource
+// @Accept json
+// @Produce json
+// @Param id path string true "Data source ID"
+// @Param request body object true "data_source and credentials"
+// @Success 200 {object} dto.DataSourceResponse
+// @Failure 400 {object} map[string]string
+// @Router /datasource/{id}/reconfigure [put]
+func (h *DataSourceHandler) ReconfigureDataSource(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenantID := h.getTenantID(c)
+	if tenantID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	id := c.Param("id")
+	existing, status, msg := h.getOwnedDataSource(ctx, tenantID, id)
+	if status != http.StatusOK {
+		c.JSON(status, gin.H{"error": msg})
+		return
+	}
+
+	var req struct {
+		DataSource  types.DataSource       `json:"data_source" binding:"required"`
+		Credentials map[string]interface{} `json:"credentials"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: data_source is required"})
+		return
+	}
+
+	req.DataSource.ID = existing.ID
+	req.DataSource.TenantID = existing.TenantID
+	req.DataSource.KnowledgeBaseID = existing.KnowledgeBaseID
+	req.DataSource.Type = existing.Type
+	updated, err := h.service.ReconfigureDataSource(ctx, &req.DataSource, req.Credentials)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, dto.NewDataSourceResponse(updated))
 }
 
 // DeleteDataSource godoc
@@ -313,6 +360,7 @@ func (h *DataSourceHandler) ValidateCredentials(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
 
 	var req struct {
 		Type        string                 `json:"type" binding:"required"`
@@ -329,6 +377,63 @@ func (h *DataSourceHandler) ValidateCredentials(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "connected"})
+}
+
+// PreviewResources godoc
+// @Summary Preview resources using candidate credentials
+// @Description List resources without creating or mutating a data source
+// @Tags DataSource
+// @Accept json
+// @Produce json
+// @Param request body object true "type, credentials, settings, and optional parent_id"
+// @Success 200 {object} []types.Resource
+// @Failure 400 {object} map[string]string
+// @Router /datasource/preview-resources [post]
+func (h *DataSourceHandler) PreviewResources(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenantID := h.getTenantID(c)
+	if tenantID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
+
+	var req struct {
+		Type         string                 `json:"type" binding:"required"`
+		DataSourceID string                 `json:"data_source_id"`
+		Credentials  map[string]interface{} `json:"credentials"`
+		Settings     map[string]interface{} `json:"settings"`
+		ParentID     string                 `json:"parent_id"`
+		ValidateOnly bool                   `json:"validate_only"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: type is required"})
+		return
+	}
+	if req.DataSourceID != "" {
+		if _, status, msg := h.getOwnedDataSource(ctx, tenantID, req.DataSourceID); status != http.StatusOK {
+			c.JSON(status, gin.H{"error": msg})
+			return
+		}
+	}
+
+	resources, err := h.service.PreviewResources(
+		ctx,
+		req.Type,
+		req.DataSourceID,
+		req.Credentials,
+		req.Settings,
+		req.ParentID,
+		req.ValidateOnly,
+	)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if resources == nil {
+		resources = make([]types.Resource, 0)
+	}
+	c.JSON(http.StatusOK, resources)
 }
 
 // @Summary List available resources in data source

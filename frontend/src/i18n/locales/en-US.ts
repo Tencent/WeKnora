@@ -906,12 +906,12 @@ export default {
       editTitle: 'Edit Agent',
       buttons: {
         create: 'Create Agent',
-        saveAndClose: 'Save and Close',
+        saveAndClose: 'Save and Close'
       },
       postCreateHint: {
         title: 'Created successfully',
         footer: 'Keep adjusting settings, configure sharing and publishing, then click "Save and Close".',
-        integrationDesc: 'Go to Integrations to configure IM, web embed, and other publishing channels',
+        integrationDesc: 'Go to Integrations to configure IM, web embed, and other publishing channels'
       },
       basicInfo: 'Basic Info',
       basicInfoDesc: 'Configure agent name, description, and run mode',
@@ -2307,13 +2307,12 @@ export default {
     },
     buttons: {
       create: 'Create Knowledge Base',
-      save: 'Save Configuration',
-      saveAndClose: 'Save and Close',
+      saveAndClose: 'Save and Close'
     },
     postCreateHint: {
       title: 'Created successfully',
       footer: 'Keep adjusting settings, configure sharing and data sources, then click "Save and Close".',
-      followUpDesc: 'Configure data sources on the left, or use Share Management to publish to spaces',
+      followUpDesc: 'Configure data sources on the left, or use Share Management to publish to spaces'
     },
     share: {
       description: 'Share the knowledge base with spaces so members can access and use it',
@@ -5146,11 +5145,14 @@ export default {
     paused: 'Paused',
     resumed: 'Resumed',
     pauseFailed: 'Failed to pause',
+    resumeFailed: 'Failed to resume',
     logs: 'Logs',
     syncModeLabel: 'Sync mode',
     syncMode: {
       incremental: 'Incremental',
-      full: 'Full'
+      full: 'Full',
+      incrementalDesc: 'Process only new or updated content for routine syncs',
+      fullDesc: 'Rescan the complete scope for first import or reconciliation'
     },
     status: {
       active: 'Connected',
@@ -5169,7 +5171,7 @@ export default {
     connectionFailed: 'Connection failed',
     isRequired: 'is required',
     credentialsLabel: 'credentials',
-    resourceHint: 'Select the spaces or folders to sync',
+    resourceHint: 'Select the spaces, folders, or online documents to sync',
     untitled: 'Untitled',
     resourceLoadFailed: 'Failed to load resources',
     noResources: 'No wiki spaces found',
@@ -5187,7 +5189,9 @@ export default {
     conflictLabel: 'Conflict strategy',
     conflict: {
       overwrite: 'Overwrite',
-      skip: 'Skip existing'
+      skip: 'Skip existing',
+      overwriteDesc: 'Update knowledge entries when source content changes',
+      skipDesc: 'Keep content that already exists in the knowledge base'
     },
     syncDeletions: 'Sync deletions (remove knowledge when deleted at source)',
     createAndSync: 'Create & Sync Now',
@@ -5234,14 +5238,16 @@ export default {
       lark: 'Lark',
       notion: 'Notion',
       yuque: 'Yuque',
-      rss: 'RSS / Atom Feed'
+      rss: 'RSS / Atom Feed',
+      dingtalk: 'DingTalk Docs'
     },
     connectorDesc: {
       feishu: 'Sync documents, spreadsheets and files from Feishu Wiki',
       lark: 'Sync documents, spreadsheets and files from Lark Wiki (Feishu international)',
       notion: 'Sync pages and databases from Notion',
       yuque: 'Sync documents from Yuque knowledge bases',
-      rss: 'Sync articles from RSS / Atom feeds'
+      rss: 'Sync articles from RSS / Atom feeds',
+      dingtalk: 'Sync online documents from DingTalk knowledge bases'
     },
     field: {
       appId: 'App ID',
@@ -5253,7 +5259,10 @@ export default {
       feedUrls: 'Feed URLs',
       feedUrlsHint: 'One RSS / Atom feed URL per line; multiple feeds are supported.',
       authHeaders: 'Custom headers (optional)',
-      authHeadersHint: 'For private feeds. One per line in "Name: Value" form, e.g. Authorization: Bearer xxxx'
+      authHeadersHint: 'For private feeds. One per line in "Name: Value" form, e.g. Authorization: Bearer xxxx',
+      appKey: 'AppKey (Client ID)',
+      operatorId: 'Operator Union ID',
+      operatorIdHint: 'Union ID of a user who can access the selected DingTalk knowledge bases. API visibility follows this user’s permissions.'
     },
     comingSoon: 'Coming soon',
     docHint: 'Get credentials at:',
@@ -5291,13 +5300,54 @@ export default {
     resourceType: {
       wikiSpace: 'Wiki Space',
       docCategory: 'Document Tag',
-      book: 'Yuque Book'
+      book: 'Yuque Book',
+      space: 'Knowledge Base',
+      folder: 'Folder',
+      document: 'Online Document',
+      unsupported: 'Unsupported by this connector'
     },
     neverSynced: 'Never synced',
     justNow: 'Just now',
     minutesAgo: '{n}m ago',
     hoursAgo: '{n}h ago',
-    daysAgo: '{n}d ago'
+    daysAgo: '{n}d ago',
+    createTitleWithType: 'Add {type} Data Source',
+    editTitleWithType: 'Edit {type} Data Source',
+    resourceRequired: 'Select at least one DingTalk resource to sync',
+    resourceLoadFailedDesc: 'Check the network and app permissions, then retry. Your configuration is preserved.',
+    noResources_dingtalk: 'No DingTalk content available to sync',
+    noResourcesDesc_dingtalk: 'The operator cannot access a knowledge base yet, or the app permissions are not active',
+    guideStep1_dingtalk: 'Confirm the internal app has read access to knowledge bases and files',
+    guideStep2_dingtalk: 'Confirm the operator Union ID can access the target knowledge base',
+    guideStep3_dingtalk: 'Publish permission changes, then return here and retry',
+    permissionDocLink_dingtalk: 'View DingTalk knowledge-base permission docs',
+    selectedScopeCount: '{count} sync scope selected | {count} sync scopes selected',
+    stepProgress: 'Step {current} of {total} · {description}',
+    prereqBarText_dingtalk: 'First time? Click to see the DingTalk internal-app setup guide',
+    prereqStep1Brief_dingtalk: 'Create a DingTalk internal app',
+    prereqStep1Desc_dingtalk: 'Open DingTalk Developer Console, create an internal app, and copy its AppKey and AppSecret.',
+    prereqStep2Brief_dingtalk: 'Grant the required read permissions',
+    prereqStep2Desc_dingtalk: 'Enable Wiki.Workspace.Read, Wiki.Node.Read, and Storage.File.Read, then publish the permission change.',
+    prereqStep3Brief_dingtalk: 'Choose an operator with knowledge-base access',
+    prereqStep3Desc_dingtalk: 'Enter that user’s Union ID. The connector can only list and read resources visible to this operator.',
+    prereqOpenConsole_dingtalk: 'Open DingTalk Developer Console',
+    syncError: {
+      delete_failed: 'Delete failed; see server logs',
+      feishu_auth_or_permission: 'Authentication or permission error; check credentials and app permissions',
+      feishu_rate_limited: 'Feishu API rate limited; will retry on the next sync',
+      feishu_timeout: 'Export or request timed out; will retry on the next sync',
+      feishu_server_unavailable: 'Feishu service temporarily unavailable; will retry on the next sync',
+      feishu_api_error: 'Feishu API error (code={code}); will retry on the next sync',
+      feishu_api_error_generic: 'Feishu API error; will retry on the next sync',
+      sync_failed: 'Sync failed; will retry on the next sync',
+      ingest_failed: 'Ingest failed; see server logs'
+    },
+    stepDescription: {
+      selectType: 'Choose the external content source to connect',
+      credentials: 'Configure access credentials and verify the connection',
+      resources: 'Select the spaces and documents to keep in sync',
+      strategy: 'Set the refresh cadence and conflict behavior'
+    }
   },
   integrations: {
     title: 'Publish & Integrations',

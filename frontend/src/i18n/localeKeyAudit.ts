@@ -99,6 +99,8 @@ const EXTRA_PREFIXES = [
   'organization.role.',
   'inviteRegister.',
   'modelSettings.builtinModels.',
+  'datasource.stepDescription.',
+  'datasource.syncError.',
 ] as const
 
 /** Keys that must survive pruning even when static analysis misses them. */

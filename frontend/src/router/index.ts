@@ -204,6 +204,11 @@ const router = createRouter({
       name: 'markdownTest',
       component: () => import('../views/dev/MarkdownTestPage.vue'),
       meta: { requiresAuth: false, requiresInit: false }
+    }, {
+      path: '/platform/dev/dingtalk-datasource',
+      name: 'dingtalkDatasourceMockTest',
+      component: () => import('../views/dev/DingTalkDatasourceMockPage.vue'),
+      meta: { requiresAuth: false, requiresInit: false }
     }] : []),
   ],
 });

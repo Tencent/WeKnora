@@ -119,6 +119,9 @@ func asynqRetryDelayFunc(n int, e error, t *asynq.Task) time.Duration {
 	if errors.Is(e, service.ErrWikiIngestConcurrent) {
 		return wikiIngestRetryDelay
 	}
+	if errors.Is(e, service.ErrDataSourceIngestPending) {
+		return types.DataSourceIngestPendingRetryDelay
+	}
 	return asynq.DefaultRetryDelayFunc(n, e, t)
 }
 

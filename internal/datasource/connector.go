@@ -51,6 +51,21 @@ type Connector interface {
 	FetchIncremental(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error)
 }
 
+// CursorAwareFullSyncConnector is an optional extension for connectors whose
+// full snapshot can also reconcile deletions safely. The service supplies the
+// prior snapshot cursor, while the connector still re-fetches every current
+// item and returns a replacement cursor plus any deletion markers.
+type CursorAwareFullSyncConnector interface {
+	Connector
+
+	FetchAllWithCursor(
+		ctx context.Context,
+		config *types.DataSourceConfig,
+		resourceIDs []string,
+		cursor *types.SyncCursor,
+	) ([]types.FetchedItem, *types.SyncCursor, error)
+}
+
 // StreamHandler receives items and progress checkpoints emitted during a
 // streaming fetch. The service implements it to ingest each item as it arrives
 // (bounding memory to one item instead of the whole wiki) and to persist the
@@ -216,10 +231,10 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 	types.ConnectorTypeDingTalk: {
 		Type:         types.ConnectorTypeDingTalk,
 		Name:         "DingTalk (钉钉)",
-		Description:  "Sync documents and content from DingTalk",
+		Description:  "Sync documents from DingTalk Wiki (钉钉知识库)",
 		Priority:     7,
-		AuthType:     "api_key",
-		Capabilities: []string{"incremental"},
+		AuthType:     "oauth2",
+		Capabilities: []string{"incremental", "deletion_sync"},
 	},
 	types.ConnectorTypeWebCrawler: {
 		Type:         types.ConnectorTypeWebCrawler,

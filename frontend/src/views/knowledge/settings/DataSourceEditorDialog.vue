@@ -1,17 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick, type Directive, type DirectiveBinding } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import {
   createDataSource,
   updateDataSource,
+  reconfigureDataSource,
   triggerSync,
-  validateConnection,
-  validateCredentials,
-  listResources,
+  previewResources,
   resolveResourceAncestors,
-  deleteDataSource,
-  putDataSourceCredentials,
   deleteDataSourceCredentials,
   type DataSource,
   type Resource,
@@ -19,6 +16,19 @@ import {
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { getDatasourceIconUrl } from './datasourceIcons'
+import {
+  DINGTALK_CONNECTOR_DEF,
+  connectorRequiresCredentials,
+  connectionValidationMode,
+  createLatestRequestGate,
+  credentialsForMainPayload,
+  hasCandidateCredentialValues,
+  mergeLazyResources,
+  missingRequiredCredentialField,
+  requiresResourceSelection,
+  usesCandidateResourcePreview,
+  type ConnectorDef,
+} from './datasourceEditorLogic'
 
 const props = defineProps<{
   kbId: string
@@ -29,9 +39,50 @@ const visible = defineModel<boolean>('visible', { default: false })
 const emit = defineEmits<{ saved: [] }>()
 const { t } = useI18n()
 
+type NativeControlBinding = {
+  id: string
+  describedBy?: string
+}
+
+function applyNativeControlAttrs(
+  el: HTMLElement,
+  binding: DirectiveBinding<NativeControlBinding>,
+) {
+  const control = el.matches('input, textarea')
+    ? el
+    : el.querySelector<HTMLInputElement | HTMLTextAreaElement>('input, textarea')
+  if (!control) return
+  control.id = binding.value.id
+  if (binding.value.describedBy) {
+    control.setAttribute('aria-describedby', binding.value.describedBy)
+  } else {
+    control.removeAttribute('aria-describedby')
+  }
+}
+
+// TDesign applies fallthrough attributes to its wrapper rather than the native
+// input. This local directive keeps visible labels semantically associated with
+// the actual input/textarea without changing the shared form component.
+const vNativeControl: Directive<HTMLElement, NativeControlBinding> = {
+  mounted: applyNativeControlAttrs,
+  updated: applyNativeControlAttrs,
+}
+
+const credentialFieldId = (key: string) => `datasource-credential-${key}`
+const credentialFieldHintId = (key: string) => `${credentialFieldId(key)}-hint`
+
 const isEdit = computed(() => !!props.dataSource)
 const step = ref(0)
 const submitting = ref(false)
+const dialogSessionGate = createLatestRequestGate()
+const connectionTestGate = createLatestRequestGate()
+const drawerVisible = computed({
+  get: () => visible.value,
+  set: (next: boolean) => {
+    if (!next && submitting.value) return
+    visible.value = next
+  },
+})
 
 // In edit mode the credential "configured?" flag travels on the main
 // DataSource response (DataSource.credentials.credentials.configured —
@@ -44,6 +95,7 @@ const credentialsConfigured = ref(false)
 // Remove actions. Toggling Replace reveals the credential inputs so the
 // user can type a new set. Untoggling discards anything typed.
 const replaceCredentialsMode = ref(false)
+const initialSettingsFingerprint = ref('')
 
 // Whether the credential input section is interactive right now. In create
 // mode it's always shown; in edit mode only when the user opted in to
@@ -91,6 +143,8 @@ async function confirmRemoveCredentials() {
     replaceCredentialsMode.value = false
     pendingRemoveCredentials.value = false
     form.value.config.credentials = {}
+    selectionBeforeCredentialReplace.value = null
+    resetResourcePicker(connectorRequiresCredentials(currentDef.value))
     MessagePlugin.success(t('credential.removedToast'))
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('credential.removeFailed'))
@@ -104,6 +158,11 @@ function cancelReplaceCredentials() {
   pendingRemoveCredentials.value = false
   form.value.config.credentials = {}
   rssAuthHeaders.value = []
+  resetResourcePicker(false)
+  if (selectionBeforeCredentialReplace.value) {
+    selectedResourceIds.value = [...selectionBeforeCredentialReplace.value]
+  }
+  selectionBeforeCredentialReplace.value = null
   testResult.value = credentialsConfigured.value ? 'success' : ''
   testErrorMsg.value = ''
 }
@@ -156,12 +215,28 @@ function removeRssAuthHeader(idx: number) {
 }
 
 function needsConnectionTest(): boolean {
-  return !(isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value)
+  return connectionValidationMode(
+    isEdit.value,
+    credentialsConfigured.value,
+    replaceCredentialsMode.value,
+  ) === 'stateless'
+}
+
+function isCandidateResourcePreview(): boolean {
+  return usesCandidateResourcePreview(
+    isEdit.value,
+    credentialsConfigured.value,
+    replaceCredentialsMode.value,
+    connectorRequiresCredentials(currentDef.value),
+    hasCandidateCredentialValues(form.value.config.credentials),
+  )
 }
 
 function enterReplaceCredentials() {
   pendingRemoveCredentials.value = false
+  selectionBeforeCredentialReplace.value = [...selectedResourceIds.value]
   replaceCredentialsMode.value = true
+  resetResourcePicker(true)
   testResult.value = ''
   testErrorMsg.value = ''
 }
@@ -184,7 +259,14 @@ const form = ref({
 // Step 2: Resources
 const resources = ref<Resource[]>([])
 const loadingResources = ref(false)
+const resourceLoadError = ref(false)
 const selectedResourceIds = ref<string[]>([])
+const resourceTreeRef = ref<HTMLElement | null>(null)
+const activeResourceId = ref('')
+// Credential replacement changes the external identity namespace. Keep the
+// stored selection only as a cancel backup; candidate browsing always starts
+// empty so old opaque IDs can never leak into the final configuration.
+const selectionBeforeCredentialReplace = ref<string[] | null>(null)
 const expandedResourceIds = ref(new Set<string>())
 // Lazy loading: parents whose children have already been fetched, and parents
 // currently being fetched. Used to load hierarchical sources (e.g. Feishu wiki)
@@ -195,6 +277,23 @@ const loadingChildrenIds = ref(new Set<string>())
 // Notion populate parent_id on the first call). In that case expanding a node
 // never needs an extra request.
 const treeFullyLoaded = ref(false)
+const resourceLoadGate = createLatestRequestGate()
+
+function resetResourcePicker(clearSelection: boolean) {
+  resourceLoadGate.invalidate()
+  loadingResources.value = false
+  resourceLoadError.value = false
+  resources.value = []
+  activeResourceId.value = ''
+  expandedResourceIds.value = new Set()
+  loadedChildrenIds.value = new Set()
+  loadingChildrenIds.value = new Set()
+  treeFullyLoaded.value = false
+  if (clearSelection) {
+    selectedResourceIds.value = []
+    form.value.config.resource_ids = []
+  }
+}
 
 // Shared children/parent indexes — used by tree rendering and selection logic
 const childrenMap = computed(() => {
@@ -230,6 +329,10 @@ const checkStates = computed(() => {
   // in the cover set; otherwise `indeterminate` if any descendant is checked;
   // otherwise `unchecked`. Returns whether the subtree contains a checked node.
   function walk(node: Resource, ancestorChecked: boolean): boolean {
+    if (!isResourceSelectable(node)) {
+      states.set(node.external_id, 'unchecked')
+      return false
+    }
     const selfChecked = ancestorChecked || cover.has(node.external_id)
     let descendantChecked = false
     for (const c of childrenMap.value.get(node.external_id) || []) {
@@ -261,36 +364,42 @@ function toggleExpand(id: string) {
 // no-op when the connector already delivered the whole tree in one call (e.g.
 // Notion) or when this node's children have already been fetched.
 async function ensureChildrenLoaded(id: string) {
-  if (!tempDsId.value) return
+  if (isEdit.value && !tempDsId.value) return
   if (loadedChildrenIds.value.has(id) || loadingChildrenIds.value.has(id)) return
   if (treeFullyLoaded.value) {
     loadedChildrenIds.value = new Set(loadedChildrenIds.value).add(id)
     return
   }
 
+  const generation = resourceLoadGate.current()
   loadingChildrenIds.value = new Set(loadingChildrenIds.value).add(id)
   try {
-    const res = await listResources(tempDsId.value, id)
+    const res = await previewResources({
+      type: form.value.type,
+      credentials: credentialsForPreviewRequest(),
+      settings: form.value.config.settings,
+      dataSourceId: isEdit.value ? tempDsId.value : undefined,
+      parentId: id,
+    })
+    if (!resourceLoadGate.isCurrent(generation)) return
     const children: Resource[] = res?.data || res || []
     if (children.length > 0) {
-      const existing = new Set(resources.value.map(r => r.external_id))
-      const merged = resources.value.slice()
-      for (const c of children) {
-        if (!existing.has(c.external_id)) merged.push(c)
-      }
-      resources.value = merged
+      resources.value = mergeLazyResources(resources.value, children)
     }
     loadedChildrenIds.value = new Set(loadedChildrenIds.value).add(id)
   } catch (e: any) {
+    if (!resourceLoadGate.isCurrent(generation)) return
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
     // Collapse again so the user can retry the expand.
     const next = new Set(expandedResourceIds.value)
     next.delete(id)
     expandedResourceIds.value = next
   } finally {
-    const s = new Set(loadingChildrenIds.value)
-    s.delete(id)
-    loadingChildrenIds.value = s
+    if (resourceLoadGate.isCurrent(generation)) {
+      const s = new Set(loadingChildrenIds.value)
+      s.delete(id)
+      loadingChildrenIds.value = s
+    }
   }
 }
 
@@ -309,6 +418,78 @@ const visibleTree = computed(() => {
   return result
 })
 
+const selectableVisibleResourceList = computed<Resource[]>(() =>
+  visibleTree.value
+    .map(item => item.resource)
+    .filter(isResourceSelectable)
+)
+
+const visibleResourceIdSet = computed(
+  () => new Set(selectableVisibleResourceList.value.map(resource => resource.external_id)),
+)
+
+const resourceTabStopId = computed(() =>
+  visibleResourceIdSet.value.has(activeResourceId.value)
+    ? activeResourceId.value
+    : selectableVisibleResourceList.value[0]?.external_id,
+)
+
+function resourceTabIndex(id: string): 0 | -1 {
+  return id === resourceTabStopId.value ? 0 : -1
+}
+
+function focusResourceRow(id: string) {
+  activeResourceId.value = id
+  void nextTick(() => {
+    const rows = resourceTreeRef.value?.querySelectorAll<HTMLElement>('[data-resource-id]')
+    const row = rows
+      ? Array.from(rows).find(item => item.dataset.resourceId === id)
+      : undefined
+    row?.focus()
+  })
+}
+
+function moveResourceFocus(id: string, offset: -1 | 1) {
+  const visible = selectableVisibleResourceList.value
+  const index = visible.findIndex(resource => resource.external_id === id)
+  if (index < 0) return
+  const next = visible[index + offset]
+  if (next) focusResourceRow(next.external_id)
+}
+
+function focusResourceBoundary(position: 'first' | 'last') {
+  const visible = selectableVisibleResourceList.value
+  const target = position === 'first' ? visible[0] : visible[visible.length - 1]
+  if (target) focusResourceRow(target.external_id)
+}
+
+function handleResourceArrowRight(resource: Resource) {
+  if (!resource.has_children) return
+  if (!expandedResourceIds.value.has(resource.external_id)) {
+    toggleExpand(resource.external_id)
+    return
+  }
+  const firstChild = visibleTree.value.find(
+    item =>
+      item.resource.parent_id === resource.external_id &&
+      isResourceSelectable(item.resource),
+  )?.resource
+  if (firstChild) {
+    focusResourceRow(firstChild.external_id)
+  }
+}
+
+function handleResourceArrowLeft(resource: Resource) {
+  if (resource.has_children && expandedResourceIds.value.has(resource.external_id)) {
+    toggleExpand(resource.external_id)
+    return
+  }
+  const parent = resources.value.find(item => item.external_id === resource.parent_id)
+  if (parent && isResourceSelectable(parent)) {
+    focusResourceRow(parent.external_id)
+  }
+}
+
 // Connection test
 const testing = ref(false)
 const testResult = ref<'success' | 'error' | ''>('')
@@ -318,7 +499,8 @@ const testErrorMsg = ref('')
 const prereqExpanded = ref(false)
 
 
-// Temp data source for resource listing
+// Existing data-source ID in edit mode. Create-mode resource browsing is
+// stateless and never persists a credential-bearing draft.
 const tempDsId = ref('')
 
 // Schedule presets
@@ -331,25 +513,6 @@ const schedulePresets = computed(() => [
 ])
 
 // --- Connector definitions ---
-interface ConnectorDef {
-  type: string
-  available: boolean
-  docUrl: string
-  permissionDocUrl: string
-  permissionPageUrl: string
-  requiredPermissions: string[]
-  fields: {
-    key: string
-    labelKey: string
-    placeholder: string
-    secret?: boolean
-    optional?: boolean
-    hintKey?: string
-    multiline?: boolean
-    fieldType?: 'custom_headers'
-  }[]
-}
-
 const connectorDefs = computed<ConnectorDef[]>(() => [
   {
     type: 'feishu',
@@ -414,6 +577,7 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://www.yuque.com', optional: true, hintKey: 'datasource.field.baseUrlHint' },
     ],
   },
+  DINGTALK_CONNECTOR_DEF,
   {
     type: 'rss',
     available: true,
@@ -431,30 +595,30 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
 const currentDef = computed(() => connectorDefs.value.find(d => d.type === form.value.type))
 
 // --- Drawer lifecycle ---
-watch(visible, async (v) => {
+watch(visible, (v) => {
   if (!v) {
-    if (!isEdit.value && tempDsId.value) {
-      try {
-        await deleteDataSource(tempDsId.value)
-      } catch {
-        // Ignore cleanup errors
-      }
-      tempDsId.value = ''
-    }
+    dialogSessionGate.invalidate()
+    connectionTestGate.invalidate()
+    testing.value = false
+    resourceLoadGate.invalidate()
+    loadingResources.value = false
+    loadingChildrenIds.value = new Set()
     return
   }
+  dialogSessionGate.begin()
+  connectionTestGate.invalidate()
+  testing.value = false
+  submitting.value = false
   step.value = isEdit.value ? 1 : 0
   testResult.value = ''
   testErrorMsg.value = ''
   tempDsId.value = ''
   prereqExpanded.value = false
   pendingRemoveCredentials.value = false
-  resources.value = []
+  selectionBeforeCredentialReplace.value = null
+  initialSettingsFingerprint.value = ''
   selectedResourceIds.value = []
-  expandedResourceIds.value = new Set()
-  loadedChildrenIds.value = new Set()
-  loadingChildrenIds.value = new Set()
-  treeFullyLoaded.value = false
+  resetResourcePicker(false)
   rssAuthHeaders.value = []
 
   if (isEdit.value && props.dataSource) {
@@ -482,6 +646,10 @@ watch(visible, async (v) => {
       sync_deletions: props.dataSource.sync_deletions,
     }
     selectedResourceIds.value = form.value.config?.resource_ids || []
+    initialSettingsFingerprint.value = JSON.stringify(form.value.config.settings)
+    if (isCandidateResourcePreview()) {
+      selectedResourceIds.value = []
+    }
     tempDsId.value = props.dataSource.id
   } else {
     replaceCredentialsMode.value = false
@@ -495,15 +663,21 @@ watch(visible, async (v) => {
       conflict_strategy: 'overwrite',
       sync_deletions: true,
     }
+    initialSettingsFingerprint.value = JSON.stringify(form.value.config.settings)
   }
 })
 
 watch(
   () => form.value.config.credentials,
   () => {
+    connectionTestGate.invalidate()
+    testing.value = false
     if (needsConnectionTest()) {
       testResult.value = ''
       testErrorMsg.value = ''
+    }
+    if (!isEdit.value || isCandidateResourcePreview()) {
+      resetResourcePicker(true)
     }
   },
   { deep: true },
@@ -513,6 +687,8 @@ watch(
   rssAuthHeaders,
   () => {
     syncRssAuthHeadersToCredentials()
+    connectionTestGate.invalidate()
+    testing.value = false
     if (needsConnectionTest()) {
       testResult.value = ''
       testErrorMsg.value = ''
@@ -522,17 +698,26 @@ watch(
 )
 
 watch(
-  () => form.value.config.settings.feed_urls,
-  () => {
-    if (needsConnectionTest()) {
-      testResult.value = ''
-      testErrorMsg.value = ''
+  () => form.value.config.settings,
+  (settings) => {
+    connectionTestGate.invalidate()
+    testing.value = false
+    testResult.value = ''
+    testErrorMsg.value = ''
+    if (
+      (isEdit.value || resources.value.length > 0) &&
+      JSON.stringify(settings) !== initialSettingsFingerprint.value
+    ) {
+      resetResourcePicker(true)
     }
   },
+  { deep: true },
 )
 
 function selectType(def: ConnectorDef) {
   if (!def.available) return
+  connectionTestGate.invalidate()
+  testing.value = false
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
   form.value.config.credentials = {}
@@ -544,65 +729,90 @@ function selectType(def: ConnectorDef) {
 async function testConnection() {
   syncRssAuthHeadersToCredentials()
   if (!validateRssFeedUrls()) return
-  if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
-    const fields = currentDef.value?.fields || []
-    for (const f of fields) {
-      if (f.optional || f.fieldType === 'custom_headers') continue
-      if (!form.value.config.credentials[f.key]) {
-        MessagePlugin.warning(`${t(f.labelKey)} ${t('datasource.isRequired')}`)
-        return
-      }
+  const validationMode = connectionValidationMode(
+    isEdit.value,
+    credentialsConfigured.value,
+    replaceCredentialsMode.value,
+  )
+  if (validationMode === 'stateless') {
+    const missing = missingRequiredCredentialField(
+      currentDef.value,
+      form.value.config.credentials,
+    )
+    if (missing) {
+      MessagePlugin.warning(`${t(missing.labelKey)} ${t('datasource.isRequired')}`)
+      return
     }
   }
 
+  const requestGeneration = connectionTestGate.begin()
+  const sessionGeneration = dialogSessionGate.current()
   testing.value = true
   testResult.value = ''
   testErrorMsg.value = ''
   try {
-    if (isEdit.value && tempDsId.value) {
-      await updateDataSource(tempDsId.value, {
-        ...form.value,
-        knowledge_base_id: props.kbId,
-      } as any)
-      await validateConnection(tempDsId.value)
-    } else {
-      const creds = { ...form.value.config.credentials }
-      if (form.value.type === 'rss') {
-        // validate-credentials is credentials-only; feed URLs live in settings.
-        creds.feed_urls = form.value.config.settings.feed_urls
-      }
-      await validateCredentials(form.value.type, creds)
-    }
+    await previewResources({
+      type: form.value.type,
+      credentials: validationMode === 'stored'
+        ? null
+        : candidateCredentialsForRequest(),
+      settings: form.value.config.settings,
+      dataSourceId: isEdit.value ? tempDsId.value : undefined,
+      validateOnly: true,
+    })
+    if (
+      !connectionTestGate.isCurrent(requestGeneration) ||
+      !dialogSessionGate.isCurrent(sessionGeneration)
+    ) return
     testResult.value = 'success'
     MessagePlugin.success(t('datasource.testSuccess'))
   } catch (e: any) {
+    if (
+      !connectionTestGate.isCurrent(requestGeneration) ||
+      !dialogSessionGate.isCurrent(sessionGeneration)
+    ) return
     testResult.value = 'error'
     testErrorMsg.value = e?.message || e?.error || ''
     MessagePlugin.error(t('datasource.testFailed'))
+  } finally {
+    if (
+      connectionTestGate.isCurrent(requestGeneration) &&
+      dialogSessionGate.isCurrent(sessionGeneration)
+    ) {
+      testing.value = false
+    }
   }
-  testing.value = false
+}
+
+function candidateCredentialsForRequest(): Record<string, unknown> {
+  syncRssAuthHeadersToCredentials()
+  return Object.fromEntries(
+    Object.entries(form.value.config.credentials).filter(
+      ([, value]) => typeof value === 'string' ? value.trim() !== '' : value != null,
+    ),
+  )
+}
+
+function credentialsForPreviewRequest(): Record<string, unknown> | null {
+  return !isEdit.value || isCandidateResourcePreview()
+    ? candidateCredentialsForRequest()
+    : null
 }
 
 // --- Load resources ---
 async function loadResources() {
+  const generation = resourceLoadGate.begin()
   loadingResources.value = true
+  resourceLoadError.value = false
   try {
-    if (!tempDsId.value) {
-      const res = await createDataSource({
-        ...form.value,
-        knowledge_base_id: props.kbId,
-        status: 'paused',
-      } as any)
-      const created = res?.data || res
-      tempDsId.value = created.id
-    } else if (!isEdit.value) {
-      await updateDataSource(tempDsId.value, {
-        ...form.value,
-        knowledge_base_id: props.kbId,
-      } as any)
-    }
+    const res = await previewResources({
+      type: form.value.type,
+      credentials: credentialsForPreviewRequest(),
+      settings: form.value.config.settings,
+      dataSourceId: isEdit.value ? tempDsId.value : undefined,
+    })
 
-    const res = await listResources(tempDsId.value)
+    if (!resourceLoadGate.isCurrent(generation)) return false
     resources.value = res?.data || res || []
     // Any parent that already arrived with children (connectors returning the
     // full tree, e.g. Notion) needs no further lazy fetch.
@@ -622,17 +832,25 @@ async function loadResources() {
         .filter(r => !r.parent_id && r.has_children && parentsWithChildren.has(r.external_id))
         .map(r => r.external_id),
     )
+    initialSettingsFingerprint.value = JSON.stringify(form.value.config.settings)
     // When editing a lazily-loaded source, reveal pre-existing selections that
     // live below the (not-yet-loaded) tree so they are visible and checked.
-    if (isEdit.value && !treeFullyLoaded.value) {
+    if (isEdit.value && !isCandidateResourcePreview() && !treeFullyLoaded.value) {
       const loaded = new Set(resources.value.map(r => r.external_id))
       const hidden = selectedResourceIds.value.filter(id => !loaded.has(id))
       if (hidden.length > 0) void revealExistingSelections(hidden)
     }
+    return true
   } catch (e: any) {
+    if (!resourceLoadGate.isCurrent(generation)) return false
+    resourceLoadError.value = true
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
+    return false
+  } finally {
+    if (resourceLoadGate.isCurrent(generation)) {
+      loadingResources.value = false
+    }
   }
-  loadingResources.value = false
 }
 
 // revealExistingSelections asks the backend which ancestors must be expanded to
@@ -640,8 +858,10 @@ async function loadResources() {
 // so the saved selection becomes visible and correctly checked in the tree.
 async function revealExistingSelections(hiddenIds: string[]) {
   if (!tempDsId.value || hiddenIds.length === 0) return
+  const generation = resourceLoadGate.current()
   try {
     const res = await resolveResourceAncestors(tempDsId.value, hiddenIds)
+    if (!resourceLoadGate.isCurrent(generation)) return
     const ancestors: string[] = res?.data?.ancestors || res?.ancestors || []
     if (ancestors.length === 0) return
     const expanded = new Set(expandedResourceIds.value)
@@ -651,6 +871,7 @@ async function revealExistingSelections(hiddenIds: string[]) {
     // selection itself); calls are independent and dedup on merge.
     await Promise.all(ancestors.map(id => ensureChildrenLoaded(id)))
   } catch (e: any) {
+    if (!resourceLoadGate.isCurrent(generation)) return
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
   }
 }
@@ -704,7 +925,9 @@ function uncheckResource(id: string, cover: Set<string>) {
       const parent = chain[i]
       const next = chain[i - 1]
       for (const sib of childrenMap.value.get(parent) || []) {
-        if (sib.external_id !== next) cover.add(sib.external_id)
+        if (sib.external_id !== next && isResourceSelectable(sib)) {
+          cover.add(sib.external_id)
+        }
       }
     }
   }
@@ -716,6 +939,9 @@ function uncheckResource(id: string, cover: Set<string>) {
 }
 
 function toggleResource(id: string) {
+  const resource = resources.value.find(item => item.external_id === id)
+  if (!resource) return
+  if (!isResourceSelectable(resource)) return
   const cover = new Set(selectedResourceIds.value)
   if ((checkStates.value.get(id) || 'unchecked') === 'unchecked') {
     checkResource(id, cover)
@@ -741,13 +967,13 @@ function validateStep1Fields(): boolean {
     return true
   }
 
-  const fields = currentDef.value?.fields || []
-  for (const f of fields) {
-    if (f.optional || f.fieldType === 'custom_headers') continue
-    if (!form.value.config.credentials[f.key]) {
-      MessagePlugin.warning(`${t(f.labelKey)} ${t('datasource.isRequired')}`)
-      return false
-    }
+  const missing = missingRequiredCredentialField(
+    currentDef.value,
+    form.value.config.credentials,
+  )
+  if (missing) {
+    MessagePlugin.warning(`${t(missing.labelKey)} ${t('datasource.isRequired')}`)
+    return false
   }
   return true
 }
@@ -755,18 +981,33 @@ function validateStep1Fields(): boolean {
 async function nextStep() {
   if (step.value === 1) {
     if (!validateStep1Fields()) return
-    if (needsConnectionTest() && testResult.value !== 'success') {
+    if (testResult.value !== 'success') {
       await testConnection()
       if ((testResult.value as string) !== 'success') return
     }
   }
+  if (step.value === 2 && resourceLoadError.value) {
+    MessagePlugin.warning(t('datasource.resourceLoadFailed'))
+    return
+  }
+  if (
+    step.value === 2 &&
+    requiresResourceSelection(form.value.type) &&
+    selectedResourceCount.value === 0
+  ) {
+    MessagePlugin.warning(t('datasource.resourceRequired'))
+    return
+  }
   step.value++
   if (step.value === 2) {
-    loadResources()
+    await loadResources()
   }
 }
 
 function prevStep() {
+  if (loadingResources.value) return
+  resourceLoadGate.invalidate()
+  loadingChildrenIds.value = new Set()
   step.value--
 }
 
@@ -776,130 +1017,123 @@ function prevStep() {
 // already carries them.
 //
 // Edit mode: credentials NEVER flow through the main PUT — they go via the
-// /credentials subresource, committed before the main submit (see
-// commitCredentialsIfNeeded). Sending an empty map keeps the backend
-// validator happy.
+// Candidate credential replacement instead uses the atomic reconfigure
+// endpoint; an empty map here keeps ordinary edit payloads secret-free.
 function buildConfigPayload(): Record<string, unknown> {
   return {
-    credentials: isEdit.value ? {} : { ...form.value.config.credentials },
+    credentials: credentialsForMainPayload(
+      isEdit.value,
+      form.value.config.credentials,
+    ),
     resource_ids: form.value.config.resource_ids,
     settings: form.value.config.settings,
   }
 }
 
-// In edit mode, when the user opted in to Replace credentials and typed at
-// least one value, commit it to /credentials before the main PUT. Aborts
-// the whole submit on failure so we don't leave the row partially saved.
-async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
-  if (!isEdit.value || !replaceCredentialsMode.value) return true
-  syncRssAuthHeadersToCredentials()
-  const filled = Object.entries(form.value.config.credentials).filter(
-    ([, v]) => typeof v === 'string' ? v !== '' : v != null,
-  )
-  if (filled.length === 0) return true
-  try {
-    await putDataSourceCredentials(dsId, Object.fromEntries(filled))
-    credentialsConfigured.value = true
-    replaceCredentialsMode.value = false
-    form.value.config.credentials = {}
-    rssAuthHeaders.value = []
-    return true
-  } catch (e: any) {
-    MessagePlugin.error(e?.message || e?.error || t('credential.saveFailed'))
-    return false
-  }
-}
-
+// In edit mode, credential replacement and candidate data-source settings are
+// submitted together through the atomic reconfigure endpoint. A validation or
+// persistence failure therefore leaves both the stored config and secret intact.
 // --- Final submit ---
 async function handleSubmit() {
   form.value.config.resource_ids = selectedResourceIds.value
+  const sessionGeneration = dialogSessionGate.current()
+  const editing = isEdit.value
+  const existingID = editing ? tempDsId.value : ''
+  const dataSourcePayload = {
+    ...form.value,
+    config: buildConfigPayload(),
+    knowledge_base_id: props.kbId,
+    status: editing ? (props.dataSource?.status || 'active') : 'active',
+  } as any
   submitting.value = true
   try {
-    let dataSourceId = tempDsId.value
+    let dataSourceId = existingID
 
-    if (tempDsId.value) {
-      // Commit credential replacement BEFORE the main PUT so a validation
-      // failure on credentials doesn't leave us with an updated row that
-      // still points at the old broken token.
-      const credsOk = await commitCredentialsIfNeeded(tempDsId.value)
-      if (!credsOk) {
-        submitting.value = false
-        return
+    if (editing) {
+      if (isCandidateResourcePreview()) {
+        await reconfigureDataSource(
+          existingID,
+          dataSourcePayload,
+          candidateCredentialsForRequest(),
+        )
+      } else {
+        await updateDataSource(existingID, dataSourcePayload)
       }
-      await updateDataSource(tempDsId.value, {
-        ...form.value,
-        config: buildConfigPayload(),
-        knowledge_base_id: props.kbId,
-        status: 'active',
-      } as any)
     } else {
-      const res = await createDataSource({
-        ...form.value,
-        config: buildConfigPayload(),
-        knowledge_base_id: props.kbId,
-        status: 'active',
-      } as any)
+      const res = await createDataSource(dataSourcePayload)
       const created = res?.data || res
       dataSourceId = created.id
-      tempDsId.value = created.id
+    }
+    if (!dialogSessionGate.isCurrent(sessionGeneration)) return
+    if (editing && isCandidateResourcePreview()) {
+      credentialsConfigured.value = true
     }
 
-    if (isEdit.value) {
+    if (editing) {
       MessagePlugin.warning(t('datasource.updateSuccessSyncHint'))
     } else {
       try {
         await triggerSync(dataSourceId)
+        if (!dialogSessionGate.isCurrent(sessionGeneration)) return
         MessagePlugin.success(t('datasource.createAndSyncSuccess'))
       } catch (e: any) {
+        if (!dialogSessionGate.isCurrent(sessionGeneration)) return
         MessagePlugin.warning(e?.message || e?.error || t('datasource.createButSyncFailed'))
       }
     }
 
+    if (!dialogSessionGate.isCurrent(sessionGeneration)) return
     emit('saved')
-    // Clear before close — otherwise the visible watcher treats the just-saved
-    // row as an abandoned temp draft and DELETEs it (loadResources creates the
-    // row early at step 2 with tempDsId).
-    tempDsId.value = ''
+    submitting.value = false
     visible.value = false
   } catch (e: any) {
+    if (!dialogSessionGate.isCurrent(sessionGeneration)) return
     MessagePlugin.error(e?.message || e?.error || t('datasource.saveFailed'))
+  } finally {
+    if (dialogSessionGate.isCurrent(sessionGeneration)) {
+      submitting.value = false
+    }
   }
-  submitting.value = false
 }
 
 function handleClose() {
+  if (submitting.value) return
   visible.value = false
 }
 
 async function handleDrawerConfirm() {
+  if (loadingResources.value || submitting.value) return
   if (step.value === 1 || step.value === 2) {
     await nextStep()
   } else if (step.value === 3) {
-    handleSubmit()
+    await handleSubmit()
   }
 }
 
-const selectedResourceCount = computed(() => {
-  let count = 0
-  for (const state of checkStates.value.values()) {
-    if (state === 'checked') count++
-  }
-  return count
-})
+// Count the stable minimal cover set sent to the backend. Counting every
+// currently loaded descendant made the visible number jump when a lazy branch
+// was expanded, even though the user's selection had not changed.
+const selectedResourceCount = computed(() => selectedResourceIds.value.length)
 
 const hasExpandableNodes = computed(() => resources.value.some(r => r.has_children))
 
 function resourceIconName(r: Resource): string {
-  if (r.has_children) return 'folder'
   switch (r.type) {
+    case 'space':
     case 'wiki_space':
       return 'root-list'
+    case 'folder':
+      return expandedResourceIds.value.has(r.external_id) ? 'folder-open' : 'folder'
     case 'book':
       return 'book'
     case 'doc_category':
       return 'folder-open'
+    case 'document':
+      return 'file-paste'
+    case 'unsupported':
+      return 'error-circle'
     default:
-      return 'file'
+      return r.has_children ? 'folder' : 'file'
   }
 }
 
@@ -917,9 +1151,17 @@ function collapseAllNodes() {
 }
 
 const resourceTypeLabelMap: Record<string, string> = {
+  space: 'datasource.resourceType.space',
+  folder: 'datasource.resourceType.folder',
+  document: 'datasource.resourceType.document',
   wiki_space: 'datasource.resourceType.wikiSpace',
   doc_category: 'datasource.resourceType.docCategory',
   book: 'datasource.resourceType.book',
+  unsupported: 'datasource.resourceType.unsupported',
+}
+
+function isResourceSelectable(resource: Resource): boolean {
+  return resource.type !== 'unsupported'
 }
 
 function resourceTypeLabel(type: string): string {
@@ -943,11 +1185,33 @@ const stepTitles = computed(() => [
   t('datasource.step.strategy'),
 ])
 
-const drawerTitle = computed(() =>
-  isEdit.value ? t('datasource.editTitle') : t('datasource.createTitle'),
+const connectorDisplayName = computed(() =>
+  form.value.type ? t(`datasource.connector.${form.value.type}`) : '',
 )
 
-const drawerDescription = computed(() => stepTitles.value[step.value] ?? '')
+const drawerTitle = computed(() => {
+  if (!connectorDisplayName.value) {
+    return isEdit.value ? t('datasource.editTitle') : t('datasource.createTitle')
+  }
+  return isEdit.value
+    ? t('datasource.editTitleWithType', { type: connectorDisplayName.value })
+    : t('datasource.createTitleWithType', { type: connectorDisplayName.value })
+})
+
+const stepDescriptionKeys = [
+  'datasource.stepDescription.selectType',
+  'datasource.stepDescription.credentials',
+  'datasource.stepDescription.resources',
+  'datasource.stepDescription.strategy',
+]
+
+const drawerDescription = computed(() =>
+  t('datasource.stepProgress', {
+    current: step.value + 1,
+    total: stepTitles.value.length,
+    description: t(stepDescriptionKeys[step.value]),
+  }),
+)
 
 const drawerConfirmText = computed(() => {
   if (step.value === 3) {
@@ -960,13 +1224,18 @@ const drawerConfirmText = computed(() => {
 
 <template>
   <SettingDrawer
-    v-model:visible="visible"
+    v-model:visible="drawerVisible"
     :title="drawerTitle"
     :description="drawerDescription"
     :class="form.type ? `datasource-editor-drawer datasource-editor-drawer--${form.type}` : 'datasource-editor-drawer'"
     :hide-footer="step === 0"
     :confirm-text="drawerConfirmText"
-    :confirm-loading="submitting || (step === 1 && testing)"
+    :confirm-loading="submitting || loadingResources || (step === 1 && testing)"
+    :confirm-disabled="step === 2 && (
+      resourceLoadError ||
+      (requiresResourceSelection(form.type) && selectedResourceCount === 0)
+    )"
+    :cancel-disabled="submitting"
     storage-key="setting-drawer:width:datasource-editor"
     width="640px"
     @confirm="handleDrawerConfirm"
@@ -1013,7 +1282,7 @@ const drawerConfirmText = computed(() => {
     </template>
 
     <template v-else-if="step === 2 || step === 3" #footer-left>
-      <t-button variant="outline" @click="prevStep">
+      <t-button variant="outline" :disabled="loadingResources" @click="prevStep">
         {{ t('datasource.back') }}
       </t-button>
     </template>
@@ -1024,6 +1293,7 @@ const drawerConfirmText = computed(() => {
         v-for="(title, i) in stepTitles"
         :key="i"
         :class="['ds-step', { active: step === i, done: step > i }]"
+        :aria-current="step === i ? 'step' : undefined"
       >
         <span class="ds-step-num">
           <t-icon v-if="step > i" name="check" class="ds-step-check" />
@@ -1137,23 +1407,37 @@ const drawerConfirmText = computed(() => {
         </div>
 
         <div class="form-item">
-          <label class="form-label required">{{ t('datasource.nameLabel') }}</label>
-          <t-input v-model="form.name" :placeholder="t('datasource.namePlaceholder')" />
+          <label class="form-label required" for="datasource-name-input">
+            {{ t('datasource.nameLabel') }}
+          </label>
+          <t-input
+            v-native-control="{ id: 'datasource-name-input' }"
+            v-model="form.name"
+            :placeholder="t('datasource.namePlaceholder')"
+          />
         </div>
       </section>
 
       <section v-if="form.type === 'rss'" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('datasource.field.feedUrls') }}</h4>
         <div class="form-item">
-          <label class="form-label required">{{ t('datasource.field.feedUrls') }}</label>
+          <label class="form-label required" for="datasource-rss-feed-urls">
+            {{ t('datasource.field.feedUrls') }}
+          </label>
           <t-textarea
+            v-native-control="{
+              id: 'datasource-rss-feed-urls',
+              describedBy: 'datasource-rss-feed-urls-hint',
+            }"
             v-model="form.config.settings.feed_urls"
             placeholder="https://example.com/feed.xml"
             :autosize="{ minRows: 2, maxRows: 6 }"
             autocomplete="off"
             spellcheck="false"
           />
-          <p class="form-desc">{{ t('datasource.field.feedUrlsHint') }}</p>
+          <p id="datasource-rss-feed-urls-hint" class="form-desc">
+            {{ t('datasource.field.feedUrlsHint') }}
+          </p>
         </div>
       </section>
 
@@ -1264,11 +1548,19 @@ const drawerConfirmText = computed(() => {
               </div>
             </template>
             <template v-else>
-              <label class="form-label" :class="{ required: !field.optional }">
+              <label
+                class="form-label"
+                :class="{ required: !field.optional }"
+                :for="credentialFieldId(field.key)"
+              >
                 {{ t(field.labelKey) }}
               </label>
               <t-textarea
                 v-if="field.multiline"
+                v-native-control="{
+                  id: credentialFieldId(field.key),
+                  describedBy: field.hintKey ? credentialFieldHintId(field.key) : undefined,
+                }"
                 v-model="form.config.credentials[field.key]"
                 :placeholder="field.placeholder || t('credential.inputPlaceholder')"
                 :autosize="{ minRows: 2, maxRows: 6 }"
@@ -1277,6 +1569,10 @@ const drawerConfirmText = computed(() => {
               />
               <t-input
                 v-else
+                v-native-control="{
+                  id: credentialFieldId(field.key),
+                  describedBy: field.hintKey ? credentialFieldHintId(field.key) : undefined,
+                }"
                 v-model="form.config.credentials[field.key]"
                 :placeholder="field.placeholder || t('credential.inputPlaceholder')"
                 :type="field.secret ? 'password' : 'text'"
@@ -1285,7 +1581,13 @@ const drawerConfirmText = computed(() => {
               >
                 <template v-if="field.secret" #prefix-icon><t-icon name="lock-on" /></template>
               </t-input>
-              <p v-if="field.hintKey" class="form-desc">{{ t(field.hintKey) }}</p>
+              <p
+                v-if="field.hintKey"
+                :id="credentialFieldHintId(field.key)"
+                class="form-desc"
+              >
+                {{ t(field.hintKey) }}
+              </p>
             </template>
           </div>
           <div v-if="isEdit && replaceCredentialsMode" class="credential-edit-actions">
@@ -1302,10 +1604,10 @@ const drawerConfirmText = computed(() => {
       <h4 class="setting-drawer__section-title">{{ t('datasource.step.resources') }}</h4>
       <p class="ds-resource-hint">{{ t('datasource.resourceHint') }}</p>
       <div v-if="loadingResources" class="ds-loading-center"><t-loading /></div>
-      <div v-else-if="resources.length > 0" class="resource-picker">
+      <div v-else-if="!resourceLoadError && resources.length > 0" class="resource-picker">
         <div class="resource-picker__toolbar">
           <span class="resource-picker__count">
-            {{ t('knowledgeBase.selectedCount', { count: selectedResourceCount }) }}
+            {{ t('datasource.selectedScopeCount', { count: selectedResourceCount }) }}
           </span>
           <div v-if="hasExpandableNodes" class="resource-picker__actions">
             <button type="button" class="resource-picker__action" @click="expandAllNodes">
@@ -1317,7 +1619,13 @@ const drawerConfirmText = computed(() => {
             </button>
           </div>
         </div>
-        <div class="resource-picker__list" role="tree">
+        <div
+          ref="resourceTreeRef"
+          class="resource-picker__list"
+          role="tree"
+          aria-multiselectable="true"
+          :aria-label="t('datasource.step.resources')"
+        >
           <div
             v-for="{ resource: r, depth } in visibleTree"
             :key="r.external_id"
@@ -1325,20 +1633,41 @@ const drawerConfirmText = computed(() => {
             :class="{
               'is-checked': resourceRowState(r.external_id) === 'checked',
               'is-indeterminate': resourceRowState(r.external_id) === 'indeterminate',
+              'is-disabled': !isResourceSelectable(r),
             }"
             :style="{ '--depth': depth }"
             role="treeitem"
+            :data-resource-id="r.external_id"
+            :tabindex="isResourceSelectable(r) ? resourceTabIndex(r.external_id) : -1"
+            :aria-level="depth + 1"
+            :aria-checked="resourceRowState(r.external_id) === 'indeterminate'
+              ? 'mixed'
+              : resourceRowState(r.external_id) === 'checked'"
             :aria-expanded="r.has_children ? expandedResourceIds.has(r.external_id) : undefined"
+            :aria-disabled="!isResourceSelectable(r)"
             @click="toggleResource(r.external_id)"
+            @focus="activeResourceId = r.external_id"
+            @keydown.enter.prevent.stop="toggleResource(r.external_id)"
+            @keydown.space.prevent.stop="toggleResource(r.external_id)"
+            @keydown.down.prevent.stop="moveResourceFocus(r.external_id, 1)"
+            @keydown.up.prevent.stop="moveResourceFocus(r.external_id, -1)"
+            @keydown.home.prevent.stop="focusResourceBoundary('first')"
+            @keydown.end.prevent.stop="focusResourceBoundary('last')"
+            @keydown.right.prevent.stop="handleResourceArrowRight(r)"
+            @keydown.left.prevent.stop="handleResourceArrowLeft(r)"
           >
             <button
               v-if="r.has_children"
               type="button"
               class="resource-picker__expand"
+              tabindex="-1"
               :aria-label="expandedResourceIds.has(r.external_id)
                 ? t('knowledgeStages.collapseBranch')
                 : t('knowledgeStages.expandBranch')"
+              :aria-expanded="expandedResourceIds.has(r.external_id)"
               @click.stop="toggleExpand(r.external_id)"
+              @keydown.enter.stop
+              @keydown.space.stop
             >
               <t-loading v-if="loadingChildrenIds.has(r.external_id)" size="12px" />
               <t-icon
@@ -1365,7 +1694,7 @@ const drawerConfirmText = computed(() => {
               >
                 <path
                   d="M10 3L4.5 8.5L2 6"
-                  stroke="#fff"
+                  stroke="currentColor"
                   stroke-width="2"
                   stroke-linecap="round"
                   stroke-linejoin="round"
@@ -1387,11 +1716,29 @@ const drawerConfirmText = computed(() => {
           </div>
         </div>
       </div>
-      <div v-else class="ds-resource-empty">
-        <t-icon name="info-circle" size="32px" style="color: var(--td-warning-color); margin-bottom: 8px;" />
-        <p class="ds-empty-title">{{ t('datasource.noResources') }}</p>
-        <p class="ds-empty-desc">{{ t(`datasource.noResourcesDesc_${form.type}`, t('datasource.noResourcesDesc')) }}</p>
-        <div class="ds-guide-steps">
+      <div
+        v-else
+        class="ds-resource-empty"
+        :class="{ 'is-error': resourceLoadError }"
+      >
+        <span class="ds-resource-empty__icon" aria-hidden="true">
+          <t-icon :name="resourceLoadError ? 'error-circle' : 'search'" size="24px" />
+        </span>
+        <p class="ds-empty-title">
+          {{
+            resourceLoadError
+              ? t('datasource.resourceLoadFailed')
+              : t(`datasource.noResources_${form.type}`, t('datasource.noResources'))
+          }}
+        </p>
+        <p class="ds-empty-desc">
+          {{
+            resourceLoadError
+              ? t('datasource.resourceLoadFailedDesc')
+              : t(`datasource.noResourcesDesc_${form.type}`, t('datasource.noResourcesDesc'))
+          }}
+        </p>
+        <div v-if="!resourceLoadError" class="ds-guide-steps">
           <div class="ds-guide-step">
             <span class="ds-guide-num">1</span>
             <span>{{ t(`datasource.guideStep1_${form.type}`, t('datasource.guideStep1')) }}</span>
@@ -1410,13 +1757,13 @@ const drawerConfirmText = computed(() => {
             {{ t('datasource.retryLoadResources') }}
           </button>
           <a
-            v-if="currentDef?.permissionDocUrl"
+            v-if="!resourceLoadError && currentDef?.permissionDocUrl"
             :href="currentDef.permissionDocUrl"
             target="_blank"
             rel="noopener"
             class="doc-link"
           >
-            {{ t('datasource.permissionDocLink') }}
+            {{ t(`datasource.permissionDocLink_${form.type}`, t('datasource.permissionDocLink')) }}
             <t-icon name="link" class="link-icon" />
           </a>
         </div>
@@ -1425,6 +1772,17 @@ const drawerConfirmText = computed(() => {
 
     <!-- Step 3: Sync strategy -->
     <template v-if="step === 3">
+      <div class="ds-strategy-summary">
+        <span class="ds-strategy-summary__icon">
+          <DataSourceTypeIcon :type="form.type" :size="24" />
+        </span>
+        <div class="ds-strategy-summary__copy">
+          <strong>{{ form.name }}</strong>
+          <span>{{ t('datasource.selectedScopeCount', { count: selectedResourceCount }) }}</span>
+        </div>
+        <t-icon name="check-circle-filled" class="ds-strategy-summary__status" />
+      </div>
+
       <section class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('datasource.syncScheduleLabel') }}</h4>
         <t-select v-model="form.sync_schedule">
@@ -1444,7 +1802,8 @@ const drawerConfirmText = computed(() => {
               :aria-checked="form.sync_mode === 'incremental'"
               @click="form.sync_mode = 'incremental'"
             >
-              {{ t('datasource.syncMode.incremental') }}
+              <span class="option-pill__title">{{ t('datasource.syncMode.incremental') }}</span>
+              <span class="option-pill__desc">{{ t('datasource.syncMode.incrementalDesc') }}</span>
             </button>
             <button
               type="button"
@@ -1454,7 +1813,8 @@ const drawerConfirmText = computed(() => {
               :aria-checked="form.sync_mode === 'full'"
               @click="form.sync_mode = 'full'"
             >
-              {{ t('datasource.syncMode.full') }}
+              <span class="option-pill__title">{{ t('datasource.syncMode.full') }}</span>
+              <span class="option-pill__desc">{{ t('datasource.syncMode.fullDesc') }}</span>
             </button>
           </div>
         </div>
@@ -1470,7 +1830,8 @@ const drawerConfirmText = computed(() => {
               :aria-checked="form.conflict_strategy === 'overwrite'"
               @click="form.conflict_strategy = 'overwrite'"
             >
-              {{ t('datasource.conflict.overwrite') }}
+              <span class="option-pill__title">{{ t('datasource.conflict.overwrite') }}</span>
+              <span class="option-pill__desc">{{ t('datasource.conflict.overwriteDesc') }}</span>
             </button>
             <button
               type="button"
@@ -1480,7 +1841,8 @@ const drawerConfirmText = computed(() => {
               :aria-checked="form.conflict_strategy === 'skip'"
               @click="form.conflict_strategy = 'skip'"
             >
-              {{ t('datasource.conflict.skip') }}
+              <span class="option-pill__title">{{ t('datasource.conflict.skip') }}</span>
+              <span class="option-pill__desc">{{ t('datasource.conflict.skipDesc') }}</span>
             </button>
           </div>
         </div>
@@ -1496,21 +1858,28 @@ const drawerConfirmText = computed(() => {
 <style scoped lang="less">
 @import './datasource-surface.less';
 .ds-steps {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 20px;
-  border-bottom: 1px solid var(--td-component-stroke);
-  padding-bottom: 14px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 18px;
+  padding: 5px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 11px;
+  background: var(--td-bg-color-secondarycontainer);
 }
 
 .ds-step {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  flex: 1;
   min-width: 0;
+  min-height: 36px;
+  padding: 6px 8px;
+  border-radius: 8px;
   font-size: 13px;
-  color: var(--td-text-color-placeholder);
+  color: var(--td-text-color-secondary);
+  transition: color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
 }
 
 .ds-step-title {
@@ -1521,12 +1890,14 @@ const drawerConfirmText = computed(() => {
 }
 
 .ds-step.active {
-  color: var(--td-brand-color);
-  font-weight: 500;
+  color: var(--td-brand-color-7, var(--td-brand-color));
+  font-weight: 600;
+  background: var(--td-bg-color-container);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--td-text-color-primary) 10%, transparent);
 }
 
 .ds-step.done {
-  color: var(--td-text-color-secondary);
+  color: var(--td-text-color-primary);
   font-weight: 500;
 }
 
@@ -1541,19 +1912,19 @@ const drawerConfirmText = computed(() => {
   font-size: 12px;
   font-weight: 600;
   border: 1px solid var(--td-component-stroke);
-  color: var(--td-text-color-placeholder);
+  color: var(--td-text-color-secondary);
   background: transparent;
 }
 
 .ds-step.active .ds-step-num {
-  background: var(--td-brand-color);
-  color: #fff;
-  border-color: var(--td-brand-color);
+  background: var(--td-brand-color-7, var(--td-brand-color));
+  color: var(--td-bg-color-container);
+  border-color: var(--td-brand-color-7, var(--td-brand-color));
 }
 
 .ds-step.done .ds-step-num {
   background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-  color: var(--td-brand-color);
+  color: var(--td-brand-color-8, var(--td-brand-color-active));
   border-color: transparent;
 }
 
@@ -1570,16 +1941,23 @@ const drawerConfirmText = computed(() => {
 .ds-type-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 10px;
+  gap: 12px;
 }
 
 .ds-type-card {
   .ds-surface-card--interactive();
-  padding: 14px;
+  min-height: 92px;
+  padding: 15px;
   cursor: pointer;
   text-align: left;
   font: inherit;
   color: inherit;
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--td-bg-color-container) 96%, var(--td-brand-color) 4%),
+      var(--td-bg-color-container)
+    );
 }
 
 .ds-type-card.disabled {
@@ -1591,26 +1969,26 @@ const drawerConfirmText = computed(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .ds-type-name {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 
 .ds-type-soon {
   font-size: 10px;
-  color: var(--td-text-color-placeholder);
+  color: var(--td-text-color-secondary);
   background: var(--td-bg-color-component);
   padding: 1px 6px;
   border-radius: 3px;
 }
 
 .ds-type-desc {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--td-text-color-secondary);
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
 /* --- Step 1: setup guide + credentials (align with ModelEditor / CredentialResource) --- */
@@ -1627,7 +2005,7 @@ const drawerConfirmText = computed(() => {
 .inline-alert__icon {
   font-size: 15px;
   flex-shrink: 0;
-  color: var(--td-text-color-placeholder);
+  color: var(--td-text-color-secondary);
 }
 
 .inline-alert__text {
@@ -1641,19 +2019,28 @@ const drawerConfirmText = computed(() => {
   gap: 2px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--td-brand-color);
+  color: var(--td-brand-color-7, var(--td-brand-color));
   white-space: nowrap;
   transition: color 0.15s ease;
 }
 
 .inline-alert__action:hover {
-  color: var(--td-brand-color-active);
+  color: var(--td-brand-color-8, var(--td-brand-color-active));
 }
 
 .ds-setup-guide {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, #1677ff 22%, var(--td-component-stroke));
+  border-radius: 10px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #1677ff 10%, var(--td-bg-color-container)),
+      color-mix(in srgb, #1677ff 3%, var(--td-bg-color-container))
+    );
 }
 
 .ds-setup-guide--standalone {
@@ -1671,21 +2058,26 @@ const drawerConfirmText = computed(() => {
   font: inherit;
   font-size: 13px;
   line-height: 1.5;
-  color: var(--td-text-color-secondary);
+  color: var(--td-text-color-primary);
   text-align: left;
   cursor: pointer;
   transition: color 0.12s ease;
 }
 
-.ds-setup-guide__toggle:hover,
+.ds-setup-guide__toggle:hover {
+  color: var(--td-text-color-primary);
+}
+
 .ds-setup-guide__toggle:focus-visible {
   color: var(--td-text-color-primary);
-  outline: none;
+  border-radius: 4px;
+  outline: 2px solid var(--td-brand-color-7, var(--td-brand-color));
+  outline-offset: 2px;
 }
 
 .ds-setup-guide__icon {
   flex-shrink: 0;
-  color: var(--td-text-color-placeholder);
+  color: #1677ff;
 }
 
 .ds-setup-guide__summary {
@@ -1695,25 +2087,61 @@ const drawerConfirmText = computed(() => {
 
 .ds-setup-guide__chevron {
   flex-shrink: 0;
-  color: var(--td-text-color-placeholder);
+  color: var(--td-text-color-secondary);
 }
 
 .ds-setup-guide__body {
-  padding: 0 0 0 23px;
+  padding: 0 2px 2px 23px;
 }
 
 .ds-setup-steps {
   margin: 10px 0 0;
-  padding: 0 0 0 18px;
+  padding: 0;
+  list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
+  counter-reset: setup-step;
 }
 
 .ds-setup-step {
+  position: relative;
+  padding: 0 0 13px 30px;
   font-size: 13px;
   line-height: 1.5;
   color: var(--td-text-color-primary);
+  counter-increment: setup-step;
+}
+
+.ds-setup-step:last-child {
+  padding-bottom: 2px;
+}
+
+.ds-setup-step::before {
+  content: counter(setup-step);
+  position: absolute;
+  left: 0;
+  top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  color: color-mix(in srgb, #1677ff 60%, var(--td-text-color-primary));
+  background: color-mix(in srgb, #1677ff 14%, var(--td-bg-color-container));
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ds-setup-step:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 9px;
+  top: 23px;
+  bottom: 2px;
+  width: 1px;
+  background: color-mix(in srgb, #1677ff 22%, var(--td-component-stroke));
 }
 
 .ds-setup-step__title {
@@ -1786,7 +2214,7 @@ const drawerConfirmText = computed(() => {
 }
 
 .credential-faux-text.muted {
-  color: var(--td-text-color-placeholder);
+  color: var(--td-text-color-secondary);
 }
 
 .credential-faux-text.danger {
@@ -1800,11 +2228,11 @@ const drawerConfirmText = computed(() => {
 }
 
 .credential-status-icon.success {
-  color: var(--td-success-color);
+  color: var(--td-success-color-7, var(--td-success-color));
 }
 
 .credential-status-icon.muted {
-  color: var(--td-text-color-placeholder);
+  color: var(--td-text-color-secondary);
 }
 
 .credential-status-icon.warn {
@@ -1878,7 +2306,7 @@ const drawerConfirmText = computed(() => {
   margin: 4px 0 0;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--td-text-color-placeholder);
+  color: var(--td-text-color-secondary);
 }
 
 .status-icon {
@@ -1887,7 +2315,7 @@ const drawerConfirmText = computed(() => {
 }
 
 .status-icon.available {
-  color: var(--td-brand-color);
+  color: var(--td-brand-color-7, var(--td-brand-color));
 }
 
 .status-icon.unavailable {
@@ -1921,7 +2349,7 @@ const drawerConfirmText = computed(() => {
   margin: -8px 0 0;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--td-text-color-placeholder);
+  color: var(--td-text-color-secondary);
 }
 
 .resource-picker {
@@ -1940,8 +2368,15 @@ const drawerConfirmText = computed(() => {
 }
 
 .resource-picker__count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 9px;
+  border-radius: 999px;
   font-size: 12px;
-  color: var(--td-text-color-secondary);
+  font-weight: 500;
+  color: var(--td-brand-color-8, var(--td-brand-color-active));
+  background: color-mix(in srgb, var(--td-brand-color) 9%, var(--td-bg-color-container));
 }
 
 .resource-picker__actions {
@@ -1952,20 +2387,23 @@ const drawerConfirmText = computed(() => {
 }
 
 .resource-picker__action {
-  padding: 0;
+  padding: 3px 6px;
   border: none;
+  border-radius: 5px;
   background: transparent;
   font: inherit;
   font-size: 12px;
-  color: var(--td-text-color-placeholder);
+  color: var(--td-text-color-secondary);
   cursor: pointer;
   transition: color 0.12s ease;
 }
 
 .resource-picker__action:hover,
 .resource-picker__action:focus-visible {
-  color: var(--td-text-color-secondary);
-  outline: none;
+  color: var(--td-brand-color-8, var(--td-brand-color-active));
+  background: color-mix(in srgb, var(--td-brand-color) 7%, transparent);
+  outline: 2px solid var(--td-brand-color-7, var(--td-brand-color));
+  outline-offset: 1px;
 }
 
 .resource-picker__action-sep {
@@ -1976,10 +2414,11 @@ const drawerConfirmText = computed(() => {
 
 .resource-picker__list {
   .ds-inset-panel();
-  min-height: 360px;
-  max-height: min(calc(100vh - 260px), 600px);
+  min-height: 88px;
+  max-height: min(calc(100vh - 330px), 520px);
   overflow-y: auto;
-  padding: 4px 6px;
+  padding: 6px;
+  border: 1px solid var(--td-component-stroke);
   overscroll-behavior: contain;
 }
 
@@ -1987,31 +2426,65 @@ const drawerConfirmText = computed(() => {
   --depth: 0;
   position: relative;
   display: grid;
-  grid-template-columns: 16px 16px 16px 1fr;
+  grid-template-columns: 18px 18px 18px 1fr;
   align-items: center;
   column-gap: 8px;
-  min-height: 34px;
+  min-height: 40px;
   margin-bottom: 2px;
-  padding: 5px 8px 5px calc(8px + var(--depth) * 14px);
-  border-radius: 6px;
+  padding: 6px 10px 6px calc(10px + var(--depth) * 16px);
+  border-radius: 8px;
   cursor: pointer;
-  transition: background 0.12s ease;
+  outline: none;
+  transition: background 0.14s ease, box-shadow 0.14s ease, color 0.14s ease;
 }
 
 .resource-picker__row:last-child {
   margin-bottom: 0;
 }
 
-.resource-picker__row:hover,
-.resource-picker__row.is-checked,
+.resource-picker__row:hover {
+  background: var(--td-bg-color-container-hover);
+}
+
+.resource-picker__row.is-checked {
+  background: color-mix(in srgb, var(--td-brand-color) 9%, var(--td-bg-color-container));
+  box-shadow: inset 3px 0 0 var(--td-brand-color);
+}
+
 .resource-picker__row.is-indeterminate {
-  background: var(--td-bg-color-secondarycontainer);
+  background: color-mix(in srgb, var(--td-brand-color) 5%, var(--td-bg-color-container));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--td-brand-color) 65%, transparent);
+}
+
+.resource-picker__row:focus-visible {
+  outline: 2px solid var(--td-brand-color-7, var(--td-brand-color));
+  outline-offset: -2px;
+}
+
+.resource-picker__row.is-checked .resource-picker__name,
+.resource-picker__row.is-indeterminate .resource-picker__name {
+  font-weight: 600;
+}
+
+.resource-picker__row.is-checked .resource-picker__icon,
+.resource-picker__row.is-indeterminate .resource-picker__icon {
+  color: var(--td-brand-color-7, var(--td-brand-color));
+}
+
+.resource-picker__row.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.resource-picker__row.is-disabled:hover {
+  background: transparent;
+  box-shadow: none;
 }
 
 .resource-picker__expand,
 .resource-picker__expand-spacer {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
 }
 
@@ -2023,7 +2496,7 @@ const drawerConfirmText = computed(() => {
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: var(--td-text-color-placeholder);
+  color: var(--td-text-color-secondary);
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
 }
@@ -2036,9 +2509,9 @@ const drawerConfirmText = computed(() => {
 }
 
 .resource-picker__check {
-  width: 16px;
-  height: 16px;
-  border-radius: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
   border: 1.5px solid var(--td-component-border, var(--td-component-stroke));
   display: inline-flex;
   align-items: center;
@@ -2050,8 +2523,9 @@ const drawerConfirmText = computed(() => {
 
 .resource-picker__check.is-checked,
 .resource-picker__check.is-indeterminate {
-  background: var(--td-brand-color);
-  border-color: var(--td-brand-color);
+  background: var(--td-brand-color-7, var(--td-brand-color));
+  border-color: var(--td-brand-color-7, var(--td-brand-color));
+  color: var(--td-bg-color-container);
 }
 
 .resource-picker__check.is-indeterminate::after {
@@ -2059,12 +2533,12 @@ const drawerConfirmText = computed(() => {
   width: 8px;
   height: 2px;
   border-radius: 1px;
-  background: #fff;
+  background: currentColor;
 }
 
 .resource-picker__icon {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2093,16 +2567,41 @@ const drawerConfirmText = computed(() => {
   flex-shrink: 0;
   font-size: 10px;
   line-height: 1;
-  padding: 2px 5px;
-  border-radius: 4px;
-  color: var(--td-text-color-placeholder);
+  padding: 3px 6px;
+  border-radius: 999px;
+  color: var(--td-text-color-secondary);
   background: color-mix(in srgb, var(--td-text-color-placeholder) 8%, transparent);
 }
 
 /* --- Step 2: empty state --- */
 .ds-resource-empty {
   text-align: center;
-  padding: 24px 0;
+  padding: 30px 18px;
+  border: 1px dashed var(--td-component-stroke);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 70%, transparent);
+}
+
+.ds-resource-empty__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 12px;
+  border-radius: 14px;
+  color: var(--td-brand-color-7, var(--td-brand-color));
+  background: color-mix(in srgb, var(--td-brand-color) 10%, var(--td-bg-color-container));
+}
+
+.ds-resource-empty.is-error {
+  border-color: color-mix(in srgb, var(--td-error-color) 38%, var(--td-component-stroke));
+  background: color-mix(in srgb, var(--td-error-color) 5%, var(--td-bg-color-container));
+}
+
+.ds-resource-empty.is-error .ds-resource-empty__icon {
+  color: var(--td-error-color);
+  background: var(--td-error-color-1);
 }
 
 .ds-empty-title {
@@ -2170,7 +2669,7 @@ const drawerConfirmText = computed(() => {
   margin: 0 0 10px 0;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--td-text-color-placeholder);
+  color: var(--td-text-color-secondary);
 }
 
 .custom-headers-list {
@@ -2197,7 +2696,7 @@ const drawerConfirmText = computed(() => {
     width: 32px;
     height: 32px;
     padding: 0;
-    color: var(--td-text-color-placeholder);
+    color: var(--td-text-color-secondary);
     border-radius: 6px;
     transition: all 0.18s ease;
 
@@ -2215,62 +2714,179 @@ const drawerConfirmText = computed(() => {
   font: inherit;
   font-size: 13px;
   font-weight: 500;
-  color: var(--td-brand-color);
+  color: var(--td-brand-color-8, var(--td-brand-color-active));
   cursor: pointer;
   transition: color 0.12s ease;
 }
 
 .ds-empty-retry:hover,
 .ds-empty-retry:focus-visible {
-  color: var(--td-brand-color-active);
+  color: var(--td-brand-color-8, var(--td-brand-color-active));
   outline: none;
 }
 
 /* --- Step 3: sync strategy option pills --- */
-.option-group {
+.ds-strategy-summary {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 14px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 10px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--td-brand-color) 7%, var(--td-bg-color-container)),
+      var(--td-bg-color-container)
+    );
+}
+
+.ds-strategy-summary__icon {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px;
-  background: var(--td-bg-color-secondarycontainer);
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  width: fit-content;
+  border-radius: 10px;
+  background: var(--td-bg-color-container);
+}
+
+.ds-strategy-summary__copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ds-strategy-summary__copy strong {
+  overflow: hidden;
+  color: var(--td-text-color-primary);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-strategy-summary__copy span {
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+}
+
+.ds-strategy-summary__status {
+  flex: 0 0 auto;
+  color: var(--td-success-color-7, var(--td-success-color));
+  font-size: 18px;
+}
+
+.option-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
   max-width: 100%;
 }
 
 .option-pill {
-  display: inline-flex;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   justify-content: center;
-  padding: 4px 10px;
-  min-height: 28px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
+  gap: 3px;
+  min-height: 66px;
+  padding: 10px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 9px;
+  background: var(--td-bg-color-container);
   font: inherit;
-  font-size: 12px;
-  line-height: 1.3;
+  line-height: 1.4;
   color: var(--td-text-color-secondary);
   cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  text-align: left;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .option-pill:hover {
   color: var(--td-text-color-primary);
+  border-color: var(--td-brand-color-3, var(--td-brand-color));
 }
 
 .option-pill:focus-visible {
-  outline: 2px solid var(--td-brand-color);
+  outline: 2px solid var(--td-brand-color-7, var(--td-brand-color));
   outline-offset: 1px;
 }
 
 .option-pill.is-active {
-  background: var(--td-bg-color-container);
-  border-color: var(--td-component-stroke);
+  background: color-mix(in srgb, var(--td-brand-color) 9%, var(--td-bg-color-container));
+  border-color: var(--td-brand-color);
+  color: var(--td-brand-color-8, var(--td-brand-color-active));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--td-brand-color) 15%, transparent);
+}
+
+.option-pill__title {
+  font-size: 13px;
+  font-weight: 600;
   color: var(--td-text-color-primary);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+.option-pill.is-active .option-pill__title {
+  color: var(--td-brand-color-8, var(--td-brand-color-active));
+}
+
+.option-pill__desc {
+  font-size: 11px;
+  color: var(--td-text-color-secondary);
+}
+
+@media (max-width: 720px) {
+  .ds-steps {
+    gap: 2px;
+    margin-bottom: 14px;
+    padding: 4px;
+  }
+
+  .ds-step {
+    gap: 5px;
+    min-height: 34px;
+    padding: 5px 4px;
+    font-size: 11px;
+  }
+
+  .ds-step-num {
+    width: 20px;
+    height: 20px;
+    font-size: 11px;
+  }
+
+  .ds-type-grid,
+  .option-group {
+    grid-template-columns: 1fr;
+  }
+
+  .resource-picker__toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .resource-picker__type {
+    display: none;
+  }
+
+  .resource-picker__list {
+    max-height: min(calc(100vh - 310px), 460px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-step,
+  .ds-type-card,
+  .resource-picker__row,
+  .resource-picker__check,
+  .option-pill {
+    transition: none;
+  }
 }
 </style>
 
@@ -2283,10 +2899,32 @@ const drawerConfirmText = computed(() => {
   box-shadow: inset 0 0 0 1px var(--td-component-stroke);
 }
 
+.datasource-editor-drawer .t-drawer__content-wrapper {
+  max-width: 100vw;
+}
+
 .datasource-header-icon__img {
   display: block;
   width: 24px;
   height: 24px;
   object-fit: contain;
+}
+
+@media (max-width: 720px) {
+  .datasource-editor-drawer .t-drawer__content-wrapper {
+    width: 100vw !important;
+  }
+
+  .datasource-editor-drawer .t-drawer__header {
+    padding: 12px 14px;
+  }
+
+  .datasource-editor-drawer .t-drawer__body {
+    padding: 14px;
+  }
+
+  .datasource-editor-drawer .t-drawer__footer {
+    padding: 10px 14px;
+  }
 }
 </style>

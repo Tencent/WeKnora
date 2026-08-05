@@ -141,6 +141,77 @@ definitions:
     - ErrAgentInvalidTemperature
     - ErrVectorStoreBindingInvalid
     - ErrVectorStoreUnavailable
+  github_com_Tencent_WeKnora_internal_handler_dto.CredentialFieldMetadata:
+    properties:
+      configured:
+        type: boolean
+    type: object
+  github_com_Tencent_WeKnora_internal_handler_dto.DataSourceConfigDTO:
+    properties:
+      resource_ids:
+        items:
+          type: string
+        type: array
+      settings:
+        additionalProperties: true
+        type: object
+      type:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse:
+    properties:
+      config:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceConfigDTO'
+      conflict_strategy:
+        type: string
+      created_at:
+        type: string
+      credentials:
+        additionalProperties:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.CredentialFieldMetadata'
+        description: |-
+          Single logical credential field. DataSource credentials are a
+          per-connector atomic map, so "configured?" applies to the whole set.
+        type: object
+      error_message:
+        type: string
+      id:
+        type: string
+      knowledge_base_id:
+        type: string
+      last_sync_at:
+        type: string
+      last_sync_cursor:
+        items:
+          type: integer
+        type: array
+      last_sync_result:
+        items:
+          type: integer
+        type: array
+      latest_sync_log:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog'
+      name:
+        type: string
+      status:
+        type: string
+      sync_deletions:
+        type: boolean
+      sync_log_retention_days:
+        type: integer
+      sync_mode:
+        type: string
+      sync_schedule:
+        type: string
+      tenant_id:
+        type: integer
+      total_items_synced:
+        type: integer
+      type:
+        type: string
+      updated_at:
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_infrastructure_chunker.DocProfile:
     properties:
       all_caps_short_line_count:
@@ -6980,7 +7051,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
+              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse'
             type: array
         "400":
           description: Bad Request
@@ -7008,7 +7079,7 @@ paths:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse'
         "400":
           description: Bad Request
           schema:
@@ -7053,7 +7124,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse'
         "404":
           description: Not Found
           schema:
@@ -7066,7 +7137,8 @@ paths:
     put:
       consumes:
       - application/json
-      description: Update an existing data source configuration
+      description: Update non-secret data source settings. Credentials in this payload
+        are ignored; use the atomic reconfigure endpoint to replace credentials.
       parameters:
       - description: Data source ID
         in: path
@@ -7085,7 +7157,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse'
         "400":
           description: Bad Request
           schema:
@@ -7153,6 +7225,40 @@ paths:
               type: string
             type: object
       summary: Pause data source
+      tags:
+      - DataSource
+  /datasource/{id}/reconfigure:
+    put:
+      consumes:
+      - application/json
+      description: Validate candidate credentials and configuration together, then
+        persist them in one update
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: data_source and credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Atomically reconfigure a data source
       tags:
       - DataSource
   /datasource/{id}/resource-ancestors:
@@ -7338,6 +7444,36 @@ paths:
               $ref: '#/definitions/github_com_Tencent_WeKnora_internal_datasource.ConnectorMetadata'
             type: array
       summary: Get available connectors
+      tags:
+      - DataSource
+  /datasource/preview-resources:
+    post:
+      consumes:
+      - application/json
+      description: List resources without creating or mutating a data source
+      parameters:
+      - description: type, credentials, settings, and optional parent_id
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Resource'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Preview resources using candidate credentials
       tags:
       - DataSource
   /datasource/validate-credentials:

@@ -146,8 +146,9 @@ func (r *fakeSyncLogRepo) HasRunningSync(_ context.Context, dsID string) (bool, 
 
 // fakeTaskEnqueuer counts how many tasks are enqueued.
 type fakeTaskEnqueuer struct {
-	count     atomic.Int64
-	lastQueue atomic.Value
+	count        atomic.Int64
+	lastQueue    atomic.Value
+	lastMaxRetry atomic.Int64
 }
 
 func (e *fakeTaskEnqueuer) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
@@ -156,6 +157,11 @@ func (e *fakeTaskEnqueuer) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 		if opt.Type() == asynq.QueueOpt {
 			if queue, ok := opt.Value().(string); ok {
 				e.lastQueue.Store(queue)
+			}
+		}
+		if opt.Type() == asynq.MaxRetryOpt {
+			if maxRetry, ok := opt.Value().(int); ok {
+				e.lastMaxRetry.Store(int64(maxRetry))
 			}
 		}
 	}
@@ -221,6 +227,13 @@ func TestScheduler_CronFires(t *testing.T) {
 	if queue, _ := enqueuer.lastQueue.Load().(string); queue != types.QueueSync {
 		t.Errorf("scheduled sync queue = %q, want %q", queue, types.QueueSync)
 	}
+	if maxRetry := enqueuer.lastMaxRetry.Load(); maxRetry != types.DataSourceSyncMaxRetry {
+		t.Errorf(
+			"scheduled sync max retry = %d, want ordinary budget %d",
+			maxRetry,
+			types.DataSourceSyncMaxRetry,
+		)
+	}
 }
 
 func TestScheduler_AddOrUpdate(t *testing.T) {
@@ -251,6 +264,31 @@ func TestScheduler_AddOrUpdate(t *testing.T) {
 	}
 	if scheduler.EntryCount() != 1 {
 		t.Errorf("after update: EntryCount() = %d, want 1 (should replace, not add)", scheduler.EntryCount())
+	}
+}
+
+func TestSchedulerRefreshIgnoresStalePausedSnapshot(t *testing.T) {
+	repo := newFakeDataSourceRepo()
+	current := &types.DataSource{
+		ID:           "ds-refresh-current",
+		TenantID:     1,
+		Status:       types.DataSourceStatusActive,
+		SyncSchedule: "0 0 * * * *",
+	}
+	if err := repo.Create(context.Background(), current); err != nil {
+		t.Fatalf("Create() error: %v", err)
+	}
+	scheduler := NewScheduler(repo, newFakeSyncLogRepo(), &fakeTaskEnqueuer{})
+	scheduler.cron.Start()
+	defer scheduler.Stop()
+
+	// Refresh takes only the ID and rebuilds the schedule from the
+	// authoritative active database state.
+	if err := scheduler.Refresh(context.Background(), current.ID); err != nil {
+		t.Fatalf("Refresh() error: %v", err)
+	}
+	if scheduler.EntryCount() != 1 {
+		t.Fatalf("EntryCount() = %d, want active database state scheduled", scheduler.EntryCount())
 	}
 }
 

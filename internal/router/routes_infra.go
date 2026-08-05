@@ -259,12 +259,14 @@ func RegisterDataSourceRoutes(
 
 		// Validate credentials without persistence (for "Test Connection" button) — Admin+
 		ds.POST("/validate-credentials", g.Admin(), handler.ValidateCredentials)
+		ds.POST("/preview-resources", g.Admin(), handler.PreviewResources)
 
 		// CRUD operations
 		ds.POST("", g.Admin(), handler.CreateDataSource)
 		ds.GET("", g.Viewer(), handler.ListDataSources)
 		ds.GET("/:id", g.Viewer(), handler.GetDataSource)
 		ds.PUT("/:id", g.Admin(), handler.UpdateDataSource)
+		ds.PUT("/:id/reconfigure", g.Admin(), handler.ReconfigureDataSource)
 		ds.DELETE("/:id", g.Admin(), handler.DeleteDataSource)
 
 		// Credential subresource. Single logical field "credentials" because

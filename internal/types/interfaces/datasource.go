@@ -43,6 +43,26 @@ type DataSourceService interface {
 	// This is used by the frontend "Test Connection" button before creating a data source.
 	ValidateCredentials(ctx context.Context, connectorType string, credentials map[string]interface{}) error
 
+	// PreviewResources lists resources with candidate credentials without
+	// creating or mutating a data source row.
+	PreviewResources(
+		ctx context.Context,
+		connectorType string,
+		dataSourceID string,
+		credentials map[string]interface{},
+		settings map[string]interface{},
+		parentID string,
+		validateOnly bool,
+	) ([]types.Resource, error)
+
+	// ReconfigureDataSource validates and atomically persists candidate
+	// credentials together with the non-secret data-source configuration.
+	ReconfigureDataSource(
+		ctx context.Context,
+		ds *types.DataSource,
+		credentials map[string]interface{},
+	) (*types.DataSource, error)
+
 	// ListAvailableResources lists resources available for sync in the external system.
 	// parentID enables lazy loading: "" lists the top level, a resource ExternalID lists its children.
 	ListAvailableResources(ctx context.Context, dsID string, parentID string) ([]types.Resource, error)

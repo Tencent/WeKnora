@@ -2,10 +2,12 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -17,13 +19,15 @@ import (
 // SyncTaskExecutor executes tasks synchronously (in a goroutine) without Redis.
 // Used in Lite mode as a drop-in replacement for *asynq.Client.
 type SyncTaskExecutor struct {
-	mu       sync.RWMutex
-	handlers map[string]func(context.Context, *asynq.Task) error
+	mu            sync.RWMutex
+	handlers      map[string]func(context.Context, *asynq.Task) error
+	activeTaskIDs map[string]struct{}
 }
 
 func NewSyncTaskExecutor() *SyncTaskExecutor {
 	return &SyncTaskExecutor{
-		handlers: make(map[string]func(context.Context, *asynq.Task) error),
+		handlers:      make(map[string]func(context.Context, *asynq.Task) error),
+		activeTaskIDs: make(map[string]struct{}),
 	}
 }
 
@@ -38,17 +42,10 @@ func (e *SyncTaskExecutor) RegisterHandler(pattern string, handler func(context.
 // Instead of queuing to Redis, it dispatches the task to a goroutine.
 // Supports ProcessIn (delay) and MaxRetry options for parity with asynq.
 func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
-	e.mu.RLock()
-	handler, ok := e.handlers[task.Type()]
-	e.mu.RUnlock()
-
-	if !ok {
-		return nil, fmt.Errorf("sync task executor: no handler registered for type %q", task.Type())
-	}
-
 	var delay time.Duration
 	maxRetry := 25 // asynq default
 	maxRetrySet := false
+	taskID := uuid.New().String()
 	for _, opt := range opts {
 		switch opt.Type() {
 		case asynq.ProcessInOpt:
@@ -60,6 +57,10 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 				maxRetry = n
 				maxRetrySet = true
 			}
+		case asynq.TaskIDOpt:
+			if id, ok := opt.Value().(string); ok && id != "" {
+				taskID = id
+			}
 		}
 	}
 	// Callers that explicitly pass MaxRetry(0) want no retries.
@@ -68,7 +69,19 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 		maxRetry = 0
 	}
 
-	taskID := uuid.New().String()
+	e.mu.Lock()
+	handler, ok := e.handlers[task.Type()]
+	if !ok {
+		e.mu.Unlock()
+		return nil, fmt.Errorf("sync task executor: no handler registered for type %q", task.Type())
+	}
+	if _, exists := e.activeTaskIDs[taskID]; exists {
+		e.mu.Unlock()
+		return nil, asynq.ErrTaskIDConflict
+	}
+	e.activeTaskIDs[taskID] = struct{}{}
+	e.mu.Unlock()
+
 	info := &asynq.TaskInfo{
 		ID:    taskID,
 		Queue: "sync",
@@ -76,6 +89,11 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 	}
 
 	go func() {
+		defer func() {
+			e.mu.Lock()
+			delete(e.activeTaskIDs, taskID)
+			e.mu.Unlock()
+		}()
 		if delay > 0 {
 			time.Sleep(delay)
 		}
@@ -94,15 +112,24 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 				if backoff > 30*time.Second {
 					backoff = 30 * time.Second
 				}
+				if errors.Is(lastErr, service.ErrDataSourceIngestPending) {
+					backoff = types.DataSourceIngestPendingRetryDelay
+				}
 				logger.Infof(ctx, "[SyncTask] Retrying task type=%s id=%s attempt=%d/%d backoff=%s",
 					task.Type(), taskID, attempt, maxRetry, backoff)
 				time.Sleep(backoff)
 			}
 
-			lastErr = handler(ctx, task)
+			attemptCtx := types.WithTaskRetryMetadata(ctx, attempt, maxRetry)
+			lastErr = handler(attemptCtx, task)
 			if lastErr == nil {
 				logger.Infof(ctx, "[SyncTask] Task completed type=%s id=%s elapsed=%v",
 					task.Type(), taskID, time.Since(start))
+				return
+			}
+			if shouldStopSyncTaskRetry(lastErr) {
+				logger.Errorf(ctx, "[SyncTask] Task failed without retry type=%s id=%s elapsed=%v err=%v",
+					task.Type(), taskID, time.Since(start), lastErr)
 				return
 			}
 		}
@@ -112,6 +139,10 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 	}()
 
 	return info, nil
+}
+
+func shouldStopSyncTaskRetry(taskErr error) bool {
+	return errors.Is(taskErr, asynq.SkipRetry)
 }
 
 type SyncTaskParams struct {

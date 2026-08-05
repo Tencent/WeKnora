@@ -545,6 +545,7 @@ export default {
     paused: 'Приостановлено',
     resumed: 'Возобновлено',
     pauseFailed: 'Не удалось приостановить',
+    resumeFailed: 'Не удалось возобновить',
     logs: 'Журнал',
     syncModeLabel: 'Режим синхронизации',
     createTitle: 'Добавить источник данных',
@@ -559,7 +560,7 @@ export default {
     connectionFailed: 'Подключение не удалось',
     isRequired: 'обязательно для заполнения',
     credentialsLabel: 'учётные данные',
-    resourceHint: 'Выберите пространства или папки для синхронизации',
+    resourceHint: 'Выберите пространства, папки или онлайн-документы для синхронизации',
     untitled: 'Без названия',
     resourceLoadFailed: 'Не удалось загрузить список ресурсов',
     noResources: 'Пространства вики не найдены',
@@ -615,10 +616,51 @@ export default {
     minutesAgo: '{n} мин назад',
     hoursAgo: '{n} ч назад',
     daysAgo: '{n} д назад',
+    createTitleWithType: 'Добавить источник данных {type}',
+    editTitleWithType: 'Редактировать источник данных {type}',
+    resourceRequired: 'Выберите хотя бы один ресурс DingTalk для синхронизации',
+    resourceLoadFailedDesc: 'Проверьте сеть и права приложения, затем повторите. Введённые настройки сохранены.',
+    noResources_dingtalk: 'Нет доступного для синхронизации контента DingTalk',
+    noResourcesDesc_dingtalk: 'У оператора пока нет доступа к базе знаний или права приложения ещё не активированы',
+    guideStep1_dingtalk: 'Убедитесь, что внутреннее приложение имеет права чтения баз знаний и файлов',
+    guideStep2_dingtalk: 'Убедитесь, что Union ID оператора имеет доступ к нужной базе знаний',
+    guideStep3_dingtalk: 'Опубликуйте изменения прав, затем вернитесь и повторите загрузку',
+    permissionDocLink_dingtalk: 'Документация по правам базы знаний DingTalk',
+    selectedScopeCount: 'Выбрано областей синхронизации: {count}',
+    stepProgress: 'Шаг {current} из {total} · {description}',
+    prereqBarText_dingtalk: 'Впервые используете? Откройте руководство по настройке внутреннего приложения DingTalk',
+    prereqStep1Brief_dingtalk: 'Создайте внутреннее приложение DingTalk',
+    prereqStep1Desc_dingtalk: 'Создайте внутреннее приложение в консоли разработчика DingTalk и скопируйте AppKey и AppSecret.',
+    prereqStep2Brief_dingtalk: 'Предоставьте необходимые права чтения',
+    prereqStep2Desc_dingtalk: 'Включите Wiki.Workspace.Read, Wiki.Node.Read и Storage.File.Read, затем опубликуйте изменения прав.',
+    prereqStep3Brief_dingtalk: 'Выберите оператора с доступом к базе знаний',
+    prereqStep3Desc_dingtalk: 'Укажите Union ID этого пользователя. Коннектор может читать только ресурсы, доступные оператору.',
+    prereqOpenConsole_dingtalk: 'Открыть консоль разработчика DingTalk',
+    stepDescription: {
+      selectType: 'Выберите внешний источник контента для подключения',
+      credentials: 'Настройте учётные данные и проверьте подключение',
+      resources: 'Выберите пространства и документы для синхронизации',
+      strategy: 'Задайте частоту обновления и обработку конфликтов'
+    },
+    syncError: {
+      delete_failed: 'Ошибка удаления; смотрите логи сервера',
+      feishu_auth_or_permission: 'Ошибка аутентификации или недостаточно прав; проверьте учётные данные и права приложения',
+      feishu_rate_limited: 'Превышен лимит запросов к API Feishu; повтор при следующей синхронизации',
+      feishu_timeout: 'Тайм-аут экспорта или запроса; повтор при следующей синхронизации',
+      feishu_server_unavailable: 'Сервис Feishu временно недоступен; повтор при следующей синхронизации',
+      feishu_api_error: 'Ошибка API Feishu (code={code}); повтор при следующей синхронизации',
+      feishu_api_error_generic: 'Ошибка API Feishu; повтор при следующей синхронизации',
+      sync_failed: 'Ошибка синхронизации; повтор при следующей синхронизации',
+      ingest_failed: 'Ошибка импорта; смотрите логи сервера'
+    },
     resourceType: {
       wikiSpace: 'Пространство вики',
       docCategory: 'Тег документа',
-      book: 'База знаний Yuque'
+      book: 'База знаний Yuque',
+      space: 'База знаний',
+      folder: 'Папка',
+      document: 'Онлайн-документ',
+      unsupported: 'Не поддерживается этим коннектором'
     },
     scheduleHuman: {
       '30min': 'Каждые 30 мин',
@@ -637,21 +679,26 @@ export default {
       feedUrls: 'Адреса лент',
       feedUrlsHint: 'По одному адресу ленты RSS / Atom в строке; можно указать несколько.',
       authHeaders: 'Пользовательские заголовки (необязательно)',
-      authHeadersHint: 'Для приватных лент. По одному в строке в формате «Имя: Значение», например Authorization: Bearer xxxx'
+      authHeadersHint: 'Для приватных лент. По одному в строке в формате «Имя: Значение», например Authorization: Bearer xxxx',
+      appKey: 'AppKey (Client ID)',
+      operatorId: 'Union ID оператора',
+      operatorIdHint: 'Укажите Union ID пользователя с доступом к выбранным базам знаний DingTalk. Видимость ресурсов определяется правами этого пользователя.'
     },
     connectorDesc: {
       feishu: 'Синхронизация документов, таблиц и файлов из Feishu Wiki',
       lark: 'Синхронизация документов, таблиц и файлов из Lark Wiki',
       notion: 'Синхронизация страниц и баз данных из Notion',
       yuque: 'Синхронизация документов из баз знаний Yuque',
-      rss: 'Синхронизация статей из лент RSS / Atom'
+      rss: 'Синхронизация статей из лент RSS / Atom',
+      dingtalk: 'Синхронизация онлайн-документов из баз знаний DingTalk'
     },
     connector: {
       feishu: 'Feishu (Фэйшу)',
       lark: 'Lark',
       notion: 'Notion',
       yuque: 'Yuque (Юйцюэ)',
-      rss: 'RSS / Atom лента'
+      rss: 'RSS / Atom лента',
+      dingtalk: 'Документы DingTalk'
     },
     logDetail: {
       startTime: 'Время начала',
@@ -686,7 +733,9 @@ export default {
     },
     conflict: {
       overwrite: 'Перезаписать',
-      skip: 'Пропустить существующие'
+      skip: 'Пропустить существующие',
+      overwriteDesc: 'Обновлять записи базы знаний при изменении источника',
+      skipDesc: 'Сохранять материалы, уже существующие в базе знаний'
     },
     status: {
       active: 'Подключено',
@@ -695,7 +744,9 @@ export default {
     },
     syncMode: {
       incremental: 'Инкрементная',
-      full: 'Полная'
+      full: 'Полная',
+      incrementalDesc: 'Обрабатывать только новые и изменённые материалы для регулярной синхронизации',
+      fullDesc: 'Повторно сканировать весь диапазон при первом импорте или сверке'
     }
   },
   ollama: {
@@ -3513,15 +3564,14 @@ export default {
       tip1: 'After sharing, space members will access this knowledge base based on the assigned permissions',
       tip2: 'Editable permission allows members to modify content; Read-only permission only allows retrieval and Q&A'
     },
-    buttons: {
-      create: 'Создать базу знаний',
-      save: 'Сохранить настройки',
-      saveAndClose: 'Сохранить и закрыть',
-    },
     postCreateHint: {
       title: 'База знаний создана',
       footer: 'Продолжите настройку, настройте совместное использование и источники данных, затем нажмите «Сохранить и закрыть».',
-      followUpDesc: 'Настройте источники данных слева или опубликуйте базу в пространствах через «Управление общим доступом»',
+      followUpDesc: 'Настройте источники данных слева или опубликуйте базу в пространствах через «Управление общим доступом»'
+    },
+    buttons: {
+      create: 'Создать базу знаний',
+      saveAndClose: 'Сохранить и закрыть'
     },
     wikiBrowser: {
       editBtn: 'Редактировать',
@@ -4846,15 +4896,6 @@ export default {
     editor: {
       createTitle: 'Create Agent',
       editTitle: 'Edit Agent',
-      buttons: {
-        create: 'Создать агента',
-        saveAndClose: 'Сохранить и закрыть',
-      },
-      postCreateHint: {
-        title: 'Агент создан',
-        footer: 'Продолжите настройку, настройте совместное использование и публикацию, затем нажмите «Сохранить и закрыть».',
-        integrationDesc: 'Перейдите в раздел интеграций, чтобы настроить каналы IM, веб-встраивания и другие каналы публикации',
-      },
       basicInfo: 'Basic Info',
       basicInfoDesc: 'Настройка имени, описания и режима работы агента',
       promptsConfig: 'Промпты',
@@ -4948,7 +4989,16 @@ export default {
       selectSkillsDesc: 'Выберите Skills для активации',
       noSkillsAvailable: 'Нет доступных предустановленных Skills',
       skillsInfoTitle: 'Что такое Skills?',
-      skillsInfoContent: 'Skills — это предустановленные модули профессиональных знаний, которые предоставляют агенту инструкции, рабочие процессы и инструменты для конкретных областей. При активации агент автоматически загружает соответствующие знания по мере необходимости.'
+      skillsInfoContent: 'Skills — это предустановленные модули профессиональных знаний, которые предоставляют агенту инструкции, рабочие процессы и инструменты для конкретных областей. При активации агент автоматически загружает соответствующие знания по мере необходимости.',
+      postCreateHint: {
+        title: 'Агент создан',
+        footer: 'Продолжите настройку, настройте совместное использование и публикацию, затем нажмите «Сохранить и закрыть».',
+        integrationDesc: 'Перейдите в раздел интеграций, чтобы настроить каналы IM, веб-встраивания и другие каналы публикации'
+      },
+      buttons: {
+        create: 'Создать агента',
+        saveAndClose: 'Сохранить и закрыть'
+      }
     },
     messages: {
       created: 'Agent created successfully',

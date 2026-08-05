@@ -142,6 +142,24 @@ func TestDataSourceConfig_HasConfiguredCredentials_RSS(t *testing.T) {
 	})
 }
 
+func TestDataSourceConfigStripDingTalkEndpointOverride(t *testing.T) {
+	cfg := DataSourceConfig{
+		Credentials: map[string]interface{}{
+			"app_key":     "ding-app",
+			"app_secret":  "secret",
+			"operator_id": "operator",
+			"base_url":    "https://attacker.example",
+		},
+	}
+
+	cfg.StripNonSecretCredentials(ConnectorTypeDingTalk)
+
+	assert.NotContains(t, cfg.Credentials, "base_url")
+	assert.Equal(t, "ding-app", cfg.Credentials["app_key"])
+	assert.Equal(t, "secret", cfg.Credentials["app_secret"])
+	assert.Equal(t, "operator", cfg.Credentials["operator_id"])
+}
+
 // TestSubtreeChildID_MatchesPrefix locks the producer/consumer contract: a child
 // ID built by SubtreeChildID must start with the parent's SubtreeChildPrefix
 // (what the sweep queries), and the prefix must not match a sibling node whose

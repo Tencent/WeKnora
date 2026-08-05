@@ -21,6 +21,12 @@ type createKnowledgeFileRepoStub struct {
 	createCalls      int
 	createErr        error
 	createdKnowledge *types.Knowledge
+	setTagsErr       error
+	deleteErr        error
+	deleteCalls      int
+	deleteTagCalls   int
+	updateCalls      int
+	updatedKnowledge *types.Knowledge
 }
 
 func (r *createKnowledgeFileRepoStub) CheckKnowledgeExists(
@@ -39,6 +45,41 @@ func (r *createKnowledgeFileRepoStub) CreateKnowledge(ctx context.Context, knowl
 	return r.createErr
 }
 
+func (r *createKnowledgeFileRepoStub) SetKnowledgeTags(
+	context.Context,
+	string,
+	[]string,
+) error {
+	return r.setTagsErr
+}
+
+func (r *createKnowledgeFileRepoStub) DeleteKnowledge(
+	context.Context,
+	uint64,
+	string,
+) error {
+	r.deleteCalls++
+	return r.deleteErr
+}
+
+func (r *createKnowledgeFileRepoStub) UpdateKnowledge(
+	_ context.Context,
+	knowledge *types.Knowledge,
+) error {
+	r.updateCalls++
+	copied := *knowledge
+	r.updatedKnowledge = &copied
+	return nil
+}
+
+func (r *createKnowledgeFileRepoStub) DeleteKnowledgeTagRelations(
+	context.Context,
+	string,
+) error {
+	r.deleteTagCalls++
+	return nil
+}
+
 // GetKnowledgeTags is invoked by setAndAttachKnowledgeTags after create even
 // when no tags were supplied; a fresh knowledge has none, so return empty.
 func (r *createKnowledgeFileRepoStub) GetKnowledgeTags(
@@ -52,6 +93,19 @@ type createKnowledgeFileKBServiceStub struct {
 	interfaces.KnowledgeBaseService
 
 	kb *types.KnowledgeBase
+}
+
+type createKnowledgeTagRepoStub struct {
+	interfaces.KnowledgeTagRepository
+	tags []*types.KnowledgeTag
+}
+
+func (r *createKnowledgeTagRepoStub) GetByIDs(
+	context.Context,
+	uint64,
+	[]string,
+) ([]*types.KnowledgeTag, error) {
+	return r.tags, nil
 }
 
 func (s *createKnowledgeFileKBServiceStub) GetKnowledgeBaseByID(
@@ -264,6 +318,89 @@ func TestCreateKnowledgeFromFileDeletesStoredFileWhenCreateFails(t *testing.T) {
 	require.Equal(t, 1, repo.createCalls)
 	require.Equal(t, 1, fileSvc.deleteCalls)
 	require.Equal(t, "stored/"+fileSvc.savedWithKnowledgeID, fileSvc.deletedPath)
+}
+
+func TestCreateKnowledgeFromFileRollsBackRowAndFileWhenTagAttachFails(t *testing.T) {
+	t.Parallel()
+
+	repo := &createKnowledgeFileRepoStub{setTagsErr: errors.New("tag relation unavailable")}
+	fileSvc := &createKnowledgeFileServiceStub{}
+	task := &createKnowledgeTaskEnqueuerStub{}
+	tagRepo := &createKnowledgeTagRepoStub{tags: []*types.KnowledgeTag{{
+		ID:              "tag-1",
+		KnowledgeBaseID: "kb-1",
+	}}}
+	svc := &knowledgeService{
+		repo:      repo,
+		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		fileSvc:   fileSvc,
+		task:      task,
+		tagRepo:   tagRepo,
+	}
+
+	knowledge, err := svc.CreateKnowledgeFromFile(
+		newCreateKnowledgeFileContext(),
+		"kb-1",
+		newMultipartFileHeader(t, "doc.txt", "hello"),
+		nil,
+		nil,
+		"",
+		[]string{"tag-1"},
+		"",
+		nil,
+	)
+
+	require.ErrorContains(t, err, "tag relation unavailable")
+	require.Nil(t, knowledge)
+	require.Equal(t, 1, repo.createCalls)
+	require.Equal(t, 1, repo.deleteTagCalls)
+	require.Equal(t, 1, repo.deleteCalls)
+	require.Equal(t, 1, fileSvc.deleteCalls)
+	require.Zero(t, task.calls, "orphaned pending rows must never enqueue parsing")
+}
+
+func TestCreateKnowledgeFromFileMarksRecoverableFailureWhenRollbackDeleteFails(t *testing.T) {
+	t.Parallel()
+
+	repo := &createKnowledgeFileRepoStub{
+		setTagsErr: errors.New("tag relation unavailable"),
+		deleteErr:  errors.New("database delete unavailable"),
+	}
+	fileSvc := &createKnowledgeFileServiceStub{}
+	task := &createKnowledgeTaskEnqueuerStub{}
+	tagRepo := &createKnowledgeTagRepoStub{tags: []*types.KnowledgeTag{{
+		ID:              "tag-1",
+		KnowledgeBaseID: "kb-1",
+	}}}
+	svc := &knowledgeService{
+		repo:      repo,
+		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		fileSvc:   fileSvc,
+		task:      task,
+		tagRepo:   tagRepo,
+	}
+
+	knowledge, err := svc.CreateKnowledgeFromFile(
+		newCreateKnowledgeFileContext(),
+		"kb-1",
+		newMultipartFileHeader(t, "doc.txt", "hello"),
+		nil,
+		nil,
+		"",
+		[]string{"tag-1"},
+		"",
+		nil,
+	)
+
+	require.ErrorContains(t, err, "database delete unavailable")
+	require.Nil(t, knowledge)
+	require.Equal(t, 1, repo.deleteCalls)
+	require.Equal(t, 1, repo.updateCalls)
+	require.NotNil(t, repo.updatedKnowledge)
+	require.Equal(t, types.ParseStatusFailed, repo.updatedKnowledge.ParseStatus)
+	require.Contains(t, repo.updatedKnowledge.ErrorMessage, "before processing task enqueue")
+	require.Zero(t, fileSvc.deleteCalls, "file must remain while its database row remains")
+	require.Zero(t, task.calls)
 }
 
 func TestCreateKnowledgeFromFile_PersistsProcessOverrides(t *testing.T) {

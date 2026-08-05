@@ -545,6 +545,7 @@ export default {
     paused: '일시정지됨',
     resumed: '재개됨',
     pauseFailed: '일시정지 실패',
+    resumeFailed: '재개 실패',
     logs: '로그',
     syncModeLabel: '동기화 모드',
     createTitle: '데이터 소스 추가',
@@ -559,7 +560,7 @@ export default {
     connectionFailed: '연결 실패',
     isRequired: '은(는) 필수입니다',
     credentialsLabel: '자격 증명',
-    resourceHint: '동기화할 공간/폴더를 선택하세요',
+    resourceHint: '동기화할 공간, 폴더 또는 온라인 문서를 선택하세요',
     untitled: '제목 없음',
     resourceLoadFailed: '리소스 목록 로드 실패',
     noResources: '동기화 가능한 위키 공간을 찾을 수 없습니다',
@@ -615,10 +616,51 @@ export default {
     minutesAgo: '{n}분 전',
     hoursAgo: '{n}시간 전',
     daysAgo: '{n}일 전',
+    createTitleWithType: '{type} 데이터 소스 추가',
+    editTitleWithType: '{type} 데이터 소스 편집',
+    resourceRequired: '동기화할 DingTalk 리소스를 하나 이상 선택하세요',
+    resourceLoadFailedDesc: '네트워크와 앱 권한을 확인한 후 다시 시도하세요. 입력한 설정은 유지됩니다.',
+    noResources_dingtalk: '동기화할 수 있는 DingTalk 콘텐츠가 없습니다',
+    noResourcesDesc_dingtalk: '운영자가 접근할 수 있는 지식베이스가 없거나 앱 권한이 아직 적용되지 않았습니다',
+    guideStep1_dingtalk: '내부 앱에 지식베이스 및 파일 읽기 권한이 있는지 확인하세요',
+    guideStep2_dingtalk: '운영자 Union ID가 대상 지식베이스에 접근할 수 있는지 확인하세요',
+    guideStep3_dingtalk: '권한 변경을 게시한 후 여기로 돌아와 다시 시도하세요',
+    permissionDocLink_dingtalk: 'DingTalk 지식베이스 권한 문서 보기',
+    selectedScopeCount: '동기화 범위 {count}개 선택됨',
+    stepProgress: '{current}/{total}단계 · {description}',
+    prereqBarText_dingtalk: '처음 사용하시나요? DingTalk 내부 앱 설정 가이드를 확인하세요',
+    prereqStep1Brief_dingtalk: 'DingTalk 내부 앱 만들기',
+    prereqStep1Desc_dingtalk: 'DingTalk 개발자 콘솔에서 내부 앱을 만들고 AppKey와 AppSecret을 복사하세요.',
+    prereqStep2Brief_dingtalk: '필수 읽기 권한 부여',
+    prereqStep2Desc_dingtalk: 'Wiki.Workspace.Read, Wiki.Node.Read, Storage.File.Read 권한을 활성화하고 변경 사항을 게시하세요.',
+    prereqStep3Brief_dingtalk: '지식베이스 접근 권한이 있는 작업자 선택',
+    prereqStep3Desc_dingtalk: '해당 사용자의 Union ID를 입력하세요. 커넥터는 이 작업자에게 보이는 리소스만 읽을 수 있습니다.',
+    prereqOpenConsole_dingtalk: 'DingTalk 개발자 콘솔 열기',
+    stepDescription: {
+      selectType: '연결할 외부 콘텐츠 소스를 선택하세요',
+      credentials: '접근 자격 증명을 안전하게 설정하고 연결을 확인하세요',
+      resources: '지속적으로 동기화할 공간과 문서를 선택하세요',
+      strategy: '업데이트 주기와 충돌 처리 방식을 설정하세요'
+    },
+    syncError: {
+      delete_failed: '삭제 실패, 서버 로그를 확인하세요',
+      feishu_auth_or_permission: '인증 또는 권한 부족: 자격 증명과 앱 권한을 확인하세요',
+      feishu_rate_limited: 'Feishu API 요청 제한, 다음 동기화 시 다시 시도합니다',
+      feishu_timeout: '문서 내보내기 또는 요청 시간 초과, 다음 동기화 시 다시 시도합니다',
+      feishu_server_unavailable: 'Feishu 서비스가 일시적으로 사용 불가, 다음 동기화 시 다시 시도합니다',
+      feishu_api_error: 'Feishu API 오류(code={code}), 다음 동기화 시 다시 시도합니다',
+      feishu_api_error_generic: 'Feishu API 오류, 다음 동기화 시 다시 시도합니다',
+      sync_failed: '동기화 실패, 다음 동기화 시 다시 시도합니다',
+      ingest_failed: '가져오기 실패, 서버 로그를 확인하세요'
+    },
     resourceType: {
       wikiSpace: '위키 공간',
       docCategory: '문서 태그',
-      book: 'Yuque 지식베이스'
+      book: 'Yuque 지식베이스',
+      space: '지식베이스',
+      folder: '폴더',
+      document: '온라인 문서',
+      unsupported: '이 커넥터에서 지원하지 않음'
     },
     scheduleHuman: {
       '30min': '30분마다',
@@ -637,21 +679,26 @@ export default {
       feedUrls: '피드 주소',
       feedUrlsHint: '한 줄에 하나씩 RSS / Atom 피드 주소를 입력하세요. 여러 개를 함께 입력할 수 있습니다.',
       authHeaders: '사용자 지정 헤더 (선택)',
-      authHeadersHint: '비공개 피드 접근용. 한 줄에 하나씩 「이름: 값」 형식으로 입력하세요. 예: Authorization: Bearer xxxx'
+      authHeadersHint: '비공개 피드 접근용. 한 줄에 하나씩 「이름: 값」 형식으로 입력하세요. 예: Authorization: Bearer xxxx',
+      appKey: 'AppKey (Client ID)',
+      operatorId: '작업자 Union ID',
+      operatorIdHint: '선택한 DingTalk 지식베이스에 접근할 수 있는 사용자의 Union ID를 입력하세요. 표시 범위는 해당 사용자의 권한을 따릅니다.'
     },
     connectorDesc: {
       feishu: '페이슈 위키에서 문서, 스프레드시트, 파일 동기화',
       lark: 'Lark 위키에서 문서, 스프레드시트, 파일 동기화',
       notion: 'Notion에서 페이지 및 데이터베이스 동기화',
       yuque: '위큐 지식베이스에서 문서 동기화',
-      rss: 'RSS / Atom 피드에서 글 동기화'
+      rss: 'RSS / Atom 피드에서 글 동기화',
+      dingtalk: 'DingTalk 지식베이스의 온라인 문서 동기화'
     },
     connector: {
       feishu: '페이슈 (Feishu)',
       lark: 'Lark (Feishu 글로벌)',
       notion: 'Notion',
       yuque: '위큐 (Yuque)',
-      rss: 'RSS / Atom 피드'
+      rss: 'RSS / Atom 피드',
+      dingtalk: 'DingTalk 문서'
     },
     logDetail: {
       startTime: '시작 시간',
@@ -686,7 +733,9 @@ export default {
     },
     conflict: {
       overwrite: '덮어쓰기',
-      skip: '기존 항목 건너뛰기'
+      skip: '기존 항목 건너뛰기',
+      overwriteDesc: '원본 콘텐츠가 변경되면 지식베이스 항목을 업데이트합니다',
+      skipDesc: '지식베이스에 이미 있는 콘텐츠를 유지합니다'
     },
     status: {
       active: '연결됨',
@@ -695,7 +744,9 @@ export default {
     },
     syncMode: {
       incremental: '증분 동기화',
-      full: '전체 동기화'
+      full: '전체 동기화',
+      incrementalDesc: '일상 동기화를 위해 새로 추가되거나 변경된 콘텐츠만 처리합니다',
+      fullDesc: '최초 가져오기 또는 전체 점검을 위해 모든 범위를 다시 스캔합니다'
     }
   },
   ollama: {
@@ -3513,15 +3564,14 @@ export default {
       tip1: '공유 후 스페이스 구성원은 설정된 권한에 따라 이 지식베이스에 액세스하게 됩니다.',
       tip2: '편집 가능한 권한을 통해 구성원은 지식베이스 콘텐츠를 수정할 수 있으며, 읽기 전용 권한은 검색 및 Q&A만 허용합니다.'
     },
-    buttons: {
-      create: '지식베이스 생성',
-      save: '설정 저장',
-      saveAndClose: '저장 후 닫기',
-    },
     postCreateHint: {
       title: '생성 완료',
       footer: '설정을 계속 조정하고 공유·데이터 소스를 구성한 뒤 "저장 후 닫기"를 클릭하세요.',
-      followUpDesc: '왼쪽에서 데이터 소스를 구성하거나 "공유 관리"에서 스페이스에 게시할 수 있습니다',
+      followUpDesc: '왼쪽에서 데이터 소스를 구성하거나 "공유 관리"에서 스페이스에 게시할 수 있습니다'
+    },
+    buttons: {
+      create: '지식베이스 생성',
+      saveAndClose: '저장 후 닫기'
     },
     wikiBrowser: {
       editBtn: '편집',
@@ -4846,15 +4896,6 @@ export default {
     editor: {
       createTitle: '에이전트 만들기',
       editTitle: '에이전트 편집',
-      buttons: {
-        create: '에이전트 만들기',
-        saveAndClose: '저장 후 닫기',
-      },
-      postCreateHint: {
-        title: '생성 완료',
-        footer: '설정을 계속 조정하고 공유·배포 채널을 구성한 뒤 "저장 후 닫기"를 클릭하세요.',
-        integrationDesc: '통합 센터에서 IM, 웹 임베드 등 배포 채널을 설정하세요',
-      },
       basicInfo: '기본정보',
       basicInfoDesc: '에이전트 이름, 설명 및 실행 모드 구성',
       promptsConfig: '프롬프트',
@@ -4948,7 +4989,16 @@ export default {
       selectSkillsDesc: '활성화할 Skills 선택',
       noSkillsAvailable: '사전 설치된 Skills가 없습니다',
       skillsInfoTitle: 'Skills란 무엇인가요?',
-      skillsInfoContent: 'Skills는 Agent에 특정 도메인의 지침, 워크플로 및 도구 지원을 제공하는 사전 설치된 전문 지식 모듈입니다. 활성화되면 Agent는 필요할 때 자동으로 관련 지식을 로드합니다.'
+      skillsInfoContent: 'Skills는 Agent에 특정 도메인의 지침, 워크플로 및 도구 지원을 제공하는 사전 설치된 전문 지식 모듈입니다. 활성화되면 Agent는 필요할 때 자동으로 관련 지식을 로드합니다.',
+      postCreateHint: {
+        title: '생성 완료',
+        footer: '설정을 계속 조정하고 공유·배포 채널을 구성한 뒤 "저장 후 닫기"를 클릭하세요.',
+        integrationDesc: '통합 센터에서 IM, 웹 임베드 등 배포 채널을 설정하세요'
+      },
+      buttons: {
+        create: '에이전트 만들기',
+        saveAndClose: '저장 후 닫기'
+      }
     },
     messages: {
       created: '에이전트가 성공적으로 생성되었습니다.',
