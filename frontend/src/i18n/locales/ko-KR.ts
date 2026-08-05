@@ -3311,6 +3311,15 @@ export default {
         instructionsLabel: '질문 생성 지침',
         instructionsDescription: '안정적인 출력 형식을 유지하면서 대상, 상황 및 표현 방식을 지정합니다',
         instructionsPlaceholder: '예: 시험 문제 형식을 피하고 자연스러운 고객 지원 질문을 생성…'
+      },
+      autoTag: {
+        label: '자동 태그 연결',
+        description: '문서 파싱 후 현재 지식베이스의 기존 태그 중 적합한 태그를 연결합니다. 태그를 생성하거나 삭제하지 않으며 모델 호출이 한 번 추가됩니다.',
+        modelLabel: '분류 모델',
+        modelDescription: '비워 두면 지식베이스 요약 모델을 사용합니다.',
+        modelPlaceholder: '분류 모델 선택',
+        maxTagsLabel: '문서당 최대 태그 수',
+        maxTagsDescription: '문서마다 기존 태그 1-10개를 자동 연결합니다.'
       }
     },
     asr: {
