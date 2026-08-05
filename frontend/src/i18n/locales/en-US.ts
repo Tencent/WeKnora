@@ -2590,6 +2590,15 @@ export default {
         instructionsDescription: 'Specify audience, scenario, and wording while the system retains the stable output format',
         instructionsPlaceholder: 'For example: generate natural customer-support questions and avoid exam-style wording…'
       },
+      autoTag: {
+        label: 'Automatic Tagging',
+        description: 'After parsing, select suitable tags from the existing knowledge-base tags. Tags are never created or deleted, but one extra model call is required.',
+        modelLabel: 'Classification Model',
+        modelDescription: 'Leave empty to reuse the knowledge-base summary model.',
+        modelPlaceholder: 'Select a classification model',
+        maxTagsLabel: 'Maximum tags per document',
+        maxTagsDescription: 'Automatically associate 1-10 existing tags per document.'
+      },
       tableMetadataInstructions: {
         label: 'Table Metadata Instructions',
         description: 'Add business context and field semantics to CSV/Excel summaries for better retrieval',

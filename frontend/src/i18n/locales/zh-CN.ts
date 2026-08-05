@@ -3311,6 +3311,15 @@ export default {
         instructionsLabel: '问题生成要求',
         instructionsDescription: '指定问题面向的人群、场景和表达方式，系统仍维护稳定输出格式',
         instructionsPlaceholder: '例如：生成客服用户常问的自然语言问题，避免考试题式表达…'
+      },
+      autoTag: {
+        label: '自动关联标签',
+        description: '文档解析完成后，从当前知识库已有标签中选择合适标签自动关联。不会创建或删除标签，并会增加一次模型调用。',
+        modelLabel: '分类模型',
+        modelDescription: '留空时使用知识库摘要模型。',
+        modelPlaceholder: '请选择分类模型',
+        maxTagsLabel: '单篇文档最多标签数',
+        maxTagsDescription: '每篇文档最多自动关联 1-10 个已有标签。'
       }
     },
     asr: {
