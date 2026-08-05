@@ -7,7 +7,7 @@
 - 知识库类型 `type` 为 `document`（文档）或 `faq`（FAQ），默认 `document`。
 - JSON 中对象存储相关字段：**`storage_config`** 为序列化字段名（对应数据库列 `cos_config`，兼容旧数据）。旧客户端若仍发送或接收 `cos_config`，服务端会兼容解析；新集成请使用 **`storage_config`**。
 - **`storage_provider_config`** 为新版存储提供者选择（如 `{"provider": "local"}`），与空间级存储引擎凭证配合使用；无配置时可为 `null`。
-- 嵌套配置对象：`chunking_config`、`image_processing_config`、`vlm_config`、`asr_config`、`extract_config`、`faq_config`、`question_generation_config`。其中 `extract_config`、`faq_config`、`question_generation_config` 允许为 `null`。
+- 嵌套配置对象：`chunking_config`、`image_processing_config`、`vlm_config`、`asr_config`、`extract_config`、`faq_config`、`question_generation_config`、`auto_tag_config`。其中 `extract_config`、`faq_config`、`question_generation_config`、`auto_tag_config` 允许为 `null`。
 - **`vector_store_id`** 为知识库绑定的向量存储 ID（参见 [vector-store.md](./vector-store.md)）。未指定（或 `null`/`""`）时使用空间级默认的环境变量存储；一旦创建即不可修改。详情接口返回时会附带 `vector_store_name` / `vector_store_source` / `vector_store_engine_type` / `vector_store_status` 四个只读元数据字段，用于前端展示。
 
 | 方法   | 路径                                      | 描述                     |
@@ -46,6 +46,7 @@
 | extract_config                | object  | 否   | 图谱抽取配置；`enabled=true` 时需提供 `text`/`tags`/`nodes`/`relations` |
 | faq_config                    | object  | 否   | FAQ 配置（仅 FAQ 类型知识库需要）                               |
 | question_generation_config    | object  | 否   | 问题生成配置                                                    |
+| auto_tag_config               | object  | 否   | 文档自动标签配置，默认关闭；仅适用于 `document` 类型知识库      |
 | vector_store_id               | string  | 否   | 绑定的向量存储 ID。不传或为空字符串等同于 `null`（使用环境变量默认存储）。指定时必须是调用者所在空间拥有的向量存储 UUID；创建后不可修改。无效 UUID / 跨空间 / 未注册到引擎的 ID 会返回 `400` |
 
 **请求**:
@@ -106,6 +107,11 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
     "question_generation_config": {
         "enabled": false,
         "question_count": 3
+    },
+    "auto_tag_config": {
+        "enabled": true,
+        "model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
+        "max_tags": 3
     },
     "vector_store_id": "550e8400-e29b-41d4-a716-446655440000"
 }'
@@ -170,6 +176,11 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
             "enabled": false,
             "question_count": 3
         },
+        "auto_tag_config": {
+            "enabled": true,
+            "model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
+            "max_tags": 3
+        },
         "is_pinned": false,
         "pinned_at": null,
         "knowledge_count": 0,
@@ -187,6 +198,18 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
     "success": true
 }
 ```
+
+### 自动标签配置
+
+`auto_tag_config` 在文档解析完成后异步调用聊天模型，从知识库已有标签中选择匹配项并增量关联到文档。该过程不会创建新标签，也不会删除或覆盖人工添加的标签。
+
+| 字段       | 类型    | 默认值 | 说明 |
+| ---------- | ------- | ------ | ---- |
+| `enabled`  | boolean | `false` | 是否启用自动标签 |
+| `model_id` | string  | `""` | 使用的聊天模型 ID；为空时使用知识库的 `summary_model_id` |
+| `max_tags` | integer | `3` | 单个文档最多自动关联的标签数，取值范围为 `1` 到 `10` |
+
+自动标签仅对启用该配置后新解析或重新解析的文档生效。模型调用失败不会阻塞文档解析完成，异步任务会按照任务队列策略重试。
 
 **`vector_store_*` 响应字段说明**:
 

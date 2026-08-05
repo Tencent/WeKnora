@@ -108,7 +108,7 @@ type KnowledgeBase struct {
 	// QuestionGenerationConfig stores question generation configuration for document knowledge bases
 	QuestionGenerationConfig *QuestionGenerationConfig `yaml:"question_generation_config" json:"question_generation_config" gorm:"column:question_generation_config;type:json"`
 	// AutoTagConfig controls asynchronous association of existing tags after parsing.
-	AutoTagConfig *AutoTagConfig `yaml:"auto_tag_config" json:"auto_tag_config" gorm:"column:auto_tag_config;type:json;default:null"`
+	AutoTagConfig *AutoTagConfig `yaml:"auto_tag_config" json:"auto_tag_config" gorm:"type:json"`
 	// WikiConfig stores wiki-specific configuration (only for wiki type knowledge bases)
 	WikiConfig *WikiConfig `yaml:"wiki_config"             json:"wiki_config"             gorm:"column:wiki_config;type:json"`
 	// IndexingStrategy controls which indexing pipelines are active for this knowledge base.
@@ -174,8 +174,10 @@ type AutoTagConfig struct {
 	MaxTags int    `yaml:"max_tags,omitempty" json:"max_tags,omitempty"`
 }
 
+// Value serializes the automatic-tagging configuration for database storage.
 func (c AutoTagConfig) Value() (driver.Value, error) { return json.Marshal(c) }
 
+// Scan deserializes the automatic-tagging configuration from a database value.
 func (c *AutoTagConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -191,6 +193,7 @@ func (c *AutoTagConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
+// Normalize applies defaults and bounds to the automatic-tagging configuration.
 func (c *AutoTagConfig) Normalize() {
 	if c == nil {
 		return
@@ -669,7 +672,9 @@ func (kb *KnowledgeBase) EnsureDefaults() {
 	if kb.Type != KnowledgeBaseTypeFAQ {
 		kb.FAQConfig = nil
 	}
-	if kb.AutoTagConfig != nil {
+	if kb.Type != KnowledgeBaseTypeDocument {
+		kb.AutoTagConfig = nil
+	} else if kb.AutoTagConfig != nil {
 		kb.AutoTagConfig.Normalize()
 	}
 	// Set defaults for FAQ

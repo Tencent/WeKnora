@@ -26,7 +26,7 @@ func TestSQLiteMigrationsIncludeAutoTagConfig(t *testing.T) {
 
 	rows, err := db.Query("PRAGMA table_info(knowledge_bases)")
 	require.NoError(t, err)
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	found := false
 	for rows.Next() {
