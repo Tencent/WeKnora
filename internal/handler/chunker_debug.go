@@ -51,15 +51,18 @@ type PreviewChunkingRequest struct {
 
 // PreviewChunkingPayload mirrors the snake_case JSON the rest of the API
 // uses for ChunkingConfig fields. We don't reuse types.ChunkingConfig
-// directly because it carries a lot of unrelated fields (parser engine
-// rules, parent-child sizes, etc.) that the preview path doesn't need.
+// directly because it carries unrelated parser rules and table-processing
+// metadata that the preview path does not use.
 type PreviewChunkingPayload struct {
-	ChunkSize    int      `json:"chunk_size"`
-	ChunkOverlap int      `json:"chunk_overlap"`
-	Separators   []string `json:"separators"`
-	Strategy     string   `json:"strategy"`
-	TokenLimit   int      `json:"token_limit"`
-	Languages    []string `json:"languages"`
+	ChunkSize         int      `json:"chunk_size"`
+	ChunkOverlap      int      `json:"chunk_overlap"`
+	Separators        []string `json:"separators"`
+	EnableParentChild bool     `json:"enable_parent_child"`
+	ParentChunkSize   int      `json:"parent_chunk_size"`
+	ChildChunkSize    int      `json:"child_chunk_size"`
+	Strategy          string   `json:"strategy"`
+	TokenLimit        int      `json:"token_limit"`
+	Languages         []string `json:"languages"`
 }
 
 // PreviewChunkResult describes one chunk emitted during preview.
@@ -162,7 +165,23 @@ func PreviewChunking(c *gin.Context) {
 	}
 	resCh := make(chan splitResult, 1)
 	go func() {
-		chunks, diag := chunker.SplitWithDiagnostics(req.Text, cfg)
+		var chunks []chunker.Chunk
+		var diag *chunker.Diagnostics
+		if req.ChunkingConfig.EnableParentChild {
+			parentCfg, childCfg := chunker.DeriveParentChildConfigs(
+				cfg,
+				req.ChunkingConfig.ParentChunkSize,
+				req.ChunkingConfig.ChildChunkSize,
+			)
+			result, parentDiag := chunker.SplitParentChildWithDiagnostics(req.Text, parentCfg, childCfg)
+			chunks = make([]chunker.Chunk, len(result.Children))
+			for i, child := range result.Children {
+				chunks[i] = child.Chunk
+			}
+			diag = parentDiag
+		} else {
+			chunks, diag = chunker.SplitWithDiagnostics(req.Text, cfg)
+		}
 		resCh <- splitResult{chunks: chunks, diag: diag}
 	}()
 

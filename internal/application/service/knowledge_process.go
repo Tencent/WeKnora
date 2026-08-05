@@ -247,27 +247,7 @@ func buildSplitterConfigFromChunking(cc types.ChunkingConfig) chunker.SplitterCo
 // splitter, so parent-child chunks would silently lose heading alignment and
 // ContextHeader breadcrumbs regardless of the configured strategy.
 func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfig) (parent, child chunker.SplitterConfig) {
-	parentSize := cc.ParentChunkSize
-	if parentSize <= 0 {
-		parentSize = 4096
-	}
-	childSize := cc.ChildChunkSize
-	if childSize <= 0 {
-		childSize = 384
-	}
-	parent = chunker.SplitterConfig{
-		ChunkSize:    parentSize,
-		ChunkOverlap: base.ChunkOverlap, // reuse configured overlap for parents
-		Separators:   base.Separators,
-		Strategy:     base.Strategy,
-	}
-	child = chunker.SplitterConfig{
-		ChunkSize:    childSize,
-		ChunkOverlap: childSize / 5, // ~20% overlap for child chunks
-		Separators:   base.Separators,
-		Strategy:     base.Strategy,
-	}
-	return
+	return chunker.DeriveParentChildConfigs(base, cc.ParentChunkSize, cc.ChildChunkSize)
 }
 
 // processChunks processes chunks and creates embeddings for knowledge content
