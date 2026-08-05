@@ -793,10 +793,9 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	// any chunk has been manually edited; after that ChunkIndex is safer.
 	sortedChunks := sortChunksForSummary(chunks)
 
-	// Concatenate original chunk contents by StartAt offset to reconstruct the
-	// document, then enrich with image info in a second pass. Enrichment must
-	// happen AFTER concatenation because StartAt is based on original document
-	// offsets — enriched (longer) content would break the positioning.
+	// Reconstruct the document before enriching it with image info. Enrichment
+	// must happen AFTER reconstruction because StartAt is based on original
+	// document offsets; enriched (longer) content would break the positioning.
 	chunkContents := ""
 	hasEditedChunk := false
 	for _, chunk := range sortedChunks {
@@ -817,14 +816,9 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		}
 		chunkContents = strings.Join(parts, "\n\n")
 	} else {
-		for _, chunk := range sortedChunks {
-			runes := []rune(chunkContents)
-			if chunk.StartAt <= len(runes) {
-				chunkContents = string(runes[:chunk.StartAt]) + chunk.Content
-			} else {
-				chunkContents += chunk.Content
-			}
-		}
+		// Synthetic table headers are not represented in StartAt/EndAt. Match
+		// real text overlap instead of slicing by source offsets.
+		chunkContents = searchutil.MergeTextChunks(sortedChunks, "")
 	}
 
 	// Collect image_info from image_ocr/image_caption children and enrich
