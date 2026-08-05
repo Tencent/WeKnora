@@ -14,10 +14,10 @@ import (
 
 // ToolResult represents the result of a tool execution
 type ToolResult struct {
-	Success bool                   `json:"success"`         // Whether the tool executed successfully
-	Output  string                 `json:"output"`          // Human-readable output
-	Data    map[string]interface{} `json:"data,omitempty"`  // Structured data for programmatic use
-	Error   string                 `json:"error,omitempty"` // Error message if execution failed
+	Success bool                   `json:"success"`          // Whether the tool executed successfully
+	Output  string                 `json:"output"`           // Human-readable output
+	Data    map[string]interface{} `json:"data,omitempty"`   // Structured data for programmatic use
+	Error   string                 `json:"error,omitempty"`  // Error message if execution failed
 	Images  []string               `json:"images,omitempty"` // Base64 data URIs from tool (e.g. MCP image content)
 }
 
@@ -145,14 +145,14 @@ type SearchMessagesRequest struct {
 
 // MessageSearchGroupItem represents a grouped search result item
 type MessageSearchGroupItem struct {
-	RequestID    string    `json:"request_id"`
-	SessionID    string    `json:"session_id"`
-	SessionTitle string    `json:"session_title"`
-	QueryContent string    `json:"query_content"`
-	AnswerContent string   `json:"answer_content"`
-	Score        float64   `json:"score"`
-	MatchType    string    `json:"match_type"`
-	CreatedAt    time.Time `json:"created_at"`
+	RequestID     string    `json:"request_id"`
+	SessionID     string    `json:"session_id"`
+	SessionTitle  string    `json:"session_title"`
+	QueryContent  string    `json:"query_content"`
+	AnswerContent string    `json:"answer_content"`
+	Score         float64   `json:"score"`
+	MatchType     string    `json:"match_type"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // MessageSearchResult represents the result of a message search
