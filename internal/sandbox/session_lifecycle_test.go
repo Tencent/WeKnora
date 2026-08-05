@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -158,6 +159,7 @@ func newTestRemoteSessionLifecycle(
 			},
 		},
 		time.Second,
+		"",
 	)
 	require.NoError(t, err)
 	return lifecycle
@@ -858,4 +860,40 @@ func TestRemoteSessionLifecycleDestroySemantics(t *testing.T) {
 		require.NoError(t, getErr)
 		require.NotNil(t, binding)
 	})
+}
+
+// Two configs in one workspace can point at the SAME provider account. Without
+// config_id in metadata, cleaning one config would delete the other's
+// sandboxes, so this tag is a correctness requirement, not a nicety.
+func TestLifecycleTagsSandboxWithConfigID(t *testing.T) {
+	lifecycle := newTestLifecycleWithConfigID(t, "cfg-42")
+
+	md := lifecycle.metadata(SessionSandboxKey{TenantID: 7, SessionID: "s-1"})
+
+	require.Equal(t, "cfg-42", md[remoteMetadataConfigID])
+	require.Equal(t, "7", md[remoteMetadataTenantID])
+	require.Equal(t, "s-1", md[remoteMetadataSessionID])
+}
+
+func TestLifecycleTagsGlobalDefaultConfigWithSentinel(t *testing.T) {
+	lifecycle := newTestLifecycleWithConfigID(t, "")
+
+	md := lifecycle.metadata(SessionSandboxKey{TenantID: 7, SessionID: "s-1"})
+
+	require.Equal(t, types.SandboxConfigIDGlobalDefault, md[remoteMetadataConfigID],
+		"an empty config ID must still be tagged, so listing can target it")
+}
+
+func newTestLifecycleWithConfigID(t *testing.T, configID string) *remoteSessionLifecycle {
+	t.Helper()
+	lifecycle, err := newRemoteSessionLifecycle(
+		newFakeRemoteClient(SandboxTypeCube),
+		NewMemorySessionSandboxBindingStore(),
+		&fakeSessionExistenceChecker{exists: true},
+		RemoteCreateRequest{TemplateID: "template-a"},
+		time.Minute,
+		configID,
+	)
+	require.NoError(t, err)
+	return lifecycle
 }

@@ -92,6 +92,16 @@ type SessionBoundManagerConfig struct {
 	Client  RemoteSandboxClient
 	Store   SessionSandboxBindingStore
 	Checker SessionExistenceChecker
+
+	// ConfigID identifies the tenant sandbox config this manager serves. It is
+	// stamped onto sandbox metadata so cleanup can target one config without
+	// touching another that shares the same provider account.
+	ConfigID string
+
+	// SkipHealthProbe skips the construction-time Health() round-trip and,
+	// with it, the Local fallback. Set by the per-tenant resolver, which
+	// builds a manager per request. See NewSessionBoundManager.
+	SkipHealthProbe bool
 }
 
 // NewSessionBoundManager wires the manager with an explicit RemoteSandboxClient
@@ -160,6 +170,7 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 		deps.Checker,
 		createRequest,
 		sessionLifecycleCleanupTimeout,
+		deps.ConfigID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("session bound manager: %w", err)
@@ -174,6 +185,15 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 		lifecycle:  lifecycle,
 		ephemeral:  NewRemoteSandbox(deps.Client, createRequest),
 		activeType: provider,
+	}
+
+	// Per-tenant managers are rebuilt on every request, so probing here would
+	// add a remote round-trip to each one. Skipping also disables the Local
+	// fallback below, which is deliberate: when a tenant explicitly configures
+	// a backend, silently running their scripts in a local process is a
+	// surprising, security-relevant downgrade. Failing loudly is correct.
+	if deps.SkipHealthProbe {
+		return m, nil
 	}
 
 	// Health probe uses the provider's own HTTP timeout.

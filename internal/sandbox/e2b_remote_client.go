@@ -31,6 +31,18 @@ type E2BRemoteClient struct {
 // The API key is required; the caller may leave APIURL / SandboxDomain empty
 // to fall back to the SDK's built-in defaults.
 func NewE2BRemoteClient(cfg *Config) (*E2BRemoteClient, error) {
+	return NewE2BRemoteClientWithTransport(cfg, nil)
+}
+
+// NewE2BRemoteClientWithTransport builds the client with an injected HTTP
+// transport. Per-tenant clients are constructed per request, so sharing one
+// transport across tenants is what preserves connection pooling: transports
+// pool per host:port and the API key travels in per-request headers, making
+// the sharing both safe and effective. A nil transport uses the http default.
+func NewE2BRemoteClientWithTransport(
+	cfg *Config,
+	transport *http.Transport,
+) (*E2BRemoteClient, error) {
 	if cfg == nil {
 		return nil, errors.New("e2b remote client config is required")
 	}
@@ -41,11 +53,15 @@ func NewE2BRemoteClient(cfg *Config) (*E2BRemoteClient, error) {
 	if timeout <= 0 {
 		timeout = DefaultE2BHTTPTimeout
 	}
+	httpClient := &http.Client{Timeout: timeout}
+	if transport != nil {
+		httpClient.Transport = transport
+	}
 	client, err := e2b.NewClient(e2b.ClientConfig{
 		APIKey:        cfg.E2BAPIKey,
 		APIBaseURL:    strings.TrimSpace(cfg.E2BAPIURL),
 		SandboxDomain: strings.TrimSpace(cfg.E2BSandboxDomain),
-		HTTPClient:    &http.Client{Timeout: timeout},
+		HTTPClient:    httpClient,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build e2b client: %w", err)
@@ -97,6 +113,7 @@ func (c *E2BRemoteClient) Capabilities() RemoteSandboxCapabilities {
 		SupportsPauseResume:           true,
 		SupportsTimeoutRefresh:        true,
 		SupportsFilesystemEnumeration: true,
+		SupportsVolumes:               true,
 	}
 }
 
@@ -170,7 +187,8 @@ func (c *E2BRemoteClient) Create(
 			AllowOut:           append([]string(nil), policy.AllowOut...),
 			DenyOut:            append([]string(nil), policy.DenyOut...),
 		},
-		AutoPause: action == RemoteOnTimeoutPause,
+		AutoPause:    action == RemoteOnTimeoutPause,
+		VolumeMounts: toE2BVolumeMounts(request.VolumeMounts),
 	}
 	if request.Timeout.AutoResume {
 		autoPauseMemory := true
@@ -368,6 +386,7 @@ func e2bServerMetadataFilter(metadata map[string]string) map[string]string {
 		remoteMetadataTenantID,
 		remoteMetadataProvider,
 		remoteMetadataBindingVersion,
+		remoteMetadataConfigID,
 	} {
 		if value, ok := metadata[key]; ok {
 			return e2bSafeMetadataFilter(key, value)
@@ -481,6 +500,9 @@ func (c *E2BRemoteClient) Exec(
 	}
 	if len(request.Env) > 0 {
 		options = append(options, e2b.WithEnv(cloneMetadata(request.Env)))
+	}
+	if request.User != "" {
+		options = append(options, e2b.WithUser(request.User))
 	}
 	if request.Timeout > 0 {
 		options = append(options, e2b.WithTimeout(request.Timeout))
@@ -699,6 +721,22 @@ func e2bTimeoutSeconds(policy RemoteTimeoutPolicy, fallback time.Duration) (int,
 	default:
 		return 0, fmt.Errorf("unsupported timeout mode %q", policy.Mode)
 	}
+}
+
+// toE2BVolumeMounts converts the provider-neutral RemoteVolumeMount slice to
+// E2B SDK VolumeMount values. Nil and empty inputs both produce nil.
+func toE2BVolumeMounts(src []RemoteVolumeMount) []e2b.VolumeMount {
+	if len(src) == 0 {
+		return nil
+	}
+	result := make([]e2b.VolumeMount, len(src))
+	for i, mount := range src {
+		result[i] = e2b.VolumeMount{
+			Name: mount.Name,
+			Path: mount.Path,
+		}
+	}
+	return result
 }
 
 // isE2BExecTimeout reports whether a failed command Run should be treated as

@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 const (
@@ -15,6 +17,11 @@ const (
 	remoteMetadataSessionID      = "weknora_session_id"
 	remoteMetadataBindingVersion = "weknora_binding_version"
 	remoteMetadataProvider       = "weknora_provider"
+
+	// remoteMetadataConfigID records which sandbox config created the sandbox.
+	// Two configs in one workspace may share a provider account, so cleanup
+	// must filter by config as well as tenant/session ownership.
+	remoteMetadataConfigID = "weknora_sandbox_config_id"
 )
 
 // ErrSandboxSessionDeleted reports that the owning WeKnora session no longer
@@ -29,12 +36,13 @@ type SessionExistenceChecker interface {
 // remoteSessionLifecycle coordinates one provider's persistent sandboxes using
 // an authoritative binding store. It contains no provider-native types.
 type remoteSessionLifecycle struct {
-	client         RemoteSandboxClient
-	bindings       SessionSandboxBindingStore
-	sessionChecker SessionExistenceChecker
-	createRequest  RemoteCreateRequest
-	cleanupTimeout time.Duration
-	now            func() time.Time
+	client          RemoteSandboxClient
+	bindings        SessionSandboxBindingStore
+	sessionChecker  SessionExistenceChecker
+	createRequest   RemoteCreateRequest
+	cleanupTimeout  time.Duration
+	sandboxConfigID string
+	now             func() time.Time
 }
 
 func newRemoteSessionLifecycle(
@@ -43,6 +51,7 @@ func newRemoteSessionLifecycle(
 	sessionChecker SessionExistenceChecker,
 	createRequest RemoteCreateRequest,
 	cleanupTimeout time.Duration,
+	sandboxConfigID string,
 ) (*remoteSessionLifecycle, error) {
 	if client == nil {
 		return nil, errors.New("remote sandbox client is required")
@@ -65,15 +74,19 @@ func newRemoteSessionLifecycle(
 	if cleanupTimeout <= 0 {
 		return nil, errors.New("remote sandbox cleanup timeout must be positive")
 	}
+	if strings.TrimSpace(sandboxConfigID) == "" {
+		sandboxConfigID = types.SandboxConfigIDGlobalDefault
+	}
 	createRequest.Metadata = cloneMetadata(createRequest.Metadata)
 	createRequest.EnvVars = cloneMetadata(createRequest.EnvVars)
 	return &remoteSessionLifecycle{
-		client:         client,
-		bindings:       bindings,
-		sessionChecker: sessionChecker,
-		createRequest:  createRequest,
-		cleanupTimeout: cleanupTimeout,
-		now:            time.Now,
+		client:          client,
+		bindings:        bindings,
+		sessionChecker:  sessionChecker,
+		createRequest:   createRequest,
+		cleanupTimeout:  cleanupTimeout,
+		sandboxConfigID: sandboxConfigID,
+		now:             time.Now,
 	}, nil
 }
 
@@ -572,6 +585,7 @@ func (l *remoteSessionLifecycle) metadata(key SessionSandboxKey) map[string]stri
 		remoteMetadataSessionID:      key.SessionID,
 		remoteMetadataBindingVersion: strconv.Itoa(SessionSandboxBindingVersion),
 		remoteMetadataProvider:       string(l.client.Provider()),
+		remoteMetadataConfigID:       l.sandboxConfigID,
 	}
 }
 
