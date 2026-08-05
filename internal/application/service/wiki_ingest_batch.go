@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -435,19 +434,19 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		eg.Go(func() error {
 			if op.Op == WikiOpRetract {
 				// Resolve the authoritative page set at run-time. The caller
-				// (knowledgeService.cleanupWikiOnKnowledgeDelete) captures
+				// (knowledgeService.cleanupWikiProvenanceOnKnowledgeDelete) captures
 				// PageSlugs from a DB snapshot taken *before* this task fires,
 				// but there is a window where:
 				//   - cleanup ran before ingest → snapshot is empty, but a
 				//     concurrent ingest may have already created pages by now
 				//   - a previous ingest batch created new pages after cleanup
 				//     captured its snapshot
-				// Re-querying ListPagesBySourceRef here unions the caller's
+				// Re-querying the provenance ledger here unions the caller's
 				// slugs with whatever currently references the knowledge, so
 				// no page is left un-retracted. It also lets us support
 				// callers that deliberately enqueue retract with empty
 				// PageSlugs as "figure it out yourself" — see
-				// cleanupWikiOnKnowledgeDelete's comment (3).
+				// cleanupWikiProvenanceOnKnowledgeDelete's retract guarantee.
 				slugSet := make(map[string]struct{}, len(op.PageSlugs))
 				folderSet := make(map[string]struct{}, len(op.FolderIDs))
 				for _, slug := range op.PageSlugs {
@@ -462,23 +461,28 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 					}
 				}
 				if op.KnowledgeID != "" {
-					livePages, err := s.wikiService.ListPagesBySourceRef(mapCtx, payload.KnowledgeBaseID, op.KnowledgeID)
-					if err != nil {
-						logger.Warnf(mapCtx, "wiki ingest: retract lookup failed for %s: %v", op.KnowledgeID, err)
+					if s.provenanceLife == nil {
+						logger.Warnf(mapCtx, "wiki ingest: provenance lifecycle unavailable for retract %s", op.KnowledgeID)
 					} else {
-						for _, p := range livePages {
-							if p == nil || p.Slug == "" {
+						impacts, lookupErr := s.provenanceLife.ListKnowledgePageImpacts(
+							mapCtx, payload.TenantID, payload.KnowledgeBaseID, op.KnowledgeID,
+						)
+						if lookupErr != nil {
+							logger.Warnf(mapCtx, "wiki ingest: retract provenance lookup failed for %s: %v", op.KnowledgeID, lookupErr)
+						}
+						for _, impact := range impacts {
+							if impact.Slug == "" {
 								continue
 							}
-							// Index pages never carry real source_refs;
+							// Index pages never carry real sources;
 							// if they somehow surface here, skip — the
 							// reduce stage would be a no-op anyway.
-							if p.PageType == types.WikiPageTypeIndex {
+							if impact.PageType == types.WikiPageTypeIndex {
 								continue
 							}
-							slugSet[p.Slug] = struct{}{}
-							if p.FolderID != "" {
-								folderSet[p.FolderID] = struct{}{}
+							slugSet[impact.Slug] = struct{}{}
+							if impact.FolderID != "" {
+								folderSet[impact.FolderID] = struct{}{}
 							}
 						}
 					}
@@ -1296,11 +1300,13 @@ func (s *wikiIngestService) mapOneDocument(
 	// attaches concrete chunk IDs to each candidate slug.
 	var (
 		summaryContent string
+		summaryFacts   *wikiFactOutput
 		summaryErr     error
 		citations      map[string][]string
 		newSlugs       []newSlugFromCitation
 		batchCount     int
 	)
+	summaryEvidence := wikiEvidenceFromChunks(chunks, payload.TenantID, payload.KnowledgeBaseID, maxContentForWiki)
 
 	// Both calls run in parallel goroutines under the same wikiSpan
 	// parent — their subspans will visually overlap in the trace view,
@@ -1321,21 +1327,29 @@ func (s *wikiIngestService) mapOneDocument(
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		summaryContent, summaryErr = s.generateWithTemplate(ctx, chatModel, agent.WikiSummaryPrompt, map[string]string{
-			"Content":            content,
+		var raw string
+		raw, summaryErr = s.generateWithTemplate(ctx, chatModel, agent.WikiSummaryFactsPrompt, map[string]string{
+			"SourceChunks":       renderWikiEvidenceXML(summaryEvidence),
 			"Language":           lang,
 			"ExtractedSlugs":     slugListing,
 			"CustomInstructions": batchCtx.ContentInstructions,
-			"InstructionScope":   "wiki_content",
 		})
+		if summaryErr == nil {
+			summaryFacts, summaryErr = parseWikiFactOutput(raw, summaryEvidence)
+			if summaryErr != nil {
+				summaryErr = fmt.Errorf("validate summary fact output: %w", summaryErr)
+			} else {
+				summaryContent = renderWikiFactOutput(summaryFacts)
+			}
+		}
 		if summaryErr != nil {
 			s.tracker().FailSpan(ctx, summarySpan, "SUMMARY_FAILED", summaryErr.Error(), summaryErr)
 		} else {
-			sumLine, sumBody := splitSummaryLine(summaryContent)
 			s.tracker().EndSpan(ctx, summarySpan, types.JSONMap{
 				"chars":        utf8.RuneCountInString(summaryContent),
-				"summary_line": previewText(sumLine, 160),
-				"body_preview": previewText(sumBody, 320),
+				"summary_line": previewText(summaryFacts.Summary, 160),
+				"body_preview": previewText(summaryContent, 320),
+				"fact_blocks":  len(summaryFacts.Blocks),
 			})
 		}
 	}()
@@ -1426,27 +1440,24 @@ func (s *wikiIngestService) mapOneDocument(
 		s.tracker().FailSpan(ctx, wikiSpan, "SUMMARY_FAILED", summaryErr.Error(), summaryErr)
 		return nil, nil, fmt.Errorf("generate summary: %w", summaryErr)
 	}
-	sumLine, sumBody := splitSummaryLine(summaryContent)
-	if sumBody == "" {
-		sumBody = summaryContent
-	}
-	if sumLine == "" {
-		sumLine = docTitle
-	}
+	sumLine := summaryFacts.Summary
+	sumBody := summaryContent
 	docSummaryLine = sumLine
 	docSummary = sumBody
 	if strings.TrimSpace(docSummary) == "" {
 		docSummary = sumLine
 	}
 	updates = append(updates, SlugUpdate{
-		Slug:        summarySlug,
-		Type:        types.WikiPageTypeSummary,
-		DocTitle:    docTitle,
-		KnowledgeID: knowledgeID,
-		SourceRef:   sourceRef,
-		Language:    lang,
-		SummaryLine: sumLine,
-		SummaryBody: sumBody,
+		Slug:         summarySlug,
+		Type:         types.WikiPageTypeSummary,
+		DocTitle:     docTitle,
+		KnowledgeID:  knowledgeID,
+		SourceRef:    sourceRef,
+		Language:     lang,
+		SummaryLine:  sumLine,
+		SummaryBody:  sumBody,
+		SourceChunks: wikiFactChunkIDs(summaryFacts),
+		FactOutput:   summaryFacts,
 	})
 	extractedPages = append(extractedPages, wikiIngestPageRef{Slug: summarySlug, Title: docTitle})
 
@@ -1462,7 +1473,6 @@ func (s *wikiIngestService) mapOneDocument(
 				SourceRef:    sourceRef,
 				Language:     lang,
 				SourceChunks: item.SourceChunks,
-				DocSummary:   docSummary,
 			})
 		}
 	}
@@ -1479,7 +1489,6 @@ func (s *wikiIngestService) mapOneDocument(
 				SourceRef:    sourceRef,
 				Language:     lang,
 				SourceChunks: item.SourceChunks,
-				DocSummary:   docSummary,
 			})
 		}
 	}
@@ -1498,10 +1507,10 @@ func (s *wikiIngestService) mapOneDocument(
 	//      swap: emit BOTH a "retract" (carrying the doc's PRIOR summary
 	//      body as the old-version signal) AND the normal addition. The
 	//      reduce stage sees HasAdditions=1 + HasRetractions=1 and the
-	//      WikiPageModifyUserPrompt correctly tells the editor model to
-	//      remove the old K section and add the new K section in one
-	//      pass — giving us replace-not-append semantics that "append
-	//      new K on top of old K" would otherwise violate.
+	//      WikiPageFactMergePrompt receives both the retained trusted facts
+	//      and the new evidence, then returns one replacement fact set. This
+	//      gives us replace-not-append semantics instead of leaving stale K
+	//      facts beside the new K facts.
 	//
 	//  (c) oldSlug ∈ new AND slug is a summary page (summary/...) →
 	//      nothing to do here. reduceSlugUpdates' summary branch
@@ -1666,11 +1675,13 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 //   - changed:          whether the wiki page was created or updated
 //   - affectedType:     "ingest" or "retract" — drives downstream bookkeeping
 //   - additionFailed:   true iff the slug had entity/concept additions queued
-//     AND the WikiPageModifyUserPrompt LLM call failed, so no page exists/was
+//     AND the WikiPageFactMergePrompt LLM call failed, so no page exists/was
 //     refreshed for it. Callers use this to sanitize dead [[slug]] links
-//     elsewhere (e.g. in the doc's summary page) and to drop the slug from
-//     the wiki log feed so users don't see a clickable entry that 404s.
-//   - err:              transport / repo error from the persisted upsert.
+//     elsewhere (e.g. in the doc's summary page).
+//   - err:              LLM/JSON validation, provenance publish, or repo error.
+//     The caller requeues every contributing document through the bounded
+//     fail_count/dead-letter path, so invalid structured output is never
+//     silently accepted as a successful reduce.
 func (s *wikiIngestService) reduceSlugUpdates(
 	ctx context.Context,
 	chatModel chat.Chat,
@@ -1816,132 +1827,42 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		page.Summary = summaryUpdate.SummaryLine
 		page.PageType = types.WikiPageTypeSummary
 		page.SourceRefs = appendUnique(page.SourceRefs, summaryUpdate.SourceRef)
-		// Summary pages don't carry chunk-level citations (they are document-
-		// level synopses generated from the whole content). Clear any stale
-		// chunk refs that may remain if this slug was once an entity page
-		// and got converted to a summary page.
-		page.ChunkRefs = types.StringArray{}
-		changed = true
-
-		if exists {
-			_, err = s.wikiService.UpdatePage(ctx, page)
-		} else {
-			_, err = s.wikiService.CreatePage(ctx, page)
+		page.ChunkRefs = types.StringArray(summaryUpdate.SourceChunks)
+		if summaryUpdate.FactOutput == nil {
+			return false, "", true, errors.New("summary update is missing validated fact output")
 		}
-		return changed, affectedType, false, err
+		page.PageMetadata, err = setWikiFactMetadata(page.PageMetadata, summaryUpdate.FactOutput)
+		if err != nil {
+			return false, "", true, err
+		}
+		changed = true
+		if err = s.publishWikiFactPage(ctx, page, summaryUpdate.FactOutput); err != nil {
+			return false, "", true, err
+		}
+		return changed, affectedType, false, nil
 	}
 
-	var remainingSourcesContent strings.Builder
-	var deletedContent strings.Builder
 	var relatedSlugs strings.Builder
-	var newContentBuilder strings.Builder
-	var sharedSourceContexts strings.Builder
-	var docTitles []string
 	var language string
+	var finalFacts *wikiFactOutput
+	evidenceChunkIDs := append([]string(nil), page.ChunkRefs...)
+	retractedKnowledgeIDs := make(map[string]struct{})
 
 	if len(retracts) > 0 {
 		language = retracts[0].Language
-
 		for _, r := range retracts {
-			fmt.Fprintf(&deletedContent, "<document>\n<title>%s</title>\n<content>\n%s\n</content>\n</document>\n\n", r.DocTitle, r.RetractDocContent)
+			retractedKnowledgeIDs[r.KnowledgeID] = struct{}{}
 		}
-
-		retractKIDs := make(map[string]bool)
-		for _, r := range retracts {
-			retractKIDs[r.KnowledgeID] = true
-		}
-
-		for _, ref := range page.SourceRefs {
-			pipeIdx := strings.Index(ref, "|")
-			var refKnowledgeID, refTitle string
-			if pipeIdx > 0 {
-				refKnowledgeID = ref[:pipeIdx]
-				refTitle = ref[pipeIdx+1:]
-			} else {
-				refKnowledgeID = ref
-				refTitle = ref
-			}
-
-			if retractKIDs[refKnowledgeID] {
-				continue
-			}
-
-			if content := batchCtx.SummaryContentByKnowledgeID(ctx, refKnowledgeID); content != "" {
-				fmt.Fprintf(&remainingSourcesContent, "<document>\n<title>%s</title>\n<content>\n%s\n</content>\n</document>\n\n", refTitle, content)
-			} else {
-				fmt.Fprintf(&remainingSourcesContent, "<document>\n<title>%s</title>\n<content>\n(summary not available)\n</content>\n</document>\n\n", refTitle)
-			}
-		}
-		if remainingSourcesContent.Len() == 0 {
-			remainingSourcesContent.WriteString("(no remaining sources)")
-		}
-
-		newRefs := types.StringArray{}
-		for _, ref := range page.SourceRefs {
-			pipeIdx := strings.Index(ref, "|")
-			refKnowledgeID := ref
-			if pipeIdx > 0 {
-				refKnowledgeID = ref[:pipeIdx]
-			}
-			if !retractKIDs[refKnowledgeID] {
-				newRefs = append(newRefs, ref)
-			}
-		}
-		page.SourceRefs = newRefs
 	}
 
 	if len(additions) > 0 {
 		language = additions[0].Language
-
-		// Resolve SourceChunks → chunk contents in a single batched query per
-		// knowledge ID, so the <new_information> block can quote the chunks
-		// verbatim instead of relying on the short Details paraphrase.
-		chunkContentByID := s.resolveCitedChunks(ctx, tenantID, additions)
-		// A document summary is shared by every page derived from that document.
-		// Render a deterministic, de-duplicated block before any page-specific
-		// metadata so provider prefix caches can reuse it across parallel reduce
-		// calls.
-		sourceContextByRef := make(map[string]string)
-
 		for _, add := range additions {
-			cited := collectCitedChunkContent(add.SourceChunks, chunkContentByID)
-			// Frame the chunks with the document-level summary body so the
-			// editor model knows BOTH what the document is about AND what
-			// kind of document it is (resume vs announcement vs product
-			// page vs schedule). The one-sentence headline alone was too
-			// terse to keep the editor grounded on longer or multi-topic
-			// source documents, and calibrating tone (self-reported vs
-			// third-party authoritative) benefits from the richer context.
-			sourceCtx := strings.TrimSpace(add.DocSummary)
-			if sourceCtx != "" {
-				contextKey := add.SourceRef
-				if contextKey == "" {
-					contextKey = add.KnowledgeID + "\x00" + add.DocTitle
-				}
-				sourceContextByRef[contextKey] = fmt.Sprintf(
-					"<document>\n<title>%s</title>\n<context>\n%s\n</context>\n</document>\n",
-					add.DocTitle, sourceCtx,
-				)
-			}
-			if cited != "" {
-				fmt.Fprintf(&newContentBuilder,
-					"<document>\n<title>%s</title>\n<content>\n**%s**: %s\n\n%s\n</content>\n</document>\n\n",
-					add.DocTitle, add.Item.Name, add.Item.Description, cited)
-			} else {
-				// Fallback: no citations available (legacy path, citation pass
-				// failed, or bad chunk IDs were filtered out) — stick with
-				// the short Details summary so the page still gets real text.
-				fmt.Fprintf(&newContentBuilder,
-					"<document>\n<title>%s</title>\n<content>\n**%s**: %s\n\n%s\n</content>\n</document>\n\n",
-					add.DocTitle, add.Item.Name, add.Item.Description, add.Item.Details)
-			}
-			docTitles = appendUnique(docTitles, add.DocTitle)
-
+			evidenceChunkIDs = append(evidenceChunkIDs, add.SourceChunks...)
 			for _, alias := range add.Item.Aliases {
 				page.Aliases = appendUnique(page.Aliases, alias)
 			}
 			page.SourceRefs = appendUnique(page.SourceRefs, add.SourceRef)
-
 			if page.Title == "" {
 				page.Title = add.Item.Name
 			}
@@ -1949,36 +1870,26 @@ func (s *wikiIngestService) reduceSlugUpdates(
 				page.PageType = add.Type
 			}
 		}
-
-		contextKeys := make([]string, 0, len(sourceContextByRef))
-		for key := range sourceContextByRef {
-			contextKeys = append(contextKeys, key)
-		}
-		sort.Strings(contextKeys)
-		for _, key := range contextKeys {
-			sharedSourceContexts.WriteString(sourceContextByRef[key])
-		}
 	}
 
 	if len(additions) > 0 || len(retracts) > 0 {
+		newSourceRefs := make(map[string]string, len(additions))
+		for _, addition := range additions {
+			newSourceRefs[addition.KnowledgeID] = addition.SourceRef
+		}
+		evidence := s.resolveWikiCitationEvidence(ctx, tenantID, kbID, evidenceChunkIDs)
+		for chunkID, item := range evidence {
+			if _, removed := retractedKnowledgeIDs[item.KnowledgeID]; removed {
+				delete(evidence, chunkID)
+			}
+		}
+
 		titles := batchCtx.SlugTitleMany(ctx, []string(page.OutLinks))
-
-		// slugHandles escape high-entropy slugs behind short reference handles
-		// (ref-1, ref-2, …) for the editor LLM, then translates them back to
-		// real slugs after generation (see decodeContent below).
 		slugHandles := newWikiSlugHandles()
-
-		// Escape every out-link slug behind a request-local handle so the editor
-		// never has to retype a real slug — this is where UUID-based summary
-		// slugs (summary/<uuid>) got mangled into 404-ing links. Both the
-		// <valid_wiki_links> listing AND the [[...]] refs already present in
-		// <existing_page_content> use the SAME handle table, so the
-		// model sees one consistent, copy-safe identifier space; we translate
-		// the handles back to real slugs after generation.
 		known := make(map[string]struct{}, len(page.OutLinks))
 		for _, outSlug := range page.OutLinks {
 			known[outSlug] = struct{}{}
-			slugHandles.handle(outSlug) // pre-assign for stable ordering
+			slugHandles.handle(outSlug)
 		}
 		for _, outSlug := range page.OutLinks {
 			if title := titles[outSlug]; title != "" {
@@ -1986,28 +1897,11 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			}
 		}
 
-		// Older generated pages may still contain short chunk aliases such as
-		// [c003]. They are internal ingest metadata; keep the editor context
-		// clean so a subsequent update cannot copy them into rewritten prose.
 		existingContent := stripWikiInlineChunkCitations(page.Content)
 		existingContent = slugHandles.encodeContent(existingContent, known)
 		if !exists || existingContent == "" {
 			existingContent = "(New page)"
 		}
-
-		hasAdditionsStr := ""
-		if len(additions) > 0 {
-			hasAdditionsStr = "1"
-		}
-		hasRetractionsStr := ""
-		if len(retracts) > 0 {
-			hasRetractionsStr = "1"
-		}
-
-		// Fall back gracefully if title/type are still unset (shouldn't happen
-		// for well-formed updates — both get populated from `additions` above,
-		// and retract-only paths require an existing page — but stay defensive
-		// so we never feed the LLM an empty identity block).
 		pageTitle := page.Title
 		if pageTitle == "" {
 			pageTitle = slug
@@ -2016,56 +1910,42 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		if pageType == "" {
 			pageType = "wiki page"
 		}
-		pageAliases := strings.Join(page.Aliases, ", ")
 
-		var updatedContent string
-		updatedContent, err = s.generateWithTemplate(ctx, chatModel, agent.WikiPageModifyUserPrompt, map[string]string{
-			"HasAdditions":            hasAdditionsStr,
-			"HasRetractions":          hasRetractionsStr,
-			"PageSlug":                slug,
-			"PageTitle":               pageTitle,
-			"PageType":                pageType,
-			"PageAliases":             pageAliases,
-			"ExistingContent":         existingContent,
-			"SharedSourceContexts":    sharedSourceContexts.String(),
-			"NewContent":              newContentBuilder.String(),
-			"DeletedContent":          deletedContent.String(),
-			"RemainingSourcesContent": remainingSourcesContent.String(),
-			"AvailableSlugs":          relatedSlugs.String(),
-			"Language":                language,
-			"CustomInstructions":      batchCtx.ContentInstructions,
-			"InstructionScope":        "wiki_content",
+		existingFacts, _ := getWikiFactMetadata(page.PageMetadata)
+		rawFactOutput, generateErr := s.generateWithTemplate(ctx, chatModel, agent.WikiPageFactMergePrompt, map[string]string{
+			"PageSlug":           slug,
+			"PageTitle":          pageTitle,
+			"PageType":           pageType,
+			"PageAliases":        strings.Join(page.Aliases, ", "),
+			"ExistingContent":    existingContent,
+			"ExistingFactBlocks": marshalWikiFactOutput(existingFacts),
+			"SourceChunks":       renderWikiEvidenceXML(evidence),
+			"AvailableSlugs":     relatedSlugs.String(),
+			"Language":           language,
+			"CustomInstructions": batchCtx.ContentInstructions,
 		})
-
-		if err == nil && updatedContent != "" {
-			// Translate request-local handles (ref-N) the model copied from the
-			// encoded context back to their real slugs BEFORE the content is
-			// parsed/stored, so out_links reflect real pages again.
-			updatedContent = slugHandles.decodeContent(updatedContent)
-			updatedSummary, updatedBody := splitSummaryLine(updatedContent)
-			if updatedBody != "" {
-				page.Content = updatedBody
-			} else {
-				page.Content = updatedContent
+		if generateErr == nil {
+			rawFactOutput = slugHandles.decodeContent(rawFactOutput)
+			finalFacts, generateErr = parseWikiFactOutput(rawFactOutput, evidence)
+		}
+		if generateErr == nil && finalFacts != nil {
+			page.Content = renderWikiFactOutput(finalFacts)
+			page.Summary = finalFacts.Summary
+			page.ChunkRefs = wikiFactChunkIDs(finalFacts)
+			page.SourceRefs = sourceRefsForWikiFacts(page.SourceRefs, newSourceRefs, finalFacts)
+			page.PageMetadata, generateErr = setWikiFactMetadata(page.PageMetadata, finalFacts)
+			if generateErr == nil {
+				changed = true
 			}
-			if updatedSummary != "" {
-				page.Summary = updatedSummary
-			}
-			changed = true
-		} else if err != nil {
-			logger.Warnf(ctx, "wiki ingest: update/retract failed for slug %s: %v", slug, err)
-			// Flag addition failures so the batch can sanitize stale
-			// [[slug]] references in the doc's summary page and keep the
-			// missing page out of finalize processing.
-			// Retract-only failures don't poison anything (they leave
-			// the existing page unchanged), so don't flag those.
+		}
+		if generateErr != nil {
+			logger.Warnf(ctx, "wiki ingest: fact-block update/retract failed for slug %s: %v", slug, generateErr)
 			if len(additions) > 0 {
 				additionFailed = true
 			}
-			// Don't propagate the LLM error to the named return: it has
-			// already been logged, and the eg.Go caller would otherwise
-			// log it a second time as "reduce failed for slug".
-			err = nil
+			return false, "", additionFailed, fmt.Errorf(
+				"generate validated fact blocks for slug %s: %w", slug, generateErr,
+			)
 		}
 	}
 
@@ -2081,17 +1961,13 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	}
 
 	if changed {
-		// Refresh chunk refs in-place on the page so they persist alongside
-		// the rest of the row. Retract-only updates (no additions) preserve
-		// the existing refs; addition rounds append the newly-cited chunks
-		// on top of what was already there, deduplicated.
-		page.ChunkRefs = mergeChunkRefs(page.ChunkRefs, additions)
-		if exists {
-			_, err = s.wikiService.UpdatePage(ctx, page)
-		} else {
-			_, err = s.wikiService.CreatePage(ctx, page)
+		if finalFacts == nil {
+			return false, "", additionFailed, errors.New("wiki page is missing validated fact output")
 		}
-		return true, affectedType, additionFailed, err
+		if err = s.publishWikiFactPage(ctx, page, finalFacts); err != nil {
+			return false, "", additionFailed, err
+		}
+		return true, affectedType, additionFailed, nil
 	}
 
 	return false, "", additionFailed, nil

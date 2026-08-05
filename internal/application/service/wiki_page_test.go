@@ -21,7 +21,7 @@ func TestPruneEmptyFolderChainsDeletesOnlyEmptyCandidateAncestors(t *testing.T) 
 
 	ctx := context.Background()
 	repo := repository.NewWikiPageRepository(db)
-	svc := NewWikiPageService(repo, nil, nil, nil, nil)
+	svc := NewWikiPageService(repo, nil, nil, nil, nil, nil, nil)
 	now := time.Now()
 	createFolder := func(id, parentID, name, path string, depth int) {
 		require.NoError(t, repo.CreateFolder(ctx, &types.WikiFolder{
@@ -77,7 +77,7 @@ func TestUpdateWikiPagePersistsAndClearsAliases(t *testing.T) {
 
 	ctx := context.Background()
 	repo := repository.NewWikiPageRepository(db)
-	svc := NewWikiPageService(repo, nil, nil, nil, nil)
+	svc := NewWikiPageService(repo, nil, nil, nil, nil, nil, nil)
 	page, err := svc.CreatePage(ctx, &types.WikiPage{
 		TenantID: 1, KnowledgeBaseID: "kb-alias", Slug: "concept/alias",
 		Title: "Alias", Summary: "summary", Content: "content",
@@ -180,7 +180,7 @@ func TestRepairContentLinks(t *testing.T) {
 
 	ctx := context.Background()
 	repo := repository.NewWikiPageRepository(db)
-	svc := NewWikiPageService(repo, nil, nil, nil, nil)
+	svc := NewWikiPageService(repo, nil, nil, nil, nil, nil, nil)
 	const kbID = "kb-repair"
 	now := time.Now()
 

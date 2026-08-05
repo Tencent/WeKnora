@@ -1071,6 +1071,9 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 	}
 
 	// Publish: persist pending status and enqueue async task for cleanup + re-indexing
+	if kb.IsWikiEnabled() {
+		s.prepareWikiForReparse(ctx, existing)
+	}
 	existing.ParseStatus = "pending"
 	existing.Description = ""
 	existing.ProcessedAt = nil

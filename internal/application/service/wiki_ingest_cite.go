@@ -418,6 +418,39 @@ func (s *wikiIngestService) resolveCitedChunks(
 	return out
 }
 
+// resolveWikiCitationEvidence loads the exact chunks that the final page
+// compiler may cite. Rows are re-checked against tenant and KB scope even
+// though the repository query is already tenant-scoped.
+func (s *wikiIngestService) resolveWikiCitationEvidence(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	chunkIDs []string,
+) map[string]wikiCitationEvidence {
+	seen := make(map[string]struct{}, len(chunkIDs))
+	ids := make([]string, 0, len(chunkIDs))
+	for _, id := range chunkIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return map[string]wikiCitationEvidence{}
+	}
+	chunks, err := s.chunkRepo.ListChunksByID(ctx, tenantID, ids)
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to resolve final fact evidence: %v", err)
+		return map[string]wikiCitationEvidence{}
+	}
+	return wikiEvidenceFromChunks(chunks, tenantID, kbID, 0)
+}
+
 // collectCitedChunkContent materializes the verbatim content of every
 // referenced chunk, concatenated in the order provided. Chunk IDs that can't
 // be resolved are silently dropped (logged upstream).

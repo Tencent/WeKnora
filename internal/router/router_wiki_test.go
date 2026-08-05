@@ -118,6 +118,7 @@ func TestWikiReadRoutesDenyCrossTenantKB(t *testing.T) {
 	paths := []string{
 		"/api/v1/knowledgebase/kb-victim/wiki/pages",
 		"/api/v1/knowledgebase/kb-victim/wiki/pages/secret-page",
+		"/api/v1/knowledgebase/kb-victim/wiki/sources/page-secret",
 		"/api/v1/knowledgebase/kb-victim/wiki/folders",
 		"/api/v1/knowledgebase/kb-victim/wiki/index",
 		"/api/v1/knowledgebase/kb-victim/wiki/graph",
