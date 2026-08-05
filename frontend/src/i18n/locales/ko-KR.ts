@@ -560,11 +560,13 @@ export default {
     isRequired: '은(는) 필수입니다',
     credentialsLabel: '자격 증명',
     resourceHint: '동기화할 공간/폴더를 선택하세요',
+    resourceRequired: '동기화할 리소스를 하나 이상 선택하세요',
     untitled: '제목 없음',
     resourceLoadFailed: '리소스 목록 로드 실패',
     noResources: '동기화 가능한 위키 공간을 찾을 수 없습니다',
     noResourcesDesc: '앱이 콘텐츠를 가져오려면 그룹 채팅을 통해 위키 접근 권한을 얻어야 합니다',
     noResourcesDesc_notion: '앱이 콘텐츠를 가져오려면 Notion 페이지 접근 권한이 필요합니다',
+    noResourcesDesc_dingtalk: 'DingTalk 앱에 위키 및 문서 읽기 권한이 있어야 공간을 표시할 수 있습니다',
     retryLoadResources: '다시 시도',
     guideStep1: 'Feishu에서 그룹 채팅을 만들고 그룹 설정의 \'그룹 봇\'에 앱을 추가하세요',
     guideStep2: '위키 \'설정\' > \'멤버 설정\' > \'멤버 추가\'를 열고 해당 그룹 채팅을 검색하여 추가하세요',
@@ -572,7 +574,12 @@ export default {
     guideStep1_notion: 'Notion에서 동기화하려는 페이지나 데이터베이스를 엽니다',
     guideStep2_notion: '오른쪽 상단의 \'···\' 메뉴를 클릭하고 \'Connect to\' 또는 \'Add connections\'를 선택합니다',
     guideStep3_notion: 'Integration 앱을 검색하여 선택한 후, 돌아와서 다시 시도를 클릭하세요',
+    guideStep1_dingtalk: 'DingTalk 개발자 콘솔에서 내부 앱을 만들거나 선택하세요',
+    guideStep2_dingtalk: '위키 공간, 위키 노드, 파일 콘텐츠 읽기 권한을 부여한 뒤 앱을 게시하세요',
+    guideStep3_dingtalk: '앱이 대상 위키 공간에 접근할 수 있는지 확인한 후 돌아와 다시 시도하세요',
     permissionDocLink: '페이슈 위키 권한 설정 문서 보기',
+    permissionDocLink_yuque: 'Yuque Token 문서 보기',
+    permissionDocLink_dingtalk: 'DingTalk 권한 문서 보기',
     syncScheduleLabel: '동기화 주기',
     conflictLabel: '충돌 전략',
     syncDeletions: '삭제 동기화 (소스에서 삭제 시 지식베이스에서도 삭제)',
@@ -589,6 +596,13 @@ export default {
     openDoc: '문서 열기',
     prereqBarText: '처음 사용하시나요? 클릭하여 Feishu 앱 설정 가이드를 확인하세요',
     prereqBarText_yuque: '처음 사용하시나요? 클릭하여 Yuque Token 설정 가이드를 확인하세요',
+    prereqBarText_dingtalk: '처음 사용하시나요? 클릭하여 DingTalk 앱 설정 가이드를 확인하세요',
+    prereqStep1Brief_dingtalk: 'DingTalk 내부 앱 만들기 또는 선택',
+    prereqStep1Desc_dingtalk: 'DingTalk 개발자 콘솔에서 앱을 열고 Client ID와 Client Secret을 복사하세요.',
+    prereqStep2Brief_dingtalk: '필요한 위키 및 문서 권한 부여',
+    prereqStep2Desc_dingtalk: 'Wiki.Workspace.Read, Wiki.Node.Read, Storage.File.Read 권한을 활성화한 뒤 앱을 게시하세요.',
+    prereqStep3Brief_dingtalk: 'Operator UnionID 준비',
+    prereqStep3Desc_dingtalk: '대상 DingTalk 위키 공간을 읽을 수 있는 사용자의 unionId를 사용하세요.',
     prereqStep1Brief_yuque: 'Yuque 개인 Token 생성',
     prereqStep1Desc_yuque: 'Yuque 로그인 → 프로필 아이콘 → 설정 → Token → 새 Token 만들기',
     prereqStep2Brief_yuque: 'Token에 필요한 권한 부여',
@@ -600,6 +614,7 @@ export default {
     prereqBotDesc: '오픈 플랫폼 → 앱 기능 추가 → 봇 → 버전 생성 후 게시',
     prereqPermBrief: 'API 권한 활성화',
     prereqOpenConsole: 'Feishu 오픈 플랫폼 설정으로 이동',
+    prereqOpenConsole_dingtalk: 'DingTalk 개발자 콘솔로 이동',
     prereqMemberBrief: '그룹 채팅을 통해 지식베이스 멤버로 추가',
     prereqMemberDesc: '그룹 채팅 생성 → 앱을 그룹 봇으로 추가 → 그룹 채팅을 지식베이스 멤버로 추가',
     back: '이전',
@@ -618,7 +633,9 @@ export default {
     resourceType: {
       wikiSpace: '위키 공간',
       docCategory: '문서 태그',
-      book: 'Yuque 지식베이스'
+      book: 'Yuque 지식베이스',
+      folder: '폴더',
+      document: '문서'
     },
     scheduleHuman: {
       '30min': '30분마다',
@@ -630,6 +647,10 @@ export default {
     field: {
       appId: 'App ID',
       appSecret: 'App Secret',
+      clientId: 'Client ID',
+      clientSecret: 'Client Secret',
+      operatorId: 'Operator UnionID',
+      operatorIdHint: '대상 DingTalk 위키 공간을 읽을 수 있는 사용자의 unionId를 입력하세요.',
       integrationToken: 'Integration Token',
       apiToken: 'API Token',
       baseUrl: 'Base URL',
@@ -644,14 +665,16 @@ export default {
       lark: 'Lark 위키에서 문서, 스프레드시트, 파일 동기화',
       notion: 'Notion에서 페이지 및 데이터베이스 동기화',
       yuque: '위큐 지식베이스에서 문서 동기화',
-      rss: 'RSS / Atom 피드에서 글 동기화'
+      rss: 'RSS / Atom 피드에서 글 동기화',
+      dingtalk: 'DingTalk 위키에서 문서 동기화'
     },
     connector: {
       feishu: '페이슈 (Feishu)',
       lark: 'Lark (Feishu 글로벌)',
       notion: 'Notion',
       yuque: '위큐 (Yuque)',
-      rss: 'RSS / Atom 피드'
+      rss: 'RSS / Atom 피드',
+      dingtalk: 'DingTalk'
     },
     logDetail: {
       startTime: '시작 시간',

@@ -560,11 +560,13 @@ export default {
     isRequired: 'обязательно для заполнения',
     credentialsLabel: 'учётные данные',
     resourceHint: 'Выберите пространства или папки для синхронизации',
+    resourceRequired: 'Выберите хотя бы один ресурс для синхронизации',
     untitled: 'Без названия',
     resourceLoadFailed: 'Не удалось загрузить список ресурсов',
     noResources: 'Пространства вики не найдены',
     noResourcesDesc: 'Приложению требуется доступ к вики через групповой чат для получения контента',
     noResourcesDesc_notion: 'Приложению требуются права доступа к странице Notion для получения контента',
+    noResourcesDesc_dingtalk: 'Приложению DingTalk нужны права чтения вики и документов, чтобы показать пространства',
     retryLoadResources: 'Повторить',
     guideStep1: 'Создайте групповой чат в Feishu, затем добавьте ваше приложение как бота в настройках группы',
     guideStep2: 'Откройте вики "Настройки" > "Управление участниками" > "Добавить участника", найдите групповой чат и добавьте его',
@@ -572,7 +574,12 @@ export default {
     guideStep1_notion: 'Откройте страницу или базу данных, которую хотите синхронизировать в Notion',
     guideStep2_notion: 'Нажмите меню «···» в правом верхнем углу, выберите «Connect to» или «Add connections»',
     guideStep3_notion: 'Найдите и выберите ваше интеграционное приложение, затем вернитесь и нажмите Повторить',
+    guideStep1_dingtalk: 'Откройте консоль разработчика DingTalk и создайте или выберите внутреннее приложение',
+    guideStep2_dingtalk: 'Выдайте права чтения пространства вики, узлов вики и содержимого файлов, затем опубликуйте приложение',
+    guideStep3_dingtalk: 'Убедитесь, что приложение имеет доступ к нужным пространствам вики, затем вернитесь и нажмите Повторить',
     permissionDocLink: 'Документация по настройке прав доступа',
+    permissionDocLink_yuque: 'Документация по токену Yuque',
+    permissionDocLink_dingtalk: 'Документация по правам DingTalk',
     syncScheduleLabel: 'Расписание синхронизации',
     conflictLabel: 'Стратегия конфликтов',
     syncDeletions: 'Синхронизировать удаления (удалять знания при удалении в источнике)',
@@ -589,6 +596,13 @@ export default {
     openDoc: 'Открыть документацию',
     prereqBarText: 'Используете впервые? Нажмите, чтобы открыть руководство по настройке приложения Feishu',
     prereqBarText_yuque: 'Используете впервые? Нажмите, чтобы открыть руководство по настройке Yuque Token',
+    prereqBarText_dingtalk: 'Используете впервые? Нажмите, чтобы открыть руководство по настройке приложения DingTalk',
+    prereqStep1Brief_dingtalk: 'Создайте или выберите внутреннее приложение DingTalk',
+    prereqStep1Desc_dingtalk: 'Откройте приложение в консоли разработчика DingTalk и скопируйте Client ID и Client Secret.',
+    prereqStep2Brief_dingtalk: 'Выдайте нужные права для вики и документов',
+    prereqStep2Desc_dingtalk: 'Включите Wiki.Workspace.Read, Wiki.Node.Read и Storage.File.Read, затем опубликуйте приложение.',
+    prereqStep3Brief_dingtalk: 'Подготовьте Operator UnionID',
+    prereqStep3Desc_dingtalk: 'Используйте unionId пользователя DingTalk, который может читать целевые пространства вики.',
     prereqStep1Brief_yuque: 'Создайте персональный Yuque Token',
     prereqStep1Desc_yuque: 'Войдите в Yuque → значок профиля → Настройки → Token → Создать новый Token',
     prereqStep2Brief_yuque: 'Назначьте Token необходимые права',
@@ -600,6 +614,7 @@ export default {
     prereqBotDesc: 'Открытая платформа → Добавить возможность приложения → Бот → Создать версию и опубликовать',
     prereqPermBrief: 'Включите права API',
     prereqOpenConsole: 'Открыть настройки Feishu Open Platform',
+    prereqOpenConsole_dingtalk: 'Открыть консоль разработчика DingTalk',
     prereqMemberBrief: 'Добавьте через групповой чат как участника базы знаний',
     prereqMemberDesc: 'Создайте групповой чат → добавьте приложение как группового бота → добавьте групповой чат как участника базы знаний',
     back: 'Назад',
@@ -618,7 +633,9 @@ export default {
     resourceType: {
       wikiSpace: 'Пространство вики',
       docCategory: 'Тег документа',
-      book: 'База знаний Yuque'
+      book: 'База знаний Yuque',
+      folder: 'Папка',
+      document: 'Документ'
     },
     scheduleHuman: {
       '30min': 'Каждые 30 мин',
@@ -630,6 +647,10 @@ export default {
     field: {
       appId: 'App ID',
       appSecret: 'App Secret',
+      clientId: 'Client ID',
+      clientSecret: 'Client Secret',
+      operatorId: 'Operator UnionID',
+      operatorIdHint: 'Укажите unionId пользователя DingTalk, у которого есть доступ на чтение к целевым пространствам вики.',
       integrationToken: 'Integration Token',
       apiToken: 'API Token',
       baseUrl: 'Base URL',
@@ -644,14 +665,16 @@ export default {
       lark: 'Синхронизация документов, таблиц и файлов из Lark Wiki',
       notion: 'Синхронизация страниц и баз данных из Notion',
       yuque: 'Синхронизация документов из баз знаний Yuque',
-      rss: 'Синхронизация статей из лент RSS / Atom'
+      rss: 'Синхронизация статей из лент RSS / Atom',
+      dingtalk: 'Синхронизация документов из DingTalk Wiki'
     },
     connector: {
       feishu: 'Feishu (Фэйшу)',
       lark: 'Lark',
       notion: 'Notion',
       yuque: 'Yuque (Юйцюэ)',
-      rss: 'RSS / Atom лента'
+      rss: 'RSS / Atom лента',
+      dingtalk: 'DingTalk (ДинТок)'
     },
     logDetail: {
       startTime: 'Время начала',

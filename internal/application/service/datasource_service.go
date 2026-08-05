@@ -764,22 +764,33 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	}
 
 	ds.LastSyncAt = timePtr(time.Now().UTC())
-	syncStatus := types.SyncLogStatusSuccess
-	syncErrorMessage := ""
 	if len(fetchWarnings) > 0 {
-		syncStatus = types.SyncLogStatusPartial
-		syncErrorMessage = fmt.Sprintf("Some feeds failed: %s", strings.Join(fetchWarnings, "; "))
 		for _, w := range fetchWarnings {
 			result.Errors = append(result.Errors, types.SyncItemError{Message: w})
 		}
 		resultJSON, _ = result.ToJSON()
 	}
+	syncStatus, syncErrorMessage := batchSyncCompletionStatus(result, fetchWarnings)
 	s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, syncStatus, syncErrorMessage, wasPaused)
 
 	logger.Infof(ctx, "data source sync completed: ds=%s created=%d updated=%d deleted=%d",
 		payload.DataSourceID, syncLog.ItemsCreated, syncLog.ItemsUpdated, syncLog.ItemsDeleted)
 
 	return nil
+}
+
+func batchSyncCompletionStatus(result *types.SyncResult, fetchWarnings []string) (string, string) {
+	status := types.SyncLogStatusSuccess
+	var messages []string
+	if len(fetchWarnings) > 0 {
+		status = types.SyncLogStatusPartial
+		messages = append(messages, fmt.Sprintf("Some feeds failed: %s", strings.Join(fetchWarnings, "; ")))
+	}
+	if result != nil && result.Failed > 0 {
+		status = types.SyncLogStatusPartial
+		messages = append(messages, fmt.Sprintf("%d item(s) failed to sync", result.Failed))
+	}
+	return status, strings.Join(messages, "; ")
 }
 
 // resolveAutoTagIDs finds or creates the per-data-source tag applied to every

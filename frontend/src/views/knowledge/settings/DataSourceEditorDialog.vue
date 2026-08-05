@@ -19,6 +19,7 @@ import {
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { getDatasourceIconUrl } from './datasourceIcons'
+import { hasRequiredResourceSelection } from './dataSourceResourceSelection'
 
 const props = defineProps<{
   kbId: string
@@ -425,6 +426,23 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'auth_headers', labelKey: 'datasource.field.authHeaders', placeholder: '', optional: true, hintKey: 'datasource.field.authHeadersHint', fieldType: 'custom_headers' },
     ],
   },
+  {
+    type: 'dingtalk',
+    available: true,
+    docUrl: 'https://open.dingtalk.com/document/development/get-knowledge-base-list',
+    permissionDocUrl: 'https://open.dingtalk.com/document/development/get-node-list',
+    permissionPageUrl: 'https://open-dev.dingtalk.com/',
+    requiredPermissions: [
+      'Wiki.Workspace.Read',
+      'Wiki.Node.Read',
+      'Storage.File.Read',
+    ],
+    fields: [
+      { key: 'client_id', labelKey: 'datasource.field.clientId', placeholder: '' },
+      { key: 'client_secret', labelKey: 'datasource.field.clientSecret', placeholder: '', secret: true },
+      { key: 'operator_id', labelKey: 'datasource.field.operatorId', placeholder: 'operator unionId', hintKey: 'datasource.field.operatorIdHint' },
+    ],
+  },
 ])
 
 
@@ -752,6 +770,14 @@ function validateStep1Fields(): boolean {
   return true
 }
 
+function validateStep2Resources(): boolean {
+  if (!hasRequiredResourceSelection(form.value.type, selectedResourceIds.value)) {
+    MessagePlugin.warning(t('datasource.resourceRequired'))
+    return false
+  }
+  return true
+}
+
 async function nextStep() {
   if (step.value === 1) {
     if (!validateStep1Fields()) return
@@ -759,6 +785,8 @@ async function nextStep() {
       await testConnection()
       if ((testResult.value as string) !== 'success') return
     }
+  } else if (step.value === 2) {
+    if (!validateStep2Resources()) return
   }
   step.value++
   if (step.value === 2) {
@@ -812,6 +840,7 @@ async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
 
 // --- Final submit ---
 async function handleSubmit() {
+  if (!validateStep2Resources()) return
   form.value.config.resource_ids = selectedResourceIds.value
   submitting.value = true
   try {
@@ -890,15 +919,18 @@ const selectedResourceCount = computed(() => {
 const hasExpandableNodes = computed(() => resources.value.some(r => r.has_children))
 
 function resourceIconName(r: Resource): string {
-  if (r.has_children) return 'folder'
   switch (r.type) {
     case 'wiki_space':
       return 'root-list'
     case 'book':
       return 'book'
     case 'doc_category':
+    case 'folder':
       return 'folder-open'
+    case 'document':
+      return 'file'
     default:
+      if (r.has_children) return 'folder'
       return 'file'
   }
 }
@@ -920,6 +952,8 @@ const resourceTypeLabelMap: Record<string, string> = {
   wiki_space: 'datasource.resourceType.wikiSpace',
   doc_category: 'datasource.resourceType.docCategory',
   book: 'datasource.resourceType.book',
+  folder: 'datasource.resourceType.folder',
+  document: 'datasource.resourceType.document',
 }
 
 function resourceTypeLabel(type: string): string {
@@ -1416,7 +1450,7 @@ const drawerConfirmText = computed(() => {
             rel="noopener"
             class="doc-link"
           >
-            {{ t('datasource.permissionDocLink') }}
+            {{ t(`datasource.permissionDocLink_${form.type}`, t('datasource.permissionDocLink')) }}
             <t-icon name="link" class="link-icon" />
           </a>
         </div>
