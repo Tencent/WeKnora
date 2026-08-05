@@ -18,8 +18,8 @@ const LCS_LINE_LIMIT = 1500
 // detected first so typical wiki edits (one section changed) stay cheap even
 // on long pages.
 export function diffWikiLines(oldText: string, newText: string): WikiDiffLine[] {
-  const oldLines = oldText.split('\n')
-  const newLines = newText.split('\n')
+  const oldLines = oldText ? oldText.split('\n') : []
+  const newLines = newText ? newText.split('\n') : []
 
   // Trim common prefix.
   let start = 0
