@@ -26,6 +26,8 @@ func (q *autoTagRecordingQueue) Enqueue(task *asynq.Task, _ ...asynq.Option) (*a
 func TestStripJSONCodeFence(t *testing.T) {
 	assert.Equal(t, `{"matches":[]}`, stripJSONCodeFence("```json\n{\"matches\":[]}\n```"))
 	assert.Equal(t, `{"matches":[]}`, stripJSONCodeFence("  {\"matches\":[]}  "))
+	assert.Equal(t, `{"matches":[]}`, stripJSONCodeFence("Sure, here is the JSON: {\"matches\":[]}"))
+	assert.Equal(t, `[1,2]`, stripJSONCodeFence("The values are [1,2], as requested."))
 }
 
 func TestValidateAutoTagMatches(t *testing.T) {

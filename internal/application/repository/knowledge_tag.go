@@ -80,7 +80,11 @@ func (r *knowledgeRepository) AddKnowledgeTagRelations(
 		var knowledgeCount int64
 		if err := tx.Model(&types.Knowledge{}).
 			Where("id = ? AND tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", knowledgeID, tenantID, kbID).
-			Where("parse_status NOT IN ?", []string{types.ParseStatusCancelled, types.ParseStatusDeleting, types.ParseStatusFailed}).
+			Where("parse_status NOT IN ?", []string{
+				types.ParseStatusCancelled,
+				types.ParseStatusDeleting,
+				types.ParseStatusFailed,
+			}).
 			Count(&knowledgeCount).Error; err != nil {
 			return err
 		}

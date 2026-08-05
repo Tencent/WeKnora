@@ -489,7 +489,11 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 // enqueueAutoTagTask schedules best-effort classification against the KB's
 // existing tags. It intentionally owns no pending-subtask slot: a model or
 // configuration failure must never keep document parsing in finalizing.
-func (s *KnowledgePostProcessService) enqueueAutoTagTask(ctx context.Context, payload types.KnowledgePostProcessPayload, attempt int) bool {
+func (s *KnowledgePostProcessService) enqueueAutoTagTask(
+	ctx context.Context,
+	payload types.KnowledgePostProcessPayload,
+	attempt int,
+) bool {
 	if s.taskEnqueuer == nil {
 		return false
 	}
