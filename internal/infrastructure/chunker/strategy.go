@@ -133,15 +133,33 @@ func SplitWithDiagnostics(text string, cfg SplitterConfig) ([]Chunk, *Diagnostic
 // is bounded by O(sum(parent_size)) ≈ O(N) total, which is the same
 // order as the original parent profiling pass.
 func SplitParentChild(text string, parentCfg, childCfg SplitterConfig) ParentChildResult {
-	if text == "" {
-		return ParentChildResult{}
-	}
+	result, _ := splitParentChild(text, parentCfg, childCfg, false)
+	return result
+}
+
+// SplitParentChildWithDiagnostics is the diagnostics-aware form of
+// SplitParentChild. The result is identical to SplitParentChild; diagnostics
+// describe the strategy selected for the parent split over the full document.
+// It is intended for debug surfaces rather than the ingestion hot path.
+func SplitParentChildWithDiagnostics(text string, parentCfg, childCfg SplitterConfig) (ParentChildResult, *Diagnostics) {
+	return splitParentChild(text, parentCfg, childCfg, true)
+}
+
+func splitParentChild(text string, parentCfg, childCfg SplitterConfig, withDiagnostics bool) (ParentChildResult, *Diagnostics) {
 	parentCfg = ensureDefaults(parentCfg)
 	childCfg = ensureDefaults(childCfg)
 
-	parents := Split(text, parentCfg)
+	var (
+		parents []Chunk
+		diag    *Diagnostics
+	)
+	if withDiagnostics {
+		parents, diag = SplitWithDiagnostics(text, parentCfg)
+	} else {
+		parents = Split(text, parentCfg)
+	}
 	if len(parents) == 0 {
-		return ParentChildResult{}
+		return ParentChildResult{}, diag
 	}
 
 	var newParents []Chunk
@@ -164,7 +182,32 @@ func SplitParentChild(text string, parentCfg, childCfg SplitterConfig) ParentChi
 			childSeq++
 		}
 	}
-	return ParentChildResult{Parents: newParents, Children: children}
+	return ParentChildResult{Parents: newParents, Children: children}, diag
+}
+
+// DeriveParentChildConfigs produces the exact parent and child splitter
+// configurations used by knowledge ingestion. Keeping this here lets preview
+// and ingestion remain in lockstep as the parent-child defaults evolve.
+func DeriveParentChildConfigs(base SplitterConfig, parentSize, childSize int) (parent, child SplitterConfig) {
+	if parentSize <= 0 {
+		parentSize = 4096
+	}
+	if childSize <= 0 {
+		childSize = 384
+	}
+	parent = SplitterConfig{
+		ChunkSize:    parentSize,
+		ChunkOverlap: base.ChunkOverlap,
+		Separators:   base.Separators,
+		Strategy:     base.Strategy,
+	}
+	child = SplitterConfig{
+		ChunkSize:    childSize,
+		ChunkOverlap: childSize / 5,
+		Separators:   base.Separators,
+		Strategy:     base.Strategy,
+	}
+	return
 }
 
 // mergeBreadcrumbs combines the parent and child heading breadcrumbs into a

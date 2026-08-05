@@ -197,3 +197,44 @@ func TestPreviewChunking_ChunkTruncation(t *testing.T) {
 		t.Errorf("stats.truncated_to should reflect ORIGINAL count > %d, got %v", previewMaxChunks, truncated)
 	}
 }
+
+func TestPreviewChunking_ParentChildMatchesIngestion(t *testing.T) {
+	text := strings.Repeat("## Record\n"+strings.Repeat("A sufficiently long entry body. ", 10)+"\n\n", 12)
+	payload := PreviewChunkingPayload{
+		ChunkSize:         300,
+		ChunkOverlap:      30,
+		Separators:        []string{"\n\n", "\n"},
+		EnableParentChild: true,
+		ParentChunkSize:   300,
+		ChildChunkSize:    100,
+		Strategy:          chunker.StrategyHeading,
+	}
+	w, parsed := postPreview(t, PreviewChunkingRequest{Text: text, ChunkingConfig: payload})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body=%s", w.Code, w.Body.String())
+	}
+
+	base := chunker.SplitterConfig{
+		ChunkSize:    payload.ChunkSize,
+		ChunkOverlap: payload.ChunkOverlap,
+		Separators:   payload.Separators,
+		Strategy:     payload.Strategy,
+	}
+	parentCfg, childCfg := chunker.DeriveParentChildConfigs(base, payload.ParentChunkSize, payload.ChildChunkSize)
+	want := chunker.SplitParentChild(text, parentCfg, childCfg)
+
+	data := parsed["data"].(map[string]any)
+	got := data["chunks"].([]any)
+	if len(got) != len(want.Children) {
+		t.Fatalf("chunk count: got %d want %d", len(got), len(want.Children))
+	}
+	for i, child := range want.Children {
+		previewChunk := got[i].(map[string]any)
+		if previewChunk["content"] != child.Content {
+			t.Errorf("chunk %d content differs", i)
+		}
+		if int(previewChunk["start"].(float64)) != child.Start || int(previewChunk["end"].(float64)) != child.End {
+			t.Errorf("chunk %d span: got %v-%v want %d-%d", i, previewChunk["start"], previewChunk["end"], child.Start, child.End)
+		}
+	}
+}
