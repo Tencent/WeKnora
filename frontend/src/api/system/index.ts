@@ -180,9 +180,9 @@ export interface StorageEngineConfig {
     path_prefix: string
   }
   s3: {
-    endpoint: string
+    endpoint: string // optional for standard AWS S3
     region: string
-    access_key: string
+    access_key: string // both keys empty => AWS default credential chain
     secret_key: string
     bucket_name: string
     path_prefix: string

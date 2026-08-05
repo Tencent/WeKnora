@@ -4613,6 +4613,8 @@ export default {
       s3Desc: 'AWS S3 및 호환 오브젝트 스토리지 서비스, 퍼블릭 클라우드 배포에 적합합니다.',
       s3AccessKeyPlaceholder: 'AWS Access Key',
       s3SecretKeyPlaceholder: 'AWS Secret Key',
+      s3DefaultCredentialsHint: '두 키를 모두 비워 두면 AWS 기본 자격 증명 체인(IAM 역할, IRSA / 웹 자격 증명, 환경 변수 또는 공유 구성)을 사용합니다.',
+      s3EndpointPlaceholder: '선택 사항; 비워 두면 AWS 리전 기본 엔드포인트 사용',
       ks3Title: 'Kingsoft Cloud KS3',
       ks3Desc: 'Kingsoft Cloud 오브젝트 스토리지 서비스(KS3), 퍼블릭 클라우드 배포에 적합합니다.',
       ks3AccessKeyPlaceholder: 'Kingsoft Cloud Access Key',

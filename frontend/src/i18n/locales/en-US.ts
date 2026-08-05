@@ -1244,6 +1244,8 @@ export default {
       s3Desc: 'AWS S3 and S3-compatible object storage services, suitable for public cloud deployment.',
       s3AccessKeyPlaceholder: 'AWS Access Key',
       s3SecretKeyPlaceholder: 'AWS Secret Key',
+      s3DefaultCredentialsHint: 'Leave both keys empty to use the AWS default credential chain (IAM role, IRSA / web identity, environment, or shared config).',
+      s3EndpointPlaceholder: 'Optional; leave empty to use the AWS regional endpoint',
       ks3Title: 'Kingsoft Cloud KS3',
       ks3Desc: 'Kingsoft Cloud Object Storage Service (KS3), suitable for public cloud deployment.',
       ks3AccessKeyPlaceholder: 'Kingsoft Cloud Access Key',

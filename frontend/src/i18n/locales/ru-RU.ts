@@ -4613,6 +4613,8 @@ export default {
       s3Desc: 'AWS S3 и совместимые сервисы объектного хранилища для публичного облака.',
       s3AccessKeyPlaceholder: 'AWS Access Key',
       s3SecretKeyPlaceholder: 'AWS Secret Key',
+      s3DefaultCredentialsHint: 'Оставьте оба ключа пустыми, чтобы использовать стандартную цепочку учётных данных AWS (IAM role, IRSA / web identity, переменные среды или общий профиль).',
+      s3EndpointPlaceholder: 'Необязательно; оставьте пустым для регионального endpoint AWS',
       ks3Title: 'Kingsoft Cloud KS3',
       ks3Desc: 'Объектное хранилище Kingsoft Cloud (KS3), подходит для публичного облака.',
       ks3AccessKeyPlaceholder: 'Kingsoft Cloud Access Key',

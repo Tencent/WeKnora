@@ -4613,6 +4613,8 @@ export default {
       s3Desc: 'AWS S3 及兼容的对象存储服务，适合公有云部署。',
       s3AccessKeyPlaceholder: 'AWS Access Key',
       s3SecretKeyPlaceholder: 'AWS Secret Key',
+      s3DefaultCredentialsHint: 'Access Key 与 Secret Key 同时留空时，将使用 AWS 默认凭证链（IAM Role、IRSA / Web Identity、环境变量或共享配置）。',
+      s3EndpointPlaceholder: '可选，留空使用 AWS 区域默认端点',
       ks3Title: '金山云 KS3',
       ks3Desc: '金山云对象存储服务（KS3），适合公有云部署。',
       ks3AccessKeyPlaceholder: '金山云 Access Key',
