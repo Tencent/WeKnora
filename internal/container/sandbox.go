@@ -240,6 +240,81 @@ func (c *repositorySessionExistenceChecker) SessionExists(
 	return session != nil, nil
 }
 
+// buildGlobalSandboxConfig returns the process-wide *sandbox.Config that
+// per-tenant overrides are merged onto. It mirrors newSandboxManager's mode
+// selection so the baseline a tenant inherits is exactly what the deployment
+// runs by default.
+func buildGlobalSandboxConfig() *sandbox.Config {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("WEKNORA_SANDBOX_MODE")))
+	switch mode {
+	case "cube":
+		return buildCubeSandboxConfig()
+	case "e2b":
+		return buildE2BSandboxConfig()
+	case "docker":
+		cfg := sandbox.DefaultConfig()
+		cfg.Type = sandbox.SandboxTypeDocker
+		if v := os.Getenv("WEKNORA_SANDBOX_DOCKER_IMAGE"); v != "" {
+			cfg.DockerImage = v
+		}
+		return cfg
+	case "local":
+		cfg := sandbox.DefaultConfig()
+		cfg.Type = sandbox.SandboxTypeLocal
+		return cfg
+	default:
+		cfg := sandbox.DefaultConfig()
+		cfg.Type = sandbox.SandboxTypeDisabled
+		return cfg
+	}
+}
+
+// newSandboxConfigDefaults exposes the deployment's inheritable sandbox
+// defaults (secret-free) so the settings API can show what a workspace without
+// its own overrides actually runs on.
+func newSandboxConfigDefaults() *sandbox.ConfigDefaults {
+	return sandbox.DescribeDefaults(buildGlobalSandboxConfig())
+}
+
+// newTenantSandboxResolver wires the per-tenant resolver. The process-wide
+// manager remains the fallback for tenants that configured nothing, so
+// existing deployments are unaffected.
+func newTenantSandboxResolver(
+	defaultManager sandbox.Manager,
+	loader sandbox.TenantSandboxConfigLoader,
+	redisClient *redis.Client,
+	sessionRepo interfaces.SessionRepository,
+) sandbox.TenantSandboxResolver {
+	ctx := context.Background()
+
+	// Tenants may configure cube/e2b regardless of the global mode, so the
+	// resolver needs the same Redis-backed binding guarantees the global
+	// remote path demands. Without them per-tenant config stays disabled and
+	// every workspace keeps using the process-wide manager.
+	store, storeKind, err := selectSessionBindingStore(redisClient, true)
+	if err != nil {
+		logger.Warnf(ctx,
+			"Per-tenant sandbox config disabled: %v", err)
+		return nil
+	}
+	resolver, err := sandbox.NewTenantSandboxResolver(sandbox.TenantSandboxResolverDeps{
+		GlobalConfig:    buildGlobalSandboxConfig(),
+		DefaultManager:  defaultManager,
+		Loader:          loader,
+		Store:           store,
+		Checker:         sessionExistenceCheckerFor(sessionRepo),
+		SharedTransport: sandbox.NewGuardedTransport(),
+	})
+	if err != nil {
+		logger.Warnf(ctx,
+			"Failed to initialize tenant sandbox resolver: %v "+
+				"(per-tenant sandbox config disabled)", err)
+		return nil
+	}
+	logger.Infof(ctx, "Tenant sandbox resolver configured: binding=%s", storeKind)
+	return resolver
+}
+
 // buildCubeSandboxConfig assembles a fully-populated *sandbox.Config for the
 // Cube backend, applying environment overrides on top of the package
 // defaults.
