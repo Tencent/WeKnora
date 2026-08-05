@@ -214,12 +214,12 @@ func TestPreviewChunking_ParentChildMatchesIngestion(t *testing.T) {
 		t.Fatalf("status %d body=%s", w.Code, w.Body.String())
 	}
 
-	base := chunker.SplitterConfig{
+	base := chunker.NormalizeSplitterConfig(chunker.SplitterConfig{
 		ChunkSize:    payload.ChunkSize,
 		ChunkOverlap: payload.ChunkOverlap,
 		Separators:   payload.Separators,
 		Strategy:     payload.Strategy,
-	}
+	})
 	parentCfg, childCfg := chunker.DeriveParentChildConfigs(base, payload.ParentChunkSize, payload.ChildChunkSize)
 	want := chunker.SplitParentChild(text, parentCfg, childCfg)
 
@@ -236,5 +236,65 @@ func TestPreviewChunking_ParentChildMatchesIngestion(t *testing.T) {
 		if int(previewChunk["start"].(float64)) != child.Start || int(previewChunk["end"].(float64)) != child.End {
 			t.Errorf("chunk %d span: got %v-%v want %d-%d", i, previewChunk["start"], previewChunk["end"], child.Start, child.End)
 		}
+		gotHeader, _ := previewChunk["context_header"].(string)
+		if gotHeader != child.ContextHeader {
+			t.Errorf("chunk %d context_header: got %q want %q", i, gotHeader, child.ContextHeader)
+		}
+	}
+}
+
+func TestPreviewChunking_SingleLevelUnchanged(t *testing.T) {
+	text := strings.Repeat("Paragraph one.\n\nParagraph two.\n\n", 20)
+	payload := PreviewChunkingPayload{
+		ChunkSize:    200,
+		ChunkOverlap: 20,
+		Separators:   []string{"\n\n", "\n"},
+		Strategy:     chunker.StrategyLegacy,
+	}
+	w, parsed := postPreview(t, PreviewChunkingRequest{Text: text, ChunkingConfig: payload})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body=%s", w.Code, w.Body.String())
+	}
+
+	want, _ := chunker.SplitWithDiagnostics(text, chunker.NormalizeSplitterConfig(chunker.SplitterConfig{
+		ChunkSize:    payload.ChunkSize,
+		ChunkOverlap: payload.ChunkOverlap,
+		Separators:   payload.Separators,
+		Strategy:     payload.Strategy,
+	}))
+	data := parsed["data"].(map[string]any)
+	got := data["chunks"].([]any)
+	if len(got) != len(want) {
+		t.Fatalf("chunk count: got %d want %d", len(got), len(want))
+	}
+}
+
+func TestPreviewChunking_ParentChildDefaultSizes(t *testing.T) {
+	text := strings.Repeat("## Record\n"+strings.Repeat("A sufficiently long entry body. ", 10)+"\n\n", 12)
+	payload := PreviewChunkingPayload{
+		ChunkSize:         300,
+		ChunkOverlap:      30,
+		Separators:        []string{"\n\n", "\n"},
+		EnableParentChild: true,
+		Strategy:          chunker.StrategyHeading,
+	}
+	w, parsed := postPreview(t, PreviewChunkingRequest{Text: text, ChunkingConfig: payload})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body=%s", w.Code, w.Body.String())
+	}
+
+	base := chunker.NormalizeSplitterConfig(chunker.SplitterConfig{
+		ChunkSize:    payload.ChunkSize,
+		ChunkOverlap: payload.ChunkOverlap,
+		Separators:   payload.Separators,
+		Strategy:     payload.Strategy,
+	})
+	parentCfg, childCfg := chunker.DeriveParentChildConfigs(base, 0, 0)
+	want := chunker.SplitParentChild(text, parentCfg, childCfg)
+
+	data := parsed["data"].(map[string]any)
+	got := data["chunks"].([]any)
+	if len(got) != len(want.Children) {
+		t.Fatalf("chunk count: got %d want %d", len(got), len(want.Children))
 	}
 }
