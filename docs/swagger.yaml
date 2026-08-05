@@ -5045,14 +5045,20 @@ definitions:
     type: object
   internal_handler.PreviewChunkingPayload:
     properties:
+      child_chunk_size:
+        type: integer
       chunk_overlap:
         type: integer
       chunk_size:
         type: integer
+      enable_parent_child:
+        type: boolean
       languages:
         items:
           type: string
         type: array
+      parent_chunk_size:
+        type: integer
       separators:
         items:
           type: string

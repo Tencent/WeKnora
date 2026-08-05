@@ -185,6 +185,21 @@ func splitParentChild(text string, parentCfg, childCfg SplitterConfig, withDiagn
 	return ParentChildResult{Parents: newParents, Children: children}, diag
 }
 
+// NormalizeSplitterConfig applies the same base splitter defaults used by
+// knowledge ingestion before parent-child derivation or single-pass splitting.
+func NormalizeSplitterConfig(cfg SplitterConfig) SplitterConfig {
+	if cfg.ChunkSize <= 0 {
+		cfg.ChunkSize = DefaultChunkSize
+	}
+	if cfg.ChunkOverlap <= 0 {
+		cfg.ChunkOverlap = DefaultChunkOverlap
+	}
+	if len(cfg.Separators) == 0 {
+		cfg.Separators = []string{"\n\n", "\n", "。"}
+	}
+	return cfg
+}
+
 // DeriveParentChildConfigs produces the exact parent and child splitter
 // configurations used by knowledge ingestion. Keeping this here lets preview
 // and ingestion remain in lockstep as the parent-child defaults evolve.

@@ -21472,17 +21472,26 @@ const docTemplate = `{
         "internal_handler.PreviewChunkingPayload": {
             "type": "object",
             "properties": {
+                "child_chunk_size": {
+                    "type": "integer"
+                },
                 "chunk_overlap": {
                     "type": "integer"
                 },
                 "chunk_size": {
                     "type": "integer"
                 },
+                "enable_parent_child": {
+                    "type": "boolean"
+                },
                 "languages": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
+                },
+                "parent_chunk_size": {
+                    "type": "integer"
                 },
                 "separators": {
                     "type": "array",
