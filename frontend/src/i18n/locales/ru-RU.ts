@@ -565,6 +565,7 @@ export default {
     noResources: 'Пространства вики не найдены',
     noResourcesDesc: 'Приложению требуется доступ к вики через групповой чат для получения контента',
     noResourcesDesc_notion: 'Приложению требуются права доступа к странице Notion для получения контента',
+    noResourcesDesc_confluence: 'Пространства Confluence не найдены. Сначала создайте Space в Confluence и убедитесь, что учётная запись имеет доступ.',
     retryLoadResources: 'Повторить',
     guideStep1: 'Создайте групповой чат в Feishu, затем добавьте ваше приложение как бота в настройках группы',
     guideStep2: 'Откройте вики "Настройки" > "Управление участниками" > "Добавить участника", найдите групповой чат и добавьте его',
@@ -572,6 +573,9 @@ export default {
     guideStep1_notion: 'Откройте страницу или базу данных, которую хотите синхронизировать в Notion',
     guideStep2_notion: 'Нажмите меню «···» в правом верхнем углу, выберите «Connect to» или «Add connections»',
     guideStep3_notion: 'Найдите и выберите ваше интеграционное приложение, затем вернитесь и нажмите Повторить',
+        guideStep1_confluence: 'Войдите в Confluence и перейдите в нужное пространство (Space)',
+        guideStep2_confluence: 'Убедитесь, что учётная запись имеет право «Просмотр» для этого пространства',
+        guideStep3_confluence: 'Если пространства ещё нет, сначала создайте Space в Confluence, затем нажмите Повторить',
     permissionDocLink: 'Документация по настройке прав доступа',
     syncScheduleLabel: 'Расписание синхронизации',
     conflictLabel: 'Стратегия конфликтов',
@@ -589,6 +593,7 @@ export default {
     openDoc: 'Открыть документацию',
     prereqBarText: 'Используете впервые? Нажмите, чтобы открыть руководство по настройке приложения Feishu',
     prereqBarText_yuque: 'Используете впервые? Нажмите, чтобы открыть руководство по настройке Yuque Token',
+        prereqBarText_confluence: 'Используете впервые? Нажмите, чтобы открыть руководство по настройке Confluence',
     prereqStep1Brief_yuque: 'Создайте персональный Yuque Token',
     prereqStep1Desc_yuque: 'Войдите в Yuque → значок профиля → Настройки → Token → Создать новый Token',
     prereqStep2Brief_yuque: 'Назначьте Token необходимые права',
@@ -596,6 +601,12 @@ export default {
     prereqStep3Brief_yuque: '(Опционально) Для Enterprise укажите Base URL',
     prereqStep3Desc_yuque: 'Пользователям публичного облака указывать не нужно. Для Yuque Enterprise или приватного развёртывания укажите корпоративный домен',
     prereqOpenConsole_yuque: 'Перейти к настройкам Yuque Token',
+        prereqStep1Brief_confluence: 'Получить учётные данные для доступа к Confluence',
+        prereqStep1Desc_confluence: 'Server/DC: используйте имя пользователя и пароль; Cloud: используйте email и API Token',
+        prereqStep2Brief_confluence: 'Подтвердить доступ к пространству',
+        prereqStep2Desc_confluence: 'Убедитесь, что учётная запись имеет доступ на просмотр хотя бы к одному Space в Confluence',
+        prereqStep3Brief_confluence: 'Убедиться, что существует хотя бы один Space',
+        prereqStep3Desc_confluence: 'Если Space ещё нет, сначала создайте его в Confluence',
     prereqBotBrief: 'Добавьте приложению возможность «Бот»',
     prereqBotDesc: 'Открытая платформа → Добавить возможность приложения → Бот → Создать версию и опубликовать',
     prereqPermBrief: 'Включите права API',
@@ -618,7 +629,8 @@ export default {
     resourceType: {
       wikiSpace: 'Пространство вики',
       docCategory: 'Тег документа',
-      book: 'База знаний Yuque'
+      book: 'База знаний Yuque',
+      confluenceSpace: 'Пространство Confluence',
     },
     scheduleHuman: {
       '30min': 'Каждые 30 мин',
@@ -637,21 +649,30 @@ export default {
       feedUrls: 'Адреса лент',
       feedUrlsHint: 'По одному адресу ленты RSS / Atom в строке; можно указать несколько.',
       authHeaders: 'Пользовательские заголовки (необязательно)',
-      authHeadersHint: 'Для приватных лент. По одному в строке в формате «Имя: Значение», например Authorization: Bearer xxxx'
+      authHeadersHint: 'Для приватных лент. По одному в строке в формате «Имя: Значение», например Authorization: Bearer xxxx',
+      confluenceBaseUrl: 'Адрес Confluence',
+      confluenceUsername: 'Имя пользователя',
+      confluencePassword: 'Пароль',
+      confluenceApiToken: 'API Token',
+      confluenceEditionLabel: 'Версия Confluence',
+      confluenceEditionServer: 'Server / Data Center',
+      confluenceEditionCloud: 'Cloud',
     },
     connectorDesc: {
       feishu: 'Синхронизация документов, таблиц и файлов из Feishu Wiki',
       lark: 'Синхронизация документов, таблиц и файлов из Lark Wiki',
       notion: 'Синхронизация страниц и баз данных из Notion',
       yuque: 'Синхронизация документов из баз знаний Yuque',
-      rss: 'Синхронизация статей из лент RSS / Atom'
+      rss: 'Синхронизация статей из лент RSS / Atom',
+      confluence: 'Синхронизация страниц из Atlassian Confluence в формате PDF',
     },
     connector: {
       feishu: 'Feishu (Фэйшу)',
       lark: 'Lark',
       notion: 'Notion',
       yuque: 'Yuque (Юйцюэ)',
-      rss: 'RSS / Atom лента'
+      rss: 'RSS / Atom лента',
+      confluence: 'Confluence',
     },
     logDetail: {
       startTime: 'Время начала',
@@ -695,7 +716,8 @@ export default {
     },
     syncMode: {
       incremental: 'Инкрементная',
-      full: 'Полная'
+      full: 'Полная',
+      mirror: 'Зеркальная (с удалением)',
     }
   },
   ollama: {
@@ -5286,6 +5308,7 @@ export default {
     channelIm: 'IM канал',
     channelNotion: 'Notion',
     channelYuque: 'Yuque',
+    channelConfluence: 'Confluence',
     channelUpload: 'Загрузка',
     channelManual: 'Вручную',
     channelUrl: 'Веб',

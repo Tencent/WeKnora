@@ -33,6 +33,7 @@ const (
 	// Sync modes
 	SyncModeIncremental = "incremental"
 	SyncModeFull        = "full"
+	SyncModeMirror      = "mirror" // incremental + actually delete KB entries removed at source
 
 	// Data source status
 	DataSourceStatusActive  = "active"

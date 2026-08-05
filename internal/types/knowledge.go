@@ -32,6 +32,7 @@ const (
 	ChannelIM               = "im"                // Generic IM channel
 	ChannelNotion           = "notion"            // Notion
 	ChannelYuque            = "yuque"             // Yuque (语雀)
+	ChannelConfluence       = "confluence"        // Atlassian Confluence
 	ChannelRSS              = "rss"               // RSS / Atom feed
 )
 

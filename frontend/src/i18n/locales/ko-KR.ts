@@ -565,6 +565,7 @@ export default {
     noResources: '동기화 가능한 위키 공간을 찾을 수 없습니다',
     noResourcesDesc: '앱이 콘텐츠를 가져오려면 그룹 채팅을 통해 위키 접근 권한을 얻어야 합니다',
     noResourcesDesc_notion: '앱이 콘텐츠를 가져오려면 Notion 페이지 접근 권한이 필요합니다',
+    noResourcesDesc_confluence: '동기화할 Confluence 공간을 찾을 수 없습니다. 먼저 Confluence에서 Space를 생성하고 계정에 접근 권한이 있는지 확인하세요.',
     retryLoadResources: '다시 시도',
     guideStep1: 'Feishu에서 그룹 채팅을 만들고 그룹 설정의 \'그룹 봇\'에 앱을 추가하세요',
     guideStep2: '위키 \'설정\' > \'멤버 설정\' > \'멤버 추가\'를 열고 해당 그룹 채팅을 검색하여 추가하세요',
@@ -572,6 +573,9 @@ export default {
     guideStep1_notion: 'Notion에서 동기화하려는 페이지나 데이터베이스를 엽니다',
     guideStep2_notion: '오른쪽 상단의 \'···\' 메뉴를 클릭하고 \'Connect to\' 또는 \'Add connections\'를 선택합니다',
     guideStep3_notion: 'Integration 앱을 검색하여 선택한 후, 돌아와서 다시 시도를 클릭하세요',
+        guideStep1_confluence: "Confluence에 로그인하여 동기화할 Space로 이동하세요",
+        guideStep2_confluence: "계정에 해당 Space에 대한 '보기' 권한이 있는지 확인하세요",
+        guideStep3_confluence: "Space가 아직 없다면 먼저 Confluence에서 Space를 생성한 후 다시 시도를 클릭하세요",
     permissionDocLink: '페이슈 위키 권한 설정 문서 보기',
     syncScheduleLabel: '동기화 주기',
     conflictLabel: '충돌 전략',
@@ -589,6 +593,7 @@ export default {
     openDoc: '문서 열기',
     prereqBarText: '처음 사용하시나요? 클릭하여 Feishu 앱 설정 가이드를 확인하세요',
     prereqBarText_yuque: '처음 사용하시나요? 클릭하여 Yuque Token 설정 가이드를 확인하세요',
+        prereqBarText_confluence: '처음 사용하시나요? 클릭하여 Confluence 설정 가이드를 확인하세요',
     prereqStep1Brief_yuque: 'Yuque 개인 Token 생성',
     prereqStep1Desc_yuque: 'Yuque 로그인 → 프로필 아이콘 → 설정 → Token → 새 Token 만들기',
     prereqStep2Brief_yuque: 'Token에 필요한 권한 부여',
@@ -596,6 +601,12 @@ export default {
     prereqStep3Brief_yuque: '(선택) Enterprise 사용 시 Base URL 입력',
     prereqStep3Desc_yuque: '퍼블릭 클라우드 사용자는 입력하지 않아도 됩니다. Yuque Enterprise 또는 사설 배포 시 기업 도메인을 입력하세요',
     prereqOpenConsole_yuque: 'Yuque Token 설정으로 이동',
+        prereqStep1Brief_confluence: 'Confluence 접근 자격증명 획득',
+        prereqStep1Desc_confluence: 'Server/DC: 사용자 이름과 비밀번호 사용; Cloud: 이메일과 API Token 사용',
+        prereqStep2Brief_confluence: 'Space 접근 권한 확인',
+        prereqStep2Desc_confluence: '계정에 최소 하나의 Confluence Space에 대한 보기 권한이 있는지 확인하세요',
+        prereqStep3Brief_confluence: '최소 하나의 Space가 존재하는지 확인',
+        prereqStep3Desc_confluence: 'Space가 없다면 먼저 Confluence에서 Space를 생성하세요',
     prereqBotBrief: '앱에 \'봇\' 기능 추가',
     prereqBotDesc: '오픈 플랫폼 → 앱 기능 추가 → 봇 → 버전 생성 후 게시',
     prereqPermBrief: 'API 권한 활성화',
@@ -618,7 +629,8 @@ export default {
     resourceType: {
       wikiSpace: '위키 공간',
       docCategory: '문서 태그',
-      book: 'Yuque 지식베이스'
+      book: 'Yuque 지식베이스',
+      confluenceSpace: 'Confluence 공간',
     },
     scheduleHuman: {
       '30min': '30분마다',
@@ -637,21 +649,30 @@ export default {
       feedUrls: '피드 주소',
       feedUrlsHint: '한 줄에 하나씩 RSS / Atom 피드 주소를 입력하세요. 여러 개를 함께 입력할 수 있습니다.',
       authHeaders: '사용자 지정 헤더 (선택)',
-      authHeadersHint: '비공개 피드 접근용. 한 줄에 하나씩 「이름: 값」 형식으로 입력하세요. 예: Authorization: Bearer xxxx'
+      authHeadersHint: '비공개 피드 접근용. 한 줄에 하나씩 「이름: 값」 형식으로 입력하세요. 예: Authorization: Bearer xxxx',
+      confluenceBaseUrl: 'Confluence 주소',
+      confluenceUsername: '사용자 이름',
+      confluencePassword: '비밀번호',
+      confluenceApiToken: 'API Token',
+      confluenceEditionLabel: 'Confluence 버전',
+      confluenceEditionServer: 'Server / Data Center',
+      confluenceEditionCloud: 'Cloud',
     },
     connectorDesc: {
       feishu: '페이슈 위키에서 문서, 스프레드시트, 파일 동기화',
       lark: 'Lark 위키에서 문서, 스프레드시트, 파일 동기화',
       notion: 'Notion에서 페이지 및 데이터베이스 동기화',
       yuque: '위큐 지식베이스에서 문서 동기화',
-      rss: 'RSS / Atom 피드에서 글 동기화'
+      rss: 'RSS / Atom 피드에서 글 동기화',
+      confluence: 'Atlassian Confluence에서 페이지를 PDF로 동기화',
     },
     connector: {
       feishu: '페이슈 (Feishu)',
       lark: 'Lark (Feishu 글로벌)',
       notion: 'Notion',
       yuque: '위큐 (Yuque)',
-      rss: 'RSS / Atom 피드'
+      rss: 'RSS / Atom 피드',
+      confluence: 'Confluence',
     },
     logDetail: {
       startTime: '시작 시간',
@@ -695,7 +716,8 @@ export default {
     },
     syncMode: {
       incremental: '증분 동기화',
-      full: '전체 동기화'
+      full: '전체 동기화',
+      mirror: '미러 동기화 (삭제 포함)',
     }
   },
   ollama: {
@@ -5286,6 +5308,7 @@ export default {
     channelIm: 'IM 채널',
     channelNotion: 'Notion',
     channelYuque: 'Yuque',
+    channelConfluence: 'Confluence',
     channelUpload: '업로드',
     channelManual: '수동',
     channelUrl: '웹',

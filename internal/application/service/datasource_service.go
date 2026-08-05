@@ -681,10 +681,10 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		items, fetchErr = connector.FetchAll(ctx, config, config.ResourceIDs)
 		logger.Infof(ctx, "full sync fetched %d items", len(items))
 	} else {
-		// Incremental sync
+		// Incremental / mirror sync (mirror uses incremental fetch + deletion detection)
 		cursor, _ := ds.ParseSyncCursor()
 		items, nextCursor, fetchErr = connector.FetchIncremental(ctx, config, cursor)
-		logger.Infof(ctx, "incremental sync fetched %d items", len(items))
+		logger.Infof(ctx, "%s sync fetched %d items", ds.SyncMode, len(items))
 	}
 
 	var fetchWarnings []string
@@ -841,7 +841,23 @@ func (s *DataSourceService) applyFetchedItem(
 	tagIDs []string, result *types.SyncResult,
 ) {
 	if item.IsDeleted {
-		if ds.SyncDeletions {
+		if ds.SyncMode == types.SyncModeMirror && item.ExternalID != "" {
+			// Mirror mode: actually delete the corresponding knowledge entry.
+			repo := s.knowledgeService.GetRepository()
+			existing, findErr := repo.FindByMetadataKey(ctx, ds.TenantID, ds.KnowledgeBaseID, "external_id", item.ExternalID)
+			if findErr != nil {
+				logger.Warnf(ctx, "failed to find knowledge for deleted external_id=%s: %v", item.ExternalID, findErr)
+			} else if existing != nil {
+				if delErr := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); delErr != nil {
+					logger.Warnf(ctx, "failed to delete knowledge %s for external_id=%s: %v", existing.ID, item.ExternalID, delErr)
+				} else {
+					logger.Infof(ctx, "deleted knowledge %s for external_id=%s (mirror sync)", existing.ID, item.ExternalID)
+					result.Deleted++
+				}
+			} else {
+				logger.Debugf(ctx, "no knowledge found for deleted external_id=%s, skipping", item.ExternalID)
+			}
+		} else if ds.SyncDeletions {
 			// Count only — actual KB deletion is intentionally not performed.
 			// Users manage knowledge removal explicitly via the KB UI to avoid
 			// accidental data loss from connector misdetection or reconfiguration.
