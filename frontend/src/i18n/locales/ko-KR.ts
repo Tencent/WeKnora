@@ -653,6 +653,8 @@ export default {
     },
     field: {
       appId: 'App ID',
+      appKey: 'AppKey / Client ID',
+      operatorId: '작업자 UnionID',
       appSecret: 'App Secret',
       integrationToken: 'Integration Token',
       apiToken: 'API Token',
@@ -670,6 +672,7 @@ export default {
       lark_drive: "Lark 드라이브 폴더에서 문서, 스프레드시트, 파일 동기화",
       notion: 'Notion에서 페이지 및 데이터베이스 동기화',
       yuque: '위큐 지식베이스에서 문서 동기화',
+      dingtalk: 'DingTalk 지식베이스에서 문서 동기화',
       rss: 'RSS / Atom 피드에서 글 동기화'
     },
     connector: {
@@ -679,6 +682,7 @@ export default {
       lark_drive: "Lark 드라이브",
       notion: 'Notion',
       yuque: '위큐 (Yuque)',
+      dingtalk: 'DingTalk 문서',
       rss: 'RSS / Atom 피드'
     },
     logDetail: {

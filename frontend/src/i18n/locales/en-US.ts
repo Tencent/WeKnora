@@ -5258,6 +5258,7 @@ export default {
       lark_drive: 'Lark Drive',
       notion: 'Notion',
       yuque: 'Yuque',
+      dingtalk: 'DingTalk Docs',
       rss: 'RSS / Atom Feed'
     },
     connectorDesc: {
@@ -5267,6 +5268,7 @@ export default {
       lark_drive: 'Sync documents, spreadsheets and files from a Lark Drive folder (Feishu international)',
       notion: 'Sync pages and databases from Notion',
       yuque: 'Sync documents from Yuque knowledge bases',
+      dingtalk: 'Sync documents from DingTalk knowledge bases',
       rss: 'Sync articles from RSS / Atom feeds'
     },
     drive: {
@@ -5284,6 +5286,8 @@ export default {
     },
     field: {
       appId: 'App ID',
+      appKey: 'AppKey / Client ID',
+      operatorId: 'Operator UnionID',
       appSecret: 'App Secret',
       integrationToken: 'Integration Token',
       apiToken: 'API Token',

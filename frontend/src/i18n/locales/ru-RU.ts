@@ -653,6 +653,8 @@ export default {
     },
     field: {
       appId: 'App ID',
+      appKey: 'AppKey / Client ID',
+      operatorId: 'UnionID оператора',
       appSecret: 'App Secret',
       integrationToken: 'Integration Token',
       apiToken: 'API Token',
@@ -670,6 +672,7 @@ export default {
       lark_drive: 'Синхронизация документов, таблиц и файлов из папки Lark Drive',
       notion: 'Синхронизация страниц и баз данных из Notion',
       yuque: 'Синхронизация документов из баз знаний Yuque',
+      dingtalk: 'Синхронизация документов из баз знаний DingTalk',
       rss: 'Синхронизация статей из лент RSS / Atom'
     },
     connector: {
@@ -679,6 +682,7 @@ export default {
       lark_drive: 'Lark Drive',
       notion: 'Notion',
       yuque: 'Yuque (Юйцюэ)',
+      dingtalk: 'DingTalk Docs',
       rss: 'RSS / Atom лента'
     },
     logDetail: {
