@@ -156,12 +156,12 @@ func (s *sessionService) AgentQA(
 			return fmt.Errorf("load session attachments for sandbox staging: %w", loadErr)
 		}
 		stager, ok := s.agentService.(interface {
-			stageSessionAttachments(context.Context, string, types.MessageAttachments) ([]stagedSessionAttachment, error)
+			stageSessionAttachments(context.Context, string, string, types.MessageAttachments) ([]stagedSessionAttachment, error)
 		})
 		if !ok {
 			return errors.New("agent service does not support session attachment staging")
 		}
-		stagedAttachments, err = stager.stageSessionAttachments(ctx, sessionID, sessionAttachments)
+		stagedAttachments, err = stager.stageSessionAttachments(ctx, sessionID, agentConfig.SandboxConfigID, sessionAttachments)
 		if err != nil {
 			return fmt.Errorf("restore session attachments into sandbox: %w", err)
 		}
@@ -530,6 +530,7 @@ func (s *sessionService) configureSkillsFromAgent(
 	if customAgent == nil {
 		return
 	}
+	agentConfig.SandboxConfigID = customAgent.Config.SandboxConfigID
 	// When sandbox is disabled, skills cannot be enabled (no script execution environment)
 	sandboxMode := os.Getenv("WEKNORA_SANDBOX_MODE")
 	if sandboxMode == "" || sandboxMode == "disabled" {

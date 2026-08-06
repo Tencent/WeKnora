@@ -28,6 +28,19 @@ const (
 	SandboxTypeDisabled SandboxType = "disabled"
 )
 
+// IsNamedSandboxBackendType reports whether raw can be stored as a user-facing
+// named sandbox backend. Only remote session backends (cube/e2b) support
+// per-config credentials and session pinning; docker/local/disabled are
+// deployment-level or workspace-policy concerns.
+func IsNamedSandboxBackendType(raw string) bool {
+	switch SandboxType(raw) {
+	case SandboxTypeCube, SandboxTypeE2B:
+		return true
+	default:
+		return false
+	}
+}
+
 // Default configuration values
 const (
 	DefaultTimeout     = 60 * time.Second

@@ -174,7 +174,7 @@ func (c *ArtifactCollector) sessionSource(ctx context.Context, sessionID string)
 	if configID == "" {
 		return nil
 	}
-	mgr, err := resolveTenantSandboxForConfig(ctx, c.resolver, nil, tenantID, configID)
+	mgr, err := resolveTenantSandboxForConfig(ctx, c.resolver, nil, tenantID, configID, nil)
 	if err != nil {
 		// Refusing to read is the safe failure: substituting another backend
 		// would look in the wrong provider account and report "no artifacts".

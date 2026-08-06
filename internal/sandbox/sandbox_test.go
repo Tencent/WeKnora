@@ -195,6 +195,24 @@ func TestNewDisabledManager(t *testing.T) {
 	}
 }
 
+func TestIsNamedSandboxBackendType(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want bool
+	}{
+		{"cube", true},
+		{"e2b", true},
+		{"docker", false},
+		{"local", false},
+		{"disabled", false},
+		{"", false},
+	} {
+		if got := IsNamedSandboxBackendType(tc.raw); got != tc.want {
+			t.Fatalf("IsNamedSandboxBackendType(%q) = %v, want %v", tc.raw, got, tc.want)
+		}
+	}
+}
+
 func TestExecuteResultHelpers(t *testing.T) {
 	// Test IsSuccess
 	successResult := &ExecuteResult{
