@@ -55,6 +55,52 @@ func TestGroupAndMerge_TrustedOverlapTrimsAndExtendsRange(t *testing.T) {
 	assert.ElementsMatch(t, []string{"c2"}, results[0].SubChunkID)
 }
 
+func TestGroupAndMerge_TrustedOverlapBeyondTextSearchWindow(t *testing.T) {
+	// A real overlap wider than the text matcher's 400-rune window: the position
+	// path knows the exact amount, so the overlap must not survive twice.
+	overlap := rangeText('o', 500)
+	first := trustedResult("c1", 1, 0, 1000, rangeText('a', 500)+overlap)
+	second := trustedResult("c2", 2, 500, 1500, overlap+rangeText('b', 500))
+
+	results := mergeGrouped(docChunks(first, second))
+
+	require.Len(t, results, 1)
+	assert.Equal(t, rangeText('a', 500)+overlap+rangeText('b', 500), results[0].Content)
+	assert.Equal(t, 1500, results[0].EndAt)
+}
+
+func TestGroupAndMerge_TrustedAdjacentRepeatedTextKeepsEveryRow(t *testing.T) {
+	// Adjacent trusted chunks (positional overlap 0) made of one repeating row:
+	// searching for the longest suffix match would mistake the repetition for an
+	// overlap and drop rows, so the exact-overlap path must concatenate verbatim.
+	row := "| cell | cell |\n"
+	firstBody := rangeText('x', 100) + strings.Repeat(row, 2)
+	secondBody := strings.Repeat(row, 3) + rangeText('y', 60)
+	first := trustedResult("c1", 1, 0, runeLen(firstBody), firstBody)
+	second := trustedResult("c2", 2, runeLen(firstBody), runeLen(firstBody)+runeLen(secondBody), secondBody)
+
+	results := mergeGrouped(docChunks(first, second))
+
+	require.Len(t, results, 1)
+	assert.Equal(t, firstBody+secondBody, results[0].Content)
+	assert.Equal(t, 5, strings.Count(results[0].Content, row), "no repeated row may be dropped")
+}
+
+func TestGroupAndMerge_TrustedOverlapTextMismatchFallsBackToTextMatch(t *testing.T) {
+	// Length invariant holds but the bodies disagree inside the overlap window
+	// (HTML entities, synthetic headers): the exact path must refuse and the text
+	// fallback must keep both bodies rather than trim on coordinates.
+	first := trustedResult("c1", 1, 0, 100, rangeText('a', 80)+rangeText('b', 20))
+	second := trustedResult("c2", 2, 80, 200, rangeText('c', 20)+rangeText('d', 100))
+
+	results := mergeGrouped(docChunks(first, second))
+
+	require.Len(t, results, 1)
+	assert.Contains(t, results[0].Content, rangeText('b', 20))
+	assert.Contains(t, results[0].Content, rangeText('c', 20))
+	assert.Contains(t, results[0].Content, rangeText('d', 100))
+}
+
 func TestGroupAndMerge_TrustedAdjacentJoinsSeamlessly(t *testing.T) {
 	// Adjacent trusted chunks are contiguous in the original document: the
 	// merged body must be the exact concatenation, with no separator inserted.
