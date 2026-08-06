@@ -2,6 +2,8 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig, type DefaultTheme } from 'vitepress'
 import { withMermaid } from 'vitepress-plugin-mermaid'
+import './theme-config.d.ts'
+import { repoVersionLabel } from './version'
 
 const root = resolve(import.meta.dirname, '..')
 
@@ -56,6 +58,7 @@ function tokenize(text: string): string[] {
 }
 
 const repo = 'https://github.com/Tencent/WeKnora'
+const site = 'https://weknora.weixin.qq.com'
 
 export default withMermaid(
   defineConfig({
@@ -106,7 +109,10 @@ export default withMermaid(
         { text: 'API', link: '/04-api/01-api-overview', activeMatch: '/04-api/' },
         { text: '客户端', link: '/05-clients/01-frontend', activeMatch: '/05-clients/' },
         { text: '开发', link: '/06-development/01-dev-guide', activeMatch: '/06-development/' },
+        { text: '官网', link: site },
       ],
+
+      weknoraVersion: repoVersionLabel,
 
       sidebar,
 
@@ -160,7 +166,7 @@ export default withMermaid(
       },
 
       footer: {
-        message: '基于 WeKnora main 分支源码整理 · MIT License',
+        message: `基于 WeKnora ${repoVersionLabel} 源码整理 · MIT License`,
         copyright: '© Tencent WeKnora',
       },
     },
