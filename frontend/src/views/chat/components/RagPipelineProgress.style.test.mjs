@@ -50,12 +50,31 @@ test('rag pipeline opens references from search steps and the drawer composable'
 test('rag pipeline uses a native pending step and lets the thinking title shimmer while pending', () => {
   assert.match(source, /showPrePipelineWait/)
   assert.match(source, /class="action-card action-pending"/)
-  assert.match(source, /t\('chat\.thinkingAlt'\)/)
+  assert.match(source, /t\('chat\.preparingAnswer'\)/)
   assert.match(source, /showThinkingStep/)
   assert.match(source, /'action-pending': thinkingPending/)
   assert.match(source, /hasThinkingEvent/)
   assert.doesNotMatch(source, /thinking-loading/)
   assert.doesNotMatch(source, /showActivityIndicator/)
+})
+
+test('rag pipeline shows a pending model-answer step after retrieval completes', () => {
+  assert.match(source, /showWaitStep/)
+  assert.match(source, /getRagPipelineWaitKind/)
+  assert.match(source, /createRagWaitController/)
+  assert.match(source, /t\('chat\.connectingModelAndGeneratingAnswer'\)/)
+  assert.match(source, /t\('chat\.modelStillResponding'\)/)
+  assert.match(source, /rag-model-wait-step/)
+  assert.match(source, /'action-pending': !waitStepStalled/)
+  assert.match(source, /waitController\.dispose\(\)/)
+})
+
+test('rag pipeline announces wait status from a region that outlives each row', () => {
+  const template = source.split('<script')[0]
+  assert.match(template, /class="sr-only" role="status" aria-live="polite"/)
+  assert.equal((template.match(/aria-live/g) || []).length, 1)
+  assert.match(source, /liveStatusText/)
+  assert.match(source, /\.sr-only \{[\s\S]*clip: rect\(0, 0, 0, 0\)/)
 })
 
 test('done row appears only after the full turn completes', () => {

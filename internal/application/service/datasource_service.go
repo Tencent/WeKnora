@@ -1162,7 +1162,17 @@ func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *ty
 //
 // Returns (isUpdate, error) — isUpdate is true when an existing item was replaced.
 func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource, item *types.FetchedItem, tagIDs []string) (bool, error) {
+	// Channel decides the knowledge "source" label shown in the UI. Prefer the
+	// connector-supplied metadata["channel"] (e.g. Feishu Drive sets it to
+	// "feishu" so Drive docs share the wiki's "飞书" label instead of showing
+	// "unknown" for the raw ds.Type "feishu_drive"). Fall back to ds.Type so
+	// connectors that don't set metadata.channel still get a meaningful label.
 	channel := ds.Type // e.g. "feishu", "notion"
+	if item.Metadata != nil {
+		if mc, ok := item.Metadata["channel"]; ok && mc != "" {
+			channel = mc
+		}
+	}
 
 	metadata := map[string]string{
 		"external_id":        item.ExternalID,
@@ -1253,8 +1263,8 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 
 // dupIsSameNode reports whether a duplicate-content error means the parent still
 // exists in the KB *under this item's own external_id* — i.e. a content-dedup hit
-// against this same node, so reconciling its subtree is safe. Deduplication keys
-// on file_hash alone (CheckKnowledgeExists), so an updated node whose rebuilt body
+// against this same node, so reconciling its subtree is safe. File deduplication
+// keys on file_hash plus file_type (CheckKnowledgeExists), so an updated node whose rebuilt body
 // happens to hash-collide with a DIFFERENT knowledge item (another node, or a
 // manually-uploaded file with no external_id) would otherwise sweep this node's
 // children even though its own parent row was just deleted for the update and

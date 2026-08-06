@@ -32,19 +32,25 @@ type MinerUReader struct {
 	vlmServerURL  string // vLLM server URL for vlm-http-client / hybrid-http-client
 	formulaEnable bool
 	tableEnable   bool
-	ocrEnable     bool
+	parseMethod   string
 	language      string
 }
 
 // NewMinerUReader creates a reader from ParserEngineOverrides.
 func NewMinerUReader(overrides map[string]string) *MinerUReader {
+	var legacyOCREnabled *bool
+	if raw, ok := overrides["mineru_enable_ocr"]; ok {
+		value := parseBoolOr(raw, true)
+		legacyOCREnabled = &value
+	}
+
 	c := &MinerUReader{
 		endpoint:      strings.TrimRight(overrides["mineru_endpoint"], "/"),
 		backend:       stringOr(overrides["mineru_model"], "pipeline"),
 		vlmServerURL:  overrides["mineru_vlm_server_url"],
 		formulaEnable: parseBoolOr(overrides["mineru_enable_formula"], true),
 		tableEnable:   parseBoolOr(overrides["mineru_enable_table"], true),
-		ocrEnable:     parseBoolOr(overrides["mineru_enable_ocr"], true),
+		parseMethod:   types.ResolveMinerUParseMethod(overrides["mineru_parse_method"], legacyOCREnabled),
 		language:      stringOr(overrides["mineru_language"], "ch"),
 	}
 	return c
@@ -117,7 +123,7 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 		"return_images":       "true",
 		"table_enable":        fmt.Sprintf("%v", c.tableEnable),
 		"formula_enable":      fmt.Sprintf("%v", c.formulaEnable),
-		"parse_method":        "ocr",
+		"parse_method":        c.parseMethod,
 		"start_page_id":       "0",
 		"end_page_id":         "99999",
 		"backend":             c.backend,
@@ -125,9 +131,6 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 		"return_middle_json":  "false",
 		"return_model_output": "false",
 		"return_content_list": "true",
-	}
-	if !c.ocrEnable {
-		fields["parse_method"] = "txt"
 	}
 	if c.language != "" {
 		fields["lang_list"] = c.language
@@ -373,7 +376,7 @@ func extractImageRefsFromContent(content string) []string {
 			refs = append(refs, strings.TrimSpace(match[2]))
 		}
 	}
-	for _, match := range imgHTMLRelativeSrc.FindAllStringSubmatch(content, -1) {
+	for _, match := range imgHTMLSrc.FindAllStringSubmatch(content, -1) {
 		if len(match) >= 3 {
 			refs = append(refs, match[2])
 		}

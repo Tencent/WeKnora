@@ -322,6 +322,7 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 			"",
 			"",
 			"",
+			nil,
 		)
 		chunkPage++
 		if err != nil {
@@ -1366,7 +1367,7 @@ func (s *knowledgeService) moveKnowledgeReparse(
 			}
 		}
 
-		lang, _ := types.LanguageFromContext(ctx)
+		lang := types.LanguageFromContextOrDefault(ctx)
 		taskPayload := types.DocumentProcessPayload{
 			TenantID:                 tenantID,
 			KnowledgeID:              knowledge.ID,

@@ -18,7 +18,6 @@ import (
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
-	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/config"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
@@ -26,6 +25,7 @@ import (
 	mcppkg "github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/ratelimit"
+	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -80,98 +80,21 @@ func stripImageXMLTags(s string) string {
 	})
 }
 
-// storageSchemeRe matches both legacy provider:// URLs and canonical
-// storage://<backend-id>/provider:// URLs.
-var storageSchemeRe = regexp.MustCompile(
-	`\b(?:resource://[0-9A-Za-z_-]+|` +
-		`(?:storage://[0-9A-Za-z_-]+/)?` +
-		`(?:local|minio|s3|cos|tos|oss|obs|ks3)://[^\s)\]>"]+)`,
-)
-
-// rewriteStorageURLs replaces all provider:// URLs in content with HTTP URLs
-// obtained from fileService.GetFileURL. URLs that are already HTTP or cannot
-// be resolved are left unchanged.
-//
-// Logging policy:
-//   - Successful rewrite logs at INFO with the full signed URL so operators
-//     can copy it out of logs and verify public reachability directly. The
-//     trade-off: anyone with log access can use a signed URL until it
-//     expires (WeKnora 2h, MinIO 24h). Acceptable for diagnosability.
-//   - Failure or no-op rewrite logs at WARN. The no-op case typically means
-//     APP_EXTERNAL_URL is not configured for the local backend, which is
-//     the most common cause of "image broken in IM" reports.
-func rewriteStorageURLs(ctx context.Context, content string, resolver *imFileServiceResolver) string {
+// rewriteStorageURLs replaces all storage references in content with HTTP URLs
+// so IM clients — which cannot attach WeKnora credentials to an image fetch —
+// can render them. See internal/storageurl for the shared implementation.
+func rewriteStorageURLs(ctx context.Context, content string, resolver *storageurl.FileServiceResolver) string {
 	if resolver == nil {
 		return content
 	}
-	return storageSchemeRe.ReplaceAllStringFunc(content, func(match string) string {
-		fileSvc := resolver.resolve(match)
-		if fileSvc == nil {
-			logger.Warnf(ctx, "[IM] rewriteStorageURLs: no file service for src=%s", match)
-			return match
-		}
-		httpURL, err := fileSvc.GetFileURL(ctx, match)
-		if err != nil {
-			logger.Warnf(ctx, "[IM] rewriteStorageURLs failed: src=%s err=%v", match, err)
-			return match
-		}
-		if httpURL == match {
-			logger.Warnf(ctx,
-				"[IM] rewriteStorageURLs no-op (URL unchanged; for local storage set APP_EXTERNAL_URL): src=%s",
-				match)
-			return match
-		}
-		logger.Infof(ctx, "[IM] rewriteStorageURLs: src=%s dst=%s", match, httpURL)
-		return httpURL
-	})
+	return storageurl.Rewrite(ctx, content, resolver, "IM")
 }
 
 // ── Streaming holdback helpers ──
-// During streaming, content is flushed in 300ms batches. A provider:// URL or
+// During streaming, content is flushed in 300ms batches. A storage reference or
 // an XML tag may be split across two batches. These helpers detect incomplete
 // patterns at the end of a chunk so the caller can hold them back until the
 // next flush completes them.
-
-// incompleteURLSuffixRe matches a provider:// URL that reaches the end of the
-// string — it may continue in the next chunk.
-var incompleteURLSuffixRe = regexp.MustCompile(
-	`\b(?:resource|storage|local|minio|s3|cos|tos|oss|obs|ks3)://[^\s)\]>"]*$`,
-)
-
-// findIncompleteStorageURL returns the byte offset of a potentially truncated
-// provider:// URL at the tail of s, or -1 if none.
-func findIncompleteStorageURL(s string) int {
-	loc := incompleteURLSuffixRe.FindStringIndex(s)
-	if loc == nil {
-		return -1
-	}
-	return loc[0]
-}
-
-// incompleteMarkdownImageSuffixRe matches a Markdown image whose destination URL
-// (the parenthesized part) is not yet closed — e.g. "![alt](minio://part" or "![alt](".
-// Holding back only from "minio://" would flush "![alt](" to the IM client and break
-// the image once the URL arrives in the next chunk.
-var incompleteMarkdownImageSuffixRe = regexp.MustCompile(`!\[[^\]]*\]\([^)]*$`)
-
-// findIncompleteMarkdownImage returns the byte offset of an unclosed ![alt](url
-// suffix at the end of s, or -1 if none.
-func findIncompleteMarkdownImage(s string) int {
-	// Prefer pairing a trailing provider:// fragment with the nearest preceding ![…](
-	// so alt text may contain ']' (e.g. ![a[b]](minio://part).
-	if urlIdx := findIncompleteStorageURL(s); urlIdx >= 0 {
-		if imgIdx := strings.LastIndex(s[:urlIdx], "!["); imgIdx >= 0 {
-			if strings.Contains(s[imgIdx:urlIdx], "](") {
-				return imgIdx
-			}
-		}
-	}
-	loc := incompleteMarkdownImageSuffixRe.FindStringIndex(s)
-	if loc == nil {
-		return -1
-	}
-	return loc[0]
-}
 
 // incompleteXMLTagRe matches the opening of an <image…>, <kb…>, or <web…> tag
 // that reaches the end of the string without a closing '>'.
@@ -192,12 +115,7 @@ func findIncompleteXMLTag(s string) int {
 // holdbackCutoff returns the earliest incomplete-pattern offset at the tail of
 // chunk, or len(chunk) if the chunk is safe to flush entirely.
 func holdbackCutoff(chunk string) int {
-	cutoff := len(chunk)
-	if idx := findIncompleteMarkdownImage(chunk); idx >= 0 && idx < cutoff {
-		cutoff = idx
-	} else if idx := findIncompleteStorageURL(chunk); idx >= 0 && idx < cutoff {
-		cutoff = idx
-	}
+	cutoff := storageurl.HoldbackCutoff(chunk)
 	if idx := findIncompleteXMLTag(chunk); idx >= 0 && idx < cutoff {
 		cutoff = idx
 	}
@@ -216,109 +134,37 @@ func formatIMOutboundAnswer(ctx context.Context, raw string, tenant *types.Tenan
 func cleanIMContent(ctx context.Context, content string, tenant *types.Tenant, defaultFileSvc interfaces.FileService, storageResolvers ...interfaces.StorageBackendResolver) string {
 	content = stripImageXMLTags(content)
 	content = stripIMCitationTags(content)
-	resolver := newIMFileServiceResolver(tenant, defaultFileSvc, storageResolvers...)
-	resolver.ctx = ctx
+	resolver := newIMFileServiceResolver(tenant, defaultFileSvc, storageResolvers...).WithContext(ctx)
 	content = rewriteStorageURLs(ctx, content, resolver)
 	return content
 }
 
 func imLocalStorageBaseDir() string {
-	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
-	if baseDir == "" {
-		baseDir = "/data/files"
-	}
-	return baseDir
+	return storageurl.LocalStorageBaseDir()
 }
 
-// imFileServiceResolver resolves and caches FileService instances per storage provider
-// for the lifetime of one cleanIMContent / outbound message (avoids re-creating SDK clients
-// for every URL in a long answer).
-type imFileServiceResolver struct {
-	tenant          *types.Tenant
-	defaultSvc      interfaces.FileService
-	storageResolver interfaces.StorageBackendResolver
-	ctx             context.Context
-	cache           map[string]interfaces.FileService
+// newIMFileServiceResolver builds a per-message storage backend resolver. The
+// cache lives for one cleanIMContent / outbound message so a long answer does
+// not re-create an SDK client for every reference.
+func newIMFileServiceResolver(
+	tenant *types.Tenant,
+	defaultSvc interfaces.FileService,
+	storageResolvers ...interfaces.StorageBackendResolver,
+) *storageurl.FileServiceResolver {
+	return storageurl.NewFileServiceResolver(tenant, defaultSvc, storageResolvers...)
 }
 
-func newIMFileServiceResolver(tenant *types.Tenant, defaultSvc interfaces.FileService, storageResolvers ...interfaces.StorageBackendResolver) *imFileServiceResolver {
-	resolver := &imFileServiceResolver{
-		tenant:     tenant,
-		defaultSvc: defaultSvc,
-		ctx:        context.Background(),
-		cache:      make(map[string]interfaces.FileService),
-	}
-	if len(storageResolvers) > 0 {
-		resolver.storageResolver = storageResolvers[0]
-	}
-	return resolver
-}
-
-func (r *imFileServiceResolver) resolve(filePath string) interfaces.FileService {
-	if _, ok := types.ParseResourcePath(filePath); ok {
-		return r.defaultSvc
-	}
-	backendID, _, _ := types.ParseStorageBackendPath(filePath)
-	provider := types.ParseProviderScheme(filePath)
-	if provider == "" {
-		if r.tenant != nil && r.tenant.StorageEngineConfig != nil {
-			provider = strings.ToLower(strings.TrimSpace(r.tenant.StorageEngineConfig.DefaultProvider))
-		}
-		if provider == "" {
-			return nil
-		}
-	}
-	cacheKey := backendID + ":" + provider
-	if svc, ok := r.cache[cacheKey]; ok {
-		return svc
-	}
-	if r.storageResolver != nil && r.tenant != nil {
-		svc, _, err := r.storageResolver.ResolveFileService(r.ctx, r.tenant, backendID, provider, imLocalStorageBaseDir())
-		if err == nil {
-			r.cache[cacheKey] = svc
-			return svc
-		}
-		logger.Warnf(r.ctx, "[IM] resolve storage backend failed: backend_id=%s provider=%s err=%v", backendID, provider, err)
-	}
-	svc := buildIMFileServiceForProvider(r.tenant, provider, r.defaultSvc)
-	if svc != nil {
-		r.cache[cacheKey] = svc
-	}
-	return svc
-}
-
-// buildIMFileServiceForProvider selects the FileService for a storage provider.
-// filePath scheme wins over tenant DefaultProvider. Falls back to the process-wide
-// default FileService (STORAGE_TYPE / env) when tenant config is missing — mirrors
-// ImageMultimodalService.resolveFileServiceForPayload (issue #1282).
 func buildIMFileServiceForProvider(
 	tenant *types.Tenant,
 	provider string,
 	defaultSvc interfaces.FileService,
 ) interfaces.FileService {
-	baseDir := imLocalStorageBaseDir()
-	var sec *types.StorageEngineConfig
-	if tenant != nil {
-		sec = tenant.StorageEngineConfig
-	}
-
-	svc, _, err := filesvc.NewFileServiceFromStorageConfig(provider, sec, baseDir)
-	if err == nil {
-		return svc
-	}
-	if provider == "local" {
-		externalURL := strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL"))
-		return filesvc.NewLocalFileService(baseDir, externalURL)
-	}
-	if defaultSvc != nil {
-		return defaultSvc
-	}
-	return nil
+	return storageurl.BuildFileServiceForProvider(tenant, provider, defaultSvc)
 }
 
 // resolveIMFileServiceForPath is a test/helper entry point without caching.
 func resolveIMFileServiceForPath(tenant *types.Tenant, filePath string, defaultSvc interfaces.FileService) interfaces.FileService {
-	return newIMFileServiceResolver(tenant, defaultSvc).resolve(filePath)
+	return newIMFileServiceResolver(tenant, defaultSvc).ResolveFileService(filePath)
 }
 
 const (
@@ -949,6 +795,23 @@ func (s *Service) dedupCleanupLoop() {
 	}
 }
 
+// imImageConfigWarning returns an operator warning when IM channels are active
+// but APP_EXTERNAL_URL is unset. resource:// images then render only if the
+// storage backend is itself publicly reachable (e.g. a cloud bucket with a
+// public endpoint); on the default MinIO (internal minio:9000) or local
+// deployment it is not, so images silently break. Advisory only; returns ""
+// when there is nothing to warn about. Pure (no receiver/closures) so it is
+// unit-testable.
+func imImageConfigWarning(activeChannels int, externalURL string) string {
+	if activeChannels == 0 || strings.TrimSpace(externalURL) != "" {
+		return ""
+	}
+	return fmt.Sprintf("[IM] %d IM channel(s) active but APP_EXTERNAL_URL is unset; "+
+		"resource:// images render only if the storage backend is publicly reachable — "+
+		"otherwise set APP_EXTERNAL_URL so they route through nginx /r/",
+		activeChannels)
+}
+
 // LoadAndStartChannels loads all enabled channels from the database and starts them.
 func (s *Service) LoadAndStartChannels() error {
 	s.startChannelConfigSubscriber()
@@ -957,6 +820,10 @@ func (s *Service) LoadAndStartChannels() error {
 	var channels []IMChannel
 	if err := s.db.Where("enabled = ? AND deleted_at IS NULL", true).Find(&channels).Error; err != nil {
 		return fmt.Errorf("load im channels: %w", err)
+	}
+
+	if msg := imImageConfigWarning(len(channels), os.Getenv("APP_EXTERNAL_URL")); msg != "" {
+		logger.Warnf(ctx, "%s", msg)
 	}
 
 	for i := range channels {
@@ -1247,8 +1114,8 @@ func (s *Service) wsLeaderRenewLoop(ctx context.Context, channelID string) {
 			result, err := script.Run(ctx, s.redis, []string{key}, s.instanceID, wsLeaderTTL.Milliseconds()).Int64()
 			if err != nil || result == 0 {
 				logger.Warnf(context.Background(),
-					"[IM] Lost leadership for channel %s, stopping adapter", channelID)
-				s.StopChannel(channelID)
+					"[IM] Lost leadership for channel %s, stopping adapter and scheduling recovery", channelID)
+				s.handleWSLeadershipLoss(channelID)
 				return
 			}
 			// Still the leader — verify the channel is still active. A
@@ -1296,6 +1163,23 @@ func (s *Service) wsLeaderRenewLoop(ctx context.Context, channelID string) {
 			return
 		}
 	}
+}
+
+// handleWSLeadershipLoss tears down the adapter that no longer owns its lease
+// and puts the enabled channel back into the existing takeover loop. The retry
+// loop re-reads the durable channel row before reconnecting, so a concurrent
+// delete, disable, or config update cannot resurrect a stale runtime.
+func (s *Service) handleWSLeadershipLoss(channelID string) {
+	_, channel, running := s.GetChannelAdapter(channelID)
+	if !running || channel == nil {
+		return
+	}
+
+	s.StopChannel(channelID)
+	if s.stopped.Load() {
+		return
+	}
+	s.scheduleWSLeaderRetry(channel)
 }
 
 func (s *Service) scheduleWSLeaderRetry(channel *IMChannel) {

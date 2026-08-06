@@ -188,7 +188,11 @@ func (h *KnowledgeHandler) resolveKnowledgeAndValidateKBAccess(c *gin.Context, k
 	if h.agentShareService != nil && requiredPermission == types.OrgRoleViewer {
 		agentID := c.Query("agent_id")
 		if agentID != "" {
-			agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, tenantID, callerTenantRole, agentID)
+			sourceTenantID, parseErr := types.ParseAgentSourceTenantID(c.Query(types.AgentSourceTenantIDParam))
+			if parseErr != nil {
+				return nil, ctx, errors.NewBadRequestError(parseErr.Error())
+			}
+			agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, tenantID, callerTenantRole, agentID, sourceTenantID)
 			if err == nil && agent != nil {
 				if knowledge.TenantID != agent.TenantID {
 					return nil, ctx, errors.NewForbiddenError("Permission denied to access this knowledge")
@@ -921,6 +925,8 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 // @Param        source        query     string  false  "来源/渠道筛选 (web/api/feishu/notion/yuque/wechat/...，或 manual/url 按 type 过滤)"
 // @Param        start_time    query     string  false  "更新时间起点，RFC3339 格式"
 // @Param        end_time      query     string  false  "更新时间终点，RFC3339 格式"
+// @Param        folder_path      query     string  false  "文件夹路径筛选，空字符串表示知识库根目录；不传该参数则不按文件夹过滤"
+// @Param        folder_recursive query     bool    false  "为 true 时同时返回子文件夹内的文档"
 // @Success      200        {object}  map[string]interface{}  "知识列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -972,10 +978,20 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		}
 		filter.UpdatedTo = t
 	}
+	// The folder dimension is opt-in by parameter *presence*: an empty
+	// folder_path is meaningful (the knowledge base root), so it cannot be
+	// distinguished from "no folder filter" by value alone.
+	if raw, ok := c.GetQuery("folder_path"); ok {
+		filter.FolderPath = types.NormalizeKnowledgeFolderPath(raw)
+		filter.FolderScope = types.FolderScopeExact
+		if recursive, err := strconv.ParseBool(c.DefaultQuery("folder_recursive", "false")); err == nil && recursive {
+			filter.FolderScope = types.FolderScopeSubtree
+		}
+	}
 
 	logger.Infof(
 		ctx,
-		"Retrieving knowledge list under knowledge base, kb_id=%s tag_ids=%s keyword=%s file_type=%s parse_status=%s source=%s start_time=%s end_time=%s page=%d page_size=%d effectiveTenantID=%d",
+		"Retrieving knowledge list under knowledge base, kb_id=%s tag_ids=%s keyword=%s file_type=%s parse_status=%s source=%s start_time=%s end_time=%s folder_path=%s folder_scope=%s page=%d page_size=%d effectiveTenantID=%d",
 		secutils.SanitizeForLog(kbID),
 		secutils.SanitizeForLog(strings.Join(filter.TagIDs, ",")),
 		secutils.SanitizeForLog(filter.Keyword),
@@ -984,6 +1000,8 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		secutils.SanitizeForLog(filter.Source),
 		secutils.SanitizeForLog(c.Query("start_time")),
 		secutils.SanitizeForLog(c.Query("end_time")),
+		secutils.SanitizeForLog(filter.FolderPath),
+		string(filter.FolderScope),
 		pagination.Page,
 		pagination.PageSize,
 		effectiveTenantID,
@@ -1010,6 +1028,251 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		"page":      result.Page,
 		"page_size": result.PageSize,
 	})
+}
+
+// ListKnowledgeFolders godoc
+// @Summary      获取知识库文件夹目录树
+// @Description  返回知识库内由文件夹上传形成的目录树，包含每个文件夹的直接文档数与含子目录的总数
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "知识库ID"
+// @Success      200  {object}  map[string]interface{}  "目录树"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/knowledge/folders [get]
+func (h *KnowledgeHandler) ListKnowledgeFolders(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// Read access mirrors ListKnowledge so the sidebar tree is available to
+	// every viewer of a shared knowledge base.
+	_, kbID, effectiveTenantID, _, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	tree, err := h.kgService.ListKnowledgeFolderTree(ctx, kbID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Knowledge folder tree retrieved, kb_id=%s folders=%d",
+		secutils.SanitizeForLog(kbID), len(tree.Folders))
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    tree,
+	})
+}
+
+// MoveKnowledgeToFolderRequest is the body schema for POST /knowledge/folder.
+type MoveKnowledgeToFolderRequest struct {
+	KBID string   `json:"kb_id" binding:"required"`
+	IDs  []string `json:"knowledge_ids" binding:"required"`
+	// FolderPath is the destination folder; the empty string is the knowledge
+	// base top level. It is deliberately not `binding:"required"` so documents
+	// can be moved back out of every folder.
+	FolderPath string `json:"folder_path"`
+}
+
+// MoveKnowledgeToFolder godoc
+// @Summary      移动知识到文件夹
+// @Description  批量修改知识条目所属文件夹。文件夹由路径推导而来，因此目标路径不存在时会自动创建；空路径表示知识库顶层。仅调整归类，不会重新解析文档
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      MoveKnowledgeToFolderRequest  true  "移动请求"
+// @Success      200      {object}  map[string]interface{}        "移动成功"
+// @Failure      400      {object}  errors.AppError               "请求参数错误"
+// @Failure      403      {object}  errors.AppError               "权限不足"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/folder [post]
+func (h *KnowledgeHandler) MoveKnowledgeToFolder(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req MoveKnowledgeToFolderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
+		return
+	}
+
+	ids := dedupeKnowledgeIDs(req.IDs)
+	if len(ids) == 0 {
+		c.Error(errors.NewBadRequestError("knowledge_ids cannot be empty"))
+		return
+	}
+	const maxBatch = 200
+	if len(ids) > maxBatch {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("too many ids (max %d per batch)", maxBatch)))
+		return
+	}
+
+	kbID, effectiveTenantID, err := h.requireKnowledgeWriteAccess(c, req.KBID)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	// Guard against cross-KB moves: the service layer scopes by tenant, so the
+	// handler must confirm every entry belongs to the requested knowledge base.
+	if err := h.requireKnowledgeInKB(ctx, effectiveTenantID, kbID, ids); err != nil {
+		c.Error(err)
+		return
+	}
+
+	affected, err := h.kgService.MoveKnowledgeToFolder(ctx, kbID, ids, req.FolderPath)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"moved_count": affected,
+			"folder_path": types.NormalizeKnowledgeFolderPath(req.FolderPath),
+		},
+	})
+}
+
+// RenameKnowledgeFolderRequest is the body schema for
+// PUT /knowledge-bases/:id/knowledge/folders.
+type RenameKnowledgeFolderRequest struct {
+	From string `json:"from" binding:"required"`
+	To   string `json:"to"   binding:"required"`
+}
+
+// RenameKnowledgeFolder godoc
+// @Summary      重命名或移动文件夹
+// @Description  把一个文件夹及其所有子目录改到新路径。目标路径已存在时两个文件夹合并；不能移动到自身子目录下
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                        true  "知识库ID"
+// @Param        request  body      RenameKnowledgeFolderRequest  true  "重命名请求"
+// @Success      200      {object}  map[string]interface{}        "重命名成功"
+// @Failure      400      {object}  errors.AppError               "请求参数错误"
+// @Failure      403      {object}  errors.AppError               "权限不足"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/knowledge/folders [put]
+func (h *KnowledgeHandler) RenameKnowledgeFolder(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req RenameKnowledgeFolderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
+		return
+	}
+
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("No permission to modify knowledge"))
+		return
+	}
+	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
+		c.Error(err)
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	affected, err := h.kgService.RenameKnowledgeFolder(ctx, kbID, req.From, req.To)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"moved_count": affected,
+			"folder_path": types.NormalizeKnowledgeFolderPath(req.To),
+		},
+	})
+}
+
+// dedupeKnowledgeIDs trims, drops empty and de-duplicates a batch of IDs while
+// preserving the caller's order.
+func dedupeKnowledgeIDs(raw []string) []string {
+	seen := make(map[string]struct{}, len(raw))
+	ids := make([]string, 0, len(raw))
+	for _, item := range raw {
+		id := strings.TrimSpace(item)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// requireKnowledgeWriteAccess resolves a knowledge base from a request body and
+// enforces the editor-or-admin plus ownership gate shared by the batch routes.
+func (h *KnowledgeHandler) requireKnowledgeWriteAccess(
+	c *gin.Context,
+	requestedKBID string,
+) (string, uint64, error) {
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, requestedKBID)
+	if err != nil {
+		return "", 0, err
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		return "", 0, errors.NewForbiddenError("No permission to modify knowledge")
+	}
+	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
+		return "", 0, err
+	}
+	return kbID, effectiveTenantID, nil
+}
+
+// requireKnowledgeInKB verifies every ID exists and belongs to the given
+// knowledge base, so a batch operation cannot reach across knowledge bases.
+func (h *KnowledgeHandler) requireKnowledgeInKB(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	ids []string,
+) error {
+	knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, tenantID, ids)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		return errors.NewInternalServerError(err.Error())
+	}
+	if len(knowledgeList) != len(ids) {
+		return errors.NewBadRequestError("One or more knowledge entries not found")
+	}
+	for _, k := range knowledgeList {
+		if k.KnowledgeBaseID != kbID {
+			return errors.NewBadRequestError(
+				fmt.Sprintf("Knowledge %s does not belong to knowledge base %s",
+					secutils.SanitizeForLog(k.ID), secutils.SanitizeForLog(kbID)))
+		}
+	}
+	return nil
 }
 
 // DeleteKnowledge godoc
@@ -1099,20 +1362,7 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 		return
 	}
 
-	// Deduplicate and drop empty IDs.
-	seen := make(map[string]struct{}, len(req.IDs))
-	ids := make([]string, 0, len(req.IDs))
-	for _, raw := range req.IDs {
-		id := strings.TrimSpace(raw)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
-	}
+	ids := dedupeKnowledgeIDs(req.IDs)
 	if len(ids) == 0 {
 		c.Error(errors.NewBadRequestError("ids cannot be empty"))
 		return
@@ -1384,9 +1634,10 @@ func (h *KnowledgeHandler) PreviewKnowledgeFile(c *gin.Context) {
 
 // GetKnowledgeBatchRequest defines parameters for batch knowledge retrieval
 type GetKnowledgeBatchRequest struct {
-	IDs     []string `form:"ids" binding:"required"` // List of knowledge IDs
-	KBID    string   `form:"kb_id"`                  // Optional: scope to this KB (validates access and uses effective tenant for shared KB)
-	AgentID string   `form:"agent_id"`               // Optional: when using a shared agent, use agent's tenant for retrieval (validates shared agent access)
+	IDs                 []string `form:"ids" binding:"required"` // List of knowledge IDs
+	KBID                string   `form:"kb_id"`                  // Optional: scope to this KB (validates access and uses effective tenant for shared KB)
+	AgentID             string   `form:"agent_id"`               // Optional: when using a shared agent, use agent's tenant for retrieval (validates shared agent access)
+	AgentSourceTenantID uint64   `form:"agent_source_tenant_id"` // Optional source selector, verified against the share relation
 }
 
 // GetKnowledgeBatch godoc
@@ -1420,6 +1671,10 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
+	if _, parseErr := types.ParseAgentSourceTenantID(c.Query(types.AgentSourceTenantIDParam)); parseErr != nil {
+		c.Error(errors.NewBadRequestError(parseErr.Error()))
+		return
+	}
 
 	// agentAllowedKBIDs restricts results to the agent's configured KB scope.
 	// nil = no agent restriction; empty slice = agent has no KB access (none mode).
@@ -1439,7 +1694,7 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 			return
 		}
 		callerTenantRole := types.TenantRoleFromContext(ctx)
-		agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID)
+		agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID, req.AgentSourceTenantID)
 		if err != nil || agent == nil {
 			logger.Warnf(ctx, "GetKnowledgeBatch: invalid or inaccessible shared agent %s: %v", agentID, err)
 			c.Error(errors.NewForbiddenError("Invalid or inaccessible shared agent").WithDetails(err.Error()))
@@ -1565,12 +1820,52 @@ func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
+	updated, getErr := h.kgService.GetKnowledgeByID(effCtx, id)
+	if getErr != nil {
+		logger.Warnf(ctx, "Knowledge updated but failed to reload status for %s: %v", id, getErr)
+	}
 
 	logger.Infof(ctx, "Knowledge updated successfully, knowledge ID: %s", id)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "Knowledge chunk updated successfully",
+		"message": "Knowledge updated successfully",
+		"data":    updated,
 	})
+}
+
+// RegenerateKnowledgeSummary refreshes a stale summary after chunk or metadata edits.
+func (h *KnowledgeHandler) RegenerateKnowledgeSummary(c *gin.Context) {
+	ctx := c.Request.Context()
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	knowledge, err := h.kgService.GetKnowledgeByID(effCtx, id)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if knowledge.SummaryStatus == "" || knowledge.SummaryStatus == types.SummaryStatusNone {
+		knowledge, err = h.kgService.RegenerateKnowledgeSummary(effCtx, id)
+	} else {
+		err = h.kgService.RequestKnowledgeSummaryRefresh(effCtx, id)
+		if err == nil {
+			knowledge, err = h.kgService.GetKnowledgeByID(effCtx, id)
+		}
+	}
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": knowledge})
 }
 
 // UpdateManualKnowledge godoc
@@ -1952,7 +2247,12 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 			return
 		}
 		callerTenantRole := types.TenantRoleFromContext(ctx)
-		agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID)
+		requestedSourceTenantID, parseErr := types.ParseAgentSourceTenantID(c.Query(types.AgentSourceTenantIDParam))
+		if parseErr != nil {
+			c.Error(errors.NewBadRequestError(parseErr.Error()))
+			return
+		}
+		agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID, requestedSourceTenantID)
 		if err != nil {
 			if goerrors.Is(err, service.ErrAgentShareNotFound) || goerrors.Is(err, service.ErrAgentSharePermission) || goerrors.Is(err, service.ErrAgentNotFoundForShare) {
 				c.Error(errors.NewForbiddenError("no permission for this shared agent"))

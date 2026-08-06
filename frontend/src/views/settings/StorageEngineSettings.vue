@@ -369,14 +369,15 @@
         <template v-else-if="currentEngine === 's3'">
           <section class="setting-drawer__section">
             <h4 class="setting-drawer__section-title">{{ $t('settings.storage.credentialsSection', '凭证') }}</h4>
+            <p class="form-desc">{{ $t('settings.storage.s3DefaultCredentialsHint') }}</p>
             <div class="form-item">
-              <label class="form-label required">Access Key</label>
+              <label class="form-label">Access Key</label>
               <t-input v-model="config.s3.access_key" :placeholder="$t('settings.storage.s3AccessKeyPlaceholder')" clearable>
                 <template #prefix-icon><t-icon name="lock-on" /></template>
               </t-input>
             </div>
             <div class="form-item">
-              <label class="form-label required">Secret Key</label>
+              <label class="form-label">Secret Key</label>
               <t-input v-model="config.s3.secret_key" type="password" :placeholder="$t('settings.storage.s3SecretKeyPlaceholder')" clearable>
                 <template #prefix-icon><t-icon name="lock-on" /></template>
               </t-input>
@@ -385,8 +386,8 @@
           <section class="setting-drawer__section">
             <h4 class="setting-drawer__section-title">{{ $t('settings.storage.bucketSection', 'Bucket') }}</h4>
             <div class="form-item">
-              <label class="form-label required">Endpoint</label>
-              <t-input v-model="config.s3.endpoint" placeholder="e.g. https://s3.amazonaws.com" clearable />
+              <label class="form-label">Endpoint</label>
+              <t-input v-model="config.s3.endpoint" :placeholder="$t('settings.storage.s3EndpointPlaceholder')" clearable />
             </div>
             <div class="form-item">
               <label class="form-label required">Region</label>
@@ -1684,4 +1685,3 @@ onMounted(loadAll)
   color: #CE1126;
 }
 </style>
-

@@ -77,28 +77,29 @@ templates:
   # --- Model fallback prompt templates (for fallback_strategy = "model") ---
   - id: "model_fallback"
     name: "Model Fallback"
-    description: "Fallback prompt that delegates to the model for generation"
+    description: "Fallback prompt that delegates to the model for grounded generation"
     i18n:
       zh-CN:
         name: "模型兜底提示"
-        description: "引导模型基于通用知识回答的提示词"
+        description: "引导模型在无直接命中时基于知识库清单进行受控回复"
       en-US:
         name: "Model Fallback Prompt"
-        description: "Prompt to guide model to answer with general knowledge"
+        description: "Prompt to guide model to respond from knowledge-base evidence only"
       ko-KR:
         name: "모델 폴백 프롬프트"
         description: "일반 지식을 바탕으로 모델이 답변하도록 안내하는 프롬프트"
     mode: "model"
     content: |
-      No content directly matched the user's query via search. However, the knowledge base contains the following documents:
+      No content directly matched the user's query via search. The following knowledge-base documents may be available for reference:
 
       {{kb_documents}}
 
-      Important Notes:
-      1. If the document listing above is available, use it to help answer the user's question (e.g., list relevant documents, suggest which documents may contain the information they need)
-      2. If the document listing is empty, use your general knowledge and clearly inform the user that the answer is not from the knowledge base
-      3. If the question involves specific domains or requires the latest information, suggest the user consult official resources
-      4. Maintain accuracy and objectivity in the response
+      ## Required Behavior
+      1. Do NOT use web search, external sources, training data, or general knowledge to answer the substantive question.
+      2. If the document listing above is available, use it only to suggest which documents may need to be checked. Do not claim that a specific answer is supported unless it appears in the retrieved evidence.
+      3. If the document listing is empty or insufficient, clearly state that the current knowledge-base retrieval did not find supporting evidence.
+      4. Ask the user to narrow the question, provide a more specific keyword, or select a likely document when that would help.
+      5. Keep the response concise, objective, and auditable.
 
       ## CRITICAL: Language Rule
       - ALWAYS respond in {{language}}
@@ -111,7 +112,7 @@ templates:
     i18n:
       zh-CN:
         name: "标准兜底 Prompt"
-        description: "知识库无相关结果时引导模型回答的默认提示词"
+        description: "知识库无相关结果时引导模型基于知识库清单进行受控回复"
       en-US:
         name: "Standard Fallback Prompt"
         description: "Default prompt that delegates to the model when KB has no relevant results"
@@ -120,18 +121,18 @@ templates:
         description: "KB에 관련 결과가 없을 때 모델에 위임하는 기본 프롬프트"
     mode: "model"
     content: |
-      You are WeKnora, a professional and friendly AI assistant developed by Tencent.
+      You are WeKnora, a professional and friendly AI assistant developed by ebkb.
 
-      No content directly matched the user's query via search. However, the knowledge base contains the following documents:
+      No content directly matched the user's query via search. The following knowledge-base documents may be available for reference:
 
       {{kb_documents}}
 
       ## Response Requirements
-      - If the document listing above is available, use it to help answer the user's question (e.g., list relevant documents, suggest which documents may contain the information they need, or summarize what is available in the knowledge base)
-      - If the document listing is empty or not relevant, answer the user's question based on your general knowledge and clearly inform the user that the answer is not from the knowledge base
-      - Be concise, clear, and substantive
-      - If real-time data or personal privacy information is involved, honestly state that it cannot be obtained
-      - Use a polite and professional tone
+      - Do NOT use web search, external sources, training data, or general knowledge to answer the substantive question.
+      - If the document listing above is available, use it only to suggest which documents may need to be checked. Do not claim that a specific answer is supported unless it appears in the retrieved evidence.
+      - If the document listing is empty or not relevant, clearly state that the current knowledge-base retrieval did not find supporting evidence.
+      - Ask the user to narrow the question, provide a more specific keyword, or select a likely document when that would help.
+      - Be concise, clear, objective, and auditable.
       - IMPORTANT: Always respond in {{language}}
 
       ## User's question:

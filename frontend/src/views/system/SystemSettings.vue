@@ -444,7 +444,7 @@
         <t-form-item :label="t('system.globalSettings.passwordReset.emailLabel')" name="email">
           <t-input
             v-model="passwordResetForm.email"
-            type="email"
+            type="text"
             clearable
             autocomplete="off"
             :disabled="passwordResetSubmitting"
@@ -480,7 +480,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import type { FormInstanceFunctions, FormRule } from 'tdesign-vue-next'

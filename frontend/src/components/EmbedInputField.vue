@@ -298,7 +298,8 @@ onUnmounted(() => {
       border: none;
       box-shadow: none;
       background: transparent;
-      padding: 14px 16px 52px;
+      padding: 12px 14px 44px;
+      min-height: 84px !important;
       font-size: 14px;
       line-height: 1.5;
       resize: none;

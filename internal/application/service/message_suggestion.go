@@ -80,13 +80,7 @@ func (s *messageSuggestionService) EnsureFollowUps(
 	}
 
 	tenantID := types.MustTenantIDFromContext(ctx)
-	locale := message.ExecutionContext.Locale
-	if locale == "" {
-		locale, _ = types.LanguageFromContext(ctx)
-	}
-	if locale == "" {
-		locale = types.DefaultLanguage()
-	}
+	locale := types.ResolveLanguage(ctx, message.ExecutionContext.Locale)
 	configHash := message.ExecutionContext.AgentConfigHash
 	if configHash == "" {
 		configHash = "no-agent-config"
@@ -181,13 +175,7 @@ func (s *messageSuggestionService) GetFollowUps(
 		return nil, err
 	}
 	tenantID := types.MustTenantIDFromContext(ctx)
-	locale := message.ExecutionContext.Locale
-	if locale == "" {
-		locale, _ = types.LanguageFromContext(ctx)
-	}
-	if locale == "" {
-		locale = types.DefaultLanguage()
-	}
+	locale := types.ResolveLanguage(ctx, message.ExecutionContext.Locale)
 	configHash := message.ExecutionContext.AgentConfigHash
 	if configHash == "" {
 		configHash = "no-agent-config"
@@ -345,7 +333,7 @@ func (s *messageSuggestionService) generateWithModel(
 	if categories == "" {
 		categories = "clarify, deepen, action"
 	}
-	language := types.LanguageLocaleName(message.ExecutionContext.Locale)
+	language := types.ResolveLanguageName(ctx, message.ExecutionContext.Locale)
 	systemPrompt := buildSuggestionSystemPrompt(count, language, categories)
 	if instruction := strings.TrimSpace(config.AdditionalInstruction); instruction != "" {
 		systemPrompt += " Additional agent instruction: " + instruction

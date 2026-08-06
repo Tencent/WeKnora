@@ -84,6 +84,21 @@ type KnowledgeService interface {
 		page *types.Pagination,
 		filter types.KnowledgeListFilter,
 	) (*types.PageResult, error)
+	// ListKnowledgeFolderTree returns the folder hierarchy derived from the
+	// folder_path of every knowledge entry in a knowledge base, with per-folder
+	// document counts. It powers the document sidebar tree.
+	ListKnowledgeFolderTree(ctx context.Context, kbID string) (*types.KnowledgeFolderTree, error)
+	// MoveKnowledgeToFolder re-files knowledge entries under the given folder
+	// path (empty means the knowledge base top level). Folders are derived from
+	// the stored paths, so a path that does not exist yet is created implicitly.
+	MoveKnowledgeToFolder(
+		ctx context.Context,
+		kbID string,
+		ids []string,
+		folderPath string,
+	) (int64, error)
+	// RenameKnowledgeFolder moves a folder and everything below it to a new path.
+	RenameKnowledgeFolder(ctx context.Context, kbID string, from string, to string) (int64, error)
 	// DeleteKnowledge deletes knowledge by ID.
 	DeleteKnowledge(ctx context.Context, id string) error
 	// DeleteKnowledgeList deletes multiple knowledge entries by IDs.
@@ -92,6 +107,12 @@ type KnowledgeService interface {
 	GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error)
 	// UpdateKnowledge updates knowledge information.
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
+	// RegenerateKnowledgeSummary refreshes the document description and summary retrieval chunk.
+	RegenerateKnowledgeSummary(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
+	// RequestKnowledgeSummaryRefresh enqueues an async summary refresh.
+	RequestKnowledgeSummaryRefresh(ctx context.Context, knowledgeID string) error
+	// RegenerateChunkQuestions rebuilds the auxiliary questions for one current chunk revision.
+	RegenerateChunkQuestions(ctx context.Context, chunkID string) ([]types.GeneratedQuestion, error)
 	// UpdateManualKnowledge updates manual Markdown knowledge content.
 	UpdateManualKnowledge(
 		ctx context.Context,
@@ -235,6 +256,30 @@ type KnowledgeRepository interface {
 		kbID string,
 		params *types.KnowledgeCheckParams,
 	) (bool, *types.Knowledge, error)
+	// ListKnowledgeFolderCounts aggregates the number of knowledge entries
+	// stored directly in each folder_path of a knowledge base.
+	ListKnowledgeFolderCounts(
+		ctx context.Context,
+		tenantID uint64,
+		kbID string,
+	) ([]*types.KnowledgeFolderCount, error)
+	// UpdateKnowledgeFolderPath files the given entries under folderPath.
+	UpdateKnowledgeFolderPath(
+		ctx context.Context,
+		tenantID uint64,
+		kbID string,
+		ids []string,
+		folderPath string,
+	) (int64, error)
+	// RenameKnowledgeFolderPath rewrites folder_path for a folder and all of its
+	// descendants. Renaming onto an existing path merges the folders.
+	RenameKnowledgeFolderPath(
+		ctx context.Context,
+		tenantID uint64,
+		kbID string,
+		from string,
+		to string,
+	) (int64, error)
 	// AminusB returns the IDs of knowledge in A that have no counterpart in B,
 	// comparing file_hash as a multiset (so duplicate-count differences and
 	// NULL/empty hashes are handled correctly, letting a clone converge).

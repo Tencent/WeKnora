@@ -224,6 +224,45 @@ func TestEnsureDefaults(t *testing.T) {
 	}
 }
 
+func TestNormalizeSplitterConfig_MatchesIngestionDefaults(t *testing.T) {
+	cfg := NormalizeSplitterConfig(SplitterConfig{})
+	if cfg.ChunkSize != DefaultChunkSize {
+		t.Errorf("chunk size: got %d want %d", cfg.ChunkSize, DefaultChunkSize)
+	}
+	if cfg.ChunkOverlap != DefaultChunkOverlap {
+		t.Errorf("chunk overlap: got %d want %d", cfg.ChunkOverlap, DefaultChunkOverlap)
+	}
+	if len(cfg.Separators) != 3 {
+		t.Fatalf("separators: got %v", cfg.Separators)
+	}
+}
+
+func TestNormalizeLineEndings(t *testing.T) {
+	input := "first\r\nsecond\rthird\nfourth"
+	if got, want := NormalizeLineEndings(input), "first\nsecond\nthird\nfourth"; got != want {
+		t.Errorf("NormalizeLineEndings() = %q, want %q", got, want)
+	}
+}
+
+func TestDeriveParentChildConfigs_DefaultSizes(t *testing.T) {
+	base := SplitterConfig{
+		ChunkSize:    1000,
+		ChunkOverlap: 100,
+		Separators:   []string{"\n\n", "\n"},
+		Strategy:     StrategyHeading,
+	}
+	parent, child := DeriveParentChildConfigs(base, 0, 0)
+	if parent.ChunkSize != 4096 || child.ChunkSize != 384 {
+		t.Fatalf("default sizes: parent=%d child=%d", parent.ChunkSize, child.ChunkSize)
+	}
+	if parent.Strategy != StrategyHeading || child.Strategy != StrategyHeading {
+		t.Fatalf("strategy not propagated: parent=%q child=%q", parent.Strategy, child.Strategy)
+	}
+	if child.ChunkOverlap != 384/5 {
+		t.Fatalf("child overlap: got %d want %d", child.ChunkOverlap, 384/5)
+	}
+}
+
 func TestValidateChunks_Empty(t *testing.T) {
 	if v := ValidateChunks(nil, 1000, 500); v.OK {
 		t.Error("nil chunks should be invalid")

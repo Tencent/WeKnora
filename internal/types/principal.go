@@ -26,6 +26,19 @@ const EmbedVisitorHeader = "X-Embed-Visitor"
 // LIKE '<prefix>%' selects every API-key session in the tenant.
 const SessionOwnerAPITenantKeyPrefix = "api_tenant_key:"
 
+// SessionOwnerAPIExternalUserPrefix prefixes sessions.user_id for rows created
+// by a tenant API key whose request resolved an external-user identity. The
+// remainder is "<tenantID>:<externalUserID>".
+const SessionOwnerAPIExternalUserPrefix = PrincipalAPIExternalUser + ":"
+
+// IsAPISessionOwnerID reports whether a stored session owner was produced by
+// a tenant API-key request, with or without an external-user identity.
+func IsAPISessionOwnerID(ownerID string) bool {
+	ownerID = strings.TrimSpace(ownerID)
+	return strings.HasPrefix(ownerID, SessionOwnerAPITenantKeyPrefix) ||
+		strings.HasPrefix(ownerID, SessionOwnerAPIExternalUserPrefix)
+}
+
 // Principal represents the terminal caller for per-subject isolation features.
 // It is intentionally separate from UserID: many principals, such as IM users
 // or embed visitors, are not WeKnora accounts and must not imply RBAC rights.

@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -562,6 +565,95 @@ func (s *knowledgeService) ListPagedKnowledgeByKnowledgeBaseID(ctx context.Conte
 	return types.NewPageResult(total, page, knowledges), nil
 }
 
+// ListKnowledgeFolderTree returns the folder hierarchy of a knowledge base with
+// per-folder document counts, derived from the folder_path stored on each
+// knowledge entry.
+func (s *knowledgeService) ListKnowledgeFolderTree(ctx context.Context,
+	kbID string,
+) (*types.KnowledgeFolderTree, error) {
+	counts, err := s.repo.ListKnowledgeFolderCounts(ctx,
+		ctx.Value(types.TenantIDContextKey).(uint64), kbID)
+	if err != nil {
+		return nil, err
+	}
+	return types.BuildKnowledgeFolderTree(counts), nil
+}
+
+// MoveKnowledgeToFolder re-files knowledge entries under folderPath. Since
+// folders are derived from the stored paths, a folder that does not exist yet is
+// created by this call; a folder whose last entry moves away disappears.
+func (s *knowledgeService) MoveKnowledgeToFolder(ctx context.Context,
+	kbID string, ids []string, folderPath string,
+) (int64, error) {
+	if len(ids) == 0 {
+		return 0, werrors.NewBadRequestError("knowledge_ids cannot be empty")
+	}
+	normalized, err := normalizeTargetFolderPath(ctx, folderPath)
+	if err != nil {
+		return 0, err
+	}
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	affected, err := s.repo.UpdateKnowledgeFolderPath(ctx, tenantID, kbID, ids, normalized)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to move knowledge to folder %q: %v", normalized, err)
+		return 0, err
+	}
+	logger.Infof(ctx, "Moved %d knowledge entries to folder %q in kb %s", affected, normalized, kbID)
+	return affected, nil
+}
+
+// RenameKnowledgeFolder moves a folder and its whole subtree to a new path.
+// Renaming onto an existing folder merges them, which is the same outcome the
+// user would get by moving the documents one by one.
+func (s *knowledgeService) RenameKnowledgeFolder(ctx context.Context,
+	kbID string, from string, to string,
+) (int64, error) {
+	source := types.NormalizeKnowledgeFolderPath(from)
+	if source == "" {
+		return 0, werrors.NewBadRequestError("源文件夹路径不能为空")
+	}
+	target, err := normalizeTargetFolderPath(ctx, to)
+	if err != nil {
+		return 0, err
+	}
+	if target == "" {
+		return 0, werrors.NewBadRequestError("目标文件夹路径不能为空")
+	}
+	if target == source {
+		return 0, nil
+	}
+	// Moving a folder inside itself would make its own subtree unreachable.
+	if strings.HasPrefix(target, source+"/") {
+		return 0, werrors.NewBadRequestError("不能将文件夹移动到它自己的子目录下")
+	}
+
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	affected, err := s.repo.RenameKnowledgeFolderPath(ctx, tenantID, kbID, source, target)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to rename folder %q to %q: %v", source, target, err)
+		return 0, err
+	}
+	logger.Infof(ctx, "Renamed folder %q to %q in kb %s, %d entries affected",
+		source, target, kbID, affected)
+	return affected, nil
+}
+
+// normalizeTargetFolderPath canonicalizes a caller-supplied destination folder
+// and applies the same input validation as the upload path, since the value ends
+// up rendered as sidebar tree labels.
+func normalizeTargetFolderPath(ctx context.Context, folderPath string) (string, error) {
+	trimmed := strings.TrimSpace(folderPath)
+	if trimmed == "" {
+		return "", nil
+	}
+	safe, valid := secutils.ValidateInput(trimmed)
+	if !valid {
+		logger.Errorf(ctx, "Invalid folder path: %s", secutils.SanitizeForLog(trimmed))
+		return "", werrors.NewValidationError("文件夹路径包含非法字符")
+	}
+	return types.NormalizeKnowledgeFolderPath(safe), nil
+}
+
 // GetKnowledgeFile retrieves the physical file associated with a knowledge entry
 func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error) {
 	// Get knowledge record
@@ -609,11 +701,44 @@ func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types
 	if knowledge.Description != "" {
 		record.Description = knowledge.Description
 	}
+	metadataChanged := false
+	if knowledge.CustomMetadata != nil {
+		var custom map[string]interface{}
+		if err := json.Unmarshal(knowledge.CustomMetadata, &custom); err != nil {
+			return fmt.Errorf("custom_metadata must be a JSON object: %w", err)
+		}
+		if len(custom) > 20 {
+			return fmt.Errorf("custom_metadata supports at most 20 fields")
+		}
+		for key, value := range custom {
+			if len(strings.TrimSpace(key)) == 0 || len(key) > 64 || len(fmt.Sprint(value)) > 1000 {
+				return fmt.Errorf("invalid custom_metadata field %q", key)
+			}
+			switch value.(type) {
+			case string, float64, bool, nil:
+			default:
+				return fmt.Errorf("custom_metadata field %q must be a string, number, boolean, or null", key)
+			}
+		}
+		existing := make(map[string]interface{})
+		if len(record.CustomMetadata) > 0 {
+			_ = json.Unmarshal(record.CustomMetadata, &existing)
+		}
+		metadataChanged = !reflect.DeepEqual(existing, custom)
+		record.CustomMetadata = knowledge.CustomMetadata
+	}
 
 	// Update knowledge record in the repository
 	if err := s.repo.UpdateKnowledge(ctx, record); err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge: %v", err)
 		return err
+	}
+	if metadataChanged && record.SummaryStatus != "" && record.SummaryStatus != types.SummaryStatusNone {
+		if err := enqueueSummaryRefresh(ctx, s.repo, s.task, s.kbService, s.tracker(), record); err != nil {
+			logger.Warnf(ctx, "Metadata saved but summary refresh enqueue failed for %s: %v", record.ID, err)
+		} else {
+			logger.Infof(ctx, "Enqueued summary refresh after metadata update, knowledge ID: %s", record.ID)
+		}
 	}
 	logger.Infof(ctx, "Knowledge updated successfully, ID: %s", knowledge.ID)
 	return nil

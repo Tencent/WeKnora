@@ -3,12 +3,16 @@ templates:
   - id: "default_session_title"
     name: "Standard Title"
     description: "Generate a concise session title from user's question"
+    i18n:
+      zh-CN:
+        name: "标准标题"
+        description: "根据用户问题生成简短对话标题"
     default: true
     content: |
-      Generate a short session title based on the user's question.
+      请根据用户的问题生成一个简短的对话标题。
 
-      Requirements:
-      - 4-10 words
-      - Only extract the intent of the user's question, don't answer about it
-      - Output only the title, no explanation needed
-      - IMPORTANT: Use {{language}} for the title
+      要求：
+      - 标题长度必须在 4 到 15 个字之间
+      - 只提取用户问题的核心意图，不要回答问题
+      - 只输出标题本身，不要任何解释、标点或引号
+      - 使用中文
