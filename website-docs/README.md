@@ -213,4 +213,4 @@ flowchart LR
 - 文中源码路径均相对仓库根目录，如 `internal/agent/engine.go`。
 - API 路径默认带 `/api/v1` 前缀；认证方式见 [API 总览](04-api/01-api-overview.md)。
 - 配置示例中的密钥均为占位符，生产环境务必替换（尤其 `JWT_SECRET`、`SYSTEM_AES_KEY`、数据库口令）。
-- 文档对应 `main` 分支（v0.7.1 及其后的提交），随代码变更同步维护。
+- 文档基于仓库根目录 `VERSION` 文件对应版本源码整理（VitePress 构建时自动读取），随代码变更同步维护。

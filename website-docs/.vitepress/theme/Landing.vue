@@ -1,5 +1,9 @@
 <script setup lang="ts">
+import { useData } from 'vitepress/client'
 import Illus from './Illus.vue'
+
+const { theme } = useData()
+const versionLabel = theme.value.weknoraVersion ?? 'unknown'
 
 const stats = [
   { value: '25', unit: '种', label: '文件格式：文档、网页、扫描件、图片、音频' },
@@ -266,7 +270,7 @@ const deployments = [
     <section class="hero">
       <div class="shell hero-grid">
         <div class="hero-copy">
-          <p class="eyebrow">Tencent 开源 · WeKnora v0.7.1 · 官方文档</p>
+          <p class="eyebrow">Tencent 开源 · WeKnora {{ versionLabel }} · 官方文档</p>
           <h1 class="display">
             开源的知识库问答系统
           </h1>
@@ -275,6 +279,14 @@ const deployments = [
           <div class="actions">
             <a class="btn btn-solid" href="/01-getting-started/01-introduction">开始阅读</a>
             <a class="btn btn-ghost" href="/02-architecture/01-overview">系统架构</a>
+            <a
+              class="btn btn-text"
+              href="https://weknora.weixin.qq.com"
+              target="_blank"
+              rel="noreferrer"
+            >
+              官方网站 ↗
+            </a>
             <a
               class="btn btn-text"
               href="https://github.com/Tencent/WeKnora"
