@@ -127,6 +127,7 @@ type sessionService struct {
 	sandboxMgr            sandbox.Manager // Default sandbox backend; used to reclaim per-session MicroVMs on delete
 	sandboxResolver       sandbox.TenantSandboxResolver
 	sandboxPinner         *SessionSandboxPinner
+	sandboxPolicy         WorkspaceSandboxPolicy
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -147,6 +148,7 @@ func NewSessionService(cfg *config.Config,
 	sandboxMgr sandbox.Manager,
 	sandboxResolver sandbox.TenantSandboxResolver,
 	sandboxPinner *SessionSandboxPinner,
+	sandboxPolicy WorkspaceSandboxPolicy,
 ) interfaces.SessionService {
 	return &sessionService{
 		cfg:                   cfg,
@@ -166,6 +168,7 @@ func NewSessionService(cfg *config.Config,
 		sandboxMgr:            sandboxMgr,
 		sandboxResolver:       sandboxResolver,
 		sandboxPinner:         sandboxPinner,
+		sandboxPolicy:         sandboxPolicy,
 	}
 }
 
@@ -677,7 +680,7 @@ func (s *sessionService) destroyBoundSandbox(ctx context.Context, sessionID stri
 	// to the default manager keeps those reachable: DestroySession is a cheap
 	// binding lookup that no-ops when the session truly has no sandbox, whereas
 	// skipping would abandon a paused instance that keeps billing.
-	mgr, err := resolveTenantSandboxForConfig(ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID)
+	mgr, err := resolveTenantSandboxForConfig(ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, s.sandboxPolicy)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to resolve sandbox for session %s cleanup: %v", sessionID, err)
 		return

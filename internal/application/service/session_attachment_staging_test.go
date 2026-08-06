@@ -127,6 +127,7 @@ func TestStageSessionAttachmentsReconcilesAndSkipsExisting(t *testing.T) {
 	staged, err := service.stageSessionAttachments(
 		context.Background(),
 		"session-1",
+		"",
 		types.MessageAttachments{attachment, attachment},
 	)
 
@@ -139,7 +140,7 @@ func TestStageSessionAttachmentsReconcilesAndSkipsExisting(t *testing.T) {
 	assert.NotContains(t, manager.files, stalePath)
 
 	// The second reconciliation sees the same path and size and avoids storage IO.
-	_, err = service.stageSessionAttachments(context.Background(), "session-1", types.MessageAttachments{attachment})
+	_, err = service.stageSessionAttachments(context.Background(), "session-1", "", types.MessageAttachments{attachment})
 	require.NoError(t, err)
 	assert.Equal(t, 1, fileService.getCalls[attachment.URL])
 }
@@ -154,7 +155,7 @@ func TestStageSessionAttachmentsSkipsWhenNoFilesystemCapability(t *testing.T) {
 	}
 	service := &agentService{sandboxMgr: manager, fileService: &stagingFileService{}}
 
-	staged, err := service.stageSessionAttachments(context.Background(), "session-1", types.MessageAttachments{{
+	staged, err := service.stageSessionAttachments(context.Background(), "session-1", "", types.MessageAttachments{{
 		URL: "local://tenant/file", FileName: "file.txt",
 	}})
 

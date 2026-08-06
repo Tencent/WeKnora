@@ -81,11 +81,16 @@ func ListConfigSandboxes(
 // ReleaseConfigSandboxes deletes every sandbox the config owns and reports how
 // many went away.
 //
+// This is deliberately NOT exposed as an admin action. Its one caller is the
+// sweep that runs immediately after a config's credentials are overwritten,
+// using the outgoing credentials still held in memory — the only remaining
+// moment those sandboxes can be reached at all. An admin blocked from editing a
+// config is instead told to end the owning sessions or create a second config.
+//
 // One undeletable sandbox does not abort the sweep - partial progress is
-// strictly better than none - but the failures ARE returned. Reporting success
-// while a sandbox survived is the expensive lie here: the caller would tell the
-// admin "released 3", stop retrying, and leave a paused instance billing on
-// credentials that are about to be replaced.
+// strictly better than none - but the failures ARE returned. Swallowing them
+// would leave a paused instance billing on credentials that no longer exist
+// anywhere, with no record of which sandbox it was.
 func ReleaseConfigSandboxes(
 	ctx context.Context,
 	client ConfigSandboxClient,

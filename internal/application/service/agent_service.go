@@ -107,6 +107,7 @@ type agentService struct {
 	sandboxMgr            sandbox.Manager
 	sandboxResolver       sandbox.TenantSandboxResolver
 	sandboxPinner         *SessionSandboxPinner
+	sandboxPolicy         WorkspaceSandboxPolicy
 }
 
 // NewAgentService creates a new agent service
@@ -131,6 +132,7 @@ func NewAgentService(
 	sandboxMgr sandbox.Manager,
 	sandboxResolver sandbox.TenantSandboxResolver,
 	sandboxPinner *SessionSandboxPinner,
+	sandboxPolicy WorkspaceSandboxPolicy,
 ) interfaces.AgentService {
 	return &agentService{
 		cfg:                   cfg,
@@ -153,6 +155,7 @@ func NewAgentService(
 		sandboxMgr:            sandboxMgr,
 		sandboxResolver:       sandboxResolver,
 		sandboxPinner:         sandboxPinner,
+		sandboxPolicy:         sandboxPolicy,
 	}
 }
 
@@ -364,7 +367,7 @@ func (s *agentService) initializeSkillsManager(
 	if err != nil {
 		return nil, fmt.Errorf("resolve sandbox config for session %s: %w", sessionID, err)
 	}
-	sandboxMgr, err := resolveTenantSandboxForConfig(ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID)
+	sandboxMgr, err := resolveTenantSandboxForConfig(ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, s.sandboxPolicy)
 	if err != nil {
 		return nil, err
 	}

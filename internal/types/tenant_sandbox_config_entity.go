@@ -24,6 +24,16 @@ const SandboxConfigIDGlobalDefault = "-"
 // is a crashed handler's leftover and must not wedge the config.
 const SandboxCordonLease = 2 * time.Minute
 
+// SandboxWorkspacePolicyConfigName is the reserved row name for the workspace-
+// level "disable script execution for deployment-default agents" toggle. It is
+// hidden from the management list and updated via the workspace-policy API.
+const SandboxWorkspacePolicyConfigName = "__workspace_scripts_policy__"
+
+// IsSandboxWorkspacePolicyRow reports whether e is the internal policy row.
+func IsSandboxWorkspacePolicyRow(e *TenantSandboxConfigEntity) bool {
+	return e != nil && e.Name == SandboxWorkspacePolicyConfigName
+}
+
 // TenantSandboxConfigEntity is one named sandbox backend configuration.
 type TenantSandboxConfigEntity struct {
 	ID          string `gorm:"type:varchar(36);primaryKey"`

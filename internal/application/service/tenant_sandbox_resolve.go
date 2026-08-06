@@ -6,6 +6,9 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
@@ -54,6 +57,17 @@ func (l *tenantSandboxConfigLoader) Load(
 	}, nil
 }
 
+// WorkspaceSandboxPolicy reports whether sandbox execution is disabled for the
+// entire workspace, including agents bound to named cube/e2b configs.
+type WorkspaceSandboxPolicy interface {
+	WorkspaceScriptsDisabled(ctx context.Context, tenantID uint64) (bool, error)
+}
+
+func deploymentSandboxDisabled() bool {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("WEKNORA_SANDBOX_MODE")))
+	return mode == "" || mode == "disabled"
+}
+
 // resolveTenantSandboxForConfig returns the Manager for an explicit config.
 //
 // Unlike the previous tenant-only helper this does NOT degrade to the default
@@ -66,12 +80,38 @@ func resolveTenantSandboxForConfig(
 	fallback sandbox.Manager,
 	tenantID uint64,
 	configID string,
+	policy WorkspaceSandboxPolicy,
 ) (sandbox.Manager, error) {
-	if resolver == nil || tenantID == 0 {
-		return fallback, nil
+	// ① Deployment-wide kill switch (WEKNORA_SANDBOX_MODE empty/disabled).
+	if deploymentSandboxDisabled() {
+		return sandbox.NewDisabledManager(), nil
 	}
+
+	// ② Workspace kill switch — independent of resolver availability.
+	if policy != nil && tenantID != 0 {
+		disabled, err := policy.WorkspaceScriptsDisabled(ctx, tenantID)
+		if err != nil {
+			logger.Warnf(ctx,
+				"[sandbox] failed to read workspace sandbox policy for %d: %v",
+				tenantID, err)
+		} else if disabled {
+			return sandbox.NewDisabledManager(), nil
+		}
+	}
+
+	// ③ Default path: agents with no named config use the process-wide manager.
 	if configID == "" || configID == types.SandboxConfigIDGlobalDefault {
 		return fallback, nil
+	}
+
+	// ④ Named config: must not silently fall back to the deployment default.
+	if tenantID == 0 {
+		return nil, fmt.Errorf(
+			"sandbox: resolve config %q: missing workspace context", configID)
+	}
+	if resolver == nil {
+		return nil, fmt.Errorf(
+			"sandbox: resolve config %q: per-tenant resolver unavailable", configID)
 	}
 	mgr, err := resolver.Resolve(ctx, tenantID, configID)
 	if err != nil {

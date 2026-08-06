@@ -195,6 +195,7 @@ func TestSandboxIdentityChangedToleratesNilGlobal(t *testing.T) {
 // provider resources.
 type fakeConfigRepo struct {
 	entity *types.TenantSandboxConfigEntity
+	policy *types.TenantSandboxConfigEntity
 
 	events  []string
 	updated *types.TenantSandboxConfigEntity
@@ -206,7 +207,12 @@ type fakeConfigRepo struct {
 	clearCordonCtxErr error
 }
 
-func (f *fakeConfigRepo) Create(context.Context, *types.TenantSandboxConfigEntity) error {
+func (f *fakeConfigRepo) Create(_ context.Context, e *types.TenantSandboxConfigEntity) error {
+	if types.IsSandboxWorkspacePolicyRow(e) {
+		f.policy = e
+		return nil
+	}
+	f.entity = e
 	return nil
 }
 
@@ -220,7 +226,14 @@ func (f *fakeConfigRepo) GetByID(
 func (f *fakeConfigRepo) ListByTenant(
 	context.Context, uint64,
 ) ([]*types.TenantSandboxConfigEntity, error) {
-	return nil, nil
+	var out []*types.TenantSandboxConfigEntity
+	if f.entity != nil {
+		out = append(out, f.entity)
+	}
+	if f.policy != nil {
+		out = append(out, f.policy)
+	}
+	return out, nil
 }
 
 func (f *fakeConfigRepo) Update(
@@ -234,8 +247,11 @@ func (f *fakeConfigRepo) Update(
 	return nil
 }
 
-func (f *fakeConfigRepo) SoftDelete(context.Context, uint64, string) error {
+func (f *fakeConfigRepo) SoftDelete(_ context.Context, _ uint64, id string) error {
 	f.events = append(f.events, "delete")
+	if f.policy != nil && f.policy.ID == id {
+		f.policy = nil
+	}
 	f.deleted = true
 	return nil
 }
@@ -675,4 +691,39 @@ func TestSandboxesStillLiveErrorSupportsErrorsIs(t *testing.T) {
 	err := &SandboxesStillLiveError{Inventory: SandboxInventory{SandboxCount: 1}}
 
 	require.True(t, stderrors.Is(err, ErrSandboxesStillLive))
+}
+
+func TestCreateRejectsNonNamedSandboxBackend(t *testing.T) {
+	svc := newTestConfigService(t, &fakeConfigRepo{}, nil, stubAgentRepo{})
+
+	_, err := svc.Create(context.Background(), 7, CreateSandboxConfigInput{
+		Name:   "local-dev",
+		Config: &types.TenantSandboxConfig{SandboxType: "local"},
+	})
+
+	require.ErrorIs(t, err, ErrNamedSandboxBackendUnsupported)
+}
+
+func TestWorkspaceScriptsDisabledPolicy(t *testing.T) {
+	repo := &fakeConfigRepo{}
+	svc := newTestConfigService(t, repo, nil, stubAgentRepo{})
+	ctx := context.Background()
+
+	disabled, err := svc.WorkspaceScriptsDisabled(ctx, 7)
+	require.NoError(t, err)
+	require.False(t, disabled)
+
+	require.NoError(t, svc.SetWorkspaceScriptsDisabled(ctx, 7, true))
+	disabled, err = svc.WorkspaceScriptsDisabled(ctx, 7)
+	require.NoError(t, err)
+	require.True(t, disabled)
+
+	list, err := svc.List(ctx, 7)
+	require.NoError(t, err)
+	require.Empty(t, list)
+
+	require.NoError(t, svc.SetWorkspaceScriptsDisabled(ctx, 7, false))
+	disabled, err = svc.WorkspaceScriptsDisabled(ctx, 7)
+	require.NoError(t, err)
+	require.False(t, disabled)
 }

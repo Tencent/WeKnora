@@ -101,6 +101,12 @@ var ErrSandboxInventoryUnverifiable = stderrors.New(
 // bad input without matching on the message text.
 var ErrSandboxConfigNameRequired = stderrors.New("sandbox config name is required")
 
+// ErrNamedSandboxBackendUnsupported marks a sandbox type that cannot be stored
+// as a user-facing named backend config.
+var ErrNamedSandboxBackendUnsupported = stderrors.New(
+	"named sandbox configs only support cube and e2b backends",
+)
+
 // SandboxInventory describes what a config holds and who a change disturbs.
 type SandboxInventory struct {
 	SandboxCount int      `json:"sandbox_count"`
@@ -192,12 +198,94 @@ func SanitizeSandboxConfig(
 	return merged, nil
 }
 
+func validateNamedSandboxBackend(cfg *types.TenantSandboxConfig) error {
+	if cfg == nil || strings.TrimSpace(cfg.SandboxType) == "" {
+		return apperrors.NewBadRequestError("sandbox backend type is required")
+	}
+	if !sandbox.IsNamedSandboxBackendType(cfg.SandboxType) {
+		return fmt.Errorf("%w", ErrNamedSandboxBackendUnsupported)
+	}
+	return nil
+}
+
+func filterPublicSandboxConfigs(
+	list []*types.TenantSandboxConfigEntity,
+) []*types.TenantSandboxConfigEntity {
+	if len(list) == 0 {
+		return list
+	}
+	out := make([]*types.TenantSandboxConfigEntity, 0, len(list))
+	for _, e := range list {
+		if types.IsSandboxWorkspacePolicyRow(e) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+func findWorkspacePolicyRow(
+	list []*types.TenantSandboxConfigEntity,
+) *types.TenantSandboxConfigEntity {
+	for _, e := range list {
+		if types.IsSandboxWorkspacePolicyRow(e) {
+			return e
+		}
+	}
+	return nil
+}
+
+// WorkspaceScriptsDisabled reports whether agents that rely on the deployment
+// default (empty sandbox_config_id) must not execute skill scripts.
+func (s *TenantSandboxConfigService) WorkspaceScriptsDisabled(
+	ctx context.Context, tenantID uint64,
+) (bool, error) {
+	list, err := s.repo.ListByTenant(ctx, tenantID)
+	if err != nil {
+		return false, err
+	}
+	return findWorkspacePolicyRow(list) != nil, nil
+}
+
+// SetWorkspaceScriptsDisabled toggles workspace-level script execution for
+// agents that do not point at a named cube/e2b config.
+func (s *TenantSandboxConfigService) SetWorkspaceScriptsDisabled(
+	ctx context.Context, tenantID uint64, disabled bool,
+) error {
+	list, err := s.repo.ListByTenant(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	existing := findWorkspacePolicyRow(list)
+	if disabled {
+		if existing != nil {
+			return nil
+		}
+		entity := &types.TenantSandboxConfigEntity{
+			ID:          uuid.New().String(),
+			TenantID:    tenantID,
+			Name:        types.SandboxWorkspacePolicyConfigName,
+			Description: "",
+			SandboxType: string(sandbox.SandboxTypeDisabled),
+			Config:      &types.TenantSandboxConfig{SandboxType: string(sandbox.SandboxTypeDisabled)},
+		}
+		return s.repo.Create(ctx, entity)
+	}
+	if existing == nil {
+		return nil
+	}
+	return s.repo.SoftDelete(ctx, tenantID, existing.ID)
+}
+
 // Create stores a new config.
 func (s *TenantSandboxConfigService) Create(
 	ctx context.Context, tenantID uint64, in CreateSandboxConfigInput,
 ) (*types.TenantSandboxConfigEntity, error) {
 	merged, err := SanitizeSandboxConfig(in.Config, nil)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateNamedSandboxBackend(merged); err != nil {
 		return nil, err
 	}
 	name := strings.TrimSpace(in.Name)
@@ -220,18 +308,29 @@ func (s *TenantSandboxConfigService) Create(
 	return entity, nil
 }
 
-// List returns the workspace's configs.
+// List returns the workspace's user-facing configs (policy row excluded).
 func (s *TenantSandboxConfigService) List(
 	ctx context.Context, tenantID uint64,
 ) ([]*types.TenantSandboxConfigEntity, error) {
-	return s.repo.ListByTenant(ctx, tenantID)
+	list, err := s.repo.ListByTenant(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return filterPublicSandboxConfigs(list), nil
 }
 
 // Get returns one config, or nil when absent.
 func (s *TenantSandboxConfigService) Get(
 	ctx context.Context, tenantID uint64, id string,
 ) (*types.TenantSandboxConfigEntity, error) {
-	return s.repo.GetByID(ctx, tenantID, id)
+	entity, err := s.repo.GetByID(ctx, tenantID, id)
+	if err != nil || entity == nil {
+		return nil, err
+	}
+	if types.IsSandboxWorkspacePolicyRow(entity) {
+		return nil, nil
+	}
+	return entity, nil
 }
 
 // Inventory answers what changing or deleting this config would disturb.
@@ -286,8 +385,14 @@ func (s *TenantSandboxConfigService) Update(
 	if err != nil || entity == nil {
 		return nil, err
 	}
+	if types.IsSandboxWorkspacePolicyRow(entity) {
+		return nil, apperrors.NewBadRequestError("workspace policy cannot be edited here")
+	}
 	merged, err := SanitizeSandboxConfig(in.Config, entity.Config)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateNamedSandboxBackend(merged); err != nil {
 		return nil, err
 	}
 	if !SandboxIdentityChanged(entity.Config, merged, s.globalCfg) {
@@ -349,6 +454,9 @@ func (s *TenantSandboxConfigService) Delete(
 	// card the workspace still has, so absence is an explicit 404.
 	if entity == nil {
 		return apperrors.NewNotFoundError("sandbox config not found")
+	}
+	if types.IsSandboxWorkspacePolicyRow(entity) {
+		return apperrors.NewBadRequestError("workspace policy cannot be deleted here")
 	}
 	summaries, listErr := s.listSandboxes(ctx, entity.Config, tenantID, id)
 	if listErr != nil {
