@@ -99,7 +99,8 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 				time.Sleep(backoff)
 			}
 
-			lastErr = handler(ctx, task)
+			attemptCtx := types.WithTaskRetryMetadata(ctx, attempt, maxRetry)
+			lastErr = handler(attemptCtx, task)
 			if lastErr == nil {
 				logger.Infof(ctx, "[SyncTask] Task completed type=%s id=%s elapsed=%v",
 					task.Type(), taskID, time.Since(start))

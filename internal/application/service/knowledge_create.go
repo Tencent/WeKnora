@@ -28,11 +28,19 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file")
 
-	// Use custom filename if provided, otherwise use original filename
+	// Use custom filename if provided, otherwise use original filename. Folder
+	// uploads pass a path-qualified name ("docs/spec/design.md"): the directory
+	// part becomes the knowledge's folder_path and only the base name is kept as
+	// the display / storage file name.
 	fileName := file.Filename
+	folderPath := ""
 	if customFileName != "" {
-		fileName = customFileName
-		logger.Infof(ctx, "Using custom filename: %s (original: %s)", customFileName, file.Filename)
+		folderPath, fileName = types.SplitKnowledgeRelativePath(customFileName)
+		if fileName == "" {
+			fileName = file.Filename
+		}
+		logger.Infof(ctx, "Using custom filename: %s (original: %s, folder: %s)",
+			fileName, file.Filename, folderPath)
 	}
 
 	logger.Infof(ctx, "Knowledge base ID: %s, file: %s", kbID, fileName)
@@ -125,6 +133,17 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, werrors.NewValidationError("文件名包含非法字符")
 	}
 
+	// The folder path is rendered as sidebar tree labels, so it goes through the
+	// same input validation as the file name before it is stored.
+	if folderPath != "" {
+		safeFolderPath, folderValid := secutils.ValidateInput(folderPath)
+		if !folderValid {
+			logger.Errorf(ctx, "Invalid folder path: %s", folderPath)
+			return nil, werrors.NewValidationError("文件夹路径包含非法字符")
+		}
+		folderPath = types.NormalizeKnowledgeFolderPath(safeFolderPath)
+	}
+
 	eff, err := resolveFileImportProcessConfig(ctx, kb, getFileType(safeFilename), processOverrides, enableMultimodel)
 	if err != nil {
 		return nil, err
@@ -140,6 +159,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		Channel:          defaultChannel(channel),
 		Title:            safeFilename,
 		FileName:         safeFilename,
+		FolderPath:       folderPath,
 		FileType:         getFileType(safeFilename),
 		FileSize:         file.Size,
 		FileHash:         hash,
@@ -193,7 +213,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		questionCount = 3
 	}
 
-	lang, _ := types.LanguageFromContext(ctx)
+	lang := types.LanguageFromContextOrDefault(ctx)
 	taskPayload := types.DocumentProcessPayload{
 		TenantID:                 tenantID,
 		KnowledgeID:              knowledge.ID,
@@ -391,7 +411,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		questionCount = 3
 	}
 
-	lang, _ := types.LanguageFromContext(ctx)
+	lang := types.LanguageFromContextOrDefault(ctx)
 	taskPayload := types.DocumentProcessPayload{
 		TenantID:                 tenantID,
 		KnowledgeID:              knowledge.ID,
@@ -633,7 +653,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		questionCount = 3
 	}
 
-	lang, _ := types.LanguageFromContext(ctx)
+	lang := types.LanguageFromContextOrDefault(ctx)
 	taskPayload := types.DocumentProcessPayload{
 		TenantID:                 tenantID,
 		KnowledgeID:              knowledge.ID,
@@ -907,7 +927,7 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 			}
 		}
 
-		lang, _ := types.LanguageFromContext(ctx)
+		lang := types.LanguageFromContextOrDefault(ctx)
 		taskPayload := types.DocumentProcessPayload{
 			TenantID:                 tenantID,
 			KnowledgeID:              knowledge.ID,
@@ -1187,6 +1207,10 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 			resolvedImages = append(resolvedImages, storedImages...)
 		}
 	}
+
+	// Keep manually entered CRLF text aligned with the LF values sent by the
+	// chunking preview endpoint.
+	clean = chunker.NormalizeLineEndings(clean)
 
 	processOverrides, _ := knowledge.ProcessOverrides()
 	eff := ResolveProcessConfig(kb, processOverrides)
