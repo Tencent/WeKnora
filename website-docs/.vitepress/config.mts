@@ -66,6 +66,7 @@ export default withMermaid(
     titleTemplate: ':title · WeKnora 文档',
     description: 'WeKnora（维娜拉）官方文档：部署、配置、功能说明、API 参考与二次开发',
     lang: 'zh-CN',
+    base: '/docs/',
     cleanUrls: true,
     lastUpdated: true,
     srcExclude: ['README.md'],
