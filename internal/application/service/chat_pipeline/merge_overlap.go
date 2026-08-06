@@ -38,9 +38,7 @@ func (p *PluginMerge) mergeSequentialChunks(
 			groups = append(groups, mergedGroup{result: current, lastIndex: current.ChunkIndex})
 			continue
 		case mergeExtend:
-			lastChunk.Content = searchutil.AppendWithOverlap(
-				lastChunk.Content, current.Content, lastChunk.EndAt-current.StartAt,
-			)
+			lastChunk.Content = appendTrustedContent(lastChunk.Content, current.Content, lastChunk.EndAt-current.StartAt)
 			lastChunk.EndAt = current.EndAt
 			recordMergedChild(ctx, knowledgeID, lastChunk, current, "image_merge")
 		case mergeSubsume:
@@ -73,6 +71,21 @@ func (p *PluginMerge) mergeSequentialChunks(
 	})
 
 	return merged
+}
+
+// appendTrustedContent joins a trusted pair using the overlap the coordinates
+// already give us, and only falls back to text search when the overlap does not
+// match character for character (HTML entities or synthetic table headers can
+// keep the length invariant while changing the body).
+//
+// The fallback matters both ways: searching for the longest suffix match would
+// otherwise mistake a repeated table row or log line for the overlap and drop
+// real content, which is exactly what the position path is meant to avoid.
+func appendTrustedContent(acc, next string, positionOverlap int) string {
+	if merged, ok := searchutil.AppendWithExactOverlap(acc, next, positionOverlap); ok {
+		return merged
+	}
+	return searchutil.AppendWithOverlap(acc, next, positionOverlap)
 }
 
 // chunkTrusted reports whether a result's StartAt/EndAt can be trusted for
