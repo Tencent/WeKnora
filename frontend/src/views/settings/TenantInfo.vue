@@ -661,8 +661,11 @@ const onEditQuotaKeydown = (_value: any, ctx: { e: KeyboardEvent }) => {
 
 const saveTenantQuota = async () => {
   if (!tenantInfo.value?.id) return
-  const gb = Number(editQuotaGB.value)
-  if (!editQuotaGB.value.trim() || !Number.isFinite(gb) || gb <= 0) {
+  // t-input type="number" 会把 v-model 转成 number，这里统一归一成字符串再校验，
+  // 否则对 number 调 .trim() 会直接抛 TypeError（在 try 之外，表现为点击没反应）。
+  const raw = String(editQuotaGB.value ?? '').trim()
+  const gb = Number(raw)
+  if (!raw || !Number.isFinite(gb) || gb <= 0) {
     MessagePlugin.warning(t('tenant.storage.quotaUpdateFailed'))
     return
   }
