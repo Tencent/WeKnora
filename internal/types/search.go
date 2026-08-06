@@ -207,6 +207,11 @@ type SearchResult struct {
 
 	// KnowledgeBaseID is the ID of the knowledge base this result belongs to
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+
+	// ContentRevision is the chunk edit revision at retrieval time.
+	// Internal only: used by the merge pipeline to decide whether source
+	// coordinates are still trustworthy.
+	ContentRevision int `json:"-"`
 }
 
 // SearchParams represents the search parameters
