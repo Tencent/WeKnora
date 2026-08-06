@@ -304,6 +304,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   const setCanCreateTenant = (allowed: boolean) => {
     canCreateTenant.value = allowed
+    localStorage.setItem('weknora_can_create_tenant', String(allowed))
   }
 
   // fetchPendingInvitationCount hits the dedicated /me/invitations/
@@ -413,6 +414,7 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('weknora_selected_tenant_id')
     localStorage.removeItem('weknora_selected_tenant_name')
     localStorage.removeItem('weknora_memberships')
+    localStorage.removeItem('weknora_can_create_tenant')
     localStorage.removeItem('weknora_lite_mode')
     isLiteMode.value = false
     try {
@@ -502,6 +504,11 @@ export const useAuthStore = defineStore('auth', () => {
         console.error('Failed to parse memberships', e)
         memberships.value = []
       }
+    }
+
+    const storedCanCreate = localStorage.getItem('weknora_can_create_tenant')
+    if (storedCanCreate !== null) {
+      canCreateTenant.value = storedCanCreate === 'true'
     }
 
     isLiteMode.value = localStorage.getItem('weknora_lite_mode') === 'true'

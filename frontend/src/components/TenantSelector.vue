@@ -289,8 +289,8 @@ const onTenantCreated = async (newTenant: TenantInfo) => {
   tenants.value = [newTenant, ...tenants.value.filter(t => t.id !== newTenant.id)]
   total.value = total.value + 1
   authStore.setAllTenants(tenants.value)
-  await authStore.refreshFromAuthMe()
   authStore.setSelectedTenant(newTenant.id, newTenant.name)
+  await authStore.refreshFromAuthMe()
   // Newly-created tenant becomes the user's "last active" so re-login
   // lands here. Race against the existing grace window before reload.
   const persist = persistLastActiveTenantPreference(newTenant.id)
