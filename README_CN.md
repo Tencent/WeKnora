@@ -194,31 +194,19 @@ docker compose up -d    # 启动核心服务
 
 > 如需使用本地 Ollama 模型，请先运行 `ollama serve > /dev/null 2>&1 &`
 
-### 🔄 版本升级
-
-若已有部署并下载了更新的 release：
-
-```bash
-# 在 .env 中将 WEKNORA_VERSION 设为目标版本（如 0.7.0），或保持 latest
-docker compose pull     # 拉取与 WEKNORA_VERSION 匹配的镜像
-docker compose up -d    # 用新镜像重建容器
-```
-
-> 仅执行 `docker compose up -d` 会复用本地缓存镜像，可能导致 Web UI 显示版本与下载的 release 不一致。
-
 ### 🔧 可选服务（Docker Compose Profile）
 
 按需添加 `--profile` 启动额外组件，多个 profile 可叠加使用：
 
 | Profile | 说明 | 启动命令 |
 |---------|------|----------|
-| _(默认)_ | 核心服务 | `docker compose pull && docker compose up -d` |
-| `full` | 全部功能 | `docker compose --profile full pull && docker compose --profile full up -d` |
-| `neo4j` | 知识图谱 (Neo4j) | `docker compose --profile neo4j pull && docker compose --profile neo4j up -d` |
-| `minio` | 对象存储 (MinIO) | `docker compose --profile minio pull && docker compose --profile minio up -d` |
-| `langfuse` | 链路追踪 (Langfuse) | `docker compose --profile langfuse pull && docker compose --profile langfuse up -d` |
+| _(默认)_ | 核心服务 | `docker compose up -d` |
+| `full` | 全部功能 | `docker compose --profile full up -d` |
+| `neo4j` | 知识图谱 (Neo4j) | `docker compose --profile neo4j up -d` |
+| `minio` | 对象存储 (MinIO) | `docker compose --profile minio up -d` |
+| `langfuse` | 链路追踪 (Langfuse) | `docker compose --profile langfuse up -d` |
 
-组合示例：`docker compose --profile neo4j --profile minio pull && docker compose --profile neo4j --profile minio up -d`
+组合示例：`docker compose --profile neo4j --profile minio up -d`
 
 停止服务：`docker compose down`
 

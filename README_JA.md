@@ -179,25 +179,12 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 git clone https://github.com/Tencent/WeKnora.git
 cd WeKnora
 cp .env.example .env   # 必要に応じて .env を編集（詳細はファイル内のコメント参照）
-docker compose pull     # 最新イメージを取得
-docker compose up -d    # コアサービスを起動
+docker compose up -d   # コアサービスを起動
 ```
 
 起動後、**http://localhost** にアクセスして利用開始。
 
 > ローカル Ollama モデルを使用する場合は、先に `ollama serve > /dev/null 2>&1 &` を実行してください。
-
-### 🔄 アップグレード
-
-既存のデプロイがあり、新しい release をダウンロードした場合：
-
-```bash
-# .env の WEKNORA_VERSION を対象バージョン（例: 0.7.0）に設定、または latest のまま
-docker compose pull     # WEKNORA_VERSION に一致するイメージを取得
-docker compose up -d    # 新しいイメージでコンテナを再作成
-```
-
-> `docker compose up -d` のみではローカルキャッシュのイメージが再利用され、Web UI の表示バージョンがダウンロードした release と一致しない場合があります。
 
 ### 🔧 オプションサービス（Docker Compose Profile）
 
@@ -205,13 +192,13 @@ docker compose up -d    # 新しいイメージでコンテナを再作成
 
 | Profile | 説明 | コマンド |
 |---------|------|---------|
-| _(デフォルト)_ | コアサービス | `docker compose pull && docker compose up -d` |
-| `full` | 全機能 | `docker compose --profile full pull && docker compose --profile full up -d` |
-| `neo4j` | ナレッジグラフ (Neo4j) | `docker compose --profile neo4j pull && docker compose --profile neo4j up -d` |
-| `minio` | オブジェクトストレージ (MinIO) | `docker compose --profile minio pull && docker compose --profile minio up -d` |
-| `langfuse` | トレーシング (Langfuse) | `docker compose --profile langfuse pull && docker compose --profile langfuse up -d` |
+| _(デフォルト)_ | コアサービス | `docker compose up -d` |
+| `full` | 全機能 | `docker compose --profile full up -d` |
+| `neo4j` | ナレッジグラフ (Neo4j) | `docker compose --profile neo4j up -d` |
+| `minio` | オブジェクトストレージ (MinIO) | `docker compose --profile minio up -d` |
+| `langfuse` | トレーシング (Langfuse) | `docker compose --profile langfuse up -d` |
 
-組み合わせ例：`docker compose --profile neo4j --profile minio pull && docker compose --profile neo4j --profile minio up -d`
+組み合わせ例：`docker compose --profile neo4j --profile minio up -d`
 
 サービス停止：`docker compose down`
 
