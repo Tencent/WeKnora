@@ -550,7 +550,7 @@ open http://localhost
           </svg>
           <span>WeKnora</span>
         </div>
-        <p class="closing-note">文档对应仓库 main 分支。源码路径均相对仓库根目录，API 路径默认带 <code>/api/v1</code> 前缀，配置示例中的密钥均为占位符。</p>
+        <p class="closing-note">文档基于仓库 {{ versionLabel }} 源码整理。源码路径均相对仓库根目录，API 路径默认带 <code>/api/v1</code> 前缀，配置示例中的密钥均为占位符。</p>
         <div class="closing-links">
           <a :href="withBase('/01-getting-started/01-introduction')">快速开始</a>
           <a :href="withBase('/04-api/01-api-overview')">API 总览</a>
