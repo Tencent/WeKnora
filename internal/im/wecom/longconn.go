@@ -380,9 +380,7 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 	c.mu.Unlock()
 
 	defer func() {
-		c.mu.Lock()
-		c.conn = nil
-		c.mu.Unlock()
+		c.closeConn()
 		_ = conn.Close()
 		// NOTE: streamBufs is intentionally NOT cleared on reconnect.
 		// Active streams survive reconnections — the WeCom replace-based
@@ -707,9 +705,11 @@ func (c *LongConnClient) convertMixedMessage(msg *botMessage, chatID string, cha
 // pending ReadMessage call in the receive loop and triggers a reconnection.
 func (c *LongConnClient) closeConn() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn != nil {
-		_ = c.conn.Close()
+	conn := c.conn
+	c.conn = nil
+	c.mu.Unlock()
+	if conn != nil {
+		_ = conn.Close()
 	}
 }
 
