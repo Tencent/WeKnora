@@ -186,7 +186,8 @@
 git clone https://github.com/Tencent/WeKnora.git
 cd WeKnora
 cp .env.example .env   # 按需编辑 .env，详见文件内注释
-docker compose up -d   # 启动核心服务
+docker compose pull     # 拉取最新镜像
+docker compose up -d    # 启动核心服务
 ```
 
 启动成功后访问 **http://localhost** 即可使用。
