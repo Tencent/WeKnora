@@ -20024,6 +20024,17 @@ const docTemplate = `{
                     "description": "MaxPagesPerIngest limits pages created/updated per ingest operation (0 = no limit)",
                     "type": "integer"
                 },
+                "synthesis_fallback_model_id": {
+                    "description": "SynthesisFallbackModelID is the first fallback LLM model ID kept for compatibility\nwith older clients that only support a single fallback field.",
+                    "type": "string"
+                },
+                "synthesis_fallback_model_ids": {
+                    "description": "SynthesisFallbackModelIDs are tried in order after the effective synthesis model.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "synthesis_model_id": {
                     "description": "SynthesisModelID is the LLM model ID used for wiki page generation and updates",
                     "type": "string"

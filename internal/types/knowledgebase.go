@@ -627,6 +627,9 @@ func (kb *KnowledgeBase) EnsureDefaults() {
 	if kb.Type != KnowledgeBaseTypeFAQ {
 		kb.FAQConfig = nil
 	}
+	if kb.WikiConfig != nil {
+		kb.WikiConfig.NormalizeSynthesisModelChain()
+	}
 	// Set defaults for FAQ
 	if kb.Type == KnowledgeBaseTypeFAQ {
 		if kb.FAQConfig == nil {

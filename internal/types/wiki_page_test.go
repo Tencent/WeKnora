@@ -65,6 +65,117 @@ func TestWikiConfigScanNil(t *testing.T) {
 	}
 }
 
+func TestWikiConfig_SynthesisModelChainIDsLegacyFallback(t *testing.T) {
+	cfg := WikiConfig{
+		SynthesisModelID:         "wiki-primary",
+		SynthesisFallbackModelID: "wiki-fallback",
+	}
+	got := cfg.SynthesisModelChainIDs("summary-model")
+	want := []string{"wiki-primary", "wiki-fallback"}
+	if len(got) != len(want) {
+		t.Fatalf("chain length = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("chain[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	cfg.NormalizeSynthesisModelChain()
+	if cfg.SynthesisFallbackModelID != "wiki-fallback" {
+		t.Fatalf("synthesis_fallback_model_id = %q, want wiki-fallback", cfg.SynthesisFallbackModelID)
+	}
+}
+
+func TestWikiConfig_SynthesisModelChainIDsSummaryPrimary(t *testing.T) {
+	cfg := WikiConfig{
+		SynthesisFallbackModelIDs: []string{"fallback-1", "summary-model", "fallback-2"},
+	}
+	got := cfg.SynthesisModelChainIDs("summary-model")
+	want := []string{"summary-model", "fallback-1", "fallback-2"}
+	if len(got) != len(want) {
+		t.Fatalf("chain length = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("chain[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestWikiConfig_SynthesisModelChainIDsFallbackOnly(t *testing.T) {
+	cfg := WikiConfig{
+		SynthesisFallbackModelIDs: []string{"fallback-1", "fallback-2"},
+	}
+	got := cfg.SynthesisModelChainIDs("")
+	want := []string{"fallback-1", "fallback-2"}
+	if len(got) != len(want) {
+		t.Fatalf("chain length = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("chain[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestWikiConfig_NormalizeSynthesisModelChainDedupesAndCaps(t *testing.T) {
+	cfg := WikiConfig{
+		SynthesisModelID: " primary ",
+		SynthesisFallbackModelIDs: []string{
+			" fallback-1 ",
+			"primary",
+			"",
+			"fallback-2",
+			"fallback-1",
+			"fallback-3",
+			"fallback-4",
+			"fallback-5",
+		},
+	}
+	cfg.NormalizeSynthesisModelChain()
+	want := []string{"primary", "fallback-1", "fallback-2", "fallback-3", "fallback-4"}
+	got := cfg.SynthesisModelChainIDs("summary-model")
+	if len(got) != len(want) {
+		t.Fatalf("chain length = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("chain[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	if cfg.SynthesisFallbackModelID != "fallback-1" {
+		t.Fatalf("synthesis_fallback_model_id = %q, want fallback-1", cfg.SynthesisFallbackModelID)
+	}
+}
+
+func TestWikiConfig_ValueScanNormalizesSynthesisModelChain(t *testing.T) {
+	cfg := WikiConfig{
+		SynthesisModelID:          " primary ",
+		SynthesisFallbackModelIDs: []string{"primary", " fallback-1 ", "fallback-1", "fallback-2"},
+	}
+	val, err := cfg.Value()
+	if err != nil {
+		t.Fatalf("WikiConfig.Value() error: %v", err)
+	}
+	var restored WikiConfig
+	if err := restored.Scan(val); err != nil {
+		t.Fatalf("WikiConfig.Scan() error: %v", err)
+	}
+	want := []string{"primary", "fallback-1", "fallback-2"}
+	got := restored.SynthesisModelChainIDs("summary-model")
+	if len(got) != len(want) {
+		t.Fatalf("chain length = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("chain[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	if restored.SynthesisFallbackModelID != "fallback-1" {
+		t.Fatalf("synthesis_fallback_model_id = %q, want fallback-1", restored.SynthesisFallbackModelID)
+	}
+}
+
 func TestStringArrayValueScan(t *testing.T) {
 	arr := StringArray{"a", "b", "c"}
 
