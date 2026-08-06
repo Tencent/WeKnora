@@ -1,6 +1,10 @@
 package provider
 
-import "testing"
+import (
+	"testing"
+
+	openai "github.com/sashabaranov/go-openai"
+)
 
 // TestIsOpenAIReasoningOrGPT5Model 验证 GPT-5 / o-series 模型识别逻辑。
 // 见 issue #1283：这些模型必须使用 max_completion_tokens 替代 max_tokens。
@@ -42,5 +46,33 @@ func TestIsOpenAIReasoningOrGPT5Model(t *testing.T) {
 				t.Errorf("IsOpenAIReasoningOrGPT5Model(%q) = %v, want %v", tc.input, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestShapeOpenAIReasoningRequest(t *testing.T) {
+	req := openai.ChatCompletionRequest{
+		MaxTokens:        128,
+		Temperature:      0.7,
+		TopP:             0.9,
+		FrequencyPenalty: 0.1,
+		PresencePenalty:  0.2,
+	}
+
+	ShapeOpenAIReasoningRequest(&req)
+
+	if req.MaxTokens != 0 {
+		t.Fatalf("MaxTokens = %d, want 0", req.MaxTokens)
+	}
+	if req.MaxCompletionTokens != 128 {
+		t.Fatalf("MaxCompletionTokens = %d, want 128", req.MaxCompletionTokens)
+	}
+	if req.Temperature != 0 || req.TopP != 0 || req.FrequencyPenalty != 0 || req.PresencePenalty != 0 {
+		t.Fatalf("unsupported sampling parameters were not cleared: %+v", req)
+	}
+
+	req = openai.ChatCompletionRequest{MaxTokens: 128, MaxCompletionTokens: 2048}
+	ShapeOpenAIReasoningRequest(&req)
+	if req.MaxCompletionTokens != 2048 {
+		t.Fatalf("existing MaxCompletionTokens was overwritten: got %d want 2048", req.MaxCompletionTokens)
 	}
 }
