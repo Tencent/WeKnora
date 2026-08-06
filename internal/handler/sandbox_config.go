@@ -21,6 +21,8 @@ type sandboxConfigService interface {
 	Update(context.Context, uint64, string, service.UpdateSandboxConfigInput) (*types.TenantSandboxConfigEntity, error)
 	Delete(context.Context, uint64, string, bool) error
 	Inventory(context.Context, uint64, string) (service.SandboxInventory, error)
+	WorkspaceScriptsDisabled(context.Context, uint64) (bool, error)
+	SetWorkspaceScriptsDisabled(context.Context, uint64, bool) error
 }
 
 type SandboxConfigHandler struct {
@@ -114,6 +116,7 @@ func respondSandboxConfigRefusal(c *gin.Context, err error) bool {
 func respondSandboxConfigServiceError(c *gin.Context, err error) {
 	switch {
 	case stderrors.Is(err, service.ErrSandboxConfigNameRequired),
+		stderrors.Is(err, service.ErrNamedSandboxBackendUnsupported),
 		stderrors.Is(err, sandbox.ErrUnsupportedSandboxType),
 		stderrors.Is(err, sandbox.ErrUnsafeOutboundURL):
 		c.Error(apperrors.NewBadRequestError(err.Error()))
@@ -133,7 +136,14 @@ func respondSandboxConfigServiceError(c *gin.Context, err error) {
 // @Security     ApiKeyAuth
 // @Router       /sandbox-configs [get]
 func (h *SandboxConfigHandler) List(c *gin.Context) {
-	configs, err := h.service.List(c.Request.Context(), sandboxConfigTenantID(c))
+	ctx := c.Request.Context()
+	tenantID := sandboxConfigTenantID(c)
+	configs, err := h.service.List(ctx, tenantID)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	disabled, err := h.service.WorkspaceScriptsDisabled(ctx, tenantID)
 	if err != nil {
 		c.Error(err)
 		return
@@ -142,7 +152,31 @@ func (h *SandboxConfigHandler) List(c *gin.Context) {
 	for _, cfg := range configs {
 		data = append(data, toSandboxConfigResponse(cfg))
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": data, "defaults": h.defaults})
+	c.JSON(http.StatusOK, gin.H{
+		"success":                    true,
+		"data":                       data,
+		"defaults":                   h.defaults,
+		"workspace_scripts_disabled": disabled,
+	})
+}
+
+type workspacePolicyRequest struct {
+	ScriptsDisabled bool `json:"scripts_disabled"`
+}
+
+// SetWorkspacePolicy toggles script execution for agents that use the deployment default.
+func (h *SandboxConfigHandler) SetWorkspacePolicy(c *gin.Context) {
+	var req workspacePolicyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewBadRequestError(err.Error()))
+		return
+	}
+	tenantID := sandboxConfigTenantID(c)
+	if err := h.service.SetWorkspaceScriptsDisabled(c.Request.Context(), tenantID, req.ScriptsDisabled); err != nil {
+		c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "workspace_scripts_disabled": req.ScriptsDisabled})
 }
 
 // Create godoc

@@ -161,6 +161,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
+	must(container.Provide(repository.NewTenantSandboxConfigRepository))
 	must(container.Provide(repository.NewCustomAgentRepository))
 	must(container.Provide(repository.NewOrganizationRepository))
 	must(container.Provide(repository.NewKBShareRepository))
@@ -186,6 +187,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// gets its own persistent MicroVM. See internal/sandbox/session_manager.go.
 	logger.Debugf(ctx, "[Container] Registering sandbox manager...")
 	must(container.Provide(newSandboxManager))
+	// Per-tenant sandbox backends: the resolver builds a manager per request
+	// from the tenant's own configuration, falling back to the singleton above
+	// for tenants that configured nothing.
+	must(container.Provide(service.NewTenantSandboxConfigLoader))
+	must(container.Provide(newTenantSandboxResolver))
+	must(container.Provide(newSandboxConfigDefaults))
 
 	// Business service layer
 	logger.Debugf(ctx, "[Container] Registering business services...")
@@ -209,6 +216,15 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewEvaluationService))
 	must(container.Provide(service.NewUserService))
 	must(container.Provide(service.NewSystemSettingService))
+	must(container.Provide(func(
+		repo repository.TenantSandboxConfigRepository,
+		agents interfaces.CustomAgentRepository,
+	) *service.TenantSandboxConfigService {
+		return service.NewTenantSandboxConfigService(repo, agents, buildGlobalSandboxConfig())
+	}))
+	must(container.Provide(func(s *service.TenantSandboxConfigService) service.WorkspaceSandboxPolicy {
+		return s
+	}))
 	must(container.Provide(service.NewWeKnoraCloudService))
 
 	// Extract services - register individual extracters with names
@@ -263,6 +279,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// SessionService is passed as parameter to CreateAgentEngine method when creating AgentService
 	logger.Debugf(ctx, "[Container] Registering event bus and agent service...")
 	must(container.Provide(event.NewEventBus))
+	must(container.Provide(service.NewSessionSandboxPinner))
 	must(container.Provide(func(cfg *config.Config, s interfaces.MCPToolApprovalService, rdb *redis.Client) *approval.Gate {
 		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, rdb)
 	}))
@@ -366,6 +383,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewMessageHandler))
 	must(container.Provide(handler.NewMessageSuggestionHandler))
 	must(container.Provide(handler.NewModelHandler))
+	must(container.Provide(handler.NewSandboxConfigHandler))
 	must(container.Provide(handler.NewEvaluationHandler))
 	must(container.Provide(handler.NewInitializationHandler))
 	must(container.Provide(handler.NewAuthHandler))

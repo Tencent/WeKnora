@@ -146,6 +146,7 @@ func TestSandboxConfigValidationSentinelsMapTo400(t *testing.T) {
 		err  error
 	}{
 		{"missing name", service.ErrSandboxConfigNameRequired},
+		{"named backend unsupported", service.ErrNamedSandboxBackendUnsupported},
 		{"unknown backend", fmt.Errorf("%w %q", sandbox.ErrUnsupportedSandboxType, "quantum")},
 		{"unsafe endpoint", fmt.Errorf("%w: host is private", sandbox.ErrUnsafeOutboundURL)},
 	} {
@@ -230,4 +231,19 @@ func (s *fakeSandboxConfigService) Inventory(
 	string,
 ) (service.SandboxInventory, error) {
 	return service.SandboxInventory{}, nil
+}
+
+func (s *fakeSandboxConfigService) WorkspaceScriptsDisabled(
+	context.Context,
+	uint64,
+) (bool, error) {
+	return false, nil
+}
+
+func (s *fakeSandboxConfigService) SetWorkspaceScriptsDisabled(
+	context.Context,
+	uint64,
+	bool,
+) error {
+	return nil
 }

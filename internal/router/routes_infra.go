@@ -51,6 +51,7 @@ func RegisterSandboxConfigRoutes(
 	configs := g.apiKeyGroup(r.Group("/sandbox-configs"), apiKeyFullAccess())
 	{
 		configs.GET("", g.Viewer(), h.List)
+		configs.PUT("/workspace-policy", g.Admin(), h.SetWorkspacePolicy)
 		configs.POST("", g.Admin(), h.Create)
 		configs.GET("/:id", g.Viewer(), h.Get)
 		configs.PUT("/:id", g.Admin(), h.Update)
