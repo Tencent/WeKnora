@@ -152,7 +152,35 @@
             <p class="desc">{{ $t('tenant.storage.quotaDescription') }}</p>
           </div>
           <div class="setting-control">
-            <span class="info-value">{{ formatBytes(tenantInfo.storage_quota) }}</span>
+            <!-- 只读态：显示配额 + 编辑按钮（owner 才看得见编辑入口）。
+               与名称/描述同款"原地编辑"模式。 -->
+            <template v-if="!editingQuota">
+              <span class="info-value">{{ formatBytes(tenantInfo.storage_quota) }}</span>
+              <t-button v-if="canEditTenant" theme="default" variant="text" shape="square" size="small"
+                class="edit-btn" :title="$t('tenant.storage.editQuota')"
+                :aria-label="$t('tenant.storage.editQuota')" @click="startEditQuota">
+                <template #icon>
+                  <t-icon name="edit" />
+                </template>
+              </t-button>
+            </template>
+            <!-- 编辑态：GB 数值输入（允许 1 位小数）+ 保存/取消。回车保存，Esc 取消。 -->
+            <div v-else class="inline-edit inline-edit-quota">
+              <div class="inline-edit-quota-field">
+                <t-input v-model="editQuotaGB" type="number"
+                  :placeholder="$t('tenant.storage.editQuotaPlaceholder')" :disabled="savingQuota" autofocus
+                  class="inline-edit-input" @enter="saveTenantQuota" @keydown="onEditQuotaKeydown" />
+                <!-- 上限提示：磁盘探测失败（disk_unavailable）或 stats 拉取失败时降级不显示。 -->
+                <p v-if="quotaMaxHintText" class="quota-max-hint">{{ quotaMaxHintText }}</p>
+              </div>
+              <t-button theme="primary" size="small" :loading="savingQuota" @click="saveTenantQuota">
+                {{ $t('tenant.details.editNameConfirm') }}
+              </t-button>
+              <t-button theme="default" variant="outline" size="small" :disabled="savingQuota"
+                @click="cancelEditQuota">
+                {{ $t('tenant.details.editNameCancel') }}
+              </t-button>
+            </div>
           </div>
         </div>
 
@@ -242,7 +270,12 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { getCurrentUser, type TenantInfo } from '@/api/auth'
-import { deleteTenant as deleteTenantApi, updateTenant as updateTenantApi } from '@/api/tenant'
+import {
+  deleteTenant as deleteTenantApi,
+  getTenantStorageStats,
+  updateTenant as updateTenantApi,
+  type TenantStorageStats,
+} from '@/api/tenant'
 import {
   leaveTenant,
   fetchAllTenantMembers,
@@ -578,6 +611,105 @@ const saveTenantName = async () => {
   }
 }
 
+// 原地编辑存储配额：与名称对称的 editing / editValue / saving 三态。
+// 输入单位是 GB（允许 1 位小数），提交时换算成字节；服务端做最终校验，
+// 前端按 storage-stats 做预校验（即时 toast，不发请求）。
+const editingQuota = ref(false)
+const editQuotaGB = ref('')
+const savingQuota = ref(false)
+const storageStats = ref<TenantStorageStats | null>(null)
+
+// 上限提示：磁盘探测失败（disk_unavailable）或 stats 拉取失败时降级不显示。
+const quotaMaxHintText = computed(() => {
+  const stats = storageStats.value
+  if (!stats || stats.disk_unavailable || !stats.quota_max_bytes) return ''
+  return t('tenant.storage.quotaMaxHint', { max: formatBytes(stats.quota_max_bytes) })
+})
+
+const startEditQuota = () => {
+  const quota = tenantInfo.value?.storage_quota
+  if (quota === undefined) return
+  editQuotaGB.value = (quota / 1024 ** 3).toFixed(1)
+  editingQuota.value = true
+  // 进入编辑态时拉一次实时数据用于上限提示；失败只记 console，不阻断编辑。
+  storageStats.value = null
+  void loadStorageStats()
+}
+
+const loadStorageStats = async () => {
+  if (!tenantInfo.value?.id) return
+  const resp = await getTenantStorageStats(Number(tenantInfo.value.id))
+  if (resp.success && resp.data) {
+    storageStats.value = resp.data
+  } else {
+    console.warn('[TenantInfo] failed to load storage stats:', resp.message)
+  }
+}
+
+const cancelEditQuota = () => {
+  if (savingQuota.value) return
+  editingQuota.value = false
+  editQuotaGB.value = ''
+}
+
+// t-input 自身不冒泡 esc，这里手动处理（与 enter 的体验对称）。
+const onEditQuotaKeydown = (_value: any, ctx: { e: KeyboardEvent }) => {
+  if (ctx?.e?.key === 'Escape') {
+    cancelEditQuota()
+  }
+}
+
+const saveTenantQuota = async () => {
+  if (!tenantInfo.value?.id) return
+  const gb = Number(editQuotaGB.value)
+  if (!editQuotaGB.value.trim() || !Number.isFinite(gb) || gb <= 0) {
+    MessagePlugin.warning(t('tenant.storage.quotaUpdateFailed'))
+    return
+  }
+  const bytes = Math.round(gb * 1024 ** 3)
+  // 预校验下限：已用量优先取实时 stats，拉不到就退回 tenantInfo 里的快照值。
+  const storageUsed = storageStats.value?.storage_used_bytes ?? tenantInfo.value.storage_used ?? 0
+  if (bytes < storageUsed) {
+    MessagePlugin.error(t('tenant.storage.quotaBelowUsedError', { used: formatBytes(storageUsed) }))
+    return
+  }
+  const stats = storageStats.value
+  if (stats && !stats.disk_unavailable && stats.quota_max_bytes && bytes > stats.quota_max_bytes) {
+    MessagePlugin.error(t('tenant.storage.quotaExceedsDiskError'))
+    return
+  }
+  if (bytes === tenantInfo.value.storage_quota) {
+    editingQuota.value = false
+    return
+  }
+
+  try {
+    savingQuota.value = true
+    const resp = await updateTenantApi(Number(tenantInfo.value.id), { storage_quota: bytes })
+    if (resp.success) {
+      // 本地立即回显，避免等 /auth/me 往返；storage_quota 只影响本页展示，
+      // 无需同步 authStore。只取响应里的配额字段合并：本页 tenantInfo 的类型
+      // 来自 /auth/me（id 为 string），与租户接口的 TenantInfo（id 为 number）
+      // 不同构，不能整体铺开。
+      if (tenantInfo.value) {
+        tenantInfo.value = {
+          ...tenantInfo.value,
+          storage_quota: resp.data?.storage_quota ?? bytes,
+          storage_used: resp.data?.storage_used ?? tenantInfo.value.storage_used,
+        }
+      }
+      MessagePlugin.success(t('tenant.storage.quotaUpdateSuccess'))
+      editingQuota.value = false
+    } else {
+      MessagePlugin.error(resp.message || t('tenant.storage.quotaUpdateFailed'))
+    }
+  } catch (err: any) {
+    MessagePlugin.error(err?.message || t('tenant.storage.quotaUpdateFailed'))
+  } finally {
+    savingQuota.value = false
+  }
+}
+
 // Methods
 const loadInfo = async () => {
   try {
@@ -818,6 +950,31 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* 配额行的原地编辑：上限提示放在输入框下方成一列，按钮与输入框顶部对齐。 */
+.inline-edit-quota {
+  align-items: flex-start;
+}
+
+.inline-edit-quota-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 220px;
+  flex: 1;
+
+  .inline-edit-input {
+    max-width: none;
+  }
+}
+
+.quota-max-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+  line-height: 1.4;
+  text-align: right;
 }
 
 /* 只读态的描述：多行可换行；空描述用占位色提示用户可点编辑写入。 */

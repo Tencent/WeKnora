@@ -169,6 +169,18 @@ func (f *fakeTenantService) BulkSetStorageQuota(ctx context.Context, quotaBytes 
 	return 0, nil
 }
 
+func (f *fakeTenantService) UpdateStorageQuota(
+	ctx context.Context, tenantID uint64, quotaBytes int64,
+) (*types.Tenant, error) {
+	return nil, nil
+}
+
+func (f *fakeTenantService) GetTenantStorageStats(
+	ctx context.Context, tenantID uint64,
+) (*types.TenantStorageStats, error) {
+	return nil, nil
+}
+
 func (f *fakeTenantService) SearchTenants(
 	ctx context.Context, keyword string, tenantID uint64, page, pageSize int,
 ) ([]*types.Tenant, int64, error) {

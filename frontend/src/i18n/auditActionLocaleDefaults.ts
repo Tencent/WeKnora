@@ -25,6 +25,7 @@ const TENANT_MEMBER_AUDIT_ACTION_LABELS_EN: Record<string, string> = {
 
 const SYSTEM_GLOBAL_AUDIT_ACTION_LABELS_EN: Record<string, string> = {
   'system.setting_changed': 'System setting changed',
+  'tenant.storage_quota_updated': 'Workspace storage quota updated',
   'system.admin_promoted': 'System admin granted',
   'system.api_key_created': 'Platform API key created',
   'system.api_key_revoked': 'Platform API key revoked',

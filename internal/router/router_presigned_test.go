@@ -57,6 +57,12 @@ func (s *stubTenantService) ListAllTenants(context.Context) ([]*types.Tenant, er
 func (s *stubTenantService) BulkSetStorageQuota(context.Context, int64) (int64, error) {
 	panic("unexpected")
 }
+func (s *stubTenantService) UpdateStorageQuota(context.Context, uint64, int64) (*types.Tenant, error) {
+	panic("unexpected")
+}
+func (s *stubTenantService) GetTenantStorageStats(context.Context, uint64) (*types.TenantStorageStats, error) {
+	panic("unexpected")
+}
 
 func (s *stubTenantService) SearchTenants(context.Context, string, uint64, int, int) ([]*types.Tenant, int64, error) {
 	panic("unexpected")

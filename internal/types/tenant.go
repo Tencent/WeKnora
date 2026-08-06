@@ -126,6 +126,26 @@ type Tenant struct {
 	DeletedAt gorm.DeletedAt `yaml:"deleted_at"          json:"deleted_at"          gorm:"index"`
 }
 
+// TenantStorageStats reports how much headroom an Owner has when raising
+// their storage quota. QuotaMaxBytes is the largest quota the volume can
+// honour right now: disk-free plus what the tenant already occupies
+// (raising the quota into already-used space needs no extra disk). When
+// the disk probe fails, DiskUnavailable is true, DiskFreeBytes is omitted
+// and QuotaMaxBytes degrades to the current usage — the UI should then
+// only offer lowering the quota, mirroring the fail-closed rule in
+// TenantService.UpdateStorageQuota.
+type TenantStorageStats struct {
+	// Free bytes on the volume hosting the local storage root; omitted
+	// when the probe failed.
+	DiskFreeBytes int64 `json:"disk_free_bytes,omitempty"`
+	// Maximum quota the tenant may set (disk free + storage used).
+	QuotaMaxBytes int64 `json:"quota_max_bytes"`
+	// Bytes the tenant currently occupies.
+	StorageUsedBytes int64 `json:"storage_used_bytes"`
+	// True when the disk free-space probe failed.
+	DiskUnavailable bool `json:"disk_unavailable"`
+}
+
 // RetrieverEngines represents the retriever engines for a tenant
 type RetrieverEngines struct {
 	Engines []RetrieverEngineParams `yaml:"engines" json:"engines" gorm:"type:json"`
