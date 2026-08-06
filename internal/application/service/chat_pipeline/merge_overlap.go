@@ -89,10 +89,11 @@ func appendTrustedContent(acc, next string, positionOverlap int) string {
 }
 
 // chunkTrusted reports whether a result's StartAt/EndAt can be trusted for
-// position-based merging: unedited, valid range, and splitter-consistent
-// length (runeLen(Content) == EndAt-StartAt).
+// position-based merging: unedited, not pipeline-rewritten, valid range, and
+// splitter-consistent length (runeLen(Content) == EndAt-StartAt).
 func chunkTrusted(chunk *types.SearchResult) bool {
 	return chunk.ContentRevision == 0 &&
+		!chunk.ContentRewritten &&
 		chunk.EndAt > chunk.StartAt &&
 		runeLen(chunk.Content) == chunk.EndAt-chunk.StartAt
 }
