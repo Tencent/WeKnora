@@ -262,17 +262,24 @@ type StreamResponse struct {
 	Data                map[string]interface{} `json:"data,omitempty"`                 // Additional metadata for enhanced display
 }
 
-// KnowledgeQAStream knowledge Q&A streaming API
+// KnowledgeQAStream knowledge Q&A streaming API.
+// Pass ResourceURLOptions to receive public HTTP(S) file URLs in the stream.
 func (c *Client) KnowledgeQAStream(
 	ctx context.Context,
 	sessionID string,
 	request *KnowledgeQARequest,
 	callback func(*StreamResponse) error,
+	opts ...ResourceURLOptions,
 ) error {
 	path := fmt.Sprintf("/api/v1/knowledge-chat/%s", sessionID)
 	debugLogger.Debug("knowledge_qa_stream_start", "session_id", sessionID, "query", request.Query)
 
-	resp, err := c.doRequestStream(ctx, http.MethodPost, path, request, nil)
+	queryParams := url.Values{}
+	if len(opts) > 0 {
+		applyResourceURLQuery(queryParams, &opts[0])
+	}
+
+	resp, err := c.doRequestStream(ctx, http.MethodPost, path, request, queryParams)
 	if err != nil {
 		debugLogger.Debug("request_failed", "error", err)
 		return err
@@ -350,17 +357,22 @@ func (c *Client) KnowledgeQAStream(
 	return nil
 }
 
-// ContinueStream continues to receive an active stream for a session
+// ContinueStream continues to receive an active stream for a session.
+// Pass ResourceURLOptions to receive public HTTP(S) file URLs in the stream.
 func (c *Client) ContinueStream(
 	ctx context.Context,
 	sessionID string,
 	messageID string,
 	callback func(*StreamResponse) error,
+	opts ...ResourceURLOptions,
 ) error {
 	path := fmt.Sprintf("/api/v1/sessions/continue-stream/%s", sessionID)
 
 	queryParams := url.Values{}
 	queryParams.Add("message_id", messageID)
+	if len(opts) > 0 {
+		applyResourceURLQuery(queryParams, &opts[0])
+	}
 
 	resp, err := c.doRequestStream(ctx, http.MethodGet, path, nil, queryParams)
 	if err != nil {
@@ -463,15 +475,25 @@ type SearchKnowledgeResponse struct {
 	Data    []*SearchResult `json:"data"`
 }
 
-// SearchKnowledge performs knowledge base search without LLM summarization
-func (c *Client) SearchKnowledge(ctx context.Context, request *SearchKnowledgeRequest) ([]*SearchResult, error) {
+// SearchKnowledge performs knowledge base search without LLM summarization.
+// Pass ResourceURLOptions to receive public HTTP(S) file URLs in results.
+func (c *Client) SearchKnowledge(
+	ctx context.Context,
+	request *SearchKnowledgeRequest,
+	opts ...ResourceURLOptions,
+) ([]*SearchResult, error) {
 	debugLogger.Debug("search_knowledge_start",
 		"knowledge_base_ids", request.KnowledgeBaseIDs,
 		"knowledge_ids", request.KnowledgeIDs,
 		"query", request.Query,
 	)
 
-	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/knowledge-search", request, nil)
+	queryParams := url.Values{}
+	if len(opts) > 0 {
+		applyResourceURLQuery(queryParams, &opts[0])
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/knowledge-search", request, queryParams)
 	if err != nil {
 		debugLogger.Debug("request_failed", "error", err)
 		return nil, err

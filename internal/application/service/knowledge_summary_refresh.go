@@ -112,7 +112,7 @@ func enqueueSummaryRefresh(
 	if tracker == nil {
 		tracker = noopSpanTracker{}
 	}
-	language, _ := types.LanguageFromContext(ctx)
+	language := types.LanguageFromContextOrDefault(ctx)
 	payload := types.SummaryGenerationPayload{
 		TenantID:        knowledge.TenantID,
 		KnowledgeBaseID: knowledge.KnowledgeBaseID,

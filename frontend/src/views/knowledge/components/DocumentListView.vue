@@ -107,6 +107,10 @@ const formatTime = (time?: string) => {
 const getSourceInfo = (item: KnowledgeItem): { icon: string; label: string } => {
   const ch = item.channel;
   if (ch === 'feishu') return { icon: 'cloud-download', label: t('knowledgeBase.channelFeishu') };
+  // Drive (云盘) connectors use their own channel so Drive docs show
+  // "飞书云盘" / "Lark 云盘", distinct from the wiki connector's "飞书".
+  if (ch === 'feishu_drive') return { icon: 'cloud-download', label: t('knowledgeBase.channelFeishuDrive') };
+  if (ch === 'lark_drive') return { icon: 'cloud-download', label: t('knowledgeBase.channelLarkDrive') };
   if (ch === 'notion') return { icon: 'cloud-download', label: t('knowledgeBase.channelNotion') };
   if (ch === 'yuque') return { icon: 'cloud-download', label: t('knowledgeBase.channelYuque') };
   if (ch === 'wechat') return { icon: 'cloud-download', label: t('knowledgeBase.channelWechat') };

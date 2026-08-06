@@ -486,6 +486,8 @@ const messages = {
     "knowledgeEditor": {
       "wikiBrowser": {
         "viewInGraph": "在图谱中查看",
+        "editingBadge": "编辑中",
+        "pageActions": "页面操作",
         "version": "v{ver}",
         "filterSummary": "摘要",
         "filterEntity": "实体",
@@ -980,6 +982,8 @@ const messages = {
     "knowledgeEditor": {
       "wikiBrowser": {
         "viewInGraph": "View in Graph",
+        "editingBadge": "Editing",
+        "pageActions": "Page actions",
         "version": "v{ver}",
         "filterSummary": "Summaries",
         "filterEntity": "Entities",

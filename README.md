@@ -209,12 +209,25 @@ See [`cli/README.md`](./cli/README.md) for install + 5-minute quickstart and
 git clone https://github.com/Tencent/WeKnora.git
 cd WeKnora
 cp .env.example .env   # Edit .env as needed, see comments in the file
-docker compose up -d   # Start core services
+docker compose pull     # Pull the latest images
+docker compose up -d    # Start core services
 ```
 
 Once started, visit **http://localhost** to get started.
 
 > To use a local Ollama model, run `ollama serve > /dev/null 2>&1 &` first.
+
+### 🔄 Upgrading
+
+If you already have WeKnora running and downloaded a newer release:
+
+```bash
+# Set WEKNORA_VERSION in .env to the target release (e.g. 0.7.0), or keep latest
+docker compose pull     # Pull images matching WEKNORA_VERSION
+docker compose up -d    # Recreate containers with new images
+```
+
+> `docker compose up -d` alone reuses locally cached images and may leave the UI version out of sync with the release you downloaded.
 
 ### 🔧 Optional Services (Docker Compose Profiles)
 
@@ -222,13 +235,13 @@ Add `--profile` flags to enable additional components. Multiple profiles can be 
 
 | Profile | Description | Command |
 |---------|-------------|---------|
-| _(default)_ | Core services | `docker compose up -d` |
-| `full` | All features | `docker compose --profile full up -d` |
-| `neo4j` | Knowledge Graph (Neo4j) | `docker compose --profile neo4j up -d` |
-| `minio` | Object Storage (MinIO) | `docker compose --profile minio up -d` |
-| `langfuse` | Tracing (Langfuse) | `docker compose --profile langfuse up -d` |
+| _(default)_ | Core services | `docker compose pull && docker compose up -d` |
+| `full` | All features | `docker compose --profile full pull && docker compose --profile full up -d` |
+| `neo4j` | Knowledge Graph (Neo4j) | `docker compose --profile neo4j pull && docker compose --profile neo4j up -d` |
+| `minio` | Object Storage (MinIO) | `docker compose --profile minio pull && docker compose --profile minio up -d` |
+| `langfuse` | Tracing (Langfuse) | `docker compose --profile langfuse pull && docker compose --profile langfuse up -d` |
 
-Combine profiles: `docker compose --profile neo4j --profile minio up -d`
+Combine profiles: `docker compose --profile neo4j --profile minio pull && docker compose --profile neo4j --profile minio up -d`
 
 Stop services: `docker compose down`
 

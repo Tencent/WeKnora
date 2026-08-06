@@ -5045,14 +5045,20 @@ definitions:
     type: object
   internal_handler.PreviewChunkingPayload:
     properties:
+      child_chunk_size:
+        type: integer
       chunk_overlap:
         type: integer
       chunk_size:
         type: integer
+      enable_parent_child:
+        type: boolean
       languages:
         items:
           type: string
         type: array
+      parent_chunk_size:
+        type: integer
       separators:
         items:
           type: string
@@ -5829,6 +5835,49 @@ info:
   title: WeKnora API
   version: "1.0"
 paths:
+  /agent-chat/{session_id}:
+    post:
+      consumes:
+      - application/json
+      description: 基于Agent的智能问答，支持多轮对话和SSE流式响应
+      parameters:
+      - description: 会话ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 问答请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_session.CreateKnowledgeQARequest'
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: 问答结果（SSE流）
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Agent问答
+      tags:
+      - 问答
   /agent/mcp-oauth-resolutions/{pending_id}:
     post:
       consumes:
@@ -9627,6 +9676,49 @@ paths:
       summary: 获取知识库复制进度
       tags:
       - 知识库
+  /knowledge-chat/{session_id}:
+    post:
+      consumes:
+      - application/json
+      description: 基于知识库的问答（使用LLM总结），支持SSE流式响应
+      parameters:
+      - description: 会话ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 问答请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_session.CreateKnowledgeQARequest'
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: 问答结果（SSE流）
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 知识问答
+      tags:
+      - 问答
   /knowledge/{id}:
     delete:
       consumes:
@@ -11528,6 +11620,14 @@ paths:
         in: query
         name: before_time
         type: string
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
       produces:
       - application/json
       responses:
@@ -12680,76 +12780,6 @@ paths:
       summary: 取消置顶会话
       tags:
       - 会话
-  /sessions/{session_id}/agent-qa:
-    post:
-      consumes:
-      - application/json
-      description: 基于Agent的智能问答，支持多轮对话和SSE流式响应
-      parameters:
-      - description: 会话ID
-        in: path
-        name: session_id
-        required: true
-        type: string
-      - description: 问答请求
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/internal_handler_session.CreateKnowledgeQARequest'
-      produces:
-      - text/event-stream
-      responses:
-        "200":
-          description: 问答结果（SSE流）
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: 请求参数错误
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      - ApiKeyAuth: []
-      summary: Agent问答
-      tags:
-      - 问答
-  /sessions/{session_id}/knowledge-qa:
-    post:
-      consumes:
-      - application/json
-      description: 基于知识库的问答（使用LLM总结），支持SSE流式响应
-      parameters:
-      - description: 会话ID
-        in: path
-        name: session_id
-        required: true
-        type: string
-      - description: 问答请求
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/internal_handler_session.CreateKnowledgeQARequest'
-      produces:
-      - text/event-stream
-      responses:
-        "200":
-          description: 问答结果（SSE流）
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: 请求参数错误
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      - ApiKeyAuth: []
-      summary: 知识问答
-      tags:
-      - 问答
   /sessions/{session_id}/messages/{message_id}/suggestions:
     get:
       parameters:
@@ -12985,6 +13015,14 @@ paths:
         name: message_id
         required: true
         type: string
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
       produces:
       - text/event-stream
       responses:
@@ -13015,6 +13053,14 @@ paths:
         required: true
         schema:
           $ref: '#/definitions/internal_handler_session.SearchKnowledgeRequest'
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
       produces:
       - application/json
       responses:

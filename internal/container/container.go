@@ -54,7 +54,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/datasource"
-	feishuConnector "github.com/Tencent/WeKnora/internal/datasource/connector/feishu"
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/drive"
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/wiki"
 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
 	rssConnector "github.com/Tencent/WeKnora/internal/datasource/connector/rss"
 	yuqueConnector "github.com/Tencent/WeKnora/internal/datasource/connector/yuque"
@@ -1003,11 +1005,10 @@ func initRawFileService(_ *config.Config) (interfaces.FileService, error) {
 			os.Getenv("TOS_TEMP_REGION"),      // 可选：临时桶 region，默认与主桶相同
 		)
 	case "s3":
-		if os.Getenv("S3_ENDPOINT") == "" ||
-			os.Getenv("S3_REGION") == "" ||
-			os.Getenv("S3_ACCESS_KEY") == "" ||
-			os.Getenv("S3_SECRET_KEY") == "" ||
-			os.Getenv("S3_BUCKET_NAME") == "" {
+		accessKey, secretKey := os.Getenv("S3_ACCESS_KEY"), os.Getenv("S3_SECRET_KEY")
+		if os.Getenv("S3_REGION") == "" ||
+			os.Getenv("S3_BUCKET_NAME") == "" ||
+			(accessKey == "") != (secretKey == "") {
 			return nil, fmt.Errorf("missing S3 configuration")
 		}
 		pathPrefix := os.Getenv("S3_PATH_PREFIX")
@@ -1016,8 +1017,8 @@ func initRawFileService(_ *config.Config) (interfaces.FileService, error) {
 		}
 		return file.NewS3FileService(
 			os.Getenv("S3_ENDPOINT"),
-			os.Getenv("S3_ACCESS_KEY"),
-			os.Getenv("S3_SECRET_KEY"),
+			accessKey,
+			secretKey,
 			os.Getenv("S3_BUCKET_NAME"),
 			os.Getenv("S3_REGION"),
 			pathPrefix,
@@ -1640,12 +1641,21 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	registry := datasource.NewConnectorRegistry()
 
 	var errs error
-	if err := registry.Register(feishuConnector.NewConnector(feishuConnector.RegionFeishu)); err != nil {
+	if err := registry.Register(wiki.NewConnector(core.RegionFeishu)); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register feishu connector: %w", err))
 	}
 	// Lark is Feishu's international cloud: same connector, different host/tenant.
-	if err := registry.Register(feishuConnector.NewConnector(feishuConnector.RegionLark)); err != nil {
+	if err := registry.Register(wiki.NewConnector(core.RegionLark)); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register lark connector: %w", err))
+	}
+	// Feishu/Lark Drive (云盘) mode: different connector type so the registry
+	// dispatches to the Drive connector. Shares core.Client/Region/export logic
+	// with the wiki connector. See 飞书云盘数据源设计.md / ADR-0001.
+	if err := registry.Register(drive.NewDriveConnector(core.RegionFeishuDrive)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register feishu_drive connector: %w", err))
+	}
+	if err := registry.Register(drive.NewDriveConnector(core.RegionLarkDrive)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register lark_drive connector: %w", err))
 	}
 	if err := registry.Register(notionConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register notion connector: %w", err))

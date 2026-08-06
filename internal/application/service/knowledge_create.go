@@ -213,7 +213,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		questionCount = 3
 	}
 
-	lang, _ := types.LanguageFromContext(ctx)
+	lang := types.LanguageFromContextOrDefault(ctx)
 	taskPayload := types.DocumentProcessPayload{
 		TenantID:                 tenantID,
 		KnowledgeID:              knowledge.ID,
@@ -411,7 +411,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		questionCount = 3
 	}
 
-	lang, _ := types.LanguageFromContext(ctx)
+	lang := types.LanguageFromContextOrDefault(ctx)
 	taskPayload := types.DocumentProcessPayload{
 		TenantID:                 tenantID,
 		KnowledgeID:              knowledge.ID,
@@ -653,7 +653,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		questionCount = 3
 	}
 
-	lang, _ := types.LanguageFromContext(ctx)
+	lang := types.LanguageFromContextOrDefault(ctx)
 	taskPayload := types.DocumentProcessPayload{
 		TenantID:                 tenantID,
 		KnowledgeID:              knowledge.ID,
@@ -927,7 +927,7 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 			}
 		}
 
-		lang, _ := types.LanguageFromContext(ctx)
+		lang := types.LanguageFromContextOrDefault(ctx)
 		taskPayload := types.DocumentProcessPayload{
 			TenantID:                 tenantID,
 			KnowledgeID:              knowledge.ID,
@@ -1207,6 +1207,10 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 			resolvedImages = append(resolvedImages, storedImages...)
 		}
 	}
+
+	// Keep manually entered CRLF text aligned with the LF values sent by the
+	// chunking preview endpoint.
+	clean = chunker.NormalizeLineEndings(clean)
 
 	processOverrides, _ := knowledge.ProcessOverrides()
 	eff := ResolveProcessConfig(kb, processOverrides)

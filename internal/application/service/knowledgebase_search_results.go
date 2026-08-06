@@ -309,6 +309,7 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 	return &types.SearchResult{
 		ID:                      chunk.ID,
 		Content:                 chunk.Content,
+		ContentRevision:         chunk.ContentRevision,
 		KnowledgeID:             chunk.KnowledgeID,
 		ChunkIndex:              chunk.ChunkIndex,
 		KnowledgeTitle:          knowledge.Title,

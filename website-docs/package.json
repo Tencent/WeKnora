@@ -1,0 +1,21 @@
+{
+  "name": "weknora-docs-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview",
+    "check:mermaid": "node scripts/check-mermaid.mjs",
+    "check:links": "node scripts/check-links.mjs",
+    "check": "npm run check:links && npm run check:mermaid"
+  },
+  "devDependencies": {
+    "mermaid": "^11.16.0",
+    "playwright-core": "^1.62.0",
+    "vitepress": "^1.6.4",
+    "vitepress-plugin-mermaid": "^2.0.17",
+    "vue": "^3.5.13",
+    "jsdom": "^28.0.0"
+  }
+}

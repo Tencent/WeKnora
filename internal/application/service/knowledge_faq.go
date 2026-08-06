@@ -124,6 +124,15 @@ func (s *knowledgeService) ListFAQEntries(ctx context.Context,
 	return types.NewPageResult(total, page, entries), nil
 }
 
+// faqCreateIndexBudget caps the indexing step of a single interactive FAQ
+// create. Indexing embeds inline and the embedding call retries with
+// exponential backoff, so a degraded embedding service can stretch one create
+// past ten seconds — long enough for an impatient caller to resend and pile up
+// concurrent creates. Failing fast is the better trade here: the caller can
+// retry a clear error, whereas a request left hanging invites duplicates.
+// Background and bulk indexing keep the full retry budget.
+const faqCreateIndexBudget = 5 * time.Second
+
 // CreateFAQEntry creates a single FAQ entry synchronously.
 func (s *knowledgeService) CreateFAQEntry(ctx context.Context,
 	kbID string, payload *types.FAQEntryPayload,
@@ -151,6 +160,14 @@ func (s *knowledgeService) CreateFAQEntry(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+
+	// 同一标准问的并发创建必须串行：下面的重复校验只看得到已落库的条目，
+	// 拦不住还在索引中的兄弟请求（上游超时重试就会造出这种并发）。
+	releaseGuard, err := s.acquireFAQCreateGuard(ctx, tenantID, kb.ID, meta.StandardQuestion)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseGuard()
 
 	// 检查标准问和相似问是否与其他条目重复
 	if err := s.checkFAQQuestionDuplicate(ctx, tenantID, kb.ID, "", meta); err != nil {
@@ -212,11 +229,18 @@ func (s *knowledgeService) CreateFAQEntry(ctx context.Context,
 		return nil, fmt.Errorf("failed to create chunk: %w", err)
 	}
 
-	// 索引chunk
-	if err := s.indexFAQChunks(ctx, kb, faqKnowledge, []*types.Chunk{chunk}, embeddingModel, true, false); err != nil {
-		// 如果索引失败，删除已创建的chunk
-		_ = s.chunkService.DeleteChunk(ctx, chunk.ID)
-		return nil, fmt.Errorf("failed to index chunk: %w", err)
+	// 索引chunk：交互式创建给索引步骤设硬上限，避免 embedding 抖动把请求拖长
+	indexCtx, cancelIndex := context.WithTimeout(ctx, faqCreateIndexBudget)
+	indexErr := s.indexFAQChunks(indexCtx, kb, faqKnowledge, []*types.Chunk{chunk}, embeddingModel, true, false)
+	cancelIndex()
+	if indexErr != nil {
+		// 如果索引失败，删除已创建的chunk。回滚失败会留下一条 stored 状态的
+		// 残留：它不出现在列表里，却会被重复校验命中，因此必须告警而非静默。
+		if delErr := s.chunkService.DeleteChunk(ctx, chunk.ID); delErr != nil {
+			logger.Errorf(ctx,
+				"CreateFAQEntry: rollback failed, chunk %s left in stored state: %v", chunk.ID, delErr)
+		}
+		return nil, fmt.Errorf("failed to index chunk: %w", indexErr)
 	}
 
 	// 更新chunk状态为已索引

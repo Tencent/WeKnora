@@ -30,7 +30,7 @@ func NewWikiReplaceTextTool(
 	return &wikiReplaceTextTool{
 		BaseTool: NewBaseTool(
 			ToolWikiReplaceText,
-			"Replace specific exact text in a Wiki page. Ideal for minor corrections.",
+			"Replace all occurrences of specific exact text in a Wiki page. Ideal for consistent minor corrections.",
 			json.RawMessage(`{
 				"type": "object",
 				"properties": {
@@ -103,11 +103,12 @@ func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage)
 		return &types.ToolResult{Success: false, Error: fmt.Sprintf("Failed to fetch page %s: %v", params.Slug, err)}, nil
 	}
 
-	if !strings.Contains(existingPage.Content, params.OldText) {
+	replacementCount := strings.Count(existingPage.Content, params.OldText)
+	if replacementCount == 0 {
 		return &types.ToolResult{Success: false, Error: "old_text not found in the current page content. Ensure you copy it exactly as it appears."}, nil
 	}
 
-	existingPage.Content = strings.Replace(existingPage.Content, params.OldText, params.NewText, 1)
+	existingPage.Content = strings.ReplaceAll(existingPage.Content, params.OldText, params.NewText)
 
 	if params.SourceRefs != nil {
 		if t.scopeEnforced {
@@ -129,17 +130,18 @@ func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage)
 	oldPreview := truncateRunes(params.OldText, 80)
 	newPreview := truncateRunes(params.NewText, 80)
 
-	output := fmt.Sprintf("Successfully replaced text on page [[%s]].\n- Old: %s\n- New: %s", params.Slug, oldPreview, newPreview)
+	output := fmt.Sprintf("Successfully replaced %d occurrence(s) on page [[%s]].\n- Old: %s\n- New: %s", replacementCount, params.Slug, oldPreview, newPreview)
 
 	return &types.ToolResult{
 		Success: true,
 		Output:  output,
 		Data: map[string]interface{}{
-			"display_type": "wiki_replace_text",
-			"slug":         params.Slug,
-			"title":        existingPage.Title,
-			"old_text":     oldPreview,
-			"new_text":     newPreview,
+			"display_type":      "wiki_replace_text",
+			"slug":              params.Slug,
+			"title":             existingPage.Title,
+			"old_text":          oldPreview,
+			"new_text":          newPreview,
+			"replacement_count": replacementCount,
 		},
 	}, nil
 }

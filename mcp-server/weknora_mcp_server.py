@@ -335,6 +335,31 @@ class WeKnoraClient:
             "POST", f"/knowledge-bases/{kb_id}/knowledge/url", json=data
         )
 
+    def create_knowledge_from_text(
+        self,
+        kb_id: str,
+        title: str,
+        content: str,
+        tag_ids: list[str] | None = None,
+        status: str = "publish",
+    ) -> Dict:
+        """Create a knowledge entry from raw Markdown text (manual knowledge).
+
+        ``status`` defaults to ``"publish"`` so the entry is chunked, embedded
+        and made searchable immediately, which suits API/MCP callers that have
+        no UI to publish drafts. Pass ``"draft"`` to save without indexing.
+        """
+        data = {
+            "title": title,
+            "content": content,
+            "status": status,
+        }
+        if tag_ids:
+            data["tag_ids"] = tag_ids
+        return self._request(
+            "POST", f"/knowledge-bases/{kb_id}/knowledge/manual", json=data
+        )
+
     def list_knowledge(self, kb_id: str, page: int = 1, page_size: int = 20) -> Dict:
         """List knowledge in a knowledge base"""
         params = {"page": page, "page_size": page_size}
@@ -712,6 +737,27 @@ def create_knowledge_from_url(
 ) -> dict:
     """Create knowledge from a web URL."""
     return client.create_knowledge_from_url(kb_id, url, enable_multimodel)
+
+
+@mcp.tool()
+def create_knowledge_from_text(
+    kb_id: str,
+    title: str,
+    content: str,
+    tag_ids: list[str] | None = None,
+    status: str = "publish",
+) -> dict:
+    """Create a knowledge entry from raw Markdown text.
+
+    Use this when you have the document content directly (e.g. an abstract or
+    pasted text) instead of a file path or URL. ``kb_id`` may be a UUID or a
+    knowledge-base name (resolved automatically). ``title`` and ``content``
+    are required. ``status`` defaults to ``"publish"`` so the entry is indexed
+    and searchable immediately; pass ``"draft"`` to save without indexing.
+    """
+    return client.create_knowledge_from_text(
+        client.resolve_kb_id(kb_id), title, content, tag_ids=tag_ids, status=status
+    )
 
 
 @mcp.tool()

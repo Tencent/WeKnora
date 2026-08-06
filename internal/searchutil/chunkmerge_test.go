@@ -58,6 +58,50 @@ func TestAppendWithOverlap_NoOverlap(t *testing.T) {
 	}
 }
 
+func TestAppendWithExactOverlap_TrimsKnownOverlap(t *testing.T) {
+	overlap := "shared boundary text"
+	got, ok := AppendWithExactOverlap("before "+overlap, overlap+" after", len([]rune(overlap)))
+	if !ok {
+		t.Fatal("exact overlap should be accepted")
+	}
+	want := "before " + overlap + " after"
+	if got != want {
+		t.Fatalf("exact overlap mismatch:\n got=%q\nwant=%q", got, want)
+	}
+}
+
+func TestAppendWithExactOverlap_ZeroOverlapConcatenatesRepeatedText(t *testing.T) {
+	// 首尾相接的两段都由同一周期性文本组成（表格行 / 日志行）。重叠量为 0 时
+	// 必须原样拼接，不能去搜索后缀匹配，否则会吃掉 next 开头的重复行。
+	row := "| cell | cell |\n"
+	acc := "前言\n" + row + row
+	next := row + row + row + "结尾\n"
+	got, ok := AppendWithExactOverlap(acc, next, 0)
+	if !ok {
+		t.Fatal("zero overlap should be accepted")
+	}
+	if got != acc+next {
+		t.Fatalf("zero overlap must concatenate verbatim:\n got=%q\nwant=%q", got, acc+next)
+	}
+}
+
+func TestAppendWithExactOverlap_RejectsMismatchedOverlap(t *testing.T) {
+	// 长度不变式成立但文本已经不同（HTML 实体、补写表头等），必须拒绝，
+	// 由调用方回退到按文本匹配。
+	if _, ok := AppendWithExactOverlap("abcdefghijkl", "XYZdefghijkl", 6); ok {
+		t.Fatal("mismatched overlap should be rejected")
+	}
+}
+
+func TestAppendWithExactOverlap_RejectsOverlapLongerThanBodies(t *testing.T) {
+	if _, ok := AppendWithExactOverlap("short", "shorter", 99); ok {
+		t.Fatal("overlap exceeding body length should be rejected")
+	}
+	if _, ok := AppendWithExactOverlap("short", "shorter", -1); ok {
+		t.Fatal("negative overlap should be rejected")
+	}
+}
+
 func TestJoinChunkContentUsesCurrentTextInsteadOfSourceOffsets(t *testing.T) {
 	first := "first edited body with no original overlap"
 	second := "second independently edited body"
