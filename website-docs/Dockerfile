@@ -1,5 +1,5 @@
 # Build from repository root:
-#   docker build -f website-docs/Dockerfile -t wechatopenai/weknora-docs:latest .
+#   docker build --platform linux/amd64 -f website-docs/Dockerfile -t wechatopenai/weknora-docs:latest .
 #
 # Gateway (preserve /docs/ prefix):
 #   location /docs/ { proxy_pass http://weknora-docs:80/docs/; }
@@ -21,12 +21,17 @@ RUN cd website-docs && npm ci
 COPY website-docs/ website-docs/
 RUN cd website-docs && npm run build
 
-# Same pinned nginx base as frontend/Dockerfile (CentOS 7 / old libseccomp compatible).
-FROM nginx:1.30.3-alpine@sha256:0d3b80406a13a767339fbe2f41406d6c7da727ab89cf8fae399e81f780f814d1
+# Align with internal frontend image: stable-alpine + custom entrypoint + bash.
+FROM nginx:stable-alpine AS production-stage
 
 COPY --from=builder /build/website-docs/.vitepress/dist /usr/share/nginx/html
+
+RUN apk add --no-cache bash
+
 COPY website-docs/nginx.conf /etc/nginx/conf.d/default.conf
+COPY website-docs/docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 
 EXPOSE 80
 
-CMD ["nginx", "-g", "daemon off;"]
+ENTRYPOINT ["/docker-entrypoint.sh"]
