@@ -125,6 +125,23 @@ func TestGroupAndMerge_TrustedGapStartsNewGroup(t *testing.T) {
 	require.Len(t, results, 2, "position gap must not merge")
 }
 
+func TestGroupAndMerge_RewrittenResultDoesNotTrustCoordinates(t *testing.T) {
+	// A result whose content was replaced by the pipeline (parent or neighbor
+	// expansion) must never enter the position path, even when the replacement
+	// happens to satisfy the length invariant and share boundary text: its
+	// stale coordinates must not extend the merged group's range.
+	first := trustedResult("c1", 1, 0, 100, rangeText('a', 100))
+	rewritten := trustedResult("c2", 2, 80, 200, rangeText('a', 20)+rangeText('b', 100))
+	rewritten.ContentRewritten = true
+
+	results := mergeGrouped(docChunks(first, rewritten))
+
+	require.Len(t, results, 1)
+	assert.Contains(t, results[0].Content, rangeText('a', 100))
+	assert.Contains(t, results[0].Content, rangeText('b', 100))
+	assert.Equal(t, 100, results[0].EndAt, "rewritten result must not extend the range via stale coordinates")
+}
+
 func TestGroupAndMerge_TrustedContainedSubsumes(t *testing.T) {
 	// Range-contained and text-verified: one result whose content is the
 	// outer body; the inner chunk is recorded, not duplicated.

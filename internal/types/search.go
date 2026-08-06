@@ -218,6 +218,12 @@ type SearchResult struct {
 	// serialized; the length invariant in chunkTrusted is the remaining guard
 	// there. Keep the gorm column explicit so direct row scans populate it.
 	ContentRevision int `gorm:"column:content_revision" json:"-"`
+
+	// ContentRewritten reports that the merge pipeline replaced Content
+	// (parent or neighbor expansion) after retrieval, so StartAt/EndAt no
+	// longer describe the body. Internal only: used by the merge pipeline,
+	// never serialized.
+	ContentRewritten bool `json:"-"`
 }
 
 // SearchParams represents the search parameters

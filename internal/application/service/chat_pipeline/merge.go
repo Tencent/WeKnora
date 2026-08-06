@@ -338,6 +338,7 @@ func (p *PluginMerge) resolveParentChunks(
 			assignScopedImageInfo(r, scopedImageInfo, r.ID)
 			parentContent := searchutil.PruneMarkdownImagesByImageInfo(parent.Content, r.ImageInfo)
 			r.Content = searchutil.JoinChunkContent(parentContent, r.Content, "\n\n")
+			r.ContentRewritten = true
 			if !containsID(r.SubChunkID, r.ID) {
 				r.SubChunkID = append(r.SubChunkID, r.ID)
 			}
@@ -357,6 +358,7 @@ func (p *PluginMerge) resolveParentChunks(
 			}
 			r.Content = textParent.Content
 			r.ChunkIndex = textParent.ChunkIndex
+			r.ContentRewritten = true
 			assignScopedImageInfo(r, scopedImageInfo, textParent.ID)
 			if r.ImageInfo == "" && hitImageInfo != "" {
 				r.ImageInfo = searchutil.FilterImageInfoByContentURLs(textParent.Content, hitImageInfo)
@@ -364,6 +366,7 @@ func (p *PluginMerge) resolveParentChunks(
 			textContent := searchutil.PruneMarkdownImagesByImageInfo(textParent.Content, r.ImageInfo)
 			parentContent := searchutil.PruneMarkdownImagesByImageInfo(contentSource.Content, r.ImageInfo)
 			r.Content = searchutil.JoinChunkContent(parentContent, textContent, "\n\n")
+			r.ContentRewritten = true
 			pipelineInfo(ctx, "Merge", "image_parent_resolve", map[string]interface{}{
 				"child_id":   r.ID,
 				"child_type": r.ChunkType,
