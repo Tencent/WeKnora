@@ -273,6 +273,11 @@
                 :label="configFieldText(option.label_key, option.label)"
               />
             </t-select>
+            <t-switch
+              v-else-if="field.type === 'boolean'"
+              :model-value="extraConfigBool(providerForm.parameters.extra_config[field.key], field.default !== 'false')"
+              @change="(val: boolean) => (providerForm.parameters.extra_config[field.key] = String(val))"
+            />
             <p v-if="field.description" class="form-desc">
               {{ configFieldText(field.description_key, field.description) }}
             </p>
@@ -489,6 +494,15 @@ const providerTypeLabel = (providerId: string) => {
 
 const configFieldText = (key: string | undefined, fallback: string) => {
   return key ? t(key, fallback) : fallback
+}
+// extraConfigBool parses a stringified boolean stored in extra_config.
+// When the stored value is empty, it falls back to the field default, then
+// to defaultTrue so toggles default to "on" for providers that opt in.
+const extraConfigBool = (value: string | undefined, defaultTrue: boolean) => {
+  const raw = (value ?? '').trim().toLowerCase()
+  if (raw === 'true') return true
+  if (raw === 'false') return false
+  return defaultTrue
 }
 
 const providerConfigDefaults = (providerId: string) => {

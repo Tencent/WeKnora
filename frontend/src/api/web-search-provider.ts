@@ -5,7 +5,7 @@ export interface WebSearchProviderEntity {
   id?: string
   tenant_id?: number
   name: string
-  provider: 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu' | 'searxng' | 'keenable' | 'zhipu'
+  provider: 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu' | 'searxng' | 'keenable' | 'zhipu' | 'metaso'
   description?: string
   parameters: {
     // api_key is never returned by the server in this shape; it lives behind
@@ -43,7 +43,7 @@ export interface WebSearchProviderConfigField {
   key: string
   label: string
   label_key?: string
-  type: 'select'
+  type: 'select' | 'boolean'
   required?: boolean
   default?: string
   description?: string
