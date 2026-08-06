@@ -51,7 +51,10 @@ flowchart TB
 ```bash
 git clone https://github.com/Tencent/WeKnora.git && cd WeKnora
 cp .env.example .env              # 编辑必填项：DB_USER/DB_PASSWORD/DB_NAME、REDIS_PASSWORD、JWT_SECRET、SYSTEM_AES_KEY
-docker compose up -d --pull always
+make start-all                # 等价 ./scripts/start_all.sh（默认拉取最新镜像）
+# 或直接：
+docker compose pull           # 拉取与 WEKNORA_VERSION 匹配的镜像
+docker compose up -d
 docker compose ps                 # 等所有服务变成 healthy/running
 ```
 
@@ -60,6 +63,18 @@ docker compose ps                 # 等所有服务变成 healthy/running
 启动后在浏览器打开 `http://localhost` 就是前端（端口由 `FRONTEND_PORT` 决定，默认 80），首次访问会落到注册页。前端 Nginx 把 `/api/` 反代到后端，所以接口调用同样走 `http://localhost/api/v1`；后端 `8080` 端口也直接映射到宿主机，`curl http://localhost:8080/health` 可用于确认后端就绪。
 
 > 注意：`docker-compose.yml` 的 app 服务使用 `env_file: [.env]`，`.env` 不存在会导致 compose 解析失败。`make docker-run` / `start_all.sh` 会自动 `cp .env.example .env` 或 `touch .env` 兜底。
+
+### 版本升级
+
+若已有部署并下载了更新的 release：
+
+```bash
+# 在 .env 中将 WEKNORA_VERSION 设为目标版本（如 0.7.0），或保持 latest
+docker compose pull
+docker compose up -d
+```
+
+> 仅执行 `docker compose up -d` 会复用本地缓存镜像，可能导致 Web UI 显示版本与下载的 release 不一致。
 
 ### 核心服务（默认启动）
 
