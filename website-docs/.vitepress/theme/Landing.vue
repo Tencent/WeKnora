@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useData } from 'vitepress/client'
+import { withBase } from 'vitepress'
 import Illus from './Illus.vue'
 
 const { theme } = useData()
@@ -277,8 +278,8 @@ const deployments = [
           <p class="lede">WeKnora（维娜拉）将 PDF、Word、网页与飞书 / Notion / 语雀等来源的资料汇入知识库，提供检索增强的问答能力，回答标注可追溯的出处。除基础问答外，还提供 <strong>Wiki 自动成书</strong>、<strong>ReAct Agent 与 MCP 双向集成</strong>、<strong>知识图谱增强检索</strong>，以及面向团队的<strong>多空间隔离、四级 RBAC、作用域 API Key 与审计日志</strong>。支持完整私有部署，模型可全部替换为本地推理。</p>
           <p class="lede lede-sub">本文档覆盖部署与配置、功能说明、约 360 个 API 端点的接口参考，以及二次开发的扩展点。</p>
           <div class="actions">
-            <a class="btn btn-solid" href="/01-getting-started/01-introduction">开始阅读</a>
-            <a class="btn btn-ghost" href="/02-architecture/01-overview">系统架构</a>
+            <a class="btn btn-solid" :href="withBase('/01-getting-started/01-introduction')">开始阅读</a>
+            <a class="btn btn-ghost" :href="withBase('/02-architecture/01-overview')">系统架构</a>
             <a
               class="btn btn-text"
               href="https://weknora.weixin.qq.com"
@@ -377,7 +378,7 @@ const deployments = [
 
         <ol class="chain">
           <li v-for="c in chain" :key="c.step" class="chain-item">
-            <a :href="c.href">
+            <a :href="withBase(c.href)">
               <span class="chain-head">
                 <Illus :name="c.icon" class="chain-icon" />
                 <span class="chain-step">{{ c.step }}</span>
@@ -400,7 +401,7 @@ const deployments = [
         </header>
 
         <div class="features">
-          <a v-for="f in features" :key="f.title" class="feature" :href="f.href">
+          <a v-for="f in features" :key="f.title" class="feature" :href="withBase(f.href)">
             <span class="feature-head">
               <Illus :name="f.icon" class="feature-icon" />
               <span class="feature-tag">{{ f.tag }}</span>
@@ -432,9 +433,9 @@ const deployments = [
         </div>
 
         <div class="surfaces-actions">
-          <a class="btn btn-ghost" href="/05-clients/01-frontend">查看客户端文档</a>
-          <a class="btn btn-text" href="/03-features/13-embed-channel">网页嵌入 ↗</a>
-          <a class="btn btn-text" href="/03-features/12-im-integration">IM 集成 ↗</a>
+          <a class="btn btn-ghost" :href="withBase('/05-clients/01-frontend')">查看客户端文档</a>
+          <a class="btn btn-text" :href="withBase('/03-features/13-embed-channel')">网页嵌入 ↗</a>
+          <a class="btn btn-text" :href="withBase('/03-features/12-im-integration')">IM 集成 ↗</a>
         </div>
       </div>
     </section>
@@ -465,7 +466,7 @@ const deployments = [
             </div>
             <ul class="map-list">
               <li v-for="it in m.items" :key="it.link">
-                <a :href="it.link">{{ it.text }}</a>
+                <a :href="withBase(it.link)">{{ it.text }}</a>
               </li>
             </ul>
           </section>
@@ -492,7 +493,7 @@ const deployments = [
               </span>
             </li>
           </ul>
-          <a class="btn btn-ghost" href="/01-getting-started/02-installation">查看安装部署</a>
+          <a class="btn btn-ghost" :href="withBase('/01-getting-started/02-installation')">查看安装部署</a>
         </div>
 
         <div class="deploy-code">
@@ -519,7 +520,7 @@ open http://localhost
 <span class="c"># 停止：docker compose down</span></code></pre>
           <p class="deploy-code-note">
             首次打开前端会落到注册页，注册后在初始化向导里配置对话模型与向量模型，即可建库提问。后端 API 与前端同域，走 <code>http://localhost/api/v1</code>。
-            完整步骤见<a href="/01-getting-started/03-quickstart">快速上手</a>，其余部署形态与参数见<a href="/01-getting-started/02-installation">安装部署</a>。
+            完整步骤见<a :href="withBase('/01-getting-started/03-quickstart')">快速上手</a>，其余部署形态与参数见<a :href="withBase('/01-getting-started/02-installation')">安装部署</a>。
           </p>
         </div>
       </div>
@@ -551,9 +552,9 @@ open http://localhost
         </div>
         <p class="closing-note">文档对应仓库 main 分支。源码路径均相对仓库根目录，API 路径默认带 <code>/api/v1</code> 前缀，配置示例中的密钥均为占位符。</p>
         <div class="closing-links">
-          <a href="/01-getting-started/01-introduction">快速开始</a>
-          <a href="/04-api/01-api-overview">API 总览</a>
-          <a href="/06-development/03-extension-points">扩展点</a>
+          <a :href="withBase('/01-getting-started/01-introduction')">快速开始</a>
+          <a :href="withBase('/04-api/01-api-overview')">API 总览</a>
+          <a :href="withBase('/06-development/03-extension-points')">扩展点</a>
           <a href="https://github.com/Tencent/WeKnora" target="_blank" rel="noreferrer">GitHub</a>
         </div>
         <p class="closing-copy">© Tencent WeKnora · MIT License</p>
