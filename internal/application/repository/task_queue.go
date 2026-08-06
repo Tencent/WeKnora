@@ -361,6 +361,26 @@ func (r *taskPendingOpsRepository) DeleteByScope(ctx context.Context, scope, sco
 // A missing row returns (0, nil): the caller's ID may have been removed
 // by a concurrent DeleteByIDs (e.g. dead-letter path), which is benign.
 func (r *taskPendingOpsRepository) IncrFailCount(ctx context.Context, id int64) (int, error) {
+	if r.db.Dialector.Name() != "postgres" {
+		var newCount int
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			res := tx.Model(&types.TaskPendingOp{}).
+				Where("id = ?", id).
+				Update("fail_count", gorm.Expr("fail_count + 1"))
+			if res.Error != nil || res.RowsAffected == 0 {
+				return res.Error
+			}
+			return tx.Model(&types.TaskPendingOp{}).
+				Select("fail_count").
+				Where("id = ?", id).
+				Scan(&newCount).Error
+		})
+		if err != nil {
+			return 0, err
+		}
+		return newCount, nil
+	}
+
 	var newCount int
 	err := r.db.WithContext(ctx).Raw(
 		`UPDATE task_pending_ops SET fail_count = fail_count + 1 WHERE id = ? RETURNING fail_count`,

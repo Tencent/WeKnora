@@ -247,11 +247,11 @@ func (s *vectorStoreService) unregisterSafely(ctx context.Context, storeID strin
 	}
 }
 
-// isPostgres reports whether the active GORM dialector is PostgreSQL.
-// Used to gate dialect-specific clauses (e.g., SELECT FOR UPDATE) that
-// SQLite would either ignore (recent versions) or fail to compile on.
+// isPostgres reports whether the active GORM dialector supports the row-locking
+// clauses used by the PostgreSQL path. MySQL/InnoDB supports the same GORM
+// Locking clause; SQLite would either ignore it or fail to compile on.
 func (s *vectorStoreService) isPostgres(db *gorm.DB) bool {
-	return db != nil && db.Dialector != nil && db.Dialector.Name() == "postgres"
+	return db != nil && db.Dialector != nil && (db.Dialector.Name() == "postgres" || db.Dialector.Name() == "mysql")
 }
 
 // SaveDetectedVersion updates the connection_config.version for a stored vector store.

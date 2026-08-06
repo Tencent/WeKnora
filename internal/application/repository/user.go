@@ -261,8 +261,12 @@ func (r *userRepository) SearchUsers(ctx context.Context, query string, limit in
 	var users []*types.User
 	searchPattern := "%" + query + "%"
 
+	likeExpr := "LOWER(username) LIKE LOWER(?) OR LOWER(email) LIKE LOWER(?)"
+	if r.db.Dialector.Name() == "postgres" {
+		likeExpr = "username ILIKE ? OR email ILIKE ?"
+	}
 	dbQuery := r.db.WithContext(ctx).
-		Where("username ILIKE ? OR email ILIKE ?", searchPattern, searchPattern).
+		Where(likeExpr, searchPattern, searchPattern).
 		Where("is_active = ?", true).
 		Order("username ASC")
 

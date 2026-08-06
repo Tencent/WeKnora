@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/mysql"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -106,6 +108,8 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 	migrationsPath := "file://migrations/versioned"
 	if strings.HasPrefix(dsn, "sqlite3://") {
 		migrationsPath = "file://migrations/sqlite"
+	} else if strings.HasPrefix(dsn, "mysql://") {
+		migrationsPath = "file://migrations/mysql"
 	}
 
 	var m *migrate.Migrate
@@ -300,6 +304,7 @@ func recoverFromDirtyState(ctx context.Context, m *migrate.Migrate, dirtyVersion
 
 // GetMigrationVersion returns the current migration version
 func GetMigrationVersion() (uint, bool, error) {
+	driver := os.Getenv("DB_DRIVER")
 	dbURL := fmt.Sprintf(
 		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
 		os.Getenv("DB_USER"),
@@ -308,8 +313,21 @@ func GetMigrationVersion() (uint, bool, error) {
 		os.Getenv("DB_PORT"),
 		os.Getenv("DB_NAME"),
 	)
-
 	migrationsPath := "file://migrations/versioned"
+	switch driver {
+	case "mysql":
+		dbURL = fmt.Sprintf("mysql://%s@tcp(%s:%s)/%s?multiStatements=true&parseTime=true",
+			url.UserPassword(os.Getenv("DB_USER"), os.Getenv("DB_PASSWORD")).String(),
+			os.Getenv("DB_HOST"), os.Getenv("DB_PORT"), url.PathEscape(os.Getenv("DB_NAME")))
+		migrationsPath = "file://migrations/mysql"
+	case "sqlite":
+		dbPath := os.Getenv("DB_PATH")
+		if dbPath == "" {
+			dbPath = "./data/weknora.db"
+		}
+		dbURL = "sqlite3://" + dbPath
+		migrationsPath = "file://migrations/sqlite"
+	}
 
 	m, err := migrate.New(migrationsPath, dbURL)
 	if err != nil {
