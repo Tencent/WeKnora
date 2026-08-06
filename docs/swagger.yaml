@@ -284,6 +284,7 @@ definitions:
     - rbac.invitation_declined
     - rbac.invitation_revoked
     - rbac.invitation_expired
+    - tenant.storage_quota_updated
     - vector_store.created
     - vector_store.updated
     - vector_store.deleted
@@ -347,6 +348,7 @@ definitions:
     - AuditActionInvitationDeclined
     - AuditActionInvitationRevoked
     - AuditActionInvitationExpired
+    - AuditActionTenantStorageQuotaUpdated
     - AuditActionVectorStoreCreated
     - AuditActionVectorStoreUpdated
     - AuditActionVectorStoreDeleted
@@ -14613,6 +14615,32 @@ paths:
       summary: 修改空间成员角色
       tags:
       - 空间成员
+  /tenants/{id}/storage-stats:
+    get:
+      description: 返回当前已用空间、卷剩余空间与可设置的最大配额，供 Owner 编辑配额时约束取值范围
+      parameters:
+      - description: 空间ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 存储统计
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 获取空间存储配额统计
+      tags:
+      - 空间管理
   /tenants/all:
     get:
       consumes:
