@@ -25,9 +25,9 @@ func GetAESKey() []byte {
 }
 
 // EncryptAESGCM encrypts plaintext with AES-256-GCM.
-// Returns the original string if empty, already encrypted, or key is nil.
+// Returns the original string if empty, already encrypted, or key is empty.
 func EncryptAESGCM(plaintext string, key []byte) (string, error) {
-	if plaintext == "" || key == nil {
+	if plaintext == "" || len(key) == 0 {
 		return plaintext, nil
 	}
 	if strings.HasPrefix(plaintext, EncPrefix) {
@@ -63,7 +63,7 @@ var ErrEncryptedDataMissingKey = errors.New("encrypted data found but SYSTEM_AES
 // DecryptAESGCM decrypts an AES-256-GCM encrypted string.
 // If the string lacks the enc:v1: prefix, it's treated as legacy plaintext and returned as-is.
 func DecryptAESGCM(encrypted string, key []byte) (string, error) {
-	if encrypted == "" || key == nil {
+	if encrypted == "" || len(key) == 0 {
 		return encrypted, nil
 	}
 	if !strings.HasPrefix(encrypted, EncPrefix) {

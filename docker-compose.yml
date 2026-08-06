@@ -281,7 +281,7 @@ services:
       # 需重新填写）。生产环境必须显式设置且妥善保管，丢失则所有加密数据不可恢复。
       # （TENANT_AES_KEY / CRYPTO_MASTER_KEY / CRYPTO_SALT 已废弃：v0.4.0 起加密统一
       #   改用 SYSTEM_AES_KEY，Go 主应用不再读取这三个变量。）
-      - SYSTEM_AES_KEY=${SYSTEM_AES_KEY:-}
+      # SYSTEM_AES_KEY 由 env_file (.env) 提供，不在此处覆盖以避免空值覆盖。
       - SSRF_WHITELIST=${SSRF_WHITELIST:-}
       # 保留原始 URL 的图片域名白名单（逗号分隔，不替换为 provider://）
       - IMAGE_HOST_KEEP_URL=${IMAGE_HOST_KEEP_URL:-}
