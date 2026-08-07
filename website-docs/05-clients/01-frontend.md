@@ -8,7 +8,7 @@ WeKnora 的 Web 前端是一个基于 **Vue 3 + TypeScript + Vite** 的单页应
 
 ## 技术栈总览
 
-依据 `frontend/package.json`（版本 0.7.1）：
+依据 `frontend/package.json`（版本 0.7.2）：
 
 | 类别 | 选型 | 版本 | 说明 |
 | --- | --- | --- | --- |
