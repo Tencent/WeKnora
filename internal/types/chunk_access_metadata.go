@@ -30,7 +30,7 @@ func (c *Chunk) AccessMetadata() (JSONMap, error) {
 	}
 
 	var accessMetadata JSONMap
-	if err := json.Unmarshal(rawAccessMetadata, &accessMetadata); err != nil {
+	if err := decodeJSONWithNumbers(rawAccessMetadata, &accessMetadata); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", chunkAccessMetadataKey, err)
 	}
 	if accessMetadata == nil {
@@ -60,7 +60,7 @@ func (c *Chunk) withExistingAccessMetadata(metadata []byte) (JSON, error) {
 	}
 
 	var accessMetadata JSONMap
-	if err := json.Unmarshal(rawAccessMetadata, &accessMetadata); err != nil {
+	if err := decodeJSONWithNumbers(rawAccessMetadata, &accessMetadata); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", chunkAccessMetadataKey, err)
 	}
 	if accessMetadata == nil {
@@ -77,4 +77,37 @@ func (c *Chunk) withExistingAccessMetadata(metadata []byte) (JSON, error) {
 		return nil, fmt.Errorf("encode chunk metadata: %w", err)
 	}
 	return JSON(merged), nil
+}
+
+// clearNonAccessMetadata removes metadata owned by document/FAQ writers while
+// preserving a valid reserved access object. Without one, metadata is cleared.
+func (c *Chunk) clearNonAccessMetadata() error {
+	if c == nil || len(c.Metadata) == 0 {
+		return nil
+	}
+	var existing map[string]json.RawMessage
+	if err := json.Unmarshal(c.Metadata, &existing); err != nil {
+		return fmt.Errorf("decode chunk metadata: %w", err)
+	}
+	if existing == nil {
+		return fmt.Errorf("chunk metadata must be a JSON object")
+	}
+	rawAccessMetadata, ok := existing[chunkAccessMetadataKey]
+	if !ok {
+		c.Metadata = nil
+		return nil
+	}
+	var accessMetadata JSONMap
+	if err := decodeJSONWithNumbers(rawAccessMetadata, &accessMetadata); err != nil {
+		return fmt.Errorf("decode %s: %w", chunkAccessMetadataKey, err)
+	}
+	if accessMetadata == nil {
+		return fmt.Errorf("%s must be a JSON object", chunkAccessMetadataKey)
+	}
+	metadata, err := json.Marshal(map[string]json.RawMessage{chunkAccessMetadataKey: rawAccessMetadata})
+	if err != nil {
+		return fmt.Errorf("encode chunk metadata: %w", err)
+	}
+	c.Metadata = JSON(metadata)
+	return nil
 }

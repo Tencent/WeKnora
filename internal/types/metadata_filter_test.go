@@ -115,18 +115,15 @@ func TestMetadataFilterJSONPreservesZeroEqualityValues(t *testing.T) {
 	}
 }
 
-func TestMetadataFilterValidateRejectsExplicitNullAndMixedGroups(t *testing.T) {
+func TestMetadataFilterJSONRejectsExplicitNullAndMixedGroups(t *testing.T) {
 	for _, body := range []string{
 		`{"and":null,"field":"x","op":"eq","value":true}`,
 		`{"or":null,"field":"x","op":"eq","value":true}`,
 		`{"and":null,"or":[{"field":"x","op":"eq","value":true}]}`,
 	} {
 		var filter MetadataFilter
-		if err := json.Unmarshal([]byte(body), &filter); err != nil {
-			t.Fatalf("unmarshal %s: %v", body, err)
-		}
-		if err := filter.Validate(); err == nil {
-			t.Fatalf("malformed explicit group accepted: %s", body)
+		if err := json.Unmarshal([]byte(body), &filter); err == nil {
+			t.Fatalf("malformed explicit group decoded: %s", body)
 		}
 	}
 }
@@ -146,6 +143,146 @@ func TestMetadataFilterValidateAcceptsStrictJSONNumbers(t *testing.T) {
 		if err := filter.Validate(); err != nil {
 			t.Fatalf("valid JSON number %q was rejected: %v", value, err)
 		}
+	}
+}
+
+func TestMetadataFilterJSONRejectsUnknownDuplicateAndBranchMixedFields(t *testing.T) {
+	tests := []string{
+		`{"field":"department","op":"eq","value":"research","unknown":true}`,
+		`{"field":"department","field":"finance","op":"eq","value":"research"}`,
+		`{"and":[{"field":"department","op":"eq","value":"research"}],"field":null}`,
+		`{"and":[{"field":"department","op":"eq","value":"research"}],"op":null}`,
+		`{"and":[{"field":"department","op":"eq","value":"research"}],"value":null}`,
+		`{"and":[{"field":"department","op":"eq","value":"research"}],"values":null}`,
+	}
+	for _, body := range tests {
+		var filter MetadataFilter
+		if err := json.Unmarshal([]byte(body), &filter); err == nil {
+			t.Fatalf("malformed filter was decoded: %s", body)
+		}
+	}
+}
+
+func TestMetadataFilterJSONRejectsMissingOrNullLeafFields(t *testing.T) {
+	for _, body := range []string{
+		`{"op":"eq","value":false}`,
+		`{"field":null,"op":"eq","value":false}`,
+		`{"field":"enabled","value":false}`,
+		`{"field":"enabled","op":null,"value":false}`,
+		`{"field":"enabled","op":"eq"}`,
+		`{"field":"enabled","op":"eq","value":null}`,
+		`{"field":"enabled","op":"in"}`,
+		`{"field":"enabled","op":"in","values":null}`,
+	} {
+		var filter MetadataFilter
+		err := json.Unmarshal([]byte(body), &filter)
+		if err == nil {
+			err = filter.Validate()
+		}
+		if err == nil {
+			t.Fatalf("missing or null required leaf field was accepted: %s", body)
+		}
+	}
+}
+
+func TestMetadataFilterJSONPreservesScalarZeroValuesAndOmitsLeafFieldsFromGroups(t *testing.T) {
+	for _, value := range []any{false, json.Number("0"), ""} {
+		body, err := json.Marshal(MetadataFilter{Field: "value", Op: MetadataFilterOpEqual, Value: value})
+		if err != nil {
+			t.Fatalf("marshal scalar %#v: %v", value, err)
+		}
+		if !strings.Contains(string(body), `"value":`) {
+			t.Fatalf("zero scalar was omitted: %s", body)
+		}
+	}
+
+	body, err := json.Marshal(MetadataFilter{And: []MetadataFilter{{
+		Field: "enabled", Op: MetadataFilterOpEqual, Value: false,
+	}}})
+	if err != nil {
+		t.Fatalf("marshal group: %v", err)
+	}
+	var groupFields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &groupFields); err != nil {
+		t.Fatalf("decode marshaled group: %v", err)
+	}
+	if _, exists := groupFields["value"]; exists {
+		t.Fatalf("group JSON contains value: %s", body)
+	}
+	if _, exists := groupFields["field"]; exists {
+		t.Fatalf("group JSON contains leaf-only fields: %s", body)
+	}
+}
+
+func TestMetadataFilterValidateBoundsInValuesPayload(t *testing.T) {
+	const (
+		maxValues     = 64
+		maxValueBytes = 4096
+		maxTotalBytes = 16384
+	)
+	validValues := make([]any, maxValues)
+	for i := range validValues {
+		validValues[i] = "v"
+	}
+	if err := (&MetadataFilter{Field: "role", Op: MetadataFilterOpIn, Values: validValues}).Validate(); err != nil {
+		t.Fatalf("maximum values count rejected: %v", err)
+	}
+
+	tooMany := append(validValues, "overflow")
+	if err := (&MetadataFilter{Field: "role", Op: MetadataFilterOpIn, Values: tooMany}).Validate(); err == nil {
+		t.Fatal("values list above maximum count was accepted")
+	}
+
+	if err := (&MetadataFilter{
+		Field: "role", Op: MetadataFilterOpIn,
+		Values: []any{strings.Repeat("x", maxValueBytes-2)},
+	}).Validate(); err != nil {
+		t.Fatalf("single value at maximum encoded byte length rejected: %v", err)
+	}
+	if err := (&MetadataFilter{
+		Field: "role", Op: MetadataFilterOpIn,
+		Values: []any{strings.Repeat("x", maxValueBytes)},
+	}).Validate(); err == nil {
+		t.Fatal("single encoded value above maximum byte length was accepted")
+	}
+
+	exactTotalValues := make([]any, maxValues)
+	for i := range exactTotalValues {
+		exactTotalValues[i] = strings.Repeat("x", maxTotalBytes/maxValues-2)
+	}
+	if err := (&MetadataFilter{Field: "role", Op: MetadataFilterOpIn, Values: exactTotalValues}).Validate(); err != nil {
+		t.Fatalf("values payload at maximum total encoded length rejected: %v", err)
+	}
+
+	totalValues := make([]any, maxValues)
+	for i := range totalValues {
+		totalValues[i] = strings.Repeat("x", maxTotalBytes/maxValues)
+	}
+	if err := (&MetadataFilter{Field: "role", Op: MetadataFilterOpIn, Values: totalValues}).Validate(); err == nil {
+		t.Fatal("values payload above maximum total encoded length was accepted")
+	}
+}
+
+func TestMetadataFilterMatchesAdjacentIntegersAboveTwoToThe53Exactly(t *testing.T) {
+	var filter MetadataFilter
+	if err := json.Unmarshal([]byte(`{"field":"employee_id","op":"eq","value":9007199254740993}`), &filter); err != nil {
+		t.Fatalf("decode filter: %v", err)
+	}
+	chunk := &Chunk{Metadata: JSON(`{"access_metadata":{"employee_id":9007199254740992}}`)}
+	metadata, err := chunk.AccessMetadata()
+	if err != nil {
+		t.Fatalf("decode access metadata: %v", err)
+	}
+	if filter.Matches(metadata) {
+		t.Fatal("adjacent integers above 2^53 compared equal")
+	}
+	chunk.Metadata = JSON(`{"access_metadata":{"employee_id":9007199254740993}}`)
+	metadata, err = chunk.AccessMetadata()
+	if err != nil {
+		t.Fatalf("decode matching access metadata: %v", err)
+	}
+	if !filter.Matches(metadata) {
+		t.Fatal("identical integer above 2^53 did not match")
 	}
 }
 

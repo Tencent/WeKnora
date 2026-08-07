@@ -92,6 +92,11 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 
 	// Build final search results
 	searchResults := s.assembleSearchResults(ctx, chunks, chunkMap, knowledgeMap, index, skipEnrichment)
+	if metadataFilter != nil {
+		for _, result := range searchResults {
+			result.KnowledgeDescription = ""
+		}
+	}
 
 	searchutil.EnrichSearchResultsImageInfo(ctx, s.chunkRepo, tenantID, searchResults)
 
@@ -133,6 +138,9 @@ func filterChunksByMetadata(chunks []*types.Chunk, metadataFilter *types.Metadat
 	filtered := make([]*types.Chunk, 0, len(chunks))
 	for _, chunk := range chunks {
 		if chunk == nil {
+			continue
+		}
+		if chunk.ChunkType == types.ChunkTypeSummary {
 			continue
 		}
 		accessMetadata, err := chunk.AccessMetadata()

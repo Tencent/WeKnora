@@ -1,11 +1,15 @@
 package types
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
+	"math/big"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -26,6 +30,10 @@ const (
 	maxMetadataFilterDepth = 8
 	maxMetadataFilterNodes = 64
 	maxMetadataFilterField = 64
+
+	maxMetadataFilterValues          = 64
+	maxMetadataFilterValueBytes      = 4096
+	maxMetadataFilterTotalValueBytes = 16384
 )
 
 // MetadataFilter is a recursive boolean expression over row metadata.
@@ -40,23 +48,144 @@ type MetadataFilter struct {
 
 	andSet bool
 	orSet  bool
+
+	fieldSet  bool
+	opSet     bool
+	valueSet  bool
+	valuesSet bool
 }
 
-// UnmarshalJSON records group fields separately from their decoded slices so
-// explicit null group fields cannot be mistaken for omitted group fields.
+// UnmarshalJSON strictly decodes one filter node. Presence flags distinguish
+// omitted fields from valid zero scalars and reject branch mixing even when a
+// conflicting field is explicitly null.
 func (f *MetadataFilter) UnmarshalJSON(data []byte) error {
-	type metadataFilterAlias MetadataFilter
-	var decoded metadataFilterAlias
-	if err := json.Unmarshal(data, &decoded); err != nil {
+	if f == nil {
+		return fmt.Errorf("metadata filter receiver is nil")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	opening, err := decoder.Token()
+	if err != nil {
 		return err
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
+	if delimiter, ok := opening.(json.Delim); !ok || delimiter != '{' {
+		return fmt.Errorf("metadata filter node must be a JSON object")
+	}
+
+	decoded := MetadataFilter{}
+	seen := make(map[string]struct{}, 6)
+	for decoder.More() {
+		keyToken, tokenErr := decoder.Token()
+		if tokenErr != nil {
+			return tokenErr
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return fmt.Errorf("metadata filter field name must be a string")
+		}
+		if _, duplicate := seen[key]; duplicate {
+			return fmt.Errorf("duplicate metadata filter field %q", key)
+		}
+		seen[key] = struct{}{}
+
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			return err
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("metadata filter field %q must not be null", key)
+		}
+		switch key {
+		case "and":
+			decoded.andSet = true
+			if err := decodeJSONWithNumbers(raw, &decoded.And); err != nil {
+				return fmt.Errorf("decode metadata filter and: %w", err)
+			}
+		case "or":
+			decoded.orSet = true
+			if err := decodeJSONWithNumbers(raw, &decoded.Or); err != nil {
+				return fmt.Errorf("decode metadata filter or: %w", err)
+			}
+		case "field":
+			decoded.fieldSet = true
+			if err := decodeJSONWithNumbers(raw, &decoded.Field); err != nil {
+				return fmt.Errorf("decode metadata filter field: %w", err)
+			}
+		case "op":
+			decoded.opSet = true
+			if err := decodeJSONWithNumbers(raw, &decoded.Op); err != nil {
+				return fmt.Errorf("decode metadata filter op: %w", err)
+			}
+		case "value":
+			decoded.valueSet = true
+			if err := decodeJSONWithNumbers(raw, &decoded.Value); err != nil {
+				return fmt.Errorf("decode metadata filter value: %w", err)
+			}
+		case "values":
+			decoded.valuesSet = true
+			if err := decodeJSONWithNumbers(raw, &decoded.Values); err != nil {
+				return fmt.Errorf("decode metadata filter values: %w", err)
+			}
+		default:
+			return fmt.Errorf("unknown metadata filter field %q", key)
+		}
+	}
+	closing, err := decoder.Token()
+	if err != nil {
 		return err
 	}
-	*f = MetadataFilter(decoded)
-	_, f.andSet = fields["and"]
-	_, f.orSet = fields["or"]
+	if delimiter, ok := closing.(json.Delim); !ok || delimiter != '}' {
+		return fmt.Errorf("metadata filter node has invalid JSON object termination")
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("metadata filter node contains trailing JSON")
+		}
+		return err
+	}
+	*f = decoded
+	return nil
+}
+
+// MarshalJSON emits only fields belonging to the selected branch. Equality
+// scalars remain present even when they are false, zero, or an empty string.
+func (f MetadataFilter) MarshalJSON() ([]byte, error) {
+	result := make(map[string]any, 2)
+	hasAnd := f.andSet || f.And != nil
+	hasOr := f.orSet || f.Or != nil
+	if hasAnd || hasOr {
+		if hasAnd {
+			result["and"] = f.And
+		}
+		if hasOr {
+			result["or"] = f.Or
+		}
+		return json.Marshal(result)
+	}
+	result["field"] = f.Field
+	result["op"] = f.Op
+	if f.Op == MetadataFilterOpIn || f.valuesSet || f.Values != nil {
+		result["values"] = f.Values
+	} else {
+		result["value"] = f.Value
+	}
+	return json.Marshal(result)
+}
+
+func decodeJSONWithNumbers(data []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("unexpected trailing JSON")
+		}
+		return err
+	}
 	return nil
 }
 
@@ -85,7 +214,8 @@ func (v *metadataFilterValidation) validate(f *MetadataFilter, depth int) error 
 	hasAnd := f.andSet || f.And != nil
 	hasOr := f.orSet || f.Or != nil
 	if hasAnd || hasOr {
-		if f.Field != "" || f.Op != "" || f.Value != nil || f.Values != nil {
+		if f.fieldSet || f.Field != "" || f.opSet || f.Op != "" ||
+			f.valueSet || f.Value != nil || f.valuesSet || f.Values != nil {
 			return fmt.Errorf("metadata filter node cannot mix group and predicate fields")
 		}
 		if hasAnd == hasOr {
@@ -108,7 +238,10 @@ func (v *metadataFilterValidation) validate(f *MetadataFilter, depth int) error 
 		return nil
 	}
 
-	if f.Field == "" || strings.TrimSpace(f.Field) != f.Field || len([]rune(f.Field)) > maxMetadataFilterField {
+	hasField := f.fieldSet || f.Field != ""
+	hasOp := f.opSet || f.Op != ""
+	if !hasField || f.Field == "" || strings.TrimSpace(f.Field) != f.Field ||
+		len([]rune(f.Field)) > maxMetadataFilterField {
 		return fmt.Errorf(
 			"metadata filter field must be a trimmed non-empty key of at most %d characters",
 			maxMetadataFilterField,
@@ -119,18 +252,41 @@ func (v *metadataFilterValidation) validate(f *MetadataFilter, depth int) error 
 			return fmt.Errorf("metadata filter field contains a control character")
 		}
 	}
+	if !hasOp {
+		return fmt.Errorf("metadata filter leaf requires an operator")
+	}
+	hasValue := f.valueSet || f.Value != nil
+	hasValues := f.valuesSet || f.Values != nil
 	switch f.Op {
 	case MetadataFilterOpEqual:
-		if f.Value == nil || f.Values != nil || !validMetadataScalar(f.Value) {
+		if !hasValue || f.Value == nil || hasValues || !validMetadataScalar(f.Value) {
 			return fmt.Errorf("metadata filter eq requires one scalar value")
 		}
 	case MetadataFilterOpIn:
-		if f.Value != nil || len(f.Values) == 0 {
+		if hasValue || !hasValues || len(f.Values) == 0 {
 			return fmt.Errorf("metadata filter in requires a non-empty values list")
 		}
+		if len(f.Values) > maxMetadataFilterValues {
+			return fmt.Errorf("metadata filter in accepts at most %d values", maxMetadataFilterValues)
+		}
+		totalBytes := 0
 		for _, value := range f.Values {
 			if !validMetadataScalar(value) {
 				return fmt.Errorf("metadata filter in values must be scalars")
+			}
+			encoded, err := json.Marshal(value)
+			if err != nil {
+				return fmt.Errorf("encode metadata filter in value: %w", err)
+			}
+			if len(encoded) > maxMetadataFilterValueBytes {
+				return fmt.Errorf("metadata filter in value exceeds %d encoded bytes", maxMetadataFilterValueBytes)
+			}
+			totalBytes += len(encoded)
+			if totalBytes > maxMetadataFilterTotalValueBytes {
+				return fmt.Errorf(
+					"metadata filter in values exceed %d total encoded bytes",
+					maxMetadataFilterTotalValueBytes,
+				)
 			}
 		}
 	default:
@@ -239,29 +395,85 @@ func metadataArray(value any) ([]any, bool) {
 func metadataScalarEqual(left, right any) bool {
 	if leftNumber, ok := metadataNumber(left); ok {
 		rightNumber, rightOK := metadataNumber(right)
-		return rightOK && leftNumber == rightNumber
+		return rightOK && leftNumber.equal(rightNumber)
 	}
 	return reflect.DeepEqual(left, right)
 }
 
-func metadataNumber(value any) (float64, bool) {
+type normalizedMetadataNumber struct {
+	negative bool
+	digits   string
+	exponent *big.Int
+}
+
+func (n normalizedMetadataNumber) equal(other normalizedMetadataNumber) bool {
+	return n.negative == other.negative && n.digits == other.digits && n.exponent.Cmp(other.exponent) == 0
+}
+
+func metadataNumber(value any) (normalizedMetadataNumber, bool) {
 	if number, ok := value.(json.Number); ok {
-		parsed, err := number.Float64()
-		return parsed, err == nil && !math.IsNaN(parsed) && !math.IsInf(parsed, 0)
+		return normalizeMetadataNumber(string(number))
 	}
 	rv := reflect.ValueOf(value)
 	if !rv.IsValid() {
-		return 0, false
+		return normalizedMetadataNumber{}, false
 	}
+	var encoded string
 	switch rv.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return float64(rv.Int()), true
+		encoded = strconv.FormatInt(rv.Int(), 10)
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return float64(rv.Uint()), true
-	case reflect.Float32, reflect.Float64:
-		value := rv.Float()
-		return value, !math.IsNaN(value) && !math.IsInf(value, 0)
+		encoded = strconv.FormatUint(rv.Uint(), 10)
+	case reflect.Float32:
+		floatValue := rv.Float()
+		if math.IsNaN(floatValue) || math.IsInf(floatValue, 0) {
+			return normalizedMetadataNumber{}, false
+		}
+		encoded = strconv.FormatFloat(floatValue, 'g', -1, 32)
+	case reflect.Float64:
+		floatValue := rv.Float()
+		if math.IsNaN(floatValue) || math.IsInf(floatValue, 0) {
+			return normalizedMetadataNumber{}, false
+		}
+		encoded = strconv.FormatFloat(floatValue, 'g', -1, 64)
 	default:
-		return 0, false
+		return normalizedMetadataNumber{}, false
 	}
+	return normalizeMetadataNumber(encoded)
+}
+
+// normalizeMetadataNumber canonicalizes JSON decimal syntax without converting
+// through binary floating point. The exponent remains arbitrary precision, so
+// comparison is exact without allocating enormous powers of ten.
+func normalizeMetadataNumber(value string) (normalizedMetadataNumber, bool) {
+	if !strictJSONNumberPattern.MatchString(value) {
+		return normalizedMetadataNumber{}, false
+	}
+	negative := strings.HasPrefix(value, "-")
+	if negative {
+		value = value[1:]
+	}
+	exponent := new(big.Int)
+	if separator := strings.IndexAny(value, "eE"); separator >= 0 {
+		if _, ok := exponent.SetString(value[separator+1:], 10); !ok {
+			return normalizedMetadataNumber{}, false
+		}
+		value = value[:separator]
+	}
+	fractionDigits := 0
+	if point := strings.IndexByte(value, '.'); point >= 0 {
+		fractionDigits = len(value) - point - 1
+		value = value[:point] + value[point+1:]
+	}
+	digits := strings.TrimLeft(value, "0")
+	if digits == "" {
+		return normalizedMetadataNumber{digits: "0", exponent: new(big.Int)}, true
+	}
+	trailingZeros := len(digits) - len(strings.TrimRight(digits, "0"))
+	if trailingZeros > 0 {
+		digits = digits[:len(digits)-trailingZeros]
+	}
+	exponent.Sub(exponent, big.NewInt(int64(fractionDigits)))
+	exponent.Add(exponent, big.NewInt(int64(trailingZeros)))
+	return normalizedMetadataNumber{negative: negative, digits: digits, exponent: exponent}, true
 }

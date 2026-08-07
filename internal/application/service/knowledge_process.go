@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -745,28 +746,76 @@ func firstTextChunkSummaryFallback(textChunks []*types.Chunk) string {
 	return fallback
 }
 
-// newSummaryChunk creates a summary child chunk that retains only the source
-// chunk's reserved access metadata. Summary content must not inherit unrelated
-// document metadata such as generated questions.
+// commonSummaryAccessMetadata returns access metadata only when every source
+// chunk carries the same reserved object. A heterogeneous document cannot
+// safely assign one chunk's permissions to document-wide summary content.
+func commonSummaryAccessMetadata(sourceChunks []*types.Chunk) (types.JSONMap, error) {
+	if len(sourceChunks) == 0 {
+		return nil, fmt.Errorf("summary source chunks are required")
+	}
+	var common types.JSONMap
+	var commonEncoded []byte
+	for _, source := range sourceChunks {
+		if source == nil {
+			return nil, fmt.Errorf("summary source chunk is nil")
+		}
+		accessMetadata, err := source.AccessMetadata()
+		if err != nil {
+			return nil, fmt.Errorf("extract access metadata for summary source chunk %s: %w", source.ID, err)
+		}
+		encoded, err := json.Marshal(accessMetadata)
+		if err != nil {
+			return nil, fmt.Errorf("encode summary source access metadata: %w", err)
+		}
+		if commonEncoded == nil {
+			common = accessMetadata
+			commonEncoded = encoded
+			continue
+		}
+		if !bytes.Equal(commonEncoded, encoded) {
+			return types.JSONMap{}, nil
+		}
+	}
+	return common, nil
+}
+
+// applySummaryChunkAccessMetadata synchronizes an initial or refreshed summary
+// chunk with the safe common access object, clearing stale metadata when source
+// chunks differ or carry no access metadata.
+func applySummaryChunkAccessMetadata(summary *types.Chunk, sourceChunks []*types.Chunk) error {
+	if summary == nil {
+		return fmt.Errorf("summary chunk is required")
+	}
+	accessMetadata, err := commonSummaryAccessMetadata(sourceChunks)
+	if err != nil {
+		return err
+	}
+	if len(accessMetadata) == 0 {
+		summary.Metadata = nil
+		return nil
+	}
+	metadata, err := json.Marshal(types.JSONMap{"access_metadata": accessMetadata})
+	if err != nil {
+		return fmt.Errorf("encode summary access metadata: %w", err)
+	}
+	summary.Metadata = types.JSON(metadata)
+	return nil
+}
+
+// newSummaryChunk creates a summary child chunk that retains access metadata
+// only when all contributing chunks agree. It never inherits unrelated chunk
+// metadata such as generated questions.
 func newSummaryChunk(
-	source *types.Chunk,
+	sourceChunks []*types.Chunk,
 	knowledge *types.Knowledge,
 	id string,
 	content string,
 	chunkIndex int,
 ) (*types.Chunk, error) {
-	if source == nil {
-		return nil, fmt.Errorf("summary source chunk is required")
+	if len(sourceChunks) == 0 || sourceChunks[0] == nil {
+		return nil, fmt.Errorf("summary source chunks are required")
 	}
-	accessMetadata, err := source.AccessMetadata()
-	if err != nil {
-		return nil, fmt.Errorf("extract access metadata for summary source chunk %s: %w", source.ID, err)
-	}
-	metadata, err := json.Marshal(types.JSONMap{"access_metadata": accessMetadata})
-	if err != nil {
-		return nil, fmt.Errorf("encode summary access metadata: %w", err)
-	}
-	return &types.Chunk{
+	summary := &types.Chunk{
 		ID:              id,
 		TenantID:        knowledge.TenantID,
 		KnowledgeID:     knowledge.ID,
@@ -777,9 +826,12 @@ func newSummaryChunk(
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
 		ChunkType:       types.ChunkTypeSummary,
-		ParentChunkID:   source.ID,
-		Metadata:        types.JSON(metadata),
-	}, nil
+		ParentChunkID:   sourceChunks[0].ID,
+	}
+	if err := applySummaryChunkAccessMetadata(summary, sourceChunks); err != nil {
+		return nil, err
+	}
+	return summary, nil
 }
 
 // applyRetryableSummaryFailureState keeps an existing description visible
@@ -1336,7 +1388,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// and surfacing them in retrieved RAG context can re-introduce the
 		// hallucination vector this branch is meant to close.
 		summaryChunk, err := newSummaryChunk(
-			textChunks[0], knowledge, uuid.New().String(), fmt.Sprintf("# Summary\n%s", summary), maxChunkIndex+1,
+			textChunks, knowledge, uuid.New().String(), fmt.Sprintf("# Summary\n%s", summary), maxChunkIndex+1,
 		)
 		if err != nil {
 			summaryErr = err
@@ -2414,6 +2466,9 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 				chunk.SourceContent = chunk.Content
 				chunk.IsEnabled = true
 				chunk.UpdatedAt = time.Now()
+				if err := applySummaryChunkAccessMetadata(chunk, textChunks); err != nil {
+					return nil, err
+				}
 				if err := s.chunkRepo.UpdateChunk(ctx, chunk); err != nil {
 					return nil, err
 				}
@@ -2423,7 +2478,7 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 		}
 		if !found {
 			summaryChunk, err := newSummaryChunk(
-				textChunks[0], knowledge, uuid.NewString(), "# Summary\n"+summary, maxIndex+1,
+				textChunks, knowledge, uuid.NewString(), "# Summary\n"+summary, maxIndex+1,
 			)
 			if err != nil {
 				return nil, err

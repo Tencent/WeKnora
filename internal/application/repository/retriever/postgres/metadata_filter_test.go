@@ -5,13 +5,32 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Tencent/WeKnora/internal/types"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	gormlogger "gorm.io/gorm/logger"
 )
+
+type keywordSQLLogSpy struct {
+	infoModeRequests int
+}
+
+func (l *keywordSQLLogSpy) LogMode(level gormlogger.LogLevel) gormlogger.Interface {
+	if level == gormlogger.Info {
+		l.infoModeRequests++
+	}
+	return l
+}
+
+func (l *keywordSQLLogSpy) Info(context.Context, string, ...interface{})  {}
+func (l *keywordSQLLogSpy) Warn(context.Context, string, ...interface{})  {}
+func (l *keywordSQLLogSpy) Error(context.Context, string, ...interface{}) {}
+func (l *keywordSQLLogSpy) Trace(context.Context, time.Time, func() (string, int64), error) {
+}
 
 func TestCompileMetadataFilterPreservesNestedBooleanTree(t *testing.T) {
 	filter := &types.MetadataFilter{Or: []types.MetadataFilter{
@@ -138,6 +157,45 @@ func TestKeywordsRetrieveExecutesMetadataFilterBeforeLimit(t *testing.T) {
 	}
 	if len(results) != 1 || len(results[0].Results) != 0 {
 		t.Fatalf("keyword results = %#v, want one empty retrieval result", results)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("keyword SQL expectation: %v", err)
+	}
+}
+
+func TestKeywordsRetrieveDoesNotForceSQLDebugLogging(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("create SQL mock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	logSpy := &keywordSQLLogSpy{}
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{Conn: db}), &gorm.Config{
+		DisableAutomaticPing: true,
+		Logger:               logSpy,
+	})
+	if err != nil {
+		t.Fatalf("open GORM PostgreSQL DB: %v", err)
+	}
+	baselineInfoRequests := logSpy.infoModeRequests
+	mock.ExpectQuery(`(?s)SELECT .* FROM "embeddings"`).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"score", "id", "content", "source_id", "source_type", "chunk_id", "knowledge_id", "knowledge_base_id", "tag_id",
+		}))
+
+	repo := &pgRepository{db: gormDB}
+	if _, err := repo.KeywordsRetrieve(context.Background(), types.RetrieveParams{
+		Query: "expense", TopK: 2,
+		MetadataFilter: &types.MetadataFilter{
+			Field: "department", Op: types.MetadataFilterOpEqual, Value: "research",
+		},
+	}); err != nil {
+		t.Fatalf("keyword retrieval: %v", err)
+	}
+	if logSpy.infoModeRequests != baselineInfoRequests {
+		t.Fatalf("keyword retrieval forced SQL logger to info/debug mode: before=%d after=%d",
+			baselineInfoRequests, logSpy.infoModeRequests)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("keyword SQL expectation: %v", err)

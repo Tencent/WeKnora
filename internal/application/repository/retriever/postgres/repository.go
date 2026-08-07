@@ -173,7 +173,7 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 	}})
 
 	var embeddingDBList []pgVectorWithScore
-	err = g.db.WithContext(ctx).Clauses(conds...).Debug().
+	err = g.db.WithContext(ctx).Clauses(conds...).
 		Select([]string{
 			"paradedb.score(id) as score",
 			"id",

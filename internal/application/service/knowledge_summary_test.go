@@ -184,32 +184,64 @@ func TestFirstTextChunkSummaryFallback(t *testing.T) {
 	})
 }
 
-func TestInitialSummaryChunkInheritsOnlyReservedAccessMetadata(t *testing.T) {
-	source := &types.Chunk{
-		ID:       "source-chunk",
-		Metadata: types.JSON(`{"access_metadata":{"department":"research"},"generated_questions":["unrelated"]}`),
+func TestInitialSummaryChunkCarriesAccessMetadataOnlyWhenAllSourceChunksAgree(t *testing.T) {
+	sources := []*types.Chunk{
+		{
+			ID:       "source-chunk-1",
+			Metadata: types.JSON(`{"access_metadata":{"department":"research"},"generated_questions":["unrelated"]}`),
+		},
+		{
+			ID:       "source-chunk-2",
+			Metadata: types.JSON(`{"generated_questions":["different"],"access_metadata":{"department":"research"}}`),
+		},
 	}
 	knowledge := &types.Knowledge{ID: "knowledge", TenantID: 1, KnowledgeBaseID: "kb"}
 
-	summary, err := newSummaryChunk(source, knowledge, "summary-id", "# Summary\ninitial", 8)
+	summary, err := newSummaryChunk(sources, knowledge, "summary-id", "# Summary\ninitial", 8)
 	if err != nil {
 		t.Fatalf("newSummaryChunk() error = %v", err)
 	}
 	assertSummaryChunkAccessMetadata(t, summary)
+
+	sources[1].Metadata = types.JSON(`{"access_metadata":{"department":"finance"}}`)
+	summary, err = newSummaryChunk(sources, knowledge, "heterogeneous-summary", "# Summary\ninitial", 8)
+	if err != nil {
+		t.Fatalf("newSummaryChunk() with heterogeneous metadata error = %v", err)
+	}
+	accessMetadata, err := summary.AccessMetadata()
+	if err != nil {
+		t.Fatalf("heterogeneous summary AccessMetadata() error = %v", err)
+	}
+	if len(accessMetadata) != 0 || len(summary.Metadata) != 0 {
+		t.Fatalf("heterogeneous summary metadata = %s, want empty", summary.Metadata)
+	}
 }
 
-func TestRefreshSummaryChunkInheritsOnlyReservedAccessMetadata(t *testing.T) {
-	source := &types.Chunk{
-		ID:       "source-chunk",
-		Metadata: types.JSON(`{"access_metadata":{"department":"research"},"generated_questions":["unrelated"]}`),
+func TestRefreshSummaryChunkSynchronizesAndClearsAccessMetadata(t *testing.T) {
+	summary := &types.Chunk{
+		ID:       "summary-id",
+		Metadata: types.JSON(`{"access_metadata":{"department":"stale"}}`),
 	}
-	knowledge := &types.Knowledge{ID: "knowledge", TenantID: 1, KnowledgeBaseID: "kb"}
-
-	summary, err := newSummaryChunk(source, knowledge, "summary-id", "# Summary\nrefreshed", 8)
-	if err != nil {
-		t.Fatalf("newSummaryChunk() error = %v", err)
+	sources := []*types.Chunk{
+		{ID: "source-1", Metadata: types.JSON(`{"access_metadata":{"department":"research"}}`)},
+		{ID: "source-2", Metadata: types.JSON(`{"access_metadata":{"department":"research"}}`)},
+	}
+	if err := applySummaryChunkAccessMetadata(summary, sources); err != nil {
+		t.Fatalf("apply homogeneous refresh metadata: %v", err)
 	}
 	assertSummaryChunkAccessMetadata(t, summary)
+
+	sources[1].Metadata = types.JSON(`{"access_metadata":{"department":"finance"}}`)
+	if err := applySummaryChunkAccessMetadata(summary, sources); err != nil {
+		t.Fatalf("apply heterogeneous refresh metadata: %v", err)
+	}
+	accessMetadata, err := summary.AccessMetadata()
+	if err != nil {
+		t.Fatalf("cleared summary AccessMetadata() error = %v", err)
+	}
+	if len(accessMetadata) != 0 || len(summary.Metadata) != 0 {
+		t.Fatalf("refreshed heterogeneous summary metadata = %s, want empty", summary.Metadata)
+	}
 }
 
 func assertSummaryChunkAccessMetadata(t *testing.T, summary *types.Chunk) {

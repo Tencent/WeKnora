@@ -93,6 +93,8 @@ Validation rules:
 - Field names are non-empty, bounded in length, and validated as safe metadata keys. The key is bound as a JSON key by the backend translator; callers cannot provide SQL, JSONPath, or backend-specific fragments.
 - A key that is not present in a row is a non-match, so a typo cannot broaden access.
 - `eq` accepts one string, number, or boolean scalar; `in` accepts a non-empty list of those scalars.
+- One `in` leaf accepts at most 64 values. Each scalar's JSON encoding is limited to 4,096 bytes, and the sum of encoded values in that leaf is limited to 16,384 bytes.
+- Unknown fields, duplicate JSON keys, explicit `null` node fields, and fields from the other node branch are rejected. Valid scalar `false`, `0`, and `""` values are preserved.
 - `not` and range operators are intentionally deferred.
 
 ## 6. Filter semantics
@@ -145,6 +147,8 @@ Existing indexed records without the access-metadata payload remain searchable w
 Retrieval can enrich a hit with parent, nearby, or relation chunks. Every such expansion path must use the same filter and drop records that do not match. Otherwise an allowed row could act as a bridge to a restricted neighboring row.
 
 The response must not expose internal filter evaluation details or backend query fragments. Validation errors may identify the invalid field/operator, but not emit generated SQL or sensitive metadata values in logs.
+
+When `metadata_filter` is present, document-wide summary chunks are excluded and `KnowledgeDescription` is omitted because either may aggregate content from chunks with different access metadata. A summary index record carries `access_metadata` only when every contributing text chunk has the same reserved object; initial indexing and refresh both clear summary access metadata for heterogeneous source chunks.
 
 ## 10. Error handling and security
 

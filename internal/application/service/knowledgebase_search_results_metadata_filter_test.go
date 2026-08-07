@@ -53,7 +53,10 @@ func newMetadataFilterResultService(chunks map[string]*types.Chunk) *knowledgeBa
 	return &knowledgeBaseService{
 		chunkRepo: &metadataFilterResultChunkRepo{chunks: chunks},
 		kgRepo: &metadataFilterResultKnowledgeRepo{knowledge: map[string]*types.Knowledge{
-			"knowledge": {ID: "knowledge", KnowledgeBaseID: "kb", Title: "metadata filter test"},
+			"knowledge": {
+				ID: "knowledge", KnowledgeBaseID: "kb", Title: "metadata filter test",
+				Description: "document-wide summary containing restricted chunk content",
+			},
 		}},
 	}
 }
@@ -118,6 +121,26 @@ func TestProcessSearchResultsMetadataFilterExcludesDisallowedNearbyAndAccessMeta
 	}
 	if string(chunkMetadata["label"]) != `"visible"` {
 		t.Fatalf("public chunk metadata = %s, want visible label", chunkMetadata["label"])
+	}
+	if results[0].KnowledgeDescription != "" {
+		t.Fatalf("filtered result leaked knowledge description %q", results[0].KnowledgeDescription)
+	}
+}
+
+func TestProcessSearchResultsMetadataFilterExcludesSummaryChunks(t *testing.T) {
+	summary := metadataFilterResultChunk("summary", metadataForDepartment("research"))
+	summary.ChunkType = types.ChunkTypeSummary
+	summary.Content = "summary assembled from chunks with different access metadata"
+	service := newMetadataFilterResultService(map[string]*types.Chunk{summary.ID: summary})
+
+	results, err := service.processSearchResults(metadataFilterResultContext(), []*types.IndexWithScore{{
+		ChunkID: summary.ID, KnowledgeID: summary.KnowledgeID, Score: 1,
+	}}, true, metadataFilterForResearch())
+	if err != nil {
+		t.Fatalf("processSearchResults() error = %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("filtered result returned summary content: %#v", results)
 	}
 }
 

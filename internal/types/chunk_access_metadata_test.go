@@ -87,3 +87,57 @@ func TestChunkMetadataSettersPreserveReservedAccessMetadata(t *testing.T) {
 		})
 	}
 }
+
+func TestChunkMetadataSettersNilPreserveOnlyReservedAccessMetadata(t *testing.T) {
+	tests := []struct {
+		name string
+		set  func(*Chunk) error
+	}{
+		{name: "document metadata", set: func(chunk *Chunk) error { return chunk.SetDocumentMetadata(nil) }},
+		{name: "FAQ metadata", set: func(chunk *Chunk) error { return chunk.SetFAQMetadata(nil) }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chunk := &Chunk{
+				Metadata:    JSON(`{"access_metadata":{"department":"research"},"generated_questions":["old"]}`),
+				ContentHash: "old-hash",
+			}
+			if err := tt.set(chunk); err != nil {
+				t.Fatalf("clear metadata: %v", err)
+			}
+			accessMetadata, err := chunk.AccessMetadata()
+			if err != nil {
+				t.Fatalf("AccessMetadata() error = %v", err)
+			}
+			if accessMetadata["department"] != "research" {
+				t.Fatalf("AccessMetadata() = %#v, want reserved department", accessMetadata)
+			}
+			persisted, err := chunk.Metadata.Map()
+			if err != nil {
+				t.Fatalf("metadata map: %v", err)
+			}
+			if len(persisted) != 1 {
+				t.Fatalf("cleared metadata = %#v, want only access_metadata", persisted)
+			}
+			if tt.name == "FAQ metadata" && chunk.ContentHash != "" {
+				t.Fatalf("FAQ ContentHash = %q, want empty", chunk.ContentHash)
+			}
+		})
+	}
+}
+
+func TestChunkMetadataSettersNilClearMetadataWithoutReservedAccessObject(t *testing.T) {
+	for _, set := range []func(*Chunk) error{
+		func(chunk *Chunk) error { return chunk.SetDocumentMetadata(nil) },
+		func(chunk *Chunk) error { return chunk.SetFAQMetadata(nil) },
+	} {
+		chunk := &Chunk{Metadata: JSON(`{"generated_questions":["old"]}`)}
+		if err := set(chunk); err != nil {
+			t.Fatalf("clear metadata: %v", err)
+		}
+		if len(chunk.Metadata) != 0 {
+			t.Fatalf("metadata without reserved access object = %s, want empty", chunk.Metadata)
+		}
+	}
+}

@@ -115,7 +115,7 @@ curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/pin -H "Authorization: Bearer $TOK
 | `only_recommended` | bool | 否 | FAQ 仅推荐条目 |
 | `skip_context_enrichment` | bool | 否 | 跳过父块/上下文补齐 |
 
-`metadata_filter` 的对象节点只能是一个 `or` 或 `and` 组，组内可继续嵌套；叶子节点使用 `field`、`op` 和 `value`（`eq`），或 `field`、`op` 和 `values`（`in`）。例如：
+`metadata_filter` 的对象节点只能是一个 `or` 或 `and` 组，组内可继续嵌套；叶子节点使用 `field`、`op` 和 `value`（`eq`），或 `field`、`op` 和 `values`（`in`）。未知字段、重复 JSON key、显式 `null` 和组/叶字段混用都会被拒绝。单个 `in` 叶子最多包含 64 个值；每个 scalar 的 JSON 编码最多 4,096 字节，单叶所有值的编码总长最多 16,384 字节。例如：
 
 ```json
 {
@@ -133,7 +133,7 @@ curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/pin -H "Authorization: Bearer $TOK
 }
 ```
 
-它可与 `knowledge_ids` 的文档级限定叠加，对文档中的分块（chunk）做进一步收窄；过滤条件针对分块访问元数据，不读取文档级 `custom_metadata`。它不负责解析或确认调用者身份，也不是身份解析器。过滤读取保留的 `access_metadata` 对象；本接口只提供检索过滤，不承诺或提供该元数据的写入支持。省略 `metadata_filter`（或传 `null`）保持现有检索行为。
+它可与 `knowledge_ids` 的文档级限定叠加，对文档中的分块（chunk）做进一步收窄；过滤条件针对分块访问元数据，不读取文档级 `custom_metadata`。带过滤条件的搜索会排除 document-wide summary chunk，并不返回 `knowledge_description`，避免暴露由不同权限分块聚合出的摘要内容。它不负责解析或确认调用者身份，也不是身份解析器。过滤读取保留的 `access_metadata` 对象；本接口只提供检索过滤，不承诺或提供该元数据的写入支持。省略 `metadata_filter`（或传 `null`）保持现有检索行为。
 
 响应：200 `{"success":true,"data":[SearchResult]}`
 
