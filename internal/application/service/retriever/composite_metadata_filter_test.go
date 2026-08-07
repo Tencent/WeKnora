@@ -45,6 +45,27 @@ func TestCompositeRetrieveEngineSupportsMetadataFilter(t *testing.T) {
 			}}},
 		},
 		{
+			name: "empty string retriever type fails closed",
+			engine: &CompositeRetrieveEngine{engineInfos: []*engineInfo{{
+				retrieveEngine: &fakeEngine{engineType: types.PostgresRetrieverEngineType},
+				retrieverType:  []types.RetrieverType{""},
+			}}},
+		},
+		{
+			name: "unknown nonempty retriever type fails closed",
+			engine: &CompositeRetrieveEngine{engineInfos: []*engineInfo{{
+				retrieveEngine: &fakeEngine{engineType: types.PostgresRetrieverEngineType},
+				retrieverType:  []types.RetrieverType{"not-a-postgres-retriever"},
+			}}},
+		},
+		{
+			name: "mixed valid and invalid retriever types fail closed",
+			engine: &CompositeRetrieveEngine{engineInfos: []*engineInfo{{
+				retrieveEngine: &fakeEngine{engineType: types.PostgresRetrieverEngineType},
+				retrieverType:  []types.RetrieverType{types.VectorRetrieverType, ""},
+			}}},
+		},
+		{
 			name: "typed nil retrieve engine fails closed",
 			engine: &CompositeRetrieveEngine{engineInfos: []*engineInfo{{
 				retrieveEngine: typedNilEngine,

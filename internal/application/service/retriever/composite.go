@@ -38,6 +38,10 @@ func isNilRetrieveEngine(engine interfaces.RetrieveEngineService) bool {
 	}
 }
 
+func isPostgresMetadataFilterRetrieverType(retrieverType types.RetrieverType) bool {
+	return retrieverType == types.KeywordsRetrieverType || retrieverType == types.VectorRetrieverType
+}
+
 // CompositeRetrieveEngine implements a composite pattern for retrieval engines,
 // delegating operations to all registered engines
 type CompositeRetrieveEngine struct {
@@ -130,6 +134,11 @@ func (c *CompositeRetrieveEngine) SupportsMetadataFilter() bool {
 		}
 		if engineInfo.retrieveEngine.EngineType() != types.PostgresRetrieverEngineType {
 			return false
+		}
+		for _, retrieverType := range engineInfo.retrieverType {
+			if !isPostgresMetadataFilterRetrieverType(retrieverType) {
+				return false
+			}
 		}
 	}
 	return true
