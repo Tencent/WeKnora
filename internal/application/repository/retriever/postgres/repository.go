@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
-	"github.com/pgvector/pgvector-go"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -165,52 +163,17 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 	params types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
 	logger.GetLogger(ctx).Infof("[Postgres] Keywords retrieval: query=%s, topK=%d", params.Query, params.TopK)
-	conds := make([]clause.Expression, 0)
-
-	// KnowledgeBaseIDs and KnowledgeIDs use AND logic
-	// - If only KnowledgeBaseIDs: search entire knowledge bases
-	// - If only KnowledgeIDs: search specific documents
-	// - If both: search specific documents within the knowledge bases (AND)
-	if len(params.KnowledgeBaseIDs) > 0 {
-		logger.GetLogger(ctx).Debugf("[Postgres] Filtering by knowledge base IDs: %v", params.KnowledgeBaseIDs)
-		conds = append(conds, clause.IN{
-			Column: "knowledge_base_id",
-			Values: common.ToInterfaceSlice(params.KnowledgeBaseIDs),
-		})
+	conds, err := buildKeywordRetrieveConditions(params)
+	if err != nil {
+		logger.GetLogger(ctx).Errorf("[Postgres] Keywords metadata filter compilation failed: %v", err)
+		return nil, err
 	}
-	if len(params.KnowledgeIDs) > 0 {
-		logger.GetLogger(ctx).Debugf("[Postgres] Filtering by knowledge IDs: %v", params.KnowledgeIDs)
-		conds = append(conds, clause.IN{
-			Column: "knowledge_id",
-			Values: common.ToInterfaceSlice(params.KnowledgeIDs),
-		})
-	}
-	// Filter by tag IDs if specified
-	if len(params.TagIDs) > 0 {
-		logger.GetLogger(ctx).Debugf("[Postgres] Filtering by tag IDs: %v", params.TagIDs)
-		conds = append(conds, clause.IN{
-			Column: "tag_id",
-			Values: common.ToInterfaceSlice(params.TagIDs),
-		})
-	}
-
-	// Use ParadeDB's ||| operator for matching any token
-	conds = append(conds, clause.Expr{
-		SQL:  "content ||| ?",
-		Vars: []interface{}{params.Query},
-	})
-
-	// Filter by is_enabled = true or NULL (NULL means enabled for historical data)
-	conds = append(conds, clause.Expr{
-		SQL:  "(is_enabled IS NULL OR is_enabled = ?)",
-		Vars: []interface{}{true},
-	})
 	conds = append(conds, clause.OrderBy{Columns: []clause.OrderByColumn{
 		{Column: clause.Column{Name: "score"}, Desc: true},
 	}})
 
 	var embeddingDBList []pgVectorWithScore
-	err := g.db.WithContext(ctx).Clauses(conds...).Debug().
+	err = g.db.WithContext(ctx).Clauses(conds...).Debug().
 		Select([]string{
 			"paradedb.score(id) as score",
 			"id",
@@ -268,133 +231,19 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 	logger.GetLogger(ctx).Infof("[Postgres] Vector retrieval: dim=%d, topK=%d, threshold=%.4f",
 		len(params.Embedding), params.TopK, params.Threshold)
 
-	dimension := len(params.Embedding)
-	queryVector := pgvector.NewHalfVector(params.Embedding)
-
-	// Build WHERE conditions for filtering
-	whereParts := make([]string, 0)
-	allVars := make([]interface{}, 0)
-
-	// Add query vector first (used in ORDER BY for HNSW index)
-	allVars = append(allVars, queryVector)
-
-	// Dimension filter (required for HNSW index WHERE clause)
-	whereParts = append(whereParts, fmt.Sprintf("dimension = $%d", len(allVars)+1))
-	allVars = append(allVars, dimension)
-
-	// KnowledgeBaseIDs and KnowledgeIDs use AND logic
-	// - If only KnowledgeBaseIDs: search entire knowledge bases
-	// - If only KnowledgeIDs: search specific documents
-	// - If both: search specific documents within the knowledge bases (AND)
-	if len(params.KnowledgeBaseIDs) > 0 {
-		logger.GetLogger(ctx).Debugf(
-			"[Postgres] Filtering vector search by knowledge base IDs: %v",
-			params.KnowledgeBaseIDs,
-		)
-		placeholders := make([]string, len(params.KnowledgeBaseIDs))
-		paramStart := len(allVars) + 1
-		for i := range params.KnowledgeBaseIDs {
-			placeholders[i] = fmt.Sprintf("$%d", paramStart+i)
-			allVars = append(allVars, params.KnowledgeBaseIDs[i])
-		}
-		whereParts = append(whereParts, fmt.Sprintf("knowledge_base_id IN (%s)",
-			strings.Join(placeholders, ", ")))
-	}
-	if len(params.KnowledgeIDs) > 0 {
-		logger.GetLogger(ctx).Debugf(
-			"[Postgres] Filtering vector search by knowledge IDs: %v",
-			params.KnowledgeIDs,
-		)
-		placeholders := make([]string, len(params.KnowledgeIDs))
-		paramStart := len(allVars) + 1
-		for i := range params.KnowledgeIDs {
-			placeholders[i] = fmt.Sprintf("$%d", paramStart+i)
-			allVars = append(allVars, params.KnowledgeIDs[i])
-		}
-		whereParts = append(whereParts, fmt.Sprintf("knowledge_id IN (%s)",
-			strings.Join(placeholders, ", ")))
-	}
-	// Filter by tag IDs if specified
-	if len(params.TagIDs) > 0 {
-		logger.GetLogger(ctx).Debugf(
-			"[Postgres] Filtering vector search by tag IDs: %v",
-			params.TagIDs,
-		)
-		placeholders := make([]string, len(params.TagIDs))
-		paramStart := len(allVars) + 1
-		for i := range params.TagIDs {
-			placeholders[i] = fmt.Sprintf("$%d", paramStart+i)
-			allVars = append(allVars, params.TagIDs[i])
-		}
-		whereParts = append(whereParts, fmt.Sprintf("tag_id IN (%s)",
-			strings.Join(placeholders, ", ")))
-	}
-
-	// is_enabled filter
-	whereParts = append(whereParts, fmt.Sprintf("(is_enabled IS NULL OR is_enabled = $%d)", len(allVars)+1))
-	allVars = append(allVars, true)
-
-	// Build WHERE clause string
-	whereClause := ""
-	if len(whereParts) > 0 {
-		whereClause = "WHERE " + strings.Join(whereParts, " AND ")
-	}
-
-	// Expand TopK to get more candidates before threshold filtering.
-	//
-	// HNSW requires `ef_search >= LIMIT`, and a very large LIMIT (e.g. 1000)
-	// forces HNSW to walk a near-exhaustive portion of the graph, often making
-	// it slower than a sequential scan and pushing the planner to pick Seq Scan
-	// even when an index exists. 200 is a good sweet spot: it gives enough
-	// headroom for threshold/filter post-processing without ballooning ef_search.
-	expandedTopK := params.TopK * 2
-	if expandedTopK < 100 {
-		expandedTopK = 100 // Minimum 100 candidates
-	}
-	if expandedTopK > 200 {
-		expandedTopK = 200 // Maximum 200 candidates (keeps HNSW efficient)
-	}
-	if expandedTopK < params.TopK {
-		expandedTopK = params.TopK // Ensure subquery limit is at least final limit
-	}
-
-	// Optimized query: Use subquery to calculate distance once.
+	// Optimized query: Use a subquery to calculate distance once.
 	//
 	// IMPORTANT: The HNSW index in this project is built on the EXPRESSION
 	//   (embedding::halfvec(<dim>)) halfvec_cosine_ops
 	// because the `embedding` column itself is `halfvec` without a fixed dimension
 	// (so the table can store multiple embedding sizes such as 798 / 3584 / ...).
 	//
-	// pgvector requires the ORDER BY expression to match the indexed expression
-	// EXACTLY, otherwise the planner falls back to a sequential scan. The
-	// `embedding::halfvec(%d)` cast on both sides of `<=>` is therefore NOT
-	// redundant — it is the only way to make the HNSW index get used at all.
-	// See: pgvector issues #702, #835 and ParadeDB "indexing-expressions" docs.
-	subqueryLimitParam := len(allVars) + 1
-	thresholdParam := len(allVars) + 2
-	finalLimitParam := len(allVars) + 3
-
-	querySQL := fmt.Sprintf(`
-		SELECT 
-			id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id, tag_id,
-			(1 - distance) as score
-		FROM (
-			SELECT 
-				id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id, tag_id,
-				embedding::halfvec(%[1]d) <=> $1::halfvec(%[1]d) as distance
-			FROM embeddings
-			%[2]s
-			ORDER BY embedding::halfvec(%[1]d) <=> $1::halfvec(%[1]d)
-			LIMIT $%[3]d
-		) AS candidates
-		WHERE distance <= $%[4]d
-		ORDER BY distance ASC
-		LIMIT $%[5]d
-	`, dimension, whereClause, subqueryLimitParam, thresholdParam, finalLimitParam)
-
-	allVars = append(allVars, expandedTopK)       // LIMIT in subquery
-	allVars = append(allVars, 1-params.Threshold) // Distance threshold
-	allVars = append(allVars, params.TopK)        // Final LIMIT
+	querySQL, allVars, err := buildVectorRetrieveQuery(params)
+	if err != nil {
+		logger.GetLogger(ctx).Errorf("[Postgres] Vector metadata filter compilation failed: %v", err)
+		return nil, err
+	}
+	expandedTopK := vectorCandidateLimit(params.TopK)
 
 	// HNSW's `ef_search` defaults to 40, which is much smaller than our
 	// `expandedTopK` budget (up to 1000). Without raising it, HNSW would only
@@ -409,7 +258,7 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 
 	var embeddingDBList []pgVectorWithScore
 
-	err := g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(fmt.Sprintf("SET LOCAL hnsw.ef_search = %d", efSearch)).Error; err != nil {
 			// Treat as non-fatal: pgvector should always expose this GUC, but if
 			// for any reason it does not we still want the query to run (just
