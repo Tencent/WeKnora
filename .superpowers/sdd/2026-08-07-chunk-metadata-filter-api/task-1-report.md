@@ -58,3 +58,40 @@ The tests cover the required nested policy, malformed mixed nodes, empty groups 
 ## Concerns
 
 No known concerns for Task 1. Retrieval propagation, backend compilation/capability checks, and context-enrichment enforcement remain intentionally deferred to later tasks.
+
+## Review fixes
+
+### Findings addressed
+
+- Changed `MetadataFilter.Value` to `json:"value"` so equality filters explicitly preserve `false`, `0`, and `""` in the public JSON contract. Added round-trip regression coverage.
+- Added custom JSON unmarshalling presence tracking for `and` and `or`. Explicit `null` group fields now remain distinguishable from omitted fields and are rejected, including malformed mixed nodes.
+- Tightened numeric scalar validation to reject malformed `json.Number` values, NaN, and positive/negative infinity for both filter values and membership lists.
+
+### Fix RED evidence
+
+After adding the regression tests and before the fix:
+
+```text
+go test ./internal/types -run 'TestMetadataFilter' -count=1
+--- FAIL: TestMetadataFilterValidateRejectsExplicitNullAndMixedGroups
+    malformed explicit group accepted: {"and":null,"field":"x","op":"eq","value":true}
+--- FAIL: TestMetadataFilterValidateRejectsInvalidJSONNumbers
+    invalid JSON number "not-a-number" was accepted
+FAIL
+```
+
+The zero-value JSON regression test was already exposing the desired behavior with the prior interface-typed field, but it remains as an explicit guard for the fixed contract.
+
+### Fix GREEN evidence
+
+```text
+go test ./internal/types -run 'TestMetadataFilter' -count=1
+ok   github.com/Tencent/WeKnora/internal/types  0.725s
+
+go test ./internal/types -count=1
+ok   github.com/Tencent/WeKnora/internal/types  0.618s
+
+git diff --check
+```
+
+The fixes are limited to Task 1 AST JSON/validation behavior and regression tests. The existing Task 1 commit was not rewritten.

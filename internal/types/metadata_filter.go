@@ -30,8 +30,29 @@ type MetadataFilter struct {
 	Or     []MetadataFilter       `json:"or,omitempty"`
 	Field  string                 `json:"field,omitempty"`
 	Op     MetadataFilterOperator `json:"op,omitempty"`
-	Value  any                    `json:"value,omitempty"`
+	Value  any                    `json:"value"`
 	Values []any                  `json:"values,omitempty"`
+
+	andSet bool
+	orSet  bool
+}
+
+// UnmarshalJSON records group fields separately from their decoded slices so
+// explicit null group fields cannot be mistaken for omitted group fields.
+func (f *MetadataFilter) UnmarshalJSON(data []byte) error {
+	type metadataFilterAlias MetadataFilter
+	var decoded metadataFilterAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*f = MetadataFilter(decoded)
+	_, f.andSet = fields["and"]
+	_, f.orSet = fields["or"]
+	return nil
 }
 
 // Validate checks the filter grammar and its resource limits.
@@ -56,8 +77,8 @@ func (v *metadataFilterValidation) validate(f *MetadataFilter, depth int) error 
 		return fmt.Errorf("metadata filter exceeds maximum node count of %d", maxMetadataFilterNodes)
 	}
 
-	hasAnd := f.And != nil
-	hasOr := f.Or != nil
+	hasAnd := f.andSet || f.And != nil
+	hasOr := f.orSet || f.Or != nil
 	if hasAnd || hasOr {
 		if f.Field != "" || f.Op != "" || f.Value != nil || f.Values != nil {
 			return fmt.Errorf("metadata filter node cannot mix group and predicate fields")
@@ -121,10 +142,15 @@ func validMetadataScalar(value any) bool {
 		return true
 	}
 	if _, ok := value.(json.Number); ok {
-		return true
+		_, ok = metadataNumber(value)
+		return ok
 	}
 	kind := reflect.TypeOf(value).Kind()
-	return kind >= reflect.Int && kind <= reflect.Float64 || kind >= reflect.Uint && kind <= reflect.Uint64
+	if kind >= reflect.Int && kind <= reflect.Float64 || kind >= reflect.Uint && kind <= reflect.Uint64 {
+		_, ok := metadataNumber(value)
+		return ok
+	}
+	return false
 }
 
 // Matches evaluates the filter against one metadata row. Invalid filters and
@@ -210,7 +236,7 @@ func metadataScalarEqual(left, right any) bool {
 func metadataNumber(value any) (float64, bool) {
 	if number, ok := value.(json.Number); ok {
 		parsed, err := number.Float64()
-		return parsed, err == nil && !math.IsNaN(parsed)
+		return parsed, err == nil && !math.IsNaN(parsed) && !math.IsInf(parsed, 0)
 	}
 	rv := reflect.ValueOf(value)
 	if !rv.IsValid() {
@@ -223,7 +249,7 @@ func metadataNumber(value any) (float64, bool) {
 		return float64(rv.Uint()), true
 	case reflect.Float32, reflect.Float64:
 		value := rv.Float()
-		return value, !math.IsNaN(value)
+		return value, !math.IsNaN(value) && !math.IsInf(value, 0)
 	default:
 		return 0, false
 	}

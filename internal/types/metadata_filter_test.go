@@ -85,6 +85,50 @@ func TestMetadataFilterValidateAcceptsJSONScalars(t *testing.T) {
 	}
 }
 
+func TestMetadataFilterJSONPreservesZeroEqualityValues(t *testing.T) {
+	for _, value := range []any{false, float64(0), ""} {
+		body, err := json.Marshal(MetadataFilter{Field: "value", Op: MetadataFilterOpEqual, Value: value})
+		if err != nil {
+			t.Fatalf("marshal value %#v: %v", value, err)
+		}
+		var decoded MetadataFilter
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("unmarshal value %#v: %v", value, err)
+		}
+		if decoded.Value == nil {
+			t.Fatalf("value %#v was omitted from JSON: %s", value, body)
+		}
+		if err := decoded.Validate(); err != nil {
+			t.Fatalf("round-tripped value %#v rejected: %v", value, err)
+		}
+	}
+}
+
+func TestMetadataFilterValidateRejectsExplicitNullAndMixedGroups(t *testing.T) {
+	for _, body := range []string{
+		`{"and":null,"field":"x","op":"eq","value":true}`,
+		`{"or":null,"field":"x","op":"eq","value":true}`,
+		`{"and":null,"or":[{"field":"x","op":"eq","value":true}]}`,
+	} {
+		var filter MetadataFilter
+		if err := json.Unmarshal([]byte(body), &filter); err != nil {
+			t.Fatalf("unmarshal %s: %v", body, err)
+		}
+		if err := filter.Validate(); err == nil {
+			t.Fatalf("malformed explicit group accepted: %s", body)
+		}
+	}
+}
+
+func TestMetadataFilterValidateRejectsInvalidJSONNumbers(t *testing.T) {
+	for _, value := range []json.Number{"not-a-number", "NaN", "+Inf", "-Inf"} {
+		filter := MetadataFilter{Field: "value", Op: MetadataFilterOpEqual, Value: value}
+		if err := filter.Validate(); err == nil {
+			t.Fatalf("invalid JSON number %q was accepted", value)
+		}
+	}
+}
+
 func TestMetadataFilterMatchesMissingFieldAsFalse(t *testing.T) {
 	filter := MetadataFilter{Field: "department", Op: MetadataFilterOpEqual, Value: "research"}
 	if filter.Matches(JSONMap{"employee_nature": "formal"}) {
