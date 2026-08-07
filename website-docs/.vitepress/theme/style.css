@@ -1,0 +1,761 @@
+/* ==========================================================================
+   WeKnora 文档站主题
+   墨蓝（logo 主色）· 纸白 · 鎏金（帆浪点缀）
+   ========================================================================== */
+
+:root {
+  --wk-ink: #101f38;
+  --wk-ink-deep: #0a1526;
+  --wk-ink-soft: #40536f;
+  --wk-ink-mute: #6d7d94;
+  --wk-gold: #b8863b;
+  --wk-gold-light: #d9a94f;
+  --wk-paper: #fdfcfa;
+  --wk-paper-2: #f5f3ee;
+  --wk-paper-3: #edeae2;
+  --wk-rule: rgba(16, 31, 56, 0.12);
+  --wk-rule-soft: rgba(16, 31, 56, 0.07);
+
+  --wk-font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "HarmonyOS Sans SC", "Source Han Sans SC", "Noto Sans CJK SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --wk-font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua",
+    Georgia, "Songti SC", "Source Han Serif SC", "Noto Serif CJK SC", "STSong", serif;
+  --wk-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+    Consolas, "Liberation Mono", monospace;
+
+  /* —— 覆盖 VitePress 默认变量 —— */
+  --vp-font-family-base: var(--wk-font-sans);
+  --vp-font-family-mono: var(--wk-font-mono);
+
+  --vp-c-brand-1: var(--wk-ink);
+  --vp-c-brand-2: #24395a;
+  --vp-c-brand-3: var(--wk-gold);
+  --vp-c-brand-soft: rgba(184, 134, 59, 0.14);
+
+  --vp-c-bg: var(--wk-paper);
+  --vp-c-bg-alt: var(--wk-paper-2);
+  --vp-c-bg-soft: var(--wk-paper-2);
+  --vp-c-bg-elv: #ffffff;
+
+  --vp-c-text-1: var(--wk-ink);
+  --vp-c-text-2: var(--wk-ink-soft);
+  --vp-c-text-3: var(--wk-ink-mute);
+
+  --vp-c-divider: var(--wk-rule);
+  --vp-c-gutter: var(--wk-rule);
+  --vp-c-border: var(--wk-rule);
+
+  /* 铺满视口。默认主题用这个值给 .VPContent 算左右内边距
+     （padding-right: (100vw - max-width) / 2），任何小于视口的定值都会在两侧留出
+     大片空白；给一个大于视口的定值又会让左内边距被钳到 0、正文钻到侧栏底下。
+     取 100vw 时右侧内边距为 0、左侧正好等于侧栏宽度。 */
+  --vp-layout-max-width: 100vw;
+  --vp-nav-height: 68px;
+  --vp-sidebar-width: 288px;
+  --vp-code-block-bg: #fbf9f5;
+
+  --vp-home-hero-name-color: var(--wk-ink);
+  --vp-code-copy-copied-text-content: "已复制";
+}
+
+.dark {
+  --wk-ink: #e6ecf5;
+  --wk-ink-soft: #a9b6c9;
+  --wk-ink-mute: #7d8ca2;
+  --wk-gold: #d9a94f;
+  --wk-gold-light: #e8c176;
+  --wk-paper: #0b1220;
+  --wk-paper-2: #101a2b;
+  --wk-paper-3: #16233a;
+  --wk-rule: rgba(190, 208, 232, 0.14);
+  --wk-rule-soft: rgba(190, 208, 232, 0.08);
+
+  --vp-c-brand-1: #e6ecf5;
+  --vp-c-brand-2: #c3d0e2;
+  --vp-c-brand-3: var(--wk-gold);
+  --vp-c-bg-elv: #101a2b;
+  --vp-code-block-bg: #0d1626;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1, "liga" 1, "cv05" 1;
+}
+
+::selection {
+  background: rgba(184, 134, 59, 0.22);
+}
+
+/* --------------------------------------------------------------------------
+   顶栏
+   -------------------------------------------------------------------------- */
+
+.VPNav {
+  backdrop-filter: saturate(140%) blur(14px);
+}
+
+.VPNavBar:not(.has-sidebar):not(.top) {
+  background-color: color-mix(in srgb, var(--wk-paper) 82%, transparent);
+}
+
+/* 导航栏与正文之间不要任何分隔线或渐变 */
+.VPNavBar .divider,
+.VPNavBar .curtain {
+  display: none;
+}
+
+/* 默认主题在有侧栏时把标题块撑到侧栏宽、搜索框推到正文列起点，
+   这里让它与首页（无侧栏）共用同一套居中容器，两种页面的 logo 与搜索位置才一致 */
+@media (min-width: 960px) {
+  .VPNavBar.has-sidebar .wrapper {
+    padding: 0 32px;
+  }
+
+  .VPNavBar.has-sidebar .container {
+    max-width: calc(var(--vp-layout-max-width) - 64px);
+  }
+
+  .VPNavBar.has-sidebar .title {
+    position: static;
+    width: auto;
+    padding: 0;
+  }
+
+  .VPNavBar.has-sidebar .content {
+    padding-left: 0;
+    padding-right: 0;
+  }
+}
+
+.VPNavBarTitle .title {
+  font-family: var(--wk-font-sans);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  font-size: 15px;
+  text-transform: uppercase;
+  border-bottom: none !important;
+}
+
+.VPNavBarTitle .logo {
+  height: 22px;
+  margin-right: 10px;
+}
+
+.VPNavBarMenuLink {
+  position: relative;
+  font-size: 13.5px !important;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--wk-ink-soft) !important;
+}
+
+.VPNavBarMenuLink.active,
+.VPNavBarMenuLink:hover {
+  color: var(--wk-ink) !important;
+}
+
+.VPNavBarMenuLink.active::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 16px;
+  height: 1px;
+  background: var(--wk-gold);
+}
+
+.VPNavBarSearch .DocSearch-Button,
+.VPNavBarSearch button {
+  border-radius: 2px;
+  border: 1px solid var(--wk-rule);
+  background: transparent;
+}
+
+/* --------------------------------------------------------------------------
+   侧边栏
+   -------------------------------------------------------------------------- */
+
+/* 默认公式在视口窄于 layout-max-width 时会把侧栏压窄，这里给它一个下限 */
+@media (min-width: 1440px) {
+  .VPSidebar {
+    width: calc(
+      max(0px, (100vw - (var(--vp-layout-max-width) - 64px)) / 2) + var(--vp-sidebar-width) - 32px
+    ) !important;
+  }
+}
+
+.VPSidebar {
+  border-right: 1px solid var(--wk-rule-soft);
+}
+
+/* 桌面侧栏透明，让正文背景贯通；窄屏抽屉必须不透明，否则会透出正文 */
+@media (min-width: 960px) {
+  .VPSidebar {
+    /* 与默认主题一致：正好让出顶栏高度，首组标题紧贴顶栏下沿 */
+    padding-top: var(--vp-nav-height) !important;
+    background: transparent !important;
+  }
+}
+
+@media (max-width: 959px) {
+  .VPSidebar {
+    padding-top: 18px !important;
+    background: var(--wk-paper) !important;
+    border-right: none;
+  }
+
+  .dark .VPSidebar {
+    background: var(--wk-paper) !important;
+  }
+
+  /* 移动端不需要顶部 curtain */
+  .VPSidebar .curtain {
+    display: none;
+  }
+}
+
+/* 默认主题的 curtain 用负 margin 铺满侧栏宽度，会盖住滚动条顶部 */
+@media (min-width: 960px) {
+  .VPSidebar .curtain {
+    /* 默认写死 -64px，本站 nav-height 为 68px，对齐以免 sticky 错位 */
+    top: calc(var(--vp-nav-height) * -1);
+    margin-right: 0;
+    width: calc(100% + 32px);
+    /* 叠加滚动条画在内容区右侧，需裁掉一条竖向通道 */
+    clip-path: inset(0 14px 0 0);
+    background-color: color-mix(in srgb, var(--wk-paper) 82%, transparent);
+    backdrop-filter: saturate(140%) blur(14px);
+  }
+
+  .dark .VPSidebar .curtain {
+    background-color: color-mix(in srgb, var(--wk-paper) 82%, transparent);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   中等屏「本页目录」条（960–1279px）
+   默认通栏 + 底边会横穿侧栏，看起来像多余的线
+   -------------------------------------------------------------------------- */
+
+@media (min-width: 960px) and (max-width: 1279px) {
+  .VPLocalNav.has-sidebar {
+    width: calc(100% - var(--vp-sidebar-width));
+    margin-left: var(--vp-sidebar-width);
+    /* 盖过默认主题 scoped 的 padding-left: sidebar-width，否则会双重偏移居中 */
+    padding-left: 0 !important;
+    background-color: color-mix(in srgb, var(--wk-paper) 82%, transparent);
+    backdrop-filter: saturate(140%) blur(14px);
+    border-bottom-color: var(--wk-rule-soft);
+  }
+
+  .VPLocalNav.has-sidebar .container {
+    justify-content: flex-start;
+    padding-left: 32px;
+    padding-right: 32px;
+  }
+
+  .VPLocalNav.has-sidebar .VPLocalNavOutlineDropdown {
+    padding-left: 0;
+  }
+
+  /* 默认 left 按通栏算了 sidebar+32；LocalNav 已右移，再加一次会落到中间 */
+  .VPLocalNav.has-sidebar .VPLocalNavOutlineDropdown .items {
+    left: 32px;
+    right: auto;
+  }
+}
+
+.VPSidebarItem.level-0 > .item > .text {
+  font-family: var(--wk-font-mono);
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--wk-ink-mute) !important;
+}
+
+.VPSidebarItem.level-0 {
+  padding-bottom: 22px;
+}
+
+.VPSidebarItem.level-0:not(:first-child) {
+  border-top: 1px solid var(--wk-rule-soft);
+  padding-top: 20px;
+}
+
+.VPSidebarItem.level-1 .link .text {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--wk-ink-soft);
+  transition: color 0.2s ease;
+}
+
+.VPSidebarItem.level-1 .link:hover .text {
+  color: var(--wk-ink);
+}
+
+.VPSidebarItem.level-1.is-active .link .text {
+  color: var(--wk-ink) !important;
+  font-weight: 600;
+}
+
+.VPSidebarItem.level-1.is-active > .item {
+  position: relative;
+}
+
+.VPSidebarItem.level-1.is-active > .item::before {
+  content: "";
+  position: absolute;
+  left: -14px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--wk-gold);
+}
+
+/* --------------------------------------------------------------------------
+   正文排版
+   -------------------------------------------------------------------------- */
+
+.VPDoc {
+  padding-top: 44px !important;
+}
+
+/* 默认主题用 scoped 选择器把正文锁死在 688px，覆盖它需要 !important。
+   这里让正文列吃满侧栏与右侧目录之间的空间，只在超宽屏留一个上限，
+   免得一行拉到两千像素。 */
+@media (min-width: 1280px) {
+  .VPDoc .content-container,
+  .VPDoc.has-aside .content-container {
+    max-width: 1600px !important;
+  }
+}
+
+.vp-doc {
+  font-size: 15.5px;
+  line-height: 1.82;
+  color: var(--wk-ink-soft);
+}
+
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3,
+.vp-doc h4 {
+  color: var(--wk-ink);
+  letter-spacing: -0.01em;
+}
+
+.vp-doc h1 {
+  font-family: var(--wk-font-serif);
+  font-size: 42px;
+  line-height: 1.22;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  margin-bottom: 28px;
+}
+
+.vp-doc h2 {
+  font-family: var(--wk-font-serif);
+  font-size: 27px;
+  font-weight: 500;
+  line-height: 1.35;
+  margin-top: 66px;
+  padding-top: 26px;
+  border-top: 1px solid var(--wk-rule-soft);
+}
+
+.vp-doc h3 {
+  font-size: 18.5px;
+  font-weight: 650;
+  margin-top: 42px;
+  letter-spacing: 0;
+}
+
+.vp-doc h4 {
+  font-size: 15.5px;
+  font-weight: 650;
+  margin-top: 30px;
+}
+
+.vp-doc h2 .header-anchor,
+.vp-doc h3 .header-anchor {
+  color: var(--wk-gold);
+  font-weight: 400;
+}
+
+.vp-doc p,
+.vp-doc li {
+  color: var(--wk-ink-soft);
+}
+
+.vp-doc strong {
+  color: var(--wk-ink);
+  font-weight: 650;
+}
+
+.vp-doc a {
+  color: var(--wk-ink);
+  font-weight: 500;
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--wk-gold) 55%, transparent);
+  padding-bottom: 1px;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.vp-doc a:hover {
+  border-bottom-color: var(--wk-gold);
+  background: rgba(184, 134, 59, 0.08);
+}
+
+.vp-doc ul,
+.vp-doc ol {
+  padding-left: 1.3em;
+}
+
+.vp-doc li + li {
+  margin-top: 6px;
+}
+
+.vp-doc li::marker {
+  color: var(--wk-ink-mute);
+}
+
+.vp-doc blockquote {
+  border-left: 2px solid var(--wk-gold);
+  background: transparent;
+  padding: 2px 0 2px 20px;
+  margin: 26px 0;
+}
+
+.vp-doc blockquote > p {
+  font-size: 14.5px;
+  color: var(--wk-ink-mute);
+  margin: 0;
+}
+
+.vp-doc hr {
+  border-top: 1px solid var(--wk-rule-soft);
+  margin: 52px 0;
+}
+
+/* 代码 */
+
+.vp-doc :not(pre) > code {
+  font-size: 0.86em;
+  font-family: var(--wk-font-mono);
+  background: var(--wk-paper-2);
+  border: 1px solid var(--wk-rule-soft);
+  border-radius: 3px;
+  padding: 2px 5px;
+  color: var(--wk-ink);
+}
+
+.vp-doc div[class*="language-"] {
+  border-radius: 4px;
+  border: 1px solid var(--wk-rule-soft);
+  background: var(--vp-code-block-bg);
+  margin: 26px 0;
+}
+
+.vp-doc div[class*="language-"] pre {
+  padding: 20px 0;
+}
+
+.vp-doc [class*="language-"] code {
+  font-size: 13px;
+  line-height: 1.72;
+}
+
+/* 复制按钮：默认隐形，悬停时才出现的细线方钮 */
+.vp-doc [class*="language-"] > button.copy {
+  top: 9px;
+  right: 9px;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--wk-rule-soft);
+  border-radius: 2px;
+  background-color: transparent;
+  background-size: 14px;
+  background-position: 50%;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.2s ease, transform 0.2s ease, border-color 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.vp-doc [class*="language-"]:hover > button.copy,
+.vp-doc [class*="language-"] > button.copy:focus-visible {
+  opacity: 1;
+  transform: none;
+}
+
+.vp-doc [class*="language-"] > button.copy:hover {
+  border-color: var(--wk-gold);
+  background-color: var(--wk-paper);
+}
+
+.vp-doc [class*="language-"] > button.copy.copied,
+.vp-doc [class*="language-"] > button.copy:hover.copied {
+  border-color: var(--wk-gold);
+  background-color: var(--wk-paper);
+}
+
+.vp-doc [class*="language-"] > button.copy.copied::before,
+.vp-doc [class*="language-"] > button.copy:hover.copied::before {
+  top: -1px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--wk-rule-soft);
+  border-radius: 2px;
+  background-color: var(--wk-paper);
+  font-family: var(--wk-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  color: var(--wk-ink-mute);
+  line-height: 26px;
+}
+
+.vp-doc [class*="language-"] > span.lang {
+  font-family: var(--wk-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--wk-ink-mute);
+}
+
+/* 表格 */
+
+/* 滚动交给包裹层（见 config.mts 的 table_open 规则），表格本身保持
+   display:table + width:100%，所有表格宽度一致地撑满正文列 */
+.vp-doc .wk-table {
+  overflow-x: auto;
+  margin: 28px 0;
+  max-width: 100%;
+}
+
+.vp-doc .wk-table > table {
+  display: table;
+  width: 100%;
+  /* 窄屏下宁可横向滚动，也不要把列挤成一字一行 */
+  min-width: 420px;
+  margin: 0;
+  font-size: 13.5px;
+  border-collapse: collapse;
+}
+
+.vp-doc .wk-table::-webkit-scrollbar {
+  height: 6px;
+}
+
+.vp-doc .wk-table::-webkit-scrollbar-thumb {
+  background: var(--wk-rule);
+  border-radius: 3px;
+}
+
+.vp-doc th {
+  font-family: var(--wk-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--wk-ink-mute);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--wk-rule);
+  padding: 10px 14px 10px 0;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.vp-doc td {
+  border: none;
+  border-bottom: 1px solid var(--wk-rule-soft);
+  padding: 12px 14px 12px 0;
+  vertical-align: top;
+  line-height: 1.7;
+}
+
+.vp-doc tr {
+  background: transparent !important;
+  border: none;
+}
+
+.vp-doc th:last-child,
+.vp-doc td:last-child {
+  padding-right: 0;
+}
+
+/* 自定义容器 */
+
+.vp-doc .custom-block {
+  border-radius: 3px;
+  border: 1px solid var(--wk-rule);
+  border-left-width: 2px;
+  background: var(--wk-paper-2);
+  font-size: 14px;
+  padding: 16px 20px;
+}
+
+.vp-doc .custom-block.tip {
+  border-left-color: var(--wk-gold);
+}
+
+.vp-doc .custom-block-title {
+  font-family: var(--wk-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* Mermaid 图 */
+
+.vp-doc .mermaid {
+  position: relative;
+  margin: 34px 0;
+  padding: 28px 20px;
+  border: 1px solid var(--wk-rule-soft);
+  border-radius: 4px;
+  background: var(--wk-paper-2);
+  text-align: center;
+  overflow-x: auto;
+  cursor: zoom-in;
+  transition: border-color 0.2s ease;
+}
+
+.vp-doc .mermaid:hover {
+  border-color: var(--wk-rule);
+}
+
+.vp-doc .mermaid::after {
+  content: "点击放大";
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  font-family: var(--wk-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--wk-ink-mute);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.vp-doc .mermaid:hover::after {
+  opacity: 1;
+}
+
+/* 页脚区 */
+
+.VPDocFooter {
+  margin-top: 72px;
+  padding-top: 26px;
+  border-top: 1px solid var(--wk-rule-soft);
+}
+
+.VPDocFooter .prev-link .desc,
+.VPDocFooter .next-link .desc {
+  font-family: var(--wk-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.VPDocFooter .pager-link {
+  border: 1px solid var(--wk-rule-soft);
+  border-radius: 3px;
+  background: transparent;
+}
+
+.VPDocFooter .pager-link:hover {
+  border-color: var(--wk-gold);
+}
+
+.VPDocFooter .pager-link .title {
+  font-weight: 550;
+  color: var(--wk-ink);
+}
+
+.VPDocAsideOutline .outline-title,
+.VPDocOutlineItem .outline-title {
+  font-family: var(--wk-font-mono);
+  font-size: 10.5px !important;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--wk-ink-mute);
+}
+
+.VPDocAside .outline-link {
+  font-size: 12.8px;
+  line-height: 1.65;
+  padding: 6px 0;
+  color: var(--wk-ink-mute);
+}
+
+.VPDocAside .outline-link.nested {
+  padding-inline-start: 16px;
+}
+
+.VPDocAside .VPDocAsideOutline .root {
+  padding-inline-start: 2px;
+}
+
+.VPDocAside .outline-link.active {
+  color: var(--wk-ink);
+}
+
+.VPDocAsideOutline .outline-marker {
+  background-color: var(--wk-gold) !important;
+}
+
+.VPFooter {
+  border-top: 1px solid var(--wk-rule-soft);
+  background: transparent !important;
+  padding: 34px 24px;
+}
+
+.VPFooter .message,
+.VPFooter .copyright {
+  font-size: 12.5px;
+  color: var(--wk-ink-mute);
+  letter-spacing: 0.02em;
+}
+
+.VPLastUpdated {
+  font-family: var(--wk-font-mono);
+  font-size: 11px !important;
+  letter-spacing: 0.06em;
+}
+
+/* --------------------------------------------------------------------------
+   首页容器：去掉默认 page 布局的边距限制
+   -------------------------------------------------------------------------- */
+
+.landing-page .VPPage {
+  padding: 0;
+}
+
+.landing-page .VPContent.is-home,
+.landing-page .VPContent {
+  padding: 0 !important;
+}
+
+.landing-page .VPFooter {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .vp-doc h1 {
+    font-size: 32px;
+  }
+  .vp-doc h2 {
+    font-size: 23px;
+    margin-top: 52px;
+  }
+}

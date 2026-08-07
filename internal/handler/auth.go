@@ -164,7 +164,12 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 	req.Username = secutils.SanitizeForLog(req.Username)
 	req.Email = secutils.SanitizeForLog(req.Email)
-	req.Password = secutils.SanitizeForLog(req.Password)
+	// Password is intentionally NOT sanitized: SanitizeForLog replaces
+	// \n, \r, \t and strips other control characters so a string is safe
+	// to write into a log line. Applying it to a real password would
+	// silently rewrite the credential before hashing, so registration
+	// would succeed but login with the original password would fail.
+	// Passwords must never be logged, so they don't need that defence.
 
 	// Validate required fields
 	if req.Username == "" || req.Email == "" || req.Password == "" {
