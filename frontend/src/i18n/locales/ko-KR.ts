@@ -226,7 +226,21 @@ export default {
   },
   userProfile: {
     title: '사용자 정보',
-    description: '계정 기본 정보(사용자 ID, 사용자 이름, 이메일, 가입 시각)를 확인합니다.'
+    description: '계정 기본 정보(사용자 ID, 사용자 이름, 이메일, 가입 시각)를 확인하고 비밀번호를 변경할 수 있습니다.',
+    changePassword: {
+      label: '비밀번호 변경',
+      description: '현재 비밀번호를 확인한 뒤 새 비밀번호를 설정합니다. 성공 시 모든 세션이 만료되어 다시 로그인해야 합니다.',
+      currentLabel: '현재 비밀번호',
+      currentPlaceholder: '현재 비밀번호를 입력하세요',
+      currentRequired: '현재 비밀번호를 입력하세요',
+      newLabel: '새 비밀번호',
+      newPlaceholder: '8-32자, 문자와 숫자 포함',
+      confirmLabel: '새 비밀번호 확인',
+      confirmPlaceholder: '새 비밀번호를 다시 입력하세요',
+      submit: '비밀번호 업데이트',
+      success: '비밀번호가 변경되었습니다. 새 비밀번호로 다시 로그인해 주세요.',
+      failed: '비밀번호 변경에 실패했습니다. 현재 비밀번호를 확인해 주세요.',
+    },
   },
   credential: {
     configured: '구성됨',

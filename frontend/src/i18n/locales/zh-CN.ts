@@ -226,7 +226,21 @@ export default {
   },
   userProfile: {
     title: '用户信息',
-    description: '查看您的账户基础信息（用户 ID、用户名、邮箱、注册时间）'
+    description: '查看您的账户基础信息（用户 ID、用户名、邮箱、注册时间），并可修改登录密码',
+    changePassword: {
+      label: '修改密码',
+      description: '使用当前密码验证后设置新密码。修改成功后所有设备上的登录状态将失效，需要重新登录。',
+      currentLabel: '当前密码',
+      currentPlaceholder: '请输入当前密码',
+      currentRequired: '请输入当前密码',
+      newLabel: '新密码',
+      newPlaceholder: '8-32 个字符，需包含字母和数字',
+      confirmLabel: '确认新密码',
+      confirmPlaceholder: '再次输入新密码',
+      submit: '更新密码',
+      success: '密码已更新，请使用新密码重新登录',
+      failed: '修改密码失败，请检查当前密码是否正确',
+    },
   },
   credential: {
     configured: '已配置',

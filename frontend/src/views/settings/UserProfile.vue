@@ -65,20 +65,123 @@
           <span class="info-value">{{ formatDate(userInfo?.created_at) }}</span>
         </div>
       </div>
+
+      <!-- 修改密码 -->
+      <div class="setting-row password-row">
+        <div class="setting-info">
+          <label>{{ $t('userProfile.changePassword.label') }}</label>
+          <p class="desc">{{ $t('userProfile.changePassword.description') }}</p>
+        </div>
+        <div class="setting-control password-control">
+          <t-form
+            ref="passwordFormRef"
+            :data="passwordForm"
+            :rules="passwordRules"
+            label-align="top"
+            class="password-form"
+            @submit.prevent
+          >
+            <t-form-item :label="$t('userProfile.changePassword.currentLabel')" name="oldPassword">
+              <t-input
+                v-model="passwordForm.oldPassword"
+                type="password"
+                autocomplete="current-password"
+                :disabled="passwordSubmitting"
+                :placeholder="$t('userProfile.changePassword.currentPlaceholder')"
+              >
+                <template #prefix-icon><t-icon name="lock-on" /></template>
+              </t-input>
+            </t-form-item>
+            <t-form-item :label="$t('userProfile.changePassword.newLabel')" name="newPassword">
+              <t-input
+                v-model="passwordForm.newPassword"
+                type="password"
+                autocomplete="new-password"
+                :disabled="passwordSubmitting"
+                :placeholder="$t('userProfile.changePassword.newPlaceholder')"
+              >
+                <template #prefix-icon><t-icon name="lock-on" /></template>
+              </t-input>
+            </t-form-item>
+            <t-form-item :label="$t('userProfile.changePassword.confirmLabel')" name="confirmPassword">
+              <t-input
+                v-model="passwordForm.confirmPassword"
+                type="password"
+                autocomplete="new-password"
+                :disabled="passwordSubmitting"
+                :placeholder="$t('userProfile.changePassword.confirmPlaceholder')"
+                @enter="submitPasswordChange"
+              >
+                <template #prefix-icon><t-icon name="lock-on" /></template>
+              </t-input>
+            </t-form-item>
+            <div class="password-actions">
+              <t-button
+                theme="primary"
+                :loading="passwordSubmitting"
+                :disabled="passwordSubmitting"
+                @click="submitPasswordChange"
+              >
+                {{ $t('userProfile.changePassword.submit') }}
+              </t-button>
+            </div>
+          </t-form>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { getCurrentUser, type UserInfo } from '@/api/auth'
+import { ref, reactive, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { MessagePlugin } from 'tdesign-vue-next'
+import type { FormInstanceFunctions, FormRule } from 'tdesign-vue-next'
+import {
+  getCurrentUser,
+  changePassword,
+  logout as logoutApi,
+  type UserInfo,
+} from '@/api/auth'
+import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 
 const { t, locale } = useI18n()
+const router = useRouter()
+const authStore = useAuthStore()
 
 const userInfo = ref<UserInfo | null>(null)
 const loading = ref(true)
 const error = ref('')
+
+const passwordFormRef = ref<FormInstanceFunctions | null>(null)
+const passwordSubmitting = ref(false)
+const passwordForm = reactive({
+  oldPassword: '',
+  newPassword: '',
+  confirmPassword: '',
+})
+
+const passwordRules = computed<Record<string, FormRule[]>>(() => ({
+  oldPassword: [
+    { required: true, message: t('userProfile.changePassword.currentRequired'), type: 'error' },
+  ],
+  newPassword: [
+    { required: true, message: t('auth.passwordRequired'), type: 'error' },
+    { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
+    { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
+    { pattern: /[a-zA-Z]/, message: t('auth.passwordMustContainLetter'), type: 'error' },
+    { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' },
+  ],
+  confirmPassword: [
+    { required: true, message: t('auth.confirmPasswordRequired'), type: 'error' },
+    {
+      validator: (val: string) => val === passwordForm.newPassword,
+      message: t('auth.passwordMismatch'),
+      type: 'error',
+    },
+  ],
+}))
 
 const loadInfo = async () => {
   try {
@@ -111,6 +214,48 @@ const formatDate = (dateStr: string | undefined) => {
     return fmt.format(d)
   } catch {
     return t('tenant.formatError')
+  }
+}
+
+const resetPasswordForm = () => {
+  passwordForm.oldPassword = ''
+  passwordForm.newPassword = ''
+  passwordForm.confirmPassword = ''
+  passwordFormRef.value?.clearValidate?.()
+}
+
+const submitPasswordChange = async () => {
+  if (passwordSubmitting.value) return
+  const result = await passwordFormRef.value?.validate?.()
+  if (result !== true) return
+
+  passwordSubmitting.value = true
+  try {
+    const resp = await changePassword({
+      old_password: passwordForm.oldPassword,
+      new_password: passwordForm.newPassword,
+    })
+    if (!resp.success) {
+      MessagePlugin.error(resp.message || t('userProfile.changePassword.failed'))
+      return
+    }
+
+    MessagePlugin.success(t('userProfile.changePassword.success'))
+    resetPasswordForm()
+
+    // Backend revokes all sessions on success; mirror that locally and
+    // force a fresh login with the new credential.
+    try {
+      await logoutApi()
+    } catch {
+      /* ignore — local cleanup still proceeds */
+    }
+    authStore.logout()
+    router.push('/login')
+  } catch (err: any) {
+    MessagePlugin.error(err?.message || t('userProfile.changePassword.failed'))
+  } finally {
+    passwordSubmitting.value = false
   }
 }
 
@@ -206,5 +351,30 @@ onMounted(loadInfo)
     text-align: right;
     word-break: break-word;
   }
+}
+
+.password-row {
+  align-items: flex-start;
+}
+
+.password-control {
+  min-width: 320px;
+  max-width: 360px;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.password-form {
+  width: 100%;
+
+  :deep(.t-form__item) {
+    margin-bottom: 16px;
+  }
+}
+
+.password-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
 }
 </style>
