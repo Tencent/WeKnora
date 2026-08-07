@@ -312,16 +312,21 @@ func (s *userService) buildMembershipsForUser(
 	if user == nil {
 		return []types.Membership{}
 	}
+	// Only synthesise a membership from User.TenantID when the membership
+	// service is entirely unavailable (partial DI graphs / legacy tests).
+	// Once ListByUser is reachable, an empty or fully-filtered result is
+	// authoritative: inventing a row from a stale users.tenant_id is what
+	// kept removed workspaces visible in the space switcher (#2586).
 	if s.memberService == nil {
 		return synthFallbackMembership(user, activeTenant)
 	}
 	rows, err := s.memberService.ListByUser(ctx, user.ID)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to list memberships for user %s: %v", user.ID, err)
-		return synthFallbackMembership(user, activeTenant)
+		return []types.Membership{}
 	}
 	if len(rows) == 0 {
-		return synthFallbackMembership(user, activeTenant)
+		return []types.Membership{}
 	}
 	// 收集需要批量查询名称的 tenant id（跳过 activeTenant 因为它已经在手）。
 	needsLookup := make([]uint64, 0, len(rows))
@@ -366,17 +371,18 @@ func (s *userService) buildMembershipsForUser(
 			Role:       m.Role,
 		})
 	}
-	if len(out) == 0 {
-		return synthFallbackMembership(user, activeTenant)
-	}
 	return out
 }
 
 // synthFallbackMembership returns a single-row membership list inferred
-// from User.TenantID. Used when the membership table has not been
-// populated yet (e.g. during the rollout window where the migration has
-// run but the auth middleware's auto-promotion hasn't fired) so the
-// response shape stays consistent.
+// from User.TenantID. Used only when the membership service itself is
+// unavailable (partial DI graphs in tests, or a rollout window where the
+// service has not been wired yet) so the response shape stays consistent.
+//
+// Callers that successfully queried tenant_members must NOT use this
+// helper: an empty membership list is authoritative and synthesising
+// from users.tenant_id would re-surface workspaces the user was removed
+// from (#2586).
 //
 // The fallback role is intentionally TenantRoleViewer (least privilege):
 // the login response only feeds UI rendering, and the backend re-derives
@@ -776,6 +782,14 @@ func (s *userService) resolveLoginTenantID(ctx context.Context, user *types.User
 // token when a usable tenant is available (repairs partial
 // invitation/admin-assignment flows). resolveFirstMembershipTenant
 // best-effort persists the resolved tenant as the new home.
+//
+// When users.tenant_id is non-zero we still verify an active membership
+// still exists (mirroring resolveLoginTenantID's check on
+// LastActiveTenantID). A dangling home pointer is common after
+// RemoveMember: the membership row is soft-deleted but users.tenant_id
+// was historically left untouched, which made the removed workspace
+// reappear via synthFallbackMembership (#2586). Superusers that can
+// access every tenant skip the membership gate.
 func (s *userService) homeOrFirstMembershipTenant(ctx context.Context, user *types.User) uint64 {
 	if user == nil {
 		return 0
@@ -783,7 +797,42 @@ func (s *userService) homeOrFirstMembershipTenant(ctx context.Context, user *typ
 	if user.TenantID == 0 {
 		return s.resolveFirstMembershipTenant(ctx, user)
 	}
-	return user.TenantID
+	if user.CanAccessAllTenants || s.memberService == nil {
+		return user.TenantID
+	}
+	member, err := s.memberService.GetMembership(ctx, user.ID, user.TenantID)
+	if err == nil && member != nil && member.Status == types.TenantMemberStatusActive {
+		return user.TenantID
+	}
+	logger.Warnf(ctx,
+		"homeOrFirstMembershipTenant: user %s home tenant %d has no active membership, "+
+			"clearing stale home and re-resolving (err=%v)",
+		user.ID, user.TenantID, err)
+	s.clearStaleHomeTenant(ctx, user)
+	return s.resolveFirstMembershipTenant(ctx, user)
+}
+
+// clearStaleHomeTenant best-effort zeroes users.tenant_id (and a
+// LastActiveTenantID that pointed at the same workspace) after the home
+// membership is observed to be gone. Failures are logged but never
+// fail login: the in-memory user is already corrected for this request.
+func (s *userService) clearStaleHomeTenant(ctx context.Context, user *types.User) {
+	if user == nil {
+		return
+	}
+	staleHome := user.TenantID
+	user.TenantID = 0
+	if user.Preferences.LastActiveTenantID != nil && *user.Preferences.LastActiveTenantID == staleHome {
+		user.Preferences.LastActiveTenantID = nil
+	}
+	if s.userRepo == nil {
+		return
+	}
+	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+		logger.Warnf(ctx,
+			"clearStaleHomeTenant: failed to persist cleared home for user %s (was tenant %d): %v",
+			user.ID, staleHome, err)
+	}
 }
 
 // resolveFirstMembershipTenant makes a tenantless identity usable when an
