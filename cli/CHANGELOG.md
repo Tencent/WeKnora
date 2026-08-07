@@ -52,6 +52,10 @@ CLI history before v0.3 is recorded in the project root
   reference payloads.
 
 ### Fixed
+- `agent update` confirmation retries now preserve repeatable KB operations
+  and file-path flags; `model update` preserves repeatable `--param` values.
+  Requests backed by stdin or secret input omit `retry_argv` instead of
+  returning a partial command that changes semantics.
 - Streaming SDK calls are no longer cut off by the client's default 30-second
   timeout (explicit `WithTimeout` values remain honored), and SSE data lines
   up to 4 MiB are accepted.
@@ -122,7 +126,7 @@ CLI history before v0.3 is recorded in the project root
   - Success on stdout: `{ok:true, data?:<T>, meta?, _notice?, profile?}` (`data`
     omitted on mutation-only success).
   - Error on stderr (json mode): `{ok:false, error:{type, message, hint?,
-    retry_command?, retry_after_seconds?, risk?, detail?}, _notice?}`.
+    retry_argv?, retry_after_seconds?, risk?, detail?}, _notice?}`.
   - `meta.count` / `meta.has_more` surface list totals and server-side
     pagination state. `meta.next_cursor` / `meta.total_count` /
     `meta.request_id` are reserved — populated when the SDK exposes them
@@ -192,11 +196,11 @@ CLI history before v0.3 is recorded in the project root
   - jq pattern: `jq '.data[] | select(.ok == false) | .id'`.
 - **MCP server tool errors now return `StructuredContent`.**
   - `CallToolResult{IsError: true, Content:[text-fallback],
-    StructuredContent:{type, message, hint?, retry_command?, risk?, detail?}}`.
+    StructuredContent:{type, message, hint?, retry_argv?, risk?, detail?}}`.
   - Shape mirrors stderr `envelope.error` sub-object — one parser handles both.
 - **Unknown subcommand emits typed envelope.**
   - `input.unknown_subcommand` with `detail.{unknown, command_path, available[]}`
-    + `retry_command: "<parent> --help"`. Replaces v0.6's free-form
+    + `retry_argv: ["<parent>", "--help"]`. Replaces v0.6's free-form
     `"unknown command \"x\" for \"weknora\""` prose.
 - **`weknora chat` requires the query as a single quoted argument.**
   - v0.6: `MinimumNArgs(1)` silently joined `weknora chat hello world` into
@@ -211,8 +215,8 @@ CLI history before v0.3 is recorded in the project root
 - **`WEKNORA_FORMAT` env var** sets the default `--format`. Values:
   `text | json | ndjson`. Overridden by explicit `--format`. Invalid values
   ignored.
-- **`error.retry_command`** — directly-executable retry argv, distinct from
-  prose `hint`. Agents read `retry_command` without regex-parsing `hint`.
+- **`error.retry_argv`** — directly-executable retry argv, distinct from
+  prose `hint`. Agents read `retry_argv` without regex-parsing `hint`.
 - **`error.retry_after_seconds`** — `server.rate_limited` / `server.timeout`
   surface server `Retry-After` header verbatim. CLI-direct (`weknora api`)
   parses HTTP `Retry-After` headers; SDK-mediated paths will gain coverage

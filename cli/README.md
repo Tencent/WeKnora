@@ -255,6 +255,8 @@ Under `--format json` the same failure is the typed error envelope on stderr
 (`{ok:false, error:{type, exit_code, hint?, retry_argv?, …}}`) — see
 [AGENTS.md §1.4](AGENTS.md) for the field-by-field contract and the full code
 taxonomy.
+`retry_argv` is omitted when the original request depends on stdin or another
+input that cannot be replayed safely and completely.
 
 ### Exit codes
 
