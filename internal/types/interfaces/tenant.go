@@ -77,11 +77,24 @@ type TenantAPIKeyCreateResult struct {
 	Token  string
 }
 
+// TenantAPIKeyUpdateRequest 修改已创建租户 API Key 的可配置属性。
+// 配置语义与创建接口一致：FullAccess 为 true 时忽略细粒度能力和知识库范围。
+type TenantAPIKeyUpdateRequest struct {
+	TenantID         uint64
+	APIKeyID         uint64
+	Name             string
+	FullAccess       bool
+	KnowledgeBaseIDs []string
+	Capabilities     []string
+	ExpiresAt        *time.Time
+}
+
 type TenantAPIKeyRepository interface {
 	CreateAPIKey(ctx context.Context, key *types.TenantAPIKey) error
 	GetAPIKeyByHash(ctx context.Context, hash string) (*types.TenantAPIKey, error)
 	ListAPIKeys(ctx context.Context, tenantID uint64) ([]*types.TenantAPIKey, error)
 	ListPlatformAPIKeys(ctx context.Context) ([]*types.TenantAPIKey, error)
+	UpdateAPIKey(ctx context.Context, tenantID uint64, id uint64, key *types.TenantAPIKey) (*types.TenantAPIKey, error)
 	RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error
 	RevokePlatformAPIKey(ctx context.Context, id uint64) error
 	UpdateAPIKeyHash(ctx context.Context, id uint64, hash string) error
@@ -100,6 +113,7 @@ type TenantAPIKeyService interface {
 	AuthenticateAPIKey(ctx context.Context, token string) (*types.TenantAPIKey, error)
 	ListAPIKeys(ctx context.Context, tenantID uint64) ([]*types.TenantAPIKey, error)
 	ListPlatformAPIKeys(ctx context.Context) ([]*types.TenantAPIKey, error)
+	UpdateAPIKey(ctx context.Context, req TenantAPIKeyUpdateRequest) (*types.TenantAPIKey, error)
 	RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error
 	RevokePlatformAPIKey(ctx context.Context, id uint64) error
 	// BackfillMissingKeyHashes computes and persists the SHA-256 key_hash
