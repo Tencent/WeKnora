@@ -184,6 +184,55 @@ func TestFirstTextChunkSummaryFallback(t *testing.T) {
 	})
 }
 
+func TestInitialSummaryChunkInheritsOnlyReservedAccessMetadata(t *testing.T) {
+	source := &types.Chunk{
+		ID:       "source-chunk",
+		Metadata: types.JSON(`{"access_metadata":{"department":"research"},"generated_questions":["unrelated"]}`),
+	}
+	knowledge := &types.Knowledge{ID: "knowledge", TenantID: 1, KnowledgeBaseID: "kb"}
+
+	summary, err := newSummaryChunk(source, knowledge, "summary-id", "# Summary\ninitial", 8)
+	if err != nil {
+		t.Fatalf("newSummaryChunk() error = %v", err)
+	}
+	assertSummaryChunkAccessMetadata(t, summary)
+}
+
+func TestRefreshSummaryChunkInheritsOnlyReservedAccessMetadata(t *testing.T) {
+	source := &types.Chunk{
+		ID:       "source-chunk",
+		Metadata: types.JSON(`{"access_metadata":{"department":"research"},"generated_questions":["unrelated"]}`),
+	}
+	knowledge := &types.Knowledge{ID: "knowledge", TenantID: 1, KnowledgeBaseID: "kb"}
+
+	summary, err := newSummaryChunk(source, knowledge, "summary-id", "# Summary\nrefreshed", 8)
+	if err != nil {
+		t.Fatalf("newSummaryChunk() error = %v", err)
+	}
+	assertSummaryChunkAccessMetadata(t, summary)
+}
+
+func assertSummaryChunkAccessMetadata(t *testing.T, summary *types.Chunk) {
+	t.Helper()
+	accessMetadata, err := summary.AccessMetadata()
+	if err != nil {
+		t.Fatalf("summary AccessMetadata() error = %v", err)
+	}
+	if accessMetadata["department"] != "research" {
+		t.Fatalf("summary access metadata = %#v, want department=research", accessMetadata)
+	}
+	persisted, err := summary.Metadata.Map()
+	if err != nil {
+		t.Fatalf("summary metadata map: %v", err)
+	}
+	if len(persisted) != 1 {
+		t.Fatalf("summary metadata = %#v, want only access_metadata", persisted)
+	}
+	if _, ok := persisted["generated_questions"]; ok {
+		t.Fatalf("summary metadata leaked unrelated source metadata: %#v", persisted)
+	}
+}
+
 func TestApplyRetryableSummaryFailureState(t *testing.T) {
 	chunks := []*types.Chunk{{Content: "first body chunk"}}
 

@@ -745,6 +745,43 @@ func firstTextChunkSummaryFallback(textChunks []*types.Chunk) string {
 	return fallback
 }
 
+// newSummaryChunk creates a summary child chunk that retains only the source
+// chunk's reserved access metadata. Summary content must not inherit unrelated
+// document metadata such as generated questions.
+func newSummaryChunk(
+	source *types.Chunk,
+	knowledge *types.Knowledge,
+	id string,
+	content string,
+	chunkIndex int,
+) (*types.Chunk, error) {
+	if source == nil {
+		return nil, fmt.Errorf("summary source chunk is required")
+	}
+	accessMetadata, err := source.AccessMetadata()
+	if err != nil {
+		return nil, fmt.Errorf("extract access metadata for summary source chunk %s: %w", source.ID, err)
+	}
+	metadata, err := json.Marshal(types.JSONMap{"access_metadata": accessMetadata})
+	if err != nil {
+		return nil, fmt.Errorf("encode summary access metadata: %w", err)
+	}
+	return &types.Chunk{
+		ID:              id,
+		TenantID:        knowledge.TenantID,
+		KnowledgeID:     knowledge.ID,
+		KnowledgeBaseID: knowledge.KnowledgeBaseID,
+		Content:         content,
+		ChunkIndex:      chunkIndex,
+		IsEnabled:       true,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+		ChunkType:       types.ChunkTypeSummary,
+		ParentChunkID:   source.ID,
+		Metadata:        types.JSON(metadata),
+	}, nil
+}
+
 // applyRetryableSummaryFailureState keeps an existing description visible
 // while another attempt is queued, then publishes the deterministic fallback
 // and marks only the summary subtask failed after the retry budget is exhausted.
@@ -1298,20 +1335,12 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// unreliable signal (e.g. "MX5280.pdf" for a scanned legal letter)
 		// and surfacing them in retrieved RAG context can re-introduce the
 		// hallucination vector this branch is meant to close.
-		summaryChunk := &types.Chunk{
-			ID:              uuid.New().String(),
-			TenantID:        knowledge.TenantID,
-			KnowledgeID:     knowledge.ID,
-			KnowledgeBaseID: knowledge.KnowledgeBaseID,
-			Content:         fmt.Sprintf("# Summary\n%s", summary),
-			ChunkIndex:      maxChunkIndex + 1,
-			IsEnabled:       true,
-			CreatedAt:       time.Now(),
-			UpdatedAt:       time.Now(),
-			StartAt:         0,
-			EndAt:           0,
-			ChunkType:       types.ChunkTypeSummary,
-			ParentChunkID:   textChunks[0].ID,
+		summaryChunk, err := newSummaryChunk(
+			textChunks[0], knowledge, uuid.New().String(), fmt.Sprintf("# Summary\n%s", summary), maxChunkIndex+1,
+		)
+		if err != nil {
+			summaryErr = err
+			return err
 		}
 
 		// Save summary chunk
@@ -2393,11 +2422,11 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 			}
 		}
 		if !found {
-			summaryChunk := &types.Chunk{
-				ID: uuid.NewString(), TenantID: tenantID, KnowledgeID: knowledge.ID,
-				KnowledgeBaseID: knowledge.KnowledgeBaseID, Content: "# Summary\n" + summary,
-				ChunkIndex: maxIndex + 1, IsEnabled: true, ChunkType: types.ChunkTypeSummary,
-				ParentChunkID: textChunks[0].ID, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+			summaryChunk, err := newSummaryChunk(
+				textChunks[0], knowledge, uuid.NewString(), "# Summary\n"+summary, maxIndex+1,
+			)
+			if err != nil {
+				return nil, err
 			}
 			if err := s.chunkRepo.CreateChunks(ctx, []*types.Chunk{summaryChunk}); err != nil {
 				return nil, err
