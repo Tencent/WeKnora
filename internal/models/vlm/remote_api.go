@@ -143,6 +143,11 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 		MaxTokens:   defaultMaxToks,
 		Temperature: v.temperature,
 	}
+	if provider.IsOpenAIReasoningOrGPT5Model(v.modelName) {
+		req.MaxCompletionTokens = req.MaxTokens
+		req.MaxTokens = 0
+		req.Temperature = 0
+	}
 
 	totalImageSize := 0
 	for _, img := range imgBytesList {
