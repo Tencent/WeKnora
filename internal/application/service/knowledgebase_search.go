@@ -260,7 +260,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		deduplicatedChunks = deduplicatedChunks[:params.MatchCount]
 	}
 
-	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
+	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment, params.MetadataFilter)
 }
 
 // pickPrimary returns the KB whose ID matches id, or nil if id is not in

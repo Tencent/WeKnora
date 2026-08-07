@@ -100,6 +100,24 @@ func (c *CompositeRetrieveEngine) SupportRetriever(r types.RetrieverType) bool {
 	return false
 }
 
+// SupportsMetadataFilter reports whether every active retrieval engine can
+// enforce metadata filtering. Filtering must fail closed because retrieval
+// results are later used to assemble response context.
+func (c *CompositeRetrieveEngine) SupportsMetadataFilter() bool {
+	if c == nil || len(c.engineInfos) == 0 {
+		return false
+	}
+	for _, engineInfo := range c.engineInfos {
+		if engineInfo == nil || engineInfo.retrieveEngine == nil || len(engineInfo.retrieverType) == 0 {
+			return false
+		}
+		if engineInfo.retrieveEngine.EngineType() != types.PostgresRetrieverEngineType {
+			return false
+		}
+	}
+	return true
+}
+
 // BatchUpdateChunkEnabledStatus updates the enabled status of chunks in batch
 func (c *CompositeRetrieveEngine) BatchUpdateChunkEnabledStatus(
 	ctx context.Context,
