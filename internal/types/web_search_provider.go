@@ -24,6 +24,7 @@ const (
 	WebSearchProviderTypeSearxng    WebSearchProviderType = "searxng"
 	WebSearchProviderTypeKeenable   WebSearchProviderType = "keenable"
 	WebSearchProviderTypeZhipu      WebSearchProviderType = "zhipu"
+	WebSearchProviderTypeMetaso     WebSearchProviderType = "metaso"
 )
 
 // WebSearchProviderEntity represents a configured web search provider instance for a workspace.
@@ -272,6 +273,54 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 						{Label: "Medium", LabelKey: "webSearchSettings.configFields.contentMedium", Value: "medium"},
 						{Label: "High", LabelKey: "webSearchSettings.configFields.contentHigh", Value: "high"},
 					},
+				},
+			},
+		},
+		{
+			ID:             "metaso",
+			Name:           "Metaso",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "Metaso Search API (requires API key)",
+			DocsURL:        "https://metaso.cn/search-api/playground",
+			ConfigFields: []WebSearchProviderConfigField{
+				{
+					Key:            "scope",
+					Label:          "搜索范围",
+					LabelKey:       "webSearchSettings.configFields.metasoScope",
+					Type:           "select",
+					Required:       true,
+					Default:        "webpage",
+					Description:    "选择 Metaso 的搜索范围。",
+					DescriptionKey: "webSearchSettings.configFields.metasoScopeDesc",
+					Options: []WebSearchProviderConfigFieldOption{
+						{Label: "网页", LabelKey: "webSearchSettings.configFields.metasoScopeWebpage", Value: "webpage"},
+						{Label: "文库", LabelKey: "webSearchSettings.configFields.metasoScopeDocument", Value: "document"},
+						{Label: "学术", LabelKey: "webSearchSettings.configFields.metasoScopeScholar", Value: "scholar"},
+						{Label: "图片", LabelKey: "webSearchSettings.configFields.metasoScopeImage", Value: "image"},
+						{Label: "视频", LabelKey: "webSearchSettings.configFields.metasoScopeVideo", Value: "video"},
+						{Label: "播客", LabelKey: "webSearchSettings.configFields.metasoScopePodcast", Value: "podcast"},
+					},
+				},
+				{
+					Key:            "conciseSnippet",
+					Label:          "返回精简的原文匹配信息",
+					LabelKey:       "webSearchSettings.configFields.metasoConciseSnippet",
+					Type:           "boolean",
+					Required:       false,
+					Default:        "true",
+					Description:    "开启后返回精简的原文匹配信息，关闭则返回完整片段。",
+					DescriptionKey: "webSearchSettings.configFields.metasoConciseSnippetDesc",
+				},
+				{
+					Key:            "includeSummary",
+					Label:          "通过网页摘要进行召回增强",
+					LabelKey:       "webSearchSettings.configFields.metasoIncludeSummary",
+					Type:           "boolean",
+					Required:       false,
+					Default:        "true",
+					Description:    "开启后通过网页的摘要信息进行召回增强。",
+					DescriptionKey: "webSearchSettings.configFields.metasoIncludeSummaryDesc",
 				},
 			},
 		},
