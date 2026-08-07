@@ -572,16 +572,13 @@ func (g *pgRepository) CopyIndices(ctx context.Context,
 			}
 
 			// Create new vector index, copy the content and vector of the source index
-			targetVector := &pgVector{
-				Content:         sourceVector.Content,
-				SourceID:        targetSourceID, // Handle SourceID transformation properly
-				SourceType:      sourceVector.SourceType,
-				ChunkID:         targetChunkID,         // Update to target chunk ID
-				KnowledgeID:     targetKnowledgeID,     // Update to target knowledge ID
-				KnowledgeBaseID: targetKnowledgeBaseID, // Update to target knowledge base ID
-				Dimension:       sourceVector.Dimension,
-				Embedding:       sourceVector.Embedding, // Copy the vector embedding directly, avoid recalculation
-			}
+			targetVector := copiedVector(
+				sourceVector,
+				targetSourceID,
+				targetChunkID,
+				targetKnowledgeID,
+				targetKnowledgeBaseID,
+			)
 
 			targetVectors = append(targetVectors, targetVector)
 		}
@@ -613,6 +610,23 @@ func (g *pgRepository) CopyIndices(ctx context.Context,
 
 	logger.GetLogger(ctx).Infof("[Postgres] Index copying completed, total copied: %d", totalCopied)
 	return nil
+}
+
+func copiedVector(
+	sourceVector *pgVector,
+	targetSourceID, targetChunkID, targetKnowledgeID, targetKnowledgeBaseID string,
+) *pgVector {
+	return &pgVector{
+		Content:         sourceVector.Content,
+		SourceID:        targetSourceID,
+		SourceType:      sourceVector.SourceType,
+		ChunkID:         targetChunkID,
+		KnowledgeID:     targetKnowledgeID,
+		KnowledgeBaseID: targetKnowledgeBaseID,
+		Dimension:       sourceVector.Dimension,
+		Embedding:       sourceVector.Embedding,
+		AccessMetadata:  sourceVector.AccessMetadata,
+	}
 }
 
 // BatchUpdateChunkEnabledStatus updates the enabled status of chunks in batch
