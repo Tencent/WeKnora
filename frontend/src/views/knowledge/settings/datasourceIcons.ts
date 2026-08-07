@@ -1,4 +1,5 @@
 import feishuIcon from '@/assets/img/datasource-feishu.ico'
+import gitlabIcon from '@/assets/img/datasource-gitlab.png'
 import larkIcon from '@/assets/img/datasource-lark.svg'
 import notionIcon from '@/assets/img/datasource-notion.ico'
 import yuqueIcon from '@/assets/img/datasource-yuque.ico'
@@ -13,6 +14,7 @@ export const datasourceIconMap: Record<string, string> = {
   notion: notionIcon,
   yuque: yuqueIcon,
   rss: rssIcon,
+  gitlab: gitlabIcon,
 }
 
 export function getDatasourceIconUrl(type: string): string | undefined {

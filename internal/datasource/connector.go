@@ -269,6 +269,14 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "custom",
 		Capabilities: []string{"incremental"},
 	},
+	types.ConnectorTypeGitLab: {
+		Type:         types.ConnectorTypeGitLab,
+		Name:         "GitLab",
+		Description:  "Sync files from GitLab projects",
+		Priority:     8,
+		AuthType:     "token",
+		Capabilities: []string{"incremental", "hierarchical"},
+	},
 }
 
 // ListAvailableConnectors returns all available connector metadata

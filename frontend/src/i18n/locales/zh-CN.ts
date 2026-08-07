@@ -559,6 +559,16 @@ export default {
     connectionFailed: '连接失败',
     isRequired: '为必填项',
     credentialsLabel: '凭证',
+    gitlab: {
+      baseUrl: 'GitLab 地址',
+      accessToken: '个人访问令牌',
+      projects: 'GitLab 项目',
+      projectsHint: '填写项目 ID（或 URL 编码后的项目路径），可选指定分支和目录。',
+      project: '项目', projectId: '项目 ID', projectIdPlaceholder: '例如：12345 或 group%2Fproject',
+      ref: '分支', refPlaceholder: '留空时使用默认分支',
+      paths: '同步目录', pathsPlaceholder: '每行一个目录；留空同步整个项目',
+      addProject: '添加项目', projectRequired: '请至少添加一个 GitLab 项目',
+    },
     resourceHint: '选择要同步的内容空间/文件夹',
     untitled: '无标题',
     resourceLoadFailed: '加载资源列表失败',
@@ -670,7 +680,8 @@ export default {
       lark_drive: "同步 Lark 云盘文件夹中的文档、表格、文件（飞书国际版）",
       notion: '同步 Notion 中的页面和数据库',
       yuque: '同步语雀知识库中的文档',
-      rss: '同步 RSS / Atom 订阅源中的文章'
+      rss: '同步 RSS / Atom 订阅源中的文章',
+      gitlab: '同步 GitLab 项目中的文件'
     },
     connector: {
       feishu: '飞书',
@@ -679,7 +690,8 @@ export default {
       lark_drive: "Lark 云盘",
       notion: 'Notion',
       yuque: '语雀',
-      rss: 'RSS / Atom 订阅'
+      rss: 'RSS / Atom 订阅',
+      gitlab: 'GitLab'
     },
     logDetail: {
       startTime: '开始时间',
@@ -5347,6 +5359,7 @@ export default {
     channelIm: 'IM 渠道',
     channelNotion: 'Notion',
     channelYuque: '语雀',
+    channelGitLab: 'GitLab',
     channelUpload: '上传',
     channelManual: '手动',
     channelUrl: '网页',
