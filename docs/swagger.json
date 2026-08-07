@@ -15457,6 +15457,24 @@
                 "AuditOutcomeCanceled"
             ]
         },
+        "github_com_Tencent_WeKnora_internal_types.AutoTagConfig": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "max_tags": {
+                    "type": "integer"
+                },
+                "model_id": {
+                    "type": "string"
+                },
+                "skip_if_tagged": {
+                    "description": "SkipIfTagged leaves documents that already carry tags untouched, so a\ndeliberate manual classification is not diluted by model guesses. It is\na pointer because the default is true: rows written before this field\nexisted decode to nil and must not silently flip to \"always append\".",
+                    "type": "boolean"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.COSEngineConfig": {
             "type": "object",
             "properties": {
@@ -16732,6 +16750,14 @@
                         }
                     ]
                 },
+                "auto_tag_config": {
+                    "description": "AutoTagConfig controls asynchronous association of existing tags after parsing.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutoTagConfig"
+                        }
+                    ]
+                },
                 "chunk_count": {
                     "description": "Chunk count (not stored in database, calculated on query)",
                     "type": "integer"
@@ -16909,6 +16935,14 @@
         "github_com_Tencent_WeKnora_internal_types.KnowledgeBaseConfig": {
             "type": "object",
             "properties": {
+                "auto_tag_config": {
+                    "description": "AutoTagConfig controls optional automatic association of existing KB tags.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutoTagConfig"
+                        }
+                    ]
+                },
                 "chunking_config": {
                     "description": "Chunking configuration",
                     "allOf": [

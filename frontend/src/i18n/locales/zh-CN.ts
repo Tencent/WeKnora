@@ -3319,7 +3319,9 @@ export default {
         modelDescription: '留空时使用知识库摘要模型。',
         modelPlaceholder: '请选择分类模型',
         maxTagsLabel: '单篇文档最多标签数',
-        maxTagsDescription: '每篇文档最多自动关联 1-10 个已有标签。'
+        maxTagsDescription: '每篇文档最多自动关联 1-10 个已有标签。',
+        skipIfTaggedLabel: '跳过已有标签的文档',
+        skipIfTaggedDescription: '开启后，上传时已手动设置标签的文档不再自动打标签，避免覆盖人工分类意图。'
       }
     },
     asr: {

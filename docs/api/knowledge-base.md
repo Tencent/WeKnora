@@ -111,7 +111,8 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
     "auto_tag_config": {
         "enabled": true,
         "model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
-        "max_tags": 3
+        "max_tags": 3,
+        "skip_if_tagged": true
     },
     "vector_store_id": "550e8400-e29b-41d4-a716-446655440000"
 }'
@@ -179,7 +180,8 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
         "auto_tag_config": {
             "enabled": true,
             "model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
-            "max_tags": 3
+            "max_tags": 3,
+            "skip_if_tagged": true
         },
         "is_pinned": false,
         "pinned_at": null,
@@ -208,8 +210,11 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
 | `enabled`  | boolean | `false` | 是否启用自动标签 |
 | `model_id` | string  | `""` | 使用的聊天模型 ID；为空时使用知识库的 `summary_model_id` |
 | `max_tags` | integer | `3` | 单个文档最多自动关联的标签数，取值范围为 `1` 到 `10` |
+| `skip_if_tagged` | boolean | `true` | 文档已有标签时是否跳过自动标签。开启时不会调用模型，可避免稀释人工分类；设为 `false` 则在已有标签基础上追加 |
 
 自动标签仅对启用该配置后新解析或重新解析的文档生效。模型调用失败不会阻塞文档解析完成，异步任务会按照任务队列策略重试。
+
+候选标签按知识库排序取前 500 个参与分类；标签数超出时会记录告警并使用该前缀，不会跳过任务。模型按候选序号返回结果，服务端会校验序号范围并映射回标签 ID，越界或重复的序号将被丢弃。
 
 **`vector_store_*` 响应字段说明**:
 

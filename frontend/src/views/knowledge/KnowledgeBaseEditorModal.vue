@@ -797,7 +797,8 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     autoTagConfig: {
       enabled: false,
       modelId: '',
-      maxTags: 3
+      maxTags: 3,
+      skipIfTagged: true
     },
     wikiConfig: {
       synthesisModelId: '',
@@ -922,7 +923,10 @@ const loadKBData = async (kbIdOverride?: string) => {
       autoTagConfig: {
         enabled: kb.auto_tag_config?.enabled || false,
         modelId: kb.auto_tag_config?.model_id || '',
-        maxTags: kb.auto_tag_config?.max_tags || 3
+        maxTags: kb.auto_tag_config?.max_tags || 3,
+        // Absent on knowledge bases saved before the toggle existed; the
+        // backend treats that as "skip", so mirror it here.
+        skipIfTagged: kb.auto_tag_config?.skip_if_tagged ?? true
       },
       wikiConfig: {
         synthesisModelId: kb.wiki_config?.synthesis_model_id || '',
@@ -1281,7 +1285,8 @@ const buildSubmitData = () => {
   data.auto_tag_config = {
     enabled: formData.value.autoTagConfig?.enabled || false,
     model_id: formData.value.autoTagConfig?.modelId || '',
-    max_tags: formData.value.autoTagConfig?.maxTags || 3
+    max_tags: formData.value.autoTagConfig?.maxTags || 3,
+    skip_if_tagged: formData.value.autoTagConfig?.skipIfTagged ?? true
   }
 
   if (formData.value.type === 'faq') {
