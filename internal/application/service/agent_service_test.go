@@ -28,15 +28,17 @@ type fakeAgentKnowledgeService struct {
 	interfaces.KnowledgeService
 	knowledges []*types.Knowledge
 	lastFilter types.KnowledgeListFilter
+	lastTenant uint64
 }
 
 func (s *fakeAgentKnowledgeService) ListPagedKnowledgeByKnowledgeBaseID(
-	_ context.Context,
+	ctx context.Context,
 	_ string,
 	page *types.Pagination,
 	filter types.KnowledgeListFilter,
 ) (*types.PageResult, error) {
 	s.lastFilter = filter
+	s.lastTenant, _ = types.TenantIDFromContext(ctx)
 
 	filtered := make([]*types.Knowledge, 0, len(s.knowledges))
 	for _, knowledge := range s.knowledges {
@@ -46,6 +48,46 @@ func (s *fakeAgentKnowledgeService) ListPagedKnowledgeByKnowledgeBaseID(
 		filtered = append(filtered, knowledge)
 	}
 	return types.NewPageResult(int64(len(filtered)), page, filtered), nil
+}
+
+func TestGetKnowledgeBaseInfos_SharedKnowledgeBaseUsesSourceTenant(t *testing.T) {
+	const (
+		receiverTenantID = uint64(7)
+		sourceTenantID   = uint64(42)
+	)
+	now := time.Now()
+	knowledgeService := &fakeAgentKnowledgeService{
+		knowledges: []*types.Knowledge{
+			{
+				ID:              "shared-doc",
+				KnowledgeBaseID: "shared-kb",
+				Title:           "shared document",
+				ParseStatus:     types.ParseStatusCompleted,
+				CreatedAt:       now,
+			},
+		},
+	}
+	service := &agentService{
+		knowledgeBaseService: &fakeAgentKnowledgeBaseService{
+			kb: &types.KnowledgeBase{
+				ID:       "shared-kb",
+				Name:     "Shared KB",
+				Type:     types.KnowledgeBaseTypeDocument,
+				TenantID: sourceTenantID,
+			},
+		},
+		knowledgeService: knowledgeService,
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, receiverTenantID)
+
+	infos, err := service.getKnowledgeBaseInfos(ctx, []string{"shared-kb"}, map[string]uint64{"shared-kb": sourceTenantID})
+
+	require.NoError(t, err)
+	require.Len(t, infos, 1)
+	assert.Equal(t, 1, infos[0].DocCount)
+	require.Len(t, infos[0].RecentDocs, 1)
+	assert.Equal(t, "shared-doc", infos[0].RecentDocs[0].KnowledgeID)
+	assert.Equal(t, sourceTenantID, knowledgeService.lastTenant)
 }
 
 func TestGetKnowledgeBaseInfos_ExcludesUnprocessedDocuments(t *testing.T) {
@@ -84,7 +126,7 @@ func TestGetKnowledgeBaseInfos_ExcludesUnprocessedDocuments(t *testing.T) {
 		knowledgeService: knowledgeService,
 	}
 
-	infos, err := service.getKnowledgeBaseInfos(context.Background(), []string{"kb-1"})
+	infos, err := service.getKnowledgeBaseInfos(context.Background(), []string{"kb-1"}, nil)
 
 	require.NoError(t, err)
 	require.Len(t, infos, 1)
