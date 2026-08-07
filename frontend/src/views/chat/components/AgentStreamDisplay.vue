@@ -780,6 +780,7 @@ import thinkingIcon from '@/assets/img/Frame3718.svg';
 
 interface SessionData {
   id?: string;
+  assistant_message_id?: string;
   request_id?: string;
   debugRequest?: Record<string, unknown>;
   isAgentMode?: boolean;
@@ -818,13 +819,41 @@ const showRequestInfo = computed(
   () => !props.embeddedMode && !!(props.session?.request_id || props.session?.id),
 );
 
+const resolveAssistantMessageId = (session?: SessionData) =>
+  String(session?.assistant_message_id || session?.id || '').trim();
+
 // Agent answers embed exported charts and knowledge-base images as
-// `resource://` handles. An embed visitor has no Bearer token, so they must be
-// fetched through the channel-scoped proxy rather than the tenant one.
-const protectedFileAccess = computed<ProtectedFileAccessContext | undefined>(() =>
-  props.embeddedMode && props.embedChannelId && props.embedToken
-    ? { mode: 'embed', channelId: props.embedChannelId, token: props.embedToken }
-    : undefined,
+// `resource://` handles. Embed visitors use the channel-scoped proxy. Logged-in
+// users use the persisted assistant message as the authorization anchor, which
+// also covers resources owned by a shared agent's source workspace.
+const protectedFileAccess = computed<ProtectedFileAccessContext | undefined>(() => {
+  if (props.embeddedMode && props.embedChannelId && props.embedToken) {
+    return { mode: 'embed', channelId: props.embedChannelId, token: props.embedToken };
+  }
+  const messageId = resolveAssistantMessageId(props.session);
+  if (props.sessionId && messageId) {
+    return { mode: 'message', sessionId: props.sessionId, messageId };
+  }
+  return undefined;
+});
+
+// Re-hydrate when the message authorization anchor becomes available or is
+// corrected (e.g. request_id → persisted assistant_message_id after agent_query).
+watch(
+  () => {
+    const access = protectedFileAccess.value;
+    if (access?.mode === 'message') {
+      return `${access.sessionId}\0${access.messageId}`;
+    }
+    return '';
+  },
+  (scopeKey, previousScopeKey) => {
+    if (!scopeKey || scopeKey === previousScopeKey) return;
+    clearProtectedFileFailureCache();
+    nextTick(async () => {
+      await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
+    });
+  },
 );
 
 const {

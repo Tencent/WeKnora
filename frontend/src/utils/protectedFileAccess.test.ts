@@ -42,6 +42,19 @@ test('knowledge-base access routes through the KB-scoped proxy', () => {
   )
 })
 
+test('message access routes through the session-message-scoped proxy', () => {
+  const request = buildProtectedFileRequest(RESOURCE, {
+    mode: 'message',
+    sessionId: 'session 1',
+    messageId: 'message/1',
+  })
+
+  assert.equal(
+    request?.url,
+    `/api/v1/sessions/session%201/messages/message%2F1/files?file_path=${encodeURIComponent(RESOURCE)}`,
+  )
+})
+
 test('an embed context without a token yields no request instead of an unauthenticated one', () => {
   const request = buildProtectedFileRequest(RESOURCE, { mode: 'embed', channelId: 'ch-1', token: '' })
 
@@ -72,11 +85,16 @@ test('a component scope refines the default tenant plane', () => {
     resolveProtectedFileAccess({ mode: 'knowledgeBase', kbId: '  ' }),
     { mode: 'tenant' },
   )
+  assert.deepEqual(
+    resolveProtectedFileAccess({ mode: 'message', sessionId: 'session-1', messageId: '  ' }),
+    { mode: 'tenant' },
+  )
 })
 
-test('all three file proxies are recognized as protected proxy paths', () => {
+test('all file proxies are recognized as protected proxy paths', () => {
   assert.equal(isProtectedFileProxyPath('/files'), true)
   assert.equal(isProtectedFileProxyPath('/api/v1/knowledge-bases/kb-1/files'), true)
+  assert.equal(isProtectedFileProxyPath('/api/v1/sessions/session-1/messages/message-1/files'), true)
   assert.equal(isProtectedFileProxyPath('/api/v1/embed/ch-1/files'), true)
   assert.equal(isProtectedFileProxyPath('/api/v1/embed/ch-1/config'), false)
 })
