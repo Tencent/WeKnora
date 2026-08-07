@@ -58,6 +58,10 @@ type RetrieveParams struct {
 	Threshold float64
 	// Knowledge type (e.g., "faq", "manual") - determines which index to use
 	KnowledgeType string
+	// MetadataFilter narrows retrieval to chunks whose access metadata matches.
+	// The pointer is shared with SearchParams so all retrieval branches apply
+	// the same validated expression.
+	MetadataFilter *MetadataFilter
 	// Additional parameters, different retrievers may require different parameters
 	AdditionalParams map[string]interface{}
 	// Retriever type

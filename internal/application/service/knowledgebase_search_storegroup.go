@@ -63,6 +63,20 @@ type storeGroup struct {
 	TopK int
 }
 
+// metadataFilterCapable is intentionally a narrow interface so Task 3 can
+// fail closed before the composite's concrete capability method lands in Task
+// 7. Once CompositeRetrieveEngine implements SupportsMetadataFilter, this
+// assertion invokes it directly; until then, and for any unknown composite,
+// filtering is rejected rather than silently skipped.
+type metadataFilterCapable interface {
+	SupportsMetadataFilter() bool
+}
+
+func supportsMetadataFilter(engine *retriever.CompositeRetrieveEngine) bool {
+	capable, ok := any(engine).(metadataFilterCapable)
+	return ok && capable.SupportsMetadataFilter()
+}
+
 // resolveStoreGroups partitions kbs by (VectorStoreID, KB.TenantID),
 // resolves the engine per group via the PR2 factory using the OWNING
 // tenant for ownership lookup, and builds the per-store base RetrieveParams
@@ -124,6 +138,9 @@ func (s *knowledgeBaseService) resolveStoreGroups(
 			resolveCtx, s.retrieveEngine, s.ownership, key.tenantID, storeIDPtr)
 		if err != nil {
 			return nil, classifyFactoryError(ctx, err, key.tenantID, key.storeID)
+		}
+		if params.MetadataFilter != nil && !supportsMetadataFilter(engine) {
+			return nil, apperrors.NewMetadataFilterUnsupportedError()
 		}
 		baseParams, err := s.buildRetrievalParams(
 			ctx, engine, primary, groupKBs, params, matchCount)
