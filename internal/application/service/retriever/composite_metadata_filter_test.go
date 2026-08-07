@@ -7,47 +7,79 @@ import (
 )
 
 func TestCompositeRetrieveEngineSupportsMetadataFilter(t *testing.T) {
+	var typedNilEngine *fakeEngine
 	tests := []struct {
-		name  string
-		infos []*engineInfo
-		want  bool
+		name   string
+		engine *CompositeRetrieveEngine
+		want   bool
 	}{
 		{
 			name: "postgres members only",
-			infos: []*engineInfo{
+			engine: &CompositeRetrieveEngine{engineInfos: []*engineInfo{
 				{retrieveEngine: &fakeEngine{engineType: types.PostgresRetrieverEngineType}, retrieverType: []types.RetrieverType{types.VectorRetrieverType}},
 				{retrieveEngine: &fakeEngine{engineType: types.PostgresRetrieverEngineType}, retrieverType: []types.RetrieverType{types.KeywordsRetrieverType}},
-			},
+			}},
 			want: true,
 		},
 		{
+			name: "nil composite fails closed",
+		},
+		{
+			name:   "empty member set fails closed",
+			engine: &CompositeRetrieveEngine{},
+		},
+		{
+			name:   "nil engine info fails closed",
+			engine: &CompositeRetrieveEngine{engineInfos: []*engineInfo{nil}},
+		},
+		{
+			name: "nil retrieve engine fails closed",
+			engine: &CompositeRetrieveEngine{engineInfos: []*engineInfo{{
+				retrieverType: []types.RetrieverType{types.VectorRetrieverType},
+			}}},
+		},
+		{
+			name: "empty retriever types fail closed",
+			engine: &CompositeRetrieveEngine{engineInfos: []*engineInfo{{
+				retrieveEngine: &fakeEngine{engineType: types.PostgresRetrieverEngineType},
+			}}},
+		},
+		{
+			name: "typed nil retrieve engine fails closed",
+			engine: &CompositeRetrieveEngine{engineInfos: []*engineInfo{{
+				retrieveEngine: typedNilEngine,
+				retrieverType:  []types.RetrieverType{types.VectorRetrieverType},
+			}}},
+		},
+		{
 			name: "mixed engine members",
-			infos: []*engineInfo{
+			engine: &CompositeRetrieveEngine{engineInfos: []*engineInfo{
 				{retrieveEngine: &fakeEngine{engineType: types.PostgresRetrieverEngineType}, retrieverType: []types.RetrieverType{types.VectorRetrieverType}},
 				{retrieveEngine: &fakeEngine{engineType: types.ElasticsearchRetrieverEngineType}, retrieverType: []types.RetrieverType{types.KeywordsRetrieverType}},
-			},
+			}},
 		},
 		{
 			name: "unknown engine member",
-			infos: []*engineInfo{
+			engine: &CompositeRetrieveEngine{engineInfos: []*engineInfo{
 				{retrieveEngine: &fakeEngine{engineType: types.RetrieverEngineType("unknown")}, retrieverType: []types.RetrieverType{types.VectorRetrieverType}},
-			},
-		},
-		{
-			name: "empty member set fails closed",
-		},
-		{
-			name: "invalid member fails closed",
-			infos: []*engineInfo{
-				nil,
-			},
+			}},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			engine := &CompositeRetrieveEngine{engineInfos: tt.infos}
-			if got := engine.SupportsMetadataFilter(); got != tt.want {
+			panicked := false
+			got := false
+			func() {
+				defer func() {
+					panicked = recover() != nil
+				}()
+				got = tt.engine.SupportsMetadataFilter()
+			}()
+			if panicked {
+				t.Fatal("SupportsMetadataFilter() panicked")
+			}
+			if got != tt.want {
 				t.Fatalf("SupportsMetadataFilter() = %v, want %v", got, tt.want)
 			}
 		})

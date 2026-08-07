@@ -135,6 +135,43 @@ func TestProcessSearchResultsMetadataFilterStillFiltersPrimaryWhenEnrichmentSkip
 	}
 }
 
+func TestProcessSearchResultsMetadataFilterExcludesMalformedAccessMetadata(t *testing.T) {
+	t.Run("primary", func(t *testing.T) {
+		primary := metadataFilterResultChunk("malformed-primary", types.JSON(`{"access_metadata":"not-an-object"}`))
+		service := newMetadataFilterResultService(map[string]*types.Chunk{primary.ID: primary})
+
+		results, err := service.processSearchResults(metadataFilterResultContext(), []*types.IndexWithScore{{
+			ChunkID: primary.ID, KnowledgeID: primary.KnowledgeID, Score: 1,
+		}}, true, metadataFilterForResearch())
+		if err != nil {
+			t.Fatalf("processSearchResults() error = %v", err)
+		}
+		if len(results) != 0 {
+			t.Fatalf("result IDs = %v, want no malformed primary result", searchResultIDs(results))
+		}
+	})
+
+	t.Run("enrichment", func(t *testing.T) {
+		primary := metadataFilterResultChunk("primary", metadataForDepartment("research"))
+		primary.NextChunkID = "malformed-nearby"
+		nearby := metadataFilterResultChunk("malformed-nearby", types.JSON(`{"access_metadata":"not-an-object"}`))
+		service := newMetadataFilterResultService(map[string]*types.Chunk{
+			primary.ID: primary,
+			nearby.ID:  nearby,
+		})
+
+		results, err := service.processSearchResults(metadataFilterResultContext(), []*types.IndexWithScore{{
+			ChunkID: primary.ID, KnowledgeID: primary.KnowledgeID, Score: 1,
+		}}, false, metadataFilterForResearch())
+		if err != nil {
+			t.Fatalf("processSearchResults() error = %v", err)
+		}
+		if got := searchResultIDs(results); len(got) != 1 || got[0] != primary.ID {
+			t.Fatalf("result IDs = %v, want only allowed primary", got)
+		}
+	})
+}
+
 func TestProcessSearchResultsMetadataFilterExcludesDisallowedParentAndRelation(t *testing.T) {
 	primary := metadataFilterResultChunk("primary", metadataForDepartment("research"))
 	primary.ParentChunkID = "parent"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,22 @@ import (
 type engineInfo struct {
 	retrieveEngine interfaces.RetrieveEngineService
 	retrieverType  []types.RetrieverType
+}
+
+// isNilRetrieveEngine reports whether an interface either has no dynamic value
+// or holds a typed nil. The latter compares non-nil at the interface level but
+// panics when a method dereferences its receiver.
+func isNilRetrieveEngine(engine interfaces.RetrieveEngineService) bool {
+	if engine == nil {
+		return true
+	}
+	value := reflect.ValueOf(engine)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 // CompositeRetrieveEngine implements a composite pattern for retrieval engines,
@@ -108,7 +125,7 @@ func (c *CompositeRetrieveEngine) SupportsMetadataFilter() bool {
 		return false
 	}
 	for _, engineInfo := range c.engineInfos {
-		if engineInfo == nil || engineInfo.retrieveEngine == nil || len(engineInfo.retrieverType) == 0 {
+		if engineInfo == nil || isNilRetrieveEngine(engineInfo.retrieveEngine) || len(engineInfo.retrieverType) == 0 {
 			return false
 		}
 		if engineInfo.retrieveEngine.EngineType() != types.PostgresRetrieverEngineType {
