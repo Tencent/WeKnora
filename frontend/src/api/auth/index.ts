@@ -414,6 +414,30 @@ export async function logout(): Promise<{ success: boolean; message?: string }> 
   }
 }
 
+export interface ChangePasswordRequest {
+  old_password: string
+  new_password: string
+}
+
+/**
+ * Self-service password rotation. On success the backend revokes every
+ * outstanding session for the caller, so the client should clear local
+ * auth state and send the user back to /login.
+ */
+export async function changePassword(
+  data: ChangePasswordRequest,
+): Promise<{ success: boolean; message?: string }> {
+  try {
+    const response = await post('/api/v1/auth/change-password', data)
+    return response as unknown as { success: boolean; message?: string }
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || t('userProfile.changePassword.failed'),
+    }
+  }
+}
+
 /**
  * 验证Token有效性
  */

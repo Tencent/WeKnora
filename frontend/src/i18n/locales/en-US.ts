@@ -5672,7 +5672,21 @@ export default {
   },
   userProfile: {
     title: 'User Profile',
-    description: 'View your account info (user ID, username, email, registration time).'
+    description: 'View your account info (user ID, username, email, registration time) and change your password.',
+    changePassword: {
+      label: 'Change password',
+      description: 'Verify your current password, then set a new one. All signed-in sessions will be revoked and you will need to sign in again.',
+      currentLabel: 'Current password',
+      currentPlaceholder: 'Enter your current password',
+      currentRequired: 'Enter your current password',
+      newLabel: 'New password',
+      newPlaceholder: '8-32 characters, include letters and numbers',
+      confirmLabel: 'Confirm new password',
+      confirmPlaceholder: 'Enter the new password again',
+      submit: 'Update password',
+      success: 'Password updated. Please sign in with your new password.',
+      failed: 'Failed to change password. Check that your current password is correct.',
+    },
   },
   tenantMember: {
     title: 'Members',

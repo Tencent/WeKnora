@@ -37,6 +37,11 @@ var (
 	// It is exported so HTTP handlers can translate the failure to a 400
 	// without exposing bcrypt or persistence errors.
 	ErrPasswordPolicy = errors.New("password must be 8-32 characters and contain at least one letter and one number")
+
+	// ErrInvalidOldPassword is returned by ChangePassword when the supplied
+	// current password does not match the stored hash. Handlers map this to
+	// a 400 so callers can prompt the user without treating it as a 500.
+	ErrInvalidOldPassword = errors.New("invalid old password")
 )
 
 // ValidatePasswordPolicy keeps administrative password resets aligned with
@@ -632,17 +637,24 @@ func (s *userService) DeleteUser(ctx context.Context, id string) error {
 	return s.userRepo.DeleteUser(ctx, id)
 }
 
-// ChangePassword changes user password
+// ChangePassword changes user password after verifying the current
+// credential. The new password must satisfy ValidatePasswordPolicy so
+// self-service rotation cannot introduce weaker passwords than
+// registration / admin reset allow. On success every outstanding session
+// is revoked so a stolen token cannot survive the rotation.
 func (s *userService) ChangePassword(ctx context.Context, userID string, oldPassword, newPassword string) error {
+	if err := ValidatePasswordPolicy(newPassword); err != nil {
+		return err
+	}
+
 	user, err := s.userRepo.GetUserByID(ctx, userID)
 	if err != nil {
 		return err
 	}
 
 	// Verify old password
-	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPassword))
-	if err != nil {
-		return errors.New("invalid old password")
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPassword)); err != nil {
+		return ErrInvalidOldPassword
 	}
 
 	// Hash new password
