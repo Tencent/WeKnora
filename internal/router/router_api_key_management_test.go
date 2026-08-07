@@ -31,6 +31,7 @@ func TestAPIKeyGateDeniesTenantKeyManagementPaths(t *testing.T) {
 	{
 		tenantByID.GET("/api-keys", reachedOK)
 		tenantByID.POST("/api-keys", reachedOK)
+		tenantByID.PUT("/api-keys/:key_id", reachedOK)
 		tenantByID.DELETE("/api-keys/:key_id", reachedOK)
 		tenantByID.GET("/api-principal-config", reachedOK)
 		tenantByID.PUT("/api-principal-config", reachedOK)
@@ -47,6 +48,7 @@ func TestAPIKeyGateDeniesTenantKeyManagementPaths(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/v1/tenants/42/api-keys"},
 		{http.MethodPost, "/api/v1/tenants/42/api-keys"},
+		{http.MethodPut, "/api/v1/tenants/42/api-keys/7"},
 		{http.MethodDelete, "/api/v1/tenants/42/api-keys/7"},
 		{http.MethodGet, "/api/v1/tenants/42/api-principal-config"},
 		{http.MethodPut, "/api/v1/tenants/42/api-principal-config"},
