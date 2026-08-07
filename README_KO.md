@@ -28,7 +28,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="버전" src="https://img.shields.io/badge/version-0.7.1-2e6cc4?labelColor=d4eaf7">
+        <img alt="버전" src="https://img.shields.io/badge/version-0.7.2-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -50,12 +50,13 @@
 
 [**WeKnora**](https://weknora.weixin.qq.com)는 엔터프라이즈급 문서 이해, 시맨틱 검색, 자율 추론 시나리오를 위해 설계된 오픈소스 LLM 기반 지식 프레임워크입니다.
 
-본 프레임워크는 **세 가지 핵심 역량**을 중심으로 구성됩니다. 일상 검색에 최적화된 **RAG 기반 빠른 Q&A**, 지식 검색·MCP 도구·웹 검색을 자율적으로 오케스트레이션하여 복잡한 다단계 작업을 처리하는 **ReAct Agent 추론**, 그리고 Agent가 원본 문서에서 상호 연결된 마크다운 지식베이스와 인터랙티브 지식 그래프를 스스로 생성·유지하는 완전히 새로운 **Wiki 모드**입니다. 다양한 데이터 소스 연동(Feishu / Notion / Yuque / RSS, 지속 확장 중), **웹사이트 임베드 Widget**으로 외부 사이트에 에이전트 게시, 프로그램 연동을 위한 **범위 지정 API 키 및 Principal 모델**, 워크스페이스별 **다중 인스턴스 스토리지 백엔드**, 20개 이상의 LLM 프로바이더 통합, Langfuse 기반 풀스택 관측 가능성과 **런타임 작업 큐 대시보드 + Worker 풀 거버넌스**, **엔터프라이즈 멀티 테넌트 RBAC(4단계 역할 매트릭스 + 리소스 소유권 + 테넌트 감사 로그)**, 완전 셀프호스팅이 가능한 모듈형 아키텍처를 결합하여, WeKnora는 흩어진 문서를 검색·추론 가능하며 지속적으로 진화하는 전용 지식 자산으로 탈바꿈시킵니다.
+본 프레임워크는 **세 가지 핵심 역량**을 중심으로 구성됩니다. 일상 검색에 최적화된 **RAG 기반 빠른 Q&A**, 지식 검색·MCP 도구·웹 검색을 자율적으로 오케스트레이션하여 복잡한 다단계 작업을 처리하는 **ReAct Agent 추론**, 그리고 Agent가 원본 문서에서 상호 연결된 마크다운 지식베이스와 인터랙티브 지식 그래프를 스스로 생성·유지하는 완전히 새로운 **Wiki 모드**(수동 편집·버전 이력·원클릭 롤백 지원)입니다. 지식 가공 과정도 세밀하게 제어할 수 있습니다. **트리형 폴더**가 업로드 시의 디렉터리 구조를 그대로 유지하고, **청크 편집 및 버전 이력**을 통해 검색 청크를 문서처럼 수정·비교·롤백할 수 있습니다. 다양한 데이터 소스 연동(Feishu 지식베이스 / Feishu 클라우드 드라이브 / Notion / Yuque / RSS, 지속 확장 중), **웹사이트 임베드 Widget**으로 외부 사이트에 에이전트 게시, 프로그램 연동을 위한 **범위 지정 API 키 및 Principal 모델**, 워크스페이스별 **다중 인스턴스 스토리지 백엔드**, 20개 이상의 LLM 프로바이더 통합, Langfuse 기반 풀스택 관측 가능성과 **런타임 작업 큐 대시보드 + Worker 풀 거버넌스**, **엔터프라이즈 멀티 테넌트 RBAC(4단계 역할 매트릭스 + 리소스 소유권 + 테넌트 감사 로그)**, 완전 셀프호스팅이 가능한 모듈형 아키텍처를 결합하여, WeKnora는 흩어진 문서를 검색·추론 가능하며 지속적으로 진화하는 전용 지식 자산으로 탈바꿈시킵니다.
 
 Feishu, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지원하며(추가 데이터 소스 개발 중), PDF, Word, 이미지, Excel 등 10가지 이상의 문서 포맷을 처리합니다. WeChat Work, Feishu, Slack, Telegram 등의 IM 채널을 통해 Q&A 서비스를 직접 제공할 수 있습니다. 모델 레이어에서 OpenAI, DeepSeek, Qwen(Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, Ollama 등 주요 프로바이더를 지원합니다. 전체 프로세스가 모듈화 설계되어 LLM, 벡터 DB, 스토리지 등 구성 요소를 유연하게 교체 가능하며, 로컬 및 프라이빗 클라우드 배포를 지원하여 데이터 완전 자체 관리가 가능합니다. 또한 WeKnora는 **Langfuse**와 원활하게 통합되어 Agent 추론, 토큰 사용량 및 파이프라인에 대한 포괄적인 관측 가능성(Observability)을 제공합니다.
 
 ## ✨ 최신 업데이트
 
+- **v0.7.2** — **공식 제품 문서 사이트** 공개(VitePress, 6개 섹션 약 50편으로 약 360개 API 엔드포인트와 약 150개 환경 변수를 다루며, 독립 Docker/Nginx 배포·빠른 시작 샘플 데이터·로컬 MCP 데모 포함); **지식베이스 폴더 트리**(업로드 경로를 독립 데이터로 저장하여 파일 관리자처럼 탐색·이름 변경·문서 재배치); **청크 편집 및 버전 이력**(UI에서 검색 청크 직접 편집, 버전별 diff와 롤백, 편집 후 인덱스 자동 재구축, 문서 커스텀 메타데이터); **Wiki 페이지 버전 이력**(스냅샷 + 라인 단위 diff + 원클릭 롤백 + 브라우저 내 수동 편집); **파일 직접 링크 모드** `resource_urls=public` / `RESOURCE_URL_MODE`(서드파티 앱이 인증 프록시를 다시 호출하지 않고 이미지와 파일을 렌더링); **Feishu 클라우드 드라이브 데이터 소스** 및 docx blocks API 동기화; 문서 일괄 태깅; **MCP Server 1.1.x**(mcp 2.x 고수준 API로 마이그레이션, 공식 PyPI 패키지 `tencent-weknora-mcp`, `create_knowledge_from_text`와 `list_shared_knowledge_bases` 추가로 총 29개 도구); AWS S3 기본 자격 증명 체인(IAM Role / IRSA); 로컬 HTML 업로드 파싱; QQBot Markdown 응답; app / frontend / docreader / mcp-server PR CI 검사 추가. 또한 router와 `modelcontext` 대규모 리팩터링, 리랭크·청킹 품질 개선 및 광범위한 안정성 수정. 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.7.1** — 새로운 **Yunzhijia(云之家) IM 통합**(WebSocket + 이미지 메시지 + Markdown 응답); **Volcengine Rerank** 제공자(요청 자동 분할)와 **Zhipu AI 웹 검색** 제공자; 컨트롤 플레인 자동화를 위한 **플랫폼 범위 API 키**(테넌트 관리, 시스템 설정, 런타임 큐, 감사 로그); **KB 단위 활동 감사 추적**; FAQ 관리 강화(필터링, 태깅, 내보내기, 가져오기 결과 추적); **Langfuse OTLP/OTel 트레이싱** 마이그레이션 및 W3C traceparent 전파; 채팅 헤더 액션을 통한 원클릭 **Markdown 내보내기** 및 참조 드로어의 Wiki 도구 결과 표시; 프롬프트 캐시 가시성; 세션 채널 거버넌스(IM/임베드/API 세션을 관리자 범위로 분리); Feishu 대규모 Wiki 동기화 견고화; 레거시 Neo4j 대화 메모리 의존성 제거. 또한 광범위한 slug 무결성, SSRF 전송, 상태 동기화 강화. 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.7.0** — 세분화된 **범위 지정 API 키 및 Principal 모델**(능력 단위 권한 + KB 단위 제한 + API 통합 플레이그라운드); **런타임 작업 큐 가시성 대시보드 및 Worker 풀 거버넌스**(단계별 풀 + 모델별 동시성 거버너 + 실패 작업 조사/재시도); **다중 인스턴스 스토리지 백엔드**(워크스페이스당 여러 스토리지 인스턴스, KB 단위 바인딩, 기본 인스턴스); **세션 범위 임시 첨부**(이미지/문서 비동기 파싱 + 통합 한도); 추천 질문 및 후속 질문; 안정적인 리소스 레지스트리 및 LLM 컨텍스트 별칭 압축; `@Skill / @MCP` 멘션 기반 범위 지정 Agent 런타임; 대화 중 MCP OAuth; QQBot 및 Lark(Feishu 국제판) IM 통합; Redis TLS; Requesty 모델 제공자 + Keenable 웹 검색; 테넌트리스 프로비저닝 및 제어된 셀프서비스 워크스페이스; 관리자 비밀번호 재설정; 지식 베이스 복제 플로우; `weknora` CLI v0.10. 또한 대규모 보안 강화(SSRF, 비밀 마스킹, SQL 검증, IDOR). 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.6.3** — 웹사이트 임베드 Widget 및 통합 센터(보안 모드 Token 교환 + 속도 제한); 채팅 경험 전면 개편(인용 팝오버, RAG 파이프라인 진행, 스트리밍 Markdown); 문서 다중 태그 및 일괄 reparse; Wiki 폴더 및 계층 탐색; RSS 데이터 소스; MCP OAuth2; EPUB / MHTML 파싱; Agent 모델 준비 상태 검사; 모델 디버거; 세션 소스 필터; 워크스페이스 삭제 UI. 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
@@ -86,8 +87,12 @@ Feishu, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지�
     <td width="50%" align="center"><b>🕸️ Wiki 지식 그래프</b><br/><img src="./docs/images/wiki-graph.png" alt="Wiki 지식 그래프" width="100%"></td>
   </tr>
   <tr>
+    <td width="50%" align="center"><b>🕘 Wiki 페이지 버전 이력 및 롤백</b><br/><img src="./docs/images/wiki-revision-history.png" alt="Wiki 페이지 버전 이력 및 롤백" width="100%"></td>
+    <td width="50%" align="center"><b>✂️ 청크 편집 및 버전 이력</b><br/><img src="./docs/images/kb-chunk-edit.png" alt="청크 편집 및 버전 이력" width="100%"></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><b>📁 폴더 트리 및 일괄 작업</b><br/><img src="./docs/images/kb-document-list.png" alt="지식베이스 폴더 트리 및 일괄 작업" width="100%"></td>
     <td width="50%" align="center"><b>🤖 Agent 모드 · 도구 호출 과정</b><br/><img src="./docs/images/agent-qa.png" alt="Agent 모드 도구 호출 과정" width="100%"></td>
-    <td width="50%" align="center"><b>⚙️ 대화 설정</b><br/><img src="./docs/images/settings.png" alt="대화 설정" width="100%"></td>
   </tr>
   <tr>
     <td colspan="2" align="center"><b>🔭 관측 가능성 · Langfuse Tracing</b><br/><img src="./docs/images/langfuse.png" alt="Langfuse Tracing" width="100%"></td>
@@ -118,7 +123,7 @@ Feishu, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지�
 |------|------|
 | 지능형 추론 | ReACT 점진적 멀티스텝 추론, 지식 검색·MCP 도구·웹 검색을 자율 오케스트레이션 |
 | 빠른 Q&A | 지식베이스 기반 RAG Q&A, 빠르고 정확한 답변 |
-| Wiki 모드 | Agent가 주도하여 원본 문서에서 구조화된 마크다운 Wiki 페이지를 자동 생성 및 유지 관리 |
+| Wiki 모드 | Agent가 주도하여 원본 문서에서 구조화된 마크다운 Wiki 페이지를 자동 생성 및 유지 관리; 브라우저 내 수동 편집, 페이지 버전 이력, 라인 단위 diff 및 원클릭 롤백 |
 | 도구 호출 | 내장 도구, MCP 도구(OAuth2 원격 서비스·대화 중 OAuth 포함), 웹 검색; `@Skill / @MCP` 멘션으로 턴 단위 Agent 런타임 범위 지정 |
 | 대화 전략 | 온라인 프롬프트 편집, 검색 임계값 조정, 멀티턴 문맥 인식, Agent별 인용 출력 토글 |
 | 추천 질문 | 지식베이스 콘텐츠 기반 질문 자동 생성 및 답변 후 후속 질문 |
@@ -131,12 +136,14 @@ Feishu, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지�
 | 기능 | 상세 |
 |------|------|
 | 지식베이스 타입 | FAQ / 문서 / Wiki, 폴더 임포트·URL 임포트·다중 태그 관리·온라인 입력 |
+| 폴더 트리 | 폴더 업로드 시 원본 디렉터리 구조를 유지하고, 사이드바 트리 탐색·폴더 이름 변경·문서를 다른 폴더로 재배치 지원 |
+| 청크 편집 및 버전 | UI에서 검색 청크를 직접 편집하고 버전별 스냅샷·diff·원클릭 롤백, 편집 후 인덱스 자동 재구축; 생성 질문 추가·수정·삭제·재생성; 문서 커스텀 메타데이터 지원 |
 | 업로드 단위 파싱 설정 | 업로드 확인 대화상자 또는 `process_config` API로 파서·청킹·멀티모달(VLM / ASR)·그래프 추출·질문 생성을 배치 단위로 덮어쓰기; reparse 시 설정 변경 지원 |
 | 일괄 reparse | 여러 문서의 파싱을 한 번에 재큐잉, 배치 단위 `process_config` 지원 |
-| 데이터 소스 임포트 | Feishu / Notion / Yuque / RSS 피드 자동 동기화(추가 데이터 소스 개발 중), 증분·전체 동기화 지원 |
+| 데이터 소스 임포트 | Feishu 지식베이스 / Feishu 클라우드 드라이브 / Lark / Notion / Yuque / RSS 피드 자동 동기화(추가 데이터 소스 개발 중), 증분·전체 동기화 지원 |
 | 문서 포맷 | PDF / Word / Txt / Markdown / HTML / EPUB / MHTML / 이미지 / CSV / Excel / PPT / JSON |
 | 검색 전략 | BM25 희소 / Dense 밀집 / GraphRAG 그래프 강화 / 부모-자식 청킹 / pgvector HNSW 가속(1024차원) / 다차원 인덱싱 |
-| 일괄 선택 | KB 목록에서 마키(드래그) 다중 선택으로 일괄 작업 |
+| 일괄 선택 및 태깅 | KB 목록에서 마키(드래그) 다중 선택으로 일괄 reparse 및 일괄 태깅(공통 태그 자동 선택) |
 | E2E 테스트 | 전체 파이프라인 시각화, 리콜 적중률·BLEU / ROUGE 지표 평가 |
 
 **연동 및 확장**
@@ -146,11 +153,12 @@ Feishu, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지�
 | LLM | OpenAI / Azure OpenAI / Anthropic (Claude) / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Requesty / Ollama |
 | Embedding | Ollama / BGE / GTE / OpenAI 호환 API |
 | 벡터 DB | PostgreSQL (pgvector) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / Tencent VectorDB |
-| 오브젝트 스토리지 | 로컬 / MinIO / AWS S3 / Volcengine TOS / Alibaba Cloud OSS / Kingsoft Cloud KS3 / Huawei Cloud OBS; **워크스페이스당 여러 스토리지 인스턴스**, KB 단위 바인딩 및 기본 인스턴스 |
+| 오브젝트 스토리지 | 로컬 / MinIO / AWS S3(IAM Role / IRSA 기본 자격 증명 체인 지원) / Volcengine TOS / Alibaba Cloud OSS / Kingsoft Cloud KS3 / Huawei Cloud OBS; **워크스페이스당 여러 스토리지 인스턴스**, KB 단위 바인딩 및 기본 인스턴스 |
 | IM 통합 | WeChat Work / Feishu / Lark(Feishu 국제판) / QQBot / Slack / Telegram / DingTalk / Mattermost / WeChat / Yunzhijia |
 | 웹사이트 임베드 | 임베드 Widget으로 에이전트 게시, 도메인 허용 목록·속도 제한·보안 모드 Token 교환 |
 | 웹 검색 | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG / Keenable / Zhipu AI |
-| API 통합 | 범위 지정 API 키(능력 단위 권한 + KB 단위 제한 + 스로틀링된 last_used 추적)와 API 통합 플레이그라운드; MCP OAuth 및 임베드 세션을 Principal 단위로 격리 |
+| API 통합 | 범위 지정 API 키(능력 단위 권한 + KB 단위 제한 + 스로틀링된 last_used 추적)와 API 통합 플레이그라운드; MCP OAuth 및 임베드 세션을 Principal 단위로 격리; `resource_urls=public`으로 바로 로드 가능한 파일 / 이미지 URL을 반환하여 인증 프록시 재호출 제거 |
+| MCP Server | 공식 PyPI 패키지 `tencent-weknora-mcp`, 29개 도구, stdio / SSE / HTTP 3가지 트랜스포트 지원 |
 
 **플랫폼**
 
@@ -253,6 +261,8 @@ WeKnora는 [WeChat 대화 오픈 플랫폼](https://chatbot.weixin.qq.com)의 �
 
 
 ## 📘 API 레퍼런스
+
+**공식 제품 문서**: [`website-docs/`](./website-docs/README.md) — 「입문 → 아키텍처 → 기능 → API → 클라이언트 → 개발」 6개 섹션으로 구성된 완전한 문서 세트로, 약 360개 API 엔드포인트, 약 150개 환경 변수, 9개 확장 지점을 다룹니다. 이 디렉터리는 VitePress 사이트이기도 하여 `cd website-docs && npm install && npm run dev`로 로컬 미리보기가 가능하며, 디렉터리 내 `Dockerfile`로 단독 배포할 수도 있습니다.
 
 문제 해결 FAQ: [문제 해결 FAQ](./docs/QA.md)
 
