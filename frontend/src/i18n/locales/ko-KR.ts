@@ -240,6 +240,10 @@ export default {
       submit: '비밀번호 업데이트',
       success: '비밀번호가 변경되었습니다. 새 비밀번호로 다시 로그인해 주세요.',
       failed: '비밀번호 변경에 실패했습니다. 현재 비밀번호를 확인해 주세요.',
+      policyFailed: '새 비밀번호는 8-32자이며 문자와 숫자를 포함해야 합니다',
+      sameAsCurrent: '새 비밀번호는 현재 비밀번호와 같을 수 없습니다',
+      oidcOnlyDescription: 'OIDC로 개설된 계정입니다. 로컬 로그인 비밀번호가 아직 설정되지 않았습니다.',
+      oidcOnlyNotice: '시스템 관리자에게 비밀번호 재설정을 요청하거나 OIDC로 계속 로그인하세요. 자가 변경에는 현재 비밀번호가 필요합니다.',
     },
   },
   credential: {

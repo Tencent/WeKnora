@@ -687,11 +687,18 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	if err != nil {
 		switch {
 		case stderrors.Is(err, service.ErrPasswordPolicy):
-			appErr := errors.NewValidationError(err.Error())
+			appErr := errors.NewValidationError("Password policy violation").
+				WithDetails(service.DetailPasswordPolicy)
 			c.Error(appErr)
 			return
 		case stderrors.Is(err, service.ErrInvalidOldPassword):
-			appErr := errors.NewBadRequestError("Current password is incorrect")
+			appErr := errors.NewBadRequestError("Current password is incorrect").
+				WithDetails(service.DetailInvalidOldPassword)
+			c.Error(appErr)
+			return
+		case stderrors.Is(err, service.ErrSamePassword):
+			appErr := errors.NewValidationError("New password must differ from current password").
+				WithDetails(service.DetailSamePassword)
 			c.Error(appErr)
 			return
 		default:

@@ -42,6 +42,18 @@ var (
 	// current password does not match the stored hash. Handlers map this to
 	// a 400 so callers can prompt the user without treating it as a 500.
 	ErrInvalidOldPassword = errors.New("invalid old password")
+
+	// ErrSamePassword is returned when the new password equals the current
+	// one so callers can reject no-op rotations that would still revoke
+	// every session.
+	ErrSamePassword = errors.New("new password must differ from current password")
+)
+
+// Machine-readable change-password failure reasons for HTTP details fields.
+const (
+	DetailInvalidOldPassword = "invalid_old_password"
+	DetailPasswordPolicy     = "password_policy"
+	DetailSamePassword       = "same_password"
 )
 
 // ValidatePasswordPolicy keeps administrative password resets aligned with
@@ -643,18 +655,23 @@ func (s *userService) DeleteUser(ctx context.Context, id string) error {
 // registration / admin reset allow. On success every outstanding session
 // is revoked so a stolen token cannot survive the rotation.
 func (s *userService) ChangePassword(ctx context.Context, userID string, oldPassword, newPassword string) error {
-	if err := ValidatePasswordPolicy(newPassword); err != nil {
-		return err
-	}
-
 	user, err := s.userRepo.GetUserByID(ctx, userID)
 	if err != nil {
 		return err
 	}
 
-	// Verify old password
+	// Verify old password before policy checks so callers with a wrong
+	// current credential get a clear failure instead of a policy error.
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPassword)); err != nil {
 		return ErrInvalidOldPassword
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(newPassword)); err == nil {
+		return ErrSamePassword
+	}
+
+	if err := ValidatePasswordPolicy(newPassword); err != nil {
+		return err
 	}
 
 	// Hash new password
@@ -665,6 +682,10 @@ func (s *userService) ChangePassword(ctx context.Context, userID string, oldPass
 
 	user.PasswordHash = string(hashedPassword)
 	user.UpdatedAt = time.Now()
+	if user.Preferences.OidcOnlyLogin != nil && *user.Preferences.OidcOnlyLogin {
+		cleared := false
+		user.Preferences.OidcOnlyLogin = &cleared
+	}
 
 	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
 		return err
@@ -1486,6 +1507,13 @@ func (s *userService) provisionOIDCUser(
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to auto-provision OIDC user: %w", err)
+	}
+
+	oidcOnly := true
+	user.Preferences.OidcOnlyLogin = &oidcOnly
+	user.UpdatedAt = time.Now()
+	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+		return nil, fmt.Errorf("failed to mark OIDC-only login preference: %w", err)
 	}
 	return user, nil
 }
