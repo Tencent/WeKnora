@@ -50,6 +50,21 @@ test('isAgentWebSearchReady requires enabled flag and resolvable provider', () =
   );
 });
 
+test('isAgentWebSearchReady trusts source workspace readiness for a shared agent', () => {
+  assert.equal(
+    isAgentWebSearchReady(
+      { web_search_enabled: true, web_search_provider_id: 'source-provider' },
+      [],
+      true,
+    ),
+    true,
+  );
+  assert.equal(
+    isAgentWebSearchReady({ web_search_enabled: true }, providers, false),
+    false,
+  );
+});
+
 test('isTenantWebSearchReady checks default provider only', () => {
   assert.equal(isTenantWebSearchReady(providers), true);
   assert.equal(

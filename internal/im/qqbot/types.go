@@ -76,8 +76,13 @@ type qqAttachment struct {
 }
 
 type sendMessageRequest struct {
-	Content string `json:"content"`
-	MsgType int    `json:"msg_type"`
-	MsgID   string `json:"msg_id,omitempty"`
-	MsgSeq  int    `json:"msg_seq,omitempty"`
+	Content  string           `json:"content,omitempty"`
+	MsgType  int              `json:"msg_type"`
+	Markdown *markdownMessage `json:"markdown,omitempty"`
+	MsgID    string           `json:"msg_id,omitempty"`
+	MsgSeq   int              `json:"msg_seq,omitempty"`
+}
+
+type markdownMessage struct {
+	Content string `json:"content,omitempty"`
 }

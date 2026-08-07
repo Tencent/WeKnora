@@ -38,7 +38,7 @@
 
             <!-- 右侧内容区域 -->
             <div class="settings-content">
-              <div class="content-wrapper">
+              <div ref="contentWrapperRef" class="content-wrapper">
                 <!-- 组织管理员但空间角色不足，给出只读提示 -->
                 <div v-if="showTenantRoleHint" class="tenant-role-hint">
                   <t-icon name="info-circle" size="16px" />
@@ -456,7 +456,7 @@
                         ? $t('organization.members.emptySearch', { q: memberSearchQuery })
                         : $t('organization.noMembers')" />
                     </div>
-                    <div v-else class="data-table-shell">
+                    <div v-else class="data-table-shell members-table-shell">
                       <t-table row-key="id" :data="filteredMembers" :columns="memberColumns" size="medium" hover
                         stripe :loading="membersLoading">
                         <template #member="{ row }">
@@ -818,7 +818,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -863,6 +863,7 @@ const emit = defineEmits<{
 
 // State
 const currentSection = ref('basic')
+const contentWrapperRef = ref<HTMLElement | null>(null)
 const orgInfo = computed(() => orgStore.currentOrganization)
 const members = computed(() => orgStore.currentMembers)
 const sharedKnowledgeBases = ref<KnowledgeBaseShare[]>([])
@@ -974,19 +975,13 @@ const addMemberRoleOptions = computed(() => [
   { label: t('organization.role.admin'), value: 'admin' },
 ])
 
-// 空间搜索结果选项。主标签展示空间名，括号里附带代表用户名（不再展示
-// 邮箱、不带"代表："前缀，避免冗长和译文别扭）；空间名缺失时回退到
-// 代表用户名 / 空间 ID。
+// 空间搜索结果选项。成员单位是空间，只按空间名搜索，因此直接展示空间名；
+// 空间名缺失时回退到空间 ID。
 const tenantSearchOptions = computed(() =>
-  tenantSearchResults.value.map((c) => {
-    const tenantLabel = c.tenant_name || c.representative_username || `tenant#${c.tenant_id}`
-    const showsTenantName = !!c.tenant_name
-    const label =
-      showsTenantName && c.representative_username
-        ? `${tenantLabel}（${c.representative_username}）`
-        : tenantLabel
-    return { label, value: c.tenant_id }
-  })
+  tenantSearchResults.value.map((c) => ({
+    label: c.tenant_name || `tenant#${c.tenant_id}`,
+    value: c.tenant_id,
+  }))
 )
 
 const modalTitle = computed(() => {
@@ -1508,7 +1503,8 @@ const handleSave = async () => {
       // 创建模式
       const result = await orgStore.create(
         formData.value.name.trim(),
-        formData.value.description.trim()
+        formData.value.description.trim(),
+        formData.value.avatar || undefined
       )
       if (result) {
         MessagePlugin.success(t('organization.createSuccess'))
@@ -1610,7 +1606,7 @@ const handleSubmitUpgrade = async () => {
   }
 }
 
-// 添加成员：搜索空间（按空间名 / 用户名 / 邮箱模糊匹配，按 tenant_id 去重）
+// 添加成员：搜索空间（仅按空间名模糊匹配，按 tenant_id 去重）
 let tenantSearchTimer: ReturnType<typeof setTimeout> | null = null
 const handleTenantSearch = (query: string) => {
   if (tenantSearchTimer) {
@@ -1860,9 +1856,32 @@ const getPermissionTheme = (permission: string) => {
   }
 }
 
+const scrollContentToTop = async () => {
+  await nextTick()
+  contentWrapperRef.value?.scrollTo({ top: 0, behavior: 'auto' })
+}
+
+let previousBodyOverflow = ''
+let bodyScrollLocked = false
+
+const lockBackgroundScroll = () => {
+  if (bodyScrollLocked) return
+  previousBodyOverflow = document.body.style.overflow
+  document.body.style.overflow = 'hidden'
+  bodyScrollLocked = true
+}
+
+const unlockBackgroundScroll = () => {
+  if (!bodyScrollLocked) return
+  document.body.style.overflow = previousBodyOverflow
+  bodyScrollLocked = false
+}
+
 // Watch
 watch(() => props.visible, (newVal) => {
   if (newVal) {
+    lockBackgroundScroll()
+    void scrollContentToTop()
     currentSection.value = 'basic'
     memberSearchQuery.value = ''
     joinRequestSearchQuery.value = ''
@@ -1885,13 +1904,26 @@ watch(() => props.visible, (newVal) => {
       fetchMembers()
       fetchSharedKBs()
     }
+  } else {
+    unlockBackgroundScroll()
+  }
+}, { immediate: true })
+
+watch(() => props.orgId, () => {
+  if (props.visible) {
+    void scrollContentToTop()
   }
 })
 
 watch(currentSection, (section) => {
+  void scrollContentToTop()
   if (section === 'joinRequests' && props.orgId) {
     fetchJoinRequests()
   }
+})
+
+onBeforeUnmount(() => {
+  unlockBackgroundScroll()
 })
 
 watch(addMemberPopupVisible, (visible) => {
@@ -1919,6 +1951,7 @@ watch(addMemberPopupVisible, (visible) => {
   justify-content: center;
   z-index: 2000;
   backdrop-filter: blur(4px);
+  overscroll-behavior: none;
 }
 
 .settings-modal {
@@ -2087,6 +2120,7 @@ watch(addMemberPopupVisible, (visible) => {
   padding: 28px 40px 48px;
   box-sizing: border-box;
   scroll-padding-bottom: 24px;
+  overscroll-behavior: contain;
 }
 
 .tenant-role-hint {
@@ -2834,6 +2868,16 @@ watch(addMemberPopupVisible, (visible) => {
 
   :deep(.member-role-select.t-select) {
     width: 100%;
+  }
+}
+
+.members-table-shell {
+  overflow: visible;
+  max-height: none;
+
+  :deep(.t-table__content) {
+    overflow: visible !important;
+    max-height: none !important;
   }
 }
 

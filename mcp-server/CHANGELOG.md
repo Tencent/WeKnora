@@ -5,6 +5,59 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 并且本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 新增
+- 新增 `create_knowledge_from_text` 工具：通过手动 Markdown 文本创建知识条目，调用既有 `/knowledge-bases/{id}/knowledge/manual` 接口，补齐 #323 中"文本"部分。默认 `status="publish"`，创建后即进入解析/索引流程、可被检索；可传 `status="draft"` 仅保存不索引。
+- README 工具清单补列既有的 `create_knowledge_from_file`。
+
+## [1.1.1] - 2026-07-30
+
+### 变更
+- 官方 PyPI 包名改为 **`tencent-weknora-mcp`**（由 Tencent/WeKnora 仓库 CI 通过 Trusted Publishing 发布）。
+  原社区包 `weknora-mcp` 非官方维护，请迁移安装命令。
+- 项目 URL 指向 [Tencent/WeKnora](https://github.com/Tencent/WeKnora) 官方仓库（`mcp-server/` 目录）。
+
+### 修复
+- HTTP 传输恢复 `stateless_http=True`，与迁移前 `StreamableHTTPSessionManager(stateless=True)` 行为一致。
+- SSE 传输恢复消息端点 `/sse/messages/`，与迁移前路由一致。
+- `WeKnoraClient` 使用线程本地 `requests.Session`，避免 MCP 2.x 在线程池中并发调用时出现 Session 竞态。
+- 文件上传（`create_knowledge_from_file`）尊重 `WEKNORA_VERIFY_SSL` 设置。
+
+### 注意
+- 工具执行失败时，MCPServer 2.x 返回 `CallToolResult(isError=True)`（`ToolError`），
+  不再像旧版低层 API 那样以成功响应的文本块返回 `"Error executing …"` 前缀。
+  仅解析 `content[0].text` 的客户端通常无感；依赖 `isError` 标志的集成方行为会更符合 MCP 规范。
+
+## [1.1.0] - 2026-07-30
+
+### 修复
+- 修复 MCP Python SDK 2.x 下服务器启动崩溃（`AttributeError: 'Server' object has no attribute 'list_tools'`）。
+  SDK 2.0 移除了低层 `Server` 的装饰器 API（`@app.list_tools()` / `@app.call_tool()` / `app.get_capabilities()`），
+  而通过 `uvx` 拉起已发布包时会解析到最新 2.x，导致连接被关闭。
+
+### 变更
+- 将 MCP 服务器实现从低层 `Server` 迁移到高层 `MCPServer` API（mcp 2.x，原 FastMCP 改名）。
+  - 28 个工具重写为 `@mcp.tool()` 函数签名式：输入参数走类型标注（schema 由框架自动生成），
+    描述走 docstring，返回纯 Python 值由框架序列化。
+  - 传输层改用 `run_stdio_async()` / `sse_app()` / `streamable_http_app()`，鉴权仍由 `MCPAuthMiddleware` 包裹。
+  - `WeKnoraClient` 业务逻辑（REST/SSE 调用、resolve_*、wiki）保持不变。
+- 依赖上限调整为 `mcp>=2,<3`（发布包与开发环境一致，避免再次因无上限被解析到未来破坏性版本）。
+
+### 注意
+- 本版本要求运行环境 `mcp>=2`。若临时需要旧版 SDK，可在启动命令加 `--with "mcp<2"`，但建议升级到本版本。
+
+## [1.0.1] - 2026-07-28
+
+### 修复
+- 将入口脚本（`run_server.py`、`main.py`、`run.py`）的诊断输出改到 stderr，避免破坏 MCP stdio 协议流导致客户端启动失败
+- 修复 wheel 漏打包 `upload_paths.py` 导致的 `ModuleNotFoundError`
+- 将 `__init__.py` 改为绝对导入，修复 unittest/pytest 收集测试时的包导入错误
+
+### 变更
+- PyPI 分发包名统一为 `weknora-mcp`（命令行入口 `weknora-mcp-server` / `weknora-server` 不变）
+- 新增 CI workflow（`.github/workflows/mcp-server.yml`），发布 tag 格式为 `mcp-server-v*`
+
 ## [1.0.0] - 2024-01-XX
 
 ### 新增
@@ -50,7 +103,7 @@
 
 ### 文件结构
 ```
-WeKnoraMCP/
+WeKnora/mcp-server/
 ├── __init__.py              # 包初始化文件
 ├── main.py                  # 主入口点 (推荐)
 ├── run.py                   # 便捷启动脚本

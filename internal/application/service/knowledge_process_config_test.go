@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -129,6 +130,7 @@ func TestBuildSplitterConfigFromChunking_UsesEffectiveChunkingConfig(t *testing.
 func TestEffectiveChunkingConfig_ResolveParserEngineFromOverrides(t *testing.T) {
 	t.Parallel()
 
+	xlsxFirstRowAsHeader := true
 	kb := &types.KnowledgeBase{
 		ChunkingConfig: types.ChunkingConfig{
 			ParserEngineRules: []types.ParserEngineRule{
@@ -139,10 +141,96 @@ func TestEffectiveChunkingConfig_ResolveParserEngineFromOverrides(t *testing.T) 
 	overrides := &types.KnowledgeProcessOverrides{
 		ParserEngineRules: []types.ParserEngineRule{
 			{FileTypes: []string{"pdf"}, Engine: "mineru"},
+			{
+				FileTypes:            []string{"xlsx", "xls"},
+				Engine:               "builtin",
+				XLSXFirstRowAsHeader: &xlsxFirstRowAsHeader,
+			},
 		},
 	}
 	eff := ResolveProcessConfig(kb, overrides)
 	require.Equal(t, "mineru", eff.ChunkingConfig.ResolveParserEngine("pdf"))
+	xlsxRule := eff.ChunkingConfig.ResolveParserEngineRule("xlsx")
+	require.NotNil(t, xlsxRule)
+	require.Equal(t, "builtin", xlsxRule.Engine)
+	require.Equal(t, &xlsxFirstRowAsHeader, xlsxRule.XLSXFirstRowAsHeader)
+}
+
+func TestApplyParserRuleOverrides_XLSXFirstRowAsHeader(t *testing.T) {
+	t.Parallel()
+
+	for _, enabled := range []bool{true, false} {
+		enabled := enabled
+		t.Run(strconv.FormatBool(enabled), func(t *testing.T) {
+			config := types.ChunkingConfig{
+				ParserEngineRules: []types.ParserEngineRule{{
+					FileTypes:            []string{"xlsx", "xls"},
+					Engine:               "builtin",
+					XLSXFirstRowAsHeader: &enabled,
+				}},
+			}
+			overrides := map[string]string{"tenant_option": "preserved"}
+
+			applyParserRuleOverrides(overrides, config, "xlsx")
+
+			require.Equal(t, strconv.FormatBool(enabled), overrides[xlsxFirstRowAsHeaderOverride])
+			require.Equal(t, "preserved", overrides["tenant_option"])
+		})
+	}
+}
+
+func TestApplyParserRuleOverrides_XLSFileType(t *testing.T) {
+	t.Parallel()
+
+	enabled := true
+	config := types.ChunkingConfig{
+		ParserEngineRules: []types.ParserEngineRule{{
+			FileTypes:            []string{"xlsx", "xls"},
+			Engine:               "builtin",
+			XLSXFirstRowAsHeader: &enabled,
+		}},
+	}
+	overrides := map[string]string{}
+
+	applyParserRuleOverrides(overrides, config, "xls")
+
+	require.Equal(t, "true", overrides[xlsxFirstRowAsHeaderOverride])
+}
+
+func TestApplyParserRuleOverrides_NormalizesFileTypeCase(t *testing.T) {
+	t.Parallel()
+
+	enabled := true
+	config := types.ChunkingConfig{
+		ParserEngineRules: []types.ParserEngineRule{{
+			FileTypes:            []string{"xlsx"},
+			Engine:               "builtin",
+			XLSXFirstRowAsHeader: &enabled,
+		}},
+	}
+	overrides := map[string]string{}
+
+	applyParserRuleOverrides(overrides, config, ".XLSX")
+
+	require.Equal(t, "true", overrides[xlsxFirstRowAsHeaderOverride])
+}
+
+func TestApplyParserRuleOverrides_SkipsNonBuiltinEngine(t *testing.T) {
+	t.Parallel()
+
+	enabled := true
+	config := types.ChunkingConfig{
+		ParserEngineRules: []types.ParserEngineRule{{
+			FileTypes:            []string{"xlsx"},
+			Engine:               "markitdown",
+			XLSXFirstRowAsHeader: &enabled,
+		}},
+	}
+	overrides := map[string]string{}
+
+	applyParserRuleOverrides(overrides, config, "xlsx")
+
+	require.NotContains(t, overrides, xlsxFirstRowAsHeaderOverride)
 }
 
 func TestResolveProcessConfig_ParserEngineRulesReplaced(t *testing.T) {
@@ -307,7 +395,7 @@ func TestValidateProcessOverrides_NonMediaFileTypes(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestValidateProcessOverrides_COSIncompleteForImage(t *testing.T) {
+func TestValidateProcessOverrides_ImageAllowsStorageFallback(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.WithValue(context.Background(), types.TenantInfoContextKey, &types.Tenant{
@@ -321,7 +409,66 @@ func TestValidateProcessOverrides_COSIncompleteForImage(t *testing.T) {
 	kb.SetStorageProvider("cos")
 
 	err := ValidateProcessOverrides(ctx, kb, &types.KnowledgeProcessOverrides{}, []string{"png"})
+	require.NoError(t, err)
+}
+
+func TestResolveFileImportProcessConfig_ImageRequiresVLM(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		VLMConfig: types.VLMConfig{Enabled: false},
+	}
+	_, err := resolveFileImportProcessConfig(context.Background(), kb, "png", nil, nil)
 	require.Error(t, err)
+	var badReq *werrors.AppError
+	require.ErrorAs(t, err, &badReq)
+}
+
+func TestResolveFileImportProcessConfig_AudioRequiresASR(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ASRConfig: types.ASRConfig{Enabled: false},
+	}
+	_, err := resolveFileImportProcessConfig(context.Background(), kb, "mp3", nil, nil)
+	require.Error(t, err)
+}
+
+// The regression behind #2447: spreadsheets must clear the shared import gate
+// even when the caller sends no per-import overrides.
+func TestResolveFileImportProcessConfig_SpreadsheetAllowedWithoutOverrides(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{ChunkingConfig: types.ChunkingConfig{ChunkSize: 512}}
+	for _, ext := range []string{"xlsx", "xls", "csv"} {
+		eff, err := resolveFileImportProcessConfig(context.Background(), kb, ext, nil, nil)
+		require.NoErrorf(t, err, "ext=%s", ext)
+		require.Equal(t, 512, eff.ChunkingConfig.ChunkSize)
+	}
+}
+
+func TestResolveFileImportProcessConfig_RejectsUnsupportedAndUndeterminable(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{}
+	for _, ext := range []string{"exe", "mp4", "", unknownFileType} {
+		_, err := resolveFileImportProcessConfig(context.Background(), kb, ext, nil, nil)
+		require.Errorf(t, err, "ext=%s should be rejected", ext)
+	}
+}
+
+// ApplyKnowledgeProcessOverrides stays scoped to overrides: import-time file
+// type gating belongs to resolveFileImportProcessConfig, so callers that pass
+// no overrides (reparse, connector sync) keep their existing behaviour.
+func TestApplyKnowledgeProcessOverrides_NoOverridesSkipsImportGate(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		VLMConfig: types.VLMConfig{Enabled: false},
+	}
+	knowledge := &types.Knowledge{}
+	_, err := ApplyKnowledgeProcessOverrides(context.Background(), kb, knowledge, nil, []string{"png"}, nil)
+	require.NoError(t, err)
 }
 
 func TestMergeParserEngineOverrides(t *testing.T) {

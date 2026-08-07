@@ -265,6 +265,10 @@ type SharedAgentInfo struct {
 	SharedAt         time.Time     `json:"shared_at"`
 	SharedByUserID   string        `json:"shared_by_user_id,omitempty"`
 	SharedByUsername string        `json:"shared_by_username,omitempty"`
+	// WebSearchReady is resolved against the source workspace without exposing
+	// its provider list or credentials. Receivers must not compare the agent's
+	// provider ID with their own workspace resources.
+	WebSearchReady bool `json:"web_search_ready"`
 	// DisabledByMe: current tenant has hidden this shared agent from their conversation dropdown (per-user preference)
 	DisabledByMe bool `json:"disabled_by_me"`
 }

@@ -54,7 +54,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/datasource"
-	feishuConnector "github.com/Tencent/WeKnora/internal/datasource/connector/feishu"
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/drive"
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/wiki"
 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
 	rssConnector "github.com/Tencent/WeKnora/internal/datasource/connector/rss"
 	yuqueConnector "github.com/Tencent/WeKnora/internal/datasource/connector/yuque"
@@ -170,7 +172,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewDataSourceRepository))
 	must(container.Provide(repository.NewSyncLogRepository))
 	must(container.Provide(repository.NewWikiPageRepository))
-	must(container.Provide(repository.NewWikiLogEntryRepository))
 	must(container.Provide(repository.NewTaskPendingOpsRepository))
 	must(container.Provide(repository.NewTaskDeadLetterRepository))
 
@@ -216,7 +217,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewCustomAgentService))
 	must(container.Provide(service.NewUserResourceFavoriteService))
 	must(container.Provide(service.NewWikiPageService))
-	must(container.Provide(service.NewWikiLogEntryService))
 	must(container.Provide(service.NewWikiIngestService, dig.Name("wikiIngest")))
 	must(container.Provide(service.NewWikiLintService))
 	must(container.Provide(service.NewEmbedChannelService))
@@ -378,7 +378,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// IM integration
 	logger.Debugf(ctx, "[Container] Registering IM integration...")
 	must(container.Provide(imPkg.NewService))
-	must(container.Invoke(registerIMAdapterFactories))
+	must(container.Invoke(registerIMService))
 	must(container.Provide(handler.NewIMHandler))
 	must(container.Provide(handler.NewEmbedChannelHandler))
 	must(container.Provide(handler.NewWeKnoraCloudHandler))
@@ -770,6 +770,28 @@ func migrateLegacyStorageBackends(db *gorm.DB) {
 		logger.Warnf(context.Background(), "Failed to load workspaces for storage backend migration: %v", err)
 		return
 	}
+	if len(tenants) == 0 {
+		return
+	}
+
+	// Load every alias in a single query. Probing each tenant/provider pair with
+	// First() makes GORM log "record not found" for every miss, which floods the
+	// startup log with workspaces × providers lines on fresh installs.
+	var aliases []*types.StorageBackend
+	if err := db.Where("legacy_alias = ?", true).Find(&aliases).Error; err != nil {
+		logger.Warnf(context.Background(), "Failed to load legacy storage aliases: %v", err)
+		return
+	}
+	existingAliases := make(map[uint64]map[string]*types.StorageBackend, len(aliases))
+	for _, alias := range aliases {
+		byProvider := existingAliases[alias.TenantID]
+		if byProvider == nil {
+			byProvider = make(map[string]*types.StorageBackend)
+			existingAliases[alias.TenantID] = byProvider
+		}
+		byProvider[alias.Provider] = alias
+	}
+
 	for _, tenant := range tenants {
 		legacy := tenant.StorageEngineConfig
 		defaultProvider := ""
@@ -785,9 +807,7 @@ func migrateLegacyStorageBackends(db *gorm.DB) {
 
 		backendIDs := make(map[string]string)
 		for _, provider := range storageallowlist.Supported() {
-			var existing types.StorageBackend
-			err := db.Where("tenant_id = ? AND provider = ? AND legacy_alias = ?", tenant.ID, provider, true).First(&existing).Error
-			if err == nil {
+			if existing := existingAliases[tenant.ID][provider]; existing != nil {
 				// Environment-backed aliases are snapshots, not user-owned config.
 				// Refresh them at every startup so credential rotation does not
 				// leave the persisted resolver on stale values. If the workspace
@@ -943,11 +963,10 @@ func initRawFileService(_ *config.Config) (interfaces.FileService, error) {
 			os.Getenv("TOS_TEMP_REGION"),      // 可选：临时桶 region，默认与主桶相同
 		)
 	case "s3":
-		if os.Getenv("S3_ENDPOINT") == "" ||
-			os.Getenv("S3_REGION") == "" ||
-			os.Getenv("S3_ACCESS_KEY") == "" ||
-			os.Getenv("S3_SECRET_KEY") == "" ||
-			os.Getenv("S3_BUCKET_NAME") == "" {
+		accessKey, secretKey := os.Getenv("S3_ACCESS_KEY"), os.Getenv("S3_SECRET_KEY")
+		if os.Getenv("S3_REGION") == "" ||
+			os.Getenv("S3_BUCKET_NAME") == "" ||
+			(accessKey == "") != (secretKey == "") {
 			return nil, fmt.Errorf("missing S3 configuration")
 		}
 		pathPrefix := os.Getenv("S3_PATH_PREFIX")
@@ -956,8 +975,8 @@ func initRawFileService(_ *config.Config) (interfaces.FileService, error) {
 		}
 		return file.NewS3FileService(
 			os.Getenv("S3_ENDPOINT"),
-			os.Getenv("S3_ACCESS_KEY"),
-			os.Getenv("S3_SECRET_KEY"),
+			accessKey,
+			secretKey,
 			os.Getenv("S3_BUCKET_NAME"),
 			os.Getenv("S3_REGION"),
 			pathPrefix,
@@ -1030,8 +1049,12 @@ func initRawFileService(_ *config.Config) (interfaces.FileService, error) {
 //   - Error if initialization fails
 func initRetrieveEngineRegistry(
 	db *gorm.DB, cfg *config.Config, auditSvc interfaces.AuditLogService,
+	storeRepo interfaces.VectorStoreRepository, engineFactory interfaces.EngineFactory,
 ) (interfaces.RetrieveEngineRegistry, error) {
-	registry := retriever.NewRetrieveEngineRegistry()
+	// storeRepo and engineFactory let the registry rebuild a store engine that
+	// is absent from this process, which happens when startup skipped it after
+	// a construction failure or when another instance registered it.
+	registry := retriever.NewRetrieveEngineRegistry(storeRepo, engineFactory)
 	retrieveDriver := strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",")
 	log := logger.GetLogger(context.Background())
 	// Audit sink for OpenSearch driver events (index created / reindex). Driver
@@ -1542,10 +1565,10 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 	registry.Register("zhipu", infra_web_search.NewZhipuProvider)
 }
 
-// registerIMAdapterFactories registers adapter factories for each IM platform
-// and loads enabled channels from the database. Each platform's factory lives
-// in its own subpackage to keep this file focused on wiring.
-func registerIMAdapterFactories(imService *imPkg.Service) {
+// registerIMService registers adapter factories, loads enabled channels, and
+// wires the process-lifetime shutdown hook. Each platform's factory lives in
+// its own subpackage to keep this file focused on wiring.
+func registerIMService(imService *imPkg.Service, cleaner interfaces.ResourceCleaner) {
 	imService.RegisterAdapterFactory("wecom", wecom.NewFactory())
 	imService.RegisterAdapterFactory("feishu", feishu.NewFactory(feishu.RegionFeishu))
 	// Lark is Feishu's international cloud: same adapter, different host/tenant.
@@ -1562,6 +1585,11 @@ func registerIMAdapterFactories(imService *imPkg.Service) {
 	if err := imService.LoadAndStartChannels(); err != nil {
 		logger.Warnf(context.Background(), "[IM] Failed to load channels from database: %v", err)
 	}
+
+	cleaner.RegisterWithName("IMService", func() error {
+		imService.Stop()
+		return nil
+	})
 }
 
 // initConnectorRegistry creates and populates the connector registry with all available connectors.
@@ -1571,12 +1599,21 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	registry := datasource.NewConnectorRegistry()
 
 	var errs error
-	if err := registry.Register(feishuConnector.NewConnector(feishuConnector.RegionFeishu)); err != nil {
+	if err := registry.Register(wiki.NewConnector(core.RegionFeishu)); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register feishu connector: %w", err))
 	}
 	// Lark is Feishu's international cloud: same connector, different host/tenant.
-	if err := registry.Register(feishuConnector.NewConnector(feishuConnector.RegionLark)); err != nil {
+	if err := registry.Register(wiki.NewConnector(core.RegionLark)); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register lark connector: %w", err))
+	}
+	// Feishu/Lark Drive (云盘) mode: different connector type so the registry
+	// dispatches to the Drive connector. Shares core.Client/Region/export logic
+	// with the wiki connector. See 飞书云盘数据源设计.md / ADR-0001.
+	if err := registry.Register(drive.NewDriveConnector(core.RegionFeishuDrive)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register feishu_drive connector: %w", err))
+	}
+	if err := registry.Register(drive.NewDriveConnector(core.RegionLarkDrive)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register lark_drive connector: %w", err))
 	}
 	if err := registry.Register(notionConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register notion connector: %w", err))

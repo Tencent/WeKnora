@@ -43,6 +43,12 @@ const (
 	// heartbeat pong) before treating the connection as dead. Set to 3× heartbeat
 	// interval so a single missed pong does not cause a spurious reconnect.
 	readTimeout = 3 * defaultHeartbeatInterval
+
+	// writeTimeout bounds a single frame write. Without it a stalled peer can
+	// block a write while holding c.mu, which in turn blocks Stop() and — since
+	// the IM service tears channels down while holding its own channel-map lock
+	// — every other channel operation in the process.
+	writeTimeout = 10 * time.Second
 )
 
 // wsFrame is the JSON frame exchanged over the WeCom bot WebSocket.
@@ -211,12 +217,7 @@ func (c *LongConnClient) Start(ctx context.Context) error {
 // Stop gracefully closes the connection.
 func (c *LongConnClient) Stop() {
 	c.closed.Store(true)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn != nil {
-		_ = c.conn.Close()
-		c.conn = nil
-	}
+	c.closeConn()
 }
 
 // SendReply sends a text reply through the WebSocket connection.
@@ -374,16 +375,20 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 	c.mu.Unlock()
 
 	defer func() {
-		c.mu.Lock()
-		c.conn = nil
-		c.mu.Unlock()
-		_ = conn.Close()
+		c.closeConnIf(conn)
 		// NOTE: streamBufs is intentionally NOT cleared on reconnect.
 		// Active streams survive reconnections — the WeCom replace-based
 		// protocol means the next UpdateStreamContent will resend the full
 		// accumulated content on the new connection. EndStream always
 		// cleans up the buffer, so there is no memory leak.
 	}()
+
+	// A Stop() that lands between the dial and the assignment above finds no
+	// connection to close, so re-check here to avoid running a receive loop
+	// that nobody will tear down until the read deadline expires.
+	if c.closed.Load() {
+		return fmt.Errorf("client stopped")
+	}
 
 	// Authenticate
 	if err := c.authenticate(ctx); err != nil {
@@ -395,7 +400,7 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 	// Start heartbeat
 	heartbeatCtx, heartbeatCancel := context.WithCancel(ctx)
 	defer heartbeatCancel()
-	go c.heartbeatLoop(heartbeatCtx)
+	go c.heartbeatLoop(heartbeatCtx, conn)
 
 	// Message receive loop with read deadline.
 	// The deadline is reset on every successful read; if no message arrives
@@ -417,7 +422,7 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 		switch frame.Cmd {
 		case cmdMsgCallback, cmdEventCallback:
 			// Detach from connection ctx so in-flight messages survive reconnects.
-			go c.handleCallback(context.WithoutCancel(ctx), frame)
+			go c.handleCallback(context.WithoutCancel(ctx), conn, frame)
 		default:
 			// pong or other control frames — ignore
 		}
@@ -468,7 +473,7 @@ func (c *LongConnClient) authenticate(ctx context.Context) error {
 	return nil
 }
 
-func (c *LongConnClient) heartbeatLoop(ctx context.Context) {
+func (c *LongConnClient) heartbeatLoop(ctx context.Context, conn *ws.Conn) {
 	ticker := time.NewTicker(defaultHeartbeatInterval)
 	defer ticker.Stop()
 
@@ -484,14 +489,14 @@ func (c *LongConnClient) heartbeatLoop(ctx context.Context) {
 			}
 			if err := c.writeJSON(frame); err != nil {
 				logger.Warnf(ctx, "[WeCom] Heartbeat failed: %v, closing connection to trigger reconnect", err)
-				c.closeConn()
+				c.closeConnIf(conn)
 				return
 			}
 		}
 	}
 }
 
-func (c *LongConnClient) handleCallback(ctx context.Context, frame wsFrame) {
+func (c *LongConnClient) handleCallback(ctx context.Context, conn *ws.Conn, frame wsFrame) {
 	// Log raw message body for debugging
 	logger.Debugf(ctx, "[WeCom] Raw callback body: %s", string(frame.Body))
 
@@ -510,7 +515,7 @@ func (c *LongConnClient) handleCallback(ctx context.Context, frame wsFrame) {
 		switch msg.Event.EventType {
 		case "disconnected_event":
 			logger.Warnf(ctx, "[WeCom] Server sent disconnected_event, closing connection to trigger reconnect")
-			c.closeConn()
+			c.closeConnIf(conn)
 		default:
 			logger.Infof(ctx, "[WeCom] Ignoring event type: %s", msg.Event.EventType)
 		}
@@ -697,13 +702,41 @@ func (c *LongConnClient) convertMixedMessage(msg *botMessage, chatID string, cha
 	return nil
 }
 
-// closeConn forcibly closes the underlying WebSocket, which unblocks any
-// pending ReadMessage call in the receive loop and triggers a reconnection.
+// closeConn forcibly closes the active WebSocket, which unblocks any pending
+// ReadMessage call in the receive loop and triggers a reconnection.
+//
+// c.mu is released before Close because closing a TLS connection writes a
+// close_notify alert and can block for seconds on a stalled peer. Holding c.mu
+// across that write stalls Stop(), and the IM service tears channels down while
+// holding its own channel-map lock, so the delay spreads to every other channel
+// operation in the process.
 func (c *LongConnClient) closeConn() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn != nil {
-		_ = c.conn.Close()
+	conn := c.conn
+	c.conn = nil
+	c.mu.Unlock()
+	if conn != nil {
+		_ = conn.Close()
+	}
+}
+
+// closeConnIf closes conn only while it is still the active connection.
+// Callers bound to a single connection generation — the heartbeat loop and the
+// detached callback handlers — must use this instead of closeConn: their
+// goroutines can outlive the connection that spawned them, and an unconditional
+// close would tear down a healthy connection opened by a later reconnect.
+func (c *LongConnClient) closeConnIf(conn *ws.Conn) {
+	if conn == nil {
+		return
+	}
+	c.mu.Lock()
+	active := c.conn == conn
+	if active {
+		c.conn = nil
+	}
+	c.mu.Unlock()
+	if active {
+		_ = conn.Close()
 	}
 }
 
@@ -775,6 +808,7 @@ func (c *LongConnClient) writeJSON(v interface{}) error {
 	if c.conn == nil {
 		return fmt.Errorf("connection closed")
 	}
+	_ = c.conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 	return c.conn.WriteJSON(v)
 }
 

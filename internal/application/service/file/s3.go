@@ -34,11 +34,19 @@ func newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix 
 	var cfg aws.Config
 	var err error
 
-	// Configure AWS SDK
-	cfg, err = config.LoadDefaultConfig(context.Background(),
-		config.WithRegion(region),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
-	)
+	// With no explicit AK/SK, keep the AWS default credential chain intact. This
+	// supports IAM roles for EC2/ECS/EKS (IRSA), web identity, shared config, and
+	// environment credentials without persisting long-lived keys in WeKnora.
+	loadOptions := []func(*config.LoadOptions) error{config.WithRegion(region)}
+	if accessKey != "" || secretKey != "" {
+		if accessKey == "" || secretKey == "" {
+			return nil, fmt.Errorf("S3 access key and secret key must be provided together")
+		}
+		loadOptions = append(loadOptions, config.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
+		))
+	}
+	cfg, err = config.LoadDefaultConfig(context.Background(), loadOptions...)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)

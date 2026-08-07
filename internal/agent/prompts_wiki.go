@@ -321,7 +321,7 @@ Now apply the instructions above to the chunks and output ONLY the JSON.`
 const WikiPageModifySystemPrompt = `You are a wiki editor tasked with updating an existing wiki page. You must process NEW information to add and/or deleted documents whose exclusive contributions must be removed.
 
 ### SOURCE GROUNDING & MERGE RULES (CRITICAL):
-1. **No Inline Chunk IDs:** Chunk aliases such as [c003] are internal processing metadata. NEVER output them in the page body or summary, and remove any legacy inline chunk aliases from existing content while editing. Source associations are stored separately by the system.
+1. **No Inline Chunk IDs:** Chunk handles such as [c003] are internal processing metadata. NEVER output them in the page body or summary, and remove any legacy inline chunk handles from existing content while editing. Source associations are stored separately by the system.
 2. **Mandatory Grounding:** Every newly added factual claim, entity, or numerical value MUST be directly supported by the provided new source chunks, but the final prose must remain clean Markdown without inline chunk IDs.
 3. **No Hallucination:** Do not invent, synthesize, or infer any information that is not explicitly present in the provided source chunks. If the new chunks clearly and directly supersede or contradict existing content, update the main text to reflect the newer supported information AND add a brief "Contradictions / Updates" section summarizing the change. If the conflict is ambiguous, unresolved, or not directly supported by the provided chunks, do not overwrite the existing content; instead, add only a "Contradictions / Updates" section describing the conflict.
 4. The shared source-context block describes what each source document is about and what kind of document it is. Use it only to calibrate scope, attribution, and tone. Never copy source-context wording into the page as factual evidence.
@@ -444,30 +444,25 @@ const WikiIndexIntroUpdatePrompt = `You are a wiki editor. Update the introducti
 
 Output ONLY the updated title and introduction paragraph. Do NOT generate any directory listings or page links.`
 
-// WikiLogEntryTemplate is a simple template for log entries (not LLM-generated).
-const WikiLogEntryTemplate = `## [{{.Date}}] {{.Operation}} | {{.Title}}
-- **Source**: {{.SourceInfo}}
-- **Pages affected**: {{.PagesAffected}}
-- **Summary**: {{.Summary}}
-`
-
 // WikiDeduplicationPrompt asks the LLM to identify duplicate entities/concepts
 // between newly extracted items and existing wiki pages.
-const WikiDeduplicationPrompt = `You are a strict deduplication system. Given a list of newly extracted items and a list of existing wiki pages, determine which new items refer to the **exact same** real-world entity or concept as an existing page.
+const WikiDeduplicationPrompt = `You are a strict deduplication system. You are given a list of newly extracted items. Each item carries its OWN short list of existing wiki pages that are surface-similar to it (its <candidates>). For each item, decide whether it refers to the **exact same** real-world entity or concept as ONE of its own candidates.
 
-<new_items>
-{{.NewItems}}
-</new_items>
-
-<existing_pages>
-{{.ExistingPages}}
-</existing_pages>
+<items>
+{{.Candidates}}
+</items>
 
 <instructions>
+### How to read the input
+Each <item> is a newly extracted entity/concept. The <candidates> nested inside it are the ONLY existing pages you may merge that item into — they were pre-selected as similar to that specific item. A page listed under one item tells you NOTHING about any other item.
+
+### Hard constraints — a merge is only valid when ALL hold:
+- The target slug is one of the candidate <page> slugs listed **inside that same item**. NEVER merge into a page listed under a different item, and NEVER invent a slug.
+- The types are compatible: entities merge with entities, concepts merge with concepts. **Never merge an entity into a concept or vice versa.**
+
 ### Merge criteria — ALL must be true:
-1. The new item and the existing page refer to the **same real-world thing** (same person, same organization, same specific concept).
+1. The new item and the candidate page refer to the **same real-world thing** (same person, same organization, same specific concept).
 2. The match is a **name variation**: abbreviation ↔ full name, translation, or minor spelling difference.
-3. The types are compatible: entities merge with entities, concepts merge with concepts. **Never merge an entity into a concept or vice versa.**
 
 ### Examples of CORRECT merges:
 - "Acme Corp" → "Acme Corporation" (same company, abbreviation)

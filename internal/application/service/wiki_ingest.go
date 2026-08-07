@@ -327,7 +327,7 @@ type wikiIngestService struct {
 	chunkRepo      interfaces.ChunkRepository
 	modelService   interfaces.ModelService
 	task           interfaces.TaskEnqueuer
-	logEntrySvc    interfaces.WikiLogEntryService
+	audit          interfaces.AuditLogService
 	pendingRepo    interfaces.TaskPendingOpsRepository
 	deadLetterRepo interfaces.TaskDeadLetterRepository
 	redisClient    *redis.Client // nil in Lite mode (no Redis)
@@ -367,7 +367,7 @@ func NewWikiIngestService(
 	chunkRepo interfaces.ChunkRepository,
 	modelService interfaces.ModelService,
 	task interfaces.TaskEnqueuer,
-	logEntrySvc interfaces.WikiLogEntryService,
+	audit interfaces.AuditLogService,
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	deadLetterRepo interfaces.TaskDeadLetterRepository,
 	redisClient *redis.Client,
@@ -381,7 +381,7 @@ func NewWikiIngestService(
 		chunkRepo:      chunkRepo,
 		modelService:   modelService,
 		task:           task,
-		logEntrySvc:    logEntrySvc,
+		audit:          audit,
 		pendingRepo:    pendingRepo,
 		deadLetterRepo: deadLetterRepo,
 		redisClient:    redisClient,
@@ -424,7 +424,10 @@ func (s *wikiIngestService) beginWikiSubspan(ctx context.Context, knowledgeID st
 	return s.tracker().BeginSubSpan(ctx, parent, "postprocess.wiki", types.SpanKindSubSpan, input)
 }
 
-// EnqueueWikiIngest queues a document for wiki ingestion.
+// EnqueueWikiIngest queues a document for wiki ingestion. The returned bool
+// reports whether the durable pending op was persisted. A trigger enqueue
+// error may therefore be returned together with true; callers can retry only
+// the KB-scoped trigger without appending a duplicate operation.
 //
 // Architecture: each upload inserts one row into task_pending_ops
 // (task_type="wiki:ingest", scope="knowledge_base", scope_id=kbID,
@@ -461,14 +464,39 @@ func EnqueueWikiIngest(
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	tenantID uint64,
 	kbID, knowledgeID string,
-) {
-	lang, _ := types.LanguageFromContext(ctx)
+) (bool, error) {
+	pendingOp, err := newWikiIngestPendingOp(ctx, tenantID, kbID, knowledgeID)
 
 	// Persist the pending op. A re-ingest of the same knowledge id while
 	// a previous op is still queued simply appends another row; the
 	// peekPendingList consumer collapses by dedup_key (== knowledge_id),
 	// keeping the LATEST op for each knowledge — matching the legacy
 	// "RPush + reverse-dedupe" semantics.
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to marshal pending op for %s: %v", knowledgeID, err)
+		return false, err
+	}
+	accepted, err := enqueueWikiPendingOp(ctx, pendingRepo, pendingOp)
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to enqueue pending op for %s: %v", knowledgeID, err)
+		return false, fmt.Errorf("enqueue wiki ingest pending op: %w", err)
+	}
+	if !accepted {
+		logger.Infof(ctx, "wiki ingest: skip enqueue for deleted KB %s", kbID)
+		return false, nil
+	}
+	if err := enqueueWikiIngestTrigger(ctx, task, tenantID, kbID); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+func newWikiIngestPendingOp(
+	ctx context.Context,
+	tenantID uint64,
+	kbID, knowledgeID string,
+) (*types.TaskPendingOp, error) {
+	lang := types.LanguageFromContextOrDefault(ctx)
 	op := WikiPendingOp{
 		Op:          WikiOpIngest,
 		KnowledgeID: knowledgeID,
@@ -476,10 +504,9 @@ func EnqueueWikiIngest(
 	}
 	payloadBytes, err := json.Marshal(op)
 	if err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to marshal pending op for %s: %v", knowledgeID, err)
-		return
+		return nil, fmt.Errorf("marshal wiki ingest pending op: %w", err)
 	}
-	accepted, err := enqueueWikiPendingOp(ctx, pendingRepo, &types.TaskPendingOp{
+	return &types.TaskPendingOp{
 		TenantID: tenantID,
 		TaskType: wikiTaskType,
 		Scope:    wikiTaskScope,
@@ -487,23 +514,30 @@ func EnqueueWikiIngest(
 		Op:       WikiOpIngest,
 		DedupKey: knowledgeID,
 		Payload:  payloadBytes,
-	})
-	if err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to enqueue pending op for %s: %v", knowledgeID, err)
-		return
-	}
-	if !accepted {
-		logger.Infof(ctx, "wiki ingest: skip enqueue for deleted KB %s", kbID)
-		return
-	}
+	}, nil
+}
 
+func enqueueWikiIngestTrigger(
+	ctx context.Context,
+	task interfaces.TaskEnqueuer,
+	tenantID uint64,
+	kbID string,
+) error {
+	lang := types.LanguageFromContextOrDefault(ctx)
 	trigger := WikiIngestPayload{
 		TenantID:        tenantID,
 		KnowledgeBaseID: kbID,
 		Language:        lang,
 	}
 	langfuse.InjectTracing(ctx, &trigger)
-	triggerBytes, _ := json.Marshal(trigger)
+	triggerBytes, err := json.Marshal(trigger)
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to marshal trigger task: %v", err)
+		return fmt.Errorf("marshal wiki ingest trigger: %w", err)
+	}
+	if task == nil {
+		return errors.New("enqueue wiki ingest trigger: task enqueuer is nil")
+	}
 
 	t := asynq.NewTask(types.TypeWikiIngest, triggerBytes,
 		asynq.Queue(types.QueueWiki),
@@ -513,7 +547,9 @@ func EnqueueWikiIngest(
 	)
 	if _, err := task.Enqueue(t); err != nil {
 		logger.Warnf(ctx, "wiki ingest: failed to enqueue trigger task: %v", err)
+		return fmt.Errorf("enqueue wiki ingest trigger: %w", err)
 	}
+	return nil
 }
 
 // EnqueueWikiRetract queues a wiki retraction op (a delete cleanup).
@@ -1170,14 +1206,18 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 }
 
 // docIngestResult captures per-document info for batch post-processing.
+type wikiIngestPageRef struct {
+	Slug  string
+	Title string
+}
+
 type docIngestResult struct {
 	KnowledgeID string
 	DocTitle    string
 	Summary     string // one-line summary of the document (from summary page)
 	// Pages records the wiki pages this document touched, carrying both
-	// the slug (for navigation / retract lookups) and the human-readable
-	// title captured at ingest time (for the log feed's display layer).
-	Pages []types.WikiLogPageRef
+	// the slug used for link/retract bookkeeping and its human-readable title.
+	Pages []wikiIngestPageRef
 	// MapStats are the per-doc map-phase metrics captured at the moment
 	// mapOneDocument finishes. Surfaced into the postprocess.wiki span's
 	// output so the trace viewer can show "what the map phase produced"
@@ -1251,12 +1291,16 @@ type WikiBatchContext struct {
 
 // SlugUpdate represents a single update operation for a specific slug
 type SlugUpdate struct {
-	Slug              string
-	Type              string        // "entity", "concept", "summary", "retract", "retractStale"
-	Item              extractedItem // For entity/concept
-	DocTitle          string
-	KnowledgeID       string
-	SourceRef         string
+	Slug        string
+	Type        string        // "entity", "concept", "summary", "retract", "retractStale"
+	Item        extractedItem // For entity/concept
+	DocTitle    string
+	KnowledgeID string
+	SourceRef   string
+	// Language is the already-resolved, human-readable language name the
+	// Reduce phase interpolates into the editor prompt (e.g. "Chinese
+	// (Simplified)"), NOT a locale code. Map resolves it once per document
+	// so every page derived from that document shares one language.
 	Language          string
 	SummaryBody       string // For summary
 	SummaryLine       string // For summary
@@ -1626,7 +1670,7 @@ func (s *wikiIngestService) cleanDeadLinks(ctx context.Context, kbID string, aff
 		if page.Status == types.WikiPageStatusArchived {
 			continue
 		}
-		if page.PageType == types.WikiPageTypeIndex || page.PageType == types.WikiPageTypeLog {
+		if page.PageType == types.WikiPageTypeIndex {
 			continue
 		}
 		if len(page.OutLinks) == 0 {
@@ -1721,7 +1765,7 @@ func (s *wikiIngestService) injectCrossLinks(
 		if err != nil || page == nil {
 			continue
 		}
-		if page.PageType == types.WikiPageTypeIndex || page.PageType == types.WikiPageTypeLog {
+		if page.PageType == types.WikiPageTypeIndex {
 			continue
 		}
 
@@ -1771,7 +1815,7 @@ func (s *wikiIngestService) injectCrossLinks(
 func collectLinkRefs(pages []*types.WikiPage) []linkRef {
 	refs := make([]linkRef, 0, len(pages)*2)
 	for _, p := range pages {
-		if p.PageType == types.WikiPageTypeIndex || p.PageType == types.WikiPageTypeLog {
+		if p.PageType == types.WikiPageTypeIndex {
 			continue
 		}
 		if p.Title != "" {
@@ -1909,7 +1953,7 @@ func (s *wikiIngestService) getExistingPageSlugsForKnowledge(ctx context.Context
 	for _, slug := range slugs {
 		// Defense-in-depth: skip wiki-intrinsic slugs that never have
 		// real source refs.
-		if slug == "index" || slug == "log" {
+		if slug == "index" {
 			continue
 		}
 		out[slug] = true
@@ -2125,34 +2169,6 @@ func splitSummaryLine(raw string) (summary string, content string) {
 	return "", raw
 }
 
-// buildLogEntry builds a WikiLogEntry struct for the current batch. It is
-// pure (no DB access) so callers can accumulate entries cheaply under their
-// lock and flush them in a single AppendBatch call at the end of the batch.
-//
-// Historically this was a per-event `GetLog + UpdatePage` round trip, which
-// rewrote the entire log page's TEXT column on every ingest/retract op —
-// O(n^2) write amplification as the log grew. The batch writer now uses
-// wikiLogEntryService.AppendBatch instead; see ProcessWikiIngest.
-func (s *wikiIngestService) buildLogEntry(tenantID uint64, kbID, action, knowledgeID, docTitle, summary string, pagesAffected []types.WikiLogPageRef) *types.WikiLogEntry {
-	// Copy pagesAffected so the entry does not alias caller-owned slices.
-	// The batch accumulates SlugUpdate results that may be reused downstream.
-	var pages types.WikiLogPageRefs
-	if len(pagesAffected) > 0 {
-		pages = make(types.WikiLogPageRefs, len(pagesAffected))
-		copy(pages, pagesAffected)
-	}
-	return &types.WikiLogEntry{
-		TenantID:        tenantID,
-		KnowledgeBaseID: kbID,
-		Action:          action,
-		KnowledgeID:     knowledgeID,
-		DocTitle:        docTitle,
-		Summary:         summary,
-		PagesAffected:   pages,
-		CreatedAt:       time.Now(),
-	}
-}
-
 // publishDraftPages transitions draft pages to published status after ingest completes.
 // This ensures users don't see half-built pages during the ingest process.
 func (s *wikiIngestService) publishDraftPages(ctx context.Context, kbID string, slugs []string) {
@@ -2170,19 +2186,39 @@ func (s *wikiIngestService) publishDraftPages(ctx context.Context, kbID string, 
 	}
 }
 
-// writeDedupItemXML renders a single entity/concept entry as a structured XML
-// block for the deduplication prompt. Structured form (versus a single
-// pipe-separated line) helps the LLM reliably tell name / aliases / type apart
-// and reduces nonsensical merges like "居民身份证" → "工作居住证".
-func writeDedupItemXML(buf *strings.Builder, slug, name, itemType string, aliases []string) {
-	fmt.Fprintf(buf, "  <item slug=%q type=%q>\n", slug, itemType)
-	fmt.Fprintf(buf, "    <name>%s</name>\n", xmlEscape(name))
-	for _, alias := range aliases {
+// writeDedupCandidateGroup renders one new item together with its own
+// similarity-candidate existing pages, nested under a <candidates> element.
+// This per-item grouping is what constrains the dedup model to local
+// decisions (see the grouping rationale in deduplicateExtractedBatch). The
+// candidate pages keep their aliases so the model still has the acronym /
+// translation signal it needs to accept a legitimate merge.
+func writeDedupCandidateGroup(
+	buf *strings.Builder, item extractedItem, itemType string, candidates []*types.WikiPageLite,
+) {
+	fmt.Fprintf(buf, "  <item slug=%q type=%q>\n", item.Slug, itemType)
+	fmt.Fprintf(buf, "    <name>%s</name>\n", xmlEscape(item.Name))
+	for _, alias := range item.Aliases {
 		if alias == "" {
 			continue
 		}
 		fmt.Fprintf(buf, "    <alias>%s</alias>\n", xmlEscape(alias))
 	}
+	buf.WriteString("    <candidates>\n")
+	for _, p := range candidates {
+		if p == nil {
+			continue
+		}
+		fmt.Fprintf(buf, "      <page slug=%q type=%q>\n", p.Slug, p.PageType)
+		fmt.Fprintf(buf, "        <name>%s</name>\n", xmlEscape(p.Title))
+		for _, alias := range []string(p.Aliases) {
+			if alias == "" {
+				continue
+			}
+			fmt.Fprintf(buf, "        <alias>%s</alias>\n", xmlEscape(alias))
+		}
+		buf.WriteString("      </page>\n")
+	}
+	buf.WriteString("    </candidates>\n")
 	buf.WriteString("  </item>\n")
 }
 
@@ -2226,7 +2262,16 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	// Build the candidate set: for each new item, ask the repo for
 	// the top-K trigram-similar pages and union the results. Dedup by
 	// slug as we go so the prompt only carries each candidate once.
+	//
+	// itemCandidates additionally records, per new item, the slugs that
+	// surfaced for THAT item specifically. The prompt only ever sees the
+	// flattened union, so validMerge below uses this per-item scoping to
+	// reject a merge whose target was pulled in for a *different* item —
+	// the class of hallucination the union otherwise enables (e.g. weak
+	// models emitting entity/tencent-open → entity/hiring-agent, which
+	// share no trigram signal and were never candidates for each other).
 	candidatePages := make(map[string]*types.WikiPageLite)
+	itemCandidates := make(map[string]map[string]bool)
 	probe := func(item extractedItem) {
 		queries := make([]string, 0, 1+len(item.Aliases))
 		if item.Name != "" {
@@ -2236,6 +2281,11 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 			if alias != "" {
 				queries = append(queries, alias)
 			}
+		}
+		own := itemCandidates[item.Slug]
+		if own == nil {
+			own = make(map[string]bool)
+			itemCandidates[item.Slug] = own
 		}
 		for _, q := range queries {
 			pages, err := s.wikiService.FindSimilarPages(ctx, kbID, q,
@@ -2252,6 +2302,7 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 				if _, ok := candidatePages[p.Slug]; !ok {
 					candidatePages[p.Slug] = p
 				}
+				own[p.Slug] = true
 			}
 		}
 	}
@@ -2270,25 +2321,59 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	logger.Infof(ctx, "wiki ingest: %d similar existing pages selected for %d new items",
 		len(candidatePages), len(entities)+len(concepts))
 
-	var existingBuf strings.Builder
-	for _, p := range candidatePages {
-		writeDedupItemXML(&existingBuf, p.Slug, p.Title, p.PageType, []string(p.Aliases))
+	// Group each new item with ONLY the existing pages that surfaced for
+	// its own similarity probe. Presenting the model two flat lists (all
+	// new items × all candidates) invites cross-item mispairings — it has
+	// no way to tell which candidate is relevant to which item, so a weak
+	// model pairs unrelated slugs that merely coexist in the prompt. A
+	// per-item shortlist turns dedup into a local yes/no decision against
+	// a handful of genuinely-similar pages and makes cross-item pairings
+	// structurally unnatural to express. Items with no candidate are
+	// omitted entirely (they cannot merge and only add hallucination
+	// surface + tokens).
+	var candBuf strings.Builder
+	groups := 0
+	renderGroup := func(item extractedItem, itemType string) {
+		cset := itemCandidates[item.Slug]
+		if len(cset) == 0 {
+			return
+		}
+		slugs := make([]string, 0, len(cset))
+		for slug := range cset {
+			// Skip the item's own slug: an identically-slugged existing
+			// page is a re-ingest/update, not a merge target.
+			if slug == item.Slug {
+				continue
+			}
+			if _, ok := candidatePages[slug]; ok {
+				slugs = append(slugs, slug)
+			}
+		}
+		if len(slugs) == 0 {
+			return
+		}
+		sort.Strings(slugs)
+		pages := make([]*types.WikiPageLite, 0, len(slugs))
+		for _, slug := range slugs {
+			pages = append(pages, candidatePages[slug])
+		}
+		writeDedupCandidateGroup(&candBuf, item, itemType, pages)
+		groups++
 	}
-	if existingBuf.Len() == 0 {
+	for _, item := range entities {
+		renderGroup(item, "entity")
+	}
+	for _, item := range concepts {
+		renderGroup(item, "concept")
+	}
+	if groups == 0 {
+		// Every new item's candidate list is empty after scoping —
+		// nothing the model could safely merge.
 		return entities, concepts
 	}
 
-	var newBuf strings.Builder
-	for _, item := range entities {
-		writeDedupItemXML(&newBuf, item.Slug, item.Name, "entity", item.Aliases)
-	}
-	for _, item := range concepts {
-		writeDedupItemXML(&newBuf, item.Slug, item.Name, "concept", item.Aliases)
-	}
-
 	dedupeJSON, err := s.generateWithTemplate(ctx, chatModel, agent.WikiDeduplicationPrompt, map[string]string{
-		"NewItems":      newBuf.String(),
-		"ExistingPages": existingBuf.String(),
+		"Candidates": candBuf.String(),
 	})
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: deduplication LLM call failed: %v", err)
@@ -2309,36 +2394,9 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 		return entities, concepts
 	}
 
-	// Build the existing-slug set from the candidate map: anything not
-	// in candidates is rejected as an LLM hallucination, since by
-	// construction the model only ever saw those slugs as merge
-	// targets. Compare with the legacy "look up against allPages"
-	// path which had a wider acceptance window.
-	existingSlugs := make(map[string]bool, len(candidatePages))
-	for slug := range candidatePages {
-		existingSlugs[slug] = true
-	}
-
 	validMerge := func(srcSlug, dstSlug string) bool {
-		if !existingSlugs[dstSlug] {
-			logger.Warnf(ctx, "wiki ingest: dedup rejected %s → %s (target slug does not exist in candidate set)", srcSlug, dstSlug)
-			return false
-		}
-		srcSlash := strings.Index(srcSlug, "/")
-		dstSlash := strings.Index(dstSlug, "/")
-		if srcSlash <= 0 || dstSlash <= 0 {
-			// A type-prefixed slug must look like "entity/foo" or
-			// "concept/bar". An LLM that emits an un-prefixed slug
-			// here is hallucinating; reject rather than fall through
-			// the prefix-equality check (which would treat both empty
-			// prefixes as a match).
-			logger.Warnf(ctx, "wiki ingest: dedup rejected %s → %s (missing type prefix)", srcSlug, dstSlug)
-			return false
-		}
-		srcPrefix := srcSlug[:srcSlash+1]
-		dstPrefix := dstSlug[:dstSlash+1]
-		if srcPrefix != dstPrefix {
-			logger.Warnf(ctx, "wiki ingest: dedup rejected %s → %s (type mismatch: %s vs %s)", srcSlug, dstSlug, srcPrefix, dstPrefix)
+		if reason := dedupMergeRejectReason(srcSlug, dstSlug, itemCandidates[srcSlug]); reason != "" {
+			logger.Warnf(ctx, "wiki ingest: dedup rejected %s → %s (%s)", srcSlug, dstSlug, reason)
 			return false
 		}
 		return true

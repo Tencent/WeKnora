@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -140,11 +141,15 @@ func (r *ToolRegistry) ExecuteTool(
 		}, nil
 	}
 
-	result, execErr := tool.Execute(ctx, args)
-
-	// Truncate large tool outputs to prevent context window poisoning.
+	// Publish the ceiling so budget-aware tools can shape a batched result
+	// themselves; the truncation below stays as the fallback for the rest.
 	maxOutput := r.getMaxToolOutput()
-	if result != nil && len(result.Output) > maxOutput {
+	result, execErr := tool.Execute(WithOutputBudget(ctx, maxOutput), args)
+
+	// Truncate large tool outputs to prevent context window poisoning. The
+	// limit is counted in runes to match TruncateToolOutput; comparing bytes
+	// here would leave CJK output effectively uncapped.
+	if result != nil && utf8.RuneCountInString(result.Output) > maxOutput {
 		result.Output = TruncateToolOutput(result.Output, maxOutput)
 	}
 

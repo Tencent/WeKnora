@@ -1,0 +1,4 @@
+mcp>=2,<3
+starlette>=0.27.0
+uvicorn>=0.24.0
+httpx>=0.27.0

@@ -1528,7 +1528,7 @@ func (h *TenantHandler) GetPromptTemplates(c *gin.Context) {
 	}
 
 	// Determine user language from context (set by Language middleware)
-	lang, _ := types.LanguageFromContext(c.Request.Context())
+	lang := types.LanguageFromContextOrDefault(c.Request.Context())
 
 	// Build a localized copy so the original config is never mutated
 	localized := &config.PromptTemplatesConfig{

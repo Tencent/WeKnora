@@ -28,7 +28,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="버전" src="https://img.shields.io/badge/version-0.7.0-2e6cc4?labelColor=d4eaf7">
+        <img alt="버전" src="https://img.shields.io/badge/version-0.7.1-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -56,6 +56,7 @@ Feishu, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지�
 
 ## ✨ 최신 업데이트
 
+- **v0.7.1** — 새로운 **Yunzhijia(云之家) IM 통합**(WebSocket + 이미지 메시지 + Markdown 응답); **Volcengine Rerank** 제공자(요청 자동 분할)와 **Zhipu AI 웹 검색** 제공자; 컨트롤 플레인 자동화를 위한 **플랫폼 범위 API 키**(테넌트 관리, 시스템 설정, 런타임 큐, 감사 로그); **KB 단위 활동 감사 추적**; FAQ 관리 강화(필터링, 태깅, 내보내기, 가져오기 결과 추적); **Langfuse OTLP/OTel 트레이싱** 마이그레이션 및 W3C traceparent 전파; 채팅 헤더 액션을 통한 원클릭 **Markdown 내보내기** 및 참조 드로어의 Wiki 도구 결과 표시; 프롬프트 캐시 가시성; 세션 채널 거버넌스(IM/임베드/API 세션을 관리자 범위로 분리); Feishu 대규모 Wiki 동기화 견고화; 레거시 Neo4j 대화 메모리 의존성 제거. 또한 광범위한 slug 무결성, SSRF 전송, 상태 동기화 강화. 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.7.0** — 세분화된 **범위 지정 API 키 및 Principal 모델**(능력 단위 권한 + KB 단위 제한 + API 통합 플레이그라운드); **런타임 작업 큐 가시성 대시보드 및 Worker 풀 거버넌스**(단계별 풀 + 모델별 동시성 거버너 + 실패 작업 조사/재시도); **다중 인스턴스 스토리지 백엔드**(워크스페이스당 여러 스토리지 인스턴스, KB 단위 바인딩, 기본 인스턴스); **세션 범위 임시 첨부**(이미지/문서 비동기 파싱 + 통합 한도); 추천 질문 및 후속 질문; 안정적인 리소스 레지스트리 및 LLM 컨텍스트 별칭 압축; `@Skill / @MCP` 멘션 기반 범위 지정 Agent 런타임; 대화 중 MCP OAuth; QQBot 및 Lark(Feishu 국제판) IM 통합; Redis TLS; Requesty 모델 제공자 + Keenable 웹 검색; 테넌트리스 프로비저닝 및 제어된 셀프서비스 워크스페이스; 관리자 비밀번호 재설정; 지식 베이스 복제 플로우; `weknora` CLI v0.10. 또한 대규모 보안 강화(SSRF, 비밀 마스킹, SQL 검증, IDOR). 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.6.3** — 웹사이트 임베드 Widget 및 통합 센터(보안 모드 Token 교환 + 속도 제한); 채팅 경험 전면 개편(인용 팝오버, RAG 파이프라인 진행, 스트리밍 Markdown); 문서 다중 태그 및 일괄 reparse; Wiki 폴더 및 계층 탐색; RSS 데이터 소스; MCP OAuth2; EPUB / MHTML 파싱; Agent 모델 준비 상태 검사; 모델 디버거; 세션 소스 필터; 워크스페이스 삭제 UI. 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.6.2** — 업로드 단위 파싱 설정(`process_config`) + 업로드 확인 대화상자; reparse 시 설정 덮어쓰기; `weknora` CLI v0.9(번들 Agent Skills, `session stop`, auth/profile 통합); KB 마키 선택 다중 선택; pgvector 1024차원 HNSW 인덱스; 채팅 리소스 Store 리팩터; Langfuse 단일 추적(Jaeger 제거). 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
@@ -146,7 +147,7 @@ Feishu, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지�
 | Embedding | Ollama / BGE / GTE / OpenAI 호환 API |
 | 벡터 DB | PostgreSQL (pgvector) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / Tencent VectorDB |
 | 오브젝트 스토리지 | 로컬 / MinIO / AWS S3 / Volcengine TOS / Alibaba Cloud OSS / Kingsoft Cloud KS3 / Huawei Cloud OBS; **워크스페이스당 여러 스토리지 인스턴스**, KB 단위 바인딩 및 기본 인스턴스 |
-| IM 통합 | WeChat Work / Feishu / Lark(Feishu 국제판) / QQBot / Slack / Telegram / DingTalk / Mattermost / WeChat |
+| IM 통합 | WeChat Work / Feishu / Lark(Feishu 국제판) / QQBot / Slack / Telegram / DingTalk / Mattermost / WeChat / Yunzhijia |
 | 웹사이트 임베드 | 임베드 Widget으로 에이전트 게시, 도메인 허용 목록·속도 제한·보안 모드 Token 교환 |
 | 웹 검색 | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG / Keenable / Zhipu AI |
 | API 통합 | 범위 지정 API 키(능력 단위 권한 + KB 단위 제한 + 스로틀링된 last_used 추적)와 API 통합 플레이그라운드; MCP OAuth 및 임베드 세션을 Principal 단위로 격리 |
@@ -188,12 +189,25 @@ Feishu, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지�
 git clone https://github.com/Tencent/WeKnora.git
 cd WeKnora
 cp .env.example .env   # 필요에 따라 .env 편집 (파일 내 주석 참고)
-docker compose up -d   # 코어 서비스 시작
+docker compose pull     # 최신 이미지 가져오기
+docker compose up -d    # 코어 서비스 시작
 ```
 
 시작 후 **http://localhost** 에 접속하여 바로 사용 가능합니다.
 
 > 로컬 Ollama 모델을 사용하려면 먼저 `ollama serve > /dev/null 2>&1 &` 를 실행하세요.
+
+### 🔄 업그레이드
+
+기존 배포가 있고 새 release를 다운로드한 경우:
+
+```bash
+# .env에서 WEKNORA_VERSION을 대상 버전(예: 0.7.0)으로 설정하거나 latest 유지
+docker compose pull     # WEKNORA_VERSION에 맞는 이미지 가져오기
+docker compose up -d    # 새 이미지로 컨테이너 재생성
+```
+
+> `docker compose up -d`만 실행하면 로컬 캐시 이미지가 재사용되어 Web UI 버전이 다운로드한 release와 일치하지 않을 수 있습니다.
 
 ### 🔧 선택 서비스 (Docker Compose Profile)
 
@@ -201,13 +215,13 @@ docker compose up -d   # 코어 서비스 시작
 
 | Profile | 설명 | 명령어 |
 |---------|------|--------|
-| _(기본)_ | 코어 서비스 | `docker compose up -d` |
-| `full` | 전체 기능 | `docker compose --profile full up -d` |
-| `neo4j` | 지식 그래프 (Neo4j) | `docker compose --profile neo4j up -d` |
-| `minio` | 오브젝트 스토리지 (MinIO) | `docker compose --profile minio up -d` |
-| `langfuse` | 트레이싱 (Langfuse) | `docker compose --profile langfuse up -d` |
+| _(기본)_ | 코어 서비스 | `docker compose pull && docker compose up -d` |
+| `full` | 전체 기능 | `docker compose --profile full pull && docker compose --profile full up -d` |
+| `neo4j` | 지식 그래프 (Neo4j) | `docker compose --profile neo4j pull && docker compose --profile neo4j up -d` |
+| `minio` | 오브젝트 스토리지 (MinIO) | `docker compose --profile minio pull && docker compose --profile minio up -d` |
+| `langfuse` | 트레이싱 (Langfuse) | `docker compose --profile langfuse pull && docker compose --profile langfuse up -d` |
 
-조합 예시: `docker compose --profile neo4j --profile minio up -d`
+조합 예시: `docker compose --profile neo4j --profile minio pull && docker compose --profile neo4j --profile minio up -d`
 
 서비스 중지: `docker compose down`
 

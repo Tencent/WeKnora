@@ -172,3 +172,27 @@ func recordKBActivity(
 		Details:     detailJSON,
 	})
 }
+
+// RecordWikiContentActivity writes the bounded Wiki mutation summary shown in
+// the knowledge-base activity feed. Wiki mutations used to reach this feed as
+// a side effect of inserting rows into the dedicated wiki_log_entries table;
+// keeping the projection explicit lets the activity feed remain authoritative
+// without maintaining a second, Wiki-only event store.
+func RecordWikiContentActivity(
+	ctx context.Context,
+	audit interfaces.AuditLogService,
+	tenantID uint64,
+	kbID string,
+	actions map[string]int,
+) {
+	count := 0
+	for _, actionCount := range actions {
+		count += actionCount
+	}
+	if count == 0 {
+		return
+	}
+	recordKBActivity(ctx, audit, tenantID, kbID, types.AuditActionWikiContentChanged,
+		"wiki", kbID, types.AuditOutcomeSuccess,
+		map[string]any{"count": count, "actions": actions})
+}

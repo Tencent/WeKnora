@@ -34,6 +34,7 @@ export default function (knowledgeBaseId?: string) {
     summary_status: "",
     parse_status: "",
     error_message: "",
+	custom_metadata: {} as Record<string, unknown>,
     chunkLoading: false,
     chunkLoadError: "",
     tags: [] as Array<{ id: string; name: string; color?: string }>,
@@ -50,6 +51,8 @@ export default function (knowledgeBaseId?: string) {
       source?: string;
       start_time?: string;
       end_time?: string;
+      folder_path?: string;
+      folder_recursive?: boolean;
     } = { page: 1, page_size: 35 },
     kbId?: string,
   ): Promise<void> => {
@@ -75,6 +78,7 @@ export default function (knowledgeBaseId?: string) {
         original_file_name: item.file_name,
         display_name: displayName,
         file_name: displayName,
+        folder_path: item.folder_path || '',
         updated_at: formatStringDate(new Date(item.updated_at)),
         isMore: false,
         file_type: fileTypeSource ? String(fileTypeSource).toLocaleUpperCase() : '',
@@ -189,6 +193,7 @@ export default function (knowledgeBaseId?: string) {
       summary_status: "",
       parse_status: "",
       error_message: "",
+	  custom_metadata: {},
       chunkLoadError: "",
       tags: item?.tags ? [...item.tags] : [],
     });
@@ -208,6 +213,7 @@ export default function (knowledgeBaseId?: string) {
             summary_status: data.summary_status || '',
             parse_status: data.parse_status || '',
             error_message: data.error_message || '',
+			custom_metadata: data.custom_metadata || {},
             tags: data.tags?.length ? data.tags : (item?.tags || []),
           });
         }

@@ -79,6 +79,15 @@ type LLMToolCall struct {
 	Type             string           `json:"type"` // "function"
 	Function         FunctionCall     `json:"function"`
 	ProviderMetadata ToolCallMetadata `json:"provider_metadata,omitempty"`
+
+	// ModelArguments and the resolution fields are request-local observability
+	// state. ModelArguments preserves the exact JSON emitted by the model while
+	// Function.Arguments is decoded to durable application identifiers before
+	// tool execution. These fields must never be sent back to a provider or
+	// persisted in chat history.
+	ModelArguments     string   `json:"-"`
+	ArgumentResolution string   `json:"-"`
+	UnresolvedHandles  []string `json:"-"`
 }
 
 // ToolCallMetadata carries provider-specific tool-call state that must round-trip

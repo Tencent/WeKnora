@@ -7,6 +7,9 @@ import rssIcon from '@/assets/img/datasource-rss.svg'
 export const datasourceIconMap: Record<string, string> = {
   feishu: feishuIcon,
   lark: larkIcon,
+  // Drive (云盘) connectors reuse the wiki icons - same product, same brand.
+  feishu_drive: feishuIcon,
+  lark_drive: larkIcon,
   notion: notionIcon,
   yuque: yuqueIcon,
   rss: rssIcon,

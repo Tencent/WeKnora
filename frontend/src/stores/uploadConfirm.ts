@@ -21,21 +21,34 @@ export interface UploadConfirmReparseSource {
 export interface UploadConfirmResult {
   processConfig: KnowledgeProcessOverrides
   mode: UploadConfirmMode
+  tagIds?: string[]
   files?: File[]
   urls?: string[]
   manual?: UploadConfirmManualSource
   reparse?: UploadConfirmReparseSource
+  /**
+   * Folder the batch is uploaded into ('' = knowledge base root). Returned as
+   * part of the result because the dialog lets the user change it, so callers
+   * must use this value rather than whatever folder was open when they opened
+   * the dialog.
+   */
+  targetFolder?: string
 }
 
 export interface OpenUploadConfirmOptions {
   mode: UploadConfirmMode
   kbInfo: any
+  tagIds?: string[]
   files?: File[]
   urls?: string[]
   manual?: UploadConfirmManualSource
   reparse?: UploadConfirmReparseSource
   acceptFileTypes?: string
   supportedFileTypes?: string[]
+  /** Folder pre-selected from the sidebar tree; '' means the root. */
+  targetFolder?: string
+  /** Existing folders the dialog can offer as upload destinations. */
+  folderOptions?: Array<{ path: string; name: string; depth: number }>
 }
 
 export const useUploadConfirmStore = defineStore('uploadConfirm', {
@@ -45,10 +58,13 @@ export const useUploadConfirmStore = defineStore('uploadConfirm', {
     kbInfo: null as any,
     files: [] as File[],
     urls: [] as string[],
+    tagIds: [] as string[],
     manual: null as UploadConfirmManualSource | null,
     reparse: null as UploadConfirmReparseSource | null,
     acceptFileTypes: '',
     supportedFileTypes: [] as string[],
+    targetFolder: '',
+    folderOptions: [] as Array<{ path: string; name: string; depth: number }>,
     pendingResolve: null as ((value: UploadConfirmResult) => void) | null,
     pendingReject: null as (() => void) | null,
   }),
@@ -61,10 +77,15 @@ export const useUploadConfirmStore = defineStore('uploadConfirm', {
         this.kbInfo = options.kbInfo
         this.files = options.files ? [...options.files] : []
         this.urls = options.urls ? [...options.urls] : []
+        this.tagIds = options.tagIds
+          ? [...options.tagIds]
+          : [...(options.manual?.tagIds || [])]
         this.manual = options.manual || null
         this.reparse = options.reparse || null
         this.acceptFileTypes = options.acceptFileTypes || ''
         this.supportedFileTypes = options.supportedFileTypes ? [...options.supportedFileTypes] : []
+        this.targetFolder = options.targetFolder || ''
+        this.folderOptions = options.folderOptions ? [...options.folderOptions] : []
         this.pendingResolve = resolve
         this.pendingReject = reject
       })
@@ -86,10 +107,13 @@ export const useUploadConfirmStore = defineStore('uploadConfirm', {
       this.kbInfo = null
       this.files = []
       this.urls = []
+      this.tagIds = []
       this.manual = null
       this.reparse = null
       this.acceptFileTypes = ''
       this.supportedFileTypes = []
+      this.targetFolder = ''
+      this.folderOptions = []
       this.pendingResolve = null
       this.pendingReject = null
     },
