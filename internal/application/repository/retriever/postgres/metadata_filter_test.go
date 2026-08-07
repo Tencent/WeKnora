@@ -1,11 +1,15 @@
 package postgres
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Tencent/WeKnora/internal/types"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -91,6 +95,43 @@ func TestKeywordsRetrieveAppliesMetadataFilterBeforeLimit(t *testing.T) {
 	}
 	if metadata.SQL == "" || len(metadata.Vars) != 4 {
 		t.Fatalf("metadata predicate was not bound before keyword top-K: %+v", metadata)
+	}
+}
+
+func TestKeywordsRetrieveExecutesMetadataFilterBeforeLimit(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("create SQL mock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{Conn: db}), &gorm.Config{DisableAutomaticPing: true})
+	if err != nil {
+		t.Fatalf("open GORM PostgreSQL DB: %v", err)
+	}
+	repo := &pgRepository{db: gormDB}
+	field := "department'); DROP TABLE embeddings; --"
+	value := "research'); --"
+
+	mock.ExpectQuery(`(?s)SELECT .* FROM "embeddings" WHERE \(+access_metadata @> jsonb_build_object\(\$1, \$2::jsonb\) OR access_metadata @> jsonb_build_object\(\$3, jsonb_build_array\(\$4::jsonb\)\)+ AND content \|\|\| \$5 AND \(+is_enabled IS NULL OR is_enabled = \$6\)+ ORDER BY "score" DESC LIMIT \$7`).
+		WithArgs(field, `"research'); --"`, field, `"research'); --"`, "expense", true, 2).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"score", "id", "content", "source_id", "source_type", "chunk_id", "knowledge_id", "knowledge_base_id", "tag_id",
+		}))
+
+	results, err := repo.KeywordsRetrieve(context.Background(), types.RetrieveParams{
+		Query:          "expense",
+		TopK:           2,
+		MetadataFilter: &types.MetadataFilter{Field: field, Op: types.MetadataFilterOpEqual, Value: value},
+	})
+	if err != nil {
+		t.Fatalf("keyword retrieval: %v", err)
+	}
+	if len(results) != 1 || len(results[0].Results) != 0 {
+		t.Fatalf("keyword results = %#v, want one empty retrieval result", results)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("keyword SQL expectation: %v", err)
 	}
 }
 
