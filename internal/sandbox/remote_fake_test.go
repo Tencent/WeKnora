@@ -49,6 +49,9 @@ type fakeRemoteClient struct {
 	createHook  func(context.Context, RemoteCreateRequest) error
 	afterCreate func(RemoteSandboxHandle)
 	deleteHook  func(context.Context, string) error
+
+	makeDirPaths []string
+	execRequests []RemoteExecRequest
 }
 
 func newFakeRemoteClient(provider RemoteProvider) *fakeRemoteClient {
@@ -226,10 +229,13 @@ func (c *fakeRemoteClient) Delete(ctx context.Context, sandboxID string) error {
 }
 
 func (c *fakeRemoteClient) Exec(
-	context.Context,
-	RemoteSandboxHandle,
-	RemoteExecRequest,
+	_ context.Context,
+	_ RemoteSandboxHandle,
+	request RemoteExecRequest,
 ) (*RemoteExecResult, error) {
+	c.mu.Lock()
+	c.execRequests = append(c.execRequests, request)
+	c.mu.Unlock()
 	return &RemoteExecResult{ExitCode: 0}, nil
 }
 
@@ -258,7 +264,10 @@ func (c *fakeRemoteClient) ListDir(
 	return nil, nil
 }
 
-func (c *fakeRemoteClient) MakeDir(context.Context, RemoteSandboxHandle, string) error {
+func (c *fakeRemoteClient) MakeDir(_ context.Context, _ RemoteSandboxHandle, path string) error {
+	c.mu.Lock()
+	c.makeDirPaths = append(c.makeDirPaths, path)
+	c.mu.Unlock()
 	return nil
 }
 

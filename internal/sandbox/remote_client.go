@@ -79,6 +79,18 @@ type RemoteTimeoutPolicy struct {
 	AutoResume bool
 }
 
+// RemoteVolumeMount describes a volume to mount into the sandbox at creation
+// time. Both Cube and E2B support named-volume mounts, making this a
+// provider-neutral concept. Each entry references a pre-created volume by
+// Name and the sandbox-internal Path at which it should appear.
+type RemoteVolumeMount struct {
+	// Name identifies the volume. Required.
+	Name string
+
+	// Path is the mount point inside the sandbox. Required.
+	Path string
+}
+
 // RemoteCreateRequest holds the neutral parameters for spawning a new sandbox.
 type RemoteCreateRequest struct {
 	// TemplateID references the pre-baked sandbox template. Required.
@@ -100,6 +112,11 @@ type RemoteCreateRequest struct {
 	// A zero-value policy asks the adapter to apply the provider's default
 	// behaviour (see RemoteNetworkPolicy for the exact semantics).
 	Network RemoteNetworkPolicy
+
+	// VolumeMounts specifies volumes to mount into the sandbox at creation
+	// time. Optional. When non-empty, the adapter maps each entry to the
+	// provider-native volume mount API (e2b.VolumeMount for E2B, etc.).
+	VolumeMounts []RemoteVolumeMount
 }
 
 // RemoteNetworkPolicy is the provider-neutral outbound-network policy for a
@@ -229,9 +246,23 @@ type RemoteExecRequest struct {
 	// default".
 	WorkDir string
 
+	// User is the OS user the process runs as. Empty means "provider
+	// default". Both backends support selecting it (E2B WithUser, Cube
+	// CommandOptions.User).
+	//
+	// Callers that rely on filesystem permissions for isolation MUST set a
+	// non-root user: root bypasses mode bits entirely, which would defeat
+	// read-only protection on shared volumes.
+	User string
+
 	// Timeout bounds a single exec call. Zero means "use provider default".
 	Timeout time.Duration
 }
+
+// DefaultSandboxExecUser is the non-root account WeKnora runs sandboxed
+// scripts as. The sandbox template must provision this user; E2B base
+// templates ship a "user" account, and Cube templates are expected to match.
+const DefaultSandboxExecUser = "user"
 
 // RemoteExecResult is the neutral shape returned by Exec.
 type RemoteExecResult struct {
@@ -305,6 +336,12 @@ type RemoteSandboxCapabilities struct {
 	// application layer then knows to deregister list/read/attachment
 	// staging tools that would otherwise fail at request time.
 	SupportsFilesystemEnumeration bool
+
+	// SupportsVolumes is true when the provider can mount a named volume into
+	// a sandbox at creation time (RemoteCreateRequest.VolumeMounts). Callers
+	// use this to tell an operator up front that a backend cannot serve
+	// volume-based features, instead of failing later at first use.
+	SupportsVolumes bool
 }
 
 // RemoteSandboxClient is the contract SessionBoundManager talks to. All
