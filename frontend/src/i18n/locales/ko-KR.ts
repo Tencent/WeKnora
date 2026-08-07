@@ -2355,6 +2355,10 @@ export default {
           label: 'Requesty',
           description: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4-5 등'
         },
+        orcarouter: {
+          label: 'OrcaRouter',
+          description: 'orcarouter/auto, openai/gpt-5.5, anthropic/claude-sonnet-4.6 등'
+        },
         openrouter: {
           label: 'OpenRouter',
           description: 'openai/gpt-5.2-chat, google/gemini-3-flash-preview 등'

@@ -2329,6 +2329,7 @@ definitions:
     - jina
     - openrouter
     - requesty
+    - orcarouter
     - nvidia
     - novita
     - azure_openai
@@ -2347,6 +2348,7 @@ definitions:
       ModelSourceNvidia: NVIDIA model
       ModelSourceOpenAI: OpenAI model
       ModelSourceOpenRouter: OpenRouter model
+      ModelSourceOrcaRouter: OrcaRouter model
       ModelSourceRemote: Remote model
       ModelSourceRequesty: Requesty model
       ModelSourceSiliconFlow: SiliconFlow model
@@ -2368,6 +2370,7 @@ definitions:
     - Jina AI model
     - OpenRouter model
     - Requesty model
+    - OrcaRouter model
     - NVIDIA model
     - Novita AI model
     - Azure OpenAI model
@@ -2387,6 +2390,7 @@ definitions:
     - ModelSourceJina
     - ModelSourceOpenRouter
     - ModelSourceRequesty
+    - ModelSourceOrcaRouter
     - ModelSourceNvidia
     - ModelSourceNovita
     - ModelSourceAzureOpenAI

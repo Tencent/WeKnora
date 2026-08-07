@@ -141,7 +141,7 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 
 | 機能 | 詳細 |
 |------|------|
-| 大規模モデル | OpenAI / Azure OpenAI / Anthropic (Claude) / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Requesty / Ollama |
+| 大規模モデル | OpenAI / Azure OpenAI / Anthropic (Claude) / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Requesty / OrcaRouter / Ollama |
 | Embedding | Ollama / BGE / GTE / OpenAI 互換 API |
 | ベクトル DB | PostgreSQL (pgvector) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / Tencent VectorDB |
 | オブジェクトストレージ | ローカル / MinIO / AWS S3（IAM Role / IRSA のデフォルト資格情報チェーン対応）/ 火山引擎 TOS / Alibaba Cloud OSS / 金山雲 KS3 / 華為雲 OBS；**ワークスペースごとに複数のストレージインスタンス**、KB 単位のバインドとデフォルトインスタンス |

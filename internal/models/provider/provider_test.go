@@ -39,6 +39,7 @@ func TestDetectProvider(t *testing.T) {
 		{"https://api.anthropic.com/v1", ProviderAnthropic},
 		{"https://openrouter.ai/api/v1", ProviderOpenRouter},
 		{"https://router.requesty.ai/v1", ProviderRequesty},
+		{"https://api.orcarouter.ai/v1", ProviderOrcaRouter},
 		{"https://dashscope.aliyuncs.com/compatible-mode/v1", ProviderAliyun},
 		{"https://open.bigmodel.cn/api/paas/v4", ProviderZhipu},
 		{"https://api.deepseek.com/v1", ProviderDeepSeek},
@@ -247,6 +248,38 @@ func TestRequestyProviderValidation(t *testing.T) {
 		assert.Equal(t, "Requesty", info.DisplayName)
 		assert.Equal(t, RequestyBaseURL, info.GetDefaultURL(types.ModelTypeKnowledgeQA))
 		assert.Equal(t, RequestyBaseURL, info.GetDefaultURL(types.ModelTypeEmbedding))
+		assert.Contains(t, info.ModelTypes, types.ModelTypeKnowledgeQA)
+		assert.True(t, info.RequiresAuth)
+	})
+}
+
+func TestOrcaRouterProviderValidation(t *testing.T) {
+	p := &OrcaRouterProvider{}
+
+	t.Run("valid config", func(t *testing.T) {
+		config := &Config{
+			APIKey:    "test-key",
+			ModelName: "openai/gpt-5.5",
+		}
+		err := p.ValidateConfig(config)
+		assert.NoError(t, err)
+	})
+
+	t.Run("missing API key", func(t *testing.T) {
+		config := &Config{
+			ModelName: "openai/gpt-5.5",
+		}
+		err := p.ValidateConfig(config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "API key")
+	})
+
+	t.Run("info", func(t *testing.T) {
+		info := p.Info()
+		assert.Equal(t, ProviderOrcaRouter, info.Name)
+		assert.Equal(t, "OrcaRouter", info.DisplayName)
+		assert.Equal(t, OrcaRouterBaseURL, info.GetDefaultURL(types.ModelTypeKnowledgeQA))
+		assert.Equal(t, OrcaRouterBaseURL, info.GetDefaultURL(types.ModelTypeEmbedding))
 		assert.Contains(t, info.ModelTypes, types.ModelTypeKnowledgeQA)
 		assert.True(t, info.RequiresAuth)
 	})
