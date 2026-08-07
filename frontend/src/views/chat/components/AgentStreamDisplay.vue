@@ -497,7 +497,11 @@ import { getKnowledgeChunksSummaryHtml } from '@/utils/knowledgeChunksDisplay';
 import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
-import type { KnowledgeReferenceLike, ReferenceHighlightTarget } from '@/utils/referenceSources';
+import {
+  mergeReferenceSources,
+  type KnowledgeReferenceLike,
+  type ReferenceHighlightTarget,
+} from '@/utils/referenceSources';
 import { resolveCitationChunkId } from '@/utils/citationMarkdown';
 import { getWikiPage, type WikiPage } from '@/api/wiki';
 import { MessagePlugin } from 'tdesign-vue-next';
@@ -833,7 +837,7 @@ const {
   cancelClose: cancelCitationClose,
   scheduleClose: scheduleCitationClose,
 } = useChatCitationPopover(rootElement, {
-  getKnowledgeReferences: () => props.session?.knowledge_references,
+  getKnowledgeReferences: () => getReferencesForDrawer(),
   embedChannelId: () => (props.embeddedMode ? props.embedChannelId : undefined),
   embedToken: () => (props.embeddedMode ? props.embedToken : undefined),
   sessionId: () => props.sessionId,
@@ -847,16 +851,10 @@ const getReferencesForDrawer = (
   const messageReferences = refsOverride?.length
     ? refsOverride
     : props.session?.knowledge_references;
-  if (messageReferences?.length) return messageReferences;
-
-  // Agent answers can already contain citation tags before the aggregated
-  // knowledge_references event is emitted (and some restored conversations do
-  // not have that aggregate at all). The completed retrieval tool events still
-  // carry the same source data, so use them to keep citation clicks in the
-  // references drawer instead of falling through to KB-page navigation.
-  return (props.session?.agentEventStream || []).flatMap((event) =>
+  const toolReferences = (props.session?.agentEventStream || []).flatMap((event) =>
     getToolReferenceItems(event),
   );
+  return mergeReferenceSources(messageReferences, toolReferences);
 };
 
 const openReferencesDrawer = (
