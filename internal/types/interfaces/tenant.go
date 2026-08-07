@@ -77,11 +77,20 @@ type TenantAPIKeyCreateResult struct {
 	Token  string
 }
 
+// TenantAPIKeyKnowledgeBaseUpdateRequest 修改已创建 scoped API Key 的知识库白名单。
+// KnowledgeBaseIDs 为空表示允许访问本租户的全部知识库。
+type TenantAPIKeyKnowledgeBaseUpdateRequest struct {
+	TenantID         uint64
+	APIKeyID         uint64
+	KnowledgeBaseIDs []string
+}
+
 type TenantAPIKeyRepository interface {
 	CreateAPIKey(ctx context.Context, key *types.TenantAPIKey) error
 	GetAPIKeyByHash(ctx context.Context, hash string) (*types.TenantAPIKey, error)
 	ListAPIKeys(ctx context.Context, tenantID uint64) ([]*types.TenantAPIKey, error)
 	ListPlatformAPIKeys(ctx context.Context) ([]*types.TenantAPIKey, error)
+	UpdateAPIKeyKnowledgeBases(ctx context.Context, tenantID uint64, id uint64, knowledgeBaseIDs types.StringArray) (*types.TenantAPIKey, error)
 	RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error
 	RevokePlatformAPIKey(ctx context.Context, id uint64) error
 	UpdateAPIKeyHash(ctx context.Context, id uint64, hash string) error
@@ -100,6 +109,7 @@ type TenantAPIKeyService interface {
 	AuthenticateAPIKey(ctx context.Context, token string) (*types.TenantAPIKey, error)
 	ListAPIKeys(ctx context.Context, tenantID uint64) ([]*types.TenantAPIKey, error)
 	ListPlatformAPIKeys(ctx context.Context) ([]*types.TenantAPIKey, error)
+	UpdateAPIKeyKnowledgeBases(ctx context.Context, req TenantAPIKeyKnowledgeBaseUpdateRequest) (*types.TenantAPIKey, error)
 	RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error
 	RevokePlatformAPIKey(ctx context.Context, id uint64) error
 	// BackfillMissingKeyHashes computes and persists the SHA-256 key_hash

@@ -158,6 +158,15 @@
                       <td>
                         <div class="api-key-table__actions">
                           <t-button
+                            v-if="!key.full_access"
+                            shape="square"
+                            variant="text"
+                            :title="$t('integrations.api.editApiKeyScope')"
+                            @click="openEditAPIKeyScope(key)"
+                          >
+                            <t-icon name="edit-1" />
+                          </t-button>
+                          <t-button
                             shape="square"
                             variant="text"
                             :title="$t('integrations.api.copy')"
@@ -555,6 +564,40 @@
       </div>
     </SettingDrawer>
 
+    <SettingDrawer
+      :visible="apiKeyScopeDialogVisible"
+      class="api-key-scope-drawer"
+      :title="$t('integrations.api.editApiKeyScope')"
+      :description="$t('integrations.api.editApiKeyScopeDesc', { name: editingAPIKey?.name || '' })"
+      icon="folder"
+      width="520px"
+      :min-width="440"
+      :max-width="760"
+      storage-key="setting-drawer:width:api-key-scope"
+      :confirm-text="$t('common.save')"
+      :confirm-loading="apiKeyScopeSaving"
+      @update:visible="(v: boolean) => apiKeyScopeDialogVisible = v"
+      @confirm="saveAPIKeyKnowledgeScope"
+    >
+      <div class="api-key-dialog">
+        <div class="api-key-dialog-row">
+          <div class="api-key-dialog-row__label">
+            <label>{{ $t('integrations.api.apiKeyKnowledgeScope') }}</label>
+          </div>
+          <t-select
+            v-model="editingKnowledgeBaseIDs"
+            multiple
+            filterable
+            clearable
+            :loading="knowledgeBasesLoading"
+            :options="knowledgeBaseOptions"
+            :placeholder="$t('integrations.api.apiKeyKnowledgeScopePlaceholder')"
+          />
+          <p class="scope-hint">{{ $t('integrations.api.editApiKeyScopeHint') }}</p>
+        </div>
+      </div>
+    </SettingDrawer>
+
   </div>
 </template>
 
@@ -571,6 +614,7 @@ import {
   createAPIPrincipalTestToken,
   getAPIPrincipalConfig,
   listTenantAPIKeys,
+  updateTenantAPIKeyKnowledgeBases,
   updateAPIPrincipalConfig,
   type APIPrincipalConfig,
   type APIPrincipalMode,
@@ -602,6 +646,10 @@ const apiKeys = ref<TenantAPIKey[]>([])
 const apiKeysLoading = ref(false)
 const apiKeyDialogVisible = ref(false)
 const apiKeyCreating = ref(false)
+const apiKeyScopeDialogVisible = ref(false)
+const apiKeyScopeSaving = ref(false)
+const editingAPIKey = ref<TenantAPIKey | null>(null)
+const editingKnowledgeBaseIDs = ref<string[]>([])
 const knowledgeBasesLoading = ref(false)
 const knowledgeBases = ref<Array<{ id: string; name: string }>>([])
 const secretInput = ref('')
@@ -1322,6 +1370,37 @@ async function createScopedAPIKey() {
     MessagePlugin.error(err?.message || t('integrations.api.createApiKeyFailed'))
   } finally {
     apiKeyCreating.value = false
+  }
+}
+
+// 打开范围编辑器时复制当前白名单，取消操作不会污染列表中的原始数据。
+function openEditAPIKeyScope(key: TenantAPIKey) {
+  editingAPIKey.value = key
+  editingKnowledgeBaseIDs.value = [...(key.knowledge_base_ids || [])]
+  apiKeyScopeDialogVisible.value = true
+  void loadKnowledgeBaseOptions()
+}
+
+// 保存后使用服务端返回的规范化结果刷新列表，确保鉴权范围与界面立即一致。
+async function saveAPIKeyKnowledgeScope() {
+  const key = editingAPIKey.value
+  if (!key) return
+  apiKeyScopeSaving.value = true
+  try {
+    const resp = await updateTenantAPIKeyKnowledgeBases(tenantId.value, key.id, {
+      knowledge_base_ids: editingKnowledgeBaseIDs.value,
+    })
+    if (!resp.success || !resp.data) {
+      throw new Error(resp.message || t('integrations.api.updateApiKeyScopeFailed'))
+    }
+    apiKeyScopeDialogVisible.value = false
+    editingAPIKey.value = null
+    MessagePlugin.success(t('integrations.api.updateApiKeyScopeSuccess'))
+    await loadAPIKeys()
+  } catch (err: any) {
+    MessagePlugin.error(err?.message || t('integrations.api.updateApiKeyScopeFailed'))
+  } finally {
+    apiKeyScopeSaving.value = false
   }
 }
 

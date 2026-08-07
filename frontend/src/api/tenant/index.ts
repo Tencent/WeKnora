@@ -118,6 +118,10 @@ export interface CreateTenantAPIKeyPayload {
   expires_at_unix?: number
 }
 
+export interface UpdateTenantAPIKeyKnowledgeBasesPayload {
+  knowledge_base_ids: string[]
+}
+
 // 搜索空间参数
 export interface SearchTenantsParams {
   keyword?: string
@@ -223,6 +227,23 @@ export async function createTenantAPIKey(
     return {
       success: false,
       message: error.message || t('error.tenant.createApiKeyFailed'),
+    }
+  }
+}
+
+/** 替换已创建 scoped API Key 的知识库白名单；空数组表示全部知识库。 */
+export async function updateTenantAPIKeyKnowledgeBases(
+  tenantId: number,
+  keyId: number,
+  payload: UpdateTenantAPIKeyKnowledgeBasesPayload,
+): Promise<{ success: boolean; data?: TenantAPIKey; message?: string }> {
+  try {
+    const response = await put(`/api/v1/tenants/${tenantId}/api-keys/${keyId}/knowledge-bases`, payload)
+    return response as unknown as { success: boolean; data?: TenantAPIKey; message?: string }
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || t('integrations.api.updateApiKeyScopeFailed'),
     }
   }
 }

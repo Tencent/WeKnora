@@ -143,6 +143,12 @@ type tenantAPIKeyCreateRequest struct {
 	ExpiresAt        *int64   `json:"expires_at_unix"`
 }
 
+// tenantAPIKeyKnowledgeBaseUpdateRequest 仅修改已创建 scoped API Key 的知识库范围。
+// 空数组表示允许访问本租户全部知识库。
+type tenantAPIKeyKnowledgeBaseUpdateRequest struct {
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
+}
+
 type tenantAPIKeyResponse struct {
 	ID               uint64                `json:"id"`
 	ScopeType        types.APIKeyScopeType `json:"scope_type"`
@@ -713,6 +719,40 @@ func (h *TenantHandler) CreateAPIKey(c *gin.Context) {
 	})
 }
 
+// UpdateAPIKeyKnowledgeBases 修改已创建 scoped API Key 的知识库白名单。
+// 路由层要求当前租户 Owner；这里继续校验每个知识库归属并返回更新后的 Key。
+func (h *TenantHandler) UpdateAPIKeyKnowledgeBases(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenantID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || tenantID == 0 {
+		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
+		return
+	}
+	keyID, err := strconv.ParseUint(c.Param("key_id"), 10, 64)
+	if err != nil || keyID == 0 {
+		c.Error(errors.NewBadRequestError("Invalid API key ID"))
+		return
+	}
+	var req tenantAPIKeyKnowledgeBaseUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	if appErr := validateTenantAPIKeyKnowledgeBaseIDs(ctx, h.kbService, tenantID, req.KnowledgeBaseIDs); appErr != nil {
+		c.Error(appErr)
+		return
+	}
+
+	updated, err := h.apiKeyService.UpdateAPIKeyKnowledgeBases(ctx, interfaces.TenantAPIKeyKnowledgeBaseUpdateRequest{
+		TenantID: tenantID, APIKeyID: keyID, KnowledgeBaseIDs: req.KnowledgeBaseIDs,
+	})
+	if err != nil {
+		c.Error(errors.NewNotFoundError("Scoped API key not found"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": tenantAPIKeyForResponse(updated)})
+}
+
 func (h *TenantHandler) DeleteAPIKey(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID, err := strconv.ParseUint(c.Param("id"), 10, 64)
@@ -774,12 +814,39 @@ func validateTenantAPIKeyRequest(
 			return errors.NewValidationError("capabilities contains an unknown capability")
 		}
 	}
-	for _, kbID := range req.KnowledgeBaseIDs {
+	return validateTenantAPIKeyKnowledgeBaseIDs(ctx, kbService, tenantID, req.KnowledgeBaseIDs)
+}
+
+// validateTenantAPIKeyKnowledgeBaseIDs 校验白名单中的知识库真实存在且属于目标租户。
+// 入参是请求上下文、知识库服务、租户 ID 和待授权 ID；成功无返回值，失败返回可直接响应的应用错误。
+func validateTenantAPIKeyKnowledgeBaseIDs(
+	ctx context.Context,
+	kbService interfaces.KnowledgeBaseService,
+	tenantID uint64,
+	knowledgeBaseIDs []string,
+) *errors.AppError {
+	if len(knowledgeBaseIDs) == 0 {
+		return nil
+	}
+	return validateTenantAPIKeyKnowledgeBaseIDsWithLookup(
+		ctx, tenantID, knowledgeBaseIDs, kbService.GetKnowledgeBaseByID,
+	)
+}
+
+// validateTenantAPIKeyKnowledgeBaseIDsWithLookup 将归属校验与大型知识库服务接口解耦，便于覆盖边界测试。
+// lookup 输入知识库 ID 并返回真实知识库；函数输出 nil 或可直接响应的校验错误。
+func validateTenantAPIKeyKnowledgeBaseIDsWithLookup(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeBaseIDs []string,
+	lookup func(context.Context, string) (*types.KnowledgeBase, error),
+) *errors.AppError {
+	for _, kbID := range knowledgeBaseIDs {
 		kbID = strings.TrimSpace(kbID)
 		if kbID == "" {
 			continue
 		}
-		kb, err := kbService.GetKnowledgeBaseByID(ctx, kbID)
+		kb, err := lookup(ctx, kbID)
 		if err != nil || kb == nil {
 			return errors.NewValidationError("knowledge_base_ids contains an unknown knowledge base")
 		}

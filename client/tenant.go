@@ -84,10 +84,10 @@ type TenantAPIKey struct {
 	APIKey           string           `json:"api_key"`
 	Role             TenantAPIKeyRole `json:"role"`
 	KnowledgeBaseIDs []string         `json:"knowledge_base_ids"`
-	LastUsedAt       *time.Time          `json:"last_used_at,omitempty"`
-	ExpiresAt        *time.Time          `json:"expires_at,omitempty"`
-	CreatedAt        time.Time           `json:"created_at"`
-	UpdatedAt        time.Time           `json:"updated_at"`
+	LastUsedAt       *time.Time       `json:"last_used_at,omitempty"`
+	ExpiresAt        *time.Time       `json:"expires_at,omitempty"`
+	CreatedAt        time.Time        `json:"created_at"`
+	UpdatedAt        time.Time        `json:"updated_at"`
 }
 
 // CreateTenantAPIKeyRequest creates a revocable tenant API key.
@@ -96,6 +96,12 @@ type CreateTenantAPIKeyRequest struct {
 	Role             TenantAPIKeyRole `json:"role,omitempty"`
 	KnowledgeBaseIDs []string         `json:"knowledge_base_ids,omitempty"`
 	ExpiresAtUnix    *int64           `json:"expires_at_unix,omitempty"`
+}
+
+// UpdateTenantAPIKeyKnowledgeBasesRequest updates a scoped key's KB allow-list.
+// An empty list means all knowledge bases in the tenant are allowed.
+type UpdateTenantAPIKeyKnowledgeBasesRequest struct {
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
 }
 
 // CreatedTenantAPIKey includes the created API key. Token is kept for
@@ -270,6 +276,25 @@ func (c *Client) CreateTenantAPIKey(
 	}
 
 	var response tenantAPIKeyCreateResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+	return &response.Data, nil
+}
+
+// UpdateTenantAPIKeyKnowledgeBases replaces a scoped API key's knowledge-base allow-list.
+func (c *Client) UpdateTenantAPIKeyKnowledgeBases(
+	ctx context.Context, tenantID uint64, keyID uint64, req *UpdateTenantAPIKeyKnowledgeBasesRequest,
+) (*TenantAPIKey, error) {
+	path := fmt.Sprintf("/api/v1/tenants/%d/api-keys/%d/knowledge-bases", tenantID, keyID)
+	resp, err := c.doRequest(ctx, http.MethodPut, path, req, nil)
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		Success bool         `json:"success"`
+		Data    TenantAPIKey `json:"data"`
+	}
 	if err := parseResponse(resp, &response); err != nil {
 		return nil, err
 	}

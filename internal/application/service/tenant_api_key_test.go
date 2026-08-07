@@ -96,6 +96,68 @@ func (r *fakeTenantAPIKeyRepo) RevokeAPIKey(_ context.Context, tenantID uint64, 
 	return apprepo.ErrTenantAPIKeyNotFound
 }
 
+// UpdateAPIKeyKnowledgeBases 模拟仓储的租户和 scoped 约束。
+// 传入租户 ID、Key ID、知识库 ID 列表，返回更新后的 Key；目标不合法时返回未找到。
+func (r *fakeTenantAPIKeyRepo) UpdateAPIKeyKnowledgeBases(
+	_ context.Context, tenantID uint64, id uint64, knowledgeBaseIDs types.StringArray,
+) (*types.TenantAPIKey, error) {
+	for _, key := range r.byHash {
+		if key.ID == id && key.TenantIDValue() == tenantID && !key.FullAccess && key.RevokedAt == nil {
+			key.KnowledgeBaseIDs = append(types.StringArray(nil), knowledgeBaseIDs...)
+			cp := *key
+			return &cp, nil
+		}
+	}
+	return nil, apprepo.ErrTenantAPIKeyNotFound
+}
+
+// TestTenantAPIKeyServiceUpdateKnowledgeBasesNormalizesIDs 验证更新服务的输入规范化。
+// 输入包含空白、重复和带首尾空格的 ID，输出应只保留有序且唯一的有效 ID。
+func TestTenantAPIKeyServiceUpdateKnowledgeBasesNormalizesIDs(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeTenantAPIKeyRepo()
+	svc := NewTenantAPIKeyService(repo)
+	created, err := svc.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
+		TenantID: 42, Name: "scoped", Capabilities: []string{"retrieve"},
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIKey returned error: %v", err)
+	}
+
+	updated, err := svc.UpdateAPIKeyKnowledgeBases(ctx, interfaces.TenantAPIKeyKnowledgeBaseUpdateRequest{
+		TenantID: 42, APIKeyID: created.APIKey.ID,
+		KnowledgeBaseIDs: []string{" kb-1 ", "", "kb-2", "kb-1"},
+	})
+	if err != nil {
+		t.Fatalf("UpdateAPIKeyKnowledgeBases returned error: %v", err)
+	}
+	if got, want := []string(updated.KnowledgeBaseIDs), []string{"kb-1", "kb-2"}; !apiKeyEqualStrings(got, want) {
+		t.Fatalf("knowledge_base_ids = %#v, want %#v", got, want)
+	}
+
+	cleared, err := svc.UpdateAPIKeyKnowledgeBases(ctx, interfaces.TenantAPIKeyKnowledgeBaseUpdateRequest{
+		TenantID: 42, APIKeyID: created.APIKey.ID, KnowledgeBaseIDs: []string{},
+	})
+	if err != nil {
+		t.Fatalf("clearing knowledge base scope returned error: %v", err)
+	}
+	if len(cleared.KnowledgeBaseIDs) != 0 {
+		t.Fatalf("cleared knowledge_base_ids = %#v, want empty", cleared.KnowledgeBaseIDs)
+	}
+}
+
+func apiKeyEqualStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func (r *fakeTenantAPIKeyRepo) RevokePlatformAPIKey(_ context.Context, id uint64) error {
 	now := time.Now()
 	for _, key := range r.byHash {
