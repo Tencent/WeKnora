@@ -1,7 +1,7 @@
 # API-first chunk metadata filter
 
-Status: Proposed for review  
-Date: 2026-08-07  
+Status: Proposed for review
+Date: 2026-08-07
 Related upstream discussions: [#2024](https://github.com/Tencent/WeKnora/issues/2024), [#2090](https://github.com/Tencent/WeKnora/issues/2090)
 
 ## 1. Summary
