@@ -284,16 +284,26 @@ func (c *AnthropicChat) buildRequest(messages []Message, opts *ChatOptions) anth
 		switch msg.Role {
 		case "system":
 			systemParts = append(systemParts, content)
-		case "assistant":
-			req.Messages = append(req.Messages, anthropicMessage{Role: "assistant", Content: content})
-		case "user":
-			req.Messages = append(req.Messages, anthropicMessage{Role: "user", Content: content})
 		default:
-			req.Messages = append(req.Messages, anthropicMessage{Role: "user", Content: content})
+			role := "user"
+			if msg.Role == "assistant" {
+				role = "assistant"
+			}
+			req.Messages = appendAnthropicMessage(req.Messages, role, content)
 		}
 	}
 	req.System = strings.Join(systemParts, "\n\n")
 	return req
+}
+
+// appendAnthropicMessage preserves the Messages API's alternating user and
+// assistant roles while retaining the original message order within a turn.
+func appendAnthropicMessage(messages []anthropicMessage, role, content string) []anthropicMessage {
+	if len(messages) > 0 && messages[len(messages)-1].Role == role {
+		messages[len(messages)-1].Content += "\n\n" + content
+		return messages
+	}
+	return append(messages, anthropicMessage{Role: role, Content: content})
 }
 
 func textFromMultiContent(parts []MessageContentPart) string {
