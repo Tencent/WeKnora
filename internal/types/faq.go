@@ -100,7 +100,7 @@ func (c *Chunk) SetDocumentMetadata(meta *DocumentChunkMetadata) error {
 		return nil
 	}
 	if meta == nil {
-		return c.clearNonAccessMetadata()
+		return c.clearMetadataFields("generated_questions", "generated_questions_revision")
 	}
 	bytes, err := json.Marshal(meta)
 	if err != nil {
@@ -191,7 +191,15 @@ func (c *Chunk) SetFAQMetadata(meta *FAQChunkMetadata) error {
 	}
 	if meta == nil {
 		c.ContentHash = ""
-		return c.clearNonAccessMetadata()
+		return c.clearMetadataFields(
+			"standard_question",
+			"similar_questions",
+			"negative_questions",
+			"answers",
+			"answer_strategy",
+			"version",
+			"source",
+		)
 	}
 	// 基础清理后存储到 DB（保留原始内容）
 	meta.Sanitize()

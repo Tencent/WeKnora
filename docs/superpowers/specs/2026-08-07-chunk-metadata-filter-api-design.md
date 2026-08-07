@@ -148,7 +148,7 @@ Retrieval can enrich a hit with parent, nearby, or relation chunks. Every such e
 
 The response must not expose internal filter evaluation details or backend query fragments. Validation errors may identify the invalid field/operator, but not emit generated SQL or sensitive metadata values in logs.
 
-When `metadata_filter` is present, document-wide summary chunks are excluded and `KnowledgeDescription` is omitted because either may aggregate content from chunks with different access metadata. A summary index record carries `access_metadata` only when every contributing text chunk has the same reserved object; initial indexing and refresh both clear summary access metadata for heterogeneous source chunks.
+When `metadata_filter` is present, document-wide summary chunks are excluded and `KnowledgeDescription` is omitted because either may aggregate content from chunks with different access metadata. Filtered search also does not backfill `ImageInfo` from image OCR/caption child chunks; only image information already stored on a selected matching chunk can be returned. A summary index record carries `access_metadata` only when every contributing text chunk has the same reserved object; initial indexing and refresh both clear summary access metadata for heterogeneous source chunks.
 
 ## 10. Error handling and security
 

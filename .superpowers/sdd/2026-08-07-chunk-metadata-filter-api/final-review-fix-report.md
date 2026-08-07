@@ -121,3 +121,110 @@ git diff --check
 - No live PostgreSQL/ParadeDB/pgvector instance was used. SQL execution shape is covered with `sqlmock`; JSONB numeric behavior relies on PostgreSQL's exact JSONB numeric semantics.
 - No live summary model, Asynq worker, or retrieval-engine reindex was run. Initial/refresh metadata decisions and the refresh persistence path are covered by Go tests and related-package regression tests.
 - No deployed HTTP environment or protected-data acceptance test was run; handler binding and filtered response behavior are local Go tests.
+
+---
+
+## Final narrow follow-up at `205d55d4`
+
+Starting HEAD: `205d55d484faa7aaae7e2c854e53666f613dfa46`
+
+This follow-up addresses the independently confirmed remaining one Critical and two Important findings. It does not reset or rewrite earlier commits, and no push or merge is performed.
+
+### 1. Filtered image enrichment isolation
+
+- `processSearchResults` no longer calls child-image enrichment when `metadataFilter` is present.
+- This prevents URL, OCR text, or caption data from image OCR/caption child chunks from bypassing the chunk metadata predicate.
+- Unfiltered search keeps the existing enrichment behavior.
+- The regression repository now returns a real restricted image child with URL, OCR, and caption payload. Before the fix, that payload appeared in `SearchResult.ImageInfo`; after the fix, the filtered response remains empty.
+- The design and REST API documentation state that filtered search does not backfill `image_info` from image OCR/caption child chunks.
+
+### 2. Exact `JSONMap.Scan` numbers
+
+- `JSONMap.Scan` now uses the shared `json.Decoder.UseNumber` path instead of ordinary `json.Unmarshal`.
+- The scanner recursively preserves JSON numbers, including integers above `2^53`, as `json.Number` until `Value` marshals them back to JSON.
+- Regression coverage scans both real-driver-style `[]byte` and sqlmock-style `string` values and proves `9007199254740993` and a nested `9007199254740995` marshal without rounding.
+- Related repository tests include the knowledge-span JSONB fields (`input`, `output`, and `metadata`) that use the same scanner, in addition to PostgreSQL retriever `access_metadata` usage and the CopyIndices mapping tests.
+
+### 3. Setter-owned metadata cleanup
+
+- `SetDocumentMetadata(nil)` removes only `generated_questions` and `generated_questions_revision`.
+- `SetFAQMetadata(nil)` removes only the known `FAQChunkMetadata` keys.
+- Both setters preserve valid reserved `access_metadata` and unrelated extension keys such as `label`; metadata becomes nil only when no keys remain.
+- FAQ cleanup still clears `ContentHash`.
+- Existing nil-setter fixtures now use fields owned by the setter under test, so they no longer require the FAQ setter to delete document metadata.
+
+### TDD evidence
+
+The three new regressions were added and observed RED before production changes:
+
+- Service RED: the filtered result contained the restricted child image URL, caption, and OCR payload.
+- JSONMap RED: `9007199254740993` scanned as the rounded `9.007199254740992e+15` float.
+- Setter RED: both document and FAQ nil setters removed the unrelated `label` field.
+
+After the minimal production changes, the focused regressions passed.
+
+### Files changed in this follow-up
+
+- `internal/application/service/knowledgebase_search_results.go`
+- `internal/application/service/knowledgebase_search_results_metadata_filter_test.go`
+- `internal/types/json_map.go`
+- `internal/types/json_map_test.go`
+- `internal/types/chunk_access_metadata.go`
+- `internal/types/chunk_access_metadata_test.go`
+- `internal/types/faq.go`
+- `docs/superpowers/specs/2026-08-07-chunk-metadata-filter-api-design.md`
+- `website-docs/04-api/02-api-knowledge.md`
+- `.superpowers/sdd/2026-08-07-chunk-metadata-filter-api/final-review-fix-report.md`
+
+### Verification
+
+Focused regressions:
+
+```text
+GOTELEMETRY=off go test ./internal/application/service -run 'TestProcessSearchResultsMetadataFilterDoesNotEnrichImageInfoFromChildChunks' -count=1
+ok  github.com/Tencent/WeKnora/internal/application/service
+
+GOTELEMETRY=off go test ./internal/types -run 'TestJSONMapScanValuePreservesExactNumbers|TestChunkMetadataSettersNil' -count=1
+ok  github.com/Tencent/WeKnora/internal/types
+```
+
+Complete related-package tests:
+
+```text
+GOTELEMETRY=off go test ./internal/types ./internal/application/service ./internal/application/repository ./internal/application/repository/retriever/postgres ./internal/handler -count=1
+ok  github.com/Tencent/WeKnora/internal/types
+ok  github.com/Tencent/WeKnora/internal/application/service
+ok  github.com/Tencent/WeKnora/internal/application/repository
+ok  github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres
+ok  github.com/Tencent/WeKnora/internal/handler
+```
+
+Static verification:
+
+```text
+GOTELEMETRY=off go vet ./...
+# exit 0, no output
+
+git diff --check
+# exit 0, no output
+```
+
+Additional full-suite check:
+
+```text
+GOTELEMETRY=off go test ./... -count=1
+# FAILED only in internal/datasource/connector/feishu/wiki:
+# TestFetchAll_LogsSummaryWithSkipBreakdown captured repeated "json" lines instead of the expected summary text.
+
+GOTELEMETRY=off go test ./internal/datasource/connector/feishu/wiki \
+  -run '^TestFetchAll_LogsSummaryWithSkipBreakdown$' -count=1 -v
+# FAILED with the same pre-existing log-capture mismatch.
+```
+
+No files in that package or its logger path are changed by this follow-up. The failure is recorded rather than expanded into this narrow security fix.
+
+### Unverified external boundaries for this follow-up
+
+- No live PostgreSQL/ParadeDB/pgvector instance was used. Exact scanner/value round-tripping and CopyIndices preservation are local Go tests; PostgreSQL JSONB driver behavior is not re-exercised against a live server.
+- No deployed hybrid-search endpoint or protected-data acceptance environment was used. The image-enrichment regression executes the real service and enrichment code with an in-memory repository double that returns a restricted child chunk.
+- Agent/session QA and chat-pipeline enrichment remain outside this REST hybrid-search change's documented scope and were not changed.

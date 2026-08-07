@@ -133,7 +133,7 @@ curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/pin -H "Authorization: Bearer $TOK
 }
 ```
 
-它可与 `knowledge_ids` 的文档级限定叠加，对文档中的分块（chunk）做进一步收窄；过滤条件针对分块访问元数据，不读取文档级 `custom_metadata`。带过滤条件的搜索会排除 document-wide summary chunk，并不返回 `knowledge_description`，避免暴露由不同权限分块聚合出的摘要内容。它不负责解析或确认调用者身份，也不是身份解析器。过滤读取保留的 `access_metadata` 对象；本接口只提供检索过滤，不承诺或提供该元数据的写入支持。省略 `metadata_filter`（或传 `null`）保持现有检索行为。
+它可与 `knowledge_ids` 的文档级限定叠加，对文档中的分块（chunk）做进一步收窄；过滤条件针对分块访问元数据，不读取文档级 `custom_metadata`。带过滤条件的搜索会排除 document-wide summary chunk，并不返回 `knowledge_description`，避免暴露由不同权限分块聚合出的摘要内容；同时不会从 image OCR/caption 子块补齐 `image_info`，只可能返回已存储在命中且匹配过滤条件的分块上的图片信息。它不负责解析或确认调用者身份，也不是身份解析器。过滤读取保留的 `access_metadata` 对象；本接口只提供检索过滤，不承诺或提供该元数据的写入支持。省略 `metadata_filter`（或传 `null`）保持现有检索行为。
 
 响应：200 `{"success":true,"data":[SearchResult]}`
 

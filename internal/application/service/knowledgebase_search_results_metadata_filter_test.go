@@ -11,7 +11,8 @@ import (
 
 type metadataFilterResultChunkRepo struct {
 	interfaces.ChunkRepository
-	chunks map[string]*types.Chunk
+	chunks             map[string]*types.Chunk
+	childrenByParentID map[string][]*types.Chunk
 }
 
 func (r *metadataFilterResultChunkRepo) ListChunksByID(
@@ -27,9 +28,13 @@ func (r *metadataFilterResultChunkRepo) ListChunksByID(
 }
 
 func (r *metadataFilterResultChunkRepo) ListChunksByParentIDs(
-	_ context.Context, _ uint64, _ []string,
+	_ context.Context, _ uint64, parentIDs []string,
 ) ([]*types.Chunk, error) {
-	return nil, nil
+	var chunks []*types.Chunk
+	for _, parentID := range parentIDs {
+		chunks = append(chunks, r.childrenByParentID[parentID]...)
+	}
+	return chunks, nil
 }
 
 type metadataFilterResultKnowledgeRepo struct {
@@ -124,6 +129,33 @@ func TestProcessSearchResultsMetadataFilterExcludesDisallowedNearbyAndAccessMeta
 	}
 	if results[0].KnowledgeDescription != "" {
 		t.Fatalf("filtered result leaked knowledge description %q", results[0].KnowledgeDescription)
+	}
+}
+
+func TestProcessSearchResultsMetadataFilterDoesNotEnrichImageInfoFromChildChunks(t *testing.T) {
+	primary := metadataFilterResultChunk("primary", metadataForDepartment("research"))
+	restrictedImage := metadataFilterResultChunk("restricted-image", metadataForDepartment("finance"))
+	restrictedImage.ParentChunkID = primary.ID
+	restrictedImage.ChunkType = types.ChunkTypeImageOCR
+	restrictedImage.ImageInfo = `[{"url":"https://restricted.example/image.png",` +
+		`"caption":"restricted caption","ocr_text":"restricted OCR"}]`
+	service := newMetadataFilterResultService(map[string]*types.Chunk{primary.ID: primary})
+	repo := service.chunkRepo.(*metadataFilterResultChunkRepo)
+	repo.childrenByParentID = map[string][]*types.Chunk{
+		primary.ID: {restrictedImage},
+	}
+
+	results, err := service.processSearchResults(metadataFilterResultContext(), []*types.IndexWithScore{{
+		ChunkID: primary.ID, KnowledgeID: primary.KnowledgeID, Score: 1,
+	}}, false, metadataFilterForResearch())
+	if err != nil {
+		t.Fatalf("processSearchResults() error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("result count = %d, want 1", len(results))
+	}
+	if results[0].ImageInfo != "" {
+		t.Fatalf("filtered result leaked child image info %q", results[0].ImageInfo)
 	}
 }
 

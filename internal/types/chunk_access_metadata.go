@@ -79,9 +79,9 @@ func (c *Chunk) withExistingAccessMetadata(metadata []byte) (JSON, error) {
 	return JSON(merged), nil
 }
 
-// clearNonAccessMetadata removes metadata owned by document/FAQ writers while
-// preserving a valid reserved access object. Without one, metadata is cleared.
-func (c *Chunk) clearNonAccessMetadata() error {
+// clearMetadataFields removes only metadata owned by the calling writer while
+// preserving a valid reserved access object and all unrelated extension keys.
+func (c *Chunk) clearMetadataFields(fields ...string) error {
 	if c == nil || len(c.Metadata) == 0 {
 		return nil
 	}
@@ -92,19 +92,23 @@ func (c *Chunk) clearNonAccessMetadata() error {
 	if existing == nil {
 		return fmt.Errorf("chunk metadata must be a JSON object")
 	}
-	rawAccessMetadata, ok := existing[chunkAccessMetadataKey]
-	if !ok {
+	if rawAccessMetadata, ok := existing[chunkAccessMetadataKey]; ok {
+		var accessMetadata JSONMap
+		if err := decodeJSONWithNumbers(rawAccessMetadata, &accessMetadata); err != nil {
+			return fmt.Errorf("decode %s: %w", chunkAccessMetadataKey, err)
+		}
+		if accessMetadata == nil {
+			return fmt.Errorf("%s must be a JSON object", chunkAccessMetadataKey)
+		}
+	}
+	for _, field := range fields {
+		delete(existing, field)
+	}
+	if len(existing) == 0 {
 		c.Metadata = nil
 		return nil
 	}
-	var accessMetadata JSONMap
-	if err := decodeJSONWithNumbers(rawAccessMetadata, &accessMetadata); err != nil {
-		return fmt.Errorf("decode %s: %w", chunkAccessMetadataKey, err)
-	}
-	if accessMetadata == nil {
-		return fmt.Errorf("%s must be a JSON object", chunkAccessMetadataKey)
-	}
-	metadata, err := json.Marshal(map[string]json.RawMessage{chunkAccessMetadataKey: rawAccessMetadata})
+	metadata, err := json.Marshal(existing)
 	if err != nil {
 		return fmt.Errorf("encode chunk metadata: %w", err)
 	}
