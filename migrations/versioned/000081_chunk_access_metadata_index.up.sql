@@ -10,6 +10,6 @@ BEGIN
         CREATE INDEX IF NOT EXISTS idx_embeddings_access_metadata
             ON embeddings USING GIN (access_metadata);
     ELSE
-        RAISE NOTICE '[Migration 000079] embeddings table does not exist, skipping';
+        RAISE NOTICE '[Migration 000081] embeddings table does not exist, skipping';
     END IF;
 END $$;

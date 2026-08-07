@@ -39,8 +39,8 @@
 - `internal/application/repository/retriever/postgres/repository.go`: Preserve metadata during index copy and apply predicates to keyword/vector SQL.
 - `internal/application/repository/retriever/postgres/metadata_filter.go`: Parameterized JSONB predicate compiler.
 - `internal/application/repository/retriever/postgres/metadata_filter_test.go`: Compiler and SQL-injection regression tests.
-- `migrations/versioned/000079_chunk_access_metadata_index.up.sql`: Add PostgreSQL index metadata storage and JSONB index.
-- `migrations/versioned/000079_chunk_access_metadata_index.down.sql`: Revert the migration.
+- `migrations/versioned/000081_chunk_access_metadata_index.up.sql`: Add PostgreSQL index metadata storage and JSONB index.
+- `migrations/versioned/000081_chunk_access_metadata_index.down.sql`: Revert the migration.
 - `internal/application/service/chunk.go`, `knowledge_process.go`, `image_multimodal.go`, `extract.go`, `knowledge_faq.go`, `knowledge_faq_import.go`: Carry chunk access metadata into every existing `IndexInfo` construction path.
 - `website-docs/04-api/02-api-knowledge.md`: REST request grammar, semantics, and example.
 - `website-docs/03-features/05-retrieval-engines.md`: PostgreSQL support matrix, indexing/backfill requirement, and unsupported-backend behavior.
@@ -376,8 +376,8 @@ git commit -m "feat: carry chunk access metadata into indexes"
 ### Task 5: Add PostgreSQL access-metadata storage and copy preservation
 
 **Files:**
-- Create: `migrations/versioned/000079_chunk_access_metadata_index.up.sql`
-- Create: `migrations/versioned/000079_chunk_access_metadata_index.down.sql`
+- Create: `migrations/versioned/000081_chunk_access_metadata_index.up.sql`
+- Create: `migrations/versioned/000081_chunk_access_metadata_index.down.sql`
 - Modify: `internal/application/repository/retriever/postgres/structs.go:15-80`
 - Modify: `internal/application/repository/retriever/postgres/repository.go:486-570`
 - Create: `internal/application/repository/retriever/postgres/structs_test.go`
@@ -431,7 +431,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit PostgreSQL metadata storage**
 
 ```bash
-git add migrations/versioned/000079_chunk_access_metadata_index.up.sql migrations/versioned/000079_chunk_access_metadata_index.down.sql internal/application/repository/retriever/postgres/structs.go internal/application/repository/retriever/postgres/repository.go internal/application/repository/retriever/postgres/structs_test.go
+git add migrations/versioned/000081_chunk_access_metadata_index.up.sql migrations/versioned/000081_chunk_access_metadata_index.down.sql internal/application/repository/retriever/postgres/structs.go internal/application/repository/retriever/postgres/repository.go internal/application/repository/retriever/postgres/structs_test.go
 git commit -m "feat: store chunk access metadata in postgres indexes"
 ```
 
