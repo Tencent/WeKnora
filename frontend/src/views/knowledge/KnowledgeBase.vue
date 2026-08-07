@@ -35,6 +35,7 @@ import {
   batchReparseKnowledge,
   getKnowledgeSpans,
   getKnowledgeDetails,
+  listKnowledgeFiles,
   listKnowledgeFolders,
   moveKnowledgeToFolder,
   renameKnowledgeFolder,
@@ -1999,15 +2000,57 @@ const onCardGridCheckboxChange = (id: string, checked: boolean, ctx?: { e?: Even
   toggleSelectRow(id, checked, !!me?.shiftKey);
 };
 
-const toggleSelectAll = (checked: boolean) => {
-  if (checked) {
-    for (const item of cardList.value || []) selectedIds.value.add(item.id);
-  } else {
-    for (const item of cardList.value || []) selectedIds.value.delete(item.id);
+// Select all across pages: the list is loaded incrementally via infinite
+// scroll, so cardList only holds the loaded window. When the header checkbox
+// is checked, fetch every document id matching the current filters from the
+// backend page by page; otherwise only the loaded slice would be selected.
+// The backend caps page_size at 1000.
+const SELECT_ALL_PAGE_SIZE = 1000;
+const selectAllAcrossPages = ref(false);
+const selectAllLoading = ref(false);
+let selectAllGeneration = 0;
+
+const toggleSelectAll = async (checked: boolean) => {
+  if (!checked) {
+    clearSelection();
+    return;
+  }
+  for (const item of cardList.value || []) selectedIds.value.add(item.id);
+  selectAllAcrossPages.value = true;
+  if (cardList.value.length >= total.value) return;
+  const currentKbId = kbId.value;
+  if (!currentKbId) return;
+  const generation = ++selectAllGeneration;
+  selectAllLoading.value = true;
+  try {
+    let pageNum = 1;
+    while (true) {
+      const res: any = await listKnowledgeFiles(currentKbId, {
+        page: pageNum,
+        page_size: SELECT_ALL_PAGE_SIZE,
+        ...filterParams.value,
+      });
+      // The user cancelled select-all or switched filters/kb while fetching:
+      // discard this result.
+      if (generation !== selectAllGeneration || !isCurrentKb(currentKbId)) return;
+      const items = res?.data || [];
+      const totalAll = res?.total || 0;
+      for (const it of items) {
+        if (it?.id) selectedIds.value.add(it.id);
+      }
+      if (items.length === 0 || pageNum * SELECT_ALL_PAGE_SIZE >= totalAll) break;
+      pageNum++;
+    }
+  } catch {
+    // Keep the partially selected ids if the fetch fails midway.
+  } finally {
+    if (generation === selectAllGeneration) selectAllLoading.value = false;
   }
 };
 
 const clearSelection = () => {
+  selectAllGeneration++;
+  selectAllAcrossPages.value = false;
   selectedIds.value.clear();
   lastSelectedIndex = -1;
 };
@@ -2197,6 +2240,9 @@ watch(cardList, () => {
     moreIndex.value = -1;
   }
   if (selectedIds.value.size === 0) return;
+  // With select-all across pages, selectedIds intentionally contains ids
+  // outside the loaded window; don't prune them against the visible list.
+  if (selectAllAcrossPages.value) return;
   const visible = new Set(items.map((i: KnowledgeCard) => i.id));
   for (const id of selectedIds.value) {
     if (!visible.has(id)) selectedIds.value.delete(id);
@@ -2629,7 +2675,8 @@ async function createNewSession(value: string): Promise<void> {
               </div>
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
                 <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
-                  :reparse-loading="batchReparsing" :tag-loading="batchTagging" :visible="batchMode || selectedIds.size > 0"
+                  :reparse-loading="batchReparsing" :tag-loading="batchTagging" :select-all-loading="selectAllLoading"
+                  :visible="batchMode || selectedIds.size > 0"
                   :show-move-to-folder="canEdit" :folder-options="folderOptions"
                   @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse"
                   @batch-tag="handleBatchTag"
