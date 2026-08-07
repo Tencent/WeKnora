@@ -1,7 +1,9 @@
 package cmdutil
 
 import (
+	"encoding/csv"
 	"fmt"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 
@@ -14,22 +16,54 @@ import (
 
 // BuildRetryArgv assembles the directly-executable retry argv for a
 // confirmation-gated command: head (e.g. []string{"weknora","kb","update",id})
-// followed by each *changed* flag named in allow (as "--name", "value") in
-// pflag's visit order, plus a trailing "-y". Flags not in allow — multi-value
-// or file-based ones where a precise single argv is impractical — are skipped;
-// the human reconstructs those. Replaces the per-command build*RetryCmd helpers.
+// followed by each *changed* flag named in allow in pflag's visit order, plus
+// a trailing "-y". The returned slice is directly executable and never needs
+// shell re-tokenization; a slice read failure returns nil to fail closed.
 func BuildRetryArgv(c *cobra.Command, head []string, allow ...string) []string {
 	allowed := make(map[string]struct{}, len(allow))
-	for _, a := range allow {
-		allowed[a] = struct{}{}
+	for _, name := range allow {
+		allowed[name] = struct{}{}
 	}
-	parts := append([]string{}, head...)
-	c.Flags().Visit(func(f *pflag.Flag) {
-		if _, ok := allowed[f.Name]; ok {
-			parts = append(parts, "--"+f.Name, f.Value.String())
+	parts := append([]string(nil), head...)
+	complete := true
+	c.Flags().Visit(func(flag *pflag.Flag) {
+		if !complete {
+			return
 		}
+		if _, ok := allowed[flag.Name]; !ok {
+			return
+		}
+		parts, complete = appendRetryFlag(parts, flag)
 	})
+	if !complete {
+		return nil
+	}
 	return append(parts, "-y")
+}
+
+func appendRetryFlag(parts []string, flag *pflag.Flag) ([]string, bool) {
+	if values, ok := flag.Value.(pflag.SliceValue); ok {
+		items := values.GetSlice()
+		for _, item := range items {
+			if flag.Value.Type() == "stringSlice" {
+				item = encodeStringSliceItem(item)
+			}
+			parts = append(parts, "--"+flag.Name, item)
+		}
+		return parts, true
+	}
+	if flag.Value.Type() == "bool" {
+		return append(parts, "--"+flag.Name+"="+flag.Value.String()), true
+	}
+	return append(parts, "--"+flag.Name, flag.Value.String()), true
+}
+
+func encodeStringSliceItem(value string) string {
+	var b strings.Builder
+	w := csv.NewWriter(&b)
+	_ = w.Write([]string{value})
+	w.Flush()
+	return strings.TrimRight(b.String(), "\r\n")
 }
 
 // confirmCaveat returns the trailing safety note shown after the interactive
