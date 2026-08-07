@@ -91,13 +91,13 @@ type knowledgeService interface {
 
 type chatService interface {
 	CreateSession(ctx context.Context, req *sdk.CreateSessionRequest) (*sdk.Session, error)
-	KnowledgeQAStream(ctx context.Context, sessionID string, req *sdk.KnowledgeQARequest, cb func(*sdk.StreamResponse) error) error
+	KnowledgeQAStream(ctx context.Context, sessionID string, req *sdk.KnowledgeQARequest, cb func(*sdk.StreamResponse) error, opts ...sdk.ResourceURLOptions) error
 }
 
 type agentService interface {
 	ListAgents(ctx context.Context) ([]sdk.Agent, error)
 	GetAgent(ctx context.Context, agentID string) (*sdk.Agent, error)
-	AgentQAStreamWithRequest(ctx context.Context, sessionID string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback) error
+	AgentQAStreamWithRequest(ctx context.Context, sessionID string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback, opts ...sdk.ResourceURLOptions) error
 }
 
 // chunkListService is the narrow surface chunk_list depends on. Kept
@@ -114,7 +114,7 @@ type chunkListService interface {
 // four domain interfaces - also satisfies it.
 type sessionAskService interface {
 	CreateSession(ctx context.Context, req *sdk.CreateSessionRequest) (*sdk.Session, error)
-	AgentQAStreamWithRequest(ctx context.Context, sessionID string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback) error
+	AgentQAStreamWithRequest(ctx context.Context, sessionID string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback, opts ...sdk.ResourceURLOptions) error
 }
 
 // registerTools wires the curated 10 tools onto server. Adding a tool here

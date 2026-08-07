@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/testutil"
@@ -51,5 +53,64 @@ func TestConfirmDestructiveBatch_VerbMatchesOperation(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "delete 3 document(s) requires") {
 		t.Errorf("unexpected batch message: %q", err.Error())
+	}
+}
+
+func TestBuildRetryArgv_ScalarsAndSlices(t *testing.T) {
+	cmd := &cobra.Command{Use: "update"}
+	var name string
+	var addKBs []string
+	var format string
+	cmd.Flags().StringVar(&name, "name", "", "")
+	cmd.Flags().StringSliceVar(&addKBs, "add-kb", nil, "")
+	cmd.Flags().StringVar(&format, "format", "", "")
+	if err := cmd.Flags().Parse([]string{
+		"--add-kb", "kb_new",
+		"--add-kb", "kb_old",
+		"--name", "Renamed",
+		"--format", "json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := cmdutil.BuildRetryArgv(cmd, []string{"weknora", "agent", "update", "ag_abc"},
+		"name", "add-kb", "format")
+	// Visit order is lexicographical among changed flags.
+	want := []string{
+		"weknora", "agent", "update", "ag_abc",
+		"--add-kb", "kb_new",
+		"--add-kb", "kb_old",
+		"--format", "json",
+		"--name", "Renamed",
+		"-y",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len got=%d want=%d\ngot=%v\nwant=%v", len(got), len(want), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("idx %d: got %q want %q\nfull got=%v", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestBuildRetryArgv_SkipsFlagsNotInAllow(t *testing.T) {
+	cmd := &cobra.Command{Use: "update"}
+	var name, secret string
+	cmd.Flags().StringVar(&name, "name", "", "")
+	cmd.Flags().StringVar(&secret, "api-key-stdin", "", "")
+	if err := cmd.Flags().Parse([]string{"--name", "x", "--api-key-stdin", "-"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := cmdutil.BuildRetryArgv(cmd, []string{"weknora", "model", "update", "m1"}, "name", "format")
+	want := []string{"weknora", "model", "update", "m1", "--name", "x", "-y"}
+	if len(got) != len(want) {
+		t.Fatalf("len got=%d want=%d\ngot=%v\nwant=%v", len(got), len(want), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("idx %d: got %q want %q\nfull got=%v", i, got[i], want[i], got)
+		}
 	}
 }
