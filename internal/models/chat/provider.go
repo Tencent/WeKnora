@@ -259,14 +259,7 @@ func (moonshotProvider) ShapeRequest(req *openai.ChatCompletionRequest, _ *ChatO
 // shapeOpenAIReasoning strips sampling params (unsupported by o-series / GPT-5)
 // and migrates max_tokens to max_completion_tokens. See issue #1283.
 func shapeOpenAIReasoning(req *openai.ChatCompletionRequest) {
-	req.Temperature = 0
-	req.TopP = 0
-	req.FrequencyPenalty = 0
-	req.PresencePenalty = 0
-	if req.MaxCompletionTokens == 0 && req.MaxTokens > 0 {
-		req.MaxCompletionTokens = req.MaxTokens
-	}
-	req.MaxTokens = 0
+	provider.ShapeOpenAIReasoningRequest(req)
 }
 
 // providerRegistry is ordered: more specific adapters (those with a real

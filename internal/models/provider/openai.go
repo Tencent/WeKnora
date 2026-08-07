@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	openai "github.com/sashabaranov/go-openai"
 )
 
 const (
@@ -83,4 +84,17 @@ func IsOpenAIReasoningOrGPT5Model(modelName string) bool {
 		}
 	}
 	return false
+}
+
+// ShapeOpenAIReasoningRequest removes sampling parameters unsupported by
+// o-series / GPT-5 models and migrates max_tokens to max_completion_tokens.
+func ShapeOpenAIReasoningRequest(req *openai.ChatCompletionRequest) {
+	req.Temperature = 0
+	req.TopP = 0
+	req.FrequencyPenalty = 0
+	req.PresencePenalty = 0
+	if req.MaxCompletionTokens == 0 && req.MaxTokens > 0 {
+		req.MaxCompletionTokens = req.MaxTokens
+	}
+	req.MaxTokens = 0
 }
