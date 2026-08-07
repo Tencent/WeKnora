@@ -240,6 +240,10 @@ export default {
       submit: '更新密码',
       success: '密码已更新，请使用新密码重新登录',
       failed: '修改密码失败，请检查当前密码是否正确',
+      policyFailed: '新密码须为 8-32 个字符，且同时包含字母和数字',
+      sameAsCurrent: '新密码不能与当前密码相同',
+      oidcOnlyDescription: '您的账号通过 OIDC 登录开通，尚未设置本地登录密码。',
+      oidcOnlyNotice: '请联系系统管理员重置密码，或继续使用 OIDC 登录。自助修改密码需要先知道当前密码。',
     },
   },
   credential: {

@@ -5688,6 +5688,10 @@ export default {
       submit: 'Update password',
       success: 'Password updated. Please sign in with your new password.',
       failed: 'Failed to change password. Check that your current password is correct.',
+      policyFailed: 'New password must be 8-32 characters and include letters and numbers',
+      sameAsCurrent: 'New password must differ from your current password',
+      oidcOnlyDescription: 'Your account was created via OIDC sign-in and has no known local password yet.',
+      oidcOnlyNotice: 'Ask a system administrator to reset your password, or keep signing in with OIDC. Self-service change requires your current password.',
     },
   },
   tenantMember: {

@@ -254,6 +254,26 @@ func TestChangePasswordRequiresPolicyAndRevokesSessions(t *testing.T) {
 	}
 }
 
+func TestChangePasswordRejectsSamePassword(t *testing.T) {
+	ctx := context.Background()
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+	repo := svc.userRepo.(*stubUserRepoForAuth)
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte("OldSecure9"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash old password: %v", err)
+	}
+	repo.users["user-1"].PasswordHash = string(hashed)
+
+	if err := svc.ChangePassword(ctx, "user-1", "OldSecure9", "OldSecure9"); !errors.Is(err, ErrSamePassword) {
+		t.Fatalf("ChangePassword(same) err = %v, want ErrSamePassword", err)
+	}
+	if repo.updateCalls != 0 || len(tokenRepo.revokedUserIDs) != 0 {
+		t.Fatalf("same password caused side effects: updates=%d revocations=%v", repo.updateCalls, tokenRepo.revokedUserIDs)
+	}
+}
+
 func TestUserIDFromSignedTokenAcceptsExpiredToken(t *testing.T) {
 	expired := signTestJWT(jwt.MapClaims{
 		"user_id": "user-1",

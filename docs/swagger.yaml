@@ -3820,6 +3820,13 @@ definitions:
                  a stored *0 the same as nil.
           *N   = preferred workspace id.
         type: integer
+      oidc_only_login:
+        description: |-
+          OidcOnlyLogin is set server-side when an account is auto-provisioned
+          via OIDC with a random password the user never received. The profile
+          UI hides self-service password rotation until the user sets a known
+          password via ChangePassword (which clears this flag).
+        type: boolean
     type: object
   github_com_Tencent_WeKnora_internal_types.VLMConfig:
     properties:
@@ -6371,7 +6378,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 修改当前用户的登录密码
+      description: 修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；成功后所有会话被撤销，需重新登录。
       parameters:
       - description: 密码修改请求
         in: body

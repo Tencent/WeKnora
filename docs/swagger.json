@@ -818,7 +818,7 @@
                         "Bearer": []
                     }
                 ],
-                "description": "修改当前用户的登录密码",
+                "description": "修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；成功后所有会话被撤销，需重新登录。",
                 "consumes": [
                     "application/json"
                 ],
@@ -19807,6 +19807,10 @@
                 "last_active_tenant_id": {
                     "description": "LastActiveTenantID remembers the last workspace the user actively\nswitched into, so a fresh login (new device, cleared browser, new\nrefresh token) lands them back in that workspace instead of always\nbouncing to their home workspace. Login / RefreshToken validate that\nthe workspace still exists and the user still has an active membership\n(or CanAccessAllTenants) before honouring this preference; an\ninvalid pointer is best-effort cleared and the user falls back to\nhome.\n\nnil  = no preference (use user.TenantID, i.e. home)\n*0   = \"clear preference\" sentinel for the partial-update endpoint\n       (UpdateUserPreferences turns this into nil). Otherwise treat\n       a stored *0 the same as nil.\n*N   = preferred workspace id.",
                     "type": "integer"
+                },
+                "oidc_only_login": {
+                    "description": "OidcOnlyLogin is set server-side when an account is auto-provisioned\nvia OIDC with a random password the user never received. The profile\nUI hides self-service password rotation until the user sets a known\npassword via ChangePassword (which clears this flag).",
+                    "type": "boolean"
                 }
             }
         },

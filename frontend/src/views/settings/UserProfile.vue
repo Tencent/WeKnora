@@ -70,10 +70,21 @@
       <div class="setting-row password-row">
         <div class="setting-info">
           <label>{{ $t('userProfile.changePassword.label') }}</label>
-          <p class="desc">{{ $t('userProfile.changePassword.description') }}</p>
+          <p class="desc">
+            {{ oidcOnlyLogin
+              ? $t('userProfile.changePassword.oidcOnlyDescription')
+              : $t('userProfile.changePassword.description') }}
+          </p>
         </div>
         <div class="setting-control password-control">
+          <t-alert
+            v-if="oidcOnlyLogin"
+            theme="info"
+            :message="$t('userProfile.changePassword.oidcOnlyNotice')"
+            class="oidc-only-notice"
+          />
           <t-form
+            v-else
             ref="passwordFormRef"
             :data="passwordForm"
             :rules="passwordRules"
@@ -162,6 +173,10 @@ const passwordForm = reactive({
   confirmPassword: '',
 })
 
+const oidcOnlyLogin = computed(
+  () => userInfo.value?.preferences?.oidc_only_login === true,
+)
+
 const passwordRules = computed<Record<string, FormRule[]>>(() => ({
   oldPassword: [
     { required: true, message: t('userProfile.changePassword.currentRequired'), type: 'error' },
@@ -172,6 +187,11 @@ const passwordRules = computed<Record<string, FormRule[]>>(() => ({
     { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
     { pattern: /[a-zA-Z]/, message: t('auth.passwordMustContainLetter'), type: 'error' },
     { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' },
+    {
+      validator: (val: string) => val !== passwordForm.oldPassword,
+      message: t('userProfile.changePassword.sameAsCurrent'),
+      type: 'error',
+    },
   ],
   confirmPassword: [
     { required: true, message: t('auth.confirmPasswordRequired'), type: 'error' },
@@ -179,6 +199,7 @@ const passwordRules = computed<Record<string, FormRule[]>>(() => ({
       validator: (val: string) => val === passwordForm.newPassword,
       message: t('auth.passwordMismatch'),
       type: 'error',
+      trigger: 'blur',
     },
   ],
 }))
@@ -362,6 +383,10 @@ onMounted(loadInfo)
   max-width: 360px;
   flex-direction: column;
   align-items: stretch;
+}
+
+.oidc-only-notice {
+  width: 100%;
 }
 
 .password-form {
