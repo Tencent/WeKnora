@@ -22,7 +22,7 @@ type stubSearchSessionService struct {
 }
 
 func (s *stubSearchSessionService) SearchKnowledge(
-	_ context.Context, _ []string, _ []string, _ []types.TagScope, _ string,
+	_ context.Context, _ []string, _ []string, _ []types.TagScope, _ string, _ string,
 ) ([]*types.SearchResult, error) {
 	return []*types.SearchResult{{
 		Content:   "chunk ![c](" + testResourceHandle + ")",
