@@ -165,6 +165,13 @@ type KnowledgeBaseConfig struct {
 	IndexingStrategy *IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"`
 }
 
+const (
+	// DefaultAutoTagMaxTags is applied when max_tags is unset or non-positive.
+	DefaultAutoTagMaxTags = 3
+	// MaximumAutoTagMaxTags caps how many tags one document may auto-acquire.
+	MaximumAutoTagMaxTags = 10
+)
+
 // AutoTagConfig controls asynchronous document auto-tagging. It is deliberately
 // opt-in so upgrading an existing deployment does not add model calls or alter
 // document tags unexpectedly.
@@ -172,6 +179,20 @@ type AutoTagConfig struct {
 	Enabled bool   `yaml:"enabled" json:"enabled"`
 	ModelID string `yaml:"model_id,omitempty" json:"model_id,omitempty"`
 	MaxTags int    `yaml:"max_tags,omitempty" json:"max_tags,omitempty"`
+	// SkipIfTagged leaves documents that already carry tags untouched, so a
+	// deliberate manual classification is not diluted by model guesses. It is
+	// a pointer because the default is true: rows written before this field
+	// existed decode to nil and must not silently flip to "always append".
+	SkipIfTagged *bool `yaml:"skip_if_tagged,omitempty" json:"skip_if_tagged,omitempty"`
+}
+
+// ShouldSkipIfTagged reports whether documents with existing tags are left
+// alone. Defaults to true for nil receivers and unset values.
+func (c *AutoTagConfig) ShouldSkipIfTagged() bool {
+	if c == nil || c.SkipIfTagged == nil {
+		return true
+	}
+	return *c.SkipIfTagged
 }
 
 // Value serializes the automatic-tagging configuration for database storage.
@@ -199,10 +220,14 @@ func (c *AutoTagConfig) Normalize() {
 		return
 	}
 	if c.MaxTags <= 0 {
-		c.MaxTags = 3
+		c.MaxTags = DefaultAutoTagMaxTags
 	}
-	if c.MaxTags > 10 {
-		c.MaxTags = 10
+	if c.MaxTags > MaximumAutoTagMaxTags {
+		c.MaxTags = MaximumAutoTagMaxTags
+	}
+	if c.SkipIfTagged == nil {
+		skip := true
+		c.SkipIfTagged = &skip
 	}
 }
 

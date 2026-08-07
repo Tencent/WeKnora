@@ -3319,7 +3319,9 @@ export default {
         modelDescription: '비워 두면 지식베이스 요약 모델을 사용합니다.',
         modelPlaceholder: '분류 모델 선택',
         maxTagsLabel: '문서당 최대 태그 수',
-        maxTagsDescription: '문서마다 기존 태그 1-10개를 자동 연결합니다.'
+        maxTagsDescription: '문서마다 기존 태그 1-10개를 자동 연결합니다.',
+        skipIfTaggedLabel: '태그가 있는 문서 건너뛰기',
+        skipIfTaggedDescription: '활성화하면 업로드 시 수동으로 태그를 지정한 문서에는 자동 태그를 추가하지 않아 사용자의 분류 의도를 유지합니다.'
       }
     },
     asr: {

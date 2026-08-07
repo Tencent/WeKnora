@@ -103,6 +103,15 @@
             />
           </div>
         </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <label>{{ $t('knowledgeEditor.advanced.autoTag.skipIfTaggedLabel') }}</label>
+            <p class="desc">{{ $t('knowledgeEditor.advanced.autoTag.skipIfTaggedDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <t-switch v-model="localAutoTag.skipIfTagged" size="medium" @change="emitAutoTag" />
+          </div>
+        </div>
       </div>
 
       <div class="setting-row setting-row-vertical">
@@ -139,6 +148,7 @@ interface AutoTagConfig {
   enabled: boolean
   modelId: string
   maxTags: number
+  skipIfTagged: boolean
 }
 
 interface Props {
@@ -167,7 +177,7 @@ const localQuestionGeneration = ref<QuestionGenerationConfig>(
 )
 
 const localAutoTag = ref<AutoTagConfig>(
-  props.autoTag ? { ...props.autoTag } : { enabled: false, modelId: '', maxTags: 3 }
+  props.autoTag ? { ...props.autoTag } : { enabled: false, modelId: '', maxTags: 3, skipIfTagged: true }
 )
 
 watch(() => props.questionGeneration, (newVal) => {

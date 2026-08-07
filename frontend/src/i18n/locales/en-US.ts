@@ -2597,7 +2597,9 @@ export default {
         modelDescription: 'Leave empty to reuse the knowledge-base summary model.',
         modelPlaceholder: 'Select a classification model',
         maxTagsLabel: 'Maximum tags per document',
-        maxTagsDescription: 'Automatically associate 1-10 existing tags per document.'
+        maxTagsDescription: 'Automatically associate 1-10 existing tags per document.',
+        skipIfTaggedLabel: 'Skip documents that already have tags',
+        skipIfTaggedDescription: 'When enabled, documents tagged manually at upload time are left untouched, so a deliberate classification is not diluted.'
       },
       tableMetadataInstructions: {
         label: 'Table Metadata Instructions',
