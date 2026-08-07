@@ -404,20 +404,25 @@ func (s *TenantSandboxConfigService) Update(
 	}
 	defer s.clearCordonAfterRequest(ctx, tenantID, id)
 
-	// There is no force override here, unlike Delete: overwriting credentials we
-	// cannot verify is exactly how sandboxes become permanently unreclaimable,
-	// and the admin already has a way out — create a second config and re-point
-	// the agents, leaving these credentials intact.
+	// When old credentials no longer reach the provider we cannot enumerate
+	// sandboxes to refuse the edit — but blocking the save traps the admin on
+	// a key they are trying to fix. Proceed and skip the post-write sweep;
+	// sandboxes we cannot see may become orphans and need provider-side cleanup.
 	oldClient, err := s.clientFor(entity.Config)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrSandboxInventoryUnverifiable, err)
+		logger.Warnf(ctx,
+			"[sandbox] config %s: old credentials unusable for inventory: %v; proceeding",
+			id, err)
+		oldClient = nil
 	}
 	if oldClient != nil {
-		summaries, err := sandbox.ListConfigSandboxes(ctx, oldClient, tenantID, id)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrSandboxInventoryUnverifiable, err)
-		}
-		if len(summaries) > 0 {
+		summaries, listErr := sandbox.ListConfigSandboxes(ctx, oldClient, tenantID, id)
+		if listErr != nil {
+			logger.Warnf(ctx,
+				"[sandbox] config %s: cannot verify sandbox inventory with old credentials: %v; proceeding",
+				id, listErr)
+			oldClient = nil
+		} else if len(summaries) > 0 {
 			inv := s.inventoryFromSummaries(ctx, tenantID, id, summaries)
 			return nil, &SandboxesStillLiveError{Inventory: inv}
 		}

@@ -96,6 +96,9 @@ type ArtifactCollector struct {
 	// nil keeps the process-wide source for every workspace.
 	resolver sandbox.TenantSandboxResolver
 	pinner   *SessionSandboxPinner
+	// fallbackMgr is the deployment-wide SessionBoundManager. Sentinel pins
+	// ("-") resolve to it rather than a per-config manager.
+	fallbackMgr sandbox.Manager
 }
 
 // NewArtifactCollector wires up an ArtifactCollector. Callers keep a single
@@ -152,6 +155,7 @@ func NewArtifactCollectorFromSandboxManager(
 	)
 	collector.resolver = sandboxResolver
 	collector.pinner = pinner
+	collector.fallbackMgr = sandboxMgr
 	return collector
 }
 
@@ -174,7 +178,9 @@ func (c *ArtifactCollector) sessionSource(ctx context.Context, sessionID string)
 	if configID == "" {
 		return nil
 	}
-	mgr, err := resolveTenantSandboxForConfig(ctx, c.resolver, nil, tenantID, configID, nil)
+	mgr, err := resolveTenantSandboxForConfig(
+		ctx, c.resolver, c.fallbackMgr, tenantID, configID, nil,
+	)
 	if err != nil {
 		// Refusing to read is the safe failure: substituting another backend
 		// would look in the wrong provider account and report "no artifacts".
@@ -186,8 +192,13 @@ func (c *ArtifactCollector) sessionSource(ctx context.Context, sessionID string)
 		// manager of its own; the injected process-wide source IS that backend.
 		return c.source
 	}
-	source, _ := mgr.(SandboxArtifactSource)
-	return source
+	if source, ok := mgr.(SandboxArtifactSource); ok {
+		return source
+	}
+	if configID == types.SandboxConfigIDGlobalDefault {
+		return c.source
+	}
+	return nil
 }
 
 // newBoundedConfig fills in defaults so callers can pass a zero

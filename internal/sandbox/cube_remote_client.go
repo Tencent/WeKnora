@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -30,10 +31,23 @@ type CubeRemoteClient struct {
 	httpTimeout   time.Duration
 }
 
-// NewCubeRemoteClient constructs a Cube-backed RemoteSandboxClient from the
-// WeKnora sandbox Config. It does not probe the control plane; callers may
-// invoke Health() as part of startup policy.
+// NewCubeRemoteClient constructs a Cube-backed RemoteSandboxClient using the
+// SDK default HTTP clients (separate control/data pools). Suitable for the
+// process-wide default manager and for throwaway connectivity probes, neither
+// of which benefits from an externally owned pool.
 func NewCubeRemoteClient(config *Config) (*CubeRemoteClient, error) {
+	return NewCubeRemoteClientWithPool(config, nil)
+}
+
+// NewCubeRemoteClientWithPool builds a client whose connections come from a
+// caller-owned pool. Named configs construct a client per request, so the pool
+// is what keeps connections alive across requests; it routes control-plane
+// traffic onto the transport shared with E2B while preserving the SDK's
+// proxy dial rewrite for the data plane. A nil pool keeps the SDK defaults.
+func NewCubeRemoteClientWithPool(
+	config *Config,
+	pool *CubeTransportPool,
+) (*CubeRemoteClient, error) {
 	if config == nil {
 		return nil, errors.New("cube remote client config is required")
 	}
@@ -42,44 +56,34 @@ func NewCubeRemoteClient(config *Config) (*CubeRemoteClient, error) {
 		httpTimeout = DefaultCubeHTTPTimeout
 	}
 	sdkCfg := cubesandbox.Config{
-		APIURL:     config.CubeAPIURL,
-		APIKey:     config.CubeAPIKey,
-		TemplateID: config.CubeTemplate,
-		// ProxyNodeIP: ,
-		// ProxyPortHTTP: ,
-		// ProxyScheme: ,
+		APIURL:         config.CubeAPIURL,
+		APIKey:         config.CubeAPIKey,
+		TemplateID:     config.CubeTemplate,
 		SandboxDomain:  config.CubeSandboxDomain,
 		Timeout:        config.CubeHTTPTimeout,
 		RequestTimeout: config.CubeHTTPTimeout,
 	}
 
-	// Break the CubeProxy URL into (host, port, scheme). The SDK then dials
-	// <ProxyNodeIP>:<ProxyPortHTTP> while preserving the virtual sandbox
-	// hostname in the request's Host header.
-	// var envdAddr string
 	if proxyHost, proxyPort, proxyScheme, ok := parseProxyURL(config.CubeProxyURL); ok {
 		sdkCfg.ProxyNodeIP = proxyHost
 		sdkCfg.ProxyPortHTTP = proxyPort
 		sdkCfg.ProxyScheme = proxyScheme
-		// envdAddr = net.JoinHostPort(proxyHost, strconv.Itoa(proxyPort))
 	}
 
-	ttl := config.CubeSandboxTTL
-	if ttl <= 0 {
-		ttl = DefaultCubeSandboxTTL
+	var opts []cubesandbox.ClientOption
+	if pool != nil {
+		httpClient := &http.Client{
+			Timeout:   httpTimeout,
+			Transport: pool.RoundTripperFor(config),
+		}
+		opts = append(opts, cubesandbox.WithHTTPClient(httpClient))
 	}
-
-	// Inject a single HTTP client that both routes control/data-plane traffic
-	// and patches the SDK's connect request. This CubeAPI build (v0.5.11)
-	// rejects the SDK's empty "/sandboxes/{id}/connect" body with HTTP 422
-	// ("missing field `timeout`"); the rewriter fills the mandatory field in.
-	// sdkHTTP := newCubeSDKHTTPClient(envdAddr, config.CubeSandboxDomain, ttl, httpTimeout)
 
 	return &CubeRemoteClient{
 		config: config,
 		client: cubesandbox.NewClient(
 			sdkCfg,
-			// cubesandbox.WithHTTPClient(sdkHTTP),
+			opts...,
 		),
 		sandboxDomain: config.CubeSandboxDomain,
 		httpTimeout:   httpTimeout,
@@ -123,6 +127,9 @@ func (c *CubeRemoteClient) Capabilities() RemoteSandboxCapabilities {
 		SupportsPauseResume:           true,
 		SupportsTimeoutRefresh:        true,
 		SupportsFilesystemEnumeration: true,
+		// Cube's CreateOptions has no volume-mount field yet; revisit when the
+		// official Go SDK reaches v0.6.0.
+		SupportsVolumes: false,
 	}
 }
 
@@ -350,11 +357,14 @@ func (c *CubeRemoteClient) Exec(
 	}
 
 	startedAt := time.Now()
+	// User comes from the neutral request rather than being hardcoded: running
+	// everything as root silently defeats file-mode protections on shared
+	// volumes, and made this adapter behave differently from E2B's.
 	sdkResult, execErr := sb.Commands().Run(execCtx, line, cubesandbox.CommandOptions{
 		Timeout: request.Timeout,
 		Envs:    envs,
 		Cwd:     request.WorkDir,
-		User:    "root",
+		User:    request.User,
 	})
 	duration := time.Since(startedAt)
 

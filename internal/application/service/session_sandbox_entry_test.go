@@ -21,6 +21,28 @@ func (s stubSandboxResolver) Resolve(context.Context, uint64, string) (sandbox.M
 	return s.mgr, s.err
 }
 
+// artifactFallbackManager is a minimal sandbox.Manager that delegates artifact
+// reads to a SandboxArtifactSource — used when tests exercise sentinel pins.
+type artifactFallbackManager struct {
+	source SandboxArtifactSource
+}
+
+func (m *artifactFallbackManager) Execute(context.Context, *sandbox.ExecuteConfig) (*sandbox.ExecuteResult, error) {
+	panic("unexpected Execute")
+}
+func (m *artifactFallbackManager) Cleanup(context.Context) error { return nil }
+func (m *artifactFallbackManager) GetSandbox() sandbox.Sandbox   { return nil }
+func (m *artifactFallbackManager) GetType() sandbox.SandboxType {
+	return sandbox.SandboxTypeCube
+}
+
+func (m *artifactFallbackManager) ListSessionFiles(ctx context.Context, sessionID, dir string) ([]sandbox.RemoteDirEntry, error) {
+	return m.source.ListSessionFiles(ctx, sessionID, dir)
+}
+func (m *artifactFallbackManager) ReadSessionFile(ctx context.Context, sessionID, path string) ([]byte, error) {
+	return m.source.ReadSessionFile(ctx, sessionID, path)
+}
+
 // Execution decides the config; every later operation must follow the pin, so
 // that re-pointing the agent mid-conversation cannot split a session across
 // two backends.
@@ -76,6 +98,8 @@ func TestSandboxConfigForExecutionPinsOnFirstStaging(t *testing.T) {
 // must keep collecting artifacts: resolving the sentinel yields no per-config
 // manager, which is not the same as "this session has no sandbox".
 func TestArtifactSessionSourceKeepsDefaultBackendForSentinelPin(t *testing.T) {
+	t.Setenv("WEKNORA_SANDBOX_MODE", "cube")
+
 	pinner := NewSessionSandboxPinner(newPinTestDB(t))
 	ctx := context.Background()
 	_, err := pinner.Pin(ctx, "s-1", types.SandboxConfigIDGlobalDefault)
@@ -83,14 +107,18 @@ func TestArtifactSessionSourceKeepsDefaultBackendForSentinelPin(t *testing.T) {
 
 	source := &fakeSandboxSource{}
 	collector := &ArtifactCollector{
-		source:   source,
-		resolver: stubSandboxResolver{},
-		pinner:   pinner,
+		source:      source,
+		resolver:    stubSandboxResolver{},
+		pinner:      pinner,
+		fallbackMgr: &artifactFallbackManager{source: source},
 	}
 
 	got := collector.sessionSource(ctx, "s-1")
 	require.NotNil(t, got)
-	require.Same(t, source, got.(*fakeSandboxSource))
+	// Sentinel pins resolve to the deployment-wide manager, which may be a
+	// distinct object from c.source even though both read the same backend.
+	_, ok := got.(SandboxArtifactSource)
+	require.True(t, ok)
 }
 
 // Attachment staging is reached through a runtime type assertion in

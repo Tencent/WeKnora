@@ -569,9 +569,10 @@ func TestInventoryMarksUnverifiableInsteadOfFailing(t *testing.T) {
 	require.Equal(t, []string{"analyst"}, inv.AgentNames)
 }
 
-// An identity edit gets no force override: the admin's way out is a second
-// config, which keeps the old credentials - and therefore cleanup - intact.
-func TestUpdateRefusesWhenInventoryUnverifiable(t *testing.T) {
+// When old credentials cannot reach the provider, the update proceeds anyway
+// so the admin can fix a mistyped key; sandboxes_still_live still blocks when
+// the old credentials can list live instances.
+func TestUpdateProceedsWhenInventoryUnverifiable(t *testing.T) {
 	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
 	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
 		ID: "cfg-a", TenantID: 7, Name: "prod", SandboxType: "e2b",
@@ -582,15 +583,16 @@ func TestUpdateRefusesWhenInventoryUnverifiable(t *testing.T) {
 		return nil, stderrors.New("dial tcp: no such host")
 	}
 
-	_, err := svc.Update(context.Background(), 7, "cfg-a", UpdateSandboxConfigInput{
+	updated, err := svc.Update(context.Background(), 7, "cfg-a", UpdateSandboxConfigInput{
 		Name:   "prod",
 		Config: e2bCfg("key-b", "https://api.e2b.app", "e2b.app", "t1", 300),
 	})
 
-	require.ErrorIs(t, err, ErrSandboxInventoryUnverifiable)
-	require.Nil(t, repo.updated)
-	require.Equal(t, []string{"get", "cordon", "uncordon"}, repo.events,
-		"the cordon must still be released")
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	require.NotNil(t, repo.updated)
+	require.Equal(t, "key-b", repo.updated.Config.E2B.APIKey)
+	require.Equal(t, []string{"get", "cordon", "write", "uncordon"}, repo.events)
 }
 
 func TestDeleteSoftDeletesWhenEmpty(t *testing.T) {

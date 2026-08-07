@@ -35,6 +35,7 @@ import (
 	"fmt"
 	"log"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -43,12 +44,25 @@ import (
 )
 
 // SessionInputRoot is reserved for durable user attachments restored from
-// file storage. Generated artifacts must remain under /workspace/output.
+// file storage. Generated artifacts must remain under SessionOutputRoot.
 const SessionInputRoot = "/workspace/input"
+
+// SessionOutputRoot is where skill scripts write artifacts for collection.
+// The skills manager injects this path via skillOutputEnvVar; Execute
+// materialises the directory via envd before the script runs so scripts
+// do not depend on the template user being able to mkdir under /workspace.
+const SessionOutputRoot = "/workspace/output"
+
+// skillOutputEnvVar matches the skills manager's WEKNORA_SKILL_OUTPUT_DIR.
+const skillOutputEnvVar = "WEKNORA_SKILL_OUTPUT_DIR"
 
 // SessionWorkspaceRoot is the writable workspace root inside remote sandboxes.
 // shell_exec work_dir must stay underneath this path.
 const SessionWorkspaceRoot = "/workspace"
+
+// sessionArtifactDirBootstrapTimeout bounds the root-owned setup step that
+// grants DefaultSandboxExecUser write access to the artifact directory.
+const sessionArtifactDirBootstrapTimeout = 15 * time.Second
 
 // sessionLifecycleCleanupTimeout bounds the lifecycle coordinator's own
 // bookkeeping deletions (loser cleanup, orphan cleanup after session
@@ -284,7 +298,69 @@ func (m *SessionBoundManager) Execute(ctx context.Context, cfg *ExecuteConfig) (
 	if err != nil {
 		return nil, err
 	}
+	m.ensureExecutionOutputDir(ctx, handle, cfg)
 	return m.ephemeral.ExecuteOnHandle(ctx, handle, cfg)
+}
+
+// ensureExecutionOutputDir creates the skill artifact directory and grants
+// DefaultSandboxExecUser write access before script execution. envd MakeDir
+// often leaves the path root-owned on Cube; the follow-up chown/chmod runs as
+// root via envd (empty User). Best-effort: failures are logged and do not
+// abort the upcoming script execution.
+func (m *SessionBoundManager) ensureExecutionOutputDir(
+	ctx context.Context,
+	handle RemoteSandboxHandle,
+	cfg *ExecuteConfig,
+) {
+	if m == nil || m.client == nil || handle == nil {
+		return
+	}
+	outputDir := executionOutputDir(cfg)
+	if outputDir == "" {
+		return
+	}
+	execUser := DefaultSandboxExecUser
+	if err := m.client.MakeDir(ctx, handle, outputDir); err != nil {
+		log.Printf("[sandbox] ensure output dir %s failed: %v", outputDir, err)
+		return
+	}
+	quoted := strconv.Quote(outputDir)
+	line := fmt.Sprintf(
+		"chown %s:%s %s && chmod 775 %s",
+		execUser, execUser, quoted, quoted,
+	)
+	result, err := m.client.Exec(ctx, handle, RemoteExecRequest{
+		Shell:   true,
+		Command: line,
+		Timeout: sessionArtifactDirBootstrapTimeout,
+	})
+	if err != nil {
+		log.Printf(
+			"[sandbox] grant output dir %s to %s failed: %v",
+			outputDir, execUser, err,
+		)
+		return
+	}
+	if result != nil && result.ExitCode != 0 {
+		log.Printf(
+			"[sandbox] grant output dir %s to %s: exit=%d stderr=%s",
+			outputDir, execUser, result.ExitCode, strings.TrimSpace(result.Stderr),
+		)
+	}
+}
+
+// executionOutputDir resolves the artifact directory for this Execute call.
+// It prefers WEKNORA_SKILL_OUTPUT_DIR from cfg.Env when the path stays under
+// SessionWorkspaceRoot; otherwise it falls back to SessionOutputRoot.
+func executionOutputDir(cfg *ExecuteConfig) string {
+	if cfg != nil && cfg.Env != nil {
+		if dir := strings.TrimSpace(cfg.Env[skillOutputEnvVar]); dir != "" {
+			if clean, err := cleanSessionWorkDir(dir); err == nil {
+				return clean
+			}
+		}
+	}
+	return SessionOutputRoot
 }
 
 // DestroySession removes the remote sandbox bound to sessionID (if any) and

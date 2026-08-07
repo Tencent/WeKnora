@@ -17,8 +17,10 @@
 //
 // That left the construction-time Health probe as the only real cost, which
 // SkipHealthProbe removes. Connection reuse is preserved by sharing one
-// http.Transport across tenants. The upshot: no cache, no eviction, no
-// invalidation plumbing, and a config change takes effect on the next request.
+// http.Transport across tenants (Cube additionally routes its data plane
+// through CubeTransportPool; see cube_transport.go). The upshot: no cache, no
+// eviction, no invalidation plumbing, and a config change takes effect on the
+// next request.
 package sandbox
 
 import (
@@ -91,6 +93,10 @@ type TenantSandboxResolverDeps struct {
 type tenantSandboxResolver struct {
 	deps      TenantSandboxResolverDeps
 	transport *http.Transport
+
+	// cubeTransports must outlive the per-request clients it serves, which is
+	// the whole point of holding it here rather than building it per Resolve.
+	cubeTransports *CubeTransportPool
 }
 
 // NewTenantSandboxResolver validates the wiring and returns a resolver.
@@ -111,7 +117,11 @@ func NewTenantSandboxResolver(deps TenantSandboxResolverDeps) (TenantSandboxReso
 	if transport == nil {
 		transport = NewGuardedTransport()
 	}
-	return &tenantSandboxResolver{deps: deps, transport: transport}, nil
+	return &tenantSandboxResolver{
+		deps:           deps,
+		transport:      transport,
+		cubeTransports: NewCubeTransportPool(transport),
+	}, nil
 }
 
 // NewGuardedTransport returns an http.Transport whose dialer refuses addresses
@@ -185,7 +195,7 @@ func (r *tenantSandboxResolver) Resolve(
 func (r *tenantSandboxResolver) buildClient(cfg *Config) (RemoteSandboxClient, error) {
 	switch cfg.Type {
 	case SandboxTypeCube:
-		return NewCubeRemoteClient(cfg)
+		return NewCubeRemoteClientWithPool(cfg, r.cubeTransports)
 	case SandboxTypeE2B:
 		return NewE2BRemoteClientWithTransport(cfg, r.transport)
 	default:

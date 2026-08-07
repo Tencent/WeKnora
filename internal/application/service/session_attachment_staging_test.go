@@ -106,6 +106,8 @@ func (m *stagingSandboxManager) RemoveSessionInputPath(_ context.Context, _ stri
 }
 
 func TestStageSessionAttachmentsReconcilesAndSkipsExisting(t *testing.T) {
+	t.Setenv("WEKNORA_SANDBOX_MODE", "cube")
+
 	attachment := types.MessageAttachment{
 		URL:      "local://tenant/attachment-1",
 		FileName: "report.pdf",
@@ -146,6 +148,8 @@ func TestStageSessionAttachmentsReconcilesAndSkipsExisting(t *testing.T) {
 }
 
 func TestStageSessionAttachmentsSkipsWhenNoFilesystemCapability(t *testing.T) {
+	t.Setenv("WEKNORA_SANDBOX_MODE", "local")
+
 	// disableFiles=true simulates any manager without a session filesystem
 	// capability (Local/Docker/Disabled DefaultManager, or a
 	// SessionBoundManager whose remote provider fell back to Local).

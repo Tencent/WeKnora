@@ -133,6 +133,7 @@ func (s *RemoteSandbox) ExecuteOnHandle(
 		Stdin:   cfg.Stdin,
 		Env:     cfg.Env,
 		WorkDir: remoteScriptDir,
+		User:    DefaultSandboxExecUser,
 		Timeout: timeout,
 	}
 

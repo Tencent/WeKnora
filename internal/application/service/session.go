@@ -497,6 +497,13 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 		logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
 	}
 
+	if s.suggestionRepo != nil {
+		if err := s.suggestionRepo.DeleteBySessionID(ctx, tenantID, id); err != nil {
+			logger.Warnf(ctx, "Failed to delete suggestions for session %s: %v", id, err)
+		}
+	}
+
+	s.destroyBoundSandbox(ctx, id)
 	// Delete session from repository
 	rows, err := s.sessionRepo.Delete(ctx, tenantID, userID, id)
 	if err != nil {
@@ -509,16 +516,6 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	if rows == 0 {
 		return apperrors.ErrSessionNotFound
 	}
-	if s.suggestionRepo != nil {
-		if err := s.suggestionRepo.DeleteBySessionID(ctx, tenantID, id); err != nil {
-			logger.Warnf(ctx, "Failed to delete suggestions for session %s: %v", id, err)
-		}
-	}
-
-	// Best-effort: release the sandbox MicroVM bound to this session, if any.
-	// Only the SessionBoundManager (Cube backend) implements DestroySession;
-	// other backends are stateless per-execute and don't need cleanup here.
-	s.destroyBoundSandbox(ctx, id)
 
 	return nil
 }
@@ -570,6 +567,11 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 		// DeleteSession for the rationale.
 	}
 
+	// Tear down sandboxes while session rows (and pins) are still readable.
+	for _, id := range visibleIDs {
+		s.destroyBoundSandbox(ctx, id)
+	}
+
 	// Batch delete sessions from repository
 	if _, err := s.sessionRepo.BatchDelete(ctx, tenantID, userID, visibleIDs); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -584,11 +586,6 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 				logger.Warnf(ctx, "Failed to delete suggestions for session %s: %v", id, err)
 			}
 		}
-	}
-
-	// Best-effort: release sandbox MicroVMs bound to the deleted sessions.
-	for _, id := range visibleIDs {
-		s.destroyBoundSandbox(ctx, id)
 	}
 
 	return nil
@@ -628,6 +625,13 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 		}
 	}
 
+	// Tear down sandboxes while session rows (and pins) are still readable.
+	if sessions != nil {
+		for _, session := range sessions {
+			s.destroyBoundSandbox(ctx, session.ID)
+		}
+	}
+
 	if _, err := s.sessionRepo.DeleteAllByTenantID(ctx, tenantID, userID); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,
@@ -640,11 +644,6 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 				logger.Warnf(ctx, "Failed to delete suggestions for session %s: %v", session.ID, err)
 			}
 		}
-	}
-
-	// Best-effort: release sandbox MicroVMs bound to each deleted session.
-	for _, session := range sessions {
-		s.destroyBoundSandbox(ctx, session.ID)
 	}
 
 	logger.Infof(ctx, "All sessions deleted for tenant %d", tenantID)
@@ -660,8 +659,8 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 // and hold no resources keyed on session ID.
 //
 // Errors are logged but never propagated: sandbox teardown must not block
-// the primary session deletion, which is already committed by the time we
-// get here.
+// session deletion. Call this while the session row is still live so the
+// sandbox_config_id pin resolves to the correct named backend.
 func (s *sessionService) destroyBoundSandbox(ctx context.Context, sessionID string) {
 	if sessionID == "" {
 		return
@@ -698,9 +697,6 @@ func (s *sessionService) destroyBoundSandbox(ctx context.Context, sessionID stri
 		logger.Warnf(ctx, "Failed to destroy sandbox for session %s: %v", sessionID, err)
 		return
 	}
-	// Delete paths soft-delete the session before cleanup, so this is usually a
-	// no-op under GORM's default scope. Keeping it here makes any future
-	// live-session destroy path release the pin immediately.
 	if s.sandboxPinner != nil {
 		if err := s.sandboxPinner.Clear(ctx, sessionID); err != nil {
 			logger.Warnf(ctx, "Failed to clear sandbox pin for session %s: %v", sessionID, err)

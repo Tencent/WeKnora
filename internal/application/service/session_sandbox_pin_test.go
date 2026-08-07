@@ -116,3 +116,21 @@ func TestClearReleasesPin(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, read)
 }
+
+// Session delete soft-deletes the row before any follow-up work. Destroy must
+// therefore read sandbox_config_id first; otherwise the pinner sees an absent
+// session and teardown resolves the wrong backend (T4 regression).
+func TestSoftDeleteHidesSandboxPin(t *testing.T) {
+	db := newPinTestDB(t)
+	pinner := NewSessionSandboxPinner(db)
+	ctx := context.Background()
+
+	_, err := pinner.Pin(ctx, "s-1", "cfg-a")
+	require.NoError(t, err)
+
+	require.NoError(t, db.Delete(&types.Session{}, "id = ?", "s-1").Error)
+
+	read, err := pinner.Read(ctx, "s-1")
+	require.NoError(t, err)
+	require.Empty(t, read, "soft-deleted session must not expose its pin")
+}

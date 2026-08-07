@@ -9,6 +9,28 @@
     @close="close"
     @update:visible="(v: boolean) => emit('update:visible', v)"
   >
+    <!--
+      Identity-change refusals must sit at the top: the form is long and the
+      admin otherwise saves, sees nothing, and assumes the click did nothing.
+    -->
+    <div v-if="conflict" ref="conflictAlertRef" class="blocked blocked-top">
+      <t-alert v-if="conflict.code === 'sandboxes_still_live'" theme="warning"
+        :message="$t('settings.sandbox.sandboxesStillLive', { count: conflict.inventory?.sandbox_count ?? 0 })">
+        <template #description>
+          <p v-if="affectedSessionCount">{{ $t('settings.sandbox.affectedSessions', { count: affectedSessionCount }) }}</p>
+          <p v-if="conflict.inventory?.agent_names?.length">
+            {{ $t('settings.sandbox.affectedAgents', { names: conflict.inventory.agent_names.join('、') }) }}
+          </p>
+          <p>{{ $t('settings.sandbox.blockedHint') }}</p>
+        </template>
+      </t-alert>
+      <t-alert v-else theme="warning" :message="$t('settings.sandbox.unverifiableBlocked')">
+        <template #description>
+          <p>{{ $t('settings.sandbox.unverifiableSaveHint') }}</p>
+        </template>
+      </t-alert>
+    </div>
+
     <t-form label-align="top">
       <t-form-item :label="$t('settings.sandbox.configName')" :status="nameError ? 'error' : undefined"
         :tips="nameError || undefined">
@@ -125,7 +147,7 @@
       </t-popconfirm>
     </div>
 
-    <div v-if="checkResult" class="check-result">
+    <div v-if="checkResult" ref="checkResultRef" class="check-result">
       <t-alert :theme="checkResult.ok ? 'success' : 'error'"
         :message="checkResult.ok ? $t('settings.sandbox.checkPassed') : $t('settings.sandbox.checkFailed')" />
       <ul class="check-list">
@@ -142,34 +164,11 @@
         :message="$t('settings.sandbox.noVolumeSupport')" />
     </div>
 
-    <!--
-      The backend refuses identity changes while the config still owns sandboxes.
-      It hands back what it counted, so the admin sees the scale of the problem
-      and the two ways out - there is deliberately no release button, because
-      releasing behind the admin's back would destroy live conversations.
-    -->
-    <div v-if="conflict" class="blocked">
-      <t-alert v-if="conflict.code === 'sandboxes_still_live'" theme="warning"
-        :message="$t('settings.sandbox.sandboxesStillLive', { count: conflict.inventory?.sandbox_count ?? 0 })">
-        <template #description>
-          <p v-if="affectedSessionCount">{{ $t('settings.sandbox.affectedSessions', { count: affectedSessionCount }) }}</p>
-          <p v-if="conflict.inventory?.agent_names?.length">
-            {{ $t('settings.sandbox.affectedAgents', { names: conflict.inventory.agent_names.join('、') }) }}
-          </p>
-          <p>{{ $t('settings.sandbox.blockedHint') }}</p>
-        </template>
-      </t-alert>
-      <t-alert v-else theme="warning" :message="$t('settings.sandbox.unverifiableBlocked')">
-        <template #description>
-          <p>{{ $t('settings.sandbox.unverifiableSaveHint') }}</p>
-        </template>
-      </t-alert>
-    </div>
   </t-drawer>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import {
@@ -212,6 +211,8 @@ const saving = ref(false)
 const checking = ref(false)
 const checkResult = ref<SandboxCheckResult | null>(null)
 const conflict = ref<SandboxConflict | null>(null)
+const conflictAlertRef = ref<HTMLElement | null>(null)
+const checkResultRef = ref<HTMLElement | null>(null)
 const nameError = ref('')
 
 const name = ref('')
@@ -320,6 +321,8 @@ async function save() {
       // Keep the drawer open with the form intact: the admin has to act
       // elsewhere first, and retyping everything afterwards would be cruel.
       conflict.value = refusal
+      await nextTick()
+      conflictAlertRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       return
     }
     MessagePlugin.error(e?.message || t('settings.sandbox.saveFailed'))
@@ -340,6 +343,10 @@ async function runCheck(deep: boolean) {
       deep,
     })
     checkResult.value = res?.data || null
+    if (checkResult.value) {
+      await nextTick()
+      checkResultRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('settings.sandbox.checkFailed'))
   } finally {
@@ -438,6 +445,11 @@ function invalidateCheck() {
 
 .blocked {
   margin-top: 16px;
+}
+
+.blocked-top {
+  margin-top: 0;
+  margin-bottom: 16px;
 }
 
 .blocked p {
