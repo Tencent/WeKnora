@@ -302,6 +302,12 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
+	if req.MetadataFilter != nil {
+		if err := req.MetadataFilter.Validate(); err != nil {
+			c.Error(apperrors.NewValidationError(err.Error()))
+			return
+		}
+	}
 	precomputedVectorOnly := len(req.QueryEmbedding) > 0 && req.DisableKeywordsMatch && !req.DisableVectorMatch
 	if strings.TrimSpace(req.QueryText) == "" && !precomputedVectorOnly {
 		_ = c.Error(apperrors.NewBadRequestError("query_text is required"))

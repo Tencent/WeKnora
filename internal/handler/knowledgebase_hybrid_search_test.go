@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -97,6 +99,40 @@ func TestHybridSearchAcceptsQueryText(t *testing.T) {
 	}
 	if svc.searchParams.MatchCount != 3 {
 		t.Fatalf("match count = %d, want 3", svc.searchParams.MatchCount)
+	}
+}
+
+func TestHybridSearchAcceptsNestedMetadataFilter(t *testing.T) {
+	svc := &hybridSearchTestService{}
+	body := `{"query_text":"报销","metadata_filter":{"or":[{"and":[{"field":"employee_nature","op":"eq","value":"formal"},{"field":"department","op":"eq","value":"research"}]}]}}`
+	response := performHybridSearchRequest(svc, body)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", response.Code, response.Body.String())
+	}
+	if svc.searchCalls != 1 {
+		t.Fatalf("expected one HybridSearch call, got %d", svc.searchCalls)
+	}
+	if svc.searchParams.MetadataFilter == nil || len(svc.searchParams.MetadataFilter.Or) != 1 {
+		t.Fatalf("metadata_filter was not propagated: %+v", svc.searchParams.MetadataFilter)
+	}
+	if len(svc.searchParams.MetadataFilter.Or[0].And) != 2 {
+		t.Fatalf("nested and was not propagated: %+v", svc.searchParams.MetadataFilter)
+	}
+}
+
+func TestHybridSearchRejectsMalformedMetadataFilterBeforeService(t *testing.T) {
+	svc := &hybridSearchTestService{}
+	response := performHybridSearchRequest(svc, `{"query_text":"报销","metadata_filter":{"field":"department","op":"contains","value":"research"}}`)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", response.Code, response.Body.String())
+	}
+	if svc.searchCalls != 0 {
+		t.Fatalf("malformed metadata_filter reached HybridSearch %d time(s)", svc.searchCalls)
+	}
+	if !strings.Contains(response.Body.String(), `"code":`+fmt.Sprint(apperrors.ErrValidation)) {
+		t.Fatalf("expected validation error envelope, got %s", response.Body.String())
 	}
 }
 
