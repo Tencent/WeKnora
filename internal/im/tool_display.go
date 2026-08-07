@@ -49,6 +49,7 @@ var imToolNameLabels = map[string]string{
 	"query_knowledge_graph":   "知识图谱查询",
 	"read_skill":              "读取技能",
 	"execute_skill_script":    "执行技能脚本",
+	"shell_exec":              "执行沙箱命令",
 	"data_analysis":           "数据分析",
 	"data_schema":             "数据结构",
 	"database_query":          "数据库查询",

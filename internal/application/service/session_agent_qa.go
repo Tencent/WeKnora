@@ -24,6 +24,9 @@ func (s *sessionService) AgentQA(
 	eventBus *event.EventBus,
 ) error {
 	sessionID := req.Session.ID
+	// Propagate the session ID so stateful sandbox backends (CubeSandbox) can
+	// bind script execution to a per-session MicroVM instance.
+	ctx = types.WithSessionID(ctx, sessionID)
 	sessionJSON, err := json.Marshal(req.Session)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to marshal session, session ID: %s, error: %v", sessionID, err)
@@ -140,6 +143,30 @@ func (s *sessionService) AgentQA(
 		llmContext = []chat.Message{}
 	}
 
+	// Reconcile all durable session attachments into the session's remote
+	// sandbox before the model can request shell or skill execution. The
+	// durable storage URL — not the ephemeral sandbox path — remains the
+	// source of truth. Gated on the sandbox manager advertising a session
+	// filesystem capability so provider-neutral wiring (Cube today, E2B
+	// tomorrow) drops in without touching this call site.
+	var stagedAttachments []stagedSessionAttachment
+	if sessionSandboxFileStore(s.sandboxMgr) != nil {
+		sessionAttachments, loadErr := s.messageRepo.GetSessionAttachments(ctx, sessionID)
+		if loadErr != nil {
+			return fmt.Errorf("load session attachments for sandbox staging: %w", loadErr)
+		}
+		stager, ok := s.agentService.(interface {
+			stageSessionAttachments(context.Context, string, types.MessageAttachments) ([]stagedSessionAttachment, error)
+		})
+		if !ok {
+			return errors.New("agent service does not support session attachment staging")
+		}
+		stagedAttachments, err = stager.stageSessionAttachments(ctx, sessionID, sessionAttachments)
+		if err != nil {
+			return fmt.Errorf("restore session attachments into sandbox: %w", err)
+		}
+	}
+
 	// Create agent engine with EventBus
 	logger.Info(ctx, "Creating agent engine")
 	engine, err := s.agentService.CreateAgentEngine(
@@ -182,6 +209,10 @@ func (s *sessionService) AgentQA(
 	if len(req.Attachments) > 0 {
 		agentQuery += req.Attachments.BuildPrompt()
 		logger.Infof(ctx, "Appended %d attachment(s) to agent query", len(req.Attachments))
+	}
+	if manifest := buildSandboxAttachmentsPrompt(stagedAttachments); manifest != "" {
+		agentQuery += manifest
+		logger.Infof(ctx, "Appended %d staged sandbox attachment path(s) to agent query", len(stagedAttachments))
 	}
 
 	// Scope envelopes (runtime_context / must_use) are injected per LLM call inside

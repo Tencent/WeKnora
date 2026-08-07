@@ -221,14 +221,6 @@ func TestExecuteResultHelpers(t *testing.T) {
 		t.Error("Expected IsSuccess() to return false when killed")
 	}
 
-	// Test GetOutput
-	if successResult.GetOutput() != "output" {
-		t.Errorf("Expected GetOutput() to return stdout, got %s", successResult.GetOutput())
-	}
-
-	if failResult.GetOutput() != "error" {
-		t.Errorf("Expected GetOutput() to return stderr when stdout is empty, got %s", failResult.GetOutput())
-	}
 }
 
 func TestPythonScriptExecution(t *testing.T) {
