@@ -2463,7 +2463,8 @@ export default {
       updateApiPrincipalConfigFailed: '更新 API 用户身份配置失败',
       createApiPrincipalTestTokenFailed: '生成 API 测试 Token 失败',
       updateFailed: '更新空间信息失败',
-      deleteFailed: '删除空间失败'
+      deleteFailed: '删除空间失败',
+      getStorageStatsFailed: '获取存储用量数据失败'
     },
     model: {
       createFailed: '创建模型失败',
@@ -2575,6 +2576,7 @@ export default {
         target: {
           bulkQuota: '批量同步：默认存储配额',
           bulkQuotaDiff: '应用到 {count} 个空间（{gb} GB）',
+          quotaDiff: '{old} → {new}',
           promoteIdempotent: '目标已是系统管理员（幂等）',
           revokeNoop: '目标本就不是系统管理员（幂等）',
           requiredRole: '需要角色：{role}',
@@ -2586,6 +2588,7 @@ export default {
         },
         action: {
           'system.setting_changed': '系统设置变更',
+          'tenant.storage_quota_updated': '空间存储配额变更',
           'system.admin_promoted': '授予系统管理员',
           'system.api_key_created': '创建平台 API Key',
           'system.api_key_revoked': '吊销平台 API Key',
@@ -3091,7 +3094,14 @@ export default {
       usedLabel: '已使用存储',
       usedDescription: '已经使用的存储空间',
       usageLabel: '存储使用率',
-      usageDescription: '存储空间的使用百分比'
+      usageDescription: '存储空间的使用百分比',
+      editQuota: '编辑配额',
+      editQuotaPlaceholder: '输入配额（GB）',
+      quotaMaxHint: '上限约 {max}（本机磁盘可用空间 + 已用量）',
+      quotaBelowUsedError: '配额不能低于当前已用量 {used}',
+      quotaExceedsDiskError: '配额超过本机磁盘可用容量',
+      quotaUpdateSuccess: '存储配额已更新',
+      quotaUpdateFailed: '配额更新失败'
     },
     details: {
       idLabel: '空间 ID',

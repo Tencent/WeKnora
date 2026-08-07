@@ -36,6 +36,11 @@ type TenantHandler struct {
 	// in-code default, so a SystemAdmin's UI override applies on the
 	// very next CreateTenant call.
 	systemSettingSvc interfaces.SystemSettingService
+	// auditSvc records Owner-initiated storage-quota changes. Optional —
+	// when nil the audit write is skipped so unit tests that wire a
+	// partial handler still compile. In production the dig graph always
+	// provides one.
+	auditSvc interfaces.AuditLogService
 }
 
 // NewTenantHandler creates a new tenant handler instance with the provided service
@@ -63,6 +68,7 @@ func NewTenantHandler(
 	kbService interfaces.KnowledgeBaseService,
 	config *config.Config,
 	systemSettingSvc interfaces.SystemSettingService,
+	auditSvc interfaces.AuditLogService,
 ) *TenantHandler {
 	return &TenantHandler{
 		service:          service,
@@ -72,6 +78,7 @@ func NewTenantHandler(
 		kbService:        kbService,
 		config:           config,
 		systemSettingSvc: systemSettingSvc,
+		auditSvc:         auditSvc,
 	}
 }
 
@@ -92,16 +99,24 @@ type createTenantRequest struct {
 
 // updateTenantRequest is the JSON body for PUT /tenants/:id. Only the
 // fields an Owner is permitted to mutate via the public API are bound;
-// everything else (storage_quota, status, business, api_key, agent /
-// retrieval / storage configs, ...) is intentionally NOT writable here
-// — those go through dedicated endpoints (PUT /tenants/kv/:key, ...)
-// that have their own validation.
+// everything else (status, business, api_key, agent / retrieval /
+// storage configs, ...) is intentionally NOT writable here — those go
+// through dedicated endpoints (PUT /tenants/kv/:key, ...) that have
+// their own validation.
+//
+// storage_quota is the one privileged column allowed here: self-service
+// quota editing is a deliberate Owner feature, and it does NOT trust the
+// bound value blindly — TenantService.UpdateStorageQuota re-validates
+// the quota semantics (> 0, >= current usage, <= disk free + usage)
+// before persisting, so a crafted body cannot grant more headroom than
+// the volume actually has.
 //
 // Pointers so we can distinguish "not sent" from "explicit empty
 // string"; when nil we leave the existing column untouched.
 type updateTenantRequest struct {
-	Name        *string `json:"name"        binding:"omitempty,min=1,max=128"`
-	Description *string `json:"description" binding:"omitempty,max=512"`
+	Name         *string `json:"name"          binding:"omitempty,min=1,max=128"`
+	Description  *string `json:"description"   binding:"omitempty,max=512"`
+	StorageQuota *int64  `json:"storage_quota" binding:"omitempty,gt=0"`
 }
 
 type apiPrincipalConfigRequest struct {
@@ -581,13 +596,16 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 		return
 	}
 
-	// Strict whitelist: only Name / Description are mutable through the
-	// public PUT. Storage quota, status, business, configs, api_key and
-	// every other privileged column live behind dedicated endpoints
+	// Strict whitelist: only Name / Description / StorageQuota are
+	// mutable through the public PUT. Status, business, configs, api_key
+	// and every other privileged column live behind dedicated endpoints
 	// (PUT /tenants/kv/:key, ...). Without this, an
 	// Owner — including any user who just self-served a tenant — could
-	// flip status / bump storage_quota by simply crafting an extended
-	// JSON body. Pointers distinguish "field omitted" from "explicit
+	// flip status by simply crafting an extended JSON body. StorageQuota
+	// is the exception by design (Owner self-service), but it is routed
+	// through TenantService.UpdateStorageQuota which re-validates the
+	// value against usage and real disk headroom instead of trusting the
+	// bound body. Pointers distinguish "field omitted" from "explicit
 	// empty string" so we can leave untouched columns alone.
 	var req updateTenantRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -622,6 +640,33 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 		existing.Description = strings.TrimSpace(*req.Description)
 	}
 
+	// quotaAudit carries an Owner-initiated quota change from the
+	// StorageQuota branch down to the post-UpdateTenant success path, so
+	// the audit row is only written once the whole update has persisted
+	// (and only when the quota actually changed — restating the current
+	// value is a no-op the audit log should not record).
+	var quotaAudit *struct{ old, new int64 }
+
+	if req.StorageQuota != nil {
+		oldQuota := existing.StorageQuota
+		updated, err := h.service.UpdateStorageQuota(ctx, id, *req.StorageQuota)
+		if err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"tenant_id":     id,
+				"storage_quota": *req.StorageQuota,
+			})
+			c.Error(errors.NewValidationError("Invalid storage quota").WithDetails(err.Error()))
+			return
+		}
+		// Reflect the persisted value so the response below reports the
+		// new quota even though the Name/Description path re-saves the
+		// same struct afterwards.
+		existing.StorageQuota = updated.StorageQuota
+		if oldQuota != updated.StorageQuota {
+			quotaAudit = &struct{ old, new int64 }{old: oldQuota, new: updated.StorageQuota}
+		}
+	}
+
 	logger.Infof(ctx, "Updating tenant, ID: %d, Name: %s", id, secutils.SanitizeForLog(existing.Name))
 
 	updatedTenant, err := h.service.UpdateTenant(ctx, existing)
@@ -642,10 +687,86 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 		updatedTenant.ID,
 		secutils.SanitizeForLog(updatedTenant.Name),
 	)
+	// Audit only after the full update persisted: emitting it inside the
+	// StorageQuota branch would record a "success" row even if the
+	// subsequent UpdateTenant save failed.
+	if quotaAudit != nil {
+		h.emitStorageQuotaAudit(ctx, id, quotaAudit.old, quotaAudit.new)
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    dto.NewTenantResponse(ctx, updatedTenant),
 	})
+}
+
+// GetTenantStorageStats godoc
+// @Summary      获取空间存储配额统计
+// @Description  返回当前已用空间、卷剩余空间与可设置的最大配额，供 Owner 编辑配额时约束取值范围
+// @Tags         空间管理
+// @Produce      json
+// @Param        id  path      int  true  "空间ID"
+// @Success      200  {object}  map[string]interface{}  "存储统计"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /tenants/{id}/storage-stats [get]
+func (h *TenantHandler) GetTenantStorageStats(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		logger.Errorf(ctx, "Invalid workspace ID: %s", secutils.SanitizeForLog(c.Param("id")))
+		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
+		return
+	}
+
+	stats, err := h.service.GetTenantStorageStats(ctx, id)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+		} else {
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError("Failed to load storage stats").WithDetails(err.Error()))
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    stats,
+	})
+}
+
+// emitStorageQuotaAudit writes one audit row for an Owner-initiated
+// storage-quota change. Best-effort: a nil audit service or a write
+// failure only logs a warning and never blocks the main flow (mirrors
+// emitAdminAudit in system.go). disk_free_bytes is probed via
+// GetTenantStorageStats and simply omitted when the disk is unreadable —
+// the old/new quota pair is the load-bearing part of the record.
+func (h *TenantHandler) emitStorageQuotaAudit(ctx context.Context, tenantID uint64, oldQuota, newQuota int64) {
+	if h.auditSvc == nil {
+		return
+	}
+	actorID, _ := types.UserIDFromContext(ctx)
+	detailMap := map[string]any{
+		"old_quota_bytes": oldQuota,
+		"new_quota_bytes": newQuota,
+	}
+	if stats, err := h.service.GetTenantStorageStats(ctx, tenantID); err == nil && !stats.DiskUnavailable {
+		detailMap["disk_free_bytes"] = stats.DiskFreeBytes
+	}
+	details, _ := json.Marshal(detailMap)
+	if err := h.auditSvc.Log(ctx, &types.AuditLog{
+		TenantID:    tenantID,
+		ActorUserID: actorID,
+		ActorRole:   string(types.TenantRoleFromContext(ctx)),
+		Action:      types.AuditActionTenantStorageQuotaUpdated,
+		TargetType:  "tenant_storage_quota",
+		TargetID:    strconv.FormatUint(tenantID, 10),
+		Outcome:     types.AuditOutcomeSuccess,
+		Details:     types.JSON(details),
+	}); err != nil {
+		logger.Warnf(ctx, "Failed to write storage quota audit log for tenant %d: %v", tenantID, err)
+	}
 }
 
 func (h *TenantHandler) ListAPIKeys(c *gin.Context) {

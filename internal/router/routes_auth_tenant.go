@@ -16,6 +16,7 @@ import (
 //   - GET   /:id          Viewer+ (read tenant settings)
 //   - PUT   /:id          Owner+ (mutate tenant config)
 //   - DELETE /:id         Owner+ (also normally a CanAccessAllTenants op)
+//   - GET   /:id/storage-stats   Viewer+ (disk headroom for the quota editor)
 //   - GET/POST/DELETE /:id/api-keys   Owner+ (scoped API key management)
 //   - GET    /:id/members            Viewer+ (any member can see who else is in)
 //   - POST   /:id/members            Owner+ (only Owner can add new members)
@@ -94,6 +95,12 @@ func RegisterTenantRoutes(
 				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), g.Owner(), handler.UpdateTenant)
 			g.apiKeyRoute(tenantByID, http.MethodDelete, "",
 				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), g.Owner(), handler.DeleteTenant)
+			// Volume headroom for the Owner quota editor. Viewer+ is
+			// enough: free disk space is not sensitive, and
+			// PathTenantMatch already scopes the read to the active
+			// tenant. JWT-only like the other lifecycle routes — the
+			// quota editor is a UI flow, not an API-key integration.
+			tenantByID.GET("/storage-stats", g.Viewer(), handler.GetTenantStorageStats)
 			tenantByID.GET("/api-keys", g.Owner(), handler.ListAPIKeys)
 			tenantByID.POST("/api-keys", g.Owner(), handler.CreateAPIKey)
 			tenantByID.DELETE("/api-keys/:key_id", g.Owner(), handler.DeleteAPIKey)

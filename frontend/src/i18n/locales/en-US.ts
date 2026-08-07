@@ -2821,7 +2821,14 @@ export default {
       usedLabel: 'Used Storage',
       usedDescription: 'Storage space that has been used',
       usageLabel: 'Storage Usage',
-      usageDescription: 'Percentage of storage capacity used'
+      usageDescription: 'Percentage of storage capacity used',
+      editQuota: 'Edit quota',
+      editQuotaPlaceholder: 'Enter quota (GB)',
+      quotaMaxHint: 'Max ≈ {max} (disk free + current usage)',
+      quotaBelowUsedError: 'Quota cannot be below current usage {used}',
+      quotaExceedsDiskError: 'Quota exceeds available disk capacity',
+      quotaUpdateSuccess: 'Storage quota updated',
+      quotaUpdateFailed: 'Failed to update quota'
     },
     leaveDangerZone: {
       title: 'Leave this workspace',
@@ -3352,6 +3359,7 @@ export default {
         },
         action: {
           'system.setting_changed': 'System setting changed',
+          'tenant.storage_quota_updated': 'Workspace storage quota updated',
           'system.admin_promoted': 'System admin granted',
           'system.api_key_created': 'Platform API key created',
           'system.api_key_revoked': 'Platform API key revoked',
@@ -3370,6 +3378,7 @@ export default {
         target: {
           bulkQuota: 'Bulk sync: default storage quota',
           bulkQuotaDiff: 'Applied to {count} workspaces ({gb} GB)',
+          quotaDiff: '{old} → {new}',
           promoteIdempotent: 'Target was already a system admin (idempotent)',
           revokeNoop: 'Target was not a system admin (idempotent)',
           requiredRole: 'Required role: {role}',
@@ -3442,7 +3451,8 @@ export default {
       updateApiPrincipalConfigFailed: 'Failed to update API principal config',
       createApiPrincipalTestTokenFailed: 'Failed to create API test token',
       updateFailed: 'Failed to update workspace information',
-      deleteFailed: 'Failed to delete workspace'
+      deleteFailed: 'Failed to delete workspace',
+      getStorageStatsFailed: 'Failed to fetch storage stats'
     },
     initialization: {
       checkFailed: 'Check failed',

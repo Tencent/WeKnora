@@ -51,6 +51,14 @@ const (
 	// an overdue pending row to expired. Actor is empty (system).
 	AuditActionInvitationExpired AuditAction = "rbac.invitation_expired"
 
+	// AuditActionTenantStorageQuotaUpdated fires when a tenant Owner
+	// changes their own workspace's storage_quota through
+	// PUT /tenants/:id. Tenant-scoped (tenant_id = the workspace), unlike
+	// the SystemAdmin bulk apply which reuses
+	// AuditActionSystemSettingChanged with tenant_id=0. Details payload
+	// carries {old_quota_bytes, new_quota_bytes, disk_free_bytes}.
+	AuditActionTenantStorageQuotaUpdated AuditAction = "tenant.storage_quota_updated"
+
 	// VectorStore lifecycle actions. Emitted by VectorStoreService.
 	// Cover both env-store-derived (__env_*) and DB store create /
 	// update / delete paths. Details payload identifies the store_id

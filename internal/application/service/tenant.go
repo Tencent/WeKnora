@@ -3,12 +3,14 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 // ListTenantsParams defines parameters for listing tenants with filtering and pagination
@@ -230,6 +232,105 @@ func (s *tenantService) BulkSetStorageQuota(ctx context.Context, quotaBytes int6
 	}
 	logger.Infof(ctx, "Bulk set storage_quota=%d on %d tenants", quotaBytes, affected)
 	return affected, nil
+}
+
+// localStorageFreeBytesFn probes free space on the volume hosting the
+// local storage root. A package-level variable so tests can stub the
+// statfs call without a real filesystem layout.
+var localStorageFreeBytesFn = utils.LocalStorageFreeBytes
+
+// UpdateStorageQuota validates and persists an Owner-initiated quota
+// change for a single tenant. Validation order matters: the usage floor
+// is checked before the disk ceiling so the caller gets the most
+// actionable error first.
+//
+// Rules:
+//   - quotaBytes must be > 0 (knowledge_create.go treats <= 0 as
+//     "unlimited", which a self-service editor must never produce);
+//   - quotaBytes must be >= current StorageUsed — a quota below usage
+//     would wedge every future write;
+//   - quotaBytes must fit the volume: disk free + StorageUsed (bytes
+//     already occupied need no extra disk).
+//
+// When the disk probe fails the check is fail-closed for increases only:
+// raising the quota is rejected because we cannot prove it fits, while
+// lowering or restating the current quota stays allowed (it cannot make
+// the disk situation worse).
+func (s *tenantService) UpdateStorageQuota(ctx context.Context, tenantID uint64, quotaBytes int64) (*types.Tenant, error) {
+	if tenantID == 0 {
+		return nil, errors.New("tenant ID cannot be 0")
+	}
+	if quotaBytes <= 0 {
+		return nil, fmt.Errorf("storage quota must be positive, got %d", quotaBytes)
+	}
+
+	tenant, err := s.repo.GetTenantByID(ctx, tenantID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"tenant_id": tenantID,
+		})
+		return nil, err
+	}
+
+	if quotaBytes < tenant.StorageUsed {
+		return nil, fmt.Errorf("storage quota cannot be below current usage (%d bytes used)", tenant.StorageUsed)
+	}
+
+	free, err := localStorageFreeBytesFn()
+	if err != nil {
+		if quotaBytes > tenant.StorageQuota {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"tenant_id":   tenantID,
+				"quota_bytes": quotaBytes,
+			})
+			return nil, fmt.Errorf("cannot verify free disk space, refusing to raise storage quota: %w", err)
+		}
+		logger.Warnf(ctx, "Free disk space probe failed, allowing quota decrease without ceiling check: %v", err)
+	} else if quotaBytes > free+tenant.StorageUsed {
+		return nil, fmt.Errorf(
+			"storage quota exceeds available disk capacity (%d bytes free + %d bytes used)",
+			free, tenant.StorageUsed,
+		)
+	}
+
+	tenant.StorageQuota = quotaBytes
+	tenant.UpdatedAt = time.Now()
+	// GORM `Updates(struct)` skips zero values, which is safe here because
+	// the >0 rule above guarantees the new quota is never a zero value.
+	if err := s.repo.UpdateTenant(ctx, tenant); err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"tenant_id":   tenantID,
+			"quota_bytes": quotaBytes,
+		})
+		return nil, err
+	}
+
+	logger.Infof(ctx, "Tenant %d storage quota updated to %d bytes", tenantID, quotaBytes)
+	return tenant, nil
+}
+
+// GetTenantStorageStats reports current usage plus the quota ceiling the
+// local volume can honour. The probe failure is not an error here: the
+// UI still needs usage to render, so the stats degrade to
+// DiskUnavailable with QuotaMaxBytes = StorageUsed (matching the
+// fail-closed decrease-only rule in UpdateStorageQuota).
+func (s *tenantService) GetTenantStorageStats(ctx context.Context, tenantID uint64) (*types.TenantStorageStats, error) {
+	tenant, err := s.GetTenantByID(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	stats := &types.TenantStorageStats{StorageUsedBytes: tenant.StorageUsed}
+	free, err := localStorageFreeBytesFn()
+	if err != nil {
+		logger.Warnf(ctx, "Free disk space probe failed for tenant %d storage stats: %v", tenantID, err)
+		stats.DiskUnavailable = true
+		stats.QuotaMaxBytes = tenant.StorageUsed
+		return stats, nil
+	}
+	stats.DiskFreeBytes = free
+	stats.QuotaMaxBytes = free + tenant.StorageUsed
+	return stats, nil
 }
 
 // SearchTenants searches tenants with pagination and filters
