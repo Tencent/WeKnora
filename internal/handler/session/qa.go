@@ -722,7 +722,14 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		request.KnowledgeIDs, tagScopes, request.Query, request.RerankModelID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		// Preserve typed errors (e.g. 400/403 for an invalid rerank_model_id)
+		// so the documented error-code contract holds; only unknown errors
+		// are flattened to 500.
+		if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+		} else {
+			_ = c.Error(errors.NewInternalServerError(err.Error()))
+		}
 		return
 	}
 
