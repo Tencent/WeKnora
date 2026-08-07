@@ -81,15 +81,26 @@ Reversible write: without -y/--yes in a non-TTY / JSON context it exits 10
 				return err
 			}
 			yes, _ := c.Flags().GetBool("yes")
-			// --api-key-stdin / --param excluded from retry_argv (stdin secret /
-			// repeatable), matching agent update's multi-value exclusions.
-			retry := cmdutil.BuildRetryArgv(c, []string{"weknora", "model", "update", id},
-				"display-name", "description", "base-url", "default", "format")
-			if err := cmdutil.ConfirmWrite(f.Prompter(), yes, fopts.WantsJSON(), "update", "model", id, "model.update", retry); err != nil {
-				return err
+			retryArgv := cmdutil.BuildRetryArgv(c,
+				[]string{"weknora", "model", "update", id},
+				"display-name", "description", "base-url", "param", "default", "format",
+			)
+			if opts.APIKeyStdin {
+				retryArgv = nil
 			}
-			if opts.StdinReader == nil {
-				opts.StdinReader = iostreams.IO.In
+			if err := cmdutil.ConfirmWrite(f.Prompter(), yes, fopts.WantsJSON(),
+				"update", "model", id, "model.update", retryArgv); err != nil {
+				if opts.APIKeyStdin {
+					if ce := cmdutil.AsError(err); ce != nil {
+						return ce.
+							WithHint("re-run the original command with -y after approval; secret stdin input cannot be replayed automatically").
+							WithDetail(map[string]any{
+								"retry_argv_available": false,
+								"unreplayable_flags":   []string{"--api-key-stdin"},
+							})
+					}
+				}
+				return err
 			}
 			cli, err := f.Client()
 			if err != nil {
