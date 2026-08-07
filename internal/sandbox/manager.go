@@ -128,7 +128,7 @@ func (m *DefaultManager) validateExecution(config *ExecuteConfig) error {
 
 	// Validate script content
 	if scriptContent != "" {
-		result := m.validator.ValidateScript(scriptContent)
+		result := m.validator.ValidateScript(scriptContent, config.AllowNetwork)
 		if !result.Valid {
 			// Log all validation errors
 			for _, verr := range result.Errors {

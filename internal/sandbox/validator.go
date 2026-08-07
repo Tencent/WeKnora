@@ -46,7 +46,7 @@ func NewScriptValidator() *ScriptValidator {
 }
 
 // ValidateScript validates script content for dangerous patterns
-func (v *ScriptValidator) ValidateScript(content string) *ValidationResult {
+func (v *ScriptValidator) ValidateScript(content string, allowNetwork bool) *ValidationResult {
 	result := &ValidationResult{Valid: true, Errors: make([]*ValidationError, 0)}
 
 	// Check for dangerous commands (use simple string matching for complex patterns)
@@ -77,7 +77,7 @@ func (v *ScriptValidator) ValidateScript(content string) *ValidationResult {
 	}
 
 	// Check for network access attempts
-	if v.hasNetworkAccess(content) {
+	if !allowNetwork && v.hasNetworkAccess(content) {
 		result.Valid = false
 		result.Errors = append(result.Errors, &ValidationError{
 			Type:    "network_access",
@@ -164,11 +164,11 @@ func (v *ScriptValidator) ValidateStdin(stdin string) *ValidationResult {
 }
 
 // ValidateAll performs comprehensive validation on script, args, and stdin
-func (v *ScriptValidator) ValidateAll(scriptContent string, args []string, stdin string) *ValidationResult {
+func (v *ScriptValidator) ValidateAll(scriptContent string, args []string, stdin string, allowNetwork bool) *ValidationResult {
 	result := &ValidationResult{Valid: true, Errors: make([]*ValidationError, 0)}
 
 	// Validate script content
-	if scriptResult := v.ValidateScript(scriptContent); !scriptResult.Valid {
+	if scriptResult := v.ValidateScript(scriptContent, allowNetwork); !scriptResult.Valid {
 		result.Valid = false
 		result.Errors = append(result.Errors, scriptResult.Errors...)
 	}

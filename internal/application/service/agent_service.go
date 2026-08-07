@@ -365,6 +365,12 @@ func (s *agentService) initializeSkillsManager(
 		}
 	}
 
+	allowNetworkStr := os.Getenv("WEKNORA_SANDBOX_ALLOW_NETWORK")
+	allowNetwork := false
+	if v, err := strconv.ParseBool(allowNetworkStr); err == nil {
+		allowNetwork = v
+	}
+
 	switch sandboxMode {
 	case "docker":
 		sandboxMgr, err = sandbox.NewManagerFromType("docker", true, dockerImage) // Enable fallback to local
@@ -381,13 +387,14 @@ func (s *agentService) initializeSkillsManager(
 	default:
 		sandboxMgr = sandbox.NewDisabledManager()
 	}
-	logger.Infof(ctx, "Sandbox configured: mode=%s, timeout=%ds, image=%s", sandboxMode, sandboxTimeout, dockerImage)
+	logger.Infof(ctx, "Sandbox configured: mode=%s, timeout=%ds, image=%s, allowNetwork=%v", sandboxMode, sandboxTimeout, dockerImage, allowNetwork)
 
 	// Create skills manager
 	skillsConfig := &skills.ManagerConfig{
 		SkillDirs:     config.SkillDirs,
 		AllowedSkills: config.AllowedSkills,
 		Enabled:       config.SkillsEnabled,
+		AllowNetwork:  allowNetwork,
 	}
 
 	skillsManager := skills.NewManager(skillsConfig, sandboxMgr)

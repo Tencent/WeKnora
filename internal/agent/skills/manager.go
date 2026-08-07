@@ -22,6 +22,7 @@ type Manager struct {
 	// Cache
 	metadataCache []*SkillMetadata
 	mu            sync.RWMutex
+	allowNetwork  bool
 }
 
 // ManagerConfig holds configuration for the skill manager
@@ -29,6 +30,7 @@ type ManagerConfig struct {
 	SkillDirs     []string // Directories to search for skills
 	AllowedSkills []string // Skill names whitelist (empty = allow all)
 	Enabled       bool     // Whether skills are enabled
+	AllowNetwork  bool     // Whether network access is allowed
 }
 
 // NewManager creates a new skill manager with the given configuration
@@ -45,6 +47,7 @@ func NewManager(config *ManagerConfig, sandboxMgr sandbox.Manager) *Manager {
 		skillDirs:     config.SkillDirs,
 		allowedSkills: config.AllowedSkills,
 		enabled:       config.Enabled,
+		allowNetwork:  config.AllowNetwork,
 	}
 }
 
@@ -204,10 +207,11 @@ func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath strin
 
 	// Prepare execution config
 	config := &sandbox.ExecuteConfig{
-		Script:  file.Path,
-		Args:    args,
-		WorkDir: basePath,
-		Stdin:   stdin,
+		Script:		   file.Path,
+		Args:    	   args,
+		WorkDir:       basePath,
+		Stdin:         stdin,
+		AllowNetwork:  m.allowNetwork,
 	}
 
 	// Execute in sandbox

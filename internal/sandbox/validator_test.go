@@ -123,7 +123,7 @@ func TestScriptValidator_ValidateScript(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := v.ValidateScript(tt.content)
+			result := v.ValidateScript(tt.content, true)
 
 			if tt.shouldFail && result.Valid {
 				t.Errorf("expected validation to fail but it passed")
@@ -300,6 +300,7 @@ func TestScriptValidator_ValidateAll(t *testing.T) {
 		`print("Hello")`,                // safe script
 		[]string{"--input", "file.txt"}, // safe args
 		`{"data": "value"}`,             // safe stdin
+		true,
 	)
 
 	if !result.Valid {
@@ -311,6 +312,7 @@ func TestScriptValidator_ValidateAll(t *testing.T) {
 		`os.system("rm -rf /")`,
 		[]string{"--input", "file.txt"},
 		`{"data": "value"}`,
+		true,
 	)
 
 	if result.Valid {
@@ -322,6 +324,7 @@ func TestScriptValidator_ValidateAll(t *testing.T) {
 		`print("Hello")`,
 		[]string{"--input", "file.txt; rm -rf /"},
 		`{"data": "value"}`,
+		true,
 	)
 
 	if result.Valid {
