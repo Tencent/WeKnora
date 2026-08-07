@@ -56,6 +56,35 @@ func (r *tenantAPIKeyRepository) ListPlatformAPIKeys(ctx context.Context) ([]*ty
 	return keys, err
 }
 
+// UpdateAPIKeyKnowledgeBases 更新租户 scoped API Key 的知识库白名单。
+// tenant_id、scope_type 和 full_access 同时参与条件，避免跨租户或误改全权限 Key。
+func (r *tenantAPIKeyRepository) UpdateAPIKeyKnowledgeBases(
+	ctx context.Context, tenantID uint64, id uint64, knowledgeBaseIDs types.StringArray,
+) (*types.TenantAPIKey, error) {
+	res := r.db.WithContext(ctx).
+		Model(&types.TenantAPIKey{}).
+		Where("id = ? AND tenant_id = ? AND scope_type = ? AND full_access = ? AND revoked_at IS NULL",
+			id, tenantID, types.APIKeyScopeTenant, false).
+		Update("knowledge_base_ids", knowledgeBaseIDs)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return nil, ErrTenantAPIKeyNotFound
+	}
+
+	var key types.TenantAPIKey
+	if err := r.db.WithContext(ctx).
+		Where("id = ? AND tenant_id = ? AND revoked_at IS NULL", id, tenantID).
+		First(&key).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrTenantAPIKeyNotFound
+		}
+		return nil, err
+	}
+	return &key, nil
+}
+
 func (r *tenantAPIKeyRepository) RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error {
 	now := time.Now().UTC()
 	res := r.db.WithContext(ctx).

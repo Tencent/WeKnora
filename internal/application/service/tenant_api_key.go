@@ -130,6 +130,22 @@ func (s *tenantAPIKeyService) ListPlatformAPIKeys(ctx context.Context) ([]*types
 	return s.repo.ListPlatformAPIKeys(ctx)
 }
 
+// UpdateAPIKeyKnowledgeBases 规范化知识库 ID 后更新已创建 scoped API Key 的白名单。
+// 入参中的空白项和重复项会被移除；空结果代表不限制知识库范围。
+func (s *tenantAPIKeyService) UpdateAPIKeyKnowledgeBases(
+	ctx context.Context, req interfaces.TenantAPIKeyKnowledgeBaseUpdateRequest,
+) (*types.TenantAPIKey, error) {
+	if req.TenantID == 0 {
+		return nil, errors.New("tenant_id is required")
+	}
+	if req.APIKeyID == 0 {
+		return nil, errors.New("api_key_id is required")
+	}
+	return s.repo.UpdateAPIKeyKnowledgeBases(
+		ctx, req.TenantID, req.APIKeyID, normalizeAPIKeyIDs(req.KnowledgeBaseIDs),
+	)
+}
+
 func (s *tenantAPIKeyService) RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error {
 	return s.repo.RevokeAPIKey(ctx, tenantID, id)
 }
