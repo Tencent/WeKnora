@@ -3166,6 +3166,7 @@ export default {
     refreshSuggestedQuestions: 'Ещё',
     thinking: 'Думаю...',
     thinkingAlt: 'Обдумывание...',
+    restoringGenerationProgress: 'Восстановление процесса генерации…',
     preparingAnswer: 'Подготовка ответа…',
     connectingModelAndGeneratingAnswer: 'Подключение к модели и создание ответа…',
     modelStillResponding: 'Модель отвечает дольше обычного, продолжаем ждать…',

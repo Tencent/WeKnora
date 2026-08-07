@@ -1,6 +1,10 @@
 import { markRaw, nextTick, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ensureRagPipelineHistoryStream } from '@/utils/rag-pipeline-history'
+import {
+  clearMessageStreamRecovery,
+  markLatestIncompleteAssistantForRecovery,
+} from '@/utils/stream-recovery-state'
 
 export type ChatMessage = Record<string, unknown>
 
@@ -78,6 +82,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
 
   const markAssistantStopped = (message: ChatMessage) => {
     if (!message || message.is_completed) return
+    clearMessageStreamRecovery(message)
     message.is_completed = true
     if (message.isAgentMode) {
       if (!message.agentEventStream) message.agentEventStream = []
@@ -211,6 +216,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
   ) => {
     if (!isLoading && !isRecovering) return false
     const last = messages[messages.length - 1]
+    if (last?.role === 'assistant' && last.isRecoveringStream) return false
     if (last?.role === 'assistant' && last?.isAgentMode && !last?.is_completed) {
       return false
     }
@@ -420,6 +426,10 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       } else {
         messagesList.push(...processed)
       }
+    }
+
+    if (preserveIncompleteStreamReactive && !isScrollType) {
+      markLatestIncompleteAssistantForRecovery(messagesList)
     }
 
     if (isFirstEnter?.value) {
@@ -854,6 +864,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       assistant_message_id: data.assistant_message_id,
     })
 
+    // The first replayed/live event means continue-stream is connected. Remove
+    // the refresh-only status before handing this same event to the original
+    // RAG, Agent, thinking, tool, or answer renderer.
+    clearMessageStreamRecovery(resolveActiveAssistantMessage(data))
+
     if (data.response_type === 'agent_query') {
       if (data.id) {
         const earlyMsg = getTrailingIncompleteAssistant()
@@ -1025,5 +1040,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     processStreamChunk,
     prepareForNewOutgoingMessage,
     markInFlightAssistantStopped,
+    clearActiveStreamRecovery: () => {
+      clearMessageStreamRecovery(getTrailingIncompleteAssistant())
+    },
   }
 }
