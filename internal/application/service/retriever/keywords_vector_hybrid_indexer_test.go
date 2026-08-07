@@ -56,9 +56,9 @@ type accessMetadataRecordingRepository struct {
 }
 
 func (r *accessMetadataRecordingRepository) BatchSave(
-	ctx context.Context,
+	_ context.Context,
 	indexInfoList []*types.IndexInfo,
-	params map[string]any,
+	_ map[string]any,
 ) error {
 	r.indexed = append(r.indexed, indexInfoList...)
 	return nil

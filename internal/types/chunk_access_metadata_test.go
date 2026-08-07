@@ -3,7 +3,9 @@ package types
 import "testing"
 
 func TestChunkAccessMetadataExtractsReservedObject(t *testing.T) {
-	chunk := &Chunk{Metadata: JSON(`{"access_metadata":{"department":"research","employee_nature":"formal"},"generated_questions":["unrelated"]}`)}
+	metadata := JSON(`{"access_metadata":{"department":"research","employee_nature":"formal"},` +
+		`"generated_questions":["unrelated"]}`)
+	chunk := &Chunk{Metadata: metadata}
 
 	got, err := chunk.AccessMetadata()
 	if err != nil {
@@ -69,7 +71,9 @@ func TestChunkMetadataSettersPreserveReservedAccessMetadata(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			chunk := &Chunk{Metadata: JSON(`{"access_metadata":{"department":"research"},"generated_questions":["old"]}`)}
+			metadata := JSON(`{"access_metadata":{"department":"research"},` +
+				`"generated_questions":["old"]}`)
+			chunk := &Chunk{Metadata: metadata}
 			if err := tt.set(chunk); err != nil {
 				t.Fatalf("set metadata: %v", err)
 			}

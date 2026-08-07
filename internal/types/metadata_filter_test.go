@@ -35,12 +35,23 @@ func TestMetadataFilterValidateRejectsMalformedNodes(t *testing.T) {
 		name   string
 		filter MetadataFilter
 	}{
-		{name: "mixed group and predicate", filter: MetadataFilter{And: []MetadataFilter{{Field: "x", Op: MetadataFilterOpEqual, Value: true}}, Field: "x", Op: MetadataFilterOpEqual, Value: true}},
+		{
+			name: "mixed group and predicate",
+			filter: MetadataFilter{
+				And:   []MetadataFilter{{Field: "x", Op: MetadataFilterOpEqual, Value: true}},
+				Field: "x", Op: MetadataFilterOpEqual, Value: true,
+			},
+		},
 		{name: "empty node", filter: MetadataFilter{}},
 		{name: "empty and", filter: MetadataFilter{And: []MetadataFilter{}}},
 		{name: "empty or", filter: MetadataFilter{Or: []MetadataFilter{}}},
 		{name: "empty in", filter: MetadataFilter{Field: "x", Op: MetadataFilterOpIn, Values: []any{}}},
-		{name: "eq with values", filter: MetadataFilter{Field: "x", Op: MetadataFilterOpEqual, Value: true, Values: []any{true}}},
+		{
+			name: "eq with values",
+			filter: MetadataFilter{
+				Field: "x", Op: MetadataFilterOpEqual, Value: true, Values: []any{true},
+			},
+		},
 		{name: "in with value", filter: MetadataFilter{Field: "x", Op: MetadataFilterOpIn, Value: true, Values: []any{true}}},
 		{name: "unknown operator", filter: MetadataFilter{Field: "x", Op: MetadataFilterOperator("gt"), Value: true}},
 		{name: "missing value", filter: MetadataFilter{Field: "x", Op: MetadataFilterOpEqual}},
@@ -152,11 +163,37 @@ func TestMetadataFilterMatchesScalarsAndArrays(t *testing.T) {
 		metadata JSONMap
 		want     bool
 	}{
-		{name: "scalar equality", filter: MetadataFilter{Field: "department", Op: MetadataFilterOpEqual, Value: "research"}, metadata: JSONMap{"department": "research"}, want: true},
-		{name: "scalar membership", filter: MetadataFilter{Field: "department", Op: MetadataFilterOpIn, Values: []any{"finance", "research"}}, metadata: JSONMap{"department": "research"}, want: true},
-		{name: "array equality", filter: MetadataFilter{Field: "roles", Op: MetadataFilterOpEqual, Value: "reviewer"}, metadata: JSONMap{"roles": []any{"author", "reviewer"}}, want: true},
-		{name: "array intersection", filter: MetadataFilter{Field: "roles", Op: MetadataFilterOpIn, Values: []any{"reviewer", "admin"}}, metadata: JSONMap{"roles": []any{"author", "reviewer"}}, want: true},
-		{name: "array no intersection", filter: MetadataFilter{Field: "roles", Op: MetadataFilterOpIn, Values: []any{"admin"}}, metadata: JSONMap{"roles": []any{"author", "reviewer"}}, want: false},
+		{
+			name:     "scalar equality",
+			filter:   MetadataFilter{Field: "department", Op: MetadataFilterOpEqual, Value: "research"},
+			metadata: JSONMap{"department": "research"}, want: true,
+		},
+		{
+			name: "scalar membership",
+			filter: MetadataFilter{
+				Field: "department", Op: MetadataFilterOpIn, Values: []any{"finance", "research"},
+			},
+			metadata: JSONMap{"department": "research"}, want: true,
+		},
+		{
+			name:     "array equality",
+			filter:   MetadataFilter{Field: "roles", Op: MetadataFilterOpEqual, Value: "reviewer"},
+			metadata: JSONMap{"roles": []any{"author", "reviewer"}}, want: true,
+		},
+		{
+			name: "array intersection",
+			filter: MetadataFilter{
+				Field: "roles", Op: MetadataFilterOpIn, Values: []any{"reviewer", "admin"},
+			},
+			metadata: JSONMap{"roles": []any{"author", "reviewer"}}, want: true,
+		},
+		{
+			name: "array no intersection",
+			filter: MetadataFilter{
+				Field: "roles", Op: MetadataFilterOpIn, Values: []any{"admin"},
+			},
+			metadata: JSONMap{"roles": []any{"author", "reviewer"}}, want: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -27,7 +27,10 @@ func TestCompileMetadataFilterPreservesNestedBooleanTree(t *testing.T) {
 		t.Fatalf("compile metadata filter: %v", err)
 	}
 
-	wantSQL := "(((access_metadata @> jsonb_build_object(?, ?::jsonb) OR access_metadata @> jsonb_build_object(?, jsonb_build_array(?::jsonb))) AND ((access_metadata @> jsonb_build_object(?, ?::jsonb) OR access_metadata @> jsonb_build_object(?, jsonb_build_array(?::jsonb))) OR (access_metadata @> jsonb_build_object(?, ?::jsonb) OR access_metadata @> jsonb_build_object(?, jsonb_build_array(?::jsonb))))) OR (access_metadata @> jsonb_build_object(?, ?::jsonb) OR access_metadata @> jsonb_build_object(?, jsonb_build_array(?::jsonb))))"
+	const scalarPredicate = "access_metadata @> jsonb_build_object(?, ?::jsonb)"
+	const arrayPredicate = "access_metadata @> jsonb_build_object(?, jsonb_build_array(?::jsonb))"
+	leafPredicate := "(" + scalarPredicate + " OR " + arrayPredicate + ")"
+	wantSQL := "((" + leafPredicate + " AND (" + leafPredicate + " OR " + leafPredicate + ")) OR " + leafPredicate + ")"
 	if sql != wantSQL {
 		t.Fatalf("compiled SQL = %s\nwant %s", sql, wantSQL)
 	}
@@ -53,7 +56,8 @@ func TestCompileMetadataFilterBindsInjectionValuesAndHonorsOffset(t *testing.T) 
 	if strings.Contains(sql, field) || strings.Contains(sql, "research") {
 		t.Fatalf("untrusted value was interpolated into SQL: %s", sql)
 	}
-	wantSQL := "(access_metadata @> jsonb_build_object($8, $9::jsonb) OR access_metadata @> jsonb_build_object($10, jsonb_build_array($11::jsonb)))"
+	wantSQL := "(access_metadata @> jsonb_build_object($8, $9::jsonb) OR " +
+		"access_metadata @> jsonb_build_object($10, jsonb_build_array($11::jsonb)))"
 	if sql != wantSQL {
 		t.Fatalf("compiled SQL = %s, want %s", sql, wantSQL)
 	}
@@ -113,7 +117,12 @@ func TestKeywordsRetrieveExecutesMetadataFilterBeforeLimit(t *testing.T) {
 	field := "department'); DROP TABLE embeddings; --"
 	value := "research'); --"
 
-	mock.ExpectQuery(`(?s)SELECT .* FROM "embeddings" WHERE \(+access_metadata @> jsonb_build_object\(\$1, \$2::jsonb\) OR access_metadata @> jsonb_build_object\(\$3, jsonb_build_array\(\$4::jsonb\)\)+ AND content \|\|\| \$5 AND \(+is_enabled IS NULL OR is_enabled = \$6\)+ ORDER BY "score" DESC LIMIT \$7`).
+	const metadataConditionPattern = `\(+access_metadata @> jsonb_build_object\(\$1, \$2::jsonb\) OR ` +
+		`access_metadata @> jsonb_build_object\(\$3, jsonb_build_array\(\$4::jsonb\)\)+`
+	const queryPattern = `(?s)SELECT .* FROM "embeddings" WHERE ` + metadataConditionPattern +
+		` AND content \|\|\| \$5 AND \(+is_enabled IS NULL OR is_enabled = \$6\)+ ` +
+		`ORDER BY "score" DESC LIMIT \$7`
+	mock.ExpectQuery(queryPattern).
 		WithArgs(field, `"research'); --"`, field, `"research'); --"`, "expense", true, 2).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"score", "id", "content", "source_id", "source_type", "chunk_id", "knowledge_id", "knowledge_base_id", "tag_id",

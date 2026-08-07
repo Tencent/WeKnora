@@ -104,7 +104,9 @@ func TestHybridSearchAcceptsQueryText(t *testing.T) {
 
 func TestHybridSearchAcceptsNestedMetadataFilter(t *testing.T) {
 	svc := &hybridSearchTestService{}
-	body := `{"query_text":"报销","metadata_filter":{"or":[{"and":[{"field":"employee_nature","op":"eq","value":"formal"},{"field":"department","op":"eq","value":"research"}]}]}}`
+	body := `{"query_text":"报销","metadata_filter":{"or":[{"and":[` +
+		`{"field":"employee_nature","op":"eq","value":"formal"},` +
+		`{"field":"department","op":"eq","value":"research"}]}]}}`
 	response := performHybridSearchRequest(svc, body)
 
 	if response.Code != http.StatusOK {
@@ -123,7 +125,9 @@ func TestHybridSearchAcceptsNestedMetadataFilter(t *testing.T) {
 
 func TestHybridSearchRejectsMalformedMetadataFilterBeforeService(t *testing.T) {
 	svc := &hybridSearchTestService{}
-	response := performHybridSearchRequest(svc, `{"query_text":"报销","metadata_filter":{"field":"department","op":"contains","value":"research"}}`)
+	body := `{"query_text":"报销","metadata_filter":` +
+		`{"field":"department","op":"contains","value":"research"}}`
+	response := performHybridSearchRequest(svc, body)
 
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d body=%s", response.Code, response.Body.String())

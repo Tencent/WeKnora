@@ -525,7 +525,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				knowledge.ParseStatus = types.ParseStatusFailed
 				knowledge.ErrorMessage = fmt.Sprintf("extract access metadata for chunk %s: %v", chunk.ID, metadataErr)
 				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
+				_ = s.repo.UpdateKnowledge(ctx, knowledge)
 				s.failStage(ctx, knowledge.ID, types.StageEmbedding,
 					werrors.ErrCodeVectorStoreWriteFailed, "extract access metadata failed", metadataErr)
 				return

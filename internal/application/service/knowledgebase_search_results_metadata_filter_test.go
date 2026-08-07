@@ -91,7 +91,8 @@ func searchResultIDs(results []*types.SearchResult) []string {
 }
 
 func TestProcessSearchResultsMetadataFilterExcludesDisallowedNearbyAndAccessMetadata(t *testing.T) {
-	primary := metadataFilterResultChunk("primary", types.JSON(`{"access_metadata":{"department":"research"},"label":"visible"}`))
+	metadata := types.JSON(`{"access_metadata":{"department":"research"},"label":"visible"}`)
+	primary := metadataFilterResultChunk("primary", metadata)
 	primary.NextChunkID = "nearby"
 	nearby := metadataFilterResultChunk("nearby", metadataForDepartment("finance"))
 	service := newMetadataFilterResultService(map[string]*types.Chunk{

@@ -14,8 +14,10 @@ import (
 type MetadataFilterOperator string
 
 const (
+	// MetadataFilterOpEqual matches a scalar or an element of a stored array.
 	MetadataFilterOpEqual MetadataFilterOperator = "eq"
-	MetadataFilterOpIn    MetadataFilterOperator = "in"
+	// MetadataFilterOpIn matches any supplied scalar against a scalar or stored array.
+	MetadataFilterOpIn MetadataFilterOperator = "in"
 )
 
 var strictJSONNumberPattern = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
@@ -107,7 +109,10 @@ func (v *metadataFilterValidation) validate(f *MetadataFilter, depth int) error 
 	}
 
 	if f.Field == "" || strings.TrimSpace(f.Field) != f.Field || len([]rune(f.Field)) > maxMetadataFilterField {
-		return fmt.Errorf("metadata filter field must be a trimmed non-empty key of at most %d characters", maxMetadataFilterField)
+		return fmt.Errorf(
+			"metadata filter field must be a trimmed non-empty key of at most %d characters",
+			maxMetadataFilterField,
+		)
 	}
 	for _, r := range f.Field {
 		if unicode.IsControl(r) {

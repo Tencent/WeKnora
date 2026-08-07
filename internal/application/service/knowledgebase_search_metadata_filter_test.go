@@ -80,8 +80,14 @@ func TestHybridSearch_MetadataFilterUnsupportedFailsClosedBeforeAnyRetrieve(t *t
 	repo := &metadataFilterKBRepo{
 		fakeKBRepo: newFakeKBRepo(),
 		kbs: []*types.KnowledgeBase{
-			{ID: "kb-postgres", TenantID: 1, VectorStoreID: ptr(postgresStoreID), IndexingStrategy: types.DefaultIndexingStrategy()},
-			{ID: "kb-elastic", TenantID: 1, VectorStoreID: ptr(elasticStoreID), IndexingStrategy: types.DefaultIndexingStrategy()},
+			{
+				ID: "kb-postgres", TenantID: 1, VectorStoreID: ptr(postgresStoreID),
+				IndexingStrategy: types.DefaultIndexingStrategy(),
+			},
+			{
+				ID: "kb-elastic", TenantID: 1, VectorStoreID: ptr(elasticStoreID),
+				IndexingStrategy: types.DefaultIndexingStrategy(),
+			},
 		},
 	}
 	svc := &knowledgeBaseService{

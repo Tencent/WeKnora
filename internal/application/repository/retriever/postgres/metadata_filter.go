@@ -1,3 +1,4 @@
+// Package postgres implements PostgreSQL-backed retrieval storage.
 package postgres
 
 import (
@@ -111,8 +112,10 @@ func compileMetadataFilterEqual(field string, value interface{}, binder *metadat
 	// JSONB containment covers both persisted forms: the first alternative
 	// matches a scalar value, and the second matches a scalar member of a
 	// persisted JSON array.
+	const scalarPredicate = "access_metadata @> jsonb_build_object(%s, %s::jsonb)"
+	const arrayPredicate = "access_metadata @> jsonb_build_object(%s, jsonb_build_array(%s::jsonb))"
 	return fmt.Sprintf(
-		"(access_metadata @> jsonb_build_object(%s, %s::jsonb) OR access_metadata @> jsonb_build_object(%s, jsonb_build_array(%s::jsonb)))",
+		"("+scalarPredicate+" OR "+arrayPredicate+")",
 		binder.bind(field), binder.bind(string(encodedValue)),
 		binder.bind(field), binder.bind(string(encodedValue)),
 	), nil

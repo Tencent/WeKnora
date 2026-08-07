@@ -304,7 +304,7 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	}
 	if req.MetadataFilter != nil {
 		if err := req.MetadataFilter.Validate(); err != nil {
-			c.Error(apperrors.NewValidationError(err.Error()))
+			_ = c.Error(apperrors.NewValidationError(err.Error()))
 			return
 		}
 	}

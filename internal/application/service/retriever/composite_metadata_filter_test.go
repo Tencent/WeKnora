@@ -16,8 +16,14 @@ func TestCompositeRetrieveEngineSupportsMetadataFilter(t *testing.T) {
 		{
 			name: "postgres members only",
 			engine: &CompositeRetrieveEngine{engineInfos: []*engineInfo{
-				{retrieveEngine: &fakeEngine{engineType: types.PostgresRetrieverEngineType}, retrieverType: []types.RetrieverType{types.VectorRetrieverType}},
-				{retrieveEngine: &fakeEngine{engineType: types.PostgresRetrieverEngineType}, retrieverType: []types.RetrieverType{types.KeywordsRetrieverType}},
+				{
+					retrieveEngine: &fakeEngine{engineType: types.PostgresRetrieverEngineType},
+					retrieverType:  []types.RetrieverType{types.VectorRetrieverType},
+				},
+				{
+					retrieveEngine: &fakeEngine{engineType: types.PostgresRetrieverEngineType},
+					retrieverType:  []types.RetrieverType{types.KeywordsRetrieverType},
+				},
 			}},
 			want: true,
 		},
@@ -75,14 +81,23 @@ func TestCompositeRetrieveEngineSupportsMetadataFilter(t *testing.T) {
 		{
 			name: "mixed engine members",
 			engine: &CompositeRetrieveEngine{engineInfos: []*engineInfo{
-				{retrieveEngine: &fakeEngine{engineType: types.PostgresRetrieverEngineType}, retrieverType: []types.RetrieverType{types.VectorRetrieverType}},
-				{retrieveEngine: &fakeEngine{engineType: types.ElasticsearchRetrieverEngineType}, retrieverType: []types.RetrieverType{types.KeywordsRetrieverType}},
+				{
+					retrieveEngine: &fakeEngine{engineType: types.PostgresRetrieverEngineType},
+					retrieverType:  []types.RetrieverType{types.VectorRetrieverType},
+				},
+				{
+					retrieveEngine: &fakeEngine{engineType: types.ElasticsearchRetrieverEngineType},
+					retrieverType:  []types.RetrieverType{types.KeywordsRetrieverType},
+				},
 			}},
 		},
 		{
 			name: "unknown engine member",
 			engine: &CompositeRetrieveEngine{engineInfos: []*engineInfo{
-				{retrieveEngine: &fakeEngine{engineType: types.RetrieverEngineType("unknown")}, retrieverType: []types.RetrieverType{types.VectorRetrieverType}},
+				{
+					retrieveEngine: &fakeEngine{engineType: types.RetrieverEngineType("unknown")},
+					retrieverType:  []types.RetrieverType{types.VectorRetrieverType},
+				},
 			}},
 		},
 	}
