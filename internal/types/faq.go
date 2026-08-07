@@ -107,7 +107,10 @@ func (c *Chunk) SetDocumentMetadata(meta *DocumentChunkMetadata) error {
 	if err != nil {
 		return err
 	}
-	c.Metadata = JSON(bytes)
+	c.Metadata, err = c.withExistingAccessMetadata(bytes)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -198,7 +201,10 @@ func (c *Chunk) SetFAQMetadata(meta *FAQChunkMetadata) error {
 	if err != nil {
 		return err
 	}
-	c.Metadata = JSON(bytes)
+	c.Metadata, err = c.withExistingAccessMetadata(bytes)
+	if err != nil {
+		return err
+	}
 	// ContentHash 基于归一化后的数据计算，用于去重匹配
 	normalized := meta.Normalize()
 	c.ContentHash = CalculateFAQContentHash(normalized)

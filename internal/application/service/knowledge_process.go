@@ -520,6 +520,16 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			// to plain Content otherwise. The document title sits outermost;
 			// custom metadata remains document-scoped model context.
 			indexContent := buildKnowledgeIndexContent(knowledge, chunk.EmbeddingContent())
+			accessMetadata, metadataErr := chunk.AccessMetadata()
+			if metadataErr != nil {
+				knowledge.ParseStatus = types.ParseStatusFailed
+				knowledge.ErrorMessage = fmt.Sprintf("extract access metadata for chunk %s: %v", chunk.ID, metadataErr)
+				knowledge.UpdatedAt = time.Now()
+				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.failStage(ctx, knowledge.ID, types.StageEmbedding,
+					werrors.ErrCodeVectorStoreWriteFailed, "extract access metadata failed", metadataErr)
+				return
+			}
 			indexInfoList = append(indexInfoList, &types.IndexInfo{
 				Content:         indexContent,
 				SourceID:        chunk.ID,
@@ -527,6 +537,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				ChunkID:         chunk.ID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
+				AccessMetadata:  accessMetadata,
 				IsEnabled:       true,
 			})
 		}
@@ -1334,6 +1345,11 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			return fmt.Errorf("failed to get embedding model: %w", err)
 		}
 
+		summaryAccessMetadata, err := summaryChunk.AccessMetadata()
+		if err != nil {
+			summaryErr = fmt.Errorf("extract access metadata for summary chunk %s: %w", summaryChunk.ID, err)
+			return summaryErr
+		}
 		indexInfo := []*types.IndexInfo{{
 			Content:         summaryChunk.Content,
 			SourceID:        summaryChunk.ID,
@@ -1341,6 +1357,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			ChunkID:         summaryChunk.ID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
+			AccessMetadata:  summaryAccessMetadata,
 			IsEnabled:       true,
 		}}
 
@@ -1689,6 +1706,11 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		if sampleQuestion == "" && len(questions) > 0 {
 			sampleQuestion = previewText(questions[0], 200)
 		}
+		accessMetadata, metadataErr := chunk.AccessMetadata()
+		if metadataErr != nil {
+			exitStatus = "extract_access_metadata_failed"
+			return fmt.Errorf("extract access metadata for chunk %s: %w", chunk.ID, metadataErr)
+		}
 
 		// Update chunk metadata with unique IDs for each question
 		generatedQuestions := make([]types.GeneratedQuestion, len(questions))
@@ -1727,6 +1749,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 				ChunkID:         chunk.ID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
+				AccessMetadata:  accessMetadata,
 				IsEnabled:       true,
 			})
 		}
@@ -2027,6 +2050,12 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		if sampleQuestion == "" {
 			sampleQuestion = previewText(questions[0], 200)
 		}
+		accessMetadata, metadataErr := chunk.AccessMetadata()
+		if metadataErr != nil {
+			exitStatus = "extract_access_metadata_failed"
+			qErr = fmt.Errorf("extract access metadata for chunk %s: %w", chunk.ID, metadataErr)
+			return qErr
+		}
 
 		generatedQuestions := make([]types.GeneratedQuestion, len(questions))
 		questionRevision := chunk.ContentRevision
@@ -2056,6 +2085,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 				ChunkID:         chunk.ID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
+				AccessMetadata:  accessMetadata,
 				IsEnabled:       true,
 			})
 		}
@@ -2836,6 +2866,10 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 			}
 			knowledgeCache[chunk.KnowledgeID] = knowledge
 		}
+		accessMetadata, err := chunk.AccessMetadata()
+		if err != nil {
+			return fmt.Errorf("extract access metadata for chunk %s: %w", chunk.ID, err)
+		}
 		indexInfo = append(indexInfo, &types.IndexInfo{
 			Content:         buildKnowledgeIndexContent(knowledge, chunk.EmbeddingContent()),
 			SourceID:        chunk.ID,
@@ -2844,6 +2878,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
 			KnowledgeType:   sourceKB.Type,
+			AccessMetadata:  accessMetadata,
 			IsEnabled:       chunk.IsEnabled,
 		})
 		meta, metaErr := chunk.DocumentMetadata()
@@ -2857,7 +2892,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 						Content: buildKnowledgeIndexContent(knowledge, q.Question), SourceID: types.GeneratedQuestionSourceID(chunk.ID, q.ID),
 						SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
 						KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
-						KnowledgeType: sourceKB.Type, IsEnabled: true,
+						KnowledgeType: sourceKB.Type, AccessMetadata: accessMetadata, IsEnabled: true,
 					})
 				}
 			}
