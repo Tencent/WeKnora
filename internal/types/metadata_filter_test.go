@@ -121,10 +121,19 @@ func TestMetadataFilterValidateRejectsExplicitNullAndMixedGroups(t *testing.T) {
 }
 
 func TestMetadataFilterValidateRejectsInvalidJSONNumbers(t *testing.T) {
-	for _, value := range []json.Number{"not-a-number", "NaN", "+Inf", "-Inf"} {
+	for _, value := range []json.Number{"not-a-number", "NaN", "+Inf", "-Inf", "01", "1.", " 1", "1 "} {
 		filter := MetadataFilter{Field: "value", Op: MetadataFilterOpEqual, Value: value}
 		if err := filter.Validate(); err == nil {
 			t.Fatalf("invalid JSON number %q was accepted", value)
+		}
+	}
+}
+
+func TestMetadataFilterValidateAcceptsStrictJSONNumbers(t *testing.T) {
+	for _, value := range []json.Number{"0", "-0", "12.5", "1e3", "-2.5E-4"} {
+		filter := MetadataFilter{Field: "value", Op: MetadataFilterOpEqual, Value: value}
+		if err := filter.Validate(); err != nil {
+			t.Fatalf("valid JSON number %q was rejected: %v", value, err)
 		}
 	}
 }

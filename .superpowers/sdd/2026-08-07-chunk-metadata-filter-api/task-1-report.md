@@ -95,3 +95,34 @@ git diff --check
 ```
 
 The fixes are limited to Task 1 AST JSON/validation behavior and regression tests. The existing Task 1 commit was not rewritten.
+
+## Review round 1 follow-up fix
+
+### Finding addressed
+
+Added strict JSON-number lexical validation for `json.Number` before the existing `Float64()` parsing and finiteness checks. The accepted grammar is equivalent to `-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?`, so leading zeroes, incomplete decimals, and surrounding whitespace are rejected while decimal and exponent forms remain valid. Existing scalar equality and membership semantics are unchanged.
+
+### Follow-up RED evidence
+
+After adding regression tests and before the production fix:
+
+```text
+go test ./internal/types -run 'TestMetadataFilter' -count=1
+--- FAIL: TestMetadataFilterValidateRejectsInvalidJSONNumbers
+    invalid JSON number "01" was accepted
+FAIL
+```
+
+### Follow-up GREEN evidence
+
+```text
+go test ./internal/types -run 'TestMetadataFilter' -count=1
+ok   github.com/Tencent/WeKnora/internal/types  0.666s
+
+go test ./internal/types -count=1
+ok   github.com/Tencent/WeKnora/internal/types  0.628s
+
+git diff --check
+```
+
+Regression coverage includes malformed `01`, `1.`, whitespace-wrapped numbers, malformed/non-finite values, and valid `0`, `-0`, decimal, and exponent forms.

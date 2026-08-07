@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"regexp"
 	"strings"
 	"unicode"
 )
@@ -16,6 +17,8 @@ const (
 	MetadataFilterOpEqual MetadataFilterOperator = "eq"
 	MetadataFilterOpIn    MetadataFilterOperator = "in"
 )
+
+var strictJSONNumberPattern = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
 
 const (
 	maxMetadataFilterDepth = 8
@@ -142,6 +145,9 @@ func validMetadataScalar(value any) bool {
 		return true
 	}
 	if _, ok := value.(json.Number); ok {
+		if !strictJSONNumberPattern.MatchString(string(value.(json.Number))) {
+			return false
+		}
 		_, ok = metadataNumber(value)
 		return ok
 	}
