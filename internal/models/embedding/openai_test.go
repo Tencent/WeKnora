@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 )
 
@@ -41,6 +42,61 @@ func TestOpenAIEmbedderBatchEmbedOmitsDimensionsForFixedSizeModels(t *testing.T)
 
 	if _, ok := requestBody["dimensions"]; ok {
 		t.Fatalf("expected request body to omit dimensions for fixed-size model, got %v", requestBody)
+	}
+}
+
+func TestOpenAIEmbedderRetries429WithRetryAfter(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := hits.Add(1)
+		if n == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":"rate limited"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"embedding":[0.1,0.2],"index":0}]}`))
+	}))
+	defer server.Close()
+
+	embedder, err := NewOpenAIEmbedder("test-key", server.URL, "text-embedding-3-small", 511, 0, "m1", nil)
+	if err != nil {
+		t.Fatalf("NewOpenAIEmbedder: %v", err)
+	}
+	got, err := embedder.BatchEmbed(context.Background(), []string{"hello"})
+	if err != nil {
+		t.Fatalf("BatchEmbed: %v", err)
+	}
+	if len(got) != 1 || len(got[0]) != 2 {
+		t.Fatalf("unexpected embeddings: %#v", got)
+	}
+	if hits.Load() < 2 {
+		t.Fatalf("hits = %d, want >= 2 (429 then success)", hits.Load())
+	}
+}
+
+func TestOpenAIEmbedderExhausts429Retries(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"still limited"}`))
+	}))
+	defer server.Close()
+
+	embedder, err := NewOpenAIEmbedder("test-key", server.URL, "text-embedding-3-small", 511, 0, "m1", nil)
+	if err != nil {
+		t.Fatalf("NewOpenAIEmbedder: %v", err)
+	}
+	// Force a single attempt so the test stays fast.
+	embedder.maxRetries = 0
+	_, err = embedder.BatchEmbed(context.Background(), []string{"hello"})
+	if !IsRateLimitError(err) {
+		t.Fatalf("err = %v, want RateLimitError", err)
 	}
 }
 

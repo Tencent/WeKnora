@@ -249,8 +249,10 @@ services:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       # Ollama 不可用时仅告警不阻断（true 时生效）
       - OLLAMA_OPTIONAL=${OLLAMA_OPTIONAL:-true}
-      # 批量 embedding 大小
+      # 批量 embedding 大小 / 子批次速率 pacing / 失败子批次重试（见 .env.example）
       - BATCH_EMBED_SIZE=${BATCH_EMBED_SIZE:-}
+      - EMBED_REQUEST_INTERVAL_MS=${EMBED_REQUEST_INTERVAL_MS:-}
+      - EMBED_BATCH_MAX_RETRIES=${EMBED_BATCH_MAX_RETRIES:-}
       # VLM 单次 HTTP 请求超时（秒，默认 180）
       - VLM_HTTP_TIMEOUT_SECONDS=${VLM_HTTP_TIMEOUT_SECONDS:-}
       # LLM 流原始转储（排查上下文问题；1 启用，默认目录 ~/.weknora/investigate/llm-stream）
