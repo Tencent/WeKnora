@@ -249,6 +249,8 @@ type SearchParams struct {
 	// in processSearchResults. Used by the chat pipeline where context assembly
 	// is handled separately in the merge stage.
 	SkipContextEnrichment bool `json:"skip_context_enrichment,omitempty"`
+	// MetadataFilter narrows retrieval to chunks whose access metadata matches.
+	MetadataFilter *MetadataFilter `json:"metadata_filter,omitempty"`
 }
 
 // Value implements the driver.Valuer interface, used to convert SearchResult to database value
