@@ -2043,6 +2043,10 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 	if meta == nil {
 		meta = &types.FAQChunkMetadata{StandardQuestion: chunk.Content}
 	}
+	accessMetadata, err := chunk.AccessMetadata()
+	if err != nil {
+		return nil, fmt.Errorf("extract access metadata for chunk %s: %w", chunk.ID, err)
+	}
 
 	// 如果是一起索引模式，使用原有逻辑
 	if questionIndexMode == types.FAQQuestionIndexModeCombined {
@@ -2057,6 +2061,7 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 				KnowledgeBaseID: chunk.KnowledgeBaseID,
 				KnowledgeType:   types.KnowledgeTypeFAQ,
 				TagID:           chunk.TagID,
+				AccessMetadata:  accessMetadata,
 				IsEnabled:       chunk.IsEnabled,
 				IsRecommended:   chunk.Flags.HasFlag(types.ChunkFlagRecommended),
 			},
@@ -2086,6 +2091,7 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 		KnowledgeBaseID: chunk.KnowledgeBaseID,
 		KnowledgeType:   types.KnowledgeTypeFAQ,
 		TagID:           chunk.TagID,
+		AccessMetadata:  accessMetadata,
 		IsEnabled:       chunk.IsEnabled,
 		IsRecommended:   chunk.Flags.HasFlag(types.ChunkFlagRecommended),
 	})
@@ -2112,6 +2118,7 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
 			KnowledgeType:   types.KnowledgeTypeFAQ,
 			TagID:           chunk.TagID,
+			AccessMetadata:  accessMetadata,
 			IsEnabled:       chunk.IsEnabled,
 			IsRecommended:   chunk.Flags.HasFlag(types.ChunkFlagRecommended),
 		})

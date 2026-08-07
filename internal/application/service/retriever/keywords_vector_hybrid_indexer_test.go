@@ -50,6 +50,43 @@ func (r *saveOnlyRepository) BatchSave(
 	return nil
 }
 
+type accessMetadataRecordingRepository struct {
+	interfaces.RetrieveEngineRepository
+	indexed []*types.IndexInfo
+}
+
+func (r *accessMetadataRecordingRepository) BatchSave(
+	_ context.Context,
+	indexInfoList []*types.IndexInfo,
+	_ map[string]any,
+) error {
+	r.indexed = append(r.indexed, indexInfoList...)
+	return nil
+}
+
+func TestBatchIndexForwardsAccessMetadataToRepository(t *testing.T) {
+	repository := &accessMetadataRecordingRepository{}
+	service := &KeywordsVectorHybridRetrieveEngineService{indexRepository: repository}
+	withMetadata := types.JSONMap{"department": "research"}
+
+	err := service.BatchIndex(context.Background(), nil, []*types.IndexInfo{
+		{SourceID: "with-metadata", AccessMetadata: withMetadata},
+		{SourceID: "without-metadata"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("BatchIndex() error = %v", err)
+	}
+	if len(repository.indexed) != 2 {
+		t.Fatalf("repository received %d records, want 2", len(repository.indexed))
+	}
+	if got := repository.indexed[0].AccessMetadata; got["department"] != "research" {
+		t.Fatalf("repository access metadata = %#v, want department=research", got)
+	}
+	if repository.indexed[1].AccessMetadata != nil {
+		t.Fatalf("repository omitted access metadata = %#v, want nil", repository.indexed[1].AccessMetadata)
+	}
+}
+
 func TestIndexRemovesInlineImagePayloadBeforeEmbedding(t *testing.T) {
 	ctx := context.Background()
 	embedder := &capturingEmbedder{}

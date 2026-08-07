@@ -14,6 +14,7 @@ import (
 func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	chunks []*types.IndexWithScore,
 	skipEnrichment bool,
+	metadataFilter *types.MetadataFilter,
 ) ([]*types.SearchResult, error) {
 	if len(chunks) == 0 {
 		return nil, nil
@@ -21,7 +22,25 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 
 	tenantID := types.MustTenantIDFromContext(ctx)
 
-	// Collect all knowledge and chunk IDs, track scores and match info
+	// Fetch primary chunks first so a defense-in-depth metadata check happens
+	// before their retrieval IDs contribute to knowledge or context assembly.
+	primaryIndex := s.buildChunkIndex(chunks)
+	logger.Infof(ctx, "Fetching chunk data for %d IDs", len(primaryIndex.chunkIDs))
+	allChunks, err := s.listChunksByIDWithShared(ctx, tenantID, primaryIndex.chunkIDs)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"tenant_id": tenantID,
+			"chunk_ids": primaryIndex.chunkIDs,
+		})
+		return nil, err
+	}
+	logger.Infof(ctx, "Chunk data fetched successfully, count: %d", len(allChunks))
+	chunks, allChunks = filterPrimarySearchChunks(chunks, allChunks, metadataFilter)
+	if len(chunks) == 0 {
+		return nil, nil
+	}
+
+	// Build the retrieval index only from allowed primary chunks.
 	index := s.buildChunkIndex(chunks)
 
 	// Batch fetch knowledge data (include shared KB so cross-tenant retrieval works)
@@ -30,18 +49,6 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-
-	// Batch fetch chunks (include shared KB chunks)
-	logger.Infof(ctx, "Fetching chunk data for %d IDs", len(index.chunkIDs))
-	allChunks, err := s.listChunksByIDWithShared(ctx, tenantID, index.chunkIDs)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id": tenantID,
-			"chunk_ids": index.chunkIDs,
-		})
-		return nil, err
-	}
-	logger.Infof(ctx, "Chunk data fetched successfully, count: %d", len(allChunks))
 
 	// Build chunk map and collect enrichment IDs (parent, related, nearby)
 	chunkMap := make(map[string]*types.Chunk, len(allChunks))
@@ -57,6 +64,7 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 			if err != nil {
 				logger.Warnf(ctx, "Failed to fetch some additional chunks: %v", err)
 			} else {
+				additionalChunks = filterChunksByMetadata(additionalChunks, metadataFilter)
 				for _, chunk := range additionalChunks {
 					chunkMap[chunk.ID] = chunk
 				}
@@ -71,6 +79,7 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 						if err != nil {
 							logger.Warnf(ctx, "Failed to fetch second-level parent chunks: %v", err)
 						} else {
+							parentChunks = filterChunksByMetadata(parentChunks, metadataFilter)
 							for _, chunk := range parentChunks {
 								chunkMap[chunk.ID] = chunk
 							}
@@ -83,11 +92,66 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 
 	// Build final search results
 	searchResults := s.assembleSearchResults(ctx, chunks, chunkMap, knowledgeMap, index, skipEnrichment)
+	if metadataFilter != nil {
+		for _, result := range searchResults {
+			result.KnowledgeDescription = ""
+		}
+	}
 
-	searchutil.EnrichSearchResultsImageInfo(ctx, s.chunkRepo, tenantID, searchResults)
+	if metadataFilter == nil {
+		searchutil.EnrichSearchResultsImageInfo(ctx, s.chunkRepo, tenantID, searchResults)
+	}
 
 	logger.Infof(ctx, "Search results processed, total: %d", len(searchResults))
 	return searchResults, nil
+}
+
+// filterPrimarySearchChunks applies the metadata predicate to fetched primary
+// chunks, then keeps input retrieval results only when their chunk is allowed.
+// This preserves retrieval order while preventing rejected primary IDs from
+// driving knowledge lookup or context enrichment.
+func filterPrimarySearchChunks(
+	inputChunks []*types.IndexWithScore,
+	fetchedChunks []*types.Chunk,
+	metadataFilter *types.MetadataFilter,
+) ([]*types.IndexWithScore, []*types.Chunk) {
+	allowedChunks := filterChunksByMetadata(fetchedChunks, metadataFilter)
+	allowedByID := make(map[string]bool, len(allowedChunks))
+	for _, chunk := range allowedChunks {
+		allowedByID[chunk.ID] = true
+	}
+
+	filteredInput := make([]*types.IndexWithScore, 0, len(inputChunks))
+	for _, chunk := range inputChunks {
+		if chunk != nil && allowedByID[chunk.ChunkID] {
+			filteredInput = append(filteredInput, chunk)
+		}
+	}
+	return filteredInput, allowedChunks
+}
+
+// filterChunksByMetadata applies the access predicate to any fetched batch.
+// A malformed access metadata payload fails closed when a filter is present.
+func filterChunksByMetadata(chunks []*types.Chunk, metadataFilter *types.MetadataFilter) []*types.Chunk {
+	if metadataFilter == nil {
+		return chunks
+	}
+
+	filtered := make([]*types.Chunk, 0, len(chunks))
+	for _, chunk := range chunks {
+		if chunk == nil {
+			continue
+		}
+		if chunk.ChunkType == types.ChunkTypeSummary {
+			continue
+		}
+		accessMetadata, err := chunk.AccessMetadata()
+		if err != nil || !metadataFilter.Matches(accessMetadata) {
+			continue
+		}
+		filtered = append(filtered, chunk)
+	}
+	return filtered
 }
 
 // chunkIndex holds pre-computed lookup structures for processing search results.
@@ -327,10 +391,31 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 		KnowledgeChannel:        knowledge.Channel,
 		KnowledgeDescription:    knowledge.Description,
 		KnowledgeCustomMetadata: knowledge.CustomMetadataText(),
-		ChunkMetadata:           chunk.Metadata,
+		ChunkMetadata:           publicChunkMetadata(chunk.Metadata),
 		MatchedContent:          matchedContent,
 		KnowledgeBaseID:         knowledge.KnowledgeBaseID,
 	}
+}
+
+// publicChunkMetadata removes the reserved access object before a result is
+// returned. Invalid metadata is omitted rather than echoed back to callers.
+func publicChunkMetadata(metadata types.JSON) types.JSON {
+	if len(metadata) == 0 {
+		return nil
+	}
+	var values map[string]json.RawMessage
+	if err := json.Unmarshal(metadata, &values); err != nil || values == nil {
+		return nil
+	}
+	delete(values, "access_metadata")
+	if len(values) == 0 {
+		return nil
+	}
+	publicMetadata, err := json.Marshal(values)
+	if err != nil {
+		return nil
+	}
+	return types.JSON(publicMetadata)
 }
 
 // isSearchableChunk checks if a chunk type should be included in search results.

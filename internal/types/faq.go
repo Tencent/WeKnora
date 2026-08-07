@@ -100,14 +100,16 @@ func (c *Chunk) SetDocumentMetadata(meta *DocumentChunkMetadata) error {
 		return nil
 	}
 	if meta == nil {
-		c.Metadata = nil
-		return nil
+		return c.clearMetadataFields("generated_questions", "generated_questions_revision")
 	}
 	bytes, err := json.Marshal(meta)
 	if err != nil {
 		return err
 	}
-	c.Metadata = JSON(bytes)
+	c.Metadata, err = c.withExistingAccessMetadata(bytes)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -188,9 +190,16 @@ func (c *Chunk) SetFAQMetadata(meta *FAQChunkMetadata) error {
 		return nil
 	}
 	if meta == nil {
-		c.Metadata = nil
 		c.ContentHash = ""
-		return nil
+		return c.clearMetadataFields(
+			"standard_question",
+			"similar_questions",
+			"negative_questions",
+			"answers",
+			"answer_strategy",
+			"version",
+			"source",
+		)
 	}
 	// 基础清理后存储到 DB（保留原始内容）
 	meta.Sanitize()
@@ -198,7 +207,10 @@ func (c *Chunk) SetFAQMetadata(meta *FAQChunkMetadata) error {
 	if err != nil {
 		return err
 	}
-	c.Metadata = JSON(bytes)
+	c.Metadata, err = c.withExistingAccessMetadata(bytes)
+	if err != nil {
+		return err
+	}
 	// ContentHash 基于归一化后的数据计算，用于去重匹配
 	normalized := meta.Normalize()
 	c.ContentHash = CalculateFAQContentHash(normalized)

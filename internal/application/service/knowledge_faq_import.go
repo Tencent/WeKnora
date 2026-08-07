@@ -1839,6 +1839,10 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 	if kb.FAQConfig != nil && kb.FAQConfig.IndexMode != "" {
 		indexMode = kb.FAQConfig.IndexMode
 	}
+	accessMetadata, err := chunk.AccessMetadata()
+	if err != nil {
+		return fmt.Errorf("extract access metadata for chunk %s: %w", chunk.ID, err)
+	}
 
 	// 对新旧数据进行归一化处理，确保与 buildFAQIndexInfoList 的行为一致
 	// 旧数据归一化
@@ -1891,6 +1895,7 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
 			KnowledgeType:   types.KnowledgeTypeFAQ,
 			TagID:           chunk.TagID,
+			AccessMetadata:  accessMetadata,
 			IsEnabled:       chunk.IsEnabled,
 			IsRecommended:   chunk.Flags.HasFlag(types.ChunkFlagRecommended),
 		})
@@ -1938,6 +1943,7 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 				KnowledgeBaseID: chunk.KnowledgeBaseID,
 				KnowledgeType:   types.KnowledgeTypeFAQ,
 				TagID:           chunk.TagID,
+				AccessMetadata:  accessMetadata,
 				IsEnabled:       chunk.IsEnabled,
 				IsRecommended:   chunk.Flags.HasFlag(types.ChunkFlagRecommended),
 			})

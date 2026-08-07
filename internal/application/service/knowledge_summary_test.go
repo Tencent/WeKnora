@@ -184,6 +184,87 @@ func TestFirstTextChunkSummaryFallback(t *testing.T) {
 	})
 }
 
+func TestInitialSummaryChunkCarriesAccessMetadataOnlyWhenAllSourceChunksAgree(t *testing.T) {
+	sources := []*types.Chunk{
+		{
+			ID:       "source-chunk-1",
+			Metadata: types.JSON(`{"access_metadata":{"department":"research"},"generated_questions":["unrelated"]}`),
+		},
+		{
+			ID:       "source-chunk-2",
+			Metadata: types.JSON(`{"generated_questions":["different"],"access_metadata":{"department":"research"}}`),
+		},
+	}
+	knowledge := &types.Knowledge{ID: "knowledge", TenantID: 1, KnowledgeBaseID: "kb"}
+
+	summary, err := newSummaryChunk(sources, knowledge, "summary-id", "# Summary\ninitial", 8)
+	if err != nil {
+		t.Fatalf("newSummaryChunk() error = %v", err)
+	}
+	assertSummaryChunkAccessMetadata(t, summary)
+
+	sources[1].Metadata = types.JSON(`{"access_metadata":{"department":"finance"}}`)
+	summary, err = newSummaryChunk(sources, knowledge, "heterogeneous-summary", "# Summary\ninitial", 8)
+	if err != nil {
+		t.Fatalf("newSummaryChunk() with heterogeneous metadata error = %v", err)
+	}
+	accessMetadata, err := summary.AccessMetadata()
+	if err != nil {
+		t.Fatalf("heterogeneous summary AccessMetadata() error = %v", err)
+	}
+	if len(accessMetadata) != 0 || len(summary.Metadata) != 0 {
+		t.Fatalf("heterogeneous summary metadata = %s, want empty", summary.Metadata)
+	}
+}
+
+func TestRefreshSummaryChunkSynchronizesAndClearsAccessMetadata(t *testing.T) {
+	summary := &types.Chunk{
+		ID:       "summary-id",
+		Metadata: types.JSON(`{"access_metadata":{"department":"stale"}}`),
+	}
+	sources := []*types.Chunk{
+		{ID: "source-1", Metadata: types.JSON(`{"access_metadata":{"department":"research"}}`)},
+		{ID: "source-2", Metadata: types.JSON(`{"access_metadata":{"department":"research"}}`)},
+	}
+	if err := applySummaryChunkAccessMetadata(summary, sources); err != nil {
+		t.Fatalf("apply homogeneous refresh metadata: %v", err)
+	}
+	assertSummaryChunkAccessMetadata(t, summary)
+
+	sources[1].Metadata = types.JSON(`{"access_metadata":{"department":"finance"}}`)
+	if err := applySummaryChunkAccessMetadata(summary, sources); err != nil {
+		t.Fatalf("apply heterogeneous refresh metadata: %v", err)
+	}
+	accessMetadata, err := summary.AccessMetadata()
+	if err != nil {
+		t.Fatalf("cleared summary AccessMetadata() error = %v", err)
+	}
+	if len(accessMetadata) != 0 || len(summary.Metadata) != 0 {
+		t.Fatalf("refreshed heterogeneous summary metadata = %s, want empty", summary.Metadata)
+	}
+}
+
+func assertSummaryChunkAccessMetadata(t *testing.T, summary *types.Chunk) {
+	t.Helper()
+	accessMetadata, err := summary.AccessMetadata()
+	if err != nil {
+		t.Fatalf("summary AccessMetadata() error = %v", err)
+	}
+	if accessMetadata["department"] != "research" {
+		t.Fatalf("summary access metadata = %#v, want department=research", accessMetadata)
+	}
+	persisted, err := summary.Metadata.Map()
+	if err != nil {
+		t.Fatalf("summary metadata map: %v", err)
+	}
+	if len(persisted) != 1 {
+		t.Fatalf("summary metadata = %#v, want only access_metadata", persisted)
+	}
+	if _, ok := persisted["generated_questions"]; ok {
+		t.Fatalf("summary metadata leaked unrelated source metadata: %#v", persisted)
+	}
+}
+
 func TestApplyRetryableSummaryFailureState(t *testing.T) {
 	chunks := []*types.Chunk{{Content: "first body chunk"}}
 

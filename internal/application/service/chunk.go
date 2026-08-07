@@ -667,11 +667,15 @@ func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) e
 	if err != nil {
 		return err
 	}
+	accessMetadata, err := chunk.AccessMetadata()
+	if err != nil {
+		return fmt.Errorf("extract access metadata for chunk %s: %w", chunk.ID, err)
+	}
 	items := []*types.IndexInfo{{
 		Content: buildKnowledgeIndexContent(knowledge, chunk.EmbeddingContent()), SourceID: chunk.ID,
 		SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
 		KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
-		KnowledgeType: kb.Type, IsEnabled: true,
+		KnowledgeType: kb.Type, AccessMetadata: accessMetadata, IsEnabled: true,
 	}}
 	meta, err := chunk.DocumentMetadata()
 	if err != nil {
@@ -686,7 +690,7 @@ func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) e
 				Content: buildKnowledgeIndexContent(knowledge, question.Question), SourceID: types.GeneratedQuestionSourceID(chunk.ID, question.ID),
 				SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
 				KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
-				KnowledgeType: kb.Type, IsEnabled: true,
+				KnowledgeType: kb.Type, AccessMetadata: accessMetadata, IsEnabled: true,
 			})
 		}
 	}
