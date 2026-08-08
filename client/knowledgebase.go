@@ -30,6 +30,7 @@ type KnowledgeBase struct {
 	StorageProviderConfig *StorageProviderConfig `json:"storage_provider_config"`
 	StorageConfig         StorageConfig          `json:"storage_config"`
 	ExtractConfig         *ExtractConfig         `json:"extract_config"`
+	AutoTagConfig         *AutoTagConfig         `json:"auto_tag_config"`
 	CreatedAt             time.Time              `json:"created_at"`
 	UpdatedAt             time.Time              `json:"updated_at"`
 	// Computed fields (not stored in database)
@@ -44,6 +45,7 @@ type KnowledgeBaseConfig struct {
 	ChunkingConfig        ChunkingConfig        `json:"chunking_config"`
 	ImageProcessingConfig ImageProcessingConfig `json:"image_processing_config"`
 	FAQConfig             *FAQConfig            `json:"faq_config"`
+	AutoTagConfig         *AutoTagConfig        `json:"auto_tag_config,omitempty"`
 }
 
 // ChunkingConfig represents document chunking configuration
@@ -118,6 +120,22 @@ type ParserEngineRule struct {
 type QuestionGenerationConfig struct {
 	Enabled       bool `json:"enabled"`
 	QuestionCount int  `json:"question_count"`
+}
+
+// AutoTagConfig controls optional automatic association of existing knowledge
+// base tags after a document finishes parsing. Only applies to document-type
+// knowledge bases; disabled by default.
+type AutoTagConfig struct {
+	Enabled bool `json:"enabled"`
+	// ModelID selects the chat model used for classification. Empty falls
+	// back to the knowledge base's summary model.
+	ModelID string `json:"model_id,omitempty"`
+	// MaxTags caps how many existing tags one document may auto-acquire
+	// (1-10, defaults to 3).
+	MaxTags int `json:"max_tags,omitempty"`
+	// SkipIfTagged leaves documents that already carry tags untouched.
+	// Defaults to true when omitted.
+	SkipIfTagged *bool `json:"skip_if_tagged,omitempty"`
 }
 
 // ASRConfig represents automatic speech recognition settings for audio files.

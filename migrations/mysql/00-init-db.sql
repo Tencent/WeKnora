@@ -52,6 +52,7 @@ CREATE TABLE knowledge_bases (
     cos_config JSON NOT NULL,
     vlm_config JSON NOT NULL,
     extract_config JSON NULL,
+    auto_tag_config JSON NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL
