@@ -530,6 +530,7 @@ type UpdateModelRequest struct {
 	Parameters  types.ModelParameters `json:"parameters"`
 	Source      types.ModelSource     `json:"source"`
 	Type        types.ModelType       `json:"type"`
+	IsDefault   *bool                 `json:"is_default"`
 }
 
 // UpdateModel godoc
@@ -627,6 +628,9 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 
 	model.Source = req.Source
 	model.Type = req.Type
+	if req.IsDefault != nil {
+		model.IsDefault = *req.IsDefault
+	}
 
 	logger.Infof(ctx, "Updating model, ID: %s, Name: %s", id, model.Name)
 	if err := h.service.UpdateModel(ctx, model); err != nil {

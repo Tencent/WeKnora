@@ -248,16 +248,16 @@ func TestLoadBuiltinModelsConfig_ResurrectsSoftDeleted(t *testing.T) {
 	assert.Equal(t, int64(0), deleted, "deleted_at must be cleared")
 }
 
-func TestLoadBuiltinModelsConfig_ClearsExistingDefault(t *testing.T) {
+func TestLoadBuiltinModelsConfig_DefaultScopesDoNotOverlap(t *testing.T) {
 	db := setupBuiltinModelsDB(t)
 
-	// Seed an existing default (manual, e.g. user picked it via UI).
+	// The first workspace may use the same tenant id as builtin rows. Its
+	// workspace-owned default must remain independent from builtin defaults.
 	require.NoError(t, db.Create(&Model{
 		ID: "user-default", Name: "user", Type: ModelTypeKnowledgeQA,
 		TenantID: 10000, Source: ModelSourceRemote, Status: ModelStatusActive,
 		IsDefault: true, IsBuiltin: false, ManagedBy: "",
 	}).Error)
-
 	dir := writeYAML(t, `builtin_models:
   - id: builtin-llm
     name: gpt-4o-mini
@@ -268,8 +268,8 @@ func TestLoadBuiltinModelsConfig_ClearsExistingDefault(t *testing.T) {
 
 	var prev Model
 	require.NoError(t, db.Where("id = ?", "user-default").First(&prev).Error)
-	assert.False(t, prev.IsDefault,
-		"YAML is_default=true must clear other defaults in same (tenant,type)")
+	assert.True(t, prev.IsDefault,
+		"YAML builtin default must not clear a workspace-owned default")
 
 	var newDefault Model
 	require.NoError(t, db.Where("id = ?", "builtin-llm").First(&newDefault).Error)

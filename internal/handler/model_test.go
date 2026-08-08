@@ -20,6 +20,22 @@ func TestModelUpdateRequestDisplayNamePresence(t *testing.T) {
 	assert.Equal(t, "", *cleared.DisplayName)
 }
 
+func TestModelUpdateRequestDefaultPresence(t *testing.T) {
+	var omitted UpdateModelRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"name":"gpt-4o"}`), &omitted))
+	assert.Nil(t, omitted.IsDefault)
+
+	var set UpdateModelRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"is_default":true}`), &set))
+	require.NotNil(t, set.IsDefault)
+	assert.True(t, *set.IsDefault)
+
+	var unset UpdateModelRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"is_default":false}`), &unset))
+	require.NotNil(t, unset.IsDefault)
+	assert.False(t, *unset.IsDefault)
+}
+
 func TestParseModelDebugOptionsPreservesExplicitThinkingFalse(t *testing.T) {
 	opts, err := parseModelDebugOptions(`{"thinking":false,"temperature":0,"max_tokens":256}`)
 	require.NoError(t, err)

@@ -65,5 +65,5 @@ type ModelRepository interface {
 	Delete(ctx context.Context, tenantID uint64, id string) error
 	// ClearDefaultByType clears the default flag for all models of a specific type
 	// optionally excluding a specific model ID.
-	ClearDefaultByType(ctx context.Context, tenantID uint, modelType types.ModelType, excludeID string) error
+	ClearDefaultByType(ctx context.Context, tenantID uint64, modelType types.ModelType, excludeID string) error
 }
