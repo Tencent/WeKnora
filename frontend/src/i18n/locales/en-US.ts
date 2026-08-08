@@ -2,6 +2,7 @@ export default {
   menu: {
     knowledgeBase: 'Knowledge Base',
     agents: 'Agents',
+    modelUsage: 'Model Usage',
     organizations: 'Shared Spaces',
     newChat: 'New Chat',
     settings: 'System Settings',
@@ -1031,6 +1032,7 @@ export default {
   },
   settings: {
     modelManagement: 'Model Management',
+    modelUsage: 'Model Usage',
     webSearchConfig: 'Web Search',
     autoCheckUpdate: 'Auto Download Updates',
     autoCheckUpdateDesc: 'When enabled, automatically check and download the latest version in the background.',
@@ -4022,6 +4024,71 @@ export default {
         segmentCount: 'Segment count'
       }
     }
+  },
+  modelUsage: {
+    title: 'Model Usage',
+    description: 'Watch calls, token usage, errors, and recent activity for every model in this workspace.',
+    loadFailed: 'Failed to load model usage',
+    empty: 'No model calls in this time range',
+    autoRefresh: 'Auto refresh',
+    autoRefreshOn: 'Auto refresh every 5 seconds',
+    autoRefreshOff: 'Auto refresh paused',
+    ranges: {
+      '15m': '15 min',
+      '1h': '1 hour',
+      '24h': '24 hours',
+      '7d': '7 days',
+    },
+    types: {
+      KnowledgeQA: 'Chat',
+      Embedding: 'Embedding',
+      Rerank: 'ReRank',
+      VLLM: 'Vision',
+      ASR: 'Speech',
+    },
+    usageSource: {
+      provider: 'Provider',
+      estimated: 'Estimated',
+      missing: 'Missing',
+      not_applicable: 'N/A',
+    },
+    metrics: {
+      totalTokens: 'Total Tokens',
+      cached: 'Cached {count}',
+      calls: 'Calls',
+      errors: 'Errors {count}',
+      promptCompletion: 'Input / Output',
+      promptCompletionHint: 'Prompt / Completion tokens',
+      successRate: 'Success Rate',
+    },
+    timeline: {
+      title: 'Usage Timeline',
+      subtitle: 'Aggregated by the selected time range',
+    },
+    table: {
+      title: 'Model Ranking',
+      subtitle: 'Sorted by token usage',
+    },
+    recent: {
+      title: 'Recent Calls',
+      subtitle: 'Metadata only',
+      success: 'Success',
+      failed: 'Failed',
+    },
+    columns: {
+      model: 'Model',
+      type: 'Type',
+      provider: 'Source',
+      calls: 'Calls',
+      totalTokens: 'Total Tokens',
+      breakdown: 'Token Breakdown',
+      promptShort: 'In',
+      completionShort: 'Out',
+      cachedShort: 'Cached',
+      errors: 'Errors',
+      successRate: 'Success',
+      lastUsed: 'Last Used',
+    },
   },
   ollamaSettings: {
     title: 'Ollama Settings',

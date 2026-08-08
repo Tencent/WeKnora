@@ -1854,6 +1854,71 @@ export default {
       urlInvalid: '유효한 URL을 입력해주세요'
     }
   },
+  modelUsage: {
+    title: '모델 사용량',
+    description: '이 워크스페이스의 모든 모델 호출 횟수, 토큰 사용량, 오류 및 최근 활동을 확인합니다.',
+    loadFailed: '모델 사용량을 불러오지 못했습니다',
+    empty: '선택한 시간 범위에 모델 호출 기록이 없습니다',
+    autoRefresh: '자동 새로고침',
+    autoRefreshOn: '5초마다 자동 새로고침',
+    autoRefreshOff: '자동 새로고침 일시 중지됨',
+    ranges: {
+      '15m': '15분',
+      '1h': '1시간',
+      '24h': '24시간',
+      '7d': '7일',
+    },
+    types: {
+      KnowledgeQA: '대화',
+      Embedding: 'Embedding',
+      Rerank: 'ReRank',
+      VLLM: '비전',
+      ASR: '음성',
+    },
+    usageSource: {
+      provider: '공급자',
+      estimated: '추정',
+      missing: '미반환',
+      not_applicable: '해당 없음',
+    },
+    metrics: {
+      totalTokens: '총 토큰',
+      cached: '캐시 적중 {count}',
+      calls: '호출 횟수',
+      errors: '오류 {count}',
+      promptCompletion: '입력 / 출력',
+      promptCompletionHint: 'Prompt / Completion 토큰',
+      successRate: '성공률',
+    },
+    timeline: {
+      title: '사용량 타임라인',
+      subtitle: '선택한 시간 범위로 집계',
+    },
+    table: {
+      title: '모델 순위',
+      subtitle: '토큰 사용량 순 정렬',
+    },
+    recent: {
+      title: '최근 호출',
+      subtitle: '메타데이터만 표시',
+      success: '성공',
+      failed: '실패',
+    },
+    columns: {
+      model: '모델',
+      type: '유형',
+      provider: '소스',
+      calls: '호출',
+      totalTokens: '총 토큰',
+      breakdown: '토큰 구성',
+      promptShort: '입력',
+      completionShort: '출력',
+      cachedShort: '캐시',
+      errors: '오류',
+      successRate: '성공률',
+      lastUsed: '마지막 사용',
+    },
+  },
   ollamaSettings: {
     title: 'Ollama 설정',
     description: '로컬 Ollama 서비스를 관리하고 모델을 보고 다운로드합니다',
@@ -4644,6 +4709,7 @@ export default {
   },
   settings: {
     modelManagement: '모델 관리',
+    modelUsage: '모델 사용량',
     webSearchConfig: '웹 검색',
     autoCheckUpdate: '업데이트 자동 다운로드',
     autoCheckUpdateDesc: '활성화하면 시작 시 최신 버전을 자동으로 확인하고 백그라운드에서 다운로드합니다.',
@@ -5895,6 +5961,7 @@ export default {
   menu: {
     knowledgeBase: '지식베이스',
     agents: '에이전트',
+    modelUsage: '모델 사용량',
     organizations: '공유 공간',
     newChat: '새 대화',
     settings: '시스템 설정',

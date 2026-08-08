@@ -35,6 +35,7 @@ type Config struct {
 	ModelName string
 	APIKey    string
 	ModelID   string
+	Provider  string
 	Language  string // optional: specify language for transcription
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string
@@ -53,6 +54,7 @@ func ConfigFromModel(m *types.Model) *Config {
 		BaseURL:       m.Parameters.BaseURL,
 		ModelName:     m.Name,
 		Source:        m.Source,
+		Provider:      m.Parameters.Provider,
 		CustomHeaders: m.Parameters.CustomHeaders,
 	}
 }
@@ -60,6 +62,8 @@ func ConfigFromModel(m *types.Model) *Config {
 // NewASR creates an ASR instance based on the provided configuration.
 // All ASR vendors use the OpenAI-compatible /v1/audio/transcriptions API.
 func NewASR(config *Config) (ASR, error) {
+	var a ASR
 	a, err := NewOpenAIASR(config)
+	a, err = wrapASRUsage(a, err, config)
 	return wrapASRLangfuse(a, err)
 }
