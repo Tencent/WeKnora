@@ -47,3 +47,30 @@ func TestNvidiaRerankerNormalizesLogitsToProbabilities(t *testing.T) {
 	assert.Greater(t, results[0].RelevanceScore, results[1].RelevanceScore)
 	assert.Greater(t, results[1].RelevanceScore, results[2].RelevanceScore)
 }
+
+func TestNvidiaRerankerSkipsInvalidIndexes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model": "nvidia-rerank-model",
+			"rankings": [
+				{"index": -1, "logit": 23.0},
+				{"index": 0, "logit": 0.0},
+				{"index": 1, "logit": -23.0}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	reranker := &NvidiaReranker{
+		modelName: "nvidia-rerank-model",
+		apiKey:    "nvapi-test",
+		baseURL:   server.URL,
+		client:    server.Client(),
+	}
+
+	results, err := reranker.Rerank(t.Context(), "query", []string{"only document"})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, 0, results[0].Index)
+}

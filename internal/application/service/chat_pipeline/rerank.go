@@ -192,7 +192,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 
 	// Process reranked results
 	for _, rr := range rerankResp {
-		if rr.Index >= len(candidatesToRerank) {
+		if !validRerankIndex(rr.Index, len(candidatesToRerank)) {
 			continue
 		}
 		sr := candidatesToRerank[rr.Index]
@@ -281,7 +281,7 @@ func buildRerankSpanOutput(
 			"index":       rr.Index,
 			"model_score": rr.RelevanceScore,
 		}
-		if rr.Index >= 0 && rr.Index < len(candidates) {
+		if validRerankIndex(rr.Index, len(candidates)) {
 			row["chunk_id"] = candidates[rr.Index].ID
 			row["knowledge_id"] = candidates[rr.Index].KnowledgeID
 			row["knowledge_title"] = candidates[rr.Index].KnowledgeTitle
@@ -357,7 +357,7 @@ func (p *PluginRerank) rerank(ctx context.Context,
 	})
 	logged := min(5, len(rerankResp))
 	for i := range logged {
-		if rerankResp[i].Index < len(candidates) {
+		if validRerankIndex(rerankResp[i].Index, len(candidates)) {
 			pipelineInfo(ctx, "Rerank", "top_score", map[string]interface{}{
 				"rank":        i + 1,
 				"score":       rerankResp[i].RelevanceScore,
@@ -379,7 +379,7 @@ func (p *PluginRerank) rerank(ctx context.Context,
 	// Filter results based on threshold
 	rankFilter := []rerank.RankResult{}
 	for _, result := range rerankResp {
-		if result.Index >= len(candidates) {
+		if !validRerankIndex(result.Index, len(candidates)) {
 			continue
 		}
 		if result.RelevanceScore >= chatManage.RerankThreshold {
@@ -392,12 +392,19 @@ func (p *PluginRerank) rerank(ctx context.Context,
 	// when the best score is too low — forcing irrelevant results is worse than
 	// returning nothing and letting the caller handle the empty-result case.
 	fallbackMinScore := rerankFallbackMinScore(chatManage.SearchTargets)
-	if len(rankFilter) == 0 && len(rerankResp) > 0 && rerankResp[0].RelevanceScore >= fallbackMinScore {
-		rankFilter = rerankResp[:1]
+	var fallbackResult *rerank.RankResult
+	for i := range rerankResp {
+		if validRerankIndex(rerankResp[i].Index, len(candidates)) {
+			fallbackResult = &rerankResp[i]
+			break
+		}
+	}
+	if len(rankFilter) == 0 && fallbackResult != nil && fallbackResult.RelevanceScore >= fallbackMinScore {
+		rankFilter = []rerank.RankResult{*fallbackResult}
 		pipelineInfo(ctx, "Rerank", "fallback_top1", map[string]interface{}{
 			"reason":    "all_below_threshold",
 			"threshold": chatManage.RerankThreshold,
-			"top_score": rerankResp[0].RelevanceScore,
+			"top_score": fallbackResult.RelevanceScore,
 		})
 	} else if len(rankFilter) == 0 {
 		pipelineInfo(ctx, "Rerank", "fallback_skip", map[string]interface{}{
@@ -408,6 +415,10 @@ func (p *PluginRerank) rerank(ctx context.Context,
 	}
 
 	return rankFilter, nil
+}
+
+func validRerankIndex(index, candidateCount int) bool {
+	return index >= 0 && index < candidateCount
 }
 
 func rerankFallbackMinScore(searchTargets types.SearchTargets) float64 {
