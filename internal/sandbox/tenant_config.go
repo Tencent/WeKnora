@@ -39,7 +39,9 @@ func ResolveEffectiveConfig(
 		effective.Type = resolved
 	}
 	overrideSeconds(&effective.DefaultTimeout, tenantCfg.DefaultTimeoutSec)
-
+	if tenantCfg.EnvVars != nil {
+		effective.EnvVars = cloneMetadata(tenantCfg.EnvVars)
+	}
 	if cube := tenantCfg.Cube; cube != nil {
 		if err := overrideURL(&effective.CubeAPIURL, cube.APIURL); err != nil {
 			return nil, err

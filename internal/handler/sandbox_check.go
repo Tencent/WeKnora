@@ -115,7 +115,7 @@ func (h *SystemHandler) CheckSandboxConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "msg": err.Error()})
 		return
 	}
-	effective, err := sandbox.ResolveEffectiveConfig(merged, buildCheckBaselineConfig(merged))
+	effective, err := sandbox.ResolveEffectiveConfig(merged, sandbox.DeploymentConfig())
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "msg": err.Error()})
 		return
@@ -291,20 +291,6 @@ func (h *SystemHandler) probeSandboxEgress(
 // shellSingleQuote wraps s for safe inclusion in a single-quoted shell string.
 func shellSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
-// buildCheckBaselineConfig returns the baseline the submitted overrides are
-// merged onto. The probe must exercise exactly what the tenant supplied, so
-// the baseline only carries the selected provider's type.
-func buildCheckBaselineConfig(cfg *types.TenantSandboxConfig) *sandbox.Config {
-	baseline := sandbox.DefaultConfig()
-	baseline.FallbackEnabled = false
-	if cfg != nil && cfg.SandboxType != "" {
-		if resolved, err := sandbox.ParseSandboxType(cfg.SandboxType); err == nil {
-			baseline.Type = resolved
-		}
-	}
-	return baseline
 }
 
 // sandboxCheckReason turns a provider error into a readable cause using the

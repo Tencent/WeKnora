@@ -11,9 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -98,7 +96,7 @@ func buildCubeManager(
 	redisClient *redis.Client,
 	sessionRepo interfaces.SessionRepository,
 ) sandbox.Manager {
-	cfg := buildCubeSandboxConfig()
+	cfg := sandbox.CubeConfigFromEnv()
 	client, err := sandbox.NewCubeRemoteClient(cfg)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build Cube sandbox client: %v (falling back to disabled)", err)
@@ -131,7 +129,7 @@ func buildE2BManager(
 	redisClient *redis.Client,
 	sessionRepo interfaces.SessionRepository,
 ) sandbox.Manager {
-	cfg := buildE2BSandboxConfig()
+	cfg := sandbox.E2BConfigFromEnv()
 	client, err := sandbox.NewE2BRemoteClient(cfg)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build E2B sandbox client: %v (falling back to disabled)", err)
@@ -241,32 +239,9 @@ func (c *repositorySessionExistenceChecker) SessionExists(
 }
 
 // buildGlobalSandboxConfig returns the process-wide *sandbox.Config that
-// per-tenant overrides are merged onto. It mirrors newSandboxManager's mode
-// selection so the baseline a tenant inherits is exactly what the deployment
-// runs by default.
+// per-tenant overrides are merged onto.
 func buildGlobalSandboxConfig() *sandbox.Config {
-	mode := strings.ToLower(strings.TrimSpace(os.Getenv("WEKNORA_SANDBOX_MODE")))
-	switch mode {
-	case "cube":
-		return buildCubeSandboxConfig()
-	case "e2b":
-		return buildE2BSandboxConfig()
-	case "docker":
-		cfg := sandbox.DefaultConfig()
-		cfg.Type = sandbox.SandboxTypeDocker
-		if v := os.Getenv("WEKNORA_SANDBOX_DOCKER_IMAGE"); v != "" {
-			cfg.DockerImage = v
-		}
-		return cfg
-	case "local":
-		cfg := sandbox.DefaultConfig()
-		cfg.Type = sandbox.SandboxTypeLocal
-		return cfg
-	default:
-		cfg := sandbox.DefaultConfig()
-		cfg.Type = sandbox.SandboxTypeDisabled
-		return cfg
-	}
+	return sandbox.DeploymentConfig()
 }
 
 // newSandboxConfigDefaults exposes the deployment's inheritable sandbox
@@ -313,91 +288,4 @@ func newTenantSandboxResolver(
 	}
 	logger.Infof(ctx, "Tenant sandbox resolver configured: binding=%s", storeKind)
 	return resolver
-}
-
-// buildCubeSandboxConfig assembles a fully-populated *sandbox.Config for the
-// Cube backend, applying environment overrides on top of the package
-// defaults.
-func buildCubeSandboxConfig() *sandbox.Config {
-	cfg := sandbox.DefaultConfig()
-	cfg.Type = sandbox.SandboxTypeCube
-	// Remote sandboxes must not fall back to LocalSandbox: skill scripts would
-	// execute on the WeKnora host while session-scoped tools stay disabled.
-	cfg.FallbackEnabled = false
-
-	if v := os.Getenv("WEKNORA_SANDBOX_CUBE_API_URL"); v != "" {
-		cfg.CubeAPIURL = v
-	}
-	if v := os.Getenv("WEKNORA_SANDBOX_CUBE_PROXY_URL"); v != "" {
-		cfg.CubeProxyURL = v
-	}
-	if v := os.Getenv("WEKNORA_SANDBOX_CUBE_SANDBOX_DOMAIN"); v != "" {
-		cfg.CubeSandboxDomain = v
-	}
-	if v := os.Getenv("WEKNORA_SANDBOX_CUBE_API_KEY"); v != "" {
-		cfg.CubeAPIKey = v
-	}
-	if v := os.Getenv("WEKNORA_SANDBOX_CUBE_TEMPLATE"); v != "" {
-		cfg.CubeTemplate = v
-	}
-	if v := os.Getenv("WEKNORA_SANDBOX_CUBE_SANDBOX_TTL"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			cfg.CubeSandboxTTL = time.Duration(n) * time.Second
-		}
-	}
-
-	if v := os.Getenv("WEKNORA_SANDBOX_CUBE_HTTP_TIMEOUT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			cfg.CubeHTTPTimeout = time.Duration(n) * time.Second
-		}
-	}
-	if v := os.Getenv("WEKNORA_SANDBOX_TIMEOUT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			cfg.DefaultTimeout = time.Duration(n) * time.Second
-		}
-	}
-	return cfg
-}
-
-// buildE2BSandboxConfig assembles a fully-populated *sandbox.Config for the
-// E2B backend. The API key must be provided; other fields fall back to the
-// SDK defaults (built into go-e2b) when the environment leaves them unset.
-func buildE2BSandboxConfig() *sandbox.Config {
-	cfg := sandbox.DefaultConfig()
-	cfg.Type = sandbox.SandboxTypeE2B
-	// E2B has no host-safe fallback: the SDK reaches a public cloud API
-	// with a per-tenant key. Running the tool on the WeKnora host after a
-	// health failure would break isolation, so disable fallback.
-	cfg.FallbackEnabled = false
-	cfg.E2BSandboxTTL = sandbox.DefaultE2BSandboxTTL
-	cfg.E2BHTTPTimeout = sandbox.DefaultE2BHTTPTimeout
-
-	if v := os.Getenv("WEKNORA_SANDBOX_E2B_API_KEY"); v != "" {
-		cfg.E2BAPIKey = v
-	}
-	if v := os.Getenv("WEKNORA_SANDBOX_E2B_API_URL"); v != "" {
-		cfg.E2BAPIURL = v
-	}
-	if v := os.Getenv("WEKNORA_SANDBOX_E2B_SANDBOX_DOMAIN"); v != "" {
-		cfg.E2BSandboxDomain = v
-	}
-	if v := os.Getenv("WEKNORA_SANDBOX_E2B_TEMPLATE"); v != "" {
-		cfg.E2BTemplate = v
-	}
-	if v := os.Getenv("WEKNORA_SANDBOX_E2B_SANDBOX_TTL"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			cfg.E2BSandboxTTL = time.Duration(n) * time.Second
-		}
-	}
-	if v := os.Getenv("WEKNORA_SANDBOX_E2B_HTTP_TIMEOUT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			cfg.E2BHTTPTimeout = time.Duration(n) * time.Second
-		}
-	}
-	if v := os.Getenv("WEKNORA_SANDBOX_TIMEOUT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			cfg.DefaultTimeout = time.Duration(n) * time.Second
-		}
-	}
-	return cfg
 }

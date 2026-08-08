@@ -215,6 +215,9 @@ type Config struct {
 	// MaxCPU is the maximum CPU cores
 	MaxCPU float64
 
+	// EnvVars are additional environment variables to set for the sandbox.
+	EnvVars map[string]string
+
 	// CubeAPIURL is the base URL of the CubeAPI (E2B-compatible) endpoint.
 	// Only used when Type == SandboxTypeCube. Example: "http://127.0.0.1:33000".
 	CubeAPIURL string
@@ -249,7 +252,6 @@ type Config struct {
 	E2BAPIKey string
 
 	// E2BAPIURL is the E2B control-plane endpoint. Empty defaults to
-	// https://api.e2b.app.
 	E2BAPIURL string
 
 	// E2BSandboxDomain is the domain envd traffic is routed through, e.g.
@@ -259,12 +261,10 @@ type Config struct {
 	// E2BTemplate is the E2B template ID used at sandbox creation.
 	E2BTemplate string
 
-	// E2BSandboxTTL is the E2B-side idle timeout hint. Zero uses the SDK
-	// default (300 s).
+	// E2BSandboxTTL is the E2B-side idle timeout hint.
 	E2BSandboxTTL time.Duration
 
-	// E2BHTTPTimeout bounds each HTTP call to the E2B API. Zero uses the
-	// default.
+	// E2BHTTPTimeout bounds each HTTP call to the E2B API.
 	E2BHTTPTimeout time.Duration
 }
 

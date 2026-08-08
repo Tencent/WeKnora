@@ -773,6 +773,8 @@ func cleanSessionWorkDir(workDir string) (string, error) {
 // authoritative source of identity — it selects the correct Config fields so
 // Cube and E2B never read each other's templates or TTLs.
 func buildSessionCreateRequest(provider RemoteProvider, cfg *Config) (RemoteCreateRequest, error) {
+	envVars := cloneMetadata(cfg.EnvVars)
+
 	switch provider {
 	case SandboxTypeCube:
 		ttl := cfg.CubeSandboxTTL
@@ -781,6 +783,7 @@ func buildSessionCreateRequest(provider RemoteProvider, cfg *Config) (RemoteCrea
 		}
 		return RemoteCreateRequest{
 			TemplateID: cfg.CubeTemplate,
+			EnvVars:    envVars,
 			Timeout: RemoteTimeoutPolicy{
 				Mode:       RemoteTimeoutExplicit,
 				Value:      ttl,
@@ -796,6 +799,7 @@ func buildSessionCreateRequest(provider RemoteProvider, cfg *Config) (RemoteCrea
 		}
 		return RemoteCreateRequest{
 			TemplateID: cfg.E2BTemplate,
+			EnvVars:    envVars,
 			Timeout: RemoteTimeoutPolicy{
 				Mode:       RemoteTimeoutExplicit,
 				Value:      ttl,

@@ -305,7 +305,7 @@ func (c *E2BRemoteClient) List(
 	for _, info := range infos {
 		converted := e2bRemoteSummary(info)
 		if !metadataMatches(converted.Metadata, filter.Metadata) ||
-			!cubeStateMatches(converted.State, filter.States) {
+			!StateMatches(converted.State, filter.States) {
 			continue
 		}
 		result = append(result, converted)

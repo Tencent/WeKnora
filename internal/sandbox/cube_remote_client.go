@@ -294,7 +294,7 @@ func (c *CubeRemoteClient) List(
 	for _, summary := range sandboxInfos {
 		converted := cubeRemoteSummary(summary)
 		if !metadataMatches(converted.Metadata, filter.Metadata) ||
-			!cubeStateMatches(converted.State, filter.States) {
+			!StateMatches(converted.State, filter.States) {
 			continue
 		}
 		result = append(result, *converted)
@@ -722,7 +722,7 @@ func cubeModTime(value string) time.Time {
 	return time.Time{}
 }
 
-func cubeStateMatches(candidate RemoteSandboxState, allowed []RemoteSandboxState) bool {
+func StateMatches(candidate RemoteSandboxState, allowed []RemoteSandboxState) bool {
 	if len(allowed) == 0 {
 		return true
 	}
