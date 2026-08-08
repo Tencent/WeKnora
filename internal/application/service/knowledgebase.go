@@ -34,6 +34,7 @@ type knowledgeBaseService struct {
 	chunkRepo       interfaces.ChunkRepository
 	shareRepo       interfaces.KBShareRepository
 	kbShareService  interfaces.KBShareService
+	wikiPageRepo    interfaces.WikiPageRepository
 	modelService    interfaces.ModelService
 	retrieveEngine  interfaces.RetrieveEngineRegistry
 	ownership       retriever.TenantStoreOwnership
@@ -56,6 +57,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	chunkRepo interfaces.ChunkRepository,
 	shareRepo interfaces.KBShareRepository,
 	kbShareService interfaces.KBShareService,
+	wikiPageRepo interfaces.WikiPageRepository,
 	modelService interfaces.ModelService,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
@@ -77,6 +79,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 		chunkRepo:       chunkRepo,
 		shareRepo:       shareRepo,
 		kbShareService:  kbShareService,
+		wikiPageRepo:    wikiPageRepo,
 		modelService:    modelService,
 		retrieveEngine:  retrieveEngine,
 		ownership:       ownership,
@@ -957,6 +960,23 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 		// Delete all knowledge entries from database
 		logger.Infof(ctx, "Deleting knowledge entries from database")
 		if err := s.kgRepo.DeleteKnowledgeList(ctx, tenantID, knowledgeIDs); err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"knowledge_base_id": kbID,
+			})
+			return err
+		}
+	}
+
+	// Step 3: Delete the wiki rows this KB owned (pages, folders, issues and
+	// their revision history). This sits outside the knowledge-list block
+	// above: per-document deletes never touch wiki data, so a KB whose
+	// documents were removed one by one can still hold live wiki pages that
+	// would otherwise stay orphaned forever. Like the knowledge-row delete,
+	// these are pure DB rows, so a failure is returned for asynq to retry
+	// rather than swallowed — the deferred queue scrub still runs either way.
+	if s.wikiPageRepo != nil {
+		logger.Infof(ctx, "Deleting wiki data for knowledge base, ID: %s", kbID)
+		if err := s.wikiPageRepo.DeleteByKnowledgeBase(ctx, kbID); err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"knowledge_base_id": kbID,
 			})
