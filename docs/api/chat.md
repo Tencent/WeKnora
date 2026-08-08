@@ -15,6 +15,14 @@
 
 基于知识库的 RAG 问答，支持 SSE 流式响应。
 
+**查询参数**：
+
+| 参数 | 取值 | 说明 |
+|------|------|------|
+| `resource_urls` | `handle`（默认）/ `public` | `public` 让答案与引用里的图片直接返回可加载的 http(s) 链接，省去逐个调用 `/files` 代理。详见[文件与图片引用](./README.md#文件与图片引用resource-与直链) |
+
+同样适用于下面的 `/agent-chat/:session_id`、`/knowledge-search` 与 `/sessions/continue-stream/:session_id`。
+
 **请求参数**：
 
 | 参数 | 类型 | 必填 | 说明 |

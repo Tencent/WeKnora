@@ -534,6 +534,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
 import { hydrateProtectedFileImages, clearProtectedFileFailureCache, sanitizeMarkdownHTML } from '@/utils/security';
+import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
 import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
@@ -746,7 +747,7 @@ const wikiDrawerContent = computed(() => {
 watch(wikiDrawerContent, async () => {
   await nextTick();
   if (wikiDrawerBodyRef.value) {
-    await hydrateProtectedFileImages(wikiDrawerBodyRef.value);
+    await hydrateProtectedFileImages(wikiDrawerBodyRef.value, protectedFileAccess.value);
   }
 });
 
@@ -807,6 +808,7 @@ import thinkingIcon from '@/assets/img/Frame3718.svg';
 
 interface SessionData {
   id?: string;
+  assistant_message_id?: string;
   request_id?: string;
   debugRequest?: Record<string, unknown>;
   isAgentMode?: boolean;
@@ -865,6 +867,43 @@ watch(
     feedbackType.value = props.session?.feedback_type || 'none';
     dislikeReasonCode.value = props.session?.feedback_reason_code || 'not_helpful';
     dislikeReasonText.value = props.session?.feedback_reason_text || '';
+  },
+);
+
+const resolveAssistantMessageId = (session?: SessionData) =>
+  String(session?.assistant_message_id || session?.id || '').trim();
+
+// Agent answers embed exported charts and knowledge-base images as
+// `resource://` handles. Embed visitors use the channel-scoped proxy. Logged-in
+// users use the persisted assistant message as the authorization anchor, which
+// also covers resources owned by a shared agent's source workspace.
+const protectedFileAccess = computed<ProtectedFileAccessContext | undefined>(() => {
+  if (props.embeddedMode && props.embedChannelId && props.embedToken) {
+    return { mode: 'embed', channelId: props.embedChannelId, token: props.embedToken };
+  }
+  const messageId = resolveAssistantMessageId(props.session);
+  if (props.sessionId && messageId) {
+    return { mode: 'message', sessionId: props.sessionId, messageId };
+  }
+  return undefined;
+});
+
+// Re-hydrate when the message authorization anchor becomes available or is
+// corrected (e.g. request_id → persisted assistant_message_id after agent_query).
+watch(
+  () => {
+    const access = protectedFileAccess.value;
+    if (access?.mode === 'message') {
+      return `${access.sessionId}\0${access.messageId}`;
+    }
+    return '';
+  },
+  (scopeKey, previousScopeKey) => {
+    if (!scopeKey || scopeKey === previousScopeKey) return;
+    clearProtectedFileFailureCache();
+    nextTick(async () => {
+      await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
+    });
   },
 );
 
@@ -1275,7 +1314,7 @@ watch(eventStream, (stream) => {
   activeThinkingVersion.value++;
 
   nextTick(async () => {
-    await hydrateProtectedFileImages(rootElement.value);
+    await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
     await enhanceMarkdownContainer(rootElement.value);
     // Auto-scroll thinking detail content to bottom during streaming
     if (newActiveIds.size > 0 && rootElement.value) {
@@ -1452,7 +1491,7 @@ watch(answerFullyRendered, (ready) => {
   // suppressed by the missing-source cache.
   clearProtectedFileFailureCache();
   nextTick(async () => {
-    await hydrateProtectedFileImages(rootElement.value);
+    await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
   });
 }, { immediate: true });
 
@@ -1922,7 +1961,7 @@ const toggleIntermediateSteps = () => {
   showIntermediateSteps.value = !showIntermediateSteps.value;
   nextTick(async () => {
     if (rootElement.value) {
-      await hydrateProtectedFileImages(rootElement.value);
+      await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
     }
   });
 };
@@ -2242,7 +2281,7 @@ onMounted(() => {
     (root as any).__citationKeydown__ = keydownListener;
     root.addEventListener('keydown', keydownListener, true);
     rebindCitations();
-    await hydrateProtectedFileImages(rootElement.value);
+    await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
   });
 });
 
@@ -2266,7 +2305,7 @@ onUpdated(() => {
     // and idempotent: blob results are cached per URL, in-flight fetches are
     // de-duped, and failures back off for a cooldown — so a not-yet-ready file
     // simply retries later (and the answerFullyRendered pass is the backstop).
-    await hydrateProtectedFileImages(rootElement.value);
+    await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
   });
 });
 

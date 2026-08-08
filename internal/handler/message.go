@@ -13,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -23,21 +24,50 @@ import (
 type MessageHandler struct {
 	MessageService         interfaces.MessageService         // Service that implements message business logic
 	MessageFeedbackService interfaces.MessageFeedbackService // Service for answer feedback state
+	// FileService and StorageResolver back the optional `resource_urls=public`
+	// mode, which returns loadable HTTP URLs instead of internal
+	// `resource://` handles. Both may be nil, in which case only the default
+	// handle mode is available.
+	FileService     interfaces.FileService
+	StorageResolver interfaces.StorageBackendResolver
 }
 
 // NewMessageHandler creates a new message handler instance with the required service
 // Parameters:
 //   - messageService: Service that implements message business logic
+//   - messageFeedbackService: Service for answer feedback state
+//   - fileService: Storage access used to sign public resource URLs
+//   - storageResolver: Resolves per-tenant storage backends for those URLs
 //
 // Returns a pointer to a new MessageHandler
 func NewMessageHandler(
 	messageService interfaces.MessageService,
 	messageFeedbackService interfaces.MessageFeedbackService,
+	fileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
 ) *MessageHandler {
 	return &MessageHandler{
 		MessageService:         messageService,
 		MessageFeedbackService: messageFeedbackService,
+		FileService:            fileService,
+		StorageResolver:        storageResolver,
 	}
+}
+
+// resolveResourceRewriter builds the storage-reference rewriter for one response
+// from the request's `resource_urls` parameter, falling back to the deployment
+// default. The returned error is already an AppError the caller can hand to
+// c.Error: a rejected scope is a 403, a typo in the parameter is a 400.
+func (h *MessageHandler) resolveResourceRewriter(c *gin.Context) (*storageurl.Rewriter, error) {
+	ctx := c.Request.Context()
+	mode, err := storageurl.ResolveMode(ctx, c.Query(storageurl.QueryParam))
+	if err != nil {
+		if stderrors.Is(err, storageurl.ErrPublicModeForbidden) {
+			return nil, errors.NewForbiddenError(err.Error())
+		}
+		return nil, errors.NewBadRequestError(err.Error())
+	}
+	return storageurl.NewRequestRewriter(ctx, mode, h.FileService, h.StorageResolver), nil
 }
 
 // LoadMessages godoc
@@ -46,10 +76,11 @@ func NewMessageHandler(
 // @Tags         消息
 // @Accept       json
 // @Produce      json
-// @Param        session_id   path      string  true   "会话ID"
-// @Param        limit        query     int     false  "返回数量"  default(20)
-// @Param        before_time  query     string  false  "在此时间之前的消息（RFC3339Nano格式）"
-// @Success      200          {object}  map[string]interface{}  "消息列表"
+// @Param        session_id     path      string  true   "会话ID"
+// @Param        limit          query     int     false  "返回数量"  default(20)
+// @Param        before_time    query     string  false  "在此时间之前的消息（RFC3339Nano格式）"
+// @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
+// @Success      200            {object}  map[string]interface{}  "消息列表"
 // @Failure      400          {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -67,9 +98,16 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 	logger.Infof(ctx, "Loading messages params, session ID: %s, limit: %s, before time: %s",
 		sessionID, limit, beforeTimeStr)
 
-	// Parse limit parameter with fallback to default
-	limitInt, err := strconv.Atoi(limit)
+	rewriter, err := h.resolveResourceRewriter(c)
 	if err != nil {
+		logger.Warnf(ctx, "Rejected resource URL mode: %v", err)
+		_ = c.Error(err)
+		return
+	}
+
+	// Parse limit parameter with fallback to default
+	limitInt, convErr := strconv.Atoi(limit)
+	if convErr != nil {
 		logger.Warnf(ctx, "Invalid limit value, using default value 20, input: %s", limit)
 		limitInt = 20
 	}
@@ -101,7 +139,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 		h.attachFeedbackState(ctx, messages)
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
-			"data":    messages,
+			"data":    rewriter.RewriteMessagesResponse(ctx, messages),
 		})
 		return
 	}
@@ -142,7 +180,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 	h.attachFeedbackState(ctx, messages)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    messages,
+		"data":    rewriter.RewriteMessagesResponse(ctx, messages),
 	})
 }
 

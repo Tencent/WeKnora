@@ -449,6 +449,22 @@ definitions:
     - AuditOutcomeFailed
     - AuditOutcomePartial
     - AuditOutcomeCanceled
+  github_com_Tencent_WeKnora_internal_types.AutoTagConfig:
+    properties:
+      enabled:
+        type: boolean
+      max_tags:
+        type: integer
+      model_id:
+        type: string
+      skip_if_tagged:
+        description: |-
+          SkipIfTagged leaves documents that already carry tags untouched, so a
+          deliberate manual classification is not diluted by model guesses. It is
+          a pointer because the default is true: rows written before this field
+          existed decode to nil and must not silently flip to "always append".
+        type: boolean
+    type: object
   github_com_Tencent_WeKnora_internal_types.COSEngineConfig:
     properties:
       app_id:
@@ -1391,6 +1407,13 @@ definitions:
       created_at:
         description: Creation time of the knowledge
         type: string
+      custom_metadata:
+        description: |-
+          CustomMetadata is user-authored descriptive metadata. It is deliberately
+          separate from Metadata, which contains internal ingestion state and IDs.
+        items:
+          type: integer
+        type: array
       deleted_at:
         allOf:
         - $ref: '#/definitions/gorm.DeletedAt'
@@ -1421,6 +1444,14 @@ definitions:
         type: integer
       file_type:
         description: File type of the knowledge
+        type: string
+      folder_path:
+        description: |-
+          FolderPath is the canonical relative directory this entry belongs to
+          inside the knowledge base, e.g. "docs/spec" for a folder upload of
+          "docs/spec/design.md". Empty means the knowledge base root. It is a
+          display/navigation concern only: it never affects where the file is
+          physically stored (see FilePath).
         type: string
       id:
         description: Unique identifier of the knowledge
@@ -1488,6 +1519,11 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig'
         description: ASR config (Automatic Speech Recognition)
+      auto_tag_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutoTagConfig'
+        description: AutoTagConfig controls asynchronous association of existing tags
+          after parsing.
       chunk_count:
         description: Chunk count (not stored in database, calculated on query)
         type: integer
@@ -1635,6 +1671,11 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.KnowledgeBaseConfig:
     properties:
+      auto_tag_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutoTagConfig'
+        description: AutoTagConfig controls optional automatic association of existing
+          KB tags.
       chunking_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig'
@@ -2574,6 +2615,9 @@ definitions:
       mineru_enable_formula:
         type: boolean
       mineru_enable_ocr:
+        description: |-
+          MinerUEnableOCR is retained for compatibility with configurations saved
+          before parse_method supported auto/ocr/txt.
         type: boolean
       mineru_enable_table:
         type: boolean
@@ -2584,6 +2628,8 @@ definitions:
         type: string
       mineru_model:
         description: MinerU 自建解析参数
+        type: string
+      mineru_parse_method:
         type: string
       mineru_vlm_server_url:
         description: vLLM 服务器地址 (vlm-http-client / hybrid-http-client)
@@ -2629,6 +2675,11 @@ definitions:
         items:
           type: string
         type: array
+      xlsx_first_row_as_header:
+        description: |-
+          XLSXFirstRowAsHeader restores row-1 column context for flat XLSX tables.
+          nil preserves the parser default; an explicit false disables the mode.
+        type: boolean
     type: object
   github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig:
     properties:
@@ -3085,6 +3136,10 @@ definitions:
       knowledge_channel:
         description: KnowledgeChannel indicates through which channel the knowledge
           was ingested (web, api, wechat, etc.)
+        type: string
+      knowledge_custom_metadata:
+        description: KnowledgeCustomMetadata is user-authored context safe to expose
+          to models.
         type: string
       knowledge_description:
         description: KnowledgeDescription is the description of the knowledge document
@@ -3765,6 +3820,13 @@ definitions:
                  a stored *0 the same as nil.
           *N   = preferred workspace id.
         type: integer
+      oidc_only_login:
+        description: |-
+          OidcOnlyLogin is set server-side when an account is auto-provisioned
+          via OIDC with a random password the user never received. The profile
+          UI hides self-service password rotation until the user sets a known
+          password via ChangePassword (which clears this flag).
+        type: boolean
     type: object
   github_com_Tencent_WeKnora_internal_types.VLMConfig:
     properties:
@@ -4979,6 +5041,24 @@ definitions:
       task_id:
         type: string
     type: object
+  internal_handler.MoveKnowledgeToFolderRequest:
+    properties:
+      folder_path:
+        description: |-
+          FolderPath is the destination folder; the empty string is the knowledge
+          base top level. It is deliberately not `binding:"required"` so documents
+          can be moved back out of every folder.
+        type: string
+      kb_id:
+        type: string
+      knowledge_ids:
+        items:
+          type: string
+        type: array
+    required:
+    - kb_id
+    - knowledge_ids
+    type: object
   internal_handler.PreviewChunkResult:
     properties:
       content:
@@ -4998,14 +5078,20 @@ definitions:
     type: object
   internal_handler.PreviewChunkingPayload:
     properties:
+      child_chunk_size:
+        type: integer
       chunk_overlap:
         type: integer
       chunk_size:
         type: integer
+      enable_parent_child:
+        type: boolean
       languages:
         items:
           type: string
         type: array
+      parent_chunk_size:
+        type: integer
       separators:
         items:
           type: string
@@ -5111,6 +5197,16 @@ definitions:
         type: boolean
     required:
     - modelName
+    type: object
+  internal_handler.RenameKnowledgeFolderRequest:
+    properties:
+      from:
+        type: string
+      to:
+        type: string
+    required:
+    - from
+    - to
     type: object
   internal_handler.ResetUserPasswordRequest:
     properties:
@@ -5318,22 +5414,12 @@ definitions:
     type: object
   internal_handler.UpdateChunkRequest:
     properties:
-      chunk_index:
-        type: integer
       content:
         type: string
-      embedding:
-        items:
-          type: number
-        type: array
-      end_at:
+      expected_revision:
         type: integer
-      image_info:
-        type: string
       is_enabled:
         type: boolean
-      start_at:
-        type: integer
     type: object
   internal_handler.UpdateKnowledgeBaseRequest:
     properties:
@@ -5601,6 +5687,9 @@ definitions:
         description: Selected custom agent ID (backend resolves shared agent and its
           workspace from share relation)
         type: string
+      agent_source_tenant_id:
+        description: Optional disambiguator; backend still verifies the share relation
+        type: integer
       attachment_ids:
         description: Pre-uploaded session-scoped document IDs
         items:
@@ -5779,6 +5868,49 @@ info:
   title: WeKnora API
   version: "1.0"
 paths:
+  /agent-chat/{session_id}:
+    post:
+      consumes:
+      - application/json
+      description: 基于Agent的智能问答，支持多轮对话和SSE流式响应
+      parameters:
+      - description: 会话ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 问答请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_session.CreateKnowledgeQARequest'
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: 问答结果（SSE流）
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Agent问答
+      tags:
+      - 问答
   /agent/mcp-oauth-resolutions/{pending_id}:
     post:
       consumes:
@@ -6246,7 +6378,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 修改当前用户的登录密码
+      description: 修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；成功后所有会话被撤销，需重新登录。
       parameters:
       - description: 密码修改请求
         in: body
@@ -8927,6 +9059,14 @@ paths:
         in: query
         name: end_time
         type: string
+      - description: 文件夹路径筛选，空字符串表示知识库根目录；不传该参数则不按文件夹过滤
+        in: query
+        name: folder_path
+        type: string
+      - description: 为 true 时同时返回子文件夹内的文档
+        in: query
+        name: folder_recursive
+        type: boolean
       produces:
       - application/json
       responses:
@@ -9002,6 +9142,73 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 从文件创建知识
+      tags:
+      - 知识管理
+  /knowledge-bases/{id}/knowledge/folders:
+    get:
+      consumes:
+      - application/json
+      description: 返回知识库内由文件夹上传形成的目录树，包含每个文件夹的直接文档数与含子目录的总数
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 目录树
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取知识库文件夹目录树
+      tags:
+      - 知识管理
+    put:
+      consumes:
+      - application/json
+      description: 把一个文件夹及其所有子目录改到新路径。目标路径已存在时两个文件夹合并；不能移动到自身子目录下
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 重命名请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.RenameKnowledgeFolderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 重命名成功
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 权限不足
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 重命名或移动文件夹
       tags:
       - 知识管理
   /knowledge-bases/{id}/knowledge/manual:
@@ -9502,6 +9709,49 @@ paths:
       summary: 获取知识库复制进度
       tags:
       - 知识库
+  /knowledge-chat/{session_id}:
+    post:
+      consumes:
+      - application/json
+      description: 基于知识库的问答（使用LLM总结），支持SSE流式响应
+      parameters:
+      - description: 会话ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 问答请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_session.CreateKnowledgeQARequest'
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: 问答结果（SSE流）
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 知识问答
+      tags:
+      - 问答
   /knowledge/{id}:
     delete:
       consumes:
@@ -9840,6 +10090,40 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 批量重新解析知识
+      tags:
+      - 知识管理
+  /knowledge/folder:
+    post:
+      consumes:
+      - application/json
+      description: 批量修改知识条目所属文件夹。文件夹由路径推导而来，因此目标路径不存在时会自动创建；空路径表示知识库顶层。仅调整归类，不会重新解析文档
+      parameters:
+      - description: 移动请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.MoveKnowledgeToFolderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 移动成功
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 权限不足
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 移动知识到文件夹
       tags:
       - 知识管理
   /knowledge/image/{id}/{chunk_id}:
@@ -11369,6 +11653,14 @@ paths:
         in: query
         name: before_time
         type: string
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
       produces:
       - application/json
       responses:
@@ -12521,76 +12813,6 @@ paths:
       summary: 取消置顶会话
       tags:
       - 会话
-  /sessions/{session_id}/agent-qa:
-    post:
-      consumes:
-      - application/json
-      description: 基于Agent的智能问答，支持多轮对话和SSE流式响应
-      parameters:
-      - description: 会话ID
-        in: path
-        name: session_id
-        required: true
-        type: string
-      - description: 问答请求
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/internal_handler_session.CreateKnowledgeQARequest'
-      produces:
-      - text/event-stream
-      responses:
-        "200":
-          description: 问答结果（SSE流）
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: 请求参数错误
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      - ApiKeyAuth: []
-      summary: Agent问答
-      tags:
-      - 问答
-  /sessions/{session_id}/knowledge-qa:
-    post:
-      consumes:
-      - application/json
-      description: 基于知识库的问答（使用LLM总结），支持SSE流式响应
-      parameters:
-      - description: 会话ID
-        in: path
-        name: session_id
-        required: true
-        type: string
-      - description: 问答请求
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/internal_handler_session.CreateKnowledgeQARequest'
-      produces:
-      - text/event-stream
-      responses:
-        "200":
-          description: 问答结果（SSE流）
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: 请求参数错误
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      - ApiKeyAuth: []
-      summary: 知识问答
-      tags:
-      - 问答
   /sessions/{session_id}/messages/{message_id}/suggestions:
     get:
       parameters:
@@ -12826,6 +13048,14 @@ paths:
         name: message_id
         required: true
         type: string
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
       produces:
       - text/event-stream
       responses:
@@ -12856,6 +13086,14 @@ paths:
         required: true
         schema:
           $ref: '#/definitions/internal_handler_session.SearchKnowledgeRequest'
+      - default: handle
+        description: 文件引用形式，public 返回可加载直链
+        enum:
+        - handle
+        - public
+        in: query
+        name: resource_urls
+        type: string
       produces:
       - application/json
       responses:

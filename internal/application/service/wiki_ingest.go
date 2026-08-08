@@ -496,7 +496,7 @@ func newWikiIngestPendingOp(
 	tenantID uint64,
 	kbID, knowledgeID string,
 ) (*types.TaskPendingOp, error) {
-	lang, _ := types.LanguageFromContext(ctx)
+	lang := types.LanguageFromContextOrDefault(ctx)
 	op := WikiPendingOp{
 		Op:          WikiOpIngest,
 		KnowledgeID: knowledgeID,
@@ -523,7 +523,7 @@ func enqueueWikiIngestTrigger(
 	tenantID uint64,
 	kbID string,
 ) error {
-	lang, _ := types.LanguageFromContext(ctx)
+	lang := types.LanguageFromContextOrDefault(ctx)
 	trigger := WikiIngestPayload{
 		TenantID:        tenantID,
 		KnowledgeBaseID: kbID,
@@ -1291,12 +1291,16 @@ type WikiBatchContext struct {
 
 // SlugUpdate represents a single update operation for a specific slug
 type SlugUpdate struct {
-	Slug              string
-	Type              string        // "entity", "concept", "summary", "retract", "retractStale"
-	Item              extractedItem // For entity/concept
-	DocTitle          string
-	KnowledgeID       string
-	SourceRef         string
+	Slug        string
+	Type        string        // "entity", "concept", "summary", "retract", "retractStale"
+	Item        extractedItem // For entity/concept
+	DocTitle    string
+	KnowledgeID string
+	SourceRef   string
+	// Language is the already-resolved, human-readable language name the
+	// Reduce phase interpolates into the editor prompt (e.g. "Chinese
+	// (Simplified)"), NOT a locale code. Map resolves it once per document
+	// so every page derived from that document shares one language.
 	Language          string
 	SummaryBody       string // For summary
 	SummaryLine       string // For summary

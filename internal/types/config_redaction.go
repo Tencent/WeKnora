@@ -219,8 +219,16 @@ func MergeStorageEngineConfigForUpdate(incoming, existing *StorageEngineConfig) 
 		if existing != nil && existing.S3 != nil {
 			prev = *existing.S3
 		}
-		s3.AccessKey = PreserveIfRedacted(s3.AccessKey, prev.AccessKey)
-		s3.SecretKey = PreserveIfRedacted(s3.SecretKey, prev.SecretKey)
+		// Empty S3 credentials intentionally switch authentication to the AWS
+		// default credential chain. Only the response placeholder means "keep
+		// the stored value"; treating empty as preserve makes it impossible to
+		// migrate an existing static AK/SK configuration to IAM roles.
+		if s3.AccessKey == RedactedSecretPlaceholder {
+			s3.AccessKey = prev.AccessKey
+		}
+		if s3.SecretKey == RedactedSecretPlaceholder {
+			s3.SecretKey = prev.SecretKey
+		}
 		out.S3 = &s3
 	}
 	if out.OSS != nil {

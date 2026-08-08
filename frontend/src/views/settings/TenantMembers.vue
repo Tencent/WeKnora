@@ -515,6 +515,8 @@ import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useAuthStore } from '@/stores/auth'
+import { AUDIT_ACTION_I18N_ROOTS } from '@/i18n/auditActionRegistry'
+import { auditActionLabel } from '@/i18n/auditActionLabel'
 import {
   listMembers,
   updateMemberRole,
@@ -1052,11 +1054,7 @@ function auditOutcomeTheme(o: AuditOutcome): 'success' | 'danger' | 'default' {
 // i18n 键名含点号（rbac.member_added）。用 t(path) 会按路径拆开解析，
 // 无法命中 tenantMember.audit.action['rbac.*'] — 必须用 tm + 字面量键。
 function formatAuditAction(action: AuditAction): string {
-  const bag = tm('tenantMember.audit.action') as unknown
-  if (bag !== null && typeof bag === 'object' && typeof (bag as Record<string, string>)[action] === 'string') {
-    return (bag as Record<string, string>)[action]
-  }
-  return action
+  return auditActionLabel({ tm }, AUDIT_ACTION_I18N_ROOTS.tenantMember, action)
 }
 
 // Resolve a user id to a display label: prefer current页的 members，

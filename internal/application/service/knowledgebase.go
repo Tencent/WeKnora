@@ -529,6 +529,10 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		if config.WikiConfig != nil {
 			kb.WikiConfig = config.WikiConfig
 		}
+		if config.AutoTagConfig != nil {
+			config.AutoTagConfig.Normalize()
+			kb.AutoTagConfig = config.AutoTagConfig
+		}
 		// Update indexing strategy — syncs to ExtractConfig for backward compat
 		if config.IndexingStrategy != nil {
 			if !config.IndexingStrategy.HasAnyIndexing() {
@@ -1294,10 +1298,7 @@ func (s *knowledgeBaseService) buildDuplicateKnowledgeBaseName(
 	tenantID uint64,
 	sourceName string,
 ) string {
-	locale, ok := types.LanguageFromContext(ctx)
-	if !ok {
-		locale = types.DefaultLanguage()
-	}
+	locale := types.LanguageFromContextOrDefault(ctx)
 	suffix := duplicateKBCopySuffix(locale)
 
 	baseName := strings.TrimSpace(sourceName)

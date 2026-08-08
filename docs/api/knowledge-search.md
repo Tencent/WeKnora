@@ -21,6 +21,10 @@
 
 > 必须指定 `knowledge_base_id` 或 `knowledge_base_ids` 中的至少一个。
 
+**查询参数**:
+
+- `resource_urls`: `handle`（默认）或 `public`。`public` 把检索结果 `content` / `image_info` 里的 `resource://` 引用换成可加载的 http(s) 链接，详见[文件与图片引用](./README.md#文件与图片引用resource-与直链)
+
 **请求**:
 
 ```curl

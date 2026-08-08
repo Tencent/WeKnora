@@ -334,11 +334,7 @@ func (p *PluginQueryUnderstand) parseOutput(chatManage *types.ChatManage, raw st
 		return
 	}
 
-	// If JSON parsing failed entirely, treat the raw text as the rewritten query
-	// and default to IntentKBSearch for safety.
-	if content != "" {
-		chatManage.RewriteQuery = content
-	}
+	// On parse failure, keep the original query and intent.
 }
 
 func parseStructuredQueryOutput(raw string) (queryUnderstandOutput, bool) {

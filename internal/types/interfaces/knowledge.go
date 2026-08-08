@@ -84,6 +84,21 @@ type KnowledgeService interface {
 		page *types.Pagination,
 		filter types.KnowledgeListFilter,
 	) (*types.PageResult, error)
+	// ListKnowledgeFolderTree returns the folder hierarchy derived from the
+	// folder_path of every knowledge entry in a knowledge base, with per-folder
+	// document counts. It powers the document sidebar tree.
+	ListKnowledgeFolderTree(ctx context.Context, kbID string) (*types.KnowledgeFolderTree, error)
+	// MoveKnowledgeToFolder re-files knowledge entries under the given folder
+	// path (empty means the knowledge base top level). Folders are derived from
+	// the stored paths, so a path that does not exist yet is created implicitly.
+	MoveKnowledgeToFolder(
+		ctx context.Context,
+		kbID string,
+		ids []string,
+		folderPath string,
+	) (int64, error)
+	// RenameKnowledgeFolder moves a folder and everything below it to a new path.
+	RenameKnowledgeFolder(ctx context.Context, kbID string, from string, to string) (int64, error)
 	// DeleteKnowledge deletes knowledge by ID.
 	DeleteKnowledge(ctx context.Context, id string) error
 	// DeleteKnowledgeList deletes multiple knowledge entries by IDs.
@@ -241,6 +256,30 @@ type KnowledgeRepository interface {
 		kbID string,
 		params *types.KnowledgeCheckParams,
 	) (bool, *types.Knowledge, error)
+	// ListKnowledgeFolderCounts aggregates the number of knowledge entries
+	// stored directly in each folder_path of a knowledge base.
+	ListKnowledgeFolderCounts(
+		ctx context.Context,
+		tenantID uint64,
+		kbID string,
+	) ([]*types.KnowledgeFolderCount, error)
+	// UpdateKnowledgeFolderPath files the given entries under folderPath.
+	UpdateKnowledgeFolderPath(
+		ctx context.Context,
+		tenantID uint64,
+		kbID string,
+		ids []string,
+		folderPath string,
+	) (int64, error)
+	// RenameKnowledgeFolderPath rewrites folder_path for a folder and all of its
+	// descendants. Renaming onto an existing path merges the folders.
+	RenameKnowledgeFolderPath(
+		ctx context.Context,
+		tenantID uint64,
+		kbID string,
+		from string,
+		to string,
+	) (int64, error)
 	// AminusB returns the IDs of knowledge in A that have no counterpart in B,
 	// comparing file_hash as a multiset (so duplicate-count differences and
 	// NULL/empty hashes are handled correctly, letting a clone converge).
@@ -284,6 +323,15 @@ type KnowledgeRepository interface {
 	ListIDsByTagIDs(ctx context.Context, tenantID uint64, kbID string, tagIDs []string) ([]string, error)
 	// SetKnowledgeTags replaces all tags for a single knowledge entry (deletes old, inserts new).
 	SetKnowledgeTags(ctx context.Context, knowledgeID string, tagIDs []string) error
+	// AddKnowledgeTagRelations attaches tags without removing existing ones,
+	// after validating that the knowledge and every tag belong to the given
+	// tenant and knowledge base. Duplicate deliveries are idempotent.
+	AddKnowledgeTagRelations(
+		ctx context.Context,
+		tenantID uint64,
+		kbID, knowledgeID string,
+		tagIDs []string,
+	) error
 	// GetKnowledgeTags returns tags for multiple knowledge IDs.
 	GetKnowledgeTags(ctx context.Context, knowledgeIDs []string) (map[string][]*types.KnowledgeTag, error)
 	// DeleteKnowledgeTagRelations deletes all tag relations for a knowledge entry.

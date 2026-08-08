@@ -328,6 +328,9 @@ const debugConfig = computed(() => ({
   chunkSize: localChunkSize.value,
   chunkOverlap: localChunkOverlap.value,
   separators: localSeparators.value,
+  enableParentChild: localEnableParentChild.value,
+  parentChunkSize: localParentChunkSize.value,
+  childChunkSize: localChildChunkSize.value,
   strategy: localStrategy.value,
   tokenLimit: localTokenLimit.value,
   languages: localLanguages.value

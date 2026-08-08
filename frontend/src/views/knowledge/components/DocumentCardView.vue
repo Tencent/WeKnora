@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { formatFileSize } from '@/utils/files';
 import { useTagChipsOverflow } from '@/composables/useTagChipsOverflow';
 import DocumentActionMenu from './DocumentActionMenu.vue';
+import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
 
 interface Tag {
@@ -19,6 +20,7 @@ interface KnowledgeCard {
   summary_status?: string;
   description?: string;
   file_name?: string;
+  folder_path?: string;
   original_file_name?: string;
   display_name?: string;
   title?: string;
@@ -43,6 +45,15 @@ const props = defineProps<{
   canMutateKnowledge: boolean;
   traceAvailableById: Record<string, boolean>;
   tagList: Tag[];
+  /** Sub-folders of the folder currently being browsed. */
+  folders?: Array<{ path: string; name: string; total_count: number }>;
+  /** Every folder of the knowledge base, for the "move to folder" picker. */
+  folderOptions?: FolderOption[];
+  /**
+   * Replace the updated-at line with the card's folder. Only meaningful when
+   * the grid spans several folders, i.e. while filtering.
+   */
+  showFolderPath?: boolean;
   // Move sub-flow state
   moveMenuMode: 'normal' | 'targets' | 'confirm';
   moveTargetKbs: any[];
@@ -56,8 +67,10 @@ const emit = defineEmits<{
   (e: 'open', item: KnowledgeCard): void;
   (e: 'toggle-checkbox', id: string, checked: boolean, ctx?: { e?: Event }): void;
   (e: 'menu-visible-change', visible: boolean, item: KnowledgeCard): void;
-  (e: 'action', action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'batch-manage' | 'delete', item: KnowledgeCard): void;
+  (e: 'action', action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'batch-manage' | 'delete', item: KnowledgeCard): void;
   (e: 'tag-edit', item: KnowledgeCard): void;
+  (e: 'open-folder', path: string): void;
+  (e: 'move-to-folder', item: KnowledgeCard, folderPath: string): void;
   // Move sub-flow emits
   (e: 'move-select-target', kb: any): void;
   (e: 'move-back'): void;
@@ -74,6 +87,11 @@ const {
   getOverflowCount,
 } = useTagChipsOverflow('tagItemId');
 
+// Which row's action popup is currently showing the folder picker. Kept local so
+// picking a folder stays inside the menu the user already opened, exactly like
+// the "move to knowledge base" sub-menu next to it.
+const folderPickerItemId = ref<string | null>(null);
+
 // --- Menu index tracking ---
 const activeMenuIndex = ref(-1);
 const openMenu = (index: number) => {
@@ -82,6 +100,7 @@ const openMenu = (index: number) => {
 const onMenuVisibleChange = (visible: boolean, item: KnowledgeCard) => {
   if (!visible) {
     activeMenuIndex.value = -1;
+    folderPickerItemId.value = null;
   }
   emit('menu-visible-change', visible, item);
 };
@@ -249,8 +268,20 @@ const onCardMouseLeave = () => {
   cardPopoverElement = null;
 };
 
+const onFolderPicked = (item: KnowledgeCard, path: string) => {
+  folderPickerItemId.value = null;
+  if (item.isMore !== undefined) item.isMore = false;
+  activeMenuIndex.value = -1;
+  emit('move-to-folder', item, path);
+};
+
 // --- Action handlers ---
-const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'batch-manage' | 'delete', item: KnowledgeCard) => {
+const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'batch-manage' | 'delete', item: KnowledgeCard) => {
+  // The folder picker opens inside this same popup, so keep the menu open.
+  if (action === 'move-folder') {
+    folderPickerItemId.value = item.id;
+    return;
+  }
   // Don't close menu for move — it triggers the sub-flow
   if (action !== 'move') {
     if (item.isMore !== undefined) item.isMore = false;
@@ -261,7 +292,27 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
 </script>
 
 <template>
-  <div class="doc-card-list doc-card-list-animated">
+  <div class="doc-card-view">
+    <div class="doc-card-list doc-card-list-animated">
+      <div
+        v-for="folder in folders"
+        :key="'folder-' + folder.path"
+        class="folder-card"
+        :title="folder.path"
+        role="button"
+        tabindex="0"
+        @click="emit('open-folder', folder.path)"
+        @keydown.enter="emit('open-folder', folder.path)"
+      >
+        <div class="folder-card__body">
+          <t-icon name="folder" class="folder-card__icon" />
+          <span class="folder-card__title">{{ folder.name }}</span>
+        </div>
+        <div class="folder-card__footer">
+          {{ t('knowledgeBase.folderTree.folderCardCount', { count: folder.total_count }) }}
+        </div>
+      </div>
+
     <div
       class="knowledge-card"
       :class="{ 'is-selected': selectedIds.has(item.id), 'batch-mode': batchMode }"
@@ -302,8 +353,19 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
               <img class="more-icon" src="@/assets/img/more.png" alt="" />
             </div>
             <template #content>
+              <!-- Move: folder picker (must win over the normal menu while open) -->
+              <div v-if="folderPickerItemId === item.id" class="card-menu move-menu">
+                <FolderPickerMenu
+                  :options="folderOptions || []"
+                  :current-path="item.folder_path || ''"
+                  show-back
+                  @back="folderPickerItemId = null"
+                  @confirm="(path: string) => onFolderPicked(item, path)"
+                />
+              </div>
+
               <!-- Normal menu -->
-              <div v-if="moveMenuMode === 'normal'" class="card-menu">
+              <div v-else-if="moveMenuMode === 'normal'" class="card-menu">
                 <DocumentActionMenu
                   :item="item"
                   :can-mutate-knowledge="canMutateKnowledge"
@@ -313,6 +375,7 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
                   @reparse="handleAction('reparse', item)"
                   @cancel-parse="handleAction('cancel-parse', item)"
                   @move="handleAction('move', item)"
+                  @move-folder="handleAction('move-folder', item)"
                   @batch-manage="handleAction('batch-manage', item)"
                   @delete="handleAction('delete', item)"
                 />
@@ -451,7 +514,12 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
       </div>
 
       <div class="card-bottom">
-        <span class="card-time">{{ formatDocTime(item.updated_at) }}</span>
+        <button v-if="showFolderPath && item.folder_path" type="button" class="card-folder"
+          :title="item.folder_path" @click.stop="emit('open-folder', item.folder_path)">
+          <t-icon name="folder" />
+          <span>{{ item.folder_path }}</span>
+        </button>
+        <span v-else class="card-time">{{ formatDocTime(item.updated_at) }}</span>
         <div class="card-bottom-right">
           <div v-if="tagList.length" class="card-tag-selector" @click.stop>
             <!-- Editable mode -->
@@ -522,6 +590,7 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
           </div>
         </div>
       </div>
+    </div>
     </div>
   </div>
 
@@ -598,6 +667,10 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
   to { opacity: 1; transform: translateY(0); }
 }
 
+.doc-card-view {
+  width: 100%;
+}
+
 .doc-card-list {
   box-sizing: border-box;
   display: grid;
@@ -609,6 +682,74 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
   &.doc-card-list-animated {
     animation: contentFadeIn 0.32s ease-out;
   }
+}
+
+.folder-card {
+  min-width: 240px;
+  height: 136px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--td-component-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--td-bg-color-container);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--td-component-stroke) 55%, var(--td-brand-color));
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.07);
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 30%, transparent);
+  }
+}
+
+.folder-card__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  overflow: hidden;
+}
+
+.folder-card__icon {
+  flex-shrink: 0;
+  font-size: 28px;
+  line-height: 1;
+  color: var(--td-brand-color);
+  opacity: 0.88;
+}
+
+.folder-card__title {
+  flex: 1;
+  min-height: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  max-height: 40px;
+  color: var(--td-text-color-primary);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  word-break: break-all;
+}
+
+.folder-card__footer {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  border-top: 1px solid var(--td-component-stroke);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--td-text-color-placeholder);
 }
 
 .knowledge-card {
@@ -792,6 +933,38 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
     font-size: 12px;
     font-weight: 400;
     white-space: nowrap;
+  }
+
+  .card-folder {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    max-width: 60%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--td-text-color-secondary);
+    font-family: var(--app-font-family);
+    font-size: 12px;
+    cursor: pointer;
+    transition: color 0.15s ease;
+
+    &:hover {
+      color: var(--td-brand-color);
+    }
+
+    span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .t-icon {
+      flex: 0 0 auto;
+      font-size: 13px;
+    }
   }
 
   .card-type {

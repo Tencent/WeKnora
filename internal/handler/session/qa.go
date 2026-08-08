@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
@@ -43,6 +44,7 @@ type qaRequestContext struct {
 	webSearchEnabled      bool
 	mentionedItems        types.MentionedItems
 	effectiveTenantID     uint64                   // when using shared agent, tenant ID for model/KB/MCP resolution; 0 = use context tenant
+	sharedAgentReadOnly   bool                     // access was granted by a read-only agent share
 	images                []ImageAttachment        // Uploaded images with analysis text
 	userMessageID         string                   // Created user message ID (populated after createUserMessage)
 	channel               string                   // Source channel: "web", "api", "im", etc.
@@ -50,6 +52,10 @@ type qaRequestContext struct {
 	attachmentIDs         []string                 // Pre-uploaded session-scoped document IDs, resolved after SSE starts
 	attachmentMetas       types.MessageAttachments // Metadata-only view of attachmentIDs for the persisted user message
 	suggestionAttribution *types.SuggestionAttribution
+	// resourceRewriter turns internal storage references in the outbound stream
+	// into directly loadable URLs when the caller asks for `resource_urls=public`.
+	// Disabled (a pass-through) in the default handle mode.
+	resourceRewriter *storageurl.StreamRewriter
 
 	// Snapshot of the request fields needed to persist the input-bar state
 	// for session restoration. Kept verbatim from the request so we record
@@ -62,21 +68,22 @@ type qaRequestContext struct {
 func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 	imageURLs, imageDescription := extractImageURLsAndOCRText(rc.images)
 	return &types.QARequest{
-		Session:            rc.session,
-		Query:              rc.query,
-		AssistantMessageID: rc.assistantMessage.ID,
-		SummaryModelID:     rc.summaryModelID,
-		CustomAgent:        rc.customAgent,
-		KnowledgeBaseIDs:   rc.knowledgeBaseIDs,
-		KnowledgeIDs:       rc.knowledgeIDs,
-		TagScopes:          rc.tagScopes,
-		MCPServiceIDs:      rc.mcpServiceIDs,
-		SkillNames:         rc.skillNames,
-		ImageURLs:          imageURLs,
-		ImageDescription:   imageDescription,
-		UserMessageID:      rc.userMessageID,
-		WebSearchEnabled:   rc.webSearchEnabled,
-		Attachments:        rc.attachments,
+		Session:             rc.session,
+		Query:               rc.query,
+		AssistantMessageID:  rc.assistantMessage.ID,
+		SummaryModelID:      rc.summaryModelID,
+		CustomAgent:         rc.customAgent,
+		SharedAgentReadOnly: rc.sharedAgentReadOnly,
+		KnowledgeBaseIDs:    rc.knowledgeBaseIDs,
+		KnowledgeIDs:        rc.knowledgeIDs,
+		TagScopes:           rc.tagScopes,
+		MCPServiceIDs:       rc.mcpServiceIDs,
+		SkillNames:          rc.skillNames,
+		ImageURLs:           imageURLs,
+		ImageDescription:    imageDescription,
+		UserMessageID:       rc.userMessageID,
+		WebSearchEnabled:    rc.webSearchEnabled,
+		Attachments:         rc.attachments,
 	}
 }
 
@@ -106,6 +113,14 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	if request.Query == "" {
 		logger.Error(ctx, "Query content is empty")
 		return nil, nil, errors.NewBadRequestError("Query content cannot be empty")
+	}
+
+	// Resolve the storage-reference representation up front: once the SSE stream
+	// has started an invalid value can no longer be reported as a 400.
+	resourceRewriter, err := h.resolveStreamRewriter(c)
+	if err != nil {
+		logger.Warnf(ctx, "Rejected resource URL mode: %v", err)
+		return nil, nil, err
 	}
 	if h.suggestionService != nil && request.SuggestionAttribution != nil {
 		if err := h.suggestionService.ValidateAttribution(ctx, sessionID, request.Query, request.SuggestionAttribution); err != nil {
@@ -138,7 +153,10 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	}
 
 	// Get custom agent if agent_id is provided. Backend resolves shared agent from share relation (no client-provided tenant).
-	customAgent, effectiveTenantID := h.resolveAgent(ctx, c, request.AgentID)
+	customAgent, effectiveTenantID, sharedAgentReadOnly := h.resolveAgent(ctx, c, request.AgentID, request.AgentSourceTenantID)
+	if request.AgentSourceTenantID != 0 && customAgent == nil {
+		return nil, nil, errors.NewNotFoundError("Shared agent not found")
+	}
 
 	// Merge @mentioned items into knowledge_base_ids and knowledge_ids
 	kbIDs, knowledgeIDs := mergeKnowledgeTargets(request.KnowledgeBaseIDs, request.KnowledgeIds, request.MentionedItems)
@@ -160,6 +178,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		); scopedTenantID != 0 {
 			customAgent = scopedAgent
 			effectiveTenantID = scopedTenantID
+			sharedAgentReadOnly = false
 		}
 	}
 
@@ -205,6 +224,10 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		}
 
 		tenantID := c.GetUint64(types.TenantIDContextKey.String())
+		attachmentRuntimeCtx := ctx
+		if effectiveTenantID != 0 {
+			attachmentRuntimeCtx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+		}
 
 		// Use ASR only when the agent has audio upload enabled.
 		asrModelID := ""
@@ -229,7 +252,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 				}
 
 				processed, err := h.attachmentProcessor.ProcessAttachment(
-					ctx, data, att.FileName, att.FileSize, tenantID, asrModelID,
+					attachmentRuntimeCtx, data, att.FileName, att.FileSize, tenantID, asrModelID,
 				)
 				if err != nil {
 					errChan <- fmt.Errorf("attachment %d processing failed: %w", idx+1, err)
@@ -341,6 +364,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		webSearchEnabled:      request.WebSearchEnabled,
 		mentionedItems:        convertMentionedItems(request.MentionedItems),
 		effectiveTenantID:     effectiveTenantID,
+		sharedAgentReadOnly:   sharedAgentReadOnly,
 		images:                request.Images,
 		channel:               request.Channel,
 		attachments:           processedAttachments,
@@ -349,6 +373,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		suggestionAttribution: request.SuggestionAttribution,
 		reqAgentEnabled:       request.AgentEnabled,
 		reqAgentID:            request.AgentID,
+		resourceRewriter:      resourceRewriter,
 	}
 
 	return reqCtx, &request, nil
@@ -367,10 +392,7 @@ func buildMessageExecutionContext(
 	skillNames []string,
 	webSearchEnabled bool,
 ) (types.MessageExecutionContext, string, uint64, string) {
-	locale, ok := types.LanguageFromContext(ctx)
-	if !ok {
-		locale = types.DefaultLanguage()
-	}
+	locale := types.LanguageFromContextOrDefault(ctx)
 
 	snapshot := types.MessageExecutionContext{
 		KnowledgeBaseIDs: knowledgeBaseIDs,
@@ -447,9 +469,14 @@ func cloneTagScopes(scopes []types.TagScope) []types.TagScope {
 
 // resolveAgent resolves the custom agent by ID, trying shared agent first, then own agent.
 // Returns (nil, 0) if agentID is empty or not found.
-func (h *Handler) resolveAgent(ctx context.Context, c *gin.Context, agentID string) (*types.CustomAgent, uint64) {
+func (h *Handler) resolveAgent(
+	ctx context.Context,
+	c *gin.Context,
+	agentID string,
+	sourceTenantID uint64,
+) (*types.CustomAgent, uint64, bool) {
 	if agentID == "" {
-		return nil, 0
+		return nil, 0, false
 	}
 
 	logger.Infof(ctx, "Resolving agent, agent ID: %s", secutils.SanitizeForLog(agentID))
@@ -457,21 +484,26 @@ func (h *Handler) resolveAgent(ctx context.Context, c *gin.Context, agentID stri
 	// Try shared agent first
 	var customAgent *types.CustomAgent
 	var effectiveTenantID uint64
+	var sharedAgentReadOnly bool
 	userIDVal, _ := c.Get(types.UserIDContextKey.String())
 	currentTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if h.agentShareService != nil && userIDVal != nil && currentTenantID != 0 {
 		callerTenantRole := types.TenantRoleFromContext(ctx)
-		agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID)
+		var agent *types.CustomAgent
+		var err error
+		agent, err = h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID, sourceTenantID)
 		if err == nil && agent != nil {
 			effectiveTenantID = agent.TenantID
 			customAgent = agent
+			sharedAgentReadOnly = true
 			logger.Infof(ctx, "Using shared agent: ID=%s, Name=%s, effectiveTenantID=%d (retrieval scope)",
 				customAgent.ID, customAgent.Name, effectiveTenantID)
 		}
 	}
 
-	// Fall back to own agent
-	if customAgent == nil {
+	// Fall back to an own agent only when no source workspace was requested.
+	// A rejected shared selector must not silently run a same-ID local builtin.
+	if customAgent == nil && sourceTenantID == 0 {
 		agent, err := h.customAgentService.GetAgentByID(ctx, agentID)
 		if err == nil {
 			customAgent = agent
@@ -481,12 +513,12 @@ func (h *Handler) resolveAgent(ctx context.Context, c *gin.Context, agentID stri
 			logger.Warnf(ctx, "Failed to get custom agent, agent ID: %s, error: %v, using default config",
 				secutils.SanitizeForLog(agentID), err)
 		}
-	} else {
+	} else if customAgent != nil {
 		logger.Infof(ctx, "Using custom agent: ID=%s, Name=%s, IsBuiltin=%v, AgentMode=%s, effectiveTenantID=%d",
 			customAgent.ID, customAgent.Name, customAgent.IsBuiltin, customAgent.Config.AgentMode, effectiveTenantID)
 	}
 
-	return customAgent, effectiveTenantID
+	return customAgent, effectiveTenantID, sharedAgentReadOnly
 }
 
 // mergeKnowledgeTargets merges request KB/knowledge IDs with @mentioned items into deduplicated slices.
@@ -604,6 +636,7 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 // @Accept       json
 // @Produce      json
 // @Param        request  body      SearchKnowledgeRequest  true  "搜索请求"
+// @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
 // @Success      200      {object}  map[string]interface{}  "搜索结果"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -625,6 +658,15 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	if request.Query == "" {
 		logger.Error(ctx, "Query content is empty")
 		c.Error(errors.NewBadRequestError("Query content cannot be empty"))
+		return
+	}
+
+	// Resolve the storage-reference representation before retrieving, so a typo
+	// or a rejected scope costs nothing.
+	rewriter, err := h.resolveResourceRewriter(c)
+	if err != nil {
+		logger.Warnf(ctx, "Rejected resource URL mode: %v", err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -683,7 +725,7 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	logger.Infof(ctx, "Knowledge search completed, found %d results", len(searchResults))
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    searchResults,
+		"data":    rewriter.CopyReferences(ctx, searchResults),
 	})
 }
 
@@ -695,11 +737,12 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 // @Produce      text/event-stream
 // @Param        session_id  path      string                   true  "会话ID"
 // @Param        request     body      CreateKnowledgeQARequest true  "问答请求"
+// @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
 // @Success      200         {object}  map[string]interface{}   "问答结果（SSE流）"
 // @Failure      400         {object}  errors.AppError          "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /sessions/{session_id}/knowledge-qa [post]
+// @Router       /knowledge-chat/{session_id} [post]
 func (h *Handler) KnowledgeQA(c *gin.Context) {
 	// Parse and validate request
 	reqCtx, request, err := h.parseQARequest(c, "KnowledgeQA")
@@ -720,11 +763,12 @@ func (h *Handler) KnowledgeQA(c *gin.Context) {
 // @Produce      text/event-stream
 // @Param        session_id  path      string                   true  "会话ID"
 // @Param        request     body      CreateKnowledgeQARequest true  "问答请求"
+// @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
 // @Success      200         {object}  map[string]interface{}   "问答结果（SSE流）"
 // @Failure      400         {object}  errors.AppError          "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /sessions/{session_id}/agent-qa [post]
+// @Router       /agent-chat/{session_id} [post]
 func (h *Handler) AgentQA(c *gin.Context) {
 	// Parse and validate request
 	reqCtx, request, err := h.parseQARequest(c, "AgentQA")
@@ -960,7 +1004,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	// Handle SSE events (blocking)
 	shouldWaitForTitle := generateTitle && reqCtx.session.Title == ""
 	h.handleAgentEventsForSSE(ctx, reqCtx.c, sessionID, reqCtx.assistantMessage.ID,
-		reqCtx.requestID, streamCtx.eventBus, shouldWaitForTitle)
+		reqCtx.requestID, streamCtx.eventBus, shouldWaitForTitle, reqCtx.resourceRewriter)
 }
 
 // runVLMAnalysisIfNeeded runs VLM image analysis within the async goroutine,

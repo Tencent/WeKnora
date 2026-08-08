@@ -29,6 +29,7 @@ export async function listKnowledgeBaseActivity(
 // 知识库管理 API（列表、创建、获取、更新、删除、复制）
 export function listKnowledgeBases(params?: {
   agent_id?: string;
+  agent_source_tenant_id?: string;
   /**
    * Optional creator filter. Server-side semantics:
    *   - "mine"   → only KBs whose creator_id matches the caller
@@ -41,6 +42,7 @@ export function listKnowledgeBases(params?: {
 }) {
   const query = new URLSearchParams();
   if (params?.agent_id) query.set('agent_id', params.agent_id);
+  if (params?.agent_source_tenant_id) query.set('agent_source_tenant_id', params.agent_source_tenant_id);
   if (params?.creator && params.creator !== 'all') query.set('creator', params.creator);
   const qs = query.toString();
   return get(qs ? `/api/v1/knowledge-bases?${qs}` : '/api/v1/knowledge-bases');
@@ -85,6 +87,7 @@ export function createKnowledgeBase(data: {
   chunking_config?: any;
   embedding_model_id?: string;
   summary_model_id?: string;
+  auto_tag_config?: { enabled: boolean; model_id?: string; max_tags?: number; skip_if_tagged?: boolean };
   // Opt-in binding to a specific tenant-owned VectorStore. Omit (or
   // send undefined / empty string) to fall back to the env-configured
   // store. Immutable after creation — UpdateKnowledgeBase intentionally
@@ -125,9 +128,10 @@ export function createKnowledgeBase(data: {
   return post(`/api/v1/knowledge-bases`, data);
 }
 
-export function getKnowledgeBaseById(id: string, options?: { agent_id?: string }) {
+export function getKnowledgeBaseById(id: string, options?: { agent_id?: string; agent_source_tenant_id?: string }) {
   const query = new URLSearchParams();
   if (options?.agent_id) query.set('agent_id', options.agent_id);
+  if (options?.agent_source_tenant_id) query.set('agent_source_tenant_id', options.agent_source_tenant_id);
   const qs = query.toString();
   return get(qs ? `/api/v1/knowledge-bases/${id}?${qs}` : `/api/v1/knowledge-bases/${id}`);
 }
@@ -146,6 +150,7 @@ export function updateKnowledgeBase(id: string, data: {
       content_instructions?: string;
       extraction_instructions?: string;
     };
+    auto_tag_config?: { enabled: boolean; model_id?: string; max_tags?: number; skip_if_tagged?: boolean };
     indexing_strategy?: {
       vector_enabled: boolean;
       keyword_enabled: boolean;
@@ -261,6 +266,14 @@ export function listKnowledgeFiles(
     source?: string;
     start_time?: string;
     end_time?: string;
+    /**
+     * Folder to browse. An empty string means the knowledge base root, so the
+     * parameter is only sent when it is defined — leaving it out lists every
+     * folder (the flat view).
+     */
+    folder_path?: string;
+    /** Include documents stored in sub-folders of folder_path. */
+    folder_recursive?: boolean;
   },
 ) {
   const query = new URLSearchParams();
@@ -273,13 +286,61 @@ export function listKnowledgeFiles(
   if (params.source) query.append('source', params.source);
   if (params.start_time) query.append('start_time', params.start_time);
   if (params.end_time) query.append('end_time', params.end_time);
+  if (params.folder_path !== undefined) {
+    query.append('folder_path', params.folder_path);
+    if (params.folder_recursive) query.append('folder_recursive', 'true');
+  }
   const qs = query.toString();
   return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${qs}`);
 }
 
-export function getKnowledgeDetails(id: string, options?: { agent_id?: string }) {
+/** One node of the knowledge base folder tree. */
+export interface KnowledgeFolderNode {
+  /** Canonical folder path, e.g. "docs/spec". */
+  path: string;
+  /** Last segment of the path, used as the row label. */
+  name: string;
+  /** Documents stored directly in this folder. */
+  document_count: number;
+  /** Documents in this folder plus every descendant folder. */
+  total_count: number;
+  children?: KnowledgeFolderNode[];
+}
+
+export interface KnowledgeFolderTree {
+  /** Documents that are not part of any uploaded folder. */
+  root_document_count: number;
+  /** Documents in the whole knowledge base. */
+  total_document_count: number;
+  folders: KnowledgeFolderNode[];
+}
+
+export function listKnowledgeFolders(kbId: string) {
+  return get(`/api/v1/knowledge-bases/${kbId}/knowledge/folders`);
+}
+
+/**
+ * Re-file documents under `folderPath` ('' = knowledge base top level). Folders
+ * are derived from the stored paths, so a path that does not exist yet is
+ * created by this call. Only the grouping changes; documents are not re-parsed.
+ */
+export function moveKnowledgeToFolder(kbId: string, ids: string[], folderPath: string) {
+  return post('/api/v1/knowledge/folder', {
+    kb_id: kbId,
+    knowledge_ids: ids,
+    folder_path: folderPath,
+  });
+}
+
+/** Rename or move a folder together with everything below it. */
+export function renameKnowledgeFolder(kbId: string, from: string, to: string) {
+  return put(`/api/v1/knowledge-bases/${kbId}/knowledge/folders`, { from, to });
+}
+
+export function getKnowledgeDetails(id: string, options?: { agent_id?: string; agent_source_tenant_id?: string }) {
   const query = new URLSearchParams();
   if (options?.agent_id) query.set('agent_id', options.agent_id);
+  if (options?.agent_source_tenant_id) query.set('agent_source_tenant_id', options.agent_source_tenant_id);
   const qs = query.toString();
   return get(qs ? `/api/v1/knowledge/${id}?${qs}` : `/api/v1/knowledge/${id}`);
 }
@@ -322,10 +383,11 @@ export function previewKnowledgeFile(id: string) {
 }
 
 /** @param idsQueryString - query string with ids (e.g. ids=xxx&ids=yyy) */
-export function batchQueryKnowledge(idsQueryString: string, kbId?: string, agentId?: string) {
+export function batchQueryKnowledge(idsQueryString: string, kbId?: string, agentId?: string, agentSourceTenantId?: string) {
   let qs = idsQueryString;
   if (kbId) qs += `&kb_id=${encodeURIComponent(kbId)}`;
   if (agentId) qs += `&agent_id=${encodeURIComponent(agentId)}`;
+  if (agentSourceTenantId) qs += `&agent_source_tenant_id=${encodeURIComponent(agentSourceTenantId)}`;
   return get(`/api/v1/knowledge/batch?${qs}`);
 }
 
@@ -539,7 +601,7 @@ export function searchKnowledge(
   offset = 0,
   limit = 20,
   fileTypes?: string[],
-  options?: { agent_id?: string; recent?: boolean }
+  options?: { agent_id?: string; agent_source_tenant_id?: string; recent?: boolean }
 ) {
   const query = new URLSearchParams();
   if (keyword) {
@@ -551,6 +613,7 @@ export function searchKnowledge(
     query.set('file_types', fileTypes.join(','));
   }
   if (options?.agent_id) query.set('agent_id', options.agent_id);
+  if (options?.agent_source_tenant_id) query.set('agent_source_tenant_id', options.agent_source_tenant_id);
   if (options?.recent) query.set('recent', 'true');
   return get(`/api/v1/knowledge/search?${query.toString()}`);
 }

@@ -340,6 +340,45 @@ func TestListByTypeLight_EmptyType_ReturnsZero(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
+func TestListPagesCursorExcludesArchivedPages(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	mk := func(id, slug, status string) *types.WikiPage {
+		page := makeWikiPage("kb-lint", slug, types.WikiPageTypeConcept, status)
+		page.ID = id
+		return page
+	}
+	pages := []*types.WikiPage{
+		mk("001", "concept/live-a", types.WikiPageStatusPublished),
+		mk("002", "concept/archived", types.WikiPageStatusArchived),
+		mk("003", "concept/live-b", types.WikiPageStatusDraft),
+		mk("004", "concept/other-kb", types.WikiPageStatusPublished),
+	}
+	pages[3].KnowledgeBaseID = "kb-other"
+	for _, p := range pages {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	first, next, err := repo.ListPagesCursor(ctx, "kb-lint", "", 1)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	assert.Equal(t, "concept/live-a", first[0].Slug)
+	assert.Equal(t, "001", next)
+
+	second, next, err := repo.ListPagesCursor(ctx, "kb-lint", next, 1)
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+	assert.Equal(t, "concept/live-b", second[0].Slug)
+	assert.Equal(t, "003", next)
+
+	third, next, err := repo.ListPagesCursor(ctx, "kb-lint", next, 1)
+	require.NoError(t, err)
+	assert.Empty(t, third)
+	assert.Empty(t, next)
+}
+
 // TestListByTypeLight_ClampsLimit verifies the [1, 200] clamp. We don't
 // want a client passing limit=100000 and forcing the DB to return a
 // multi-MB response.
@@ -388,6 +427,43 @@ func TestCountOrphans_SQLiteCountsEmptyInLinks(t *testing.T) {
 	got, err := repo.CountOrphans(ctx, "kb-orphans")
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), got)
+}
+
+func TestWikiStatsQueriesExcludeArchivedPages(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	live := makeWikiPage("kb-stats", "entity/live", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	live.InLinks = types.StringArray{"index"}
+	live.OutLinks = types.StringArray{"concept/live-target"}
+	archived := makeWikiPage("kb-stats", "entity/archived", types.WikiPageTypeEntity, types.WikiPageStatusArchived)
+	archived.InLinks = types.StringArray{}
+	archived.OutLinks = types.StringArray{"concept/archived-target"}
+	indexPage := makeWikiPage("kb-stats", "index", types.WikiPageTypeIndex, types.WikiPageStatusPublished)
+	indexPage.InLinks = types.StringArray{}
+	otherKB := makeWikiPage("kb-other", "entity/other", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+
+	for _, p := range []*types.WikiPage{live, archived, indexPage, otherKB} {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	counts, err := repo.CountByType(ctx, "kb-stats")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), counts[types.WikiPageTypeEntity])
+	assert.Equal(t, int64(1), counts[types.WikiPageTypeIndex])
+
+	orphans, err := repo.CountOrphans(ctx, "kb-stats")
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), orphans)
+
+	pages, err := repo.ListAll(ctx, "kb-stats")
+	require.NoError(t, err)
+	assert.Len(t, pages, 2)
+	for _, page := range pages {
+		assert.NotEqual(t, types.WikiPageStatusArchived, page.Status)
+		assert.Equal(t, "kb-stats", page.KnowledgeBaseID)
+	}
 }
 
 // makeWikiRevision builds a snapshot row for the given page state.

@@ -1368,7 +1368,7 @@ func (s *knowledgeService) moveKnowledgeReparse(
 			}
 		}
 
-		lang, _ := types.LanguageFromContext(ctx)
+		lang := types.LanguageFromContextOrDefault(ctx)
 		taskPayload := types.DocumentProcessPayload{
 			TenantID:                 tenantID,
 			KnowledgeID:              knowledge.ID,
