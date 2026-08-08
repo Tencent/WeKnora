@@ -358,6 +358,14 @@ export function cancelKnowledgeParse(id: string) {
   return post(`/api/v1/knowledge/${id}/cancel-parse`);
 }
 
+export function retryKnowledgeFileUpdate(id: string) {
+  return post(`/api/v1/knowledge/${id}/file-update/retry`);
+}
+
+export function discardKnowledgeFileUpdate(id: string) {
+  return del(`/api/v1/knowledge/${id}/file-update`);
+}
+
 export function getKnowledgeSpans(id: string, attempt?: number) {
   const qs = attempt ? `?attempt=${attempt}` : '';
   return get(`/api/v1/knowledge/${id}/spans${qs}`);

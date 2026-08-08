@@ -3,6 +3,7 @@ package types
 import (
 	"encoding/json"
 	"fmt"
+	"mime/multipart"
 	"sort"
 	"strings"
 	"time"
@@ -66,6 +67,21 @@ const (
 	// queued downstream tasks, but the knowledge row and any already-written
 	// chunks/index are kept so the user can re-trigger parsing via reparse.
 	ParseStatusCancelled = "cancelled"
+	// ParseStatusReplacing indicates that a validated replacement file has
+	// been staged and the asynchronous worker is rebuilding this knowledge in
+	// place. Other write operations must not mutate the row in this state.
+	ParseStatusReplacing = "replacing"
+)
+
+// File knowledge update slot states.
+const (
+	KnowledgeFileUpdateStateIdle      = "idle"
+	KnowledgeFileUpdateStateWaiting   = "waiting"
+	KnowledgeFileUpdateStateApplying  = "applying"
+	KnowledgeFileUpdateStateRetryWait = "retry_wait"
+	KnowledgeFileUpdateStateFailed    = "failed"
+	KnowledgeFileUpdateResultActive   = "active"
+	KnowledgeFileUpdateResultPending  = "pending"
 )
 
 // Summary status constants for async summary generation
@@ -188,6 +204,41 @@ type Knowledge struct {
 	DeletedAt gorm.DeletedAt `json:"deleted_at"         gorm:"index"`
 	// Knowledge base name (not stored in database, populated on query)
 	KnowledgeBaseName string `json:"knowledge_base_name" gorm:"-"`
+	// FileUpdateVersion is the latest accepted file update version.
+	FileUpdateVersion uint64 `json:"file_update_version" gorm:"-"`
+	// FileUpdateState projects the durable update slot state.
+	FileUpdateState string `json:"file_update_state" gorm:"-"`
+	// FileUpdateError contains a sanitized update failure summary.
+	FileUpdateError string `json:"file_update_error,omitempty" gorm:"-"`
+}
+
+// KnowledgeFileUpdateSlot stores at most one active and one latest pending
+// replacement for a file knowledge.
+type KnowledgeFileUpdateSlot struct {
+	KnowledgeID     string    `gorm:"column:knowledge_id;primaryKey"`
+	TenantID        uint64    `gorm:"column:tenant_id"`
+	KnowledgeBaseID string    `gorm:"column:knowledge_base_id"`
+	LatestVersion   uint64    `gorm:"column:latest_version"`
+	ActiveVersion   *uint64   `gorm:"column:active_version"`
+	ActiveState     string    `gorm:"column:active_state"`
+	ActivePayload   JSON      `gorm:"column:active_payload;type:json"`
+	PendingVersion  *uint64   `gorm:"column:pending_version"`
+	PendingPayload  JSON      `gorm:"column:pending_payload;type:json"`
+	LastError       string    `gorm:"column:last_error"`
+	CreatedAt       time.Time `gorm:"column:created_at"`
+	UpdatedAt       time.Time `gorm:"column:updated_at"`
+}
+
+func (KnowledgeFileUpdateSlot) TableName() string { return "knowledge_file_update_slots" }
+
+// KnowledgeFileUpdateStageResult describes the durable state after accepting
+// an update. Superseded payloads are returned for staged-file cleanup.
+type KnowledgeFileUpdateStageResult struct {
+	Version                uint64
+	State                  string
+	ActiveVersion          uint64
+	ReplacedActivePayload  JSON
+	ReplacedPendingPayload JSON
 }
 
 // CustomMetadataText returns stable human-readable metadata for summaries and
@@ -217,6 +268,56 @@ func (k *Knowledge) CustomMetadataText() string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// KnowledgeFileUpdateRequest carries an in-place file replacement request.
+// The Provided flags distinguish an omitted multipart field from an explicit
+// empty value, which is required for preserving or clearing optional fields.
+type KnowledgeFileUpdateRequest struct {
+	KnowledgeBaseID       string
+	KnowledgeID           string
+	File                  *multipart.FileHeader
+	CustomFileName        string
+	ExpectedFileHash      string
+	ExpectedUpdateVersion *uint64
+	Metadata              map[string]string
+	MetadataProvided      bool
+	TagIDs                []string
+	TagIDsProvided        bool
+	Channel               string
+	ChannelProvided       bool
+	ProcessOverrides      *KnowledgeProcessOverrides
+}
+
+// KnowledgeFileCreateOrUpdateRequest carries the unified multipart file
+// upsert request. When KnowledgeID is empty, the service first tries to find a
+// unique existing file knowledge by the effective filename; if no match exists,
+// it creates a new knowledge.
+type KnowledgeFileCreateOrUpdateRequest struct {
+	KnowledgeBaseID       string
+	KnowledgeID           string
+	File                  *multipart.FileHeader
+	CustomFileName        string
+	ExpectedFileHash      string
+	ExpectedUpdateVersion *uint64
+	EnableMultimodel      *bool
+	Metadata              map[string]string
+	MetadataProvided      bool
+	TagIDs                []string
+	TagIDsProvided        bool
+	Channel               string
+	ChannelProvided       bool
+	ProcessOverrides      *KnowledgeProcessOverrides
+}
+
+// KnowledgeFileUpsertResult is returned by the create-or-update HTTP flow.
+type KnowledgeFileUpsertResult struct {
+	Action           string     `json:"action"`
+	Knowledge        *Knowledge `json:"knowledge"`
+	TaskID           string     `json:"task_id,omitempty"`
+	UpdateVersion    uint64     `json:"update_version,omitempty"`
+	UpdateState      string     `json:"update_state,omitempty"`
+	AcceptedFileHash string     `json:"accepted_file_hash,omitempty"`
 }
 
 // GetMetadata returns the metadata as a map[string]string.

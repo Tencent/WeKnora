@@ -1429,6 +1429,15 @@ definitions:
       file_type:
         description: File type of the knowledge
         type: string
+      file_update_error:
+        description: FileUpdateError contains a sanitized update failure summary.
+        type: string
+      file_update_state:
+        description: FileUpdateState projects the durable update slot state.
+        type: string
+      file_update_version:
+        description: FileUpdateVersion is the latest accepted file update version.
+        type: integer
       folder_path:
         description: |-
           FolderPath is the canonical relative directory this entry belongs to
@@ -9111,6 +9120,95 @@ paths:
       summary: 从文件创建知识
       tags:
       - 知识管理
+  /knowledge-bases/{id}/knowledge/file/create-or-update:
+    post:
+      consumes:
+      - multipart/form-data
+      description: knowledge_id 为空时按文件名匹配同知识库唯一文件知识，命中则更新，否则新增；提供时保留原 knowledge ID，按
+        active + 最新 pending 的 latest-wins 规则异步更新
+      operationId: createOrUpdateKnowledgeFromFile
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 上传的文件
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: 要修改的知识ID；省略时按文件名匹配唯一文件知识，未命中则新增
+        in: formData
+        name: knowledge_id
+        type: string
+      - description: 修改时可选的当前文件hash
+        in: formData
+        name: expected_file_hash
+        type: string
+      - description: 修改时可选的最后接受更新版本
+        in: formData
+        name: expected_update_version
+        type: integer
+      - description: 自定义文件名
+        in: formData
+        name: fileName
+        type: string
+      - description: 元数据JSON
+        in: formData
+        name: metadata
+        type: string
+      - description: 启用多模态处理
+        in: formData
+        name: enable_multimodel
+        type: boolean
+      - description: 分类ID列表，逗号分隔
+        in: formData
+        name: tag_ids
+        type: string
+      - description: 来源渠道
+        in: formData
+        name: channel
+        type: string
+      - description: 处理配置JSON（KnowledgeProcessOverrides）
+        in: formData
+        name: process_config
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 请求幂等且内容未变化
+          schema:
+            additionalProperties: true
+            type: object
+        "202":
+          description: 新增或修改任务已接受
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 修改目标不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: 状态、版本或重复冲突
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "413":
+          description: 文件超限
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 新增或修改文件知识
+      tags:
+      - 知识管理
   /knowledge-bases/{id}/knowledge/folders:
     get:
       consumes:
@@ -9880,6 +9978,64 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 下载知识文件
+      tags:
+      - 知识管理
+  /knowledge/{id}/file-update:
+    delete:
+      description: 删除精确匹配的失败 active 和最新 pending 暂存版本，不影响并发提交的新版本
+      parameters:
+      - description: 知识ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 待更新版本已丢弃
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: 没有失败更新或状态已变化
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 丢弃失败的文件更新
+      tags:
+      - 知识管理
+  /knowledge/{id}/file-update/retry:
+    post:
+      description: 重新唤醒 update slot 中保留的失败 active 版本；并发上传的新版本不会被覆盖
+      parameters:
+      - description: 知识ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 重试已提交
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: 没有失败更新或状态已变化
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "503":
+          description: 任务系统暂时不可用
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 重试失败的文件更新
       tags:
       - 知识管理
   /knowledge/{id}/preview:

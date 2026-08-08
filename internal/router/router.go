@@ -2,7 +2,9 @@ package router
 
 import (
 	"context"
+	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 
 	_ "github.com/Tencent/WeKnora/docs" // swagger docs
@@ -84,6 +87,7 @@ type RouterParams struct {
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	WikiPageHandler              *handler.WikiPageHandler
+	RetrieveEngineRegistry       interfaces.RetrieveEngineRegistry
 }
 
 // NewRouter 创建新的路由
@@ -125,7 +129,25 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 	// 健康检查（不需要认证）
 	r.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "ok"})
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+	r.GET("/ready", func(c *gin.Context) {
+		configured := types.ParseRetrieverDrivers(os.Getenv("RETRIEVE_DRIVER"))
+		registered := registeredRetrieveDrivers(params.RetrieveEngineRegistry)
+		missing, unexpected := compareRetrieveDrivers(configured, registered)
+		status := http.StatusOK
+		state := "ok"
+		if len(missing) > 0 {
+			status = http.StatusServiceUnavailable
+			state = "unavailable"
+		}
+		c.JSON(status, gin.H{
+			"status":                      state,
+			"configured_retrieve_drivers": configured,
+			"registered_retrieve_drivers": registered,
+			"missing_retrieve_drivers":    missing,
+			"unexpected_retrieve_drivers": unexpected,
+		})
 	})
 
 	// Swagger API 文档（仅在非生产环境下启用）
@@ -276,6 +298,49 @@ func NewRouter(params RouterParams) *gin.Engine {
 	}
 
 	return r
+}
+
+func registeredRetrieveDrivers(registry interfaces.RetrieveEngineRegistry) []string {
+	if registry == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	for _, engine := range registry.GetAllRetrieveEngineServices() {
+		if engine == nil {
+			continue
+		}
+		seen[string(engine.EngineType())] = struct{}{}
+	}
+	drivers := make([]string, 0, len(seen))
+	for driver := range seen {
+		drivers = append(drivers, driver)
+	}
+	sort.Strings(drivers)
+	return drivers
+}
+
+func compareRetrieveDrivers(configured, registered []string) (missing, unexpected []string) {
+	configuredSet := make(map[string]struct{}, len(configured))
+	registeredSet := make(map[string]struct{}, len(registered))
+	for _, driver := range configured {
+		configuredSet[driver] = struct{}{}
+	}
+	for _, driver := range registered {
+		registeredSet[driver] = struct{}{}
+	}
+	for _, driver := range configured {
+		if _, ok := registeredSet[driver]; !ok {
+			missing = append(missing, driver)
+		}
+	}
+	for _, driver := range registered {
+		if _, ok := configuredSet[driver]; !ok {
+			unexpected = append(unexpected, driver)
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(unexpected)
+	return missing, unexpected
 }
 
 // trustedProxies returns the proxy CIDRs/IPs whose X-Forwarded-For headers

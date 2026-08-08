@@ -5242,6 +5242,140 @@ const docTemplate = `{
                 }
             }
         },
+        "/knowledge-bases/{id}/knowledge/file/create-or-update": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "knowledge_id 为空时按文件名匹配同知识库唯一文件知识，命中则更新，否则新增；提供时保留原 knowledge ID，按 active + 最新 pending 的 latest-wins 规则异步更新",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "新增或修改文件知识",
+                "operationId": "createOrUpdateKnowledgeFromFile",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "上传的文件",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "要修改的知识ID；省略时按文件名匹配唯一文件知识，未命中则新增",
+                        "name": "knowledge_id",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "修改时可选的当前文件hash",
+                        "name": "expected_file_hash",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "修改时可选的最后接受更新版本",
+                        "name": "expected_update_version",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "自定义文件名",
+                        "name": "fileName",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "元数据JSON",
+                        "name": "metadata",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "启用多模态处理",
+                        "name": "enable_multimodel",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "分类ID列表，逗号分隔",
+                        "name": "tag_ids",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "来源渠道",
+                        "name": "channel",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "处理配置JSON（KnowledgeProcessOverrides）",
+                        "name": "process_config",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "请求幂等且内容未变化",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "202": {
+                        "description": "新增或修改任务已接受",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "修改目标不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "状态、版本或重复冲突",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "413": {
+                        "description": "文件超限",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/knowledge-bases/{id}/knowledge/folders": {
             "get": {
                 "security": [
@@ -6926,6 +7060,100 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledge/{id}/file-update": {
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "删除精确匹配的失败 active 和最新 pending 暂存版本，不影响并发提交的新版本",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "丢弃失败的文件更新",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "待更新版本已丢弃",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "没有失败更新或状态已变化",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledge/{id}/file-update/retry": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "重新唤醒 update slot 中保留的失败 active 版本；并发上传的新版本不会被覆盖",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "重试失败的文件更新",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "重试已提交",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "没有失败更新或状态已变化",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "503": {
+                        "description": "任务系统暂时不可用",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -16648,6 +16876,18 @@ const docTemplate = `{
                 "file_type": {
                     "description": "File type of the knowledge",
                     "type": "string"
+                },
+                "file_update_error": {
+                    "description": "FileUpdateError contains a sanitized update failure summary.",
+                    "type": "string"
+                },
+                "file_update_state": {
+                    "description": "FileUpdateState projects the durable update slot state.",
+                    "type": "string"
+                },
+                "file_update_version": {
+                    "description": "FileUpdateVersion is the latest accepted file update version.",
+                    "type": "integer"
                 },
                 "folder_path": {
                     "description": "FolderPath is the canonical relative directory this entry belongs to\ninside the knowledge base, e.g. \"docs/spec\" for a folder upload of\n\"docs/spec/design.md\". Empty means the knowledge base root. It is a\ndisplay/navigation concern only: it never affects where the file is\nphysically stored (see FilePath).",

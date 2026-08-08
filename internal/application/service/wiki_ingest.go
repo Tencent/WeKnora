@@ -2688,7 +2688,7 @@ func (s *wikiIngestService) isKnowledgeGone(ctx context.Context, kbID, knowledge
 		return true
 	}
 	switch kn.ParseStatus {
-	case types.ParseStatusDeleting, types.ParseStatusCancelled:
+	case types.ParseStatusDeleting, types.ParseStatusCancelled, types.ParseStatusReplacing:
 		return true
 	}
 	return false

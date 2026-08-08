@@ -381,7 +381,7 @@ func (s *ImageMultimodalService) shouldDropOrphanedMultimodal(
 			return false, err
 		}
 		switch k.ParseStatus {
-		case types.ParseStatusCancelled, types.ParseStatusDeleting:
+		case types.ParseStatusCancelled, types.ParseStatusDeleting, types.ParseStatusReplacing:
 			return true, nil
 		}
 	}

@@ -24,6 +24,7 @@ DROP TABLE IF EXISTS chunks;
 DROP TABLE IF EXISTS messages;
 DROP TABLE IF EXISTS temporary_documents;
 DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS knowledge_file_update_slots;
 DROP TABLE IF EXISTS knowledges;
 DROP TABLE IF EXISTS knowledge_bases;
 DROP TABLE IF EXISTS storage_backends;
