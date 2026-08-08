@@ -1564,6 +1564,7 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 	registry.Register("searxng", infra_web_search.NewSearxngProvider)
 	registry.Register("keenable", infra_web_search.NewKeenableProvider)
 	registry.Register("zhipu", infra_web_search.NewZhipuProvider)
+	registry.Register("exa", infra_web_search.NewExaProvider)
 }
 
 // registerIMService registers adapter factories, loads enabled channels, and
