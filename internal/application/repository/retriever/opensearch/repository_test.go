@@ -1122,6 +1122,60 @@ func TestNewRepository_AcceptsLongStoreID(t *testing.T) {
 	}
 }
 
+func TestNewRepositoryDefersTransientStartupProbeAndRecovers(t *testing.T) {
+	const transientResponses = int32(8)
+	var infoCalls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			if infoCalls.Add(1) <= transientResponses {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"error":{"type":"unavailable","reason":"starting"},"status":503}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"version":{"distribution":"opensearch","number":"3.3.2"}}`))
+		case "/_cat/plugins":
+			_, _ = w.Write([]byte(`[{"name":"node-1","component":"opensearch-knn"}]`))
+		default:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer ts.Close()
+
+	repoIface, err := NewRepository(context.Background(), newTestClient(t, ts.URL), "", nil)
+	if err != nil {
+		t.Fatalf("transient startup probe must not fail construction: %v", err)
+	}
+	repo, ok := repoIface.(*Repository)
+	if !ok {
+		t.Fatalf("repository type: %T", repoIface)
+	}
+	if !repo.clusterProbePending {
+		t.Fatal("transient startup failure must leave a deferred probe")
+	}
+	var probeErr error
+	for attempt := 0; attempt < 10; attempt++ {
+		probeErr = repo.ensureClusterValidated(context.Background())
+		if probeErr == nil {
+			break
+		}
+		if !errors.Is(probeErr, ErrTransport) {
+			t.Fatalf("deferred transient probe classification: %v", probeErr)
+		}
+	}
+	if probeErr != nil {
+		t.Fatalf("deferred probe should eventually recover: %v", probeErr)
+	}
+	if repo.clusterProbePending {
+		t.Fatal("successful deferred probe must clear pending state")
+	}
+	if got := infoCalls.Load(); got <= transientResponses {
+		t.Fatalf("cluster info calls: want recovery after %d transient responses, got %d",
+			transientResponses, got)
+	}
+}
+
 // ============================================================================
 // Stub coverage — remaining stubs return the not-enabled sentinel
 //

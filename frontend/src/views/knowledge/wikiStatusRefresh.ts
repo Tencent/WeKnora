@@ -8,6 +8,10 @@ export function isKnowledgeParseInFlight(status?: string): boolean {
 }
 
 export function knowledgeNeedsStatusPolling(item: KnowledgePollStatus): boolean {
+  // `replacing` is driven by an external API, not the local parse pipeline,
+  // so it is not "parse in flight", but the list must keep polling until the
+  // async replacement lands the row back on pending/completed/failed.
+  if (item.parse_status === 'replacing') return true
   if (isKnowledgeParseInFlight(item.parse_status)) return true
   return item.parse_status === 'completed' &&
     (item.summary_status === 'pending' || item.summary_status === 'processing')

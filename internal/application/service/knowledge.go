@@ -397,7 +397,7 @@ func (s *knowledgeService) isKnowledgeDeleting(ctx context.Context, tenantID uin
 }
 
 // isKnowledgeAborted returns (true, status) when the knowledge has been
-// marked as deleting OR cancelled so async pipeline workers should bail
+// marked as deleting, cancelled, or replacing so async pipeline workers should bail
 // out. Status is returned so callers can branch on cleanup behavior:
 // deleting → existing cleanup of partial chunks/index applies;
 // cancelled → keep partially written data per user expectation.
@@ -417,7 +417,7 @@ func (s *knowledgeService) isKnowledgeAborted(
 		return true, types.ParseStatusDeleting
 	}
 	switch knowledge.ParseStatus {
-	case types.ParseStatusDeleting, types.ParseStatusCancelled:
+	case types.ParseStatusDeleting, types.ParseStatusCancelled, types.ParseStatusReplacing:
 		return true, knowledge.ParseStatus
 	}
 	return false, knowledge.ParseStatus
@@ -449,6 +449,40 @@ func (s *knowledgeService) checkStorageEngineConfigured(ctx context.Context, kb 
 		return nil
 	}
 	return werrors.NewBadRequestError("请先为知识库选择存储引擎，再上传内容。请前往知识库设置页面进行配置。")
+}
+
+// checkRetrieveEngineConfigured resolves the KB's effective vector store before
+// file bytes are persisted. This prevents accepting work that is guaranteed to
+// fail later with a missing repository registration.
+func (s *knowledgeService) checkRetrieveEngineConfigured(
+	ctx context.Context, kb *types.KnowledgeBase, tenantID uint64,
+) error {
+	// Some focused unit tests construct a partial service. Production always
+	// injects the registry through the container.
+	if s == nil || s.retrieveEngine == nil || kb == nil {
+		return nil
+	}
+	if kb.VectorStoreID != nil && *kb.VectorStoreID != "" && s.ownership == nil {
+		return werrors.NewServiceUnavailableError("知识库检索引擎暂时不可用")
+	}
+	if _, ok := types.TenantInfoFromContext(ctx); !ok && s.tenantRepo != nil {
+		tenant, err := s.tenantRepo.GetTenantByID(ctx, tenantID)
+		if err != nil {
+			return werrors.NewServiceUnavailableError("知识库检索引擎暂时不可用")
+		}
+		ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+	}
+	if _, err := retriever.CreateRetrieveEngineForKB(
+		ctx, s.retrieveEngine, s.ownership, tenantID, kb.VectorStoreID,
+	); err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"tenant_id": tenantID,
+			"kb_id":     kb.ID,
+			"reason":    "retrieve engine preflight failed",
+		})
+		return werrors.NewServiceUnavailableError("知识库检索引擎暂时不可用")
+	}
+	return nil
 }
 
 func kbIDOrEmpty(kb *types.KnowledgeBase) string {
@@ -694,6 +728,9 @@ func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types
 		logger.Errorf(ctx, "Failed to get knowledge record: %v", err)
 		return err
 	}
+	if record.ParseStatus == types.ParseStatusReplacing {
+		return werrors.NewConflictError("knowledge file is being replaced")
+	}
 	// if need other fields update, please add here
 	if knowledge.Title != "" {
 		record.Title = knowledge.Title
@@ -803,6 +840,17 @@ func (s *knowledgeService) GetKnowledgeBatchWithSharedAccess(ctx context.Context
 
 // SetKnowledgeTags replaces all tags for a single knowledge entry.
 func (s *knowledgeService) SetKnowledgeTags(ctx context.Context, knowledgeID string, tagIDs []string) error {
+	tenantID, _ := ctx.Value(types.TenantIDContextKey).(uint64)
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		return err
+	}
+	if knowledge.ParseStatus == types.ParseStatusReplacing {
+		return werrors.NewConflictError("knowledge file is being replaced")
+	}
+	if err := s.validateKnowledgeTagIDs(ctx, tenantID, knowledge.KnowledgeBaseID, tagIDs); err != nil {
+		return err
+	}
 	return s.repo.SetKnowledgeTags(ctx, knowledgeID, tagIDs)
 }
 
@@ -907,6 +955,9 @@ func (s *knowledgeService) UpdateKnowledgeTag(ctx context.Context, knowledgeID s
 	if err != nil {
 		return err
 	}
+	if knowledge.ParseStatus == types.ParseStatusReplacing {
+		return werrors.NewConflictError("knowledge file is being replaced")
+	}
 
 	// Validate all tag IDs
 	if err := s.validateKnowledgeTagIDs(ctx, tenantID, knowledge.KnowledgeBaseID, tagIDs); err != nil {
@@ -940,6 +991,11 @@ func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, authoriz
 	knowledgeList, err := s.repo.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
 	if err != nil {
 		return err
+	}
+	for _, knowledge := range knowledgeList {
+		if knowledge.ParseStatus == types.ParseStatusReplacing {
+			return werrors.NewConflictError(fmt.Sprintf("knowledge %s file is being replaced", knowledge.ID))
+		}
 	}
 
 	// Validate all requested IDs were found and belong to the authorized KB

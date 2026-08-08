@@ -67,6 +67,7 @@ type createKnowledgeFileServiceStub struct {
 	savedWithKnowledgeID string
 	deleteCalls          int
 	deletedPath          string
+	deleteErr            error
 }
 
 func (s *createKnowledgeFileServiceStub) CheckConnectivity(ctx context.Context) error {
@@ -108,7 +109,7 @@ func (s *createKnowledgeFileServiceStub) GetFileURL(ctx context.Context, filePat
 func (s *createKnowledgeFileServiceStub) DeleteFile(ctx context.Context, filePath string) error {
 	s.deleteCalls++
 	s.deletedPath = filePath
-	return nil
+	return s.deleteErr
 }
 
 func (s *createKnowledgeFileServiceStub) CopyFile(ctx context.Context, srcPath string, tenantID uint64, knowledgeID string) (string, error) {

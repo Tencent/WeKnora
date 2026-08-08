@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"strconv"
 	"strings"
@@ -436,6 +437,174 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		"success": true,
 		"data":    knowledge,
 	})
+}
+
+type createOrUpdateFileForm struct {
+	File                  *multipart.FileHeader
+	KnowledgeID           string
+	ExpectedFileHash      string
+	ExpectedUpdateVersion *uint64
+	CustomFileName        string
+	Metadata              map[string]string
+	MetadataProvided      bool
+	EnableMultimodel      *bool
+	ProcessOverrides      *types.KnowledgeProcessOverrides
+	TagIDs                []string
+	TagIDsProvided        bool
+	Channel               string
+	ChannelProvided       bool
+}
+
+func parseCreateOrUpdateFileForm(c *gin.Context) (*createOrUpdateFileForm, error) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		return nil, errors.NewBadRequestError("File upload failed").WithDetails(err.Error())
+	}
+	maxSizeMB := utils.GetMaxFileSizeMB()
+	if file.Size > maxSizeMB*1024*1024 {
+		return nil, &errors.AppError{
+			Code:     errors.ErrBadRequest,
+			Message:  fmt.Sprintf("文件大小不能超过%dMB", maxSizeMB),
+			HTTPCode: http.StatusRequestEntityTooLarge,
+		}
+	}
+
+	form := &createOrUpdateFileForm{
+		File:             file,
+		KnowledgeID:      strings.TrimSpace(c.PostForm("knowledge_id")),
+		ExpectedFileHash: strings.TrimSpace(c.PostForm("expected_file_hash")),
+		CustomFileName:   c.PostForm("fileName"),
+	}
+	if raw, provided := c.GetPostForm("expected_update_version"); provided {
+		version, err := strconv.ParseUint(strings.TrimSpace(raw), 10, 64)
+		if err != nil {
+			return nil, errors.NewBadRequestError("Invalid expected_update_version format").WithDetails(err.Error())
+		}
+		form.ExpectedUpdateVersion = &version
+	}
+	if raw, provided := c.GetPostForm("metadata"); provided {
+		form.MetadataProvided = true
+		form.Metadata = make(map[string]string)
+		if strings.TrimSpace(raw) != "" {
+			if err := json.Unmarshal([]byte(raw), &form.Metadata); err != nil {
+				return nil, errors.NewBadRequestError("Invalid metadata format").WithDetails(err.Error())
+			}
+		}
+	}
+	if raw, provided := c.GetPostForm("enable_multimodel"); provided && strings.TrimSpace(raw) != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, errors.NewBadRequestError("Invalid enable_multimodel format").WithDetails(err.Error())
+		}
+		form.EnableMultimodel = &value
+	}
+	if raw, provided := c.GetPostForm("process_config"); provided {
+		form.ProcessOverrides = &types.KnowledgeProcessOverrides{}
+		if strings.TrimSpace(raw) != "" {
+			if err := json.Unmarshal([]byte(raw), form.ProcessOverrides); err != nil {
+				return nil, errors.NewBadRequestError("Invalid process_config format").WithDetails(err.Error())
+			}
+		}
+	}
+	if form.EnableMultimodel != nil &&
+		(form.ProcessOverrides == nil || form.ProcessOverrides.EnableMultimodel == nil) {
+		if form.ProcessOverrides == nil {
+			form.ProcessOverrides = &types.KnowledgeProcessOverrides{}
+		}
+		form.ProcessOverrides.EnableMultimodel = form.EnableMultimodel
+	}
+	if raw, provided := c.GetPostForm("tag_ids"); provided {
+		form.TagIDsProvided = true
+		form.TagIDs = parseCommaSeparatedTagIDs(raw)
+	}
+	if raw, provided := c.GetPostForm("channel"); provided {
+		form.ChannelProvided = true
+		form.Channel = raw
+	}
+	return form, nil
+}
+
+// CreateOrUpdateKnowledgeFromFile godoc
+// @ID           createOrUpdateKnowledgeFromFile
+// @Summary      新增或修改文件知识
+// @Description  knowledge_id 为空时按文件名匹配同知识库唯一文件知识，命中则更新，否则新增；提供时保留原 knowledge ID，按 active + 最新 pending 的 latest-wins 规则异步更新
+// @Tags         知识管理
+// @Accept       multipart/form-data
+// @Produce      json
+// @Param        id                 path      string  true   "知识库ID"
+// @Param        file               formData  file    true   "上传的文件"
+// @Param        knowledge_id       formData  string  false  "要修改的知识ID；省略时按文件名匹配唯一文件知识，未命中则新增"
+// @Param        expected_file_hash formData  string  false  "修改时可选的当前文件hash"
+// @Param        expected_update_version formData  integer false "修改时可选的最后接受更新版本"
+// @Param        fileName           formData  string  false  "自定义文件名"
+// @Param        metadata           formData  string  false  "元数据JSON"
+// @Param        enable_multimodel  formData  bool    false  "启用多模态处理"
+// @Param        tag_ids            formData  string  false  "分类ID列表，逗号分隔"
+// @Param        channel            formData  string  false  "来源渠道"
+// @Param        process_config     formData  string  false  "处理配置JSON（KnowledgeProcessOverrides）"
+// @Success      200                {object}  map[string]interface{}  "请求幂等且内容未变化"
+// @Success      202                {object}  map[string]interface{}  "新增或修改任务已接受"
+// @Failure      400                {object}  errors.AppError         "请求参数错误"
+// @Failure      404                {object}  errors.AppError         "修改目标不存在"
+// @Failure      409                {object}  errors.AppError         "状态、版本或重复冲突"
+// @Failure      413                {object}  errors.AppError         "文件超限"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/knowledge/file/create-or-update [post]
+func (h *KnowledgeHandler) CreateOrUpdateKnowledgeFromFile(c *gin.Context) {
+	ctx := c.Request.Context()
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("No permission to create or update knowledge"))
+		return
+	}
+
+	form, err := parseCreateOrUpdateFileForm(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	result, err := h.kgService.CreateOrUpdateKnowledgeFromFile(ctx, &types.KnowledgeFileCreateOrUpdateRequest{
+		KnowledgeBaseID:       kbID,
+		KnowledgeID:           form.KnowledgeID,
+		File:                  form.File,
+		CustomFileName:        form.CustomFileName,
+		ExpectedFileHash:      form.ExpectedFileHash,
+		ExpectedUpdateVersion: form.ExpectedUpdateVersion,
+		EnableMultimodel:      form.EnableMultimodel,
+		Metadata:              form.Metadata,
+		MetadataProvided:      form.MetadataProvided,
+		TagIDs:                form.TagIDs,
+		TagIDsProvided:        form.TagIDsProvided,
+		Channel:               form.Channel,
+		ChannelProvided:       form.ChannelProvided,
+		ProcessOverrides:      form.ProcessOverrides,
+	})
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		if goerrors.Is(err, service.ErrInvalidFileType) {
+			c.Error(errors.NewBadRequestError(err.Error()))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_id": secutils.SanitizeForLog(form.KnowledgeID),
+		})
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	status := http.StatusAccepted
+	if result.Action == "unchanged" {
+		status = http.StatusOK
+	}
+	c.JSON(status, gin.H{"success": true, "data": result})
 }
 
 // CreateKnowledgeFromURL godoc
@@ -2045,6 +2214,77 @@ func (h *KnowledgeHandler) CancelKnowledgeParse(c *gin.Context) {
 		"message": "Knowledge parse cancelled",
 		"data":    knowledge,
 	})
+}
+
+// RetryKnowledgeFileUpdate godoc
+// @Summary      重试失败的文件更新
+// @Description  重新唤醒 update slot 中保留的失败 active 版本；并发上传的新版本不会被覆盖
+// @Tags         知识管理
+// @Produce      json
+// @Param        id path string true "知识ID"
+// @Success      200 {object} map[string]interface{} "重试已提交"
+// @Failure      409 {object} errors.AppError "没有失败更新或状态已变化"
+// @Failure      503 {object} errors.AppError "任务系统暂时不可用"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/{id}/file-update/retry [post]
+func (h *KnowledgeHandler) RetryKnowledgeFileUpdate(c *gin.Context) {
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	knowledge, err := h.kgService.RetryKnowledgeFileUpdate(effCtx, id)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(c.Request.Context(), err, map[string]interface{}{"knowledge_id": id})
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": knowledge})
+}
+
+// DiscardKnowledgeFileUpdate godoc
+// @Summary      丢弃失败的文件更新
+// @Description  删除精确匹配的失败 active 和最新 pending 暂存版本，不影响并发提交的新版本
+// @Tags         知识管理
+// @Produce      json
+// @Param        id path string true "知识ID"
+// @Success      200 {object} map[string]interface{} "待更新版本已丢弃"
+// @Failure      409 {object} errors.AppError "没有失败更新或状态已变化"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/{id}/file-update [delete]
+func (h *KnowledgeHandler) DiscardKnowledgeFileUpdate(c *gin.Context) {
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	knowledge, err := h.kgService.DiscardKnowledgeFileUpdate(effCtx, id)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(c.Request.Context(), err, map[string]interface{}{"knowledge_id": id})
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": knowledge})
 }
 
 type knowledgeTagBatchRequest struct {

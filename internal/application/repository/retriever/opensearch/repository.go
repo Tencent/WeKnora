@@ -26,10 +26,11 @@ import (
 // except the once / initErr maps are read-only after NewRepository returns;
 // per-dimension index initialization is guarded by sync.Once.
 //
-// Lifecycle: NewRepository validates connectivity + cluster version +
-// k-NN plugin, but does NOT create any index. Index creation happens
-// lazily on first Save / BatchSave / Retrieve once the embedding
-// dimension is known (see ensureReady — per-dimension index naming).
+// Lifecycle: NewRepository validates cluster version + k-NN plugin when the
+// cluster is reachable. A transient transport failure defers that probe until
+// first use so a short OpenSearch outage does not prevent the API process from
+// starting. It does NOT create any index. Index creation happens lazily on
+// first Save / BatchSave / Retrieve once the embedding dimension is known.
 //
 // Concurrency: A single Repository instance is shared across N goroutines
 // concurrently retrieving from the same store (the multi-store fan-out
@@ -65,6 +66,13 @@ type Repository struct {
 	keywordsReady bool
 	keywordsErr   error
 
+	// A startup transport failure defers the version/plugin probe. The first
+	// real operation retries it under this mutex; permanent probe failures are
+	// cached until restart, while transport failures remain retryable.
+	clusterProbeMu      sync.Mutex
+	clusterProbePending bool
+	clusterProbeErr     error
+
 	// sink receives audit events (index created / reindex executed). nil
 	// means no auditing; use r.auditSink() to get a non-nil sink. Set via
 	// WithAuditSink at construction.
@@ -75,11 +83,10 @@ type Repository struct {
 // red if the interface drifts and our implementation lags).
 var _ interfaces.RetrieveEngineRepository = (*Repository)(nil)
 
-// NewRepository builds a new OpenSearch k-NN repository and verifies the
-// backing cluster is reachable + version-compatible + has the k-NN
-// plugin installed on every cluster node. It does NOT create any index —
-// callers (Save / Retrieve) trigger lazy per-dimension creation via
-// ensureReady on first use.
+// NewRepository builds a new OpenSearch k-NN repository. Permanent validation
+// errors (authentication, unsupported version, missing k-NN plugin) fail the
+// constructor. Transient transport errors defer validation until first use.
+// It does NOT create any index; callers trigger lazy per-dimension creation.
 //
 // storeID is the VectorStore.ID owning this repository instance. It is
 // folded into the base index name so multiple OpenSearch VectorStores
@@ -131,13 +138,6 @@ func NewRepository(
 		return nil, fmt.Errorf("opensearch: invalid index config: %w", err)
 	}
 
-	if err := probeVersion(ctx, client); err != nil {
-		return nil, err // already wraps ErrVersionUnsupported / ErrTransport
-	}
-	if err := probeKNNPlugin(ctx, client); err != nil {
-		return nil, err // already wraps ErrConfigInvalid / ErrTransport
-	}
-
 	r := &Repository{
 		client:    client,
 		baseIndex: base,
@@ -148,9 +148,45 @@ func NewRepository(
 	for _, opt := range opts {
 		opt(r)
 	}
+	if err := probeCluster(ctx, client); err != nil {
+		if !isTransientErr(err) {
+			return nil, err
+		}
+		r.clusterProbePending = true
+		log.Warnf("[OpenSearch] startup probe deferred after transient failure: %v", err)
+		return r, nil
+	}
 	log.Infof("[OpenSearch] repository ready (baseIndex=%s, knn_engine=%s, hnsw_m=%d)",
 		base, icfg.knnEngine, icfg.hnswM)
 	return r, nil
+}
+
+func probeCluster(ctx context.Context, client *osapi.Client) error {
+	if err := probeVersion(ctx, client); err != nil {
+		return err
+	}
+	return probeKNNPlugin(ctx, client)
+}
+
+func (r *Repository) ensureClusterValidated(ctx context.Context) error {
+	r.clusterProbeMu.Lock()
+	defer r.clusterProbeMu.Unlock()
+	if r.clusterProbeErr != nil {
+		return r.clusterProbeErr
+	}
+	if !r.clusterProbePending {
+		return nil
+	}
+	if err := probeCluster(ctx, r.client); err != nil {
+		if !isTransientErr(err) {
+			r.clusterProbeErr = err
+			r.clusterProbePending = false
+		}
+		return err
+	}
+	r.clusterProbePending = false
+	logger.GetLogger(ctx).Infof("[OpenSearch] deferred startup probe recovered (baseIndex=%s)", r.baseIndex)
+	return nil
 }
 
 // ensureReady creates the per-dimension index (alias-backed) the first
@@ -179,6 +215,9 @@ func (r *Repository) ensureReady(ctx context.Context, dim int) error {
 	if dim <= 0 || dim > 16000 {
 		return fmt.Errorf("opensearch: dim %d out of range (1..16000): %w",
 			dim, ErrDimensionMismatch)
+	}
+	if err := r.ensureClusterValidated(ctx); err != nil {
+		return err
 	}
 
 	r.onceMu.Lock()

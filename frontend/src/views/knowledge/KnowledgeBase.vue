@@ -31,6 +31,8 @@ import {
   createKnowledgeFromURL,
   reparseKnowledge,
   cancelKnowledgeParse,
+  retryKnowledgeFileUpdate,
+  discardKnowledgeFileUpdate,
   batchDeleteKnowledge,
   batchReparseKnowledge,
   getKnowledgeSpans,
@@ -581,6 +583,7 @@ const parseStatusOptions = computed(() => [
   { label: t('knowledgeBase.parseStatusFailed'), value: 'failed' },
   { label: t('knowledgeBase.parseStatusCancelled'), value: 'cancelled' },
   { label: t('knowledgeBase.parseStatusFinalizing'), value: 'finalizing' },
+  { label: t('knowledgeBase.parseStatusReplacing'), value: 'replacing' },
   { label: t('knowledgeBase.parseStatusDraft'), value: 'draft' },
 ]);
 const selectedSource = ref('');
@@ -1316,6 +1319,9 @@ type KnowledgeCard = {
   metadata?: any;
   error_message?: string;
   tags?: Array<{ id: string; name: string; color?: string }>;
+  file_update_version?: number;
+  file_update_state?: string;
+  file_update_error?: string;
 };
 // needsStatusPolling decides whether a card row is still "in flight"
 // enough that the doc list should keep refreshing it. Keep in sync with
@@ -1324,7 +1330,7 @@ type KnowledgeCard = {
 // graph extract still running), and a `completed` row whose summary
 // hasn't landed yet keeps polling so the description fills in.
 const needsStatusPolling = (item: KnowledgeCard) => {
-  return knowledgeNeedsStatusPolling(item);
+  return knowledgeNeedsStatusPolling(item) || item.file_update_state === 'active' || item.file_update_state === 'pending';
 };
 
 const updateStatus = (analyzeList: KnowledgeCard[]) => {
@@ -2145,9 +2151,31 @@ const confirmCancelParseKnowledge = async (item: KnowledgeCard) => {
   }
 };
 
+const confirmRetryFileUpdate = async (item: KnowledgeCard) => {
+  if (!item?.id) return;
+  try {
+    await retryKnowledgeFileUpdate(item.id);
+    MessagePlugin.success(t('knowledgeBase.retryFileUpdateSubmitted'));
+    loadKnowledgeFiles(kbId.value);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.retryFileUpdateFailed'));
+  }
+};
+
+const confirmDiscardFileUpdate = async (item: KnowledgeCard) => {
+  if (!item?.id) return;
+  try {
+    await discardKnowledgeFileUpdate(item.id);
+    MessagePlugin.success(t('knowledgeBase.discardFileUpdateSubmitted'));
+    loadKnowledgeFiles(kbId.value);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.discardFileUpdateFailed'));
+  }
+};
+
 // Bridge card-view actions back to existing per-card handlers.
 const handleCardAction = (
-  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'edit' | 'reparse' | 'cancel-parse' | 'retry-file-update' | 'discard-file-update' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
@@ -2157,6 +2185,8 @@ const handleCardAction = (
     return confirmRebuildKnowledge(idx, item);
   }
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
+  if (action === 'retry-file-update') return confirmRetryFileUpdate(item);
+  if (action === 'discard-file-update') return confirmDiscardFileUpdate(item);
   if (action === 'move') return handleMoveKnowledge(item);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);
@@ -2165,13 +2195,15 @@ const handleCardAction = (
 
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
-  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'edit' | 'reparse' | 'cancel-parse' | 'retry-file-update' | 'discard-file-update' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') return confirmRebuildKnowledge(idx, item);
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
+  if (action === 'retry-file-update') return confirmRetryFileUpdate(item);
+  if (action === 'discard-file-update') return confirmDiscardFileUpdate(item);
   if (action === 'move') return handleMoveKnowledge(item);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);

@@ -75,6 +75,9 @@ func (r *Repository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMap map[
 func (r *Repository) updateByQueryScript(
 	ctx context.Context, chunkIDs []string, source string, params map[string]any,
 ) error {
+	if err := r.ensureClusterValidated(ctx); err != nil {
+		return err
+	}
 	body, err := json.Marshal(map[string]any{
 		"query": map[string]any{
 			"terms": map[string]any{"chunk_id": chunkIDs},

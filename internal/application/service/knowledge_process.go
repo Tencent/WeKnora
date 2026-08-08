@@ -1094,7 +1094,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	// Short-circuit when the user cancelled parsing or the row is being deleted.
 	if knowledge != nil {
 		switch knowledge.ParseStatus {
-		case types.ParseStatusCancelled, types.ParseStatusDeleting:
+		case types.ParseStatusCancelled, types.ParseStatusDeleting, types.ParseStatusReplacing:
 			logger.Infof(ctx, "Summary generation: knowledge aborted (%s), skipping: %s",
 				knowledge.ParseStatus, payload.KnowledgeID)
 			summaryOut["skipped"] = "knowledge_" + knowledge.ParseStatus
@@ -1550,7 +1550,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 	// Short-circuit when the user cancelled parsing or the row is being deleted.
 	if knowledge != nil {
 		switch knowledge.ParseStatus {
-		case types.ParseStatusCancelled, types.ParseStatusDeleting:
+		case types.ParseStatusCancelled, types.ParseStatusDeleting, types.ParseStatusReplacing:
 			exitStatus = "knowledge_" + knowledge.ParseStatus
 			logger.Infof(ctx, "Question generation: knowledge aborted (%s), skipping: %s",
 				knowledge.ParseStatus, payload.KnowledgeID)
@@ -1891,7 +1891,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	// batch, so a cancel stops burning LLM quota on the remaining batches.
 	if knowledge != nil {
 		switch knowledge.ParseStatus {
-		case types.ParseStatusCancelled, types.ParseStatusDeleting:
+		case types.ParseStatusCancelled, types.ParseStatusDeleting, types.ParseStatusReplacing:
 			exitStatus = "knowledge_" + knowledge.ParseStatus
 			logger.Infof(ctx, "Question generation: knowledge aborted (%s), skipping batch %d",
 				knowledge.ParseStatus, payload.BatchIndex)
@@ -2395,6 +2395,9 @@ func (s *knowledgeService) ReparseKnowledge(
 	if err != nil {
 		logger.Errorf(ctx, "Failed to load knowledge: %v", err)
 		return nil, err
+	}
+	if existing.ParseStatus == types.ParseStatusReplacing {
+		return nil, werrors.NewConflictError("knowledge file is being replaced")
 	}
 
 	// Allocate a fresh span tree attempt up front. Doing this BEFORE

@@ -82,6 +82,18 @@ func TestMatchesKnowledgePreservesPerKnowledgeAllowList(t *testing.T) {
 	if matchesKnowledge(types.TypeKBClone, []byte(`{"knowledge_id":"knowledge-1"}`), "knowledge-1") {
 		t.Fatal("KB clone must not become cancellable through the per-knowledge API")
 	}
+	if matchesKnowledge(types.TypeKnowledgeFileUpdate, []byte(`{"knowledge_id":"knowledge-1"}`), "knowledge-1") {
+		t.Fatal("file update coordinator must not cancel itself while applying a replacement")
+	}
+	if !matchesKnowledgeBase(
+		types.TypeKnowledgeFileUpdate,
+		[]byte(`{"knowledge_base_id":"kb-1","knowledge_id":"knowledge-1"}`),
+		"kb-1",
+		map[string]struct{}{"knowledge-1": {}},
+		nil,
+	) {
+		t.Fatal("KB deletion still needs to cancel queued file update coordinators")
+	}
 }
 
 func TestCancelTasksForKnowledgeBaseRescansMutatedPages(t *testing.T) {

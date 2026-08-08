@@ -35,6 +35,9 @@ interface KnowledgeCard {
   created_at?: string;
   file_size?: number | string;
   channel?: string;
+  file_update_version?: number;
+  file_update_state?: string;
+  file_update_error?: string;
 }
 
 const props = defineProps<{
@@ -67,7 +70,7 @@ const emit = defineEmits<{
   (e: 'open', item: KnowledgeCard): void;
   (e: 'toggle-checkbox', id: string, checked: boolean, ctx?: { e?: Event }): void;
   (e: 'menu-visible-change', visible: boolean, item: KnowledgeCard): void;
-  (e: 'action', action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'batch-manage' | 'delete', item: KnowledgeCard): void;
+  (e: 'action', action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'retry-file-update' | 'discard-file-update' | 'move' | 'move-folder' | 'batch-manage' | 'delete', item: KnowledgeCard): void;
   (e: 'tag-edit', item: KnowledgeCard): void;
   (e: 'open-folder', path: string): void;
   (e: 'move-to-folder', item: KnowledgeCard, folderPath: string): void;
@@ -276,7 +279,7 @@ const onFolderPicked = (item: KnowledgeCard, path: string) => {
 };
 
 // --- Action handlers ---
-const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'batch-manage' | 'delete', item: KnowledgeCard) => {
+const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'retry-file-update' | 'discard-file-update' | 'move' | 'move-folder' | 'batch-manage' | 'delete', item: KnowledgeCard) => {
   // The folder picker opens inside this same popup, so keep the menu open.
   if (action === 'move-folder') {
     folderPickerItemId.value = item.id;
@@ -335,6 +338,15 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
             />
           </div>
           <span class="card-content-title" :title="item.file_name">{{ item.file_name }}</span>
+          <t-tag v-if="item.file_update_state && item.file_update_state !== 'idle'" size="small"
+            :theme="item.file_update_state === 'failed' ? 'danger' : 'warning'" variant="light-outline"
+            class="card-file-update-tag">
+            {{ item.file_update_state === 'active'
+              ? $t('knowledgeBase.fileUpdateActive')
+              : item.file_update_state === 'pending'
+                ? $t('knowledgeBase.fileUpdatePending', { version: item.file_update_version })
+                : $t('knowledgeBase.fileUpdateFailed') }}
+          </t-tag>
           <t-popup
             v-if="canEdit"
             v-model="item.isMore"
@@ -374,6 +386,8 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
                   @view-trace="handleAction('view-trace', item)"
                   @reparse="handleAction('reparse', item)"
                   @cancel-parse="handleAction('cancel-parse', item)"
+                  @retry-file-update="handleAction('retry-file-update', item)"
+                  @discard-file-update="handleAction('discard-file-update', item)"
                   @move="handleAction('move', item)"
                   @move-folder="handleAction('move-folder', item)"
                   @batch-manage="handleAction('batch-manage', item)"
@@ -475,6 +489,10 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
           >
             <t-icon name="chart-line" />
           </button>
+        </div>
+        <div v-else-if="item.parse_status === 'replacing'" class="card-analyze">
+          <t-icon name="loading" class="card-analyze-loading"></t-icon>
+          <span class="card-analyze-txt">{{ $t('knowledgeBase.statusReplacing') }}</span>
         </div>
         <div v-else-if="item.parse_status === 'failed'" class="card-analyze failure card-analyze-trace">
           <t-icon name="close-circle" class="card-analyze-loading failure"></t-icon>
@@ -618,6 +636,9 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
             :auto-poll="false"
             :compact="true"
           />
+        </div>
+        <div v-else-if="hoveredCardItem.parse_status === 'replacing'" class="card-popover-status parsing">
+          {{ $t('knowledgeBase.statusReplacing') }}
         </div>
         <div v-else-if="hoveredCardItem.parse_status === 'draft'" class="card-popover-status draft">
           {{ $t('knowledgeBase.draft') }}
@@ -879,6 +900,15 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
     font-weight: 600;
     letter-spacing: 0.01em;
     margin-right: 8px;
+  }
+
+  .card-file-update-tag {
+    flex-shrink: 0;
+    max-width: 112px;
+    margin: 3px 8px 0 6px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .more-wrap {

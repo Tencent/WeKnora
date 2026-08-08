@@ -26,6 +26,9 @@ interface KnowledgeItem {
   source?: string;
   description?: string;
   channel?: string;
+  file_update_version?: number;
+  file_update_state?: string;
+  file_update_error?: string;
   isMore?: boolean;
 }
 
@@ -60,7 +63,7 @@ const emit = defineEmits<{
   (e: 'open', item: KnowledgeItem): void;
   (e: 'toggle-row', id: string, checked: boolean, shiftKey: boolean): void;
   (e: 'toggle-all', checked: boolean): void;
-  (e: 'action', action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem): void;
+  (e: 'action', action: 'edit' | 'reparse' | 'cancel-parse' | 'retry-file-update' | 'discard-file-update' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem): void;
   (e: 'probe-trace', item: KnowledgeItem): void;
   (e: 'tag-edit', item: KnowledgeItem): void;
   (e: 'open-folder', path: string): void;
@@ -144,6 +147,11 @@ const computeStatus = (item: KnowledgeItem): StatusInfo => {
       return { label: t('knowledgeBase.generatingSummary'), theme: 'primary', icon: 'loading', spin: true };
     }
     return { label: t('knowledgeBase.statusFinalizing'), theme: 'primary', icon: 'loading', spin: true };
+  }
+  // replacing = an external API is swapping the source file in place. Show a
+  // dedicated in-progress label; write actions are disabled until it settles.
+  if (item.parse_status === 'replacing') {
+    return { label: t('knowledgeBase.statusReplacing'), theme: 'primary', icon: 'loading', spin: true };
   }
   if (item.parse_status === 'failed') {
     return { label: t('knowledgeBase.statusFailed'), theme: 'danger', icon: 'close-circle' };
@@ -235,7 +243,7 @@ const onFolderPicked = (item: KnowledgeItem, path: string) => {
   emit('move-to-folder', item, path);
 };
 
-const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem) => {
+const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'retry-file-update' | 'discard-file-update' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem) => {
   // The folder picker opens inside this same popup, so keep the menu open.
   if (action === 'move-folder') {
     folderPickerItemId.value = item.id;
@@ -369,6 +377,15 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'mo
             </t-tag>
             <span v-else class="row-muted">--</span>
           </template>
+          <t-tag v-if="item.file_update_state && item.file_update_state !== 'idle'" size="small"
+            :theme="item.file_update_state === 'failed' ? 'danger' : 'warning'" variant="light-outline"
+            class="row-status-tag">
+            {{ item.file_update_state === 'active'
+              ? t('knowledgeBase.fileUpdateActive')
+              : item.file_update_state === 'pending'
+                ? t('knowledgeBase.fileUpdatePending', { version: item.file_update_version })
+                : t('knowledgeBase.fileUpdateFailed') }}
+          </t-tag>
         </div>
 
         <div class="cell cell-time">
@@ -404,6 +421,8 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'mo
                   @view-trace="handleAction('view-trace', item)"
                   @reparse="handleAction('reparse', item)"
                   @cancel-parse="handleAction('cancel-parse', item)"
+                  @retry-file-update="handleAction('retry-file-update', item)"
+                  @discard-file-update="handleAction('discard-file-update', item)"
                   @move="handleAction('move', item)"
                   @move-folder="handleAction('move-folder', item)"
                   @batch-manage="handleAction('batch-manage', item)"
@@ -828,6 +847,13 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'mo
 
 .row-status-tag :deep(.t-icon) {
   margin-right: 2px;
+}
+
+.doc-list-row .cell-status {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
 }
 
 .icon-spin {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -68,12 +70,29 @@ CREATE TABLE IF NOT EXISTS knowledge_processing_spans (
 );
 `
 
+const housekeepingFileUpdateSlotsDDL = `
+CREATE TABLE IF NOT EXISTS knowledge_file_update_slots (
+    knowledge_id VARCHAR(64) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    knowledge_base_id VARCHAR(64) NOT NULL,
+    latest_version INTEGER NOT NULL DEFAULT 0,
+    active_version INTEGER,
+    active_state VARCHAR(16) NOT NULL DEFAULT 'idle',
+    active_payload TEXT,
+    pending_version INTEGER,
+    pending_payload TEXT,
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);`
+
 func setupHousekeepingDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(knowledgeTestDDL).Error)
 	require.NoError(t, db.Exec(housekeepingSpansDDL).Error)
+	require.NoError(t, db.Exec(housekeepingFileUpdateSlotsDDL).Error)
 	return db
 }
 
@@ -103,6 +122,15 @@ func insertSpan(t *testing.T, db *gorm.DB, kid string, attempt int, spanID, stat
 type fakeTaskInspector struct {
 	queued map[string]bool
 	err    error
+}
+
+type housekeepingTaskEnqueuer struct {
+	tasks []*asynq.Task
+}
+
+func (e *housekeepingTaskEnqueuer) Enqueue(task *asynq.Task, _ ...asynq.Option) (*asynq.TaskInfo, error) {
+	e.tasks = append(e.tasks, task)
+	return &asynq.TaskInfo{ID: "housekeeping-wake"}, nil
 }
 
 func (f fakeTaskInspector) CancelTasksForKnowledge(
@@ -143,7 +171,7 @@ func newHousekeepingSvcWithInspector(db *gorm.DB, inspector interfaces.TaskInspe
 		// default of 2h+10min is just a constant scale factor.
 		DocumentProcessTimeout: 1 * time.Hour,
 	}}
-	return NewHousekeepingService(db, cfg, inspector)
+	return NewHousekeepingService(db, cfg, inspector, nil)
 }
 
 // TestHousekeeping_RecoversAbandoned exercises the happy path: a
@@ -307,4 +335,44 @@ func TestHousekeeping_PreservesRecentlyTouched(t *testing.T) {
 	).Row().Scan(&status))
 	assert.Equal(t, types.ParseStatusProcessing, status,
 		"knowledge updated within the cutoff must be left alone")
+}
+
+func TestHousekeepingRearmsStaleFileUpdateAndRetainsFailedSlot(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	stale := time.Now().Add(-3 * time.Hour)
+	for _, fixture := range []struct {
+		id    string
+		state string
+	}{
+		{id: "update-waiting", state: types.KnowledgeFileUpdateStateWaiting},
+		{id: "update-applying-queued", state: types.KnowledgeFileUpdateStateApplying},
+		{id: "update-failed", state: types.KnowledgeFileUpdateStateFailed},
+	} {
+		require.NoError(t, db.Exec(`
+			INSERT INTO knowledge_file_update_slots
+				(knowledge_id, tenant_id, knowledge_base_id, latest_version, active_version, active_state, active_payload, updated_at)
+			VALUES (?, 1, 'kb-1', 1, 1, ?, '{}', ?)
+		`, fixture.id, fixture.state, stale).Error)
+	}
+	task := &housekeepingTaskEnqueuer{}
+	cfg := &config.Config{KnowledgeBase: &config.KnowledgeBaseConfig{
+		DocumentProcessTimeout: time.Hour,
+	}}
+	svc := NewHousekeepingService(db, cfg, fakeTaskInspector{
+		queued: map[string]bool{"update-applying-queued": true},
+	}, task)
+
+	svc.runSweep(context.Background())
+
+	require.Len(t, task.tasks, 1)
+	assert.Equal(t, types.TypeKnowledgeFileUpdate, task.tasks[0].Type())
+	var wake types.KnowledgeFileUpdateTaskPayload
+	require.NoError(t, json.Unmarshal(task.tasks[0].Payload(), &wake))
+	assert.Equal(t, "update-waiting", wake.KnowledgeID)
+
+	var failedState string
+	require.NoError(t, db.Raw(
+		`SELECT active_state FROM knowledge_file_update_slots WHERE knowledge_id = 'update-failed'`,
+	).Row().Scan(&failedState))
+	assert.Equal(t, types.KnowledgeFileUpdateStateFailed, failedState)
 }
