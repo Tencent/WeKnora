@@ -1287,6 +1287,17 @@ type WikiBatchContext struct {
 	// pre-resolved ids and never races on folder creation. Read-only during
 	// reduce.
 	PlannedFolderID map[string]string
+
+	// MaxPageContentBytes mirrors KB.WikiConfig.MaxPageContentBytes, resolved
+	// once per batch. 0 = no cap (unbounded page growth). When > 0, reduce
+	// skips re-synthesizing a page whose existing content already meets or
+	// exceeds it on add-only updates (see WikiConfig.MaxPageContentBytes).
+	MaxPageContentBytes int
+
+	// MaxRefs mirrors KB.WikiConfig.MaxRefs, resolved once per batch. 0 = no
+	// cap. When > 0, reduce trims chunk_refs to the most-recent MaxRefs
+	// entries.
+	MaxRefs int
 }
 
 // SlugUpdate represents a single update operation for a specific slug
