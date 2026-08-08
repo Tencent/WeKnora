@@ -231,7 +231,7 @@ func TestListPagedChunksByKnowledgeID_FiltersEnabledState(t *testing.T) {
 	enabled := true
 	chunks, total, err := repo.ListPagedChunksByKnowledgeID(
 		ctx, 1, "faq-knowledge", &types.Pagination{Page: 1, PageSize: 20},
-		[]types.ChunkType{types.ChunkTypeFAQ}, nil, "", "", "", types.KnowledgeTypeFAQ, &enabled,
+		[]types.ChunkType{types.ChunkTypeFAQ}, nil, "", "", "", types.KnowledgeTypeFAQ, nil, &enabled,
 	)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), total)
@@ -240,7 +240,7 @@ func TestListPagedChunksByKnowledgeID_FiltersEnabledState(t *testing.T) {
 
 	allChunks, allTotal, err := repo.ListPagedChunksByKnowledgeID(
 		ctx, 1, "faq-knowledge", &types.Pagination{Page: 1, PageSize: 20},
-		[]types.ChunkType{types.ChunkTypeFAQ}, nil, "", "", "", types.KnowledgeTypeFAQ, nil,
+		[]types.ChunkType{types.ChunkTypeFAQ}, nil, "", "", "", types.KnowledgeTypeFAQ, nil, nil,
 	)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), allTotal)
@@ -330,4 +330,49 @@ func TestListRecentDocumentChunksWithQuestions_UnionsExplicitKBAndKnowledge(t *t
 	require.NoError(t, err)
 	require.Len(t, got, 2)
 	assert.ElementsMatch(t, []string{fromExplicitKB.ID, fromExplicitDocument.ID}, []string{got[0].ID, got[1].ID})
+}
+
+func TestListPagedChunksByKnowledgeID_FeedbackFilters(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	kbID := uuid.New().String()
+	knowledgeID := uuid.New().String()
+	lowRate := 0.2
+	highRate := 0.9
+	low := makeChunk(kbID, knowledgeID, string(types.ChunkTypeText))
+	low.PositiveRate = &lowRate
+	low.LikeCount = 1
+	low.DislikeCount = 4
+	low.NeedsOptimization = true
+	high := makeChunk(kbID, knowledgeID, string(types.ChunkTypeText))
+	high.PositiveRate = &highRate
+	high.LikeCount = 9
+	high.DislikeCount = 1
+	neutral := makeChunk(kbID, knowledgeID, string(types.ChunkTypeText))
+	neutral.PositiveRate = nil
+	require.NoError(t, db.Create([]*types.Chunk{low, high, neutral}).Error)
+
+	maxRate := 0.5
+	chunks, total, err := repo.ListPagedChunksByKnowledgeID(
+		ctx, 1, knowledgeID, &types.Pagination{Page: 1, PageSize: 10},
+		[]types.ChunkType{types.ChunkTypeText}, nil, "", "", "", "",
+		&types.ChunkFeedbackFilter{MaxPositiveRate: &maxRate}, nil,
+	)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, chunks, 1)
+	require.Equal(t, low.ID, chunks[0].ID)
+
+	needsOptimization := true
+	chunks, total, err = repo.ListPagedChunksByKnowledgeID(
+		ctx, 1, knowledgeID, &types.Pagination{Page: 1, PageSize: 10},
+		[]types.ChunkType{types.ChunkTypeText}, nil, "", "", "", "",
+		&types.ChunkFeedbackFilter{NeedsOptimization: &needsOptimization}, nil,
+	)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, chunks, 1)
+	require.Equal(t, low.ID, chunks[0].ID)
 }

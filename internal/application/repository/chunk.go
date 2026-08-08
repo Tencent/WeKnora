@@ -171,6 +171,7 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	searchField string,
 	sortOrder string,
 	knowledgeType string,
+	feedbackFilter *types.ChunkFeedbackFilter,
 	isEnabled *bool,
 ) ([]*types.Chunk, int64, error) {
 	var chunks []*types.Chunk
@@ -182,6 +183,14 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 			tenantID, knowledgeID, chunkType, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)})
 		if len(tagIDs) > 0 {
 			db = db.Where("tag_id IN ?", tagIDs)
+		}
+		if feedbackFilter != nil {
+			if feedbackFilter.MaxPositiveRate != nil {
+				db = db.Where("positive_rate IS NOT NULL AND positive_rate <= ?", *feedbackFilter.MaxPositiveRate)
+			}
+			if feedbackFilter.NeedsOptimization != nil {
+				db = db.Where("needs_optimization = ?", *feedbackFilter.NeedsOptimization)
+			}
 		}
 		if isEnabled != nil {
 			db = db.Where("is_enabled = ?", *isEnabled)
