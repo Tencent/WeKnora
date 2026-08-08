@@ -315,3 +315,30 @@ func TestEffectiveStorageProvider_CrossBackendDetection(t *testing.T) {
 			dstSame.EffectiveStorageProvider(tenantDefault), sp)
 	}
 }
+
+func TestResolveParserEngineDefaultsPresentationsToMarkItDown(t *testing.T) {
+	config := ChunkingConfig{}
+	for _, fileType := range []string{"ppt", "pptx", "PPTX", ".pptx"} {
+		if got := config.ResolveParserEngine(fileType); got != "markitdown" {
+			t.Fatalf("ResolveParserEngine(%q) = %q, want markitdown", fileType, got)
+		}
+	}
+	if got := config.ResolveParserEngine("pdf"); got != "" {
+		t.Fatalf("ResolveParserEngine(pdf) = %q, want builtin default", got)
+	}
+
+	overridden := ChunkingConfig{ParserEngineRules: []ParserEngineRule{{
+		FileTypes: []string{".PPTX"},
+		Engine:    "mineru",
+	}}}
+	if got := overridden.ResolveParserEngine("pptx"); got != "mineru" {
+		t.Fatalf("explicit presentation parser rule = %q, want mineru", got)
+	}
+	builtin := ChunkingConfig{ParserEngineRules: []ParserEngineRule{{
+		FileTypes: []string{"ppt", "pptx"},
+		Engine:    "builtin",
+	}}}
+	if got := builtin.ResolveParserEngine(".PPT"); got != "builtin" {
+		t.Fatalf("explicit builtin presentation parser rule = %q, want builtin", got)
+	}
+}

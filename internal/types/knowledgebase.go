@@ -249,7 +249,7 @@ type ChunkingConfig struct {
 	// Separators
 	Separators []string `yaml:"separators"    json:"separators"`
 	// ParserEngineRules configures which parser engine to use for each file type.
-	// When empty, the builtin engine is used for all types.
+	// When no rule matches, presentations use MarkItDown and other types use the builtin engine.
 	ParserEngineRules []ParserEngineRule `yaml:"parser_engine_rules,omitempty" json:"parser_engine_rules,omitempty"`
 	// EnableParentChild enables two-level parent-child chunking strategy.
 	// When enabled, large parent chunks provide context while small child chunks
@@ -278,12 +278,18 @@ type ChunkingConfig struct {
 	TableMetadataInstructions string `yaml:"table_metadata_instructions,omitempty" json:"table_metadata_instructions,omitempty"`
 }
 
-// ResolveParserEngine returns the engine name for the given file type
-// based on the configured rules. Returns empty string (builtin) when
-// no rule matches.
+// ResolveParserEngine returns the engine name for the given file type based on
+// the configured rules. Presentations default to MarkItDown when no explicit
+// rule matches; other file types return an empty string (builtin).
 func (c ChunkingConfig) ResolveParserEngine(fileType string) string {
 	if rule := c.ResolveParserEngineRule(fileType); rule != nil {
 		return rule.Engine
+	}
+	// The bundled DocReader handles presentations through its MarkItDown
+	// engine; the builtin engine intentionally covers other Office formats.
+	switch normalizeParserFileType(fileType) {
+	case "ppt", "pptx":
+		return "markitdown"
 	}
 	return ""
 }
