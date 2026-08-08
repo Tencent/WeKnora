@@ -216,13 +216,29 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 				}
 			}
 			yes, _ := cmd.Flags().GetBool("yes")
-			// Build the retry command from the flags the user actually passed.
-			// --add-kb/--remove-kb/--system-prompt-file/--config-file are excluded
-			// (multi-value / file-based — a precise single argv is impractical).
-			retryCmd := cmdutil.BuildRetryArgv(cmd, []string{"weknora", "agent", "update", opts.AgentID},
-				"name", "description", "model", "system-prompt", "agent-mode",
-				"rerank-model", "temperature", "kb-selection-mode", "format")
-			if err := cmdutil.ConfirmWrite(f.Prompter(), yes, fopts.WantsJSON(), "update", "agent", opts.AgentID, "agent.update", retryCmd); err != nil {
+			// Preserve every semantic flag that can be safely re-read on retry.
+			// stdin-backed prompt input fails closed instead of returning a partial argv.
+			retryArgv := cmdutil.BuildRetryArgv(cmd,
+				[]string{"weknora", "agent", "update", opts.AgentID},
+				"name", "description", "model", "system-prompt", "system-prompt-file",
+				"agent-mode", "rerank-model", "temperature", "add-kb", "remove-kb",
+				"kb-selection-mode", "config-file", "format",
+			)
+			stdinBacked := systemPromptFile == "-"
+			if stdinBacked {
+				retryArgv = nil
+			}
+			if err := cmdutil.ConfirmWrite(f.Prompter(), yes, fopts.WantsJSON(), "update", "agent", opts.AgentID, "agent.update", retryArgv); err != nil {
+				if stdinBacked {
+					if ce := cmdutil.AsError(err); ce != nil {
+						return ce.
+							WithHint("re-run the original command with -y after approval; stdin-backed input cannot be replayed automatically").
+							WithDetail(map[string]any{
+								"retry_argv_available": false,
+								"unreplayable_flags":   []string{"--system-prompt-file"},
+							})
+					}
+				}
 				return err
 			}
 			cli, err := f.Client()
@@ -283,7 +299,6 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 	})
 	return cmd
 }
-
 
 // editHasAnyFlag reports whether opts carries at least one surgical update
 // signal. Required-flag validation lives in runEdit (not PreRunE) so unit

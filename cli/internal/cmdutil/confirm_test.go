@@ -7,6 +7,8 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/testutil"
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/require"
 )
 
 // The confirmation message verb must match the actual operation: an `edit`
@@ -52,4 +54,63 @@ func TestConfirmDestructiveBatch_VerbMatchesOperation(t *testing.T) {
 	if !strings.Contains(err.Error(), "delete 3 document(s) requires") {
 		t.Errorf("unexpected batch message: %q", err.Error())
 	}
+}
+
+func TestBuildRetryArgv_PreservesScalarBoolAndRepeatableFlags(t *testing.T) {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("description", "", "")
+	cmd.Flags().Bool("default", true, "")
+	cmd.Flags().StringSlice("add-kb", nil, "")
+	cmd.Flags().StringArray("param", nil, "")
+
+	require.NoError(t, cmd.Flags().Set("description", "value with spaces;$(noop)"))
+	require.NoError(t, cmd.Flags().Set("default", "false"))
+	require.NoError(t, cmd.Flags().Set("add-kb", "kb_a"))
+	require.NoError(t, cmd.Flags().Set("add-kb", "kb_b"))
+	require.NoError(t, cmd.Flags().Set("param", "temperature=0.2"))
+	require.NoError(t, cmd.Flags().Set("param", "label=a,b"))
+
+	got := cmdutil.BuildRetryArgv(cmd, []string{"weknora", "probe", "update"},
+		"description", "default", "add-kb", "param")
+	require.Equal(t, []string{
+		"weknora", "probe", "update",
+		"--add-kb", "kb_a",
+		"--add-kb", "kb_b",
+		"--default=false",
+		"--description", "value with spaces;$(noop)",
+		"--param", "temperature=0.2",
+		"--param", "label=a,b",
+		"-y",
+	}, got)
+}
+
+func TestBuildRetryArgv_StringSliceValueContainingCommaRoundTrips(t *testing.T) {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().StringSlice("add-kb", nil, "")
+	require.NoError(t, cmd.Flags().Set("add-kb", "\"kb,blue\""))
+
+	got := cmdutil.BuildRetryArgv(cmd, []string{"weknora", "agent", "update", "ag_abc"}, "add-kb")
+	require.Equal(t, []string{
+		"weknora", "agent", "update", "ag_abc",
+		"--add-kb", "\"kb,blue\"",
+		"-y",
+	}, got)
+
+	replayed := &cobra.Command{Use: "update"}
+	var values []string
+	replayed.Flags().StringSliceVar(&values, "add-kb", nil, "")
+	replayed.Flags().BoolP("yes", "y", false, "")
+	require.NoError(t, replayed.ParseFlags(got[4:]))
+	require.Equal(t, []string{"kb,blue"}, values)
+}
+
+func TestBuildRetryArgv_DoesNotMutateHead(t *testing.T) {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("name", "", "")
+	require.NoError(t, cmd.Flags().Set("name", "new"))
+	head := []string{"weknora", "agent", "update", "ag_abc"}
+	wantHead := append([]string(nil), head...)
+
+	_ = cmdutil.BuildRetryArgv(cmd, head, "name")
+	require.Equal(t, wantHead, head)
 }

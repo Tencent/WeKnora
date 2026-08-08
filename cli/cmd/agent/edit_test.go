@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -323,4 +327,86 @@ func TestAgentEdit_RequiresConfirmation(t *testing.T) {
 	// retry argv must include -y and the agent id
 	assert.Contains(t, ce.RetryArgv, "-y")
 	assert.Contains(t, ce.RetryArgv, "ag_abc")
+}
+
+func newConfirmationFactory() *cmdutil.Factory {
+	return &cmdutil.Factory{
+		Client:   func() (*sdk.Client, error) { return nil, nil },
+		Prompter: func() prompt.Prompter { return prompt.AgentPrompter{} },
+	}
+}
+
+func executeAgentUpdateForConfirmation(t *testing.T, args ...string) *cmdutil.Error {
+	t.Helper()
+	iostreams.SetForTest(t)
+	root := withRootHarnessAgent(NewCmdEdit(newConfirmationFactory()), args...)
+	err := root.Execute()
+	require.Error(t, err)
+	require.Equal(t, 10, cmdutil.ExitCode(err))
+	ce := cmdutil.AsError(err)
+	require.NotNil(t, ce)
+	root = nil
+	runtime.GC()
+	root = nil
+	runtime.GC()
+	return ce
+}
+
+func TestAgentUpdate_RetryArgvPreservesKBOperations(t *testing.T) {
+	ce := executeAgentUpdateForConfirmation(t,
+		"ag_abc",
+		"--add-kb", "kb_new",
+		"--add-kb", "kb_second",
+		"--remove-kb", "kb_old",
+		"--name", "Renamed",
+		"--format", "json",
+	)
+	require.Equal(t, []string{
+		"weknora", "agent", "update", "ag_abc",
+		"--add-kb", "kb_new",
+		"--add-kb", "kb_second",
+		"--format", "json",
+		"--name", "Renamed",
+		"--remove-kb", "kb_old",
+		"-y",
+	}, ce.RetryArgv)
+}
+
+func TestAgentUpdate_RetryArgvPreservesFilePaths(t *testing.T) {
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "system prompt.md")
+	require.NoError(t, os.WriteFile(promptPath, []byte("prompt"), 0o600))
+
+	ce := executeAgentUpdateForConfirmation(t,
+		"ag_abc", "--system-prompt-file", promptPath, "--format", "json")
+	require.Contains(t, ce.RetryArgv, "--system-prompt-file")
+	require.Contains(t, ce.RetryArgv, promptPath)
+}
+
+func TestAgentUpdate_StdinInputOmitsRetryArgv(t *testing.T) {
+	ce := executeAgentUpdateForConfirmation(t,
+		"ag_abc", "--system-prompt-file", "-", "--format", "json")
+	require.Empty(t, ce.RetryArgv)
+	require.Contains(t, ce.Hint, "stdin-backed input cannot be replayed")
+	require.Equal(t, map[string]any{
+		"retry_argv_available": false,
+		"unreplayable_flags":   []string{"--system-prompt-file"},
+	}, ce.Detail)
+}
+
+func TestAgentUpdate_RetryArgvPreservesConfigFileAndEmptyDescription(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("model_id: mdl_x\n"), 0o600))
+
+	ce := executeAgentUpdateForConfirmation(t,
+		"ag_abc",
+		"--config-file", configPath,
+		"--description", "",
+		"--format", "json",
+	)
+	require.Contains(t, ce.RetryArgv, configPath)
+	descriptionAt := slices.Index(ce.RetryArgv, "--description")
+	require.GreaterOrEqual(t, descriptionAt, 0)
+	require.Equal(t, "", ce.RetryArgv[descriptionAt+1])
 }

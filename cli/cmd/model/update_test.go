@@ -5,11 +5,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/prompt"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
@@ -78,4 +80,64 @@ func TestModelUpdate_RequiresAtLeastOneFlag(t *testing.T) {
 	assert.True(t, modelUpdateHasFlag(&UpdateOptions{flags: modelUpdateFlags{displayName: true}}))
 	assert.True(t, modelUpdateHasFlag(&UpdateOptions{APIKeyStdin: true}))
 	assert.True(t, modelUpdateHasFlag(&UpdateOptions{Params: []string{"k=v"}}))
+}
+
+func withRootHarnessModelUpdate(update *cobra.Command, args ...string) *cobra.Command {
+	root := &cobra.Command{Use: "weknora"}
+	root.PersistentFlags().BoolP("yes", "y", false, "")
+	root.PersistentFlags().String("format", "", "")
+	root.PersistentFlags().StringP("jq", "q", "", "")
+	model := &cobra.Command{Use: "model"}
+	model.AddCommand(update)
+	root.AddCommand(model)
+	root.SetArgs(append([]string{"model", "update"}, args...))
+	root.SetContext(context.Background())
+	root.SilenceErrors = true
+	root.SilenceUsage = true
+	return root
+}
+
+func executeModelUpdateForConfirmation(t *testing.T, args ...string) *cmdutil.Error {
+	t.Helper()
+	iostreams.SetForTest(t)
+	f := &cmdutil.Factory{
+		Client:   func() (*sdk.Client, error) { return nil, nil },
+		Prompter: func() prompt.Prompter { return prompt.AgentPrompter{} },
+	}
+	err := withRootHarnessModelUpdate(NewCmdUpdate(f), args...).Execute()
+	require.Error(t, err)
+	require.Equal(t, 10, cmdutil.ExitCode(err))
+	ce := cmdutil.AsError(err)
+	require.NotNil(t, ce)
+	return ce
+}
+
+func TestModelUpdate_RetryArgvPreservesParamsAndFalseBool(t *testing.T) {
+	ce := executeModelUpdateForConfirmation(t,
+		"mdl_x",
+		"--param", "temperature=0.2",
+		"--param", "label=\"a,b\"",
+		"--default=false",
+		"--format", "json",
+	)
+	require.Equal(t, []string{
+		"weknora", "model", "update", "mdl_x",
+		"--default=false",
+		"--format", "json",
+		"--param", "temperature=0.2",
+		"--param", "label=\"a,b\"",
+		"-y",
+	}, ce.RetryArgv)
+}
+
+func TestModelUpdate_APIKeyStdinOmitsRetryArgvAndSecret(t *testing.T) {
+	ce := executeModelUpdateForConfirmation(t,
+		"mdl_x", "--api-key-stdin", "--base-url", "https://api.example.com", "--format", "json")
+	require.Empty(t, ce.RetryArgv)
+	require.NotContains(t, ce.Error(), "SECRET")
+	require.Contains(t, ce.Hint, "secret stdin input cannot be replayed")
+	require.Equal(t, map[string]any{
+		"retry_argv_available": false,
+		"unreplayable_flags":   []string{"--api-key-stdin"},
+	}, ce.Detail)
 }
