@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -233,6 +234,17 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		asrModelID := ""
 		if customAgent != nil && customAgent.Config.AudioUploadEnabled && customAgent.Config.ASRModelID != "" {
 			asrModelID = customAgent.Config.ASRModelID
+		}
+
+		// Resolve the agent's chat parser engine from attachment file types
+		if customAgent != nil {
+			for _, att := range request.AttachmentUploads {
+				ext := strings.ToLower(filepath.Ext(att.FileName))
+				if engine := customAgent.Config.ResolveChatParserEngine(ext); engine != "" {
+					attachmentRuntimeCtx = context.WithValue(attachmentRuntimeCtx, types.ChatParserEngineContextKey, engine)
+					break
+				}
+			}
 		}
 
 		// Process all attachments concurrently.
