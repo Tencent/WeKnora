@@ -805,9 +805,15 @@ func BuildEnvVectorStores(retrieveDriver string, envLookup EnvLookupFunc) []Vect
 		return nil
 	}
 
+	drivers := strings.Split(retrieveDriver, ",")
 	var stores []VectorStore
 
-	for _, driver := range ParseRetrieverDrivers(retrieveDriver) {
+	for _, driver := range drivers {
+		driver = strings.TrimSpace(driver)
+		if driver == "" {
+			continue
+		}
+
 		store := buildEnvStoreForDriver(driver, envLookup)
 		if store != nil {
 			stores = append(stores, *store)

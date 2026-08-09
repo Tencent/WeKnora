@@ -23,6 +23,7 @@ func TestKnowledgeFileUpdateSlotMigratesExistingSQLite(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	_, err = db.Exec(`
+		CREATE TABLE knowledge_bases (id TEXT PRIMARY KEY);
 		CREATE TABLE schema_migrations (version INTEGER NOT NULL PRIMARY KEY, dirty BOOLEAN NOT NULL);
 		INSERT INTO schema_migrations(version, dirty) VALUES (2, 0);
 	`)

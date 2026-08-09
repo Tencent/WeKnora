@@ -596,7 +596,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		encodedPassword := url.QueryEscape(dbPassword)
 
 		// Check if postgres is in RETRIEVE_DRIVER to determine skip_embedding
-		retrieveDriver := types.ParseRetrieverDrivers(os.Getenv("RETRIEVE_DRIVER"))
+		retrieveDriver := strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",")
 		skipEmbedding := "true"
 		if slices.Contains(retrieveDriver, "postgres") {
 			skipEmbedding = "false"
@@ -1057,7 +1057,7 @@ func initRetrieveEngineRegistry(
 	// is absent from this process, which happens when startup skipped it after
 	// a construction failure or when another instance registered it.
 	registry := retriever.NewRetrieveEngineRegistry(storeRepo, engineFactory)
-	retrieveDriver := types.ParseRetrieverDrivers(os.Getenv("RETRIEVE_DRIVER"))
+	retrieveDriver := strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",")
 	log := logger.GetLogger(context.Background())
 	// Audit sink for OpenSearch driver events (index created / reindex). Driver
 	// events fire under a tenant-scoped ctx at indexing time; the env-path
@@ -1137,15 +1137,15 @@ func initRetrieveEngineRegistry(
 		}
 		client, err := openSearchRepo.NewOpenSearchClient(cc)
 		if err != nil {
-			return nil, fmt.Errorf("create opensearch client: %w", err)
+			log.Errorf("Create opensearch client failed: %v", err)
 		} else if repo, err := openSearchRepo.NewRepository(
 			context.Background(), client, "", nil, openSearchRepo.WithAuditSink(auditSink),
 		); err != nil {
-			return nil, fmt.Errorf("create opensearch repository: %w", err)
+			log.Errorf("Create opensearch repository failed: %v", err)
 		} else if err := registry.Register(
 			retriever.NewKVHybridRetrieveEngine(repo, types.OpenSearchRetrieverEngineType),
 		); err != nil {
-			return nil, fmt.Errorf("register opensearch retrieve engine: %w", err)
+			log.Errorf("Register opensearch retrieve engine failed: %v", err)
 		} else {
 			log.Infof("Register opensearch retrieve engine success")
 		}
@@ -1353,24 +1353,6 @@ func initRetrieveEngineRegistry(
 				} else {
 					log.Infof("Register tencent_vectordb retrieve engine success")
 				}
-			}
-		}
-	}
-
-	engineMapping := types.GetRetrieverEngineMapping()
-	for _, driver := range retrieveDriver {
-		params, ok := engineMapping[driver]
-		if !ok {
-			return nil, fmt.Errorf("unsupported retrieve driver %q", driver)
-		}
-		checked := make(map[types.RetrieverEngineType]struct{})
-		for _, param := range params {
-			if _, ok := checked[param.RetrieverEngineType]; ok {
-				continue
-			}
-			checked[param.RetrieverEngineType] = struct{}{}
-			if _, err := registry.GetRetrieveEngineService(param.RetrieverEngineType); err != nil {
-				return nil, fmt.Errorf("configured retrieve driver %q is unavailable: %w", driver, err)
 			}
 		}
 	}

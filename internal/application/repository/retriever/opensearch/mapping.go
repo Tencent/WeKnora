@@ -195,9 +195,6 @@ func buildKeywordsMapping(cfg internalCfg) ([]byte, error) {
 // failures can be retried by the next caller (sync.Once cannot be
 // reset).
 func (r *Repository) ensureKeywordsIndex(ctx context.Context) error {
-	if err := r.ensureClusterValidated(ctx); err != nil {
-		return err
-	}
 	r.keywordsMu.Lock()
 	defer r.keywordsMu.Unlock()
 

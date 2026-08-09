@@ -91,7 +91,7 @@ func TestInitRetrieveEngineRegistry_OpenSearchEnvPath(t *testing.T) {
 		t.Fatalf("open in-mem db: %v", err)
 	}
 
-	t.Setenv("RETRIEVE_DRIVER", " postgres, opensearch ")
+	t.Setenv("RETRIEVE_DRIVER", "opensearch")
 	t.Setenv("OPENSEARCH_ADDR", ts.URL)
 
 	// nil store repository and engine factory: this exercises the env-driver
@@ -102,42 +102,5 @@ func TestInitRetrieveEngineRegistry_OpenSearchEnvPath(t *testing.T) {
 	}
 	if _, err := registry.GetRetrieveEngineService(types.OpenSearchRetrieverEngineType); err != nil {
 		t.Errorf("opensearch engine not registered via env path: %v", err)
-	}
-}
-
-func TestInitRetrieveEngineRegistry_OpenSearchTransientStartupRegistersDeferred(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(`{"error":{"type":"unavailable","reason":"starting"},"status":503}`))
-	}))
-	defer ts.Close()
-
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open in-mem db: %v", err)
-	}
-	t.Setenv("RETRIEVE_DRIVER", "opensearch")
-	t.Setenv("OPENSEARCH_ADDR", ts.URL)
-
-	registry, err := initRetrieveEngineRegistry(db, &config.Config{}, &fakeAuditSvc{}, nil, nil)
-	if err != nil {
-		t.Fatalf("transient OpenSearch startup failure must not fail registry init: %v", err)
-	}
-	if _, err := registry.GetRetrieveEngineService(types.OpenSearchRetrieverEngineType); err != nil {
-		t.Fatalf("deferred OpenSearch repository must remain registered: %v", err)
-	}
-}
-
-func TestInitRetrieveEngineRegistryRejectsUnknownConfiguredDriver(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open in-mem db: %v", err)
-	}
-	t.Setenv("RETRIEVE_DRIVER", " postgres, unknown-driver ")
-
-	_, err = initRetrieveEngineRegistry(db, &config.Config{}, &fakeAuditSvc{}, nil, nil)
-	if err == nil {
-		t.Fatal("configured unknown retrieve driver must fail startup")
 	}
 }

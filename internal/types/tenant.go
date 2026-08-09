@@ -62,31 +62,13 @@ func GetRetrieverEngineMapping() map[string][]RetrieverEngineParams {
 	return retrieverEngineMapping
 }
 
-// ParseRetrieverDrivers normalizes RETRIEVE_DRIVER consistently for registry,
-// tenant defaults, migrations, and env-backed vector-store projections.
-func ParseRetrieverDrivers(raw string) []string {
-	result := make([]string, 0)
-	seen := make(map[string]struct{})
-	for _, driver := range strings.Split(raw, ",") {
-		driver = strings.ToLower(strings.TrimSpace(driver))
-		if driver == "" {
-			continue
-		}
-		if _, ok := seen[driver]; ok {
-			continue
-		}
-		seen[driver] = struct{}{}
-		result = append(result, driver)
-	}
-	return result
-}
-
 // GetDefaultRetrieverEngines returns the default retriever engines based on RETRIEVE_DRIVER env
 func GetDefaultRetrieverEngines() []RetrieverEngineParams {
 	result := []RetrieverEngineParams{}
 	seen := make(map[string]bool)
 
-	for _, driver := range ParseRetrieverDrivers(os.Getenv("RETRIEVE_DRIVER")) {
+	for _, driver := range strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",") {
+		driver = strings.TrimSpace(driver)
 		if params, ok := retrieverEngineMapping[driver]; ok {
 			for _, p := range params {
 				key := string(p.RetrieverType) + ":" + string(p.RetrieverEngineType)

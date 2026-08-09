@@ -66,10 +66,6 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	if err := s.checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
 	}
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-	if err := s.checkRetrieveEngineConfigured(ctx, kb, tenantID); err != nil {
-		return nil, err
-	}
 
 	// Early reject before the whole-file hash below. resolveFileImportProcessConfig
 	// gates the same extension set, but this path must keep returning
@@ -89,6 +85,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	}
 
 	// Check if file already exists
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	logger.Infof(ctx, "Checking if file exists, tenant ID: %d", tenantID)
 	exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
 		Type:     "file",

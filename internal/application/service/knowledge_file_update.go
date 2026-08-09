@@ -224,9 +224,6 @@ func (s *knowledgeService) UpdateKnowledgeFile(
 	if err := s.checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
 	}
-	if err := s.checkRetrieveEngineConfigured(ctx, kb, tenantID); err != nil {
-		return nil, err
-	}
 	if req.TagIDsProvided {
 		if err := s.validateKnowledgeTagIDs(ctx, tenantID, req.KnowledgeBaseID, req.TagIDs); err != nil {
 			return nil, err

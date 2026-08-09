@@ -120,6 +120,7 @@ func TestRunAsynqServerRegistersKnowledgeFileUpdateHandler(t *testing.T) {
 		DataTableSummary:     handler,
 		ImageMultimodal:      handler,
 		KnowledgePostProcess: handler,
+		KnowledgeAutoTag:     handler,
 		WikiIngest:           handler,
 		TemporaryDocument:    taskRouteTemporaryDocumentServiceStub{},
 	})
