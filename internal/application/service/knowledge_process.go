@@ -3741,9 +3741,14 @@ func (s *knowledgeService) resolveDocReader(ctx context.Context, engine, fileTyp
 	}
 }
 
-// markKnowledgeFailed persists a terminal failed state for the knowledge
-// row: parse_status=failed plus a visible error message.
+// markKnowledgeFailed persists a terminal failed state: parse_status=failed
+// plus a visible error message. Skips when the row was cancelled or is being
+// deleted so a failure cannot overwrite a newer user action.
 func (s *knowledgeService) markKnowledgeFailed(ctx context.Context, knowledge *types.Knowledge, errMsg string) {
+	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
+		logger.Warnf(ctx, "markKnowledgeFailed skipped for %s: row is %s", knowledge.ID, status)
+		return
+	}
 	knowledge.ParseStatus = types.ParseStatusFailed
 	knowledge.ErrorMessage = errMsg
 	knowledge.UpdatedAt = time.Now()
