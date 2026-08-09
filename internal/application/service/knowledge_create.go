@@ -1273,12 +1273,8 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 		if err := s.processChunks(newCtx, kb, knowledge, parsed, opts); err != nil {
 			logger.GetLogger(newCtx).WithField("error", err).
 				Errorf("triggerManualProcessing process chunks failed")
-			// No error channel out of the goroutine: mark the row failed so
-			// the UI shows the failure instead of a permanent spinner.
-			knowledge.ParseStatus = types.ParseStatusFailed
-			knowledge.ErrorMessage = err.Error()
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			// No error channel out of the goroutine: fail the row in place.
+			s.markKnowledgeFailed(ctx, knowledge, err.Error())
 		}
 	}()
 	return nil

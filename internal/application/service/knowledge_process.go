@@ -149,12 +149,8 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 		}
 	}
 	if err := s.processChunks(ctx, kb, knowledge, chunks, opts); err != nil {
-		// Sync (request-path) processing has no asynq retry loop, so surface
-		// the failure on the row immediately instead of leaving it stuck.
-		knowledge.ParseStatus = types.ParseStatusFailed
-		knowledge.ErrorMessage = err.Error()
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		// No asynq retry loop in the sync path: fail the row immediately.
+		s.markKnowledgeFailed(ctx, knowledge, err.Error())
 	}
 }
 
@@ -3107,10 +3103,7 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, payload.KnowledgeBaseID)
 	if err != nil {
 		logger.Errorf(ctx, "ProcessManualUpdate: failed to get knowledge base: %v", err)
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = fmt.Sprintf("failed to get knowledge base: %v", err)
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.markKnowledgeFailed(ctx, knowledge, fmt.Sprintf("failed to get knowledge base: %v", err))
 		return nil
 	}
 
@@ -3145,25 +3138,14 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"knowledge_id": payload.KnowledgeID,
 			})
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = fmt.Sprintf("failed to cleanup old resources: %v", err)
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.markKnowledgeFailed(ctx, knowledge, fmt.Sprintf("failed to cleanup old resources: %v", err))
 			return nil
 		}
 	}
 
 	// Run manual processing (image resolution + chunking + embedding) synchronously within the worker
 	if err := s.triggerManualProcessing(ctx, kb, knowledge, payload.Content, true); err != nil {
-		// Same contract as ProcessDocument: asynq retries transient failures;
-		// only the final attempt marks the row failed.
-		if isFinalAsynqAttempt(ctx) {
-			knowledge.ParseStatus = types.ParseStatusFailed
-			knowledge.ErrorMessage = err.Error()
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
-		}
-		return err
+		return s.failKnowledgeRetryable(ctx, knowledge, isFinalAsynqAttempt(ctx), err)
 	}
 	return nil
 }
@@ -3248,10 +3230,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, payload.KnowledgeBaseID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get knowledge base: %v", err)
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = fmt.Sprintf("failed to get knowledge base: %v", err)
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.markKnowledgeFailed(ctx, knowledge, fmt.Sprintf("failed to get knowledge base: %v", err))
 		return nil
 	}
 
@@ -3290,10 +3269,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	if payload.FilePath != "" && !payload.EnableMultimodel && IsImageType(payload.FileType) {
 		logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
 			WithField("error", ErrImageNotParse).Errorf("processDocument image without enable multimodel")
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = ErrImageNotParse.Error()
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.markKnowledgeFailed(ctx, knowledge, ErrImageNotParse.Error())
 		return nil
 	}
 
@@ -3301,10 +3277,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	if payload.FilePath != "" && IsAudioType(payload.FileType) && !eff.ASRConfig.IsASREnabled() {
 		logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
 			Errorf("processDocument audio without ASR model configured")
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = "上传音频文件需要设置ASR语音识别模型"
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.markKnowledgeFailed(ctx, knowledge, "上传音频文件需要设置ASR语音识别模型")
 		return nil
 	}
 
@@ -3312,10 +3285,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	if payload.FilePath != "" && IsVideoType(payload.FileType) {
 		logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
 			Errorf("processDocument video not supported")
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = "暂不支持视频文件"
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.markKnowledgeFailed(ctx, knowledge, "暂不支持视频文件")
 		return nil
 	}
 
@@ -3327,10 +3297,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		// file_url import: SSRF re-check (防 DNS 重绑定), download, persist, then delegate to convert()
 		if err := secutils.ValidateURLForSSRF(payload.FileURL); err != nil {
 			logger.Errorf(ctx, "File URL rejected for SSRF protection in ProcessDocument: %s, err: %v", payload.FileURL, err)
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = "File URL is not allowed for security reasons"
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.markKnowledgeFailed(ctx, knowledge, "File URL is not allowed for security reasons")
 			return nil
 		}
 
@@ -3339,21 +3306,12 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		contentBytes, err := downloadFileFromURL(ctx, payload.FileURL, &resolvedFileName, &resolvedFileType)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to download file from URL: %s, error: %v", payload.FileURL, err)
-			if isLastRetry {
-				knowledge.ParseStatus = "failed"
-				knowledge.ErrorMessage = err.Error()
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
-			}
-			return fmt.Errorf("failed to download file from URL: %w", err)
+			return s.failKnowledgeRetryable(ctx, knowledge, isLastRetry, fmt.Errorf("failed to download file from URL: %w", err))
 		}
 
 		if resolvedFileType != "" && !isSupportedImportExtension(resolvedFileType) {
 			logger.Errorf(ctx, "Unsupported file type resolved from file URL: %s", resolvedFileType)
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = fmt.Sprintf("unsupported file type: %s", resolvedFileType)
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.markKnowledgeFailed(ctx, knowledge, fmt.Sprintf("unsupported file type: %s", resolvedFileType))
 			return nil
 		}
 
@@ -3368,13 +3326,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		fileSvc := s.resolveFileService(ctx, kb)
 		filePath, err := fileSvc.SaveBytes(ctx, contentBytes, payload.TenantID, resolvedFileName, true)
 		if err != nil {
-			if isLastRetry {
-				knowledge.ParseStatus = "failed"
-				knowledge.ErrorMessage = err.Error()
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
-			}
-			return fmt.Errorf("failed to save downloaded file: %w", err)
+			return s.failKnowledgeRetryable(ctx, knowledge, isLastRetry, fmt.Errorf("failed to save downloaded file: %w", err))
 		}
 
 		payload.FilePath = filePath
@@ -3430,16 +3382,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			QuestionCount:            payload.QuestionCount,
 		}
 		if err := s.processChunks(ctx, kb, knowledge, passageChunks, passageOpts); err != nil {
-			// Retryable: asynq retries transient failures; only the final
-			// attempt marks the row failed. Returning nil here would report
-			// task success and strand the document in "processing" forever.
-			if isLastRetry {
-				knowledge.ParseStatus = types.ParseStatusFailed
-				knowledge.ErrorMessage = err.Error()
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
-			}
-			return err
+			return s.failKnowledgeRetryable(ctx, knowledge, isLastRetry, err)
 		}
 		return nil
 	} else {
@@ -3457,10 +3400,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	if convertResult != nil && convertResult.IsAudio && len(convertResult.AudioData) > 0 {
 		if !eff.ASRConfig.IsASREnabled() {
 			logger.Error(ctx, "Audio file detected but ASR is not configured")
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = "ASR model is not configured for audio transcription"
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.markKnowledgeFailed(ctx, knowledge, "ASR model is not configured for audio transcription")
 			return nil
 		}
 
@@ -3470,23 +3410,14 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		asrModel, err := s.modelService.GetASRModel(ctx, eff.ASRConfig.ModelID)
 		if err != nil {
 			logger.Errorf(ctx, "[ASR] Failed to get ASR model: %v", err)
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = fmt.Sprintf("failed to get ASR model: %v", err)
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.markKnowledgeFailed(ctx, knowledge, fmt.Sprintf("failed to get ASR model: %v", err))
 			return nil
 		}
 
 		transcriptionResult, err := asrModel.Transcribe(ctx, convertResult.AudioData, knowledge.FileName)
 		if err != nil {
 			logger.Errorf(ctx, "[ASR] Transcription failed: %v", err)
-			if isLastRetry {
-				knowledge.ParseStatus = "failed"
-				knowledge.ErrorMessage = fmt.Sprintf("audio transcription failed: %v", err)
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
-			}
-			return fmt.Errorf("audio transcription failed: %w", err)
+			return s.failKnowledgeRetryable(ctx, knowledge, isLastRetry, fmt.Errorf("audio transcription failed: %w", err))
 		}
 
 		var transcribedText string
@@ -3591,16 +3522,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 	// Step 4: Process chunks (vectorize + index + enqueue async tasks)
 	if err := s.processChunks(ctx, kb, knowledge, chunks, processOpts); err != nil {
-		// Retryable: asynq retries transient failures; only the final
-		// attempt marks the row failed. Returning nil here would report
-		// task success and strand the document in "processing" forever.
-		if isLastRetry {
-			knowledge.ParseStatus = types.ParseStatusFailed
-			knowledge.ErrorMessage = err.Error()
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
-		}
-		return err
+		return s.failKnowledgeRetryable(ctx, knowledge, isLastRetry, err)
 	}
 
 	return nil
@@ -3642,10 +3564,7 @@ func (s *knowledgeService) convert(
 	if isURL {
 		if err := secutils.ValidateURLForSSRF(payload.URL); err != nil {
 			logger.Errorf(ctx, "URL rejected for SSRF protection: %s, err: %v", payload.URL, err)
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = "URL is not allowed for security reasons"
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.markKnowledgeFailed(ctx, knowledge, "URL is not allowed for security reasons")
 			s.failStage(ctx, knowledge.ID, types.StageDocReader,
 				werrors.ErrCodeDocReaderParseFailed, "URL rejected for security reasons", err)
 			return nil, nil
@@ -3664,12 +3583,10 @@ func (s *knowledgeService) convert(
 	if reader == nil {
 		logger.Errorf(ctx, "[convert] no doc reader for kb=%s knowledge=%s fileType=%s engine=%q isURL=%v",
 			kb.ID, knowledge.ID, fileType, parserEngine, isURL)
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = "Document parsing service is not configured. Please use text/paragraph import or set DOCREADER_ADDR."
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		msg := "Document parsing service is not configured. Please use text/paragraph import or set DOCREADER_ADDR."
+		s.markKnowledgeFailed(ctx, knowledge, msg)
 		s.failStage(ctx, knowledge.ID, types.StageDocReader,
-			werrors.ErrCodeDocReaderUnavailable, knowledge.ErrorMessage, nil)
+			werrors.ErrCodeDocReaderUnavailable, msg, nil)
 		return nil, nil
 	}
 
@@ -3716,10 +3633,7 @@ func (s *knowledgeService) convert(
 	if result.Error != "" {
 		logger.Errorf(ctx, "[convert] parser returned error kb=%s knowledge=%s file=%q type=%s engine=%q: %s",
 			kb.ID, knowledge.ID, req.FileName, fileType, parserEngine, result.Error)
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = result.Error
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.markKnowledgeFailed(ctx, knowledge, result.Error)
 		s.failStage(ctx, knowledge.ID, types.StageDocReader,
 			werrors.ErrCodeDocReaderParseFailed, result.Error, nil)
 		return nil, nil
@@ -3827,6 +3741,28 @@ func (s *knowledgeService) resolveDocReader(ctx context.Context, engine, fileTyp
 	}
 }
 
+// markKnowledgeFailed persists a terminal failed state for the knowledge
+// row: parse_status=failed plus a visible error message.
+func (s *knowledgeService) markKnowledgeFailed(ctx context.Context, knowledge *types.Knowledge, errMsg string) {
+	knowledge.ParseStatus = types.ParseStatusFailed
+	knowledge.ErrorMessage = errMsg
+	knowledge.UpdatedAt = time.Now()
+	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+		logger.Warnf(ctx, "markKnowledgeFailed update failed for %s: %v", knowledge.ID, err)
+	}
+}
+
+// failKnowledgeRetryable marks the row failed on the final attempt and
+// returns err so the caller can hand it to asynq for retry.
+func (s *knowledgeService) failKnowledgeRetryable(
+	ctx context.Context, knowledge *types.Knowledge, isLastRetry bool, err error,
+) error {
+	if isLastRetry {
+		s.markKnowledgeFailed(ctx, knowledge, err.Error())
+	}
+	return err
+}
+
 // failKnowledge marks knowledge as failed (only on last retry) and returns an error.
 func (s *knowledgeService) failKnowledge(
 	ctx context.Context,
@@ -3836,13 +3772,7 @@ func (s *knowledgeService) failKnowledge(
 	args ...interface{},
 ) (*types.ReadResult, error) {
 	errMsg := fmt.Sprintf(format, args...)
-	if isLastRetry {
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = errMsg
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
-	}
-	return nil, fmt.Errorf(format, args...)
+	return nil, s.failKnowledgeRetryable(ctx, knowledge, isLastRetry, errors.New(errMsg))
 }
 
 // enqueueImageMultimodalTasks enqueues asynq tasks for multimodal image processing.
