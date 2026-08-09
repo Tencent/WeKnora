@@ -293,12 +293,14 @@ curl --location 'http://localhost:8080/api/v1/auth/me' \
 
 ## POST `/auth/change-password` - 修改密码
 
+修改当前用户的登录密码。新密码须满足 **8–32 位**且**同时包含字母与数字**；不能与当前密码相同。成功后**所有会话被撤销**，需使用新密码重新登录。
+
 **参数说明（请求体）**:
 
 | 字段          | 类型   | 必填 | 校验    | 说明      |
 | ------------- | ------ | ---- | ------- | --------- |
-| old_password  | string | 是   |          | 旧密码    |
-| new_password  | string | 是   | 最少 6 位 | 新密码    |
+| old_password  | string | 是   |          | 当前密码  |
+| new_password  | string | 是   | 8–32 位，须含字母与数字，且不同于旧密码 | 新密码    |
 
 **请求**:
 
@@ -314,4 +316,10 @@ curl --location 'http://localhost:8080/api/v1/auth/change-password' \
 
 **响应**: `{ "success": true, "message": "Password changed successfully" }`
 
-**错误**: 旧密码不匹配或新密码不满足校验 → 400。
+**错误**（400）:
+
+| `error.details`       | 含义                         |
+| --------------------- | ---------------------------- |
+| `invalid_old_password` | 当前密码不正确               |
+| `password_policy`      | 新密码不满足长度/复杂度要求  |
+| `same_password`        | 新密码与当前密码相同         |

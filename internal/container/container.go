@@ -209,6 +209,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewDataTableSummaryService, dig.Name("dataTableSummary")))
 	must(container.Provide(service.NewImageMultimodalService, dig.Name("imageMultimodal")))
 	must(container.Provide(service.NewKnowledgePostProcessService, dig.Name("knowledgePostProcess")))
+	must(container.Provide(service.NewKnowledgeAutoTagService, dig.Name("knowledgeAutoTag")))
 
 	must(container.Provide(service.NewMessageService))
 	must(container.Provide(service.NewMessageSuggestionService))

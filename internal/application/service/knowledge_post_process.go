@@ -177,6 +177,9 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	willSpawnQuestion := willSpawnSummary && kb.NeedsEmbeddingModel() &&
 		eff.QuestionGenerationConfig.Enabled
 	willSpawnWiki := kb.IndexingStrategy.WikiEnabled && len(textChunks) > 0
+	willSpawnAutoTag := kb.Type == types.KnowledgeBaseTypeDocument &&
+		kb.AutoTagConfig != nil && kb.AutoTagConfig.Enabled && len(textChunks) > 0
+	enqueuedAutoTag := false
 
 	// Question generation now fans out one subtask per plain text chunk
 	// (mirroring the graph-extract per-chunk pattern) so each chunk's LLM
@@ -336,6 +339,13 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		}
 	}
 
+	// Queue best-effort automatic tagging only after the processing row has
+	// successfully handed off to finalizing. This avoids model calls from a
+	// duplicate post-process delivery that observes an already terminal row.
+	if willSpawnAutoTag {
+		enqueuedAutoTag = s.enqueueAutoTagTask(ctx, payload, attempt)
+	}
+
 	// 4. Spawn Summary and Question Tasks
 	enqueuedSummary := false
 	enqueuedQuestionCount := 0
@@ -460,6 +470,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		"wiki_slot_owned":         wikiSlotOwned,
 		"enqueued_graph":          enqueuedGraphCount > 0,
 		"enqueued_graph_count":    enqueuedGraphCount,
+		"enqueued_auto_tag":       enqueuedAutoTag,
 	}
 	s.tracker().EndSpan(ctx, postSpan, postOutput)
 	if wikiSlotOwned && wikiEnqueueErr != nil {
@@ -473,6 +484,40 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	s.tracker().FinalizeAttempt(ctx, payload.KnowledgeID, attempt,
 		types.SpanStatusDone, postOutput, "", "")
 	return nil
+}
+
+// enqueueAutoTagTask schedules best-effort classification against the KB's
+// existing tags. It intentionally owns no pending-subtask slot: a model or
+// configuration failure must never keep document parsing in finalizing.
+func (s *KnowledgePostProcessService) enqueueAutoTagTask(
+	ctx context.Context,
+	payload types.KnowledgePostProcessPayload,
+	attempt int,
+) bool {
+	if s.taskEnqueuer == nil {
+		return false
+	}
+	taskPayload := types.KnowledgeAutoTagPayload{
+		TenantID:        payload.TenantID,
+		KnowledgeBaseID: payload.KnowledgeBaseID,
+		KnowledgeID:     payload.KnowledgeID,
+		Language:        payload.Language,
+		Attempt:         attempt,
+	}
+	langfuse.InjectTracing(ctx, &taskPayload)
+	payloadBytes, err := json.Marshal(taskPayload)
+	if err != nil {
+		logger.Warnf(ctx, "[KnowledgePostProcess] Failed to marshal auto tag payload: %v", err)
+		return false
+	}
+	task := asynq.NewTask(types.TypeKnowledgeAutoTag, payloadBytes,
+		asynq.Queue(types.QueueSummary), asynq.MaxRetry(2), asynq.Timeout(2*time.Minute))
+	if _, err := s.taskEnqueuer.Enqueue(task); err != nil {
+		logger.Warnf(ctx, "[KnowledgePostProcess] Failed to enqueue automatic tagging for %s: %v", payload.KnowledgeID, err)
+		return false
+	}
+	logger.Infof(ctx, "[KnowledgePostProcess] Enqueued automatic tagging for %s", payload.KnowledgeID)
+	return true
 }
 
 // enqueueSummaryGenerationTask enqueues the summary task. Returns true only

@@ -406,10 +406,12 @@
                     ref="advancedSettingsRef"
                     v-if="formData"
                     :question-generation="formData.questionGenerationConfig"
+                    :auto-tag="formData.autoTagConfig"
                     :rag-enabled="formData.indexingStrategy?.vectorEnabled || formData.indexingStrategy?.keywordEnabled"
                     :all-models="allModels"
                     :table-metadata-instructions="formData.chunkingConfig.tableMetadataInstructions"
                     @update:question-generation="handleQuestionGenerationUpdate"
+                    @update:auto-tag="(value) => { if (formData) formData.autoTagConfig = value }"
                     @update:table-metadata-instructions="(value: string) => { if (formData) formData.chunkingConfig.tableMetadataInstructions = value }"
                   />
                 </div>
@@ -792,6 +794,12 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       questionCount: 3,
       customInstructions: ''
     },
+    autoTagConfig: {
+      enabled: false,
+      modelId: '',
+      maxTags: 3,
+      skipIfTagged: true
+    },
     wikiConfig: {
       synthesisModelId: '',
       maxPagesPerIngest: 0,
@@ -911,6 +919,14 @@ const loadKBData = async (kbIdOverride?: string) => {
         enabled: kb.question_generation_config?.enabled || false,
         questionCount: kb.question_generation_config?.question_count || 3,
         customInstructions: kb.question_generation_config?.custom_instructions || ''
+      },
+      autoTagConfig: {
+        enabled: kb.auto_tag_config?.enabled || false,
+        modelId: kb.auto_tag_config?.model_id || '',
+        maxTags: kb.auto_tag_config?.max_tags || 3,
+        // Absent on knowledge bases saved before the toggle existed; the
+        // backend treats that as "skip", so mirror it here.
+        skipIfTagged: kb.auto_tag_config?.skip_if_tagged ?? true
       },
       wikiConfig: {
         synthesisModelId: kb.wiki_config?.synthesis_model_id || '',
@@ -1266,6 +1282,13 @@ const buildSubmitData = () => {
     }
   }
 
+  data.auto_tag_config = {
+    enabled: formData.value.autoTagConfig?.enabled || false,
+    model_id: formData.value.autoTagConfig?.modelId || '',
+    max_tags: formData.value.autoTagConfig?.maxTags || 3,
+    skip_if_tagged: formData.value.autoTagConfig?.skipIfTagged ?? true
+  }
+
   if (formData.value.type === 'faq') {
     data.faq_config = {
       index_mode: formData.value.faqConfig?.indexMode || 'question_only',
@@ -1390,6 +1413,7 @@ const doSubmit = async () => {
         }
       }
       if (formData.value.type !== 'faq') {
+        updateConfig.auto_tag_config = data.auto_tag_config
         updateConfig.indexing_strategy = {
           vector_enabled: formData.value.indexingStrategy?.vectorEnabled ?? true,
           keyword_enabled: formData.value.indexingStrategy?.keywordEnabled ?? true,

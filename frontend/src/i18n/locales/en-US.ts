@@ -2602,6 +2602,17 @@ export default {
         instructionsDescription: 'Specify audience, scenario, and wording while the system retains the stable output format',
         instructionsPlaceholder: 'For example: generate natural customer-support questions and avoid exam-style wording…'
       },
+      autoTag: {
+        label: 'Automatic Tagging',
+        description: 'After parsing, select suitable tags from the existing knowledge-base tags. Tags are never created or deleted, but one extra model call is required.',
+        modelLabel: 'Classification Model',
+        modelDescription: 'Leave empty to reuse the knowledge-base summary model.',
+        modelPlaceholder: 'Select a classification model',
+        maxTagsLabel: 'Maximum tags per document',
+        maxTagsDescription: 'Automatically associate 1-10 existing tags per document.',
+        skipIfTaggedLabel: 'Skip documents that already have tags',
+        skipIfTaggedDescription: 'When enabled, documents tagged manually at upload time are left untouched, so a deliberate classification is not diluted.'
+      },
       tableMetadataInstructions: {
         label: 'Table Metadata Instructions',
         description: 'Add business context and field semantics to CSV/Excel summaries for better retrieval',
@@ -5675,7 +5686,25 @@ export default {
   },
   userProfile: {
     title: 'User Profile',
-    description: 'View your account info (user ID, username, email, registration time).'
+    description: 'View your account info (user ID, username, email, registration time) and change your password.',
+    changePassword: {
+      label: 'Change password',
+      description: 'Verify your current password, then set a new one. All signed-in sessions will be revoked and you will need to sign in again.',
+      currentLabel: 'Current password',
+      currentPlaceholder: 'Enter your current password',
+      currentRequired: 'Enter your current password',
+      newLabel: 'New password',
+      newPlaceholder: '8-32 characters, include letters and numbers',
+      confirmLabel: 'Confirm new password',
+      confirmPlaceholder: 'Enter the new password again',
+      submit: 'Update password',
+      success: 'Password updated. Please sign in with your new password.',
+      failed: 'Failed to change password. Check that your current password is correct.',
+      policyFailed: 'New password must be 8-32 characters and include letters and numbers',
+      sameAsCurrent: 'New password must differ from your current password',
+      oidcOnlyDescription: 'Your account was created via OIDC sign-in and has no known local password yet.',
+      oidcOnlyNotice: 'Ask a system administrator to reset your password, or keep signing in with OIDC. Self-service change requires your current password.',
+    },
   },
   tenantMember: {
     title: 'Members',
