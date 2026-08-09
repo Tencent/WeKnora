@@ -226,7 +226,25 @@ export default {
   },
   userProfile: {
     title: '用户信息',
-    description: '查看您的账户基础信息（用户 ID、用户名、邮箱、注册时间）'
+    description: '查看您的账户基础信息（用户 ID、用户名、邮箱、注册时间），并可修改登录密码',
+    changePassword: {
+      label: '修改密码',
+      description: '使用当前密码验证后设置新密码。修改成功后所有设备上的登录状态将失效，需要重新登录。',
+      currentLabel: '当前密码',
+      currentPlaceholder: '请输入当前密码',
+      currentRequired: '请输入当前密码',
+      newLabel: '新密码',
+      newPlaceholder: '8-32 个字符，需包含字母和数字',
+      confirmLabel: '确认新密码',
+      confirmPlaceholder: '再次输入新密码',
+      submit: '更新密码',
+      success: '密码已更新，请使用新密码重新登录',
+      failed: '修改密码失败，请检查当前密码是否正确',
+      policyFailed: '新密码须为 8-32 个字符，且同时包含字母和数字',
+      sameAsCurrent: '新密码不能与当前密码相同',
+      oidcOnlyDescription: '您的账号通过 OIDC 登录开通，尚未设置本地登录密码。',
+      oidcOnlyNotice: '请联系系统管理员重置密码，或继续使用 OIDC 登录。自助修改密码需要先知道当前密码。',
+    },
   },
   credential: {
     configured: '已配置',
@@ -3312,6 +3330,17 @@ export default {
         instructionsLabel: '问题生成要求',
         instructionsDescription: '指定问题面向的人群、场景和表达方式，系统仍维护稳定输出格式',
         instructionsPlaceholder: '例如：生成客服用户常问的自然语言问题，避免考试题式表达…'
+      },
+      autoTag: {
+        label: '自动关联标签',
+        description: '文档解析完成后，从当前知识库已有标签中选择合适标签自动关联。不会创建或删除标签，并会增加一次模型调用。',
+        modelLabel: '分类模型',
+        modelDescription: '留空时使用知识库摘要模型。',
+        modelPlaceholder: '请选择分类模型',
+        maxTagsLabel: '单篇文档最多标签数',
+        maxTagsDescription: '每篇文档最多自动关联 1-10 个已有标签。',
+        skipIfTaggedLabel: '跳过已有标签的文档',
+        skipIfTaggedDescription: '开启后，上传时已手动设置标签的文档不再自动打标签，避免覆盖人工分类意图。'
       }
     },
     asr: {

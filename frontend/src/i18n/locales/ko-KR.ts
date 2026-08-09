@@ -226,7 +226,25 @@ export default {
   },
   userProfile: {
     title: '사용자 정보',
-    description: '계정 기본 정보(사용자 ID, 사용자 이름, 이메일, 가입 시각)를 확인합니다.'
+    description: '계정 기본 정보(사용자 ID, 사용자 이름, 이메일, 가입 시각)를 확인하고 비밀번호를 변경할 수 있습니다.',
+    changePassword: {
+      label: '비밀번호 변경',
+      description: '현재 비밀번호를 확인한 뒤 새 비밀번호를 설정합니다. 성공 시 모든 세션이 만료되어 다시 로그인해야 합니다.',
+      currentLabel: '현재 비밀번호',
+      currentPlaceholder: '현재 비밀번호를 입력하세요',
+      currentRequired: '현재 비밀번호를 입력하세요',
+      newLabel: '새 비밀번호',
+      newPlaceholder: '8-32자, 문자와 숫자 포함',
+      confirmLabel: '새 비밀번호 확인',
+      confirmPlaceholder: '새 비밀번호를 다시 입력하세요',
+      submit: '비밀번호 업데이트',
+      success: '비밀번호가 변경되었습니다. 새 비밀번호로 다시 로그인해 주세요.',
+      failed: '비밀번호 변경에 실패했습니다. 현재 비밀번호를 확인해 주세요.',
+      policyFailed: '새 비밀번호는 8-32자이며 문자와 숫자를 포함해야 합니다',
+      sameAsCurrent: '새 비밀번호는 현재 비밀번호와 같을 수 없습니다',
+      oidcOnlyDescription: 'OIDC로 개설된 계정입니다. 로컬 로그인 비밀번호가 아직 설정되지 않았습니다.',
+      oidcOnlyNotice: '시스템 관리자에게 비밀번호 재설정을 요청하거나 OIDC로 계속 로그인하세요. 자가 변경에는 현재 비밀번호가 필요합니다.',
+    },
   },
   credential: {
     configured: '구성됨',
@@ -3312,6 +3330,17 @@ export default {
         instructionsLabel: '질문 생성 지침',
         instructionsDescription: '안정적인 출력 형식을 유지하면서 대상, 상황 및 표현 방식을 지정합니다',
         instructionsPlaceholder: '예: 시험 문제 형식을 피하고 자연스러운 고객 지원 질문을 생성…'
+      },
+      autoTag: {
+        label: '자동 태그 연결',
+        description: '문서 파싱 후 현재 지식베이스의 기존 태그 중 적합한 태그를 연결합니다. 태그를 생성하거나 삭제하지 않으며 모델 호출이 한 번 추가됩니다.',
+        modelLabel: '분류 모델',
+        modelDescription: '비워 두면 지식베이스 요약 모델을 사용합니다.',
+        modelPlaceholder: '분류 모델 선택',
+        maxTagsLabel: '문서당 최대 태그 수',
+        maxTagsDescription: '문서마다 기존 태그 1-10개를 자동 연결합니다.',
+        skipIfTaggedLabel: '태그가 있는 문서 건너뛰기',
+        skipIfTaggedDescription: '활성화하면 업로드 시 수동으로 태그를 지정한 문서에는 자동 태그를 추가하지 않아 사용자의 분류 의도를 유지합니다.'
       }
     },
     asr: {

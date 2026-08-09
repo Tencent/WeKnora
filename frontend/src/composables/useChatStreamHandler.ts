@@ -878,6 +878,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         const assistantId = data.assistant_message_id as string | undefined
         existingMessage = {
           id: assistantId || data.id,
+          assistant_message_id: assistantId,
           request_id: data.id,
           role: 'assistant',
           content: '',
@@ -896,6 +897,10 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         log('[Agent Query] Created agent placeholder message')
       } else {
         ensureAgentMessageShell(existingMessage, data.id as string | undefined)
+        if (data.assistant_message_id) {
+          existingMessage.id = data.assistant_message_id as string
+          existingMessage.assistant_message_id = data.assistant_message_id
+        }
         log('[Agent Query] Continuing stream for existing message')
       }
       onAgentQuery?.(data, existingMessage, created)

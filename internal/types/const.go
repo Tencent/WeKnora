@@ -61,6 +61,9 @@ const (
 	// the agent emits a one-shot authorization notice and continues instead of
 	// blocking until the OAuth wait times out. See IsMCPOAuthNonInteractive.
 	MCPOAuthNonInteractiveContextKey ContextKey = "MCPOAuthNonInteractive"
+	// ChatParserEngineContextKey carries the resolved parser engine
+	// from the agent's ChatParserEngineRules for chat attachment processing.
+	ChatParserEngineContextKey ContextKey = "ChatParserEngine"
 )
 
 // String returns the string representation of the context key

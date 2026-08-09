@@ -449,6 +449,22 @@ definitions:
     - AuditOutcomeFailed
     - AuditOutcomePartial
     - AuditOutcomeCanceled
+  github_com_Tencent_WeKnora_internal_types.AutoTagConfig:
+    properties:
+      enabled:
+        type: boolean
+      max_tags:
+        type: integer
+      model_id:
+        type: string
+      skip_if_tagged:
+        description: |-
+          SkipIfTagged leaves documents that already carry tags untouched, so a
+          deliberate manual classification is not diluted by model guesses. It is
+          a pointer because the default is true: rows written before this field
+          existed decode to nil and must not silently flip to "always append".
+        type: boolean
+    type: object
   github_com_Tencent_WeKnora_internal_types.COSEngineConfig:
     properties:
       app_id:
@@ -1503,6 +1519,11 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig'
         description: ASR config (Automatic Speech Recognition)
+      auto_tag_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutoTagConfig'
+        description: AutoTagConfig controls asynchronous association of existing tags
+          after parsing.
       chunk_count:
         description: Chunk count (not stored in database, calculated on query)
         type: integer
@@ -1650,6 +1671,11 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.KnowledgeBaseConfig:
     properties:
+      auto_tag_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutoTagConfig'
+        description: AutoTagConfig controls optional automatic association of existing
+          KB tags.
       chunking_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig'
@@ -3794,6 +3820,13 @@ definitions:
                  a stored *0 the same as nil.
           *N   = preferred workspace id.
         type: integer
+      oidc_only_login:
+        description: |-
+          OidcOnlyLogin is set server-side when an account is auto-provisioned
+          via OIDC with a random password the user never received. The profile
+          UI hides self-service password rotation until the user sets a known
+          password via ChangePassword (which clears this flag).
+        type: boolean
     type: object
   github_com_Tencent_WeKnora_internal_types.VLMConfig:
     properties:
@@ -6345,7 +6378,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 修改当前用户的登录密码
+      description: 修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；成功后所有会话被撤销，需重新登录。
       parameters:
       - description: 密码修改请求
         in: body

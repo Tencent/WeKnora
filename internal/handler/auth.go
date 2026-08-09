@@ -5,12 +5,14 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
@@ -645,7 +647,7 @@ func (h *AuthHandler) UpdateMyPreferences(c *gin.Context) {
 
 // ChangePassword godoc
 // @Summary      修改密码
-// @Description  修改当前用户的登录密码
+// @Description  修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；成功后所有会话被撤销，需重新登录。
 // @Tags         认证
 // @Accept       json
 // @Produce      json
@@ -661,7 +663,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 
 	var req struct {
 		OldPassword string `json:"old_password" binding:"required"`
-		NewPassword string `json:"new_password" binding:"required,min=6"`
+		NewPassword string `json:"new_password" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -683,10 +685,28 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	// Change password
 	err = h.userService.ChangePassword(ctx, user.ID, req.OldPassword, req.NewPassword)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to change password: %v", err)
-		appErr := errors.NewBadRequestError("Password change failed").WithDetails(err.Error())
-		c.Error(appErr)
-		return
+		switch {
+		case stderrors.Is(err, service.ErrPasswordPolicy):
+			appErr := errors.NewValidationError("Password policy violation").
+				WithDetails(service.DetailPasswordPolicy)
+			c.Error(appErr)
+			return
+		case stderrors.Is(err, service.ErrInvalidOldPassword):
+			appErr := errors.NewBadRequestError("Current password is incorrect").
+				WithDetails(service.DetailInvalidOldPassword)
+			c.Error(appErr)
+			return
+		case stderrors.Is(err, service.ErrSamePassword):
+			appErr := errors.NewValidationError("New password must differ from current password").
+				WithDetails(service.DetailSamePassword)
+			c.Error(appErr)
+			return
+		default:
+			logger.Errorf(ctx, "Failed to change password: %v", err)
+			appErr := errors.NewBadRequestError("Password change failed").WithDetails(err.Error())
+			c.Error(appErr)
+			return
+		}
 	}
 
 	logger.Infof(ctx, "Password changed successfully for user: %s", user.Email)

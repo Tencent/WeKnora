@@ -99,6 +99,8 @@ export interface UserPreferences {
   // 偏好；后端在 Login / RefreshToken 时校验 membership 有效后才会沿用，
   // 否则回退到 home 并清掉这个字段。传 0 给 PATCH 表示「清除偏好」。
   last_active_tenant_id?: number | null
+  // oidc_only_login 为 true 表示账号由 OIDC 自动开通且用户尚未设置已知密码。
+  oidc_only_login?: boolean
 }
 
 // 用户信息接口
@@ -410,6 +412,50 @@ export async function logout(): Promise<{ success: boolean; message?: string }> 
     return {
       success: false,
       message: error.message || t('error.auth.logoutFailed')
+    }
+  }
+}
+
+export interface ChangePasswordRequest {
+  old_password: string
+  new_password: string
+}
+
+/** Map change-password API failures to localized UI strings. */
+export function resolveChangePasswordError(error: any): string {
+  const details =
+    typeof error?.error?.details === 'string'
+      ? error.error.details
+      : typeof error?.details === 'string'
+        ? error.details
+        : ''
+  switch (details) {
+    case 'invalid_old_password':
+      return t('userProfile.changePassword.failed')
+    case 'password_policy':
+      return t('userProfile.changePassword.policyFailed')
+    case 'same_password':
+      return t('userProfile.changePassword.sameAsCurrent')
+    default:
+      return error?.message || t('userProfile.changePassword.failed')
+  }
+}
+
+/**
+ * Self-service password rotation. On success the backend revokes every
+ * outstanding session for the caller, so the client should clear local
+ * auth state and send the user back to /login.
+ */
+export async function changePassword(
+  data: ChangePasswordRequest,
+): Promise<{ success: boolean; message?: string }> {
+  try {
+    const response = await post('/api/v1/auth/change-password', data)
+    return response as unknown as { success: boolean; message?: string }
+  } catch (error: any) {
+    return {
+      success: false,
+      message: resolveChangePasswordError(error),
     }
   }
 }
