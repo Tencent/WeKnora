@@ -241,7 +241,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 			for _, att := range request.AttachmentUploads {
 				ext := strings.ToLower(filepath.Ext(att.FileName))
 				if engine := customAgent.Config.ResolveChatParserEngine(ext); engine != "" {
-					ctx = context.WithValue(ctx, types.ChatParserEngineContextKey, engine)
+					attachmentRuntimeCtx = context.WithValue(attachmentRuntimeCtx, types.ChatParserEngineContextKey, engine)
 					break
 				}
 			}
