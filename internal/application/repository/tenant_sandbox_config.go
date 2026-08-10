@@ -98,15 +98,31 @@ func (r *tenantSandboxConfigRepository) SoftDelete(
 		Delete(&types.TenantSandboxConfigEntity{}).Error
 }
 
+// ErrSandboxConfigCordoned is returned by SetCordon when another request
+// already holds a fresh cordon lease on the same config row.
+var ErrSandboxConfigCordoned = errors.New("sandbox config is being modified by another request")
+
 // SetCordon must be committed before the caller lists provider sandboxes:
 // resolution paths only stop creating sandboxes once they can see it.
+//
+// The update is a conditional CAS: it refuses to overwrite a cordon that is
+// still within the lease window, so two concurrent identity-change requests
+// cannot race past each other.
 func (r *tenantSandboxConfigRepository) SetCordon(
 	ctx context.Context, tenantID uint64, id string, at time.Time,
 ) error {
-	return r.db.WithContext(ctx).
+	result := r.db.WithContext(ctx).
 		Model(&types.TenantSandboxConfigEntity{}).
 		Where("tenant_id = ? AND id = ?", tenantID, id).
-		Update("cordoned_at", at).Error
+		Where("cordoned_at IS NULL OR cordoned_at < ?", at.Add(-types.SandboxCordonLease)).
+		Update("cordoned_at", at)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrSandboxConfigCordoned
+	}
+	return nil
 }
 
 func (r *tenantSandboxConfigRepository) ClearCordon(

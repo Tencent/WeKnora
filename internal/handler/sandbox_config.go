@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/sandbox"
@@ -97,6 +98,16 @@ func respondSandboxInventoryUnverifiable(c *gin.Context) {
 	})
 }
 
+func respondSandboxConfigCordoned(c *gin.Context) {
+	c.JSON(http.StatusLocked, gin.H{
+		"success": false,
+		"error": gin.H{
+			"code":    "sandbox_config_cordoned",
+			"message": "该配置正在被其他人修改，请稍后重试",
+		},
+	})
+}
+
 func respondSandboxConfigRefusal(c *gin.Context, err error) bool {
 	var liveErr *service.SandboxesStillLiveError
 	if stderrors.As(err, &liveErr) {
@@ -105,6 +116,10 @@ func respondSandboxConfigRefusal(c *gin.Context, err error) bool {
 	}
 	if stderrors.Is(err, service.ErrSandboxInventoryUnverifiable) {
 		respondSandboxInventoryUnverifiable(c)
+		return true
+	}
+	if stderrors.Is(err, repository.ErrSandboxConfigCordoned) {
+		respondSandboxConfigCordoned(c)
 		return true
 	}
 	return false
@@ -118,7 +133,8 @@ func respondSandboxConfigServiceError(c *gin.Context, err error) {
 	case stderrors.Is(err, service.ErrSandboxConfigNameRequired),
 		stderrors.Is(err, service.ErrNamedSandboxBackendUnsupported),
 		stderrors.Is(err, sandbox.ErrUnsupportedSandboxType),
-		stderrors.Is(err, sandbox.ErrUnsafeOutboundURL):
+		stderrors.Is(err, sandbox.ErrUnsafeOutboundURL),
+		stderrors.Is(err, sandbox.ErrSandboxConfigIncomplete):
 		c.Error(apperrors.NewBadRequestError(err.Error()))
 	default:
 		c.Error(err)
@@ -249,6 +265,7 @@ func (h *SandboxConfigHandler) Get(c *gin.Context) {
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Sandbox config not found"
 // @Failure      409      {object}  map[string]interface{}  "Live sandboxes or unverifiable inventory"
+// @Failure      423      {object}  map[string]interface{}  "Sandbox config is being modified by another request"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /sandbox-configs/{id} [put]

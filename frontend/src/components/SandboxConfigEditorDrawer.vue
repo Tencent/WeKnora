@@ -40,79 +40,88 @@
         <t-input v-model="description" :placeholder="$t('settings.sandbox.configDescriptionPlaceholder')" />
       </t-form-item>
 
-      <t-alert theme="info" class="identity-hint" :message="$t('settings.sandbox.identityFieldHint')" />
+      <!--
+        Only while editing: a config being created owns no sandboxes yet, so
+        warning that these fields are locked would describe a restriction that
+        does not apply.
+      -->
+      <t-alert v-if="record" theme="info" class="identity-hint"
+        :message="$t('settings.sandbox.identityFieldHint')" />
 
       <t-form-item :label="$t('settings.sandbox.backend')">
-        <t-select v-model="backend" @change="invalidateCheck">
+        <t-select v-model="backend" @change="onBackendChange">
           <t-option v-for="opt in backendOptions" :key="opt" :value="opt" :label="backendLabel(opt)" />
         </t-select>
       </t-form-item>
 
+      <!--
+        Placeholders are format examples, never the deployment's own values: a
+        named config inherits nothing, so showing what .env holds would suggest
+        an empty field still works.
+      -->
       <!-- Cube -->
       <template v-if="backend === 'cube'">
-        <t-form-item :label="$t('settings.sandbox.apiUrl')" :help="inheritedHint(cubeDefaults?.api_url)">
-          <t-input v-model="cube.api_url" :placeholder="cubeDefaults?.api_url || 'http://127.0.0.1:33000'"
-            @input="invalidateCheck" />
+        <t-form-item :label="requiredLabel('apiUrl')" :status="fieldStatus('api_url')" :tips="fieldTip('api_url')">
+          <t-input v-model="cube.api_url" placeholder="http://cube.example.com:33000"
+            @input="onFieldInput('api_url')" />
         </t-form-item>
-        <t-form-item :label="$t('settings.sandbox.proxyUrl')" :help="inheritedHint(cubeDefaults?.proxy_url)">
-          <t-input v-model="cube.proxy_url" placeholder="http://127.0.0.1:80" @input="invalidateCheck" />
+        <t-form-item :label="requiredLabel('proxyUrl')" :status="fieldStatus('proxy_url')"
+          :tips="fieldTip('proxy_url')">
+          <t-input v-model="cube.proxy_url" placeholder="http://cube.example.com:80"
+            @input="onFieldInput('proxy_url')" />
         </t-form-item>
-        <t-form-item :label="$t('settings.sandbox.sandboxDomain')" :help="inheritedHint(cubeDefaults?.sandbox_domain)">
-          <t-input v-model="cube.sandbox_domain" placeholder="cube.app" />
+        <t-form-item :label="requiredLabel('sandboxDomain')" :status="fieldStatus('sandbox_domain')"
+          :tips="fieldTip('sandbox_domain')">
+          <t-input v-model="cube.sandbox_domain" placeholder="cube.app" @input="onFieldInput('sandbox_domain')" />
         </t-form-item>
-        <t-form-item :label="$t('settings.sandbox.apiKey')"
-          :help="inheritedHint(undefined, cubeDefaults?.api_key_configured)">
+        <t-form-item :label="$t('settings.sandbox.apiKey')" :help="$t('settings.sandbox.cubeApiKeyOptional')">
           <t-input v-model="cube.api_key" type="password" :placeholder="secretPlaceholder" />
         </t-form-item>
-        <t-form-item :label="$t('settings.sandbox.templateId')" :help="inheritedHint(cubeDefaults?.template_id)">
-          <t-input v-model="cube.template_id" :placeholder="cubeDefaults?.template_id" @input="invalidateCheck" />
+        <t-form-item :label="requiredLabel('templateId')" :status="fieldStatus('template_id')"
+          :tips="fieldTip('template_id')">
+          <t-input v-model="cube.template_id" placeholder="tpl-xxxxxxxx" @input="onFieldInput('template_id')" />
         </t-form-item>
         <div class="timeout-row">
-          <t-form-item :label="$t('settings.sandbox.httpTimeout')" :help="inheritedHint(cubeDefaults?.http_timeout_sec)">
-            <t-input-number v-model="cube.http_timeout_sec" :min="0" theme="column"
-              :placeholder="String(cubeDefaults?.http_timeout_sec || '')" />
+          <t-form-item :label="$t('settings.sandbox.httpTimeout')">
+            <t-input-number v-model="cube.http_timeout_sec" :min="0" theme="column" placeholder="30" />
           </t-form-item>
-          <t-form-item :label="$t('settings.sandbox.sandboxTtl')" :help="inheritedHint(cubeDefaults?.sandbox_ttl_seconds)">
-            <t-input-number v-model="cube.cube_sandbox_ttl_seconds" :min="0" theme="column"
-              :placeholder="String(cubeDefaults?.sandbox_ttl_seconds || '')" />
+          <t-form-item :label="$t('settings.sandbox.sandboxTtl')">
+            <t-input-number v-model="cube.cube_sandbox_ttl_seconds" :min="0" theme="column" placeholder="1800" />
           </t-form-item>
-          <t-form-item :label="$t('settings.sandbox.defaultTimeout')"
-            :help="inheritedHint(defaults?.default_timeout_sec) || $t('settings.sandbox.defaultTimeoutHint')">
+          <t-form-item :label="$t('settings.sandbox.defaultTimeout')">
             <t-input-number v-model="defaultTimeoutSec" :min="0" theme="column"
-              :placeholder="String(defaults?.default_timeout_sec || '')" />
+              :placeholder="String(defaults?.default_timeout_sec || 60)" />
           </t-form-item>
         </div>
       </template>
 
       <!-- E2B -->
       <template v-else-if="backend === 'e2b'">
-        <t-form-item :label="$t('settings.sandbox.apiUrl')" :help="inheritedHint(e2bDefaults?.api_url)">
-          <t-input v-model="e2b.api_url" :placeholder="e2bDefaults?.api_url || 'https://api.e2b.app'"
-            @input="invalidateCheck" />
+        <t-form-item :label="$t('settings.sandbox.apiUrl')" :help="$t('settings.sandbox.e2bApiUrlOptional')">
+          <t-input v-model="e2b.api_url" placeholder="https://api.e2b.app" @input="invalidateCheck" />
         </t-form-item>
-        <t-form-item :label="$t('settings.sandbox.sandboxDomain')" :help="inheritedHint(e2bDefaults?.sandbox_domain)">
+        <t-form-item :label="$t('settings.sandbox.sandboxDomain')" :help="$t('settings.sandbox.e2bDomainOptional')">
           <t-input v-model="e2b.sandbox_domain" placeholder="e2b.app" />
         </t-form-item>
-        <t-form-item :label="$t('settings.sandbox.apiKey')"
-          :help="inheritedHint(undefined, e2bDefaults?.api_key_configured)">
-          <t-input v-model="e2b.api_key" type="password" :placeholder="secretPlaceholder" />
+        <t-form-item :label="requiredLabel('apiKey')" :status="fieldStatus('api_key')" :tips="fieldTip('api_key')">
+          <t-input v-model="e2b.api_key" type="password" :placeholder="secretPlaceholder"
+            @input="onFieldInput('api_key')" />
         </t-form-item>
-        <t-form-item :label="$t('settings.sandbox.templateId')" :help="inheritedHint(e2bDefaults?.template_id)">
-          <t-input v-model="e2b.template_id" :placeholder="e2bDefaults?.template_id" @input="invalidateCheck" />
+        <t-form-item :label="requiredLabel('templateId')" :status="fieldStatus('template_id')"
+          :tips="fieldTip('template_id')">
+          <t-input v-model="e2b.template_id" placeholder="xxxxxxxxxxxxxxxx"
+            @input="onFieldInput('template_id')" />
         </t-form-item>
         <div class="timeout-row">
-          <t-form-item :label="$t('settings.sandbox.httpTimeout')" :help="inheritedHint(e2bDefaults?.http_timeout_sec)">
-            <t-input-number v-model="e2b.http_timeout_sec" :min="0" theme="column"
-              :placeholder="String(e2bDefaults?.http_timeout_sec || '')" />
+          <t-form-item :label="$t('settings.sandbox.httpTimeout')">
+            <t-input-number v-model="e2b.http_timeout_sec" :min="0" theme="column" placeholder="30" />
           </t-form-item>
-          <t-form-item :label="$t('settings.sandbox.sandboxTtl')" :help="inheritedHint(e2bDefaults?.sandbox_ttl_seconds)">
-            <t-input-number v-model="e2b.e2b_sandbox_ttl_seconds" :min="0" theme="column"
-              :placeholder="String(e2bDefaults?.sandbox_ttl_seconds || '')" />
+          <t-form-item :label="$t('settings.sandbox.sandboxTtl')">
+            <t-input-number v-model="e2b.e2b_sandbox_ttl_seconds" :min="0" theme="column" placeholder="300" />
           </t-form-item>
-          <t-form-item :label="$t('settings.sandbox.defaultTimeout')"
-            :help="inheritedHint(defaults?.default_timeout_sec) || $t('settings.sandbox.defaultTimeoutHint')">
+          <t-form-item :label="$t('settings.sandbox.defaultTimeout')">
             <t-input-number v-model="defaultTimeoutSec" :min="0" theme="column"
-              :placeholder="String(defaults?.default_timeout_sec || '')" />
+              :placeholder="String(defaults?.default_timeout_sec || 60)" />
           </t-form-item>
         </div>
       </template>
@@ -218,7 +227,9 @@ const nameError = ref('')
 const name = ref('')
 const description = ref('')
 const backend = ref('')
-const defaultTimeoutSec = ref<number>(0)
+// undefined rather than 0 so the input renders empty and shows its placeholder,
+// matching the HTTP timeout / TTL fields. A literal 0 would read as a real value.
+const defaultTimeoutSec = ref<number | undefined>(undefined)
 const cube = reactive<SandboxCubeConfig>({})
 const e2b = reactive<SandboxE2BConfig>({})
 const envRows = ref<{ key: string; value: string }[]>([])
@@ -229,15 +240,40 @@ const isRemoteBackend = computed(() => backend.value === 'cube' || backend.value
 const backendLabel = (value: string) => t(`settings.sandbox.backends.${value}`)
 const checkLabel = (probe: string) => t(`settings.sandbox.checks.${probe}`, probe)
 
-const cubeDefaults = computed(() => props.defaults?.cube)
-const e2bDefaults = computed(() => props.defaults?.e2b)
+// Mirrors sandbox.MissingRequiredFields on the server. Duplicated on purpose:
+// the server stays the authority, this only spares the admin a round-trip and
+// points at the offending input instead of showing one combined message.
+const REQUIRED_FIELDS: Record<string, string[]> = {
+  cube: ['api_url', 'proxy_url', 'sandbox_domain', 'template_id'],
+  e2b: ['api_key', 'template_id'],
+}
 
-// Inherited values are shown as placeholders so an empty field reads as
-// "inherits X" rather than "unset".
-const inheritedHint = (value?: string | number, configured?: boolean) => {
-  if (configured) return t('settings.sandbox.inheritedSecret')
-  if (value === undefined || value === '' || value === 0) return ''
-  return t('settings.sandbox.inheritedValue', { value: String(value) })
+const fieldErrors = ref<Record<string, string>>({})
+
+const fieldStatus = (field: string) => (fieldErrors.value[field] ? 'error' : undefined)
+const fieldTip = (field: string) => fieldErrors.value[field] || undefined
+
+const requiredLabel = (labelKey: string) => `${t(`settings.sandbox.${labelKey}`)} *`
+
+// Clearing on input rather than re-validating keeps the error from flickering
+// back while the admin is still halfway through typing a URL.
+function onFieldInput(field: string) {
+  delete fieldErrors.value[field]
+  invalidateCheck()
+}
+
+function validateRequiredFields(): boolean {
+  const required = REQUIRED_FIELDS[backend.value] || []
+  const values = (backend.value === 'cube' ? cube : e2b) as Record<string, unknown>
+  const errors: Record<string, string> = {}
+  for (const field of required) {
+    const value = values[field]
+    if (typeof value !== 'string' || value.trim() === '') {
+      errors[field] = t('settings.sandbox.fieldRequired')
+    }
+  }
+  fieldErrors.value = errors
+  return Object.keys(errors).length === 0
 }
 
 const affectedSessionCount = computed(() => conflict.value?.inventory?.session_ids?.length || 0)
@@ -257,7 +293,7 @@ function reset() {
   backend.value = isNamedSandboxBackend(cfg.sandbox_type || '')
     ? cfg.sandbox_type!
     : defaultBackendType()
-  defaultTimeoutSec.value = cfg.default_timeout_sec || 0
+  defaultTimeoutSec.value = cfg.default_timeout_sec || undefined
   // Replace rather than merge: a reused reactive object would otherwise carry
   // the previously edited config's fields into the next one opened.
   Object.keys(cube).forEach((key) => delete (cube as Record<string, unknown>)[key])
@@ -268,6 +304,7 @@ function reset() {
   checkResult.value = null
   conflict.value = null
   nameError.value = ''
+  fieldErrors.value = {}
 }
 
 watch(() => props.visible, (open) => {
@@ -303,6 +340,7 @@ async function save() {
     return
   }
   nameError.value = ''
+  if (!validateRequiredFields()) return
   saving.value = true
   conflict.value = null
   try {
@@ -332,6 +370,9 @@ async function save() {
 }
 
 async function runCheck(deep: boolean) {
+  // The probe builds a real client, so an incomplete config would come back as
+  // a generic client_build failure instead of naming the empty field.
+  if (!validateRequiredFields()) return
   checking.value = true
   checkResult.value = null
   try {
@@ -357,6 +398,13 @@ async function runCheck(deep: boolean) {
 // A result that no longer matches the form is worse than none.
 function invalidateCheck() {
   checkResult.value = null
+}
+
+// The two backends require different fields, so carrying errors across a switch
+// would flag inputs the admin can no longer even see.
+function onBackendChange() {
+  fieldErrors.value = {}
+  invalidateCheck()
 }
 </script>
 

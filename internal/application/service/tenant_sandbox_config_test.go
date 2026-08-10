@@ -15,8 +15,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// testGlobalSandboxConfig mirrors a deployment's WEKNORA_SANDBOX_* values, which
-// is what an empty per-config field inherits.
+// testGlobalSandboxConfig mirrors a deployment's WEKNORA_SANDBOX_* values. Named
+// configs inherit none of the provider fields from it; it is here so the service
+// under test is wired the way production wires it.
 func testGlobalSandboxConfig() *sandbox.Config {
 	cfg := sandbox.DefaultConfig()
 	cfg.Type = sandbox.SandboxTypeE2B
@@ -24,9 +25,6 @@ func testGlobalSandboxConfig() *sandbox.Config {
 	cfg.E2BSandboxDomain = "e2b.app"
 	cfg.E2BAPIKey = "global-key"
 	cfg.E2BTemplate = "global-template"
-	cfg.CubeAPIURL = "https://cube.example.com"
-	cfg.CubeProxyURL = "https://proxy.example.com"
-	cfg.CubeSandboxDomain = "cube.app"
 	return cfg
 }
 
@@ -111,16 +109,15 @@ func TestSandboxIdentityChanged(t *testing.T) {
 			want: false,
 		},
 		{
-			// Inheriting a field and spelling out the same value are the same
-			// deployment; comparing stored values instead of effective ones
-			// would 409 on a no-op edit.
-			name: "spelling out an inherited value is not a change",
+			// Nothing is inherited, so filling in an endpoint that was blank
+			// really does re-point the config at a different account.
+			name: "filling in a blank endpoint changes identity",
 			old: &types.TenantSandboxConfig{
 				SandboxType: "e2b",
 				E2B:         &types.E2BSandboxConfig{APIKey: "key-a"},
 			},
-			new:  e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "global-template", 0),
-			want: false,
+			new:  e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 0),
+			want: true,
 		},
 		{
 			// Only the ACTIVE provider's fields describe where the sandboxes
@@ -147,8 +144,7 @@ func TestSandboxIdentityChanged(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want,
-				SandboxIdentityChanged(tt.old, tt.new, testGlobalSandboxConfig()))
+			require.Equal(t, tt.want, SandboxIdentityChanged(tt.old, tt.new))
 		})
 	}
 }
@@ -164,7 +160,7 @@ func TestSandboxIdentityChangedAfterMaskMerge(t *testing.T) {
 	merged := types.MergeSandboxConfigForUpdate(incoming, stored)
 
 	require.False(t,
-		SandboxIdentityChanged(stored, merged, testGlobalSandboxConfig()),
+		SandboxIdentityChanged(stored, merged),
 		"a masked key that merges back to the stored one is not a rotation")
 }
 
@@ -176,18 +172,8 @@ func TestSandboxIdentityChangedJudgesUnreachableOldEndpoint(t *testing.T) {
 	dead := cubeCfg("key-a", "https://decommissioned.invalid", "https://proxy.invalid", "cube.app")
 	live := cubeCfg("key-a", "https://cube.example.com", "https://proxy.invalid", "cube.app")
 
-	require.True(t, SandboxIdentityChanged(dead, live, testGlobalSandboxConfig()))
-	require.False(t, SandboxIdentityChanged(dead, dead, testGlobalSandboxConfig()))
-}
-
-// A nil deployment config is a wiring bug, not a reason to panic or to report a
-// spurious change: both sides then simply inherit nothing.
-func TestSandboxIdentityChangedToleratesNilGlobal(t *testing.T) {
-	cfg := e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300)
-
-	require.False(t, SandboxIdentityChanged(cfg, cfg, nil))
-	require.True(t, SandboxIdentityChanged(
-		cfg, e2bCfg("key-b", "https://api.e2b.app", "e2b.app", "t1", 300), nil))
+	require.True(t, SandboxIdentityChanged(dead, live))
+	require.False(t, SandboxIdentityChanged(dead, dead))
 }
 
 // fakeConfigRepo records cordon transitions so tests can assert the sequence
@@ -634,13 +620,16 @@ func TestSanitizeSandboxConfigPreservesRedactedSecret(t *testing.T) {
 	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
 	existing := &types.TenantSandboxConfig{
 		SandboxType: "e2b",
-		E2B:         &types.E2BSandboxConfig{APIKey: "stored-key", APIURL: "https://203.0.113.10"},
+		E2B: &types.E2BSandboxConfig{
+			APIKey: "stored-key", APIURL: "https://203.0.113.10", TemplateID: "t1",
+		},
 	}
 	incoming := &types.TenantSandboxConfig{
 		SandboxType: "e2b",
 		E2B: &types.E2BSandboxConfig{
-			APIKey: types.RedactedSecretPlaceholder,
-			APIURL: "https://203.0.113.10",
+			APIKey:     types.RedactedSecretPlaceholder,
+			APIURL:     "https://203.0.113.10",
+			TemplateID: "t1",
 		},
 	}
 
@@ -648,6 +637,43 @@ func TestSanitizeSandboxConfigPreservesRedactedSecret(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, "stored-key", out.E2B.APIKey)
+}
+
+// Nothing is inherited from the deployment, so an incomplete config has to be
+// refused when it is saved rather than at the first sandbox allocation.
+func TestSanitizeSandboxConfigRejectsIncompleteConfig(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
+	incoming := &types.TenantSandboxConfig{
+		SandboxType: "cube",
+		Cube:        &types.CubeSandboxConfig{APIURL: "https://203.0.113.10"},
+	}
+
+	_, err := SanitizeSandboxConfig(incoming, nil)
+
+	require.ErrorIs(t, err, sandbox.ErrSandboxConfigIncomplete)
+	require.Contains(t, err.Error(), "proxy_url")
+}
+
+// A masked key must still count as present: the merge restores it before the
+// completeness check runs, otherwise every edit of a saved config would be
+// rejected for a missing credential it never stopped having.
+func TestSanitizeSandboxConfigCountsRedactedSecretAsPresent(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
+	existing := &types.TenantSandboxConfig{
+		SandboxType: "e2b",
+		E2B:         &types.E2BSandboxConfig{APIKey: "stored-key", TemplateID: "t1"},
+	}
+	incoming := &types.TenantSandboxConfig{
+		SandboxType: "e2b",
+		E2B: &types.E2BSandboxConfig{
+			APIKey: types.RedactedSecretPlaceholder, TemplateID: "t2",
+		},
+	}
+
+	out, err := SanitizeSandboxConfig(incoming, existing)
+
+	require.NoError(t, err)
+	require.Equal(t, "t2", out.E2B.TemplateID)
 }
 
 func TestSanitizeSandboxConfigRejectsUnsafeURL(t *testing.T) {

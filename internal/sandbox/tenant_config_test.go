@@ -21,76 +21,102 @@ func globalTestConfig() *Config {
 	}
 }
 
+// completeE2BTenantConfig is the minimum a named E2B config must carry now that
+// nothing is inherited.
+func completeE2BTenantConfig() *types.TenantSandboxConfig {
+	return &types.TenantSandboxConfig{
+		SandboxType: "e2b",
+		E2B: &types.E2BSandboxConfig{
+			APIKey:     "tenant-key",
+			TemplateID: "tenant-template",
+		},
+	}
+}
+
+// A nil tenant config means "the deployment default backend", which is the one
+// path where the baseline is used as-is.
 func TestResolveEffectiveConfigNilTenantKeepsGlobal(t *testing.T) {
 	global := globalTestConfig()
 
 	got, err := ResolveEffectiveConfig(nil, global)
 
 	require.NoError(t, err)
-	require.Equal(t, *global, *got, "existing tenants must behave exactly as before")
+	require.Equal(t, *global, *got)
 }
 
 func TestResolveEffectiveConfigDoesNotMutateGlobal(t *testing.T) {
 	global := globalTestConfig()
-	tenantCfg := &types.TenantSandboxConfig{
-		SandboxType: "e2b",
-		E2B:         &types.E2BSandboxConfig{APIKey: "tenant-key"},
-	}
 
-	_, err := ResolveEffectiveConfig(tenantCfg, global)
+	_, err := ResolveEffectiveConfig(completeE2BTenantConfig(), global)
 
 	require.NoError(t, err)
 	require.Equal(t, "global-key", global.E2BAPIKey,
 		"resolution must not leak tenant values into the shared global config")
 }
 
-func TestResolveEffectiveConfigFieldLevelFallback(t *testing.T) {
+// The point of the whole design: a named config never picks up the deployment's
+// endpoint, domain or key, so what it does not state it does not get.
+func TestResolveEffectiveConfigDoesNotInheritProviderFields(t *testing.T) {
 	global := globalTestConfig()
-	// Tenant overrides only the API key; everything else must be inherited.
-	tenantCfg := &types.TenantSandboxConfig{
-		SandboxType: "e2b",
-		E2B:         &types.E2BSandboxConfig{APIKey: "tenant-key"},
-	}
 
-	got, err := ResolveEffectiveConfig(tenantCfg, global)
+	got, err := ResolveEffectiveConfig(completeE2BTenantConfig(), global)
 
 	require.NoError(t, err)
 	require.Equal(t, "tenant-key", got.E2BAPIKey)
-	require.Equal(t, "https://global.e2b.dev", got.E2BAPIURL)
-	require.Equal(t, "global-template", got.E2BTemplate)
-	require.Equal(t, "global.domain", got.E2BSandboxDomain)
+	require.Equal(t, "tenant-template", got.E2BTemplate)
+	require.Empty(t, got.E2BAPIURL, "go-e2b resolves its own API base when unset")
+	require.Empty(t, got.E2BSandboxDomain)
 }
 
-func TestResolveEffectiveConfigSwitchesProvider(t *testing.T) {
-	global := globalTestConfig() // global is e2b
-	tenantCfg := &types.TenantSandboxConfig{
+// A leftover sub-struct from the deployment's other provider must not survive
+// either, or a cube config would silently answer with e2b coordinates.
+func TestResolveEffectiveConfigClearsInactiveProviderBaseline(t *testing.T) {
+	global := globalTestConfig() // global is e2b, with e2b credentials set
+
+	got, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
 		SandboxType: "cube",
 		Cube: &types.CubeSandboxConfig{
-			APIKey:     "cube-key",
-			APIURL:     "https://203.0.113.20",
+			APIKey: "cube-key", APIURL: "https://203.0.113.20",
+			ProxyURL: "https://203.0.113.21", SandboxDomain: "cube.example",
 			TemplateID: "cube-template",
 		},
-	}
-
-	got, err := ResolveEffectiveConfig(tenantCfg, global)
+	}, global)
 
 	require.NoError(t, err)
 	require.Equal(t, SandboxTypeCube, got.Type)
-	require.Equal(t, "cube-key", got.CubeAPIKey)
 	require.Equal(t, "https://203.0.113.20", got.CubeAPIURL)
-	require.Equal(t, "cube-template", got.CubeTemplate)
+	require.Empty(t, got.E2BAPIKey, "the baseline's e2b credentials must not ride along")
+	require.Empty(t, got.E2BTemplate)
+}
+
+func TestResolveEffectiveConfigRejectsIncompleteCube(t *testing.T) {
+	_, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType: "cube",
+		Cube:        &types.CubeSandboxConfig{APIURL: "https://203.0.113.20"},
+	}, globalTestConfig())
+
+	require.ErrorIs(t, err, ErrSandboxConfigIncomplete)
+	require.Contains(t, err.Error(), "proxy_url")
+	require.Contains(t, err.Error(), "sandbox_domain")
+	require.Contains(t, err.Error(), "template_id")
+}
+
+func TestResolveEffectiveConfigRejectsIncompleteE2B(t *testing.T) {
+	_, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType: "e2b",
+		E2B:         &types.E2BSandboxConfig{TemplateID: "t1"},
+	}, globalTestConfig())
+
+	require.ErrorIs(t, err, ErrSandboxConfigIncomplete)
+	require.Contains(t, err.Error(), "api_key")
 }
 
 func TestResolveEffectiveConfigAppliesTimeoutsAndTTL(t *testing.T) {
 	global := globalTestConfig()
-	tenantCfg := &types.TenantSandboxConfig{
-		SandboxType:       "e2b",
-		DefaultTimeoutSec: 90,
-		E2B: &types.E2BSandboxConfig{
-			HTTPTimeoutSec:       15,
-			E2BSandboxTTLSeconds: 600,
-		},
-	}
+	tenantCfg := completeE2BTenantConfig()
+	tenantCfg.DefaultTimeoutSec = 90
+	tenantCfg.E2B.HTTPTimeoutSec = 15
+	tenantCfg.E2B.E2BSandboxTTLSeconds = 600
 
 	got, err := ResolveEffectiveConfig(tenantCfg, global)
 
@@ -98,6 +124,22 @@ func TestResolveEffectiveConfigAppliesTimeoutsAndTTL(t *testing.T) {
 	require.Equal(t, 90*time.Second, got.DefaultTimeout)
 	require.Equal(t, 15*time.Second, got.E2BHTTPTimeout)
 	require.Equal(t, 600*time.Second, got.E2BSandboxTTL)
+}
+
+// Tuning fields fall back to the built-in constants, never to the deployment's:
+// "inherits nothing" would be a much weaker rule with an exception here.
+func TestResolveEffectiveConfigTuningFallsBackToBuiltIns(t *testing.T) {
+	global := globalTestConfig()
+	global.E2BSandboxTTL = 10 * time.Minute
+	global.E2BHTTPTimeout = 90 * time.Second
+
+	got, err := ResolveEffectiveConfig(completeE2BTenantConfig(), global)
+
+	require.NoError(t, err)
+	require.Equal(t, DefaultE2BSandboxTTL, got.E2BSandboxTTL)
+	require.Equal(t, DefaultE2BHTTPTimeout, got.E2BHTTPTimeout)
+	require.Equal(t, global.DefaultTimeout, got.DefaultTimeout,
+		"the execution timeout is deployment policy and does carry over")
 }
 
 func TestResolveEffectiveConfigDisabled(t *testing.T) {

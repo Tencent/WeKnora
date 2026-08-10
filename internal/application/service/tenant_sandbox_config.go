@@ -51,14 +51,11 @@ const sandboxConfigCleanupTimeout = 20 * time.Second
 // comparing a raw payload would report a key rotation on every single save and
 // leave the config permanently uneditable.
 //
-// The comparison is on effective values, since a field left empty inherits the
-// deployment default: spelling out the inherited value changes nothing and must
-// not be refused. It is also deliberately free of validation — see
-// sandbox.IdentityOf for why an unreachable old endpoint must still be judgeable.
-func SandboxIdentityChanged(
-	oldCfg, newCfg *types.TenantSandboxConfig,
-	global *sandbox.Config,
-) bool {
+// The comparison needs no deployment baseline: named configs inherit nothing, so
+// the stored fields are the whole identity. It is also deliberately free of
+// validation — see sandbox.IdentityOf for why an unreachable old endpoint must
+// still be judgeable.
+func SandboxIdentityChanged(oldCfg, newCfg *types.TenantSandboxConfig) bool {
 	if oldCfg == nil {
 		// Nothing exists yet, so nothing can be stranded.
 		return false
@@ -66,7 +63,7 @@ func SandboxIdentityChanged(
 	if newCfg == nil {
 		return true
 	}
-	return sandbox.IdentityOf(oldCfg, global) != sandbox.IdentityOf(newCfg, global)
+	return sandbox.IdentityOf(oldCfg) != sandbox.IdentityOf(newCfg)
 }
 
 // ErrSandboxesStillLive is returned when an identity change or deletion is
@@ -194,6 +191,15 @@ func SanitizeSandboxConfig(
 		return nil, apperrors.NewBadRequestError(
 			"SYSTEM_AES_KEY is not configured; refusing to store sandbox credentials in plaintext",
 		)
+	}
+	// Reject an incomplete config here rather than at first sandbox allocation.
+	// Resolving is what the runtime does, so both paths agree by construction.
+	// The baseline passed in is irrelevant to the outcome: named configs inherit
+	// no provider field, so only merged decides what is missing.
+	// Returned unwrapped so respondSandboxConfigServiceError can classify the
+	// sentinel; wrapping it in an AppError here would hide the chain.
+	if _, err := sandbox.ResolveEffectiveConfig(merged, sandbox.DefaultConfig()); err != nil {
+		return nil, err
 	}
 	return merged, nil
 }
@@ -395,7 +401,7 @@ func (s *TenantSandboxConfigService) Update(
 	if err := validateNamedSandboxBackend(merged); err != nil {
 		return nil, err
 	}
-	if !SandboxIdentityChanged(entity.Config, merged, s.globalCfg) {
+	if !SandboxIdentityChanged(entity.Config, merged) {
 		return s.writeConfig(ctx, entity, in, merged)
 	}
 
@@ -482,6 +488,9 @@ func (s *TenantSandboxConfigService) Delete(
 func (s *TenantSandboxConfigService) clientFor(
 	cfg *types.TenantSandboxConfig,
 ) (sandbox.ConfigSandboxClient, error) {
+	// The baseline only supplies the deployment's execution timeout; every
+	// provider field comes from cfg, so a nil globalCfg cannot change which
+	// backend this client talks to.
 	base := s.globalCfg
 	if base == nil {
 		base = sandbox.DefaultConfig()

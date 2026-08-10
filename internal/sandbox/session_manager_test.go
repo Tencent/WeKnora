@@ -54,8 +54,12 @@ func TestExecutionOutputDir(t *testing.T) {
 func TestSessionBoundManagerExecuteEnsuresOutputDir(t *testing.T) {
 	client := newFakeRemoteClient(SandboxTypeCube)
 	checker := &fakeSessionExistenceChecker{exists: true}
+	// DefaultConfig carries no Cube template on purpose; the deployment baseline
+	// or the named config supplies it.
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
 	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
-		Config:          DefaultConfig(),
+		Config:          cfg,
 		Client:          client,
 		Store:           NewMemorySessionSandboxBindingStore(),
 		Checker:         checker,

@@ -618,19 +618,25 @@ func (c *StorageEngineConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
-// TenantSandboxConfig holds tenant-level sandbox configuration overrides.
-// Fields not configured by the tenant fall back to the global defaults
-// provided via environment variables (WEKNORA_SANDBOX_*).
+// TenantSandboxConfig is one named sandbox backend a workspace maintains.
+//
+// It is self-contained: provider fields are NOT inherited from the deployment's
+// WEKNORA_SANDBOX_* values, which only back agents that selected no config at
+// all. Leaving a required provider field empty is rejected on save rather than
+// filled in from the environment — see sandbox.MissingRequiredFields for the
+// list and internal/sandbox/tenant_config.go for why inheritance was dropped.
 type TenantSandboxConfig struct {
-	// SandboxType selects the sandbox backend for this tenant.
-	// Valid values: "cube", "e2b", "docker", "local", "disabled".
-	// Empty means "use the global WEKNORA_SANDBOX_MODE default".
+	// SandboxType selects the sandbox backend. Named configs must set it to
+	// "cube" or "e2b"; "docker", "local" and "disabled" appear only on the
+	// workspace policy row.
 	SandboxType string `json:"sandbox_type,omitempty"`
 
 	// ── 通用配置（跨后端生效）──────────────────────────────────
 
-	// DefaultTimeoutSec is the per-execution timeout in seconds.
-	// 0 means use the global WEKNORA_SANDBOX_TIMEOUT default (60s).
+	// DefaultTimeoutSec is the per-execution timeout in seconds. 0 keeps the
+	// deployment's WEKNORA_SANDBOX_TIMEOUT: an execution guardrail is operator
+	// policy rather than part of this backend's identity, so it is the one
+	// value a named config still takes from the environment.
 	DefaultTimeoutSec int `json:"default_timeout_sec,omitempty"`
 
 	// EnvVars are additional environment variables injected into every
@@ -653,6 +659,9 @@ type TenantSandboxConfig struct {
 	Docker *DockerSandboxConfig `json:"docker,omitempty"`
 }
 
+// CubeSandboxConfig addresses one CubeSandbox deployment. APIURL, ProxyURL,
+// SandboxDomain and TemplateID are all required; APIKey is optional because the
+// common single-node setup runs unauthenticated.
 type CubeSandboxConfig struct {
 	APIURL        string `json:"api_url,omitempty"`
 	ProxyURL      string `json:"proxy_url,omitempty"`
@@ -661,13 +670,15 @@ type CubeSandboxConfig struct {
 	TemplateID    string `json:"template_id,omitempty"`
 
 	// HTTPTimeoutSec bounds each HTTP call to the sandbox control plane.
-	// Applies to both Cube and E2B backends. 0 means use the per-backend
-	// global default (30s for both).
+	// 0 means use the built-in default (30s), never the deployment's value.
 	HTTPTimeoutSec int `json:"http_timeout_sec,omitempty"`
 
 	CubeSandboxTTLSeconds int `json:"cube_sandbox_ttl_seconds,omitempty"`
 }
 
+// E2BSandboxConfig addresses one E2B account. APIKey and TemplateID are
+// required; APIURL and SandboxDomain are optional because go-e2b resolves both
+// on its own when they are empty.
 type E2BSandboxConfig struct {
 	APIURL        string `json:"api_url,omitempty"`
 	SandboxDomain string `json:"sandbox_domain,omitempty"`
@@ -675,8 +686,7 @@ type E2BSandboxConfig struct {
 	TemplateID    string `json:"template_id,omitempty"`
 
 	// HTTPTimeoutSec bounds each HTTP call to the sandbox control plane.
-	// Applies to both Cube and E2B backends. 0 means use the per-backend
-	// global default (30s for both).
+	// 0 means use the built-in default (30s), never the deployment's value.
 	HTTPTimeoutSec int `json:"http_timeout_sec,omitempty"`
 
 	E2BSandboxTTLSeconds int `json:"e2b_sandbox_ttl_seconds,omitempty"`

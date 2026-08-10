@@ -88,7 +88,9 @@ func TestResolveBuildsRemoteManagerWithoutHealthProbe(t *testing.T) {
 		result: ResolvedTenantSandboxConfig{
 			Config: &types.TenantSandboxConfig{
 				SandboxType: "e2b",
-				E2B:         &types.E2BSandboxConfig{APIKey: "tenant-key"},
+				E2B: &types.E2BSandboxConfig{
+					APIKey: "tenant-key", TemplateID: "tenant-template",
+				},
 			},
 			Found: true,
 		},
@@ -108,7 +110,9 @@ func TestResolveBuildsFreshManagerEveryCall(t *testing.T) {
 		result: ResolvedTenantSandboxConfig{
 			Config: &types.TenantSandboxConfig{
 				SandboxType: "e2b",
-				E2B:         &types.E2BSandboxConfig{APIKey: "tenant-key"},
+				E2B: &types.E2BSandboxConfig{
+					APIKey: "tenant-key", TemplateID: "tenant-template",
+				},
 			},
 			Found: true,
 		},

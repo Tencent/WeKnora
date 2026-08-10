@@ -36,7 +36,7 @@ require (
 	github.com/larksuite/oapi-sdk-go/v3 v3.9.7
 	github.com/longbridgeapp/opencc v0.3.13
 	github.com/mark3labs/mcp-go v0.52.0
-	github.com/matiasinsaurralde/go-e2b v0.1.0
+	github.com/matiasinsaurralde/go-e2b v0.1.1-0.20260808041540-fdc08ceaa1c1
 	github.com/milvus-io/milvus/client/v2 v2.6.4
 	github.com/minio/minio-go/v7 v7.1.0
 	github.com/mmcdole/gofeed v1.3.0
@@ -60,13 +60,13 @@ require (
 	github.com/swaggo/gin-swagger v1.6.1
 	github.com/swaggo/swag v1.16.6
 	github.com/tencent/vectordatabase-sdk-go v1.8.4
-	github.com/tencentcloud/CubeSandbox/sdk/go v0.0.0-20260723122231-7b40f26ebd63
+	github.com/tencentcloud/CubeSandbox/sdk/go v0.0.0-20260807115140-5cefcca27a7f
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.103
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/lkeap v1.3.103
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.73
 	github.com/tiktoken-go/tokenizer v0.7.0
-	github.com/volcengine/vikingdb-go-sdk v0.0.11
 	github.com/volcengine/ve-tos-golang-sdk/v2 v2.9.4
+	github.com/volcengine/vikingdb-go-sdk v0.0.11
 	github.com/wailsapp/wails/v2 v2.12.0
 	github.com/weaviate/weaviate v1.37.3
 	github.com/weaviate/weaviate-go-client/v5 v5.7.3

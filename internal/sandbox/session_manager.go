@@ -153,13 +153,15 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 		return nil, fmt.Errorf("sandbox: unsupported remote provider %q", provider)
 	}
 
-	// Apply the provider-specific defaults so downstream code reads only
-	// non-zero Config fields for this provider.
+	// Apply the provider's tuning defaults so downstream code reads only
+	// non-zero TTL / timeout fields. Endpoint defaults are deliberately not
+	// applied here: this constructor also serves named configs, which must be
+	// told what they are missing rather than handed a built-in localhost value.
 	switch provider {
 	case SandboxTypeCube:
-		applyCubeDefaults(cfg)
+		applyCubeRuntimeDefaults(cfg)
 	case SandboxTypeE2B:
-		applyE2BDefaults(cfg)
+		applyE2BRuntimeDefaults(cfg)
 	}
 
 	// Build the provider-specific neutral create request using the

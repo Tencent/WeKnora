@@ -268,22 +268,24 @@ type Config struct {
 	E2BHTTPTimeout time.Duration
 }
 
-// DefaultConfig returns a default sandbox configuration
+// DefaultConfig returns a default sandbox configuration.
+//
+// It deliberately carries no Cube or E2B endpoint, credential or template: those
+// belong either to the deployment baseline (see applyCubeDeploymentDefaults) or
+// to a named config that spelled them out. Presetting them here once meant every
+// baseline silently offered a localhost Cube to configs that had never asked for
+// one.
 func DefaultConfig() *Config {
 	return &Config{
-		Type:              SandboxTypeLocal,
-		FallbackEnabled:   true,
-		DefaultTimeout:    DefaultTimeout,
-		DockerImage:       DefaultDockerImage,
-		AllowedCommands:   defaultAllowedCommands(),
-		MaxMemory:         DefaultMemoryLimit,
-		MaxCPU:            DefaultCPULimit,
-		CubeAPIURL:        DefaultCubeAPIURL,
-		CubeProxyURL:      DefaultCubeProxyURL,
-		CubeSandboxDomain: DefaultCubeSandboxDomain,
-		CubeTemplate:      DefaultCubeTemplate,
-		CubeSandboxTTL:    DefaultCubeSandboxTTL,
-		CubeHTTPTimeout:   DefaultCubeHTTPTimeout,
+		Type:            SandboxTypeLocal,
+		FallbackEnabled: true,
+		DefaultTimeout:  DefaultTimeout,
+		DockerImage:     DefaultDockerImage,
+		AllowedCommands: defaultAllowedCommands(),
+		MaxMemory:       DefaultMemoryLimit,
+		MaxCPU:          DefaultCPULimit,
+		CubeSandboxTTL:  DefaultCubeSandboxTTL,
+		CubeHTTPTimeout: DefaultCubeHTTPTimeout,
 	}
 }
 

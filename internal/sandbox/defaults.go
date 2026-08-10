@@ -1,8 +1,15 @@
 // Package sandbox: configuration defaults and deployment baseline.
 //
-// applyCubeDefaults / applyE2BDefaults fill provider fields that adapters rely
-// on being non-zero. DeploymentConfig reads WEKNORA_SANDBOX_* for the
-// process-wide baseline tenant overrides merge onto.
+// DeploymentConfig reads WEKNORA_SANDBOX_* into the process-wide baseline. That
+// baseline backs agents which selected no named config; it is NOT merged into
+// named configs, so the built-in endpoint constants below stay on this path only
+// (see tenant_config.go for why).
+//
+// The provider defaults come in two flavours. Deployment defaults fill endpoints
+// and templates and exist so a developer can run `WEKNORA_SANDBOX_MODE=cube` with
+// an empty .env. Runtime defaults fill TTLs and HTTP timeouts and are safe
+// anywhere, because those have meaningful built-in values while an endpoint does
+// not.
 package sandbox
 
 import (
@@ -83,6 +90,9 @@ func cubeConfigFromEnv() *Config {
 			cfg.DefaultTimeout = time.Duration(n) * time.Second
 		}
 	}
+	// After the environment so an explicit value always wins.
+	applyCubeDeploymentDefaults(cfg)
+	applyCubeRuntimeDefaults(cfg)
 	return cfg
 }
 
@@ -90,8 +100,6 @@ func e2bConfigFromEnv() *Config {
 	cfg := DefaultConfig()
 	cfg.Type = SandboxTypeE2B
 	cfg.FallbackEnabled = false
-	cfg.E2BSandboxTTL = DefaultE2BSandboxTTL
-	cfg.E2BHTTPTimeout = DefaultE2BHTTPTimeout
 
 	if v := os.Getenv("WEKNORA_SANDBOX_E2B_API_KEY"); v != "" {
 		cfg.E2BAPIKey = v
@@ -120,12 +128,18 @@ func e2bConfigFromEnv() *Config {
 			cfg.DefaultTimeout = time.Duration(n) * time.Second
 		}
 	}
+	applyE2BRuntimeDefaults(cfg)
 	return cfg
 }
 
-// applyCubeDefaults mutates cfg in-place so downstream code can rely on the
-// Cube-specific fields being non-zero. Safe to call multiple times.
-func applyCubeDefaults(cfg *Config) {
+// applyCubeDeploymentDefaults fills the Cube endpoint, domain and template with
+// the built-in single-node values so `WEKNORA_SANDBOX_MODE=cube` works out of the
+// box on a developer machine.
+//
+// It is reachable from the deployment baseline only. Named configs must not see
+// these constants: inheriting them is how a workspace config ends up dialling
+// 127.0.0.1 instead of being told which field it forgot.
+func applyCubeDeploymentDefaults(cfg *Config) {
 	if cfg == nil {
 		return
 	}
@@ -141,6 +155,16 @@ func applyCubeDefaults(cfg *Config) {
 	if cfg.CubeTemplate == "" {
 		cfg.CubeTemplate = DefaultCubeTemplate
 	}
+}
+
+// applyCubeRuntimeDefaults fills the Cube tuning fields downstream code relies
+// on being non-zero. Unlike the endpoint defaults these are safe everywhere:
+// a TTL or an HTTP timeout has a sane built-in value, an endpoint does not.
+// Safe to call multiple times.
+func applyCubeRuntimeDefaults(cfg *Config) {
+	if cfg == nil {
+		return
+	}
 	if cfg.CubeSandboxTTL <= 0 {
 		cfg.CubeSandboxTTL = DefaultCubeSandboxTTL
 	}
@@ -149,9 +173,10 @@ func applyCubeDefaults(cfg *Config) {
 	}
 }
 
-// applyE2BDefaults mutates cfg in-place so downstream code can rely on the
-// E2B-specific timeout fields being non-zero.
-func applyE2BDefaults(cfg *Config) {
+// applyE2BRuntimeDefaults is applyCubeRuntimeDefaults for E2B. There is no
+// applyE2BDeploymentDefaults: go-e2b resolves its own API base URL and sandbox
+// domain, and it ships no template ID that would work for anyone.
+func applyE2BRuntimeDefaults(cfg *Config) {
 	if cfg == nil {
 		return
 	}
