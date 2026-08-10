@@ -281,6 +281,10 @@ async function hydrateSessionFromToken(authStore: ReturnType<typeof useAuthStore
       authStore.setCanCreateTenant(canCreateTenant)
     }
 
+    authStore.setAutoAcceptInvitation(
+      response.data?.capabilities?.auto_accept_invitation === true,
+    )
+
     return true
   } catch {
     return false

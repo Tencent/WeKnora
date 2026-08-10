@@ -26,8 +26,8 @@ func TestBuildMilvusClientConfig_UsesDatabaseName(t *testing.T) {
 	if cfg.DBName != "regdi_ram_haom1" {
 		t.Fatalf("expected DBName to be propagated, got %q", cfg.DBName)
 	}
-	if len(cfg.DialOptions) != 1 {
-		t.Fatalf("expected one dial option, got %d", len(cfg.DialOptions))
+	if len(cfg.DialOptions) != 2 {
+		t.Fatalf("expected timeout and SSRF-safe dial options, got %d", len(cfg.DialOptions))
 	}
 }
 
@@ -40,7 +40,7 @@ func TestBuildMilvusClientConfig_DefaultsAddressWhenMissing(t *testing.T) {
 	if cfg.DBName != "" {
 		t.Fatalf("expected empty DBName by default, got %q", cfg.DBName)
 	}
-	if len(cfg.DialOptions) != 1 {
-		t.Fatalf("expected one dial option, got %d", len(cfg.DialOptions))
+	if len(cfg.DialOptions) != 2 {
+		t.Fatalf("expected timeout and SSRF-safe dial options, got %d", len(cfg.DialOptions))
 	}
 }
