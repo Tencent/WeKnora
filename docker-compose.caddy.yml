@@ -22,6 +22,7 @@ services:
       - DOMAIN=${DOMAIN}
     volumes:
       - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/chess3i/static:/srv/chess3i/static:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

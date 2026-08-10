@@ -2,12 +2,45 @@
 # Tên miền lấy từ biến môi trường $DOMAIN (đặt trong .env trên VPS).
 
 {
-	# Email đăng ký Let's Encrypt (nhận cảnh báo sắp hết hạn).
 	email duongsinhchess@gmail.com
 }
 
 {$DOMAIN} {
 	encode zstd gzip
-	# frontend là tên service trong docker-compose (nginx phục vụ UI + proxy /api → app).
 	reverse_proxy frontend:80
+}
+
+chess3i.com, www.chess3i.com {
+	@sitegen path /vi/* /en/* /sitemap.xml /graph.json
+	root @sitegen /srv/chess3i/static
+	file_server @sitegen
+	@notsitegen {
+		not path /vi/* /en/* /sitemap.xml /graph.json
+	}
+	reverse_proxy @notsitegen 172.18.0.1:8081
+	encode gzip zstd
+}
+
+# BookStack — Thư viện cờ vua (HTTPS via Let's Encrypt)
+thuviencovua.com, www.thuviencovua.com {
+	encode zstd gzip
+	reverse_proxy bookstack:80
+}
+
+# BookStack fallback qua IP (HTTP)
+http://65.109.129.242 {
+	encode zstd gzip
+	reverse_proxy bookstack:80
+}
+
+# Mentingo LMS (Cờ Vua Học Đường) — staging. Backend publish host :3000/:3080, proxy qua host gateway.
+lms.covuahocduong.com {
+	encode zstd gzip
+	@api path /api/*
+	handle @api {
+		reverse_proxy 172.18.0.1:3000
+	}
+	handle {
+		reverse_proxy 172.18.0.1:3080
+	}
 }
