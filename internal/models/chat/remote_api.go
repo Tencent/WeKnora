@@ -72,16 +72,16 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 		}
 	}
 
+	// The SDK must use the same SSRF-safe transport as the raw HTTP paths.
+	// Constructor-time URL validation alone cannot prevent DNS rebinding or a
+	// later redirect to an internal address.
+	sdkHTTPClient := rawHTTPClient
 	// 如果指定了 CustomHeaders，则给 SDK 使用的 HTTPClient 挂一层 RoundTripper，
 	// 在每个请求上自动注入这些 header（raw HTTP 路径会在发送前单独处理）。
 	if len(chatConfig.CustomHeaders) > 0 {
-		if httpClient, ok := config.HTTPClient.(*http.Client); ok {
-			config.HTTPClient = secutils.WrapHTTPClientWithHeaders(httpClient, chatConfig.CustomHeaders)
-		} else {
-			// SDK 默认未显式设置时 HTTPClient 为 nil，此时构造一个新的注入了 header 的 client。
-			config.HTTPClient = secutils.WrapHTTPClientWithHeaders(nil, chatConfig.CustomHeaders)
-		}
+		sdkHTTPClient = secutils.WrapHTTPClientWithHeaders(sdkHTTPClient, chatConfig.CustomHeaders)
 	}
+	config.HTTPClient = sdkHTTPClient
 
 	modelName := chatConfig.ModelName
 	if chatConfig.ExtraConfig != nil {

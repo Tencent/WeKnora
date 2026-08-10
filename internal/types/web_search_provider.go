@@ -25,6 +25,7 @@ const (
 	WebSearchProviderTypeKeenable   WebSearchProviderType = "keenable"
 	WebSearchProviderTypeZhipu      WebSearchProviderType = "zhipu"
 	WebSearchProviderTypeExa        WebSearchProviderType = "exa"
+	WebSearchProviderTypeMetaso     WebSearchProviderType = "metaso"
 )
 
 // WebSearchProviderEntity represents a configured web search provider instance for a workspace.
@@ -235,6 +236,32 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 			SupportsProxy:          true,
 			Description:            "Keenable web search built for AI agents (keyless by default; an optional API key lifts the rate limit)",
 			DocsURL:                "https://keenable.ai/",
+		},
+		{
+			ID:             "metaso",
+			Name:           "Metaso AI Search",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "Metaso AI Search API (requires API key)",
+			DocsURL:        "https://metaso.cn/search-api/playground",
+			ConfigFields: []WebSearchProviderConfigField{
+				{
+					Key:         "scope",
+					Label:       "Search scope",
+					Type:        "select",
+					Required:    true,
+					Default:     "webpage",
+					Description: "Select the content source searched by Metaso.",
+					Options: []WebSearchProviderConfigFieldOption{
+						{Label: "Web pages", Value: "webpage"},
+						{Label: "Documents", Value: "document"},
+						{Label: "Scholar", Value: "scholar"},
+						{Label: "Podcasts", Value: "podcast"},
+						{Label: "Videos", Value: "video"},
+						{Label: "Images", Value: "image"},
+					},
+				},
+			},
 		},
 		{
 			ID:             "zhipu",

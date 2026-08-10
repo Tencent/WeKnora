@@ -41,6 +41,9 @@ func (s *mcpServiceService) CreateMCPService(ctx context.Context, service *types
 	if service.TransportType == types.MCPTransportStdio {
 		return fmt.Errorf("stdio transport is disabled for security reasons; please use SSE or HTTP Streamable transport instead")
 	}
+	if err := mcp.ValidateServiceOutboundURLs(service); err != nil {
+		return err
+	}
 
 	// Set default advanced config if not provided
 	if service.AdvancedConfig == nil {
@@ -248,6 +251,9 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 	}
 
 	// Update timestamp
+	if err := mcp.ValidateServiceOutboundURLs(existing); err != nil {
+		return err
+	}
 	existing.UpdatedAt = time.Now()
 
 	if err := s.mcpServiceRepo.Update(ctx, existing); err != nil {

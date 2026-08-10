@@ -8,9 +8,17 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/im"
 )
+
+func useTestHTTPClient(t *testing.T) {
+	t.Helper()
+	original := httpClient
+	httpClient = &http.Client{Timeout: 5 * time.Second}
+	t.Cleanup(func() { httpClient = original })
+}
 
 // testRegion returns a Lark-shaped region pointed at a fake Open Platform, so
 // the whole send path can be driven without touching the real cloud. Region
@@ -86,6 +94,7 @@ func (f *fakeOpenPlatform) sawPath(want string) bool {
 // SendReply must fetch a token from the region's cloud and reply under the
 // original message, carrying that token as a bearer credential.
 func TestSendReply_EndToEnd_UsesRegionCloud(t *testing.T) {
+	useTestHTTPClient(t)
 	fake := &fakeOpenPlatform{}
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
@@ -130,6 +139,7 @@ func TestSendReply_EndToEnd_UsesRegionCloud(t *testing.T) {
 // A group that rejects reply-in-thread (230071) must still receive the answer
 // via the plain send-message API, addressed to the chat.
 func TestSendReply_EndToEnd_FallsBackToSendAPI(t *testing.T) {
+	useTestHTTPClient(t)
 	fake := &fakeOpenPlatform{replyCode: 230071}
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
@@ -160,6 +170,7 @@ func TestSendReply_EndToEnd_FallsBackToSendAPI(t *testing.T) {
 
 // A non-fallback-eligible error must surface, not be silently swallowed.
 func TestSendReply_EndToEnd_HardErrorSurfaces(t *testing.T) {
+	useTestHTTPClient(t)
 	fake := &fakeOpenPlatform{replyCode: 99991663} // app ticket invalid — not retryable
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()

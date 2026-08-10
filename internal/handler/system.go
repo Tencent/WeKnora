@@ -28,8 +28,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
 
@@ -863,59 +861,16 @@ func storageEndpointHost(endpoint string) string {
 	return endpoint
 }
 
-// isBlockedStorageEndpoint checks whether a storage endpoint resolves to a dangerous
-// address (cloud metadata, loopback, link-local). Unlike the stricter isSSRFSafeURL,
-// this allows private IPs since MinIO is commonly deployed on internal networks.
-// It also respects the SSRF_WHITELIST environment variable for whitelisted hosts.
+// isBlockedStorageEndpoint keeps the legacy handler contract while delegating
+// to the same fail-closed SSRF policy used by the storage clients themselves.
+// Private storage endpoints must be explicitly whitelisted by an operator.
 func isBlockedStorageEndpoint(endpoint string) (bool, string) {
-	host := storageEndpointHost(endpoint)
-	if host == "" {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
 		return true, "无效的地址"
 	}
-
-	// Check SSRF whitelist first – whitelisted hosts bypass the block check.
-	if secutils.IsSSRFWhitelisted(host) {
-		return false, ""
-	}
-
-	hostLower := strings.ToLower(host)
-
-	blockedHosts := []string{
-		"metadata.google.internal",
-		"metadata.tencentyun.com",
-		"metadata.aws.internal",
-	}
-	for _, bh := range blockedHosts {
-		if hostLower == bh {
-			return true, "该地址不允许访问"
-		}
-	}
-
-	checkIP := func(ip net.IP) (bool, string) {
-		if ip.IsLoopback() {
-			return true, "不允许访问本地回环地址"
-		}
-		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-			return true, "不允许访问链路本地地址"
-		}
-		if ip.IsUnspecified() {
-			return true, "无效的地址"
-		}
-		return false, ""
-	}
-
-	if ip := net.ParseIP(host); ip != nil {
-		return checkIP(ip)
-	}
-
-	ips, err := net.LookupIP(host)
-	if err != nil {
-		return false, ""
-	}
-	for _, ip := range ips {
-		if blocked, reason := checkIP(ip); blocked {
-			return blocked, reason
-		}
+	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
+		return true, secutils.FormatSSRFError("存储 Endpoint", endpoint, err)
 	}
 	return false, ""
 }
@@ -1029,15 +984,7 @@ func (h *SystemHandler) checkMinio(c *gin.Context, ctx context.Context, cfg *typ
 		// If bucket does not exist, auto-create it
 		if strings.Contains(errMsg, "does not exist") && cfg.BucketName != "" {
 			logger.Info(ctx, "Storage check: bucket does not exist, attempting auto-creation", "bucket", cfg.BucketName)
-			minioClient, clientErr := minio.New(endpoint, &minio.Options{
-				Creds:  credentials.NewStaticV4(accessKeyID, secretAccessKey, ""),
-				Secure: cfg.UseSSL,
-			})
-			if clientErr != nil {
-				c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: fmt.Sprintf("Failed to create MinIO client: %s", sanitizeStorageCheckError(clientErr))}})
-				return
-			}
-			if mkErr := minioClient.MakeBucket(ctx, cfg.BucketName, minio.MakeBucketOptions{}); mkErr != nil {
+			if _, mkErr := file.NewMinioFileService(endpoint, accessKeyID, secretAccessKey, cfg.BucketName, cfg.UseSSL); mkErr != nil {
 				logger.Error(ctx, "Storage check: failed to create bucket", "bucket", cfg.BucketName, "error", mkErr)
 				c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: fmt.Sprintf("Failed to auto-create Bucket '%s': %s", cfg.BucketName, sanitizeStorageCheckError(mkErr))}})
 				return

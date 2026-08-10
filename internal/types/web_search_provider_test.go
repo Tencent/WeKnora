@@ -55,5 +55,22 @@ func TestGetWebSearchProviderTypesIncludesExa(t *testing.T) {
 	}
 	if len(field.Options) != 2 || field.Options[0].Value != "true" || field.Options[1].Value != "false" {
 		t.Fatalf("unexpected Exa config options: %+v", field.Options)
+func TestGetWebSearchProviderTypesIncludesMetaso(t *testing.T) {
+	var metaso *WebSearchProviderTypeInfo
+	providerTypes := GetWebSearchProviderTypes()
+	for i := range providerTypes {
+		if providerTypes[i].ID == string(WebSearchProviderTypeMetaso) {
+			metaso = &providerTypes[i]
+			break
+		}
+	}
+	if metaso == nil {
+		t.Fatal("Metaso provider type not found")
+	}
+	if !metaso.RequiresAPIKey || !metaso.SupportsProxy || len(metaso.ConfigFields) != 1 {
+		t.Fatalf("unexpected Metaso metadata: %+v", metaso)
+	}
+	if field := metaso.ConfigFields[0]; field.Key != "scope" || field.Default != "webpage" || len(field.Options) != 6 {
+		t.Fatalf("unexpected Metaso scope metadata: %+v", field)
 	}
 }
