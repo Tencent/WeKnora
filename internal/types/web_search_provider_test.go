@@ -55,6 +55,8 @@ func TestGetWebSearchProviderTypesIncludesExa(t *testing.T) {
 	}
 	if len(field.Options) != 2 || field.Options[0].Value != "true" || field.Options[1].Value != "false" {
 		t.Fatalf("unexpected Exa config options: %+v", field.Options)
+	}
+}
 func TestGetWebSearchProviderTypesIncludesMetaso(t *testing.T) {
 	var metaso *WebSearchProviderTypeInfo
 	providerTypes := GetWebSearchProviderTypes()
