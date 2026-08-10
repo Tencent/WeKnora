@@ -4132,7 +4132,7 @@ export default {
       goToKb: 'Go to Knowledge Base'
     },
     messages: {
-      deleted: 'База знаний удалена',
+      deleted: 'Задача удаления базы знаний отправлена',
       deleteFailed: 'Не удалось удалить базу знаний',
       duplicateSuccess: 'Дубликат базы знаний создан (без содержимого)',
       duplicateFailed: 'Не удалось создать дубликат базы знаний'
@@ -5500,7 +5500,7 @@ export default {
     clearSelection: 'Снять выделение',
     batchDelete: 'Удалить выбранные',
     confirmBatchDeleteDocument: 'Удалить {count} выбранных документов? Это действие нельзя отменить.',
-    batchDeleteSuccess: 'Удалено документов: {count}',
+    batchDeleteSuccess: 'Отправлена задача удаления документов: {count}',
     batchDeleteFailed: 'Ошибка пакетного удаления',
     batchTag: 'Пакетная метка',
     batchTagDialogHeading: 'Пакетное назначение меток',
@@ -5558,7 +5558,7 @@ export default {
     allUploadSuccess: 'Все файлы загружены ({count})',
     partialUploadSuccess: 'Частичная загрузка (успешно: {success}, ошибки: {fail})',
     allUploadFailed: 'Все файлы не удалось загрузить ({count})',
-    deleteSuccess: 'Знание удалено!',
+    deleteSuccess: 'Задача удаления отправлена',
     chunkLoadFailed: 'Не удалось загрузить фрагменты',
     infoCard: {
       tooltip: 'Просмотр информации о базе знаний',

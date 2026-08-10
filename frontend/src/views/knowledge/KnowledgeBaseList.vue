@@ -1537,7 +1537,7 @@ const confirmDelete = () => {
 
   deleteKnowledgeBase(deletingKb.value.id).then((res: any) => {
     if (res.success) {
-      MessagePlugin.success(t('knowledgeList.messages.deleted'))
+      MessagePlugin.info(t('knowledgeList.messages.deleted'))
       deleteVisible.value = false
       deletingKb.value = null
       fetchList(true)

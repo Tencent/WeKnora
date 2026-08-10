@@ -44,6 +44,7 @@ type knowledgeBaseService struct {
 	asynqClient     interfaces.TaskEnqueuer
 	taskInspector   interfaces.TaskInspector
 	taskPendingRepo interfaces.TaskPendingOpsRepository
+	wikiRepo        interfaces.WikiPageRepository
 	dsRepo          interfaces.DataSourceRepository
 	syncLogRepo     interfaces.SyncLogRepository
 	dsScheduler     *datasource.Scheduler
@@ -66,6 +67,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	asynqClient interfaces.TaskEnqueuer,
 	taskInspector interfaces.TaskInspector,
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
+	wikiRepo interfaces.WikiPageRepository,
 	dsRepo interfaces.DataSourceRepository,
 	syncLogRepo interfaces.SyncLogRepository,
 	dsScheduler *datasource.Scheduler,
@@ -87,6 +89,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 		asynqClient:     asynqClient,
 		taskInspector:   taskInspector,
 		taskPendingRepo: taskPendingRepo,
+		wikiRepo:        wikiRepo,
 		dsRepo:          dsRepo,
 		syncLogRepo:     syncLogRepo,
 		dsScheduler:     dsScheduler,
@@ -829,7 +832,15 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 
 	// Step 1: Get all knowledge entries in this knowledge base
 	logger.Infof(ctx, "Fetching all knowledge entries in knowledge base, ID: %s", kbID)
-	knowledgeList, err := s.kgRepo.ListKnowledgeByKnowledgeBaseID(ctx, tenantID, kbID)
+	var (
+		knowledgeList []*types.Knowledge
+		err           error
+	)
+	if lister, ok := s.kgRepo.(interfaces.UnscopedKnowledgeLister); ok {
+		knowledgeList, err = lister.ListKnowledgeByKnowledgeBaseIDUnscoped(ctx, tenantID, kbID)
+	} else {
+		knowledgeList, err = s.kgRepo.ListKnowledgeByKnowledgeBaseID(ctx, tenantID, kbID)
+	}
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"knowledge_base_id": kbID,
@@ -845,7 +856,13 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 	// Repeat the best-effort queue scrub with document IDs. Some batch tasks
 	// only carry knowledge_id(s), and active work from the first pass may have
 	// enqueued another downstream task before cancellation reached it.
-	s.cleanupTasksForKnowledgeBase(ctx, kbID, knowledgeIDs, payload.DataSourceIDs)
+	if err := s.deletePendingTasksForKnowledgeBase(ctx, kbID); err != nil {
+		logger.Errorf(ctx, "Failed to clear durable tasks for deleted KB %s: %v", kbID, err)
+		return err
+	}
+	s.cancelTasksForKnowledgeBase(ctx, kbID, knowledgeIDs, payload.DataSourceIDs)
+
+	var imageURLs []string
 
 	// Step 2: Delete all knowledge entries and their resources
 	if len(knowledgeList) > 0 {
@@ -879,25 +896,20 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			logger.Errorf(ctx, "KB delete task deferred: %v (tenant=%d, kb=%s)", err, payload.TenantID, payload.KnowledgeBaseID)
 			return err
 		} else {
-			// Group knowledge by embedding model and type
-			type groupKey struct {
-				EmbeddingModelID string
-				Type             string
-			}
-			embeddingGroups := make(map[groupKey][]string)
+			// Deletion is keyed by knowledge ID and must not depend on the
+			// currently configured model or dimension. Historical data may live
+			// in a collection created by an older embedding model.
+			embeddingGroups := make(map[string][]string)
 			for _, knowledge := range knowledgeList {
-				key := groupKey{EmbeddingModelID: knowledge.EmbeddingModelID, Type: knowledge.Type}
-				embeddingGroups[key] = append(embeddingGroups[key], knowledge.ID)
-			}
-
-			for key, knowledgeGroup := range embeddingGroups {
-				embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, key.EmbeddingModelID)
-				if err != nil {
-					logger.Warnf(ctx, "Failed to get embedding model %s: %v", key.EmbeddingModelID, err)
+				if strings.TrimSpace(knowledge.EmbeddingModelID) == "" {
 					continue
 				}
-				if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, knowledgeGroup, embeddingModel.GetDimensions(), key.Type); err != nil {
-					logger.Warnf(ctx, "Failed to delete embeddings for model %s: %v", key.EmbeddingModelID, err)
+				embeddingGroups[knowledge.Type] = append(embeddingGroups[knowledge.Type], knowledge.ID)
+			}
+
+			for knowledgeType, knowledgeGroup := range embeddingGroups {
+				if err := retrieveEngine.DeleteByKnowledgeIDListAllDimensions(ctx, knowledgeGroup, knowledgeType); err != nil {
+					return fmt.Errorf("delete embeddings for KB %s: %w", kbID, err)
 				}
 			}
 		}
@@ -911,31 +923,13 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 		for _, ci := range chunkImageInfos {
 			imageInfoStrs = append(imageInfoStrs, ci.ImageInfo)
 		}
-		imageURLs := collectImageURLs(ctx, imageInfoStrs)
+		imageURLs = collectImageURLs(ctx, imageInfoStrs)
 
 		// Delete all chunks
 		logger.Infof(ctx, "Deleting all chunks in knowledge base")
 		for _, knowledgeID := range knowledgeIDs {
 			if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, tenantID, knowledgeID); err != nil {
-				logger.Warnf(ctx, "Failed to delete chunks for knowledge %s: %v", knowledgeID, err)
-			}
-		}
-
-		// Delete physical files, extracted images, and adjust storage
-		logger.Infof(ctx, "Deleting physical files and extracted images")
-		storageAdjust := int64(0)
-		for _, knowledge := range knowledgeList {
-			if knowledge.FilePath != "" {
-				if err := s.fileSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
-					logger.Warnf(ctx, "Failed to delete file %s: %v", knowledge.FilePath, err)
-				}
-			}
-			storageAdjust -= knowledge.StorageSize
-		}
-		deleteExtractedImages(ctx, s.fileSvc, imageURLs)
-		if storageAdjust != 0 {
-			if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantID, storageAdjust); err != nil {
-				logger.Warnf(ctx, "Failed to adjust tenant storage: %v", err)
+				return fmt.Errorf("delete chunks for knowledge %s: %w", knowledgeID, err)
 			}
 		}
 
@@ -950,10 +944,19 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 		}
 		if s.graphEngine != nil && len(namespaces) > 0 {
 			if err := s.graphEngine.DelGraph(ctx, namespaces); err != nil {
-				logger.Warnf(ctx, "Failed to delete knowledge graph: %v", err)
+				return fmt.Errorf("delete knowledge graph for KB %s: %w", kbID, err)
 			}
 		}
+	}
 
+	if s.wikiRepo != nil {
+		logger.Infof(ctx, "Deleting Wiki data for knowledge base")
+		if err := s.wikiRepo.DeleteByKnowledgeBaseID(ctx, kbID); err != nil {
+			return fmt.Errorf("delete Wiki data for KB %s: %w", kbID, err)
+		}
+	}
+
+	if len(knowledgeList) > 0 {
 		// Delete all knowledge entries from database
 		logger.Infof(ctx, "Deleting knowledge entries from database")
 		if err := s.kgRepo.DeleteKnowledgeList(ctx, tenantID, knowledgeIDs); err != nil {
@@ -961,6 +964,32 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 				"knowledge_base_id": kbID,
 			})
 			return err
+		}
+
+		// Physical files are removed only after every retryable index, chunk,
+		// graph, Wiki, and database cleanup has succeeded. Failures below may
+		// leak storage but cannot make the remaining metadata impossible to
+		// retry. Only rows that were active at task start adjust quota; unscoped
+		// historical rows may already have been accounted for by an older task.
+		logger.Infof(ctx, "Deleting physical files and extracted images")
+		storageAdjust := int64(0)
+		for _, knowledge := range knowledgeList {
+			if knowledge.FilePath != "" && s.fileSvc != nil {
+				if err := s.fileSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
+					logger.Warnf(ctx, "Failed to delete file %s: %v", knowledge.FilePath, err)
+				}
+			}
+			if !knowledge.DeletedAt.Valid {
+				storageAdjust -= knowledge.StorageSize
+			}
+		}
+		if s.fileSvc != nil {
+			deleteExtractedImages(ctx, s.fileSvc, imageURLs)
+		}
+		if storageAdjust != 0 && s.tenantRepo != nil {
+			if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantID, storageAdjust); err != nil {
+				logger.Warnf(ctx, "Failed to adjust tenant storage: %v", err)
+			}
 		}
 	}
 
@@ -999,16 +1028,18 @@ func (s *knowledgeBaseService) cleanupTasksForKnowledgeBase(
 	if kbID == "" {
 		return
 	}
-	cleaner, ok := s.taskPendingRepo.(interfaces.TaskPendingOpsScopeCleaner)
-	if ok {
-		// Clear durable work before scanning Redis. A large or degraded queue
-		// must not consume the caller's entire deadline and starve the database
-		// fence that prevents startup recovery from reviving this KB.
-		if err := cleaner.DeleteByScope(ctx, types.TaskScopeKnowledgeBase, kbID); err != nil {
-			logger.Warnf(ctx, "Failed to clear durable tasks for deleted KB %s: %v", kbID, err)
-		}
+	if err := s.deletePendingTasksForKnowledgeBase(ctx, kbID); err != nil {
+		logger.Warnf(ctx, "Failed to clear durable tasks for deleted KB %s: %v", kbID, err)
 	}
 	s.cancelTasksForKnowledgeBase(ctx, kbID, knowledgeIDs, dataSourceIDs)
+}
+
+func (s *knowledgeBaseService) deletePendingTasksForKnowledgeBase(ctx context.Context, kbID string) error {
+	cleaner, ok := s.taskPendingRepo.(interfaces.TaskPendingOpsScopeCleaner)
+	if !ok || kbID == "" {
+		return nil
+	}
+	return cleaner.DeleteByScope(ctx, types.TaskScopeKnowledgeBase, kbID)
 }
 
 // deleteDataSourcesForKnowledgeBase mirrors DataSourceService.DeleteDataSource for

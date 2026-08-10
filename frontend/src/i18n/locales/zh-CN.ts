@@ -4132,7 +4132,7 @@ export default {
       goToKb: '进入知识库'
     },
     messages: {
-      deleted: '已删除',
+      deleted: '知识库删除任务已提交',
       deleteFailed: '删除失败',
       duplicateSuccess: '知识库副本已创建（不包含知识内容）',
       duplicateFailed: '创建知识库副本失败'
@@ -5500,7 +5500,7 @@ export default {
     clearSelection: '取消选择',
     batchDelete: '批量删除',
     confirmBatchDeleteDocument: '确认删除选中的 {count} 个文档？删除后将无法恢复。',
-    batchDeleteSuccess: '成功删除 {count} 个文档',
+    batchDeleteSuccess: '已提交 {count} 个文档的删除任务',
     batchDeleteFailed: '批量删除失败',
     batchTag: '批量打标签',
     batchTagDialogHeading: '批量打标签',
@@ -5558,7 +5558,7 @@ export default {
     allUploadSuccess: '所有文件上传成功（{count}个）',
     partialUploadSuccess: '部分文件上传成功（成功：{success}，失败：{fail}）',
     allUploadFailed: '所有文件上传失败（{count}个）',
-    deleteSuccess: '知识删除成功！',
+    deleteSuccess: '删除任务已提交',
     chunkLoadFailed: '分块加载失败',
     infoCard: {
       tooltip: '查看知识库信息',

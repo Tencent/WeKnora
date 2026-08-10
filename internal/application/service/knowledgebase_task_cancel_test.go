@@ -80,6 +80,17 @@ type recordingKBPendingRepo struct {
 	deleteErr error
 }
 
+type recordingKBWikiRepo struct {
+	interfaces.WikiPageRepository
+	kbIDs []string
+	err   error
+}
+
+func (r *recordingKBWikiRepo) DeleteByKnowledgeBaseID(_ context.Context, kbID string) error {
+	r.kbIDs = append(r.kbIDs, kbID)
+	return r.err
+}
+
 func (r *recordingKBPendingRepo) DeleteByScope(_ context.Context, scope, scopeID string) error {
 	if scope == types.TaskScopeKnowledgeBase {
 		r.scopeIDs = append(r.scopeIDs, scopeID)
@@ -195,6 +206,52 @@ func TestProcessKBDeleteRepeatsQueueCleanup(t *testing.T) {
 	assert.Equal(t, []string{"kb-race", "kb-race"}, pendingRepo.scopeIDs)
 }
 
+func TestProcessKBDeleteRetriesWhenDurableCleanupFails(t *testing.T) {
+	pendingErr := errors.New("database unavailable")
+	pendingRepo := &recordingKBPendingRepo{deleteErr: pendingErr}
+	svc := &knowledgeBaseService{
+		kgRepo:          emptyKBKnowledgeRepo{},
+		taskPendingRepo: pendingRepo,
+	}
+	payload, err := json.Marshal(types.KBDeletePayload{TenantID: 1, KnowledgeBaseID: "kb-pending"})
+	require.NoError(t, err)
+
+	err = svc.ProcessKBDelete(context.Background(), asynq.NewTask(types.TypeKBDelete, payload))
+
+	require.ErrorIs(t, err, pendingErr)
+	assert.Equal(t, []string{"kb-pending", "kb-pending"}, pendingRepo.scopeIDs)
+}
+
+func TestProcessKBDeleteCleansWikiDataWithoutKnowledgeRows(t *testing.T) {
+	wikiRepo := &recordingKBWikiRepo{}
+	svc := &knowledgeBaseService{
+		kgRepo:   emptyKBKnowledgeRepo{},
+		wikiRepo: wikiRepo,
+	}
+	payload, err := json.Marshal(types.KBDeletePayload{TenantID: 1, KnowledgeBaseID: "kb-wiki"})
+	require.NoError(t, err)
+
+	err = svc.ProcessKBDelete(context.Background(), asynq.NewTask(types.TypeKBDelete, payload))
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"kb-wiki"}, wikiRepo.kbIDs)
+}
+
+func TestProcessKBDeleteRetriesWhenWikiCleanupFails(t *testing.T) {
+	wikiErr := errors.New("wiki database unavailable")
+	wikiRepo := &recordingKBWikiRepo{err: wikiErr}
+	svc := &knowledgeBaseService{
+		kgRepo:   emptyKBKnowledgeRepo{},
+		wikiRepo: wikiRepo,
+	}
+	payload, err := json.Marshal(types.KBDeletePayload{TenantID: 1, KnowledgeBaseID: "kb-wiki"})
+	require.NoError(t, err)
+
+	err = svc.ProcessKBDelete(context.Background(), asynq.NewTask(types.TypeKBDelete, payload))
+
+	require.ErrorIs(t, err, wikiErr)
+}
+
 type populatedKBKnowledgeRepo struct {
 	interfaces.KnowledgeRepository
 	items []*types.Knowledge
@@ -253,6 +310,37 @@ func (kbCleanupEmbedder) BatchEmbedWithPool(
 	return nil, nil
 }
 
+type failingKBDeleteEngine struct {
+	interfaces.RetrieveEngineService
+	err         error
+	deleteCalls int
+}
+
+func (e *failingKBDeleteEngine) EngineType() types.RetrieverEngineType {
+	return types.QdrantRetrieverEngineType
+}
+
+func (e *failingKBDeleteEngine) Support() []types.RetrieverType {
+	return []types.RetrieverType{types.VectorRetrieverType}
+}
+
+func (e *failingKBDeleteEngine) DeleteByKnowledgeIDList(
+	context.Context, []string, int, string,
+) error {
+	e.deleteCalls++
+	return e.err
+}
+
+type trackingKBChunkRepo struct {
+	kbCleanupChunkRepo
+	deleteCalls int
+}
+
+func (r *trackingKBChunkRepo) DeleteChunksByKnowledgeID(context.Context, uint64, string) error {
+	r.deleteCalls++
+	return nil
+}
+
 func TestProcessKBDeleteCollectsKnowledgeIDsForEveryScrub(t *testing.T) {
 	inspector := &recordingKBTaskInspector{}
 	svc := &knowledgeBaseService{
@@ -274,6 +362,39 @@ func TestProcessKBDeleteCollectsKnowledgeIDsForEveryScrub(t *testing.T) {
 	for _, call := range inspector.calls {
 		assert.Equal(t, []string{"knowledge-1", "knowledge-2"}, call.knowledgeIDs)
 	}
+}
+
+func TestProcessKBDeleteVectorFailureKeepsKnowledgeRows(t *testing.T) {
+	vectorErr := errors.New("qdrant unavailable")
+	engine := &failingKBDeleteEngine{err: vectorErr}
+	registry := retriever.NewRetrieveEngineRegistry(nil, nil)
+	require.NoError(t, registry.Register(engine))
+	repo := &kbDeleteTrackingKnowledgeRepo{populatedKBKnowledgeRepo: populatedKBKnowledgeRepo{items: []*types.Knowledge{
+		{ID: "knowledge-1", KnowledgeBaseID: "kb-1", EmbeddingModelID: "model-1", Type: "file"},
+	}}}
+	chunkRepo := &trackingKBChunkRepo{}
+	svc := &knowledgeBaseService{
+		kgRepo:         repo,
+		chunkRepo:      chunkRepo,
+		modelService:   kbCleanupModelService{},
+		retrieveEngine: registry,
+	}
+	payload, err := json.Marshal(types.KBDeletePayload{
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		EffectiveEngines: []types.RetrieverEngineParams{{
+			RetrieverEngineType: types.QdrantRetrieverEngineType,
+			RetrieverType:       types.VectorRetrieverType,
+		}},
+	})
+	require.NoError(t, err)
+
+	err = svc.ProcessKBDelete(context.Background(), asynq.NewTask(types.TypeKBDelete, payload))
+
+	require.ErrorIs(t, err, vectorErr)
+	assert.Equal(t, 1, engine.deleteCalls)
+	assert.Equal(t, 0, chunkRepo.deleteCalls)
+	assert.Equal(t, 0, repo.deleteCalls, "knowledge rows must remain available for retry")
 }
 
 // kbDeleteDeferredRegistry reports a retryable engine-resolution failure from

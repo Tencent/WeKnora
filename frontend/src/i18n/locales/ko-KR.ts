@@ -4132,7 +4132,7 @@ export default {
       goToKb: '지식베이스를 입력하세요'
     },
     messages: {
-      deleted: '삭제됨',
+      deleted: '지식베이스 삭제 작업이 제출되었습니다',
       deleteFailed: '삭제 실패',
       duplicateSuccess: '지식베이스 복제본이 생성되었습니다(콘텐츠 제외)',
       duplicateFailed: '지식베이스 복제본 생성 실패'
@@ -5500,7 +5500,7 @@ export default {
     clearSelection: '선택 해제',
     batchDelete: '선택 삭제',
     confirmBatchDeleteDocument: '선택한 {count}개 문서를 삭제하시겠습니까? 삭제 후 복구할 수 없습니다.',
-    batchDeleteSuccess: '{count}개 문서가 삭제되었습니다',
+    batchDeleteSuccess: '{count}개 문서의 삭제 작업이 제출되었습니다',
     batchDeleteFailed: '일괄 삭제 실패',
     batchTag: '일괄 태그',
     batchTagDialogHeading: '일괄 태그 지정',
@@ -5558,7 +5558,7 @@ export default {
     allUploadSuccess: '모든 파일 업로드 성공 ({count}개)',
     partialUploadSuccess: '일부 파일 업로드 성공 (성공: {success}, 실패: {fail})',
     allUploadFailed: '모든 파일 업로드 실패 ({count}개)',
-    deleteSuccess: '지식이 성공적으로 삭제되었습니다!',
+    deleteSuccess: '삭제 작업이 제출되었습니다',
     chunkLoadFailed: '청크 로드 실패',
     infoCard: {
       tooltip: '지식베이스 정보 보기',

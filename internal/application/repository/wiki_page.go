@@ -1123,6 +1123,29 @@ func (r *wikiPageRepository) DeleteByID(ctx context.Context, id string) error {
 	return nil
 }
 
+// DeleteByKnowledgeBaseID permanently removes the complete Wiki scope for a
+// deleted knowledge base. The operation is transactional and idempotent so an
+// asynchronous KB delete can safely retry after a partial infrastructure
+// failure without leaving revisions, folders, or issues behind.
+func (r *wikiPageRepository) DeleteByKnowledgeBaseID(ctx context.Context, kbID string) error {
+	if kbID == "" {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, model := range []interface{}{
+			&types.WikiPageRevision{},
+			&types.WikiPageIssue{},
+			&types.WikiPage{},
+			&types.WikiFolder{},
+		} {
+			if err := tx.Unscoped().Where("knowledge_base_id = ?", kbID).Delete(model).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // escapeLikePattern escapes LIKE / ILIKE metacharacters so the returned string
 // can be safely concatenated with % wildcards without unintended matches.
 // Order matters: escape the backslash first, then the wildcards.

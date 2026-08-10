@@ -65,6 +65,55 @@ func newTestRepo(t *testing.T, handler http.HandlerFunc) (*Repository, *httptest
 	return repo, ts
 }
 
+func TestDeleteByKnowledgeIDListAllDimensionsUsesIndexWildcard(t *testing.T) {
+	var requestPath string
+	var requestQuery string
+	repo, server := newTestRepo(t, func(w http.ResponseWriter, r *http.Request) {
+		requestPath = r.URL.Path
+		requestQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"deleted": 1}`))
+	})
+	defer server.Close()
+
+	err := repo.DeleteByKnowledgeIDListAllDimensions(
+		context.Background(), []string{"knowledge-1"}, "file",
+	)
+	if err != nil {
+		t.Fatalf("DeleteByKnowledgeIDListAllDimensions returned error: %v", err)
+	}
+	if !strings.Contains(requestPath, "/weknora_test_*/_delete_by_query") {
+		t.Fatalf("request path = %q, want cross-dimension wildcard", requestPath)
+	}
+	if !strings.Contains(requestQuery, "allow_no_indices=true") ||
+		!strings.Contains(requestQuery, "ignore_unavailable=true") {
+		t.Fatalf("request query = %q, want idempotent missing-index flags", requestQuery)
+	}
+}
+
+func TestDeleteByKnowledgeIDListAllDimensionsBatchesLargeLists(t *testing.T) {
+	var requestCount int
+	repo, server := newTestRepo(t, func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"deleted": 1}`))
+	})
+	defer server.Close()
+
+	knowledgeIDs := make([]string, 2001)
+	for i := range knowledgeIDs {
+		knowledgeIDs[i] = fmt.Sprintf("knowledge-%d", i)
+	}
+	if err := repo.DeleteByKnowledgeIDListAllDimensions(
+		context.Background(), knowledgeIDs, "file",
+	); err != nil {
+		t.Fatalf("DeleteByKnowledgeIDListAllDimensions returned error: %v", err)
+	}
+	if requestCount != 3 {
+		t.Fatalf("delete-by-query requests = %d, want 3", requestCount)
+	}
+}
+
 // ============================================================================
 // Interface satisfaction (compile-time check — duplicates the var _ assertion
 // in repository.go but documents the intent explicitly in tests).

@@ -50,6 +50,30 @@ func (r *saveOnlyRepository) BatchSave(
 	return nil
 }
 
+type crossDimensionDeleteRepository struct {
+	interfaces.RetrieveEngineRepository
+	allDimensionCalls int
+	configuredCalls   int
+	knowledgeIDs      []string
+	knowledgeType     string
+}
+
+func (r *crossDimensionDeleteRepository) DeleteByKnowledgeIDList(
+	context.Context, []string, int, string,
+) error {
+	r.configuredCalls++
+	return nil
+}
+
+func (r *crossDimensionDeleteRepository) DeleteByKnowledgeIDListAllDimensions(
+	_ context.Context, knowledgeIDs []string, knowledgeType string,
+) error {
+	r.allDimensionCalls++
+	r.knowledgeIDs = append([]string(nil), knowledgeIDs...)
+	r.knowledgeType = knowledgeType
+	return nil
+}
+
 func TestIndexRemovesInlineImagePayloadBeforeEmbedding(t *testing.T) {
 	ctx := context.Background()
 	embedder := &capturingEmbedder{}
@@ -104,6 +128,25 @@ func TestBatchIndexTruncatesOversizedEmbeddingInput(t *testing.T) {
 	}
 	if got := len([]rune(embedder.batchTexts[0])); got > safetyMaxChars {
 		t.Fatalf("embedding input length = %d, want <= %d", got, safetyMaxChars)
+	}
+}
+
+func TestDeleteByKnowledgeIDListUsesCrossDimensionRepositoryCapability(t *testing.T) {
+	repo := &crossDimensionDeleteRepository{}
+	service := &KeywordsVectorHybridRetrieveEngineService{indexRepository: repo}
+
+	err := service.DeleteByKnowledgeIDList(
+		context.Background(), []string{"knowledge-1"}, 2048, "file",
+	)
+	if err != nil {
+		t.Fatalf("DeleteByKnowledgeIDList returned error: %v", err)
+	}
+	if repo.allDimensionCalls != 1 || repo.configuredCalls != 0 {
+		t.Fatalf("all-dimension calls = %d, configured-dimension calls = %d, want 1 and 0",
+			repo.allDimensionCalls, repo.configuredCalls)
+	}
+	if len(repo.knowledgeIDs) != 1 || repo.knowledgeIDs[0] != "knowledge-1" || repo.knowledgeType != "file" {
+		t.Fatalf("unexpected delete payload: ids=%v type=%q", repo.knowledgeIDs, repo.knowledgeType)
 	}
 }
 

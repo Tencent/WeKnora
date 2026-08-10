@@ -97,6 +97,21 @@ func (r *knowledgeRepository) ListKnowledgeByKnowledgeBaseID(
 	return knowledges, nil
 }
 
+// ListKnowledgeByKnowledgeBaseIDUnscoped includes soft-deleted rows so a
+// replayed knowledge-base deletion can clean vector, graph, Wiki, and file
+// data left by older failed delete attempts.
+func (r *knowledgeRepository) ListKnowledgeByKnowledgeBaseIDUnscoped(
+	ctx context.Context, tenantID uint64, kbID string,
+) ([]*types.Knowledge, error) {
+	var knowledges []*types.Knowledge
+	if err := r.db.WithContext(ctx).Unscoped().
+		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+		Order("created_at DESC").Find(&knowledges).Error; err != nil {
+		return nil, err
+	}
+	return knowledges, nil
+}
+
 // applyKnowledgeListFilter applies the optional filter dimensions of
 // KnowledgeListFilter to a GORM query. Tenant / knowledge base scoping must be
 // applied by the caller before invoking this helper.

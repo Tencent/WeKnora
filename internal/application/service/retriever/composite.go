@@ -298,6 +298,21 @@ func (c *CompositeRetrieveEngine) DeleteByKnowledgeIDList(ctx context.Context,
 	})
 }
 
+// DeleteByKnowledgeIDListAllDimensions deletes knowledge data without relying
+// on the currently configured embedding dimension. Dimension-partitioned
+// repositories discover and clean every owned collection; single-index
+// repositories ignore the zero-dimension fallback as they always have.
+func (c *CompositeRetrieveEngine) DeleteByKnowledgeIDListAllDimensions(
+	ctx context.Context, knowledgeIDList []string, knowledgeType string,
+) error {
+	return c.concurrentExecWithError(ctx, func(ctx context.Context, engineInfo *engineInfo) error {
+		if deleter, ok := engineInfo.retrieveEngine.(interfaces.CrossDimensionKnowledgeDeleter); ok {
+			return deleter.DeleteByKnowledgeIDListAllDimensions(ctx, knowledgeIDList, knowledgeType)
+		}
+		return engineInfo.retrieveEngine.DeleteByKnowledgeIDList(ctx, knowledgeIDList, 0, knowledgeType)
+	})
+}
+
 // EstimateStorageSize estimates the storage size required for the provided index information
 func (c *CompositeRetrieveEngine) EstimateStorageSize(ctx context.Context,
 	embedder embedding.Embedder, indexInfoList []*types.IndexInfo,

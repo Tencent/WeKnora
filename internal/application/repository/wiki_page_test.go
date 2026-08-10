@@ -108,6 +108,48 @@ func setupWikiPagesTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestDeleteByKnowledgeBaseIDRemovesCompleteWikiScope(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	require.NoError(t, db.AutoMigrate(&types.WikiPageIssue{}))
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+	page := makeWikiPage("kb-delete", "concept/delete", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	require.NoError(t, repo.Create(ctx, page))
+	require.NoError(t, db.Create(&types.WikiPageRevision{
+		ID:              uuid.New().String(),
+		TenantID:        1,
+		KnowledgeBaseID: "kb-delete",
+		PageID:          page.ID,
+		Slug:            page.Slug,
+		Version:         1,
+	}).Error)
+	require.NoError(t, db.Create(&types.WikiFolder{
+		ID:              uuid.New().String(),
+		TenantID:        1,
+		KnowledgeBaseID: "kb-delete",
+		Name:            "folder",
+	}).Error)
+	require.NoError(t, db.Create(&types.WikiPageIssue{
+		ID:              uuid.New().String(),
+		TenantID:        1,
+		KnowledgeBaseID: "kb-delete",
+		Slug:            page.Slug,
+	}).Error)
+
+	require.NoError(t, repo.DeleteByKnowledgeBaseID(ctx, "kb-delete"))
+
+	for _, model := range []interface{}{
+		&types.WikiPage{},
+		&types.WikiPageRevision{},
+		&types.WikiFolder{},
+		&types.WikiPageIssue{},
+	} {
+		var count int64
+		require.NoError(t, db.Unscoped().Model(model).Where("knowledge_base_id = ?", "kb-delete").Count(&count).Error)
+		require.Zero(t, count)
+	}
+}
+
 // makeWikiPage builds a minimal WikiPage suitable for insert. Title is
 // derived from the slug so ORDER BY title ASC yields a predictable
 // test ordering without callers having to spell out both fields.
