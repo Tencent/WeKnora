@@ -50,7 +50,10 @@ const DOMPurifyConfig = {
     'version', 'baseprofile', 'enable-background', 'overflow', 'visibility',
     'display', 'pointer-events', 'cursor', 'data-emit', 'direction',
     // KaTeX MathML 支持的属性
-    'mathvariant', 'encoding', 'aria-hidden'
+    'mathvariant', 'encoding', 'aria-hidden',
+    // Chip tham chiếu cờ vua [[game/<slug>]] → <a data-chess-ref data-chess-type>
+    // (renderChessChips, utils/chessBlocks.ts) — cần giữ để click mở popup bàn cờ.
+    'data-chess-ref', 'data-chess-type',
   ],
   USE_PROFILES: { html: true, svg: true, mathMl: true },
   ...domPurifySecurityOptions,

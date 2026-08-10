@@ -38,9 +38,10 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>();
 
-const REF_TYPES = ['game', 'puzzle', 'lesson', 'course', 'position'];
+const REF_TYPES = ['game', 'puzzle', 'lesson', 'course', 'position', 'book', 'chapter'];
 const TYPE_LABELS: Record<string, string> = {
   game: 'Ván', puzzle: 'Bài tập', lesson: 'Bài', course: 'Khóa', position: 'Thế cờ',
+  book: 'Sách', chapter: 'Chương',
 };
 function typeLabel(t: string): string { return TYPE_LABELS[t] || t; }
 
@@ -257,6 +258,8 @@ function caretCoordinates(el: HTMLTextAreaElement, position: number) {
   &[data-type='lesson'] { background: #389e0d; }
   &[data-type='course'] { background: #531dab; }
   &[data-type='position'] { background: #0a7d6f; }
+  &[data-type='book'] { background: #ad6800; }
+  &[data-type='chapter'] { background: #7cb305; }
 }
 .cwl-title {
   flex: 1;

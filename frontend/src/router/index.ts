@@ -82,6 +82,14 @@ const router = createRouter({
       component: () => import("../views/knowledge/KnowledgeBase.vue"),
       meta: { requiresInit: true, requiresAuth: true }
     },
+    // Trang in sách (Thư viện sách cờ vua): route ĐỘC LẬP (không nằm trong
+    // /platform) để không kéo theo sidebar/topbar — mở ở tab mới rồi Ctrl+P.
+    {
+      path: "/book-print/:id",
+      name: "chessBookPrint",
+      component: () => import("../views/chess/BookPrint.vue"),
+      meta: { requiresInit: true, requiresAuth: true }
+    },
     {
       path: "/platform",
       name: "Platform",

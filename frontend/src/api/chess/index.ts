@@ -1,4 +1,4 @@
-import { get, post, put, del } from "../../utils/request";
+import { get, post, put, del, postUpload } from "../../utils/request";
 
 // API quản lý khóa học & bài học cờ vua (Phase 4 LMS).
 // Lưu ý: path phải bao gồm tiền tố /api/v1 (giống các api khác — baseURL không chứa nó).
@@ -31,7 +31,7 @@ export interface ChessLesson {
 
 // ---- Tìm kiếm hợp nhất tham chiếu cờ (autocomplete wikilink khi gõ "[[") ----
 export interface ChessRefSearchItem {
-  type: "game" | "puzzle" | "lesson" | "course" | "position";
+  type: "game" | "puzzle" | "lesson" | "course" | "position" | "book" | "chapter";
   slug: string;
   ref: string; // "<type>/<slug>"
   title: string;
@@ -163,3 +163,104 @@ export const listPositionsByGame = (gameId: string) =>
 export const exportPositions = (f: Partial<{ category: string; level: string; eco: string }> = {}) =>
   get(`/api/v1/chess/positions/export${qs(f as Record<string, string>)}`);
 export const importPositions = (positions: any[]) => post("/api/v1/chess/positions/import", { positions });
+
+// ---- Thư viện sách cờ vua (Kệ → Sách → Chương) ----
+// Biên soạn NỘI BỘ (markdown + FEN + ván cờ + ảnh), KHÔNG phải kho ebook
+// PDF/EPUB để đọc. Chỉ sách status="published" được index vào KB tri thức cờ.
+
+export interface ChessShelf {
+  id: string;
+  title: string; kind: string; description: string; cover_url: string; sort_order: number;
+  book_count?: number;
+  slug?: string;
+  created_at?: string;
+}
+export interface ChessBook {
+  id: string;
+  title: string; subtitle: string;
+  author: string; translator: string; publisher: string; year: string; isbn: string; language: string;
+  level: string; phase: string; eco: string; status: string;
+  description: string; cover_url: string; tags: string; sort_order: number;
+  chapter_count?: number;
+  slug?: string;
+  created_at?: string; updated_at?: string;
+}
+export interface ChessBookChapter {
+  id: string; book_id: string;
+  part: string; title: string; content: string; fen: string; level: string; sort_order: number;
+  slug?: string;
+  created_at?: string; updated_at?: string;
+}
+export interface ChessChapterRevision {
+  id: string; chapter_id: string; revision_number: number;
+  title: string; content: string; summary: string; created_by: string; created_at: string;
+}
+
+// ---- Kệ ----
+export const listShelves = (f: Partial<{ kind: string; q: string }> = {}) =>
+  get(`/api/v1/chess/shelves${qs(f as Record<string, string>)}`);
+export const getShelf = (id: string) => get(`/api/v1/chess/shelves/${id}`);
+export const getShelfBySlug = (slug: string) => get(`/api/v1/chess/shelves/by-slug/${encodeURIComponent(slug)}`);
+export const createShelf = (data: Partial<ChessShelf>) => post("/api/v1/chess/shelves", data);
+export const updateShelf = (id: string, data: Partial<ChessShelf>) => put(`/api/v1/chess/shelves/${id}`, data);
+export const renameShelfSlug = (id: string, slug: string) => put(`/api/v1/chess/shelves/${id}/slug`, { slug });
+export const deleteShelf = (id: string) => del(`/api/v1/chess/shelves/${id}`);
+// Ghi đè toàn bộ danh sách sách trên một kệ (nhiều-nhiều) theo đúng thứ tự truyền vào.
+export const setShelfBooks = (id: string, bookIds: string[]) => put(`/api/v1/chess/shelves/${id}/books`, { book_ids: bookIds });
+
+// ---- Sách ----
+export const listBooks = (
+  f: Partial<{ shelf_id: string; level: string; phase: string; status: string; q: string }> = {},
+) => get(`/api/v1/chess/books${qs(f as Record<string, string>)}`);
+export const getBook = (id: string) => get(`/api/v1/chess/books/${id}`);
+// Giải mã wikilink [[book/<slug>]] → sách.
+export const getBookBySlug = (slug: string) => get(`/api/v1/chess/books/by-slug/${encodeURIComponent(slug)}`);
+export const getBookBacklinks = (slug: string) => get(`/api/v1/chess/books/by-slug/${encodeURIComponent(slug)}/backlinks`);
+// Kệ đang chứa sách (hiển thị ở form sửa sách).
+export const listShelvesOfBook = (id: string) => get(`/api/v1/chess/books/${id}/shelves`);
+export const createBook = (data: Partial<ChessBook>) => post("/api/v1/chess/books", data);
+export const updateBook = (id: string, data: Partial<ChessBook>) => put(`/api/v1/chess/books/${id}`, data);
+// Đổi slug sách (giữ link cũ qua alias).
+export const renameBookSlug = (id: string, slug: string) => put(`/api/v1/chess/books/${id}/slug`, { slug });
+// Xóa sách — cascade chương/kệ/ảnh/lịch sử ở backend.
+export const deleteBook = (id: string) => del(`/api/v1/chess/books/${id}`);
+// Export/Import sách (kèm chương) dạng JSON — sao lưu/chia sẻ. Import luôn tạo mới.
+export const exportBooks = (f: Partial<{ shelf_id: string; level: string; phase: string; status: string }> = {}) =>
+  get(`/api/v1/chess/books/export${qs(f as Record<string, string>)}`);
+export const importBooks = (books: any[]) => post("/api/v1/chess/books/import", { books });
+
+// ---- Ảnh chèn trong chương ----
+// Upload ảnh (multipart) → {id, url}. url là đường dẫn ổn định
+// (GET /api/v1/chess/books/images/:id), dùng trực tiếp trong markdown chương —
+// KHÔNG phải presigned URL có hạn dùng.
+export const uploadBookImage = (bookId: string, file: File, onProgress?: (e: any) => void) => {
+  const form = new FormData();
+  form.append("file", file);
+  return postUpload(`/api/v1/chess/books/${bookId}/images`, form, onProgress);
+};
+export const bookImageURL = (imageId: string) => `/api/v1/chess/books/images/${imageId}`;
+
+// ---- Chương ----
+export const listChapters = (bookId: string) => get(`/api/v1/chess/books/${bookId}/chapters`);
+export const createChapter = (bookId: string, data: Partial<ChessBookChapter>) =>
+  post(`/api/v1/chess/books/${bookId}/chapters`, data);
+// Ghi lại thứ tự chương theo đúng danh sách chapterIds truyền vào.
+export const reorderChapters = (bookId: string, chapterIds: string[]) =>
+  put(`/api/v1/chess/books/${bookId}/chapters/reorder`, { chapter_ids: chapterIds });
+export const getChapter = (id: string) => get(`/api/v1/chess/chapters/${id}`);
+// Giải mã wikilink [[chapter/<slug>]] → chương.
+export const getChapterBySlug = (slug: string) => get(`/api/v1/chess/chapters/by-slug/${encodeURIComponent(slug)}`);
+export const getChapterBacklinks = (slug: string) => get(`/api/v1/chess/chapters/by-slug/${encodeURIComponent(slug)}/backlinks`);
+// summary (tùy chọn): ghi chú thay đổi, lưu kèm bản phiên bản mới nếu title/content đổi.
+export const updateChapter = (id: string, data: Partial<ChessBookChapter> & { summary?: string }) =>
+  put(`/api/v1/chess/chapters/${id}`, data);
+// Đổi slug chương (giữ link cũ qua alias).
+export const renameChapterSlug = (id: string, slug: string) => put(`/api/v1/chess/chapters/${id}/slug`, { slug });
+export const deleteChapter = (id: string) => del(`/api/v1/chess/chapters/${id}`);
+
+// ---- Lịch sử phiên bản chương ----
+export const listChapterRevisions = (chapterId: string) => get(`/api/v1/chess/chapters/${chapterId}/revisions`);
+export const getChapterRevision = (chapterId: string, revId: string) =>
+  get(`/api/v1/chess/chapters/${chapterId}/revisions/${revId}`);
+export const restoreChapterRevision = (chapterId: string, revId: string) =>
+  post(`/api/v1/chess/chapters/${chapterId}/revisions/${revId}/restore`, {});

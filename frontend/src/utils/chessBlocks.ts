@@ -1,4 +1,5 @@
 import type { ChessBoardData } from '@/types/tool-results';
+import type { ChessRefType } from './chessRef';
 
 // Tiện ích bóc tách khối ``` chess ``` trong nội dung câu trả lời để render bàn
 // cờ tương tác. Dùng hàm THUẦN (không đụng DOM) — botmsg.vue render bàn cờ bằng
@@ -71,7 +72,7 @@ export function stripChessBlocks(markdown: string): string {
 // Một đoạn nội dung sau khi tách: markdown thuần, một bàn cờ (từ khối ```chess),
 // hoặc một tham chiếu cờ NHÚNG (từ ![[game/<slug>]]).
 export interface ChessRefSeg {
-  refType: 'game' | 'puzzle' | 'lesson' | 'course' | 'position';
+  refType: ChessRefType;
   slug: string; // slug trần
   ref: string; // "game/<slug>"
   label?: string; // nhãn tùy chọn từ cú pháp ![[ref|nhãn]]
@@ -114,7 +115,7 @@ export function splitChessSegments(markdown: string): ChessSegment[] {
 }
 
 // Các loại tham chiếu cờ hợp lệ cho wikilink.
-const CHESS_REF_TYPES = 'game|puzzle|lesson|course|position';
+const CHESS_REF_TYPES = 'game|puzzle|lesson|course|position|book|chapter';
 // NHÚNG inline: ![[game/<slug>]] hoặc ![[game/<slug>|nhãn]] → bàn cờ inline.
 const CHESS_EMBED_RE = new RegExp(`!\\[\\[(${CHESS_REF_TYPES})/([^\\]|]+?)(?:\\|([^\\]]+))?\\]\\]`, 'g');
 // CHIP inline: [[game/<slug>]] (KHÔNG có dấu ! phía trước) → liên kết <a> bấm mở popup.

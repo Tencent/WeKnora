@@ -14,6 +14,11 @@
       <t-tab-panel value="positions" label="Ngân hàng thế cờ">
         <div class="cm-pane"><PositionBank v-if="tab === 'positions'" :focus-slug="focusPositionSlug" /></div>
       </t-tab-panel>
+      <t-tab-panel value="books" label="Thư viện sách">
+        <div class="cm-pane">
+          <BookLibrary v-if="tab === 'books'" :focus-book-slug="focusBookSlug" :focus-chapter-slug="focusChapterSlug" />
+        </div>
+      </t-tab-panel>
     </t-tabs>
   </div>
 </template>
@@ -25,18 +30,21 @@ import ChessCourses from './ChessCourses.vue';
 import GameLibrary from './GameLibrary.vue';
 import PuzzleBank from './PuzzleBank.vue';
 import PositionBank from './PositionBank.vue';
+import BookLibrary from './BookLibrary.vue';
 
 const route = useRoute();
 const tab = ref('courses');
 
 // Deep-link "Mở trong thư viện": ?ref=game/<slug> | puzzle/<slug> | lesson/<slug>
-// | course/<slug> | position/<slug> → chuyển sang đúng tab và bảo component
-// con chọn/mở đối tượng tương ứng.
+// | course/<slug> | position/<slug> | book/<slug> | chapter/<slug> → chuyển
+// sang đúng tab và bảo component con chọn/mở đối tượng tương ứng.
 const focusGameSlug = ref('');
 const focusPuzzleSlug = ref('');
 const focusLessonSlug = ref('');
 const focusCourseSlug = ref('');
 const focusPositionSlug = ref('');
+const focusBookSlug = ref('');
+const focusChapterSlug = ref('');
 
 const focusRef = computed(() => String(route.query.ref || ''));
 function parseRef(r: string): { type: string; slug: string } | null {
@@ -65,6 +73,12 @@ watch(
     } else if (p.type === 'position') {
       tab.value = 'positions';
       focusPositionSlug.value = p.slug;
+    } else if (p.type === 'book') {
+      tab.value = 'books';
+      focusBookSlug.value = p.slug;
+    } else if (p.type === 'chapter') {
+      tab.value = 'books';
+      focusChapterSlug.value = p.slug;
     }
   },
   { immediate: true },
