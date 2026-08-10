@@ -191,6 +191,12 @@ func TestValidateURLForSSRF_IPv6Whitelist(t *testing.T) {
 			rawURL:    "https://8.8.8.8/dns-query",
 			wantErr:   true,
 		},
+		{
+			name:      "whitelist does not allow non-http scheme",
+			whitelist: "example.com",
+			rawURL:    "gopher://example.com/_stats",
+			wantErr:   true,
+		},
 	}
 
 	for _, tt := range tests {

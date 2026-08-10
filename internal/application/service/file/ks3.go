@@ -53,6 +53,9 @@ func NewKS3FileService(endpoint, region, accessKey, secretKey, bucketName, pathP
 }
 
 func newKS3Client(endpoint, region, accessKey, secretKey string) (*ks3s3.S3, error) {
+	if err := utils.ValidateURLForSSRF(endpoint); err != nil {
+		return nil, fmt.Errorf("unsafe KS3 endpoint: %w", err)
+	}
 	creds := credentials.NewStaticCredentials(accessKey, secretKey, "")
 	client := ks3s3.New(&ks3aws.Config{
 		Credentials:      creds,
@@ -62,6 +65,7 @@ func newKS3Client(endpoint, region, accessKey, secretKey string) (*ks3s3.S3, err
 		S3ForcePathStyle: false, // KS3 uses virtual-hosted style
 		SignerVersion:    "V2",  // KS3 recommends V2 signing
 		MaxRetries:       3,
+		HTTPClient:       utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig()),
 	})
 	return client, nil
 }

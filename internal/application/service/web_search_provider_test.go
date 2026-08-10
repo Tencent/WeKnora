@@ -30,3 +30,21 @@ func TestIsValidProviderTypeIncludesZhipu(t *testing.T) {
 		t.Fatal("Zhipu provider type is not accepted")
 	}
 }
+
+func TestValidateProviderParametersMetaso(t *testing.T) {
+	valid := types.WebSearchProviderParameters{
+		APIKey:      "mk-test",
+		ExtraConfig: map[string]string{"scope": "webpage"},
+	}
+	if err := validateProviderParameters(types.WebSearchProviderTypeMetaso, valid); err != nil {
+		t.Fatalf("valid Metaso parameters rejected: %v", err)
+	}
+	invalid := valid
+	invalid.ExtraConfig = map[string]string{"scope": "unsupported"}
+	if err := validateProviderParameters(types.WebSearchProviderTypeMetaso, invalid); err == nil {
+		t.Fatal("invalid Metaso scope was accepted")
+	}
+	if !isValidProviderType(types.WebSearchProviderTypeMetaso) {
+		t.Fatal("Metaso provider type is not accepted")
+	}
+}

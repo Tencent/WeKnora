@@ -28,9 +28,16 @@ type minioFileService struct {
 // Shared by NewMinioFileService (which also ensures the bucket exists) and
 // CheckMinioConnectivity (read-only probe).
 func newMinioClient(endpoint, accessKeyID, secretAccessKey, bucketName string, useSSL bool) (*minioFileService, error) {
+	if err := utils.ValidateURLForSSRF(endpoint); err != nil {
+		return nil, fmt.Errorf("unsafe MinIO endpoint: %w", err)
+	}
+	httpConfig := utils.DefaultSSRFSafeHTTPClientConfig()
 	client, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKeyID, secretAccessKey, ""),
 		Secure: useSSL,
+		Transport: &utils.SSRFValidatingRoundTripper{
+			Base: utils.NewSSRFSafeTransport(httpConfig),
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize MinIO client: %w", err)

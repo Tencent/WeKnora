@@ -14,6 +14,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 const (
@@ -62,16 +63,17 @@ type HTTPDocumentReader struct {
 }
 
 func NewHTTPDocumentReader(baseURL string) (*HTTPDocumentReader, error) {
+	baseURL = strings.TrimSuffix(strings.TrimSpace(baseURL), "/")
+	if baseURL != "" {
+		if err := secutils.ValidateURLForSSRF(baseURL); err != nil {
+			return nil, fmt.Errorf("docreader address failed SSRF validation: %w", err)
+		}
+	}
+	clientCfg := secutils.DefaultSSRFSafeHTTPClientConfig()
+	clientCfg.Timeout = 5 * time.Minute
 	p := &HTTPDocumentReader{
-		baseURL: strings.TrimSuffix(baseURL, "/"),
-		client: &http.Client{
-			Timeout: 5 * time.Minute,
-			Transport: &http.Transport{
-				MaxIdleConns:        10,
-				IdleConnTimeout:     90 * time.Second,
-				MaxIdleConnsPerHost: 5,
-			},
-		},
+		baseURL: baseURL,
+		client:  secutils.NewSSRFSafeHTTPClient(clientCfg),
 	}
 	if p.baseURL != "" {
 		logger.Infof(context.Background(), "INFO: HTTP docreader base URL: %s", p.baseURL)
@@ -86,9 +88,15 @@ func (p *HTTPDocumentReader) base() string {
 }
 
 func (p *HTTPDocumentReader) Reconnect(addr string) error {
+	addr = strings.TrimSuffix(strings.TrimSpace(addr), "/")
+	if addr != "" {
+		if err := secutils.ValidateURLForSSRF(addr); err != nil {
+			return fmt.Errorf("docreader address failed SSRF validation: %w", err)
+		}
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.baseURL = strings.TrimSuffix(addr, "/")
+	p.baseURL = addr
 	logger.Infof(context.Background(), "INFO: HTTP docreader base URL set to %s", p.baseURL)
 	return nil
 }
@@ -121,6 +129,9 @@ func (p *HTTPDocumentReader) ListEngines(ctx context.Context, overrides map[stri
 	base := p.base()
 	if base == "" {
 		return nil, errNotConnected
+	}
+	if err := secutils.ValidateURLForSSRF(base); err != nil {
+		return nil, fmt.Errorf("docreader address failed SSRF validation: %w", err)
 	}
 
 	body := httpListEnginesRequest{ConfigOverrides: overrides}
@@ -186,6 +197,9 @@ func (p *HTTPDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (
 	base := p.base()
 	if base == "" {
 		return nil, errNotConnected
+	}
+	if err := secutils.ValidateURLForSSRF(base); err != nil {
+		return nil, fmt.Errorf("docreader address failed SSRF validation: %w", err)
 	}
 
 	body := httpReadRequest{

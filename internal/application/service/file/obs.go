@@ -12,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -43,12 +44,16 @@ func NewObsFileService(
 	endpoint, region, accessKeyID, secretAccessKey, bucketName string,
 	pathPrefix string,
 ) (interfaces.FileService, error) {
+	if err := utils.ValidateURLForSSRF(endpoint); err != nil {
+		return nil, fmt.Errorf("unsafe OBS endpoint: %w", err)
+	}
 
 	client := s3.New(s3.Options{
 		Region:           region,
 		EndpointResolver: &obsEndpointResolver{url: endpoint},
 		Credentials:      credentials.NewStaticCredentialsProvider(accessKeyID, secretAccessKey, ""),
 		UsePathStyle:     true,
+		HTTPClient:       utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig()),
 	})
 
 	_, err := client.HeadBucket(context.Background(), &s3.HeadBucketInput{
@@ -76,6 +81,9 @@ func NewObsFileService(
 }
 
 func CheckObsConnectivity(ctx context.Context, endpoint, region, accessKey, secretKey, bucketName string) error {
+	if err := utils.ValidateURLForSSRF(endpoint); err != nil {
+		return fmt.Errorf("unsafe OBS endpoint: %w", err)
+	}
 	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -84,6 +92,7 @@ func CheckObsConnectivity(ctx context.Context, endpoint, region, accessKey, secr
 		EndpointResolver: &obsEndpointResolver{url: endpoint},
 		Credentials:      credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
 		UsePathStyle:     true,
+		HTTPClient:       utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig()),
 	})
 
 	_, err := client.HeadBucket(checkCtx, &s3.HeadBucketInput{
