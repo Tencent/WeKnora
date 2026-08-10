@@ -136,7 +136,32 @@ func TestDeleteByKnowledgeBaseIDRemovesCompleteWikiScope(t *testing.T) {
 		Slug:            page.Slug,
 	}).Error)
 
-	require.NoError(t, repo.DeleteByKnowledgeBaseID(ctx, "kb-delete"))
+	otherTenantPage := makeWikiPage("kb-delete", "concept/preserve", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	otherTenantPage.ID = uuid.New().String()
+	otherTenantPage.TenantID = 2
+	require.NoError(t, repo.Create(ctx, otherTenantPage))
+	require.NoError(t, db.Create(&types.WikiPageRevision{
+		ID:              uuid.New().String(),
+		TenantID:        2,
+		KnowledgeBaseID: "kb-delete",
+		PageID:          otherTenantPage.ID,
+		Slug:            otherTenantPage.Slug,
+		Version:         1,
+	}).Error)
+	require.NoError(t, db.Create(&types.WikiFolder{
+		ID:              uuid.New().String(),
+		TenantID:        2,
+		KnowledgeBaseID: "kb-delete",
+		Name:            "preserve-folder",
+	}).Error)
+	require.NoError(t, db.Create(&types.WikiPageIssue{
+		ID:              uuid.New().String(),
+		TenantID:        2,
+		KnowledgeBaseID: "kb-delete",
+		Slug:            otherTenantPage.Slug,
+	}).Error)
+
+	require.NoError(t, repo.DeleteByKnowledgeBaseID(ctx, 1, "kb-delete"))
 
 	for _, model := range []interface{}{
 		&types.WikiPage{},
@@ -145,8 +170,15 @@ func TestDeleteByKnowledgeBaseIDRemovesCompleteWikiScope(t *testing.T) {
 		&types.WikiPageIssue{},
 	} {
 		var count int64
-		require.NoError(t, db.Unscoped().Model(model).Where("knowledge_base_id = ?", "kb-delete").Count(&count).Error)
+		require.NoError(t, db.Unscoped().Model(model).
+			Where("tenant_id = ? AND knowledge_base_id = ?", 1, "kb-delete").
+			Count(&count).Error)
 		require.Zero(t, count)
+		var preserved int64
+		require.NoError(t, db.Unscoped().Model(model).
+			Where("tenant_id = ? AND knowledge_base_id = ?", 2, "kb-delete").
+			Count(&preserved).Error)
+		require.EqualValues(t, 1, preserved)
 	}
 }
 

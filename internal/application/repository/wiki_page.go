@@ -1127,8 +1127,10 @@ func (r *wikiPageRepository) DeleteByID(ctx context.Context, id string) error {
 // deleted knowledge base. The operation is transactional and idempotent so an
 // asynchronous KB delete can safely retry after a partial infrastructure
 // failure without leaving revisions, folders, or issues behind.
-func (r *wikiPageRepository) DeleteByKnowledgeBaseID(ctx context.Context, kbID string) error {
-	if kbID == "" {
+func (r *wikiPageRepository) DeleteByKnowledgeBaseID(
+	ctx context.Context, tenantID uint64, kbID string,
+) error {
+	if tenantID == 0 || kbID == "" {
 		return nil
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -1138,7 +1140,9 @@ func (r *wikiPageRepository) DeleteByKnowledgeBaseID(ctx context.Context, kbID s
 			&types.WikiPage{},
 			&types.WikiFolder{},
 		} {
-			if err := tx.Unscoped().Where("knowledge_base_id = ?", kbID).Delete(model).Error; err != nil {
+			if err := tx.Unscoped().
+				Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+				Delete(model).Error; err != nil {
 				return err
 			}
 		}

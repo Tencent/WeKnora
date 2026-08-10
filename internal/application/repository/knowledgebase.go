@@ -177,6 +177,44 @@ func (r *knowledgeBaseRepository) DeleteKnowledgeBase(ctx context.Context, id st
 	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&types.KnowledgeBase{}).Error
 }
 
+// DeleteKnowledgeBaseWithPendingOp commits the logical deletion and its
+// durable cleanup intent in one database transaction. The worker trigger may
+// be lost or ambiguously acknowledged by Redis; the pending row remains the
+// source of truth and is re-dispatched until cleanup succeeds.
+func (r *knowledgeBaseRepository) DeleteKnowledgeBaseWithPendingOp(
+	ctx context.Context,
+	id string,
+	tenantID uint64,
+	op *types.TaskPendingOp,
+) error {
+	if id == "" || tenantID == 0 {
+		return errors.New("knowledge base delete outbox: id and tenant_id are required")
+	}
+	if err := preparePendingOp(op); err != nil {
+		return err
+	}
+	if op.TenantID != tenantID || op.TaskType != types.TypeKBDelete ||
+		op.Scope != types.TaskScopeKnowledgeBaseDelete || op.ScopeID != id ||
+		op.DedupKey != id || op.Op != types.TaskOpKnowledgeBaseDelete {
+		return errors.New("knowledge base delete outbox: pending operation scope mismatch")
+	}
+
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(op).Error; err != nil {
+			return err
+		}
+		result := tx.Where("id = ? AND tenant_id = ?", id, tenantID).
+			Delete(&types.KnowledgeBase{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrKnowledgeBaseNotFound
+		}
+		return nil
+	})
+}
+
 // CountByVectorStoreID counts active knowledge bases that are bound to the
 // given vector store within a tenant scope.
 //
