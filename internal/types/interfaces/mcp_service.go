@@ -44,8 +44,15 @@ type MCPServiceService interface {
 	// ListMCPServicesByIDs retrieves multiple MCP services by IDs
 	ListMCPServicesByIDs(ctx context.Context, tenantID uint64, ids []string) ([]*types.MCPService, error)
 
-	// UpdateMCPService updates an MCP service
-	UpdateMCPService(ctx context.Context, service *types.MCPService) error
+	// UpdateMCPService updates an MCP service. updateFields records presence for
+	// scalar fields whose zero values cannot represent omission. Supported keys
+	// are "name", "description", and "enabled"; a nil map means none of those
+	// scalar fields were provided.
+	UpdateMCPService(
+		ctx context.Context,
+		service *types.MCPService,
+		updateFields map[string]bool,
+	) error
 
 	// DeleteMCPService deletes an MCP service
 	DeleteMCPService(ctx context.Context, tenantID uint64, id string) error
