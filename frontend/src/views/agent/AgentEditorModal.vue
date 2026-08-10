@@ -1648,6 +1648,7 @@ import {
   markContextualGuideDone,
 } from '@/config/contextualGuides';
 import { useI18n } from 'vue-i18n';
+import { selectInitialModelId } from '@/utils/modelDefaults';
 import { MessagePlugin } from 'tdesign-vue-next';
 import {
   createAgent,
@@ -2417,13 +2418,15 @@ const removeStarterSuggestion = (index: number) => {
   formData.value.config.question_suggestions.starters.items.splice(index, 1);
 };
 
-const applyDefaultChatModelIfEmpty = () => {
+const applyDefaultModelsIfEmpty = () => {
   if (props.mode !== 'create' || !formData.value) return
-  const chat =
-    allModels.value.find((m) => m.type === 'KnowledgeQA' && m.is_default)
-    || allModels.value.find((m) => m.type === 'KnowledgeQA')
-  if (!formData.value.config.model_id && chat?.id) {
-    formData.value.config.model_id = chat.id
+  const chatModelId = selectInitialModelId(allModels.value, 'KnowledgeQA')
+  const rerankModelId = selectInitialModelId(allModels.value, 'Rerank')
+  if (!formData.value.config.model_id && chatModelId) {
+    formData.value.config.model_id = chatModelId
+  }
+  if (!formData.value.config.rerank_model_id && rerankModelId) {
+    formData.value.config.rerank_model_id = rerankModelId
   }
 }
 
@@ -3043,7 +3046,7 @@ watch(() => props.visible, async (val) => {
           formData.value.description = getPresetDefaultDescription(preset);
         }
       }
-      applyDefaultChatModelIfEmpty()
+      applyDefaultModelsIfEmpty()
     }
 
     if (props.initialHighlightField) {
