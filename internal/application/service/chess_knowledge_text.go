@@ -136,6 +136,65 @@ func buildLessonKnowledgeText(l *types.ChessLesson) (string, string) {
 	return title, b.String()
 }
 
+// chessLevelLabel dịch mã cấp độ 6 bậc Dương Sinh sang nhãn tiếng Việt đầy đủ
+// để văn bản index đọc tự nhiên (thay vì mã "tot"/"vua" trần).
+func chessLevelLabel(level string) string {
+	switch level {
+	case "tot":
+		return "Tốt"
+	case "ma":
+		return "Mã"
+	case "tuong":
+		return "Tượng"
+	case "xe":
+		return "Xe"
+	case "hau":
+		return "Hậu"
+	case "vua":
+		return "Vua"
+	default:
+		return level
+	}
+}
+
+// buildPositionKnowledgeText sinh (tiêu đề, nội dung) cho một thế cờ trong Ngân
+// hàng thế cờ. Khác buildPuzzleKnowledgeText (bài TẬP, có lời giải): position là
+// thế cờ THAM CHIẾU để dạy/trích dẫn, nên phần chú giải (có thể chứa wikilink)
+// là nội dung chính — expand giống bài giảng để không nhiễu cú pháp khi embed.
+func buildPositionKnowledgeText(p *types.ChessPosition) (string, string) {
+	name := firstNonEmptyStr(p.Title, p.Slug)
+	title := "Thế cờ: " + name
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s\n\n", title)
+	if p.Category != "" {
+		fmt.Fprintf(&b, "- Phân loại: %s\n", p.Category)
+	}
+	if p.Level != "" {
+		fmt.Fprintf(&b, "- Cấp độ: %s\n", chessLevelLabel(p.Level))
+	}
+	if p.ECO != "" {
+		fmt.Fprintf(&b, "- Mã khai cuộc (ECO): %s\n", p.ECO)
+	}
+	if p.Assessment != "" {
+		fmt.Fprintf(&b, "- Đánh giá: %s\n", p.Assessment)
+	}
+	if p.FEN != "" {
+		fmt.Fprintf(&b, "- Thế cờ (FEN): `%s`\n", p.FEN)
+	}
+	if p.Tags != "" {
+		fmt.Fprintf(&b, "- Thẻ: %s\n", p.Tags)
+	}
+	if body := strings.TrimSpace(expandChessWikilinks(p.Annotation)); body != "" {
+		b.WriteString("\n")
+		b.WriteString(body)
+		b.WriteString("\n")
+	}
+	if p.Source != "" {
+		fmt.Fprintf(&b, "\n- Nguồn: %s\n", p.Source)
+	}
+	return title, b.String()
+}
+
 func firstNonEmptyStr(a, b string) string {
 	if strings.TrimSpace(a) != "" {
 		return a

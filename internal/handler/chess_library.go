@@ -387,11 +387,12 @@ func (h *ChessLibraryHandler) ReindexKB(c *gin.Context) {
 		return
 	}
 	chessOK(c, gin.H{
-		"games_total":   res.GamesTotal,
-		"puzzles_total": res.PuzzlesTotal,
-		"enqueued":      res.Enqueued,
-		"failed":        res.Failed,
-		"errors":        res.Errors,
+		"games_total":     res.GamesTotal,
+		"puzzles_total":   res.PuzzlesTotal,
+		"positions_total": res.PositionsTotal,
+		"enqueued":        res.Enqueued,
+		"failed":          res.Failed,
+		"errors":          res.Errors,
 		// Tương thích ngược với client/runbook cũ:
 		"games_indexed":   res.GamesTotal,
 		"puzzles_indexed": res.PuzzlesTotal,

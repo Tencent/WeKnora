@@ -102,6 +102,21 @@ func (h *ChessRefHandler) SearchRefs(c *gin.Context) {
 			n++
 		}
 	}
+	if want(types.ChessRefTypePosition) {
+		positions, _ := h.library.ListPositions(ctx, tenantID, types.ChessPositionFilter{Keyword: q})
+		for i, p := range positions {
+			if i >= perType {
+				break
+			}
+			items = append(items, types.ChessRefSearchItem{
+				Type:     types.ChessRefTypePosition,
+				Slug:     p.Slug,
+				Ref:      types.ChessRefTypePosition + "/" + p.Slug,
+				Title:    firstNonEmpty(p.Title, p.Slug),
+				Subtitle: strings.TrimSpace(p.Category + " " + p.ECO),
+			})
+		}
+	}
 
 	chessOK(c, items)
 }

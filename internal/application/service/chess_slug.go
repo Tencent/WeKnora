@@ -86,6 +86,18 @@ func lessonSlugBase(l *types.ChessLesson) string {
 	return slugifyChess(l.Title)
 }
 
+// positionSlugBase: tiêu đề thế cờ, hoặc phân loại nếu thiếu tiêu đề, hoặc
+// tiền tố "pos" nếu cả hai đều rỗng (ensureUniqueChessSlug tự nối id8 sau).
+func positionSlugBase(p *types.ChessPosition) string {
+	if s := slugifyChess(p.Title); s != "" {
+		return s
+	}
+	if s := slugifyChess(p.Category); s != "" {
+		return s
+	}
+	return "pos"
+}
+
 // courseSlugBase: tiêu đề khóa học.
 func courseSlugBase(c *types.ChessCourse) string {
 	return slugifyChess(c.Title)

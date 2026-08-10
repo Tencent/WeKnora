@@ -29,8 +29,8 @@
 | Docker engine | `docker-compose.chess.yml`, `docker/Dockerfile.chess-engine`, `docker/chess-engine/uci_http_bridge.py` |
 | Deploy/Docs | `scripts/deploy/weknora-chess.service`, `scripts/seed_chess_wikilink_demo.*`, `docs/chess-wikilink-demo.md` |
 
-## B. Migrations cờ (NỐI TIẾP upstream) — `000062`–`000069`
-courses · games_puzzles · slugs · wiki_chess_refs · course_slug · refs_source_type · slug_aliases · kb_index.
+## B. Migrations cờ (NỐI TIẾP upstream) — `000062`–`000070`
+courses · games_puzzles · slugs · wiki_chess_refs · course_slug · refs_source_type · slug_aliases · kb_index · **`000070` chess_positions** (thực thể mới — Ngân hàng thế cờ, xem mục E).
 > Khi merge: nếu upstream thêm migration trùng dải số → đổi số migration cờ cho cao hơn.
 
 ---
@@ -93,7 +93,7 @@ courses · games_puzzles · slugs · wiki_chess_refs · course_slug · refs_sour
 
 ## D. Quyết định kiến trúc (ADR rút gọn)
 - **Engine:** Arasan (MIT) sidecar **HTTP** (UCI→HTTP bridge), gọi qua `WEKNORA_CHESS_*`.
-- **Agent HLV:** `kb_selection_mode: none` — mặc định KHÔNG RAG, chỉ 6 tool cờ + engine. *(Bật `CHESS_KB_INDEX` + thêm `knowledge_search` để trích dẫn lý thuyết/sách.)*
+- **Agent HLV:** `kb_selection_mode: none` — mặc định KHÔNG RAG, chỉ 7 tool cờ + engine (thêm `chess_lookup_position` từ đợt Ngân hàng thế cờ, mục E). *(Bật `CHESS_KB_INDEX` + thêm `knowledge_search` để trích dẫn lý thuyết/sách.)*
 - **RAG cờ:** gate `CHESS_KB_INDEX` (mặc định TẮT); import PGN hàng loạt KHÔNG trigger index.
 - **Wikilink:** slug bất biến; resolve `exact → alias → fuzzy` (bigram-Jaccard ≥ 0.8); bảng `chess_slug_aliases`.
 - **i18n:** bỏ `zh-CN`, chuẩn hóa **vi-VN** làm ngôn ngữ chính.
@@ -144,8 +144,23 @@ RAG production bật xong nhưng agent "tìm thấy tên nhưng không ra nội 
 
 **Bổ sung sau khi index-status chạy (vẫn rỗng dù 7/7 completed):** Đào tiếp tới `session_knowledge_qa.go` (KBSelectionMode=all) + `tools/capabilities.go`. **NGUYÊN NHÂN GỐC THẬT:** `knowledge_search` yêu cầu KB có capability `vector|keyword` (`KBSatisfiesAgentRequirements`); capability lấy từ `KnowledgeBase.IndexingStrategy.{Vector,Keyword}Enabled`. KB "Tri thức cờ vua" production có vector+keyword=FALSE → (a) bị loại khỏi tập search của agent VÀ khỏi @picker frontend; (b) `processChunks` skip embedding (`NeedsEmbeddingModel`=false) nên không có vector — `completed` chỉ là parse xong, KHÔNG đảm bảo đã embed. `ensureChessKB` tạo KB KHÔNG set `IndexingStrategy` (dựa `EnsureDefaults`); KB cũ trên prod dính false. **Sửa:** (1) `ensureChessKB` set TƯỜNG MINH `IndexingStrategy: types.DefaultIndexingStrategy()` khi tạo + cảnh báo nếu KB cũ tắt index; (2) index-status thêm `vector_enabled/keyword_enabled/searchable` + `enabled_docs/disabled_docs` để xác nhận; (3) runbook 4b: nhánh `searchable:false` → XÓA KB cờ + reindex (code mới tạo lại đúng). Vận hành: xóa "Tri thức cờ vua" trên prod → reindex → KB mới có vector+keyword bật → embedding chạy thật.
 
+### Ngân hàng thế cờ FEN — position bank (2026-08-10) — nhánh `feat/chess-position-bank`
+Thêm thực thể cờ THỨ 5 `position` (bên cạnh game/puzzle/lesson/course), wikilink `[[position/<slug>]]`. **Ranh giới:** puzzle = bài TẬP có lời giải, để LUYỆN (không đổi); position = thế cờ THAM CHIẾU để DẠY/trích dẫn/phân tích (tàn cuộc lý thuyết, tabiya khai cuộc, mô-típ chiến thuật/cấu trúc tốt) — **CỐ Ý cho phép FEN không có quân Vua** (thế cờ giản lược dạy trẻ mới học).
+
+**Kiểm chứng ràng buộc "không Vua" trước khi code (không cần thoả hiệp):** `notnil/chess` (`decodeFEN`) không kiểm tra sự tồn tại của Vua, chỉ đòi đủ 6 trường + cấu trúc — nên `chess.ValidateFEN`/`isValidFEN` (frontend) dùng lại được nguyên vẹn. Ba nơi PHẢI tránh: (1) chess.js frontend bắt buộc đúng 2 Vua → `ChessBoardDisplay`/`ChessRefEmbed` dữ liệu position **không bao giờ set `pgn`**, chỉ `fen`; (2) engine Arasan không phân tích được → không gọi engine cho position; (3) `chess.FENAfterMove`/`UCIToSAN`/`gameFromFEN` dựng `notnil.Game` → không dùng cho position.
+
+**Quyết định kiến trúc:** position là "ngăn" thứ ba của `chessLibraryService`/`chessLibraryRepository`/`ChessLibraryHandler` (file mới `chess_library_position.go`, `chess_position.go` repo/handler — method trên CÙNG struct), **không phải service riêng** → `container.go` **0 dòng thay đổi**; `router.go` chỉ thêm 1 nhóm route trong `RegisterChessLibraryRoutes` đã có.
+
+- **Backend mới (file riêng, an toàn merge):** migration `000070_chess_positions` (mục B); `internal/chess/fen.go` (`NormalizeFEN` bù trường thiếu, `FENKey`, `HasBothKings`, `SideToMove` export) + test; `internal/types/chess_position.go`; `internal/application/repository/chess_position.go`; `internal/application/service/chess_library_position.go`; `internal/handler/chess_position.go`; `internal/agent/tools/chess_lookup_position.go` (tool thứ 7, mẫu `PuzzleSource`, có bộ thế cờ mẫu nhúng sẵn gồm 1 thế KHÔNG Vua) + test; `frontend/src/views/chess/PositionBank.vue` + `components/ChessPositionEditor.vue` (trình soạn thế cờ bằng chuột — cm-chessboard không validate luật gì, xác nhận qua đọc source; **không dùng chess.js**) + `frontend/src/utils/chessPositionOptions.ts`.
+- **File dùng chung bị chạm (đã có sẵn trong inventory C1/C2, chỉ thêm dòng):** `internal/types/wiki_chess_ref.go` (+`ChessRefTypePosition`/`ChessRefSourcePosition`), `internal/application/service/wiki_page.go` (+1 dòng `chessRefPrefixes` — thiếu dòng này thì `[[position/x]]` bị coi là link wiki thường, lỗi CÂM), `internal/types/wiki_page.go` (+`WikiNodeTypeChessPosition` + nhánh `ChessRefTypeToNodeType`), `internal/handler/chess_ref.go` (+nhánh `SearchRefs`), `internal/application/repository/wiki_chess_ref.go` (+`ReplaceForPosition`/`DeleteForPosition` mẫu `ReplaceForLesson` — xóa theo `tenant_id+page_slug`, KHÔNG theo `kb_id`; +khối query thứ 3 trong `ListBacklinks`), `internal/application/service/agent_service.go` (+1 case đăng ký tool), `internal/agent/tools/definitions.go` (+hằng tên/nhãn/`ChessToolNames`), `config/builtin_agents.yaml` (+tool + 1 dòng prompt), `internal/application/service/chess_knowledge_indexer.go`/`chess_knowledge_text.go` (+`IndexPosition`/`buildPositionKnowledgeText`), `internal/types/chess_kb_index.go` (+`PositionsTotal`).
+- **Frontend dùng chung bị chạm:** `utils/chessRef.ts` + `utils/chessBlocks.ts` (union `ChessRefType`/`CHESS_REF_TYPES` +`position`), `api/chess/index.ts` (+nhóm hàm `*Position*`), `components/{ChessWikiLinkSuggest,ChessRefMissing,ChessRefEmbed}.vue` (+nhãn/icon/màu), **`components/ChessBacklinks.vue`** (sửa bug có sẵn: nhị phân `lesson`/*else* khiến backlink `position` từng rơi nhầm route KB rỗng — nay 3 nhánh rõ ràng), `views/knowledge/wiki/WikiBrowser.vue` (+màu/nhãn/`nodeColorMap`/`isChessNodeType` — thiếu dòng cuối thì node đồ thị không click mở được), `views/chat/components/tool-results/ChessBoardDisplay.vue` (+`defineExpose({currentFen, currentIndex, currentLabel})` để `GameLibrary.vue` "kéo" FEN đang xem khi trích thế cờ từ ván — **không** dùng `emit` để tránh state trùng), `views/chess/{ChessManage,ChessCourses,GameLibrary}.vue` (+tab/picker/nút "Lưu thế cờ này"), `i18n/locales/vi-VN.ts` (đổi nhãn `type_puzzle`: "Thế cờ" → **"Bài tập"**, dành "Thế cờ" cho `position` — CHỈ đổi nhãn hiển thị, KHÔNG đổi slug/dữ liệu cũ).
+- **Không cần migration** cho `wiki_chess_refs`/`chess_slug_aliases`/`chess_kb_index` — cột `chess_type`/`source_type` là `VARCHAR(16)` tự do, không CHECK/enum.
+- **Test mới:** `internal/chess/fen_test.go`, `chess_library_position_test.go` (fake repo kiểu embed-interface như `chess_knowledge_indexer_test.go`; phủ slug unique/rename ghi alias/resolve exact→alias→fuzzy), `chess_lookup_position_test.go` (mẫu `chess_generate_puzzle_test.go`), + case mới trong `chess_knowledge_text_test.go`. `gofmt`/`go vet`/`go build ./...` sạch; `vue-tsc --noEmit` sạch (0 lỗi).
+- **Môi trường dev (Windows, ghi lại để đỡ mất công lần sau):** `go build ./...` lỗi cgo `sqlite3.h: No such file` do thiếu `CGO_CFLAGS` trỏ vào `build_sqliteshim/` (header đã có sẵn trong repo, chỉ thiếu biến môi trường) — build với `CGO_CFLAGS="-I$(pwd)/build_sqliteshim"` thì qua. Không phải lỗi do lớp cờ.
+
 ### Backlog cũ
 - [x] Áp nhận diện thương hiệu Dương Sinh (`#2B3990` navy + xanh, logo) vào `frontend/` — xong WS4a (màu+logo+title). *Còn có thể làm thêm:* pattern ô cờ nền, font Roboto bundle (hiện chỉ promote trong font-stack).
 - [ ] (Tùy chọn) Bật `CHESS_KB_INDEX` full stack + nối KB "Tri thức cờ vua" vào agent HLV — **runbook đã có:** `docs/chess-rag-enable.md`.
-- [x] Nút "đổi tên slug" dùng `chess_slug_aliases` — xong WS-D2 cho game+puzzle (course/lesson còn lại).
+- [x] Nút "đổi tên slug" dùng `chess_slug_aliases` — xong WS-D2 cho game+puzzle (course/lesson còn lại). Position (mới) cũng có rename+alias.
+- [ ] Ngân hàng thế cờ: rename cho course/lesson vẫn chưa có (nợ cũ, không phải phạm vi đợt này).
 - [ ] Khi merge upstream lần tới: ưu tiên rà C1 (móc lõi) + C4 (i18n/prompt) + C6 (migration sqlite).

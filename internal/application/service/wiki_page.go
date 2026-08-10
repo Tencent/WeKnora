@@ -945,10 +945,11 @@ func normalizeSlug(slug string) string {
 
 // chessRefPrefixes là các tiền tố slug nhận diện tham chiếu cờ (vs trang wiki).
 var chessRefPrefixes = map[string]bool{
-	types.ChessRefTypeGame:   true,
-	types.ChessRefTypePuzzle: true,
-	types.ChessRefTypeLesson: true,
-	types.ChessRefTypeCourse: true,
+	types.ChessRefTypeGame:     true,
+	types.ChessRefTypePuzzle:   true,
+	types.ChessRefTypeLesson:   true,
+	types.ChessRefTypeCourse:   true,
+	types.ChessRefTypePosition: true,
 }
 
 // splitChessRef tách "game/<slug>" → ("game", "<slug>", true). Trả false nếu

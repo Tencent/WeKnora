@@ -134,10 +134,11 @@ const (
 // dùng làm WikiGraphNode.PageType cho các đối tượng cờ được trang wiki tham chiếu
 // ([[game/<slug>]] …). Frontend dựa vào đây để tô màu + bấm mở bàn cờ.
 const (
-	WikiNodeTypeChessGame   = "chess_game"
-	WikiNodeTypeChessPuzzle = "chess_puzzle"
-	WikiNodeTypeChessLesson = "chess_lesson"
-	WikiNodeTypeChessCourse = "chess_course"
+	WikiNodeTypeChessGame     = "chess_game"
+	WikiNodeTypeChessPuzzle   = "chess_puzzle"
+	WikiNodeTypeChessLesson   = "chess_lesson"
+	WikiNodeTypeChessCourse   = "chess_course"
+	WikiNodeTypeChessPosition = "chess_position"
 )
 
 // ChessRefTypeToNodeType ánh xạ loại tham chiếu cờ → loại node đồ thị.
@@ -151,6 +152,8 @@ func ChessRefTypeToNodeType(chessType string) string {
 		return WikiNodeTypeChessLesson
 	case ChessRefTypeCourse:
 		return WikiNodeTypeChessCourse
+	case ChessRefTypePosition:
+		return WikiNodeTypeChessPosition
 	}
 	return ""
 }

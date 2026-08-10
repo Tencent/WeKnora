@@ -530,6 +530,23 @@ func RegisterChessLibraryRoutes(r *gin.RouterGroup, h *handler.ChessLibraryHandl
 		puzzles.PUT("/:id/slug", g.Contributor(), h.RenamePuzzleSlug)
 		puzzles.DELETE("/:id", g.Contributor(), h.DeletePuzzle)
 	}
+	// Ngân hàng thế cờ — thực thể cờ thứ 5 (game/puzzle/lesson/course/position).
+	// Khác puzzle (bài TẬP có lời giải): position là thế cờ THAM CHIẾU để dạy/
+	// trích dẫn/phân tích, CỐ Ý cho phép FEN không có quân Vua (dạy trẻ mới học).
+	positions := r.Group("/chess/positions")
+	{
+		positions.GET("", g.Viewer(), h.ListPositions)
+		positions.POST("", g.Contributor(), h.CreatePosition)
+		positions.GET("/export", g.Viewer(), h.ExportPositions)
+		positions.POST("/import", g.Contributor(), h.ImportPositions)
+		// Route tĩnh "by-slug" đặt trước param ":id" (giải mã wikilink [[position/<slug>]]).
+		positions.GET("/by-slug/:slug", g.Viewer(), h.GetPositionBySlug)
+		positions.GET("/by-slug/:slug/backlinks", g.Viewer(), h.GetPositionBacklinks)
+		positions.GET("/:id", g.Viewer(), h.GetPosition)
+		positions.PUT("/:id", g.Contributor(), h.UpdatePosition)
+		positions.PUT("/:id/slug", g.Contributor(), h.RenamePositionSlug)
+		positions.DELETE("/:id", g.Contributor(), h.DeletePosition)
+	}
 	// Bảo trì KB tri thức cờ (đẩy lại index sau khi bật CHESS_KB_INDEX). Nặng →
 	// cần Contributor. No-op khi RAG cờ chưa bật.
 	library := r.Group("/chess/library")

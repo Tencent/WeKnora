@@ -1872,6 +1872,7 @@ function getTypeTheme(type: string): string {
     summary: 'primary', entity: 'success', concept: 'warning',
     synthesis: 'primary', comparison: 'danger', index: 'default', log: 'default',
     chess_game: 'primary', chess_puzzle: 'danger', chess_lesson: 'success', chess_course: 'warning',
+    chess_position: 'default',
   }
   return map[type] || 'default'
 }
@@ -1890,6 +1891,7 @@ function getTypeLabel(type: string): string {
     chess_puzzle: t('chess.ref.type_puzzle'),
     chess_lesson: t('chess.ref.type_lesson'),
     chess_course: t('chess.ref.type_course'),
+    chess_position: t('chess.ref.type_position'),
   }
   return map[type] || type
 }
@@ -3460,13 +3462,15 @@ const graphSelectedSlug = ref<string | null>(null)
 const nodeColorMap: Record<string, string> = {
   summary: '#0052d9', entity: '#2ba471', concept: '#e37318',
   synthesis: '#0594fa', comparison: '#d54941', index: '#8c8c8c', log: '#8c8c8c',
-  // Node CỜ (ván/thế cờ/bài giảng/khóa học) được trang wiki tham chiếu.
+  // Node CỜ (ván/thế cờ/bài giảng/khóa học/thế cờ ngân hàng) được trang wiki tham chiếu.
   chess_game: '#834ec2', chess_puzzle: '#b5328a', chess_lesson: '#0a7d6f', chess_course: '#c2700a',
+  chess_position: '#2275b4',
 }
 
 // isChessNodeType nhận diện node cờ trong đồ thị (slug dạng "game/<slug>").
 function isChessNodeType(type: string): boolean {
-  return type === 'chess_game' || type === 'chess_puzzle' || type === 'chess_lesson' || type === 'chess_course'
+  return type === 'chess_game' || type === 'chess_puzzle' || type === 'chess_lesson' ||
+    type === 'chess_course' || type === 'chess_position'
 }
 
 // RenderGraphOpts tweaks how renderGraph initializes node positions when

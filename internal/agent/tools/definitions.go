@@ -40,6 +40,7 @@ const (
 	ToolChessExplainMove     = "chess_explain_move"
 	ToolChessLookupOpening   = "chess_lookup_opening"
 	ToolChessGeneratePuzzle  = "chess_generate_puzzle"
+	ToolChessLookupPosition  = "chess_lookup_position"
 )
 
 // ChessToolNames liệt kê toàn bộ tool cờ vua. Dùng để cấp quyền và để loại trừ
@@ -52,6 +53,7 @@ func ChessToolNames() []string {
 		ToolChessExplainMove,
 		ToolChessLookupOpening,
 		ToolChessGeneratePuzzle,
+		ToolChessLookupPosition,
 	}
 }
 
@@ -94,6 +96,7 @@ func AvailableToolDefinitions() []AvailableTool {
 		{Name: ToolChessExplainMove, Label: "Giải thích nước đi", Description: "Giải thích một nước đi dựa trên đánh giá engine"},
 		{Name: ToolChessLookupOpening, Label: "Tra khai cuộc", Description: "Nhận diện tên khai cuộc và mã ECO từ chuỗi nước đi"},
 		{Name: ToolChessGeneratePuzzle, Label: "Ra bài tập cờ", Description: "Sinh một thế cờ bài tập để học viên luyện tập"},
+		{Name: ToolChessLookupPosition, Label: "Tra thế cờ mẫu", Description: "Lấy thế cờ mẫu từ Ngân hàng thế cờ để dạy/minh họa"},
 	}
 }
 

@@ -35,7 +35,9 @@ const resolved = ref<ResolvedChessRef | null>(null);
 const overrideRef = ref('');
 const activeRef = computed(() => overrideRef.value || props.refStr);
 
-const iconMap: Record<ChessRefType, string> = { game: 'play-circle', puzzle: 'help-circle', lesson: 'books', course: 'folder' };
+const iconMap: Record<ChessRefType, string> = {
+  game: 'play-circle', puzzle: 'help-circle', lesson: 'books', course: 'folder', position: 'grid',
+};
 const iconName = computed(() => (resolved.value ? iconMap[resolved.value.type] : 'chess'));
 const typeLabel = computed(() => (resolved.value ? t(`chess.ref.type_${resolved.value.type}`) : ''));
 

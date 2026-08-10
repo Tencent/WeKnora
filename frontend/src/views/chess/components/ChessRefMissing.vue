@@ -37,7 +37,9 @@ const emit = defineEmits<{ (e: 'choose', ref: string): void }>();
 const { t } = useI18n();
 const router = useRouter();
 
-const TYPE_LABELS: Record<string, string> = { game: 'Ván', puzzle: 'Thế cờ', lesson: 'Bài', course: 'Khóa' };
+const TYPE_LABELS: Record<string, string> = {
+  game: 'Ván', puzzle: 'Bài tập', lesson: 'Bài', course: 'Khóa', position: 'Thế cờ',
+};
 function typeLabel(tp: string): string { return TYPE_LABELS[tp] || tp; }
 
 const loading = ref(false);
@@ -88,6 +90,7 @@ watch(() => props.refStr, loadSuggestions, { immediate: true });
   &[data-type='puzzle'] { background: #d4380d; }
   &[data-type='lesson'] { background: #389e0d; }
   &[data-type='course'] { background: #531dab; }
+  &[data-type='position'] { background: #0a7d6f; }
 }
 .crm-chip-title { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .crm-actions { margin-top: 10px; }

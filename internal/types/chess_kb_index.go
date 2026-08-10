@@ -47,9 +47,10 @@ type ChessIndexStatus struct {
 // vì embedding chạy NỀN, "enqueued" không đồng nghĩa "đã embed". Kiểm tra hoàn tất
 // embedding qua ChessIndexStatus (completed) sau ~1 phút.
 type ChessReindexResult struct {
-	GamesTotal   int      `json:"games_total"`      // số ván của tenant
-	PuzzlesTotal int      `json:"puzzles_total"`    // số bài tập của tenant
-	Enqueued     int      `json:"enqueued"`         // số bản ghi đã đẩy đi index (chờ embed nền)
-	Failed       int      `json:"failed"`           // số bản ghi lỗi ngay khi đẩy
-	Errors       []string `json:"errors,omitempty"` // mẫu lỗi (tối đa 5)
+	GamesTotal     int      `json:"games_total"`      // số ván của tenant
+	PuzzlesTotal   int      `json:"puzzles_total"`    // số bài tập của tenant
+	PositionsTotal int      `json:"positions_total"`  // số thế cờ của tenant
+	Enqueued       int      `json:"enqueued"`         // số bản ghi đã đẩy đi index (chờ embed nền)
+	Failed         int      `json:"failed"`           // số bản ghi lỗi ngay khi đẩy
+	Errors         []string `json:"errors,omitempty"` // mẫu lỗi (tối đa 5)
 }

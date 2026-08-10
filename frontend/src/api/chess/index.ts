@@ -31,7 +31,7 @@ export interface ChessLesson {
 
 // ---- Tìm kiếm hợp nhất tham chiếu cờ (autocomplete wikilink khi gõ "[[") ----
 export interface ChessRefSearchItem {
-  type: "game" | "puzzle" | "lesson" | "course";
+  type: "game" | "puzzle" | "lesson" | "course" | "position";
   slug: string;
   ref: string; // "<type>/<slug>"
   title: string;
@@ -128,3 +128,38 @@ export const randomPuzzle = (f: Partial<{ theme: string; difficulty: string }> =
 export const exportPuzzles = (f: Partial<{ theme: string; difficulty: string }> = {}) =>
   get(`/api/v1/chess/puzzles/export${qs(f as Record<string, string>)}`);
 export const importPuzzles = (puzzles: any[]) => post("/api/v1/chess/puzzles/import", { puzzles });
+
+// ---- Ngân hàng thế cờ ----
+// Khác ChessPuzzle (bài TẬP có lời giải, để LUYỆN): ChessPosition là thế cờ
+// THAM CHIẾU để DẠY/trích dẫn/phân tích — CỐ Ý cho phép fen không có quân Vua
+// (thế cờ giản lược dạy trẻ mới học). annotation là markdown CÓ THỂ chứa
+// wikilink [[...]] (khác solution của puzzle, chỉ là chuỗi nước đi).
+export interface ChessPosition {
+  id: string;
+  title: string; fen: string; fen_key: string;
+  category: string; level: string; eco: string;
+  side_to_move: string; orientation: string; assessment: string;
+  annotation: string; tags: string; source: string;
+  source_game_id: string; source_ply: number;
+  slug?: string;
+  created_at?: string;
+}
+export const listPositions = (
+  f: Partial<{ category: string; level: string; eco: string; source_game_id: string; q: string }> = {},
+) => get(`/api/v1/chess/positions${qs(f as Record<string, string>)}`);
+export const getPosition = (id: string) => get(`/api/v1/chess/positions/${id}`);
+// Giải mã wikilink [[position/<slug>]] → thế cờ.
+export const getPositionBySlug = (slug: string) => get(`/api/v1/chess/positions/by-slug/${encodeURIComponent(slug)}`);
+export const getPositionBacklinks = (slug: string) => get(`/api/v1/chess/positions/by-slug/${encodeURIComponent(slug)}/backlinks`);
+export const createPosition = (data: Partial<ChessPosition>) => post("/api/v1/chess/positions", data);
+export const updatePosition = (id: string, data: Partial<ChessPosition>) => put(`/api/v1/chess/positions/${id}`, data);
+// Đổi slug thế cờ (giữ link cũ qua alias).
+export const renamePositionSlug = (id: string, slug: string) => put(`/api/v1/chess/positions/${id}/slug`, { slug });
+export const deletePosition = (id: string) => del(`/api/v1/chess/positions/${id}`);
+// Thế cờ đã trích từ MỘT ván cụ thể (panel trong Kho ván).
+export const listPositionsByGame = (gameId: string) =>
+  get(`/api/v1/chess/positions${qs({ source_game_id: gameId })}`);
+// Export/Import thế cờ dạng JSON — sao lưu/chia sẻ. Import luôn tạo mới.
+export const exportPositions = (f: Partial<{ category: string; level: string; eco: string }> = {}) =>
+  get(`/api/v1/chess/positions/export${qs(f as Record<string, string>)}`);
+export const importPositions = (positions: any[]) => post("/api/v1/chess/positions/import", { positions });
