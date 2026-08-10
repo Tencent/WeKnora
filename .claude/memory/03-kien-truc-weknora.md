@@ -39,16 +39,19 @@ internal/handler/chess_*               # API: course, library, ref
 internal/types/(interfaces/)chess_*    + wiki_chess_ref.go
 ```
 
-**6 tool cờ (đăng ký cho agent):** `chess_analyze_position`, `chess_best_move`, `chess_evaluate_game`, `chess_explain_move`, `chess_lookup_opening`, `chess_generate_puzzle`.
+**7 tool cờ (đăng ký cho agent):** `chess_analyze_position`, `chess_best_move`, `chess_evaluate_game`, `chess_explain_move`, `chess_lookup_opening`, `chess_generate_puzzle`, `chess_lookup_position`.
 
-**Migrations cờ:** `000062` courses · `000063` games_puzzles · `000064` slugs · `000065` wiki_chess_refs · `000066` course_slug · `000067` refs_source_type · `000068` slug_aliases · `000069` kb_index.
+**Migrations cờ:** `000062` courses · `000063` games_puzzles · `000064` slugs · `000065` wiki_chess_refs · `000066` course_slug · `000067` refs_source_type · `000068` slug_aliases · `000069` kb_index · `000070` chess_positions (Ngân hàng thế cờ) · `000071` chess_books (Thư viện sách: kệ/sách/chương/ảnh/phiên bản).
 
 **Frontend:**
 ```
-frontend/src/views/chess/             # ChessCourses, ChessManage, GameLibrary, PuzzleBank
-  components/                          # Backlinks, RefDialog, RefEmbed, RefMissing, WikiLinkSuggest
+frontend/src/views/chess/             # ChessCourses, ChessManage, GameLibrary, PuzzleBank,
+                                       # PositionBank, BookLibrary, BookPrint
+  components/                          # Backlinks, RefDialog, RefEmbed, RefMissing, WikiLinkSuggest,
+                                       # ChessPositionEditor, ChessShelfManager, ChessChapterHistory
 frontend/src/views/chat/components/tool-results/ChessBoardDisplay.vue   # bàn cờ tương tác
 frontend/src/api/chess/ · stores/chessWikiDraft.ts · utils/chessBlocks.ts · utils/chessRef.ts
+  · utils/chessPositionOptions.ts · utils/chessBookOptions.ts
 ```
 
 **Engine (Arasan) — sidecar HTTP:**

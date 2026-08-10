@@ -32,18 +32,18 @@ Fork của [Tencent/WeKnora](https://github.com/Tencent/WeKnora) (knowledge plat
 
 ## 3. Lớp cờ vua đã tùy biến (BẢN ĐỒ — đọc kỹ trước khi đụng vào)
 
-Đây là phần tùy biến lớn nhất so với upstream. Khái niệm chính: **Game** (ván cờ), **Position** (thế cờ/FEN), **Lesson** (bài giảng), **Course** (khóa học), **Puzzle** (bài tập), và **Chess Wikilink/Ref** (liên kết chéo kiểu Obsidian `[[game/<slug>|Nhãn]]`).
+Đây là phần tùy biến lớn nhất so với upstream. Khái niệm chính: **Game** (ván cờ), **Position** (thế cờ/FEN), **Lesson** (bài giảng), **Course** (khóa học), **Puzzle** (bài tập), **Shelf/Book/Chapter** (kệ/sách/chương — Thư viện sách cờ vua, soạn thảo nội bộ), và **Chess Wikilink/Ref** (liên kết chéo kiểu Obsidian `[[game/<slug>|Nhãn]]`, gồm cả `[[book/<slug>]]`/`[[chapter/<slug>]]`).
 
 | Vùng | File chính | Vai trò |
 |---|---|---|
 | Engine | `internal/chess/` (`board.go`, `engine.go`, `uci_engine.go`, `http_engine.go`) | Bọc Arasan qua UCI/HTTP |
-| Agent tools | `internal/agent/tools/chess_*.go` | 6 tool: `chess_analyze_position`, `chess_best_move`, `chess_evaluate_game`, `chess_explain_move`, `chess_lookup_opening`, `chess_generate_puzzle` (+ `chess_common.go`) |
-| Repository | `internal/application/repository/chess_*`, `wiki_chess_ref.go` | course, kb_index, library, slug_alias, wiki ref |
-| Service | `internal/application/service/chess_*` | course, knowledge_indexer, knowledge_text, library, resolve, slug |
-| Handler (API) | `internal/handler/chess_*` | course, library, ref — vd `GET /api/v1/chess/refs/search?q=` |
+| Agent tools | `internal/agent/tools/chess_*.go` | 7 tool: `chess_analyze_position`, `chess_best_move`, `chess_evaluate_game`, `chess_explain_move`, `chess_lookup_opening`, `chess_generate_puzzle`, `chess_lookup_position` (+ `chess_common.go`) |
+| Repository | `internal/application/repository/chess_*`, `wiki_chess_ref.go` | course, kb_index, library (game/puzzle/position/**book/shelf/chapter**), slug_alias, wiki ref |
+| Service | `internal/application/service/chess_*` | course, knowledge_indexer, knowledge_text, library, library_position, **library_book**, resolve, slug |
+| Handler (API) | `internal/handler/chess_*` | course, library, position, **book**, ref — vd `GET /api/v1/chess/refs/search?q=` |
 | Types | `internal/types/...chess_*`, `wiki_chess_ref.go` | kiểu dữ liệu & interfaces |
-| Migrations | `migrations/versioned/000062`–`000069` | courses, games_puzzles, slugs, wiki_chess_refs, course_slug, refs_source_type, slug_aliases, kb_index |
-| Frontend | `frontend/src/views/chess/` (ChessCourses, ChessManage, GameLibrary, PuzzleBank + components), `views/chat/components/tool-results/ChessBoardDisplay.vue`, `api/chess/`, `stores/chessWikiDraft.ts`, `utils/chessBlocks.ts`, `utils/chessRef.ts` | UI quản lý cờ, bàn cờ tương tác, wikilink |
+| Migrations | `migrations/versioned/000062`–`000071` | courses, games_puzzles, slugs, wiki_chess_refs, course_slug, refs_source_type, slug_aliases, kb_index, chess_positions, **chess_books (kệ/sách/chương/ảnh/phiên bản)** |
+| Frontend | `frontend/src/views/chess/` (ChessCourses, ChessManage, GameLibrary, PuzzleBank, PositionBank, **BookLibrary, BookPrint** + components), `views/chat/components/tool-results/ChessBoardDisplay.vue`, `api/chess/`, `stores/chessWikiDraft.ts`, `utils/chessBlocks.ts`, `utils/chessRef.ts` | UI quản lý cờ, bàn cờ tương tác, wikilink, **thư viện sách** |
 | Agent cấu hình | `config/builtin_agents.yaml` → agent `builtin-chess-coach` ("HLV Cờ vua") | system prompt tiếng Việt + 6 chess tools |
 | Docker | `docker-compose.chess.yml`, `docker/Dockerfile.chess-engine`, `docker/chess-engine/uci_http_bridge.py` | overlay engine |
 | Scripts/Docs | `scripts/deploy/weknora-chess.service`, `scripts/seed_chess_wikilink_demo.*`, `docs/chess-wikilink-demo.md` | deploy + demo |
