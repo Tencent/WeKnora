@@ -4459,6 +4459,7 @@ export default {
   inviteRegister: {
     bannerTitle: 'You have been invited to join "{tenant}"',
     bannerHint: 'Fill in the details below to register. You will join the team automatically once registration completes.',
+    bannerHintLogin: 'Log in to join this team automatically.',
     loading: 'Verifying invitation link…',
     invalidTitle: 'Invitation link is invalid or revoked',
     invalidBody: 'Ask your inviter to send a new link, or sign in with an existing account.',
@@ -4477,6 +4478,7 @@ export default {
     submit: 'Complete registration',
     submitting: 'Submitting…',
     success: 'Registration successful — entering workspace…',
+    joined: 'You have joined the team.',
     failed: 'Registration failed; please try again later',
     usernameRequired: 'Display name is required',
     passwordTooShort: 'Password must be at least 6 characters',

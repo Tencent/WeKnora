@@ -82,12 +82,21 @@ type AuthTenant struct {
 	Name string `json:"name"`
 }
 
+// AuthCapabilities mirrors GET /auth/me capabilities for SPA feature gates.
+type AuthCapabilities struct {
+	CanCreateTenant      bool `json:"can_create_tenant"`
+	AutoAcceptInvitation bool `json:"auto_accept_invitation"`
+}
+
 // CurrentUserResponse is the body of GET /api/v1/auth/me.
 type CurrentUserResponse struct {
 	Success bool `json:"success"`
 	Data    struct {
-		User   *AuthUser   `json:"user,omitempty"`
-		Tenant *AuthTenant `json:"tenant,omitempty"`
+		User           *AuthUser         `json:"user,omitempty"`
+		Tenant         *AuthTenant       `json:"tenant,omitempty"`
+		Memberships    []AuthMembership  `json:"memberships,omitempty"`
+		TenantRequired bool              `json:"tenant_required,omitempty"`
+		Capabilities   *AuthCapabilities `json:"capabilities,omitempty"`
 	} `json:"data"`
 }
 
