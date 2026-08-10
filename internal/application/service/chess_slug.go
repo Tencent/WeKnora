@@ -103,6 +103,37 @@ func courseSlugBase(c *types.ChessCourse) string {
 	return slugifyChess(c.Title)
 }
 
+// shelfSlugBase: tên kệ.
+func shelfSlugBase(s *types.ChessShelf) string {
+	return slugifyChess(s.Title)
+}
+
+// bookSlugBase: tên sách (+ năm xuất bản nếu trùng, khớp mẫu gameSlugBase).
+func bookSlugBase(b *types.ChessBook) string {
+	base := slugifyChess(b.Title)
+	if base == "" {
+		base = "sach"
+	}
+	if y := slugifyChess(strings.TrimSpace(b.Year)); y != "" {
+		base = strings.Trim(base+"-"+y, "-")
+	}
+	return base
+}
+
+// chapterSlugBase: "<slug sách>-<tiêu đề chương>" — đọc được và ít đụng nhau
+// hơn slug chương trần, vì slug chương là DUY NHẤT theo TOÀN TENANT (không
+// scope theo sách — bắt buộc để [[chapter/<slug>]] resolve toàn tenant).
+func chapterSlugBase(bookSlug string, ch *types.ChessBookChapter) string {
+	title := slugifyChess(ch.Title)
+	if title == "" {
+		title = "chuong"
+	}
+	if bookSlug == "" {
+		return title
+	}
+	return strings.Trim(bookSlug+"-"+title, "-")
+}
+
 // id8 lấy 8 hex đầu của UUID (đã bỏ dấu "-") làm hậu tố/giá trị dự phòng.
 func id8(uuid string) string {
 	h := strings.ReplaceAll(uuid, "-", "")

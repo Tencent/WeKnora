@@ -195,6 +195,90 @@ func buildPositionKnowledgeText(p *types.ChessPosition) (string, string) {
 	return title, b.String()
 }
 
+// buildBookKnowledgeText sinh (tiêu đề, nội dung) cho một cuốn sách — nội dung
+// gồm metadata thư mục + mô tả + MỤC LỤC (tiêu đề chương, gộp theo Part) để
+// agent biết sách có những gì mà không cần nạp toàn văn từng chương (từng
+// chương được index RIÊNG qua buildChapterKnowledgeText).
+func buildBookKnowledgeText(b *types.ChessBook, chapters []*types.ChessBookChapter) (string, string) {
+	name := firstNonEmptyStr(b.Title, b.Slug)
+	title := "Sách: " + name
+	var out strings.Builder
+	fmt.Fprintf(&out, "# %s\n\n", title)
+	if b.Subtitle != "" {
+		fmt.Fprintf(&out, "*%s*\n\n", b.Subtitle)
+	}
+	if b.Author != "" {
+		fmt.Fprintf(&out, "- Tác giả: %s\n", b.Author)
+	}
+	if b.Translator != "" {
+		fmt.Fprintf(&out, "- Dịch giả: %s\n", b.Translator)
+	}
+	if b.Publisher != "" {
+		fmt.Fprintf(&out, "- Nhà xuất bản: %s\n", b.Publisher)
+	}
+	if b.Year != "" {
+		fmt.Fprintf(&out, "- Năm: %s\n", b.Year)
+	}
+	if b.Level != "" {
+		fmt.Fprintf(&out, "- Cấp độ: %s\n", chessLevelLabel(b.Level))
+	}
+	if b.Phase != "" {
+		fmt.Fprintf(&out, "- Giai đoạn: %s\n", b.Phase)
+	}
+	if b.ECO != "" {
+		fmt.Fprintf(&out, "- Mã khai cuộc (ECO): %s\n", b.ECO)
+	}
+	if b.Tags != "" {
+		fmt.Fprintf(&out, "- Thẻ: %s\n", b.Tags)
+	}
+	if body := strings.TrimSpace(b.Description); body != "" {
+		out.WriteString("\n")
+		out.WriteString(body)
+		out.WriteString("\n")
+	}
+	if len(chapters) > 0 {
+		out.WriteString("\n## Mục lục\n\n")
+		lastPart := "\x00" // giá trị canh gác không khớp Part thật để in tiêu đề Phần đầu tiên
+		for _, ch := range chapters {
+			if ch.Part != lastPart {
+				if ch.Part != "" {
+					fmt.Fprintf(&out, "\n%s\n", ch.Part)
+				}
+				lastPart = ch.Part
+			}
+			fmt.Fprintf(&out, "- %s\n", firstNonEmptyStr(ch.Title, ch.Slug))
+		}
+	}
+	return title, out.String()
+}
+
+// buildChapterKnowledgeText sinh (tiêu đề, nội dung) cho một chương sách.
+// Tiêu đề gắn tên sách để agent trích dẫn rõ nguồn ("Chương: <sách> — <chương>").
+// Nội dung do người soạn viết (có thể chứa wikilink cờ) → expand để embed sạch,
+// cùng khuôn buildLessonKnowledgeText/buildPositionKnowledgeText.
+func buildChapterKnowledgeText(book *types.ChessBook, ch *types.ChessBookChapter) (string, string) {
+	bookName := firstNonEmptyStr(book.Title, book.Slug)
+	chapName := firstNonEmptyStr(ch.Title, ch.Slug)
+	title := "Chương: " + bookName + " — " + chapName
+	var out strings.Builder
+	fmt.Fprintf(&out, "# %s\n\n", title)
+	if ch.Part != "" {
+		fmt.Fprintf(&out, "- Phần: %s\n", ch.Part)
+	}
+	if ch.Level != "" {
+		fmt.Fprintf(&out, "- Cấp độ: %s\n", chessLevelLabel(ch.Level))
+	}
+	if ch.FEN != "" {
+		fmt.Fprintf(&out, "- Thế cờ (FEN): `%s`\n", ch.FEN)
+	}
+	if body := strings.TrimSpace(expandChessWikilinks(ch.Content)); body != "" {
+		out.WriteString("\n")
+		out.WriteString(body)
+		out.WriteString("\n")
+	}
+	return title, out.String()
+}
+
 func firstNonEmptyStr(a, b string) string {
 	if strings.TrimSpace(a) != "" {
 		return a

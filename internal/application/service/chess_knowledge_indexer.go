@@ -84,6 +84,29 @@ func (ix *ChessKnowledgeIndexer) IndexPosition(ctx context.Context, p *types.Che
 	return ix.upsert(ctx, p.TenantID, types.ChessRefTypePosition, p.Slug, title, content)
 }
 
+// IndexBook chỉ index sách ở trạng thái "published" — bản thảo (draft) KHÔNG
+// được đưa vào KB tri thức cờ để agent không trích dẫn nội dung chưa duyệt.
+// chapters (tùy chọn) dựng mục lục trong nội dung index; truyền nil nếu caller
+// không có sẵn (indexer không tự truy vấn DB chương).
+func (ix *ChessKnowledgeIndexer) IndexBook(ctx context.Context, b *types.ChessBook, chapters []*types.ChessBookChapter) error {
+	if !ix.Enabled() || b == nil || b.Slug == "" || b.Status != types.ChessBookStatusPublished {
+		return nil
+	}
+	title, content := buildBookKnowledgeText(b, chapters)
+	return ix.upsert(ctx, b.TenantID, types.ChessRefTypeBook, b.Slug, title, content)
+}
+
+// IndexChapter index một chương — CHỈ khi sách chứa nó đã "published" (cùng
+// điều kiện IndexBook). Nhận cả book để lấy tiêu đề sách + kiểm tra Status mà
+// không phải truy vấn lại DB trong indexer.
+func (ix *ChessKnowledgeIndexer) IndexChapter(ctx context.Context, book *types.ChessBook, ch *types.ChessBookChapter) error {
+	if !ix.Enabled() || book == nil || ch == nil || ch.Slug == "" || book.Status != types.ChessBookStatusPublished {
+		return nil
+	}
+	title, content := buildChapterKnowledgeText(book, ch)
+	return ix.upsert(ctx, ch.TenantID, types.ChessRefTypeChapter, ch.Slug, title, content)
+}
+
 // Remove xóa bản ghi Knowledge tương ứng (khi đối tượng cờ bị xóa).
 func (ix *ChessKnowledgeIndexer) Remove(ctx context.Context, tenantID uint64, chessType, slug string) {
 	if !ix.Enabled() || slug == "" {

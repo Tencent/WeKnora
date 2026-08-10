@@ -390,6 +390,8 @@ func (h *ChessLibraryHandler) ReindexKB(c *gin.Context) {
 		"games_total":     res.GamesTotal,
 		"puzzles_total":   res.PuzzlesTotal,
 		"positions_total": res.PositionsTotal,
+		"books_total":     res.BooksTotal,
+		"chapters_total":  res.ChaptersTotal,
 		"enqueued":        res.Enqueued,
 		"failed":          res.Failed,
 		"errors":          res.Errors,

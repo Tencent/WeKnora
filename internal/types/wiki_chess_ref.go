@@ -9,6 +9,13 @@ const (
 	ChessRefTypeLesson   = "lesson"
 	ChessRefTypeCourse   = "course"
 	ChessRefTypePosition = "position"
+	// ChessRefTypeBook là sách trong Thư viện sách cờ vua — chỉ là ĐÍCH wikilink
+	// [[book/<slug>]] (mô tả sách là blurb ngắn, không phát wikilink — nhất
+	// quán với ChessRefTypeCourse).
+	ChessRefTypeBook = "book"
+	// ChessRefTypeChapter là chương trong sách — vừa là ĐÍCH [[chapter/<slug>]]
+	// vừa là NGUỒN (nội dung chương có thể chứa wikilink, xem ChessRefSourceChapter).
+	ChessRefTypeChapter = "chapter"
 )
 
 // Loại NGUỒN tham chiếu (cột source_type trong wiki_chess_refs).
@@ -16,6 +23,9 @@ const (
 	ChessRefSourceWiki     = "wiki"
 	ChessRefSourceLesson   = "lesson"
 	ChessRefSourcePosition = "position"
+	// ChessRefSourceChapter đánh dấu tham chiếu cờ PHÁT ra từ nội dung một
+	// chương sách (page_slug = slug chương, kb_id rỗng — cùng mẫu lesson/position).
+	ChessRefSourceChapter = "chapter"
 )
 
 // WikiChessRef ghi nhận một tham chiếu từ trang wiki tới một đối tượng cờ

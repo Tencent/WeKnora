@@ -117,6 +117,33 @@ func (h *ChessRefHandler) SearchRefs(c *gin.Context) {
 			})
 		}
 	}
+	if want(types.ChessRefTypeBook) {
+		books, _ := h.library.ListBooks(ctx, tenantID, types.ChessBookFilter{Keyword: q})
+		for i, b := range books {
+			if i >= perType {
+				break
+			}
+			items = append(items, types.ChessRefSearchItem{
+				Type:     types.ChessRefTypeBook,
+				Slug:     b.Slug,
+				Ref:      types.ChessRefTypeBook + "/" + b.Slug,
+				Title:    firstNonEmpty(b.Title, b.Slug),
+				Subtitle: strings.TrimSpace(b.Author + " " + b.Year),
+			})
+		}
+	}
+	if want(types.ChessRefTypeChapter) {
+		chapters, _ := h.library.SearchChapters(ctx, tenantID, q, perType)
+		for _, ch := range chapters {
+			items = append(items, types.ChessRefSearchItem{
+				Type:     types.ChessRefTypeChapter,
+				Slug:     ch.Slug,
+				Ref:      types.ChessRefTypeChapter + "/" + ch.Slug,
+				Title:    firstNonEmpty(ch.Title, ch.Slug),
+				Subtitle: ch.Part,
+			})
+		}
+	}
 
 	chessOK(c, items)
 }

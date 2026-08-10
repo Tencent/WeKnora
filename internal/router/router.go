@@ -547,6 +547,57 @@ func RegisterChessLibraryRoutes(r *gin.RouterGroup, h *handler.ChessLibraryHandl
 		positions.PUT("/:id/slug", g.Contributor(), h.RenamePositionSlug)
 		positions.DELETE("/:id", g.Contributor(), h.DeletePosition)
 	}
+	// Thư viện sách cờ vua — Kệ → Sách → Chương. Biên soạn NỘI BỘ (markdown +
+	// FEN + ván cờ + ảnh), KHÔNG phải kho ebook PDF/EPUB để đọc. Chỉ sách
+	// status="published" được index vào KB tri thức cờ.
+	shelves := r.Group("/chess/shelves")
+	{
+		shelves.GET("", g.Viewer(), h.ListShelves)
+		shelves.POST("", g.Contributor(), h.CreateShelf)
+		// Route tĩnh "by-slug" đặt trước param ":id".
+		shelves.GET("/by-slug/:slug", g.Viewer(), h.GetShelfBySlug)
+		shelves.GET("/:id", g.Viewer(), h.GetShelf)
+		shelves.PUT("/:id", g.Contributor(), h.UpdateShelf)
+		shelves.PUT("/:id/slug", g.Contributor(), h.RenameShelfSlug)
+		// SetShelfBooks ghi đè toàn bộ sách trên kệ (nhiều-nhiều) theo thứ tự truyền vào.
+		shelves.PUT("/:id/books", g.Contributor(), h.SetShelfBooks)
+		shelves.DELETE("/:id", g.Contributor(), h.DeleteShelf)
+	}
+	books := r.Group("/chess/books")
+	{
+		books.GET("", g.Viewer(), h.ListBooks)
+		books.POST("", g.Contributor(), h.CreateBook)
+		books.GET("/export", g.Viewer(), h.ExportBooks)
+		books.POST("/import", g.Contributor(), h.ImportBooks)
+		// Route tĩnh "images/:imageId" đặt trước param ":id" — phục vụ ảnh chèn
+		// trong chương qua URL ổn định (KHÔNG phải presigned URL có hạn dùng).
+		books.GET("/images/:imageId", g.Viewer(), h.GetBookImage)
+		// Route tĩnh "by-slug" đặt trước param ":id" (giải mã wikilink [[book/<slug>]]).
+		books.GET("/by-slug/:slug", g.Viewer(), h.GetBookBySlug)
+		books.GET("/by-slug/:slug/backlinks", g.Viewer(), h.GetBookBacklinks)
+		books.GET("/:id", g.Viewer(), h.GetBook)
+		books.PUT("/:id", g.Contributor(), h.UpdateBook)
+		books.PUT("/:id/slug", g.Contributor(), h.RenameBookSlug)
+		books.DELETE("/:id", g.Contributor(), h.DeleteBook)
+		books.GET("/:id/shelves", g.Viewer(), h.ListShelvesOfBook)
+		books.GET("/:id/chapters", g.Viewer(), h.ListChapters)
+		books.POST("/:id/chapters", g.Contributor(), h.CreateChapter)
+		books.PUT("/:id/chapters/reorder", g.Contributor(), h.ReorderChapters)
+		books.POST("/:id/images", g.Contributor(), h.UploadBookImage)
+	}
+	chapters := r.Group("/chess/chapters")
+	{
+		// Route tĩnh "by-slug" đặt trước param ":chapter_id" (giải mã wikilink [[chapter/<slug>]]).
+		chapters.GET("/by-slug/:slug", g.Viewer(), h.GetChapterBySlug)
+		chapters.GET("/by-slug/:slug/backlinks", g.Viewer(), h.GetChapterBacklinks)
+		chapters.GET("/:chapter_id", g.Viewer(), h.GetChapter)
+		chapters.PUT("/:chapter_id", g.Contributor(), h.UpdateChapter)
+		chapters.PUT("/:chapter_id/slug", g.Contributor(), h.RenameChapterSlug)
+		chapters.DELETE("/:chapter_id", g.Contributor(), h.DeleteChapter)
+		chapters.GET("/:chapter_id/revisions", g.Viewer(), h.ListChapterRevisions)
+		chapters.GET("/:chapter_id/revisions/:rev_id", g.Viewer(), h.GetChapterRevision)
+		chapters.POST("/:chapter_id/revisions/:rev_id/restore", g.Contributor(), h.RestoreChapterRevision)
+	}
 	// Bảo trì KB tri thức cờ (đẩy lại index sau khi bật CHESS_KB_INDEX). Nặng →
 	// cần Contributor. No-op khi RAG cờ chưa bật.
 	library := r.Group("/chess/library")

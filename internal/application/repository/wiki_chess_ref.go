@@ -85,6 +85,29 @@ func (r *wikiChessRefRepository) ReplaceForPosition(
 	})
 }
 
+// ReplaceForChapter đồng bộ tham chiếu cờ TỪ nội dung một chương sách (nguồn
+// chapter; kb_id rỗng, page_slug = slug chương). Cùng mẫu ReplaceForLesson
+// (không phải ReplaceForPage): chương thuộc tenant, không thuộc KB.
+func (r *wikiChessRefRepository) ReplaceForChapter(
+	ctx context.Context, tenantID uint64, chapterSlug string, refs []types.WikiChessRef,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("source_type = ? AND tenant_id = ? AND page_slug = ?",
+			types.ChessRefSourceChapter, tenantID, chapterSlug).
+			Delete(&types.WikiChessRef{}).Error; err != nil {
+			return err
+		}
+		if len(refs) == 0 {
+			return nil
+		}
+		for i := range refs {
+			refs[i].SourceType = types.ChessRefSourceChapter
+			refs[i].KBID = ""
+		}
+		return tx.Create(&refs).Error
+	})
+}
+
 func (r *wikiChessRefRepository) DeleteForPage(ctx context.Context, kbID, pageSlug string) error {
 	return r.db.WithContext(ctx).
 		Where("source_type = ? AND kb_id = ? AND page_slug = ?", types.ChessRefSourceWiki, kbID, pageSlug).
@@ -102,6 +125,13 @@ func (r *wikiChessRefRepository) DeleteForLesson(ctx context.Context, tenantID u
 func (r *wikiChessRefRepository) DeleteForPosition(ctx context.Context, tenantID uint64, positionSlug string) error {
 	return r.db.WithContext(ctx).
 		Where("source_type = ? AND tenant_id = ? AND page_slug = ?", types.ChessRefSourcePosition, tenantID, positionSlug).
+		Delete(&types.WikiChessRef{}).Error
+}
+
+// DeleteForChapter xóa mọi tham chiếu cờ TỪ một chương sách (khi xóa chương).
+func (r *wikiChessRefRepository) DeleteForChapter(ctx context.Context, tenantID uint64, chapterSlug string) error {
+	return r.db.WithContext(ctx).
+		Where("source_type = ? AND tenant_id = ? AND page_slug = ?", types.ChessRefSourceChapter, tenantID, chapterSlug).
 		Delete(&types.WikiChessRef{}).Error
 }
 
@@ -152,7 +182,21 @@ func (r *wikiChessRefRepository) ListBacklinks(
 		return nil, err
 	}
 
-	return append(append(wiki, lesson...), position...), nil
+	// Nguồn CHƯƠNG SÁCH (nội dung chương có thể chứa wikilink).
+	var chapter []types.ChessBacklink
+	if err := r.db.WithContext(ctx).
+		Table("wiki_chess_refs AS r").
+		Select("'chapter' AS source_type, '' AS kb_id, r.page_slug AS page_slug, COALESCE(ch.title, ch.slug, '') AS page_title").
+		Joins("LEFT JOIN chess_book_chapters AS ch ON ch.slug = r.page_slug AND ch.tenant_id = r.tenant_id").
+		Where("r.source_type = ? AND r.tenant_id = ? AND r.chess_type = ? AND r.chess_slug = ?",
+			types.ChessRefSourceChapter, tenantID, chessType, chessSlug).
+		Order("page_title").
+		Scan(&chapter).Error; err != nil {
+		return nil, err
+	}
+
+	out := append(append(wiki, lesson...), position...)
+	return append(out, chapter...), nil
 }
 
 func (r *wikiChessRefRepository) ListByKB(ctx context.Context, kbID string) ([]types.WikiChessRef, error) {

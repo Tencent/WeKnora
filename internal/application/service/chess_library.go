@@ -12,22 +12,29 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// chessLibraryService triển khai nghiệp vụ kho ván đấu & ngân hàng bài tập.
+// chessLibraryService triển khai nghiệp vụ kho ván đấu, ngân hàng bài tập &
+// thư viện sách cờ vua.
 type chessLibraryService struct {
 	repo         interfaces.ChessLibraryRepository
 	chessRefRepo interfaces.WikiChessRefRepository
 	aliasRepo    interfaces.ChessSlugAliasRepository
 	indexer      *ChessKnowledgeIndexer
+	// fileService lưu/đọc ảnh chèn trong chương sách (Thư viện sách). Có thể
+	// nil trong test — mọi lời gọi ảnh trả lỗi rõ ràng thay vì panic.
+	fileService interfaces.FileService
 }
 
-// NewChessLibraryService tạo service kho ván & bài tập cờ vua.
+// NewChessLibraryService tạo service kho ván, bài tập & thư viện sách cờ vua.
 func NewChessLibraryService(
 	repo interfaces.ChessLibraryRepository,
 	chessRefRepo interfaces.WikiChessRefRepository,
 	aliasRepo interfaces.ChessSlugAliasRepository,
 	indexer *ChessKnowledgeIndexer,
+	fileService interfaces.FileService,
 ) interfaces.ChessLibraryService {
-	return &chessLibraryService{repo: repo, chessRefRepo: chessRefRepo, aliasRepo: aliasRepo, indexer: indexer}
+	return &chessLibraryService{
+		repo: repo, chessRefRepo: chessRefRepo, aliasRepo: aliasRepo, indexer: indexer, fileService: fileService,
+	}
 }
 
 // pruneChessRefs xóa các backlink wiki trỏ tới đối tượng cờ vừa bị xóa (best-effort).
@@ -437,6 +444,25 @@ func (s *chessLibraryService) ReindexAll(ctx context.Context, tenantID uint64) (
 	res.PositionsTotal = len(positions)
 	for _, p := range positions {
 		record("position", p.Slug, s.indexer.IndexPosition(ctx, p))
+	}
+
+	// Chỉ sách ĐÃ PUBLISHED được index (bản thảo không rò vào câu trả lời của agent).
+	books, err := s.repo.ListBooks(ctx, tenantID, types.ChessBookFilter{Status: types.ChessBookStatusPublished})
+	if err != nil {
+		return res, err
+	}
+	res.BooksTotal = len(books)
+	for _, b := range books {
+		chapters, cerr := s.repo.ListChapters(ctx, tenantID, b.ID)
+		if cerr != nil {
+			record("book", b.Slug, cerr)
+			continue
+		}
+		record("book", b.Slug, s.indexer.IndexBook(ctx, b, chapters))
+		res.ChaptersTotal += len(chapters)
+		for _, ch := range chapters {
+			record("chapter", ch.Slug, s.indexer.IndexChapter(ctx, b, ch))
+		}
 	}
 	return res, nil
 }
