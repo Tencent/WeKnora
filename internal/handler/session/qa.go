@@ -24,6 +24,11 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	maxAttachmentUploadsPerRequest = 5
+	maxAttachmentUploadTotalBytes  = int64(100 * 1024 * 1024)
+)
+
 // qaRequestContext holds all the common data needed for QA requests
 type qaRequestContext struct {
 	ctx                   context.Context
@@ -213,15 +218,17 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	if len(request.AttachmentUploads) > 0 {
 		logger.Infof(ctx, "[%s] processing %d attachment(s)", logPrefix, len(request.AttachmentUploads))
 
-		// MAX_FILE_SIZE_MB env (50MB default). See utils/filesize.go for
-		// why this is deploy-time-only rather than a runtime setting.
-		maxSizeMB := secutils.GetMaxFileSizeMB()
-		maxSize := maxSizeMB * 1024 * 1024
-		for i, upload := range request.AttachmentUploads {
-			if upload.FileSize > maxSize {
-				return nil, nil, errors.NewBadRequestError(
-					fmt.Sprintf("attachment %d exceeds size limit of %dMB", i+1, maxSizeMB))
-			}
+		// Decode first and validate actual bytes. Client-declared file_size is
+		// metadata only and must not be trusted for memory or sandbox limits.
+		maxSize := secutils.GetMaxFileSize()
+		decodedAttachments, decodeErr := decodeAndValidateAttachmentUploads(
+			request.AttachmentUploads,
+			maxAttachmentUploadsPerRequest,
+			maxSize,
+			maxAttachmentUploadTotalBytes,
+		)
+		if decodeErr != nil {
+			return nil, nil, errors.NewBadRequestError(decodeErr.Error())
 		}
 
 		tenantID := c.GetUint64(types.TenantIDContextKey.String())
@@ -257,14 +264,8 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 			go func(idx int, att AttachmentUpload) {
 				defer wg.Done()
 
-				data, err := DecodeBase64Attachment(att.Data)
-				if err != nil {
-					errChan <- fmt.Errorf("attachment %d decode failed: %w", idx+1, err)
-					return
-				}
-
 				processed, err := h.attachmentProcessor.ProcessAttachment(
-					attachmentRuntimeCtx, data, att.FileName, att.FileSize, tenantID, asrModelID,
+					attachmentRuntimeCtx, decodedAttachments[idx], att.FileName, int64(len(decodedAttachments[idx])), tenantID, asrModelID,
 				)
 				if err != nil {
 					errChan <- fmt.Errorf("attachment %d processing failed: %w", idx+1, err)
@@ -389,6 +390,34 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	}
 
 	return reqCtx, &request, nil
+}
+
+func decodeAndValidateAttachmentUploads(
+	uploads []AttachmentUpload,
+	maxCount int,
+	maxFileBytes, maxTotalBytes int64,
+) ([][]byte, error) {
+	if len(uploads) > maxCount {
+		return nil, fmt.Errorf("at most %d attachments are allowed per request", maxCount)
+	}
+	decoded := make([][]byte, len(uploads))
+	var total int64
+	for i, upload := range uploads {
+		data, err := DecodeBase64Attachment(upload.Data)
+		if err != nil {
+			return nil, fmt.Errorf("attachment %d decode failed: %w", i+1, err)
+		}
+		actualSize := int64(len(data))
+		if actualSize > maxFileBytes {
+			return nil, fmt.Errorf("attachment %d exceeds size limit of %d bytes", i+1, maxFileBytes)
+		}
+		total += actualSize
+		if total > maxTotalBytes {
+			return nil, fmt.Errorf("attachments exceed total request limit of %d bytes", maxTotalBytes)
+		}
+		decoded[i] = data
+	}
+	return decoded, nil
 }
 
 func buildMessageExecutionContext(
@@ -597,6 +626,10 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 			logger.Infof(reqCtx.ctx, "Using effective tenant %d for shared agent (model/KB/MCP)", reqCtx.effectiveTenantID)
 		}
 	}
+	// The session's sandbox stays bound to the session owner even when the
+	// borrowed tenant above drives everything else, because DeleteSession tears
+	// that sandbox down from a request that only knows the session's tenant.
+	baseCtx = types.WithSandboxTenantID(baseCtx, reqCtx.session.TenantID)
 
 	// Create EventBus and cancellable context
 	eventBus := event.NewEventBus()
@@ -625,7 +658,7 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 
 	// Setup stream handler
 	h.setupStreamHandler(asyncCtx, reqCtx.sessionID, reqCtx.assistantMessage.ID,
-		reqCtx.requestID, reqCtx.receivedAt, reqCtx.assistantMessage, eventBus)
+		reqCtx.requestID, reqCtx.session.TenantID, reqCtx.receivedAt, reqCtx.assistantMessage, eventBus)
 
 	// Generate title if needed
 	if generateTitle && reqCtx.session.Title == "" {

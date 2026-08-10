@@ -149,6 +149,17 @@ type CustomAgentConfig struct {
 	SkillsSelectionMode string `yaml:"skills_selection_mode" json:"skills_selection_mode"`
 	// Selected skill names (only used when SkillsSelectionMode is "selected")
 	SelectedSkills []string `yaml:"selected_skills" json:"selected_skills"`
+
+	// ===== Sandbox Settings =====
+	// SandboxConfigID selects which workspace sandbox config this agent's
+	// skill scripts run on. Empty means the deployment-wide
+	// WEKNORA_SANDBOX_* defaults.
+	//
+	// This references the LOGICAL config, never a specific revision: keeping
+	// the indirection here is what would let credential rotation happen
+	// without re-pointing every agent (see the spec's §4.8).
+	SandboxConfigID string `yaml:"sandbox_config_id" json:"sandbox_config_id,omitempty"`
+
 	// ===== Knowledge Base Settings =====
 	// Knowledge base selection mode: "all" = all KBs, "selected" = specific KBs, "none" = no KB
 	KBSelectionMode string `yaml:"kb_selection_mode" json:"kb_selection_mode"`
