@@ -130,9 +130,24 @@ func (e *WeKnoraCloudEmbedder) BatchEmbed(ctx context.Context, texts []string) (
 	}
 
 	result := make([][]float32, len(texts))
+	seen := make([]bool, len(texts))
 	for _, item := range embedResp.Data {
-		if item.Index < len(result) {
-			result[item.Index] = item.Embedding
+		if item.Index < 0 || item.Index >= len(result) {
+			return nil, fmt.Errorf(
+				"weknoracloud embedder: response index %d out of range for %d inputs",
+				item.Index,
+				len(texts),
+			)
+		}
+		if seen[item.Index] {
+			return nil, fmt.Errorf("weknoracloud embedder: duplicate response index %d", item.Index)
+		}
+		result[item.Index] = item.Embedding
+		seen[item.Index] = true
+	}
+	for index, found := range seen {
+		if !found {
+			return nil, fmt.Errorf("weknoracloud embedder: missing embedding for input index %d", index)
 		}
 	}
 	return result, nil
