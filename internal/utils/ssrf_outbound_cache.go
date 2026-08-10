@@ -17,9 +17,9 @@ import (
 const outboundSSRFValidationTTL = 60 * time.Second
 
 var (
-	ssrfOutboundCacheGen      atomic.Uint64
-	ssrfOutboundCache         sync.Map // string -> *ssrfOutboundCacheEntry
-	ssrfOutboundValidateGroup singleflight.Group
+	ssrfOutboundCacheGen       atomic.Uint64
+	ssrfOutboundCache          sync.Map // string -> *ssrfOutboundCacheEntry
+	ssrfOutboundValidateGroup  singleflight.Group
 	ssrfOutboundValidateMisses atomic.Uint64 // test-only counter
 )
 

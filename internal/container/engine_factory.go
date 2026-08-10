@@ -389,4 +389,3 @@ func createTencentVectorDBEngine(store types.VectorStore) (interfaces.RetrieveEn
 	repo := tencentVectorDBRepo.NewTencentVectorDBRetrieveEngineRepository(client, cc.Database, &store.IndexConfig)
 	return retriever.NewKVHybridRetrieveEngine(repo, types.TencentVectorDBRetrieverEngineType), nil
 }
-
