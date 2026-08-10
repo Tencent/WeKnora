@@ -39,7 +39,10 @@ import (
 var _ im.StreamSender = (*Adapter)(nil)
 var _ im.FileDownloader = (*Adapter)(nil)
 
-var httpClient = &http.Client{Timeout: 10 * time.Second}
+var httpClient = utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
+	Timeout:      10 * time.Second,
+	MaxRedirects: 5,
+})
 
 // Adapter implements im.Adapter for Feishu/Lark.
 type Adapter struct {

@@ -72,7 +72,9 @@ func (s *weKnoraCloudService) verifyCredentials(ctx context.Context, appID, appS
 	logger.Infof(ctx, "credential verification request: method=GET url=%s app_id=%s request_id=%s ",
 		healthURL, appID, requestID)
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	clientCfg := utils.DefaultSSRFSafeHTTPClientConfig()
+	clientCfg.Timeout = 10 * time.Second
+	client := utils.NewSSRFSafeHTTPClient(clientCfg)
 	resp, err := client.Do(req)
 	if err != nil {
 		logger.Warnf(ctx, "credential verification HTTP failed: url=%s err=%v", healthURL, err)
