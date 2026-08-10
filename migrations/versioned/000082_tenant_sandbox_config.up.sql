@@ -1,7 +1,7 @@
 -- Description: Store multiple named sandbox backend configs per workspace.
 -- Replaces the earlier single tenants.tenant_sandbox_config JSONB column: one
 -- workspace can now point different agents at different sandbox backends.
-DO $$ BEGIN RAISE NOTICE '[Migration 000080] Creating tenant_sandbox_configs'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000082] Creating tenant_sandbox_configs'; END $$;
 
 CREATE TABLE IF NOT EXISTS tenant_sandbox_configs (
     id           VARCHAR(36)  PRIMARY KEY,

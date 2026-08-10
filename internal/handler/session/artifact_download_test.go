@@ -29,12 +29,12 @@ import (
 // so the failure surfaces immediately.
 // -----------------------------------------------------------------------------
 
-type stubSessionService struct {
+type stubSessionServiceForArtifacts struct {
 	interfaces.SessionService
 	getSession func(ctx context.Context, id string) (*types.Session, error)
 }
 
-func (s *stubSessionService) GetSession(ctx context.Context, id string) (*types.Session, error) {
+func (s *stubSessionServiceForArtifacts) GetSession(ctx context.Context, id string) (*types.Session, error) {
 	return s.getSession(ctx, id)
 }
 
@@ -113,7 +113,7 @@ func TestDownloadMessageArtifact_HappyPath(t *testing.T) {
 	body := []byte("PPTX-BYTES")
 
 	h := &Handler{
-		sessionService: &stubSessionService{
+		sessionService: &stubSessionServiceForArtifacts{
 			getSession: func(_ context.Context, id string) (*types.Session, error) {
 				if id != sessionID {
 					return nil, apperrors.ErrSessionNotFound
@@ -165,7 +165,7 @@ func TestDownloadMessageArtifact_HappyPath(t *testing.T) {
 
 func TestDownloadMessageArtifact_SessionNotOwnedReturns404(t *testing.T) {
 	h := &Handler{
-		sessionService: &stubSessionService{
+		sessionService: &stubSessionServiceForArtifacts{
 			getSession: func(_ context.Context, _ string) (*types.Session, error) {
 				return nil, apperrors.ErrSessionNotFound
 			},
@@ -184,7 +184,7 @@ func TestDownloadMessageArtifact_IndexOutOfRange(t *testing.T) {
 	sessionID := "sess-1"
 	messageID := "msg-1"
 	h := &Handler{
-		sessionService: &stubSessionService{
+		sessionService: &stubSessionServiceForArtifacts{
 			getSession: func(_ context.Context, _ string) (*types.Session, error) {
 				return &types.Session{ID: sessionID, TenantID: 42}, nil
 			},
@@ -206,7 +206,7 @@ func TestDownloadMessageArtifact_IndexOutOfRange(t *testing.T) {
 
 func TestDownloadMessageArtifact_InvalidIndex(t *testing.T) {
 	h := &Handler{
-		sessionService: &stubSessionService{
+		sessionService: &stubSessionServiceForArtifacts{
 			getSession: func(_ context.Context, _ string) (*types.Session, error) {
 				return &types.Session{ID: "sess-1", TenantID: 42}, nil
 			},
@@ -223,7 +223,7 @@ func TestDownloadMessageArtifact_InvalidIndex(t *testing.T) {
 
 func TestListSessionArtifacts_StripsURL(t *testing.T) {
 	h := &Handler{
-		sessionService: &stubSessionService{
+		sessionService: &stubSessionServiceForArtifacts{
 			getSession: func(_ context.Context, _ string) (*types.Session, error) {
 				return &types.Session{ID: "sess-1", TenantID: 42}, nil
 			},
