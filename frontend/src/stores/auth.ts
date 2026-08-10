@@ -374,6 +374,28 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  // 用 token 加入空间并刷新成员关系、切到新空间。token 无效时返回 ok:false（不抛异常），
+  // 提示与跳转交给调用方（store 不碰 router）。
+  const acceptInvitationByTokenAndRefresh = async (
+    token: string,
+  ): Promise<{ ok: boolean; tenantId?: number; tenantName?: string }> => {
+    try {
+      const { acceptInvitationByToken } = await import('@/api/tenant/invitations')
+      const resp = await acceptInvitationByToken(token)
+      if (!resp.success || !resp.data?.membership) {
+        return { ok: false }
+      }
+      const tenantId = resp.data.membership.tenant_id
+      const tenantName = resp.data.tenant_name
+      // 刷新成员关系，并切到刚加入的空间。
+      await refreshFromAuthMe()
+      setSelectedTenant(tenantId, tenantName ?? null)
+      return { ok: true, tenantId, tenantName }
+    } catch {
+      return { ok: false }
+    }
+  }
+
   const getSelectedTenant = () => {
     return selectedTenantId.value
   }
@@ -552,6 +574,7 @@ export const useAuthStore = defineStore('auth', () => {
     setCanCreateTenant,
     fetchPendingInvitationCount,
     refreshFromAuthMe,
+    acceptInvitationByTokenAndRefresh,
     getSelectedTenant,
     setLiteMode,
     logout,
