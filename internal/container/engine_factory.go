@@ -7,7 +7,6 @@ import (
 	"net"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	esv7 "github.com/elastic/go-elasticsearch/v7"
@@ -240,7 +239,7 @@ func createQdrantEngine(store types.VectorStore) (interfaces.RetrieveEngineServi
 		Port:        port,
 		APIKey:      cc.APIKey,
 		UseTLS:      cc.UseTLS,
-		GrpcOptions: []grpc.DialOption{grpc.WithContextDialer(ssrfSafeGRPCDialer)},
+		GrpcOptions: []grpc.DialOption{grpc.WithContextDialer(utils.SSRFSafeGRPCDialer)},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create qdrant client: %w", err)
@@ -269,7 +268,7 @@ func buildMilvusClientConfig(cc types.ConnectionConfig) milvusclient.ClientConfi
 		Address: addr,
 		DialOptions: []grpc.DialOption{
 			grpc.WithTimeout(5 * time.Second),
-			grpc.WithContextDialer(ssrfSafeGRPCDialer),
+			grpc.WithContextDialer(utils.SSRFSafeGRPCDialer),
 		},
 	}
 	if cc.Username != "" {
@@ -340,12 +339,8 @@ func createDorisEngine(store types.VectorStore) (interfaces.RetrieveEngineServic
 	mc := mysql.NewConfig()
 	mc.User = cc.Username
 	mc.Passwd = cc.Password
-	dorisSSRFDialerOnce.Do(func() {
-		mysql.RegisterDialContext(dorisSSRFNetwork, func(ctx context.Context, addr string) (net.Conn, error) {
-			return utils.SSRFSafeDialContext(ctx, "tcp", addr)
-		})
-	})
-	mc.Net = dorisSSRFNetwork
+	utils.RegisterMySQLSSRFDialer()
+	mc.Net = utils.MySQLSSRFNetwork
 	mc.Addr = cc.Addr
 	mc.DBName = cc.Database
 	mc.Params = map[string]string{"charset": "utf8mb4"}
@@ -395,10 +390,3 @@ func createTencentVectorDBEngine(store types.VectorStore) (interfaces.RetrieveEn
 	return retriever.NewKVHybridRetrieveEngine(repo, types.TencentVectorDBRetrieverEngineType), nil
 }
 
-const dorisSSRFNetwork = "tcp-weknora-ssrf"
-
-var dorisSSRFDialerOnce sync.Once
-
-func ssrfSafeGRPCDialer(ctx context.Context, addr string) (net.Conn, error) {
-	return utils.SSRFSafeDialContext(ctx, "tcp", addr)
-}

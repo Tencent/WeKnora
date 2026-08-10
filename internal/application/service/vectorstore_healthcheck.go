@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -23,6 +22,7 @@ import (
 	"github.com/weaviate/weaviate-go-client/v5/weaviate"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate/auth"
 	wgrpc "github.com/weaviate/weaviate-go-client/v5/weaviate/grpc"
+	"google.golang.org/grpc"
 )
 
 const connectionTestTimeout = 10 * time.Second
@@ -156,6 +156,9 @@ func testQdrantConnection(ctx context.Context, config types.ConnectionConfig) (s
 		Port:   port,
 		APIKey: config.APIKey,
 		UseTLS: config.UseTLS,
+		GrpcOptions: []grpc.DialOption{
+			grpc.WithContextDialer(secutils.SSRFSafeGRPCDialer),
+		},
 	})
 	if err != nil {
 		return "", errors.NewBadRequestError("failed to create qdrant client: invalid configuration")
@@ -185,7 +188,7 @@ func testMilvusConnection(ctx context.Context, config types.ConnectionConfig) (s
 		addr = "localhost:19530"
 	}
 
-	conn, err := (&net.Dialer{}).DialContext(testCtx, "tcp", addr)
+	conn, err := secutils.SSRFSafeDialContext(testCtx, "tcp", addr)
 	if err != nil {
 		logger.Warnf(ctx, "Milvus connection test failed: %v", err)
 		return "", errors.NewBadRequestError("failed to connect to milvus: connection refused or server unreachable")
@@ -202,6 +205,9 @@ func testTencentVectorDBConnection(ctx context.Context, config types.ConnectionC
 	client, err := tcvectordb.NewRpcClient(config.Addr, config.Username, config.APIKey, &tcvectordb.ClientOption{
 		ReadConsistency: tcvectordb.EventualConsistency,
 		Timeout:         connectionTestTimeout,
+		Transport: &secutils.SSRFValidatingRoundTripper{
+			Base: secutils.NewSSRFSafeTransport(secutils.DefaultSSRFSafeHTTPClientConfig()),
+		},
 	})
 	if err != nil {
 		logger.Warnf(ctx, "Tencent VectorDB connection test failed: %v", err)
@@ -234,7 +240,8 @@ func testWeaviateConnection(ctx context.Context, config types.ConnectionConfig) 
 	}
 
 	weaviateCfg := weaviate.Config{
-		Host: host,
+		Host:             host,
+		ConnectionClient: secutils.NewSSRFSafeHTTPClient(secutils.DefaultSSRFSafeHTTPClientConfig()),
 		GrpcConfig: &wgrpc.Config{
 			Host: grpcAddress,
 		},
@@ -292,7 +299,8 @@ func testDorisConnection(ctx context.Context, config types.ConnectionConfig) (st
 	cfg := mysql.NewConfig()
 	cfg.User = config.Username
 	cfg.Passwd = config.Password
-	cfg.Net = "tcp"
+	secutils.RegisterMySQLSSRFDialer()
+	cfg.Net = secutils.MySQLSSRFNetwork
 	cfg.Addr = config.Addr
 	cfg.DBName = database
 	cfg.Timeout = 5 * time.Second

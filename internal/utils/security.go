@@ -819,9 +819,8 @@ func newSSRFCheckRedirect(maxRedirects int) func(*http.Request, []*http.Request)
 		if redirectHost != "" && IsSSRFWhitelisted(redirectHost) {
 			return nil
 		}
-		redirectURL := req.URL.String()
-		if safe, reason := isSSRFSafeURL(redirectURL); !safe {
-			return fmt.Errorf("%w: %s", ErrSSRFRedirectBlocked, reason)
+		if err := validateURLForSSRFForOutbound(req.URL.String()); err != nil {
+			return fmt.Errorf("%w: %w", ErrSSRFRedirectBlocked, err)
 		}
 
 		return nil
@@ -844,7 +843,7 @@ func (t *SSRFValidatingRoundTripper) RoundTrip(req *http.Request) (*http.Respons
 	if t == nil || t.Base == nil {
 		return nil, fmt.Errorf("outbound request blocked: base transport is required")
 	}
-	if err := ValidateURLForSSRF(req.URL.String()); err != nil {
+	if err := validateURLForSSRFForOutbound(req.URL.String()); err != nil {
 		return nil, fmt.Errorf("outbound request blocked by SSRF policy: %w", err)
 	}
 	return t.Base.RoundTrip(req)
@@ -873,6 +872,12 @@ func NewSSRFSafeHTTPClientWithTransport(
 // upstream should share one NewSSRFSafeTransport via NewSSRFSafeHTTPClientWithTransport instead.
 func NewSSRFSafeHTTPClient(config SSRFSafeHTTPClientConfig) *http.Client {
 	return NewSSRFSafeHTTPClientWithTransport(config, NewSSRFSafeTransport(config))
+}
+
+// SSRFSafeGRPCDialer is compatible with grpc.WithContextDialer and pins DNS
+// answers the same way as SSRFSafeDialContext.
+func SSRFSafeGRPCDialer(ctx context.Context, addr string) (net.Conn, error) {
+	return SSRFSafeDialContext(ctx, "tcp", addr)
 }
 
 // SSRFSafeDialContext is a custom dial function that validates the resolved IP addresses
@@ -1031,6 +1036,7 @@ func loadSSRFWhitelist() *ssrfWhitelistConfig {
 // applySSRFWhitelist for the canonical merge logic.
 func SetSSRFWhitelistFromRaw(raw string) {
 	ssrfWhitelistAtomic.Store(parseSSRFWhitelistRaw(raw))
+	invalidateSSRFOutboundValidationCache()
 }
 
 // parseSSRFWhitelistRaw parses a comma-separated whitelist string into
@@ -1209,6 +1215,7 @@ func ResetSSRFWhitelistForTest() {
 	ssrfWhitelistOnce = sync.Once{}
 	ssrfWhitelist = nil
 	ssrfWhitelistAtomic.Store(nil)
+	invalidateSSRFOutboundValidationCache()
 }
 
 // FormatSSRFError takes the error returned by ValidateURLForSSRF and wraps
