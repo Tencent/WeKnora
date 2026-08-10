@@ -59,6 +59,45 @@ func TestExaProviderSearchMapping(t *testing.T) {
 	}
 }
 
+func TestExaProviderSupportsConnectionTestProbe(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/search" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("x-api-key"); got != "exa-test" {
+			t.Fatalf("x-api-key = %q", got)
+		}
+		var request exaSearchRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if request.Query != "test" || request.NumResults != 1 {
+			t.Fatalf("connection test request = %+v", request)
+		}
+		if !request.Contents.Highlights || request.Contents.Text {
+			t.Fatalf("connection test should request highlights without page text: %+v", request.Contents)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(exaSearchResponse{Results: []exaResult{
+			{Title: "Exa", URL: "https://exa.ai/"},
+		}})
+	}))
+	defer srv.Close()
+
+	p := &ExaProvider{
+		client:  srv.Client(),
+		baseURL: srv.URL + "/search",
+		apiKey:  "exa-test",
+	}
+	results, err := p.Search(context.Background(), "test", 1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("len(results) = %d, want 1", len(results))
+	}
+}
+
 func TestExaProviderValidationAndStatus(t *testing.T) {
 	if _, err := NewExaProvider(types.WebSearchProviderParameters{}); err == nil {
 		t.Fatal("expected missing API key error")

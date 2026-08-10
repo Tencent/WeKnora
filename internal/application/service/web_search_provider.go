@@ -138,7 +138,8 @@ func isValidProviderType(provider types.WebSearchProviderType) bool {
 		types.WebSearchProviderTypeSearxng,
 		types.WebSearchProviderTypeKeenable,
 		types.WebSearchProviderTypeMetaso,
-		types.WebSearchProviderTypeZhipu:
+		types.WebSearchProviderTypeZhipu,
+		types.WebSearchProviderTypeExa:
 		return true
 	default:
 		return false
@@ -170,6 +171,10 @@ func validateProviderParameters(provider types.WebSearchProviderType, params typ
 	case types.WebSearchProviderTypeBaidu:
 		if params.APIKey == "" {
 			return fmt.Errorf("API key is required for Baidu provider")
+		}
+	case types.WebSearchProviderTypeExa:
+		if params.APIKey == "" {
+			return fmt.Errorf("API key is required for Exa provider")
 		}
 	case types.WebSearchProviderTypeZhipu:
 		if err := infra_web_search.ValidateZhipuParameters(params); err != nil {
