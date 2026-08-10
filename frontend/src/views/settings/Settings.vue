@@ -70,7 +70,7 @@
             <!-- 右侧内容区域 -->
             <div class="settings-content">
               <div class="content-wrapper" :class="{
-                'content-wrapper--wide': currentSection === 'members',
+                'content-wrapper--wide': currentSection === 'members' || currentSection === 'modelUsage',
                 'content-wrapper--full': SYSTEM_ADMIN_SECTIONS.has(currentSection) || isIntegrationSection(currentSection),
               }">
                 <!-- 角色不允许访问当前 section（deep-link 进来 / 跨空间切换后角色降级）—— 优先于具体 section 渲染。
@@ -102,6 +102,11 @@
                   <!-- 模型配置 -->
                   <div v-if="currentSection === 'models'" class="section">
                     <ModelSettings />
+                  </div>
+
+                  <!-- 模型用量看板（独立页面 /platform/model-usage 的深链兜底） -->
+                  <div v-if="currentSection === 'modelUsage'" class="section">
+                    <ModelUsageSettings />
                   </div>
 
                   <!-- 网络搜索配置 -->
@@ -198,6 +203,7 @@ import TenantInfo from './TenantInfo.vue'
 import UserProfile from './UserProfile.vue'
 import GeneralSettings from './GeneralSettings.vue'
 import ModelSettings from './ModelSettings.vue'
+import ModelUsageSettings from './ModelUsageSettings.vue'
 import OllamaSettings from './OllamaSettings.vue'
 import McpSettings from './McpSettings.vue'
 import WebSearchSettings from './WebSearchSettings.vue'
@@ -324,6 +330,7 @@ const navItems = computed(() => {
     { key: 'ollama', icon: 'server', label: 'Ollama' },
     { key: 'weknoracloud', icon: '', label: 'WeKnora Cloud' },
     { key: 'models', icon: 'control-platform', label: t('settings.modelManagement') },
+    { key: 'modelUsage', icon: 'chart-bar', label: t('settings.modelUsage') },
     { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig') },
     { key: 'chathistory', icon: 'chat', label: t('chatHistorySettings.title') },
     { key: 'vectorstore', icon: 'data-base', label: t('settings.vectorStoreEngine') },
@@ -370,7 +377,7 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'models_runtime',
       label: t('settings.navGroups.modelsRuntime'),
-      items: pickItems(['models', 'ollama', 'weknoracloud']),
+      items: pickItems(['models', 'modelUsage', 'ollama', 'weknoracloud']),
     },
     {
       key: 'integrations',

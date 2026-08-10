@@ -145,6 +145,114 @@ export function deleteModel(id: string): Promise<void> {
   });
 }
 
+// ----------------------------------------------------------------------------
+// Model usage metering (see internal/handler/model_usage.go). Metadata only:
+// tokens, latency and outcome per model call — never prompts or outputs.
+export type ModelUsageRange = '15m' | '1h' | '24h' | '7d'
+export type ModelUsageType = 'all' | 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR'
+
+export interface ModelUsageSummary {
+  window_start: string
+  window_end: string
+  refresh_seconds: number
+  total_calls: number
+  total_tokens: number
+  prompt_tokens: number
+  completion_tokens: number
+  cached_tokens: number
+  error_count: number
+  success_rate: number
+}
+
+export interface ModelUsageModelStats {
+  model_id: string
+  model_name: string
+  display_name: string
+  model_type: Exclude<ModelUsageType, 'all'>
+  model_source: string
+  provider: string
+  calls: number
+  prompt_tokens: number
+  completion_tokens: number
+  cached_tokens: number
+  total_tokens: number
+  input_items: number
+  duration_ms: number
+  error_count: number
+  success_rate: number
+  avg_tokens_per_call: number
+  last_used_at?: string | null
+}
+
+export interface ModelUsageTimelinePoint {
+  bucket_start: string
+  model_id: string
+  model_name: string
+  model_type: Exclude<ModelUsageType, 'all'>
+  calls: number
+  prompt_tokens: number
+  completion_tokens: number
+  cached_tokens: number
+  total_tokens: number
+  error_count: number
+}
+
+export interface ModelUsageEvent {
+  id: number
+  tenant_id: number
+  user_id: string
+  request_id: string
+  model_id: string
+  model_name: string
+  model_type: Exclude<ModelUsageType, 'all'>
+  model_source: string
+  provider: string
+  request_kind: string
+  usage_source: string
+  prompt_tokens: number
+  completion_tokens: number
+  cached_tokens: number
+  total_tokens: number
+  input_items: number
+  duration_ms: number
+  success: boolean
+  error_type: string
+  created_at: string
+}
+
+export interface ModelUsageReport {
+  summary: ModelUsageSummary
+  models: ModelUsageModelStats[]
+  timeline: ModelUsageTimelinePoint[]
+  recent_events: ModelUsageEvent[]
+}
+
+export function getModelUsage(params: {
+  range?: ModelUsageRange
+  model_type?: ModelUsageType
+  model_id?: string
+} = {}): Promise<ModelUsageReport> {
+  const search = new URLSearchParams()
+  if (params.range) search.set('range', params.range)
+  if (params.model_type) search.set('model_type', params.model_type)
+  if (params.model_id) search.set('model_id', params.model_id)
+  const query = search.toString()
+  return new Promise((resolve, reject) => {
+    get(`/api/v1/models/usage${query ? `?${query}` : ''}`)
+      .then((response: any) => {
+        if (response.success && response.data) {
+          resolve(response.data)
+        } else {
+          reject(new Error(response.message || 'Failed to load model usage'))
+        }
+      })
+      .catch((error: any) => {
+        console.error('Failed to load model usage:', error)
+        reject(error)
+      })
+  })
+}
+
 export interface ModelDebugOptions {
   system_prompt?: string
   temperature?: number

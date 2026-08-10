@@ -122,6 +122,7 @@ func NewReranker(config *RerankerConfig) (Reranker, error) {
 	if logger.LLMDebugEnabled() {
 		r = &debugReranker{inner: r}
 	}
+	r = wrapRerankerUsage(r, config)
 	return wrapRerankerLangfuse(r, nil)
 }
 

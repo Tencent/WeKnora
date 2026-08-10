@@ -101,6 +101,7 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 	if logger.LLMDebugEnabled() {
 		e = &debugEmbedder{inner: e}
 	}
+	e = wrapEmbedderUsage(e, config)
 	if langfuse.GetManager().Enabled() {
 		e = &langfuseEmbedder{inner: e}
 	}
