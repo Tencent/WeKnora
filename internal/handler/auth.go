@@ -571,6 +571,8 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	memberships := h.userService.BuildLoginMemberships(ctx, user, tenant)
 	canCreateTenant := user.CanAccessAllTenants ||
 		resolveTenantSelfServiceCreationEnabled(ctx, h.configInfo, h.systemSettingSvc)
+	autoAcceptInvitation := h.systemSettingSvc != nil &&
+		h.systemSettingSvc.GetBool(ctx, "tenant.auto_accept_invitation", "WEKNORA_TENANT_AUTO_ACCEPT_INVITATION", false)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
@@ -579,7 +581,8 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 			"memberships":     memberships,
 			"tenant_required": tenant == nil,
 			"capabilities": gin.H{
-				"can_create_tenant": canCreateTenant,
+				"can_create_tenant":      canCreateTenant,
+				"auto_accept_invitation": autoAcceptInvitation,
 			},
 		},
 	})

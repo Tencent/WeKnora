@@ -27,23 +27,30 @@ type TenantInvitationHandler struct {
 	invitationService interfaces.TenantInvitationService
 	userService       interfaces.UserService
 	tenantService     interfaces.TenantService
+	memberService     interfaces.TenantMemberService
+	systemSettingSvc  interfaces.SystemSettingService
 	configInfo        *config.Config
 }
 
-// NewTenantInvitationHandler wires the dependencies. tenantService is
-// used to hydrate tenant names in the inbox view so the invitee sees
-// "join Foo Workspace" instead of a raw numeric tenant id. configInfo
-// supplies FrontendBaseURL for share-link URL composition.
+// NewTenantInvitationHandler wires the dependencies. tenantService hydrates
+// tenant names in the inbox view; configInfo supplies FrontendBaseURL for
+// share-link URL composition. memberService + systemSettingSvc back the
+// auto-accept switch (tenant.auto_accept_invitation); both are nil-guarded
+// for tests (production wiring always injects both).
 func NewTenantInvitationHandler(
 	invitationService interfaces.TenantInvitationService,
 	userService interfaces.UserService,
 	tenantService interfaces.TenantService,
+	memberService interfaces.TenantMemberService,
+	systemSettingSvc interfaces.SystemSettingService,
 	configInfo *config.Config,
 ) *TenantInvitationHandler {
 	return &TenantInvitationHandler{
 		invitationService: invitationService,
 		userService:       userService,
 		tenantService:     tenantService,
+		memberService:     memberService,
+		systemSettingSvc:  systemSettingSvc,
 		configInfo:        configInfo,
 	}
 }
@@ -245,7 +252,7 @@ func (h *TenantInvitationHandler) ListTenantInvitations(c *gin.Context) {
 
 // CreateInvitation godoc
 // @Summary      发出空间邀请
-// @Description  Owner 通过邮箱邀请已注册用户加入当前空间；被邀请人需要在 /me/invitations 接受后才会成为成员。
+// @Description  Owner 通过邮箱邀请已注册用户加入空间。开启 tenant.auto_accept_invitation 后被邀请人立即自动加入（响应为成员结构），否则需在 /me/invitations 接受后成为成员。
 // @Tags         空间邀请
 // @Accept       json
 // @Produce      json
@@ -288,6 +295,20 @@ func (h *TenantInvitationHandler) CreateInvitation(c *gin.Context) {
 	var invitedBy *string
 	if caller != "" && !types.IsSyntheticUserID(caller) {
 		invitedBy = &caller
+	}
+
+	// Auto-accept switch (tenant.auto_accept_invitation): skip the pending
+	// invitation and add the already-registered invitee as a member.
+	if h.systemSettingSvc != nil &&
+		h.systemSettingSvc.GetBool(ctx, "tenant.auto_accept_invitation", "WEKNORA_TENANT_AUTO_ACCEPT_INVITATION", false) {
+		if h.memberService == nil {
+			logger.Errorf(ctx, "auto_accept_invitation enabled but memberService is nil; tenant=%d", tenantID)
+			c.Error(apperrors.NewInternalServerError("failed to add member"))
+			return
+		}
+		// Writes the 201 member response / mapped error; auto-accept is done.
+		addMemberAndRespond(c, ctx, h.memberService, user, tenantID, req.Role, invitedBy)
+		return
 	}
 
 	inv, err := h.invitationService.Create(ctx, tenantID, user.ID, req.Role, invitedBy, req.Message)

@@ -321,6 +321,7 @@ export interface MembershipInfo {
  */
 export interface AuthCapabilities {
   can_create_tenant: boolean
+  auto_accept_invitation: boolean
 }
 
 export async function getCurrentUser(): Promise<{ success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[]; tenant_required?: boolean; capabilities?: AuthCapabilities }; message?: string }> {

@@ -59,6 +59,8 @@ export const useAuthStore = defineStore('auth', () => {
   // then reject with 403/2005.
   const canCreateTenant = ref(false)
 
+  const autoAcceptInvitation = ref(false)
+
   // 计算属性
   const isLoggedIn = computed(() => {
     return !!token.value && !!user.value
@@ -368,6 +370,8 @@ export const useAuthStore = defineStore('auth', () => {
         setCanCreateTenant(createCapability)
       }
 
+      autoAcceptInvitation.value = response.data?.capabilities?.auto_accept_invitation === true
+
       return true
     } catch {
       return false
@@ -401,6 +405,7 @@ export const useAuthStore = defineStore('auth', () => {
     memberships.value = []
     pendingInvitationCount.value = 0
     canCreateTenant.value = false
+    autoAcceptInvitation.value = false
     clearSessionResourceCaches()
 
     // 清空localStorage
@@ -505,6 +510,13 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     isLiteMode.value = localStorage.getItem('weknora_lite_mode') === 'true'
+
+    // localStorage only caches user/tenant/memberships — never capabilities.
+    // Reconcile with /auth/me so deployment switches (can_create_tenant,
+    // auto_accept_invitation) track the live server, not last-login state.
+    if (storedToken) {
+      refreshFromAuthMe()
+    }
   }
 
   // 初始化时从localStorage恢复状态
@@ -524,6 +536,7 @@ export const useAuthStore = defineStore('auth', () => {
     memberships,
     pendingInvitationCount,
     canCreateTenant,
+    autoAcceptInvitation,
 
     // 计算属性
     isLoggedIn,
