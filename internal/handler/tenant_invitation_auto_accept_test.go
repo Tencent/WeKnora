@@ -53,8 +53,10 @@ func (s *autoAcceptMemberSvc) AddMember(_ context.Context, userID string, _ uint
 // autoAcceptUserSvc resolves GetUserByEmail for the 404 / happy paths.
 type autoAcceptUserSvc struct {
 	interfaces.UserService
-	user *types.User
-	uerr error
+	user          *types.User
+	uerr          error
+	updatedTenant uint64
+	updateCalled  bool
 }
 
 func (s *autoAcceptUserSvc) GetUserByEmail(_ context.Context, _ string) (*types.User, error) {
@@ -65,11 +67,18 @@ func (s *autoAcceptUserSvc) GetUserByID(_ context.Context, _ string) (*types.Use
 	return nil, nil
 }
 
+func (s *autoAcceptUserSvc) UpdateUser(_ context.Context, user *types.User) error {
+	s.updateCalled = true
+	s.updatedTenant = user.TenantID
+	return nil
+}
+
 // autoAcceptInvitationSvc records whether the classic pending-invitation
 // flow was reached (it must NOT run when auto-accept is on).
 type autoAcceptInvitationSvc struct {
 	interfaces.TenantInvitationService
-	created bool
+	created          bool
+	reconcilePending bool
 }
 
 func (s *autoAcceptInvitationSvc) Create(_ context.Context, tenantID uint64, userID string, role types.TenantRole, _ *string, _ string) (*types.TenantInvitation, error) {
@@ -81,6 +90,11 @@ func (s *autoAcceptInvitationSvc) Create(_ context.Context, tenantID uint64, use
 		Role:          role,
 		Status:        types.TenantInvitationStatusPending,
 	}, nil
+}
+
+func (s *autoAcceptInvitationSvc) MarkPendingAcceptedIfExists(_ context.Context, _ uint64, _ string) error {
+	s.reconcilePending = true
+	return nil
 }
 
 func newAutoAcceptTestRouter(h *TenantInvitationHandler) *gin.Engine {
@@ -123,6 +137,9 @@ func TestCreateInvitation_AutoAcceptEnabled_AddsMemberDirectly(t *testing.T) {
 	}
 	if invites.created {
 		t.Fatal("auto-accept must not create a pending invitation row")
+	}
+	if !invites.reconcilePending {
+		t.Fatal("auto-accept should reconcile any stale pending invitation")
 	}
 	var resp struct {
 		Success bool `json:"success"`
@@ -250,5 +267,29 @@ func TestCreateInvitation_AutoAcceptEnabled_NilMemberServiceReturns500(t *testin
 	}
 	if invites.created {
 		t.Fatal("memberService nil must not silently fall back to invitation flow")
+	}
+}
+
+func TestCreateInvitation_AutoAccept_AdoptsTenantlessInviteeHomeTenant(t *testing.T) {
+	users := &autoAcceptUserSvc{
+		user: &types.User{ID: "u-bob", Email: "bob@x.com", Username: "bob", TenantID: 0},
+	}
+	members := &autoAcceptMemberSvc{}
+	invites := &autoAcceptInvitationSvc{}
+	h := &TenantInvitationHandler{
+		invitationService: invites,
+		userService:       users,
+		memberService:     members,
+		systemSettingSvc:  &autoAcceptSettingSvc{enabled: true},
+	}
+	r := newAutoAcceptTestRouter(h)
+
+	w := postAutoAcceptInvitation(t, r, `{"email":"bob@x.com","role":"contributor"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !users.updateCalled || users.updatedTenant != 7 {
+		t.Fatalf("tenantless invitee should adopt tenant 7, updateCalled=%v updatedTenant=%d",
+			users.updateCalled, users.updatedTenant)
 	}
 }

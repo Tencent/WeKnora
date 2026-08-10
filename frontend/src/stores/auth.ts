@@ -308,6 +308,10 @@ export const useAuthStore = defineStore('auth', () => {
     canCreateTenant.value = allowed
   }
 
+  const setAutoAcceptInvitation = (enabled: boolean) => {
+    autoAcceptInvitation.value = enabled
+  }
+
   // fetchPendingInvitationCount hits the dedicated /me/invitations/
   // pending-count endpoint and updates the store. Errors are
   // swallowed — the badge degrades to its last-known value instead
@@ -370,7 +374,7 @@ export const useAuthStore = defineStore('auth', () => {
         setCanCreateTenant(createCapability)
       }
 
-      autoAcceptInvitation.value = response.data?.capabilities?.auto_accept_invitation === true
+      setAutoAcceptInvitation(response.data?.capabilities?.auto_accept_invitation === true)
 
       return true
     } catch {
@@ -532,13 +536,6 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     isLiteMode.value = localStorage.getItem('weknora_lite_mode') === 'true'
-
-    // localStorage only caches user/tenant/memberships — never capabilities.
-    // Reconcile with /auth/me so deployment switches (can_create_tenant,
-    // auto_accept_invitation) track the live server, not last-login state.
-    if (storedToken) {
-      refreshFromAuthMe()
-    }
   }
 
   // 初始化时从localStorage恢复状态
@@ -585,6 +582,7 @@ export const useAuthStore = defineStore('auth', () => {
     setMemberships,
     setPendingInvitationCount,
     setCanCreateTenant,
+    setAutoAcceptInvitation,
     fetchPendingInvitationCount,
     refreshFromAuthMe,
     acceptInvitationByTokenAndRefresh,
