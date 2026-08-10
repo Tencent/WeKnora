@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -234,7 +235,27 @@ func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 		invitedBy = &caller
 	}
 
-	member, err := h.memberService.AddMember(ctx, user.ID, tenantID, req.Role, invitedBy)
+	// Add the member and write the 201 / mapped-error response through the
+	// shared helper (also used by the invitation auto-accept path).
+	addMemberAndRespond(c, ctx, h.memberService, user, tenantID, req.Role, invitedBy)
+}
+
+// addMemberAndRespond calls TenantMemberService.AddMember and writes the
+// HTTP response: 201 with a TenantMemberResponse on success, or the service
+// sentinel mapped to its HTTP status (400 / 403 / 409 / 500) on error. It
+// always writes exactly one response, so the caller MUST return right after.
+// Shared by TenantMemberHandler.AddMember and the auto-accept branch of
+// TenantInvitationHandler.CreateInvitation so the mapping never drifts.
+func addMemberAndRespond(
+	c *gin.Context,
+	ctx context.Context,
+	memberService interfaces.TenantMemberService,
+	user *types.User,
+	tenantID uint64,
+	role types.TenantRole,
+	invitedBy *string,
+) {
+	member, err := memberService.AddMember(ctx, user.ID, tenantID, role, invitedBy)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidTenantRole):
@@ -252,23 +273,21 @@ func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 		}
 		return
 	}
-
 	// Project the freshly added row through the same response shape the
 	// list endpoint uses, so the UI can swap "Add Member" UX into the
 	// table without an extra round-trip.
-	resp := types.TenantMemberResponse{
-		UserID:    member.UserID,
-		Email:     user.Email,
-		Username:  user.Username,
-		Avatar:    user.Avatar,
-		Role:      member.Role,
-		Status:    member.Status,
-		InvitedBy: member.InvitedBy,
-		JoinedAt:  member.JoinedAt,
-	}
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data":    resp,
+		"data": types.TenantMemberResponse{
+			UserID:    member.UserID,
+			Email:     user.Email,
+			Username:  user.Username,
+			Avatar:    user.Avatar,
+			Role:      member.Role,
+			Status:    member.Status,
+			InvitedBy: member.InvitedBy,
+			JoinedAt:  member.JoinedAt,
+		},
 	})
 }
 
