@@ -26,7 +26,10 @@ import (
 )
 
 // httpClient is a shared HTTP client with a reasonable timeout for DingTalk API calls.
-var httpClient = &http.Client{Timeout: 15 * time.Second}
+var httpClient = secutils.NewSSRFSafeHTTPClient(secutils.SSRFSafeHTTPClientConfig{
+	Timeout:      15 * time.Second,
+	MaxRedirects: 5,
+})
 
 // apiBaseURL is the DingTalk OpenAPI host. Overridable in tests.
 var apiBaseURL = "https://api.dingtalk.com"
@@ -420,6 +423,9 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 }
 
 func (a *Adapter) replyViaSessionWebhook(ctx context.Context, webhookURL, content string) error {
+	if err := secutils.ValidateURLForSSRF(webhookURL); err != nil {
+		return fmt.Errorf("dingtalk sessionWebhook rejected by SSRF policy: %w", err)
+	}
 	body := map[string]interface{}{
 		"msgtype": "markdown",
 		"markdown": map[string]string{

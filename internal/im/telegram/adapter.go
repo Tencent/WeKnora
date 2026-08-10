@@ -17,6 +17,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // Compile-time checks.
@@ -72,8 +73,8 @@ func (a *Adapter) VerifyCallback(c *gin.Context) error {
 
 // telegramUpdate represents an incoming Telegram update (subset of fields).
 type telegramUpdate struct {
-	UpdateID int             `json:"update_id"`
-	Message  *telegramMsg    `json:"message"`
+	UpdateID int          `json:"update_id"`
+	Message  *telegramMsg `json:"message"`
 }
 
 type telegramMsg struct {
@@ -256,7 +257,10 @@ func (a *Adapter) editMessage(ctx context.Context, chatID, messageID, text, pars
 }
 
 // httpClient is a shared HTTP client with a reasonable timeout for Telegram API calls.
-var httpClient = &http.Client{Timeout: 15 * time.Second}
+var httpClient = secutils.NewSSRFSafeHTTPClient(secutils.SSRFSafeHTTPClientConfig{
+	Timeout:      15 * time.Second,
+	MaxRedirects: 5,
+})
 
 // callAPI calls the Telegram Bot API, discarding the result.
 func (a *Adapter) callAPI(ctx context.Context, method string, body interface{}) error {
@@ -311,7 +315,7 @@ const minEditInterval = 500 * time.Millisecond
 type streamState struct {
 	mu        sync.Mutex
 	content   strings.Builder
-	msgID     string    // Telegram message ID of the "thinking" message
+	msgID     string // Telegram message ID of the "thinking" message
 	chatID    string
 	lastEdit  time.Time // last successful editMessageText timestamp
 	createdAt time.Time // for orphan stream detection

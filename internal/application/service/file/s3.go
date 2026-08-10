@@ -31,6 +31,9 @@ type s3FileService struct {
 
 // newS3Client creates a bare s3FileService with just the SDK client initialised.
 func newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix string, forcePathStyle bool) (*s3FileService, error) {
+	if err := utils.ValidateURLForSSRF(endpoint); err != nil {
+		return nil, fmt.Errorf("unsafe S3 endpoint: %w", err)
+	}
 	var cfg aws.Config
 	var err error
 
@@ -55,16 +58,20 @@ func newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix 
 	// Create S3 client with custom endpoint if provided.
 	// For S3-compatible services (non-AWS), use path-style addressing
 	// (endpoint/bucket/key) instead of virtual-hosted style (bucket.endpoint/key).
+	httpClient := utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig())
 	var client *s3.Client
 	if endpoint != "" {
 		usePathStyle := forcePathStyle || !strings.Contains(endpoint, "amazonaws.com")
 		client = s3.NewFromConfig(cfg, func(o *s3.Options) {
 			o.BaseEndpoint = aws.String(endpoint)
 			o.UsePathStyle = usePathStyle
+			o.HTTPClient = httpClient
 		})
 	} else {
 		// Standard AWS S3
-		client = s3.NewFromConfig(cfg)
+		client = s3.NewFromConfig(cfg, func(o *s3.Options) {
+			o.HTTPClient = httpClient
+		})
 	}
 
 	// Normalize pathPrefix: ensure it ends with '/' if not empty

@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	esv7 "github.com/elastic/go-elasticsearch/v7"
@@ -33,6 +35,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/tencent/vectordatabase-sdk-go/tcvectordb"
 )
 
@@ -58,6 +61,9 @@ func createEngineServiceFromStore(
 	cfg *config.Config,
 	auditSink openSearchRepo.AuditSink,
 ) (interfaces.RetrieveEngineService, error) {
+	if err := validateRuntimeVectorStoreAddresses(store); err != nil {
+		return nil, err
+	}
 	switch store.EngineType {
 	case types.PostgresRetrieverEngineType:
 		return createPostgresEngine(store, db)
@@ -79,6 +85,48 @@ func createEngineServiceFromStore(
 		return createOpenSearchEngine(ctx, store, auditSink)
 	default:
 		return nil, fmt.Errorf("unsupported engine type: %s", store.EngineType)
+	}
+}
+
+// validateRuntimeVectorStoreAddresses is the final guard for persisted or
+// imported vector-store rows. Create/test handlers validate the same fields at
+// the input boundary, but runtime construction must not assume every stored row
+// was written through those handlers.
+func validateRuntimeVectorStoreAddresses(store types.VectorStore) error {
+	cc := store.ConnectionConfig
+	check := func(label, endpoint string) error {
+		endpoint = strings.TrimSpace(endpoint)
+		if endpoint == "" {
+			return nil
+		}
+		if err := utils.ValidateURLForSSRF(endpoint); err != nil {
+			return fmt.Errorf("%s failed SSRF validation: %w", label, err)
+		}
+		return nil
+	}
+
+	switch store.EngineType {
+	case types.PostgresRetrieverEngineType, types.SQLiteRetrieverEngineType:
+		return nil
+	case types.ElasticsearchRetrieverEngineType,
+		types.OpenSearchRetrieverEngineType,
+		types.MilvusRetrieverEngineType,
+		types.TencentVectorDBRetrieverEngineType,
+		types.DorisRetrieverEngineType:
+		return check("vector store address", cc.Addr)
+	case types.QdrantRetrieverEngineType:
+		endpoint := cc.Host
+		if endpoint != "" && cc.Port != 0 {
+			endpoint = net.JoinHostPort(strings.Trim(cc.Host, "[]"), strconv.Itoa(cc.Port))
+		}
+		return check("qdrant address", endpoint)
+	case types.WeaviateRetrieverEngineType:
+		if err := check("weaviate HTTP address", cc.Host); err != nil {
+			return err
+		}
+		return check("weaviate gRPC address", cc.GrpcAddress)
+	default:
+		return fmt.Errorf("vector store engine %q has no SSRF address policy", store.EngineType)
 	}
 }
 
@@ -142,10 +190,16 @@ func isESv7(version string) bool {
 
 func createElasticsearchV8Engine(store types.VectorStore, cfg *config.Config) (interfaces.RetrieveEngineService, error) {
 	cc := store.ConnectionConfig
+	if err := utils.ValidateURLForSSRF(cc.Addr); err != nil {
+		return nil, fmt.Errorf("elasticsearch address failed SSRF validation: %w", err)
+	}
 	client, err := elasticsearch.NewTypedClient(elasticsearch.Config{
 		Addresses: []string{cc.Addr},
 		Username:  cc.Username,
 		Password:  cc.Password,
+		Transport: &utils.SSRFValidatingRoundTripper{
+			Base: utils.NewSSRFSafeTransport(utils.DefaultSSRFSafeHTTPClientConfig()),
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create elasticsearch v8 client: %w", err)
@@ -156,10 +210,16 @@ func createElasticsearchV8Engine(store types.VectorStore, cfg *config.Config) (i
 
 func createElasticsearchV7Engine(store types.VectorStore, cfg *config.Config) (interfaces.RetrieveEngineService, error) {
 	cc := store.ConnectionConfig
+	if err := utils.ValidateURLForSSRF(cc.Addr); err != nil {
+		return nil, fmt.Errorf("elasticsearch address failed SSRF validation: %w", err)
+	}
 	client, err := esv7.NewClient(esv7.Config{
 		Addresses: []string{cc.Addr},
 		Username:  cc.Username,
 		Password:  cc.Password,
+		Transport: &utils.SSRFValidatingRoundTripper{
+			Base: utils.NewSSRFSafeTransport(utils.DefaultSSRFSafeHTTPClientConfig()),
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create elasticsearch v7 client: %w", err)
@@ -176,10 +236,11 @@ func createQdrantEngine(store types.VectorStore) (interfaces.RetrieveEngineServi
 	}
 
 	client, err := qdrant.NewClient(&qdrant.Config{
-		Host:   cc.Host,
-		Port:   port,
-		APIKey: cc.APIKey,
-		UseTLS: cc.UseTLS,
+		Host:        cc.Host,
+		Port:        port,
+		APIKey:      cc.APIKey,
+		UseTLS:      cc.UseTLS,
+		GrpcOptions: []grpc.DialOption{grpc.WithContextDialer(ssrfSafeGRPCDialer)},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create qdrant client: %w", err)
@@ -205,8 +266,11 @@ func buildMilvusClientConfig(cc types.ConnectionConfig) milvusclient.ClientConfi
 	}
 
 	milvusCfg := milvusclient.ClientConfig{
-		Address:     addr,
-		DialOptions: []grpc.DialOption{grpc.WithTimeout(5 * time.Second)},
+		Address: addr,
+		DialOptions: []grpc.DialOption{
+			grpc.WithTimeout(5 * time.Second),
+			grpc.WithContextDialer(ssrfSafeGRPCDialer),
+		},
 	}
 	if cc.Username != "" {
 		milvusCfg.Username = cc.Username
@@ -236,7 +300,8 @@ func createWeaviateEngine(store types.VectorStore) (interfaces.RetrieveEngineSer
 	}
 
 	weaviateCfg := weaviate.Config{
-		Host: host,
+		Host:             host,
+		ConnectionClient: utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig()),
 		GrpcConfig: &wgrpc.Config{
 			Host: grpcAddress,
 		},
@@ -275,7 +340,12 @@ func createDorisEngine(store types.VectorStore) (interfaces.RetrieveEngineServic
 	mc := mysql.NewConfig()
 	mc.User = cc.Username
 	mc.Passwd = cc.Password
-	mc.Net = "tcp"
+	dorisSSRFDialerOnce.Do(func() {
+		mysql.RegisterDialContext(dorisSSRFNetwork, func(ctx context.Context, addr string) (net.Conn, error) {
+			return utils.SSRFSafeDialContext(ctx, "tcp", addr)
+		})
+	})
+	mc.Net = dorisSSRFNetwork
 	mc.Addr = cc.Addr
 	mc.DBName = cc.Database
 	mc.Params = map[string]string{"charset": "utf8mb4"}
@@ -314,10 +384,21 @@ func createTencentVectorDBEngine(store types.VectorStore) (interfaces.RetrieveEn
 	client, err := tcvectordb.NewRpcClient(cc.Addr, cc.Username, cc.APIKey, &tcvectordb.ClientOption{
 		ReadConsistency: tcvectordb.EventualConsistency,
 		Timeout:         10 * time.Second,
+		Transport: &utils.SSRFValidatingRoundTripper{
+			Base: utils.NewSSRFSafeTransport(utils.DefaultSSRFSafeHTTPClientConfig()),
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create tencent vectordb client: %w", err)
 	}
 	repo := tencentVectorDBRepo.NewTencentVectorDBRetrieveEngineRepository(client, cc.Database, &store.IndexConfig)
 	return retriever.NewKVHybridRetrieveEngine(repo, types.TencentVectorDBRetrieverEngineType), nil
+}
+
+const dorisSSRFNetwork = "tcp-weknora-ssrf"
+
+var dorisSSRFDialerOnce sync.Once
+
+func ssrfSafeGRPCDialer(ctx context.Context, addr string) (net.Conn, error) {
+	return utils.SSRFSafeDialContext(ctx, "tcp", addr)
 }
