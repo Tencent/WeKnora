@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -306,8 +307,7 @@ func (h *TenantInvitationHandler) CreateInvitation(c *gin.Context) {
 			c.Error(apperrors.NewInternalServerError("failed to add member"))
 			return
 		}
-		// Writes the 201 member response / mapped error; auto-accept is done.
-		addMemberAndRespond(c, ctx, h.memberService, user, tenantID, req.Role, invitedBy)
+		h.autoAcceptInvitationAndRespond(c, ctx, user, tenantID, req.Role, invitedBy)
 		return
 	}
 
@@ -343,6 +343,44 @@ func (h *TenantInvitationHandler) CreateInvitation(c *gin.Context) {
 		"success": true,
 		"data":    resp,
 	})
+}
+
+// autoAcceptInvitationAndRespond adds the invitee as an active member,
+// reconciles any stale pending invitation row, and adopts the invited
+// tenant as the invitee's home tenant when they are tenantless (same as
+// AcceptMyInvitation).
+func (h *TenantInvitationHandler) autoAcceptInvitationAndRespond(
+	c *gin.Context,
+	ctx context.Context,
+	user *types.User,
+	tenantID uint64,
+	role types.TenantRole,
+	invitedBy *string,
+) {
+	member, err := h.memberService.AddMember(ctx, user.ID, tenantID, role, invitedBy)
+	if err != nil {
+		writeAddMemberError(c, ctx, user, tenantID, err)
+		return
+	}
+	if h.invitationService != nil {
+		if markErr := h.invitationService.MarkPendingAcceptedIfExists(ctx, tenantID, user.ID); markErr != nil {
+			logger.Warnf(ctx,
+				"auto_accept: failed to reconcile pending invitation for user=%s tenant=%d: %v",
+				user.ID, tenantID, markErr)
+		}
+	}
+	if user.TenantID == 0 {
+		user.TenantID = tenantID
+		if updateErr := h.userService.UpdateUser(ctx, user); updateErr != nil {
+			logger.Errorf(ctx,
+				"auto_accept: member added but default tenant update failed: user=%s tenant=%d err=%v",
+				user.ID, tenantID, updateErr)
+			c.Error(apperrors.NewInternalServerError(
+				"member added but default workspace update failed").WithDetails(updateErr.Error()))
+			return
+		}
+	}
+	writeAddMemberSuccess(c, user, member)
 }
 
 // RevokeInvitation godoc
@@ -553,7 +591,7 @@ type acceptInvitationByTokenRequest struct {
 // @Produce      json
 // @Param        request  body      acceptInvitationByTokenRequest  true  "邀请 token"
 // @Success      200      {object}  map[string]interface{}
-// @Failure      410      {object}  errors.AppError  "链接无效或已撤销"
+// @Failure      410      {object}  apperrors.AppError  "链接无效或已撤销"
 // @Security     Bearer
 // @Router       /me/invitations/accept-by-token [post]
 func (h *TenantInvitationHandler) AcceptMyInvitationByToken(c *gin.Context) {
