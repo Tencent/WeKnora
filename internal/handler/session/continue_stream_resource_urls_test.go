@@ -20,11 +20,11 @@ import (
 // each interface keeps everything else nil-panicky so an un-stubbed call fails
 // loudly rather than returning a zero value.
 
-type stubSessionService struct {
+type stubContinueStreamSessionService struct {
 	interfaces.SessionService
 }
 
-func (s *stubSessionService) GetSession(_ context.Context, id string) (*types.Session, error) {
+func (s *stubContinueStreamSessionService) GetSession(_ context.Context, id string) (*types.Session, error) {
 	return &types.Session{ID: id, TenantID: 1}, nil
 }
 
@@ -83,7 +83,7 @@ func newContinueStreamRouter(t *testing.T) *gin.Engine {
 	r := gin.New()
 	r.Use(middleware.ErrorHandler())
 	h := &Handler{
-		sessionService: &stubSessionService{},
+		sessionService: &stubContinueStreamSessionService{},
 		messageService: &stubMessageServiceForStream{},
 		streamManager:  &stubStreamManager{events: completedAnswerStream()},
 		fileService:    &stubResourceFileService{},
