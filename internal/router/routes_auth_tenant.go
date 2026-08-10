@@ -170,6 +170,8 @@ func RegisterMyInvitationRoutes(r *gin.RouterGroup, invitationHandler *handler.T
 		me.GET("/invitations/pending-count", invitationHandler.CountMyPendingInvitations)
 		me.POST("/invitations/:inv_id/accept", invitationHandler.AcceptMyInvitation)
 		me.POST("/invitations/:inv_id/decline", invitationHandler.DeclineMyInvitation)
+		// 已登录用户用共享链接 token 加入空间（对应 register-by-invite，但不建新账号）。
+		me.POST("/invitations/accept-by-token", invitationHandler.AcceptMyInvitationByToken)
 	}
 }
 

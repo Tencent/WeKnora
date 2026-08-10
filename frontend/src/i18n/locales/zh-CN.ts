@@ -4459,6 +4459,7 @@ export default {
   inviteRegister: {
     bannerTitle: '您被邀请加入「{tenant}」',
     bannerHint: '填写下方信息完成注册，注册成功后将自动加入该团队。',
+    bannerHintLogin: '登录后将自动加入该团队。',
     loading: '正在校验邀请链接…',
     invalidTitle: '邀请链接无效或已撤销',
     invalidBody: '请联系邀请人重新发送链接，或前往登录使用现有账号。',
@@ -4477,6 +4478,7 @@ export default {
     submit: '完成注册',
     submitting: '提交中…',
     success: '注册成功，正在进入工作空间…',
+    joined: '已加入该团队',
     failed: '注册失败，请稍后重试',
     usernameRequired: '请输入姓名',
     passwordTooShort: '密码至少 6 位',

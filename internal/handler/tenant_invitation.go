@@ -518,6 +518,90 @@ func (h *TenantInvitationHandler) AcceptMyInvitation(c *gin.Context) {
 	})
 }
 
+// acceptInvitationByTokenRequest: POST /me/invitations/accept-by-token 的请求体。
+// 已登录用户用 token 加入空间（与 register-by-invite 不同，不创建新账号）。
+type acceptInvitationByTokenRequest struct {
+	Token string `json:"token" binding:"required"`
+}
+
+// AcceptMyInvitationByToken godoc
+// @Summary      通过共享链接加入空间
+// @Description  已登录用户用共享邀请链接 token 加入空间，不创建新账号；对已是成员的用户幂等。
+// @Tags         我的邀请
+// @Accept       json
+// @Produce      json
+// @Param        request  body      acceptInvitationByTokenRequest  true  "邀请 token"
+// @Success      200      {object}  map[string]interface{}
+// @Failure      410      {object}  errors.AppError  "链接无效或已撤销"
+// @Security     Bearer
+// @Router       /me/invitations/accept-by-token [post]
+func (h *TenantInvitationHandler) AcceptMyInvitationByToken(c *gin.Context) {
+	ctx := c.Request.Context()
+	caller, ok := types.UserIDFromContext(ctx)
+	if !ok || caller == "" {
+		c.Error(apperrors.NewUnauthorizedError("caller user id missing from context"))
+		return
+	}
+
+	var req acceptInvitationByTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("token is required").WithDetails(err.Error()))
+		return
+	}
+	token := strings.TrimSpace(req.Token)
+	if token == "" {
+		c.Error(apperrors.NewValidationError("token is required"))
+		return
+	}
+
+	member, err := h.invitationService.AcceptByToken(ctx, token, caller)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvitationTokenInvalid):
+			// 无效/过期/撤销统一返回 410（与 LookupInvitationByToken 一致）。
+			c.Error(&apperrors.AppError{
+				Code:     apperrors.ErrNotFound,
+				Message:  "invitation link is invalid or has been revoked",
+				HTTPCode: http.StatusGone,
+			})
+		default:
+			logger.Errorf(ctx, "AcceptMyInvitationByToken failed: user=%s err=%v", caller, err)
+			c.Error(apperrors.NewInternalServerError("failed to accept invitation").WithDetails(err.Error()))
+		}
+		return
+	}
+
+	// 无租户用户将首个加入的空间设为默认空间（与 AcceptMyInvitation 同理）。
+	if user, userErr := h.userService.GetUserByID(ctx, caller); userErr == nil && user != nil && user.TenantID == 0 {
+		user.TenantID = member.TenantID
+		if updateErr := h.userService.UpdateUser(ctx, user); updateErr != nil {
+			logger.Errorf(ctx, "AcceptMyInvitationByToken failed to set default tenant: user=%s tenant=%d err=%v",
+				caller, member.TenantID, updateErr)
+			c.Error(apperrors.NewInternalServerError("invitation accepted but default workspace update failed").WithDetails(updateErr.Error()))
+			return
+		}
+	}
+
+	// 供前端切换空间展示用。
+	tenantName := ""
+	if tenant, terr := h.tenantService.GetTenantByID(ctx, member.TenantID); terr == nil && tenant != nil {
+		tenantName = tenant.Name
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"membership": gin.H{
+				"tenant_id": member.TenantID,
+				"role":      member.Role,
+				"status":    member.Status,
+				"joined_at": member.JoinedAt,
+			},
+			"tenant_name": tenantName,
+		},
+	})
+}
+
 // DeclineMyInvitation godoc
 // @Summary      拒绝邀请
 // @Description  当前登录用户拒绝一条 pending 邀请；不创建 tenant_members 行。

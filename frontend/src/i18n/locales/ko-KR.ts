@@ -4459,6 +4459,7 @@ export default {
   inviteRegister: {
     bannerTitle: '「{tenant}」에 초대되었습니다',
     bannerHint: '아래 정보를 입력해 가입을 완료하세요. 등록이 끝나면 자동으로 팀에 합류합니다.',
+    bannerHintLogin: '로그인하면 자동으로 팀에 합류됩니다.',
     loading: '초대 링크를 확인하는 중…',
     invalidTitle: '초대 링크가 유효하지 않거나 취소되었습니다',
     invalidBody: '초대한 분께 새 링크를 요청하거나 기존 계정으로 로그인하세요.',
@@ -4477,6 +4478,7 @@ export default {
     submit: '가입 완료',
     submitting: '전송 중…',
     success: '가입 완료, 워크스페이스로 이동합니다…',
+    joined: '팀에 합류했습니다.',
     failed: '가입에 실패했습니다. 잠시 후 다시 시도해 주세요',
     usernameRequired: '이름을 입력하세요',
     passwordTooShort: '비밀번호는 최소 6자 이상이어야 합니다',
