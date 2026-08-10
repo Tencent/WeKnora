@@ -116,7 +116,11 @@ func (s *mcpServiceService) ListMCPServicesByIDs(
 }
 
 // UpdateMCPService updates an MCP service
-func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types.MCPService) error {
+func (s *mcpServiceService) UpdateMCPService(
+	ctx context.Context,
+	service *types.MCPService,
+	updateFields map[string]bool,
+) error {
 	// Check if service exists
 	existing, err := s.mcpServiceRepo.GetByID(ctx, service.TenantID, service.ID)
 	if err != nil {
@@ -211,40 +215,34 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 		}
 	}
 
-	// Merge updates: only update fields that are provided (non-zero or explicitly set)
-	// This ensures that false values for enabled field are properly updated
-	// Handler ensures that service.Enabled is only set if "enabled" key exists in the request
-	// So we can safely update enabled field if service.Name is empty (indicating partial update)
-	// or if we're updating other fields (indicating full update)
-	// For enabled field, we'll update it if this is a partial update (only enabled) or if it's explicitly set
-	if service.Name == "" {
-		// Partial update - only update enabled field.
-		existing.Enabled = service.Enabled
-	} else {
-		// Full update - update all fields including enabled
+	// Scalar zero values cannot distinguish omission from an explicit update,
+	// so use the handler's field-presence map for name, description, and enabled.
+	if updateFields["name"] {
 		existing.Name = service.Name
-		if service.Description != existing.Description {
-			existing.Description = service.Description
-		}
+	}
+	if updateFields["description"] {
+		existing.Description = service.Description
+	}
+	if updateFields["enabled"] {
 		existing.Enabled = service.Enabled
-		if service.TransportType != "" {
-			existing.TransportType = service.TransportType
-		}
-		if service.URL != nil {
-			existing.URL = service.URL
-		}
-		if service.StdioConfig != nil {
-			existing.StdioConfig = service.StdioConfig
-		}
-		if service.EnvVars != nil {
-			existing.EnvVars = service.EnvVars
-		}
-		if service.Headers != nil {
-			existing.Headers = service.Headers
-		}
-		if service.AdvancedConfig != nil {
-			existing.AdvancedConfig = service.AdvancedConfig
-		}
+	}
+	if service.TransportType != "" {
+		existing.TransportType = service.TransportType
+	}
+	if service.URL != nil {
+		existing.URL = service.URL
+	}
+	if service.StdioConfig != nil {
+		existing.StdioConfig = service.StdioConfig
+	}
+	if service.EnvVars != nil {
+		existing.EnvVars = service.EnvVars
+	}
+	if service.Headers != nil {
+		existing.Headers = service.Headers
+	}
+	if service.AdvancedConfig != nil {
+		existing.AdvancedConfig = service.AdvancedConfig
 	}
 
 	// Update timestamp

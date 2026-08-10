@@ -334,7 +334,7 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 		}
 	}
 
-	if err := h.mcpServiceService.UpdateMCPService(ctx, &service); err != nil {
+	if err := h.mcpServiceService.UpdateMCPService(ctx, &service, updateFields); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_id": secutils.SanitizeForLog(serviceID)})
 		c.Error(errors.NewInternalServerError("Failed to update MCP service: " + err.Error()))
 		return
