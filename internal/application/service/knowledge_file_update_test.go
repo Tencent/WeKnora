@@ -26,6 +26,8 @@ type fileUpdateRepoStub struct {
 	stageCalls     int
 	applyCalls     int
 	applyValues    map[string]interface{}
+	tags           map[string][]*types.KnowledgeTag
+	tagsErr        error
 }
 
 func (r *fileUpdateRepoStub) TransitionKnowledgeFileUpdateState(
@@ -122,6 +124,12 @@ func (r *fileUpdateRepoStub) UpdateApplyingKnowledgeFileColumns(
 func (r *fileUpdateRepoStub) GetKnowledgeTags(
 	context.Context, []string,
 ) (map[string][]*types.KnowledgeTag, error) {
+	if r.tagsErr != nil {
+		return nil, r.tagsErr
+	}
+	if r.tags != nil {
+		return r.tags, nil
+	}
 	return map[string][]*types.KnowledgeTag{}, nil
 }
 
@@ -424,6 +432,130 @@ func TestUpdateKnowledgeFileSameLatestPendingIsUnchanged(t *testing.T) {
 	assert.Empty(t, task.tasks)
 	assert.Zero(t, fileSvc.saveCalls)
 	assert.Zero(t, fileSvc.deleteCalls)
+}
+
+func TestUpdateKnowledgeFileSameCurrentFileAndExplicitChannelIsUnchanged(t *testing.T) {
+	file := newMultipartFileHeader(t, "latest.md", "latest content")
+	hash, err := calculateFileHash(file)
+	require.NoError(t, err)
+	repo := &fileUpdateRepoStub{
+		knowledge: &types.Knowledge{
+			ID: "knowledge-1", KnowledgeBaseID: "kb-1", Type: "file",
+			FilePath: "current/path.md", FileName: "latest.md", FileHash: hash,
+			Channel: "api-e2e", ParseStatus: types.ParseStatusCompleted,
+			FileUpdateVersion: 4, FileUpdateState: types.KnowledgeFileUpdateStateIdle,
+		},
+	}
+	fileSvc := &createKnowledgeFileServiceStub{}
+	task := &fileUpdateTaskStub{}
+
+	result, err := newFileUpdateService(repo, fileSvc, task).UpdateKnowledgeFile(
+		newCreateKnowledgeFileContext(),
+		&types.KnowledgeFileUpdateRequest{
+			KnowledgeBaseID: "kb-1", KnowledgeID: "knowledge-1", File: file,
+			Channel: "api-e2e", ChannelProvided: true,
+		},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "unchanged", result.Action)
+	assert.Equal(t, uint64(4), result.Knowledge.FileUpdateVersion)
+	assert.Zero(t, repo.stageCalls)
+	assert.Zero(t, fileSvc.saveCalls)
+	assert.Empty(t, task.tasks)
+}
+
+func TestUpdateKnowledgeFileSameCurrentFileAndDifferentChannelStagesUpdate(t *testing.T) {
+	file := newMultipartFileHeader(t, "latest.md", "latest content")
+	hash, err := calculateFileHash(file)
+	require.NoError(t, err)
+	repo := &fileUpdateRepoStub{
+		knowledge: &types.Knowledge{
+			ID: "knowledge-1", KnowledgeBaseID: "kb-1", Type: "file",
+			FilePath: "current/path.md", FileName: "latest.md", FileHash: hash,
+			Channel: "api-e2e", ParseStatus: types.ParseStatusCompleted,
+			FileUpdateVersion: 4, FileUpdateState: types.KnowledgeFileUpdateStateIdle,
+		},
+		stageResult: &types.KnowledgeFileUpdateStageResult{
+			Version: 5, State: types.KnowledgeFileUpdateResultActive, ActiveVersion: 5,
+		},
+	}
+	fileSvc := &createKnowledgeFileServiceStub{}
+	task := &fileUpdateTaskStub{}
+
+	result, err := newFileUpdateService(repo, fileSvc, task).UpdateKnowledgeFile(
+		newCreateKnowledgeFileContext(),
+		&types.KnowledgeFileUpdateRequest{
+			KnowledgeBaseID: "kb-1", KnowledgeID: "knowledge-1", File: file,
+			Channel: "another-channel", ChannelProvided: true,
+		},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "updated", result.Action)
+	assert.Equal(t, uint64(5), result.UpdateVersion)
+	assert.Equal(t, 1, repo.stageCalls)
+	assert.Equal(t, 1, fileSvc.saveCalls)
+	require.Len(t, task.tasks, 1)
+}
+
+func TestSameAsCurrentKnowledgeFileComparesExplicitConfig(t *testing.T) {
+	storedOverrides := &types.KnowledgeProcessOverrides{
+		ParserEngineOverrides: map[string]string{"mode": "accurate"},
+	}
+	existing := &types.Knowledge{
+		ID: "knowledge-1", FileName: "latest.md", FileHash: "same-hash",
+		Channel: "api-e2e", FileUpdateState: types.KnowledgeFileUpdateStateIdle,
+		Metadata: types.JSON(`{"source":"sync","owner":"docs"}`),
+	}
+	repo := &fileUpdateRepoStub{
+		knowledge: existing,
+		tags: map[string][]*types.KnowledgeTag{
+			existing.ID: {{ID: "tag-1"}, {ID: "tag-2"}},
+		},
+	}
+	svc := &knowledgeService{repo: repo}
+
+	request := func() *types.KnowledgeFileUpdateRequest {
+		return &types.KnowledgeFileUpdateRequest{
+			Channel: "api-e2e", ChannelProvided: true,
+			Metadata: map[string]string{"source": "sync"}, MetadataProvided: true,
+			TagIDs: []string{"tag-2", "tag-1", "tag-1"}, TagIDsProvided: true,
+			ProcessOverrides: &types.KnowledgeProcessOverrides{
+				ParserEngineOverrides: map[string]string{"mode": "accurate"},
+			},
+		}
+	}
+
+	unchanged, err := svc.sameAsCurrentKnowledgeFile(
+		context.Background(), existing, request(), storedOverrides, "", "latest.md", "same-hash",
+	)
+	require.NoError(t, err)
+	assert.True(t, unchanged)
+
+	tests := map[string]func(*types.KnowledgeFileUpdateRequest){
+		"channel": func(req *types.KnowledgeFileUpdateRequest) { req.Channel = "web" },
+		"metadata": func(req *types.KnowledgeFileUpdateRequest) {
+			req.Metadata["source"] = "manual"
+		},
+		"tags": func(req *types.KnowledgeFileUpdateRequest) { req.TagIDs = []string{"tag-1"} },
+		"process config": func(req *types.KnowledgeFileUpdateRequest) {
+			req.ProcessOverrides.ParserEngineOverrides["mode"] = "fast"
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			req := request()
+			mutate(req)
+			unchanged, err := svc.sameAsCurrentKnowledgeFile(
+				context.Background(), existing, req, storedOverrides, "", "latest.md", "same-hash",
+			)
+			require.NoError(t, err)
+			assert.False(t, unchanged)
+		})
+	}
 }
 
 func TestRetryKnowledgeFileUpdateRearmsExactFailedVersion(t *testing.T) {

@@ -250,9 +250,13 @@ func (s *knowledgeService) UpdateKnowledgeFile(
 	if err != nil {
 		return nil, err
 	}
-	if (existing.FileUpdateState == "" || existing.FileUpdateState == types.KnowledgeFileUpdateStateIdle) &&
-		newHash == existing.FileHash && safeFilename == existing.FileName && folderPath == existing.FolderPath &&
-		!req.MetadataProvided && !req.TagIDsProvided && !req.ChannelProvided && req.ProcessOverrides == nil {
+	unchanged, err := s.sameAsCurrentKnowledgeFile(
+		ctx, existing, req, storedOverrides, folderPath, safeFilename, newHash,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if unchanged {
 		s.attachTagsToKnowledge(ctx, existing)
 		return &types.KnowledgeFileUpsertResult{Action: "unchanged", Knowledge: existing}, nil
 	}
@@ -990,6 +994,72 @@ func sameKnowledgeFileUpdate(a, b *types.KnowledgeFileUpdatePayload) bool {
 		a.Channel == b.Channel &&
 		a.ProcessProvided == b.ProcessProvided &&
 		reflect.DeepEqual(a.ProcessConfig, b.ProcessConfig)
+}
+
+func (s *knowledgeService) sameAsCurrentKnowledgeFile(
+	ctx context.Context,
+	existing *types.Knowledge,
+	req *types.KnowledgeFileUpdateRequest,
+	storedOverrides *types.KnowledgeProcessOverrides,
+	folderPath string,
+	fileName string,
+	fileHash string,
+) (bool, error) {
+	if existing == nil ||
+		(existing.FileUpdateState != "" && existing.FileUpdateState != types.KnowledgeFileUpdateStateIdle) ||
+		fileHash != existing.FileHash || fileName != existing.FileName || folderPath != existing.FolderPath {
+		return false, nil
+	}
+	if req.ChannelProvided && req.Channel != existing.Channel {
+		return false, nil
+	}
+	if req.ProcessOverrides != nil && !reflect.DeepEqual(req.ProcessOverrides, storedOverrides) {
+		return false, nil
+	}
+	if req.MetadataProvided {
+		metadata, err := existing.Metadata.Map()
+		if err != nil {
+			return false, fmt.Errorf("parse stored metadata: %w", err)
+		}
+		for key, value := range req.Metadata {
+			if key == "process_overrides" {
+				continue
+			}
+			if current, ok := metadata[key]; !ok || !reflect.DeepEqual(current, value) {
+				return false, nil
+			}
+		}
+	}
+	if req.TagIDsProvided {
+		tagMap, err := s.repo.GetKnowledgeTags(ctx, []string{existing.ID})
+		if err != nil {
+			return false, err
+		}
+		existing.Tags = tagMap[existing.ID]
+		currentIDs := make([]string, 0, len(existing.Tags))
+		for _, tag := range existing.Tags {
+			if tag != nil {
+				currentIDs = append(currentIDs, tag.ID)
+			}
+		}
+		if !sameKnowledgeTagIDs(req.TagIDs, currentIDs) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func sameKnowledgeTagIDs(a, b []string) bool {
+	set := func(values []string) map[string]struct{} {
+		result := make(map[string]struct{}, len(values))
+		for _, value := range values {
+			if value != "" {
+				result[value] = struct{}{}
+			}
+		}
+		return result
+	}
+	return reflect.DeepEqual(set(a), set(b))
 }
 
 func replacementMetadata(
