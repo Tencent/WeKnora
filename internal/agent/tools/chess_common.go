@@ -42,12 +42,11 @@ func friendlyEngineError(err error) string {
 // chess_common.go gom các tiện ích dùng chung cho nhóm tool cờ vua.
 
 // fenSide trả về "w" hoặc "b" — bên đang đi, đọc từ trường thứ hai của FEN.
+// Ủy quyền cho chess.SideToMove (internal/chess/fen.go) để không giữ bản triển
+// khai trùng lặp thứ ba (bản thứ nhất: chess.sideToMove; bản thứ hai từng nằm
+// ở đây).
 func fenSide(fen string) string {
-	f := strings.Fields(fen)
-	if len(f) >= 2 && (f[1] == "w" || f[1] == "b") {
-		return f[1]
-	}
-	return "w"
+	return chess.SideToMove(fen)
 }
 
 // chessBoardData chuyển một chess.Analysis thành map dữ liệu cho frontend

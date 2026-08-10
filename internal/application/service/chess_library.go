@@ -429,6 +429,15 @@ func (s *chessLibraryService) ReindexAll(ctx context.Context, tenantID uint64) (
 	for _, p := range puzzles {
 		record("puzzle", p.Slug, s.indexer.IndexPuzzle(ctx, p))
 	}
+
+	positions, err := s.repo.ListPositions(ctx, tenantID, types.ChessPositionFilter{})
+	if err != nil {
+		return res, err
+	}
+	res.PositionsTotal = len(positions)
+	for _, p := range positions {
+		record("position", p.Slug, s.indexer.IndexPosition(ctx, p))
+	}
 	return res, nil
 }
 

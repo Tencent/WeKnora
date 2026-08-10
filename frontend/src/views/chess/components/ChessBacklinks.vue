@@ -6,11 +6,11 @@
       :key="i"
       href="#"
       class="cbl-item"
-      :class="b.source_type === 'lesson' ? 'cbl-lesson' : 'cbl-wiki'"
+      :class="classFor(b.source_type)"
       :title="t('chess.ref.openBacklink')"
       @click.prevent="open(b)"
     >
-      <t-icon :name="b.source_type === 'lesson' ? 'books' : 'file'" size="14px" />
+      <t-icon :name="iconFor(b.source_type)" size="14px" />
       {{ b.page_title || b.page_slug }}
     </a>
   </div>
@@ -27,7 +27,8 @@ import { useRouter } from 'vue-router';
 import { resolveChessBacklinks, type ChessBacklink, type ChessRefType } from '@/utils/chessRef';
 
 // Hiển thị "Được liên kết bởi" cho một đối tượng cờ + bấm để về nguồn.
-// Nguồn 'lesson' → mở bài giảng trong Khóa học; 'wiki' → mở trang wiki trong KB.
+// Nguồn 'lesson' → mở bài giảng trong Khóa học; 'position' → mở thế cờ trong
+// Ngân hàng thế cờ; 'wiki' (mặc định) → mở trang wiki trong KB.
 const props = defineProps<{ refType: ChessRefType; slug?: string; showEmpty?: boolean }>();
 const emit = defineEmits<{ (e: 'navigate'): void }>();
 const { t } = useI18n();
@@ -44,9 +45,24 @@ async function load() {
   loaded.value = true;
 }
 
+// 3 nhánh RÕ RÀNG (không phải nhị phân lesson/else) — nguồn 'position' KHÔNG
+// được rơi vào nhánh wiki (nó có kb_id='' nên sẽ điều hướng tới KB rỗng, hỏng
+// route mà không báo lỗi).
+function iconFor(sourceType?: string): string {
+  if (sourceType === 'lesson') return 'books';
+  if (sourceType === 'position') return 'grid';
+  return 'file';
+}
+function classFor(sourceType?: string): string {
+  if (sourceType === 'lesson') return 'cbl-lesson';
+  if (sourceType === 'position') return 'cbl-position';
+  return 'cbl-wiki';
+}
 function open(b: ChessBacklink) {
   if (b.source_type === 'lesson') {
     router.push({ name: 'chessCourses', query: { ref: `lesson/${b.page_slug}` } });
+  } else if (b.source_type === 'position') {
+    router.push({ name: 'chessCourses', query: { ref: `position/${b.page_slug}` } });
   } else {
     router.push({ name: 'knowledgeBaseDetail', params: { kbId: b.kb_id }, query: { tab: 'wiki', slug: b.page_slug } });
   }

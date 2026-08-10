@@ -1,17 +1,17 @@
 import type { ChessBoardData } from '@/types/tool-results';
 import {
-  getGameBySlug, getPuzzleBySlug, getLessonBySlug, getCourseBySlug,
-  getGameBacklinks, getPuzzleBacklinks, getLessonBacklinks, getCourseBacklinks,
+  getGameBySlug, getPuzzleBySlug, getLessonBySlug, getCourseBySlug, getPositionBySlug,
+  getGameBacklinks, getPuzzleBacklinks, getLessonBacklinks, getCourseBacklinks, getPositionBacklinks,
 } from '@/api/chess';
 
 // Giải mã wikilink cờ vua [[game/<slug>]] / [[puzzle/<slug>]] / [[lesson/<slug>]]
-// / [[course/<slug>]] về đối tượng tương ứng + dữ liệu bàn cờ để render (khóa học
-// KHÔNG có bàn cờ → board=null). Có cache để một trang nhiều chip/embed không gọi
-// API trùng.
+// / [[course/<slug>]] / [[position/<slug>]] về đối tượng tương ứng + dữ liệu bàn
+// cờ để render (khóa học KHÔNG có bàn cờ → board=null). Có cache để một trang
+// nhiều chip/embed không gọi API trùng.
 
-export type ChessRefType = 'game' | 'puzzle' | 'lesson' | 'course';
+export type ChessRefType = 'game' | 'puzzle' | 'lesson' | 'course' | 'position';
 
-const REF_TYPES: ChessRefType[] = ['game', 'puzzle', 'lesson', 'course'];
+const REF_TYPES: ChessRefType[] = ['game', 'puzzle', 'lesson', 'course', 'position'];
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
@@ -88,6 +88,24 @@ async function doResolve(ref: string): Promise<ResolvedChessRef> {
     if (!c) return notFound(type, slug);
     return { type, slug, ref, title: c.title || slug, board: null, found: true, raw: c };
   }
+  if (type === 'position') {
+    const res: any = await getPositionBySlug(slug);
+    const p = res?.data;
+    if (!p) return notFound(type, slug);
+    const title = p.title || slug;
+    // CỐ Ý không set `pgn`: thế cờ trong Ngân hàng thế cờ có thể không có quân
+    // Vua (dạy trẻ mới học) — ChessBoardDisplay chỉ đi qua chess.js khi có pgn,
+    // và chess.js từ chối FEN thiếu Vua. Chỉ fen (+ orientation) là an toàn.
+    return {
+      type, slug, ref, title, found: true, raw: p,
+      board: {
+        display_type: 'chess_board',
+        fen: p.fen || START_FEN,
+        orientation: p.orientation === 'b' ? 'black' : 'white',
+        caption: title,
+      },
+    };
+  }
   // lesson
   const res: any = await getLessonBySlug(slug);
   const l = res?.data;
@@ -113,7 +131,7 @@ export function resolveChessRef(ref: string): Promise<ResolvedChessRef> {
 }
 
 export interface ChessBacklink {
-  source_type?: string; // 'wiki' | 'lesson' — quyết định cách điều hướng
+  source_type?: string; // 'wiki' | 'lesson' | 'position' — quyết định cách điều hướng
   kb_id: string;
   page_slug: string;
   page_title: string;
@@ -124,6 +142,7 @@ const BACKLINK_FN: Record<ChessRefType, (slug: string) => Promise<any>> = {
   puzzle: getPuzzleBacklinks,
   lesson: getLessonBacklinks,
   course: getCourseBacklinks,
+  position: getPositionBacklinks,
 };
 
 // Lấy danh sách trang wiki/bài giảng đang trỏ tới đối tượng cờ.

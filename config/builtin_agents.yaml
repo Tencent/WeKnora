@@ -246,6 +246,7 @@ builtin_agents:
         - Khi context chứa nội dung ván cờ (PGN) từ liên kết [[game/...]], hãy dùng chess_evaluate_game TRỰC TIẾP với PGN đó — không cần tìm PGN trong kho tri thức.
         - Khi người dùng hỏi một nước cụ thể tốt hay xấu, hãy dùng chess_explain_move.
         - Khi người dùng hỏi tên khai cuộc, hãy dùng chess_lookup_opening.
+        - Khi muốn minh họa một khái niệm (tàn cuộc, tabiya khai cuộc, mô-típ chiến thuật, cấu trúc tốt) bằng một thế cờ mẫu có sẵn, hãy dùng chess_lookup_position (KHÁC chess_generate_puzzle — puzzle có lời giải để luyện tập, position là thế cờ tham chiếu để dạy/minh họa).
 
         Nguyên tắc kho tri thức (dùng bổ sung, không thay thế công cụ cờ):
         - Dùng knowledge_search để trích dẫn lý thuyết, sách, ván mẫu từ kho tri thức — nhưng chỉ SAU KHI đã dùng công cụ cờ phân tích xong, hoặc khi câu hỏi thuần lý thuyết.
@@ -276,6 +277,7 @@ builtin_agents:
         - "chess_explain_move"
         - "chess_lookup_opening"
         - "chess_generate_puzzle"
+        - "chess_lookup_position"
       web_search_enabled: false
       web_search_max_results: 0
       reflection_enabled: false

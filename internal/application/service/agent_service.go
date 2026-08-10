@@ -661,6 +661,8 @@ func (s *agentService) registerTools(
 			toolToRegister = tools.NewChessLookupOpeningTool(s.chessLookupLimit())
 		case tools.ToolChessGeneratePuzzle:
 			toolToRegister = tools.NewChessGeneratePuzzleTool(s.chessLibraryService)
+		case tools.ToolChessLookupPosition:
+			toolToRegister = tools.NewChessLookupPositionTool(s.chessLibraryService)
 		case tools.ToolChessAnalyzePosition:
 			if eng := s.getChessEngine(ctx); eng != nil {
 				toolToRegister = tools.NewChessAnalyzePositionTool(eng, s.chessDefaultDepth())

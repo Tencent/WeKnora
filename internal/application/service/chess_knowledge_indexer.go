@@ -76,6 +76,14 @@ func (ix *ChessKnowledgeIndexer) IndexLesson(ctx context.Context, l *types.Chess
 	return ix.upsert(ctx, l.TenantID, types.ChessRefTypeLesson, l.Slug, title, content)
 }
 
+func (ix *ChessKnowledgeIndexer) IndexPosition(ctx context.Context, p *types.ChessPosition) error {
+	if !ix.Enabled() || p == nil || p.Slug == "" {
+		return nil
+	}
+	title, content := buildPositionKnowledgeText(p)
+	return ix.upsert(ctx, p.TenantID, types.ChessRefTypePosition, p.Slug, title, content)
+}
+
 // Remove xóa bản ghi Knowledge tương ứng (khi đối tượng cờ bị xóa).
 func (ix *ChessKnowledgeIndexer) Remove(ctx context.Context, tenantID uint64, chessType, slug string) {
 	if !ix.Enabled() || slug == "" {

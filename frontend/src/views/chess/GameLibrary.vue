@@ -42,7 +42,21 @@
       <div class="gl-viewer">
         <template v-if="selected">
           <ChessBacklinks v-if="selected.slug" ref-type="game" :slug="selected.slug" show-empty class="gl-backlinks" />
-          <ChessBoardDisplay :key="selected.id" :data="viewerData" />
+          <div class="gl-viewer-actions">
+            <t-button size="small" variant="outline" @click="openSavePositionDialog">
+              <template #icon><t-icon name="save" /></template>Lưu thế cờ này
+            </t-button>
+          </div>
+          <ChessBoardDisplay ref="boardRef" :key="selected.id" :data="viewerData" />
+          <div v-if="extractedPositions.length" class="gl-extracted">
+            <div class="gl-extracted-title">Thế cờ đã trích từ ván này ({{ extractedPositions.length }})</div>
+            <div class="gl-extracted-chips">
+              <a v-for="p in extractedPositions" :key="p.id" href="#" class="gl-extracted-chip"
+                @click.prevent="openPosition(p)">
+                {{ p.title || p.slug }}<span class="gl-extracted-ply">sau nước {{ p.source_ply }}</span>
+              </a>
+            </div>
+          </div>
         </template>
         <div v-else class="gl-empty gl-empty--big">Chọn một ván để xem lại (lật từng nước).</div>
       </div>
@@ -55,6 +69,20 @@
           placeholder='[Event "..."]...&#10;1. e4 e5 ... 1-0' />
       </div>
     </t-dialog>
+
+    <t-dialog v-model:visible="savePosDialog.visible" header="Lưu thế cờ vào Ngân hàng thế cờ"
+      :on-confirm="doSavePosition" width="560px">
+      <div class="gl-form">
+        <label>Thế cờ (FEN) — nước đang xem</label>
+        <t-input :model-value="savePosDialog.fen" readonly />
+        <label>Tiêu đề</label>
+        <t-input v-model="savePosDialog.title" placeholder="VD: Vua+Xe đấu Vua sau nước 42" />
+        <label>Phân loại</label>
+        <t-select v-model="savePosDialog.category" :options="positionCategoryOptions" clearable filterable creatable />
+        <label>Cấp độ</label>
+        <t-select v-model="savePosDialog.level" :options="positionLevelOptions" clearable />
+      </div>
+    </t-dialog>
   </div>
 </template>
 
@@ -65,10 +93,17 @@ import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next';
 import ChessBoardDisplay from '@/views/chat/components/tool-results/ChessBoardDisplay.vue';
 import ChessBacklinks from '@/views/chess/components/ChessBacklinks.vue';
 import type { ChessBoardData } from '@/types/tool-results';
-import { listGames, getGameBySlug, deleteGame, importGames, exportGamesPGN, renameGameSlug, type ChessGame } from '@/api/chess';
+import {
+  listGames, getGameBySlug, deleteGame, importGames, exportGamesPGN, renameGameSlug, type ChessGame,
+  listPositionsByGame, createPosition, type ChessPosition,
+} from '@/api/chess';
 import { downloadText } from '@/utils/fileTransfer';
+import { positionCategoryOptions, positionLevelOptions } from '@/utils/chessPositionOptions';
+import { useRouter } from 'vue-router';
 
 const { t } = useI18n();
+const router = useRouter();
+const boardRef = ref<InstanceType<typeof ChessBoardDisplay> | null>(null);
 
 // Deep-link "Mở trong thư viện": chọn sẵn ván theo slug (từ wikilink [[game/<slug>]]).
 const props = defineProps<{ focusSlug?: string }>();
@@ -76,7 +111,7 @@ async function focusBySlug(slug?: string) {
   if (!slug) return;
   try {
     const res: any = await getGameBySlug(slug);
-    if (res?.data) selected.value = res.data;
+    if (res?.data) { selected.value = res.data; loadExtractedPositions(res.data.id); }
   } catch { /* không tìm thấy → bỏ qua */ }
 }
 onMounted(() => focusBySlug(props.focusSlug));
@@ -105,6 +140,48 @@ const selected = ref<ChessGame | null>(null);
 const filter = reactive({ white: '', black: '', eco: '', result: '' });
 const importDialog = reactive({ visible: false, pgn: '' });
 
+interface SavePositionDialogState {
+  visible: boolean;
+  fen: string;
+  ply: number;
+  title: string;
+  category: string;
+  level: string;
+}
+const savePosDialog = reactive<SavePositionDialogState>({
+  visible: false, fen: '', ply: 0, title: '', category: '', level: '',
+});
+function openSavePositionDialog() {
+  const fen = boardRef.value?.currentFen || '';
+  if (!fen) { MessagePlugin.warning('Chưa có thế cờ để lưu'); return; }
+  savePosDialog.visible = true;
+  savePosDialog.fen = fen;
+  savePosDialog.ply = boardRef.value?.currentIndex ?? 0;
+  const label = boardRef.value?.currentLabel || '';
+  const players = selected.value ? `${selected.value.white || '?'} – ${selected.value.black || '?'}` : '';
+  savePosDialog.title = label ? `${players} — ${label}` : players;
+  savePosDialog.category = '';
+  savePosDialog.level = '';
+}
+async function doSavePosition() {
+  if (!selected.value) return;
+  try {
+    await createPosition({
+      title: savePosDialog.title,
+      fen: savePosDialog.fen,
+      category: savePosDialog.category,
+      level: savePosDialog.level,
+      source_game_id: selected.value.id,
+      source_ply: savePosDialog.ply,
+    });
+    savePosDialog.visible = false;
+    await loadExtractedPositions(selected.value.id);
+    MessagePlugin.success('Đã lưu thế cờ vào Ngân hàng thế cờ');
+  } catch (e: any) {
+    MessagePlugin.error(e?.error || e?.message || 'Lưu thế cờ thất bại');
+  }
+}
+
 const viewerData = computed<ChessBoardData>(() => ({
   display_type: 'chess_board',
   fen: STARTFEN,
@@ -118,7 +195,21 @@ async function load() {
     games.value = res?.data || [];
   } catch { MessagePlugin.error('Tải kho ván thất bại'); }
 }
-function select(g: ChessGame) { selected.value = g; }
+
+// Thế cờ đã trích từ ván đang xem (Ngân hàng thế cờ, nguồn source_game_id).
+const extractedPositions = ref<ChessPosition[]>([]);
+async function loadExtractedPositions(gameId: string) {
+  extractedPositions.value = [];
+  try {
+    const res: any = await listPositionsByGame(gameId);
+    extractedPositions.value = res?.data || [];
+  } catch { /* best-effort, không chặn xem ván */ }
+}
+function openPosition(p: ChessPosition) {
+  router.push({ name: 'chessCourses', query: { ref: `position/${p.slug}` } });
+}
+
+function select(g: ChessGame) { selected.value = g; loadExtractedPositions(g.id); }
 function remove(g: ChessGame) {
   DialogPlugin.confirm({
     header: 'Xóa ván', body: `Xóa ván ${g.white} – ${g.black}?`,
@@ -192,4 +283,15 @@ load();
 .gl-meta { display: flex; gap: 8px; margin-top: 3px; font-size: 12px; color: var(--td-text-color-secondary); }
 .gl-tag { background: var(--td-brand-color-light); color: var(--td-brand-color); padding: 0 6px; border-radius: 4px; }
 .gl-form { display: flex; flex-direction: column; gap: 6px; label { font-size: 13px; color: var(--td-text-color-secondary); } }
+.gl-viewer-actions { margin-bottom: 8px; }
+.gl-extracted { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--td-component-stroke); }
+.gl-extracted-title { font-size: 12px; color: var(--td-text-color-secondary); margin-bottom: 6px; }
+.gl-extracted-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.gl-extracted-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 8px; border-radius: 6px; font-size: 12px; text-decoration: none;
+  background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-primary);
+  &:hover { color: var(--td-brand-color); }
+}
+.gl-extracted-ply { color: var(--td-text-color-placeholder); font-size: 11px; }
 </style>

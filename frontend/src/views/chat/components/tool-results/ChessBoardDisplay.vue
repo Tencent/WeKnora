@@ -108,6 +108,11 @@ const positions = computed<PosItem[]>(() => {
 
 const currentIndex = ref(0);
 const currentLabel = computed(() => positions.value[currentIndex.value]?.label ?? '');
+// FEN của thế cờ đang xem (nước hiện tại nếu đang tua ván). Lộ ra qua
+// defineExpose bên dưới để component cha (vd GameLibrary) "kéo" FEN tại đúng
+// thời điểm bấm nút — thay vì phát emit mỗi lần đổi nước, tránh sinh state
+// trùng và tự miễn nhiễm với watch(positions) reset currentIndex bên dưới.
+const currentFen = computed(() => positions.value[currentIndex.value]?.fen ?? '');
 
 // ---- Đánh giá engine ----
 const hasEval = computed(() =>
@@ -205,6 +210,10 @@ watch(positions, () => {
   currentIndex.value = 0;
   applyPosition();
 });
+
+// Cho phép component cha đọc thế cờ đang xem (vd nút "Lưu thế cờ này" trong
+// GameLibrary khi tua ván) mà không cần biết chỉ số nước nội bộ.
+defineExpose({ currentFen, currentIndex, currentLabel });
 </script>
 
 <style lang="less" scoped>

@@ -5817,16 +5817,20 @@ export default {
       openBacklink: "Mở nguồn liên kết",
       dialogTitle: "Tham chiếu cờ",
       type_game: "Ván cờ",
-      type_puzzle: "Thế cờ",
+      // "Thế cờ" nay dành riêng cho Ngân hàng thế cờ (position); puzzle (bài TẬP
+      // có lời giải, để LUYỆN) đổi nhãn thành "Bài tập" để không trùng tên.
+      type_puzzle: "Bài tập",
       type_lesson: "Bài giảng",
       type_course: "Khóa học",
+      type_position: "Thế cờ",
       // Bộ chọn chèn link trong trình soạn bài giảng.
       insert: "Chèn ván/thế cờ",
       pickerTitle: "Chèn tham chiếu cờ",
       tabGames: "Ván cờ",
-      tabPuzzles: "Thế cờ / Bài tập",
+      tabPuzzles: "Bài tập",
       tabLessons: "Bài giảng",
       tabCourses: "Khóa học",
+      tabPositions: "Thế cờ",
       searchPlaceholder: "Tìm theo tên…",
       empty: "Không có mục nào.",
       embedToggle: "Nhúng bàn cờ inline (![[…]])",
