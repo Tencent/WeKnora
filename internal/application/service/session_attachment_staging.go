@@ -42,6 +42,48 @@ func sessionSandboxShellExecutor(mgr sandbox.Manager) sandbox.SessionShellExecut
 	return provider.SessionShellExecutor()
 }
 
+// sessionAttachmentStager is the agentService surface the QA pipeline needs to
+// stage attachments. Declared as a named interface so the runtime type
+// assertion in session_agent_qa.go has one definition to drift against.
+type sessionAttachmentStager interface {
+	sessionSandboxInputStore(
+		ctx context.Context, sessionID, agentSandboxConfigID string,
+	) (sandbox.SessionFileStore, error)
+	stageSessionAttachments(
+		ctx context.Context, sessionID, agentSandboxConfigID string,
+		attachments types.MessageAttachments,
+	) ([]stagedSessionAttachment, error)
+}
+
+// sessionSandboxInputStore resolves the session filesystem capability of the
+// backend this session's sandbox actually runs on.
+//
+// Callers must gate staging on this rather than on the process-wide manager: a
+// workspace can select a named Cube/E2B config while the deployment default is
+// docker/local, and in that combination the agent still registers shell/skill
+// tools against the remote sandbox, so its attachments have to be staged too.
+func (s *agentService) sessionSandboxInputStore(
+	ctx context.Context,
+	sessionID string,
+	agentSandboxConfigID string,
+) (sandbox.SessionFileStore, error) {
+	if s == nil {
+		return nil, nil
+	}
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	configID, err := sandboxConfigForExecution(ctx, s.sandboxPinner, sessionID, agentSandboxConfigID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve sandbox config for session %s: %w", sessionID, err)
+	}
+	mgr, err := resolveTenantSandboxForConfig(
+		ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, s.sandboxPolicy,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return sessionSandboxFileStore(mgr), nil
+}
+
 // stageSessionAttachments reconciles /workspace/input with the durable
 // attachment inventory. It is gated on the sandbox manager advertising a
 // session filesystem capability; other backends retain prompt-extracted
@@ -55,18 +97,10 @@ func (s *agentService) stageSessionAttachments(
 	if s == nil {
 		return nil, nil
 	}
-	// The capability depends on the workspace's own backend, so probe the
-	// resolved manager rather than the process-wide default.
-	tenantID, _ := types.TenantIDFromContext(ctx)
-	configID, err := sandboxConfigForExecution(ctx, s.sandboxPinner, sessionID, agentSandboxConfigID)
-	if err != nil {
-		return nil, fmt.Errorf("resolve sandbox config for session %s: %w", sessionID, err)
-	}
-	mgr, err := resolveTenantSandboxForConfig(ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, s.sandboxPolicy)
+	store, err := s.sessionSandboxInputStore(ctx, sessionID, agentSandboxConfigID)
 	if err != nil {
 		return nil, err
 	}
-	store := sessionSandboxFileStore(mgr)
 	if store == nil {
 		return nil, nil
 	}

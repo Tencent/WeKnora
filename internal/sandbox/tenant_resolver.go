@@ -205,13 +205,19 @@ func (r *tenantSandboxResolver) buildClient(cfg *Config) (RemoteSandboxClient, e
 
 // NewRemoteClientForCheck builds a throwaway client for connectivity probes.
 // It is never cached and never handed to a manager.
+//
+// Both providers get a guarded transport. The endpoints being probed come
+// straight off an admin's unsaved form, so save-time ValidateOutboundURL has
+// not necessarily run against the address this client will actually dial, and
+// even when it has, a hostname can resolve to a public address during
+// validation and to 169.254.169.254 at dial time.
 func NewRemoteClientForCheck(cfg *Config) (RemoteSandboxClient, error) {
 	if cfg == nil {
 		return nil, errors.New("sandbox: config is required")
 	}
 	switch cfg.Type {
 	case SandboxTypeCube:
-		return NewCubeRemoteClient(cfg)
+		return NewCubeRemoteClientWithPool(cfg, NewCubeTransportPool(nil))
 	case SandboxTypeE2B:
 		return NewE2BRemoteClientWithTransport(cfg, NewGuardedTransport())
 	default:

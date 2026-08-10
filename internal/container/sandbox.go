@@ -97,7 +97,10 @@ func buildCubeManager(
 	sessionRepo interfaces.SessionRepository,
 ) sandbox.Manager {
 	cfg := sandbox.CubeConfigFromEnv()
-	client, err := sandbox.NewCubeRemoteClient(cfg)
+	// The pool lives as long as this process-wide manager, and its guarded
+	// dialer keeps the deployment default on the same outbound policy the
+	// per-tenant resolver enforces.
+	client, err := sandbox.NewCubeRemoteClientWithPool(cfg, sandbox.NewCubeTransportPool(nil))
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build Cube sandbox client: %v (falling back to disabled)", err)
 		return sandbox.NewDisabledManager()
@@ -130,7 +133,7 @@ func buildE2BManager(
 	sessionRepo interfaces.SessionRepository,
 ) sandbox.Manager {
 	cfg := sandbox.E2BConfigFromEnv()
-	client, err := sandbox.NewE2BRemoteClient(cfg)
+	client, err := sandbox.NewE2BRemoteClientWithTransport(cfg, sandbox.NewGuardedTransport())
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build E2B sandbox client: %v (falling back to disabled)", err)
 		return sandbox.NewDisabledManager()

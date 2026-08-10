@@ -150,16 +150,22 @@ func (s *sessionService) AgentQA(
 	// filesystem capability so provider-neutral wiring (Cube today, E2B
 	// tomorrow) drops in without touching this call site.
 	var stagedAttachments []stagedSessionAttachment
-	if sessionSandboxFileStore(s.sandboxMgr) != nil {
+	stager, ok := s.agentService.(sessionAttachmentStager)
+	if !ok {
+		return errors.New("agent service does not support session attachment staging")
+	}
+	// Probe the backend this session's sandbox actually runs on. Gating on the
+	// process-wide manager instead would skip staging whenever the deployment
+	// default is docker/local but the agent selected a named Cube/E2B config —
+	// the tools would still run remotely, against an empty /workspace/input.
+	inputStore, storeErr := stager.sessionSandboxInputStore(ctx, sessionID, agentConfig.SandboxConfigID)
+	if storeErr != nil {
+		return fmt.Errorf("resolve sandbox file store for session %s: %w", sessionID, storeErr)
+	}
+	if inputStore != nil {
 		sessionAttachments, loadErr := s.messageRepo.GetSessionAttachments(ctx, sessionID)
 		if loadErr != nil {
 			return fmt.Errorf("load session attachments for sandbox staging: %w", loadErr)
-		}
-		stager, ok := s.agentService.(interface {
-			stageSessionAttachments(context.Context, string, string, types.MessageAttachments) ([]stagedSessionAttachment, error)
-		})
-		if !ok {
-			return errors.New("agent service does not support session attachment staging")
 		}
 		stagedAttachments, err = stager.stageSessionAttachments(ctx, sessionID, agentConfig.SandboxConfigID, sessionAttachments)
 		if err != nil {

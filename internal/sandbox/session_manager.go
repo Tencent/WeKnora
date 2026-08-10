@@ -706,11 +706,19 @@ func (m *SessionBoundManager) listFilesRecursive(
 // sessionKey resolves the tenant-scoped binding key. Tenant ID comes from the
 // request context; empty tenant is treated as a caller error to keep session
 // bindings globally addressable in Redis.
+//
+// It reads the session-owner tenant rather than the ambient request tenant so
+// that a shared agent — which runs under the agent owner's workspace so its
+// models, KBs and named sandbox configs resolve there — still binds its sandbox
+// under the session's own tenant. Session deletion tears the sandbox down from a
+// request that knows only that tenant, so any other choice would strand the
+// MicroVM. SandboxTenantIDFromContext falls back to the request tenant, which
+// is already the session owner on every non-borrowed path.
 func (m *SessionBoundManager) sessionKey(
 	ctx context.Context,
 	sessionID string,
 ) (SessionSandboxKey, error) {
-	tenantID, ok := types.TenantIDFromContext(ctx)
+	tenantID, ok := types.SandboxTenantIDFromContext(ctx)
 	if !ok || tenantID == 0 {
 		return SessionSandboxKey{}, errors.New("sandbox: tenant ID missing from context")
 	}

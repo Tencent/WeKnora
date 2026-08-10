@@ -127,11 +127,7 @@ func TestArtifactSessionSourceKeepsDefaultBackendForSentinelPin(t *testing.T) {
 // staging". This pins the shape that call site asserts.
 func TestAgentServiceSatisfiesStagingAssertion(t *testing.T) {
 	var svc any = &agentService{}
-	_, ok := svc.(interface {
-		stageSessionAttachments(
-			context.Context, string, string, types.MessageAttachments,
-		) ([]stagedSessionAttachment, error)
-	})
+	_, ok := svc.(sessionAttachmentStager)
 	require.True(t, ok)
 }
 

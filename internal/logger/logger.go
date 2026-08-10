@@ -527,6 +527,12 @@ func CloneContext(ctx context.Context) context.Context {
 		types.LanguageContextKey,
 		types.SessionTenantIDContextKey,
 		types.SessionIDContextKey,
+		// SandboxTenantIDContextKey: the session owner's tenant, which the
+		// shared-agent path deliberately keeps separate from
+		// TenantIDContextKey. Dropping it here would silently re-key every
+		// session→sandbox binding onto the borrowed tenant, because
+		// setupSSEStream builds its async context through CloneContext.
+		types.SandboxTenantIDContextKey,
 		types.EmbedQueryContextKey,
 		types.EmbedVisitorContextKey,
 		// Keep the Langfuse trace alive across CloneContext boundaries so
