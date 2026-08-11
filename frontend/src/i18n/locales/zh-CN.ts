@@ -4377,6 +4377,7 @@ export default {
     confirmDelete: '确认删除',
     deleteSuccess: '删除成功',
     deleteFailed: '删除失败',
+    updateSuccess: '更新成功',
     saveSuccess: '保存成功',
     saveFailed: '保存失败',
     file: '文件',
