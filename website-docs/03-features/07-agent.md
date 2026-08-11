@@ -402,19 +402,13 @@ description: Extract text and tables from PDF files, fill forms, merge documents
 
 Agent 侧的启停在 `configureSkillsFromAgent`（`internal/application/service/session_agent_qa.go`）：
 
-- **沙箱关闭（`WEKNORA_SANDBOX_MODE` 为空或 `disabled`）时技能整体不可用**；
+- 智能体未选择空间级沙箱配置时，脚本执行工具不可用，但仍可浏览技能说明；
 - `SkillsSelectionMode`：`all` = 全部预置技能、`selected` = `SelectedSkills` 白名单、`none`/空 = 禁用；
 - 用户 `@技能` 提及会经 `applyPerRequestSkillScope` 把本轮白名单收窄到提及集合，并作为 `PinnedSkillInfo` 注入 `<must_use>` 块（"Must call read_skill(...) before answering"）。
 
 ### 5.3 与沙箱（internal/sandbox）的关系
 
-`execute_skill_script` → `skills.Manager.ExecuteScript` → `sandbox.Manager.Execute`。沙箱由环境变量配置：
-
-| 环境变量 | 含义 | 默认 |
-| --- | --- | --- |
-| `WEKNORA_SANDBOX_MODE` | `docker` / `local` / `disabled` | `disabled` |
-| `WEKNORA_SANDBOX_DOCKER_IMAGE` | Docker 沙箱镜像 | `wechatopenai/weknora-sandbox:latest` |
-| `WEKNORA_SANDBOX_TIMEOUT` | 执行超时（秒） | 60 |
+`execute_skill_script` → `skills.Manager.ExecuteScript` → `sandbox.Manager.Execute`。Docker、Local、CubeSandbox、E2B 均通过「设置 → 沙箱后端」的同一套空间配置与检查接口维护；远端模板从目标 Cube/E2B 集群实时拉取，缺少 WeKnora 标准模板时自动创建。Docker/Local 每次独立执行，不写入会话沙箱绑定。
 
 **Manager 与校验器**（`internal/sandbox/manager.go`、`validator.go`）：每次执行前，除非 `SkipValidation`，`ScriptValidator` 会做四类静态校验，任一命中即拒绝执行并返回 `ErrSecurityViolation`：
 

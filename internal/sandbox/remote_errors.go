@@ -82,6 +82,12 @@ type RemoteError struct {
 	// or SDK error strings belong here.
 	Message string
 
+	// StatusCode is the provider's HTTP status when the failure came from an
+	// HTTP response, or 0 when it did not. Kind deliberately collapses statuses
+	// that call for the same lifecycle decision, so diagnostics that must tell
+	// those statuses apart read this instead of re-parsing Message.
+	StatusCode int
+
 	// Cause is the original provider-side error, retained for
 	// errors.Unwrap so callers can still errors.Is / errors.As it.
 	Cause error

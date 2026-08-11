@@ -36,8 +36,6 @@ func (c *countingRoundTripper) seen() []string {
 // rewrite, which is exactly the regression this guards: the proxy has to see
 // the request, and it has to see the sandbox authority in the Host header.
 func TestCubeTransportPoolRoutesDataPlaneThroughProxy(t *testing.T) {
-	t.Setenv(AllowPrivateEndpointsEnv, "true")
-
 	api := newCubeMockServer(t)
 
 	var mu sync.Mutex
@@ -51,10 +49,12 @@ func TestCubeTransportPoolRoutesDataPlaneThroughProxy(t *testing.T) {
 	t.Cleanup(proxy.Close)
 
 	cfg := testConfig(t, api)
+	cfg.AllowPrivateEndpoints = true
 	cfg.CubeProxyURL = proxy.URL
 
-	control := &countingRoundTripper{next: NewGuardedTransport()}
-	client, err := NewCubeRemoteClientWithPool(cfg, NewCubeTransportPool(control))
+	policy := OutboundURLPolicy{AllowPrivate: true}
+	control := &countingRoundTripper{next: NewGuardedTransportWithPolicy(policy)}
+	client, err := NewCubeRemoteClientWithPool(cfg, NewCubeTransportPoolWithPolicy(control, policy))
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -91,7 +91,10 @@ func TestCubeTransportPoolRoutesDataPlaneThroughProxy(t *testing.T) {
 // Configs pointing at the same proxy must share one pool - otherwise building
 // a client per request pools nothing.
 func TestCubeTransportPoolReusesTransportPerProxyEndpoint(t *testing.T) {
-	pool := NewCubeTransportPool(NewGuardedTransport())
+	pool := NewCubeTransportPoolWithPolicy(
+		NewGuardedTransportWithPolicy(OutboundURLPolicy{AllowPrivate: true}),
+		OutboundURLPolicy{AllowPrivate: true},
+	)
 
 	first := pool.RoundTripperFor(&Config{
 		CubeProxyURL:      "http://127.0.0.1:8080",

@@ -17,6 +17,8 @@ import (
 
 	"connectrpc.com/connect"
 	e2b "github.com/matiasinsaurralde/go-e2b"
+
+	"github.com/Tencent/WeKnora/internal/logger"
 )
 
 // E2BRemoteClient implements RemoteSandboxClient on top of the go-e2b client.
@@ -125,6 +127,191 @@ func (c *E2BRemoteClient) Health(ctx context.Context) error {
 		return normalizeE2BError("Health", err)
 	}
 	return nil
+}
+
+func (c *E2BRemoteClient) ListTemplates(ctx context.Context) ([]RemoteTemplate, error) {
+	items, err := c.client.ListTemplates(ctx)
+	if err != nil {
+		return nil, normalizeE2BError("ListTemplates", err)
+	}
+	result := make([]RemoteTemplate, 0, len(items))
+	for _, item := range items {
+		name := item.TemplateID
+		if len(item.Names) > 0 && strings.TrimSpace(item.Names[0]) != "" {
+			name = strings.TrimSpace(item.Names[0])
+		} else if len(item.Aliases) > 0 && strings.TrimSpace(item.Aliases[0]) != "" {
+			name = strings.TrimSpace(item.Aliases[0])
+		}
+		standard := isStandardTemplate(name)
+		for _, candidate := range append(append([]string(nil), item.Aliases...), item.Names...) {
+			if isStandardTemplate(candidate) {
+				standard = true
+				break
+			}
+		}
+		status := normalizeE2BTemplateBuildStatus(item.BuildStatus)
+		// E2B's template list keeps reporting a pending build status after the
+		// template already became spawnable, so reconcile our standard template
+		// against the build endpoints before telling the UI to keep waiting
+		// forever. Limit these extra requests to the standard template; polling
+		// every public template would turn one catalog refresh into an
+		// unbounded N+1 request pattern.
+		if standard && isE2BTemplateBuildPending(status) {
+			if reconciled := c.reconcileE2BTemplateStatus(ctx, item); reconciled != "" {
+				status = reconciled
+			}
+		}
+		result = append(result, RemoteTemplate{
+			ID:        item.TemplateID,
+			Name:      name,
+			Status:    status,
+			Version:   item.EnvdVersion,
+			CreatedAt: item.CreatedAt,
+			UpdatedAt: item.UpdatedAt,
+			Standard:  standard,
+		})
+	}
+	return result, nil
+}
+
+// reconcileE2BTemplateStatus resolves the real build state of a template whose
+// list entry still looks pending, by asking the per-build endpoint that owns
+// that answer.
+//
+// Only the template's *current* build counts as evidence. E2B spawns from that
+// build alone, so neither an older successful build nor a non-zero spawn count
+// proves the template can boot now — both happily coexist with a template that
+// answers every sandbox creation with a 404. It returns an empty string when
+// nothing more authoritative than the list status could be established.
+func (c *E2BRemoteClient) reconcileE2BTemplateStatus(
+	ctx context.Context,
+	item e2b.TemplateDetail,
+) string {
+	templateID := strings.TrimSpace(item.TemplateID)
+	buildID := strings.TrimSpace(item.BuildID)
+	if templateID == "" {
+		return ""
+	}
+	// buildID is "the last successful build", so the all-zero UUID means the
+	// provider sees none under the tag it resolves. When builds did finish, the
+	// template is not building at all — its builds are untagged, and no amount
+	// of waiting will change that.
+	if isBlankE2BUUID(buildID) {
+		if item.BuildCount > 0 && c.hasSuccessfulE2BBuild(ctx, templateID) {
+			return TemplateStatusUntagged
+		}
+		return ""
+	}
+	build, err := c.client.GetBuildStatus(ctx, templateID, buildID)
+	if err != nil {
+		logger.Warnf(ctx,
+			"e2b build status lookup failed for template %s build %s: %v",
+			templateID, buildID, err,
+		)
+		return ""
+	}
+	if isE2BTemplateBuildPending(build.Status) {
+		return ""
+	}
+	reconciled := normalizeE2BTemplateBuildStatus(build.Status)
+	if reconciled == "" {
+		return ""
+	}
+	logger.Debugf(ctx,
+		"e2b template %s list status %q reconciled to %q from build %s",
+		templateID, item.BuildStatus, reconciled, buildID,
+	)
+	return reconciled
+}
+
+// hasSuccessfulE2BBuild reports whether the template's build history contains a
+// finished build. It separates "the first build is still running" from "builds
+// succeeded but none is reachable under the default tag".
+func (c *E2BRemoteClient) hasSuccessfulE2BBuild(ctx context.Context, templateID string) bool {
+	result, err := c.client.GetTemplate(ctx, templateID, e2b.WithTemplateBuildsLimit(100))
+	if err != nil {
+		logger.Warnf(ctx, "e2b template build history lookup failed for %s: %v", templateID, err)
+		return false
+	}
+	for _, build := range result.Template.Builds {
+		if normalizeE2BTemplateBuildStatus(build.Status) == "ready" {
+			return true
+		}
+	}
+	return false
+}
+
+// isBlankE2BUUID reports whether id carries no build reference. E2B returns the
+// all-zero UUID, not an empty string, for a template without a build.
+func isBlankE2BUUID(id string) bool {
+	trimmed := strings.TrimSpace(id)
+	if trimmed == "" {
+		return true
+	}
+	for _, char := range trimmed {
+		if char != '0' && char != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeE2BTemplateBuildStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "ready", "success", "succeeded", "complete", "completed":
+		return "ready"
+	case "building", "processing":
+		return "building"
+	case "waiting", "queued", "pending", "uploaded":
+		return "waiting"
+	case "error", "failed", "failure", "cancelled", "canceled":
+		return "error"
+	default:
+		return strings.ToLower(strings.TrimSpace(status))
+	}
+}
+
+func isE2BTemplateBuildPending(status string) bool {
+	switch normalizeE2BTemplateBuildStatus(status) {
+	case "building", "waiting":
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *E2BRemoteClient) EnsureStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
+	items, err := c.ListTemplates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if items[i].Standard {
+			return &items[i], nil
+		}
+	}
+	builder := e2b.NewTemplate().FromImage(DefaultDockerImage)
+	build, err := builder.BuildInBackground(ctx, c.client, e2b.BuildConfig{
+		Name: StandardTemplateName,
+		// Creating a sandbox from a plain template name or ID resolves the
+		// "default" tag, so a build tagged anything else is unreachable: E2B
+		// answers every creation with "tag 'default' does not exist for
+		// template ...". Naming the tag explicitly keeps that contract visible
+		// instead of relying on the server-side default.
+		Tags:     []string{DefaultE2BTemplateTag},
+		CPUCount: 2,
+		MemoryMB: 2048,
+	})
+	if err != nil {
+		return nil, normalizeE2BError("EnsureStandardTemplate", err)
+	}
+	return &RemoteTemplate{
+		ID:       build.TemplateID,
+		Name:     StandardTemplateName,
+		Status:   "building",
+		Image:    DefaultDockerImage,
+		Standard: true,
+	}, nil
 }
 
 func (c *E2BRemoteClient) Create(
@@ -807,6 +994,7 @@ func normalizeE2BError(op string, err error) error {
 		return fmt.Errorf("e2b %s: %w", op, err)
 	}
 	kind := RemoteErrorKindInternal
+	status := 0
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
 		kind = RemoteErrorKindTimeout
@@ -839,6 +1027,7 @@ func normalizeE2BError(op string, err error) error {
 			kind = RemoteErrorKindTimeout
 		case errors.As(err, &apiErr):
 			kind = httpErrorKind(op, apiErr.StatusCode)
+			status = apiErr.StatusCode
 		case errors.As(err, &connectErr):
 			switch connectErr.Code() {
 			case connect.CodeCanceled, connect.CodeDeadlineExceeded:
@@ -868,7 +1057,9 @@ func normalizeE2BError(op string, err error) error {
 			}
 		}
 	}
-	return NewRemoteError(SandboxTypeE2B, op, kind, err.Error(), err)
+	remoteErr := NewRemoteError(SandboxTypeE2B, op, kind, err.Error(), err)
+	remoteErr.StatusCode = status
+	return remoteErr
 }
 
 // e2bRemoteEntryType maps the E2B SDK FileInfo.Type onto the provider-neutral

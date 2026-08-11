@@ -10,7 +10,7 @@ import (
 
 // Identity comes from the stored row alone. Nothing about the deployment can
 // change it, which is what makes "did this edit strand a sandbox" answerable
-// without reaching for WEKNORA_SANDBOX_*.
+// without reaching for process-level sandbox configuration.
 func TestIdentityOfReadsStoredFieldsOnly(t *testing.T) {
 	identity := IdentityOf(&types.TenantSandboxConfig{
 		SandboxType: "e2b",

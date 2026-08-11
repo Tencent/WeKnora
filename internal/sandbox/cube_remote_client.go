@@ -141,6 +141,58 @@ func (c *CubeRemoteClient) Health(ctx context.Context) error {
 	return nil
 }
 
+func (c *CubeRemoteClient) ListTemplates(ctx context.Context) ([]RemoteTemplate, error) {
+	items, err := c.client.ListTemplates(ctx)
+	if err != nil {
+		return nil, normalizeCubeError("ListTemplates", err)
+	}
+	result := make([]RemoteTemplate, 0, len(items))
+	for _, item := range items {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			name = item.TemplateID
+		}
+		result = append(result, RemoteTemplate{
+			ID:        item.TemplateID,
+			Name:      name,
+			Status:    item.Status,
+			Version:   item.Version,
+			Image:     item.ImageInfo,
+			CreatedAt: item.CreatedAt,
+			Standard:  isStandardTemplate(name),
+		})
+	}
+	return result, nil
+}
+
+func (c *CubeRemoteClient) EnsureStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
+	items, err := c.ListTemplates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if items[i].Standard {
+			return &items[i], nil
+		}
+	}
+	job, err := c.client.BuildTemplate(ctx, cubesandbox.BuildTemplateOptions{
+		Image:             DefaultDockerImage,
+		Name:              StandardTemplateName,
+		WritableLayerSize: "1G",
+		ExposedPorts:      []uint16{49983},
+	})
+	if err != nil {
+		return nil, normalizeCubeError("EnsureStandardTemplate", err)
+	}
+	return &RemoteTemplate{
+		ID:       job.TemplateID,
+		Name:     StandardTemplateName,
+		Status:   job.Status,
+		Image:    DefaultDockerImage,
+		Standard: true,
+	}, nil
+}
+
 func (c *CubeRemoteClient) Create(
 	ctx context.Context,
 	request RemoteCreateRequest,

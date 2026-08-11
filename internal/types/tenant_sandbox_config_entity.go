@@ -12,8 +12,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// SandboxConfigIDGlobalDefault marks a sandbox created on the deployment-wide
-// WEKNORA_SANDBOX_* configuration rather than on a stored config row.
+// SandboxConfigIDGlobalDefault is retained for sessions created by older
+// versions that used a deployment-wide sandbox configuration.
 //
 // A sentinel rather than the empty string, so NULL on sessions.sandbox_config_id
 // unambiguously means "this session has no live sandbox".

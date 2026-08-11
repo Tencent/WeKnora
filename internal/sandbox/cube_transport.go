@@ -35,6 +35,7 @@ import (
 // One instance lives for the process; clients built from it come and go.
 type CubeTransportPool struct {
 	control http.RoundTripper
+	policy  OutboundURLPolicy
 
 	// data maps a proxy "host:port" to the transport that dials it.
 	data sync.Map
@@ -43,10 +44,14 @@ type CubeTransportPool struct {
 // NewCubeTransportPool returns a pool whose control plane rides control.
 // A nil control transport installs a guarded one.
 func NewCubeTransportPool(control http.RoundTripper) *CubeTransportPool {
+	return NewCubeTransportPoolWithPolicy(control, DefaultOutboundURLPolicy())
+}
+
+func NewCubeTransportPoolWithPolicy(control http.RoundTripper, policy OutboundURLPolicy) *CubeTransportPool {
 	if control == nil {
-		control = NewGuardedTransport()
+		control = NewGuardedTransportWithPolicy(policy)
 	}
-	return &CubeTransportPool{control: control}
+	return &CubeTransportPool{control: control, policy: policy}
 }
 
 // RoundTripperFor returns the transport a client built from cfg should use.
@@ -68,7 +73,7 @@ func (p *CubeTransportPool) dataTransport(target string) http.RoundTripper {
 	if existing, ok := p.data.Load(target); ok {
 		return existing.(http.RoundTripper)
 	}
-	actual, _ := p.data.LoadOrStore(target, newCubeDataTransport(target))
+	actual, _ := p.data.LoadOrStore(target, newCubeDataTransportWithPolicy(target, p.policy))
 	return actual.(http.RoundTripper)
 }
 
@@ -76,10 +81,14 @@ func (p *CubeTransportPool) dataTransport(target string) http.RoundTripper {
 // mirroring the SDK's proxy rewrite while adding the outbound address guard
 // the SDK has no notion of.
 func newCubeDataTransport(target string) *http.Transport {
+	return newCubeDataTransportWithPolicy(target, DefaultOutboundURLPolicy())
+}
+
+func newCubeDataTransportWithPolicy(target string, policy OutboundURLPolicy) *http.Transport {
 	dialer := &net.Dialer{
 		Timeout:   10 * time.Second,
 		KeepAlive: 30 * time.Second,
-		Control:   SafeDialControl,
+		Control:   SafeDialControlForPolicy(policy),
 	}
 	return &http.Transport{
 		// The proxy is addressed directly; an ambient HTTP proxy would

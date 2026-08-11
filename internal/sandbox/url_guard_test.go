@@ -137,16 +137,7 @@ func TestPolicyDialControlMirrorsValidation(t *testing.T) {
 }
 
 func TestDefaultOutboundURLPolicyFailsClosed(t *testing.T) {
-	t.Setenv(AllowPrivateEndpointsEnv, "")
 	if DefaultOutboundURLPolicy().AllowPrivate {
-		t.Fatal("an unset opt-in must fail closed")
-	}
-	t.Setenv(AllowPrivateEndpointsEnv, "not-a-bool")
-	if DefaultOutboundURLPolicy().AllowPrivate {
-		t.Fatal("an unparseable opt-in must fail closed")
-	}
-	t.Setenv(AllowPrivateEndpointsEnv, "true")
-	if !DefaultOutboundURLPolicy().AllowPrivate {
-		t.Fatal("an explicit true must enable private endpoints")
+		t.Fatal("callers without a workspace config must fail closed")
 	}
 }

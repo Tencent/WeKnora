@@ -25,7 +25,8 @@ import (
 // SandboxIdentity is the comparable projection of a config: two configs with
 // equal identities can operate each other's sandboxes.
 type SandboxIdentity struct {
-	Provider string
+	Provider              string
+	AllowPrivateEndpoints bool
 
 	// Control plane - whether an existing sandbox can still be reclaimed.
 	APIURL string
@@ -53,7 +54,10 @@ func IdentityOf(tenantCfg *types.TenantSandboxConfig) SandboxIdentity {
 	if tenantCfg == nil {
 		return SandboxIdentity{}
 	}
-	identity := SandboxIdentity{Provider: tenantCfg.SandboxType}
+	identity := SandboxIdentity{
+		Provider:              tenantCfg.SandboxType,
+		AllowPrivateEndpoints: tenantCfg.AllowPrivateEndpoints,
+	}
 	switch SandboxType(tenantCfg.SandboxType) {
 	case SandboxTypeCube:
 		if cube := tenantCfg.Cube; cube != nil {
