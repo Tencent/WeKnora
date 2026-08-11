@@ -92,6 +92,32 @@ class DocxVerticalMergeFillTest(unittest.TestCase):
 
         self.assertIs(fill_vertical_merged_cells_docx(content), content)
 
+    def test_separate_merge_groups_keep_distinct_values_and_other_columns(self):
+        document = WordDocument()
+        table = document.add_table(rows=6, cols=2)
+        table.cell(0, 0).text = "group"
+        table.cell(0, 1).text = "item"
+        for row_index in range(1, 6):
+            table.cell(row_index, 1).text = f"item-{row_index}"
+
+        table.cell(1, 0).merge(table.cell(2, 0)).text = "group-a"
+        table.cell(3, 0).text = "standalone"
+        table.cell(4, 0).merge(table.cell(5, 0)).text = "group-b"
+
+        output = io.BytesIO()
+        document.save(output)
+        filled = fill_vertical_merged_cells_docx(output.getvalue())
+        parsed_table = WordDocument(io.BytesIO(filled)).tables[0]
+
+        self.assertEqual(
+            [parsed_table.cell(row_index, 0).text for row_index in range(1, 6)],
+            ["group-a", "group-a", "standalone", "group-b", "group-b"],
+        )
+        self.assertEqual(
+            [parsed_table.cell(row_index, 1).text for row_index in range(1, 6)],
+            [f"item-{row_index}" for row_index in range(1, 6)],
+        )
+
 
 class DocxMarkitdownDispatchTest(unittest.TestCase):
     def test_non_docx_types_do_not_run_docx_preprocessor(self):
