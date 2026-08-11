@@ -61,6 +61,7 @@ import {
   shouldRefreshWikiStatusAfterKnowledgePoll,
 } from './wikiStatusRefresh';
 import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
+import { resolveKnowledgeDownloadFileName } from './knowledgeDownloadFileName';
 import {
   buildUploadFileName,
   canMoveFolderTo,
@@ -2152,10 +2153,7 @@ const downloadKnowledge = async (item: KnowledgeCard) => {
     const file = await downKnowledgeDetails(item.id);
     const objectUrl = URL.createObjectURL(file);
     const link = document.createElement('a');
-    const baseName = item.file_name || item.title || item.id;
-    const fileName = item.type === 'manual' && !baseName.toLowerCase().endsWith('.md')
-      ? `${baseName}.md`
-      : baseName;
+    const fileName = resolveKnowledgeDownloadFileName(item);
     link.style.display = 'none';
     link.href = objectUrl;
     link.download = fileName;
