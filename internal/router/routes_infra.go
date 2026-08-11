@@ -40,6 +40,26 @@ func RegisterModelRoutes(
 	}
 }
 
+// Sandbox configs are workspace infrastructure that hold provider credentials.
+// Scoped API keys cannot safely receive partial authority over them yet because
+// mutation can strand remote sandboxes.
+func RegisterSandboxConfigRoutes(
+	r *gin.RouterGroup,
+	h *handler.SandboxConfigHandler,
+	g *rbacGuards,
+) {
+	configs := g.apiKeyGroup(r.Group("/sandbox-configs"), apiKeyFullAccess())
+	{
+		configs.GET("", g.Viewer(), h.List)
+		configs.PUT("/workspace-policy", g.Admin(), h.SetWorkspacePolicy)
+		configs.POST("", g.Admin(), h.Create)
+		configs.GET("/:id", g.Viewer(), h.Get)
+		configs.PUT("/:id", g.Admin(), h.Update)
+		configs.DELETE("/:id", g.Admin(), h.Delete)
+		configs.GET("/:id/sandboxes", g.Admin(), h.Inventory)
+	}
+}
+
 // RegisterEvaluationRoutes registers evaluation endpoints. Running an
 // evaluation drives LLM calls (cost) and reads from KBs across the
 // tenant; gate to Admin+ until product asks for a finer-grained

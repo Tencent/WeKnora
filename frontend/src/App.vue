@@ -105,6 +105,19 @@ const persistOIDCLoginResponse = async (response: any) => {
 
   await syncOIDCUserContext()
 
+  // OIDC 跳转前暂存的邀请 token：拿到会话后兑换并进入对应空间。
+  const pendingInviteToken = sessionStorage.getItem('weknora_pending_invite_token')
+  if (pendingInviteToken) {
+    sessionStorage.removeItem('weknora_pending_invite_token')
+    const result = await authStore.acceptInvitationByTokenAndRefresh(pendingInviteToken)
+    await nextTick()
+    if (result.ok) MessagePlugin.success(t('inviteRegister.joined'))
+    else MessagePlugin.warning(t('inviteRegister.invalidBody'))
+    // 会话已有效，无论 token 是否兑换成功都进入应用。
+    router.replace('/platform/knowledge-bases')
+    return
+  }
+
   await nextTick()
   router.replace(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
 }

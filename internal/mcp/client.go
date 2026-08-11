@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -147,15 +148,22 @@ func asOAuthRequired(err error) *OAuthRequiredError {
 
 // NewMCPClient creates a new MCP client based on the transport type
 func NewMCPClient(config *ClientConfig) (MCPClient, error) {
+	if config == nil || config.Service == nil {
+		return nil, fmt.Errorf("MCP client config and service are required")
+	}
+	if err := ValidateServiceOutboundURLs(config.Service); err != nil {
+		return nil, err
+	}
+
 	// Create HTTP client with timeout
 	timeout := 30 * time.Second
 	if config.Service.AdvancedConfig != nil && config.Service.AdvancedConfig.Timeout > 0 {
 		timeout = time.Duration(config.Service.AdvancedConfig.Timeout) * time.Second
 	}
 
-	httpClient := &http.Client{
-		Timeout: timeout,
-	}
+	clientCfg := secutils.DefaultSSRFSafeHTTPClientConfig()
+	clientCfg.Timeout = timeout
+	httpClient := secutils.NewSSRFSafeHTTPClient(clientCfg)
 
 	// Build headers
 	headers := make(map[string]string)

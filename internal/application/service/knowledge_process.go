@@ -3596,6 +3596,16 @@ func (s *knowledgeService) convert(
 	}
 	mergedOverrides := MergeParserEngineOverrides(tenantOverrides, uploadOverrides)
 	applyParserRuleOverrides(mergedOverrides, eff.ChunkingConfig, fileType)
+	if err := validateParserEngineOverrideURLs(mergedOverrides); err != nil {
+		logger.Errorf(ctx, "Parser endpoint rejected for SSRF protection: %v", err)
+		knowledge.ParseStatus = "failed"
+		knowledge.ErrorMessage = "Parser endpoint is not allowed for security reasons"
+		knowledge.UpdatedAt = time.Now()
+		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.failStage(ctx, knowledge.ID, types.StageDocReader,
+			werrors.ErrCodeDocReaderParseFailed, knowledge.ErrorMessage, err)
+		return nil, nil
+	}
 
 	if isURL {
 		if err := secutils.ValidateURLForSSRF(payload.URL); err != nil {

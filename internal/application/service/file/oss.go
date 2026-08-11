@@ -34,12 +34,16 @@ const ossScheme = "oss://"
 
 // newOSSClient creates an OSS client using the official Aliyun SDK v2.
 func newOSSClient(endpoint, region, accessKey, secretKey string) (*oss.Client, error) {
+	if err := utils.ValidateURLForSSRF(endpoint); err != nil {
+		return nil, fmt.Errorf("unsafe OSS endpoint: %w", err)
+	}
 	creds := credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")
 
 	cfg := oss.LoadDefaultConfig().
 		WithCredentialsProvider(creds).
 		WithRegion(region).
-		WithEndpoint(endpoint)
+		WithEndpoint(endpoint).
+		WithHttpClient(utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig()))
 
 	return oss.NewClient(cfg), nil
 }

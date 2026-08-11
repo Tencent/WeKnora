@@ -94,4 +94,9 @@ type TenantInvitationService interface {
 	// same link. Idempotent: if the user already has membership, the
 	// existing row is returned.
 	AcceptByToken(ctx context.Context, plainToken string, newUserID string) (*types.TenantMember, error)
+
+	// MarkPendingAcceptedIfExists transitions a per-user pending invitation
+	// into accepted when auto-accept joins the invitee without inbox
+	// confirmation. No-op when no pending row exists.
+	MarkPendingAcceptedIfExists(ctx context.Context, tenantID uint64, inviteeUserID string) error
 }

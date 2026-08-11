@@ -111,3 +111,28 @@ func TestCountByModelID_CustomAgent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count)
 }
+
+func TestCustomAgentSandboxConfigReferences(t *testing.T) {
+	ctx := context.Background()
+	db := setupModelUsageTestDB(t)
+	repo := NewCustomAgentRepository(db)
+	configID := "sandbox-cfg-1"
+
+	require.NoError(t, db.Exec(
+		`INSERT INTO custom_agents (id, name, tenant_id, config) VALUES
+			(?, ?, ?, ?),
+			(?, ?, ?, ?),
+			(?, ?, ?, ?)`,
+		uuid.New().String(), "analysis-agent", 1, `{"sandbox_config_id":"sandbox-cfg-1"}`,
+		uuid.New().String(), "other-agent", 1, `{"sandbox_config_id":"sandbox-cfg-2"}`,
+		uuid.New().String(), "other-tenant-agent", 2, `{"sandbox_config_id":"sandbox-cfg-1"}`,
+	).Error)
+
+	count, err := repo.CountBySandboxConfigID(ctx, 1, configID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count)
+
+	names, err := repo.ListNamesBySandboxConfigID(ctx, 1, configID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"analysis-agent"}, names)
+}

@@ -43,7 +43,7 @@ type ViewOptions struct {
 // dependency surface stays minimal.
 type ViewService interface {
 	GetSession(ctx context.Context, id string) (*sdk.Session, error)
-	LoadMessages(ctx context.Context, sessionID string, limit int, beforeTime *time.Time) ([]sdk.Message, error)
+	LoadMessages(ctx context.Context, sessionID string, limit int, beforeTime *time.Time, opts ...sdk.ResourceURLOptions) ([]sdk.Message, error)
 }
 
 // NewCmdView builds `weknora session view <id>`. Renders session metadata

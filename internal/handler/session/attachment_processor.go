@@ -235,13 +235,21 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 	if p.documentReader == nil {
 		return fmt.Errorf("DocumentReader not configured")
 	}
-	
+
 	normalizedType := strings.TrimPrefix(fileType, ".")
+
+	parserEngine := ""
+	if v := ctx.Value(types.ChatParserEngineContextKey); v != nil {
+		if s, ok := v.(string); ok {
+			parserEngine = s
+		}
+	}
 
 	result, err := p.documentReader.Read(ctx, &types.ReadRequest{
 		FileContent:           data,
 		FileName:              fileName,
 		FileType:              normalizedType,
+		ParserEngine:          parserEngine,
 		ParserEngineOverrides: getParserEngineOverridesFromContext(ctx),
 	})
 	if err != nil {

@@ -669,3 +669,239 @@ export async function purgeArchivedRuntimeTasks(
   )
   return response as unknown as { success: boolean; deleted: number }
 }
+
+// --- Sandbox backend configuration (per workspace) ---
+
+export interface SandboxVolumeMountConfig {
+  enabled: boolean
+  mount_path?: string
+  provider?: string
+  volume_id?: string
+  volume_name?: string
+  volume_owner_fingerprint?: string
+}
+
+export interface SandboxCubeConfig {
+  api_url?: string
+  proxy_url?: string
+  sandbox_domain?: string
+  api_key?: string
+  template_id?: string
+  http_timeout_sec?: number
+  cube_sandbox_ttl_seconds?: number
+}
+
+export interface SandboxE2BConfig {
+  api_url?: string
+  sandbox_domain?: string
+  api_key?: string
+  template_id?: string
+  http_timeout_sec?: number
+  e2b_sandbox_ttl_seconds?: number
+}
+
+export interface SandboxConfig {
+  sandbox_type?: string
+  default_timeout_sec?: number
+  env_vars?: Record<string, string>
+  volume_mount?: SandboxVolumeMountConfig
+  cube?: SandboxCubeConfig
+  e2b?: SandboxE2BConfig
+  docker?: { image?: string }
+}
+
+/** `ok: null` means the probe was not executed in this run. */
+export interface SandboxCheckItem {
+  name: string
+  ok: boolean | null
+  message?: string
+  latency_ms?: number
+}
+
+export interface SandboxCheckResult {
+  ok: boolean
+  provider: string
+  checks: SandboxCheckItem[]
+  capabilities?: Record<string, boolean>
+}
+
+/** Non-secret, inheritable defaults from the deployment's .env configuration. */
+export interface SandboxProviderDefaults {
+  api_url?: string
+  proxy_url?: string
+  sandbox_domain?: string
+  template_id?: string
+  api_key_configured: boolean
+  http_timeout_sec?: number
+  sandbox_ttl_seconds?: number
+}
+
+export interface SandboxConfigDefaults {
+  sandbox_type: string
+  default_timeout_sec?: number
+  docker_image?: string
+  cube?: SandboxProviderDefaults
+  e2b?: SandboxProviderDefaults
+}
+
+/** One named sandbox backend config. Credentials arrive masked. */
+export interface SandboxConfigRecord {
+  id: string
+  name: string
+  description?: string
+  sandbox_type: string
+  config: SandboxConfig
+  created_at: string
+  updated_at: string
+}
+
+/** Create/update payload. */
+export interface SandboxConfigUpsert {
+  name: string
+  description?: string
+  config: SandboxConfig
+}
+
+/**
+ * What a config currently holds. `sandbox_count` comes from the provider, so a
+ * non-zero value is authoritative: identity edits and deletion are refused
+ * until it reaches zero.
+ *
+ * `unverifiable` means the provider could not be reached, so the count is
+ * UNKNOWN rather than zero — never render it as "0 sandboxes".
+ */
+export interface SandboxInventory {
+  sandbox_count: number
+  session_ids?: string[]
+  agent_names?: string[]
+  unverifiable?: boolean
+}
+
+/** Named sandbox backends that support per-config credentials (cube/e2b only). */
+export const NAMED_SANDBOX_BACKEND_TYPES = ['cube', 'e2b'] as const
+
+export function isNamedSandboxBackend(type: string): boolean {
+  return (NAMED_SANDBOX_BACKEND_TYPES as readonly string[]).includes(type)
+}
+
+/**
+ * Returns every config of the workspace plus the deployment defaults an empty
+ * field inherits. An empty list means "no named config yet", in which case
+ * agents run on those defaults — which is NOT the same as disabled.
+ */
+export function listSandboxConfigs(): Promise<{
+  data: SandboxConfigRecord[]
+  defaults?: SandboxConfigDefaults
+  workspace_scripts_disabled?: boolean
+}> {
+  return get('/api/v1/sandbox-configs') as unknown as Promise<{
+    data: SandboxConfigRecord[]
+    defaults?: SandboxConfigDefaults
+    workspace_scripts_disabled?: boolean
+  }>
+}
+
+export function setSandboxWorkspacePolicy(scriptsDisabled: boolean): Promise<{
+  workspace_scripts_disabled: boolean
+}> {
+  return put('/api/v1/sandbox-configs/workspace-policy', {
+    scripts_disabled: scriptsDisabled,
+  }) as unknown as Promise<{ workspace_scripts_disabled: boolean }>
+}
+
+export function createSandboxConfig(
+  payload: SandboxConfigUpsert,
+): Promise<{ data: SandboxConfigRecord }> {
+  return post('/api/v1/sandbox-configs', payload) as unknown as Promise<{
+    data: SandboxConfigRecord
+  }>
+}
+
+export function getSandboxConfigById(id: string): Promise<{ data: SandboxConfigRecord }> {
+  return get(`/api/v1/sandbox-configs/${id}`) as unknown as Promise<{
+    data: SandboxConfigRecord
+  }>
+}
+
+export function updateSandboxConfigById(
+  id: string,
+  payload: SandboxConfigUpsert,
+): Promise<{ data: SandboxConfigRecord }> {
+  return put(`/api/v1/sandbox-configs/${id}`, payload) as unknown as Promise<{
+    data: SandboxConfigRecord
+  }>
+}
+
+/**
+ * `force` only overrides an inventory the backend could not verify; it never
+ * overrides sandboxes the backend can actually see. Ask for it exclusively in
+ * response to a `sandbox_inventory_unverifiable` conflict.
+ */
+export function deleteSandboxConfig(id: string, force = false): Promise<void> {
+  const query = force ? '?force=true' : ''
+  return del(`/api/v1/sandbox-configs/${id}${query}`) as unknown as Promise<void>
+}
+
+export function getSandboxConfigInventory(id: string): Promise<{ data: SandboxInventory }> {
+  return get(`/api/v1/sandbox-configs/${id}/sandboxes`) as unknown as Promise<{
+    data: SandboxInventory
+  }>
+}
+
+/**
+ * Probe a sandbox configuration without saving it. Redacted secrets are
+ * resolved server-side, so pass `config_id` alongside an edited `config` to
+ * test unsaved changes without retyping an API key. Omit `config` to probe a
+ * stored config as-is.
+ *
+ * `deep` additionally creates and destroys one sandbox, which is the only way
+ * to validate the template ID, Cube's proxy data plane and outbound egress.
+ * It consumes real sandbox time.
+ */
+export function checkSandboxConfig(payload: {
+  config?: SandboxConfig
+  config_id?: string
+  deep?: boolean
+}): Promise<{ data: SandboxCheckResult }> {
+  return post('/api/v1/system/sandbox-check', payload) as unknown as Promise<{
+    data: SandboxCheckResult
+  }>
+}
+
+/**
+ * The two refusals a save or a delete can hit. They mean opposite things:
+ * `sandboxes_still_live` says the backend counted live sandboxes, so the only
+ * ways forward are ending the owning sessions or creating a second config;
+ * `sandbox_inventory_unverifiable` says the backend is unreachable, so nothing
+ * could be counted — the one case a force delete may override.
+ */
+export type SandboxConflictCode = 'sandboxes_still_live' | 'sandbox_inventory_unverifiable'
+
+export interface SandboxConflict {
+  code: SandboxConflictCode
+  message?: string
+  /** Present for `sandboxes_still_live`; there is nothing to report otherwise. */
+  inventory?: SandboxInventory
+}
+
+/**
+ * Reads a sandbox-config conflict out of a rejected request, or returns null
+ * when the failure is anything else.
+ *
+ * The interceptor spreads the response body onto the rejection, so the code
+ * sits at `err.error.code`. Parsing it in one place keeps callers from
+ * hard-coding that shape — and from confusing the two conflicts, which drive
+ * different recovery paths in the UI.
+ */
+export function parseSandboxConflict(err: unknown): SandboxConflict | null {
+  if (typeof err !== 'object' || err === null) return null
+  const detail = (err as { error?: { code?: string; message?: string; data?: SandboxInventory } }).error
+  if (!detail || typeof detail !== 'object') return null
+  if (
+    detail.code !== 'sandboxes_still_live' &&
+    detail.code !== 'sandbox_inventory_unverifiable'
+  ) {
+    return null
+  }
+  return { code: detail.code, message: detail.message, inventory: detail.data }
+}
