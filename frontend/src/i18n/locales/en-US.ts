@@ -1693,6 +1693,7 @@ export default {
     confirmDelete: 'Confirm Delete',
     deleteSuccess: 'Deleted successfully',
     deleteFailed: 'Delete failed',
+    updateSuccess: 'Updated successfully',
     saveSuccess: 'Saved successfully',
     saveFailed: 'Save failed',
     file: 'File',
