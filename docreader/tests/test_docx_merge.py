@@ -2,6 +2,8 @@ import io
 import unittest
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from docx import Document as WordDocument
 from lxml import etree
@@ -78,6 +80,51 @@ class DocxVerticalMergeFillTest(unittest.TestCase):
         content = output.getvalue()
 
         self.assertIs(fill_vertical_merged_cells_docx(content), content)
+
+    def test_horizontal_merge_only_passes_through_unchanged(self):
+        document = WordDocument()
+        table = document.add_table(rows=1, cols=3)
+        table.cell(0, 0).merge(table.cell(0, 1)).text = "horizontal merge"
+        table.cell(0, 2).text = "independent"
+        output = io.BytesIO()
+        document.save(output)
+        content = output.getvalue()
+
+        self.assertIs(fill_vertical_merged_cells_docx(content), content)
+
+
+class DocxMarkitdownDispatchTest(unittest.TestCase):
+    def test_non_docx_types_do_not_run_docx_preprocessor(self):
+        for file_type in ("doc", "txt", "md"):
+            with self.subTest(file_type=file_type):
+                parser = StdMarkitdownParser(file_type=file_type)
+                result = SimpleNamespace(text_content="parsed")
+                with (
+                    patch(
+                        "docreader.parser.markitdown_parser.fill_vertical_merged_cells_docx"
+                    ) as preprocess,
+                    patch.object(parser, "_convert_markitdown", return_value=result),
+                ):
+                    document = parser.parse_into_text(b"payload")
+
+                self.assertEqual(document.content, "parsed")
+                preprocess.assert_not_called()
+
+    def test_uppercase_docx_type_runs_docx_preprocessor(self):
+        parser = StdMarkitdownParser(file_type=".DOCX")
+        result = SimpleNamespace(text_content="parsed")
+        with (
+            patch(
+                "docreader.parser.markitdown_parser.fill_vertical_merged_cells_docx",
+                return_value=b"preprocessed",
+            ) as preprocess,
+            patch.object(parser, "_convert_markitdown", return_value=result) as convert,
+        ):
+            document = parser.parse_into_text(b"payload")
+
+        self.assertEqual(document.content, "parsed")
+        preprocess.assert_called_once_with(b"payload")
+        convert.assert_called_once_with(b"preprocessed", ".DOCX", keep_data_uris=True)
 
 
 class Issue2634ParserRegressionTest(unittest.TestCase):
