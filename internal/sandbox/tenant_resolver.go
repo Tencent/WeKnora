@@ -120,9 +120,9 @@ func NewTenantSandboxResolver(deps TenantSandboxResolverDeps) (TenantSandboxReso
 		transport = NewGuardedTransport()
 	}
 	return &tenantSandboxResolver{
-		deps:                  deps,
-		transport:             transport,
-		privateTransport:      NewGuardedTransportWithPolicy(OutboundURLPolicy{AllowPrivate: true}),
+		deps:                     deps,
+		transport:                transport,
+		privateTransport:         NewGuardedTransportWithPolicy(OutboundURLPolicy{AllowPrivate: true}),
 		gatewayTransports:        NewSandboxGatewayTransportPool(transport),
 		privateGatewayTransports: NewSandboxGatewayTransportPoolWithPolicy(nil, OutboundURLPolicy{AllowPrivate: true}),
 	}, nil
