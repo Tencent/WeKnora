@@ -2481,7 +2481,8 @@ export default {
       updateApiPrincipalConfigFailed: 'API principal config 업데이트 실패',
       createApiPrincipalTestTokenFailed: 'API 테스트 토큰 생성 실패',
       updateFailed: '워크스페이스 정보 업데이트 실패',
-      deleteFailed: 'Failed to delete workspace'
+      deleteFailed: 'Failed to delete workspace',
+      getStorageStatsFailed: '스토리지 통계를 가져오지 못했습니다'
     },
     model: {
       createFailed: '모델 생성 실패',
@@ -2593,6 +2594,7 @@ export default {
         target: {
           bulkQuota: '일괄 동기화: 기본 저장 할당량',
           bulkQuotaDiff: '{count}개 워크스페이스에 적용됨 ({gb} GB)',
+          quotaDiff: '{old} → {new}',
           promoteIdempotent: '이미 시스템 관리자임 (멱등)',
           revokeNoop: '원래 시스템 관리자가 아니었음 (멱등)',
           requiredRole: '필요 역할: {role}',
@@ -2604,6 +2606,7 @@ export default {
         },
         action: {
           'system.setting_changed': '시스템 설정 변경',
+          'tenant.storage_quota_updated': '워크스페이스 스토리지 할당량 변경됨',
           'system.admin_promoted': '시스템 관리자 부여',
           'system.api_key_created': '플랫폼 API 키 생성',
           'system.api_key_revoked': '플랫폼 API 키 폐기',
@@ -3109,7 +3112,14 @@ export default {
       usedLabel: '사용된 저장소',
       usedDescription: '이미 사용된 저장 스페이스',
       usageLabel: '저장소 사용률',
-      usageDescription: '저장 스페이스의 사용 백분율'
+      usageDescription: '저장 스페이스의 사용 백분율',
+      editQuota: '할당량 편집',
+      editQuotaPlaceholder: '할당량 입력 (GB)',
+      quotaMaxHint: '최대 약 {max} (디스크 여유 + 사용량)',
+      quotaBelowUsedError: '할당량은 현재 사용량 {used}보다 낮을 수 없습니다',
+      quotaExceedsDiskError: '할당량이 디스크 가용 용량을 초과합니다',
+      quotaUpdateSuccess: '스토리지 할당량이 업데이트되었습니다',
+      quotaUpdateFailed: '할당량 업데이트 실패'
     },
     details: {
       idLabel: '워크스페이스 ID',

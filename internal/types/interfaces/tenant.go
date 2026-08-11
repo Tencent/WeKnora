@@ -32,6 +32,19 @@ type TenantService interface {
 	// forbids storage_quota edits for Owners). quotaBytes must be > 0;
 	// callers are responsible for resolving GB→bytes.
 	BulkSetStorageQuota(ctx context.Context, quotaBytes int64) (int64, error)
+	// UpdateStorageQuota persists an Owner-initiated quota change for a
+	// single tenant after validating it against current usage and the
+	// free space on the local storage volume. Unlike BulkSetStorageQuota
+	// this is the self-service path and therefore enforces:
+	// quotaBytes > 0, quotaBytes >= storage used, and
+	// quotaBytes <= disk free + storage used. When the disk probe fails
+	// the check is fail-closed for increases (raising is rejected) but
+	// lowering or restating the quota stays allowed.
+	UpdateStorageQuota(ctx context.Context, tenantID uint64, quotaBytes int64) (*types.Tenant, error)
+	// GetTenantStorageStats reports the tenant's storage usage together
+	// with the quota ceiling the local volume can currently honour, so
+	// the UI can bound the Owner's quota editor.
+	GetTenantStorageStats(ctx context.Context, tenantID uint64) (*types.TenantStorageStats, error)
 	// SearchTenants searches tenants with pagination and filters
 	SearchTenants(ctx context.Context, keyword string, tenantID uint64, page, pageSize int) ([]*types.Tenant, int64, error)
 	// GetTenantByIDForUser gets a tenant by ID with permission check

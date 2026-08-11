@@ -358,6 +358,19 @@ function auditTargetDiff(row: AuditLog): string {
     }
     return formatSettingDiff(details)
   }
+  if (row.action === 'tenant.storage_quota_updated') {
+    // Details: { old_quota_bytes, new_quota_bytes, disk_free_bytes? }。
+    // 字节值人类可读化成 GB（保留 1 位小数），与配额编辑页的输入单位一致。
+    const oldBytes = typeof details.old_quota_bytes === 'number' ? details.old_quota_bytes : null
+    const newBytes = typeof details.new_quota_bytes === 'number' ? details.new_quota_bytes : null
+    if (oldBytes !== null && newBytes !== null) {
+      return t('system.globalSettings.audit.target.quotaDiff', {
+        old: `${(oldBytes / 1024 ** 3).toFixed(1)} GB`,
+        new: `${(newBytes / 1024 ** 3).toFixed(1)} GB`,
+      })
+    }
+    return ''
+  }
   if (row.action === 'system.admin_promoted' && typeof details.idempotent === 'boolean') {
     if (details.idempotent === true) {
       return t('system.globalSettings.audit.target.promoteIdempotent')

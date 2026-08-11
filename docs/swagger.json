@@ -14005,6 +14005,47 @@
                 }
             }
         },
+        "/tenants/{id}/storage-stats": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "返回当前已用空间、卷剩余空间与可设置的最大配额，供 Owner 编辑配额时约束取值范围",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "空间管理"
+                ],
+                "summary": "获取空间存储配额统计",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "空间ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "存储统计",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/user/favorites": {
             "get": {
                 "description": "Lists this user's starred resources in the current workspace for a given type",
@@ -15315,6 +15356,7 @@
                 "rbac.invitation_declined",
                 "rbac.invitation_revoked",
                 "rbac.invitation_expired",
+                "tenant.storage_quota_updated",
                 "vector_store.created",
                 "vector_store.updated",
                 "vector_store.deleted",
@@ -15378,6 +15420,7 @@
                 "AuditActionInvitationDeclined",
                 "AuditActionInvitationRevoked",
                 "AuditActionInvitationExpired",
+                "AuditActionTenantStorageQuotaUpdated",
                 "AuditActionVectorStoreCreated",
                 "AuditActionVectorStoreUpdated",
                 "AuditActionVectorStoreDeleted",

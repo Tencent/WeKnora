@@ -2481,7 +2481,8 @@ export default {
       updateApiPrincipalConfigFailed: 'Не удалось обновить конфигурацию API principal',
       createApiPrincipalTestTokenFailed: 'Не удалось создать тестовый API Token',
       updateFailed: 'Не удалось обновить информацию о пространстве',
-      deleteFailed: 'Failed to delete workspace'
+      deleteFailed: 'Failed to delete workspace',
+      getStorageStatsFailed: 'Не удалось получить данные о хранилище'
     },
     model: {
       createFailed: 'Не удалось создать модель',
@@ -2593,6 +2594,7 @@ export default {
         target: {
           bulkQuota: 'Массовая синхронизация: квота хранилища по умолчанию',
           bulkQuotaDiff: 'Применено к {count} пространствам ({gb} ГБ)',
+          quotaDiff: '{old} → {new}',
           promoteIdempotent: 'Уже системный администратор (идемпотентно)',
           revokeNoop: 'И так не был системным администратором (идемпотентно)',
           requiredRole: 'Требуемая роль: {role}',
@@ -2604,6 +2606,7 @@ export default {
         },
         action: {
           'system.setting_changed': 'Изменена системная настройка',
+          'tenant.storage_quota_updated': 'Квота хранилища рабочей области изменена',
           'system.admin_promoted': 'Выдан системный администратор',
           'system.api_key_created': 'Создан платформенный API-ключ',
           'system.api_key_revoked': 'Отозван платформенный API-ключ',
@@ -3109,7 +3112,14 @@ export default {
       usedLabel: 'Использовано хранения',
       usedDescription: 'Объём уже использованного пространства',
       usageLabel: 'Использование хранения',
-      usageDescription: 'Процент использованного пространства'
+      usageDescription: 'Процент использованного пространства',
+      editQuota: 'Изменить квоту',
+      editQuotaPlaceholder: 'Введите квоту (ГБ)',
+      quotaMaxHint: 'Максимум ≈ {max} (свободно на диске + использовано)',
+      quotaBelowUsedError: 'Квота не может быть ниже текущего использования {used}',
+      quotaExceedsDiskError: 'Квота превышает доступную ёмкость диска',
+      quotaUpdateSuccess: 'Квота хранилища обновлена',
+      quotaUpdateFailed: 'Не удалось обновить квоту'
     },
     details: {
       idLabel: 'ID пространства',
