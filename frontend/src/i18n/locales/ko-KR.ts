@@ -4377,6 +4377,7 @@ export default {
     confirmDelete: '삭제 확인',
     deleteSuccess: '삭제 성공',
     deleteFailed: '삭제 실패',
+    updateSuccess: '업데이트 성공',
     saveSuccess: '저장 성공',
     saveFailed: '저장 실패',
     file: '파일',
