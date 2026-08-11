@@ -4374,6 +4374,7 @@ export default {
     confirmDelete: 'Подтвердить удаление',
     deleteSuccess: 'Успешно удалено',
     deleteFailed: 'Ошибка удаления',
+    updateSuccess: 'Успешно обновлено',
     saveSuccess: 'Успешно сохранено',
     saveFailed: 'Ошибка сохранения',
     file: 'Файл',
