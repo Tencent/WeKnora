@@ -620,24 +620,24 @@ func (c *StorageEngineConfig) Scan(value interface{}) error {
 
 // TenantSandboxConfig is one named sandbox backend a workspace maintains.
 //
-// It is self-contained: provider fields are NOT inherited from the deployment's
-// WEKNORA_SANDBOX_* values, which only back agents that selected no config at
-// all. Leaving a required provider field empty is rejected on save rather than
-// filled in from the environment — see sandbox.MissingRequiredFields for the
-// list and internal/sandbox/tenant_config.go for why inheritance was dropped.
+// It is self-contained: provider fields are not inherited from process
+// environment. Leaving a required provider field empty is rejected on save.
 type TenantSandboxConfig struct {
-	// SandboxType selects the sandbox backend. Named configs must set it to
-	// "cube" or "e2b"; "docker", "local" and "disabled" appear only on the
+	// SandboxType selects the sandbox backend. Named configs may use "cube",
+	// "e2b", "docker", or "local". "disabled" is reserved for the hidden
 	// workspace policy row.
 	SandboxType string `json:"sandbox_type,omitempty"`
 
 	// ── 通用配置（跨后端生效）──────────────────────────────────
 
-	// DefaultTimeoutSec is the per-execution timeout in seconds. 0 keeps the
-	// deployment's WEKNORA_SANDBOX_TIMEOUT: an execution guardrail is operator
-	// policy rather than part of this backend's identity, so it is the one
-	// value a named config still takes from the environment.
+	// DefaultTimeoutSec is the per-execution timeout in seconds. 0 uses the
+	// program's built-in default.
 	DefaultTimeoutSec int `json:"default_timeout_sec,omitempty"`
+
+	// AllowPrivateEndpoints permits this workspace config to reach RFC1918 or
+	// loopback cluster endpoints. Link-local/cloud-metadata addresses remain
+	// blocked. It is explicit in the UI instead of hidden in process env.
+	AllowPrivateEndpoints bool `json:"allow_private_endpoints,omitempty"`
 
 	// EnvVars are additional environment variables injected into every
 	// sandbox created for this tenant. 🔒 Values are encrypted at rest.

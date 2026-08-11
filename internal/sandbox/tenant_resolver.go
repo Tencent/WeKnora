@@ -74,7 +74,7 @@ type TenantSandboxResolver interface {
 
 // TenantSandboxResolverDeps bundles the resolver's wiring.
 type TenantSandboxResolverDeps struct {
-	// GlobalConfig is the process-wide config built from WEKNORA_SANDBOX_*.
+	// GlobalConfig supplies only built-in runtime tuning defaults.
 	GlobalConfig *Config
 
 	// DefaultManager serves tenants without their own configuration, which
@@ -91,12 +91,14 @@ type TenantSandboxResolverDeps struct {
 }
 
 type tenantSandboxResolver struct {
-	deps      TenantSandboxResolverDeps
-	transport *http.Transport
+	deps             TenantSandboxResolverDeps
+	transport        *http.Transport
+	privateTransport *http.Transport
 
 	// cubeTransports must outlive the per-request clients it serves, which is
 	// the whole point of holding it here rather than building it per Resolve.
-	cubeTransports *CubeTransportPool
+	cubeTransports        *CubeTransportPool
+	privateCubeTransports *CubeTransportPool
 }
 
 // NewTenantSandboxResolver validates the wiring and returns a resolver.
@@ -118,9 +120,11 @@ func NewTenantSandboxResolver(deps TenantSandboxResolverDeps) (TenantSandboxReso
 		transport = NewGuardedTransport()
 	}
 	return &tenantSandboxResolver{
-		deps:           deps,
-		transport:      transport,
-		cubeTransports: NewCubeTransportPool(transport),
+		deps:                  deps,
+		transport:             transport,
+		privateTransport:      NewGuardedTransportWithPolicy(OutboundURLPolicy{AllowPrivate: true}),
+		cubeTransports:        NewCubeTransportPool(transport),
+		privateCubeTransports: NewCubeTransportPoolWithPolicy(nil, OutboundURLPolicy{AllowPrivate: true}),
 	}, nil
 }
 
@@ -128,11 +132,15 @@ func NewTenantSandboxResolver(deps TenantSandboxResolverDeps) (TenantSandboxReso
 // the outbound policy forbids. This closes the DNS-rebinding window that
 // save-time URL validation cannot cover.
 func NewGuardedTransport() *http.Transport {
+	return NewGuardedTransportWithPolicy(DefaultOutboundURLPolicy())
+}
+
+func NewGuardedTransportWithPolicy(policy OutboundURLPolicy) *http.Transport {
 	return &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   10 * time.Second,
 			KeepAlive: 30 * time.Second,
-			Control:   SafeDialControl,
+			Control:   SafeDialControlForPolicy(policy),
 		}).DialContext,
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 4,
@@ -148,7 +156,7 @@ func (r *tenantSandboxResolver) Resolve(
 ) (Manager, error) {
 	if strings.TrimSpace(configID) == "" ||
 		configID == types.SandboxConfigIDGlobalDefault {
-		return r.deps.DefaultManager, nil
+		return NewDisabledManager(), nil
 	}
 
 	resolved, err := r.deps.Loader.Load(ctx, tenantID, configID)
@@ -184,9 +192,15 @@ func (r *tenantSandboxResolver) Resolve(
 			SkipHealthProbe: true,
 			ConfigID:        configID,
 		})
+	case SandboxTypeDocker, SandboxTypeLocal:
+		// Stateless backends still come from the selected workspace row. Docker
+		// fallback is deliberately disabled: silently running a configured
+		// container workload on the application host would cross an isolation
+		// boundary.
+		effective.FallbackEnabled = false
+		return NewManager(effective)
 	default:
-		// docker/local have no per-config remote wiring.
-		return r.deps.DefaultManager, nil
+		return NewDisabledManager(), nil
 	}
 }
 
@@ -195,8 +209,14 @@ func (r *tenantSandboxResolver) Resolve(
 func (r *tenantSandboxResolver) buildClient(cfg *Config) (RemoteSandboxClient, error) {
 	switch cfg.Type {
 	case SandboxTypeCube:
+		if cfg.AllowPrivateEndpoints {
+			return NewCubeRemoteClientWithPool(cfg, r.privateCubeTransports)
+		}
 		return NewCubeRemoteClientWithPool(cfg, r.cubeTransports)
 	case SandboxTypeE2B:
+		if cfg.AllowPrivateEndpoints {
+			return NewE2BRemoteClientWithTransport(cfg, r.privateTransport)
+		}
 		return NewE2BRemoteClientWithTransport(cfg, r.transport)
 	default:
 		return nil, fmt.Errorf("sandbox: provider %q has no remote client", cfg.Type)
@@ -217,9 +237,11 @@ func NewRemoteClientForCheck(cfg *Config) (RemoteSandboxClient, error) {
 	}
 	switch cfg.Type {
 	case SandboxTypeCube:
-		return NewCubeRemoteClientWithPool(cfg, NewCubeTransportPool(nil))
+		return NewCubeRemoteClientWithPool(cfg, NewCubeTransportPoolWithPolicy(nil,
+			OutboundURLPolicy{AllowPrivate: cfg.AllowPrivateEndpoints}))
 	case SandboxTypeE2B:
-		return NewE2BRemoteClientWithTransport(cfg, NewGuardedTransport())
+		return NewE2BRemoteClientWithTransport(cfg, NewGuardedTransportWithPolicy(
+			OutboundURLPolicy{AllowPrivate: cfg.AllowPrivateEndpoints}))
 	default:
 		return nil, fmt.Errorf("sandbox: provider %q cannot be probed", cfg.Type)
 	}

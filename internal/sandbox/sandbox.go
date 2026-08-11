@@ -29,12 +29,11 @@ const (
 )
 
 // IsNamedSandboxBackendType reports whether raw can be stored as a user-facing
-// named sandbox backend. Only remote session backends (cube/e2b) support
-// per-config credentials and session pinning; docker/local/disabled are
-// deployment-level or workspace-policy concerns.
+// named sandbox backend. Remote backends are session-persistent; docker/local
+// are stateless, but all four share the same workspace configuration surface.
 func IsNamedSandboxBackendType(raw string) bool {
 	switch SandboxType(raw) {
-	case SandboxTypeCube, SandboxTypeE2B:
+	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker, SandboxTypeLocal:
 		return true
 	default:
 		return false
@@ -48,8 +47,8 @@ const (
 	DefaultCPULimit    = 1.0               // 1 CPU core
 	DefaultDockerImage = "wechatopenai/weknora-sandbox:latest"
 
-	// DefaultCubeAPIURL is the default CubeAPI endpoint used when
-	// WEKNORA_SANDBOX_CUBE_API_URL is not configured.
+	// DefaultCubeAPIURL is retained for SDK tests and explicit local helpers;
+	// workspace configs must still provide their endpoint.
 	DefaultCubeAPIURL = "http://127.0.0.1:33000"
 	// DefaultCubeProxyURL is the default CubeProxy endpoint (HTTP, port 80) used
 	// to reach the in-sandbox envd via host-header routing.
@@ -57,8 +56,6 @@ const (
 	// DefaultCubeSandboxDomain is the sandbox routing domain configured on
 	// CubeProxy (matches CUBE_API_SANDBOX_DOMAIN in the Cube deployment).
 	DefaultCubeSandboxDomain = "cube.app"
-	// DefaultCubeTemplate is the default template ID used to spawn Cube sandboxes.
-	DefaultCubeTemplate = "tpl-2b7911a5c3bb419a8745957a"
 	// DefaultCubeSandboxTTL is the Cube-side sandbox lifetime hint (in seconds)
 	// requested at creation; the sandbox is torn down by CubeMaster if the
 	// client goes silent for longer than this value.
@@ -200,6 +197,10 @@ type Config struct {
 	// DefaultTimeout is the default execution timeout
 	DefaultTimeout time.Duration
 
+	// AllowPrivateEndpoints is the per-workspace outbound policy for this
+	// connection. Link-local addresses are blocked regardless.
+	AllowPrivateEndpoints bool
+
 	// DockerImage is the Docker image to use (Docker sandbox only)
 	DockerImage string
 
@@ -270,11 +271,9 @@ type Config struct {
 
 // DefaultConfig returns a default sandbox configuration.
 //
-// It deliberately carries no Cube or E2B endpoint, credential or template: those
-// belong either to the deployment baseline (see applyCubeDeploymentDefaults) or
-// to a named config that spelled them out. Presetting them here once meant every
-// baseline silently offered a localhost Cube to configs that had never asked for
-// one.
+// It deliberately carries no Cube or E2B endpoint, credential or template:
+// those belong to a named workspace config. Presetting them here once meant an
+// incomplete workspace config could silently dial localhost.
 func DefaultConfig() *Config {
 	return &Config{
 		Type:            SandboxTypeLocal,

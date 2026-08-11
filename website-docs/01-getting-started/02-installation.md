@@ -223,7 +223,7 @@ Lite 模式通过编译期 `EDITION=lite` 与运行期 `.env.lite` 环境实现�
 - **队列/流**：`STREAM_MANAGER_TYPE=memory`（`internal/stream/factory.go`），不需要 Redis，Asynq 分布式队列在 Lite 模式下为内存/no-op；
 - **前端**：`make build-lite` 会把 `frontend/dist` 复制为仓库根的 `web/`，二进制直接内嵌托管静态资源（`WEKNORA_WEB_DIR` 可指定目录，router 的 `serveFrontendStatic` 提供服务）；
 - **文档解析**：仍可选连本地 docreader（`DOCREADER_ADDR=127.0.0.1:50051`）；
-- **沙箱**：`WEKNORA_SANDBOX_MODE=disabled`。
+- **沙箱**：Lite 启动时不预置后端；可在设置页按空间统一配置 Docker、Local、CubeSandbox 或 E2B。
 
 ```bash
 cp .env.lite.example .env.lite      # 修改 SYSTEM_AES_KEY / JWT_SECRET

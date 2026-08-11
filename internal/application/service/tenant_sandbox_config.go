@@ -27,6 +27,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -101,7 +102,7 @@ var ErrSandboxConfigNameRequired = stderrors.New("sandbox config name is require
 // ErrNamedSandboxBackendUnsupported marks a sandbox type that cannot be stored
 // as a user-facing named backend config.
 var ErrNamedSandboxBackendUnsupported = stderrors.New(
-	"named sandbox configs only support cube and e2b backends",
+	"named sandbox configs only support cube, e2b, docker and local backends",
 )
 
 // SandboxInventory describes what a config holds and who a change disturbs.
@@ -129,6 +130,21 @@ type UpdateSandboxConfigInput struct {
 	Name        string
 	Description string
 	Config      *types.TenantSandboxConfig
+}
+
+// SandboxTemplateQueryInput describes an unsaved connection from the settings
+// drawer. ConfigID is optional and lets masked credentials resolve against the
+// stored row while editing.
+type SandboxTemplateQueryInput struct {
+	Config         *types.TenantSandboxConfig
+	ConfigID       string
+	EnsureStandard bool
+}
+
+type SandboxTemplateCatalog struct {
+	Templates          []sandbox.RemoteTemplate `json:"templates"`
+	StandardTemplateID string                   `json:"standard_template_id,omitempty"`
+	Provisioned        bool                     `json:"provisioned"`
 }
 
 // SandboxConfigAgentRepo is the slice of the agent repository this service
@@ -181,7 +197,9 @@ func SanitizeSandboxConfig(
 		}
 	}
 	for _, endpoint := range sandboxConfigEndpoints(merged) {
-		if err := sandbox.ValidateOutboundURL(endpoint); err != nil {
+		if err := sandbox.ValidateOutboundURLWithPolicy(endpoint, sandbox.OutboundURLPolicy{
+			AllowPrivate: merged.AllowPrivateEndpoints,
+		}); err != nil {
 			return nil, err
 		}
 	}
@@ -241,8 +259,8 @@ func findWorkspacePolicyRow(
 	return nil
 }
 
-// WorkspaceScriptsDisabled reports whether agents that rely on the deployment
-// default (empty sandbox_config_id) must not execute skill scripts.
+// WorkspaceScriptsDisabled reports whether the workspace-wide kill switch is
+// active, regardless of which named backend an agent selected.
 func (s *TenantSandboxConfigService) WorkspaceScriptsDisabled(
 	ctx context.Context, tenantID uint64,
 ) (bool, error) {
@@ -253,8 +271,8 @@ func (s *TenantSandboxConfigService) WorkspaceScriptsDisabled(
 	return findWorkspacePolicyRow(list) != nil, nil
 }
 
-// SetWorkspaceScriptsDisabled toggles workspace-level script execution for
-// agents that do not point at a named cube/e2b config.
+// SetWorkspaceScriptsDisabled toggles script execution for the entire
+// workspace, across all named backend types.
 func (s *TenantSandboxConfigService) SetWorkspaceScriptsDisabled(
 	ctx context.Context, tenantID uint64, disabled bool,
 ) error {
@@ -337,6 +355,152 @@ func (s *TenantSandboxConfigService) Get(
 		return nil, nil
 	}
 	return entity, nil
+}
+
+// QueryTemplates reads the provider's template catalog and optionally installs
+// the standard WeKnora image when it is absent. This is intentionally driven by
+// workspace credentials instead of deployment environment variables.
+func (s *TenantSandboxConfigService) QueryTemplates(
+	ctx context.Context, tenantID uint64, in SandboxTemplateQueryInput,
+) (*SandboxTemplateCatalog, error) {
+	var existing *types.TenantSandboxConfig
+	if strings.TrimSpace(in.ConfigID) != "" {
+		entity, err := s.repo.GetByID(ctx, tenantID, in.ConfigID)
+		if err != nil {
+			return nil, err
+		}
+		if entity == nil || types.IsSandboxWorkspacePolicyRow(entity) {
+			return nil, apperrors.NewNotFoundError("sandbox config not found")
+		}
+		existing = entity.Config
+	}
+	merged := types.MergeSandboxConfigForUpdate(in.Config, existing)
+	if merged == nil {
+		merged = types.MergeSandboxConfigForUpdate(existing, nil)
+	}
+	if merged == nil {
+		return nil, apperrors.NewBadRequestError("sandbox config is required")
+	}
+
+	// Catalog access needs the control-plane connection but does not need a
+	// spawn template yet. A private placeholder lets the same effective-config
+	// validation protect every other required field without weakening runtime
+	// validation.
+	switch merged.SandboxType {
+	case string(sandbox.SandboxTypeCube):
+		if merged.Cube == nil {
+			merged.Cube = &types.CubeSandboxConfig{}
+		}
+		if strings.TrimSpace(merged.Cube.TemplateID) == "" {
+			merged.Cube.TemplateID = "__catalog__"
+		}
+	case string(sandbox.SandboxTypeE2B):
+		if merged.E2B == nil {
+			merged.E2B = &types.E2BSandboxConfig{}
+		}
+		if strings.TrimSpace(merged.E2B.TemplateID) == "" {
+			merged.E2B.TemplateID = "__catalog__"
+		}
+	default:
+		return nil, apperrors.NewBadRequestError(
+			"sandbox template catalog only supports cube and e2b backends")
+	}
+
+	for _, endpoint := range sandboxConfigEndpoints(merged) {
+		if err := sandbox.ValidateOutboundURLWithPolicy(endpoint, sandbox.OutboundURLPolicy{
+			AllowPrivate: merged.AllowPrivateEndpoints,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	effective, err := sandbox.ResolveEffectiveConfig(merged, sandbox.DefaultConfig())
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.newClient(effective)
+	if err != nil {
+		return nil, err
+	}
+	catalog, ok := any(client).(sandbox.RemoteTemplateCatalog)
+	if !ok {
+		return nil, fmt.Errorf("sandbox: provider %q does not expose templates", effective.Type)
+	}
+	templates, err := catalog.ListTemplates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := &SandboxTemplateCatalog{Templates: deduplicateSandboxTemplates(templates)}
+	for _, item := range result.Templates {
+		if item.Standard {
+			result.StandardTemplateID = item.ID
+			break
+		}
+	}
+	if in.EnsureStandard && result.StandardTemplateID == "" {
+		standard, ensureErr := catalog.EnsureStandardTemplate(ctx)
+		if ensureErr != nil {
+			return nil, ensureErr
+		}
+		result.Provisioned = true
+		result.StandardTemplateID = standard.ID
+		result.Templates = deduplicateSandboxTemplates(append(result.Templates, *standard))
+	}
+	sort.SliceStable(result.Templates, func(i, j int) bool {
+		if result.Templates[i].Standard != result.Templates[j].Standard {
+			return result.Templates[i].Standard
+		}
+		return strings.ToLower(result.Templates[i].Name) < strings.ToLower(result.Templates[j].Name)
+	})
+	return result, nil
+}
+
+func deduplicateSandboxTemplates(items []sandbox.RemoteTemplate) []sandbox.RemoteTemplate {
+	if len(items) < 2 {
+		return items
+	}
+	result := make([]sandbox.RemoteTemplate, 0, len(items))
+	indexByID := make(map[string]int, len(items))
+	for _, item := range items {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			result = append(result, item)
+			continue
+		}
+		idx, exists := indexByID[id]
+		if !exists {
+			indexByID[id] = len(result)
+			result = append(result, item)
+			continue
+		}
+		current := &result[idx]
+		current.Standard = current.Standard || item.Standard
+		if templateStatusRank(item.Status) > templateStatusRank(current.Status) {
+			current.Status = item.Status
+			current.Version = item.Version
+			current.UpdatedAt = item.UpdatedAt
+		}
+		if strings.TrimSpace(current.Name) == "" ||
+			(strings.EqualFold(current.Name, sandbox.StandardTemplateName) && strings.Contains(item.Name, "/")) {
+			current.Name = item.Name
+		}
+		if current.Image == "" {
+			current.Image = item.Image
+		}
+	}
+	return result
+}
+
+func templateStatusRank(status string) int {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "ready", "available", "complete", "completed", "success", "succeeded":
+		return 3
+	case "building", "waiting", "pending", "queued", "processing":
+		return 2
+	case "failed", "error", "cancelled", "canceled":
+		return 1
+	default:
+		return 0
+	}
 }
 
 // Inventory answers what changing or deleting this config would disturb.

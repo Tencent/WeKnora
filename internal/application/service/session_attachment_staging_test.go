@@ -106,8 +106,6 @@ func (m *stagingSandboxManager) RemoveSessionInputPath(_ context.Context, _ stri
 }
 
 func TestStageSessionAttachmentsReconcilesAndSkipsExisting(t *testing.T) {
-	t.Setenv("WEKNORA_SANDBOX_MODE", "cube")
-
 	attachment := types.MessageAttachment{
 		URL:      "local://tenant/attachment-1",
 		FileName: "report.pdf",
@@ -124,12 +122,16 @@ func TestStageSessionAttachmentsReconcilesAndSkipsExisting(t *testing.T) {
 	fileService := &stagingFileService{
 		files: map[string][]byte{attachment.URL: []byte("content")},
 	}
-	service := &agentService{sandboxMgr: manager, fileService: fileService}
+	service := &agentService{
+		sandboxMgr: manager, fileService: fileService,
+		sandboxResolver: stubSandboxResolver{mgr: manager},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 
 	staged, err := service.stageSessionAttachments(
-		context.Background(),
+		ctx,
 		"session-1",
-		"",
+		"cfg-remote",
 		types.MessageAttachments{attachment, attachment},
 	)
 
@@ -142,14 +144,12 @@ func TestStageSessionAttachmentsReconcilesAndSkipsExisting(t *testing.T) {
 	assert.NotContains(t, manager.files, stalePath)
 
 	// The second reconciliation sees the same path and size and avoids storage IO.
-	_, err = service.stageSessionAttachments(context.Background(), "session-1", "", types.MessageAttachments{attachment})
+	_, err = service.stageSessionAttachments(ctx, "session-1", "cfg-remote", types.MessageAttachments{attachment})
 	require.NoError(t, err)
 	assert.Equal(t, 1, fileService.getCalls[attachment.URL])
 }
 
 func TestStageSessionAttachmentsSkipsWhenNoFilesystemCapability(t *testing.T) {
-	t.Setenv("WEKNORA_SANDBOX_MODE", "local")
-
 	// disableFiles=true simulates any manager without a session filesystem
 	// capability (Local/Docker/Disabled DefaultManager, or a
 	// SessionBoundManager whose remote provider fell back to Local).
