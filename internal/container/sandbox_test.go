@@ -26,15 +26,7 @@ func TestSelectSessionBindingStorePrefersRedis(t *testing.T) {
 	require.IsType(t, &sandbox.RedisSessionSandboxBindingStore{}, store)
 }
 
-func TestSelectSessionBindingStoreRequiresRedisForRemoteModes(t *testing.T) {
-	_, _, err := selectSessionBindingStore(nil, true)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "require Redis")
-}
-
-func TestSelectSessionBindingStoreAllowsMemoryWhenOptedIn(t *testing.T) {
-	t.Setenv("WEKNORA_SANDBOX_ALLOW_MEMORY_BINDING", "true")
-
+func TestSelectSessionBindingStoreUsesMemoryWithoutRedis(t *testing.T) {
 	store, kind, err := selectSessionBindingStore(nil, true)
 	require.NoError(t, err)
 	require.Equal(t, "memory", kind)

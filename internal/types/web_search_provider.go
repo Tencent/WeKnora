@@ -24,6 +24,7 @@ const (
 	WebSearchProviderTypeSearxng    WebSearchProviderType = "searxng"
 	WebSearchProviderTypeKeenable   WebSearchProviderType = "keenable"
 	WebSearchProviderTypeZhipu      WebSearchProviderType = "zhipu"
+	WebSearchProviderTypeExa        WebSearchProviderType = "exa"
 	WebSearchProviderTypeMetaso     WebSearchProviderType = "metaso"
 )
 
@@ -298,6 +299,27 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 					Options: []WebSearchProviderConfigFieldOption{
 						{Label: "Medium", LabelKey: "webSearchSettings.configFields.contentMedium", Value: "medium"},
 						{Label: "High", LabelKey: "webSearchSettings.configFields.contentHigh", Value: "high"},
+					},
+				},
+			},
+		},
+		{
+			ID:             "exa",
+			Name:           "Exa",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "Exa Search API for AI applications (requires API key)",
+			DocsURL:        "https://docs.exa.ai/",
+			ConfigFields: []WebSearchProviderConfigField{
+				{
+					Key:         "include_text",
+					Label:       "Include text",
+					Type:        "select",
+					Default:     "false",
+					Description: "Include page text in the unified result Content field.",
+					Options: []WebSearchProviderConfigFieldOption{
+						{Label: "Enabled", Value: "true"},
+						{Label: "Disabled", Value: "false"},
 					},
 				},
 			},

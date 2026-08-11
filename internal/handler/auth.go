@@ -287,13 +287,53 @@ func (h *AuthHandler) GetOIDCAuthorizationURL(c *gin.Context) {
 
 	// Bind the state nonce to this browser so an attacker cannot replay
 	// their own authorization code into a victim's callback.
-	if resp.Nonce != "" {
-		secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
-		c.SetSameSite(http.SameSiteLaxMode)
-		c.SetCookie(oidcNonceCookieName, resp.Nonce, oidcNonceCookieMaxAge, "/", "", secure, true)
-	}
+	setOIDCNonceCookie(c, resp.Nonce)
 
 	c.JSON(http.StatusOK, resp)
+}
+
+// setOIDCNonceCookie binds the OIDC state nonce to this browser so an
+// attacker cannot replay their own authorization code into a victim's
+// callback. Shared by /auth/oidc/url (JSON) and /auth/oidc/start (302).
+func setOIDCNonceCookie(c *gin.Context, nonce string) {
+	if nonce == "" {
+		return
+	}
+	secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(oidcNonceCookieName, nonce, oidcNonceCookieMaxAge, "/", "", secure, true)
+}
+
+// oidcCallbackURL derives the absolute /auth/oidc/callback URL from the
+// request's own origin (scheme + host), so external platforms can deep-link
+// to /auth/oidc/start without supplying a redirect_uri.
+func oidcCallbackURL(c *gin.Context) string {
+	scheme := "http"
+	if c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	return scheme + "://" + c.Request.Host + "/api/v1/auth/oidc/callback"
+}
+
+// OIDCStart godoc
+// @Summary      发起 OIDC 登录（直接 302）
+// @Description  与 /auth/oidc/url 不同，此端点直接 302 重定向到 OIDC Provider 的授权页，
+// @Description  无需前端 JS 介入。适用于外部平台（如企业门户）直接给出一个链接即可
+// @Description  触发 OIDC 授权码流程，借助 IdP 的 SSO session 实现免再次输密码。
+// @Tags         认证
+// @Success      302
+// @Router       /auth/oidc/start [get]
+func (h *AuthHandler) OIDCStart(c *gin.Context) {
+	ctx := c.Request.Context()
+	resp, err := h.userService.GetOIDCAuthorizationURL(ctx, oidcCallbackURL(c))
+	if err != nil {
+		logger.Errorf(ctx, "Failed to generate OIDC authorization URL: %v", err)
+		appErr := errors.NewForbiddenError("OIDC authorization unavailable").WithDetails(err.Error())
+		c.Error(appErr)
+		return
+	}
+	setOIDCNonceCookie(c, resp.Nonce)
+	c.Redirect(http.StatusFound, resp.AuthorizationURL)
 }
 
 // GetOIDCConfig godoc

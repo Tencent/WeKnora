@@ -59,9 +59,9 @@ type sessionAttachmentStager interface {
 // backend this session's sandbox actually runs on.
 //
 // Callers must gate staging on this rather than on the process-wide manager: a
-// workspace can select a named Cube/E2B config while the deployment default is
-// docker/local, and in that combination the agent still registers shell/skill
-// tools against the remote sandbox, so its attachments have to be staged too.
+// different workspace configs expose different capabilities. Remote backends
+// need attachment staging; stateless Docker/Local backends do not advertise a
+// session filesystem at all.
 func (s *agentService) sessionSandboxInputStore(
 	ctx context.Context,
 	sessionID string,
@@ -71,15 +71,12 @@ func (s *agentService) sessionSandboxInputStore(
 		return nil, nil
 	}
 	tenantID, _ := types.TenantIDFromContext(ctx)
-	configID, err := sandboxConfigForExecution(ctx, s.sandboxPinner, sessionID, agentSandboxConfigID)
-	if err != nil {
-		return nil, fmt.Errorf("resolve sandbox config for session %s: %w", sessionID, err)
-	}
-	mgr, err := resolveTenantSandboxForConfig(
-		ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, s.sandboxPolicy,
+	mgr, _, err := resolveSandboxForExecution(
+		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
+		tenantID, sessionID, agentSandboxConfigID, s.sandboxPolicy,
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve sandbox config for session %s: %w", sessionID, err)
 	}
 	return sessionSandboxFileStore(mgr), nil
 }

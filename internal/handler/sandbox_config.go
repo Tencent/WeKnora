@@ -24,18 +24,45 @@ type sandboxConfigService interface {
 	Inventory(context.Context, uint64, string) (service.SandboxInventory, error)
 	WorkspaceScriptsDisabled(context.Context, uint64) (bool, error)
 	SetWorkspaceScriptsDisabled(context.Context, uint64, bool) error
+	QueryTemplates(context.Context, uint64, service.SandboxTemplateQueryInput) (*service.SandboxTemplateCatalog, error)
+}
+
+type sandboxTemplateQueryRequest struct {
+	Config         *types.TenantSandboxConfig `json:"config"`
+	ConfigID       string                     `json:"config_id,omitempty"`
+	EnsureStandard bool                       `json:"ensure_standard"`
+}
+
+// QueryTemplates returns the templates visible through an unsaved workspace
+// connection. When requested, it also starts provisioning the standard
+// WeKnora image if that cluster does not have one yet.
+func (h *SandboxConfigHandler) QueryTemplates(c *gin.Context) {
+	var req sandboxTemplateQueryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewBadRequestError(err.Error()))
+		return
+	}
+	result, err := h.service.QueryTemplates(c.Request.Context(), sandboxConfigTenantID(c),
+		service.SandboxTemplateQueryInput{
+			Config:         req.Config,
+			ConfigID:       req.ConfigID,
+			EnsureStandard: req.EnsureStandard,
+		})
+	if err != nil {
+		respondSandboxConfigServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 }
 
 type SandboxConfigHandler struct {
-	service  sandboxConfigService
-	defaults *sandbox.ConfigDefaults
+	service sandboxConfigService
 }
 
 func NewSandboxConfigHandler(
 	service *service.TenantSandboxConfigService,
-	defaults *sandbox.ConfigDefaults,
 ) *SandboxConfigHandler {
-	return &SandboxConfigHandler{service: service, defaults: defaults}
+	return &SandboxConfigHandler{service: service}
 }
 
 type sandboxConfigRequest struct {
@@ -143,7 +170,7 @@ func respondSandboxConfigServiceError(c *gin.Context, err error) {
 
 // List godoc
 // @Summary      List sandbox configs
-// @Description  List workspace sandbox backend configs with credentials masked and deployment defaults included.
+// @Description  List workspace sandbox backend configs with credentials masked.
 // @Tags         SandboxConfig
 // @Produce      json
 // @Success      200  {object}  map[string]interface{}   "Sandbox configs and defaults"
@@ -171,7 +198,6 @@ func (h *SandboxConfigHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success":                    true,
 		"data":                       data,
-		"defaults":                   h.defaults,
 		"workspace_scripts_disabled": disabled,
 	})
 }
@@ -180,7 +206,7 @@ type workspacePolicyRequest struct {
 	ScriptsDisabled bool `json:"scripts_disabled"`
 }
 
-// SetWorkspacePolicy toggles script execution for agents that use the deployment default.
+// SetWorkspacePolicy toggles script execution for the whole workspace.
 func (h *SandboxConfigHandler) SetWorkspacePolicy(c *gin.Context) {
 	var req workspacePolicyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

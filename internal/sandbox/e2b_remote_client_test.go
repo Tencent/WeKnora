@@ -269,6 +269,307 @@ func TestE2BRemoteClientProviderAndCapabilities(t *testing.T) {
 	require.True(t, caps.SupportsFilesystemEnumeration)
 }
 
+func TestE2BRemoteClientListTemplatesReconcilesStandardTemplateBuildStatus(t *testing.T) {
+	var statusRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/templates":
+			writeJSON(w, http.StatusOK, []map[string]any{{
+				"templateID":  "template-ready",
+				"buildID":     "build-success",
+				"names":       []string{"project/weknora"},
+				"aliases":     []string{"weknora"},
+				"buildStatus": "waiting",
+				"envdVersion": "0.4.0",
+			}})
+		case "/templates/template-ready/builds/build-success/status":
+			statusRequests.Add(1)
+			writeJSON(w, http.StatusOK, map[string]any{
+				"templateID": "template-ready",
+				"buildID":    "build-success",
+				"status":     "ready",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := NewE2BRemoteClient(&Config{
+		E2BAPIKey:     "key-test",
+		E2BAPIURL:     server.URL,
+		E2BTemplate:   "template-ready",
+		E2BSandboxTTL: time.Minute,
+	})
+	require.NoError(t, err)
+
+	templates, err := client.ListTemplates(context.Background())
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	require.True(t, templates[0].Standard)
+	require.Equal(t, "project/weknora", templates[0].Name)
+	require.Equal(t, "ready", templates[0].Status)
+	require.Equal(t, int32(1), statusRequests.Load())
+}
+
+// An older successful build does not make the current one spawnable: E2B boots
+// the current build only, and reporting "ready" here let the UI hand out a
+// template that every sandbox creation rejected with a 404.
+func TestE2BRemoteClientListTemplatesIgnoresOlderSuccessfulBuild(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/templates":
+			writeJSON(w, http.StatusOK, []map[string]any{{
+				"templateID":  "template-queued",
+				"buildID":     "build-queued",
+				"names":       []string{"project/weknora"},
+				"buildStatus": "waiting",
+			}})
+		case "/templates/template-queued/builds/build-queued/status":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"templateID": "template-queued",
+				"buildID":    "build-queued",
+				"status":     "waiting",
+			})
+		case "/templates/template-queued":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"templateID": "template-queued",
+				"names":      []string{"project/weknora"},
+				"builds": []map[string]any{
+					{"buildID": "build-queued", "status": "waiting"},
+					{"buildID": "build-older", "status": "success"},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := NewE2BRemoteClient(&Config{
+		E2BAPIKey:     "key-test",
+		E2BAPIURL:     server.URL,
+		E2BSandboxTTL: time.Minute,
+	})
+	require.NoError(t, err)
+
+	templates, err := client.ListTemplates(context.Background())
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	require.Equal(t, "waiting", templates[0].Status)
+}
+
+// E2B reports the all-zero UUID for a template that never got a build attached.
+// Asking the build endpoint about it only yields a 400, and the template cannot
+// be spawned, so the pending list status stands.
+func TestE2BRemoteClientListTemplatesKeepsPendingWithoutBuildReference(t *testing.T) {
+	var buildRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/templates":
+			writeJSON(w, http.StatusOK, []map[string]any{{
+				"templateID":  "template-unbuilt",
+				"buildID":     "00000000-0000-0000-0000-000000000000",
+				"names":       []string{"project/weknora"},
+				"buildStatus": "building",
+				"spawnCount":  0,
+			}})
+		case strings.Contains(r.URL.Path, "/builds/"):
+			buildRequests.Add(1)
+			http.Error(w, `{"code":400,"message":"Build not found"}`, http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := NewE2BRemoteClient(&Config{
+		E2BAPIKey:     "key-test",
+		E2BAPIURL:     server.URL,
+		E2BSandboxTTL: time.Minute,
+	})
+	require.NoError(t, err)
+
+	templates, err := client.ListTemplates(context.Background())
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	require.Equal(t, "building", templates[0].Status)
+	require.Equal(t, int32(0), buildRequests.Load())
+}
+
+func TestE2BRemoteClientListTemplatesKeepsPendingWithoutSuccessfulBuild(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/templates":
+			writeJSON(w, http.StatusOK, []map[string]any{{
+				"templateID":  "template-fresh",
+				"buildID":     "build-fresh",
+				"names":       []string{"project/weknora"},
+				"buildStatus": "building",
+			}})
+		case "/templates/template-fresh/builds/build-fresh/status":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"templateID": "template-fresh",
+				"buildID":    "build-fresh",
+				"status":     "building",
+			})
+		case "/templates/template-fresh":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"templateID": "template-fresh",
+				"builds": []map[string]any{
+					{"buildID": "build-fresh", "status": "building"},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := NewE2BRemoteClient(&Config{
+		E2BAPIKey:     "key-test",
+		E2BAPIURL:     server.URL,
+		E2BSandboxTTL: time.Minute,
+	})
+	require.NoError(t, err)
+
+	templates, err := client.ListTemplates(context.Background())
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	require.Equal(t, "building", templates[0].Status)
+}
+
+// Builds that finished but carry no default tag look exactly like "still
+// building" in the template list, while sandbox creation rejects the template
+// outright. The catalog has to name that state so the UI stops waiting.
+func TestE2BRemoteClientListTemplatesReportsUntaggedBuilds(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/templates":
+			writeJSON(w, http.StatusOK, []map[string]any{{
+				"templateID":  "template-untagged",
+				"buildID":     "00000000-0000-0000-0000-000000000000",
+				"names":       []string{"project/weknora"},
+				"buildStatus": "waiting",
+				"buildCount":  2,
+			}})
+		case "/templates/template-untagged":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"templateID": "template-untagged",
+				"builds": []map[string]any{
+					{"buildID": "build-1", "status": "success"},
+					{"buildID": "build-2", "status": "success"},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := NewE2BRemoteClient(&Config{
+		E2BAPIKey:     "key-test",
+		E2BAPIURL:     server.URL,
+		E2BSandboxTTL: time.Minute,
+	})
+	require.NoError(t, err)
+
+	templates, err := client.ListTemplates(context.Background())
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	require.Equal(t, TemplateStatusUntagged, templates[0].Status)
+}
+
+// A template whose first build is genuinely still running has no finished build
+// to find, so it must keep reporting the pending status.
+func TestE2BRemoteClientListTemplatesKeepsPendingOnFirstBuild(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/templates":
+			writeJSON(w, http.StatusOK, []map[string]any{{
+				"templateID":  "template-first",
+				"buildID":     "00000000-0000-0000-0000-000000000000",
+				"names":       []string{"project/weknora"},
+				"buildStatus": "building",
+				"buildCount":  1,
+			}})
+		case "/templates/template-first":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"templateID": "template-first",
+				"builds":     []map[string]any{{"buildID": "build-1", "status": "building"}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := NewE2BRemoteClient(&Config{
+		E2BAPIKey:     "key-test",
+		E2BAPIURL:     server.URL,
+		E2BSandboxTTL: time.Minute,
+	})
+	require.NoError(t, err)
+
+	templates, err := client.ListTemplates(context.Background())
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	require.Equal(t, "building", templates[0].Status)
+}
+
+// Past spawns say nothing about the build that is current now, so they must not
+// upgrade a pending status either.
+func TestE2BRemoteClientListTemplatesIgnoresSpawnCount(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/templates":
+			writeJSON(w, http.StatusOK, []map[string]any{{
+				"templateID":  "template-spawned",
+				"buildID":     "build-x",
+				"names":       []string{"weknora"},
+				"buildStatus": "waiting",
+				"spawnCount":  4,
+			}})
+		case "/templates/template-spawned/builds/build-x/status":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"templateID": "template-spawned",
+				"buildID":    "build-x",
+				"status":     "waiting",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := NewE2BRemoteClient(&Config{
+		E2BAPIKey:     "key-test",
+		E2BAPIURL:     server.URL,
+		E2BSandboxTTL: time.Minute,
+	})
+	require.NoError(t, err)
+
+	templates, err := client.ListTemplates(context.Background())
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	require.Equal(t, "waiting", templates[0].Status)
+}
+
+func TestNormalizeE2BTemplateBuildStatus(t *testing.T) {
+	tests := map[string]string{
+		"READY":      "ready",
+		"success":    "ready",
+		"completed":  "ready",
+		"processing": "building",
+		"uploaded":   "waiting",
+		"failed":     "error",
+		"custom":     "custom",
+	}
+	for raw, want := range tests {
+		require.Equalf(t, want, normalizeE2BTemplateBuildStatus(raw), "status %q", raw)
+	}
+}
+
 func TestE2BRemoteClientCreateWritesMetadataAndPauseLifecycle(t *testing.T) {
 	mock := newE2BMockServer(t)
 	client := newTestE2BRemoteClient(t, mock)

@@ -2,7 +2,7 @@
 //
 // ResolveEffectiveConfig turns one stored config into the *Config a manager is
 // built from. A named config is self-contained: provider fields are never
-// inherited from the WEKNORA_SANDBOX_* baseline, they come from the config or
+// inherited from process configuration; they come from the workspace config or
 // they are missing and the config is refused (see config_required.go).
 //
 // Field-level inheritance was tried first and removed. It made the stored row an
@@ -15,8 +15,8 @@
 //
 // What still comes from the baseline is deliberately narrow: the deployment's
 // script execution timeout, which is an operational guardrail rather than part
-// of a backend's identity. A nil tenant config means "the deployment default
-// backend" and yields the baseline unchanged.
+// of a backend's identity. A nil tenant config is used only by low-level
+// callers that explicitly request the supplied baseline.
 package sandbox
 
 import (
@@ -58,14 +58,15 @@ func ResolveEffectiveConfig(
 		effective.Type = resolved
 	}
 	overrideSeconds(&effective.DefaultTimeout, tenantCfg.DefaultTimeoutSec)
+	effective.AllowPrivateEndpoints = tenantCfg.AllowPrivateEndpoints
 	if tenantCfg.EnvVars != nil {
 		effective.EnvVars = cloneMetadata(tenantCfg.EnvVars)
 	}
 	if cube := tenantCfg.Cube; cube != nil {
-		if err := overrideURL(&effective.CubeAPIURL, cube.APIURL); err != nil {
+		if err := overrideURL(&effective.CubeAPIURL, cube.APIURL, effective.AllowPrivateEndpoints); err != nil {
 			return nil, err
 		}
-		if err := overrideURL(&effective.CubeProxyURL, cube.ProxyURL); err != nil {
+		if err := overrideURL(&effective.CubeProxyURL, cube.ProxyURL, effective.AllowPrivateEndpoints); err != nil {
 			return nil, err
 		}
 		overrideString(&effective.CubeSandboxDomain, cube.SandboxDomain)
@@ -76,7 +77,10 @@ func ResolveEffectiveConfig(
 	}
 
 	if e2bCfg := tenantCfg.E2B; e2bCfg != nil {
-		if err := overrideURL(&effective.E2BAPIURL, e2bCfg.APIURL); err != nil {
+		if err := overrideURL(&effective.E2BAPIURL, e2bCfg.APIURL, effective.AllowPrivateEndpoints); err != nil {
+			return nil, err
+		}
+		if err := overrideURL(&effective.E2BProxyURL, e2bCfg.ProxyURL, effective.AllowPrivateEndpoints); err != nil {
 			return nil, err
 		}
 		overrideString(&effective.E2BSandboxDomain, e2bCfg.SandboxDomain)
@@ -110,6 +114,7 @@ func ResolveEffectiveConfig(
 // default rather than to whatever this deployment happens to run, otherwise
 // "inherits nothing" would still have an exception to explain.
 func clearProviderFields(cfg *Config) {
+	cfg.DockerImage = ""
 	cfg.CubeAPIURL = ""
 	cfg.CubeProxyURL = ""
 	cfg.CubeSandboxDomain = ""
@@ -119,6 +124,7 @@ func clearProviderFields(cfg *Config) {
 	cfg.CubeHTTPTimeout = 0
 
 	cfg.E2BAPIURL = ""
+	cfg.E2BProxyURL = ""
 	cfg.E2BSandboxDomain = ""
 	cfg.E2BAPIKey = ""
 	cfg.E2BTemplate = ""
@@ -174,11 +180,11 @@ func overrideString(dst *string, value string) {
 
 // overrideURL is overrideString for endpoint fields: a tenant-supplied URL
 // must pass the SSRF guard before it is accepted into the effective config.
-func overrideURL(dst *string, value string) error {
+func overrideURL(dst *string, value string, allowPrivate bool) error {
 	if value == "" {
 		return nil
 	}
-	if err := ValidateOutboundURL(value); err != nil {
+	if err := ValidateOutboundURLWithPolicy(value, OutboundURLPolicy{AllowPrivate: allowPrivate}); err != nil {
 		return err
 	}
 	*dst = value
