@@ -17,6 +17,8 @@ import (
 
 	"connectrpc.com/connect"
 	e2b "github.com/matiasinsaurralde/go-e2b"
+
+	"github.com/Tencent/WeKnora/internal/logger"
 )
 
 // E2BRemoteClient implements RemoteSandboxClient on top of the go-e2b client.
@@ -43,6 +45,31 @@ func NewE2BRemoteClientWithTransport(
 	cfg *Config,
 	transport *http.Transport,
 ) (*E2BRemoteClient, error) {
+	if transport == nil {
+		return newE2BRemoteClient(cfg, nil)
+	}
+	return newE2BRemoteClient(cfg, transport)
+}
+
+// NewE2BRemoteClientWithPool builds the client on top of the shared gateway
+// pool. It is what self-hosted E2B-compatible control planes need: the pool
+// keeps control-plane traffic on the process-wide transport while dialling
+// data-plane traffic at the configured gateway (see gateway_transport.go).
+// A nil pool falls back to the SDK defaults.
+func NewE2BRemoteClientWithPool(
+	cfg *Config,
+	pool *SandboxGatewayTransportPool,
+) (*E2BRemoteClient, error) {
+	if pool == nil {
+		return newE2BRemoteClient(cfg, nil)
+	}
+	return newE2BRemoteClient(cfg, pool.RoundTripperFor(cfg))
+}
+
+func newE2BRemoteClient(
+	cfg *Config,
+	transport http.RoundTripper,
+) (*E2BRemoteClient, error) {
 	if cfg == nil {
 		return nil, errors.New("e2b remote client config is required")
 	}
@@ -53,9 +80,12 @@ func NewE2BRemoteClientWithTransport(
 	if timeout <= 0 {
 		timeout = DefaultE2BHTTPTimeout
 	}
-	httpClient := &http.Client{Timeout: timeout}
-	if transport != nil {
-		httpClient.Transport = transport
+	// Every E2B client speaks to envd through the compatibility shim, whether
+	// or not a gateway is configured: the two details it rewrites belong to the
+	// envd protocol itself, not to any one deployment. See envd_compat_transport.go.
+	httpClient := &http.Client{
+		Timeout:   timeout,
+		Transport: NewEnvdCompatTransport(transport, DefaultSandboxExecUser),
 	}
 	client, err := e2b.NewClient(e2b.ClientConfig{
 		APIKey:        cfg.E2BAPIKey,
@@ -117,14 +147,209 @@ func (c *E2BRemoteClient) Capabilities() RemoteSandboxCapabilities {
 	}
 }
 
-// Health probes the E2B control plane via ListSandboxes. The SDK does not
-// expose a dedicated health endpoint, and ListSandboxes is the smallest
-// authenticated call that will detect a bad API key or a dead API.
+// Health probes the control plane by listing sandboxes. The protocol has no
+// dedicated health endpoint, and a list is the smallest authenticated call
+// that detects a bad API key or a dead API.
+//
+// It deliberately uses the v2 listing rather than the legacy one: v2 is what
+// every other call in this client already depends on, and E2B-compatible
+// control planes (Agent-Sandbox, for one) implement only that one — probing
+// the legacy path would report a perfectly healthy backend as unreachable.
 func (c *E2BRemoteClient) Health(ctx context.Context) error {
-	if _, err := c.client.ListSandboxes(ctx); err != nil {
+	if _, err := c.client.ListSandboxesV2(ctx, e2b.WithSandboxLimit(1)); err != nil {
 		return normalizeE2BError("Health", err)
 	}
 	return nil
+}
+
+func (c *E2BRemoteClient) ListTemplates(ctx context.Context) ([]RemoteTemplate, error) {
+	items, err := c.client.ListTemplates(ctx)
+	if err != nil {
+		return nil, normalizeE2BError("ListTemplates", err)
+	}
+	result := make([]RemoteTemplate, 0, len(items))
+	for _, item := range items {
+		name := item.TemplateID
+		if len(item.Names) > 0 && strings.TrimSpace(item.Names[0]) != "" {
+			name = strings.TrimSpace(item.Names[0])
+		} else if len(item.Aliases) > 0 && strings.TrimSpace(item.Aliases[0]) != "" {
+			name = strings.TrimSpace(item.Aliases[0])
+		}
+		standard := isStandardTemplate(name)
+		for _, candidate := range append(append([]string(nil), item.Aliases...), item.Names...) {
+			if isStandardTemplate(candidate) {
+				standard = true
+				break
+			}
+		}
+		status := normalizeE2BTemplateBuildStatus(item.BuildStatus)
+		// E2B's template list keeps reporting a pending build status after the
+		// template already became spawnable, so reconcile our standard template
+		// against the build endpoints before telling the UI to keep waiting
+		// forever. Limit these extra requests to the standard template; polling
+		// every public template would turn one catalog refresh into an
+		// unbounded N+1 request pattern.
+		if standard && isE2BTemplateBuildPending(status) {
+			if reconciled := c.reconcileE2BTemplateStatus(ctx, item); reconciled != "" {
+				status = reconciled
+			}
+		}
+		result = append(result, RemoteTemplate{
+			ID:        item.TemplateID,
+			Name:      name,
+			Status:    status,
+			Version:   item.EnvdVersion,
+			CreatedAt: item.CreatedAt,
+			UpdatedAt: item.UpdatedAt,
+			Standard:  standard,
+		})
+	}
+	return result, nil
+}
+
+// reconcileE2BTemplateStatus resolves the real build state of a template whose
+// list entry still looks pending, by asking the per-build endpoint that owns
+// that answer.
+//
+// Only the template's *current* build counts as evidence. E2B spawns from that
+// build alone, so neither an older successful build nor a non-zero spawn count
+// proves the template can boot now — both happily coexist with a template that
+// answers every sandbox creation with a 404. It returns an empty string when
+// nothing more authoritative than the list status could be established.
+func (c *E2BRemoteClient) reconcileE2BTemplateStatus(
+	ctx context.Context,
+	item e2b.TemplateDetail,
+) string {
+	templateID := strings.TrimSpace(item.TemplateID)
+	buildID := strings.TrimSpace(item.BuildID)
+	if templateID == "" {
+		return ""
+	}
+	// buildID is "the last successful build", so the all-zero UUID means the
+	// provider sees none under the tag it resolves. When builds did finish, the
+	// template is not building at all — its builds are untagged, and no amount
+	// of waiting will change that.
+	if isBlankE2BUUID(buildID) {
+		if item.BuildCount > 0 && c.hasSuccessfulE2BBuild(ctx, templateID) {
+			return TemplateStatusUntagged
+		}
+		return ""
+	}
+	build, err := c.client.GetBuildStatus(ctx, templateID, buildID)
+	if err != nil {
+		logger.Warnf(ctx,
+			"e2b build status lookup failed for template %s build %s: %v",
+			templateID, buildID, err,
+		)
+		return ""
+	}
+	if isE2BTemplateBuildPending(build.Status) {
+		return ""
+	}
+	reconciled := normalizeE2BTemplateBuildStatus(build.Status)
+	if reconciled == "" {
+		return ""
+	}
+	logger.Debugf(ctx,
+		"e2b template %s list status %q reconciled to %q from build %s",
+		templateID, item.BuildStatus, reconciled, buildID,
+	)
+	return reconciled
+}
+
+// hasSuccessfulE2BBuild reports whether the template's build history contains a
+// finished build. It separates "the first build is still running" from "builds
+// succeeded but none is reachable under the default tag".
+func (c *E2BRemoteClient) hasSuccessfulE2BBuild(ctx context.Context, templateID string) bool {
+	result, err := c.client.GetTemplate(ctx, templateID, e2b.WithTemplateBuildsLimit(100))
+	if err != nil {
+		logger.Warnf(ctx, "e2b template build history lookup failed for %s: %v", templateID, err)
+		return false
+	}
+	for _, build := range result.Template.Builds {
+		if normalizeE2BTemplateBuildStatus(build.Status) == "ready" {
+			return true
+		}
+	}
+	return false
+}
+
+// isBlankE2BUUID reports whether id carries no build reference. E2B returns the
+// all-zero UUID, not an empty string, for a template without a build.
+func isBlankE2BUUID(id string) bool {
+	trimmed := strings.TrimSpace(id)
+	if trimmed == "" {
+		return true
+	}
+	for _, char := range trimmed {
+		if char != '0' && char != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeE2BTemplateBuildStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "ready", "success", "succeeded", "complete", "completed":
+		return "ready"
+	case "building", "processing":
+		return "building"
+	case "waiting", "queued", "pending", "uploaded":
+		return "waiting"
+	case "error", "failed", "failure", "cancelled", "canceled":
+		return "error"
+	default:
+		return strings.ToLower(strings.TrimSpace(status))
+	}
+}
+
+func isE2BTemplateBuildPending(status string) bool {
+	switch normalizeE2BTemplateBuildStatus(status) {
+	case "building", "waiting":
+		return true
+	default:
+		return false
+	}
+}
+
+// EnsureStandardTemplate returns the cluster's WeKnora template, building it
+// when absent. A failed or untagged template is not returned as is: it can
+// never spawn a sandbox, so it falls through to the build below. E2B resolves
+// the build by name, so that is a rebuild of the same template rather than a
+// second entry in the catalog.
+func (c *E2BRemoteClient) EnsureStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
+	items, err := c.ListTemplates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if items[i].Standard && !IsTemplateBuildFailed(items[i].Status) {
+			return &items[i], nil
+		}
+	}
+	builder := e2b.NewTemplate().FromImage(DefaultDockerImage)
+	build, err := builder.BuildInBackground(ctx, c.client, e2b.BuildConfig{
+		Name: StandardTemplateName,
+		// Creating a sandbox from a plain template name or ID resolves the
+		// "default" tag, so a build tagged anything else is unreachable: E2B
+		// answers every creation with "tag 'default' does not exist for
+		// template ...". Naming the tag explicitly keeps that contract visible
+		// instead of relying on the server-side default.
+		Tags:     []string{DefaultE2BTemplateTag},
+		CPUCount: 2,
+		MemoryMB: 2048,
+	})
+	if err != nil {
+		return nil, normalizeE2BError("EnsureStandardTemplate", err)
+	}
+	return &RemoteTemplate{
+		ID:       build.TemplateID,
+		Name:     StandardTemplateName,
+		Status:   "building",
+		Image:    DefaultDockerImage,
+		Standard: true,
+	}, nil
 }
 
 func (c *E2BRemoteClient) Create(
@@ -557,6 +782,11 @@ func (c *E2BRemoteClient) Exec(
 	}, nil
 }
 
+// Filesystem operations name DefaultSandboxExecUser explicitly rather than
+// relying on the daemon's default account. It keeps ownership aligned with the
+// account scripts run as, and it is required for interoperability: E2B Cloud
+// falls back to "user" when the request omits it, while other E2B-compatible
+// control planes reject the call outright.
 func (c *E2BRemoteClient) WriteFile(
 	ctx context.Context,
 	handle RemoteSandboxHandle,
@@ -570,7 +800,7 @@ func (c *E2BRemoteClient) WriteFile(
 	if strings.TrimSpace(path) == "" {
 		return e2bInvalidRequest("WriteFile", "path is required", nil)
 	}
-	if _, err := sandbox.Filesystem.WriteBytes(ctx, path, content); err != nil {
+	if _, err := sandbox.Filesystem.WriteBytes(ctx, path, content, e2b.WithFileUser(DefaultSandboxExecUser)); err != nil {
 		return normalizeE2BError("WriteFile", err)
 	}
 	return nil
@@ -588,7 +818,7 @@ func (c *E2BRemoteClient) ReadFile(
 	if strings.TrimSpace(path) == "" {
 		return nil, e2bInvalidRequest("ReadFile", "path is required", nil)
 	}
-	content, err := sandbox.Filesystem.ReadBytes(ctx, path)
+	content, err := sandbox.Filesystem.ReadBytes(ctx, path, e2b.WithFileUser(DefaultSandboxExecUser))
 	if err != nil {
 		return nil, normalizeE2BError("ReadFile", err)
 	}
@@ -607,7 +837,7 @@ func (c *E2BRemoteClient) ListDir(
 	if strings.TrimSpace(path) == "" {
 		return nil, e2bInvalidRequest("ListDir", "path is required", nil)
 	}
-	entries, err := sandbox.Filesystem.List(ctx, path)
+	entries, err := sandbox.Filesystem.List(ctx, path, e2b.WithFileUser(DefaultSandboxExecUser))
 	if err != nil {
 		return nil, normalizeE2BError("ListDir", err)
 	}
@@ -636,7 +866,7 @@ func (c *E2BRemoteClient) MakeDir(
 	if strings.TrimSpace(path) == "" {
 		return e2bInvalidRequest("MakeDir", "path is required", nil)
 	}
-	if err := sandbox.Filesystem.MakeDir(ctx, path); err != nil {
+	if err := sandbox.Filesystem.MakeDir(ctx, path, e2b.WithFileUser(DefaultSandboxExecUser)); err != nil {
 		return normalizeE2BError("MakeDir", err)
 	}
 	return nil
@@ -654,7 +884,7 @@ func (c *E2BRemoteClient) Remove(
 	if strings.TrimSpace(path) == "" {
 		return e2bInvalidRequest("Remove", "path is required", nil)
 	}
-	if err := sandbox.Filesystem.Remove(ctx, path); err != nil {
+	if err := sandbox.Filesystem.Remove(ctx, path, e2b.WithFileUser(DefaultSandboxExecUser)); err != nil {
 		return normalizeE2BError("Remove", err)
 	}
 	return nil
@@ -672,7 +902,7 @@ func (c *E2BRemoteClient) Stat(
 	if strings.TrimSpace(path) == "" {
 		return nil, e2bInvalidRequest("Stat", "path is required", nil)
 	}
-	info, err := sandbox.Filesystem.Stat(ctx, path)
+	info, err := sandbox.Filesystem.Stat(ctx, path, e2b.WithFileUser(DefaultSandboxExecUser))
 	if err != nil {
 		return nil, normalizeE2BError("Stat", err)
 	}
@@ -807,6 +1037,7 @@ func normalizeE2BError(op string, err error) error {
 		return fmt.Errorf("e2b %s: %w", op, err)
 	}
 	kind := RemoteErrorKindInternal
+	status := 0
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
 		kind = RemoteErrorKindTimeout
@@ -839,6 +1070,7 @@ func normalizeE2BError(op string, err error) error {
 			kind = RemoteErrorKindTimeout
 		case errors.As(err, &apiErr):
 			kind = httpErrorKind(op, apiErr.StatusCode)
+			status = apiErr.StatusCode
 		case errors.As(err, &connectErr):
 			switch connectErr.Code() {
 			case connect.CodeCanceled, connect.CodeDeadlineExceeded:
@@ -868,7 +1100,9 @@ func normalizeE2BError(op string, err error) error {
 			}
 		}
 	}
-	return NewRemoteError(SandboxTypeE2B, op, kind, err.Error(), err)
+	remoteErr := NewRemoteError(SandboxTypeE2B, op, kind, err.Error(), err)
+	remoteErr.StatusCode = status
+	return remoteErr
 }
 
 // e2bRemoteEntryType maps the E2B SDK FileInfo.Type onto the provider-neutral

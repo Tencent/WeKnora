@@ -693,6 +693,7 @@ export interface SandboxCubeConfig {
 
 export interface SandboxE2BConfig {
   api_url?: string
+  proxy_url?: string
   sandbox_domain?: string
   api_key?: string
   template_id?: string
@@ -703,6 +704,7 @@ export interface SandboxE2BConfig {
 export interface SandboxConfig {
   sandbox_type?: string
   default_timeout_sec?: number
+  allow_private_endpoints?: boolean
   env_vars?: Record<string, string>
   volume_mount?: SandboxVolumeMountConfig
   cube?: SandboxCubeConfig
@@ -715,6 +717,8 @@ export interface SandboxCheckItem {
   name: string
   ok: boolean | null
   message?: string
+  /** Stable code for why a probe was skipped; localized by the caller. */
+  reason?: string
   latency_ms?: number
 }
 
@@ -725,23 +729,23 @@ export interface SandboxCheckResult {
   capabilities?: Record<string, boolean>
 }
 
-/** Non-secret, inheritable defaults from the deployment's .env configuration. */
-export interface SandboxProviderDefaults {
-  api_url?: string
-  proxy_url?: string
-  sandbox_domain?: string
-  template_id?: string
-  api_key_configured: boolean
-  http_timeout_sec?: number
-  sandbox_ttl_seconds?: number
+export interface SandboxTemplate {
+  id: string
+  name: string
+  status?: string
+  version?: string
+  image?: string
+  created_at?: string
+  updated_at?: string
+  standard: boolean
+  /** The provider's own explanation for a failed build, when it reports one. */
+  error?: string
 }
 
-export interface SandboxConfigDefaults {
-  sandbox_type: string
-  default_timeout_sec?: number
-  docker_image?: string
-  cube?: SandboxProviderDefaults
-  e2b?: SandboxProviderDefaults
+export interface SandboxTemplateCatalog {
+  templates: SandboxTemplate[]
+  standard_template_id?: string
+  provisioned: boolean
 }
 
 /** One named sandbox backend config. Credentials arrive masked. */
@@ -777,26 +781,20 @@ export interface SandboxInventory {
   unverifiable?: boolean
 }
 
-/** Named sandbox backends that support per-config credentials (cube/e2b only). */
-export const NAMED_SANDBOX_BACKEND_TYPES = ['cube', 'e2b'] as const
+/** Sandbox backends managed as named workspace configurations. */
+export const NAMED_SANDBOX_BACKEND_TYPES = ['cube', 'e2b', 'docker', 'local'] as const
 
 export function isNamedSandboxBackend(type: string): boolean {
   return (NAMED_SANDBOX_BACKEND_TYPES as readonly string[]).includes(type)
 }
 
-/**
- * Returns every config of the workspace plus the deployment defaults an empty
- * field inherits. An empty list means "no named config yet", in which case
- * agents run on those defaults — which is NOT the same as disabled.
- */
+/** Returns every sandbox config of the workspace. No config means disabled. */
 export function listSandboxConfigs(): Promise<{
   data: SandboxConfigRecord[]
-  defaults?: SandboxConfigDefaults
   workspace_scripts_disabled?: boolean
 }> {
   return get('/api/v1/sandbox-configs') as unknown as Promise<{
     data: SandboxConfigRecord[]
-    defaults?: SandboxConfigDefaults
     workspace_scripts_disabled?: boolean
   }>
 }
@@ -845,6 +843,21 @@ export function deleteSandboxConfig(id: string, force = false): Promise<void> {
 export function getSandboxConfigInventory(id: string): Promise<{ data: SandboxInventory }> {
   return get(`/api/v1/sandbox-configs/${id}/sandboxes`) as unknown as Promise<{
     data: SandboxInventory
+  }>
+}
+
+/**
+ * Fetch templates using the connection currently entered in the drawer.
+ * `ensure_standard` starts a provider-side build when no WeKnora template is
+ * present; the returned building item can be polled through the same endpoint.
+ */
+export function querySandboxTemplates(payload: {
+  config: SandboxConfig
+  config_id?: string
+  ensure_standard?: boolean
+}): Promise<{ data: SandboxTemplateCatalog }> {
+  return post('/api/v1/sandbox-configs/templates/query', payload) as unknown as Promise<{
+    data: SandboxTemplateCatalog
   }>
 }
 
