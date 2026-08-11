@@ -21,6 +21,13 @@ type ToolRegistry struct {
 	maxToolOutputSize int // maximum chars for tool output (0 = use DefaultMaxToolOutput)
 }
 
+// outputLimitProvider is implemented by tools that expose a caller-configurable
+// output budget with their own hard safety cap. It prevents the registry's
+// generic limit from undoing that explicit bounded choice.
+type outputLimitProvider interface {
+	OutputLimitChars(args json.RawMessage) int
+}
+
 // NewToolRegistry creates a new tool registry
 func NewToolRegistry() *ToolRegistry {
 	return &ToolRegistry{
@@ -144,6 +151,11 @@ func (r *ToolRegistry) ExecuteTool(
 	// Publish the ceiling so budget-aware tools can shape a batched result
 	// themselves; the truncation below stays as the fallback for the rest.
 	maxOutput := r.getMaxToolOutput()
+	if provider, ok := tool.(outputLimitProvider); ok {
+		if toolLimit := provider.OutputLimitChars(args); toolLimit > maxOutput {
+			maxOutput = toolLimit
+		}
+	}
 	result, execErr := tool.Execute(WithOutputBudget(ctx, maxOutput), args)
 
 	// Truncate large tool outputs to prevent context window poisoning. The

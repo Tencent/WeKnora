@@ -59,10 +59,13 @@ func TestNewSearchHTTPClient_AcceptsEmptyProxy(t *testing.T) {
 }
 
 func TestSsrfSafeRedirect_BlocksNonHTTPSScheme(t *testing.T) {
-	h := ssrfSafeRedirect(10)
+	client, err := NewSearchHTTPClient(0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	req := &http.Request{URL: mustParse(t, "ftp://evil.com/")}
 	// len(via)==0 so first redirect
-	err := h(req, nil)
+	err = client.CheckRedirect(req, nil)
 	if err == nil {
 		t.Fatal("expected error for ftp redirect")
 	}

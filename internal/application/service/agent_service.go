@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/approval"
@@ -103,6 +104,10 @@ type agentService struct {
 	tenantService         interfaces.TenantService
 	storageResolver       interfaces.StorageBackendResolver
 	toolApprovalGate      approval.MCPApproval
+	sandboxMgr            sandbox.Manager
+	sandboxResolver       sandbox.TenantSandboxResolver
+	sandboxPinner         *SessionSandboxPinner
+	sandboxPolicy         WorkspaceSandboxPolicy
 }
 
 // NewAgentService creates a new agent service
@@ -124,6 +129,10 @@ func NewAgentService(
 	tenantService interfaces.TenantService,
 	storageResolver interfaces.StorageBackendResolver,
 	toolApprovalGate approval.MCPApproval,
+	sandboxMgr sandbox.Manager,
+	sandboxResolver sandbox.TenantSandboxResolver,
+	sandboxPinner *SessionSandboxPinner,
+	sandboxPolicy WorkspaceSandboxPolicy,
 ) interfaces.AgentService {
 	return &agentService{
 		cfg:                   cfg,
@@ -143,6 +152,10 @@ func NewAgentService(
 		tenantService:         tenantService,
 		storageResolver:       storageResolver,
 		toolApprovalGate:      toolApprovalGate,
+		sandboxMgr:            sandboxMgr,
+		sandboxResolver:       sandboxResolver,
+		sandboxPinner:         sandboxPinner,
+		sandboxPolicy:         sandboxPolicy,
 	}
 }
 
@@ -217,7 +230,7 @@ func (s *agentService) CreateAgentEngine(
 
 	// Initialize skills manager if skills are enabled
 	if config.SkillsEnabled && len(config.SkillDirs) > 0 {
-		skillsManager, err := s.initializeSkillsManager(ctx, config, toolRegistry)
+		skillsManager, err := s.initializeSkillsManager(ctx, sessionID, config, toolRegistry)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to initialize skills manager: %v", err)
 		} else if skillsManager != nil {
@@ -336,52 +349,44 @@ func (s *agentService) resolveKBAndDocInfos(
 	return kbInfos, selectedDocs
 }
 
-// initializeSkillsManager creates and initializes the skills manager
+// initializeSkillsManager creates and initializes the skills manager.
+//
+// The sandbox manager is resolved per workspace: backends differ in
+// capability (E2B exposes a session file store, local does not), so tool
+// registration below must inspect this workspace's real manager rather than a
+// process-wide singleton. Workspaces without their own sandbox configuration
+// resolve to the injected default.
 func (s *agentService) initializeSkillsManager(
 	ctx context.Context,
+	sessionID string,
 	config *types.AgentConfig,
 	toolRegistry *tools.ToolRegistry,
 ) (*skills.Manager, error) {
-	// Initialize sandbox manager based on environment variables
-	// WEKNORA_SANDBOX_MODE: "docker", "local", "disabled" (default: "disabled")
-	// WEKNORA_SANDBOX_TIMEOUT: timeout in seconds (default: 60)
-	// WEKNORA_SANDBOX_DOCKER_IMAGE: custom Docker image (default: wechatopenai/weknora-sandbox:latest)
-	var sandboxMgr sandbox.Manager
-	var err error
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	configID, err := sandboxConfigForExecution(ctx, s.sandboxPinner, sessionID, config.SandboxConfigID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve sandbox config for session %s: %w", sessionID, err)
+	}
+	sandboxMgr, err := resolveTenantSandboxForConfig(ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, s.sandboxPolicy)
+	if err != nil {
+		return nil, err
+	}
+	if sandboxMgr == nil {
+		sandboxMgr = sandbox.NewDisabledManager()
+	}
 
-	sandboxMode := os.Getenv("WEKNORA_SANDBOX_MODE")
+	sandboxMode := strings.ToLower(strings.TrimSpace(os.Getenv("WEKNORA_SANDBOX_MODE")))
 	if sandboxMode == "" {
 		sandboxMode = "disabled"
 	}
-	dockerImage := os.Getenv("WEKNORA_SANDBOX_DOCKER_IMAGE")
-	if dockerImage == "" {
-		dockerImage = sandbox.DefaultDockerImage
-	}
-	sandboxTimeoutStr := os.Getenv("WEKNORA_SANDBOX_TIMEOUT")
 	sandboxTimeout := 60
-	if sandboxTimeoutStr != "" {
-		if v, err := strconv.Atoi(sandboxTimeoutStr); err == nil && v > 0 {
-			sandboxTimeout = v
+	if v := os.Getenv("WEKNORA_SANDBOX_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			sandboxTimeout = n
 		}
 	}
-
-	switch sandboxMode {
-	case "docker":
-		sandboxMgr, err = sandbox.NewManagerFromType("docker", true, dockerImage) // Enable fallback to local
-		if err != nil {
-			logger.Warnf(ctx, "Failed to initialize Docker sandbox, falling back to disabled: %v", err)
-			sandboxMgr = sandbox.NewDisabledManager()
-		}
-	case "local":
-		sandboxMgr, err = sandbox.NewManagerFromType("local", false, "")
-		if err != nil {
-			logger.Warnf(ctx, "Failed to initialize local sandbox: %v", err)
-			sandboxMgr = sandbox.NewDisabledManager()
-		}
-	default:
-		sandboxMgr = sandbox.NewDisabledManager()
-	}
-	logger.Infof(ctx, "Sandbox configured: mode=%s, timeout=%ds, image=%s", sandboxMode, sandboxTimeout, dockerImage)
+	logger.Infof(ctx, "Sandbox in use: mode=%s type=%s timeout=%ds",
+		sandboxMode, sandboxMgr.GetType(), sandboxTimeout)
 
 	// Create skills manager
 	skillsConfig := &skills.ManagerConfig{
@@ -402,10 +407,35 @@ func (s *agentService) initializeSkillsManager(
 	toolRegistry.RegisterTool(readSkillTool)
 	logger.Infof(ctx, "Registered read_skill tool")
 
-	if sandboxMode != "disabled" {
+	if sandboxMgr.GetType() != sandbox.SandboxTypeDisabled {
 		executeSkillTool := tools.NewExecuteSkillScriptTool(skillsManager)
 		toolRegistry.RegisterTool(executeSkillTool)
 		logger.Infof(ctx, "Registered execute_skill_script tool")
+
+		// list_sandbox_files / read_sandbox_file expose per-session
+		// filesystem inspection. Registration is gated on the sandbox
+		// manager advertising a SessionFileStore capability — providers
+		// that fell back to a stateless local sandbox return nil so we
+		// never surface tenant-isolated tools that would run on the
+		// WeKnora host.
+		if store := sessionSandboxFileStore(sandboxMgr); store != nil {
+			toolRegistry.RegisterTool(tools.NewListSandboxFilesTool(store))
+			toolRegistry.RegisterTool(tools.NewReadSandboxFileTool(store))
+			logger.Infof(ctx, "Registered list_sandbox_files and read_sandbox_file tools")
+		} else {
+			logger.Infof(ctx, "Sandbox backend does not advertise session filesystem capability; list_sandbox_files/read_sandbox_file not registered")
+		}
+
+		// shell_exec is a remote-only capability. SessionCapabilityProvider
+		// yields nil for stateless backends and for a SessionBoundManager
+		// that fell back to LocalSandbox, so the same check works for
+		// every provider (Cube, E2B, future backends).
+		if executor := sessionSandboxShellExecutor(sandboxMgr); executor != nil {
+			toolRegistry.RegisterTool(tools.NewShellExecTool(executor))
+			logger.Infof(ctx, "Registered shell_exec tool")
+		} else {
+			logger.Infof(ctx, "Sandbox backend does not advertise remote shell capability; shell_exec not registered")
+		}
 	}
 
 	return skillsManager, nil

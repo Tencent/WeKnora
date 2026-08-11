@@ -124,21 +124,74 @@ type AgentConfig struct {
 
 ### Sandbox 配置（环境变量）
 
-Sandbox 相关配置通过环境变量设置：
+下表的环境变量是**部署级默认值**。工作区还可以维护多份具名沙箱后端配置，智能体各自选用其一；未选择的智能体回落到这里的默认值（见「工作区沙箱后端配置」）。
 
 | 环境变量 | 说明 | 默认值 |
 |---------|------|--------|
-| `WEKNORA_SANDBOX_MODE` | sandbox 模式: `docker`, `local`, `disabled` | `disabled` |
+| `WEKNORA_SANDBOX_MODE` | sandbox 模式：`docker` / `local` / `cube` / `e2b` / `disabled` | `disabled` |
 | `WEKNORA_SANDBOX_TIMEOUT` | 脚本执行超时（秒） | `60` |
-| `WEKNORA_SANDBOX_DOCKER_IMAGE` | 自定义 Docker 镜像 | `wechatopenai/weknora-sandbox:latest` |
+| `WEKNORA_SANDBOX_DOCKER_IMAGE` | 自定义 Docker 镜像（docker 模式） | `wechatopenai/weknora-sandbox:latest` |
+| `WEKNORA_SANDBOX_REDIS_NAMESPACE` | 会话→沙箱绑定的 Redis key 命名空间（cube / e2b 生效；未设置时复用 `WEKNORA_REDIS_NAMESPACE`） | `weknora` |
+| `WEKNORA_SANDBOX_CUBE_*` | Cube 后端专用配置，见 `.env.example` | — |
+| `WEKNORA_SANDBOX_E2B_*` | E2B 后端专用配置，见 `.env.example`（`WEKNORA_SANDBOX_E2B_API_KEY` 必填） | — |
 
 ### Sandbox 模式
 
-| 模式 | 说明 |
-|------|------|
-| `docker` | 使用 Docker 容器隔离（推荐） |
-| `local` | 本地进程执行（基础安全限制） |
-| `disabled` | 禁用脚本执行 |
+| 模式 | 状态 | 说明 |
+|------|------|------|
+| `docker` | 稳定 | 使用 Docker 容器隔离（推荐用于本地/单机部署） |
+| `local` | 基础 | 本地进程执行（仅基础白名单，无 MicroVM 隔离） |
+| `cube` | 稳定 | Tencent CubeSandbox MicroVM；会话级持久，支持多机（需 Redis） |
+| `e2b` | 稳定 | E2B 云端 MicroVM；会话级持久，支持多机（需 Redis）；依赖第三方 SDK go-e2b |
+| `disabled` | — | 关闭本实例全部沙箱能力，含工作区具名配置 |
+
+### 工作区沙箱后端配置
+
+一个工作区可以维护**多份具名**沙箱后端配置（「设置 → 沙箱后端」），智能体在编辑弹窗的「能力扩展 → 沙箱后端」里各自选一份。不选就使用上表的部署级默认后端，行为与本特性上线前完全一致。
+
+同一后端类型可以有多份配置：例如两份 E2B 分别指向不同账号或区域，让不同智能体的技能脚本落在不同配额上。
+
+**具名配置是自包含的，不继承 `.env`。** 部署级 `WEKNORA_SANDBOX_*` 只服务「没有选择任何具名配置」的智能体；具名配置里留空的字段不会回退到那些值，必须自己填全：
+
+| 后端 | 必填 | 可留空 |
+|---|---|---|
+| Cube | API 端点、Proxy 端点、沙箱域名、模板 ID | API Key（自建部署通常无鉴权） |
+| E2B | API Key、模板 ID | API 端点、沙箱域名（go-e2b 自行解析默认值） |
+
+留空必填项在保存时就会被拒绝（HTTP 400，报文里列出缺哪些字段），而不是等到第一次执行技能才失败。HTTP 超时与沙箱 TTL 留空走**内置默认值**，同样不看 `.env`。唯一仍沿用部署值的是「执行超时」，因为它属于运维护栏而非后端身份。
+
+这条规则换来的是：库里那一行就是沙箱位置的完整描述。因此身份比较不必再去解析 `.env`，改 `.env` 也不会在无人察觉的情况下把某份配置重新指向别的账号。
+
+**会话与配置的绑定是「随沙箱同生共死」的钉子。** 会话首次创建沙箱时，把当时用的配置 ID 记在 `sessions.sandbox_config_id` 上；此后该会话的附件上传、产物收集、沙箱销毁都锁定在这份配置上。改智能体的选择**只影响之后新建的沙箱**——否则管理员改一次配置，正在进行的会话就会去错误的账号里找产物，销毁也会打空，留下一个没人知道 ID 的 paused 沙箱持续计费。
+
+**有沙箱在跑时改不了身份字段。** 身份字段分两组，成因不同但后果都足够严重：
+
+| 组 | 字段 | 一改会怎样 |
+|---|---|---|
+| 控制面 | 后端类型、API 端点、API Key | 旧沙箱**再也无法列举/删除/恢复**——新凭据没有权限动它们，而 `onTimeout=pause` 意味着 TTL 也不会回收|
+| 数据面 | E2B 沙箱域名；Cube 代理地址、沙箱域名 | 旧沙箱仍可删，但 envd 请求会打到错的主机 ⇒ 该配置下**所有活会话立刻失效**，而沙箱还活着继续计费 |
+
+因此这类修改会被拒绝（HTTP 409），界面会给出沙箱数量、受影响会话数，以及两条出路：**结束或删除那些会话**（删会话会销毁其沙箱），或者**新建一份配置**把智能体指过去（旧凭据原样留着，清理能力不丢）。**没有「释放沙箱」按钮**——那等于在管理员背后销毁正在进行的对话。
+
+**删除配置**只拦远端沙箱，不拦智能体引用：确认弹窗会列出仍指向它的智能体名单，但不阻止删除；删除后那些智能体执行技能时会明确报错，而不是静默换到别的后端。若后端已连不上、无法核实是否仍有沙箱，可以强制删除（这是唯一能强制的情形——能数出来的活沙箱永远不让强删）。
+
+**`sessions.sandbox_config_id` 取值语义：**
+
+| 值 | 含义 |
+|---|---|
+| `NULL` | 当前无活沙箱（删会话 / 销毁后会 Clear） |
+| `"-"` | 活沙箱建在**部署默认**（`.env` `WEKNORA_SANDBOX_*`）上 |
+| UUID | 活沙箱建在工作区某份**具名配置**上 |
+
+
+### 会话级 sandbox 部署要点
+
+- **binding store 自动选择**：无需专门的开关，进程根据 `REDIS_ADDR` 是否配置自动决定绑定存储——配置了 `REDIS_ADDR`（Redis 可用）时使用 Redis binding store，否则退回进程内内存 binding store。命名空间用 `WEKNORA_SANDBOX_REDIS_NAMESPACE`，未设置时依次回退到 `WEKNORA_REDIS_NAMESPACE`、`weknora`。
+- **多机部署（生产推荐）**：配置 `REDIS_ADDR`。多副本共享同一 session 的沙箱绑定，通过 Redis SET NX + 可续租分布式锁串行化 create / recover / delete。
+- **单机部署**：不配置 `REDIS_ADDR`（或 Lite 模式）时使用进程内内存 binding，仅限单实例。进程重启会丢失 session→sandbox 映射，remote 侧沙箱成为孤儿（注意：**TTL 到期只会暂停、不会销毁**，见下）。
+- **切换 provider**：不同 provider 的 sandbox ID 不通用。切换 `WEKNORA_SANDBOX_MODE` 后，旧 session 的 binding 会因 provider 不匹配被 CAS 替换成新 provider 的新沙箱；WeKnora 不做跨 provider 删除。
+- **⚠️ 孤儿沙箱不会被 TTL 自动回收**：会话沙箱创建时使用 `onTimeout=pause` + `autoResume=true`（见 `buildSessionCreateRequest`），因此 **TTL 到期是"暂停"而非"销毁"**——保留状态本就是 pause 的目的。加上 CAS 换绑会把旧 sandboxID 从 binding store 覆盖掉，被替换的沙箱会变成**无人知晓 ID 的 paused 孤儿**，持续占用快照存储与费用。删除会话（`session.go` 的 destroyer）与 lifecycle 的惰性 orphan cleanup 都覆盖不到这种情况。生产环境需依赖按 metadata 列举并与 binding 对账的清理任务来回收（`internal/sandbox/orphan_reaper.go`），且**必须显式包含 `paused` 状态**。对账维度是 `(tenant_id, config_id)` 而非仅 `tenant_id`：同一工作区的两份配置可能指向**同一个 provider 账号**（例如同一个 E2B Key 只差模板），只按 `tenant_id` 过滤会把另一份配置的沙箱一并误删。
+- **网络策略**：`cube` 与 `e2b` 默认开启公网出口和 public traffic，可在 create 时通过 provider-neutral `RemoteNetworkPolicy`（`AllowInternetAccess` / `AllowPublicTraffic` / `AllowOut` / `DenyOut`）精细化配置；两个 adapter 都实现了同一契约。
 
 ## Agent 工具
 

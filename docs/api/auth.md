@@ -275,19 +275,44 @@ curl --location 'http://localhost:8080/api/v1/auth/me' \
 ```json
 {
     "success": true,
-    "user": {
-        "id": "usr-...",
-        "username": "alice",
-        "email": "alice@example.com",
-        "avatar": "",
-        "tenant_id": 1,
-        "is_active": true,
-        "can_access_all_tenants": false,
-        "created_at": "2026-05-11T10:00:00+08:00",
-        "updated_at": "2026-05-11T10:00:00+08:00"
+    "data": {
+        "user": {
+            "id": "usr-...",
+            "username": "alice",
+            "email": "alice@example.com",
+            "avatar": "",
+            "tenant_id": 1,
+            "is_active": true,
+            "can_access_all_tenants": false,
+            "created_at": "2026-05-11T10:00:00+08:00",
+            "updated_at": "2026-05-11T10:00:00+08:00"
+        },
+        "tenant": {
+            "id": 1,
+            "name": "My Workspace"
+        },
+        "memberships": [
+            {
+                "tenant_id": 1,
+                "tenant_name": "My Workspace",
+                "role": "owner"
+            }
+        ],
+        "tenant_required": false,
+        "capabilities": {
+            "can_create_tenant": false,
+            "auto_accept_invitation": false
+        }
     }
 }
 ```
+
+`capabilities` 供 SPA 读取部署级开关，无需调用超管设置 API：
+
+| 字段 | 说明 |
+| ---- | ---- |
+| `can_create_tenant` | 当前用户是否可自助创建空间 |
+| `auto_accept_invitation` | 全局 `tenant.auto_accept_invitation`：邮箱邀请已注册用户时是否直接加入（无需收件箱确认） |
 
 ---
 

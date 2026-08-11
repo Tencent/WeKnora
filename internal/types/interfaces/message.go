@@ -57,6 +57,12 @@ type MessageService interface {
 
 	// GetChatHistoryKBStats returns statistics about the chat history knowledge base (indexed message count, etc.)
 	GetChatHistoryKBStats(ctx context.Context) (*types.ChatHistoryKBStats, error)
+
+	// GetSessionArtifacts returns every skill-produced MessageArtifact
+	// recorded against any assistant message of the session. Used to power
+	// the frontend "download files generated in this session" drawer and
+	// to clean up storage blobs on session deletion.
+	GetSessionArtifacts(ctx context.Context, sessionID string) (types.MessageArtifacts, error)
 }
 
 // MessageFeedbackService manages answer feedback and chunk attribution.
@@ -119,4 +125,13 @@ type MessageRepository interface {
 	GetKnowledgeIDsBySessionID(ctx context.Context, sessionID string) ([]string, error)
 	// UpdateMessageKnowledgeID updates the knowledge_id field for a message
 	UpdateMessageKnowledgeID(ctx context.Context, messageID string, knowledgeID string) error
+	// GetSessionArtifacts returns every skill-produced MessageArtifact recorded
+	// against any assistant message of the session, in creation order. The
+	// implementation only projects the artifacts JSONB column, so it stays
+	// cheap even for long conversations. Empty slice + nil error means the
+	// session has no artifacts yet (never an error).
+	GetSessionArtifacts(ctx context.Context, sessionID string) (types.MessageArtifacts, error)
+	// GetSessionAttachments returns every user-uploaded attachment recorded in
+	// the session. Implementations should project only the attachments column.
+	GetSessionAttachments(ctx context.Context, sessionID string) (types.MessageAttachments, error)
 }

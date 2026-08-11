@@ -4,6 +4,7 @@ import (
 	stderrors "errors"
 	"net/http"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -32,6 +33,10 @@ type Handler struct {
 	modelService           interfaces.ModelService // Service for model management (VLM access)
 	attachmentProcessor    *AttachmentProcessor    // Processor for file attachments
 	temporaryDocuments     interfaces.TemporaryDocumentService
+	// artifactCollector drains skill-generated files from the session sandbox
+	// after an agent turn completes. May be nil when the sandbox backend does
+	// not support artifact collection; handlers must check before using.
+	artifactCollector *service.ArtifactCollector
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -53,6 +58,7 @@ func NewHandler(
 	documentReader interfaces.DocumentReader,
 	imageResolver *docparser.ImageResolver,
 	temporaryDocuments interfaces.TemporaryDocumentService,
+	artifactCollector *service.ArtifactCollector,
 ) *Handler {
 	return &Handler{
 		sessionService:         sessionService,
@@ -70,6 +76,7 @@ func NewHandler(
 		storageResolver:        storageResolver,
 		modelService:           modelService,
 		temporaryDocuments:     temporaryDocuments,
+		artifactCollector:      artifactCollector,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,

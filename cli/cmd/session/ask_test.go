@@ -33,7 +33,7 @@ func (s *scriptedAskSvc) CreateSession(_ context.Context, req *sdk.CreateSession
 	return s.createResp, s.createErr
 }
 
-func (s *scriptedAskSvc) AgentQAStreamWithRequest(_ context.Context, sessionID string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback) error {
+func (s *scriptedAskSvc) AgentQAStreamWithRequest(_ context.Context, sessionID string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback, opts ...sdk.ResourceURLOptions) error {
 	s.got.sessionID = sessionID
 	s.got.req = req
 	for _, e := range s.events {

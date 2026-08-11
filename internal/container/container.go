@@ -162,6 +162,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
+	must(container.Provide(repository.NewTenantSandboxConfigRepository))
 	must(container.Provide(repository.NewCustomAgentRepository))
 	must(container.Provide(repository.NewOrganizationRepository))
 	must(container.Provide(repository.NewKBShareRepository))
@@ -180,6 +181,19 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
 	must(container.Provide(mcp.NewMCPManager))
 	must(container.Provide(mcp.NewOAuthManager))
+
+	// Sandbox manager (script execution backend for skills). Reads
+	// WEKNORA_SANDBOX_MODE env var: "docker" | "local" | "cube" | "disabled"
+	// (default). The Cube mode wires a SessionBoundManager so each Session
+	// gets its own persistent MicroVM. See internal/sandbox/session_manager.go.
+	logger.Debugf(ctx, "[Container] Registering sandbox manager...")
+	must(container.Provide(newSandboxManager))
+	// Per-tenant sandbox backends: the resolver builds a manager per request
+	// from the tenant's own configuration, falling back to the singleton above
+	// for tenants that configured nothing.
+	must(container.Provide(service.NewTenantSandboxConfigLoader))
+	must(container.Provide(newTenantSandboxResolver))
+	must(container.Provide(newSandboxConfigDefaults))
 
 	// Business service layer
 	logger.Debugf(ctx, "[Container] Registering business services...")
@@ -203,6 +217,15 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewEvaluationService))
 	must(container.Provide(service.NewUserService))
 	must(container.Provide(service.NewSystemSettingService))
+	must(container.Provide(func(
+		repo repository.TenantSandboxConfigRepository,
+		agents interfaces.CustomAgentRepository,
+	) *service.TenantSandboxConfigService {
+		return service.NewTenantSandboxConfigService(repo, agents, buildGlobalSandboxConfig())
+	}))
+	must(container.Provide(func(s *service.TenantSandboxConfigService) service.WorkspaceSandboxPolicy {
+		return s
+	}))
 	must(container.Provide(service.NewWeKnoraCloudService))
 
 	// Extract services - register individual extracters with names
@@ -258,6 +281,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// SessionService is passed as parameter to CreateAgentEngine method when creating AgentService
 	logger.Debugf(ctx, "[Container] Registering event bus and agent service...")
 	must(container.Provide(event.NewEventBus))
+	must(container.Provide(service.NewSessionSandboxPinner))
 	must(container.Provide(func(cfg *config.Config, s interfaces.MCPToolApprovalService, rdb *redis.Client) *approval.Gate {
 		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, rdb)
 	}))
@@ -269,6 +293,13 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// SessionService is created after AgentService and passes itself to AgentService.CreateAgentEngine when needed
 	logger.Debugf(ctx, "[Container] Registering session service...")
 	must(container.Provide(service.NewSessionService))
+
+	// ArtifactCollector drains skill-generated files from the sandbox on
+	// each agent turn (see spec at
+	// docs/superpowers/specs/2026-07-10-skill-artifact-download-design.md).
+	// The factory returns nil when the sandbox backend does not support
+	// per-session file inspection; downstream code guards on nil.
+	must(container.Provide(service.NewArtifactCollectorFromSandboxManager))
 
 	logger.Debugf(ctx, "[Container] Registering task enqueuer...")
 	redisAvailable := os.Getenv("REDIS_ADDR") != ""
@@ -355,6 +386,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewMessageHandler))
 	must(container.Provide(handler.NewMessageSuggestionHandler))
 	must(container.Provide(handler.NewModelHandler))
+	must(container.Provide(handler.NewSandboxConfigHandler))
 	must(container.Provide(handler.NewEvaluationHandler))
 	must(container.Provide(handler.NewInitializationHandler))
 	must(container.Provide(handler.NewAuthHandler))
@@ -1567,6 +1599,7 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 	registry.Register("searxng", infra_web_search.NewSearxngProvider)
 	registry.Register("keenable", infra_web_search.NewKeenableProvider)
 	registry.Register("zhipu", infra_web_search.NewZhipuProvider)
+	registry.Register("metaso", infra_web_search.NewMetasoProvider)
 }
 
 // registerIMService registers adapter factories, loads enabled channels, and

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -27,23 +28,30 @@ type TenantInvitationHandler struct {
 	invitationService interfaces.TenantInvitationService
 	userService       interfaces.UserService
 	tenantService     interfaces.TenantService
+	memberService     interfaces.TenantMemberService
+	systemSettingSvc  interfaces.SystemSettingService
 	configInfo        *config.Config
 }
 
-// NewTenantInvitationHandler wires the dependencies. tenantService is
-// used to hydrate tenant names in the inbox view so the invitee sees
-// "join Foo Workspace" instead of a raw numeric tenant id. configInfo
-// supplies FrontendBaseURL for share-link URL composition.
+// NewTenantInvitationHandler wires the dependencies. tenantService hydrates
+// tenant names in the inbox view; configInfo supplies FrontendBaseURL for
+// share-link URL composition. memberService + systemSettingSvc back the
+// auto-accept switch (tenant.auto_accept_invitation); both are nil-guarded
+// for tests (production wiring always injects both).
 func NewTenantInvitationHandler(
 	invitationService interfaces.TenantInvitationService,
 	userService interfaces.UserService,
 	tenantService interfaces.TenantService,
+	memberService interfaces.TenantMemberService,
+	systemSettingSvc interfaces.SystemSettingService,
 	configInfo *config.Config,
 ) *TenantInvitationHandler {
 	return &TenantInvitationHandler{
 		invitationService: invitationService,
 		userService:       userService,
 		tenantService:     tenantService,
+		memberService:     memberService,
+		systemSettingSvc:  systemSettingSvc,
 		configInfo:        configInfo,
 	}
 }
@@ -245,7 +253,7 @@ func (h *TenantInvitationHandler) ListTenantInvitations(c *gin.Context) {
 
 // CreateInvitation godoc
 // @Summary      发出空间邀请
-// @Description  Owner 通过邮箱邀请已注册用户加入当前空间；被邀请人需要在 /me/invitations 接受后才会成为成员。
+// @Description  Owner 通过邮箱邀请已注册用户加入空间。开启 tenant.auto_accept_invitation 后被邀请人立即自动加入（响应为成员结构），否则需在 /me/invitations 接受后成为成员。
 // @Tags         空间邀请
 // @Accept       json
 // @Produce      json
@@ -290,6 +298,19 @@ func (h *TenantInvitationHandler) CreateInvitation(c *gin.Context) {
 		invitedBy = &caller
 	}
 
+	// Auto-accept switch (tenant.auto_accept_invitation): skip the pending
+	// invitation and add the already-registered invitee as a member.
+	if h.systemSettingSvc != nil &&
+		h.systemSettingSvc.GetBool(ctx, "tenant.auto_accept_invitation", "WEKNORA_TENANT_AUTO_ACCEPT_INVITATION", false) {
+		if h.memberService == nil {
+			logger.Errorf(ctx, "auto_accept_invitation enabled but memberService is nil; tenant=%d", tenantID)
+			c.Error(apperrors.NewInternalServerError("failed to add member"))
+			return
+		}
+		h.autoAcceptInvitationAndRespond(c, ctx, user, tenantID, req.Role, invitedBy)
+		return
+	}
+
 	inv, err := h.invitationService.Create(ctx, tenantID, user.ID, req.Role, invitedBy, req.Message)
 	if err != nil {
 		switch {
@@ -322,6 +343,44 @@ func (h *TenantInvitationHandler) CreateInvitation(c *gin.Context) {
 		"success": true,
 		"data":    resp,
 	})
+}
+
+// autoAcceptInvitationAndRespond adds the invitee as an active member,
+// reconciles any stale pending invitation row, and adopts the invited
+// tenant as the invitee's home tenant when they are tenantless (same as
+// AcceptMyInvitation).
+func (h *TenantInvitationHandler) autoAcceptInvitationAndRespond(
+	c *gin.Context,
+	ctx context.Context,
+	user *types.User,
+	tenantID uint64,
+	role types.TenantRole,
+	invitedBy *string,
+) {
+	member, err := h.memberService.AddMember(ctx, user.ID, tenantID, role, invitedBy)
+	if err != nil {
+		writeAddMemberError(c, ctx, user, tenantID, err)
+		return
+	}
+	if h.invitationService != nil {
+		if markErr := h.invitationService.MarkPendingAcceptedIfExists(ctx, tenantID, user.ID); markErr != nil {
+			logger.Warnf(ctx,
+				"auto_accept: failed to reconcile pending invitation for user=%s tenant=%d: %v",
+				user.ID, tenantID, markErr)
+		}
+	}
+	if user.TenantID == 0 {
+		user.TenantID = tenantID
+		if updateErr := h.userService.UpdateUser(ctx, user); updateErr != nil {
+			logger.Errorf(ctx,
+				"auto_accept: member added but default tenant update failed: user=%s tenant=%d err=%v",
+				user.ID, tenantID, updateErr)
+			c.Error(apperrors.NewInternalServerError(
+				"member added but default workspace update failed").WithDetails(updateErr.Error()))
+			return
+		}
+	}
+	writeAddMemberSuccess(c, user, member)
 }
 
 // RevokeInvitation godoc
@@ -514,6 +573,90 @@ func (h *TenantInvitationHandler) AcceptMyInvitation(c *gin.Context) {
 				"status":    member.Status,
 				"joined_at": member.JoinedAt,
 			},
+		},
+	})
+}
+
+// acceptInvitationByTokenRequest: POST /me/invitations/accept-by-token 的请求体。
+// 已登录用户用 token 加入空间（与 register-by-invite 不同，不创建新账号）。
+type acceptInvitationByTokenRequest struct {
+	Token string `json:"token" binding:"required"`
+}
+
+// AcceptMyInvitationByToken godoc
+// @Summary      通过共享链接加入空间
+// @Description  已登录用户用共享邀请链接 token 加入空间，不创建新账号；对已是成员的用户幂等。
+// @Tags         我的邀请
+// @Accept       json
+// @Produce      json
+// @Param        request  body      acceptInvitationByTokenRequest  true  "邀请 token"
+// @Success      200      {object}  map[string]interface{}
+// @Failure      410      {object}  apperrors.AppError  "链接无效或已撤销"
+// @Security     Bearer
+// @Router       /me/invitations/accept-by-token [post]
+func (h *TenantInvitationHandler) AcceptMyInvitationByToken(c *gin.Context) {
+	ctx := c.Request.Context()
+	caller, ok := types.UserIDFromContext(ctx)
+	if !ok || caller == "" {
+		c.Error(apperrors.NewUnauthorizedError("caller user id missing from context"))
+		return
+	}
+
+	var req acceptInvitationByTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("token is required").WithDetails(err.Error()))
+		return
+	}
+	token := strings.TrimSpace(req.Token)
+	if token == "" {
+		c.Error(apperrors.NewValidationError("token is required"))
+		return
+	}
+
+	member, err := h.invitationService.AcceptByToken(ctx, token, caller)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvitationTokenInvalid):
+			// 无效/过期/撤销统一返回 410（与 LookupInvitationByToken 一致）。
+			c.Error(&apperrors.AppError{
+				Code:     apperrors.ErrNotFound,
+				Message:  "invitation link is invalid or has been revoked",
+				HTTPCode: http.StatusGone,
+			})
+		default:
+			logger.Errorf(ctx, "AcceptMyInvitationByToken failed: user=%s err=%v", caller, err)
+			c.Error(apperrors.NewInternalServerError("failed to accept invitation").WithDetails(err.Error()))
+		}
+		return
+	}
+
+	// 无租户用户将首个加入的空间设为默认空间（与 AcceptMyInvitation 同理）。
+	if user, userErr := h.userService.GetUserByID(ctx, caller); userErr == nil && user != nil && user.TenantID == 0 {
+		user.TenantID = member.TenantID
+		if updateErr := h.userService.UpdateUser(ctx, user); updateErr != nil {
+			logger.Errorf(ctx, "AcceptMyInvitationByToken failed to set default tenant: user=%s tenant=%d err=%v",
+				caller, member.TenantID, updateErr)
+			c.Error(apperrors.NewInternalServerError("invitation accepted but default workspace update failed").WithDetails(updateErr.Error()))
+			return
+		}
+	}
+
+	// 供前端切换空间展示用。
+	tenantName := ""
+	if tenant, terr := h.tenantService.GetTenantByID(ctx, member.TenantID); terr == nil && tenant != nil {
+		tenantName = tenant.Name
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"membership": gin.H{
+				"tenant_id": member.TenantID,
+				"role":      member.Role,
+				"status":    member.Status,
+				"joined_at": member.JoinedAt,
+			},
+			"tenant_name": tenantName,
 		},
 	})
 }
