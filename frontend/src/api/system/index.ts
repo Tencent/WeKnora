@@ -693,6 +693,7 @@ export interface SandboxCubeConfig {
 
 export interface SandboxE2BConfig {
   api_url?: string
+  proxy_url?: string
   sandbox_domain?: string
   api_key?: string
   template_id?: string
@@ -737,6 +738,8 @@ export interface SandboxTemplate {
   created_at?: string
   updated_at?: string
   standard: boolean
+  /** The provider's own explanation for a failed build, when it reports one. */
+  error?: string
 }
 
 export interface SandboxTemplateCatalog {

@@ -5,6 +5,8 @@ import (
 	stderrors "errors"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -281,6 +283,11 @@ type stubProviderClient struct {
 	inventories [][]sandbox.RemoteSandboxSummary
 	templates   []sandbox.RemoteTemplate
 	ensured     *sandbox.RemoteTemplate
+	// ensureDelay widens the window in which concurrent provisioning requests
+	// overlap, which is the only way to observe whether they were collapsed.
+	ensureDelay time.Duration
+
+	ensureCalls atomic.Int32
 
 	listCalls    int
 	deleted      []string
@@ -292,6 +299,10 @@ func (s *stubProviderClient) ListTemplates(context.Context) ([]sandbox.RemoteTem
 }
 
 func (s *stubProviderClient) EnsureStandardTemplate(context.Context) (*sandbox.RemoteTemplate, error) {
+	s.ensureCalls.Add(1)
+	if s.ensureDelay > 0 {
+		time.Sleep(s.ensureDelay)
+	}
 	if s.ensured != nil {
 		copy := *s.ensured
 		return &copy, nil
@@ -353,6 +364,92 @@ func TestQueryTemplatesEnsuresMissingWeKnoraTemplate(t *testing.T) {
 	require.Equal(t, "tpl-weknora", result.StandardTemplateID)
 	require.Len(t, result.Templates, 2)
 	require.True(t, result.Templates[0].Standard, "standard template should sort first")
+}
+
+// Provisioning only becomes idempotent once the build shows up in the
+// provider's catalog, so overlapping requests have to share one attempt or the
+// cluster ends up with a template per click.
+func TestQueryTemplatesCollapsesConcurrentProvisioning(t *testing.T) {
+	client := &stubProviderClient{ensureDelay: 50 * time.Millisecond}
+	svc := newTestConfigService(t, &fakeConfigRepo{}, client, stubAgentRepo{})
+
+	var group sync.WaitGroup
+	for range 4 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			_, err := svc.QueryTemplates(context.Background(), 7, SandboxTemplateQueryInput{
+				Config:         e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "", 300),
+				EnsureStandard: true,
+			})
+			require.NoError(t, err)
+		}()
+	}
+	group.Wait()
+
+	require.Equal(t, int32(1), client.ensureCalls.Load())
+}
+
+// Two tenants pointing at different clusters must not be serialised behind one
+// another, and neither may receive the other's template.
+func TestQueryTemplatesProvisionsPerClusterIndependently(t *testing.T) {
+	client := &stubProviderClient{}
+	svc := newTestConfigService(t, &fakeConfigRepo{}, client, stubAgentRepo{})
+
+	for _, key := range []string{"key-a", "key-b"} {
+		_, err := svc.QueryTemplates(context.Background(), 7, SandboxTemplateQueryInput{
+			Config:         e2bCfg(key, "https://api.e2b.app", "e2b.app", "", 300),
+			EnsureStandard: true,
+		})
+		require.NoError(t, err)
+	}
+
+	require.Equal(t, int32(2), client.ensureCalls.Load())
+}
+
+// A cluster whose only WeKnora template failed to build must be reprovisioned,
+// not reported as already equipped.
+func TestQueryTemplatesReprovisionsOverFailedStandardTemplate(t *testing.T) {
+	client := &stubProviderClient{
+		templates: []sandbox.RemoteTemplate{
+			{ID: "tpl-broken", Name: "weknora", Status: "failed", Standard: true, Error: "no space left"},
+		},
+		ensured: &sandbox.RemoteTemplate{
+			ID: "tpl-broken", Name: "weknora", Status: "building", Standard: true,
+		},
+	}
+	svc := newTestConfigService(t, &fakeConfigRepo{}, client, stubAgentRepo{})
+
+	result, err := svc.QueryTemplates(context.Background(), 7, SandboxTemplateQueryInput{
+		Config:         e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "", 300),
+		EnsureStandard: true,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int32(1), client.ensureCalls.Load())
+	require.True(t, result.Provisioned)
+	require.Equal(t, "tpl-broken", result.StandardTemplateID)
+	require.Len(t, result.Templates, 1, "a rebuild must not add a catalog entry")
+	require.Equal(t, "building", result.Templates[0].Status)
+}
+
+// Without EnsureStandard the catalog is read-only, so a failed template is
+// reported as it is rather than silently hidden.
+func TestQueryTemplatesReportsFailedStandardTemplateWithoutEnsure(t *testing.T) {
+	client := &stubProviderClient{templates: []sandbox.RemoteTemplate{
+		{ID: "tpl-broken", Name: "weknora", Status: "failed", Standard: true, Error: "no space left"},
+	}}
+	svc := newTestConfigService(t, &fakeConfigRepo{}, client, stubAgentRepo{})
+
+	result, err := svc.QueryTemplates(context.Background(), 7, SandboxTemplateQueryInput{
+		Config: e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "", 300),
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int32(0), client.ensureCalls.Load())
+	require.False(t, result.Provisioned)
+	require.Empty(t, result.StandardTemplateID, "a failed template must not be preselected")
+	require.Equal(t, "no space left", result.Templates[0].Error)
 }
 
 func TestQueryTemplatesDeduplicatesSameProviderTemplateID(t *testing.T) {

@@ -80,6 +80,9 @@ func ResolveEffectiveConfig(
 		if err := overrideURL(&effective.E2BAPIURL, e2bCfg.APIURL, effective.AllowPrivateEndpoints); err != nil {
 			return nil, err
 		}
+		if err := overrideURL(&effective.E2BProxyURL, e2bCfg.ProxyURL, effective.AllowPrivateEndpoints); err != nil {
+			return nil, err
+		}
 		overrideString(&effective.E2BSandboxDomain, e2bCfg.SandboxDomain)
 		overrideString(&effective.E2BAPIKey, e2bCfg.APIKey)
 		overrideString(&effective.E2BTemplate, e2bCfg.TemplateID)
@@ -121,6 +124,7 @@ func clearProviderFields(cfg *Config) {
 	cfg.CubeHTTPTimeout = 0
 
 	cfg.E2BAPIURL = ""
+	cfg.E2BProxyURL = ""
 	cfg.E2BSandboxDomain = ""
 	cfg.E2BAPIKey = ""
 	cfg.E2BTemplate = ""

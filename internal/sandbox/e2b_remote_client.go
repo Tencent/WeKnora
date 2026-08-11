@@ -45,6 +45,31 @@ func NewE2BRemoteClientWithTransport(
 	cfg *Config,
 	transport *http.Transport,
 ) (*E2BRemoteClient, error) {
+	if transport == nil {
+		return newE2BRemoteClient(cfg, nil)
+	}
+	return newE2BRemoteClient(cfg, transport)
+}
+
+// NewE2BRemoteClientWithPool builds the client on top of the shared gateway
+// pool. It is what self-hosted E2B-compatible control planes need: the pool
+// keeps control-plane traffic on the process-wide transport while dialling
+// data-plane traffic at the configured gateway (see gateway_transport.go).
+// A nil pool falls back to the SDK defaults.
+func NewE2BRemoteClientWithPool(
+	cfg *Config,
+	pool *SandboxGatewayTransportPool,
+) (*E2BRemoteClient, error) {
+	if pool == nil {
+		return newE2BRemoteClient(cfg, nil)
+	}
+	return newE2BRemoteClient(cfg, pool.RoundTripperFor(cfg))
+}
+
+func newE2BRemoteClient(
+	cfg *Config,
+	transport http.RoundTripper,
+) (*E2BRemoteClient, error) {
 	if cfg == nil {
 		return nil, errors.New("e2b remote client config is required")
 	}
@@ -55,9 +80,12 @@ func NewE2BRemoteClientWithTransport(
 	if timeout <= 0 {
 		timeout = DefaultE2BHTTPTimeout
 	}
-	httpClient := &http.Client{Timeout: timeout}
-	if transport != nil {
-		httpClient.Transport = transport
+	// Every E2B client speaks to envd through the compatibility shim, whether
+	// or not a gateway is configured: the two details it rewrites belong to the
+	// envd protocol itself, not to any one deployment. See envd_compat_transport.go.
+	httpClient := &http.Client{
+		Timeout:   timeout,
+		Transport: NewEnvdCompatTransport(transport, DefaultSandboxExecUser),
 	}
 	client, err := e2b.NewClient(e2b.ClientConfig{
 		APIKey:        cfg.E2BAPIKey,
@@ -119,11 +147,16 @@ func (c *E2BRemoteClient) Capabilities() RemoteSandboxCapabilities {
 	}
 }
 
-// Health probes the E2B control plane via ListSandboxes. The SDK does not
-// expose a dedicated health endpoint, and ListSandboxes is the smallest
-// authenticated call that will detect a bad API key or a dead API.
+// Health probes the control plane by listing sandboxes. The protocol has no
+// dedicated health endpoint, and a list is the smallest authenticated call
+// that detects a bad API key or a dead API.
+//
+// It deliberately uses the v2 listing rather than the legacy one: v2 is what
+// every other call in this client already depends on, and E2B-compatible
+// control planes (Agent-Sandbox, for one) implement only that one — probing
+// the legacy path would report a perfectly healthy backend as unreachable.
 func (c *E2BRemoteClient) Health(ctx context.Context) error {
-	if _, err := c.client.ListSandboxes(ctx); err != nil {
+	if _, err := c.client.ListSandboxesV2(ctx, e2b.WithSandboxLimit(1)); err != nil {
 		return normalizeE2BError("Health", err)
 	}
 	return nil
@@ -280,13 +313,18 @@ func isE2BTemplateBuildPending(status string) bool {
 	}
 }
 
+// EnsureStandardTemplate returns the cluster's WeKnora template, building it
+// when absent. A failed or untagged template is not returned as is: it can
+// never spawn a sandbox, so it falls through to the build below. E2B resolves
+// the build by name, so that is a rebuild of the same template rather than a
+// second entry in the catalog.
 func (c *E2BRemoteClient) EnsureStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
 	items, err := c.ListTemplates(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for i := range items {
-		if items[i].Standard {
+		if items[i].Standard && !IsTemplateBuildFailed(items[i].Status) {
 			return &items[i], nil
 		}
 	}
@@ -744,6 +782,11 @@ func (c *E2BRemoteClient) Exec(
 	}, nil
 }
 
+// Filesystem operations name DefaultSandboxExecUser explicitly rather than
+// relying on the daemon's default account. It keeps ownership aligned with the
+// account scripts run as, and it is required for interoperability: E2B Cloud
+// falls back to "user" when the request omits it, while other E2B-compatible
+// control planes reject the call outright.
 func (c *E2BRemoteClient) WriteFile(
 	ctx context.Context,
 	handle RemoteSandboxHandle,
@@ -757,7 +800,7 @@ func (c *E2BRemoteClient) WriteFile(
 	if strings.TrimSpace(path) == "" {
 		return e2bInvalidRequest("WriteFile", "path is required", nil)
 	}
-	if _, err := sandbox.Filesystem.WriteBytes(ctx, path, content); err != nil {
+	if _, err := sandbox.Filesystem.WriteBytes(ctx, path, content, e2b.WithFileUser(DefaultSandboxExecUser)); err != nil {
 		return normalizeE2BError("WriteFile", err)
 	}
 	return nil
@@ -775,7 +818,7 @@ func (c *E2BRemoteClient) ReadFile(
 	if strings.TrimSpace(path) == "" {
 		return nil, e2bInvalidRequest("ReadFile", "path is required", nil)
 	}
-	content, err := sandbox.Filesystem.ReadBytes(ctx, path)
+	content, err := sandbox.Filesystem.ReadBytes(ctx, path, e2b.WithFileUser(DefaultSandboxExecUser))
 	if err != nil {
 		return nil, normalizeE2BError("ReadFile", err)
 	}
@@ -794,7 +837,7 @@ func (c *E2BRemoteClient) ListDir(
 	if strings.TrimSpace(path) == "" {
 		return nil, e2bInvalidRequest("ListDir", "path is required", nil)
 	}
-	entries, err := sandbox.Filesystem.List(ctx, path)
+	entries, err := sandbox.Filesystem.List(ctx, path, e2b.WithFileUser(DefaultSandboxExecUser))
 	if err != nil {
 		return nil, normalizeE2BError("ListDir", err)
 	}
@@ -823,7 +866,7 @@ func (c *E2BRemoteClient) MakeDir(
 	if strings.TrimSpace(path) == "" {
 		return e2bInvalidRequest("MakeDir", "path is required", nil)
 	}
-	if err := sandbox.Filesystem.MakeDir(ctx, path); err != nil {
+	if err := sandbox.Filesystem.MakeDir(ctx, path, e2b.WithFileUser(DefaultSandboxExecUser)); err != nil {
 		return normalizeE2BError("MakeDir", err)
 	}
 	return nil
@@ -841,7 +884,7 @@ func (c *E2BRemoteClient) Remove(
 	if strings.TrimSpace(path) == "" {
 		return e2bInvalidRequest("Remove", "path is required", nil)
 	}
-	if err := sandbox.Filesystem.Remove(ctx, path); err != nil {
+	if err := sandbox.Filesystem.Remove(ctx, path, e2b.WithFileUser(DefaultSandboxExecUser)); err != nil {
 		return normalizeE2BError("Remove", err)
 	}
 	return nil
@@ -859,7 +902,7 @@ func (c *E2BRemoteClient) Stat(
 	if strings.TrimSpace(path) == "" {
 		return nil, e2bInvalidRequest("Stat", "path is required", nil)
 	}
-	info, err := sandbox.Filesystem.Stat(ctx, path)
+	info, err := sandbox.Filesystem.Stat(ctx, path, e2b.WithFileUser(DefaultSandboxExecUser))
 	if err != nil {
 		return nil, normalizeE2BError("Stat", err)
 	}
