@@ -8,8 +8,20 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+type pinTestManager struct {
+	typ sandbox.SandboxType
+}
+
+func (m *pinTestManager) Execute(context.Context, *sandbox.ExecuteConfig) (*sandbox.ExecuteResult, error) {
+	return nil, nil
+}
+func (m *pinTestManager) Cleanup(context.Context) error { return nil }
+func (m *pinTestManager) GetSandbox() sandbox.Sandbox   { return nil }
+func (m *pinTestManager) GetType() sandbox.SandboxType  { return m.typ }
 
 func newPinTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -52,13 +64,13 @@ func TestPinIsIdempotentAndReturnsExistingWinner(t *testing.T) {
 	require.Equal(t, "cfg-a", second, "the first writer wins; later callers adopt it")
 }
 
-func TestPinNormalizesEmptyConfigToSentinel(t *testing.T) {
+func TestPinLeavesEmptyConfigUnpinned(t *testing.T) {
 	pinner := NewSessionSandboxPinner(newPinTestDB(t))
 	ctx := context.Background()
 
 	got, err := pinner.Pin(ctx, "s-1", "")
 	require.NoError(t, err)
-	require.Equal(t, types.SandboxConfigIDGlobalDefault, got)
+	require.Empty(t, got)
 }
 
 // A padded ID must land in the column exactly as Read will compare it, or the
@@ -133,4 +145,55 @@ func TestSoftDeleteHidesSandboxPin(t *testing.T) {
 	read, err := pinner.Read(ctx, "s-1")
 	require.NoError(t, err)
 	require.Empty(t, read, "soft-deleted session must not expose its pin")
+}
+
+func TestResolveSandboxForExecutionDoesNotPinStatelessBackend(t *testing.T) {
+	pinner := NewSessionSandboxPinner(newPinTestDB(t))
+	want := &pinTestManager{typ: sandbox.SandboxTypeLocal}
+
+	got, configID, err := resolveSandboxForExecution(
+		context.Background(), stubSandboxResolver{mgr: want}, nil, pinner,
+		7, "s-1", "cfg-local", nil,
+	)
+
+	require.NoError(t, err)
+	require.Same(t, want, got)
+	require.Equal(t, "cfg-local", configID)
+	pinned, err := pinner.Read(context.Background(), "s-1")
+	require.NoError(t, err)
+	require.Empty(t, pinned, "local and Docker executions must not leave a session binding")
+}
+
+func TestResolveSandboxForExecutionPinsRemoteBackend(t *testing.T) {
+	pinner := NewSessionSandboxPinner(newPinTestDB(t))
+	want := &pinTestManager{typ: sandbox.SandboxTypeCube}
+
+	got, configID, err := resolveSandboxForExecution(
+		context.Background(), stubSandboxResolver{mgr: want}, nil, pinner,
+		7, "s-1", "cfg-cube", nil,
+	)
+
+	require.NoError(t, err)
+	require.Same(t, want, got)
+	require.Equal(t, "cfg-cube", configID)
+	pinned, err := pinner.Read(context.Background(), "s-1")
+	require.NoError(t, err)
+	require.Equal(t, "cfg-cube", pinned)
+}
+
+func TestResolveSandboxForExecutionKeepsExistingRemotePin(t *testing.T) {
+	pinner := NewSessionSandboxPinner(newPinTestDB(t))
+	_, err := pinner.Pin(context.Background(), "s-1", "cfg-existing")
+	require.NoError(t, err)
+	want := &pinTestManager{typ: sandbox.SandboxTypeE2B}
+
+	got, configID, err := resolveSandboxForExecution(
+		context.Background(), stubSandboxResolver{mgr: want}, nil, pinner,
+		7, "s-1", "cfg-new-agent-choice", nil,
+	)
+
+	require.NoError(t, err)
+	require.Same(t, want, got)
+	require.Equal(t, "cfg-existing", configID,
+		"re-pointing an agent must not move an existing remote session")
 }

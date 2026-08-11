@@ -1,9 +1,4 @@
-// Package container - sandbox provider.
-//
-// This file wires up the sandbox.Manager singleton that gets injected into
-// agent_service and session_service. It is intentionally isolated from
-// container.go so environment-variable parsing and provider-specific
-// configuration stay out of the main provider table.
+// Package container - workspace sandbox provider wiring.
 package container
 
 import (
@@ -23,151 +18,20 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// newSandboxManager builds a sandbox.Manager from environment variables.
-// Recognised variables:
-//
-//	WEKNORA_SANDBOX_MODE          "docker" | "local" | "cube" | "e2b" | "disabled" (default "disabled")
-//	WEKNORA_SANDBOX_TIMEOUT       per-execute timeout in seconds (default 60)
-//	WEKNORA_SANDBOX_DOCKER_IMAGE  custom docker image (docker mode only)
-//	WEKNORA_SANDBOX_REDIS_NAMESPACE     Redis key namespace suffix (default derives from
-//	                              WEKNORA_REDIS_NAMESPACE, then "weknora")
-//	WEKNORA_SANDBOX_CUBE_API_URL      CubeAPI endpoint             (default http://127.0.0.1:33000)
-//	WEKNORA_SANDBOX_CUBE_PROXY_URL    CubeProxy endpoint (envd)    (default http://127.0.0.1:80)
-//	WEKNORA_SANDBOX_CUBE_SANDBOX_DOMAIN  sandbox routing domain     (default cube.app)
-//	WEKNORA_SANDBOX_CUBE_ENVD_PORT     internal envd port           (default 49983)
-//	WEKNORA_SANDBOX_CUBE_API_KEY      X-API-Key value              (default empty; Cube auth disabled)
-//	WEKNORA_SANDBOX_CUBE_TEMPLATE     template ID                  (default tpl-2b7911a5c3bb419a8745957a)
-//	WEKNORA_SANDBOX_CUBE_SANDBOX_TTL  Cube-side sandbox timeout, seconds (default 1800)
-//	WEKNORA_SANDBOX_CUBE_HTTP_TIMEOUT single HTTP call timeout, seconds (default 30)
-//	WEKNORA_SANDBOX_E2B_API_KEY           X-API-Key for the E2B backend (required for mode=e2b)
-//	WEKNORA_SANDBOX_E2B_API_URL           E2B control-plane endpoint    (default https://api.e2b.app)
-//	WEKNORA_SANDBOX_E2B_SANDBOX_DOMAIN    sandbox routing domain        (default e2b.app)
-//	WEKNORA_SANDBOX_E2B_TEMPLATE          template ID / alias
-//	WEKNORA_SANDBOX_E2B_SANDBOX_TTL       E2B-side idle timeout, seconds (default 300)
-//	WEKNORA_SANDBOX_E2B_HTTP_TIMEOUT      single HTTP call timeout, seconds (default 30)
+// newSandboxManager is deliberately disabled. Every executable backend now
+// comes from a named workspace configuration resolved at request time.
 func newSandboxManager(
-	redisClient *redis.Client,
-	sessionRepo interfaces.SessionRepository,
+	_ *redis.Client,
+	_ interfaces.SessionRepository,
 ) sandbox.Manager {
-	ctx := context.Background()
-
-	mode := strings.ToLower(strings.TrimSpace(os.Getenv("WEKNORA_SANDBOX_MODE")))
-	if mode == "" {
-		mode = "disabled"
-	}
-
-	switch mode {
-	case "docker":
-		dockerImage := os.Getenv("WEKNORA_SANDBOX_DOCKER_IMAGE")
-		if dockerImage == "" {
-			dockerImage = sandbox.DefaultDockerImage
-		}
-		m, err := sandbox.NewManagerFromType("docker", true, dockerImage)
-		if err != nil {
-			logger.Warnf(ctx, "Failed to initialize Docker sandbox, falling back to disabled: %v", err)
-			return sandbox.NewDisabledManager()
-		}
-		logger.Infof(ctx, "Sandbox configured: mode=docker image=%s", dockerImage)
-		return m
-
-	case "local":
-		m, err := sandbox.NewManagerFromType("local", false, "")
-		if err != nil {
-			logger.Warnf(ctx, "Failed to initialize local sandbox: %v", err)
-			return sandbox.NewDisabledManager()
-		}
-		logger.Infof(ctx, "Sandbox configured: mode=local")
-		return m
-
-	case "cube":
-		return buildCubeManager(ctx, redisClient, sessionRepo)
-
-	case "e2b":
-		return buildE2BManager(ctx, redisClient, sessionRepo)
-
-	default:
-		logger.Infof(ctx, "Sandbox configured: mode=disabled")
-		return sandbox.NewDisabledManager()
-	}
-}
-
-func buildCubeManager(
-	ctx context.Context,
-	redisClient *redis.Client,
-	sessionRepo interfaces.SessionRepository,
-) sandbox.Manager {
-	cfg := sandbox.CubeConfigFromEnv()
-	// The pool lives as long as this process-wide manager, and its guarded
-	// dialer keeps the deployment default on the same outbound policy the
-	// per-tenant resolver enforces.
-	client, err := sandbox.NewCubeRemoteClientWithPool(cfg, sandbox.NewCubeTransportPool(nil))
-	if err != nil {
-		logger.Warnf(ctx, "Failed to build Cube sandbox client: %v (falling back to disabled)", err)
-		return sandbox.NewDisabledManager()
-	}
-	store, storeKind, err := selectSessionBindingStore(redisClient, true)
-	if err != nil {
-		logger.Errorf(ctx, "Refusing to start Cube sandbox: %v", err)
-		return sandbox.NewDisabledManager()
-	}
-	m, err := sandbox.NewSessionBoundManager(sandbox.SessionBoundManagerConfig{
-		Config:  cfg,
-		Client:  client,
-		Store:   store,
-		Checker: sessionExistenceCheckerFor(sessionRepo),
-	})
-	if err != nil {
-		logger.Warnf(ctx, "Failed to initialize Cube sandbox: %v (falling back to disabled)", err)
-		return sandbox.NewDisabledManager()
-	}
-	logger.Infof(ctx,
-		"Sandbox configured: mode=cube api=%s proxy=%s domain=%s template=%s binding=%s",
-		cfg.CubeAPIURL, cfg.CubeProxyURL, cfg.CubeSandboxDomain, cfg.CubeTemplate, storeKind,
-	)
-	return m
-}
-
-func buildE2BManager(
-	ctx context.Context,
-	redisClient *redis.Client,
-	sessionRepo interfaces.SessionRepository,
-) sandbox.Manager {
-	cfg := sandbox.E2BConfigFromEnv()
-	client, err := sandbox.NewE2BRemoteClientWithTransport(cfg, sandbox.NewGuardedTransport())
-	if err != nil {
-		logger.Warnf(ctx, "Failed to build E2B sandbox client: %v (falling back to disabled)", err)
-		return sandbox.NewDisabledManager()
-	}
-	store, storeKind, err := selectSessionBindingStore(redisClient, true)
-	if err != nil {
-		logger.Errorf(ctx, "Refusing to start E2B sandbox: %v", err)
-		return sandbox.NewDisabledManager()
-	}
-	m, err := sandbox.NewSessionBoundManager(sandbox.SessionBoundManagerConfig{
-		Config:  cfg,
-		Client:  client,
-		Store:   store,
-		Checker: sessionExistenceCheckerFor(sessionRepo),
-	})
-	if err != nil {
-		logger.Warnf(ctx, "Failed to initialize E2B sandbox: %v (falling back to disabled)", err)
-		return sandbox.NewDisabledManager()
-	}
-	logger.Infof(ctx,
-		"Sandbox configured: mode=e2b api=%s domain=%s template=%s ttl=%s binding=%s",
-		cfg.E2BAPIURL, cfg.E2BSandboxDomain, cfg.E2BTemplate, cfg.E2BSandboxTTL, storeKind,
-	)
-	return m
+	return sandbox.NewDisabledManager()
 }
 
 func selectSessionBindingStore(
 	redisClient *redis.Client,
 	requireRedis bool,
 ) (sandbox.SessionSandboxBindingStore, string, error) {
-	namespace := strings.TrimSpace(os.Getenv("WEKNORA_SANDBOX_REDIS_NAMESPACE"))
-	if namespace == "" {
-		namespace = strings.TrimSpace(os.Getenv("WEKNORA_REDIS_NAMESPACE"))
-	}
+	namespace := strings.TrimSpace(os.Getenv("WEKNORA_REDIS_NAMESPACE"))
 	if namespace == "" {
 		namespace = "weknora"
 	}
@@ -178,19 +42,10 @@ func selectSessionBindingStore(
 		}
 		return store, "redis", nil
 	}
-	if requireRedis && !allowMemorySandboxBinding() {
-		return nil, "", errors.New(
-			"remote sandbox modes (cube/e2b) require Redis for session binding; " +
-				"set WEKNORA_SANDBOX_ALLOW_MEMORY_BINDING=true only for single-instance dev",
-		)
-	}
+	_ = requireRedis
 	logger.Warnf(context.Background(),
 		"[sandbox] No Redis configured, using in-memory binding store (single-instance)")
 	return sandbox.NewMemorySessionSandboxBindingStore(), "memory", nil
-}
-
-func allowMemorySandboxBinding() bool {
-	return strings.EqualFold(strings.TrimSpace(os.Getenv("WEKNORA_SANDBOX_ALLOW_MEMORY_BINDING")), "true")
 }
 
 // sessionExistenceLookup is the narrow slice of SessionRepository the
@@ -244,19 +99,15 @@ func (c *repositorySessionExistenceChecker) SessionExists(
 // buildGlobalSandboxConfig returns the process-wide *sandbox.Config that
 // per-tenant overrides are merged onto.
 func buildGlobalSandboxConfig() *sandbox.Config {
-	return sandbox.DeploymentConfig()
+	cfg := sandbox.DefaultConfig()
+	cfg.Type = sandbox.SandboxTypeDisabled
+	cfg.FallbackEnabled = false
+	return cfg
 }
 
-// newSandboxConfigDefaults exposes the deployment's inheritable sandbox
-// defaults (secret-free) so the settings API can show what a workspace without
-// its own overrides actually runs on.
-func newSandboxConfigDefaults() *sandbox.ConfigDefaults {
-	return sandbox.DescribeDefaults(buildGlobalSandboxConfig())
-}
-
-// newTenantSandboxResolver wires the per-tenant resolver. The process-wide
-// manager remains the fallback for tenants that configured nothing, so
-// existing deployments are unaffected.
+// newTenantSandboxResolver wires the workspace-config resolver. The
+// process-wide manager is disabled; agents without a selected config stay
+// disabled as well.
 func newTenantSandboxResolver(
 	defaultManager sandbox.Manager,
 	loader sandbox.TenantSandboxConfigLoader,
@@ -265,10 +116,9 @@ func newTenantSandboxResolver(
 ) sandbox.TenantSandboxResolver {
 	ctx := context.Background()
 
-	// Tenants may configure cube/e2b regardless of the global mode, so the
-	// resolver needs the same Redis-backed binding guarantees the global
-	// remote path demands. Without them per-tenant config stays disabled and
-	// every workspace keeps using the process-wide manager.
+	// Tenants may configure any supported backend regardless of process startup
+	// mode. Remote configs use this binding store for session persistence;
+	// Docker and Local configs remain stateless.
 	store, storeKind, err := selectSessionBindingStore(redisClient, true)
 	if err != nil {
 		logger.Warnf(ctx,

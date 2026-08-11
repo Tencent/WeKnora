@@ -23,6 +23,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -86,7 +87,9 @@ func (p *SessionSandboxPinner) Pin(
 ) (string, error) {
 	configID = strings.TrimSpace(configID)
 	if configID == "" {
-		configID = types.SandboxConfigIDGlobalDefault
+		// No workspace config means sandbox execution is disabled, so there is
+		// no remote resource whose backend needs pinning.
+		return "", nil
 	}
 	// Two attempts: a concurrent Clear can hand the row back unpinned between
 	// our update and our read, and returning that empty value would be the
@@ -136,28 +139,58 @@ func (p *SessionSandboxPinner) Clear(ctx context.Context, sessionID string) erro
 		Update("sandbox_config_id", nil).Error
 }
 
-// sandboxConfigForExecution decides which config a session's sandbox runs on.
-//
-// Skill execution and attachment staging can be the first operation that creates
-// a session sandbox, so they adopt an existing pin and otherwise claim the
-// agent's current choice. Later operations must follow the pin instead.
-func sandboxConfigForExecution(
+// resolveSandboxForExecution resolves before pinning so stateless workspace
+// backends (docker/local) never leave a permanent session pin. Remote backends
+// pin before their first Create; concurrent callers adopt and re-resolve the
+// winning config before executing anything.
+func resolveSandboxForExecution(
 	ctx context.Context,
+	resolver sandbox.TenantSandboxResolver,
+	fallback sandbox.Manager,
 	pinner *SessionSandboxPinner,
+	tenantID uint64,
 	sessionID string,
 	agentConfigID string,
-) (string, error) {
+	policy WorkspaceSandboxPolicy,
+) (sandbox.Manager, string, error) {
+	if pinner != nil && strings.TrimSpace(sessionID) != "" {
+		pinned, err := pinner.Read(ctx, sessionID)
+		if err != nil {
+			return nil, "", err
+		}
+		if pinned != "" {
+			mgr, err := resolveTenantSandboxForConfig(
+				ctx, resolver, fallback, tenantID, pinned, policy,
+			)
+			return mgr, pinned, err
+		}
+	}
+
+	configID := strings.TrimSpace(agentConfigID)
+	mgr, err := resolveTenantSandboxForConfig(
+		ctx, resolver, fallback, tenantID, configID, policy,
+	)
+	if err != nil || mgr == nil {
+		return mgr, configID, err
+	}
+	if mgr.GetType() != sandbox.SandboxTypeCube && mgr.GetType() != sandbox.SandboxTypeE2B {
+		return mgr, configID, nil
+	}
 	if pinner == nil || strings.TrimSpace(sessionID) == "" {
-		return agentConfigID, nil
+		return mgr, configID, nil
 	}
-	pinned, err := pinner.Read(ctx, sessionID)
+
+	winner, err := pinner.Pin(ctx, sessionID, configID)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
-	if pinned != "" {
-		return pinned, nil
+	if winner == configID {
+		return mgr, winner, nil
 	}
-	return pinner.Pin(ctx, sessionID, agentConfigID)
+	mgr, err = resolveTenantSandboxForConfig(
+		ctx, resolver, fallback, tenantID, winner, policy,
+	)
+	return mgr, winner, err
 }
 
 // sandboxConfigForExistingSandbox returns the config an already-created

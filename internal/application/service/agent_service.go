@@ -4,9 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
-	"strconv"
-	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/approval"
@@ -352,10 +349,10 @@ func (s *agentService) resolveKBAndDocInfos(
 // initializeSkillsManager creates and initializes the skills manager.
 //
 // The sandbox manager is resolved per workspace: backends differ in
-// capability (E2B exposes a session file store, local does not), so tool
+// capability (remote MicroVMs expose a session file store, local does not), so tool
 // registration below must inspect this workspace's real manager rather than a
-// process-wide singleton. Workspaces without their own sandbox configuration
-// resolve to the injected default.
+// process-wide singleton. Workspaces without a selected configuration resolve
+// to the disabled manager.
 func (s *agentService) initializeSkillsManager(
 	ctx context.Context,
 	sessionID string,
@@ -363,30 +360,18 @@ func (s *agentService) initializeSkillsManager(
 	toolRegistry *tools.ToolRegistry,
 ) (*skills.Manager, error) {
 	tenantID, _ := types.TenantIDFromContext(ctx)
-	configID, err := sandboxConfigForExecution(ctx, s.sandboxPinner, sessionID, config.SandboxConfigID)
+	sandboxMgr, configID, err := resolveSandboxForExecution(
+		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
+		tenantID, sessionID, config.SandboxConfigID, s.sandboxPolicy,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("resolve sandbox config for session %s: %w", sessionID, err)
-	}
-	sandboxMgr, err := resolveTenantSandboxForConfig(ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, s.sandboxPolicy)
-	if err != nil {
-		return nil, err
 	}
 	if sandboxMgr == nil {
 		sandboxMgr = sandbox.NewDisabledManager()
 	}
 
-	sandboxMode := strings.ToLower(strings.TrimSpace(os.Getenv("WEKNORA_SANDBOX_MODE")))
-	if sandboxMode == "" {
-		sandboxMode = "disabled"
-	}
-	sandboxTimeout := 60
-	if v := os.Getenv("WEKNORA_SANDBOX_TIMEOUT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			sandboxTimeout = n
-		}
-	}
-	logger.Infof(ctx, "Sandbox in use: mode=%s type=%s timeout=%ds",
-		sandboxMode, sandboxMgr.GetType(), sandboxTimeout)
+	logger.Infof(ctx, "Workspace sandbox in use: config=%s type=%s", configID, sandboxMgr.GetType())
 
 	// Create skills manager
 	skillsConfig := &skills.ManagerConfig{

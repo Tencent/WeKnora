@@ -16,9 +16,6 @@ import (
 // link-local at dial time, and they must do so even under the private-endpoint
 // opt-in that self-hosted Cube deployments need.
 func TestNewRemoteClientForCheckRefusesLinkLocalAtDial(t *testing.T) {
-	// The opt-in is deliberately ON: link-local must stay blocked regardless.
-	t.Setenv(AllowPrivateEndpointsEnv, "true")
-
 	const metadata = "http://169.254.169.254"
 
 	for _, tc := range []struct {
@@ -28,20 +25,22 @@ func TestNewRemoteClientForCheckRefusesLinkLocalAtDial(t *testing.T) {
 		{
 			name: "cube",
 			cfg: &Config{
-				Type:              SandboxTypeCube,
-				CubeAPIURL:        metadata,
-				CubeProxyURL:      metadata,
-				CubeSandboxDomain: "cube.app",
-				CubeTemplate:      "tpl-test",
+				AllowPrivateEndpoints: true,
+				Type:                  SandboxTypeCube,
+				CubeAPIURL:            metadata,
+				CubeProxyURL:          metadata,
+				CubeSandboxDomain:     "cube.app",
+				CubeTemplate:          "tpl-test",
 			},
 		},
 		{
 			name: "e2b",
 			cfg: &Config{
-				Type:        SandboxTypeE2B,
-				E2BAPIKey:   "key-test",
-				E2BAPIURL:   metadata,
-				E2BTemplate: "base",
+				AllowPrivateEndpoints: true,
+				Type:                  SandboxTypeE2B,
+				E2BAPIKey:             "key-test",
+				E2BAPIURL:             metadata,
+				E2BTemplate:           "base",
 			},
 		},
 	} {

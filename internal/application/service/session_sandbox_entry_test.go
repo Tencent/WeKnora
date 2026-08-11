@@ -43,23 +43,6 @@ func (m *artifactFallbackManager) ReadSessionFile(ctx context.Context, sessionID
 	return m.source.ReadSessionFile(ctx, sessionID, path)
 }
 
-// Execution decides the config; every later operation must follow the pin, so
-// that re-pointing the agent mid-conversation cannot split a session across
-// two backends.
-func TestSandboxConfigForExecutionPinsAgentChoice(t *testing.T) {
-	pinner := NewSessionSandboxPinner(newPinTestDB(t))
-	ctx := context.Background()
-
-	got, err := sandboxConfigForExecution(ctx, pinner, "s-1", "cfg-a")
-	require.NoError(t, err)
-	require.Equal(t, "cfg-a", got)
-
-	// Admin re-points the agent at cfg-b: the live sandbox stays on cfg-a.
-	got, err = sandboxConfigForExecution(ctx, pinner, "s-1", "cfg-b")
-	require.NoError(t, err)
-	require.Equal(t, "cfg-a", got)
-}
-
 func TestSandboxConfigForExistingSandboxReturnsEmptyWhenUnpinned(t *testing.T) {
 	pinner := NewSessionSandboxPinner(newPinTestDB(t))
 
@@ -68,38 +51,9 @@ func TestSandboxConfigForExistingSandboxReturnsEmptyWhenUnpinned(t *testing.T) {
 	require.Empty(t, got, "no pin means no live sandbox; callers must skip")
 }
 
-func TestSandboxConfigForExecutionUsesSentinelForGlobalDefault(t *testing.T) {
-	pinner := NewSessionSandboxPinner(newPinTestDB(t))
-
-	got, err := sandboxConfigForExecution(context.Background(), pinner, "s-1", "")
-	require.NoError(t, err)
-	require.Equal(t, types.SandboxConfigIDGlobalDefault, got)
-}
-
-// Attachment staging can be the call that creates the session's first sandbox
-// (WriteSessionInputFile provisions on first write), so it must pin like
-// execution does - not follow a pin that does not exist yet.
-func TestSandboxConfigForExecutionPinsOnFirstStaging(t *testing.T) {
-	pinner := NewSessionSandboxPinner(newPinTestDB(t))
-	ctx := context.Background()
-
-	staged, err := sandboxConfigForExecution(ctx, pinner, "s-1", "cfg-a")
-	require.NoError(t, err)
-	require.Equal(t, "cfg-a", staged)
-
-	// The execution that follows in the same turn must land on the same config.
-	executed, err := sandboxConfigForExecution(ctx, pinner, "s-1", "cfg-a")
-	require.NoError(t, err)
-	require.Equal(t, staged, executed)
-}
-
-// Most deployments run every session on the WEKNORA_SANDBOX_* default, whose
-// pin is the sentinel and whose manager is the injected process-wide one. That
-// must keep collecting artifacts: resolving the sentinel yields no per-config
-// manager, which is not the same as "this session has no sandbox".
+// Older sessions can still carry the historical default-config sentinel. The
+// fallback manager remains readable so those sessions can be cleaned up.
 func TestArtifactSessionSourceKeepsDefaultBackendForSentinelPin(t *testing.T) {
-	t.Setenv("WEKNORA_SANDBOX_MODE", "cube")
-
 	pinner := NewSessionSandboxPinner(newPinTestDB(t))
 	ctx := context.Background()
 	_, err := pinner.Pin(ctx, "s-1", types.SandboxConfigIDGlobalDefault)

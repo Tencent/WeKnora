@@ -14,13 +14,9 @@
 //     that actually holds, because a hostname can resolve to a public address
 //     during validation and to 169.254.169.254 at dial time (DNS rebinding).
 //
-// Self-hosted deployments complicate this: CubeAPI's own default endpoint is
-// http://127.0.0.1:33000, so a blanket ban on private addresses would make
-// per-tenant Cube configuration impossible. The policy is therefore
-// deny-by-default with an explicit operator opt-in
-// (WEKNORA_SANDBOX_ALLOW_PRIVATE_ENDPOINTS=true). Even when opted in, the
-// link-local range — and with it the cloud metadata address — stays blocked,
-// because it is never a legitimate sandbox endpoint.
+// Self-hosted deployments complicate this, so private endpoints are an
+// explicit field on each workspace config. Even when enabled, link-local
+// ranges — including cloud metadata — stay blocked.
 package sandbox
 
 import (
@@ -28,8 +24,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"os"
-	"strconv"
 	"strings"
 	"syscall"
 )
@@ -37,11 +31,6 @@ import (
 // ErrUnsafeOutboundURL is returned for any endpoint that uses an unsupported
 // scheme or resolves to an address the policy forbids.
 var ErrUnsafeOutboundURL = errors.New("sandbox: unsafe outbound URL")
-
-// AllowPrivateEndpointsEnv opts a deployment into private/loopback sandbox
-// endpoints. Required for self-hosted Cube, which listens on 127.0.0.1 by
-// default. Link-local addresses remain blocked regardless.
-const AllowPrivateEndpointsEnv = "WEKNORA_SANDBOX_ALLOW_PRIVATE_ENDPOINTS"
 
 // OutboundURLPolicy decides which addresses tenant-supplied endpoints may
 // resolve to.
@@ -51,14 +40,10 @@ type OutboundURLPolicy struct {
 	AllowPrivate bool
 }
 
-// DefaultOutboundURLPolicy reads the policy from the environment. Absent or
-// unparseable values fail closed.
+// DefaultOutboundURLPolicy is the fail-closed policy used by callers that do
+// not carry a workspace configuration.
 func DefaultOutboundURLPolicy() OutboundURLPolicy {
-	allow, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(AllowPrivateEndpointsEnv)))
-	if err != nil {
-		allow = false
-	}
-	return OutboundURLPolicy{AllowPrivate: allow}
+	return OutboundURLPolicy{}
 }
 
 // ValidateOutboundURL checks raw against the environment's policy.
@@ -66,9 +51,19 @@ func ValidateOutboundURL(raw string) error {
 	return DefaultOutboundURLPolicy().Validate(raw)
 }
 
+func ValidateOutboundURLWithPolicy(raw string, policy OutboundURLPolicy) error {
+	return policy.Validate(raw)
+}
+
 // SafeDialControl is a net.Dialer.Control hook using the environment's policy.
 func SafeDialControl(network string, address string, conn syscall.RawConn) error {
 	return DefaultOutboundURLPolicy().DialControl(network, address, conn)
+}
+
+func SafeDialControlForPolicy(policy OutboundURLPolicy) func(string, string, syscall.RawConn) error {
+	return func(network string, address string, conn syscall.RawConn) error {
+		return policy.DialControl(network, address, conn)
+	}
 }
 
 // Validate reports whether raw is an acceptable tenant-supplied endpoint. It
@@ -103,8 +98,8 @@ func (p OutboundURLPolicy) Validate(raw string) error {
 	if lower == "localhost" || strings.HasSuffix(lower, ".localhost") {
 		if !p.AllowPrivate {
 			return fmt.Errorf(
-				"%w: host %q is loopback; set %s=true to allow self-hosted endpoints",
-				ErrUnsafeOutboundURL, host, AllowPrivateEndpointsEnv,
+				"%w: host %q is loopback; enable private endpoints for this workspace config",
+				ErrUnsafeOutboundURL, host,
 			)
 		}
 		return nil
@@ -162,8 +157,8 @@ func (p OutboundURLPolicy) checkIP(ip net.IP) error {
 	if ip.IsLoopback() || ip.IsPrivate() || isCarrierGradeNAT(ip) {
 		if !p.AllowPrivate {
 			return fmt.Errorf(
-				"%w: address %s is private; set %s=true to allow self-hosted endpoints",
-				ErrUnsafeOutboundURL, ip, AllowPrivateEndpointsEnv,
+				"%w: address %s is private; enable private endpoints for this workspace config",
+				ErrUnsafeOutboundURL, ip,
 			)
 		}
 	}
