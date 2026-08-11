@@ -1121,7 +1121,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_wiki_page_revisions_page_version
 CREATE INDEX IF NOT EXISTS idx_wiki_page_revisions_kb_slug
     ON wiki_page_revisions (knowledge_base_id, slug);
 
--- File knowledge update coordination slot. Migration 000080 repeats this
+-- File knowledge update coordination slot. Migration 000004 repeats this
 -- idempotently so databases already initialized at version 0 are upgraded.
 CREATE TABLE IF NOT EXISTS knowledge_file_update_slots (
     knowledge_id VARCHAR(36) PRIMARY KEY,

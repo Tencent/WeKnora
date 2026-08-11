@@ -45,7 +45,7 @@ func TestKnowledgeFileUpdateSlotMigratesExistingSQLite(t *testing.T) {
 	require.NoError(t, migrator.Up())
 	version, dirty, err := migrator.Version()
 	require.NoError(t, err)
-	require.Equal(t, uint(80), version)
+	require.Equal(t, uint(4), version)
 	require.False(t, dirty)
 
 	var tableName string
