@@ -370,6 +370,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.sandbox
+      target: sandbox
     profiles:
       - full
     command: ["true"]

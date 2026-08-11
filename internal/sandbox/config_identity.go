@@ -69,6 +69,7 @@ func IdentityOf(tenantCfg *types.TenantSandboxConfig) SandboxIdentity {
 		if e2bCfg := tenantCfg.E2B; e2bCfg != nil {
 			identity.APIURL, identity.APIKey = e2bCfg.APIURL, e2bCfg.APIKey
 			identity.SandboxDomain = e2bCfg.SandboxDomain
+			identity.ProxyURL = e2bCfg.ProxyURL
 		}
 	}
 	return identity

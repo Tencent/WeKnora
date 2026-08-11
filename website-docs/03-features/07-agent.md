@@ -408,7 +408,7 @@ Agent 侧的启停在 `configureSkillsFromAgent`（`internal/application/service
 
 ### 5.3 与沙箱（internal/sandbox）的关系
 
-`execute_skill_script` → `skills.Manager.ExecuteScript` → `sandbox.Manager.Execute`。Docker、Local、CubeSandbox、E2B 均通过「设置 → 沙箱后端」的同一套空间配置与检查接口维护；远端模板从目标 Cube/E2B 集群实时拉取，缺少 WeKnora 标准模板时自动创建。Docker/Local 每次独立执行，不写入会话沙箱绑定。
+`execute_skill_script` → `skills.Manager.ExecuteScript` → `sandbox.Manager.Execute`。Docker、Local、CubeSandbox、E2B 均通过「设置 → 沙箱后端」的同一套空间配置与检查接口维护；远端模板从目标集群实时拉取，缺少 WeKnora 标准模板时自动创建。Docker/Local 每次独立执行，不写入会话沙箱绑定，也不提供 shell_exec、附件暂存与产物收集，仅适合本机开发调试。生产环境使用 E2B 协议后端：E2B Cloud、CubeSandbox，或任意 E2B 兼容控制面，接入方式见 `docs/sandbox-protocol.md`。
 
 **Manager 与校验器**（`internal/sandbox/manager.go`、`validator.go`）：每次执行前，除非 `SkipValidation`，`ScriptValidator` 会做四类静态校验，任一命中即拒绝执行并返回 `ErrSecurityViolation`：
 

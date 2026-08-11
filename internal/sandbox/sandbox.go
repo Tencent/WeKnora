@@ -47,6 +47,25 @@ const (
 	DefaultCPULimit    = 1.0               // 1 CPU core
 	DefaultDockerImage = "wechatopenai/weknora-sandbox:latest"
 
+	// DefaultCubeTemplateImage is the same environment with Cube's envd daemon
+	// baked in (target "cube" of docker/Dockerfile.sandbox).
+	//
+	// Cube turns an OCI image into a template directly and gates the build on
+	// GET :49983/health, which only envd answers. Building a Cube template from
+	// DefaultDockerImage therefore always fails the probe with "connection
+	// refused" — E2B gets away with that image because its own builder injects
+	// envd, and the Docker backend never needs one.
+	DefaultCubeTemplateImage = "wechatopenai/weknora-sandbox:latest-cube"
+
+	// CubeEnvdPort is the port envd listens on inside a Cube sandbox. It carries
+	// the readiness probe as well as every exec and filesystem call, and the
+	// data plane addresses sandboxes as "49983-{id}.{domain}".
+	CubeEnvdPort = 49983
+
+	// CubeEnvdHealthPath is the envd endpoint Cube probes to decide whether a
+	// template build succeeded.
+	CubeEnvdHealthPath = "/health"
+
 	// DefaultCubeAPIURL is retained for SDK tests and explicit local helpers;
 	// workspace configs must still provide their endpoint.
 	DefaultCubeAPIURL = "http://127.0.0.1:33000"
@@ -258,6 +277,12 @@ type Config struct {
 	// E2BSandboxDomain is the domain envd traffic is routed through, e.g.
 	// "e2b.app". Empty defaults to the SDK's built-in.
 	E2BSandboxDomain string
+
+	// E2BProxyURL is the data-plane gateway that fronts envd for self-hosted
+	// E2B-compatible control planes. Empty keeps the SDK's behaviour of
+	// resolving the sandbox authority through DNS over TLS, which is what E2B
+	// Cloud expects. See types.E2BSandboxConfig.ProxyURL.
+	E2BProxyURL string
 
 	// E2BTemplate is the E2B template ID used at sandbox creation.
 	E2BTemplate string

@@ -4758,6 +4758,7 @@ export default {
       loadingTemplates: '正在从集群加载模板…',
       templateBuildingHint: '标准模板正在自动构建，列表会自动刷新。',
       templateUntaggedHint: '构建已完成，但没有构建带 default 标签，创建沙箱时无法解析。请在 E2B 删除该模板，刷新后 WeKnora 会重新构建。',
+      templateFailedReason: '构建失败：{reason}',
       noTemplates: '当前集群未返回可用模板。',
       templateReadyHint: '模板「{name}」已就绪并选中。',
       templateProvisioningHint: '模板仍在构建中，状态会自动刷新。',
@@ -4782,6 +4783,7 @@ export default {
       secretKeepHint: '已配置，留空表示不修改',
       e2bApiUrlOptional: '可留空 —— 留空时使用 SDK 默认值',
       e2bDomainOptional: '可留空 —— 留空时使用 SDK 默认值',
+      e2bProxyUrlOptional: '自建 E2B 兼容集群的数据面网关地址；留空表示按 sandbox domain 直连（E2B Cloud 用法）',
       backends: {
         disabled: '禁用',
         local: '本地进程',

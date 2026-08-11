@@ -4758,6 +4758,7 @@ export default {
       loadingTemplates: 'Loading templates from the cluster...',
       templateBuildingHint: 'The standard template is being built automatically. This list will refresh.',
       templateUntaggedHint: 'Сборки завершены, но ни одна не имеет тега default, поэтому при создании песочницы шаблон не находится. Удалите его в E2B и обновите список — WeKnora пересоберёт шаблон.',
+      templateFailedReason: 'Сборка не удалась: {reason}',
       noTemplates: 'No templates were returned by this cluster.',
       templateReadyHint: 'Template “{name}” is ready and selected.',
       templateProvisioningHint: 'A template is still being built. The status refreshes automatically.',
@@ -4782,6 +4783,7 @@ export default {
       secretKeepHint: 'Настроено — оставьте пустым, чтобы не менять',
       e2bApiUrlOptional: 'Optional — the SDK default is used when empty',
       e2bDomainOptional: 'Optional — the SDK default is used when empty',
+      e2bProxyUrlOptional: 'Data-plane gateway of a self-hosted E2B-compatible cluster. Leave empty to reach sandboxes through the sandbox domain, as E2B Cloud expects.',
       backends: {
         disabled: 'Disabled',
         local: 'Local process',

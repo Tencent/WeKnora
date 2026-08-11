@@ -676,14 +676,26 @@ type CubeSandboxConfig struct {
 	CubeSandboxTTLSeconds int `json:"cube_sandbox_ttl_seconds,omitempty"`
 }
 
-// E2BSandboxConfig addresses one E2B account. APIKey and TemplateID are
-// required; APIURL and SandboxDomain are optional because go-e2b resolves both
-// on its own when they are empty.
+// E2BSandboxConfig addresses one E2B-protocol control plane: E2B Cloud, a
+// self-hosted E2B Infrastructure, or any E2B-compatible implementation
+// (CubeSandbox, Agent-Sandbox, …). APIKey and TemplateID are required; APIURL
+// and SandboxDomain are optional because go-e2b resolves both on its own when
+// they are empty.
 type E2BSandboxConfig struct {
 	APIURL        string `json:"api_url,omitempty"`
 	SandboxDomain string `json:"sandbox_domain,omitempty"`
 	APIKey        string `json:"api_key,omitempty"` // 加密
 	TemplateID    string `json:"template_id,omitempty"`
+
+	// ProxyURL is the data-plane gateway that fronts envd. E2B Cloud resolves
+	// "<port>-<sandboxID>.<sandbox_domain>" through public DNS and TLS, so it
+	// needs no value here. Self-hosted E2B-compatible control planes usually
+	// serve every sandbox from one gateway address and expect the sandbox
+	// authority in the Host header; setting this makes WeKnora dial the
+	// gateway directly instead of requiring wildcard DNS and a certificate
+	// for the sandbox domain. An "http://" gateway also downgrades the
+	// data-plane scheme, which the E2B SDK otherwise pins to https.
+	ProxyURL string `json:"proxy_url,omitempty"`
 
 	// HTTPTimeoutSec bounds each HTTP call to the sandbox control plane.
 	// 0 means use the built-in default (30s), never the deployment's value.

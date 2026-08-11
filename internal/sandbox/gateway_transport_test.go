@@ -35,7 +35,7 @@ func (c *countingRoundTripper) seen() []string {
 // the configured proxy. Sharing one transport across both planes drops that
 // rewrite, which is exactly the regression this guards: the proxy has to see
 // the request, and it has to see the sandbox authority in the Host header.
-func TestCubeTransportPoolRoutesDataPlaneThroughProxy(t *testing.T) {
+func TestSandboxGatewayTransportPoolRoutesDataPlaneThroughProxy(t *testing.T) {
 	api := newCubeMockServer(t)
 
 	var mu sync.Mutex
@@ -54,7 +54,7 @@ func TestCubeTransportPoolRoutesDataPlaneThroughProxy(t *testing.T) {
 
 	policy := OutboundURLPolicy{AllowPrivate: true}
 	control := &countingRoundTripper{next: NewGuardedTransportWithPolicy(policy)}
-	client, err := NewCubeRemoteClientWithPool(cfg, NewCubeTransportPoolWithPolicy(control, policy))
+	client, err := NewCubeRemoteClientWithPool(cfg, NewSandboxGatewayTransportPoolWithPolicy(control, policy))
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -90,8 +90,8 @@ func TestCubeTransportPoolRoutesDataPlaneThroughProxy(t *testing.T) {
 
 // Configs pointing at the same proxy must share one pool - otherwise building
 // a client per request pools nothing.
-func TestCubeTransportPoolReusesTransportPerProxyEndpoint(t *testing.T) {
-	pool := NewCubeTransportPoolWithPolicy(
+func TestSandboxGatewayTransportPoolReusesTransportPerProxyEndpoint(t *testing.T) {
+	pool := NewSandboxGatewayTransportPoolWithPolicy(
 		NewGuardedTransportWithPolicy(OutboundURLPolicy{AllowPrivate: true}),
 		OutboundURLPolicy{AllowPrivate: true},
 	)
@@ -99,15 +99,15 @@ func TestCubeTransportPoolReusesTransportPerProxyEndpoint(t *testing.T) {
 	first := pool.RoundTripperFor(&Config{
 		CubeProxyURL:      "http://127.0.0.1:8080",
 		CubeSandboxDomain: "cube.app",
-	}).(*cubeSplitTransport)
+	}).(*gatewaySplitTransport)
 	second := pool.RoundTripperFor(&Config{
 		CubeProxyURL:      "http://127.0.0.1:8080",
 		CubeSandboxDomain: "cube.app",
-	}).(*cubeSplitTransport)
+	}).(*gatewaySplitTransport)
 	other := pool.RoundTripperFor(&Config{
 		CubeProxyURL:      "http://127.0.0.1:9090",
 		CubeSandboxDomain: "cube.app",
-	}).(*cubeSplitTransport)
+	}).(*gatewaySplitTransport)
 
 	require.Same(t, first.data, second.data)
 	require.NotSame(t, first.data, other.data)
@@ -116,17 +116,60 @@ func TestCubeTransportPoolReusesTransportPerProxyEndpoint(t *testing.T) {
 
 // Without a usable proxy URL the SDK dials the sandbox authority directly, so
 // the split transport must not invent a data plane.
-func TestCubeTransportPoolWithoutProxyKeepsEverythingOnControl(t *testing.T) {
-	pool := NewCubeTransportPool(NewGuardedTransport())
+func TestSandboxGatewayTransportPoolWithoutProxyKeepsEverythingOnControl(t *testing.T) {
+	pool := NewSandboxGatewayTransportPool(NewGuardedTransport())
 
-	split := pool.RoundTripperFor(&Config{CubeSandboxDomain: "cube.app"}).(*cubeSplitTransport)
+	split := pool.RoundTripperFor(&Config{CubeSandboxDomain: "cube.app"}).(*gatewaySplitTransport)
 
 	// A nil data transport is what sends sandbox authorities back to control.
 	require.Nil(t, split.data)
 }
 
-func TestCubeSplitTransportClassifiesAuthorities(t *testing.T) {
-	split := &cubeSplitTransport{
+// A self-hosted E2B-compatible control plane fronts every sandbox with one
+// gateway, so the E2B provider must read its own gateway fields - and a plain
+// HTTP gateway has to survive the SDK pinning the data-plane scheme to https.
+func TestSandboxGatewayTransportPoolRoutesE2BDataPlane(t *testing.T) {
+	pool := NewSandboxGatewayTransportPoolWithPolicy(
+		NewGuardedTransportWithPolicy(OutboundURLPolicy{AllowPrivate: true}),
+		OutboundURLPolicy{AllowPrivate: true},
+	)
+
+	split := pool.RoundTripperFor(&Config{
+		Type:             SandboxTypeE2B,
+		E2BProxyURL:      "http://127.0.0.1:18080",
+		E2BSandboxDomain: "localhost",
+		// Cube fields must be ignored for an E2B config.
+		CubeProxyURL:      "http://127.0.0.1:9999",
+		CubeSandboxDomain: "cube.app",
+	}).(*gatewaySplitTransport)
+
+	require.NotNil(t, split.data)
+	require.Equal(t, "http", split.dataScheme)
+	require.True(t, split.isDataPlane("49983-sbx.localhost"))
+	require.False(t, split.isDataPlane("49983-sbx.cube.app"))
+}
+
+func TestGatewaySplitTransportAppliesGatewayScheme(t *testing.T) {
+	recorder := &recordingRoundTripper{}
+	split := &gatewaySplitTransport{
+		control:       &recordingRoundTripper{},
+		data:          recorder,
+		sandboxDomain: "localhost",
+		dataScheme:    "http",
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "https://49983-sbx.localhost/files", nil)
+	_, err := split.RoundTrip(request)
+	require.NoError(t, err)
+
+	require.Equal(t, "http", recorder.request.URL.Scheme)
+	// The sandbox authority is what the gateway routes on; it must survive.
+	require.Equal(t, "49983-sbx.localhost", recorder.request.URL.Host)
+	require.Equal(t, "https", request.URL.Scheme, "the caller's request must not be mutated")
+}
+
+func TestGatewaySplitTransportClassifiesAuthorities(t *testing.T) {
+	split := &gatewaySplitTransport{
 		control:       NewGuardedTransport(),
 		data:          NewGuardedTransport(),
 		sandboxDomain: "cube.app",

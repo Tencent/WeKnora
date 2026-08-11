@@ -152,6 +152,10 @@
               <t-input v-model="e2b.sandbox_domain" placeholder="e2b.app" @input="invalidateConnection" />
             </t-form-item>
           </div>
+          <t-form-item :label="$t('settings.sandbox.proxyUrl')" :help="$t('settings.sandbox.e2bProxyUrlOptional')">
+            <t-input v-model="e2b.proxy_url" placeholder="http://sandbox-gateway.example.com"
+              @input="invalidateConnection" />
+          </t-form-item>
         </template>
         <div class="private-endpoint-row">
           <div>
@@ -228,6 +232,9 @@
               -->
               <span v-if="isTemplateUntagged(item)" class="template-card__hint template-card__hint--error">
                 {{ $t('settings.sandbox.templateUntaggedHint') }}
+              </span>
+              <span v-else-if="templateFailureReason(item)" class="template-card__hint template-card__hint--error">
+                {{ templateFailureReason(item) }}
               </span>
               <span v-else-if="isTemplatePending(item) && item.standard" class="template-card__hint">
                 {{ $t('settings.sandbox.templateBuildingHint') }}
@@ -684,12 +691,25 @@ function isTemplateUntagged(item: SandboxTemplate): boolean {
   return item.status?.trim().toLowerCase() === 'untagged'
 }
 
+function isTemplateFailed(item: SandboxTemplate): boolean {
+  const status = item.status?.trim().toLowerCase()
+  return ['failed', 'failure', 'error', 'cancelled', 'canceled'].includes(status || '')
+}
+
+// A red "failed" badge on its own leaves no way to tell a registry credential
+// problem from a node that ran out of disk, so the provider's own message is
+// shown verbatim when it sends one.
+function templateFailureReason(item: SandboxTemplate): string {
+  if (!isTemplateFailed(item)) return ''
+  const reason = item.error?.trim()
+  return reason ? t('settings.sandbox.templateFailedReason', { reason }) : ''
+}
+
 function templateStatusTheme(item: SandboxTemplate): 'success' | 'warning' | 'danger' | 'default' {
   if (isTemplateSelectable(item)) return 'success'
   if (isTemplateUntagged(item)) return 'danger'
   if (isTemplatePending(item)) return 'warning'
-  const status = item.status?.trim().toLowerCase()
-  if (['failed', 'failure', 'error', 'cancelled', 'canceled'].includes(status || '')) return 'danger'
+  if (isTemplateFailed(item)) return 'danger'
   return 'default'
 }
 
@@ -697,10 +717,7 @@ function templateStatusLabel(item: SandboxTemplate): string {
   if (isTemplateSelectable(item)) return t('settings.sandbox.templateStatuses.ready')
   if (isTemplateUntagged(item)) return t('settings.sandbox.templateStatuses.untagged')
   if (isTemplatePending(item)) return t('settings.sandbox.templateStatuses.building')
-  const status = item.status?.trim().toLowerCase()
-  if (['failed', 'failure', 'error', 'cancelled', 'canceled'].includes(status || '')) {
-    return t('settings.sandbox.templateStatuses.failed')
-  }
+  if (isTemplateFailed(item)) return t('settings.sandbox.templateStatuses.failed')
   return t('settings.sandbox.templateStatuses.unknown')
 }
 

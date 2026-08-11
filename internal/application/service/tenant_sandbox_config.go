@@ -25,6 +25,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	stderrors "errors"
 	"fmt"
 	"sort"
@@ -32,6 +34,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -162,6 +165,12 @@ type TenantSandboxConfigService struct {
 
 	// newClient is injectable so tests can supply a provider inventory.
 	newClient func(*sandbox.Config) (sandbox.ConfigSandboxClient, error)
+
+	// ensureTemplate collapses concurrent "make sure this cluster has our
+	// template" requests per cluster. Provisioning is idempotent only once the
+	// build shows up in the provider's catalog, and a double-click on refresh
+	// is fast enough to slip in before that.
+	ensureTemplate singleflight.Group
 }
 
 // NewTenantSandboxConfigService wires the config service.
@@ -430,16 +439,24 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 		return nil, err
 	}
 	result := &SandboxTemplateCatalog{Templates: deduplicateSandboxTemplates(templates)}
-	for _, item := range result.Templates {
-		if item.Standard {
-			result.StandardTemplateID = item.ID
-			break
-		}
+	usable := pickStandardTemplate(result.Templates)
+	if usable != nil {
+		result.StandardTemplateID = usable.ID
 	}
-	if in.EnsureStandard && result.StandardTemplateID == "" {
-		standard, ensureErr := catalog.EnsureStandardTemplate(ctx)
+	// A template whose build failed cannot spawn anything, so it does not count
+	// as "this cluster already has one" — leaving it at that is what kept a
+	// broken cluster broken no matter how often the admin hit refresh.
+	if in.EnsureStandard && usable == nil {
+		key := ensureTemplateKey(tenantID, sandbox.IdentityOf(merged))
+		ensured, ensureErr, _ := s.ensureTemplate.Do(key, func() (any, error) {
+			return catalog.EnsureStandardTemplate(ctx)
+		})
 		if ensureErr != nil {
 			return nil, ensureErr
+		}
+		standard, ok := ensured.(*sandbox.RemoteTemplate)
+		if !ok || standard == nil {
+			return nil, fmt.Errorf("sandbox: provider %q returned no standard template", effective.Type)
 		}
 		result.Provisioned = true
 		result.StandardTemplateID = standard.ID
@@ -452,6 +469,31 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 		return strings.ToLower(result.Templates[i].Name) < strings.ToLower(result.Templates[j].Name)
 	})
 	return result, nil
+}
+
+// pickStandardTemplate returns the WeKnora template the UI should preselect, or
+// nil when the cluster has none that could ever spawn a sandbox. A failed build
+// is skipped so the caller can reprovision instead of offering it.
+func pickStandardTemplate(items []sandbox.RemoteTemplate) *sandbox.RemoteTemplate {
+	var best *sandbox.RemoteTemplate
+	for i := range items {
+		if !items[i].Standard || sandbox.IsTemplateBuildFailed(items[i].Status) {
+			continue
+		}
+		if best == nil || templateStatusRank(items[i].Status) > templateStatusRank(best.Status) {
+			best = &items[i]
+		}
+	}
+	return best
+}
+
+// ensureTemplateKey names one cluster as seen by one tenant. The identity
+// carries an API key, so it is hashed rather than formatted: this string is
+// only ever compared, and it should not be able to surface a credential in a
+// panic trace or a heap dump.
+func ensureTemplateKey(tenantID uint64, identity sandbox.SandboxIdentity) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d|%#v", tenantID, identity)))
+	return hex.EncodeToString(sum[:])
 }
 
 func deduplicateSandboxTemplates(items []sandbox.RemoteTemplate) []sandbox.RemoteTemplate {
@@ -478,6 +520,7 @@ func deduplicateSandboxTemplates(items []sandbox.RemoteTemplate) []sandbox.Remot
 			current.Status = item.Status
 			current.Version = item.Version
 			current.UpdatedAt = item.UpdatedAt
+			current.Error = item.Error
 		}
 		if strings.TrimSpace(current.Name) == "" ||
 			(strings.EqualFold(current.Name, sandbox.StandardTemplateName) && strings.Contains(item.Name, "/")) {

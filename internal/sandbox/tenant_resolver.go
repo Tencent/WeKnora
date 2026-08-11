@@ -18,7 +18,7 @@
 // That left the construction-time Health probe as the only real cost, which
 // SkipHealthProbe removes. Connection reuse is preserved by sharing one
 // http.Transport across tenants (Cube additionally routes its data plane
-// through CubeTransportPool; see cube_transport.go). The upshot: no cache, no
+// through SandboxGatewayTransportPool; see gateway_transport.go). The upshot: no cache, no
 // eviction, no invalidation plumbing, and a config change takes effect on the
 // next request.
 package sandbox
@@ -95,10 +95,10 @@ type tenantSandboxResolver struct {
 	transport        *http.Transport
 	privateTransport *http.Transport
 
-	// cubeTransports must outlive the per-request clients it serves, which is
+	// gatewayTransports must outlive the per-request clients it serves, which is
 	// the whole point of holding it here rather than building it per Resolve.
-	cubeTransports        *CubeTransportPool
-	privateCubeTransports *CubeTransportPool
+	gatewayTransports        *SandboxGatewayTransportPool
+	privateGatewayTransports *SandboxGatewayTransportPool
 }
 
 // NewTenantSandboxResolver validates the wiring and returns a resolver.
@@ -120,11 +120,11 @@ func NewTenantSandboxResolver(deps TenantSandboxResolverDeps) (TenantSandboxReso
 		transport = NewGuardedTransport()
 	}
 	return &tenantSandboxResolver{
-		deps:                  deps,
-		transport:             transport,
-		privateTransport:      NewGuardedTransportWithPolicy(OutboundURLPolicy{AllowPrivate: true}),
-		cubeTransports:        NewCubeTransportPool(transport),
-		privateCubeTransports: NewCubeTransportPoolWithPolicy(nil, OutboundURLPolicy{AllowPrivate: true}),
+		deps:                     deps,
+		transport:                transport,
+		privateTransport:         NewGuardedTransportWithPolicy(OutboundURLPolicy{AllowPrivate: true}),
+		gatewayTransports:        NewSandboxGatewayTransportPool(transport),
+		privateGatewayTransports: NewSandboxGatewayTransportPoolWithPolicy(nil, OutboundURLPolicy{AllowPrivate: true}),
 	}, nil
 }
 
@@ -210,14 +210,17 @@ func (r *tenantSandboxResolver) buildClient(cfg *Config) (RemoteSandboxClient, e
 	switch cfg.Type {
 	case SandboxTypeCube:
 		if cfg.AllowPrivateEndpoints {
-			return NewCubeRemoteClientWithPool(cfg, r.privateCubeTransports)
+			return NewCubeRemoteClientWithPool(cfg, r.privateGatewayTransports)
 		}
-		return NewCubeRemoteClientWithPool(cfg, r.cubeTransports)
+		return NewCubeRemoteClientWithPool(cfg, r.gatewayTransports)
 	case SandboxTypeE2B:
+		// The gateway pool is used even without a gateway URL: it then keeps
+		// every request on the shared control transport, which is exactly what
+		// a plain E2B Cloud config wants.
 		if cfg.AllowPrivateEndpoints {
-			return NewE2BRemoteClientWithTransport(cfg, r.privateTransport)
+			return NewE2BRemoteClientWithPool(cfg, r.privateGatewayTransports)
 		}
-		return NewE2BRemoteClientWithTransport(cfg, r.transport)
+		return NewE2BRemoteClientWithPool(cfg, r.gatewayTransports)
 	default:
 		return nil, fmt.Errorf("sandbox: provider %q has no remote client", cfg.Type)
 	}
@@ -237,10 +240,13 @@ func NewRemoteClientForCheck(cfg *Config) (RemoteSandboxClient, error) {
 	}
 	switch cfg.Type {
 	case SandboxTypeCube:
-		return NewCubeRemoteClientWithPool(cfg, NewCubeTransportPoolWithPolicy(nil,
+		return NewCubeRemoteClientWithPool(cfg, NewSandboxGatewayTransportPoolWithPolicy(nil,
 			OutboundURLPolicy{AllowPrivate: cfg.AllowPrivateEndpoints}))
 	case SandboxTypeE2B:
-		return NewE2BRemoteClientWithTransport(cfg, NewGuardedTransportWithPolicy(
+		// Probing through the gateway pool is what makes the check meaningful
+		// for a self-hosted control plane: it exercises the same data-plane
+		// routing the resolved manager will use.
+		return NewE2BRemoteClientWithPool(cfg, NewSandboxGatewayTransportPoolWithPolicy(nil,
 			OutboundURLPolicy{AllowPrivate: cfg.AllowPrivateEndpoints}))
 	default:
 		return nil, fmt.Errorf("sandbox: provider %q cannot be probed", cfg.Type)
