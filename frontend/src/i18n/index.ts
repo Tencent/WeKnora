@@ -11,8 +11,22 @@ const messages = {
   'ko-KR': koKR
 }
 
-// Получаем сохраненный язык из localStorage или используем китайский по умолчанию
-const savedLocale = localStorage.getItem('locale') || 'zh-CN'
+const SUPPORTED_LOCALES = Object.keys(messages)
+const BUILT_IN_DEFAULT = 'zh-CN'
+
+// Resolve the deployment default locale. Mirrors the MAX_FILE_SIZE_MB convention:
+// runtime config (.env -> docker-entrypoint -> window.__RUNTIME_CONFIG__) wins over
+// build-time env (VITE_DEFAULT_LOCALE), then the built-in default. Unknown values
+// (e.g. a typo in .env) fall back to the built-in default instead of a blank UI.
+function resolveDefaultLocale(): string {
+  const candidate = window.__RUNTIME_CONFIG__?.DEFAULT_LOCALE
+    || import.meta.env.VITE_DEFAULT_LOCALE
+    || BUILT_IN_DEFAULT
+  return SUPPORTED_LOCALES.includes(candidate) ? candidate : BUILT_IN_DEFAULT
+}
+
+// User's explicit past choice wins; otherwise use the deployment default.
+const savedLocale = localStorage.getItem('locale') || resolveDefaultLocale()
 
 const i18n = createI18n({
   legacy: false,
