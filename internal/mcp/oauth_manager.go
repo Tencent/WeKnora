@@ -8,6 +8,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/redis/go-redis/v9"
 )
@@ -52,12 +53,18 @@ func (m *OAuthManager) newHandler(
 	if service.URL == nil || *service.URL == "" {
 		return nil, fmt.Errorf("MCP service URL is required for OAuth")
 	}
+	if err := ValidateServiceOutboundURLs(service); err != nil {
+		return nil, err
+	}
+	httpCfg := secutils.DefaultSSRFSafeHTTPClientConfig()
+	httpCfg.Timeout = 30 * time.Second
 	cfg := transport.OAuthConfig{
 		RedirectURI:           redirectURI,
 		Scopes:                service.AuthConfig.Scopes,
 		TokenStore:            newDBTokenStore(m.repo, tenantID, principal, service.ID),
 		PKCEEnabled:           true,
 		AuthServerMetadataURL: service.AuthConfig.AuthServerMetadataURL,
+		HTTPClient:            secutils.NewSSRFSafeHTTPClient(httpCfg),
 	}
 	if existing, err := m.repo.GetClient(ctx, tenantID, service.ID); err == nil && existing != nil {
 		cfg.ClientID = existing.ClientID

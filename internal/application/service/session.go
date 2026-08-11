@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 )
 
 func sessionUserIDFromContext(ctx context.Context) string {
@@ -123,6 +124,10 @@ type sessionService struct {
 	webSearchProviderRepo interfaces.WebSearchProviderRepository // Repository for web search provider entities
 	kbShareService        interfaces.KBShareService              // Service for KB sharing operations
 	suggestionRepo        interfaces.MessageSuggestionRepository
+	sandboxMgr            sandbox.Manager // Default sandbox backend; used to reclaim per-session MicroVMs on delete
+	sandboxResolver       sandbox.TenantSandboxResolver
+	sandboxPinner         *SessionSandboxPinner
+	sandboxPolicy         WorkspaceSandboxPolicy
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -140,6 +145,10 @@ func NewSessionService(cfg *config.Config,
 	webSearchProviderRepo interfaces.WebSearchProviderRepository,
 	kbShareService interfaces.KBShareService,
 	suggestionRepo interfaces.MessageSuggestionRepository,
+	sandboxMgr sandbox.Manager,
+	sandboxResolver sandbox.TenantSandboxResolver,
+	sandboxPinner *SessionSandboxPinner,
+	sandboxPolicy WorkspaceSandboxPolicy,
 ) interfaces.SessionService {
 	return &sessionService{
 		cfg:                   cfg,
@@ -156,6 +165,10 @@ func NewSessionService(cfg *config.Config,
 		webSearchProviderRepo: webSearchProviderRepo,
 		kbShareService:        kbShareService,
 		suggestionRepo:        suggestionRepo,
+		sandboxMgr:            sandboxMgr,
+		sandboxResolver:       sandboxResolver,
+		sandboxPinner:         sandboxPinner,
+		sandboxPolicy:         sandboxPolicy,
 	}
 }
 
@@ -470,11 +483,27 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 		}
 	}()
 
+	// NOTE: Skill-generated artifact blobs are intentionally NOT purged here.
+	// Their lifecycle mirrors messages, which are soft-deleted (deleted_at
+	// timestamp) rather than physically removed. Hard-deleting the blobs on a
+	// soft session delete would (a) diverge from message semantics, (b) make
+	// any future "restore soft-deleted session" flow silently broken, and (c)
+	// leave 404s in the download endpoint if the message row is ever surfaced
+	// again. A dedicated GC job or explicit hard-delete API is the right
+	// place to reclaim storage — not this soft-delete path.
+
 	// Cleanup temporary KB stored in Redis for this session
 	if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, id); err != nil {
 		logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
 	}
 
+	if s.suggestionRepo != nil {
+		if err := s.suggestionRepo.DeleteBySessionID(ctx, tenantID, id); err != nil {
+			logger.Warnf(ctx, "Failed to delete suggestions for session %s: %v", id, err)
+		}
+	}
+
+	s.destroyBoundSandbox(ctx, id)
 	// Delete session from repository
 	rows, err := s.sessionRepo.Delete(ctx, tenantID, userID, id)
 	if err != nil {
@@ -486,11 +515,6 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	}
 	if rows == 0 {
 		return apperrors.ErrSessionNotFound
-	}
-	if s.suggestionRepo != nil {
-		if err := s.suggestionRepo.DeleteBySessionID(ctx, tenantID, id); err != nil {
-			logger.Warnf(ctx, "Failed to delete suggestions for session %s: %v", id, err)
-		}
 	}
 
 	return nil
@@ -539,6 +563,13 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 		if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, id); err != nil {
 			logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
 		}
+		// Artifact blobs are kept alongside soft-deleted messages — see
+		// DeleteSession for the rationale.
+	}
+
+	// Tear down sandboxes while session rows (and pins) are still readable.
+	for _, id := range visibleIDs {
+		s.destroyBoundSandbox(ctx, id)
 	}
 
 	// Batch delete sessions from repository
@@ -589,6 +620,15 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 			if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, session.ID); err != nil {
 				logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", session.ID, err)
 			}
+			// Artifact blobs are kept alongside soft-deleted messages — see
+			// DeleteSession for the rationale.
+		}
+	}
+
+	// Tear down sandboxes while session rows (and pins) are still readable.
+	if sessions != nil {
+		for _, session := range sessions {
+			s.destroyBoundSandbox(ctx, session.ID)
 		}
 	}
 
@@ -608,6 +648,60 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 
 	logger.Infof(ctx, "All sessions deleted for tenant %d", tenantID)
 	return nil
+}
+
+// destroyBoundSandbox tears down the sandbox MicroVM bound to sessionID, if
+// the configured sandbox backend supports session-scoped instances.
+//
+// Only SessionBoundManager (the CubeSandbox backend) implements the
+// DestroySession method. For Docker/Local/Disabled backends the type assertion
+// fails and the call is a no-op — those backends are stateless per Execute
+// and hold no resources keyed on session ID.
+//
+// Errors are logged but never propagated: sandbox teardown must not block
+// session deletion. Call this while the session row is still live so the
+// sandbox_config_id pin resolves to the correct named backend.
+func (s *sessionService) destroyBoundSandbox(ctx context.Context, sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	// Resolve the workspace's own manager: the sandbox to release lives on
+	// whichever backend that workspace is configured for, not necessarily the
+	// process-wide default.
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	configID, err := sandboxConfigForExistingSandbox(ctx, s.sandboxPinner, sessionID)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to read sandbox pin for session %s cleanup: %v", sessionID, err)
+		return
+	}
+	// An empty pin normally means there is nothing to destroy, but sessions
+	// whose sandbox predates the pin column also read as empty. Falling through
+	// to the default manager keeps those reachable: DestroySession is a cheap
+	// binding lookup that no-ops when the session truly has no sandbox, whereas
+	// skipping would abandon a paused instance that keeps billing.
+	mgr, err := resolveTenantSandboxForConfig(ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, s.sandboxPolicy)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to resolve sandbox for session %s cleanup: %v", sessionID, err)
+		return
+	}
+	if mgr == nil {
+		return
+	}
+	destroyer, ok := mgr.(interface {
+		DestroySession(context.Context, string) error
+	})
+	if !ok {
+		return
+	}
+	if err := destroyer.DestroySession(ctx, sessionID); err != nil {
+		logger.Warnf(ctx, "Failed to destroy sandbox for session %s: %v", sessionID, err)
+		return
+	}
+	if s.sandboxPinner != nil {
+		if err := s.sandboxPinner.Clear(ctx, sessionID); err != nil {
+			logger.Warnf(ctx, "Failed to clear sandbox pin for session %s: %v", sessionID, err)
+		}
+	}
 }
 
 // GenerateTitle generates a title for the current conversation content

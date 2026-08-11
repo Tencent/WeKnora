@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -14,6 +15,58 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCurrentTurnToolResultBudgetBounds(t *testing.T) {
+	assert.Equal(t, maxCurrentTurnToolTokens, currentTurnToolResultBudget(0))
+	assert.Equal(t, minCurrentTurnToolTokens, currentTurnToolResultBudget(10_000))
+	assert.Equal(t, 20_000, currentTurnToolResultBudget(100_000))
+	assert.Equal(t, maxCurrentTurnToolTokens, currentTurnToolResultBudget(1_000_000))
+}
+
+func TestTrimCurrentTurnToolResultsKeepsNewestAndPairing(t *testing.T) {
+	estimator, err := agenttoken.NewEstimator()
+	require.NoError(t, err)
+
+	messages := []chat.Message{
+		{Role: "user", Content: "old turn"},
+		{Role: "tool", Name: "old", ToolCallID: "old-call", Content: strings.Repeat("historical ", 1000)},
+		{Role: "assistant", Content: "old answer"},
+		{Role: "user", Content: "current turn"},
+		{
+			Role: "assistant",
+			ToolCalls: []chat.ToolCall{
+				{ID: "call-1", Type: "function"},
+				{ID: "call-2", Type: "function"},
+				{ID: "call-3", Type: "function"},
+			},
+		},
+		{Role: "tool", Name: "one", ToolCallID: "call-1", Content: strings.Repeat("alpha beta gamma ", 1000)},
+		{Role: "tool", Name: "two", ToolCallID: "call-2", Content: strings.Repeat("delta epsilon zeta ", 1000)},
+		{Role: "tool", Name: "three", ToolCallID: "call-3", Content: strings.Repeat("newest result ", 100)},
+	}
+	latestCost := estimator.EstimateMessage(&messages[7])
+	markerOne := messages[5]
+	markerOne.Content = compactedToolResultMarker(markerOne.Content)
+	markerTwo := messages[6]
+	markerTwo.Content = compactedToolResultMarker(markerTwo.Content)
+	budget := latestCost + estimator.EstimateMessage(&markerOne) + estimator.EstimateMessage(&markerTwo)
+
+	trimmed, changed := trimCurrentTurnToolResults(messages, estimator, budget)
+
+	require.True(t, changed)
+	assert.Equal(t, messages[1].Content, trimmed[1].Content, "historical results are handled separately")
+	assert.Contains(t, trimmed[5].Content, "Tool result compacted")
+	assert.Contains(t, trimmed[6].Content, "Tool result compacted")
+	assert.Equal(t, messages[7].Content, trimmed[7].Content, "newest result should be kept in full")
+	assert.Equal(t, messages[4].ToolCalls, trimmed[4].ToolCalls, "assistant tool-call pairing must remain intact")
+	assert.Equal(t, strings.Repeat("alpha beta gamma ", 1000), messages[5].Content, "input messages must not be mutated")
+
+	total := 0
+	for _, idx := range []int{5, 6, 7} {
+		total += estimator.EstimateMessage(&trimmed[idx])
+	}
+	assert.LessOrEqual(t, total, budget)
+}
 
 // TestAnalyzeResponse_ToolCall_DoesNotTerminate is a regression guard: the
 // agent has no dedicated terminal tool — any round that requests tool calls is

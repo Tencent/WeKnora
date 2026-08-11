@@ -32,6 +32,22 @@ type cosFileService struct {
 
 const cosScheme = "cos://"
 
+func newCOSHTTPClient(secretID, secretKey string) *http.Client {
+	httpConfig := utils.DefaultSSRFSafeHTTPClientConfig()
+	client := utils.NewSSRFSafeHTTPClient(httpConfig)
+	// COS GetCredential expects AuthorizationTransport to remain the outermost
+	// transport. Put the per-request SSRF guard immediately underneath it while
+	// retaining the safe client's redirect policy.
+	client.Transport = &cos.AuthorizationTransport{
+		SecretID:  secretID,
+		SecretKey: secretKey,
+		Transport: &utils.SSRFValidatingRoundTripper{
+			Base: utils.NewSSRFSafeTransport(httpConfig),
+		},
+	}
+	return client
+}
+
 // newCosClient creates a bare cosFileService with just the SDK client initialised.
 // Shared by NewCosFileService* constructors and CheckCosConnectivity.
 func newCosClient(bucketName, region, secretID, secretKey string) (*cosFileService, error) {
@@ -41,12 +57,7 @@ func newCosClient(bucketName, region, secretID, secretKey string) (*cosFileServi
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse bucketURL: %w", err)
 	}
-	client := cos.NewClient(&cos.BaseURL{BucketURL: u}, &http.Client{
-		Transport: &cos.AuthorizationTransport{
-			SecretID:  secretID,
-			SecretKey: secretKey,
-		},
-	})
+	client := cos.NewClient(&cos.BaseURL{BucketURL: u}, newCOSHTTPClient(secretID, secretKey))
 	return &cosFileService{client: client, bucketURL: bucketURL, bucketName: bucketName, region: region}, nil
 }
 
@@ -72,12 +83,7 @@ func NewCosFileServiceWithTempBucket(bucketName, region, secretId, secretKey, co
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse temp bucketURL: %w", err)
 		}
-		svc.tempClient = cos.NewClient(&cos.BaseURL{BucketURL: tempU}, &http.Client{
-			Transport: &cos.AuthorizationTransport{
-				SecretID:  secretId,
-				SecretKey: secretKey,
-			},
-		})
+		svc.tempClient = cos.NewClient(&cos.BaseURL{BucketURL: tempU}, newCOSHTTPClient(secretId, secretKey))
 		svc.tempBucketURL = tempBucketURL
 	}
 

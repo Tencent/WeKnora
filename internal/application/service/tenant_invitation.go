@@ -268,6 +268,25 @@ func (s *tenantInvitationService) Accept(
 	return member, nil
 }
 
+// MarkPendingAcceptedIfExists reconciles a stale per-user pending row when
+// tenant.auto_accept_invitation joins the invitee directly. member_added
+// audit from AddMember is the authoritative trail; we only flip status here.
+func (s *tenantInvitationService) MarkPendingAcceptedIfExists(
+	ctx context.Context,
+	tenantID uint64,
+	inviteeUserID string,
+) error {
+	s.sweep(ctx)
+	inv, err := s.repo.GetPendingByPair(ctx, tenantID, inviteeUserID)
+	if err != nil {
+		return err
+	}
+	if inv == nil {
+		return nil
+	}
+	return s.repo.MarkStatusIfPending(ctx, inv.ID, types.TenantInvitationStatusAccepted, s.now())
+}
+
 // emitInvitationAccepted writes the rbac.invitation_accepted audit row.
 // Actor is the invitee (acting on their own inbox); target is the same
 // user since the action is self-directed.

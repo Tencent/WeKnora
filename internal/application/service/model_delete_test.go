@@ -71,6 +71,12 @@ func (s *stubAgentRepoForModelDelete) DeleteAgent(context.Context, string, uint6
 func (s *stubAgentRepoForModelDelete) CountByModelID(context.Context, uint64, string) (int64, error) {
 	return s.count, nil
 }
+func (s *stubAgentRepoForModelDelete) CountBySandboxConfigID(context.Context, uint64, string) (int64, error) {
+	return 0, nil
+}
+func (s *stubAgentRepoForModelDelete) ListNamesBySandboxConfigID(context.Context, uint64, string) ([]string, error) {
+	return nil, nil
+}
 
 type stubModelRepoForDelete struct {
 	model  *types.Model

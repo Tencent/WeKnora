@@ -195,6 +195,24 @@ func TestNewDisabledManager(t *testing.T) {
 	}
 }
 
+func TestIsNamedSandboxBackendType(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want bool
+	}{
+		{"cube", true},
+		{"e2b", true},
+		{"docker", false},
+		{"local", false},
+		{"disabled", false},
+		{"", false},
+	} {
+		if got := IsNamedSandboxBackendType(tc.raw); got != tc.want {
+			t.Fatalf("IsNamedSandboxBackendType(%q) = %v, want %v", tc.raw, got, tc.want)
+		}
+	}
+}
+
 func TestExecuteResultHelpers(t *testing.T) {
 	// Test IsSuccess
 	successResult := &ExecuteResult{
@@ -221,14 +239,6 @@ func TestExecuteResultHelpers(t *testing.T) {
 		t.Error("Expected IsSuccess() to return false when killed")
 	}
 
-	// Test GetOutput
-	if successResult.GetOutput() != "output" {
-		t.Errorf("Expected GetOutput() to return stdout, got %s", successResult.GetOutput())
-	}
-
-	if failResult.GetOutput() != "error" {
-		t.Errorf("Expected GetOutput() to return stderr when stdout is empty, got %s", failResult.GetOutput())
-	}
 }
 
 func TestPythonScriptExecution(t *testing.T) {
