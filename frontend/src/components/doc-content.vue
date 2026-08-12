@@ -496,13 +496,10 @@ const preprocessMathDelimiters = (rawText: string): string => {
     .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
 };
 const renderer = new marked.Renderer();
-let page = 1;
-let loadingChunks = false;
-let pendingRequestedPage: number | null = null;
-let pendingChunksBeforeLoad = 0;
 const CHUNK_PAGE_SIZE = 25;
-/** Scroll container for the main doc drawer (not the first .t-drawer__body on the page). */
-let docScrollEl: HTMLElement | null = null;
+const chunkPage = ref(1);
+let loadedChunkPage = 1;
+let pendingChunkPage: number | null = null;
 let mdContentWrap = ref()
 // Drawer uses attach="body", so markdown nodes live outside mdContentWrap in the DOM.
 const docMarkdownRoot = ref<HTMLElement | null>(null)
@@ -589,62 +586,26 @@ const mergeChunks = (chunks: any[]): string => {
   return merged;
 };
 
-const findDocDrawerScrollEl = (): HTMLElement | null =>
-  document.querySelector('.doc-main-drawer .t-drawer__body') as HTMLElement | null;
-
-const unbindDrawerScroll = () => {
-  if (docScrollEl) {
-    docScrollEl.removeEventListener('scroll', handleDetailsScroll);
-    docScrollEl = null;
-  }
-};
-
-const bindDrawerScroll = () => {
-  unbindDrawerScroll();
-  docScrollEl = findDocDrawerScrollEl();
-  if (docScrollEl) {
-    docScrollEl.addEventListener('scroll', handleDetailsScroll, { passive: true });
-  }
-};
-
 onMounted(() => {
   loadTraceDrawerWidth();
   loadMainDrawerWidth();
   window.addEventListener('resize', onTraceDrawerWindowResize, { passive: true });
 });
 
-watch(() => props.visible, (visible) => {
-  if (visible) {
-    nextTick(() => {
-      bindDrawerScroll();
-      maybeLoadMoreChunks();
-    });
-  } else {
-    unbindDrawerScroll();
-  }
-});
 watch(() => props.details?.id, () => {
-  page = 1;
-  loadingChunks = false;
-  pendingRequestedPage = null;
-  pendingChunksBeforeLoad = 0;
+  chunkPage.value = 1;
+  loadedChunkPage = 1;
+  pendingChunkPage = null;
 });
 watch(() => props.details?.chunkLoading, (val) => {
-  if (val === false) {
-    if (pendingRequestedPage !== null) {
-      const currentLength = props.details?.md?.length || 0;
-      const hasError = Boolean(props.details?.chunkLoadError);
-      if (hasError && currentLength <= pendingChunksBeforeLoad) {
-        page = Math.max(1, pendingRequestedPage - 1);
-        MessagePlugin.warning(props.details?.chunkLoadError);
-      }
+  if (val === false && pendingChunkPage !== null) {
+    if (props.details?.chunkLoadError) {
+      chunkPage.value = loadedChunkPage;
+      MessagePlugin.warning(props.details.chunkLoadError);
+    } else {
+      loadedChunkPage = pendingChunkPage;
     }
-    pendingRequestedPage = null;
-    pendingChunksBeforeLoad = 0;
-    loadingChunks = false;
-    if (props.visible) {
-      nextTick(() => maybeLoadMoreChunks());
-    }
+    pendingChunkPage = null;
   }
 });
 onUnmounted(() => {
@@ -652,7 +613,6 @@ onUnmounted(() => {
   window.removeEventListener('resize', onTraceDrawerWindowResize);
   cleanupTraceDrawerResize();
   cleanupMainDrawerResize();
-  unbindDrawerScroll();
   if (audioBlobUrl.value) {
     URL.revokeObjectURL(audioBlobUrl.value);
   }
@@ -837,9 +797,6 @@ watch(() => props.details.md, () => {
 watch(() => viewMode.value, (mode) => {
   if ((mode === 'chunks' || mode === 'merged') && props.visible) {
     runMarkdownPostRenderPipeline();
-    if (mode === 'chunks') {
-      nextTick(() => maybeLoadMoreChunks());
-    }
   }
 }, { flush: 'post' });
 
@@ -944,7 +901,7 @@ const processMarkdown = (markdownText) => {
 };
 const handleClose = () => {
   emit("closeDoc", false);
-  const scrollEl = docScrollEl || findDocDrawerScrollEl();
+  const scrollEl = document.querySelector('.doc-main-drawer .t-drawer__body') as HTMLElement | null;
   if (scrollEl) scrollEl.scrollTop = 0;
   viewMode.value = 'merged';
 };
@@ -1134,10 +1091,8 @@ const notifyChunkMutationOutcome = (item: any, result: any, successMessage?: str
 };
 
 const reloadChunksFromStart = () => {
-  page = 1;
-  loadingChunks = true;
-  pendingRequestedPage = 1;
-  pendingChunksBeforeLoad = 0;
+  chunkPage.value = 1;
+  pendingChunkPage = 1;
   editingChunkId.value = '';
   chunkDraft.value = '';
   emit('getDoc', 1);
@@ -1564,43 +1519,12 @@ const downloadFile = () => {
       MessagePlugin.error(t('file.downloadFailed'));
     });
 };
-const requestNextChunkPage = () => {
-  if (loadingChunks || props.details?.chunkLoading) return;
-  const total = props.details?.total ?? 0;
-  const loaded = props.details?.md?.length ?? 0;
-  if (loaded >= total || total === 0) return;
-  const pageNum = Math.ceil(total / CHUNK_PAGE_SIZE);
-  if (page + 1 > pageNum) return;
-  page++;
-  loadingChunks = true;
-  pendingRequestedPage = page;
-  pendingChunksBeforeLoad = loaded;
-  emit('getDoc', page);
+const handleChunkPageChange = (pageInfo: { current: number }) => {
+  if (props.details?.chunkLoading || pageInfo.current === loadedChunkPage) return;
+  pendingChunkPage = pageInfo.current;
+  emit('getDoc', pageInfo.current);
 };
 
-/** When the list is shorter than the drawer, scroll never fires — prefetch until scrollable or done. */
-const maybeLoadMoreChunks = () => {
-  if (!props.visible || loadingChunks || props.details?.chunkLoading) return;
-  const el = docScrollEl || findDocDrawerScrollEl();
-  if (!el) return;
-  const loaded = props.details?.md?.length ?? 0;
-  const total = props.details?.total ?? 0;
-  if (loaded >= total) return;
-  const { scrollHeight, clientHeight } = el;
-  if (scrollHeight <= clientHeight + 8) {
-    requestNextChunkPage();
-  }
-};
-
-const handleDetailsScroll = () => {
-  if (loadingChunks || props.details?.chunkLoading) return;
-  const el = docScrollEl || findDocDrawerScrollEl();
-  if (!el) return;
-  const { scrollTop, scrollHeight, clientHeight } = el;
-  if (scrollTop + clientHeight >= scrollHeight - 8) {
-    requestNextChunkPage();
-  }
-};
 </script>
 <template>
   <div class="doc_content" ref="mdContentWrap">
@@ -1874,7 +1798,7 @@ const handleDetailsScroll = () => {
                 v-for="(chunk, index) in processedChunks" :key="chunk.original.id || index">
                 <div class="chunk-header">
                   <div class="chunk-heading">
-                    <span class="chunk-index">{{ $t('knowledgeBase.segment') }} {{ index + 1 }}</span>
+                    <span class="chunk-index">{{ $t('knowledgeBase.segment') }} {{ (chunkPage - 1) * CHUNK_PAGE_SIZE + index + 1 }}</span>
                     <span class="chunk-meta">{{ chunk.meta }}</span>
                   </div>
                   <div class="chunk-header-right">
@@ -2124,6 +2048,13 @@ const handleDetailsScroll = () => {
           </div>
 
           <!-- 文档预览视图 -->
+          <div v-if="(viewMode === 'merged' || viewMode === 'chunks') && details.total > CHUNK_PAGE_SIZE"
+            class="chunk-pagination">
+            <t-pagination v-model="chunkPage" :total="details.total" :page-size="CHUNK_PAGE_SIZE" size="small"
+              show-jumper show-page-number :show-page-size="false" :disabled="details.chunkLoading"
+              @change="handleChunkPageChange" />
+          </div>
+
           <div v-else-if="viewMode === 'preview'">
             <DocumentPreview :knowledgeId="details.id" :fileType="details.file_type" :fileName="details.title"
               :active="viewMode === 'preview'" />
@@ -2149,6 +2080,14 @@ const handleDetailsScroll = () => {
 .metadata-empty { color: var(--td-text-color-placeholder); }
 .metadata-actions, .chunk-editor-actions { margin-top: 8px; justify-content: flex-end; }
 .chunk-disabled { opacity: .5; }
+
+.chunk-pagination {
+  display: flex;
+  justify-content: center;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--td-component-stroke);
+}
 
 .icon-action-btn {
   width: 28px;
