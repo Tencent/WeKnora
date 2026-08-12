@@ -23,6 +23,6 @@ docker-compose --profile neo4j up -d
 
 ## 查看图谱
 
-登陆 `http://localhost:7474`，执行 `match (n) return (n)` 即可查看生成的知识图谱。
+登录 `http://localhost:7474`，执行 `match (n) return (n)` 即可查看生成的知识图谱。
 
 在对话时，系统会自动查询知识图谱，并获取相关知识。

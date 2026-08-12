@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue';
+import { ref, computed, nextTick, onBeforeUnmount, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatFileSize } from '@/utils/files';
 import { useTagChipsOverflow } from '@/composables/useTagChipsOverflow';
@@ -42,6 +42,7 @@ const props = defineProps<{
   selectedIds: Set<string>;
   batchMode: boolean;
   canEdit: boolean;
+  canDownload: boolean;
   canMutateKnowledge: boolean;
   traceAvailableById: Record<string, boolean>;
   tagList: Tag[];
@@ -67,7 +68,7 @@ const emit = defineEmits<{
   (e: 'open', item: KnowledgeCard): void;
   (e: 'toggle-checkbox', id: string, checked: boolean, ctx?: { e?: Event }): void;
   (e: 'menu-visible-change', visible: boolean, item: KnowledgeCard): void;
-  (e: 'action', action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'batch-manage' | 'delete', item: KnowledgeCard): void;
+  (e: 'action', action: 'download' | 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'batch-manage' | 'delete', item: KnowledgeCard): void;
   (e: 'tag-edit', item: KnowledgeCard): void;
   (e: 'open-folder', path: string): void;
   (e: 'move-to-folder', item: KnowledgeCard, folderPath: string): void;
@@ -157,6 +158,7 @@ const channelLabelMap: Record<string, string> = {
   dingtalk: 'knowledgeBase.channelDingtalk',
   slack: 'knowledgeBase.channelSlack',
   im: 'knowledgeBase.channelIm',
+  ima: 'knowledgeBase.channelIma',
 };
 
 const getChannelLabel = (channel: string) => {
@@ -182,6 +184,15 @@ const CARD_POPOVER_ESTIMATED_HEIGHT = 300;
 const cardHoverShowDelay = 300;
 let cardHoverTimer: ReturnType<typeof setTimeout> | null = null;
 let cardPopoverElement: HTMLElement | null = null;
+
+const dismissCardPopover = () => {
+  if (cardHoverTimer) {
+    clearTimeout(cardHoverTimer);
+    cardHoverTimer = null;
+  }
+  hoveredCardItem.value = null;
+  cardPopoverElement = null;
+};
 
 const calculatePopoverPositionFromCard = (cardElement: HTMLElement): { x: number; y: number } => {
   const cardRect = cardElement.getBoundingClientRect();
@@ -247,10 +258,15 @@ const onCardMouseEnter = (ev: MouseEvent, item: KnowledgeCard) => {
   const cardElement = (ev.currentTarget as HTMLElement);
   cardHoverTimer = setTimeout(() => {
     cardHoverTimer = null;
+    // Folder navigation can replace the card list before this delayed callback
+    // runs. A detached card has a zero rect, which used to place the teleported
+    // popover at the top-left corner of the viewport.
+    if (!cardElement.isConnected || !props.items.some(candidate => candidate.id === item.id)) return;
     hoveredCardItem.value = item;
     const pos = calculatePopoverPositionFromCard(cardElement);
     cardPopoverPos.value = pos;
     nextTick(() => {
+      if (!cardElement.isConnected || hoveredCardItem.value?.id !== item.id) return;
       cardPopoverElement = document.querySelector('.knowledge-card-hover-popover') as HTMLElement;
       if (cardPopoverElement) {
         const refinedPos = calculatePopoverPositionFromCard(cardElement);
@@ -261,12 +277,17 @@ const onCardMouseEnter = (ev: MouseEvent, item: KnowledgeCard) => {
 };
 
 const onCardMouseLeave = () => {
-  if (cardHoverTimer) {
-    clearTimeout(cardHoverTimer);
-    cardHoverTimer = null;
-  }
-  hoveredCardItem.value = null;
-  cardPopoverElement = null;
+  dismissCardPopover();
+};
+
+// Browsing to another folder swaps the item collection without necessarily
+// dispatching mouseleave on a card that Vue removes.
+watch(() => props.items, dismissCardPopover);
+onBeforeUnmount(dismissCardPopover);
+
+const onOpenFolder = (path: string) => {
+  dismissCardPopover();
+  emit('open-folder', path);
 };
 
 const onFolderPicked = (item: KnowledgeCard, path: string) => {
@@ -277,7 +298,7 @@ const onFolderPicked = (item: KnowledgeCard, path: string) => {
 };
 
 // --- Action handlers ---
-const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'batch-manage' | 'delete', item: KnowledgeCard) => {
+const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'batch-manage' | 'delete', item: KnowledgeCard) => {
   // The folder picker opens inside this same popup, so keep the menu open.
   if (action === 'move-folder') {
     folderPickerItemId.value = item.id;
@@ -302,8 +323,8 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
         :title="folder.path"
         role="button"
         tabindex="0"
-        @click="emit('open-folder', folder.path)"
-        @keydown.enter="emit('open-folder', folder.path)"
+        @click="onOpenFolder(folder.path)"
+        @keydown.enter="onOpenFolder(folder.path)"
       >
         <div class="folder-card__body">
           <t-icon name="folder" class="folder-card__icon" />
@@ -369,8 +390,10 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
               <div v-else-if="moveMenuMode === 'normal'" class="card-menu">
                 <DocumentActionMenu
                   :item="item"
+                  :can-download="canDownload"
                   :can-mutate-knowledge="canMutateKnowledge"
                   :trace-visible="isTraceMenuVisible(item)"
+                  @download="handleAction('download', item)"
                   @edit="handleAction('edit', item)"
                   @view-trace="handleAction('view-trace', item)"
                   @reparse="handleAction('reparse', item)"

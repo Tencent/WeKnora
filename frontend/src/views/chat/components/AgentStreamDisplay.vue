@@ -315,6 +315,23 @@
                   :title="$t('agent.addToKnowledgeBase')">
                   <t-icon name="bookmark-add" />
                 </t-button>
+                <!-- Skill artifact download: only shown when the persisted
+                     assistant message recorded any generated files. Agent
+                     mode is the primary path for skills, so this is where
+                     the button is most likely to appear. -->
+                <t-badge
+                  v-if="hasArtifacts"
+                  :count="artifactCount"
+                  :offset="[-4, 4]"
+                  shape="round"
+                  size="small"
+                >
+                  <t-button size="small" variant="outline" shape="round"
+                    @click.stop="openArtifactDrawer"
+                    :title="$t('agent.artifactDrawer.buttonTitle')">
+                    <t-icon name="download" />
+                  </t-button>
+                </t-badge>
                 <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
                     <t-icon name="info-circle" />
@@ -479,6 +496,13 @@
       </div>
     </template>
   </t-drawer>
+  <ChatArtifactsDrawer
+    v-if="hasArtifacts && sessionIdForArtifacts && messageIdForArtifacts"
+    v-model:visible="showArtifactDrawer"
+    :session-id="sessionIdForArtifacts"
+    :message-id="messageIdForArtifacts"
+    :artifacts="artifactList"
+  />
 </template>
 
 <script setup lang="ts">
@@ -492,6 +516,7 @@ import McpOAuthCard from './McpOAuthCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
+import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
 import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
 import { getKnowledgeChunksSummaryHtml } from '@/utils/knowledgeChunksDisplay';
 import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay';
@@ -780,6 +805,7 @@ import thinkingIcon from '@/assets/img/Frame3718.svg';
 
 interface SessionData {
   id?: string;
+  assistant_message_id?: string;
   request_id?: string;
   debugRequest?: Record<string, unknown>;
   isAgentMode?: boolean;
@@ -818,14 +844,66 @@ const showRequestInfo = computed(
   () => !props.embeddedMode && !!(props.session?.request_id || props.session?.id),
 );
 
+const resolveAssistantMessageId = (session?: SessionData) =>
+  String(session?.assistant_message_id || session?.id || '').trim();
+
 // Agent answers embed exported charts and knowledge-base images as
-// `resource://` handles. An embed visitor has no Bearer token, so they must be
-// fetched through the channel-scoped proxy rather than the tenant one.
-const protectedFileAccess = computed<ProtectedFileAccessContext | undefined>(() =>
-  props.embeddedMode && props.embedChannelId && props.embedToken
-    ? { mode: 'embed', channelId: props.embedChannelId, token: props.embedToken }
-    : undefined,
+// `resource://` handles. Embed visitors use the channel-scoped proxy. Logged-in
+// users use the persisted assistant message as the authorization anchor, which
+// also covers resources owned by a shared agent's source workspace.
+const protectedFileAccess = computed<ProtectedFileAccessContext | undefined>(() => {
+  if (props.embeddedMode && props.embedChannelId && props.embedToken) {
+    return { mode: 'embed', channelId: props.embedChannelId, token: props.embedToken };
+  }
+  const messageId = resolveAssistantMessageId(props.session);
+  if (props.sessionId && messageId) {
+    return { mode: 'message', sessionId: props.sessionId, messageId };
+  }
+  return undefined;
+});
+
+// Re-hydrate when the message authorization anchor becomes available or is
+// corrected (e.g. request_id → persisted assistant_message_id after agent_query).
+watch(
+  () => {
+    const access = protectedFileAccess.value;
+    if (access?.mode === 'message') {
+      return `${access.sessionId}\0${access.messageId}`;
+    }
+    return '';
+  },
+  (scopeKey, previousScopeKey) => {
+    if (!scopeKey || scopeKey === previousScopeKey) return;
+    clearProtectedFileFailureCache();
+    nextTick(async () => {
+      await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
+    });
+  },
 );
+
+// -----------------------------------------------------------------------------
+// Skill artifact download drawer (Agent path)
+// -----------------------------------------------------------------------------
+// Same contract as botmsg.vue: only render the button when the persisted
+// assistant message actually recorded files, then let ChatArtifactsDrawer
+// resolve names/sizes/mtimes and stream downloads via the /artifacts
+// endpoint. Agent mode is the primary path for skills, so this button will
+// appear more often here than in the RAG path.
+const showArtifactDrawer = ref(false);
+const artifactList = computed(() => {
+  const list = ((props.session?.artifacts as any[]) || []);
+  return list.map((a, i) => ({ index: i, ...a }));
+});
+const hasArtifacts = computed(() => artifactList.value.length > 0);
+const artifactCount = computed(() => artifactList.value.length);
+const sessionIdForArtifacts = computed(() => props.sessionId ?? '');
+const messageIdForArtifacts = computed(() =>
+  String(props.session?.id || props.session?.request_id || ''),
+);
+function openArtifactDrawer() {
+  if (!hasArtifacts.value) return;
+  showArtifactDrawer.value = true;
+}
 
 const {
   float: citationFloat,

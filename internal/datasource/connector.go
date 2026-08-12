@@ -205,6 +205,14 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "api_key",
 		Capabilities: []string{"incremental"},
 	},
+	types.ConnectorTypeIMA: {
+		Type:         types.ConnectorTypeIMA,
+		Name:         "Tencent IMA (ima.qq.com)",
+		Description:  "Sync knowledge bases and documents from Tencent IMA",
+		Priority:     3,
+		AuthType:     "api_key",
+		Capabilities: []string{"incremental", "deletion_sync"},
+	},
 	types.ConnectorTypeGitHub: {
 		Type:         types.ConnectorTypeGitHub,
 		Name:         "GitHub",

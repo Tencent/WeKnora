@@ -191,6 +191,24 @@ curl --location 'http://localhost:8080/api/v1/auth/oidc/url?redirect=%2Fdashboar
 
 ---
 
+## GET `/auth/oidc/start` - 发起 OIDC 登录（直接 302）
+
+与 `/auth/oidc/url` 不同，此端点**直接 302 重定向**到 OIDC Provider 的授权页，不返回 JSON，因此无需前端 JS 介入。适用于外部平台（如企业门户 / Nexus）直接给出一个链接即可触发 OIDC 授权码流程，借助 IdP 的 SSO session 实现免再次输密码。
+
+回调地址由后端根据请求自身的 origin（`<scheme>://<host>/api/v1/auth/oidc/callback`）自动构造，无需调用方提供。
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/auth/oidc/start'
+```
+
+**响应**：`302 Found`，`Location` 指向 IdP 授权页（含 `client_id` / `state` / `redirect_uri` / `scope`）。
+
+> 登录成功后的回调行为与 `/auth/oidc/callback` 一致：302 回前端首页并把登录结果编码进 URL hash。当前登录后固定落到默认首页 `/platform/knowledge-bases`（直达指定业务页的 `next` 参数为未来扩展）。
+
+---
+
 ## POST `/auth/refresh` - 刷新令牌
 
 **参数说明（请求体）**:
@@ -275,30 +293,57 @@ curl --location 'http://localhost:8080/api/v1/auth/me' \
 ```json
 {
     "success": true,
-    "user": {
-        "id": "usr-...",
-        "username": "alice",
-        "email": "alice@example.com",
-        "avatar": "",
-        "tenant_id": 1,
-        "is_active": true,
-        "can_access_all_tenants": false,
-        "created_at": "2026-05-11T10:00:00+08:00",
-        "updated_at": "2026-05-11T10:00:00+08:00"
+    "data": {
+        "user": {
+            "id": "usr-...",
+            "username": "alice",
+            "email": "alice@example.com",
+            "avatar": "",
+            "tenant_id": 1,
+            "is_active": true,
+            "can_access_all_tenants": false,
+            "created_at": "2026-05-11T10:00:00+08:00",
+            "updated_at": "2026-05-11T10:00:00+08:00"
+        },
+        "tenant": {
+            "id": 1,
+            "name": "My Workspace"
+        },
+        "memberships": [
+            {
+                "tenant_id": 1,
+                "tenant_name": "My Workspace",
+                "role": "owner"
+            }
+        ],
+        "tenant_required": false,
+        "capabilities": {
+            "can_create_tenant": false,
+            "auto_accept_invitation": false
+        }
     }
 }
 ```
+
+`capabilities` 供 SPA 读取部署级开关，无需调用超管设置 API：
+
+| 字段 | 说明 |
+| ---- | ---- |
+| `can_create_tenant` | 当前用户是否可自助创建空间 |
+| `auto_accept_invitation` | 全局 `tenant.auto_accept_invitation`：邮箱邀请已注册用户时是否直接加入（无需收件箱确认） |
 
 ---
 
 ## POST `/auth/change-password` - 修改密码
 
+修改当前用户的登录密码。新密码须满足 **8–32 位**且**同时包含字母与数字**；不能与当前密码相同。成功后**所有会话被撤销**，需使用新密码重新登录。
+
 **参数说明（请求体）**:
 
 | 字段          | 类型   | 必填 | 校验    | 说明      |
 | ------------- | ------ | ---- | ------- | --------- |
-| old_password  | string | 是   |          | 旧密码    |
-| new_password  | string | 是   | 最少 6 位 | 新密码    |
+| old_password  | string | 是   |          | 当前密码  |
+| new_password  | string | 是   | 8–32 位，须含字母与数字，且不同于旧密码 | 新密码    |
 
 **请求**:
 
@@ -314,4 +359,10 @@ curl --location 'http://localhost:8080/api/v1/auth/change-password' \
 
 **响应**: `{ "success": true, "message": "Password changed successfully" }`
 
-**错误**: 旧密码不匹配或新密码不满足校验 → 400。
+**错误**（400）:
+
+| `error.details`       | 含义                         |
+| --------------------- | ---------------------------- |
+| `invalid_old_password` | 当前密码不正确               |
+| `password_policy`      | 新密码不满足长度/复杂度要求  |
+| `same_password`        | 新密码与当前密码相同         |

@@ -59,6 +59,8 @@ export const useAuthStore = defineStore('auth', () => {
   // then reject with 403/2005.
   const canCreateTenant = ref(false)
 
+  const autoAcceptInvitation = ref(false)
+
   // 计算属性
   const isLoggedIn = computed(() => {
     return !!token.value && !!user.value
@@ -306,6 +308,10 @@ export const useAuthStore = defineStore('auth', () => {
     canCreateTenant.value = allowed
   }
 
+  const setAutoAcceptInvitation = (enabled: boolean) => {
+    autoAcceptInvitation.value = enabled
+  }
+
   // fetchPendingInvitationCount hits the dedicated /me/invitations/
   // pending-count endpoint and updates the store. Errors are
   // swallowed — the badge degrades to its last-known value instead
@@ -368,9 +374,33 @@ export const useAuthStore = defineStore('auth', () => {
         setCanCreateTenant(createCapability)
       }
 
+      setAutoAcceptInvitation(response.data?.capabilities?.auto_accept_invitation === true)
+
       return true
     } catch {
       return false
+    }
+  }
+
+  // 用 token 加入空间并刷新成员关系、切到新空间。token 无效时返回 ok:false（不抛异常），
+  // 提示与跳转交给调用方（store 不碰 router）。
+  const acceptInvitationByTokenAndRefresh = async (
+    token: string,
+  ): Promise<{ ok: boolean; tenantId?: number; tenantName?: string }> => {
+    try {
+      const { acceptInvitationByToken } = await import('@/api/tenant/invitations')
+      const resp = await acceptInvitationByToken(token)
+      if (!resp.success || !resp.data?.membership) {
+        return { ok: false }
+      }
+      const tenantId = resp.data.membership.tenant_id
+      const tenantName = resp.data.tenant_name
+      // 刷新成员关系，并切到刚加入的空间。
+      await refreshFromAuthMe()
+      setSelectedTenant(tenantId, tenantName ?? null)
+      return { ok: true, tenantId, tenantName }
+    } catch {
+      return { ok: false }
     }
   }
 
@@ -401,6 +431,7 @@ export const useAuthStore = defineStore('auth', () => {
     memberships.value = []
     pendingInvitationCount.value = 0
     canCreateTenant.value = false
+    autoAcceptInvitation.value = false
     clearSessionResourceCaches()
 
     // 清空localStorage
@@ -524,6 +555,7 @@ export const useAuthStore = defineStore('auth', () => {
     memberships,
     pendingInvitationCount,
     canCreateTenant,
+    autoAcceptInvitation,
 
     // 计算属性
     isLoggedIn,
@@ -550,8 +582,10 @@ export const useAuthStore = defineStore('auth', () => {
     setMemberships,
     setPendingInvitationCount,
     setCanCreateTenant,
+    setAutoAcceptInvitation,
     fetchPendingInvitationCount,
     refreshFromAuthMe,
+    acceptInvitationByTokenAndRefresh,
     getSelectedTenant,
     setLiteMode,
     logout,

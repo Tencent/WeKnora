@@ -449,6 +449,22 @@ definitions:
     - AuditOutcomeFailed
     - AuditOutcomePartial
     - AuditOutcomeCanceled
+  github_com_Tencent_WeKnora_internal_types.AutoTagConfig:
+    properties:
+      enabled:
+        type: boolean
+      max_tags:
+        type: integer
+      model_id:
+        type: string
+      skip_if_tagged:
+        description: |-
+          SkipIfTagged leaves documents that already carry tags untouched, so a
+          deliberate manual classification is not diluted by model guesses. It is
+          a pointer because the default is true: rows written before this field
+          existed decode to nil and must not silently flip to "always append".
+        type: boolean
+    type: object
   github_com_Tencent_WeKnora_internal_types.COSEngineConfig:
     properties:
       app_id:
@@ -1503,6 +1519,11 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig'
         description: ASR config (Automatic Speech Recognition)
+      auto_tag_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutoTagConfig'
+        description: AutoTagConfig controls asynchronous association of existing tags
+          after parsing.
       chunk_count:
         description: Chunk count (not stored in database, calculated on query)
         type: integer
@@ -1650,6 +1671,11 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.KnowledgeBaseConfig:
     properties:
+      auto_tag_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AutoTagConfig'
+        description: AutoTagConfig controls optional automatic association of existing
+          KB tags.
       chunking_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig'
@@ -3794,6 +3820,13 @@ definitions:
                  a stored *0 the same as nil.
           *N   = preferred workspace id.
         type: integer
+      oidc_only_login:
+        description: |-
+          OidcOnlyLogin is set server-side when an account is auto-provisioned
+          via OIDC with a random password the user never received. The profile
+          UI hides self-service password rotation until the user sets a known
+          password via ChangePassword (which clears this flag).
+        type: boolean
     type: object
   github_com_Tencent_WeKnora_internal_types.VLMConfig:
     properties:
@@ -3941,6 +3974,7 @@ definitions:
     - searxng
     - keenable
     - zhipu
+    - metaso
     type: string
     x-enum-varnames:
     - WebSearchProviderTypeBing
@@ -3952,6 +3986,7 @@ definitions:
     - WebSearchProviderTypeSearxng
     - WebSearchProviderTypeKeenable
     - WebSearchProviderTypeZhipu
+    - WebSearchProviderTypeMetaso
   github_com_Tencent_WeKnora_internal_types.WikiConfig:
     properties:
       content_instructions:
@@ -5440,6 +5475,13 @@ definitions:
           etc. by the JSON unmarshaller). Service.encodeForType normalises
           these against the registry's declared type and rejects mismatches.
     type: object
+  internal_handler.acceptInvitationByTokenRequest:
+    properties:
+      token:
+        type: string
+    required:
+    - token
+    type: object
   internal_handler.addMemberRequest:
     properties:
       email:
@@ -6345,7 +6387,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 修改当前用户的登录密码
+      description: 修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；成功后所有会话被撤销，需重新登录。
       parameters:
       - description: 密码修改请求
         in: body
@@ -11550,6 +11592,35 @@ paths:
       summary: 拒绝邀请
       tags:
       - 我的邀请
+  /me/invitations/accept-by-token:
+    post:
+      consumes:
+      - application/json
+      description: 已登录用户用共享邀请链接 token 加入空间，不创建新账号；对已是成员的用户幂等。
+      parameters:
+      - description: 邀请 token
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.acceptInvitationByTokenRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "410":
+          description: 链接无效或已撤销
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 通过共享链接加入空间
+      tags:
+      - 我的邀请
   /me/invitations/pending-count:
     get:
       description: 轻量级 endpoint，返回当前登录用户的 pending 邀请数，用于头像旁的角标轮询。
@@ -14381,7 +14452,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: Owner 通过邮箱邀请已注册用户加入当前空间；被邀请人需要在 /me/invitations 接受后才会成为成员。
+      description: Owner 通过邮箱邀请已注册用户加入空间。开启 tenant.auto_accept_invitation 后被邀请人立即自动加入（响应为成员结构），否则需在
+        /me/invitations 接受后成为成员。
       parameters:
       - description: 空间 ID
         in: path

@@ -83,13 +83,26 @@ func TestEveryAsynqTaskTypeHasADeclaredQueue(t *testing.T) {
 		TypeQuestionGeneration, TypeSummaryGeneration, TypeKBClone,
 		TypeIndexDelete, TypeKBDelete, TypeKnowledgeListDelete,
 		TypeKnowledgeListReparse, TypeKnowledgeMove, TypeDataTableSummary,
-		TypeImageMultimodal, TypeKnowledgePostProcess, TypeManualProcess,
+		TypeImageMultimodal, TypeKnowledgePostProcess, TypeKnowledgeAutoTag, TypeManualProcess,
 		TypeDataSourceSync, TypeWikiIngest, TypeWikiFinalize, TypeTemporaryDocumentProcess,
 	}
 	for _, taskType := range taskTypes {
 		if _, ok := QueueForTaskType(taskType); !ok {
 			t.Fatalf("task type %q has no declared queue", taskType)
 		}
+	}
+}
+
+func TestKnowledgeAutoTagUsesEnrichmentPool(t *testing.T) {
+	queue, ok := QueueForTaskType(TypeKnowledgeAutoTag)
+	if !ok || queue != QueueSummary {
+		t.Fatalf("automatic tagging must use %q, got %q", QueueSummary, queue)
+	}
+	if QueueWeightsForPool(WorkerPoolPostProcess)[queue] != 0 {
+		t.Fatalf("automatic tagging must not consume post-process orchestration capacity")
+	}
+	if QueueWeightsForPool(WorkerPoolEnrichment)[queue] <= 0 {
+		t.Fatalf("automatic tagging queue must be consumed by the enrichment pool")
 	}
 }
 

@@ -5,9 +5,11 @@ import subprocess
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 
 import openpyxl
 import pandas as pd
+from openpyxl.chart import BarChart, Reference
 
 from docreader.parser.excel_convert import detect_excel_format, engine_for_format
 from docreader.parser.excel_parser import ExcelParser
@@ -136,6 +138,28 @@ class XlsxRepairTest(unittest.TestCase):
 
 
 class XlsxMergeFillTest(unittest.TestCase):
+    @staticmethod
+    def _workbook_with_merged_cells_and_chart() -> bytes:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "title"
+        ws.merge_cells("A1:B1")
+        ws.append(["category", "value"])
+        ws.append(["one", 1])
+        ws.append(["two", 2])
+
+        chart = BarChart()
+        chart.add_data(
+            Reference(ws, min_col=2, min_row=2, max_row=4),
+            titles_from_data=True,
+        )
+        chart.set_categories(Reference(ws, min_col=1, min_row=3, max_row=4))
+        ws.add_chart(chart, "D2")
+
+        bio = io.BytesIO()
+        wb.save(bio)
+        return bio.getvalue()
+
     def test_fill_merged_cells_propagates_master_value(self):
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -154,6 +178,89 @@ class XlsxMergeFillTest(unittest.TestCase):
         self.assertEqual(out_ws["B1"].value, "title")
         self.assertEqual(out_ws["A3"].value, "left")
         self.assertEqual(out_ws["B3"].value, "only-b")
+
+    def test_fill_merged_cells_does_not_serialize_charts(self):
+        content = self._workbook_with_merged_cells_and_chart()
+
+        with patch(
+            "openpyxl.chart._chart.ChartBase._write",
+            side_effect=AttributeError("'Typed' object has no attribute 'to_tree'"),
+        ):
+            filled = fill_merged_cells_xlsx(content)
+
+        out_wb = openpyxl.load_workbook(io.BytesIO(filled), data_only=True)
+        out_ws = out_wb.active
+        self.assertEqual(out_ws["B1"].value, "title")
+        self.assertEqual(out_ws["A3"].value, "one")
+        self.assertEqual(out_ws["B4"].value, 2)
+        self.assertEqual(out_ws._charts, [])
+
+    def test_excel_parser_reads_merged_workbook_with_chart(self):
+        document = ExcelParser().parse_into_text(
+            self._workbook_with_merged_cells_and_chart()
+        )
+
+        self.assertIn("A: title,B: title", document.content)
+        self.assertIn("A: one,B: 1", document.content)
+        self.assertIn("A: two,B: 2", document.content)
+
+    def test_chart_workbook_without_merges_passes_through_unchanged(self):
+        content = self._workbook_with_merged_cells_and_chart()
+        wb = openpyxl.load_workbook(io.BytesIO(content))
+        wb.active.unmerge_cells("A1:B1")
+        bio = io.BytesIO()
+        wb.save(bio)
+        content = bio.getvalue()
+
+        self.assertEqual(fill_merged_cells_xlsx(content), content)
+
+    def test_fill_does_not_serialize_dedicated_chart_sheets(self):
+        content = self._workbook_with_merged_cells_and_chart()
+        wb = openpyxl.load_workbook(io.BytesIO(content))
+        ws = wb.active
+        chart = BarChart()
+        chart.add_data(
+            Reference(ws, min_col=2, min_row=2, max_row=4),
+            titles_from_data=True,
+        )
+        chart.set_categories(Reference(ws, min_col=1, min_row=3, max_row=4))
+        chart_sheet = wb.create_chartsheet("Summary")
+        chart_sheet.add_chart(chart)
+        wb.active = chart_sheet
+        bio = io.BytesIO()
+        wb.save(bio)
+
+        with patch(
+            "openpyxl.chart._chart.ChartBase._write",
+            side_effect=AttributeError("'Typed' object has no attribute 'to_tree'"),
+        ):
+            filled = fill_merged_cells_xlsx(bio.getvalue())
+
+        out_wb = openpyxl.load_workbook(io.BytesIO(filled), data_only=True)
+        self.assertEqual(out_wb.active._charts, [])
+        self.assertEqual(out_wb.active.title, "Sheet")
+        self.assertEqual(out_wb.chartsheets, [])
+
+    def test_fill_keeps_active_worksheet_after_removing_earlier_chart_sheet(self):
+        content = self._workbook_with_merged_cells_and_chart()
+        wb = openpyxl.load_workbook(io.BytesIO(content))
+        data_sheet = wb.active
+        chart = BarChart()
+        chart.add_data(
+            Reference(data_sheet, min_col=2, min_row=2, max_row=4),
+            titles_from_data=True,
+        )
+        chart_sheet = wb.create_chartsheet("Summary", 0)
+        chart_sheet.add_chart(chart)
+        wb.active = data_sheet
+        bio = io.BytesIO()
+        wb.save(bio)
+
+        filled = fill_merged_cells_xlsx(bio.getvalue())
+
+        out_wb = openpyxl.load_workbook(io.BytesIO(filled), data_only=True)
+        self.assertEqual(out_wb.active.title, "Sheet")
+        self.assertEqual(out_wb.chartsheets, [])
 
     def test_parse_en_mergecell_workbook(self):
         path = os.path.join(

@@ -250,8 +250,7 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 
 | 名称 | 默认值 | 说明 |
 | --- | --- | --- |
-| `WEKNORA_SANDBOX_MODE` | disabled（代码默认；标准 compose 里设为 docker） | Skills 沙箱：`docker` / `local` / `disabled` |
-| `WEKNORA_SANDBOX_TIMEOUT` / `WEKNORA_SANDBOX_DOCKER_IMAGE` | 60 / wechatopenai/weknora-sandbox:latest | 沙箱执行超时与镜像 |
+| Sandbox 配置 | 设置页按空间维护 | 后端、凭据、模板、超时和私网访问策略不再读取 `WEKNORA_SANDBOX_*` |
 | `WEKNORA_SKILLS_DIR` | 空（镜像内 /app/skills/preloaded） | 自定义 Skills 目录 |
 | `WEKNORA_AGENT_LLM_TIMEOUT` | 120s | Agent 单次 LLM 调用超时（Go duration 或纯数字秒） |
 | `WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT` / `_FAIL_OPEN` | 600s / fail-close | MCP 工具人工审批等待与失败策略 |

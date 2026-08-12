@@ -601,6 +601,21 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    // Tencent IMA (ima.qq.com). Uses the OpenAPI at /openapi/wiki/v1 with two
+    // static headers (ima-openapi-clientid + ima-openapi-apikey); no OAuth.
+    type: 'ima',
+    available: true,
+    docUrl: 'https://ima.qq.com/agent-interface',
+    permissionDocUrl: 'https://ima.qq.com/agent-interface',
+    permissionPageUrl: 'https://ima.qq.com/agent-interface',
+    requiredPermissions: [],
+    fields: [
+      { key: 'client_id', labelKey: 'datasource.field.imaClientId', placeholder: '', secret: true },
+      { key: 'api_key', labelKey: 'datasource.field.imaApiKey', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://ima.qq.com', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
+  },
+  {
     type: 'rss',
     available: true,
     docUrl: '',

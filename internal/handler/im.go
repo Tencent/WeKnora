@@ -65,6 +65,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		Name            string     `json:"name"`
 		Mode            string     `json:"mode"`
 		OutputMode      string     `json:"output_mode"`
+		SessionMode     string     `json:"session_mode"`
 		KnowledgeBaseID string     `json:"knowledge_base_id"`
 		Credentials     types.JSON `json:"credentials"`
 		Enabled         *bool      `json:"enabled"`
@@ -86,6 +87,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		Name:            req.Name,
 		Mode:            req.Mode,
 		OutputMode:      req.OutputMode,
+		SessionMode:     req.SessionMode,
 		KnowledgeBaseID: req.KnowledgeBaseID,
 		Credentials:     req.Credentials,
 		Enabled:         true,
@@ -207,6 +209,7 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 		Name            *string    `json:"name"`
 		Mode            *string    `json:"mode"`
 		OutputMode      *string    `json:"output_mode"`
+		SessionMode     *string    `json:"session_mode"`
 		KnowledgeBaseID *string    `json:"knowledge_base_id"`
 		Credentials     types.JSON `json:"credentials"`
 		Enabled         *bool      `json:"enabled"`
@@ -225,6 +228,9 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 	}
 	if req.OutputMode != nil {
 		channel.OutputMode = *req.OutputMode
+	}
+	if req.SessionMode != nil {
+		channel.SessionMode = *req.SessionMode
 	}
 	if req.KnowledgeBaseID != nil {
 		channel.KnowledgeBaseID = *req.KnowledgeBaseID

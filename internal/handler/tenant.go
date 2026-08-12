@@ -143,6 +143,15 @@ type tenantAPIKeyCreateRequest struct {
 	ExpiresAt        *int64   `json:"expires_at_unix"`
 }
 
+// tenantAPIKeyUpdateRequest 修改已创建 API Key 的配置，字段语义与创建接口一致。
+type tenantAPIKeyUpdateRequest struct {
+	Name             string   `json:"name"`
+	FullAccess       bool     `json:"full_access"`
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
+	Capabilities     []string `json:"capabilities"`
+	ExpiresAt        *int64   `json:"expires_at_unix"`
+}
+
 type tenantAPIKeyResponse struct {
 	ID               uint64                `json:"id"`
 	ScopeType        types.APIKeyScopeType `json:"scope_type"`
@@ -713,6 +722,46 @@ func (h *TenantHandler) CreateAPIKey(c *gin.Context) {
 	})
 }
 
+// UpdateAPIKey 修改已创建租户 API Key 的授权范围和其他可配置属性。
+// 路由层要求当前租户 Owner；字段校验与创建接口保持一致。
+func (h *TenantHandler) UpdateAPIKey(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenantID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || tenantID == 0 {
+		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
+		return
+	}
+	keyID, err := strconv.ParseUint(c.Param("key_id"), 10, 64)
+	if err != nil || keyID == 0 {
+		c.Error(errors.NewBadRequestError("Invalid API key ID"))
+		return
+	}
+	var req tenantAPIKeyUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	if appErr := validateTenantAPIKeyRequest(ctx, h.kbService, tenantID, tenantAPIKeyCreateRequest(req)); appErr != nil {
+		c.Error(appErr)
+		return
+	}
+	var expiresAt *time.Time
+	if req.ExpiresAt != nil {
+		t := time.Unix(*req.ExpiresAt, 0).UTC()
+		expiresAt = &t
+	}
+
+	updated, err := h.apiKeyService.UpdateAPIKey(ctx, interfaces.TenantAPIKeyUpdateRequest{
+		TenantID: tenantID, APIKeyID: keyID, Name: req.Name, FullAccess: req.FullAccess,
+		KnowledgeBaseIDs: req.KnowledgeBaseIDs, Capabilities: req.Capabilities, ExpiresAt: expiresAt,
+	})
+	if err != nil {
+		c.Error(errors.NewNotFoundError("API key not found"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": tenantAPIKeyForResponse(updated)})
+}
+
 func (h *TenantHandler) DeleteAPIKey(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID, err := strconv.ParseUint(c.Param("id"), 10, 64)
@@ -774,12 +823,39 @@ func validateTenantAPIKeyRequest(
 			return errors.NewValidationError("capabilities contains an unknown capability")
 		}
 	}
-	for _, kbID := range req.KnowledgeBaseIDs {
+	return validateTenantAPIKeyKnowledgeBaseIDs(ctx, kbService, tenantID, req.KnowledgeBaseIDs)
+}
+
+// validateTenantAPIKeyKnowledgeBaseIDs 校验白名单中的知识库真实存在且属于目标租户。
+// 入参是请求上下文、知识库服务、租户 ID 和待授权 ID；成功无返回值，失败返回可直接响应的应用错误。
+func validateTenantAPIKeyKnowledgeBaseIDs(
+	ctx context.Context,
+	kbService interfaces.KnowledgeBaseService,
+	tenantID uint64,
+	knowledgeBaseIDs []string,
+) *errors.AppError {
+	if len(knowledgeBaseIDs) == 0 {
+		return nil
+	}
+	return validateTenantAPIKeyKnowledgeBaseIDsWithLookup(
+		ctx, tenantID, knowledgeBaseIDs, kbService.GetKnowledgeBaseByID,
+	)
+}
+
+// validateTenantAPIKeyKnowledgeBaseIDsWithLookup 将归属校验与大型知识库服务接口解耦，便于覆盖边界测试。
+// lookup 输入知识库 ID 并返回真实知识库；函数输出 nil 或可直接响应的校验错误。
+func validateTenantAPIKeyKnowledgeBaseIDsWithLookup(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeBaseIDs []string,
+	lookup func(context.Context, string) (*types.KnowledgeBase, error),
+) *errors.AppError {
+	for _, kbID := range knowledgeBaseIDs {
 		kbID = strings.TrimSpace(kbID)
 		if kbID == "" {
 			continue
 		}
-		kb, err := kbService.GetKnowledgeBaseByID(ctx, kbID)
+		kb, err := lookup(ctx, kbID)
 		if err != nil || kb == nil {
 			return errors.NewValidationError("knowledge_base_ids contains an unknown knowledge base")
 		}
@@ -1735,6 +1811,16 @@ func validateParserEngineOutboundURLs(cfg *types.ParserEngineConfig) error {
 	if vlmURL := strings.TrimSpace(cfg.MinerUVLMServerURL); vlmURL != "" {
 		if err := secutils.ValidateURLForSSRF(vlmURL); err != nil {
 			return fmt.Errorf("mineru_vlm_server_url failed SSRF validation: %v", err)
+		}
+	}
+	if odlURL := strings.TrimSpace(cfg.ODLHybridURL); odlURL != "" {
+		if err := secutils.ValidateURLForSSRF(odlURL); err != nil {
+			return fmt.Errorf("odl_hybrid_url failed SSRF validation: %v", err)
+		}
+	}
+	if endpoint := strings.TrimSpace(cfg.PaddleOCRVLEndpoint); endpoint != "" {
+		if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
+			return fmt.Errorf("paddleocr_vl_endpoint failed SSRF validation: %v", err)
 		}
 	}
 	return nil

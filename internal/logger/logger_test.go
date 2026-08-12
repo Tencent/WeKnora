@@ -212,3 +212,22 @@ func TestCloneContextPreservesTenantAPIKeyScope(t *testing.T) {
 		t.Fatalf("cloned scope = %#v, want key_id=7 scoped to kb-1", got)
 	}
 }
+
+// setupSSEStream builds its async context through CloneContext, so dropping
+// this key here would silently re-key every session→sandbox binding onto the
+// tenant a shared agent borrowed — stranding the MicroVM at session deletion.
+func TestCloneContextPreservesSandboxTenantID(t *testing.T) {
+	t.Parallel()
+
+	const sessionOwner, agentOwner = uint64(7), uint64(99)
+
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, agentOwner)
+	ctx = types.WithSandboxTenantID(ctx, sessionOwner)
+	cloned := CloneContext(ctx)
+
+	got, ok := types.SandboxTenantIDFromContext(cloned)
+	if !ok || got != sessionOwner {
+		t.Fatalf("SandboxTenantIDFromContext(cloned) = (%d, %v), want (%d, true)",
+			got, ok, sessionOwner)
+	}
+}

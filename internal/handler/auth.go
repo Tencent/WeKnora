@@ -5,12 +5,14 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
@@ -285,13 +287,53 @@ func (h *AuthHandler) GetOIDCAuthorizationURL(c *gin.Context) {
 
 	// Bind the state nonce to this browser so an attacker cannot replay
 	// their own authorization code into a victim's callback.
-	if resp.Nonce != "" {
-		secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
-		c.SetSameSite(http.SameSiteLaxMode)
-		c.SetCookie(oidcNonceCookieName, resp.Nonce, oidcNonceCookieMaxAge, "/", "", secure, true)
-	}
+	setOIDCNonceCookie(c, resp.Nonce)
 
 	c.JSON(http.StatusOK, resp)
+}
+
+// setOIDCNonceCookie binds the OIDC state nonce to this browser so an
+// attacker cannot replay their own authorization code into a victim's
+// callback. Shared by /auth/oidc/url (JSON) and /auth/oidc/start (302).
+func setOIDCNonceCookie(c *gin.Context, nonce string) {
+	if nonce == "" {
+		return
+	}
+	secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(oidcNonceCookieName, nonce, oidcNonceCookieMaxAge, "/", "", secure, true)
+}
+
+// oidcCallbackURL derives the absolute /auth/oidc/callback URL from the
+// request's own origin (scheme + host), so external platforms can deep-link
+// to /auth/oidc/start without supplying a redirect_uri.
+func oidcCallbackURL(c *gin.Context) string {
+	scheme := "http"
+	if c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	return scheme + "://" + c.Request.Host + "/api/v1/auth/oidc/callback"
+}
+
+// OIDCStart godoc
+// @Summary      发起 OIDC 登录（直接 302）
+// @Description  与 /auth/oidc/url 不同，此端点直接 302 重定向到 OIDC Provider 的授权页，
+// @Description  无需前端 JS 介入。适用于外部平台（如企业门户）直接给出一个链接即可
+// @Description  触发 OIDC 授权码流程，借助 IdP 的 SSO session 实现免再次输密码。
+// @Tags         认证
+// @Success      302
+// @Router       /auth/oidc/start [get]
+func (h *AuthHandler) OIDCStart(c *gin.Context) {
+	ctx := c.Request.Context()
+	resp, err := h.userService.GetOIDCAuthorizationURL(ctx, oidcCallbackURL(c))
+	if err != nil {
+		logger.Errorf(ctx, "Failed to generate OIDC authorization URL: %v", err)
+		appErr := errors.NewForbiddenError("OIDC authorization unavailable").WithDetails(err.Error())
+		c.Error(appErr)
+		return
+	}
+	setOIDCNonceCookie(c, resp.Nonce)
+	c.Redirect(http.StatusFound, resp.AuthorizationURL)
 }
 
 // GetOIDCConfig godoc
@@ -569,6 +611,8 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	memberships := h.userService.BuildLoginMemberships(ctx, user, tenant)
 	canCreateTenant := user.CanAccessAllTenants ||
 		resolveTenantSelfServiceCreationEnabled(ctx, h.configInfo, h.systemSettingSvc)
+	autoAcceptInvitation := h.systemSettingSvc != nil &&
+		h.systemSettingSvc.GetBool(ctx, "tenant.auto_accept_invitation", "WEKNORA_TENANT_AUTO_ACCEPT_INVITATION", false)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
@@ -577,7 +621,8 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 			"memberships":     memberships,
 			"tenant_required": tenant == nil,
 			"capabilities": gin.H{
-				"can_create_tenant": canCreateTenant,
+				"can_create_tenant":      canCreateTenant,
+				"auto_accept_invitation": autoAcceptInvitation,
 			},
 		},
 	})
@@ -645,7 +690,7 @@ func (h *AuthHandler) UpdateMyPreferences(c *gin.Context) {
 
 // ChangePassword godoc
 // @Summary      修改密码
-// @Description  修改当前用户的登录密码
+// @Description  修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；成功后所有会话被撤销，需重新登录。
 // @Tags         认证
 // @Accept       json
 // @Produce      json
@@ -661,7 +706,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 
 	var req struct {
 		OldPassword string `json:"old_password" binding:"required"`
-		NewPassword string `json:"new_password" binding:"required,min=6"`
+		NewPassword string `json:"new_password" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -683,10 +728,28 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	// Change password
 	err = h.userService.ChangePassword(ctx, user.ID, req.OldPassword, req.NewPassword)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to change password: %v", err)
-		appErr := errors.NewBadRequestError("Password change failed").WithDetails(err.Error())
-		c.Error(appErr)
-		return
+		switch {
+		case stderrors.Is(err, service.ErrPasswordPolicy):
+			appErr := errors.NewValidationError("Password policy violation").
+				WithDetails(service.DetailPasswordPolicy)
+			c.Error(appErr)
+			return
+		case stderrors.Is(err, service.ErrInvalidOldPassword):
+			appErr := errors.NewBadRequestError("Current password is incorrect").
+				WithDetails(service.DetailInvalidOldPassword)
+			c.Error(appErr)
+			return
+		case stderrors.Is(err, service.ErrSamePassword):
+			appErr := errors.NewValidationError("New password must differ from current password").
+				WithDetails(service.DetailSamePassword)
+			c.Error(appErr)
+			return
+		default:
+			logger.Errorf(ctx, "Failed to change password: %v", err)
+			appErr := errors.NewBadRequestError("Password change failed").WithDetails(err.Error())
+			c.Error(appErr)
+			return
+		}
 	}
 
 	logger.Infof(ctx, "Password changed successfully for user: %s", user.Email)

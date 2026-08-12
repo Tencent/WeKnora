@@ -342,6 +342,7 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 	RegisterWebSearchProviderRoutes(v1, &handler.WebSearchProviderHandler{}, &handler.WebSearchProviderCredentialsHandler{}, g)
 	RegisterVectorStoreRoutes(v1, &handler.VectorStoreHandler{}, g)
 	RegisterStorageBackendRoutes(v1, &handler.StorageBackendHandler{}, g)
+	RegisterSandboxConfigRoutes(v1, &handler.SandboxConfigHandler{}, g)
 	RegisterEmbedChannelRoutes(v1, &handler.EmbedChannelHandler{}, g)
 	RegisterIMChannelRoutes(v1, &handler.IMHandler{}, g)
 	RegisterDataSourceRoutes(v1, &handler.DataSourceHandler{}, &handler.DataSourceCredentialsHandler{}, g)
@@ -374,6 +375,39 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 			}
 			if !policyHasCapability(policy, tc.cap) {
 				t.Fatalf("policy capabilities = %#v, want %s", policy.Capabilities, tc.cap)
+			}
+		})
+	}
+}
+
+func TestSandboxConfigRoutesRequireFullAccessOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+
+	RegisterSandboxConfigRoutes(v1, &handler.SandboxConfigHandler{}, g)
+
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/v1/sandbox-configs"},
+		{http.MethodPost, "/api/v1/sandbox-configs"},
+		{http.MethodPost, "/api/v1/sandbox-configs/templates/query"},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id"},
+		{http.MethodPut, "/api/v1/sandbox-configs/:id"},
+		{http.MethodDelete, "/api/v1/sandbox-configs/:id"},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/sandboxes"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
+			if !policy.RequireFullAccess {
+				t.Fatal("sandbox config routes should require full access")
+			}
+			if len(policy.Capabilities) != 0 {
+				t.Fatalf("sandbox config routes must not be granted by a scoped capability: %#v", policy.Capabilities)
 			}
 		})
 	}
