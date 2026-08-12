@@ -620,6 +620,14 @@ export default {
     prereqStep3Brief_yuque: '（可选）企业版填写 Base URL',
     prereqStep3Desc_yuque: '公有云用户无需填写；语雀企业版或私有部署请填写企业域名',
     prereqOpenConsole_yuque: '前往语雀 Token 设置',
+    prereqBarText_ima: '首次使用？点击查看腾讯 IMA OpenAPI 授权指引',
+    prereqStep1Brief_ima: '开通 IMA 智能体接入',
+    prereqStep1Desc_ima: '登录 https://ima.qq.com/agent-interface 并申请 OpenAPI 接入',
+    prereqStep2Brief_ima: '获取 ClientID 与 APIKey',
+    prereqStep2Desc_ima: '在智能体接入页复制 ima-openapi-clientid 与 ima-openapi-apikey 两个凭证',
+    prereqStep3Brief_ima: '授权目标知识库',
+    prereqStep3Desc_ima: '在 IMA 客户端为该凭证授权需要同步的知识库，未授权的知识库不会出现在列表中',
+    prereqOpenConsole_ima: '前往 IMA OpenAPI 控制台',
     prereqStep1Brief_feishu: "创建飞书自建应用",
     prereqStep1Desc_feishu: "登录飞书开放平台 → 创建企业自建应用",
     prereqStep2Brief_feishu: "添加机器人能力",
@@ -680,6 +688,8 @@ export default {
       appSecret: 'App Secret',
       integrationToken: 'Integration Token',
       apiToken: 'API Token',
+      imaClientId: 'IMA ClientID',
+      imaApiKey: 'IMA APIKey',
       baseUrl: 'Base URL（可选）',
       baseUrlHint: '留空将使用默认公有云地址；如果是私有部署/企业内网部署，或需要通过反向代理访问，请填写自定义地址（例如 https://api-proxy.example.com）',
       feedUrls: '订阅源地址',
@@ -694,6 +704,7 @@ export default {
       lark_drive: "同步 Lark 云盘文件夹中的文档、表格、文件（飞书国际版）",
       notion: '同步 Notion 中的页面和数据库',
       yuque: '同步语雀知识库中的文档',
+      ima: '同步腾讯 IMA 知识库中的文档、笔记与文件',
       rss: '同步 RSS / Atom 订阅源中的文章'
     },
     connector: {
@@ -703,6 +714,7 @@ export default {
       lark_drive: "Lark 云盘",
       notion: 'Notion',
       yuque: '语雀',
+      ima: '腾讯 IMA',
       rss: 'RSS / Atom 订阅'
     },
     logDetail: {
@@ -5588,6 +5600,7 @@ export default {
     channelIm: 'IM 渠道',
     channelNotion: 'Notion',
     channelYuque: '语雀',
+    channelIma: '腾讯 IMA',
     channelUpload: '上传',
     channelManual: '手动',
     channelUrl: '网页',
