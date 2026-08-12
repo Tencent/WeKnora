@@ -1,0 +1,183 @@
+name: Manual Docker Build
+
+# 纯手动触发:不监听 push/tag,只在 Actions 页面手动点 Run。
+# 仅构建(验证 Dockerfile 能过),不推送到任何 registry。
+# 分支由 GitHub 手动触发 UI 自带的 ref 选择器决定。
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_all:
+        description: "构建所有包(勾选后忽略下方单独选项)"
+        type: boolean
+        default: false
+      build_ui:
+        description: "构建 ui"
+        type: boolean
+        default: false
+      build_app:
+        description: "构建 app"
+        type: boolean
+        default: false
+      build_docreader:
+        description: "构建 docreader"
+        type: boolean
+        default: false
+      build_sandbox:
+        description: "构建 sandbox(含 cube 变体)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "24"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  build-ui:
+    if: ${{ inputs.build_all == true || inputs.build_ui == true }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Prepare version info
+        id: version
+        run: |
+          eval "$(./scripts/get_version.sh env)"
+          echo "commit_id=$COMMIT_ID" >> $GITHUB_OUTPUT
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        env:
+          VITE_IS_DOCKER: true
+          VITE_FRONTEND_COMMIT: ${{ steps.version.outputs.commit_id }}
+        run: ./scripts/build_frontend_dist.sh
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build ui Image
+        uses: docker/build-push-action@v7
+        with:
+          push: false
+          load: true
+          platforms: linux/amd64
+          file: frontend/Dockerfile
+          context: ./frontend
+          cache-from: type=gha,scope=build-ui
+          cache-to: type=gha,scope=build-ui,mode=max
+
+  build-docreader:
+    if: ${{ inputs.build_all == true || inputs.build_docreader == true }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build docreader Image
+        uses: docker/build-push-action@v7
+        with:
+          push: false
+          load: true
+          platforms: linux/amd64
+          file: docker/Dockerfile.docreader
+          context: .
+          cache-from: type=gha,scope=build-docreader
+          cache-to: type=gha,scope=build-docreader,mode=max
+
+  build-sandbox:
+    if: ${{ inputs.build_all == true || inputs.build_sandbox == true }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build sandbox Image
+        uses: docker/build-push-action@v7
+        with:
+          push: false
+          load: true
+          platforms: linux/amd64
+          file: docker/Dockerfile.sandbox
+          target: sandbox
+          context: .
+          cache-from: type=gha,scope=build-sandbox
+          cache-to: type=gha,scope=build-sandbox,mode=max
+
+      # Cube builds templates straight from the image and gates the build on
+      # GET :49983/health, so it needs the variant with envd baked in.
+      - name: Build sandbox Cube Image
+        uses: docker/build-push-action@v7
+        with:
+          push: false
+          load: true
+          platforms: linux/amd64
+          file: docker/Dockerfile.sandbox
+          target: cube
+          context: .
+          cache-from: type=gha,scope=build-sandbox-cube
+          cache-to: type=gha,scope=build-sandbox-cube,mode=max
+
+  build-app:
+    if: ${{ inputs.build_all == true || inputs.build_app == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Prepare version info
+        id: version
+        run: |
+          eval "$(./scripts/get_version.sh env)"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "commit_id=$COMMIT_ID" >> $GITHUB_OUTPUT
+          echo "build_time=$BUILD_TIME" >> $GITHUB_OUTPUT
+          echo "go_version=$GO_VERSION" >> $GITHUB_OUTPUT
+          ./scripts/get_version.sh info
+
+      - name: Build app Image
+        uses: docker/build-push-action@v7
+        with:
+          push: false
+          load: true
+          platforms: linux/amd64
+          file: docker/Dockerfile.app
+          context: .
+          build-args: |
+            ${{ format('VERSION_ARG={0}', steps.version.outputs.version) }}
+            ${{ format('COMMIT_ID_ARG={0}', steps.version.outputs.commit_id) }}
+            ${{ format('BUILD_TIME_ARG={0}', steps.version.outputs.build_time) }}
+            ${{ format('GO_VERSION_ARG={0}', steps.version.outputs.go_version) }}
+          cache-from: type=gha,scope=build-app
+          cache-to: type=gha,scope=build-app,mode=max
