@@ -55,7 +55,7 @@ const (
 	// DefaultDockerImage therefore always fails the probe with "connection
 	// refused" — E2B gets away with that image because its own builder injects
 	// envd, and the Docker backend never needs one.
-	DefaultCubeTemplateImage = "wechatopenai/weknora-sandbox:latest-cube"
+	DefaultCubeTemplateImage = "wechatopenai/weknora-sandbox:main-cube"
 
 	// CubeEnvdPort is the port envd listens on inside a Cube sandbox. It carries
 	// the readiness probe as well as every exec and filesystem call, and the
