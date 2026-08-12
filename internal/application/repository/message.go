@@ -267,3 +267,67 @@ func (r *messageRepository) UpdateMessageKnowledgeID(
 		Where("id = ?", messageID).
 		Update("knowledge_id", knowledgeID).Error
 }
+
+// GetSessionArtifacts returns every skill-produced MessageArtifact recorded
+// against any assistant message of the session, in creation order.
+//
+// Projection is scoped to the artifacts JSONB column plus created_at (used
+// to order the flattened output). Assistant messages without artifacts (the
+// common case) contribute an empty slice and cost nothing extra.
+func (r *messageRepository) GetSessionArtifacts(
+	ctx context.Context, sessionID string,
+) (types.MessageArtifacts, error) {
+	if sessionID == "" {
+		return nil, nil
+	}
+	var rows []struct {
+		Artifacts types.MessageArtifacts `gorm:"column:artifacts"`
+		CreatedAt time.Time              `gorm:"column:created_at"`
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&types.Message{}).
+		Select("artifacts", "created_at").
+		Where("session_id = ? AND deleted_at IS NULL", sessionID).
+		Order("created_at ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return types.MessageArtifacts{}, nil
+	}
+	result := make(types.MessageArtifacts, 0, len(rows))
+	for _, row := range rows {
+		if len(row.Artifacts) == 0 {
+			continue
+		}
+		result = append(result, row.Artifacts...)
+	}
+	return result, nil
+}
+
+// GetSessionAttachments returns every user-uploaded attachment in creation
+// order while projecting only the attachments JSON column.
+func (r *messageRepository) GetSessionAttachments(
+	ctx context.Context, sessionID string,
+) (types.MessageAttachments, error) {
+	if sessionID == "" {
+		return nil, nil
+	}
+	var rows []struct {
+		Attachments types.MessageAttachments `gorm:"column:attachments"`
+		CreatedAt   time.Time                `gorm:"column:created_at"`
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&types.Message{}).
+		Select("attachments", "created_at").
+		Where("session_id = ? AND deleted_at IS NULL", sessionID).
+		Order("created_at ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	result := make(types.MessageAttachments, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, row.Attachments...)
+	}
+	return result, nil
+}

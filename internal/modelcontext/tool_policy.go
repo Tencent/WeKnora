@@ -144,6 +144,11 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 	// "url"/"knowledge_id" with unrelated semantics.
 	"read_skill":           {},
 	"execute_skill_script": {},
+	// Sandbox shell/file tools return whatever a skill script produced, so they
+	// carry the same unknown-shape caveat as skill output above.
+	"shell_exec":         {},
+	"list_sandbox_files": {},
+	"read_sandbox_file":  {},
 }
 
 // HasToolPolicy reports whether a tool has an explicit model-handle policy.

@@ -1,0 +1,81 @@
+// Package sandbox: session-scoped capability interfaces.
+//
+// The Sandbox / Manager pair intentionally hides provider identity (Cube,
+// E2B, Docker, Local) from the application layer. Higher layers should never
+// branch on Manager.GetType() to decide whether a feature is supported —
+// that couples them to a specific backend and, worse, misfires when a
+// remote-capable manager transparently falls back to a stateless local
+// sandbox.
+//
+// Instead, session-scoped features (shell execution, per-session file
+// inspection, attachment staging) are advertised via the capability
+// interfaces below. A manager may satisfy the underlying methods yet still
+// return nil from the accessors on SessionCapabilityProvider when the
+// current runtime configuration cannot honour that capability — for
+// example, SessionBoundManager returns nil from every accessor after it
+// falls back to LocalSandbox, ensuring the agent never surfaces
+// tenant-isolated tools that would run on the WeKnora host.
+package sandbox
+
+import (
+	"context"
+	"time"
+)
+
+// SessionShellExecutor executes ad-hoc shell commands inside a session-
+// scoped remote sandbox. Local/Docker backends do not implement it; a
+// SessionBoundManager only surfaces it while the remote backend is active.
+type SessionShellExecutor interface {
+	ExecShellCommand(
+		ctx context.Context,
+		sessionID string,
+		command string,
+		workDir string,
+		timeout time.Duration,
+		env map[string]string,
+	) (*ExecuteResult, error)
+}
+
+// SessionFileStore is the effective per-session filesystem view a manager
+// offers callers that need to inspect, stage, or clean up files inside the
+// session's remote sandbox. It is intentionally provider-neutral: entries
+// use RemoteDirEntry / RemoteStatEntry, so E2B and Cube can implement it
+// without touching the caller.
+type SessionFileStore interface {
+	// EnsureSessionDir creates dir in the session's live sandbox. Silent
+	// no-op when no sandbox is bound yet; the next Execute call will
+	// materialise the directory during script upload.
+	EnsureSessionDir(ctx context.Context, sessionID, dir string) error
+
+	// ListSessionFiles walks dir recursively and returns file entries.
+	// Returns nil (no error) when the session has no live sandbox so
+	// callers can treat "no sandbox" and "empty output" uniformly.
+	ListSessionFiles(ctx context.Context, sessionID, dir string) ([]RemoteDirEntry, error)
+
+	// StatSessionFile returns metadata for a single file. Errors when the
+	// session has no bound sandbox — callers of this method already hold a
+	// path from a prior ListSessionFiles call.
+	StatSessionFile(ctx context.Context, sessionID, path string) (*RemoteStatEntry, error)
+
+	// ReadSessionFile downloads a file's contents. Same "no sandbox
+	// bound" contract as StatSessionFile.
+	ReadSessionFile(ctx context.Context, sessionID, path string) ([]byte, error)
+
+	// WriteSessionInputFile writes a durable attachment path into the
+	// session's remote sandbox, provisioning the sandbox on first call.
+	WriteSessionInputFile(ctx context.Context, sessionID, filePath string, content []byte) error
+
+	// RemoveSessionInputPath deletes a staged attachment. No-op when the
+	// session has no live sandbox.
+	RemoveSessionInputPath(ctx context.Context, sessionID, targetPath string) error
+}
+
+// SessionCapabilityProvider is implemented by managers that MAY offer
+// session-scoped capabilities. Accessors return nil when the current
+// runtime configuration cannot support that capability (e.g. remote
+// provider unhealthy → LocalSandbox fallback). Application code should
+// gate feature registration on non-nil accessor returns.
+type SessionCapabilityProvider interface {
+	SessionShellExecutor() SessionShellExecutor
+	SessionFileStore() SessionFileStore
+}

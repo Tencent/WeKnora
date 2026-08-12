@@ -79,6 +79,21 @@ func RegisterSessionRoutes(
 			sessions.POST("/:session_id/messages/:message_id/suggestions", suggestionHandler.Ensure)
 			sessions.POST("/:session_id/suggestion-events", suggestionHandler.RecordEvent)
 		}
+
+		// Skill-generated file artifacts. The list endpoints only expose
+		// metadata; the actual bytes are streamed via /artifacts/:index/download
+		// so the storage URL never appears on the wire.
+		//
+		// NOTE: gin builds a separate radix tree per HTTP verb but every
+		// path in the same tree must share the same wildcard name. The GET
+		// tree already binds :id via /sessions/:id (GetSession); reusing
+		// :id here (instead of :session_id) avoids the
+		// "wildcard conflicts" panic at route registration. The handlers
+		// read the URL param via c.Param("session_id") with a fallback to
+		// c.Param("id") for exactly this reason.
+		sessions.GET("/:id/artifacts", handler.ListSessionArtifacts)
+		sessions.GET("/:id/messages/:message_id/artifacts", handler.ListMessageArtifacts)
+		sessions.GET("/:id/messages/:message_id/artifacts/:index/download", handler.DownloadMessageArtifact)
 	}
 }
 

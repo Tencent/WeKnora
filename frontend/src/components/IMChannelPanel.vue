@@ -780,7 +780,7 @@ function resolvedChannelName(): string {
 }
 
 function platformSupportsThread(platform: string): boolean {
-  return ['slack', 'mattermost', 'feishu', 'lark', 'telegram'].includes(platform);
+  return ['slack', 'mattermost', 'feishu', 'lark', 'telegram', 'yunzhijia'].includes(platform);
 }
 
 watch(

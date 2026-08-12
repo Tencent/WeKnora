@@ -49,3 +49,10 @@ func scopeCustomAgentsByModelID(db *gorm.DB, modelID string) *gorm.DB {
 		modelID, modelID, modelID, modelID, modelID, modelID,
 	)
 }
+
+func scopeCustomAgentsBySandboxConfigID(db *gorm.DB, configID string) *gorm.DB {
+	if db.Dialector.Name() == "postgres" {
+		return db.Where("config->>'sandbox_config_id' = ?", configID)
+	}
+	return db.Where("json_extract(config, '$.sandbox_config_id') = ?", configID)
+}
