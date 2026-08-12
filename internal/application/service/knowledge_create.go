@@ -1274,7 +1274,8 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 			logger.GetLogger(newCtx).WithField("error", err).
 				Errorf("triggerManualProcessing process chunks failed")
 			// No error channel out of the goroutine: fail the row in place.
-			s.markKnowledgeFailed(ctx, knowledge, err.Error())
+			// Use the detached context: a cancelled request would otherwise skip the failure write.
+			s.markKnowledgeFailed(newCtx, knowledge, err.Error())
 		}
 	}()
 	return nil
