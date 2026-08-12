@@ -1,7 +1,10 @@
 name: Manual Docker Build
 
 # 纯手动触发:不监听 push/tag,只在 Actions 页面手动点 Run。
-# 仅构建(验证 Dockerfile 能过),不推送到任何 registry。
+# 每个 build job 把镜像导出为 .tar 作中间 artifact;package job 等全部构建
+# 完成后下载所有 tar,用 gzip -9(最大压缩级别)压成单个
+# weknora-docker-images.tar.gz 上传。跑完在运行页 Artifacts 区下载这一个包即可。
+# 本地:tar xzf weknora-docker-images.tar.gz && docker load -i weknora-*.tar
 # 分支由 GitHub 手动触发 UI 自带的 ref 选择器决定。
 
 on:
@@ -70,12 +73,20 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           push: false
-          load: true
           platforms: linux/amd64
           file: frontend/Dockerfile
           context: ./frontend
+          outputs: type=docker,dest=/tmp/weknora-ui.tar
           cache-from: type=gha,scope=build-ui
           cache-to: type=gha,scope=build-ui,mode=max
+
+      - name: Upload ui image (intermediate)
+        uses: actions/upload-artifact@v7
+        with:
+          name: weknora-ui
+          path: /tmp/weknora-ui.tar
+          if-no-files-found: error
+          retention-days: 1
 
   build-docreader:
     if: ${{ inputs.build_all == true || inputs.build_docreader == true }}
@@ -102,12 +113,20 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           push: false
-          load: true
           platforms: linux/amd64
           file: docker/Dockerfile.docreader
           context: .
+          outputs: type=docker,dest=/tmp/weknora-docreader.tar
           cache-from: type=gha,scope=build-docreader
           cache-to: type=gha,scope=build-docreader,mode=max
+
+      - name: Upload docreader image (intermediate)
+        uses: actions/upload-artifact@v7
+        with:
+          name: weknora-docreader
+          path: /tmp/weknora-docreader.tar
+          if-no-files-found: error
+          retention-days: 1
 
   build-sandbox:
     if: ${{ inputs.build_all == true || inputs.build_sandbox == true }}
@@ -123,11 +142,11 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           push: false
-          load: true
           platforms: linux/amd64
           file: docker/Dockerfile.sandbox
           target: sandbox
           context: .
+          outputs: type=docker,dest=/tmp/weknora-sandbox.tar
           cache-from: type=gha,scope=build-sandbox
           cache-to: type=gha,scope=build-sandbox,mode=max
 
@@ -137,13 +156,29 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           push: false
-          load: true
           platforms: linux/amd64
           file: docker/Dockerfile.sandbox
           target: cube
           context: .
+          outputs: type=docker,dest=/tmp/weknora-sandbox-cube.tar
           cache-from: type=gha,scope=build-sandbox-cube
           cache-to: type=gha,scope=build-sandbox-cube,mode=max
+
+      - name: Upload sandbox image (intermediate)
+        uses: actions/upload-artifact@v7
+        with:
+          name: weknora-sandbox
+          path: /tmp/weknora-sandbox.tar
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload sandbox cube image (intermediate)
+        uses: actions/upload-artifact@v7
+        with:
+          name: weknora-sandbox-cube
+          path: /tmp/weknora-sandbox-cube.tar
+          if-no-files-found: error
+          retention-days: 1
 
   build-app:
     if: ${{ inputs.build_all == true || inputs.build_app == true }}
@@ -170,7 +205,6 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           push: false
-          load: true
           platforms: linux/amd64
           file: docker/Dockerfile.app
           context: .
@@ -179,5 +213,50 @@ jobs:
             ${{ format('COMMIT_ID_ARG={0}', steps.version.outputs.commit_id) }}
             ${{ format('BUILD_TIME_ARG={0}', steps.version.outputs.build_time) }}
             ${{ format('GO_VERSION_ARG={0}', steps.version.outputs.go_version) }}
+          outputs: type=docker,dest=/tmp/weknora-app.tar
           cache-from: type=gha,scope=build-app
           cache-to: type=gha,scope=build-app,mode=max
+
+      - name: Upload app image (intermediate)
+        uses: actions/upload-artifact@v7
+        with:
+          name: weknora-app
+          path: /tmp/weknora-app.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  # 等所有勾选的 build job 完成后,下载全部中间 tar,gzip -9 压成单个包上传。
+  # 任一构建成功即运行;被取消才跳过。被跳过的 build job 不产 artifact,
+  # download 自然只取已成功那部分。
+  package:
+    needs: [build-ui, build-docreader, build-sandbox, build-app]
+    if: ${{ !cancelled() && (needs.build-ui.result == 'success' || needs.build-docreader.result == 'success' || needs.build-sandbox.result == 'success' || needs.build-app.result == 'success') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all image artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: /tmp/images
+          merge-multiple: true
+
+      - name: Show downloaded images
+        run: |
+          echo "下载到的镜像 tar:"
+          ls -lh /tmp/images/
+
+      - name: Compress into single tar.gz (gzip -9, max level)
+        run: |
+          mkdir -p /tmp/out
+          # docker save 的层是未压缩 tar,因此 gzip -9 对整体仍能有效压缩。
+          tar --use-compress-program="gzip -9" \
+              -cf /tmp/out/weknora-docker-images.tar.gz -C /tmp/images .
+          echo "压缩完成:"
+          ls -lh /tmp/out/weknora-docker-images.tar.gz
+
+      - name: Upload unified archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: weknora-docker-images
+          path: /tmp/out/weknora-docker-images.tar.gz
+          if-no-files-found: error
+          retention-days: 7
