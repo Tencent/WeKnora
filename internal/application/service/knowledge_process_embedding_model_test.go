@@ -24,8 +24,11 @@ type embeddingModelFailureRepo struct {
 }
 
 func (r *embeddingModelFailureRepo) GetKnowledgeByID(
-	context.Context, uint64, string,
+	ctx context.Context, _ uint64, _ string,
 ) (*types.Knowledge, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return r.knowledge, nil
 }
 
@@ -180,6 +183,25 @@ func TestTriggerManualProcessingEmbeddingModelFailureMarksFailed(t *testing.T) {
 	svc, repo, kb, knowledge := newEmbeddingModelFailureService()
 
 	err := svc.triggerManualProcessing(context.Background(), kb, knowledge, "# content", false)
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return repo.knowledge.ParseStatus == types.ParseStatusFailed
+	}, 2*time.Second, 5*time.Millisecond)
+	require.Contains(t, repo.knowledge.ErrorMessage, "resolve embedding model failed")
+}
+
+// TestTriggerManualProcessingEmbeddingModelFailureSurvivesCancelledParent
+// pins that the detached goroutine persists its failure write with the
+// detached context. With the parent request context cancelled,
+// isKnowledgeAborted would see a cancelled repo read (treated as deleting)
+// and skip the terminal write, stranding the row in "processing".
+func TestTriggerManualProcessingEmbeddingModelFailureSurvivesCancelledParent(t *testing.T) {
+	svc, repo, kb, knowledge := newEmbeddingModelFailureService()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := svc.triggerManualProcessing(ctx, kb, knowledge, "# content", false)
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
