@@ -466,6 +466,7 @@ export default {
     channelIm: 'IM Channel',
     channelNotion: 'Notion',
     channelYuque: 'Yuque',
+    channelIma: 'Tencent IMA',
     channelUpload: 'Upload',
     channelManual: 'Manual',
     channelUrl: 'Web',
@@ -5476,6 +5477,7 @@ export default {
       lark_drive: 'Lark Drive',
       notion: 'Notion',
       yuque: 'Yuque',
+      ima: 'Tencent IMA',
       rss: 'RSS / Atom Feed'
     },
     connectorDesc: {
@@ -5485,6 +5487,7 @@ export default {
       lark_drive: 'Sync documents, spreadsheets and files from a Lark Drive folder (Feishu international)',
       notion: 'Sync pages and databases from Notion',
       yuque: 'Sync documents from Yuque knowledge bases',
+      ima: 'Sync documents, notes and files from Tencent IMA knowledge bases (AI sessions and video parses are not supported)',
       rss: 'Sync articles from RSS / Atom feeds'
     },
     drive: {
@@ -5505,6 +5508,8 @@ export default {
       appSecret: 'App Secret',
       integrationToken: 'Integration Token',
       apiToken: 'API Token',
+      imaClientId: 'IMA ClientID',
+      imaApiKey: 'IMA APIKey',
       baseUrl: 'Base URL (optional)',
       baseUrlHint: 'Leave empty to use the default public cloud address. For private/enterprise deployments or when accessing via reverse proxy, enter your custom address (e.g. https://api-proxy.example.com).',
       feedUrls: 'Feed URLs',
@@ -5548,6 +5553,14 @@ export default {
     prereqStep3Brief_lark_drive: 'Configure app permissions',
     prereqStep3Desc_lark_drive: 'Enable drive:drive:readonly, drive:export:readonly, docx:document:readonly permissions',
     prereqOpenConsole_yuque: 'Open Yuque Token settings',
+    prereqBarText_ima: 'First time? Click to see the Tencent IMA OpenAPI setup guide',
+    prereqStep1Brief_ima: 'Enable IMA agent OpenAPI access',
+    prereqStep1Desc_ima: 'Sign in to https://ima.qq.com/agent-interface and apply for OpenAPI access',
+    prereqStep2Brief_ima: 'Obtain the ClientID and APIKey',
+    prereqStep2Desc_ima: 'Copy the ima-openapi-clientid and ima-openapi-apikey credentials from the agent-interface page',
+    prereqStep3Brief_ima: 'Grant the credential access to the target knowledge bases',
+    prereqStep3Desc_ima: 'In the IMA client, authorize the credential for the knowledge bases you want to sync; unauthorized bases will not appear in the list',
+    prereqOpenConsole_ima: 'Open Tencent IMA OpenAPI console',
     prereqBotBrief: 'Add "Bot" capability to your app',
     prereqBotDesc: 'Open Platform > Add App Capability > Bot > create version and publish',
     prereqPermBrief: 'Grant API permissions',

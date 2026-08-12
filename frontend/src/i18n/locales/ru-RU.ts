@@ -620,6 +620,14 @@ export default {
     prereqStep3Brief_yuque: '(Опционально) Для Enterprise укажите Base URL',
     prereqStep3Desc_yuque: 'Пользователям публичного облака указывать не нужно. Для Yuque Enterprise или приватного развёртывания укажите корпоративный домен',
     prereqOpenConsole_yuque: 'Перейти к настройкам Yuque Token',
+    prereqBarText_ima: 'В первый раз? Нажмите, чтобы увидеть руководство по настройке Tencent IMA OpenAPI',
+    prereqStep1Brief_ima: 'Включите доступ к IMA agent OpenAPI',
+    prereqStep1Desc_ima: 'Войдите на https://ima.qq.com/agent-interface и подайте заявку на доступ к OpenAPI',
+    prereqStep2Brief_ima: 'Получите ClientID и APIKey',
+    prereqStep2Desc_ima: 'Скопируйте учётные данные ima-openapi-clientid и ima-openapi-apikey на странице agent-interface',
+    prereqStep3Brief_ima: 'Предоставьте учётным данным доступ к целевым базам знаний',
+    prereqStep3Desc_ima: 'В клиенте IMA авторизуйте учётные данные для баз знаний, которые нужно синхронизировать; неавторизованные базы в списке не отобразятся',
+    prereqOpenConsole_ima: 'Открыть консоль Tencent IMA OpenAPI',
     prereqStep1Brief_feishu: 'Создать частное приложение Feishu',
     prereqStep1Desc_feishu: 'Войдите в Feishu Open Platform → Создать корпоративное частное приложение',
     prereqStep2Brief_feishu: 'Добавить возможность бота',
@@ -680,6 +688,8 @@ export default {
       appSecret: 'App Secret',
       integrationToken: 'Integration Token',
       apiToken: 'API Token',
+      imaClientId: 'IMA ClientID',
+      imaApiKey: 'IMA APIKey',
       baseUrl: 'Base URL',
       baseUrlHint: 'Оставьте пустым, чтобы использовать адрес общедоступного облака по умолчанию. Для частных/корпоративных развертываний или при доступе через обратный прокси введите ваш собственный адрес (например, https://api-proxy.example.com)',
       feedUrls: 'Адреса лент',
@@ -694,6 +704,7 @@ export default {
       lark_drive: 'Синхронизация документов, таблиц и файлов из папки Lark Drive',
       notion: 'Синхронизация страниц и баз данных из Notion',
       yuque: 'Синхронизация документов из баз знаний Yuque',
+      ima: 'Синхронизация документов, заметок и файлов из баз знаний Tencent IMA (ИИ-сессии и разбор видео не поддерживаются)',
       rss: 'Синхронизация статей из лент RSS / Atom'
     },
     connector: {
@@ -703,6 +714,7 @@ export default {
       lark_drive: 'Lark Drive',
       notion: 'Notion',
       yuque: 'Yuque (Юйцюэ)',
+      ima: 'Tencent IMA',
       rss: 'RSS / Atom лента'
     },
     logDetail: {
@@ -5589,6 +5601,7 @@ export default {
     channelIm: 'IM канал',
     channelNotion: 'Notion',
     channelYuque: 'Yuque',
+    channelIma: 'Tencent IMA',
     channelUpload: 'Загрузка',
     channelManual: 'Вручную',
     channelUrl: 'Веб',

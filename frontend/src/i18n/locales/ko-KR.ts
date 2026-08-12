@@ -644,6 +644,14 @@ export default {
     prereqStep3Brief_lark_drive: "앱 권한 구성",
     prereqStep3Desc_lark_drive: "drive:drive:readonly, drive:export:readonly, docx:document:readonly 권한 활성화",
     prereqOpenConsole_yuque: 'Yuque Token 설정으로 이동',
+    prereqBarText_ima: '처음 사용하시나요? 클릭하여 Tencent IMA OpenAPI 설정 가이드를 확인하세요',
+    prereqStep1Brief_ima: 'IMA 에이전트 OpenAPI 액세스 활성화',
+    prereqStep1Desc_ima: 'https://ima.qq.com/agent-interface 에 로그인하여 OpenAPI 액세스를 신청하세요',
+    prereqStep2Brief_ima: 'ClientID 및 APIKey 획득',
+    prereqStep2Desc_ima: '에이전트 접속 페이지에서 ima-openapi-clientid 와 ima-openapi-apikey 자격 증명을 복사하세요',
+    prereqStep3Brief_ima: '대상 지식베이스에 자격 증명 권한 부여',
+    prereqStep3Desc_ima: 'IMA 클라이언트에서 동기화하려는 지식베이스에 대해 자격 증명을 승인하세요. 승인되지 않은 지식베이스는 목록에 나타나지 않습니다',
+    prereqOpenConsole_ima: 'Tencent IMA OpenAPI 콘솔로 이동',
     prereqBotBrief: '앱에 \'봇\' 기능 추가',
     prereqBotDesc: '오픈 플랫폼 → 앱 기능 추가 → 봇 → 버전 생성 후 게시',
     prereqPermBrief: 'API 권한 활성화',
@@ -680,6 +688,8 @@ export default {
       appSecret: 'App Secret',
       integrationToken: 'Integration Token',
       apiToken: 'API Token',
+      imaClientId: 'IMA ClientID',
+      imaApiKey: 'IMA APIKey',
       baseUrl: 'Base URL',
       baseUrlHint: "비워두면 기본 퍼블릭 클라우드 주소가 사용됩니다. 프라이빗/엔터프라이즈 배포거나 리버스 프록시를 통해 액세스해야 하는 경우 사용자 정의 주소를 입력하세요 (예: https://api-proxy.example.com)",
       feedUrls: '피드 주소',
@@ -694,6 +704,7 @@ export default {
       lark_drive: "Lark 드라이브 폴더에서 문서, 스프레드시트, 파일 동기화",
       notion: 'Notion에서 페이지 및 데이터베이스 동기화',
       yuque: '위큐 지식베이스에서 문서 동기화',
+      ima: 'Tencent IMA 지식베이스에서 문서, 노트 및 파일 동기화 (AI 세션과 동영상 분석은 지원되지 않음)',
       rss: 'RSS / Atom 피드에서 글 동기화'
     },
     connector: {
@@ -703,6 +714,7 @@ export default {
       lark_drive: "Lark 드라이브",
       notion: 'Notion',
       yuque: '위큐 (Yuque)',
+      ima: 'Tencent IMA',
       rss: 'RSS / Atom 피드'
     },
     logDetail: {
@@ -5589,6 +5601,7 @@ export default {
     channelIm: 'IM 채널',
     channelNotion: 'Notion',
     channelYuque: 'Yuque',
+    channelIma: 'Tencent IMA',
     channelUpload: '업로드',
     channelManual: '수동',
     channelUrl: '웹',
