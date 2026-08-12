@@ -3050,7 +3050,10 @@ async function createNewSession(value: string): Promise<void> {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   position: relative;
+  container-type: inline-size;
+  container-name: doc-card-area;
   /* 作为批量工具栏悬浮的定位上下文 */
 }
 
@@ -3171,17 +3174,22 @@ async function createNewSession(value: string): Promise<void> {
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
+    position: relative;
+    z-index: 1;
   }
 
-  @media (min-width: 1280px) {
+  // The folder tree changes the available document width without changing the
+  // viewport width. Switch to a single row only when this content area itself
+  // is wide enough for TDesign's fixed-width filter controls.
+  @container doc-card-area (min-width: 1240px) {
     display: flex;
     flex-direction: row;
     flex-wrap: nowrap;
     gap: 12px;
 
     &__filters {
-      flex: 0 1 auto;
-      overflow-x: visible;
+      flex: 1 1 auto;
+      overflow-x: auto;
     }
   }
 
