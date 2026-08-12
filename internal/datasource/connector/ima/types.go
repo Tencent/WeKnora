@@ -16,8 +16,13 @@ import (
 // the client (see client.go); users only configure the host.
 const DefaultBaseURL = "https://ima.qq.com"
 
-// Base path for every OpenAPI request.
+// Base path for knowledge-base OpenAPI requests.
 const apiBasePath = "/openapi/wiki/v1"
+
+// Base path for the note OpenAPI. Notes live in their own namespace: the wiki
+// endpoints only ever hand back a notebook_id for them, and the body has to be
+// read from here.
+const noteBasePath = "/openapi/note/v1"
 
 // Config holds IMA-specific configuration decoded from
 // DataSourceConfig.Credentials. Both credentials are opaque strings and
@@ -74,11 +79,38 @@ func parseIMAConfig(config *types.DataSourceConfig) (*Config, error) {
 }
 
 // apiEnvelope is the uniform IMA response wrapper: `{ code, msg, data }`.
-// A non-zero code is a business-level error and MUST be surfaced to the user
+// A non-zero code is a business-level error and MUST be surfaced to the user.
+//
+// Some published IMA references spell the same envelope `{ retcode, errmsg }`.
+// Accepting both costs nothing and avoids the failure mode where a mismatch
+// leaves Code at its zero value and every API error is silently read as
+// success.
 type apiEnvelope struct {
-	Code int             `json:"code"`
-	Msg  string          `json:"msg"`
+	Code   int    `json:"code"`
+	Msg    string `json:"msg"`
+	RetErr *int   `json:"retcode"`
+	ErrMsg string `json:"errmsg"`
+
 	Data json.RawMessage `json:"data"`
+}
+
+// statusCode returns the business status code under either spelling.
+func (e apiEnvelope) statusCode() int {
+	if e.Code != 0 {
+		return e.Code
+	}
+	if e.RetErr != nil {
+		return *e.RetErr
+	}
+	return 0
+}
+
+// message returns the human-readable error under either spelling.
+func (e apiEnvelope) message() string {
+	if e.Msg != "" {
+		return e.Msg
+	}
+	return e.ErrMsg
 }
 
 // KnowledgeBaseInfo mirrors IMA's KnowledgeBaseInfo (get_knowledge_base).
@@ -198,6 +230,12 @@ type getMediaInfoResp struct {
 	MediaType       int32           `json:"media_type"`
 	URLInfo         urlInfo         `json:"url_info"`
 	NotebookExtInfo notebookExtInfo `json:"notebook_ext_info"`
+}
+
+// getDocContentResp — note/v1 get_doc_content response. Content is the note
+// body; with target_content_format=0 it is plain text.
+type getDocContentResp struct {
+	Content string `json:"content"`
 }
 
 // imaCursor tracks per-knowledge-base state seen during the last sync.
@@ -385,6 +423,11 @@ func mimeForExtension(ext string) string {
 	}
 }
 
+// isSkippableMediaType reports whether IMA offers no way to read this type's
+// content. AI sessions are only ever referenced by session_id with no read
+// endpoint, and video parses cannot even be added outside the IMA desktop app.
+// Notes are NOT listed here: they are read through the note namespace, see
+// fetchNote.
 func isSkippableMediaType(t int32) bool {
-	return t == mediaTypeNote || t == mediaTypeAISession || t == mediaTypeVideo
+	return t == mediaTypeAISession || t == mediaTypeVideo
 }

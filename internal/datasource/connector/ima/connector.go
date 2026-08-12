@@ -407,6 +407,53 @@ func listAllKBFiles(
 	return out, folderPath, nil
 }
 
+// fetchNote resolves an IMA note (media_type=11). Notes carry no downloadable
+// body: get_media_info only reports the notebook_id, and the text has to be
+// read from the separate note namespace.
+//
+// The body arrives as plain text but is ingested as Markdown, because IMA notes
+// are authored as rich text and the export keeps its heading and list markers —
+// parsing it as Markdown preserves that structure for chunking, and text with
+// no markers is unaffected.
+func fetchNote(
+	ctx context.Context, cli *client,
+	kbID string, externalID string, f walkedFile, folderPath map[string]string,
+	info *getMediaInfoResp,
+) (types.FetchedItem, fetchOutcome) {
+	noteID := info.NotebookExtInfo.NotebookID
+	if noteID == "" {
+		logger.Warnf(ctx, "[IMA] note %s (title=%q) has no notebook_id, skipping", f.MediaID, f.Title)
+		return types.FetchedItem{}, fetchSkipped
+	}
+
+	content, err := cli.GetNoteContent(ctx, noteID)
+	if err != nil {
+		logger.Warnf(ctx, "[IMA] get_doc_content(note %s, title=%q) failed, will retry next sync: %v",
+			noteID, f.Title, err)
+		return types.FetchedItem{}, fetchFailed
+	}
+	if strings.TrimSpace(content) == "" {
+		logger.Infof(ctx, "[IMA] note %s (title=%q) is empty, skipping", noteID, f.Title)
+		return types.FetchedItem{}, fetchSkipped
+	}
+
+	fileName := sanitizeFileName(f.Title)
+	if !strings.HasSuffix(strings.ToLower(fileName), ".md") {
+		fileName += ".md"
+	}
+
+	return types.FetchedItem{
+		ExternalID:       externalID,
+		Title:            f.Title,
+		Content:          []byte(content),
+		ContentType:      "text/markdown",
+		FileName:         fileName,
+		SourceResourceID: kbID,
+		UpdatedAt:        time.Now(),
+		Metadata:         baseMetadata(externalID, f, folderPath, info, kbID),
+	}, fetchOK
+}
+
 // fetchOutcome distinguishes the three ways fetchOneMedia can end, because the
 // caller has to treat them differently when building the sync cursor: only a
 // transient failure must stay out of the cursor so it is retried next run.
@@ -439,8 +486,12 @@ func fetchOneMedia(
 		return types.FetchedItem{}, fetchFailed
 	}
 
+	if info.MediaType == mediaTypeNote {
+		return fetchNote(ctx, cli, kbID, externalID, f, folderPath, info)
+	}
+
 	if isSkippableMediaType(info.MediaType) {
-		logger.Infof(ctx, "[IMA] skip media %s (title=%q media_type=%d): unsupported by wiki OpenAPI",
+		logger.Infof(ctx, "[IMA] skip media %s (title=%q media_type=%d): unsupported by the IMA OpenAPI",
 			f.MediaID, f.Title, info.MediaType)
 		return types.FetchedItem{}, fetchSkipped
 	}

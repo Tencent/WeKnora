@@ -43,6 +43,13 @@ type fakeFile struct {
 	InfoFails bool
 	// DownloadFails makes the download URL return a 500.
 	DownloadFails bool
+
+	// NotebookID is reported under notebook_ext_info for notes.
+	NotebookID string
+	// NoteBody is what get_doc_content serves for NotebookID.
+	NoteBody string
+	// NoteFails makes get_doc_content return a business error.
+	NoteFails bool
 }
 
 // fakeFolder is a folder entry in a fake knowledge base listing.
@@ -83,6 +90,7 @@ func newFakeIMA(t *testing.T) *fakeIMA {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(apiBasePath+"/", f.handleAPI)
+	mux.HandleFunc(noteBasePath+"/", f.handleNoteAPI)
 	mux.HandleFunc("/dl/", f.handleDownload)
 	f.server = httptest.NewServer(mux)
 	t.Cleanup(f.server.Close)
@@ -218,7 +226,9 @@ func (f *fakeIMA) handleAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resp := getMediaInfoResp{MediaType: file.MediaType}
-		if !file.NoURL {
+		resp.NotebookExtInfo = notebookExtInfo{NotebookID: file.NotebookID}
+		// Notes carry no url_info; the body lives in the note namespace.
+		if !file.NoURL && file.MediaType != mediaTypeNote {
 			resp.URLInfo = urlInfo{
 				URL:     f.server.URL + "/dl/" + mediaID,
 				Headers: file.URLHeaders,
@@ -229,6 +239,42 @@ func (f *fakeIMA) handleAPI(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeEnvelope(w, 110001, "unsupported action "+action, nil)
 	}
+}
+
+// handleNoteAPI serves the /openapi/note/v1 namespace.
+func (f *fakeIMA) handleNoteAPI(w http.ResponseWriter, r *http.Request) {
+	action := strings.TrimPrefix(r.URL.Path, noteBasePath+"/")
+	f.record("note/" + action)
+
+	var req map[string]interface{}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	if action != "get_doc_content" {
+		writeEnvelope(w, 110012, "unsupported note action "+action, nil)
+		return
+	}
+
+	noteID, _ := req["note_id"].(string)
+	f.record("get_doc_content:" + noteID)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, byParent := range f.files {
+		for _, files := range byParent {
+			for _, file := range files {
+				if file.NotebookID != noteID || noteID == "" {
+					continue
+				}
+				if file.NoteFails {
+					writeEnvelope(w, 110011, "note read failed", nil)
+					return
+				}
+				writeEnvelope(w, 0, "", getDocContentResp{Content: file.NoteBody})
+				return
+			}
+		}
+	}
+	writeEnvelope(w, 110001, "unknown note", nil)
 }
 
 func (f *fakeIMA) handleDownload(w http.ResponseWriter, r *http.Request) {

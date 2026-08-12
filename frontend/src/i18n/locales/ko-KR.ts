@@ -704,7 +704,7 @@ export default {
       lark_drive: "Lark 드라이브 폴더에서 문서, 스프레드시트, 파일 동기화",
       notion: 'Notion에서 페이지 및 데이터베이스 동기화',
       yuque: '위큐 지식베이스에서 문서 동기화',
-      ima: 'Tencent IMA 지식베이스에서 문서 및 파일 동기화 (노트와 AI 세션은 아직 지원되지 않음)',
+      ima: 'Tencent IMA 지식베이스에서 문서, 노트 및 파일 동기화 (AI 세션과 동영상 분석은 지원되지 않음)',
       rss: 'RSS / Atom 피드에서 글 동기화'
     },
     connector: {
