@@ -992,6 +992,7 @@ export default {
       consoleTip: '前往获取凭证信息',
       wecomWSEndpointHint: '可选，私有化部署时填写自定义 WebSocket 地址，留空则使用默认公有云地址。内网地址需将域名加入 SSRF_WHITELIST 环境变量',
       wecomAPIBaseURLHint: '可选，私有化部署时填写自定义 API 地址，留空则使用默认公有云地址。内网地址需将域名加入 SSRF_WHITELIST 环境变量',
+      feishuAPIBaseURLHint: '可选。若服务器能直连外网则留空；若需通过代理才能访问飞书，填写反向代理地址（如 nginx，http://host:port）。内网地址需将域名加入 SSRF_WHITELIST 环境变量',
       fileKnowledgeBase: '文件保存知识库',
       fileKnowledgeBasePlaceholder: '选择知识库（可选）',
       fileKnowledgeBaseHint: '配置后，用户发送的文件将自动保存到该知识库中',

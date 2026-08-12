@@ -25,9 +25,14 @@ func NewFactory(region Region) im.AdapterFactory {
 		appSecret := im.GetString(creds, "app_secret")
 		verificationToken := im.GetString(creds, "verification_token")
 		encryptKey := im.GetString(creds, "encrypt_key")
+		apiBaseURL := im.GetString(creds, "api_base_url")
 
-		// Always create the HTTP adapter (needed for SendReply in both modes)
-		adapter := NewAdapter(region, appID, appSecret, verificationToken, encryptKey)
+		// Always create the HTTP adapter (needed for SendReply in both modes).
+		// apiBaseURL is validated here; an invalid value fails the channel.
+		adapter, err := NewAdapter(region, appID, appSecret, verificationToken, encryptKey, apiBaseURL)
+		if err != nil {
+			return nil, nil, fmt.Errorf("create %s adapter: %w", region.Platform, err)
+		}
 
 		mode := im.ResolveMode(channel, "websocket")
 
@@ -36,7 +41,7 @@ func NewFactory(region Region) im.AdapterFactory {
 			return adapter, nil, nil
 
 		case "websocket":
-			client := NewLongConnClient(region, appID, appSecret, msgHandler)
+			client := NewLongConnClient(region, appID, appSecret, apiBaseURL, msgHandler)
 
 			wsCtx, wsCancel := context.WithCancel(context.Background())
 			go func() {

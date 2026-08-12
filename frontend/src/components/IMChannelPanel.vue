@@ -314,6 +314,11 @@
                 <label class="form-label">App Secret</label>
                 <t-input v-model="formData.credentials.app_secret" type="password" placeholder="App Secret" />
               </div>
+              <div class="form-item">
+                <label class="form-label">Base URL</label>
+                <t-input v-model="formData.credentials.api_base_url" placeholder="https://open.feishu.cn" />
+                <p class="form-desc">{{ $t('agentEditor.im.feishuAPIBaseURLHint') }}</p>
+              </div>
               <template v-if="formData.mode === 'webhook'">
                 <div class="form-item">
                   <label class="form-label">Verification Token</label>

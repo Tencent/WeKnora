@@ -99,7 +99,7 @@ func TestSendReply_EndToEnd_UsesRegionCloud(t *testing.T) {
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
-	a := NewAdapter(testRegion(srv.URL), "cli_app", "secret", "", "")
+	a, _ := NewAdapter(testRegion(srv.URL), "cli_app", "secret", "", "", "")
 	incoming := &im.IncomingMessage{
 		Platform:  im.PlatformLark,
 		UserID:    "ou_user1",
@@ -144,7 +144,7 @@ func TestSendReply_EndToEnd_FallsBackToSendAPI(t *testing.T) {
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
-	a := NewAdapter(testRegion(srv.URL), "cli_app", "secret", "", "")
+	a, _ := NewAdapter(testRegion(srv.URL), "cli_app", "secret", "", "", "")
 	incoming := &im.IncomingMessage{
 		Platform:  im.PlatformLark,
 		UserID:    "ou_user1",
@@ -175,7 +175,7 @@ func TestSendReply_EndToEnd_HardErrorSurfaces(t *testing.T) {
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
-	a := NewAdapter(testRegion(srv.URL), "cli_app", "secret", "", "")
+	a, _ := NewAdapter(testRegion(srv.URL), "cli_app", "secret", "", "", "")
 	incoming := &im.IncomingMessage{
 		Platform: im.PlatformLark, UserID: "ou_user1",
 		ChatType: im.ChatTypeDirect, MessageID: "om_msg1",
