@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,10 +44,6 @@ type treeEntry struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
 	Path string `json:"path"`
-}
-type member struct {
-	Username string `json:"username"`
-	State    string `json:"state"`
 }
 type comparison struct {
 	Diffs []struct {
@@ -112,7 +109,33 @@ func (c *client) getRaw(ctx context.Context, endpoint string) ([]byte, error) {
 	}
 	return io.ReadAll(resp.Body)
 }
-func projectPath(id string) string { return url.PathEscape(id) }
+
+// projectPath encodes a GitLab project identifier for URL path segments.
+// Numeric IDs are used verbatim. Namespace paths accept either "group/project"
+// or a once-encoded "group%2Fproject" without double-encoding percent signs.
+func projectPath(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ""
+	}
+	if _, err := strconv.ParseInt(id, 10, 64); err == nil {
+		return id
+	}
+	decoded := id
+	if strings.Contains(id, "%") {
+		if unescaped, err := url.PathUnescape(id); err == nil {
+			decoded = unescaped
+		}
+	}
+	if strings.Contains(decoded, "/") {
+		parts := strings.Split(decoded, "/")
+		for i, part := range parts {
+			parts[i] = url.PathEscape(part)
+		}
+		return strings.Join(parts, "%2F")
+	}
+	return url.PathEscape(decoded)
+}
 func (c *client) project(ctx context.Context, id string) (*project, error) {
 	var p project
 	err := c.get(ctx, "/projects/"+projectPath(id), &p)
@@ -132,29 +155,6 @@ func (c *client) ping(ctx context.Context) error {
 		ID int64 `json:"id"`
 	}
 	return c.get(ctx, "/user", &user)
-}
-func (c *client) members(ctx context.Context, id string) ([]member, error) {
-	var m []member
-	allEndpoint := "/projects/" + projectPath(id) + "/members/all?per_page=100"
-	if err := c.get(ctx, allEndpoint, &m); err == nil {
-		return m, nil
-	} else {
-		// Some GitLab deployments do not expose the inherited-members endpoint.
-		// The standard members endpoint still verifies direct project membership.
-		allErr := err
-		m = nil
-		membersEndpoint := "/projects/" + projectPath(id) + "/members?per_page=100"
-		if err := c.get(ctx, membersEndpoint, &m); err == nil {
-			return m, nil
-		} else {
-			return nil, fmt.Errorf("members query failed (%v); fallback failed (%w)", allErr, err)
-		}
-	}
-}
-func (c *client) groupMembers(ctx context.Context, id int64) ([]member, error) {
-	var m []member
-	err := c.get(ctx, fmt.Sprintf("/groups/%d/members?per_page=100", id), &m)
-	return m, err
 }
 func (c *client) commitSHA(ctx context.Context, id, ref string) (string, error) {
 	var v struct {

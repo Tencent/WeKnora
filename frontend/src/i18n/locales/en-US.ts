@@ -5419,8 +5419,8 @@ export default {
     credentialsLabel: 'credentials',
     gitlab: {
       baseUrl: 'GitLab URL', accessToken: 'Personal access token', projects: 'GitLab projects',
-      projectsHint: 'Enter a project ID (or URL-encoded project path), with optional branch and directories.',
-      project: 'Project', projectId: 'Project ID', projectIdPlaceholder: 'For example: 12345 or group%2Fproject',
+      projectsHint: 'Enter a project ID or namespace path (for example group/project), with optional branch and directories.',
+      project: 'Project', projectId: 'Project ID', projectIdPlaceholder: 'For example: 12345 or group/project',
       ref: 'Branch', refPlaceholder: 'Leave empty to use the default branch',
       paths: 'Directories', pathsPlaceholder: 'One directory per line; leave empty to sync the whole project',
       addProject: 'Add project', projectRequired: 'Add at least one GitLab project',

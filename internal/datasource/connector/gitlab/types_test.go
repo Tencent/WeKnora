@@ -45,13 +45,3 @@ func TestKnowledgeRelativePathPreservesRepositoryTreeBelowProjectAndBranch(t *te
 		t.Fatalf("knowledge relative path = %q", got)
 	}
 }
-
-func TestHasActiveMember(t *testing.T) {
-	members := []member{{Username: "liguowei", State: "active"}, {Username: "disabled", State: "blocked"}}
-	if !hasActiveMember(members, "liguowei") {
-		t.Fatal("expected active member to match")
-	}
-	if hasActiveMember(members, "disabled") {
-		t.Fatal("blocked member must not match")
-	}
-}
