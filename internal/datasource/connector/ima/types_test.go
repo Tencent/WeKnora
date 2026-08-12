@@ -1,6 +1,7 @@
 package ima
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -150,14 +151,46 @@ func TestSanitizeFileName(t *testing.T) {
 }
 
 func TestIsSkippableMediaType(t *testing.T) {
-	for _, mt := range []int32{mediaTypeNote, mediaTypeAISession, mediaTypeVideo} {
+	for _, mt := range []int32{mediaTypeAISession, mediaTypeVideo} {
 		if !isSkippableMediaType(mt) {
 			t.Errorf("media type %d should be skippable", mt)
 		}
 	}
-	for _, mt := range []int32{mediaTypePDF, mediaTypeMarkdown, mediaTypeWeb} {
+	// Notes are read through the note namespace rather than skipped.
+	for _, mt := range []int32{mediaTypePDF, mediaTypeMarkdown, mediaTypeWeb, mediaTypeNote} {
 		if isSkippableMediaType(mt) {
 			t.Errorf("media type %d should not be skippable", mt)
 		}
+	}
+}
+
+// TestAPIEnvelope_AcceptsBothSpellings covers the retcode/errmsg variant some
+// IMA references describe: if only `code` were read, a non-zero retcode would
+// decode as 0 and every API error would be silently treated as success.
+func TestAPIEnvelope_AcceptsBothSpellings(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantCode int
+		wantMsg  string
+	}{
+		{"code/msg", `{"code":110030,"msg":"无权限"}`, 110030, "无权限"},
+		{"retcode/errmsg", `{"retcode":110030,"errmsg":"无权限"}`, 110030, "无权限"},
+		{"success", `{"code":0,"msg":"ok"}`, 0, "ok"},
+		{"retcode success", `{"retcode":0,"errmsg":"成功"}`, 0, "成功"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var env apiEnvelope
+			if err := json.Unmarshal([]byte(tt.body), &env); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if got := env.statusCode(); got != tt.wantCode {
+				t.Errorf("statusCode() = %d, want %d", got, tt.wantCode)
+			}
+			if got := env.message(); got != tt.wantMsg {
+				t.Errorf("message() = %q, want %q", got, tt.wantMsg)
+			}
+		})
 	}
 }

@@ -203,6 +203,113 @@ func TestFetchIncremental_UnsupportedTypeIsProbedOnce(t *testing.T) {
 	}
 }
 
+// TestFetchAll_NoteBodyIsReadFromNoteNamespace covers IMA notes. They expose no
+// url_info at all: get_media_info only reports a notebook_id, and the body has
+// to be read from /openapi/note/v1/get_doc_content.
+func TestFetchAll_NoteBodyIsReadFromNoteNamespace(t *testing.T) {
+	f := newFakeIMA(t)
+	f.setKB("kb1", []fakeFile{{
+		MediaID:    "note_1",
+		Title:      "Meeting notes",
+		MediaType:  mediaTypeNote,
+		NotebookID: "987654321",
+		NoteBody:   "# Standup\n- shipped the connector",
+	}})
+
+	items, err := NewConnector().FetchAll(context.Background(), f.config("kb1"), []string{"kb1"})
+	if err != nil {
+		t.Fatalf("FetchAll: %v", err)
+	}
+
+	note := mustFindItem(t, items, logicalKey("kb1", "", "Meeting notes"))
+	if string(note.Content) != "# Standup\n- shipped the connector" {
+		t.Errorf("content = %q, want the note body", note.Content)
+	}
+	if !strings.HasSuffix(note.FileName, ".md") {
+		t.Errorf("FileName = %q, want an .md suffix", note.FileName)
+	}
+	if note.ContentType != "text/markdown" {
+		t.Errorf("ContentType = %q, want text/markdown", note.ContentType)
+	}
+	if note.Metadata["notebook_id"] != "987654321" {
+		t.Errorf("metadata notebook_id = %q, want 987654321", note.Metadata["notebook_id"])
+	}
+	if f.callCount("get_doc_content:987654321") != 1 {
+		t.Errorf("get_doc_content calls = %d, want 1", f.callCount("get_doc_content:987654321"))
+	}
+}
+
+// TestFetchIncremental_NoteReadFailureIsRetried checks that a note whose body
+// could not be read follows the same retry path as a failed download rather
+// than being remembered as synced.
+func TestFetchIncremental_NoteReadFailureIsRetried(t *testing.T) {
+	f := newFakeIMA(t)
+	note := fakeFile{
+		MediaID: "note_1", Title: "Broken", MediaType: mediaTypeNote,
+		NotebookID: "111", NoteBody: "recovered", NoteFails: true,
+	}
+	f.setKB("kb1", []fakeFile{note})
+
+	c := NewConnector()
+	cfg := f.config("kb1")
+	key := logicalKey("kb1", "", "Broken")
+
+	items, cursor, err := c.FetchIncremental(context.Background(), cfg, nil)
+	if err != nil {
+		t.Fatalf("first FetchIncremental: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("a note that could not be read must not be emitted, got %s", describeItems(items))
+	}
+	if _, recorded := decodeCursor(t, cursor).KBLogical["kb1"][key]; recorded {
+		t.Fatal("a failed note read must not be recorded in the cursor")
+	}
+
+	note.NoteFails = false
+	f.setKB("kb1", []fakeFile{note})
+	items2, _, err := c.FetchIncremental(context.Background(), cfg, cursor)
+	if err != nil {
+		t.Fatalf("second FetchIncremental: %v", err)
+	}
+	if got := mustFindItem(t, items2, key); string(got.Content) != "recovered" {
+		t.Errorf("content = %q, want recovered", got.Content)
+	}
+}
+
+func TestFetchAll_EmptyNoteIsSkipped(t *testing.T) {
+	f := newFakeIMA(t)
+	f.setKB("kb1", []fakeFile{{
+		MediaID: "note_1", Title: "Blank", MediaType: mediaTypeNote,
+		NotebookID: "222", NoteBody: "   \n  ",
+	}})
+
+	items, err := NewConnector().FetchAll(context.Background(), f.config("kb1"), []string{"kb1"})
+	if err != nil {
+		t.Fatalf("FetchAll: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("an empty note must be skipped, got %s", describeItems(items))
+	}
+}
+
+// TestFetchAll_AISessionIsStillSkipped pins the types IMA genuinely cannot
+// export, so widening note support does not quietly widen these too.
+func TestFetchAll_AISessionIsStillSkipped(t *testing.T) {
+	f := newFakeIMA(t)
+	f.setKB("kb1", []fakeFile{
+		{MediaID: "m-ai", Title: "Chat", MediaType: mediaTypeAISession},
+		{MediaID: "m-video", Title: "Clip", MediaType: mediaTypeVideo},
+	})
+
+	items, err := NewConnector().FetchAll(context.Background(), f.config("kb1"), []string{"kb1"})
+	if err != nil {
+		t.Fatalf("FetchAll: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("AI sessions and video parses must be skipped, got %s", describeItems(items))
+	}
+}
+
 // TestFetchAll_AuthenticatedURLIsDownloaded covers media types with no fixed
 // extension. When IMA attaches auth headers the URL is IMA-hosted and WeKnora's
 // own fetch could not authenticate, so the connector must download it here and

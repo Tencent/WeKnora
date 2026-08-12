@@ -57,10 +57,20 @@ func newClient(cfg *Config) *client {
 }
 
 // callAPI executes an authenticated POST to /openapi/wiki/v1/<action>.
-// It parses the standard {code, msg, data} envelope and unmarshals `data`
-// into `result`. A non-zero business code is returned as a plain error so the
-// caller can surface `msg` to the user
 func (c *client) callAPI(ctx context.Context, action string, req interface{}, result interface{}) error {
+	return c.callAPIAt(ctx, apiBasePath, action, req, result)
+}
+
+// callAPIAt executes an authenticated POST to <basePath>/<action>. It parses
+// the standard {code, msg, data} envelope and unmarshals `data` into `result`.
+// A non-zero business code is returned as a plain error so the caller can
+// surface `msg` to the user.
+//
+// basePath is a parameter because notes live under a second namespace
+// (/openapi/note/v1) that shares this authentication and envelope.
+func (c *client) callAPIAt(
+	ctx context.Context, basePath, action string, req interface{}, result interface{},
+) error {
 	const (
 		maxRetries    = 3
 		max5xxRetries = 1
@@ -84,7 +94,10 @@ func (c *client) callAPI(ctx context.Context, action string, req interface{}, re
 		body = []byte("{}")
 	}
 
-	url := c.baseURL + apiBasePath + "/" + action
+	url := c.baseURL + basePath + "/" + action
+	// Both namespaces expose distinct actions, but log the full path so the two
+	// are never ambiguous.
+	label := basePath + "/" + action
 
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
@@ -98,9 +111,9 @@ func (c *client) callAPI(ctx context.Context, action string, req interface{}, re
 		httpReq.Header.Set("User-Agent", userAgent)
 
 		if attempt == 0 {
-			logger.Infof(ctx, "[IMA] POST %s", action)
+			logger.Infof(ctx, "[IMA] POST %s", label)
 		} else {
-			logger.Infof(ctx, "[IMA] POST %s (retry %d/%d)", action, attempt, maxRetries)
+			logger.Infof(ctx, "[IMA] POST %s (retry %d/%d)", label, attempt, maxRetries)
 		}
 
 		resp, err := c.httpClient.Do(httpReq)
@@ -132,7 +145,7 @@ func (c *client) callAPI(ctx context.Context, action string, req interface{}, re
 		// (get_media_info in particular) carry pre-signed storage URLs and
 		// per-request auth headers that must not land in the server log.
 		bodyPreview := truncate(string(respBody), 500)
-		logger.Infof(ctx, "[IMA] POST %s → status=%d bodyLen=%d", action, resp.StatusCode, len(respBody))
+		logger.Infof(ctx, "[IMA] POST %s → status=%d bodyLen=%d", label, resp.StatusCode, len(respBody))
 
 		// HTTP-level auth failures: surface as ErrInvalidCredentials.
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
@@ -178,19 +191,19 @@ func (c *client) callAPI(ctx context.Context, action string, req interface{}, re
 		// 110021 (限频) is retried. Everything else — including 110001 (参数非法),
 		// which is a bug on our side rather than a credential problem — surfaces
 		// verbatim so the user sees IMA's own message.
-		if env.Code != 0 {
-			if env.Code == 110030 {
+		if code := env.statusCode(); code != 0 {
+			if code == 110030 {
 				return fmt.Errorf("%w: ima code=%d msg=%s",
-					datasource.ErrInvalidCredentials, env.Code, env.Msg)
+					datasource.ErrInvalidCredentials, code, env.message())
 			}
-			if env.Code == 110021 && attempt < maxRetries {
-				lastErr = fmt.Errorf("ima rate limited: code=%d msg=%s", env.Code, env.Msg)
+			if code == 110021 && attempt < maxRetries {
+				lastErr = fmt.Errorf("ima rate limited: code=%d msg=%s", code, env.message())
 				if sErr := sleepCtx(ctx, backoff[minInt(attempt, len(backoff)-1)]); sErr != nil {
 					return sErr
 				}
 				continue
 			}
-			return fmt.Errorf("ima api error: code=%d msg=%s", env.Code, env.Msg)
+			return fmt.Errorf("ima api error: code=%d msg=%s", code, env.message())
 		}
 
 		if result != nil && len(env.Data) > 0 && string(env.Data) != "null" {
@@ -293,6 +306,23 @@ func (c *client) GetMediaInfo(ctx context.Context, mediaID string) (*getMediaInf
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// GetNoteContent — POST /openapi/note/v1/get_doc_content. Returns an IMA note's
+// body as plain text (target_content_format=0).
+//
+// noteID is the notebook_id that get_media_info reports for a note: the wiki
+// namespace never exposes note bodies, it only points at them.
+func (c *client) GetNoteContent(ctx context.Context, noteID string) (string, error) {
+	req := map[string]interface{}{
+		"note_id":               noteID,
+		"target_content_format": 0,
+	}
+	var resp getDocContentResp
+	if err := c.callAPIAt(ctx, noteBasePath, "get_doc_content", req, &resp); err != nil {
+		return "", err
+	}
+	return resp.Content, nil
 }
 
 // DownloadURL fetches a URL returned by GetMediaInfo, respecting the auth
