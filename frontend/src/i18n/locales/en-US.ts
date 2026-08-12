@@ -5487,7 +5487,6 @@ export default {
       yuque: 'Yuque',
       rss: 'RSS / Atom Feed',
       ima: 'Tencent IMA',
-      rss: 'RSS / Atom Feed',
       gitlab: 'GitLab'
     },
     connectorDesc: {
@@ -5499,7 +5498,6 @@ export default {
       yuque: 'Sync documents from Yuque knowledge bases',
       rss: 'Sync articles from RSS / Atom feeds',
       ima: 'Sync documents, notes and files from Tencent IMA knowledge bases (AI sessions and video parses are not supported)',
-      rss: 'Sync articles from RSS / Atom feeds',
       gitlab: 'Sync files from GitLab projects'
     },
     drive: {
