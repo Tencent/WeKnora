@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 // RemoteErrorKind is the stable, provider-neutral classification of a
@@ -128,6 +129,29 @@ func NewRemoteError(provider RemoteProvider, op string, kind RemoteErrorKind, me
 		Message:  message,
 		Cause:    cause,
 	}
+}
+
+// RemoteErrorDiagnostics formats err for logs. When err wraps a RemoteError
+// it includes kind, op, HTTP status, and message without re-parsing text.
+func RemoteErrorDiagnostics(err error) string {
+	if err == nil {
+		return ""
+	}
+	var re *RemoteError
+	if !errors.As(err, &re) {
+		return err.Error()
+	}
+	parts := []string{string(re.Kind)}
+	if re.Op != "" {
+		parts = append(parts, "op="+re.Op)
+	}
+	if re.StatusCode != 0 {
+		parts = append(parts, fmt.Sprintf("http=%d", re.StatusCode))
+	}
+	if re.Message != "" {
+		parts = append(parts, re.Message)
+	}
+	return strings.Join(parts, " ")
 }
 
 // remoteKind extracts the Kind from err, or "" when err is not a

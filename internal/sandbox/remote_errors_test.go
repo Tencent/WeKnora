@@ -111,3 +111,20 @@ func TestRemoteErrorRetainsCause(t *testing.T) {
 		t.Fatalf("Error() = %q, want %q", got, want)
 	}
 }
+
+func TestRemoteErrorDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	remote := NewRemoteError(
+		SandboxTypeCube, "Exec", RemoteErrorKindAuthentication,
+		"HTTP 403", errors.New("forbidden"),
+	)
+	remote.StatusCode = 403
+	got := RemoteErrorDiagnostics(remote)
+	if got != "authentication op=Exec http=403 HTTP 403" {
+		t.Fatalf("RemoteErrorDiagnostics() = %q", got)
+	}
+	if RemoteErrorDiagnostics(errors.New("plain")) != "plain" {
+		t.Fatal("expected plain error text")
+	}
+}

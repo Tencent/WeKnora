@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 func TestValidateTenantAPIKeyRequestRequiresCapabilitiesForScopedKey(t *testing.T) {
@@ -31,5 +33,30 @@ func TestValidateTenantAPIKeyRequestAcceptsScopedKeyWithCapability(t *testing.T)
 		Capabilities: []string{"chat"},
 	}); err != nil {
 		t.Fatalf("scoped key validation error = %v", err)
+	}
+}
+
+// TestValidateTenantAPIKeyKnowledgeBaseOwnership 验证知识库白名单的租户边界。
+// 输入同租户、其他租户和不存在的知识库 ID；仅同租户 ID 应通过。
+func TestValidateTenantAPIKeyKnowledgeBaseOwnership(t *testing.T) {
+	lookup := func(_ context.Context, id string) (*types.KnowledgeBase, error) {
+		switch id {
+		case "kb-owned":
+			return &types.KnowledgeBase{ID: id, TenantID: 42}, nil
+		case "kb-other":
+			return &types.KnowledgeBase{ID: id, TenantID: 43}, nil
+		default:
+			return nil, context.Canceled
+		}
+	}
+
+	if err := validateTenantAPIKeyKnowledgeBaseIDsWithLookup(context.Background(), 42, []string{"kb-owned"}, lookup); err != nil {
+		t.Fatalf("owned knowledge base validation error = %v", err)
+	}
+	if err := validateTenantAPIKeyKnowledgeBaseIDsWithLookup(context.Background(), 42, []string{"kb-other"}, lookup); err == nil {
+		t.Fatal("expected cross-tenant knowledge base to be rejected")
+	}
+	if err := validateTenantAPIKeyKnowledgeBaseIDsWithLookup(context.Background(), 42, []string{"kb-missing"}, lookup); err == nil {
+		t.Fatal("expected missing knowledge base to be rejected")
 	}
 }

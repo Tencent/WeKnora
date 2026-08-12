@@ -130,6 +130,44 @@ func (s *tenantAPIKeyService) ListPlatformAPIKeys(ctx context.Context) ([]*types
 	return s.repo.ListPlatformAPIKeys(ctx)
 }
 
+// UpdateAPIKey 按创建接口的相同语义更新租户 API Key 配置。
+// scoped Key 需要至少一个能力；full-access Key 会清空细粒度能力和知识库范围。
+func (s *tenantAPIKeyService) UpdateAPIKey(
+	ctx context.Context, req interfaces.TenantAPIKeyUpdateRequest,
+) (*types.TenantAPIKey, error) {
+	if req.TenantID == 0 {
+		return nil, errors.New("tenant_id is required")
+	}
+	if req.APIKeyID == 0 {
+		return nil, errors.New("api_key_id is required")
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return nil, errors.New("name is required")
+	}
+	capabilities := types.NormalizeAPIKeyCapabilities(types.StringArray(req.Capabilities))
+	if !req.FullAccess && len(capabilities) == 0 {
+		return nil, errors.New("capabilities are required for scoped API keys")
+	}
+	expiresAt := req.ExpiresAt
+	if expiresAt != nil {
+		utc := expiresAt.UTC()
+		expiresAt = &utc
+	}
+	key := &types.TenantAPIKey{
+		Name:             name,
+		FullAccess:       req.FullAccess,
+		KnowledgeBaseIDs: normalizeAPIKeyIDs(req.KnowledgeBaseIDs),
+		Capabilities:     capabilities,
+		ExpiresAt:        expiresAt,
+	}
+	if key.FullAccess {
+		key.KnowledgeBaseIDs = nil
+		key.Capabilities = nil
+	}
+	return s.repo.UpdateAPIKey(ctx, req.TenantID, req.APIKeyID, key)
+}
+
 func (s *tenantAPIKeyService) RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error {
 	return s.repo.RevokeAPIKey(ctx, tenantID, id)
 }
