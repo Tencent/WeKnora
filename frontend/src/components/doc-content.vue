@@ -22,6 +22,7 @@ import { useI18n } from 'vue-i18n';
 import { useAuthStore } from '@/stores/auth';
 import DocumentPreview from '@/components/document-preview.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
+import { resolveKnowledgeDownloadFileName } from '@/views/knowledge/knowledgeDownloadFileName';
 
 const { t } = useI18n();
 const authStore = useAuthStore();
@@ -1550,9 +1551,7 @@ const downloadFile = () => {
         const link = document.createElement("a");
         link.style.display = "none";
         link.setAttribute("href", url.value);
-        const needsExt = props.details.type === 'manual' && !props.details.title.toLowerCase().endsWith('.md');
-        const ext = needsExt ? '.md' : '';
-        link.setAttribute("download", props.details.title + ext);
+        link.setAttribute("download", resolveKnowledgeDownloadFileName(props.details));
         document.body.appendChild(link);
         link.click();
         nextTick(() => {
