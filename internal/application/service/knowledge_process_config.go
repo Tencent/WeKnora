@@ -47,6 +47,8 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 		GraphEnabled:             kb.IsGraphEnabled(),
 		ExtractConfig:            derefExtractConfig(kb.ExtractConfig),
 	}
+	// enabled 只作为旧结构的输出投影，不能反向影响图谱开关。
+	eff.ExtractConfig.Enabled = eff.GraphEnabled
 	if overrides == nil {
 		return eff
 	}
@@ -82,13 +84,16 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	}
 	if overrides.GraphEnabled != nil {
 		eff.GraphEnabled = *overrides.GraphEnabled
+	} else if overrides.ExtractConfig != nil {
+		// 兼容只保存 extract_config.enabled 的历史上传配置。
+		eff.GraphEnabled = overrides.ExtractConfig.Enabled
 	}
 	if overrides.ExtractConfig != nil {
 		eff.ExtractConfig = mergeExtractConfig(eff.ExtractConfig, overrides.ExtractConfig)
 	}
 
-	// Match KnowledgeBase.IsGraphEnabled: graph fan-out requires extract to be on.
-	eff.GraphEnabled = eff.GraphEnabled && eff.ExtractConfig.Enabled
+	// 覆盖项合并后，再同步一次兼容投影。
+	eff.ExtractConfig.Enabled = eff.GraphEnabled
 
 	return eff
 }
@@ -292,7 +297,6 @@ func mergeExtractConfig(base types.ExtractConfig, override *types.ExtractConfig)
 		return base
 	}
 	result := base
-	result.Enabled = override.Enabled
 	if override.Text != "" {
 		result.Text = override.Text
 	}

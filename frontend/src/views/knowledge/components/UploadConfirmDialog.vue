@@ -525,9 +525,11 @@
 
                   <div v-if="isGraphSectionAvailable" v-show="activeSection === 'graph'" class="section">
                     <GraphSettings
+                      :enabled="uiState.graphEnabled"
                       :graph-extract="uiState.nodeExtractConfig"
                       :model-id="llmModelId"
                       :all-models="allModels"
+                      @update:enabled="handleGraphEnabledUpdate"
                       @update:graphExtract="handleNodeExtractUpdate"
                     />
                   </div>
@@ -603,7 +605,6 @@ interface UploadUIState {
   asrConfig: { enabled: boolean; modelId: string; language: string }
   questionGenerationConfig: { enabled: boolean; questionCount: number; customInstructions?: string }
   nodeExtractConfig: {
-    enabled: boolean
     text: string
     tags: string[]
     nodes: Array<{ name: string; attributes: string[] }>
@@ -1007,7 +1008,7 @@ function getSectionNavStatus(
       }
     }
     case 'graph': {
-      if (!uiState.value.graphEnabled || !uiState.value.nodeExtractConfig.enabled) {
+      if (!uiState.value.graphEnabled) {
         return { status: t('uploadConfirm.statusOff'), statusTone: 'muted' }
       }
       const tagCount = uiState.value.nodeExtractConfig.tags?.length ?? 0
@@ -1073,7 +1074,6 @@ function createDefaultUIState(): UploadUIState {
     asrConfig: { enabled: false, modelId: '', language: '' },
     questionGenerationConfig: { enabled: true, questionCount: 3, customInstructions: '' },
     nodeExtractConfig: {
-      enabled: false,
       text: '',
       tags: [],
       nodes: [],
@@ -1122,7 +1122,6 @@ function initFromKbInfo(kb: any) {
       customInstructions: kb.question_generation_config?.custom_instructions || '',
     },
     nodeExtractConfig: {
-      enabled: !!kb.extract_config?.enabled && !!kb.indexing_strategy?.graph_enabled,
       text: kb.extract_config?.text || '',
       tags: kb.extract_config?.tags || [],
       nodes: (kb.extract_config?.nodes || []).map((node: any) => ({
@@ -1172,9 +1171,8 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
       question_count: state.questionGenerationConfig.questionCount,
       custom_instructions: state.questionGenerationConfig.customInstructions,
     },
-    graph_enabled: state.nodeExtractConfig.enabled && state.graphEnabled,
+    graph_enabled: state.graphEnabled,
     extract_config: {
-      enabled: state.nodeExtractConfig.enabled,
       text: state.nodeExtractConfig.text,
       tags: state.nodeExtractConfig.tags,
       nodes: state.nodeExtractConfig.nodes,
@@ -1230,7 +1228,6 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
   }
   const ec = o.extract_config
   if (ec) {
-    if (ec.enabled != null) s.nodeExtractConfig.enabled = ec.enabled
     if (ec.text != null) s.nodeExtractConfig.text = ec.text
     if (ec.tags) s.nodeExtractConfig.tags = ec.tags
     if (ec.nodes) s.nodeExtractConfig.nodes = ec.nodes.map(n => ({ name: n.name, attributes: n.attributes || [] }))
@@ -1238,7 +1235,6 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
     if (ec.custom_instructions != null) s.nodeExtractConfig.customInstructions = ec.custom_instructions
   }
   if (o.graph_enabled != null) s.graphEnabled = o.graph_enabled
-  s.nodeExtractConfig.enabled = s.nodeExtractConfig.enabled && s.graphEnabled
   if (o.parser_engine_overrides && o.parser_engine_overrides.pdf_force_scanned === 'true') {
     s.pdfForceScanned = true
   } else {
@@ -1374,7 +1370,10 @@ const handleAddASRModel = () => {
 
 const handleNodeExtractUpdate = (config: UploadUIState['nodeExtractConfig']) => {
   uiState.value.nodeExtractConfig = { ...config }
-  uiState.value.graphEnabled = config.enabled
+}
+
+const handleGraphEnabledUpdate = (enabled: boolean) => {
+  uiState.value.graphEnabled = enabled
 }
 
 const validateBeforeConfirm = (): boolean => {

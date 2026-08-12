@@ -157,6 +157,81 @@ func TestKnowledgeBase_UnmarshalJSON_WithVectorStoreID(t *testing.T) {
 	// If a future change introduces such a shadow, the value above would fail to populate.
 }
 
+func TestKnowledgeBase_UnmarshalJSON_GraphEnabledPrecedence(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{
+			name: "新字段显式关闭优先于旧字段开启",
+			body: `{"indexing_strategy":{"vector_enabled":true,"graph_enabled":false},` +
+				`"extract_config":{"enabled":true}}`,
+			want: false,
+		},
+		{
+			name: "新字段显式开启优先于旧字段关闭",
+			body: `{"indexing_strategy":{"vector_enabled":true,"graph_enabled":true},` +
+				`"extract_config":{"enabled":false}}`,
+			want: true,
+		},
+		{
+			name: "缺少新字段时兼容旧客户端",
+			body: `{"extract_config":{"enabled":true}}`,
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var kb KnowledgeBase
+			if err := json.Unmarshal([]byte(tt.body), &kb); err != nil {
+				t.Fatalf("json.Unmarshal returned error: %v", err)
+			}
+			if got := kb.IsGraphEnabled(); got != tt.want {
+				t.Fatalf("IsGraphEnabled() = %v, want %v", got, tt.want)
+			}
+			if tt.name == "缺少新字段时兼容旧客户端" &&
+				(!kb.IndexingStrategy.VectorEnabled || !kb.IndexingStrategy.KeywordEnabled) {
+				t.Fatal("legacy payload must preserve vector and keyword defaults")
+			}
+		})
+	}
+}
+
+func TestKnowledgeBase_GraphEnabledSingleSource(t *testing.T) {
+	t.Run("业务判断只读取 indexing strategy", func(t *testing.T) {
+		kb := &KnowledgeBase{
+			IndexingStrategy: IndexingStrategy{VectorEnabled: true, GraphEnabled: true},
+			ExtractConfig:    &ExtractConfig{Enabled: false},
+		}
+		if !kb.IsGraphEnabled() {
+			t.Fatal("deprecated extract flag must not disable graph indexing")
+		}
+	})
+
+	t.Run("默认值处理只向旧字段单向投影", func(t *testing.T) {
+		kb := &KnowledgeBase{
+			IndexingStrategy: IndexingStrategy{VectorEnabled: true, GraphEnabled: false},
+			ExtractConfig:    &ExtractConfig{Enabled: true},
+		}
+		kb.EnsureDefaults()
+		if kb.IsGraphEnabled() || kb.ExtractConfig.Enabled {
+			t.Fatal("deprecated extract flag must follow graph_enabled=false")
+		}
+	})
+
+	t.Run("开启图谱时创建旧客户端兼容投影", func(t *testing.T) {
+		kb := &KnowledgeBase{
+			IndexingStrategy: IndexingStrategy{VectorEnabled: true, GraphEnabled: true},
+		}
+		kb.EnsureDefaults()
+		if kb.ExtractConfig == nil || !kb.ExtractConfig.Enabled {
+			t.Fatal("expected enabled compatibility projection")
+		}
+	})
+}
+
 // TestKnowledgeBase_HasVectorStore covers the nil-safe binding accessor.
 func TestKnowledgeBase_HasVectorStore(t *testing.T) {
 	t.Run("nil receiver returns false", func(t *testing.T) {

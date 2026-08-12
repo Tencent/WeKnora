@@ -261,7 +261,7 @@
                         <t-icon v-if="kb.isProcessing" name="loading" size="12px" class="processing-icon" />
                       </div>
                     </t-tooltip>
-                    <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
+                    <t-tooltip v-if="kb.indexing_strategy?.graph_enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
                       placement="top">
                       <div class="feature-badge kg">
                         <t-icon name="relation" size="14px" />
@@ -338,7 +338,7 @@
                         }}</span>
                       </div>
                     </t-tooltip>
-                    <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
+                    <t-tooltip v-if="kb.indexing_strategy?.graph_enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
                       placement="top">
                       <div class="feature-badge kg">
                         <t-icon name="relation" size="14px" />
@@ -494,7 +494,7 @@
                         <t-icon v-if="kb.isProcessing" name="loading" size="12px" class="processing-icon" />
                       </div>
                     </t-tooltip>
-                    <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
+                    <t-tooltip v-if="kb.indexing_strategy?.graph_enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
                       placement="top">
                       <div class="feature-badge kg">
                         <t-icon name="relation" size="14px" />
@@ -851,7 +851,7 @@ interface KB {
   type?: 'document' | 'faq';
   showMore?: boolean;
   vlm_config?: { enabled?: boolean; model_id?: string };
-  extract_config?: { enabled?: boolean };
+  indexing_strategy?: { graph_enabled?: boolean };
   storage_provider_config?: { provider?: string };
   storage_config?: { provider?: string; bucket_name?: string }; // legacy
   question_generation_config?: { enabled?: boolean; question_count?: number };

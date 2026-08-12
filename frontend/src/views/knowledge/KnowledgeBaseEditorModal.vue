@@ -393,9 +393,11 @@
                 <div v-if="!isFAQ && currentSection === 'graph'" class="section">
                   <GraphSettings
                     v-if="formData"
+                    :enabled="formData.indexingStrategy.graphEnabled"
                     :graph-extract="formData.nodeExtractConfig"
                     :model-id="formData.modelConfig.llmModelId"
                     :all-models="allModels"
+                    @update:enabled="handleGraphEnabledUpdate"
                     @update:graphExtract="handleNodeExtractUpdate"
                   />
                 </div>
@@ -771,7 +773,6 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       language: ''
     },
     nodeExtractConfig: {
-      enabled: false,
       text: '',
       tags: [] as string[],
       nodes: [] as Array<{
@@ -901,7 +902,6 @@ const loadKBData = async (kbIdOverride?: string) => {
         language: kb.asr_config?.language || ''
       },
       nodeExtractConfig: {
-        enabled: kb.extract_config?.enabled || false,
         text: kb.extract_config?.text || '',
         tags: kb.extract_config?.tags || [],
         nodes: (kb.extract_config?.nodes || []).map((node: any) => ({
@@ -1138,6 +1138,12 @@ const handleNodeExtractUpdate = (config: any) => {
   }
 }
 
+const handleGraphEnabledUpdate = (enabled: boolean) => {
+  if (formData.value?.indexingStrategy) {
+    formData.value.indexingStrategy.graphEnabled = enabled
+  }
+}
+
 // 验证表单
 const validateForm = (): boolean => {
   if (!formData.value) return false
@@ -1260,9 +1266,6 @@ const buildSubmitData = () => {
     provider: storageProvider
   }
 
-  // 添加知识图谱配置 — now synced via indexingStrategy.graphEnabled
-  // extract_config is sent below along with indexing_strategy
-
   // 添加问题生成配置
   if (formData.value.questionGenerationConfig?.enabled) {
     data.question_generation_config = {
@@ -1314,11 +1317,9 @@ const buildSubmitData = () => {
     }
   }
 
-  // Always persist extract_config so the toggle state from GraphSettings is saved,
-  // regardless of whether the graph indexing strategy is currently enabled.
+  // extract_config 只保存抽取参数；图谱开关统一由 indexing_strategy.graph_enabled 管理。
   if (formData.value.nodeExtractConfig) {
     data.extract_config = {
-      enabled: !!formData.value.nodeExtractConfig.enabled,
       text: formData.value.nodeExtractConfig.text || '',
       tags: formData.value.nodeExtractConfig.tags || [],
       nodes: formData.value.nodeExtractConfig.nodes || [],
@@ -1427,6 +1428,7 @@ const doSubmit = async () => {
       const config: KBModelConfigRequest = {
         llmModelId: data.summary_model_id,
         embeddingModelId: data.embedding_model_id,
+        graphEnabled: data.indexing_strategy?.graph_enabled ?? false,
         vlm_config: data.vlm_config,
         asr_config: data.asr_config,
         documentSplitting: {
@@ -1451,7 +1453,6 @@ const doSubmit = async () => {
         storageBackendId: formData.value?.storageBackendId || '',
         storageProvider: data.storage_provider_config?.provider || data.storage_config?.provider || 'local',
         nodeExtract: {
-          enabled: data.extract_config?.enabled || false,
           text: data.extract_config?.text || '',
           tags: data.extract_config?.tags || [],
           nodes: data.extract_config?.nodes || [],

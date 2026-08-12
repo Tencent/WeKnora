@@ -95,10 +95,12 @@ func NewInitializationHandler(
 
 // KBModelConfigRequest 知识库模型配置请求（简化版，只传模型ID）
 type KBModelConfigRequest struct {
-	LLMModelID       string           `json:"llmModelId"       binding:"required"`
-	EmbeddingModelID string           `json:"embeddingModelId"` // optional when RAG indexing is disabled
-	VLMConfig        *types.VLMConfig `json:"vlm_config"`
-	ASRConfig        *types.ASRConfig `json:"asr_config"`
+	LLMModelID       string `json:"llmModelId"       binding:"required"`
+	EmbeddingModelID string `json:"embeddingModelId"` // optional when RAG indexing is disabled
+	// GraphEnabled 是图谱开关的唯一状态源。指针用于区分未传与显式关闭。
+	GraphEnabled *bool            `json:"graphEnabled,omitempty"`
+	VLMConfig    *types.VLMConfig `json:"vlm_config"`
+	ASRConfig    *types.ASRConfig `json:"asr_config"`
 
 	// 文档分块配置
 	DocumentSplitting struct {
@@ -131,7 +133,8 @@ type KBModelConfigRequest struct {
 
 	// 知识图谱配置
 	NodeExtract struct {
-		Enabled            bool                  `json:"enabled"`
+		// Deprecated: 仅用于兼容旧客户端，新客户端应发送 graphEnabled。
+		Enabled            *bool                 `json:"enabled,omitempty"`
 		Text               string                `json:"text"`
 		Tags               []string              `json:"tags"`
 		Nodes              []types.GraphNode     `json:"nodes"`
@@ -411,32 +414,32 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	}
 	kb.SetStorageProvider(provider)
 
-	// 更新知识图谱配置
-	if req.NodeExtract.Enabled {
-		// 转换 Nodes 和 Relations 为指针类型
-		nodes := make([]*types.GraphNode, len(req.NodeExtract.Nodes))
-		for i := range req.NodeExtract.Nodes {
-			nodes[i] = &req.NodeExtract.Nodes[i]
-		}
-		relations := make([]*types.GraphRelation, len(req.NodeExtract.Relations))
-		for i := range req.NodeExtract.Relations {
-			relations[i] = &req.NodeExtract.Relations[i]
-		}
-
-		kb.ExtractConfig = &types.ExtractConfig{
-			Enabled:            req.NodeExtract.Enabled,
-			Text:               req.NodeExtract.Text,
-			Tags:               req.NodeExtract.Tags,
-			Nodes:              nodes,
-			Relations:          relations,
-			CustomInstructions: strings.TrimSpace(req.NodeExtract.CustomInstructions),
-		}
-	} else if kb.ExtractConfig != nil {
-		kb.ExtractConfig.Enabled = false
-	} else {
-		kb.ExtractConfig = &types.ExtractConfig{Enabled: false}
+	// 更新知识图谱配置。graphEnabled 优先；旧 enabled 仅在新字段缺失时兼容映射。
+	graphEnabled := kb.IsGraphEnabled()
+	if req.GraphEnabled != nil {
+		graphEnabled = *req.GraphEnabled
+	} else if req.NodeExtract.Enabled != nil {
+		graphEnabled = *req.NodeExtract.Enabled
 	}
-	if err := validateExtractConfig(kb.ExtractConfig); err != nil {
+	kb.IndexingStrategy.GraphEnabled = graphEnabled
+
+	nodes := make([]*types.GraphNode, len(req.NodeExtract.Nodes))
+	for i := range req.NodeExtract.Nodes {
+		nodes[i] = &req.NodeExtract.Nodes[i]
+	}
+	relations := make([]*types.GraphRelation, len(req.NodeExtract.Relations))
+	for i := range req.NodeExtract.Relations {
+		relations[i] = &req.NodeExtract.Relations[i]
+	}
+	kb.ExtractConfig = &types.ExtractConfig{
+		Enabled:            graphEnabled,
+		Text:               req.NodeExtract.Text,
+		Tags:               req.NodeExtract.Tags,
+		Nodes:              nodes,
+		Relations:          relations,
+		CustomInstructions: strings.TrimSpace(req.NodeExtract.CustomInstructions),
+	}
+	if err := validateExtractConfig(kb.ExtractConfig, graphEnabled); err != nil {
 		logger.Error(ctx, "Invalid extract configuration", err)
 		c.Error(err)
 		return
@@ -879,8 +882,10 @@ func (h *InitializationHandler) applyKnowledgeBaseInitialization(
 		kb.StorageConfig = types.StorageConfig{}
 	}
 
+	kb.IndexingStrategy.GraphEnabled = req.NodeExtract.Enabled
 	if req.NodeExtract.Enabled {
 		kb.ExtractConfig = &types.ExtractConfig{
+			Enabled:   true,
 			Text:      req.NodeExtract.Text,
 			Tags:      req.NodeExtract.Tags,
 			Nodes:     make([]*types.GraphNode, 0),
@@ -900,6 +905,9 @@ func (h *InitializationHandler) applyKnowledgeBaseInitialization(
 				Type:  relation.Type,
 			})
 		}
+	} else if kb.ExtractConfig != nil {
+		// 旧初始化接口关闭图谱时，同步清理兼容投影。
+		kb.ExtractConfig.Enabled = false
 	}
 }
 
@@ -1579,9 +1587,10 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 		}
 	}
 
+	config["graphEnabled"] = kb.IsGraphEnabled()
 	if kb.ExtractConfig != nil {
 		nodeExtract := map[string]interface{}{
-			"enabled":   kb.ExtractConfig.Enabled,
+			"enabled":   kb.IsGraphEnabled(),
 			"text":      kb.ExtractConfig.Text,
 			"tags":      kb.ExtractConfig.Tags,
 			"nodes":     kb.ExtractConfig.Nodes,

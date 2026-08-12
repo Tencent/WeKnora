@@ -51,7 +51,6 @@ export interface GraphRelationOverride {
 }
 
 export interface ExtractConfigOverride {
-  enabled?: boolean
   text?: string
   tags?: string[]
   nodes?: GraphNodeOverride[]

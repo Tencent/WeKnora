@@ -36,13 +36,13 @@
         </div>
         <div class="setting-control">
           <t-switch
-            v-model="localGraphExtract.enabled"
+            :model-value="props.enabled"
             @change="handleEnabledChange"
           />
         </div>
       </div>
 
-      <div v-if="localGraphExtract.enabled" class="setting-row vertical">
+      <div v-if="props.enabled" class="setting-row vertical">
         <div class="setting-info">
           <label>{{ t('graphSettings.customInstructionsLabel') }}</label>
           <p class="desc">{{ t('graphSettings.customInstructionsDescription') }}</p>
@@ -59,7 +59,7 @@
       </div>
 
       <!-- 关系类型配置 -->
-      <div v-if="localGraphExtract.enabled" class="setting-row vertical">
+      <div v-if="props.enabled" class="setting-row vertical">
         <div class="setting-info">
           <label>{{ t('graphSettings.tagsLabel') }}</label>
           <p class="desc">{{ t('graphSettings.tagsDescription') }}</p>
@@ -96,7 +96,7 @@
       </div>
 
       <!-- 示例文本 -->
-      <div v-if="localGraphExtract.enabled" class="setting-row vertical">
+      <div v-if="props.enabled" class="setting-row vertical">
         <div class="setting-info">
           <label>{{ t('graphSettings.sampleTextLabel') }}</label>
           <p class="desc">{{ t('graphSettings.sampleTextDescription') }}</p>
@@ -132,7 +132,7 @@
       </div>
 
       <!-- 实体列表 -->
-      <div v-if="localGraphExtract.enabled && localGraphExtract.nodes.length > 0" class="setting-row vertical">
+      <div v-if="props.enabled && localGraphExtract.nodes.length > 0" class="setting-row vertical">
         <div class="setting-info">
           <label>{{ t('graphSettings.entityListLabel') }}</label>
           <p class="desc">{{ t('graphSettings.entityListDescription') }}</p>
@@ -187,7 +187,7 @@
       </div>
 
       <!-- 添加实体按钮 -->
-      <div v-if="localGraphExtract.enabled" class="setting-row">
+      <div v-if="props.enabled" class="setting-row">
         <div class="setting-info">
           <label>{{ t('graphSettings.manageEntitiesLabel') }}</label>
           <p class="desc">{{ t('graphSettings.manageEntitiesDescription') }}</p>
@@ -203,7 +203,7 @@
       </div>
 
       <!-- 关系列表 -->
-      <div v-if="localGraphExtract.enabled && localGraphExtract.relations.length > 0" class="setting-row vertical">
+      <div v-if="props.enabled && localGraphExtract.relations.length > 0" class="setting-row vertical">
         <div class="setting-info">
           <label>{{ t('graphSettings.relationListLabel') }}</label>
           <p class="desc">{{ t('graphSettings.relationListDescription') }}</p>
@@ -268,7 +268,7 @@
       </div>
 
       <!-- 添加关系按钮 -->
-      <div v-if="localGraphExtract.enabled" class="setting-row">
+      <div v-if="props.enabled" class="setting-row">
         <div class="setting-info">
           <label>{{ t('graphSettings.manageRelationsLabel') }}</label>
           <p class="desc">{{ t('graphSettings.manageRelationsDescription') }}</p>
@@ -284,7 +284,7 @@
       </div>
 
       <!-- 提取操作按钮 -->
-      <div v-if="localGraphExtract.enabled" class="setting-row">
+      <div v-if="props.enabled" class="setting-row">
         <div class="setting-info">
           <label>{{ t('graphSettings.extractActionsLabel') }}</label>
           <p class="desc">{{ t('graphSettings.extractActionsDescription') }}</p>
@@ -336,7 +336,6 @@ const authStore = useAuthStore()
 const canRunGraphExtract = computed(() => authStore.hasRole('admin'))
 
 interface GraphExtractConfig {
-  enabled: boolean
   text: string
   tags: string[]
   nodes: Node[]
@@ -345,6 +344,7 @@ interface GraphExtractConfig {
 }
 
 interface Props {
+  enabled: boolean
   graphExtract: GraphExtractConfig
   modelId: string
   allModels?: any[]
@@ -356,6 +356,7 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const emit = defineEmits<{
+  'update:enabled': [value: boolean]
   'update:graphExtract': [value: GraphExtractConfig]
 }>()
 
@@ -402,14 +403,15 @@ const handleConfigChange = () => {
 }
 
 // 处理启用/禁用切换
-const handleEnabledChange = () => {
+const handleEnabledChange = (enabled: boolean) => {
   // 当关闭提取功能时，清空示例数据，但保留自定义指令以便再次启用时恢复。
-  if (!localGraphExtract.value.enabled) {
+  if (!enabled) {
     localGraphExtract.value.text = ''
     localGraphExtract.value.tags = []
     localGraphExtract.value.nodes = []
     localGraphExtract.value.relations = []
   }
+  emit('update:enabled', enabled)
   handleConfigChange()
 }
 

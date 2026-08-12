@@ -30,3 +30,11 @@ test('shows a post-create hint after the first successful save', () => {
   assert.match(source, /settings-footer-note/)
   assert.match(source, /knowledgeEditor\.postCreateHint\.followUpDesc/)
 })
+
+test('uses indexing_strategy.graph_enabled as the only graph toggle state', () => {
+  assert.match(source, /:enabled="formData\.indexingStrategy\.graphEnabled"/)
+  assert.match(source, /@update:enabled="handleGraphEnabledUpdate"/)
+  assert.match(source, /graphEnabled: data\.indexing_strategy\?\.graph_enabled \?\? false/)
+  assert.doesNotMatch(source, /nodeExtractConfig\.enabled/)
+  assert.doesNotMatch(source, /extract_config\?\.enabled/)
+})

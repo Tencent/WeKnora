@@ -361,7 +361,9 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
-	if err := validateExtractConfig(req.ExtractConfig); err != nil {
+	// 先迁移旧的 extract_config.enabled，再按唯一状态源校验图谱配置。
+	req.EnsureDefaults()
+	if err := validateExtractConfig(req.ExtractConfig, req.IsGraphEnabled()); err != nil {
 		logger.Error(ctx, "Invalid extract configuration", err)
 		c.Error(err)
 		return
@@ -1257,12 +1259,16 @@ func (h *KnowledgeBaseHandler) GetKBCloneProgress(c *gin.Context) {
 }
 
 // validateExtractConfig validates the graph configuration parameters
-func validateExtractConfig(config *types.ExtractConfig) error {
+func validateExtractConfig(config *types.ExtractConfig, graphEnabled bool) error {
 	if config == nil {
+		if graphEnabled {
+			return apperrors.NewBadRequestError("extract config is required when graph indexing is enabled")
+		}
 		return nil
 	}
-	if !config.Enabled {
-		config.Enabled = false
+	// enabled 是兼容投影，始终由唯一状态源覆盖。
+	config.Enabled = graphEnabled
+	if !graphEnabled {
 		return nil
 	}
 	// Validate text field

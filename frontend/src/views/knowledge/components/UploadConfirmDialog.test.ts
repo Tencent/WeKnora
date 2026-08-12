@@ -78,3 +78,9 @@ test('uses section navigation with inline chunking controls and advanced options
   assert.match(dialog, /data-section="multimodal"/)
   assert.doesNotMatch(dialog, /<KBChunkingSettings/)
 })
+
+test('uses graph_enabled as the only graph toggle state for upload overrides', () => {
+  assert.match(dialog, /:enabled="uiState\.graphEnabled"/)
+  assert.match(dialog, /graph_enabled: state\.graphEnabled/)
+  assert.doesNotMatch(dialog, /nodeExtractConfig\.enabled/)
+})

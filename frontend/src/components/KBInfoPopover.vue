@@ -274,7 +274,7 @@ const capabilities = computed<Array<{ key: string; label: string; theme: Capabil
   if (kb.asr_config?.enabled) {
     items.push({ key: 'asr', label: 'ASR', theme: 'primary' })
   }
-  if (kb.extract_config?.enabled) {
+  if (kb.indexing_strategy?.graph_enabled) {
     items.push({
       key: 'kg',
       label: t('knowledgeList.features.knowledgeGraph'),

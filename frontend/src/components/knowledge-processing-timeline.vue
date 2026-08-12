@@ -1393,7 +1393,9 @@ const processConfigLines = computed<string[]>(() => {
     lines.push(`${t(k('question'))}: ${qg.enabled ? t(k('questionOn'), { n: qg.question_count ?? 3 }) : t(k('off'))}`)
   }
 
-  const graph = o.graph_enabled ?? o.extract_config?.enabled
+  // 仅用于展示升级前保存的上传快照；当前状态与新快照只使用 graph_enabled。
+  const legacyExtractConfig = o.extract_config as ({ enabled?: boolean } | undefined)
+  const graph = o.graph_enabled ?? legacyExtractConfig?.enabled
   if (graph != null) lines.push(`${t(k('graph'))}: ${onOff(graph)}`)
 
   return lines.length ? lines : [t('knowledgeStages.processConfig.kbDefault')]

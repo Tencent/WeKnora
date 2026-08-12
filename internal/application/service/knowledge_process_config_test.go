@@ -19,7 +19,8 @@ func processConfigBoolPtr(v bool) *bool {
 func testKBWithGraphEnabled(enabled bool) *types.KnowledgeBase {
 	return &types.KnowledgeBase{
 		IndexingStrategy: types.IndexingStrategy{GraphEnabled: enabled},
-		ExtractConfig:    &types.ExtractConfig{Enabled: enabled},
+		// 故意让旧字段与新状态不一致，确保业务逻辑只读取唯一状态源。
+		ExtractConfig: &types.ExtractConfig{Enabled: !enabled},
 	}
 }
 
@@ -66,9 +67,10 @@ func TestResolveProcessConfig_GraphDisabled(t *testing.T) {
 	overrides := &types.KnowledgeProcessOverrides{GraphEnabled: processConfigBoolPtr(false)}
 	eff := ResolveProcessConfig(kb, overrides)
 	require.False(t, eff.GraphEnabled)
+	require.False(t, eff.ExtractConfig.Enabled)
 }
 
-func TestResolveProcessConfig_GraphRequiresExtractEnabled(t *testing.T) {
+func TestResolveProcessConfig_GraphIgnoresDeprecatedExtractFlag(t *testing.T) {
 	t.Parallel()
 
 	kb := testKBWithGraphEnabled(true)
@@ -77,8 +79,8 @@ func TestResolveProcessConfig_GraphRequiresExtractEnabled(t *testing.T) {
 		ExtractConfig: &types.ExtractConfig{Enabled: false},
 	}
 	eff := ResolveProcessConfig(kb, overrides)
-	require.False(t, eff.ExtractConfig.Enabled)
-	require.False(t, eff.GraphEnabled)
+	require.True(t, eff.GraphEnabled)
+	require.True(t, eff.ExtractConfig.Enabled)
 }
 
 func TestResolveProcessConfig_NilOverridesUsesKBDefaults(t *testing.T) {
@@ -93,7 +95,7 @@ func TestResolveProcessConfig_NilOverridesUsesKBDefaults(t *testing.T) {
 			QuestionCount: 3,
 		},
 		IndexingStrategy: types.IndexingStrategy{GraphEnabled: true},
-		ExtractConfig:    &types.ExtractConfig{Enabled: true, Tags: []string{"tag-a"}},
+		ExtractConfig:    &types.ExtractConfig{Enabled: false, Tags: []string{"tag-a"}},
 	}
 
 	eff := ResolveProcessConfig(kb, nil)

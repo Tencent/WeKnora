@@ -390,6 +390,31 @@ func (kb *KnowledgeBase) UnmarshalJSON(data []byte) error {
 	if kb.StorageProviderConfig == nil && kb.StorageConfig.Provider != "" {
 		kb.StorageProviderConfig = &StorageProviderConfig{Provider: kb.StorageConfig.Provider}
 	}
+
+	// 兼容旧客户端：仅当请求没有明确提供 graph_enabled 时，才读取旧开关。
+	// 一旦新字段存在（包括显式 false），它就是唯一状态源。
+	var graphPresence struct {
+		IndexingStrategy json.RawMessage `json:"indexing_strategy"`
+	}
+	if err := json.Unmarshal(data, &graphPresence); err != nil {
+		return err
+	}
+	hasGraphEnabled := false
+	hasIndexingStrategy := len(graphPresence.IndexingStrategy) > 0 &&
+		string(graphPresence.IndexingStrategy) != "null"
+	if hasIndexingStrategy {
+		var strategyFields map[string]json.RawMessage
+		if err := json.Unmarshal(graphPresence.IndexingStrategy, &strategyFields); err != nil {
+			return err
+		}
+		_, hasGraphEnabled = strategyFields["graph_enabled"]
+	} else {
+		// 旧客户端完全不发送 indexing_strategy 时，保持原来的向量+关键词默认值。
+		kb.IndexingStrategy = DefaultIndexingStrategy()
+	}
+	if !hasGraphEnabled && kb.ExtractConfig != nil && kb.ExtractConfig.Enabled {
+		kb.IndexingStrategy.GraphEnabled = true
+	}
 	return nil
 }
 
@@ -635,6 +660,8 @@ func (c *ASRConfig) Scan(value interface{}) error {
 
 // ExtractConfig represents the extract configuration for a knowledge base
 type ExtractConfig struct {
+	// Deprecated: 图谱开关的唯一状态源是 IndexingStrategy.GraphEnabled。
+	// 该字段仅保留为历史数据和旧客户端的兼容投影。
 	Enabled   bool             `yaml:"enabled"   json:"enabled"`
 	Text      string           `yaml:"text"      json:"text,omitempty"`
 	Tags      []string         `yaml:"tags"      json:"tags,omitempty"`
@@ -726,9 +753,11 @@ func (kb *KnowledgeBase) EnsureDefaults() {
 	if kb.IndexingStrategy.IsZero() {
 		kb.IndexingStrategy = DefaultIndexingStrategy()
 	}
-	// Sync legacy ExtractConfig.Enabled → IndexingStrategy.GraphEnabled
-	if kb.ExtractConfig != nil && kb.ExtractConfig.Enabled && !kb.IndexingStrategy.GraphEnabled {
-		kb.IndexingStrategy.GraphEnabled = true
+	// 旧数据由数据库迁移一次性写入唯一状态源；运行时只做单向兼容投影。
+	if kb.ExtractConfig != nil {
+		kb.ExtractConfig.Enabled = kb.IndexingStrategy.GraphEnabled
+	} else if kb.IndexingStrategy.GraphEnabled {
+		kb.ExtractConfig = &ExtractConfig{Enabled: true}
 	}
 }
 
@@ -799,10 +828,9 @@ func (kb *KnowledgeBase) IsKeywordEnabled() bool {
 }
 
 // IsGraphEnabled checks if knowledge graph extraction is enabled.
-// Requires both the IndexingStrategy flag and a valid ExtractConfig.
+// IndexingStrategy.GraphEnabled is the single source of truth.
 func (kb *KnowledgeBase) IsGraphEnabled() bool {
-	return kb != nil && kb.IndexingStrategy.GraphEnabled &&
-		kb.ExtractConfig != nil && kb.ExtractConfig.Enabled
+	return kb != nil && kb.IndexingStrategy.GraphEnabled
 }
 
 // NeedsEmbeddingModel returns true if any enabled pipeline requires an embedding model.

@@ -15,6 +15,8 @@ export interface COSCredentialStatus {
 
 // 初始化配置数据类型
 export interface InitializationConfig {
+    /** 图谱开关的唯一状态源；nodeExtract.enabled 仅供旧接口兼容。 */
+    graphEnabled?: boolean;
     llm: {
         source: string;
         modelName: string;
@@ -83,6 +85,7 @@ export interface InitializationConfig {
     // Frontend-only hint for storage selection UI
     storageType?: 'cos' | 'minio';
     nodeExtract: {
+        /** @deprecated Use graphEnabled. */
         enabled: boolean,
         text: string,
         tags: string[],
@@ -106,6 +109,7 @@ export interface DownloadTask {
 export interface KBModelConfigRequest {
     llmModelId: string
     embeddingModelId: string
+    graphEnabled: boolean
     vlm_config?: {
         enabled: boolean
         model_id?: string
@@ -149,7 +153,6 @@ export interface KBModelConfigRequest {
     storageBackendId?: string
     storageProvider?: string
     nodeExtract: {
-        enabled: boolean
         text: string
         tags: string[]
         nodes: Node[]

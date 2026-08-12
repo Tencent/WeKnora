@@ -104,10 +104,11 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 		return next()
 	}
 
-	// Check if any knowledge base has ExtractConfig enabled and collect their IDs
+	// 按唯一图谱状态源筛选知识库；EnsureDefaults 负责旧字段的单向兼容投影。
 	enabledKBSet := make(map[string]struct{})
 	for _, kb := range kbs {
-		if kb.ExtractConfig != nil && kb.ExtractConfig.Enabled {
+		kb.EnsureDefaults()
+		if kb.IsGraphEnabled() {
 			enabledKBSet[kb.ID] = struct{}{}
 		}
 	}
