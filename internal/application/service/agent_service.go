@@ -55,31 +55,23 @@ func agentHasKnowledgeScope(config *types.AgentConfig) bool {
 	)
 }
 
-// knowledgeBaseIDsForPrompt returns KB IDs to show in runtime_context metadata.
-// Prefer explicit KnowledgeBases; fall back to deduped IDs from SearchTargets.
-func knowledgeBaseIDsForPrompt(config *types.AgentConfig) []string {
+// knowledgeBaseScopesForPrompt returns the KB IDs to show in runtime_context
+// metadata, together with the tenant each KB should be queried under.
+//
+// The tenant map always comes from SearchTargets, which buildSearchTargets has
+// already resolved (and authorized) per KB: a directly shared KB carries its
+// source tenant there. KnowledgeBases alone cannot tell own from shared KBs —
+// both KBSelectionMode="all" and an @mention put shared KB IDs into it.
+// KBs missing from the map fall back to the caller's tenant.
+func knowledgeBaseScopesForPrompt(config *types.AgentConfig) ([]string, map[string]uint64) {
 	if config == nil {
-		return nil
+		return nil, nil
 	}
+	kbTenantMap := config.SearchTargets.GetKBTenantMap()
 	if len(config.KnowledgeBases) > 0 {
-		return config.KnowledgeBases
+		return config.KnowledgeBases, kbTenantMap
 	}
-	if len(config.SearchTargets) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(config.SearchTargets))
-	out := make([]string, 0, len(config.SearchTargets))
-	for _, target := range config.SearchTargets {
-		if target == nil || target.KnowledgeBaseID == "" {
-			continue
-		}
-		if _, ok := seen[target.KnowledgeBaseID]; ok {
-			continue
-		}
-		seen[target.KnowledgeBaseID] = struct{}{}
-		out = append(out, target.KnowledgeBaseID)
-	}
-	return out
+	return config.SearchTargets.GetAllKnowledgeBaseIDs(), kbTenantMap
 }
 
 // agentService implements agent-related business logic
@@ -322,8 +314,8 @@ func (s *agentService) resolveKBAndDocInfos(
 	ctx context.Context,
 	config *types.AgentConfig,
 ) ([]*agent.KnowledgeBaseInfo, []*agent.SelectedDocumentInfo) {
-	kbIDs := knowledgeBaseIDsForPrompt(config)
-	kbInfos, err := s.getKnowledgeBaseInfos(ctx, kbIDs)
+	kbIDs, kbTenantMap := knowledgeBaseScopesForPrompt(config)
+	kbInfos, err := s.getKnowledgeBaseInfos(ctx, kbIDs, kbTenantMap)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to get knowledge base details, using IDs only: %v", err)
 		kbInfos = make([]*agent.KnowledgeBaseInfo, 0, len(kbIDs))
@@ -735,8 +727,10 @@ func (s *agentService) ValidateConfig(config *types.AgentConfig) error {
 	return nil
 }
 
-// getKnowledgeBaseInfos retrieves detailed information for knowledge bases
-func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string) ([]*agent.KnowledgeBaseInfo, error) {
+// getKnowledgeBaseInfos retrieves detailed information for knowledge bases.
+// kbTenantMap carries the tenant each KB should be queried under (source tenant
+// for directly shared KBs); a missing entry falls back to the request tenant.
+func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string, kbTenantMap map[string]uint64) ([]*agent.KnowledgeBaseInfo, error) {
 	if len(kbIDs) == 0 {
 		return []*agent.KnowledgeBaseInfo{}, nil
 	}
@@ -765,12 +759,22 @@ func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string
 			continue
 		}
 
+		// Document/FAQ listing below is tenant-scoped, so a directly shared KB
+		// must be queried under its source tenant — the request context belongs
+		// to the receiving tenant and would silently yield doc_count=0. The
+		// tenant comes from the SearchTarget that buildSearchTargets already
+		// authorized; this only widens the metadata query, never the KB set.
+		metaCtx := ctx
+		if scopeTenantID := kbTenantMap[kbID]; scopeTenantID != 0 {
+			metaCtx = context.WithValue(ctx, types.TenantIDContextKey, scopeTenantID)
+		}
+
 		// Get document count and recent documents
 		docCount := 0
 		recentDocs := []agent.RecentDocInfo{}
 
 		if kb.Type == types.KnowledgeBaseTypeFAQ {
-			pageResult, err := s.knowledgeService.ListFAQEntries(ctx, kbID, &types.Pagination{
+			pageResult, err := s.knowledgeService.ListFAQEntries(metaCtx, kbID, &types.Pagination{
 				Page:     1,
 				PageSize: 10,
 			}, nil, 0, "", "", "")
@@ -801,7 +805,7 @@ func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string
 
 		// Fallback to generic knowledge listing when not FAQ or FAQ retrieval failed
 		if kb.Type != types.KnowledgeBaseTypeFAQ || len(recentDocs) == 0 {
-			pageResult, err := s.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(ctx, kbID, &types.Pagination{
+			pageResult, err := s.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(metaCtx, kbID, &types.Pagination{
 				Page:     1,
 				PageSize: 10,
 			}, types.KnowledgeListFilter{

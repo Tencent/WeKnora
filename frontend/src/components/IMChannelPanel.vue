@@ -584,6 +584,7 @@
 import { ref, onMounted, watch, onUnmounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
+import { copyWithToast } from '@/utils/clipboard';
 import {
   listIMChannels, createIMChannel, updateIMChannel, deleteIMChannel, toggleIMChannel,
   getWeChatQRCode, pollWeChatQRCodeStatus, listAllIMChannels, listAgents,
@@ -941,25 +942,7 @@ function getCallbackUrl(channel: IMChannel): string {
 }
 
 async function copyUrl(channel: IMChannel) {
-  const text = getCallbackUrl(channel);
-  try {
-    await navigator.clipboard.writeText(text);
-    MessagePlugin.success(t('common.copySuccess'));
-  } catch {
-    const el = document.createElement('textarea');
-    el.value = text;
-    el.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
-    document.body.appendChild(el);
-    el.focus();
-    el.select();
-    const ok = document.execCommand('copy');
-    document.body.removeChild(el);
-    if (ok) {
-      MessagePlugin.success(t('common.copySuccess'));
-    } else {
-      MessagePlugin.error(t('common.copyFailed'));
-    }
-  }
+  await copyWithToast(getCallbackUrl(channel), 'common.copySuccess');
 }
 
 function openCreate() {
