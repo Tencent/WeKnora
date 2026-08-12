@@ -237,10 +237,12 @@ export default function (knowledgeBaseId?: string) {
           const { data, total: totalResult } = result;
           details.md = data;
           details.total = totalResult;
+        } else {
+          details.chunkLoadError = result?.message || result?.error?.message || t('knowledgeBase.chunkLoadFailed');
         }
       })
       .catch((err: any) => {
-        if (requestGeneration !== chunkRequestGeneration) return;
+        if (requestGeneration !== chunkRequestGeneration || activeKnowledgeId !== id) return;
         details.chunkLoadError = err?.message || t('knowledgeBase.chunkLoadFailed');
         console.error("[ChunkLoad] failed", {
           knowledgeId: id,

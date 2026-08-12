@@ -12,6 +12,7 @@ import {
   downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile,
   updateDocumentChunk, listChunkRevisions, revertDocumentChunk, updateKnowledgeMetadata,
   regenerateKnowledgeSummary, upsertGeneratedQuestion, regenerateGeneratedQuestions, getKnowledgeDetails,
+  KNOWLEDGE_CHUNK_PAGE_SIZE,
 } from "@/api/knowledge-base/index";
 import { MessagePlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
@@ -496,10 +497,13 @@ const preprocessMathDelimiters = (rawText: string): string => {
     .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
 };
 const renderer = new marked.Renderer();
-const CHUNK_PAGE_SIZE = 25;
+const CHUNK_PAGE_SIZE = KNOWLEDGE_CHUNK_PAGE_SIZE;
 const chunkPage = ref(1);
-let loadedChunkPage = 1;
+const loadedChunkPage = ref(1);
 let pendingChunkPage: number | null = null;
+const isChunkPageTransition = computed(
+  () => Boolean(props.details?.chunkLoading) && chunkPage.value !== loadedChunkPage.value,
+);
 let mdContentWrap = ref()
 // Drawer uses attach="body", so markdown nodes live outside mdContentWrap in the DOM.
 const docMarkdownRoot = ref<HTMLElement | null>(null)
@@ -594,16 +598,16 @@ onMounted(() => {
 
 watch(() => props.details?.id, () => {
   chunkPage.value = 1;
-  loadedChunkPage = 1;
+  loadedChunkPage.value = 1;
   pendingChunkPage = null;
 });
 watch(() => props.details?.chunkLoading, (val) => {
   if (val === false && pendingChunkPage !== null) {
     if (props.details?.chunkLoadError) {
-      chunkPage.value = loadedChunkPage;
+      chunkPage.value = loadedChunkPage.value;
       MessagePlugin.warning(props.details.chunkLoadError);
     } else {
-      loadedChunkPage = pendingChunkPage;
+      loadedChunkPage.value = pendingChunkPage;
     }
     pendingChunkPage = null;
   }
@@ -1520,7 +1524,7 @@ const downloadFile = () => {
     });
 };
 const handleChunkPageChange = (pageInfo: { current: number }) => {
-  if (props.details?.chunkLoading || pageInfo.current === loadedChunkPage) return;
+  if (props.details?.chunkLoading || pageInfo.current === loadedChunkPage.value) return;
   pendingChunkPage = pageInfo.current;
   emit('getDoc', pageInfo.current);
 };
@@ -1786,19 +1790,30 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
 
           <!-- 合并视图 -->
           <div v-if="viewMode === 'merged'">
-            <div v-if="!mergedContent" class="no_content">{{ $t('common.noData') }}</div>
-            <div v-else class="md-content" v-html="processMarkdown(mergedContent)"></div>
+            <div v-if="isChunkPageTransition" class="chunk-page-loading">
+              <t-loading size="small" />
+              <span>{{ $t('common.loading') }}</span>
+            </div>
+            <template v-else>
+              <div v-if="!mergedContent" class="no_content">{{ $t('common.noData') }}</div>
+              <div v-else class="md-content" v-html="processMarkdown(mergedContent)"></div>
+            </template>
           </div>
 
           <!-- 分块视图 -->
           <div v-else-if="viewMode === 'chunks'">
-            <div v-if="!processedChunks.length" class="no_content">{{ $t('common.noData') }}</div>
-            <div v-else class="chunk-list">
+            <div v-if="isChunkPageTransition" class="chunk-page-loading">
+              <t-loading size="small" />
+              <span>{{ $t('common.loading') }}</span>
+            </div>
+            <template v-else>
+              <div v-if="!processedChunks.length" class="no_content">{{ $t('common.noData') }}</div>
+              <div v-else class="chunk-list">
               <div class="chunk-item" :class="{ 'chunk-item--disabled': !chunk.original.is_enabled }"
                 v-for="(chunk, index) in processedChunks" :key="chunk.original.id || index">
                 <div class="chunk-header">
                   <div class="chunk-heading">
-                    <span class="chunk-index">{{ $t('knowledgeBase.segment') }} {{ (chunkPage - 1) * CHUNK_PAGE_SIZE + index + 1 }}</span>
+                    <span class="chunk-index">{{ $t('knowledgeBase.segment') }} {{ (loadedChunkPage - 1) * CHUNK_PAGE_SIZE + index + 1 }}</span>
                     <span class="chunk-meta">{{ chunk.meta }}</span>
                   </div>
                   <div class="chunk-header-right">
@@ -2045,6 +2060,7 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
 
               </div>
             </div>
+            </template>
           </div>
 
           <!-- 文档预览视图 -->
@@ -2087,6 +2103,15 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
   margin-top: 20px;
   padding-top: 16px;
   border-top: 1px solid var(--td-component-stroke);
+}
+
+.chunk-page-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 120px;
+  color: var(--td-text-color-secondary);
 }
 
 .icon-action-btn {
