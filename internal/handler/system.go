@@ -551,6 +551,14 @@ func (h *SystemHandler) isOBSConfigured(c *gin.Context) bool {
 	return false
 }
 
+// isOBSEnvAvailable checks whether OBS env vars are set.
+func (h *SystemHandler) isOBSEnvAvailable() bool {
+	return os.Getenv("OBS_ENDPOINT") != "" &&
+		os.Getenv("OBS_ACCESS_KEY") != "" &&
+		os.Getenv("OBS_SECRET_KEY") != "" &&
+		os.Getenv("OBS_BUCKET_NAME") != ""
+}
+
 // isTOSEnvAvailable checks whether TOS env vars are set.
 func (h *SystemHandler) isTOSEnvAvailable() bool {
 	return os.Getenv("TOS_ENDPOINT") != "" &&
@@ -591,6 +599,7 @@ func (h *SystemHandler) GetStorageEngineStatus(c *gin.Context) {
 	ossConfigured := h.isOSSConfigured(c)
 	ks3Configured := h.isKS3Configured(c)
 	obsConfigured := h.isOBSConfigured(c)
+	obsEnvAvailable := h.isOBSEnvAvailable()
 	allowed := getAllowedStorageProviders()
 
 	// avail and desc are keyed by provider name and must stay in sync with
@@ -605,7 +614,7 @@ func (h *SystemHandler) GetStorageEngineStatus(c *gin.Context) {
 		"s3":    s3Configured,
 		"oss":   ossConfigured,
 		"ks3":   ks3Configured,
-		"obs":   obsConfigured,
+		"obs":   obsConfigured || obsEnvAvailable,
 	}
 	desc := map[string]string{
 		"local": "本地文件系统存储，仅适合单机部署",

@@ -103,12 +103,23 @@ func NewFileServiceFromStorageConfig(
 		return svc, p, err
 
 	case "obs":
-		obsEndpoint := strings.TrimSpace(os.Getenv("OBS_ENDPOINT"))
-		obsRegion := strings.TrimSpace(os.Getenv("OBS_REGION"))
-		obsAccessKey := strings.TrimSpace(os.Getenv("OBS_ACCESS_KEY"))
-		obsSecretKey := strings.TrimSpace(os.Getenv("OBS_SECRET_KEY"))
-		obsBucketName := strings.TrimSpace(os.Getenv("OBS_BUCKET_NAME"))
-		obsPathPrefix := strings.TrimSpace(os.Getenv("OBS_PATH_PREFIX"))
+		var obsEndpoint, obsRegion, obsAccessKey, obsSecretKey, obsBucketName, obsPathPrefix string
+		// prefer tenant config; fall back to env vars (mirrors MinIO behaviour)
+		if sec != nil && sec.OBS != nil && sec.OBS.Endpoint != "" && sec.OBS.AccessKey != "" && sec.OBS.SecretKey != "" && sec.OBS.BucketName != "" {
+			obsEndpoint = strings.TrimSpace(sec.OBS.Endpoint)
+			obsRegion = strings.TrimSpace(sec.OBS.Region)
+			obsAccessKey = strings.TrimSpace(sec.OBS.AccessKey)
+			obsSecretKey = strings.TrimSpace(sec.OBS.SecretKey)
+			obsBucketName = strings.TrimSpace(sec.OBS.BucketName)
+			obsPathPrefix = strings.TrimSpace(sec.OBS.PathPrefix)
+		} else {
+			obsEndpoint = strings.TrimSpace(os.Getenv("OBS_ENDPOINT"))
+			obsRegion = strings.TrimSpace(os.Getenv("OBS_REGION"))
+			obsAccessKey = strings.TrimSpace(os.Getenv("OBS_ACCESS_KEY"))
+			obsSecretKey = strings.TrimSpace(os.Getenv("OBS_SECRET_KEY"))
+			obsBucketName = strings.TrimSpace(os.Getenv("OBS_BUCKET_NAME"))
+			obsPathPrefix = strings.TrimSpace(os.Getenv("OBS_PATH_PREFIX"))
+		}
 		if obsPathPrefix == "" {
 			obsPathPrefix = "weknora/"
 		}
