@@ -654,6 +654,7 @@
                       <div class="setting-control">
                         <ModelSelector model-type="Rerank" :selected-model-id="formData.config.rerank_model_id"
                           :all-models="allModels"
+                          :clearable="!needsRerankModel"
                           @update:selected-model-id="(val: string) => formData.config.rerank_model_id = val"
                           @add-model="handleAddModel('rerank')"
                           :placeholder="$t('agent.editor.rerankModelPlaceholder')" />
@@ -671,6 +672,7 @@
                       <div class="setting-control">
                         <ModelSelector model-type="KnowledgeQA"
                           :selected-model-id="formData.config.query_understand_model_id" :all-models="allModels"
+                          clearable
                           @update:selected-model-id="(val: string) => formData.config.query_understand_model_id = val"
                           @add-model="handleAddModel('llm')"
                           :placeholder="$t('agent.editor.queryUnderstandModelPlaceholder')" />
@@ -809,6 +811,7 @@
                       <div class="setting-control">
                         <ModelSelector model-type="ASR" :selected-model-id="formData.config.asr_model_id"
                           :all-models="allModels"
+                          clearable
                           @update:selected-model-id="(val: string) => formData.config.asr_model_id = val"
                           @add-model="handleAddModel('asr')"
                           :placeholder="$t('agentEditor.audioUpload.asrModelPlaceholder')" />
@@ -1011,6 +1014,7 @@
                           <ModelSelector model-type="KnowledgeQA"
                             :selected-model-id="formData.config.question_suggestions.follow_ups.model_id"
                             :all-models="allModels"
+                            clearable
                             @update:selected-model-id="(val: string) => formData.config.question_suggestions.follow_ups.model_id = val"
                             @add-model="handleAddModel('summary')" />
                         </div>
