@@ -164,13 +164,48 @@ func (c *client) commitSHA(ctx context.Context, id, ref string) (string, error) 
 	return v.ID, err
 }
 func (c *client) tree(ctx context.Context, id, ref, dir string) ([]treeEntry, error) {
-	q := url.Values{"ref": {ref}, "per_page": {"100"}}
+	q := url.Values{"ref": {ref}, "per_page": {"100"}, "page": {"1"}}
 	if dir != "" {
 		q.Set("path", dir)
 	}
-	var t []treeEntry
-	err := c.get(ctx, "/projects/"+projectPath(id)+"/repository/tree?"+q.Encode(), &t)
-	return t, err
+	endpoint := "/projects/" + projectPath(id) + "/repository/tree"
+	var all []treeEntry
+	for {
+		var page []treeEntry
+		nextPage, err := c.getTreePage(ctx, endpoint, q, &page)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		if nextPage == "" {
+			return all, nil
+		}
+		q.Set("page", nextPage)
+	}
+}
+
+func (c *client) getTreePage(ctx context.Context, endpoint string, query url.Values, out interface{}) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+endpoint+"?"+query.Encode(), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("PRIVATE-TOKEN", c.token)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", &apiError{endpoint: endpoint, status: resp.StatusCode}
+	}
+	if err := json.Unmarshal(body, out); err != nil {
+		return "", err
+	}
+	return resp.Header.Get("X-Next-Page"), nil
 }
 func (c *client) raw(ctx context.Context, id, ref, file string) ([]byte, error) {
 	q := url.Values{"ref": {ref}}

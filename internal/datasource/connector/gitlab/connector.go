@@ -12,7 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-var _ datasource.Connector = (*Connector)(nil)
+var _ datasource.StreamingConnector = (*Connector)(nil)
 
 type Connector struct {
 	client        *client
@@ -233,12 +233,142 @@ func (c *Connector) FetchIncremental(ctx context.Context, ds *types.DataSourceCo
 	raw, _ := json.Marshal(next)
 	return out, &types.SyncCursor{LastSyncTime: time.Now().UTC(), ConnectorCursor: map[string]interface{}{"projects": next.Projects, "raw": string(raw)}}, nil
 }
+
+// FetchStream is the production sync path. It emits each supported repository
+// file as soon as it is read, so large GitLab projects do not accumulate their
+// contents in memory. The service prefers this method for StreamingConnector
+// implementations; FetchAll and FetchIncremental remain compatibility methods
+// required by the base Connector interface.
+func (c *Connector) FetchStream(
+	ctx context.Context, ds *types.DataSourceConfig, old *types.SyncCursor, h datasource.StreamHandler,
+) (*types.SyncCursor, error) {
+	var err error
+	if c, err = c.configured(ds); err != nil {
+		return nil, err
+	}
+	cfg, err := parseConfig(ds)
+	if err != nil {
+		return nil, err
+	}
+	prev := cursor{Projects: map[string]string{}}
+	if old != nil {
+		b, _ := json.Marshal(old.ConnectorCursor)
+		_ = json.Unmarshal(b, &prev)
+		if prev.Projects == nil {
+			prev.Projects = map[string]string{}
+		}
+	}
+	next := cursor{Projects: make(map[string]string, len(cfg.Projects))}
+	for projectID, commit := range prev.Projects {
+		next.Projects[projectID] = commit
+	}
+
+	for _, selection := range cfg.Projects {
+		project, err := c.client.project(ctx, selection.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		ref := selection.Ref
+		if ref == "" {
+			ref = project.DefaultBranch
+		}
+		head, err := c.client.commitSHA(ctx, selection.ProjectID, ref)
+		if err != nil {
+			return nil, err
+		}
+
+		previous := prev.Projects[selection.ProjectID]
+		switch {
+		case previous == "":
+			err = c.streamFiles(ctx, project, ref, selection.Paths, h)
+		case previous != head:
+			err = c.streamChanges(ctx, project, ref, previous, head, selection.Paths, h)
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		next.Projects[selection.ProjectID] = head
+		checkpoint := gitLabCursor(next)
+		if err := h.Checkpoint(ctx, checkpoint); err != nil {
+			return nil, err
+		}
+	}
+	return gitLabCursor(next), nil
+}
+
+func gitLabCursor(value cursor) *types.SyncCursor {
+	raw, _ := json.Marshal(value)
+	return &types.SyncCursor{
+		LastSyncTime:    time.Now().UTC(),
+		ConnectorCursor: map[string]interface{}{"projects": value.Projects, "raw": string(raw)},
+	}
+}
+
+func (c *Connector) streamChanges(
+	ctx context.Context, project *project, ref, from, to string, roots []string, h datasource.StreamHandler,
+) error {
+	diff, err := c.client.compare(ctx, fmt.Sprint(project.ID), from, to)
+	if err != nil || diff.CompareTimeout {
+		// A compare can be unavailable after history rewrites or be truncated by
+		// GitLab. Re-enumerating the configured scope preserves file updates.
+		return c.streamFiles(ctx, project, ref, roots, h)
+	}
+	for _, change := range diff.Diffs {
+		if change.DeletedFile {
+			if c.inScope(change.OldPath, roots) && isSupportedFile(change.OldPath) {
+				if err := h.Emit(ctx, c.deleted(project, ref, change.OldPath)); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if change.RenamedFile && c.inScope(change.OldPath, roots) && isSupportedFile(change.OldPath) {
+			if err := h.Emit(ctx, c.deleted(project, ref, change.OldPath)); err != nil {
+				return err
+			}
+		}
+		if c.inScope(change.NewPath, roots) && isSupportedFile(change.NewPath) {
+			item, err := c.item(ctx, project, ref, change.NewPath)
+			if err != nil {
+				return err
+			}
+			if err := h.Emit(ctx, item); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (c *Connector) streamFiles(
+	ctx context.Context, project *project, ref string, roots []string, h datasource.StreamHandler,
+) error {
+	return c.walkFiles(ctx, fmt.Sprint(project.ID), ref, roots, func(file string) error {
+		item, err := c.item(ctx, project, ref, file)
+		if err != nil {
+			return err
+		}
+		return h.Emit(ctx, item)
+	})
+}
+
 func (c *Connector) files(ctx context.Context, id, ref string, roots []string) ([]string, error) {
+	var out []string
+	err := c.walkFiles(ctx, id, ref, roots, func(file string) error {
+		out = append(out, file)
+		return nil
+	})
+	return out, err
+}
+
+// walkFiles visits supported blobs while traversing the selected directories.
+// It deliberately does not collect paths, keeping streaming sync memory bounded
+// by the traversal depth plus the current file body.
+func (c *Connector) walkFiles(ctx context.Context, id, ref string, roots []string, visit func(string) error) error {
 	if len(roots) == 0 {
 		roots = []string{""}
 	}
-	seen := map[string]bool{}
-	var out []string
 	var walk func(string) error
 	walk = func(dir string) error {
 		entries, err := c.client.tree(ctx, id, ref, dir)
@@ -250,20 +380,38 @@ func (c *Connector) files(ctx context.Context, id, ref string, roots []string) (
 				if err := walk(e.Path); err != nil {
 					return err
 				}
-			} else if e.Type == "blob" && !seen[e.Path] {
-				seen[e.Path] = true
-				out = append(out, e.Path)
+			} else if e.Type == "blob" && isSupportedFile(e.Path) {
+				if err := visit(e.Path); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
 	}
 	for _, r := range roots {
 		if err := walk(r); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	return out, nil
+	return nil
 }
+
+func isSupportedFile(file string) bool {
+	_, ok := gitLabSupportedFileExtensions[strings.ToLower(path.Ext(file))]
+	return ok
+}
+
+// gitLabSupportedFileExtensions limits repository sync to formats the current
+// knowledge import pipeline can process. This is intentionally connector-local:
+// GitLab exposes arbitrary repository blobs, unlike document-centric sources.
+var gitLabSupportedFileExtensions = map[string]struct{}{
+	".pdf": {}, ".txt": {}, ".docx": {}, ".doc": {}, ".epub": {},
+	".html": {}, ".htm": {}, ".mhtml": {}, ".md": {}, ".markdown": {},
+	".png": {}, ".jpg": {}, ".jpeg": {}, ".gif": {},
+	".csv": {}, ".xlsx": {}, ".xls": {}, ".pptx": {}, ".ppt": {}, ".json": {},
+	".mp3": {}, ".wav": {}, ".m4a": {}, ".flac": {}, ".ogg": {},
+}
+
 func (c *Connector) item(ctx context.Context, p *project, ref, file string) (types.FetchedItem, error) {
 	body, err := c.client.raw(ctx, fmt.Sprint(p.ID), ref, file)
 	if err != nil {

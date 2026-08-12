@@ -160,6 +160,126 @@ func TestFetchIncrementalSyncsMultipleProjects(t *testing.T) {
 	}
 }
 
+type gitLabStreamRecorder struct {
+	items       []types.FetchedItem
+	checkpoints []*types.SyncCursor
+}
+
+func (h *gitLabStreamRecorder) Emit(_ context.Context, item types.FetchedItem) error {
+	h.items = append(h.items, item)
+	return nil
+}
+
+func (h *gitLabStreamRecorder) Checkpoint(_ context.Context, cursor *types.SyncCursor) error {
+	h.checkpoints = append(h.checkpoints, cursor)
+	return nil
+}
+
+func TestFetchStreamFiltersUnsupportedFilesAndCheckpointsProjects(t *testing.T) {
+	var rawRequests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/projects/1":
+			_, _ = w.Write([]byte(`{"id":1,"name":"docs","path_with_namespace":"group/docs","web_url":"https://gitlab.test/group/docs","default_branch":"main"}`))
+		case "/projects/1/repository/commits/main":
+			_, _ = w.Write([]byte(`{"id":"commit-1"}`))
+		case "/projects/1/repository/tree":
+			_, _ = w.Write([]byte(`[
+				{"name":"README.md","type":"blob","path":"README.md"},
+				{"name":"server.go","type":"blob","path":"server.go"},
+				{"name":"payload.exe","type":"blob","path":"payload.exe"}
+			]`))
+		default:
+			if strings.Contains(r.URL.EscapedPath(), "/repository/files/") {
+				rawRequests = append(rawRequests, r.URL.EscapedPath())
+				_, _ = w.Write([]byte("# readme"))
+				return
+			}
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	connector := &Connector{client: &client{baseURL: server.URL, http: server.Client()}, canonicalBase: server.URL}
+	config := &types.DataSourceConfig{Settings: map[string]interface{}{
+		"projects": []interface{}{map[string]interface{}{"project_id": "1", "paths": []interface{}{}}},
+	}}
+	handler := &gitLabStreamRecorder{}
+	next, err := connector.FetchStream(context.Background(), config, nil, handler)
+	if err != nil {
+		t.Fatalf("FetchStream() error = %v", err)
+	}
+	if len(handler.items) != 1 || handler.items[0].FileName != "docs-main/README.md" {
+		t.Fatalf("emitted items = %#v", handler.items)
+	}
+	if len(rawRequests) != 1 || !strings.Contains(rawRequests[0], "README%2Emd") {
+		t.Fatalf("raw requests = %v, want only README.md", rawRequests)
+	}
+	if len(handler.checkpoints) != 1 || next == nil {
+		t.Fatalf("checkpoints = %d, next = %#v", len(handler.checkpoints), next)
+	}
+	projects, _ := next.ConnectorCursor["projects"].(map[string]string)
+	if projects["1"] != "commit-1" {
+		t.Fatalf("cursor projects = %#v", next.ConnectorCursor["projects"])
+	}
+}
+
+func TestIsSupportedFile(t *testing.T) {
+	for _, tc := range []struct {
+		file string
+		want bool
+	}{
+		{file: "docs/guide.MD", want: true},
+		{file: "report.pdf", want: true},
+		{file: "src/main.go", want: false},
+		{file: "archive.tar.gz", want: false},
+		{file: "LICENSE", want: false},
+	} {
+		if got := isSupportedFile(tc.file); got != tc.want {
+			t.Errorf("isSupportedFile(%q) = %v, want %v", tc.file, got, tc.want)
+		}
+	}
+}
+
+func TestTreeFollowsGitLabPagination(t *testing.T) {
+	allowLocalGitLabServer(t)
+	var requestedPages []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v4/projects/1/repository/tree" {
+			http.NotFound(w, r)
+			return
+		}
+		requestedPages = append(requestedPages, r.URL.Query().Get("page"))
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("page") {
+		case "1":
+			w.Header().Set("X-Next-Page", "2")
+			_, _ = w.Write([]byte(`[{"name":"one.md","type":"blob","path":"one.md"}]`))
+		case "2":
+			_, _ = w.Write([]byte(`[{"name":"two.md","type":"blob","path":"two.md"}]`))
+		default:
+			http.Error(w, "unexpected page", http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	c, err := newClient(server.URL, "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := c.tree(context.Background(), "1", "main", "")
+	if err != nil {
+		t.Fatalf("tree() error = %v", err)
+	}
+	if len(entries) != 2 || entries[1].Path != "two.md" {
+		t.Fatalf("entries = %#v", entries)
+	}
+	if got, want := strings.Join(requestedPages, ","), "1,2"; got != want {
+		t.Fatalf("requested pages = %q, want %q", got, want)
+	}
+}
+
 func TestDirectoryExistsListsTheTargetPath(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/projects/18296/repository/tree" || r.URL.Query().Get("path") != "docs" {
