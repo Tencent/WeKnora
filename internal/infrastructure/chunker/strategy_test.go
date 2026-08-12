@@ -244,23 +244,70 @@ func TestNormalizeLineEndings(t *testing.T) {
 	}
 }
 
-func TestDeriveParentChildConfigs_DefaultSizes(t *testing.T) {
-	base := SplitterConfig{
-		ChunkSize:    1000,
-		ChunkOverlap: 100,
-		Separators:   []string{"\n\n", "\n"},
-		Strategy:     StrategyHeading,
-	}
-	parent, child := DeriveParentChildConfigs(base, 0, 0)
-	if parent.ChunkSize != 4096 || child.ChunkSize != 384 {
-		t.Fatalf("default sizes: parent=%d child=%d", parent.ChunkSize, child.ChunkSize)
-	}
-	if parent.Strategy != StrategyHeading || child.Strategy != StrategyHeading {
-		t.Fatalf("strategy not propagated: parent=%q child=%q", parent.Strategy, child.Strategy)
-	}
-	if child.ChunkOverlap != 384/5 {
-		t.Fatalf("child overlap: got %d want %d", child.ChunkOverlap, 384/5)
-	}
+func TestDeriveParentChildConfigs(t *testing.T) {
+	t.Run("uses default parent and child sizes", func(t *testing.T) {
+		base := SplitterConfig{
+			ChunkSize:    1000,
+			ChunkOverlap: 100,
+			Separators:   []string{"\n\n", "\n"},
+			Strategy:     StrategyHeading,
+		}
+		parent, child := DeriveParentChildConfigs(base, 0, 0)
+		if parent.ChunkSize != 4096 || child.ChunkSize != 384 {
+			t.Fatalf("default sizes: parent=%d child=%d", parent.ChunkSize, child.ChunkSize)
+		}
+		if parent.Strategy != StrategyHeading || child.Strategy != StrategyHeading {
+			t.Fatalf("strategy not propagated: parent=%q child=%q", parent.Strategy, child.Strategy)
+		}
+		if child.ChunkOverlap != 384/5 {
+			t.Fatalf("child overlap: got %d want %d", child.ChunkOverlap, 384/5)
+		}
+	})
+
+	t.Run("applies embedding token limit only to children", func(t *testing.T) {
+		const (
+			parentSize = 4096
+			childSize  = 1024
+			tokenLimit = 200
+		)
+		base := SplitterConfig{
+			ChunkSize:    DefaultChunkSize,
+			ChunkOverlap: DefaultChunkOverlap,
+			Separators:   []string{"。"},
+			Strategy:     StrategyLegacy,
+			TokenLimit:   tokenLimit,
+			Languages:    []string{LangChinese},
+		}
+
+		parent, child := DeriveParentChildConfigs(base, parentSize, childSize)
+		if parent.TokenLimit != 0 {
+			t.Fatalf("parent token limit: got %d want 0", parent.TokenLimit)
+		}
+		if len(parent.Languages) != 1 || parent.Languages[0] != LangChinese {
+			t.Fatalf("parent languages: got %v want [%s]", parent.Languages, LangChinese)
+		}
+		if child.TokenLimit != tokenLimit {
+			t.Fatalf("child token limit: got %d want %d", child.TokenLimit, tokenLimit)
+		}
+		if len(child.Languages) != 1 || child.Languages[0] != LangChinese {
+			t.Fatalf("child languages: got %v want [%s]", child.Languages, LangChinese)
+		}
+
+		text := strings.Repeat("这是用于验证中文分块预算的句子。", 100)
+		result := SplitParentChild(text, parent, child)
+		if len(result.Parents) != 1 {
+			t.Fatalf("parents: got %d want 1", len(result.Parents))
+		}
+		if got := len([]rune(result.Parents[0].Content)); got != len([]rune(text)) {
+			t.Fatalf("parent length: got %d want %d", got, len([]rune(text)))
+		}
+		budget := CharsForTokenLimit(tokenLimit, LangChinese)
+		for i, c := range result.Children {
+			if got := len([]rune(c.Content)); got > budget {
+				t.Fatalf("child[%d] length: got %d want <= %d", i, got, budget)
+			}
+		}
+	})
 }
 
 func TestValidateChunks_Empty(t *testing.T) {
