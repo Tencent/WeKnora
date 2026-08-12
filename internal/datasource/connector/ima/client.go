@@ -1,3 +1,6 @@
+// Package ima implements the WeKnora data source connector for Tencent IMA
+// (ima.qq.com), syncing documents and files out of IMA knowledge bases via the
+// /openapi/wiki/v1 OpenAPI.
 package ima
 
 import (
@@ -12,6 +15,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 const (
@@ -112,7 +116,7 @@ func (c *client) callAPI(ctx context.Context, action string, req interface{}, re
 		}
 
 		respBody, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if readErr != nil {
 			lastErr = fmt.Errorf("read response: %w", readErr)
 			if attempt < maxRetries {
@@ -124,9 +128,11 @@ func (c *client) callAPI(ctx context.Context, action string, req interface{}, re
 			return lastErr
 		}
 
+		// The body is only ever logged on an error path: successful responses
+		// (get_media_info in particular) carry pre-signed storage URLs and
+		// per-request auth headers that must not land in the server log.
 		bodyPreview := truncate(string(respBody), 500)
-		logger.Infof(ctx, "[IMA] POST %s → status=%d bodyLen=%d body=%s",
-			action, resp.StatusCode, len(respBody), bodyPreview)
+		logger.Infof(ctx, "[IMA] POST %s → status=%d bodyLen=%d", action, resp.StatusCode, len(respBody))
 
 		// HTTP-level auth failures: surface as ErrInvalidCredentials.
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
@@ -167,9 +173,11 @@ func (c *client) callAPI(ctx context.Context, action string, req interface{}, re
 		}
 
 		// Business-level errors.
-		// 110030 (无权限) / 110001 (参数非法) with common auth hint patterns are
-		// mapped to ErrInvalidCredentials so the service marks the source in
-		// `error` state and stops scheduling until re-authenticated.
+		// 110030 (无权限) is mapped to ErrInvalidCredentials so the service marks
+		// the source in `error` state and stops scheduling until re-authenticated.
+		// 110021 (限频) is retried. Everything else — including 110001 (参数非法),
+		// which is a bug on our side rather than a credential problem — surfaces
+		// verbatim so the user sees IMA's own message.
 		if env.Code != 0 {
 			if env.Code == 110030 {
 				return fmt.Errorf("%w: ima code=%d msg=%s",
@@ -294,6 +302,13 @@ func (c *client) DownloadURL(ctx context.Context, u urlInfo) ([]byte, string, er
 	if u.URL == "" {
 		return nil, "", fmt.Errorf("empty url")
 	}
+	// The URL comes from an API response, so it is attacker-influenced as far
+	// as this process is concerned. downloadClient already guards the dial and
+	// every redirect hop; this rejects an unsafe target before the first
+	// connection is even attempted.
+	if err := utils.ValidateURLForSSRF(u.URL); err != nil {
+		return nil, "", fmt.Errorf("media URL rejected: %w", err)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.URL, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("create download request: %w", err)
@@ -307,7 +322,7 @@ func (c *client) DownloadURL(ctx context.Context, u urlInfo) ([]byte, string, er
 	if err != nil {
 		return nil, "", fmt.Errorf("download: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, "", fmt.Errorf("download http error: status=%d", resp.StatusCode)
