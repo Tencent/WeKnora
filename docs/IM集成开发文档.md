@@ -820,8 +820,7 @@ type ReplyMessage struct {
 │  6. 解析/创建 ChannelSession                     │
 │  7. 获取 WeKnora Session                         │
 │  8. 加载 Agent 配置（获取知识库、模型等信息）       │
-│  9. 文件消息？→ 下载并保存到知识库                  │
-│ 10. 提交到 qaQueue (有界队列, 异步执行)            │
+│  9. 所有消息提交到 qaQueue (有界队列, 异步执行)     │
 └───────────┬─────────────────────────────────────┘
             │
             ▼
@@ -917,7 +916,7 @@ type FileDownloader interface {
 }
 ```
 
-实现此接口后，当用户发送文件/图片消息且渠道配置了 `knowledge_base_id` 时，Service 会自动下载文件并保存到指定知识库。
+实现此接口后，文件和图片可作为 QA 附件供模型理解。配置 `knowledge_base_id` 时，附件还会在后台保存到指定知识库；未配置时仅跳过保存。
 
 ### im.AdapterFactory — 适配器工厂
 
@@ -1539,22 +1538,7 @@ QA 管道 ──chunk──chunk──chunk──▶ EventBus
 
 ## 文件消息处理
 
-当用户在 IM 中发送文件或图片消息时，如果渠道配置了 `knowledge_base_id`，Service 会自动将文件保存到对应知识库：
-
-```
-用户发送文件/图片消息
-        │
-        ▼
-  消息类型 = file/image？
-  渠道配置了 knowledge_base_id？
-  Adapter 实现了 FileDownloader？
-        │ 全部满足
-        ▼
-  1. adapter.DownloadFile(msg) → io.ReadCloser + fileName
-  2. 通知用户 "正在处理文件..."
-  3. knowledgeService.Save(file, knowledgeBaseID)
-  4. 通知用户 "文件已保存到知识库"
-```
+文件和图片会作为 QA 附件供模型理解，用户只收到该消息对应的 QA 回复。`knowledge_base_id` 配置后会额外触发后台入库；未配置时不入库、不报错。入库结果和后续解析不再产生额外 IM 通知。解析出的附件文本最多保留前 500 行且不超过 32 KiB；发生任一限制时，模型会收到通用的截断提示。
 
 **各平台文件下载方式：**
 
