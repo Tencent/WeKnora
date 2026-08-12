@@ -37,6 +37,12 @@ type UserPreferences struct {
 	//        a stored *0 the same as nil.
 	// *N   = preferred workspace id.
 	LastActiveTenantID *uint64 `json:"last_active_tenant_id,omitempty"`
+
+	// OidcOnlyLogin is set server-side when an account is auto-provisioned
+	// via OIDC with a random password the user never received. The profile
+	// UI hides self-service password rotation until the user sets a known
+	// password via ChangePassword (which clears this flag).
+	OidcOnlyLogin *bool `json:"oidc_only_login,omitempty"`
 }
 
 // Value implements driver.Valuer so GORM persists UserPreferences as

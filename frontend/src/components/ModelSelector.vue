@@ -7,6 +7,7 @@
       :disabled="disabled"
       :loading="loading"
       :status="status"
+      :clearable="clearable"
       filterable
       style="width: 100%;"
     >
@@ -53,6 +54,7 @@ interface Props {
   disabled?: boolean
   placeholder?: string
   status?: 'default' | 'success' | 'warning' | 'error'
+  clearable?: boolean
   // 可选：外部传入的所有模型列表，如果提供则不调用API
   allModels?: ModelConfig[]
 }
@@ -61,6 +63,7 @@ const props = withDefaults(defineProps<Props>(), {
   disabled: false,
   placeholder: '',
   status: 'default',
+  clearable: false,
 })
 
 const emit = defineEmits<{
@@ -119,13 +122,13 @@ const loadModels = async () => {
 }
 
 // 处理模型选择变化
-const handleModelChange = (value: string) => {
+const handleModelChange = (value?: string) => {
   // 如果选择的是添加模型选项，触发添加事件而不更新选中值
   if (value === '__add_model__') {
     emit('add-model')
     return
   }
-  emit('update:selectedModelId', value)
+  emit('update:selectedModelId', value || '')
 }
 
 // 暴露刷新方法给父组件

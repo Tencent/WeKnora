@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue';
+import { ref, computed, nextTick, onBeforeUnmount, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatFileSize } from '@/utils/files';
 import { useTagChipsOverflow } from '@/composables/useTagChipsOverflow';
@@ -182,6 +182,15 @@ const cardHoverShowDelay = 300;
 let cardHoverTimer: ReturnType<typeof setTimeout> | null = null;
 let cardPopoverElement: HTMLElement | null = null;
 
+const dismissCardPopover = () => {
+  if (cardHoverTimer) {
+    clearTimeout(cardHoverTimer);
+    cardHoverTimer = null;
+  }
+  hoveredCardItem.value = null;
+  cardPopoverElement = null;
+};
+
 const calculatePopoverPositionFromCard = (cardElement: HTMLElement): { x: number; y: number } => {
   const cardRect = cardElement.getBoundingClientRect();
   const viewportWidth = window.innerWidth;
@@ -246,10 +255,15 @@ const onCardMouseEnter = (ev: MouseEvent, item: KnowledgeCard) => {
   const cardElement = (ev.currentTarget as HTMLElement);
   cardHoverTimer = setTimeout(() => {
     cardHoverTimer = null;
+    // Folder navigation can replace the card list before this delayed callback
+    // runs. A detached card has a zero rect, which used to place the teleported
+    // popover at the top-left corner of the viewport.
+    if (!cardElement.isConnected || !props.items.some(candidate => candidate.id === item.id)) return;
     hoveredCardItem.value = item;
     const pos = calculatePopoverPositionFromCard(cardElement);
     cardPopoverPos.value = pos;
     nextTick(() => {
+      if (!cardElement.isConnected || hoveredCardItem.value?.id !== item.id) return;
       cardPopoverElement = document.querySelector('.knowledge-card-hover-popover') as HTMLElement;
       if (cardPopoverElement) {
         const refinedPos = calculatePopoverPositionFromCard(cardElement);
@@ -260,12 +274,17 @@ const onCardMouseEnter = (ev: MouseEvent, item: KnowledgeCard) => {
 };
 
 const onCardMouseLeave = () => {
-  if (cardHoverTimer) {
-    clearTimeout(cardHoverTimer);
-    cardHoverTimer = null;
-  }
-  hoveredCardItem.value = null;
-  cardPopoverElement = null;
+  dismissCardPopover();
+};
+
+// Browsing to another folder swaps the item collection without necessarily
+// dispatching mouseleave on a card that Vue removes.
+watch(() => props.items, dismissCardPopover);
+onBeforeUnmount(dismissCardPopover);
+
+const onOpenFolder = (path: string) => {
+  dismissCardPopover();
+  emit('open-folder', path);
 };
 
 const onFolderPicked = (item: KnowledgeCard, path: string) => {
@@ -301,8 +320,8 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
         :title="folder.path"
         role="button"
         tabindex="0"
-        @click="emit('open-folder', folder.path)"
-        @keydown.enter="emit('open-folder', folder.path)"
+        @click="onOpenFolder(folder.path)"
+        @keydown.enter="onOpenFolder(folder.path)"
       >
         <div class="folder-card__body">
           <t-icon name="folder" class="folder-card__icon" />

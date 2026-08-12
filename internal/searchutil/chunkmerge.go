@@ -130,6 +130,40 @@ func AppendWithOverlap(acc, next string, positionOverlap int) string {
 	return acc + next
 }
 
+// AppendWithExactOverlap 在调用方已确认位置坐标可信时，按坐标给出的精确重叠量
+// 拼接 acc 与 next：校验 acc 的末 overlap 个字符与 next 的前 overlap 个字符逐字
+// 符相等，相等则精确裁剪，overlap 为 0 时直接拼接。
+//
+// 与 AppendWithOverlap 的区别在于「不猜」：后者为兼容补写表头、HTML 实体等长度
+// 偏差，会在窗口内搜索最长后缀匹配，重复周期性文本（表格、日志）可能被误判成重
+// 叠而裁掉真实内容。坐标可信时重叠量是已知的，不需要搜索。
+//
+// 校验不通过返回 ok=false，由调用方决定是否回退到 AppendWithOverlap。
+func AppendWithExactOverlap(acc, next string, overlap int) (string, bool) {
+	if acc == "" {
+		return next, true
+	}
+	if next == "" {
+		return acc, true
+	}
+	if overlap < 0 {
+		return "", false
+	}
+	if overlap == 0 {
+		return acc + next, true
+	}
+
+	accRunes := []rune(acc)
+	nextRunes := []rune(next)
+	if overlap > len(accRunes) || overlap > len(nextRunes) {
+		return "", false
+	}
+	if !runeSlicesEqual(accRunes[len(accRunes)-overlap:], nextRunes[:overlap]) {
+		return "", false
+	}
+	return acc + string(nextRunes[overlap:]), true
+}
+
 // MergeTextChunks 按 StartAt（并列时按 ChunkIndex）排序后，用 AppendWithOverlap
 // 把多个 chunk 的内容重建为完整文本。gapSep 用于位置不相邻（有间隙）的两段之间
 // 的分隔符（如 "\n"），传空串则直接拼接。

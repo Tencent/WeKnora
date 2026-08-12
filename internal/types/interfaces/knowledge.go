@@ -323,6 +323,15 @@ type KnowledgeRepository interface {
 	ListIDsByTagIDs(ctx context.Context, tenantID uint64, kbID string, tagIDs []string) ([]string, error)
 	// SetKnowledgeTags replaces all tags for a single knowledge entry (deletes old, inserts new).
 	SetKnowledgeTags(ctx context.Context, knowledgeID string, tagIDs []string) error
+	// AddKnowledgeTagRelations attaches tags without removing existing ones,
+	// after validating that the knowledge and every tag belong to the given
+	// tenant and knowledge base. Duplicate deliveries are idempotent.
+	AddKnowledgeTagRelations(
+		ctx context.Context,
+		tenantID uint64,
+		kbID, knowledgeID string,
+		tagIDs []string,
+	) error
 	// GetKnowledgeTags returns tags for multiple knowledge IDs.
 	GetKnowledgeTags(ctx context.Context, knowledgeIDs []string) (map[string][]*types.KnowledgeTag, error)
 	// DeleteKnowledgeTagRelations deletes all tag relations for a knowledge entry.

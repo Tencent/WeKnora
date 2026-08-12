@@ -102,3 +102,55 @@ func TestApplyAuthAndTenantDefaults_DefaultTenantMode(t *testing.T) {
 		}
 	})
 }
+
+// TestApplyAuthAndTenantDefaults_CrossTenantAccess is a regression test for the
+// env-binding gap: viper.AutomaticEnv has no SetEnvPrefix, so
+// WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS is never bound to the nested struct
+// automatically. applyAuthAndTenantDefaults must read it explicitly (like RBAC);
+// without that, only config.yaml's enable_cross_tenant_access would take effect
+// and the documented env override would be silently ignored.
+func TestApplyAuthAndTenantDefaults_CrossTenantAccess(t *testing.T) {
+	t.Run("environment true enables cross-tenant access", func(t *testing.T) {
+		t.Setenv("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS", "true")
+		cfg := &Config{Tenant: &TenantConfig{EnableCrossTenantAccess: false}}
+
+		applyAuthAndTenantDefaults(cfg)
+
+		if !cfg.Tenant.EnableCrossTenantAccess {
+			t.Fatal("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS=true should enable cross-tenant access")
+		}
+	})
+
+	t.Run("environment false overrides yaml true", func(t *testing.T) {
+		t.Setenv("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS", "false")
+		cfg := &Config{Tenant: &TenantConfig{EnableCrossTenantAccess: true}}
+
+		applyAuthAndTenantDefaults(cfg)
+
+		if cfg.Tenant.EnableCrossTenantAccess {
+			t.Fatal("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS=false should disable cross-tenant access")
+		}
+	})
+
+	t.Run("case-insensitive TRUE also enables", func(t *testing.T) {
+		t.Setenv("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS", "TRUE")
+		cfg := &Config{Tenant: &TenantConfig{EnableCrossTenantAccess: false}}
+
+		applyAuthAndTenantDefaults(cfg)
+
+		if !cfg.Tenant.EnableCrossTenantAccess {
+			t.Fatal("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS=TRUE should enable cross-tenant access (case-insensitive)")
+		}
+	})
+
+	t.Run("unset leaves yaml value untouched", func(t *testing.T) {
+		t.Setenv("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS", "")
+		cfg := &Config{Tenant: &TenantConfig{EnableCrossTenantAccess: true}}
+
+		applyAuthAndTenantDefaults(cfg)
+
+		if !cfg.Tenant.EnableCrossTenantAccess {
+			t.Fatal("empty env should leave the YAML-provided cross-tenant access value untouched")
+		}
+	})
+}

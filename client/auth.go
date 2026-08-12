@@ -82,12 +82,21 @@ type AuthTenant struct {
 	Name string `json:"name"`
 }
 
+// AuthCapabilities mirrors GET /auth/me capabilities for SPA feature gates.
+type AuthCapabilities struct {
+	CanCreateTenant      bool `json:"can_create_tenant"`
+	AutoAcceptInvitation bool `json:"auto_accept_invitation"`
+}
+
 // CurrentUserResponse is the body of GET /api/v1/auth/me.
 type CurrentUserResponse struct {
 	Success bool `json:"success"`
 	Data    struct {
-		User   *AuthUser   `json:"user,omitempty"`
-		Tenant *AuthTenant `json:"tenant,omitempty"`
+		User           *AuthUser         `json:"user,omitempty"`
+		Tenant         *AuthTenant       `json:"tenant,omitempty"`
+		Memberships    []AuthMembership  `json:"memberships,omitempty"`
+		TenantRequired bool              `json:"tenant_required,omitempty"`
+		Capabilities   *AuthCapabilities `json:"capabilities,omitempty"`
 	} `json:"data"`
 }
 
@@ -158,6 +167,33 @@ func (c *Client) RefreshToken(ctx context.Context, refreshToken string) (*Refres
 		return nil, fmt.Errorf("refresh token: %w", err)
 	}
 	var out RefreshTokenResponse
+	if err := parseResponse(resp, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ChangePasswordRequest is the body for POST /api/v1/auth/change-password.
+type ChangePasswordRequest struct {
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password"`
+}
+
+// ChangePasswordResponse is returned on successful password rotation.
+type ChangePasswordResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+}
+
+// ChangePassword rotates the caller's password. On success every outstanding
+// session is revoked server-side; callers should discard local tokens.
+// Maps to POST /api/v1/auth/change-password.
+func (c *Client) ChangePassword(ctx context.Context, req ChangePasswordRequest) (*ChangePasswordResponse, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/auth/change-password", req, nil)
+	if err != nil {
+		return nil, fmt.Errorf("change password: %w", err)
+	}
+	var out ChangePasswordResponse
 	if err := parseResponse(resp, &out); err != nil {
 		return nil, err
 	}

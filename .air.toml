@@ -44,3 +44,6 @@ tmp_dir = "tmp"
   clear_on_rebuild = false
   keep_scroll = true
 
+[cmd]
+  # 重启前执行的清理命令
+  stop = "sudo lsof -t -i :18080 | xargs -r sudo kill -9"

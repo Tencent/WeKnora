@@ -75,7 +75,7 @@ func WrapHTTPClientWithHeaders(client *http.Client, headers map[string]string) *
 		return client
 	}
 	if client == nil {
-		client = &http.Client{}
+		client = NewSSRFSafeHTTPClient(DefaultSSRFSafeHTTPClientConfig())
 	}
 	base := client.Transport
 	if base == nil {

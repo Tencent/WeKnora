@@ -44,6 +44,9 @@ func (c *PaddleOCRVLReader) Read(ctx context.Context, req *types.ReadRequest) (*
 	if c.endpoint == "" {
 		return &types.ReadResult{Error: "PaddleOCR-VL endpoint is not configured"}, nil
 	}
+	if err := utils.ValidateURLForSSRF(c.endpoint); err != nil {
+		return &types.ReadResult{Error: fmt.Sprintf("PaddleOCR-VL endpoint blocked by SSRF policy: %v", err)}, nil
+	}
 
 	content := req.FileContent
 	if len(content) == 0 {
@@ -157,7 +160,10 @@ func (c *PaddleOCRVLReader) callLayoutParsing(
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: paddleOCRVLTimeout}
+	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
+		Timeout:      paddleOCRVLTimeout,
+		MaxRedirects: 5,
+	})
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return "", nil, fmt.Errorf("HTTP request: %w", err)
@@ -264,6 +270,9 @@ func PingPaddleOCRVL(endpoint string) (bool, string) {
 	endpoint = strings.TrimRight(endpoint, "/")
 	if endpoint == "" {
 		return false, "未配置 PaddleOCR-VL 端点"
+	}
+	if err := utils.ValidateURLForSSRF(endpoint); err != nil {
+		return false, fmt.Sprintf("PaddleOCR-VL 端点未通过 SSRF 校验: %v", err)
 	}
 	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
 		Timeout:      5 * time.Second,

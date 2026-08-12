@@ -1,12 +1,21 @@
 # WeKnora Sandbox Image
 # Pre-built environment for executing agent skill scripts in Docker sandbox
 # Multi-stage build, minimal dependencies
+#
+# Two targets ship from this file:
+#   runtime (default) - the plain environment. Used by the Docker backend and
+#                       as the base image of E2B templates, whose builder
+#                       injects its own envd.
+#   cube              - the same environment plus Cube's envd daemon. Cube
+#                       builds templates straight from the image and probes
+#                       :49983/health, so an image without envd can only ever
+#                       fail. See docs/sandbox-cluster.md.
 
 # Stage 1: Get Node.js binaries
 FROM node:20-slim AS node-base
 
-# Stage 2: Final image
-FROM python:3.11-slim
+# Stage 2: Runtime image
+FROM python:3.11-slim AS runtime
 
 # Copy Node.js from node image (avoids NodeSource install overhead)
 COPY --from=node-base /usr/local/bin/node /usr/local/bin/
@@ -22,9 +31,42 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Note: Current preloaded skills only use Python stdlib
 # Add packages here when skills actually need them:
 
-# Create non-root user (UID 1000) for sandbox execution
-RUN groupadd -g 1000 sandbox && \
-    useradd -u 1000 -g sandbox -m -s /bin/bash sandbox
+# Create non-root user (UID 1000) for sandbox execution. The account is named
+# "user" because that is the account name E2B templates are expected to expose
+# and the one WeKnora names when running scripts and file operations against an
+# E2B-protocol backend; the Docker backend addresses it numerically as
+# 1000:1000, so both paths land on the same account.
+RUN groupadd -g 1000 user && \
+    useradd -u 1000 -g user -m -s /bin/bash user
 
 WORKDIR /workspace
-USER sandbox
+USER user
+
+# Stage 3: Cube template image
+#
+# envd is what Cube talks to for everything — the readiness probe that decides
+# whether a template build succeeds, plus every later exec and file call. It
+# runs as root and drops to the account named in each request, which is why
+# this variant does not keep the runtime's USER user.
+#
+# This target is linux/amd64 only: cubesandbox-base publishes no arm64 image,
+# which matches Cube itself (PVM is x86_64-only).
+FROM ghcr.io/tencentcloud/cubesandbox-base:2026.16 AS cube-base
+
+FROM runtime AS cube
+
+USER root
+COPY --from=cube-base /usr/bin/envd /usr/bin/envd
+COPY --from=cube-base /usr/local/bin/cube-entrypoint.sh /usr/local/bin/cube-entrypoint.sh
+
+EXPOSE 49983
+# The entrypoint backgrounds envd and then waits on it, since this image
+# defines no CMD of its own.
+ENTRYPOINT ["/usr/local/bin/cube-entrypoint.sh"]
+
+# Stage 4: default target
+#
+# Docker builds the last stage when none is named, and that must stay the plain
+# runtime: a bare `docker build -f docker/Dockerfile.sandbox .` is expected to
+# produce the image the Docker backend runs, not the Cube variant.
+FROM runtime AS sandbox

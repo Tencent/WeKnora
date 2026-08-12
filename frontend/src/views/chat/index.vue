@@ -338,7 +338,7 @@ const handleSuggestedQuestionClick = (question) => {
     }
 };
 
-const resolveAssistantMessageId = (message) => message?.id || message?.assistant_message_id;
+const resolveAssistantMessageId = (message) => message?.assistant_message_id || message?.id;
 
 const handleAnswerRenderComplete = (message, ready) => {
     message.answerFullyRendered = Boolean(ready);

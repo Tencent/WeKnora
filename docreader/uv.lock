@@ -458,7 +458,7 @@ dependencies = [
     { name = "grpcio-tools" },
     { name = "lxml" },
     { name = "markdownify" },
-    { name = "markitdown", extra = ["docx", "pdf", "xls", "xlsx"] },
+    { name = "markitdown", extra = ["docx", "pdf", "pptx", "xls", "xlsx"] },
     { name = "opendataloader-pdf" },
     { name = "openpyxl" },
     { name = "pandas" },
@@ -484,7 +484,7 @@ requires-dist = [
     { name = "grpcio-tools", specifier = ">=1.78.0" },
     { name = "lxml", specifier = ">=6.1.0" },
     { name = "markdownify", specifier = ">=0.13.1" },
-    { name = "markitdown", extras = ["docx", "pdf", "xls", "xlsx"], specifier = ">=0.1.3" },
+    { name = "markitdown", extras = ["docx", "pdf", "xls", "xlsx", "pptx"], specifier = ">=0.1.3" },
     { name = "opendataloader-pdf", specifier = ">=2.4.7" },
     { name = "openpyxl", specifier = ">=3.1.0" },
     { name = "pandas", specifier = ">=2.0.0" },
@@ -993,6 +993,9 @@ docx = [
 ]
 pdf = [
     { name = "pdfminer-six" },
+]
+pptx = [
+    { name = "python-pptx" },
 ]
 xls = [
     { name = "pandas" },

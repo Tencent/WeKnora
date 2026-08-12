@@ -200,6 +200,16 @@ var registry = map[string]settingSpec{
 			"用于兼容旧版本「创建空间即下发默认 API Key」的行为（属于破坏性变更的回退开关）。" +
 			"每次创建空间时实时读取，修改后立即生效。默认 false（不自动创建，需通过 API Key 管理显式创建）。",
 	},
+	// tenant.auto_accept_invitation: invite = auto-join switch (default false).
+	"tenant.auto_accept_invitation": {
+		Type:     "bool",
+		EnvName:  "WEKNORA_TENANT_AUTO_ACCEPT_INVITATION",
+		Default:  false,
+		Category: "tenant",
+		Description: "全局开关：开启后，空间管理员通过邮箱邀请已注册用户加入空间时，" +
+			"被邀请人将被立即自动加入（直接写入成员关系），无需在收件箱手动接受，也不再生成待接受的邀请记录。" +
+			"关闭时保持原有「发出邀请 → 被邀请人收件箱确认」流程。每次邀请时实时读取，修改后立即生效。默认 false。",
+	},
 	"asynq.core_concurrency": {
 		Type:            "int",
 		EnvName:         "WEKNORA_ASYNQ_CORE_CONCURRENCY",

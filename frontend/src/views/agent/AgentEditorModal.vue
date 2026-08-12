@@ -1289,6 +1289,46 @@
                   </div>
                 </div>
 
+                <!-- 沙箱后端配置（仅 Agent 模式）：技能脚本的运行环境 -->
+                <div v-show="currentSection === 'sandbox' && isAgentMode" class="section">
+                  <div class="section-header">
+                    <h2>{{ $t('agent.editor.sandboxConfig') }}</h2>
+                    <p class="section-description">{{ $t('agent.editor.sandboxConfigDesc') }}</p>
+                  </div>
+
+                  <div class="settings-group">
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.sandboxBackend') }}</label>
+                        <p class="desc">{{ $t('agent.editor.sandboxBackendHint') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-select v-model="formData.config.sandbox_config_id"
+                          :placeholder="$t('agent.editor.sandboxBackendDefault')" style="width: 280px">
+                          <t-option value="" :label="$t('agent.editor.sandboxBackendDefault')" />
+                          <t-option v-for="cfg in sandboxConfigOptions" :key="cfg.id" :value="cfg.id"
+                            :label="`${cfg.name} (${backendLabel(cfg.sandbox_type)})`" />
+                        </t-select>
+                      </div>
+                    </div>
+
+                    <!-- 未建具名配置时说明「默认」到底是什么，避免下拉只有一项时显得像坏了 -->
+                    <div v-if="sandboxConfigOptions.length === 0" class="setting-row">
+                      <div class="setting-info">
+                        <p class="desc empty-hint">{{ $t('agent.editor.sandboxNoConfigs') }}</p>
+                      </div>
+                    </div>
+
+                    <div class="skill-info-box">
+                      <t-icon name="cloud" class="info-icon" />
+                      <div class="info-content">
+                        <p><strong>{{ $t('agent.editor.sandboxInfoTitle') }}</strong></p>
+                        <p>{{ $t('agent.editor.sandboxInfoContent') }}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- 知识库配置 -->
                 <div v-show="currentSection === 'knowledge'" class="section">
                   <div class="section-header">
@@ -1648,6 +1688,7 @@ import {
   markContextualGuideDone,
 } from '@/config/contextualGuides';
 import { useI18n } from 'vue-i18n';
+import { selectInitialModelId } from '@/utils/modelDefaults';
 import { MessagePlugin } from 'tdesign-vue-next';
 import {
   createAgent,
@@ -1664,7 +1705,13 @@ import { type ModelConfig } from '@/api/model';
 import { type AgentNotReadyReasonKey, agentRequiresRerankModel } from '@/utils/agent-readiness';
 import { type SkillInfo } from '@/api/skill';
 import { type WebSearchProviderEntity } from '@/api/web-search-provider';
-import { type StorageEngineStatusItem, type PromptTemplate, type PromptTemplatesConfig } from '@/api/system';
+import {
+  isNamedSandboxBackend,
+  type SandboxConfigRecord,
+  type StorageEngineStatusItem,
+  type PromptTemplate,
+  type PromptTemplatesConfig,
+} from '@/api/system';
 import { useUIStore } from '@/stores/ui';
 import { useAuthStore } from '@/stores/auth';
 import { useOrganizationStore } from '@/stores/organization';
@@ -1884,6 +1931,19 @@ const webSearchProviderList = ref<WebSearchProviderEntity[]>([]);
 const skillOptions = ref<{ name: string; description: string }[]>([]);
 // 是否允许启用 Skills（取决于后端沙箱是否启用，disabled 时为 false；未请求前为 false 避免闪显）
 const skillsAvailable = ref(false);
+// 空间内的具名沙箱后端配置。始终包含当前已选中的那份，即使它已被删除——
+// 否则下拉会静默显示为“不启用沙箱”，看不出该智能体其实指着一份不存在的配置。
+const sandboxConfigOptions = computed(() => {
+  const configs = chatResources.sandboxConfigs.filter((cfg) => isNamedSandboxBackend(cfg.sandbox_type));
+  const selected = formData.value.config.sandbox_config_id;
+  if (!selected || configs.some((cfg) => cfg.id === selected)) return configs;
+  return [
+    ...configs,
+    { id: selected, name: t('agent.editor.sandboxBackendMissing'), sandbox_type: '' } as SandboxConfigRecord,
+  ];
+});
+const backendLabel = (type: string) =>
+  type ? t(`settings.sandbox.backends.${type}`) : t('common.error');
 // 存储引擎可用状态（用于图片存储 provider 选择）
 const storageEngineStatus = ref<StorageEngineStatusItem[]>([]);
 const imageStorageOptions = computed(() => {
@@ -2247,6 +2307,9 @@ const navItems = computed(() => {
   }
   if (isAgentMode.value && skillsAvailable.value) {
     items.push({ key: 'skills', icon: 'lightbulb', label: t('agent.editor.skillsConfig') });
+    // 沙箱是技能脚本的运行环境：先选跑哪些技能，再选跑在哪份后端上。
+    // 与 skills 同门控——部署级沙箱关闭时技能整体不可用，选后端也就无从谈起。
+    items.push({ key: 'sandbox', icon: 'cloud', label: t('agent.editor.sandboxConfig') });
   }
   // 发布（仅编辑模式）
   if (editorMode.value === 'edit' && editorAgent.value?.id && !editorAgent.value?.is_builtin && !authStore.isLiteMode) {
@@ -2274,7 +2337,7 @@ const navGroups = computed(() => {
     {
       key: 'capability',
       label: t('agentEditor.navGroups.capability'),
-      items: pickItems(['multimodal', 'tools', 'mcp', 'skills']),
+      items: pickItems(['multimodal', 'tools', 'mcp', 'skills', 'sandbox']),
     },
     {
       key: 'integration',
@@ -2314,6 +2377,8 @@ const defaultFormData = {
     // Skills 设置
     skills_selection_mode: 'none' as 'all' | 'selected' | 'none',
     selected_skills: [] as string[],
+    // 技能脚本运行在哪份空间沙箱配置上。留空表示禁用脚本执行。
+    sandbox_config_id: '' as string,
     // 知识库设置：新建智能体默认选择 "全部知识库"，
     // 让用户无需先去勾选 KB 即可上手；如有需要可改为 "selected" / "none"。
     kb_selection_mode: 'all' as 'all' | 'selected' | 'none',
@@ -2417,13 +2482,15 @@ const removeStarterSuggestion = (index: number) => {
   formData.value.config.question_suggestions.starters.items.splice(index, 1);
 };
 
-const applyDefaultChatModelIfEmpty = () => {
+const applyDefaultModelsIfEmpty = () => {
   if (props.mode !== 'create' || !formData.value) return
-  const chat =
-    allModels.value.find((m) => m.type === 'KnowledgeQA' && m.is_default)
-    || allModels.value.find((m) => m.type === 'KnowledgeQA')
-  if (!formData.value.config.model_id && chat?.id) {
-    formData.value.config.model_id = chat.id
+  const chatModelId = selectInitialModelId(allModels.value, 'KnowledgeQA')
+  const rerankModelId = selectInitialModelId(allModels.value, 'Rerank')
+  if (!formData.value.config.model_id && chatModelId) {
+    formData.value.config.model_id = chatModelId
+  }
+  if (!formData.value.config.rerank_model_id && rerankModelId) {
+    formData.value.config.rerank_model_id = rerankModelId
   }
 }
 
@@ -3043,7 +3110,7 @@ watch(() => props.visible, async (val) => {
           formData.value.description = getPresetDefaultDescription(preset);
         }
       }
-      applyDefaultChatModelIfEmpty()
+      applyDefaultModelsIfEmpty()
     }
 
     if (props.initialHighlightField) {
@@ -3342,6 +3409,7 @@ const loadDependencies = async () => {
       chatResources.ensureModels(),
       chatResources.ensureKnowledgeBases(),
       chatResources.ensureWebSearchProviders(),
+      chatResources.ensureSandboxConfigs(),
       editorResources.prefetchAgentEditorDeps(),
     ]);
 
