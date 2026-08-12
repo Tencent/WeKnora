@@ -42,10 +42,11 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 	return nil
 }
 
-// ResolveResourceAncestors: IMA knowledge bases are exposed as a flat list of
-// top-level resources, so a lazy-loaded picker has no ancestors to reveal.
+// ResolveResourceAncestors returns nothing: IMA knowledge bases are exposed as
+// a flat list of top-level resources, so a lazy-loaded picker has no ancestors
+// to reveal.
 func (c *Connector) ResolveResourceAncestors(
-	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
+	_ context.Context, _ *types.DataSourceConfig, _ []string,
 ) ([]string, error) {
 	return []string{}, nil
 }
@@ -103,7 +104,7 @@ func (c *Connector) ListResources(
 				return nil, fmt.Errorf("search_knowledge_base fallback: %w", err)
 			}
 			for _, b := range resp.InfoList {
-				bases = append(bases, kbLite{ID: b.ID, Name: b.Name, CoverURL: b.CoverURL})
+				bases = append(bases, kbLite(b))
 			}
 			if resp.IsEnd || resp.NextCursor == "" {
 				break
@@ -237,7 +238,6 @@ func (c *Connector) walk(
 	newCursor := &imaCursor{
 		LastSyncTime: time.Now(),
 		KBLogical:    make(map[string]map[string]string),
-		KBMedia:      make(map[string]map[string]string),
 	}
 	var out []types.FetchedItem
 
@@ -247,24 +247,22 @@ func (c *Connector) walk(
 			return nil, nil, fmt.Errorf("list KB %s: %w", kbID, err)
 		}
 
-		currentLogical := make(map[string]string, len(files))
-		currentMedia := make(map[string]string, len(files))
+		// present holds every logical_key IMA listed this cycle; it drives
+		// delete detection. syncedLogical holds only the keys we actually
+		// resolved this cycle and is what gets persisted as the cursor, so a
+		// transient failure is retried next run rather than being remembered
+		// as "unchanged" forever.
+		present := make(map[string]struct{}, len(files))
+		syncedLogical := make(map[string]string, len(files))
 		keys := make([]string, len(files))
 		for i, f := range files {
-			// f.MediaType is 0 in list responses (IMA omits it there); we rely on
-			// (kb_id, parent_folder_id, title) which IMA enforces uniqueness on
-			// via check_repeated_names. Encoding media_type as 0 is fine as long
-			// as it stays consistent across syncs — which it does, since 0 is a
-			// constant here.
-			key := logicalKey(kbID, f.ParentFolderID, f.Title, f.MediaType)
+			key := logicalKey(kbID, f.ParentFolderID, f.Title)
 			keys[i] = key
-			currentLogical[key] = f.MediaID
-			currentMedia[f.MediaID] = f.Title
+			present[key] = struct{}{}
 		}
-		newCursor.KBLogical[kbID] = currentLogical
-		newCursor.KBMedia[kbID] = currentMedia
+		newCursor.KBLogical[kbID] = syncedLogical
 
-		replaced := 0
+		var replaced, failed int
 		for i, f := range files {
 			key := keys[i]
 
@@ -273,28 +271,41 @@ func (c *Connector) walk(
 				if prevSet, ok := prev.KBLogical[kbID]; ok {
 					if prevMediaID, seen := prevSet[key]; seen {
 						if prevMediaID == f.MediaID {
-							continue // unchanged
+							// Unchanged: carry the entry forward so it is not
+							// re-fetched next cycle either.
+							syncedLogical[key] = f.MediaID
+							continue
 						}
 						replaced++ // media_id changed → replacement, fall through to re-fetch
 					}
 				}
 			}
 
-			item, ok := fetchOneMedia(ctx, cli, cfg, kbID, key, f, folderPath)
-			if !ok {
-				continue
+			item, outcome := fetchOneMedia(ctx, cli, kbID, key, f, folderPath)
+			switch outcome {
+			case fetchOK:
+				syncedLogical[key] = f.MediaID
+				out = append(out, item)
+			case fetchSkipped:
+				// Deterministic skip (unsupported media type, no URL): record it
+				// so we do not pay for get_media_info on every future sync.
+				syncedLogical[key] = f.MediaID
+			case fetchFailed:
+				// Transient: leave the key out of the cursor so the next run
+				// retries. `present` still contains it, so it is not mistaken
+				// for a deletion.
+				failed++
 			}
-			out = append(out, item)
 		}
 
-		// Deletion detection (incremental only) — based on logical_key vanishing,
-		// so a same-name replacement (media_id churns but logical_key stays)
-		// never fires a spurious delete.
+		// Deletion detection (incremental only) — based on logical_key vanishing
+		// from the listing, so neither a same-name replacement (media_id churns
+		// but logical_key stays) nor a failed download fires a spurious delete.
 		deleted := 0
 		if incremental && prev != nil && prev.KBLogical != nil {
 			if prevSet, ok := prev.KBLogical[kbID]; ok {
 				for prevKey := range prevSet {
-					if _, still := currentLogical[prevKey]; !still {
+					if _, still := present[prevKey]; !still {
 						out = append(out, types.FetchedItem{
 							ExternalID:       prevKey,
 							IsDeleted:        true,
@@ -306,8 +317,8 @@ func (c *Connector) walk(
 			}
 		}
 
-		logger.Infof(ctx, "[IMA] KB %s: total=%d replaced=%d deleted=%d",
-			kbID, len(files), replaced, deleted)
+		logger.Infof(ctx, "[IMA] KB %s: total=%d replaced=%d failed=%d deleted=%d",
+			kbID, len(files), replaced, failed, deleted)
 	}
 
 	if !incremental {
@@ -396,50 +407,83 @@ func listAllKBFiles(
 	return out, folderPath, nil
 }
 
+// fetchOutcome distinguishes the three ways fetchOneMedia can end, because the
+// caller has to treat them differently when building the sync cursor: only a
+// transient failure must stay out of the cursor so it is retried next run.
+type fetchOutcome int
+
+const (
+	// fetchOK: the item was resolved and should be ingested.
+	fetchOK fetchOutcome = iota
+	// fetchSkipped: IMA cannot give us this item's content and never will
+	// (unsupported media type, no URL). Deterministic, so it is safe to
+	// remember in the cursor and stop re-probing it.
+	fetchSkipped
+	// fetchFailed: a transient error (API call or download). Must be retried.
+	fetchFailed
+)
+
 // fetchOneMedia calls get_media_info for a single item and, when possible,
-// downloads its body. Returns false if the item should be skipped (unsupported
-// media type, download error, note-type, etc.).
+// downloads its body.
 //
 // externalID is the stable logical_key computed by the caller — same value
 // across syncs even after an IMA same-name replacement mints a new media_id.
 // The raw media_id is still preserved in metadata for observability.
 func fetchOneMedia(
-	ctx context.Context, cli *client, cfg *Config,
+	ctx context.Context, cli *client,
 	kbID string, externalID string, f walkedFile, folderPath map[string]string,
-) (types.FetchedItem, bool) {
+) (types.FetchedItem, fetchOutcome) {
 	info, err := cli.GetMediaInfo(ctx, f.MediaID)
 	if err != nil {
-		logger.Warnf(ctx, "[IMA] get_media_info(%s) failed, skipping: %v", f.MediaID, err)
-		return types.FetchedItem{}, false
+		logger.Warnf(ctx, "[IMA] get_media_info(%s) failed, will retry next sync: %v", f.MediaID, err)
+		return types.FetchedItem{}, fetchFailed
 	}
 
 	if isSkippableMediaType(info.MediaType) {
 		logger.Infof(ctx, "[IMA] skip media %s (title=%q media_type=%d): unsupported by wiki OpenAPI",
 			f.MediaID, f.Title, info.MediaType)
-		return types.FetchedItem{}, false
+		return types.FetchedItem{}, fetchSkipped
 	}
 
 	if info.URLInfo.URL == "" {
 		logger.Warnf(ctx, "[IMA] media %s (title=%q) has no url_info.url, skipping", f.MediaID, f.Title)
-		return types.FetchedItem{}, false
+		return types.FetchedItem{}, fetchSkipped
 	}
 
 	ext := extensionForMediaType(info.MediaType)
+
+	// A media type with no fixed extension (web page, WeChat article, ...) is
+	// normally handed to the ingest layer as a bare URL so WeKnora fetches it
+	// itself. That only works for publicly reachable links: when IMA attaches
+	// auth headers the URL points at IMA-hosted storage and WeKnora's own
+	// fetch — which cannot carry those headers — would be rejected. In that
+	// case download here, where the headers are available, and infer the
+	// extension from the response instead.
 	if ext == "" {
-		return types.FetchedItem{
-			ExternalID:       externalID,
-			Title:            f.Title,
-			URL:              info.URLInfo.URL,
-			SourceResourceID: kbID,
-			UpdatedAt:        time.Now(),
-			Metadata:         baseMetadata(externalID, f, folderPath, info, kbID),
-		}, true
+		if len(info.URLInfo.Headers) == 0 {
+			return types.FetchedItem{
+				ExternalID:       externalID,
+				Title:            f.Title,
+				URL:              info.URLInfo.URL,
+				SourceResourceID: kbID,
+				UpdatedAt:        time.Now(),
+				Metadata:         baseMetadata(externalID, f, folderPath, info, kbID),
+			}, fetchOK
+		}
+		ext = "html"
 	}
 
 	body, ct, err := cli.DownloadURL(ctx, info.URLInfo)
 	if err != nil {
-		logger.Warnf(ctx, "[IMA] download media %s (title=%q) failed, skipping: %v", f.MediaID, f.Title, err)
-		return types.FetchedItem{}, false
+		logger.Warnf(ctx, "[IMA] download media %s (title=%q) failed, will retry next sync: %v",
+			f.MediaID, f.Title, err)
+		return types.FetchedItem{}, fetchFailed
+	}
+
+	// IMA labels every image media_type=9, so trust the response's own
+	// Content-Type over the media_type default when it names a real format.
+	if detected := extensionForContentType(ct); detected != "" {
+		ext = detected
 	}
 	if ct == "" || strings.HasPrefix(ct, "application/octet-stream") {
 		ct = mimeForExtension(ext)
@@ -460,14 +504,17 @@ func fetchOneMedia(
 		UpdatedAt:        time.Now(),
 		SourceResourceID: kbID,
 		Metadata:         baseMetadata(externalID, f, folderPath, info, kbID),
-	}, true
+	}, fetchOK
 }
 
 // baseMetadata builds the metadata map preserved on every ingested item.
 // externalID (the caller's logical_key) is stored so operators can join the
 // stable identity back to the raw media_id — useful when debugging why a
 // same-name replacement showed up as an update instead of an add.
-func baseMetadata(externalID string, f walkedFile, folderPath map[string]string, info *getMediaInfoResp, kbID string) map[string]string {
+func baseMetadata(
+	externalID string, f walkedFile, folderPath map[string]string,
+	info *getMediaInfoResp, kbID string,
+) map[string]string {
 	m := map[string]string{
 		"channel":           types.ChannelIMA,
 		"media_id":          f.MediaID,

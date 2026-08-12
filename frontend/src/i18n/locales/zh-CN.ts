@@ -698,7 +698,7 @@ export default {
       lark_drive: "同步 Lark 云盘文件夹中的文档、表格、文件（飞书国际版）",
       notion: '同步 Notion 中的页面和数据库',
       yuque: '同步语雀知识库中的文档',
-      ima: '同步腾讯 IMA 知识库中的文档、笔记与文件',
+      ima: '同步腾讯 IMA 知识库中的文档与文件（暂不支持笔记与 AI 会话）',
       rss: '同步 RSS / Atom 订阅源中的文章'
     },
     connector: {

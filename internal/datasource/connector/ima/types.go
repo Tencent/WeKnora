@@ -202,21 +202,22 @@ type getMediaInfoResp struct {
 
 // imaCursor tracks per-knowledge-base state seen during the last sync.
 //
-// Two parallel maps are kept, both keyed by kb_id:
+// KBLogical: { logical_key: media_id } — the authoritative source for both
+// delete detection AND "replacement" detection. IMA reassigns media_id
+// whenever a same-named file is replaced in place, so a logical key (see
+// logicalKey) is what we treat as a document's stable identity.
+// A logical_key present last sync but absent this sync ⇒ delete.
+// A logical_key whose media_id changed ⇒ replacement (re-fetch content; the
+// emitted FetchedItem carries the same ExternalID so the ingest layer's
+// "existing external_id → delete-and-recreate" path (see
+// datasource_service.go applyFetchedItem) treats it as an update.
 //
-//   - KBLogical: { logical_key: media_id } — the authoritative source for
-//     both delete detection AND "replacement" detection. IMA reassigns
-//     media_id whenever a same-named file is replaced in place, so a logical
-//     key (see logicalKey) is what we treat as a document's stable identity.
-//     A logical_key present last sync but absent this sync ⇒ delete.
-//     A logical_key whose media_id changed ⇒ replacement (re-fetch content;
-//     the emitted FetchedItem carries the same ExternalID so the ingest
-//     layer's "existing external_id → delete-and-recreate" path (see
-//     datasource_service.go applyFetchedItem) treats it as an update.
+// Only items that were successfully synced (or deterministically skipped)
+// this cycle are recorded, so a transient download failure leaves the key
+// absent and the next run retries it instead of treating it as unchanged.
 //
-//   - KBMedia (legacy): { media_id: title } — retained so cursors persisted
-//     by older versions still deserialize; not consulted for new detection.
-//     New cursors write this too, purely for observability in logs.
+// KBMedia is a legacy field retained only so cursors persisted by earlier
+// builds still deserialize; it is never written or consulted.
 type imaCursor struct {
 	LastSyncTime time.Time                    `json:"last_sync_time"`
 	KBLogical    map[string]map[string]string `json:"kb_logical,omitempty"`
@@ -226,8 +227,8 @@ type imaCursor struct {
 // logicalKey derives a stable identity for an IMA item that survives
 // same-name replacement (which mints a new media_id server-side).
 //
-// The key is a short SHA-256 hex over (kb_id, parent_folder_id, title,
-// media_type). Rationale:
+// The key is a short SHA-256 hex over (kb_id, parent_folder_id, title).
+// Rationale:
 //
 //   - kb_id keeps identities isolated across knowledge bases (same file
 //     copied into two KBs is two distinct docs from WeKnora's perspective).
@@ -235,17 +236,20 @@ type imaCursor struct {
 //     display name — the tuple IMA's own check_repeated_names uses to gate
 //     uploads (see api.md), so IMA's own uniqueness constraint enforces
 //     this key's uniqueness inside a KB.
-//   - media_type distinguishes "notes.md" (Markdown) from "notes.md"
-//     (Word) in the same folder — pathologically rare but cheap to guard.
+//
+// media_type is deliberately NOT part of the key: get_knowledge_list omits it
+// (it only arrives later from get_media_info), so folding it in would mean
+// every external_id shifts the day IMA starts populating the field in list
+// responses — which reads as "every document deleted and re-added".
 //
 // Emitted as "ima_" + first 32 hex chars (128 bits) — small enough to fit
 // well within Postgres varchar(64) external_id columns, still >> collision
 // resistant for any realistic KB size.
-func logicalKey(kbID, parentFolderID, title string, mediaType int32) string {
+func logicalKey(kbID, parentFolderID, title string) string {
 	h := sha256.New()
 	// Delimiter can't appear in any component because it's neither a valid
 	// IMA id character nor allowed in titles once we've folded to bytes.
-	fmt.Fprintf(h, "%s\x1f%s\x1f%s\x1f%d", kbID, parentFolderID, title, mediaType)
+	_, _ = fmt.Fprintf(h, "%s\x1f%s\x1f%s", kbID, parentFolderID, title)
 	return "ima_" + hex.EncodeToString(h.Sum(nil))[:32]
 }
 
@@ -301,6 +305,35 @@ func extensionForMediaType(t int32) string {
 	}
 }
 
+// extensionForContentType maps a response Content-Type back to a file
+// extension, ignoring any "; charset=..." suffix. Returns "" for types we
+// have no better guess for than the media_type-derived default.
+//
+// IMA reports every image as media_type=9 regardless of the real encoding, so
+// the download's Content-Type is the only signal that distinguishes a JPEG
+// from a PNG. Naming a JPEG ".png" breaks the extension-based file-type checks
+// downstream in the ingest pipeline.
+func extensionForContentType(contentType string) string {
+	mediaType := strings.ToLower(strings.TrimSpace(contentType))
+	if i := strings.Index(mediaType, ";"); i >= 0 {
+		mediaType = strings.TrimSpace(mediaType[:i])
+	}
+	switch mediaType {
+	case "image/png":
+		return "png"
+	case "image/jpeg", "image/jpg":
+		return "jpg"
+	case "image/gif":
+		return "gif"
+	case "image/webp":
+		return "webp"
+	case "image/bmp":
+		return "bmp"
+	default:
+		return ""
+	}
+}
+
 // mimeForExtension maps a file extension to a canonical MIME type.
 // Used when the downloaded URL response omits (or misreports) Content-Type.
 func mimeForExtension(ext string) string {
@@ -331,6 +364,10 @@ func mimeForExtension(ext string) string {
 		return "image/jpeg"
 	case "webp":
 		return "image/webp"
+	case "gif":
+		return "image/gif"
+	case "bmp":
+		return "image/bmp"
 	case "epub":
 		return "application/epub+zip"
 	case "xmind":

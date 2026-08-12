@@ -5486,7 +5486,7 @@ export default {
       lark_drive: 'Sync documents, spreadsheets and files from a Lark Drive folder (Feishu international)',
       notion: 'Sync pages and databases from Notion',
       yuque: 'Sync documents from Yuque knowledge bases',
-      ima: 'Sync documents, notes and files from Tencent IMA knowledge bases',
+      ima: 'Sync documents and files from Tencent IMA knowledge bases (notes and AI sessions are not supported yet)',
       rss: 'Sync articles from RSS / Atom feeds'
     },
     drive: {
