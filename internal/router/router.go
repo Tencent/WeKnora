@@ -266,7 +266,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterSandboxConfigRoutes(v1, params.SandboxConfigHandler, rbacGuards)
 		RegisterEvaluationRoutes(v1, params.EvaluationHandler, rbacGuards)
 		RegisterInitializationRoutes(v1, params.InitializationHandler, rbacGuards)
-		RegisterSystemRoutes(v1, params.SystemHandler, rbacGuards)
+		RegisterSystemRoutes(v1, params.SystemHandler, deploymentCapabilitiesFromRouter(params), rbacGuards)
 		RegisterSystemAdminRoutes(v1, params.SystemHandler, params.AuditLogHandler, rbacGuards)
 		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler, params.MCPCredentialsHandler, params.MCPOAuthHandler, rbacGuards)
 		RegisterWebSearchRoutes(v1, params.WebSearchHandler, rbacGuards)

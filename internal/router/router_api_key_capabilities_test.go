@@ -337,7 +337,7 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 	RegisterTenantRoutes(v1, &handler.TenantHandler{}, nil, nil, nil, g)
 	RegisterModelRoutes(v1, &handler.ModelHandler{}, &handler.ModelCredentialsHandler{}, g)
 	RegisterEvaluationRoutes(v1, &handler.EvaluationHandler{}, g)
-	RegisterSystemRoutes(v1, &handler.SystemHandler{}, g)
+	RegisterSystemRoutes(v1, &handler.SystemHandler{}, deploymentCapabilitiesResponse{}, g)
 	RegisterMCPServiceRoutes(v1, &handler.MCPServiceHandler{}, &handler.MCPCredentialsHandler{}, &handler.MCPOAuthHandler{}, g)
 	RegisterWebSearchProviderRoutes(v1, &handler.WebSearchProviderHandler{}, &handler.WebSearchProviderCredentialsHandler{}, g)
 	RegisterVectorStoreRoutes(v1, &handler.VectorStoreHandler{}, g)
@@ -347,6 +347,11 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 	RegisterIMChannelRoutes(v1, &handler.IMHandler{}, g)
 	RegisterDataSourceRoutes(v1, &handler.DataSourceHandler{}, &handler.DataSourceCredentialsHandler{}, g)
 	RegisterWeKnoraCloudRoutes(v1, &handler.WeKnoraCloudHandler{}, g)
+
+	capabilitiesPolicy := mustLookupAPIKeyPolicy(t, g, http.MethodGet, "/api/v1/system/capabilities")
+	if capabilitiesPolicy.RequireFullAccess || len(capabilitiesPolicy.Capabilities) != 0 {
+		t.Fatalf("system capabilities should be readable by any valid API key: %#v", capabilitiesPolicy)
+	}
 
 	cases := []struct {
 		method string

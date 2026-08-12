@@ -197,7 +197,9 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { useI18n } from 'vue-i18n'
+import { MessagePlugin } from 'tdesign-vue-next'
 import SystemInfo from './SystemInfo.vue'
 import TenantInfo from './TenantInfo.vue'
 import UserProfile from './UserProfile.vue'
@@ -220,6 +222,7 @@ import SystemAuditLog from '@/views/system/SystemAuditLog.vue'
 import IntegrationSettingsSection from '@/views/integrations/IntegrationSettingsSection.vue'
 import {
   INTEGRATION_PREVIEW_ITEMS,
+  INTEGRATION_TAB_CAPABILITY,
   INTEGRATION_TAB_MIN_ROLE,
   INTEGRATION_TABS,
   type IntegrationTab,
@@ -228,11 +231,13 @@ import {
   SETTINGS_SECTION_MIN_ROLE,
   SYSTEM_ADMIN_SETTINGS_SECTIONS,
 } from '@/config/settingsAccess'
+import { SETTINGS_SECTION_CAPABILITY } from '@/config/deploymentCapabilities'
 
 const route = useRoute()
 const router = useRouter()
 const uiStore = useUIStore()
 const authStore = useAuthStore()
+const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const { t } = useI18n()
 
 const currentSection = ref<string>('general')
@@ -298,6 +303,15 @@ const normalizeSettingsSection = (section: string) => {
   return section
 }
 
+const isSectionSupported = (key: string): boolean => {
+  if (isIntegrationSection(key)) {
+    return deploymentCapabilities.isSupported(
+      INTEGRATION_TAB_CAPABILITY[integrationTabFromSection(key)],
+    )
+  }
+  return deploymentCapabilities.isSupported(SETTINGS_SECTION_CAPABILITY[key])
+}
+
 const canSeeSection = (key: string): boolean => {
   if (isIntegrationSection(key)) {
     const min = INTEGRATION_TAB_MIN_ROLE[integrationTabFromSection(key)]
@@ -353,7 +367,7 @@ const navItems = computed(() => {
   if (!authStore.currentTenantRole && !authStore.canAccessAllTenants) {
     return [] as NavItem[]
   }
-  return all.filter((it) => canSeeSection(it.key))
+  return all.filter((it) => canSeeSection(it.key) && isSectionSupported(it.key))
 })
 
 const navGroups = computed<NavGroup[]>(() => {
@@ -492,6 +506,12 @@ const handleClose = () => {
 watch(() => uiStore.settingsInitialSection, (section) => {
   if (section && visible.value) {
     const normalizedSection = normalizeSettingsSection(section)
+    if (deploymentCapabilities.loaded && !isSectionSupported(normalizedSection)) {
+      MessagePlugin.warning(t('settings.capabilityUnavailable'))
+      currentSection.value = navItems.value[0]?.key || 'general'
+      currentSubSection.value = ''
+      return
+    }
     currentSection.value = normalizedSection
     const navItem = (navItems.value as any[]).find((item) => item.key === normalizedSection)
     if (navItem && navItem.children && navItem.children.length > 0) {
@@ -514,10 +534,23 @@ watch(() => uiStore.settingsInitialSection, (section) => {
 }, { immediate: true })
 
 watch(
-  () => [visible.value, route.query.section],
-  ([isVisible, section]) => {
+  () => [visible.value, route.query.section, deploymentCapabilities.loaded] as const,
+  ([isVisible, section, capabilitiesLoaded]) => {
     if (!isVisible || typeof section !== 'string') return
-    currentSection.value = normalizeSettingsSection(section)
+    const normalizedSection = normalizeSettingsSection(section)
+    if (capabilitiesLoaded && !isSectionSupported(normalizedSection)) {
+      MessagePlugin.warning(t('settings.capabilityUnavailable'))
+      currentSection.value = navItems.value[0]?.key || 'general'
+      currentSubSection.value = ''
+      if (route.path === '/platform/settings') {
+        const query = { ...route.query }
+        delete query.section
+        delete query.tab
+        void router.replace({ path: route.path, query })
+      }
+      return
+    }
+    currentSection.value = normalizedSection
     currentSubSection.value = ''
   },
   { immediate: true },
@@ -544,6 +577,12 @@ const handleSettingsNav = (e: CustomEvent) => {
   const { section, subsection } = e.detail
   if (section) {
     const normalizedSection = normalizeSettingsSection(section)
+    if (deploymentCapabilities.loaded && !isSectionSupported(normalizedSection)) {
+      MessagePlugin.warning(t('settings.capabilityUnavailable'))
+      currentSection.value = navItems.value[0]?.key || 'general'
+      currentSubSection.value = ''
+      return
+    }
     currentSection.value = normalizedSection
     // 如果有子菜单，自动展开
     const navItem = (navItems.value as any[]).find((item: any) => item.key === normalizedSection)
