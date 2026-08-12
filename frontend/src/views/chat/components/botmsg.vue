@@ -112,9 +112,9 @@ import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
 import {
     buildManualMarkdown,
-    copyTextToClipboard,
     formatManualTitle,
 } from '@/utils/chatMessageShared';
+import { copyWithToast } from '@/utils/clipboard';
 import {
     createChatMarkdownRenderer,
     renderChatMarkdown,
@@ -306,13 +306,7 @@ const handleCopyAnswer = async () => {
         return;
     }
 
-    try {
-        await copyTextToClipboard(content);
-        MessagePlugin.success(t('chat.copySuccess'));
-    } catch (err) {
-        console.error('复制失败:', err);
-        MessagePlugin.error(t('chat.copyFailed'));
-    }
+    await copyWithToast(content, 'chat.copySuccess', 'chat.copyFailed');
 };
 
 // 添加到知识库

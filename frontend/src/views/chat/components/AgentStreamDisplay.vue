@@ -539,13 +539,13 @@ import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
 import { parseWikiToolReferences } from '@/utils/wikiToolReferences';
 import {
   buildManualMarkdown,
-  copyTextToClipboard,
   formatManualTitle,
   replaceIncompleteMermaidWithPlaceholder,
   prepareStreamingMermaidMarkdown,
   extractFirstMermaidCode,
   injectCachedMermaidSvg,
 } from '@/utils/chatMessageShared';
+import { copyWithToast } from '@/utils/clipboard';
 import {
   configureMarkedForChatMarkdown,
   renderChatMarkdown,
@@ -2766,13 +2766,7 @@ const handleCopyAnswer = async (answerEvent: any) => {
     return;
   }
 
-  try {
-    await copyTextToClipboard(content);
-    MessagePlugin.success(t('agentStream.copy.success'));
-  } catch (err) {
-    console.error('Copy failed:', err);
-    MessagePlugin.error(t('agentStream.copy.failed'));
-  }
+  await copyWithToast(content, 'agentStream.copy.success', 'agentStream.copy.failed');
 };
 
 const handleAddToKnowledge = (answerEvent: any) => {
