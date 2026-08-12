@@ -975,6 +975,7 @@ const channelLabelMap: Record<string, string> = {
   dingtalk: 'knowledgeBase.channelDingtalk',
   slack: 'knowledgeBase.channelSlack',
   im: 'knowledgeBase.channelIm',
+  ima: 'knowledgeBase.channelIma',
 };
 
 const getChannelLabel = (channel: string) => {
