@@ -77,27 +77,102 @@ const isChatDropRoute = () => {
     return CHAT_DROP_ROUTE_NAMES.has(String(route.name || ''));
 }
 
-const collectDroppedFiles = async (event: DragEvent): Promise<File[]> => {
-    const dataTransferFiles = event.dataTransfer?.files ? Array.from(event.dataTransfer.files) : [];
-    if (dataTransferFiles.length > 0) {
-        return dataTransferFiles;
-    }
+// -- Drag-and-drop folder traversal helpers -------------------------------
+// When a folder is dragged onto the page, Chrome/Edge populate
+// dataTransfer.files with phantom directory entries (size 0, no extension)
+// instead of the real files inside. The only API that can traverse a
+// dropped directory is webkitGetAsEntry(), so we must try it first and
+// only fall back to dataTransfer.files for plain (non-directory) drags.
+// Firefox leaves dataTransfer.files empty for folder drops, so the same
+// entry-based path is required there as well.
 
-    const dataTransferItems = event.dataTransfer?.items ? Array.from(event.dataTransfer.items) : [];
-    if (dataTransferItems.length === 0) {
-        return [];
-    }
+const isHiddenSegment = (segment: string): boolean => segment.startsWith('.');
 
-    const files = await Promise.all(dataTransferItems.map(item => new Promise<File | null>((resolve) => {
-        const fileEntry = (item as any).webkitGetAsEntry?.();
-        if (fileEntry?.isFile && typeof fileEntry.file === 'function') {
-            fileEntry.file((file: File) => resolve(file), () => resolve(null));
-            return;
+const setRelativePath = (file: File, relativePath: string): void => {
+    try {
+        Object.defineProperty(file, 'webkitRelativePath', {
+            value: relativePath,
+            writable: false,
+            enumerable: true,
+            configurable: true,
+        });
+    } catch {
+        // Safari older builds may reject defineProperty on File; those
+        // files simply won't carry a relative path and upload flat.
+    }
+};
+
+const readAllDirEntries = (reader: any): Promise<any[]> => {
+    return new Promise((resolve) => {
+        const collected: any[] = [];
+        const readBatch = () => {
+            reader.readEntries((entries: any[]) => {
+                if (!entries || entries.length === 0) {
+                    resolve(collected);
+                } else {
+                    collected.push(...entries);
+                    readBatch();
+                }
+            }, () => resolve(collected));
+        };
+        readBatch();
+    });
+};
+
+const traverseEntry = (entry: any, path: string): Promise<File[]> => {
+    return new Promise((resolve) => {
+        if (entry.isFile) {
+            entry.file((file: File) => {
+                // Only set webkitRelativePath for files inside a directory,
+                // matching <input webkitdirectory>. Top-level dropped files
+                // keep the default empty value so they upload as individuals.
+                if (path) {
+                    const relativePath = `${path}/${file.name}`;
+                    if (relativePath.split('/').some(isHiddenSegment)) {
+                        resolve([]);
+                        return;
+                    }
+                    setRelativePath(file, relativePath);
+                }
+                resolve([file]);
+            }, () => resolve([]));
+        } else if (entry.isDirectory) {
+            const dirPath = path ? `${path}/${entry.name}` : entry.name;
+            // Skip hidden directories (.git, .DS_Store, etc.)
+            if (dirPath.split('/').some(isHiddenSegment)) {
+                resolve([]);
+                return;
+            }
+            readAllDirEntries(entry.createReader())
+                .then(children => Promise.all(children.map(c => traverseEntry(c, dirPath))))
+                .then(results => resolve(results.flat()))
+                .catch(() => resolve([]));
+        } else {
+            resolve([]);
         }
-        resolve(null);
-    })));
+    });
+};
 
-    return files.filter((file): file is File => file instanceof File);
+const collectDroppedFiles = async (event: DragEvent): Promise<File[]> => {
+    const items = event.dataTransfer?.items ? Array.from(event.dataTransfer.items) : [];
+
+    // Try webkitGetAsEntry first — the only way to traverse dropped directories.
+    if (items.length > 0) {
+        const entries = items
+            .filter(item => item.kind === 'file')
+            .map(item => (item as any).webkitGetAsEntry?.())
+            .filter(entry => entry != null);
+
+        if (entries.length > 0) {
+            const results = await Promise.all(entries.map(e => traverseEntry(e, '')));
+            const files = results.flat();
+            if (files.length > 0) return files;
+        }
+    }
+
+    // Fallback: plain file drag (no directories) or browser without
+    // webkitGetAsEntry support.
+    return event.dataTransfer?.files ? Array.from(event.dataTransfer.files) : [];
 }
 
 // 检查知识库初始化状态
