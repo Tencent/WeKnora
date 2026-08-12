@@ -215,6 +215,9 @@ func NormalizeLineEndings(text string) string {
 // DeriveParentChildConfigs produces the exact parent and child splitter
 // configurations used by knowledge ingestion. Keeping this here lets preview
 // and ingestion remain in lockstep as the parent-child defaults evolve.
+// Language hints apply to both levels because they affect structural boundary
+// detection. TokenLimit applies only to children: they are embedded, while
+// parents retain the configured context window and are never vector-indexed.
 func DeriveParentChildConfigs(base SplitterConfig, parentSize, childSize int) (parent, child SplitterConfig) {
 	if parentSize <= 0 {
 		parentSize = 4096
@@ -227,12 +230,15 @@ func DeriveParentChildConfigs(base SplitterConfig, parentSize, childSize int) (p
 		ChunkOverlap: base.ChunkOverlap,
 		Separators:   base.Separators,
 		Strategy:     base.Strategy,
+		Languages:    base.Languages,
 	}
 	child = SplitterConfig{
 		ChunkSize:    childSize,
 		ChunkOverlap: childSize / 5,
 		Separators:   base.Separators,
 		Strategy:     base.Strategy,
+		TokenLimit:   base.TokenLimit,
+		Languages:    base.Languages,
 	}
 	return
 }
