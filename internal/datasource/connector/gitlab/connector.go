@@ -21,7 +21,7 @@ type Connector struct {
 
 // NewConnector creates a stateless connector. Each data source provides its
 // own GitLab URL and access token in its encrypted credentials.
-func NewConnector() *Connector { return &Connector{} }
+func NewConnector() *Connector    { return &Connector{} }
 func (c *Connector) Type() string { return types.ConnectorTypeGitLab }
 
 func (c *Connector) configured(ds *types.DataSourceConfig) (*Connector, error) {

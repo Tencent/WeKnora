@@ -198,11 +198,11 @@ func TestFetchIncrementalSyncsMultipleProjects(t *testing.T) {
 			"access_token": "token",
 		},
 		Settings: map[string]interface{}{
-		"projects": []interface{}{
-			map[string]interface{}{"project_id": "1", "ref": "master", "paths": []interface{}{}},
-			map[string]interface{}{"project_id": "2", "ref": "master", "paths": []interface{}{}},
-		},
-	}}
+			"projects": []interface{}{
+				map[string]interface{}{"project_id": "1", "ref": "master", "paths": []interface{}{}},
+				map[string]interface{}{"project_id": "2", "ref": "master", "paths": []interface{}{}},
+			},
+		}}
 
 	items, cursor, err := connector.FetchIncremental(context.Background(), config, nil)
 	if err != nil {

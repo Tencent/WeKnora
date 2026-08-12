@@ -109,6 +109,7 @@ func (c *client) getRaw(ctx context.Context, endpoint string) ([]byte, error) {
 	}
 	return io.ReadAll(resp.Body)
 }
+
 // projectPath encodes a GitLab project identifier for URL path segments.
 // Numeric IDs are used verbatim. Namespace paths accept either "group/project"
 // or a once-encoded "group%2Fproject" without double-encoding percent signs.
