@@ -154,6 +154,7 @@ const channelLabelMap: Record<string, string> = {
   wechat: 'knowledgeBase.channelWechat',
   wecom: 'knowledgeBase.channelWecom',
   feishu: 'knowledgeBase.channelFeishu',
+  gitlab: 'knowledgeBase.channelGitLab',
   dingtalk: 'knowledgeBase.channelDingtalk',
   slack: 'knowledgeBase.channelSlack',
   im: 'knowledgeBase.channelIm',

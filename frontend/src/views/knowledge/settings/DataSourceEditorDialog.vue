@@ -206,6 +206,21 @@ const driveFolderToken = ref('')
 const driveFolderTokenError = ref('')
 const driveRootLoaded = ref(false)
 const isDriveConnector = (type: string) => type === 'feishu_drive' || type === 'lark_drive'
+const isGitLabConnector = (type: string) => type === 'gitlab'
+
+interface GitLabProjectInput { project_id: string; ref: string; pathsText: string }
+const gitlabProjects = ref<GitLabProjectInput[]>([])
+function syncGitLabProjectsToSettings() {
+  if (!isGitLabConnector(form.value.type)) return
+  form.value.config.settings.projects = gitlabProjects.value
+    .filter(project => project.project_id.trim())
+    .map(project => ({
+      project_id: project.project_id.trim(), ref: project.ref.trim(),
+      paths: project.pathsText.split(/[\n,]/).map(path => path.trim()).filter(Boolean),
+    }))
+}
+function addGitLabProject() { gitlabProjects.value.push({ project_id: '', ref: '', pathsText: '' }) }
+function removeGitLabProject(index: number) { gitlabProjects.value.splice(index, 1); syncGitLabProjectsToSettings() }
 
 // extractDriveFolderToken accepts either a bare folder_token or a Drive folder
 // URL (https://xxx.feishu.cn/drive/folder/<token> or the Lark equivalent
@@ -611,6 +626,13 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'auth_headers', labelKey: 'datasource.field.authHeaders', placeholder: '', optional: true, hintKey: 'datasource.field.authHeadersHint', fieldType: 'custom_headers' },
     ],
   },
+  {
+    type: 'gitlab', available: true, docUrl: '', permissionDocUrl: '', permissionPageUrl: '', requiredPermissions: [],
+    fields: [
+      { key: 'base_url', labelKey: 'datasource.gitlab.baseUrl', placeholder: 'https://gitlab.example.com' },
+      { key: 'access_token', labelKey: 'datasource.gitlab.accessToken', placeholder: '', secret: true },
+    ],
+  },
 ])
 
 
@@ -645,6 +667,7 @@ watch(visible, async (v) => {
   driveFolderTokenError.value = ''
   driveRootLoaded.value = false
   rssAuthHeaders.value = []
+  gitlabProjects.value = []
 
   if (isEdit.value && props.dataSource) {
     // Reset edit/replace toggle every open so an aborted replace doesn't
@@ -671,6 +694,13 @@ watch(visible, async (v) => {
       sync_deletions: props.dataSource.sync_deletions,
     }
     selectedResourceIds.value = form.value.config?.resource_ids || []
+    if (isGitLabConnector(form.value.type)) {
+      const savedProjects = Array.isArray(form.value.config.settings.projects) ? form.value.config.settings.projects : []
+      gitlabProjects.value = savedProjects.map((project: any) => ({
+        project_id: String(project.project_id || ''), ref: String(project.ref || ''),
+        pathsText: Array.isArray(project.paths) ? project.paths.join('\n') : '',
+      }))
+    }
     // Pre-fill the Drive root folder_token from the saved resource_ids so the
     // user sees what they previously entered. driveRootLoaded stays false: the
     // tree has not been listed yet, and clicking "load" triggers listResources
@@ -737,6 +767,7 @@ function selectType(def: ConnectorDef) {
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
   form.value.config.credentials = {}
+  if (isGitLabConnector(def.type)) addGitLabProject()
   rssAuthHeaders.value = []
   step.value = 1
 }
@@ -970,6 +1001,13 @@ async function nextStep() {
     }
     driveFolderTokenError.value = ''
   }
+  if (step.value === 2 && isGitLabConnector(form.value.type)) {
+    syncGitLabProjectsToSettings()
+    if (!gitlabProjects.value.some(project => project.project_id.trim())) {
+      MessagePlugin.warning(t('datasource.gitlab.projectRequired'))
+      return
+    }
+  }
   step.value++
   if (step.value === 2) {
     // Drive connectors need a user-supplied folder_token before listing.
@@ -982,6 +1020,7 @@ async function nextStep() {
       }
       return
     }
+    if (isGitLabConnector(form.value.type)) return
     loadResources()
   }
 }
@@ -1000,6 +1039,7 @@ function prevStep() {
 // commitCredentialsIfNeeded). Sending an empty map keeps the backend
 // validator happy.
 function buildConfigPayload(): Record<string, unknown> {
+  syncGitLabProjectsToSettings()
   return {
     credentials: isEdit.value ? {} : { ...form.value.config.credentials },
     resource_ids: form.value.config.resource_ids,
@@ -1183,7 +1223,7 @@ const drawerConfirmText = computed(() => {
     v-model:visible="visible"
     :title="drawerTitle"
     :description="drawerDescription"
-    :class="[form.type ? `datasource-editor-drawer datasource-editor-drawer--${form.type}` : 'datasource-editor-drawer', { 'ds-fixed-step': step === 2 }]"
+    :class="[form.type ? `datasource-editor-drawer datasource-editor-drawer--${form.type}` : 'datasource-editor-drawer', { 'ds-fixed-step': step === 2 && !isGitLabConnector(form.type) }]"
     :hide-footer="step === 0"
     :confirm-text="drawerConfirmText"
     :confirm-loading="submitting || (step === 1 && testing)"
@@ -1519,6 +1559,26 @@ const drawerConfirmText = computed(() => {
 
     <!-- Step 2: Select resources -->
     <section v-if="step === 2" class="setting-drawer__section ds-resource-section">
+      <template v-if="isGitLabConnector(form.type)">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.gitlab.projects') }}</h4>
+        <p class="ds-resource-hint">{{ t('datasource.gitlab.projectsHint') }}</p>
+        <div class="gitlab-project-list">
+          <div v-for="(project, index) in gitlabProjects" :key="index" class="gitlab-project-row">
+            <div class="gitlab-project-row__header">
+              <strong>{{ t('datasource.gitlab.project') }} {{ index + 1 }}</strong>
+              <t-button variant="text" size="small" theme="danger" @click="removeGitLabProject(index)"><t-icon name="delete" /></t-button>
+            </div>
+            <label class="form-label required">{{ t('datasource.gitlab.projectId') }}</label>
+            <t-input v-model="project.project_id" :placeholder="t('datasource.gitlab.projectIdPlaceholder')" />
+            <label class="form-label">{{ t('datasource.gitlab.ref') }}</label>
+            <t-input v-model="project.ref" :placeholder="t('datasource.gitlab.refPlaceholder')" />
+            <label class="form-label">{{ t('datasource.gitlab.paths') }}</label>
+            <t-textarea v-model="project.pathsText" :placeholder="t('datasource.gitlab.pathsPlaceholder')" :autosize="{ minRows: 2, maxRows: 5 }" />
+          </div>
+          <t-button variant="outline" @click="addGitLabProject"><template #icon><t-icon name="add" /></template>{{ t('datasource.gitlab.addProject') }}</t-button>
+        </div>
+      </template>
+      <template v-else>
       <h4 class="setting-drawer__section-title">{{ t('datasource.step.resources') }}</h4>
       <p class="ds-resource-hint">{{ t('datasource.resourceHint') }}</p>
 
@@ -1680,6 +1740,7 @@ const drawerConfirmText = computed(() => {
           </a>
         </div>
       </div>
+      </template>
     </section>
 
     <!-- Step 3: Sync strategy -->
@@ -2604,6 +2665,27 @@ const drawerConfirmText = computed(() => {
   border-color: var(--td-component-stroke);
   color: var(--td-text-color-primary);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+.gitlab-project-list {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.gitlab-project-row {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+  background: var(--td-bg-color-container);
+}
+
+.gitlab-project-row__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 </style>
 
