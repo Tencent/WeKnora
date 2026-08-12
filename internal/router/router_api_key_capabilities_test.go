@@ -31,6 +31,7 @@ func TestConversationRoutesDeclareChatCapability(t *testing.T) {
 		{http.MethodPost, "/api/v1/knowledge-chat/:session_id"},
 		{http.MethodPost, "/api/v1/agent-chat/:session_id"},
 		{http.MethodGet, "/api/v1/messages/:session_id/load"},
+		{http.MethodPost, "/api/v1/messages/:session_id/:id/feedback"},
 		{http.MethodDelete, "/api/v1/messages/:session_id/:id"},
 	}
 
@@ -293,6 +294,7 @@ func TestKnowledgeReadRoutesDeclareRetrieveCapability(t *testing.T) {
 
 	RegisterKnowledgeBaseRoutes(v1, &handler.KnowledgeBaseHandler{}, g)
 	RegisterKnowledgeRoutes(v1, &handler.KnowledgeHandler{}, g)
+	RegisterChunkRoutes(v1, &handler.ChunkHandler{}, g)
 	RegisterFAQRoutes(v1, &handler.FAQHandler{}, g)
 	RegisterKnowledgeTagRoutes(v1, &handler.TagHandler{}, g)
 	RegisterChatRoutes(v1, &sessionhandler.Handler{}, g)
@@ -309,6 +311,10 @@ func TestKnowledgeReadRoutesDeclareRetrieveCapability(t *testing.T) {
 		{http.MethodGet, "/api/v1/knowledge-bases/:id/knowledge"},
 		{http.MethodGet, "/api/v1/knowledge/:id"},
 		{http.MethodGet, "/api/v1/knowledge/:id/download"},
+		{http.MethodGet, "/api/v1/chunks/:knowledge_id"},
+		{http.MethodGet, "/api/v1/chunks/by-id/:id"},
+		{http.MethodGet, "/api/v1/chunks/by-id/:id/feedback-stats"},
+		{http.MethodGet, "/api/v1/chunks/by-id/:id/weight-logs"},
 		{http.MethodPost, "/api/v1/knowledge-bases/:id/faq/search"},
 		{http.MethodGet, "/api/v1/knowledge-bases/:id/tags"},
 		{http.MethodPost, "/api/v1/knowledge-search"},

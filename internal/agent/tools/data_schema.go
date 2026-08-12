@@ -93,12 +93,13 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		input.KnowledgeID,
 		page,
 		chunkTypes,
-		nil, // tagIDs
-		"",  // keyword
-		"",  // searchField
-		"",  // sortOrder
-		"",  // knowledgeType
-		&enabled,
+		nil,      // tagIDs
+		"",       // keyword
+		"",       // searchField
+		"",       // sortOrder
+		"",       // knowledgeType
+		nil,      // feedbackFilter
+		&enabled, // isEnabled
 	)
 	if err != nil {
 		return &types.ToolResult{

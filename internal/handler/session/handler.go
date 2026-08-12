@@ -17,21 +17,22 @@ import (
 
 // Handler handles all HTTP requests related to conversation sessions
 type Handler struct {
-	messageService       interfaces.MessageService // Service for managing messages
-	suggestionService    interfaces.MessageSuggestionService
-	sessionService       interfaces.SessionService       // Service for managing sessions
-	streamManager        interfaces.StreamManager        // Manager for handling streaming responses
-	config               *config.Config                  // Application configuration
-	knowledgebaseService interfaces.KnowledgeBaseService // Service for managing knowledge bases
-	customAgentService   interfaces.CustomAgentService   // Service for managing custom agents
-	tenantService        interfaces.TenantService        // Service for loading tenant (shared agent context)
-	agentShareService    interfaces.AgentShareService    // Service for resolving shared agents (KB scope in retrieval)
-	kbShareService       interfaces.KBShareService       // Service for resolving shared KB permissions
-	fileService          interfaces.FileService          // Service for file storage (image uploads)
-	storageResolver      interfaces.StorageBackendResolver
-	modelService         interfaces.ModelService // Service for model management (VLM access)
-	attachmentProcessor  *AttachmentProcessor    // Processor for file attachments
-	temporaryDocuments   interfaces.TemporaryDocumentService
+	messageService         interfaces.MessageService         // Service for managing messages
+	messageFeedbackService interfaces.MessageFeedbackService // Service for answer feedback attribution
+	suggestionService      interfaces.MessageSuggestionService
+	sessionService         interfaces.SessionService       // Service for managing sessions
+	streamManager          interfaces.StreamManager        // Manager for handling streaming responses
+	config                 *config.Config                  // Application configuration
+	knowledgebaseService   interfaces.KnowledgeBaseService // Service for managing knowledge bases
+	customAgentService     interfaces.CustomAgentService   // Service for managing custom agents
+	tenantService          interfaces.TenantService        // Service for loading tenant (shared agent context)
+	agentShareService      interfaces.AgentShareService    // Service for resolving shared agents (KB scope in retrieval)
+	kbShareService         interfaces.KBShareService       // Service for resolving shared KB permissions
+	fileService            interfaces.FileService          // Service for file storage (image uploads)
+	storageResolver        interfaces.StorageBackendResolver
+	modelService           interfaces.ModelService // Service for model management (VLM access)
+	attachmentProcessor    *AttachmentProcessor    // Processor for file attachments
+	temporaryDocuments     interfaces.TemporaryDocumentService
 	// artifactCollector drains skill-generated files from the session sandbox
 	// after an agent turn completes. May be nil when the sandbox backend does
 	// not support artifact collection; handlers must check before using.
@@ -42,6 +43,7 @@ type Handler struct {
 func NewHandler(
 	sessionService interfaces.SessionService,
 	messageService interfaces.MessageService,
+	messageFeedbackService interfaces.MessageFeedbackService,
 	suggestionService interfaces.MessageSuggestionService,
 	streamManager interfaces.StreamManager,
 	config *config.Config,
@@ -59,21 +61,22 @@ func NewHandler(
 	artifactCollector *service.ArtifactCollector,
 ) *Handler {
 	return &Handler{
-		sessionService:       sessionService,
-		messageService:       messageService,
-		suggestionService:    suggestionService,
-		streamManager:        streamManager,
-		config:               config,
-		knowledgebaseService: knowledgebaseService,
-		customAgentService:   customAgentService,
-		tenantService:        tenantService,
-		agentShareService:    agentShareService,
-		kbShareService:       kbShareService,
-		fileService:          fileService,
-		storageResolver:      storageResolver,
-		modelService:         modelService,
-		temporaryDocuments:   temporaryDocuments,
-		artifactCollector:    artifactCollector,
+		sessionService:         sessionService,
+		messageService:         messageService,
+		messageFeedbackService: messageFeedbackService,
+		suggestionService:      suggestionService,
+		streamManager:          streamManager,
+		config:                 config,
+		knowledgebaseService:   knowledgebaseService,
+		customAgentService:     customAgentService,
+		tenantService:          tenantService,
+		agentShareService:      agentShareService,
+		kbShareService:         kbShareService,
+		fileService:            fileService,
+		storageResolver:        storageResolver,
+		modelService:           modelService,
+		temporaryDocuments:     temporaryDocuments,
+		artifactCollector:      artifactCollector,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,

@@ -152,6 +152,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewKnowledgeTagRepository))
 	must(container.Provide(repository.NewSessionRepository))
 	must(container.Provide(repository.NewMessageRepository))
+	must(container.Provide(repository.NewMessageFeedbackRepository))
 	must(container.Provide(repository.NewMessageSuggestionRepository))
 	must(container.Provide(repository.NewModelRepository))
 	must(container.Provide(repository.NewUserRepository))
@@ -232,6 +233,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewKnowledgeAutoTagService, dig.Name("knowledgeAutoTag")))
 
 	must(container.Provide(service.NewMessageService))
+	must(container.Provide(service.NewMessageFeedbackService))
 	must(container.Provide(service.NewMessageSuggestionService))
 	must(container.Provide(service.NewMCPServiceService))
 	must(container.Provide(service.NewMCPToolApprovalService))
@@ -362,6 +364,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipeline.NewPluginExtractEntity))
 	must(container.Invoke(chatpipeline.NewPluginSearchEntity))
 	must(container.Invoke(chatpipeline.NewPluginSearchParallel))
+	must(container.Invoke(chatpipeline.NewPluginFeedbackWeightBoost))
 	must(container.Invoke(chatpipeline.NewPluginWikiBoost))
 	logger.Debugf(ctx, "[Container] Chat pipeline plugins registered")
 
