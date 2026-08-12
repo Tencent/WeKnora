@@ -442,14 +442,15 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		return insertChunks[i].ChunkIndex < insertChunks[j].ChunkIndex
 	})
 
-	// 仅为文本类型的Chunk设置前后关系（child chunks only, parents already linked above）
+	// Collect retrievable text chunks only. ParentChunkID only controls parent expansion after retrieval.
+	// When ParentChunkID is empty, retrieval keeps the standalone child content without loading a parent.
 	textChunks := make([]*types.Chunk, 0, len(chunks))
 	for _, chunk := range insertChunks {
-		if chunk.ChunkType == types.ChunkTypeText && chunk.ParentChunkID != "" {
-			// This is a child chunk in parent-child mode
+		if chunk.ChunkType == types.ChunkTypeText && hasParentChild {
+			// A child whose redundant parent was elided still needs its own embedding.
 			textChunks = append(textChunks, chunk)
 		} else if chunk.ChunkType == types.ChunkTypeText && !hasParentChild {
-			// Normal flat chunk (no parent-child mode)
+			// Flat chunking indexes the text chunk directly.
 			textChunks = append(textChunks, chunk)
 		}
 	}
