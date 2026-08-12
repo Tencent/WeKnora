@@ -84,6 +84,66 @@ func TestConnectorValidateRejectsMissingCredentials(t *testing.T) {
 	}
 }
 
+func TestConnectorValidateRejectsMissingProjectsOnSave(t *testing.T) {
+	allowLocalGitLabServer(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v4/user" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id": 42}`))
+	}))
+	defer server.Close()
+
+	err := NewConnector().Validate(context.Background(), &types.DataSourceConfig{
+		Credentials: map[string]interface{}{
+			"base_url":     server.URL,
+			"access_token": "token",
+		},
+		Settings: map[string]interface{}{
+			"projects": []interface{}{},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected missing projects validation error")
+	}
+}
+
+func TestConnectorConfiguredDoesNotReuseRegistryClient(t *testing.T) {
+	allowLocalGitLabServer(t)
+
+	var requestedTokens []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v4/user" {
+			http.NotFound(w, r)
+			return
+		}
+		requestedTokens = append(requestedTokens, r.Header.Get("PRIVATE-TOKEN"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id": 42}`))
+	}))
+	defer server.Close()
+
+	connector := NewConnector()
+	first := &types.DataSourceConfig{
+		Credentials: map[string]interface{}{"base_url": server.URL, "access_token": "token-a"},
+	}
+	second := &types.DataSourceConfig{
+		Credentials: map[string]interface{}{"base_url": server.URL, "access_token": "token-b"},
+	}
+	if err := connector.Validate(context.Background(), first); err != nil {
+		t.Fatalf("first validate: %v", err)
+	}
+	if err := connector.Validate(context.Background(), second); err != nil {
+		t.Fatalf("second validate: %v", err)
+	}
+	if len(requestedTokens) != 2 || requestedTokens[0] != "token-a" || requestedTokens[1] != "token-b" {
+		t.Fatalf("requested tokens = %#v", requestedTokens)
+	}
+}
+
 func TestNewClientNormalizesAPIBaseURL(t *testing.T) {
 	allowLocalGitLabServer(t)
 
@@ -100,27 +160,29 @@ func TestNewClientNormalizesAPIBaseURL(t *testing.T) {
 }
 
 func TestFetchIncrementalSyncsMultipleProjects(t *testing.T) {
+	allowLocalGitLabServer(t)
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/projects/1":
+		case "/api/v4/projects/1":
 			_, _ = w.Write([]byte(`{"id":1,"name":"project-one","path_with_namespace":"group/project-one","web_url":"https://gitlab.test/group/project-one","default_branch":"master"}`))
-		case "/projects/2":
+		case "/api/v4/projects/2":
 			_, _ = w.Write([]byte(`{"id":2,"name":"project-two","path_with_namespace":"group/project-two","web_url":"https://gitlab.test/group/project-two","default_branch":"master"}`))
-		case "/projects/1/repository/commits/master":
+		case "/api/v4/projects/1/repository/commits/master":
 			_, _ = w.Write([]byte(`{"id":"commit-1"}`))
-		case "/projects/2/repository/commits/master":
+		case "/api/v4/projects/2/repository/commits/master":
 			_, _ = w.Write([]byte(`{"id":"commit-2"}`))
-		case "/projects/1/repository/tree":
+		case "/api/v4/projects/1/repository/tree":
 			_, _ = w.Write([]byte(`[{"name":"one.md","type":"blob","path":"one.md"}]`))
-		case "/projects/2/repository/tree":
+		case "/api/v4/projects/2/repository/tree":
 			_, _ = w.Write([]byte(`[{"name":"two.md","type":"blob","path":"two.md"}]`))
 		default:
-			if strings.HasPrefix(r.URL.EscapedPath(), "/projects/1/repository/files/one%2Emd/raw") {
+			if strings.HasPrefix(r.URL.EscapedPath(), "/api/v4/projects/1/repository/files/one%2Emd/raw") {
 				_, _ = w.Write([]byte("one"))
 				return
 			}
-			if strings.HasPrefix(r.URL.EscapedPath(), "/projects/2/repository/files/two%2Emd/raw") {
+			if strings.HasPrefix(r.URL.EscapedPath(), "/api/v4/projects/2/repository/files/two%2Emd/raw") {
 				_, _ = w.Write([]byte("two"))
 				return
 			}
@@ -129,11 +191,13 @@ func TestFetchIncrementalSyncsMultipleProjects(t *testing.T) {
 	}))
 	defer server.Close()
 
-	connector := &Connector{
-		client:        &client{baseURL: server.URL, http: server.Client()},
-		canonicalBase: server.URL,
-	}
-	config := &types.DataSourceConfig{Settings: map[string]interface{}{
+	connector := NewConnector()
+	config := &types.DataSourceConfig{
+		Credentials: map[string]interface{}{
+			"base_url":     server.URL,
+			"access_token": "token",
+		},
+		Settings: map[string]interface{}{
 		"projects": []interface{}{
 			map[string]interface{}{"project_id": "1", "ref": "master", "paths": []interface{}{}},
 			map[string]interface{}{"project_id": "2", "ref": "master", "paths": []interface{}{}},
@@ -176,15 +240,17 @@ func (h *gitLabStreamRecorder) Checkpoint(_ context.Context, cursor *types.SyncC
 }
 
 func TestFetchStreamFiltersUnsupportedFilesAndCheckpointsProjects(t *testing.T) {
+	allowLocalGitLabServer(t)
+
 	var rawRequests []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/projects/1":
+		case "/api/v4/projects/1":
 			_, _ = w.Write([]byte(`{"id":1,"name":"docs","path_with_namespace":"group/docs","web_url":"https://gitlab.test/group/docs","default_branch":"main"}`))
-		case "/projects/1/repository/commits/main":
+		case "/api/v4/projects/1/repository/commits/main":
 			_, _ = w.Write([]byte(`{"id":"commit-1"}`))
-		case "/projects/1/repository/tree":
+		case "/api/v4/projects/1/repository/tree":
 			_, _ = w.Write([]byte(`[
 				{"name":"README.md","type":"blob","path":"README.md"},
 				{"name":"server.go","type":"blob","path":"server.go"},
@@ -201,10 +267,16 @@ func TestFetchStreamFiltersUnsupportedFilesAndCheckpointsProjects(t *testing.T) 
 	}))
 	defer server.Close()
 
-	connector := &Connector{client: &client{baseURL: server.URL, http: server.Client()}, canonicalBase: server.URL}
-	config := &types.DataSourceConfig{Settings: map[string]interface{}{
-		"projects": []interface{}{map[string]interface{}{"project_id": "1", "paths": []interface{}{}}},
-	}}
+	connector := NewConnector()
+	config := &types.DataSourceConfig{
+		Credentials: map[string]interface{}{
+			"base_url":     server.URL,
+			"access_token": "token",
+		},
+		Settings: map[string]interface{}{
+			"projects": []interface{}{map[string]interface{}{"project_id": "1", "paths": []interface{}{}}},
+		},
+	}
 	handler := &gitLabStreamRecorder{}
 	next, err := connector.FetchStream(context.Background(), config, nil, handler)
 	if err != nil {
@@ -231,6 +303,7 @@ func TestIsSupportedFile(t *testing.T) {
 		want bool
 	}{
 		{file: "docs/guide.MD", want: true},
+		{file: "docs/guide.mdx", want: true},
 		{file: "report.pdf", want: true},
 		{file: "src/main.go", want: false},
 		{file: "archive.tar.gz", want: false},
@@ -280,55 +353,18 @@ func TestTreeFollowsGitLabPagination(t *testing.T) {
 	}
 }
 
-func TestDirectoryExistsListsTheTargetPath(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/projects/18296/repository/tree" || r.URL.Query().Get("path") != "docs" {
-			http.NotFound(w, r)
-			return
+func TestProjectPathEncodesNamespaceWithoutDoubleEscaping(t *testing.T) {
+	for _, tc := range []struct {
+		in, want string
+	}{
+		{in: "12345", want: "12345"},
+		{in: "group/project", want: "group%2Fproject"},
+		{in: "group%2Fproject", want: "group%2Fproject"},
+		{in: "my group/my project", want: "my%20group%2Fmy%20project"},
+	} {
+		if got := projectPath(tc.in); got != tc.want {
+			t.Errorf("projectPath(%q) = %q, want %q", tc.in, got, tc.want)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"name":"quickstart.mdx","type":"blob","path":"docs/quickstart.mdx"}]`))
-	}))
-	defer server.Close()
-
-	connector := &Connector{client: &client{baseURL: server.URL, http: server.Client()}}
-	exists, err := connector.directoryExists(context.Background(), "18296", "master", "docs")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !exists {
-		t.Fatal("expected docs directory to exist")
-	}
-}
-
-func TestMembersFallsBackWhenInheritedMembersEndpointIsUnavailable(t *testing.T) {
-	t.Setenv("SSRF_WHITELIST", "127.0.0.1,::1,localhost")
-	secutils.ResetSSRFWhitelistForTest()
-	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v4/projects/18724/members/all":
-			http.NotFound(w, r)
-		case "/api/v4/projects/18724/members":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`[{"username":"alice","state":"active"}]`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	c, err := newClient(server.URL, "token")
-	if err != nil {
-		t.Fatal(err)
-	}
-	members, err := c.members(context.Background(), "18724")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(members) != 1 || members[0].Username != "alice" {
-		t.Fatalf("members = %#v", members)
 	}
 }
 

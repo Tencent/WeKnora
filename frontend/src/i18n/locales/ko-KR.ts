@@ -585,8 +585,8 @@ export default {
     credentialsLabel: '자격 증명',
     gitlab: {
       baseUrl: 'GitLab URL', accessToken: '개인 액세스 토큰', projects: 'GitLab 프로젝트',
-      projectsHint: '프로젝트 ID(또는 URL 인코딩된 프로젝트 경로)를 입력하고, 필요에 따라 브랜치와 디렉터리를 지정하세요.',
-      project: '프로젝트', projectId: '프로젝트 ID', projectIdPlaceholder: '예: 12345 또는 group%2Fproject',
+      projectsHint: '프로젝트 ID 또는 네임스페이스 경로(예: group/project)를 입력하고, 필요에 따라 브랜치와 디렉터리를 지정하세요.',
+      project: '프로젝트', projectId: '프로젝트 ID', projectIdPlaceholder: '예: 12345 또는 group/project',
       ref: '브랜치', refPlaceholder: '비워 두면 기본 브랜치를 사용합니다',
       paths: '디렉터리', pathsPlaceholder: '한 줄에 하나씩 입력하세요. 비워 두면 전체 프로젝트를 동기화합니다',
       addProject: '프로젝트 추가', projectRequired: 'GitLab 프로젝트를 하나 이상 추가하세요',

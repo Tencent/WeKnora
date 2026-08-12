@@ -21,13 +21,10 @@ type Connector struct {
 
 // NewConnector creates a stateless connector. Each data source provides its
 // own GitLab URL and access token in its encrypted credentials.
-func NewConnector() *Connector    { return &Connector{} }
+func NewConnector() *Connector { return &Connector{} }
 func (c *Connector) Type() string { return types.ConnectorTypeGitLab }
 
 func (c *Connector) configured(ds *types.DataSourceConfig) (*Connector, error) {
-	if c.client != nil {
-		return c, nil
-	}
 	if ds == nil {
 		return nil, datasource.ErrInvalidConfig
 	}
@@ -41,32 +38,21 @@ func (c *Connector) configured(ds *types.DataSourceConfig) (*Connector, error) {
 }
 
 func (c *Connector) Validate(ctx context.Context, ds *types.DataSourceConfig) error {
-	var err error
-	if c, err = c.configured(ds); err != nil {
+	configured, err := c.configured(ds)
+	if err != nil {
 		return err
 	}
-	// Connection testing deliberately validates only the GitLab URL and token.
-	return c.client.ping(ctx)
-}
-
-func (c *Connector) directoryExists(ctx context.Context, projectID, ref, dir string) (bool, error) {
-	entries, err := c.client.tree(ctx, projectID, ref, dir)
-	if err != nil {
-		return false, err
+	if err := configured.client.ping(ctx); err != nil {
+		return err
 	}
-	// Git does not store empty directories. A successful non-empty listing of
-	// the target path is therefore a reliable directory existence check and
-	// avoids deployments that treat path="." as an invalid root path.
-	return len(entries) > 0, nil
-}
-
-func hasActiveMember(members []member, username string) bool {
-	for _, m := range members {
-		if m.Username == username && m.State == "active" {
-			return true
+	if ds != nil {
+		if _, ok := ds.Settings["projects"]; ok {
+			if _, err := parseConfig(ds); err != nil {
+				return err
+			}
 		}
 	}
-	return false
+	return nil
 }
 func (c *Connector) ListResources(ctx context.Context, ds *types.DataSourceConfig, parent string) ([]types.Resource, error) {
 	var err error
@@ -198,7 +184,7 @@ func (c *Connector) FetchIncremental(ctx context.Context, ds *types.DataSourceCo
 				// the server. Re-enumerate the configured scope to preserve updates.
 				files, listErr := c.files(ctx, s.ProjectID, ref, s.Paths)
 				if listErr != nil {
-					return nil, nil, fmt.Errorf("gitlab compare %s: %w", s.ProjectID, err)
+					return nil, nil, fmt.Errorf("gitlab list files %s: %w", s.ProjectID, listErr)
 				}
 				for _, f := range files {
 					item, itemErr := c.item(ctx, p, ref, f)
@@ -210,15 +196,15 @@ func (c *Connector) FetchIncremental(ctx context.Context, ds *types.DataSourceCo
 			} else {
 				for _, d := range diff.Diffs {
 					if d.DeletedFile {
-						if c.inScope(d.OldPath, s.Paths) {
+						if c.inScope(d.OldPath, s.Paths) && isSupportedFile(d.OldPath) {
 							out = append(out, c.deleted(p, ref, d.OldPath))
 						}
 						continue
 					}
-					if d.RenamedFile && c.inScope(d.OldPath, s.Paths) {
+					if d.RenamedFile && c.inScope(d.OldPath, s.Paths) && isSupportedFile(d.OldPath) {
 						out = append(out, c.deleted(p, ref, d.OldPath))
 					}
-					if c.inScope(d.NewPath, s.Paths) {
+					if c.inScope(d.NewPath, s.Paths) && isSupportedFile(d.NewPath) {
 						item, err := c.item(ctx, p, ref, d.NewPath)
 						if err != nil {
 							return nil, nil, err
@@ -406,7 +392,7 @@ func isSupportedFile(file string) bool {
 // GitLab exposes arbitrary repository blobs, unlike document-centric sources.
 var gitLabSupportedFileExtensions = map[string]struct{}{
 	".pdf": {}, ".txt": {}, ".docx": {}, ".doc": {}, ".epub": {},
-	".html": {}, ".htm": {}, ".mhtml": {}, ".md": {}, ".markdown": {},
+	".html": {}, ".htm": {}, ".mhtml": {}, ".md": {}, ".markdown": {}, ".mdx": {},
 	".png": {}, ".jpg": {}, ".jpeg": {}, ".gif": {},
 	".csv": {}, ".xlsx": {}, ".xls": {}, ".pptx": {}, ".ppt": {}, ".json": {},
 	".mp3": {}, ".wav": {}, ".m4a": {}, ".flac": {}, ".ogg": {},

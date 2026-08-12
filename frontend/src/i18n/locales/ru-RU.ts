@@ -585,8 +585,8 @@ export default {
     credentialsLabel: 'учётные данные',
     gitlab: {
       baseUrl: 'URL GitLab', accessToken: 'Персональный токен доступа', projects: 'Проекты GitLab',
-      projectsHint: 'Укажите ID проекта (или URL-кодированный путь к проекту), а также при необходимости ветку и каталоги.',
-      project: 'Проект', projectId: 'ID проекта', projectIdPlaceholder: 'Например: 12345 или group%2Fproject',
+      projectsHint: 'Укажите ID проекта или путь в пространстве имён (например group/project), а также при необходимости ветку и каталоги.',
+      project: 'Проект', projectId: 'ID проекта', projectIdPlaceholder: 'Например: 12345 или group/project',
       ref: 'Ветка', refPlaceholder: 'Оставьте пустым, чтобы использовать ветку по умолчанию',
       paths: 'Каталоги', pathsPlaceholder: 'По одному каталогу в строке; оставьте пустым для синхронизации всего проекта',
       addProject: 'Добавить проект', projectRequired: 'Добавьте хотя бы один проект GitLab',
