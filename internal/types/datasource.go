@@ -36,6 +36,7 @@ const (
 	ConnectorTypeSlack       = "slack"
 	ConnectorTypeIMAP        = "imap"
 	ConnectorTypeRSS         = "rss"
+	ConnectorTypeGitLab      = "gitlab"
 	ConnectorTypeIMA         = "ima"
 
 	// Sync modes

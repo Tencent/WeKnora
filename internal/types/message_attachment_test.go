@@ -28,3 +28,16 @@ func TestMessageAttachmentsBuildPromptEscapesAttachmentBoundaries(t *testing.T) 
 		t.Fatal("selected chunk metadata is missing")
 	}
 }
+
+func TestMessageAttachmentsBuildPromptUsesGenericTruncationNotice(t *testing.T) {
+	prompt := (MessageAttachments{{
+		FileName: "large.txt", Content: "prefix", IsTruncated: true, LineCount: 1000,
+	}}).BuildPrompt()
+
+	if !strings.Contains(prompt, "This attachment was truncated for prompt-size safety") {
+		t.Fatalf("generic truncation note is missing: %s", prompt)
+	}
+	if strings.Contains(prompt, "first 500 lines") {
+		t.Fatalf("line-only truncation note must not be used: %s", prompt)
+	}
+}

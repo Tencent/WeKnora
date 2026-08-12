@@ -94,7 +94,7 @@ imService.RegisterAdapterFactory("yunzhijia", yunzhijia.NewFactory())
 | `AgentID` | 绑定的自定义智能体；回答走该 Agent 的配置（模型、知识库、Skills、MCP、联网搜索） |
 | `Platform` / `Mode` | 平台与接入模式。默认值：mattermost/yunzhijia → `webhook`，wechat → `longpoll`（且强制 `output_mode=full`），其余 → `websocket` |
 | `OutputMode` | `stream`（默认，流式）或 `full`（等完整答案后一次性回复） |
-| `KnowledgeBaseID` | 可选"文件知识库"。配置后，用户发给机器人的文件/图片会被下载并入库（见下文） |
+| `KnowledgeBaseID` | 可选"文件知识库"。无论是否配置，文件/图片都会下载后供 QA 理解；配置后会额外在后台入库（见下文） |
 | `SessionMode` | `user`（默认，按 平台+用户+群 维度映射会话）或 `thread`（按 平台+线程+群 维度，每个顶层消息开新会话） |
 | `BotIdentity` | 由平台+模式+凭据推导的机器人唯一标识（`computeBotIdentity`，如 `feishu:<app_id>`、`telegram:<botID>`、`wecom:ws:<bot_id>`），数据库唯一索引防止同一个机器人被配置到两个渠道（`checkDuplicateBot` 返回 `duplicate_bot:` 前缀错误 → HTTP 409） |
 | `Credentials` | JSONB 凭据。列表接口（`IMChannelSummary`）**从不返回凭据内容**，只返回 `credentials_configured` 布尔值 |
@@ -142,12 +142,10 @@ sequenceDiagram
     H->>S: 异步 HandleMessage(msg, channelID)
     S->>DB: 消息去重 (im:dedup:messageID, TTL 5min)
     S->>S: 超长截断 (4096 rune) / 速率限制 (滑动窗口 10次/60s, 命令豁免)
-    alt "文件/图片消息且渠道配置了文件知识库"
-        S->>A: DownloadFile → CreateKnowledgeFromFile → LLM 智能通知 + 解析完成后推送摘要
-    else "斜杠命令 (/help /info /search /stop /clear)"
+    alt "斜杠命令 (/help /info /search /stop /clear)"
         S->>S: CommandRegistry.Parse → cmd.Execute → 副作用 (ActionClear / ActionStop)
         S->>A: SendReply / 流式回复命令结果
-    else "普通文本"
+    else "普通消息（含文件/图片）"
         S->>DB: resolveSession — (platform,user,chat[,thread]) → ChannelSession → WeKnora Session
         S->>Q: Enqueue(qaRequest)（队列满/超限则回复"排队人数较多"）
         Q-->>S: worker 执行 executeQARequest
@@ -200,15 +198,9 @@ sequenceDiagram
 
 ## 文件消息处理
 
-当渠道配置了 `knowledge_base_id` 且消息类型为 `file`/`image` 时（`handleFileMessage` / `processFileToKnowledgeBase`）：
+文件和图片会作为 QA 附件处理：文档内容会提供给模型，图片会在模型支持时直接识别。因此，即使渠道未配置文件知识库，机器人也会基于附件内容正常回复。
 
-1. 适配器需实现 `FileDownloader`，否则回复"当前平台暂不支持文件消息处理"；
-2. 扩展名白名单：`pdf txt docx doc md markdown png jpg jpeg gif csv xlsx xls pptx ppt`（`supportedKBFileExts`）；图片缺扩展名时补 `.png`；企微 aibot 等平台回调中只有哈希名的文件，**下载后**再从 Content-Disposition/Content-Type 解析真实文件名做校验；
-3. 异步下载并调用 `KnowledgeService.CreateKnowledgeFromFile` 入库（channel 字段记为对应平台，见 `imPlatformToChannel`）；重复文件提示"文件已存在于知识库中"；
-4. 处理结果通过 `sendSmartReply` 通知：用渠道 Agent 的 LLM 按 `smartReplySystemPrompt` 生成一条自然的通知消息（支持流式），LLM 不可用时回退静态模板；
-5. `watchAndSendSummary` 在后台轮询等待 Asynq 解析+摘要完成后，把**文档摘要**主动推送回聊天。
-
-未配置文件知识库的渠道收到纯文件/图片消息时，会提示先在渠道设置中配置文件知识库。
+`knowledge_base_id` 只决定是否将附件额外保存到知识库。配置后，保存任务在后台执行，不影响当前 QA 回复，也不会额外发送“已入库”或“解析完成”消息。解析文本最多保留前 500 行且不超过 32 KiB，触及任一限制时模型会得到通用截断提示。附件无法读取、平台不支持下载或文件超过 32 MiB 时，机器人会提示用户改用文字描述或重新发送。
 
 ## 回复中的图片外链（resource:// 改写）
 

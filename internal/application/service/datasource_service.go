@@ -1124,12 +1124,10 @@ func (s *DataSourceService) ValidateCredentials(ctx context.Context, connectorTy
 	if err != nil {
 		return err
 	}
-
 	config := &types.DataSourceConfig{
 		Type:        connectorType,
 		Credentials: credentials,
 	}
-
 	if err := connector.Validate(ctx, config); err != nil {
 		return err
 	}

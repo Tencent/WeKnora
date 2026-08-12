@@ -466,6 +466,7 @@ export default {
     channelIm: 'IM Channel',
     channelNotion: 'Notion',
     channelYuque: 'Yuque',
+    channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
     channelUpload: 'Upload',
     channelManual: 'Manual',
@@ -5416,6 +5417,14 @@ export default {
     connectionFailed: 'Connection failed',
     isRequired: 'is required',
     credentialsLabel: 'credentials',
+    gitlab: {
+      baseUrl: 'GitLab URL', accessToken: 'Personal access token', projects: 'GitLab projects',
+      projectsHint: 'Enter a project ID (or URL-encoded project path), with optional branch and directories.',
+      project: 'Project', projectId: 'Project ID', projectIdPlaceholder: 'For example: 12345 or group%2Fproject',
+      ref: 'Branch', refPlaceholder: 'Leave empty to use the default branch',
+      paths: 'Directories', pathsPlaceholder: 'One directory per line; leave empty to sync the whole project',
+      addProject: 'Add project', projectRequired: 'Add at least one GitLab project',
+    },
     resourceHint: 'Select the spaces or folders to sync',
     untitled: 'Untitled',
     resourceLoadFailed: 'Failed to load resources',
@@ -5483,8 +5492,9 @@ export default {
       lark_drive: 'Lark Drive',
       notion: 'Notion',
       yuque: 'Yuque',
+      rss: 'RSS / Atom Feed',
       ima: 'Tencent IMA',
-      rss: 'RSS / Atom Feed'
+      gitlab: 'GitLab'
     },
     connectorDesc: {
       feishu: 'Sync documents, spreadsheets and files from Feishu Wiki',
@@ -5493,8 +5503,9 @@ export default {
       lark_drive: 'Sync documents, spreadsheets and files from a Lark Drive folder (Feishu international)',
       notion: 'Sync pages and databases from Notion',
       yuque: 'Sync documents from Yuque knowledge bases',
+      rss: 'Sync articles from RSS / Atom feeds',
       ima: 'Sync documents, notes and files from Tencent IMA knowledge bases (AI sessions and video parses are not supported)',
-      rss: 'Sync articles from RSS / Atom feeds'
+      gitlab: 'Sync files from GitLab projects'
     },
     drive: {
       folderTokenLabel: 'Drive folder token',

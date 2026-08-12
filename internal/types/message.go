@@ -128,7 +128,7 @@ func (attachments MessageAttachments) BuildPrompt() string {
 			sb.WriteString("\n</content>\n")
 
 			if att.IsTruncated {
-				sb.WriteString(fmt.Sprintf("<note>This legacy upload has a total of %d lines and only its first 500 lines are available.</note>\n",
+				sb.WriteString(fmt.Sprintf("<note>This attachment was truncated for prompt-size safety; only a prefix is available. The original content has %d lines.</note>\n",
 					att.LineCount))
 			}
 		} else {

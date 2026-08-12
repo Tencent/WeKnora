@@ -583,6 +583,14 @@ export default {
     connectionFailed: '연결 실패',
     isRequired: '은(는) 필수입니다',
     credentialsLabel: '자격 증명',
+    gitlab: {
+      baseUrl: 'GitLab URL', accessToken: '개인 액세스 토큰', projects: 'GitLab 프로젝트',
+      projectsHint: '프로젝트 ID(또는 URL 인코딩된 프로젝트 경로)를 입력하고, 필요에 따라 브랜치와 디렉터리를 지정하세요.',
+      project: '프로젝트', projectId: '프로젝트 ID', projectIdPlaceholder: '예: 12345 또는 group%2Fproject',
+      ref: '브랜치', refPlaceholder: '비워 두면 기본 브랜치를 사용합니다',
+      paths: '디렉터리', pathsPlaceholder: '한 줄에 하나씩 입력하세요. 비워 두면 전체 프로젝트를 동기화합니다',
+      addProject: '프로젝트 추가', projectRequired: 'GitLab 프로젝트를 하나 이상 추가하세요',
+    },
     resourceHint: '동기화할 공간/폴더를 선택하세요',
     untitled: '제목 없음',
     resourceLoadFailed: '리소스 목록 로드 실패',
@@ -705,7 +713,8 @@ export default {
       notion: 'Notion에서 페이지 및 데이터베이스 동기화',
       yuque: '위큐 지식베이스에서 문서 동기화',
       ima: 'Tencent IMA 지식베이스에서 문서, 노트 및 파일 동기화 (AI 세션과 동영상 분석은 지원되지 않음)',
-      rss: 'RSS / Atom 피드에서 글 동기화'
+      rss: 'RSS / Atom 피드에서 글 동기화',
+      gitlab: 'GitLab 프로젝트의 파일 동기화'
     },
     connector: {
       feishu: '페이슈 (Feishu)',
@@ -715,7 +724,8 @@ export default {
       notion: 'Notion',
       yuque: '위큐 (Yuque)',
       ima: 'Tencent IMA',
-      rss: 'RSS / Atom 피드'
+      rss: 'RSS / Atom 피드',
+      gitlab: 'GitLab'
     },
     logDetail: {
       startTime: '시작 시간',
@@ -5607,6 +5617,7 @@ export default {
     channelIm: 'IM 채널',
     channelNotion: 'Notion',
     channelYuque: 'Yuque',
+    channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
     channelUpload: '업로드',
     channelManual: '수동',

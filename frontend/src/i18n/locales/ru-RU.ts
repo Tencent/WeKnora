@@ -583,6 +583,14 @@ export default {
     connectionFailed: 'Подключение не удалось',
     isRequired: 'обязательно для заполнения',
     credentialsLabel: 'учётные данные',
+    gitlab: {
+      baseUrl: 'URL GitLab', accessToken: 'Персональный токен доступа', projects: 'Проекты GitLab',
+      projectsHint: 'Укажите ID проекта (или URL-кодированный путь к проекту), а также при необходимости ветку и каталоги.',
+      project: 'Проект', projectId: 'ID проекта', projectIdPlaceholder: 'Например: 12345 или group%2Fproject',
+      ref: 'Ветка', refPlaceholder: 'Оставьте пустым, чтобы использовать ветку по умолчанию',
+      paths: 'Каталоги', pathsPlaceholder: 'По одному каталогу в строке; оставьте пустым для синхронизации всего проекта',
+      addProject: 'Добавить проект', projectRequired: 'Добавьте хотя бы один проект GitLab',
+    },
     resourceHint: 'Выберите пространства или папки для синхронизации',
     untitled: 'Без названия',
     resourceLoadFailed: 'Не удалось загрузить список ресурсов',
@@ -705,7 +713,8 @@ export default {
       notion: 'Синхронизация страниц и баз данных из Notion',
       yuque: 'Синхронизация документов из баз знаний Yuque',
       ima: 'Синхронизация документов, заметок и файлов из баз знаний Tencent IMA (ИИ-сессии и разбор видео не поддерживаются)',
-      rss: 'Синхронизация статей из лент RSS / Atom'
+      rss: 'Синхронизация статей из лент RSS / Atom',
+      gitlab: 'Синхронизация файлов из проектов GitLab'
     },
     connector: {
       feishu: 'Feishu (Фэйшу)',
@@ -715,7 +724,8 @@ export default {
       notion: 'Notion',
       yuque: 'Yuque (Юйцюэ)',
       ima: 'Tencent IMA',
-      rss: 'RSS / Atom лента'
+      rss: 'RSS / Atom лента',
+      gitlab: 'GitLab'
     },
     logDetail: {
       startTime: 'Время начала',
@@ -5607,6 +5617,7 @@ export default {
     channelIm: 'IM канал',
     channelNotion: 'Notion',
     channelYuque: 'Yuque',
+    channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
     channelUpload: 'Загрузка',
     channelManual: 'Вручную',
