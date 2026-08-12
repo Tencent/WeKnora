@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
@@ -887,4 +888,46 @@ func (s *sessionService) GenerateTitleAsync(
 			}
 		}
 	}()
+}
+
+// ResolveRerankModel resolves a requested rerank model ID or name to a model ID.
+// An empty requested string returns empty, leaving fallback to resolveRerankModelID.
+func (s *sessionService) ResolveRerankModel(ctx context.Context, requested string) (string, error) {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return "", nil
+	}
+	if s.modelService == nil {
+		return "", apperrors.NewInternalServerError("model service not available")
+	}
+	models, err := s.modelService.ListModels(ctx)
+	if err != nil {
+		return "", err
+	}
+	rerank := make([]*types.Model, 0)
+	for _, model := range models {
+		if model != nil && model.Type == types.ModelTypeRerank && model.Status == types.ModelStatusActive {
+			rerank = append(rerank, model)
+		}
+	}
+	for _, model := range rerank {
+		if model.ID == requested {
+			return model.ID, nil
+		}
+	}
+	matches := make([]*types.Model, 0)
+	for _, model := range rerank {
+		if model.Name == requested {
+			matches = append(matches, model)
+		}
+	}
+	if len(matches) > 1 {
+		logger.Warnf(ctx, "Request provided ambiguous rerank model %s", secutils.SanitizeForLog(requested))
+		return "", apperrors.NewBadRequestError("rerank_model_id matches multiple models")
+	}
+	if len(matches) == 1 {
+		return matches[0].ID, nil
+	}
+	logger.Warnf(ctx, "Request provided invalid rerank model %s", secutils.SanitizeForLog(requested))
+	return "", apperrors.NewForbiddenError("rerank model not found or not accessible")
 }

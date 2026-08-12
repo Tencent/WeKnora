@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // KnowledgeQA performs knowledge base question answering with LLM summarization
@@ -86,6 +87,12 @@ func (s *sessionService) KnowledgeQA(
 	// Resolve retrieval tenant scope using shared helper
 	retrievalTenantID := s.resolveRetrievalTenantID(ctx, req)
 
+	// Load tenant-level retrieval config (nil is safe; used for rerank model fallback)
+	var rc *types.RetrievalConfig
+	if tenant, err2 := s.tenantService.GetTenantByID(ctx, retrievalTenantID); err2 == nil {
+		rc = tenant.RetrievalConfig
+	}
+
 	// Build unified search targets (computed once, used throughout pipeline)
 	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.TagScopes)
 	if err != nil {
@@ -149,10 +156,6 @@ func (s *sessionService) KnowledgeQA(
 		},
 	}
 
-	// Apply custom agent overrides (system prompt, temperature, retrieval params,
-	// rewrite, fallback, FAQ strategy, history turns)
-	s.applyAgentOverridesToChatManage(ctx, req.CustomAgent, chatManage)
-
 	// Determine pipeline based on the effective knowledge retrieval scope and
 	// web search setting. Tag-only mentions leave the raw KB/knowledge ID slices
 	// empty but produce SearchTargets, so the unified targets must participate in
@@ -160,6 +163,24 @@ func (s *sessionService) KnowledgeQA(
 	hasKB := types.HasKnowledgeRetrievalScope(searchTargets, knowledgeBaseIDs, knowledgeIDs)
 	needsRAG := hasKB || req.WebSearchEnabled
 	hasHistory := chatManage.MaxRounds > 0
+
+	// Resolve the rerank model: request override (hard-failing 400/403) then
+	// agent config, then tenant RetrievalConfig, then auto-detect.
+	// Only when retrieval actually runs.
+	var agentRerankModelID string
+	if req.CustomAgent != nil {
+		agentRerankModelID = req.CustomAgent.Config.RerankModelID
+	}
+	if needsRAG {
+		chatManage.RerankModelID, err = s.resolveRerankModelID(ctx, req.RerankModelID, agentRerankModelID, rc)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Apply custom agent overrides (system prompt, temperature, retrieval params,
+	// rewrite, fallback, FAQ strategy, history turns)
+	s.applyAgentOverridesToChatManage(ctx, req.CustomAgent, chatManage)
 
 	var pipeline []types.EventType
 	if !needsRAG {
@@ -801,7 +822,7 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 // knowledgeBaseIDs: list of knowledge base IDs to search (supports multi-KB)
 // knowledgeIDs: list of specific knowledge (file) IDs to search
 func (s *sessionService) SearchKnowledge(ctx context.Context,
-	knowledgeBaseIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, query string,
+	knowledgeBaseIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, query string, rerankModelID string,
 ) ([]*types.SearchResult, error) {
 	logger.Info(ctx, "Start knowledge base search without LLM summary")
 	logger.Infof(ctx, "Knowledge base search parameters, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, query: %s",
@@ -853,26 +874,11 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 		},
 	}
 
-	// Get default models
-	models, err := s.modelService.ListModels(ctx)
+	// Resolve the rerank model
+	chatManage.RerankModelID, err = s.resolveRerankModelID(ctx, rerankModelID, "", rc)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get models: %v", err)
+		logger.Errorf(ctx, "Failed to resolve rerank model ID '%s': %v", secutils.SanitizeForLog(rerankModelID), err)
 		return nil, err
-	}
-
-	// Use rerank model from RetrievalConfig if set, otherwise auto-select the first available
-	if rc != nil && rc.RerankModelID != "" {
-		chatManage.RerankModelID = rc.RerankModelID
-	} else {
-		for _, model := range models {
-			if model == nil {
-				continue
-			}
-			if model.Type == types.ModelTypeRerank {
-				chatManage.RerankModelID = model.ID
-				break
-			}
-		}
 	}
 
 	// Use specific event list, only including retrieval-related events, not LLM summarization
