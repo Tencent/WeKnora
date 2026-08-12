@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"sort"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -59,6 +60,12 @@ func (r *modelRepository) List(
 		return nil, err
 	}
 
+	sort.SliceStable(models, func(i, j int) bool {
+		leftDefault := models[i].IsDefault && !models[i].IsBuiltin
+		rightDefault := models[j].IsDefault && !models[j].IsBuiltin
+		return leftDefault && !rightDefault
+	})
+
 	return models, nil
 }
 
@@ -81,12 +88,13 @@ func (r *modelRepository) Delete(ctx context.Context, tenantID uint64, id string
 // This is a batch operation that updates all matching records in one query
 func (r *modelRepository) ClearDefaultByType(
 	ctx context.Context,
-	tenantID uint,
+	tenantID uint64,
 	modelType types.ModelType,
 	excludeID string,
 ) error {
 	query := r.db.WithContext(ctx).Model(&types.Model{}).Where(
-		"tenant_id = ? AND type = ? AND is_default = ?", tenantID, modelType, true,
+		"tenant_id = ? AND type = ? AND is_default = ? AND is_builtin = ?",
+		tenantID, modelType, true, false,
 	)
 
 	// If excludeID is provided, exclude that model from the update

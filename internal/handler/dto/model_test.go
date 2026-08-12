@@ -16,6 +16,7 @@ func TestModelResponse_OmitsSecrets(t *testing.T) {
 		ID:          "m-1",
 		Name:        "gpt-x",
 		DisplayName: "Support QA",
+		IsDefault:   true,
 		Parameters: types.ModelParameters{
 			APIKey:    "sk-real-api-key-do-not-leak",
 			AppSecret: "app-real-secret-do-not-leak",
@@ -43,11 +44,13 @@ func TestModelResponse_OmitsSecrets(t *testing.T) {
 	assert.Contains(t, s, "appid-public-ok-to-show")
 	assert.Contains(t, s, "api.example.com")
 	assert.Contains(t, s, `"display_name":"Support QA"`)
+	assert.Contains(t, s, `"is_default":true`)
 }
 
 func TestModelResponse_BuiltinStripsTenantConfig(t *testing.T) {
 	m := &types.Model{
 		ID:        "builtin-1",
+		IsDefault: true,
 		IsBuiltin: true,
 		Parameters: types.ModelParameters{
 			BaseURL:        "https://tenant-private.example.com",
@@ -66,6 +69,8 @@ func TestModelResponse_BuiltinStripsTenantConfig(t *testing.T) {
 		"builtin must not leak per-tenant extra_config")
 	assert.True(t, resp.Parameters.SupportsVision,
 		"capability metadata must survive (not per-tenant)")
+	assert.False(t, resp.IsDefault,
+		"builtin defaults are not workspace defaults")
 
 	body, _ := json.Marshal(resp)
 	assert.False(t, strings.Contains(string(body), "should-not-leak"))
@@ -76,6 +81,7 @@ func TestModelResponse_SystemAdminCanManageBuiltinConfig(t *testing.T) {
 	ctx := context.WithValue(viewerContext(), types.SystemAdminContextKey, true)
 	m := &types.Model{
 		ID:        "builtin-1",
+		IsDefault: true,
 		IsBuiltin: true,
 		Parameters: types.ModelParameters{
 			BaseURL:       "https://global-provider.example.com",
@@ -94,6 +100,8 @@ func TestModelResponse_SystemAdminCanManageBuiltinConfig(t *testing.T) {
 	assert.Equal(t, map[string]string{"X-Route": "global"}, resp.Parameters.CustomHeaders)
 	assert.True(t, resp.Credentials["api_key"].Configured)
 	assert.True(t, resp.Credentials["app_secret"].Configured)
+	assert.False(t, resp.IsDefault,
+		"builtin defaults are not workspace defaults")
 
 	body, err := json.Marshal(resp)
 	require.NoError(t, err)

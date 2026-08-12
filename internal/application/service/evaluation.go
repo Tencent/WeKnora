@@ -157,10 +157,10 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 			if model == nil {
 				continue
 			}
-			if model.Type == types.ModelTypeEmbedding {
+			if model.Type == types.ModelTypeEmbedding && embeddingModelID == "" {
 				embeddingModelID = model.ID
 			}
-			if model.Type == types.ModelTypeKnowledgeQA {
+			if model.Type == types.ModelTypeKnowledgeQA && llmModelID == "" {
 				llmModelID = model.ID
 			}
 		}

@@ -248,6 +248,16 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 		model.IsBuiltin = true
 		model.ManagedBy = ""
 	}
+	if model.IsDefault && !model.IsBuiltin {
+		if err := s.repo.ClearDefaultByType(ctx, model.TenantID, model.Type, model.ID); err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"model_id":   model.ID,
+				"model_type": model.Type,
+				"tenant_id":  model.TenantID,
+			})
+			return err
+		}
+	}
 
 	// Update model in repository
 	err = s.repo.Update(ctx, model)
@@ -591,9 +601,6 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 
 	return vlmModel, nil
 }
-
-// Note: default model selection logic has been removed; models no longer
-// maintain a per-type default flag at the service layer.
 
 // GetASRModel retrieves and initializes an automatic speech recognition model instance.
 func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR, error) {

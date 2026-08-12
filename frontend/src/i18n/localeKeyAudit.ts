@@ -193,7 +193,8 @@ function isStaticTranslationKey(key: string): boolean {
 }
 
 const KNOWN_LOCALE_NAMESPACES = new Set(Object.keys(enUS as Record<string, unknown>))
-const INDIRECT_TERNARY_IN_T_RE = /\$t\(\s*[\s\S]*?\? ['"]([^'"]+)['"]\s*:\s*['"]([^'"]+)['"]/g
+const INDIRECT_TERNARY_IN_T_RE =
+  /(?:\$t|i18n\.global\.t|(?<![.\w])t|globalSettingsText)\(\s*[\s\S]*?\?\s*['"]([^'"]+)['"]\s*:\s*['"]([^'"]+)['"]/g
 const INDIRECT_VAR_T_RE = /\$t\(([a-zA-Z_][\w]*)\)/g
 
 function addIndirectTranslationKeys(content: string, usage: I18nUsage): void {

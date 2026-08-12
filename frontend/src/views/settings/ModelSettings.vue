@@ -66,6 +66,9 @@
           <div class="model-card__body">
             <div class="model-card__header">
               <h3 class="model-card__title">{{ modelDisplayName(model) }}</h3>
+              <t-tag v-if="model.isDefault" theme="success" variant="light" size="small">
+                {{ $t('model.defaultTag') }}
+              </t-tag>
               <span v-if="model.isBuiltin" class="model-card__lock" :title="$t('modelSettings.builtinTag')"
                 :aria-label="$t('modelSettings.builtinTag')">
                 <t-icon :name="authStore.isSystemAdmin ? 'edit-1' : 'lock-on'" />
@@ -147,11 +150,13 @@ import { AddIcon, PlayCircleIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
 import ModelDebugDrawer from '@/components/ModelDebugDrawer.vue'
-import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, type ModelConfig } from '@/api/model'
+import { listModels, getModel, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, type ModelConfig } from '@/api/model'
 import { useAuthStore } from '@/stores/auth'
+import { useChatResourcesStore } from '@/stores/chatResources'
 
 const { t, te } = useI18n()
 const authStore = useAuthStore()
+const chatResources = useChatResourcesStore()
 type ModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
 type FilterType = 'all' | ModelType
 
@@ -191,6 +196,7 @@ function convertToLegacyFormat(model: ModelConfig) {
     provider: model.parameters.provider || '',
     dimension: model.parameters.embedding_parameters?.dimension,
     supportsDimensionOverride: model.parameters.embedding_parameters?.supports_dimension_override || false,
+    isDefault: model.is_default || false,
     isBuiltin: model.is_builtin || false,
     supportsVision: model.parameters.supports_vision || false,
     maxConcurrency: model.parameters.max_concurrency,
@@ -499,6 +505,33 @@ const deleteModel = async (_type: ModelType, modelId: string) => {
   }
 }
 
+// 更新默认状态。更新接口目前接收完整模型配置，因此先读取最新详情，
+// 避免仅提交 is_default 时将其他配置字段覆盖为空值。
+const updateDefault = async (modelId: string, isDefault: boolean) => {
+  try {
+    const model = await getModel(modelId)
+    await updateModelAPI(modelId, {
+      name: model.name,
+      display_name: model.display_name || '',
+      type: model.type,
+      source: model.source,
+      description: model.description || '',
+      parameters: model.parameters,
+      is_default: isDefault,
+    })
+    chatResources.invalidate('models')
+    MessagePlugin.success(t(isDefault
+      ? 'modelSettings.toasts.setDefault'
+      : 'modelSettings.toasts.unsetDefault'))
+    await loadModels()
+  } catch (error: any) {
+    console.error(isDefault ? '设置默认模型失败:' : '取消默认模型失败:', error)
+    MessagePlugin.error(error.message || t(isDefault
+      ? 'modelSettings.toasts.setDefaultFailed'
+      : 'modelSettings.toasts.unsetDefaultFailed'))
+  }
+}
+
 // 获取模型操作菜单选项
 const getModelOptions = (type: ModelType, model: any) => {
   const options: any[] = []
@@ -522,6 +555,13 @@ const getModelOptions = (type: ModelType, model: any) => {
   }
 
   options.push({
+    content: t(model.isDefault
+      ? 'modelSettings.actions.unsetDefault'
+      : 'modelSettings.actions.setDefault'),
+    value: `${model.isDefault ? 'unset' : 'set'}-default-${type}-${model.id}`
+  })
+
+  options.push({
     content: t('common.edit'),
     value: `edit-${type}-${model.id}`
   })
@@ -538,7 +578,11 @@ const getModelOptions = (type: ModelType, model: any) => {
 const handleMenuAction = (data: { value: string }, type: ModelType, model: any) => {
   const value = data.value
 
-  if (value.indexOf('edit-') === 0) {
+  if (value.indexOf('set-default-') === 0) {
+    updateDefault(model.id, true)
+  } else if (value.indexOf('unset-default-') === 0) {
+    updateDefault(model.id, false)
+  } else if (value.indexOf('edit-') === 0) {
     editModel(type, model)
   } else if (value.indexOf('copy-') === 0) {
     copyModel(type, model.id)
