@@ -407,6 +407,10 @@ func (h *SystemHandler) runDeepSandboxCheck(
 		}
 	}()
 	result.add("template_exists", true, "", 0)
+	logger.Infof(ctx,
+		"[SandboxCheck] probe sandbox created id=%s provider=%s template=%s",
+		handle.ID(), result.Provider, sandbox.EffectiveTemplateID(cfg),
+	)
 
 	const marker = "weknora-ok"
 	start := time.Now()
@@ -419,6 +423,10 @@ func (h *SystemHandler) runDeepSandboxCheck(
 	latency := time.Since(start).Milliseconds()
 	switch {
 	case err != nil:
+		logger.Warnf(ctx,
+			"[SandboxCheck] sandbox_exec failed sandbox=%s latency_ms=%d ui_reason=%s detail=%s",
+			handle.ID(), latency, sandboxCheckReason(err), sandbox.RemoteErrorDiagnostics(err),
+		)
 		result.add("sandbox_exec", false, sandboxCheckReason(err), latency)
 		result.skip("egress_available", skipReasonSandboxExecFailed)
 		return
@@ -427,6 +435,11 @@ func (h *SystemHandler) runDeepSandboxCheck(
 		result.skip("egress_available", skipReasonSandboxExecFailed)
 		return
 	case !strings.Contains(execResult.Stdout, marker):
+		logger.Warnf(ctx,
+			"[SandboxCheck] sandbox_exec probe mismatch sandbox=%s exit=%d killed=%v stdout=%q stderr=%q",
+			handle.ID(), execResult.ExitCode, execResult.Killed,
+			firstProbeLine(execResult.Stdout), firstProbeLine(execResult.Stderr),
+		)
 		result.add("sandbox_exec", false, describeProbeMismatch(
 			execResult.ExitCode, execResult.Killed,
 			execResult.Stdout, execResult.Stderr, "",
