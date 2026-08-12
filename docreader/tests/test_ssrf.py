@@ -1,3 +1,4 @@
+import ipaddress
 import os
 import unittest
 from unittest.mock import patch
@@ -35,6 +36,20 @@ class TestSSRFValidation(unittest.TestCase):
         )
         self.assertFalse(safe)
         self.assertTrue(reason)
+
+    def test_blocks_invalid_port(self):
+        safe, reason = is_ssrf_safe_url("https://example.com:99999/path")
+        self.assertFalse(safe)
+        self.assertIn("invalid port", reason)
+
+    def test_blocks_ipv4_mapped_private_ipv6_resolution(self):
+        with patch(
+            "docreader.utils.ssrf._resolve_host_ips",
+            return_value=((ipaddress.ip_address("::ffff:127.0.0.1"),), None),
+        ):
+            safe, reason = is_ssrf_safe_url("https://example.invalid/path")
+        self.assertFalse(safe)
+        self.assertIn("restricted", reason)
 
     def test_allows_public_https(self):
         safe, reason = is_ssrf_safe_url("https://example.com/article")

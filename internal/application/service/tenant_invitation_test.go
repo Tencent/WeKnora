@@ -584,3 +584,33 @@ func TestInvitationService_AcceptByToken_RequiresUserID(t *testing.T) {
 		t.Fatalf("empty user id must be rejected")
 	}
 }
+
+func TestInvitationService_MarkPendingAcceptedIfExists_NoPending(t *testing.T) {
+	svc, _, _ := newInvitationSvc()
+	ctx := context.Background()
+	if err := svc.MarkPendingAcceptedIfExists(ctx, 1, "u-alice"); err != nil {
+		t.Fatalf("MarkPendingAcceptedIfExists: %v", err)
+	}
+}
+
+func TestInvitationService_MarkPendingAcceptedIfExists_FlipsPendingRow(t *testing.T) {
+	svc, invRepo, _ := newInvitationSvc()
+	ctx := context.Background()
+	inv, err := svc.Create(ctx, 1, "u-alice", types.TenantRoleViewer, nil, "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if inv.Status != types.TenantInvitationStatusPending {
+		t.Fatalf("want pending, got %s", inv.Status)
+	}
+	if err := svc.MarkPendingAcceptedIfExists(ctx, 1, "u-alice"); err != nil {
+		t.Fatalf("MarkPendingAcceptedIfExists: %v", err)
+	}
+	got, err := invRepo.GetByID(ctx, inv.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Status != types.TenantInvitationStatusAccepted {
+		t.Fatalf("want accepted, got %s", got.Status)
+	}
+}

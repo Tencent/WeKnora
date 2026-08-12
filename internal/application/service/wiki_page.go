@@ -906,7 +906,7 @@ func (s *wikiPageService) RebuildLinks(ctx context.Context, kbID string) error {
 	return nil
 }
 
-// ListAllPages retrieves all wiki pages without pagination.
+// ListAllPages retrieves all non-archived wiki pages without pagination.
 func (s *wikiPageService) ListAllPages(ctx context.Context, kbID string) ([]*types.WikiPage, error) {
 	return s.repo.ListAll(ctx, kbID)
 }

@@ -24,6 +24,10 @@ const (
 	// defaultToolExecTimeout is the default maximum time for a single tool execution.
 	// Prevents long-running tools (web_fetch, database_query) from hanging indefinitely.
 	defaultToolExecTimeout = 60 * time.Second
+	// shellExecToolTimeout is slightly longer than shell_exec's own hard
+	// 600-second command timeout so the tool can return a structured timeout
+	// result instead of being cancelled first by the generic agent wrapper.
+	shellExecToolTimeout = 10*time.Minute + 5*time.Second
 
 	// maxLLMRetries is the maximum number of retries for transient LLM errors.
 	maxLLMRetries = 2
@@ -41,6 +45,13 @@ const (
 	// unhandled finish reasons (e.g., content_filter not caught elsewhere).
 	maxRepeatedResponseRounds = 2
 )
+
+func toolExecutionTimeout(toolName string) time.Duration {
+	if toolName == "shell_exec" {
+		return shellExecToolTimeout
+	}
+	return defaultToolExecTimeout
+}
 
 // transientErrorMarkers are substrings that indicate a transient (retryable) error.
 var transientErrorMarkers = []string{

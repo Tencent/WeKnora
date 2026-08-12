@@ -16,9 +16,29 @@ const (
 	SandboxTypeDocker SandboxType = "docker"
 	// SandboxTypeLocal uses local process with restrictions
 	SandboxTypeLocal SandboxType = "local"
+	// SandboxTypeCube uses Tencent CubeSandbox (E2B-compatible) MicroVM for isolation.
+	// Unlike Docker/Local backends which are stateless per execution, Cube supports
+	// session-scoped persistent sandboxes: multiple executions bound to the same
+	// SessionID share the same MicroVM instance and preserve installed packages,
+	// created files, running services, etc.
+	SandboxTypeCube SandboxType = "cube"
+	// SandboxTypeE2B uses E2B's hosted MicroVM sandbox service.
+	SandboxTypeE2B SandboxType = "e2b"
 	// SandboxTypeDisabled means script execution is disabled
 	SandboxTypeDisabled SandboxType = "disabled"
 )
+
+// IsNamedSandboxBackendType reports whether raw can be stored as a user-facing
+// named sandbox backend. Remote backends are session-persistent; docker/local
+// are stateless, but all four share the same workspace configuration surface.
+func IsNamedSandboxBackendType(raw string) bool {
+	switch SandboxType(raw) {
+	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker, SandboxTypeLocal:
+		return true
+	default:
+		return false
+	}
+}
 
 // Default configuration values
 const (
@@ -26,6 +46,48 @@ const (
 	DefaultMemoryLimit = 256 * 1024 * 1024 // 256MB
 	DefaultCPULimit    = 1.0               // 1 CPU core
 	DefaultDockerImage = "wechatopenai/weknora-sandbox:latest"
+
+	// DefaultCubeTemplateImage is the same environment with Cube's envd daemon
+	// baked in (target "cube" of docker/Dockerfile.sandbox).
+	//
+	// Cube turns an OCI image into a template directly and gates the build on
+	// GET :49983/health, which only envd answers. Building a Cube template from
+	// DefaultDockerImage therefore always fails the probe with "connection
+	// refused" — E2B gets away with that image because its own builder injects
+	// envd, and the Docker backend never needs one.
+	DefaultCubeTemplateImage = "wechatopenai/weknora-sandbox:main-cube"
+
+	// CubeEnvdPort is the port envd listens on inside a Cube sandbox. It carries
+	// the readiness probe as well as every exec and filesystem call, and the
+	// data plane addresses sandboxes as "49983-{id}.{domain}".
+	CubeEnvdPort = 49983
+
+	// CubeEnvdHealthPath is the envd endpoint Cube probes to decide whether a
+	// template build succeeded.
+	CubeEnvdHealthPath = "/health"
+
+	// DefaultCubeAPIURL is retained for SDK tests and explicit local helpers;
+	// workspace configs must still provide their endpoint.
+	DefaultCubeAPIURL = "http://127.0.0.1:33000"
+	// DefaultCubeProxyURL is the default CubeProxy endpoint (HTTP, port 80) used
+	// to reach the in-sandbox envd via host-header routing.
+	DefaultCubeProxyURL = "http://127.0.0.1:80"
+	// DefaultCubeSandboxDomain is the sandbox routing domain configured on
+	// CubeProxy (matches CUBE_API_SANDBOX_DOMAIN in the Cube deployment).
+	DefaultCubeSandboxDomain = "cube.app"
+	// DefaultCubeSandboxTTL is the Cube-side sandbox lifetime hint (in seconds)
+	// requested at creation; the sandbox is torn down by CubeMaster if the
+	// client goes silent for longer than this value.
+	DefaultCubeSandboxTTL = 30 * time.Minute
+	// DefaultCubeHTTPTimeout bounds a single HTTP call to the CubeAPI
+	// (excluding user script execution which has its own per-call timeout).
+	DefaultCubeHTTPTimeout = 30 * time.Second
+
+	// DefaultE2BSandboxTTL matches the E2B SDK's built-in default so an
+	// unset E2BSandboxTTL still yields a valid sandbox lifetime.
+	DefaultE2BSandboxTTL = 5 * time.Minute
+	// DefaultE2BHTTPTimeout bounds a single HTTP call to the E2B API.
+	DefaultE2BHTTPTimeout = 30 * time.Second
 )
 
 // Common errors
@@ -89,10 +151,6 @@ type ExecuteConfig struct {
 	// Env is additional environment variables
 	Env map[string]string
 
-	// AllowedCmds is a whitelist of commands that can be executed
-	// If empty, a default safe list is used
-	AllowedCmds []string
-
 	// AllowNetwork enables network access (Docker only)
 	AllowNetwork bool
 
@@ -113,6 +171,12 @@ type ExecuteConfig struct {
 
 	// ScriptContent is the script content for validation (optional, will be read from file if not provided)
 	ScriptContent string
+
+	// SessionID scopes the execution to a per-session persistent sandbox.
+	// Currently only honoured by remote backends; Docker/Local backends ignore it.
+	// When empty, Cube falls back to an ephemeral (one-shot) sandbox that is
+	// created and torn down inside the single Execute call.
+	SessionID string
 }
 
 // ExecuteResult contains the result of script execution
@@ -141,14 +205,6 @@ func (r *ExecuteResult) IsSuccess() bool {
 	return r.ExitCode == 0 && !r.Killed && r.Error == ""
 }
 
-// GetOutput returns the combined stdout and stderr, preferring stdout
-func (r *ExecuteResult) GetOutput() string {
-	if r.Stdout != "" {
-		return r.Stdout
-	}
-	return r.Stderr
-}
-
 // Config holds sandbox manager configuration
 type Config struct {
 	// Type is the preferred sandbox type
@@ -159,6 +215,10 @@ type Config struct {
 
 	// DefaultTimeout is the default execution timeout
 	DefaultTimeout time.Duration
+
+	// AllowPrivateEndpoints is the per-workspace outbound policy for this
+	// connection. Link-local addresses are blocked regardless.
+	AllowPrivateEndpoints bool
 
 	// DockerImage is the Docker image to use (Docker sandbox only)
 	DockerImage string
@@ -174,9 +234,71 @@ type Config struct {
 
 	// MaxCPU is the maximum CPU cores
 	MaxCPU float64
+
+	// EnvVars are additional environment variables to set for the sandbox.
+	EnvVars map[string]string
+
+	// CubeAPIURL is the base URL of the CubeAPI (E2B-compatible) endpoint.
+	// Only used when Type == SandboxTypeCube. Example: "http://127.0.0.1:33000".
+	CubeAPIURL string
+
+	// CubeProxyURL is the base URL of the CubeProxy HTTP endpoint through which
+	// in-sandbox envd traffic is routed via host-header rewriting. Example:
+	// "http://127.0.0.1:80".
+	CubeProxyURL string
+
+	// CubeSandboxDomain matches CubeAPI's CUBE_API_SANDBOX_DOMAIN. It is used to
+	// build the Host header "<port>-<sandboxID>.<domain>" that CubeProxy relies
+	// on to route requests into the correct MicroVM.
+	CubeSandboxDomain string
+
+	// CubeAPIKey is the API key sent via X-API-Key. Leave empty when the Cube
+	// deployment does not enforce authentication.
+	CubeAPIKey string
+
+	// CubeTemplate is the default template ID used when creating sandboxes.
+	CubeTemplate string
+
+	// CubeSandboxTTL is the Cube-side lifetime hint (passed as `timeout` when
+	// creating a sandbox). CubeMaster will reap the MicroVM if the client stops
+	// touching it for longer than this duration.
+	CubeSandboxTTL time.Duration
+
+	// CubeHTTPTimeout bounds each HTTP call to CubeAPI. Zero uses the default.
+	CubeHTTPTimeout time.Duration
+
+	// E2BAPIKey is the E2B API key sent via X-API-Key. Only used when
+	// Type == SandboxTypeE2B.
+	E2BAPIKey string
+
+	// E2BAPIURL is the E2B control-plane endpoint. Empty defaults to
+	E2BAPIURL string
+
+	// E2BSandboxDomain is the domain envd traffic is routed through, e.g.
+	// "e2b.app". Empty defaults to the SDK's built-in.
+	E2BSandboxDomain string
+
+	// E2BProxyURL is the data-plane gateway that fronts envd for self-hosted
+	// E2B-compatible control planes. Empty keeps the SDK's behaviour of
+	// resolving the sandbox authority through DNS over TLS, which is what E2B
+	// Cloud expects. See types.E2BSandboxConfig.ProxyURL.
+	E2BProxyURL string
+
+	// E2BTemplate is the E2B template ID used at sandbox creation.
+	E2BTemplate string
+
+	// E2BSandboxTTL is the E2B-side idle timeout hint.
+	E2BSandboxTTL time.Duration
+
+	// E2BHTTPTimeout bounds each HTTP call to the E2B API.
+	E2BHTTPTimeout time.Duration
 }
 
-// DefaultConfig returns a default sandbox configuration
+// DefaultConfig returns a default sandbox configuration.
+//
+// It deliberately carries no Cube or E2B endpoint, credential or template:
+// those belong to a named workspace config. Presetting them here once meant an
+// incomplete workspace config could silently dial localhost.
 func DefaultConfig() *Config {
 	return &Config{
 		Type:            SandboxTypeLocal,
@@ -186,6 +308,8 @@ func DefaultConfig() *Config {
 		AllowedCommands: defaultAllowedCommands(),
 		MaxMemory:       DefaultMemoryLimit,
 		MaxCPU:          DefaultCPULimit,
+		CubeSandboxTTL:  DefaultCubeSandboxTTL,
+		CubeHTTPTimeout: DefaultCubeHTTPTimeout,
 	}
 }
 
@@ -222,7 +346,7 @@ func ValidateConfig(config *Config) error {
 	}
 
 	switch config.Type {
-	case SandboxTypeDocker, SandboxTypeLocal, SandboxTypeDisabled:
+	case SandboxTypeDocker, SandboxTypeLocal, SandboxTypeCube, SandboxTypeE2B, SandboxTypeDisabled:
 		// Valid types
 	default:
 		return errors.New("invalid sandbox type")

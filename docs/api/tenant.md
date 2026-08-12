@@ -636,3 +636,14 @@ curl --location --request PUT 'http://localhost:8080/api/v1/tenants/kv/agent-con
 - `retrieval-config`: `embedding_top_k` / `rerank_top_k` ∈ `[0, 200]`；阈值范围同上。
 - `storage-engine-config`: `default_provider` 必须在 `STORAGE_ALLOW_LIST` 允许的列表内。
 - `chat-history-config`: 启用且设置了 `embedding_model_id` 而尚未关联知识库时，会自动创建一个隐藏知识库并将其 ID 写入配置。
+
+## 空间邀请（邮箱邀请已注册用户）
+
+`POST /tenants/:id/invitations` 通过邮箱邀请**已注册**用户。全局开关 `tenant.auto_accept_invitation`（环境变量 `WEKNORA_TENANT_AUTO_ACCEPT_INVITATION`，默认 `false`）控制行为：
+
+| 开关 | 行为 | 成功响应 `data` 形状 |
+| ---- | ---- | -------------------- |
+| `false` | 创建 pending 邀请，受邀人须在 `/me/invitations` 接受 | `TenantInvitation`（含 `id`、`status: pending`） |
+| `true` | 直接写入 `tenant_members`，并 reconcile 已有 pending 行 | `TenantMember`（含 `user_id`、`status: active`） |
+
+开启 auto-accept 时，无默认空间的受邀人会将该空间设为 home tenant（与手动接受邀请一致）。SPA 通过 `GET /auth/me` 的 `capabilities.auto_accept_invitation` 感知开关，无需读取系统设置 API。

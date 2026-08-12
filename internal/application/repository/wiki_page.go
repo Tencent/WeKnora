@@ -1055,11 +1055,11 @@ func (r *wikiPageRepository) FindSimilarPages(
 	return out, nil
 }
 
-// ListAll retrieves all wiki pages in a knowledge base
+// ListAll retrieves all non-archived wiki pages in a knowledge base.
 func (r *wikiPageRepository) ListAll(ctx context.Context, kbID string) ([]*types.WikiPage, error) {
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ?", kbID).
+		Where("knowledge_base_id = ? AND status <> ?", kbID, types.WikiPageStatusArchived).
 		Order("page_type ASC, title ASC").
 		Find(&pages).Error; err != nil {
 		return nil, err
@@ -1193,7 +1193,7 @@ func (r *wikiPageRepository) CountByType(ctx context.Context, kbID string) (map[
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
 		Select("page_type, count(*) as count").
-		Where("knowledge_base_id = ?", kbID).
+		Where("knowledge_base_id = ? AND status <> ?", kbID, types.WikiPageStatusArchived).
 		Group("page_type").
 		Scan(&results).Error; err != nil {
 		return nil, err
@@ -1211,7 +1211,7 @@ func (r *wikiPageRepository) CountOrphans(ctx context.Context, kbID string) (int
 	var count int64
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
-		Where("knowledge_base_id = ?", kbID).
+		Where("knowledge_base_id = ? AND status <> ?", kbID, types.WikiPageStatusArchived).
 		Where(r.wikiEmptyInLinksPredicate()).
 		// Exclude the index page because it is naturally a root page.
 		Where("page_type <> ?", types.WikiPageTypeIndex).

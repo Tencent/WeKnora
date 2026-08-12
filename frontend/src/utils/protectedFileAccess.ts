@@ -1,9 +1,10 @@
 /**
  * 受保护文件（provider:// / resource:// 等）的访问上下文。
  *
- * 后端按访问主体拆了三条文件代理，鉴权模型互不相同：
+ * 后端按访问主体拆分文件代理，鉴权模型互不相同：
  *   - `/files`                                → 登录态 Bearer + X-Tenant-ID
  *   - `/api/v1/knowledge-bases/:id/files`     → 知识库访问权限（跨租户共享库）
+ *   - `/api/v1/sessions/:id/messages/:mid/files` → 会话消息归属 + 共享智能体权限
  *   - `/api/v1/embed/:channel_id/files`       → 嵌入访客的 Embed token
  *
  * 选哪条代理取决于当前请求的鉴权平面，而不是取决于哪个组件在渲染图片。
@@ -20,6 +21,7 @@ const STORAGE_BACKEND_FILE_SCHEME_RE = new RegExp(
 
 const KB_FILE_PROXY_PATH_RE = /^\/api\/v1\/knowledge-bases\/[^/]+\/files$/;
 const EMBED_FILE_PROXY_PATH_RE = /^\/api\/v1\/embed\/[^/]+\/files$/;
+const MESSAGE_FILE_PROXY_PATH_RE = /^\/api\/v1\/sessions\/[^/]+\/messages\/[^/]+\/files$/;
 
 export type ProtectedFileAccessContext =
   /** 登录态用户：Bearer + 选中租户。 */
@@ -27,7 +29,9 @@ export type ProtectedFileAccessContext =
   /** 嵌入访客：只持有 Embed token，无 Bearer、无租户上下文。 */
   | { mode: 'embed'; channelId: string; token: string }
   /** 知识库作用域：登录态用户读取共享库中归属其他租户的对象。 */
-  | { mode: 'knowledgeBase'; kbId: string };
+  | { mode: 'knowledgeBase'; kbId: string }
+  /** 消息作用域：登录态用户读取共享智能体回复中的源空间资源。 */
+  | { mode: 'message'; sessionId: string; messageId: string };
 
 export interface ProtectedFileRequest {
   url: string;
@@ -80,6 +84,9 @@ export function resolveProtectedFileAccess(
   if (fallback.mode === 'embed') return fallback;
   if (!override) return fallback;
   if (override.mode === 'knowledgeBase' && !override.kbId.trim()) return fallback;
+  if (override.mode === 'message' && (!override.sessionId.trim() || !override.messageId.trim())) {
+    return fallback;
+  }
   return override;
 }
 
@@ -89,11 +96,12 @@ export function isProviderFileURL(url: string): boolean {
   return PROVIDER_FILE_SCHEME_RE.test(trimmed) || STORAGE_BACKEND_FILE_SCHEME_RE.test(trimmed);
 }
 
-/** 是否为三条受保护文件代理之一的路径。 */
+/** 是否为受保护文件代理之一的路径。 */
 export function isProtectedFileProxyPath(pathname: string): boolean {
   return (
     pathname === '/files'
     || KB_FILE_PROXY_PATH_RE.test(pathname)
+    || MESSAGE_FILE_PROXY_PATH_RE.test(pathname)
     || EMBED_FILE_PROXY_PATH_RE.test(pathname)
   );
 }
@@ -150,6 +158,13 @@ export function buildProtectedFileRequest(
   if (access.mode === 'knowledgeBase') {
     return {
       url: `/api/v1/knowledge-bases/${encodeURIComponent(access.kbId.trim())}/files?${query}`,
+      headers: tenantRequestHeaders(),
+    };
+  }
+
+  if (access.mode === 'message') {
+    return {
+      url: `/api/v1/sessions/${encodeURIComponent(access.sessionId.trim())}/messages/${encodeURIComponent(access.messageId.trim())}/files?${query}`,
       headers: tenantRequestHeaders(),
     };
   }

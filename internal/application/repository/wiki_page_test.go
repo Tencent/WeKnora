@@ -429,6 +429,43 @@ func TestCountOrphans_SQLiteCountsEmptyInLinks(t *testing.T) {
 	assert.Equal(t, int64(1), got)
 }
 
+func TestWikiStatsQueriesExcludeArchivedPages(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	live := makeWikiPage("kb-stats", "entity/live", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	live.InLinks = types.StringArray{"index"}
+	live.OutLinks = types.StringArray{"concept/live-target"}
+	archived := makeWikiPage("kb-stats", "entity/archived", types.WikiPageTypeEntity, types.WikiPageStatusArchived)
+	archived.InLinks = types.StringArray{}
+	archived.OutLinks = types.StringArray{"concept/archived-target"}
+	indexPage := makeWikiPage("kb-stats", "index", types.WikiPageTypeIndex, types.WikiPageStatusPublished)
+	indexPage.InLinks = types.StringArray{}
+	otherKB := makeWikiPage("kb-other", "entity/other", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+
+	for _, p := range []*types.WikiPage{live, archived, indexPage, otherKB} {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	counts, err := repo.CountByType(ctx, "kb-stats")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), counts[types.WikiPageTypeEntity])
+	assert.Equal(t, int64(1), counts[types.WikiPageTypeIndex])
+
+	orphans, err := repo.CountOrphans(ctx, "kb-stats")
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), orphans)
+
+	pages, err := repo.ListAll(ctx, "kb-stats")
+	require.NoError(t, err)
+	assert.Len(t, pages, 2)
+	for _, page := range pages {
+		assert.NotEqual(t, types.WikiPageStatusArchived, page.Status)
+		assert.Equal(t, "kb-stats", page.KnowledgeBaseID)
+	}
+}
+
 // makeWikiRevision builds a snapshot row for the given page state.
 func makeWikiRevision(page *types.WikiPage, version int, editSource string) *types.WikiPageRevision {
 	return &types.WikiPageRevision{

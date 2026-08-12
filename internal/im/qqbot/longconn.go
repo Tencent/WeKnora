@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	ws "github.com/gorilla/websocket"
 )
 
@@ -68,7 +69,9 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	conn, _, err := ws.DefaultDialer.DialContext(ctx, gatewayURL, nil)
+	dialer := *ws.DefaultDialer
+	dialer.NetDialContext = secutils.SSRFSafeDialContext
+	conn, _, err := dialer.DialContext(ctx, gatewayURL, nil)
 	if err != nil {
 		return err
 	}

@@ -1,9 +1,16 @@
 #!/bin/sh
 
+# Only emit whitelisted locale tags to avoid config.js injection from env values.
+RUNTIME_DEFAULT_LOCALE=""
+case "${DEFAULT_LOCALE:-}" in
+  zh-CN|en-US|ru-RU|ko-KR) RUNTIME_DEFAULT_LOCALE="${DEFAULT_LOCALE}" ;;
+esac
+
 # 生成运行时配置文件，注入环境变量到前端
 cat > /usr/share/nginx/html/config.js << EOF
 window.__RUNTIME_CONFIG__ = {
-  MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-50}
+  MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-50},
+  DEFAULT_LOCALE: "${RUNTIME_DEFAULT_LOCALE}"
 };
 EOF
 

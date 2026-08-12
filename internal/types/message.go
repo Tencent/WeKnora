@@ -128,7 +128,7 @@ func (attachments MessageAttachments) BuildPrompt() string {
 			sb.WriteString("\n</content>\n")
 
 			if att.IsTruncated {
-				sb.WriteString(fmt.Sprintf("<note>This legacy upload has a total of %d lines and only its first 500 lines are available.</note>\n",
+				sb.WriteString(fmt.Sprintf("<note>This attachment was truncated for prompt-size safety; only a prefix is available. The original content has %d lines.</note>\n",
 					att.LineCount))
 			}
 		} else {
@@ -163,6 +163,56 @@ func (m *MessageAttachments) Scan(value interface{}) error {
 		b = []byte(v)
 	default:
 		*m = make(MessageAttachments, 0)
+		return nil
+	}
+	return json.Unmarshal(b, m)
+}
+
+// MessageArtifact represents a file produced by a skill script during a chat
+// turn. Unlike MessageAttachment (which stores files uploaded by the user),
+// MessageArtifact records files that the sandbox generated on the model's
+// behalf and that WeKnora has persisted to its file service so the user can
+// download them after the sandbox is reaped.
+//
+// URL is the provider-scoped storage path (e.g. "local://tenant/..."), never
+// exposed directly to the client. SourcePath + ModTime form the sandbox-side
+// identity used by ArtifactCollector to de-duplicate files across multi-turn
+// runs (see docs/superpowers/specs/2026-07-10-skill-artifact-download-design.md).
+type MessageArtifact struct {
+	URL        string    `json:"url"`         // Storage URL (provider://path); persisted, not sent to client
+	FileName   string    `json:"file_name"`   // Original filename inside the sandbox
+	FileType   string    `json:"file_type"`   // File extension (e.g., ".pptx", ".pdf")
+	FileSize   int64     `json:"file_size"`   // File size in bytes
+	SourcePath string    `json:"source_path"` // Absolute path inside the sandbox (used for diff)
+	ModTime    time.Time `json:"mod_time"`    // Sandbox-side modification time (used for diff)
+	CreatedAt  time.Time `json:"created_at"`  // When WeKnora persisted the blob
+}
+
+// MessageArtifacts is a slice of MessageArtifact for database storage.
+type MessageArtifacts []MessageArtifact
+
+// Value implements the driver.Valuer interface for database serialization
+func (m MessageArtifacts) Value() (driver.Value, error) {
+	if m == nil {
+		return json.Marshal([]MessageArtifact{})
+	}
+	return json.Marshal(m)
+}
+
+// Scan implements the sql.Scanner interface for database deserialization
+func (m *MessageArtifacts) Scan(value interface{}) error {
+	if value == nil {
+		*m = make(MessageArtifacts, 0)
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		*m = make(MessageArtifacts, 0)
 		return nil
 	}
 	return json.Unmarshal(b, m)
@@ -225,6 +275,10 @@ type Message struct {
 	Images MessageImages `json:"images,omitempty" gorm:"type:jsonb;column:images"`
 	// Attached files (documents, audio, etc., for user messages)
 	Attachments MessageAttachments `json:"attachments,omitempty" gorm:"type:jsonb;column:attachments"`
+	// Skill-generated files produced during this assistant turn (assistant messages only).
+	// Populated by ArtifactCollector after the sandbox finishes, referenced by the
+	// artifact download endpoint. Empty for user messages and turns without skills.
+	Artifacts MessageArtifacts `json:"artifacts,omitempty" gorm:"type:jsonb;column:artifacts"`
 	// Whether message generation is complete
 	IsCompleted bool `json:"is_completed"`
 	// Whether this response is a fallback (no knowledge base match found)
@@ -352,6 +406,9 @@ func (m *Message) BeforeCreate(tx *gorm.DB) (err error) {
 	}
 	if m.Attachments == nil {
 		m.Attachments = make(MessageAttachments, 0)
+	}
+	if m.Artifacts == nil {
+		m.Artifacts = make(MessageArtifacts, 0)
 	}
 	return nil
 }

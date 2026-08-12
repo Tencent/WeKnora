@@ -87,6 +87,7 @@ export function createKnowledgeBase(data: {
   chunking_config?: any;
   embedding_model_id?: string;
   summary_model_id?: string;
+  auto_tag_config?: { enabled: boolean; model_id?: string; max_tags?: number; skip_if_tagged?: boolean };
   // Opt-in binding to a specific tenant-owned VectorStore. Omit (or
   // send undefined / empty string) to fall back to the env-configured
   // store. Immutable after creation — UpdateKnowledgeBase intentionally
@@ -149,6 +150,7 @@ export function updateKnowledgeBase(id: string, data: {
       content_instructions?: string;
       extraction_instructions?: string;
     };
+    auto_tag_config?: { enabled: boolean; model_id?: string; max_tags?: number; skip_if_tagged?: boolean };
     indexing_strategy?: {
       vector_enabled: boolean;
       keyword_enabled: boolean;
@@ -389,8 +391,10 @@ export function batchQueryKnowledge(idsQueryString: string, kbId?: string, agent
   return get(`/api/v1/knowledge/batch?${qs}`);
 }
 
+export const KNOWLEDGE_CHUNK_PAGE_SIZE = 25;
+
 export function getKnowledgeDetailsCon(id: string, page: number) {
-  return get(`/api/v1/chunks/${id}?page=${page}&page_size=25`);
+  return get(`/api/v1/chunks/${id}?page=${page}&page_size=${KNOWLEDGE_CHUNK_PAGE_SIZE}`);
 }
 
 export interface ChunkEditPayload {

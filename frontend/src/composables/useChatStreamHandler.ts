@@ -813,6 +813,16 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         onTurnComplete?.(message)
         fullContent.value = ''
         currentAssistantMessageId.value = ''
+        // Hydrate skill-generated artifacts as soon as the SSE completion
+        // event arrives — without this the download button only appears
+        // after a page refresh (the assistant message row is fetched via
+        // getMessageList which does include the artifacts JSON column).
+        // botmsg.vue / AgentStreamDisplay.vue read `message.artifacts`
+        // reactively to decide whether to render the download button.
+        const streamedArtifacts = (dataPayload as any)?.artifacts
+        if (Array.isArray(streamedArtifacts) && streamedArtifacts.length) {
+          message.artifacts = streamedArtifacts
+        }
         if (message.agentEventStream) {
           ;(message.agentEventStream as ChatMessage[]).push({
             type: 'agent_complete',
@@ -878,6 +888,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         const assistantId = data.assistant_message_id as string | undefined
         existingMessage = {
           id: assistantId || data.id,
+          assistant_message_id: assistantId,
           request_id: data.id,
           role: 'assistant',
           content: '',
@@ -896,6 +907,10 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         log('[Agent Query] Created agent placeholder message')
       } else {
         ensureAgentMessageShell(existingMessage, data.id as string | undefined)
+        if (data.assistant_message_id) {
+          existingMessage.id = data.assistant_message_id as string
+          existingMessage.assistant_message_id = data.assistant_message_id
+        }
         log('[Agent Query] Continuing stream for existing message')
       }
       onAgentQuery?.(data, existingMessage, created)
