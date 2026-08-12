@@ -1689,6 +1689,7 @@ import {
 } from '@/config/contextualGuides';
 import { useI18n } from 'vue-i18n';
 import { selectInitialModelId } from '@/utils/modelDefaults';
+import { copyWithToast } from '@/utils/clipboard';
 import { MessagePlugin } from 'tdesign-vue-next';
 import {
   createAgent,
@@ -1778,27 +1779,7 @@ const saveButtonLabel = computed(() =>
 );
 
 const copyAgentId = async () => {
-  const id = editorAgent.value?.id;
-  if (!id) return;
-
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(id);
-    } else {
-      const textarea = document.createElement('textarea');
-      textarea.value = id;
-      textarea.setAttribute('readonly', '');
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-    }
-    MessagePlugin.success(t('common.copied'));
-  } catch {
-    MessagePlugin.error(t('common.copyFailed'));
-  }
+  await copyWithToast(editorAgent.value?.id, 'common.copied');
 };
 
 const currentSection = ref(props.initialSection || 'basic');

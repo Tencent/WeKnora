@@ -674,6 +674,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { copyWithToast } from '@/utils/clipboard'
 import { getCurrentUser } from '@/api/auth'
 import { listAgents, BUILTIN_SMART_REASONING_ID, type CustomAgent } from '@/api/agent'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
@@ -1307,20 +1308,7 @@ async function saveIfNeeded(options: { showSuccess?: boolean } = {}) {
 }
 
 async function copy(text: string) {
-  if (!text) return
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text)
-  } else {
-    const textArea = document.createElement('textarea')
-    textArea.value = text
-    textArea.style.position = 'fixed'
-    textArea.style.opacity = '0'
-    document.body.appendChild(textArea)
-    textArea.select()
-    document.execCommand('copy')
-    document.body.removeChild(textArea)
-  }
-  MessagePlugin.success(t('integrations.api.copySuccess'))
+  await copyWithToast(text, 'integrations.api.copySuccess')
 }
 
 async function tryLoadWailsApiBaseURL() {

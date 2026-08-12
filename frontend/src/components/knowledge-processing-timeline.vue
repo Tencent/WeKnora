@@ -2,6 +2,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { copyWithToast } from '@/utils/clipboard'
 import { getKnowledgeSpans, reparseKnowledge, cancelKnowledgeParse, getKnowledgeDetails } from '@/api/knowledge-base/index'
 import {
   groupPostprocessGraphSpans,
@@ -446,13 +447,8 @@ function localizedErrorSuggestion(code?: string): string {
 }
 
 async function copyValue(value: any) {
-  try {
-    const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
-    await navigator.clipboard.writeText(text)
-    MessagePlugin.success(t('knowledgeStages.copied'))
-  } catch {
-    MessagePlugin.error(t('knowledgeStages.copyDetails'))
-  }
+  const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+  await copyWithToast(text, 'knowledgeStages.copied', 'knowledgeStages.copyDetails')
 }
 
 async function copySpan(node: SpanNode) {
