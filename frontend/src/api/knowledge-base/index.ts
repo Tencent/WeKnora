@@ -391,8 +391,10 @@ export function batchQueryKnowledge(idsQueryString: string, kbId?: string, agent
   return get(`/api/v1/knowledge/batch?${qs}`);
 }
 
+export const KNOWLEDGE_CHUNK_PAGE_SIZE = 25;
+
 export function getKnowledgeDetailsCon(id: string, page: number) {
-  return get(`/api/v1/chunks/${id}?page=${page}&page_size=25`);
+  return get(`/api/v1/chunks/${id}?page=${page}&page_size=${KNOWLEDGE_CHUNK_PAGE_SIZE}`);
 }
 
 export interface ChunkEditPayload {
