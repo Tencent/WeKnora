@@ -2623,6 +2623,7 @@ export default {
       similarityThresholdLabel: 'Similarity Threshold',
       statusEnabled: 'Enabled',
       statusDisabled: 'Disabled',
+      statusEnableSuccess: 'FAQ entry enabled',
       statusDisableSuccess: 'FAQ entry disabled',
       statusUpdateFailed: 'Failed to update status',
       recommended: 'Recommend',
@@ -2631,7 +2632,12 @@ export default {
       recommendedDisableSuccess: 'FAQ entry recommendation disabled',
       recommendedUpdateFailed: 'Failed to update recommendation status',
       batchUpdateTag: 'Batch Set Tags',
-      batchUpdateTagTip: 'Set tags for {count} selected entries'
+      batchUpdateTagTip: 'Set tags for {count} selected entries',
+      batchEnable: 'Enable selected',
+      batchDisable: 'Disable selected',
+      batchDelete: 'Delete selected',
+      confirmBatchDelete: 'Delete the selected {count} FAQ entries? This action cannot be undone.',
+      batchDeleteSuccess: 'Deleted {count} FAQ entries'
     },
     faqImport: {
       title: 'Batch Import FAQ',

@@ -231,7 +231,8 @@
             </div>
           </div>
           <!-- Card List Container with Scroll -->
-          <div ref="scrollContainer" class="faq-scroll-container" @scroll="handleScroll">
+          <div ref="scrollContainer" class="faq-scroll-container"
+            :class="{ 'has-batch-bar': selectedRowKeys.length > 0 && canSelectEntries }" @scroll="handleScroll">
             <!-- FAQ 骨架屏 -->
             <div v-if="loading && entries.length === 0" class="faq-skeleton-grid">
               <div v-for="n in 6" :key="'faq-skel-' + n" class="faq-card faq-card-skeleton">
@@ -252,7 +253,7 @@
             <template v-else-if="entries.length > 0">
               <div ref="cardListRef" class="faq-card-list">
                 <div v-for="entry in entries" :key="entry.id" class="faq-card"
-                  :class="{ 'selected': selectedRowKeys.includes(entry.id) }"
+                  :class="{ 'selected': selectedRowKeys.includes(entry.id), 'is-selectable': canSelectEntries }"
                   @click="handleCardSelect(entry.id, !selectedRowKeys.includes(entry.id))">
                   <!-- Card Header -->
                   <div class="faq-card-header">
@@ -423,6 +424,14 @@
             <div v-if="hasMore === false && entries.length > 0" class="faq-no-more">
               {{ $t('common.noMoreData') }}
             </div>
+          </div>
+          <div class="faq-batch-bar-anchor">
+            <FAQBatchBar :count="selectedRowKeys.length" :enabled-count="selectedEnabledCount"
+              :disabled-count="selectedDisabledCount" :can-edit="canEdit" :can-manage="canManage"
+              :tag-loading="batchTagLoading" :status-action="batchStatusAction"
+              :delete-loading="batchDeleteLoading" @cancel="clearFAQSelection" @batch-tag="openBatchTagDialog"
+              @enable="handleBatchStatusChange(true)" @disable="handleBatchStatusChange(false)"
+              @delete="handleBatchDelete" />
           </div>
         </div>
       </div>
@@ -711,7 +720,8 @@
                 <t-button theme="default" variant="outline" @click="batchTagDialogVisible = false">
                   {{ $t('common.cancel') }}
                 </t-button>
-                <t-button theme="primary" @click="handleBatchTag">
+                <t-button theme="primary" :loading="batchTagLoading" :disabled="batchActionLoading"
+                  @click="handleBatchTag">
                   {{ $t('common.confirm') }}
                 </t-button>
               </div>
@@ -880,6 +890,7 @@ import Papa from 'papaparse'
 import FAQTagTooltip from '@/components/FAQTagTooltip.vue'
 import KBInfoPopover from '@/components/KBInfoPopover.vue'
 import KBSwitcherDropdown from '@/components/KBSwitcherDropdown.vue'
+import FAQBatchBar from './FAQBatchBar.vue'
 import KbTagManageDrawer from './KbTagManageDrawer.vue'
 import { useUIStore } from '@/stores/ui'
 
@@ -979,6 +990,8 @@ const canManage = computed(() => {
   return orgStore.canManageKB(props.kbId, false)
 })
 
+const canSelectEntries = computed(() => canEdit.value || canManage.value)
+
 const faqExportOptions = computed(() => [
   { content: t('knowledgeEditor.faqExport.exportCSV'), value: 'export_csv' },
   { content: t('knowledgeEditor.faqExport.exportJSON'), value: 'export_json' },
@@ -1023,6 +1036,22 @@ const entries = ref<FAQEntry[]>([])
 const entryStatusLoading = reactive<Record<number, boolean>>({})
 const entryRecommendedLoading = reactive<Record<number, boolean>>({})
 const selectedRowKeys = ref<number[]>([])
+const batchDeleteLoading = ref(false)
+const batchTagLoading = ref(false)
+const batchStatusAction = ref<'enable' | 'disable' | null>(null)
+const selectedEntries = computed(() => {
+  const selectedIds = new Set(selectedRowKeys.value)
+  return entries.value.filter(entry => selectedIds.has(entry.id))
+})
+const selectedEnabledCount = computed(() => (
+  selectedEntries.value.filter(entry => entry.is_enabled !== false).length
+))
+const selectedDisabledCount = computed(() => selectedEntries.value.length - selectedEnabledCount.value)
+const batchActionLoading = computed(() => (
+  batchDeleteLoading.value
+  || batchTagLoading.value
+  || batchStatusAction.value != null
+))
 const scrollContainer = ref<HTMLElement | null>(null)
 const cardListRef = ref<HTMLElement | null>(null)
 const hasMore = ref(true)
@@ -1455,43 +1484,6 @@ const handleKnowledgeDropdownSelect = (data: { value: string }) => {
   router.push(`/platform/knowledge-bases/${data.value}`)
 }
 
-const handleFaqMenuAction = (event: Event) => {
-  const detail = (event as CustomEvent<{ action: string; kbId: string }>).detail
-  if (!detail || detail.kbId !== props.kbId) return
-
-  if (detail.action === 'create') {
-    if (canEdit.value) openEditor()
-  } else if (detail.action === 'import') {
-    if (canEdit.value) openImportDialog()
-  } else if (detail.action === 'search') {
-    searchDrawerVisible.value = true
-  } else if (detail.action === 'export') {
-    // Export is usually allowed for viewers as well
-    handleExportCSV()
-  } else if (detail.action === 'batch') {
-    // 批量操作通过左侧菜单的下拉菜单处理
-    if (selectedRowKeys.value.length === 0) {
-      MessagePlugin.warning(t('knowledgeEditor.faq.selectEntriesFirst'))
-    }
-  } else if (detail.action === 'batchTag') {
-    if (canEdit.value && selectedRowKeys.value.length > 0) {
-      openBatchTagDialog()
-    }
-  } else if (detail.action === 'batchEnable') {
-    if (canEdit.value && selectedRowKeys.value.length > 0) {
-      handleBatchStatusChange(true)
-    }
-  } else if (detail.action === 'batchDisable') {
-    if (canEdit.value && selectedRowKeys.value.length > 0) {
-      handleBatchStatusChange(false)
-    }
-  } else if (detail.action === 'batchDelete') {
-    if (canManage.value && selectedRowKeys.value.length > 0) {
-      handleBatchDelete()
-    }
-  }
-}
-
 const handleEntryStatusChange = async (entry: FAQEntry, value: boolean) => {
   if (!props.kbId) {
     return
@@ -1660,6 +1652,7 @@ const checkAndLoadMore = () => {
 }
 
 const handleCardSelect = (entryId: number, checked: boolean) => {
+  if (!canSelectEntries.value || batchActionLoading.value) return
   if (checked) {
     if (!selectedRowKeys.value.includes(entryId)) {
       selectedRowKeys.value.push(entryId)
@@ -1670,6 +1663,11 @@ const handleCardSelect = (entryId: number, checked: boolean) => {
       selectedRowKeys.value.splice(index, 1)
     }
   }
+}
+
+const clearFAQSelection = () => {
+  if (batchActionLoading.value) return
+  selectedRowKeys.value = []
 }
 
 const resetEditorForm = () => {
@@ -1785,14 +1783,18 @@ const handleSubmitEntry = async () => {
 }
 
 const handleBatchDelete = async () => {
-  if (!selectedRowKeys.value.length) return
+  if (!canManage.value || !selectedRowKeys.value.length || !props.kbId || batchActionLoading.value) return
+  const selectedIds = [...selectedRowKeys.value]
+  batchDeleteLoading.value = true
   try {
-    await deleteFAQEntries(props.kbId, selectedRowKeys.value)
-    MessagePlugin.success(t('knowledgeEditor.faqImport.deleteSuccess'))
+    await deleteFAQEntries(props.kbId, selectedIds)
+    MessagePlugin.success(t('knowledgeEditor.faq.batchDeleteSuccess', { count: selectedIds.length }))
     selectedRowKeys.value = []
     await loadEntries()
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.operationFailed'))
+  } finally {
+    batchDeleteLoading.value = false
   }
 }
 
@@ -1801,16 +1803,18 @@ const batchTagDialogVisible = ref(false)
 const batchTagValue = ref<string>('')
 
 const openBatchTagDialog = () => {
-  if (!selectedRowKeys.value.length) return
+  if (!canEdit.value || !selectedRowKeys.value.length || batchActionLoading.value) return
   batchTagValue.value = ''
   batchTagDialogVisible.value = true
 }
 
 const handleBatchTag = async () => {
-  if (!selectedRowKeys.value.length || !props.kbId) return
+  if (!canEdit.value || !selectedRowKeys.value.length || !props.kbId || batchActionLoading.value) return
+  const selectedIds = [...selectedRowKeys.value]
+  batchTagLoading.value = true
   try {
     const updates: Record<number, number | null> = {}
-    selectedRowKeys.value.forEach(id => {
+    selectedIds.forEach(id => {
       updates[id] = batchTagValue.value ? Number(batchTagValue.value) : null
     })
     await updateFAQEntryTagBatch(props.kbId, { updates })
@@ -1821,14 +1825,18 @@ const handleBatchTag = async () => {
     await loadTags(true)
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.operationFailed'))
+  } finally {
+    batchTagLoading.value = false
   }
 }
 
 const handleBatchStatusChange = async (isEnabled: boolean) => {
-  if (!selectedRowKeys.value.length || !props.kbId) return
+  if (!canEdit.value || !selectedRowKeys.value.length || !props.kbId || batchActionLoading.value) return
+  const selectedIds = [...selectedRowKeys.value]
+  batchStatusAction.value = isEnabled ? 'enable' : 'disable'
   try {
     const by_id: Record<number, { is_enabled: boolean }> = {}
-    selectedRowKeys.value.forEach(id => {
+    selectedIds.forEach(id => {
       by_id[id] = { is_enabled: isEnabled }
     })
     await updateFAQEntryFieldsBatch(props.kbId, { by_id })
@@ -1837,6 +1845,8 @@ const handleBatchStatusChange = async (isEnabled: boolean) => {
     await loadEntries()
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.operationFailed'))
+  } finally {
+    batchStatusAction.value = null
   }
 }
 
@@ -2424,24 +2434,6 @@ const handleImport = async () => {
   }
 }
 
-// 监听选中数量变化，通知左侧菜单
-watch(selectedRowKeys, (newKeys, oldKeys) => {
-  const count = newKeys.length
-  // 获取选中条目的状态信息
-  const selectedEntries = entries.value.filter(entry => newKeys.includes(entry.id))
-  const enabledCount = selectedEntries.filter(entry => entry.is_enabled !== false).length
-  const disabledCount = count - enabledCount
-
-  const event = new CustomEvent('faqSelectionChanged', {
-    detail: {
-      count,
-      enabledCount,
-      disabledCount
-    }
-  })
-  window.dispatchEvent(event)
-}, { immediate: true, deep: true })
-
 // 组件卸载时清理轮询
 onUnmounted(() => {
   stopPolling()
@@ -2830,31 +2822,15 @@ onMounted(async () => {
   orgStore.fetchSharedKnowledgeBases()
   loadKnowledgeList()
   window.addEventListener('resize', handleResize)
-  window.addEventListener('faqMenuAction', handleFaqMenuAction as EventListener)
   // 如果已有kbId，恢复导入任务状态
   if (props.kbId) {
     await restoreImportTask()
     await loadImportResult() // 加载导入结果
   }
-  // 主动触发一次选中数量事件，确保左侧菜单能接收到初始状态
-  nextTick(() => {
-    const count = selectedRowKeys.value.length
-    const selectedEntries = entries.value.filter(entry => selectedRowKeys.value.includes(entry.id))
-    const enabledCount = selectedEntries.filter(entry => entry.is_enabled !== false).length
-    const disabledCount = count - enabledCount
-    window.dispatchEvent(new CustomEvent('faqSelectionChanged', {
-      detail: {
-        count,
-        enabledCount,
-        disabledCount
-      }
-    }))
-  })
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
-  window.removeEventListener('faqMenuAction', handleFaqMenuAction as EventListener)
   if (arrangeCardsTimer) {
     clearTimeout(arrangeCardsTimer)
   }
@@ -3047,6 +3023,7 @@ watch(() => entries.value.map(e => ({
 }
 
 .faq-card-area {
+  position: relative;
   flex: 1;
   min-width: 0;
   display: flex;
@@ -3622,6 +3599,26 @@ watch(() => entries.value.map(e => ({
   overflow-y: auto;
   overflow-x: hidden;
   padding-right: 4px;
+
+  &.has-batch-bar {
+    padding-bottom: 76px;
+  }
+}
+
+.faq-batch-bar-anchor {
+  position: absolute;
+  right: 0;
+  bottom: 12px;
+  left: 0;
+  z-index: 6;
+  display: flex;
+  justify-content: center;
+  padding: 0 16px;
+  pointer-events: none;
+
+  &>* {
+    pointer-events: auto;
+  }
 }
 
 @keyframes contentFadeIn {
@@ -3683,14 +3680,18 @@ watch(() => entries.value.map(e => ({
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
-  cursor: pointer;
+  cursor: default;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
   box-sizing: border-box;
   height: fit-content;
 
-  &:hover {
-    border-color: var(--td-brand-color);
-    box-shadow: 0 2px 8px rgba(7, 192, 95, 0.1);
+  &.is-selectable {
+    cursor: pointer;
+
+    &:hover {
+      border-color: var(--td-brand-color);
+      box-shadow: 0 2px 8px rgba(7, 192, 95, 0.1);
+    }
   }
 
   &.selected {
