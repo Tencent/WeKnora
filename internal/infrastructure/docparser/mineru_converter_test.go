@@ -69,11 +69,11 @@ func TestMinerUUploadFileName(t *testing.T) {
 
 func TestParseMinerUFileParseResponse(t *testing.T) {
 	tests := []struct {
-		name             string
-		uploadFileName   string
-		response         map[string]any
-		wantMarkdown     string
-		wantResultKey    string
+		name           string
+		uploadFileName string
+		response       map[string]any
+		wantMarkdown   string
+		wantResultKey  string
 	}{
 		{
 			name:           "match upload stem",
