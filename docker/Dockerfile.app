@@ -43,8 +43,27 @@ ENV COMMIT_ID=${COMMIT_ID_ARG}
 ENV BUILD_TIME=${BUILD_TIME_ARG}
 ENV GO_VERSION=${GO_VERSION_ARG}
 
+# Optional: link the anydoc parser engine, which converts office documents in
+# the Go process instead of the Python docreader. It is off by default because
+# it needs a Rust toolchain (a few minutes and ~1 GB of build-stage layers) for
+# an engine most deployments do not select.
+#   docker build --build-arg WITH_ANYDOC=1 ...
+ARG WITH_ANYDOC=0
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
+ENV PATH=/usr/local/cargo/bin:$PATH
+RUN if [ "$WITH_ANYDOC" = "1" ]; then \
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable && \
+        ./scripts/build-anydoc-lib.sh; \
+    fi
+
 # Build the application with version info
-RUN --mount=type=cache,target=/go/pkg/mod make build-prod
+RUN --mount=type=cache,target=/go/pkg/mod \
+    if [ "$WITH_ANYDOC" = "1" ]; then \
+        make build-prod GO_BUILD_TAGS=anydoc; \
+    else \
+        make build-prod; \
+    fi
 RUN --mount=type=cache,target=/go/pkg/mod cp -r /go/pkg/mod/github.com/yanyiwu/ /app/yanyiwu/
 
 # Final stage

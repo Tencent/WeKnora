@@ -400,6 +400,48 @@ Python 依赖（`pyproject.toml` + `uv.lock` 锁定）：`grpcio`、`pypdfium2`�
 
 ---
 
+## 8. anydoc 引擎（Go 进程内解析，不经 docreader）
+
+`anydoc` 是一个 Go 侧的可选解析引擎：它把 [anydoc](https://github.com/firecrawl/anydoc)（Rust 编写的文档转换库）通过 cgo 链接进 WeKnora 主进程，直接把 office 文档转成 Markdown。与本文其余部分描述的 docreader 不同，它**不经过 Python 服务、不跨进程、也不调用外部二进制**——适合不想部署 docreader 的轻量部署，或对解析延迟敏感的场景。
+
+支持的文件类型：`doc`、`docx`、`docm`、`odt`、`rtf`、`ppt`、`pptx`、`pptm`、`odp`、`xls`、`xlsx`、`xlsm`、`ods`、`epub`、`csv`、`pdf`。
+
+### 8.1 启用方式
+
+解析库是 Rust 静态库，需要 Rust 工具链构建，因此默认不链接：未启用时该引擎在「解析引擎」列表里显示为不可用，并给出提示，其它引擎不受影响。
+
+```bash
+make build-anydoc                  # 构建静态库 + 带 anydoc 标签的二进制
+# 等价于：
+scripts/build-anydoc-lib.sh && go build -tags anydoc ./cmd/server
+```
+
+Docker 镜像：
+
+```bash
+docker build -f docker/Dockerfile.app --build-arg WITH_ANYDOC=1 -t weknora-app:anydoc .
+```
+
+启用后在知识库的解析设置里把对应文件类型指向 `anydoc` 引擎即可。
+
+### 8.2 能力边界
+
+- **扫描件 PDF**：anydoc 只抽取 PDF 的文字层。没有文字层的扫描件会报「需要 OCR」；若 DocReader（builtin）已连接，AnydocReader 会自动把该文件交给 builtin，按页渲染 JPEG 并标记 `image_source_type=scanned_pdf`，后续仍走 Go 侧 OCR。未连接 DocReader 时转换失败，请改用 `builtin`、`mineru` 或 `paddleocr_vl`。
+- **纵向合并单元格不回填**：docreader 的 `Docx2Parser` 会把纵向合并的值复制到每一行（见 issue #2634），anydoc 只在起始行输出该值，后续行留空。对依赖表格逐行语义的知识库，`builtin` 仍然更稳。
+- **图片位置**：开启图片抽取时，先把文档模型里的嵌入图改写成 `images/image-N.ext` 链接，再交给 anydoc 官方 GFM 序列化，因此图片会留在原段落/表格/列表位置。设置引擎覆盖参数 `anydoc_extract_images=false` 可关闭图片抽取，走更快的纯文本渲染（嵌入图会退化成 alt 文本）。
+- **不处理 URL、图片、音频**：这些仍由 `WebParser`、`SimpleFormatReader` 与 ASR 链路负责。
+
+### 8.3 代码位置
+
+| 路径 | 作用 |
+| --- | --- |
+| `internal/infrastructure/docparser/anydoc/` | 适配层：格式映射、可用性判断，以及 cgo / stub 两个后端 |
+| `internal/infrastructure/docparser/anydoc_reader.go` | `DocReader` 实现：转换结果与图片引用组装 |
+| `internal/infrastructure/docparser/engines.go` | 引擎注册（元数据 + Reader 工厂） |
+| `third_party/anydoc-go/` | vendored 的上游 Go 绑定与 C ABI shim（来源与本地改动见该目录 README） |
+
+---
+
 ## 附：关键事实速查
 
 - **对外接口**：仅 gRPC，端口 `50051`（`DOCREADER_GRPC_PORT`/`PORT`），RPC：`Read` / `ReadStream` / `ListEngines` + 标准 Health 服务。

@@ -3752,41 +3752,23 @@ func isLikelyRateLimitError(err error) bool {
 	return false
 }
 
-// Returns nil when the required service is unavailable.
-func (s *knowledgeService) resolveDocReader(ctx context.Context, engine, fileType string, isURL bool, overrides map[string]string) interfaces.DocReader {
-	switch engine {
-	case docparser.SimpleEngineName:
-		return &docparser.SimpleFormatReader{}
-	case docparser.WeKnoraCloudEngineName:
-		creds := s.tenantService.GetWeKnoraCloudCredentials(ctx)
-		if creds == nil {
-			logger.Warnf(ctx, "[resolveDocReader] WeKnoraCloud: no tenant credentials (fileType=%s)", fileType)
-			return nil
-		}
-		reader, err := docparser.NewWeKnoraCloudSignedDocumentReader(creds.AppID, creds.AppSecret)
-		if err != nil {
-			logger.Errorf(ctx, "[resolveDocReader] WeKnoraCloud reader init failed: %v", err)
-			return nil
-		}
-		return reader
-	case "mineru":
-		return docparser.NewMinerUReader(overrides)
-	case "mineru_cloud":
-		return docparser.NewMinerUCloudReader(overrides)
-	case "paddleocr_vl":
-		return docparser.NewPaddleOCRVLReader(overrides)
-	case "paddleocr_vl_cloud":
-		return docparser.NewPaddleOCRVLCloudReader(overrides)
-	case "builtin":
-		// 明确指定使用 builtin 引擎（docreader），不使用 simple format 兜底
-		return s.documentReader
-	default:
-		// 未指定引擎时的兜底逻辑：simple format 使用 Go 原生处理，其他使用 docreader
-		if !isURL && docparser.IsSimpleFormat(fileType) {
-			return &docparser.SimpleFormatReader{}
-		}
-		return s.documentReader
+// resolveDocReader picks the reader for one parse request. The engine catalog
+// itself lives in the docparser registry; this only supplies the dependencies
+// the service owns. Returns nil when the chosen engine cannot run — an
+// unconfigured cloud engine, a disconnected docreader — after logging why.
+func (s *knowledgeService) resolveDocReader(
+	ctx context.Context, engine, fileType string, isURL bool, overrides map[string]string,
+) interfaces.DocReader {
+	reader, err := docparser.NewReader(ctx, engine, fileType, isURL, docparser.ReaderDeps{
+		Overrides:               overrides,
+		Remote:                  s.documentReader,
+		WeKnoraCloudCredentials: s.tenantService.GetWeKnoraCloudCredentials,
+	})
+	if err != nil {
+		logger.Warnf(ctx, "[resolveDocReader] engine=%q fileType=%q unusable: %v", engine, fileType, err)
+		return nil
 	}
+	return reader
 }
 
 // failKnowledge marks knowledge as failed (only on last retry) and returns an error.
