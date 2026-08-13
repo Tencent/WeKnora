@@ -92,6 +92,22 @@ test('only the collapsed root summary shows an expand chevron', () => {
   assert.doesNotMatch(source, /isEventExpanded\(event\.event_id\) \? 'chevron/)
 })
 
+// Recalled memory is one more thing the turn did before answering, so it rides
+// the same timeline as the steps instead of sitting in a card above them. It has
+// to travel into the collapsed tree with them, and appear exactly once.
+test('recalled memory rides the agent timeline as its leading row', () => {
+  const template = source.split('<script')[0]
+  assert.equal((template.match(/<ChatMemoryStep/g) || []).length, 2)
+  assert.match(template, /<div v-if="showIntermediateSteps" class="tree-children">\s*\n\s*<ChatMemoryStep/)
+  assert.match(template, /<ChatMemoryStep\s*\n\s*v-if="showMemoryRow"/)
+  assert.match(template, /<ChatMemoryStep[\s\S]*?:is-last="memoryIsLast"/)
+  assert.match(source, /!props\.ragMode && hasMemory\.value && !shouldShowCollapsedSteps\.value/)
+  assert.match(
+    source,
+    /const memoryIsLast = computed\([\s\S]*lastStreamingTimelineEventIndex\.value === -1/,
+  )
+})
+
 test('pending tool rows do not render an extra axis dot', () => {
   assert.doesNotMatch(source, /&\.action-pending\s*\{[\s\S]*&::after/)
 })
