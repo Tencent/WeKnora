@@ -66,12 +66,19 @@ func newStreamHandler(svc *DataSourceService, ds *types.DataSource, result *type
 }
 
 // Emit routes items through the same classification as the batch loop: deleted
-// items are counted, and connector-reported failures (an item carrying only a
-// Metadata["error"]) land in result.Failed with a message — never silently lost.
+// items count into result.Deleted (the actual deletion, scoping and failure
+// counters are covered by the ProcessSync tests) and connector-reported
+// failures (an item carrying only a Metadata["error"]) land in result.Failed
+// with a message — never silently lost.
 func TestStreamHandler_EmitClassifiesDeletedAndFailed(t *testing.T) {
-	ds := &types.DataSource{ID: "ds-1", Type: types.ConnectorTypeFeishu, SyncDeletions: true}
+	ds := &types.DataSource{
+		ID: "ds-1", TenantID: 1, KnowledgeBaseID: "kb-1",
+		Type: types.ConnectorTypeFeishu, SyncDeletions: true,
+	}
 	result := &types.SyncResult{}
-	h := newStreamHandler(&DataSourceService{}, ds, result, &types.SyncLog{})
+	knowledgeRepo := &deletionLookupKnowledgeRepo{knowledge: &types.Knowledge{ID: "knowledge-gone"}}
+	knowledgeSvc := &sweepFakeKS{repo: knowledgeRepo}
+	h := newStreamHandler(&DataSourceService{knowledgeService: knowledgeSvc}, ds, result, &types.SyncLog{})
 
 	require.NoError(t, h.Emit(context.Background(), types.FetchedItem{ExternalID: "gone", IsDeleted: true}))
 	require.NoError(t, h.Emit(context.Background(), types.FetchedItem{

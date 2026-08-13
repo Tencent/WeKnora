@@ -24,6 +24,12 @@ func (r *sweepFakeRepo) FindByMetadataKey(ctx context.Context, tenantID uint64, 
 	return nil, nil // no existing main item → skip the case-1 update delete
 }
 
+func (r *sweepFakeRepo) FindByDataSourceExternalID(
+	_ context.Context, _ uint64, _, _, _ string,
+) (*types.Knowledge, error) {
+	return nil, nil // no existing main item -> skip the case-1 update delete
+}
+
 func (r *sweepFakeRepo) FindByMetadataKeyPrefix(ctx context.Context, tenantID uint64, kbID, key, prefix string) ([]*types.Knowledge, error) {
 	r.prefixCalls = append(r.prefixCalls, key+"|"+prefix)
 	return r.prefixReturn, nil
@@ -31,18 +37,27 @@ func (r *sweepFakeRepo) FindByMetadataKeyPrefix(ctx context.Context, tenantID ui
 
 type sweepFakeKS struct {
 	interfaces.KnowledgeService
-	repo      *sweepFakeRepo
-	events    []string // ordered log of "delete:<id>" and "create:<fname>"
-	deleted   []string
-	createErr error // if set, CreateKnowledgeFromFile returns it after logging
+	repo               interfaces.KnowledgeRepository
+	events             []string // ordered log of "delete:<id>" and "create:<fname>"
+	deleted            []string
+	createErr          error            // if set, CreateKnowledgeFromFile returns it after logging
+	deleteErr          error            // if set, DeleteKnowledge returns it after logging
+	createURLKnowledge *types.Knowledge // if set, CreateKnowledgeFromURL returns it
 }
 
 func (k *sweepFakeKS) GetRepository() interfaces.KnowledgeRepository { return k.repo }
 
+func (k *sweepFakeKS) CreateKnowledgeFromURL(
+	_ context.Context, _ string, _ string, _ string, _ string, _ *bool,
+	_ string, _ []string, _ string, _ *types.KnowledgeProcessOverrides,
+) (*types.Knowledge, error) {
+	return k.createURLKnowledge, nil
+}
+
 func (k *sweepFakeKS) DeleteKnowledge(ctx context.Context, id string) error {
 	k.events = append(k.events, "delete:"+id)
 	k.deleted = append(k.deleted, id)
-	return nil
+	return k.deleteErr
 }
 
 // DeleteKnowledgeList is the batched delete the subtree sweep now uses; record
