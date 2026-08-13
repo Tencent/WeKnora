@@ -619,20 +619,24 @@ func (mixedSyncConnector) Type() string { return "test-sync-mixed" }
 func (mixedSyncConnector) Validate(context.Context, *types.DataSourceConfig) error {
 	return nil
 }
+
 func (mixedSyncConnector) ListResources(context.Context, *types.DataSourceConfig, string) ([]types.Resource, error) {
 	return nil, nil
 }
+
 func (mixedSyncConnector) ResolveResourceAncestors(
 	context.Context, *types.DataSourceConfig, []string,
 ) ([]string, error) {
 	return nil, nil
 }
+
 func (mixedSyncConnector) FetchAll(context.Context, *types.DataSourceConfig, []string) ([]types.FetchedItem, error) {
 	return []types.FetchedItem{
 		{ExternalID: "file:gone", IsDeleted: true},
 		{ExternalID: "file:new", Content: []byte("hello"), FileName: "new.txt"},
 	}, nil
 }
+
 func (mixedSyncConnector) FetchIncremental(
 	context.Context, *types.DataSourceConfig, *types.SyncCursor,
 ) ([]types.FetchedItem, *types.SyncCursor, error) {
