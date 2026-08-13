@@ -403,8 +403,13 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 			})
 			return err
 		}
+		// Both models memory pins have to be checked. Deleting the extraction
+		// model leaves the workspace pointing at a model that no longer exists,
+		// and distillation only warns when it cannot resolve one, so auto
+		// extraction would stop with nothing surfaced to the admin who did it.
 		if tenant != nil && tenant.MemoryConfig != nil &&
-			strings.TrimSpace(tenant.MemoryConfig.EmbeddingModelID) == id {
+			(strings.TrimSpace(tenant.MemoryConfig.EmbeddingModelID) == id ||
+				strings.TrimSpace(tenant.MemoryConfig.ExtractModelID) == id) {
 			logger.Warnf(ctx, "Model %s is used by long-term memory", id)
 			return apperrors.NewBadRequestError(formatModelInUseMessage(0, 0, true))
 		}

@@ -293,7 +293,11 @@ func (r *memoryRepository) ListItems(
 		limit = 50
 	}
 	var items []*types.MemoryItem
-	err := query.Order("valid_from DESC").Limit(limit).Offset(offset).Find(&items).Error
+	// id breaks ties so paging stays deterministic. A distillation run writes
+	// several items at once, and ordering those by valid_from alone lets the
+	// database return them in a different order per page, which both repeats
+	// and skips rows across an offset walk.
+	err := query.Order("valid_from DESC, id DESC").Limit(limit).Offset(offset).Find(&items).Error
 	if err != nil {
 		return nil, 0, err
 	}

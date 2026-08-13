@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -431,6 +432,44 @@ func TestClearForgetsEverything(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, total)
 	require.Empty(t, topics)
+}
+
+// TestClearTombstonesLiveMemoriesFirst pins which memories get the bounded
+// rejection budget. max_items caps active memories only, so superseded and
+// archived rows accumulate without limit and a long-lived store easily holds
+// more rows than MaxMemoryTombstones. Spending the budget on whatever happened
+// to be newest left the memory the user was actually being served with no
+// tombstone, free to be written straight back.
+func TestClearTombstonesLiveMemoriesFirst(t *testing.T) {
+	svc, db, tenantRepo := newMemoryHarness(t)
+	ctx := enabledCtx(t, tenantRepo, 1, "alice")
+
+	// The one memory still in use, deliberately the oldest row in the store.
+	require.NoError(t, db.Create(&types.MemoryItem{
+		ID: "live-1", TenantID: 1, SubjectID: "web_user:alice",
+		Kind: types.MemoryKindFact, Topic: "数据库", Content: "生产库是 PostgreSQL",
+		NormalizedKey: "数据库|生产库是 postgresql", Status: types.MemoryStatusActive,
+		ValidFrom: time.Now().Add(-24 * time.Hour),
+	}).Error)
+
+	// Enough newer dead rows to exhaust the budget on their own.
+	for i := 0; i < types.MaxMemoryTombstones+10; i++ {
+		require.NoError(t, db.Create(&types.MemoryItem{
+			ID: fmt.Sprintf("dead-%d", i), TenantID: 1, SubjectID: "web_user:alice",
+			Kind: types.MemoryKindFact, Content: fmt.Sprintf("旧的说法 %d", i),
+			NormalizedKey: fmt.Sprintf("旧|%d", i), Status: types.MemoryStatusSuperseded,
+			ValidFrom: time.Now(),
+		}).Error)
+	}
+
+	_, err := svc.Clear(ctx)
+	require.NoError(t, err)
+
+	_, err = svc.Remember(ctx, types.MemoryItem{
+		Kind: types.MemoryKindFact, Topic: "数据库", Content: "生产库是 PostgreSQL",
+	})
+	require.ErrorIs(t, err, ErrPreviouslyForgotten,
+		"the memory that was in use must keep its tombstone, not be crowded out by dead rows")
 }
 
 func TestGetSettingsReportsMergedState(t *testing.T) {
