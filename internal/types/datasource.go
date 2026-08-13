@@ -431,6 +431,10 @@ type SyncResult struct {
 	// Items that failed
 	Failed int `json:"failed"`
 
+	// Deleted items whose KB deletion failed (a subset of Failed). Past the
+	// connector cursor, so normally only a later full sync retries them.
+	DeletionFailed int `json:"deletion_failed,omitempty"`
+
 	// Per-item failure samples (capped), shown in the sync-log UI.
 	Errors []SyncItemError `json:"errors,omitempty"`
 

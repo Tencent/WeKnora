@@ -774,6 +774,20 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		}
 		resultJSON, _ = result.ToJSON()
 	}
+	if result.Failed > 0 {
+		// Per-document failures flip the sync to partial so the drawer shows
+		// which docs didn't make it (mirrors the streaming path). Deletion
+		// failures additionally only retry on a later full sync.
+		syncStatus = types.SyncLogStatusPartial
+		if syncErrorMessage != "" {
+			syncErrorMessage += "; "
+		}
+		syncErrorMessage += fmt.Sprintf("%d document(s) failed to sync", result.Failed)
+		if result.DeletionFailed > 0 {
+			syncErrorMessage += fmt.Sprintf(
+				"; %d deletion failure(s) will only retry on the next full sync", result.DeletionFailed)
+		}
+	}
 	s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, syncStatus, syncErrorMessage, wasPaused)
 
 	logger.Infof(ctx, "data source sync completed: ds=%s created=%d updated=%d deleted=%d",
@@ -853,6 +867,7 @@ func (s *DataSourceService) applyFetchedItem(
 		)
 		if lookupErr != nil {
 			result.Failed++
+			result.DeletionFailed++
 			recordSyncError(result, types.SyncItemError{
 				Title:   item.Title,
 				Code:    "deletion_lookup_failed",
@@ -867,7 +882,12 @@ func (s *DataSourceService) applyFetchedItem(
 			return
 		}
 		if deleteErr := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); deleteErr != nil {
+			// The cursor is persisted past this item, so a failed deletion is
+			// not retried by the next incremental sync, only by a later full
+			// sync. Counted separately so the sync-log message can warn the
+			// operator about this gap.
 			result.Failed++
+			result.DeletionFailed++
 			recordSyncError(result, types.SyncItemError{
 				Title:   item.Title,
 				Code:    "deletion_failed",
@@ -1055,13 +1075,18 @@ func (s *DataSourceService) processSyncStreaming(
 	// Surface per-document failures as a partial sync (not silent success), so
 	// the sync-log drawer's failure detail explains which docs didn't make it —
 	// the visibility gap behind "status normal but not everything syncs"
-	// (Tencent/WeKnora#2136). Failed nodes were not advanced in the cursor, so
-	// the next run retries them.
+	// (Tencent/WeKnora#2136). Fetch failures abort the stream before the failed
+	// page is checkpointed, so the next run retries them; deletion failures are
+	// past the cursor and only retry on a full sync in the normal case (see
+	// applyFetchedItem).
 	status := types.SyncLogStatusSuccess
 	errMsg := ""
 	if result.Failed > 0 {
 		status = types.SyncLogStatusPartial
 		errMsg = fmt.Sprintf("%d document(s) failed to sync", result.Failed)
+		if result.DeletionFailed > 0 {
+			errMsg += fmt.Sprintf("; %d deletion failure(s) will only retry on the next full sync", result.DeletionFailed)
+		}
 	}
 	s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, status, errMsg, wasPaused)
 	logger.Infof(ctx, "streaming sync completed: ds=%s created=%d updated=%d deleted=%d skipped=%d failed=%d",
