@@ -13112,7 +13112,7 @@ paths:
       summary: 继续流式响应
       tags:
       - 问答
-  /sessions/search:
+  /knowledge-search:
     post:
       consumes:
       - application/json

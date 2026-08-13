@@ -10829,7 +10829,7 @@
                 }
             }
         },
-        "/sessions/search": {
+        "/knowledge-search": {
             "post": {
                 "security": [
                     {

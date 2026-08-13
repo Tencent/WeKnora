@@ -10836,7 +10836,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/sessions/search": {
+        "/knowledge-search": {
             "post": {
                 "security": [
                     {
