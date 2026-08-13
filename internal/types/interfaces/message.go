@@ -41,7 +41,7 @@ type MessageService interface {
 	// ClearSessionMessages deletes all messages in a session, along with their chat history KB entries
 	ClearSessionMessages(ctx context.Context, sessionID string) error
 
-	// SearchMessages searches messages by keyword and/or vector similarity across all sessions of the current tenant.
+	// SearchMessages searches messages by keyword and/or vector similarity across the caller's own sessions.
 	// Uses the chat history knowledge base for vector search instead of in-memory computation.
 	SearchMessages(ctx context.Context, params *types.MessageSearchParams) (*types.MessageSearchResult, error)
 
@@ -79,6 +79,14 @@ type MessageRepository interface {
 	GetMessagesBySessionBeforeTime(
 		ctx context.Context, sessionID string, beforeTime time.Time, limit int,
 	) ([]*types.Message, error)
+	// ListMessagesBySessionAfterTime returns messages created strictly after
+	// afterTime, oldest first. Long-term memory distillation walks forward from
+	// a watermark, so it needs the oldest unprocessed messages rather than the
+	// newest ones: paging from the newest end would skip everything in between
+	// once a session outruns the page size.
+	ListMessagesBySessionAfterTime(
+		ctx context.Context, sessionID string, afterTime time.Time, limit int,
+	) ([]*types.Message, error)
 	// UpdateMessage updates a message
 	UpdateMessage(ctx context.Context, message *types.Message) error
 	// UpdateMessageImages updates only the images JSONB column for a message
@@ -92,7 +100,9 @@ type MessageRepository interface {
 	// GetFirstMessageOfUser gets the first message of a user
 	GetFirstMessageOfUser(ctx context.Context, sessionID string) (*types.Message, error)
 	// SearchMessagesByKeyword searches messages by keyword (ILIKE) across sessions for a tenant
-	SearchMessagesByKeyword(ctx context.Context, tenantID uint64, keyword string, sessionIDs []string, limit int) ([]*types.MessageWithSession, error)
+	// OwnedSessionIDs narrows a set of session ids to the ones this person owns.
+	OwnedSessionIDs(ctx context.Context, tenantID uint64, ownerID string, sessionIDs []string) (map[string]bool, error)
+	SearchMessagesByKeyword(ctx context.Context, tenantID uint64, ownerID, keyword string, sessionIDs []string, limit int) ([]*types.MessageWithSession, error)
 	// GetMessagesByKnowledgeIDs retrieves messages by their associated Knowledge IDs
 	GetMessagesByKnowledgeIDs(ctx context.Context, knowledgeIDs []string) ([]*types.MessageWithSession, error)
 	// GetMessagesByRequestIDs retrieves messages by their request IDs (used to fetch Q&A pair partners)

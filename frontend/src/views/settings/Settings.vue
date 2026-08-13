@@ -114,6 +114,16 @@
                     <ChatHistorySettings />
                   </div>
 
+                  <!-- 长期记忆（空间级开关） -->
+                  <div v-if="currentSection === 'memory'" class="section">
+                    <MemoryWorkspaceSettings />
+                  </div>
+
+                  <!-- 我的记忆（个人记忆管理） -->
+                  <div v-if="currentSection === 'mymemory'" class="section">
+                    <MemorySettings />
+                  </div>
+
                   <!-- 向量数据库引擎 -->
                   <div v-if="currentSection === 'vectorstore'" class="section">
                     <VectorStoreSettings />
@@ -207,6 +217,8 @@ import OllamaSettings from './OllamaSettings.vue'
 import McpSettings from './McpSettings.vue'
 import WebSearchSettings from './WebSearchSettings.vue'
 import ChatHistorySettings from './ChatHistorySettings.vue'
+import MemorySettings from './MemorySettings.vue'
+import MemoryWorkspaceSettings from './MemoryWorkspaceSettings.vue'
 import VectorStoreSettings from './VectorStoreSettings.vue'
 import ParserEngineSettings from './ParserEngineSettings.vue'
 import StorageEngineSettings from './StorageBackendSettings.vue'
@@ -332,6 +344,7 @@ const navItems = computed(() => {
     { key: 'models', icon: 'control-platform', label: t('settings.modelManagement') },
     { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig') },
     { key: 'chathistory', icon: 'chat', label: t('chatHistorySettings.title') },
+    { key: 'memory', icon: 'bulletpoint', label: t('memoryWorkspaceSettings.title') },
     { key: 'vectorstore', icon: 'data-base', label: t('settings.vectorStoreEngine') },
     { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
     { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
@@ -343,6 +356,7 @@ const navItems = computed(() => {
     { key: 'platform-api-keys', icon: 'secured', label: t('platformApiKeys.title') },
     { key: 'system-audit-log', icon: 'history', label: t('system.globalSettings.audit.tabLabel') },
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
+    { key: 'mymemory', icon: 'bookmark', label: t('memorySettings.title') },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
     { key: 'members', icon: 'usergroup', label: t('tenantMember.title') },
     ...integrationItems,
@@ -367,12 +381,12 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'account',
       label: t('settings.navGroups.account'),
-      items: pickItems(['general', 'userprofile']),
+      items: pickItems(['general', 'userprofile', 'mymemory']),
     },
     {
       key: 'workspace',
       label: t('settings.navGroups.workspace'),
-      items: pickItems(['tenant', 'members', 'chathistory']),
+      items: pickItems(['tenant', 'members', 'chathistory', 'memory']),
     },
     {
       key: 'models_runtime',

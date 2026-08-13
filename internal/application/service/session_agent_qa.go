@@ -186,6 +186,25 @@ func (s *sessionService) AgentQA(
 		return err
 	}
 
+	// Recall long-term memory for this turn. Like the RAG path this is a
+	// no-model read, and an agent may opt out of it entirely.
+	memoryCtx := types.ApplyAgentMemoryPreference(ctx, agentConfig.MemoryEnabled)
+	if s.memoryService != nil {
+		recall := s.memoryService.Recall(memoryCtx, req.Query)
+		if recall.Prompt != "" {
+			engine.SetMemoryPrompt(recall.Prompt)
+			used := types.UsedMemoriesFromItems(recall.Items)
+			if err := eventBus.Emit(ctx, event.Event{
+				Type:      event.EventMemoryRecalled,
+				SessionID: sessionID,
+				Data:      event.MemoryRecalledData{Memories: used},
+			}); err != nil {
+				logger.Warnf(ctx, "Failed to emit memory recalled event: %v", err)
+			}
+			logger.Infof(ctx, "Injected %d long-term memories into agent context", len(used))
+		}
+	}
+
 	// Route image data based on agent model's vision capability
 	var agentModelSupportsVision bool
 	if effectiveModelID != "" {

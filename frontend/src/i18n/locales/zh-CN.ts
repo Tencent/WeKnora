@@ -3191,6 +3191,11 @@ export default {
     }
   },
   chat: {
+    memoryUsedCount: '本次使用了 {count} 条记忆',
+    memoryForget: '删除这条记忆',
+    memoryForgotten: '已删除这条记忆',
+    memoryForgetFailed: '删除失败',
+    memoryHint: '这些是助手在回答时看到的长期记忆，删除后不会再被使用。',
     suggestedQuestions: '你可以这样问我',
     followUpQuestions: '继续问',
     followUpQuestionsLoading: '加载推荐问题',
@@ -3357,7 +3362,7 @@ export default {
         description: '解析文档时调用大模型为每个分块生成相关问题，提高检索召回率。启用后会增加文档解析耗时。',
         countLabel: '生成问题数量',
         countDescription: '每个文档分块生成的问题数量（1-10）',
-        instructionsLabel: '问题生成要求',
+    instructionsLabel: '问题生成要求',
         instructionsDescription: '指定问题面向的人群、场景和表达方式，系统仍维护稳定输出格式',
         instructionsPlaceholder: '例如：生成客服用户常问的自然语言问题，避免考试题式表达…'
       },
@@ -3729,6 +3734,7 @@ export default {
       filterConcept: '概念',
       filterSynthesis: '综合',
       filterComparison: '对比',
+      legendFamiliar: '你常用的资料',
       emptyTitle: '暂无 Wiki 页面',
       emptyDesc: '上传文档并启用 Wiki 后将自动生成知识页面',
       selectPageHint: '从左侧选择一个页面查看内容',
@@ -4590,6 +4596,180 @@ export default {
     toasts: {
       saveSuccess: '检索配置已保存',
       saveFailed: '保存配置失败: {message}'
+    }
+  },
+  memorySettings: {
+    title: '我的记忆',
+    description: '这里是助手跨会话记住的关于你的内容。你可以随时查看、修改和删除，删除后不会再被使用。',
+    workspaceDisabled: '当前空间尚未开启长期记忆，管理员开启后这里的开关才会生效。',
+    enableLabel: '为我启用长期记忆',
+    enableDescription: '关闭后助手不再读取或新增你的记忆，已有记忆会保留，重新开启即可继续使用。',
+    usage: {
+      title: '记忆何时会被使用',
+      iconHint: '查看哪些记忆会在对话里被使用',
+      intro: '仅「生效中」会进入对话。',
+      rows: {
+        alwaysOn: {
+          label: '每轮都会带上',
+          text: '个人信息、偏好，以及明确说「记住」的内容'
+        },
+        situational: {
+          label: '相关时才用',
+          text: '事实、在办事项'
+        },
+        interest: {
+          label: '理解常问方向',
+          text: '长期关注，不一定每轮都引用'
+        },
+        tracking: {
+          label: '先观察再记住',
+          text: '常问方向会先计数，达到次数后才成为长期关注'
+        },
+        documents: {
+          label: '常用资料',
+          text: '反复用来回答你的文档，检索时会稍稍优先'
+        },
+        pending: {
+          label: '确认后才生效',
+          text: '待确认的推断'
+        },
+        inactive: {
+          label: '不再使用',
+          text: '已被更新、已归档'
+        }
+      }
+    },
+    listTitle: '记忆列表',
+    listCount: '共 {count} 条',
+    statusActive: '生效中',
+    statusSuperseded: '已被更新',
+    statusArchived: '已归档',
+    statusPending: '待确认',
+    statusTracking: '观察中',
+    statusDocuments: '常用资料',
+    confirmGuess: '是的',
+    rejectGuess: '不是',
+    pendingHint: '这些是系统从你的提问里推断出来的，确认之前不会被使用。',
+    trackingHint: '这些是你反复问到、但还没达到「长期关注」次数的主题。记下来之前不会进入对话。',
+    documentsHint: '这些文档在回答里反复出现，检索会稍微偏向它们。停止跟踪后不再加权，再被引用两次会重新出现。',
+    supersededHint: '这些内容已被更新的记忆替代，不会再进入对话，只作为变更记录保留。',
+    archivedHint: '已归档的记忆不会再进入对话。超出每人上限后，较少用到的条目会被自动收起。',
+    pendingEmptyTitle: '没有待确认的推断',
+    pendingEmptyDescription: '当系统从你的提问里推断出关于你的信息时，会先放在这里等你确认。',
+    trackingEmptyTitle: '没有正在观察的主题',
+    trackingEmptyDescription: '自动提炼开启后，系统会先统计你常问的方向，达到次数后再记为长期关注。',
+    documentsEmptyTitle: '还没有常用资料',
+    documentsEmptyDescription: '同一份文档被回答引用两次以上，就会出现在这里。',
+    supersededEmptyTitle: '还没有被更新的记忆',
+    supersededEmptyDescription: '同一主题被新说法覆盖时，旧内容会留在这里。在本页直接编辑是原地改写，不会产生这条记录。',
+    archivedEmptyTitle: '还没有归档的记忆',
+    archivedEmptyDescription: '生效中超过上限（默认 200 条）时，较少用到的会自动收起；带过期时间的事项到期后也会进来。',
+    documentsHits: '已引用 {hits} 次',
+    untitledDocument: '未命名文档',
+    openDocument: '打开文档',
+    openDocumentUnavailable: '无法打开：缺少知识库信息',
+    stopTrackingDocument: '停止跟踪',
+    stopTrackingDocumentConfirm: '停止用这份文档做个性化检索？之后再被引用两次会重新出现。',
+    stopTrackingDocumentSuccess: '已停止跟踪这份资料',
+    stopTrackingDocumentFailed: '停止跟踪失败',
+    trackingProgress: '已问 {hits} 次，满 {threshold} 次后记为长期关注',
+    trackingReady: '已达到次数，可以记为长期关注',
+    trackingAliases: '也问过：{aliases}',
+    promoteTopic: '记为关注',
+    dismissTopic: '不再跟踪',
+    dismissTopicConfirm: '停止跟踪这个主题？之后再问到也不会自动记为长期关注。',
+    promoteSuccess: '已记为长期关注',
+    promoteFailed: '记为关注失败',
+    dismissSuccess: '已停止跟踪这个主题',
+    dismissFailed: '停止跟踪失败',
+    confirmSuccess: '已确认',
+    confirmFailed: '确认失败',
+    rejectSuccess: '已否决，不会再次推断',
+    rejectFailed: '否决失败',
+    export: '导出',
+    consolidate: '整理',
+    consolidateConfirm: '合并意思接近的条目，旧内容会留在「已被更新」。确定整理？',
+    consolidateSuccess: '整理完成：合并 {merged} 组，到期归档 {expired} 条，过期事项降权 {demoted} 条',
+    consolidateNothing: '没有发现需要整理的内容',
+    consolidateTooFewItems: '记忆还太少，暂时没有整理的必要',
+    consolidateNoCandidates: '没有发现意思相近的记忆，无需合并',
+    consolidateModelDeclined: '模型看过了，这些记忆说的不是同一件事，未做合并',
+    consolidateModelUnavailable: '模型不可用，为避免误合并，本次没有改动任何记忆',
+    consolidateFailed: '整理失败',
+    clear: '清空',
+    clearConfirm: '将永久删除你的全部记忆、正在观察的主题和常用资料，此操作不可撤销。确定继续吗？',
+    deleteConfirm: '永久删除这条记忆？',
+    add: '添加',
+    addPlaceholder: '用一句话写下你希望助手记住的事',
+    addTitle: '添加记忆',
+    addKindLabel: '类型',
+    addContentLabel: '内容',
+    emptyTitle: '还没有记忆',
+    emptyDescription: '在对话里说「记住：……」，或者在上面直接添加一条。',
+    kinds: {
+      profile: '个人信息',
+      preference: '偏好',
+      fact: '事实',
+      task: '在办事项',
+      interest: '长期关注'
+    },
+    kindHints: {
+      profile: '之后每轮对话都会带上',
+      preference: '之后每轮对话都会带上',
+      fact: '只在问题相关时才会用到',
+      task: '只在问题相关时才会用到',
+      interest: '用来理解你常问的方向，不一定每轮都引用'
+    },
+    origins: {
+      explicit: '你要求记住',
+      extracted: '自动提炼',
+      manual: '手动添加'
+    },
+    toasts: {
+      enabled: '已为你开启长期记忆',
+      disabled: '已关闭长期记忆',
+      added: '已添加',
+      updated: '已更新',
+      deleted: '已删除',
+      cleared: '已删除 {count} 条记忆',
+      saveFailed: '操作失败：{message}'
+    }
+  },
+  memoryWorkspaceSettings: {
+    title: '长期记忆',
+    description: '让助手跨会话记住成员说过的个人信息、偏好、事实与在办事项。',
+    introTitle: '默认关闭，需要你显式开启',
+    introDescription: '长期记忆会保留成员在对话中说过的内容，因此默认不开启。开启后每位成员的记忆彼此隔离，成员可以在「我的记忆」里随时查看、修改、删除或整体关闭。生效中的个人信息与偏好会进入之后的每一轮对话；事实和在办事项只在相关问题时召回。',
+    enableLabel: '在本空间启用长期记忆',
+    enableDescription: '关闭后本空间的所有会话都不会读取或写入记忆。',
+    writeModeLabel: '记忆写入方式',
+    writeModeDescription: '决定什么内容会被记住。',
+    writeModeExplicit: '仅显式记录',
+    writeModeAuto: '自动提炼',
+    writeModeExplicitHint: '只记录成员明确说「记住：……」的内容，以及在记忆页手动添加的条目，不额外调用模型。',
+    writeModeAutoHint: '在此基础上，会话结束后在后台调用一次模型，从成员自己说过的话里提炼值得长期保留的内容。',
+    extractModelLabel: '提炼模型',
+    extractModelDescription: '留空则使用该次会话所用的模型。',
+    extractDelayLabel: '挖掘延迟',
+    extractDelayDescription: '一轮对话结束后等待多久再挖掘。等一等可以让一次模型调用覆盖用户连着发的几条消息。',
+    extractMinIntervalLabel: '两次挖掘的最小间隔',
+    extractMinIntervalDescription: '同一个人两次挖掘之间至少间隔多久，用来控制成本。间隔内产生的消息不会被丢弃，会顺延到下一次挖掘一并处理。',
+    vectorRecallLabel: '按语义召回记忆',
+    vectorRecallDescription: '除了字面匹配，再按含义匹配。用户换个说法之后，原来那条记忆仍然能被找到——而多数记忆迟早会被换说法。每轮问答多一次向量调用，超时会自动退回字面匹配。',
+    embeddingModelLabel: '记忆 Embedding 模型',
+    embeddingModelDescription: '语义召回只使用这一个模型，与各知识库绑定的 Embedding 无关。不选则只按字面匹配。换模型后，新写入立刻用新模型；旧记忆在补上新向量之前，语义召回找不到它们，只靠字面匹配。',
+    conditioningLabel: '让记忆参与检索',
+    conditioningDescription: '开启后，记忆会参与查询改写和文档排序，而不只是附加到回答提示里。这是记忆在知识库产品里真正起作用的地方。',
+    interestThresholdLabel: '成为长期关注的次数',
+    interestThresholdDescription: '同一个主题被问到这么多次后，才会作为长期关注记下来。设为 1 会把每个一次性问题都记下来，通常太吵。',
+    instructionsLabel: '自定义挖掘规则',
+    instructionsDescription: '追加到挖掘提示词里的空间规则，用来表达产品猜不到的策略，例如「永远不要记录客户姓名」。',
+    instructionsPlaceholder: '一行一条规则，例如：永远不要记录客户姓名',
+    maxItemsLabel: '每人记忆上限',
+    maxItemsDescription: '超出后按重要度与使用时间归档最低的若干条，归档的记忆仍可在「我的记忆」里查看。',
+    toasts: {
+      saveSuccess: '长期记忆配置已保存',
+      saveFailed: '保存失败：{message}'
     }
   },
   chatHistorySettings: {

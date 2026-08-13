@@ -158,8 +158,8 @@ func (s *stubAgentShareForGuard) CountByOrganizations(context.Context, []string)
 // guardOpts collects optional knobs for runGuard. Keeps the call site
 // readable when most tests only care about a couple of dimensions.
 type guardOpts struct {
-	agentID             string // ?agent_id query param
-	agentSourceTenantID string // ?agent_source_tenant_id query param
+	agentID             string                  // ?agent_id query param
+	agentSourceTenantID string                  // ?agent_source_tenant_id query param
 	agentShare          *stubAgentShareForGuard // nil means "no agent-share service"
 }
 

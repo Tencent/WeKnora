@@ -13,6 +13,7 @@ const (
 	ToolListKnowledgeChunks = "list_knowledge_chunks"
 	ToolQueryKnowledgeGraph = "query_knowledge_graph"
 	ToolGetDocumentInfo     = "get_document_info"
+	ToolSearchConversations = "search_conversations"
 	ToolDatabaseQuery       = "database_query"
 	ToolDataAnalysis        = "data_analysis"
 	ToolDataSchema          = "data_schema"
@@ -65,6 +66,11 @@ func AvailableToolDefinitions() []AvailableTool {
 		{Name: ToolListKnowledgeChunks, Label: "查看文档分块", Description: "获取文档完整分块内容"},
 		{Name: ToolQueryKnowledgeGraph, Label: "查询知识图谱", Description: "从知识图谱中查询关系"},
 		{Name: ToolGetDocumentInfo, Label: "获取文档信息", Description: "查看文档元数据"},
+		{
+			Name:        ToolSearchConversations,
+			Label:       "回顾历史对话",
+			Description: "在用户自己的历史会话中查找之前聊过的内容",
+		},
 		{Name: ToolDatabaseQuery, Label: "查询数据库", Description: "查询数据库中的信息"},
 		{Name: ToolDataAnalysis, Label: "数据分析", Description: "理解数据文件并进行数据分析"},
 		{Name: ToolDataSchema, Label: "查看数据元信息", Description: "获取表格文件的元信息"},
@@ -96,6 +102,10 @@ func DefaultAllowedTools() []string {
 		ToolListKnowledgeChunks,
 		ToolQueryKnowledgeGraph,
 		ToolGetDocumentInfo,
+		// Looking up what this user asked before is only ever a read of their
+		// own history, and it is what lets "上次你给我的那个配置" resolve at all
+		// without stuffing every past conversation into the context window.
+		ToolSearchConversations,
 		ToolDatabaseQuery,
 		ToolDataAnalysis,
 		ToolDataSchema,

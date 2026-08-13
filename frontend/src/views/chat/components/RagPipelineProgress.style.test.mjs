@@ -113,3 +113,22 @@ test('rag pipeline includes attachment prep steps on the timeline', () => {
   assert.match(source, /getAttachmentParsingSummaryHtml/)
   assert.match(source, /isAttachmentTool/)
 })
+
+test('memory rides the existing timeline as a single reusable row', () => {
+  assert.match(source, /<ChatMemoryStep/)
+  assert.equal(source.split('<ChatMemoryStep').length - 1, 3)
+  assert.match(source, /:is-last="memoryIsLast"/)
+})
+
+// A host that draws its own timeline asks for the memory row only. Without the
+// guard this component rebuilds a whole pipeline out of the same agent event
+// stream, and the turn shows every retrieval step twice in two disjoint blocks.
+test('memory-only hosts get the memory row and nothing else', () => {
+  assert.match(source, /memoryOnly\?: boolean/)
+  assert.match(source, /v-if="memoryOnly"\s*\n\s*variant="root"/)
+  assert.match(source, /<div v-else-if="showPrePipelineWait"/)
+  assert.match(source, /if \(props\.memoryOnly\) return hasMemory\.value/)
+
+  const botmsg = readFileSync(join(here, 'botmsg.vue'), 'utf8')
+  assert.match(botmsg, /<RagPipelineProgress v-if="session\.used_memories\?\.length"[\s\S]*?memory-only/)
+})

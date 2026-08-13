@@ -28,6 +28,10 @@ type AgentEngine interface {
 		llmContext []chat.Message,
 		imageURLs ...[]string,
 	) (*types.AgentState, error)
+
+	// SetMemoryPrompt supplies the long-term memory envelope for this run.
+	// It must be called before Execute; an empty string is a no-op.
+	SetMemoryPrompt(prompt string)
 }
 
 // AgentService defines the interface for agent-related operations
