@@ -159,3 +159,23 @@ func TestMergeTextChunks_GapSeparator(t *testing.T) {
 		t.Fatalf("gap separator mismatch:\n got=%q\nwant=%q", got, want)
 	}
 }
+
+// TestAppendWithOverlap_ContiguousRealContentRepeat is a regression test:
+// two chunks are strictly contiguous (positionOverlap==0), but a boilerplate
+// sentence at the tail of acc reappears inside the head window of next as
+// real content (the same sentence is written multiple times in the document).
+// The old algorithm would enter text matching and, due to the headSlack
+// floor of 320, mistake the head of next for a prepended table header and
+// delete it, causing irreversible content loss. After the fix it should
+// concatenate directly without trimming.
+func TestAppendWithOverlap_ContiguousRealContentRepeat(t *testing.T) {
+	repeat := "The system shall maintain a complete audit trail of all transactions."
+	acc := "3.2 Logging Requirements\n\n" + repeat
+	next := "\n\n5.1 Security Controls\n\n* Role-based access\n* Encryption at rest\n\n5.2 Compliance\n\n" + repeat + " This satisfies SOC 2."
+	got := AppendWithOverlap(acc, next, 0)
+	want := acc + next
+	if got != want {
+		t.Fatalf("contiguous real-content repeat must not trim:\n got.len=%d\nwant.len=%d\n got.tail=%q\nwant.tail=%q",
+			len(got), len(want), got[len(acc)-50:], want[len(acc)-50:])
+	}
+}
