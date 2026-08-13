@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Pre-push checks aligned with CI (.github/workflows/app.yml, frontend.yml, cli.yml)
+# and the PR checklist (git diff --check, golangci-lint --new-from-rev=origin/main).
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# shellcheck source=scripts/git-hooks/common.sh
+source "$ROOT/scripts/git-hooks/common.sh"
+
+if hook_skip; then
+  exit 0
+fi
+
+cd "$ROOT"
+
+remote="${1:-origin}"
+while read -r _local_ref local_sha remote_ref remote_sha; do
+  # Skip delete pushes.
+  if [[ "$local_sha" =~ ^0+$ ]]; then
+    continue
+  fi
+
+  log_step "pre-push ($remote ${remote_ref#refs/heads/})"
+
+  # New branch: validate everything since origin/main. Existing branch: only
+  # the commits being pushed (avoids re-checking the whole PR on every push).
+  if [[ "$remote_sha" =~ ^0+$ ]]; then
+    range_start="$(merge_base)"
+    range_end="$local_sha"
+    lint_from_rev="$range_start"
+    log_step "new branch; diff ${range_start:0:12}..${local_sha:0:12}"
+  else
+    if [[ "$remote_sha" == "$local_sha" ]]; then
+      log_ok "pre-push: nothing new to push"
+      continue
+    fi
+    range_start="$remote_sha"
+    range_end="$local_sha"
+    lint_from_rev="$remote_sha"
+    log_step "pushing ${remote_sha:0:12}..${local_sha:0:12}"
+  fi
+
+  check_whitespace "${range_start}..${range_end}"
+
+  changed=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && changed+=("$line")
+  done < <(git diff --name-only --diff-filter=ACMR "${range_start}..${range_end}" || true)
+
+  if [[ ${#changed[@]} -eq 0 ]]; then
+    log_ok "pre-push: no changed files in push range"
+    continue
+  fi
+
+  # --- App (Go, excluding cli/ and docreader/) ---
+  changed_go=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && changed_go+=("$line")
+  done < <(git diff --name-only --diff-filter=ACMR "${range_start}..${range_end}" -- '*.go' ':!cli/**' || true)
+
+  if [[ ${#changed_go[@]} -gt 0 ]]; then
+    go_files=()
+    for f in "${changed_go[@]}"; do
+      go_files+=("$ROOT/$f")
+    done
+    check_gofmt_files check "${go_files[@]}"
+
+    run_golangci_if_available "$lint_from_rev"
+
+    pkgs=()
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && pkgs+=("$line")
+    done < <(collect_go_packages_from_files "${changed_go[@]}")
+
+    filtered=()
+    for pkg in "${pkgs[@]}"; do
+      [[ "$pkg" == *"/docreader/"* ]] && continue
+      filtered+=("$pkg")
+    done
+    run_app_vet_test "${filtered[@]}"
+
+    log_step "go build ./cmd/server"
+    go build ./cmd/server
+    log_ok "go build ./cmd/server"
+  fi
+
+  # --- CLI ---
+  if paths_match_prefix "cli/" "${changed[@]}"; then
+    run_cli_checks
+  fi
+
+  # --- Frontend ---
+  if paths_match_prefix "frontend/" "${changed[@]}"; then
+    run_frontend_checks
+  fi
+
+  log_ok "pre-push passed"
+done
+
+exit 0

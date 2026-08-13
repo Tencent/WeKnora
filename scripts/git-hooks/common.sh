@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+# Shared helpers for WeKnora git hooks (mirrors .github/workflows and PR checklist).
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+hook_skip() {
+  [[ "${SKIP_HOOKS:-}" == "1" ]]
+}
+
+log_step() {
+  printf '→ %s\n' "$*"
+}
+
+log_ok() {
+  printf '✓ %s\n' "$*"
+}
+
+log_fail() {
+  printf '✗ %s\n' "$*" >&2
+}
+
+# File types we expect hand-edited in PRs (skip sample-data / generated blobs).
+WHITESPACE_PATHSPECS=(
+  '*.go'
+  '*.ts' '*.tsx' '*.vue' '*.js' '*.mjs'
+  '*.yaml' '*.yml' '*.json'
+  '*.sh' '*.sql'
+  'Makefile'
+  'frontend/package.json'
+  'frontend/package-lock.json'
+)
+
+# Best-effort fetch so merge-base matches CI (origin/main).
+ensure_origin_main() {
+  git -C "$ROOT" fetch origin main --quiet 2>/dev/null || true
+}
+
+merge_base() {
+  ensure_origin_main
+  local base
+  base="$(git -C "$ROOT" merge-base HEAD origin/main 2>/dev/null || true)"
+  if [[ -n "$base" ]]; then
+    printf '%s\n' "$base"
+    return
+  fi
+  base="$(git -C "$ROOT" merge-base HEAD main 2>/dev/null || true)"
+  if [[ -n "$base" ]]; then
+    printf '%s\n' "$base"
+    return
+  fi
+  git -C "$ROOT" rev-parse HEAD~1
+}
+
+check_whitespace() {
+  log_step "git diff --check (source files)"
+  if [[ "${1:-}" == "--cached" ]]; then
+    if git -C "$ROOT" diff --cached --quiet -- "${WHITESPACE_PATHSPECS[@]}"; then
+      log_ok "no staged source changes to check"
+      return 0
+    fi
+    git -C "$ROOT" diff --check --cached -- "${WHITESPACE_PATHSPECS[@]}"
+  else
+    if git -C "$ROOT" diff --quiet "$@" -- "${WHITESPACE_PATHSPECS[@]}"; then
+      log_ok "no changed source files to check"
+      return 0
+    fi
+    git -C "$ROOT" diff --check "$@" -- "${WHITESPACE_PATHSPECS[@]}"
+  fi
+  log_ok "no whitespace errors"
+}
+
+check_gofmt_files() {
+  local mode="$1" # check | write
+  shift
+  local -a files=("$@")
+  [[ ${#files[@]} -gt 0 ]] || return 0
+
+  local unformatted
+  if [[ "$mode" == "write" ]]; then
+    log_step "gofmt (auto-format staged Go files)"
+    gofmt -w "${files[@]}"
+    # Re-stage formatted files.
+    git -C "$ROOT" add -- "${files[@]}"
+    log_ok "gofmt applied"
+    return 0
+  fi
+
+  log_step "gofmt (check)"
+  unformatted="$(gofmt -l "${files[@]}")"
+  if [[ -n "$unformatted" ]]; then
+    log_fail "the following Go files are not gofmt-formatted:"
+    printf '%s\n' "$unformatted" >&2
+    log_fail "run: gofmt -w <files>  (or commit again after pre-commit auto-format)"
+    return 1
+  fi
+  log_ok "gofmt"
+}
+
+collect_go_packages_from_files() {
+  local -a files=("$@")
+  local f dir pkg
+  local -a pkgs=()
+  for f in "${files[@]}"; do
+    [[ "$f" == *.go ]] || continue
+    dir="$(dirname "$f")"
+    pkg="$(cd "$ROOT/$dir" && go list . 2>/dev/null)" || continue
+    pkgs+=("$pkg")
+  done
+  if [[ ${#pkgs[@]} -eq 0 ]]; then
+    return 0
+  fi
+  printf '%s\n' "${pkgs[@]}" | sort -u
+}
+
+run_golangci_if_available() {
+  local from_rev="$1"
+  if ! command -v golangci-lint >/dev/null 2>&1; then
+    log_step "golangci-lint not installed; skip (install: https://golangci-lint.run)"
+    return 0
+  fi
+  log_step "golangci-lint run --new-from-rev=$from_rev ./..."
+  (
+    cd "$ROOT"
+    golangci-lint run --new-from-rev="$from_rev" ./...
+  )
+  log_ok "golangci-lint"
+}
+
+run_app_vet_test() {
+  local -a pkgs=("$@")
+  if [[ ${#pkgs[@]} -eq 0 ]]; then
+    log_step "no app Go packages changed; skip go vet/test"
+    return 0
+  fi
+  log_step "go vet (${#pkgs[@]} package(s))"
+  (
+    cd "$ROOT"
+    go vet "${pkgs[@]}"
+  )
+  log_ok "go vet"
+  if [[ "${HOOK_SKIP_TEST:-}" == "1" ]]; then
+    log_step "HOOK_SKIP_TEST=1; skip go test"
+    return 0
+  fi
+  log_step "go test (${#pkgs[@]} package(s))"
+  (
+    cd "$ROOT"
+    go test -count=1 "${pkgs[@]}"
+  )
+  log_ok "go test"
+}
+
+run_cli_checks() {
+  log_step "cli: go vet && go test"
+  (
+    cd "$ROOT/cli"
+    go vet ./...
+    if [[ "${HOOK_SKIP_TEST:-}" == "1" ]]; then
+      log_step "HOOK_SKIP_TEST=1; skip cli go test"
+    else
+      go test -count=1 ./...
+    fi
+  )
+  log_ok "cli checks"
+}
+
+run_frontend_checks() {
+  log_step "frontend: verify (test, type-check, build)"
+  "$ROOT/scripts/verify_frontend_pr.sh"
+  log_ok "frontend checks"
+}
+
+paths_match_prefix() {
+  local prefix="$1"
+  shift
+  local p
+  for p in "$@"; do
+    [[ "$p" == "$prefix"* ]] && return 0
+  done
+  return 1
+}
