@@ -5,7 +5,7 @@ tmp_dir = "tmp"
 [build]
   args_bin = []
   bin = "./tmp/main"
-  cmd = "go build -ldflags=\"$(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'\" -o ./tmp/main ./cmd/server"
+  cmd = "go build -tags \"${GO_BUILD_TAGS}\" -ldflags=\"$(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'\" -o ./tmp/main ./cmd/server"
   delay = 1000
   exclude_dir = ["assets", "tmp", "vendor", "testdata", "frontend", "migrations", "node_modules", "docs", "logs", "data", "WeKnora-Chrome-Extension", "Formula", "dataset", "docreader", "docker", "llm_debug", "web", "mcp-server", "misc", "scripts", "dist", "client", "helm"]
   exclude_file = []

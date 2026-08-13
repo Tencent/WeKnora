@@ -152,6 +152,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/elastic/elastic-transport-go/v8 v8.9.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
+	github.com/firecrawl/anydoc/go v0.1.8
 	github.com/form3tech-oss/jwt-go v3.2.5+incompatible // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
@@ -348,3 +349,7 @@ require (
 )
 
 replace go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc => go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.59.0
+
+// The anydoc Go bindings are not published yet (firecrawl/anydoc#30 is still
+// open), so they are vendored. Drop this replace once upstream tags go/vX.Y.Z.
+replace github.com/firecrawl/anydoc/go => ./third_party/anydoc-go
