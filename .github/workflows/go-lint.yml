@@ -1,10 +1,20 @@
 name: Go Lint
 
 # The repository carries a large backlog of pre-existing golangci-lint findings,
-# so this workflow only reports issues introduced by the pull request itself
-# (`only-new-issues`). Running it on push would lint the whole tree and fail.
+# so pull requests are only judged on the code they introduce (`only-new-issues`).
+# A full-tree run on main would fail, hence the two-job split below: `golangci`
+# gates pull requests, `warm-cache` runs on main purely to populate the caches
+# that pull requests restore from.
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.go"
+      - "**/go.mod"
+      - "**/go.sum"
+      - ".golangci.yml"
+      - ".github/workflows/go-lint.yml"
   pull_request:
     paths:
       - "**/*.go"
@@ -29,6 +39,7 @@ env:
 jobs:
   golangci:
     name: golangci-lint (${{ matrix.module }})
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -50,3 +61,34 @@ jobs:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           working-directory: ${{ matrix.module }}
           only-new-issues: true
+
+  warm-cache:
+    # Action caches written by a pull request run are scoped to that pull
+    # request, so only runs on the default branch produce caches every pull
+    # request can restore. Without this job each pull request would recompile
+    # the whole package graph from scratch (~6 minutes for the root module).
+    # Manual runs land here too: they refresh the cache and print the full
+    # backlog without the misleading red status a gating run would produce.
+    name: warm lint cache (${{ matrix.module }})
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [".", "cli", "client"]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: ${{ matrix.module }}
+          # This job exists for its cache side effect only; the backlog of
+          # existing findings must not turn main red.
+          args: --issues-exit-code=0
