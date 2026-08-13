@@ -784,6 +784,11 @@ export default {
       loadAuthHint: 'Учётные данные приложения недействительны или отсутствуют области Drive. Проверьте App ID / App Secret и разрешения drive:drive:readonly.',
       loadNotFoundHint: 'folder_token не существует или удалён. Проверьте токен, скопированный из URL папки Feishu Drive.',
     },
+    syncError: {
+      deletion_lookup_failed: 'Не удалось найти элемент перед удалением; подробности в журнале сервера',
+      deletion_failed: 'Не удалось удалить элемент; подробности в журнале сервера',
+      ingest_failed: 'Не удалось импортировать элемент; подробности в журнале сервера'
+    },
   },
   ollama: {
     unknown: 'Неизвестно',

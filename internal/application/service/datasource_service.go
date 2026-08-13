@@ -866,12 +866,14 @@ func (s *DataSourceService) applyFetchedItem(
 			ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, item.ExternalID,
 		)
 		if lookupErr != nil {
+			logger.Errorf(ctx, "failed to find deleted knowledge for external_id=%s (ds=%s, kb=%s): %v",
+				item.ExternalID, ds.ID, ds.KnowledgeBaseID, lookupErr)
 			result.Failed++
 			result.DeletionFailed++
 			recordSyncError(result, types.SyncItemError{
 				Title:   item.Title,
 				Code:    "deletion_lookup_failed",
-				Message: fmt.Sprintf("%s: find deleted knowledge: %v", item.ExternalID, lookupErr),
+				Message: "Failed to look up the item before deletion; see server logs",
 			})
 			return
 		}
@@ -882,16 +884,17 @@ func (s *DataSourceService) applyFetchedItem(
 			return
 		}
 		if deleteErr := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); deleteErr != nil {
-			// The cursor is persisted past this item, so a failed deletion is
-			// not retried by the next incremental sync, only by a later full
-			// sync. Counted separately so the sync-log message can warn the
-			// operator about this gap.
+			// The cursor is already past this item, so a failed deletion normally
+			// retries only on a later full sync. Counted separately so the
+			// sync-log message can warn the operator about this gap.
 			result.Failed++
 			result.DeletionFailed++
+			logger.Errorf(ctx, "failed to delete knowledge %s for external_id=%s (ds=%s): %v",
+				existing.ID, item.ExternalID, ds.ID, deleteErr)
 			recordSyncError(result, types.SyncItemError{
 				Title:   item.Title,
 				Code:    "deletion_failed",
-				Message: fmt.Sprintf("%s: delete knowledge: %v", item.ExternalID, deleteErr),
+				Message: "Deletion failed; see server logs",
 			})
 			return
 		}

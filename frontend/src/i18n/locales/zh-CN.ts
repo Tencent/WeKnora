@@ -786,6 +786,11 @@ export default {
       loadAuthHint: "应用凭证无效或缺少云盘权限，请检查 App ID / App Secret 及 drive:drive:readonly 等权限。",
       loadNotFoundHint: "folder_token 不存在或已删除，请确认从飞书云盘文件夹 URL 复制的 token 正确。",
     },
+    syncError: {
+      deletion_lookup_failed: '删除前查找文档失败，请查看服务器日志',
+      deletion_failed: '删除失败，请查看服务器日志',
+      ingest_failed: '导入失败，请查看服务器日志'
+    },
   },
   ollama: {
     unknown: '未知',

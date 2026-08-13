@@ -86,6 +86,7 @@ const EXTRA_PREFIXES = [
   'contextualGuide.chat.steps.',
   'contextualGuide.agentList.steps.',
   'contextualGuide.agentCreate.steps.',
+  'datasource.syncError.',
   'kbSettings.parser.engines.',
   'model.editor.description.',
   'integrations.tabs.',
