@@ -22,6 +22,7 @@ func TestEveryBuiltInToolDeclaresAModelHandlePolicy(t *testing.T) {
 		ToolQueryKnowledgeGraph,
 		ToolGetDocumentInfo,
 		ToolSearchConversations,
+		ToolSearchMemory,
 		ToolDatabaseQuery,
 		ToolDataAnalysis,
 		ToolDataSchema,

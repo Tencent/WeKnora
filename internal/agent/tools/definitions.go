@@ -14,6 +14,7 @@ const (
 	ToolQueryKnowledgeGraph = "query_knowledge_graph"
 	ToolGetDocumentInfo     = "get_document_info"
 	ToolSearchConversations = "search_conversations"
+	ToolSearchMemory        = "search_memory"
 	ToolDatabaseQuery       = "database_query"
 	ToolDataAnalysis        = "data_analysis"
 	ToolDataSchema          = "data_schema"
@@ -106,6 +107,12 @@ func DefaultAllowedTools() []string {
 		// own history, and it is what lets "上次你给我的那个配置" resolve at all
 		// without stuffing every past conversation into the context window.
 		ToolSearchConversations,
+		// ToolSearchMemory is deliberately absent here and from
+		// AvailableToolDefinitions. Like web_search it is not chosen from this
+		// list at all: registerTools injects it whenever the workspace, the
+		// user and the agent all allow memory, and strips it whenever they do
+		// not. Adding it here would let a stale allowlist decide something the
+		// memory switches already decide.
 		ToolDatabaseQuery,
 		ToolDataAnalysis,
 		ToolDataSchema,

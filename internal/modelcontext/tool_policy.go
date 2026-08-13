@@ -76,6 +76,10 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 	// Past conversations carry no durable chunk or document IDs, so there is
 	// nothing to compact; the output is prose the model may quote.
 	"search_conversations": {},
+	// Memories are single sentences about the person. They carry no chunk or
+	// document IDs of their own, and the memory item IDs never leave the
+	// service, so there is nothing here for the model to hold a handle on.
+	"search_memory": {},
 	"query_knowledge_graph": {
 		sourceIDKeys: map[string]struct{}{"knowledge_base_ids": {}},
 		sourceOutput: true,

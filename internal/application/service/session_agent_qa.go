@@ -278,6 +278,7 @@ func (s *sessionService) buildAgentConfig(
 		WebSearchProviderID:         customAgent.Config.WebSearchProviderID,
 		MultiTurnEnabled:            customAgent.Config.MultiTurnEnabled,
 		HistoryTurns:                customAgent.Config.HistoryTurns,
+		MemoryEnabled:               customAgent.Config.MemoryEnabled,
 		MCPSelectionMode:            customAgent.Config.MCPSelectionMode,
 		MCPServices:                 customAgent.Config.MCPServices,
 		MCPAuthWaitTimeout:          customAgent.Config.MCPAuthWaitTimeout,
