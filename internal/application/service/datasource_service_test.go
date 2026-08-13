@@ -265,6 +265,9 @@ type deletionLookupKnowledgeRepo struct {
 	knowledge       *types.Knowledge
 	lookupErr       error
 	metadataUpdates []map[string]string // metadata persisted via UpdateKnowledge
+	metadataUpdateErr error
+	hardDeleted     []string
+	hardDeleteErr   error
 	tenantID        uint64
 	knowledgeBaseID string
 	dataSourceID    string
@@ -272,6 +275,9 @@ type deletionLookupKnowledgeRepo struct {
 }
 
 func (r *deletionLookupKnowledgeRepo) UpdateKnowledge(_ context.Context, knowledge *types.Knowledge) error {
+	if r.metadataUpdateErr != nil {
+		return r.metadataUpdateErr
+	}
 	metadata := map[string]string{}
 	if len(knowledge.Metadata) > 0 {
 		if err := json.Unmarshal(knowledge.Metadata, &metadata); err != nil {
@@ -293,6 +299,83 @@ func (r *deletionLookupKnowledgeRepo) FindByDataSourceExternalID(
 	r.dataSourceID = dataSourceID
 	r.externalID = externalID
 	return r.knowledge, nil
+}
+
+func (r *deletionLookupKnowledgeRepo) HardDeleteKnowledge(_ context.Context, _ uint64, id string) error {
+	if r.hardDeleteErr != nil {
+		return r.hardDeleteErr
+	}
+	r.hardDeleted = append(r.hardDeleted, id)
+	return nil
+}
+
+func (r *deletionLookupKnowledgeRepo) HardDeleteKnowledgeList(_ context.Context, _ uint64, ids []string) error {
+	for _, id := range ids {
+		if err := r.HardDeleteKnowledge(context.Background(), 0, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// scopedDeletionRepo models two data sources sharing the same external_id.
+type scopedDeletionRepo struct {
+	interfaces.KnowledgeRepository
+	live        map[string]*types.Knowledge
+	hardDeleted []string
+}
+
+func (r *scopedDeletionRepo) FindByDataSourceExternalID(
+	_ context.Context, _ uint64, _, dataSourceID, externalID string,
+) (*types.Knowledge, error) {
+	if r.live == nil {
+		return nil, nil
+	}
+	return r.live[dataSourceID+"|"+externalID], nil
+}
+
+func (r *scopedDeletionRepo) HardDeleteKnowledge(_ context.Context, _ uint64, id string) error {
+	r.hardDeleted = append(r.hardDeleted, id)
+	return nil
+}
+
+func (r *scopedDeletionRepo) HardDeleteKnowledgeList(_ context.Context, _ uint64, ids []string) error {
+	r.hardDeleted = append(r.hardDeleted, ids...)
+	return nil
+}
+
+// keyedDeletionRepo maps external_id to live knowledge for multi-item sync tests.
+type keyedDeletionRepo struct {
+	interfaces.KnowledgeRepository
+	items         map[string]*types.Knowledge
+	hardDeleted   []string
+	hardDeleteErr error
+}
+
+func (r *keyedDeletionRepo) FindByDataSourceExternalID(
+	_ context.Context, _ uint64, _, _, externalID string,
+) (*types.Knowledge, error) {
+	if r.items == nil {
+		return nil, nil
+	}
+	return r.items[externalID], nil
+}
+
+func (r *keyedDeletionRepo) HardDeleteKnowledge(_ context.Context, _ uint64, id string) error {
+	if r.hardDeleteErr != nil {
+		return r.hardDeleteErr
+	}
+	r.hardDeleted = append(r.hardDeleted, id)
+	return nil
+}
+
+func (r *keyedDeletionRepo) HardDeleteKnowledgeList(_ context.Context, _ uint64, ids []string) error {
+	for _, id := range ids {
+		if err := r.HardDeleteKnowledge(context.Background(), 0, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // syncDeletionHarness wires a DataSourceService around a connector that always
@@ -495,4 +578,126 @@ func TestProcessSync_SyncDeletionsDeleteFailureCountsFailed(t *testing.T) {
 	require.Len(t, result.Errors, 1)
 	assert.Equal(t, "deletion_failed", result.Errors[0].Code)
 	assert.Equal(t, 1, deletionFailedCount(t, updated))
+}
+
+func TestProcessSync_SyncDeletionsHardDeletesRow(t *testing.T) {
+	h := newSyncDeletionHarness(t, true, "ds-delete-hard", "log-delete-hard", nil, nil)
+	updated, err := h.run(t)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, updated.ItemsDeleted)
+	assert.Equal(t, []string{"knowledge-gone"}, h.knowledgeSvc.deleted)
+	assert.Equal(t, []string{"knowledge-gone"}, h.knowledgeRepo.hardDeleted)
+}
+
+func TestApplyFetchedItem_SyncDeletionScopedPerDataSource(t *testing.T) {
+	repo := &scopedDeletionRepo{live: map[string]*types.Knowledge{
+		"ds-a|file:shared": {ID: "knowledge-a"},
+		"ds-b|file:shared": {ID: "knowledge-b"},
+	}}
+	ks := &sweepFakeKS{repo: repo}
+	svc := &DataSourceService{knowledgeService: ks}
+
+	result := &types.SyncResult{}
+	dsA := &types.DataSource{
+		ID: "ds-a", TenantID: 1, KnowledgeBaseID: "kb-1", SyncDeletions: true,
+	}
+	svc.applyFetchedItem(context.Background(), dsA, &types.FetchedItem{
+		ExternalID: "file:shared",
+		IsDeleted:  true,
+	}, nil, result)
+
+	assert.Equal(t, 1, result.Deleted)
+	assert.Equal(t, []string{"knowledge-a"}, ks.deleted)
+	assert.Equal(t, []string{"knowledge-a"}, repo.hardDeleted)
+	assert.NotContains(t, ks.deleted, "knowledge-b")
+}
+
+type mixedSyncConnector struct{}
+
+func (mixedSyncConnector) Type() string { return "test-sync-mixed" }
+func (mixedSyncConnector) Validate(context.Context, *types.DataSourceConfig) error {
+	return nil
+}
+func (mixedSyncConnector) ListResources(context.Context, *types.DataSourceConfig, string) ([]types.Resource, error) {
+	return nil, nil
+}
+func (mixedSyncConnector) ResolveResourceAncestors(
+	context.Context, *types.DataSourceConfig, []string,
+) ([]string, error) {
+	return nil, nil
+}
+func (mixedSyncConnector) FetchAll(context.Context, *types.DataSourceConfig, []string) ([]types.FetchedItem, error) {
+	return []types.FetchedItem{
+		{ExternalID: "file:gone", IsDeleted: true},
+		{ExternalID: "file:new", Content: []byte("hello"), FileName: "new.txt"},
+	}, nil
+}
+func (mixedSyncConnector) FetchIncremental(
+	context.Context, *types.DataSourceConfig, *types.SyncCursor,
+) ([]types.FetchedItem, *types.SyncCursor, error) {
+	items, err := (mixedSyncConnector{}).FetchAll(context.Background(), nil, nil)
+	return items, nil, err
+}
+
+func TestProcessSync_SyncDeletionsPartialWhenMixedResults(t *testing.T) {
+	configJSON, err := (&types.DataSourceConfig{Type: "test-sync-mixed"}).ToJSON()
+	require.NoError(t, err)
+
+	ds := &types.DataSource{
+		ID: "ds-mixed", TenantID: 1, KnowledgeBaseID: "kb-1",
+		Type: "test-sync-mixed", Config: configJSON,
+		SyncMode: types.SyncModeFull, Status: types.DataSourceStatusActive,
+		SyncDeletions: true,
+	}
+	syncLog := &types.SyncLog{
+		ID: "log-mixed", DataSourceID: ds.ID, TenantID: ds.TenantID,
+		Status: types.SyncLogStatusRunning, StartedAt: time.Now().UTC(),
+	}
+	repo := &keyedDeletionRepo{
+		items:         map[string]*types.Knowledge{"file:gone": {ID: "knowledge-gone"}},
+		hardDeleteErr: errors.New("hard delete failed"),
+	}
+	ks := &sweepFakeKS{repo: repo}
+	syncLogRepo := &processSyncSyncLogRepo{logs: map[string]*types.SyncLog{syncLog.ID: syncLog}}
+	registry := datasource.NewConnectorRegistry()
+	require.NoError(t, registry.Register(mixedSyncConnector{}))
+
+	svc := &DataSourceService{
+		dsRepo:            newKBDeleteDSRepo(ds.KnowledgeBaseID, ds),
+		syncLogRepo:       syncLogRepo,
+		knowledgeService:  ks,
+		kbService:         &processSyncKBService{kb: &types.KnowledgeBase{ID: ds.KnowledgeBaseID, TenantID: ds.TenantID}},
+		connectorRegistry: registry,
+		tenantRepo:        &processSyncTenantRepo{tenant: &types.Tenant{ID: ds.TenantID}},
+		tagService:        &processSyncTagService{},
+	}
+
+	payload, err := json.Marshal(types.DataSourceSyncPayload{
+		DataSourceID: ds.ID, TenantID: ds.TenantID, SyncLogID: syncLog.ID, ForceFull: true,
+	})
+	require.NoError(t, err)
+	err = svc.ProcessSync(context.Background(), asynq.NewTask(types.TypeDataSourceSync, payload))
+	require.NoError(t, err, "partial failure must not fail the whole sync")
+
+	updated := syncLogRepo.logs[syncLog.ID]
+	require.NotNil(t, updated)
+	assert.Equal(t, types.SyncLogStatusPartial, updated.Status)
+	assert.Equal(t, 1, updated.ItemsFailed)
+	assert.Equal(t, 1, updated.ItemsCreated)
+	assert.Contains(t, updated.ErrorMessage, "deletion failure(s) will only retry on the next full sync")
+}
+
+func TestIngestItem_URLCreationMetadataAttachFailure(t *testing.T) {
+	ds := &types.DataSource{ID: "ds-1", TenantID: 1, KnowledgeBaseID: "kb-1"}
+	repo := &deletionLookupKnowledgeRepo{metadataUpdateErr: errors.New("db unavailable")}
+	ks := &sweepFakeKS{repo: repo, createURLKnowledge: &types.Knowledge{ID: "url-knowledge-1"}}
+	svc := &DataSourceService{knowledgeService: ks}
+
+	_, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
+		ExternalID: "url:1",
+		URL:        "https://example.com/doc",
+	}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "attach datasource metadata")
 }

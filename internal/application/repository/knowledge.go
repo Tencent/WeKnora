@@ -776,6 +776,25 @@ func (r *knowledgeRepository) FindByDataSourceExternalID(
 	return &knowledge, nil
 }
 
+// HardDeleteKnowledge physically removes a knowledge row. Call it AFTER
+// DeleteKnowledge's soft-delete cascade so sync-internal deletions never
+// become tombstones that block a later re-sync of the same external item.
+func (r *knowledgeRepository) HardDeleteKnowledge(ctx context.Context, tenantID uint64, id string) error {
+	return r.db.Unscoped().WithContext(ctx).
+		Where("tenant_id = ? AND id = ?", tenantID, id).
+		Delete(&types.Knowledge{}).Error
+}
+
+// HardDeleteKnowledgeList is the batch counterpart of HardDeleteKnowledge.
+func (r *knowledgeRepository) HardDeleteKnowledgeList(ctx context.Context, tenantID uint64, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return r.db.Unscoped().WithContext(ctx).
+		Where("tenant_id = ? AND id IN ?", tenantID, ids).
+		Delete(&types.Knowledge{}).Error
+}
+
 func (r *knowledgeRepository) SearchKnowledge(
 	ctx context.Context,
 	tenantID uint64,

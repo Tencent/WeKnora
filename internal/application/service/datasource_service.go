@@ -859,6 +859,11 @@ func (s *DataSourceService) applyFetchedItem(
 			// Sync deletion disabled: neither count nor delete.
 			return
 		}
+		if item.ExternalID == "" {
+			logger.Warnf(ctx, "skipping deletion for item %q: empty external_id", item.Title)
+			result.Skipped++
+			return
+		}
 		// Perform real KB deletion, scoped to items owned by this data source
 		// so identical external IDs from different data sources cannot collide.
 		repo := s.knowledgeService.GetRepository()
@@ -891,6 +896,18 @@ func (s *DataSourceService) applyFetchedItem(
 			result.DeletionFailed++
 			logger.Errorf(ctx, "failed to delete knowledge %s for external_id=%s (ds=%s): %v",
 				existing.ID, item.ExternalID, ds.ID, deleteErr)
+			recordSyncError(result, types.SyncItemError{
+				Title:   item.Title,
+				Code:    "deletion_failed",
+				Message: "Deletion failed; see server logs",
+			})
+			return
+		}
+		if herr := repo.HardDeleteKnowledge(ctx, ds.TenantID, existing.ID); herr != nil {
+			result.Failed++
+			result.DeletionFailed++
+			logger.Errorf(ctx, "failed to hard-delete knowledge %s for external_id=%s (ds=%s): %v",
+				existing.ID, item.ExternalID, ds.ID, herr)
 			recordSyncError(result, types.SyncItemError{
 				Title:   item.Title,
 				Code:    "deletion_failed",
@@ -1254,6 +1271,9 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			if err := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); err != nil {
 				logger.Warnf(ctx, "failed to delete existing knowledge %s: %v", existing.ID, err)
 			} else {
+				if herr := repo.HardDeleteKnowledge(ctx, ds.TenantID, existing.ID); herr != nil {
+					logger.Warnf(ctx, "failed to hard-delete replaced knowledge %s: %v", existing.ID, herr)
+				}
 				isUpdate = true
 			}
 		}
@@ -1319,12 +1339,11 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 		if created != nil {
 			metadataBytes, mErr := json.Marshal(metadata)
 			if mErr != nil {
-				logger.Warnf(ctx, "failed to marshal metadata for URL knowledge %s: %v", created.ID, mErr)
-			} else {
-				created.Metadata = types.JSON(metadataBytes)
-				if uErr := s.knowledgeService.GetRepository().UpdateKnowledge(ctx, created); uErr != nil {
-					logger.Warnf(ctx, "failed to attach datasource metadata to URL knowledge %s: %v", created.ID, uErr)
-				}
+				return isUpdate, fmt.Errorf("marshal datasource metadata: %w", mErr)
+			}
+			created.Metadata = types.JSON(metadataBytes)
+			if uErr := s.knowledgeService.GetRepository().UpdateKnowledge(ctx, created); uErr != nil {
+				return isUpdate, fmt.Errorf("attach datasource metadata: %w", uErr)
 			}
 		}
 		s.sweepStaleSubtree(ctx, ds, item)
@@ -1376,6 +1395,11 @@ func (s *DataSourceService) sweepStaleSubtree(ctx context.Context, ds *types.Dat
 	}
 	ids := make([]string, 0, len(children))
 	for _, child := range children {
+		// Scope to this data source so identical external_id prefixes from
+		// another connector in the same KB cannot be swept.
+		if child.GetMetadata()["datasource_id"] != ds.ID {
+			continue
+		}
 		// A child still present in the source is preserved even if it could not be
 		// re-ingested this sync; only children that vanished from the source are
 		// stale and swept. Every child here was selected by the external_id-prefix
@@ -1397,6 +1421,9 @@ func (s *DataSourceService) sweepStaleSubtree(ctx context.Context, ds *types.Dat
 	if derr := s.knowledgeService.DeleteKnowledgeList(ctx, ids); derr != nil {
 		logger.Warnf(ctx, "failed to delete %d stale sub-item(s) of external_id=%s: %v",
 			len(ids), item.ExternalID, derr)
+	} else if herr := repo.HardDeleteKnowledgeList(ctx, ds.TenantID, ids); herr != nil {
+		logger.Warnf(ctx, "failed to hard-delete %d stale sub-item(s) of external_id=%s: %v",
+			len(ids), item.ExternalID, herr)
 	}
 }
 
