@@ -943,6 +943,11 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	if mode == qaModeNormal {
 		var completionHandled bool
 
+		// Persist the pipeline's retrieval/attachment stages so a reloaded
+		// conversation redraws the timeline it showed while streaming, including
+		// turns that searched and cited nothing.
+		registerQuickAnswerTimelineRecorder(streamCtx.eventBus, streamCtx.assistantMessage)
+
 		// Persist reasoning_content into agent_steps so historical reload can
 		// reconstruct the thinking card (same shape as Agent-mode steps).
 		// Accumulate on assistantMessage directly so user-initiated stop also
@@ -1409,14 +1414,7 @@ func appendQuickAnswerReasoning(msg *types.Message, content string) {
 	if content == "" {
 		return
 	}
-	if len(msg.AgentSteps) == 0 {
-		msg.AgentSteps = types.AgentSteps{{
-			Iteration: 0,
-			Timestamp: time.Now(),
-			ToolCalls: make([]types.ToolCall, 0),
-		}}
-	}
-	msg.AgentSteps[0].ReasoningContent += content
+	ensureQuickAnswerStep(msg).ReasoningContent += content
 }
 
 // completeAssistantMessage marks an assistant message as complete, updates it,
