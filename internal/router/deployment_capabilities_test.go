@@ -6,47 +6,48 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/gin-gonic/gin"
 )
 
-func allDeploymentFeaturesAvailable() deploymentFeatureAvailability {
-	return deploymentFeatureAvailability{
-		organizations: true,
-		agents:        true,
-		im:            true,
-		embed:         true,
-		api:           true,
-		mcp:           true,
-		webSearch:     true,
-		vectorStore:   true,
-		storage:       true,
-		sandbox:       true,
+func allDeploymentFeaturesAvailable() handler.DeploymentFeatureAvailability {
+	return handler.DeploymentFeatureAvailability{
+		Organizations: true,
+		Agents:        true,
+		IM:            true,
+		Embed:         true,
+		API:           true,
+		MCP:           true,
+		WebSearch:     true,
+		VectorStore:   true,
+		Storage:       true,
+		Sandbox:       true,
 	}
 }
 
 func TestBuildDeploymentCapabilitiesHidesOrganizationsInLite(t *testing.T) {
-	result := buildDeploymentCapabilities("lite", allDeploymentFeaturesAvailable())
+	result := handler.BuildDeploymentCapabilities("lite", allDeploymentFeaturesAvailable())
 
-	organization := result.Capabilities[capabilityOrganizations]
+	organization := result.Capabilities["organizations"]
 	if organization.Supported {
 		t.Fatal("organizations should be unsupported in lite edition")
 	}
 	if organization.Reason != "not_supported_in_lite" {
 		t.Fatalf("organization reason = %q, want not_supported_in_lite", organization.Reason)
 	}
-	if !result.Capabilities[capabilityAgents].Supported {
+	if !result.Capabilities["agents"].Supported {
 		t.Fatal("agents should remain supported in lite edition")
 	}
 }
 
 func TestBuildDeploymentCapabilitiesReflectsMissingRoutes(t *testing.T) {
 	available := allDeploymentFeaturesAvailable()
-	available.embed = false
-	available.mcp = false
+	available.Embed = false
+	available.MCP = false
 
-	result := buildDeploymentCapabilities("standard", available)
+	result := handler.BuildDeploymentCapabilities("standard", available)
 
-	for _, key := range []string{capabilityIntegrationEmbed, capabilitySettingsMCP} {
+	for _, key := range []string{"integrations.embed", "settings.mcp"} {
 		capability := result.Capabilities[key]
 		if capability.Supported {
 			t.Fatalf("%s should be unsupported", key)
@@ -55,16 +56,18 @@ func TestBuildDeploymentCapabilitiesReflectsMissingRoutes(t *testing.T) {
 			t.Fatalf("%s reason = %q, want route_not_registered", key, capability.Reason)
 		}
 	}
-	if !result.Capabilities[capabilitySettingsStorage].Supported {
+	if !result.Capabilities["settings.storage"].Supported {
 		t.Fatal("an available route should remain supported")
 	}
 }
 
-func TestDeploymentCapabilitiesHandlerReturnsSnapshot(t *testing.T) {
+func TestGetDeploymentCapabilitiesHandlerReturnsSnapshot(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
-	want := buildDeploymentCapabilities("standard", allDeploymentFeaturesAvailable())
-	engine.GET("/capabilities", deploymentCapabilitiesHandler(want))
+	want := handler.BuildDeploymentCapabilities("standard", allDeploymentFeaturesAvailable())
+	systemHandler := &handler.SystemHandler{}
+	systemHandler.BindDeploymentCapabilities(want)
+	engine.GET("/capabilities", systemHandler.GetDeploymentCapabilities)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/capabilities", nil)
@@ -74,8 +77,8 @@ func TestDeploymentCapabilitiesHandlerReturnsSnapshot(t *testing.T) {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 	}
 	var body struct {
-		Code int                            `json:"code"`
-		Data deploymentCapabilitiesResponse `json:"data"`
+		Code int                               `json:"code"`
+		Data handler.DeploymentCapabilitiesData `json:"data"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -83,7 +86,7 @@ func TestDeploymentCapabilitiesHandlerReturnsSnapshot(t *testing.T) {
 	if body.Code != 0 || body.Data.Edition != "standard" {
 		t.Fatalf("response = %#v", body)
 	}
-	if !body.Data.Capabilities[capabilityIntegrationEmbed].Supported {
+	if !body.Data.Capabilities["integrations.embed"].Supported {
 		t.Fatal("embed capability should be returned")
 	}
 }

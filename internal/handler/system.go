@@ -63,6 +63,8 @@ type SystemHandler struct {
 	// unit tests, in which case only the legacy config is consulted.
 	storageBackendRepo interfaces.StorageBackendRepository
 	sandboxConfigSvc   sandboxConfigService
+	// startup snapshot for GET /system/capabilities; bound in router.NewRouter.
+	deploymentCapabilities DeploymentCapabilitiesData
 }
 
 // NewSystemHandler creates a new system handler

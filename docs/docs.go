@@ -1161,6 +1161,20 @@ const docTemplate = `{
                 }
             }
         },
+        "/auth/oidc/start": {
+            "get": {
+                "description": "与 /auth/oidc/url 不同，此端点直接 302 重定向到 OIDC Provider 的授权页，\n无需前端 JS 介入。适用于外部平台（如企业门户）直接给出一个链接即可\n触发 OIDC 授权码流程，借助 IdP 的 SSO session 实现免再次输密码。",
+                "tags": [
+                    "认证"
+                ],
+                "summary": "发起 OIDC 登录（直接 302）",
+                "responses": {
+                    "302": {
+                        "description": "Found"
+                    }
+                }
+            }
+        },
         "/auth/oidc/url": {
             "get": {
                 "description": "根据后端OIDC配置生成第三方登录跳转地址",
@@ -10605,6 +10619,329 @@ const docTemplate = `{
                 }
             }
         },
+        "/sandbox-configs": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "List workspace sandbox backend configs with credentials masked.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "List sandbox configs",
+                "responses": {
+                    "200": {
+                        "description": "Sandbox configs and defaults",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Create a named workspace sandbox backend config. Credentials are masked in the response.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Create sandbox config",
+                "parameters": [
+                    {
+                        "description": "Sandbox backend config",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.sandboxConfigRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created sandbox config",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or validation failure",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Retrieve a workspace sandbox backend config with credentials masked.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Get sandbox config",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Sandbox config",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Sandbox config not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Update a sandbox backend config. Identity-field changes are refused while the config owns live or paused sandboxes.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Update sandbox config",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Updated sandbox config",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.sandboxConfigRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated sandbox config",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or validation failure",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Sandbox config not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "Live sandboxes or unverifiable inventory",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "423": {
+                        "description": "Sandbox config is being modified by another request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Soft-delete a sandbox backend config. force=true only overrides unverifiable provider inventory, never confirmed live sandboxes.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Delete sandbox config",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Force delete when inventory is unverifiable",
+                        "name": "force",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deletion success",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "Live sandboxes or unverifiable inventory",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs/{id}/sandboxes": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Return live/paused sandbox inventory and affected agent names for one config.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Inspect sandbox config inventory",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Sandbox inventory",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/sessions": {
             "get": {
                 "security": [
@@ -11137,6 +11474,57 @@ const docTemplate = `{
                         }
                     }
                 }
+            }
+        },
+        "/sessions/{session_id}/artifacts": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "返回本会话中所有 assistant 消息产生的技能产物元数据（不含 URL）",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会话"
+                ],
+                "summary": "列出会话生成的产物文件",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sessions/{session_id}/messages/{message_id}/artifacts": {
+            "get": {
+                "responses": {}
+            }
+        },
+        "/sessions/{session_id}/messages/{message_id}/artifacts/{index}/download": {
+            "get": {
+                "responses": {}
             }
         },
         "/sessions/{session_id}/messages/{message_id}/suggestions": {
@@ -12696,6 +13084,27 @@ const docTemplate = `{
                 }
             }
         },
+        "/system/capabilities": {
+            "get": {
+                "description": "返回当前部署版本及实际注册的后端路由所对应的功能能力；仅 supported=false 表示入口应隐藏",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "系统"
+                ],
+                "summary": "获取部署能力清单",
+                "responses": {
+                    "200": {
+                        "description": "标准 code/msg/data 包装，data 为 DeploymentCapabilitiesData",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/system/docreader/reconnect": {
             "post": {
                 "consumes": [
@@ -12795,6 +13204,40 @@ const docTemplate = `{
                 "responses": {
                     "200": {
                         "description": "OK"
+                    }
+                }
+            }
+        },
+        "/system/sandbox-check": {
+            "post": {
+                "description": "使用当前填写的参数测试沙箱后端，不保存配置；deep=true 会执行临时脚本，远端后端还会创建并销毁一个沙箱",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "系统"
+                ],
+                "summary": "测试沙箱连通性",
+                "parameters": [
+                    {
+                        "description": "沙箱配置",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.SandboxCheckRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.SandboxCheckResponse"
+                        }
                     }
                 }
             }
@@ -15763,6 +16206,34 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.CubeSandboxConfig": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "description": "加密",
+                    "type": "string"
+                },
+                "api_url": {
+                    "type": "string"
+                },
+                "cube_sandbox_ttl_seconds": {
+                    "type": "integer"
+                },
+                "http_timeout_sec": {
+                    "description": "HTTPTimeoutSec bounds each HTTP call to the sandbox control plane.\n0 means use the built-in default (30s), never the deployment's value.",
+                    "type": "integer"
+                },
+                "proxy_url": {
+                    "type": "string"
+                },
+                "sandbox_domain": {
+                    "type": "string"
+                },
+                "template_id": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.CustomAgentConfig": {
             "type": "object",
             "properties": {
@@ -15969,6 +16440,10 @@ const docTemplate = `{
                     "description": "Rewrite prompt user message template",
                     "type": "string"
                 },
+                "sandbox_config_id": {
+                    "description": "===== Sandbox Settings =====\nSandboxConfigID selects which workspace sandbox config this agent's\nskill scripts run on. Empty means sandbox execution is disabled.\n\nThis references the LOGICAL config, never a specific revision: keeping\nthe indirection here is what would let credential rotation happen\nwithout re-pointing every agent (see the spec's §4.8).",
+                    "type": "string"
+                },
                 "selected_skills": {
                     "description": "Selected skill names (only used when SkillsSelectionMode is \"selected\")",
                     "type": "array",
@@ -16135,6 +16610,43 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "description": "Last update timestamp",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.DockerSandboxConfig": {
+            "type": "object",
+            "properties": {
+                "image": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.E2BSandboxConfig": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "description": "加密",
+                    "type": "string"
+                },
+                "api_url": {
+                    "type": "string"
+                },
+                "e2b_sandbox_ttl_seconds": {
+                    "type": "integer"
+                },
+                "http_timeout_sec": {
+                    "description": "HTTPTimeoutSec bounds each HTTP call to the sandbox control plane.\n0 means use the built-in default (30s), never the deployment's value.",
+                    "type": "integer"
+                },
+                "proxy_url": {
+                    "description": "ProxyURL is the data-plane gateway that fronts envd. E2B Cloud resolves\n\"\u003cport\u003e-\u003csandboxID\u003e.\u003csandbox_domain\u003e\" through public DNS and TLS, so it\nneeds no value here. Self-hosted E2B-compatible control planes usually\nserve every sandbox from one gateway address and expect the sandbox\nauthority in the Host header; setting this makes WeKnora dial the\ngateway directly instead of requiring wildcard DNS and a certificate\nfor the sandbox domain. An \"http://\" gateway also downgrades the\ndata-plane scheme, which the E2B SDK otherwise pins to https.",
+                    "type": "string"
+                },
+                "sandbox_domain": {
+                    "type": "string"
+                },
+                "template_id": {
                     "type": "string"
                 }
             }
@@ -17659,6 +18171,13 @@ const docTemplate = `{
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AgentStep"
                     }
                 },
+                "artifacts": {
+                    "description": "Skill-generated files produced during this assistant turn (assistant messages only).\nPopulated by ArtifactCollector after the sandbox finishes, referenced by the\nartifact download endpoint. Empty for user messages and turns without skills.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MessageArtifact"
+                    }
+                },
                 "attachments": {
                     "description": "Attached files (documents, audio, etc., for user messages)",
                     "type": "array",
@@ -17741,6 +18260,39 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "description": "Last update timestamp",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.MessageArtifact": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "description": "When WeKnora persisted the blob",
+                    "type": "string"
+                },
+                "file_name": {
+                    "description": "Original filename inside the sandbox",
+                    "type": "string"
+                },
+                "file_size": {
+                    "description": "File size in bytes",
+                    "type": "integer"
+                },
+                "file_type": {
+                    "description": "File extension (e.g., \".pptx\", \".pdf\")",
+                    "type": "string"
+                },
+                "mod_time": {
+                    "description": "Sandbox-side modification time (used for diff)",
+                    "type": "string"
+                },
+                "source_path": {
+                    "description": "Absolute path inside the sandbox (used for diff)",
+                    "type": "string"
+                },
+                "url": {
+                    "description": "Storage URL (provider://path); persisted, not sent to client",
                     "type": "string"
                 }
             }
@@ -19050,6 +19602,10 @@ const docTemplate = `{
                     "description": "PinnedAt records when the session was pinned; nil when not pinned.",
                     "type": "string"
                 },
+                "sandbox_config_id": {
+                    "description": "SandboxConfigID pins which sandbox config this session's CURRENT live\nsandbox was created on. Empty means no live sandbox;\nSandboxConfigIDGlobalDefault means the deployment-wide default config.\n\nThis is an ephemeral pin that dies with the sandbox, not a permanent\nowner: sessions outlive sandboxes by months, so treating it as\npermanent would make \"no session references this config\" never true.",
+                    "type": "string"
+                },
                 "tenant_id": {
                     "description": "Workspace ID",
                     "type": "integer"
@@ -19611,6 +20167,47 @@ const docTemplate = `{
                 "TenantRoleViewer"
             ]
         },
+        "github_com_Tencent_WeKnora_internal_types.TenantSandboxConfig": {
+            "type": "object",
+            "properties": {
+                "allow_private_endpoints": {
+                    "description": "AllowPrivateEndpoints permits this workspace config to reach RFC1918 or\nloopback cluster endpoints. Link-local/cloud-metadata addresses remain\nblocked. It is explicit in the UI instead of hidden in process env.",
+                    "type": "boolean"
+                },
+                "cube": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CubeSandboxConfig"
+                },
+                "default_timeout_sec": {
+                    "description": "DefaultTimeoutSec is the per-execution timeout in seconds. 0 uses the\nprogram's built-in default.",
+                    "type": "integer"
+                },
+                "docker": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DockerSandboxConfig"
+                },
+                "e2b": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.E2BSandboxConfig"
+                },
+                "env_vars": {
+                    "description": "EnvVars are additional environment variables injected into every\nsandbox created for this tenant. 🔒 Values are encrypted at rest.\nThese become visible to all scripts running in the tenant's\nsandboxes — do not place secrets here that scripts must not access.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "sandbox_type": {
+                    "description": "SandboxType selects the sandbox backend. Named configs may use \"cube\",\n\"e2b\", \"docker\", or \"local\". \"disabled\" is reserved for the hidden\nworkspace policy row.",
+                    "type": "string"
+                },
+                "volume_mount": {
+                    "description": "VolumeMount configures an optional shared volume mounted into every\nsandbox created for this tenant. Currently used for tenant-installed\nskills, but the configuration itself is skill-agnostic and can serve\nany volume-mount use case (shared datasets, pre-installed toolchains,\netc.).",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.VolumeMountConfig"
+                        }
+                    ]
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.ToolCall": {
             "type": "object",
             "properties": {
@@ -19902,6 +20499,35 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.VolumeMountConfig": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "description": "Enabled toggles the volume mount for this tenant.",
+                    "type": "boolean"
+                },
+                "mount_path": {
+                    "description": "MountPath is the sandbox-internal path where the volume is mounted.\nDefault: /weknora/tenant/skills (customizable per use case).",
+                    "type": "string"
+                },
+                "provider": {
+                    "description": "Provider identifies the volume backend. Currently \"e2b\" or \"cube\".",
+                    "type": "string"
+                },
+                "volume_id": {
+                    "description": "VolumeID is the provider-specific volume identifier, populated after\nEnsureVolume / CreateVolume succeeds.",
+                    "type": "string"
+                },
+                "volume_name": {
+                    "description": "VolumeName is the human-readable volume name, e.g.\n\"weknora-tenant-\u003cid\u003e-skills\".",
+                    "type": "string"
+                },
+                "volume_owner_fingerprint": {
+                    "description": "VolumeOwnerFingerprint = sha256(provider + APIKey + APIURL).\nUsed to detect when the tenant switched to a different backend or\nAPI key, at which point the volume is no longer reachable and must\nbe recreated.",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.WeKnoraCloudCredentials": {
             "type": "object",
             "properties": {
@@ -20056,6 +20682,7 @@ const docTemplate = `{
                 "searxng",
                 "keenable",
                 "zhipu",
+                "exa",
                 "metaso"
             ],
             "x-enum-varnames": [
@@ -20068,6 +20695,7 @@ const docTemplate = `{
                 "WebSearchProviderTypeSearxng",
                 "WebSearchProviderTypeKeenable",
                 "WebSearchProviderTypeZhipu",
+                "WebSearchProviderTypeExa",
                 "WebSearchProviderTypeMetaso"
             ]
         },
@@ -21863,6 +22491,67 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.SandboxCheckItem": {
+            "type": "object",
+            "properties": {
+                "latency_ms": {
+                    "type": "integer"
+                },
+                "message": {
+                    "description": "Message carries free-form provider detail for an executed probe.",
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "ok": {
+                    "type": "boolean"
+                },
+                "reason": {
+                    "description": "Reason is a stable code explaining why a probe was skipped. It exists so\nthe UI can phrase the skip in the operator's language instead of echoing\na server-side sentence.",
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.SandboxCheckRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TenantSandboxConfig"
+                },
+                "config_id": {
+                    "description": "ConfigID lets an edit form test stored credentials while overriding only\nthe fields the admin changed in the drawer.",
+                    "type": "string"
+                },
+                "deep": {
+                    "description": "Deep additionally runs a throwaway script. For remote backends this also\ncreates and destroys one sandbox, which is the only way to validate the\ntemplate ID, data plane, in-sandbox execution, and outbound egress. It may\nconsume real sandbox time, so it is opt-in.",
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_handler.SandboxCheckResponse": {
+            "type": "object",
+            "properties": {
+                "capabilities": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "boolean"
+                    }
+                },
+                "checks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler.SandboxCheckItem"
+                    }
+                },
+                "ok": {
+                    "type": "boolean"
+                },
+                "provider": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.SearchMessagesRequest": {
             "type": "object",
             "required": [
@@ -22366,6 +23055,23 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "internal_handler.sandboxConfigRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TenantSandboxConfig"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
                 }
             }
         },

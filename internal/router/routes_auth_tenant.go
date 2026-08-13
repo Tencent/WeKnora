@@ -217,12 +217,11 @@ func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler, g *rba
 func RegisterSystemRoutes(
 	r *gin.RouterGroup,
 	handler *handler.SystemHandler,
-	capabilities deploymentCapabilitiesResponse,
 	g *rbacGuards,
 ) {
 	systemRoutes := g.apiKeyGroup(r.Group("/system"), apiKeyManageVectorStores(apiKeyFullAccess()))
 	{
-		systemRoutes.With(apiKeyAny()).GET("/capabilities", g.Viewer(), deploymentCapabilitiesHandler(capabilities))
+		systemRoutes.With(apiKeyAny()).GET("/capabilities", g.Viewer(), handler.GetDeploymentCapabilities)
 		systemRoutes.GET("/info", g.Viewer(), handler.GetSystemInfo)
 		systemRoutes.GET("/parser-engines", g.Viewer(), handler.ListParserEngines)
 		systemRoutes.POST("/parser-engines/check", g.Admin(), handler.CheckParserEngines)

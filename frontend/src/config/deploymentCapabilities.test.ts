@@ -18,6 +18,21 @@ test('capability filtering is fail-open unless backend explicitly disables a fea
   assert.equal(isDeploymentCapabilitySupported(capabilities, 'agents'), true)
 })
 
+test('organizations stay hidden in lite even when capabilities fail open', () => {
+  assert.equal(
+    isDeploymentCapabilitySupported({}, 'organizations', { liteMode: true }),
+    false,
+  )
+  assert.equal(
+    isDeploymentCapabilitySupported({}, 'organizations', { edition: 'lite' }),
+    false,
+  )
+  assert.equal(
+    isDeploymentCapabilitySupported({}, 'agents', { liteMode: true }),
+    true,
+  )
+})
+
 test('only route-backed settings sections require deployment capabilities', () => {
   assert.equal(SETTINGS_SECTION_CAPABILITY.mcp, 'settings.mcp')
   assert.equal(SETTINGS_SECTION_CAPABILITY.storage, 'settings.storage')

@@ -27,8 +27,15 @@ export type DeploymentCapabilityMap = Partial<Record<DeploymentCapabilityKey, De
 export function isDeploymentCapabilitySupported(
   capabilities: DeploymentCapabilityMap,
   key?: DeploymentCapabilityKey,
+  options?: { liteMode?: boolean; edition?: string },
 ): boolean {
   if (!key) return true
+  if (key === 'organizations') {
+    const isLite =
+      options?.liteMode === true ||
+      options?.edition?.trim().toLowerCase() === 'lite'
+    if (isLite) return false
+  }
   return capabilities[key]?.supported !== false
 }
 
