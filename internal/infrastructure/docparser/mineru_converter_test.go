@@ -3,6 +3,7 @@ package docparser
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -30,6 +31,100 @@ func TestNewMinerUReaderResolvesParseMethod(t *testing.T) {
 			reader := NewMinerUReader(tt.overrides)
 			if reader.parseMethod != tt.want {
 				t.Fatalf("parseMethod = %q, want %q", reader.parseMethod, tt.want)
+			}
+		})
+	}
+}
+
+func TestMinerUUploadFileName(t *testing.T) {
+	tests := []struct {
+		name     string
+		fileName string
+		fileType string
+		want     string
+	}{
+		{name: "original basename", fileName: "reports/Illustrator 研报.pdf", fileType: "pdf", want: "Illustrator 研报.pdf"},
+		{
+			name:     "strip multipart controls",
+			fileName: "reports/\r\nIllustrator\x00 export.pdf",
+			fileType: "pdf",
+			want:     "Illustrator export.pdf",
+		},
+		{name: "append extension from type", fileName: "report", fileType: "pdf", want: "report.pdf"},
+		{name: "fallback from bare type", fileType: "pdf", want: "document.pdf"},
+		{name: "fallback from dotted uppercase type", fileType: ".PDF", want: "document.pdf"},
+		{name: "fallback from path-only name", fileName: "/", fileType: "pdf", want: "document.pdf"},
+		{name: "legacy fallback without metadata", want: "document"},
+		{name: "reject unsafe fallback type", fileType: "../pdf", want: "document"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := minerUUploadFileName(tt.fileName, tt.fileType); got != tt.want {
+				t.Fatalf("minerUUploadFileName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseMinerUFileParseResponse(t *testing.T) {
+	tests := []struct {
+		name             string
+		uploadFileName   string
+		response         map[string]any
+		wantMarkdown     string
+		wantResultKey    string
+	}{
+		{
+			name:           "match upload stem",
+			uploadFileName: "Illustrator 研报.pdf",
+			response: map[string]any{
+				"results": map[string]any{
+					"Illustrator 研报": map[string]any{"md_content": "from-stem", "images": map[string]any{}},
+				},
+			},
+			wantMarkdown:  "from-stem",
+			wantResultKey: "Illustrator 研报",
+		},
+		{
+			name:           "legacy document key",
+			uploadFileName: "document",
+			response: map[string]any{
+				"results": map[string]any{
+					"document": map[string]any{"md_content": "legacy", "images": map[string]any{}},
+				},
+			},
+			wantMarkdown:  "legacy",
+			wantResultKey: "document",
+		},
+		{
+			name:           "files variant",
+			uploadFileName: "document.pdf",
+			response: map[string]any{
+				"results": map[string]any{
+					"files": map[string]any{"md_content": "from-files", "images": map[string]any{}},
+				},
+			},
+			wantMarkdown:  "from-files",
+			wantResultKey: "files",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			respBody, err := json.Marshal(tt.response)
+			if err != nil {
+				t.Fatalf("marshal response: %v", err)
+			}
+			gotMarkdown, _, gotKey, err := parseMinerUFileParseResponse(respBody, tt.uploadFileName)
+			if err != nil {
+				t.Fatalf("parseMinerUFileParseResponse() error: %v", err)
+			}
+			if gotMarkdown != tt.wantMarkdown {
+				t.Fatalf("markdown = %q, want %q", gotMarkdown, tt.wantMarkdown)
+			}
+			if gotKey != tt.wantResultKey {
+				t.Fatalf("result key = %q, want %q", gotKey, tt.wantResultKey)
 			}
 		})
 	}
@@ -73,6 +168,20 @@ func TestMinerUReaderPreservesMultipartFilename(t *testing.T) {
 			}
 
 			captured := make(chan capturedRequest, 1)
+			uploadName := minerUUploadFileName(tt.fileName, tt.fileType)
+			resultStem := minerUResultStem(uploadName)
+			responseBody, err := json.Marshal(map[string]any{
+				"results": map[string]any{
+					resultStem: map[string]any{
+						"md_content": "ok",
+						"images":     map[string]any{},
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("marshal response: %v", err)
+			}
+
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				got := capturedRequest{method: r.Method, path: r.URL.Path}
 				file, header, err := r.FormFile("files")
@@ -87,7 +196,7 @@ func TestMinerUReaderPreservesMultipartFilename(t *testing.T) {
 				}
 				captured <- got
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = io.WriteString(w, `{"results":{"document":{"md_content":"ok","images":{}}}}`)
+				_, _ = w.Write(responseBody)
 			}))
 			defer server.Close()
 
