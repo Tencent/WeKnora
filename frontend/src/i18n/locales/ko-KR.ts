@@ -3189,6 +3189,11 @@ export default {
     }
   },
   chat: {
+    memoryUsedCount: '기억 {count}개를 참고했습니다',
+    memoryForget: '이 기억 삭제',
+    memoryForgotten: '기억을 삭제했습니다',
+    memoryForgetFailed: '삭제 실패',
+    memoryHint: '이 답변이 참고한 장기 기억입니다. 삭제하면 다시 사용되지 않습니다.',
     suggestedQuestions: '이렇게 물어보세요',
     followUpQuestions: '이어서 질문',
     followUpQuestionsLoading: '추천 질문 로딩 중',
@@ -3355,7 +3360,7 @@ export default {
         description: '문서 파싱 시 대규모 모델을 호출하여 각 청크에 대한 관련 질문을 생성하여 검색 재현율을 향상시킵니다. 활성화하면 문서 파싱 시간이 증가합니다.',
         countLabel: '생성 질문 수',
         countDescription: '각 문서 청크에서 생성할 질문 수 (1-10)',
-        instructionsLabel: '질문 생성 지침',
+    instructionsLabel: '질문 생성 지침',
         instructionsDescription: '안정적인 출력 형식을 유지하면서 대상, 상황 및 표현 방식을 지정합니다',
         instructionsPlaceholder: '예: 시험 문제 형식을 피하고 자연스러운 고객 지원 질문을 생성…'
       },
@@ -3727,6 +3732,7 @@ export default {
       filterConcept: '개념',
       filterSynthesis: '종합',
       filterComparison: '비교',
+      legendFamiliar: '자주 쓰는 자료',
       emptyTitle: 'Wiki 페이지가 없습니다',
       emptyDesc: 'Wiki를 활성화하고 문서를 업로드하면 지식 페이지가 자동 생성됩니다',
       selectPageHint: '왼쪽에서 페이지를 선택하여 내용을 확인하세요',
@@ -4588,6 +4594,180 @@ export default {
     toasts: {
       saveSuccess: '검색 설정이 저장되었습니다',
       saveFailed: '설정 저장 실패: {message}'
+    }
+  },
+  memorySettings: {
+    title: '내 기억',
+    description: '어시스턴트가 대화를 넘어 기억하고 있는 내용입니다. 언제든지 확인, 수정, 삭제할 수 있으며 삭제한 기억은 다시 사용되지 않습니다.',
+    workspaceDisabled: '이 워크스페이스에서는 장기 기억이 꺼져 있습니다. 관리자가 켜야 이 스위치가 적용됩니다.',
+    enableLabel: '내 장기 기억 사용',
+    enableDescription: '끄면 어시스턴트가 기억을 읽거나 추가하지 않습니다. 기존 기억은 유지되며 다시 켜면 계속 사용됩니다.',
+    usage: {
+      title: '기억이 사용되는 시점',
+      iconHint: '어떤 기억이 대화에 쓰이는지 보기',
+      intro: '「사용 중」인 기억만 대화에 들어갑니다.',
+      rows: {
+        alwaysOn: {
+          label: '매 턴 포함',
+          text: '내 정보, 선호, 「기억해 줘」라고 말한 내용'
+        },
+        situational: {
+          label: '관련될 때만',
+          text: '사실, 진행 중인 일'
+        },
+        interest: {
+          label: '자주 묻는 방향',
+          text: '장기 관심사, 매 턴 인용되지는 않음'
+        },
+        tracking: {
+          label: '먼저 관찰',
+          text: '자주 묻는 방향은 먼저 횟수를 세고, 기준에 도달해야 장기 관심사가 됩니다'
+        },
+        documents: {
+          label: '자주 쓰는 자료',
+          text: '답변에 반복해서 쓰인 문서이며, 검색 시 약간 우선됩니다'
+        },
+        pending: {
+          label: '확인 후 적용',
+          text: '확인 대기 중인 추론'
+        },
+        inactive: {
+          label: '사용 안 함',
+          text: '대체됨, 보관됨'
+        }
+      }
+    },
+    listTitle: '기억 목록',
+    listCount: '총 {count}개',
+    statusActive: '사용 중',
+    statusSuperseded: '대체됨',
+    statusArchived: '보관됨',
+    statusPending: '확인 대기',
+    statusTracking: '관찰 중',
+    statusDocuments: '자주 쓰는 자료',
+    confirmGuess: '맞아요',
+    rejectGuess: '아니에요',
+    pendingHint: '질문에서 추론된 내용입니다. 확인하기 전까지는 사용되지 않습니다.',
+    trackingHint: '반복해서 묻고 있지만 아직 「장기 관심사」가 될 횟수에 도달하지 않은 주제입니다. 그때까지는 대화에 사용되지 않습니다.',
+    documentsHint: '답변에 반복해서 등장하는 문서이며, 검색이 조금 더 이쪽을 선호합니다. 추적을 멈추면 가중치가 사라지고, 두 번 더 인용되면 다시 나타납니다.',
+    supersededHint: '이 내용은 새로 갱신된 기억으로 대체되어 대화에 다시 들어가지 않으며, 변경 기록으로만 남습니다.',
+    archivedHint: '보관된 기억은 대화에 다시 들어가지 않습니다. 인당 한도를 넘으면 덜 쓰인 항목이 자동으로 접힙니다.',
+    pendingEmptyTitle: '확인할 항목이 없습니다',
+    pendingEmptyDescription: '질문에서 사용자에 대해 추론한 내용이 생기면 여기에서 확인을 기다립니다.',
+    trackingEmptyTitle: '관찰 중인 주제가 없습니다',
+    trackingEmptyDescription: '자동 추출이 켜지면 자주 묻는 방향을 먼저 세고, 횟수가 충분해지면 장기 관심사로 기억합니다.',
+    documentsEmptyTitle: '자주 쓰는 자료가 없습니다',
+    documentsEmptyDescription: '같은 문서가 답변에 두 번 이상 인용되면 여기에 나타납니다.',
+    supersededEmptyTitle: '대체된 기억이 없습니다',
+    supersededEmptyDescription: '같은 주제가 새 표현으로 덮이면 이전 내용이 여기에 남습니다. 이 페이지에서 직접 수정하면 그 자리에서 갱신되며 이 목록에는 생기지 않습니다.',
+    archivedEmptyTitle: '보관된 기억이 없습니다',
+    archivedEmptyDescription: '사용 중인 기억이 한도(기본 200개)를 넘으면 덜 쓰인 항목이 자동으로 접힙니다. 만료 시각이 있는 할 일도 기한이 지나면 여기로 옵니다.',
+    documentsHits: '{hits}회 인용됨',
+    untitledDocument: '제목 없는 문서',
+    openDocument: '문서 열기',
+    openDocumentUnavailable: '열 수 없음: 지식 베이스 정보가 없습니다',
+    stopTrackingDocument: '추적 중지',
+    stopTrackingDocumentConfirm: '이 문서로 개인화 검색을 중단할까요? 두 번 더 인용되면 다시 나타납니다.',
+    stopTrackingDocumentSuccess: '이 자료 추적을 중지했습니다',
+    stopTrackingDocumentFailed: '추적을 중지하지 못했습니다',
+    trackingProgress: '{hits}회 질문함, {threshold}회가 되면 장기 관심사로 기억합니다',
+    trackingReady: '횟수에 도달했습니다. 장기 관심사로 저장할 수 있습니다',
+    trackingAliases: '이렇게도 물었습니다: {aliases}',
+    promoteTopic: '관심사로 저장',
+    dismissTopic: '관찰 중지',
+    dismissTopicConfirm: '이 주제 관찰을 중지할까요? 다시 물어봐도 자동으로 장기 관심사로 저장되지 않습니다.',
+    promoteSuccess: '장기 관심사로 저장했습니다',
+    promoteFailed: '관심사로 저장하지 못했습니다',
+    dismissSuccess: '이 주제 관찰을 중지했습니다',
+    dismissFailed: '관찰을 중지하지 못했습니다',
+    confirmSuccess: '확인했습니다',
+    confirmFailed: '확인하지 못했습니다',
+    rejectSuccess: '거절했습니다. 다시 추론하지 않습니다.',
+    rejectFailed: '거절하지 못했습니다',
+    export: '내보내기',
+    consolidate: '정리',
+    consolidateConfirm: '뜻이 비슷한 항목을 합칩니다. 이전 내용은 「대체됨」에 남습니다. 계속할까요?',
+    consolidateSuccess: '정리 완료: {merged}개 그룹 병합, 만료 {expired}개 보관, 기한 지난 할 일 {demoted}개 우선순위 낮춤',
+    consolidateNothing: '정리할 내용이 없습니다',
+    consolidateTooFewItems: '기억이 아직 적어 정리할 필요가 없습니다',
+    consolidateNoCandidates: '뜻이 비슷해 합칠 만한 기억이 없습니다',
+    consolidateModelDeclined: '모델이 확인한 결과 서로 다른 내용이라 합치지 않았습니다',
+    consolidateModelUnavailable: '모델을 사용할 수 없어 잘못 합치지 않도록 아무것도 바꾸지 않았습니다',
+    consolidateFailed: '정리하지 못했습니다',
+    clear: '전체 삭제',
+    clearConfirm: '모든 기억, 관찰 중인 주제, 자주 쓰는 자료가 영구 삭제되며 되돌릴 수 없습니다. 계속하시겠습니까?',
+    deleteConfirm: '이 기억을 영구 삭제할까요?',
+    add: '추가',
+    addPlaceholder: '어시스턴트가 기억했으면 하는 내용을 한 문장으로 적어 주세요',
+    addTitle: '기억 추가',
+    addKindLabel: '유형',
+    addContentLabel: '내용',
+    emptyTitle: '아직 기억이 없습니다',
+    emptyDescription: '대화에서 "기억해 줘: ..."라고 말하거나 위에서 직접 추가하세요.',
+    kinds: {
+      profile: '내 정보',
+      preference: '선호',
+      fact: '사실',
+      task: '진행 중인 일',
+      interest: '장기 관심사'
+    },
+    kindHints: {
+      profile: '이후 매 대화 턴에 포함됩니다',
+      preference: '이후 매 대화 턴에 포함됩니다',
+      fact: '질문과 관련될 때만 사용됩니다',
+      task: '질문과 관련될 때만 사용됩니다',
+      interest: '자주 묻는 방향을 이해하는 데 쓰이며, 매 턴 인용되지는 않습니다'
+    },
+    origins: {
+      explicit: '직접 요청',
+      extracted: '자동 정리',
+      manual: '수동 추가'
+    },
+    toasts: {
+      enabled: '장기 기억을 켰습니다',
+      disabled: '장기 기억을 껐습니다',
+      added: '추가했습니다',
+      updated: '수정했습니다',
+      deleted: '삭제했습니다',
+      cleared: '{count}개의 기억을 삭제했습니다',
+      saveFailed: '작업 실패: {message}'
+    }
+  },
+  memoryWorkspaceSettings: {
+    title: '장기 기억',
+    description: '구성원이 말한 개인 정보, 선호, 사실, 진행 중인 일을 어시스턴트가 대화를 넘어 기억하도록 합니다.',
+    introTitle: '기본값은 꺼짐이며 직접 켜야 합니다',
+    introDescription: '장기 기억은 구성원이 대화에서 말한 내용을 보관하므로 기본으로 켜지지 않습니다. 켜면 구성원마다 기억 공간이 분리되며 "내 기억"에서 확인, 수정, 삭제하거나 전체를 끌 수 있습니다. 사용 중인 내 정보와 선호는 이후 매 턴에 들어가고, 사실과 진행 중인 일은 질문과 관련될 때만 불러옵니다.',
+    enableLabel: '이 워크스페이스에서 장기 기억 사용',
+    enableDescription: '끄면 이 워크스페이스의 모든 대화가 기억을 읽거나 쓰지 않습니다.',
+    writeModeLabel: '기억 저장 방식',
+    writeModeDescription: '무엇을 기억할지 결정합니다.',
+    writeModeExplicit: '명시적 요청만',
+    writeModeAuto: '자동 정리',
+    writeModeExplicitHint: '구성원이 명시적으로 기억을 요청한 내용과 기억 페이지에서 직접 추가한 항목만 저장하며 추가 모델 호출이 없습니다.',
+    writeModeAutoHint: '여기에 더해 대화가 끝난 뒤 백그라운드에서 모델을 한 번 호출해 구성원이 한 말에서 오래 남길 내용을 정리합니다.',
+    extractModelLabel: '정리 모델',
+    extractModelDescription: '비워 두면 해당 대화에서 사용한 모델을 씁니다.',
+    extractDelayLabel: '정리 지연',
+    extractDelayDescription: '대화가 끝난 뒤 정리를 시작하기까지의 대기 시간입니다. 잠시 기다리면 사용자가 연달아 보낸 여러 메시지를 모델 호출 한 번으로 처리할 수 있습니다.',
+    extractMinIntervalLabel: '정리 간 최소 간격',
+    extractMinIntervalDescription: '같은 사람에 대한 두 번의 정리 사이 최소 간격으로, 비용을 제한합니다. 간격 안에 생긴 메시지는 버려지지 않고 다음 정리로 넘어갑니다.',
+    vectorRecallLabel: '의미로 기억 검색',
+    vectorRecallDescription: '표현이 아니라 의미로도 검색합니다. 사용자가 다르게 표현해도 기존 기억을 찾을 수 있습니다. 턴마다 임베딩 호출이 한 번 추가되며, 시간 초과 시 표현 기반 검색으로 되돌아갑니다.',
+    embeddingModelLabel: '기억 Embedding 모델',
+    embeddingModelDescription: '의미 검색은 이 모델 하나만 사용하며, 지식베이스마다 묶인 Embedding과는 무관합니다. 비워 두면 표현만으로 검색합니다. 바꾸면 새로 쓰는 기억은 바로 새 모델을 쓰고, 기존 기억은 새 벡터가 생길 때까지 표현으로만 찾습니다.',
+    conditioningLabel: '검색에 기억 반영',
+    conditioningDescription: '기억이 답변 프롬프트에만 붙는 것이 아니라 질의 재작성과 문서 순위에도 반영됩니다.',
+    interestThresholdLabel: '장기 관심사가 되기까지의 질문 수',
+    interestThresholdDescription: '같은 주제가 이만큼 반복된 뒤에야 기록됩니다. 1로 두면 스쳐 가는 질문까지 모두 기록되어 보통 너무 시끄럽습니다.',
+    instructionsLabel: '사용자 정의 정리 규칙',
+    instructionsDescription: '정리 프롬프트에 덧붙는 워크스페이스 규칙으로, 제품이 알 수 없는 정책을 표현합니다. 예: "고객 이름은 절대 기록하지 않는다".',
+    instructionsPlaceholder: '한 줄에 규칙 하나, 예: 고객 이름은 기록하지 않기',
+    maxItemsLabel: '구성원당 기억 상한',
+    maxItemsDescription: '초과하면 중요도와 사용 시점이 낮은 항목부터 보관 처리되며 "내 기억"에서 계속 확인할 수 있습니다.',
+    toasts: {
+      saveSuccess: '장기 기억 설정을 저장했습니다',
+      saveFailed: '저장 실패: {message}'
     }
   },
   chatHistorySettings: {

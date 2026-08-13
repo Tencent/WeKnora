@@ -21,6 +21,13 @@
                     @render-complete-change="emit('render-complete-change', $event)" />
             </div>
             <template v-else>
+                <!-- No pipeline here, but a turn that used long-term memory
+                     still has something to report. Only the memory row is
+                     wanted: agent mode already draws its own timeline, and
+                     letting this component re-derive one from the same event
+                     stream would show every step twice. -->
+                <RagPipelineProgress v-if="session.used_memories?.length" :session="session"
+                    :embedded-mode="embeddedMode" memory-only />
                 <docInfo v-if="session.knowledge_references?.length" :session="session"></docInfo>
                 <AgentStreamDisplay :session="session" :session-id="sessionId" :user-query="userQuery"
                     v-if="session.isAgentMode" :follow-up-loading="followUpLoading"

@@ -73,6 +73,9 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 		sourceIDKeys: map[string]struct{}{"knowledge_ids": {}, "faq_ids": {}},
 		sourceOutput: true,
 	},
+	// Past conversations carry no durable chunk or document IDs, so there is
+	// nothing to compact; the output is prose the model may quote.
+	"search_conversations": {},
 	"query_knowledge_graph": {
 		sourceIDKeys: map[string]struct{}{"knowledge_base_ids": {}},
 		sourceOutput: true,

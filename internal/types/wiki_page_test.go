@@ -179,6 +179,29 @@ func TestWikiPageJSON(t *testing.T) {
 	}
 }
 
+func TestWikiSourceKnowledgeID(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"doc-1|排班手册", "doc-1"},
+		{"doc-1", "doc-1"},
+		{"  doc-1 | title ", "doc-1"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := WikiSourceKnowledgeID(c.in); got != c.want {
+			t.Errorf("WikiSourceKnowledgeID(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	page := &WikiPage{SourceRefs: StringArray{"doc-1|手册", "doc-2"}}
+	if !page.BuiltFrom(map[string]struct{}{"doc-1": {}}) {
+		t.Errorf("page should match doc-1")
+	}
+	if page.BuiltFrom(map[string]struct{}{"doc-9": {}}) {
+		t.Errorf("page should not match an unrelated document")
+	}
+}
+
 func TestWikiGraphDataJSON(t *testing.T) {
 	graph := WikiGraphData{
 		Nodes: []WikiGraphNode{

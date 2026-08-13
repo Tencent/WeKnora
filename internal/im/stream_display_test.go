@@ -74,7 +74,7 @@ func TestStreamDisplayPipeline_agentScenario_redGreen(t *testing.T) {
 	}
 
 	final := FormatIMFinalFromParts(IMStreamParts{
-		Mode: IMStreamModeAgent,
+		Mode:       IMStreamModeAgent,
 		AgentInner: "分析 Civilization VI 问题\n",
 		AgentToolSteps: []IMToolStep{
 			{ToolName: "grep_chunks", Success: true},

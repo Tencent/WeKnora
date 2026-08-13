@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -390,7 +391,23 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 	}
 	if kbCount > 0 || agentCount > 0 {
 		logger.Warnf(ctx, "Model %s is in use: kb=%d agent=%d", id, kbCount, agentCount)
-		return apperrors.NewBadRequestError(formatModelInUseMessage(kbCount, agentCount))
+		return apperrors.NewBadRequestError(formatModelInUseMessage(kbCount, agentCount, false))
+	}
+
+	if s.tenantService != nil {
+		tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
+		if err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"model_id":  id,
+				"tenant_id": tenantID,
+			})
+			return err
+		}
+		if tenant != nil && tenant.MemoryConfig != nil &&
+			strings.TrimSpace(tenant.MemoryConfig.EmbeddingModelID) == id {
+			logger.Warnf(ctx, "Model %s is used by long-term memory", id)
+			return apperrors.NewBadRequestError(formatModelInUseMessage(0, 0, true))
+		}
 	}
 
 	// Delete model from repository
@@ -630,25 +647,20 @@ func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR
 	return sttModel, nil
 }
 
-func formatModelInUseMessage(kbCount, agentCount int64) string {
-	switch {
-	case kbCount > 0 && agentCount > 0:
-		return fmt.Sprintf(
-			"model is used by %d knowledge base(s) and %d agent(s); "+
-				"reconfigure or remove those references before deleting",
-			kbCount, agentCount,
-		)
-	case kbCount > 0:
-		return fmt.Sprintf(
-			"model is used by %d knowledge base(s); "+
-				"reconfigure or remove those references before deleting",
-			kbCount,
-		)
-	default:
-		return fmt.Sprintf(
-			"model is used by %d agent(s); "+
-				"reconfigure or remove those references before deleting",
-			agentCount,
-		)
+func formatModelInUseMessage(kbCount, agentCount int64, memory bool) string {
+	var parts []string
+	if kbCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d knowledge base(s)", kbCount))
 	}
+	if agentCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d agent(s)", agentCount))
+	}
+	if memory {
+		parts = append(parts, "long-term memory")
+	}
+	joined := strings.Join(parts, " and ")
+	return fmt.Sprintf(
+		"model is used by %s; reconfigure or remove those references before deleting",
+		joined,
+	)
 }

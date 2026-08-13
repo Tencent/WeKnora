@@ -1554,6 +1554,180 @@ export default {
       errorGeneric: 'An error occurred. Please try again.'
     }
   },
+  memorySettings: {
+    title: 'My memory',
+    description: 'What the assistant remembers about you across conversations. You can review, edit and delete anything here; deleted memories are never used again.',
+    workspaceDisabled: 'Long-term memory is off for this workspace. This switch takes effect once an admin turns it on.',
+    enableLabel: 'Use long-term memory for me',
+    enableDescription: 'When off, the assistant neither reads nor adds your memories. Existing ones are kept and resume when you turn it back on.',
+    usage: {
+      title: 'When memories are used',
+      iconHint: 'See which memories are used in conversation',
+      intro: 'Only Active memories are used in conversation.',
+      rows: {
+        alwaysOn: {
+          label: 'Every turn',
+          text: 'Profile, preferences, and anything you asked to remember'
+        },
+        situational: {
+          label: 'When related',
+          text: 'Facts and ongoing tasks'
+        },
+        interest: {
+          label: 'Usual topics',
+          text: 'Long-term interests; not necessarily quoted every turn'
+        },
+        tracking: {
+          label: 'Watch first',
+          text: 'Recurring topics are counted first, and become a long-term interest only after they hit the threshold'
+        },
+        documents: {
+          label: 'Familiar sources',
+          text: 'Documents your answers keep drawing on; retrieval prefers them slightly'
+        },
+        pending: {
+          label: 'After you confirm',
+          text: 'Inferred items awaiting review'
+        },
+        inactive: {
+          label: 'Not used',
+          text: 'Replaced and archived items'
+        }
+      }
+    },
+    listTitle: 'Memories',
+    listCount: '{count} total',
+    statusActive: 'Active',
+    statusSuperseded: 'Replaced',
+    statusArchived: 'Archived',
+    statusPending: 'Needs review',
+    statusTracking: 'Watching',
+    statusDocuments: 'Familiar sources',
+    confirmGuess: 'Yes',
+    rejectGuess: 'No',
+    pendingHint: 'These were inferred from your questions. They are not used until you confirm them.',
+    trackingHint: 'These are topics you keep asking about, but they have not yet hit the threshold to become a long-term interest. They are not used in conversation until then.',
+    documentsHint: 'These documents keep showing up in answers, so retrieval leans toward them a little. Stop tracking to drop the boost; they reappear after two more citations.',
+    supersededHint: 'These have been replaced by newer memories. They are kept as a history of what changed and are not used in conversation.',
+    archivedHint: 'Archived memories are not used in conversation. When you hit the per-person limit, less-used items are tucked away automatically.',
+    pendingEmptyTitle: 'Nothing to review',
+    pendingEmptyDescription: 'When something is inferred about you from your questions, it waits here for your confirmation.',
+    trackingEmptyTitle: 'No topics being watched',
+    trackingEmptyDescription: 'Once auto-distillation is on, the system counts what you usually ask about and turns it into a long-term interest after enough repeats.',
+    documentsEmptyTitle: 'No familiar sources yet',
+    documentsEmptyDescription: 'A document appears here after it has been cited in answers at least twice.',
+    supersededEmptyTitle: 'Nothing has been replaced yet',
+    supersededEmptyDescription: 'When a new wording covers the same topic, the old one stays here. Editing an item on this page updates it in place and does not create a history row.',
+    archivedEmptyTitle: 'Nothing archived yet',
+    archivedEmptyDescription: 'When active memories exceed the cap (200 by default), less-used ones are tucked away. Dated tasks also land here after they expire.',
+    documentsHits: 'Cited {hits} times',
+    untitledDocument: 'Untitled document',
+    openDocument: 'Open document',
+    openDocumentUnavailable: 'Cannot open: missing knowledge base',
+    stopTrackingDocument: 'Stop tracking',
+    stopTrackingDocumentConfirm: 'Stop using this document for personalized retrieval? It will reappear after two more citations.',
+    stopTrackingDocumentSuccess: 'Stopped tracking this source',
+    stopTrackingDocumentFailed: 'Failed to stop tracking',
+    trackingProgress: 'Asked {hits} times; becomes a long-term interest at {threshold}',
+    trackingReady: 'Threshold reached — you can save this as a long-term interest',
+    trackingAliases: 'Also asked as: {aliases}',
+    promoteTopic: 'Save as interest',
+    dismissTopic: 'Stop watching',
+    dismissTopicConfirm: 'Stop watching this topic? Asking about it again will not automatically save it as a long-term interest.',
+    promoteSuccess: 'Saved as a long-term interest',
+    promoteFailed: 'Failed to save as interest',
+    dismissSuccess: 'Stopped watching this topic',
+    dismissFailed: 'Failed to stop watching',
+    confirmSuccess: 'Confirmed',
+    confirmFailed: 'Failed to confirm',
+    rejectSuccess: 'Declined. It will not be inferred again.',
+    rejectFailed: 'Failed to decline',
+    export: 'Export',
+    consolidate: 'Tidy up',
+    consolidateConfirm: 'Near-duplicate items will be merged. The old wording stays under Replaced. Continue?',
+    consolidateSuccess: 'Tidied up: merged {merged} groups, archived {expired} expired, demoted {demoted} stale tasks',
+    consolidateNothing: 'Nothing needed tidying',
+    consolidateTooFewItems: 'Too few memories to be worth tidying yet',
+    consolidateNoCandidates: 'No memories looked close enough to merge',
+    consolidateModelDeclined: 'The model looked and found these are different things, so nothing was merged',
+    consolidateModelUnavailable: 'The model was unavailable, so nothing was changed rather than risk a wrong merge',
+    consolidateFailed: 'Failed to tidy up',
+    clear: 'Clear all',
+    clearConfirm: 'This permanently deletes all of your memories, watched topics, and familiar sources and cannot be undone. Continue?',
+    deleteConfirm: 'Permanently delete this memory?',
+    add: 'Add',
+    addPlaceholder: 'Write one sentence you want the assistant to remember',
+    addTitle: 'Add a memory',
+    addKindLabel: 'Kind',
+    addContentLabel: 'Content',
+    emptyTitle: 'No memories yet',
+    emptyDescription: 'Say "remember that ..." in a conversation, or add one directly above.',
+    kinds: {
+      profile: 'About you',
+      preference: 'Preference',
+      fact: 'Fact',
+      task: 'Ongoing task',
+      interest: 'Long-term interest'
+    },
+    kindHints: {
+      profile: 'Included in every later turn',
+      preference: 'Included in every later turn',
+      fact: 'Used only when the question is related',
+      task: 'Used only when the question is related',
+      interest: 'Helps the assistant understand what you usually ask about; not necessarily quoted every turn'
+    },
+    origins: {
+      explicit: 'You asked',
+      extracted: 'Distilled',
+      manual: 'Added by hand'
+    },
+    toasts: {
+      enabled: 'Long-term memory enabled for you',
+      disabled: 'Long-term memory disabled',
+      added: 'Added',
+      updated: 'Updated',
+      deleted: 'Deleted',
+      cleared: 'Deleted {count} memories',
+      saveFailed: 'Operation failed: {message}'
+    }
+  },
+  memoryWorkspaceSettings: {
+    title: 'Long-term memory',
+    description: 'Let the assistant remember what members tell it — who they are, how they like to work, stable facts and what they are working on — across conversations.',
+    introTitle: 'Off by default, you have to turn it on',
+    introDescription: 'Long-term memory retains what members say in conversations, so it does not arrive enabled. Once on, each member has their own isolated memory space and can review, edit, delete or switch it off entirely under "My memory". Active profile and preference memories are included in every later turn; facts and ongoing tasks are recalled only when the question is related.',
+    enableLabel: 'Enable long-term memory in this workspace',
+    enableDescription: 'When off, no conversation in this workspace reads or writes memory.',
+    writeModeLabel: 'How memories are written',
+    writeModeDescription: 'Controls what gets remembered.',
+    writeModeExplicit: 'Explicit only',
+    writeModeAuto: 'Distill automatically',
+    writeModeExplicitHint: 'Only records what a member explicitly asks to remember, plus entries added by hand. No extra model call.',
+    writeModeAutoHint: 'Additionally makes one background model call after a conversation to distill what is worth keeping from what the member said.',
+    extractModelLabel: 'Distillation model',
+    extractModelDescription: 'Leave blank to use the model the conversation itself used.',
+    extractDelayLabel: 'Distillation delay',
+    extractDelayDescription: 'How long a finished turn waits before distillation runs. Waiting lets one model call cover the several messages a user usually sends in a row.',
+    extractMinIntervalLabel: 'Minimum interval between runs',
+    extractMinIntervalDescription: 'The floor between two distillation runs for one person, used to bound cost. Messages produced inside the interval are not dropped — they are carried over to the next run.',
+    vectorRecallLabel: 'Match memory by meaning',
+    vectorRecallDescription: 'Adds semantic matching on top of wording, so a memory still surfaces after the user re-phrases the subject — and most memories get re-phrased eventually. Costs one embedding call per turn, and falls back to wording-only matching on timeout.',
+    embeddingModelLabel: 'Memory embedding model',
+    embeddingModelDescription: 'Semantic recall uses this one model, independent of whichever embedding models knowledge bases bind. Leave blank for wording-only matching. After a change, new memories use the new model immediately; existing ones stay wording-only until they are re-embedded.',
+    conditioningLabel: 'Let memory shape retrieval',
+    conditioningDescription: 'Memory takes part in query rewriting and document ranking rather than only being appended to the answer prompt. This is where memory earns its keep in a knowledge-base product.',
+    interestThresholdLabel: 'Questions before a topic becomes an interest',
+    interestThresholdDescription: 'A subject is recorded only after it has come up this many times. Setting it to 1 records every passing question, which is usually too noisy.',
+    instructionsLabel: 'Custom distillation rules',
+    instructionsDescription: 'Workspace rules appended to the distillation prompt, for policies the product cannot guess — for example "never record customer names".',
+    instructionsPlaceholder: 'One rule per line, for example: never record customer names',
+    maxItemsLabel: 'Memories per member',
+    maxItemsDescription: 'Beyond this, the lowest ranked memories are archived by importance and recency. Archived memories stay visible under "My memory".',
+    toasts: {
+      saveSuccess: 'Long-term memory settings saved',
+      saveFailed: 'Failed to save: {message}'
+    }
+  },
   chatHistorySettings: {
     title: 'Message Management',
     description: 'Configure chat history knowledge base to automatically index conversation messages for semantic search',
@@ -2464,6 +2638,7 @@ export default {
       filterConcept: 'Concepts',
       filterSynthesis: 'Synthesis',
       filterComparison: 'Comparisons',
+      legendFamiliar: 'Sources you use often',
       emptyTitle: 'No wiki pages yet',
       emptyDesc: 'Upload documents with Wiki enabled to auto-generate knowledge pages',
       selectPageHint: 'Select a page from the left to view its content',
@@ -2836,6 +3011,11 @@ export default {
     }
   },
   chat: {
+    memoryUsedCount: 'Used {count} memories',
+    memoryForget: 'Delete this memory',
+    memoryForgotten: 'Memory deleted',
+    memoryForgetFailed: 'Failed to delete',
+    memoryHint: 'These are the long-term memories this answer saw. Deleting one stops it from being used again.',
     suggestedQuestions: 'You can ask me',
     followUpQuestions: 'Keep asking',
     followUpQuestionsLoading: 'Loading suggested questions',

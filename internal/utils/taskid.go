@@ -11,7 +11,7 @@ import (
 
 // GenerateTaskID generates a unique task ID with multiple collision-resistant elements.
 // The format is: <taskType>_<tenantID>_<timestamp>_<uuid>_<businessID>
-// 
+//
 // Parameters:
 //   - taskType: Type of task (e.g., "faq_import", "kb_clone")
 //   - tenantID: Tenant ID for multi-tenancy isolation
@@ -21,10 +21,10 @@ import (
 func GenerateTaskID(taskType string, tenantID uint64, businessID ...string) string {
 	// Use current timestamp in milliseconds for temporal uniqueness
 	timestamp := time.Now().UnixMilli()
-	
+
 	// Generate a short UUID (first 8 characters for brevity)
 	shortUUID := strings.ReplaceAll(uuid.New().String()[:8], "-", "")
-	
+
 	// Build the task ID components
 	components := []string{
 		sanitizeTaskType(taskType),
@@ -32,12 +32,12 @@ func GenerateTaskID(taskType string, tenantID uint64, businessID ...string) stri
 		strconv.FormatInt(timestamp, 10),
 		shortUUID,
 	}
-	
+
 	// Add business ID if provided
 	if len(businessID) > 0 && businessID[0] != "" {
 		components = append(components, sanitizeBusinessID(businessID[0]))
 	}
-	
+
 	return strings.Join(components, "_")
 }
 
@@ -46,18 +46,18 @@ func GenerateTaskID(taskType string, tenantID uint64, businessID ...string) stri
 func GenerateTaskIDWithPrefix(prefix string, tenantID uint64, businessID ...string) string {
 	timestamp := time.Now().UnixMilli()
 	shortUUID := strings.ReplaceAll(uuid.New().String()[:8], "-", "")
-	
+
 	components := []string{
 		sanitizeTaskType(prefix),
 		strconv.FormatUint(tenantID, 10),
 		strconv.FormatInt(timestamp, 10),
 		shortUUID,
 	}
-	
+
 	if len(businessID) > 0 && businessID[0] != "" {
 		components = append(components, sanitizeBusinessID(businessID[0]))
 	}
-	
+
 	return strings.Join(components, "_")
 }
 

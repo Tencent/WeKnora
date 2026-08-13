@@ -128,6 +128,7 @@ type sessionService struct {
 	sandboxResolver       sandbox.TenantSandboxResolver
 	sandboxPinner         *SessionSandboxPinner
 	sandboxPolicy         WorkspaceSandboxPolicy
+	memoryService         interfaces.MemoryService // Service for cross-session long-term memory
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -149,6 +150,7 @@ func NewSessionService(cfg *config.Config,
 	sandboxResolver sandbox.TenantSandboxResolver,
 	sandboxPinner *SessionSandboxPinner,
 	sandboxPolicy WorkspaceSandboxPolicy,
+	memoryService interfaces.MemoryService,
 ) interfaces.SessionService {
 	return &sessionService{
 		cfg:                   cfg,
@@ -169,6 +171,7 @@ func NewSessionService(cfg *config.Config,
 		sandboxResolver:       sandboxResolver,
 		sandboxPinner:         sandboxPinner,
 		sandboxPolicy:         sandboxPolicy,
+		memoryService:         memoryService,
 	}
 }
 

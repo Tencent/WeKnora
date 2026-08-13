@@ -962,7 +962,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 
 				logger.Infof(streamCtx.asyncCtx, "Knowledge QA service completed for session: %s", sessionID)
 				updateCtx := context.WithValue(streamCtx.asyncCtx, types.TenantIDContextKey, reqCtx.session.TenantID)
-				h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, reqCtx.query)
+				h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, reqCtx.query, reqCtx.userMessageID)
 				streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
 					Type:      event.EventAgentComplete,
 					SessionID: sessionID,
@@ -998,7 +998,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 					context.WithoutCancel(streamCtx.asyncCtx),
 					types.TenantIDContextKey, reqCtx.session.TenantID,
 				)
-				h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, reqCtx.query)
+				h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, reqCtx.query, reqCtx.userMessageID)
 				logger.Infof(streamCtx.asyncCtx, "Agent QA service completed for session: %s", sessionID)
 			}
 		}()
@@ -1410,7 +1410,9 @@ func appendQuickAnswerReasoning(msg *types.Message, content string) {
 
 // completeAssistantMessage marks an assistant message as complete, updates it,
 // and asynchronously indexes the Q&A pair into the chat history knowledge base.
-func (h *Handler) completeAssistantMessage(ctx context.Context, assistantMessage *types.Message, userQuery string) {
+func (h *Handler) completeAssistantMessage(
+	ctx context.Context, assistantMessage *types.Message, userQuery, userMessageID string,
+) {
 	assistantMessage.UpdatedAt = time.Now()
 	assistantMessage.IsCompleted = true
 	_ = h.messageService.UpdateMessage(ctx, assistantMessage)
@@ -1428,4 +1430,73 @@ func (h *Handler) completeAssistantMessage(ctx context.Context, assistantMessage
 			}
 		}()
 	}
+	if userQuery != "" {
+		go h.recordTurnMemory(bgCtx, assistantMessage, userQuery, userMessageID)
+	}
+}
+
+// recordTurnMemory runs the long-term memory write path for a finished turn.
+//
+// This is the single place a conversation can produce memory, and it sits at
+// the point where both the RAG and the Agent path converge, so neither mode
+// can silently miss it. A stopped conversation arrives with an empty query and
+// is skipped by the caller.
+func (h *Handler) recordTurnMemory(
+	ctx context.Context, assistantMessage *types.Message, userQuery, userMessageID string,
+) {
+	if h.memoryService == nil {
+		return
+	}
+	// An explicit "remember ..." directive is stored verbatim and immediately,
+	// with no model in the loop. This is what makes the default explicit_only
+	// mode useful rather than merely safe.
+	if statement, ok := types.DetectExplicitMemory(userQuery); ok {
+		if _, err := h.memoryService.Remember(ctx, types.MemoryItem{
+			Kind:            types.MemoryKindFact,
+			Content:         statement,
+			Importance:      4,
+			Origin:          types.MemoryOriginExplicit,
+			SourceSessionID: assistantMessage.SessionID,
+			// Attribute to the user's own message, not the answer. Background
+			// distillation reads that same message, so the two paths must
+			// agree on provenance or a memory deleted from one can be
+			// re-derived by the other.
+			SourceMessageID: userMessageID,
+		}); err != nil {
+			logger.Warnf(ctx, "memory: explicit remember failed for message %s: %v", assistantMessage.ID, err)
+		}
+	}
+	h.recordAnswerSources(ctx, assistantMessage)
+	h.memoryService.ScheduleExtraction(ctx, assistantMessage.SessionID, assistantMessage.ID, assistantMessage.ModelID)
+}
+
+// recordAnswerSources notes which documents this answer drew on, so the
+// reranker can prefer the material this person keeps working from.
+//
+// The references attached to an answer are a weaker signal than an explicit
+// thumbs-up: they say the retriever kept picking a document, not that the user
+// found it useful. They are, however, the only per-person retrieval signal
+// available without asking for anything, and the boost they earn is capped
+// accordingly.
+func (h *Handler) recordAnswerSources(ctx context.Context, assistantMessage *types.Message) {
+	if len(assistantMessage.KnowledgeReferences) == 0 {
+		return
+	}
+	seen := make(map[string]struct{}, len(assistantMessage.KnowledgeReferences))
+	refs := make([]types.MemoryDocAffinity, 0, len(assistantMessage.KnowledgeReferences))
+	for _, ref := range assistantMessage.KnowledgeReferences {
+		if ref.KnowledgeID == "" {
+			continue
+		}
+		if _, dup := seen[ref.KnowledgeID]; dup {
+			continue
+		}
+		seen[ref.KnowledgeID] = struct{}{}
+		refs = append(refs, types.MemoryDocAffinity{
+			KnowledgeID:     ref.KnowledgeID,
+			KnowledgeBaseID: ref.KnowledgeBaseID,
+			Title:           ref.KnowledgeTitle,
+		})
+	}
+	h.memoryService.RecordAnswerSources(ctx, refs)
 }
