@@ -1296,8 +1296,11 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 				ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, item.ExternalID,
 			)
 			if terr != nil {
-				logger.Warnf(ctx, "failed to check tombstone for external_id=%s: %v", item.ExternalID, terr)
-			} else if tomb != nil {
+				// Fail closed: an unanswered tombstone check must not re-create
+				// an item the user deleted from the KB.
+				return false, fmt.Errorf("check tombstone for external_id=%s: %w", item.ExternalID, terr)
+			}
+			if tomb != nil {
 				logger.Infof(ctx, "item %q (external_id=%s) was deleted from the KB, skipping resurrection",
 					item.Title, item.ExternalID)
 				return false, errSyncItemTombstoned
