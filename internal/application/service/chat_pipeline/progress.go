@@ -183,6 +183,21 @@ func EndRetrievalProgress(
 	}
 
 	count, docCount, webCount := retrievalResultBreakdown(chatManage)
+
+	// ErrSearchNothing means retrieval short-circuited the pipeline into the
+	// fallback answer: nothing survived filtering, and the fallback prompt gets
+	// a knowledge-base listing rather than any retrieved chunk. So no chunk
+	// reached the model, and none can be cited either. Reporting the raw hits as
+	// the result count is what made the timeline promise results the answer never
+	// saw — and offer a row with no references to open. The raw hits stay
+	// available as candidates, which is the useful part when a threshold is what
+	// rejected them.
+	candidateCount := 0
+	if stageErr == ErrSearchNothing {
+		candidateCount = count
+		count, docCount, webCount = 0, 0, 0
+	}
+
 	searchSource := retrievalSearchSource(chatManage)
 	if count > 0 {
 		switch {
@@ -197,10 +212,13 @@ func EndRetrievalProgress(
 	success := stageErr == nil || stageErr == ErrSearchNothing
 	output := ""
 	if success {
-		if count == 0 {
-			output = "未检索到相关内容"
-		} else {
+		switch {
+		case count > 0:
 			output = fmt.Sprintf("检索到 %d 条相关内容", count)
+		case candidateCount > 0:
+			output = fmt.Sprintf("命中 %d 条候选，相关性不足，未用于回答", candidateCount)
+		default:
+			output = "未检索到相关内容"
 		}
 	}
 
@@ -220,10 +238,11 @@ func EndRetrievalProgress(
 			Success:    success,
 			Duration:   time.Since(start).Milliseconds(),
 			Data: map[string]interface{}{
-				"count":         count,
-				"doc_count":     docCount,
-				"web_count":     webCount,
-				"search_source": searchSource,
+				"count":           count,
+				"doc_count":       docCount,
+				"web_count":       webCount,
+				"search_source":   searchSource,
+				"candidate_count": candidateCount,
 			},
 		},
 	})

@@ -1264,6 +1264,7 @@ export default {
     },
     search: {
       noResults: '未找到匹配的内容',
+      candidatesBelowThreshold: '命中 {count} 条候选，相关性不足，未用于回答',
       foundResultsFromFiles: '找到 {count} 个结果，来自 {files} 个文件',
       foundResults: '找到 {count} 个结果',
       foundMixedResults: '找到 {count} 个结果（{docCount} 篇文档，{webCount} 条网页）',
