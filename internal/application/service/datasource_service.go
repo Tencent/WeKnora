@@ -841,12 +841,41 @@ func (s *DataSourceService) applyFetchedItem(
 	tagIDs []string, result *types.SyncResult,
 ) {
 	if item.IsDeleted {
-		if ds.SyncDeletions {
-			// Count only — actual KB deletion is intentionally not performed.
-			// Users manage knowledge removal explicitly via the KB UI to avoid
-			// accidental data loss from connector misdetection or reconfiguration.
-			result.Deleted++
+		if !ds.SyncDeletions {
+			// Sync deletion disabled: neither count nor delete.
+			return
 		}
+		// Perform real KB deletion, scoped to items owned by this data source
+		// so identical external IDs from different data sources cannot collide.
+		repo := s.knowledgeService.GetRepository()
+		existing, lookupErr := repo.FindByDataSourceExternalID(
+			ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, item.ExternalID,
+		)
+		if lookupErr != nil {
+			result.Failed++
+			recordSyncError(result, types.SyncItemError{
+				Title:   item.Title,
+				Code:    "deletion_lookup_failed",
+				Message: fmt.Sprintf("%s: find deleted knowledge: %v", item.ExternalID, lookupErr),
+			})
+			return
+		}
+		if existing == nil {
+			// Deletion is idempotent: the source item may already have been
+			// removed manually or by an earlier sync.
+			result.Skipped++
+			return
+		}
+		if deleteErr := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); deleteErr != nil {
+			result.Failed++
+			recordSyncError(result, types.SyncItemError{
+				Title:   item.Title,
+				Code:    "deletion_failed",
+				Message: fmt.Sprintf("%s: delete knowledge: %v", item.ExternalID, deleteErr),
+			})
+			return
+		}
+		result.Deleted++
 		return
 	}
 
@@ -1185,7 +1214,10 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 	isUpdate := false
 	if item.ExternalID != "" {
 		repo := s.knowledgeService.GetRepository()
-		existing, err := repo.FindByMetadataKey(ctx, ds.TenantID, ds.KnowledgeBaseID, "external_id", item.ExternalID)
+		// Scope the lookup to items owned by this data source so identical
+		// external IDs from two data sources cannot collide or overwrite each
+		// other during updates.
+		existing, err := repo.FindByDataSourceExternalID(ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, item.ExternalID)
 		if err != nil {
 			logger.Warnf(ctx, "failed to check existing knowledge for external_id=%s: %v", item.ExternalID, err)
 			// Non-fatal: proceed with creation (may produce duplicate)
@@ -1231,7 +1263,7 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 
 	// Case 2: only a remote URL — let WeKnora handle downloading and parsing
 	if item.URL != "" {
-		if _, err := s.knowledgeService.CreateKnowledgeFromURL(
+		created, err := s.knowledgeService.CreateKnowledgeFromURL(
 			ctx,
 			ds.KnowledgeBaseID,
 			item.URL,
@@ -1242,7 +1274,8 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			tagIDs, // auto-tag from data source
 			channel,
 			nil,
-		); err != nil {
+		)
+		if err != nil {
 			var dupErr *types.DuplicateKnowledgeError
 			if errors.As(err, &dupErr) && dupIsSameNode(dupErr, item) {
 				// Identical content is already present in the KB under THIS node's
@@ -1251,6 +1284,20 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 				s.sweepStaleSubtree(ctx, ds, item)
 			}
 			return isUpdate, err
+		}
+		// URL-created knowledge has no metadata, so a later deletion could
+		// never find it. Attach the datasource keys on fresh creation only;
+		// the duplicate path reuses an existing row that must not be re-tagged.
+		if created != nil {
+			metadataBytes, mErr := json.Marshal(metadata)
+			if mErr != nil {
+				logger.Warnf(ctx, "failed to marshal metadata for URL knowledge %s: %v", created.ID, mErr)
+			} else {
+				created.Metadata = types.JSON(metadataBytes)
+				if uErr := s.knowledgeService.GetRepository().UpdateKnowledge(ctx, created); uErr != nil {
+					logger.Warnf(ctx, "failed to attach datasource metadata to URL knowledge %s: %v", created.ID, uErr)
+				}
+			}
 		}
 		s.sweepStaleSubtree(ctx, ds, item)
 		return isUpdate, nil

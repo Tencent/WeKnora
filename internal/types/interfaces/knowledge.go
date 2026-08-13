@@ -317,6 +317,11 @@ type KnowledgeRepository interface {
 	// FindByMetadataKeyPrefix finds knowledge items whose metadata[key] starts
 	// with the given prefix. Used to sweep an external node's attachment sub-items.
 	FindByMetadataKeyPrefix(ctx context.Context, tenantID uint64, kbID string, key string, prefix string) ([]*types.Knowledge, error)
+	// FindByDataSourceExternalID finds a knowledge item owned by one data source
+	// and identified by the source's external item ID.
+	FindByDataSourceExternalID(
+		ctx context.Context, tenantID uint64, kbID, dataSourceID, externalID string,
+	) (*types.Knowledge, error)
 	// SearchKnowledgeInScopes searches knowledge items by keyword within the given (tenant_id, kb_id) scopes (own + shared).
 	SearchKnowledgeInScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error)
 	// ListIDsByTagIDs returns all knowledge IDs that have any of the specified tag IDs (OR semantics).
