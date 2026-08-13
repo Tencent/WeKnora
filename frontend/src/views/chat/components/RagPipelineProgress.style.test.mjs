@@ -49,6 +49,7 @@ test('rag pipeline opens references from search steps and the drawer composable'
 
 test('rag pipeline uses a native pending step and lets the thinking title shimmer while pending', () => {
   assert.match(source, /showPrePipelineWait/)
+  assert.match(source, /v-else-if="showPrePipelineWait"[\s\S]*class="tool-event"/)
   assert.match(source, /class="action-card action-pending"/)
   assert.match(source, /t\('chat\.preparingAnswer'\)/)
   assert.match(source, /showThinkingStep/)
@@ -128,7 +129,23 @@ test('memory-only hosts get the memory row and nothing else', () => {
   assert.match(source, /v-if="memoryOnly"\s*\n\s*variant="root"/)
   assert.match(source, /<div v-else-if="showPrePipelineWait"/)
   assert.match(source, /if \(props\.memoryOnly\) return hasMemory\.value/)
+})
 
+// The standalone row is for answers with no timeline at all. Agent turns keep
+// their memory row inside the agent timeline, so rendering it here too would
+// show the same recall twice, in two different visual languages.
+test('only timeline-less answers get the standalone memory row', () => {
   const botmsg = readFileSync(join(here, 'botmsg.vue'), 'utf8')
-  assert.match(botmsg, /<RagPipelineProgress v-if="session\.used_memories\?\.length"[\s\S]*?memory-only/)
+  assert.match(
+    botmsg,
+    /<RagPipelineProgress v-if="!session\.isAgentMode && session\.used_memories\?\.length"[\s\S]*?memory-only/,
+  )
+})
+
+// Both timelines show the same row from the same state; duplicating the recall
+// list, expand state and forget call is how the two drift apart.
+test('memory row state is shared by both timelines', () => {
+  assert.match(source, /useChatMemoryRow\(\(\) => props\.session\?\.used_memories\)/)
+  const agent = readFileSync(join(here, 'AgentStreamDisplay.vue'), 'utf8')
+  assert.match(agent, /useChatMemoryRow\(/)
 })

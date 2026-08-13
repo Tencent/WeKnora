@@ -22,11 +22,13 @@
       <div class="tree-child tree-child-last streaming-loading-node">
         <div class="tree-branch" />
         <div class="tree-child-content">
-          <div class="action-card action-pending">
-            <div class="action-header no-results">
-              <div class="action-title">
-                <t-icon class="action-title-icon" name="lightbulb" />
-                <span class="action-name">{{ t('chat.preparingAnswer') }}</span>
+          <div class="tool-event">
+            <div class="action-card action-pending">
+              <div class="action-header no-results">
+                <div class="action-title">
+                  <t-icon class="action-title-icon" name="lightbulb" />
+                  <span class="action-name">{{ t('chat.preparingAnswer') }}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -247,10 +249,9 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
-import { deleteMemoryItem } from '@/api/memory'
 import ChatMemoryStep from './ChatMemoryStep.vue'
+import { useChatMemoryRow } from '@/composables/useChatMemoryRow'
 import { getAgentToolIconName } from '@/utils/agent-tool-icons'
 import {
   getKnowledgeSearchSummaryHtml,
@@ -295,36 +296,14 @@ const waitController = createRagWaitController((view) => {
 // Long-term memory is shown as a timeline row rather than as a card of its
 // own: it is one more thing the turn did before answering, and giving it a
 // separate visual language would make it read as unrelated to the pipeline.
-const memoryExpanded = ref(false)
-const forgettingId = ref('')
-const forgottenIds = ref<string[]>([])
-
-const memoryItems = computed(() => {
-  const used = props.session?.used_memories
-  if (!Array.isArray(used)) return []
-  return used.filter((memory) => memory?.id && !forgottenIds.value.includes(memory.id))
-})
-
-const hasMemory = computed(() => memoryItems.value.length > 0)
-
-const toggleMemory = () => {
-  memoryExpanded.value = !memoryExpanded.value
-}
-
-// Forgetting from the answer is the shortest path from noticing a wrong memory
-// to it being gone, which is where users actually notice one.
-const forgetMemory = async (memory: { id: string }) => {
-  forgettingId.value = memory.id
-  try {
-    await deleteMemoryItem(memory.id)
-    forgottenIds.value = [...forgottenIds.value, memory.id]
-    MessagePlugin.success(t('chat.memoryForgotten'))
-  } catch (error: any) {
-    MessagePlugin.error(error?.message || t('chat.memoryForgetFailed'))
-  } finally {
-    forgettingId.value = ''
-  }
-}
+const {
+  memoryItems,
+  hasMemory,
+  expanded: memoryExpanded,
+  forgettingId,
+  toggle: toggleMemory,
+  forget: forgetMemory,
+} = useChatMemoryRow(() => props.session?.used_memories)
 
 const thinkingContent = computed(() => {
   const stream = props.session?.agentEventStream
