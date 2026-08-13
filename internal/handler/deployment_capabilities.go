@@ -69,16 +69,16 @@ func BuildDeploymentCapabilities(
 	return DeploymentCapabilitiesData{
 		Edition: edition,
 		Capabilities: map[string]DeploymentCapability{
-			"organizations":       organizations,
-			"agents":                supportedDeploymentCapability(available.Agents),
-			"integrations.im":       supportedDeploymentCapability(available.IM),
-			"integrations.embed":    supportedDeploymentCapability(available.Embed),
-			"integrations.api":      supportedDeploymentCapability(available.API),
-			"settings.mcp":          supportedDeploymentCapability(available.MCP),
-			"settings.websearch":    supportedDeploymentCapability(available.WebSearch),
-			"settings.vectorstore":  supportedDeploymentCapability(available.VectorStore),
-			"settings.storage":      supportedDeploymentCapability(available.Storage),
-			"settings.sandbox":      supportedDeploymentCapability(available.Sandbox),
+			"organizations":        organizations,
+			"agents":               supportedDeploymentCapability(available.Agents),
+			"integrations.im":      supportedDeploymentCapability(available.IM),
+			"integrations.embed":   supportedDeploymentCapability(available.Embed),
+			"integrations.api":     supportedDeploymentCapability(available.API),
+			"settings.mcp":         supportedDeploymentCapability(available.MCP),
+			"settings.websearch":   supportedDeploymentCapability(available.WebSearch),
+			"settings.vectorstore": supportedDeploymentCapability(available.VectorStore),
+			"settings.storage":     supportedDeploymentCapability(available.Storage),
+			"settings.sandbox":     supportedDeploymentCapability(available.Sandbox),
 		},
 	}
 }

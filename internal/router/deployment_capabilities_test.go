@@ -77,7 +77,7 @@ func TestGetDeploymentCapabilitiesHandlerReturnsSnapshot(t *testing.T) {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 	}
 	var body struct {
-		Code int                               `json:"code"`
+		Code int                                `json:"code"`
 		Data handler.DeploymentCapabilitiesData `json:"data"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
