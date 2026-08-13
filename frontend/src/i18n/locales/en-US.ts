@@ -5792,7 +5792,12 @@ export default {
     justNow: 'Just now',
     minutesAgo: '{n}m ago',
     hoursAgo: '{n}h ago',
-    daysAgo: '{n}d ago'
+    daysAgo: '{n}d ago',
+    syncError: {
+      deletion_lookup_failed: 'Failed to look up the item before deletion; see server logs',
+      deletion_failed: 'Deletion failed; see server logs',
+      ingest_failed: 'Ingest failed; see server logs'
+    }
   },
   integrations: {
     title: 'Publish & Integrations',

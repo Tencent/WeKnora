@@ -784,6 +784,11 @@ export default {
       loadAuthHint: "앱 자격 증명이 유효하지 않거나 드라이브 권한이 없습니다. App ID / App Secret 및 drive:drive:readonly 권한을 확인하세요.",
       loadNotFoundHint: "folder_token이 존재하지 않거나 삭제되었습니다. 페이슈 드라이브 폴더 URL에서 복사한 토큰이 맞는지 확인하세요.",
     },
+    syncError: {
+      deletion_lookup_failed: '삭제 전 항목 조회에 실패했습니다. 서버 로그를 확인하세요',
+      deletion_failed: '삭제에 실패했습니다. 서버 로그를 확인하세요',
+      ingest_failed: '가져오기에 실패했습니다. 서버 로그를 확인하세요'
+    },
   },
   ollama: {
     unknown: '알 수 없음',
