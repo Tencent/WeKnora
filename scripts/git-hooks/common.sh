@@ -53,6 +53,24 @@ merge_base() {
   git -C "$ROOT" rev-parse HEAD~1
 }
 
+# Prefer the open PR's base SHA (matches GitHub CI diff) when gh is available.
+pr_diff_base_ref() {
+  ensure_origin_main
+  if command -v gh >/dev/null 2>&1; then
+    local base_sha
+    base_sha="$(gh pr view --json baseRefOid --jq .baseRefOid 2>/dev/null || true)"
+    if [[ -n "$base_sha" && "$base_sha" != "null" ]]; then
+      printf '%s\n' "$base_sha"
+      return
+    fi
+  fi
+  if git -C "$ROOT" rev-parse --verify origin/main >/dev/null 2>&1; then
+    printf '%s\n' "origin/main"
+    return
+  fi
+  printf '%s\n' "main"
+}
+
 check_whitespace() {
   log_step "git diff --check (source files)"
   if [[ "${1:-}" == "--cached" ]]; then
@@ -75,6 +93,21 @@ check_gofmt_files() {
   local mode="$1" # check | write
   shift
   local -a files=("$@")
+  if [[ ${#files[@]} -gt 0 ]]; then
+    local -a existing=()
+    local f rel
+    for f in "${files[@]}"; do
+      if [[ -f "$f" ]]; then
+        existing+=("$f")
+        continue
+      fi
+      rel="${f#"$ROOT"/}"
+      if [[ -f "$ROOT/$rel" ]]; then
+        existing+=("$ROOT/$rel")
+      fi
+    done
+    files=("${existing[@]}")
+  fi
   [[ ${#files[@]} -gt 0 ]] || return 0
 
   local unformatted

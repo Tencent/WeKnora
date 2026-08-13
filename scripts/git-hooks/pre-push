@@ -21,48 +21,41 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
 
   log_step "pre-push ($remote ${remote_ref#refs/heads/})"
 
+  ensure_origin_main
+  pr_ref="$(pr_diff_base_ref)"
+  pr_tip="$local_sha"
+  pr_diff="${pr_ref}...${pr_tip}"
+  lint_from_rev="$pr_ref"
+
   if [[ "$remote_sha" =~ ^0+$ ]]; then
-    pr_base="$(merge_base)"
-    pr_tip="$local_sha"
-    push_range="${pr_base}..${local_sha}"
-    lint_from_rev="$pr_base"
-    log_step "new branch; PR diff ${pr_base:0:12}..${local_sha:0:12}"
+    push_start="$(git -C "$ROOT" merge-base "$pr_ref" "$local_sha")"
+    push_range="${push_start}..${local_sha}"
+    log_step "new branch; PR diff ${pr_ref}...${local_sha:0:12}"
   else
     if [[ "$remote_sha" == "$local_sha" ]]; then
       log_ok "pre-push: nothing new to push"
       continue
     fi
-    pr_base="$(merge_base)"
-    pr_tip="$local_sha"
     push_range="${remote_sha}..${local_sha}"
-    lint_from_rev="$remote_sha"
-    log_step "pushing ${remote_sha:0:12}..${local_sha:0:12}; PR diff ${pr_base:0:12}..${local_sha:0:12}"
+    log_step "pushing ${remote_sha:0:12}..${local_sha:0:12}; PR diff ${pr_ref}...${local_sha:0:12}"
   fi
 
-  # Whitespace: files touched in this push only.
   check_whitespace "$push_range"
 
-  # PR-scoped file list (matches CI gofmt gate on pull_request).
   pr_changed=()
   while IFS= read -r line; do
     [[ -n "$line" ]] && pr_changed+=("$line")
-  done < <(git diff --name-only --diff-filter=ACMR "${pr_base}..${pr_tip}" || true)
+  done < <(git diff --name-only --diff-filter=ACMR "$pr_diff" || true)
 
-  push_changed=()
-  while IFS= read -r line; do
-    [[ -n "$line" ]] && push_changed+=("$line")
-  done < <(git diff --name-only --diff-filter=ACMR "$push_range" || true)
-
-  if [[ ${#pr_changed[@]} -eq 0 && ${#push_changed[@]} -eq 0 ]]; then
-    log_ok "pre-push: no changed files"
+  if [[ ${#pr_changed[@]} -eq 0 ]]; then
+    log_ok "pre-push: no PR diff changes"
     continue
   fi
 
-  # --- App (Go): gofmt on entire PR diff; vet/build like CI on every push ---
   pr_changed_go=()
   while IFS= read -r line; do
     [[ -n "$line" ]] && pr_changed_go+=("$line")
-  done < <(git diff --name-only --diff-filter=ACMR "${pr_base}..${pr_tip}" -- '*.go' ':!cli/**' || true)
+  done < <(git diff --name-only --diff-filter=ACMR "$pr_diff" -- '*.go' ':!cli/**' || true)
 
   if [[ ${#pr_changed_go[@]} -gt 0 ]]; then
     go_files=()
@@ -92,7 +85,6 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
     log_ok "go build ./cmd/server"
   fi
 
-  # --- CLI / frontend: if touched anywhere in the PR ---
   if paths_match_prefix "cli/" "${pr_changed[@]}"; then
     run_cli_checks
   fi
