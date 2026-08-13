@@ -1,0 +1,4 @@
+interface:
+  display_name: "目录上下文素材审计"
+  short_description: "仅依据写作目录筛选、核验并分类呈现 WeKnora 素材知识"
+  default_prompt: "使用 $map-weknora-from-outline，仅依据写作目录筛选并核验 WeKnora 素材知识。"

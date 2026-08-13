@@ -1,0 +1,4 @@
+interface:
+  display_name: "全文上下文素材审计"
+  short_description: "依据目录、小节要求和现有正文筛选、核验并分类呈现素材知识"
+  default_prompt: "使用 $map-weknora-from-full-content，依据目录、小节要求和现有正文筛选并核验 WeKnora 素材知识。"

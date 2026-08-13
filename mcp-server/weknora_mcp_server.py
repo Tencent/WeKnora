@@ -608,6 +608,107 @@ class WeKnoraClient:
             params={"limit": limit},
         )
 
+    def wiki_log(self, kb_id: str, limit: int = 200) -> Dict:
+        """Get the newest Wiki ingest/retract events for a knowledge base."""
+        return self._request(
+            "GET",
+            f"/knowledgebase/{kb_id}/wiki/log",
+            params={"limit": limit},
+        )
+
+    def wiki_summary_exists(self, kb_id: str, knowledge_id: str) -> bool:
+        """Check the deterministic per-document Wiki summary page."""
+        response = self.session.get(
+            f"{self.base_url}/knowledgebase/{kb_id}/wiki/pages/summary/{knowledge_id}"
+        )
+        if response.status_code == 404:
+            return False
+        response.raise_for_status()
+        return True
+
+    @staticmethod
+    def _response_data(payload: Dict) -> Any:
+        data = payload.get("data")
+        if isinstance(data, (dict, list)):
+            return data
+        return payload
+
+    def get_wiki_build_status(self, kb_id: str, knowledge_id: str) -> Dict:
+        """Return whether one parsed document is fully available in the Wiki."""
+        kb = self._response_data(self.get_knowledge_base(kb_id))
+        knowledge = self._response_data(self.get_knowledge(knowledge_id))
+        if knowledge["knowledge_base_id"] != kb_id:
+            raise ValueError(
+                f"Knowledge {knowledge_id!r} does not belong to knowledge base {kb_id!r}"
+            )
+
+        capabilities = kb.get("capabilities") or kb.get("indexing_strategy") or {}
+        wiki_enabled = bool(
+            capabilities.get("wiki", capabilities.get("wiki_enabled", False))
+        )
+        parse_status = knowledge["parse_status"]
+        result = {
+            "knowledge_base_id": kb_id,
+            "knowledge_id": knowledge_id,
+            "title": knowledge.get("title") or knowledge.get("file_name") or "",
+            "parse_status": parse_status,
+            "wiki_enabled": wiki_enabled,
+            "status": "pending",
+            "ready": False,
+            "reason": "Document parsing has not started",
+            "wiki_version": None,
+            "ingest_event": None,
+        }
+
+        if not wiki_enabled:
+            result.update(status="disabled", reason="Wiki is disabled for this knowledge base")
+            return result
+        if parse_status in {"failed", "cancelled"}:
+            result.update(
+                status=parse_status,
+                reason=knowledge.get("error_message") or f"Document parsing is {parse_status}",
+            )
+            return result
+        if parse_status in {"processing", "finalizing"}:
+            result.update(status="processing", reason="Document parsing is still running")
+            return result
+        if parse_status != "completed":
+            return result
+
+        index = self.wiki_index_view(kb_id, limit=1)
+        result["wiki_version"] = index.get("version")
+        log = self.wiki_log(kb_id)
+        entries = log.get("entries", [])
+        event = next(
+            (entry for entry in entries if entry.get("knowledge_id") == knowledge_id),
+            None,
+        )
+        if event is not None:
+            result["ingest_event"] = event
+            if event.get("action") == "ingest":
+                result.update(
+                    status="completed",
+                    ready=True,
+                    reason="Wiki ingest event has been recorded",
+                )
+                return result
+            result.update(status="processing", reason="Latest Wiki event is not an ingest")
+            return result
+
+        if self.wiki_summary_exists(kb_id, knowledge_id):
+            result.update(
+                status="completed",
+                ready=True,
+                reason="Wiki summary page exists (legacy completion fallback)",
+            )
+            return result
+
+        result.update(
+            status="processing",
+            reason="Document parsing completed; waiting for Wiki ingest",
+        )
+        return result
+
 
 # Initialize MCP server instance (mcp 2.x high-level API).
 # MCPServer (formerly FastMCP) builds input schemas from function type hints
@@ -1010,6 +1111,18 @@ def wiki_index_view(kb_id: str, limit: int = 50) -> dict:
     summary, etc.).
     """
     return client.wiki_index_view(kb_id, limit)
+
+
+@mcp.tool()
+def get_wiki_build_status(kb_id: str, knowledge_id: str) -> dict:
+    """Check whether a completed knowledge document has been ingested into the Wiki.
+
+    Returns pending, processing, completed, failed, cancelled, or disabled plus a
+    machine-readable ready flag. Use this before autonomous Wiki analysis.
+    kb_id may be a UUID or a knowledge-base name (resolved automatically).
+    """
+    resolved = client.resolve_kb_id(kb_id)
+    return client.get_wiki_build_status(resolved, knowledge_id)
 
 
 # ---------------------------------------------------------------------------

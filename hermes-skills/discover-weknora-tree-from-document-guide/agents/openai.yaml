@@ -1,0 +1,4 @@
+interface:
+  display_name: "全文要点素材发现"
+  short_description: "仅依据全文写作要点发现、核验并整理 WeKnora 素材知识"
+  default_prompt: "使用 $discover-weknora-tree-from-document-guide，仅依据全文写作要点生成 WeKnora 素材知识树。"

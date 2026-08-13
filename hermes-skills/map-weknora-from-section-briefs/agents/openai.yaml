@@ -1,0 +1,4 @@
+interface:
+  display_name: "小节要求素材审计"
+  short_description: "依据写作目录和小节要求筛选、核验并分类呈现素材知识"
+  default_prompt: "使用 $map-weknora-from-section-briefs，依据目录和小节写作要求筛选并核验 WeKnora 素材知识。"

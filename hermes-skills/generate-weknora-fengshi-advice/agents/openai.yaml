@@ -1,0 +1,4 @@
+interface:
+  display_name: "WeKnora × 锋矢写作建议"
+  short_description: "定时发现 WeKnora 新知识并为锋矢生成可追溯的写作优化建议"
+  default_prompt: "Use $generate-weknora-fengshi-advice to discover newly integrated WeKnora knowledge and create reviewed Fengshi writing suggestions."

@@ -145,6 +145,12 @@ python test_module.py
 - `list_chunks` - 列出知识块
 - `delete_chunk` - 删除知识块
 
+### Wiki 查询
+- `get_wiki_build_status` - 返回文档解析/Wiki 构建状态及机器可读的 `ready` 标记
+- `wiki_index_view` - 获取 Wiki 目录与版本
+- `wiki_search` - 搜索 Wiki 页面
+- `wiki_read_page` - 读取 Wiki 页面
+
 ## 故障排除
 
 如果遇到导入错误，请确保：

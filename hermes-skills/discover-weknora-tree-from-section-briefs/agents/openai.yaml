@@ -1,0 +1,4 @@
+interface:
+  display_name: "小节要点素材发现"
+  short_description: "依据全文及全部小节写作要点发现并整理 WeKnora 素材知识"
+  default_prompt: "使用 $discover-weknora-tree-from-section-briefs，依据全文和全部小节写作要点生成 WeKnora 素材知识树。"
