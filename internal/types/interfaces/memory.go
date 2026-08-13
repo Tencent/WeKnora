@@ -184,6 +184,23 @@ type MemoryRecall struct {
 	Items []*types.MemoryItem
 }
 
+// MemorySearchResult is what an on-demand lookup into the memory store
+// returns.
+//
+// It is a separate type from MemoryRecall because the two have different
+// consumers. Recall produces a prompt envelope for a turn; a search produces
+// items for a tool, and that tool has to tell the model *why* it got nothing.
+// "This user has memory switched off" and "nothing stored matches" call for
+// different answers, and collapsing both into an empty slice would have the
+// agent report a blank memory store to someone who simply disabled it.
+type MemorySearchResult struct {
+	// Available is false when memory is off at any level — workspace, user or
+	// the agent handling this request.
+	Available bool
+	// Items are the matches, most relevant first.
+	Items []*types.MemoryItem
+}
+
 // RetrievalContext is what memory contributes to retrieval rather than to the
 // answer prompt: who this person is, what they keep asking about, and which
 // documents they rely on.
@@ -215,6 +232,20 @@ type MemoryService interface {
 	// calls and returns an empty recall (never an error) whenever memory is
 	// disabled at any level, so callers can use it unconditionally.
 	Recall(ctx context.Context, query string) MemoryRecall
+	// SearchMemory ranks the user's stored memories against an arbitrary
+	// query, for callers that need to reach past what Recall's per-turn budget
+	// admitted. Like Recall it performs no LLM call and never errors.
+	SearchMemory(ctx context.Context, query string, limit int) MemorySearchResult
+	// MemoryAvailable reports whether this request may read memory at all:
+	// the workspace switch, the user's own opt out and the agent's preference
+	// combined.
+	//
+	// Read paths do not need this — Recall and SearchMemory already degrade on
+	// their own. It exists for callers that must decide whether to *offer* a
+	// memory-backed feature, where the difference between "off" and "empty"
+	// has to be settled before anything is built rather than after it is
+	// called.
+	MemoryAvailable(ctx context.Context) bool
 	// RetrievalContextFor returns what memory contributes to retrieval. Like
 	// Recall it makes no model call and degrades to an empty value.
 	RetrievalContextFor(ctx context.Context) RetrievalContext

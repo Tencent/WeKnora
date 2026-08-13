@@ -72,6 +72,16 @@ const (
 	// MemoryRecallMaxItems bounds how many situational items one turn can pull
 	// in, independent of the rune budget.
 	MemoryRecallMaxItems = 5
+	// MemorySearchMaxItems and MemorySearchRuneBudget bound one on-demand
+	// memory lookup. They are far more generous than the recall budgets
+	// because the two are paid for differently: recall rides in every turn's
+	// system prompt whether or not it is needed, while a search happens only
+	// when the model asked for it and is answering a question the resident
+	// block could not.
+	MemorySearchMaxItems   = 20
+	MemorySearchRuneBudget = 2000
+	// MemorySearchDefaultItems is what a caller that names no limit gets.
+	MemorySearchDefaultItems = 10
 	// MemoryResidentInterestMaxItems bounds how many interests the resident
 	// block may carry.
 	//
@@ -136,15 +146,21 @@ func IsValidMemoryKind(kind string) bool {
 	return false
 }
 
-// memoryDisabledContextKey marks a request whose agent opted out of memory.
+// MemoryDisabledContextKey marks a request whose agent opted out of memory.
 // The agent switch is per-request rather than per-scope, so it travels in the
 // context instead of the database: the same user talking to two agents gets
 // memory in one conversation and not the other.
-const memoryDisabledContextKey ContextKey = "MemoryDisabled"
+//
+// Exported because logger.CloneContext rebuilds contexts from an allowlist of
+// keys, and the memory write path (extraction, explicit remember, document
+// affinity) runs on the far side of one of those rebuilds. A key left
+// unexported here would be silently dropped there, leaving an opted-out agent
+// unable to read memory while still writing to it.
+const MemoryDisabledContextKey ContextKey = "MemoryDisabled"
 
 // WithMemoryDisabled marks the current request as not allowed to read memory.
 func WithMemoryDisabled(ctx context.Context) context.Context {
-	return context.WithValue(ctx, memoryDisabledContextKey, true)
+	return context.WithValue(ctx, MemoryDisabledContextKey, true)
 }
 
 // MemoryAllowedForAgent reports whether the agent handling this request
@@ -154,7 +170,7 @@ func MemoryAllowedForAgent(ctx context.Context) bool {
 	if ctx == nil {
 		return true
 	}
-	disabled, ok := ctx.Value(memoryDisabledContextKey).(bool)
+	disabled, ok := ctx.Value(MemoryDisabledContextKey).(bool)
 	return !(ok && disabled)
 }
 

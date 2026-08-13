@@ -631,6 +631,17 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 	// that sandbox down from a request that only knows the session's tenant.
 	baseCtx = types.WithSandboxTenantID(baseCtx, reqCtx.session.TenantID)
 
+	// An agent that opted out of long-term memory has to be opted out of the
+	// write path too, not just recall. The two run from different contexts:
+	// recall is marked inside the QA services, while extraction, the explicit
+	// "remember this" route and document affinity are all kicked off from
+	// completeAssistantMessage on a context descended from this one. Marking
+	// the root of the async work is what keeps them from disagreeing — an
+	// agent that cannot read the memory must not keep writing to it.
+	if reqCtx.customAgent != nil {
+		baseCtx = types.ApplyAgentMemoryPreference(baseCtx, reqCtx.customAgent.Config.MemoryEnabled)
+	}
+
 	// Create EventBus and cancellable context
 	eventBus := event.NewEventBus()
 	asyncCtx, cancel := context.WithCancel(logger.CloneContext(baseCtx))

@@ -535,6 +535,13 @@ func CloneContext(ctx context.Context) context.Context {
 		types.SandboxTenantIDContextKey,
 		types.EmbedQueryContextKey,
 		types.EmbedVisitorContextKey,
+		// MemoryDisabledContextKey: the agent-level opt-out from long-term
+		// memory. setupSSEStream builds its async context through
+		// CloneContext, and the memory WRITE path (extraction, explicit
+		// remember, document affinity) hangs off that context. Dropping the
+		// key here would let an agent that cannot read memory keep writing
+		// to it.
+		types.MemoryDisabledContextKey,
 		// Keep the Langfuse trace alive across CloneContext boundaries so
 		// LLM/Embedder/Reranker/VLM/ASR wrappers attach their generations
 		// to the same trace opened by GinMiddleware, instead of each call

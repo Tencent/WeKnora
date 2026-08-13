@@ -124,12 +124,19 @@ func selectResidentInterests(
 	return selected, relevant
 }
 
+// selectRecallWithTrace ranks candidates against the query and returns the
+// best ones that fit in maxItems and runeBudget. The budgets are arguments
+// rather than constants because the same fusion serves two callers with very
+// different economics: a per-turn recall that must stay small, and an
+// on-demand search the model paid a tool call for.
 func (s *Service) selectRecallWithTrace(
 	ctx context.Context,
 	scope interfaces.MemoryScope,
 	cfg *types.MemoryConfig,
 	query string,
 	candidates []*types.MemoryItem,
+	maxItems int,
+	runeBudget int,
 ) ([]*types.MemoryItem, recallRankingTrace) {
 	trace := recallRankingTrace{}
 	if len(candidates) == 0 {
@@ -173,20 +180,18 @@ func (s *Service) selectRecallWithTrace(
 
 	if len(vector) == 0 {
 		trace.Mode = "lexical_only"
-		matched := takeWithinBudget(lexical, candidates,
-			types.MemoryRecallMaxItems, types.MemoryRecallRuneBudget)
+		matched := takeWithinBudget(lexical, candidates, maxItems, runeBudget)
 		trace.Matched = len(matched)
 		return matched, trace
 	}
 
-	if len(vector) > types.MemoryRecallMaxItems*2 {
-		vector = vector[:types.MemoryRecallMaxItems*2]
+	if len(vector) > maxItems*2 {
+		vector = vector[:maxItems*2]
 	}
 	fused := fuseRankings(lexical, vector)
 	trace.FusedCandidates = len(fused)
 	trace.Mode = "hybrid"
-	matched := takeWithinBudget(fused, candidates,
-		types.MemoryRecallMaxItems, types.MemoryRecallRuneBudget)
+	matched := takeWithinBudget(fused, candidates, maxItems, runeBudget)
 	trace.Matched = len(matched)
 	return matched, trace
 }

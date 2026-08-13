@@ -45,6 +45,12 @@
         <div class="setting-info">
           <label>{{ t('memorySettings.enableLabel') }}</label>
           <p class="desc">{{ t('memorySettings.enableDescription') }}</p>
+          <!-- An agent can opt out on its own, so this switch being on is not a
+               promise that every conversation uses memory. Say so here rather
+               than letting someone conclude the page is broken. -->
+          <p v-if="userEnabled && settings?.workspace_enabled" class="desc">
+            {{ t('memorySettings.agentDisabledHint') }}
+          </p>
         </div>
         <div class="setting-control">
           <t-switch

@@ -1103,6 +1103,7 @@ export default {
       multiTurn: '开启后将保留历史对话上下文',
       historyRounds: '保留最近几轮对话作为上下文',
       rewrite: '多轮对话时自动改写用户问题，消解指代和补全省略',
+      memoryEnabled: '允许该智能体读取并补充你的长期记忆。关闭后，与它的对话既不会读取记忆，也不会新增记忆。空间或个人设置关闭时，这里开启也不会生效',
       queryUnderstandModel: '用于问题理解（改写与意图识别）的模型，留空则复用主对话模型',
       rewriteSystemPrompt: '用于问题改写的系统提示词（留空使用默认）',
       rewriteUserPrompt: '用于问题改写的用户提示词模板（留空使用默认）',
@@ -4604,6 +4605,7 @@ export default {
     workspaceDisabled: '当前空间尚未开启长期记忆，管理员开启后这里的开关才会生效。',
     enableLabel: '为我启用长期记忆',
     enableDescription: '关闭后助手不再读取或新增你的记忆，已有记忆会保留，重新开启即可继续使用。',
+    agentDisabledHint: '单个智能体也可以单独关闭长期记忆。被关闭的智能体在对话中既不会读取你的记忆，也不会新增记忆；换用其他智能体不受影响。',
     usage: {
       title: '记忆何时会被使用',
       iconHint: '查看哪些记忆会在对话里被使用',
@@ -5419,6 +5421,7 @@ export default {
       allowedTools: '允许的工具',
       multiTurn: '多轮对话',
       historyTurns: '保留轮数',
+      memoryEnabled: '长期记忆',
       retrievalStrategy: '检索策略',
       embeddingTopK: '向量召回数量',
       keywordThreshold: '关键词阈值',

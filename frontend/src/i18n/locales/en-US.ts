@@ -983,6 +983,7 @@ export default {
       allowedTools: 'Allowed Tools',
       multiTurn: 'Multi-turn Conversation',
       historyTurns: 'History Turns',
+      memoryEnabled: 'Long-term Memory',
       retrievalStrategy: 'Retrieval Strategy',
       embeddingTopK: 'Embedding Top K',
       keywordThreshold: 'Keyword Threshold',
@@ -1560,6 +1561,7 @@ export default {
     workspaceDisabled: 'Long-term memory is off for this workspace. This switch takes effect once an admin turns it on.',
     enableLabel: 'Use long-term memory for me',
     enableDescription: 'When off, the assistant neither reads nor adds your memories. Existing ones are kept and resume when you turn it back on.',
+    agentDisabledHint: 'An individual agent can also turn long-term memory off for itself. In a conversation with such an agent your memories are neither read nor added to; other agents are unaffected.',
     usage: {
       title: 'When memories are used',
       iconHint: 'See which memories are used in conversation',
@@ -5234,6 +5236,7 @@ export default {
       multiTurn: 'When enabled, historical conversation context will be preserved',
       historyRounds: 'Number of recent conversation rounds to keep as context',
       rewrite: 'Automatically rewrite user questions in multi-turn conversations to resolve references and omissions',
+      memoryEnabled: 'Let this agent read and add to your long-term memory. When off, conversations with it neither read your memories nor add new ones. Turning it on here has no effect while the workspace or personal switch is off',
       queryUnderstandModel: 'Model used for query understanding (rewriting and intent detection). Leave empty to reuse the main chat model.',
       rewriteSystemPrompt: 'System prompt for question rewriting (leave empty for default)',
       rewriteUserPrompt: 'User prompt template for question rewriting (leave empty for default)',

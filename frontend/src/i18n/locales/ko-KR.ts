@@ -1101,6 +1101,7 @@ export default {
       multiTurn: '활성화하면 대화 기록 컨텍스트가 유지됩니다',
       historyRounds: '컨텍스트로 유지할 최근 대화 라운드 수',
       rewrite: '다중 턴 대화에서 사용자 질문을 자동으로 재작성하여 지시대명사 해소 및 생략 보완',
+      memoryEnabled: '이 에이전트가 장기 기억을 읽고 추가하도록 허용합니다. 끄면 이 에이전트와의 대화에서 기억을 읽지도, 새로 추가하지도 않습니다. 공간 또는 개인 설정이 꺼져 있으면 여기서 켜도 적용되지 않습니다',
       queryUnderstandModel: '질문 이해(재작성과 의도 분류)에 사용할 모델입니다. 비워 두면 기본 대화 모델을 사용합니다.',
       rewriteSystemPrompt: '질문 재작성용 시스템 프롬프트 (비워두면 기본값 사용)',
       rewriteUserPrompt: '질문 재작성용 사용자 프롬프트 템플릿 (비워두면 기본값 사용)',
@@ -4602,6 +4603,7 @@ export default {
     workspaceDisabled: '이 워크스페이스에서는 장기 기억이 꺼져 있습니다. 관리자가 켜야 이 스위치가 적용됩니다.',
     enableLabel: '내 장기 기억 사용',
     enableDescription: '끄면 어시스턴트가 기억을 읽거나 추가하지 않습니다. 기존 기억은 유지되며 다시 켜면 계속 사용됩니다.',
+    agentDisabledHint: '개별 에이전트도 장기 기억을 따로 끌 수 있습니다. 꺼 둔 에이전트와의 대화에서는 기억을 읽지도 추가하지도 않으며, 다른 에이전트는 영향을 받지 않습니다.',
     usage: {
       title: '기억이 사용되는 시점',
       iconHint: '어떤 기억이 대화에 쓰이는지 보기',
@@ -5417,6 +5419,7 @@ export default {
       allowedTools: '허용된 도구',
       multiTurn: '여러 라운드의 대화',
       historyTurns: '라운드 수를 유지하세요',
+      memoryEnabled: '장기 기억',
       retrievalStrategy: '검색 전략',
       embeddingTopK: '벡터 회수 횟수',
       keywordThreshold: '키워드 기준점',

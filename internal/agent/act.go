@@ -170,6 +170,7 @@ var toolDisplayNames = map[string]string{
 	agenttools.ToolQueryKnowledgeGraph: "查询知识图谱",
 	agenttools.ToolGetDocumentInfo:     "获取文档信息",
 	agenttools.ToolSearchConversations: "回顾历史对话",
+	agenttools.ToolSearchMemory:        "查询长期记忆",
 	agenttools.ToolDatabaseQuery:       "查询数据",
 	agenttools.ToolDataAnalysis:        "数据分析",
 	agenttools.ToolDataSchema:          "查看数据结构",

@@ -190,7 +190,8 @@ func (s *Service) Recall(ctx context.Context, query string) interfaces.MemoryRec
 		"memory: recall start subject=%s resident=%d candidates=%d block_runes=%d",
 		scope.SubjectID, len(residentItems), len(candidates), len([]rune(block)))
 
-	matched, rankTrace := s.selectRecallWithTrace(recallCtx, scope, cfg, query, candidates)
+	matched, rankTrace := s.selectRecallWithTrace(recallCtx, scope, cfg, query, candidates,
+		types.MemoryRecallMaxItems, types.MemoryRecallRuneBudget)
 
 	prompt := types.WrapMemoryForPrompt(block, types.RenderMemoryRecall(matched))
 	if prompt == "" {
