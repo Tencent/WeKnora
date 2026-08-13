@@ -57,6 +57,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/drive"
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/wiki"
+	gitlabConnector "github.com/Tencent/WeKnora/internal/datasource/connector/gitlab"
+	imaConnector "github.com/Tencent/WeKnora/internal/datasource/connector/ima"
 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
 	rssConnector "github.com/Tencent/WeKnora/internal/datasource/connector/rss"
 	yuqueConnector "github.com/Tencent/WeKnora/internal/datasource/connector/yuque"
@@ -181,10 +183,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(mcp.NewMCPManager))
 	must(container.Provide(mcp.NewOAuthManager))
 
-	// Sandbox manager (script execution backend for skills). Reads
-	// WEKNORA_SANDBOX_MODE env var: "docker" | "local" | "cube" | "disabled"
-	// (default). The Cube mode wires a SessionBoundManager so each Session
-	// gets its own persistent MicroVM. See internal/sandbox/session_manager.go.
+	// Sandbox manager fallback is disabled; executable backends are resolved
+	// from named workspace configurations.
 	logger.Debugf(ctx, "[Container] Registering sandbox manager...")
 	must(container.Provide(newSandboxManager))
 	// Per-tenant sandbox backends: the resolver builds a manager per request
@@ -192,7 +192,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// for tenants that configured nothing.
 	must(container.Provide(service.NewTenantSandboxConfigLoader))
 	must(container.Provide(newTenantSandboxResolver))
-	must(container.Provide(newSandboxConfigDefaults))
 
 	// Business service layer
 	logger.Debugf(ctx, "[Container] Registering business services...")
@@ -1597,6 +1596,7 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 	registry.Register("searxng", infra_web_search.NewSearxngProvider)
 	registry.Register("keenable", infra_web_search.NewKeenableProvider)
 	registry.Register("zhipu", infra_web_search.NewZhipuProvider)
+	registry.Register("exa", infra_web_search.NewExaProvider)
 	registry.Register("metaso", infra_web_search.NewMetasoProvider)
 }
 
@@ -1656,8 +1656,14 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	if err := registry.Register(yuqueConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register yuque connector: %w", err))
 	}
+	if err := registry.Register(imaConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register ima connector: %w", err))
+	}
 	if err := registry.Register(rssConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register rss connector: %w", err))
+	}
+	if err := registry.Register(gitlabConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register gitlab connector: %w", err))
 	}
 
 	// Future connectors will be registered here:

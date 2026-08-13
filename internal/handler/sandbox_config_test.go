@@ -110,7 +110,7 @@ func TestSandboxConfigDeletePassesForceQuery(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	svc := &fakeSandboxConfigService{}
-	h := &SandboxConfigHandler{service: svc, defaults: &sandbox.ConfigDefaults{}}
+	h := &SandboxConfigHandler{service: svc}
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		c.Set(types.TenantIDContextKey.String(), uint64(42))
@@ -246,4 +246,12 @@ func (s *fakeSandboxConfigService) SetWorkspaceScriptsDisabled(
 	bool,
 ) error {
 	return nil
+}
+
+func (s *fakeSandboxConfigService) QueryTemplates(
+	context.Context,
+	uint64,
+	service.SandboxTemplateQueryInput,
+) (*service.SandboxTemplateCatalog, error) {
+	return &service.SandboxTemplateCatalog{}, nil
 }

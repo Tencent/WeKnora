@@ -4,9 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
-	"strconv"
-	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/approval"
@@ -58,31 +55,23 @@ func agentHasKnowledgeScope(config *types.AgentConfig) bool {
 	)
 }
 
-// knowledgeBaseIDsForPrompt returns KB IDs to show in runtime_context metadata.
-// Prefer explicit KnowledgeBases; fall back to deduped IDs from SearchTargets.
-func knowledgeBaseIDsForPrompt(config *types.AgentConfig) []string {
+// knowledgeBaseScopesForPrompt returns the KB IDs to show in runtime_context
+// metadata, together with the tenant each KB should be queried under.
+//
+// The tenant map always comes from SearchTargets, which buildSearchTargets has
+// already resolved (and authorized) per KB: a directly shared KB carries its
+// source tenant there. KnowledgeBases alone cannot tell own from shared KBs —
+// both KBSelectionMode="all" and an @mention put shared KB IDs into it.
+// KBs missing from the map fall back to the caller's tenant.
+func knowledgeBaseScopesForPrompt(config *types.AgentConfig) ([]string, map[string]uint64) {
 	if config == nil {
-		return nil
+		return nil, nil
 	}
+	kbTenantMap := config.SearchTargets.GetKBTenantMap()
 	if len(config.KnowledgeBases) > 0 {
-		return config.KnowledgeBases
+		return config.KnowledgeBases, kbTenantMap
 	}
-	if len(config.SearchTargets) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(config.SearchTargets))
-	out := make([]string, 0, len(config.SearchTargets))
-	for _, target := range config.SearchTargets {
-		if target == nil || target.KnowledgeBaseID == "" {
-			continue
-		}
-		if _, ok := seen[target.KnowledgeBaseID]; ok {
-			continue
-		}
-		seen[target.KnowledgeBaseID] = struct{}{}
-		out = append(out, target.KnowledgeBaseID)
-	}
-	return out
+	return config.SearchTargets.GetAllKnowledgeBaseIDs(), kbTenantMap
 }
 
 // agentService implements agent-related business logic
@@ -325,8 +314,8 @@ func (s *agentService) resolveKBAndDocInfos(
 	ctx context.Context,
 	config *types.AgentConfig,
 ) ([]*agent.KnowledgeBaseInfo, []*agent.SelectedDocumentInfo) {
-	kbIDs := knowledgeBaseIDsForPrompt(config)
-	kbInfos, err := s.getKnowledgeBaseInfos(ctx, kbIDs)
+	kbIDs, kbTenantMap := knowledgeBaseScopesForPrompt(config)
+	kbInfos, err := s.getKnowledgeBaseInfos(ctx, kbIDs, kbTenantMap)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to get knowledge base details, using IDs only: %v", err)
 		kbInfos = make([]*agent.KnowledgeBaseInfo, 0, len(kbIDs))
@@ -352,10 +341,10 @@ func (s *agentService) resolveKBAndDocInfos(
 // initializeSkillsManager creates and initializes the skills manager.
 //
 // The sandbox manager is resolved per workspace: backends differ in
-// capability (E2B exposes a session file store, local does not), so tool
+// capability (remote MicroVMs expose a session file store, local does not), so tool
 // registration below must inspect this workspace's real manager rather than a
-// process-wide singleton. Workspaces without their own sandbox configuration
-// resolve to the injected default.
+// process-wide singleton. Workspaces without a selected configuration resolve
+// to the disabled manager.
 func (s *agentService) initializeSkillsManager(
 	ctx context.Context,
 	sessionID string,
@@ -363,30 +352,18 @@ func (s *agentService) initializeSkillsManager(
 	toolRegistry *tools.ToolRegistry,
 ) (*skills.Manager, error) {
 	tenantID, _ := types.TenantIDFromContext(ctx)
-	configID, err := sandboxConfigForExecution(ctx, s.sandboxPinner, sessionID, config.SandboxConfigID)
+	sandboxMgr, configID, err := resolveSandboxForExecution(
+		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
+		tenantID, sessionID, config.SandboxConfigID, s.sandboxPolicy,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("resolve sandbox config for session %s: %w", sessionID, err)
-	}
-	sandboxMgr, err := resolveTenantSandboxForConfig(ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, s.sandboxPolicy)
-	if err != nil {
-		return nil, err
 	}
 	if sandboxMgr == nil {
 		sandboxMgr = sandbox.NewDisabledManager()
 	}
 
-	sandboxMode := strings.ToLower(strings.TrimSpace(os.Getenv("WEKNORA_SANDBOX_MODE")))
-	if sandboxMode == "" {
-		sandboxMode = "disabled"
-	}
-	sandboxTimeout := 60
-	if v := os.Getenv("WEKNORA_SANDBOX_TIMEOUT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			sandboxTimeout = n
-		}
-	}
-	logger.Infof(ctx, "Sandbox in use: mode=%s type=%s timeout=%ds",
-		sandboxMode, sandboxMgr.GetType(), sandboxTimeout)
+	logger.Infof(ctx, "Workspace sandbox in use: config=%s type=%s", configID, sandboxMgr.GetType())
 
 	// Create skills manager
 	skillsConfig := &skills.ManagerConfig{
@@ -750,8 +727,10 @@ func (s *agentService) ValidateConfig(config *types.AgentConfig) error {
 	return nil
 }
 
-// getKnowledgeBaseInfos retrieves detailed information for knowledge bases
-func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string) ([]*agent.KnowledgeBaseInfo, error) {
+// getKnowledgeBaseInfos retrieves detailed information for knowledge bases.
+// kbTenantMap carries the tenant each KB should be queried under (source tenant
+// for directly shared KBs); a missing entry falls back to the request tenant.
+func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string, kbTenantMap map[string]uint64) ([]*agent.KnowledgeBaseInfo, error) {
 	if len(kbIDs) == 0 {
 		return []*agent.KnowledgeBaseInfo{}, nil
 	}
@@ -780,12 +759,22 @@ func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string
 			continue
 		}
 
+		// Document/FAQ listing below is tenant-scoped, so a directly shared KB
+		// must be queried under its source tenant — the request context belongs
+		// to the receiving tenant and would silently yield doc_count=0. The
+		// tenant comes from the SearchTarget that buildSearchTargets already
+		// authorized; this only widens the metadata query, never the KB set.
+		metaCtx := ctx
+		if scopeTenantID := kbTenantMap[kbID]; scopeTenantID != 0 {
+			metaCtx = context.WithValue(ctx, types.TenantIDContextKey, scopeTenantID)
+		}
+
 		// Get document count and recent documents
 		docCount := 0
 		recentDocs := []agent.RecentDocInfo{}
 
 		if kb.Type == types.KnowledgeBaseTypeFAQ {
-			pageResult, err := s.knowledgeService.ListFAQEntries(ctx, kbID, &types.Pagination{
+			pageResult, err := s.knowledgeService.ListFAQEntries(metaCtx, kbID, &types.Pagination{
 				Page:     1,
 				PageSize: 10,
 			}, nil, 0, "", "", "")
@@ -816,7 +805,7 @@ func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string
 
 		// Fallback to generic knowledge listing when not FAQ or FAQ retrieval failed
 		if kb.Type != types.KnowledgeBaseTypeFAQ || len(recentDocs) == 0 {
-			pageResult, err := s.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(ctx, kbID, &types.Pagination{
+			pageResult, err := s.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(metaCtx, kbID, &types.Pagination{
 				Page:     1,
 				PageSize: 10,
 			}, types.KnowledgeListFilter{

@@ -1689,6 +1689,7 @@ import {
 } from '@/config/contextualGuides';
 import { useI18n } from 'vue-i18n';
 import { selectInitialModelId } from '@/utils/modelDefaults';
+import { copyWithToast } from '@/utils/clipboard';
 import { MessagePlugin } from 'tdesign-vue-next';
 import {
   createAgent,
@@ -1778,27 +1779,7 @@ const saveButtonLabel = computed(() =>
 );
 
 const copyAgentId = async () => {
-  const id = editorAgent.value?.id;
-  if (!id) return;
-
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(id);
-    } else {
-      const textarea = document.createElement('textarea');
-      textarea.value = id;
-      textarea.setAttribute('readonly', '');
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-    }
-    MessagePlugin.success(t('common.copied'));
-  } catch {
-    MessagePlugin.error(t('common.copyFailed'));
-  }
+  await copyWithToast(editorAgent.value?.id, 'common.copied');
 };
 
 const currentSection = ref(props.initialSection || 'basic');
@@ -1932,7 +1913,7 @@ const skillOptions = ref<{ name: string; description: string }[]>([]);
 // 是否允许启用 Skills（取决于后端沙箱是否启用，disabled 时为 false；未请求前为 false 避免闪显）
 const skillsAvailable = ref(false);
 // 空间内的具名沙箱后端配置。始终包含当前已选中的那份，即使它已被删除——
-// 否则下拉会静默显示为"使用部署默认配置"，看不出该智能体其实指着一份不存在的配置。
+// 否则下拉会静默显示为“不启用沙箱”，看不出该智能体其实指着一份不存在的配置。
 const sandboxConfigOptions = computed(() => {
   const configs = chatResources.sandboxConfigs.filter((cfg) => isNamedSandboxBackend(cfg.sandbox_type));
   const selected = formData.value.config.sandbox_config_id;
@@ -2377,7 +2358,7 @@ const defaultFormData = {
     // Skills 设置
     skills_selection_mode: 'none' as 'all' | 'selected' | 'none',
     selected_skills: [] as string[],
-    // 技能脚本运行在哪份沙箱后端配置上。留空表示使用部署默认配置。
+    // 技能脚本运行在哪份空间沙箱配置上。留空表示禁用脚本执行。
     sandbox_config_id: '' as string,
     // 知识库设置：新建智能体默认选择 "全部知识库"，
     // 让用户无需先去勾选 KB 即可上手；如有需要可改为 "selected" / "none"。

@@ -24,8 +24,10 @@ type LongConnClient struct {
 }
 
 // NewLongConnClient creates a long connection client on the given region's cloud.
+// apiBaseURL overrides the SDK's bootstrap domain (empty uses the region
+// default); set it to a reverse-proxy origin for private/internal deployments.
 // When a message arrives, it converts it to IncomingMessage and calls handler.
-func NewLongConnClient(region Region, appID, appSecret string, handler MessageHandler) *LongConnClient {
+func NewLongConnClient(region Region, appID, appSecret, apiBaseURL string, handler MessageHandler) *LongConnClient {
 	// Long connection mode does not require verificationToken or encryptKey;
 	// those are only used for webhook signature verification and decryption.
 	eventHandler := dispatcher.NewEventDispatcher("", "").
@@ -39,13 +41,19 @@ func NewLongConnClient(region Region, appID, appSecret string, handler MessageHa
 
 	sdkLogger := &feishuLoggerAdapter{region: region, appID: appID}
 
-	// WithDomain points the SDK at the region's cloud. It defaults to
-	// open.feishu.cn, so Lark apps would otherwise fail to authenticate.
+	apiBaseURL = strings.TrimRight(strings.TrimSpace(apiBaseURL), "/")
+	if apiBaseURL == "" {
+		apiBaseURL = region.OpenBaseURL
+	}
+
+	// WithDomain points the SDK at the region's cloud (open.feishu.cn by
+	// default). apiBaseURL overrides it for deployments that reach Feishu
+	// through a reverse proxy.
 	wsClient := larkws.NewClient(appID, appSecret,
 		larkws.WithEventHandler(eventHandler),
 		larkws.WithAutoReconnect(true),
 		larkws.WithLogger(sdkLogger),
-		larkws.WithDomain(region.OpenBaseURL),
+		larkws.WithDomain(apiBaseURL),
 	)
 
 	return &LongConnClient{region: region, appID: appID, wsClient: wsClient}

@@ -45,6 +45,7 @@ const props = defineProps<{
   selectedIds: Set<string>;
   batchMode: boolean;
   canEdit: boolean;
+  canDownload: boolean;
   canMutateKnowledge: boolean;
   traceAvailableById: Record<string, boolean>;
   tagList: Tag[];
@@ -70,7 +71,7 @@ const emit = defineEmits<{
   (e: 'open', item: KnowledgeCard): void;
   (e: 'toggle-checkbox', id: string, checked: boolean, ctx?: { e?: Event }): void;
   (e: 'menu-visible-change', visible: boolean, item: KnowledgeCard): void;
-  (e: 'action', action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'retry-file-update' | 'discard-file-update' | 'move' | 'move-folder' | 'batch-manage' | 'delete', item: KnowledgeCard): void;
+  (e: 'action', action: 'download' | 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'retry-file-update' | 'discard-file-update' | 'move' | 'move-folder' | 'batch-manage' | 'delete', item: KnowledgeCard): void;
   (e: 'tag-edit', item: KnowledgeCard): void;
   (e: 'open-folder', path: string): void;
   (e: 'move-to-folder', item: KnowledgeCard, folderPath: string): void;
@@ -156,9 +157,11 @@ const channelLabelMap: Record<string, string> = {
   wechat: 'knowledgeBase.channelWechat',
   wecom: 'knowledgeBase.channelWecom',
   feishu: 'knowledgeBase.channelFeishu',
+  gitlab: 'knowledgeBase.channelGitLab',
   dingtalk: 'knowledgeBase.channelDingtalk',
   slack: 'knowledgeBase.channelSlack',
   im: 'knowledgeBase.channelIm',
+  ima: 'knowledgeBase.channelIma',
 };
 
 const getChannelLabel = (channel: string) => {
@@ -298,7 +301,7 @@ const onFolderPicked = (item: KnowledgeCard, path: string) => {
 };
 
 // --- Action handlers ---
-const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'retry-file-update' | 'discard-file-update' | 'move' | 'move-folder' | 'batch-manage' | 'delete', item: KnowledgeCard) => {
+const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'retry-file-update' | 'discard-file-update' | 'move' | 'move-folder' | 'batch-manage' | 'delete', item: KnowledgeCard) => {
   // The folder picker opens inside this same popup, so keep the menu open.
   if (action === 'move-folder') {
     folderPickerItemId.value = item.id;
@@ -399,8 +402,10 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
               <div v-else-if="moveMenuMode === 'normal'" class="card-menu">
                 <DocumentActionMenu
                   :item="item"
+                  :can-download="canDownload"
                   :can-mutate-knowledge="canMutateKnowledge"
                   :trace-visible="isTraceMenuVisible(item)"
+                  @download="handleAction('download', item)"
                   @edit="handleAction('edit', item)"
                   @view-trace="handleAction('view-trace', item)"
                   @reparse="handleAction('reparse', item)"

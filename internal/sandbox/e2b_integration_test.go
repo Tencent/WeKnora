@@ -197,11 +197,11 @@ func TestE2BIntegrationLifecycleParity(t *testing.T) {
 func e2bIntegrationConfig(t *testing.T) *Config {
 	t.Helper()
 	apiKey := firstNonEmptyEnvironment(
-		"WEKNORA_SANDBOX_E2B_API_KEY",
+		"E2B_INTEGRATION_API_KEY",
 		"E2B_API_KEY",
 	)
 	template := firstNonEmptyEnvironment(
-		"WEKNORA_SANDBOX_E2B_TEMPLATE",
+		"E2B_INTEGRATION_TEMPLATE",
 		"E2B_TEMPLATE",
 	)
 	if apiKey == "" || template == "" {
@@ -212,8 +212,8 @@ func e2bIntegrationConfig(t *testing.T) *Config {
 	cfg.Type = SandboxTypeE2B
 	cfg.FallbackEnabled = false
 	cfg.E2BAPIKey = apiKey
-	cfg.E2BAPIURL = strings.TrimSpace(os.Getenv("WEKNORA_SANDBOX_E2B_API_URL"))
-	cfg.E2BSandboxDomain = strings.TrimSpace(os.Getenv("WEKNORA_SANDBOX_E2B_SANDBOX_DOMAIN"))
+	cfg.E2BAPIURL = strings.TrimSpace(os.Getenv("E2B_INTEGRATION_API_URL"))
+	cfg.E2BSandboxDomain = strings.TrimSpace(os.Getenv("E2B_INTEGRATION_SANDBOX_DOMAIN"))
 	cfg.E2BTemplate = template
 	cfg.E2BSandboxTTL = e2bIntegrationTTL
 	cfg.E2BHTTPTimeout = e2bIntegrationHTTPTimeout

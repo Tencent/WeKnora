@@ -163,9 +163,9 @@ type StreamSender interface {
 }
 
 // FileDownloader is an optional interface that adapters can implement to support
-// downloading file attachments from the IM platform. When the adapter implements
-// this interface and the IM channel has a knowledge_base_id configured, file
-// messages will be downloaded and saved to the specified knowledge base.
+// downloading file attachments from the IM platform. It allows file/image
+// messages to be supplied to QA as attachments; when a knowledge_base_id is
+// configured, the same capability also enables asynchronous knowledge-base save.
 type FileDownloader interface {
 	// DownloadFile downloads a file resource from the IM platform.
 	// Returns the file content reader, the resolved file name, and any error.

@@ -24,6 +24,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -52,6 +53,11 @@ type Adapter struct {
 	verificationToken string
 	encryptKey        string
 
+	// apiBaseURL overrides the region's Open Platform API origin. Empty defaults
+	// to region.OpenBaseURL; set to a reverse-proxy origin for private/internal
+	// deployments that cannot reach open.feishu.cn directly.
+	apiBaseURL string
+
 	// Token cache
 	tokenMu    sync.Mutex
 	tokenCache string
@@ -59,7 +65,16 @@ type Adapter struct {
 }
 
 // NewAdapter creates a new adapter for the given region (RegionFeishu or RegionLark).
-func NewAdapter(region Region, appID, appSecret, verificationToken, encryptKey string) *Adapter {
+// apiBaseURL overrides the Open Platform API origin (empty uses the region
+// default); it is validated for scheme and SSRF safety before use.
+func NewAdapter(region Region, appID, appSecret, verificationToken, encryptKey, apiBaseURL string) (*Adapter, error) {
+	apiBaseURL = strings.TrimRight(strings.TrimSpace(apiBaseURL), "/")
+	if err := validateAPIBaseURL(apiBaseURL, region.OpenBaseURL); err != nil {
+		return nil, err
+	}
+	if apiBaseURL == "" {
+		apiBaseURL = region.OpenBaseURL
+	}
 	startStreamReaper()
 	return &Adapter{
 		region:            region,
@@ -67,13 +82,35 @@ func NewAdapter(region Region, appID, appSecret, verificationToken, encryptKey s
 		appSecret:         appSecret,
 		verificationToken: verificationToken,
 		encryptKey:        encryptKey,
+		apiBaseURL:        apiBaseURL,
+	}, nil
+}
+
+// validateAPIBaseURL checks that a custom Feishu/Lark API base URL uses an
+// http(s) scheme and passes SSRF validation. Empty or the region default is
+// allowed without further checks. Mirrors wecom.validateEndpointURL but allows
+// plain http for internal-network reverse proxies that terminate TLS at nginx.
+func validateAPIBaseURL(endpoint, defaultEndpoint string) error {
+	if endpoint == "" || endpoint == defaultEndpoint {
+		return nil
 	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return fmt.Errorf("invalid api_base_url: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("api_base_url must use http(s):// scheme, got %s://", u.Scheme)
+	}
+	if err := utils.ValidateURLForSSRF(endpoint); err != nil {
+		return fmt.Errorf("%w (for private deployments on internal networks, add the hostname to SSRF_WHITELIST)", err)
+	}
+	return nil
 }
 
 // api builds an Open Platform API URL on this adapter's cloud. path is a format
 // string beginning with "/open-apis/"; args fill its verbs.
 func (a *Adapter) api(path string, args ...any) string {
-	return a.region.OpenBaseURL + fmt.Sprintf(path, args...)
+	return a.apiBaseURL + fmt.Sprintf(path, args...)
 }
 
 // startStreamReaper starts a background goroutine (once) that periodically

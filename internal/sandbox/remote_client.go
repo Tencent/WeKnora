@@ -18,8 +18,7 @@ import (
 )
 
 // RemoteProvider identifies a remote sandbox backend. Values match the
-// user-facing WEKNORA_SANDBOX_MODE strings and the existing SandboxType
-// aliases so wiring/logging stays uniform.
+// stored SandboxType strings so wiring/logging stays uniform.
 type RemoteProvider = SandboxType
 
 // RemoteSandboxHandle is an opaque, provider-issued reference to a live

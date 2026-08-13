@@ -17,8 +17,6 @@ import (
 // process-wide manager would leave those tools running against an empty
 // /workspace/input.
 func TestSessionSandboxInputStoreUsesNamedConfigNotDeploymentDefault(t *testing.T) {
-	t.Setenv("WEKNORA_SANDBOX_MODE", "local")
-
 	// The deployment default advertises no session filesystem, standing in for
 	// docker/local/disabled.
 	deploymentDefault := &stagingSandboxManager{
@@ -43,8 +41,6 @@ func TestSessionSandboxInputStoreUsesNamedConfigNotDeploymentDefault(t *testing.
 // The mirror case: no named config means the deployment default decides, and a
 // backend without a session filesystem must not stage anything.
 func TestSessionSandboxInputStoreSkipsWhenDeploymentDefaultHasNoFilesystem(t *testing.T) {
-	t.Setenv("WEKNORA_SANDBOX_MODE", "local")
-
 	deploymentDefault := &stagingSandboxManager{
 		sandboxType:  sandbox.SandboxTypeLocal,
 		disableFiles: true,

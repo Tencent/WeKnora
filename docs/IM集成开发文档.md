@@ -240,6 +240,147 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置
 
 ---
 
+#### API Base URL（可选，内网代理）
+
+渠道配置里的 **API Base URL** 是可选字段，用于让 WeKnora 通过反向代理访问飞书开放平台：
+
+- **服务器能直连外网** → **留空**即可，默认访问 `https://open.feishu.cn`
+- **服务器需要代理才能访问外网**（如内网部署）→ 填写反向代理地址（如 nginx，`http://10.0.0.1:8080/feishu`）
+
+该地址同时覆盖飞书 IM 的所有出站调用，一个字段统一管控：
+
+| 出站 | 说明 |
+|---|---|
+| WebSocket bootstrap | SDK 拿 wss 地址的请求 |
+| wss 长连接 | 收消息的 WebSocket（经改写后的地址） |
+| HTTP API | token、发消息、下载文件、CardKit 流式卡片 |
+
+**nginx 反向代理要点**（WebSocket 模式，已生产验证）：
+
+飞书 bootstrap 返回的 ws 地址 host 是 **`msg-frontier.feishu.cn`**（长连接专用域名，**不是 `open.feishu.cn`**），path 是 `/ws/v2`。因此 nginx 需要**三个 location**，upstream 不同不能混：
+
+| location | 匹配 | upstream | 作用 |
+|---|---|---|---|
+| `= /<前缀>/callback/ws/endpoint` | bootstrap POST | `open.feishu.cn` | 拿 ws 地址 + `sub_filter` 改写 |
+| `/<前缀>/ws/` | ws dial（GET+Upgrade） | **`msg-frontier.feishu.cn`** | WebSocket 长连接反代 |
+| `/<前缀>/` | OpenAPI HTTP | `open.feishu.cn` | token/发消息/下载文件/卡片 |
+
+- `sub_filter` 替换的是 `wss://msg-frontier.feishu.cn`（不是 `open.feishu.cn`），改成 `ws://<nginx>/<前缀>`，WeKnora 才会明文回连 nginx
+- ws dial 的 upstream 必须是 `msg-frontier.feishu.cn`，若误指 `open.feishu.cn` 会 404（open.feishu.cn 不处理 `/ws/v2`）
+- `rewrite` 模式要与 location 前缀一致（如 `location /weknora/feishu/ws/` 配 `rewrite ^/weknora/feishu/(.*)$ /$1 break`），否则前缀不剥离 -> 飞书 404 -> ws 握手失败
+- `map $http_upgrade $connection_upgrade` 区分 POST（Connection=close）与 ws（Connection=upgrade），三者共存
+- 不需要 nginx 支持 CONNECT
+
+以下为生产验证通过的完整配置（按实际调整地址与前缀）：
+
+```nginx
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 80;
+    server_name <能访问外网的Nginx 主机IP>;
+
+    # ① bootstrap：POST /callback/ws/endpoint -> open.feishu.cn + sub_filter 改写 wss URL
+    location = /weknora/feishu/callback/ws/endpoint {
+        resolver 114.114.114.114 8.8.8.8 valid=300s ipv6=off;
+        set $feishu_host "open.feishu.cn";
+        rewrite ^/weknora/feishu/(.*)$ /$1 break;
+        proxy_pass https://$feishu_host;
+
+        proxy_ssl_server_name on;
+        proxy_ssl_name open.feishu.cn;
+        proxy_ssl_protocols TLSv1.2 TLSv1.3;
+        proxy_ssl_verify off;
+        proxy_set_header Host open.feishu.cn;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+
+        # 禁 gzip，sub_filter 才能改写 JSON
+        proxy_set_header Accept-Encoding "";
+        # 飞书下发的 wss host 是 msg-frontier.feishu.cn（长连接专用域名，非 open.feishu.cn）
+        sub_filter 'wss://msg-frontier.feishu.cn' 'ws://<能访问外网的Nginx 主机IP>/weknora/feishu';
+        sub_filter_once off;
+        sub_filter_types application/json;
+    }
+
+    # ② ws dial：WebSocket 长连接 -> msg-frontier.feishu.cn（upstream 不是 open.feishu.cn！）
+    location /weknora/feishu/ws/ {
+        resolver 114.114.114.114 8.8.8.8 valid=300s ipv6=off;
+        set $feishu_host "msg-frontier.feishu.cn";
+        rewrite ^/weknora/feishu/(.*)$ /$1 break;
+        proxy_pass https://$feishu_host;
+
+        proxy_ssl_server_name on;
+        proxy_ssl_name msg-frontier.feishu.cn;
+        proxy_ssl_protocols TLSv1.2 TLSv1.3;
+        proxy_ssl_verify off;
+        proxy_set_header Host msg-frontier.feishu.cn;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_request_buffering off;
+        chunked_transfer_encoding on;
+
+        proxy_connect_timeout 60s;
+        proxy_send_timeout    3600s;
+        proxy_read_timeout    3600s;
+        send_timeout          3600s;
+
+        client_max_body_size    0;
+        proxy_max_temp_file_size 0;
+    }
+
+    # ③ OpenAPI HTTP：token/发消息/下载文件/CardKit -> open.feishu.cn
+    location /weknora/feishu/ {
+        resolver 114.114.114.114 8.8.8.8 valid=300s ipv6=off;
+        set $feishu_host "open.feishu.cn";
+        rewrite ^/weknora/feishu/(.*)$ /$1 break;
+        proxy_pass https://$feishu_host;
+
+        proxy_ssl_server_name on;
+        proxy_ssl_name open.feishu.cn;
+        proxy_ssl_protocols TLSv1.2 TLSv1.3;
+        proxy_ssl_verify off;
+        proxy_set_header Host open.feishu.cn;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        client_max_body_size 0;
+    }
+}
+```
+
+> 验证 sub_filter 生效：`curl -s http://127.0.0.1/weknora/feishu/callback/ws/endpoint -X POST -H 'Content-Type: application/json' -d '{"AppID":"xxx","AppSecret":"xxx"}'`，返回的 `data.URL` 应为 `ws://<能访问外网的Nginx 主机IP>/weknora/feishu/ws/v2?...`（不再是 `wss://msg-frontier.feishu.cn/...`）。WeKnora 日志出现 `[IM] Feishu WebSocket connected successfully` 即长连接建立。
+
+**SSRF 白名单**：若 `api_base_url` 是内网地址，需把主机名加入 `SSRF_WHITELIST` 环境变量，否则 SSRF 防护会拦截。
+
+> Webhook 模式下，`api_base_url` 只影响出站 HTTP API；飞书回调 WeKnora 的入站路径不受影响（回调地址在渠道卡片上单独配置）。
+> Lark 国际版同理，只是默认域名换成 `https://open.larksuite.com`。
+
+---
+
 ### Lark 接入
 
 Lark 是飞书的国际版。两者是同一产品部署在两朵相互隔离的云上，**IM 的 API 接口、事件结构、
@@ -820,8 +961,7 @@ type ReplyMessage struct {
 │  6. 解析/创建 ChannelSession                     │
 │  7. 获取 WeKnora Session                         │
 │  8. 加载 Agent 配置（获取知识库、模型等信息）       │
-│  9. 文件消息？→ 下载并保存到知识库                  │
-│ 10. 提交到 qaQueue (有界队列, 异步执行)            │
+│  9. 所有消息提交到 qaQueue (有界队列, 异步执行)     │
 └───────────┬─────────────────────────────────────┘
             │
             ▼
@@ -917,7 +1057,7 @@ type FileDownloader interface {
 }
 ```
 
-实现此接口后，当用户发送文件/图片消息且渠道配置了 `knowledge_base_id` 时，Service 会自动下载文件并保存到指定知识库。
+实现此接口后，文件和图片可作为 QA 附件供模型理解。配置 `knowledge_base_id` 时，附件还会在后台保存到指定知识库；未配置时仅跳过保存。
 
 ### im.AdapterFactory — 适配器工厂
 
@@ -1539,22 +1679,7 @@ QA 管道 ──chunk──chunk──chunk──▶ EventBus
 
 ## 文件消息处理
 
-当用户在 IM 中发送文件或图片消息时，如果渠道配置了 `knowledge_base_id`，Service 会自动将文件保存到对应知识库：
-
-```
-用户发送文件/图片消息
-        │
-        ▼
-  消息类型 = file/image？
-  渠道配置了 knowledge_base_id？
-  Adapter 实现了 FileDownloader？
-        │ 全部满足
-        ▼
-  1. adapter.DownloadFile(msg) → io.ReadCloser + fileName
-  2. 通知用户 "正在处理文件..."
-  3. knowledgeService.Save(file, knowledgeBaseID)
-  4. 通知用户 "文件已保存到知识库"
-```
+文件和图片会作为 QA 附件供模型理解，用户只收到该消息对应的 QA 回复。`knowledge_base_id` 配置后会额外触发后台入库；未配置时不入库、不报错。入库结果和后续解析不再产生额外 IM 通知。解析出的附件文本最多保留前 500 行且不超过 32 KiB；发生任一限制时，模型会收到通用的截断提示。
 
 **各平台文件下载方式：**
 

@@ -43,15 +43,13 @@ func newTestResolver(t *testing.T, loader TenantSandboxConfigLoader) (TenantSand
 	return resolver, fallback
 }
 
-// Existing deployments have no tenant config at all; they must keep using the
-// process-wide manager built from WEKNORA_SANDBOX_*.
-func TestResolveEmptyConfigIDUsesDefaultManager(t *testing.T) {
-	resolver, fallback := newTestResolver(t, &stubTenantConfigLoader{})
+func TestResolveEmptyConfigIDIsDisabled(t *testing.T) {
+	resolver, _ := newTestResolver(t, &stubTenantConfigLoader{})
 
 	mgr, err := resolver.Resolve(context.Background(), 42, "")
 
 	require.NoError(t, err)
-	require.Same(t, fallback, mgr)
+	require.Equal(t, SandboxTypeDisabled, mgr.GetType())
 }
 
 // A cordoned config must not produce a manager: the whole point of the cordon
@@ -101,6 +99,25 @@ func TestResolveBuildsRemoteManagerWithoutHealthProbe(t *testing.T) {
 	require.NoError(t, err)
 	require.NotSame(t, fallback, mgr)
 	require.Equal(t, SandboxTypeE2B, mgr.GetType())
+}
+
+func TestResolveBuildsLocalManagerFromWorkspaceConfig(t *testing.T) {
+	resolver, fallback := newTestResolver(t, &stubTenantConfigLoader{
+		result: ResolvedTenantSandboxConfig{
+			Config: &types.TenantSandboxConfig{
+				SandboxType:       "local",
+				DefaultTimeoutSec: 17,
+				EnvVars:           map[string]string{"WORKSPACE_FLAG": "enabled"},
+			},
+			Found: true,
+		},
+	})
+
+	mgr, err := resolver.Resolve(context.Background(), 42, "cfg-local")
+
+	require.NoError(t, err)
+	require.NotSame(t, fallback, mgr)
+	require.Equal(t, SandboxTypeLocal, mgr.GetType())
 }
 
 // No caching: the loader is consulted on every Resolve, which is what makes a

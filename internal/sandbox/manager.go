@@ -51,14 +51,6 @@ func (m *DefaultManager) initializeSandbox(ctx context.Context) error {
 		dockerSandbox := NewDockerSandbox(m.config)
 		if dockerSandbox.IsAvailable(ctx) {
 			m.sandbox = dockerSandbox
-			// Pre-pull the sandbox image asynchronously so it's ready before first use
-			go func() {
-				if err := dockerSandbox.EnsureImage(context.Background()); err != nil {
-					log.Printf("[sandbox] failed to pre-pull image %s: %v", m.config.DockerImage, err)
-				} else {
-					log.Printf("[sandbox] image %s is ready", m.config.DockerImage)
-				}
-			}()
 			return nil
 		}
 
@@ -106,9 +98,19 @@ func (m *DefaultManager) Execute(ctx context.Context, config *ExecuteConfig) (*E
 		return nil, ErrSandboxDisabled
 	}
 
+	effective := config
+	if config != nil && len(m.config.EnvVars) > 0 {
+		copy := *config
+		copy.Env = cloneMetadata(m.config.EnvVars)
+		for key, value := range config.Env {
+			copy.Env[key] = value
+		}
+		effective = &copy
+	}
+
 	// Perform security validation unless explicitly skipped
-	if !config.SkipValidation {
-		if err := runScriptValidation(m.validator, config); err != nil {
+	if effective != nil && !effective.SkipValidation {
+		if err := runScriptValidation(m.validator, effective); err != nil {
 			log.Printf("[sandbox] Security validation failed: %v", err)
 			return &ExecuteResult{
 				ExitCode: -1,
@@ -118,7 +120,7 @@ func (m *DefaultManager) Execute(ctx context.Context, config *ExecuteConfig) (*E
 		}
 	}
 
-	return sandbox.Execute(ctx, config)
+	return sandbox.Execute(ctx, effective)
 }
 
 // runScriptValidation is the package-level helper that DefaultManager and

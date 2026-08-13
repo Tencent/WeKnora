@@ -117,6 +117,7 @@
 import { computed, nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
+import { copyToClipboard } from '@/utils/clipboard'
 import { getMessageList } from '@/api/chat'
 import {
   clearSession,
@@ -179,26 +180,8 @@ function onMenuAction(value: string): void {
 }
 
 async function copyText(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text)
-      return
-    } catch {
-      // Some browsers expose Clipboard API outside a permitted context.
-      // Fall through to the legacy copy path before reporting a failure.
-    }
-  }
-
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.setAttribute('readonly', '')
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.select()
-  const copied = document.execCommand('copy')
-  textarea.remove()
-  if (!copied) throw new Error('clipboard unavailable')
+  const ok = await copyToClipboard(text)
+  if (!ok) throw new Error('clipboard unavailable')
 }
 
 function currentSessionLink(): string {

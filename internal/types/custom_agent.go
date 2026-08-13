@@ -152,8 +152,7 @@ type CustomAgentConfig struct {
 
 	// ===== Sandbox Settings =====
 	// SandboxConfigID selects which workspace sandbox config this agent's
-	// skill scripts run on. Empty means the deployment-wide
-	// WEKNORA_SANDBOX_* defaults.
+	// skill scripts run on. Empty means sandbox execution is disabled.
 	//
 	// This references the LOGICAL config, never a specific revision: keeping
 	// the indirection here is what would let credential rotation happen

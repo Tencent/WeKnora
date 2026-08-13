@@ -611,3 +611,26 @@ func (r *wikiPendingRepoForCleanupTest) DeleteByDedupKey(
 ) error {
 	return nil
 }
+
+// TestGenerateWithTemplateSetsMaxTokens is a regression for #2604: without an
+// explicit MaxTokens, DeepSeek-class providers default to 8192 completion
+// tokens and truncate combined wiki extraction JSON mid-field.
+func TestGenerateWithTemplateSetsMaxTokens(t *testing.T) {
+	model := &templateCaptureChatModel{response: `{"entities":[],"concepts":[]}`}
+	service := &wikiIngestService{}
+	_, err := service.generateWithTemplate(
+		context.Background(),
+		model,
+		`Content={{.Content}}`,
+		map[string]string{"Content": "hello"},
+	)
+	if err != nil {
+		t.Fatalf("generateWithTemplate() error = %v", err)
+	}
+	if model.options.MaxTokens != wikiLLMMaxTokens {
+		t.Fatalf("MaxTokens = %d, want %d", model.options.MaxTokens, wikiLLMMaxTokens)
+	}
+	if model.options.Thinking == nil || *model.options.Thinking {
+		t.Fatalf("Thinking should be non-nil false, got %#v", model.options.Thinking)
+	}
+}

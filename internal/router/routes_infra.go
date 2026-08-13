@@ -52,6 +52,7 @@ func RegisterSandboxConfigRoutes(
 	{
 		configs.GET("", g.Viewer(), h.List)
 		configs.PUT("/workspace-policy", g.Admin(), h.SetWorkspacePolicy)
+		configs.POST("/templates/query", g.Admin(), h.QueryTemplates)
 		configs.POST("", g.Admin(), h.Create)
 		configs.GET("/:id", g.Viewer(), h.Get)
 		configs.PUT("/:id", g.Admin(), h.Update)

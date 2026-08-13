@@ -482,6 +482,7 @@ import { useAuthStore } from '@/stores/auth'
 import type { Organization, OrganizationPreview, SearchableOrganizationItem } from '@/api/organization'
 import { previewOrganization, submitJoinRequest } from '@/api/organization'
 import { useI18n } from 'vue-i18n'
+import { copyWithToast } from '@/utils/clipboard'
 import OrganizationSettingsModal from './OrganizationSettingsModal.vue'
 import SpaceAvatar from '@/components/SpaceAvatar.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
@@ -1040,35 +1041,8 @@ function viewOrganizationFromPreview() {
 }
 
 // 复制预览中的空间 ID
-function copyPreviewSpaceId() {
-  if (!invitePreviewData.value?.id) return
-  const text = invitePreviewData.value.id
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(() => {
-        MessagePlugin.success(t('common.copied'))
-      }).catch(() => {
-        fallbackCopyText(text)
-        MessagePlugin.success(t('common.copied'))
-      })
-    } else {
-      fallbackCopyText(text)
-      MessagePlugin.success(t('common.copied'))
-    }
-  } catch {
-    MessagePlugin.error(t('common.copyFailed'))
-  }
-}
-
-function fallbackCopyText(text: string) {
-  const textArea = document.createElement('textarea')
-  textArea.value = text
-  textArea.style.position = 'fixed'
-  textArea.style.opacity = '0'
-  document.body.appendChild(textArea)
-  textArea.select()
-  document.execCommand('copy')
-  document.body.removeChild(textArea)
+async function copyPreviewSpaceId() {
+  await copyWithToast(invitePreviewData.value?.id, 'common.copied')
 }
 
 // 从搜索列表加入空间（通过空间 ID，无需邀请码）- 在预览确认后调用

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
@@ -147,17 +146,15 @@ func (s *sessionService) AgentQA(
 	// sandbox before the model can request shell or skill execution. The
 	// durable storage URL — not the ephemeral sandbox path — remains the
 	// source of truth. Gated on the sandbox manager advertising a session
-	// filesystem capability so provider-neutral wiring (Cube today, E2B
-	// tomorrow) drops in without touching this call site.
+	// filesystem capability so provider-neutral remote wiring stays here.
 	var stagedAttachments []stagedSessionAttachment
 	stager, ok := s.agentService.(sessionAttachmentStager)
 	if !ok {
 		return errors.New("agent service does not support session attachment staging")
 	}
 	// Probe the backend this session's sandbox actually runs on. Gating on the
-	// process-wide manager instead would skip staging whenever the deployment
-	// default is docker/local but the agent selected a named Cube/E2B config —
-	// the tools would still run remotely, against an empty /workspace/input.
+	// process-wide manager instead could inspect a different backend than the
+	// named workspace config selected by this agent.
 	inputStore, storeErr := stager.sessionSandboxInputStore(ctx, sessionID, agentConfig.SandboxConfigID)
 	if storeErr != nil {
 		return fmt.Errorf("resolve sandbox file store for session %s: %w", sessionID, storeErr)
@@ -537,15 +534,6 @@ func (s *sessionService) configureSkillsFromAgent(
 		return
 	}
 	agentConfig.SandboxConfigID = customAgent.Config.SandboxConfigID
-	// When sandbox is disabled, skills cannot be enabled (no script execution environment)
-	sandboxMode := os.Getenv("WEKNORA_SANDBOX_MODE")
-	if sandboxMode == "" || sandboxMode == "disabled" {
-		agentConfig.SkillsEnabled = false
-		agentConfig.SkillDirs = nil
-		agentConfig.AllowedSkills = nil
-		logger.Infof(ctx, "Sandbox is disabled: skills are not available")
-		return
-	}
 	dir := getPreloadedSkillsDir()
 	switch customAgent.Config.SkillsSelectionMode {
 	case "all":

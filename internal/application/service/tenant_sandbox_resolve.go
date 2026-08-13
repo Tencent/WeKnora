@@ -7,8 +7,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
@@ -58,14 +56,9 @@ func (l *tenantSandboxConfigLoader) Load(
 }
 
 // WorkspaceSandboxPolicy reports whether sandbox execution is disabled for the
-// entire workspace, including agents bound to named cube/e2b configs.
+// entire workspace, including agents bound to any named backend config.
 type WorkspaceSandboxPolicy interface {
 	WorkspaceScriptsDisabled(ctx context.Context, tenantID uint64) (bool, error)
-}
-
-func deploymentSandboxDisabled() bool {
-	mode := strings.ToLower(strings.TrimSpace(os.Getenv("WEKNORA_SANDBOX_MODE")))
-	return mode == "" || mode == "disabled"
 }
 
 // resolveTenantSandboxForConfig returns the Manager for an explicit config.
@@ -77,17 +70,12 @@ func deploymentSandboxDisabled() bool {
 func resolveTenantSandboxForConfig(
 	ctx context.Context,
 	resolver sandbox.TenantSandboxResolver,
-	fallback sandbox.Manager,
+	_ sandbox.Manager,
 	tenantID uint64,
 	configID string,
 	policy WorkspaceSandboxPolicy,
 ) (sandbox.Manager, error) {
-	// ① Deployment-wide kill switch (WEKNORA_SANDBOX_MODE empty/disabled).
-	if deploymentSandboxDisabled() {
-		return sandbox.NewDisabledManager(), nil
-	}
-
-	// ② Workspace kill switch — independent of resolver availability.
+	// ① Workspace kill switch — independent of resolver availability.
 	if policy != nil && tenantID != 0 {
 		disabled, err := policy.WorkspaceScriptsDisabled(ctx, tenantID)
 		if err != nil {
@@ -99,12 +87,13 @@ func resolveTenantSandboxForConfig(
 		}
 	}
 
-	// ③ Default path: agents with no named config use the process-wide manager.
+	// ② No named workspace config means sandbox execution is disabled. There is
+	// no deployment-level provider fallback anymore.
 	if configID == "" || configID == types.SandboxConfigIDGlobalDefault {
-		return fallback, nil
+		return sandbox.NewDisabledManager(), nil
 	}
 
-	// ④ Named config: must not silently fall back to the deployment default.
+	// ③ Named config: must not silently fall back to another backend.
 	if tenantID == 0 {
 		return nil, fmt.Errorf(
 			"sandbox: resolve config %q: missing workspace context", configID)

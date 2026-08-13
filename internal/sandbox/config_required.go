@@ -1,11 +1,8 @@
 // Package sandbox: what a named backend config must carry on its own.
 //
-// A named config is self-contained. Nothing is inherited from the deployment
-// WEKNORA_SANDBOX_* baseline, which exists only to serve agents that selected no
-// config at all. The trade for that clarity is that every value the provider
-// client cannot synthesize has to be present in the config itself, so this file
-// names those values once and both the save path and the resolve path check
-// against it.
+// A named config is self-contained. Every value the provider client cannot
+// synthesize has to be present in the workspace config itself, so this file
+// names those values once and both save and resolve paths check against it.
 //
 // Two classes are deliberately NOT required:
 //
@@ -33,8 +30,8 @@ var ErrSandboxConfigIncomplete = errors.New("sandbox: config is missing required
 
 // MissingRequiredFields lists the fields cfg fails to supply for its own
 // provider, named after the JSON keys the API and the settings form use so the
-// message can be surfaced without translation. Backends that hold no endpoint
-// of their own (docker / local / disabled) require nothing.
+// message can be surfaced without translation. Local and disabled hold no
+// backend-specific values; Docker must explicitly name its image.
 func MissingRequiredFields(cfg *Config) []string {
 	if cfg == nil {
 		return nil
@@ -54,6 +51,8 @@ func MissingRequiredFields(cfg *Config) []string {
 	case SandboxTypeE2B:
 		require("api_key", cfg.E2BAPIKey)
 		require("template_id", cfg.E2BTemplate)
+	case SandboxTypeDocker:
+		require("image", cfg.DockerImage)
 	}
 	return missing
 }
