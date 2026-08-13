@@ -30,7 +30,7 @@ func TestApplyAuthSessionSetsBothSurfaces(t *testing.T) {
 		Role:        types.TenantRoleAdmin,
 		SystemAdmin: true,
 		APIKeyScope: scope,
-		Extra:       map[types.ContextKey]any{EmbedChannelContextKey: &types.EmbedChannel{ID: "ch"}},
+		Extra:       map[types.ContextKey]any{types.EmbedChannelContextKey: &types.EmbedChannel{ID: "ch"}},
 	})
 
 	ctx := c.Request.Context()
@@ -67,7 +67,7 @@ func TestApplyAuthSessionSetsBothSurfaces(t *testing.T) {
 	if ch, ok := EmbedChannelFromContext(ctx); !ok || ch.ID != "ch" {
 		t.Fatalf("ctx embed channel = %#v, ok=%v", ch, ok)
 	}
-	if got, ok := c.Get(EmbedChannelContextKey.String()); !ok || got.(*types.EmbedChannel).ID != "ch" {
+	if got, ok := c.Get(types.EmbedChannelContextKey.String()); !ok || got.(*types.EmbedChannel).ID != "ch" {
 		t.Fatalf("keys embed channel = %v, ok=%v", got, ok)
 	}
 }

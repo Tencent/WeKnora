@@ -249,3 +249,33 @@ func TestCloneContextPreservesTheAgentMemoryOptOut(t *testing.T) {
 		t.Fatal("MemoryAllowedForAgent(cloned) = false for an unmarked context, want true")
 	}
 }
+
+// Document ingestion detaches mid-flight: knowledge_create hands processChunks
+// to a goroutine on a cloned context, and processChunks vectorises every chunk.
+// If the background mark does not survive, that work stops being visible to the
+// per-model concurrency governor and the ingestion storm it exists to contain
+// runs past it, starving interactive chat.
+func TestCloneContextKeepsBackgroundWorkThrottled(t *testing.T) {
+	t.Parallel()
+
+	if !types.IsBackgroundTask(CloneContext(types.WithBackgroundTask(context.Background()))) {
+		t.Fatal("IsBackgroundTask(cloned) = false, want background work to stay throttled across a detach")
+	}
+	if types.IsBackgroundTask(CloneContext(context.Background())) {
+		t.Fatal("IsBackgroundTask(cloned) = true for an unmarked context, want interactive work left ungated")
+	}
+}
+
+// An IM bot has no live client to click "Authorize", so losing this mark makes
+// the agent block on the OAuth wait for every unauthorized service instead of
+// replying with its one-shot notice.
+func TestCloneContextKeepsTheNonInteractiveOAuthMark(t *testing.T) {
+	t.Parallel()
+
+	if !types.IsMCPOAuthNonInteractive(CloneContext(types.WithMCPOAuthNonInteractive(context.Background()))) {
+		t.Fatal("IsMCPOAuthNonInteractive(cloned) = false, want the mark to survive a detach")
+	}
+	if types.IsMCPOAuthNonInteractive(CloneContext(context.Background())) {
+		t.Fatal("IsMCPOAuthNonInteractive(cloned) = true for an unmarked context, want interactive prompts to stay possible")
+	}
+}
