@@ -42,6 +42,7 @@ func NewChunkRepository(db *gorm.DB) interfaces.ChunkRepository {
 func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chunk) error {
 	for _, chunk := range chunks {
 		chunk.Content = common.CleanInvalidUTF8(chunk.Content)
+		chunk.ContextHeader = common.CleanInvalidUTF8(chunk.ContextHeader)
 		if chunk.SourceContent == "" {
 			chunk.SourceContent = chunk.Content
 		}
