@@ -701,6 +701,7 @@ import {
   type ApiKeyCapabilityGroup,
 } from '@/config/apiKeyCapabilities'
 import { normalizeAPIKeyKnowledgeBaseIDs } from './apiKeyScope'
+import { consumeApiPlaygroundSSE } from './apiPlaygroundSSE'
 
 const { t } = useI18n()
 
@@ -1610,26 +1611,6 @@ function formatJSON(value: unknown) {
   }
 }
 
-function extractAnswerFromSSE(raw: string) {
-  const chunks: string[] = []
-  raw.split('\n').forEach((line) => {
-    if (!line.startsWith('data:')) return
-    const payload = line.slice(5).trim()
-    if (!payload || payload === '[DONE]') return
-    try {
-      const parsed = JSON.parse(payload)
-      const type = parsed?.response_type || parsed?.type
-      const content = parsed?.content
-      if (type === 'answer' && typeof content === 'string') {
-        chunks.push(content)
-      }
-    } catch {
-      // Keep raw stream visible even when an event is not JSON.
-    }
-  })
-  return chunks.join('')
-}
-
 async function readResponseBody(resp: Response) {
   const text = await resp.text()
   if (!text) return ''
@@ -1718,19 +1699,16 @@ async function runPlayground() {
       throw new Error(t('integrations.api.playgroundNoStream'))
     }
 
-    const reader = chatResp.body.getReader()
-    const decoder = new TextDecoder()
-    let raw = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      raw += decoder.decode(value, { stream: true })
+    const result = await consumeApiPlaygroundSSE(chatResp.body, ({ raw, answer }) => {
       playground.stream_output = compactText(raw)
-      playground.final_answer = extractAnswerFromSSE(raw)
+      playground.final_answer = answer
+    })
+    playground.stream_output = compactText(result.raw)
+    playground.final_answer = result.answer
+    if (result.status === 'failed') {
+      playground.chat_status = 'failed'
+      throw new Error(result.error || t('integrations.api.playgroundFailed'))
     }
-    raw += decoder.decode()
-    playground.stream_output = compactText(raw)
-    playground.final_answer = extractAnswerFromSSE(raw)
     playground.chat_status = 'success'
     MessagePlugin.success(t('integrations.api.playgroundSuccess', {
       ms: Math.round(performance.now() - startedAt),
