@@ -5085,6 +5085,7 @@ export default {
     },
     search: {
       noResults: 'No matching content found',
+      candidatesBelowThreshold: 'Matched {count} candidate(s), none relevant enough to use',
       foundResultsFromFiles: 'Found {count} result(s) from {files} file(s)',
       foundResults: 'Found {count} result(s)',
       foundMixedResults: 'Found {count} result(s) ({docCount} documents, {webCount} web results)',
