@@ -32,6 +32,7 @@ import { useChatResourcesStore } from '@/stores/chatResources'
 import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { collectDroppedFiles } from './collectDroppedFiles'
 
 const route = useRoute();
 const router = useRouter();
@@ -75,101 +76,6 @@ const CHAT_DROP_ROUTE_NAMES = new Set(['chat', 'globalCreatChat', 'kbCreatChat']
 
 const isChatDropRoute = () => {
     return CHAT_DROP_ROUTE_NAMES.has(String(route.name || ''));
-}
-
-// -- 拖拽文件夹遍历辅助函数 -----------------------------------------------
-// 拖拽文件夹时，Chrome/Edge 会用"假"目录条目（size 0、无扩展名）填充
-// dataTransfer.files，而非文件夹内的真实文件。只有 webkitGetAsEntry()
-// 能递归遍历拖入的目录，因此必须优先尝试它，仅对普通文件拖拽才回退到
-// dataTransfer.files。Firefox 在拖拽文件夹时 dataTransfer.files 为空，
-// 同样需要走 entry 遍历路径。
-
-const isHiddenSegment = (segment: string): boolean => segment.startsWith('.');
-
-const setRelativePath = (file: File, relativePath: string): void => {
-    try {
-        Object.defineProperty(file, 'webkitRelativePath', {
-            value: relativePath,
-            writable: false,
-            enumerable: true,
-            configurable: true,
-        });
-    } catch {
-        // 旧版 Safari 可能拒绝在 File 上 defineProperty，这些文件
-        // 不会携带相对路径，将以平铺方式上传。
-    }
-};
-
-const readAllDirEntries = (reader: any): Promise<any[]> => {
-    return new Promise((resolve) => {
-        const collected: any[] = [];
-        const readBatch = () => {
-            reader.readEntries((entries: any[]) => {
-                if (!entries || entries.length === 0) {
-                    resolve(collected);
-                } else {
-                    collected.push(...entries);
-                    readBatch();
-                }
-            }, () => resolve(collected));
-        };
-        readBatch();
-    });
-};
-
-const traverseEntry = (entry: any, path: string): Promise<File[]> => {
-    return new Promise((resolve) => {
-        if (entry.isFile) {
-            entry.file((file: File) => {
-                // 仅对目录内的文件设置 webkitRelativePath，与
-                // <input webkitdirectory> 行为一致。顶层拖入的文件
-                // 保持空值，作为普通文件上传。
-                if (path) {
-                    const relativePath = `${path}/${file.name}`;
-                    if (relativePath.split('/').some(isHiddenSegment)) {
-                        resolve([]);
-                        return;
-                    }
-                    setRelativePath(file, relativePath);
-                }
-                resolve([file]);
-            }, () => resolve([]));
-        } else if (entry.isDirectory) {
-            const dirPath = path ? `${path}/${entry.name}` : entry.name;
-            // 跳过隐藏目录（.git、.DS_Store 等）
-            if (dirPath.split('/').some(isHiddenSegment)) {
-                resolve([]);
-                return;
-            }
-            readAllDirEntries(entry.createReader())
-                .then(children => Promise.all(children.map(c => traverseEntry(c, dirPath))))
-                .then(results => resolve(results.flat()))
-                .catch(() => resolve([]));
-        } else {
-            resolve([]);
-        }
-    });
-};
-
-const collectDroppedFiles = async (event: DragEvent): Promise<File[]> => {
-    const items = event.dataTransfer?.items ? Array.from(event.dataTransfer.items) : [];
-
-    // 优先使用 webkitGetAsEntry —— 唯一能遍历拖入目录的 API。
-    if (items.length > 0) {
-        const entries = items
-            .filter(item => item.kind === 'file')
-            .map(item => (item as any).webkitGetAsEntry?.())
-            .filter(entry => entry != null);
-
-        if (entries.length > 0) {
-            const results = await Promise.all(entries.map(e => traverseEntry(e, '')));
-            const files = results.flat();
-            if (files.length > 0) return files;
-        }
-    }
-
-    // 回退：普通文件拖拽（无目录）或不支持 webkitGetAsEntry 的浏览器。
-    return event.dataTransfer?.files ? Array.from(event.dataTransfer.files) : [];
 }
 
 // 检查知识库初始化状态
