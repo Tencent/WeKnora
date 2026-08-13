@@ -642,6 +642,15 @@ func (r *memoryRepository) MarkConsolidated(
 		Updates(map[string]interface{}{"consolidated_at": now, "updated_at": now}).Error
 }
 
+func (r *memoryRepository) MarkForcedConsolidated(
+	ctx context.Context, scope interfaces.MemoryScope,
+) error {
+	now := time.Now()
+	return r.scoped(ctx, scope).
+		Model(&types.MemorySubject{}).
+		Updates(map[string]interface{}{"forced_consolidated_at": now, "updated_at": now}).Error
+}
+
 func (r *memoryRepository) SetItemStatus(
 	ctx context.Context, scope interfaces.MemoryScope, id, status string,
 ) error {

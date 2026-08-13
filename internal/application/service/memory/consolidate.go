@@ -18,6 +18,11 @@ const (
 	// is maintenance, not a feature the user is waiting on, and every run costs
 	// a model call, so it is deliberately infrequent.
 	consolidateInterval = 24 * time.Hour
+	// forcedConsolidateInterval is the floor between two reviews one person
+	// asks for. Short enough that a real retry — fix the model, press again —
+	// is not blocked, long enough that the button cannot be scripted into a
+	// stream of model calls.
+	forcedConsolidateInterval = time.Minute
 	// consolidateMinItems is the store size below which there is nothing worth
 	// reviewing: a handful of memories cannot have drifted into contradiction.
 	consolidateMinItems = 6
@@ -90,13 +95,33 @@ func (s *Service) reviewStore(
 	force bool,
 ) *types.MemoryConsolidationResult {
 	result := &types.MemoryConsolidationResult{}
-	if !force {
-		subject, err := s.repo.GetSubject(ctx, scope)
-		if err != nil || subject == nil {
-			return result
+	subject, err := s.repo.GetSubject(ctx, scope)
+	if err != nil || subject == nil {
+		if err != nil {
+			logger.Warnf(ctx, "memory: load subject for consolidation failed: %v", err)
 		}
-		if subject.ConsolidatedAt != nil && time.Since(*subject.ConsolidatedAt) < consolidateInterval {
-			return result
+		return result
+	}
+	// Two clocks, because the two callers are rate limited for different
+	// reasons and must not silence each other. The daily pass is maintenance
+	// nobody asked for, so it waits a day. A review someone pressed a button
+	// for waits only long enough that the button cannot be held down: the
+	// endpoint is Viewer-level and each press is worth up to forcedMaxClusters
+	// model calls, which a store the model keeps declining would repeat
+	// indefinitely.
+	last, interval := subject.ConsolidatedAt, consolidateInterval
+	if force {
+		last, interval = subject.ForcedConsolidatedAt, forcedConsolidateInterval
+	}
+	if last != nil && time.Since(*last) < interval {
+		if force {
+			result.Skipped = types.MemoryConsolidationSkipTooSoon
+		}
+		return result
+	}
+	if force {
+		if err := s.repo.MarkForcedConsolidated(ctx, scope); err != nil {
+			logger.Warnf(ctx, "memory: mark forced consolidation failed: %v", err)
 		}
 	}
 
@@ -110,7 +135,15 @@ func (s *Service) reviewStore(
 		}
 	}
 
-	items, _, err := s.repo.ListItems(ctx, scope, types.MemoryStatusActive, 200, 0)
+	// The whole store, not a page of it. A fixed 200 used to bound this, which
+	// meant two duplicates that were both old could never meet: the pass only
+	// ever saw the newest rows, and consolidation is the one stage whose job is
+	// to notice things that drifted apart over weeks.
+	//
+	// Reading more costs no model calls. Candidate selection is local — token
+	// overlap plus the vectors recall already stored — and the number of groups
+	// actually put to a model is capped separately by maxClusters.
+	items, _, err := s.repo.ListItems(ctx, scope, types.MemoryStatusActive, cfg.EffectiveMaxItems(), 0)
 	if err != nil {
 		logger.Warnf(ctx, "memory: consolidation list failed: %v", err)
 		return result
@@ -272,17 +305,21 @@ func (s *Service) mergeCandidates(
 	items []*types.MemoryItem,
 	minOverlap, minCosine float64,
 ) [][]*types.MemoryItem {
-	tokens := make(map[string][]string, len(items))
+	// Sets rather than slices: clustering compares every surviving pair, so a
+	// store at the 2000-item cap runs this predicate a couple of million times
+	// and rebuilding both token sets inside each call is what would make
+	// reviewing the whole store too slow to do on a request.
+	tokens := make(map[string]map[string]struct{}, len(items))
 	for _, item := range items {
 		if item == nil {
 			continue
 		}
-		tokens[item.ID] = tokenize(item.Topic + " " + item.Content)
+		tokens[item.ID] = tokenSet(tokenize(item.Topic + " " + item.Content))
 	}
 	vectors := s.storedVectors(ctx, scope, cfg, items)
 
 	return clusterBy(items, func(a, b *types.MemoryItem) bool {
-		if jaccard(tokens[a.ID], tokens[b.ID]) >= minOverlap {
+		if jaccardSets(tokens[a.ID], tokens[b.ID]) >= minOverlap {
 			return true
 		}
 		va, vb := vectors[a.ID], vectors[b.ID]
@@ -366,27 +403,37 @@ func clusterBy(
 	return clusters
 }
 
-// jaccard is the overlap between two token sets.
+// jaccard is the overlap between two token lists.
 func jaccard(a, b []string) float64 {
+	return jaccardSets(tokenSet(a), tokenSet(b))
+}
+
+// tokenSet deduplicates tokens so repeated comparisons of the same memory do
+// not rebuild its side of the overlap each time.
+func tokenSet(tokens []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(tokens))
+	for _, token := range tokens {
+		set[token] = struct{}{}
+	}
+	return set
+}
+
+// jaccardSets is the overlap between two prepared token sets.
+func jaccardSets(a, b map[string]struct{}) float64 {
 	if len(a) == 0 || len(b) == 0 {
 		return 0
 	}
-	set := make(map[string]struct{}, len(a))
-	for _, token := range a {
-		set[token] = struct{}{}
+	// Walk the smaller side; the result is symmetric either way.
+	if len(b) < len(a) {
+		a, b = b, a
 	}
 	shared := 0
-	seen := make(map[string]struct{}, len(b))
-	for _, token := range b {
-		if _, dup := seen[token]; dup {
-			continue
-		}
-		seen[token] = struct{}{}
-		if _, ok := set[token]; ok {
+	for token := range a {
+		if _, ok := b[token]; ok {
 			shared++
 		}
 	}
-	union := len(set) + len(seen) - shared
+	union := len(a) + len(b) - shared
 	if union == 0 {
 		return 0
 	}

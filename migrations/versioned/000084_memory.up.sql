@@ -140,6 +140,10 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS used_memories JSONB;
 
 ALTER TABLE memory_subjects ADD COLUMN IF NOT EXISTS consolidated_at TIMESTAMP WITH TIME ZONE;
 
+-- A review someone asked for is rate limited separately from the daily pass:
+-- one clock for both would let the daily pass refuse the button.
+ALTER TABLE memory_subjects ADD COLUMN IF NOT EXISTS forced_consolidated_at TIMESTAMP WITH TIME ZONE;
+
 ALTER TABLE memory_topic_stats ADD COLUMN IF NOT EXISTS aliases JSONB NOT NULL DEFAULT '[]';
 
 -- Vectors live apart from the items so that listing, capacity enforcement and

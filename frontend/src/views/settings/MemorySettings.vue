@@ -798,6 +798,7 @@ const consolidateSkipMessage: Record<string, string> = {
   too_few_items: 'memorySettings.consolidateTooFewItems',
   no_candidates: 'memorySettings.consolidateNoCandidates',
   model_declined: 'memorySettings.consolidateModelDeclined',
+  too_soon: 'memorySettings.consolidateTooSoon',
 }
 
 const handleConsolidate = async () => {

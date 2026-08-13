@@ -4694,6 +4694,7 @@ export default {
     consolidateTooFewItems: '记忆还太少，暂时没有整理的必要',
     consolidateNoCandidates: '没有发现意思相近的记忆，无需合并',
     consolidateModelDeclined: '模型看过了，这些记忆说的不是同一件事，未做合并',
+    consolidateTooSoon: '刚整理过，请稍后再试',
     consolidateModelUnavailable: '模型不可用，为避免误合并，本次没有改动任何记忆',
     consolidateFailed: '整理失败',
     clear: '清空',

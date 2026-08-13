@@ -1650,6 +1650,7 @@ export default {
     consolidateTooFewItems: 'Too few memories to be worth tidying yet',
     consolidateNoCandidates: 'No memories looked close enough to merge',
     consolidateModelDeclined: 'The model looked and found these are different things, so nothing was merged',
+    consolidateTooSoon: 'A tidy-up just ran. Please try again in a moment.',
     consolidateModelUnavailable: 'The model was unavailable, so nothing was changed rather than risk a wrong merge',
     consolidateFailed: 'Failed to tidy up',
     clear: 'Clear all',
