@@ -262,16 +262,16 @@ func (*processSyncTagService) FindOrCreateTagByName(context.Context, string, str
 
 type deletionLookupKnowledgeRepo struct {
 	interfaces.KnowledgeRepository
-	knowledge       *types.Knowledge
-	lookupErr       error
-	metadataUpdates []map[string]string // metadata persisted via UpdateKnowledge
+	knowledge         *types.Knowledge
+	lookupErr         error
+	metadataUpdates   []map[string]string // metadata persisted via UpdateKnowledge
 	metadataUpdateErr error
-	hardDeleted     []string
-	hardDeleteErr   error
-	tenantID        uint64
-	knowledgeBaseID string
-	dataSourceID    string
-	externalID      string
+	hardDeleted       []string
+	hardDeleteErr     error
+	tenantID          uint64
+	knowledgeBaseID   string
+	dataSourceID      string
+	externalID        string
 }
 
 func (r *deletionLookupKnowledgeRepo) UpdateKnowledge(_ context.Context, knowledge *types.Knowledge) error {

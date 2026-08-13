@@ -128,28 +128,41 @@ run_golangci_if_available() {
   log_ok "golangci-lint"
 }
 
-run_app_vet_test() {
-  local -a pkgs=("$@")
-  if [[ ${#pkgs[@]} -eq 0 ]]; then
-    log_step "no app Go packages changed; skip go vet/test"
-    return 0
-  fi
-  log_step "go vet (${#pkgs[@]} package(s))"
+run_full_app_vet() {
+  # Mirrors .github/workflows/app.yml: vet every app package (excl. docreader).
+  log_step "go vet (all app packages, like CI)"
   (
     cd "$ROOT"
+    local -a pkgs=()
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && pkgs+=("$line")
+    done < <(go list ./... | grep -v '/docreader/' || true)
     go vet "${pkgs[@]}"
   )
   log_ok "go vet"
+}
+
+run_go_test_packages() {
+  local -a pkgs=("$@")
+  if [[ ${#pkgs[@]} -eq 0 ]]; then
+    log_step "no changed Go packages; skip go test"
+    return 0
+  fi
   if [[ "${HOOK_SKIP_TEST:-}" == "1" ]]; then
     log_step "HOOK_SKIP_TEST=1; skip go test"
     return 0
   fi
-  log_step "go test (${#pkgs[@]} package(s))"
+  log_step "go test (${#pkgs[@]} changed package(s))"
   (
     cd "$ROOT"
     go test -count=1 "${pkgs[@]}"
   )
   log_ok "go test"
+}
+
+run_app_vet_test() {
+  run_full_app_vet
+  run_go_test_packages "$@"
 }
 
 run_cli_checks() {
