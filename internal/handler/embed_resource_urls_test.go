@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
-	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -27,7 +26,7 @@ func newEmbedLoadMessagesCtx(
 		http.MethodGet, "/messages/"+testEmbedSessionID+"/load"+query, nil)
 	c.Request.Header.Set("X-Embed-Session", service.SignEmbedSessionHandle(ch, testEmbedSessionID))
 	c.Params = gin.Params{{Key: "session_id", Value: testEmbedSessionID}}
-	ctx := context.WithValue(c.Request.Context(), middleware.EmbedChannelContextKey, ch)
+	ctx := context.WithValue(c.Request.Context(), types.EmbedChannelContextKey, ch)
 	c.Request = c.Request.WithContext(ctx)
 	return c, w
 }
