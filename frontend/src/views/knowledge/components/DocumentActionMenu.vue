@@ -26,8 +26,6 @@ const emit = defineEmits<{
   (e: 'view-trace'): void;
   (e: 'reparse'): void;
   (e: 'cancel-parse'): void;
-  (e: 'retry-file-update'): void;
-  (e: 'discard-file-update'): void;
   (e: 'move'): void;
   (e: 'move-folder'): void;
   (e: 'batch-manage'): void;
@@ -42,7 +40,6 @@ const isParseInFlight = computed(() =>
   CANCELABLE_PARSE_STATUSES.has(String(props.item.parse_status ?? ''))
 );
 const isReplacing = computed(() => props.item.parse_status === 'replacing');
-const hasFailedFileUpdate = computed(() => props.item.file_update_state === 'failed');
 
 const fileName = computed(() => props.item.file_name || props.item.title || props.item.id);
 </script>
@@ -52,22 +49,6 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
     <t-icon class="icon" name="loading" />
     <span>{{ $t('knowledgeBase.statusReplacing') }}</span>
   </div>
-
-  <div v-if="hasFailedFileUpdate" class="doc-action-menu-item" @click.stop="emit('retry-file-update')">
-    <t-icon class="icon" name="refresh" />
-    <span>{{ $t('knowledgeBase.retryFileUpdate') }}</span>
-  </div>
-
-  <t-popconfirm v-if="hasFailedFileUpdate" theme="warning"
-    :content="$t('knowledgeBase.discardFileUpdateConfirm')"
-    :confirm-btn="{ content: $t('knowledgeBase.discardFileUpdate'), theme: 'danger' }"
-    :cancel-btn="{ content: $t('common.cancel') }" placement="left"
-    @confirm="emit('discard-file-update')">
-    <div class="doc-action-menu-item danger" @click.stop>
-      <t-icon class="icon" name="delete" />
-      <span>{{ $t('knowledgeBase.discardFileUpdate') }}</span>
-    </div>
-  </t-popconfirm>
 
   <!-- 下载原始文档 -->
   <div

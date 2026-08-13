@@ -37,10 +37,6 @@ type KnowledgeService interface {
 		ctx context.Context,
 		req *types.KnowledgeFileUpdateRequest,
 	) (*types.KnowledgeFileUpsertResult, error)
-	// RetryKnowledgeFileUpdate re-arms the retained failed active version.
-	RetryKnowledgeFileUpdate(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
-	// DiscardKnowledgeFileUpdate removes a failed active version and its latest pending version.
-	DiscardKnowledgeFileUpdate(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
 	// CreateKnowledgeFromURL creates knowledge from a URL.
 	// When fileName or fileType is provided (or the URL path has a known file extension),
 	// the URL is treated as a direct file download instead of a web page crawl.
@@ -367,9 +363,6 @@ type KnowledgeRepository interface {
 	) (*types.KnowledgeFileUpdateSlot, error)
 	CancelKnowledgeFileUpdates(
 		ctx context.Context, tenantID uint64, knowledgeID string,
-	) (*types.KnowledgeFileUpdateSlot, error)
-	CancelFailedKnowledgeFileUpdate(
-		ctx context.Context, tenantID uint64, knowledgeID string, activeVersion uint64,
 	) (*types.KnowledgeFileUpdateSlot, error)
 	// BeginKnowledgeDeletion atomically marks active knowledge rows as deleting
 	// and removes their file-update coordination slots.

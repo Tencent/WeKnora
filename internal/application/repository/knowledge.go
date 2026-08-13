@@ -894,41 +894,6 @@ func (r *knowledgeRepository) CancelKnowledgeFileUpdates(
 	return cancelled, err
 }
 
-// CancelFailedKnowledgeFileUpdate removes only the exact failed active
-// version observed by the caller. A concurrent upload cannot be discarded.
-func (r *knowledgeRepository) CancelFailedKnowledgeFileUpdate(
-	ctx context.Context, tenantID uint64, knowledgeID string, activeVersion uint64,
-) (*types.KnowledgeFileUpdateSlot, error) {
-	var cancelled *types.KnowledgeFileUpdateSlot
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		query := tx.Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID)
-		if tx.Dialector.Name() != "sqlite" {
-			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
-		}
-		var slot types.KnowledgeFileUpdateSlot
-		if err := query.First(&slot).Error; err != nil {
-			return err
-		}
-		if slot.ActiveVersion == nil || *slot.ActiveVersion != activeVersion ||
-			slot.ActiveState != types.KnowledgeFileUpdateStateFailed {
-			return ErrKnowledgeFileUpdateStateConflict
-		}
-		result := tx.Where(
-			"tenant_id = ? AND knowledge_id = ? AND active_version = ? AND active_state = ?",
-			tenantID, knowledgeID, activeVersion, types.KnowledgeFileUpdateStateFailed,
-		).Delete(&types.KnowledgeFileUpdateSlot{})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return ErrKnowledgeFileUpdateStateConflict
-		}
-		cancelled = &slot
-		return nil
-	})
-	return cancelled, err
-}
-
 // BeginKnowledgeDeletion serializes deletion against file-update staging and
 // returns removed slots so staged files can be cleaned after the commit.
 func (r *knowledgeRepository) BeginKnowledgeDeletion(

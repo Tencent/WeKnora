@@ -6,7 +6,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
@@ -40,18 +39,6 @@ func (r *fileUpdateRepoStub) TransitionKnowledgeFileUpdateState(
 	r.slot.ActiveState = toState
 	r.slot.LastError = lastError
 	return true, nil
-}
-
-func (r *fileUpdateRepoStub) CancelFailedKnowledgeFileUpdate(
-	_ context.Context, _ uint64, _ string, version uint64,
-) (*types.KnowledgeFileUpdateSlot, error) {
-	if r.slot == nil || r.slot.ActiveVersion == nil || *r.slot.ActiveVersion != version ||
-		r.slot.ActiveState != types.KnowledgeFileUpdateStateFailed {
-		return nil, repository.ErrKnowledgeFileUpdateStateConflict
-	}
-	cancelled := r.slot
-	r.slot = nil
-	return cancelled, nil
 }
 
 func (r *fileUpdateRepoStub) GetKnowledgeFileUpdateSlot(
@@ -556,56 +543,6 @@ func TestSameAsCurrentKnowledgeFileComparesExplicitConfig(t *testing.T) {
 			assert.False(t, unchanged)
 		})
 	}
-}
-
-func TestRetryKnowledgeFileUpdateRearmsExactFailedVersion(t *testing.T) {
-	version := uint64(7)
-	repo := &fileUpdateRepoStub{
-		knowledge: &types.Knowledge{
-			ID: "knowledge-1", TenantID: 1, KnowledgeBaseID: "kb-1", Type: "file",
-			FilePath: "old/path.md", ParseStatus: types.ParseStatusCompleted,
-		},
-		slot: &types.KnowledgeFileUpdateSlot{
-			KnowledgeID: "knowledge-1", TenantID: 1, KnowledgeBaseID: "kb-1",
-			ActiveVersion: &version, ActiveState: types.KnowledgeFileUpdateStateFailed,
-		},
-	}
-	task := &fileUpdateTaskStub{}
-	svc := newFileUpdateService(repo, &createKnowledgeFileServiceStub{}, task)
-
-	_, err := svc.RetryKnowledgeFileUpdate(newCreateKnowledgeFileContext(), "knowledge-1")
-	require.NoError(t, err)
-	assert.Equal(t, types.KnowledgeFileUpdateStateWaiting, repo.slot.ActiveState)
-	require.Len(t, task.tasks, 1)
-	var wake types.KnowledgeFileUpdateTaskPayload
-	require.NoError(t, json.Unmarshal(task.tasks[0].Payload(), &wake))
-	assert.Equal(t, version, wake.ActiveVersion)
-}
-
-func TestDiscardKnowledgeFileUpdateCleansFailedActiveAndPending(t *testing.T) {
-	version, pendingVersion := uint64(7), uint64(8)
-	active, err := json.Marshal(types.KnowledgeFileUpdatePayload{NewFilePath: "staged/a.md"})
-	require.NoError(t, err)
-	pending, err := json.Marshal(types.KnowledgeFileUpdatePayload{NewFilePath: "staged/b.md"})
-	require.NoError(t, err)
-	repo := &fileUpdateRepoStub{
-		knowledge: &types.Knowledge{
-			ID: "knowledge-1", TenantID: 1, KnowledgeBaseID: "kb-1", Type: "file",
-			FilePath: "old/path.md", ParseStatus: types.ParseStatusCompleted,
-		},
-		slot: &types.KnowledgeFileUpdateSlot{
-			KnowledgeID: "knowledge-1", TenantID: 1, KnowledgeBaseID: "kb-1",
-			ActiveVersion: &version, ActiveState: types.KnowledgeFileUpdateStateFailed,
-			ActivePayload: types.JSON(active), PendingVersion: &pendingVersion, PendingPayload: types.JSON(pending),
-		},
-	}
-	fileSvc := &createKnowledgeFileServiceStub{}
-	svc := newFileUpdateService(repo, fileSvc, &fileUpdateTaskStub{})
-
-	_, err = svc.DiscardKnowledgeFileUpdate(newCreateKnowledgeFileContext(), "knowledge-1")
-	require.NoError(t, err)
-	assert.Nil(t, repo.slot)
-	assert.Equal(t, 2, fileSvc.deleteCalls)
 }
 
 func TestRestoreFailedKnowledgeFileUpdateClaimRestoresReplacingStatus(t *testing.T) {

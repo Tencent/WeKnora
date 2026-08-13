@@ -31,8 +31,6 @@ import {
   createKnowledgeFromURL,
   reparseKnowledge,
   cancelKnowledgeParse,
-  retryKnowledgeFileUpdate,
-  discardKnowledgeFileUpdate,
   batchDeleteKnowledge,
   batchReparseKnowledge,
   getKnowledgeSpans,
@@ -2155,28 +2153,6 @@ const confirmCancelParseKnowledge = async (item: KnowledgeCard) => {
   }
 };
 
-const confirmRetryFileUpdate = async (item: KnowledgeCard) => {
-  if (!item?.id) return;
-  try {
-    await retryKnowledgeFileUpdate(item.id);
-    MessagePlugin.success(t('knowledgeBase.retryFileUpdateSubmitted'));
-    loadKnowledgeFiles(kbId.value);
-  } catch (error: any) {
-    MessagePlugin.error(error?.message || t('knowledgeBase.retryFileUpdateFailed'));
-  }
-};
-
-const confirmDiscardFileUpdate = async (item: KnowledgeCard) => {
-  if (!item?.id) return;
-  try {
-    await discardKnowledgeFileUpdate(item.id);
-    MessagePlugin.success(t('knowledgeBase.discardFileUpdateSubmitted'));
-    loadKnowledgeFiles(kbId.value);
-  } catch (error: any) {
-    MessagePlugin.error(error?.message || t('knowledgeBase.discardFileUpdateFailed'));
-  }
-};
-
 const downloadKnowledge = async (item: KnowledgeCard) => {
   if (!item?.id) return;
   try {
@@ -2200,7 +2176,7 @@ const downloadKnowledge = async (item: KnowledgeCard) => {
 
 // Bridge card-view actions back to existing per-card handlers.
 const handleCardAction = (
-  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'retry-file-update' | 'discard-file-update' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
@@ -2211,8 +2187,6 @@ const handleCardAction = (
     return confirmRebuildKnowledge(idx, item);
   }
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
-  if (action === 'retry-file-update') return confirmRetryFileUpdate(item);
-  if (action === 'discard-file-update') return confirmDiscardFileUpdate(item);
   if (action === 'move') return handleMoveKnowledge(item);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);
@@ -2221,7 +2195,7 @@ const handleCardAction = (
 
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
-  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'retry-file-update' | 'discard-file-update' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
@@ -2229,8 +2203,6 @@ const handleListAction = (
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') return confirmRebuildKnowledge(idx, item);
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
-  if (action === 'retry-file-update') return confirmRetryFileUpdate(item);
-  if (action === 'discard-file-update') return confirmDiscardFileUpdate(item);
   if (action === 'move') return handleMoveKnowledge(item);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);

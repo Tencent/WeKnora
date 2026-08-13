@@ -21,8 +21,6 @@
 | PUT    | `/knowledge/manual/:id`                    | 更新手工 Markdown 知识                     |
 | POST   | `/knowledge/:id/reparse`                   | 重新解析知识（异步）                       |
 | POST   | `/knowledge/:id/cancel-parse`              | 取消正在进行的解析任务                     |
-| POST   | `/knowledge/:id/file-update/retry`         | 重试失败的文件更新版本                     |
-| DELETE | `/knowledge/:id/file-update`               | 丢弃失败及待处理的文件更新版本             |
 | GET    | `/knowledge/:id/download`                  | 下载原始文件（attachment）                 |
 | GET    | `/knowledge/:id/preview`                   | 内联预览文件（按扩展名设置 Content-Type）  |
 | PUT    | `/knowledge/image/:id/:chunk_id`           | 更新分块图像信息                           |
@@ -185,11 +183,6 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 - `unchanged`：内容和显式配置没有变化（HTTP 200），不增加版本。
 
 调用方通过 `GET /knowledge/:id` 同时轮询 `file_update_state` 和 `parse_status`。前者取值 `idle` / `active` / `pending` / `failed`，后者表示当前已生效文件的解析状态。`file_update_version` 可作为下一次请求的 `expected_update_version`。
-
-失败槽会保留 active payload 以便恢复：
-
-- `POST /knowledge/:id/file-update/retry`：仅当最新 active 为 `failed` 时重新入队。
-- `DELETE /knowledge/:id/file-update`：丢弃精确匹配的 failed active 和最新 pending，并回收不再引用的暂存文件。
 
 删除 knowledge 会先设置 `deleting` 并撤销更新槽；已排队的陈旧更新任务不会恢复该 knowledge。
 

@@ -267,34 +267,3 @@ func TestBeginKnowledgeDeletionRollsBackStatusWhenSlotDeleteFails(t *testing.T) 
 	_, err = repo.GetKnowledgeFileUpdateSlot(ctx, 1, knowledgeID)
 	require.NoError(t, err)
 }
-
-func TestCancelFailedKnowledgeFileUpdateDoesNotRemoveNewerActive(t *testing.T) {
-	db, repo := setupKnowledgeFileUpdateSlotTestDB(t)
-	ctx := context.Background()
-	kbID := uuid.NewString()
-	knowledgeID := insertFileKnowledge(
-		t, db, 1, kbID, types.ParseStatusCompleted, "old/path.md", "old-hash",
-	)
-	first, err := repo.StageKnowledgeFileUpdate(
-		ctx, 1, knowledgeID, kbID, updatePayload(t, "staged/a.md", "ha"), nil,
-	)
-	require.NoError(t, err)
-	failed, err := repo.TransitionKnowledgeFileUpdateState(
-		ctx, 1, knowledgeID, first.ActiveVersion,
-		types.KnowledgeFileUpdateStateWaiting, types.KnowledgeFileUpdateStateFailed, "failed",
-	)
-	require.NoError(t, err)
-	require.True(t, failed)
-	latest, err := repo.StageKnowledgeFileUpdate(
-		ctx, 1, knowledgeID, kbID, updatePayload(t, "staged/b.md", "hb"), nil,
-	)
-	require.NoError(t, err)
-
-	_, err = repo.CancelFailedKnowledgeFileUpdate(ctx, 1, knowledgeID, first.ActiveVersion)
-	require.ErrorIs(t, err, ErrKnowledgeFileUpdateStateConflict)
-	slot, err := repo.GetKnowledgeFileUpdateSlot(ctx, 1, knowledgeID)
-	require.NoError(t, err)
-	require.NotNil(t, slot.ActiveVersion)
-	assert.Equal(t, latest.ActiveVersion, *slot.ActiveVersion)
-	assert.Equal(t, "staged/b.md", decodeUpdatePayload(t, slot.ActivePayload).NewFilePath)
-}
