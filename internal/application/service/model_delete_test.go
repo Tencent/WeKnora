@@ -230,6 +230,36 @@ func TestDeleteModel_RejectsWhenUsedByMemory(t *testing.T) {
 	assert.Contains(t, appErr.Message, "long-term memory")
 }
 
+// The extraction model is pinned by the workspace exactly like the embedding
+// one. Deleting it leaves memory_config pointing at a model that is gone, and
+// distillation only warns when it cannot resolve one, so auto extraction would
+// stop silently instead of the delete being refused.
+func TestDeleteModel_RejectsWhenUsedByMemoryExtraction(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	modelID := "memory-extract"
+
+	svc := NewModelService(
+		&stubModelRepoForDelete{model: &types.Model{ID: modelID, TenantID: 1}},
+		&stubKBRepoForModelDelete{},
+		&stubAgentRepoForModelDelete{},
+		nil, nil,
+		&stubTenantServiceForModelDelete{
+			tenant: &types.Tenant{
+				ID: 1,
+				MemoryConfig: &types.MemoryConfig{
+					Enabled: true, ExtractModelID: modelID, EmbeddingModelID: "some-other-model",
+				},
+			},
+		},
+	)
+
+	err := svc.DeleteModel(ctx, modelID)
+	require.Error(t, err)
+	appErr, ok := apperrors.IsAppError(err)
+	require.True(t, ok)
+	assert.Contains(t, appErr.Message, "long-term memory")
+}
+
 func TestFormatModelInUseMessage(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t,

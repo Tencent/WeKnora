@@ -794,20 +794,7 @@ func (s *Service) Clear(ctx context.Context) (int64, error) {
 	}
 	// Clearing is a rejection of everything currently stored, so it leaves the
 	// same tombstones an individual delete would.
-	items, _, err := s.repo.ListItems(ctx, scope, "", types.MaxMemoryTombstones, 0)
-	if err != nil {
-		return 0, err
-	}
-	for _, item := range items {
-		if item == nil {
-			continue
-		}
-		if err := s.repo.AddTombstone(
-			ctx, scope, item.Topic, types.MemoryFingerprint(item.Content), item.SourceMessageID,
-		); err != nil {
-			logger.Warnf(ctx, "memory: record tombstone during clear failed: %v", err)
-		}
-	}
+	s.tombstoneEverything(ctx, scope)
 	removed, err := s.repo.DeleteAll(ctx, scope)
 	if err != nil {
 		return 0, err
@@ -820,6 +807,48 @@ func (s *Service) Clear(ctx context.Context) (int64, error) {
 	}
 	s.rebuildBlock(ctx, scope)
 	return removed, nil
+}
+
+// tombstoneEverything records a rejection for each memory a clear removes.
+//
+// A subject keeps at most MaxMemoryTombstones rejections, and the store can
+// hold far more rows than that: max_items caps active memories only, so
+// superseded and archived rows pile up without limit. Reading one flat page
+// therefore spent the whole budget on whatever happened to be newest, and a
+// live memory could be left with no tombstone and free to be re-derived.
+//
+// Walking status by status spends the budget where it changes behaviour: what
+// the user was still being served, then what was waiting on their decision,
+// then the rest. The total is capped so this call cannot trim away its own
+// earlier, more important rows.
+func (s *Service) tombstoneEverything(ctx context.Context, scope interfaces.MemoryScope) {
+	budget := types.MaxMemoryTombstones
+	for _, status := range []string{
+		types.MemoryStatusActive,
+		types.MemoryStatusPending,
+		types.MemoryStatusArchived,
+		types.MemoryStatusSuperseded,
+	} {
+		if budget <= 0 {
+			return
+		}
+		items, _, err := s.repo.ListItems(ctx, scope, status, budget, 0)
+		if err != nil {
+			logger.Warnf(ctx, "memory: list %s items during clear failed: %v", status, err)
+			continue
+		}
+		for _, item := range items {
+			if item == nil {
+				continue
+			}
+			if err := s.repo.AddTombstone(
+				ctx, scope, item.Topic, types.MemoryFingerprint(item.Content), item.SourceMessageID,
+			); err != nil {
+				logger.Warnf(ctx, "memory: record tombstone during clear failed: %v", err)
+			}
+			budget--
+		}
+	}
 }
 
 // GetSettings returns the merged view the settings UI renders.

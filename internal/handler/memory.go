@@ -118,6 +118,14 @@ func (h *MemoryHandler) ListItems(c *gin.Context) {
 	})
 }
 
+const (
+	// memoryExportPageSize is how many rows one export page reads.
+	memoryExportPageSize = 500
+	// memoryExportMaxItems bounds a single export so one enormous store cannot
+	// turn a download into an unbounded read.
+	memoryExportMaxItems = 20000
+)
+
 func memoryListPaging(c *gin.Context) (limit, offset int) {
 	limit, _ = strconv.Atoi(c.DefaultQuery("limit", "50"))
 	if limit <= 0 || limit > 200 {
@@ -383,18 +391,38 @@ func (h *MemoryHandler) Clear(c *gin.Context) {
 // @Router       /memory/export [get]
 func (h *MemoryHandler) Export(c *gin.Context) {
 	ctx := c.Request.Context()
-	// Export is a snapshot, not a page: the cap matches the largest capacity a
-	// workspace can configure, so a full space is always exportable in one call.
-	items, total, err := h.memoryService.ListItems(ctx, "", 2000, 0)
-	if err != nil {
-		h.fail(c, err, "Failed to export memories")
-		return
+	// Export is a snapshot, not a page, so it walks every status to the end.
+	//
+	// A single fixed page used to serve this on the grounds that it matched the
+	// largest capacity a workspace can configure. It does not: max_items caps
+	// active memories only, while superseded and archived rows accumulate
+	// without limit, so a long-lived store holds far more than its capacity and
+	// the export quietly returned a prefix of it.
+	var items []*types.MemoryItem
+	var total int64
+	for {
+		page, pageTotal, err := h.memoryService.ListItems(ctx, "", memoryExportPageSize, len(items))
+		if err != nil {
+			h.fail(c, err, "Failed to export memories")
+			return
+		}
+		total = pageTotal
+		items = append(items, page...)
+		if len(page) < memoryExportPageSize || int64(len(items)) >= total {
+			break
+		}
+		if len(items) >= memoryExportMaxItems {
+			break
+		}
 	}
 	c.Header("Content-Disposition", `attachment; filename="weknora-memories.json"`)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"total":   total,
-		"data":    items,
+		// Say so rather than letting a partial file look complete. Only the
+		// safety ceiling can trigger this, so it stays false in practice.
+		"truncated": int64(len(items)) < total,
+		"data":      items,
 	})
 }
 
