@@ -84,6 +84,10 @@ type KnowledgeService interface {
 		page *types.Pagination,
 		filter types.KnowledgeListFilter,
 	) (*types.PageResult, error)
+	// ListKnowledgeIDsByFilter returns knowledge IDs under a knowledge base that
+	// match the same filter semantics as ListPagedKnowledgeByKnowledgeBaseID,
+	// without pagination. Used by select_all batch operations.
+	ListKnowledgeIDsByFilter(ctx context.Context, kbID string, filter types.KnowledgeListFilter) ([]string, error)
 	// ListKnowledgeFolderTree returns the folder hierarchy derived from the
 	// folder_path of every knowledge entry in a knowledge base, with per-folder
 	// document counts. It powers the document sidebar tree.
@@ -135,6 +139,10 @@ type KnowledgeService interface {
 	// is already cancelled. Returns an error when the knowledge is in a
 	// terminal state (completed / failed) or being deleted.
 	CancelKnowledgeParse(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
+	// CancelKnowledgeParseBatch cancels parse for many knowledge IDs. Per-item
+	// failures (e.g. already completed) are counted as skipped/failed and do
+	// not abort the whole batch.
+	CancelKnowledgeParseBatch(ctx context.Context, knowledgeIDs []string) (*types.BatchCancelParseResult, error)
 	// CloneKnowledgeBase clones knowledge to another knowledge base.
 	CloneKnowledgeBase(ctx context.Context, srcID, dstID string) error
 	// UpdateImageInfo updates image information for a knowledge chunk.
@@ -240,6 +248,9 @@ type KnowledgeRepository interface {
 	ListPagedKnowledgeByKnowledgeBaseID(ctx context.Context,
 		tenantID uint64, kbID string, page *types.Pagination, filter types.KnowledgeListFilter,
 	) ([]*types.Knowledge, int64, error)
+	// ListKnowledgeIDsByFilter returns only knowledge IDs matching the filter
+	// (same dimensions as ListPagedKnowledgeByKnowledgeBaseID, no pagination).
+	ListKnowledgeIDsByFilter(ctx context.Context, tenantID uint64, kbID string, filter types.KnowledgeListFilter) ([]string, error)
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
 	// UpdateKnowledgeBatch updates knowledge items in batch
 	UpdateKnowledgeBatch(ctx context.Context, knowledgeList []*types.Knowledge) error

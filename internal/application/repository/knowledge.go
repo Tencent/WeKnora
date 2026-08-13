@@ -204,6 +204,27 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	return knowledges, total, nil
 }
 
+// ListKnowledgeIDsByFilter returns knowledge IDs matching the list filter without
+// loading full rows. Callers that need a hard cap (e.g. select_all batch ops)
+// must enforce it after this returns.
+func (r *knowledgeRepository) ListKnowledgeIDsByFilter(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	filter types.KnowledgeListFilter,
+) ([]string, error) {
+	var ids []string
+	err := applyKnowledgeListFilter(
+		r.db.WithContext(ctx).Model(&types.Knowledge{}).
+			Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID),
+		filter,
+	).Order("created_at DESC").Pluck("id", &ids).Error
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 // ListKnowledgeFolderCounts aggregates how many knowledge entries live directly
 // in each folder of a knowledge base. Rows mid-deletion are excluded so the
 // sidebar tree counts match the document list.

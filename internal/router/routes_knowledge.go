@@ -128,6 +128,7 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.PUT("/tags", g.Contributor(), handler.UpdateKnowledgeTagBatch)
 		k.POST("/batch-reparse", g.Contributor(), handler.BatchReparseKnowledge)
 		k.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
+		k.POST("/batch-cancel-parse", g.Contributor(), handler.BatchCancelKnowledgeParse)
 		k.POST("/folder", g.Contributor(), handler.MoveKnowledgeToFolder)
 		k.POST("/move", g.Contributor(), handler.MoveKnowledge)
 	}

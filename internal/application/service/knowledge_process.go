@@ -2786,6 +2786,39 @@ func (s *knowledgeService) CancelKnowledgeParse(
 	return existing, nil
 }
 
+// CancelKnowledgeParseBatch cancels parse for many knowledge IDs. Items that
+// are already cancelled count as cancelled (idempotent). Terminal / deleting
+// states count as skipped. Unexpected errors count as failed.
+func (s *knowledgeService) CancelKnowledgeParseBatch(
+	ctx context.Context, knowledgeIDs []string,
+) (*types.BatchCancelParseResult, error) {
+	result := &types.BatchCancelParseResult{}
+	for _, id := range knowledgeIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		_, err := s.CancelKnowledgeParse(ctx, id)
+		if err == nil {
+			result.Cancelled++
+			continue
+		}
+		if appErr, ok := werrors.IsAppError(err); ok {
+			switch appErr.Code {
+			case werrors.ErrBadRequest:
+				result.Skipped++
+			case werrors.ErrNotFound:
+				result.Skipped++
+			default:
+				result.Failed++
+			}
+			continue
+		}
+		result.Failed++
+	}
+	return result, nil
+}
+
 // dequeueKnowledgeTasks asks the task inspector to remove any queued
 // tasks for this knowledge and signal active workers to stop. Safe to
 // call when the inspector is a no-op (Lite mode).

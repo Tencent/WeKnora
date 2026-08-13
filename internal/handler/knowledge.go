@@ -1072,16 +1072,17 @@ func (h *KnowledgeHandler) ListKnowledgeFolders(c *gin.Context) {
 // MoveKnowledgeToFolderRequest is the body schema for POST /knowledge/folder.
 type MoveKnowledgeToFolderRequest struct {
 	KBID string   `json:"kb_id" binding:"required"`
-	IDs  []string `json:"knowledge_ids" binding:"required"`
+	IDs  []string `json:"knowledge_ids"`
 	// FolderPath is the destination folder; the empty string is the knowledge
 	// base top level. It is deliberately not `binding:"required"` so documents
 	// can be moved back out of every folder.
 	FolderPath string `json:"folder_path"`
+	knowledgeBatchSelection
 }
 
 // MoveKnowledgeToFolder godoc
 // @Summary      移动知识到文件夹
-// @Description  批量修改知识条目所属文件夹。文件夹由路径推导而来，因此目标路径不存在时会自动创建；空路径表示知识库顶层。仅调整归类，不会重新解析文档
+// @Description  批量修改知识条目所属文件夹。文件夹由路径推导而来，因此目标路径不存在时会自动创建；空路径表示知识库顶层。仅调整归类，不会重新解析文档。支持 select_all + filter 按当前列表筛选解析目标集合。
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
@@ -1101,17 +1102,6 @@ func (h *KnowledgeHandler) MoveKnowledgeToFolder(c *gin.Context) {
 		return
 	}
 
-	ids := dedupeKnowledgeIDs(req.IDs)
-	if len(ids) == 0 {
-		c.Error(errors.NewBadRequestError("knowledge_ids cannot be empty"))
-		return
-	}
-	const maxBatch = 200
-	if len(ids) > maxBatch {
-		c.Error(errors.NewBadRequestError(fmt.Sprintf("too many ids (max %d per batch)", maxBatch)))
-		return
-	}
-
 	kbID, effectiveTenantID, err := h.requireKnowledgeWriteAccess(c, req.KBID)
 	if err != nil {
 		c.Error(err)
@@ -1119,29 +1109,35 @@ func (h *KnowledgeHandler) MoveKnowledgeToFolder(c *gin.Context) {
 	}
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
 
-	// Guard against cross-KB moves: the service layer scopes by tenant, so the
-	// handler must confirm every entry belongs to the requested knowledge base.
-	if err := h.requireKnowledgeInKB(ctx, effectiveTenantID, kbID, ids); err != nil {
+	resolved, err := h.resolveBatchKnowledgeIDs(
+		ctx, effectiveTenantID, kbID, req.knowledgeBatchSelection, req.IDs, "knowledge_ids cannot be empty")
+	if err != nil {
 		c.Error(err)
 		return
 	}
 
-	affected, err := h.kgService.MoveKnowledgeToFolder(ctx, kbID, ids, req.FolderPath)
-	if err != nil {
-		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
+	var affected int64
+	for _, chunk := range chunkStringIDs(resolved.IDs, maxBatchExplicitIDs) {
+		n, moveErr := h.kgService.MoveKnowledgeToFolder(ctx, kbID, chunk, req.FolderPath)
+		if moveErr != nil {
+			if appErr, ok := errors.IsAppError(moveErr); ok {
+				c.Error(appErr)
+				return
+			}
+			logger.ErrorWithFields(ctx, moveErr, nil)
+			c.Error(errors.NewInternalServerError(moveErr.Error()))
 			return
 		}
-		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
-		return
+		affected += n
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"moved_count": affected,
-			"folder_path": types.NormalizeKnowledgeFolderPath(req.FolderPath),
+			"moved_count":    affected,
+			"folder_path":    types.NormalizeKnowledgeFolderPath(req.FolderPath),
+			"matched_count":  resolved.MatchedCount,
+			"excluded_count": resolved.ExcludedCount,
 		},
 	})
 }
@@ -1337,12 +1333,13 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 // BatchDeleteKnowledgeRequest is the body schema for POST /knowledge/batch-delete.
 type BatchDeleteKnowledgeRequest struct {
 	KBID string   `json:"kb_id" binding:"required"`
-	IDs  []string `json:"ids"  binding:"required"`
+	IDs  []string `json:"ids"`
+	knowledgeBatchSelection
 }
 
 // BatchDeleteKnowledge godoc
 // @Summary      批量删除知识
-// @Description  按 ID 列表批量删除单个知识库下的多个知识条目
+// @Description  按 ID 列表或 select_all+filter 批量删除单个知识库下的多个知识条目
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
@@ -1362,17 +1359,6 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 		return
 	}
 
-	ids := dedupeKnowledgeIDs(req.IDs)
-	if len(ids) == 0 {
-		c.Error(errors.NewBadRequestError("ids cannot be empty"))
-		return
-	}
-	const maxBatch = 200
-	if len(ids) > maxBatch {
-		c.Error(errors.NewBadRequestError(fmt.Sprintf("too many ids (max %d per batch)", maxBatch)))
-		return
-	}
-
 	// Validate KB access (editor or admin) using the kb_id from body.
 	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, req.KBID)
 	if err != nil {
@@ -1389,44 +1375,31 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 	}
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
 
-	// Single batch fetch to validate that every id exists and belongs to the
-	// requested KB. The service-layer DeleteKnowledgeList only enforces tenant
-	// scope, not KB scope, so the handler must guard against cross-KB deletion.
-	knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, ids)
+	resolved, err := h.resolveBatchKnowledgeIDs(
+		ctx, effectiveTenantID, kbID, req.knowledgeBatchSelection, req.IDs, "ids cannot be empty")
 	if err != nil {
-		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(err)
 		return
-	}
-	if len(knowledgeList) != len(ids) {
-		c.Error(errors.NewBadRequestError("One or more knowledge entries not found"))
-		return
-	}
-	for _, k := range knowledgeList {
-		if k.KnowledgeBaseID != kbID {
-			c.Error(errors.NewBadRequestError(
-				fmt.Sprintf("Knowledge %s does not belong to knowledge base %s",
-					secutils.SanitizeForLog(k.ID), secutils.SanitizeForLog(kbID))))
-			return
-		}
 	}
 
-	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, ids)
+	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, resolved.IDs)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue batch knowledge delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue batch delete task"))
 		return
 	}
 
-	logger.Infof(ctx, "Batch knowledge delete task enqueued: %s, kb_id: %s, count: %d",
-		taskID, secutils.SanitizeForLog(kbID), len(ids))
+	logger.Infof(ctx, "Batch knowledge delete task enqueued: %s, kb_id: %s, count: %d, select_all: %v",
+		taskID, secutils.SanitizeForLog(kbID), len(resolved.IDs), req.SelectAll)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Batch delete task submitted",
 		"data": gin.H{
-			"task_id":       taskID,
-			"deleted_count": len(ids),
+			"task_id":        taskID,
+			"deleted_count":  len(resolved.IDs),
+			"matched_count":  resolved.MatchedCount,
+			"excluded_count": resolved.ExcludedCount,
 		},
 	})
 }
@@ -2047,18 +2020,92 @@ func (h *KnowledgeHandler) CancelKnowledgeParse(c *gin.Context) {
 	})
 }
 
+// BatchCancelKnowledgeParseRequest is the body for POST /knowledge/batch-cancel-parse.
+type BatchCancelKnowledgeParseRequest struct {
+	KBID string   `json:"kb_id" binding:"required"`
+	IDs  []string `json:"ids"`
+	knowledgeBatchSelection
+}
+
+// BatchCancelKnowledgeParse godoc
+// @Summary      批量取消知识解析
+// @Description  按 ID 列表或 select_all+filter 批量取消进行中的知识解析。部分失败不阻断整批。
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      BatchCancelKnowledgeParseRequest  true  "批量取消请求"
+// @Success      200      {object}  map[string]interface{}             "取消结果"
+// @Failure      400      {object}  errors.AppError                    "请求参数错误"
+// @Failure      403      {object}  errors.AppError                    "权限不足"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/batch-cancel-parse [post]
+func (h *KnowledgeHandler) BatchCancelKnowledgeParse(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req BatchCancelKnowledgeParseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
+		return
+	}
+
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, req.KBID)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("No permission to cancel knowledge parse"))
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	resolved, err := h.resolveBatchKnowledgeIDs(
+		ctx, effectiveTenantID, kbID, req.knowledgeBatchSelection, req.IDs, "ids cannot be empty")
+	if err != nil {
+		c.Error(err)
+		return
+	}
+
+	result, err := h.kgService.CancelKnowledgeParseBatch(ctx, resolved.IDs)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Batch cancel parse finished",
+		"data": gin.H{
+			"cancelled":      result.Cancelled,
+			"skipped":        result.Skipped,
+			"failed":         result.Failed,
+			"matched_count":  resolved.MatchedCount,
+			"excluded_count": resolved.ExcludedCount,
+		},
+	})
+}
+
 type knowledgeTagBatchRequest struct {
-	Updates map[string][]string `json:"updates" binding:"required,min=1"`
-	KBID    string              `json:"kb_id"` // Optional: scope to this KB (validates editor access and uses effective tenant for shared KB)
+	Updates map[string][]string `json:"updates"`
+	KBID    string              `json:"kb_id"` // Required for select_all; optional for updates map
+	// TagIDs is the tag set to apply (replace semantics) when select_all=true.
+	TagIDs []string `json:"tag_ids"`
+	knowledgeBatchSelection
 }
 
 // UpdateKnowledgeTagBatch godoc
 // @Summary      批量更新知识标签
-// @Description  批量更新知识条目的标签。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的空间解析
+// @Description  批量更新知识条目的标签。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的空间解析。select_all=true 时按 filter 解析目标并以 tag_ids 覆盖写入。
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        request  body      object  true  "标签更新请求（updates 必填，kb_id 可选）"
+// @Param        request  body      object  true  "标签更新请求（updates 或 select_all+tag_ids）"
 // @Success      200      {object}  map[string]interface{}  "更新成功"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -2081,10 +2128,18 @@ func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
 		return
 	}
-	// Resolve effective tenant and the authorized KB scope.
+
 	var authorizedKBID string
-	if kbID := secutils.SanitizeForLog(req.KBID); kbID != "" {
-		_, _, effID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, kbID)
+	var effectiveTenantID uint64
+	var updates map[string][]string
+	var matchedCount, excludedCount int
+
+	if req.SelectAll {
+		if strings.TrimSpace(req.KBID) == "" {
+			c.Error(errors.NewBadRequestError("kb_id is required when select_all is true"))
+			return
+		}
+		_, kbID, effID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, req.KBID)
 		if err != nil {
 			c.Error(err)
 			return
@@ -2094,32 +2149,88 @@ func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 			return
 		}
 		authorizedKBID = kbID
-		ctx = context.WithValue(ctx, types.TenantIDContextKey, effID)
-	} else if len(req.Updates) > 0 {
-		// No kb_id: infer from first knowledge ID so shared-KB updates work without client sending kb_id
-		var firstKnowledgeID string
-		for id := range req.Updates {
-			firstKnowledgeID = id
-			break
+		effectiveTenantID = effID
+		ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+		resolved, err := h.resolveBatchKnowledgeIDs(
+			ctx, effectiveTenantID, kbID, req.knowledgeBatchSelection, nil, "ids cannot be empty")
+		if err != nil {
+			c.Error(err)
+			return
 		}
-		if firstKnowledgeID != "" {
-			knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, firstKnowledgeID, types.OrgRoleEditor)
+		matchedCount = resolved.MatchedCount
+		excludedCount = resolved.ExcludedCount
+		tagIDs := dedupeKnowledgeIDs(req.TagIDs)
+		updates = make(map[string][]string, len(resolved.IDs))
+		for _, id := range resolved.IDs {
+			updates[id] = tagIDs
+		}
+	} else {
+		if len(req.Updates) == 0 {
+			c.Error(errors.NewBadRequestError("updates cannot be empty"))
+			return
+		}
+		updates = req.Updates
+		if kbID := secutils.SanitizeForLog(req.KBID); kbID != "" {
+			_, _, effID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, kbID)
 			if err != nil {
 				c.Error(err)
 				return
 			}
-			authorizedKBID = knowledge.KnowledgeBaseID
-			ctx = effCtx
+			if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+				c.Error(errors.NewForbiddenError("No permission to update knowledge tags"))
+				return
+			}
+			authorizedKBID = kbID
+			ctx = context.WithValue(ctx, types.TenantIDContextKey, effID)
+		} else if len(req.Updates) > 0 {
+			// No kb_id: infer from first knowledge ID so shared-KB updates work without client sending kb_id
+			var firstKnowledgeID string
+			for id := range req.Updates {
+				firstKnowledgeID = id
+				break
+			}
+			if firstKnowledgeID != "" {
+				knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, firstKnowledgeID, types.OrgRoleEditor)
+				if err != nil {
+					c.Error(err)
+					return
+				}
+				authorizedKBID = knowledge.KnowledgeBaseID
+				ctx = effCtx
+			}
 		}
+		matchedCount = len(updates)
 	}
-	if err := h.kgService.UpdateKnowledgeTagBatch(ctx, authorizedKBID, req.Updates); err != nil {
-		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
-		return
+
+	// Apply in chunks to avoid oversized in-memory maps / DB batches.
+	for _, chunk := range chunkStringIDs(keysOfStringSliceMap(updates), maxBatchExplicitIDs) {
+		partial := make(map[string][]string, len(chunk))
+		for _, id := range chunk {
+			partial[id] = updates[id]
+		}
+		if err := h.kgService.UpdateKnowledgeTagBatch(ctx, authorizedKBID, partial); err != nil {
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(err)
+			return
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
+		"data": gin.H{
+			"updated_count":  len(updates),
+			"matched_count":  matchedCount,
+			"excluded_count": excludedCount,
+		},
 	})
+}
+
+func keysOfStringSliceMap(m map[string][]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // UpdateImageInfo godoc
@@ -2683,20 +2794,22 @@ func sliceContains(ss []string, target string) bool {
 	return false
 }
 
-type batchReparseKnowledgeRequest struct {
+// BatchReparseKnowledgeRequest is the body schema for POST /knowledge/batch-reparse.
+type BatchReparseKnowledgeRequest struct {
 	KBID          string                           `json:"kb_id" binding:"required"`
-	IDs           []string                         `json:"ids" binding:"required"`
+	IDs           []string                         `json:"ids"`
 	ProcessConfig *types.KnowledgeProcessOverrides `json:"process_config,omitempty"`
+	knowledgeBatchSelection
 }
 
 // BatchReparseKnowledge godoc
 // @Summary      批量重新解析知识
-// @Description  按 ID 列表批量重新解析单个知识库下的多个知识条目
+// @Description  按 ID 列表或 select_all+filter 批量重新解析单个知识库下的多个知识条目
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        request  body      batchReparseKnowledgeRequest  true  "批量重解析请求"
-// @Success      200      {object}  map[string]interface{}        "任务已提交"
+// @Param        request  body      BatchReparseKnowledgeRequest  true  "批量重建请求"
+// @Success      200      {object}  map[string]interface{}        "重建任务已提交"
 // @Failure      400      {object}  errors.AppError               "请求参数错误"
 // @Failure      403      {object}  errors.AppError               "权限不足"
 // @Security     Bearer
@@ -2704,35 +2817,10 @@ type batchReparseKnowledgeRequest struct {
 // @Router       /knowledge/batch-reparse [post]
 func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
-	var req batchReparseKnowledgeRequest
 
+	var req BatchReparseKnowledgeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		logger.Errorf(ctx, "failed to parse batch reparse knowledge request: %v", err)
-		c.Error(errors.NewBadRequestError("invalid batch reparse knowledge request parameters"))
-		return
-	}
-
-	seen := make(map[string]struct{}, len(req.IDs))
-	ids := make([]string, 0, len(req.IDs))
-	for _, raw := range req.IDs {
-		id := strings.TrimSpace(raw)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
-	}
-
-	if len(ids) == 0 {
-		c.Error(errors.NewBadRequestError("no knowledge IDs provided for batch reparse"))
-		return
-	}
-	const maxBatch = 200
-	if len(ids) > maxBatch {
-		c.Error(errors.NewBadRequestError(fmt.Sprintf("too many ids (max %d per batch)", maxBatch)))
+		c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
 		return
 	}
 
@@ -2742,46 +2830,36 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 		return
 	}
 	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
-		c.Error(errors.NewForbiddenError("no permission to reparse knowledge in this kb"))
+		c.Error(errors.NewForbiddenError("No permission to reparse knowledge"))
 		return
 	}
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
 
-	knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, ids)
+	resolved, err := h.resolveBatchKnowledgeIDs(
+		ctx, effectiveTenantID, kbID, req.knowledgeBatchSelection, req.IDs, "ids cannot be empty")
 	if err != nil {
-		logger.Errorf(ctx, "failed to get knowledge batch, kb_id: %s, size: %d, err: %v", kbID, len(ids), err)
-		c.Error(errors.NewInternalServerError("failed to get knowledge batch"))
+		c.Error(err)
 		return
-	}
-	if len(knowledgeList) != len(ids) {
-		c.Error(errors.NewBadRequestError("some knowledge entries were not found"))
-		return
-	}
-	for _, k := range knowledgeList {
-		if k.KnowledgeBaseID != kbID {
-			c.Error(errors.NewBadRequestError(
-				fmt.Sprintf("Knowledge %s does not belong to knowledge base %s",
-					secutils.SanitizeForLog(k.ID), secutils.SanitizeForLog(kbID))))
-			return
-		}
 	}
 
-	taskID, err := h.enqueueKnowledgeListReparse(ctx, effectiveTenantID, ids, req.ProcessConfig)
+	taskID, err := h.enqueueKnowledgeListReparse(ctx, effectiveTenantID, resolved.IDs, req.ProcessConfig)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue batch knowledge reparse task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue batch reparse task"))
 		return
 	}
 
-	logger.Infof(ctx, "Batch knowledge reparse task enqueued: %s, kb_id: %s, count: %d",
-		taskID, secutils.SanitizeForLog(kbID), len(ids))
+	logger.Infof(ctx, "Batch knowledge reparse task enqueued: %s, kb_id: %s, count: %d, select_all: %v",
+		taskID, secutils.SanitizeForLog(kbID), len(resolved.IDs), req.SelectAll)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Batch reparse task submitted",
 		"data": gin.H{
-			"task_id":       taskID,
-			"reparse_count": len(ids),
+			"task_id":        taskID,
+			"reparse_count":  len(resolved.IDs),
+			"matched_count":  resolved.MatchedCount,
+			"excluded_count": resolved.ExcludedCount,
 		},
 	})
 }
