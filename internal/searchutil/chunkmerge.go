@@ -98,6 +98,12 @@ const (
 // positionOverlap 是由 StartAt/EndAt 估算的重叠量（lastEnd - curStart），仅用于
 // 界定搜索窗口大小；真正的重叠按文本匹配，能兼容补写表头与 HTML 实体长度偏差。
 // 若找不到文本重叠，则原样拼接（不裁剪），宁可保留也不破坏内容。
+//
+// positionOverlap <= 0 时两段位置上严格相邻或不相交，没有可去重的重叠；
+// 此时进入文本匹配会因 headSlack 下限 320 在 next 开头窗口内误命中
+// acc 后缀的真实内容重复（如同一句话在文档多次出现），把 next 开头
+// 整段误判为补写表头删掉，造成不可逆的内容丢失。直接拼接，补写表头
+// 重复交给调用方后处理。
 func AppendWithOverlap(acc, next string, positionOverlap int) string {
 	if acc == "" {
 		return next
@@ -105,14 +111,14 @@ func AppendWithOverlap(acc, next string, positionOverlap int) string {
 	if next == "" {
 		return acc
 	}
+	if positionOverlap <= 0 {
+		return acc + next
+	}
 
 	accRunes := []rune(acc)
 	nextRunes := []rune(next)
 
 	span := positionOverlap
-	if span < 0 {
-		span = 0
-	}
 
 	maxK := minInt(len(accRunes), len(nextRunes))
 	if cap := maxInt(span*3, defaultSearchSpan); maxK > cap {
