@@ -156,6 +156,47 @@ func TestAReviewThatChangesNothingSaysWhy(t *testing.T) {
 	require.Equal(t, 2, result.Reviewed)
 }
 
+// The button is Viewer-level and each press is worth up to forcedMaxClusters
+// model calls, which a store the model keeps declining would repeat forever.
+func TestASecondReviewRightAwayIsRefused(t *testing.T) {
+	svc, tenantRepo, models := newConsolidationHarness(t)
+	ctx := enabledCtx(t, tenantRepo, 1, "alice")
+	scope := scopeFor(t, ctx)
+	_, err := svc.repo.EnsureSubject(ctx, scope)
+	require.NoError(t, err)
+	seedSimilarPreferences(t, svc, ctx, scope)
+
+	first, err := svc.ConsolidateNow(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, first.Merged)
+	callsAfterFirst := models.callCount()
+
+	second, err := svc.ConsolidateNow(ctx)
+	require.NoError(t, err)
+	require.Equal(t, types.MemoryConsolidationSkipTooSoon, second.Skipped)
+	require.Equal(t, callsAfterFirst, models.callCount(),
+		"a refused review must not reach the model at all")
+}
+
+// The two clocks are separate so that the maintenance pass, which runs on its
+// own schedule and marks the subject consolidated, cannot make the button
+// report that the person only just asked for something they never asked for.
+func TestTheDailyPassDoesNotRateLimitTheButton(t *testing.T) {
+	svc, tenantRepo, _ := newConsolidationHarness(t)
+	ctx := enabledCtx(t, tenantRepo, 1, "alice")
+	scope := scopeFor(t, ctx)
+	_, err := svc.repo.EnsureSubject(ctx, scope)
+	require.NoError(t, err)
+	seedSimilarPreferences(t, svc, ctx, scope)
+
+	svc.consolidateIfDue(ctx, scope, svc.workspaceConfig(ctx, 1), "chat-1")
+
+	result, err := svc.ConsolidateNow(ctx)
+	require.NoError(t, err)
+	require.NotEqual(t, types.MemoryConsolidationSkipTooSoon, result.Skipped)
+	require.Equal(t, 1, result.Merged)
+}
+
 func TestScheduledConsolidationIgnoresAHandfulOfMemories(t *testing.T) {
 	svc, tenantRepo, models := newConsolidationHarness(t)
 	ctx := enabledCtx(t, tenantRepo, 1, "alice")

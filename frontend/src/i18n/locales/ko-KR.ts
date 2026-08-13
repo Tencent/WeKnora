@@ -4692,6 +4692,7 @@ export default {
     consolidateTooFewItems: '기억이 아직 적어 정리할 필요가 없습니다',
     consolidateNoCandidates: '뜻이 비슷해 합칠 만한 기억이 없습니다',
     consolidateModelDeclined: '모델이 확인한 결과 서로 다른 내용이라 합치지 않았습니다',
+    consolidateTooSoon: '방금 정리했습니다. 잠시 후 다시 시도해 주세요.',
     consolidateModelUnavailable: '모델을 사용할 수 없어 잘못 합치지 않도록 아무것도 바꾸지 않았습니다',
     consolidateFailed: '정리하지 못했습니다',
     clear: '전체 삭제',

@@ -205,8 +205,13 @@ type MemorySubject struct {
 	// newest conversation, so nothing else notices that five turns over three
 	// weeks have said the same thing five slightly different ways.
 	ConsolidatedAt *time.Time `json:"consolidated_at" gorm:"column:consolidated_at"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	// ForcedConsolidatedAt is when this person last asked for a review
+	// themselves. It is a separate clock from ConsolidatedAt on purpose: the
+	// daily pass having just run must not refuse someone who presses the
+	// button, so the two cannot share one timestamp.
+	ForcedConsolidatedAt *time.Time `json:"forced_consolidated_at" gorm:"column:forced_consolidated_at"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
 }
 
 // MemoryPendingSessions is the persisted queue of sessions awaiting
@@ -987,6 +992,10 @@ const (
 	// MemoryConsolidationSkipModelDeclined: the model looked and said these
 	// records are different things after all.
 	MemoryConsolidationSkipModelDeclined = "model_declined"
+	// MemoryConsolidationSkipTooSoon: this person asked for a review moments
+	// ago. Only a review someone requested can report this; the daily pass has
+	// its own, much longer interval and simply stays quiet.
+	MemoryConsolidationSkipTooSoon = "too_soon"
 )
 
 // MemoryConsolidationResult is what a whole-store review did. Zeroes mean the

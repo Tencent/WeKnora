@@ -95,6 +95,10 @@ type MemoryRepository interface {
 	// MarkConsolidated records that this subject's whole store was just
 	// reviewed, so the next review waits out the interval.
 	MarkConsolidated(ctx context.Context, scope MemoryScope) error
+	// MarkForcedConsolidated records that this subject asked for a review
+	// themselves. Kept apart from MarkConsolidated so the daily pass and the
+	// button rate limit each other independently.
+	MarkForcedConsolidated(ctx context.Context, scope MemoryScope) error
 	// UpsertItemEmbedding stores or replaces the vector for one memory.
 	UpsertItemEmbedding(ctx context.Context, scope MemoryScope, embedding *types.MemoryItemEmbedding) error
 	// DeleteItemEmbedding drops one memory's vector. What a memory embeds to

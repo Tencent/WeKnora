@@ -4692,6 +4692,7 @@ export default {
     consolidateTooFewItems: 'Записей пока слишком мало, наводить порядок рано',
     consolidateNoCandidates: 'Похожих по смыслу записей для объединения не нашлось',
     consolidateModelDeclined: 'Модель посмотрела: это разные вещи, объединять нечего',
+    consolidateTooSoon: 'Разбор только что выполнялся. Повторите чуть позже.',
     consolidateModelUnavailable: 'Модель недоступна, поэтому ничего не изменено — чтобы не объединить лишнего',
     consolidateFailed: 'Не удалось навести порядок',
     clear: 'Очистить всё',
