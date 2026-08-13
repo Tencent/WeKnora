@@ -5293,6 +5293,7 @@ export default {
       title: '권한 없음',
       desc: '현재 역할로는 이 설정 페이지에 접근할 수 없습니다. 이 워크스페이스의 관리자에게 필요한 역할을 요청하세요.'
     },
+    capabilityUnavailable: '현재 배포에서는 이 기능을 지원하지 않습니다. 사용 가능한 페이지로 돌아갔습니다.',
     navGroups: {
       account: '계정',
       workspace: '공간',

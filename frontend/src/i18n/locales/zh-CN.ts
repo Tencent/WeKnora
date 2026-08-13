@@ -5295,6 +5295,7 @@ export default {
       title: '权限不足',
       desc: '你当前的角色无权访问此设置项。请联系本空间的管理员获取所需角色。'
     },
+    capabilityUnavailable: '当前部署不支持此功能，已返回可用页面。',
     navGroups: {
       account: '账户',
       workspace: '空间',
