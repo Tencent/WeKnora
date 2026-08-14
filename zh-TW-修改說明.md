@@ -110,28 +110,35 @@
 
 ## 已知問題與解決方案
 
-### 對話圖片閃退現象
-**現象**：歷史對話中的圖片載入時「閃一下然後消失」
+### 對話圖片顯示相容性（2026-08-14 更新）
+**現象**：部分自架環境在載入 RAG 或歷史對話的知識庫圖片時，圖片短暫出現後消失；Nginx 可見下列請求回傳 `404`：
+```text
+/api/v1/sessions/<session-id>/messages/<message-id>/files?file_path=resource://...
+```
 
-**原因**：此問題與語系修改**無關**。WeKnora 內建聊天附件過期機制：
+**根因**：較新的前端具有 message-scoped 圖片代理機制，但搭配尚未提供此 API 路由的較舊自架後端時，該路由會回傳 `404`。前端既有邏輯將 `404` 視為檔案遺失並移除圖片，造成閃退觀感。這不是 MinerU 未保存圖片，也不是繁中翻譯內容造成。
+
+**已部署的相容性修復**：前端仍先使用 message-scoped 路由；若取得 `404`，僅針對已登入的 message scope 自動以既有的租戶檔案路由重試：
+```text
+/files?file_path=resource://...
+```
+Embed 訪客模式不會降級，以維持其 Embed token 的權限邊界。
+
+**驗證**：使用繁中介面重新開啟既有 RAG 對話，圖片已可正常顯示，無須重新提問。
+
+**目前部署 Image**：
+```text
+weknora-ui:zh-tw-image-fallback-20260814
+```
+
+**後續處置**：此相容性修復應以獨立 PR 提交，不混入 zh-TW 語系 PR。待後端版本原生支援上述 session/message 檔案路由後，才評估移除此 fallback。
+
+### 聊天附件 TTL
+聊天中「使用者直接上傳」的暫存附件另受下列設定管理，和知識庫（RAG）圖片是不同路徑：
 ```env
-WEKNORA_CHAT_ATTACHMENT_TTL_HOURS=24  # 預設 24 小時
+WEKNORA_CHAT_ATTACHMENT_TTL_HOURS=24
 ```
-對話中上傳的圖片超過 24 小時後會被後端自動刪除，前端載入時 API 回傳 `404`，觸發圖片組件 `@error` 隱藏邏輯。
-
-**解決方案**：
-修改 `/mnt/weknora/.env` 中的 TTL 設定：
-```bash
-# 改成 720 小時（30天）
-sed -i 's/WEKNORA_CHAT_ATTACHMENT_TTL_HOURS=.*/WEKNORA_CHAT_ATTACHMENT_TTL_HOURS=720/' .env
-
-# 或永不刪除
-sed -i 's/WEKNORA_CHAT_ATTACHMENT_TTL_HOURS=.*/WEKNORA_CHAT_ATTACHMENT_TTL_HOURS=0/' .env
-```
-修改後重啟後端容器：
-```bash
-docker compose up -d app
-```
+超過 TTL 的聊天附件可能被後端清理；可依實際保留政策調整 `.env` 後重啟 app 容器。
 
 ### 知識庫圖片儲存位置
 知識庫圖片與聊天附件不同，**不會被自動刪除**。存放位置：
@@ -165,6 +172,7 @@ docker compose up -d app
 ## 版本紀錄
 | 日期 | 版本 | 修改內容 |
 |------|------|---------|
+| 2026-08-14 | v0.2 | 更正 RAG 圖片閃退根因為新舊前後端圖片代理 API 不相容；記錄部署的 fallback Image 與獨立修復 PR 策略 |
 | 2026-08-14 | v0.1 | 初始建立 zh-TW 語系包，完成 19 組用語校正、6 個核心檔案修改、遠端部署與 PR 提交 |
 
 ---
