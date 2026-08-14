@@ -116,6 +116,33 @@ func TestRecordKBActivityCanSuppressCompositeTaskChildren(t *testing.T) {
 	}
 }
 
+func TestRecordWikiContentActivityUsesUnifiedActivityFeed(t *testing.T) {
+	audit := &captureKBActivityAudit{}
+	RecordWikiContentActivity(context.Background(), audit, 7, "kb-1", map[string]int{
+		"ingest":  3,
+		"retract": 1,
+	})
+
+	if audit.entry == nil {
+		t.Fatal("expected a wiki activity entry")
+	}
+	if audit.entry.Action != types.AuditActionWikiContentChanged ||
+		audit.entry.ScopeType != auditScopeKnowledgeBase || audit.entry.ScopeID != "kb-1" {
+		t.Fatalf("unexpected activity entry: %#v", audit.entry)
+	}
+	var details map[string]any
+	if err := json.Unmarshal(audit.entry.Details, &details); err != nil {
+		t.Fatalf("unmarshal details: %v", err)
+	}
+	if details["count"] != float64(4) {
+		t.Fatalf("count = %#v, want 4", details["count"])
+	}
+	actions, ok := details["actions"].(map[string]any)
+	if !ok || actions["ingest"] != float64(3) || actions["retract"] != float64(1) {
+		t.Fatalf("actions = %#v", details["actions"])
+	}
+}
+
 // TestKBActivityTriggerReflectsInitiatorIdentity locks in the worker
 // attribution used by ProcessKBClone / ProcessKnowledgeMove /
 // ProcessKnowledgeListDelete / ProcessKnowledgeListReparse: the task

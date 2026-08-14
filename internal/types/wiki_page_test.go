@@ -12,7 +12,6 @@ func TestWikiPageTypes(t *testing.T) {
 		WikiPageTypeEntity,
 		WikiPageTypeConcept,
 		WikiPageTypeIndex,
-		WikiPageTypeLog,
 		WikiPageTypeSynthesis,
 		WikiPageTypeComparison,
 	}
@@ -25,6 +24,9 @@ func TestWikiPageTypes(t *testing.T) {
 			t.Errorf("Duplicate WikiPageType: %s", pt)
 		}
 		seen[pt] = true
+	}
+	if IsValidWikiPageType("log") {
+		t.Error("removed Wiki log page type must not remain valid")
 	}
 }
 
@@ -174,6 +176,29 @@ func TestWikiPageJSON(t *testing.T) {
 	}
 	if len(restored.SourceRefs) != 2 {
 		t.Errorf("SourceRefs mismatch: got %v", restored.SourceRefs)
+	}
+}
+
+func TestWikiSourceKnowledgeID(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"doc-1|排班手册", "doc-1"},
+		{"doc-1", "doc-1"},
+		{"  doc-1 | title ", "doc-1"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := WikiSourceKnowledgeID(c.in); got != c.want {
+			t.Errorf("WikiSourceKnowledgeID(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	page := &WikiPage{SourceRefs: StringArray{"doc-1|手册", "doc-2"}}
+	if !page.BuiltFrom(map[string]struct{}{"doc-1": {}}) {
+		t.Errorf("page should match doc-1")
+	}
+	if page.BuiltFrom(map[string]struct{}{"doc-9": {}}) {
+		t.Errorf("page should not match an unrelated document")
 	}
 }
 

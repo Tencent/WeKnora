@@ -37,8 +37,8 @@ func (l *langfuseVLM) Predict(ctx context.Context, imgBytes [][]byte, prompt str
 			"image_count": len(imgBytes),
 		},
 		Metadata: map[string]interface{}{
-			"model_id":         l.inner.GetModelID(),
-			"image_count":      len(imgBytes),
+			"model_id":          l.inner.GetModelID(),
+			"image_count":       len(imgBytes),
 			"image_bytes_total": totalImgSize,
 		},
 	})

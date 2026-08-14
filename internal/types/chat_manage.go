@@ -128,6 +128,12 @@ type PipelineState struct {
 	ImageDescription     string            `json:"-"`
 	QuotedContext        string            `json:"-"` // Quoted message text, injected at LLM prompt stage
 	SystemPromptOverride string            `json:"-"`
+	// MemoryPrompt is the long-term memory envelope appended to the system
+	// prompt for this turn, empty when memory is off or nothing matched.
+	MemoryPrompt string `json:"-"`
+	// UsedMemories mirrors MemoryPrompt in structured form so the answer can
+	// tell the user which memories it saw.
+	UsedMemories UsedMemories `json:"-"`
 }
 
 // PipelineContext holds runtime context for the current pipeline execution.
@@ -248,6 +254,8 @@ func (c *ChatManage) Clone() *ChatManage {
 			ImageDescription:     c.ImageDescription,
 			QuotedContext:        c.QuotedContext,
 			SystemPromptOverride: c.SystemPromptOverride,
+			MemoryPrompt:         c.MemoryPrompt,
+			UsedMemories:         append(UsedMemories(nil), c.UsedMemories...),
 			RenderedContexts:     c.RenderedContexts,
 			Entity:               entity,
 			EntityKBIDs:          entityKBIDs,
@@ -261,6 +269,7 @@ type EventType string
 
 const (
 	LOAD_HISTORY           EventType = "load_history"
+	MEMORY_RECALL          EventType = "memory_recall"
 	QUERY_UNDERSTAND       EventType = "query_understand"
 	CHUNK_SEARCH           EventType = "chunk_search"
 	CHUNK_SEARCH_PARALLEL  EventType = "chunk_search_parallel"

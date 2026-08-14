@@ -194,11 +194,14 @@ func buildAssistantHistoryMessages(m *types.Message) []chat.Message {
 const legacyFinalAnswerToolName = "final_answer"
 
 // filterNonTerminalToolCalls drops legacy final_answer entries from historical
-// tool calls (see legacyFinalAnswerToolName). New turns never produce them.
+// tool calls (see legacyFinalAnswerToolName), plus the pipeline stages a
+// fast-answer turn records for its own timeline (see
+// types.PipelineToolCallIDPrefix): the model never issued those, so replaying
+// them would attribute calls to it that it cannot answer for.
 func filterNonTerminalToolCalls(calls []types.ToolCall) []types.ToolCall {
 	out := make([]types.ToolCall, 0, len(calls))
 	for _, tc := range calls {
-		if tc.Name == legacyFinalAnswerToolName {
+		if tc.Name == legacyFinalAnswerToolName || types.IsPipelineToolCallID(tc.ID) {
 			continue
 		}
 		out = append(out, tc)

@@ -27,9 +27,14 @@ type callbackMessage struct {
 }
 
 type messageParam struct {
-	Desc       []messageParamDesc `json:"desc"`
-	NotifyTo   []string           `json:"notifyTo"`
-	NotifyType int                `json:"notifyType"`
+	Desc     []messageParamDesc `json:"desc"`
+	NotifyTo []string           `json:"notifyTo"`
+	// Yunzhijia sends this as either a number or a string depending on the
+	// message client. We do not use its value, but it must be tolerant so a
+	// reply's notifyTo list remains available for mention detection.
+	NotifyType     json.RawMessage `json:"notifyType"`
+	ReplyMsgID     string          `json:"replyMsgId"`
+	ReplyRootMsgID string          `json:"replyRootMsgId"`
 }
 
 type messageParamDesc struct {
@@ -46,6 +51,7 @@ type sendMessagePayload struct {
 	MsgType      int               `json:"msgtype"`
 	Content      string            `json:"content"`
 	NotifyParams []notifyParam     `json:"notifyParams,omitempty"`
+	ParamType    int               `json:"paramType,omitempty"`
 	Param        *sendMessageParam `json:"param,omitempty"`
 }
 
@@ -58,7 +64,11 @@ type notifyParam struct {
 // sendMessageParam carries extra rendering options for a Yunzhijia reply,
 // such as requesting Markdown rendering of Content via formatType.
 type sendMessageParam struct {
-	FormatType string `json:"formatType,omitempty"`
+	FormatType      string `json:"formatType,omitempty"`
+	ReplyMsgID      string `json:"replyMsgId,omitempty"`
+	IsReference     bool   `json:"isReference,omitempty"`
+	ReplySummary    string `json:"replySummary,omitempty"`
+	ReplyPersonName string `json:"replyPersonName,omitempty"`
 }
 
 type appAccessTokenResponse struct {

@@ -107,6 +107,8 @@ type KnowledgeBase struct {
 	FAQConfig *FAQConfig `yaml:"faq_config"              json:"faq_config"              gorm:"column:faq_config;type:json"`
 	// QuestionGenerationConfig stores question generation configuration for document knowledge bases
 	QuestionGenerationConfig *QuestionGenerationConfig `yaml:"question_generation_config" json:"question_generation_config" gorm:"column:question_generation_config;type:json"`
+	// AutoTagConfig controls asynchronous association of existing tags after parsing.
+	AutoTagConfig *AutoTagConfig `yaml:"auto_tag_config" json:"auto_tag_config" gorm:"type:json"`
 	// WikiConfig stores wiki-specific configuration (only for wiki type knowledge bases)
 	WikiConfig *WikiConfig `yaml:"wiki_config"             json:"wiki_config"             gorm:"column:wiki_config;type:json"`
 	// IndexingStrategy controls which indexing pipelines are active for this knowledge base.
@@ -156,15 +158,86 @@ type KnowledgeBaseConfig struct {
 	FAQConfig *FAQConfig `yaml:"faq_config"              json:"faq_config"`
 	// Wiki configuration (only for wiki-enabled knowledge bases)
 	WikiConfig *WikiConfig `yaml:"wiki_config"             json:"wiki_config"`
+	// AutoTagConfig controls optional automatic association of existing KB tags.
+	AutoTagConfig *AutoTagConfig `yaml:"auto_tag_config" json:"auto_tag_config"`
 	// IndexingStrategy controls which indexing pipelines are active.
 	// nil means "no change" when updating (preserves existing strategy).
 	IndexingStrategy *IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"`
+}
+
+const (
+	// DefaultAutoTagMaxTags is applied when max_tags is unset or non-positive.
+	DefaultAutoTagMaxTags = 3
+	// MaximumAutoTagMaxTags caps how many tags one document may auto-acquire.
+	MaximumAutoTagMaxTags = 10
+)
+
+// AutoTagConfig controls asynchronous document auto-tagging. It is deliberately
+// opt-in so upgrading an existing deployment does not add model calls or alter
+// document tags unexpectedly.
+type AutoTagConfig struct {
+	Enabled bool   `yaml:"enabled" json:"enabled"`
+	ModelID string `yaml:"model_id,omitempty" json:"model_id,omitempty"`
+	MaxTags int    `yaml:"max_tags,omitempty" json:"max_tags,omitempty"`
+	// SkipIfTagged leaves documents that already carry tags untouched, so a
+	// deliberate manual classification is not diluted by model guesses. It is
+	// a pointer because the default is true: rows written before this field
+	// existed decode to nil and must not silently flip to "always append".
+	SkipIfTagged *bool `yaml:"skip_if_tagged,omitempty" json:"skip_if_tagged,omitempty"`
+}
+
+// ShouldSkipIfTagged reports whether documents with existing tags are left
+// alone. Defaults to true for nil receivers and unset values.
+func (c *AutoTagConfig) ShouldSkipIfTagged() bool {
+	if c == nil || c.SkipIfTagged == nil {
+		return true
+	}
+	return *c.SkipIfTagged
+}
+
+// Value serializes the automatic-tagging configuration for database storage.
+func (c AutoTagConfig) Value() (driver.Value, error) { return json.Marshal(c) }
+
+// Scan deserializes the automatic-tagging configuration from a database value.
+func (c *AutoTagConfig) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		if s, ok := value.(string); ok {
+			b = []byte(s)
+		} else {
+			return nil
+		}
+	}
+	return json.Unmarshal(b, c)
+}
+
+// Normalize applies defaults and bounds to the automatic-tagging configuration.
+func (c *AutoTagConfig) Normalize() {
+	if c == nil {
+		return
+	}
+	if c.MaxTags <= 0 {
+		c.MaxTags = DefaultAutoTagMaxTags
+	}
+	if c.MaxTags > MaximumAutoTagMaxTags {
+		c.MaxTags = MaximumAutoTagMaxTags
+	}
+	if c.SkipIfTagged == nil {
+		skip := true
+		c.SkipIfTagged = &skip
+	}
 }
 
 // ParserEngineRule maps a set of file types to a specific parser engine.
 type ParserEngineRule struct {
 	FileTypes []string `yaml:"file_types" json:"file_types"`
 	Engine    string   `yaml:"engine"     json:"engine"`
+	// XLSXFirstRowAsHeader restores row-1 column context for flat XLSX tables.
+	// nil preserves the parser default; an explicit false disables the mode.
+	XLSXFirstRowAsHeader *bool `yaml:"xlsx_first_row_as_header,omitempty" json:"xlsx_first_row_as_header,omitempty"`
 }
 
 // ChunkingConfig represents the document splitting configuration
@@ -209,14 +282,30 @@ type ChunkingConfig struct {
 // based on the configured rules. Returns empty string (builtin) when
 // no rule matches.
 func (c ChunkingConfig) ResolveParserEngine(fileType string) string {
-	for _, rule := range c.ParserEngineRules {
-		for _, ft := range rule.FileTypes {
-			if ft == fileType {
-				return rule.Engine
+	if rule := c.ResolveParserEngineRule(fileType); rule != nil {
+		return rule.Engine
+	}
+	return ""
+}
+
+// ResolveParserEngineRule returns the parser rule for a file type.
+func (c ChunkingConfig) ResolveParserEngineRule(fileType string) *ParserEngineRule {
+	fileType = normalizeParserFileType(fileType)
+	if fileType == "" {
+		return nil
+	}
+	for i := range c.ParserEngineRules {
+		for _, ft := range c.ParserEngineRules[i].FileTypes {
+			if normalizeParserFileType(ft) == fileType {
+				return &c.ParserEngineRules[i]
 			}
 		}
 	}
-	return ""
+	return nil
+}
+
+func normalizeParserFileType(fileType string) string {
+	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fileType)), ".")
 }
 
 // StorageProviderConfig stores the KB-level storage provider selection.
@@ -607,6 +696,11 @@ func (kb *KnowledgeBase) EnsureDefaults() {
 	// Clear type-specific configs that don't belong
 	if kb.Type != KnowledgeBaseTypeFAQ {
 		kb.FAQConfig = nil
+	}
+	if kb.Type != KnowledgeBaseTypeDocument {
+		kb.AutoTagConfig = nil
+	} else if kb.AutoTagConfig != nil {
+		kb.AutoTagConfig.Normalize()
 	}
 	// Set defaults for FAQ
 	if kb.Type == KnowledgeBaseTypeFAQ {

@@ -105,6 +105,12 @@ export interface CustomAgentConfig {
   multi_turn_enabled?: boolean;     // 是否启用多轮对话
   history_turns?: number;           // 保留历史轮数
 
+  // ===== 长期记忆 =====
+  // 该智能体是否可以读取用户的长期记忆。
+  // 缺省（旧数据）等同于 true：这是一个只能"关"的开关，空间设置关闭时
+  // 这里打开也不会生效。
+  memory_enabled?: boolean;
+
   // ===== 检索策略设置 =====
   embedding_top_k?: number;         // 向量召回TopK
   keyword_threshold?: number;       // 关键词召回阈值

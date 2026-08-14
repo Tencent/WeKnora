@@ -9,8 +9,6 @@ import (
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
-	"github.com/Tencent/WeKnora/internal/llmreference"
-	"github.com/Tencent/WeKnora/internal/llmresource"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -39,17 +37,8 @@ func (e *AgentEngine) streamLLMToEventBus(
 	llmCtx, llmCancel := context.WithTimeout(ctx, e.getLLMCallTimeout())
 	defer llmCancel()
 
-	// Order matters. resourceRefs must alias durable resource handles FIRST,
-	// because wiki summary-page slugs (summary/<knowledgeID>) embed a document's
-	// UUID and sourceRefs.EncodeMessages compacts that same UUID into a document
-	// citation alias (d1, d2, …) via a blind substring replace. Running
-	// sourceRefs first mangled `[[summary/<uuid>|Title]]` into `[[summary/d1]]`
-	// — an unrecoverable dead link the model then copied into wiki tool calls.
-	// Encoding resourceRefs first turns the slug into a res:// token so the UUID
-	// is gone before citation compaction runs; the two alias spaces (res://NNNN
-	// vs d/c/b/w-N) are disjoint, so decode order is unaffected.
-	messages = e.resourceRefs.EncodeMessages(messages)
-	messages = e.sourceRefs.EncodeMessages(messages)
+	// Model-context encoding owns codec ordering and temporary-handle lifecycle.
+	messages = e.modelContext.EncodeMessages(messages)
 	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
 	llmCtx = types.WithLLMCallMetadata(llmCtx, "agent_round", prefixFingerprint)
 	stream, err := e.chatModel.ChatStream(llmCtx, messages, opts)
@@ -62,10 +51,8 @@ func (e *AgentEngine) streamLLMToEventBus(
 	chunkCount := 0
 	responseTypeCounts := make(map[string]int)
 	firstChunkTime := time.Time{}
-	answerDecoder := llmresource.NewStreamDecoder(e.resourceRefs)
-	thinkingDecoder := llmresource.NewStreamDecoder(e.resourceRefs)
-	answerRefExpander := llmreference.NewStreamExpander(e.sourceRefs)
-	thinkingRefExpander := llmreference.NewStreamExpander(e.sourceRefs)
+	answerDecoder := e.modelContext.StreamDecoder()
+	thinkingDecoder := e.modelContext.StreamDecoder()
 
 	for chunk := range stream {
 		chunkCount++
@@ -82,12 +69,17 @@ func (e *AgentEngine) streamLLMToEventBus(
 			continue
 		}
 		if chunk.ResponseType == types.ResponseTypeThinking {
-			chunk.Content = thinkingRefExpander.Feed(thinkingDecoder.Feed(chunk.Content))
+			chunk.Content = thinkingDecoder.Feed(chunk.Content)
+			if chunk.Done {
+				chunk.Content += thinkingDecoder.Flush()
+			}
 		} else {
-			chunk.Content = answerRefExpander.Feed(answerDecoder.Feed(chunk.Content))
+			chunk.Content = answerDecoder.Feed(chunk.Content)
+			if chunk.Done {
+				chunk.Content += answerDecoder.Flush()
+			}
 		}
-		e.resourceRefs.DecodeToolCalls(chunk.ToolCalls)
-		e.sourceRefs.DecodeToolCalls(chunk.ToolCalls)
+		e.modelContext.DecodeToolCalls(chunk.ToolCalls)
 
 		if chunk.Content != "" {
 			isExtracted := chunk.Data != nil && chunk.Data["source"] != nil
@@ -116,17 +108,33 @@ func (e *AgentEngine) streamLLMToEventBus(
 			emitFunc(&chunk, result.Content)
 		}
 	}
-	result.Content += answerRefExpander.Feed(answerDecoder.Flush())
-	result.Content += answerRefExpander.Flush()
-	result.ReasoningContent += thinkingRefExpander.Feed(thinkingDecoder.Flush())
-	result.ReasoningContent += thinkingRefExpander.Flush()
+	answerTail := answerDecoder.Flush()
+	thinkingTail := thinkingDecoder.Flush()
+	result.Content += answerTail
+	result.ReasoningContent += thinkingTail
+	if emitFunc != nil {
+		if thinkingTail != "" {
+			emitFunc(&types.StreamResponse{ResponseType: types.ResponseTypeThinking, Content: thinkingTail}, result.Content)
+		}
+		if answerTail != "" {
+			emitFunc(&types.StreamResponse{ResponseType: types.ResponseTypeAnswer, Content: answerTail}, result.Content)
+		}
+	}
 	// Some providers stream tool-call argument fragments but expose the
 	// accumulated call in the final chunk. Decode once more after assembly so
-	// aliases split across provider chunks cannot leak into tool execution.
-	e.resourceRefs.DecodeToolCalls(result.ToolCalls)
-	e.sourceRefs.DecodeToolCalls(result.ToolCalls)
-	if orphans := e.resourceRefs.OrphanAliases(result.Content); len(orphans) > 0 {
-		logger.Warnf(ctx, "[Agent][Stream] Model emitted %d unresolvable resource alias(es): %v",
+	// handles split across provider chunks cannot leak into tool execution.
+	e.modelContext.DecodeToolCalls(result.ToolCalls)
+	for _, toolCall := range result.ToolCalls {
+		if len(toolCall.UnresolvedHandles) == 0 {
+			continue
+		}
+		logger.Warnf(ctx,
+			"[Agent][Stream] Tool %s (%s) contains unresolvable model handle(s): %v",
+			toolCall.Function.Name, toolCall.ID, toolCall.UnresolvedHandles,
+		)
+	}
+	if orphans := e.modelContext.OrphanResourceHandles(result.Content); len(orphans) > 0 {
+		logger.Warnf(ctx, "[Agent][Stream] Model emitted %d unresolvable resource handle(s): %v",
 			len(orphans), orphans)
 	}
 

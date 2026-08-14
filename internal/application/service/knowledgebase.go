@@ -261,14 +261,20 @@ func (s *knowledgeBaseService) validateVectorStoreBinding(
 			"reason":    "cross-tenant or unknown store",
 		}, "[kb.create] vector store not owned by tenant")
 		return apperrors.NewVectorStoreBindingInvalidError("vector store not found")
-	case errors.Is(err, retriever.ErrVectorStoreNotFound):
+	case errors.Is(err, retriever.ErrVectorStoreNotFound),
+		errors.Is(err, retriever.ErrVectorStoreUnavailable):
 		logger.WarnWithFields(ctx, logger.Fields{
 			"tenant_id": tenantID,
 			"store_id":  sanitized,
-			"reason":    "store registered in DB but missing in registry",
+			"reason":    "store recorded in DB but no engine could be resolved",
 		}, "[kb.create] vector store currently unavailable")
 		return apperrors.NewVectorStoreUnavailableError(
 			"vector store is currently unavailable; check its connection configuration")
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		// The caller went away or ran out of time while the binding was being
+		// verified, which can now include rebuilding the store's engine. That
+		// is not a server fault, so it must not be logged and answered as one.
+		return err
 	default:
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,
@@ -522,6 +528,10 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		}
 		if config.WikiConfig != nil {
 			kb.WikiConfig = config.WikiConfig
+		}
+		if config.AutoTagConfig != nil {
+			config.AutoTagConfig.Normalize()
+			kb.AutoTagConfig = config.AutoTagConfig
 		}
 		// Update indexing strategy — syncs to ExtractConfig for backward compat
 		if config.IndexingStrategy != nil {
@@ -863,7 +873,11 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			return asynq.SkipRetry
 		}
 		if err != nil {
-			logger.Warnf(ctx, "Failed to create retrieve engine: %v", err)
+			// Transient failures — store temporarily unavailable, request
+			// cancellation during resolution, or other retryable errors —
+			// must not fall through and report success while embeddings remain.
+			logger.Errorf(ctx, "KB delete task deferred: %v (tenant=%d, kb=%s)", err, payload.TenantID, payload.KnowledgeBaseID)
+			return err
 		} else {
 			// Group knowledge by embedding model and type
 			type groupKey struct {
@@ -1284,10 +1298,7 @@ func (s *knowledgeBaseService) buildDuplicateKnowledgeBaseName(
 	tenantID uint64,
 	sourceName string,
 ) string {
-	locale, ok := types.LanguageFromContext(ctx)
-	if !ok {
-		locale = types.DefaultLanguage()
-	}
+	locale := types.LanguageFromContextOrDefault(ctx)
 	suffix := duplicateKBCopySuffix(locale)
 
 	baseName := strings.TrimSpace(sourceName)

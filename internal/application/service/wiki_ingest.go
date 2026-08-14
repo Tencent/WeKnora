@@ -148,6 +148,17 @@ const (
 	// materially prolonging task runtime when the remote is genuinely down.
 	wikiLLMMaxAttempts = 3
 
+	// wikiLLMMaxTokens is the completion-token budget for every LLM call
+	// routed through generateWithTemplate. Combined wiki extraction emits a
+	// single large JSON document (entities + concepts + details). When
+	// MaxTokens is left at 0, OpenAI-compatible clients omit max_tokens and
+	// providers such as DeepSeek apply a default of 8192 — long extracts are
+	// truncated mid-JSON with finish_reason=length, and parse fails with
+	// "unexpected end of JSON input" (EXTRACT_FAILED). Raising the budget to
+	// 32768 matches verified complete outputs for large Chinese policy docs;
+	// shorter replies still stop early via finish_reason=stop. See #2604.
+	wikiLLMMaxTokens = 32768
+
 	// wikiLLMBackoffBase is the base delay for the exponential backoff
 	// between retry attempts. The nth retry waits base << (n-1) — so with
 	// a 2s base we wait 2s, 4s, 8s between attempts.
@@ -327,7 +338,7 @@ type wikiIngestService struct {
 	chunkRepo      interfaces.ChunkRepository
 	modelService   interfaces.ModelService
 	task           interfaces.TaskEnqueuer
-	logEntrySvc    interfaces.WikiLogEntryService
+	audit          interfaces.AuditLogService
 	pendingRepo    interfaces.TaskPendingOpsRepository
 	deadLetterRepo interfaces.TaskDeadLetterRepository
 	redisClient    *redis.Client // nil in Lite mode (no Redis)
@@ -367,7 +378,7 @@ func NewWikiIngestService(
 	chunkRepo interfaces.ChunkRepository,
 	modelService interfaces.ModelService,
 	task interfaces.TaskEnqueuer,
-	logEntrySvc interfaces.WikiLogEntryService,
+	audit interfaces.AuditLogService,
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	deadLetterRepo interfaces.TaskDeadLetterRepository,
 	redisClient *redis.Client,
@@ -381,7 +392,7 @@ func NewWikiIngestService(
 		chunkRepo:      chunkRepo,
 		modelService:   modelService,
 		task:           task,
-		logEntrySvc:    logEntrySvc,
+		audit:          audit,
 		pendingRepo:    pendingRepo,
 		deadLetterRepo: deadLetterRepo,
 		redisClient:    redisClient,
@@ -424,7 +435,10 @@ func (s *wikiIngestService) beginWikiSubspan(ctx context.Context, knowledgeID st
 	return s.tracker().BeginSubSpan(ctx, parent, "postprocess.wiki", types.SpanKindSubSpan, input)
 }
 
-// EnqueueWikiIngest queues a document for wiki ingestion.
+// EnqueueWikiIngest queues a document for wiki ingestion. The returned bool
+// reports whether the durable pending op was persisted. A trigger enqueue
+// error may therefore be returned together with true; callers can retry only
+// the KB-scoped trigger without appending a duplicate operation.
 //
 // Architecture: each upload inserts one row into task_pending_ops
 // (task_type="wiki:ingest", scope="knowledge_base", scope_id=kbID,
@@ -461,14 +475,39 @@ func EnqueueWikiIngest(
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	tenantID uint64,
 	kbID, knowledgeID string,
-) {
-	lang, _ := types.LanguageFromContext(ctx)
+) (bool, error) {
+	pendingOp, err := newWikiIngestPendingOp(ctx, tenantID, kbID, knowledgeID)
 
 	// Persist the pending op. A re-ingest of the same knowledge id while
 	// a previous op is still queued simply appends another row; the
 	// peekPendingList consumer collapses by dedup_key (== knowledge_id),
 	// keeping the LATEST op for each knowledge — matching the legacy
 	// "RPush + reverse-dedupe" semantics.
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to marshal pending op for %s: %v", knowledgeID, err)
+		return false, err
+	}
+	accepted, err := enqueueWikiPendingOp(ctx, pendingRepo, pendingOp)
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to enqueue pending op for %s: %v", knowledgeID, err)
+		return false, fmt.Errorf("enqueue wiki ingest pending op: %w", err)
+	}
+	if !accepted {
+		logger.Infof(ctx, "wiki ingest: skip enqueue for deleted KB %s", kbID)
+		return false, nil
+	}
+	if err := enqueueWikiIngestTrigger(ctx, task, tenantID, kbID); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+func newWikiIngestPendingOp(
+	ctx context.Context,
+	tenantID uint64,
+	kbID, knowledgeID string,
+) (*types.TaskPendingOp, error) {
+	lang := types.LanguageFromContextOrDefault(ctx)
 	op := WikiPendingOp{
 		Op:          WikiOpIngest,
 		KnowledgeID: knowledgeID,
@@ -476,10 +515,9 @@ func EnqueueWikiIngest(
 	}
 	payloadBytes, err := json.Marshal(op)
 	if err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to marshal pending op for %s: %v", knowledgeID, err)
-		return
+		return nil, fmt.Errorf("marshal wiki ingest pending op: %w", err)
 	}
-	accepted, err := enqueueWikiPendingOp(ctx, pendingRepo, &types.TaskPendingOp{
+	return &types.TaskPendingOp{
 		TenantID: tenantID,
 		TaskType: wikiTaskType,
 		Scope:    wikiTaskScope,
@@ -487,23 +525,30 @@ func EnqueueWikiIngest(
 		Op:       WikiOpIngest,
 		DedupKey: knowledgeID,
 		Payload:  payloadBytes,
-	})
-	if err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to enqueue pending op for %s: %v", knowledgeID, err)
-		return
-	}
-	if !accepted {
-		logger.Infof(ctx, "wiki ingest: skip enqueue for deleted KB %s", kbID)
-		return
-	}
+	}, nil
+}
 
+func enqueueWikiIngestTrigger(
+	ctx context.Context,
+	task interfaces.TaskEnqueuer,
+	tenantID uint64,
+	kbID string,
+) error {
+	lang := types.LanguageFromContextOrDefault(ctx)
 	trigger := WikiIngestPayload{
 		TenantID:        tenantID,
 		KnowledgeBaseID: kbID,
 		Language:        lang,
 	}
 	langfuse.InjectTracing(ctx, &trigger)
-	triggerBytes, _ := json.Marshal(trigger)
+	triggerBytes, err := json.Marshal(trigger)
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to marshal trigger task: %v", err)
+		return fmt.Errorf("marshal wiki ingest trigger: %w", err)
+	}
+	if task == nil {
+		return errors.New("enqueue wiki ingest trigger: task enqueuer is nil")
+	}
 
 	t := asynq.NewTask(types.TypeWikiIngest, triggerBytes,
 		asynq.Queue(types.QueueWiki),
@@ -513,7 +558,9 @@ func EnqueueWikiIngest(
 	)
 	if _, err := task.Enqueue(t); err != nil {
 		logger.Warnf(ctx, "wiki ingest: failed to enqueue trigger task: %v", err)
+		return fmt.Errorf("enqueue wiki ingest trigger: %w", err)
 	}
+	return nil
 }
 
 // EnqueueWikiRetract queues a wiki retraction op (a delete cleanup).
@@ -1170,14 +1217,18 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 }
 
 // docIngestResult captures per-document info for batch post-processing.
+type wikiIngestPageRef struct {
+	Slug  string
+	Title string
+}
+
 type docIngestResult struct {
 	KnowledgeID string
 	DocTitle    string
 	Summary     string // one-line summary of the document (from summary page)
 	// Pages records the wiki pages this document touched, carrying both
-	// the slug (for navigation / retract lookups) and the human-readable
-	// title captured at ingest time (for the log feed's display layer).
-	Pages []types.WikiLogPageRef
+	// the slug used for link/retract bookkeeping and its human-readable title.
+	Pages []wikiIngestPageRef
 	// MapStats are the per-doc map-phase metrics captured at the moment
 	// mapOneDocument finishes. Surfaced into the postprocess.wiki span's
 	// output so the trace viewer can show "what the map phase produced"
@@ -1251,12 +1302,16 @@ type WikiBatchContext struct {
 
 // SlugUpdate represents a single update operation for a specific slug
 type SlugUpdate struct {
-	Slug              string
-	Type              string        // "entity", "concept", "summary", "retract", "retractStale"
-	Item              extractedItem // For entity/concept
-	DocTitle          string
-	KnowledgeID       string
-	SourceRef         string
+	Slug        string
+	Type        string        // "entity", "concept", "summary", "retract", "retractStale"
+	Item        extractedItem // For entity/concept
+	DocTitle    string
+	KnowledgeID string
+	SourceRef   string
+	// Language is the already-resolved, human-readable language name the
+	// Reduce phase interpolates into the editor prompt (e.g. "Chinese
+	// (Simplified)"), NOT a locale code. Map resolves it once per document
+	// so every page derived from that document shares one language.
 	Language          string
 	SummaryBody       string // For summary
 	SummaryLine       string // For summary
@@ -1626,7 +1681,7 @@ func (s *wikiIngestService) cleanDeadLinks(ctx context.Context, kbID string, aff
 		if page.Status == types.WikiPageStatusArchived {
 			continue
 		}
-		if page.PageType == types.WikiPageTypeIndex || page.PageType == types.WikiPageTypeLog {
+		if page.PageType == types.WikiPageTypeIndex {
 			continue
 		}
 		if len(page.OutLinks) == 0 {
@@ -1721,7 +1776,7 @@ func (s *wikiIngestService) injectCrossLinks(
 		if err != nil || page == nil {
 			continue
 		}
-		if page.PageType == types.WikiPageTypeIndex || page.PageType == types.WikiPageTypeLog {
+		if page.PageType == types.WikiPageTypeIndex {
 			continue
 		}
 
@@ -1771,7 +1826,7 @@ func (s *wikiIngestService) injectCrossLinks(
 func collectLinkRefs(pages []*types.WikiPage) []linkRef {
 	refs := make([]linkRef, 0, len(pages)*2)
 	for _, p := range pages {
-		if p.PageType == types.WikiPageTypeIndex || p.PageType == types.WikiPageTypeLog {
+		if p.PageType == types.WikiPageTypeIndex {
 			continue
 		}
 		if p.Title != "" {
@@ -1909,7 +1964,7 @@ func (s *wikiIngestService) getExistingPageSlugsForKnowledge(ctx context.Context
 	for _, slug := range slugs {
 		// Defense-in-depth: skip wiki-intrinsic slugs that never have
 		// real source refs.
-		if slug == "index" || slug == "log" {
+		if slug == "index" {
 			continue
 		}
 		out[slug] = true
@@ -2123,34 +2178,6 @@ func splitSummaryLine(raw string) (summary string, content string) {
 		return strings.TrimSpace(summaryLine), strings.TrimSpace(raw[idx+1:])
 	}
 	return "", raw
-}
-
-// buildLogEntry builds a WikiLogEntry struct for the current batch. It is
-// pure (no DB access) so callers can accumulate entries cheaply under their
-// lock and flush them in a single AppendBatch call at the end of the batch.
-//
-// Historically this was a per-event `GetLog + UpdatePage` round trip, which
-// rewrote the entire log page's TEXT column on every ingest/retract op —
-// O(n^2) write amplification as the log grew. The batch writer now uses
-// wikiLogEntryService.AppendBatch instead; see ProcessWikiIngest.
-func (s *wikiIngestService) buildLogEntry(tenantID uint64, kbID, action, knowledgeID, docTitle, summary string, pagesAffected []types.WikiLogPageRef) *types.WikiLogEntry {
-	// Copy pagesAffected so the entry does not alias caller-owned slices.
-	// The batch accumulates SlugUpdate results that may be reused downstream.
-	var pages types.WikiLogPageRefs
-	if len(pagesAffected) > 0 {
-		pages = make(types.WikiLogPageRefs, len(pagesAffected))
-		copy(pages, pagesAffected)
-	}
-	return &types.WikiLogEntry{
-		TenantID:        tenantID,
-		KnowledgeBaseID: kbID,
-		Action:          action,
-		KnowledgeID:     knowledgeID,
-		DocTitle:        docTitle,
-		Summary:         summary,
-		PagesAffected:   pages,
-		CreatedAt:       time.Now(),
-	}
 }
 
 // publishDraftPages transitions draft pages to published status after ingest completes.
@@ -2451,7 +2478,7 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 		)
 	}
 	thinking := false
-	opts := &chat.ChatOptions{Temperature: 0.3, Thinking: &thinking}
+	opts := &chat.ChatOptions{Temperature: 0.3, Thinking: &thinking, MaxTokens: wikiLLMMaxTokens}
 	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
 	warmupKey := ""
 	if promptTpl == agent.WikiPageModifyUserPrompt {

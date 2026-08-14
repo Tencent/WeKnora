@@ -253,11 +253,148 @@ var _ interfaces.TenantMemberRepository = (*fakeTenantMemberRepo)(nil)
 
 func newServiceWithRepo() (interfaces.TenantMemberService, *fakeTenantMemberRepo) {
 	r := newFakeRepo()
-	// Audit dependency is intentionally nil — these tests pre-date PR 6
-	// and exercise membership invariants only. The service's audit
-	// hooks are nil-safe (see emitAudit), so passing nil keeps existing
-	// coverage intact without forcing a stub.
-	return NewTenantMemberService(r, nil), r
+	// Audit / user / token dependencies are intentionally nil — these
+	// tests pre-date PR 6 and exercise membership invariants only. The
+	// service's audit and RemoveMember-cleanup hooks are nil-safe, so
+	// passing nil keeps existing coverage intact without forcing stubs.
+	return NewTenantMemberService(r, nil, nil, nil), r
+}
+
+// cleanupUserRepo is a minimal UserRepository used to assert that
+// RemoveMember clears dangling home-tenant pointers (#2586).
+type cleanupUserRepo struct {
+	users map[string]*types.User
+}
+
+func (r *cleanupUserRepo) CreateUser(context.Context, *types.User) error { return nil }
+func (r *cleanupUserRepo) GetUserByID(_ context.Context, id string) (*types.User, error) {
+	u, ok := r.users[id]
+	if !ok {
+		return nil, errors.New("user not found")
+	}
+	cp := *u
+	return &cp, nil
+}
+func (r *cleanupUserRepo) GetUsersByIDs(context.Context, []string) (map[string]*types.User, error) {
+	return nil, nil
+}
+func (r *cleanupUserRepo) GetUserByEmail(context.Context, string) (*types.User, error) {
+	return nil, nil
+}
+func (r *cleanupUserRepo) GetUserByUsername(context.Context, string) (*types.User, error) {
+	return nil, nil
+}
+func (r *cleanupUserRepo) GetUserByTenantID(context.Context, uint64) (*types.User, error) {
+	return nil, nil
+}
+func (r *cleanupUserRepo) UpdateUser(_ context.Context, user *types.User) error {
+	cp := *user
+	r.users[user.ID] = &cp
+	return nil
+}
+func (r *cleanupUserRepo) DeleteUser(context.Context, string) error { return nil }
+func (r *cleanupUserRepo) ListUsers(context.Context, int, int) ([]*types.User, error) {
+	return nil, nil
+}
+func (r *cleanupUserRepo) ListSystemAdmins(context.Context, int, int) ([]*types.User, int64, error) {
+	return nil, 0, nil
+}
+func (r *cleanupUserRepo) RevokeSystemAdmin(context.Context, string, string) (*types.User, error) {
+	return nil, nil
+}
+func (r *cleanupUserRepo) SearchUsers(context.Context, string, int) ([]*types.User, error) {
+	return nil, nil
+}
+
+type cleanupTokenRepo struct {
+	revoked []string
+}
+
+func (r *cleanupTokenRepo) CreateToken(context.Context, *types.AuthToken) error { return nil }
+func (r *cleanupTokenRepo) GetTokenByValue(context.Context, string) (*types.AuthToken, error) {
+	return nil, errors.New("not found")
+}
+func (r *cleanupTokenRepo) GetTokensByUserID(context.Context, string) ([]*types.AuthToken, error) {
+	return nil, nil
+}
+func (r *cleanupTokenRepo) UpdateToken(context.Context, *types.AuthToken) error { return nil }
+func (r *cleanupTokenRepo) DeleteToken(context.Context, string) error           { return nil }
+func (r *cleanupTokenRepo) DeleteExpiredTokens(context.Context) error           { return nil }
+func (r *cleanupTokenRepo) RevokeTokensByUserID(_ context.Context, userID string) error {
+	r.revoked = append(r.revoked, userID)
+	return nil
+}
+
+func TestTenantMemberService_RemoveMember_ClearsStaleHomeAndRevokesTokens(t *testing.T) {
+	memberRepo := newFakeRepo()
+	prefTenant := uint64(7)
+	userRepo := &cleanupUserRepo{users: map[string]*types.User{
+		"contrib": {
+			ID:       "contrib",
+			TenantID: 7,
+			Preferences: types.UserPreferences{
+				LastActiveTenantID: &prefTenant,
+			},
+		},
+	}}
+	tokenRepo := &cleanupTokenRepo{}
+	svc := NewTenantMemberService(memberRepo, nil, userRepo, tokenRepo)
+	ctx := context.Background()
+
+	if _, err := svc.EnsureOwner(ctx, "owner", 7); err != nil {
+		t.Fatalf("seed owner: %v", err)
+	}
+	if _, err := svc.AddMember(ctx, "contrib", 7, types.TenantRoleContributor, nil); err != nil {
+		t.Fatalf("seed contributor: %v", err)
+	}
+	if err := svc.RemoveMember(ctx, "contrib", 7); err != nil {
+		t.Fatalf("RemoveMember: %v", err)
+	}
+
+	got := userRepo.users["contrib"]
+	if got == nil {
+		t.Fatal("user missing after cleanup")
+	}
+	if got.TenantID != 0 {
+		t.Fatalf("TenantID = %d, want 0 after home membership removal", got.TenantID)
+	}
+	if got.Preferences.LastActiveTenantID != nil {
+		t.Fatalf("LastActiveTenantID = %v, want nil", got.Preferences.LastActiveTenantID)
+	}
+	if len(tokenRepo.revoked) != 1 || tokenRepo.revoked[0] != "contrib" {
+		t.Fatalf("revoked users = %v, want [contrib]", tokenRepo.revoked)
+	}
+}
+
+func TestTenantMemberService_RemoveMember_RevokesTokensEvenWhenHomeUnchanged(t *testing.T) {
+	// User's home is tenant 1; they are removed from tenant 7. Home
+	// pointer stays, but sessions must still be revoked so a JWT scoped
+	// to tenant 7 cannot keep serving a 403-only UI.
+	memberRepo := newFakeRepo()
+	userRepo := &cleanupUserRepo{users: map[string]*types.User{
+		"contrib": {ID: "contrib", TenantID: 1},
+	}}
+	tokenRepo := &cleanupTokenRepo{}
+	svc := NewTenantMemberService(memberRepo, nil, userRepo, tokenRepo)
+	ctx := context.Background()
+
+	if _, err := svc.EnsureOwner(ctx, "owner", 7); err != nil {
+		t.Fatalf("seed owner: %v", err)
+	}
+	if _, err := svc.AddMember(ctx, "contrib", 7, types.TenantRoleContributor, nil); err != nil {
+		t.Fatalf("seed contributor: %v", err)
+	}
+	if err := svc.RemoveMember(ctx, "contrib", 7); err != nil {
+		t.Fatalf("RemoveMember: %v", err)
+	}
+
+	got := userRepo.users["contrib"]
+	if got.TenantID != 1 {
+		t.Fatalf("TenantID = %d, want home 1 left untouched", got.TenantID)
+	}
+	if len(tokenRepo.revoked) != 1 || tokenRepo.revoked[0] != "contrib" {
+		t.Fatalf("revoked users = %v, want [contrib]", tokenRepo.revoked)
+	}
 }
 
 func TestTenantMemberService_AddMember_RejectsInvalidRole(t *testing.T) {

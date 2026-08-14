@@ -35,6 +35,11 @@ import {
   batchReparseKnowledge,
   getKnowledgeSpans,
   getKnowledgeDetails,
+  listKnowledgeFolders,
+  moveKnowledgeToFolder,
+  renameKnowledgeFolder,
+  downKnowledgeDetails,
+  type KnowledgeFolderTree,
 } from "@/api/knowledge-base/index";
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
 import FAQEntryManager from './components/FAQEntryManager.vue';
@@ -42,7 +47,9 @@ import DocumentListView from './components/DocumentListView.vue';
 import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
+import KbFolderTree from './components/KbFolderTree.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
+import BatchTagDialog from './components/BatchTagDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
@@ -54,6 +61,17 @@ import {
   shouldRefreshWikiStatusAfterKnowledgePoll,
 } from './wikiStatusRefresh';
 import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
+import { resolveKnowledgeDownloadFileName } from './knowledgeDownloadFileName';
+import {
+  buildUploadFileName,
+  canMoveFolderTo,
+  childFolders,
+  folderBreadcrumbs as buildFolderBreadcrumbs,
+  folderPathExists as folderExistsInTree,
+  isFilteringDocuments,
+  isFolderUpload,
+  ROOT_FOLDER_PATH,
+} from './folderTree';
 import { useI18n } from 'vue-i18n';
 import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
 import type { ParserEngineInfo } from '@/api/system';
@@ -420,6 +438,24 @@ const selectedIds = ref<Set<string>>(new Set());
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
 const batchReparsing = ref(false);
+const batchTagging = ref(false);
+const batchTagDialogVisible = ref(false);
+const batchTagPreSelectedIds = computed(() => {
+  const ids = Array.from(selectedIds.value);
+  if (ids.length === 0) return [];
+  const cards = ids
+    .map((id) => cardList.value.find((c) => c.id === id))
+    .filter((c): c is KnowledgeCard => Boolean(c));
+  if (cards.length === 0) return [];
+  const firstTagIds = new Set((cards[0].tags || []).map((t) => t.id));
+  for (let i = 1; i < cards.length; i++) {
+    const cur = new Set((cards[i].tags || []).map((t) => t.id));
+    for (const tid of firstTagIds) {
+      if (!cur.has(tid)) firstTagIds.delete(tid);
+    }
+  }
+  return Array.from(firstTagIds);
+});
 // IDs submitted for async batch reparse; hold optimistic pending until the worker updates DB.
 const pendingReparseAck = ref<Set<string>>(new Set());
 
@@ -560,8 +596,11 @@ const sourceOptions = computed(() => [
   { label: t('knowledgeBase.sourceApi'), value: 'api' },
   { label: t('knowledgeBase.sourceBrowserExtension'), value: 'browser_extension' },
   { label: t('knowledgeBase.channelFeishu'), value: 'feishu' },
+  { label: t('knowledgeBase.channelFeishuDrive'), value: 'feishu_drive' },
   { label: t('knowledgeBase.channelNotion'), value: 'notion' },
   { label: t('knowledgeBase.channelYuque'), value: 'yuque' },
+  { label: t('knowledgeBase.channelGitLab'), value: 'gitlab' },
+  { label: t('knowledgeBase.channelIma'), value: 'ima' },
   { label: t('knowledgeBase.channelWechat'), value: 'wechat' },
   { label: t('knowledgeBase.channelWecom'), value: 'wecom' },
   { label: t('knowledgeBase.channelDingtalk'), value: 'dingtalk' },
@@ -572,6 +611,58 @@ const sourceOptions = computed(() => [
 const updatedTimeRange = ref<string[]>([]);
 // Disable any date after today so users cannot filter into the future.
 const disableFutureDate = { after: new Date(new Date().setHours(23, 59, 59, 999)) };
+
+// ── Folder tree (documents uploaded as a folder keep their relative path) ──
+const FOLDER_TREE_COLLAPSED_KEY = 'weknora.kbFolderTreeCollapsed';
+const readStoredFlag = (key: string, fallback = false) => {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? fallback : raw === 'true';
+  } catch {
+    return fallback;
+  }
+};
+const writeStoredFlag = (key: string, value: boolean) => {
+  try {
+    localStorage.setItem(key, String(value));
+  } catch {
+    // Private-mode storage failures must not break navigation.
+  }
+};
+const folderTree = ref<KnowledgeFolderTree | null>(null);
+const folderTreeLoading = ref(false);
+// The folder being browsed; ROOT_FOLDER_PATH ('') is the knowledge base top
+// level, a real node of the tree rather than a separate mode.
+const selectedFolderPath = ref<string>(ROOT_FOLDER_PATH);
+const folderTreeCollapsed = ref(readStoredFlag(FOLDER_TREE_COLLAPSED_KEY));
+const hasFolders = computed(() => (folderTree.value?.folders?.length ?? 0) > 0);
+// The folder column only earns its space once the knowledge base actually has
+// folders, so knowledge bases filled with single-file uploads look unchanged.
+const showFolderTree = computed(() => !isFAQ.value && hasFolders.value);
+// Browsing lists one folder's own contents; filtering searches its whole
+// subtree. There is no mode switch: the list follows what the user is doing.
+const isFiltering = computed(() =>
+  isFilteringDocuments({
+    keyword: docSearchKeyword.value,
+    tagIds: selectedTagIds.value,
+    fileType: selectedFileType.value,
+    parseStatus: selectedParseStatus.value,
+    source: selectedSource.value,
+    timeRange: updatedTimeRange.value,
+  }),
+);
+// Sub-folder entries shown at the top of the list while browsing. Search results
+// are flat, so they are dropped as soon as a filter is active. When the sidebar
+// tree is open it already lists the same folders, so skip the duplicate rows.
+const currentChildFolders = computed(() => {
+  if (isFiltering.value) return [];
+  if (showFolderTree.value && !folderTreeCollapsed.value) return [];
+  return childFolders(folderTree.value, selectedFolderPath.value);
+});
+// A row's folder is worth showing only when the list can span folders.
+const showDocumentFolderPath = computed(() => hasFolders.value && isFiltering.value);
+const folderBreadcrumbs = computed(() => buildFolderBreadcrumbs(selectedFolderPath.value));
+
 const filterParams = computed(() => {
   const [start, end] = updatedTimeRange.value || [];
   return {
@@ -582,6 +673,10 @@ const filterParams = computed(() => {
     source: selectedSource.value || undefined,
     start_time: start ? `${start} 00:00:00` : undefined,
     end_time: end ? `${end} 23:59:59` : undefined,
+    folder_path: selectedFolderPath.value,
+    // Searching descends into sub-folders; browsing shows one level, with the
+    // sub-folders themselves rendered as entries in the list.
+    folder_recursive: isFiltering.value,
   };
 });
 const tagMap = computed<Record<string, any>>(() => {
@@ -682,6 +777,103 @@ const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
 
 const isCurrentKb = (targetKbId: string) => targetKbId === kbId.value;
 
+const loadFolderTree = async (kbIdValue: string) => {
+  if (!kbIdValue || isFAQ.value) {
+    folderTree.value = null;
+    return;
+  }
+  folderTreeLoading.value = true;
+  try {
+    const res: any = await listKnowledgeFolders(kbIdValue);
+    if (!isCurrentKb(kbIdValue)) return;
+    folderTree.value = (res?.data as KnowledgeFolderTree) || null;
+    // A folder can disappear (its last document was deleted or moved); fall
+    // back to the root instead of leaving an empty, unreachable view.
+    if (!folderExistsInTree(folderTree.value?.folders || [], selectedFolderPath.value)) {
+      selectedFolderPath.value = ROOT_FOLDER_PATH;
+    }
+  } catch (error) {
+    if (!isCurrentKb(kbIdValue)) return;
+    console.error('Failed to load knowledge folders', error);
+    folderTree.value = null;
+  } finally {
+    if (isCurrentKb(kbIdValue)) {
+      folderTreeLoading.value = false;
+    }
+  }
+};
+
+const handleFolderSelect = (path: string) => {
+  if (selectedFolderPath.value === path) return;
+  selectedFolderPath.value = path;
+};
+
+// ── Re-filing documents and renaming folders ──
+// folder_path is display-only, so both operations are a plain column update:
+// nothing is re-parsed, re-chunked or re-embedded.
+
+// Flat folder list shared by every "move to folder" picker.
+const folderOptions = computed(() => {
+  const result: Array<{ path: string; name: string; depth: number }> = [];
+  const walk = (nodes: KnowledgeFolderTree['folders'], depth: number) => {
+    nodes.forEach((node) => {
+      result.push({ path: node.path, name: node.name, depth });
+      walk(node.children || [], depth + 1);
+    });
+  };
+  walk(folderTree.value?.folders || [], 0);
+  return result;
+});
+
+const moveKnowledgeIntoFolder = async (ids: string[], folderPath: string) => {
+  if (!kbId.value || ids.length === 0) return;
+  try {
+    await moveKnowledgeToFolder(kbId.value, ids, folderPath);
+    MessagePlugin.success(t('knowledgeBase.moveToFolder.success', { count: ids.length }));
+    clearSelection();
+    batchMode.value = false;
+    resetPage();
+    await loadKnowledgeFiles(kbId.value);
+    await loadFolderTree(kbId.value);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.moveToFolder.failed'));
+  }
+};
+
+const handleFolderRename = async ({ from, to }: { from: string; to: string }) => {
+  if (!kbId.value || !to || from === to) return;
+  if (!canMoveFolderTo(from, to)) {
+    MessagePlugin.warning(t('knowledgeBase.folderTree.renameInvalid'));
+    return;
+  }
+  try {
+    const res: any = await renameKnowledgeFolder(kbId.value, from, to);
+    const movedCount = res?.data?.moved_count ?? 0;
+    if (movedCount === 0) {
+      MessagePlugin.warning(t('knowledgeBase.folderTree.renameFailed'));
+      await loadFolderTree(kbId.value);
+      return;
+    }
+    MessagePlugin.success(t('knowledgeBase.folderTree.renameSuccess'));
+    // Follow the folder to its new path so the user stays where they were.
+    if (selectedFolderPath.value === from) {
+      selectedFolderPath.value = to;
+    } else if (selectedFolderPath.value.startsWith(`${from}/`)) {
+      selectedFolderPath.value = to + selectedFolderPath.value.slice(from.length);
+    }
+    resetPage();
+    await loadKnowledgeFiles(kbId.value);
+    await loadFolderTree(kbId.value);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.folderTree.renameFailed'));
+  }
+};
+
+const handleFolderTreeCollapsedChange = (value: boolean) => {
+  folderTreeCollapsed.value = value;
+  writeStoredFlag(FOLDER_TREE_COLLAPSED_KEY, value);
+};
+
 const loadTags = async (kbIdValue: string, reset = false) => {
   if (!kbIdValue) {
     tagList.value = [];
@@ -779,6 +971,11 @@ const openTagManageFromEditDialog = () => {
   tagManageDrawerVisible.value = true;
 };
 
+const openTagManageFromBatchDialog = () => {
+  batchTagDialogVisible.value = false;
+  tagManageDrawerVisible.value = true;
+};
+
 const onTagManageChanged = (payload?: { deletedTagId?: string }) => {
   if (!kbId.value) return;
   void loadTags(kbId.value, true);
@@ -835,9 +1032,11 @@ const loadKnowledgeBaseInfo = async (targetKbId: string, force = false) => {
     uiStore.clearSelectedTagIds();
     if (!isFAQ.value) {
       loadKnowledgeFiles(targetKbId);
+      void loadFolderTree(targetKbId);
     } else {
       cardList.value = [];
       total.value = 0;
+      folderTree.value = null;
     }
     loadTags(targetKbId, true);
   } catch (error) {
@@ -912,6 +1111,8 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
     tagSearchQuery.value = '';
     tagPage.value = 1;
     uiStore.clearSelectedTagIds();
+    folderTree.value = null;
+    selectedFolderPath.value = ROOT_FOLDER_PATH;
   }
   loadKnowledgeBaseInfo(newKbId);
 }, { immediate: true });
@@ -966,6 +1167,15 @@ watch([selectedParseStatus, selectedSource, updatedTimeRange], () => {
   }
 }, { deep: true });
 
+// 切换目录只改变列表范围，行为与其他筛选一致。浏览态与筛选态之间的切换由各筛选项
+// 自身的 watcher 触发刷新，这里不重复请求。
+watch(selectedFolderPath, () => {
+  if (!kbId.value || isFAQ.value) return;
+  clearSelection();
+  resetPage();
+  loadKnowledgeFiles(kbId.value);
+});
+
 // 监听文件上传事件
 const handleFileUploaded = (event: CustomEvent) => {
   const uploadedKbId = event.detail.kbId;
@@ -976,6 +1186,7 @@ const handleFileUploaded = (event: CustomEvent) => {
     resetPage(); // Reset page counter when reloading files after upload
     loadKnowledgeFiles(uploadedKbId);
     loadTags(uploadedKbId);
+    void loadFolderTree(uploadedKbId);
     // 启动几次探测，尽快让面包屑的"索引中"亮起。
     scheduleWikiStatusProbes();
   }
@@ -991,6 +1202,16 @@ const handleOpenURLImportDialog = (event: CustomEvent) => {
       uploadSourceRef.value?.openUrlDialog();
     }
   }
+};
+
+// Global file drops are captured by the platform shell. Route them back into
+// the same confirmation flow as the page upload button so tags and per-batch
+// processing settings are never skipped.
+const handleKnowledgeFileDrop = (event: CustomEvent) => {
+  const eventKbId = event.detail?.kbId;
+  const files = Array.isArray(event.detail?.files) ? event.detail.files : [];
+  if (eventKbId !== kbId.value || isFAQ.value || files.length === 0) return;
+  handleUploadSourceFiles(files);
 };
 
 // Auto-open document detail when navigated with ?knowledge_id=xxx.
@@ -1046,12 +1267,14 @@ onMounted(() => {
 
   window.addEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.addEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
+  window.addEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
   window.addEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
 });
 
 onUnmounted(() => {
   window.removeEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.removeEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
+  window.removeEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
   window.removeEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
   stopMovePoll();
   if (timeout !== null) {
@@ -1212,6 +1435,7 @@ const confirmDeleteKnowledge = (index: number, item: KnowledgeCard) => {
       await new Promise<void>((r) => setTimeout(r, delayMs));
     }
     loadTags(kbId.value, true);
+    void loadFolderTree(kbId.value);
   });
 };
 
@@ -1273,6 +1497,7 @@ const handleMoveConfirm = async () => {
       moveSubmitting.value = false;
       resetPage(); // Reset page counter when reloading files after move
       loadKnowledgeFiles(kbId.value);
+      void loadFolderTree(kbId.value);
     }
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('knowledgeBase.moveFailed'));
@@ -1298,6 +1523,7 @@ const startMovePoll = (taskId: string) => {
         }
         resetPage(); // Reset page counter when reloading files after move completion
         loadKnowledgeFiles(kbId.value);
+        void loadFolderTree(kbId.value);
       } else if (data.status === 'failed') {
         stopMovePoll();
         moveSubmitting.value = false;
@@ -1320,6 +1546,7 @@ const manualEditorSuccess = ({ kbId: savedKbId }: { kbId: string; knowledgeId: s
   if (savedKbId === kbId.value && !isFAQ.value) {
     resetPage(); // Reset page counter when reloading files after manual edit
     loadKnowledgeFiles(savedKbId);
+    void loadFolderTree(savedKbId);
   }
 };
 
@@ -1363,14 +1590,8 @@ const AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
 
 const uploadConfirmStore = useUploadConfirmStore();
 
-const getFolderUploadFileName = (file: File) => {
-  const relativePath = (file as any).webkitRelativePath;
-  if (!relativePath) return undefined;
-  const pathParts = relativePath.split('/');
-  if (pathParts.length <= 2) return undefined;
-  const subPath = pathParts.slice(1, -1).join('/');
-  return `${subPath}/${file.name}`;
-};
+const getFolderUploadFileName = (file: File, targetFolder: string) =>
+  buildUploadFileName(file, targetFolder);
 
 const showUploadResultMessages = (
   successCount: number,
@@ -1407,21 +1628,25 @@ const showUploadResultMessages = (
 
 const executeUploadBatch = async (
   files: File[],
-  options: { processConfig?: KnowledgeProcessOverrides } = {},
+  options: {
+    processConfig?: KnowledgeProcessOverrides;
+    tagIds?: string[];
+    /** Destination folder confirmed in the upload dialog; '' is the root. */
+    targetFolder?: string;
+  } = {},
 ) => {
   const targetKbId = kbId.value;
   if (!targetKbId || files.length === 0) {
     return { successCount: 0, failCount: files.length };
   }
 
-  const tagIdsToUpload = selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : undefined;
+  const tagIdsToUpload = options.tagIds && options.tagIds.length > 0
+    ? [...options.tagIds]
+    : undefined;
   let successCount = 0;
   let failCount = 0;
   const totalCount = files.length;
-  const hasFolderPaths = files.some((file) => {
-    const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-    return !!relativePath && relativePath.split('/').length > 2;
-  });
+  const hasFolderPaths = files.some(isFolderUpload);
 
   for (const file of files) {
     try {
@@ -1432,7 +1657,7 @@ const executeUploadBatch = async (
         process_config?: KnowledgeProcessOverrides
       } = { file, tag_ids: tagIdsToUpload };
 
-      const fileName = getFolderUploadFileName(file);
+      const fileName = getFolderUploadFileName(file, options.targetFolder || ROOT_FOLDER_PATH);
       if (fileName) uploadData.fileName = fileName;
       if (options.processConfig) {
         uploadData.process_config = options.processConfig;
@@ -1479,14 +1704,18 @@ const executeUploadBatch = async (
   return { successCount, failCount };
 };
 
-const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOverrides) => {
+const executeUrlImport = async (
+  url: string,
+  processConfig?: KnowledgeProcessOverrides,
+  tagIds?: string[],
+) => {
   const targetKbId = kbId.value;
   if (!targetKbId) {
     MessagePlugin.error(t('error.missingKbId'));
     return;
   }
 
-  const tagIdsToUpload = selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : undefined;
+  const tagIdsToUpload = tagIds && tagIds.length > 0 ? [...tagIds] : undefined;
   try {
     const responseData: any = await createKnowledgeFromURL(targetKbId, {
       url,
@@ -1528,20 +1757,22 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
   const files = result.files || [];
   const urls = result.urls || [];
   const processConfig = result.processConfig;
+  const tagIds = result.tagIds || [];
 
   if (files.length > 0) {
-    const hasFolderPaths = files.some((file) => {
-      const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-      return !!relativePath && relativePath.split('/').length > 2;
-    });
+    const hasFolderPaths = files.some(isFolderUpload);
     if (hasFolderPaths) {
       MessagePlugin.info(t('knowledgeBase.uploadingFolder', { total: files.length }));
     }
-    await executeUploadBatch(files, { processConfig });
+    await executeUploadBatch(files, {
+      processConfig,
+      tagIds,
+      targetFolder: result.targetFolder || ROOT_FOLDER_PATH,
+    });
   }
 
   for (const url of urls) {
-    await executeUrlImport(url, processConfig);
+    await executeUrlImport(url, processConfig, tagIds);
   }
 };
 
@@ -1552,10 +1783,15 @@ const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
     const result = await uploadConfirmStore.open({
       mode: 'file',
       kbInfo: kbInfo.value,
+      tagIds: [...selectedTagIds.value],
       files,
       urls,
       acceptFileTypes: acceptFileTypes.value,
       supportedFileTypes: [...supportedFileTypes.value],
+      // Pre-fill the destination with the folder being browsed; the dialog shows
+      // it and lets the user pick another folder (or the root) before confirming.
+      targetFolder: selectedFolderPath.value,
+      folderOptions: folderOptions.value,
     });
     await handleUploadConfirmResult(result);
   } catch {
@@ -1732,6 +1968,18 @@ const getDoc = (page: number) => {
   getfDetails(details.id, page)
 };
 
+const syncDocumentSummaryState = (state: { id?: string; summary_status?: string; description?: string }) => {
+  if (!state?.id) return;
+  const card = cardList.value.find((item: KnowledgeCard) => item.id === state.id);
+  if (!card) return;
+  if (typeof state.summary_status === 'string' && state.summary_status) {
+    card.summary_status = state.summary_status;
+  }
+  if (typeof state.description === 'string') {
+    card.description = state.description;
+  }
+};
+
 const toggleSelectRow = (id: string, checked: boolean, shiftKey?: boolean) => {
   const items = cardList.value || [];
   const idx = items.findIndex((i: KnowledgeCard) => i.id === id);
@@ -1850,6 +2098,7 @@ const confirmBatchDelete = async () => {
         await new Promise<void>((r) => setTimeout(r, delayMs));
       }
       loadTags(kbId.value, true);
+      void loadFolderTree(kbId.value);
     } else {
       MessagePlugin.error(res?.message || t('knowledgeBase.batchDeleteFailed'));
     }
@@ -1857,6 +2106,35 @@ const confirmBatchDelete = async () => {
     MessagePlugin.error(e?.message || t('knowledgeBase.batchDeleteFailed'));
   } finally {
     batchDeleting.value = false;
+  }
+};
+
+const handleBatchTag = () => {
+  if (batchDeleting.value || batchReparsing.value || batchTagging.value || selectedIds.value.size === 0) return;
+  batchTagDialogVisible.value = true;
+};
+
+const onBatchTagConfirm = async (tagIds: string[]) => {
+  if (batchTagging.value || selectedIds.value.size === 0) return;
+  const ids = Array.from(selectedIds.value);
+  const updateMap: Record<string, string[]> = {};
+  for (const id of ids) {
+    updateMap[id] = tagIds;
+  }
+  batchTagging.value = true;
+  try {
+    await updateKnowledgeTagBatch({ updates: updateMap });
+    MessagePlugin.success(t('knowledgeBase.batchTagSuccess', { count: ids.length }));
+    batchTagDialogVisible.value = false;
+    clearSelection();
+    batchMode.value = false;
+    resetPage();
+    loadKnowledgeFiles(kbId.value);
+    loadTags(kbId.value, true);
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeBase.batchTagFailed'));
+  } finally {
+    batchTagging.value = false;
   }
 };
 
@@ -1871,12 +2149,34 @@ const confirmCancelParseKnowledge = async (item: KnowledgeCard) => {
   }
 };
 
+const downloadKnowledge = async (item: KnowledgeCard) => {
+  if (!item?.id) return;
+  try {
+    const file = await downKnowledgeDetails(item.id);
+    const objectUrl = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    const fileName = resolveKnowledgeDownloadFileName(item);
+    link.style.display = 'none';
+    link.href = objectUrl;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    nextTick(() => {
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    });
+  } catch {
+    MessagePlugin.error(t('file.downloadFailed'));
+  }
+};
+
 // Bridge card-view actions back to existing per-card handlers.
 const handleCardAction = (
-  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
+  if (action === 'download') return downloadKnowledge(item);
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') {
     if (isParseInFlight(item.parse_status)) return onReparseMenuClick(idx, item);
@@ -1891,10 +2191,11 @@ const handleCardAction = (
 
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
-  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
+  if (action === 'download') return downloadKnowledge(item);
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') return confirmRebuildKnowledge(idx, item);
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
@@ -2064,8 +2365,42 @@ async function createNewSession(value: string): Promise<void> {
 
       <template v-if="activeKbTab === 'documents' || !isWiki">
         <div class="knowledge-main">
+          <KbFolderTree v-if="showFolderTree && !folderTreeCollapsed" :tree="folderTree" :selected-path="selectedFolderPath"
+            :loading="folderTreeLoading" :can-edit="canEdit"
+            @select="handleFolderSelect" @update:collapsed="handleFolderTreeCollapsedChange"
+            @rename="handleFolderRename" />
           <div class="tag-content">
             <div class="doc-card-area">
+              <nav v-if="showFolderTree" class="doc-folder-path"
+                :aria-label="$t('knowledgeBase.folderTree.title')">
+                <t-tooltip v-if="folderTreeCollapsed" :content="$t('knowledgeBase.folderTree.expand')" placement="top">
+                  <button type="button" class="doc-folder-path__tree-toggle"
+                    :aria-label="$t('knowledgeBase.folderTree.expand')"
+                    @click="handleFolderTreeCollapsedChange(false)">
+                    <t-icon name="folder" size="14px" />
+                  </button>
+                </t-tooltip>
+                <span v-if="!folderBreadcrumbs.length" class="doc-folder-path__crumb is-current">
+                  {{ $t('knowledgeBase.folderTree.rootRow') }}
+                </span>
+                <button v-else type="button" class="doc-folder-path__crumb"
+                  @click="handleFolderSelect('')">
+                  {{ $t('knowledgeBase.folderTree.rootRow') }}
+                </button>
+                <template v-for="(crumb, index) in folderBreadcrumbs" :key="crumb.path">
+                  <t-icon name="chevron-right" class="doc-folder-path__sep" />
+                  <span v-if="index === folderBreadcrumbs.length - 1" class="doc-folder-path__crumb is-current">
+                    {{ crumb.name }}
+                  </span>
+                  <button v-else type="button" class="doc-folder-path__crumb" @click="handleFolderSelect(crumb.path)">
+                    {{ crumb.name }}
+                  </button>
+                </template>
+                <!-- Filtering silently widens the scope to sub-folders, so say so. -->
+                <span v-if="isFiltering" class="doc-folder-path__scope">
+                  {{ $t('knowledgeBase.folderTree.searchingSubtree') }}
+                </span>
+              </nav>
               <div class="doc-filter-bar">
                 <t-input v-model.trim="docSearchKeyword" :placeholder="$t('knowledgeBase.docSearchPlaceholder')"
                   clearable class="doc-search-input" @clear="loadKnowledgeFiles(kbId)"
@@ -2230,13 +2565,16 @@ async function createNewSession(value: string): Promise<void> {
                 </div>
               </div>
               <div class="doc-scroll-container"
-                :class="{ 'is-empty': !cardList.length && !docListLoading, 'is-marquee-active': docMarqueeVisible }"
+                :class="{
+                  'is-empty': !cardList.length && !currentChildFolders.length && !docListLoading,
+                  'is-marquee-active': docMarqueeVisible,
+                }"
                 ref="knowledgeScroll" @scroll="handleScroll" @mousedown="onDocMarqueeMouseDown">
                 <div v-if="docMarqueeVisible" class="doc-marquee-box"
                   :class="{ 'is-add': docMarqueeMode === 'add', 'is-subtract': docMarqueeMode === 'subtract' }"
                   :style="docMarqueeBoxStyle" aria-hidden="true" />
                 <!-- 文档骨架屏 -->
-                <div v-if="docListLoading && cardList.length === 0" class="doc-card-list doc-card-list-animated">
+                <div v-if="docListLoading && cardList.length === 0 && !currentChildFolders.length" class="doc-card-list doc-card-list-animated">
                   <div v-for="n in 8" :key="'doc-skel-' + n" class="knowledge-card knowledge-card-skeleton">
                     <div class="card-content">
                       <div class="card-content-nav">
@@ -2251,12 +2589,14 @@ async function createNewSession(value: string): Promise<void> {
                     </div>
                   </div>
                 </div>
-                <template v-else-if="cardList.length && viewMode === 'grid'">
+                <template v-else-if="(cardList.length || currentChildFolders.length) && viewMode === 'grid'">
                   <DocumentCardView
                     :items="cardList"
+                    :folders="currentChildFolders" :folder-options="folderOptions"
                     :selected-ids="selectedIds"
                     :batch-mode="batchMode"
                     :can-edit="canEdit"
+                    :can-download="canDownloadKnowledge"
                     :can-mutate-knowledge="canMutateKnowledge"
                     :trace-available-by-id="traceAvailableById"
                     :tag-list="tagList"
@@ -2266,7 +2606,10 @@ async function createNewSession(value: string): Promise<void> {
                     :move-selected-target-name="moveSelectedTargetName"
                     :move-mode="moveMode"
                     :move-submitting="moveSubmitting"
+                    :show-folder-path="showDocumentFolderPath"
                     @open="(item: any) => openKnowledgeItem(item)"
+                    @open-folder="handleFolderSelect"
+                    @move-to-folder="(item: any, path: string) => moveKnowledgeIntoFolder([item.id], path)"
                     @toggle-checkbox="onCardGridCheckboxChange"
                     @menu-visible-change="(visible: boolean, item: any) => onCardMoreVisibleChange(visible, item)"
                     @action="(action: any, item: any) => handleCardAction(action, item)"
@@ -2277,9 +2620,10 @@ async function createNewSession(value: string): Promise<void> {
                     @update:move-mode="(mode: any) => moveMode = mode"
                   />
                 </template>
-                <template v-else-if="cardList.length && viewMode === 'list'">
-                  <DocumentListView :items="cardList" :selected-ids="selectedIds" :tag-list="tagList"
-                    :can-edit="canEdit" :can-mutate-knowledge="canMutateKnowledge"
+                <template v-else-if="(cardList.length || currentChildFolders.length) && viewMode === 'list'">
+                  <DocumentListView :items="cardList" :folders="currentChildFolders" :folder-options="folderOptions"
+                    :selected-ids="selectedIds" :tag-list="tagList"
+                    :can-edit="canEdit" :can-download="canDownloadKnowledge" :can-mutate-knowledge="canMutateKnowledge"
                     :trace-visible-ids="traceAvailableById"
                     :move-menu-mode="moveMenuMode"
                     :move-target-kbs="moveTargetKbs"
@@ -2287,6 +2631,9 @@ async function createNewSession(value: string): Promise<void> {
                     :move-selected-target-name="moveSelectedTargetName"
                     :move-mode="moveMode"
                     :move-submitting="moveSubmitting"
+                    :show-folder-path="showDocumentFolderPath"
+                    @open-folder="handleFolderSelect"
+                    @move-to-folder="(item: any, path: string) => moveKnowledgeIntoFolder([item.id], path)"
                     @open="(item: any) => openKnowledgeItem(item)" @toggle-row="toggleSelectRow"
                     @toggle-all="toggleSelectAll" @action="(action: any, item: any) => handleListAction(action, item)"
                     @probe-trace="(item: any) => probeTraceAvailable(item)"
@@ -2299,14 +2646,22 @@ async function createNewSession(value: string): Promise<void> {
                 </template>
                 <template v-else-if="!docListLoading">
                   <div class="doc-empty-state">
-                    <EmptyKnowledge />
+                    <p v-if="selectedFolderPath || isFiltering" class="doc-empty-folder">
+                      {{ isFiltering
+                        ? $t('knowledgeBase.folderTree.emptySearch')
+                        : $t('knowledgeBase.folderTree.emptyFolder') }}
+                    </p>
+                    <EmptyKnowledge v-else />
                   </div>
                 </template>
               </div>
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
                 <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
-                  :reparse-loading="batchReparsing" :visible="batchMode || selectedIds.size > 0"
-                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
+                  :reparse-loading="batchReparsing" :tag-loading="batchTagging" :visible="batchMode || selectedIds.size > 0"
+                  :show-move-to-folder="canEdit" :folder-options="folderOptions"
+                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse"
+                  @batch-tag="handleBatchTag"
+                  @move-to-folder="(path: string) => moveKnowledgeIntoFolder(Array.from(selectedIds), path)" />
               </div>
             </div>
           </div>
@@ -2316,7 +2671,7 @@ async function createNewSession(value: string): Promise<void> {
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
       <DocContent ref="docContentRef" :visible="isCardDetails" :details="details" :canEditKB="canEdit"
         :canDownloadKB="canDownloadKnowledge" :kbId="kbId"
-        @closeDoc="closeDoc" @getDoc="getDoc">
+        @closeDoc="closeDoc" @getDoc="getDoc" @summaryStateChange="syncDocumentSummaryState">
       </DocContent>
     </div>
   </template>
@@ -2339,6 +2694,14 @@ async function createNewSession(value: string): Promise<void> {
     :kb-id="kbId" :tag-list="tagList" :selected-tags="tagEditTarget?.tags || []" :can-manage="canEdit"
     @update:visible="tagEditDialogVisible = $event" @confirm="onTagEditConfirm" @tag-created="loadTags(kbId, true)"
     @open-manage="openTagManageFromEditDialog" />
+
+  <!-- 批量打标签弹窗 -->
+  <BatchTagDialog :visible="batchTagDialogVisible"
+    :count="selectedIds.size" :kb-id="kbId" :tag-list="tagList"
+    :pre-selected-tag-ids="batchTagPreSelectedIds" :can-manage="canEdit"
+    :confirm-loading="batchTagging"
+    @update:visible="batchTagDialogVisible = $event" @confirm="onBatchTagConfirm"
+    @tag-created="loadTags(kbId, true)" @open-manage="openTagManageFromBatchDialog" />
 
   <KbTagManageDrawer
     v-if="!isFAQ"
@@ -2689,8 +3052,83 @@ async function createNewSession(value: string): Promise<void> {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   position: relative;
+  container-type: inline-size;
+  container-name: doc-card-area;
   /* 作为批量工具栏悬浮的定位上下文 */
+}
+
+// 目录树选中路径的面包屑：与顶部知识库面包屑同一套视觉语言，只是更轻量。
+.doc-folder-path {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 0 0 8px;
+  flex-shrink: 0;
+
+  &__tree-toggle {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    margin-right: 4px;
+    padding: 0;
+    border: 1px solid var(--td-component-border);
+    border-radius: 6px;
+    background: var(--td-bg-color-container);
+    color: var(--td-text-color-secondary);
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+
+    &:hover {
+      border-color: var(--td-brand-color);
+      color: var(--td-brand-color);
+      background: var(--td-bg-color-container-hover);
+    }
+  }
+
+  &__crumb {
+    max-width: 220px;
+    padding: 2px 4px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--td-text-color-secondary);
+    font-family: var(--app-font-family);
+    font-size: 12px;
+    line-height: 18px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
+
+    &:hover {
+      color: var(--td-brand-color);
+      background: var(--td-bg-color-container-hover);
+    }
+
+    &.is-current {
+      color: var(--td-text-color-primary);
+      font-weight: 500;
+      cursor: default;
+
+      &:hover {
+        background: transparent;
+        color: var(--td-text-color-primary);
+      }
+    }
+  }
+
+  &__sep {
+    flex-shrink: 0;
+    font-size: 12px;
+    color: var(--td-text-color-placeholder);
+  }
 }
 
 .doc-filter-bar {
@@ -2738,17 +3176,22 @@ async function createNewSession(value: string): Promise<void> {
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
+    position: relative;
+    z-index: 1;
   }
 
-  @media (min-width: 1280px) {
+  // The folder tree changes the available document width without changing the
+  // viewport width. Switch to a single row only when this content area itself
+  // is wide enough for TDesign's fixed-width filter controls.
+  @container doc-card-area (min-width: 1240px) {
     display: flex;
     flex-direction: row;
     flex-wrap: nowrap;
     gap: 12px;
 
     &__filters {
-      flex: 0 1 auto;
-      overflow-x: visible;
+      flex: 1 1 auto;
+      overflow-x: auto;
     }
   }
 

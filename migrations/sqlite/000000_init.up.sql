@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     vector_store_id VARCHAR(36),
     storage_backend_id VARCHAR(36),
     creator_id VARCHAR(36),
+    wiki_config TEXT,
+    indexing_strategy TEXT DEFAULT '{"vector_enabled":true,"keyword_enabled":true,"wiki_enabled":false,"graph_enabled":false}',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME
@@ -103,6 +105,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     file_hash VARCHAR(64),
     storage_size BIGINT NOT NULL DEFAULT 0,
     metadata TEXT,
+    custom_metadata TEXT NOT NULL DEFAULT '{}',
     tag_id VARCHAR(36),
     summary_status VARCHAR(32) DEFAULT 'none',
     last_faq_import_result TEXT DEFAULT NULL,
@@ -145,6 +148,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_id VARCHAR(512),
     is_pinned BOOLEAN NOT NULL DEFAULT 0,
     pinned_at DATETIME,
+    sandbox_config_id VARCHAR(36),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME
@@ -167,6 +171,7 @@ CREATE TABLE IF NOT EXISTS messages (
     agent_steps TEXT DEFAULT NULL,
     mentioned_items TEXT DEFAULT '[]',
     images TEXT DEFAULT '[]',
+    artifacts TEXT DEFAULT '[]',
     is_completed BOOLEAN NOT NULL DEFAULT 0,
     is_fallback BOOLEAN NOT NULL DEFAULT 0,
     channel VARCHAR(50) NOT NULL DEFAULT '',
@@ -240,6 +245,11 @@ CREATE TABLE IF NOT EXISTS chunks (
     knowledge_base_id VARCHAR(36) NOT NULL,
     knowledge_id VARCHAR(36) NOT NULL,
     content TEXT NOT NULL,
+    source_content TEXT NOT NULL DEFAULT '',
+    content_revision INTEGER NOT NULL DEFAULT 0,
+    index_status VARCHAR(16) NOT NULL DEFAULT 'ready',
+    last_editor_id VARCHAR(64) NOT NULL DEFAULT '',
+    context_header TEXT NOT NULL DEFAULT '',
     chunk_index INTEGER NOT NULL,
     is_enabled BOOLEAN NOT NULL DEFAULT 1,
     start_at INTEGER NOT NULL,
@@ -271,6 +281,23 @@ CREATE INDEX IF NOT EXISTS idx_chunks_content_hash ON chunks(content_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_chunks_seq_id ON chunks(seq_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_kb_tenant ON chunks(knowledge_base_id, tenant_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_knowledge_enabled ON chunks(knowledge_id, is_enabled, deleted_at);
+
+CREATE TABLE IF NOT EXISTS chunk_revisions (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    knowledge_id VARCHAR(36) NOT NULL,
+    chunk_id VARCHAR(36) NOT NULL,
+    revision INTEGER NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    is_enabled BOOLEAN NOT NULL DEFAULT 1,
+    editor_id VARCHAR(64) NOT NULL DEFAULT '',
+    edit_source VARCHAR(16) NOT NULL DEFAULT 'user',
+    edited_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(chunk_id, revision)
+);
+CREATE INDEX IF NOT EXISTS idx_chunk_revisions_tenant_chunk ON chunk_revisions(tenant_id, chunk_id);
 
 CREATE TABLE IF NOT EXISTS users (
     id VARCHAR(36) PRIMARY KEY,
@@ -531,6 +558,23 @@ CREATE TABLE IF NOT EXISTS custom_agents (
 CREATE INDEX IF NOT EXISTS idx_custom_agents_tenant_id ON custom_agents(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_custom_agents_is_builtin ON custom_agents(is_builtin);
 CREATE INDEX IF NOT EXISTS idx_custom_agents_deleted_at ON custom_agents(deleted_at);
+
+CREATE TABLE IF NOT EXISTS tenant_sandbox_configs (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    sandbox_type VARCHAR(32) NOT NULL,
+    config TEXT NOT NULL DEFAULT '{}',
+    cordoned_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_sandbox_configs_tenant_id ON tenant_sandbox_configs(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_sandbox_configs_deleted_at ON tenant_sandbox_configs(deleted_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tenant_sandbox_configs_tenant_name
+    ON tenant_sandbox_configs(tenant_id, name) WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS organizations (
     id VARCHAR(36) PRIMARY KEY,
@@ -941,3 +985,138 @@ CREATE TABLE IF NOT EXISTS temporary_documents (
 CREATE INDEX IF NOT EXISTS idx_temporary_documents_scope ON temporary_documents(tenant_id, session_id);
 CREATE INDEX IF NOT EXISTS idx_temporary_documents_status ON temporary_documents(status);
 CREATE INDEX IF NOT EXISTS idx_temporary_documents_expires ON temporary_documents(expires_at);
+
+-- ---------------------------------------------------------------------------
+-- Wiki (consolidated from Postgres migrations 000037, 000040, 000061, 000075)
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS wiki_pages (
+    id                VARCHAR(36) PRIMARY KEY,
+    tenant_id         INTEGER NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    slug              VARCHAR(255) NOT NULL,
+    title             VARCHAR(512) NOT NULL DEFAULT '',
+    page_type         VARCHAR(32) NOT NULL DEFAULT 'summary',
+    status            VARCHAR(32) NOT NULL DEFAULT 'published',
+    content           TEXT NOT NULL DEFAULT '',
+    summary           TEXT NOT NULL DEFAULT '',
+    parent_slug       VARCHAR(255) NOT NULL DEFAULT '',
+    folder_id         VARCHAR(36) NOT NULL DEFAULT '',
+    category_path     TEXT DEFAULT '[]',
+    wiki_path         VARCHAR(1024) NOT NULL DEFAULT '',
+    depth             INTEGER NOT NULL DEFAULT 0,
+    sort_order        INTEGER NOT NULL DEFAULT 0,
+    source_refs       TEXT DEFAULT '[]',
+    chunk_refs        TEXT DEFAULT '[]',
+    in_links          TEXT DEFAULT '[]',
+    out_links         TEXT DEFAULT '[]',
+    page_metadata     TEXT DEFAULT '{}',
+    aliases           TEXT DEFAULT '[]',
+    version           INTEGER NOT NULL DEFAULT 1,
+    last_edit_source  VARCHAR(16) NOT NULL DEFAULT '',
+    last_editor_id    VARCHAR(64) NOT NULL DEFAULT '',
+    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at        DATETIME
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wiki_pages_kb_slug
+    ON wiki_pages (knowledge_base_id, slug)
+    WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_wiki_pages_kb_id
+    ON wiki_pages (knowledge_base_id);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_pages_page_type
+    ON wiki_pages (knowledge_base_id, page_type);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_pages_parent_slug
+    ON wiki_pages (knowledge_base_id, parent_slug);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_pages_tree
+    ON wiki_pages (knowledge_base_id, page_type, wiki_path, sort_order, title);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_pages_folder
+    ON wiki_pages (knowledge_base_id, folder_id);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_pages_tenant_id
+    ON wiki_pages (tenant_id);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_pages_deleted_at
+    ON wiki_pages (deleted_at);
+
+CREATE TABLE IF NOT EXISTS wiki_folders (
+    id                VARCHAR(36) PRIMARY KEY,
+    tenant_id         INTEGER NOT NULL DEFAULT 0,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    parent_id         VARCHAR(36) NOT NULL DEFAULT '',
+    name              VARCHAR(255) NOT NULL,
+    path              VARCHAR(1024) NOT NULL DEFAULT '',
+    depth             INTEGER NOT NULL DEFAULT 0,
+    sort_order        INTEGER NOT NULL DEFAULT 0,
+    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at        DATETIME
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wiki_folders_parent_name
+    ON wiki_folders (knowledge_base_id, parent_id, name)
+    WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_wiki_folders_parent
+    ON wiki_folders (knowledge_base_id, parent_id);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_folders_deleted_at
+    ON wiki_folders (deleted_at);
+
+CREATE TABLE IF NOT EXISTS wiki_page_issues (
+    id                    VARCHAR(36) PRIMARY KEY,
+    tenant_id             INTEGER NOT NULL,
+    knowledge_base_id     VARCHAR(36) NOT NULL,
+    slug                  VARCHAR(255) NOT NULL,
+    issue_type            VARCHAR(50) NOT NULL,
+    description           TEXT NOT NULL,
+    suspected_knowledge_ids TEXT,
+    status                VARCHAR(20) NOT NULL DEFAULT 'pending',
+    reported_by           VARCHAR(100) NOT NULL,
+    created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at            DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_page_issues_tenant_id
+    ON wiki_page_issues(tenant_id);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_page_issues_knowledge_base_id
+    ON wiki_page_issues(knowledge_base_id);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_page_issues_slug
+    ON wiki_page_issues(slug);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_page_issues_status
+    ON wiki_page_issues(status);
+
+CREATE TABLE IF NOT EXISTS wiki_page_revisions (
+    id                VARCHAR(36) PRIMARY KEY,
+    tenant_id         INTEGER NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    page_id           VARCHAR(36) NOT NULL,
+    slug              VARCHAR(255) NOT NULL,
+    version           INTEGER NOT NULL,
+    title             VARCHAR(512) NOT NULL DEFAULT '',
+    page_type         VARCHAR(32) NOT NULL DEFAULT 'summary',
+    status            VARCHAR(32) NOT NULL DEFAULT 'published',
+    content           TEXT NOT NULL DEFAULT '',
+    summary           TEXT NOT NULL DEFAULT '',
+    aliases           TEXT DEFAULT '[]',
+    edit_source       VARCHAR(16) NOT NULL DEFAULT '',
+    editor_id         VARCHAR(64) NOT NULL DEFAULT '',
+    edited_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wiki_page_revisions_page_version
+    ON wiki_page_revisions (page_id, version);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_page_revisions_kb_slug
+    ON wiki_page_revisions (knowledge_base_id, slug);

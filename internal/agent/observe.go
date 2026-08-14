@@ -11,16 +11,28 @@ import (
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
-	"github.com/Tencent/WeKnora/internal/llmreference"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
+)
+
+const (
+	minCurrentTurnToolTokens     = 8 * 1024
+	maxCurrentTurnToolTokens     = 32 * 1024
+	currentTurnToolTokenFraction = 5 // 20%
 )
 
 // manageContextWindow consolidates or compresses messages if approaching the token limit.
 // currentTokens is the caller's best estimate of the current context size (using
 // API-reported Usage when available, falling back to BPE estimation).
 func (e *AgentEngine) manageContextWindow(ctx context.Context, messages []chat.Message, round, currentTokens int) []chat.Message {
+	var trimmed bool
+	messages, trimmed = trimCurrentTurnToolResults(messages, e.tokenEstimator, currentTurnToolResultBudget(e.config.MaxContextTokens))
+	if trimmed {
+		currentTokens = e.tokenEstimator.EstimateMessages(messages)
+		logger.Infof(ctx, "[Agent][Round-%d] Trimmed current-turn tool results to token budget", round)
+	}
 	if e.config.MaxContextTokens <= 0 {
 		return messages
 	}
@@ -48,6 +60,124 @@ func (e *AgentEngine) manageContextWindow(ctx context.Context, messages []chat.M
 	}
 
 	return messages
+}
+
+func currentTurnToolResultBudget(maxContextTokens int) int {
+	if maxContextTokens <= 0 {
+		return maxCurrentTurnToolTokens
+	}
+	budget := maxContextTokens / currentTurnToolTokenFraction
+	if budget < minCurrentTurnToolTokens {
+		return minCurrentTurnToolTokens
+	}
+	if budget > maxCurrentTurnToolTokens {
+		return maxCurrentTurnToolTokens
+	}
+	return budget
+}
+
+// trimCurrentTurnToolResults returns a message copy for the next model call.
+// It never mutates ToolResult objects used by SSE, diagnostics, or persistence.
+// Assistant tool-call messages remain untouched so every compacted tool result
+// retains its provider-required call/result pairing.
+func trimCurrentTurnToolResults(
+	messages []chat.Message,
+	estimator *agenttoken.Estimator,
+	budget int,
+) ([]chat.Message, bool) {
+	if estimator == nil || budget <= 0 || len(messages) == 0 {
+		return messages, false
+	}
+
+	lastUser := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" {
+			lastUser = i
+			break
+		}
+	}
+	if lastUser < 0 {
+		return messages, false
+	}
+
+	var toolIndexes []int
+	total := 0
+	for i := lastUser + 1; i < len(messages); i++ {
+		if messages[i].Role == "tool" {
+			toolIndexes = append(toolIndexes, i)
+			total += estimator.EstimateMessage(&messages[i])
+		}
+	}
+	if total <= budget || len(toolIndexes) == 0 {
+		return messages, false
+	}
+
+	out := append([]chat.Message(nil), messages...)
+	baseCosts := make(map[int]int, len(toolIndexes))
+	remaining := budget
+	for _, idx := range toolIndexes {
+		out[idx].Content = compactedToolResultMarker(messages[idx].Content)
+		cost := estimator.EstimateMessage(&out[idx])
+		baseCosts[idx] = cost
+		remaining -= cost
+	}
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	// Spend the remaining budget newest-first. A result that cannot fit in
+	// full receives the largest head/tail preview that does fit.
+	for i := len(toolIndexes) - 1; i >= 0; i-- {
+		idx := toolIndexes[i]
+		fullCost := estimator.EstimateMessage(&messages[idx])
+		extra := fullCost - baseCosts[idx]
+		if extra <= remaining {
+			out[idx] = messages[idx]
+			remaining -= extra
+			continue
+		}
+		out[idx] = compactToolMessage(messages[idx], baseCosts[idx]+remaining, estimator)
+		remaining = 0
+	}
+	return out, true
+}
+
+func compactedToolResultMarker(content string) string {
+	return fmt.Sprintf(
+		"[Tool result compacted: original_bytes=%d. Re-run the tool with narrower filters or a smaller range if more detail is needed.]",
+		len(content),
+	)
+}
+
+func compactToolMessage(msg chat.Message, maxTokens int, estimator *agenttoken.Estimator) chat.Message {
+	runes := []rune(msg.Content)
+	base := msg
+	base.Content = compactedToolResultMarker(msg.Content)
+	if len(runes) == 0 || estimator.EstimateMessage(&base) >= maxTokens {
+		return base
+	}
+
+	best := base
+	low, high := 1, len(runes)
+	for low <= high {
+		keep := low + (high-low)/2
+		head := keep / 4
+		tail := keep - head
+		candidate := base
+		candidate.Content = fmt.Sprintf(
+			"%s\n\n%s\n...[tool result preview omitted]...\n%s",
+			base.Content,
+			string(runes[:head]),
+			string(runes[len(runes)-tail:]),
+		)
+		if estimator.EstimateMessage(&candidate) <= maxTokens {
+			best = candidate
+			low = keep + 1
+		} else {
+			high = keep - 1
+		}
+	}
+	return best
 }
 
 // responseVerdict captures the result of analyzing an LLM response to determine
@@ -377,7 +507,7 @@ func commonStringPrefix(a, b string) string {
 func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
 	e.registerRuntimeReferences()
 	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs)
-	runtimeCtx = e.sourceRefs.CompactKnownText(runtimeCtx)
+	runtimeCtx = e.modelContext.CompactKnownText(runtimeCtx)
 	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)
 	return composeUserTurnContent(runtimeCtx, mustUse, query)
 }
@@ -385,22 +515,22 @@ func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
 // registerRuntimeReferences makes bound KBs, pinned documents and recent
 // chunks addressable without exposing their durable IDs to the model.
 func (e *AgentEngine) registerRuntimeReferences() {
-	if e == nil || e.sourceRefs == nil {
+	if e == nil || e.modelContext == nil {
 		return
 	}
 	for _, kb := range e.knowledgeBasesInfo {
 		if kb == nil {
 			continue
 		}
-		e.sourceRefs.RegisterKnowledgeBase(kb.ID)
+		e.modelContext.RegisterKnowledgeBase(kb.ID)
 		for _, doc := range kb.RecentDocs {
-			e.sourceRefs.RegisterDocument(doc.KnowledgeID)
+			e.modelContext.RegisterDocument(doc.KnowledgeID)
 			if doc.ChunkID != "" {
 				title := doc.Title
 				if title == "" {
 					title = doc.FileName
 				}
-				e.sourceRefs.RegisterChunk(llmreference.ChunkReference{
+				e.modelContext.RegisterChunk(modelcontext.ChunkReference{
 					ChunkID:         doc.ChunkID,
 					KnowledgeID:     doc.KnowledgeID,
 					KnowledgeBaseID: firstNonEmptyAgent(doc.KnowledgeBaseID, kb.ID),
@@ -414,8 +544,8 @@ func (e *AgentEngine) registerRuntimeReferences() {
 		if doc == nil {
 			continue
 		}
-		e.sourceRefs.RegisterDocument(doc.KnowledgeID)
-		e.sourceRefs.RegisterKnowledgeBase(doc.KnowledgeBaseID)
+		e.modelContext.RegisterDocument(doc.KnowledgeID)
+		e.modelContext.RegisterKnowledgeBase(doc.KnowledgeBaseID)
 	}
 }
 
@@ -512,7 +642,7 @@ func (e *AgentEngine) appendToolResults(
 
 	// Add tool result messages (role: "tool", following OpenAI format)
 	for _, toolCall := range step.ToolCalls {
-		resultContent := e.sourceRefs.ModelOutput(toolCall.Result)
+		resultContent := e.modelContext.ModelToolResultForTool(toolCall.Name, toolCall.Result)
 
 		toolMsg := chat.Message{
 			Role:       "tool",

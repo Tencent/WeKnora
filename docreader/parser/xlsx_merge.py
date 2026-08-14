@@ -36,6 +36,20 @@ def fill_merged_cells_xlsx(content: bytes) -> bytes:
     if not changed:
         return content
 
+    # Charts are not part of the cell text extracted by DocReader. Remove
+    # dedicated chart sheets through the public workbook API, then clear
+    # embedded worksheet charts (openpyxl has no public removal API for them)
+    # before saving this temporary workbook.
+    active_sheet = wb.active
+    for chart_sheet in list(wb.chartsheets):
+        wb.remove(chart_sheet)
+    if active_sheet in wb.worksheets:
+        wb.active = active_sheet
+    elif wb.worksheets:
+        wb.active = wb.worksheets[0]
+    for ws in wb.worksheets:
+        ws._charts.clear()
+
     out = BytesIO()
     wb.save(out)
     logger.info("Filled merged cells in XLSX before parse")

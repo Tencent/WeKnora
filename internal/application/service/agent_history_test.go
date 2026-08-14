@@ -182,6 +182,37 @@ func TestBuildAssistantHistoryMessages_ToolCallsExpandIntoOpenAIShape(t *testing
 	assert.Empty(t, got[2].ToolCalls)
 }
 
+// A fast-answer turn persists its retrieval stages so the UI can redraw the
+// timeline after a reload. Those calls came from the pipeline, not the model, so
+// replaying them would hand the model tool calls it never made — and, in a
+// KnowledgeQA turn, tools it was never offered.
+func TestBuildAssistantHistoryMessages_SkipsPipelineTimelineToolCalls(t *testing.T) {
+	msg := &types.Message{
+		Role:    "assistant",
+		Content: "你好！很高兴见到你。",
+		AgentSteps: types.AgentSteps{
+			{
+				Iteration: 0,
+				ToolCalls: []types.ToolCall{
+					{
+						ID:     types.PipelineToolCallIDPrefix + "abc",
+						Name:   agenttools.ToolKnowledgeSearch,
+						Args:   map[string]interface{}{"query": "你好"},
+						Result: &types.ToolResult{Success: true, Output: "未检索到相关内容"},
+					},
+				},
+			},
+		},
+	}
+	got := buildAssistantHistoryMessages(msg)
+	if !assert.Len(t, got, 1) {
+		return
+	}
+	assert.Equal(t, "assistant", got[0].Role)
+	assert.Equal(t, "你好！很高兴见到你。", got[0].Content)
+	assert.Empty(t, got[0].ToolCalls)
+}
+
 // TestBuildAssistantHistoryMessages_ToolFailureSurfacesAsError ensures a
 // historical failed tool call is replayed as an "Error: …" tool message so the
 // model can see (and avoid retrying) the same failure path.

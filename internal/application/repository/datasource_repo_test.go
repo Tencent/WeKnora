@@ -51,6 +51,43 @@ func TestDataSourceRepositoryUpdateSyncStateClearsErrorMessage(t *testing.T) {
 	require.NotNil(t, stored.LastSyncAt)
 }
 
+func TestDataSourceRepositoryDeleteSoftDeletesOnSQLite(t *testing.T) {
+	db := setupDataSourceRepoTestDB(t)
+	repo := NewDataSourceRepository(db)
+	ctx := context.Background()
+
+	target := &types.DataSource{
+		ID:              "ds-delete-target",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Name:            "Delete target",
+		Type:            types.ConnectorTypeFeishu,
+	}
+	other := &types.DataSource{
+		ID:              "ds-delete-other",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Name:            "Other data source",
+		Type:            types.ConnectorTypeFeishu,
+	}
+	require.NoError(t, repo.Create(ctx, target))
+	require.NoError(t, repo.Create(ctx, other))
+
+	require.NoError(t, repo.Delete(ctx, target.ID))
+
+	var deleted types.DataSource
+	require.NoError(t, db.Unscoped().First(&deleted, "id = ?", target.ID).Error)
+	assert.True(t, deleted.DeletedAt.Valid)
+
+	found, err := repo.FindByID(ctx, target.ID)
+	assert.Error(t, err)
+	assert.Nil(t, found)
+
+	untouched, err := repo.FindByID(ctx, other.ID)
+	require.NoError(t, err)
+	assert.Equal(t, other.ID, untouched.ID)
+}
+
 func TestSyncLogRepositoryUpdateResultClearsErrorMessage(t *testing.T) {
 	db := setupDataSourceRepoTestDB(t)
 	repo := NewSyncLogRepository(db)

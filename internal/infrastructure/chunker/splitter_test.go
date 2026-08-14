@@ -270,6 +270,268 @@ func TestSplitText_OverlapChunks_NonNegativeStart(t *testing.T) {
 	}
 }
 
+func TestFindSemanticOverlapBoundary_PriorityThenEarliest(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{
+			name: "paragraph outranks earlier sentence and line",
+			text: "第一句。第二句\n普通换行后的内容\n\n最后一段",
+			want: "最后一段",
+		},
+		{
+			name: "earliest sentence wins within same priority",
+			text: "第一句。第二句。第三句",
+			want: "第二句。第三句",
+		},
+		{
+			name: "windows paragraph break",
+			text: "第一段。\r\n\r\n第二段",
+			want: "第二段",
+		},
+		{
+			name: "line outranks earlier sentence",
+			text: "第一句。第一行\n第二行",
+			want: "第二行",
+		},
+		{
+			name: "windows line break",
+			text: "第一句。第一行\r\n第二行",
+			want: "第二行",
+		},
+		{
+			name: "chinese question mark",
+			text: "第一句？第二句",
+			want: "第二句",
+		},
+		{
+			name: "chinese exclamation mark",
+			text: "第一句！第二句",
+			want: "第二句",
+		},
+		{
+			name: "english period requires following space",
+			text: "First sentence. Second sentence",
+			want: "Second sentence",
+		},
+		{
+			name: "english question mark requires following space",
+			text: "Question? Answer",
+			want: "Answer",
+		},
+		{
+			name: "english exclamation mark requires following space",
+			text: "Warning! Continue",
+			want: "Continue",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			end, ok := findSemanticOverlapBoundary(tt.text)
+			if !ok {
+				t.Fatal("expected semantic overlap boundary")
+			}
+			got := string([]rune(tt.text)[end:])
+			if got != tt.want {
+				t.Fatalf("overlap tail = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFindSemanticOverlapBoundary_NoConfiguredSemanticSeparator(t *testing.T) {
+	for _, text := range []string{
+		"没有任何语义分隔符的连续文本",
+		"只有，逗号；分号：冒号",
+		"version1.2 remains one unit",
+		"address 192.168.1.1 remains one unit",
+		"see https://ex.com?q=1&foo=bar",
+	} {
+		if end, ok := findSemanticOverlapBoundary(text); ok {
+			t.Errorf("findSemanticOverlapBoundary(%q) returned boundary at %d", text, end)
+		}
+	}
+}
+
+func TestFindSemanticOverlapBoundary_IgnoresProtectedContent(t *testing.T) {
+	for _, text := range []string{
+		"代码是 `fmt.Println(\"hello. world\")` 后续内容",
+		"代码块 ```go\nfmt.Println(\"hello. world\")\n``` 后续内容",
+		"公式 $$x. y$$ 后续内容",
+	} {
+		if end, ok := findSemanticOverlapBoundary(text); ok {
+			t.Errorf("findSemanticOverlapBoundary(%q) returned protected boundary at %d", text, end)
+		}
+	}
+}
+
+func TestFindSemanticOverlapBoundary_FiltersEligibilityBeforePriorityAndPosition(t *testing.T) {
+	tests := []struct {
+		name   string
+		text   string
+		minEnd int
+		want   string
+	}{
+		{
+			name:   "earlier ineligible sentence does not hide eligible sentence",
+			text:   "a。bc。XYZ",
+			minEnd: 4,
+			want:   "XYZ",
+		},
+		{
+			name:   "ineligible paragraph does not outrank eligible sentence",
+			text:   "\n\nx? tail",
+			minEnd: 3,
+			want:   "tail",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			end, ok := findSemanticOverlapBoundaryEndingAtOrAfter(tt.text, tt.minEnd)
+			if !ok {
+				t.Fatal("expected eligible semantic overlap boundary")
+			}
+			if got := string([]rune(tt.text)[end:]); got != tt.want {
+				t.Fatalf("overlap tail = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestComputeOverlap_FindsBoundaryInsideLargeUnit(t *testing.T) {
+	text := "abcdefgh。尾巴内容"
+	unit := splitUnit{text: text, start: 100, end: 100 + len([]rune(text))}
+
+	overlap, overlapLen := computeOverlap([]splitUnit{unit}, 8, 32, 8)
+	if got := unitsText(overlap); got != "尾巴内容" {
+		t.Fatalf("overlap = %q, want %q", got, "尾巴内容")
+	}
+	if overlapLen != len([]rune("尾巴内容")) {
+		t.Fatalf("overlapLen = %d, want %d", overlapLen, len([]rune("尾巴内容")))
+	}
+	if len(overlap) != 1 || overlap[0].start != 109 || overlap[0].end != 113 {
+		t.Fatalf("overlap source span = %+v, want [109,113)", overlap)
+	}
+}
+
+func TestComputeOverlap_NoBoundaryMeansNoOverlap(t *testing.T) {
+	text := "abcdefgh尾巴内容"
+	unit := splitUnit{text: text, start: 0, end: len([]rune(text))}
+
+	overlap, overlapLen := computeOverlap([]splitUnit{unit}, 8, 32, 8)
+	if len(overlap) != 0 || overlapLen != 0 {
+		t.Fatalf("expected no overlap, got %q (%d)", unitsText(overlap), overlapLen)
+	}
+}
+
+func TestComputeOverlap_RespectsNextChunkCapacity(t *testing.T) {
+	text := "abcdefgh。尾巴"
+	unit := splitUnit{text: text, start: 0, end: len([]rune(text))}
+
+	overlap, overlapLen := computeOverlap([]splitUnit{unit}, 10, 8, 5)
+	if got := unitsText(overlap); got != "尾巴" {
+		t.Fatalf("overlap = %q, want %q", got, "尾巴")
+	}
+	if overlapLen+5 > 8 {
+		t.Fatalf("overlap plus next content exceeds chunk size: %d + %d > %d", overlapLen, 5, 8)
+	}
+}
+
+func TestComputeOverlap_LookbehindBoundaryEligibility(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{
+			name: "single rune separator ending at minus one is eligible",
+			text: "abcd。WXYZ",
+			want: "WXYZ",
+		},
+		{
+			name: "longest separator ending at minus one is eligible",
+			text: "\r\n\r\nWXYZ",
+			want: "WXYZ",
+		},
+		{
+			name: "separator ending before minus one is ineligible",
+			text: "a。bcWXYZ",
+			want: "",
+		},
+		{
+			name: "separator crossing original window start is eligible",
+			text: "abc. WXY",
+			want: "WXY",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			unit := splitUnit{text: tt.text, start: 0, end: len([]rune(tt.text))}
+			overlap, overlapLen := computeOverlap([]splitUnit{unit}, 4, 20, 4)
+			if got := unitsText(overlap); got != tt.want {
+				t.Fatalf("overlap = %q, want %q", got, tt.want)
+			}
+			if overlapLen != len([]rune(tt.want)) {
+				t.Fatalf("overlapLen = %d, want %d", overlapLen, len([]rune(tt.want)))
+			}
+			if overlapLen > 4 {
+				t.Fatalf("overlap exceeds configured limit: %d > 4", overlapLen)
+			}
+		})
+	}
+}
+
+func TestSplitText_OverlapDoesNotBreakURLQuery(t *testing.T) {
+	line1 := strings.Repeat("a", 35)
+	text := line1 + "\n" + "https://ex.com?q=1 tail\n" + "more content here"
+	cfg := SplitterConfig{ChunkSize: 40, ChunkOverlap: 10, Separators: []string{"\n\n", "\n"}}
+
+	chunks := SplitText(text, cfg)
+	if len(chunks) < 3 {
+		t.Fatalf("expected at least 3 chunks, got %d: %#v", len(chunks), chunks)
+	}
+	if strings.HasPrefix(chunks[2].Content, "q=1") {
+		t.Fatalf("overlap broke at URL query string: chunk[2]=%q", chunks[2].Content)
+	}
+}
+
+func TestBuildUnitsWithProtection_InlineCodeNotSplit(t *testing.T) {
+	text := "intro `code.here` suffix"
+	units := buildUnitsWithProtection(text, protectedSpans(text), []string{"\n"}, 0)
+
+	for _, u := range units {
+		if strings.Contains(u.text, "code.here") && !strings.Contains(u.text, "`code.here`") {
+			t.Fatalf("inline code period split unit: %q", u.text)
+		}
+	}
+}
+
+func TestSplitText_SemanticOverlapInsideParagraph(t *testing.T) {
+	first := strings.Repeat("甲", 15) + "。尾巴"
+	text := first + "\n\n" + "后续内容"
+	cfg := SplitterConfig{
+		ChunkSize:    20,
+		ChunkOverlap: 10,
+		Separators:   []string{"\n\n", "\n", "。"},
+	}
+
+	chunks := SplitText(text, cfg)
+	if len(chunks) != 2 {
+		t.Fatalf("expected 2 chunks, got %d: %#v", len(chunks), chunks)
+	}
+	if !strings.HasPrefix(chunks[1].Content, "尾巴\n\n") {
+		t.Fatalf("second chunk should start at the sentence boundary inside the large unit, got %q", chunks[1].Content)
+	}
+	if got := chunks[1].End - chunks[1].Start; got != len([]rune(chunks[1].Content)) {
+		t.Fatalf("position invariant broken: span=%d content=%d", got, len([]rune(chunks[1].Content)))
+	}
+}
+
 func TestBuildUnitsWithProtection_RuneOffsets(t *testing.T) {
 	text := "你好世界"
 	units := buildUnitsWithProtection(text, nil, []string{"\n"}, 0)

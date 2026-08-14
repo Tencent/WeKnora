@@ -2,10 +2,12 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // SetKnowledgeTags replaces all tags for a single knowledge entry.
@@ -46,6 +48,70 @@ func (r *knowledgeRepository) SetKnowledgeTags(
 			return nil
 		}
 		return tx.Create(&relations).Error
+	})
+}
+
+// AddKnowledgeTagRelations incrementally adds validated relations and never
+// removes existing manual tags. The composite primary key plus DO NOTHING
+// makes retries and duplicate deliveries idempotent.
+func (r *knowledgeRepository) AddKnowledgeTagRelations(
+	ctx context.Context,
+	tenantID uint64,
+	kbID, knowledgeID string,
+	tagIDs []string,
+) error {
+	seen := make(map[string]struct{}, len(tagIDs))
+	unique := make([]string, 0, len(tagIDs))
+	for _, id := range tagIDs {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	if len(unique) == 0 {
+		return nil
+	}
+
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var knowledgeCount int64
+		if err := tx.Model(&types.Knowledge{}).
+			Where("id = ? AND tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", knowledgeID, tenantID, kbID).
+			Where("parse_status NOT IN ?", []string{
+				types.ParseStatusCancelled,
+				types.ParseStatusDeleting,
+				types.ParseStatusFailed,
+			}).
+			Count(&knowledgeCount).Error; err != nil {
+			return err
+		}
+		if knowledgeCount != 1 {
+			return fmt.Errorf("knowledge %s does not belong to tenant %d and knowledge base %s", knowledgeID, tenantID, kbID)
+		}
+
+		var tagCount int64
+		if err := tx.Model(&types.KnowledgeTag{}).
+			Where("tenant_id = ? AND knowledge_base_id = ? AND id IN ?", tenantID, kbID, unique).
+			Count(&tagCount).Error; err != nil {
+			return err
+		}
+		if tagCount != int64(len(unique)) {
+			return fmt.Errorf("one or more tags do not belong to tenant %d and knowledge base %s", tenantID, kbID)
+		}
+
+		now := time.Now()
+		relations := make([]types.KnowledgeTagRelation, 0, len(unique))
+		for _, tagID := range unique {
+			relations = append(relations, types.KnowledgeTagRelation{
+				KnowledgeID: knowledgeID,
+				TagID:       tagID,
+				CreatedAt:   now,
+			})
+		}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&relations).Error
 	})
 }
 

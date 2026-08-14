@@ -10,8 +10,8 @@ import (
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
-	"github.com/Tencent/WeKnora/internal/llmreference"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -153,6 +153,13 @@ func (s *sessionService) KnowledgeQA(
 	// rewrite, fallback, FAQ strategy, history turns)
 	s.applyAgentOverridesToChatManage(ctx, req.CustomAgent, chatManage)
 
+	// An agent may opt out of long-term memory. The preference is per-request
+	// rather than per-user, so it travels in the context that the recall
+	// plugin reads.
+	if req.CustomAgent != nil {
+		ctx = types.ApplyAgentMemoryPreference(ctx, req.CustomAgent.Config.MemoryEnabled)
+	}
+
 	// Determine pipeline based on the effective knowledge retrieval scope and
 	// web search setting. Tag-only mentions leave the raw KB/knowledge ID slices
 	// empty but produce SearchTargets, so the unified targets must participate in
@@ -179,12 +186,14 @@ func (s *sessionService) KnowledgeQA(
 
 		pipeline = types.NewPipelineBuilder().
 			AddIf(hasHistory, types.LOAD_HISTORY).
+			Add(types.MEMORY_RECALL).
 			Add(types.CHAT_COMPLETION_STREAM).
 			Build()
 	} else {
 		// RAG — dynamically assemble based on feature flags.
 		pipeline = types.NewPipelineBuilder().
 			AddIf(hasHistory, types.LOAD_HISTORY).
+			Add(types.MEMORY_RECALL).
 			Add(types.QUERY_UNDERSTAND).
 			Add(types.CHUNK_SEARCH_PARALLEL).
 			Add(types.CHUNK_RERANK).
@@ -202,6 +211,9 @@ func (s *sessionService) KnowledgeQA(
 
 	// Start knowledge QA event processing (set session tenant so pipeline session/message lookups use session owner)
 	ctx = context.WithValue(ctx, types.SessionTenantIDContextKey, req.Session.TenantID)
+	// Propagate the session ID so stateful sandbox backends (CubeSandbox) can
+	// bind script execution to a per-session MicroVM instance.
+	ctx = types.WithSessionID(ctx, req.Session.ID)
 	logger.Info(ctx, "Triggering question answering event")
 	setupSpan.Finish(map[string]interface{}{
 		"stages":             len(pipeline),
@@ -972,7 +984,7 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 	}
 
 	// Start streaming response
-	fallbackMessages, sourceRefs := prepareFallbackMessages(chatManage, promptContent)
+	fallbackMessages, modelContext := prepareFallbackMessages(chatManage, promptContent)
 	responseChan, err := chatModel.ChatStream(ctx, fallbackMessages, opt)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to start streaming fallback response: %v, falling back to fixed response", err)
@@ -987,22 +999,22 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 	}
 
 	// Start goroutine to consume stream and emit events
-	go s.consumeFallbackStream(ctx, chatManage, responseChan, sourceRefs)
+	go s.consumeFallbackStream(ctx, chatManage, responseChan, modelContext)
 }
 
 func prepareFallbackMessages(
 	chatManage *types.ChatManage,
 	promptContent string,
-) ([]chat.Message, *llmreference.Registry) {
+) ([]chat.Message, *modelcontext.Registry) {
 	messages := buildFallbackMessages(chatManage, promptContent)
 	citationsEnabled := chatManage == nil || chatManage.CitationsEnabled()
-	refs := llmreference.NewRegistry(citationsEnabled)
+	registry := modelcontext.NewRegistry(citationsEnabled)
 	if len(messages) > 0 && messages[0].Role == "system" {
-		messages[0].Content = strings.TrimRight(messages[0].Content, " \t\r\n") + llmreference.ProtocolPrompt(citationsEnabled)
+		messages[0].Content = strings.TrimRight(messages[0].Content, " \t\r\n") + registry.ProtocolPrompt()
 	} else {
-		messages = append([]chat.Message{{Role: "system", Content: strings.TrimSpace(llmreference.ProtocolPrompt(citationsEnabled))}}, messages...)
+		messages = append([]chat.Message{{Role: "system", Content: strings.TrimSpace(registry.ProtocolPrompt())}}, messages...)
 	}
-	return refs.EncodeMessages(messages), refs
+	return registry.EncodeMessages(messages), registry
 }
 
 func buildFallbackMessages(chatManage *types.ChatManage, promptContent string) []chat.Message {
@@ -1135,20 +1147,20 @@ func (s *sessionService) consumeFallbackStream(
 	ctx context.Context,
 	chatManage *types.ChatManage,
 	responseChan <-chan types.StreamResponse,
-	sourceRefs *llmreference.Registry,
+	modelContext *modelcontext.Registry,
 ) {
 	fallbackID := generateEventID("fallback")
 	eventBus := chatManage.EventBus
 	var finalContent string
 	streamCompleted := false
-	refExpander := llmreference.NewStreamExpander(sourceRefs)
+	decoder := modelContext.StreamDecoder()
 
 	for response := range responseChan {
 		// Emit event for each answer chunk
 		if response.ResponseType == types.ResponseTypeAnswer {
-			response.Content = refExpander.Feed(response.Content)
+			response.Content = decoder.Feed(response.Content)
 			if response.Done {
-				response.Content += refExpander.Flush()
+				response.Content += decoder.Flush()
 			}
 			finalContent += response.Content
 			if err := eventBus.Emit(ctx, types.Event{
@@ -1209,7 +1221,7 @@ func (s *sessionService) emitFallbackAnswer(ctx context.Context, chatManage *typ
 		return
 	}
 	if !chatManage.CitationsEnabled() {
-		content = llmreference.NewRegistry(false).ExpandText(content)
+		content = modelcontext.NewRegistry(false).DecodeOutputText(content)
 	}
 
 	fallbackID := generateEventID("fallback")

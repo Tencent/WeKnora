@@ -179,6 +179,26 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     return message
   }
 
+  // Records which long-term memories the answer saw. Unlike references this
+  // never creates a message shell: memory arrives before the first token, and
+  // an empty bubble that only says "3 memories" would be worse than waiting
+  // for the answer's own placeholder.
+  const applyUsedMemories = (data: ChatMessage) => {
+    const payload = (data.data ?? {}) as Record<string, unknown>
+    const memories = (payload.memories ?? data.memories) as unknown
+    if (!Array.isArray(memories) || memories.length === 0) return undefined
+
+    const message = resolveActiveAssistantMessage(data)
+    if (!message) {
+      log('[Memory] No assistant message to attach memories to')
+      return undefined
+    }
+    message.used_memories = memories.slice()
+    onMessageUpdated?.(message, data)
+    log('[Memory] Saved to message, count:', memories.length)
+    return message
+  }
+
   const ensureAgentMessageShell = (message: ChatMessage, requestId?: string) => {
     message.isAgentMode = true
     if (!isAgentStreamSession()) {
@@ -813,6 +833,16 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         onTurnComplete?.(message)
         fullContent.value = ''
         currentAssistantMessageId.value = ''
+        // Hydrate skill-generated artifacts as soon as the SSE completion
+        // event arrives — without this the download button only appears
+        // after a page refresh (the assistant message row is fetched via
+        // getMessageList which does include the artifacts JSON column).
+        // botmsg.vue / AgentStreamDisplay.vue read `message.artifacts`
+        // reactively to decide whether to render the download button.
+        const streamedArtifacts = (dataPayload as any)?.artifacts
+        if (Array.isArray(streamedArtifacts) && streamedArtifacts.length) {
+          message.artifacts = streamedArtifacts
+        }
         if (message.agentEventStream) {
           ;(message.agentEventStream as ChatMessage[]).push({
             type: 'agent_complete',
@@ -878,6 +908,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         const assistantId = data.assistant_message_id as string | undefined
         existingMessage = {
           id: assistantId || data.id,
+          assistant_message_id: assistantId,
           request_id: data.id,
           role: 'assistant',
           content: '',
@@ -896,6 +927,10 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         log('[Agent Query] Created agent placeholder message')
       } else {
         ensureAgentMessageShell(existingMessage, data.id as string | undefined)
+        if (data.assistant_message_id) {
+          existingMessage.id = data.assistant_message_id as string
+          existingMessage.assistant_message_id = data.assistant_message_id
+        }
         log('[Agent Query] Continuing stream for existing message')
       }
       onAgentQuery?.(data, existingMessage, created)
@@ -930,6 +965,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     if (data.response_type === 'references') {
       applyKnowledgeReferences(data)
       scrollToBottom()
+      return
+    }
+
+    if (data.response_type === 'memory_recalled') {
+      applyUsedMemories(data)
       return
     }
 

@@ -308,6 +308,7 @@ const agentIdForDetail = computed(() => {
   const agentId = settingsStore.selectedAgentId;
   return sourceTenantId && agentId ? agentId : undefined;
 });
+const agentSourceTenantIdForDetail = computed(() => settingsStore.selectedAgentSourceTenantId ?? undefined);
 
 const kbItems = computed(() => props.items.filter(item => item.type === 'kb'));
 const fileItems = computed(() => props.items.filter(item => item.type === 'file'));
@@ -445,7 +446,10 @@ async function fetchKbDetail(item: { id: string }) {
   if (detailCache.value[item.id]?.data || detailCache.value[item.id]?.loading) return;
   detailCache.value = { ...detailCache.value, [item.id]: { loading: true } };
   try {
-    const opts = agentIdForDetail.value ? { agent_id: agentIdForDetail.value } : undefined;
+    const opts = agentIdForDetail.value ? {
+      agent_id: agentIdForDetail.value,
+      agent_source_tenant_id: agentSourceTenantIdForDetail.value,
+    } : undefined;
     const res: any = await getKnowledgeBaseById(item.id, opts);
     detailCache.value = { ...detailCache.value, [item.id]: { loading: false, data: res?.data ?? res } };
   } catch (e: any) {
@@ -457,7 +461,10 @@ async function fetchFileDetail(item: { id: string }) {
   if (detailCache.value[item.id]?.data || detailCache.value[item.id]?.loading) return;
   detailCache.value = { ...detailCache.value, [item.id]: { loading: true } };
   try {
-    const opts = agentIdForDetail.value ? { agent_id: agentIdForDetail.value } : undefined;
+    const opts = agentIdForDetail.value ? {
+      agent_id: agentIdForDetail.value,
+      agent_source_tenant_id: agentSourceTenantIdForDetail.value,
+    } : undefined;
     const res: any = await getKnowledgeDetails(item.id, opts);
     detailCache.value = { ...detailCache.value, [item.id]: { loading: false, data: res?.data ?? res } };
   } catch (e: any) {

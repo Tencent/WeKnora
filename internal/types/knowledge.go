@@ -3,6 +3,8 @@ package types
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,12 +27,15 @@ const (
 	ChannelWechat           = "wechat"            // WeChat
 	ChannelWecom            = "wecom"             // WeCom (企业微信)
 	ChannelFeishu           = "feishu"            // Feishu / Lark
+	ChannelFeishuDrive      = "feishu_drive"      // Feishu Drive (云盘)
+	ChannelLarkDrive        = "lark_drive"        // Lark Drive (international)
 	ChannelDingtalk         = "dingtalk"          // DingTalk
 	ChannelSlack            = "slack"             // Slack
 	ChannelIM               = "im"                // Generic IM channel
 	ChannelNotion           = "notion"            // Notion
 	ChannelYuque            = "yuque"             // Yuque (语雀)
 	ChannelRSS              = "rss"               // RSS / Atom feed
+	ChannelIMA              = "ima"               // Tencent IMA (ima.qq.com)
 )
 
 // Knowledge parse status constants
@@ -104,6 +109,13 @@ type KnowledgeListFilter struct {
 	UpdatedFrom time.Time
 	// UpdatedTo, when non-zero, keeps rows with updated_at <= UpdatedTo.
 	UpdatedTo time.Time
+	// FolderPath is the folder navigated to in the sidebar tree. It is only
+	// applied when FolderScope is not FolderScopeAny, so the empty string can
+	// unambiguously mean "the knowledge base root".
+	FolderPath string
+	// FolderScope selects whether FolderPath matches exactly or includes
+	// descendant folders. FolderScopeAny (the default) ignores folders.
+	FolderScope KnowledgeFolderScope
 }
 
 // Knowledge represents a knowledge entity in the system.
@@ -142,6 +154,12 @@ type Knowledge struct {
 	EmbeddingModelID string `json:"embedding_model_id"`
 	// File name of the knowledge
 	FileName string `json:"file_name"`
+	// FolderPath is the canonical relative directory this entry belongs to
+	// inside the knowledge base, e.g. "docs/spec" for a folder upload of
+	// "docs/spec/design.md". Empty means the knowledge base root. It is a
+	// display/navigation concern only: it never affects where the file is
+	// physically stored (see FilePath).
+	FolderPath string `json:"folder_path"        gorm:"type:varchar(1024);not null;default:''"`
 	// File type of the knowledge
 	FileType string `json:"file_type"`
 	// File size of the knowledge
@@ -154,6 +172,9 @@ type Knowledge struct {
 	StorageSize int64 `json:"storage_size"`
 	// Metadata of the knowledge
 	Metadata JSON `json:"metadata"           gorm:"type:json"`
+	// CustomMetadata is user-authored descriptive metadata. It is deliberately
+	// separate from Metadata, which contains internal ingestion state and IDs.
+	CustomMetadata JSON `json:"custom_metadata" gorm:"type:json;not null"`
 	// Last FAQ import result (for FAQ type knowledge only)
 	LastFAQImportResult JSON `json:"last_faq_import_result" gorm:"type:json"`
 	// Creation time of the knowledge
@@ -168,6 +189,35 @@ type Knowledge struct {
 	DeletedAt gorm.DeletedAt `json:"deleted_at"         gorm:"index"`
 	// Knowledge base name (not stored in database, populated on query)
 	KnowledgeBaseName string `json:"knowledge_base_name" gorm:"-"`
+}
+
+// CustomMetadataText returns stable human-readable metadata for summaries and
+// document-scoped model context. Internal ingestion metadata is intentionally
+// excluded.
+func (k *Knowledge) CustomMetadataText() string {
+	if k == nil || len(k.CustomMetadata) == 0 {
+		return ""
+	}
+	var values map[string]interface{}
+	if err := json.Unmarshal(k.CustomMetadata, &values); err != nil || len(values) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	lines := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if values[key] == nil {
+			continue
+		}
+		value := strings.TrimSpace(fmt.Sprint(values[key]))
+		if strings.TrimSpace(key) != "" && value != "" {
+			lines = append(lines, fmt.Sprintf("%s: %s", strings.TrimSpace(key), value))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // GetMetadata returns the metadata as a map[string]string.
@@ -186,10 +236,17 @@ func (k *Knowledge) GetMetadata() map[string]string {
 	return metadata
 }
 
-// BeforeCreate hook generates a UUID for new Knowledge entities before they are created.
+// BeforeCreate initializes required defaults for new Knowledge entities.
 func (k *Knowledge) BeforeCreate(tx *gorm.DB) (err error) {
 	if k.ID == "" {
 		k.ID = uuid.New().String()
+	}
+	// JSON.Value returns SQL NULL for an empty value. PostgreSQL's column
+	// default is not applied when GORM explicitly inserts that NULL, so keep the
+	// application-side representation aligned with the NOT NULL database
+	// invariant for every knowledge creation path.
+	if len(k.CustomMetadata) == 0 {
+		k.CustomMetadata = JSON(`{}`)
 	}
 	return nil
 }
@@ -404,6 +461,8 @@ func (k *Knowledge) SetProcessOverrides(o *KnowledgeProcessOverrides) error {
 type KnowledgeCheckParams struct {
 	// File parameters
 	FileName string
+	// FileType scopes file-hash deduplication; callers checking file uploads should set it.
+	FileType string
 	FileSize int64
 	FileHash string
 	// URL parameters

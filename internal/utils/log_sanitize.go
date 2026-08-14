@@ -8,8 +8,8 @@ import (
 var imageDataURLPatternForLog = regexp.MustCompile(`data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+`)
 
 const (
-	defaultMaxLogChars        = 12000
-	defaultMaxDataURLPreview  = 96
+	defaultMaxLogChars       = 12000
+	defaultMaxDataURLPreview = 96
 )
 
 // CompactImageDataURLForLog shortens large image data URLs for log output.

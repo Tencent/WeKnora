@@ -22,14 +22,21 @@ const (
 	presignDefaultTTL = 2 * time.Hour
 )
 
-// getPresignKey returns the HMAC key derived from SYSTEM_AES_KEY.
-// Returns nil if the key is not configured or invalid.
-func getPresignKey() []byte {
+// SystemHMACKey returns the deployment-wide HMAC key derived from
+// SYSTEM_AES_KEY, or nil when it is unset or too short to be a real secret.
+// Callers must treat nil as "this deployment cannot sign", not as an empty key.
+func SystemHMACKey() []byte {
 	key := os.Getenv("SYSTEM_AES_KEY")
 	if len(key) < 16 {
 		return nil
 	}
 	return []byte(key)
+}
+
+// getPresignKey returns the HMAC key derived from SYSTEM_AES_KEY.
+// Returns nil if the key is not configured or invalid.
+func getPresignKey() []byte {
+	return SystemHMACKey()
 }
 
 // signPayload computes HMAC-SHA256 over the canonical payload string.

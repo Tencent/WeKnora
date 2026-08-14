@@ -808,6 +808,9 @@ func applyAgentEnvOverrides(cfg *Config) {
 //   - WEKNORA_AUTH_DEFAULT_TENANT_MODE ("create_personal"/"tenantless")
 //   - WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED (boolean)
 //   - WEKNORA_TENANT_ENABLE_RBAC      ("true"/"false", case-insensitive)
+//   - WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS ("true"/"false", case-insensitive).
+//     Read explicitly because viper.AutomaticEnv has no SetEnvPrefix, so the
+//     WEKNORA_-prefixed var is not bound to the nested struct automatically.
 //   - WEKNORA_TENANT_MAX_OWNED_PER_USER (integer; <0 disables the cap,
 //     0 falls back to the handler default, >0 enforces that exact cap).
 //     Unparseable / empty values are ignored so a stale shell variable
@@ -857,6 +860,16 @@ func applyAuthAndTenantDefaults(cfg *Config) {
 		// via config.yaml `enable_rbac: false` or the env override.
 		on := true
 		cfg.Tenant.EnableRBAC = &on
+	}
+
+	// WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS mirrors the RBAC switch above.
+	// It must be read explicitly: viper.AutomaticEnv has no SetEnvPrefix, so the
+	// WEKNORA_-prefixed env var is never bound to the nested struct field —
+	// without this block, only config.yaml's enable_cross_tenant_access takes
+	// effect and the documented env override is silently ignored. The default
+	// stays whatever config.yaml provides (false unless set there).
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS")); value != "" {
+		cfg.Tenant.EnableCrossTenantAccess = strings.EqualFold(value, "true")
 	}
 
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED")); value != "" {

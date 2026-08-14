@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -18,6 +19,13 @@ const toolErrorHint = "\n\n[Analyze the error above and try a different approach
 type ToolRegistry struct {
 	tools             map[string]types.Tool
 	maxToolOutputSize int // maximum chars for tool output (0 = use DefaultMaxToolOutput)
+}
+
+// outputLimitProvider is implemented by tools that expose a caller-configurable
+// output budget with their own hard safety cap. It prevents the registry's
+// generic limit from undoing that explicit bounded choice.
+type outputLimitProvider interface {
+	OutputLimitChars(args json.RawMessage) int
 }
 
 // NewToolRegistry creates a new tool registry
@@ -140,11 +148,20 @@ func (r *ToolRegistry) ExecuteTool(
 		}, nil
 	}
 
-	result, execErr := tool.Execute(ctx, args)
-
-	// Truncate large tool outputs to prevent context window poisoning.
+	// Publish the ceiling so budget-aware tools can shape a batched result
+	// themselves; the truncation below stays as the fallback for the rest.
 	maxOutput := r.getMaxToolOutput()
-	if result != nil && len(result.Output) > maxOutput {
+	if provider, ok := tool.(outputLimitProvider); ok {
+		if toolLimit := provider.OutputLimitChars(args); toolLimit > maxOutput {
+			maxOutput = toolLimit
+		}
+	}
+	result, execErr := tool.Execute(WithOutputBudget(ctx, maxOutput), args)
+
+	// Truncate large tool outputs to prevent context window poisoning. The
+	// limit is counted in runes to match TruncateToolOutput; comparing bytes
+	// here would leave CJK output effectively uncapped.
+	if result != nil && utf8.RuneCountInString(result.Output) > maxOutput {
 		result.Output = TruncateToolOutput(result.Output, maxOutput)
 	}
 

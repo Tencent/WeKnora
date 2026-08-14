@@ -1,0 +1,157 @@
+// resources.go is the durable-resource half of the model-context registry:
+// it assigns request-local res://NNNN handles to stored resource references
+// and restores them before application code consumes model output.
+package modelcontext
+
+import (
+	"regexp"
+	"sort"
+	"strings"
+
+	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/types"
+)
+
+// storedRefRE also recognizes legacy physical references. New writes persist
+// resource:// handles, but old chunks and message history can still contain a
+// provider URL. Giving both forms the same request-local handle makes rollout
+// safe without a blocking full-table content rewrite.
+//
+// The final alternative handles wiki summary-page slugs (summary/<uuid>). They
+// are not storage handles, but they share the exact failure mode this registry
+// exists to prevent: a high-entropy identifier the model must reproduce
+// verbatim (inside [[slug|display]] links and as wiki-tool slug arguments).
+// Models routinely mangle the UUID by inserting or dropping hex digits, which
+// yields dead cross-links. Aliasing the slug to a low-entropy res:// token
+// removes the opportunity to mangle at the source; the token round-trips back
+// to the real slug on stream output and in decoded tool-call arguments before
+// anything is persisted. Entity slugs (entity/<readable-title>) are low-entropy
+// and semantically meaningful, so they are deliberately left untouched.
+var storedRefRE = regexp.MustCompile(
+	`resource://[0-9A-Za-z_-]{22}|` +
+		`(?:storage://[0-9A-Za-z_-]+/)?` +
+		`(?:local|minio|cos|tos|s3|oss|ks3|obs)://[^\s)\]>"']+|` +
+		`summary/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`,
+)
+
+// resourceHandleShapeRE matches the handle syntax produced by EncodeText. It
+// is used to spot handle-shaped tokens the registry cannot map back — either a
+// hallucinated reference or a coincidental collision — and by the stream-side
+// orphan filter.
+var resourceHandleShapeRE = regexp.MustCompile(`res://\d+`)
+
+// resourceRegistry assigns low-entropy, request-local handles to stable resource
+// handles. It is safe to reuse across all rounds of one Agent execution.
+type resourceRegistry struct {
+	table *handleTable[struct{}]
+}
+
+// newResourceRegistry creates an empty request-local handle registry.
+func newResourceRegistry() *resourceRegistry {
+	// A URL-shaped handle (scheme://digits) keeps the token low-entropy while
+	// looking enough like a link that the model reuses it verbatim inside
+	// Markdown image/link syntax instead of reasoning about or rewriting it.
+	return &resourceRegistry{table: newHandleTable[struct{}]("res://", 4, 1)}
+}
+
+// EncodeText replaces stored references with compact, stable handles.
+func (r *resourceRegistry) EncodeText(value string) string {
+	if r == nil || value == "" {
+		return value
+	}
+	return storedRefRE.ReplaceAllStringFunc(value, func(ref string) string {
+		return r.table.register(ref, ref, struct{}{}, nil)
+	})
+}
+
+// DecodeText restores every handle currently known to the registry. Handles are
+// replaced longest-first with no word-boundary check — this plain substring
+// behavior is load-bearing for handles adjacent to punctuation in Markdown.
+func (r *resourceRegistry) DecodeText(value string) string {
+	if r == nil || value == "" {
+		return value
+	}
+	pairs := r.table.pairs()
+	sort.SliceStable(pairs, func(i, j int) bool { return len(pairs[i].handle) > len(pairs[j].handle) })
+	for _, item := range pairs {
+		value = strings.ReplaceAll(value, item.handle, item.value)
+	}
+	return value
+}
+
+// StripOrphanHandles removes handle-shaped tokens after all known handles have
+// been restored. Use this only on model output; tool arguments must retain
+// unknown handles long enough for modelcontext to reject the call.
+func (r *resourceRegistry) StripOrphanHandles(value string) string {
+	if value == "" {
+		return value
+	}
+	return resourceHandleShapeRE.ReplaceAllString(value, "")
+}
+
+// EncodeMessages returns a copied message slice with textual references
+// compacted. Binary/image content fields are intentionally left untouched.
+func (r *resourceRegistry) EncodeMessages(messages []chat.Message) []chat.Message {
+	if r == nil || len(messages) == 0 {
+		return messages
+	}
+	encoded := make([]chat.Message, len(messages))
+	copy(encoded, messages)
+	for i := range encoded {
+		encoded[i].Content = r.EncodeText(encoded[i].Content)
+		encoded[i].ReasoningContent = r.EncodeText(encoded[i].ReasoningContent)
+		if len(encoded[i].MultiContent) > 0 {
+			encoded[i].MultiContent = append([]chat.MessageContentPart(nil), encoded[i].MultiContent...)
+			for j := range encoded[i].MultiContent {
+				encoded[i].MultiContent[j].Text = r.EncodeText(encoded[i].MultiContent[j].Text)
+			}
+		}
+		if len(encoded[i].ToolCalls) > 0 {
+			encoded[i].ToolCalls = append([]chat.ToolCall(nil), encoded[i].ToolCalls...)
+			for j := range encoded[i].ToolCalls {
+				encoded[i].ToolCalls[j].Function.Arguments = r.EncodeText(encoded[i].ToolCalls[j].Function.Arguments)
+			}
+		}
+	}
+	return encoded
+}
+
+// DecodeToolCalls restores handles in tool-call JSON arguments.
+func (r *resourceRegistry) DecodeToolCalls(toolCalls []types.LLMToolCall) {
+	for i := range toolCalls {
+		toolCalls[i].Function.Arguments = r.DecodeText(toolCalls[i].Function.Arguments)
+	}
+}
+
+// OrphanHandles returns the distinct handle-shaped tokens in an already-decoded
+// string that the registry cannot resolve. A non-empty result means the model
+// emitted a reference no real resource backs (hallucination) or the user text
+// happened to collide with the handle syntax. Callers should log/observe these
+// rather than surfacing them to end users as broken links.
+func (r *resourceRegistry) OrphanHandles(decoded string) []string {
+	if decoded == "" {
+		return nil
+	}
+	var orphans []string
+	seen := make(map[string]struct{})
+	for _, match := range resourceHandleShapeRE.FindAllString(decoded, -1) {
+		if r != nil && r.table.has(match) {
+			continue
+		}
+		if _, dup := seen[match]; dup {
+			continue
+		}
+		seen[match] = struct{}{}
+		orphans = append(orphans, match)
+	}
+	return orphans
+}
+
+func (r *resourceRegistry) handles() []string {
+	pairs := r.table.pairs()
+	handles := make([]string, 0, len(pairs))
+	for _, item := range pairs {
+		handles = append(handles, item.handle)
+	}
+	return handles
+}

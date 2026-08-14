@@ -106,6 +106,9 @@ const messages = {
       "unableToGetKnowledgeBaseId": "无法获取知识库ID",
       "summaryInProgress": "正在总结答案……",
       "thinkingAlt": "正在思考",
+      "preparingAnswer": "正在准备回答…",
+      "connectingModelAndGeneratingAnswer": "正在连接模型并生成回答…",
+      "modelStillResponding": "模型响应较慢，仍在等待…",
       "deepThoughtCompleted": "已深度思考",
       "deepThoughtAlt": "深度思考完成",
       "referencesTitle": "参考了{count}个相关内容",
@@ -366,6 +369,7 @@ const messages = {
       },
       "search": {
         "noResults": "未找到匹配的内容",
+        "candidatesBelowThreshold": "命中 {count} 条候选，相关性不足，未用于回答",
         "foundResultsFromFiles": "找到 {count} 个结果，来自 {files} 个文件",
         "foundResults": "找到 {count} 个结果",
         "foundMixedResults": "找到 {count} 个结果（{docCount} 篇文档，{webCount} 条网页）",
@@ -483,6 +487,8 @@ const messages = {
     "knowledgeEditor": {
       "wikiBrowser": {
         "viewInGraph": "在图谱中查看",
+        "editingBadge": "编辑中",
+        "pageActions": "页面操作",
         "version": "v{ver}",
         "filterSummary": "摘要",
         "filterEntity": "实体",
@@ -596,6 +602,9 @@ const messages = {
       "unableToGetKnowledgeBaseId": "Unable to get knowledge base ID",
       "summaryInProgress": "Summarizing answer…",
       "thinkingAlt": "Thinking in progress",
+      "preparingAnswer": "Preparing an answer…",
+      "connectingModelAndGeneratingAnswer": "Connecting to the model and generating an answer…",
+      "modelStillResponding": "The model is taking longer than usual, still waiting…",
       "deepThoughtCompleted": "Deep thinking completed",
       "deepThoughtAlt": "Deep thinking finished",
       "referencesTitle": "Referenced {count} related item(s)",
@@ -857,6 +866,7 @@ const messages = {
       },
       "search": {
         "noResults": "No matching content found",
+        "candidatesBelowThreshold": "Matched {count} candidate(s), none relevant enough to use",
         "foundResultsFromFiles": "Found {count} result(s) from {files} file(s)",
         "foundResults": "Found {count} result(s)",
         "foundMixedResults": "Found {count} result(s) ({docCount} documents, {webCount} web results)",
@@ -974,6 +984,8 @@ const messages = {
     "knowledgeEditor": {
       "wikiBrowser": {
         "viewInGraph": "View in Graph",
+        "editingBadge": "Editing",
+        "pageActions": "Page actions",
         "version": "v{ver}",
         "filterSummary": "Summaries",
         "filterEntity": "Entities",
@@ -1048,6 +1060,9 @@ const koEmbedPublish = {
     followUpQuestions: '이어서 질문',
     followUpQuestionsLoading: '추천 질문 로딩 중',
     thinkingAlt: '생각 중',
+    preparingAnswer: '답변을 준비하고 있습니다…',
+    connectingModelAndGeneratingAnswer: '모델에 연결하여 답변을 생성하고 있습니다…',
+    modelStillResponding: '모델 응답이 평소보다 오래 걸리고 있습니다. 계속 기다리는 중…',
     refreshSuggestedQuestions: '다른 질문',
     imageTooMany: '이미지는 최대 5장까지 업로드할 수 있습니다',
     imageTypeSizeError: 'JPG/PNG/GIF/WEBP만 지원하며, 각 파일은 10MB 이하여야 합니다',
@@ -1136,6 +1151,9 @@ const ruEmbedPublish = {
     followUpQuestions: 'Спрашивайте дальше',
     followUpQuestionsLoading: 'Загрузка рекомендуемых вопросов',
     thinkingAlt: 'Обдумывание...',
+    preparingAnswer: 'Подготовка ответа…',
+    connectingModelAndGeneratingAnswer: 'Подключение к модели и создание ответа…',
+    modelStillResponding: 'Модель отвечает дольше обычного, продолжаем ждать…',
     refreshSuggestedQuestions: 'Ещё',
     imageTooMany: 'Можно загрузить не более 5 изображений',
     imageTypeSizeError: 'Поддерживаются только JPG/PNG/GIF/WEBP, каждый файл до 10 МБ',

@@ -37,7 +37,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var httpClient = &http.Client{Timeout: 30 * time.Second}
+var httpClient = secutils.NewSSRFSafeHTTPClient(secutils.SSRFSafeHTTPClientConfig{
+	Timeout:      30 * time.Second,
+	MaxRedirects: 5,
+})
 
 const defaultAPIBaseURL = "https://qyapi.weixin.qq.com"
 

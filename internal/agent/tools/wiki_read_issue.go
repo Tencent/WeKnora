@@ -25,7 +25,7 @@ func NewWikiReadIssueTool(wikiService interfaces.WikiPageService, kbIDs []string
   "properties": {
     "issue_id": {
       "type": "string",
-      "description": "Optional: The ID of a specific issue to read."
+      "description": "Optional: The short iN ID of a specific issue from an earlier wiki_read_issue result."
     },
     "slug": {
       "type": "string",
@@ -60,27 +60,31 @@ func (t *wikiReadIssueTool) Execute(ctx context.Context, args json.RawMessage) (
 		return &types.ToolResult{Success: false, Error: "No knowledge bases available"}, nil
 	}
 
-	kbID := t.kbIDs[0]
-
 	if issueID != "" {
-		// Just reuse ListIssues since there's no GetIssueByID yet
-		issues, err := t.wikiService.ListIssues(ctx, kbID, "", "")
+		issue, err := resolveWikiIssue(ctx, t.wikiService, issueID, t.kbIDs)
+		if err != nil {
+			return &types.ToolResult{Success: false, Error: err.Error()}, nil
+		}
+		out, _ := json.MarshalIndent(issue, "", "  ")
+		return &types.ToolResult{Success: true, Output: string(out)}, nil
+	}
+
+	var issues []*types.WikiPageIssue
+	for _, kbID := range dedupNonEmptyStrings(t.kbIDs) {
+		kbIssues, err := t.wikiService.ListIssues(ctx, kbID, slug, "pending")
 		if err != nil {
 			return &types.ToolResult{Success: false, Error: "Failed to list issues: " + err.Error()}, nil
 		}
-		
-		for _, issue := range issues {
-			if issue.ID == issueID {
-				out, _ := json.MarshalIndent(issue, "", "  ")
-				return &types.ToolResult{Success: true, Output: string(out)}, nil
+		for _, issue := range kbIssues {
+			if issue != nil && issue.KnowledgeBaseID != "" && issue.KnowledgeBaseID != kbID {
+				return &types.ToolResult{
+					Success: false,
+					Error: "Issue result returned knowledge base " + issue.KnowledgeBaseID +
+						" while resolving allowed scope " + kbID,
+				}, nil
 			}
 		}
-		return &types.ToolResult{Success: false, Error: "Issue not found"}, nil
-	}
-
-	issues, err := t.wikiService.ListIssues(ctx, kbID, slug, "pending")
-	if err != nil {
-		return &types.ToolResult{Success: false, Error: "Failed to list issues: " + err.Error()}, nil
+		issues = append(issues, kbIssues...)
 	}
 
 	if len(issues) == 0 {

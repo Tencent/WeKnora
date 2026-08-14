@@ -24,6 +24,8 @@ const (
 	WebSearchProviderTypeSearxng    WebSearchProviderType = "searxng"
 	WebSearchProviderTypeKeenable   WebSearchProviderType = "keenable"
 	WebSearchProviderTypeZhipu      WebSearchProviderType = "zhipu"
+	WebSearchProviderTypeExa        WebSearchProviderType = "exa"
+	WebSearchProviderTypeMetaso     WebSearchProviderType = "metaso"
 )
 
 // WebSearchProviderEntity represents a configured web search provider instance for a workspace.
@@ -236,6 +238,32 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 			DocsURL:                "https://keenable.ai/",
 		},
 		{
+			ID:             "metaso",
+			Name:           "Metaso AI Search",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "Metaso AI Search API (requires API key)",
+			DocsURL:        "https://metaso.cn/search-api/playground",
+			ConfigFields: []WebSearchProviderConfigField{
+				{
+					Key:         "scope",
+					Label:       "Search scope",
+					Type:        "select",
+					Required:    true,
+					Default:     "webpage",
+					Description: "Select the content source searched by Metaso.",
+					Options: []WebSearchProviderConfigFieldOption{
+						{Label: "Web pages", Value: "webpage"},
+						{Label: "Documents", Value: "document"},
+						{Label: "Scholar", Value: "scholar"},
+						{Label: "Podcasts", Value: "podcast"},
+						{Label: "Videos", Value: "video"},
+						{Label: "Images", Value: "image"},
+					},
+				},
+			},
+		},
+		{
 			ID:             "zhipu",
 			Name:           "Zhipu AI",
 			RequiresAPIKey: true,
@@ -271,6 +299,27 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 					Options: []WebSearchProviderConfigFieldOption{
 						{Label: "Medium", LabelKey: "webSearchSettings.configFields.contentMedium", Value: "medium"},
 						{Label: "High", LabelKey: "webSearchSettings.configFields.contentHigh", Value: "high"},
+					},
+				},
+			},
+		},
+		{
+			ID:             "exa",
+			Name:           "Exa",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "Exa Search API for AI applications (requires API key)",
+			DocsURL:        "https://docs.exa.ai/",
+			ConfigFields: []WebSearchProviderConfigField{
+				{
+					Key:         "include_text",
+					Label:       "Include text",
+					Type:        "select",
+					Default:     "false",
+					Description: "Include page text in the unified result Content field.",
+					Options: []WebSearchProviderConfigFieldOption{
+						{Label: "Enabled", Value: "true"},
+						{Label: "Disabled", Value: "false"},
 					},
 				},
 			},

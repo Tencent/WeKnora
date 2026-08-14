@@ -13,6 +13,8 @@ const (
 	ToolListKnowledgeChunks = "list_knowledge_chunks"
 	ToolQueryKnowledgeGraph = "query_knowledge_graph"
 	ToolGetDocumentInfo     = "get_document_info"
+	ToolSearchConversations = "search_conversations"
+	ToolSearchMemory        = "search_memory"
 	ToolDatabaseQuery       = "database_query"
 	ToolDataAnalysis        = "data_analysis"
 	ToolDataSchema          = "data_schema"
@@ -21,6 +23,19 @@ const (
 	// Skills-related tools (only available when skills are enabled)
 	ToolExecuteSkillScript = "execute_skill_script"
 	ToolReadSkill          = "read_skill"
+	// Sandbox filesystem inspection (read-only; only available when the
+	// sandbox backend supports per-session file listing — currently the
+	// Cube SessionBoundManager). Lets the LLM discover and inspect files
+	// produced by prior skill executions in the same session so chained
+	// skills stop guessing paths.
+	ToolListSandboxFiles = "list_sandbox_files"
+	ToolReadSandboxFile  = "read_sandbox_file"
+	// ToolShellExec lets the LLM execute ad-hoc shell commands inside the
+	// current session's Cube sandbox (dependency installs, environment
+	// probing). Only registered when the sandbox backend is Cube — Docker
+	// and Local backends do not expose this tool to preserve their
+	// existing stateless security model.
+	ToolShellExec = "shell_exec"
 	// Wiki-related tools (only available when wiki KBs are in scope)
 	ToolWikiReadPage      = "wiki_read_page"
 	ToolWikiWritePage     = "wiki_write_page"
@@ -52,11 +67,19 @@ func AvailableToolDefinitions() []AvailableTool {
 		{Name: ToolListKnowledgeChunks, Label: "查看文档分块", Description: "获取文档完整分块内容"},
 		{Name: ToolQueryKnowledgeGraph, Label: "查询知识图谱", Description: "从知识图谱中查询关系"},
 		{Name: ToolGetDocumentInfo, Label: "获取文档信息", Description: "查看文档元数据"},
+		{
+			Name:        ToolSearchConversations,
+			Label:       "回顾历史对话",
+			Description: "在用户自己的历史会话中查找之前聊过的内容",
+		},
 		{Name: ToolDatabaseQuery, Label: "查询数据库", Description: "查询数据库中的信息"},
 		{Name: ToolDataAnalysis, Label: "数据分析", Description: "理解数据文件并进行数据分析"},
 		{Name: ToolDataSchema, Label: "查看数据元信息", Description: "获取表格文件的元信息"},
 		{Name: ToolReadSkill, Label: "读取技能", Description: "按需读取技能内容以学习专业能力"},
 		{Name: ToolExecuteSkillScript, Label: "执行技能脚本", Description: "在沙箱环境中执行技能脚本"},
+		{Name: ToolListSandboxFiles, Label: "列出沙箱文件", Description: "列出当前会话沙箱产出目录下的文件"},
+		{Name: ToolReadSandboxFile, Label: "读取沙箱文件", Description: "读取当前会话沙箱中已生成的文件内容"},
+		{Name: ToolShellExec, Label: "执行沙箱命令", Description: "在当前会话沙箱中执行 shell 命令（如安装依赖、检查环境）"},
 		{Name: ToolWikiReadPage, Label: "读取Wiki页面", Description: "读取指定的Wiki页面内容"},
 		{Name: ToolWikiSearch, Label: "搜索Wiki", Description: "在Wiki中搜索页面"},
 		{Name: ToolWikiReadSourceDoc, Label: "精读源文档", Description: "使用知识点深入阅读特定原始文档"},
@@ -80,6 +103,16 @@ func DefaultAllowedTools() []string {
 		ToolListKnowledgeChunks,
 		ToolQueryKnowledgeGraph,
 		ToolGetDocumentInfo,
+		// Looking up what this user asked before is only ever a read of their
+		// own history, and it is what lets "上次你给我的那个配置" resolve at all
+		// without stuffing every past conversation into the context window.
+		ToolSearchConversations,
+		// ToolSearchMemory is deliberately absent here and from
+		// AvailableToolDefinitions. Like web_search it is not chosen from this
+		// list at all: registerTools injects it whenever the workspace, the
+		// user and the agent all allow memory, and strips it whenever they do
+		// not. Adding it here would let a stale allowlist decide something the
+		// memory switches already decide.
 		ToolDatabaseQuery,
 		ToolDataAnalysis,
 		ToolDataSchema,

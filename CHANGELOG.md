@@ -2,6 +2,70 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.2] - 2026-08-07
+
+### New Features
+
+- **NEW**: **Official Documentation Site** — the headline of this release. A complete VitePress product documentation site now lives in `website-docs/`, organized into six sections (Getting Started → Architecture → Features → API → Clients → Development) across ~50 pages: 21 feature guides, 13 API reference pages covering ~360 endpoints with permissions/parameters/curl examples, 7 client guides (frontend, CLI, Go SDK, mini program, desktop, Chrome extension, Claw Skill), a configuration reference for ~150 environment variables, and a database/migration guide covering 40+ tables. Ships a custom landing page, a `<Screenshot>` component with placeholder fallback, Mermaid zooming, and link/diagram validation scripts (`scripts/check-links.mjs`, `scripts/check-mermaid.mjs`). The site reads the repository-root `VERSION` file at build time so version labels never drift. Deployment is self-contained: `website-docs/Dockerfile` + `nginx.conf` (listening on 8081) + `docker-entrypoint.sh`. Quickstart sample data (4 Markdown documents + an FAQ import JSON) and a runnable local MCP demo (`examples/mcp-demo/`) are included so a first knowledge base can be built end to end without hunting for test files.
+- **NEW**: **Knowledge Base Folder Tree** — folder uploads no longer smuggle their relative directory into `file_name`. The path now lives in a dedicated `folder_path` column with a backfill for existing rows (migration `000079_knowledge_folder_path`), so the document list renders a real sidebar folder tree that can be browsed like a file manager, folders can be renamed in place, and documents can be re-filed into another folder. Individually uploaded documents get a visible home at the tree root instead of disappearing. Adds `GET /knowledge-bases/{id}/knowledge/folders` and `PUT /knowledge-bases/{id}/knowledge/folders`, plus a folder picker popup on each row.
+- **NEW**: **Editable Chunks, Revision History & Custom Metadata** — retrieval chunks are now editable directly from the UI, with every superseded version snapshotted for diff and one-click revert, and the index rebuilt automatically after an edit (migration `000078_chunk_editing_and_custom_metadata` adds `chunks.source_content` / `content_revision` / `index_status` / `last_editor_id` / `context_header`, the `chunk_revisions` table, and `knowledges.custom_metadata`). Generated questions can be added, edited, deleted, and regenerated per chunk, and survive content edits. Adds `PUT /chunks/{knowledge_id}/{id}`, `GET /chunks/{knowledge_id}/{id}/revisions`, `POST /chunks/{knowledge_id}/{id}/revert`, and the generated-question endpoints. Chunk details moved into header popups for a tighter layout.
+- **NEW**: **Wiki Page Revision History, Diff & Manual Editing** — every wiki page version is preserved before being overwritten (migration `000075_wiki_page_revisions`, plus `wiki_pages.last_edit_source` / `last_editor_id` recording whether the current version came from the pipeline, an agent, a user, or a revert). A revision drawer lists the full history with line-level diffs and one-click rollback, and pages can be edited by hand in the browser. The Wiki reader layout, source-document reference handling, and sidebar UX were reworked to match the session-list experience.
+- **NEW**: **Directly Loadable File URLs (`resource_urls=public`)** — chat answers, references, knowledge search, and embed responses can return ready-to-load http(s) URLs for files and images instead of internal `resource://` handles, so third-party apps no longer need a second authenticated call to the `/files` proxy. Opt in per request with `?resource_urls=public` or per deployment with `RESOURCE_URL_MODE=public`. A new `internal/storageurl` package centralizes the rewriting, reusing a live access grant per resource to keep read endpoints from writing on every request. Anonymous embed channels and KB-restricted API keys always stay on `handle`. See [`docs/api/README.md`](./docs/api/README.md).
+- **NEW**: **Feishu Drive Data Source** — a new Feishu Cloud Drive connector joins the existing Feishu wiki connector (#2466). New-format Feishu cloud documents (docx) are now synchronized through the blocks API with per-block-type drill-down (#2087), configurable via the new `E9` docx parsing-mode section in `.env.example`.
+- **NEW**: **Batch Document Tagging** — select documents in the knowledge base list and apply tags in bulk through a dedicated dialog that pre-selects the tags already common to the selection.
+- **NEW**: **MCP Server 1.1.x** — the WeKnora MCP server migrated from the removed low-level `Server` decorator API to the high-level `MCPServer` API (mcp 2.x), restoring HTTP (`stateless_http`) and SSE (`/sse/messages/`) transport compatibility, and now publishes as the official PyPI package **`tencent-weknora-mcp`** via Trusted Publishing. Two new tools bring the total to 29: `create_knowledge_from_text` (create a knowledge entry from Markdown text) and `list_shared_knowledge_bases` (shared KBs are also folded into name resolution and tool hints).
+- **NEW**: **AWS S3 Default Credential Chain** — leaving `S3_ACCESS_KEY` and `S3_SECRET_KEY` both empty now falls back to the AWS SDK default credential chain, supporting EC2/ECS/EKS IAM roles, IRSA / Web Identity, environment variables, and shared config files (#2008).
+- **NEW**: **Local HTML Upload Parsing** — docreader gained a dedicated HTML parser, so `.html` files can be uploaded directly instead of only imported by URL. The supported-extension set is now the single gate for both direct upload and URL import (#2447).
+- **NEW**: **QQBot Markdown Replies** — QQBot channels reply with markdown formatting like the other IM integrations.
+- **NEW**: **PR CI Workflows** — dedicated GitHub Actions checks for the Go app, frontend, docreader, and MCP server, plus a `scripts/verify_frontend_pr.sh` helper for local pre-PR verification.
+
+### Improvements
+
+- **IMPROVED**: **Router and auth middleware split by domain** — the 2390-line `internal/router/router.go` was split into `routes_agent.go`, `routes_auth_tenant.go`, `routes_chat.go`, `routes_infra.go`, `routes_knowledge.go`, `files.go`, and `static.go`, with the duplicated file proxies deduplicated. The Auth middleware was likewise split and session-context attachment unified in one place.
+- **IMPROVED**: **`modelcontext` package consolidation** — `llmreference` and `llmresource` were folded into `modelcontext` as source and resource codecs, every handle space was rebuilt on one generic table, source-key gating moved behind a single dispatch table, and stream decoding now goes through one suffix-hold primitive. Handle terminology is consistent across the merged package, and several handle-codec bugs were fixed along the way.
+- **IMPROVED**: **Unified Wiki operation history** — the redundant Wiki Browser operation log was removed and its storage/API retired (migration `000077_remove_wiki_log`); wiki mutations are recorded only in the knowledge-base Activity view.
+- **IMPROVED**: **Rerank quality and throughput** — reranker passage cleaning now preserves code and math passages, NVIDIA logit-style scores are normalized before fusion, and Tencent LKEAP requests are batched to stay within API limits.
+- **IMPROVED**: **Chinese query expansion** — expanded queries are segmented with jieba so Chinese rewrites actually match the sparse index.
+- **IMPROVED**: **Chunking consistency** — line endings are normalized before splitting, overlap boundaries preserve semantic sentence ends (English `?`/`!` require a following space), the chunking preview matches parent-child splitting, and XLS header-override behavior is aligned with XLSX.
+- **IMPROVED**: **Document summaries** — table chunks keep every row in the summary, failed summary generation retries before falling back, and stale summaries are re-enqueued for refresh with the tenant context restored for background refresh tasks.
+- **IMPROVED**: **Frontend i18n hygiene** — locale files were pruned against `zh-CN`, with an audit harness (`localeKeyAudit`, audit-action registry, regeneration script) that keeps the other locales aligned and catches missing keys in CI.
+- **IMPROVED**: **UI polish** — redesigned upload confirmation dialog (tags can be configured at upload time), refined user settings menu, unified organization settings modal scrolling, clearer document processing timeline statuses, and a persistent live region that announces RAG wait status for screen readers.
+- **IMPROVED**: **Deployment docs** — `docker compose pull` guidance completed across all deployment steps so upgrades stop reusing stale cached images.
+
+### Bug Fixes
+
+- **FIXED**: Registration passwords are no longer sanitized before hashing, which corrupted passwords containing special characters.
+- **FIXED**: WeCom long-connection deadlock between `closeConn` and `heartbeatLoop`; connection close is now scoped to its own generation, and disabled channels are handled in the IM callback.
+- **FIXED**: SQLite — `DataSource` deletion failed, a zero vector threshold was treated as a filter instead of "no filter", and vector candidates are now filtered before top-k.
+- **FIXED**: Evaluation retrieval metrics were always zero; chunks are mapped back to passage IDs and passage indexing is synchronous.
+- **FIXED**: Empty or mismatched embedding results could panic an ants worker and deadlock a mutex.
+- **FIXED**: Retrieval merge output ordering is deterministic, and trusted overlaps are trimmed by exact position rather than text search (including after pipeline rewrites, #2558).
+- **FIXED**: Archived wiki pages are excluded from stats queries and the lint cursor; wiki prompt language is always resolved; wiki state is reconciled when documents move across knowledge bases; batched `wiki_read_page` results stay within the output budget.
+- **FIXED**: Retried FAQ creation no longer produces duplicate entries, and disabled FAQ entries are excluded from agent retrieval.
+- **FIXED**: Knowledge base deletion cleans up bound vector stores in batch delete and retries when engine resolution is deferred; a missing vector store engine is rebuilt on demand.
+- **FIXED**: MinerU automatic PDF parsing preserved; skipped stages are counted in parsing progress; stale `error_message` values are cleared on every reprocess and finalize path; batch reparse failures are surfaced.
+- **FIXED**: The embed runtime can read its own session again, fixing follow-up-suggestion 500s and lost conversations on refresh.
+- **FIXED**: Answer-generation status is shown after retrieval instead of a silent gap; duplicate terminal answer events are suppressed; retrieval fallback errors are preserved and web partial success / wiki-only embed fallback are covered.
+- **FIXED**: Agent web evidence is preserved when page fetches fail, with a safe rendered `web_fetch` fallback.
+- **FIXED**: Frontend — attachment upload status stays reactive, protected embed images route through the channel file proxy, and audit / KB-activity strings were restored after the locale prune.
+- **FIXED**: Shared agent source selector validation and shared agent source permissions hardened; API-runtime admin-console bypass scoped to owned sessions; external users included in the API session group.
+- **FIXED**: Remote images referenced by HTML `img` tags resolve during parsing (#2355); PaddleOCR-VL Cloud HTML tables are normalized; MCP server diagnostics route to stderr to fix a stdio protocol crash (#2371); non-UUID agent IDs resolve in MCP.
+- **FIXED**: Duplicate detection distinguishes files by type and is scoped correctly; custom metadata defaults on create; image uploads can fall back to the file service; wiki folder path is preserved after creation.
+
+### Infrastructure & Build
+
+- **BUILD**: Migrations `000075_wiki_page_revisions`, `000076_knowledge_metadata_external_id_index`, `000077_remove_wiki_log`, `000078_chunk_editing_and_custom_metadata`, `000079_knowledge_folder_path`; SQLite migrations `000001_remove_wiki_log`, `000002_knowledge_folder_path`.
+- **BUILD**: New `internal/storageurl` package for storage reference URL rewriting; Go client extended with `resource_urls` support.
+- **BUILD**: GitHub Actions workflows added for app / frontend / docreader / mcp-server; gofmt check scoped to PR commits; App workflow Go dependency caching sped up.
+- **BUILD**: Swagger / API docs regenerated for chunk revisions, knowledge folders, wiki revisions, and `resource_urls`.
+
+### Documentation
+
+- **DOC**: `website-docs/` official documentation site added (six sections, ~50 pages, ~360 documented endpoints), with quickstart sample data and a local MCP demo under `examples/mcp-demo/`.
+- **DOC**: `docs/api/README.md` and `docs/api/chat.md` document `resource_urls` and `RESOURCE_URL_MODE`; Feishu Drive data source guide added under `docs/wiki/集成扩展/`.
+- **DOC**: `docs/QA.md` extended for the documentation site, folder tree, chunk editing, wiki revisions, and public resource URLs.
+- **DOC**: Architecture diagram updated for the folder tree, chunk editing, wiki revision history, and public file URLs.
+
 ## [0.7.1] - 2026-07-24
 
 ### New Features
@@ -19,6 +83,7 @@ All notable changes to this project will be documented in this file.
 
 ### Improvements
 
+- **IMPROVED**: **Unified Wiki activity history** — removed the duplicate Wiki Browser log feed and its dedicated storage/API. Wiki mutations continue to appear in the knowledge-base Activity view, which is now the single operation-history surface (migration `000077_remove_wiki_log`).
 - **IMPROVED**: **Removed Neo4j conversation memory** — the Neo4j-based episodic memory pipeline, its API fields, settings UI, and embed toggles were dropped, so chat no longer depends on Neo4j graph storage. This simplifies deployment and reduces the required infrastructure footprint.
 - **IMPROVED**: **Shared SSRF-safe HTTP transport** — model clients, embedders, the Doris Stream Load client, and datasource connectors now reuse a single SSRF-safe HTTP transport, consolidating outbound-request protection.
 - **IMPROVED**: **Resilient Feishu large-wiki sync** — Feishu wiki synchronization now retries, resumes streaming, and surfaces failure reasons for large spaces.
@@ -44,7 +109,7 @@ All notable changes to this project will be documented in this file.
 
 ### Infrastructure & Build
 
-- **BUILD**: Migrations `000071_platform_api_keys`, `000072_auth_timestamp_tz`, `000073_kb_activity_scope`, `000074_mcp_oauth_refresh_lease`.
+- **BUILD**: Migrations `000071_platform_api_keys`, `000072_auth_timestamp_tz`, `000073_kb_activity_scope`, `000074_mcp_oauth_refresh_lease`, `000077_remove_wiki_log`.
 - **BUILD**: `tenant_api_keys` table structure updated and legacy migration files removed; Langfuse tracing client replaced by an OTel exporter.
 - **BUILD**: Swagger / API docs regenerated for platform API keys, activity audit trail, web-search providers, and the removed memory feature.
 

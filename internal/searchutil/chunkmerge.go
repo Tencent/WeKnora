@@ -2,13 +2,76 @@ package searchutil
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// JoinChunkContent joins two current chunk bodies without relying on parser
+// offsets. Exact containment is collapsed, a real suffix/prefix overlap is
+// removed, and otherwise both bodies are retained with separator between
+// them. The conservative fallback intentionally prefers small duplication
+// over silently dropping edited content.
+func JoinChunkContent(acc, next, separator string) string {
+	if acc == "" {
+		return next
+	}
+	if next == "" {
+		return acc
+	}
+	if ContainsChunkContent(acc, next) {
+		return acc
+	}
+	if ContainsChunkContent(next, acc) {
+		return next
+	}
+
+	accRunes := []rune(acc)
+	nextRunes := []rune(next)
+	maxOverlap := minInt(len(accRunes), len(nextRunes))
+	// Editable chunks may be much larger than parser-produced chunks. Bound
+	// suffix matching so an adversarial 200 KB edit cannot turn retrieval into
+	// quadratic work. Parser overlap windows are normally far below this cap;
+	// larger unmatched overlap is safely retained as duplication.
+	if maxOverlap > defaultSearchSpan {
+		maxOverlap = defaultSearchSpan
+	}
+	for overlap := maxOverlap; overlap >= minOverlapRunes; overlap-- {
+		if runeSlicesEqual(accRunes[len(accRunes)-overlap:], nextRunes[:overlap]) {
+			return acc + string(nextRunes[overlap:])
+		}
+	}
+	return acc + separator + next
+}
+
+// ContainsChunkContent reports whether the complete current body is safely
+// represented by another body. Very short substrings are not treated as
+// containment because common words and punctuation would create false drops.
+func ContainsChunkContent(container, contained string) bool {
+	if container == "" || contained == "" {
+		return false
+	}
+	if container == contained {
+		return true
+	}
+	return len([]rune(contained)) >= minOverlapRunes && strings.Contains(container, contained)
+}
+
+func runeSlicesEqual(left, right []rune) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // 这里实现 chunk 内容的「重叠拼接」公共逻辑，供文档重建（reconstructContent）、
-// 知识图谱内容合并（graph mergeChunkContents）、检索结果重叠合并
-// （chat_pipeline mergeOverlappingChunks）等多处复用。
+// 知识图谱内容合并（graph mergeChunkContents）等路径复用。聊天检索链路允许
+// 用户编辑 Chunk，使用上面的 JoinChunkContent，避免依赖原文位置坐标。
 //
 // 历史上各处都用「按位置」的公式裁剪重叠（offset = len(content) - (EndAt -
 // lastEndAt) 之类），它默认 len([]rune(Content)) == EndAt-StartAt。但有两类
@@ -35,6 +98,12 @@ const (
 // positionOverlap 是由 StartAt/EndAt 估算的重叠量（lastEnd - curStart），仅用于
 // 界定搜索窗口大小；真正的重叠按文本匹配，能兼容补写表头与 HTML 实体长度偏差。
 // 若找不到文本重叠，则原样拼接（不裁剪），宁可保留也不破坏内容。
+//
+// positionOverlap <= 0 时两段位置上严格相邻或不相交，没有可去重的重叠；
+// 此时进入文本匹配会因 headSlack 下限 320 在 next 开头窗口内误命中
+// acc 后缀的真实内容重复（如同一句话在文档多次出现），把 next 开头
+// 整段误判为补写表头删掉，造成不可逆的内容丢失。直接拼接，补写表头
+// 重复交给调用方后处理。
 func AppendWithOverlap(acc, next string, positionOverlap int) string {
 	if acc == "" {
 		return next
@@ -42,14 +111,14 @@ func AppendWithOverlap(acc, next string, positionOverlap int) string {
 	if next == "" {
 		return acc
 	}
+	if positionOverlap <= 0 {
+		return acc + next
+	}
 
 	accRunes := []rune(acc)
 	nextRunes := []rune(next)
 
 	span := positionOverlap
-	if span < 0 {
-		span = 0
-	}
 
 	maxK := minInt(len(accRunes), len(nextRunes))
 	if cap := maxInt(span*3, defaultSearchSpan); maxK > cap {
@@ -65,6 +134,40 @@ func AppendWithOverlap(acc, next string, positionOverlap int) string {
 		}
 	}
 	return acc + next
+}
+
+// AppendWithExactOverlap 在调用方已确认位置坐标可信时，按坐标给出的精确重叠量
+// 拼接 acc 与 next：校验 acc 的末 overlap 个字符与 next 的前 overlap 个字符逐字
+// 符相等，相等则精确裁剪，overlap 为 0 时直接拼接。
+//
+// 与 AppendWithOverlap 的区别在于「不猜」：后者为兼容补写表头、HTML 实体等长度
+// 偏差，会在窗口内搜索最长后缀匹配，重复周期性文本（表格、日志）可能被误判成重
+// 叠而裁掉真实内容。坐标可信时重叠量是已知的，不需要搜索。
+//
+// 校验不通过返回 ok=false，由调用方决定是否回退到 AppendWithOverlap。
+func AppendWithExactOverlap(acc, next string, overlap int) (string, bool) {
+	if acc == "" {
+		return next, true
+	}
+	if next == "" {
+		return acc, true
+	}
+	if overlap < 0 {
+		return "", false
+	}
+	if overlap == 0 {
+		return acc + next, true
+	}
+
+	accRunes := []rune(acc)
+	nextRunes := []rune(next)
+	if overlap > len(accRunes) || overlap > len(nextRunes) {
+		return "", false
+	}
+	if !runeSlicesEqual(accRunes[len(accRunes)-overlap:], nextRunes[:overlap]) {
+		return "", false
+	}
+	return acc + string(nextRunes[overlap:]), true
 }
 
 // MergeTextChunks 按 StartAt（并列时按 ChunkIndex）排序后，用 AppendWithOverlap

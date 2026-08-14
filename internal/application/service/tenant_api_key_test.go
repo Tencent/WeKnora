@@ -96,6 +96,86 @@ func (r *fakeTenantAPIKeyRepo) RevokeAPIKey(_ context.Context, tenantID uint64, 
 	return apprepo.ErrTenantAPIKeyNotFound
 }
 
+// UpdateAPIKey 模拟仓储的租户边界并覆盖 API Key 的可配置属性。
+// 传入租户 ID、Key ID 和新配置，返回更新后的 Key；跨租户或已撤销目标返回未找到。
+func (r *fakeTenantAPIKeyRepo) UpdateAPIKey(
+	_ context.Context, tenantID uint64, id uint64, update *types.TenantAPIKey,
+) (*types.TenantAPIKey, error) {
+	for _, key := range r.byHash {
+		if key.ID == id && key.TenantIDValue() == tenantID && key.RevokedAt == nil {
+			key.Name = update.Name
+			key.FullAccess = update.FullAccess
+			key.KnowledgeBaseIDs = append(types.StringArray(nil), update.KnowledgeBaseIDs...)
+			key.Capabilities = append(types.StringArray(nil), update.Capabilities...)
+			key.ExpiresAt = update.ExpiresAt
+			cp := *key
+			return &cp, nil
+		}
+	}
+	return nil, apprepo.ErrTenantAPIKeyNotFound
+}
+
+// TestTenantAPIKeyServiceUpdateNormalizesConfiguration 验证通用更新的输入规范化。
+// 输入包含重复 ID/能力和 UTC+8 到期时间，输出应去重、清理名称并统一为 UTC。
+func TestTenantAPIKeyServiceUpdateNormalizesConfiguration(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeTenantAPIKeyRepo()
+	svc := NewTenantAPIKeyService(repo)
+	created, err := svc.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
+		TenantID: 42, Name: "scoped", Capabilities: []string{"retrieve"},
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIKey returned error: %v", err)
+	}
+
+	expiresAt := time.Date(2026, 9, 1, 12, 0, 0, 0, time.FixedZone("UTC+8", 8*60*60))
+	updated, err := svc.UpdateAPIKey(ctx, interfaces.TenantAPIKeyUpdateRequest{
+		TenantID: 42, APIKeyID: created.APIKey.ID,
+		Name: " updated ", Capabilities: []string{"retrieve", "chat", "retrieve"},
+		KnowledgeBaseIDs: []string{" kb-1 ", "", "kb-2", "kb-1"},
+		ExpiresAt:        &expiresAt,
+	})
+	if err != nil {
+		t.Fatalf("UpdateAPIKey returned error: %v", err)
+	}
+	if updated.Name != "updated" {
+		t.Fatalf("name = %q, want updated", updated.Name)
+	}
+	if got, want := []string(updated.KnowledgeBaseIDs), []string{"kb-1", "kb-2"}; !apiKeyEqualStrings(got, want) {
+		t.Fatalf("knowledge_base_ids = %#v, want %#v", got, want)
+	}
+	if got, want := []string(updated.Capabilities), []string{"retrieve", "chat"}; !apiKeyEqualStrings(got, want) {
+		t.Fatalf("capabilities = %#v, want %#v", got, want)
+	}
+	if updated.ExpiresAt == nil || updated.ExpiresAt.Location() != time.UTC {
+		t.Fatalf("expires_at = %v, want UTC", updated.ExpiresAt)
+	}
+
+	full, err := svc.UpdateAPIKey(ctx, interfaces.TenantAPIKeyUpdateRequest{
+		TenantID: 42, APIKeyID: created.APIKey.ID, Name: "full", FullAccess: true,
+		KnowledgeBaseIDs: []string{"kb-ignored"}, Capabilities: []string{"retrieve"},
+	})
+	if err != nil {
+		t.Fatalf("updating to full access returned error: %v", err)
+	}
+	if !full.FullAccess || len(full.KnowledgeBaseIDs) != 0 || len(full.Capabilities) != 0 {
+		t.Fatalf("full access scope = full:%v kbs:%v caps:%v, want true/empty/empty",
+			full.FullAccess, full.KnowledgeBaseIDs, full.Capabilities)
+	}
+}
+
+func apiKeyEqualStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func (r *fakeTenantAPIKeyRepo) RevokePlatformAPIKey(_ context.Context, id uint64) error {
 	now := time.Now()
 	for _, key := range r.byHash {

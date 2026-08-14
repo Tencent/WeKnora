@@ -4,30 +4,29 @@ import (
 	"context"
 	"strings"
 
-	"github.com/Tencent/WeKnora/internal/llmreference"
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// prepareMessagesWithReferences replaces the pipeline's positional context IDs
-// with request-local chunk references in the copy sent to the model. Persisted
-// rendered_content remains unchanged; public citations are expanded only when
-// the request's agent setting enables them.
-func prepareMessagesWithReferences(
+// prepareMessagesWithModelContext replaces positional retrieval IDs with
+// request-local model handles. Persisted rendered_content remains unchanged;
+// public citations are expanded only when the request setting enables them.
+func prepareMessagesWithModelContext(
 	ctx context.Context,
 	chatManage *types.ChatManage,
-) ([]chat.Message, *llmreference.Registry) {
+) ([]chat.Message, *modelcontext.Registry) {
 	citationsEnabled := chatManage == nil || chatManage.CitationsEnabled()
-	refs := llmreference.NewRegistry(citationsEnabled)
+	registry := modelcontext.NewRegistry(citationsEnabled)
 	if chatManage == nil {
-		return nil, refs
+		return nil, registry
 	}
 	messages := prepareMessagesWithHistory(chatManage)
 	if len(messages) > 0 {
-		messages[0].Content = strings.TrimRight(messages[0].Content, " \t\r\n") + llmreference.ProtocolPrompt(citationsEnabled)
+		messages[0].Content = strings.TrimRight(messages[0].Content, " \t\r\n") + registry.ProtocolPrompt()
 	}
 	if len(chatManage.MergeResult) == 0 || len(messages) == 0 {
-		return messages, refs
+		return messages, registry
 	}
 
 	ordered := orderedPipelineReferences(chatManage)
@@ -58,10 +57,10 @@ func prepareMessagesWithReferences(
 			"content":           getEnrichedPassageForChat(ctx, result),
 		})
 	}
-	refs.RegisterSearchResults(knowledgeResults)
+	registry.RegisterSearchResults(knowledgeResults)
 	var contextParts []string
 	if len(knowledgeRows) > 0 {
-		contextParts = append(contextParts, refs.ModelOutput(&types.ToolResult{
+		contextParts = append(contextParts, registry.ModelToolResult(&types.ToolResult{
 			Success: true,
 			Data: map[string]interface{}{
 				"display_type": "search_results",
@@ -70,7 +69,7 @@ func prepareMessagesWithReferences(
 		}))
 	}
 	if len(webRows) > 0 {
-		contextParts = append(contextParts, refs.ModelOutput(&types.ToolResult{
+		contextParts = append(contextParts, registry.ModelToolResult(&types.ToolResult{
 			Success: true,
 			Data: map[string]interface{}{
 				"display_type": "web_search_results",
@@ -80,7 +79,7 @@ func prepareMessagesWithReferences(
 	}
 	modelContexts := strings.Join(contextParts, "\n")
 	if strings.TrimSpace(modelContexts) == "" {
-		return messages, refs
+		return messages, registry
 	}
 
 	last := len(messages) - 1
@@ -94,7 +93,7 @@ func prepareMessagesWithReferences(
 	if !replaced {
 		messages[last].Content = modelContexts + "\n\n" + messages[last].Content
 	}
-	return messages, refs
+	return messages, registry
 }
 
 func isPipelineWebReference(result *types.SearchResult) bool {

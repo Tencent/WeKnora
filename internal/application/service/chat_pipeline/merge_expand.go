@@ -3,6 +3,7 @@ package chatpipeline
 import (
 	"context"
 
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -176,7 +177,7 @@ func (p *PluginMerge) expandShortContextWithNeighbors(
 				p.fetchChunksIfMissing(ctx, tenantID, chunkMap, prevCursor)
 				if prevChunk := chunkMap[prevCursor]; prevChunk != nil &&
 					prevChunk.KnowledgeID == baseChunk.KnowledgeID {
-					prevContent = concatNoOverlap(prevChunk.Content, prevContent)
+					prevContent = searchutil.JoinChunkContent(prevChunk.Content, prevContent, "\n\n")
 					prevIDs = append([]string{prevChunk.ID}, prevIDs...)
 					prevCursor = prevChunk.PreChunkID
 					expanded = true
@@ -194,7 +195,7 @@ func (p *PluginMerge) expandShortContextWithNeighbors(
 				p.fetchChunksIfMissing(ctx, tenantID, chunkMap, nextCursor)
 				if nextChunk := chunkMap[nextCursor]; nextChunk != nil &&
 					nextChunk.KnowledgeID == baseChunk.KnowledgeID {
-					nextContent = concatNoOverlap(nextContent, nextChunk.Content)
+					nextContent = searchutil.JoinChunkContent(nextContent, nextChunk.Content, "\n\n")
 					nextIDs = append(nextIDs, nextChunk.ID)
 					nextCursor = nextChunk.NextChunkID
 					expanded = true
@@ -214,6 +215,7 @@ func (p *PluginMerge) expandShortContextWithNeighbors(
 
 		beforeLen := runeLen(res.Content)
 		res.Content = merged
+		res.ContentRewritten = true
 
 		for _, id := range prevIDs {
 			if id != "" && !containsID(res.SubChunkID, id) {
@@ -225,14 +227,6 @@ func (p *PluginMerge) expandShortContextWithNeighbors(
 				res.SubChunkID = append(res.SubChunkID, id)
 			}
 		}
-
-		if prevContent != "" {
-			res.StartAt = baseChunk.StartAt - runeLen(prevContent)
-			if res.StartAt < 0 {
-				res.StartAt = 0
-			}
-		}
-		res.EndAt = res.StartAt + runeLen(res.Content)
 
 		pipelineInfo(ctx, "Merge", "expand_short_chunk", map[string]interface{}{
 			"chunk_id":       res.ID,
@@ -260,43 +254,16 @@ func runeLen(s string) int {
 func mergeOrderedContent(prev, base, next string, maxLen int) string {
 	content := base
 	if prev != "" {
-		content = concatNoOverlap(prev, content)
+		content = searchutil.JoinChunkContent(prev, content, "\n\n")
 	}
 	if next != "" {
-		content = concatNoOverlap(content, next)
+		content = searchutil.JoinChunkContent(content, next, "\n\n")
 	}
 	runes := []rune(content)
 	if len(runes) > maxLen {
 		return string(runes[:maxLen])
 	}
 	return content
-}
-
-// concatNoOverlap concatenates two strings, removing potential overlapping prefix/suffix
-func concatNoOverlap(a, b string) string {
-	if a == "" {
-		return b
-	}
-	if b == "" {
-		return a
-	}
-
-	ar := []rune(a)
-	br := []rune(b)
-	maxOverlap := minInt(len(ar), len(br))
-	for k := maxOverlap; k > 0; k-- {
-		if string(ar[len(ar)-k:]) == string(br[:k]) {
-			return string(ar) + string(br[k:])
-		}
-	}
-	return string(ar) + string(br)
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func containsID(ids []string, target string) bool {

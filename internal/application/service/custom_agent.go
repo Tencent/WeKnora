@@ -722,7 +722,11 @@ func (s *customAgentService) getSuggestedQuestions(
 			if err != nil || meta == nil || len(meta.GeneratedQuestions) == 0 {
 				continue
 			}
-			q := meta.GeneratedQuestions[0].Question
+			questions := meta.GetQuestionStrings()
+			if len(questions) == 0 {
+				continue
+			}
+			q := questions[0]
 			if q == "" || seen[q] {
 				continue
 			}
@@ -758,7 +762,7 @@ func (s *customAgentService) getSuggestedQuestions(
 				})
 				continue
 			}
-			locale, _ := types.LanguageFromContext(ctx)
+			locale := types.LanguageFromContextOrDefault(ctx)
 			for _, page := range wikiPages {
 				q := wikiSuggestionFromPage(page, locale)
 				if q == "" || seen[q] {
