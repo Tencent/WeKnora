@@ -131,7 +131,7 @@ func TestMySQLRepositoryQueries(t *testing.T) {
 	assert.Equal(t, "mysql-knowledge", knowledgeItems[0].ID)
 
 	messageRepo := &messageRepository{db: tx}
-	messages, err := messageRepo.SearchMessagesByKeyword(ctx, 9001, "hello mysql", nil, 10)
+	messages, err := messageRepo.SearchMessagesByKeyword(ctx, 9001, "", "hello mysql", nil, 10)
 	require.NoError(t, err)
 	require.Len(t, messages, 1)
 	assert.Equal(t, "mysql-message", messages[0].ID)
