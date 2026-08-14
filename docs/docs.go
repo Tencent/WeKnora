@@ -18457,6 +18457,7 @@ const docTemplate = `{
                 "jina",
                 "openrouter",
                 "requesty",
+                "orcarouter",
                 "nvidia",
                 "novita",
                 "azure_openai"
@@ -18475,6 +18476,7 @@ const docTemplate = `{
                 "ModelSourceNvidia": "NVIDIA model",
                 "ModelSourceOpenAI": "OpenAI model",
                 "ModelSourceOpenRouter": "OpenRouter model",
+                "ModelSourceOrcaRouter": "OrcaRouter model",
                 "ModelSourceRemote": "Remote model",
                 "ModelSourceRequesty": "Requesty model",
                 "ModelSourceSiliconFlow": "SiliconFlow model",
@@ -18497,6 +18499,7 @@ const docTemplate = `{
                 "Jina AI model",
                 "OpenRouter model",
                 "Requesty model",
+                "OrcaRouter model",
                 "NVIDIA model",
                 "Novita AI model",
                 "Azure OpenAI model"
@@ -18517,6 +18520,7 @@ const docTemplate = `{
                 "ModelSourceJina",
                 "ModelSourceOpenRouter",
                 "ModelSourceRequesty",
+                "ModelSourceOrcaRouter",
                 "ModelSourceNvidia",
                 "ModelSourceNovita",
                 "ModelSourceAzureOpenAI"

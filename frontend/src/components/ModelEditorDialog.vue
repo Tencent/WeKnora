@@ -561,6 +561,16 @@ const fallbackProviderOptions = computed(() => [
     modelTypes: ['chat', 'embedding']
   },
   {
+    value: 'orcarouter',
+    label: t('model.editor.providers.orcarouter.label'),
+    defaultUrls: {
+      chat: 'https://api.orcarouter.ai/v1',
+      embedding: 'https://api.orcarouter.ai/v1'
+    },
+    description: t('model.editor.providers.orcarouter.description'),
+    modelTypes: ['chat', 'embedding']
+  },
+  {
     value: 'gemini',
     label: t('model.editor.providers.gemini.label'),
     defaultUrls: {
