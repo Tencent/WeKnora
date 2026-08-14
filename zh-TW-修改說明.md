@@ -128,7 +128,7 @@ Embed 訪客模式不會降級，以維持其 Embed token 的權限邊界。
 
 **目前部署 Image**：
 ```text
-weknora-ui:zh-tw-image-fallback-20260814
+weknora-ui:zh-tw-i18n-v0.3-image-fallback-20260814
 ```
 
 **後續處置**：此相容性修復應以獨立 PR 提交，不混入 zh-TW 語系 PR。待後端版本原生支援上述 session/message 檔案路由後，才評估移除此 fallback。
