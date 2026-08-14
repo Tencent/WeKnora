@@ -14,10 +14,10 @@ import (
 type stubResolveKGService struct {
 	interfaces.KnowledgeService
 
-	filterIDs   []string
-	filterErr   error
-	batchByID   map[string]*types.Knowledge
-	lastFilter  types.KnowledgeListFilter
+	filterIDs  []string
+	filterErr  error
+	batchByID  map[string]*types.Knowledge
+	lastFilter types.KnowledgeListFilter
 }
 
 func (s *stubResolveKGService) ListKnowledgeIDsByFilter(

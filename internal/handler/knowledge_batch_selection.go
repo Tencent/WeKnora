@@ -38,9 +38,9 @@ type knowledgeBatchSelection struct {
 }
 
 type resolvedBatchIDs struct {
-	IDs            []string
-	MatchedCount   int
-	ExcludedCount  int
+	IDs           []string
+	MatchedCount  int
+	ExcludedCount int
 }
 
 func (f knowledgeBatchFilter) toListFilter() (types.KnowledgeListFilter, error) {
@@ -77,11 +77,11 @@ func (f knowledgeBatchFilter) toListFilter() (types.KnowledgeListFilter, error) 
 
 // resolveBatchKnowledgeIDs resolves the target ID set for batch write APIs.
 //
-// - select_all=false: explicitIDs are required, capped at maxBatchExplicitIDs,
-//   and verified to exist in the given knowledge base.
-// - select_all=true: IDs are loaded from the DB via Filter, then exclude_ids
-//   are removed; capped at maxSelectAllMatched. Existence is implied by the
-//   filter query (no GetKnowledgeBatch round-trip).
+//   - select_all=false: explicitIDs are required, capped at maxBatchExplicitIDs,
+//     and verified to exist in the given knowledge base.
+//   - select_all=true: IDs are loaded from the DB via Filter, then exclude_ids
+//     are removed; capped at maxSelectAllMatched. Existence is implied by the
+//     filter query (no GetKnowledgeBatch round-trip).
 func (h *KnowledgeHandler) resolveBatchKnowledgeIDs(
 	ctx context.Context,
 	tenantID uint64,
