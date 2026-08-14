@@ -74,6 +74,8 @@ export function useCmdkSearch(options: {
   chunkLimit?: number
   /** Debounce delay in ms. */
   debounceMs?: number
+  /** 当前部署是否提供智能体路由；不提供时不发起预加载请求。 */
+  agentsEnabled?: () => boolean
 }) {
   const debounceMs = options.debounceMs ?? 350
   const query = ref('')
@@ -149,6 +151,7 @@ export function useCmdkSearch(options: {
   // Agents (own + shared). Lazily loaded & cached; no backend search endpoint
   // exists so we always filter client-side.
   const ensureAgents = async (): Promise<void> => {
+    if (options.agentsEnabled?.() === false) return
     if (agentsLoaded.value) return
     if (agentsLoadingPromise) return agentsLoadingPromise
     agentsLoadingPromise = (async () => {
@@ -188,6 +191,7 @@ export function useCmdkSearch(options: {
   }
 
   const agentMatches = computed<CmdkAgent[]>(() => {
+    if (options.agentsEnabled?.() === false) return []
     const q = query.value.trim().toLowerCase()
     if (!q) return []
     return agents.value
@@ -350,7 +354,9 @@ export function useCmdkSearch(options: {
     // keystroke. Sessions come from the menuStore (already populated by the
     // sidebar) so no extra fetch needed here.
     ensureKbs()
-    ensureAgents()
+    if (options.agentsEnabled?.() !== false) {
+      ensureAgents()
+    }
   })
 
   return {

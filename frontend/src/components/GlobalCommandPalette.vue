@@ -165,6 +165,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useCommandPaletteStore } from '@/stores/commandPalette'
 import { useAuthStore } from '@/stores/auth'
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { useCmdkSearch, type CmdkFileGroup, type CmdkChunk, type CmdkMsgGroup } from './GlobalCommandPalette/useSearch'
 import { highlightText } from './GlobalCommandPalette/useHighlight'
 import { useStartChat } from './GlobalCommandPalette/useStartChat'
@@ -179,6 +180,7 @@ const route = useRoute()
 const router = useRouter()
 const commandPaletteStore = useCommandPaletteStore()
 const authStore = useAuthStore()
+const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const { open, initialQuery, recentQueries } = storeToRefs(commandPaletteStore)
 const { startChat } = useStartChat()
 
@@ -200,6 +202,7 @@ const {
   clearResults,
 } = useCmdkSearch({
   lockedKbIds: () => (activeKbScope.value ? [activeKbScope.value.id] : []),
+  agentsEnabled: () => deploymentCapabilities.isSupported('agents'),
 })
 
 const drawerVisible = ref(false)
@@ -256,11 +259,15 @@ const allCommands = computed(() => {
     t,
     close: () => commandPaletteStore.closePalette(),
   })
-  // 共享空间入口与侧栏菜单保持一致：viewer / contributor 看不到。
-  if (!authStore.hasRole('admin')) {
-    return cmds.filter((c) => c.id !== 'open-organizations')
-  }
-  return cmds
+  return cmds.filter((command) => {
+    if (command.id === 'open-agents') {
+      return deploymentCapabilities.isSupported('agents')
+    }
+    if (command.id === 'open-organizations') {
+      return authStore.hasRole('admin') && deploymentCapabilities.isSupported('organizations')
+    }
+    return true
+  })
 })
 
 const filteredCommands = computed(() => filterCommands(allCommands.value, query.value))

@@ -96,6 +96,7 @@ type ScoreNormalizer interface {
 // "legacy/experimental, no standalone deployable instance"):
 //   - InfinityRetrieverEngineType
 //   - ElasticFaissRetrieverEngineType
+//
 // Their case labels below route to clamp01(score) defensively, but
 // production code never returns these engine types.
 //

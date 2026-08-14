@@ -18,6 +18,14 @@
       </div>
       <!-- Tree children (intermediate steps) -->
       <div v-if="showIntermediateSteps" class="tree-children">
+        <ChatMemoryStep
+          v-if="hasMemory"
+          :memories="memoryItems"
+          :expanded="memoryExpanded"
+          :forgetting-id="memoryForgettingId"
+          @toggle="toggleMemory"
+          @forget="forgetMemory"
+        />
         <template v-for="(event, index) in visibleIntermediateEvents" :key="getEventKey(event, index)">
           <div v-if="event && event.type" class="tree-child"
             :class="{ 'tree-child-last': !isConversationDone && index === visibleIntermediateEvents.length - 1 }">
@@ -213,6 +221,19 @@
         'streaming-steps-constrained': !answerEverStarted && !isConversationDone,
         'is-streaming-timeline': showStreamingTimeline
       }">
+      <!-- Recalled memory leads the timeline: it is what the turn knew before it
+           started, so it belongs on the same line as the steps that follow it
+           rather than in a card of its own above them. -->
+      <ChatMemoryStep
+        v-if="showMemoryRow"
+        class="event-item"
+        :memories="memoryItems"
+        :expanded="memoryExpanded"
+        :is-last="memoryIsLast"
+        :forgetting-id="memoryForgettingId"
+        @toggle="toggleMemory"
+        @forget="forgetMemory"
+      />
       <template v-for="(event, index) in displayEvents" :key="getEventKey(event, index)">
         <div v-if="event && event.type" class="event-item" :class="{
           'event-answer': event.type === 'answer',
@@ -517,6 +538,8 @@ import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
+import ChatMemoryStep from './ChatMemoryStep.vue';
+import { useChatMemoryRow, type UsedMemory } from '@/composables/useChatMemoryRow';
 import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
 import { getKnowledgeChunksSummaryHtml } from '@/utils/knowledgeChunksDisplay';
 import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay';
@@ -843,6 +866,15 @@ const embedAuthProps = computed(() => ({
 const showRequestInfo = computed(
   () => !props.embeddedMode && !!(props.session?.request_id || props.session?.id),
 );
+
+const {
+  memoryItems,
+  hasMemory,
+  expanded: memoryExpanded,
+  forgettingId: memoryForgettingId,
+  toggle: toggleMemory,
+  forget: forgetMemory,
+} = useChatMemoryRow(() => props.session?.used_memories as UsedMemory[] | undefined);
 
 const resolveAssistantMessageId = (session?: SessionData) =>
   String(session?.assistant_message_id || session?.id || '').trim();
@@ -1664,6 +1696,19 @@ const shouldShowCollapsedSteps = computed(() => {
   const hasSteps = intermediateStepsCount.value > 0;
   return hasSteps && isConversationDone.value;
 });
+
+// Once the steps collapse, the memory row travels with them into the tree —
+// showing it here as well would leave two rows saying the same thing. In
+// quick-answer mode the pipeline component owns the timeline and its memory row.
+const showMemoryRow = computed(
+  () => !props.ragMode && hasMemory.value && !shouldShowCollapsedSteps.value,
+);
+
+// Memory leads the timeline, so it is only the last node while nothing has
+// followed it yet — and a lone node has no trunk line to draw below it.
+const memoryIsLast = computed(
+  () => lastStreamingTimelineEventIndex.value === -1 && !showAgentActivityIndicator.value,
+);
 
 // Check if event is a "deep thinking" type (either streaming thinking or thinking tool call)
 const isThinkingLikeEvent = (event: any): boolean => {

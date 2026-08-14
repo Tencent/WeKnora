@@ -527,11 +527,17 @@ const viewMode = ref<'chunks' | 'merged' | 'preview'>('merged');
  *  2. HTML 实体编码（&#34; 等）导致的 content 长度与原文区间不一致——比对的是
  *     文本本身，不受长度偏差影响。
  *
+ * positionOverlap <= 0 时两段位置上严格相邻或不相交，无可去重重叠；此时进入
+ * 文本匹配会因 headSlack 下限 320 在 next 开头窗口内误命中 acc 后缀的真实
+ * 内容重复（如同一句话在文档多次出现），把 next 开头整段误判为补写表头删掉，
+ * 造成不可逆的内容丢失。直接拼接，补写表头重复交给调用方后处理。
+ *
  * @param positionOverlap 由 start/end 估算的重叠量，仅用于界定搜索窗口大小。
  */
 const appendChunkContent = (acc: string, next: string, positionOverlap: number): string => {
   if (!acc) return next;
   if (!next) return acc;
+  if (positionOverlap <= 0) return acc + next;
 
   const MIN_OVERLAP = 12;          // 过短的后缀容易误匹配（如分隔行），忽略
   const span = Math.max(positionOverlap, 0);

@@ -317,6 +317,16 @@ type KnowledgeRepository interface {
 	// FindByMetadataKeyPrefix finds knowledge items whose metadata[key] starts
 	// with the given prefix. Used to sweep an external node's attachment sub-items.
 	FindByMetadataKeyPrefix(ctx context.Context, tenantID uint64, kbID string, key string, prefix string) ([]*types.Knowledge, error)
+	// FindByDataSourceExternalID finds a knowledge item owned by one data source
+	// and identified by the source's external item ID.
+	FindByDataSourceExternalID(
+		ctx context.Context, tenantID uint64, kbID, dataSourceID, externalID string,
+	) (*types.Knowledge, error)
+	// HardDeleteKnowledge physically removes a row after DeleteKnowledge's soft-delete
+	// cascade. Sync-internal deletions use this so rows never become tombstones.
+	HardDeleteKnowledge(ctx context.Context, tenantID uint64, id string) error
+	// HardDeleteKnowledgeList is the batch counterpart of HardDeleteKnowledge.
+	HardDeleteKnowledgeList(ctx context.Context, tenantID uint64, ids []string) error
 	// SearchKnowledgeInScopes searches knowledge items by keyword within the given (tenant_id, kb_id) scopes (own + shared).
 	SearchKnowledgeInScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error)
 	// ListIDsByTagIDs returns all knowledge IDs that have any of the specified tag IDs (OR semantics).

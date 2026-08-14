@@ -348,6 +348,11 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 	RegisterDataSourceRoutes(v1, &handler.DataSourceHandler{}, &handler.DataSourceCredentialsHandler{}, g)
 	RegisterWeKnoraCloudRoutes(v1, &handler.WeKnoraCloudHandler{}, g)
 
+	capabilitiesPolicy := mustLookupAPIKeyPolicy(t, g, http.MethodGet, "/api/v1/system/capabilities")
+	if capabilitiesPolicy.RequireFullAccess || len(capabilitiesPolicy.Capabilities) != 0 {
+		t.Fatalf("system capabilities should be readable by any valid API key: %#v", capabilitiesPolicy)
+	}
+
 	cases := []struct {
 		method string
 		path   string

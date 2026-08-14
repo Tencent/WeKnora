@@ -246,6 +246,10 @@ type CustomAgentConfig struct {
 	MultiTurnEnabled bool `yaml:"multi_turn_enabled" json:"multi_turn_enabled"`
 	// Number of history turns to keep in context
 	HistoryTurns int `yaml:"history_turns" json:"history_turns"`
+	// Whether this agent may read the user's long-term memory. Nil inherits
+	// the workspace setting; false opts a single agent out of memory even when
+	// the workspace has it on. There is no "on" that overrides the workspace.
+	MemoryEnabled *bool `yaml:"memory_enabled" json:"memory_enabled,omitempty"`
 
 	// ===== Retrieval Strategy Settings (for both modes) =====
 	// Embedding/Vector retrieval top K
