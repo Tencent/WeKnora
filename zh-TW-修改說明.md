@@ -128,7 +128,12 @@ Embed 訪客模式不會降級，以維持其 Embed token 的權限邊界。
 
 **目前部署 Image**：
 ```text
-weknora-ui:zh-tw-i18n-v0.3-image-fallback-20260814
+weknora-ui:zh-tw-v0.7.2-overlay-20260814
+```
+
+**部署驗證（2026-08-14）**：已在官方 `v0.7.2` 前後端基準上重新編譯並部署；確認 served bundle 含 `zh-TW` 與受保護圖片相容性 fallback，並保留官方基準 Image：
+```text
+weknora-ui:official-v0.7.2-before-zh-tw-overlay-20260814
 ```
 
 **後續處置**：此相容性修復應以獨立 PR 提交，不混入 zh-TW 語系 PR。待後端版本原生支援上述 session/message 檔案路由後，才評估移除此 fallback。
@@ -172,6 +177,7 @@ WEKNORA_CHAT_ATTACHMENT_TTL_HOURS=24
 ## 版本紀錄
 | 日期 | 版本 | 修改內容 |
 |------|------|---------|
+| 2026-08-14 | v0.4 | 官方 UI Image 更新後，以 v0.7.2 基準重新部署 zh-TW Overlay；保留官方 Image 備份並驗證語系 bundle、內建智能體繁中名稱與圖片 fallback |
 | 2026-08-14 | v0.3 | 完整複核 zh-TW 全部翻譯值；以 OpenCC `s2twp` 校正 2,076 個項目，確認「快速問答」等簡體用語零殘留，並完成語系審計與 production build 驗證 |
 | 2026-08-14 | v0.2 | 更正 RAG 圖片閃退根因為新舊前後端圖片代理 API 不相容；記錄部署的 fallback Image 與獨立修復 PR 策略 |
 | 2026-08-14 | v0.1 | 初始建立 zh-TW 語系包，完成 19 組用語校正、6 個核心檔案修改、遠端部署與 PR 提交 |
