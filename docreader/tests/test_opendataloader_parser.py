@@ -1,6 +1,7 @@
 """Unit tests for OpenDataLoader parser helpers (no JVM required)."""
 
 import os
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -10,12 +11,41 @@ from docreader.parser.opendataloader_parser import (
     _collect_images_under_output,
     _find_markdown_file,
     _normalize_odl_image_url,
+    _ping_hybrid,
+    _run_convert,
     _rewrite_markdown_image_refs,
     opendataloader_available,
 )
 
 
 class OpenDataLoaderHelpersTest(unittest.TestCase):
+    def test_hybrid_health_probe_blocks_private_url_before_request(self):
+        with mock.patch(
+            "docreader.parser.opendataloader_parser.is_ssrf_safe_url",
+            return_value=(False, "restricted test address"),
+        ), mock.patch("urllib.request.build_opener") as build_opener:
+            ok, msg = _ping_hybrid("http://127.0.0.1:8080", retries=1)
+
+        self.assertFalse(ok)
+        self.assertIn("SSRF", msg)
+        build_opener.assert_not_called()
+
+    def test_convert_blocks_private_hybrid_url_at_final_sink(self):
+        fake_module = mock.Mock()
+        with mock.patch.dict(sys.modules, {"opendataloader_pdf": fake_module}):
+            with self.assertRaisesRegex(RuntimeError, "SSRF"):
+                _run_convert(
+                    "/tmp/input.pdf",
+                    "/tmp/output",
+                    "/tmp/output/images",
+                    overrides={
+                        "odl_hybrid": "docling-fast",
+                        "odl_hybrid_url": "http://169.254.169.254/latest/meta-data",
+                    },
+                )
+
+        fake_module.convert.assert_not_called()
+
     def test_find_markdown_prefers_stem_match(self):
         with tempfile.TemporaryDirectory() as d:
             other = os.path.join(d, "other.md")

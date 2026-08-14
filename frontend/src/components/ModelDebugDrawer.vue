@@ -192,9 +192,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { copyWithToast } from '@/utils/clipboard'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { debugModel, type ModelConfig, type ModelDebugResult } from '@/api/model'
 import { fileSizeVerification } from '@/utils'
@@ -448,13 +449,14 @@ const runDebug = async () => {
 
 const copyResult = async () => {
   if (!result.value) return
-  try {
-    await navigator.clipboard.writeText(JSON.stringify(result.value, null, 2))
-    MessagePlugin.success(t('common.copied'))
-  } catch {
-    MessagePlugin.error(t('common.copyFailed'))
-  }
+  await copyWithToast(JSON.stringify(result.value, null, 2), 'common.copied')
 }
+
+onBeforeUnmount(() => {
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+  }
+})
 </script>
 
 <style scoped lang="less">

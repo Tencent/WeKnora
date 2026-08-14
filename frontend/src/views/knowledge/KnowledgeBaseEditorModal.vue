@@ -14,7 +14,7 @@
             <!-- 左侧导航 -->
             <div class="settings-sidebar">
               <div class="sidebar-header">
-                <h2 class="sidebar-title">{{ mode === 'create' ? $t('knowledgeEditor.titleCreate') : $t('knowledgeEditor.titleEdit') }}</h2>
+                <h2 class="sidebar-title">{{ editorMode === 'create' ? $t('knowledgeEditor.titleCreate') : $t('knowledgeEditor.titleEdit') }}</h2>
               </div>
               <div class="settings-nav" data-guide="kb-editor-sidebar">
                 <template v-for="group in navGroups" :key="group.key">
@@ -45,11 +45,11 @@
                       <p class="section-desc">{{ $t('knowledgeEditor.basic.description') }}</p>
                     </div>
                     <div class="section-body">
-                      <div v-if="mode === 'edit' && props.kbId" class="form-item">
+                      <div v-if="editorMode === 'edit' && activeKbId" class="form-item">
                         <label class="form-label">{{ $t('knowledgeEditor.basic.kbId') }}</label>
-                        <p class="form-tip">{{ $t('knowledgeEditor.basic.kbIdDesc') }}</p>
+                        <p class="form-tip">{{ isPostCreateSession ? $t('knowledgeEditor.postCreateHint.followUpDesc') : $t('knowledgeEditor.basic.kbIdDesc') }}</p>
                         <div class="kb-id-field">
-                          <code class="kb-id-value" :title="props.kbId">{{ props.kbId }}</code>
+                          <code class="kb-id-value" :title="activeKbId">{{ activeKbId }}</code>
                           <t-tooltip :content="$t('common.copy')" placement="top">
                             <t-button theme="default" size="small" variant="text" class="kb-id-copy"
                               @click="copyKbId">
@@ -63,7 +63,7 @@
                         <label class="form-label required">{{ $t('knowledgeEditor.basic.typeLabel') }}</label>
                         <t-radio-group
                           v-model="formData.type"
-                          :disabled="mode === 'edit'"
+                          :disabled="editorMode === 'edit'"
                           data-guide="kb-create-type"
                         >
                           <t-radio-button value="document">{{ $t('knowledgeEditor.basic.typeDocument') }}</t-radio-button>
@@ -198,7 +198,7 @@
                 <div v-show="currentSection === 'vectorStore'" class="section">
                   <KBVectorStoreSettings
                     v-if="formData"
-                    :mode="mode"
+                    :mode="editorMode"
                     :vector-store-id="formData.vectorStoreId"
                     :bound-source="formData.vectorStoreInfo?.source"
                     :bound-name="formData.vectorStoreInfo?.name"
@@ -256,7 +256,7 @@
                   <KBStorageSettings
                     :storage-backend-id="formData.storageBackendId"
                     :storage-provider="formData.storageProvider"
-                    :has-files="mode === 'edit' && hasFiles"
+                    :has-files="editorMode === 'edit' && hasFiles"
                     @update:storage-backend-id="handleStorageBackendUpdate"
                     @update:storage-provider="handleStorageProviderUpdate"
                   />
@@ -406,38 +406,49 @@
                     ref="advancedSettingsRef"
                     v-if="formData"
                     :question-generation="formData.questionGenerationConfig"
+                    :auto-tag="formData.autoTagConfig"
                     :rag-enabled="formData.indexingStrategy?.vectorEnabled || formData.indexingStrategy?.keywordEnabled"
                     :all-models="allModels"
                     :table-metadata-instructions="formData.chunkingConfig.tableMetadataInstructions"
                     @update:question-generation="handleQuestionGenerationUpdate"
+                    @update:auto-tag="(value) => { if (formData) formData.autoTagConfig = value }"
                     @update:table-metadata-instructions="(value: string) => { if (formData) formData.chunkingConfig.tableMetadataInstructions = value }"
                   />
                 </div>
 
                 <!-- 数据源管理（仅编辑模式） -->
-                <div v-if="mode === 'edit' && kbId && currentSection === 'datasource'" class="section">
-                  <DataSourceSettings :kb-id="kbId" @count="dsCount = $event" />
+                <div v-if="editorMode === 'edit' && activeKbId && currentSection === 'datasource'" class="section">
+                  <DataSourceSettings :kb-id="activeKbId" @count="dsCount = $event" />
                 </div>
 
                 <!-- 共享设置（仅编辑模式） -->
-                <div v-if="mode === 'edit' && kbId && currentSection === 'share'" class="section">
-                  <KBShareSettings :kb-id="kbId" :can-share="canShareKB" />
+                <div v-if="editorMode === 'edit' && activeKbId && currentSection === 'share'" class="section">
+                  <KBShareSettings :kb-id="activeKbId" :can-share="canShareKB" />
                 </div>
 
                 <!-- 活动记录（仅编辑模式，KB 所属租户内 Owner/Admin） -->
-                <div v-if="mode === 'edit' && kbId && canViewActivity && currentSection === 'activity'" class="section">
-                  <KnowledgeBaseActivitySettings :kb-id="kbId" :active="currentSection === 'activity'" />
+                <div v-if="editorMode === 'edit' && activeKbId && canViewActivity && currentSection === 'activity'" class="section">
+                  <KnowledgeBaseActivitySettings :kb-id="activeKbId" :active="currentSection === 'activity'" />
                 </div>
               </div>
 
               <!-- 保存按钮 -->
               <div class="settings-footer">
-                <t-button theme="default" variant="outline" @click="handleClose">
-                  {{ $t('common.cancel') }}
-                </t-button>
-                <t-button theme="primary" data-guide="kb-create-submit" @click="handleSubmit" :loading="saving">
-                  {{ mode === 'create' ? $t('knowledgeEditor.buttons.create') : $t('knowledgeEditor.buttons.save') }}
-                </t-button>
+                <p v-if="isPostCreateSession" class="settings-footer-note">
+                  <t-icon name="check-circle-filled" class="settings-footer-note__icon" />
+                  <span>
+                    <strong>{{ $t('knowledgeEditor.postCreateHint.title') }}</strong>
+                    {{ $t('knowledgeEditor.postCreateHint.footer') }}
+                  </span>
+                </p>
+                <div class="settings-footer-actions">
+                  <t-button theme="default" variant="outline" @click="handleClose">
+                    {{ $t('common.cancel') }}
+                  </t-button>
+                  <t-button theme="primary" data-guide="kb-create-submit" @click="handleSubmit" :loading="saving">
+                    {{ saveButtonLabel }}
+                  </t-button>
+                </div>
               </div>
             </div>
           </div>
@@ -446,7 +457,7 @@
     </Transition>
   </Teleport>
 
-  <KbCreateContextualGuide :when="visible && mode === 'create'" :is-faq="isFAQ"
+  <KbCreateContextualGuide :when="visible && editorMode === 'create'" :is-faq="isFAQ"
     :needs-embedding="kbCreateNeedsEmbedding" />
 </template>
 
@@ -457,8 +468,9 @@ import { KB_EDITOR_FOCUS_SECTION_EVENT, markContextualGuideDone } from '@/config
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { createKnowledgeBase, getKnowledgeBaseById, listKnowledgeFiles, updateKnowledgeBase, rebuildKBIndex } from '@/api/knowledge-base'
 import { updateKBConfig, type KBModelConfigRequest } from '@/api/initialization'
-import { type ModelConfig } from '@/api/model'
 import { useChatResourcesStore } from '@/stores/chatResources'
+import { selectInitialModelId } from '@/utils/modelDefaults'
+import { copyWithToast } from '@/utils/clipboard'
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
@@ -495,28 +507,19 @@ const emit = defineEmits<{
   (e: 'success', kbId: string): void
 }>()
 
-const copyKbId = async () => {
-  const id = props.kbId
-  if (!id) return
+/** 首次保存创建成功后留在弹窗内，继续配置共享等设置 */
+const savedKbId = ref<string | null>(null)
+const editorMode = computed(() => (savedKbId.value ? 'edit' : props.mode))
+const activeKbId = computed(() => savedKbId.value ?? props.kbId)
+const isPostCreateSession = computed(() => !!savedKbId.value)
+const saveButtonLabel = computed(() =>
+  editorMode.value === 'create'
+    ? t('knowledgeEditor.buttons.create')
+    : t('knowledgeEditor.buttons.saveAndClose')
+)
 
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(id)
-    } else {
-      const textarea = document.createElement('textarea')
-      textarea.value = id
-      textarea.setAttribute('readonly', '')
-      textarea.style.position = 'fixed'
-      textarea.style.opacity = '0'
-      document.body.appendChild(textarea)
-      textarea.select()
-      document.execCommand('copy')
-      document.body.removeChild(textarea)
-    }
-    MessagePlugin.success(t('common.copied'))
-  } catch {
-    MessagePlugin.error(t('common.copyFailed'))
-  }
+const copyKbId = async () => {
+  await copyWithToast(activeKbId.value, 'common.copied')
 }
 
 const currentSection = ref<string>('basic')
@@ -556,7 +559,7 @@ const kbTenantId = ref<number>(0)
 // would only see 403s if we let them try. Mirror the matrix here so
 // the buttons disappear instead of failing.
 const canShareKB = computed(() => {
-  if (!props.kbId) return false
+  if (!activeKbId.value) return false
   const userId = authStore.user?.id || ''
   if (kbCreatorId.value && userId && kbCreatorId.value === userId) return true
   return authStore.hasRole('admin')
@@ -568,7 +571,7 @@ const isKbOwner = computed(() => {
 })
 
 const canViewActivity = computed(() => {
-  if (props.mode !== 'edit' || !props.kbId) return false
+  if (editorMode.value !== 'edit' || !activeKbId.value) return false
   if (Number(kbTenantId.value || 0) !== Number(authStore.currentTenantId || 0)) return false
   return isKbOwner.value || authStore.hasRole('admin')
 })
@@ -614,11 +617,11 @@ const navItems = computed(() => {
       { key: 'graph', icon: 'chart-bubble', label: t('knowledgeEditor.sidebar.graph') },
       { key: 'advanced', icon: 'setting', label: t('knowledgeEditor.sidebar.advanced') }
     )
-    if (props.mode === 'edit' && props.kbId) {
+    if (editorMode.value === 'edit' && activeKbId.value) {
       items.push({ key: 'datasource', icon: 'cloud-download', label: t('knowledgeEditor.sidebar.datasource'), badge: dsCount.value || undefined })
     }
   }
-  if (props.mode === 'edit' && props.kbId && !authStore.isLiteMode) {
+  if (editorMode.value === 'edit' && activeKbId.value && !authStore.isLiteMode) {
     items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') })
   }
   if (canViewActivity.value) {
@@ -676,18 +679,14 @@ const kbCreateNeedsEmbedding = computed(() => {
 })
 
 const applyDefaultModelsIfEmpty = () => {
-  if (!formData.value || props.mode !== 'create') return
-  const pick = (type: ModelConfig['type']) => {
-    const list = allModels.value.filter((m) => m.type === type)
-    return list.find((m) => m.is_default) || list[0]
+  if (!formData.value || editorMode.value !== 'create') return
+  const chatModelId = selectInitialModelId(allModels.value, 'KnowledgeQA')
+  const embeddingModelId = selectInitialModelId(allModels.value, 'Embedding')
+  if (!formData.value.modelConfig.llmModelId && chatModelId) {
+    formData.value.modelConfig.llmModelId = chatModelId
   }
-  const chat = pick('KnowledgeQA')
-  const embedding = pick('Embedding')
-  if (!formData.value.modelConfig.llmModelId && chat?.id) {
-    formData.value.modelConfig.llmModelId = chat.id
-  }
-  if (!formData.value.modelConfig.embeddingModelId && embedding?.id) {
-    formData.value.modelConfig.embeddingModelId = embedding.id
+  if (!formData.value.modelConfig.embeddingModelId && embeddingModelId) {
+    formData.value.modelConfig.embeddingModelId = embeddingModelId
   }
 }
 
@@ -772,6 +771,12 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       questionCount: 3,
       customInstructions: ''
     },
+    autoTagConfig: {
+      enabled: false,
+      modelId: '',
+      maxTags: 3,
+      skipIfTagged: true
+    },
     wikiConfig: {
       synthesisModelId: '',
       maxPagesPerIngest: 0,
@@ -811,14 +816,15 @@ const loadAllModels = async (force = false) => {
 }
 
 // 加载知识库数据（编辑模式）
-const loadKBData = async () => {
-  if (props.mode !== 'edit' || !props.kbId) return
+const loadKBData = async (kbIdOverride?: string) => {
+  const kbId = kbIdOverride ?? activeKbId.value
+  if (editorMode.value !== 'edit' || !kbId) return
   
   loading.value = true
   try {
     const [kbInfo, filesResult] = await Promise.all([
-      getKnowledgeBaseById(props.kbId),
-      listKnowledgeFiles(props.kbId, { page: 1, page_size: 1 })
+      getKnowledgeBaseById(kbId),
+      listKnowledgeFiles(kbId, { page: 1, page_size: 1 })
     ])
     
     if (!kbInfo || !kbInfo.data) {
@@ -890,6 +896,14 @@ const loadKBData = async () => {
         enabled: kb.question_generation_config?.enabled || false,
         questionCount: kb.question_generation_config?.question_count || 3,
         customInstructions: kb.question_generation_config?.custom_instructions || ''
+      },
+      autoTagConfig: {
+        enabled: kb.auto_tag_config?.enabled || false,
+        modelId: kb.auto_tag_config?.model_id || '',
+        maxTags: kb.auto_tag_config?.max_tags || 3,
+        // Absent on knowledge bases saved before the toggle existed; the
+        // backend treats that as "skip", so mirror it here.
+        skipIfTagged: kb.auto_tag_config?.skip_if_tagged ?? true
       },
       wikiConfig: {
         synthesisModelId: kb.wiki_config?.synthesis_model_id || '',
@@ -974,7 +988,7 @@ const handleGranularityChange = (value: string | number | boolean) => {
   }
 }
 
-const isIndexingLocked = computed(() => props.mode === 'edit' && hasFiles.value)
+const isIndexingLocked = computed(() => editorMode.value === 'edit' && hasFiles.value)
 
 const toggleVectorIndexing = () => {
   if (!formData.value) return
@@ -1008,7 +1022,7 @@ const isWikiOnlyStrategy = computed(() => {
 // 仅在创建模式、用户未改过分块设置时，随索引策略自动应用/撤销 Wiki-only 预设。
 // 编辑模式严格保持后端已有配置不变，避免误改。
 watch(isWikiOnlyStrategy, (wikiOnly) => {
-  if (props.mode !== 'create') return
+  if (editorMode.value !== 'create') return
   if (!formData.value) return
   if (chunkingDirty.value) return
   const preset = wikiOnly ? WIKI_ONLY_CHUNKING_PRESET : DEFAULT_CHUNKING_PRESET
@@ -1050,7 +1064,7 @@ const handleAddWikiModel = () => {
 
 const handleStorageProviderUpdate = (value: string) => {
   if (formData.value) {
-    formData.value.storageProvider = props.mode === 'create'
+    formData.value.storageProvider = editorMode.value === 'create'
       ? editorResources.resolveUsableStorageProvider(value || tenantDefaultStorageProvider.value)
       : (value || tenantDefaultStorageProvider.value || 'local')
   }
@@ -1076,7 +1090,7 @@ async function loadTenantDefaultStorageProvider(force = false) {
 /** Resolved storage provider for create payload (never silently default to local before tenant config loads). */
 function resolvedStorageProvider(): string {
   const explicit = formData.value?.storageProvider?.trim()
-  if (props.mode === 'create') {
+  if (editorMode.value === 'create') {
     return editorResources.resolveUsableStorageProvider(explicit || tenantDefaultStorageProvider.value)
   }
   if (explicit) return explicit
@@ -1245,6 +1259,13 @@ const buildSubmitData = () => {
     }
   }
 
+  data.auto_tag_config = {
+    enabled: formData.value.autoTagConfig?.enabled || false,
+    model_id: formData.value.autoTagConfig?.modelId || '',
+    max_tags: formData.value.autoTagConfig?.maxTags || 3,
+    skip_if_tagged: formData.value.autoTagConfig?.skipIfTagged ?? true
+  }
+
   if (formData.value.type === 'faq') {
     data.faq_config = {
       index_mode: formData.value.faqConfig?.indexMode || 'question_only',
@@ -1298,7 +1319,7 @@ const handleSubmit = async () => {
 
   // 编辑模式下，若已有文件且存储引擎发生了变化，弹窗确认
   if (
-    props.mode === 'edit' &&
+    editorMode.value === 'edit' &&
     hasFiles.value &&
     formData.value &&
     initialStorageProvider.value &&
@@ -1331,18 +1352,23 @@ const doSubmit = async () => {
       throw new Error(t('knowledgeEditor.messages.buildDataFailed'))
     }
 
-    if (props.mode === 'create') {
+    if (editorMode.value === 'create') {
       // 创建模式：一次性创建知识库及所有配置
       const result: any = await createKnowledgeBase(data)
       if (!result.success || !result.data?.id) {
         throw new Error(result.message || t('knowledgeEditor.messages.createFailed'))
       }
+      const createdKbId = result.data.id as string
+      savedKbId.value = createdKbId
+      currentSection.value = 'basic'
+      await loadKBData(createdKbId)
       MessagePlugin.success(t('knowledgeEditor.messages.createSuccess'))
       markContextualGuideDone('kbCreate')
-      emit('success', result.data.id)
+      emit('success', createdKbId)
     } else {
       // 编辑模式：分别更新基本信息和配置
-      if (!props.kbId) {
+      const kbId = activeKbId.value
+      if (!kbId) {
         throw new Error(t('knowledgeEditor.messages.missingId'))
       }
 
@@ -1364,6 +1390,7 @@ const doSubmit = async () => {
         }
       }
       if (formData.value.type !== 'faq') {
+        updateConfig.auto_tag_config = data.auto_tag_config
         updateConfig.indexing_strategy = {
           vector_enabled: formData.value.indexingStrategy?.vectorEnabled ?? true,
           keyword_enabled: formData.value.indexingStrategy?.keywordEnabled ?? true,
@@ -1371,7 +1398,7 @@ const doSubmit = async () => {
           graph_enabled: formData.value.indexingStrategy?.graphEnabled ?? false,
         }
       }
-      await updateKnowledgeBase(props.kbId, {
+      await updateKnowledgeBase(kbId, {
         name: data.name,
         description: data.description,
         config: updateConfig
@@ -1419,7 +1446,7 @@ const doSubmit = async () => {
         }
       }
 
-      await updateKBConfig(props.kbId, config)
+      await updateKBConfig(kbId, config)
       MessagePlugin.success(t('knowledgeEditor.messages.updateSuccess'))
 
       // Check if indexing strategy changed and offer rebuild
@@ -1441,7 +1468,7 @@ const doSubmit = async () => {
             onConfirm: async () => {
               dialog.destroy()
               try {
-                const result: any = await rebuildKBIndex(props.kbId!)
+                const result: any = await rebuildKBIndex(kbId)
                 const count = result?.data?.document_count ?? 0
                 MessagePlugin.success(t('knowledgeEditor.indexing.rebuildSuccess', { count }))
               } catch (e) {
@@ -1456,10 +1483,9 @@ const doSubmit = async () => {
         }
       }
 
-      emit('success', props.kbId)
+      emit('success', kbId)
+      handleClose()
     }
-    
-    handleClose()
   } catch (error: any) {
     console.error('Knowledge base operation failed:', error)
     // Vector-store-binding error codes from the server. Both indicate
@@ -1486,6 +1512,7 @@ const doSubmit = async () => {
 
 // 重置所有状态
 const resetState = () => {
+  savedKbId.value = null
   currentSection.value = 'basic'
   formData.value = null
   hasFiles.value = false
@@ -1931,10 +1958,43 @@ watch(
 }
 
 .settings-footer {
-  padding: 16px 32px;
+  padding: 12px 40px;
   border-top: 1px solid var(--td-component-stroke);
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.settings-footer-note {
+  margin: 0;
+  margin-right: auto;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--td-text-color-secondary);
+
+  strong {
+    margin-right: 4px;
+    color: var(--td-text-color-primary);
+    font-weight: 500;
+  }
+
+  &__icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+    font-size: 14px;
+    color: var(--td-success-color);
+  }
+}
+
+.settings-footer-actions {
+  display: flex;
   gap: 12px;
   flex-shrink: 0;
 }

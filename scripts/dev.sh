@@ -424,7 +424,7 @@ start_app() {
         return 1
     fi
     
-    # 本地 docker-compose.dev 模式：把容器服务名映射到 localhost
+    # 本地 docker-compose.dev 模式：把容器服务名映射到宿主机回环地址
     # 远程开发模式（DEV_REMOTE_HOST 或 .env.local 已设地址）则保留 .env/.env.local 中的值
     if [ -n "${DEV_REMOTE_HOST:-}" ]; then
         log_info "远程开发模式: 基础设施 → ${DEV_REMOTE_HOST}"
@@ -439,13 +439,13 @@ start_app() {
             export LANGFUSE_HOST="http://${DEV_REMOTE_HOST}:3000"
         fi
     else
-        export DB_HOST=localhost
-        export DOCREADER_ADDR=localhost:50051
-        export MINIO_ENDPOINT=localhost:9000
-        export REDIS_ADDR=localhost:6379
-        export MILVUS_ADDRESS=localhost:19530
-        export NEO4J_URI=bolt://localhost:7687
-        export QDRANT_HOST=localhost
+        export DB_HOST=127.0.0.1
+        export DOCREADER_ADDR=127.0.0.1:50051
+        export MINIO_ENDPOINT=127.0.0.1:9000
+        export REDIS_ADDR=127.0.0.1:6379
+        export MILVUS_ADDRESS=127.0.0.1:19530
+        export NEO4J_URI=bolt://127.0.0.1:7687
+        export QDRANT_HOST=127.0.0.1
     fi
     export DOCREADER_TRANSPORT="${DOCREADER_TRANSPORT:-grpc}"
 

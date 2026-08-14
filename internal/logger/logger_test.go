@@ -212,3 +212,70 @@ func TestCloneContextPreservesTenantAPIKeyScope(t *testing.T) {
 		t.Fatalf("cloned scope = %#v, want key_id=7 scoped to kb-1", got)
 	}
 }
+
+// setupSSEStream builds its async context through CloneContext, so dropping
+// this key here would silently re-key every session→sandbox binding onto the
+// tenant a shared agent borrowed — stranding the MicroVM at session deletion.
+func TestCloneContextPreservesSandboxTenantID(t *testing.T) {
+	t.Parallel()
+
+	const sessionOwner, agentOwner = uint64(7), uint64(99)
+
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, agentOwner)
+	ctx = types.WithSandboxTenantID(ctx, sessionOwner)
+	cloned := CloneContext(ctx)
+
+	got, ok := types.SandboxTenantIDFromContext(cloned)
+	if !ok || got != sessionOwner {
+		t.Fatalf("SandboxTenantIDFromContext(cloned) = (%d, %v), want (%d, true)",
+			got, ok, sessionOwner)
+	}
+}
+
+// The agent-level memory opt-out is set before setupSSEStream clones, while
+// extraction and the explicit remember route run after. Losing the key here
+// would leave an agent that cannot read memory still writing to it.
+func TestCloneContextPreservesTheAgentMemoryOptOut(t *testing.T) {
+	t.Parallel()
+
+	optedOut := CloneContext(types.WithMemoryDisabled(context.Background()))
+	if types.MemoryAllowedForAgent(optedOut) {
+		t.Fatal("MemoryAllowedForAgent(cloned) = true, want the opt-out to survive the clone")
+	}
+
+	// The absence of the marker still has to read as allowed, so agents that
+	// never touched the switch keep their memory.
+	if !types.MemoryAllowedForAgent(CloneContext(context.Background())) {
+		t.Fatal("MemoryAllowedForAgent(cloned) = false for an unmarked context, want true")
+	}
+}
+
+// Document ingestion detaches mid-flight: knowledge_create hands processChunks
+// to a goroutine on a cloned context, and processChunks vectorises every chunk.
+// If the background mark does not survive, that work stops being visible to the
+// per-model concurrency governor and the ingestion storm it exists to contain
+// runs past it, starving interactive chat.
+func TestCloneContextKeepsBackgroundWorkThrottled(t *testing.T) {
+	t.Parallel()
+
+	if !types.IsBackgroundTask(CloneContext(types.WithBackgroundTask(context.Background()))) {
+		t.Fatal("IsBackgroundTask(cloned) = false, want background work to stay throttled across a detach")
+	}
+	if types.IsBackgroundTask(CloneContext(context.Background())) {
+		t.Fatal("IsBackgroundTask(cloned) = true for an unmarked context, want interactive work left ungated")
+	}
+}
+
+// An IM bot has no live client to click "Authorize", so losing this mark makes
+// the agent block on the OAuth wait for every unauthorized service instead of
+// replying with its one-shot notice.
+func TestCloneContextKeepsTheNonInteractiveOAuthMark(t *testing.T) {
+	t.Parallel()
+
+	if !types.IsMCPOAuthNonInteractive(CloneContext(types.WithMCPOAuthNonInteractive(context.Background()))) {
+		t.Fatal("IsMCPOAuthNonInteractive(cloned) = false, want the mark to survive a detach")
+	}
+	if types.IsMCPOAuthNonInteractive(CloneContext(context.Background())) {
+		t.Fatal("IsMCPOAuthNonInteractive(cloned) = true for an unmarked context, want interactive prompts to stay possible")
+	}
+}

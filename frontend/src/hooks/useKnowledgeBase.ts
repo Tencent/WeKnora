@@ -40,6 +40,8 @@ export default function (knowledgeBaseId?: string) {
     tags: [] as Array<{ id: string; name: string; color?: string }>,
   });
   let knowledgeListGeneration = 0;
+  let chunkRequestGeneration = 0;
+  let activeKnowledgeId = '';
   const getKnowled = (
     query: {
       page: number;
@@ -51,6 +53,8 @@ export default function (knowledgeBaseId?: string) {
       source?: string;
       start_time?: string;
       end_time?: string;
+      folder_path?: string;
+      folder_recursive?: boolean;
     } = { page: 1, page_size: 35 },
     kbId?: string,
   ): Promise<void> => {
@@ -76,6 +80,7 @@ export default function (knowledgeBaseId?: string) {
         original_file_name: item.file_name,
         display_name: displayName,
         file_name: displayName,
+        folder_path: item.folder_path || '',
         updated_at: formatStringDate(new Date(item.updated_at)),
         isMore: false,
         file_type: fileTypeSource ? String(fileTypeSource).toLocaleUpperCase() : '',
@@ -177,6 +182,8 @@ export default function (knowledgeBaseId?: string) {
       });
   };
   const getCardDetails = (item: any) => {
+    activeKnowledgeId = item.id;
+    chunkRequestGeneration++;
     Object.assign(details, {
       title: "",
       time: "",
@@ -220,21 +227,22 @@ export default function (knowledgeBaseId?: string) {
   };
   
   const getfDetails = (id: string, page: number) => {
+    const requestGeneration = ++chunkRequestGeneration;
     details.chunkLoading = true;
     details.chunkLoadError = "";
     getKnowledgeDetailsCon(id, page)
       .then((result: any) => {
+        if (requestGeneration !== chunkRequestGeneration || activeKnowledgeId !== id) return;
         if (result.success && result.data) {
           const { data, total: totalResult } = result;
-          if (page === 1) {
-            details.md = data;
-          } else {
-            details.md.push(...data);
-          }
+          details.md = data;
           details.total = totalResult;
+        } else {
+          details.chunkLoadError = result?.message || result?.error?.message || t('knowledgeBase.chunkLoadFailed');
         }
       })
       .catch((err: any) => {
+        if (requestGeneration !== chunkRequestGeneration || activeKnowledgeId !== id) return;
         details.chunkLoadError = err?.message || t('knowledgeBase.chunkLoadFailed');
         console.error("[ChunkLoad] failed", {
           knowledgeId: id,
@@ -243,7 +251,9 @@ export default function (knowledgeBaseId?: string) {
         });
       })
       .finally(() => {
-        details.chunkLoading = false;
+        if (requestGeneration === chunkRequestGeneration) {
+          details.chunkLoading = false;
+        }
       });
   };
   return {

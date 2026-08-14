@@ -97,7 +97,7 @@ type WikiPageService interface {
 	// RebuildIndexPage regenerates the index page.
 	RebuildIndexPage(ctx context.Context, kbID string) error
 
-	// ListAllPages retrieves all wiki pages in a knowledge base without pagination.
+	// ListAllPages retrieves all non-archived wiki pages in a knowledge base without pagination.
 	// Used for index rebuild, graph generation, cross-link injection, etc.
 	ListAllPages(ctx context.Context, kbID string) ([]*types.WikiPage, error)
 
@@ -354,7 +354,7 @@ type WikiPageRepository interface {
 	// Used to recompute cached paths when a folder subtree is moved/renamed.
 	ListPagesByFolderIDs(ctx context.Context, kbID string, folderIDs []string) ([]*types.WikiPage, error)
 
-	// ListAll retrieves all wiki pages in a knowledge base (for link rebuilding, graph generation).
+	// ListAll retrieves all non-archived wiki pages in a knowledge base (for link rebuilding, graph generation).
 	ListAll(ctx context.Context, kbID string) ([]*types.WikiPage, error)
 
 	// ListRecentForSuggestions returns recent user-visible wiki pages under the given

@@ -17,7 +17,14 @@ const (
 	ConnectorTypeFeishu = "feishu"
 	// ConnectorTypeLark is Feishu's international edition (open.larksuite.com).
 	// It shares the Feishu connector; only the API host and tenant differ.
-	ConnectorTypeLark        = "lark"
+	ConnectorTypeLark = "lark"
+	// ConnectorTypeFeishuDrive is the Feishu Drive (云盘) mode: syncs documents
+	// under a user-supplied Drive folder_token, as opposed to a Wiki space.
+	// Shares the feishu connector package; only resource enumeration + fetch differ.
+	ConnectorTypeFeishuDrive = "feishu_drive"
+	// ConnectorTypeLarkDrive is the Lark (international) Drive mode, the
+	// international counterpart of ConnectorTypeFeishuDrive.
+	ConnectorTypeLarkDrive   = "lark_drive"
 	ConnectorTypeNotion      = "notion"
 	ConnectorTypeConfluence  = "confluence"
 	ConnectorTypeYuque       = "yuque"
@@ -29,6 +36,8 @@ const (
 	ConnectorTypeSlack       = "slack"
 	ConnectorTypeIMAP        = "imap"
 	ConnectorTypeRSS         = "rss"
+	ConnectorTypeGitLab      = "gitlab"
+	ConnectorTypeIMA         = "ima"
 
 	// Sync modes
 	SyncModeIncremental = "incremental"
@@ -421,6 +430,10 @@ type SyncResult struct {
 
 	// Items that failed
 	Failed int `json:"failed"`
+
+	// Deleted items whose KB deletion failed (a subset of Failed). Past the
+	// connector cursor, so normally only a later full sync retries them.
+	DeletionFailed int `json:"deletion_failed,omitempty"`
 
 	// Per-item failure samples (capped), shown in the sync-log UI.
 	Errors []SyncItemError `json:"errors,omitempty"`

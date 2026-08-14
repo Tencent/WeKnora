@@ -479,6 +479,19 @@ func (s *messageService) GetChatHistoryKBStats(ctx context.Context) (*types.Chat
 	return stats, nil
 }
 
+// GetSessionArtifacts returns every skill-produced artifact recorded against
+// any assistant message of the session. Thin pass-through to the repository:
+// the collector and session cleanup both need it, and centralising it here
+// keeps tests able to inject a stub MessageService.
+func (s *messageService) GetSessionArtifacts(
+	ctx context.Context, sessionID string,
+) (types.MessageArtifacts, error) {
+	if sessionID == "" {
+		return types.MessageArtifacts{}, nil
+	}
+	return s.messageRepo.GetSessionArtifacts(ctx, sessionID)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Message Search (Hybrid: Keyword + KB Vector Search)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -489,6 +502,14 @@ func (s *messageService) SearchMessages(ctx context.Context, params *types.Messa
 	logger.Infof(ctx, "Start searching messages, query: %s, mode: %s", params.Query, params.Mode)
 
 	tenantID := types.MustTenantIDFromContext(ctx)
+
+	// Conversation search is scoped to the person asking, exactly as the
+	// session list is. Sessions are per-user state, and a workspace-wide
+	// keyword search over them let any viewer read a colleague's private
+	// conversations, which is not something a search box should be able to do.
+	if params.OwnerID == "" {
+		params.OwnerID = types.SessionOwnerIDFromContext(ctx)
+	}
 
 	// Set defaults
 	if params.Mode == "" {
@@ -504,7 +525,8 @@ func (s *messageService) SearchMessages(ctx context.Context, params *types.Messa
 
 	// Step 1: Keyword search (direct PG ILIKE)
 	if params.Mode == types.MessageSearchModeKeyword || params.Mode == types.MessageSearchModeHybrid {
-		keywordResults, err = s.messageRepo.SearchMessagesByKeyword(ctx, tenantID, params.Query, params.SessionIDs, params.Limit*3)
+		keywordResults, err = s.messageRepo.SearchMessagesByKeyword(
+			ctx, tenantID, params.OwnerID, params.Query, params.SessionIDs, params.Limit*3)
 		if err != nil {
 			logger.Errorf(ctx, "Keyword search failed: %v", err)
 			return nil, err
@@ -537,6 +559,13 @@ func (s *messageService) SearchMessages(ctx context.Context, params *types.Messa
 		items = rrfMerge(keywordResults, vectorResults)
 	}
 
+	// The vector path resolves hits through a shared knowledge base that does
+	// not know who wrote a message, so ownership is re-checked on the results.
+	items, err = s.restrictToOwnedSessions(ctx, tenantID, params.OwnerID, items)
+	if err != nil {
+		return nil, err
+	}
+
 	// Step 4: Fetch partner messages (Q&A counterparts) to ensure complete pairs
 	items = s.fetchPartnerMessages(ctx, items)
 
@@ -555,6 +584,38 @@ func (s *messageService) SearchMessages(ctx context.Context, params *types.Messa
 
 	logger.Infof(ctx, "Message search completed, returning %d grouped results", result.Total)
 	return result, nil
+}
+
+// restrictToOwnedSessions drops results from sessions the caller does not own.
+func (s *messageService) restrictToOwnedSessions(
+	ctx context.Context, tenantID uint64, ownerID string, items []*types.MessageSearchResultItem,
+) ([]*types.MessageSearchResultItem, error) {
+	if ownerID == "" || len(items) == 0 {
+		return items, nil
+	}
+	sessionIDs := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if item == nil || item.SessionID == "" {
+			continue
+		}
+		if _, dup := seen[item.SessionID]; dup {
+			continue
+		}
+		seen[item.SessionID] = struct{}{}
+		sessionIDs = append(sessionIDs, item.SessionID)
+	}
+	owned, err := s.messageRepo.OwnedSessionIDs(ctx, tenantID, ownerID, sessionIDs)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]*types.MessageSearchResultItem, 0, len(items))
+	for _, item := range items {
+		if item != nil && owned[item.SessionID] {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered, nil
 }
 
 // vectorSearchViaKB performs vector search using the chat history knowledge base's HybridSearch.

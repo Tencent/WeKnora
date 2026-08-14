@@ -121,6 +121,52 @@ func TestRetrievalProgressEmitsSingleToolCallAndResult(t *testing.T) {
 	assert.Equal(t, retrievalSourceKnowledge, resultData.Data["search_source"])
 }
 
+// A turn whose candidates all fell below the relevance threshold answers from
+// the fallback, which never sees a retrieved chunk. Reporting the raw hits as
+// the result count claimed context the answer did not have — and offered a row
+// with no references behind it.
+func TestRetrievalProgressReportsNoResultsWhenPipelineFellBack(t *testing.T) {
+	bus := &recordingEventBus{}
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{SessionID: "sess-fallback"},
+		PipelineContext: types.PipelineContext{EventBus: bus},
+		PipelineState: types.PipelineState{
+			SearchResult: []*types.SearchResult{{ID: "r1"}, {ID: "r2"}, {ID: "r3"}},
+		},
+	}
+
+	progress := BeginRetrievalProgress(context.Background(), cm)
+	require.NotNil(t, progress)
+	EndRetrievalProgress(context.Background(), cm, progress, time.Now(), ErrSearchNothing)
+
+	resultData, ok := bus.events[1].Data.(event.AgentToolResultData)
+	require.True(t, ok)
+	assert.True(t, resultData.Success)
+	assert.Equal(t, 0, resultData.Data["count"])
+	assert.Equal(t, 0, resultData.Data["doc_count"])
+	assert.Equal(t, 0, resultData.Data["web_count"])
+	assert.Equal(t, 3, resultData.Data["candidate_count"])
+	assert.Equal(t, "命中 3 条候选，相关性不足，未用于回答", resultData.Output)
+}
+
+func TestRetrievalProgressReportsNothingFoundWhenThereWereNoCandidates(t *testing.T) {
+	bus := &recordingEventBus{}
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{SessionID: "sess-empty"},
+		PipelineContext: types.PipelineContext{EventBus: bus},
+	}
+
+	progress := BeginRetrievalProgress(context.Background(), cm)
+	require.NotNil(t, progress)
+	EndRetrievalProgress(context.Background(), cm, progress, time.Now(), ErrSearchNothing)
+
+	resultData, ok := bus.events[1].Data.(event.AgentToolResultData)
+	require.True(t, ok)
+	assert.Equal(t, 0, resultData.Data["count"])
+	assert.Equal(t, 0, resultData.Data["candidate_count"])
+	assert.Equal(t, "未检索到相关内容", resultData.Output)
+}
+
 func TestRetrievalProgressWebOnlySearchSource(t *testing.T) {
 	bus := &recordingEventBus{}
 	cm := &types.ChatManage{

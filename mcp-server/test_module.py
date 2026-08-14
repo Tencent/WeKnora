@@ -84,7 +84,7 @@ class ModuleIntegrationTest(unittest.TestCase):
 
     def test_pyproject_metadata(self):
         text = (MCP_SERVER_DIR / "pyproject.toml").read_text(encoding="utf-8")
-        self.assertIn("weknora-mcp", text)
+        self.assertIn("tencent-weknora-mcp", text)
         self.assertIn("weknora-mcp-server", text)
 
 

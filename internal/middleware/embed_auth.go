@@ -32,9 +32,6 @@ const (
 	embedGlobalMinuteFloor = 120
 )
 
-// EmbedChannelContextKey stores the authenticated embed channel on the request context.
-const EmbedChannelContextKey types.ContextKey = "EmbedChannel"
-
 var (
 	embedLimiterOnce sync.Once
 	embedLimiter     *ratelimit.Limiter
@@ -171,7 +168,7 @@ func EmbedAuth(
 			TenantID: ch.TenantID,
 			Tenant:   tenant,
 			Role:     types.TenantRoleViewer,
-			Extra:    map[types.ContextKey]any{EmbedChannelContextKey: ch},
+			Extra:    map[types.ContextKey]any{types.EmbedChannelContextKey: ch},
 		})
 		c.Next()
 	}
@@ -235,6 +232,6 @@ func originAllowed(origin string, allowed []string) bool {
 
 // EmbedChannelFromContext returns the authenticated embed channel, if any.
 func EmbedChannelFromContext(ctx context.Context) (*types.EmbedChannel, bool) {
-	ch, ok := ctx.Value(EmbedChannelContextKey).(*types.EmbedChannel)
+	ch, ok := ctx.Value(types.EmbedChannelContextKey).(*types.EmbedChannel)
 	return ch, ok && ch != nil
 }

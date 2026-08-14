@@ -496,7 +496,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 						RetractDocContent: op.DocSummary,
 						DocTitle:          op.DocTitle,
 						KnowledgeID:       op.KnowledgeID,
-						Language:          types.LanguageLocaleName(op.Language),
+						Language:          types.ResolveLanguageName(ctx, op.Language),
 					})
 				}
 				for folderID := range folderSet {
@@ -1157,7 +1157,7 @@ func (s *wikiIngestService) mapOneDocument(
 ) (*docIngestResult, []SlugUpdate, error) {
 	docStartedAt := time.Now()
 	knowledgeID := op.KnowledgeID
-	lang := types.LanguageLocaleName(op.Language)
+	lang := types.ResolveLanguageName(ctx, op.Language)
 
 	// Open a postprocess.wiki subspan under the parent attempt's
 	// postprocess stage so the actual per-doc work (LLM extraction +
@@ -1662,6 +1662,26 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 	return result.Entities, result.Concepts, slugItems, nil
 }
 
+// resolveSlugUpdateLanguage picks the language the editor prompt should write
+// the page in.
+//
+// A single page aggregates updates from every document that cites it, and an
+// update queued before the language field existed — or enqueued from a
+// background path that never saw the HTTP language middleware — carries none.
+// Scanning for the first update that resolved a language, rather than indexing
+// into one bucket, keeps the page localised as long as ANY contributor knew the
+// language; the deployment default covers the case where none did. Without the
+// fallback the prompt renders "Write in ." and the model picks a language at
+// random, which is how single pages ended up in the wrong language.
+func resolveSlugUpdateLanguage(ctx context.Context, updates []SlugUpdate) string {
+	for _, u := range updates {
+		if u.Language != "" {
+			return u.Language
+		}
+	}
+	return types.LanguageNameFromContext(ctx)
+}
+
 // reduceSlugUpdates returns:
 //   - changed:          whether the wiki page was created or updated
 //   - affectedType:     "ingest" or "retract" — drives downstream bookkeeping
@@ -1837,11 +1857,10 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	var newContentBuilder strings.Builder
 	var sharedSourceContexts strings.Builder
 	var docTitles []string
-	var language string
+
+	language := resolveSlugUpdateLanguage(ctx, updates)
 
 	if len(retracts) > 0 {
-		language = retracts[0].Language
-
 		for _, r := range retracts {
 			fmt.Fprintf(&deletedContent, "<document>\n<title>%s</title>\n<content>\n%s\n</content>\n</document>\n\n", r.DocTitle, r.RetractDocContent)
 		}
@@ -1891,8 +1910,6 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	}
 
 	if len(additions) > 0 {
-		language = additions[0].Language
-
 		// Resolve SourceChunks → chunk contents in a single batched query per
 		// knowledge ID, so the <new_information> block can quote the chunks
 		// verbatim instead of relying on the short Details paraphrase.

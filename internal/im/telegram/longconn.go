@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // MessageHandler is called when an IM message is received via long polling.
@@ -26,9 +27,12 @@ type LongConnClient struct {
 // NewLongConnClient creates a Telegram long-polling client.
 func NewLongConnClient(botToken string, handler MessageHandler) *LongConnClient {
 	return &LongConnClient{
-		botToken:   botToken,
-		handler:    handler,
-		httpClient: &http.Client{Timeout: 35 * time.Second},
+		botToken: botToken,
+		handler:  handler,
+		httpClient: secutils.NewSSRFSafeHTTPClient(secutils.SSRFSafeHTTPClientConfig{
+			Timeout:      35 * time.Second,
+			MaxRedirects: 5,
+		}),
 	}
 }
 

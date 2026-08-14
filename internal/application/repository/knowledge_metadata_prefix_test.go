@@ -40,10 +40,10 @@ func TestFindByMetadataKeyPrefix(t *testing.T) {
 		return id
 	}
 
-	_ = insertRow(tenantID, kbID, "nodeA")            // parent — must NOT match
+	_ = insertRow(tenantID, kbID, "nodeA")               // parent — must NOT match
 	childID := insertRow(tenantID, kbID, "nodeA#file#x") // attachment child — MUST match
-	_ = insertRow(tenantID, kbID, "nodeB")            // sibling — must NOT match
-	_ = insertRow(tenantID, otherKBID, "nodeA#file#y") // different KB — must be excluded
+	_ = insertRow(tenantID, kbID, "nodeB")               // sibling — must NOT match
+	_ = insertRow(tenantID, otherKBID, "nodeA#file#y")   // different KB — must be excluded
 
 	results, err := repo.FindByMetadataKeyPrefix(ctx, tenantID, kbID, "external_id", "nodeA#")
 	require.NoError(t, err)

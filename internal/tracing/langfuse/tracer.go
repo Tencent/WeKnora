@@ -344,8 +344,12 @@ func jsonAttr(key string, v interface{}) attribute.KeyValue {
 		return attribute.KeyValue{Key: attribute.Key(key)}
 	}
 	b, err := json.Marshal(v)
-	if err != nil || len(b) == 0 || string(b) == "null" {
+	if err != nil {
 		logger.Warnf(context.Background(), "[Langfuse] marshal attr %s failed: %v", key, err)
+		return attribute.KeyValue{Key: attribute.Key(key)}
+	}
+	if len(b) == 0 || string(b) == "null" {
+		// Optional structured fields are often unset; omit rather than warn.
 		return attribute.KeyValue{Key: attribute.Key(key)}
 	}
 	return attribute.String(key, string(b))

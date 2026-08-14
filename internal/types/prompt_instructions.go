@@ -71,10 +71,10 @@ func ValidateKnowledgeBasePromptInstructions(kb *KnowledgeBase) error {
 // merged per-upload effective config.
 func ValidateEffectiveProcessPromptInstructions(eff EffectiveProcessConfig) error {
 	fields := map[string]string{
-		"table metadata instructions":       eff.ChunkingConfig.TableMetadataInstructions,
-		"image instructions":                eff.VLMConfig.CustomInstructions,
-		"question generation instructions":  eff.QuestionGenerationConfig.CustomInstructions,
-		"graph extraction instructions":     eff.ExtractConfig.CustomInstructions,
+		"table metadata instructions":      eff.ChunkingConfig.TableMetadataInstructions,
+		"image instructions":               eff.VLMConfig.CustomInstructions,
+		"question generation instructions": eff.QuestionGenerationConfig.CustomInstructions,
+		"graph extraction instructions":    eff.ExtractConfig.CustomInstructions,
 	}
 	return validatePromptInstructionFields(fields)
 }

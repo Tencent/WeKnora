@@ -1,6 +1,7 @@
 import i18n from '@/i18n';
 import hljs from 'highlight.js';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
+import { copyToClipboard } from '@/utils/clipboard';
 
 const ENHANCE_FLAG = 'data-markdown-enhancements';
 const boundMarkdownRoots = new WeakSet<HTMLElement>();
@@ -134,26 +135,15 @@ async function handleCodeCopy(btn: HTMLButtonElement): Promise<void> {
   const copiedLabel = i18n.global.t('common.copied');
   const defaultLabel = i18n.global.t('embedPublish.copyCode');
 
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(code);
-    } else {
-      const textArea = document.createElement('textarea');
-      textArea.value = code;
-      textArea.style.position = 'fixed';
-      textArea.style.opacity = '0';
-      document.body.appendChild(textArea);
-      textArea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textArea);
-    }
+  const ok = await copyToClipboard(code);
+  if (ok) {
     btn.classList.add('is-copied');
     if (textEl) textEl.textContent = copiedLabel;
     window.setTimeout(() => {
       btn.classList.remove('is-copied');
       if (textEl) textEl.textContent = defaultLabel;
     }, 1600);
-  } catch {
+  } else {
     btn.classList.add('is-error');
     window.setTimeout(() => btn.classList.remove('is-error'), 1600);
   }

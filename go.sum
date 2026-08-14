@@ -1326,6 +1326,8 @@ cloud.google.com/go/workflows v1.12.3/go.mod h1:fmOUeeqEwPzIU81foMjTRQIdwQHADi/v
 cloud.google.com/go/workflows v1.12.4/go.mod h1:yQ7HUqOkdJK4duVtMeBCAOPiN1ZF1E9pAMX51vpwB/w=
 codeberg.org/readeck/go-readability/v2 v2.1.2 h1:JBrdyYJBRPMBbodLM1b5KxCSDH+JqCkGcuVRD7ICBAw=
 codeberg.org/readeck/go-readability/v2 v2.1.2/go.mod h1:Ut31sW4osSrJPR3T8eQslMh4+jbwimXqn0w0ReCT+PU=
+connectrpc.com/connect v1.19.1 h1:R5M57z05+90EfEvCY1b7hBxDVOUl45PrtXtAV2fOC14=
+connectrpc.com/connect v1.19.1/go.mod h1:tN20fjdGlewnSFeZxLKb0xwIZ6ozc3OQs2hTXy4du9w=
 dmitri.shuralyov.com/gpu/mtl v0.0.0-20190408044501-666a987793e9/go.mod h1:H6x//7gZCb22OMCxBHrMx7a5I7Hp++hsVxbQ4BYO7hU=
 entgo.io/ent v0.14.3 h1:wokAV/kIlH9TeklJWGGS7AYJdVckr0DloWjIcO9iIIQ=
 entgo.io/ent v0.14.3/go.mod h1:aDPE/OziPEu8+OWbzy4UlvWmD2/kbRuWfK2A40hcxJM=
@@ -2239,6 +2241,8 @@ github.com/mailru/easyjson v0.9.0 h1:PrnmzHw7262yW8sTBwxi1PdJA3Iw/EKBa8psRf7d9a4
 github.com/mailru/easyjson v0.9.0/go.mod h1:1+xMtQp2MRNVL/V1bOzuP3aP8VNwRW55fQUto+XFtTU=
 github.com/mark3labs/mcp-go v0.52.0 h1:uRSzupNSUyPGDpF4owY5X4zEpACPwBnlM3FAFuXN6gQ=
 github.com/mark3labs/mcp-go v0.52.0/go.mod h1:Zg9cB2HdwdMMVgY0xtTzq3KvYIOJQDsaut+jWjwDaQY=
+github.com/matiasinsaurralde/go-e2b v0.1.1-0.20260808041540-fdc08ceaa1c1 h1:iEhD0FOnY0m/7SyTF3vijOXbO++uLNckvD2Ttp87vw0=
+github.com/matiasinsaurralde/go-e2b v0.1.1-0.20260808041540-fdc08ceaa1c1/go.mod h1:JTycrO2WcWcZeUNZH6XIk10sV7UixdsGKOt4HQXZiiQ=
 github.com/matryer/is v1.4.0/go.mod h1:8I/i5uYgLzgsgEloJE1U6xx5HkBQpAZvepWuujKwMRU=
 github.com/matryer/is v1.4.1 h1:55ehd8zaGABKLXQUe2awZ99BD/PTc2ls+KV/dXphgEQ=
 github.com/matryer/is v1.4.1/go.mod h1:8I/i5uYgLzgsgEloJE1U6xx5HkBQpAZvepWuujKwMRU=
@@ -2614,6 +2618,8 @@ github.com/swaggo/swag v1.16.6 h1:qBNcx53ZaX+M5dxVyTrgQ0PJ/ACK+NzhwcbieTt+9yI=
 github.com/swaggo/swag v1.16.6/go.mod h1:ngP2etMK5a0P3QBizic5MEwpRmluJZPHjXcMoj4Xesg=
 github.com/tencent/vectordatabase-sdk-go v1.8.4 h1:jVATTavFzDypX/TOx+eNrOJk7DcOA0U8REH5NEIC2bs=
 github.com/tencent/vectordatabase-sdk-go v1.8.4/go.mod h1:cb53Vbd9Lnh3mA1CwqV9Jy8MrNsxpIUlrhzBiBE7A2M=
+github.com/tencentcloud/CubeSandbox/sdk/go v0.0.0-20260807115140-5cefcca27a7f h1:dHvDrWPIE2UPPo1yl8dv+LxBK7lyog3xWfWUlTaXtvI=
+github.com/tencentcloud/CubeSandbox/sdk/go v0.0.0-20260807115140-5cefcca27a7f/go.mod h1:4TpzAuDL+yundwIr7UK0N1hVV6L9R/sqcinE+z4W6G0=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.563/go.mod h1:7sCQWVkxcsR38nffDW057DRGk8mUjK1Ing/EFOK8s8Y=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.103 h1:W1dpZ/Q6+DjUpiAUSmIHuFn7rAvetlSqzQCtf0tKEEA=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.103/go.mod h1:r5r4xbfxSaeR04b166HGsBa/R4U3SueirEUpXGuw+Q0=

@@ -189,7 +189,7 @@ func TestMySQLMigrationRoundTrip(t *testing.T) {
 	}))
 	mysqlHead := highestMigrationVersion(t, "migrations/mysql")
 	assertMigrationState(t, db, mysqlHead, false)
-	assertBusinessTableCount(t, db, 51)
+	assertBusinessTableCount(t, db, 58)
 
 	migrator, err := migrate.New("file://migrations/mysql", migrationURL)
 	require.NoError(t, err)
@@ -197,7 +197,7 @@ func TestMySQLMigrationRoundTrip(t *testing.T) {
 	assertBusinessTableCount(t, db, 0)
 	require.NoError(t, migrator.Up())
 	assertMigrationState(t, db, mysqlHead, false)
-	assertBusinessTableCount(t, db, 51)
+	assertBusinessTableCount(t, db, 58)
 	sourceErr, databaseErr := migrator.Close()
 	require.NoError(t, sourceErr)
 	require.NoError(t, databaseErr)

@@ -58,6 +58,50 @@ func TestAppendWithOverlap_NoOverlap(t *testing.T) {
 	}
 }
 
+func TestAppendWithExactOverlap_TrimsKnownOverlap(t *testing.T) {
+	overlap := "shared boundary text"
+	got, ok := AppendWithExactOverlap("before "+overlap, overlap+" after", len([]rune(overlap)))
+	if !ok {
+		t.Fatal("exact overlap should be accepted")
+	}
+	want := "before " + overlap + " after"
+	if got != want {
+		t.Fatalf("exact overlap mismatch:\n got=%q\nwant=%q", got, want)
+	}
+}
+
+func TestAppendWithExactOverlap_ZeroOverlapConcatenatesRepeatedText(t *testing.T) {
+	// 首尾相接的两段都由同一周期性文本组成（表格行 / 日志行）。重叠量为 0 时
+	// 必须原样拼接，不能去搜索后缀匹配，否则会吃掉 next 开头的重复行。
+	row := "| cell | cell |\n"
+	acc := "前言\n" + row + row
+	next := row + row + row + "结尾\n"
+	got, ok := AppendWithExactOverlap(acc, next, 0)
+	if !ok {
+		t.Fatal("zero overlap should be accepted")
+	}
+	if got != acc+next {
+		t.Fatalf("zero overlap must concatenate verbatim:\n got=%q\nwant=%q", got, acc+next)
+	}
+}
+
+func TestAppendWithExactOverlap_RejectsMismatchedOverlap(t *testing.T) {
+	// 长度不变式成立但文本已经不同（HTML 实体、补写表头等），必须拒绝，
+	// 由调用方回退到按文本匹配。
+	if _, ok := AppendWithExactOverlap("abcdefghijkl", "XYZdefghijkl", 6); ok {
+		t.Fatal("mismatched overlap should be rejected")
+	}
+}
+
+func TestAppendWithExactOverlap_RejectsOverlapLongerThanBodies(t *testing.T) {
+	if _, ok := AppendWithExactOverlap("short", "shorter", 99); ok {
+		t.Fatal("overlap exceeding body length should be rejected")
+	}
+	if _, ok := AppendWithExactOverlap("short", "shorter", -1); ok {
+		t.Fatal("negative overlap should be rejected")
+	}
+}
+
 func TestJoinChunkContentUsesCurrentTextInsteadOfSourceOffsets(t *testing.T) {
 	first := "first edited body with no original overlap"
 	second := "second independently edited body"
@@ -113,5 +157,25 @@ func TestMergeTextChunks_GapSeparator(t *testing.T) {
 	want := "first\nsecond"
 	if got != want {
 		t.Fatalf("gap separator mismatch:\n got=%q\nwant=%q", got, want)
+	}
+}
+
+// TestAppendWithOverlap_ContiguousRealContentRepeat is a regression test:
+// two chunks are strictly contiguous (positionOverlap==0), but a boilerplate
+// sentence at the tail of acc reappears inside the head window of next as
+// real content (the same sentence is written multiple times in the document).
+// The old algorithm would enter text matching and, due to the headSlack
+// floor of 320, mistake the head of next for a prepended table header and
+// delete it, causing irreversible content loss. After the fix it should
+// concatenate directly without trimming.
+func TestAppendWithOverlap_ContiguousRealContentRepeat(t *testing.T) {
+	repeat := "The system shall maintain a complete audit trail of all transactions."
+	acc := "3.2 Logging Requirements\n\n" + repeat
+	next := "\n\n5.1 Security Controls\n\n* Role-based access\n* Encryption at rest\n\n5.2 Compliance\n\n" + repeat + " This satisfies SOC 2."
+	got := AppendWithOverlap(acc, next, 0)
+	want := acc + next
+	if got != want {
+		t.Fatalf("contiguous real-content repeat must not trim:\n got.len=%d\nwant.len=%d\n got.tail=%q\nwant.tail=%q",
+			len(got), len(want), got[len(acc)-50:], want[len(acc)-50:])
 	}
 }

@@ -1,3 +1,5 @@
+import type { DeploymentCapabilityKey } from './deploymentCapabilities'
+
 export const CHROME_EXTENSION_URL =
   'https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd?utm_source=item-share-cb'
 
@@ -12,6 +14,12 @@ export type IntegrationTabRole = 'viewer' | 'contributor' | 'admin' | 'owner'
 
 export const INTEGRATION_TAB_MIN_ROLE: Partial<Record<IntegrationTab, IntegrationTabRole>> = {
   api: 'owner',
+}
+
+export const INTEGRATION_TAB_CAPABILITY: Partial<Record<IntegrationTab, DeploymentCapabilityKey>> = {
+  im: 'integrations.im',
+  embed: 'integrations.embed',
+  api: 'integrations.api',
 }
 
 export type IntegrationPreviewIcon =

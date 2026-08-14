@@ -162,6 +162,12 @@ func toIncomingMessage(ctx context.Context, msg *callbackMessage) *im.IncomingMe
 	if err != nil {
 		logger.Warnf(ctx, "[Yunzhijia] Failed to parse msgParam: msgId=%s err=%v", msg.MsgID, err)
 	}
+	if param != nil {
+		// Keep topic diagnostics to identifiers only: they are sufficient to
+		// validate reply-root stability without recording user message content.
+		logger.Infof(ctx, "[Yunzhijia] Thread callback: msg_id=%s reply_msg_id=%s reply_root_msg_id=%s",
+			msg.MsgID, param.ReplyMsgID, param.ReplyRootMsgID)
+	}
 	image, hasImage := param.firstImage()
 
 	content := strings.TrimSpace(msg.Content)
@@ -202,6 +208,7 @@ func toIncomingMessage(ctx context.Context, msg *callbackMessage) *im.IncomingMe
 		ChatType:    chatType,
 		Content:     content,
 		MessageID:   msg.MsgID,
+		ThreadID:    threadIDForMessage(msg.MsgID, param),
 		Extra: map[string]string{
 			"robot_id":      msg.RobotID,
 			"robot_name":    msg.RobotName,
@@ -219,6 +226,16 @@ func toIncomingMessage(ctx context.Context, msg *callbackMessage) *im.IncomingMe
 		incoming.Extra["yunzhijia_image_height"] = fmt.Sprintf("%d", image.Height)
 	}
 	return incoming
+}
+
+// threadIDForMessage returns the message-thread identifier received from
+// Yunzhijia. A top-level message starts a new thread with its own msgId;
+// replies carry replyRootMsgId (normally the bot message at the thread root).
+func threadIDForMessage(messageID string, param *messageParam) string {
+	if param != nil && param.ReplyRootMsgID != "" {
+		return param.ReplyRootMsgID
+	}
+	return messageID
 }
 
 func firstNonEmpty(values ...string) string {
@@ -298,12 +315,18 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 	}
 	if reply.Extra != nil {
 		if formatType, ok := reply.Extra["yunzhijia_format_type"]; ok {
-			if formatType == "" {
-				payload.Param = nil
-			} else {
-				payload.Param = &sendMessageParam{FormatType: formatType}
-			}
+			payload.Param.FormatType = formatType
 		}
+	}
+	if incoming.MessageID != "" {
+		payload.ParamType = 3
+		payload.Param.ReplyMsgID = incoming.MessageID
+		payload.Param.IsReference = true
+		payload.Param.ReplySummary = incoming.Content
+		payload.Param.ReplyPersonName = incoming.UserName
+	} else if payload.Param.FormatType == "" {
+		// Keep the prior opt-out behaviour for non-reference replies.
+		payload.Param = nil
 	}
 
 	// When groupType == 3, don't set notifyParams (per reference implementation).

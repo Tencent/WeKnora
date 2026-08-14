@@ -16,7 +16,7 @@ import (
 //   - GET   /:id          Viewer+ (read tenant settings)
 //   - PUT   /:id          Owner+ (mutate tenant config)
 //   - DELETE /:id         Owner+ (also normally a CanAccessAllTenants op)
-//   - GET/POST/DELETE /:id/api-keys   Owner+ (scoped API key management)
+//   - GET/POST/PUT/DELETE /:id/api-keys   Owner+ (scoped API key management)
 //   - GET    /:id/members            Viewer+ (any member can see who else is in)
 //   - POST   /:id/members            Owner+ (only Owner can add new members)
 //   - PUT    /:id/members/:user_id   Owner+ (only Owner can change roles)
@@ -96,6 +96,7 @@ func RegisterTenantRoutes(
 				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), g.Owner(), handler.DeleteTenant)
 			tenantByID.GET("/api-keys", g.Owner(), handler.ListAPIKeys)
 			tenantByID.POST("/api-keys", g.Owner(), handler.CreateAPIKey)
+			tenantByID.PUT("/api-keys/:key_id", g.Owner(), handler.UpdateAPIKey)
 			tenantByID.DELETE("/api-keys/:key_id", g.Owner(), handler.DeleteAPIKey)
 			tenantByID.GET("/api-principal-config", g.Owner(), handler.GetAPIPrincipalConfig)
 			tenantByID.PUT("/api-principal-config", g.Owner(), handler.UpdateAPIPrincipalConfig)
@@ -170,6 +171,8 @@ func RegisterMyInvitationRoutes(r *gin.RouterGroup, invitationHandler *handler.T
 		me.GET("/invitations/pending-count", invitationHandler.CountMyPendingInvitations)
 		me.POST("/invitations/:inv_id/accept", invitationHandler.AcceptMyInvitation)
 		me.POST("/invitations/:inv_id/decline", invitationHandler.DeclineMyInvitation)
+		// 已登录用户用共享链接 token 加入空间（对应 register-by-invite，但不建新账号）。
+		me.POST("/invitations/accept-by-token", invitationHandler.AcceptMyInvitationByToken)
 	}
 }
 
@@ -191,6 +194,8 @@ func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler, g *rba
 	r.GET("/auth/oidc/config", handler.GetOIDCConfig)
 	r.GET("/auth/oidc/url", handler.GetOIDCAuthorizationURL)
 	r.GET("/auth/oidc/callback", handler.OIDCRedirectCallback)
+	// /auth/oidc/start：直连 302 跳转到 OIDC 提供方，供前端无法走 JS 拉取 URL 的场景直接发起登录
+	r.GET("/auth/oidc/start", handler.OIDCStart)
 	r.POST("/auth/refresh", handler.RefreshToken)
 	r.GET("/auth/validate", handler.ValidateToken)
 	r.POST("/auth/logout", handler.Logout)
@@ -209,15 +214,21 @@ func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler, g *rba
 // reachable". The /*-check / /reconnect endpoints actively probe
 // remote services with tenant credentials and could trigger network
 // fanout, so they're Admin+.
-func RegisterSystemRoutes(r *gin.RouterGroup, handler *handler.SystemHandler, g *rbacGuards) {
+func RegisterSystemRoutes(
+	r *gin.RouterGroup,
+	handler *handler.SystemHandler,
+	g *rbacGuards,
+) {
 	systemRoutes := g.apiKeyGroup(r.Group("/system"), apiKeyManageVectorStores(apiKeyFullAccess()))
 	{
+		systemRoutes.With(apiKeyAny()).GET("/capabilities", g.Viewer(), handler.GetDeploymentCapabilities)
 		systemRoutes.GET("/info", g.Viewer(), handler.GetSystemInfo)
 		systemRoutes.GET("/parser-engines", g.Viewer(), handler.ListParserEngines)
 		systemRoutes.POST("/parser-engines/check", g.Admin(), handler.CheckParserEngines)
 		systemRoutes.POST("/docreader/reconnect", g.Admin(), handler.ReconnectDocReader)
 		systemRoutes.GET("/storage-engine-status", g.Viewer(), handler.GetStorageEngineStatus)
 		systemRoutes.POST("/storage-engine-check", g.Admin(), handler.CheckStorageEngine)
+		systemRoutes.POST("/sandbox-check", g.Admin(), handler.CheckSandboxConfig)
 	}
 }
 

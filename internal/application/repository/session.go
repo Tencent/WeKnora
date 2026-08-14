@@ -189,20 +189,27 @@ func (r *sessionRepository) QueryPaged(
 		case "":
 			return db
 		case types.SessionSourceAPI:
-			// Tenant-wide view of API-key sessions. Their owner id is
-			// "api_tenant_key:<tenantID>:<keyID>", so a prefix match selects
-			// every key's sessions. The service layer already enforced Admin+
-			// and cleared the per-user scope for this source.
-			return db.Where("s.user_id LIKE ?", types.SessionOwnerAPITenantKeyPrefix+"%")
+			// Tenant-wide view of API-key sessions. Requests without an
+			// external identity use an api_tenant_key owner; requests with a
+			// direct-header or signed-token identity use api_external_user.
+			// The service layer already enforced Admin+ and cleared the
+			// per-user scope for this source.
+			return db.Where(
+				"(s.user_id LIKE ? OR s.user_id LIKE ?)",
+				types.SessionOwnerAPITenantKeyPrefix+"%",
+				types.SessionOwnerAPIExternalUserPrefix+"%",
+			)
 		case "web":
 			// User web chats only — exclude embed-widget sessions (same IM-null
-			// row) and tenant API-key sessions (surfaced only in the admin-only
-			// "api" bucket). The user_id NULL check keeps legacy tenant-level web
-			// rows visible, since "col NOT LIKE ?" is unknown (not true) for NULL.
+			// row) and API-key sessions (surfaced only in the admin-only "api"
+			// bucket). The user_id NULL check keeps legacy tenant-level web rows
+			// visible, since "col NOT LIKE ?" is unknown (not true) for NULL.
 			return db.Where(
 				"ics.id IS NULL AND (s.description = '' OR s.description NOT LIKE ?) "+
-					"AND (s.user_id IS NULL OR s.user_id NOT LIKE ?)",
-				embedPrefix+"%", types.SessionOwnerAPITenantKeyPrefix+"%",
+					"AND (s.user_id IS NULL OR (s.user_id NOT LIKE ? AND s.user_id NOT LIKE ?))",
+				embedPrefix+"%",
+				types.SessionOwnerAPITenantKeyPrefix+"%",
+				types.SessionOwnerAPIExternalUserPrefix+"%",
 			)
 		case "embed":
 			return db.Where("ics.id IS NULL AND s.description LIKE ?", embedPrefix+"%")

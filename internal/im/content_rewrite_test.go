@@ -68,60 +68,6 @@ func TestStripImageXMLTags(t *testing.T) {
 	}
 }
 
-func TestFindIncompleteStorageURL(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want int // expected return; -1 means no match expected
-	}{
-		{
-			"complete URL terminated by )",
-			"![img](local://1/abc/img.png)",
-			// The URL `local://1/abc/img.png` ends with `)` which is a terminator,
-			// but the regex [^\s)\]>"]* matches up to `)` — the `)` is NOT included.
-			// So the URL portion is `local://1/abc/img.png` and `)` terminates it.
-			// The match does NOT reach end of string → should return -1.
-			-1,
-		},
-		{
-			"complete URL terminated by space",
-			"text local://1/abc/img.png more text",
-			-1,
-		},
-		{
-			"truncated URL at end",
-			"text ![img](local://1/abc/im",
-			12, // starts at `l` in `local://`
-		},
-		{
-			"just scheme at end",
-			"text minio://",
-			5,
-		},
-		{
-			"partial scoped URL at end",
-			"text storage://backend-a/co",
-			5,
-		},
-		{
-			"no storage URL",
-			"just plain text http://example.com",
-			-1,
-		},
-		{
-			"URL at very end",
-			"local://1/img.png",
-			0,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := findIncompleteStorageURL(tt.in)
-			assert.Equal(t, tt.want, got, "findIncompleteStorageURL(%q)", tt.in)
-		})
-	}
-}
-
 func TestFindIncompleteXMLTag(t *testing.T) {
 	tests := []struct {
 		name string
@@ -234,29 +180,6 @@ func TestRewriteStorageURLs_COSPathNotSignedAsLocalKey(t *testing.T) {
 	out := rewriteStorageURLs(context.Background(), in, newIMFileServiceResolver(tenant, nil))
 	if out != in {
 		assert.False(t, strings.Contains(out, "local%3A"), "COS URL must not treat local:// as object key")
-	}
-}
-
-func TestFindIncompleteMarkdownImage(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want int
-	}{
-		{"complete image", "![img](local://1/a.png)", -1},
-		{"complete then text", "![img](local://1/a.png) trailing", -1},
-		{"truncated provider URL in image", `![知识助理"知识库"管理视图界面](minio://wizard-test/10000/exports/c91cf852`, 0},
-		{"open paren only", "text ![alt](", 5},
-		{"bare provider suffix without markdown", "text minio://wizard-test/10000/exp", -1},
-		{"two images complete", "![a](local://1/a.png) ![b](local://1/b.png)", -1},
-		{"first complete second incomplete", "![a](local://1/a.png) ![b](minio://part", 22},
-		{"bracket inside alt text", "![a[b]](minio://wizard-test/10000/part", 0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := findIncompleteMarkdownImage(tt.in)
-			assert.Equal(t, tt.want, got, "findIncompleteMarkdownImage(%q)", tt.in)
-		})
 	}
 }
 

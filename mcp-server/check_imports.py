@@ -6,41 +6,36 @@
 """
 
 try:
-    import mcp.types as types
-
-    print("✓ mcp.types 导入成功")
-except ImportError as e:
-    print(f"✗ mcp.types 导入失败: {e}")
-
-try:
-    from mcp.server import NotificationOptions, Server
-
-    print("✓ mcp.server 导入成功")
-except ImportError as e:
-    print(f"✗ mcp.server 导入失败: {e}")
-
-try:
-    import mcp.server.stdio
+    import mcp.server.stdio  # noqa: F401
 
     print("✓ mcp.server.stdio 导入成功")
 except ImportError as e:
     print(f"✗ mcp.server.stdio 导入失败: {e}")
 
 try:
-    from mcp.server.models import InitializationOptions
+    # mcp 2.x high-level server API (MCPServer, formerly FastMCP).
+    from mcp.server import MCPServer
 
-    print("✓ InitializationOptions 从 mcp.server.models 导入成功")
-except ImportError:
-    try:
-        from mcp import InitializationOptions
+    print("✓ MCPServer 从 mcp.server 导入成功")
+except ImportError as e:
+    print(f"✗ MCPServer 导入失败: {e}")
 
-        print("✓ InitializationOptions 从 mcp 导入成功")
-    except ImportError as e:
-        print(f"✗ InitializationOptions 导入失败: {e}")
+try:
+    from mcp.server.mcpserver.exceptions import ToolError  # noqa: F401
+
+    print("✓ ToolError 从 mcp.server.mcpserver.exceptions 导入成功")
+except ImportError as e:
+    print(f"✗ ToolError 导入失败: {e}")
+
+try:
+    import mcp_types  # noqa: F401  # standalone protocol types in mcp 2.x
+
+    print("✓ mcp_types 导入成功")
+except ImportError as e:
+    print(f"✗ mcp_types 导入失败: {e}")
 
 # 检查 MCP 包结构
 import mcp
 
 print(f"\nMCP 包版本: {getattr(mcp, '__version__', '未知')}")
 print(f"MCP 包路径: {mcp.__file__}")
-print(f"MCP 包内容: {dir(mcp)}")

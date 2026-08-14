@@ -1,13 +1,13 @@
-version: 2
-linters-settings:
-  lll:
-    line-length: 120
-    tab-width: 4
+version: "2"
 linters:
   enable:
     - lll           # 控制行宽
     - govet
     - revive
+  settings:
+    lll:
+      line-length: 120
+      tab-width: 4
 formatters:
   enable:
     - gofmt
