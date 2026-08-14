@@ -3,6 +3,8 @@ import unittest
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
 from docreader.parser.parser import Parser, detect_effective_file_type
+from docreader.parser.registry import BUILTIN_ENGINE, registry
+from docreader.parser.xmind_parser import XMindParser
 
 
 OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
@@ -29,6 +31,11 @@ class _RecordingRegistry:
 
 
 class ParserRoutingTest(unittest.TestCase):
+    def test_builtin_registry_routes_xmind_to_xmind_parser(self):
+        parser_class = registry.get_parser_class(BUILTIN_ENGINE, "xmind")
+
+        self.assertIs(parser_class, XMindParser)
+
     def test_legacy_doc_payload_renamed_to_docx_uses_doc_parser(self):
         registry = _RecordingRegistry()
         parser = Parser()
