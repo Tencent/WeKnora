@@ -134,6 +134,17 @@ function tenantRequestHeaders(): Record<string, string> {
  * 为一个存储路径构造代理请求。返回 null 表示当前上下文无法发起该请求
  * （非存储路径，或嵌入上下文尚未拿到 token），调用方应跳过并稍后重试。
  */
+export function buildProtectedFileFallbackRequest(
+  sourceURL: string,
+  access: ProtectedFileAccessContext,
+): ProtectedFileRequest | null {
+  // 訊息範圍代理晚於部分自架後端才加入；若該端點回傳 404，改以既有的
+  // 已驗證 /files 路徑重試。不可降級嵌入訪客，因其沒有租戶憑證。
+  if (access.mode !== 'message' || !isProviderFileURL(sourceURL.trim())) return null;
+  const query = new URLSearchParams({ file_path: sourceURL.trim() }).toString();
+  return { url: `/files?${query}`, headers: tenantRequestHeaders() };
+}
+
 export function buildProtectedFileRequest(
   sourceURL: string,
   access: ProtectedFileAccessContext,
