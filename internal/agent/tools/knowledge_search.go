@@ -707,9 +707,16 @@ func (t *KnowledgeSearchTool) rerankWithLLM(
 	// This prevents token overflow and improves processing efficiency
 	const batchSize = 15
 	const maxContentLength = 800 // Maximum characters per passage to avoid excessive tokens
+	const reasoningTokenReserve = 1024
 
 	// Process in batches
 	allScores := make([]float64, len(results))
+	useOriginalScores := func(start, end int) {
+		for i := start; i < end; i++ {
+			allScores[i] = results[i].Score
+		}
+	}
+	disableThinking := false
 
 	for batchStart := 0; batchStart < len(results); batchStart += batchSize {
 		batchEnd := batchStart + batchSize
@@ -793,23 +800,38 @@ Output only the scores, no explanations or additional text.`,
 			},
 		}
 
-		// Calculate appropriate max tokens based on batch size
-		// Each score line is ~15 tokens, add buffer for safety
-		maxTokens := len(batch)*20 + 100
+		// Each score line is ~15 tokens. Disable reasoning for this structured
+		// scoring task and keep a reserve for providers that ignore that option.
+		maxTokens := len(batch)*20 + 100 + reasoningTokenReserve
 
 		modelCtx := types.WithLLMCallMetadata(ctx, "knowledge_search_rerank", "")
 		response, err := t.chatModel.Chat(modelCtx, messages, &chat.ChatOptions{
 			Temperature: 0.1, // Low temperature for consistent scoring
 			MaxTokens:   maxTokens,
+			Thinking:    &disableThinking,
 		})
 		if err != nil {
 			logger.Warnf(ctx, "[Tool][KnowledgeSearch] LLM rerank batch %d-%d failed: %v, using original scores",
 				batchStart+1, batchEnd, err)
 			// Use original scores for this batch on error
-			for i := batchStart; i < batchEnd; i++ {
-				allScores[i] = results[i].Score
-			}
+			useOriginalScores(batchStart, batchEnd)
 			continue
+		}
+		if response == nil || strings.TrimSpace(response.Content) == "" ||
+			strings.EqualFold(response.FinishReason, "length") {
+			finishReason := ""
+			if response != nil {
+				finishReason = response.FinishReason
+			}
+			logger.Warnf(
+				ctx,
+				"[Tool][KnowledgeSearch] LLM rerank batch %d-%d returned incomplete output (finish_reason=%q), using original scores for remaining results",
+				batchStart+1,
+				batchEnd,
+				finishReason,
+			)
+			useOriginalScores(batchStart, len(results))
+			break
 		}
 
 		logger.Infof(ctx, "[Tool][KnowledgeSearch] LLM rerank batch %d-%d response: %s",
@@ -820,16 +842,13 @@ Output only the scores, no explanations or additional text.`,
 		if err != nil {
 			logger.Warnf(
 				ctx,
-				"[Tool][KnowledgeSearch] Failed to parse LLM scores for batch %d-%d: %v, using original scores",
+				"[Tool][KnowledgeSearch] Failed to parse LLM scores for batch %d-%d: %v, using original scores for remaining results",
 				batchStart+1,
 				batchEnd,
 				err,
 			)
-			// Use original scores for this batch on parsing error
-			for i := batchStart; i < batchEnd; i++ {
-				allScores[i] = results[i].Score
-			}
-			continue
+			useOriginalScores(batchStart, len(results))
+			break
 		}
 
 		// Store scores for this batch
@@ -919,18 +938,8 @@ func (t *KnowledgeSearchTool) parseScoresFromResponse(responseText string, expec
 		return nil, fmt.Errorf("no valid scores found in response")
 	}
 
-	// If we got fewer scores than expected, pad with last score or 0.5
-	for len(scores) < expectedCount {
-		if len(scores) > 0 {
-			scores = append(scores, scores[len(scores)-1])
-		} else {
-			scores = append(scores, 0.5)
-		}
-	}
-
-	// Truncate if we got more scores than expected
-	if len(scores) > expectedCount {
-		scores = scores[:expectedCount]
+	if len(scores) != expectedCount {
+		return nil, fmt.Errorf("expected %d scores, got %d", expectedCount, len(scores))
 	}
 
 	return scores, nil
