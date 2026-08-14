@@ -401,7 +401,7 @@ func (s *ImageMultimodalService) shouldDropOrphanedMultimodal(
 }
 
 // isFinalAsynqAttempt reports whether the current task context belongs to the
-// last retry attempt before asynq archives the task as a dead-letter. We use
+// last retry attempt before Asynq (or the Lite executor) archives the task. We use
 // this to flip multimodal finalize semantics: during normal retries we skip
 // counter decrement (the retry might still succeed), but on the final attempt
 // we count the image regardless of outcome so a permanently-failing image
@@ -412,14 +412,14 @@ func (s *ImageMultimodalService) shouldDropOrphanedMultimodal(
 // "not final" keeps test ergonomics — tests should drive finalize explicitly.
 func isFinalAsynqAttempt(ctx context.Context) bool {
 	retried, ok := asynq.GetRetryCount(ctx)
-	if !ok {
-		return false
+	if ok {
+		maxRetry, maxRetryOK := asynq.GetMaxRetry(ctx)
+		if maxRetryOK {
+			return retried >= maxRetry
+		}
 	}
-	maxRetry, ok := asynq.GetMaxRetry(ctx)
-	if !ok {
-		return false
-	}
-	return retried >= maxRetry
+	retried, maxRetry, ok := types.TaskRetryMetadataFromContext(ctx)
+	return ok && retried >= maxRetry
 }
 
 // indexChunks indexes the newly created multimodal chunks into the retrieval engine

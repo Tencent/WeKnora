@@ -160,6 +160,14 @@
                           <t-button
                             shape="square"
                             variant="text"
+                            :title="$t('integrations.api.editApiKeyScope')"
+                            @click="openEditAPIKeyScope(key)"
+                          >
+                            <t-icon name="edit-1" />
+                          </t-button>
+                          <t-button
+                            shape="square"
+                            variant="text"
                             :title="$t('integrations.api.copy')"
                             @click="copy(key.api_key)"
                           >
@@ -555,6 +563,110 @@
       </div>
     </SettingDrawer>
 
+    <SettingDrawer
+      :visible="apiKeyScopeDialogVisible"
+      class="api-key-edit-drawer"
+      :title="$t('integrations.api.editApiKeyScope')"
+      :description="$t('integrations.api.editApiKeyScopeDesc', { name: editingAPIKey?.name || '' })"
+      icon="edit-1"
+      width="560px"
+      :min-width="440"
+      :max-width="760"
+      storage-key="setting-drawer:width:api-key-scope"
+      :confirm-text="$t('common.save')"
+      :confirm-loading="apiKeyScopeSaving"
+      @update:visible="(v: boolean) => apiKeyScopeDialogVisible = v"
+      @confirm="saveAPIKeyConfiguration"
+    >
+      <div class="api-key-dialog">
+        <div class="api-key-dialog-row">
+          <div class="api-key-dialog-row__label">
+            <label>{{ $t('integrations.api.apiKeyName') }}</label>
+          </div>
+          <t-input
+            v-model="editingAPIKeyForm.name"
+            :placeholder="$t('integrations.api.apiKeyNamePlaceholder')"
+          />
+        </div>
+
+        <div class="api-key-dialog-row">
+          <div class="api-key-dialog-row__label">
+            <label>{{ $t('integrations.api.apiKeyAccessType') }}</label>
+          </div>
+          <t-radio-group v-model="editingAPIKeyAccessMode" class="mode-radio api-key-access-type-radio">
+            <t-radio-button value="scoped">{{ $t('integrations.api.apiKeyScopedAccess') }}</t-radio-button>
+            <t-radio-button value="full">{{ $t('integrations.api.capabilityTenantFull') }}</t-radio-button>
+          </t-radio-group>
+          <p class="scope-hint">
+            {{
+              editingAPIKeyFullAccessEnabled
+                ? $t('integrations.api.capabilityTenantFullHint')
+                : $t('integrations.api.apiKeyAccessTypeHint')
+            }}
+          </p>
+        </div>
+
+        <div v-if="!editingAPIKeyFullAccessEnabled" class="api-key-dialog-row">
+          <div class="api-key-dialog-row__label">
+            <label>{{ $t('integrations.api.apiKeyCapabilities') }}</label>
+          </div>
+          <div class="api-key-capability-list">
+            <div
+              v-for="group in apiKeyCapabilityGroups"
+              :key="group.key"
+              class="api-key-capability-group"
+            >
+              <div class="api-key-capability-group__header">
+                <span>{{ $t(group.labelKey) }}</span>
+                <t-button
+                  size="small"
+                  variant="text"
+                  @click="toggleEditingCapabilityGroup(group, !editingCapabilityGroupAllSelected(group))"
+                >
+                  {{
+                    editingCapabilityGroupAllSelected(group)
+                      ? $t('integrations.api.apiKeyCapabilityClearGroup')
+                      : $t('integrations.api.apiKeyCapabilitySelectGroup')
+                  }}
+                </t-button>
+              </div>
+              <div class="api-key-capability-group__items">
+                <div
+                  v-for="capability in group.capabilities"
+                  :key="capability.value"
+                  class="api-key-capability-item"
+                >
+                  <t-checkbox
+                    :model-value="editingCapabilitySelections[capability.value]"
+                    @change="editingCapabilitySelections[capability.value] = Boolean($event)"
+                  >
+                    {{ $t(capability.labelKey) }}
+                  </t-checkbox>
+                  <p class="scope-hint">{{ $t(capability.hintKey) }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="editingKnowledgeScopeApplies" class="api-key-dialog-row">
+          <div class="api-key-dialog-row__label">
+            <label>{{ $t('integrations.api.apiKeyKnowledgeScope') }}</label>
+          </div>
+          <t-select
+            v-model="editingAPIKeyForm.knowledge_base_ids"
+            multiple
+            filterable
+            clearable
+            :loading="knowledgeBasesLoading"
+            :options="knowledgeBaseOptions"
+            :placeholder="$t('integrations.api.apiKeyKnowledgeScopePlaceholder')"
+          />
+          <p class="scope-hint">{{ $t('integrations.api.editApiKeyScopeHint') }}</p>
+        </div>
+      </div>
+    </SettingDrawer>
+
   </div>
 </template>
 
@@ -562,6 +674,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { copyWithToast } from '@/utils/clipboard'
 import { getCurrentUser } from '@/api/auth'
 import { listAgents, BUILTIN_SMART_REASONING_ID, type CustomAgent } from '@/api/agent'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
@@ -571,6 +684,7 @@ import {
   createAPIPrincipalTestToken,
   getAPIPrincipalConfig,
   listTenantAPIKeys,
+  updateTenantAPIKey,
   updateAPIPrincipalConfig,
   type APIPrincipalConfig,
   type APIPrincipalMode,
@@ -586,6 +700,8 @@ import {
   TENANT_API_KEY_CAPABILITY_GROUPS,
   type ApiKeyCapabilityGroup,
 } from '@/config/apiKeyCapabilities'
+import { normalizeAPIKeyKnowledgeBaseIDs } from './apiKeyScope'
+import { consumeApiPlaygroundSSE } from './apiPlaygroundSSE'
 
 const { t } = useI18n()
 
@@ -602,6 +718,9 @@ const apiKeys = ref<TenantAPIKey[]>([])
 const apiKeysLoading = ref(false)
 const apiKeyDialogVisible = ref(false)
 const apiKeyCreating = ref(false)
+const apiKeyScopeDialogVisible = ref(false)
+const apiKeyScopeSaving = ref(false)
+const editingAPIKey = ref<TenantAPIKey | null>(null)
 const knowledgeBasesLoading = ref(false)
 const knowledgeBases = ref<Array<{ id: string; name: string }>>([])
 const secretInput = ref('')
@@ -640,6 +759,49 @@ const capabilitySelections = reactive<Record<TenantAPIKeyCapability, boolean>>(
     return acc
   }, {} as Record<TenantAPIKeyCapability, boolean>),
 )
+
+const editingCapabilitySelections = reactive<Record<TenantAPIKeyCapability, boolean>>(
+  API_KEY_CAPABILITIES.reduce((acc, capability) => {
+    acc[capability] = false
+    return acc
+  }, {} as Record<TenantAPIKeyCapability, boolean>),
+)
+
+const editingAPIKeyForm = reactive({
+  name: '',
+  knowledge_base_ids: [] as string[],
+  tenant_full_enabled: false,
+  expires_at_unix: undefined as number | undefined,
+})
+
+const editingAPIKeyFullAccessEnabled = computed(() => editingAPIKeyForm.tenant_full_enabled)
+const editingAPIKeyAccessMode = computed<'scoped' | 'full'>({
+  get: () => (editingAPIKeyForm.tenant_full_enabled ? 'full' : 'scoped'),
+  set: (value) => {
+    editingAPIKeyForm.tenant_full_enabled = value === 'full'
+  },
+})
+const editingSelectedCapabilities = computed(() => (
+  API_KEY_CAPABILITIES.filter((capability) => editingCapabilitySelections[capability])
+))
+const editingKnowledgeScopeApplies = computed(() => (
+  !editingAPIKeyFullAccessEnabled.value
+  && editingSelectedCapabilities.value.some((capability) => KB_SCOPED_CAPABILITIES.has(capability))
+))
+
+watch(editingKnowledgeScopeApplies, (applies) => {
+  if (!applies) editingAPIKeyForm.knowledge_base_ids = []
+})
+
+function editingCapabilityGroupAllSelected(group: ApiKeyCapabilityGroup): boolean {
+  return group.capabilities.every((capability) => editingCapabilitySelections[capability.value])
+}
+
+function toggleEditingCapabilityGroup(group: ApiKeyCapabilityGroup, selected: boolean) {
+  group.capabilities.forEach((capability) => {
+    editingCapabilitySelections[capability.value] = selected
+  })
+}
 
 const apiKeyForm = reactive({
   name: '',
@@ -1147,20 +1309,7 @@ async function saveIfNeeded(options: { showSuccess?: boolean } = {}) {
 }
 
 async function copy(text: string) {
-  if (!text) return
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text)
-  } else {
-    const textArea = document.createElement('textarea')
-    textArea.value = text
-    textArea.style.position = 'fixed'
-    textArea.style.opacity = '0'
-    document.body.appendChild(textArea)
-    textArea.select()
-    document.execCommand('copy')
-    document.body.removeChild(textArea)
-  }
-  MessagePlugin.success(t('integrations.api.copySuccess'))
+  await copyWithToast(text, 'integrations.api.copySuccess')
 }
 
 async function tryLoadWailsApiBaseURL() {
@@ -1301,6 +1450,10 @@ async function createScopedAPIKey() {
     MessagePlugin.error(t('integrations.api.apiKeyNameRequired'))
     return
   }
+  if (!apiKeyFullAccessEnabled.value && selectedCapabilities().length === 0) {
+    MessagePlugin.error(t('integrations.api.apiKeyCapabilitiesRequired'))
+    return
+  }
   apiKeyCreating.value = true
   try {
     const resp = await createTenantAPIKey(tenantId.value, {
@@ -1322,6 +1475,59 @@ async function createScopedAPIKey() {
     MessagePlugin.error(err?.message || t('integrations.api.createApiKeyFailed'))
   } finally {
     apiKeyCreating.value = false
+  }
+}
+
+// 打开编辑器时复制服务端配置，取消操作不会污染列表中的原始数据。
+function openEditAPIKeyScope(key: TenantAPIKey) {
+  editingAPIKey.value = key
+  editingAPIKeyForm.name = key.name
+  editingAPIKeyForm.tenant_full_enabled = key.full_access
+  editingAPIKeyForm.knowledge_base_ids = normalizeAPIKeyKnowledgeBaseIDs(key.knowledge_base_ids)
+  const expiresAt = key.expires_at ? Date.parse(key.expires_at) : Number.NaN
+  editingAPIKeyForm.expires_at_unix = Number.isNaN(expiresAt)
+    ? undefined
+    : Math.floor(expiresAt / 1000)
+  const currentCapabilities = new Set(key.capabilities || [])
+  API_KEY_CAPABILITIES.forEach((capability) => {
+    editingCapabilitySelections[capability] = currentCapabilities.has(capability)
+  })
+  apiKeyScopeDialogVisible.value = true
+  void loadKnowledgeBaseOptions()
+}
+
+// 保存完整配置后刷新列表，确保鉴权范围与界面立即一致。
+async function saveAPIKeyConfiguration() {
+  const key = editingAPIKey.value
+  if (!key) return
+  if (!editingAPIKeyForm.name.trim()) {
+    MessagePlugin.error(t('integrations.api.apiKeyNameRequired'))
+    return
+  }
+  if (!editingAPIKeyFullAccessEnabled.value && editingSelectedCapabilities.value.length === 0) {
+    MessagePlugin.error(t('integrations.api.apiKeyCapabilitiesRequired'))
+    return
+  }
+  apiKeyScopeSaving.value = true
+  try {
+    const resp = await updateTenantAPIKey(tenantId.value, key.id, {
+      name: editingAPIKeyForm.name.trim(),
+      full_access: editingAPIKeyFullAccessEnabled.value,
+      capabilities: editingAPIKeyFullAccessEnabled.value ? [] : editingSelectedCapabilities.value,
+      knowledge_base_ids: editingKnowledgeScopeApplies.value ? editingAPIKeyForm.knowledge_base_ids : [],
+      expires_at_unix: editingAPIKeyForm.expires_at_unix,
+    })
+    if (!resp.success || !resp.data) {
+      throw new Error(resp.message || t('integrations.api.updateApiKeyScopeFailed'))
+    }
+    apiKeyScopeDialogVisible.value = false
+    editingAPIKey.value = null
+    MessagePlugin.success(t('integrations.api.updateApiKeyScopeSuccess'))
+    await loadAPIKeys()
+  } catch (err: any) {
+    MessagePlugin.error(err?.message || t('integrations.api.updateApiKeyScopeFailed'))
+  } finally {
+    apiKeyScopeSaving.value = false
   }
 }
 
@@ -1349,9 +1555,10 @@ async function deleteScopedAPIKey(id: number) {
   await loadAPIKeys()
 }
 
-function formatKeyKnowledgeScope(ids: string[] = []) {
-  if (!ids.length) return t('integrations.api.allKnowledgeBases')
-  const names = ids.map((id) => knowledgeBases.value.find((kb) => kb.id === id)?.name || id)
+function formatKeyKnowledgeScope(ids: readonly string[] | null | undefined) {
+  const normalizedIDs = normalizeAPIKeyKnowledgeBaseIDs(ids)
+  if (!normalizedIDs.length) return t('integrations.api.allKnowledgeBases')
+  const names = normalizedIDs.map((id) => knowledgeBases.value.find((kb) => kb.id === id)?.name || id)
   return names.join(', ')
 }
 
@@ -1402,26 +1609,6 @@ function formatJSON(value: unknown) {
   } catch {
     return String(value)
   }
-}
-
-function extractAnswerFromSSE(raw: string) {
-  const chunks: string[] = []
-  raw.split('\n').forEach((line) => {
-    if (!line.startsWith('data:')) return
-    const payload = line.slice(5).trim()
-    if (!payload || payload === '[DONE]') return
-    try {
-      const parsed = JSON.parse(payload)
-      const type = parsed?.response_type || parsed?.type
-      const content = parsed?.content
-      if (type === 'answer' && typeof content === 'string') {
-        chunks.push(content)
-      }
-    } catch {
-      // Keep raw stream visible even when an event is not JSON.
-    }
-  })
-  return chunks.join('')
 }
 
 async function readResponseBody(resp: Response) {
@@ -1512,19 +1699,16 @@ async function runPlayground() {
       throw new Error(t('integrations.api.playgroundNoStream'))
     }
 
-    const reader = chatResp.body.getReader()
-    const decoder = new TextDecoder()
-    let raw = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      raw += decoder.decode(value, { stream: true })
+    const result = await consumeApiPlaygroundSSE(chatResp.body, ({ raw, answer }) => {
       playground.stream_output = compactText(raw)
-      playground.final_answer = extractAnswerFromSSE(raw)
+      playground.final_answer = answer
+    })
+    playground.stream_output = compactText(result.raw)
+    playground.final_answer = result.answer
+    if (result.status === 'failed') {
+      playground.chat_status = 'failed'
+      throw new Error(result.error || t('integrations.api.playgroundFailed'))
     }
-    raw += decoder.decode()
-    playground.stream_output = compactText(raw)
-    playground.final_answer = extractAnswerFromSSE(raw)
     playground.chat_status = 'success'
     MessagePlugin.success(t('integrations.api.playgroundSuccess', {
       ms: Math.round(performance.now() - startedAt),

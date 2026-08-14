@@ -108,3 +108,30 @@ func TestNewClientAllowsWhitelistedPrivateDeployment(t *testing.T) {
 		t.Fatalf("expected whitelisted private qqbot endpoints to pass: %v", err)
 	}
 }
+
+func TestSendMessageRequestUsesMarkdownMessage(t *testing.T) {
+	req := sendMessageRequest{
+		Content:  "fallback",
+		MsgType:  2,
+		Markdown: &markdownMessage{Content: "# title\n**answer**"},
+		MsgID:    "msg-1",
+		MsgSeq:   1,
+	}
+
+	raw, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["msg_type"] != float64(2) {
+		t.Fatalf("msg_type = %v, want 2", payload["msg_type"])
+	}
+	markdown, ok := payload["markdown"].(map[string]any)
+	if !ok || markdown["content"] != "# title\n**answer**" {
+		t.Fatalf("markdown payload = %#v", payload["markdown"])
+	}
+}

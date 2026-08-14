@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
+	mcpsecurity "github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -73,6 +74,11 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 			c.Error(errors.NewBadRequestError(secutils.FormatSSRFError("MCP service URL", *service.URL, err)))
 			return
 		}
+	}
+	if err := mcpsecurity.ValidateServiceOutboundURLs(&service); err != nil {
+		logger.Warnf(ctx, "SSRF validation failed for MCP service configuration: %v", err)
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
 	}
 
 	if err := h.mcpServiceService.CreateMCPService(ctx, &service); err != nil {
@@ -333,8 +339,13 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 			service.AdvancedConfig.RetryDelay = int(retryDelay)
 		}
 	}
+	if err := mcpsecurity.ValidateServiceOutboundURLs(&service); err != nil {
+		logger.Warnf(ctx, "SSRF validation failed for MCP service update: %v", err)
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
 
-	if err := h.mcpServiceService.UpdateMCPService(ctx, &service); err != nil {
+	if err := h.mcpServiceService.UpdateMCPService(ctx, &service, updateFields); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_id": secutils.SanitizeForLog(serviceID)})
 		c.Error(errors.NewInternalServerError("Failed to update MCP service: " + err.Error()))
 		return

@@ -42,6 +42,10 @@ const (
 	QueueSync           = "sync"
 	QueueMaintenance    = "low"
 	QueueWiki           = "wiki"
+	// QueueMemory carries debounced long-term memory distillation. It sits in
+	// the enrichment pool because it is a background LLM call whose latency
+	// nobody is waiting on.
+	QueueMemory = "memory"
 )
 
 // QueueDefinition is the single source of truth for queue topology. Worker
@@ -69,11 +73,12 @@ var queueDefinitions = []QueueDefinition{
 		TypeKnowledgePostProcess,
 	}},
 	{Name: QueueSummary, Pool: WorkerPoolEnrichment, Weight: 2, SharedWeight: 2, TaskTypes: []string{
-		TypeSummaryGeneration, TypeDataTableSummary,
+		TypeSummaryGeneration, TypeDataTableSummary, TypeKnowledgeAutoTag,
 	}},
 	{Name: QueueMultimodal, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeImageMultimodal}},
 	{Name: QueueGraph, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeChunkExtract}},
 	{Name: QueueQuestion, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeQuestionGeneration}},
+	{Name: QueueMemory, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeMemoryExtract}},
 	{Name: QueueSync, Pool: WorkerPoolMaintenance, Weight: 2, TaskTypes: []string{TypeDataSourceSync}},
 	{Name: QueueMaintenance, Pool: WorkerPoolMaintenance, Weight: 1, TaskTypes: []string{
 		TypeFAQImport, TypeKBClone, TypeIndexDelete, TypeKBDelete,
@@ -241,12 +246,36 @@ const (
 	TypeDataTableSummary         = "datatable:summary"          // 表格摘要任务
 	TypeImageMultimodal          = "image:multimodal"           // 图片多模态处理任务（OCR + VLM Caption）
 	TypeKnowledgePostProcess     = "knowledge:post_process"     // 知识后处理任务（统一调度）
+	TypeKnowledgeAutoTag         = "knowledge:auto_tag"         // 文档自动关联知识库已有标签
 	TypeManualProcess            = "manual:process"             // 手工知识更新任务（cleanup + 重新索引）
 	TypeDataSourceSync           = "datasource:sync"            // 数据源同步任务
 	TypeWikiIngest               = "wiki:ingest"                // Wiki 页面同步任务
 	TypeWikiFinalize             = "wiki:finalize"              // Wiki KB 级收尾任务（防抖：索引重建/死链清理/交叉链接）
 	TypeTemporaryDocumentProcess = "temporary_document:process" // 会话临时文档解析任务
+	// TypeMemoryExtract 长期记忆抽取任务（会话轮次防抖后异步执行）
+	TypeMemoryExtract = "memory:extract"
 )
+
+// MemoryExtractPayload carries everything the background distillation task
+// needs. Scope (tenant + subject) travels in the payload rather than being
+// read from the worker context: asynq and the Lite executor both start from a
+// bare context, so anything the request knew and the payload does not carry is
+// simply gone by the time the handler runs.
+type MemoryExtractPayload struct {
+	TracingContext
+	TenantID  uint64 `json:"tenant_id"`
+	SubjectID string `json:"subject_id"`
+	SessionID string `json:"session_id"`
+	// MessageID is the assistant message that closed the triggering turn. It
+	// bounds the extraction window and is stored as the source of any item
+	// produced, so every memory can be traced back to a real message.
+	MessageID string `json:"message_id"`
+	// ChatModelID is the model the conversation itself used. The extraction
+	// task falls back to it when MemoryConfig.ExtractModelID is blank, which
+	// is what the settings UI promises.
+	ChatModelID string `json:"chat_model_id,omitempty"`
+	Language    string `json:"language,omitempty"`
+}
 
 // ExtractChunkPayload represents the extract chunk task payload
 type ExtractChunkPayload struct {
@@ -495,6 +524,17 @@ type KnowledgePostProcessPayload struct {
 	KnowledgeID     string `json:"knowledge_id"`
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Language        string `json:"language,omitempty"` // Request locale for {{language}} in prompt templates
+	Attempt         int    `json:"attempt,omitempty"`
+}
+
+// KnowledgeAutoTagPayload identifies a document whose parsed content should be
+// classified against the latest set of existing tags in its knowledge base.
+type KnowledgeAutoTagPayload struct {
+	TracingContext
+	TenantID        uint64 `json:"tenant_id"`
+	KnowledgeID     string `json:"knowledge_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	Language        string `json:"language,omitempty"`
 	Attempt         int    `json:"attempt,omitempty"`
 }
 

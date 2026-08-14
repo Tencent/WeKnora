@@ -324,3 +324,32 @@ func TestAgentEdit_RequiresConfirmation(t *testing.T) {
 	assert.Contains(t, ce.RetryArgv, "-y")
 	assert.Contains(t, ce.RetryArgv, "ag_abc")
 }
+
+// TestAgentEdit_RetryArgvPreservesAddKB is a regression for #2597: exit-10
+// retry_argv must keep --add-kb / --remove-kb / --config-file so re-running
+// after human approval reproduces the original update.
+func TestAgentEdit_RetryArgvPreservesAddKB(t *testing.T) {
+	iostreams.SetForTest(t) // non-TTY
+	f := &cmdutil.Factory{
+		Client:   func() (*sdk.Client, error) { return nil, nil },
+		Prompter: func() prompt.Prompter { return prompt.AgentPrompter{} },
+	}
+	// Avoid --config-file / --system-prompt-file here: PreRunE opens paths and
+	// would fail before ConfirmWrite. Those flags still go through the same
+	// BuildRetryArgv scalar path covered in cmdutil tests.
+	root := withRootHarnessAgent(NewCmdEdit(f),
+		"ag_abc", "--add-kb", "kb_new", "--remove-kb", "kb_old", "--format", "json")
+	err := root.Execute()
+	require.Error(t, err)
+	var ce *cmdutil.Error
+	require.ErrorAs(t, err, &ce)
+	assert.Equal(t, cmdutil.CodeInputConfirmationRequired, ce.Code)
+	// pflag Visit is lexicographical among changed flags.
+	assert.Equal(t, []string{
+		"weknora", "agent", "update", "ag_abc",
+		"--add-kb", "kb_new",
+		"--format", "json",
+		"--remove-kb", "kb_old",
+		"-y",
+	}, ce.RetryArgv)
+}

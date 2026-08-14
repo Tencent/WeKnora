@@ -143,6 +143,7 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 		MaxTokens:   defaultMaxToks,
 		Temperature: v.temperature,
 	}
+	shapeReasoningVLMRequest(&req)
 
 	totalImageSize := 0
 	for _, img := range imgBytesList {
@@ -159,9 +160,45 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 		return "", fmt.Errorf("OpenAI VLM returned no choices")
 	}
 
-	content := resp.Choices[0].Message.Content
+	choice := resp.Choices[0]
+	content := choice.Message.Content
+	if strings.TrimSpace(content) == "" && choice.FinishReason == openai.FinishReasonLength {
+		// Reasoning models spend max_completion_tokens on reasoning before any
+		// visible output, so an exhausted budget yields an empty message rather
+		// than an API error. Returning "" here would be recorded as
+		// "no_extracted_content" and look identical to an image with no text.
+		return "", fmt.Errorf(
+			"OpenAI VLM returned no content: completion truncated at %d tokens (finish_reason=length)",
+			defaultMaxToks,
+		)
+	}
 	logger.Infof(ctx, "[VLM] OpenAI response received, len=%d", len(content))
 	return content, nil
+}
+
+// shapeReasoningVLMRequest adapts an OpenAI-compatible VLM request for
+// reasoning (o-series) and GPT-5 models, which reject `max_tokens` and every
+// non-default sampling parameter.
+//
+// This mirrors shapeOpenAIReasoning in internal/models/chat, which fixed the
+// same incompatibility on the chat path for issue #1283. The VLM path was
+// never wired to it, so image OCR and captioning failed for every one of these
+// models (issue #2537).
+//
+// Both quirks have to be handled together: migrating max_tokens alone still
+// fails, because the VLM default temperature (0.1) is itself rejected.
+func shapeReasoningVLMRequest(req *openai.ChatCompletionRequest) {
+	if !provider.IsOpenAIReasoningOrGPT5Model(req.Model) {
+		return
+	}
+	if req.MaxCompletionTokens == 0 && req.MaxTokens > 0 {
+		req.MaxCompletionTokens = req.MaxTokens
+	}
+	req.MaxTokens = 0
+	req.Temperature = 0
+	req.TopP = 0
+	req.FrequencyPenalty = 0
+	req.PresencePenalty = 0
 }
 
 func (v *RemoteAPIVLM) GetModelName() string { return v.modelName }

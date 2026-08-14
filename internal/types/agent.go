@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -28,6 +29,7 @@ type AgentConfig struct {
 	WebSearchProviderID     string        `json:"web_search_provider_id,omitempty"`     // WebSearchProviderEntity ID (resolved from agent config)
 	MultiTurnEnabled        bool          `json:"multi_turn_enabled"`                   // Whether multi-turn conversation is enabled
 	HistoryTurns            int           `json:"history_turns"`                        // Number of history turns to keep in context
+	MemoryEnabled           *bool         `json:"memory_enabled,omitempty"`             // nil inherits workspace
 	SearchTargets           SearchTargets `json:"-"`                                    // Pre-computed unified search targets (runtime only)
 	// MCP service selection
 	MCPSelectionMode string   `json:"mcp_selection_mode"` // MCP selection mode: "all", "selected", "none"
@@ -52,7 +54,8 @@ type AgentConfig struct {
 	AllowedSkills []string `json:"allowed_skills"` // Skill names whitelist (empty = allow all)
 
 	// Runtime-only fields (not persisted)
-	VLMModelID string `json:"-"` // VLM model ID for tool result image analysis (set from CustomAgent config)
+	VLMModelID      string `json:"-"` // VLM model ID for tool result image analysis (set from CustomAgent config)
+	SandboxConfigID string `json:"-"` // Workspace sandbox config ID for skill execution (set from CustomAgent config)
 	// Per-request @mention pins (runtime only; injected as <must_use> in the user message).
 	PinnedMCPServiceIDs []string `json:"-"`
 	PinnedSkillNames    []string `json:"-"`
@@ -202,6 +205,20 @@ type ToolCall struct {
 	Reflection       string                 `json:"reflection,omitempty"`        // Agent's reflection on this tool call result (if enabled)
 	Duration         int64                  `json:"duration"`                    // Execution time in milliseconds
 	ProviderMetadata ToolCallMetadata       `json:"provider_metadata,omitempty"` // Provider-specific tool-call state for replay
+}
+
+// PipelineToolCallIDPrefix marks a persisted tool call the model never made.
+// The fast-answer (KnowledgeQA) pipeline records its retrieval stages as tool
+// calls so a reloaded conversation can redraw the same timeline it showed while
+// streaming. History replay must skip them: asking the model to account for
+// calls it never issued, against tools it may not even have, breaks the
+// request protocol.
+const PipelineToolCallIDPrefix = "ragpipe-"
+
+// IsPipelineToolCallID reports whether a tool call was synthesized by the
+// fast-answer pipeline rather than requested by the model.
+func IsPipelineToolCallID(id string) bool {
+	return strings.HasPrefix(id, PipelineToolCallIDPrefix)
 }
 
 // AgentStep represents one iteration of the ReAct loop

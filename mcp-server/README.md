@@ -120,7 +120,9 @@ python test_module.py
 - `hybrid_search` - 混合搜索
 
 ### 知识管理
+- `create_knowledge_from_file` - 从本地文件创建知识
 - `create_knowledge_from_url` - 从 URL 创建知识
+- `create_knowledge_from_text` - 从文本创建知识
 - `list_knowledge` - 列出知识
 - `get_knowledge` - 获取知识详情
 - `delete_knowledge` - 删除知识

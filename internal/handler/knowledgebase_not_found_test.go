@@ -37,7 +37,7 @@ import (
 // outside the contract fails loudly.
 type stubKBOnlyService struct {
 	interfaces.KnowledgeBaseService
-	getByID            func(ctx context.Context, id string) (*types.KnowledgeBase, error)
+	getByID                 func(ctx context.Context, id string) (*types.KnowledgeBase, error)
 	fillKnowledgeBaseCounts func(ctx context.Context, kb *types.KnowledgeBase) error
 }
 

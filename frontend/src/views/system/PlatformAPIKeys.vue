@@ -209,6 +209,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { copyWithToast } from '@/utils/clipboard'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import type { TenantAPIKey, TenantAPIKeyCapability } from '@/api/tenant'
 import { createPlatformAPIKey, deletePlatformAPIKey, listPlatformAPIKeys } from '@/api/system'
@@ -347,9 +348,8 @@ async function deleteKey(key: TenantAPIKey) {
 }
 
 async function copyToken() {
-  await navigator.clipboard.writeText(createdToken.value)
-  MessagePlugin.success(t('platformApiKeys.copySuccess'))
-  tokenVisible.value = false
+  const ok = await copyWithToast(createdToken.value, 'platformApiKeys.copySuccess')
+  if (ok) tokenVisible.value = false
 }
 
 onMounted(reload)

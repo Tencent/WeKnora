@@ -12,6 +12,7 @@ import {
   downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile,
   updateDocumentChunk, listChunkRevisions, revertDocumentChunk, updateKnowledgeMetadata,
   regenerateKnowledgeSummary, upsertGeneratedQuestion, regenerateGeneratedQuestions, getKnowledgeDetails,
+  KNOWLEDGE_CHUNK_PAGE_SIZE,
 } from "@/api/knowledge-base/index";
 import { MessagePlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
@@ -22,6 +23,7 @@ import { useI18n } from 'vue-i18n';
 import { useAuthStore } from '@/stores/auth';
 import DocumentPreview from '@/components/document-preview.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
+import { resolveKnowledgeDownloadFileName } from '@/views/knowledge/knowledgeDownloadFileName';
 
 const { t } = useI18n();
 const authStore = useAuthStore();
@@ -495,13 +497,13 @@ const preprocessMathDelimiters = (rawText: string): string => {
     .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
 };
 const renderer = new marked.Renderer();
-let page = 1;
-let loadingChunks = false;
-let pendingRequestedPage: number | null = null;
-let pendingChunksBeforeLoad = 0;
-const CHUNK_PAGE_SIZE = 25;
-/** Scroll container for the main doc drawer (not the first .t-drawer__body on the page). */
-let docScrollEl: HTMLElement | null = null;
+const CHUNK_PAGE_SIZE = KNOWLEDGE_CHUNK_PAGE_SIZE;
+const chunkPage = ref(1);
+const loadedChunkPage = ref(1);
+let pendingChunkPage: number | null = null;
+const isChunkPageTransition = computed(
+  () => Boolean(props.details?.chunkLoading) && chunkPage.value !== loadedChunkPage.value,
+);
 let mdContentWrap = ref()
 // Drawer uses attach="body", so markdown nodes live outside mdContentWrap in the DOM.
 const docMarkdownRoot = ref<HTMLElement | null>(null)
@@ -525,11 +527,17 @@ const viewMode = ref<'chunks' | 'merged' | 'preview'>('merged');
  *  2. HTML 实体编码（&#34; 等）导致的 content 长度与原文区间不一致——比对的是
  *     文本本身，不受长度偏差影响。
  *
+ * positionOverlap <= 0 时两段位置上严格相邻或不相交，无可去重重叠；此时进入
+ * 文本匹配会因 headSlack 下限 320 在 next 开头窗口内误命中 acc 后缀的真实
+ * 内容重复（如同一句话在文档多次出现），把 next 开头整段误判为补写表头删掉，
+ * 造成不可逆的内容丢失。直接拼接，补写表头重复交给调用方后处理。
+ *
  * @param positionOverlap 由 start/end 估算的重叠量，仅用于界定搜索窗口大小。
  */
 const appendChunkContent = (acc: string, next: string, positionOverlap: number): string => {
   if (!acc) return next;
   if (!next) return acc;
+  if (positionOverlap <= 0) return acc + next;
 
   const MIN_OVERLAP = 12;          // 过短的后缀容易误匹配（如分隔行），忽略
   const span = Math.max(positionOverlap, 0);
@@ -588,62 +596,26 @@ const mergeChunks = (chunks: any[]): string => {
   return merged;
 };
 
-const findDocDrawerScrollEl = (): HTMLElement | null =>
-  document.querySelector('.doc-main-drawer .t-drawer__body') as HTMLElement | null;
-
-const unbindDrawerScroll = () => {
-  if (docScrollEl) {
-    docScrollEl.removeEventListener('scroll', handleDetailsScroll);
-    docScrollEl = null;
-  }
-};
-
-const bindDrawerScroll = () => {
-  unbindDrawerScroll();
-  docScrollEl = findDocDrawerScrollEl();
-  if (docScrollEl) {
-    docScrollEl.addEventListener('scroll', handleDetailsScroll, { passive: true });
-  }
-};
-
 onMounted(() => {
   loadTraceDrawerWidth();
   loadMainDrawerWidth();
   window.addEventListener('resize', onTraceDrawerWindowResize, { passive: true });
 });
 
-watch(() => props.visible, (visible) => {
-  if (visible) {
-    nextTick(() => {
-      bindDrawerScroll();
-      maybeLoadMoreChunks();
-    });
-  } else {
-    unbindDrawerScroll();
-  }
-});
 watch(() => props.details?.id, () => {
-  page = 1;
-  loadingChunks = false;
-  pendingRequestedPage = null;
-  pendingChunksBeforeLoad = 0;
+  chunkPage.value = 1;
+  loadedChunkPage.value = 1;
+  pendingChunkPage = null;
 });
 watch(() => props.details?.chunkLoading, (val) => {
-  if (val === false) {
-    if (pendingRequestedPage !== null) {
-      const currentLength = props.details?.md?.length || 0;
-      const hasError = Boolean(props.details?.chunkLoadError);
-      if (hasError && currentLength <= pendingChunksBeforeLoad) {
-        page = Math.max(1, pendingRequestedPage - 1);
-        MessagePlugin.warning(props.details?.chunkLoadError);
-      }
+  if (val === false && pendingChunkPage !== null) {
+    if (props.details?.chunkLoadError) {
+      chunkPage.value = loadedChunkPage.value;
+      MessagePlugin.warning(props.details.chunkLoadError);
+    } else {
+      loadedChunkPage.value = pendingChunkPage;
     }
-    pendingRequestedPage = null;
-    pendingChunksBeforeLoad = 0;
-    loadingChunks = false;
-    if (props.visible) {
-      nextTick(() => maybeLoadMoreChunks());
-    }
+    pendingChunkPage = null;
   }
 });
 onUnmounted(() => {
@@ -651,7 +623,6 @@ onUnmounted(() => {
   window.removeEventListener('resize', onTraceDrawerWindowResize);
   cleanupTraceDrawerResize();
   cleanupMainDrawerResize();
-  unbindDrawerScroll();
   if (audioBlobUrl.value) {
     URL.revokeObjectURL(audioBlobUrl.value);
   }
@@ -812,7 +783,10 @@ const runMarkdownPostRenderPipeline = async () => {
   if (!renderRoot) {
     return;
   }
-  await hydrateProtectedFileImages(renderRoot, undefined, props.kbId);
+  await hydrateProtectedFileImages(
+    renderRoot,
+    props.kbId ? { mode: 'knowledgeBase', kbId: props.kbId } : undefined,
+  );
   const images = renderRoot?.querySelectorAll?.('img.markdown-image') as NodeListOf<HTMLImageElement> | undefined;
   if (images) {
     images.forEach(async item => {
@@ -833,9 +807,6 @@ watch(() => props.details.md, () => {
 watch(() => viewMode.value, (mode) => {
   if ((mode === 'chunks' || mode === 'merged') && props.visible) {
     runMarkdownPostRenderPipeline();
-    if (mode === 'chunks') {
-      nextTick(() => maybeLoadMoreChunks());
-    }
   }
 }, { flush: 'post' });
 
@@ -940,7 +911,7 @@ const processMarkdown = (markdownText) => {
 };
 const handleClose = () => {
   emit("closeDoc", false);
-  const scrollEl = docScrollEl || findDocDrawerScrollEl();
+  const scrollEl = document.querySelector('.doc-main-drawer .t-drawer__body') as HTMLElement | null;
   if (scrollEl) scrollEl.scrollTop = 0;
   viewMode.value = 'merged';
 };
@@ -964,9 +935,15 @@ const channelLabelMap: Record<string, string> = {
   wechat: 'knowledgeBase.channelWechat',
   wecom: 'knowledgeBase.channelWecom',
   feishu: 'knowledgeBase.channelFeishu',
+  gitlab: 'knowledgeBase.channelGitLab',
+  // Drive (云盘) connectors get their own channel so Drive docs show
+  // "飞书云盘" / "Lark 云盘", distinct from the wiki connector's "飞书".
+  feishu_drive: 'knowledgeBase.channelFeishuDrive',
+  lark_drive: 'knowledgeBase.channelLarkDrive',
   dingtalk: 'knowledgeBase.channelDingtalk',
   slack: 'knowledgeBase.channelSlack',
   im: 'knowledgeBase.channelIm',
+  ima: 'knowledgeBase.channelIma',
 };
 
 const getChannelLabel = (channel: string) => {
@@ -1126,10 +1103,8 @@ const notifyChunkMutationOutcome = (item: any, result: any, successMessage?: str
 };
 
 const reloadChunksFromStart = () => {
-  page = 1;
-  loadingChunks = true;
-  pendingRequestedPage = 1;
-  pendingChunksBeforeLoad = 0;
+  chunkPage.value = 1;
+  pendingChunkPage = 1;
   editingChunkId.value = '';
   chunkDraft.value = '';
   emit('getDoc', 1);
@@ -1543,9 +1518,7 @@ const downloadFile = () => {
         const link = document.createElement("a");
         link.style.display = "none";
         link.setAttribute("href", url.value);
-        const needsExt = props.details.type === 'manual' && !props.details.title.toLowerCase().endsWith('.md');
-        const ext = needsExt ? '.md' : '';
-        link.setAttribute("download", props.details.title + ext);
+        link.setAttribute("download", resolveKnowledgeDownloadFileName(props.details));
         document.body.appendChild(link);
         link.click();
         nextTick(() => {
@@ -1558,43 +1531,12 @@ const downloadFile = () => {
       MessagePlugin.error(t('file.downloadFailed'));
     });
 };
-const requestNextChunkPage = () => {
-  if (loadingChunks || props.details?.chunkLoading) return;
-  const total = props.details?.total ?? 0;
-  const loaded = props.details?.md?.length ?? 0;
-  if (loaded >= total || total === 0) return;
-  const pageNum = Math.ceil(total / CHUNK_PAGE_SIZE);
-  if (page + 1 > pageNum) return;
-  page++;
-  loadingChunks = true;
-  pendingRequestedPage = page;
-  pendingChunksBeforeLoad = loaded;
-  emit('getDoc', page);
+const handleChunkPageChange = (pageInfo: { current: number }) => {
+  if (props.details?.chunkLoading || pageInfo.current === loadedChunkPage.value) return;
+  pendingChunkPage = pageInfo.current;
+  emit('getDoc', pageInfo.current);
 };
 
-/** When the list is shorter than the drawer, scroll never fires — prefetch until scrollable or done. */
-const maybeLoadMoreChunks = () => {
-  if (!props.visible || loadingChunks || props.details?.chunkLoading) return;
-  const el = docScrollEl || findDocDrawerScrollEl();
-  if (!el) return;
-  const loaded = props.details?.md?.length ?? 0;
-  const total = props.details?.total ?? 0;
-  if (loaded >= total) return;
-  const { scrollHeight, clientHeight } = el;
-  if (scrollHeight <= clientHeight + 8) {
-    requestNextChunkPage();
-  }
-};
-
-const handleDetailsScroll = () => {
-  if (loadingChunks || props.details?.chunkLoading) return;
-  const el = docScrollEl || findDocDrawerScrollEl();
-  if (!el) return;
-  const { scrollTop, scrollHeight, clientHeight } = el;
-  if (scrollTop + clientHeight >= scrollHeight - 8) {
-    requestNextChunkPage();
-  }
-};
 </script>
 <template>
   <div class="doc_content" ref="mdContentWrap">
@@ -1856,19 +1798,30 @@ const handleDetailsScroll = () => {
 
           <!-- 合并视图 -->
           <div v-if="viewMode === 'merged'">
-            <div v-if="!mergedContent" class="no_content">{{ $t('common.noData') }}</div>
-            <div v-else class="md-content" v-html="processMarkdown(mergedContent)"></div>
+            <div v-if="isChunkPageTransition" class="chunk-page-loading">
+              <t-loading size="small" />
+              <span>{{ $t('common.loading') }}</span>
+            </div>
+            <template v-else>
+              <div v-if="!mergedContent" class="no_content">{{ $t('common.noData') }}</div>
+              <div v-else class="md-content" v-html="processMarkdown(mergedContent)"></div>
+            </template>
           </div>
 
           <!-- 分块视图 -->
           <div v-else-if="viewMode === 'chunks'">
-            <div v-if="!processedChunks.length" class="no_content">{{ $t('common.noData') }}</div>
-            <div v-else class="chunk-list">
+            <div v-if="isChunkPageTransition" class="chunk-page-loading">
+              <t-loading size="small" />
+              <span>{{ $t('common.loading') }}</span>
+            </div>
+            <template v-else>
+              <div v-if="!processedChunks.length" class="no_content">{{ $t('common.noData') }}</div>
+              <div v-else class="chunk-list">
               <div class="chunk-item" :class="{ 'chunk-item--disabled': !chunk.original.is_enabled }"
                 v-for="(chunk, index) in processedChunks" :key="chunk.original.id || index">
                 <div class="chunk-header">
                   <div class="chunk-heading">
-                    <span class="chunk-index">{{ $t('knowledgeBase.segment') }} {{ index + 1 }}</span>
+                    <span class="chunk-index">{{ $t('knowledgeBase.segment') }} {{ (loadedChunkPage - 1) * CHUNK_PAGE_SIZE + index + 1 }}</span>
                     <span class="chunk-meta">{{ chunk.meta }}</span>
                   </div>
                   <div class="chunk-header-right">
@@ -2115,9 +2068,17 @@ const handleDetailsScroll = () => {
 
               </div>
             </div>
+            </template>
           </div>
 
           <!-- 文档预览视图 -->
+          <div v-if="(viewMode === 'merged' || viewMode === 'chunks') && details.total > CHUNK_PAGE_SIZE"
+            class="chunk-pagination">
+            <t-pagination v-model="chunkPage" :total="details.total" :page-size="CHUNK_PAGE_SIZE" size="small"
+              show-jumper show-page-number :show-page-size="false" :disabled="details.chunkLoading"
+              @change="handleChunkPageChange" />
+          </div>
+
           <div v-else-if="viewMode === 'preview'">
             <DocumentPreview :knowledgeId="details.id" :fileType="details.file_type" :fileName="details.title"
               :active="viewMode === 'preview'" />
@@ -2143,6 +2104,23 @@ const handleDetailsScroll = () => {
 .metadata-empty { color: var(--td-text-color-placeholder); }
 .metadata-actions, .chunk-editor-actions { margin-top: 8px; justify-content: flex-end; }
 .chunk-disabled { opacity: .5; }
+
+.chunk-pagination {
+  display: flex;
+  justify-content: center;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--td-component-stroke);
+}
+
+.chunk-page-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 120px;
+  color: var(--td-text-color-secondary);
+}
 
 .icon-action-btn {
   width: 28px;

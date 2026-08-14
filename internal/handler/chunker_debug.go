@@ -51,15 +51,18 @@ type PreviewChunkingRequest struct {
 
 // PreviewChunkingPayload mirrors the snake_case JSON the rest of the API
 // uses for ChunkingConfig fields. We don't reuse types.ChunkingConfig
-// directly because it carries a lot of unrelated fields (parser engine
-// rules, parent-child sizes, etc.) that the preview path doesn't need.
+// directly because it carries unrelated parser rules and table-processing
+// metadata that the preview path does not use.
 type PreviewChunkingPayload struct {
-	ChunkSize    int      `json:"chunk_size"`
-	ChunkOverlap int      `json:"chunk_overlap"`
-	Separators   []string `json:"separators"`
-	Strategy     string   `json:"strategy"`
-	TokenLimit   int      `json:"token_limit"`
-	Languages    []string `json:"languages"`
+	ChunkSize         int      `json:"chunk_size"`
+	ChunkOverlap      int      `json:"chunk_overlap"`
+	Separators        []string `json:"separators"`
+	EnableParentChild bool     `json:"enable_parent_child"`
+	ParentChunkSize   int      `json:"parent_chunk_size"`
+	ChildChunkSize    int      `json:"child_chunk_size"`
+	Strategy          string   `json:"strategy"`
+	TokenLimit        int      `json:"token_limit"`
+	Languages         []string `json:"languages"`
 }
 
 // PreviewChunkResult describes one chunk emitted during preview.
@@ -143,15 +146,16 @@ func PreviewChunking(c *gin.Context) {
 		})
 		return
 	}
+	text := chunker.NormalizeLineEndings(req.Text)
 
-	cfg := chunker.SplitterConfig{
+	cfg := chunker.NormalizeSplitterConfig(chunker.SplitterConfig{
 		ChunkSize:    req.ChunkingConfig.ChunkSize,
 		ChunkOverlap: req.ChunkingConfig.ChunkOverlap,
 		Separators:   req.ChunkingConfig.Separators,
 		Strategy:     req.ChunkingConfig.Strategy,
 		TokenLimit:   req.ChunkingConfig.TokenLimit,
 		Languages:    req.ChunkingConfig.Languages,
-	}
+	})
 
 	// Run the splitter on a goroutine so we can honor the request timeout.
 	// The splitter is CPU-bound and doesn't accept a context — wrapping
@@ -162,7 +166,23 @@ func PreviewChunking(c *gin.Context) {
 	}
 	resCh := make(chan splitResult, 1)
 	go func() {
-		chunks, diag := chunker.SplitWithDiagnostics(req.Text, cfg)
+		var chunks []chunker.Chunk
+		var diag *chunker.Diagnostics
+		if req.ChunkingConfig.EnableParentChild {
+			parentCfg, childCfg := chunker.DeriveParentChildConfigs(
+				cfg,
+				req.ChunkingConfig.ParentChunkSize,
+				req.ChunkingConfig.ChildChunkSize,
+			)
+			result, parentDiag := chunker.SplitParentChildWithDiagnostics(text, parentCfg, childCfg)
+			chunks = make([]chunker.Chunk, len(result.Children))
+			for i, child := range result.Children {
+				chunks[i] = child.Chunk
+			}
+			diag = parentDiag
+		} else {
+			chunks, diag = chunker.SplitWithDiagnostics(text, cfg)
+		}
 		resCh <- splitResult{chunks: chunks, diag: diag}
 	}()
 
@@ -184,7 +204,7 @@ func PreviewChunking(c *gin.Context) {
 	// can still show document stats. Avoids the previous double-pass.
 	profile := diag.Profile
 	if profile == nil {
-		profile = chunker.ProfileDocument(req.Text)
+		profile = chunker.ProfileDocument(text)
 	}
 
 	logger.Debugf(ctx, "chunker preview: tier=%s chunks=%d", diag.SelectedTier, len(chunks))

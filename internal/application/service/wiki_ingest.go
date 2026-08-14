@@ -148,6 +148,17 @@ const (
 	// materially prolonging task runtime when the remote is genuinely down.
 	wikiLLMMaxAttempts = 3
 
+	// wikiLLMMaxTokens is the completion-token budget for every LLM call
+	// routed through generateWithTemplate. Combined wiki extraction emits a
+	// single large JSON document (entities + concepts + details). When
+	// MaxTokens is left at 0, OpenAI-compatible clients omit max_tokens and
+	// providers such as DeepSeek apply a default of 8192 — long extracts are
+	// truncated mid-JSON with finish_reason=length, and parse fails with
+	// "unexpected end of JSON input" (EXTRACT_FAILED). Raising the budget to
+	// 32768 matches verified complete outputs for large Chinese policy docs;
+	// shorter replies still stop early via finish_reason=stop. See #2604.
+	wikiLLMMaxTokens = 32768
+
 	// wikiLLMBackoffBase is the base delay for the exponential backoff
 	// between retry attempts. The nth retry waits base << (n-1) — so with
 	// a 2s base we wait 2s, 4s, 8s between attempts.
@@ -496,7 +507,7 @@ func newWikiIngestPendingOp(
 	tenantID uint64,
 	kbID, knowledgeID string,
 ) (*types.TaskPendingOp, error) {
-	lang, _ := types.LanguageFromContext(ctx)
+	lang := types.LanguageFromContextOrDefault(ctx)
 	op := WikiPendingOp{
 		Op:          WikiOpIngest,
 		KnowledgeID: knowledgeID,
@@ -523,7 +534,7 @@ func enqueueWikiIngestTrigger(
 	tenantID uint64,
 	kbID string,
 ) error {
-	lang, _ := types.LanguageFromContext(ctx)
+	lang := types.LanguageFromContextOrDefault(ctx)
 	trigger := WikiIngestPayload{
 		TenantID:        tenantID,
 		KnowledgeBaseID: kbID,
@@ -1291,12 +1302,16 @@ type WikiBatchContext struct {
 
 // SlugUpdate represents a single update operation for a specific slug
 type SlugUpdate struct {
-	Slug              string
-	Type              string        // "entity", "concept", "summary", "retract", "retractStale"
-	Item              extractedItem // For entity/concept
-	DocTitle          string
-	KnowledgeID       string
-	SourceRef         string
+	Slug        string
+	Type        string        // "entity", "concept", "summary", "retract", "retractStale"
+	Item        extractedItem // For entity/concept
+	DocTitle    string
+	KnowledgeID string
+	SourceRef   string
+	// Language is the already-resolved, human-readable language name the
+	// Reduce phase interpolates into the editor prompt (e.g. "Chinese
+	// (Simplified)"), NOT a locale code. Map resolves it once per document
+	// so every page derived from that document shares one language.
 	Language          string
 	SummaryBody       string // For summary
 	SummaryLine       string // For summary
@@ -2463,7 +2478,7 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 		)
 	}
 	thinking := false
-	opts := &chat.ChatOptions{Temperature: 0.3, Thinking: &thinking}
+	opts := &chat.ChatOptions{Temperature: 0.3, Thinking: &thinking, MaxTokens: wikiLLMMaxTokens}
 	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
 	warmupKey := ""
 	if promptTpl == agent.WikiPageModifyUserPrompt {

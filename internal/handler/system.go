@@ -28,8 +28,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
 
@@ -64,6 +62,9 @@ type SystemHandler struct {
 	// singleton tenant.StorageEngineConfig. Optional — nil in partially-wired
 	// unit tests, in which case only the legacy config is consulted.
 	storageBackendRepo interfaces.StorageBackendRepository
+	sandboxConfigSvc   sandboxConfigService
+	// startup snapshot for GET /system/capabilities; bound in router.NewRouter.
+	deploymentCapabilities DeploymentCapabilitiesData
 }
 
 // NewSystemHandler creates a new system handler
@@ -78,6 +79,7 @@ func NewSystemHandler(cfg *config.Config,
 	taskInspector interfaces.TaskInspector,
 	knowledgeSvc interfaces.KnowledgeService,
 	storageBackendRepo interfaces.StorageBackendRepository,
+	sandboxConfigSvc *service.TenantSandboxConfigService,
 ) *SystemHandler {
 	return &SystemHandler{
 		cfg:                cfg,
@@ -91,6 +93,7 @@ func NewSystemHandler(cfg *config.Config,
 		taskInspector:      taskInspector,
 		knowledgeSvc:       knowledgeSvc,
 		storageBackendRepo: storageBackendRepo,
+		sandboxConfigSvc:   sandboxConfigSvc,
 	}
 }
 
@@ -863,59 +866,16 @@ func storageEndpointHost(endpoint string) string {
 	return endpoint
 }
 
-// isBlockedStorageEndpoint checks whether a storage endpoint resolves to a dangerous
-// address (cloud metadata, loopback, link-local). Unlike the stricter isSSRFSafeURL,
-// this allows private IPs since MinIO is commonly deployed on internal networks.
-// It also respects the SSRF_WHITELIST environment variable for whitelisted hosts.
+// isBlockedStorageEndpoint keeps the legacy handler contract while delegating
+// to the same fail-closed SSRF policy used by the storage clients themselves.
+// Private storage endpoints must be explicitly whitelisted by an operator.
 func isBlockedStorageEndpoint(endpoint string) (bool, string) {
-	host := storageEndpointHost(endpoint)
-	if host == "" {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
 		return true, "无效的地址"
 	}
-
-	// Check SSRF whitelist first – whitelisted hosts bypass the block check.
-	if secutils.IsSSRFWhitelisted(host) {
-		return false, ""
-	}
-
-	hostLower := strings.ToLower(host)
-
-	blockedHosts := []string{
-		"metadata.google.internal",
-		"metadata.tencentyun.com",
-		"metadata.aws.internal",
-	}
-	for _, bh := range blockedHosts {
-		if hostLower == bh {
-			return true, "该地址不允许访问"
-		}
-	}
-
-	checkIP := func(ip net.IP) (bool, string) {
-		if ip.IsLoopback() {
-			return true, "不允许访问本地回环地址"
-		}
-		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-			return true, "不允许访问链路本地地址"
-		}
-		if ip.IsUnspecified() {
-			return true, "无效的地址"
-		}
-		return false, ""
-	}
-
-	if ip := net.ParseIP(host); ip != nil {
-		return checkIP(ip)
-	}
-
-	ips, err := net.LookupIP(host)
-	if err != nil {
-		return false, ""
-	}
-	for _, ip := range ips {
-		if blocked, reason := checkIP(ip); blocked {
-			return blocked, reason
-		}
+	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
+		return true, secutils.FormatSSRFError("存储 Endpoint", endpoint, err)
 	}
 	return false, ""
 }
@@ -987,7 +947,7 @@ func (h *SystemHandler) isS3Configured(c *gin.Context) bool {
 	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
 		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.S3 != nil {
 			s3Conf := tenant.StorageEngineConfig.S3
-			return s3Conf.Endpoint != "" && s3Conf.Region != "" && s3Conf.AccessKey != "" && s3Conf.SecretKey != "" && s3Conf.BucketName != ""
+			return s3Conf.Region != "" && s3Conf.BucketName != "" && (s3Conf.AccessKey == "") == (s3Conf.SecretKey == "")
 		}
 	}
 	return false
@@ -1029,15 +989,7 @@ func (h *SystemHandler) checkMinio(c *gin.Context, ctx context.Context, cfg *typ
 		// If bucket does not exist, auto-create it
 		if strings.Contains(errMsg, "does not exist") && cfg.BucketName != "" {
 			logger.Info(ctx, "Storage check: bucket does not exist, attempting auto-creation", "bucket", cfg.BucketName)
-			minioClient, clientErr := minio.New(endpoint, &minio.Options{
-				Creds:  credentials.NewStaticV4(accessKeyID, secretAccessKey, ""),
-				Secure: cfg.UseSSL,
-			})
-			if clientErr != nil {
-				c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: fmt.Sprintf("Failed to create MinIO client: %s", sanitizeStorageCheckError(clientErr))}})
-				return
-			}
-			if mkErr := minioClient.MakeBucket(ctx, cfg.BucketName, minio.MakeBucketOptions{}); mkErr != nil {
+			if _, mkErr := file.NewMinioFileService(endpoint, accessKeyID, secretAccessKey, cfg.BucketName, cfg.UseSSL); mkErr != nil {
 				logger.Error(ctx, "Storage check: failed to create bucket", "bucket", cfg.BucketName, "error", mkErr)
 				c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: fmt.Sprintf("Failed to auto-create Bucket '%s': %s", cfg.BucketName, sanitizeStorageCheckError(mkErr))}})
 				return
@@ -1133,15 +1085,21 @@ func (h *SystemHandler) checkS3(c *gin.Context, ctx context.Context, cfg *types.
 		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "未提供 S3 配置"}})
 		return
 	}
-	if cfg.Endpoint == "" || cfg.Region == "" || cfg.AccessKey == "" || cfg.SecretKey == "" || cfg.BucketName == "" {
-		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "Endpoint、Region、Access Key、Secret Key、Bucket 名称不能为空"}})
+	if cfg.Region == "" || cfg.BucketName == "" {
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "Region、Bucket 名称不能为空"}})
+		return
+	}
+	if (cfg.AccessKey == "") != (cfg.SecretKey == "") {
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "Access Key 与 Secret Key 必须同时填写或同时留空（使用 AWS 默认凭证链）"}})
 		return
 	}
 
-	if blocked, reason := isBlockedStorageEndpoint(cfg.Endpoint); blocked {
-		logger.Warnf(ctx, "Storage check: S3 endpoint blocked by SSRF protection, endpoint: %s", cfg.Endpoint)
-		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: reason}})
-		return
+	if cfg.Endpoint != "" {
+		if blocked, reason := isBlockedStorageEndpoint(cfg.Endpoint); blocked {
+			logger.Warnf(ctx, "Storage check: S3 endpoint blocked by SSRF protection, endpoint: %s", cfg.Endpoint)
+			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: reason}})
+			return
+		}
 	}
 
 	err := file.CheckS3Connectivity(ctx, cfg.Endpoint, cfg.AccessKey, cfg.SecretKey, cfg.BucketName, cfg.Region)
@@ -1149,7 +1107,7 @@ func (h *SystemHandler) checkS3(c *gin.Context, ctx context.Context, cfg *types.
 		logger.Errorf(ctx, "Storage check: S3 connectivity failed, bucket: %s, error: %v", cfg.BucketName, err)
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "403") {
-			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "认证失败，请检查 Access Key / Secret Key 是否正确"}})
+			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "认证失败，请检查静态密钥或 AWS IAM Role / 默认凭证链权限"}})
 			return
 		}
 		if strings.Contains(errMsg, "404") || strings.Contains(errMsg, "NotFound") {

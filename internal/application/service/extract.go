@@ -156,6 +156,27 @@ func NewDataTableSummaryTask(
 	return nil
 }
 
+// enqueueDataTableSummaryIfNeeded enqueues table summary work for spreadsheet
+// imports. fileName is a fallback for older records whose FileType is empty.
+func enqueueDataTableSummaryIfNeeded(
+	ctx context.Context,
+	client interfaces.TaskEnqueuer,
+	tenantID uint64,
+	knowledgeID string,
+	fileName, fileType, summaryModelID, embeddingModelID string,
+) {
+	ft := normalizeFileExtension(fileType)
+	if ft == "" && fileName != "" {
+		ft = getFileType(fileName)
+	}
+	if !isDataTableFileType(ft) {
+		return
+	}
+	if err := NewDataTableSummaryTask(ctx, client, tenantID, knowledgeID, summaryModelID, embeddingModelID); err != nil {
+		logger.Warnf(ctx, "Failed to enqueue data table summary task for knowledge %s: %v", knowledgeID, err)
+	}
+}
+
 // ChunkExtractService is a service for extracting chunks
 type ChunkExtractService struct {
 	template          *types.PromptTemplateStructured
@@ -628,7 +649,7 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 
 	// 构建共用的schema和样本数据描述
 	schemaDesc := tableSchema.Description()
-	sampleDesc := s.buildSampleDataDescription(sampleResult, 10)
+	sampleDesc := s.buildSampleDataDescription(ctx, sampleResult, 10)
 
 	// 使用AI生成表格摘要和列描述
 	customInstructions := ""
@@ -839,12 +860,36 @@ func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context
 }
 
 // buildSampleDataDescription builds a formatted sample data description
-func (s *DataTableSummaryService) buildSampleDataDescription(sampleData *types.ToolResult, maxRows int) string {
+func (s *DataTableSummaryService) buildSampleDataDescription(ctx context.Context, sampleData *types.ToolResult, maxRows int) string {
 	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("Sample data (first %d rows):\n", maxRows))
 
-	rows, ok := sampleData.Data["rows"].([]map[string]interface{})
-	if !ok {
+	if sampleData == nil || sampleData.Data == nil {
+		return builder.String()
+	}
+
+	rawRows, exists := sampleData.Data["rows"]
+	if !exists || rawRows == nil {
+		return builder.String()
+	}
+
+	// DataAnalysisTool returns []map[string]string. A decoded ToolResult can
+	// instead contain []map[string]interface{}, so normalize both shapes before
+	// serializing the sample rows.
+	var rows []interface{}
+	switch typedRows := rawRows.(type) {
+	case []map[string]string:
+		rows = make([]interface{}, len(typedRows))
+		for i, row := range typedRows {
+			rows[i] = row
+		}
+	case []map[string]interface{}:
+		rows = make([]interface{}, len(typedRows))
+		for i, row := range typedRows {
+			rows[i] = row
+		}
+	default:
+		logger.Warnf(ctx, "[TableSummary] Unsupported sample rows type: %T", rawRows)
 		return builder.String()
 	}
 

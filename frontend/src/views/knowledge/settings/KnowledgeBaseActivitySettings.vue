@@ -261,6 +261,8 @@
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import { AUDIT_ACTION_I18N_ROOTS } from '@/i18n/auditActionRegistry'
+import { auditActionLabel } from '@/i18n/auditActionLabel'
 import { listKnowledgeBaseActivity, type KnowledgeBaseActivity } from '@/api/knowledge-base'
 import type { AuditOutcome } from '@/api/tenant/audit-log'
 import { useAuthStore } from '@/stores/auth'
@@ -401,11 +403,7 @@ function details(entry: KnowledgeBaseActivity): Record<string, unknown> {
 }
 
 function actionLabel(action: string): string {
-  const bag = tm('knowledgeEditor.activity.actions') as unknown
-  if (bag !== null && typeof bag === 'object' && typeof (bag as Record<string, string>)[action] === 'string') {
-    return (bag as Record<string, string>)[action]
-  }
-  return action
+  return auditActionLabel({ tm }, AUDIT_ACTION_I18N_ROOTS.kbActivity, action)
 }
 
 function outcomeLabel(value: AuditOutcome): string {
