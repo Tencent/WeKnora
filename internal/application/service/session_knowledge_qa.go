@@ -153,6 +153,13 @@ func (s *sessionService) KnowledgeQA(
 	// rewrite, fallback, FAQ strategy, history turns)
 	s.applyAgentOverridesToChatManage(ctx, req.CustomAgent, chatManage)
 
+	// An agent may opt out of long-term memory. The preference is per-request
+	// rather than per-user, so it travels in the context that the recall
+	// plugin reads.
+	if req.CustomAgent != nil {
+		ctx = types.ApplyAgentMemoryPreference(ctx, req.CustomAgent.Config.MemoryEnabled)
+	}
+
 	// Determine pipeline based on the effective knowledge retrieval scope and
 	// web search setting. Tag-only mentions leave the raw KB/knowledge ID slices
 	// empty but produce SearchTargets, so the unified targets must participate in
@@ -179,12 +186,14 @@ func (s *sessionService) KnowledgeQA(
 
 		pipeline = types.NewPipelineBuilder().
 			AddIf(hasHistory, types.LOAD_HISTORY).
+			Add(types.MEMORY_RECALL).
 			Add(types.CHAT_COMPLETION_STREAM).
 			Build()
 	} else {
 		// RAG — dynamically assemble based on feature flags.
 		pipeline = types.NewPipelineBuilder().
 			AddIf(hasHistory, types.LOAD_HISTORY).
+			Add(types.MEMORY_RECALL).
 			Add(types.QUERY_UNDERSTAND).
 			Add(types.CHUNK_SEARCH_PARALLEL).
 			Add(types.CHUNK_RERANK).

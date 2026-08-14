@@ -45,6 +45,7 @@ type AsynqTaskParams struct {
 	KnowledgeAutoTag     interfaces.TaskHandler `name:"knowledgeAutoTag"`
 	WikiIngest           interfaces.TaskHandler `name:"wikiIngest"`
 	TemporaryDocument    interfaces.TemporaryDocumentService
+	MemoryService        interfaces.MemoryService
 	DeadLetterRepo       interfaces.TaskDeadLetterRepository
 	SpanTracker          service.SpanTracker
 }
@@ -333,6 +334,11 @@ func newAsynqServeMux(params AsynqTaskParams) *asynq.ServeMux {
 	// and both land on QueueWiki, so the dedicated wiki pool serves them.
 	mux.HandleFunc(types.TypeWikiIngest, params.WikiIngest.Handle)
 	mux.HandleFunc(types.TypeWikiFinalize, params.WikiIngest.Handle)
+
+	// Register long-term memory distillation handler
+	if params.MemoryService != nil {
+		mux.HandleFunc(types.TypeMemoryExtract, params.MemoryService.Handle)
+	}
 
 	return mux
 }

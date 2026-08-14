@@ -443,6 +443,36 @@ func TestComputeGraphSubset_OverviewTruncatesByLinkCount(t *testing.T) {
 	}
 }
 
+func TestComputeGraphSubset_MarksFamiliarSourcePages(t *testing.T) {
+	pages := makeGraphFixture()
+	pages[0].SourceRefs = types.StringArray{"doc-1|排班手册"}
+	pages[1].SourceRefs = types.StringArray{"doc-2"}
+
+	got, err := computeGraphSubset(pages, &types.WikiGraphRequest{
+		Mode:                 types.WikiGraphModeOverview,
+		Limit:                0,
+		FamiliarKnowledgeIDs: []string{"doc-1"},
+	})
+	if err != nil {
+		t.Fatalf("computeGraphSubset: %v", err)
+	}
+	familiar := map[string]bool{}
+	for _, n := range got.Nodes {
+		if n.Familiar {
+			familiar[n.Slug] = true
+		}
+	}
+	if !familiar["hub"] {
+		t.Errorf("hub sources doc-1, want familiar, got %v", familiar)
+	}
+	if familiar["a"] {
+		t.Errorf("a sources a different document, must not light up")
+	}
+	if got.Meta.FamiliarCount != 1 {
+		t.Errorf("FamiliarCount = %d, want 1", got.Meta.FamiliarCount)
+	}
+}
+
 // TestComputeGraphSubset_OverviewUncapped ensures the Limit<=0 escape hatch
 // still works for internal callers (wiki lint) that need every page.
 func TestComputeGraphSubset_OverviewUncapped(t *testing.T) {

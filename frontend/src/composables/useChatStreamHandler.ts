@@ -179,6 +179,26 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     return message
   }
 
+  // Records which long-term memories the answer saw. Unlike references this
+  // never creates a message shell: memory arrives before the first token, and
+  // an empty bubble that only says "3 memories" would be worse than waiting
+  // for the answer's own placeholder.
+  const applyUsedMemories = (data: ChatMessage) => {
+    const payload = (data.data ?? {}) as Record<string, unknown>
+    const memories = (payload.memories ?? data.memories) as unknown
+    if (!Array.isArray(memories) || memories.length === 0) return undefined
+
+    const message = resolveActiveAssistantMessage(data)
+    if (!message) {
+      log('[Memory] No assistant message to attach memories to')
+      return undefined
+    }
+    message.used_memories = memories.slice()
+    onMessageUpdated?.(message, data)
+    log('[Memory] Saved to message, count:', memories.length)
+    return message
+  }
+
   const ensureAgentMessageShell = (message: ChatMessage, requestId?: string) => {
     message.isAgentMode = true
     if (!isAgentStreamSession()) {
@@ -945,6 +965,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     if (data.response_type === 'references') {
       applyKnowledgeReferences(data)
       scrollToBottom()
+      return
+    }
+
+    if (data.response_type === 'memory_recalled') {
+      applyUsedMemories(data)
       return
     }
 

@@ -1332,6 +1332,9 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	case "retrieval-config":
 		h.GetTenantRetrievalConfig(c)
 		return
+	case "memory-config":
+		h.GetTenantMemoryConfig(c)
+		return
 	default:
 		logger.Info(ctx, "KV key not supported", "key", key)
 		c.Error(errors.NewBadRequestError("unsupported key"))
@@ -1379,6 +1382,9 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 		return
 	case "retrieval-config":
 		h.updateTenantRetrievalConfigInternal(c)
+		return
+	case "memory-config":
+		h.updateTenantMemoryConfigInternal(c)
 		return
 	default:
 		logger.Info(ctx, "KV key not supported", "key", key)
@@ -1796,6 +1802,102 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 		"success": true,
 		"data":    updatedTenant.RetrievalConfig,
 		"message": "Retrieval configuration updated successfully",
+	})
+}
+
+// GetTenantMemoryConfig returns the workspace long-term memory configuration.
+func (h *TenantHandler) GetTenantMemoryConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenant, _ := types.TenantInfoFromContext(ctx)
+	if tenant == nil {
+		logger.Error(ctx, "Workspace is empty")
+		c.Error(errors.NewBadRequestError("Workspace is empty"))
+		return
+	}
+	data := tenant.MemoryConfig
+	if data == nil {
+		// Memory is off until an admin turns it on: the feature retains what
+		// users say across sessions, so it must not arrive enabled by default.
+		data = &types.MemoryConfig{}
+	}
+	data.Normalize()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    data,
+	})
+}
+
+// updateTenantMemoryConfigInternal updates the workspace memory configuration.
+func (h *TenantHandler) updateTenantMemoryConfigInternal(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var cfg types.MemoryConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	if cfg.WriteMode != "" &&
+		cfg.WriteMode != types.MemoryWriteExplicitOnly &&
+		cfg.WriteMode != types.MemoryWriteAuto {
+		c.Error(errors.NewBadRequestError("write_mode must be explicit_only or auto"))
+		return
+	}
+	if cfg.MaxItems < 0 || cfg.MaxItems > 2000 {
+		c.Error(errors.NewBadRequestError("max_items must be between 0 and 2000"))
+		return
+	}
+	if cfg.ExtractDelaySeconds < 0 || cfg.ExtractDelaySeconds > types.MaxMemoryExtractDelaySeconds {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf(
+			"extract_delay_seconds must be between 0 and %d", types.MaxMemoryExtractDelaySeconds)))
+		return
+	}
+	if cfg.ExtractMinIntervalSeconds < 0 ||
+		cfg.ExtractMinIntervalSeconds > types.MaxMemoryExtractMinIntervalSeconds {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf(
+			"extract_min_interval_seconds must be between 0 and %d",
+			types.MaxMemoryExtractMinIntervalSeconds)))
+		return
+	}
+	if len(cfg.EmbeddingModelID) > 64 {
+		c.Error(errors.NewBadRequestError("embedding_model_id is too long"))
+		return
+	}
+	if cfg.InterestThreshold < 0 || cfg.InterestThreshold > types.MaxMemoryInterestThreshold {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf(
+			"interest_threshold must be between 1 and %d", types.MaxMemoryInterestThreshold)))
+		return
+	}
+	if len([]rune(cfg.ExtractInstructions)) > types.MaxMemoryExtractInstructionsRunes {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf(
+			"extract_instructions must be at most %d characters",
+			types.MaxMemoryExtractInstructionsRunes)))
+		return
+	}
+	cfg.Normalize()
+
+	tenant, _ := types.TenantInfoFromContext(ctx)
+	if tenant == nil {
+		logger.Error(ctx, "Workspace is empty")
+		c.Error(errors.NewBadRequestError("Workspace is empty"))
+		return
+	}
+
+	tenant.MemoryConfig = &cfg
+	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+		} else {
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError("Failed to update memory config").WithDetails(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    updatedTenant.MemoryConfig,
+		"message": "Memory configuration updated successfully",
 	})
 }
 

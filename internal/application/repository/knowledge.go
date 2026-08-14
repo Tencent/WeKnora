@@ -1197,6 +1197,46 @@ func (r *knowledgeRepository) FindByMetadataKeyPrefix(
 	return items, nil
 }
 
+// FindByDataSourceExternalID locates a synced knowledge item without allowing
+// identical external IDs from two data sources to collide in one knowledge base.
+func (r *knowledgeRepository) FindByDataSourceExternalID(
+	ctx context.Context,
+	tenantID uint64,
+	kbID, dataSourceID, externalID string,
+) (*types.Knowledge, error) {
+	var knowledge types.Knowledge
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
+		Where("metadata->>'datasource_id' = ? AND metadata->>'external_id' = ?", dataSourceID, externalID).
+		First(&knowledge).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &knowledge, nil
+}
+
+// HardDeleteKnowledge physically removes a knowledge row. Call it AFTER
+// DeleteKnowledge's soft-delete cascade so sync-internal deletions never
+// become tombstones that block a later re-sync of the same external item.
+func (r *knowledgeRepository) HardDeleteKnowledge(ctx context.Context, tenantID uint64, id string) error {
+	return r.db.Unscoped().WithContext(ctx).
+		Where("tenant_id = ? AND id = ?", tenantID, id).
+		Delete(&types.Knowledge{}).Error
+}
+
+// HardDeleteKnowledgeList is the batch counterpart of HardDeleteKnowledge.
+func (r *knowledgeRepository) HardDeleteKnowledgeList(ctx context.Context, tenantID uint64, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return r.db.Unscoped().WithContext(ctx).
+		Where("tenant_id = ? AND id IN ?", tenantID, ids).
+		Delete(&types.Knowledge{}).Error
+}
+
 func (r *knowledgeRepository) SearchKnowledge(
 	ctx context.Context,
 	tenantID uint64,

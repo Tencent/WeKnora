@@ -41,6 +41,18 @@ func dedupStrings(in []string) []string {
 	return out
 }
 
+// withoutString returns the slice with every occurrence of drop removed,
+// preserving order.
+func withoutString(in []string, drop string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s != drop {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // agentHasKnowledgeScope reports whether the agent has any KB retrieval scope for
 // this turn. Tag-only @mentions populate SearchTargets (with TagIDs) but leave
 // KnowledgeBases / KnowledgeIDs empty — those must still count as in-scope.
@@ -91,6 +103,8 @@ type agentService struct {
 	webSearchStateService interfaces.WebSearchStateService
 	wikiPageService       interfaces.WikiPageService
 	tenantService         interfaces.TenantService
+	messageService        interfaces.MessageService
+	memoryService         interfaces.MemoryService
 	storageResolver       interfaces.StorageBackendResolver
 	toolApprovalGate      approval.MCPApproval
 	sandboxMgr            sandbox.Manager
@@ -116,6 +130,8 @@ func NewAgentService(
 	webSearchStateService interfaces.WebSearchStateService,
 	wikiPageService interfaces.WikiPageService,
 	tenantService interfaces.TenantService,
+	messageService interfaces.MessageService,
+	memoryService interfaces.MemoryService,
 	storageResolver interfaces.StorageBackendResolver,
 	toolApprovalGate approval.MCPApproval,
 	sandboxMgr sandbox.Manager,
@@ -139,6 +155,8 @@ func NewAgentService(
 		webSearchStateService: webSearchStateService,
 		wikiPageService:       wikiPageService,
 		tenantService:         tenantService,
+		messageService:        messageService,
+		memoryService:         memoryService,
 		storageResolver:       storageResolver,
 		toolApprovalGate:      toolApprovalGate,
 		sandboxMgr:            sandboxMgr,
@@ -526,6 +544,23 @@ func (s *agentService) registerTools(
 		allowedTools = append(allowedTools, tools.ToolWebFetch)
 	}
 
+	// Long-term memory search follows the memory switches, not the tool list.
+	// Being able to read memory is already a decision the workspace, the user
+	// and the agent each get a say in; asking for it a fourth time as a tool
+	// checkbox would only produce configurations where memory is on but the
+	// agent cannot reach past what each turn injects for it.
+	//
+	// The tool is dropped before it is re-added so that an allowlist which
+	// still names it — a preset, an API caller, or a config saved while memory
+	// was on — cannot outlive the switch being turned off.
+	allowedTools = withoutString(allowedTools, tools.ToolSearchMemory)
+	if s.memoryService != nil &&
+		s.memoryService.MemoryAvailable(types.ApplyAgentMemoryPreference(ctx, config.MemoryEnabled)) {
+		allowedTools = append(allowedTools, tools.ToolSearchMemory)
+	} else {
+		logger.Infof(ctx, "search_memory not registered: long-term memory is off for this request")
+	}
+
 	// Tool capability sets — used by the hard safety nets below to drop tools
 	// whose runtime prerequisite (a matching KB surface) is missing.
 	//
@@ -620,6 +655,18 @@ func (s *agentService) registerTools(
 				WithKnowledgeScope(s.knowledgeService)
 		case tools.ToolGetDocumentInfo:
 			toolToRegister = tools.NewGetDocumentInfoTool(s.knowledgeService, s.chunkService, config.SearchTargets)
+		case tools.ToolSearchConversations:
+			// The owner is captured from the caller's identity here, not read
+			// from the model's arguments, so no prompt can redirect the search
+			// at somebody else's conversations.
+			toolToRegister = tools.NewSearchConversationsTool(
+				s.messageService, types.SessionOwnerIDFromContext(ctx), sessionID)
+		case tools.ToolSearchMemory:
+			// Reaching this case means the memory switches were already
+			// checked above, where the tool is injected. Which memory space is
+			// read is resolved from the request context inside the service, so
+			// this tool needs no owner argument and none can be supplied.
+			toolToRegister = tools.NewSearchMemoryTool(s.memoryService)
 		case tools.ToolDatabaseQuery:
 			toolToRegister = tools.NewDatabaseQueryTool(s.db, config.SearchTargets)
 		case tools.ToolWebSearch:

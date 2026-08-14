@@ -37,7 +37,7 @@ func (v *OllamaVLM) Predict(ctx context.Context, imgBytesList [][]byte, prompt s
 			images = append(images, imgBytes)
 		}
 	}
-	
+
 	chatReq := &ollamaapi.ChatRequest{
 		Model: v.modelName,
 		Messages: []ollamaapi.Message{

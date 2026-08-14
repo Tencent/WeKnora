@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
-	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
 )
@@ -79,7 +78,7 @@ func TestExchangeEmbedSessionSuccess(t *testing.T) {
 	r := gin.New()
 	r.POST("/exchange", func(c *gin.Context) {
 		ch := &types.EmbedChannel{ID: "channel-1", Enabled: true}
-		ctx := context.WithValue(c.Request.Context(), middleware.EmbedChannelContextKey, ch)
+		ctx := context.WithValue(c.Request.Context(), types.EmbedChannelContextKey, ch)
 		c.Request = c.Request.WithContext(ctx)
 		h.ExchangeEmbedSession(c)
 	})
@@ -114,7 +113,7 @@ func TestExchangeEmbedSessionUnavailable(t *testing.T) {
 	r := gin.New()
 	r.POST("/exchange", func(c *gin.Context) {
 		ch := &types.EmbedChannel{ID: "channel-1", Enabled: true}
-		ctx := context.WithValue(c.Request.Context(), middleware.EmbedChannelContextKey, ch)
+		ctx := context.WithValue(c.Request.Context(), types.EmbedChannelContextKey, ch)
 		c.Request = c.Request.WithContext(ctx)
 		h.ExchangeEmbedSession(c)
 	})
@@ -136,7 +135,7 @@ func TestExchangeEmbedSessionRejectsSessionToken(t *testing.T) {
 	r := gin.New()
 	r.POST("/exchange", func(c *gin.Context) {
 		ch := &types.EmbedChannel{ID: "channel-1", Enabled: true}
-		ctx := context.WithValue(c.Request.Context(), middleware.EmbedChannelContextKey, ch)
+		ctx := context.WithValue(c.Request.Context(), types.EmbedChannelContextKey, ch)
 		c.Request = c.Request.WithContext(ctx)
 		h.ExchangeEmbedSession(c)
 	})

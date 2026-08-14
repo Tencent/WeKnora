@@ -45,6 +45,20 @@ export interface SystemInfo {
   uptime_seconds?: number
 }
 
+export interface DeploymentCapability {
+  supported: boolean
+  reason?: string
+}
+
+export interface DeploymentCapabilitiesResponse {
+  edition: string
+  capabilities: Record<string, DeploymentCapability>
+}
+
+export function getDeploymentCapabilities(): Promise<{ data: DeploymentCapabilitiesResponse }> {
+  return get('/api/v1/system/capabilities')
+}
+
 export interface PlaceholderDefinition {
   name: string
   label: string

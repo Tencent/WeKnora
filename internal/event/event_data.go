@@ -182,6 +182,13 @@ type AgentReferencesData struct {
 	Iteration  int         `json:"iteration"`
 }
 
+// MemoryRecalledData carries the long-term memories injected into this turn.
+// Memories is []types.UsedMemory, kept as interface{} for the same reason
+// AgentReferencesData does: the event package stays free of a types import.
+type MemoryRecalledData struct {
+	Memories interface{} `json:"memories"`
+}
+
 // AgentFinalAnswerData represents final answer streaming data
 type AgentFinalAnswerData struct {
 	Content    string `json:"content"`

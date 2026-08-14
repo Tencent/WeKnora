@@ -606,6 +606,13 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 	}
 	hasTypeFilter := len(typeAllow) > 0
 
+	familiarSet := make(map[string]struct{}, len(req.FamiliarKnowledgeIDs))
+	for _, id := range req.FamiliarKnowledgeIDs {
+		if id = strings.TrimSpace(id); id != "" {
+			familiarSet[id] = struct{}{}
+		}
+	}
+
 	pageBySlug := make(map[string]*types.WikiPage, len(pages))
 	linkCount := make(map[string]int, len(pages))
 	for _, p := range pages {
@@ -664,6 +671,7 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 			Title:     p.Title,
 			PageType:  p.PageType,
 			LinkCount: linkCount[slug],
+			Familiar:  p.BuiltFrom(familiarSet),
 		})
 	}
 	// Deterministic node ordering — the map iteration above is random.
@@ -711,6 +719,11 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 		Total:     total,
 		Returned:  len(nodes),
 		Truncated: len(nodes) < total,
+	}
+	for _, n := range nodes {
+		if n.Familiar {
+			meta.FamiliarCount++
+		}
 	}
 	if mode == types.WikiGraphModeEgo {
 		meta.Center = req.Center

@@ -49,12 +49,12 @@ func NewAdapter(client *Client, outgoingToken, botUserID string, postReplyToMain
 
 // outgoingPayload matches Mattermost outgoing webhook parameters (JSON or form).
 type outgoingPayload struct {
-	Token      string   `json:"token"`
-	UserID     string   `json:"user_id"`
-	UserName   string   `json:"user_name"`
-	ChannelID  string   `json:"channel_id"`
-	PostID     string   `json:"post_id"`
-	Text       string   `json:"text"`
+	Token      string          `json:"token"`
+	UserID     string          `json:"user_id"`
+	UserName   string          `json:"user_name"`
+	ChannelID  string          `json:"channel_id"`
+	PostID     string          `json:"post_id"`
+	Text       string          `json:"text"`
 	RootID     string          `json:"root_id"`
 	FileIDsRaw json.RawMessage `json:"file_ids"`
 }

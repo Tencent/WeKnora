@@ -654,6 +654,10 @@ type WikiGraphRequest struct {
 	Depth           int      // ego mode BFS depth, >= 1
 	Types           []string // optional page_type filter; empty = no filter
 	Limit           int      // max nodes to return; <= 0 means uncapped
+	// FamiliarKnowledgeIDs are documents this person keeps drawing answers
+	// from. Pages whose source_refs intersect the set are marked Familiar so
+	// the existing Wiki graph can light them up without cloning a second graph.
+	FamiliarKnowledgeIDs []string
 }
 
 // WikiGraphData represents the link graph structure for visualization.
@@ -673,6 +677,8 @@ type WikiGraphMeta struct {
 	Truncated bool   `json:"truncated"`        // true when Returned < Total (after filters)
 	Center    string `json:"center,omitempty"` // populated in ego mode
 	Depth     int    `json:"depth,omitempty"`  // populated in ego mode
+	// FamiliarCount is how many returned nodes are lit up for this person.
+	FamiliarCount int `json:"familiar_count,omitempty"`
 }
 
 // WikiGraphNode represents a node in the wiki link graph
@@ -682,6 +688,10 @@ type WikiGraphNode struct {
 	PageType string `json:"page_type"`
 	// Number of inbound + outbound links
 	LinkCount int `json:"link_count"`
+	// Familiar is true when this page was built from a document this person
+	// keeps citing in answers. It is a personal overlay, not a property of
+	// the page: two people looking at the same wiki see different highlights.
+	Familiar bool `json:"familiar,omitempty"`
 }
 
 // WikiGraphEdge represents a directed edge in the wiki link graph
@@ -784,4 +794,44 @@ type WikiPageLite struct {
 	Status   string      `json:"status"`
 	Aliases  StringArray `json:"aliases,omitempty"`
 	OutLinks StringArray `json:"out_links,omitempty"`
+}
+
+// WikiSourceKnowledgeID extracts the knowledge id from a source_refs entry,
+// stored as "uuid" or "uuid|title".
+func WikiSourceKnowledgeID(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	if i := strings.IndexByte(ref, '|'); i > 0 {
+		return strings.TrimSpace(ref[:i])
+	}
+	return ref
+}
+
+// SourceKnowledgeIDs returns the document ids this page was built from.
+func (p *WikiPage) SourceKnowledgeIDs() []string {
+	if p == nil || len(p.SourceRefs) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(p.SourceRefs))
+	for _, ref := range p.SourceRefs {
+		if id := WikiSourceKnowledgeID(ref); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// BuiltFrom reports whether any of this page's sources is in the given set.
+func (p *WikiPage) BuiltFrom(knowledgeIDs map[string]struct{}) bool {
+	if p == nil || len(knowledgeIDs) == 0 {
+		return false
+	}
+	for _, id := range p.SourceKnowledgeIDs() {
+		if _, ok := knowledgeIDs[id]; ok {
+			return true
+		}
+	}
+	return false
 }
