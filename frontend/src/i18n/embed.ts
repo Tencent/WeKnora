@@ -1202,7 +1202,7 @@ const ruEmbedPublish = {
   },
 } as const
 
-const SUPPORTED_LOCALES = ['zh-CN', 'en-US', 'ko-KR', 'ru-RU'] as const
+const SUPPORTED_LOCALES = ['zh-CN', 'zh-TW', 'en-US', 'ko-KR', 'ru-RU'] as const
 export type EmbedLocale = (typeof SUPPORTED_LOCALES)[number]
 
 /** Isolated from the main app `locale` key so embed preview never hijacks admin UI language. */
@@ -1214,6 +1214,7 @@ export function normalizeEmbedLocale(raw: string): EmbedLocale {
   if (s.startsWith('en')) return 'en-US'
   if (s.startsWith('ko')) return 'ko-KR'
   if (s.startsWith('ru')) return 'ru-RU'
+  if (s === 'zh-tw' || s === 'zh-hant') return 'zh-TW'
   if (s.startsWith('zh')) return 'zh-CN'
   const exact = SUPPORTED_LOCALES.find((l) => l.toLowerCase() === s)
   return exact || 'zh-CN'
