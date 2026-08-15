@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -2060,11 +2061,21 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			// parsed/stored, so out_links reflect real pages again.
 			updatedContent = slugHandles.decodeContent(updatedContent)
 			updatedSummary, updatedBody := splitSummaryLine(updatedContent)
-			if updatedBody != "" {
-				page.Content = updatedBody
-			} else {
-				page.Content = updatedContent
+			contentToStore := updatedBody
+			if contentToStore == "" {
+				contentToStore = updatedContent
 			}
+			// WikiPageModifyPrompt already tells the model not to restate what
+			// the page says, but instruction-following is the weakest link
+			// exactly where it matters most: on a hub page that many documents
+			// touch, the same paragraph comes back across successive batches and
+			// each round persists another copy. Collapse identical prose blocks
+			// deterministically instead of relying on the prompt to hold.
+			contentToStore, deduped := dedupeRepeatedBlocks(contentToStore)
+			if deduped > 0 {
+				logger.Infof(ctx, "wiki ingest: deduped %d repeated block(s) for slug %s", deduped, slug)
+			}
+			page.Content = contentToStore
 			if updatedSummary != "" {
 				page.Summary = updatedSummary
 			}
@@ -2143,4 +2154,93 @@ func mergeChunkRefs(current types.StringArray, additions []SlugUpdate) types.Str
 		}
 	}
 	return out
+}
+
+// wikiBlankLinePattern splits page content on blank lines, capturing the exact
+// separator so an unmodified document can be rebuilt byte-for-byte.
+var wikiBlankLinePattern = regexp.MustCompile(`(?:\r?\n)[\t ]*(?:\r?\n)+`)
+
+// minDedupeBlockRunes is the length below which a repeated block is left alone.
+// Short repeats are usually legitimate structure — a bare "---", a repeated
+// table header, a one-line list item that genuinely appears under two sections.
+// Collapsing those would corrupt the page, and they cost almost nothing to
+// keep. The duplication that actually hurts is repeated prose paragraphs.
+const minDedupeBlockRunes = 48
+
+// dedupeRepeatedBlocks removes repeated long prose blocks, leaving short blocks
+// and Markdown headings alone. Comparison is on whitespace-normalized text, so
+// a paragraph that came back with different wrapping still counts as a repeat.
+//
+// When nothing is removed the input is returned byte-for-byte — same newline
+// style, same spacing — so this is a no-op for the overwhelming majority of
+// pages and cannot churn content on its own.
+//
+// Returns the resulting content and how many blocks were dropped.
+func dedupeRepeatedBlocks(content string) (string, int) {
+	separatorIndexes := wikiBlankLinePattern.FindAllStringIndex(content, -1)
+	if len(separatorIndexes) == 0 {
+		return content, 0
+	}
+
+	blocks := make([]string, 0, len(separatorIndexes)+1)
+	separators := make([]string, 0, len(separatorIndexes))
+	start := 0
+	for _, loc := range separatorIndexes {
+		blocks = append(blocks, content[start:loc[0]])
+		separators = append(separators, content[loc[0]:loc[1]])
+		start = loc[1]
+	}
+	blocks = append(blocks, content[start:])
+
+	seen := make(map[string]struct{}, len(blocks))
+	keep := make([]bool, len(blocks))
+	removed := 0
+	for i, block := range blocks {
+		keep[i] = true
+		normalized := strings.Join(strings.Fields(block), " ")
+		if normalized == "" ||
+			utf8.RuneCountInString(normalized) < minDedupeBlockRunes ||
+			isMarkdownHeadingBlock(block) {
+			continue
+		}
+		if _, duplicate := seen[normalized]; duplicate {
+			keep[i] = false
+			removed++
+			continue
+		}
+		seen[normalized] = struct{}{}
+	}
+	if removed == 0 {
+		return content, 0
+	}
+
+	var out strings.Builder
+	wroteBlock := false
+	for i, block := range blocks {
+		if !keep[i] {
+			continue
+		}
+		if wroteBlock {
+			out.WriteString(separators[i-1])
+		}
+		out.WriteString(block)
+		wroteBlock = true
+	}
+	return out.String(), removed
+}
+
+// isMarkdownHeadingBlock reports whether a block is a single ATX heading line.
+// Headings legitimately repeat across a page ("## Sources" under several
+// sections) and dropping one would orphan everything beneath it.
+func isMarkdownHeadingBlock(block string) bool {
+	trimmed := strings.TrimSpace(strings.ReplaceAll(block, "\r\n", "\n"))
+	if trimmed == "" || strings.ContainsRune(trimmed, '\n') {
+		return false
+	}
+	hashes := 0
+	for hashes < len(trimmed) && trimmed[hashes] == '#' {
+		hashes++
+	}
+	return hashes >= 1 && hashes <= 6 && hashes < len(trimmed) &&
+		(trimmed[hashes] == ' ' || trimmed[hashes] == '\t')
 }
