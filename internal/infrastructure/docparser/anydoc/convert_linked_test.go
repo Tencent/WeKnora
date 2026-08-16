@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // These tests exercise the linked Rust converter, so they only build with the
@@ -191,6 +192,36 @@ func TestDeeplyNestedPDFFailsWithoutKillingTheProcess(t *testing.T) {
 	}
 }
 
+// A show-text operator with no operand made the page-classification scan walk
+// back over the whole content stream looking for one, so a stream of bare
+// `] TJ` tokens cost time quadratic in its length: before pdf-inspector 1.14.2
+// this input took 26 seconds of CPU, and a 2 MB one took nearly two minutes.
+// Unbounded work is the half of the hostile-PDF problem that guarded() cannot
+// catch — it never panics, it just holds the core — so the bound is pinned
+// here. The budget is deliberately far above the ~7ms a bounded lookback needs:
+// what it has to distinguish is linear from quadratic, not fast from slow.
+func TestDetectorLookbackStaysLinear(t *testing.T) {
+	const (
+		operators = 200000
+		budget    = 15 * time.Second
+	)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// The result is irrelevant: the page carries one real text run, so
+		// this converts either way. Only how long it takes is under test.
+		_, _ = Convert(unmatchedShowTextPDF(operators), Options{Format: "pdf"})
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(budget):
+		t.Fatalf("converting a PDF with %d unmatched TJ operators took over %s; "+
+			"the detector's operand lookback is no longer bounded", operators, budget)
+	}
+}
+
 // buildDocx writes the smallest OOXML package that carries a heading, a
 // paragraph, and one embedded image.
 func buildDocx(t *testing.T) []byte {
@@ -301,6 +332,21 @@ func nestedPDF(nested string) []byte {
 		"<< /Type /Catalog /Pages 2 0 R /Nested " + nested + " >>",
 		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
 		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>",
+	})
+}
+
+// unmatchedShowTextPDF is a one-page PDF whose content stream shows text once
+// and then repeats a TJ operator whose array operand is never opened.
+func unmatchedShowTextPDF(operators int) []byte {
+	content := "BT /F1 12 Tf 20 100 Td (Shipping summary) Tj ET\n" +
+		strings.Repeat("] TJ\n", operators)
+	return writePDF([]string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R " +
+			"/Resources << /Font << /F1 5 0 R >> >> >>",
+		fmt.Sprintf("<< /Length %d >>\nstream\n%sendstream", len(content), content),
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
 	})
 }
 
