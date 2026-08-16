@@ -186,7 +186,7 @@ jobs:
             platform: linux/arm64
             runs: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -234,6 +234,7 @@ jobs:
             ${{ format('COMMIT_ID_ARG={0}', steps.version.outputs.commit_id) }}
             ${{ format('BUILD_TIME_ARG={0}', steps.version.outputs.build_time) }}
             ${{ format('GO_VERSION_ARG={0}', steps.version.outputs.go_version) }}
+            WITH_ANYDOC=1
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-app
           cache-from: type=gha,scope=build-app-${{ env.PLATFORM_PAIR }}

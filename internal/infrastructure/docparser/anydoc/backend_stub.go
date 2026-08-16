@@ -8,7 +8,8 @@ package anydoc
 // registry simply reports the engine as unavailable.
 
 const unavailableReason = "anydoc engine not built into this binary " +
-	"(rebuild with `make build-anydoc` / `-tags anydoc`)"
+	"(rebuild with `make build-anydoc` / `-tags anydoc`; " +
+	"Docker images need `--build-arg WITH_ANYDOC=1`)"
 
 func backendAvailable() bool { return false }
 
