@@ -100,6 +100,9 @@ func TestCreateSystemUserCreatesUserWithExplicitPassword(t *testing.T) {
 	if strings.Contains(string(audits.entries[0].Details), "PlainPass9") {
 		t.Fatal("audit details leaked the password")
 	}
+	if !strings.Contains(string(audits.entries[0].Details), `"password_generated":false`) {
+		t.Fatalf("audit details must mark password_generated=false, got %s", audits.entries[0].Details)
+	}
 }
 
 func TestCreateSystemUserAutoGeneratesPasswordWhenEmpty(t *testing.T) {
@@ -135,6 +138,9 @@ func TestCreateSystemUserAutoGeneratesPasswordWhenEmpty(t *testing.T) {
 	}
 	if strings.Contains(string(audits.entries[0].Details), "G3n3r4t3dP4ssw0rd") {
 		t.Fatal("audit details leaked the generated password")
+	}
+	if !strings.Contains(string(audits.entries[0].Details), `"password_generated":true`) {
+		t.Fatalf("audit details must mark password_generated=true, got %s", audits.entries[0].Details)
 	}
 }
 
@@ -190,15 +196,20 @@ func TestCreateSystemUserMapsPasswordPolicyTo400(t *testing.T) {
 }
 
 func TestCreateSystemUserMapsDuplicateIdentityTo400(t *testing.T) {
-	users := &createUserService{err: errors.New("user with this email already exists")}
-	h := &SystemHandler{userSvc: users}
-	r := createSystemUserRouter(h, "admin-user")
+	for _, err := range []error{
+		errors.New("user with this email already exists"),
+		errors.New("user with this username already exists"),
+	} {
+		users := &createUserService{err: err}
+		h := &SystemHandler{userSvc: users}
+		r := createSystemUserRouter(h, "admin-user")
 
-	w := performCreateSystemUser(t, r, map[string]string{
-		"username": "alice", "email": "alice@example.com",
-	})
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		w := performCreateSystemUser(t, r, map[string]string{
+			"username": "alice", "email": "alice@example.com",
+		})
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("err=%v status=%d body=%s", err, w.Code, w.Body.String())
+		}
 	}
 }
 
