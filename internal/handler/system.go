@@ -1585,6 +1585,54 @@ func (h *SystemHandler) ResetUserPassword(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Password reset successfully"})
 }
 
+// CreateSystemUserResponse is the payload returned by
+// POST /api/v1/system/admin/users/create. GeneratedPassword is populated
+// exactly once, only when the server minted a random password (the
+// request left `password` empty), and is never logged, audited, or
+// retrievable again.
+type CreateSystemUserResponse struct {
+	User *types.UserInfo `json:"user"`
+	// GeneratedPassword is the plaintext password when the server
+	// auto-generated one. Absent when the caller supplied the password.
+	GeneratedPassword string `json:"generated_password,omitempty"`
+}
+
+// CreateSystemUser godoc
+// @Summary      Create a new user (SystemAdmin)
+// @Description  Provision a new local user account (SystemAdmin only).
+// @Description  When `password` is empty, a cryptographically random
+// @Description  password is generated (OIDC-style crypto/rand + base64url)
+// @Description  and returned once in the response body. Tenant provisioning
+// @Description  follows the shared auth.default_tenant_mode policy.
+// @Tags         System Admin
+// @Accept       json
+// @Produce      json
+// @Param        request body types.AdminCreateUserRequest true "User creation request"
+// @Success      201  {object}  CreateSystemUserResponse  "User created successfully"
+// @Failure      400  {object}  map[string]interface{}  "Invalid request"
+// @Failure      403  {object}  map[string]interface{}  "Forbidden: not a system admin"
+// @Router       /system/admin/users/create [post]
+func (h *SystemHandler) CreateSystemUser(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+
+	var req types.AdminCreateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user creation request"})
+		return
+	}
+	req.Username = strings.TrimSpace(req.Username)
+	req.Email = strings.TrimSpace(req.Email)
+	req.Password = strings.TrimSpace(req.Password)
+	if req.Username == "" || req.Email == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Username and email are required"})
+		return
+	}
+
+	// TODO: application logic
+	logger.Infof(ctx, "CreateSystemUser not implemented yet")
+	c.JSON(http.StatusNotImplemented, gin.H{"error": "Not implemented"})
+}
+
 // ============================================================================
 // System Settings (P1)
 // ----------------------------------------------------------------------------
