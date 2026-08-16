@@ -133,6 +133,20 @@ func TestAdminCreateUserRejectsWhitespaceOnlyPassword(t *testing.T) {
 	}
 }
 
+func TestGeneratePolicyCompliantPasswordAlwaysComplies(t *testing.T) {
+	// ~0.4% of base64url draws have no digit. Regenerating until the
+	// policy passes makes compliance certain for every draw.
+	for i := range 2000 {
+		pw, err := generatePolicyCompliantPassword()
+		if err != nil {
+			t.Fatalf("iteration %d: generate: %v", i, err)
+		}
+		if err := ValidatePasswordPolicy(pw); err != nil {
+			t.Fatalf("iteration %d: generated password %q violates the policy: %v", i, pw, err)
+		}
+	}
+}
+
 func TestAdminCreateUserRejectsWeakPasswordBeforePersisting(t *testing.T) {
 	repo := &adminCreateUserRepo{}
 	svc := newAdminCreateUserService(repo)

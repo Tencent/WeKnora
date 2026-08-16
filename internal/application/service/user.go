@@ -740,7 +740,7 @@ func (s *userService) AdminCreateUser(
 	password := req.Password
 	generated := false
 	if password == "" {
-		randomPassword, err := generateRandomString(24)
+		randomPassword, err := generatePolicyCompliantPassword()
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to generate password: %w", err)
 		}
@@ -1592,6 +1592,22 @@ func generateRandomString(length int) (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buffer), nil
+}
+
+// generatePolicyCompliantPassword returns a cryptographically random
+// password that satisfies ValidatePasswordPolicy, regenerating until
+// it does (a single 32-char base64url draw misses digits ~0.4% of the
+// time).
+func generatePolicyCompliantPassword() (string, error) {
+	for {
+		password, err := generateRandomString(24)
+		if err != nil {
+			return "", err
+		}
+		if ValidatePasswordPolicy(password) == nil {
+			return password, nil
+		}
+	}
 }
 
 func decodeJWTClaims(token string) (map[string]interface{}, error) {
