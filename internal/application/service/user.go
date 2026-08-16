@@ -723,6 +723,52 @@ func (s *userService) AdminResetPassword(ctx context.Context, userID string, new
 	return s.tokenRepo.RevokeTokensByUserID(ctx, userID)
 }
 
+// AdminCreateUser provisions a new local user on behalf of a SystemAdmin.
+// An empty password generates a random one, returned exactly once; any
+// explicit password must satisfy ValidatePasswordPolicy. Delegates to
+// Register, so duplicate checks, tenant provisioning and Owner membership
+// bootstrapping match public registration.
+func (s *userService) AdminCreateUser(
+	ctx context.Context,
+	req *types.AdminCreateUserRequest,
+	provisioning types.TenantProvisioningMode,
+) (*types.User, string, error) {
+	if req == nil || strings.TrimSpace(req.Username) == "" || strings.TrimSpace(req.Email) == "" {
+		return nil, "", errors.New("username and email are required")
+	}
+
+	password := req.Password
+	generated := false
+	if strings.TrimSpace(password) == "" {
+		randomPassword, err := generateRandomString(24)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to generate password: %w", err)
+		}
+		password = randomPassword
+		generated = true
+	}
+	// The generated password (32 base64url characters, letters and
+	// digits) always passes the policy; validating both branches keeps
+	// the public 8-32 letter-and-number contract uniform.
+	if err := ValidatePasswordPolicy(password); err != nil {
+		return nil, "", err
+	}
+
+	user, err := s.Register(ctx, &types.RegisterRequest{
+		Username:           strings.TrimSpace(req.Username),
+		Email:              strings.TrimSpace(req.Email),
+		Password:           password,
+		TenantProvisioning: provisioning,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	if generated {
+		return user, password, nil
+	}
+	return user, "", nil
+}
+
 // ValidatePassword validates user password
 func (s *userService) ValidatePassword(ctx context.Context, userID string, password string) error {
 	user, err := s.userRepo.GetUserByID(ctx, userID)

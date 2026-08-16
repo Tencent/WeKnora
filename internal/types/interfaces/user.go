@@ -79,6 +79,13 @@ type UserService interface {
 	// callers pass offset/limit to page through results. Used by the
 	// /api/v1/system/admin/list endpoint, gated to SystemAdmin callers.
 	ListSystemAdmins(ctx context.Context, offset, limit int) ([]*types.User, int64, error)
+	// AdminCreateUser provisions a new local user on behalf of a
+	// SystemAdmin. An empty req.Password generates a random password,
+	// returned exactly once as the second result. provisioning is resolved
+	// by the caller from the shared auth.default_tenant_mode policy.
+	AdminCreateUser(
+		ctx context.Context, req *types.AdminCreateUserRequest, provisioning types.TenantProvisioningMode,
+	) (*types.User, string, error)
 	// RevokeSystemAdmin removes system-admin privileges with the
 	// last-admin/self-revoke checks performed atomically.
 	RevokeSystemAdmin(ctx context.Context, userID, actorID string) (*types.User, error)
