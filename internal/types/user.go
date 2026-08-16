@@ -197,13 +197,13 @@ type RegisterRequest struct {
 // AdminCreateUserRequest is the payload for a SystemAdmin provisioning a
 // new local user via POST /api/v1/system/admin/users/create.
 //
-// Password is optional: when empty, the service generates a random one
-// (crypto/rand, same as OIDC provisioning) and returns it exactly once in
-// the response body.
+// Password is optional: when absent (or null), the service generates a
+// random one and returns it exactly once. Any provided value, the
+// empty string included, is subject to the password policy.
 type AdminCreateUserRequest struct {
-	Username string `json:"username" binding:"required,min=2,max=50"`
-	Email    string `json:"email"    binding:"required,email"`
-	Password string `json:"password"`
+	Username string  `json:"username" binding:"required,min=2,max=50"`
+	Email    string  `json:"email"    binding:"required,email"`
+	Password *string `json:"password"`
 }
 
 // TenantProvisioningMode controls what UserService.Register does after it

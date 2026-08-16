@@ -382,8 +382,10 @@ export interface CreateSystemUserRequest {
   /** Must be a valid email address. */
   email: string
   /**
-   * Optional. When omitted, the server generates a cryptographically
-   * random password and returns it exactly once in `generated_password`.
+   * Optional. Omit the key (or send null) to have the server generate a
+   * random password, returned exactly once in `generated_password`.
+   * Any provided value (including empty string) is subject to the
+   * password policy and can be rejected.
    */
   password?: string
 }

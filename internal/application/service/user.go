@@ -724,10 +724,12 @@ func (s *userService) AdminResetPassword(ctx context.Context, userID string, new
 }
 
 // AdminCreateUser provisions a new local user on behalf of a SystemAdmin.
-// An empty password generates a random one, returned exactly once; any
-// explicit password must satisfy ValidatePasswordPolicy. Delegates to
-// Register, so duplicate checks, tenant provisioning and Owner membership
-// bootstrapping match public registration.
+//
+// An absent password generates a random one, returned exactly once.
+// Any provided password, must satisfy ValidatePasswordPolicy.
+//
+// Delegates to Register, so duplicate checks, tenant provisioning and Owner
+// membership bootstrapping match public registration.
 func (s *userService) AdminCreateUser(
 	ctx context.Context,
 	req *types.AdminCreateUserRequest,
@@ -737,18 +739,21 @@ func (s *userService) AdminCreateUser(
 		return nil, "", errors.New("username and email are required")
 	}
 
-	password := req.Password
+	password := ""
 	generated := false
-	if password == "" {
+	if req.Password == nil {
 		randomPassword, err := generatePolicyCompliantPassword()
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to generate password: %w", err)
 		}
 		password = randomPassword
 		generated = true
+	} else {
+		password = *req.Password
 	}
-	// Generation triggers only on the empty string. Any explicit value,
-	// whitespace-only included, must satisfy the password policy.
+	// Generation triggers only on an absent password. Any provided
+	// value, empty or whitespace-only, is hashed byte-for-byte and must
+	// satisfy the password policy.
 	if err := ValidatePasswordPolicy(password); err != nil {
 		return nil, "", err
 	}

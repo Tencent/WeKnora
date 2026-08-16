@@ -1625,8 +1625,6 @@ func (h *SystemHandler) CreateSystemUser(c *gin.Context) {
 	req.Username = strings.TrimSpace(req.Username)
 	req.Email = strings.TrimSpace(req.Email)
 	// Password is intentionally NOT trimmed.
-	// Only a truly empty value triggers random generation; whitespace-only
-	// is rejected downstream by the password policy.
 	if req.Username == "" || req.Email == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Username and email are required"})
 		return

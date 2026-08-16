@@ -91,7 +91,7 @@ func TestCreateSystemUserCreatesUserWithExplicitPassword(t *testing.T) {
 			resp.GeneratedPassword,
 		)
 	}
-	if users.gotReq == nil || users.gotReq.Password != "PlainPass9" {
+	if users.gotReq == nil || users.gotReq.Password == nil || *users.gotReq.Password != "PlainPass9" {
 		t.Fatalf("service received unexpected request: %+v", users.gotReq)
 	}
 	if len(audits.entries) != 1 || audits.entries[0].Action != types.AuditActionSystemUserCreated {
@@ -130,6 +130,9 @@ func TestCreateSystemUserAutoGeneratesPasswordWhenEmpty(t *testing.T) {
 	if resp.GeneratedPassword != "G3n3r4t3dP4ssw0rd" {
 		t.Fatalf("generated_password=%q, want the once-only generated password", resp.GeneratedPassword)
 	}
+	if users.gotReq == nil || users.gotReq.Password != nil {
+		t.Fatalf("absent password must reach the service as nil, got %+v", users.gotReq)
+	}
 	if len(audits.entries) != 1 || audits.entries[0].Action != types.AuditActionSystemUserCreated {
 		t.Fatalf("expected one %s audit entry, got %+v", types.AuditActionSystemUserCreated, audits.entries)
 	}
@@ -145,22 +148,22 @@ func TestCreateSystemUserAutoGeneratesPasswordWhenEmpty(t *testing.T) {
 }
 
 func TestCreateSystemUserDoesNotRewritePassword(t *testing.T) {
-	// Leading/trailing whitespace is part of the credential: the exact
-	// bytes received must reach the service unmodified. Policy
-	// enforcement, including the rejection of all-whitespace values,
-	// lives in the service layer.
+	// Password bytes must reach the service unmodified, including an
+	// explicitly provided empty string (a non-nil pointer to ""). Policy
+	// enforcement, including the rejection of empty and all-whitespace
+	// values, lives in the service layer.
 	users := &createUserService{createdUser: &types.User{ID: "u3", Username: "carol", Email: "carol@example.com"}}
 	h := &SystemHandler{userSvc: users}
 	r := createSystemUserRouter(h, "admin-user")
 
-	for _, pw := range []string{"  PlainPass9  ", "\tPlainPass9\n"} {
+	for _, pw := range []string{"  PlainPass9  ", "\tPlainPass9\n", ""} {
 		w := performCreateSystemUser(t, r, map[string]string{
 			"username": "carol", "email": "carol@example.com", "password": pw,
 		})
 		if w.Code != http.StatusCreated {
 			t.Fatalf("password=%q status=%d body=%s", pw, w.Code, w.Body.String())
 		}
-		if users.gotReq == nil || users.gotReq.Password != pw {
+		if users.gotReq == nil || users.gotReq.Password == nil || *users.gotReq.Password != pw {
 			t.Fatalf("password=%q service received %+v", pw, users.gotReq)
 		}
 	}
