@@ -71,14 +71,15 @@ was quadratic:
 | `] TJ` tokens | PDF size | 0.1.8 | 0.1.9 |
 | --- | --- | --- | --- |
 | 40,000 | 195 KB | 1.0 s | 2.0 ms |
-| 120,000 | 586 KB | 9.1 s | 3.8 ms |
-| 200,000 | 977 KB | 26.7 s | 5.8 ms |
-| 400,000 | 1.9 MB | 111.9 s | 11.0 ms |
+| 120,000 | 586 KB | 9.7 s | 4.1 ms |
+| 200,000 | 977 KB | 25.9 s | 6.5 ms |
+| 400,000 | 1.9 MB | 105.6 s | 12.2 ms |
 
-Quadrupling the input cost 16× the time before the fix and grows about in step
-with it after. A 2 MB upload holding a core for nearly two minutes needs no
+One run on a 4-core VM, same Go code either side, only the linked archive
+differing. Quadrupling the input cost 16× the time before the fix and roughly
+4× after. A 2 MB upload holding a core for nearly two minutes needs no
 privilege and no malformed container — the file parses fine, it just takes
-forever, and every concurrent upload takes its own core.
+forever, and every concurrent upload takes a core of its own.
 `TestDetectorLookbackStaysLinear` in `internal/infrastructure/docparser/anydoc`
 fails if a bump reintroduces it.
 

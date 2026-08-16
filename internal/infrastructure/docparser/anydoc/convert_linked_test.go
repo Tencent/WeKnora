@@ -195,10 +195,10 @@ func TestDeeplyNestedPDFFailsWithoutKillingTheProcess(t *testing.T) {
 // A show-text operator with no operand made the page-classification scan walk
 // back over the whole content stream looking for one, so a stream of bare
 // `] TJ` tokens cost time quadratic in its length: before pdf-inspector 1.14.2
-// this input took 27 seconds of CPU, and a 2 MB one took nearly two minutes.
+// this input took 26 seconds of CPU, and a 2 MB one took nearly two minutes.
 // Unbounded work is the half of the hostile-PDF problem that guarded() cannot
 // catch — it never panics, it just holds the core — so the bound is pinned
-// here. The budget is deliberately far above the ~6ms a bounded lookback needs:
+// here. The budget is deliberately far above the ~7ms a bounded lookback needs:
 // what it has to distinguish is linear from quadratic, not fast from slow.
 func TestDetectorLookbackStaysLinear(t *testing.T) {
 	const (
