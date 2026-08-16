@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
@@ -1622,9 +1623,15 @@ func (h *SystemHandler) CreateSystemUser(c *gin.Context) {
 	}
 	req.Username = strings.TrimSpace(req.Username)
 	req.Email = strings.TrimSpace(req.Email)
-	req.Password = strings.TrimSpace(req.Password)
+	// Password is intentionally NOT trimmed.
+	// "Empty" is decided downstream via a TrimSpace comparison.
 	if req.Username == "" || req.Email == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Username and email are required"})
+		return
+	}
+	// Binding's min=2/max=50 ran on the raw JSON, re-check the trimmed value.
+	if n := utf8.RuneCountInString(req.Username); n < 2 || n > 50 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Username must be 2-50 characters"})
 		return
 	}
 
