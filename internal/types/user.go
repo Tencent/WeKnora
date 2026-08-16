@@ -199,17 +199,11 @@ type RegisterRequest struct {
 //
 // Password is optional: when empty, the service generates a random one
 // (crypto/rand, same as OIDC provisioning) and returns it exactly once in
-// the response body. TenantProvisioning is server-controlled, like
-// RegisterRequest.
+// the response body.
 type AdminCreateUserRequest struct {
 	Username string `json:"username" binding:"required,min=2,max=50"`
 	Email    string `json:"email"    binding:"required,email"`
 	Password string `json:"password"`
-
-	// TenantProvisioning is server-controlled provisioning context,
-	// resolved by the caller from the shared auth.default_tenant_mode
-	// policy. Internal only.
-	TenantProvisioning TenantProvisioningMode `json:"-"`
 }
 
 // TenantProvisioningMode controls what UserService.Register does after it

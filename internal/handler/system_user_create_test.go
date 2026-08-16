@@ -21,19 +21,21 @@ import (
 // tenant provisioning mode.
 type createUserService struct {
 	interfaces.UserService
-	createdUser *types.User
-	generated   string
-	err         error
-	gotReq      *types.AdminCreateUserRequest
+	createdUser     *types.User
+	generated       string
+	err             error
+	gotReq          *types.AdminCreateUserRequest
+	gotProvisioning types.TenantProvisioningMode
 }
 
 func (s *createUserService) AdminCreateUser(
 	_ context.Context,
 	req *types.AdminCreateUserRequest,
-	_ types.TenantProvisioningMode,
+	provisioning types.TenantProvisioningMode,
 ) (*types.User, string, error) {
 	record := *req
 	s.gotReq = &record
+	s.gotProvisioning = provisioning
 	return s.createdUser, s.generated, s.err
 }
 
@@ -169,8 +171,8 @@ func TestCreateSystemUserResolvesDefaultTenantMode(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
-	if users.gotReq == nil || users.gotReq.TenantProvisioning != types.TenantProvisioningCreatePersonal {
-		t.Fatalf("provisioning=%v, want create_personal default", users.gotReq.TenantProvisioning)
+	if users.gotProvisioning != types.TenantProvisioningCreatePersonal {
+		t.Fatalf("provisioning=%v, want create_personal default", users.gotProvisioning)
 	}
 }
 
