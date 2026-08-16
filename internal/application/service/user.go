@@ -739,7 +739,7 @@ func (s *userService) AdminCreateUser(
 
 	password := req.Password
 	generated := false
-	if strings.TrimSpace(password) == "" {
+	if password == "" {
 		randomPassword, err := generateRandomString(24)
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to generate password: %w", err)
@@ -747,9 +747,8 @@ func (s *userService) AdminCreateUser(
 		password = randomPassword
 		generated = true
 	}
-	// The generated password (32 base64url characters, letters and
-	// digits) always passes the policy; validating both branches keeps
-	// the public 8-32 letter-and-number contract uniform.
+	// Generation triggers only on the empty string. Any explicit value,
+	// whitespace-only included, must satisfy the password policy.
 	if err := ValidatePasswordPolicy(password); err != nil {
 		return nil, "", err
 	}
