@@ -108,16 +108,14 @@ func TestAdminCreateUserHashesUntrimmedPasswordByteForByte(t *testing.T) {
 	}
 }
 
-func TestAdminCreateUserRejectsWhitespaceOnlyPassword(t *testing.T) {
+func TestAdminCreateUserRejectsPolicyViolatingPassword(t *testing.T) {
 	// Registration accepts whitespace as literal password characters, but
-	// a password made up entirely of whitespace carries no letter or
-	// digit, so the admin-create policy (aligned with AdminResetPassword)
-	// rejects it with ErrPasswordPolicy. Only an absent password triggers
-	// random generation.
+	// admin-create policy-checks any provided value.
+	// Only an absent password triggers generation.
 	repo := &adminCreateUserRepo{}
 	svc := newAdminCreateUserService(repo)
 
-	for _, pw := range []string{"   ", "\t\n", " \u00a0\u00a0 "} {
+	for _, pw := range []string{"password", "", "   ", "\t\n", " \u00a0\u00a0 "} {
 		_, generated, err := svc.AdminCreateUser(context.Background(), &types.AdminCreateUserRequest{
 			Username: "alice", Email: "alice@example.com", Password: &pw,
 		}, types.TenantProvisioningTenantless)
