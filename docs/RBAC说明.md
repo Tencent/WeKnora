@@ -119,6 +119,9 @@ auth:
   # self_serve（默认）：任何人都可注册，自动建空间 + Owner 成员
   # invite_only       ：禁止公开注册，新用户必须通过 /tenants/:id/members 邀请进入
   registration_mode: self_serve
+  # 密码登录的每 IP 滑动窗口限流；默认均为 10
+  login_rate_limit_max: 10
+  login_rate_limit_window_minutes: 10
 
 audit:
   # 审计日志保留天数；每日后台清理；默认 90；置 0 关闭清理
