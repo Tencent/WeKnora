@@ -19,7 +19,7 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
         sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
     fi && \
     apt-get update && \
-    apt-get install -y git build-essential libsqlite3-dev
+    apt-get install -y git build-essential libsqlite3-dev curl
 
 # Install migrate tool
 RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
@@ -45,15 +45,16 @@ ENV COMMIT_ID=${COMMIT_ID_ARG}
 ENV BUILD_TIME=${BUILD_TIME_ARG}
 ENV GO_VERSION=${GO_VERSION_ARG}
 
-# Optional: link the anydoc parser engine, which converts office documents in
-# the Go process instead of the Python docreader. It is off by default because
-# it needs a Rust toolchain (a few minutes and ~1 GB of build-stage layers) for
-# an engine most deployments do not select.
-#   docker build --build-arg WITH_ANYDOC=1 ...
-ARG WITH_ANYDOC=0
+# Link the anydoc parser engine (office docs converted in-process, no
+# Python docreader). Default on so Hub / compose images ship a working
+# engine; pass WITH_ANYDOC=0 to skip the Rust toolchain (~few minutes and
+# ~1 GB of build-stage layers).
+ARG WITH_ANYDOC=1
 ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
 ENV PATH=/usr/local/cargo/bin:$PATH
-RUN if [ "$WITH_ANYDOC" = "1" ]; then \
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    if [ "$WITH_ANYDOC" = "1" ]; then \
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
             | sh -s -- -y --profile minimal --default-toolchain stable && \
         ./scripts/build-anydoc-lib.sh; \
