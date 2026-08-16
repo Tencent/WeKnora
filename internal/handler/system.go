@@ -1610,8 +1610,9 @@ type CreateSystemUserResponse struct {
 // @Produce      json
 // @Param        request body types.AdminCreateUserRequest true "User creation request"
 // @Success      201  {object}  CreateSystemUserResponse  "User created successfully"
-// @Failure      400  {object}  map[string]interface{}  "Invalid request"
+// @Failure      400  {object}  map[string]interface{}  "Invalid request, weak or duplicate identity"
 // @Failure      403  {object}  map[string]interface{}  "Forbidden: not a system admin"
+// @Failure      500  {object}  map[string]interface{}  "Internal error"
 // @Router       /system/admin/users/create [post]
 func (h *SystemHandler) CreateSystemUser(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
@@ -1635,9 +1636,29 @@ func (h *SystemHandler) CreateSystemUser(c *gin.Context) {
 		return
 	}
 
-	// TODO: application logic
-	logger.Infof(ctx, "CreateSystemUser not implemented yet")
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "Not implemented"})
+	req.TenantProvisioning = h.resolveDefaultTenantMode(ctx)
+	user, generatedPassword, err := h.userSvc.AdminCreateUser(ctx, &req, req.TenantProvisioning)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrPasswordPolicy), strings.Contains(err.Error(), "already exists"):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			logger.Errorf(ctx, "Failed to create user: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+		}
+		return
+	}
+
+	logger.Infof(ctx, "System admin created user %s (ID: %s)", user.Username, user.ID)
+	h.emitAdminAudit(ctx, types.AuditActionSystemUserCreated, user, map[string]any{
+		"target_email":       user.Email,
+		"target_username":    user.Username,
+		"password_generated": generatedPassword != "",
+	})
+	c.JSON(http.StatusCreated, CreateSystemUserResponse{
+		User:              user.ToUserInfo(),
+		GeneratedPassword: generatedPassword,
+	})
 }
 
 // ============================================================================
