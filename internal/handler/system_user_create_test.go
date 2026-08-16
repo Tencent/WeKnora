@@ -138,14 +138,14 @@ func TestCreateSystemUserAutoGeneratesPasswordWhenEmpty(t *testing.T) {
 
 func TestCreateSystemUserDoesNotRewritePassword(t *testing.T) {
 	// Leading/trailing whitespace is part of the credential: the exact
-	// bytes received must reach the service unmodified, and a
-	// whitespace-only value is passed through as-is (the service decides
-	// emptiness downstream).
+	// bytes received must reach the service unmodified. Policy
+	// enforcement, including the rejection of all-whitespace values,
+	// lives in the service layer.
 	users := &createUserService{createdUser: &types.User{ID: "u3", Username: "carol", Email: "carol@example.com"}}
 	h := &SystemHandler{userSvc: users}
 	r := createSystemUserRouter(h, "admin-user")
 
-	for _, pw := range []string{"  PlainPass9  ", "   "} {
+	for _, pw := range []string{"  PlainPass9  ", "\tPlainPass9\n"} {
 		w := performCreateSystemUser(t, r, map[string]string{
 			"username": "carol", "email": "carol@example.com", "password": pw,
 		})
