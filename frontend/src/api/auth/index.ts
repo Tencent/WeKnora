@@ -12,6 +12,8 @@ export interface LoginRequest {
 export interface LoginResponse {
   success: boolean
   message?: string
+  status?: number
+  retryAfter?: string | number
   user?: {
     id: string
     username: string
@@ -214,7 +216,9 @@ export async function login(data: LoginRequest): Promise<LoginResponse> {
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || t('error.auth.loginFailed')
+      message: error.message || t('error.auth.loginFailed'),
+      status: error.status,
+      retryAfter: error.retryAfter,
     }
   }
 }

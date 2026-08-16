@@ -1892,6 +1892,8 @@ export default {
     passwordMismatch: 'Entered passwords do not match',
     loginError: 'Login error, please check email or password',
     loginErrorRetry: 'Login error, please try again later',
+    loginRateLimited: 'Too many login attempts. Try again in {seconds} seconds.',
+    loginRetryCountdown: 'Try again in {seconds}s',
     registerError: 'Registration error, please try again later',
     workspaceOnboarding: {
       title: 'Choose your workspace',
