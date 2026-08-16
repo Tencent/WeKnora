@@ -121,8 +121,15 @@ const (
 	// another user's local password. Details identify the target and record
 	// session revocation, but never contain the old or new password.
 	AuditActionSystemUserPasswordReset AuditAction = "system.user_password_reset"
-	AuditActionSystemAPIKeyCreated     AuditAction = "system.api_key_created"
-	AuditActionSystemAPIKeyRevoked     AuditAction = "system.api_key_revoked"
+
+	// AuditActionSystemUserCreated fires when a SystemAdmin provisions a
+	// new local user via POST /api/v1/system/admin/users/create. Details
+	// carry {target_email, target_username, password_generated} but never
+	// the plaintext password (returned once in the HTTP response).
+	// TenantID=0 (system-scope).
+	AuditActionSystemUserCreated   AuditAction = "system.user_created"
+	AuditActionSystemAPIKeyCreated AuditAction = "system.api_key_created"
+	AuditActionSystemAPIKeyRevoked AuditAction = "system.api_key_revoked"
 
 	// Runtime queue mutations are privileged SystemAdmin actions. Retrying an
 	// archived task can repeat its original side effects; deleting one removes
