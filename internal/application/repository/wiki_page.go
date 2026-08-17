@@ -31,7 +31,7 @@ func NewWikiPageRepository(db *gorm.DB) interfaces.WikiPageRepository {
 }
 
 func (r *wikiPageRepository) wikiCategoryRankOrder() string {
-	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
+	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() != "postgres" {
 		return "CASE WHEN COALESCE(json_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
 	}
 	return "CASE WHEN COALESCE(jsonb_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
@@ -319,12 +319,15 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 		query = query.Where("status = ?", req.Status)
 	}
 	if req.Query != "" {
-		// Use PostgreSQL full-text search + ILIKE for aliases
-		query = query.Where(
-			"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
-			req.Query,
-			"%"+req.Query+"%",
-		)
+		like := "%" + req.Query + "%"
+		if r.db.Dialector.Name() == "mysql" {
+			query = query.Where("title LIKE ? OR content LIKE ? OR CAST(aliases AS CHAR) LIKE ?", like, like, like)
+		} else {
+			query = query.Where(
+				"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
+				req.Query, like,
+			)
+		}
 	}
 	// Directory filters are pushed to SQL so the DB does the counting and
 	// pagination instead of loading every page of the type into memory. `depth`
