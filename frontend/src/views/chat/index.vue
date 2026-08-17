@@ -1098,6 +1098,16 @@ onBeforeRouteUpdate((to, from, next) => {
     }
 }
 
+@media (max-width: 768px) {
+    .chat,
+    .chat.is-sidebar-collapsed {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        padding: 0 0 12px 8px;
+    }
+}
+
 .chat_scroll_box {
     flex: 1;
     // Without min-height: 0, a flex-column child defaults to min-height: auto
