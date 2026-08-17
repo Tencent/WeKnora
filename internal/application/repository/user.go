@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
@@ -260,9 +261,11 @@ func (r *userRepository) RevokeSystemAdmin(ctx context.Context, userID, actorID 
 func (r *userRepository) SearchUsers(ctx context.Context, query string, limit int) ([]*types.User, error) {
 	var users []*types.User
 	searchPattern := "%" + query + "%"
+	dialect := r.db.Dialector.Name()
 
 	dbQuery := r.db.WithContext(ctx).
-		Where("username ILIKE ? OR email ILIKE ?", searchPattern, searchPattern).
+		Where(database.CaseInsensitiveMatch(dialect, "username")+" OR "+
+			database.CaseInsensitiveMatch(dialect, "email"), searchPattern, searchPattern).
 		Where("is_active = ?", true).
 		Order("username ASC")
 

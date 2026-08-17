@@ -1,0 +1,37 @@
+services:
+  app:
+    environment:
+      - DB_DRIVER=mysql
+      - DB_HOST=postgres
+      - DB_PORT=3306
+      - DB_USER=${MYSQL_USER:-weknora}
+      - DB_PASSWORD=${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+      - DB_NAME=${MYSQL_DATABASE:-WeKnora}
+      - RETRIEVE_DRIVER=${MYSQL_RETRIEVE_DRIVER:-qdrant}
+
+  # Keep the service key "postgres" so the base app dependency remains valid.
+  # This override replaces its image and health check; no PostgreSQL process runs.
+  postgres:
+    image: mysql:8.0.37
+    container_name: WeKnora-mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    environment:
+      - MYSQL_USER=${MYSQL_USER:-weknora}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-WeKnora}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mysqladmin ping -h 127.0.0.1 -u"$${MYSQL_USER}" -p"$${MYSQL_PASSWORD}" --silent
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  mysql-data:

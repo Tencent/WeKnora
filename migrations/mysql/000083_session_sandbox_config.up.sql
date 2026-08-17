@@ -1,0 +1,1 @@
+ALTER TABLE sessions ADD COLUMN sandbox_config_id VARCHAR(36) DEFAULT NULL;
