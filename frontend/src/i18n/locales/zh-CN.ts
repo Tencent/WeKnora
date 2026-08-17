@@ -1401,6 +1401,10 @@ export default {
           name: 'Simple',
           desc: '简单格式 & 图片解析（无需外部服务）'
         },
+        anydoc: {
+          name: 'anydoc',
+          desc: '进程内 Office 文档解析（无需外部服务）'
+        },
         builtin: {
           name: '内置',
           desc: 'DocReader 内置解析引擎（docx/pdf/xlsx 等复杂格式）'

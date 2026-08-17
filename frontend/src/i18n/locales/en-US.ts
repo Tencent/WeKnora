@@ -4981,6 +4981,10 @@ export default {
           name: 'Simple',
           desc: 'Simple format & image parsing (no external service required)'
         },
+        anydoc: {
+          name: 'anydoc',
+          desc: 'In-process office document parser (no external service required)'
+        },
         mineru: {
           name: 'MinerU',
           desc: 'MinerU self-hosted service'

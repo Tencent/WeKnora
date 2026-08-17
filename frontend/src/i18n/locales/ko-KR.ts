@@ -1399,6 +1399,10 @@ export default {
           name: 'Simple',
           desc: '간단한 형식 및 이미지 파싱 (외부 서비스 불필요)'
         },
+        anydoc: {
+          name: 'anydoc',
+          desc: '프로세스 내 오피스 문서 파싱 (외부 서비스 불필요)'
+        },
         builtin: {
           name: '내장',
           desc: 'DocReader 내장 파서 엔진 (docx/pdf/xlsx 등 복잡한 형식)'

@@ -1,0 +1,39 @@
+# Go bindings for anydoc.
+#
+# `crate-type = ["staticlib"]` produces libanydoc_go.a, which the Go module
+# links at build time via cgo. Not a cdylib: cgo wants an archive it can pull
+# symbols from, not a loadable shared object.
+[package]
+name = "anydoc-go"
+version = "0.1.9"
+edition = "2024"
+description = "Go bindings (C ABI) for anydoc"
+license = "MIT"
+repository = "https://github.com/firecrawl/anydoc"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+# Standalone crate: it lives inside the WeKnora tree, not the anydoc
+# workspace, so it takes the published crate rather than a path dependency.
+# Pinned exactly: the C ABI mirrors this version's error and format enums.
+[dependencies]
+anydoc = "=0.1.9"
+
+[build-dependencies]
+cbindgen = "0.29"
+
+# document_to_markdown is crate-private in published anydoc. The build script
+# copies the pinned version above and re-exports that one function so we can
+# keep the official GFM serializer after rewriting asset images to External URLs.
+[patch.crates-io]
+anydoc = { path = "patched-anydoc" }
+
+[workspace]
+
+# Mirrors the anydoc workspace's release profile: without it the archive keeps
+# every debug symbol and roughly doubles in size.
+[profile.release]
+lto = "thin"
+strip = "symbols"
