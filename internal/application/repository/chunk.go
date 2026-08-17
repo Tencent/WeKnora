@@ -159,6 +159,26 @@ func (r *chunkRepository) ListChunksByKnowledgeID(
 	return chunks, nil
 }
 
+// ListChunksByKnowledgeIDAndTypes lists a knowledge's chunks restricted to the
+// given chunk types. ListChunksByKnowledgeID is text-only by design, so callers
+// that also need summary / parent_text / image chunks come through here rather
+// than widening that query underneath its existing callers.
+func (r *chunkRepository) ListChunksByKnowledgeIDAndTypes(
+	ctx context.Context, tenantID uint64, knowledgeID string, chunkTypes []types.ChunkType,
+) ([]*types.Chunk, error) {
+	if len(chunkTypes) == 0 {
+		return nil, nil
+	}
+	var chunks []*types.Chunk
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_id = ? AND chunk_type IN ?", tenantID, knowledgeID, chunkTypes).
+		Order("chunk_index ASC").
+		Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
 // ListPagedChunksByKnowledgeID lists chunks for a knowledge ID with pagination
 func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	ctx context.Context,
