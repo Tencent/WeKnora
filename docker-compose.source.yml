@@ -1,0 +1,40 @@
+# Overlay: bind-mount the repo into the app container and run from source with
+# Air hot reload. Use WITH the standard compose file, not instead of it:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.source.yml up -d --build --no-deps app
+#
+# Frontend stays on the production nginx image (fast static UI). Only the Go
+# app is rebuilt from source. Do not use this overlay in production.
+#
+# Windows / Docker Desktop: Air polls for file changes. Prefer http://127.0.0.1/
+# over http://localhost/ — localhost often hits [::1] / wslrelay.
+
+services:
+  app:
+    image: weknora-app-source:local
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.app.source
+      args:
+        - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
+        - GOPROXY_ARG=${GOPROXY_ARG:-https://goproxy.cn,direct}
+    user: "0:0"
+    environment:
+      - GIN_MODE=debug
+      - GOPROXY=${GOPROXY_ARG:-https://goproxy.cn,direct}
+      # Windows bind mounts make `git status` during `go build` extremely slow.
+      - GOFLAGS=-buildvcs=false
+    volumes:
+      - .:/app
+      - source-go-mod:/go/pkg/mod
+      - source-go-build:/root/.cache/go-build
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 300s
+
+volumes:
+  source-go-mod:
+  source-go-build:

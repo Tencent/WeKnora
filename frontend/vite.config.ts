@@ -130,6 +130,10 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    allowedHosts: true,
+    watch: process.env.CHOKIDAR_USEPOLLING === 'true'
+      ? { usePolling: true, interval: Number(process.env.CHOKIDAR_INTERVAL || 500) }
+      : undefined,
     // 代理配置，用于开发环境
     proxy: {
       '/api': {

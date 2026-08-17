@@ -1,0 +1,47 @@
+# Air config for source-mounted Docker. Binary stays on a Linux tmpfs
+# (/tmp/weknora-air) so Windows bind mounts cannot block exec. poll=true
+# because Docker Desktop file events are unreliable on Windows/macOS.
+root = "."
+testdata_dir = "testdata"
+tmp_dir = "/tmp/weknora-air"
+
+[build]
+  args_bin = []
+  bin = "/tmp/weknora-air/main"
+  cmd = "go build -ldflags=\"$(bash ./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'\" -o /tmp/weknora-air/main ./cmd/server"
+  delay = 1000
+  exclude_dir = ["assets", "tmp", "vendor", "testdata", "frontend", "migrations", "node_modules", "docs", "logs", "data", "WeKnora-Chrome-Extension", "Formula", "dataset", "docreader", "docker", "llm_debug", "web", "mcp-server", "misc", "scripts", "dist", "client", "helm", "website-docs", "hermes-skills"]
+  exclude_file = []
+  exclude_regex = ["_test.go"]
+  exclude_unchanged = false
+  follow_symlink = false
+  full_bin = ""
+  include_dir = []
+  include_ext = ["go", "tpl", "tmpl", "html", "yaml"]
+  include_file = []
+  kill_delay = "2s"
+  log = "build-errors.log"
+  poll = true
+  poll_interval = 500
+  rerun = false
+  rerun_delay = 500
+  send_interrupt = true
+  stop_on_error = false
+
+[color]
+  app = ""
+  build = "yellow"
+  main = "magenta"
+  runner = "green"
+  watcher = "cyan"
+
+[log]
+  main_only = false
+  time = false
+
+[misc]
+  clean_on_exit = true
+
+[screen]
+  clear_on_rebuild = false
+  keep_scroll = true

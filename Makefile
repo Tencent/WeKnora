@@ -1,4 +1,4 @@
-.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger build-lite run-lite package-lite
+.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop docker-source docker-source-logs start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger build-lite run-lite package-lite
 
 # Show help
 help:
@@ -18,6 +18,8 @@ help:
 	@echo "  docker-run            运行 Docker 容器"
 	@echo "  docker-stop           停止 Docker 容器"
 	@echo "  docker-restart        重启 Docker 容器"
+	@echo "  docker-source         源码挂载启动 app（Air 热更新；前端仍用生产 nginx 镜像）"
+	@echo "  docker-source-logs    查看源码挂载的 app 日志"
 	@echo ""
 	@echo "服务管理:"
 	@echo "  start-all         启动所有服务"
@@ -174,6 +176,15 @@ docker-restart:
 	@[ -f .env ] || ([ -f .env.example ] && cp .env.example .env || touch .env)
 	docker-compose stop -t 60
 	docker-compose up
+
+# Bind-mount the repo into app/frontend and rebuild from source on change.
+# --no-deps keeps postgres/redis/docreader on the already-running images.
+docker-source:
+	@[ -f .env ] || ([ -f .env.example ] && cp .env.example .env || touch .env)
+	docker compose -f docker-compose.yml -f docker-compose.source.yml up -d --build --no-deps app
+
+docker-source-logs:
+	docker compose -f docker-compose.yml -f docker-compose.source.yml logs -f app
 
 # Database migrations
 migrate-up:

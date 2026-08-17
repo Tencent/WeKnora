@@ -1,0 +1,45 @@
+# Source-mounted app image: Go toolchain + Air. The repo is bind-mounted
+# at runtime (see docker-compose.source.yml); this image only bakes tools.
+FROM golang:1.26-bookworm
+
+WORKDIR /app
+
+ARG GOPROXY_ARG
+ARG GOPRIVATE_ARG
+ARG GOSUMDB_ARG=off
+ARG APK_MIRROR_ARG
+
+ENV GOPROXY=${GOPROXY_ARG:-https://proxy.golang.org,direct}
+ENV GOPRIVATE=${GOPRIVATE_ARG}
+ENV GOSUMDB=${GOSUMDB_ARG}
+ENV CGO_ENABLED=1
+ENV PATH="/go/bin:${PATH}"
+
+RUN if [ -n "$APK_MIRROR_ARG" ]; then \
+        sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        git build-essential libsqlite3-dev libsqlite3-0 \
+        postgresql-client ca-certificates curl bash \
+        python3 ffmpeg tzdata && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN go install github.com/air-verse/air@v1.62.0 && \
+    go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+
+# Warm DuckDB extensions into the image so first boot does not hit the network.
+COPY go.mod go.sum ./
+COPY cmd/download/duckdb ./cmd/download/duckdb
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go run ./cmd/download/duckdb
+
+EXPOSE 8080
+
+COPY docker/source-app-entrypoint.sh /usr/local/bin/source-app-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/source-app-entrypoint.sh && \
+    chmod +x /usr/local/bin/source-app-entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/source-app-entrypoint.sh"]
+CMD ["air", "-c", "docker/air.toml"]
