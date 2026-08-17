@@ -593,6 +593,11 @@ export default {
       paths: '同步目录', pathsPlaceholder: '每行一个目录；留空同步整个项目',
       addProject: '添加项目', projectRequired: '请至少添加一个 GitLab 项目',
     },
+    pds: {
+      accessKeyId: 'Access Key ID',
+      accessKeySecret: 'Access Key Secret',
+      domainId: 'Domain ID',
+    },
     resourceHint: '选择要同步的内容空间/文件夹',
     untitled: '无标题',
     resourceLoadFailed: '加载资源列表失败',
@@ -716,7 +721,8 @@ export default {
       yuque: '同步语雀知识库中的文档',
       ima: '同步腾讯 IMA 知识库中的文档、笔记与文件（暂不支持 AI 会话与视频解析）',
       rss: '同步 RSS / Atom 订阅源中的文章',
-      gitlab: '同步 GitLab 项目中的文件'
+      gitlab: '同步 GitLab 项目中的文件',
+      pds: '同步阿里云 PDS 网盘中的文件'
     },
     connector: {
       feishu: '飞书',
@@ -727,7 +733,8 @@ export default {
       yuque: '语雀',
       ima: '腾讯 IMA',
       rss: 'RSS / Atom 订阅',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      pds: '阿里云 PDS'
     },
     logDetail: {
       startTime: '开始时间',
@@ -5816,6 +5823,7 @@ export default {
     channelYuque: '语雀',
     channelGitLab: 'GitLab',
     channelIma: '腾讯 IMA',
+    channelPDS: '阿里云 PDS',
     channelUpload: '上传',
     channelManual: '手动',
     channelUrl: '网页',

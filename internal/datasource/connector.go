@@ -285,6 +285,14 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "token",
 		Capabilities: []string{"incremental", "hierarchical"},
 	},
+	types.ConnectorTypePDS: {
+		Type:         types.ConnectorTypePDS,
+		Name:         "Alibaba Cloud PDS",
+		Description:  "Sync files from an Alibaba Cloud PDS (Drive and Photo Service) drive",
+		Priority:     13,
+		AuthType:     "api_key",
+		Capabilities: []string{"incremental", "deletion_sync", "hierarchical"},
+	},
 }
 
 // ListAvailableConnectors returns all available connector metadata

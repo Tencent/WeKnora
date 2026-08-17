@@ -25,6 +25,8 @@ function fallbackText(type: string) {
       return 'Y'
     case 'ima':
       return 'I'
+    case 'pds':
+      return 'P'
     default:
       return type.slice(0, 1).toUpperCase() || '?'
   }

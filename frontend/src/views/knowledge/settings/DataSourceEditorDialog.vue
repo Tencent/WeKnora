@@ -633,6 +633,15 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'access_token', labelKey: 'datasource.gitlab.accessToken', placeholder: '', secret: true },
     ],
   },
+  {
+    type: 'pds', available: true, docUrl: 'https://www.alibabacloud.com/help/en/pds/', permissionDocUrl: '', permissionPageUrl: '', requiredPermissions: [],
+    fields: [
+      { key: 'access_key_id', labelKey: 'datasource.pds.accessKeyId', placeholder: '', secret: true },
+      { key: 'access_key_secret', labelKey: 'datasource.pds.accessKeySecret', placeholder: '', secret: true },
+      { key: 'domain_id', labelKey: 'datasource.pds.domainId', placeholder: '' },
+      { key: 'endpoint', labelKey: 'datasource.field.baseUrl', placeholder: 'https://pds.aliyuncs.com', optional: true },
+    ],
+  },
 ])
 
 

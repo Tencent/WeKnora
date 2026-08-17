@@ -61,6 +61,7 @@ import (
 	gitlabConnector "github.com/Tencent/WeKnora/internal/datasource/connector/gitlab"
 	imaConnector "github.com/Tencent/WeKnora/internal/datasource/connector/ima"
 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
+	pdsConnector "github.com/Tencent/WeKnora/internal/datasource/connector/pds"
 	rssConnector "github.com/Tencent/WeKnora/internal/datasource/connector/rss"
 	yuqueConnector "github.com/Tencent/WeKnora/internal/datasource/connector/yuque"
 	"github.com/Tencent/WeKnora/internal/event"
@@ -1671,6 +1672,9 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	}
 	if err := registry.Register(gitlabConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register gitlab connector: %w", err))
+	}
+	if err := registry.Register(pdsConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register pds connector: %w", err))
 	}
 
 	// Future connectors will be registered here:

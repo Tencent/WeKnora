@@ -38,6 +38,7 @@ const (
 	ConnectorTypeRSS         = "rss"
 	ConnectorTypeGitLab      = "gitlab"
 	ConnectorTypeIMA         = "ima"
+	ConnectorTypePDS         = "pds"
 
 	// Sync modes
 	SyncModeIncremental = "incremental"

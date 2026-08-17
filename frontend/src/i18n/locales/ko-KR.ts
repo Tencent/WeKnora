@@ -591,6 +591,11 @@ export default {
       paths: '디렉터리', pathsPlaceholder: '한 줄에 하나씩 입력하세요. 비워 두면 전체 프로젝트를 동기화합니다',
       addProject: '프로젝트 추가', projectRequired: 'GitLab 프로젝트를 하나 이상 추가하세요',
     },
+    pds: {
+      accessKeyId: 'Access Key ID',
+      accessKeySecret: 'Access Key Secret',
+      domainId: 'Domain ID',
+    },
     resourceHint: '동기화할 공간/폴더를 선택하세요',
     untitled: '제목 없음',
     resourceLoadFailed: '리소스 목록 로드 실패',
@@ -714,7 +719,8 @@ export default {
       yuque: '위큐 지식베이스에서 문서 동기화',
       ima: 'Tencent IMA 지식베이스에서 문서, 노트 및 파일 동기화 (AI 세션과 동영상 분석은 지원되지 않음)',
       rss: 'RSS / Atom 피드에서 글 동기화',
-      gitlab: 'GitLab 프로젝트의 파일 동기화'
+      gitlab: 'GitLab 프로젝트의 파일 동기화',
+      pds: 'Alibaba Cloud PDS 드라이브의 파일 동기화'
     },
     connector: {
       feishu: '페이슈 (Feishu)',
@@ -725,7 +731,8 @@ export default {
       yuque: '위큐 (Yuque)',
       ima: 'Tencent IMA',
       rss: 'RSS / Atom 피드',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      pds: 'Alibaba Cloud PDS'
     },
     logDetail: {
       startTime: '시작 시간',
@@ -5814,6 +5821,7 @@ export default {
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
+    channelPDS: 'Alibaba Cloud PDS',
     channelUpload: '업로드',
     channelManual: '수동',
     channelUrl: '웹',

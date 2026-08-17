@@ -468,6 +468,7 @@ export default {
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
+    channelPDS: 'Alibaba Cloud PDS',
     channelUpload: 'Upload',
     channelManual: 'Manual',
     channelUrl: 'Web',
@@ -5615,6 +5616,11 @@ export default {
       paths: 'Directories', pathsPlaceholder: 'One directory per line; leave empty to sync the whole project',
       addProject: 'Add project', projectRequired: 'Add at least one GitLab project',
     },
+    pds: {
+      accessKeyId: 'Access Key ID',
+      accessKeySecret: 'Access Key Secret',
+      domainId: 'Domain ID',
+    },
     resourceHint: 'Select the spaces or folders to sync',
     untitled: 'Untitled',
     resourceLoadFailed: 'Failed to load resources',
@@ -5684,7 +5690,8 @@ export default {
       yuque: 'Yuque',
       rss: 'RSS / Atom Feed',
       ima: 'Tencent IMA',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      pds: 'Alibaba Cloud PDS'
     },
     connectorDesc: {
       feishu: 'Sync documents, spreadsheets and files from Feishu Wiki',
@@ -5695,7 +5702,8 @@ export default {
       yuque: 'Sync documents from Yuque knowledge bases',
       rss: 'Sync articles from RSS / Atom feeds',
       ima: 'Sync documents, notes and files from Tencent IMA knowledge bases (AI sessions and video parses are not supported)',
-      gitlab: 'Sync files from GitLab projects'
+      gitlab: 'Sync files from GitLab projects',
+      pds: 'Sync files from an Alibaba Cloud PDS drive'
     },
     drive: {
       folderTokenLabel: 'Drive folder token',

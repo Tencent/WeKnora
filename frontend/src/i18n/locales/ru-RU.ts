@@ -591,6 +591,11 @@ export default {
       paths: 'Каталоги', pathsPlaceholder: 'По одному каталогу в строке; оставьте пустым для синхронизации всего проекта',
       addProject: 'Добавить проект', projectRequired: 'Добавьте хотя бы один проект GitLab',
     },
+    pds: {
+      accessKeyId: 'Access Key ID',
+      accessKeySecret: 'Access Key Secret',
+      domainId: 'Domain ID',
+    },
     resourceHint: 'Выберите пространства или папки для синхронизации',
     untitled: 'Без названия',
     resourceLoadFailed: 'Не удалось загрузить список ресурсов',
@@ -714,7 +719,8 @@ export default {
       yuque: 'Синхронизация документов из баз знаний Yuque',
       ima: 'Синхронизация документов, заметок и файлов из баз знаний Tencent IMA (ИИ-сессии и разбор видео не поддерживаются)',
       rss: 'Синхронизация статей из лент RSS / Atom',
-      gitlab: 'Синхронизация файлов из проектов GitLab'
+      gitlab: 'Синхронизация файлов из проектов GitLab',
+      pds: 'Синхронизация файлов с диска Alibaba Cloud PDS'
     },
     connector: {
       feishu: 'Feishu (Фэйшу)',
@@ -725,7 +731,8 @@ export default {
       yuque: 'Yuque (Юйцюэ)',
       ima: 'Tencent IMA',
       rss: 'RSS / Atom лента',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      pds: 'Alibaba Cloud PDS'
     },
     logDetail: {
       startTime: 'Время начала',
@@ -5814,6 +5821,7 @@ export default {
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
+    channelPDS: 'Alibaba Cloud PDS',
     channelUpload: 'Загрузка',
     channelManual: 'Вручную',
     channelUrl: 'Веб',
