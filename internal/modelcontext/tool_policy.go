@@ -102,6 +102,9 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 		sourceIDKeys: map[string]struct{}{"knowledge_id": {}},
 		sourceOutput: true,
 	},
+	"wiki_list_source_chunks": {
+		sourceOutput: true,
+	},
 	"wiki_write_page": {
 		sourceIDKeys: map[string]struct{}{"source_refs": {}},
 	},

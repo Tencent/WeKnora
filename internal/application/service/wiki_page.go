@@ -47,6 +47,7 @@ type wikiPageService struct {
 	kbService       interfaces.KnowledgeBaseService
 	taskPendingRepo interfaces.TaskPendingOpsRepository
 	redisClient     *redis.Client
+	modelService    interfaces.ModelService
 }
 
 // NewWikiPageService creates a new wiki page service
@@ -56,6 +57,7 @@ func NewWikiPageService(
 	kbService interfaces.KnowledgeBaseService,
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
 	redisClient *redis.Client,
+	modelService interfaces.ModelService,
 ) interfaces.WikiPageService {
 	return &wikiPageService{
 		repo:            repo,
@@ -63,6 +65,7 @@ func NewWikiPageService(
 		kbService:       kbService,
 		taskPendingRepo: taskPendingRepo,
 		redisClient:     redisClient,
+		modelService:    modelService,
 	}
 }
 
@@ -992,7 +995,7 @@ func (s *wikiPageService) CountByType(ctx context.Context, kbID string) (map[str
 	return s.repo.CountByType(ctx, kbID)
 }
 
-// SearchPages performs full-text search over wiki pages
+// SearchPages performs keyword/regex search over wiki pages (browser typeahead).
 func (s *wikiPageService) SearchPages(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error) {
 	return s.repo.Search(ctx, kbID, query, limit)
 }

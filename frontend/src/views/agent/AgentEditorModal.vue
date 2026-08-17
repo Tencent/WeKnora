@@ -1970,7 +1970,7 @@ const defaultTemperature = ref(0.7);
 const knowledgeBaseTools = ['grep_chunks', 'knowledge_search', 'list_knowledge_chunks', 'query_knowledge_graph', 'get_document_info', 'database_query'];
 
 // Wiki 读取类工具（用于 watch(agentMode) 切到 smart-reasoning 时 seed 默认工具）
-const wikiReadTools = ['wiki_search', 'wiki_read_page', 'wiki_read_source_doc', 'wiki_flag_issue'];
+const wikiReadTools = ['wiki_search', 'wiki_read_page', 'wiki_read_source_doc', 'wiki_list_source_chunks', 'wiki_flag_issue'];
 
 // 初始化标志，防止初始化时触发 watch 自动添加工具
 const isInitializing = ref(false);
@@ -2004,6 +2004,7 @@ const allTools = computed(() => [
   { value: 'wiki_search', label: t('agentEditor.tools.wikiSearch'), description: t('agentEditor.tools.wikiSearchDesc'), group: 'wiki_read' },
   { value: 'wiki_read_page', label: t('agentEditor.tools.wikiReadPage'), description: t('agentEditor.tools.wikiReadPageDesc'), group: 'wiki_read' },
   { value: 'wiki_read_source_doc', label: t('agentEditor.tools.wikiReadSourceDoc'), description: t('agentEditor.tools.wikiReadSourceDocDesc'), group: 'wiki_read' },
+  { value: 'wiki_list_source_chunks', label: t('agentEditor.tools.wikiListSourceChunks'), description: t('agentEditor.tools.wikiListSourceChunksDesc'), group: 'wiki_read' },
   { value: 'wiki_flag_issue', label: t('agentEditor.tools.wikiFlagIssue'), description: t('agentEditor.tools.wikiFlagIssueDesc'), group: 'wiki_read' },
   // Wiki 编辑类（会直接修改 Wiki 内容）
   { value: 'wiki_write_page', label: t('agentEditor.tools.wikiWritePage'), description: t('agentEditor.tools.wikiWritePageDesc'), group: 'wiki_edit', danger: true },

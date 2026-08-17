@@ -604,7 +604,7 @@ func (r *ToolRegistry) ListTools() []string
 
 ### 现有实现
 
-工具名常量集中在 `internal/agent/tools/definitions.go`：`thinking`、`todo_write`、`grep_chunks`、`knowledge_search`、`list_knowledge_chunks`、`query_knowledge_graph`、`get_document_info`、`database_query`、`data_analysis`、`data_schema`、`web_search`、`web_fetch`、skills 工具（`execute_skill_script`、`read_skill`）、wiki 工具（`wiki_read_page`、`wiki_write_page`、`wiki_replace_text`、`wiki_rename_page`、`wiki_delete_page`、`wiki_search`、`wiki_read_source_doc`、`wiki_flag_issue`、`wiki_read_issue`、`wiki_update_issue`）。实现文件与工具同名（如 `grep_chunks.go`、`knowledge_search.go`、`data_analysis.go`、`mcp_tool.go`——后者把 MCP 服务的远程工具包装成 `types.Tool`）。
+工具名常量集中在 `internal/agent/tools/definitions.go`：`thinking`、`todo_write`、`grep_chunks`、`knowledge_search`、`list_knowledge_chunks`、`query_knowledge_graph`、`get_document_info`、`database_query`、`data_analysis`、`data_schema`、`web_search`、`web_fetch`、skills 工具（`execute_skill_script`、`read_skill`）、wiki 工具（`wiki_read_page`、`wiki_write_page`、`wiki_replace_text`、`wiki_rename_page`、`wiki_delete_page`、`wiki_search`、`wiki_read_source_doc`、`wiki_list_source_chunks`、`wiki_flag_issue`、`wiki_read_issue`、`wiki_update_issue`）。实现文件与工具同名（如 `grep_chunks.go`、`knowledge_search.go`、`data_analysis.go`、`mcp_tool.go`——后者把 MCP 服务的远程工具包装成 `types.Tool`）。
 
 ### 新增步骤
 

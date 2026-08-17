@@ -64,16 +64,17 @@ var ToolCapabilityRequirements = map[string]ToolRequirement{
 	"database_query":        {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
 
 	// ---- Wiki (operates on wiki pages; doesn't consume arbitrary file IDs) ----
-	"wiki_search":          {AllOf: []KBCapability{CapWiki}},
-	"wiki_read_page":       {AllOf: []KBCapability{CapWiki}},
-	"wiki_read_source_doc": {AllOf: []KBCapability{CapWiki}},
-	"wiki_flag_issue":      {AllOf: []KBCapability{CapWiki}},
-	"wiki_write_page":      {AllOf: []KBCapability{CapWiki}},
-	"wiki_replace_text":    {AllOf: []KBCapability{CapWiki}},
-	"wiki_rename_page":     {AllOf: []KBCapability{CapWiki}},
-	"wiki_delete_page":     {AllOf: []KBCapability{CapWiki}},
-	"wiki_read_issue":      {AllOf: []KBCapability{CapWiki}},
-	"wiki_update_issue":    {AllOf: []KBCapability{CapWiki}},
+	"wiki_search":             {AllOf: []KBCapability{CapWiki}},
+	"wiki_read_page":          {AllOf: []KBCapability{CapWiki}},
+	"wiki_read_source_doc":    {AllOf: []KBCapability{CapWiki}},
+	"wiki_list_source_chunks": {AllOf: []KBCapability{CapWiki}},
+	"wiki_flag_issue":         {AllOf: []KBCapability{CapWiki}},
+	"wiki_write_page":         {AllOf: []KBCapability{CapWiki}},
+	"wiki_replace_text":       {AllOf: []KBCapability{CapWiki}},
+	"wiki_rename_page":        {AllOf: []KBCapability{CapWiki}},
+	"wiki_delete_page":        {AllOf: []KBCapability{CapWiki}},
+	"wiki_read_issue":         {AllOf: []KBCapability{CapWiki}},
+	"wiki_update_issue":       {AllOf: []KBCapability{CapWiki}},
 
 	// ---- Data analysis (reads table summary/column chunks from RAG ingest) ----
 	"data_analysis": {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},

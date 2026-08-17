@@ -24,7 +24,7 @@ export function getAgentToolIconName(
   if (toolName === 'get_document_info' || toolName === 'list_knowledge_chunks') {
     return 'file-search'
   }
-  if (toolName === 'get_document_content' || toolName === 'wiki_read_page' || toolName === 'wiki_read_source_doc') {
+  if (toolName === 'get_document_content' || toolName === 'wiki_read_page' || toolName === 'wiki_read_source_doc' || toolName === 'wiki_list_source_chunks') {
     return 'file-search'
   }
   if (toolName === 'todo_write') {

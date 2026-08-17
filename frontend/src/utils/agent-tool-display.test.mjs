@@ -27,6 +27,7 @@ test('getAgentToolIconName maps Wiki tools to semantic search and reading icons'
   assert.equal(getAgentToolIconName('wiki_search'), 'search')
   assert.equal(getAgentToolIconName('wiki_read_page'), 'file-search')
   assert.equal(getAgentToolIconName('wiki_read_source_doc'), 'file-search')
+  assert.equal(getAgentToolIconName('wiki_list_source_chunks'), 'file-search')
 })
 
 test('getQueryText joins unique query strings', () => {

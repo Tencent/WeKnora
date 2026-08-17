@@ -275,9 +275,10 @@ flowchart TD
 | `web_fetch` | `items[]`\*（每项 `url`=`wN`、`prompt`） | 并发抓取网页（SSRF 安全客户端 + DNS pinning，必要时 chromedp 渲染），抽取正文后用小模型按 prompt 摘要；60s 超时。逐 URL 返回 `success`/`failed`/`skipped` 状态与可重试错误码，部分失败不影响其它页面 |
 | `read_skill` | `skill_name`\*、`file_path` | 读取技能 SKILL.md 全文（Level 2）或技能目录内指定文件（Level 3），并列出目录内可执行脚本 |
 | `execute_skill_script` | `skill_name`\*、`script_path`\*、`args[]`、`input`（stdin） | 在沙箱中执行技能脚本，返回 stdout/stderr/exit code/duration/killed |
-| `wiki_search` | `queries[]`\*（正则）、`limit`（默认 10）、`knowledge_base_id` | 在 Wiki 页面（标题/内容/slug/摘要）上做 POSIX 正则搜索，返回带 `bN` 标记的页面与摘要；已见 slug 去重 |
+| `wiki_search` | `queries[]`\*（自然语言问题，非正则）、`limit`（默认 10）、`knowledge_base_id` | 由模型判断哪些 entity/concept 叶子会改变后续写作计划，程序再组装目录树、来源文档、引用分块与出入链；已见 slug 去重 |
 | `wiki_read_page` | `slugs[]`\*、`knowledge_base_id` | 按 slug 读取 Wiki 页面全文、元数据、出入链（链接附摘要，已见的省略）；`index` slug 返回按类型分组的目录概览（每类 top 20） |
 | `wiki_read_source_doc` | `knowledge_id`\*（`dN`）、`query`（正则）、`start_chunk_index`、`end_chunk_index` | 深入阅读 Wiki 页面的源文档：正则过滤或按 chunk 区间取连续内容；都不传则返回文档开头 |
+| `wiki_list_source_chunks` | `slugs`\* | 按 Wiki 页面展开其 `chunk_refs` 对应的全部原文分块，不扫整篇文档 |
 | `wiki_write_page` | `slug`\*、`title`\*、`summary`\*、`content`\*、`page_type`\*、`aliases[]`、`source_refs[]` | 新建或整页覆盖 Wiki 页面；写入前规范化并校验 slug；自动处理出链 |
 | `wiki_replace_text` | `slug`\*、`old_text`\*、`new_text`\*、`source_refs[]` | 精确文本替换，适合小修订 |
 | `wiki_rename_page` | `slug`\*、`new_slug`\* | 重命名 slug 并级联更新所有引用它的页面链接 |
@@ -363,7 +364,7 @@ var ToolCapabilityRequirements = map[string]ToolRequirement{
 - 每轮展开为：user 消息（含图片 caption 与附件 prompt；**故意忽略** `RenderedContent` 快照以避免旧协议污染）→ 每个含工具调用的 `AgentStep` 展开为 assistant(with tool_calls) + 若干 tool 消息 → 末尾一条规范化最终答案 assistant 消息（剥离 `<think>` 块）；
 - 历史中的 tool 消息内容用 `CompactToolOutputForHistory`（`internal/agent/tools/persist.go`）压缩：带 `display_type` 的大载荷（如 `knowledge_chunks_list` 的 chunks、`grep_results` 的 chunk_results）替换为一行摘要（如 `"Listed 20/87 chunks from X (content omitted from history)"`）。
 
-进入引擎后，`buildMessagesWithLLMContext` 还会做**历史 KB 结果脱敏**（`redactHistoryKBResults`）：除非 Agent 开启 `RetainRetrievalHistory`，历史轮次中 KB 类工具（`knowledge_search`、`grep_chunks`、`list_knowledge_chunks`、`query_knowledge_graph`、`get_document_info`、`wiki_search`、`wiki_read_page`、`wiki_read_source_doc`）的结果一律替换为 `"[Previous retrieval result omitted — knowledge base may have changed. Please perform a fresh search.]"`，强制模型对可能已变更的知识库做新鲜检索。
+进入引擎后，`buildMessagesWithLLMContext` 还会做**历史 KB 结果脱敏**（`redactHistoryKBResults`）：除非 Agent 开启 `RetainRetrievalHistory`，历史轮次中 KB 类工具（`knowledge_search`、`grep_chunks`、`list_knowledge_chunks`、`query_knowledge_graph`、`get_document_info`、`wiki_search`、`wiki_read_page`、`wiki_read_source_doc`、`wiki_list_source_chunks`）的结果一律替换为 `"[Previous retrieval result omitted — knowledge base may have changed. Please perform a fresh search.]"`，强制模型对可能已变更的知识库做新鲜检索。
 
 持久化侧，`SanitizeAgentStepsForStorage` 在把 `AgentSteps` 写入 DB / SSE 重放前剥离 LLM-only 大载荷，只留紧凑摘要。
 
@@ -494,7 +495,7 @@ smart-reasoning 下还可选**类型预设**（`Config.AgentType`，定义在 `c
 | 预设 ID | 系统提示词模板 | 温度 | 最大迭代 | 预填工具 | KB 过滤 |
 | --- | --- | --- | --- | --- | --- |
 | `rag-qa` | `progressive_rag_agent` | 0.7 | 30 | knowledge_search、grep_chunks、list_knowledge_chunks、get_document_info | 由工具派生：any_of vector/keyword |
-| `wiki-qa` | `wiki_researcher` | 0.7 | 30 | wiki_search、wiki_read_page、wiki_read_source_doc、wiki_flag_issue | 由工具派生：any_of wiki |
+| `wiki-qa` | `wiki_researcher` | 0.7 | 30 | wiki_search、wiki_read_page、wiki_read_source_doc、wiki_list_source_chunks、wiki_flag_issue | 由工具派生：any_of wiki |
 | `hybrid-rag-wiki` | `hybrid_rag_wiki_agent` | 0.7 | 40 | wiki_search、wiki_read_page、knowledge_search、grep_chunks、list_knowledge_chunks、get_document_info、wiki_flag_issue | any_of vector/keyword/wiki |
 | `data-analysis` | `data_analyst` | 0.3 | 30 | data_schema、data_analysis；关闭 web 搜索；限定文件类型 csv/xlsx | 显式 `none_of: [faq]` |
 | `custom` | 无 | — | — | 不预填 | 不限制 |
@@ -550,8 +551,8 @@ Handler 层（`internal/handler/custom_agent.go`）提供 `CreateAgent`、`GetAg
 | `builtin-quick-answer` | 快速问答 | `quick-answer` | 模板 `default_kb` + `default_context`；temperature 0.7；FAQ 优先（直接回答阈值 0.9、加权 1.2）；query expansion + rewrite；web 搜索开、5 条；不进 Agent 引擎 |
 | `builtin-smart-reasoning` | 智能推理 | `smart-reasoning` / `rag-qa` | `max_iterations: 50`；工具：knowledge_search、grep_chunks、list_knowledge_chunks、query_knowledge_graph、get_document_info；web 搜索开；多轮 5 轮 |
 | `builtin-data-analyst` | 数据分析师 | `smart-reasoning` / `data-analysis` | 模板 `data_analyst`；temperature 0.3；`max_iterations: 30`；工具仅 data_schema + data_analysis；限定 csv/xlsx；关闭 web 搜索；历史 10 轮 |
-| `builtin-wiki-researcher` | 维基问答 | `smart-reasoning` / `wiki-qa` | 模板 `wiki_researcher`；`max_iterations: 30`；工具：wiki_search、wiki_read_page、wiki_read_source_doc、wiki_flag_issue（只读 + 报障）；关闭 web 搜索 |
-| `builtin-wiki-fixer` | 维基修订 | `smart-reasoning` / `custom` | 模板 `wiki_fixer`；`retain_retrieval_history: true`（修订需要跨轮记住页面内容）；工具含全部 wiki 写操作（wiki_write_page、wiki_replace_text、wiki_rename_page、wiki_delete_page、wiki_read_issue、wiki_update_issue 等 9 个）；`kb_selection_mode: selected` |
+| `builtin-wiki-researcher` | 维基问答 | `smart-reasoning` / `wiki-qa` | 模板 `wiki_researcher`；`max_iterations: 30`；工具：wiki_search、wiki_read_page、wiki_read_source_doc、wiki_list_source_chunks、wiki_flag_issue（只读 + 报障）；关闭 web 搜索 |
+| `builtin-wiki-fixer` | 维基修订 | `smart-reasoning` / `custom` | 模板 `wiki_fixer`；`retain_retrieval_history: true`（修订需要跨轮记住页面内容）；工具含 `wiki_list_source_chunks` 与全部 wiki 写操作（wiki_write_page、wiki_replace_text、wiki_rename_page、wiki_delete_page、wiki_read_issue、wiki_update_issue 等）；`kb_selection_mode: selected` |
 
 补充两点（来自 `internal/types/custom_agent.go`）：
 

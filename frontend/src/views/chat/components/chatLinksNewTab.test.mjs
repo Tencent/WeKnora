@@ -64,11 +64,11 @@ test('wiki tool results use the right-side references drawer', () => {
   )
   assert.match(
     agentStream,
-    /toolName === 'list_knowledge_chunks' \|\| toolName === 'wiki_read_source_doc'/,
+    /toolName === 'list_knowledge_chunks' \|\| toolName === 'wiki_read_source_doc' \|\| toolName === 'wiki_list_source_chunks'/,
   )
   assert.match(
     agentStream,
-    /const isReferenceDrawerTool =[\s\S]*?toolName === 'wiki_search'[\s\S]*?toolName === 'wiki_read_page'[\s\S]*?toolName === 'wiki_read_source_doc'/,
+    /const isReferenceDrawerTool =[\s\S]*?toolName === 'wiki_search'[\s\S]*?toolName === 'wiki_read_page'[\s\S]*?toolName === 'wiki_read_source_doc'[\s\S]*?toolName === 'wiki_list_source_chunks'/,
   )
   assert.match(agentStream, /WIKI_EDIT_TOOL_NAMES\.has\(String\(toolName \|\| ''\)\)/)
   assert.match(agentStream, /WIKI_ISSUE_TOOL_NAMES\.has\(String\(toolName \|\| ''\)\)/)

@@ -405,6 +405,36 @@ curl $BASE/api/v1/knowledgebase/kb-1/wiki/stats -H "Authorization: Bearer $TOKEN
 curl "$BASE/api/v1/knowledgebase/kb-1/wiki/search?q=部署" -H "Authorization: Bearer $TOKEN"
 ```
 
+### GET /api/v1/knowledgebase/:kb_id/wiki/source-chunks/*slug
+
+用途：按 Wiki 页面展开其 `chunk_refs` 对应的**全部原文分块**（存储顺序、全文，无 8 块上限）。摘要页或引文缺失时 `chunks` 为空且 `reason=no_chunk_refs`。某条 ref 已删除时该项 `missing=true`。
+
+响应：200 `WikiPageSourceChunksResult`
+
+```json
+{
+  "knowledge_base_id": "kb-1",
+  "slug": "concept/rag",
+  "title": "RAG",
+  "page_type": "concept",
+  "sources": [{"knowledge_id": "doc-a", "title": "手册A"}],
+  "chunks": [
+    {
+      "id": "chunk-1",
+      "knowledge_id": "doc-a",
+      "knowledge_title": "手册A",
+      "chunk_index": 3,
+      "content": "原文……"
+    }
+  ],
+  "chunk_ref_count": 1
+}
+```
+
+```bash
+curl $BASE/api/v1/knowledgebase/kb-1/wiki/source-chunks/concept/rag -H "Authorization: Bearer $TOKEN"
+```
+
 ### POST /api/v1/knowledgebase/:kb_id/wiki/rebuild-links
 
 用途：重建页面互链。写权限。无请求体。

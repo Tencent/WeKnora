@@ -1284,8 +1284,9 @@ type WikiBatchContext struct {
 	ExtractionGranularity types.WikiExtractionGranularity
 
 	// ContentInstructions and ExtractionInstructions are KB-scoped business
-	// guidance. Stable citation, merge, taxonomy and JSON rules remain in the
-	// system templates and cannot be replaced by these fields.
+	// guidance. ExtractionInstructions also seeds directory planning.
+	// Stable citation, merge, taxonomy JSON, and output protocols remain in
+	// the system templates and cannot be replaced by these fields.
 	ContentInstructions    string
 	ExtractionInstructions string
 

@@ -78,9 +78,99 @@ class ModuleIntegrationTest(unittest.TestCase):
         import weknora_mcp_server
 
         client = weknora_mcp_server.WeKnoraClient("http://localhost:8080/api/v1", "test")
-        for method in ["wiki_search", "wiki_read_page", "wiki_index_view"]:
+        for method in ["wiki_search", "wiki_read_page", "wiki_list_source_chunks", "wiki_index_view"]:
             self.assertTrue(hasattr(client, method), f"WeKnoraClient missing: {method}")
             self.assertTrue(callable(getattr(client, method)), f"{method} not callable")
+
+    def test_wiki_search_envelope_strips_associate_fields(self):
+        from weknora_mcp_server import WeKnoraClient
+
+        pages = [{"id": "p1", "slug": "entity/acme", "title": "Acme"}]
+        payload = {
+            "query": "what is acme",
+            "tree": [{"path": "公司", "leaves": [{"slug": "entity/acme"}]}],
+            "pages": pages,
+        }
+        out = WeKnoraClient._wiki_search_pages_envelope(payload)
+        self.assertEqual(list(out.keys()), ["pages"])
+        self.assertEqual(out["pages"], pages)
+
+    def test_wiki_search_envelope_unwraps_data(self):
+        from weknora_mcp_server import WeKnoraClient
+
+        pages = [{"slug": "concept/rag"}]
+        out = WeKnoraClient._wiki_search_pages_envelope({"data": {"query": "q", "pages": pages}})
+        self.assertEqual(out, {"pages": pages})
+
+    def test_wiki_search_envelope_falls_back_to_tree_leaves(self):
+        from weknora_mcp_server import WeKnoraClient
+
+        payload = {
+            "tree": [
+                {
+                    "path": "公司",
+                    "leaves": [{"slug": "entity/acme"}],
+                    "children": [
+                        {"path": "公司/产品", "leaves": [{"slug": "entity/widget"}]}
+                    ],
+                }
+            ]
+        }
+        out = WeKnoraClient._wiki_search_pages_envelope(payload)
+        self.assertEqual(
+            out,
+            {"pages": [{"slug": "entity/acme"}, {"slug": "entity/widget"}]},
+        )
+
+    def test_wiki_search_posts_optional_prompt(self):
+        from unittest.mock import Mock
+
+        from weknora_mcp_server import WeKnoraClient
+
+        client = WeKnoraClient("http://localhost:8080/api/v1", "test")
+        client.resolve_kb_id = Mock(return_value="kb-1")
+        client._request = Mock(return_value={"pages": [{"slug": "concept/a"}]})
+
+        out = client.wiki_search("kb-1", "写产品说明", 8, "只选会改变卖点表述的叶子")
+        self.assertEqual(out, {"pages": [{"slug": "concept/a"}]})
+        client._request.assert_called_once_with(
+            "POST",
+            "/knowledgebase/kb-1/wiki/associate",
+            json={
+                "q": "写产品说明",
+                "limit": 8,
+                "prompt": "只选会改变卖点表述的叶子",
+            },
+        )
+
+        client._request.reset_mock()
+        client.wiki_search("kb-1", "写产品说明")
+        client._request.assert_called_once_with(
+            "POST",
+            "/knowledgebase/kb-1/wiki/associate",
+            json={"q": "写产品说明", "limit": 10},
+        )
+
+    def test_wiki_list_source_chunks_gets_slug_path(self):
+        from unittest.mock import Mock
+
+        from weknora_mcp_server import WeKnoraClient
+
+        client = WeKnoraClient("http://localhost:8080/api/v1", "test")
+        client.resolve_kb_id = Mock(return_value="kb-1")
+        payload = {
+            "slug": "concept/root-crack",
+            "chunks": [{"id": "c1", "content": "原文"}],
+            "chunk_ref_count": 1,
+        }
+        client._request = Mock(return_value=payload)
+
+        out = client.wiki_list_source_chunks("手册库", "concept/root-crack")
+        self.assertEqual(out, payload)
+        client._request.assert_called_once_with(
+            "GET",
+            "/knowledgebase/kb-1/wiki/source-chunks/concept/root-crack",
+        )
 
     def test_pyproject_metadata(self):
         text = (MCP_SERVER_DIR / "pyproject.toml").read_text(encoding="utf-8")

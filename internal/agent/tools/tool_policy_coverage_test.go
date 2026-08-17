@@ -35,6 +35,7 @@ func TestEveryBuiltInToolDeclaresAModelHandlePolicy(t *testing.T) {
 		ToolWikiDeletePage,
 		ToolWikiSearch,
 		ToolWikiReadSourceDoc,
+		ToolWikiListSourceChunks,
 		ToolWikiFlagIssue,
 		ToolWikiReadIssue,
 		ToolWikiUpdateIssue,

@@ -478,8 +478,9 @@ SSE 与 HTTP 传输由 `MCPAuthMiddleware`（ASGI 中间件）统一鉴权：客
 
 | 工具名 | 参数 | 说明 |
 |---|---|---|
-| `wiki_search` | `kb_id`\*, `query`\*, `limit`(10) | 全文搜索 Wiki 页面（标题、slug、摘要、片段） |
+| `wiki_search` | `kb_id`\*, `query`\*, `limit`(10), `prompt` | 用自然语言问题关联相关叶子知识点（内部走 `/wiki/associate`），返回 `{pages: [...]}` 兼容信封 |
 | `wiki_read_page` | `kb_id`\*, `slug`\* | 按 slug 读取整页 Markdown、元数据与出入链 |
+| `wiki_list_source_chunks` | `kb_id`\*, `slug`\* | 按知识点展开其 `chunk_refs` 对应的全部原文分块 |
 | `wiki_index_view` | `kb_id`\*, `limit`(50) | 按类型（entity / concept / summary 等）分组的结构化 Wiki 索引 |
 
 便利特性：`resolve_kb_id` / `resolve_agent_id` 会把人类可读的名称（大小写不敏感）解析为 UUID，因此 `hybrid_search` / `chat` / `agent_chat` / `create_session` / `get_agent` 都同时接受名称与 UUID。名称解析会同时查自有知识库与共享知识库，共享库也能直接按名字引用；`resolve_agent_id` 允许非 UUID 形式的 Agent 标识。所有工具结果统一以格式化 JSON 的 `TextContent` 返回；异常被捕获并返回 `Error executing <name>: ...` 文本。

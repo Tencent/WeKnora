@@ -167,6 +167,7 @@
                       </div>
                       <div class="form-item">
                         <label class="form-label">{{ $t('knowledgeEditor.basic.descriptionLabel') }}</label>
+                        <p v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-tip">{{ $t('knowledgeEditor.basic.descriptionWikiTip') }}</p>
                         <t-textarea
                           v-model="formData.description"
                           :placeholder="$t('knowledgeEditor.basic.descriptionPlaceholder')"

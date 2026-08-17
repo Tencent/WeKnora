@@ -35,16 +35,17 @@ const (
 	// existing stateless security model.
 	ToolShellExec = "shell_exec"
 	// Wiki-related tools (only available when wiki KBs are in scope)
-	ToolWikiReadPage      = "wiki_read_page"
-	ToolWikiWritePage     = "wiki_write_page"
-	ToolWikiReplaceText   = "wiki_replace_text"
-	ToolWikiRenamePage    = "wiki_rename_page"
-	ToolWikiDeletePage    = "wiki_delete_page"
-	ToolWikiSearch        = "wiki_search"
-	ToolWikiReadSourceDoc = "wiki_read_source_doc"
-	ToolWikiFlagIssue     = "wiki_flag_issue"
-	ToolWikiReadIssue     = "wiki_read_issue"
-	ToolWikiUpdateIssue   = "wiki_update_issue"
+	ToolWikiReadPage         = "wiki_read_page"
+	ToolWikiWritePage        = "wiki_write_page"
+	ToolWikiReplaceText      = "wiki_replace_text"
+	ToolWikiRenamePage       = "wiki_rename_page"
+	ToolWikiDeletePage       = "wiki_delete_page"
+	ToolWikiSearch           = "wiki_search"
+	ToolWikiReadSourceDoc    = "wiki_read_source_doc"
+	ToolWikiListSourceChunks = "wiki_list_source_chunks"
+	ToolWikiFlagIssue        = "wiki_flag_issue"
+	ToolWikiReadIssue        = "wiki_read_issue"
+	ToolWikiUpdateIssue      = "wiki_update_issue"
 )
 
 // AvailableTool defines a simple tool metadata used by settings APIs.
@@ -76,6 +77,7 @@ func AvailableToolDefinitions() []AvailableTool {
 		{Name: ToolWikiReadPage, Label: "读取Wiki页面", Description: "读取指定的Wiki页面内容"},
 		{Name: ToolWikiSearch, Label: "搜索Wiki", Description: "在Wiki中搜索页面"},
 		{Name: ToolWikiReadSourceDoc, Label: "精读源文档", Description: "使用知识点深入阅读特定原始文档"},
+		{Name: ToolWikiListSourceChunks, Label: "列出知识点原文块", Description: "按 Wiki 页面展开其关联的全部原文分块"},
 		{Name: ToolWikiFlagIssue, Label: "标记Wiki问题", Description: "标记页面中存在的事实错误或合并冲突问题"},
 		{Name: ToolWikiWritePage, Label: "创建/覆盖Wiki", Description: "创建新页面或完全覆盖已有页面"},
 		{Name: ToolWikiReplaceText, Label: "局部替换Wiki", Description: "替换Wiki页面中的特定文本"},

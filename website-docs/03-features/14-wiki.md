@@ -76,7 +76,7 @@ TypeWikiFinalize = "wiki:finalize"
 
 辅助提示词：
 
-- `WikiTaxonomyPlanPrompt`：为同一批次的所有实体/概念统一规划目录路径（最多 2 级、优先复用已有文件夹），保证目录树连贯；
+- `WikiTaxonomyPlanPrompt`：为同一批次的所有实体/概念统一规划目录路径（最多 2 级、优先复用已有文件夹）。新建文件夹时会读取知识库 **名称、描述** 和 `extraction_instructions` 作为主题初值，避免按单篇文档主题把方法类知识点塞进「市场战略 / 技术」这类业务文件夹；
 - `WikiDeduplicationPrompt`：判断新抽取项是否与既有页面同指一物，核心原则是 **"related ≠ same"**（相关不等于相同），返回 `{ merges: { "entity/new": "entity/existing" } }`。
 
 ### 抽取粒度
@@ -210,12 +210,13 @@ Wiki 页面是 LLM 生成的，难免有需要人工订正的地方。页面因�
 
 ## 与 Agent 的关系
 
-Wiki 不只是给人看的——它是 Agent 的一等公民工作区。`internal/agent/tools/definitions.go` 注册了 10 个 wiki 工具：
+Wiki 不只是给人看的——它是 Agent 的一等公民工作区。`internal/agent/tools/definitions.go` 注册了 wiki 工具：
 
 | 工具 | 作用 | 关键参数 |
 | --- | --- | --- |
 | `wiki_read_page` | 按 slug 批量读取页面全文 | `slugs: string[]` |
-| `wiki_search` | 正则搜索页面 | `queries`、`limit?`、`knowledge_base_id?` |
+| `wiki_search` | 用自然语言问题关联相关叶子知识点，返回目录树、来源与引用分块 | `queries`、`limit?`、`knowledge_base_id?` |
+| `wiki_list_source_chunks` | 按页面展开其关联的全部原文分块 | `slugs: string[]` |
 | `wiki_write_page` | 创建/整页覆盖（`synthesis`、`comparison` 页只能由此创建） | `slug`、`title`、`summary`、`content`、`page_type`、`aliases?`、`source_refs?` |
 | `wiki_replace_text` | 页内精确文本替换 | `slug`、`old_text`、`new_text` |
 | `wiki_rename_page` | 重命名 slug，自动更新反向链接 | `slug`、`new_slug` |
@@ -263,7 +264,7 @@ Wiki 曾经维护一份独立的操作日志（`wiki_log_entries` 表 + `GET /wi
 | 数据结构 | `internal/types/wiki_page.go` |
 | HTTP Handler | `internal/handler/wiki_page.go` |
 | 生成管道 | `internal/application/service/wiki_ingest.go`、`wiki_ingest_batch.go`、`wiki_ingest_cite.go`、`wiki_ingest_dedup.go`、`wiki_ingest_taxonomy.go` |
-| 页面服务 | `internal/application/service/wiki_page.go`、`wiki_linkify.go`、`wiki_lint.go`、`wiki_slug_alias.go`、`wiki_slug_handles.go` |
+| 页面服务 | `internal/application/service/wiki_page.go`、`wiki_source_chunks.go`、`wiki_linkify.go`、`wiki_lint.go`、`wiki_slug_alias.go`、`wiki_slug_handles.go` |
 | LLM 提示词 | `internal/agent/prompts_wiki.go` |
 | Agent 工具 | `internal/agent/tools/wiki_*.go`（注册于 `internal/agent/tools/definitions.go`） |
 | 失败恢复 | `internal/container/recover_pending_wiki_tasks.go` |

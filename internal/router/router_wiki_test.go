@@ -123,6 +123,8 @@ func TestWikiReadRoutesDenyCrossTenantKB(t *testing.T) {
 		"/api/v1/knowledgebase/kb-victim/wiki/graph",
 		"/api/v1/knowledgebase/kb-victim/wiki/stats",
 		"/api/v1/knowledgebase/kb-victim/wiki/search?q=test",
+		"/api/v1/knowledgebase/kb-victim/wiki/associate?q=test",
+		"/api/v1/knowledgebase/kb-victim/wiki/source-chunks/entity/secret",
 		"/api/v1/knowledgebase/kb-victim/wiki/lint",
 		"/api/v1/knowledgebase/kb-victim/wiki/issues",
 		"/api/v1/knowledgebase/kb-victim/wiki/revisions/secret-page",

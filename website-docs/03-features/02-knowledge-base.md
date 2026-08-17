@@ -124,7 +124,8 @@ graph TB
 | `synthesis_model_id` | - | Wiki 生成 LLM |
 | `max_pages_per_ingest` | 0（不限） | 单次摄入最多创建/更新页面数 |
 | `extraction_granularity` | `standard` | `focused`（仅主要主题）/ `standard` / `exhaustive`（全部实体概念） |
-| `content_instructions` / `extraction_instructions` | - | 生成与提取风格指导 |
+| `content_instructions` | - | 摘要/页面/首页的文风与表达重点 |
+| `extraction_instructions` | - | 抽取重点，并作为 Wiki 目录分类轴（方法类 vs 主题类等）；不替换 JSON/引用协议 |
 | `ingest_batch_size` / `ingest_map_parallel` / `ingest_reduce_parallel` / `ingest_max_inflight` | 5 / 10 / 10 / 4 | 摄入并发参数 |
 
 所有 `custom_instructions` 类字段在更新时经 `validateKnowledgeBasePromptInstructions` 校验长度与合法性（`internal/handler/knowledgebase.go`）。

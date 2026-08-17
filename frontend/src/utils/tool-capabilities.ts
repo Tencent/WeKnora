@@ -61,6 +61,7 @@ export const TOOL_CAPABILITY_REQUIREMENTS: Record<string, ToolRequirement> = {
   wiki_search:          { allOf: ['wiki'] },
   wiki_read_page:       { allOf: ['wiki'] },
   wiki_read_source_doc: { allOf: ['wiki'] },
+  wiki_list_source_chunks: { allOf: ['wiki'] },
   wiki_flag_issue:      { allOf: ['wiki'] },
   wiki_write_page:      { allOf: ['wiki'] },
   wiki_replace_text:    { allOf: ['wiki'] },

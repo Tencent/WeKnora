@@ -80,10 +80,14 @@ func (s *wikiIngestService) planBatchTaxonomy(
 				it.slug, it.title, it.pageType, previewText(it.about, 120))
 		}
 
+		kbName, kbDesc, extraction := taxonomyPromptKBFields(kb)
 		raw, err := s.generateWithTemplate(ctx, chatModel, agent.WikiTaxonomyPlanPrompt, map[string]string{
-			"ExistingTaxonomy": tree,
-			"Items":            itemsBlock.String(),
-			"Language":         lang,
+			"KBName":             kbName,
+			"KBDescription":      kbDesc,
+			"ExtractionGuidance": extraction,
+			"ExistingTaxonomy":   tree,
+			"Items":              itemsBlock.String(),
+			"Language":           lang,
 		})
 		if err != nil {
 			logger.Warnf(ctx, "wiki ingest: taxonomy plan call failed (%d items): %v", len(chunk), err)
@@ -261,6 +265,38 @@ func capFolders(paths [][]string, max int) [][]string {
 		return paths[:max]
 	}
 	return paths
+}
+
+const (
+	taxonomyPromptUnnamedKB = "(unnamed knowledge base)"
+	taxonomyPromptNoKBDesc  = "(none - no knowledge-base description was provided)"
+	taxonomyPromptNoExtract = "(none - no extraction or directory-organization guidance was provided)"
+)
+
+// taxonomyPromptKBFields pulls the create-KB fields that seed directory
+// invention: name + description frame the intended domain; extraction
+// instructions can name the grouping axis (methods vs products vs themes).
+// Empty values become explicit "none" sentinels so the planner does not
+// treat a blank slot as missing context.
+func taxonomyPromptKBFields(kb *types.KnowledgeBase) (name, description, extraction string) {
+	name = taxonomyPromptUnnamedKB
+	description = taxonomyPromptNoKBDesc
+	extraction = taxonomyPromptNoExtract
+	if kb == nil {
+		return
+	}
+	if v := strings.TrimSpace(kb.Name); v != "" {
+		name = v
+	}
+	if v := strings.TrimSpace(kb.Description); v != "" {
+		description = v
+	}
+	if kb.WikiConfig != nil {
+		if v := strings.TrimSpace(kb.WikiConfig.ExtractionInstructions); v != "" {
+			extraction = v
+		}
+	}
+	return
 }
 
 // collectTaxonomyItems extracts the entity/concept pages from a batch's slug

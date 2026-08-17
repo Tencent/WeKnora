@@ -436,6 +436,43 @@ func (h *WikiPageHandler) GetPage(c *gin.Context) {
 	c.JSON(http.StatusOK, page)
 }
 
+// ListSourceChunks godoc
+// @Summary      List original chunks cited by a wiki page
+// @Description  Expand the page's chunk_refs into full original document chunks, in stored order. Empty chunk_refs (summary pages or a citation miss) return an empty list with reason=no_chunk_refs.
+// @Tags         Wiki
+// @Produce      json
+// @Param        kb_id  path   string  true  "Knowledge base ID"
+// @Param        slug   path   string  true  "Page slug"
+// @Success      200  {object}  types.WikiPageSourceChunksResult
+// @Failure      404  {object}  errors.AppError
+// @Security     Bearer
+// @Router       /knowledgebase/{kb_id}/wiki/source-chunks/{slug} [get]
+func (h *WikiPageHandler) ListSourceChunks(c *gin.Context) {
+	kbID, _, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	slug := getSlugParam(c)
+	if slug == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Page slug is required"})
+		return
+	}
+
+	result, err := h.wikiService.ListSourceChunksBySlug(c.Request.Context(), kbID, slug)
+	if err != nil {
+		if stderrors.Is(err, repository.ErrWikiPageNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Wiki page not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
 // UpdatePage godoc
 // @Summary      Update a wiki page
 // @Description  Partially update a wiki page by slug. Absent fields keep
@@ -1007,6 +1044,66 @@ func (h *WikiPageHandler) SearchPages(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"pages": pages})
+}
+
+// AssociateLeaves godoc
+// @Summary      Associate wiki leaf knowledge points
+// @Description  LLM judges which entity/concept leaves are related to the question; the program assembles directory, sources and cited chunks. POST may supply a custom judging prompt used by MCP.
+// @Tags         Wiki
+// @Accept       json
+// @Produce      json
+// @Param        kb_id  path   string  true   "Knowledge base ID"
+// @Param        q      query  string  false  "Natural-language question (GET)"
+// @Param        limit  query  int     false  "Max related leaves (default 20, max 50)"
+// @Param        prompt query  string  false  "Optional judging instructions (GET)"
+// @Success      200  {object}  types.WikiKnowledgeAssocResult
+// @Security     Bearer
+// @Router       /knowledgebase/{kb_id}/wiki/associate [get]
+// @Router       /knowledgebase/{kb_id}/wiki/associate [post]
+func (h *WikiPageHandler) AssociateLeaves(c *gin.Context) {
+	kbID, _, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	query := strings.TrimSpace(c.Query("q"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	prompt := strings.TrimSpace(c.Query("prompt"))
+
+	if c.Request.Method == http.MethodPost && c.Request.ContentLength != 0 {
+		var req struct {
+			Q      string `json:"q"`
+			Limit  int    `json:"limit"`
+			Prompt string `json:"prompt"`
+		}
+		if bindErr := c.ShouldBindJSON(&req); bindErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return
+		}
+		if q := strings.TrimSpace(req.Q); q != "" {
+			query = q
+		}
+		if req.Limit > 0 {
+			limit = req.Limit
+		}
+		if p := strings.TrimSpace(req.Prompt); p != "" {
+			prompt = p
+		}
+	}
+
+	if query == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Search query 'q' is required"})
+		return
+	}
+
+	result, err := h.wikiService.AssociateLeaves(c.Request.Context(), kbID, query, limit, prompt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
 }
 
 // RebuildLinks godoc

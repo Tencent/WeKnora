@@ -9,6 +9,15 @@ package agent
 // previously-filed pages are never churned.
 const WikiTaxonomyPlanPrompt = `You are organizing a wiki knowledge base into a navigation directory. Assign each item below to a directory path (category) so the whole set lands on ONE coherent tree.
 
+<knowledge_base>
+Name: {{.KBName}}
+Description: {{.KBDescription}}
+</knowledge_base>
+
+<extraction_guidance>
+{{.ExtractionGuidance}}
+</extraction_guidance>
+
 <existing_folders>
 {{.ExistingTaxonomy}}
 </existing_folders>
@@ -22,7 +31,12 @@ For every item, output a category path: an array of folder labels from broad to 
 
 How to choose a path for each item:
 1. If an existing folder in <existing_folders> fits, REUSE its EXACT label (character-for-character). Do NOT invent a synonym folder (e.g. do NOT create "春节习俗" when "春节 / 传统习俗" already fits).
-2. If NO existing folder fits, CREATE a new, broad, durable folder for it (e.g. an organization → "组织", a legal idea → "法律概念", a place → "地点"). The directory does not have to stay small — most items DO have a natural home, so coin a sensible top-level folder rather than leaving them unfiled. Group items of the SAME kind under the SAME new folder so the tree stays coherent.
+2. If NO existing folder fits, CREATE a new, broad, durable folder for it. Seed that invention from this knowledge base, not from one source document:
+   - Use <knowledge_base> name and description as the intended domain of the wiki. New top-level folders should be durable shelves for THAT knowledge base.
+   - User guidance is often informal (one or two sentences). Treat it as a hint for purpose, not a complete filing spec. Do not require the user to name folder axes.
+   - File by what the item IS: people, organizations, places, products, and methodological knowledge (methods, frameworks, criteria) each get their own kind of shelf. Methodological items go on a methods shelf, not under the domain topic of the document they appeared in.
+   - Do not create a folder per source-document section.
+   - Group items of the SAME kind under the SAME new folder so the tree stays coherent.
 3. Only give an empty path [] when an item genuinely belongs to NO durable subject at all. This must be RARE. The absence of a matching existing folder is NOT a reason for []; create a folder instead.
 
 Other rules:
@@ -41,6 +55,7 @@ Output format:
 {
   "assignments": [
     {"slug": "entity/zhang-san", "path": ["人物"]},
+    {"slug": "concept/retrieval-augmented-generation", "path": ["方法"]},
     {"slug": "concept/spring-festival", "path": ["节日", "传统节日"]}
   ]
 }`
@@ -563,3 +578,60 @@ func WikiGranularityGuidance(granularity string) string {
 		return WikiGranularityGuidanceStandard
 	}
 }
+
+// WikiLeafRelatePrompt asks the model which leaves would actually change a
+// later writing plan. Each leaf may include a short existing page summary
+// for disambiguation. Folder paths, file addresses and source text are
+// assembled afterwards by the program and must not appear here.
+const WikiLeafRelatePrompt = `You select leaf knowledge points that would change how a writing task is planned or written.
+
+The question is a writing task, or the subject of one. Downstream, each selected leaf will be used to decide: (1) how this knowledge point affects the writing, and (2) how the writing can use it. Select a leaf only if those two questions would have a concrete answer.
+
+Do NOT pick folders, invent slugs, rewrite the question, or rank results.
+Do NOT explain. Output ONLY JSON. When unsure, omit the leaf. Prefer precision over recall.
+
+Each leaf is listed as id, keywords, and an optional desc. The desc is the first paragraph under the page title; use it to tell similar names apart. Do not treat a shared generic word in desc as sufficient relatedness.
+
+A leaf is related ONLY when it would do at least one of the following:
+- constrain what the writing must say, avoid, emphasize, or assume;
+- supply a fact, term, criterion, mechanism, or example the writing would directly use;
+- change the writing strategy (stance, structure, evidence, caveats, or audience framing).
+
+A leaf is NOT related when it is:
+- the same broad domain or a sibling topic that would not change the writing;
+- only a hypernym, hyponym, or loosely associated background;
+- sharing a generic word with the question;
+- something a writer could ignore without changing the plan.
+
+Question:
+{{.Question}}
+
+Leaves:
+{{.Leaves}}
+
+Output format:
+{"related":["concept/example-slug"]}`
+
+// WikiLeafRelateCallerPrompt wraps a caller-supplied judging instruction
+// (MCP wiki_search prompt). Question, leaf cards and the JSON contract
+// stay server-owned so a custom prompt cannot break parsing.
+const WikiLeafRelateCallerPrompt = `You select leaf knowledge points according to the caller's judging instructions.
+
+Do NOT pick folders, invent slugs, rewrite the question, or rank results.
+Do NOT explain. Output ONLY JSON. When unsure, omit the leaf.
+
+Each leaf is listed as id, keywords, and an optional desc. The desc is the first paragraph under the page title; use it to tell similar names apart. Do not treat a shared generic word in desc as sufficient relatedness.
+
+<judging_instructions>
+{{.Criteria}}
+</judging_instructions>
+
+Question:
+{{.Question}}
+
+Leaves:
+{{.Leaves}}
+
+Output format:
+{"related":["concept/example-slug"]}`
+

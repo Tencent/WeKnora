@@ -588,17 +588,59 @@ class WeKnoraClient:
         return self._request("DELETE", f"/chunks/{knowledge_id}/{chunk_id}")
 
     # Wiki Read-Only - Methods for querying LLM-generated wiki pages
-    def wiki_search(self, kb_id: str, query: str, limit: int = 10) -> Dict:
-        """Search wiki pages by full-text query"""
-        return self._request(
-            "GET",
-            f"/knowledgebase/{kb_id}/wiki/search",
-            params={"q": query, "limit": limit},
+    def wiki_search(self, kb_id: str, query: str, limit: int = 10, prompt: str = "") -> Dict:
+        """Search wiki pages by query. Returns the legacy {pages: [...]} envelope."""
+        resolved = self.resolve_kb_id(kb_id)
+        body = {"q": query, "limit": limit}
+        if isinstance(prompt, str) and prompt.strip():
+            body["prompt"] = prompt.strip()
+        payload = self._request(
+            "POST",
+            f"/knowledgebase/{resolved}/wiki/associate",
+            json=body,
         )
+        return self._wiki_search_pages_envelope(payload)
+
+    @staticmethod
+    def _wiki_search_pages_envelope(payload: Any) -> Dict:
+        """Keep MCP wiki_search wire-compatible with GET /wiki/search.
+
+        Association internally returns {query, tree, pages}. Callers that
+        already read `.pages` must keep seeing that shape and nothing else.
+        """
+        data = payload.get("data", payload) if isinstance(payload, dict) else payload
+        if not isinstance(data, dict):
+            return {"pages": []}
+        pages = data.get("pages")
+        if isinstance(pages, list):
+            return {"pages": pages}
+        return {"pages": WeKnoraClient._wiki_leaves_as_pages(data.get("tree"))}
+
+    @staticmethod
+    def _wiki_leaves_as_pages(nodes: Any) -> list:
+        pages: list = []
+        if not isinstance(nodes, list):
+            return pages
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            for leaf in node.get("leaves") or []:
+                if isinstance(leaf, dict):
+                    pages.append(leaf)
+            pages.extend(WeKnoraClient._wiki_leaves_as_pages(node.get("children")))
+        return pages
 
     def wiki_read_page(self, kb_id: str, slug: str) -> Dict:
         """Read a wiki page by slug, returns full markdown + metadata + links"""
         return self._request("GET", f"/knowledgebase/{kb_id}/wiki/pages/{slug}")
+
+    def wiki_list_source_chunks(self, kb_id: str, slug: str) -> Dict:
+        """List every original document chunk cited by a wiki page."""
+        resolved = self.resolve_kb_id(kb_id)
+        return self._request(
+            "GET",
+            f"/knowledgebase/{resolved}/wiki/source-chunks/{slug}",
+        )
 
     def wiki_index_view(self, kb_id: str, limit: int = 50) -> Dict:
         """Get structured wiki index with per-type directory groups"""
@@ -1085,12 +1127,16 @@ def delete_chunk(knowledge_id: str, chunk_id: str) -> dict:
 
 
 @mcp.tool()
-def wiki_search(kb_id: str, query: str, limit: int = 10) -> dict:
-    """Search wiki pages by full-text query.
+def wiki_search(kb_id: str, query: str, limit: int = 10, prompt: str = "") -> dict:
+    """Search wiki pages by query.
 
     Returns matching wiki pages with title, slug, summary, and content snippets.
+
+    prompt is optional judging instructions for how to select related leaves.
+    The server always appends the question and leaf list. Omit it to use the
+    default writing-strategy criterion.
     """
-    return client.wiki_search(kb_id, query, limit)
+    return client.wiki_search(kb_id, query, limit, prompt)
 
 
 @mcp.tool()
@@ -1101,6 +1147,20 @@ def wiki_read_page(kb_id: str, slug: str) -> dict:
     references. slug example: 'entity/acme-corp', 'concept/rag'.
     """
     return client.wiki_read_page(kb_id, slug)
+
+
+@mcp.tool()
+def wiki_list_source_chunks(kb_id: str, slug: str) -> dict:
+    """List every original document chunk cited by a wiki knowledge page.
+
+    Use this after wiki_search or wiki_read_page when you need the real source
+    text behind a knowledge point. Returns the page identity, source documents,
+    and all chunk_refs expanded to full chunk content (not a whole-document
+    scan). Summary pages and pages with no citations return chunks=[] with
+    reason=no_chunk_refs. slug example: 'entity/acme-corp', 'concept/rag'.
+    kb_id may be a UUID or a knowledge-base name.
+    """
+    return client.wiki_list_source_chunks(kb_id, slug)
 
 
 @mcp.tool()

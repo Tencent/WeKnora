@@ -109,6 +109,8 @@ func TestWikiPromptsNeverRenderAnEmptyLanguage(t *testing.T) {
 		"WikiCandidateSlugPrompt":    agent.WikiCandidateSlugPrompt,
 		"WikiChunkCitationPrompt":    agent.WikiChunkCitationPrompt,
 		"WikiTaxonomyPlanPrompt":     agent.WikiTaxonomyPlanPrompt,
+		"WikiLeafRelatePrompt":       agent.WikiLeafRelatePrompt,
+		"WikiLeafRelateCallerPrompt": agent.WikiLeafRelateCallerPrompt,
 	}
 
 	for name, tpl := range prompts {

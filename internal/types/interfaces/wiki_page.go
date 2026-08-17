@@ -202,8 +202,21 @@ type WikiPageService interface {
 	// summary set.
 	CountByType(ctx context.Context, kbID string) (map[string]int64, error)
 
-	// SearchPages performs full-text search over wiki pages.
+	// SearchPages performs keyword/regex search over wiki pages. Used by
+	// the Wiki browser typeahead. Agent and MCP query use AssociateLeaves.
 	SearchPages(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
+
+	// AssociateLeaves asks the wiki synthesis model which entity/concept
+	// leaves match the question, then assembles the directory tree, source
+	// documents and cited chunks. relatePrompt is optional MCP judging
+	// text; empty keeps the default writing-strategy criterion.
+	AssociateLeaves(ctx context.Context, kbID string, query string, limit int, relatePrompt string) (*types.WikiKnowledgeAssocResult, error)
+
+	// ListSourceChunksBySlug returns every original document chunk cited
+	// by the page's chunk_refs, in stored order, with full text. Empty
+	// chunk_refs (summary pages, citation miss) yield an empty list and
+	// Reason=no_chunk_refs rather than an error.
+	ListSourceChunksBySlug(ctx context.Context, kbID string, slug string) (*types.WikiPageSourceChunksResult, error)
 
 	// ListRevisions returns the stored historical snapshots for a page
 	// (newest first, content omitted) plus the total snapshot count and the
@@ -370,8 +383,17 @@ type WikiPageRepository interface {
 	// DeleteByID soft-deletes a wiki page by ID.
 	DeleteByID(ctx context.Context, id string) error
 
-	// Search performs full-text search on wiki pages within a knowledge base.
+	// Search performs keyword/regex search on wiki pages within a knowledge base.
 	Search(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
+
+	// ListLeafKeywordCards returns entity/concept pages as slug + title +
+	// aliases + a content prefix for first-paragraph descriptions.
+	// Used as the association LLM's input catalog; full page body is not loaded.
+	ListLeafKeywordCards(ctx context.Context, kbID string) ([]types.WikiLeafKeywordCard, error)
+
+	// ListFullPagesBySlugs loads complete wiki_pages rows for the given
+	// slugs (archived rows omitted). Missing slugs are dropped.
+	ListFullPagesBySlugs(ctx context.Context, kbID string, slugs []string) ([]*types.WikiPage, error)
 
 	// CountByType returns page counts grouped by type for a knowledge base.
 	CountByType(ctx context.Context, kbID string) (map[string]int64, error)

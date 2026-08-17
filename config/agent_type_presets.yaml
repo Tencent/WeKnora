@@ -87,6 +87,7 @@ agent_type_presets:
         - "wiki_search"
         - "wiki_read_page"
         - "wiki_read_source_doc"
+        - "wiki_list_source_chunks"
         - "wiki_flag_issue"
       retain_retrieval_history: false
       kb_selection_mode: "all"
@@ -117,6 +118,8 @@ agent_type_presets:
       allowed_tools:
         - "wiki_search"
         - "wiki_read_page"
+        - "wiki_read_source_doc"
+        - "wiki_list_source_chunks"
         - "knowledge_search"
         - "grep_chunks"
         - "list_knowledge_chunks"

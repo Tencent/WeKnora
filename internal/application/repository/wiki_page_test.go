@@ -594,3 +594,29 @@ func TestDeleteRevisionsByPageOnlyTouchesThatPage(t *testing.T) {
 	require.NoError(t, repo.DeleteRevisionsByPage(ctx, ""))
 	assert.Equal(t, int64(1), countWikiRevisions(t, db, bystander.ID))
 }
+
+func TestListLeafKeywordCardsSkipsArchivedAndNonLeaves(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	keep := makeWikiPage("kb-leaf", "concept/keep", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	keep.Title = "Keep"
+	keep.Aliases = types.StringArray{"alias"}
+	keep.Summary = "A kept concept about matching."
+	keep.Content = "# Keep\n\nFirst paragraph used as the association description.\n\n## Rest\n\nIgnored body."
+	require.NoError(t, repo.Create(ctx, keep))
+	require.NoError(t, repo.Create(ctx, makeWikiPage("kb-leaf", "entity/person", types.WikiPageTypeEntity, types.WikiPageStatusPublished)))
+	require.NoError(t, repo.Create(ctx, makeWikiPage("kb-leaf", "summary/doc", types.WikiPageTypeSummary, types.WikiPageStatusPublished)))
+	require.NoError(t, repo.Create(ctx, makeWikiPage("kb-leaf", "concept/old", types.WikiPageTypeConcept, types.WikiPageStatusArchived)))
+
+	got, err := repo.ListLeafKeywordCards(ctx, "kb-leaf")
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "concept/keep", got[0].Slug)
+	assert.Equal(t, "Keep", got[0].Title)
+	assert.Equal(t, types.StringArray{"alias"}, got[0].Aliases)
+	assert.Equal(t, "A kept concept about matching.", got[0].Summary)
+	assert.Contains(t, got[0].Content, "First paragraph used as the association description.")
+	assert.Equal(t, "entity/person", got[1].Slug)
+}

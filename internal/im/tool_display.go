@@ -41,6 +41,7 @@ var imToolNameLabels = map[string]string{
 	"wiki_search":             "Wiki 搜索",
 	"wiki_read_page":          "Wiki 阅读",
 	"wiki_read_source_doc":    "精读源文档",
+	"wiki_list_source_chunks": "列出知识点原文块",
 	"todo_write":              "计划管理",
 	"knowledge_graph_extract": "知识图谱抽取",
 	"thinking":                "思考",
@@ -389,7 +390,7 @@ func imToolStatusDescription(step IMToolStep) string {
 			return "获取文档信息"
 		}
 		return "获取文档信息失败"
-	case "get_document_content", "wiki_read_source_doc":
+	case "get_document_content", "wiki_read_source_doc", "wiki_list_source_chunks":
 		if success {
 			return "获取文档内容"
 		}

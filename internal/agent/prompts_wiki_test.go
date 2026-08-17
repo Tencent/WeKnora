@@ -124,6 +124,32 @@ func TestWikiChunkCitationPrompt_PreservesPlaceholders(t *testing.T) {
 	}
 }
 
+func TestWikiTaxonomyPlanPrompt_PreservesKBSeedPlaceholders(t *testing.T) {
+	for _, field := range []string{
+		"{{.KBName}}",
+		"{{.KBDescription}}",
+		"{{.ExtractionGuidance}}",
+		"{{.ExistingTaxonomy}}",
+		"{{.Items}}",
+		"{{.Language}}",
+	} {
+		if !strings.Contains(WikiTaxonomyPlanPrompt, field) {
+			t.Errorf("WikiTaxonomyPlanPrompt lost template field %q", field)
+		}
+	}
+	for _, rule := range []string{
+		"<knowledge_base>",
+		"<extraction_guidance>",
+		"Methodological items go on a methods shelf",
+		"Do not create a folder per source-document section",
+		"informal",
+	} {
+		if !strings.Contains(WikiTaxonomyPlanPrompt, rule) {
+			t.Errorf("WikiTaxonomyPlanPrompt missing seed/anti-pattern rule %q", rule)
+		}
+	}
+}
+
 func TestWikiPageModifyUserPrompt_HidesInternalChunkHandles(t *testing.T) {
 	combined := WikiPageModifySystemPrompt + "\n" + WikiPageModifyUserPrompt
 	for _, guidance := range []string{

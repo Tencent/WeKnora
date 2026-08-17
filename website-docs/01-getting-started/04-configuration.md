@@ -330,7 +330,7 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | id | 系统 Prompt | 工具白名单 | 备注 |
 | --- | --- | --- | --- |
 | `rag-qa` | `progressive_rag_agent` | knowledge_search、grep_chunks、list_knowledge_chunks、get_document_info | temperature 0.7、max_iterations 30、FAQ 优先 |
-| `wiki-qa` | `wiki_researcher` | wiki_search、wiki_read_page、wiki_read_source_doc、wiki_flag_issue | 需 Wiki 已启用的知识库 |
+| `wiki-qa` | `wiki_researcher` | wiki_search、wiki_read_page、wiki_read_source_doc、wiki_list_source_chunks、wiki_flag_issue | 需 Wiki 已启用的知识库 |
 | `hybrid-rag-wiki` | `hybrid_rag_wiki_agent` | Wiki + RAG 工具全集 | max_iterations 40，最灵活的预设 |
 | `data-analysis` | `data_analyst` | data_schema、data_analysis | temperature 0.3；`kb_filter: none_of: [faq]`；支持 csv/xlsx |
 | `custom` | 无 | 无预填 | 完全手动配置 |

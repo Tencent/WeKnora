@@ -670,14 +670,15 @@ func countTotalToolCalls(steps []types.AgentStep) int {
 // may become stale across turns (KB can be switched, updated, or deleted).
 // Historical results from these tools are redacted to force fresh retrieval.
 var kbToolNames = map[string]bool{
-	agenttools.ToolKnowledgeSearch:     true,
-	agenttools.ToolGrepChunks:          true,
-	agenttools.ToolListKnowledgeChunks: true,
-	agenttools.ToolQueryKnowledgeGraph: true,
-	agenttools.ToolGetDocumentInfo:     true,
-	agenttools.ToolWikiSearch:          true,
-	agenttools.ToolWikiReadPage:        true,
-	agenttools.ToolWikiReadSourceDoc:   true,
+	agenttools.ToolKnowledgeSearch:      true,
+	agenttools.ToolGrepChunks:           true,
+	agenttools.ToolListKnowledgeChunks:  true,
+	agenttools.ToolQueryKnowledgeGraph:  true,
+	agenttools.ToolGetDocumentInfo:      true,
+	agenttools.ToolWikiSearch:           true,
+	agenttools.ToolWikiReadPage:         true,
+	agenttools.ToolWikiReadSourceDoc:    true,
+	agenttools.ToolWikiListSourceChunks: true,
 }
 
 // redactHistoryKBResults replaces full KB tool results in historical context

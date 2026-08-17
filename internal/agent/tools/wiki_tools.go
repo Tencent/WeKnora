@@ -771,27 +771,21 @@ func NewWikiSearchTool(
 	return &wikiSearchTool{
 		BaseTool: NewBaseTool(
 			ToolWikiSearch,
-			`Search wiki pages using PostgreSQL POSIX regular expressions (~* operator, case-insensitive).
-STRONGLY PREFER using regex to search for multiple concepts at once rather than simple plain text queries.
-Returns matching pages with titles, slugs, and summaries (each tagged with its short bN knowledge_base_id).
-Examples:
-- Alternation (RECOMMENDED): "stardust|skyvault" (matches either word)
-- Multiple terms (RECOMMENDED): "psionic.*engine" (matches both words in order)
-- Prefix matching: "^entity/.*" (finds all entities)
-- Plain text: "engine" (matches anywhere in title/content/slug/summary)
-IMPORTANT — JSON escaping: every backslash in a regex MUST be written as \\ inside the JSON tool arguments (e.g. to search for literal "C++" write "C\\+\\+", NOT "C\+\+"; for "\d+" write "\\d+"). Plain "\+" / "\d" etc. are invalid JSON escapes and will fail to parse.
-Use this to find relevant wiki pages when you don't know the exact slug.`,
+			`Find wiki leaf knowledge points related to a natural-language question.
+The tool asks a model which entity/concept leaves would change a later writing plan, then the program assembles the directory tree, source documents, cited chunks, and inbound/outbound links.
+Pass the user's question or a short restatement - do NOT use regex. Multiple queries run independently.
+Each result is a hierarchical association tree, not a flat keyword hit list.`,
 			json.RawMessage(`{
   "type": "object",
   "properties": {
     "queries": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "List of regex search queries to run"
+      "description": "Natural-language questions to associate against wiki leaves"
     },
     "limit": {
       "type": "integer",
-      "description": "Max results to return per query (default 10)"
+      "description": "Max related leaves to return per query (default 10, max 50)"
     },
     "knowledge_base_id": {
       "type": "string",
@@ -858,96 +852,44 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 	// slug when the agent has several wiki KBs in scope, so we keep the full list.
 	foundKBs := make(map[string][]string)
 
-	type searchHit struct {
-		page *types.WikiPage
-		kbID string
-	}
 	var fetchTags knowledgeTagsFetcher
 	if t.knowledgeService != nil {
 		fetchTags = t.knowledgeService.GetKnowledgeTags
 	}
 
 	for _, query := range queriesToRun {
-		var allHits []searchHit
-		filteredCount := 0
+		var trees []assocTreeHit
 		for _, sc := range effectiveScopes {
 			kbID := sc.KnowledgeBaseID
 			if kbID == "" {
 				continue
 			}
-			pages, err := t.wikiService.SearchPages(ctx, kbID, query, params.Limit)
+			result, err := t.wikiService.AssociateLeaves(ctx, kbID, query, params.Limit, "")
 			if err != nil {
 				searchErrors = append(searchErrors, fmt.Sprintf("Wiki search %q failed in KB %s: %v", query, kbID, err))
 				continue
 			}
 			successfulSearchCalls++
-			for _, p := range pages {
-				if p == nil {
-					continue
-				}
-				passesScope, scopeErr := pagePassesWikiScope(ctx, p, sc, fetchTags)
-				if scopeErr != nil {
-					searchErrors = append(searchErrors, fmt.Sprintf(
-						"Failed to validate Wiki search result %q in KB %s: %v", p.Slug, kbID, scopeErr,
-					))
-					continue
-				}
-				if !passesScope {
-					filteredCount++
-					continue
-				}
-				if p.KnowledgeBaseID != "" && p.KnowledgeBaseID != kbID {
-					searchErrors = append(searchErrors, fmt.Sprintf(
-						"Wiki search result %q returned KB %s while resolving allowed KB %s",
-						p.Slug, p.KnowledgeBaseID, kbID,
-					))
-					continue
-				}
-				actualKBID := kbID
-				allHits = append(allHits, searchHit{page: p, kbID: actualKBID})
-				t.routes.rememberPage(p, actualKBID)
-				foundKBs[p.Slug] = append(foundKBs[p.Slug], actualKBID)
-				// Register neighbour slugs so links surfaced from this
-				// page's body can be routed to the same KB by the frontend.
-				registerLinkedSlugs(foundKBs, p, actualKBID)
+			if result == nil {
+				continue
 			}
+			filtered := filterAssocTree(ctx, result.Tree, kbID, sc, fetchTags, &searchErrors)
+			if countAssocLeaves(filtered) == 0 {
+				continue
+			}
+			rememberAssocTree(t, filtered, kbID, foundKBs)
+			trees = append(trees, assocTreeHit{kbID: kbID, nodes: filtered})
 		}
-		_ = filteredCount // reserved for future debug surface
 
-		if len(allHits) == 0 {
+		if len(trees) == 0 {
 			allOutputs = append(allOutputs, fmt.Sprintf("<search_results count=\"0\" query=\"%s\" />", query))
 			continue
 		}
 
 		var sb strings.Builder
-		fmt.Fprintf(&sb, "<search_results count=\"%d\" query=\"%s\">\n", len(allHits), query)
-		for _, h := range allHits {
-			p := h.page
-			key := seenLinkKey(h.kbID, p.Slug)
-			t.mu.Lock()
-			seen := t.seenSlugs[key]
-			t.seenSlugs[key] = true
-			t.mu.Unlock()
-
-			snippet := extractSnippet(p.Content, query)
-			snippetTag := ""
-			if snippet != "" {
-				snippetTag = fmt.Sprintf("\n<match_snippet>%s</match_snippet>", snippet)
-			}
-
-			aliasesTag := ""
-			if len(p.Aliases) > 0 {
-				aliasesTag = fmt.Sprintf("\n<aliases>%s</aliases>", strings.Join(p.Aliases, ", "))
-			}
-
-			summary := p.Summary
-			if seen {
-				summary = "(summary omitted, already seen in previous search)"
-			}
-			fmt.Fprintf(&sb,
-				"<page>\n<knowledge_base_id>%s</knowledge_base_id>\n<link>[[%s|%s]]</link>\n<type>%s</type>%s\n<summary>%s</summary>%s\n</page>\n",
-				h.kbID, p.Slug, p.Title, p.PageType, aliasesTag, summary, snippetTag,
-			)
+		fmt.Fprintf(&sb, "<search_results count=\"%d\" query=\"%s\">\n", countAssocHits(trees), query)
+		for _, hit := range trees {
+			renderAssocNodes(&sb, hit.nodes, hit.kbID, query, t)
 		}
 		sb.WriteString("</search_results>")
 		allOutputs = append(allOutputs, sb.String())
@@ -967,6 +909,178 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 			"found_kbs": foundKBs,
 		},
 	}, nil
+}
+
+type assocTreeHit struct {
+	kbID  string
+	nodes []*types.WikiKnowledgeAssocNode
+}
+
+func filterAssocTree(
+	ctx context.Context,
+	nodes []*types.WikiKnowledgeAssocNode,
+	kbID string,
+	scope WikiScope,
+	fetchTags knowledgeTagsFetcher,
+	searchErrors *[]string,
+) []*types.WikiKnowledgeAssocNode {
+	if len(nodes) == 0 {
+		return nil
+	}
+	out := make([]*types.WikiKnowledgeAssocNode, 0, len(nodes))
+	for _, n := range nodes {
+		if n == nil {
+			continue
+		}
+		children := filterAssocTree(ctx, n.Children, kbID, scope, fetchTags, searchErrors)
+		leaves := make([]*types.WikiKnowledgeAssocLeaf, 0, len(n.Leaves))
+		for _, leaf := range n.Leaves {
+			if leaf == nil {
+				continue
+			}
+			page := leaf.AsPage()
+			page.KnowledgeBaseID = kbID
+			passes, err := pagePassesWikiScope(ctx, page, scope, fetchTags)
+			if err != nil {
+				*searchErrors = append(*searchErrors, fmt.Sprintf(
+					"Failed to validate Wiki search result %q in KB %s: %v", leaf.Slug, kbID, err,
+				))
+				continue
+			}
+			if !passes {
+				continue
+			}
+			leaves = append(leaves, leaf)
+		}
+		if len(children) == 0 && len(leaves) == 0 {
+			continue
+		}
+		out = append(out, &types.WikiKnowledgeAssocNode{
+			Name:     n.Name,
+			Path:     n.Path,
+			Children: children,
+			Leaves:   leaves,
+		})
+	}
+	return out
+}
+
+func rememberAssocTree(t *wikiSearchTool, nodes []*types.WikiKnowledgeAssocNode, kbID string, foundKBs map[string][]string) {
+	for _, n := range nodes {
+		if n == nil {
+			continue
+		}
+		rememberAssocTree(t, n.Children, kbID, foundKBs)
+		for _, leaf := range n.Leaves {
+			if leaf == nil {
+				continue
+			}
+			page := leaf.AsPage()
+			page.KnowledgeBaseID = kbID
+			t.routes.rememberPage(page, kbID)
+			foundKBs[leaf.Slug] = append(foundKBs[leaf.Slug], kbID)
+			registerLinkedSlugs(foundKBs, page, kbID)
+		}
+	}
+}
+
+func countAssocHits(trees []assocTreeHit) int {
+	total := 0
+	for _, t := range trees {
+		total += countAssocLeaves(t.nodes)
+	}
+	return total
+}
+
+func countAssocLeaves(nodes []*types.WikiKnowledgeAssocNode) int {
+	n := 0
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		n += len(node.Leaves) + countAssocLeaves(node.Children)
+	}
+	return n
+}
+
+func renderAssocNodes(sb *strings.Builder, nodes []*types.WikiKnowledgeAssocNode, kbID, query string, t *wikiSearchTool) {
+	for _, n := range nodes {
+		if n == nil {
+			continue
+		}
+		path := strings.Join(n.Path, "/")
+		if n.Name != "" || path != "" {
+			if path == "" {
+				path = n.Name
+			}
+			fmt.Fprintf(sb, "<folder path=\"%s\">\n", path)
+		}
+		for _, leaf := range n.Leaves {
+			renderAssocLeaf(sb, leaf, kbID, query, t)
+		}
+		renderAssocNodes(sb, n.Children, kbID, query, t)
+		if n.Name != "" || path != "" {
+			sb.WriteString("</folder>\n")
+		}
+	}
+}
+
+func renderAssocLeaf(sb *strings.Builder, leaf *types.WikiKnowledgeAssocLeaf, kbID, query string, t *wikiSearchTool) {
+	if leaf == nil {
+		return
+	}
+	key := seenLinkKey(kbID, leaf.Slug)
+	t.mu.Lock()
+	seen := t.seenSlugs[key]
+	t.seenSlugs[key] = true
+	t.mu.Unlock()
+
+	title := leaf.Title
+	if title == "" {
+		title = leaf.Slug
+	}
+	summary := leaf.Summary
+	if seen {
+		summary = "(summary omitted, already seen in previous search)"
+	}
+	aliasesTag := ""
+	if len(leaf.Aliases) > 0 {
+		aliasesTag = fmt.Sprintf("\n<aliases>%s</aliases>", strings.Join(leaf.Aliases, ", "))
+	}
+	snippet := extractSnippet(leaf.Content, query)
+	snippetTag := ""
+	if snippet != "" {
+		snippetTag = fmt.Sprintf("\n<match_snippet>%s</match_snippet>", snippet)
+	}
+	fmt.Fprintf(sb,
+		"<page>\n<knowledge_base_id>%s</knowledge_base_id>\n<link>[[%s|%s]]</link>\n<type>%s</type>%s\n<summary>%s</summary>%s\n",
+		kbID, leaf.Slug, title, leaf.PageType, aliasesTag, summary, snippetTag,
+	)
+	if path := strings.Join([]string(leaf.CategoryPath), "/"); path != "" {
+		fmt.Fprintf(sb, "<wiki_path>%s</wiki_path>\n", leaf.WikiPath)
+		fmt.Fprintf(sb, "<category_path>%s</category_path>\n", path)
+	}
+	if len(leaf.Sources) > 0 {
+		sb.WriteString("<sources>\n")
+		for _, src := range leaf.Sources {
+			fmt.Fprintf(sb, "<source knowledge_id=\"%s\">%s</source>\n", src.KnowledgeID, src.Title)
+		}
+		sb.WriteString("</sources>\n")
+	}
+	if len(leaf.Chunks) > 0 {
+		sb.WriteString("<chunks>\n")
+		for _, ch := range leaf.Chunks {
+			fmt.Fprintf(sb, "<chunk id=\"%s\">%s</chunk>\n", ch.ID, ch.Content)
+		}
+		sb.WriteString("</chunks>\n")
+	}
+	if len(leaf.OutLinks) > 0 {
+		fmt.Fprintf(sb, "<out_links>%s</out_links>\n", strings.Join(leaf.OutLinks, ", "))
+	}
+	if len(leaf.InLinks) > 0 {
+		fmt.Fprintf(sb, "<in_links>%s</in_links>\n", strings.Join(leaf.InLinks, ", "))
+	}
+	sb.WriteString("</page>\n")
 }
 
 // --- Helper ---

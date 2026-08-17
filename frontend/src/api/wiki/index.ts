@@ -26,6 +26,7 @@ export interface WikiPage {
   depth?: number;
   sort_order?: number;
   source_refs: string[];
+  chunk_refs: string[];
   in_links: string[];
   out_links: string[];
   page_metadata: Record<string, any>;
@@ -179,6 +180,33 @@ export function createWikiPage(kbId: string, data: Partial<WikiPage>) {
 
 export function getWikiPage(kbId: string, slug: string) {
   return get(`/api/v1/knowledgebase/${kbId}/wiki/pages/${encodeSlugPath(slug)}`);
+}
+
+export interface WikiPageSourceChunk {
+  id: string;
+  knowledge_id?: string;
+  knowledge_title?: string;
+  chunk_index?: number;
+  content?: string;
+  missing?: boolean;
+}
+
+export interface WikiPageSourceChunksResult {
+  knowledge_base_id: string;
+  slug: string;
+  title: string;
+  page_type: string;
+  sources?: { knowledge_id: string; title?: string }[];
+  chunks: WikiPageSourceChunk[];
+  chunk_ref_count: number;
+  missing_count?: number;
+  reason?: string;
+}
+
+// listWikiSourceChunks expands a page's chunk_refs into the full original
+// document chunks those IDs point at (stored order, no associate-search cap).
+export function listWikiSourceChunks(kbId: string, slug: string) {
+  return get(`/api/v1/knowledgebase/${kbId}/wiki/source-chunks/${encodeSlugPath(slug)}`);
 }
 
 // WikiPageUpdatePayload is a partial update: absent fields keep their stored

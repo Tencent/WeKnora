@@ -1183,6 +1183,41 @@ func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query stri
 	return pages, nil
 }
 
+const wikiLeafCardContentPrefix = 2500
+
+// ListLeafKeywordCards returns entity/concept pages as slug + title +
+// aliases + a short content prefix for first-paragraph descriptions.
+func (r *wikiPageRepository) ListLeafKeywordCards(ctx context.Context, kbID string) ([]types.WikiLeafKeywordCard, error) {
+	var cards []types.WikiLeafKeywordCard
+	if err := r.db.WithContext(ctx).
+		Model(&types.WikiPage{}).
+		Select("slug", "title", "page_type", "aliases", "summary",
+			fmt.Sprintf("SUBSTR(content, 1, %d) AS content", wikiLeafCardContentPrefix)).
+		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ?",
+			kbID,
+			[]string{types.WikiPageTypeEntity, types.WikiPageTypeConcept},
+			types.WikiPageStatusArchived).
+		Order("slug ASC").
+		Scan(&cards).Error; err != nil {
+		return nil, err
+	}
+	return cards, nil
+}
+
+// ListFullPagesBySlugs loads complete wiki_pages rows for the given slugs.
+func (r *wikiPageRepository) ListFullPagesBySlugs(ctx context.Context, kbID string, slugs []string) ([]*types.WikiPage, error) {
+	if len(slugs) == 0 {
+		return nil, nil
+	}
+	var pages []*types.WikiPage
+	if err := r.db.WithContext(ctx).
+		Where("knowledge_base_id = ? AND slug IN ? AND status <> ?", kbID, slugs, types.WikiPageStatusArchived).
+		Find(&pages).Error; err != nil {
+		return nil, err
+	}
+	return pages, nil
+}
+
 // CountByType returns page counts grouped by type for a knowledge base
 func (r *wikiPageRepository) CountByType(ctx context.Context, kbID string) (map[string]int64, error) {
 	type result struct {

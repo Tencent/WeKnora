@@ -585,6 +585,7 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   wiki_search: 'agentEditor.tools.wikiSearch',
   wiki_read_page: 'agentEditor.tools.wikiReadPage',
   wiki_read_source_doc: 'agentStream.tools.wikiReadSourceDoc',
+  wiki_list_source_chunks: 'agentStream.tools.wikiListSourceChunks',
   wiki_flag_issue: 'agentEditor.tools.wikiFlagIssue',
   wiki_write_page: 'agentEditor.tools.wikiWritePage',
   wiki_replace_text: 'agentEditor.tools.wikiReplaceText',
@@ -1211,7 +1212,7 @@ function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
       })));
   }
 
-  if (toolName === 'list_knowledge_chunks' || toolName === 'wiki_read_source_doc') {
+  if (toolName === 'list_knowledge_chunks' || toolName === 'wiki_read_source_doc' || toolName === 'wiki_list_source_chunks') {
     const chunks = Array.isArray(toolData.chunks) ? toolData.chunks : [];
     if (chunks.length) {
       return mergeDocumentReferences(chunks
@@ -2003,7 +2004,8 @@ const isReferenceDrawerTool = (toolName?: string | null): boolean =>
   toolName === 'list_knowledge_chunks' ||
   toolName === 'wiki_search' ||
   toolName === 'wiki_read_page' ||
-  toolName === 'wiki_read_source_doc';
+  toolName === 'wiki_read_source_doc' ||
+  toolName === 'wiki_list_source_chunks';
 
 const hasExpandableResults = (event: any): boolean => {
   if (isReferenceDrawerTool(event?.tool_name)) return false;
@@ -2690,7 +2692,7 @@ const getToolDescription = (event: any): string => {
     return success ? t('agentStream.toolStatus.grepSearch') : t('agentStream.toolStatus.grepSearchFailed');
   } else if (toolName === 'get_document_info') {
     return success ? t('agentStream.toolStatus.getDocInfo') : t('agentStream.toolStatus.getDocInfoFailed');
-  } else if (toolName === 'get_document_content' || toolName === 'wiki_read_source_doc') {
+  } else if (toolName === 'get_document_content' || toolName === 'wiki_read_source_doc' || toolName === 'wiki_list_source_chunks') {
     return success ? t('agentStream.toolStatus.viewDocument') : t('agentStream.toolStatus.calledFailed', { name: t('agentStream.toolStatus.viewDocument') });
   } else if (toolName === 'thinking') {
     return success ? t('agentStream.toolStatus.thinkingDone') : t('agentStream.toolStatus.thinkingFailed');

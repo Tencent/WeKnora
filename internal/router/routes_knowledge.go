@@ -323,6 +323,9 @@ func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHan
 
 		// Search and maintenance
 		wikiRead.GET("/search", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.SearchPages)
+		wikiRead.GET("/associate", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.AssociateLeaves)
+		wikiRead.POST("/associate", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.AssociateLeaves)
+		wikiRead.GET("/source-chunks/*slug", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.ListSourceChunks)
 		wiki.POST("/rebuild-links", g.OwnedWikiKBOrAdmin(), g.KBAccessWrite("kb_id"), wikiHandler.RebuildLinks)
 		wikiRead.GET("/lint", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.Lint)
 		wiki.POST("/auto-fix", g.OwnedWikiKBOrAdmin(), g.KBAccessWrite("kb_id"), wikiHandler.AutoFix)

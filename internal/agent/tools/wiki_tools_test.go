@@ -50,6 +50,79 @@ func (f *fakeWikiPageService) SearchPages(_ context.Context, kbID, _ string, _ i
 	return f.searchResults[kbID], nil
 }
 
+func (f *fakeWikiPageService) ListSourceChunksBySlug(ctx context.Context, kbID, slug string) (*types.WikiPageSourceChunksResult, error) {
+	page, err := f.GetPageBySlug(ctx, kbID, slug)
+	if err != nil {
+		return nil, err
+	}
+	if page == nil {
+		return nil, repository.ErrWikiPageNotFound
+	}
+	out := &types.WikiPageSourceChunksResult{
+		KnowledgeBaseID: page.KnowledgeBaseID,
+		Slug:            page.Slug,
+		Title:           page.Title,
+		PageType:        page.PageType,
+		Chunks:          []types.WikiPageSourceChunk{},
+	}
+	for _, ref := range page.SourceRefs {
+		id, title := ref, ""
+		if i := strings.Index(ref, "|"); i >= 0 {
+			id, title = ref[:i], ref[i+1:]
+		}
+		out.Sources = append(out.Sources, types.WikiAssocSource{KnowledgeID: id, Title: title})
+	}
+	seen := map[string]struct{}{}
+	for _, id := range page.ChunkRefs {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out.ChunkRefCount++
+		out.Chunks = append(out.Chunks, types.WikiPageSourceChunk{
+			ID:      id,
+			Content: "original text for " + id,
+		})
+	}
+	if out.ChunkRefCount == 0 {
+		out.Reason = types.WikiSourceChunksReasonNoRefs
+	}
+	return out, nil
+}
+
+func (f *fakeWikiPageService) AssociateLeaves(ctx context.Context, kbID, query string, limit int, _ string) (*types.WikiKnowledgeAssocResult, error) {
+	pages, err := f.SearchPages(ctx, kbID, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	leaves := make([]*types.WikiKnowledgeAssocLeaf, 0, len(pages))
+	for _, p := range pages {
+		if p == nil {
+			continue
+		}
+		leaves = append(leaves, &types.WikiKnowledgeAssocLeaf{
+			Slug:         p.Slug,
+			Title:        p.Title,
+			PageType:     p.PageType,
+			Aliases:      p.Aliases,
+			Summary:      p.Summary,
+			Content:      p.Content,
+			CategoryPath: p.CategoryPath,
+			WikiPath:     p.WikiPath,
+			InLinks:      p.InLinks,
+			OutLinks:     p.OutLinks,
+		})
+	}
+	tree := []*types.WikiKnowledgeAssocNode{}
+	if len(leaves) > 0 {
+		tree = []*types.WikiKnowledgeAssocNode{{Leaves: leaves}}
+	}
+	return &types.WikiKnowledgeAssocResult{Query: query, Tree: tree, Pages: pages}, nil
+}
+
 func (f *fakeWikiPageService) resetCalls() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -120,6 +193,7 @@ func TestWikiToolConstants(t *testing.T) {
 	names := []string{
 		ToolWikiReadPage,
 		ToolWikiSearch,
+		ToolWikiListSourceChunks,
 	}
 
 	seen := make(map[string]bool)
@@ -142,8 +216,9 @@ func TestWikiToolConstants(t *testing.T) {
 func TestWikiToolsInAvailableDefinitions(t *testing.T) {
 	defs := AvailableToolDefinitions()
 	wikiTools := map[string]bool{
-		ToolWikiReadPage: false,
-		ToolWikiSearch:   false,
+		ToolWikiReadPage:         false,
+		ToolWikiSearch:           false,
+		ToolWikiListSourceChunks: false,
 	}
 
 	for _, def := range defs {
@@ -265,6 +340,9 @@ func TestWikiSearchSharesRoutesWithWikiReadPage(t *testing.T) {
 	searchResult, err := searchTool.Execute(context.Background(), json.RawMessage(`{"queries":["target"]}`))
 	if err != nil || searchResult == nil || !searchResult.Success {
 		t.Fatalf("wiki_search failed: result=%+v err=%v", searchResult, err)
+	}
+	if !strings.Contains(searchResult.Output, "[[concept/target|concept/target]]") {
+		t.Fatalf("wiki_search output missing associated leaf link: %s", searchResult.Output)
 	}
 	service.resetCalls()
 

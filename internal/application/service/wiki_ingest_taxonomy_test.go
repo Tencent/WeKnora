@@ -127,3 +127,36 @@ func TestCollectTaxonomyItems(t *testing.T) {
 		t.Fatalf("items[1].about = %q, want %q", items[1].about, "about B")
 	}
 }
+
+func TestTaxonomyPromptKBFields(t *testing.T) {
+	name, desc, extraction := taxonomyPromptKBFields(nil)
+	if name != taxonomyPromptUnnamedKB || desc != taxonomyPromptNoKBDesc || extraction != taxonomyPromptNoExtract {
+		t.Fatalf("nil kb: got (%q, %q, %q)", name, desc, extraction)
+	}
+
+	name, desc, extraction = taxonomyPromptKBFields(&types.KnowledgeBase{})
+	if name != taxonomyPromptUnnamedKB || desc != taxonomyPromptNoKBDesc || extraction != taxonomyPromptNoExtract {
+		t.Fatalf("empty kb: got (%q, %q, %q)", name, desc, extraction)
+	}
+
+	name, desc, extraction = taxonomyPromptKBFields(&types.KnowledgeBase{
+		Name:        "  商业尽调  ",
+		Description: " 覆盖市场、技术与财务 ",
+		WikiConfig: &types.WikiConfig{
+			ExtractionInstructions: " 方法类知识点归入分析方法 ",
+		},
+	})
+	if name != "商业尽调" || desc != "覆盖市场、技术与财务" || extraction != "方法类知识点归入分析方法" {
+		t.Fatalf("populated kb: got (%q, %q, %q)", name, desc, extraction)
+	}
+
+	// WikiConfig present but extraction blank still uses the sentinel, so the
+	// planner sees an explicit "no guidance" rather than an empty slot.
+	_, _, extraction = taxonomyPromptKBFields(&types.KnowledgeBase{
+		Name:       "kb",
+		WikiConfig: &types.WikiConfig{ContentInstructions: "legal tone"},
+	})
+	if extraction != taxonomyPromptNoExtract {
+		t.Fatalf("blank extraction with wiki config = %q, want sentinel", extraction)
+	}
+}

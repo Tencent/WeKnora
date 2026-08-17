@@ -509,7 +509,9 @@ type WikiConfig struct {
 	// summary/entity/index prose. Citation and merge rules remain system-owned.
 	ContentInstructions string `yaml:"content_instructions,omitempty" json:"content_instructions,omitempty"`
 	// ExtractionInstructions tells candidate extraction which domain concepts
-	// to emphasize without replacing the stable JSON/citation protocol.
+	// to emphasize, and also seeds wiki directory planning (how new entity /
+	// concept pages are filed). It does not replace the stable JSON, citation,
+	// or taxonomy output protocol.
 	ExtractionInstructions string `yaml:"extraction_instructions,omitempty" json:"extraction_instructions,omitempty"`
 
 	// Wiki ingest concurrency is two-level:

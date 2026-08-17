@@ -494,16 +494,17 @@ func (s *agentService) registerTools(
 			tools.ToolDataAnalysis:        true,
 			tools.ToolDataSchema:          true,
 			// Wiki tools also require at least one KB in scope.
-			tools.ToolWikiReadPage:      true,
-			tools.ToolWikiSearch:        true,
-			tools.ToolWikiReadSourceDoc: true,
-			tools.ToolWikiFlagIssue:     true,
-			tools.ToolWikiWritePage:     true,
-			tools.ToolWikiReplaceText:   true,
-			tools.ToolWikiRenamePage:    true,
-			tools.ToolWikiDeletePage:    true,
-			tools.ToolWikiReadIssue:     true,
-			tools.ToolWikiUpdateIssue:   true,
+			tools.ToolWikiReadPage:         true,
+			tools.ToolWikiSearch:           true,
+			tools.ToolWikiReadSourceDoc:    true,
+			tools.ToolWikiListSourceChunks: true,
+			tools.ToolWikiFlagIssue:        true,
+			tools.ToolWikiWritePage:        true,
+			tools.ToolWikiReplaceText:      true,
+			tools.ToolWikiRenamePage:       true,
+			tools.ToolWikiDeletePage:       true,
+			tools.ToolWikiReadIssue:        true,
+			tools.ToolWikiUpdateIssue:      true,
 		}
 
 		// If no knowledge and no web search, also disable todo_write (not useful for simple chat)
@@ -541,16 +542,17 @@ func (s *agentService) registerTools(
 		tools.ToolDatabaseQuery:       true,
 	}
 	allWikiToolSet := map[string]bool{
-		tools.ToolWikiReadPage:      true,
-		tools.ToolWikiSearch:        true,
-		tools.ToolWikiReadSourceDoc: true,
-		tools.ToolWikiFlagIssue:     true,
-		tools.ToolWikiWritePage:     true,
-		tools.ToolWikiReplaceText:   true,
-		tools.ToolWikiRenamePage:    true,
-		tools.ToolWikiDeletePage:    true,
-		tools.ToolWikiReadIssue:     true,
-		tools.ToolWikiUpdateIssue:   true,
+		tools.ToolWikiReadPage:         true,
+		tools.ToolWikiSearch:           true,
+		tools.ToolWikiReadSourceDoc:    true,
+		tools.ToolWikiListSourceChunks: true,
+		tools.ToolWikiFlagIssue:        true,
+		tools.ToolWikiWritePage:        true,
+		tools.ToolWikiReplaceText:      true,
+		tools.ToolWikiRenamePage:       true,
+		tools.ToolWikiDeletePage:       true,
+		tools.ToolWikiReadIssue:        true,
+		tools.ToolWikiUpdateIssue:      true,
 	}
 
 	// Hard safety nets: drop tools whose runtime prerequisite is missing.
@@ -655,6 +657,8 @@ func (s *agentService) registerTools(
 			toolToRegister = tools.NewWikiSearchTool(s.wikiPageService, s.knowledgeService, wikiScopes, wikiRoutes)
 		case tools.ToolWikiReadSourceDoc:
 			toolToRegister = tools.NewWikiReadSourceDocTool(s.knowledgeService, s.chunkService, config.SearchTargets)
+		case tools.ToolWikiListSourceChunks:
+			toolToRegister = tools.NewWikiListSourceChunksTool(s.wikiPageService, s.knowledgeService, wikiScopes, wikiRoutes)
 		case tools.ToolWikiFlagIssue:
 			toolToRegister = tools.NewWikiFlagIssueTool(s.wikiPageService, wikiKBIDs, wikiRoutes).
 				WithKnowledgeScope(s.knowledgeService, config.SearchTargets)
