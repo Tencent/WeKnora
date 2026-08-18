@@ -138,16 +138,17 @@ def _parse_xml_sheets(payload: bytes) -> list[_Sheet]:
 def _read_content_entry(content: bytes) -> tuple[str, bytes]:
     try:
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
-            if "content.json" in archive.namelist():
-                content_format = "json"
+            try:
                 info = archive.getinfo("content.json")
-            elif "content.xml" in archive.namelist():
+                content_format = "json"
+            except KeyError:
+                try:
+                    info = archive.getinfo("content.xml")
+                except KeyError as exc:
+                    raise ValueError(
+                        "XMind archive is missing content.json or content.xml"
+                    ) from exc
                 content_format = "xml"
-                info = archive.getinfo("content.xml")
-            else:
-                raise ValueError(
-                    "XMind archive is missing content.json or content.xml"
-                )
 
             if info.flag_bits & 0x1:
                 raise ValueError("encrypted XMind content is not supported")

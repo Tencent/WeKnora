@@ -35,6 +35,25 @@ def _mark_entry_encrypted(payload: bytes) -> bytes:
 
 
 class XMindParserModernTests(unittest.TestCase):
+    def test_finds_content_without_enumerating_unrelated_entries(self):
+        payload = _xmind_zip(
+            {
+                "attachments/preview.png": b"preview",
+                "content.json": json.dumps(
+                    [{"title": "Outline", "rootTopic": {"title": "Root"}}]
+                ),
+            }
+        )
+
+        with patch.object(
+            zipfile.ZipFile,
+            "namelist",
+            side_effect=AssertionError("archive entries must not be enumerated"),
+        ):
+            document = XMindParser().parse_into_text(payload)
+
+        self.assertEqual("# Outline\n\n- Root", document.content)
+
     def test_parses_topic_hierarchy_and_plain_notes(self):
         payload = _modern_xmind_bytes(
             [
