@@ -1540,23 +1540,20 @@ func (t *KnowledgeSearchTool) applyMMR(
 		tokenSets[i] = t.tokenizeSimple(t.getEnrichedPassage(ctx, r.SearchResult))
 	}
 
-	// MMR selection loop
+	// MMR selection loop, incremental form: maxRedundancy[i] caches candidate i's
+	// maximum jaccard against everything selected so far, so each round only needs
+	// one comparison per remaining candidate instead of one per (candidate, selected)
+	// pair. Selection output is identical to the naive form, including tie-breaking,
+	// because the candidate iteration order is unchanged.
+	selectedTokenSets := make([]map[string]struct{}, 0, k)
+	maxRedundancy := make([]float64, len(candidates))
 	for len(selected) < k && len(candidates) > 0 {
 		bestIdx := 0
 		bestScore := -1.0
 
 		for i, r := range candidates {
-			relevance := r.Score
-			redundancy := 0.0
-
-			// Calculate maximum redundancy with already selected results
-			for _, s := range selected {
-				selectedTokens := t.tokenizeSimple(t.getEnrichedPassage(ctx, s.SearchResult))
-				redundancy = math.Max(redundancy, t.jaccard(tokenSets[i], selectedTokens))
-			}
-
 			// MMR score: balance relevance and diversity
-			mmr := lambda*relevance - (1.0-lambda)*redundancy
+			mmr := lambda*r.Score - (1.0-lambda)*maxRedundancy[i]
 			if mmr > bestScore {
 				bestScore = mmr
 				bestIdx = i
@@ -1565,20 +1562,27 @@ func (t *KnowledgeSearchTool) applyMMR(
 
 		// Add best candidate to selected and remove from candidates
 		selected = append(selected, candidates[bestIdx])
+		chosenTokens := tokenSets[bestIdx]
+		selectedTokenSets = append(selectedTokenSets, chosenTokens)
 		candidates = append(candidates[:bestIdx], candidates[bestIdx+1:]...)
-		// Remove corresponding token set
+		// Remove corresponding token set and cached redundancy
 		tokenSets = append(tokenSets[:bestIdx], tokenSets[bestIdx+1:]...)
+		maxRedundancy = append(maxRedundancy[:bestIdx], maxRedundancy[bestIdx+1:]...)
+
+		// Fold the freshly selected result into every remaining candidate's cache
+		for i := range candidates {
+			maxRedundancy[i] = math.Max(maxRedundancy[i], t.jaccard(tokenSets[i], chosenTokens))
+		}
 	}
 
-	// Compute average redundancy among selected results
+	// Compute average redundancy among selected results, reusing the cached token
+	// sets instead of re-tokenizing every pair
 	avgRed := 0.0
-	if len(selected) > 1 {
+	if len(selectedTokenSets) > 1 {
 		pairs := 0
-		for i := 0; i < len(selected); i++ {
-			for j := i + 1; j < len(selected); j++ {
-				si := t.tokenizeSimple(t.getEnrichedPassage(ctx, selected[i].SearchResult))
-				sj := t.tokenizeSimple(t.getEnrichedPassage(ctx, selected[j].SearchResult))
-				avgRed += t.jaccard(si, sj)
+		for i := 0; i < len(selectedTokenSets); i++ {
+			for j := i + 1; j < len(selectedTokenSets); j++ {
+				avgRed += t.jaccard(selectedTokenSets[i], selectedTokenSets[j])
 				pairs++
 			}
 		}
