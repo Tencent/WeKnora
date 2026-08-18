@@ -936,8 +936,10 @@ const processMarkdown = (markdownText) => {
   const safeMarkdown = safeMarkdownToHTML(mathSafeText);
 
   // 使用标记渲染
-  marked.use({ renderer });
-  let html = marked.parse(safeMarkdown) as string;
+  // Do not register this renderer globally. DocumentPreview uses the same
+  // `marked` module; registering here made its later Markdown preview reuse
+  // this image validator after the user had opened the chunk view.
+  let html = marked.parse(safeMarkdown, { renderer }) as string;
 
   // 还原被转义的 <br>
   html = html.replace(/&lt;br\s*\/?&gt;/gi, '<br>');
