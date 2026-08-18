@@ -32,12 +32,36 @@ func (*rerankChatStub) ChatStream(
 	[]chat.Message,
 	*chat.ChatOptions,
 ) (<-chan types.StreamResponse, error) {
-	return nil, nil
+	stream := make(chan types.StreamResponse)
+	close(stream)
+	return stream, nil
 }
 
 func (*rerankChatStub) GetModelName() string { return "rerank-test" }
 
 func (*rerankChatStub) GetModelID() string { return "rerank-test" }
+
+func TestRerankChatStubStreamIsClosed(t *testing.T) {
+	t.Parallel()
+
+	stream, err := (&rerankChatStub{}).ChatStream(
+		context.Background(),
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("ChatStream() error = %v", err)
+	}
+
+	select {
+	case _, ok := <-stream:
+		if ok {
+			t.Fatal("ChatStream() returned an open stream")
+		}
+	default:
+		t.Fatal("ChatStream() stream is not closed")
+	}
+}
 
 func TestFilterRerankRankResults_thresholdAndFallback(t *testing.T) {
 	t.Parallel()
