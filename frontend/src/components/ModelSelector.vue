@@ -84,10 +84,18 @@ const modelDisplayName = (model: ModelConfig) => {
   return displayName || model.name
 }
 
+const filterModels = (allModels: ModelConfig[]) => {
+  if (props.modelType === 'VLLM') {
+    return allModels.filter(m => (m.type === props.modelType || m.parameters.supports_vision === true))
+  }
+
+  return allModels.filter(m => m.type === props.modelType)
+}
+
 // 监听 allModels 变化，自动过滤当前类型的模型
 watch(() => props.allModels, (newModels) => {
   if (newModels && Array.isArray(newModels)) {
-    models.value = newModels.filter(m => m.type === props.modelType)
+    models.value = filterModels(newModels)
   }
 }, { immediate: true })
 
@@ -108,7 +116,7 @@ const loadModels = async () => {
     const result = await listModels()
     // 前端按类型筛选模型
     if (result && Array.isArray(result)) {
-      models.value = result.filter(m => m.type === props.modelType)
+      models.value = filterModels(result)
     } else {
       models.value = []
     }
