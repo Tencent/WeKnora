@@ -127,7 +127,7 @@ make dev-logs / dev-status / dev-stop / dev-restart
 
 | Dockerfile | 产物镜像 | 要点 |
 | --- | --- | --- |
-| `docker/Dockerfile.app` | `wechatopenai/weknora-app` | 两阶段：`golang:1.26-bookworm` 编译（`make build-prod`，注入版本信息，预下载 DuckDB 扩展 `cmd/download/duckdb`）→ `debian:12.12-slim` 运行层（含 `migrate` 迁移工具、python3/node/uvx（供 stdio MCP 与 Skills 使用）、ffmpeg（ASR）、gosu 降权）。入口 `scripts/docker-entrypoint.sh`：修复挂载目录属主、把 `_builtin` 内置 Skills 合并回 `skills/preloaded`，再以 appuser 运行 `./WeKnora`。`EXPOSE 8080` |
+| `docker/Dockerfile.app` | `wechatopenai/weknora-app` | 两阶段：`golang:1.26-bookworm` 编译（`make build-prod`，默认 `WITH_ANYDOC=1` 链接进程内 office 解析引擎，注入版本信息，预下载 DuckDB 扩展 `cmd/download/duckdb`）→ `debian:12.12-slim` 运行层（含 `migrate` 迁移工具、python3/node/uvx（供 stdio MCP 与 Skills 使用）、ffmpeg（ASR）、gosu 降权）。入口 `scripts/docker-entrypoint.sh`：修复挂载目录属主、把 `_builtin` 内置 Skills 合并回 `skills/preloaded`，再以 appuser 运行 `./WeKnora`。`EXPOSE 8080` |
 | `docker/Dockerfile.docreader` | `wechatopenai/weknora-docreader` | Python 3.10 + uv 依赖锁定；生成 protobuf；运行层安装 LibreOffice、OpenJDK 17、antiword、Playwright（webkit）与 `grpc_health_probe`。轻量版不含 PaddleOCR。`EXPOSE 50051`。支持 `APT_MIRROR` 构建参数 |
 | `docker/Dockerfile.odl-hybrid` | `weknora-odl-hybrid:local` | 安装 `opendataloader-pdf[hybrid]`（Docling），监听 5002，默认 `--no-ocr`；仅本地构建不发布 |
 | `docker/Dockerfile.sandbox` | `wechatopenai/weknora-sandbox` | Python 3.11-slim + Node 20 + jq，非 root 用户 `sandbox`(UID 1000)，供 Agent Skills 脚本在一次性容器中执行 |

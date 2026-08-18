@@ -394,14 +394,15 @@ func (s *temporaryDocumentService) parse(ctx context.Context, document *types.Te
 	if tenant, ok := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); ok && tenant != nil && tenant.ParserEngineConfig != nil {
 		request.ParserEngineOverrides = tenant.ParserEngineConfig.ToOverridesMap()
 	}
-	var result *types.ReadResult
-	if docparser.IsSimpleFormat(ext) && (request.ParserEngine == "" || request.ParserEngine == "auto") {
-		result, err = (&docparser.SimpleFormatReader{}).Read(ctx, request)
-	} else if s.documentReader != nil {
-		result, err = s.documentReader.Read(ctx, request)
-	} else {
-		err = fmt.Errorf("document reader is not configured")
+	deps := docparser.ReaderDeps{Overrides: request.ParserEngineOverrides, Remote: s.documentReader}
+	if s.tenantService != nil {
+		deps.WeKnoraCloudCredentials = s.tenantService.GetWeKnoraCloudCredentials
 	}
+	reader, err := docparser.NewReader(ctx, parserEngine, strings.TrimPrefix(ext, "."), false, deps)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("parse document: %w", err)
+	}
+	result, err := reader.Read(ctx, request)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("parse document: %w", err)
 	}
