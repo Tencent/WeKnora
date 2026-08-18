@@ -239,10 +239,11 @@ async function renderMarkdown(blob: Blob) {
     }
     return `<pre><code class="hljs">${highlighted}</code></pre>`;
   };
-  marked.use({ renderer });
   const mathSafeText = preprocessMathDelimiters(text);
   const safeText = safeMarkdownToHTML(mathSafeText);
-  const rawHtml = marked.parse(safeText) as string;
+  // Keep this renderer local. `marked.use` mutates a shared singleton and
+  // would otherwise inherit renderers installed by the chunk-content view.
+  const rawHtml = marked.parse(safeText, { renderer }) as string;
   markdownHtml.value = sanitizeHTML(rawHtml);
 }
 
