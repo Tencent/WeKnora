@@ -197,6 +197,26 @@ func TestCreateChunks_SQLite_SeqIDAfterSoftDelete(t *testing.T) {
 	assert.Equal(t, int64(5), saved[1].SeqID)
 }
 
+func TestCreateChunks_SQLite_SanitizesContextHeaderNULBytes(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	kbID := uuid.New().String()
+	knowledgeID := uuid.New().String()
+
+	chunk := makeChunk(kbID, knowledgeID, "text")
+	chunk.Content = "content\x00 with NUL"
+	chunk.ContextHeader = "# Header\x00 with NUL"
+
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{chunk}))
+
+	var saved types.Chunk
+	require.NoError(t, db.Where("id = ?", chunk.ID).First(&saved).Error)
+	assert.Equal(t, "content with NUL", saved.Content)
+	assert.Equal(t, "# Header with NUL", saved.ContextHeader)
+}
+
 func TestUpdateChunk_SQLite_NoNOWError(t *testing.T) {
 	db := setupChunkTestDB(t)
 	ctx := context.Background()
