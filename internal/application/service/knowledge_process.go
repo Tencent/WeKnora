@@ -2340,26 +2340,51 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 		return nil, err
 	}
 	if kb.NeedsEmbeddingModel() {
-		found := false
 		maxIndex := 0
-		summaryChunks := make([]*types.Chunk, 0, 1)
-		for _, chunk := range allChunks {
+		textChunkIDs := make([]string, 0, len(textChunks))
+		for _, chunk := range textChunks {
 			if chunk.ChunkIndex > maxIndex {
 				maxIndex = chunk.ChunkIndex
 			}
-			if chunk.ChunkType == types.ChunkTypeSummary {
-				chunk.Content = "# Summary\n" + summary
-				chunk.SourceContent = chunk.Content
-				chunk.IsEnabled = true
-				chunk.UpdatedAt = time.Now()
-				if err := s.chunkRepo.UpdateChunk(ctx, chunk); err != nil {
-					return nil, err
-				}
-				summaryChunks = append(summaryChunks, chunk)
-				found = true
+			textChunkIDs = append(textChunkIDs, chunk.ID)
+		}
+
+		// The summary chunk is stored as a child of the first text chunk.
+		// ListChunksByKnowledgeID only returns text chunks, so scanning
+		// allChunks for it can never find the summary and every refresh used to
+		// create a duplicate. Resolve it through its parent instead, keep one,
+		// and disable any leftovers from earlier refreshes so their vectors are
+		// dropped by updateChunkVector rather than kept retrievable.
+		summaryChunks := make([]*types.Chunk, 0, 1)
+		children, err := s.chunkRepo.ListChunksByParentIDs(ctx, tenantID, textChunkIDs)
+		if err != nil {
+			return nil, err
+		}
+		var existingSummary *types.Chunk
+		var staleSummaries []*types.Chunk
+		for _, child := range children {
+			if child.ChunkType != types.ChunkTypeSummary {
+				continue
+			}
+			if existingSummary == nil {
+				existingSummary = child
+			} else {
+				staleSummaries = append(staleSummaries, child)
 			}
 		}
-		if !found {
+
+		if existingSummary != nil {
+			existingSummary.Content = "# Summary\n" + summary
+			existingSummary.SourceContent = existingSummary.Content
+			existingSummary.ParentChunkID = textChunks[0].ID
+			existingSummary.ChunkIndex = maxIndex + 1
+			existingSummary.IsEnabled = true
+			existingSummary.UpdatedAt = time.Now()
+			if err := s.chunkRepo.UpdateChunk(ctx, existingSummary); err != nil {
+				return nil, err
+			}
+			summaryChunks = append(summaryChunks, existingSummary)
+		} else {
 			summaryChunk := &types.Chunk{
 				ID: uuid.NewString(), TenantID: tenantID, KnowledgeID: knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID, Content: "# Summary\n" + summary,
@@ -2371,6 +2396,19 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 			}
 			summaryChunks = append(summaryChunks, summaryChunk)
 		}
+
+		// Disable duplicate summary chunks left behind by previous refreshes.
+		for _, stale := range staleSummaries {
+			if stale.IsEnabled {
+				stale.IsEnabled = false
+				stale.UpdatedAt = time.Now()
+				if err := s.chunkRepo.UpdateChunk(ctx, stale); err != nil {
+					return nil, err
+				}
+			}
+			summaryChunks = append(summaryChunks, stale)
+		}
+
 		if err := s.updateChunkVector(ctx, knowledge.KnowledgeBaseID, summaryChunks); err != nil {
 			return nil, err
 		}
@@ -2973,6 +3011,7 @@ func (s *knowledgeService) UpdateImageInfo(
 			ChunkType:       types.ChunkTypeImageCaption,
 			ParentChunkID:   chunk.ID,
 			ImageInfo:       imageInfo,
+			IsEnabled:       true,
 		}
 		addChunk = append(addChunk, captionChunk)
 		logger.Infof(ctx, "Created new caption chunk ID: %s for image URL: %s", captionChunk.ID, image.OriginalURL)
@@ -2989,6 +3028,7 @@ func (s *knowledgeService) UpdateImageInfo(
 			ChunkType:       types.ChunkTypeImageOCR,
 			ParentChunkID:   chunk.ID,
 			ImageInfo:       imageInfo,
+			IsEnabled:       true,
 		}
 		addChunk = append(addChunk, ocrChunk)
 		logger.Infof(ctx, "Created new OCR chunk ID: %s for image URL: %s", ocrChunk.ID, image.OriginalURL)

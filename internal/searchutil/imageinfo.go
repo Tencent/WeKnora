@@ -68,6 +68,9 @@ func CollectImageInfoByChunkIDs(
 	aggMap := make(map[string]*imageAgg)
 
 	addInfo := func(targetID string, child *types.Chunk) {
+		if !child.IsEnabled {
+			return
+		}
 		if child.ImageInfo == "" {
 			return
 		}
