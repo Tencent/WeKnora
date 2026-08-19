@@ -132,3 +132,105 @@ func TestSessionBoundManagerShellExecRunsAsSandboxUser(t *testing.T) {
 	require.Len(t, shell, 1)
 	require.Equal(t, DefaultSandboxExecUser, shell[0].User)
 }
+
+func TestCleanSessionWorkDirRejectsSkillRootByDefault(t *testing.T) {
+	_, err := cleanSessionWorkDir(SkillDirFor("sk-1"), false)
+	require.Error(t, err, "ordinary sessions must stay inside /workspace")
+
+	got, err := cleanSessionWorkDir(SkillDirFor("sk-1"), true)
+	require.NoError(t, err, "install sessions need to work inside the skills root")
+	require.Equal(t, SkillDirFor("sk-1"), got)
+}
+
+func TestCleanSessionWorkDirStillRejectsArbitraryPathsInInstallMode(t *testing.T) {
+	_, err := cleanSessionWorkDir("/etc", true)
+	require.Error(t, err, "install mode widens the allowlist, it does not remove it")
+}
+
+func TestExecShellCommandWithOptionsRunsAsRootOnlyWhenAsked(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	mgr, client := newSessionManagerExecTestHarness(t)
+
+	_, err := mgr.ExecShellCommandWithOptions(ctx, "sess-1", "echo hi", ShellExecOptions{})
+	require.NoError(t, err)
+	last := lastExecRequest(t, client)
+	require.Equal(t, DefaultSandboxExecUser, last.User,
+		"ordinary shell_exec must stay on the non-root sandbox account")
+
+	_, err = mgr.ExecShellCommandWithOptions(ctx, "sess-1", "echo hi", ShellExecOptions{
+		AsRoot:          true,
+		AllowSkillsRoot: true,
+		WorkDir:         SkillDirFor("sk-1"),
+	})
+	require.NoError(t, err)
+	last = lastExecRequest(t, client)
+	require.Equal(t, "root", last.User)
+	require.Equal(t, SkillDirFor("sk-1"), last.WorkDir)
+}
+
+func TestExecShellCommandKeepsOrdinaryRemoteRequest(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	mgr, client := newSessionManagerExecTestHarness(t)
+	env := map[string]string{"A": "B"}
+
+	_, err := mgr.ExecShellCommand(ctx, "sess-1", "echo hi", "/workspace/project", time.Second, env)
+	require.NoError(t, err)
+
+	last := lastExecRequest(t, client)
+	require.Equal(t, RemoteExecRequest{
+		Command: "echo hi",
+		Shell:   true,
+		Env:     env,
+		WorkDir: "/workspace/project",
+		User:    DefaultSandboxExecUser,
+		Timeout: time.Second,
+	}, last)
+}
+
+func TestExecShellCommandEmptyWorkDirLeavesRemoteRequestUnset(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	mgr, client := newSessionManagerExecTestHarness(t)
+
+	_, err := mgr.ExecShellCommand(ctx, "sess-1", "echo hi", "", time.Second, nil)
+	require.NoError(t, err)
+
+	last := lastExecRequest(t, client)
+	require.Empty(t, last.WorkDir)
+	require.Equal(t, DefaultSandboxExecUser, last.User)
+}
+
+func TestExecShellCommandRejectsInvalidWorkDir(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	mgr, _ := newSessionManagerExecTestHarness(t)
+
+	_, err := mgr.ExecShellCommand(ctx, "sess-1", "echo hi", "/etc", time.Second, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "outside allowed roots")
+	require.Contains(t, err.Error(), SessionWorkspaceRoot)
+}
+
+func newSessionManagerExecTestHarness(t *testing.T) (*SessionBoundManager, *fakeRemoteClient) {
+	t.Helper()
+
+	client := newFakeRemoteClient(SandboxTypeCube)
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          client,
+		Store:           NewMemorySessionSandboxBindingStore(),
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+	})
+	require.NoError(t, err)
+	return mgr, client
+}
+
+func lastExecRequest(t *testing.T, client *fakeRemoteClient) RemoteExecRequest {
+	t.Helper()
+
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	require.NotEmpty(t, client.execRequests)
+	return client.execRequests[len(client.execRequests)-1]
+}

@@ -33,7 +33,98 @@ func TestCubeRemoteClientProviderAndCapabilities(t *testing.T) {
 		SupportsPauseResume:           true,
 		SupportsTimeoutRefresh:        true,
 		SupportsFilesystemEnumeration: true,
+		SupportsSnapshots:             true,
 	}, client.Capabilities())
+}
+
+func TestCubeRemoteClientCreateSnapshot(t *testing.T) {
+	mock := newCubeMockServer(t)
+	client := newTestCubeRemoteClient(t, mock)
+	ctx := context.Background()
+	handle, err := client.Create(ctx, RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+
+	ref, err := client.CreateSnapshot(ctx, handle.ID(), "weknora-sk-cfg1-g1")
+
+	require.NoError(t, err)
+	require.Equal(t, "snap-1", ref.ID)
+	require.Equal(t, []string{"weknora-sk-cfg1-g1"}, ref.Names)
+	mock.mu.Lock()
+	body := mock.snapshotCreateBody
+	mock.mu.Unlock()
+	require.Equal(t, "weknora-sk-cfg1-g1", body["name"])
+}
+
+func TestCubeRemoteClientCreateSnapshotRejectsEmptySandboxID(t *testing.T) {
+	client := newTestCubeRemoteClient(t, newCubeMockServer(t))
+
+	_, err := client.CreateSnapshot(context.Background(), "  ", "n")
+
+	require.Error(t, err)
+	require.True(t, IsRemoteInvalidRequest(err))
+}
+
+func TestCubeRemoteClientDeleteSnapshotTreatsMissingAsSuccess(t *testing.T) {
+	client := newTestCubeRemoteClient(t, newCubeMockServer(t))
+
+	err := client.DeleteSnapshot(context.Background(), "snap-missing")
+
+	require.NoError(t, err, "a missing snapshot must not fail the delete path")
+}
+
+func TestCubeRemoteClientDeleteSnapshotRejectsEmptySnapshotID(t *testing.T) {
+	client := newTestCubeRemoteClient(t, newCubeMockServer(t))
+
+	err := client.DeleteSnapshot(context.Background(), "  ")
+
+	require.Error(t, err)
+	require.True(t, IsRemoteInvalidRequest(err))
+}
+
+func TestCubeRemoteClientDeleteSnapshotReturnsUnexpectedErrors(t *testing.T) {
+	mock := newCubeMockServer(t)
+	mock.snapshotDeleteFailWith = http.StatusInternalServerError
+	client := newTestCubeRemoteClient(t, mock)
+
+	err := client.DeleteSnapshot(context.Background(), "snap-any")
+
+	require.Error(t, err)
+	require.False(t, IsRemoteNotFound(err))
+}
+
+func TestCubeRemoteClientListSnapshotsRejectsStuckPagination(t *testing.T) {
+	mock := newCubeMockServer(t)
+	mock.snapshotStuckPagination = true
+	client := newTestCubeRemoteClient(t, mock)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := client.ListSnapshots(ctx, "")
+
+	require.Error(t, err)
+	require.True(t, IsRemoteInvalidRequest(err))
+}
+
+func TestCubeRemoteClientListSnapshotsPagesAllResults(t *testing.T) {
+	mock := newCubeMockServer(t)
+	mock.snapshotPageSize = 1
+	client := newTestCubeRemoteClient(t, mock)
+	ctx := context.Background()
+	first, err := client.Create(ctx, RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+	second, err := client.Create(ctx, RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+	firstRef, err := client.CreateSnapshot(ctx, first.ID(), "weknora-sk-cfg1-g1")
+	require.NoError(t, err)
+	secondRef, err := client.CreateSnapshot(ctx, first.ID(), "weknora-sk-cfg2-g1")
+	require.NoError(t, err)
+	_, err = client.CreateSnapshot(ctx, second.ID(), "other")
+	require.NoError(t, err)
+
+	list, err := client.ListSnapshots(ctx, first.ID())
+
+	require.NoError(t, err)
+	require.Equal(t, []RemoteSnapshotRef{firstRef, secondRef}, list)
 }
 
 func TestCubeRemoteClientCreateWritesLifecyclePayload(t *testing.T) {

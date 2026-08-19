@@ -120,6 +120,24 @@ func ResolveEffectiveConfig(
 	case SandboxTypeDocker:
 		applyDockerRuntimeDefaults(&effective)
 	}
+	// A skill snapshot is just a template ID on both providers, so overriding
+	// the template field here is the entire session-side change. Everything
+	// downstream keeps reading CubeTemplate / E2BTemplate and needs no knowledge
+	// of skills.
+	switch effective.Type {
+	case SandboxTypeCube:
+		if snapshot := skillImageTemplateOverride(
+			tenantCfg.SkillImage, "cube", effective.CubeAPIKey, effective.CubeAPIURL,
+		); snapshot != "" {
+			effective.CubeTemplate = snapshot
+		}
+	case SandboxTypeE2B:
+		if snapshot := skillImageTemplateOverride(
+			tenantCfg.SkillImage, "e2b", effective.E2BAPIKey, effective.E2BAPIURL,
+		); snapshot != "" {
+			effective.E2BTemplate = snapshot
+		}
+	}
 	// Deliberately after the runtime defaults: TTLs and HTTP timeouts have
 	// built-in fallbacks, endpoints and credentials do not.
 	if err := RequireCompleteConfig(&effective); err != nil {

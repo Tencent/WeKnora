@@ -654,6 +654,10 @@ type TenantSandboxConfig struct {
 	// etc.).
 	VolumeMount *VolumeMountConfig `json:"volume_mount,omitempty"`
 
+	// SkillImage points at the snapshot that carries this config's installed
+	// skills. Empty means "use the base template".
+	SkillImage *SkillImageConfig `json:"skill_image,omitempty"`
+
 	// ── 后端专属配置（同一时刻只有一个生效，由 SandboxType 决定）───
 
 	Cube   *CubeSandboxConfig   `json:"cube,omitempty"`
@@ -785,6 +789,28 @@ type VolumeMountConfig struct {
 	// API key, at which point the volume is no longer reachable and must
 	// be recreated.
 	VolumeOwnerFingerprint string `json:"volume_owner_fingerprint,omitempty"`
+}
+
+// SkillImageConfig is the pointer to the snapshot that carries the skills
+// installed on this sandbox config. Snapshot IDs double as template IDs, so
+// nothing else is needed to boot sessions from it.
+//
+// It holds no secrets, so it is not encrypted by TenantSandboxConfig.Value.
+type SkillImageConfig struct {
+	// SnapshotID is the currently effective snapshot; empty = base template.
+	SnapshotID string `json:"snapshot_id,omitempty"`
+	// Generation increments on every successful install/remove, for naming
+	// and troubleshooting.
+	Generation int `json:"generation,omitempty"`
+	// BuiltAt records when this generation was produced.
+	BuiltAt time.Time `json:"built_at,omitempty"`
+	// BaseTemplateID is the template this chain was originally built from;
+	// the rebuild path starts over from it.
+	BaseTemplateID string `json:"base_template_id,omitempty"`
+	// OwnerFingerprint identifies the provider account that owns the snapshot.
+	// Snapshots are invisible across accounts, so a mismatch means "fall back
+	// to the base template" rather than "fail".
+	OwnerFingerprint string `json:"owner_fingerprint,omitempty"`
 }
 
 // Value implements the driver.Valuer interface. Every secret-bearing field
