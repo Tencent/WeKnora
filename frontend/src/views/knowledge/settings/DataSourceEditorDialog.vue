@@ -19,6 +19,7 @@ import {
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { getDatasourceIconUrl } from './datasourceIcons'
+import { copyWithToast } from '@/utils/clipboard'
 
 const props = defineProps<{
   kbId: string
@@ -236,6 +237,20 @@ function syncGitRepoReposToSettings() {
 }
 function addGitRepoRepo() { gitRepoRepos.value.push({ repo_url: '', branch: '', pathsText: '' }) }
 function removeGitRepoRepo(index: number) { gitRepoRepos.value.splice(index, 1); syncGitRepoReposToSettings() }
+
+// gitWebhookURL builds the push-webhook callback URL for this data source.
+// Only meaningful in edit mode: the ID must exist on the server before
+// GitLab/GitHub can be pointed at it (creation mode has no ID yet — the hint
+// shows up after saving and reopening). Built from the SPA origin so it
+// matches how the user reaches this app; nginx proxies /api to the backend.
+const gitWebhookURL = computed(() => {
+  if (!isEdit.value || !props.dataSource?.id) return ''
+  const origin = (typeof window !== 'undefined' && window.location?.origin) || ''
+  return `${origin}/api/v1/datasource/webhooks/git/${props.dataSource.id}`
+})
+async function copyGitWebhookURL() {
+  await copyWithToast(gitWebhookURL.value, 'datasource.gitRepo.webhookCopied')
+}
 
 // extractDriveFolderToken accepts either a bare folder_token or a Drive folder
 // URL (https://xxx.feishu.cn/drive/folder/<token> or the Lark equivalent
@@ -1640,6 +1655,21 @@ const drawerConfirmText = computed(() => {
           <t-button variant="outline" @click="addGitRepoRepo"><template #icon><t-icon name="add" /></template>{{ t('datasource.gitRepo.addRepo') }}</t-button>
         </div>
 
+        <!-- Push webhook hint (read-only): copy-paste URL for GitLab/GitHub.
+             Edit mode only — creation has no server-side ID to point at yet.
+             The secret itself is never echoed back; the hint tells the admin
+             where it comes from (settings or env var). -->
+        <div v-if="gitWebhookURL" class="ds-webhook-hint">
+          <div class="ds-webhook-hint__header">
+            <span class="ds-webhook-hint__title">{{ t('datasource.gitRepo.webhookTitle') }}</span>
+            <t-button variant="text" size="small" @click="copyGitWebhookURL">
+              <template #icon><t-icon name="file-copy" /></template>
+              {{ t('datasource.gitRepo.webhookCopy') }}
+            </t-button>
+          </div>
+          <p class="ds-webhook-hint__url" :title="gitWebhookURL">{{ gitWebhookURL }}</p>
+          <p class="ds-webhook-hint__desc">{{ t('datasource.gitRepo.webhookDesc') }}</p>
+        </div>
       </template>
       <template v-else>
       <h4 class="setting-drawer__section-title">{{ t('datasource.step.resources') }}</h4>
@@ -2749,6 +2779,40 @@ const drawerConfirmText = computed(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+/* Push webhook hint card (git_repo, edit mode): read-only URL + copy. */
+.ds-webhook-hint {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--td-component-stroke);
+  border-radius: 6px;
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.ds-webhook-hint__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ds-webhook-hint__title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.ds-webhook-hint__url {
+  margin: 6px 0 2px;
+  font-family: var(--td-font-family-code, monospace);
+  font-size: 12px;
+  word-break: break-all;
+  color: var(--td-text-color-primary);
+}
+
+.ds-webhook-hint__desc {
+  margin: 0;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
 }
 </style>
 

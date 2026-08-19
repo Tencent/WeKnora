@@ -414,6 +414,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	// Data source handler
 	must(container.Provide(handler.NewDataSourceHandler))
+	// Git push webhook handler（公开路由，平台自有 token/签名鉴权）
+	must(container.Provide(handler.NewDataSourceWebhookHandler))
 	// Wiki page handler
 	must(container.Provide(handler.NewWikiPageHandler))
 	// IM integration

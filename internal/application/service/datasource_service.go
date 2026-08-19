@@ -452,12 +452,30 @@ func (s *DataSourceService) ResolveResourceAncestors(
 }
 
 // ManualSync triggers an immediate sync for a data source
+// ManualSync triggers an immediate sync for a data source (user-initiated).
 func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types.SyncLog, error) {
 	ds, err := s.GetDataSource(ctx, dsID)
 	if err != nil {
 		return nil, err
 	}
+	return s.enqueueSync(ctx, ds, "manual")
+}
 
+// WebhookSync triggers an immediate sync for a data source identified as
+// webhook-initiated (git push event). It shares the enqueue path with
+// ManualSync so queueing, logging, and audit semantics stay identical.
+func (s *DataSourceService) WebhookSync(ctx context.Context, dsID string) (*types.SyncLog, error) {
+	ds, err := s.GetDataSource(ctx, dsID)
+	if err != nil {
+		return nil, err
+	}
+	return s.enqueueSync(ctx, ds, "webhook")
+}
+
+// enqueueSync validates the data source state, creates a sync log, and enqueues
+// the asynq sync task. trigger records what started the sync ("manual",
+// "webhook", "scheduled") for logs and audit trails.
+func (s *DataSourceService) enqueueSync(ctx context.Context, ds *types.DataSource, trigger string) (*types.SyncLog, error) {
 	if ds.Status != types.DataSourceStatusActive &&
 		ds.Status != types.DataSourceStatusError &&
 		ds.Status != types.DataSourceStatusPaused {
@@ -466,7 +484,7 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 
 	// Create sync log
 	syncLog := &types.SyncLog{
-		DataSourceID: dsID,
+		DataSourceID: ds.ID,
 		TenantID:     ds.TenantID,
 		Status:       types.SyncLogStatusRunning,
 		StartedAt:    time.Now().UTC(),
@@ -479,12 +497,12 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 
 	// Enqueue sync task
 	payload := &types.DataSourceSyncPayload{
-		DataSourceID: dsID,
+		DataSourceID: ds.ID,
 		TenantID:     ds.TenantID,
 		SyncLogID:    syncLog.ID,
 		ForceFull:    false,
 		Initiator:    types.TaskInitiatorFromContext(ctx),
-		Trigger:      "manual",
+		Trigger:      trigger,
 	}
 	langfuse.InjectTracing(ctx, payload)
 
@@ -506,15 +524,15 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 		_ = s.dsRepo.Update(ctx, ds)
 		recordKBActivity(ctx, s.audit, ds.TenantID, ds.KnowledgeBaseID, types.AuditActionDataSourceSyncFailed,
 			"data_source", ds.ID, types.AuditOutcomeFailed,
-			map[string]any{"name": ds.Name, "type": ds.Type, "sync_log_id": syncLog.ID, "trigger": "manual"})
+			map[string]any{"name": ds.Name, "type": ds.Type, "sync_log_id": syncLog.ID, "trigger": trigger})
 		return nil, err
 	}
 
-	logger.Infof(ctx, "sync task enqueued: ds=%s syncLog=%s", dsID, syncLog.ID)
+	logger.Infof(ctx, "sync task enqueued: ds=%s syncLog=%s trigger=%s", ds.ID, syncLog.ID, trigger)
 	recordKBActivity(ctx, s.audit, ds.TenantID, ds.KnowledgeBaseID, types.AuditActionDataSourceSyncStarted,
 		"data_source", ds.ID, types.AuditOutcomeAccepted,
 		map[string]any{"name": ds.Name, "type": ds.Type, "sync_log_id": syncLog.ID,
-			"task_id": info.ID, "trigger": "manual", "processing_status": "pending"})
+			"task_id": info.ID, "trigger": trigger, "processing_status": "pending"})
 	return syncLog, nil
 }
 
@@ -663,6 +681,10 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	// Surface the KB's multimodal/VLM state to the connector so it only extracts
 	// embedded images for OCR when the KB can actually ingest them (never persisted).
 	config.MultimodalEnabled = kb.IsMultimodalEnabled()
+	// Surface identity so connectors that keep on-disk state (e.g. git_repo
+	// clones) can namespace it per data source (never persisted).
+	config.ID = ds.ID
+	config.TenantID = ds.TenantID
 
 	// Streaming path: connectors that support it interleave fetch→ingest→
 	// checkpoint so a large sync bounds memory and resumes after a timeout

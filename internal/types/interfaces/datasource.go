@@ -56,6 +56,10 @@ type DataSourceService interface {
 	// ManualSync triggers an immediate sync for a data source
 	ManualSync(ctx context.Context, dsID string) (*types.SyncLog, error)
 
+	// WebhookSync triggers an immediate sync identified as webhook-initiated
+	// (git push event). Shares ManualSync's enqueue semantics.
+	WebhookSync(ctx context.Context, dsID string) (*types.SyncLog, error)
+
 	// PauseDataSource pauses a data source's scheduled syncs
 	PauseDataSource(ctx context.Context, id string) error
 
