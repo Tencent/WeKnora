@@ -46,5 +46,5 @@ func (m *JSONMap) Scan(src any) error {
 		*m = nil
 		return nil
 	}
-	return json.Unmarshal(raw, m)
+	return decodeJSONWithNumbers(raw, m)
 }

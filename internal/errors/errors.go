@@ -43,6 +43,7 @@ const (
 	// but is currently unavailable" without parsing the message text.
 	ErrVectorStoreBindingInvalid ErrorCode = 2200
 	ErrVectorStoreUnavailable    ErrorCode = 2201
+	ErrMetadataFilterUnsupported ErrorCode = 2202
 
 	// Add more error codes here
 )
@@ -255,6 +256,17 @@ func NewVectorStoreUnavailableError(message string) *AppError {
 	return &AppError{
 		Code:     ErrVectorStoreUnavailable,
 		Message:  message,
+		HTTPCode: http.StatusBadRequest,
+	}
+}
+
+// NewMetadataFilterUnsupportedError reports that the resolved retrieval
+// engines cannot enforce a requested metadata filter. The message is
+// deliberately store- and backend-agnostic so it cannot disclose topology.
+func NewMetadataFilterUnsupportedError() *AppError {
+	return &AppError{
+		Code:     ErrMetadataFilterUnsupported,
+		Message:  "metadata filtering is not supported for this search scope",
 		HTTPCode: http.StatusBadRequest,
 	}
 }

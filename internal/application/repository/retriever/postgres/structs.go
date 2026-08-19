@@ -26,6 +26,8 @@ type pgVector struct {
 	Dimension       int                 `json:"dimension"         gorm:"column:dimension;not null"`
 	Embedding       pgvector.HalfVector `json:"embedding"         gorm:"column:embedding;not null"`
 	IsEnabled       bool                `json:"is_enabled"        gorm:"column:is_enabled;default:true;index"`
+	//nolint:lll // Keep the complete GORM schema tag co-located with the field.
+	AccessMetadata types.JSONMap `json:"access_metadata" gorm:"column:access_metadata;type:jsonb;not null;default:'{}'"`
 }
 
 // pgVectorWithScore extends pgVector with similarity score field
@@ -43,7 +45,9 @@ type pgVectorWithScore struct {
 	Dimension       int                 `json:"dimension"         gorm:"column:dimension;not null"`
 	Embedding       pgvector.HalfVector `json:"embedding"         gorm:"column:embedding;not null"`
 	IsEnabled       bool                `json:"is_enabled"        gorm:"column:is_enabled;default:true;index"`
-	Score           float64             `json:"score"             gorm:"column:score"`
+	//nolint:lll // Keep the complete GORM schema tag co-located with the field.
+	AccessMetadata types.JSONMap `json:"access_metadata" gorm:"column:access_metadata;type:jsonb;not null;default:'{}'"`
+	Score          float64       `json:"score"             gorm:"column:score"`
 }
 
 // TableName specifies the database table name for pgVectorWithScore
@@ -67,6 +71,7 @@ func toDBVectorEmbedding(indexInfo *types.IndexInfo, additionalParams map[string
 		TagID:           indexInfo.TagID,
 		Content:         common.CleanInvalidUTF8(indexInfo.Content),
 		IsEnabled:       indexInfo.IsEnabled,
+		AccessMetadata:  indexInfo.AccessMetadata,
 	}
 	// Add embedding data if available in additionalParams
 	if additionalParams != nil && slices.Contains(slices.Collect(maps.Keys(additionalParams)), "embedding") {

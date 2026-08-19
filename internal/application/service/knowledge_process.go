@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -517,6 +518,16 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			// to plain Content otherwise. The document title sits outermost;
 			// custom metadata remains document-scoped model context.
 			indexContent := buildKnowledgeIndexContent(knowledge, chunk.EmbeddingContent())
+			accessMetadata, metadataErr := chunk.AccessMetadata()
+			if metadataErr != nil {
+				knowledge.ParseStatus = types.ParseStatusFailed
+				knowledge.ErrorMessage = fmt.Sprintf("extract access metadata for chunk %s: %v", chunk.ID, metadataErr)
+				knowledge.UpdatedAt = time.Now()
+				_ = s.repo.UpdateKnowledge(ctx, knowledge)
+				s.failStage(ctx, knowledge.ID, types.StageEmbedding,
+					werrors.ErrCodeVectorStoreWriteFailed, "extract access metadata failed", metadataErr)
+				return
+			}
 			indexInfoList = append(indexInfoList, &types.IndexInfo{
 				Content:         indexContent,
 				SourceID:        chunk.ID,
@@ -524,6 +535,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				ChunkID:         chunk.ID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
+				AccessMetadata:  accessMetadata,
 				IsEnabled:       true,
 			})
 		}
@@ -729,6 +741,94 @@ func firstTextChunkSummaryFallback(textChunks []*types.Chunk) string {
 		fallback = string(runes[:summaryFallbackMaxRunes])
 	}
 	return fallback
+}
+
+// commonSummaryAccessMetadata returns access metadata only when every source
+// chunk carries the same reserved object. A heterogeneous document cannot
+// safely assign one chunk's permissions to document-wide summary content.
+func commonSummaryAccessMetadata(sourceChunks []*types.Chunk) (types.JSONMap, error) {
+	if len(sourceChunks) == 0 {
+		return nil, fmt.Errorf("summary source chunks are required")
+	}
+	var common types.JSONMap
+	var commonEncoded []byte
+	for _, source := range sourceChunks {
+		if source == nil {
+			return nil, fmt.Errorf("summary source chunk is nil")
+		}
+		accessMetadata, err := source.AccessMetadata()
+		if err != nil {
+			return nil, fmt.Errorf("extract access metadata for summary source chunk %s: %w", source.ID, err)
+		}
+		encoded, err := json.Marshal(accessMetadata)
+		if err != nil {
+			return nil, fmt.Errorf("encode summary source access metadata: %w", err)
+		}
+		if commonEncoded == nil {
+			common = accessMetadata
+			commonEncoded = encoded
+			continue
+		}
+		if !bytes.Equal(commonEncoded, encoded) {
+			return types.JSONMap{}, nil
+		}
+	}
+	return common, nil
+}
+
+// applySummaryChunkAccessMetadata synchronizes an initial or refreshed summary
+// chunk with the safe common access object, clearing stale metadata when source
+// chunks differ or carry no access metadata.
+func applySummaryChunkAccessMetadata(summary *types.Chunk, sourceChunks []*types.Chunk) error {
+	if summary == nil {
+		return fmt.Errorf("summary chunk is required")
+	}
+	accessMetadata, err := commonSummaryAccessMetadata(sourceChunks)
+	if err != nil {
+		return err
+	}
+	if len(accessMetadata) == 0 {
+		summary.Metadata = nil
+		return nil
+	}
+	metadata, err := json.Marshal(types.JSONMap{"access_metadata": accessMetadata})
+	if err != nil {
+		return fmt.Errorf("encode summary access metadata: %w", err)
+	}
+	summary.Metadata = types.JSON(metadata)
+	return nil
+}
+
+// newSummaryChunk creates a summary child chunk that retains access metadata
+// only when all contributing chunks agree. It never inherits unrelated chunk
+// metadata such as generated questions.
+func newSummaryChunk(
+	sourceChunks []*types.Chunk,
+	knowledge *types.Knowledge,
+	id string,
+	content string,
+	chunkIndex int,
+) (*types.Chunk, error) {
+	if len(sourceChunks) == 0 || sourceChunks[0] == nil {
+		return nil, fmt.Errorf("summary source chunks are required")
+	}
+	summary := &types.Chunk{
+		ID:              id,
+		TenantID:        knowledge.TenantID,
+		KnowledgeID:     knowledge.ID,
+		KnowledgeBaseID: knowledge.KnowledgeBaseID,
+		Content:         content,
+		ChunkIndex:      chunkIndex,
+		IsEnabled:       true,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+		ChunkType:       types.ChunkTypeSummary,
+		ParentChunkID:   sourceChunks[0].ID,
+	}
+	if err := applySummaryChunkAccessMetadata(summary, sourceChunks); err != nil {
+		return nil, err
+	}
+	return summary, nil
 }
 
 // applyRetryableSummaryFailureState keeps an existing description visible
@@ -1284,20 +1384,12 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// unreliable signal (e.g. "MX5280.pdf" for a scanned legal letter)
 		// and surfacing them in retrieved RAG context can re-introduce the
 		// hallucination vector this branch is meant to close.
-		summaryChunk := &types.Chunk{
-			ID:              uuid.New().String(),
-			TenantID:        knowledge.TenantID,
-			KnowledgeID:     knowledge.ID,
-			KnowledgeBaseID: knowledge.KnowledgeBaseID,
-			Content:         fmt.Sprintf("# Summary\n%s", summary),
-			ChunkIndex:      maxChunkIndex + 1,
-			IsEnabled:       true,
-			CreatedAt:       time.Now(),
-			UpdatedAt:       time.Now(),
-			StartAt:         0,
-			EndAt:           0,
-			ChunkType:       types.ChunkTypeSummary,
-			ParentChunkID:   textChunks[0].ID,
+		summaryChunk, err := newSummaryChunk(
+			textChunks, knowledge, uuid.New().String(), fmt.Sprintf("# Summary\n%s", summary), maxChunkIndex+1,
+		)
+		if err != nil {
+			summaryErr = err
+			return err
 		}
 
 		// Save summary chunk
@@ -1331,6 +1423,11 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			return fmt.Errorf("failed to get embedding model: %w", err)
 		}
 
+		summaryAccessMetadata, err := summaryChunk.AccessMetadata()
+		if err != nil {
+			summaryErr = fmt.Errorf("extract access metadata for summary chunk %s: %w", summaryChunk.ID, err)
+			return summaryErr
+		}
 		indexInfo := []*types.IndexInfo{{
 			Content:         summaryChunk.Content,
 			SourceID:        summaryChunk.ID,
@@ -1338,6 +1435,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			ChunkID:         summaryChunk.ID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
+			AccessMetadata:  summaryAccessMetadata,
 			IsEnabled:       true,
 		}}
 
@@ -1686,6 +1784,11 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		if sampleQuestion == "" && len(questions) > 0 {
 			sampleQuestion = previewText(questions[0], 200)
 		}
+		accessMetadata, metadataErr := chunk.AccessMetadata()
+		if metadataErr != nil {
+			exitStatus = "extract_access_metadata_failed"
+			return fmt.Errorf("extract access metadata for chunk %s: %w", chunk.ID, metadataErr)
+		}
 
 		// Update chunk metadata with unique IDs for each question
 		generatedQuestions := make([]types.GeneratedQuestion, len(questions))
@@ -1724,6 +1827,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 				ChunkID:         chunk.ID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
+				AccessMetadata:  accessMetadata,
 				IsEnabled:       true,
 			})
 		}
@@ -2024,6 +2128,12 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		if sampleQuestion == "" {
 			sampleQuestion = previewText(questions[0], 200)
 		}
+		accessMetadata, metadataErr := chunk.AccessMetadata()
+		if metadataErr != nil {
+			exitStatus = "extract_access_metadata_failed"
+			qErr = fmt.Errorf("extract access metadata for chunk %s: %w", chunk.ID, metadataErr)
+			return qErr
+		}
 
 		generatedQuestions := make([]types.GeneratedQuestion, len(questions))
 		questionRevision := chunk.ContentRevision
@@ -2053,6 +2163,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 				ChunkID:         chunk.ID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
+				AccessMetadata:  accessMetadata,
 				IsEnabled:       true,
 			})
 		}
@@ -2352,6 +2463,9 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 				chunk.SourceContent = chunk.Content
 				chunk.IsEnabled = true
 				chunk.UpdatedAt = time.Now()
+				if err := applySummaryChunkAccessMetadata(chunk, textChunks); err != nil {
+					return nil, err
+				}
 				if err := s.chunkRepo.UpdateChunk(ctx, chunk); err != nil {
 					return nil, err
 				}
@@ -2360,11 +2474,11 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 			}
 		}
 		if !found {
-			summaryChunk := &types.Chunk{
-				ID: uuid.NewString(), TenantID: tenantID, KnowledgeID: knowledge.ID,
-				KnowledgeBaseID: knowledge.KnowledgeBaseID, Content: "# Summary\n" + summary,
-				ChunkIndex: maxIndex + 1, IsEnabled: true, ChunkType: types.ChunkTypeSummary,
-				ParentChunkID: textChunks[0].ID, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+			summaryChunk, err := newSummaryChunk(
+				textChunks, knowledge, uuid.NewString(), "# Summary\n"+summary, maxIndex+1,
+			)
+			if err != nil {
+				return nil, err
 			}
 			if err := s.chunkRepo.CreateChunks(ctx, []*types.Chunk{summaryChunk}); err != nil {
 				return nil, err
@@ -2833,6 +2947,10 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 			}
 			knowledgeCache[chunk.KnowledgeID] = knowledge
 		}
+		accessMetadata, err := chunk.AccessMetadata()
+		if err != nil {
+			return fmt.Errorf("extract access metadata for chunk %s: %w", chunk.ID, err)
+		}
 		indexInfo = append(indexInfo, &types.IndexInfo{
 			Content:         buildKnowledgeIndexContent(knowledge, chunk.EmbeddingContent()),
 			SourceID:        chunk.ID,
@@ -2841,6 +2959,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
 			KnowledgeType:   sourceKB.Type,
+			AccessMetadata:  accessMetadata,
 			IsEnabled:       chunk.IsEnabled,
 		})
 		meta, metaErr := chunk.DocumentMetadata()
@@ -2854,7 +2973,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 						Content: buildKnowledgeIndexContent(knowledge, q.Question), SourceID: types.GeneratedQuestionSourceID(chunk.ID, q.ID),
 						SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
 						KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
-						KnowledgeType: sourceKB.Type, IsEnabled: true,
+						KnowledgeType: sourceKB.Type, AccessMetadata: accessMetadata, IsEnabled: true,
 					})
 				}
 			}

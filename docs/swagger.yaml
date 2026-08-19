@@ -116,6 +116,7 @@ definitions:
     - 2103
     - 2200
     - 2201
+    - 2202
     type: integer
     x-enum-varnames:
     - ErrBadRequest
@@ -141,6 +142,7 @@ definitions:
     - ErrAgentInvalidTemperature
     - ErrVectorStoreBindingInvalid
     - ErrVectorStoreUnavailable
+    - ErrMetadataFilterUnsupported
   github_com_Tencent_WeKnora_internal_infrastructure_chunker.DocProfile:
     properties:
       all_caps_short_line_count:
@@ -2370,6 +2372,33 @@ definitions:
       url:
         type: string
     type: object
+  github_com_Tencent_WeKnora_internal_types.MetadataFilter:
+    properties:
+      and:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MetadataFilter'
+        type: array
+      field:
+        type: string
+      op:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MetadataFilterOperator'
+      or:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MetadataFilter'
+        type: array
+      value: {}
+      values:
+        items: {}
+        type: array
+    type: object
+  github_com_Tencent_WeKnora_internal_types.MetadataFilterOperator:
+    enum:
+    - eq
+    - in
+    type: string
+    x-enum-varnames:
+    - MetadataFilterOpEqual
+    - MetadataFilterOpIn
   github_com_Tencent_WeKnora_internal_types.MinIOEngineConfig:
     properties:
       access_key_id:
@@ -3173,6 +3202,11 @@ definitions:
         type: array
       match_count:
         type: integer
+      metadata_filter:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MetadataFilter'
+        description: MetadataFilter narrows retrieval to chunks whose access metadata
+          matches.
       only_recommended:
         type: boolean
       query_embedding:

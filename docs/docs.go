@@ -15541,7 +15541,8 @@ const docTemplate = `{
                 2102,
                 2103,
                 2200,
-                2201
+                2201,
+                2202
             ],
             "x-enum-varnames": [
                 "ErrBadRequest",
@@ -15566,7 +15567,8 @@ const docTemplate = `{
                 "ErrAgentInvalidMaxIterations",
                 "ErrAgentInvalidTemperature",
                 "ErrVectorStoreBindingInvalid",
-                "ErrVectorStoreUnavailable"
+                "ErrVectorStoreUnavailable",
+                "ErrMetadataFilterUnsupported"
             ]
         },
         "github_com_Tencent_WeKnora_internal_infrastructure_chunker.DocProfile": {
@@ -18357,6 +18359,45 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.MetadataFilter": {
+            "type": "object",
+            "properties": {
+                "and": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MetadataFilter"
+                    }
+                },
+                "field": {
+                    "type": "string"
+                },
+                "op": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MetadataFilterOperator"
+                },
+                "or": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MetadataFilter"
+                    }
+                },
+                "value": {},
+                "values": {
+                    "type": "array",
+                    "items": {}
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.MetadataFilterOperator": {
+            "type": "string",
+            "enum": [
+                "eq",
+                "in"
+            ],
+            "x-enum-varnames": [
+                "MetadataFilterOpEqual",
+                "MetadataFilterOpIn"
+            ]
+        },
         "github_com_Tencent_WeKnora_internal_types.MinIOEngineConfig": {
             "type": "object",
             "properties": {
@@ -19419,6 +19460,14 @@ const docTemplate = `{
                 },
                 "match_count": {
                     "type": "integer"
+                },
+                "metadata_filter": {
+                    "description": "MetadataFilter narrows retrieval to chunks whose access metadata matches.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MetadataFilter"
+                        }
+                    ]
                 },
                 "only_recommended": {
                     "type": "boolean"

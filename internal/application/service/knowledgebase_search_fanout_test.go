@@ -49,6 +49,32 @@ func TestParamsWithTopK_RebuildsFresh(t *testing.T) {
 	assert.Equal(t, "q1", g.BaseParams[0].Query)
 }
 
+func TestParamsWithTopK_PreservesMetadataFilter(t *testing.T) {
+	t.Parallel()
+
+	filter := &types.MetadataFilter{
+		Field: "department",
+		Op:    types.MetadataFilterOpEqual,
+		Value: "research",
+	}
+	g := &storeGroup{
+		BaseParams: []types.RetrieveParams{
+			{Query: "q1", TopK: 10, RetrieverType: types.VectorRetrieverType, MetadataFilter: filter},
+			{Query: "q2", TopK: 20, RetrieverType: types.KeywordsRetrieverType, MetadataFilter: filter},
+		},
+		TopK: 999,
+	}
+
+	out := paramsWithTopK(g)
+	require.Len(t, out, 2)
+	for _, param := range out {
+		assert.Same(t, filter, param.MetadataFilter)
+		assert.Equal(t, "department", param.MetadataFilter.Field)
+		assert.Equal(t, types.MetadataFilterOpEqual, param.MetadataFilter.Op)
+		assert.Equal(t, "research", param.MetadataFilter.Value)
+	}
+}
+
 func TestHasMixedEngineTypes(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

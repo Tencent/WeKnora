@@ -478,6 +478,11 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 
 	indexInfoList := make([]*types.IndexInfo, 0, len(chunks))
 	for _, chunk := range chunks {
+		accessMetadata, err := chunk.AccessMetadata()
+		if err != nil {
+			logger.Errorf(ctx, "[ImageMultimodal] Failed to extract access metadata for chunk %s: %v", chunk.ID, err)
+			return
+		}
 		indexInfoList = append(indexInfoList, &types.IndexInfo{
 			Content:         chunk.Content,
 			SourceID:        chunk.ID,
@@ -485,6 +490,7 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 			ChunkID:         chunk.ID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
+			AccessMetadata:  accessMetadata,
 		})
 	}
 

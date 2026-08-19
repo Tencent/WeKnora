@@ -99,6 +99,14 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	// handler/knowledgebase.go.
 	logger.Infof(ctx, "Hybrid search parameters, knowledge base IDs: %v, query text: %s",
 		searchKBIDs, secutils.SanitizeForLog(params.QueryText))
+	// HTTP handlers validate this already, but HybridSearch is also called by
+	// internal paths. Keep the invariant at the service boundary so an invalid
+	// filter cannot reach a backend implementation.
+	if params.MetadataFilter != nil {
+		if err := params.MetadataFilter.Validate(); err != nil {
+			return nil, apperrors.NewValidationError(err.Error())
+		}
+	}
 
 	tenantInfo, _ := types.TenantInfoFromContext(ctx)
 	requestTenantID := types.MustTenantIDFromContext(ctx)
@@ -252,7 +260,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		deduplicatedChunks = deduplicatedChunks[:params.MatchCount]
 	}
 
-	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
+	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment, params.MetadataFilter)
 }
 
 // pickPrimary returns the KB whose ID matches id, or nil if id is not in
@@ -370,6 +378,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 				KnowledgeIDs:     params.KnowledgeIDs,
 				TagIDs:           params.TagIDs,
 				KnowledgeType:    knowledgeType,
+				MetadataFilter:   params.MetadataFilter,
 			})
 		}
 
@@ -398,6 +407,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 			RetrieverType:    types.KeywordsRetrieverType,
 			KnowledgeIDs:     params.KnowledgeIDs,
 			TagIDs:           params.TagIDs,
+			MetadataFilter:   params.MetadataFilter,
 		})
 		logger.Info(ctx, "Keyword retrieval parameters setup completed")
 	}

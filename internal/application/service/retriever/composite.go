@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,26 @@ import (
 type engineInfo struct {
 	retrieveEngine interfaces.RetrieveEngineService
 	retrieverType  []types.RetrieverType
+}
+
+// isNilRetrieveEngine reports whether an interface either has no dynamic value
+// or holds a typed nil. The latter compares non-nil at the interface level but
+// panics when a method dereferences its receiver.
+func isNilRetrieveEngine(engine interfaces.RetrieveEngineService) bool {
+	if engine == nil {
+		return true
+	}
+	value := reflect.ValueOf(engine)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+func isPostgresMetadataFilterRetrieverType(retrieverType types.RetrieverType) bool {
+	return retrieverType == types.KeywordsRetrieverType || retrieverType == types.VectorRetrieverType
 }
 
 // CompositeRetrieveEngine implements a composite pattern for retrieval engines,
@@ -98,6 +119,29 @@ func (c *CompositeRetrieveEngine) SupportRetriever(r types.RetrieverType) bool {
 		}
 	}
 	return false
+}
+
+// SupportsMetadataFilter reports whether every active retrieval engine can
+// enforce metadata filtering. Filtering must fail closed because retrieval
+// results are later used to assemble response context.
+func (c *CompositeRetrieveEngine) SupportsMetadataFilter() bool {
+	if c == nil || len(c.engineInfos) == 0 {
+		return false
+	}
+	for _, engineInfo := range c.engineInfos {
+		if engineInfo == nil || isNilRetrieveEngine(engineInfo.retrieveEngine) || len(engineInfo.retrieverType) == 0 {
+			return false
+		}
+		if engineInfo.retrieveEngine.EngineType() != types.PostgresRetrieverEngineType {
+			return false
+		}
+		for _, retrieverType := range engineInfo.retrieverType {
+			if !isPostgresMetadataFilterRetrieverType(retrieverType) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // BatchUpdateChunkEnabledStatus updates the enabled status of chunks in batch

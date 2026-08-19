@@ -247,7 +247,36 @@ rrfScore = vectorWeight/(rrfK + vectorRank) + keywordWeight/(rrfK + keywordRank)
 
 融合之后的复合打分（rerank 模型分 0.6 + 检索基础分 0.3 + 来源权重 0.1、MMR、FAQ/Wiki 加权）发生在 chat pipeline 的 `CHUNK_RERANK` 阶段，见《检索问答全流程》文档 §3.4。
 
-## 6. 配置方法汇总
+## 6. 分块访问元数据过滤
+
+`POST /api/v1/knowledge-bases/:id/hybrid-search` 的 `metadata_filter` 可按分块的访问元数据收窄召回范围。过滤只读取 `Chunk.Metadata` 中保留的对象，不读取文档级 `custom_metadata`，也不会把该对象回显到检索结果：
+
+```json
+{
+  "access_metadata": {
+    "department": "research",
+    "employee_nature": "formal"
+  }
+}
+```
+
+| 检索后端 | `metadata_filter` 支持 | 行为 |
+| --- | --- | --- |
+| PostgreSQL | 支持（首个参考实现） | 向量和关键词查询都在各自的 Top-K 之前按 `access_metadata` 过滤；不会先返回全局 Top-K 再在应用层做授权裁剪。 |
+| SQLite、Elasticsearch、OpenSearch、Qdrant、Milvus、Weaviate、Doris、Tencent VectorDB 及其他未实现后端 | 不支持 | 搜索范围内任何已解析的后端无法执行该过滤时，接口返回 `metadata_filter_unsupported`，并且不会退化为未过滤检索结果。 |
+
+过滤后的主命中进入结果补齐时，父块、相邻块、关系块及后续层级的补齐块也会再次按同一 `access_metadata` 过滤，避免由 enrichment 把不允许的内容附加回结果。
+
+### 6.1 运营与安全边界
+
+- 已有索引行可能尚未存有 `access_metadata`。在把过滤用于访问控制前，须对历史分块补齐该元数据并重新索引；缺少或格式错误的访问元数据不会匹配过滤条件。
+- 这是 **REST 检索请求专用** 的输入字段，目前不从 chat、Agent 或其他调用上下文派生身份。调用方负责先完成身份解析，并在请求中传入适用的过滤条件。
+- 省略 `metadata_filter`（或传 `null`）保持既有未过滤检索行为；本字段不会阻止调用方省略过滤条件，因此它本身不是身份认证或授权决策器。
+- 当前没有公开的分块访问元数据写入 API。写入、同步和回填应由受控的导入/索引流程完成。
+
+具体的 boolean AST、`eq` / `in` 请求格式见《知识库 API》中的 `metadata_filter` 字段说明。
+
+## 7. 配置方法汇总
 
 核心开关（`.env.example` C1 节、`docker-compose.yml`）：
 
@@ -266,7 +295,7 @@ rrfScore = vectorWeight/(rrfK + vectorRank) + keywordWeight/(rrfK + keywordRank)
 
 除环境变量（env store，进程级全局）外，还可在管理端为租户创建 `VectorStore` 记录（DB store）并绑定到具体 KB——同一引擎类型可接多套集群实例，检索时按 KB 绑定自动路由并做租户属主校验（§1.2）。
 
-## 7. 检索执行数据流
+## 8. 检索执行数据流
 
 ```mermaid
 sequenceDiagram
