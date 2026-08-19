@@ -12,18 +12,11 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
-const (
-	// defaultMatchCount is the retrieval depth used when a caller supplies no
-	// usable MatchCount. It doubles as the over-retrieval floor, so the
-	// fallback and the pool it draws from cannot drift apart.
-	defaultMatchCount = 50
-
-	// maxRetrievalPoolSize bounds every retrieval depth derived from
-	// MatchCount: the over-retrieval pool below and the doubling TopK of the
-	// FAQ iterative path. Without it a caller-supplied MatchCount scales the
-	// vector-store query depth without limit.
-	maxRetrievalPoolSize = 500
-)
+// maxRetrievalPoolSize bounds every retrieval depth derived from MatchCount:
+// the over-retrieval pool below and the doubling TopK of the FAQ iterative
+// path. Without it a caller-supplied MatchCount scales the vector-store query
+// depth without limit.
+const maxRetrievalPoolSize = 500
 
 // GetQueryEmbedding computes the query embedding using the embedding model
 // associated with the given knowledge base. Callers can pre-compute and reuse
@@ -164,9 +157,9 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	}
 
 	// Over-retrieval (existing rule, preserved): 5x per-KB matchCount,
-	// floored at defaultMatchCount, capped at maxRetrievalPoolSize across the
-	// whole search.
-	matchCount := max(params.MatchCount*5, defaultMatchCount) * len(searchKBIDs)
+	// floored at DefaultRetrievalTopK, capped at maxRetrievalPoolSize across
+	// the whole search.
+	matchCount := max(params.MatchCount*5, types.DefaultRetrievalTopK) * len(searchKBIDs)
 	if matchCount > maxRetrievalPoolSize {
 		matchCount = maxRetrievalPoolSize
 	}
@@ -286,13 +279,13 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 // the deduplicated chunk list to [:0] and empties an otherwise successful
 // search; a negative value panics on that same slice bound.
 //
-// The fallback matches RetrievalConfig.GetEffectiveEmbeddingTopK: internal
-// callers (chat pipeline, agent tools) feed these results into reranking,
-// which trims to RerankTopK afterwards, so a wide candidate pool is the right
-// failure mode for them.
+// The fallback is shared with RetrievalConfig.GetEffectiveEmbeddingTopK:
+// internal callers (chat pipeline, agent tools) feed these results into
+// reranking, which trims to RerankTopK afterwards, so a wide candidate pool is
+// the right failure mode for them.
 func normalizedMatchCount(requested int) int {
 	if requested <= 0 {
-		return defaultMatchCount
+		return types.DefaultRetrievalTopK
 	}
 	return requested
 }
