@@ -27,8 +27,8 @@ function isLiteSpaDefaultEntry(to: RouteLocationNormalized) {
   return (
     to.path === '/' ||
     to.path === '/platform' ||
-    to.path === '/platform/knowledge-bases' ||
-    to.name === 'knowledgeBaseList'
+    to.path === '/platform/videos' ||
+    to.name === 'videoList'
   )
 }
 
@@ -42,12 +42,21 @@ function hasPendingOIDCCallback() {
   return hash.includes('oidc_result=') || hash.includes('oidc_error=')
 }
 
+function isLegacyPostAuthLanding(to: RouteLocationNormalized, from: RouteLocationNormalized) {
+  return to.path === '/platform/knowledge-bases' && (
+    from.path === '/login' ||
+    from.path === '/register' ||
+    from.path === '/platform/videos' ||
+    from.path === '/onboarding/workspace'
+  )
+}
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
       path: "/",
-      redirect: "/platform/knowledge-bases",
+      redirect: "/platform/videos",
     },
     {
       path: "/login",
@@ -95,10 +104,43 @@ const router = createRouter({
     {
       path: "/platform",
       name: "Platform",
-      redirect: "/platform/knowledge-bases",
+      redirect: "/platform/videos",
       component: () => import("../views/platform/index.vue"),
       meta: { requiresInit: true, requiresAuth: true },
       children: [
+        {
+          path: "videos",
+          name: "videoList",
+          component: () => import("../views/videohub/VideoList.vue"),
+          meta: { requiresInit: true, requiresAuth: true }
+        },
+        {
+          path: "videos/:videoId",
+          name: "videoDetail",
+          component: () => import("../views/videohub/VideoDetail.vue"),
+          meta: { requiresInit: true, requiresAuth: true }
+        },
+        {
+          path: "graph",
+          name: "knowledgeGraph",
+          component: () => import("../components/videohub/PlaceholderView.vue"),
+          props: { title: 'Knowledge Graph' },
+          meta: { requiresInit: true, requiresAuth: true }
+        },
+        {
+          path: "queries",
+          name: "userQueries",
+          component: () => import("../components/videohub/PlaceholderView.vue"),
+          props: { title: 'User Queries' },
+          meta: { requiresInit: true, requiresAuth: true }
+        },
+        {
+          path: "ai-chat",
+          name: "aiChat",
+          component: () => import("../components/videohub/PlaceholderView.vue"),
+          props: { title: 'Chat' },
+          meta: { requiresInit: true, requiresAuth: true }
+        },
         {
           path: "tenant",
           redirect: "/platform/settings"
@@ -199,6 +241,10 @@ const router = createRouter({
           name: "systemQueues",
           redirect: { path: "/platform/settings", query: { section: "runtime-queues" } },
           meta: { requiresInit: true, requiresAuth: true, requiresSystemAdmin: true },
+        },
+        {
+          path: ':pathMatch(.*)*',
+          redirect: '/platform/videos',
         },
       ],
     },
@@ -302,6 +348,14 @@ let liteDeepLinkRestoreDone = false
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
 
+  // Login and onboarding components still contain the upstream KB landing.
+  // Keep those files untouched for easier upstream sync while routing their
+  // post-auth default navigation to the custom Home page.
+  if (isLegacyPostAuthLanding(to, from)) {
+    next('/platform/videos')
+    return
+  }
+
   // OIDC 回跳登录结果依赖 App.vue 在挂载后消费 URL hash。
   // 如果这里先按“未登录”拦截到 /login，会导致回调结果没有机会落盘。
   if (hasPendingOIDCCallback()) {
@@ -334,7 +388,7 @@ router.beforeEach(async (to, from, next) => {
       }
     }
     if (authStore.hasValidTenant) {
-      next('/platform/knowledge-bases')
+      next('/platform/videos')
     } else {
       next()
     }
@@ -345,7 +399,7 @@ router.beforeEach(async (to, from, next) => {
   if (to.meta.requiresAuth === false || to.meta.requiresInit === false) {
     // 如果已登录用户访问登录页面，重定向到知识库列表页面
     if (to.path === '/login' && authStore.isLoggedIn) {
-      next(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
+      next(authStore.hasValidTenant ? '/platform/videos' : '/onboarding/workspace')
       return
     }
     next()
@@ -398,7 +452,7 @@ router.beforeEach(async (to, from, next) => {
   const requiredCapability = to.meta.requiredCapability as DeploymentCapabilityKey | undefined
   if (requiredCapability && !deploymentCapabilities.isSupported(requiredCapability)) {
     MessagePlugin.warning(i18n.global.t('settings.capabilityUnavailable'))
-    next('/platform/knowledge-bases')
+    next('/platform/videos')
     return
   }
 
@@ -408,7 +462,7 @@ router.beforeEach(async (to, from, next) => {
   // the bounce. This is UI-only; the server enforces the real check.
   if (to.meta.requiresSystemAdmin === true) {
     if (!authStore.isSystemAdmin) {
-      next('/platform/knowledge-bases')
+      next('/platform/videos')
       return
     }
   }
