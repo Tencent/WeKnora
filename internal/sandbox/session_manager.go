@@ -365,7 +365,7 @@ func (m *SessionBoundManager) ensureExecutionOutputDir(
 func executionOutputDir(cfg *ExecuteConfig) string {
 	if cfg != nil && cfg.Env != nil {
 		if dir := strings.TrimSpace(cfg.Env[skillOutputEnvVar]); dir != "" {
-			if clean, err := cleanSessionWorkDir(dir); err == nil {
+			if clean, err := cleanSessionWorkDir(dir, false); err == nil {
 				return clean
 			}
 		}
@@ -512,9 +512,25 @@ func (m *SessionBoundManager) ReadSessionFile(
 	return m.client.ReadFile(ctx, handle, filePath)
 }
 
+// ShellExecOptions carries per-call shell execution knobs. The install-only
+// flags are explicit so skill image maintenance can write under /opt without
+// loosening work_dir or user privileges for ordinary chat sessions.
+type ShellExecOptions struct {
+	WorkDir string
+	Timeout time.Duration
+	Env     map[string]string
+
+	// AllowSkillsRoot lets installer calls work inside the skills image root.
+	// See cleanSessionWorkDir for why the work_dir allowlist is lexical only.
+	AllowSkillsRoot bool
+	// AsRoot is reserved for install/maintenance commands that need to write
+	// outside /workspace; ordinary sessions must keep the provider default user.
+	AsRoot bool
+}
+
 // ExecShellCommand runs a shell one-liner inside the session's persistent
-// sandbox. Fallback is explicitly refused so shell_exec never escapes onto
-// the host machine.
+// sandbox. It preserves the shell_exec tool contract: /workspace-only work_dir
+// validation and provider default user.
 func (m *SessionBoundManager) ExecShellCommand(
 	ctx context.Context,
 	sessionID string,
@@ -522,6 +538,22 @@ func (m *SessionBoundManager) ExecShellCommand(
 	workDir string,
 	timeout time.Duration,
 	env map[string]string,
+) (*ExecuteResult, error) {
+	return m.ExecShellCommandWithOptions(ctx, sessionID, command, ShellExecOptions{
+		WorkDir: workDir,
+		Timeout: timeout,
+		Env:     env,
+	})
+}
+
+// ExecShellCommandWithOptions runs a shell command with install-only options.
+// Fallback is explicitly refused so even privileged installer calls never
+// escape onto the WeKnora host machine.
+func (m *SessionBoundManager) ExecShellCommandWithOptions(
+	ctx context.Context,
+	sessionID string,
+	command string,
+	opts ShellExecOptions,
 ) (*ExecuteResult, error) {
 	if err := m.requireRemoteBackend(); err != nil {
 		return nil, fmt.Errorf(
@@ -535,6 +567,7 @@ func (m *SessionBoundManager) ExecShellCommand(
 	if strings.TrimSpace(command) == "" {
 		return nil, errors.New("sandbox: command required for ExecShellCommand")
 	}
+	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = m.config.DefaultTimeout
 	}
@@ -542,9 +575,9 @@ func (m *SessionBoundManager) ExecShellCommand(
 		timeout = DefaultTimeout
 	}
 
-	workDir = strings.TrimSpace(workDir)
+	workDir := strings.TrimSpace(opts.WorkDir)
 	if workDir != "" {
-		cleanWorkDir, err := cleanSessionWorkDir(workDir)
+		cleanWorkDir, err := cleanSessionWorkDir(workDir, opts.AllowSkillsRoot)
 		if err != nil {
 			return nil, err
 		}
@@ -561,17 +594,23 @@ func (m *SessionBoundManager) ExecShellCommand(
 		}
 	}
 
+	// Named explicitly rather than left to each adapter's default. This command
+	// line comes from the model, so it is the one exec path an injected prompt
+	// reaches directly, and the account it runs as must not depend on which
+	// backend the workspace happens to have selected. Only a caller inside the
+	// server may ask for root, and only image maintenance does.
+	user := DefaultSandboxExecUser
+	if opts.AsRoot {
+		user = "root"
+	}
+
 	start := time.Now()
 	execResult, execErr := m.client.Exec(ctx, handle, RemoteExecRequest{
 		Command: command,
 		Shell:   true,
-		Env:     env,
+		Env:     opts.Env,
 		WorkDir: workDir,
-		// Named explicitly rather than left to each adapter's default. This
-		// command line comes from the model, so it is the one exec path an
-		// injected prompt reaches directly, and the account it runs as must
-		// not depend on which backend the workspace happens to have selected.
-		User:    DefaultSandboxExecUser,
+		User:    user,
 		Timeout: timeout,
 	})
 	duration := time.Since(start)
@@ -777,14 +816,39 @@ func cleanSessionInputPath(filePath string) (string, error) {
 	)
 }
 
-func cleanSessionWorkDir(workDir string) (string, error) {
+// cleanSessionWorkDir keeps shell_exec inside directories we are willing to let
+// an agent work in. Ordinary sessions get /workspace only.
+//
+// Validation is lexical (path.Clean plus prefix checks): a symlink under an
+// allowed root that resolves elsewhere at execution time is not detected and
+// that is intentional. The only caller that passes allowSkillsRoot also passes
+// AsRoot and runs arbitrary install shell commands, so a symlink would grant
+// nothing those commands cannot already reach via cd or absolute paths. For
+// ordinary sessions the allowlist is unchanged and its lexical nature is
+// pre-existing. The allowlist stops casual wandering and makes intent
+// auditable; the real isolation boundary is the remote sandbox itself.
+//
+// allowSkillsRoot widens it to the skills image root for install/maintenance
+// sessions, so the installer agent can set work_dir to the skill directory and
+// run ordinary relative commands instead of composing long absolute paths. It
+// is a widening, not a removal: everything outside these two roots is still
+// refused.
+func cleanSessionWorkDir(workDir string, allowSkillsRoot bool) (string, error) {
 	clean := path.Clean(strings.TrimSpace(workDir))
 	if clean == SessionWorkspaceRoot || strings.HasPrefix(clean, SessionWorkspaceRoot+"/") {
 		return clean, nil
 	}
+	if allowSkillsRoot &&
+		(clean == SkillsImageRoot || strings.HasPrefix(clean, SkillsImageRoot+"/")) {
+		return clean, nil
+	}
+	allowed := SessionWorkspaceRoot
+	if allowSkillsRoot {
+		allowed = SessionWorkspaceRoot + ", " + SkillsImageRoot
+	}
 	return "", fmt.Errorf(
-		"sandbox: work dir %q is outside %s",
-		workDir, SessionWorkspaceRoot,
+		"sandbox: work dir %q is outside allowed roots (%s)",
+		workDir, allowed,
 	)
 }
 

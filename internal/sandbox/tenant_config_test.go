@@ -274,3 +274,103 @@ func TestEffectiveTemplateIDPerProvider(t *testing.T) {
 	require.Empty(t, EffectiveTemplateID(&Config{Type: SandboxTypeLocal}))
 	require.Empty(t, EffectiveTemplateID(nil))
 }
+
+func TestResolveEffectiveConfigUsesSkillSnapshotAsTemplate(t *testing.T) {
+	global := DefaultConfig()
+
+	base := &types.TenantSandboxConfig{
+		SandboxType: "cube",
+		Cube: &types.CubeSandboxConfig{
+			APIURL: "https://203.0.113.10", ProxyURL: "https://203.0.113.11",
+			SandboxDomain: "cube.example.com", APIKey: "key-1", TemplateID: "tpl-base",
+		},
+	}
+	fp := SkillImageFingerprint("cube", "key-1", "https://203.0.113.10")
+
+	t.Run("usable snapshot overrides the base template", func(t *testing.T) {
+		cfg := *base
+		cfg.SkillImage = &types.SkillImageConfig{SnapshotID: "snap-1", OwnerFingerprint: fp}
+
+		eff, err := ResolveEffectiveConfig(&cfg, global)
+
+		require.NoError(t, err)
+		require.Equal(t, "snap-1", eff.CubeTemplate)
+	})
+
+	t.Run("fingerprint mismatch falls back to the base template", func(t *testing.T) {
+		cfg := *base
+		cfg.SkillImage = &types.SkillImageConfig{
+			SnapshotID: "snap-1", OwnerFingerprint: "fingerprint-of-another-account",
+		}
+
+		eff, err := ResolveEffectiveConfig(&cfg, global)
+
+		require.NoError(t, err)
+		require.Equal(t, "tpl-base", eff.CubeTemplate,
+			"a snapshot from another account is invisible; the session must still boot")
+	})
+
+	t.Run("empty snapshot keeps the base template", func(t *testing.T) {
+		cfg := *base
+		cfg.SkillImage = &types.SkillImageConfig{OwnerFingerprint: fp}
+
+		eff, err := ResolveEffectiveConfig(&cfg, global)
+
+		require.NoError(t, err)
+		require.Equal(t, "tpl-base", eff.CubeTemplate)
+	})
+}
+
+func TestResolveEffectiveConfigUsesSkillSnapshotAsE2BTemplate(t *testing.T) {
+	global := DefaultConfig()
+
+	base := &types.TenantSandboxConfig{
+		SandboxType: "e2b",
+		E2B: &types.E2BSandboxConfig{
+			APIURL: "https://203.0.113.20", SandboxDomain: "e2b.example.com",
+			APIKey: "key-1", TemplateID: "tpl-base",
+		},
+	}
+	fp := SkillImageFingerprint("e2b", "key-1", "https://203.0.113.20")
+	cubeFp := SkillImageFingerprint("cube", "key-1", "https://203.0.113.20")
+
+	t.Run("usable snapshot overrides the base template", func(t *testing.T) {
+		cfg := *base
+		cfg.SkillImage = &types.SkillImageConfig{SnapshotID: "snap-1", OwnerFingerprint: fp}
+
+		eff, err := ResolveEffectiveConfig(&cfg, global)
+
+		require.NoError(t, err)
+		require.Equal(t, "snap-1", eff.E2BTemplate)
+	})
+
+	t.Run("fingerprint mismatch falls back to the base template", func(t *testing.T) {
+		cfg := *base
+		cfg.SkillImage = &types.SkillImageConfig{
+			SnapshotID: "snap-1", OwnerFingerprint: cubeFp,
+		}
+
+		eff, err := ResolveEffectiveConfig(&cfg, global)
+
+		require.NoError(t, err)
+		require.Equal(t, "tpl-base", eff.E2BTemplate,
+			"a snapshot whose fingerprint was computed for cube must not override e2b; the session must still boot")
+	})
+
+	t.Run("empty snapshot keeps the base template", func(t *testing.T) {
+		cfg := *base
+		cfg.SkillImage = &types.SkillImageConfig{OwnerFingerprint: fp}
+
+		eff, err := ResolveEffectiveConfig(&cfg, global)
+
+		require.NoError(t, err)
+		require.Equal(t, "tpl-base", eff.E2BTemplate)
+	})
+}
+
+func TestSkillImageFingerprintIsStableAndDiscriminating(t *testing.T) {
+	a := SkillImageFingerprint("cube", "key-1", "https://a.example.com")
+	require.Equal(t, a, SkillImageFingerprint("cube", "key-1", "https://a.example.com"))
+	require.NotEqual(t, a, SkillImageFingerprint("cube", "key-2", "https://a.example.com"))
+	require.NotEqual(t, a, SkillImageFingerprint("e2b", "key-1", "https://a.example.com"))
+}

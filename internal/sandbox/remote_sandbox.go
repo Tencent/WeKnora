@@ -113,6 +113,31 @@ func (s *RemoteSandbox) ExecuteOnHandle(
 		return nil, ErrInvalidScript
 	}
 
+	// Skills installed into the image are already on disk; uploading them again
+	// would both waste a round trip and shadow the venv layout next to them.
+	if remote := strings.TrimSpace(cfg.RemoteScriptPath); remote != "" {
+		skillDir, ok := SkillDirForImageScript(remote)
+		if !ok {
+			// RemoteScriptPath is only trusted for installed image skills; rejecting
+			// other paths avoids silently executing arbitrary sandbox files with
+			// image-skill defaults when callers pass an unvalidated path.
+			return nil, ErrInvalidScript
+		}
+		command, baseArgs := SkillInterpreterCommand(skillDir, remote)
+		request := RemoteExecRequest{
+			Command: command,
+			Args:    append(baseArgs, cfg.Args...),
+			Stdin:   cfg.Stdin,
+			Env:     cfg.Env,
+			WorkDir: SessionWorkspaceRoot,
+			User:    DefaultSandboxExecUser,
+			Timeout: effectiveTimeout(cfg, 0),
+		}
+		start := time.Now()
+		execResult, err := s.client.Exec(ctx, handle, request)
+		return remoteExecuteResult(execResult, err, time.Since(start)), nil
+	}
+
 	content, err := readScriptContent(cfg)
 	if err != nil {
 		return nil, err

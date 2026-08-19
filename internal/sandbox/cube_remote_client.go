@@ -127,8 +127,11 @@ func (c *CubeRemoteClient) Capabilities() RemoteSandboxCapabilities {
 		SupportsPauseResume:           true,
 		SupportsTimeoutRefresh:        true,
 		SupportsFilesystemEnumeration: true,
-		// Cube's CreateOptions has no volume-mount field yet; revisit when the
-		// official Go SDK reaches v0.6.0.
+		// Cube stores snapshots as templates, so a snapshot ID can be handed
+		// straight back as CreateOptions.TemplateID.
+		SupportsSnapshots: true,
+		// CreateOptions still has no volume-mount field; skills ride on
+		// snapshots instead, so this stays false.
 		SupportsVolumes: false,
 	}
 }
@@ -656,6 +659,80 @@ func (c *CubeRemoteClient) Stat(
 	}, nil
 }
 
+// CreateSnapshot snapshots a running sandbox. Cube exposes this on *Sandbox,
+// so we connect by ID first (same shape as Delete).
+func (c *CubeRemoteClient) CreateSnapshot(
+	ctx context.Context, sandboxID string, name string,
+) (RemoteSnapshotRef, error) {
+	if strings.TrimSpace(sandboxID) == "" {
+		return RemoteSnapshotRef{}, cubeInvalidRequest("CreateSnapshot", "sandbox ID is required", nil)
+	}
+	sb, err := c.client.Connect(ctx, sandboxID)
+	if err != nil {
+		return RemoteSnapshotRef{}, normalizeCubeError("CreateSnapshot", err)
+	}
+	info, err := sb.CreateSnapshot(ctx, strings.TrimSpace(name))
+	if err != nil {
+		return RemoteSnapshotRef{}, normalizeCubeError("CreateSnapshot", err)
+	}
+	if info == nil || strings.TrimSpace(info.SnapshotID) == "" {
+		return RemoteSnapshotRef{}, cubeInvalidRequest(
+			"CreateSnapshot", "provider returned an empty snapshot ID", nil)
+	}
+	return RemoteSnapshotRef{ID: info.SnapshotID, Names: info.Names}, nil
+}
+
+// DeleteSnapshot removes a snapshot. Cube returns an API error for a missing
+// template; we map not-found to success so cleanup is idempotent.
+func (c *CubeRemoteClient) DeleteSnapshot(ctx context.Context, snapshotID string) error {
+	if strings.TrimSpace(snapshotID) == "" {
+		return cubeInvalidRequest("DeleteSnapshot", "snapshot ID is required", nil)
+	}
+	if err := c.client.DeleteSnapshot(ctx, snapshotID); err != nil {
+		normalized := normalizeCubeError("DeleteSnapshot", err)
+		if IsRemoteNotFound(normalized) {
+			return nil
+		}
+		return normalized
+	}
+	return nil
+}
+
+// ListSnapshots pages through every snapshot, optionally filtered by source
+// sandbox. Used only by the orphan-reconciliation task.
+func (c *CubeRemoteClient) ListSnapshots(
+	ctx context.Context, sandboxID string,
+) ([]RemoteSnapshotRef, error) {
+	var (
+		out   []RemoteSnapshotRef
+		token string
+	)
+	for {
+		page, next, err := c.client.ListSnapshots(ctx, cubesandbox.ListSnapshotsOptions{
+			SandboxID: strings.TrimSpace(sandboxID),
+			Limit:     100,
+			NextToken: token,
+		})
+		if err != nil {
+			return nil, normalizeCubeError("ListSnapshots", err)
+		}
+		for _, item := range page {
+			out = append(out, RemoteSnapshotRef{ID: item.SnapshotID, Names: item.Names})
+		}
+		if next == "" {
+			return out, nil
+		}
+		// A provider/SDK bug that echoes the same non-empty pagination token
+		// would otherwise spin forever and block skill-image orphan cleanup.
+		// Fail fast instead of hanging until the context is cancelled.
+		if next == token {
+			return nil, cubeInvalidRequest("ListSnapshots",
+				"provider returned the same pagination token", nil)
+		}
+		token = next
+	}
+}
+
 // --- helpers -----------------------------------------------------------------
 
 // isSDKNotFound spots the SDK's "resource missing" errors without having to
@@ -879,7 +956,11 @@ func normalizeCubeError(op string, err error) error {
 	case errors.Is(err, cubesandbox.ErrAuthentication):
 		kind = RemoteErrorKindAuthentication
 	case errors.Is(err, cubesandbox.ErrTemplateNotFound):
-		kind = RemoteErrorKindInvalidRequest
+		if op == "DeleteSnapshot" {
+			kind = RemoteErrorKindNotFound
+		} else {
+			kind = RemoteErrorKindInvalidRequest
+		}
 	case errors.Is(err, cubesandbox.ErrSandboxNotFound):
 		kind = RemoteErrorKindNotFound
 	default:
@@ -975,6 +1056,7 @@ func cubeCredentialPresence(value string) string {
 }
 
 var (
-	_ RemoteSandboxClient = (*CubeRemoteClient)(nil)
-	_ RemoteSandboxHandle = (*cubeRemoteHandle)(nil)
+	_ RemoteSandboxClient   = (*CubeRemoteClient)(nil)
+	_ RemoteSnapshotManager = (*CubeRemoteClient)(nil)
+	_ RemoteSandboxHandle   = (*cubeRemoteHandle)(nil)
 )

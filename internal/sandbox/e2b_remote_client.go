@@ -143,7 +143,10 @@ func (c *E2BRemoteClient) Capabilities() RemoteSandboxCapabilities {
 		SupportsPauseResume:           true,
 		SupportsTimeoutRefresh:        true,
 		SupportsFilesystemEnumeration: true,
-		SupportsVolumes:               true,
+		// E2B stores snapshots as templates, so a snapshot ID can be handed
+		// straight back as CreateOptions.TemplateID.
+		SupportsSnapshots: true,
+		SupportsVolumes:   true,
 	}
 }
 
@@ -920,6 +923,115 @@ func (c *E2BRemoteClient) Stat(
 	}, nil
 }
 
+// CreateSnapshot snapshots a running sandbox. E2B exposes snapshots on the
+// connected sandbox handle, so the adapter reattaches first like Delete does.
+func (c *E2BRemoteClient) CreateSnapshot(
+	ctx context.Context, sandboxID string, name string,
+) (RemoteSnapshotRef, error) {
+	if strings.TrimSpace(sandboxID) == "" {
+		return RemoteSnapshotRef{}, e2bInvalidRequest("CreateSnapshot", "sandbox ID is required", nil)
+	}
+	timeoutSeconds, err := e2bTimeoutSeconds(
+		RemoteTimeoutPolicy{Mode: RemoteTimeoutServerDefault},
+		c.timeout,
+	)
+	if err != nil {
+		return RemoteSnapshotRef{}, e2bInvalidRequest("CreateSnapshot", err.Error(), err)
+	}
+	sandbox, err := c.client.Connect(ctx, sandboxID, timeoutSeconds)
+	if err != nil {
+		return RemoteSnapshotRef{}, normalizeE2BError("CreateSnapshot", err)
+	}
+	if sandbox == nil || strings.TrimSpace(sandbox.ID) == "" ||
+		sandbox.ID != sandboxID {
+		return RemoteSnapshotRef{}, NewRemoteError(
+			SandboxTypeE2B, "CreateSnapshot", RemoteErrorKindInternal,
+			"e2b returned a mismatched sandbox handle", nil,
+		)
+	}
+
+	var info *e2b.SnapshotInfo
+	if trimmed := strings.TrimSpace(name); trimmed != "" {
+		info, err = sandbox.CreateSnapshot(ctx, trimmed)
+	} else {
+		info, err = sandbox.CreateSnapshot(ctx)
+	}
+	if err != nil {
+		return RemoteSnapshotRef{}, normalizeE2BError("CreateSnapshot", err)
+	}
+	if info == nil || strings.TrimSpace(info.SnapshotID) == "" {
+		return RemoteSnapshotRef{}, e2bInvalidRequest(
+			"CreateSnapshot", "provider returned an empty snapshot ID", nil)
+	}
+	return RemoteSnapshotRef{ID: info.SnapshotID, Names: info.Names}, nil
+}
+
+// DeleteSnapshot removes a snapshot. go-e2b reports a missing snapshot as
+// (false, nil), so cleanup stays idempotent while genuine provider errors
+// still surface through the neutral error taxonomy.
+func (c *E2BRemoteClient) DeleteSnapshot(ctx context.Context, snapshotID string) error {
+	if strings.TrimSpace(snapshotID) == "" {
+		return e2bInvalidRequest("DeleteSnapshot", "snapshot ID is required", nil)
+	}
+	if _, err := c.client.DeleteSnapshot(ctx, snapshotID); err != nil {
+		normalized := normalizeE2BError("DeleteSnapshot", err)
+		if IsRemoteNotFound(normalized) {
+			return nil
+		}
+		return normalized
+	}
+	return nil
+}
+
+// ListSnapshots pages through every snapshot, optionally filtered by source
+// sandbox. Used only by the skill-image orphan-reconciliation task.
+func (c *E2BRemoteClient) ListSnapshots(
+	ctx context.Context, sandboxID string,
+) ([]RemoteSnapshotRef, error) {
+	baseOptions := []e2b.ListSnapshotsOption{e2b.WithSnapshotLimit(100)}
+	if trimmed := strings.TrimSpace(sandboxID); trimmed != "" {
+		baseOptions = append(baseOptions, e2b.WithSnapshotSandboxID(trimmed))
+	}
+
+	var (
+		out   []RemoteSnapshotRef
+		token string
+	)
+	for {
+		options := append([]e2b.ListSnapshotsOption(nil), baseOptions...)
+		if token != "" {
+			options = append(options, e2b.WithSnapshotNextToken(token))
+		}
+		page, err := c.client.ListSnapshots(ctx, options...)
+		if err != nil {
+			return nil, normalizeE2BError("ListSnapshots", err)
+		}
+		if page == nil {
+			return nil, NewRemoteError(
+				SandboxTypeE2B,
+				"ListSnapshots",
+				RemoteErrorKindInternal,
+				"e2b returned an empty snapshot list page",
+				nil,
+			)
+		}
+		for _, item := range page.Snapshots {
+			out = append(out, RemoteSnapshotRef{ID: item.SnapshotID, Names: item.Names})
+		}
+		if page.NextToken == "" {
+			return out, nil
+		}
+		// A provider/SDK bug that echoes the same non-empty pagination token
+		// would otherwise spin forever and block skill-image orphan cleanup.
+		// Fail fast instead of hanging until the context is cancelled.
+		if page.NextToken == token {
+			return nil, e2bInvalidRequest("ListSnapshots",
+				"provider returned the same pagination token", nil)
+		}
+		token = page.NextToken
+	}
+}
+
 // --- helpers -----------------------------------------------------------------
 
 // e2bTimeoutSeconds maps the neutral RemoteTimeoutPolicy onto E2B's integer
@@ -1119,6 +1231,7 @@ func e2bRemoteEntryType(fileType string) RemoteDirEntryType {
 }
 
 var (
-	_ RemoteSandboxClient = (*E2BRemoteClient)(nil)
-	_ RemoteSandboxHandle = (*e2bRemoteHandle)(nil)
+	_ RemoteSandboxClient   = (*E2BRemoteClient)(nil)
+	_ RemoteSnapshotManager = (*E2BRemoteClient)(nil)
+	_ RemoteSandboxHandle   = (*e2bRemoteHandle)(nil)
 )
