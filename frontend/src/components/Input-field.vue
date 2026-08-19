@@ -216,7 +216,9 @@ const currentAgentConfig = computed(() => {
 // 智能体预配置的知识库 IDs
 const agentKnowledgeBases = computed(() => {
   if (!hasAgentConfig.value) return [];
-  return currentAgentConfig.value?.knowledge_bases || [];
+  // Return a fresh array so the watcher below receives an old/new snapshot
+  // when an open agent is edited in place.
+  return [...(currentAgentConfig.value?.knowledge_bases || [])];
 });
 
 // 智能体的知识库选择模式
@@ -228,11 +230,23 @@ const agentKBSelectionMode = computed(() => {
 // 共享智能体下的知识库列表（来自 listKnowledgeBases(agent_id)），用于已选知识库展示与 org 角标
 const sharedAgentKbList = ref<Array<{ id: string; name: string; type?: string; knowledge_count?: number; chunk_count?: number }>>([]);
 
-// 当智能体改变时，模型、可@知识库列表均跟随新智能体配置；网络搜索由用户主动开启
-// 知识库：用新智能体配置的列表替换当前选中，使已选与可@列表一致（含共享智能体）
-watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId, newAgentKbs, newKbMode], [oldAgentId]) => {
+// 当智能体改变或其知识库作用域被编辑时，模型、可@知识库列表均跟随最新配置；网络搜索由用户主动开启
+// 知识库：用智能体配置的列表替换当前选中，使已选与可@列表一致（含共享智能体）
+const hasSameKnowledgeBaseScope = (left: string[] | null | undefined, right: string[] | null | undefined) => {
+  const leftIds = left || [];
+  const rightIds = right || [];
+  return leftIds.length === rightIds.length && leftIds.every((id, index) => id === rightIds[index]);
+};
+
+// 同一智能体在编辑器中新增/移除知识库时，不能只等待“切换智能体”才同步：
+// 否则 @ 弹窗会按新配置显示，而按钮徽标仍保留旧的已选数量。
+watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId, newAgentKbs, newKbMode], [oldAgentId, oldAgentKbs, oldKbMode]) => {
   if (settingsStore._isApplyingSessionState) return;
-  if (newAgentId !== oldAgentId && oldAgentId !== undefined) {
+  const agentChanged = newAgentId !== oldAgentId && oldAgentId !== undefined;
+  const knowledgeScopeChanged = newAgentId === oldAgentId &&
+    (newKbMode !== oldKbMode || !hasSameKnowledgeBaseScope(newAgentKbs, oldAgentKbs));
+
+  if (agentChanged || knowledgeScopeChanged) {
     if (newKbMode === 'none') {
       settingsStore.selectKnowledgeBases([]);
     } else {

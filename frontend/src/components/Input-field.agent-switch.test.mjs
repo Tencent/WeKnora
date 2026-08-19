@@ -35,3 +35,15 @@ test('shared-agent web search button waits for source readiness metadata', () =>
   assert.match(showWebSearchButton, /isWebSearchReadinessKnown/)
   assert.match(showWebSearchButton, /selectedSharedAgent\.value\?\.web_search_ready/)
 })
+
+test('editing the active agent knowledge-base scope refreshes the @ badge selection', () => {
+  const watcherStart = inputField.indexOf('const hasSameKnowledgeBaseScope')
+  const watcherEnd = inputField.indexOf('// 共享智能体时预取该智能体知识库列表', watcherStart)
+  const watcher = inputField.slice(watcherStart, watcherEnd)
+
+  assert.notEqual(watcherStart, -1)
+  assert.notEqual(watcherEnd, -1)
+  assert.match(inputField, /return \[\.\.\.\(currentAgentConfig\.value\?\.knowledge_bases \|\| \[\]\)\]/)
+  assert.match(watcher, /knowledgeScopeChanged/)
+  assert.match(watcher, /settingsStore\.selectKnowledgeBases\(newAgentKbs && newAgentKbs\.length > 0 \? \[\.\.\.newAgentKbs\] : \[\]\)/)
+})
