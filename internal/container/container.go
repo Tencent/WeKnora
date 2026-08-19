@@ -58,6 +58,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/drive"
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/wiki"
+	gitRepoConnector "github.com/Tencent/WeKnora/internal/datasource/connector/git_repo"
 	gitlabConnector "github.com/Tencent/WeKnora/internal/datasource/connector/gitlab"
 	imaConnector "github.com/Tencent/WeKnora/internal/datasource/connector/ima"
 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
@@ -1671,6 +1672,9 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	}
 	if err := registry.Register(gitlabConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register gitlab connector: %w", err))
+	}
+	if err := registry.Register(gitRepoConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register git_repo connector: %w", err))
 	}
 
 	// Future connectors will be registered here:

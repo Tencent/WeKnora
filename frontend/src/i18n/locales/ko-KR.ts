@@ -591,6 +591,16 @@ export default {
       paths: '디렉터리', pathsPlaceholder: '한 줄에 하나씩 입력하세요. 비워 두면 전체 프로젝트를 동기화합니다',
       addProject: '프로젝트 추가', projectRequired: 'GitLab 프로젝트를 하나 이상 추가하세요',
     },
+    gitRepo: {
+      accessToken: '액세스 토큰(비공개 저장소)', accessTokenHint: '선택 사항 — 공개 저장소는 비워 두세요',
+      repos: 'Git 저장소',
+      reposHint: '동기화할 저장소를 추가하세요. Markdown/HTML 문서를 가져오며 상대 경로 이미지는 자동으로 인라인됩니다.',
+      repo: '저장소', repoUrl: '저장소 URL', repoUrlPlaceholder: '예: https://github.com/org/blog.git',
+      repoRequired: '저장소를 하나 이상 추가하세요',
+      branch: '브랜치', branchPlaceholder: '비워 두면 기본 브랜치를 사용합니다',
+      paths: '디렉터리', pathsPlaceholder: '한 줄에 하나씩 입력하세요. 비워 두면 전체 저장소를 동기화합니다',
+      addRepo: '저장소 추가',
+    },
     resourceHint: '동기화할 공간/폴더를 선택하세요',
     untitled: '제목 없음',
     resourceLoadFailed: '리소스 목록 로드 실패',
@@ -714,7 +724,8 @@ export default {
       yuque: '위큐 지식베이스에서 문서 동기화',
       ima: 'Tencent IMA 지식베이스에서 문서, 노트 및 파일 동기화 (AI 세션과 동영상 분석은 지원되지 않음)',
       rss: 'RSS / Atom 피드에서 글 동기화',
-      gitlab: 'GitLab 프로젝트의 파일 동기화'
+      gitlab: 'GitLab 프로젝트의 파일 동기화',
+      git_repo: 'Git 저장소에서 Markdown 문서와 상대 경로 이미지 동기화 (예: VuePress 블로그)'
     },
     connector: {
       feishu: '페이슈 (Feishu)',
@@ -725,7 +736,8 @@ export default {
       yuque: '위큐 (Yuque)',
       ima: 'Tencent IMA',
       rss: 'RSS / Atom 피드',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      git_repo: 'Git 저장소'
     },
     logDetail: {
       startTime: '시작 시간',

@@ -37,6 +37,7 @@ const (
 	ConnectorTypeIMAP        = "imap"
 	ConnectorTypeRSS         = "rss"
 	ConnectorTypeGitLab      = "gitlab"
+	ConnectorTypeGitRepo     = "git_repo"
 	ConnectorTypeIMA         = "ima"
 
 	// Sync modes
@@ -235,6 +236,13 @@ type DataSourceConfig struct {
 	// ingesting an image into a KB without VLM is rejected, so image extraction is
 	// skipped when this is false.
 	MultimodalEnabled bool `json:"-"`
+
+	// ID and TenantID are populated by the sync service before each fetch (never
+	// persisted, json:"-") so connectors that maintain on-disk state (e.g. git_repo
+	// clones) can namespace it per data source. Follows the MultimodalEnabled
+	// precedent of injecting per-run context through the config object.
+	ID       string `json:"-"`
+	TenantID uint64 `json:"-"`
 }
 
 // HasCredentials reports whether the credentials map carries any value at
