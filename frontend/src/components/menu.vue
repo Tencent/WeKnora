@@ -2,7 +2,7 @@
     <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed }">
         <!-- 展开时：Logo + 搜索/折叠按钮同行 -->
         <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
-            <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
+            <div class="logo_box" @click="router.push('/platform/videos')" style="cursor: pointer;">
                 <img class="logo" src="@/assets/img/weknora.png" alt="">
                 <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
             </div>
@@ -85,7 +85,7 @@
                         <div class="menu_item-box">
                             <div class="menu_icon">
                                 <img class="icon"
-                                    :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
+                                    :src="getImgSrc(item.icon == 'home' ? homeIcon : item.icon == 'graph' ? graphIcon : item.icon == 'queries' ? queriesIcon : item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
                                     alt="">
                             </div>
                             <template v-if="!uiStore.sidebarCollapsed">
@@ -101,7 +101,7 @@
             </div>
 
             <!-- 历史会话：按来源筛选后统一按日期分组展示 -->
-            <div class="submenu" v-if="!uiStore.sidebarCollapsed">
+            <div class="submenu" v-if="showChatHistory && !uiStore.sidebarCollapsed">
                 <!-- Stable, always-mounted source filter: reserving its row here
                      (instead of embedding it in the first date group, which
                      appears/disappears while a bucket loads) prevents the
@@ -341,6 +341,8 @@ type MenuItem = { title: string; icon: string; path: string; childrenPath?: stri
 const { menuArr, visibleMenuArr } = storeToRefs(usemenuStore);
 let activeSubmenu = ref<string>('');
 const isLiteEdition = ref(false);
+// Batch 1 keeps Chat as a placeholder and intentionally hides session history.
+const showChatHistory = false;
 
 // 批量管理状态
 const batchMode = ref(false)
@@ -348,7 +350,7 @@ const batchSelectedIds = ref<string[]>([])
 const batchDeleting = ref(false)
 
 const allSessionIds = computed(() => {
-    const chatMenu = (menuArr.value as unknown as MenuItem[]).find((item: MenuItem) => item.path === 'creatChat');
+    const chatMenu = (menuArr.value as unknown as MenuItem[]).find((item: MenuItem) => item.path === 'ai-chat');
     if (!chatMenu?.children) return [];
     return (chatMenu.children as any[]).map((s: any) => s.id);
 })
@@ -407,8 +409,14 @@ const isMenuItemActive = (itemPath: string): boolean => {
             return currentRoute === 'agentList';
         case 'organizations':
             return currentRoute === 'organizationList';
-        case 'creatChat':
-            return currentRoute === 'kbCreatChat' || currentRoute === 'globalCreatChat';
+        case 'home':
+            return currentRoute === 'videoList' || currentRoute === 'videoDetail';
+        case 'ai-chat':
+            return currentRoute === 'aiChat';
+        case 'graph':
+            return currentRoute === 'knowledgeGraph';
+        case 'queries':
+            return currentRoute === 'userQueries';
         case 'settings':
             return currentRoute === 'settings';
         default:
@@ -426,7 +434,7 @@ const getIconActiveState = (itemPath: string) => {
             currentRoute === 'knowledgeBaseDetail' ||
             currentRoute === 'knowledgeBaseSettings'
         ),
-        isCreatChatActive: itemPath === 'creatChat' && (currentRoute === 'kbCreatChat' || currentRoute === 'globalCreatChat'),
+        isCreatChatActive: itemPath === 'ai-chat' && currentRoute === 'aiChat',
         isSettingsActive: itemPath === 'settings' && currentRoute === 'settings',
         isChatActive: itemPath === 'chat' && currentRoute === 'chat'
     };
@@ -435,13 +443,13 @@ const getIconActiveState = (itemPath: string) => {
 // 分离上下两部分菜单（使用 visibleMenuArr 以便 lite 模式过滤 logout）
 const topMenuItems = computed<MenuItem[]>(() => {
     return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) =>
-        item.path === 'knowledge-bases' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat'
+        item.path === 'home' || item.path === 'ai-chat' || item.path === 'graph' || item.path === 'queries'
     );
 });
 
 const bottomMenuItems = computed<MenuItem[]>(() => {
     return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => {
-        if (item.path === 'knowledge-bases' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat') {
+        if (item.path === 'home' || item.path === 'ai-chat' || item.path === 'graph' || item.path === 'queries') {
             return false;
         }
         return true;
@@ -728,7 +736,7 @@ const ensureSessionInSidebar = (sessionId: string) => {
     const web = sessionBuckets.value.web;
     if (!web) return;
 
-    const chatMenu = (menuArr.value as unknown as MenuItem[]).find((item) => item.path === 'creatChat');
+    const chatMenu = (menuArr.value as unknown as MenuItem[]).find((item) => item.path === 'ai-chat');
     const fromStore = (chatMenu?.children as Record<string, unknown>[] | undefined)
         ?.find((item) => item.id === sessionId);
     if (!fromStore) return;
@@ -825,7 +833,7 @@ const syncActiveBucketFromChat = async (sessionId: string | undefined) => {
 
     let bucketKey = findSessionBucketKey(sessionBuckets.value, sessionId);
     if (!bucketKey) {
-        const chatMenu = (menuArr.value as unknown as MenuItem[]).find((item) => item.path === 'creatChat');
+        const chatMenu = (menuArr.value as unknown as MenuItem[]).find((item) => item.path === 'ai-chat');
         const fromStore = (chatMenu?.children as Record<string, unknown>[] | undefined)
             ?.find((item) => item.id === sessionId);
         if (fromStore) {
@@ -986,12 +994,14 @@ onMounted(async () => {
 
     await loadCurrentKbInfo((route.params as any)?.kbId as string)
 
-    await loadSessionOriginMeta();
-    await getMessageList();
-    const initialChatId = route.params.chatid as string | undefined;
-    if (initialChatId) {
-        ensureSessionInSidebar(initialChatId);
-        await syncActiveBucketFromChat(initialChatId);
+    if (showChatHistory) {
+        await loadSessionOriginMeta();
+        await getMessageList();
+        const initialChatId = route.params.chatid as string | undefined;
+        if (initialChatId) {
+            ensureSessionInSidebar(initialChatId);
+            await syncActiveBucketFromChat(initialChatId);
+        }
     }
     // 若组织列表未加载则拉取一次，用于侧栏「待审批」角标
     if (deploymentCapabilities.isSupported('organizations') && orgStore.organizations.length === 0) {
@@ -1034,11 +1044,14 @@ let logoutIcon = ref('logout.svg');
 let settingIcon = ref('setting.svg');
 let agentIcon = ref('agent.svg');
 let organizationIcon = ref('organization.svg');
+let homeIcon = ref('home.svg');
+let graphIcon = ref('graph.svg');
+let queriesIcon = ref('queries.svg');
 let pathPrefix = ref(route.name)
 const getIcon = (path: string) => {
     // 根据当前路由状态更新所有图标
     const kbActiveState = getIconActiveState('knowledge-bases');
-    const creatChatActiveState = getIconActiveState('creatChat');
+    const creatChatActiveState = getIconActiveState('ai-chat');
     const settingsActiveState = getIconActiveState('settings');
     const agentsActiveState = route.name === 'agentList';
     const organizationsActiveState = route.name === 'organizationList';
@@ -1054,6 +1067,9 @@ const getIcon = (path: string) => {
 
     // 对话图标：只在对话创建页面显示绿色，其他情况显示默认
     prefixIcon.value = creatChatActiveState.isCreatChatActive ? 'prefixIcon-green.svg' : 'prefixIcon.svg';
+    homeIcon.value = isMenuItemActive('home') ? 'home-green.svg' : 'home.svg';
+    graphIcon.value = isMenuItemActive('graph') ? 'graph-green.svg' : 'graph.svg';
+    queriesIcon.value = isMenuItemActive('queries') ? 'queries-green.svg' : 'queries.svg';
 
     // 设置图标：只在设置页面显示绿色
     settingIcon.value = settingsActiveState.isSettingsActive ? 'setting-green.svg' : 'setting.svg';
@@ -1063,7 +1079,15 @@ const getIcon = (path: string) => {
 }
 getIcon(typeof route.name === 'string' ? route.name as string : (route.name ? String(route.name) : ''))
 const handleMenuClick = async (path: string) => {
-    if (path === 'knowledge-bases') {
+    if (path === 'home') {
+        router.push('/platform/videos')
+    } else if (path === 'ai-chat') {
+        router.push('/platform/ai-chat')
+    } else if (path === 'graph') {
+        router.push('/platform/graph')
+    } else if (path === 'queries') {
+        router.push('/platform/queries')
+    } else if (path === 'knowledge-bases') {
         // 知识库菜单项：如果在知识库内部，跳转到当前知识库文件页；否则跳转到知识库列表
         const kbId = await getCurrentKbId()
         if (kbId) {
@@ -1115,13 +1139,13 @@ const gotopage = async (path: string) => {
         router.push('/login');
         return;
     } else {
-        if (path === 'creatChat') {
+        if (path === 'ai-chat') {
             // 如果在知识库详情页，跳转到全局对话创建页
             if (isInKnowledgeBase.value) {
-                router.push('/platform/creatChat')
+                router.push('/platform/ai-chat')
             } else {
                 // 如果不在知识库内，进入对话创建页
-                router.push(`/platform/creatChat`)
+                router.push(`/platform/ai-chat`)
             }
         } else {
             router.push(`/platform/${path}`);

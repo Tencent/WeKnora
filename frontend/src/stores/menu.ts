@@ -21,17 +21,10 @@ const createMenuChildren = () => reactive<MenuChild[]>([])
 
 export const useMenuStore = defineStore('menuStore', () => {
   const menuArr = reactive<MenuItem[]>([
-    {
-      title: '',
-      titleKey: 'menu.newChat',
-      icon: 'prefixIcon',
-      path: 'creatChat',
-      childrenPath: 'chat',
-      children: createMenuChildren()
-    },
-    { title: '', titleKey: 'menu.knowledgeBase', icon: 'zhishiku', path: 'knowledge-bases' },
-    { title: '', titleKey: 'menu.agents', icon: 'agent', path: 'agents', requiredCapability: 'agents' },
-    { title: '', titleKey: 'menu.organizations', icon: 'organization', path: 'organizations', requiredCapability: 'organizations' },
+    { title: 'Home', icon: 'home', path: 'home' },
+    { title: 'Chat', icon: 'prefixIcon', path: 'ai-chat' },
+    { title: 'Knowledge Graph', icon: 'graph', path: 'graph' },
+    { title: 'User Queries', icon: 'queries', path: 'queries' },
     { title: '', titleKey: 'menu.settings', icon: 'setting', path: 'settings' },
     { title: '', titleKey: 'menu.logout', icon: 'logout', path: 'logout' }
   ])
@@ -61,7 +54,7 @@ export const useMenuStore = defineStore('menuStore', () => {
     }
   )
 
-  const liteHiddenPaths = new Set(['logout', 'organizations'])
+  const liteHiddenPaths = new Set(['logout'])
 
   // 共享空间 (organizations) 仅对当前空间的 admin / owner 暴露入口。
   // viewer / contributor 即便在共享空间里拥有资源，也无需自行管理共享关系，
@@ -83,7 +76,7 @@ export const useMenuStore = defineStore('menuStore', () => {
     })
   })
 
-  const chatMenuIndex = menuArr.findIndex(item => item.path === 'creatChat')
+  const chatMenuIndex = menuArr.findIndex(item => item.path === 'ai-chat')
 
   const clearMenuArr = () => {
     const chatMenu = menuArr[chatMenuIndex]
@@ -94,9 +87,7 @@ export const useMenuStore = defineStore('menuStore', () => {
 
   const updatemenuArr = (obj: any) => {
     const chatMenu = menuArr[chatMenuIndex]
-    if (!chatMenu.children) {
-      chatMenu.children = createMenuChildren()
-    }
+    if (!chatMenu.children) return
     const exists = chatMenu.children.some((item: MenuChild) => item.id === obj.id)
     if (!exists) {
       chatMenu.children.push(obj)
@@ -105,9 +96,7 @@ export const useMenuStore = defineStore('menuStore', () => {
 
   const updataMenuChildren = (item: MenuChild) => {
     const chatMenu = menuArr[chatMenuIndex]
-    if (!chatMenu.children) {
-      chatMenu.children = createMenuChildren()
-    }
+    if (!chatMenu.children) return
     chatMenu.children.unshift(item)
   }
 
