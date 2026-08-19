@@ -56,7 +56,7 @@ Errors emit an error envelope on stderr (`--format json`) or prose
     "type": "auth.unauthenticated",
     "message": "fetch current user: HTTP error 401",
     "hint": "run `weknora auth login`",
-    "retry_command": "weknora auth login --host https://kb.example.com",
+    "retry_argv": ["weknora", "auth", "login"],
     "retry_after_seconds": 0,
     "risk": {"level": "destructive", "action": "noun.verb"},
     "detail": {}
@@ -66,13 +66,11 @@ Errors emit an error envelope on stderr (`--format json`) or prose
 ```
 
 `type` is the typed code (see [Error code reference](#error-code-reference)
-below). `hint` is prose; `retry_command` is the suggested next argv (single
-shell-escaped string). For non-destructive errors agents may execute it; on
-exit-10 (`input.confirmation_required`) it is informational only — the human
-must approve the destructive write explicitly. See "Exit-10 anti-patterns" for
-details. Note: tokens in `retry_command` are built via `fmt.Sprintf` with
-user-supplied IDs unquoted — callers that auto-execute must shell-quote each
-token (emitting as a JSON array is planned for v0.8).
+below). `hint` is prose; `retry_argv` is the suggested next argv as a JSON
+string array. For non-destructive errors agents may execute it; on exit-10
+(`input.confirmation_required`) it is informational only — the human must
+approve the destructive write explicitly. See "Exit-10 anti-patterns" for
+details.
 `retry_after_seconds` mirrors HTTP `Retry-After`. `risk` tags high-risk writes.
 `detail` carries structured per-error context (e.g. `unknown_subcommand`'s
 `available[]` list).
@@ -159,12 +157,12 @@ is or isn't aligned with.
 | **WeKnora** | DELETE triggers exit-10 (`input.confirmation_required`); user bypasses with `-y/--yes` |
 | **Rationale** | DELETE is irreversible. Most raw-API CLI commands rely on restricted credentials for safety, but self-hosted deployments may not have restricted-credential infrastructure available. Defensive default because agents are common consumers. |
 
-### 3. `retry_command` distinct from `hint`
+### 3. `retry_argv` distinct from `hint`
 
 | | |
 |---|---|
-| **WeKnora** | two separate fields: `retry_command` (suggested next argv, directly-executable for non-destructive errors; informational only on exit-10) + `hint` (prose) |
-| **Rationale** | Agents don't regex-extract argv from prose — known fragility. Trade-off: one extra envelope field. On exit-10, the user must approve the destructive write; agents surface `retry_command` for human review, not auto-execution. |
+| **WeKnora** | two separate fields: `retry_argv` (suggested next argv as a string array, directly executable for non-destructive errors; informational only on exit-10) + `hint` (prose) |
+| **Rationale** | Agents don't regex-extract argv from prose — known fragility. Trade-off: one extra envelope field. On exit-10, the user must approve the destructive write; agents surface `retry_argv` for human review, not auto-execution. |
 
 ### 4. NDJSON event stream has no envelope wrapping
 
@@ -435,7 +433,7 @@ For common retry patterns, AI agents can hardcode:
 
 Exit code 10 (`input.confirmation_required`) marks a destructive write where the
 CLI refused to proceed without explicit user approval. The retry envelope includes
-`retry_command` showing the exact argv that would proceed. AI agents must NEVER
+`retry_argv` showing the exact argv that would proceed. AI agents must NEVER
 auto-retry this exit code — every exit 10 is a user-in-the-loop decision.
 
 **Don't do these:**
@@ -443,7 +441,7 @@ auto-retry this exit code — every exit 10 is a user-in-the-loop decision.
 1. **Auto-add `-y/--yes` and retry.** The flag exists for the user, not the agent.
    Surface the exit-10 envelope to the user verbatim and wait for explicit go-ahead.
 
-2. **Parse the retry_command and run it.** The retry_command is *informational* --
+2. **Execute `retry_argv`.** The argv is *informational* --
    showing what *would* execute. Running it without user input collapses two steps
    the user is supposed to see.
 
