@@ -32,6 +32,14 @@ var (
 	jwtSecretOnce sync.Once
 	jwtSecret     string
 
+	// ErrUserEmailExists is returned by Register when the target entity's
+	// email already exists.
+	ErrUserEmailExists = errors.New("user with this email already exists")
+
+	// ErrUserUsernameExists is returned by Register when the target entity's
+	// username already exists.
+	ErrUserUsernameExists = errors.New("user with this username already exists")
+
 	// ErrPasswordPolicy is returned when a newly chosen password does not
 	// meet the product's public 8-32 character, letter-and-number contract.
 	// It is exported so HTTP handlers can translate the failure to a 400
@@ -136,12 +144,12 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 	// Check if user already exists
 	existingUser, _ := s.userRepo.GetUserByEmail(ctx, req.Email)
 	if existingUser != nil {
-		return nil, errors.New("user with this email already exists")
+		return nil, ErrUserEmailExists
 	}
 
 	existingUser, _ = s.userRepo.GetUserByUsername(ctx, req.Username)
 	if existingUser != nil {
-		return nil, errors.New("user with this username already exists")
+		return nil, ErrUserUsernameExists
 	}
 
 	// Hash password
@@ -764,7 +772,24 @@ func (s *userService) AdminCreateUser(
 		Password:           password,
 		TenantProvisioning: provisioning,
 	})
+	// WARN: idempotency is sequential only. Two concurrent creates of the
+	// same identity can race past Register's check; the loser gets a 500,
+	// and a retry resolves idempotently.
 	if err != nil {
+		// Register owns duplicate detection; on a duplicate we surface
+		// the existing row so the caller can respond idempotently. The
+		// sentinel names the colliding identity, so the lookup is
+		// targeted at exactly that key.
+		switch {
+		case errors.Is(err, ErrUserEmailExists):
+			if existing, lookupErr := s.userRepo.GetUserByEmail(ctx, strings.TrimSpace(req.Email)); lookupErr == nil && existing != nil {
+				return existing, "", err
+			}
+		case errors.Is(err, ErrUserUsernameExists):
+			if existing, lookupErr := s.userRepo.GetUserByUsername(ctx, strings.TrimSpace(req.Username)); lookupErr == nil && existing != nil {
+				return existing, "", err
+			}
+		}
 		return nil, "", err
 	}
 	if generated {

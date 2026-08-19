@@ -1610,7 +1610,8 @@ type CreateSystemUserResponse struct {
 // @Produce      json
 // @Param        request body types.AdminCreateUserRequest true "User creation request"
 // @Success      201  {object}  CreateSystemUserResponse  "User created successfully"
-// @Failure      400  {object}  map[string]interface{}  "Invalid request, weak or duplicate identity"
+// @Success      200  {object}  CreateSystemUserResponse  "Identity already exists, returns the existing user"
+// @Failure      400  {object}  map[string]interface{}  "Invalid request or weak password"
 // @Failure      403  {object}  map[string]interface{}  "Forbidden: not a system admin"
 // @Failure      500  {object}  map[string]interface{}  "Internal error"
 // @Router       /system/admin/users/create [post]
@@ -1638,7 +1639,21 @@ func (h *SystemHandler) CreateSystemUser(c *gin.Context) {
 	user, generatedPassword, err := h.userSvc.AdminCreateUser(ctx, &req, h.resolveDefaultTenantMode(ctx))
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrPasswordPolicy), strings.Contains(err.Error(), "already exists"):
+		case errors.Is(err, service.ErrUserEmailExists) || errors.Is(err, service.ErrUserUsernameExists):
+			if user == nil {
+				logger.Errorf(ctx, "Duplicate identity error without a resolved user: %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+				return
+			}
+			logger.Infof(ctx, "Create user noop (identity already exists, ID: %s)", user.ID)
+			h.emitAdminAudit(ctx, types.AuditActionSystemUserCreated, user, map[string]any{
+				"target_email":       user.Email,
+				"target_username":    user.Username,
+				"password_generated": false,
+				"idempotent":         true,
+			})
+			c.JSON(http.StatusOK, CreateSystemUserResponse{User: user.ToUserInfo()})
+		case errors.Is(err, service.ErrPasswordPolicy):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		default:
 			logger.Errorf(ctx, "Failed to create user: %v", err)
@@ -1652,6 +1667,7 @@ func (h *SystemHandler) CreateSystemUser(c *gin.Context) {
 		"target_email":       user.Email,
 		"target_username":    user.Username,
 		"password_generated": generatedPassword != "",
+		"idempotent":         false,
 	})
 	c.JSON(http.StatusCreated, CreateSystemUserResponse{
 		User:              user.ToUserInfo(),

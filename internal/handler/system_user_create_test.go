@@ -103,6 +103,9 @@ func TestCreateSystemUserCreatesUserWithExplicitPassword(t *testing.T) {
 	if !strings.Contains(string(audits.entries[0].Details), `"password_generated":false`) {
 		t.Fatalf("audit details must mark password_generated=false, got %s", audits.entries[0].Details)
 	}
+	if !strings.Contains(string(audits.entries[0].Details), `"idempotent":false`) {
+		t.Fatalf("audit details must mark idempotent=false, got %s", audits.entries[0].Details)
+	}
 }
 
 func TestCreateSystemUserAutoGeneratesPasswordWhenEmpty(t *testing.T) {
@@ -144,6 +147,9 @@ func TestCreateSystemUserAutoGeneratesPasswordWhenEmpty(t *testing.T) {
 	}
 	if !strings.Contains(string(audits.entries[0].Details), `"password_generated":true`) {
 		t.Fatalf("audit details must mark password_generated=true, got %s", audits.entries[0].Details)
+	}
+	if !strings.Contains(string(audits.entries[0].Details), `"idempotent":false`) {
+		t.Fatalf("audit details must mark idempotent=false, got %s", audits.entries[0].Details)
 	}
 }
 
@@ -198,21 +204,43 @@ func TestCreateSystemUserMapsPasswordPolicyTo400(t *testing.T) {
 	}
 }
 
-func TestCreateSystemUserMapsDuplicateIdentityTo400(t *testing.T) {
-	for _, err := range []error{
-		errors.New("user with this email already exists"),
-		errors.New("user with this username already exists"),
-	} {
-		users := &createUserService{err: err}
-		h := &SystemHandler{userSvc: users}
-		r := createSystemUserRouter(h, "admin-user")
+func TestCreateSystemUserDuplicateIdentityReturnsExistingUser(t *testing.T) {
+	// Idempotent contract: when the identity already exists the service
+	// returns the existing user with ErrUserEmailExists/ErrUserUsernameExists,
+	// and the handler answers 200 with the existing UserInfo, an empty
+	// generated_password and an audit row marked idempotent.
+	users := &createUserService{
+		createdUser: &types.User{ID: "existing", Username: "alice", Email: "alice@example.com"},
+		err:         service.ErrUserUsernameExists,
+	}
+	audits := &capturingAuditService{}
+	h := &SystemHandler{userSvc: users, auditSvc: audits}
+	r := createSystemUserRouter(h, "admin-user")
 
-		w := performCreateSystemUser(t, r, map[string]string{
-			"username": "alice", "email": "alice@example.com",
-		})
-		if w.Code != http.StatusBadRequest {
-			t.Fatalf("err=%v status=%d body=%s", err, w.Code, w.Body.String())
-		}
+	w := performCreateSystemUser(t, r, map[string]string{
+		"username": "alice", "email": "alice@example.com",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var resp CreateSystemUserResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.User == nil || resp.User.ID != "existing" {
+		t.Fatalf("unexpected user: %+v", resp.User)
+	}
+	if resp.GeneratedPassword != "" {
+		t.Fatalf("generated_password=%q, want empty for an existing user", resp.GeneratedPassword)
+	}
+	if len(audits.entries) != 1 || audits.entries[0].Action != types.AuditActionSystemUserCreated {
+		t.Fatalf("expected one %s audit entry, got %+v", types.AuditActionSystemUserCreated, audits.entries)
+	}
+	if !strings.Contains(string(audits.entries[0].Details), `"idempotent":true`) {
+		t.Fatalf("audit details must mark idempotent=true, got %s", audits.entries[0].Details)
+	}
+	if !strings.Contains(string(audits.entries[0].Details), `"password_generated":false`) {
+		t.Fatalf("audit details must mark password_generated=false, got %s", audits.entries[0].Details)
 	}
 }
 

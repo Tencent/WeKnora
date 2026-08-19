@@ -165,16 +165,89 @@ func TestAdminCreateUserRejectsWeakPasswordBeforePersisting(t *testing.T) {
 	}
 }
 
-func TestAdminCreateUserPropagatesDuplicateEmail(t *testing.T) {
-	repo := &adminCreateUserRepo{existingByEmail: &types.User{ID: "existing"}}
+func TestAdminCreateUserDuplicateReturnsExistingUserWithSentinel(t *testing.T) {
+	existing := &types.User{ID: "existing", Email: "alice@example.com"}
+	repo := &adminCreateUserRepo{existingByEmail: existing}
 	svc := newAdminCreateUserService(repo)
 
-	_, _, err := svc.AdminCreateUser(context.Background(), &types.AdminCreateUserRequest{
+	user, generated, err := svc.AdminCreateUser(context.Background(), &types.AdminCreateUserRequest{
 		Username: "alice", Email: "alice@example.com", Password: new("PlainPass9"),
 	}, types.TenantProvisioningTenantless)
-	if err == nil || !strings.Contains(err.Error(), "already exists") {
-		t.Fatalf("err=%v, want duplicate error", err)
+	if !errors.Is(err, ErrUserEmailExists) {
+		t.Fatalf("err=%v, want ErrUserEmailExists", err)
 	}
+	if user == nil || user.ID != existing.ID {
+		t.Fatalf("user=%v, want the existing user %q", user, existing.ID)
+	}
+	if generated != "" {
+		t.Fatalf("generated=%q, want no generated password for an existing user", generated)
+	}
+	if repo.created != nil {
+		t.Fatal("existing user was overwritten")
+	}
+}
+
+func TestAdminCreateUserDuplicateUsernameReturnsExistingUserWithSentinel(t *testing.T) {
+	existing := &types.User{ID: "existing", Username: "alice"}
+	repo := &adminCreateUserRepo{existingByUsername: existing}
+	svc := newAdminCreateUserService(repo)
+
+	user, _, err := svc.AdminCreateUser(context.Background(), &types.AdminCreateUserRequest{
+		Username: "alice", Email: "alice@example.com", Password: new("PlainPass9"),
+	}, types.TenantProvisioningTenantless)
+	if !errors.Is(err, ErrUserUsernameExists) {
+		t.Fatalf("err=%v, want ErrUserUsernameExists", err)
+	}
+	if user == nil || user.ID != existing.ID {
+		t.Fatalf("user=%v, want the existing user %q", user, existing.ID)
+	}
+}
+
+func TestAdminCreateUserDuplicateLookupTargetsSentinelIdentity(t *testing.T) {
+	// Register reports a username collision (email free at check time).
+	// A user owning the request email appears before the duplicate lookup,
+	// as if created concurrently. The lookup must return the user named by
+	// the sentinel, not the email owner a fallback would have picked.
+	repo := &racyIdentityRepo{
+		byUsername: &types.User{ID: "username-owner", Username: "alice"},
+		byEmail:    &types.User{ID: "email-owner", Email: "alice@example.com"},
+	}
+	svc := &userService{userRepo: repo}
+
+	user, _, err := svc.AdminCreateUser(context.Background(), &types.AdminCreateUserRequest{
+		Username: "alice", Email: "alice@example.com", Password: new("PlainPass9"),
+	}, types.TenantProvisioningTenantless)
+	if !errors.Is(err, ErrUserUsernameExists) {
+		t.Fatalf("err=%v, want ErrUserUsernameExists", err)
+	}
+	if user == nil || user.ID != repo.byUsername.ID {
+		t.Fatalf("user=%v, want the username-collision owner %q", user, repo.byUsername.ID)
+	}
+	if repo.emailLookups != 1 {
+		t.Fatalf("emailLookups=%d, want 1 (Register's check only, the duplicate lookup must not query email)", repo.emailLookups)
+	}
+}
+
+// racyIdentityRepo simulates a concurrent create between Register's
+// duplicate check and AdminCreateUser's duplicate-path lookup: the email
+// becomes occupied only on the second query.
+type racyIdentityRepo struct {
+	interfaces.UserRepository
+	byUsername   *types.User
+	byEmail      *types.User
+	emailLookups int
+}
+
+func (r *racyIdentityRepo) GetUserByEmail(_ context.Context, _ string) (*types.User, error) {
+	r.emailLookups++
+	if r.emailLookups > 1 {
+		return r.byEmail, nil
+	}
+	return nil, nil
+}
+
+func (r *racyIdentityRepo) GetUserByUsername(_ context.Context, _ string) (*types.User, error) {
+	return r.byUsername, nil
 }
 
 func TestAdminCreateUserRejectsMissingIdentity(t *testing.T) {
