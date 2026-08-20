@@ -95,11 +95,17 @@
       </svg>
     </div>
 
-    <!-- Logo + Brand - Top Left -->
-    <div class="header-logo">
+    <!-- Logo + Brand - Top Left（showLoginGithubLink=true 时还原为 GitHub 外链） -->
+    <component
+      :is="FEATURES.showLoginGithubLink ? 'a' : 'div'"
+      :href="FEATURES.showLoginGithubLink ? 'https://github.com/Tencent/WeKnora' : null"
+      :target="FEATURES.showLoginGithubLink ? '_blank' : null"
+      :title="FEATURES.showLoginGithubLink ? $t('common.github') : null"
+      class="header-logo"
+    >
       <img :src="BRAND_LOGO_SRC" :alt="BRANDING.name" class="logo-image" />
       <span class="logo-brand"><span class="brand-s" :style="{ color: BRANDING.accentColor }">{{ BRAND_ACCENT_LETTER }}</span>{{ BRAND_NAME_TAIL }}</span>
-    </div>
+    </component>
 
     <!-- Header Links - Top Right -->
     <div class="header-links">
@@ -364,7 +370,7 @@ import {
 } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
-import { BRANDING, BRAND_ACCENT_LETTER, BRAND_NAME_TAIL, BRAND_LOGO_SRC } from '@/config/branding'
+import { BRANDING, BRAND_ACCENT_LETTER, BRAND_NAME_TAIL, BRAND_LOGO_SRC, FEATURES } from '@/config/branding'
 
 // Import screenshot images
 import screenshot1 from '@/assets/img/screenshot-1.svg'
@@ -1207,6 +1213,7 @@ onMounted(async () => {
   left: 50px;
   z-index: 100;
   cursor: pointer;
+  text-decoration: none;
   display: flex;
   align-items: center;
   gap: 12px;

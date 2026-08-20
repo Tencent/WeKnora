@@ -27,6 +27,8 @@ export const FEATURES = {
   showChromeClawIntegrations: false,
   /** 「全部设置 → 模型」是否显示「WeKnora Cloud」（默认隐藏） */
   showWeKnoraCloud: false,
+  /** 登录页 logo 是否还原为 GitHub 外链（true=可点击跳转 GitHub，false=纯展示） */
+  showLoginGithubLink: false,
 } as const
 
 // ---------- logo 构建期解析 ----------
