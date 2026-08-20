@@ -147,6 +147,15 @@ POST   /api/v1/datasource/:id/pause         # Pause
 POST   /api/v1/datasource/:id/resume        # Resume
 ```
 
+### Webhooks (public, platform-authenticated)
+```
+POST   /api/v1/datasource/webhooks/git/:id  # GitLab/GitHub push webhook →
+                                             # incremental sync of a git_repo
+                                             # data source (X-Gitlab-Token or
+                                             # X-Hub-Signature-256 auth; see
+                                             # handler/datasource_webhook.go)
+```
+
 ### Logs
 ```
 GET    /api/v1/datasource/:id/logs          # List sync logs

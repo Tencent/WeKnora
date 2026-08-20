@@ -591,6 +591,20 @@ export default {
       paths: 'Каталоги', pathsPlaceholder: 'По одному каталогу в строке; оставьте пустым для синхронизации всего проекта',
       addProject: 'Добавить проект', projectRequired: 'Добавьте хотя бы один проект GitLab',
     },
+    gitRepo: {
+      accessToken: 'Токен доступа (для приватных репозиториев)', accessTokenHint: 'Необязательно — для публичных репозиториев оставьте пустым',
+      repos: 'Git-репозитории',
+      reposHint: 'Добавьте репозитории для синхронизации. Markdown/HTML документы импортируются, изображения с относительными путями встраиваются автоматически.',
+      repo: 'Репозиторий', repoUrl: 'URL репозитория', repoUrlPlaceholder: 'Например: https://github.com/org/blog.git',
+      repoRequired: 'Добавьте хотя бы один репозиторий',
+      branch: 'Ветка', branchPlaceholder: 'Оставьте пустым, чтобы использовать ветку по умолчанию',
+      paths: 'Каталоги', pathsPlaceholder: 'По одному каталогу в строке; оставьте пустым для синхронизации всего репозитория',
+      addRepo: 'Добавить репозиторий',
+      webhookTitle: 'Автосинхронизация при push (Webhook)',
+      webhookCopy: 'Копировать URL',
+      webhookCopied: 'URL вебхука скопирован',
+      webhookDesc: 'Добавьте этот URL как webhook (Push events) в настройках репозитория GitLab / GitHub — каждый push будет автоматически запускать инкрементную синхронизацию. Секретный токен настраивает администратор (webhook_secret источника данных или переменная окружения GIT_REPO_WEBHOOK_SECRET).',
+    },
     resourceHint: 'Выберите пространства или папки для синхронизации',
     untitled: 'Без названия',
     resourceLoadFailed: 'Не удалось загрузить список ресурсов',
@@ -714,7 +728,8 @@ export default {
       yuque: 'Синхронизация документов из баз знаний Yuque',
       ima: 'Синхронизация документов, заметок и файлов из баз знаний Tencent IMA (ИИ-сессии и разбор видео не поддерживаются)',
       rss: 'Синхронизация статей из лент RSS / Atom',
-      gitlab: 'Синхронизация файлов из проектов GitLab'
+      gitlab: 'Синхронизация файлов из проектов GitLab',
+      git_repo: 'Синхронизация Markdown-документов и изображений с относительными путями из Git-репозитория (например, блог на VuePress)'
     },
     connector: {
       feishu: 'Feishu (Фэйшу)',
@@ -725,7 +740,8 @@ export default {
       yuque: 'Yuque (Юйцюэ)',
       ima: 'Tencent IMA',
       rss: 'RSS / Atom лента',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      git_repo: 'Git-репозиторий'
     },
     logDetail: {
       startTime: 'Время начала',

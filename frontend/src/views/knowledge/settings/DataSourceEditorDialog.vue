@@ -19,6 +19,7 @@ import {
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { getDatasourceIconUrl } from './datasourceIcons'
+import { copyWithToast } from '@/utils/clipboard'
 
 const props = defineProps<{
   kbId: string
@@ -207,6 +208,7 @@ const driveFolderTokenError = ref('')
 const driveRootLoaded = ref(false)
 const isDriveConnector = (type: string) => type === 'feishu_drive' || type === 'lark_drive'
 const isGitLabConnector = (type: string) => type === 'gitlab'
+const isGitRepoConnector = (type: string) => type === 'git_repo'
 
 interface GitLabProjectInput { project_id: string; ref: string; pathsText: string }
 const gitlabProjects = ref<GitLabProjectInput[]>([])
@@ -221,6 +223,34 @@ function syncGitLabProjectsToSettings() {
 }
 function addGitLabProject() { gitlabProjects.value.push({ project_id: '', ref: '', pathsText: '' }) }
 function removeGitLabProject(index: number) { gitlabProjects.value.splice(index, 1); syncGitLabProjectsToSettings() }
+
+interface GitRepoRepoInput { repo_url: string; branch: string; pathsText: string }
+const gitRepoRepos = ref<GitRepoRepoInput[]>([])
+function syncGitRepoReposToSettings() {
+  if (!isGitRepoConnector(form.value.type)) return
+  form.value.config.settings.repos = gitRepoRepos.value
+    .filter(repo => repo.repo_url.trim())
+    .map(repo => ({
+      repo_url: repo.repo_url.trim(), branch: repo.branch.trim(),
+      paths: repo.pathsText.split(/[\n,]/).map(p => p.trim()).filter(Boolean),
+    }))
+}
+function addGitRepoRepo() { gitRepoRepos.value.push({ repo_url: '', branch: '', pathsText: '' }) }
+function removeGitRepoRepo(index: number) { gitRepoRepos.value.splice(index, 1); syncGitRepoReposToSettings() }
+
+// gitWebhookURL builds the push-webhook callback URL for this data source.
+// Only meaningful in edit mode: the ID must exist on the server before
+// GitLab/GitHub can be pointed at it (creation mode has no ID yet — the hint
+// shows up after saving and reopening). Built from the SPA origin so it
+// matches how the user reaches this app; nginx proxies /api to the backend.
+const gitWebhookURL = computed(() => {
+  if (!isEdit.value || !props.dataSource?.id) return ''
+  const origin = (typeof window !== 'undefined' && window.location?.origin) || ''
+  return `${origin}/api/v1/datasource/webhooks/git/${props.dataSource.id}`
+})
+async function copyGitWebhookURL() {
+  await copyWithToast(gitWebhookURL.value, 'datasource.gitRepo.webhookCopied')
+}
 
 // extractDriveFolderToken accepts either a bare folder_token or a Drive folder
 // URL (https://xxx.feishu.cn/drive/folder/<token> or the Lark equivalent
@@ -633,6 +663,16 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'access_token', labelKey: 'datasource.gitlab.accessToken', placeholder: '', secret: true },
     ],
   },
+  {
+    // Git Repo (git_repo): syncs markdown/docs + relative images from a git
+    // repository (e.g. a VuePress blog) via remote URL clone. The token is
+    // optional — public repos sync anonymously. Repo selection is edited in
+    // Step 2 (no resource tree).
+    type: 'git_repo', available: true, docUrl: '', permissionDocUrl: '', permissionPageUrl: '', requiredPermissions: [],
+    fields: [
+      { key: 'access_token', labelKey: 'datasource.gitRepo.accessToken', placeholder: '', secret: true, optional: true, hintKey: 'datasource.gitRepo.accessTokenHint' },
+    ],
+  },
 ])
 
 
@@ -668,6 +708,7 @@ watch(visible, async (v) => {
   driveRootLoaded.value = false
   rssAuthHeaders.value = []
   gitlabProjects.value = []
+  gitRepoRepos.value = []
 
   if (isEdit.value && props.dataSource) {
     // Reset edit/replace toggle every open so an aborted replace doesn't
@@ -699,6 +740,13 @@ watch(visible, async (v) => {
       gitlabProjects.value = savedProjects.map((project: any) => ({
         project_id: String(project.project_id || ''), ref: String(project.ref || ''),
         pathsText: Array.isArray(project.paths) ? project.paths.join('\n') : '',
+      }))
+    }
+    if (isGitRepoConnector(form.value.type)) {
+      const savedRepos = Array.isArray(form.value.config.settings.repos) ? form.value.config.settings.repos : []
+      gitRepoRepos.value = savedRepos.map((repo: any) => ({
+        repo_url: String(repo.repo_url || ''), branch: String(repo.branch || ''),
+        pathsText: Array.isArray(repo.paths) ? repo.paths.join('\n') : '',
       }))
     }
     // Pre-fill the Drive root folder_token from the saved resource_ids so the
@@ -768,6 +816,7 @@ function selectType(def: ConnectorDef) {
   form.value.name = t(`datasource.connector.${def.type}`)
   form.value.config.credentials = {}
   if (isGitLabConnector(def.type)) addGitLabProject()
+  if (isGitRepoConnector(def.type)) addGitRepoRepo()
   rssAuthHeaders.value = []
   step.value = 1
 }
@@ -1008,6 +1057,13 @@ async function nextStep() {
       return
     }
   }
+  if (step.value === 2 && isGitRepoConnector(form.value.type)) {
+    syncGitRepoReposToSettings()
+    if (!gitRepoRepos.value.some(repo => repo.repo_url.trim())) {
+      MessagePlugin.warning(t('datasource.gitRepo.repoRequired'))
+      return
+    }
+  }
   step.value++
   if (step.value === 2) {
     // Drive connectors need a user-supplied folder_token before listing.
@@ -1021,6 +1077,7 @@ async function nextStep() {
       return
     }
     if (isGitLabConnector(form.value.type)) return
+    if (isGitRepoConnector(form.value.type)) return
     loadResources()
   }
 }
@@ -1040,6 +1097,7 @@ function prevStep() {
 // validator happy.
 function buildConfigPayload(): Record<string, unknown> {
   syncGitLabProjectsToSettings()
+  syncGitRepoReposToSettings()
   return {
     credentials: isEdit.value ? {} : { ...form.value.config.credentials },
     resource_ids: form.value.config.resource_ids,
@@ -1576,6 +1634,41 @@ const drawerConfirmText = computed(() => {
             <t-textarea v-model="project.pathsText" :placeholder="t('datasource.gitlab.pathsPlaceholder')" :autosize="{ minRows: 2, maxRows: 5 }" />
           </div>
           <t-button variant="outline" @click="addGitLabProject"><template #icon><t-icon name="add" /></template>{{ t('datasource.gitlab.addProject') }}</t-button>
+        </div>
+      </template>
+      <template v-else-if="isGitRepoConnector(form.type)">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.gitRepo.repos') }}</h4>
+        <p class="ds-resource-hint">{{ t('datasource.gitRepo.reposHint') }}</p>
+        <div class="gitlab-project-list">
+          <div v-for="(repo, index) in gitRepoRepos" :key="index" class="gitlab-project-row">
+            <div class="gitlab-project-row__header">
+              <strong>{{ t('datasource.gitRepo.repo') }} {{ index + 1 }}</strong>
+              <t-button variant="text" size="small" theme="danger" @click="removeGitRepoRepo(index)"><t-icon name="delete" /></t-button>
+            </div>
+            <label class="form-label required">{{ t('datasource.gitRepo.repoUrl') }}</label>
+            <t-input v-model="repo.repo_url" :placeholder="t('datasource.gitRepo.repoUrlPlaceholder')" />
+            <label class="form-label">{{ t('datasource.gitRepo.branch') }}</label>
+            <t-input v-model="repo.branch" :placeholder="t('datasource.gitRepo.branchPlaceholder')" />
+            <label class="form-label">{{ t('datasource.gitRepo.paths') }}</label>
+            <t-textarea v-model="repo.pathsText" :placeholder="t('datasource.gitRepo.pathsPlaceholder')" :autosize="{ minRows: 2, maxRows: 5 }" />
+          </div>
+          <t-button variant="outline" @click="addGitRepoRepo"><template #icon><t-icon name="add" /></template>{{ t('datasource.gitRepo.addRepo') }}</t-button>
+        </div>
+
+        <!-- Push webhook hint (read-only): copy-paste URL for GitLab/GitHub.
+             Edit mode only — creation has no server-side ID to point at yet.
+             The secret itself is never echoed back; the hint tells the admin
+             where it comes from (settings or env var). -->
+        <div v-if="gitWebhookURL" class="ds-webhook-hint">
+          <div class="ds-webhook-hint__header">
+            <span class="ds-webhook-hint__title">{{ t('datasource.gitRepo.webhookTitle') }}</span>
+            <t-button variant="text" size="small" @click="copyGitWebhookURL">
+              <template #icon><t-icon name="file-copy" /></template>
+              {{ t('datasource.gitRepo.webhookCopy') }}
+            </t-button>
+          </div>
+          <p class="ds-webhook-hint__url" :title="gitWebhookURL">{{ gitWebhookURL }}</p>
+          <p class="ds-webhook-hint__desc">{{ t('datasource.gitRepo.webhookDesc') }}</p>
         </div>
       </template>
       <template v-else>
@@ -2686,6 +2779,40 @@ const drawerConfirmText = computed(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+/* Push webhook hint card (git_repo, edit mode): read-only URL + copy. */
+.ds-webhook-hint {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--td-component-stroke);
+  border-radius: 6px;
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.ds-webhook-hint__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ds-webhook-hint__title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.ds-webhook-hint__url {
+  margin: 6px 0 2px;
+  font-family: var(--td-font-family-code, monospace);
+  font-size: 12px;
+  word-break: break-all;
+  color: var(--td-text-color-primary);
+}
+
+.ds-webhook-hint__desc {
+  margin: 0;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
 }
 </style>
 

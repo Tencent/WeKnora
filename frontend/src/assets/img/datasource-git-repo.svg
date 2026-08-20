@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Git Repo">
+  <!-- git-branch style icon: commit node with two diverging branches -->
+  <circle cx="10" cy="14" r="6" fill="#F05133"/>
+  <circle cx="38" cy="14" r="6" fill="#F05133"/>
+  <circle cx="24" cy="38" r="6" fill="#F05133"/>
+  <path d="M10 20v6c0 3 2 5 5 5h9" fill="none" stroke="#F05133" stroke-width="4" stroke-linecap="round"/>
+  <path d="M38 20v2c0 3-2 5-5 5h-6" fill="none" stroke="#F05133" stroke-width="4" stroke-linecap="round"/>
+</svg>

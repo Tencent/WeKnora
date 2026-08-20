@@ -285,6 +285,14 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "token",
 		Capabilities: []string{"incremental", "hierarchical"},
 	},
+	types.ConnectorTypeGitRepo: {
+		Type:         types.ConnectorTypeGitRepo,
+		Name:         "Git Repo (Git 仓库)",
+		Description:  "Sync markdown documents and relative images from a Git repository (e.g. a VuePress blog)",
+		Priority:     8,
+		AuthType:     "token",
+		Capabilities: []string{"incremental", "deletion_sync"},
+	},
 }
 
 // ListAvailableConnectors returns all available connector metadata

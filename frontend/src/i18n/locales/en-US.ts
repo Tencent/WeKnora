@@ -5617,6 +5617,19 @@ export default {
       paths: 'Directories', pathsPlaceholder: 'One directory per line; leave empty to sync the whole project',
       addProject: 'Add project', projectRequired: 'Add at least one GitLab project',
     },
+    gitRepo: {
+      accessToken: 'Access token (for private repos)', accessTokenHint: 'Optional — leave empty for public repositories',
+      repos: 'Git repositories', reposHint: 'Add the repositories to sync. Markdown/HTML documents are imported; relative-path images are inlined automatically.',
+      repo: 'Repository', repoUrl: 'Repository URL', repoUrlPlaceholder: 'For example: https://github.com/org/blog.git',
+      repoRequired: 'Add at least one repository',
+      branch: 'Branch', branchPlaceholder: 'Leave empty to use the default branch',
+      paths: 'Directories', pathsPlaceholder: 'One directory per line; leave empty to sync the whole repository',
+      addRepo: 'Add repository',
+      webhookTitle: 'Push auto-sync (Webhook)',
+      webhookCopy: 'Copy URL',
+      webhookCopied: 'Webhook URL copied',
+      webhookDesc: 'Add this URL as a webhook (Push events) in your GitLab / GitHub repository settings to trigger an incremental sync on every push. The secret token is set by the administrator (data source webhook_secret or the GIT_REPO_WEBHOOK_SECRET environment variable).',
+    },
     resourceHint: 'Select the spaces or folders to sync',
     untitled: 'Untitled',
     resourceLoadFailed: 'Failed to load resources',
@@ -5686,7 +5699,8 @@ export default {
       yuque: 'Yuque',
       rss: 'RSS / Atom Feed',
       ima: 'Tencent IMA',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      git_repo: 'Git Repo'
     },
     connectorDesc: {
       feishu: 'Sync documents, spreadsheets and files from Feishu Wiki',
@@ -5697,7 +5711,8 @@ export default {
       yuque: 'Sync documents from Yuque knowledge bases',
       rss: 'Sync articles from RSS / Atom feeds',
       ima: 'Sync documents, notes and files from Tencent IMA knowledge bases (AI sessions and video parses are not supported)',
-      gitlab: 'Sync files from GitLab projects'
+      gitlab: 'Sync files from GitLab projects',
+      git_repo: 'Sync markdown documents and relative images from a Git repository (e.g. a VuePress blog)'
     },
     drive: {
       folderTokenLabel: 'Drive folder token',

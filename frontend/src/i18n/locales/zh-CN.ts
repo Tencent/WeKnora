@@ -593,6 +593,20 @@ export default {
       paths: '同步目录', pathsPlaceholder: '每行一个目录；留空同步整个项目',
       addProject: '添加项目', projectRequired: '请至少添加一个 GitLab 项目',
     },
+    gitRepo: {
+      accessToken: '访问令牌（私有仓库）', accessTokenHint: '可选 —— 公开仓库留空即可',
+      repos: 'Git 仓库',
+      reposHint: '添加要同步的仓库。Markdown/HTML 文档会导入，相对路径图片会自动内联。',
+      repo: '仓库', repoUrl: '仓库地址', repoUrlPlaceholder: '例如：https://github.com/org/blog.git',
+      repoRequired: '请至少添加一个仓库',
+      branch: '分支', branchPlaceholder: '留空时使用默认分支',
+      paths: '同步目录', pathsPlaceholder: '每行一个目录；留空同步整个仓库',
+      addRepo: '添加仓库',
+      webhookTitle: 'Push 自动同步（Webhook）',
+      webhookCopy: '复制 URL',
+      webhookCopied: 'Webhook 地址已复制',
+      webhookDesc: '在 GitLab / GitHub 项目的 Webhook 设置中填入上述 URL（Push events），提交后会自动触发增量同步。Secret token 由管理员配置（数据源 webhook_secret 或环境变量 GIT_REPO_WEBHOOK_SECRET）。',
+    },
     resourceHint: '选择要同步的内容空间/文件夹',
     untitled: '无标题',
     resourceLoadFailed: '加载资源列表失败',
@@ -716,7 +730,8 @@ export default {
       yuque: '同步语雀知识库中的文档',
       ima: '同步腾讯 IMA 知识库中的文档、笔记与文件（暂不支持 AI 会话与视频解析）',
       rss: '同步 RSS / Atom 订阅源中的文章',
-      gitlab: '同步 GitLab 项目中的文件'
+      gitlab: '同步 GitLab 项目中的文件',
+      git_repo: '从 Git 仓库同步 Markdown 文档与相对路径图片（如 VuePress 博客）'
     },
     connector: {
       feishu: '飞书',
@@ -727,7 +742,8 @@ export default {
       yuque: '语雀',
       ima: '腾讯 IMA',
       rss: 'RSS / Atom 订阅',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      git_repo: 'Git 仓库'
     },
     logDetail: {
       startTime: '开始时间',
