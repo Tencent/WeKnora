@@ -261,6 +261,7 @@ const applySummaryState = (summaryStatus?: string, description?: string) => {
 
 const isSummaryStatusInFlight = (status?: string) => status === 'pending' || status === 'processing';
 const summaryStatusRefreshing = computed(() => isSummaryStatusInFlight(props.details?.summary_status));
+const canEditSummary = computed(() => canEditContent.value && !summaryStatusRefreshing.value);
 let summaryStatusPollTimer: ReturnType<typeof setTimeout> | null = null;
 let summaryStatusPollGeneration = 0;
 
@@ -840,10 +841,18 @@ watch(() => viewMode.value, (mode) => {
 }, { flush: 'post' });
 
 watch(() => props.visible, (visible) => {
-  if (visible && (viewMode.value === 'chunks' || viewMode.value === 'merged')) {
+  if (!visible) {
+    cancelSummaryEdit();
+  } else if (viewMode.value === 'chunks' || viewMode.value === 'merged') {
     runMarkdownPostRenderPipeline();
   }
 }, { flush: 'post' });
+
+watch(summaryStatusRefreshing, (refreshing) => {
+  if (refreshing) {
+    cancelSummaryEdit();
+  }
+});
 
 // 渲染 Mermaid 图表的函数
 const renderMermaidDiagrams = async () => {
@@ -1754,7 +1763,7 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
               </span>
             </div>
             <div v-if="canEditContent && !summaryEditing" class="summary-title-actions">
-              <t-tooltip :content="$t('common.edit')" placement="top">
+              <t-tooltip v-if="canEditSummary" :content="$t('common.edit')" placement="top">
                 <t-button class="icon-action-btn" size="small" variant="text" shape="square"
                   @click="startSummaryEdit">
                   <template #icon><t-icon name="edit" size="15px" /></template>
