@@ -11,7 +11,7 @@ import { onMounted, ref, nextTick, onUnmounted, watch, computed } from "vue";
 import {
   downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile,
   updateDocumentChunk, listChunkRevisions, revertDocumentChunk, updateKnowledgeMetadata,
-  regenerateKnowledgeSummary, upsertGeneratedQuestion, regenerateGeneratedQuestions, getKnowledgeDetails,
+  updateKnowledgeSummary, regenerateKnowledgeSummary, upsertGeneratedQuestion, regenerateGeneratedQuestions, getKnowledgeDetails,
   KNOWLEDGE_CHUNK_PAGE_SIZE,
 } from "@/api/knowledge-base/index";
 import { MessagePlugin } from "tdesign-vue-next";
@@ -52,6 +52,34 @@ const metadataEditing = ref(false);
 const metadataDraft = ref<MetadataDraftRow[]>([]);
 const metadataSaving = ref(false);
 const summaryRefreshing = ref(false);
+const summaryEditing = ref(false);
+const summaryDraft = ref('');
+const summarySaving = ref(false);
+
+const startSummaryEdit = () => {
+  summaryDraft.value = props.details?.description || '';
+  summaryEditing.value = true;
+};
+
+const cancelSummaryEdit = () => {
+  summaryEditing.value = false;
+  summaryDraft.value = '';
+};
+
+const saveSummary = async () => {
+  summarySaving.value = true;
+  try {
+    const description = summaryDraft.value.trim();
+    const result: any = await updateKnowledgeSummary(props.details.id, description);
+    applySummaryState(result?.data?.summary_status, result?.data?.description ?? description);
+    summaryEditing.value = false;
+    MessagePlugin.success(t('common.saveSuccess'));
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.saveFailed'));
+  } finally {
+    summarySaving.value = false;
+  }
+};
 
 const metadataTypeOptions = computed(() => [
   { label: t('knowledgeBase.metadataTypeText'), value: 'text' },
@@ -603,6 +631,7 @@ onMounted(() => {
 });
 
 watch(() => props.details?.id, () => {
+  cancelSummaryEdit();
   chunkPage.value = 1;
   loadedChunkPage.value = 1;
   pendingChunkPage = null;
@@ -1724,14 +1753,34 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
                 <span>{{ $t('knowledgeBase.generatingSummary') }}</span>
               </span>
             </div>
-            <t-tooltip v-if="canEditContent" :content="$t('knowledgeBase.regenerateSummary')" placement="top">
-              <t-button class="icon-action-btn" size="small" variant="text" shape="square"
-                :loading="summaryRefreshing" @click="refreshSummary">
-                <template #icon><t-icon name="refresh" size="15px" /></template>
-              </t-button>
-            </t-tooltip>
+            <div v-if="canEditContent && !summaryEditing" class="summary-title-actions">
+              <t-tooltip :content="$t('common.edit')" placement="top">
+                <t-button class="icon-action-btn" size="small" variant="text" shape="square"
+                  @click="startSummaryEdit">
+                  <template #icon><t-icon name="edit" size="15px" /></template>
+                </t-button>
+              </t-tooltip>
+              <t-tooltip :content="$t('knowledgeBase.regenerateSummary')" placement="top">
+                <t-button class="icon-action-btn" size="small" variant="text" shape="square"
+                  :loading="summaryRefreshing" @click="refreshSummary">
+                  <template #icon><t-icon name="refresh" size="15px" /></template>
+                </t-button>
+              </t-tooltip>
+            </div>
           </div>
-          <div v-if="details.description" class="summary_wrapper"
+          <div v-if="summaryEditing" class="summary_editor">
+            <t-textarea v-model="summaryDraft" :autosize="{ minRows: 4, maxRows: 10 }"
+              :placeholder="$t('knowledgeBase.noDocumentSummary')" />
+            <div class="summary_editor_actions">
+              <t-button size="small" variant="outline" :disabled="summarySaving" @click="cancelSummaryEdit">
+                {{ $t('common.cancel') }}
+              </t-button>
+              <t-button size="small" theme="primary" :loading="summarySaving" @click="saveSummary">
+                {{ $t('common.save') }}
+              </t-button>
+            </div>
+          </div>
+          <div v-else-if="details.description" class="summary_wrapper"
             :class="{ 'summary_clickable': summaryOverflow || summaryExpanded }"
             @click="(summaryOverflow || summaryExpanded) && (summaryExpanded = !summaryExpanded)">
             <div ref="summaryRef" :class="['summary_content', { 'summary_collapsed': !summaryExpanded }]">{{
@@ -2543,6 +2592,23 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
   &.summary_clickable {
     cursor: pointer;
   }
+}
+
+.summary-title-actions,
+.summary_editor_actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.summary_editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.summary_editor_actions {
+  justify-content: flex-end;
 }
 
 .summary_content {

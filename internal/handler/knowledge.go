@@ -1807,13 +1807,24 @@ func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 		return
 	}
 
-	var knowledge types.Knowledge
-	if err := c.ShouldBindJSON(&knowledge); err != nil {
+	var req struct {
+		Title          *string         `json:"title"`
+		Description    *string         `json:"description"`
+		CustomMetadata json.RawMessage `json:"custom_metadata"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	knowledge.ID = id
+	knowledge := types.Knowledge{ID: id, CustomMetadata: types.JSON(req.CustomMetadata)}
+	if req.Title != nil {
+		knowledge.Title = *req.Title
+	}
+	if req.Description != nil {
+		knowledge.Description = *req.Description
+		knowledge.DescriptionSpecified = true
+	}
 
 	if err := h.kgService.UpdateKnowledge(effCtx, &knowledge); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
