@@ -20,18 +20,20 @@
           </t-tabs>
         </aside>
       </div>
+      <AiAssistant :current-video="video" :current-time="currentSeconds" @seek="seekTo" @navigate="navigateToEvidence" />
     </template>
   </main>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { fetchVideoDetail, fetchVideoOptions } from '@/api/videohub'
 import type { VideoData } from '@/types/videohub'
 import VideoPlayer from '@/components/videohub/VideoPlayer.vue'
 import ChapterNavigation from '@/components/videohub/ChapterNavigation.vue'
 import PlaceholderView from '@/components/videohub/PlaceholderView.vue'
+import AiAssistant from '@/components/videohub/AiAssistant.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -46,11 +48,20 @@ const error = ref('')
 
 async function loadVideo(id: string) {
   loading.value = true; error.value = ''; currentSeconds.value = 0
-  try { video.value = await fetchVideoDetail(id); selectedVideoId.value = id }
+  try {
+    video.value = await fetchVideoDetail(id); selectedVideoId.value = id
+    await nextTick()
+    const querySeconds = Number(route.query.t)
+    if (route.query.t !== undefined && Number.isFinite(querySeconds)) seekTo(Math.min(Math.max(querySeconds, 0), video.value.durationSeconds))
+  }
   catch (reason) { video.value = null; error.value = reason instanceof Error ? reason.message : '视频加载失败' }
   finally { loading.value = false }
 }
 function seekTo(seconds: number) { player.value?.seekTo(seconds) }
+function navigateToEvidence(videoId: string, seconds: number) {
+  if (videoId === video.value?.id) seekTo(seconds)
+  else router.push(`/platform/videos/${videoId}?t=${seconds}`)
+}
 function switchVideo(value: string | number | Array<string | number>) { if (typeof value === 'string') router.push(`/platform/videos/${value}`) }
 watch(() => route.params.videoId, value => { if (typeof value === 'string') loadVideo(value) })
 onMounted(async () => {

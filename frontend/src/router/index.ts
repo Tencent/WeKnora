@@ -137,8 +137,7 @@ const router = createRouter({
         {
           path: "ai-chat",
           name: "aiChat",
-          component: () => import("../components/videohub/PlaceholderView.vue"),
-          props: { title: 'Chat' },
+          component: () => import("../views/videohub/ChatView.vue"),
           meta: { requiresInit: true, requiresAuth: true }
         },
         {

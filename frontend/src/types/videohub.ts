@@ -46,3 +46,37 @@ export interface VideoData {
 }
 
 export type VideoOption = Pick<VideoData, 'id' | 'title'>
+
+export interface EvidenceLink {
+  label: string
+  timestamp: string
+  seconds: number
+}
+
+export interface ChatMessage {
+  id: string
+  sender: 'user' | 'assistant'
+  text: string
+  timestamp: string
+  relatedVideoId?: string
+  relatedTime?: number
+  relatedVideoTitle?: string
+  evidenceLinks?: EvidenceLink[]
+}
+
+export interface ChatSession {
+  id: string
+  title: string
+  type: 'chat' | 'doc'
+  time: string
+  messages: ChatMessage[]
+}
+
+export interface UploadForm {
+  file: { name: string; size: number }
+}
+
+export interface UploadProgress {
+  stage: 'uploading'
+  percent: number
+}
