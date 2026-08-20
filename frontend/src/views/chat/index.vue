@@ -76,19 +76,28 @@
                 <div v-for="(session, index) in messagesList"
                     :key="session.id || `${session.role}-${session.created_at}-${index}`" class="msg-item-wrapper">
 
-                    <div v-if="session.role == 'user'">
+                    <div v-if="session.role == 'user'" class="message-row message-row--user">
                         <usermsg :content="session.content" :mentioned_items="session.mentioned_items"
                             :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"
                             :session-id="session_id">
                         </usermsg>
+                        <time v-if="formatMessageTimestamp(session.created_at)" class="message-time"
+                            :datetime="session.created_at">
+                            {{ formatMessageTimestamp(session.created_at) }}
+                        </time>
                     </div>
-                    <div v-if="session.role == 'assistant' && shouldRenderAssistantMessage(session)">
+                    <div v-if="session.role == 'assistant' && shouldRenderAssistantMessage(session)"
+                        class="message-row message-row--assistant">
                         <botmsg :content="session.content" :session="session" :session-id="session_id"
                             :user-query="getUserQuery(index)" @scroll-bottom="scrollToBottom"
                             :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"
                             :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
                             @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
                         </botmsg>
+                        <time v-if="formatMessageTimestamp(session.created_at)" class="message-time"
+                            :datetime="session.created_at">
+                            {{ formatMessageTimestamp(session.created_at) }}
+                        </time>
                         <FollowUpSuggestions v-if="session.answerFullyRendered && !session.suggestionsDismissed"
                             :suggestion-set="session.suggestionSet"
                             :loading="session.suggestionLoading"
@@ -159,6 +168,7 @@ import {
 } from '@/api/message-suggestion';
 import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
 import { provideChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
+import { ensureMessageCreatedAt, formatMessageTimestamp } from '@/utils/messageTimestamp';
 
 const referencesDrawer = provideChatReferencesDrawer();
 provideChatAttachmentPreviewDrawer();
@@ -584,7 +594,10 @@ const {
         pendingStreamDebug.value = buildStreamDebugPayload();
         if (existingMessage) attachStreamDebugToMessage(existingMessage);
     },
-    onMessageCreated: (message) => attachStreamDebugToMessage(message),
+    onMessageCreated: (message) => {
+        ensureMessageCreatedAt(message);
+        attachStreamDebugToMessage(message);
+    },
     onMessageUpdated: (message, payload) => {
         attachStreamDebugToMessage(message);
         if (payload?.is_completed) pendingStreamDebug.value = null;
@@ -659,6 +672,7 @@ const handleStopGeneration = () => {
 };
 
 const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = []) => {
+    const outgoingMessageCreatedAt = new Date().toISOString();
     stopStream();
     prepareForNewOutgoingMessage();
     isReplying.value = true;
@@ -774,7 +788,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     }
 
     // 将@提及的知识库和文件信息存入用户消息
-    messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, attachments: attachmentFiles.map(a => ({ id: a.documentId, file_name: a.name, file_size: a.size, file_type: '.' + a.name.split('.').pop()?.toLowerCase() })), channel: 'web' });
+    messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, attachments: attachmentFiles.map(a => ({ id: a.documentId, file_name: a.name, file_size: a.size, file_type: '.' + a.name.split('.').pop()?.toLowerCase() })), channel: 'web', created_at: outgoingMessageCreatedAt });
     userHasScrolledUp.value = false;
     scrollToBottom(true);
 
@@ -1247,6 +1261,28 @@ onBeforeRouteUpdate((to, from, next) => {
     */
     .msg-item-wrapper {
         contain: layout style;
+    }
+
+    .message-row {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .message-row--user {
+        align-items: flex-end;
+    }
+
+    .message-time {
+        margin-top: 4px;
+        color: var(--td-text-color-secondary);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        line-height: 20px;
+    }
+
+    .message-row--assistant .message-time {
+        align-self: flex-start;
     }
 
     .botanswer_laoding_gif {
