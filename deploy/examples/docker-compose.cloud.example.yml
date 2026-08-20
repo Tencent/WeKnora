@@ -1,0 +1,160 @@
+# ============================================================
+#  WeKnora (vidsage) 生产环境 Compose Override 模板
+#  ============================================================
+#
+#  【使用方法】
+#    1. 将本文件复制到 服务器 /opt/vidsage/ 目录，命名为 docker-compose.cloud.yml
+#       cp deploy/examples/docker-compose.cloud.example.yml \
+#          /opt/vidsage/docker-compose.cloud.yml
+#    2. 按本环境实际情况修改：镜像 Tag（4处）、资源限制、环境变量来源
+#    3. 永远双文件启动（单文件必出 502 / 端口丢失 / 网络断连）：
+#       cd /opt/vidsage
+#       sudo docker compose -f docker-compose.yml -f docker-compose.cloud.yml \
+#         up -d frontend custom-backend
+#
+#  【版本控制原则】
+#    · 本地仓库只存模板（本文件），不存服务器私有镜像 Tag、资源配额等现场值
+#    · 服务器的 docker-compose.cloud.yml 为"派生文件"，每次修改先改模板，再复制到服务器
+#    · 每次替换镜像 Tag 前先备份：
+#       cp docker-compose.cloud.yml docker-compose.cloud.yml.bak-$(date +%Y%m%d%H%M%S)
+#
+#  【镜像 Tag 约定】—— 与 output/development/个性化代码部署与发布流程.md §4.1 完全一致
+#    · 前缀 lizi586586/ （Docker Hub 用户名，按实际改为自己的）
+#    · UI:       vidsage-ui             :custom-${WEKNORA_VERSION}-YYYYMMDDHHMMSS-${COMMIT8}
+#    · App(官方版本升级 / 二开官方源码时覆盖 Tag，平时不需要动):
+#                 vidsage-app            :custom-${WEKNORA_VERSION}-YYYYMMDDHHMMSS-${COMMIT8}
+#    · 后端独立:  vidsage-custom-backend :custom-${WEKNORA_VERSION}-YYYYMMDDHHMMSS-${COMMIT8}
+# ============================================================
+
+services:
+
+  # ----------------------------------------------------------
+  # 1. 前端 UI（必二开，每改 frontend/ 或 nginx.conf 都要重新打镜像）
+  #    基础 docker-compose.yml 已经声明了 ports/container_name/networks/volumes，
+  #    这里只覆盖 image + depends_on.condition + deploy.resources
+  # ----------------------------------------------------------
+  frontend:
+    image: lizi586586/vidsage-ui:custom-v0.7.2-20260820154021-31aecd1b
+    depends_on:
+      app:
+        condition: service_healthy
+      # custom-backend 健康检查依赖默认关闭（custom-backend 未部署时必须保持注释，否则 compose up 会因找不到服务报错）
+      # ⚠️ 仅当 docker-compose.cloud.yml 中已声明并启用 custom-backend 服务后，才取消下面两行注释
+      # custom-backend:
+      #   condition: service_healthy   # 个性化后端也健康后，前端再启（避免/api/custom 502）
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+
+  # ----------------------------------------------------------
+  # 2. WeKnora 官方 app（官方版本升级 / 确需二开官方 Go 源码时才需要覆盖 image）
+  #    **其余发布一律不需要改这一节**，保持官方镜像即可
+  # ----------------------------------------------------------
+  # app:
+  #   image: lizi586586/vidsage-app:custom-v0.7.3-20260901120000-aaaaaaaa
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: "0.80"
+  #         memory: 1024M
+  #       reservations:
+  #         cpus: "0.10"
+  #         memory: 256M
+
+  # ----------------------------------------------------------
+  # 3. 个性化后端独立服务（custom-backend · 唯一后端部署方式，默认启用）
+  #    ⚠️ 因为基础 docker-compose.yml 官方不包含此服务，
+  #       所以本 override 中必须写全 container_name/networks/restart 等全部字段
+  # ----------------------------------------------------------
+  custom-backend:
+    container_name: Vidsage-custom-backend
+    image: lizi586586/vidsage-custom-backend:custom-v0.7.2-20260820181000-fefbec3d
+
+    # 依赖顺序：数据库 / Redis / 官方 app 全部 healthy 后才启
+    depends_on:
+      app:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    # 必须与基础 compose 里定义的默认网络同名，
+    # 才能通过 hostname "app" / "postgres" / "redis" / "neo4j" 互相访问
+    networks:
+      - weknora
+
+    restart: unless-stopped
+
+    environment:
+      # 通用
+      TZ: Asia/Shanghai
+      LOG_LEVEL: info
+      PORT: "8081"
+
+      # 复用官方服务 —— 通过 compose network 内 hostname 访问，不走公网
+      WEKNORA_APP_INTERNAL_BASE_URL: "http://app:8080"
+      DATABASE_URL: "${DATABASE_URL}"       # 与官方 app 读同一个 .env 变量
+      REDIS_URL: "${REDIS_URL}"
+      MINIO_ENDPOINT: "minio:9000"
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD}"
+      NEO4J_URI: "bolt://neo4j:7687"
+      NEO4J_USER: "${NEO4J_USER:-neo4j}"
+      NEO4J_PASSWORD: "${NEO4J_PASSWORD}"
+
+      # 鉴权：复用 WeKnora 官方签发的 JWT（handler 里调官方 /api/auth/me 校验）
+      WEKNORA_JWT_SECRET: "${JWT_SECRET}"
+
+      # LLM（官方 /api/custom/v1/* 里需要调 LLM 时用）
+      LLM_API_BASE: "${LLM_API_BASE:-}"
+      LLM_API_KEY:  "${LLM_API_KEY:-}"
+      LLM_MODEL:    "${LLM_MODEL:-}"
+
+    # 2C4G 服务器资源总盘子留位：
+    #   postgres + redis + minio + neo4j + app + docreader ≈ 1.6C / 2.1G
+    #   frontend ≈ 0.5C / 512M
+    #   custom-backend ≈ 0.5C / 512M（下方）
+    #   余裕 ≈ 0.4C / 512M（给宿主机与突发）
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+
+    healthcheck:
+      # 对应 internal/custom/router 里必须注册的 GET /health 端点
+      # ⚠️ Dockerfile.custom-backend 基础镜像必须包含 wget，否则健康检查会直接 Exit 127：
+      #    - 若基础镜像为 alpine:  RUN apk add --no-cache wget
+      #    - 若基础镜像为 debian:  RUN apt-get update && apt-get install -y --no-install-recommends wget && rm -rf /var/lib/apt/lists/*
+      #    - 若基础镜像为 distroless/static-debian*：healthcheck 改用 Go 原生方案（编译一个 /bin/healthcheck go binary 打进镜像）
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+    # ⭐ 禁止映射 host port：只允许经 Nginx /api/custom/* 反代进入，
+    #    否则公网直连会绕过 Nginx 层的超时/大小限制/统一鉴权。
+    # ports: []
+
+# ----------------------------------------------------------
+# 网络：与基础 docker-compose.yml 保持同名（已存在，无需 driver 定义）
+# ----------------------------------------------------------
+networks:
+  weknora:
+    external: false
