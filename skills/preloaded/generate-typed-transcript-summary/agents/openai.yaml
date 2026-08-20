@@ -1,0 +1,4 @@
+interface:
+  display_name: "类型化文字稿总结"
+  short_description: "按照人物访谈、培训、沙龙或通用模板生成智能总结"
+  default_prompt: "使用 $generate-typed-transcript-summary 按文字稿类型生成智能总结。"

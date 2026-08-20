@@ -1,0 +1,4 @@
+interface:
+  display_name: "文字稿页面组装"
+  short_description: "组装概览、大纲、智能总结、相关知识和质量说明为前台页面"
+  default_prompt: "使用 $assemble-transcript-page 将文字稿知识产物组装成前台页面。"

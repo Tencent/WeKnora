@@ -1,0 +1,4 @@
+interface:
+  display_name: "文字稿内容大纲"
+  short_description: "生成包含时间范围、核心知识、说话人与完整原文的可读大纲"
+  default_prompt: "使用 $generate-transcript-outline 生成可浏览、可追溯的文字稿内容大纲。"

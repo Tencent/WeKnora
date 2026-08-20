@@ -1,0 +1,4 @@
+interface:
+  display_name: "时间轴检索"
+  short_description: "通过自然语言描述定位视频时间范围、文稿段落和证据片段"
+  default_prompt: "使用 $retrieve-from-timeline 从视频时间轴中检索定位内容。"

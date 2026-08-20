@@ -1,0 +1,4 @@
+interface:
+  display_name: "Seedream 插画生成"
+  short_description: "调用豆包 Seedream 5.0 Pro API 根据插画计划生成小黑风格配图"
+  default_prompt: "使用 $generate-seedream-illustration 根据插画计划或文字描述生成配图。"

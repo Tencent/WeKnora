@@ -1,0 +1,4 @@
+interface:
+  display_name: "文字稿内容概览"
+  short_description: "从已审计知识生成用于判断是否深入学习的快速概览"
+  default_prompt: "使用 $summarize-transcript-content 为这些文字稿生成简洁且经过审计的内容概览。"
