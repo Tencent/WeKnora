@@ -42,6 +42,17 @@ func sessionSandboxShellExecutor(mgr sandbox.Manager) sandbox.SessionShellExecut
 	return provider.SessionShellExecutor()
 }
 
+// sessionSandboxInstallShellExecutor is the install-mode counterpart of
+// sessionSandboxShellExecutor. It is a separate accessor on a separate
+// interface so a caller cannot obtain the privileged executor by accident.
+func sessionSandboxInstallShellExecutor(mgr sandbox.Manager) sandbox.SessionInstallShellExecutor {
+	provider, ok := mgr.(sandbox.SessionInstallCapabilityProvider)
+	if !ok || provider == nil {
+		return nil
+	}
+	return provider.SessionInstallShellExecutor()
+}
+
 // sessionAttachmentStager is the agentService surface the QA pipeline needs to
 // stage attachments. Declared as a named interface so the runtime type
 // assertion in session_agent_qa.go has one definition to drift against.

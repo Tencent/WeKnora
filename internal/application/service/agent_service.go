@@ -235,12 +235,20 @@ func (s *agentService) CreateAgentEngine(
 		}
 	}
 
-	// Initialize skills manager if skills are enabled
-	if config.SkillsEnabled && len(config.SkillDirs) > 0 {
+	skillsEnabledWithDirs := config.SkillsEnabled && len(config.SkillDirs) > 0
+	// Initialize the skills/sandbox manager when skills are configured, or for
+	// the skill installer, which keeps skills off yet needs the sandbox shell.
+	// The second disjunct is deliberately NOT "the config lists a sandbox
+	// tool": shell_exec is a user-selectable entry in the tool picker, so that
+	// rule would hand a live sandbox shell to every stored agent record that
+	// already lists it. Install mode is settable only through
+	// EnableSkillInstallMode, so only the built-in installer passes here and
+	// every other agent keeps exactly its previous behaviour.
+	if skillsEnabledWithDirs || config.SkillInstallMode() {
 		skillsManager, err := s.initializeSkillsManager(ctx, sessionID, config, toolRegistry)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to initialize skills manager: %v", err)
-		} else if skillsManager != nil {
+		} else if skillsEnabledWithDirs && skillsManager != nil {
 			engine.SetSkillsManager(skillsManager)
 			logger.Infof(ctx, "Skills manager initialized with %d skills",
 				len(skillsManager.GetAllMetadata()))
@@ -397,15 +405,19 @@ func (s *agentService) initializeSkillsManager(
 		return nil, fmt.Errorf("failed to initialize skills: %w", err)
 	}
 
-	// Register skills tools
-	readSkillTool := tools.NewReadSkillTool(skillsManager)
-	toolRegistry.RegisterTool(readSkillTool)
-	logger.Infof(ctx, "Registered read_skill tool")
+	// Skill tools follow SkillsEnabled, not merely sandbox availability: the
+	// skill installer agent must have shell_exec WITHOUT
+	// execute_skill_script, since it is the thing installing skills.
+	if config.SkillsEnabled {
+		toolRegistry.RegisterTool(tools.NewReadSkillTool(skillsManager))
+		logger.Infof(ctx, "Registered read_skill tool")
+	}
 
 	if sandboxMgr.GetType() != sandbox.SandboxTypeDisabled {
-		executeSkillTool := tools.NewExecuteSkillScriptTool(skillsManager)
-		toolRegistry.RegisterTool(executeSkillTool)
-		logger.Infof(ctx, "Registered execute_skill_script tool")
+		if config.SkillsEnabled {
+			toolRegistry.RegisterTool(tools.NewExecuteSkillScriptTool(skillsManager))
+			logger.Infof(ctx, "Registered execute_skill_script tool")
+		}
 
 		// list_sandbox_files / read_sandbox_file expose per-session
 		// filesystem inspection. Registration is gated on the sandbox
@@ -413,27 +425,63 @@ func (s *agentService) initializeSkillsManager(
 		// that fell back to a stateless local sandbox return nil so we
 		// never surface tenant-isolated tools that would run on the
 		// WeKnora host.
-		if store := sessionSandboxFileStore(sandboxMgr); store != nil {
-			toolRegistry.RegisterTool(tools.NewListSandboxFilesTool(store))
-			toolRegistry.RegisterTool(tools.NewReadSandboxFileTool(store))
-			logger.Infof(ctx, "Registered list_sandbox_files and read_sandbox_file tools")
-		} else {
-			logger.Infof(ctx, "Sandbox backend does not advertise session filesystem capability; list_sandbox_files/read_sandbox_file not registered")
+		//
+		// They follow SkillsEnabled for the same reason the skill tools do:
+		// the installer agent is here only for the shell it needs to install
+		// dependencies, and its prompt tells it to use shell_exec alone. A
+		// root shell can already read and list anything these two could, so
+		// offering them adds nothing but tool surface and iteration budget.
+		if config.SkillsEnabled {
+			if store := sessionSandboxFileStore(sandboxMgr); store != nil {
+				toolRegistry.RegisterTool(tools.NewListSandboxFilesTool(store))
+				toolRegistry.RegisterTool(tools.NewReadSandboxFileTool(store))
+				logger.Infof(ctx, "Registered list_sandbox_files and read_sandbox_file tools")
+			} else {
+				logger.Infof(ctx, "Sandbox backend does not advertise session filesystem capability; list_sandbox_files/read_sandbox_file not registered")
+			}
 		}
 
-		// shell_exec is a remote-only capability. SessionCapabilityProvider
-		// yields nil for stateless backends and for a SessionBoundManager
-		// that fell back to LocalSandbox, so the same check works for
-		// every provider (Cube, E2B, future backends).
-		if executor := sessionSandboxShellExecutor(sandboxMgr); executor != nil {
-			toolRegistry.RegisterTool(tools.NewShellExecTool(executor))
-			logger.Infof(ctx, "Registered shell_exec tool")
-		} else {
-			logger.Infof(ctx, "Sandbox backend does not advertise remote shell capability; shell_exec not registered")
-		}
+		registerSandboxShellTool(ctx, toolRegistry, sandboxMgr, config)
 	}
 
 	return skillsManager, nil
+}
+
+// registerSandboxShellTool registers the one shell_exec variant this run is
+// entitled to.
+//
+// shell_exec is a remote-only capability: the capability accessors yield nil
+// for stateless backends and for a SessionBoundManager that fell back to
+// LocalSandbox, so the same check works for every provider.
+//
+// The skill installer agent gets the install-mode variant, which runs as root
+// and may work inside the skills image root — it exists to install
+// dependencies into the image, which the ordinary contract forbids on both
+// counts. Every other agent keeps the non-root, /workspace-only executor.
+// AgentConfig.SkillInstallMode is settable only through
+// EnableSkillInstallMode, which refuses every agent but the built-in
+// installer, so no tenant agent can reach this branch.
+func registerSandboxShellTool(
+	ctx context.Context,
+	toolRegistry *tools.ToolRegistry,
+	sandboxMgr sandbox.Manager,
+	config *types.AgentConfig,
+) {
+	if config.SkillInstallMode() {
+		if executor := sessionSandboxInstallShellExecutor(sandboxMgr); executor != nil {
+			toolRegistry.RegisterTool(tools.NewInstallShellExecTool(executor))
+			logger.Infof(ctx, "Registered install-mode shell_exec tool")
+		} else {
+			logger.Warnf(ctx, "Sandbox backend does not advertise install-mode shell capability; skill install cannot run")
+		}
+		return
+	}
+	if executor := sessionSandboxShellExecutor(sandboxMgr); executor != nil {
+		toolRegistry.RegisterTool(tools.NewShellExecTool(executor))
+		logger.Infof(ctx, "Registered shell_exec tool")
+	} else {
+		logger.Infof(ctx, "Sandbox backend does not advertise remote shell capability; shell_exec not registered")
+	}
 }
 
 // registerTools registers tools based on the agent configuration

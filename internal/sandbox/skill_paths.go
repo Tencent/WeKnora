@@ -81,10 +81,10 @@ func SkillInterpreterCommand(skillDir, scriptPath string) (string, []string) {
 	switch strings.ToLower(path.Ext(scriptPath)) {
 	case ".py":
 		venvPython := path.Join(skillDir, ".venv", "bin", "python")
-		script := shellQuote(scriptPath)
+		script := ShellQuote(scriptPath)
 		return "/bin/sh", []string{"-c", fmt.Sprintf(
 			`if [ -x %s ]; then exec %s %s "$@"; else exec python3 %s "$@"; fi`,
-			shellQuote(venvPython), shellQuote(venvPython), script, script,
+			ShellQuote(venvPython), ShellQuote(venvPython), script, script,
 		), skillShellArgv0}
 	case ".js", ".mjs":
 		return "node", []string{scriptPath}

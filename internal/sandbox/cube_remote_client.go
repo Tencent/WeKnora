@@ -836,9 +836,9 @@ func parseProxyURL(raw string) (host string, port int, scheme string, ok bool) {
 // resolve `python3` (or similar) against $PATH inside the sandbox image.
 func buildShellLine(cmd string, args []string) string {
 	parts := make([]string, 0, len(args)+1)
-	parts = append(parts, shellQuote(cmd))
+	parts = append(parts, ShellQuote(cmd))
 	for _, a := range args {
-		parts = append(parts, shellQuote(a))
+		parts = append(parts, ShellQuote(a))
 	}
 	return strings.Join(parts, " ")
 }
@@ -855,36 +855,6 @@ func wrapWithStdin(line, stdin string) string {
 	return "cat <<'" + delim + "' | " + line + "\n" + safe + "\n" + delim
 }
 
-// shellQuote wraps s in single quotes, escaping any embedded quotes. Suitable
-// for building a /bin/bash -c line where every argv element should be treated
-// as literal text.
-func shellQuote(s string) string {
-	if s == "" {
-		return "''"
-	}
-	// Only bare tokens (alnum, dash, underscore, slash, dot, comma, colon,
-	// equals, plus) can be passed unquoted; everything else gets single
-	// quotes.
-	if isShellSafe(s) {
-		return s
-	}
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
-func isShellSafe(s string) bool {
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z':
-		case r >= 'A' && r <= 'Z':
-		case r >= '0' && r <= '9':
-		case r == '-' || r == '_' || r == '/' || r == '.' || r == ',' ||
-			r == ':' || r == '=' || r == '+':
-		default:
-			return false
-		}
-	}
-	return true
-}
 func normalizeCubeState(state string) RemoteSandboxState {
 	switch strings.ToLower(strings.TrimSpace(state)) {
 	case "running", "available":
