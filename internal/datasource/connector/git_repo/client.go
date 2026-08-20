@@ -38,10 +38,13 @@ var errHistoryRewritten = errors.New(
 var errEmptyRemote = errors.New("git_repo: remote has no resolvable branch")
 
 const (
-	// gitRepoStorageEnv overrides the clone storage base directory. Defaults to
-	// the local file storage base + "/git-repos" so clones live on the persistent
-	// data volume without a new docker mount.
-	gitRepoStorageEnv = "GIT_REPO_STORAGE_BASE_DIR"
+	// localStorageBaseEnv is the shared local file-storage root. git_repo
+	// clones live under <LOCAL_STORAGE_BASE_DIR>/git-repos, namespaced per
+	// tenant / data source by cloneDirFor. The earlier dedicated
+	// GIT_REPO_STORAGE_BASE_DIR override was dropped per review: one storage
+	// root is enough and per-tenant/datasource isolation already prevents
+	// cross-tenant collisions.
+	localStorageBaseEnv = "LOCAL_STORAGE_BASE_DIR"
 )
 
 // client wraps go-git repository operations. It is stateless apart from the
@@ -77,14 +80,12 @@ func ensureSSRFTransport() {
 	})
 }
 
-// repoStorageBase resolves the root under which git clones are kept. A
-// dedicated env var wins; otherwise clones land under LOCAL_STORAGE_BASE_DIR
-// (the persistent data-files volume), which the appuser can write.
+// repoStorageBase resolves the root under which git clones are kept. Clones
+// land under LOCAL_STORAGE_BASE_DIR (the persistent data-files volume), which
+// the appuser can write, and are namespaced per tenant / data source / repo by
+// cloneDirFor.
 func repoStorageBase() string {
-	if v := os.Getenv(gitRepoStorageEnv); v != "" {
-		return filepath.Join(v, "git-repos")
-	}
-	base := os.Getenv("LOCAL_STORAGE_BASE_DIR")
+	base := os.Getenv(localStorageBaseEnv)
 	if base == "" {
 		base = "/data/files"
 	}

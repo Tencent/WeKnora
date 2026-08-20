@@ -50,7 +50,9 @@ func setupTestRepo(t *testing.T, files map[string]string) *testRepo {
 
 // commitAndPush writes files (creating/mutating), optionally removes others,
 // commits and pushes to the bare remote on the current branch.
-func commitAndPush(t *testing.T, repo *git.Repository, workDir string, files map[string]string, removed []string, msg string) {
+func commitAndPush(
+	t *testing.T, repo *git.Repository, workDir string, files map[string]string, removed []string, msg string,
+) {
 	t.Helper()
 	wt, err := repo.Worktree()
 	if err != nil {
@@ -115,17 +117,21 @@ func testConfig(url, branch string) *types.DataSourceConfig {
 }
 
 // withTempStorage redirects clone storage under a temp dir and restores after.
+// The dedicated GIT_REPO_STORAGE_BASE_DIR override was dropped per review —
+// clone storage now follows LOCAL_STORAGE_BASE_DIR (the same persistent data
+// volume) and is namespaced per tenant/data source, so tests redirect the
+// shared LOCAL_STORAGE_BASE_DIR instead.
 func withTempStorage(t *testing.T) {
 	t.Helper()
-	prev, hadPrev := os.LookupEnv(gitRepoStorageEnv)
-	if err := os.Setenv(gitRepoStorageEnv, t.TempDir()); err != nil {
+	prev, hadPrev := os.LookupEnv(localStorageBaseEnv)
+	if err := os.Setenv(localStorageBaseEnv, t.TempDir()); err != nil {
 		t.Fatalf("Setenv: %v", err)
 	}
 	t.Cleanup(func() {
 		if hadPrev {
-			_ = os.Setenv(gitRepoStorageEnv, prev)
+			_ = os.Setenv(localStorageBaseEnv, prev)
 		} else {
-			_ = os.Unsetenv(gitRepoStorageEnv)
+			_ = os.Unsetenv(localStorageBaseEnv)
 		}
 	})
 }
