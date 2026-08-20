@@ -61,6 +61,11 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 			)
 		}
 	}
+
+	assertSQLiteShareLinkInvitationsWork(t, db)
+	assertSQLiteMCPOAuthPrincipalUpsertWorks(t, db)
+	require.False(t, sqliteColumnExists(t, db, "knowledges", "tag_id"),
+		"SQLite migrations must drop legacy knowledges.tag_id after multi-tag migration")
 }
 
 func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {
@@ -80,6 +85,12 @@ func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {
 	require.Equal(t, 4, versionBefore)
 	require.False(t, dirtyBefore)
 	_, err := db.Exec("INSERT INTO tenants (name, business) VALUES (?, ?)", "upgrade-sentinel", "migration-test")
+	require.NoError(t, err)
+	_, err = db.Exec(
+		"INSERT INTO knowledges (id, tenant_id, knowledge_base_id, type, title, source, tag_id) "+
+			"VALUES (?, 1, ?, 'document', 'tagged-doc', 'manual', ?)",
+		"legacy-knowledge-1", "legacy-kb-1", "legacy-tag-1",
+	)
 	require.NoError(t, err)
 
 	// Run the full migration set from the repo root.
@@ -109,6 +120,14 @@ func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {
 	var sentinelName string
 	require.NoError(t, db.QueryRow("SELECT name FROM tenants WHERE business = ?", "migration-test").Scan(&sentinelName))
 	require.Equal(t, "upgrade-sentinel", sentinelName)
+
+	var relationCount int
+	require.NoError(t, db.QueryRow(
+		"SELECT COUNT(*) FROM knowledge_tag_relations WHERE knowledge_id = ? AND tag_id = ?",
+		"legacy-knowledge-1", "legacy-tag-1",
+	).Scan(&relationCount))
+	require.Equal(t, 1, relationCount)
+	require.False(t, sqliteColumnExists(t, db, "knowledges", "tag_id"))
 }
 
 func sqliteRepoRoot(t *testing.T) string {
@@ -159,6 +178,66 @@ func sqliteColumnExists(t *testing.T, db *sql.DB, table, column string) bool {
 		column,
 	).Scan(&n))
 	return n == 1
+}
+
+func assertSQLiteShareLinkInvitationsWork(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec("INSERT INTO tenants (name, business) VALUES (?, ?)", "share-link-tenant", "share-link-test")
+	require.NoError(t, err)
+
+	expiresAt := "2099-01-01 00:00:00"
+	shareLinkInsert := "INSERT INTO tenant_invitations " +
+		"(tenant_id, invitee_user_id, token, role, status, expires_at) " +
+		"VALUES (1, '', ?, 'member', 'pending', ?)"
+	_, err = db.Exec(shareLinkInsert, "token-a", expiresAt)
+	require.NoError(t, err)
+	_, err = db.Exec(shareLinkInsert, "token-b", expiresAt)
+	require.NoError(t, err)
+
+	var count int
+	require.NoError(t, db.QueryRow(
+		"SELECT COUNT(*) FROM tenant_invitations WHERE tenant_id = 1 AND invitee_user_id = '' AND status = 'pending'",
+	).Scan(&count))
+	require.Equal(t, 2, count)
+}
+
+func assertSQLiteMCPOAuthPrincipalUpsertWorks(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec(
+		"INSERT INTO mcp_services (id, tenant_id, name, transport_type) VALUES (?, 1, 'svc', 'http')",
+		"svc-migration-1",
+	)
+	require.NoError(t, err)
+
+	tokenInsertPrefix := "INSERT INTO mcp_oauth_tokens " +
+		"(id, tenant_id, user_id, service_id, principal_type, principal_id, access_token) "
+	_, err = db.Exec(
+		tokenInsertPrefix +
+			"VALUES ('tok-1', 1, 'u1', 'svc-migration-1', 'web_user', 'u1', 'token-1')",
+	)
+	require.NoError(t, err)
+
+	_, err = db.Exec(
+		tokenInsertPrefix +
+			"VALUES ('tok-2', 1, 'u1', 'svc-migration-1', 'web_user', 'u1', 'token-2') " +
+			"ON CONFLICT(tenant_id, principal_type, principal_id, service_id) " +
+			"DO UPDATE SET access_token = excluded.access_token",
+	)
+	require.NoError(t, err)
+
+	var accessToken string
+	require.NoError(t, db.QueryRow(
+		"SELECT access_token FROM mcp_oauth_tokens "+
+			"WHERE tenant_id = 1 AND principal_type = 'web_user' "+
+			"AND principal_id = 'u1' AND service_id = 'svc-migration-1'",
+	).Scan(&accessToken))
+	require.Equal(t, "token-2", accessToken)
+
+	var rowCount int
+	require.NoError(t, db.QueryRow(
+		"SELECT COUNT(*) FROM mcp_oauth_tokens WHERE tenant_id = 1 AND service_id = 'svc-migration-1'",
+	).Scan(&rowCount))
+	require.Equal(t, 1, rowCount)
 }
 
 func copySQLiteMigrationsV4(t *testing.T, repoRoot string) string {
