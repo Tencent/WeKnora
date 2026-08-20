@@ -48,7 +48,9 @@ type tombstoneRepo struct {
 	tombstones     map[string]*types.Knowledge
 	children       []*types.Knowledge // returned by FindByMetadataKeyPrefix
 
-	tombstoneErr error // if set, the tombstone lookup fails
+	tombstoneErr  error // if set, the tombstone lookup fails
+	liveLookupErr error // if set, FindByDataSourceExternalID fails
+	hardDeleteErr error // if set, HardDeleteKnowledge fails
 
 	lookupTenantID     uint64
 	lookupKBID         string
@@ -84,6 +86,9 @@ func (r *tombstoneRepo) FindByMetadataKey(
 func (r *tombstoneRepo) FindByDataSourceExternalID(
 	_ context.Context, _ uint64, _ string, _ string, externalID string,
 ) (*types.Knowledge, error) {
+	if r.liveLookupErr != nil {
+		return nil, r.liveLookupErr
+	}
 	return r.liveByExternal[externalID], nil
 }
 
@@ -108,6 +113,9 @@ func (r *tombstoneRepo) FindTombstonedByDataSourceExternalID(
 
 // HardDeleteKnowledge physically removes a row (update-replace path).
 func (r *tombstoneRepo) HardDeleteKnowledge(_ context.Context, _ uint64, id string) error {
+	if r.hardDeleteErr != nil {
+		return r.hardDeleteErr
+	}
 	r.hardDeleted = append(r.hardDeleted, id)
 	if ext, ok := r.liveByID[id]; ok {
 		delete(r.liveByExternal, ext)
@@ -304,6 +312,10 @@ func TestProcessSync_TombstonedItemIsNotResurrected(t *testing.T) {
 	assert.Equal(t, 1, updated.ItemsSkipped)
 	assert.Zero(t, updated.ItemsCreated, "a tombstoned item must never be re-created")
 	assert.Zero(t, ks.createCalls, "CreateKnowledgeFromFile must not run for a tombstoned item")
+	result, err := updated.ParseResult()
+	require.NoError(t, err)
+	require.Len(t, result.Errors, 1)
+	assert.Equal(t, syncErrorCodeUserDeletedExcluded, result.Errors[0].Code)
 	assert.Equal(t, ds.TenantID, repo.lookupTenantID)
 	assert.Equal(t, ds.KnowledgeBaseID, repo.lookupKBID)
 	assert.Equal(t, ds.ID, repo.lookupDataSourceID)
@@ -313,6 +325,135 @@ func TestProcessSync_TombstonedItemIsNotResurrected(t *testing.T) {
 	updated2 := runTombstoneSync(t, svc, ds, svc.syncLogRepo.(*processSyncSyncLogRepo), "log-tombstone-2")
 	assert.Equal(t, 1, updated2.ItemsSkipped)
 	assert.Zero(t, ks.createCalls, "still not re-created on a later sync")
+}
+
+// TestProcessSync_LiveLookupFailureWithTombstoneDoesNotResurrect verifies that
+// a tombstone is honored even when the live-row lookup errors.
+func TestProcessSync_LiveLookupFailureWithTombstoneDoesNotResurrect(t *testing.T) {
+	ds := newTombstoneDataSource(t, "live-lookup-fail-tombstone")
+	connector := &tombstoneConnector{rounds: [][]types.FetchedItem{{{
+		ExternalID: "file:gone",
+		Title:      "Gone",
+		Content:    []byte("# hello\n"),
+		FileName:   "gone.md",
+	}}}}
+	repo := newTombstoneRepo()
+	repo.liveLookupErr = assert.AnError
+	repo.tombstones["file:gone"] = &types.Knowledge{
+		ID:        "soft-deleted-row",
+		DeletedAt: gorm.DeletedAt{Time: time.Now(), Valid: true},
+	}
+	ks := &tombstoneKS{repo: repo}
+	svc := newTombstoneHarness(t, ds, connector, ks)
+
+	updated := runTombstoneSync(t, svc, ds, svc.syncLogRepo.(*processSyncSyncLogRepo), "log-live-fail-tombstone")
+	assert.Equal(t, types.SyncLogStatusSuccess, updated.Status)
+	assert.Equal(t, 1, updated.ItemsSkipped)
+	assert.Zero(t, ks.createCalls, "tombstone must block creation when live lookup fails")
+}
+
+// TestProcessSync_LiveLookupFailureWithoutTombstoneFailsClosed verifies that a
+// failed live lookup with no tombstone does not fall through to creation.
+func TestProcessSync_LiveLookupFailureWithoutTombstoneFailsClosed(t *testing.T) {
+	ds := newTombstoneDataSource(t, "live-lookup-fail")
+	connector := &tombstoneConnector{rounds: [][]types.FetchedItem{{{
+		ExternalID: "file:doc",
+		Title:      "Doc",
+		Content:    []byte("# hello\n"),
+		FileName:   "doc.md",
+	}}}}
+	repo := newTombstoneRepo()
+	repo.liveLookupErr = assert.AnError
+	ks := &tombstoneKS{repo: repo}
+	svc := newTombstoneHarness(t, ds, connector, ks)
+	syncLogRepo := svc.syncLogRepo.(*processSyncSyncLogRepo)
+	syncLogRepo.logs["log-live-fail"] = &types.SyncLog{
+		ID:           "log-live-fail",
+		DataSourceID: ds.ID,
+		TenantID:     ds.TenantID,
+		Status:       types.SyncLogStatusRunning,
+		StartedAt:    time.Now().UTC(),
+	}
+
+	payload, err := json.Marshal(types.DataSourceSyncPayload{
+		DataSourceID: ds.ID,
+		TenantID:     ds.TenantID,
+		SyncLogID:    "log-live-fail",
+		ForceFull:    true,
+	})
+	require.NoError(t, err)
+	require.Error(t, svc.ProcessSync(context.Background(), asynq.NewTask(types.TypeDataSourceSync, payload)))
+
+	updated := syncLogRepo.logs["log-live-fail"]
+	require.NotNil(t, updated)
+	assert.Equal(t, 1, updated.ItemsFailed)
+	assert.Zero(t, ks.createCalls)
+}
+
+// TestProcessSync_DeletingRowIsNotResurrected verifies that a row marked
+// deleting (async delete in progress) is not update-replaced by sync.
+func TestProcessSync_DeletingRowIsNotResurrected(t *testing.T) {
+	ds := newTombstoneDataSource(t, "deleting-row")
+	connector := &tombstoneConnector{rounds: [][]types.FetchedItem{{{
+		ExternalID: "file:deleting",
+		Title:      "Deleting Doc",
+		Content:    []byte("# hello\n"),
+		FileName:   "deleting.md",
+	}}}}
+	repo := newTombstoneRepo()
+	repo.addLive("file:deleting", &types.Knowledge{
+		ID:          "deleting-row",
+		ParseStatus: types.ParseStatusDeleting,
+	})
+	ks := &tombstoneKS{repo: repo}
+	svc := newTombstoneHarness(t, ds, connector, ks)
+
+	updated := runTombstoneSync(t, svc, ds, svc.syncLogRepo.(*processSyncSyncLogRepo), "log-deleting")
+	assert.Equal(t, types.SyncLogStatusSuccess, updated.Status)
+	assert.Equal(t, 1, updated.ItemsSkipped)
+	assert.Zero(t, ks.createCalls)
+	assert.Empty(t, ks.deletedIDs, "sync must not drive update-replace while delete is in flight")
+}
+
+// TestProcessSync_UpdateHardDeleteFailureFailsItem verifies that a failed
+// hard-delete on the update-replace path fails the item instead of leaving a
+// tombstone and attempting creation.
+func TestProcessSync_UpdateHardDeleteFailureFailsItem(t *testing.T) {
+	ds := newTombstoneDataSource(t, "hard-delete-fail")
+	connector := &tombstoneConnector{rounds: [][]types.FetchedItem{{{
+		ExternalID: "file:doc",
+		Title:      "Doc",
+		Content:    []byte("# v1\n"),
+		FileName:   "doc.md",
+	}}}}
+	repo := newTombstoneRepo()
+	repo.addLive("file:doc", &types.Knowledge{ID: "existing-live-row"})
+	repo.hardDeleteErr = assert.AnError
+	ks := &tombstoneKS{repo: repo}
+	svc := newTombstoneHarness(t, ds, connector, ks)
+	syncLogRepo := svc.syncLogRepo.(*processSyncSyncLogRepo)
+	syncLogRepo.logs["log-hard-fail"] = &types.SyncLog{
+		ID:           "log-hard-fail",
+		DataSourceID: ds.ID,
+		TenantID:     ds.TenantID,
+		Status:       types.SyncLogStatusRunning,
+		StartedAt:    time.Now().UTC(),
+	}
+
+	payload, err := json.Marshal(types.DataSourceSyncPayload{
+		DataSourceID: ds.ID,
+		TenantID:     ds.TenantID,
+		SyncLogID:    "log-hard-fail",
+		ForceFull:    true,
+	})
+	require.NoError(t, err)
+	require.Error(t, svc.ProcessSync(context.Background(), asynq.NewTask(types.TypeDataSourceSync, payload)))
+
+	updated := syncLogRepo.logs["log-hard-fail"]
+	require.NotNil(t, updated)
+	assert.Equal(t, 1, updated.ItemsFailed)
+	assert.Equal(t, []string{"existing-live-row"}, ks.deletedIDs)
+	assert.Zero(t, ks.createCalls, "must not create when hard-delete fails after soft-delete")
 }
 
 // TestProcessSync_TombstoneLookupFailureDoesNotResurrect verifies the
