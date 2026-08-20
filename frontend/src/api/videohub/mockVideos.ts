@@ -1,4 +1,26 @@
-import type { Chapter, SubtitleCue, VideoCategory, VideoData } from '@/types/videohub'
+import type { Chapter, CrossVideoKnowledgeItem, CurrentKnowledgeAnchor, KnowledgeType, RelationOverview, RelationType, SubtitleCue, SummarySection, VideoCategory, VideoData } from '@/types/videohub'
+
+const summaryTitles: Record<VideoCategory, readonly string[]> = {
+  interview: ['一、人物背景', '二、经历与决策', '三、核心观点', '四、原则与思维模型', '五、案例与证据', '六、反思与边界'],
+  training: ['一、目标与受众', '二、知识地图', '三、核心概念', '四、方法与步骤', '五、示例与异常', '六、练习与应用'],
+  salon: ['一、活动与参与者', '二、议题与观点', '三、观点交锋', '四、案例与问答', '五、共识与分歧', '六、探索方向'],
+  general: ['一、定位与问题', '二、主张与论证', '三、证据与案例', '四、限定与反方', '五、影响与建议'],
+}
+
+const knowledgeLabels: Record<KnowledgeType, string> = {
+  entity: '关键人物与组织', concept: '核心概念', case: '实践案例', method: '落地方法', insight: '关键洞察',
+}
+
+const knowledgeDistributions: KnowledgeType[][] = [
+  ['entity', 'concept', 'case'],
+  ['entity', 'concept', 'case', 'method', 'insight'],
+  ['entity', 'method'],
+  [],
+  ['concept', 'insight'],
+  ['case', 'method'],
+]
+
+const relationTypes: RelationType[] = ['相同', '相似', '补充', '对比', '延伸']
 
 const sources = [
   'BigBuckBunny.mp4',
@@ -93,17 +115,94 @@ function makeSubtitles(videoIndex: number): SubtitleCue[] {
   ]
 }
 
-export const MOCK_VIDEOS: VideoData[] = definitions.map((item, index) => ({
-  id: `v-${String(index + 1).padStart(2, '0')}`,
-  title: item.title,
-  category: item.category,
-  categoryName: item.categoryName,
-  duration: item.duration,
-  durationSeconds: item.durationSeconds,
-  created_at: item.createdAt,
-  video_url: `https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/${sources[index]}`,
-  poster_url: `https://images.unsplash.com/${posters[index]}?q=80&w=1200&auto=format&fit=crop`,
-  overview: item.overview,
-  chapters: makeChapters(index, item.durationSeconds),
-  subtitles: makeSubtitles(index),
-}))
+function makeSummary(videoIndex: number, category: VideoCategory, duration: number): SummarySection[] {
+  return summaryTitles[category].map((title, index) => {
+    const seconds = Math.min(Math.round(((index + 1) * duration) / (summaryTitles[category].length + 1)), duration - 1)
+    return {
+      id: `v-${videoIndex + 1}-summary-${index + 1}`,
+      title,
+      content: `${definitions[videoIndex].overview}\n\n本节从“${title.replace(/^.+、/, '')}”出发，提炼关键判断、论证过程与可执行启示。`,
+      evidenceTimestamp: formatTime(seconds),
+      evidenceSeconds: seconds,
+      transcriptSnippet: `讲者围绕${title.replace(/^.+、/, '')}展开说明，并结合《${definitions[videoIndex].title}》的主题给出具体依据。`,
+    }
+  })
+}
+
+function makeRelatedKnowledge(videoIndex: number, duration: number) {
+  const types = knowledgeDistributions[videoIndex]
+  if (types.length === 0) return {}
+
+  const anchors: CurrentKnowledgeAnchor[] = []
+  const crossVideoItems: CrossVideoKnowledgeItem[] = []
+  types.forEach((knowledgeType, typeIndex) => {
+    const anchorCount = videoIndex === 1 ? 2 : 1
+    for (let anchorIndex = 0; anchorIndex < anchorCount; anchorIndex += 1) {
+      const anchorId = `v-${videoIndex + 1}-anchor-${knowledgeType}-${anchorIndex + 1}`
+      const seconds = Math.min(Math.round(duration * ((typeIndex + anchorIndex + 1) / (types.length + anchorCount + 1))), duration - 1)
+      anchors.push({
+        id: anchorId,
+        knowledge_type: knowledgeType,
+        content: `${knowledgeLabels[knowledgeType]}：${definitions[videoIndex].title}中的${anchorIndex === 0 ? '核心判断' : '延伸结论'}`,
+        timestamp: formatTime(seconds),
+        seconds,
+        related_count: 2,
+      })
+      for (let relationIndex = 0; relationIndex < 2; relationIndex += 1) {
+        let targetIndex = (videoIndex + typeIndex + relationIndex + 1) % definitions.length
+        if (targetIndex === videoIndex) targetIndex = (targetIndex + 1) % definitions.length
+        const targetSeconds = Math.min(90 + typeIndex * 75 + relationIndex * 45, definitions[targetIndex].durationSeconds - 1)
+        crossVideoItems.push({
+          id: `${anchorId}-relation-${relationIndex + 1}`,
+          anchorId,
+          knowledge_type: knowledgeType,
+          relation_type: relationTypes[(typeIndex + relationIndex) % relationTypes.length],
+          knowledge_content: `${definitions[targetIndex].title}对“${knowledgeLabels[knowledgeType]}”给出了另一组可验证的信息。`,
+          timestamp: formatTime(targetSeconds),
+          seconds: targetSeconds,
+          video_id: `v-${String(targetIndex + 1).padStart(2, '0')}`,
+          video_title: definitions[targetIndex].title,
+          video_category: definitions[targetIndex].category,
+          relation_description: `该内容与当前视频的${knowledgeLabels[knowledgeType]}形成交叉印证，可用于补充理解和比较。`,
+        })
+      }
+    }
+  })
+
+  const relatedVideoCount = new Set(crossVideoItems.map(item => item.video_id)).size
+  const overview: RelationOverview = {
+    relation_overview: `围绕${types.map(type => knowledgeLabels[type]).join('、')}建立跨视频关联。`,
+    related_video_count: relatedVideoCount,
+    relation_count: crossVideoItems.length,
+    top_topics: types.map(type => knowledgeLabels[type]),
+  }
+  return { relationOverview: overview, currentAnchors: anchors, crossVideoItems }
+}
+
+export const MOCK_VIDEOS: VideoData[] = definitions.map((item, index) => {
+  const summary = makeSummary(index, item.category, item.durationSeconds)
+  const typedSummary = item.category === 'interview'
+    ? { interviewSummary: summary }
+    : item.category === 'training'
+      ? { trainingSummary: summary }
+      : item.category === 'salon'
+        ? { salonSummary: summary }
+        : { summarySections: summary }
+
+  return {
+    id: `v-${String(index + 1).padStart(2, '0')}`,
+    title: item.title,
+    category: item.category,
+    categoryName: item.categoryName,
+    duration: item.duration,
+    durationSeconds: item.durationSeconds,
+    created_at: item.createdAt,
+    video_url: `https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/${sources[index]}`,
+    poster_url: `https://images.unsplash.com/${posters[index]}?q=80&w=1200&auto=format&fit=crop`,
+    overview: item.overview,
+    chapters: makeChapters(index, item.durationSeconds),
+    subtitles: makeSubtitles(index),
+    ...typedSummary,
+    ...makeRelatedKnowledge(index, item.durationSeconds),
+  }
+})

@@ -26,6 +26,51 @@ export interface SubtitleCue {
   text: string
 }
 
+export interface EvidenceRef {
+  evidenceTimestamp?: string
+  evidenceSeconds?: number
+  transcriptSnippet?: string
+}
+
+export interface SummarySection extends EvidenceRef {
+  id: string
+  title: string
+  content: string
+}
+
+export type KnowledgeType = 'entity' | 'concept' | 'case' | 'method' | 'insight'
+export type RelationType = '相同' | '相似' | '补充' | '对比' | '延伸'
+
+export interface RelationOverview {
+  relation_overview: string
+  related_video_count: number
+  relation_count: number
+  top_topics: string[]
+}
+
+export interface CurrentKnowledgeAnchor {
+  id: string
+  knowledge_type: KnowledgeType
+  content: string
+  timestamp: string
+  seconds: number
+  related_count: number
+}
+
+export interface CrossVideoKnowledgeItem {
+  id: string
+  anchorId: string
+  knowledge_type: KnowledgeType
+  relation_type: RelationType
+  knowledge_content: string
+  timestamp: string
+  seconds: number
+  video_id: string
+  video_title: string
+  video_category: VideoCategory
+  relation_description: string
+}
+
 export interface VideoData {
   id: string
   title: string
@@ -39,10 +84,13 @@ export interface VideoData {
   overview: string
   chapters: Chapter[]
   subtitles: SubtitleCue[]
-  summarySections?: unknown[]
-  relationOverview?: unknown
-  currentAnchors?: unknown[]
-  crossVideoItems?: unknown[]
+  summarySections?: SummarySection[]
+  interviewSummary?: SummarySection[]
+  trainingSummary?: SummarySection[]
+  salonSummary?: SummarySection[]
+  relationOverview?: RelationOverview
+  currentAnchors?: CurrentKnowledgeAnchor[]
+  crossVideoItems?: CrossVideoKnowledgeItem[]
 }
 
 export type VideoOption = Pick<VideoData, 'id' | 'title'>

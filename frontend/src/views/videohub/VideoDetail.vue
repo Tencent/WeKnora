@@ -1,5 +1,5 @@
 <template>
-  <main class="video-detail-page">
+  <main ref="page" class="video-detail-page">
     <div v-if="loading" class="video-detail-page__state"><t-loading text="正在加载视频" /></div>
     <div v-else-if="error" class="video-detail-page__state"><t-empty :description="error"><t-button @click="router.push('/platform/videos')">返回 Home</t-button></t-empty></div>
     <template v-else-if="video">
@@ -15,8 +15,8 @@
         </section>
         <aside class="video-detail-page__right">
           <t-tabs v-model="activeTab">
-            <t-tab-panel value="summary" label="智能总结"><PlaceholderView title="智能总结" /></t-tab-panel>
-            <t-tab-panel value="related" label="关联知识"><PlaceholderView title="关联知识" /></t-tab-panel>
+            <t-tab-panel value="summary" label="智能总结"><SmartSummary :key="video.id" :video="video" @seek="seekTo" /></t-tab-panel>
+            <t-tab-panel value="related" label="关联知识"><RelatedKnowledge :key="video.id" :video="video" @seek="seekTo" @select-video-by-id="onSelectVideoById" /></t-tab-panel>
           </t-tabs>
         </aside>
       </div>
@@ -32,12 +32,14 @@ import { fetchVideoDetail, fetchVideoOptions } from '@/api/videohub'
 import type { VideoData } from '@/types/videohub'
 import VideoPlayer from '@/components/videohub/VideoPlayer.vue'
 import ChapterNavigation from '@/components/videohub/ChapterNavigation.vue'
-import PlaceholderView from '@/components/videohub/PlaceholderView.vue'
 import AiAssistant from '@/components/videohub/AiAssistant.vue'
+import SmartSummary from '@/components/videohub/SmartSummary.vue'
+import RelatedKnowledge from '@/components/videohub/RelatedKnowledge.vue'
 
 const route = useRoute()
 const router = useRouter()
 const player = ref<InstanceType<typeof VideoPlayer> | null>(null)
+const page = ref<HTMLElement | null>(null)
 const video = ref<VideoData | null>(null)
 const videoOptions = ref<Array<{ label: string; value: string }>>([])
 const selectedVideoId = ref('')
@@ -50,7 +52,9 @@ async function loadVideo(id: string) {
   loading.value = true; error.value = ''; currentSeconds.value = 0
   try {
     video.value = await fetchVideoDetail(id); selectedVideoId.value = id
+    loading.value = false
     await nextTick()
+    page.value?.scrollTo({ top: 0 })
     const querySeconds = Number(route.query.t)
     if (route.query.t !== undefined && Number.isFinite(querySeconds)) seekTo(Math.min(Math.max(querySeconds, 0), video.value.durationSeconds))
   }
@@ -59,6 +63,10 @@ async function loadVideo(id: string) {
 }
 function seekTo(seconds: number) { player.value?.seekTo(seconds) }
 function navigateToEvidence(videoId: string, seconds: number) {
+  if (videoId === video.value?.id) seekTo(seconds)
+  else router.push(`/platform/videos/${videoId}?t=${seconds}`)
+}
+function onSelectVideoById(videoId: string, seconds: number) {
   if (videoId === video.value?.id) seekTo(seconds)
   else router.push(`/platform/videos/${videoId}?t=${seconds}`)
 }
