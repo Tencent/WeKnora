@@ -111,6 +111,8 @@ export type OrganizationSharedKnowledgeBaseItem = SharedKnowledgeBase & {
   is_mine: boolean
   /** Present when the KB is from a shared agent's config (not directly shared to the space) */
   source_from_agent?: SourceFromAgentInfo
+  /** Every shared agent that carries this KB, including KBs that are also directly shared */
+  source_from_agents?: SourceFromAgentInfo[]
 }
 
 export interface OrganizationPreview {
