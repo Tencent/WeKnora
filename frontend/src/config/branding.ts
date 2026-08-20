@@ -29,6 +29,17 @@ export const FEATURES = {
   showWeKnoraCloud: false,
   /** 登录页 logo 是否还原为 GitHub 外链（true=可点击跳转 GitHub，false=纯展示） */
   showLoginGithubLink: false,
+  /** 登录页右上角是否显示「官方网站」「GitHub」外链（默认隐藏） */
+  showLoginHeaderLinks: false,
+} as const
+
+// ---------- 登录页文案 ----------
+/** 登录页两处固定文案（默认已去掉旧品牌名 WeKnora）。想改字直接改这里。 */
+export const AUTH_TEXT = {
+  /** 登录表单下方「首次使用？」 */
+  firstTime: '首次使用？',
+  /** 注册卡片副标题「创建账户并开始使用」 */
+  registerSubtitle: '创建账户并开始使用',
 } as const
 
 // ---------- logo 构建期解析 ----------
