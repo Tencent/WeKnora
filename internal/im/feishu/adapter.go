@@ -1008,8 +1008,10 @@ func (a *Adapter) cardkitUpdateElement(ctx context.Context, accessToken, cardID,
 // reaches the card we must download each referenced image and re-upload it to
 // Feishu to obtain a usable image_key.
 
-// feishuMarkdownImageRe matches a markdown image whose target is an http(s) URL.
-var feishuMarkdownImageRe = regexp.MustCompile(`!\[([^\]]*)\]\((https?://[^)\s]+)\)`)
+// feishuMarkdownImageRe matches markdown images backed by a URL that WeKnora may
+// send to a card. An unresolved resource:// handle is not a valid Feishu
+// image_key, so resolveMarkdownImages degrades it to a link instead.
+var feishuMarkdownImageRe = regexp.MustCompile(`!\[([^\]]*)\]\(((?:https?://|resource://)[^)\s]+)\)`)
 
 // feishuMaxImageBytes caps the download size of an image before uploading to
 // Feishu (Feishu's limit is 10MB; keep a small margin).
@@ -1035,23 +1037,29 @@ func imageCacheKey(rawURL string) string {
 }
 
 // resolveMarkdownImages replaces the URL inside every ![alt](httpURL) with a
-// Feishu image_key. On failure it degrades the image to a plain text link so the
-// rest of the card still renders instead of failing the whole update.
+// Feishu image_key. On failure, or when the storage resolver left a resource://
+// handle unresolved, it degrades the image to a plain text link so the rest of
+// the card still renders instead of failing the whole update.
 func (a *Adapter) resolveMarkdownImages(ctx context.Context, accessToken, content string) string {
 	if !strings.Contains(content, "![") {
 		return content
 	}
+	fallback := func(alt, rawURL string) string {
+		if alt == "" {
+			alt = a.region.ImageFallbackLabel
+		}
+		return fmt.Sprintf("[%s](%s)", alt, rawURL)
+	}
 	return feishuMarkdownImageRe.ReplaceAllStringFunc(content, func(match string) string {
 		sub := feishuMarkdownImageRe.FindStringSubmatch(match)
 		alt, rawURL := sub[1], sub[2]
+		if strings.HasPrefix(rawURL, "resource://") {
+			return fallback(alt, rawURL)
+		}
 		imgKey, err := a.imageKeyForURL(ctx, accessToken, rawURL)
 		if err != nil || imgKey == "" {
 			logger.Warnf(ctx, "[%s] image upload failed, degrading to link: url=%s err=%v", a.region.Label, rawURL, err)
-			label := alt
-			if label == "" {
-				label = a.region.ImageFallbackLabel
-			}
-			return fmt.Sprintf("[%s](%s)", label, rawURL)
+			return fallback(alt, rawURL)
 		}
 		return fmt.Sprintf("![%s](%s)", alt, imgKey)
 	})

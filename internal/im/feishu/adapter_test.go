@@ -90,6 +90,15 @@ func TestResolveMarkdownImages_FallbackToLinkOnFailure(t *testing.T) {
 	}
 }
 
+func TestResolveMarkdownImages_ResourceHandleFallsBackToLink(t *testing.T) {
+	a := &Adapter{region: RegionFeishu}
+	in := "see ![diagram](resource://Zb2IrqfTdlCFkbUqFtmS5A) here"
+	want := "see [diagram](resource://Zb2IrqfTdlCFkbUqFtmS5A) here"
+	if got := a.resolveMarkdownImages(context.Background(), "tok", in); got != want {
+		t.Errorf("resource image fallback = %q, want %q", got, want)
+	}
+}
+
 // An image with no alt text falls back to the region's own label, so Lark users
 // do not get a Chinese link label.
 func TestResolveMarkdownImages_FallbackLabelFollowsRegion(t *testing.T) {
