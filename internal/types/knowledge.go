@@ -136,6 +136,9 @@ type Knowledge struct {
 	Title string `json:"title"`
 	// Description of the knowledge
 	Description string `json:"description"`
+	// DescriptionSpecified distinguishes an explicitly supplied empty description
+	// from an omitted field in partial update requests.
+	DescriptionSpecified bool `json:"-" gorm:"-"`
 	// Source of the knowledge (e.g. URL address for url type, "manual" for manual type)
 	Source string `json:"source"             gorm:"type:varchar(2048)"`
 	// Channel indicates through which channel the knowledge was ingested (web, api, browser_extension, wechat, etc.)

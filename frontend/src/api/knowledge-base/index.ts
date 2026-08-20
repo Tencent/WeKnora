@@ -422,6 +422,10 @@ export function updateKnowledgeMetadata(knowledgeId: string, customMetadata: Rec
   return put(`/api/v1/knowledge/${knowledgeId}`, { custom_metadata: customMetadata });
 }
 
+export function updateKnowledgeSummary(knowledgeId: string, description: string) {
+  return put(`/api/v1/knowledge/${knowledgeId}`, { description });
+}
+
 export function regenerateKnowledgeSummary(knowledgeId: string) {
   return post(`/api/v1/knowledge/${knowledgeId}/regenerate-summary`, {});
 }
