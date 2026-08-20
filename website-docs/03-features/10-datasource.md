@@ -297,6 +297,7 @@ sequenceDiagram
 
 - **认证**：凭据仅 `access_token`（可选——公开仓库匿名克隆）。认证方式为 `oauth2:<token>` HTTP Basic。
 - **配置**：settings 驱动：`repos` 列表（`repo_url` + 可选 `branch`（空=跟随远端默认分支）+ 可选 `paths` 目录过滤）。
+- **安全校验**：`repo_url` 与其它连接器的 base_url 一样需通过 SSRF 校验（`utils.ValidateURLForSSRF`）——私网 IP、回环、link-local、云元数据、内网保留域名等会被拒绝；克隆/拉取走同一套 SSRF 安全客户端（`datasource.NewConnectorHTTPClient`，拨号期+重定向二次校验，防 DNS 重绑定）。内网 git 服务器需由运维在 `SSRF_WHITELIST_EXTRA` 放行（精确域名 / `*.suffix` / IP / CIDR，见 `.env.example` J1 节）。
 - **本地克隆**：按 `<存储根>/git-repos/<租户ID>/<数据源ID>/<sha1(url+branch)>/` 目录隔离；`GIT_REPO_STORAGE_BASE_DIR` 可覆盖存储根（默认 `LOCAL_STORAGE_BASE_DIR` 即 `/data/files`）。同一数据源的并发同步用互斥锁串行化；改 URL/分支自动重新克隆（目录哈希不同）。
 - **抓取**：只同步 6 种纯文本格式（md/markdown/mdx/html/htm/txt）——**故意排除松散图片**：博客场景图片只相对于引用它的 Markdown 有意义，会被内联（见下），独立入库只是噪音文档。
 - **图片内联**（`image_inline.go`）：Markdown/HTML 中相对路径图片自动读出并转为 `data:` URI 内联，图片随文档一起入库，无需独立存储。
@@ -360,7 +361,7 @@ func NewConnectorHTTPClient(timeout time.Duration) *http.Client {
 }
 ```
 
-底层 `internal/utils/security.go` 会拒绝私网地址、回环地址、link-local 等目标，并且在**每次重定向和实际拨号时**重新校验（而非只校验初始 URL），防止恶意 feed 或自定义 base_url 把 WeKnora 引向内网服务。各连接器的 `parseXXXConfig` 都会对 base_url 调用 `ValidateConnectorBaseURL`。
+底层 `internal/utils/security.go` 会拒绝私网地址、回环地址、link-local 等目标，并且在**每次重定向和实际拨号时**重新校验（而非只校验初始 URL），防止恶意 feed 或自定义 base_url 把 WeKnora 引向内网服务。各连接器的 `parseXXXConfig` 都会对 base_url 调用 `ValidateConnectorBaseURL`；git_repo 连接器对 `repos[].repo_url` 调用 `utils.ValidateURLForSSRF`，克隆/拉取的 go-git 传输也复用 `NewConnectorHTTPClient` 的防护。
 
 `errors.go` 定义了模块级哨兵错误（`ErrConnectorNotFound`、`ErrDataSourceInvalid`、`ErrInvalidCredentials`、`ErrSyncFailed` 等）与 `PartialFetchError`（部分资源成功、部分失败；调用方应处理已得条目、持久化游标、把 `Details` 以 partial 状态呈现给用户）。
 

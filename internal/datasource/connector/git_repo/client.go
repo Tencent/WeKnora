@@ -12,21 +12,27 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/go-git/go-git/v5"
 	gitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
-	"github.com/go-git/go-git/v5/plumbing/transport/http"
+	gogitclient "github.com/go-git/go-git/v5/plumbing/transport/client"
+	http "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/go-git/go-git/v5/utils/merkletrie"
+
+	"github.com/Tencent/WeKnora/internal/datasource"
 )
 
 // errHistoryRewritten marks a previous cursor commit that no longer exists in
 // the fetched history (force-push / history rewrite / shallow boundary). The
 // caller falls back to a full re-scan instead of failing the sync.
-var errHistoryRewritten = errors.New("git_repo: previous cursor commit not found (history rewritten); falling back to full rescan")
+var errHistoryRewritten = errors.New(
+	"git_repo: previous cursor commit not found (history rewritten); falling back to full rescan")
 
 // errEmptyRemote marks a remote with no resolvable branch.
 var errEmptyRemote = errors.New("git_repo: remote has no resolvable branch")
@@ -48,7 +54,27 @@ type client struct {
 }
 
 func newClient(dsID string, tenantID uint64, token string) *client {
+	ensureSSRFTransport()
 	return &client{dsID: dsID, tenantID: tenantID, token: token, baseDir: repoStorageBase()}
+}
+
+// ensureSSRFTransport registers SSRF-guarded HTTP transports for go-git's
+// http/https protocols (clone, fetch, and ls-remote all resolve through the
+// transport registry). Using datasource.NewConnectorHTTPClient reuses the same
+// dial-time + redirect SSRF protection every other connector gets, so a repo_url
+// that passed URL-level validation cannot be re-pointed at an internal target
+// via DNS rebinding between validation and connection. Idempotent and process-
+// wide, matching how go-git's transport registry works.
+var (
+	ensureSSRFTransportOnce sync.Once
+)
+
+func ensureSSRFTransport() {
+	ensureSSRFTransportOnce.Do(func() {
+		safeClient := datasource.NewConnectorHTTPClient(30 * time.Second)
+		gogitclient.InstallProtocol("http", http.NewClient(safeClient))
+		gogitclient.InstallProtocol("https", http.NewClient(safeClient))
+	})
 }
 
 // repoStorageBase resolves the root under which git clones are kept. A
@@ -135,7 +161,9 @@ func (c *client) lsRemoteRefs(ctx context.Context, repoURL, branch string) (head
 // updated to its tip. First run clones; later runs fetch + hard-reset (which
 // also absorbs force-pushes). Returns the open repository, the head SHA and the
 // resolved branch name.
-func (c *client) ensureCheckedOut(ctx context.Context, dir, repoURL, branch string) (*git.Repository, string, string, error) {
+func (c *client) ensureCheckedOut(
+	ctx context.Context, dir, repoURL, branch string,
+) (*git.Repository, string, string, error) {
 	repo, err := git.PlainOpen(dir)
 	if err != nil {
 		if !errors.Is(err, git.ErrRepositoryNotExists) && !os.IsNotExist(err) {

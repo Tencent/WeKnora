@@ -25,8 +25,11 @@ type Connector struct {
 	client *client
 }
 
+// NewConnector creates a stateless git_repo connector; per-data-source
+// credentials and identity are injected at each call via configured().
 func NewConnector() *Connector { return &Connector{} }
 
+// Type returns the git_repo connector type identifier.
 func (c *Connector) Type() string { return types.ConnectorTypeGitRepo }
 
 func (c *Connector) configured(ds *types.DataSourceConfig) (*Connector, error) {
@@ -37,6 +40,8 @@ func (c *Connector) configured(ds *types.DataSourceConfig) (*Connector, error) {
 	return &Connector{client: newClient(ds.ID, ds.TenantID, token)}, nil
 }
 
+// Validate checks that every configured repo is reachable (via a remote
+// ref listing), after URL-level SSRF validation has passed in parseConfig.
 func (c *Connector) Validate(ctx context.Context, ds *types.DataSourceConfig) error {
 	conn, err := c.configured(ds)
 	if err != nil {
@@ -67,6 +72,7 @@ func (c *Connector) ListResources(context.Context, *types.DataSourceConfig, stri
 	return nil, nil
 }
 
+// ResolveResourceAncestors is a no-op: git_repo has no resource tree.
 func (c *Connector) ResolveResourceAncestors(context.Context, *types.DataSourceConfig, []string) ([]string, error) {
 	return []string{}, nil
 }
@@ -83,7 +89,11 @@ func (c *Connector) FetchAll(ctx context.Context, ds *types.DataSourceConfig, _ 
 	return items, err
 }
 
-func (c *Connector) FetchIncremental(ctx context.Context, ds *types.DataSourceConfig, cursor *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error) {
+// FetchIncremental delegates to the streaming FetchStream path, buffering
+// items for the base-interface (non-streaming) callers.
+func (c *Connector) FetchIncremental(
+	ctx context.Context, ds *types.DataSourceConfig, cursor *types.SyncCursor,
+) ([]types.FetchedItem, *types.SyncCursor, error) {
 	var items []types.FetchedItem
 	next, err := c.FetchStream(ctx, ds, cursor, &bufferingHandler{emit: func(item types.FetchedItem) error {
 		items = append(items, item)
@@ -198,7 +208,9 @@ func (c *Connector) FetchStream(
 }
 
 // streamFiles emits every supported in-scope file of the worktree.
-func (c *Connector) streamFiles(ctx context.Context, url, branch string, roots []string, h datasource.StreamHandler) error {
+func (c *Connector) streamFiles(
+	ctx context.Context, url, branch string, roots []string, h datasource.StreamHandler,
+) error {
 	dir := c.client.cloneDirFor(url, branch)
 	return walkFiles(dir, roots, func(rel string) error {
 		item, err := c.item(ctx, url, branch, rel)
@@ -211,7 +223,9 @@ func (c *Connector) streamFiles(ctx context.Context, url, branch string, roots [
 
 // streamChanges emits deletions for removed/renamed files and items for
 // added/modified files, mirroring the GitLab connector's diff streaming.
-func (c *Connector) streamChanges(ctx context.Context, url, branch string, roots []string, changes []nameStatusChange, h datasource.StreamHandler) error {
+func (c *Connector) streamChanges(
+	ctx context.Context, url, branch string, roots []string, changes []nameStatusChange, h datasource.StreamHandler,
+) error {
 	for _, ch := range changes {
 		if ch.Deleted {
 			if inScope(ch.OldPath, roots) && isSupportedFile(ch.OldPath) {
@@ -239,7 +253,7 @@ func (c *Connector) streamChanges(ctx context.Context, url, branch string, roots
 	return nil
 }
 
-func (c *Connector) item(ctx context.Context, url, branch, file string) (types.FetchedItem, error) {
+func (c *Connector) item(_ context.Context, url, branch, file string) (types.FetchedItem, error) {
 	dir := c.client.cloneDirFor(url, branch)
 	data, err := readFile(dir, file)
 	if err != nil {

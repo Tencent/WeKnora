@@ -97,14 +97,14 @@ func TestWebhookGitLabPushTriggersSync(t *testing.T) {
 		return gitRepoDataSource(t, map[string]interface{}{
 			"webhook_secret": "s3cret",
 			"repos": []interface{}{map[string]interface{}{
-				"repo_url": "http://192.168.0.200/lurj/knowledge.git",
+				"repo_url": "https://gitlab.com/org/blog.git",
 			}},
 		}), nil
 	}}
 	r := webhookRouter(t, svc)
 
 	w := postWebhook(r, map[string]string{"X-Gitlab-Event": "Push Hook", "X-Gitlab-Token": "s3cret"},
-		gitlabPushBody("http://192.168.0.200/lurj/knowledge.git", "refs/heads/main", pushSHA))
+		gitlabPushBody("https://gitlab.com/org/blog.git", "refs/heads/main", pushSHA))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
@@ -123,13 +123,13 @@ func TestWebhookGitLabWrongTokenRejected(t *testing.T) {
 	svc := &stubWebhookService{get: func(_ context.Context, _ string) (*types.DataSource, error) {
 		return gitRepoDataSource(t, map[string]interface{}{
 			"webhook_secret": "s3cret",
-			"repos":          []interface{}{map[string]interface{}{"repo_url": "http://x/repo.git"}},
+			"repos":          []interface{}{map[string]interface{}{"repo_url": "https://gitlab.com/org/blog.git"}},
 		}), nil
 	}}
 	r := webhookRouter(t, svc)
 
 	w := postWebhook(r, map[string]string{"X-Gitlab-Event": "Push Hook", "X-Gitlab-Token": "wrong"},
-		gitlabPushBody("http://x/repo.git", "refs/heads/main", pushSHA))
+		gitlabPushBody("https://gitlab.com/org/blog.git", "refs/heads/main", pushSHA))
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", w.Code)
@@ -143,13 +143,13 @@ func TestWebhookNoSecretConfiguredFailsClosed(t *testing.T) {
 	t.Setenv(webhookSecretEnv, "")
 	svc := &stubWebhookService{get: func(_ context.Context, _ string) (*types.DataSource, error) {
 		return gitRepoDataSource(t, map[string]interface{}{
-			"repos": []interface{}{map[string]interface{}{"repo_url": "http://x/repo.git"}},
+			"repos": []interface{}{map[string]interface{}{"repo_url": "https://gitlab.com/org/blog.git"}},
 		}), nil
 	}}
 	r := webhookRouter(t, svc)
 
 	w := postWebhook(r, map[string]string{"X-Gitlab-Token": "anything"},
-		gitlabPushBody("http://x/repo.git", "refs/heads/main", pushSHA))
+		gitlabPushBody("https://gitlab.com/org/blog.git", "refs/heads/main", pushSHA))
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403 (fail closed)", w.Code)
@@ -180,14 +180,14 @@ func TestWebhookRepoMismatchIgnored(t *testing.T) {
 	svc := &stubWebhookService{get: func(_ context.Context, _ string) (*types.DataSource, error) {
 		return gitRepoDataSource(t, map[string]interface{}{
 			"webhook_secret": "s3cret",
-			"repos":          []interface{}{map[string]interface{}{"repo_url": "http://192.168.0.200/lurj/knowledge.git"}},
+			"repos":          []interface{}{map[string]interface{}{"repo_url": "https://gitlab.com/org/blog.git"}},
 		}), nil
 	}}
 	r := webhookRouter(t, svc)
 
 	// Same host, different project: must not trigger.
 	w := postWebhook(r, map[string]string{"X-Gitlab-Token": "s3cret"},
-		gitlabPushBody("http://192.168.0.200/other/project.git", "refs/heads/main", pushSHA))
+		gitlabPushBody("https://gitlab.com/org/other.git", "refs/heads/main", pushSHA))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (ignored)", w.Code)
@@ -207,7 +207,7 @@ func TestWebhookBranchFilter(t *testing.T) {
 		return gitRepoDataSource(t, map[string]interface{}{
 			"webhook_secret": "s3cret",
 			"repos": []interface{}{map[string]interface{}{
-				"repo_url": "http://x/repo.git", "branch": "main",
+				"repo_url": "https://gitlab.com/org/blog.git", "branch": "main",
 			}},
 		}), nil
 	}}
@@ -215,14 +215,14 @@ func TestWebhookBranchFilter(t *testing.T) {
 
 	// Push to a filtered-out branch: authenticated but ignored.
 	w := postWebhook(r, map[string]string{"X-Gitlab-Token": "s3cret"},
-		gitlabPushBody("http://x/repo.git", "refs/heads/feature/other", pushSHA))
+		gitlabPushBody("https://gitlab.com/org/blog.git", "refs/heads/feature/other", pushSHA))
 	if w.Code != http.StatusOK || svc.syncCalls != 0 {
 		t.Fatalf("status = %d syncCalls = %d, want 200/0", w.Code, svc.syncCalls)
 	}
 
 	// Push to the configured branch: triggers.
 	w = postWebhook(r, map[string]string{"X-Gitlab-Token": "s3cret"},
-		gitlabPushBody("http://x/repo.git", "refs/heads/main", pushSHA))
+		gitlabPushBody("https://gitlab.com/org/blog.git", "refs/heads/main", pushSHA))
 	if w.Code != http.StatusOK || svc.syncCalls != 1 {
 		t.Fatalf("status = %d syncCalls = %d, want 200/1", w.Code, svc.syncCalls)
 	}
@@ -232,13 +232,13 @@ func TestWebhookBranchDeletionIgnored(t *testing.T) {
 	svc := &stubWebhookService{get: func(_ context.Context, _ string) (*types.DataSource, error) {
 		return gitRepoDataSource(t, map[string]interface{}{
 			"webhook_secret": "s3cret",
-			"repos":          []interface{}{map[string]interface{}{"repo_url": "http://x/repo.git"}},
+			"repos":          []interface{}{map[string]interface{}{"repo_url": "https://gitlab.com/org/blog.git"}},
 		}), nil
 	}}
 	r := webhookRouter(t, svc)
 
 	w := postWebhook(r, map[string]string{"X-Gitlab-Token": "s3cret"},
-		gitlabPushBody("http://x/repo.git", "refs/heads/gone",
+		gitlabPushBody("https://gitlab.com/org/blog.git", "refs/heads/gone",
 			"0000000000000000000000000000000000000000"))
 	if w.Code != http.StatusOK || svc.syncCalls != 0 {
 		t.Fatalf("status = %d syncCalls = %d, want 200/0 (deletion)", w.Code, svc.syncCalls)
@@ -291,7 +291,11 @@ func TestWebhookNonGitRepoTypeRejected(t *testing.T) {
 	}}
 	r := webhookRouter(t, svc)
 
-	w := postWebhook(r, map[string]string{"X-Gitlab-Token": "x"}, gitlabPushBody("http://x/repo.git", "refs/heads/main", pushSHA))
+	w := postWebhook(
+		r,
+		map[string]string{"X-Gitlab-Token": "x"},
+		gitlabPushBody("https://gitlab.com/org/blog.git", "refs/heads/main", pushSHA),
+	)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
 	}
@@ -303,7 +307,11 @@ func TestWebhookNotFound(t *testing.T) {
 	}}
 	r := webhookRouter(t, svc)
 
-	w := postWebhook(r, map[string]string{"X-Gitlab-Token": "x"}, gitlabPushBody("http://x/repo.git", "refs/heads/main", pushSHA))
+	w := postWebhook(
+		r,
+		map[string]string{"X-Gitlab-Token": "x"},
+		gitlabPushBody("https://gitlab.com/org/blog.git", "refs/heads/main", pushSHA),
+	)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", w.Code)
 	}

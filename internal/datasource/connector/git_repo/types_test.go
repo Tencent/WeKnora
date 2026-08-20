@@ -64,7 +64,9 @@ func TestParseConfigErrors(t *testing.T) {
 			Settings: settingsWith([]interface{}{map[string]interface{}{"repo_url": "git@github.com:org/blog.git"}}),
 		}},
 		{"embedded userinfo", &types.DataSourceConfig{
-			Settings: settingsWith([]interface{}{map[string]interface{}{"repo_url": "https://user:pass@github.com/org/blog.git"}}),
+			Settings: settingsWith([]interface{}{map[string]interface{}{
+				"repo_url": "https://user:pass@github.com/org/blog.git",
+			}}),
 		}},
 		{"path traversal", &types.DataSourceConfig{
 			Settings: settingsWith([]interface{}{map[string]interface{}{

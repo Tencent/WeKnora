@@ -91,14 +91,17 @@ func TestInlineRelativeImagesSkips(t *testing.T) {
 	}
 
 	// Absolute path and scheme URLs → untouched.
-	out, _ = InlineRelativeImages(root, "docs/a.md", []byte("![a](/files/x.png) ![b](https://example.com/x.png) ![c](data:image/png;base64,AAAA)\n"))
-	if !strings.Contains(string(out), "/files/x.png") || !strings.Contains(string(out), "https://example.com/x.png") || !strings.Contains(string(out), "data:image/png;base64,AAAA") {
+	out, _ = InlineRelativeImages(root, "docs/a.md", []byte(
+		"![a](/files/x.png) ![b](https://example.com/x.png) ![c](data:image/png;base64,AAAA)\n"))
+	if !strings.Contains(string(out), "/files/x.png") ||
+		!strings.Contains(string(out), "https://example.com/x.png") ||
+		!strings.Contains(string(out), "data:image/png;base64,AAAA") {
 		t.Fatalf("scheme/absolute refs must be preserved: %s", out)
 	}
 
 	// Traversal escaping the worktree → untouched.
 	md := "![evil](../../etc/passwd)\n"
-	out, n = InlineRelativeImages(root, "docs/a.md", []byte(md))
+	_, n = InlineRelativeImages(root, "docs/a.md", []byte(md))
 	if n != 0 {
 		t.Fatalf("traversal must not inline, got n=%d", n)
 	}
@@ -107,14 +110,14 @@ func TestInlineRelativeImagesSkips(t *testing.T) {
 	small := filepath.Join(root, "images", "icon.png")
 	_ = os.MkdirAll(filepath.Dir(small), 0o755)
 	_ = os.WriteFile(small, []byte{0x89, 'P', 'N', 'G'}, 0o644) // 4 bytes
-	out, n = InlineRelativeImages(root, "docs/a.md", []byte("![icon](./images/icon.png)\n"))
+	_, n = InlineRelativeImages(root, "docs/a.md", []byte("![icon](./images/icon.png)\n"))
 	if n != 0 {
 		t.Fatalf("icon image must be skipped, got n=%d", n)
 	}
 
 	// Non-image extension → skipped.
 	_ = os.WriteFile(filepath.Join(root, "images", "x.txt"), []byte(strings.Repeat("x", 600)), 0o644)
-	out, n = InlineRelativeImages(root, "docs/a.md", []byte("![txt](./images/x.txt)\n"))
+	_, n = InlineRelativeImages(root, "docs/a.md", []byte("![txt](./images/x.txt)\n"))
 	if n != 0 {
 		t.Fatalf("non-image extension must be skipped, got n=%d", n)
 	}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 // repoSelection selects a single git repository (or a subdirectory of it) to
@@ -108,16 +109,27 @@ func normalizeRepoURL(raw string) (string, error) {
 	case "git+http", "git+https":
 		u.Scheme = strings.TrimPrefix(u.Scheme, "git+")
 	default:
-		return "", fmt.Errorf("%w: repo_url scheme %q not supported (use http/https)", datasource.ErrInvalidConfig, u.Scheme)
+		return "", fmt.Errorf("%w: repo_url scheme %q not supported (use http/https)",
+			datasource.ErrInvalidConfig, u.Scheme)
 	}
 	if u.User != nil {
-		return "", fmt.Errorf("%w: repo_url must not embed credentials; use the access_token credential", datasource.ErrInvalidConfig)
+		return "", fmt.Errorf("%w: repo_url must not embed credentials; use the access_token credential",
+			datasource.ErrInvalidConfig)
 	}
 	if u.Host == "" {
 		return "", fmt.Errorf("%w: repo_url must include a host", datasource.ErrInvalidConfig)
 	}
 	u.Fragment = ""
 	u.RawQuery = ""
+
+	// SSRF guard: repo_url is user-controlled and the connector clones it over
+	// the network, so it must never point at loopback / link-local / private /
+	// cloud-metadata targets. The same policy gates the dial-time transport
+	// (ensureSSRFTransport), and internal git servers can be allowlisted via the
+	// SSRF_WHITELIST env var (exact host, suffix, or CIDR).
+	if err := utils.ValidateURLForSSRF(u.String()); err != nil {
+		return "", fmt.Errorf("%w: repo_url SSRF validation failed: %v", datasource.ErrInvalidConfig, err)
+	}
 	return u.String(), nil
 }
 
