@@ -376,6 +376,40 @@ export async function resetUserPassword(req: ResetUserPasswordRequest): Promise<
   return response as unknown as { message: string }
 }
 
+export interface CreateSystemUserRequest {
+  /** 2-50 characters. */
+  username: string
+  /** Must be a valid email address. */
+  email: string
+  /**
+   * Optional. Omit the key (or send null) to have the server generate a
+   * random password, returned exactly once in `generated_password`.
+   * Any provided value (including empty string) is subject to the
+   * password policy and can be rejected.
+   */
+  password?: string
+}
+
+export interface CreateSystemUserResponse {
+  user: SystemAdminUser
+  /**
+   * Present only when the request omitted `password` (or sent null): the
+   * server-minted plaintext password, returned exactly once and could not
+   * be fetched again.
+   */
+  generated_password?: string
+}
+
+/**
+ * Provision a new local user account (SystemAdmin only).
+ * Backend returns the unwrapped CreateSystemUserResponse body.
+ * Responses 201 on success.
+ */
+export async function createSystemUser(req: CreateSystemUserRequest): Promise<CreateSystemUserResponse> {
+  const response = await post('/api/v1/system/admin/users/create', req)
+  return response as unknown as CreateSystemUserResponse
+}
+
 // ---- System Settings (P1) ----
 
 /**

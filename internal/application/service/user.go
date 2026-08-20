@@ -32,6 +32,19 @@ var (
 	jwtSecretOnce sync.Once
 	jwtSecret     string
 
+	// ErrUserEmailExists is returned by Register when the target entity's
+	// email already exists.
+	ErrUserEmailExists = errors.New("user with this email already exists")
+
+	// ErrUserUsernameExists is returned by Register when the target entity's
+	// username already exists.
+	ErrUserUsernameExists = errors.New("user with this username already exists")
+
+	// ErrUserIdentityConflict is returned by AdminCreateUser when only part
+	// of the requested identity (email or username) collides with an existing
+	// user, so a blind idempotent retry would return the wrong account.
+	ErrUserIdentityConflict = errors.New("email and username refer to conflicting existing identities")
+
 	// ErrPasswordPolicy is returned when a newly chosen password does not
 	// meet the product's public 8-32 character, letter-and-number contract.
 	// It is exported so HTTP handlers can translate the failure to a 400
@@ -136,12 +149,12 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 	// Check if user already exists
 	existingUser, _ := s.userRepo.GetUserByEmail(ctx, req.Email)
 	if existingUser != nil {
-		return nil, errors.New("user with this email already exists")
+		return nil, ErrUserEmailExists
 	}
 
 	existingUser, _ = s.userRepo.GetUserByUsername(ctx, req.Username)
 	if existingUser != nil {
-		return nil, errors.New("user with this username already exists")
+		return nil, ErrUserUsernameExists
 	}
 
 	// Hash password
@@ -721,6 +734,105 @@ func (s *userService) AdminResetPassword(ctx context.Context, userID string, new
 	}
 
 	return s.tokenRepo.RevokeTokensByUserID(ctx, userID)
+}
+
+// AdminCreateUser provisions a new local user on behalf of a SystemAdmin.
+//
+// An absent password generates a random one, returned exactly once.
+// Any provided password, must satisfy ValidatePasswordPolicy.
+//
+// Delegates to Register, so duplicate checks, tenant provisioning and Owner
+// membership bootstrapping match public registration.
+func (s *userService) AdminCreateUser(
+	ctx context.Context,
+	req *types.AdminCreateUserRequest,
+	provisioning types.TenantProvisioningMode,
+) (*types.User, string, error) {
+	if req == nil || strings.TrimSpace(req.Username) == "" || strings.TrimSpace(req.Email) == "" {
+		return nil, "", errors.New("username and email are required")
+	}
+
+	password := ""
+	generated := false
+	if req.Password == nil {
+		randomPassword, err := generatePolicyCompliantPassword()
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to generate password: %w", err)
+		}
+		password = randomPassword
+		generated = true
+	} else {
+		password = *req.Password
+	}
+	// Generation triggers only on an absent password. Any provided
+	// value, empty or whitespace-only, is hashed byte-for-byte and must
+	// satisfy the password policy.
+	if err := ValidatePasswordPolicy(password); err != nil {
+		return nil, "", err
+	}
+
+	user, err := s.Register(ctx, &types.RegisterRequest{
+		Username:           strings.TrimSpace(req.Username),
+		Email:              strings.TrimSpace(req.Email),
+		Password:           password,
+		TenantProvisioning: provisioning,
+	})
+	// WARN: idempotency is sequential only. Two concurrent creates of the
+	// same identity can race past Register's check; the loser gets a 500,
+	// and a retry resolves idempotently.
+	if err != nil {
+		// Register owns duplicate detection; on a duplicate we surface
+		// the existing row so the caller can respond idempotently. The
+		// sentinel names the colliding identity, so the lookup is
+		// targeted at exactly that key.
+		switch {
+		case errors.Is(err, ErrUserEmailExists):
+			return s.adminCreateUserOnDuplicate(
+				ctx, req, err,
+				func(ctx context.Context) (*types.User, error) {
+					return s.userRepo.GetUserByEmail(ctx, strings.TrimSpace(req.Email))
+				},
+			)
+		case errors.Is(err, ErrUserUsernameExists):
+			return s.adminCreateUserOnDuplicate(
+				ctx, req, err,
+				func(ctx context.Context) (*types.User, error) {
+					return s.userRepo.GetUserByUsername(ctx, strings.TrimSpace(req.Username))
+				},
+			)
+		}
+		return nil, "", err
+	}
+	if generated {
+		return user, password, nil
+	}
+	return user, "", nil
+}
+
+func (s *userService) adminCreateUserOnDuplicate(
+	ctx context.Context,
+	req *types.AdminCreateUserRequest,
+	dupErr error,
+	lookup func(context.Context) (*types.User, error),
+) (*types.User, string, error) {
+	existing, lookupErr := lookup(ctx)
+	if lookupErr != nil || existing == nil {
+		return nil, "", dupErr
+	}
+	if adminCreateIdentityMatches(existing, req.Username, req.Email) {
+		return existing, "", dupErr
+	}
+	return nil, "", ErrUserIdentityConflict
+}
+
+// adminCreateIdentityMatches reports whether an existing row is the exact
+// identity an admin create is idempotently retrying (both email and username).
+func adminCreateIdentityMatches(existing *types.User, username, email string) bool {
+	if existing == nil {
+		return false
+	}
+	return existing.Username == strings.TrimSpace(username) &&
+		existing.Email == strings.TrimSpace(email)
 }
 
 // ValidatePassword validates user password
@@ -1547,6 +1659,22 @@ func generateRandomString(length int) (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buffer), nil
+}
+
+// generatePolicyCompliantPassword returns a cryptographically random
+// password that satisfies ValidatePasswordPolicy, regenerating until
+// it does (a single 32-char base64url draw misses digits ~0.4% of the
+// time).
+func generatePolicyCompliantPassword() (string, error) {
+	for {
+		password, err := generateRandomString(24)
+		if err != nil {
+			return "", err
+		}
+		if ValidatePasswordPolicy(password) == nil {
+			return password, nil
+		}
+	}
 }
 
 func decodeJWTClaims(token string) (map[string]interface{}, error) {
