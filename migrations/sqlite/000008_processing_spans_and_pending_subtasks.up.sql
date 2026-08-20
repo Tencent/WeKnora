@@ -1,6 +1,7 @@
 -- Mirrors versioned migrations:
 --   000055_knowledge_processing_spans   knowledge_processing_spans table
 --   000056_knowledge_pending_subtasks   knowledges.pending_subtasks_count
+--   000066_expand_knowledge_span_name   name VARCHAR(255)
 
 CREATE TABLE IF NOT EXISTS knowledge_processing_spans (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -8,7 +9,7 @@ CREATE TABLE IF NOT EXISTS knowledge_processing_spans (
     attempt         INTEGER NOT NULL DEFAULT 1,
     span_id         VARCHAR(64) NOT NULL,
     parent_span_id  VARCHAR(64),
-    name            VARCHAR(64) NOT NULL,
+    name            VARCHAR(255) NOT NULL,
     kind            VARCHAR(16) NOT NULL,
     status          VARCHAR(16) NOT NULL,
     input           TEXT,
