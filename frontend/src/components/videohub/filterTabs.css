@@ -1,0 +1,36 @@
+.videohub-filter-tabs {
+  display: flex;
+  gap: calc(var(--td-comp-margin-s) * .75);
+  overflow-x: auto;
+  padding-bottom: calc(var(--td-comp-margin-s) / 2);
+}
+
+.videohub-filter-tabs button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: calc(var(--td-comp-margin-s) / 2);
+  padding: calc(var(--td-comp-margin-s) / 2) calc(var(--td-comp-margin-s) * 1.5);
+  border: 0;
+  border-radius: var(--td-radius-medium);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font: inherit;
+  font-size: var(--td-font-size-body-small);
+  cursor: pointer;
+}
+
+.videohub-filter-tabs button:hover { color: var(--td-text-color-primary); }
+
+.videohub-filter-tabs button.is-active {
+  background: var(--td-brand-color);
+  color: var(--td-text-color-anti);
+  box-shadow: var(--td-shadow-1);
+  font-weight: 600;
+}
+
+.videohub-filter-tabs small {
+  font-family: var(--app-font-family-mono, monospace);
+  font-size: 11px;
+  opacity: .8;
+}

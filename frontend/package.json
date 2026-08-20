@@ -23,6 +23,7 @@
     "axios": "^1.16.0",
     "docx-preview": "^0.3.7",
     "dompurify": "^3.4.11",
+    "echarts": "^5.6.0",
     "highlight.js": "^11.11.1",
     "katex": "^0.16.45",
     "marked": "^17.0.5",

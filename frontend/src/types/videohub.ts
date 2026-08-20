@@ -128,3 +128,100 @@ export interface UploadProgress {
   stage: 'uploading'
   percent: number
 }
+
+export interface GraphNode {
+  id: string
+  name: string
+  label: string
+  attributes: string[]
+  video_id?: string
+  video_title?: string
+  video_category?: VideoCategory
+  seconds?: number
+  link_count?: number
+  type?: string
+}
+
+export interface GraphEdge {
+  id: string
+  source: string
+  target: string
+  type: string
+  weight?: number
+  confidence?: number
+}
+
+export interface WikiGraphMeta {
+  mode: 'overview' | 'ego'
+  total: number
+  returned: number
+  truncated: boolean
+  center?: string
+  depth?: number
+  familiar_count?: number
+}
+
+export interface WikiGraphRequest {
+  mode?: 'overview' | 'ego'
+  center?: string
+  depth?: number
+  types?: string[]
+  limit?: number
+  videoId?: string
+}
+
+export interface KnowledgeGraphPayload {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  meta: WikiGraphMeta
+  attributes: string[]
+}
+
+export type DashboardRange = '7d' | '30d' | '90d' | 'custom'
+
+export interface KpiSummary {
+  total_questions: number
+  active_videos: number
+  cluster_count: number
+  avg_questions_per_video: number
+  trend: Record<'total_questions' | 'active_videos' | 'cluster_count' | 'avg_questions_per_video', number>
+}
+
+export interface QuestionTrendPoint {
+  date: string
+  count: number
+  top_videos: Array<{ video_id: string; title: string; count: number }>
+}
+
+export interface QuestionClusterVideo {
+  video_id: string
+  title: string
+  video_category: VideoCategory
+  first_seconds: number
+  first_timestamp: string
+  deleted?: boolean
+}
+
+export interface QuestionCluster {
+  id: string
+  representative_question: string
+  count: number
+  related_video_count: number
+  last_asked_at: string
+  videos: QuestionClusterVideo[]
+}
+
+export interface DashboardPayload {
+  range: DashboardRange
+  from?: string
+  to?: string
+  kpi: KpiSummary
+  trend: QuestionTrendPoint[]
+  clusters: QuestionCluster[]
+}
+
+export interface DashboardRequest {
+  range: DashboardRange
+  from?: string
+  to?: string
+}

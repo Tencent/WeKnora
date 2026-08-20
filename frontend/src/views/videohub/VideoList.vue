@@ -3,9 +3,11 @@
     <header class="video-list-page__header">
       <div><h1>Home</h1><p>浏览组织内的视频知识</p></div>
       <div class="video-list-page__actions">
-        <t-input v-model="query" clearable placeholder="搜索视频" />
+        <t-input v-model="query" clearable placeholder="搜索视频">
+          <template #prefix-icon><t-icon name="search" /></template>
+        </t-input>
         <t-select v-model="sortBy" :options="sortOptions" />
-        <t-button @click="openUpload">上传视频</t-button>
+        <t-button theme="primary" @click="openUpload">上传视频</t-button>
       </div>
     </header>
     <div v-if="loading" class="video-list-page__state"><t-loading text="正在加载视频" /></div>
@@ -61,13 +63,13 @@ onMounted(async () => { try { await refreshVideos() } finally { loading.value = 
 </script>
 
 <style scoped>
-.video-list-page { height: 100%; overflow-y: auto; padding: 32px 32px 112px; background: var(--td-bg-color-container); color: var(--td-text-color-primary); }
-.video-list-page__header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin: 0 auto 24px; max-width: 1440px; }
-.video-list-page h1 { margin: 0; color: var(--td-text-color-primary); font-size: 28px; font-weight: 400; line-height: 1.29; }
-.video-list-page p { margin: 8px 0 0; color: var(--td-text-color-secondary); font-size: 14px; line-height: 1.57; }
-.video-list-page__actions { display: grid; grid-template-columns: minmax(220px, 300px) 144px auto; gap: 8px; align-items: center; }
+.video-list-page { height: 100%; overflow-y: auto; padding: calc(var(--td-comp-margin-s) * 3) calc(var(--td-comp-margin-s) * 3) calc(var(--td-comp-margin-s) * 14); background: var(--td-bg-color-container); color: var(--td-text-color-primary); }
+.video-list-page__header { display: flex; align-items: flex-end; justify-content: space-between; gap: calc(var(--td-comp-margin-s) * 3); margin: 0 auto calc(var(--td-comp-margin-s) * 3); max-width: 1440px; }
+.video-list-page h1 { margin: 0; color: var(--td-text-color-primary); font-family: -apple-system, "system-ui", BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; font-size: var(--td-font-size-headline-medium); font-weight: 400; line-height: var(--td-line-height-headline-medium); }
+.video-list-page p { margin: calc(var(--td-comp-margin-s) / 2) 0 0; color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-medium); line-height: var(--td-line-height-body-medium); }
+.video-list-page__actions { display: grid; grid-template-columns: minmax(220px, 300px) 144px auto; gap: var(--td-comp-margin-s); align-items: center; }
 .video-list-page__actions :deep(.t-input), .video-list-page__actions :deep(.t-select-input) { border-radius: var(--td-radius-medium); }
-.video-list-page__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; max-width: 1440px; margin: 0 auto; }
+.video-list-page__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: calc(var(--td-comp-margin-s) * 2); max-width: 1440px; margin: 0 auto; }
 .video-list-page__state { min-height: 320px; display: grid; place-items: center; }
-@media (max-width: 900px) { .video-list-page { padding: 24px 20px 40px; }.video-list-page__header { align-items: stretch; flex-direction: column; }.video-list-page__actions { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .video-list-page { padding: calc(var(--td-comp-margin-s) * 3) calc(var(--td-comp-margin-s) * 2.5) calc(var(--td-comp-margin-s) * 5); }.video-list-page__header { align-items: stretch; flex-direction: column; }.video-list-page__actions { grid-template-columns: 1fr; } }
 </style>

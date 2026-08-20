@@ -4,7 +4,7 @@
     <t-empty v-else-if="!overview" description="暂无关联知识" />
     <template v-else>
       <RelationOverviewCard :overview="overview" />
-      <nav class="related-knowledge__tabs" aria-label="关联知识类型筛选">
+      <nav class="videohub-filter-tabs" aria-label="关联知识类型筛选">
         <button v-for="tab in visibleTabs" :key="tab.value" type="button" :class="{ 'is-active': selectedType === tab.value }" @click="selectedType = tab.value">
           <span>{{ tab.label }}</span><small>{{ tab.count }}</small>
         </button>
@@ -26,6 +26,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import './filterTabs.css'
 import { fetchRelatedKnowledge } from '@/api/videohub/relatedKnowledge'
 import KnowledgeAnchorCard from './KnowledgeAnchorCard.vue'
 import RelationOverviewCard from './RelationOverviewCard.vue'
@@ -65,10 +66,5 @@ watch(() => props.video.id, load, { immediate: true })
 <style scoped>
 .related-knowledge { display: grid; gap: calc(var(--td-comp-margin-s) * 2); padding: calc(var(--td-comp-margin-s) * 2) calc(var(--td-comp-margin-s) / 2); }
 .related-knowledge__state, .related-knowledge > :deep(.t-empty) { min-height: 320px; display: grid; place-items: center; }
-.related-knowledge__tabs { display: flex; gap: calc(var(--td-comp-margin-s) * .75); overflow-x: auto; padding-bottom: calc(var(--td-comp-margin-s) / 2); }
-.related-knowledge__tabs button { display: inline-flex; flex: none; align-items: center; gap: calc(var(--td-comp-margin-s) / 2); padding: calc(var(--td-comp-margin-s) / 2) calc(var(--td-comp-margin-s) * 1.5); border: 0; border-radius: var(--td-radius-medium); background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-secondary); font: inherit; font-size: var(--td-font-size-body-small); cursor: pointer; }
-.related-knowledge__tabs button:hover { color: var(--td-text-color-primary); }
-.related-knowledge__tabs button.is-active { background: var(--td-brand-color); color: var(--td-text-color-anti); box-shadow: var(--td-shadow-1); font-weight: 600; }
-.related-knowledge__tabs small { font-family: var(--app-font-family-mono, monospace); font-size: 11px; opacity: .8; }
 .related-knowledge__anchors { display: grid; gap: calc(var(--td-comp-margin-s) * 2); }
 </style>

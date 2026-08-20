@@ -123,15 +123,13 @@ const router = createRouter({
         {
           path: "graph",
           name: "knowledgeGraph",
-          component: () => import("../components/videohub/PlaceholderView.vue"),
-          props: { title: 'Knowledge Graph' },
+          component: () => import("../views/videohub/KnowledgeGraph.vue"),
           meta: { requiresInit: true, requiresAuth: true }
         },
         {
           path: "queries",
           name: "userQueries",
-          component: () => import("../components/videohub/PlaceholderView.vue"),
-          props: { title: 'User Queries' },
+          component: () => import("../views/videohub/Dashboard.vue"),
           meta: { requiresInit: true, requiresAuth: true }
         },
         {
