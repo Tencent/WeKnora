@@ -166,7 +166,7 @@ func TestAdminCreateUserRejectsWeakPasswordBeforePersisting(t *testing.T) {
 }
 
 func TestAdminCreateUserDuplicateReturnsExistingUserWithSentinel(t *testing.T) {
-	existing := &types.User{ID: "existing", Email: "alice@example.com"}
+	existing := &types.User{ID: "existing", Username: "alice", Email: "alice@example.com"}
 	repo := &adminCreateUserRepo{existingByEmail: existing}
 	svc := newAdminCreateUserService(repo)
 
@@ -188,7 +188,7 @@ func TestAdminCreateUserDuplicateReturnsExistingUserWithSentinel(t *testing.T) {
 }
 
 func TestAdminCreateUserDuplicateUsernameReturnsExistingUserWithSentinel(t *testing.T) {
-	existing := &types.User{ID: "existing", Username: "alice"}
+	existing := &types.User{ID: "existing", Username: "alice", Email: "alice@example.com"}
 	repo := &adminCreateUserRepo{existingByUsername: existing}
 	svc := newAdminCreateUserService(repo)
 
@@ -209,7 +209,7 @@ func TestAdminCreateUserDuplicateLookupTargetsSentinelIdentity(t *testing.T) {
 	// as if created concurrently. The lookup must return the user named by
 	// the sentinel, not the email owner a fallback would have picked.
 	repo := &racyIdentityRepo{
-		byUsername: &types.User{ID: "username-owner", Username: "alice"},
+		byUsername: &types.User{ID: "username-owner", Username: "alice", Email: "alice@example.com"},
 		byEmail:    &types.User{ID: "email-owner", Email: "alice@example.com"},
 	}
 	svc := &userService{userRepo: repo}
@@ -248,6 +248,41 @@ func (r *racyIdentityRepo) GetUserByEmail(_ context.Context, _ string) (*types.U
 
 func (r *racyIdentityRepo) GetUserByUsername(_ context.Context, _ string) (*types.User, error) {
 	return r.byUsername, nil
+}
+
+func TestAdminCreateUserRejectsPartialEmailConflict(t *testing.T) {
+	existing := &types.User{ID: "existing", Username: "alice", Email: "alice@example.com"}
+	repo := &adminCreateUserRepo{existingByEmail: existing}
+	svc := newAdminCreateUserService(repo)
+
+	_, generated, err := svc.AdminCreateUser(context.Background(), &types.AdminCreateUserRequest{
+		Username: "bob", Email: "alice@example.com", Password: new("PlainPass9"),
+	}, types.TenantProvisioningTenantless)
+	if !errors.Is(err, ErrUserIdentityConflict) {
+		t.Fatalf("err=%v, want ErrUserIdentityConflict", err)
+	}
+	if generated != "" {
+		t.Fatalf("generated=%q, want empty", generated)
+	}
+	if repo.created != nil {
+		t.Fatal("conflicting request reached persistence")
+	}
+}
+
+func TestAdminCreateUserRejectsPartialUsernameConflict(t *testing.T) {
+	existing := &types.User{ID: "existing", Username: "alice", Email: "alice@example.com"}
+	repo := &adminCreateUserRepo{existingByUsername: existing}
+	svc := newAdminCreateUserService(repo)
+
+	_, _, err := svc.AdminCreateUser(context.Background(), &types.AdminCreateUserRequest{
+		Username: "alice", Email: "bob@example.com", Password: new("PlainPass9"),
+	}, types.TenantProvisioningTenantless)
+	if !errors.Is(err, ErrUserIdentityConflict) {
+		t.Fatalf("err=%v, want ErrUserIdentityConflict", err)
+	}
+	if repo.created != nil {
+		t.Fatal("conflicting request reached persistence")
+	}
 }
 
 func TestAdminCreateUserRejectsMissingIdentity(t *testing.T) {

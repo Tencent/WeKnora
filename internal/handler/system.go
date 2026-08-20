@@ -1588,9 +1588,8 @@ func (h *SystemHandler) ResetUserPassword(c *gin.Context) {
 
 // CreateSystemUserResponse is the payload returned by
 // POST /api/v1/system/admin/users/create. GeneratedPassword is populated
-// exactly once, only when the server minted a random password (the
-// request left `password` empty), and is never logged, audited, or
-// retrievable again.
+// exactly once, only when the server minted a random password (`password`
+// omitted or null), and is never logged, audited, or retrievable again.
 type CreateSystemUserResponse struct {
 	User *types.UserInfo `json:"user"`
 	// GeneratedPassword is the plaintext password when the server
@@ -1601,9 +1600,10 @@ type CreateSystemUserResponse struct {
 // CreateSystemUser godoc
 // @Summary      Create a new user (SystemAdmin)
 // @Description  Provision a new local user account (SystemAdmin only).
-// @Description  When `password` is empty, a cryptographically random
+// @Description  When `password` is omitted or null, a cryptographically random
 // @Description  password is generated (OIDC-style crypto/rand + base64url)
-// @Description  and returned once in the response body. Tenant provisioning
+// @Description  and returned once in the response body. Any provided value,
+// @Description  including empty string, is policy-checked. Tenant provisioning
 // @Description  follows the shared auth.default_tenant_mode policy.
 // @Tags         System Admin
 // @Accept       json
@@ -1613,6 +1613,7 @@ type CreateSystemUserResponse struct {
 // @Success      200  {object}  CreateSystemUserResponse  "Identity already exists, returns the existing user"
 // @Failure      400  {object}  map[string]interface{}  "Invalid request or weak password"
 // @Failure      403  {object}  map[string]interface{}  "Forbidden: not a system admin"
+// @Failure      409  {object}  map[string]interface{}  "Email and username refer to conflicting identities"
 // @Failure      500  {object}  map[string]interface{}  "Internal error"
 // @Router       /system/admin/users/create [post]
 func (h *SystemHandler) CreateSystemUser(c *gin.Context) {
@@ -1623,9 +1624,9 @@ func (h *SystemHandler) CreateSystemUser(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user creation request"})
 		return
 	}
-	req.Username = strings.TrimSpace(req.Username)
-	req.Email = strings.TrimSpace(req.Email)
-	// Password is intentionally NOT trimmed.
+	req.Username = secutils.SanitizeForLog(strings.TrimSpace(req.Username))
+	req.Email = secutils.SanitizeForLog(strings.TrimSpace(req.Email))
+	// Password is intentionally NOT trimmed or sanitized.
 	if req.Username == "" || req.Email == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Username and email are required"})
 		return
@@ -1655,6 +1656,8 @@ func (h *SystemHandler) CreateSystemUser(c *gin.Context) {
 			c.JSON(http.StatusOK, CreateSystemUserResponse{User: user.ToUserInfo()})
 		case errors.Is(err, service.ErrPasswordPolicy):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, service.ErrUserIdentityConflict):
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		default:
 			logger.Errorf(ctx, "Failed to create user: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})

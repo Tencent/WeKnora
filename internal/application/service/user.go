@@ -40,6 +40,11 @@ var (
 	// username already exists.
 	ErrUserUsernameExists = errors.New("user with this username already exists")
 
+	// ErrUserIdentityConflict is returned by AdminCreateUser when only part
+	// of the requested identity (email or username) collides with an existing
+	// user, so a blind idempotent retry would return the wrong account.
+	ErrUserIdentityConflict = errors.New("email and username refer to conflicting existing identities")
+
 	// ErrPasswordPolicy is returned when a newly chosen password does not
 	// meet the product's public 8-32 character, letter-and-number contract.
 	// It is exported so HTTP handlers can translate the failure to a 400
@@ -782,13 +787,19 @@ func (s *userService) AdminCreateUser(
 		// targeted at exactly that key.
 		switch {
 		case errors.Is(err, ErrUserEmailExists):
-			if existing, lookupErr := s.userRepo.GetUserByEmail(ctx, strings.TrimSpace(req.Email)); lookupErr == nil && existing != nil {
-				return existing, "", err
-			}
+			return s.adminCreateUserOnDuplicate(
+				ctx, req, err,
+				func(ctx context.Context) (*types.User, error) {
+					return s.userRepo.GetUserByEmail(ctx, strings.TrimSpace(req.Email))
+				},
+			)
 		case errors.Is(err, ErrUserUsernameExists):
-			if existing, lookupErr := s.userRepo.GetUserByUsername(ctx, strings.TrimSpace(req.Username)); lookupErr == nil && existing != nil {
-				return existing, "", err
-			}
+			return s.adminCreateUserOnDuplicate(
+				ctx, req, err,
+				func(ctx context.Context) (*types.User, error) {
+					return s.userRepo.GetUserByUsername(ctx, strings.TrimSpace(req.Username))
+				},
+			)
 		}
 		return nil, "", err
 	}
@@ -796,6 +807,32 @@ func (s *userService) AdminCreateUser(
 		return user, password, nil
 	}
 	return user, "", nil
+}
+
+func (s *userService) adminCreateUserOnDuplicate(
+	ctx context.Context,
+	req *types.AdminCreateUserRequest,
+	dupErr error,
+	lookup func(context.Context) (*types.User, error),
+) (*types.User, string, error) {
+	existing, lookupErr := lookup(ctx)
+	if lookupErr != nil || existing == nil {
+		return nil, "", dupErr
+	}
+	if adminCreateIdentityMatches(existing, req.Username, req.Email) {
+		return existing, "", dupErr
+	}
+	return nil, "", ErrUserIdentityConflict
+}
+
+// adminCreateIdentityMatches reports whether an existing row is the exact
+// identity an admin create is idempotently retrying (both email and username).
+func adminCreateIdentityMatches(existing *types.User, username, email string) bool {
+	if existing == nil {
+		return false
+	}
+	return existing.Username == strings.TrimSpace(username) &&
+		existing.Email == strings.TrimSpace(email)
 }
 
 // ValidatePassword validates user password

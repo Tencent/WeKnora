@@ -154,15 +154,12 @@ func TestCreateSystemUserAutoGeneratesPasswordWhenEmpty(t *testing.T) {
 }
 
 func TestCreateSystemUserDoesNotRewritePassword(t *testing.T) {
-	// Password bytes must reach the service unmodified, including an
-	// explicitly provided empty string (a non-nil pointer to ""). Policy
-	// enforcement, including the rejection of empty and all-whitespace
-	// values, lives in the service layer.
+	// Password bytes must reach the service unmodified for valid credentials.
 	users := &createUserService{createdUser: &types.User{ID: "u3", Username: "carol", Email: "carol@example.com"}}
 	h := &SystemHandler{userSvc: users}
 	r := createSystemUserRouter(h, "admin-user")
 
-	for _, pw := range []string{"  PlainPass9  ", "\tPlainPass9\n", ""} {
+	for _, pw := range []string{"  PlainPass9  ", "\tPlainPass9\n"} {
 		w := performCreateSystemUser(t, r, map[string]string{
 			"username": "carol", "email": "carol@example.com", "password": pw,
 		})
@@ -172,6 +169,36 @@ func TestCreateSystemUserDoesNotRewritePassword(t *testing.T) {
 		if users.gotReq == nil || users.gotReq.Password == nil || *users.gotReq.Password != pw {
 			t.Fatalf("password=%q service received %+v", pw, users.gotReq)
 		}
+	}
+}
+
+func TestCreateSystemUserMapsEmptyPasswordTo400(t *testing.T) {
+	users := &createUserService{err: service.ErrPasswordPolicy}
+	h := &SystemHandler{userSvc: users}
+	r := createSystemUserRouter(h, "admin-user")
+
+	w := performCreateSystemUser(t, r, map[string]string{
+		"username": "carol", "email": "carol@example.com", "password": "",
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateSystemUserMapsIdentityConflictTo409(t *testing.T) {
+	users := &createUserService{err: service.ErrUserIdentityConflict}
+	audits := &capturingAuditService{}
+	h := &SystemHandler{userSvc: users, auditSvc: audits}
+	r := createSystemUserRouter(h, "admin-user")
+
+	w := performCreateSystemUser(t, r, map[string]string{
+		"username": "alice", "email": "bob@example.com",
+	})
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if len(audits.entries) != 0 {
+		t.Fatalf("conflict emitted audit entries: %+v", audits.entries)
 	}
 }
 

@@ -393,8 +393,9 @@ export interface CreateSystemUserRequest {
 export interface CreateSystemUserResponse {
   user: SystemAdminUser
   /**
-   * Present only when the request left `password` empty: the server-minted
-   * plaintext password, returned exactly once and could not be fetched again.
+   * Present only when the request omitted `password` (or sent null): the
+   * server-minted plaintext password, returned exactly once and could not
+   * be fetched again.
    */
   generated_password?: string
 }
