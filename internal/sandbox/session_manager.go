@@ -389,6 +389,54 @@ func (m *SessionBoundManager) DestroySession(ctx context.Context, sessionID stri
 	return m.lifecycle.Destroy(ctx, key)
 }
 
+// CreateSnapshot forwards provider snapshot creation for the live sandbox bound
+// to sessionID. Session execution never uses this optional capability; it is
+// reserved for skill image maintenance.
+func (m *SessionBoundManager) CreateSnapshot(
+	ctx context.Context, sessionID string, name string,
+) (RemoteSnapshotRef, error) {
+	if err := m.requireRemoteBackend(); err != nil {
+		return RemoteSnapshotRef{}, err
+	}
+	snapshots, ok := SnapshotManagerFrom(m.client)
+	if !ok || !m.client.Capabilities().SupportsSnapshots {
+		return RemoteSnapshotRef{}, errors.New("sandbox: remote provider does not support snapshots")
+	}
+	handle, err := m.resolveSession(ctx, sessionID)
+	if err != nil {
+		return RemoteSnapshotRef{}, err
+	}
+	return snapshots.CreateSnapshot(ctx, handle.ID(), name)
+}
+
+// DeleteSnapshot forwards provider snapshot deletion. It is used only to clean
+// up a just-created orphan when the DB pointer switch fails.
+func (m *SessionBoundManager) DeleteSnapshot(ctx context.Context, snapshotID string) error {
+	if err := m.requireRemoteBackend(); err != nil {
+		return err
+	}
+	snapshots, ok := SnapshotManagerFrom(m.client)
+	if !ok || !m.client.Capabilities().SupportsSnapshots {
+		return errors.New("sandbox: remote provider does not support snapshots")
+	}
+	return snapshots.DeleteSnapshot(ctx, snapshotID)
+}
+
+// ListSnapshots forwards provider snapshot listing for audit and later cleanup
+// tasks.
+func (m *SessionBoundManager) ListSnapshots(
+	ctx context.Context, sandboxID string,
+) ([]RemoteSnapshotRef, error) {
+	if err := m.requireRemoteBackend(); err != nil {
+		return nil, err
+	}
+	snapshots, ok := SnapshotManagerFrom(m.client)
+	if !ok || !m.client.Capabilities().SupportsSnapshots {
+		return nil, errors.New("sandbox: remote provider does not support snapshots")
+	}
+	return snapshots.ListSnapshots(ctx, sandboxID)
+}
+
 // EnsureSessionDir creates dir inside the session's live sandbox when one is
 // bound. It is a no-op when the session has no live binding; the skill
 // framework will materialise the directory during the next Execute call.
@@ -512,6 +560,36 @@ func (m *SessionBoundManager) ReadSessionFile(
 	return m.client.ReadFile(ctx, handle, filePath)
 }
 
+// WriteSessionFile writes an install/maintenance file into the session's live
+// sandbox. It is deliberately narrower than a general remote write: only the
+// tenant skills image root is accepted, because ordinary attachments must keep
+// using WriteSessionInputFile and its /workspace/input guard.
+func (m *SessionBoundManager) WriteSessionFile(
+	ctx context.Context, sessionID, filePath string, content []byte,
+) error {
+	if err := m.requireRemoteBackend(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return errors.New("sandbox: session ID required for file staging")
+	}
+	clean := path.Clean(strings.TrimSpace(filePath))
+	if clean != SkillsImageRoot && !strings.HasPrefix(clean, SkillsImageRoot+"/") {
+		return fmt.Errorf("sandbox: install file path %q is outside %s", filePath, SkillsImageRoot)
+	}
+	handle, err := m.resolveSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if err := m.client.MakeDir(ctx, handle, path.Dir(clean)); err != nil {
+		return fmt.Errorf("sandbox: create install directory: %w", err)
+	}
+	if err := m.client.WriteFile(ctx, handle, clean, content); err != nil {
+		return fmt.Errorf("sandbox: write install file %s: %w", clean, err)
+	}
+	return nil
+}
+
 // ShellExecOptions carries per-call shell execution knobs. The install-only
 // flags are explicit so skill image maintenance can write under /opt without
 // loosening work_dir or user privileges for ordinary chat sessions.
@@ -624,6 +702,16 @@ func (m *SessionBoundManager) ExecShellCommandWithOptions(
 // real remote backend is active. Returns nil after Local fallback engages so
 // the tool layer refuses to run shell commands on the host machine.
 func (m *SessionBoundManager) SessionShellExecutor() SessionShellExecutor {
+	if m == nil || m.remoteDisabled() {
+		return nil
+	}
+	return m
+}
+
+// SessionInstallShellExecutor advertises the privileged install-mode shell.
+// Same nil contract as SessionShellExecutor: after Local fallback engages the
+// capability disappears, so an install can never run on the host machine.
+func (m *SessionBoundManager) SessionInstallShellExecutor() SessionInstallShellExecutor {
 	if m == nil || m.remoteDisabled() {
 		return nil
 	}
@@ -953,9 +1041,11 @@ func effectiveHTTPTimeout(provider RemoteProvider, cfg *Config) time.Duration {
 }
 
 var (
-	_ SessionCapabilityProvider = (*SessionBoundManager)(nil)
-	_ SessionShellExecutor      = (*SessionBoundManager)(nil)
-	_ SessionFileStore          = (*SessionBoundManager)(nil)
+	_ SessionCapabilityProvider        = (*SessionBoundManager)(nil)
+	_ SessionShellExecutor             = (*SessionBoundManager)(nil)
+	_ SessionFileStore                 = (*SessionBoundManager)(nil)
+	_ SessionInstallCapabilityProvider = (*SessionBoundManager)(nil)
+	_ SessionInstallShellExecutor      = (*SessionBoundManager)(nil)
 )
 
 // PermissiveSessionExistenceChecker accepts every session. It is safe in

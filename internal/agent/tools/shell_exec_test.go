@@ -51,7 +51,7 @@ func TestShellExecRejectsWorkDirOutsideWorkspace(t *testing.T) {
 
 	require.NoError(t, err)
 	require.False(t, result.Success)
-	require.Contains(t, result.Error, "outside the sandbox workspace")
+	require.Contains(t, result.Error, `work_dir "/etc" is outside the allowed sandbox roots /workspace`)
 	assert.Equal(t, time.Duration(0), executor.timeout)
 }
 
