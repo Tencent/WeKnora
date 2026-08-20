@@ -42,6 +42,10 @@ export const AUTH_TEXT = {
   registerSubtitle: '创建账户并开始使用',
 } as const
 
+// ---------- 新手引导 ----------
+/** 新手引导里的品牌名（第一页「欢迎使用 X」/ 第二页「X 会自动解析…」），默认跟随 BRANDING.name */
+export const GUIDE_BRAND_NAME: string = BRANDING.name
+
 // ---------- logo 构建期解析 ----------
 // assets/img 下的图片经 Vite 打进产物后按文件名取 logo，
 const brandLogos = import.meta.glob('@/assets/img/*.{png,jpg,jpeg,svg,ico}', {

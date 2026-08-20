@@ -63,12 +63,12 @@ export default {
     reopen: 'Product tour',
     steps: {
       welcome: {
-        title: 'Welcome to WeKnora',
+        title: 'Welcome to {brand}',
         desc: 'A few quick steps to get you familiar with knowledge bases, chat and agents. Click "Next" to begin.'
       },
       knowledge: {
         title: 'Create your knowledge base',
-        desc: 'Everything starts here: upload documents, web pages or FAQs and WeKnora parses and indexes them automatically. Click here to open knowledge bases.'
+        desc: 'Everything starts here: upload documents, web pages or FAQs and {brand} parses and indexes them automatically. Click here to open knowledge bases.'
       },
       chat: {
         title: 'Start an AI chat',
