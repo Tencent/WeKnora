@@ -108,7 +108,9 @@ func TestDocumentedCodes_RegisteredInAllCodes(t *testing.T) {
 		}
 	}
 	if len(stale) > 0 {
-		t.Errorf("the following error codes are documented in cli/AGENTS.md \"Error code reference\" but are not registered in AllCodes():\n  - %s\n\nDrop the row if the code was removed, or register the code if the row is correct.",
+		t.Errorf("the following error codes are documented in cli/AGENTS.md "+
+			"\"Error code reference\" but are not registered in AllCodes():\n  - %s\n\n"+
+			"Drop the row if the code was removed, or register the code if the row is correct.",
 			strings.Join(stale, "\n  - "))
 	}
 }
