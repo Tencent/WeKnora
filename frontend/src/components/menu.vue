@@ -3,7 +3,8 @@
         <!-- 展开时：Logo + 搜索/折叠按钮同行 -->
         <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
             <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
-                <img class="logo" src="@/assets/img/weknora.png" alt="">
+                <img class="logo" :src="BRAND_LOGO_SRC" alt="">
+                <span class="sidebar-logo-brand"><span class="brand-s" :style="{ color: BRANDING.accentColor }">{{ BRAND_ACCENT_LETTER }}</span>{{ BRAND_NAME_TAIL }}</span>
                 <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
             </div>
             <div class="logo_actions">
@@ -256,6 +257,7 @@ import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
 import { useI18n } from 'vue-i18n';
 import { getSystemInfo } from '@/api/system';
+import { BRANDING, BRAND_ACCENT_LETTER, BRAND_NAME_TAIL, BRAND_LOGO_SRC } from '@/config/branding';
 
 const chatResources = useChatResourcesStore();
 // Platform logos reused from IMChannelsOverviewPanel — keeps the session list
@@ -1273,8 +1275,23 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         overflow: hidden;
 
         .logo {
-            width: 128px;
+            width: 52px;
             height: auto;
+        }
+
+        .sidebar-logo-brand {
+            margin-left: 10px;
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--td-text-color-primary);
+            font-family: var(--app-font-family);
+            letter-spacing: 0.5px;
+            line-height: 1;
+            white-space: nowrap;
+
+            .brand-s {
+                color: #e60012;
+            }
         }
 
         .lite-badge {

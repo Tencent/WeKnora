@@ -2563,9 +2563,9 @@ export default {
     loadingInfo: '正在加载信息...',
     retry: '重试',
     versionLabel: '应用版本',
-    versionDescription: '当前应用服务（weknora-app）的版本号',
+    versionDescription: '当前应用服务的版本号',
     frontendVersionLabel: 'UI 版本',
-    frontendVersionDescription: '当前 UI 界面（weknora-ui）的构建版本号',
+    frontendVersionDescription: '当前 UI 界面的构建版本号',
     versionMismatch: '与应用版本不一致',
     buildTimeLabel: '构建时间',
     buildTimeDescription: '系统构建的时间',
@@ -4228,7 +4228,7 @@ export default {
     }
   },
   createChat: {
-    title: 'Hi，我是 WeKnora，让你的知识触手可及',
+    title: 'Hi，我是 {brand}，让你的知识触手可及',
     newSessionTitle: '新会话',
     messages: {
       createFailed: '创建会话失败',

@@ -95,10 +95,11 @@
       </svg>
     </div>
 
-    <!-- Logo - Top Left -->
-    <a href="https://github.com/Tencent/WeKnora" target="_blank" class="header-logo" :title="$t('common.github')">
-      <img src="@/assets/img/weknora.png" alt="WeKnora" class="logo-image" />
-    </a>
+    <!-- Logo + Brand - Top Left -->
+    <div class="header-logo">
+      <img :src="BRAND_LOGO_SRC" :alt="BRANDING.name" class="logo-image" />
+      <span class="logo-brand"><span class="brand-s" :style="{ color: BRANDING.accentColor }">{{ BRAND_ACCENT_LETTER }}</span>{{ BRAND_NAME_TAIL }}</span>
+    </div>
 
     <!-- Header Links - Top Right -->
     <div class="header-links">
@@ -363,6 +364,7 @@ import {
 } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
+import { BRANDING, BRAND_ACCENT_LETTER, BRAND_NAME_TAIL, BRAND_LOGO_SRC } from '@/config/branding'
 
 // Import screenshot images
 import screenshot1 from '@/assets/img/screenshot-1.svg'
@@ -1205,10 +1207,27 @@ onMounted(async () => {
   left: 50px;
   z-index: 100;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 
   .logo-image {
     width: 120px;
     height: auto;
+  }
+
+  .logo-brand {
+    font-size: 24px;
+    font-weight: 700;
+    color: #000000;
+    font-family: var(--app-font-family);
+    letter-spacing: 0.5px;
+    line-height: 1;
+    white-space: nowrap;
+
+    .brand-s {
+      color: #e60012;
+    }
   }
 }
 
@@ -1837,6 +1856,10 @@ html[theme-mode="dark"] {
 
   .header-logo .logo-image {
     filter: invert(1) hue-rotate(180deg) brightness(1.1);
+  }
+
+  .header-logo .logo-brand {
+    color: #ffffff;
   }
 
   .header-link {
