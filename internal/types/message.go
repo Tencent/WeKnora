@@ -285,6 +285,10 @@ type Message struct {
 	IsFallback bool `json:"is_fallback,omitempty"`
 	// Agent total execution duration in milliseconds (from query start to answer start)
 	AgentDurationMs int64 `json:"agent_duration_ms,omitempty" gorm:"column:agent_duration_ms;default:0"`
+	// LLM token usage aggregated across every round of the turn that produced this
+	// assistant message. Persisted so history reads can attribute cost after the
+	// live stream is gone; NULL (nil) for user messages and pre-feature rows.
+	Usage *TokenUsage `json:"usage,omitempty" gorm:"type:jsonb;column:usage"`
 	// RenderedContent stores the full RAG-augmented user message (with retrieved context)
 	// sent to the LLM. Used to preserve retrieval context across conversation turns.
 	// Empty for non-retrieval intents or assistant messages.

@@ -701,6 +701,9 @@ func applyIMCompleteDataToMessage(msg *types.Message, data event.AgentCompleteDa
 	}
 	msg.IsCompleted = true
 	msg.AgentDurationMs = data.TotalDurationMs
+	if usage, ok := data.Usage.(*types.TokenUsage); ok && usage != nil {
+		msg.Usage = usage
+	}
 	if len(data.KnowledgeRefs) > 0 {
 		refs := make([]*types.SearchResult, 0, len(data.KnowledgeRefs))
 		collectIMKnowledgeReferences(&refs, data.KnowledgeRefs)
