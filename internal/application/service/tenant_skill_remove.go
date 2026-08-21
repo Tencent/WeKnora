@@ -132,9 +132,10 @@ func (s *TenantSkillService) runRemove(
 		return fmt.Errorf("sandbox config %s not found", configID)
 	}
 
-	// A skill that never made it into any image needs no sandbox at all.
+	// A skill that never made it into any image needs no sandbox at all, and
+	// no live sandbox can be out of date over a skill it never carried.
 	if currentSnapshotID(cfgEntity) == "" {
-		return s.finishRemoval(cleanupBase, tenantID, configID, skillID)
+		return s.finishRemoval(cleanupBase, tenantID, configID, skillID, false)
 	}
 
 	// Everything below either creates provider resources or moves the image
@@ -163,7 +164,7 @@ func (s *TenantSkillService) runRemove(
 		// No new ledger row exists to keep active: nothing points at a
 		// snapshot any more.
 		s.markPreviousSnapshotsSuperseded(ctx, tenantID, configID, "")
-		return s.finishRemoval(cleanupBase, tenantID, configID, skillID)
+		return s.finishRemoval(cleanupBase, tenantID, configID, skillID, true)
 	}
 
 	// Remaining skills still live in the current snapshot, so it must be an
@@ -253,7 +254,7 @@ func (s *TenantSkillService) runRemove(
 	}
 	imageChanged = true
 	s.markPreviousSnapshotsSuperseded(ctx, tenantID, configID, removeRowID)
-	return s.finishRemoval(cleanupBase, tenantID, configID, skillID)
+	return s.finishRemoval(cleanupBase, tenantID, configID, skillID, true)
 }
 
 // removeSkillDirectory wipes one skill's tree from the image. The per-skill
@@ -383,7 +384,7 @@ func (s *TenantSkillService) clearImagePointer(
 // removal: the files are gone and re-running the whole flow to fix a row would
 // be absurd.
 func (s *TenantSkillService) finishRemoval(
-	cleanupBase context.Context, tenantID uint64, configID, skillID string,
+	cleanupBase context.Context, tenantID uint64, configID, skillID string, imageChanged bool,
 ) error {
 	ctx, cancel := s.cleanupContext(cleanupBase)
 	defer cancel()
@@ -412,7 +413,13 @@ func (s *TenantSkillService) finishRemoval(
 	if skill != nil && skill.BundleRef != "" {
 		s.deleteBundleBestEffort(ctx, tenantID, skill.BundleRef)
 	}
-	s.markConfigSandboxesStale(ctx, tenantID, configID)
+	// Only an image that actually changed can leave a bound sandbox out of
+	// date. Marking after a removal that moved no pointer would destroy and
+	// rebuild every live sandbox of the config - throwing away each session's
+	// /workspace scratch - for a change no sandbox can observe.
+	if imageChanged {
+		s.markConfigSandboxesStale(ctx, tenantID, configID)
+	}
 	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
 		Percent: 100, Stage: "done", Status: "removed",
 	})

@@ -1,4 +1,4 @@
-import { get, post, put, del } from '@/utils/request'
+import { get, post, put, del, patch, postUpload } from '@/utils/request'
 import type { CreatedTenantAPIKey, TenantAPIKey, TenantAPIKeyCapability } from '@/api/tenant'
 
 export interface CreatePlatformAPIKeyPayload {
@@ -749,12 +749,21 @@ export interface SandboxE2BConfig {
   e2b_sandbox_ttl_seconds?: number
 }
 
+export interface SandboxSkillImage {
+  snapshot_id?: string
+  generation?: number
+  built_at?: string
+  base_template_id?: string
+  owner_fingerprint?: string
+}
+
 export interface SandboxConfig {
   sandbox_type?: string
   default_timeout_sec?: number
   allow_private_endpoints?: boolean
   env_vars?: Record<string, string>
   volume_mount?: SandboxVolumeMountConfig
+  skill_image?: SandboxSkillImage
   cube?: SandboxCubeConfig
   e2b?: SandboxE2BConfig
   docker?: SandboxDockerConfig
@@ -979,4 +988,76 @@ export function parseSandboxConflict(err: unknown): SandboxConflict | null {
     return null
   }
   return { code: detail.code, message: detail.message, inventory: detail.data }
+}
+
+// --- Agent skills installed onto a sandbox config's image ---
+
+export type ConfigSkillStatus = 'installing' | 'ready' | 'failed' | 'removing' | 'removed'
+
+export interface ConfigSkill {
+  id: string
+  name: string
+  version?: string
+  description?: string
+  enabled: boolean
+  status: ConfigSkillStatus | string
+  error?: string
+  bundle_sha256?: string
+  installed_snapshot_id?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ConfigSkillInstallEvent {
+  percent: number
+  stage: string
+  log?: string
+  status?: string
+  done: boolean
+}
+
+export function listConfigSkills(configId: string): Promise<{ data: ConfigSkill[] }> {
+  return get(`/api/v1/sandbox-configs/${configId}/skills`) as unknown as Promise<{ data: ConfigSkill[] }>
+}
+
+export function uploadConfigSkill(
+  configId: string, file: File, onProgress?: (percent: number) => void,
+): Promise<{ data: { skill_id: string } }> {
+  const form = new FormData()
+  form.append('file', file)
+  return postUpload(`/api/v1/sandbox-configs/${configId}/skills`, form, (e: any) => {
+    if (e.total) onProgress?.(Math.round((e.loaded * 100) / e.total))
+  }, { timeout: 5 * 60 * 1000 })
+}
+
+export function patchConfigSkill(
+  configId: string,
+  skillId: string,
+  payload: { enabled: boolean },
+): Promise<{ data: ConfigSkill }> {
+  return patch(`/api/v1/sandbox-configs/${configId}/skills/${skillId}`, payload) as unknown as Promise<{
+    data: ConfigSkill
+  }>
+}
+
+export function deleteConfigSkill(
+  configId: string,
+  skillId: string,
+): Promise<{ data: { skill_id: string } }> {
+  return del(`/api/v1/sandbox-configs/${configId}/skills/${skillId}`) as unknown as Promise<{
+    data: { skill_id: string }
+  }>
+}
+
+export function getConfigSkill(
+  configId: string,
+  skillId: string,
+): Promise<{ data: ConfigSkill }> {
+  return get(`/api/v1/sandbox-configs/${configId}/skills/${skillId}`) as unknown as Promise<{
+    data: ConfigSkill
+  }>
+}
+
+export function configSkillInstallEventsUrl(configId: string, skillId: string): string {
+  return `/api/v1/sandbox-configs/${configId}/skills/${skillId}/install-events`
 }

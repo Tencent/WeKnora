@@ -368,6 +368,91 @@ func TestResolveEffectiveConfigUsesSkillSnapshotAsE2BTemplate(t *testing.T) {
 	})
 }
 
+// SkillImageActive is what the agent side asks before telling a model about an
+// installed skill, so it must agree with the template ResolveEffectiveConfig
+// actually boots. Any disagreement means either skills that are announced and
+// cannot run, or skills that are in the image and hidden.
+func TestSkillImageActiveAgreesWithTheResolvedTemplate(t *testing.T) {
+	global := DefaultConfig()
+	cube := func() *types.TenantSandboxConfig {
+		return &types.TenantSandboxConfig{
+			SandboxType: "cube",
+			Cube: &types.CubeSandboxConfig{
+				APIURL: "https://203.0.113.10", ProxyURL: "https://203.0.113.11",
+				SandboxDomain: "cube.example.com", APIKey: "key-1", TemplateID: "tpl-base",
+			},
+		}
+	}
+	fp := SkillImageFingerprint("cube", "key-1", "https://203.0.113.10")
+
+	cases := map[string]struct {
+		config *types.TenantSandboxConfig
+		want   bool
+	}{
+		"snapshot owned by the live credentials": {
+			config: func() *types.TenantSandboxConfig {
+				cfg := cube()
+				cfg.SkillImage = &types.SkillImageConfig{SnapshotID: "snap-1", OwnerFingerprint: fp}
+				return cfg
+			}(),
+			want: true,
+		},
+		"snapshot from another account": {
+			config: func() *types.TenantSandboxConfig {
+				cfg := cube()
+				cfg.SkillImage = &types.SkillImageConfig{
+					SnapshotID: "snap-1", OwnerFingerprint: "another-account",
+				}
+				return cfg
+			}(),
+			want: false,
+		},
+		"snapshot with no recorded owner": {
+			config: func() *types.TenantSandboxConfig {
+				cfg := cube()
+				cfg.SkillImage = &types.SkillImageConfig{SnapshotID: "snap-1"}
+				return cfg
+			}(),
+			want: false,
+		},
+		"no snapshot yet": {
+			config: cube(),
+			want:   false,
+		},
+		"backend that cannot snapshot": {
+			config: &types.TenantSandboxConfig{
+				SandboxType: "docker",
+				Docker:      &types.DockerSandboxConfig{Image: "img"},
+				SkillImage: &types.SkillImageConfig{
+					SnapshotID: "snap-1", OwnerFingerprint: fp,
+				},
+			},
+			want: false,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			active := SkillImageActive(tc.config)
+			require.Equal(t, tc.want, active)
+
+			eff, err := ResolveEffectiveConfig(tc.config, global)
+			require.NoError(t, err)
+			booted := EffectiveTemplateID(eff)
+			if active {
+				require.Equal(t, tc.config.SkillImage.SnapshotID, booted)
+				return
+			}
+			if tc.config.SkillImage != nil && tc.config.SkillImage.SnapshotID != "" {
+				require.NotEqual(t, tc.config.SkillImage.SnapshotID, booted,
+					"a skill declared unusable must not be the image the session boots")
+			}
+		})
+	}
+
+	require.False(t, SkillImageActive(nil))
+}
+
 func TestSkillImageFingerprintIsStableAndDiscriminating(t *testing.T) {
 	a := SkillImageFingerprint("cube", "key-1", "https://a.example.com")
 	require.Equal(t, a, SkillImageFingerprint("cube", "key-1", "https://a.example.com"))

@@ -97,8 +97,9 @@ func TestRunRemoveFallsBackToBaseTemplateWhenNoSkillsRemain(t *testing.T) {
 
 	require.Empty(t, fx.configRepo.saved.Config.SkillImage.SnapshotID,
 		"an image with no skills left is just the base template; do not spend a snapshot on it")
-	require.Equal(t, []string{"switch-pointer"}, fx.events,
-		"clearing the pointer is the whole job: no sandbox is started, so none is billed")
+	require.Equal(t, []string{"switch-pointer", "mark-stale"}, fx.events,
+		"no sandbox is started, so none is billed - but the sessions holding one must "+
+			"still rebuild from the base template")
 	require.Empty(t, fx.commands)
 
 	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
@@ -189,7 +190,11 @@ func TestRunRemoveClearsTheLastSkillWhenCredentialsRotated(t *testing.T) {
 
 	require.Empty(t, fx.configRepo.saved.Config.SkillImage.SnapshotID,
 		"the last skill can fall back to the base template without booting the unreadable snapshot")
-	require.Equal(t, []string{"switch-pointer"}, fx.events)
+	// The bindings are marked now that markConfigSandboxesStale does the work
+	// its placeholder described. It matters most here: those sandboxes run on a
+	// snapshot the live credentials can no longer resolve, so leaving them bound
+	// keeps them on an image nothing can rebuild.
+	require.Equal(t, []string{"switch-pointer", "mark-stale"}, fx.events)
 	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
 	require.NoError(t, err)
 	require.Nil(t, skill)

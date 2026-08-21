@@ -176,6 +176,31 @@ func (l *remoteSessionLifecycle) resolveLocked(
 		binding = nil
 	}
 
+	// A stale binding is one whose sandbox boots an image the config has since
+	// replaced. It is destroyed here, at the session's next resolve, rather
+	// than when the image changed, so an administrator's install does not tear
+	// down sandboxes out from under the sessions using them.
+	//
+	// Known limitation: a resolve is per sandbox OPERATION, not per turn. Every
+	// exec and file call resolves, and the lifecycle lock is released as soon as
+	// this function returns, so a mark that lands mid-turn destroys the sandbox
+	// between two tool calls of that turn — taking away the /workspace scratch
+	// the deferral is meant to preserve — and an operation of the same session
+	// running concurrently can have its sandbox deleted underneath it. The
+	// window is the same one the terminal-binding replacement below and
+	// DestroySession already have; closing it needs a turn-scoped lease, which
+	// this deferred-rebuild design deliberately does not have.
+	//
+	// Destroying before rebuilding is not optional: the recovery pass below
+	// adopts any live sandbox carrying this session's metadata, so a surviving
+	// one would simply be picked up again.
+	if binding != nil && binding.StaleAt != nil {
+		if err := l.destroyBindingLocked(ctx, key, *binding); err != nil {
+			return nil, fmt.Errorf("release stale sandbox binding: %w", err)
+		}
+		binding = nil
+	}
+
 	if binding != nil {
 		handle, replace, err := l.connectBinding(ctx, *binding)
 		if err != nil {
@@ -576,6 +601,7 @@ func (l *remoteSessionLifecycle) newBinding(
 		SandboxID:  sandboxID,
 		TemplateID: templateID,
 		CreatedAt:  createdAt.UTC(),
+		ConfigID:   l.sandboxConfigID,
 	}
 }
 

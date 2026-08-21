@@ -46,6 +46,7 @@ func RegisterModelRoutes(
 func RegisterSandboxConfigRoutes(
 	r *gin.RouterGroup,
 	h *handler.SandboxConfigHandler,
+	skills *handler.SandboxSkillHandler,
 	g *rbacGuards,
 ) {
 	configs := g.apiKeyGroup(r.Group("/sandbox-configs"), apiKeyFullAccess())
@@ -58,6 +59,15 @@ func RegisterSandboxConfigRoutes(
 		configs.PUT("/:id", g.Admin(), h.Update)
 		configs.DELETE("/:id", g.Admin(), h.Delete)
 		configs.GET("/:id/sandboxes", g.Admin(), h.Inventory)
+		// Skills are Admin+ throughout, reads included: an upload drives a
+		// root shell whose output is baked into the image every session of
+		// this config boots, and the listing names what that image carries.
+		configs.GET("/:id/skills", g.Admin(), skills.List)
+		configs.POST("/:id/skills", g.Admin(), skills.Upload)
+		configs.GET("/:id/skills/:skillId", g.Admin(), skills.Get)
+		configs.PATCH("/:id/skills/:skillId", g.Admin(), skills.Patch)
+		configs.DELETE("/:id/skills/:skillId", g.Admin(), skills.Delete)
+		configs.GET("/:id/skills/:skillId/install-events", g.Admin(), skills.InstallEvents)
 	}
 }
 

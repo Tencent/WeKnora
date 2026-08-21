@@ -125,6 +125,17 @@ func respondSandboxInventoryUnverifiable(c *gin.Context) {
 	})
 }
 
+func respondSkillSnapshotReleaseFailed(c *gin.Context, remaining []string) {
+	c.JSON(http.StatusConflict, gin.H{
+		"success": false,
+		"error": gin.H{
+			"code":    "skill_snapshot_release_failed",
+			"message": "无法销毁该配置下的技能快照，已中止删除以免快照继续计费",
+			"data":    gin.H{"snapshot_ids": remaining},
+		},
+	})
+}
+
 func respondSandboxConfigCordoned(c *gin.Context) {
 	c.JSON(http.StatusLocked, gin.H{
 		"success": false,
@@ -143,6 +154,15 @@ func respondSandboxConfigRefusal(c *gin.Context, err error) bool {
 	}
 	if stderrors.Is(err, service.ErrSandboxInventoryUnverifiable) {
 		respondSandboxInventoryUnverifiable(c)
+		return true
+	}
+	var releaseErr *service.SkillSnapshotReleaseFailedError
+	if stderrors.As(err, &releaseErr) {
+		respondSkillSnapshotReleaseFailed(c, releaseErr.Remaining)
+		return true
+	}
+	if stderrors.Is(err, service.ErrSkillSnapshotReleaseFailed) {
+		respondSkillSnapshotReleaseFailed(c, nil)
 		return true
 	}
 	if stderrors.Is(err, repository.ErrSandboxConfigCordoned) {

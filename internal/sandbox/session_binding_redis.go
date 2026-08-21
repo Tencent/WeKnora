@@ -30,6 +30,21 @@ end
 return 0
 `)
 
+var markBindingStaleIfMatchScript = redis.NewScript(`
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 0 end
+local value = cjson.decode(raw)
+if value['provider'] ~= ARGV[1] or value['sandbox_id'] ~= ARGV[2] then
+	return 0
+end
+redis.call('SET', KEYS[1], ARGV[3])
+return 1
+`)
+
+// redisBindingScanCount is the SCAN batch size. Bindings are one small key per
+// live session, so a workspace's whole set is normally a single batch.
+const redisBindingScanCount = 200
+
 // RedisSessionSandboxBindingStore is the authoritative distributed store for
 // persistent remote-session bindings.
 type RedisSessionSandboxBindingStore struct {
@@ -157,6 +172,105 @@ func (s *RedisSessionSandboxBindingStore) WithLifecycleLock(
 	)
 }
 
+// InvalidateByConfig marks every binding of one workspace's config stale.
+func (s *RedisSessionSandboxBindingStore) InvalidateByConfig(
+	ctx context.Context,
+	tenantID uint64,
+	configID string,
+) (int, error) {
+	return invalidateBindingsByConfig(ctx, s, tenantID, configID)
+}
+
+// listTenantBindingKeys SCANs the workspace's binding keys.
+//
+// SCAN rather than a maintained index: the index would be a second key that
+// every create and delete has to keep in step across processes, and a drifted
+// index silently under-reports exactly when it matters. The cost is bounded
+// because the pattern is anchored on the workspace's own prefix.
+//
+// A single-node Redis (what the container wires) answers this completely. On a
+// Redis Cluster, SCAN reaches one node, so bindings living on the others would
+// go unmarked and their sessions would keep the previous image until they end.
+func (s *RedisSessionSandboxBindingStore) listTenantBindingKeys(
+	ctx context.Context,
+	tenantID uint64,
+) ([]SessionSandboxKey, error) {
+	prefix := fmt.Sprintf(
+		"weknora:sandbox:session:{%s:%d:", s.namespace, tenantID,
+	)
+	const suffix = "}:binding"
+	pattern := escapeRedisGlob(prefix) + "*" + suffix
+
+	var keys []SessionSandboxKey
+	var cursor uint64
+	for {
+		batch, next, err := s.client.Scan(ctx, cursor, pattern, redisBindingScanCount).Result()
+		if err != nil {
+			return nil, fmt.Errorf("scan sandbox bindings: %w", err)
+		}
+		for _, raw := range batch {
+			sessionID := strings.TrimSuffix(strings.TrimPrefix(raw, prefix), suffix)
+			key := SessionSandboxKey{TenantID: tenantID, SessionID: sessionID}
+			if key.Validate() != nil {
+				continue
+			}
+			keys = append(keys, key)
+		}
+		if next == 0 {
+			return keys, nil
+		}
+		cursor = next
+	}
+}
+
+// markBindingStale writes the marked binding back only while the stored one
+// still names the same sandbox.
+func (s *RedisSessionSandboxBindingStore) markBindingStale(
+	ctx context.Context,
+	key SessionSandboxKey,
+	expected SessionSandboxBinding,
+	staleAt time.Time,
+) (bool, error) {
+	if err := validateBindingMatch(key, expected.Provider, expected.SandboxID); err != nil {
+		return false, err
+	}
+	marked := expected
+	marked.StaleAt = &staleAt
+	payload, err := json.Marshal(marked)
+	if err != nil {
+		return false, fmt.Errorf("encode stale sandbox binding: %w", err)
+	}
+	wrote, err := markBindingStaleIfMatchScript.Run(
+		ctx,
+		s.client,
+		[]string{s.bindingKey(key)},
+		string(expected.Provider),
+		expected.SandboxID,
+		payload,
+	).Int64()
+	if err != nil {
+		return false, fmt.Errorf("mark sandbox binding stale: %w", err)
+	}
+	return wrote != 0, nil
+}
+
+// escapeRedisGlob quotes the characters SCAN's MATCH treats as wildcards. The
+// namespace is operator-supplied and only screened for braces and control
+// characters, so a namespace containing "*" would otherwise widen the pattern
+// past the workspace it is meant to anchor.
+func escapeRedisGlob(literal string) string {
+	var out strings.Builder
+	out.Grow(len(literal))
+	for _, r := range literal {
+		switch r {
+		case '\\', '*', '?', '[', ']', '^':
+			out.WriteByte('\\')
+		}
+		out.WriteRune(r)
+	}
+	return out.String()
+}
+
 func (s *RedisSessionSandboxBindingStore) bindingKey(key SessionSandboxKey) string {
 	return "weknora:sandbox:session:{" + s.hashTag(key) + "}:binding"
 }
@@ -170,6 +284,8 @@ func (s *RedisSessionSandboxBindingStore) lockKey(key SessionSandboxKey) string 
 func (s *RedisSessionSandboxBindingStore) hashTag(key SessionSandboxKey) string {
 	return fmt.Sprintf("%s:%d:%s", s.namespace, key.TenantID, key.SessionID)
 }
+
+var _ tenantBindingScanner = (*RedisSessionSandboxBindingStore)(nil)
 
 func validateRedisNamespace(namespace string) error {
 	if strings.ContainsAny(namespace, "{}") {

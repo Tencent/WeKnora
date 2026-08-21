@@ -569,16 +569,24 @@ func (s *TenantSkillService) verifyDeclaredDependencies(
 	return nil
 }
 
-// normalizeSkillPermissions hands the skill tree to the execution user.
-// Installs run as root, so without this the non-root user that actually runs
-// skills could not read them — which is also why it runs before verification:
-// the smoke test has to exercise the permissions the snapshot will carry.
+// normalizeSkillPermissions makes the skill tree readable and executable by
+// the non-root execution user, and writable by nobody. Installs run as root,
+// so without the mode change the user that actually runs skills could not read
+// them at all — which is also why this runs before verification: the smoke
+// test has to exercise the permissions the snapshot will carry.
+//
+// Ownership stays with root rather than moving to the execution user because
+// this tree is baked into an image every session of the config inherits. A
+// session that could write here would be editing the skills every other
+// session runs. 555 leaves reads and execs to the "other" bits, which is all a
+// skill run needs; the cost is that Python cannot write __pycache__ into the
+// tree and silently skips bytecode caching.
 func (s *TenantSkillService) normalizeSkillPermissions(
 	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string,
 ) error {
 	cmds := []string{
-		fmt.Sprintf("chmod -R 755 %s", sandbox.ShellQuote(skillDir)),
-		fmt.Sprintf("chown -R %s %s", sandbox.DefaultSandboxExecUser, sandbox.ShellQuote(skillDir)),
+		fmt.Sprintf("chmod -R 555 %s", sandbox.ShellQuote(skillDir)),
+		fmt.Sprintf("chown -R root:root %s", sandbox.ShellQuote(skillDir)),
 	}
 	for _, cmd := range cmds {
 		if _, err := s.execInstall(ctx, mgr, sessionID, cmd); err != nil {
@@ -1324,15 +1332,69 @@ func skillOwnerFingerprint(cfg *types.TenantSandboxConfig) string {
 	return ""
 }
 
-// markConfigSandboxesStale is deliberately a no-op here. Sessions that already
-// hold a live sandbox keep running on the previous image until it is replaced;
-// marking and rebuilding those bindings is Task 13 (stale sandbox rebuild),
-// which owns the session-side state this would have to touch. Future sessions
-// already pick up the new snapshot through the config pointer.
+// configSandboxInvalidator is the narrow capability marking bound sandboxes
+// needs. It is reached by type assertion rather than declared on Manager
+// because only the session-bound remote manager owns bindings to mark: a local
+// or disabled backend has none, and for those doing nothing is correct.
+type configSandboxInvalidator interface {
+	InvalidateConfigSandboxes(ctx context.Context, tenantID uint64, configID string) (int, error)
+}
+
+// The manager the resolver hands out must keep satisfying this, so a rename on
+// the sandbox side breaks the build instead of silently skipping every mark.
+var _ configSandboxInvalidator = (*sandbox.SessionBoundManager)(nil)
+
+// markConfigSandboxesStale tells every session already holding a sandbox of
+// this config that the image underneath it has been replaced.
+//
+// The pointer switch alone only reaches FUTURE sessions: one that is open right
+// now is bound to a sandbox booted from the previous image, and without this it
+// would keep serving that image until the session ends - so a skill installed
+// minutes ago would be missing from exactly the sessions whose user just asked
+// for it. Nothing is destroyed here; the binding is marked and the session's
+// next resolve rebuilds it.
+//
+// It is best-effort on purpose. It runs after the pointer switch, so the
+// install has already succeeded, and a binding that could not be marked is a
+// session serving a stale image - an annoyance, not a corruption. Turning that
+// into a failed install would be a lie about an image that is live and serving.
+//
+// The context is detached because the caller's is cancelled exactly when this
+// matters most: withConfigLock cancels the run's context the moment lock
+// renewal fails, and marking is ordinary Redis traffic that a dead context
+// fails outright.
 func (s *TenantSkillService) markConfigSandboxesStale(
 	ctx context.Context, tenantID uint64, configID string,
 ) {
-	_ = ctx
-	_ = tenantID
-	_ = configID
+	if s.sandboxes == nil {
+		return
+	}
+	markCtx, cancel := s.cleanupContext(context.WithoutCancel(ctx))
+	defer cancel()
+
+	mgr, err := s.sandboxes.Resolve(markCtx, tenantID, configID)
+	if err != nil || mgr == nil {
+		logger.Warnf(markCtx,
+			"[skill] resolve sandbox config %s to mark its sandboxes stale failed: %v",
+			configID, err)
+		return
+	}
+	invalidator, ok := mgr.(configSandboxInvalidator)
+	if !ok {
+		return
+	}
+	marked, err := invalidator.InvalidateConfigSandboxes(markCtx, tenantID, configID)
+	if err != nil {
+		logger.Warnf(markCtx,
+			"[skill] mark live sandboxes of config %s stale failed: %v", configID, err)
+		return
+	}
+	if marked == 0 {
+		return
+	}
+	logger.Infof(markCtx,
+		"[skill] marked %d live sandbox binding(s) of config %s stale "+
+			"(this run's own maintenance session included); each remaining session "+
+			"rebuilds from the new image on its next use",
+		marked, configID)
 }

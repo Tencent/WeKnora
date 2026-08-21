@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"net/http"
+	"net/url"
 )
 
 // SkillInfo represents skill metadata
@@ -18,9 +19,14 @@ type SkillListResponse struct {
 	SkillsAvailable bool       `json:"skills_available"`
 }
 
-// ListSkills lists all preloaded agent skills
-func (c *Client) ListSkills(ctx context.Context) ([]SkillInfo, bool, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/skills", nil, nil)
+// ListSkills lists the installed skills a chat turn can invoke on one sandbox
+// config. An empty sandboxConfigID returns an empty list.
+func (c *Client) ListSkills(ctx context.Context, sandboxConfigID string) ([]SkillInfo, bool, error) {
+	query := url.Values{}
+	if sandboxConfigID != "" {
+		query.Set("sandbox_config_id", sandboxConfigID)
+	}
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/skills", nil, query)
 	if err != nil {
 		return nil, false, err
 	}

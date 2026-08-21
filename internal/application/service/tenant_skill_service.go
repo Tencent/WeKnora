@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/robfig/cron/v3"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/common/redislock"
@@ -48,6 +49,10 @@ type TenantSkillService struct {
 	// localLocks serialises installs when Redis is absent. It only guards this
 	// process; multi-replica deployments require Redis for cross-process safety.
 	localLocks *keyedMutex
+
+	cron    *cron.Cron
+	cronMu  sync.Mutex
+	started bool
 }
 
 // NewTenantSkillService wires the repositories and runtimes the install and
@@ -79,6 +84,9 @@ func NewTenantSkillService(
 		now:             time.Now,
 		cleanupTimeout:  installCleanupTimeout,
 		localLocks:      newKeyedMutex(),
+		cron: cron.New(cron.WithSeconds(), cron.WithChain(
+			cron.Recover(cron.DefaultLogger),
+		)),
 	}
 }
 

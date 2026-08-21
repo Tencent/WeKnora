@@ -45,6 +45,11 @@ func TestRedisSessionSandboxBindingStoreContract(t *testing.T) {
 	testSessionSandboxBindingStore(t, store)
 }
 
+func TestRedisSessionSandboxBindingStoreInvalidatesByConfig(t *testing.T) {
+	store, _, _ := newRedisBindingTestStore(t)
+	testSessionSandboxBindingInvalidateByConfig(t, store)
+}
+
 func TestRedisSessionSandboxBindingStoreSeparatesTenants(t *testing.T) {
 	store, _, _ := newRedisBindingTestStore(t)
 	testSessionSandboxBindingTenantIsolation(t, store)

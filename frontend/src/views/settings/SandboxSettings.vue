@@ -139,6 +139,8 @@
     <SandboxConfigEditorDrawer v-model:visible="showEditor" :record="editingRecord"
       :preset-type="activeType === 'all' ? '' : activeType" @saved="load" />
 
+    <SandboxSkillsDrawer v-model:visible="showSkills" :record="skillsRecord" />
+
     <!--
       Occupancy is a list of sessions and agents, not a one-line status, and it
       is also what explains a refused delete — so it gets a drawer rather than a
@@ -206,6 +208,7 @@ import { computed, onMounted, ref } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import SandboxConfigEditorDrawer from '@/components/SandboxConfigEditorDrawer.vue'
+import SandboxSkillsDrawer from '@/components/SandboxSkillsDrawer.vue'
 import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import {
@@ -235,6 +238,9 @@ const activeType = ref<string>('all')
 
 const showEditor = ref(false)
 const editingRecord = ref<SandboxConfigRecord | null>(null)
+
+const showSkills = ref(false)
+const skillsRecord = ref<SandboxConfigRecord | null>(null)
 
 const showInventory = ref(false)
 const inventoryLoading = ref(false)
@@ -268,6 +274,7 @@ const cardMenu = (record: SandboxConfigRecord) => {
   ]
   if (record.sandbox_type === 'cube' || record.sandbox_type === 'e2b') {
     options.push({ content: t('settings.sandbox.viewSandboxes'), value: 'inventory' })
+    options.push({ content: t('settings.sandbox.manageSkills'), value: 'skills' })
   }
   return options
 }
@@ -479,6 +486,11 @@ async function onMenuAction(action: string, record: SandboxConfigRecord) {
   }
   if (action === 'inventory') {
     await openInventory(record)
+    return
+  }
+  if (action === 'skills') {
+    skillsRecord.value = record
+    showSkills.value = true
   }
 }
 

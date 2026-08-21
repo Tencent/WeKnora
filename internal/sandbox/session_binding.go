@@ -44,6 +44,21 @@ type SessionSandboxBinding struct {
 	SandboxID  string         `json:"sandbox_id"`
 	TemplateID string         `json:"template_id"`
 	CreatedAt  time.Time      `json:"created_at"`
+
+	// ConfigID is the sandbox config the sandbox was created from. It is what
+	// makes "every sandbox of this config" answerable from the binding store:
+	// the sandbox itself carries the same value in provider metadata, but a
+	// staleness mark must not depend on the provider being reachable.
+	//
+	// Bindings written before this field existed carry an empty value. They are
+	// deliberately still valid — refusing them would break every live session
+	// on upgrade — and simply match no config until they are rebuilt.
+	ConfigID string `json:"config_id,omitempty"`
+
+	// StaleAt marks a binding whose sandbox boots an image the config has
+	// since replaced. The sandbox keeps serving until the session's next
+	// resolve, which destroys and recreates it; see InvalidateByConfig.
+	StaleAt *time.Time `json:"stale_at,omitempty"`
 }
 
 // Validate checks a binding against the current schema and authoritative key.
@@ -92,6 +107,122 @@ type SessionSandboxBindingStore interface {
 	// ownership context. The ownership context survives caller cancellation
 	// but is canceled when exclusive lock ownership is lost.
 	WithLifecycleLock(context.Context, SessionSandboxKey, func(context.Context) error) error
+
+	// InvalidateByConfig marks every binding of one workspace's sandbox config
+	// stale and reports how many it marked. Already-marked bindings are not
+	// counted again.
+	InvalidateByConfig(ctx context.Context, tenantID uint64, configID string) (int, error)
+}
+
+// bindingInvalidateLockTimeout bounds the wait for ONE session's lifecycle
+// lock while marking. The caller runs inside the per-config install lock, so a
+// single session that happens to be creating a sandbox right now must cost only
+// its own mark rather than everyone else's.
+const bindingInvalidateLockTimeout = 2 * time.Second
+
+// bindingInvalidateMarkTimeout bounds the marking itself, once the lock is
+// held. It is deliberately separate from the wait: sharing one budget would
+// leave a mark that waited most of bindingInvalidateLockTimeout for the lock
+// with milliseconds for its read plus compare-and-set, failing with a deadline
+// error indistinguishable from a Redis fault.
+const bindingInvalidateMarkTimeout = 3 * time.Second
+
+// tenantBindingScanner is the store-specific half of InvalidateByConfig:
+// enumerating one workspace's bindings and writing the mark. The serialisation
+// and matching rules are shared, in invalidateBindingsByConfig.
+type tenantBindingScanner interface {
+	SessionSandboxBindingStore
+
+	// listTenantBindingKeys returns the keys of every binding the store holds
+	// for tenantID. Bindings that disappear before they are marked are
+	// expected, not an error.
+	listTenantBindingKeys(ctx context.Context, tenantID uint64) ([]SessionSandboxKey, error)
+
+	// markBindingStale sets StaleAt only while the binding still names
+	// expected's provider and sandbox ID, and reports whether it wrote.
+	markBindingStale(
+		ctx context.Context,
+		key SessionSandboxKey,
+		expected SessionSandboxBinding,
+		staleAt time.Time,
+	) (bool, error)
+}
+
+// invalidateBindingsByConfig marks one config's bindings stale, one session at
+// a time under that session's lifecycle lock.
+//
+// The lock is what makes the mark reliable: resolve reads the binding, decides
+// whether to replace the sandbox, and rebinds all inside it, so marking outside
+// would silently lose against a resolve running at the same moment. The mark
+// itself is only ever an added field — the binding is never deleted here — so a
+// concurrent resolve can lose a mark but never a sandbox.
+//
+// One session that cannot be marked does not stop the others: the image pointer
+// has already moved by the time this runs, and an unmarked session serves the
+// previous image until it ends, which is strictly better than leaving the rest
+// of the workspace unmarked too. The failures are still returned so the caller
+// can say which sessions are affected.
+func invalidateBindingsByConfig(
+	ctx context.Context,
+	store tenantBindingScanner,
+	tenantID uint64,
+	configID string,
+) (int, error) {
+	if tenantID == 0 {
+		return 0, errors.New("sandbox binding invalidation requires a tenant")
+	}
+	keys, err := store.listTenantBindingKeys(ctx, tenantID)
+	if err != nil {
+		return 0, err
+	}
+
+	wanted := NormalizeConfigID(configID)
+	marked := 0
+	var failures []error
+	for _, key := range keys {
+		if err := ctx.Err(); err != nil {
+			failures = append(failures, err)
+			break
+		}
+		// The cap applies to acquiring the lock only: the timer is stopped once
+		// fn runs, and the work below gets a budget of its own. Cancelling
+		// waitCtx is how the wait is abandoned, so the timer cannot simply be
+		// a deadline on the context fn is given.
+		waitCtx, cancel := context.WithCancel(ctx)
+		acquireTimer := time.AfterFunc(bindingInvalidateLockTimeout, cancel)
+		err := store.WithLifecycleLock(waitCtx, key, func(lockCtx context.Context) error {
+			// A false Stop means the cap fired as the lock was granted; then
+			// lockCtx is already cancelled and the calls below fail, which is
+			// the same outcome as losing the wait.
+			acquireTimer.Stop()
+			markCtx, cancelMark := context.WithTimeout(lockCtx, bindingInvalidateMarkTimeout)
+			defer cancelMark()
+
+			binding, err := store.Get(markCtx, key)
+			if err != nil || binding == nil {
+				return err
+			}
+			if binding.ConfigID != wanted || binding.StaleAt != nil {
+				return nil
+			}
+			wrote, err := store.markBindingStale(
+				markCtx, key, *binding, time.Now().UTC(),
+			)
+			if err != nil {
+				return err
+			}
+			if wrote {
+				marked++
+			}
+			return nil
+		})
+		acquireTimer.Stop()
+		cancel()
+		if err != nil {
+			failures = append(failures, fmt.Errorf("mark session %s stale: %w", key.SessionID, err))
+		}
+	}
+	return marked, errors.Join(failures...)
 }
 
 type lifecycleOwnershipContextKey struct{}
@@ -201,6 +332,56 @@ func (s *MemorySessionSandboxBindingStore) DeleteIfMatch(
 	return true, nil
 }
 
+// InvalidateByConfig marks this process's bindings of one config stale.
+func (s *MemorySessionSandboxBindingStore) InvalidateByConfig(
+	ctx context.Context,
+	tenantID uint64,
+	configID string,
+) (int, error) {
+	return invalidateBindingsByConfig(ctx, s, tenantID, configID)
+}
+
+func (s *MemorySessionSandboxBindingStore) listTenantBindingKeys(
+	ctx context.Context,
+	tenantID uint64,
+) ([]SessionSandboxKey, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var keys []SessionSandboxKey
+	for key := range s.bindings {
+		if key.TenantID == tenantID {
+			keys = append(keys, key)
+		}
+	}
+	return keys, nil
+}
+
+func (s *MemorySessionSandboxBindingStore) markBindingStale(
+	ctx context.Context,
+	key SessionSandboxKey,
+	expected SessionSandboxBinding,
+	staleAt time.Time,
+) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	binding, exists := s.bindings[key]
+	if !exists ||
+		binding.Provider != expected.Provider ||
+		binding.SandboxID != expected.SandboxID {
+		return false, nil
+	}
+	marked := staleAt
+	binding.StaleAt = &marked
+	s.bindings[key] = binding
+	return true, nil
+}
+
 // WithLifecycleLock runs fn while holding the process-local lock for key.
 func (s *MemorySessionSandboxBindingStore) WithLifecycleLock(
 	ctx context.Context,
@@ -268,6 +449,10 @@ func validateBindingMatch(
 	}
 	return nil
 }
+
+// Both stores must keep answering "which bindings belong to this config", or
+// an image switch stops reaching the sessions already running.
+var _ tenantBindingScanner = (*MemorySessionSandboxBindingStore)(nil)
 
 func isRemoteProvider(provider RemoteProvider) bool {
 	switch provider {

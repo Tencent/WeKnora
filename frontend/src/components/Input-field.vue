@@ -1328,7 +1328,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
 
     const skillsMode = agentSkillsSelectionMode.value;
     if (skillsMode !== 'none') {
-      await editorResources.ensureSkills();
+      await editorResources.ensureSkills(currentAgentConfig.value?.sandbox_config_id);
       skillItems = editorResources.skills
         .filter(skill => isSkillAllowedByAgent(skill.name))
         .map(skill => ({

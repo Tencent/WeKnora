@@ -870,7 +870,7 @@ func (c *E2BRemoteClient) MakeDir(
 		return e2bInvalidRequest("MakeDir", "path is required", nil)
 	}
 	if err := sandbox.Filesystem.MakeDir(ctx, path, e2b.WithFileUser(DefaultSandboxExecUser)); err != nil {
-		return normalizeE2BError("MakeDir", err)
+		return ignoreExistingDir(normalizeE2BError("MakeDir", err))
 	}
 	return nil
 }

@@ -1927,8 +1927,15 @@ const showMcpServiceSelect = computed(() =>
 );
 const webSearchProviderList = ref<WebSearchProviderEntity[]>([]);
 const skillOptions = ref<{ name: string; description: string }[]>([]);
-// 是否允许启用 Skills（取决于后端沙箱是否启用，disabled 时为 false；未请求前为 false 避免闪显）
+// 是否允许启用 Skills（当前沙盒配置上有可执行技能时为 true；未选配置前为 false）
 const skillsAvailable = ref(false);
+
+async function syncInstalledSkills() {
+  const configId = formData.value.config.sandbox_config_id || ''
+  await editorResources.ensureSkills(configId)
+  skillsAvailable.value = editorResources.skillsAvailable
+  skillOptions.value = [...editorResources.skills]
+}
 // 空间内的具名沙箱后端配置。始终包含当前已选中的那份，即使它已被删除——
 // 否则下拉会静默显示为“不启用沙箱”，看不出该智能体其实指着一份不存在的配置。
 const sandboxConfigOptions = computed(() => {
@@ -2302,11 +2309,7 @@ const navItems = computed(() => {
   if (isAgentMode.value) {
     items.push({ key: 'tools', icon: 'tools', label: t('agent.editor.toolsConfig') });
     items.push({ key: 'mcp', icon: 'server', label: t('agentEditor.mcp.label') });
-  }
-  if (isAgentMode.value && skillsAvailable.value) {
     items.push({ key: 'skills', icon: 'lightbulb', label: t('agent.editor.skillsConfig') });
-    // 沙箱是技能脚本的运行环境：先选跑哪些技能，再选跑在哪份后端上。
-    // 与 skills 同门控——部署级沙箱关闭时技能整体不可用，选后端也就无从谈起。
     items.push({ key: 'sandbox', icon: 'cloud', label: t('agent.editor.sandboxConfig') });
   }
   // 发布（仅编辑模式）
@@ -3117,6 +3120,8 @@ watch(() => props.visible, async (val) => {
       applyDefaultModelsIfEmpty()
     }
 
+    await syncInstalledSkills()
+
     if (props.initialHighlightField) {
       await applyInitialFieldHighlight(props.initialHighlightField);
     }
@@ -3226,6 +3231,11 @@ watch(mcpSelectionMode, (mode) => {
   }
   // selected 模式保持 mcp_services 不变
 });
+
+watch(() => formData.value.config.sandbox_config_id, async () => {
+  if (!props.visible) return
+  await syncInstalledSkills()
+})
 
 // 监听 Skills 选择模式变化
 watch(skillsSelectionMode, (mode) => {
@@ -3427,9 +3437,6 @@ const loadDependencies = async () => {
       .filter((shared: any) => shared.knowledge_base && !myKbIds.has(shared.knowledge_base.id))
       .map((shared: any) => mapKbToOption(shared.knowledge_base, true, shared.org_name));
     kbOptions.value = [...myKbs, ...sharedKbs];
-
-    skillsAvailable.value = editorResources.skillsAvailable;
-    skillOptions.value = editorResources.skills;
 
     agentTypePresets.value = editorResources.agentTypePresets as AgentTypePreset[];
     applyPromptTemplateDefaults(editorResources.promptTemplates);

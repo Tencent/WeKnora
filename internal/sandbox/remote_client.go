@@ -401,6 +401,10 @@ type RemoteSandboxClient interface {
 	WriteFile(ctx context.Context, handle RemoteSandboxHandle, path string, content []byte) error
 	ReadFile(ctx context.Context, handle RemoteSandboxHandle, path string) ([]byte, error)
 	ListDir(ctx context.Context, handle RemoteSandboxHandle, path string) ([]RemoteDirEntry, error)
+	// MakeDir creates path, including parents. A directory that already
+	// exists is success: envd's MakeDir is not mkdir -p, and adapters must
+	// hide that so writing a second file into the same folder (or seeding
+	// SKILL.md after resetSkillDir) does not fail.
 	MakeDir(ctx context.Context, handle RemoteSandboxHandle, path string) error
 	Remove(ctx context.Context, handle RemoteSandboxHandle, path string) error
 	Stat(ctx context.Context, handle RemoteSandboxHandle, path string) (*RemoteStatEntry, error)

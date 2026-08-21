@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 )
@@ -129,6 +130,11 @@ type sessionService struct {
 	sandboxPinner         *SessionSandboxPinner
 	sandboxPolicy         WorkspaceSandboxPolicy
 	memoryService         interfaces.MemoryService // Service for cross-session long-term memory
+	// sandboxConfigRepo and tenantSkillRepo answer "which installed skills can
+	// this turn actually invoke". They are repositories rather than
+	// TenantSkillService because that service depends on this one.
+	sandboxConfigRepo repository.TenantSandboxConfigRepository
+	tenantSkillRepo   repository.TenantSkillRepository
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -151,6 +157,8 @@ func NewSessionService(cfg *config.Config,
 	sandboxPinner *SessionSandboxPinner,
 	sandboxPolicy WorkspaceSandboxPolicy,
 	memoryService interfaces.MemoryService,
+	sandboxConfigRepo repository.TenantSandboxConfigRepository,
+	tenantSkillRepo repository.TenantSkillRepository,
 ) interfaces.SessionService {
 	return &sessionService{
 		cfg:                   cfg,
@@ -172,6 +180,8 @@ func NewSessionService(cfg *config.Config,
 		sandboxPinner:         sandboxPinner,
 		sandboxPolicy:         sandboxPolicy,
 		memoryService:         memoryService,
+		sandboxConfigRepo:     sandboxConfigRepo,
+		tenantSkillRepo:       tenantSkillRepo,
 	}
 }
 
@@ -682,7 +692,10 @@ func (s *sessionService) destroyBoundSandbox(ctx context.Context, sessionID stri
 	// to the default manager keeps those reachable: DestroySession is a cheap
 	// binding lookup that no-ops when the session truly has no sandbox, whereas
 	// skipping would abandon a paused instance that keeps billing.
-	mgr, err := resolveTenantSandboxForConfig(ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, s.sandboxPolicy)
+	//
+	// Pass nil policy so the workspace kill switch cannot strand an already
+	// created sandbox: disabling script execution must still allow teardown.
+	mgr, err := resolveTenantSandboxForConfig(ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, nil)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to resolve sandbox for session %s cleanup: %v", sessionID, err)
 		return

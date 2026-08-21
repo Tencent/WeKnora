@@ -389,6 +389,23 @@ func (m *SessionBoundManager) DestroySession(ctx context.Context, sessionID stri
 	return m.lifecycle.Destroy(ctx, key)
 }
 
+// InvalidateConfigSandboxes marks every session sandbox this config owns stale,
+// so each session rebuilds its sandbox from the config's current image on its
+// next use, and reports how many bindings were marked.
+//
+// It is the image-maintenance counterpart to DestroySession: nothing is torn
+// down here, so marking cannot delete a sandbox that is executing right now.
+// The replacement happens at the session's next resolve, which may be the next
+// operation of a turn already in flight; see resolveLocked for that limitation.
+func (m *SessionBoundManager) InvalidateConfigSandboxes(
+	ctx context.Context, tenantID uint64, configID string,
+) (int, error) {
+	if err := m.requireRemoteBackend(); err != nil {
+		return 0, err
+	}
+	return m.bindings.InvalidateByConfig(ctx, tenantID, configID)
+}
+
 // CreateSnapshot forwards provider snapshot creation for the live sandbox bound
 // to sessionID. Session execution never uses this optional capability; it is
 // reserved for skill image maintenance.
@@ -448,7 +465,7 @@ func (m *SessionBoundManager) EnsureSessionDir(ctx context.Context, sessionID, d
 	if err != nil || !ok {
 		return err
 	}
-	if err := m.client.MakeDir(ctx, handle, dir); err != nil {
+	if err := ignoreExistingDir(m.client.MakeDir(ctx, handle, dir)); err != nil {
 		return fmt.Errorf("sandbox: ensure session dir %s: %w", dir, err)
 	}
 	return nil
@@ -475,7 +492,7 @@ func (m *SessionBoundManager) WriteSessionInputFile(
 	if err != nil {
 		return err
 	}
-	if err := m.client.MakeDir(ctx, handle, path.Dir(clean)); err != nil {
+	if err := ignoreExistingDir(m.client.MakeDir(ctx, handle, path.Dir(clean))); err != nil {
 		return fmt.Errorf("sandbox: create input directory: %w", err)
 	}
 	if err := m.client.WriteFile(ctx, handle, clean, content); err != nil {
@@ -581,7 +598,10 @@ func (m *SessionBoundManager) WriteSessionFile(
 	if err != nil {
 		return err
 	}
-	if err := m.client.MakeDir(ctx, handle, path.Dir(clean)); err != nil {
+	// resetSkillDir already created this folder with mkdir -p. Cube's MakeDir
+	// then reports the existing directory as an error; ignoreExistingDir keeps
+	// that from aborting the seed of SKILL.md.
+	if err := ignoreExistingDir(m.client.MakeDir(ctx, handle, path.Dir(clean))); err != nil {
 		return fmt.Errorf("sandbox: create install directory: %w", err)
 	}
 	if err := m.client.WriteFile(ctx, handle, clean, content); err != nil {

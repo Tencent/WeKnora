@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent"
+	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/sandbox"
@@ -296,6 +297,56 @@ func TestSkillToolsFollowSkillsEnabled(t *testing.T) {
 		require.True(t, toolRegistered(registry, tools.ToolReadSkill))
 		require.True(t, toolRegistered(registry, tools.ToolExecuteSkillScript))
 		require.True(t, toolRegistered(registry, tools.ToolShellExec))
+	})
+}
+
+// Whether an installed skill is invocable is decided when the AgentConfig is
+// built (effectiveTenantSkills). This is the other half of that contract: the
+// manager the model is described from must carry exactly the rows it was
+// handed, and nothing when it was handed none.
+func TestSkillsManagerOffersTheInjectedInstalledSkills(t *testing.T) {
+	newSvc := func() *agentService {
+		return &agentService{
+			sandboxResolver: stubSandboxResolver{
+				mgr: &capableManager{typ: sandbox.SandboxTypeCube, shell: &stubShellExecutor{}},
+			},
+		}
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	skillNamesOf := func(mgr *skills.Manager) []string {
+		var names []string
+		for _, meta := range mgr.GetAllMetadata() {
+			names = append(names, meta.Name)
+		}
+		return names
+	}
+
+	t.Run("injected rows are offered", func(t *testing.T) {
+		mgr, err := newSvc().initializeSkillsManager(ctx, "sess-1", &types.AgentConfig{
+			SandboxConfigID: "cfg-remote",
+			SkillsEnabled:   true,
+			SkillDirs:       []string{t.TempDir()},
+			TenantSkills: []*types.TenantSkillEntity{{
+				ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-remote",
+				Name: "pdf-tools", Description: "PDF helpers",
+				Status: types.SkillStatusReady, Enabled: true,
+			}},
+		}, tools.NewToolRegistry())
+
+		require.NoError(t, err)
+		require.Equal(t, []string{"pdf-tools"}, skillNamesOf(mgr))
+	})
+
+	t.Run("an unusable image injects no rows and offers no skills", func(t *testing.T) {
+		mgr, err := newSvc().initializeSkillsManager(ctx, "sess-1", &types.AgentConfig{
+			SandboxConfigID: "cfg-remote",
+			SkillsEnabled:   true,
+			SkillDirs:       []string{t.TempDir()},
+		}, tools.NewToolRegistry())
+
+		require.NoError(t, err)
+		require.Empty(t, skillNamesOf(mgr),
+			"a skill the model is told about but cannot invoke burns turns for nothing")
 	})
 }
 

@@ -298,6 +298,25 @@ func (s *sessionService) buildAgentConfig(
 	// Configure skills based on CustomAgentConfig
 	s.configureSkillsFromAgent(ctx, agentConfig, customAgent)
 
+	// Then add the skills installed into the sandbox config this run boots.
+	//
+	// The workspace is the one on the context rather than the agent's owner,
+	// because that is where resolveSandboxForExecution reads it; skillsForRun
+	// picks the config the same way the sandbox resolution does.
+	sandboxTenantID, _ := types.TenantIDFromContext(ctx)
+	skillConfigID, tenantSkills := skillsForRun(
+		ctx, s.sandboxPinner, s.sandboxConfigRepo, s.tenantSkillRepo,
+		sandboxTenantID, req.Session.ID, agentConfig.SandboxConfigID,
+	)
+	agentConfig.TenantSkills = tenantSkills
+	if len(tenantSkills) > 0 {
+		// The config named here is the one the skills came from, which is the
+		// pinned one whenever it differs from the agent's - the only case the
+		// line is worth reading.
+		logger.Infof(ctx, "Sandbox config %s offers %d installed skill(s) to this run",
+			skillConfigID, len(tenantSkills))
+	}
+
 	// Resolve knowledge bases using shared helper
 	kbIDs, knowledgeIDs, err := s.resolveKnowledgeBases(ctx, req)
 	if err != nil {

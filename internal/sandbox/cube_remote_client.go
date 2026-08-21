@@ -606,7 +606,7 @@ func (c *CubeRemoteClient) MakeDir(
 		return err
 	}
 	if _, err := sb.Files().MakeDir(ctx, path); err != nil {
-		return normalizeCubeError("MakeDir", err)
+		return ignoreExistingDir(normalizeCubeError("MakeDir", err))
 	}
 	return nil
 }
