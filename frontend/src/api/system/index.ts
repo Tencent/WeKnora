@@ -757,7 +757,21 @@ export interface SandboxConfig {
   volume_mount?: SandboxVolumeMountConfig
   cube?: SandboxCubeConfig
   e2b?: SandboxE2BConfig
-  docker?: { image?: string }
+  docker?: SandboxDockerConfig
+}
+
+/** Docker backend: one daemon, one long-lived container per session. */
+export interface SandboxDockerConfig {
+  image?: string
+  host?: string
+  tls_cert_path?: string
+  cpu_limit?: number
+  memory_limit_mb?: number
+  pids_limit?: number
+  network_mode?: string
+  runtime?: string
+  idle_ttl_seconds?: number
+  http_timeout_sec?: number
 }
 
 /** `ok: null` means the probe was not executed in this run. */

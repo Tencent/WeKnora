@@ -31,10 +31,10 @@ const (
 	ToolListSandboxFiles = "list_sandbox_files"
 	ToolReadSandboxFile  = "read_sandbox_file"
 	// ToolShellExec lets the LLM execute ad-hoc shell commands inside the
-	// current session's Cube sandbox (dependency installs, environment
-	// probing). Only registered when the sandbox backend is Cube — Docker
-	// and Local backends do not expose this tool to preserve their
-	// existing stateless security model.
+	// current session's sandbox (dependency installs, environment probing).
+	// Registered only when the resolved backend advertises the session shell
+	// capability — every session-scoped backend does (Cube, E2B, Docker); the
+	// Local backend does not, so ad-hoc commands never reach the host.
 	ToolShellExec = "shell_exec"
 	// Wiki-related tools (only available when wiki KBs are in scope)
 	ToolWikiReadPage      = "wiki_read_page"

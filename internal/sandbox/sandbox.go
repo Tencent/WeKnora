@@ -12,15 +12,17 @@ import (
 type SandboxType string
 
 const (
-	// SandboxTypeDocker uses Docker containers for isolation
+	// SandboxTypeDocker runs each session in its own long-lived Docker
+	// container, driven through the Docker Engine API. Like the MicroVM
+	// backends it keeps session state between executions; unlike them it
+	// shares the host kernel and lives on a single daemon.
 	SandboxTypeDocker SandboxType = "docker"
 	// SandboxTypeLocal uses local process with restrictions
 	SandboxTypeLocal SandboxType = "local"
 	// SandboxTypeCube uses Tencent CubeSandbox (E2B-compatible) MicroVM for isolation.
-	// Unlike Docker/Local backends which are stateless per execution, Cube supports
-	// session-scoped persistent sandboxes: multiple executions bound to the same
-	// SessionID share the same MicroVM instance and preserve installed packages,
-	// created files, running services, etc.
+	// Like Docker and E2B it keeps session-scoped persistent sandboxes: multiple
+	// executions bound to the same SessionID share one instance and preserve
+	// installed packages, created files, running services, etc.
 	SandboxTypeCube SandboxType = "cube"
 	// SandboxTypeE2B uses E2B's hosted MicroVM sandbox service.
 	SandboxTypeE2B SandboxType = "e2b"
@@ -29,8 +31,8 @@ const (
 )
 
 // IsNamedSandboxBackendType reports whether raw can be stored as a user-facing
-// named sandbox backend. Remote backends are session-persistent; docker/local
-// are stateless, but all four share the same workspace configuration surface.
+// named sandbox backend. Cube, E2B and Docker are session-persistent; local
+// is stateless. All four share the same workspace configuration surface.
 func IsNamedSandboxBackendType(raw string) bool {
 	switch SandboxType(raw) {
 	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker, SandboxTypeLocal:
@@ -173,9 +175,9 @@ type ExecuteConfig struct {
 	ScriptContent string
 
 	// SessionID scopes the execution to a per-session persistent sandbox.
-	// Currently only honoured by remote backends; Docker/Local backends ignore it.
-	// When empty, Cube falls back to an ephemeral (one-shot) sandbox that is
-	// created and torn down inside the single Execute call.
+	// Honoured by every session-scoped backend (Cube, E2B, Docker); the Local
+	// backend ignores it. When empty, those backends fall back to an ephemeral
+	// (one-shot) sandbox created and torn down inside the single Execute call.
 	SessionID string
 }
 
@@ -220,8 +222,43 @@ type Config struct {
 	// connection. Link-local addresses are blocked regardless.
 	AllowPrivateEndpoints bool
 
-	// DockerImage is the Docker image to use (Docker sandbox only)
+	// DockerImage is the image every sandbox container is created from. It
+	// plays the same role as a Cube/E2B template ID.
 	DockerImage string
+
+	// DockerHost is the daemon endpoint, in DOCKER_HOST form
+	// ("unix:///var/run/docker.sock", "tcp://10.0.0.5:2376"). Empty uses
+	// DefaultDockerHost.
+	DockerHost string
+
+	// DockerTLSCertPath is a directory on the WeKnora host holding
+	// ca.pem / cert.pem / key.pem. Required for a TCP daemon; unix sockets
+	// do not use TLS.
+	DockerTLSCertPath string
+
+	// DockerCPULimit / DockerMemoryBytes / DockerPidsLimit cap one sandbox
+	// container. Zero uses the built-in defaults.
+	DockerCPULimit    float64
+	DockerMemoryBytes int64
+	DockerPidsLimit   int64
+
+	// DockerNetworkMode is the Docker network every sandbox joins: "bridge" or
+	// "none". host, container: and named networks are rejected (see
+	// ValidateDockerNetworkMode). Empty means "bridge"; skills that install
+	// packages need egress, so a sandbox is not isolated from the network by
+	// default.
+	DockerNetworkMode string
+
+	// DockerRuntime selects an alternative OCI runtime, e.g. "runsc" for
+	// gVisor. Empty uses the daemon's default runtime.
+	DockerRuntime string
+
+	// DockerIdleTTL is how long a container may go without executing anything
+	// before the idle sweep reclaims it. Zero uses DefaultDockerIdleTTL.
+	DockerIdleTTL time.Duration
+
+	// DockerHTTPTimeout bounds each Engine API call. Zero uses the default.
+	DockerHTTPTimeout time.Duration
 
 	// AllowedCommands is the default list of allowed commands
 	AllowedCommands []string

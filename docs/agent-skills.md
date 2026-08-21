@@ -132,7 +132,7 @@ Docker、Local、CubeSandbox、E2B 均通过同一套空间配置 CRUD、连接�
 
 | 模式 | 状态 | 说明 |
 |------|------|------|
-| `docker` | 稳定 | 每次执行启动短生命周期容器；镜像和环境变量按空间配置，不保留会话绑定 |
+| `docker` | 稳定 | 单机 Docker daemon；会话级持久（一个会话一个长驻容器），支持多机 WeKnora 副本（需 Redis），但沙箱都落在同一台 daemon 上。见 [Docker 沙箱后端](sandbox-docker-backend.md) |
 | `local` | 开发 | 直接在 WeKnora 服务主机执行；无容器/MicroVM 隔离，不保留会话绑定 |
 | `cube` | 稳定 | Tencent CubeSandbox MicroVM；会话级持久，支持多机（需 Redis） |
 | `e2b` | 稳定 | E2B 云端 MicroVM；会话级持久，支持多机（需 Redis）；依赖第三方 SDK go-e2b |
@@ -538,7 +538,7 @@ docker pull wechatopenai/weknora-sandbox:latest
 sh scripts/build_images.sh -s
 ```
 
-> 如果未预拉取，应用启动时会自动异步拉取镜像（`EnsureImage`），但首次执行可能需要等待下载完成。
+> 如果未预拉取，创建第一个沙箱时会先拉取镜像，首次执行需要等待下载完成；也可以在设置页的模板步骤提前触发拉取。
 
 **镜像内置环境**：
 - Python 3.11 + pip（requests、pyyaml、pandas、beautifulsoup4）
