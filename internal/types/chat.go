@@ -73,6 +73,79 @@ func (u *TokenUsage) MarkPromptCacheUnsupported() {
 	u.CacheStatus = PromptCacheStatusUnsupported
 }
 
+// Accumulate adds another call's usage into u, preserving the subset
+// semantics: prompt/completion/total and every cache counter sum
+// independently (cache counters stay subsets of the prompt count and are
+// never folded into it). CacheReported ORs, and the cache status is
+// recomputed from the combined counters so a single cache hit anywhere in
+// the accumulated calls reads as a hit.
+func (u *TokenUsage) Accumulate(other TokenUsage) {
+	if u == nil {
+		return
+	}
+	u.PromptTokens += other.PromptTokens
+	u.CompletionTokens += other.CompletionTokens
+	u.TotalTokens += other.TotalTokens
+	u.CachedTokens += other.CachedTokens
+	u.CacheReadTokens += other.CacheReadTokens
+	u.CacheWriteTokens += other.CacheWriteTokens
+	u.CacheMissTokens += other.CacheMissTokens
+	u.CacheReported = u.CacheReported || other.CacheReported
+	switch {
+	case !u.CacheReported:
+		u.CacheStatus = mergeUnreportedCacheStatus(u.CacheStatus, other.CacheStatus)
+	case u.CacheReadTokens > 0:
+		u.CacheStatus = PromptCacheStatusHit
+	default:
+		u.CacheStatus = PromptCacheStatusMiss
+	}
+}
+
+// mergeUnreportedCacheStatus folds the statuses of never-reported usage.
+// "unsupported" survives only while every accumulated call was itself
+// classified unsupported — the first accumulation adopts the incoming
+// classification, and any later call that is not known-unsupported (an
+// unreported or unclassified one) degrades the aggregate to unreported.
+func mergeUnreportedCacheStatus(accumulated, incoming PromptCacheStatus) PromptCacheStatus {
+	if accumulated == "" {
+		if incoming == "" {
+			return PromptCacheStatusUnreported
+		}
+		return incoming
+	}
+	if accumulated == PromptCacheStatusUnsupported && incoming == PromptCacheStatusUnsupported {
+		return PromptCacheStatusUnsupported
+	}
+	return PromptCacheStatusUnreported
+}
+
+// Value persists the usage as a jsonb column (assistant messages carry the
+// turn's aggregate); nil writes SQL NULL. Mirrors the nullable-pointer
+// pattern APIPrincipalConfig uses.
+func (u *TokenUsage) Value() (driver.Value, error) {
+	if u == nil {
+		return nil, nil
+	}
+	return json.Marshal(u)
+}
+
+// Scan restores a jsonb usage column; NULL leaves the receiver zero-valued.
+func (u *TokenUsage) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return nil
+	}
+	return json.Unmarshal(b, u)
+}
+
 // LLMToolCall represents a function/tool call from the LLM
 type LLMToolCall struct {
 	ID               string           `json:"id"`
