@@ -244,6 +244,7 @@ import {
   SYSTEM_ADMIN_SETTINGS_SECTIONS,
 } from '@/config/settingsAccess'
 import { SETTINGS_SECTION_CAPABILITY } from '@/config/deploymentCapabilities'
+import { FEATURES } from '@/config/branding'
 
 const route = useRoute()
 const router = useRouter()
@@ -405,7 +406,11 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'models_runtime',
       label: t('settings.navGroups.modelsRuntime'),
-      items: pickItems(['models', 'ollama', 'weknoracloud']),
+      items: pickItems([
+        'models',
+        'ollama',
+        ...(FEATURES.showWeKnoraCloud ? ['weknoracloud'] : []),
+      ]),
     },
     {
       key: 'integrations',
@@ -414,8 +419,9 @@ const navGroups = computed<NavGroup[]>(() => {
         integrationSectionKey('im'),
         integrationSectionKey('embed'),
         integrationSectionKey('api'),
-        integrationSectionKey('chrome'),
-        integrationSectionKey('claw'),
+        ...(FEATURES.showChromeClawIntegrations
+          ? [integrationSectionKey('chrome'), integrationSectionKey('claw')]
+          : []),
       ]),
     },
     {
