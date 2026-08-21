@@ -54,6 +54,26 @@ class TestMarkdownTableUtil(unittest.TestCase):
             normalized,
         )
 
+    def test_malformed_unclosed_row_is_passthrough(self):
+        """An unclosed ``|``-prefixed row must not hang the process.
+
+        Regression for Tencent/WeKnora#2768: the old line_pattern explored an
+        exponential number of backtracking paths on such rows and stalled the
+        single-threaded docreader event loop.
+        """
+        line = "| " + " | ".join(f"col{i}" for i in range(100)) + "  unclosed"
+        formatted = MarkdownTableUtil().format_table(line)
+        self.assertEqual(formatted, line)
+
+    def test_long_valid_table_formats(self):
+        """A long, well-formed table still formats in linear time."""
+        header = "| " + " | ".join(f"c{i}" for i in range(200)) + " |"
+        sep = "| " + " | ".join("---" for _ in range(200)) + " |"
+        row = "| " + " | ".join(f"v{i}" for i in range(200)) + " |"
+        formatted = MarkdownTableUtil().format_table("\n".join([header, sep, row]))
+        self.assertIn("| c0 | c1 |", formatted)
+        self.assertIn("| v0 | v1 |", formatted)
+
 
 if __name__ == "__main__":
     unittest.main()
