@@ -126,6 +126,20 @@ export async function startMockWeknora(options = {}) {
           json(400, { success: false, error: { message: 'Query content cannot be empty' } })
           return
         }
+        // Mirror the real handler, which refuses an unscoped retrieval
+        // (internal/handler/session/qa.go). Answering one here would let the
+        // plugin ship a call every deployment rejects.
+        if ((body.knowledge_base_ids ?? []).length === 0
+          && (body.knowledge_ids ?? []).length === 0
+          && (body.tag_ids ?? []).length === 0) {
+          json(400, {
+            success: false,
+            error: {
+              message: 'At least one knowledge_base_id, knowledge_base_ids, knowledge_ids, or scoped tag must be provided',
+            },
+          })
+          return
+        }
         json(200, {
           success: true,
           data: searchResults(body.query, body.knowledge_base_ids ?? [], body.knowledge_ids ?? []),

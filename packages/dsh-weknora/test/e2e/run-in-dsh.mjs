@@ -6,11 +6,13 @@
  * that the harness agent loop actually called the tools and answered from what
  * they returned.
  *
- * Two scenarios run, because both are documented paths:
+ * Three scenarios run, because all three are documented paths:
  *   A. the bundle's shipped `cordis.patch.yml`, configured only by environment
  *      variables — what a user gets straight after `dsh plugin add`.
  *   B. a profile patch that overrides the row, including a renamed tool prefix,
  *      which also proves configuration reaches the plugin.
+ *   C. a row with no knowledge base scope, where the model has to discover one
+ *      before it can retrieve — WeKnora refuses an unscoped search.
  *
  * Usage:
  *   node test/e2e/run-in-dsh.mjs                 # installs dsh into a cache dir
@@ -118,8 +120,12 @@ function modelPatchRows(modelUrl) {
  * model, and the printed answer is grounded in them.
  */
 async function scenario(options) {
-  const { label, dsh, home, env, patch, prefix, weknora } = options
-  const model = await startFakeModel({ searchTool: `${prefix}_search`, readTool: `${prefix}_read_document` })
+  const { label, dsh, home, env, patch, prefix, weknora, discoverScope = false } = options
+  const model = await startFakeModel({
+    searchTool: `${prefix}_search`,
+    readTool: `${prefix}_read_document`,
+    ...discoverScope ? { listTool: `${prefix}_list_knowledge_bases` } : {},
+  })
   const requestsBefore = weknora.requests.length
   try {
     await writeFile(
@@ -144,9 +150,21 @@ async function scenario(options) {
       assert.ok(offered.includes(`${prefix}_${suffix}`), `${prefix}_${suffix} must appear in the model's tool schemas`)
     }
 
-    const paths = weknora.requests.slice(requestsBefore).map(request => request.path)
+    const calls = weknora.requests.slice(requestsBefore)
+    const paths = calls.map(request => request.path)
     log(`# WeKnora received: ${paths.join(', ')}`)
     assert.ok(paths.includes('/api/v1/knowledge-search'), 'search must reach the retrieval endpoint')
+    if (discoverScope) {
+      // WeKnora rejects an unscoped retrieval, so the only way through an
+      // unconfigured deployment is for the model to discover an id and pass it.
+      assert.ok(
+        paths.indexOf('/api/v1/knowledge-bases') >= 0
+        && paths.indexOf('/api/v1/knowledge-bases') < paths.indexOf('/api/v1/knowledge-search'),
+        'the model must list knowledge bases before it can search an unscoped deployment',
+      )
+      const search = calls.find(request => request.path === '/api/v1/knowledge-search')
+      assert.deepEqual(search.body.knowledge_base_ids, ['kb-product'], 'the discovered id must scope the search')
+    }
     assert.ok(paths.some(path => path.startsWith('/api/v1/chunks/')), 'read_document must reach the chunk endpoint')
     assert.equal(
       weknora.requests.slice(requestsBefore).every(request => request.headers['x-api-key'] === API_KEY),
@@ -220,6 +238,22 @@ async function main() {
           maxResults: 3,
           maxChunkChars: 400,
         },
+      }],
+    })
+
+    // C. No configured scope at all, which is what the quickstart's optional
+    //    WEKNORA_KNOWLEDGE_BASE_IDS leaves behind.
+    await scenario({
+      label: 'C · no configured scope, discovered by the model',
+      dsh,
+      home,
+      env,
+      weknora,
+      prefix: 'weknora',
+      discoverScope: true,
+      patch: [{
+        id: 'weknora',
+        config: { baseUrl: weknora.url, apiKey: API_KEY },
       }],
     })
 

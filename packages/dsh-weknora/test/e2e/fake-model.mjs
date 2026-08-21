@@ -7,6 +7,9 @@
  * The scripted policy is: search the knowledge base, read the document a hit
  * points at, then answer using only what the tools returned. Every request is
  * recorded so the test can assert which tool schemas the model was offered.
+ *
+ * With `listTool` the policy gains the discovery step an unscoped deployment
+ * forces: list the knowledge bases first and carry an id into the search.
  */
 
 import { createServer } from 'node:http'
@@ -73,11 +76,13 @@ function calledTools(messages) {
  * Start the fake model.
  * @param options.searchTool - tool name to call first.
  * @param options.readTool - tool name to call with a knowledge_id from the first result.
+ * @param options.listTool - when set, list knowledge bases first and scope the search to an id it returns.
  * @returns the base URL (with `/v1`), the recorded requests, and a close function.
  */
 export async function startFakeModel(options = {}) {
   const searchTool = options.searchTool ?? 'weknora_search'
   const readTool = options.readTool ?? 'weknora_read_document'
+  const listTool = options.listTool
   const requests = []
 
   const server = createServer((request, response) => {
@@ -109,8 +114,16 @@ export async function startFakeModel(options = {}) {
       const already = calledTools(messages)
       const results = toolMessages(messages)
 
+      if (listTool !== undefined && !already.includes(listTool)) {
+        streamToolCall(response, body.model, listTool, {})
+        return
+      }
+
       if (!already.includes(searchTool)) {
-        streamToolCall(response, body.model, searchTool, { query: userQuestion(messages) })
+        const scope = listTool === undefined
+          ? {}
+          : { knowledge_base_ids: [/\(id: ([^)\s]+)\)/.exec(results.join('\n'))?.[1]].filter(Boolean) }
+        streamToolCall(response, body.model, searchTool, { query: userQuestion(messages), ...scope })
         return
       }
 

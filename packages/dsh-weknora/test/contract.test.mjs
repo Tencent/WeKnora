@@ -99,7 +99,7 @@ test('the plugin only reads response fields the fixture declares', async () => {
   // A backend that serves nothing but the declared fields must still produce a
   // complete tool result, which is what "these are the fields we depend on" means.
   const declared = new Set(fixture.responseFieldsRead['types.SearchResult'])
-  const results = await client.search({ query: '混合检索', knowledgeBaseIds: [], knowledgeIds: [] }, exec.signal)
+  const results = await client.search({ query: '混合检索', knowledgeBaseIds: ['kb-product'], knowledgeIds: [] }, exec.signal)
   const trimmed = results.map(result => Object.fromEntries(
     Object.entries(result).filter(([key]) => declared.has(key)),
   ))

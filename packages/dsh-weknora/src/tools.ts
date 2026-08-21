@@ -109,9 +109,15 @@ function projectHit(result: SearchResult, rank: number, maxChunkChars: number): 
 /** Assemble the four tool definitions for one configured deployment. */
 export function createTools(client: WeknoraClient, config: ResolvedConfig): ToolDefinition[] {
   const name = (suffix: string): string => `${config.toolPrefix}_${suffix}`
+  // WeKnora rejects a retrieval that names no knowledge base, document or tag,
+  // so an unscoped deployment has to say so rather than imply a server default.
+  const discoveryHint = config.tools.listKnowledgeBases
+    ? ` Call ${name('list_knowledge_bases')} first to get the ids.`
+    : ''
   const scopeNote = config.knowledgeBaseIds.length > 0
     ? ` Defaults to knowledge base(s) ${config.knowledgeBaseIds.join(', ')} when the call names none.`
-    : ' The deployment decides the scope when the call names none.'
+    : ' This deployment configures no default scope, so every call must name knowledge_base_ids '
+      + `or knowledge_ids.${discoveryHint}`
   const definitions: ToolDefinition[] = []
 
   if (config.tools.listKnowledgeBases) {
@@ -236,6 +242,12 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
         const requested = stringArrayArg(args, 'knowledge_base_ids')
         const knowledgeBaseIds = requested.length > 0 ? requested : config.knowledgeBaseIds
         const knowledgeIds = stringArrayArg(args, 'knowledge_ids')
+        // Fail here rather than let WeKnora answer 400: the model can act on a
+        // message naming the argument to supply, not on a transport error.
+        if (knowledgeBaseIds.length === 0 && knowledgeIds.length === 0) {
+          throw new Error(`${toolName}: WeKnora needs a scope to search. Pass knowledge_base_ids or `
+            + `knowledge_ids; this deployment configures no default.${discoveryHint}`)
+        }
         const limit = boundedIntArg(args, 'max_results', config.maxResults, config.maxResults)
         const hits = await client.search({ query, knowledgeBaseIds, knowledgeIds }, exec.signal)
         const results = hits.slice(0, limit).map((hit, index) => projectHit(hit, index + 1, config.maxChunkChars))

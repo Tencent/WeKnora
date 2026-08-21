@@ -59,7 +59,7 @@ test('list_knowledge_bases renders ids the model can pass back', async () => {
 })
 
 test('search returns ranked passages carrying their knowledge_id', async () => {
-  const { byName } = await toolset()
+  const { byName } = await toolset({ knowledgeBaseIds: ['kb-product'] })
   const { value, text } = await call(byName.get('weknora_search'), { query: '默认的检索阈值是多少' })
   assert.ok(value.count > 0)
   assert.equal(value.results[0].rank, 1)
@@ -69,7 +69,7 @@ test('search returns ranked passages carrying their knowledge_id', async () => {
 })
 
 test('search respects max_results and the configured ceiling', async () => {
-  const { byName } = await toolset({ maxResults: 2 })
+  const { byName } = await toolset({ maxResults: 2, knowledgeBaseIds: ['kb-product'] })
   const wide = await call(byName.get('weknora_search'), { query: '检索 部署 向量 阈值' })
   assert.ok(wide.value.count <= 2)
   const narrow = await call(byName.get('weknora_search'), { query: '检索 部署 向量 阈值', max_results: 1 })
@@ -83,7 +83,7 @@ test('search falls back to the configured knowledge base scope', async () => {
 })
 
 test('an empty result set tells the model what to try next', async () => {
-  const { byName } = await toolset()
+  const { byName } = await toolset({ knowledgeBaseIds: ['kb-product'] })
   const { value, text } = await call(byName.get('weknora_search'), { query: '量子纠缠咖啡机保修期' })
   assert.equal(value.count, 0)
   assert.match(text, /No passage in WeKnora matched/)
@@ -94,8 +94,38 @@ test('search rejects a missing query before touching the network', async () => {
   await assert.rejects(byName.get('weknora_search').execute({}, exec), /"query" is required/)
 })
 
+// WeKnora answers 400 when a retrieval names no knowledge base, document or
+// tag. Without a configured default that is the model's most likely first
+// call, so the scope has to be demanded in the description and enforced here.
+test('search demands a scope when the deployment configures no default', async () => {
+  const { byName, mock } = await toolset()
+  const requestsBefore = mock.requests.length
+  await assert.rejects(
+    byName.get('weknora_search').execute({ query: '默认的检索阈值是多少' }, exec),
+    /needs a scope to search/,
+  )
+  assert.equal(mock.requests.length, requestsBefore, 'the unscoped call must not reach WeKnora')
+  assert.match(byName.get('weknora_search').description, /must name knowledge_base_ids/)
+  assert.match(byName.get('weknora_search').description, /weknora_list_knowledge_bases/)
+})
+
+test('knowledge_ids alone is a scope WeKnora accepts', async () => {
+  const { byName, mock } = await toolset()
+  await call(byName.get('weknora_search'), {
+    query: '默认的检索阈值是多少',
+    knowledge_ids: ['doc-retrieval-pipeline'],
+  })
+  assert.deepEqual(mock.requests.at(-1).body.knowledge_ids, ['doc-retrieval-pipeline'])
+})
+
+test('a configured default scope keeps the description free of the demand', async () => {
+  const { byName } = await toolset({ knowledgeBaseIds: ['kb-product'] })
+  assert.match(byName.get('weknora_search').description, /Defaults to knowledge base\(s\) kb-product/)
+  assert.doesNotMatch(byName.get('weknora_search').description, /must name knowledge_base_ids/)
+})
+
 test('long passages are clipped and marked truncated', async () => {
-  const { byName } = await toolset({ maxChunkChars: 20 })
+  const { byName } = await toolset({ maxChunkChars: 20, knowledgeBaseIds: ['kb-product'] })
   const { value, text } = await call(byName.get('weknora_search'), { query: '混合检索 向量 关键词' })
   assert.ok(value.results[0].truncated)
   assert.ok(value.results[0].content.length <= 21)
