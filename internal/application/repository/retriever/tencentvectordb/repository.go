@@ -143,6 +143,28 @@ func (r *repository) DeleteByKnowledgeIDList(ctx context.Context, knowledgeIDLis
 	return r.deleteByFilter(ctx, dimension, tcvectordb.In(fieldKnowledgeID, knowledgeIDList))
 }
 
+func (r *repository) DeleteByKnowledgeIDListAllDimensions(
+	ctx context.Context, knowledgeIDList []string, _ string,
+) error {
+	if len(knowledgeIDList) == 0 {
+		return nil
+	}
+	collections, err := r.client.Database(r.databaseName).ListCollection(ctx)
+	if err != nil {
+		return fmt.Errorf("tencent vectordb list collections for knowledge deletion: %w", err)
+	}
+	cond := tcvectordb.In(fieldKnowledgeID, knowledgeIDList)
+	for _, collection := range collections.Collections {
+		if !r.matchesCollection(collection.CollectionName) {
+			continue
+		}
+		if err := r.deleteCollectionByFilter(ctx, collection.CollectionName, cond); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *repository) CopyIndices(
 	ctx context.Context,
 	sourceKnowledgeBaseID string,
@@ -458,6 +480,10 @@ func (r *repository) deleteByFilter(ctx context.Context, dimension int, cond str
 		return nil
 	}
 	collectionName := r.collectionName(dimension)
+	return r.deleteCollectionByFilter(ctx, collectionName, cond)
+}
+
+func (r *repository) deleteCollectionByFilter(ctx context.Context, collectionName, cond string) error {
 	_, err := r.client.Database(r.databaseName).Collection(collectionName).Delete(ctx, tcvectordb.DeleteDocumentParams{
 		Filter: tcvectordb.NewFilter(cond),
 	})

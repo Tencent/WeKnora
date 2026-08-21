@@ -64,7 +64,10 @@ func (TaskDeadLetter) TableName() string {
 // have to guess at variations.
 const (
 	TaskScopeKnowledgeBase = "knowledge_base"
-	TaskScopeKnowledge     = "knowledge"
-	TaskScopeTenant        = "tenant"
-	TaskScopeUnknown       = "unknown"
+	// TaskScopeKnowledgeBaseDelete isolates durable KB deletion intents from
+	// normal KB-scoped work, which is purged as part of deletion cleanup.
+	TaskScopeKnowledgeBaseDelete = "knowledge_base_delete"
+	TaskScopeKnowledge           = "knowledge"
+	TaskScopeTenant              = "tenant"
+	TaskScopeUnknown             = "unknown"
 )

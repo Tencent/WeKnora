@@ -370,6 +370,10 @@ type WikiPageRepository interface {
 	// DeleteByID soft-deletes a wiki page by ID.
 	DeleteByID(ctx context.Context, id string) error
 
+	// DeleteByKnowledgeBaseID hard-deletes all Wiki pages, revisions, folders,
+	// and issues owned by a deleted knowledge base.
+	DeleteByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) error
+
 	// Search performs full-text search on wiki pages within a knowledge base.
 	Search(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
 

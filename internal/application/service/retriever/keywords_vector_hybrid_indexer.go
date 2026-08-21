@@ -286,7 +286,22 @@ func (v *KeywordsVectorHybridRetrieveEngineService) DeleteBySourceIDList(ctx con
 func (v *KeywordsVectorHybridRetrieveEngineService) DeleteByKnowledgeIDList(ctx context.Context,
 	knowledgeIDList []string, dimension int, knowledgeType string,
 ) error {
+	if deleter, ok := v.indexRepository.(interfaces.CrossDimensionKnowledgeDeleter); ok {
+		return deleter.DeleteByKnowledgeIDListAllDimensions(ctx, knowledgeIDList, knowledgeType)
+	}
 	return v.indexRepository.DeleteByKnowledgeIDList(ctx, knowledgeIDList, dimension, knowledgeType)
+}
+
+// DeleteByKnowledgeIDListAllDimensions exposes the repository capability to a
+// composite engine. Repositories backed by a single physical index already
+// ignore dimension, so the zero-dimension fallback preserves their behavior.
+func (v *KeywordsVectorHybridRetrieveEngineService) DeleteByKnowledgeIDListAllDimensions(
+	ctx context.Context, knowledgeIDList []string, knowledgeType string,
+) error {
+	if deleter, ok := v.indexRepository.(interfaces.CrossDimensionKnowledgeDeleter); ok {
+		return deleter.DeleteByKnowledgeIDListAllDimensions(ctx, knowledgeIDList, knowledgeType)
+	}
+	return v.indexRepository.DeleteByKnowledgeIDList(ctx, knowledgeIDList, 0, knowledgeType)
 }
 
 // Support returns the retriever types supported by this engine

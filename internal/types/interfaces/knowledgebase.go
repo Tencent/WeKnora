@@ -242,3 +242,16 @@ type KnowledgeBaseRepository interface {
 		ctx context.Context, tenantID uint64, userID string,
 	) (map[string]time.Time, error)
 }
+
+// KnowledgeBaseDeleteOutbox atomically soft-deletes a knowledge base and
+// persists the durable operation that will drive its physical cleanup. It is
+// optional so alternate read-only repository implementations do not need to
+// support destructive workflows.
+type KnowledgeBaseDeleteOutbox interface {
+	DeleteKnowledgeBaseWithPendingOp(
+		ctx context.Context,
+		id string,
+		tenantID uint64,
+		op *types.TaskPendingOp,
+	) error
+}

@@ -2101,7 +2101,7 @@ const confirmBatchDelete = async () => {
   try {
     const res: any = await batchDeleteKnowledge(kbId.value, ids);
     if (res?.success) {
-      MessagePlugin.success(t('knowledgeBase.batchDeleteSuccess', { count: ids.length }));
+      MessagePlugin.info(t('knowledgeBase.batchDeleteSuccess', { count: ids.length }));
       clearSelection();
       batchMode.value = false;
       resetPage();

@@ -57,6 +57,8 @@ type TaskPendingOp struct {
 	ClaimedAt *time.Time `json:"claimed_at,omitempty"`
 }
 
+const TaskOpKnowledgeBaseDelete = "delete"
+
 // TableName binds TaskPendingOp to the `task_pending_ops` table.
 func (TaskPendingOp) TableName() string {
 	return "task_pending_ops"

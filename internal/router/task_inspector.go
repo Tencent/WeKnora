@@ -21,6 +21,14 @@ func NewAsynqInspector(redisClient *redis.Client) *asynq.Inspector {
 	return asynq.NewInspectorFromRedisClient(redisClient)
 }
 
+// NewAsynqTaskRecoveryController exposes the concrete inspector through the
+// narrow interface used by durable outbox recovery.
+func NewAsynqTaskRecoveryController(
+	inspector *asynq.Inspector,
+) interfaces.TaskRecoveryController {
+	return inspector
+}
+
 // asynqTaskInspector implements interfaces.TaskInspector backed by an
 // *asynq.Inspector. Scans the queues we actually use and matches tasks
 // whose payload carries the given

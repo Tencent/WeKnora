@@ -326,6 +326,35 @@ func (w *weaviateRepository) DeleteByKnowledgeIDList(ctx context.Context,
 
 	collectionName := w.getCollectionName(dimension)
 	log.Infof("[Weaviate] Deleting indices by knowledge IDs from %s, count: %d", collectionName, len(knowledgeIDList))
+	return w.deleteKnowledgeIDsFromCollection(ctx, collectionName, knowledgeIDList)
+}
+
+func (w *weaviateRepository) DeleteByKnowledgeIDListAllDimensions(
+	ctx context.Context, knowledgeIDList []string, _ string,
+) error {
+	if len(knowledgeIDList) == 0 {
+		return nil
+	}
+	collections, err := w.ListCollections(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list collections for knowledge deletion: %w", err)
+	}
+	prefix := w.collectionBaseName + "_"
+	for _, collectionName := range collections {
+		if !strings.HasPrefix(collectionName, prefix) {
+			continue
+		}
+		if err := w.deleteKnowledgeIDsFromCollection(ctx, collectionName, knowledgeIDList); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w *weaviateRepository) deleteKnowledgeIDsFromCollection(
+	ctx context.Context, collectionName string, knowledgeIDList []string,
+) error {
+	log := logger.GetLogger(ctx)
 
 	//define filter
 	filter := w.client.Batch().ObjectsBatchDeleter().
@@ -341,7 +370,7 @@ func (w *weaviateRepository) DeleteByKnowledgeIDList(ctx context.Context,
 		log.Errorf("[Weaviate] Failed to delete by knowledge IDs: %v", err)
 		return fmt.Errorf("failed to delete by knowledge IDs: %w", err)
 	}
-	log.Infof("[Weaviate] Successfully deleted documents by knowledge IDs")
+	log.Infof("[Weaviate] Successfully deleted documents by knowledge IDs from %s", collectionName)
 	return nil
 }
 

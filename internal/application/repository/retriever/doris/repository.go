@@ -245,6 +245,24 @@ func (r *dorisRepository) DeleteByKnowledgeIDList(ctx context.Context,
 	return r.deleteByField(ctx, fieldKnowledgeID, knowledgeIDList, dimension)
 }
 
+func (r *dorisRepository) DeleteByKnowledgeIDListAllDimensions(
+	ctx context.Context, knowledgeIDList []string, _ string,
+) error {
+	if len(knowledgeIDList) == 0 {
+		return nil
+	}
+	tables, err := r.listEmbeddingTables(ctx)
+	if err != nil {
+		return fmt.Errorf("list embedding tables for knowledge deletion: %w", err)
+	}
+	for _, table := range tables {
+		if err := r.deleteByFieldFromTable(ctx, table, fieldKnowledgeID, knowledgeIDList); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // DeleteBySourceIDList 用 source_id 列删除。
 func (r *dorisRepository) DeleteBySourceIDList(ctx context.Context,
 	sourceIDList []string, dimension int, _ string,
@@ -257,12 +275,18 @@ func (r *dorisRepository) DeleteBySourceIDList(ctx context.Context,
 func (r *dorisRepository) deleteByField(ctx context.Context,
 	field string, ids []string, dimension int,
 ) error {
-	log := logger.GetLogger(ctx)
 	if len(ids) == 0 {
 		return nil
 	}
 
 	table := r.getTableName(dimension)
+	return r.deleteByFieldFromTable(ctx, table, field, ids)
+}
+
+func (r *dorisRepository) deleteByFieldFromTable(
+	ctx context.Context, table, field string, ids []string,
+) error {
+	log := logger.GetLogger(ctx)
 	placeholders := make([]string, len(ids))
 	args := make([]any, len(ids))
 	for i, v := range ids {

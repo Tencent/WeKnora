@@ -319,6 +319,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		// Asynq inspector for cancel-by-knowledge-id (best-effort
 		// dequeue of pending/scheduled/retry tasks + active-task cancel).
 		must(container.Provide(router.NewAsynqInspector))
+		must(container.Provide(router.NewAsynqTaskRecoveryController))
 		must(container.Provide(router.NewAsynqTaskInspector))
 		// Install the distributed per-model chat concurrency governor. Only
 		// available with Redis (the shared semaphore backend); Lite mode is
@@ -327,6 +328,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	} else {
 		syncExec := router.NewSyncTaskExecutor()
 		must(container.Provide(func() interfaces.TaskEnqueuer { return syncExec }))
+		must(container.Provide(func() interfaces.TaskRecoveryController { return syncExec }))
 		must(container.Provide(func() *router.SyncTaskExecutor { return syncExec }))
 		// Lite mode: no Redis means no asynq inspector. SyncTaskExecutor
 		// dispatches inline goroutines that the checkpoint-based abort
@@ -442,6 +444,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// persistence succeeded immediately before trigger enqueue failed). Re-arm
 	// them only after the matching handlers are ready.
 	must(container.Invoke(recoverPendingWikiTasks))
+	// KB deletion uses the same durable-trigger pattern so a lost Redis
+	// acknowledgement or process restart cannot strand physical cleanup.
+	must(container.Invoke(startKBDeleteRecovery))
 
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")
 	return container

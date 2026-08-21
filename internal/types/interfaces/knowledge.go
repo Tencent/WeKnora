@@ -227,6 +227,15 @@ type KnowledgeService interface {
 }
 
 // KnowledgeRepository defines the interface for knowledge repositories.
+// UnscopedKnowledgeLister exposes soft-deleted knowledge rows for destructive
+// knowledge-base cleanup. It is optional so existing repository fakes and
+// alternate implementations keep their current contract.
+type UnscopedKnowledgeLister interface {
+	ListKnowledgeByKnowledgeBaseIDUnscoped(
+		ctx context.Context, tenantID uint64, kbID string,
+	) ([]*types.Knowledge, error)
+}
+
 type KnowledgeRepository interface {
 	CreateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
 	GetKnowledgeByID(ctx context.Context, tenantID uint64, id string) (*types.Knowledge, error)
