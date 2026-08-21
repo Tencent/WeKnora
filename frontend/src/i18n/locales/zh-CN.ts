@@ -695,6 +695,8 @@ export default {
     },
     field: {
       appId: 'App ID',
+      appKey: 'AppKey / Client ID',
+      operatorId: '操作人 UnionID',
       appSecret: 'App Secret',
       integrationToken: 'Integration Token',
       apiToken: 'API Token',
@@ -714,6 +716,7 @@ export default {
       lark_drive: "同步 Lark 云盘文件夹中的文档、表格、文件（飞书国际版）",
       notion: '同步 Notion 中的页面和数据库',
       yuque: '同步语雀知识库中的文档',
+      dingtalk: '同步钉钉知识库中的文档',
       ima: '同步腾讯 IMA 知识库中的文档、笔记与文件（暂不支持 AI 会话与视频解析）',
       rss: '同步 RSS / Atom 订阅源中的文章',
       gitlab: '同步 GitLab 项目中的文件'
@@ -725,6 +728,7 @@ export default {
       lark_drive: "Lark 云盘",
       notion: 'Notion',
       yuque: '语雀',
+      dingtalk: '钉钉文档',
       ima: '腾讯 IMA',
       rss: 'RSS / Atom 订阅',
       gitlab: 'GitLab'
