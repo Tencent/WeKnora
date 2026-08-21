@@ -47,7 +47,11 @@ type ZhipuRerankResponse struct {
 
 // ZhipuRankResult represents a single reranking result from Zhipu AI
 type ZhipuRankResult struct {
-	Index          int     `json:"index"`              // Original index of the document
+	// Index is the original position of the document in the request.
+	// Pointer because the live rerank API (rerank-pro et al.) omits this
+	// field entirely — a plain int would silently unmarshal every result
+	// to 0 and collapse all hits onto the first candidate.
+	Index          *int    `json:"index"`              // Original index of the document
 	RelevanceScore float64 `json:"relevance_score"`    // Relevance score
 	Document       string  `json:"document,omitempty"` // Document text (optional)
 }
@@ -127,19 +131,45 @@ func (r *ZhipuReranker) Rerank(ctx context.Context, query string, documents []st
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 
-	// Convert Zhipu results to standard RankResult format
-	results := make([]RankResult, len(response.Results))
-	for i, zhipuResult := range response.Results {
-		results[i] = RankResult{
-			Index: zhipuResult.Index,
+	// Convert Zhipu results to standard RankResult format.
+	return mapZhipuResults(response.Results, documents), nil
+}
+
+// mapZhipuResults converts API results back to candidate positions.
+// The API may or may not return `index`; when absent, recover the
+// original position by matching the echoed document text (first
+// occurrence wins). Results that match neither way are dropped rather
+// than guessed — a wrong index silently reranks the wrong chunk.
+func mapZhipuResults(apiResults []ZhipuRankResult, documents []string) []RankResult {
+	indexByText := make(map[string]int, len(documents))
+	for i, doc := range documents {
+		if _, ok := indexByText[doc]; !ok {
+			indexByText[doc] = i
+		}
+	}
+	seen := make(map[int]bool, len(apiResults))
+	results := make([]RankResult, 0, len(apiResults))
+	for _, zhipuResult := range apiResults {
+		idx := -1
+		if zhipuResult.Index != nil &&
+			*zhipuResult.Index >= 0 && *zhipuResult.Index < len(documents) {
+			idx = *zhipuResult.Index
+		} else if i, ok := indexByText[zhipuResult.Document]; ok {
+			idx = i
+		}
+		if idx < 0 || seen[idx] {
+			continue
+		}
+		seen[idx] = true
+		results = append(results, RankResult{
+			Index: idx,
 			Document: DocumentInfo{
 				Text: zhipuResult.Document,
 			},
 			RelevanceScore: zhipuResult.RelevanceScore,
-		}
+		})
 	}
-
-	return results, nil
+	return results
 }
 
 // GetModelName returns the name of the reranking model
