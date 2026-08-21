@@ -592,7 +592,8 @@ const graphGuideUrl =
 
 // Open guide documentation to show how to enable graph database
 const handleOpenGraphGuide = () => {
-  window.open(graphGuideUrl, '_blank', 'noopener')
+  // 外链已隐藏：不再打开知识图谱文档
+  // window.open(graphGuideUrl, '_blank', 'noopener')
 }
 
 // 初始化

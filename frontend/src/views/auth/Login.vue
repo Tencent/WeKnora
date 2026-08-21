@@ -403,11 +403,6 @@ const slides = [
     image: screenshot3,
     title: t('platform.carousel.wikiTitle'),
     description: t('platform.carousel.wikiDesc')
-  },
-  {
-    image: screenshot1,
-    title: t('platform.carousel.smartDocRetrievalTitle'),
-    description: t('platform.carousel.smartDocRetrievalDesc')
   }
 ]
 

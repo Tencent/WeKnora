@@ -119,7 +119,7 @@
                   ? $t('settings.sandbox.secretConfigured')
                   : $t('settings.sandbox.cubeApiKeyOptional') }}
               </p>
-              <a class="inline-guide-link" :href="clusterGuideUrl" target="_blank" rel="noopener noreferrer">
+              <a class="inline-guide-link" target="_blank" rel="noopener noreferrer">
                 <t-icon name="link" />
                 {{ $t('settings.sandbox.cubeApiKeyWhere') }}
               </a>
@@ -264,7 +264,7 @@
         <p v-else-if="!templatesLoaded" class="section-help">
           {{ $t('settings.sandbox.templateLoadHint') }}
         </p>
-        <a class="inline-guide-link" :href="clusterGuideUrl" target="_blank" rel="noopener noreferrer">
+        <a class="inline-guide-link" target="_blank" rel="noopener noreferrer">
           <t-icon name="link" />
           {{ $t('settings.sandbox.howToBuildTemplate') }}
         </a>

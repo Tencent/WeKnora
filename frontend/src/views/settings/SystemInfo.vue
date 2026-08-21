@@ -141,14 +141,12 @@
             <div class="migration-error-actions">
               <t-link
                 theme="primary"
-                :href="troubleshootingDocsURL"
                 target="_blank"
                 rel="noopener noreferrer"
               >{{ $t('system.dbMigrationViewDocs') }}</t-link>
               <span class="migration-error-actions-sep">·</span>
               <t-link
                 theme="primary"
-                :href="reportIssueURL"
                 target="_blank"
                 rel="noopener noreferrer"
               >{{ $t('system.dbMigrationReportIssue') }}</t-link>

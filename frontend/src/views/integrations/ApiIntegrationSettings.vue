@@ -1431,7 +1431,8 @@ const saveDesktopPort = async () => {
 }
 
 function openApiDoc() {
-  window.open('https://github.com/Tencent/WeKnora/blob/main/docs/api/README.md', '_blank')
+  // 外链已隐藏：不再打开 API 文档
+  // window.open('https://github.com/Tencent/WeKnora/blob/main/docs/api/README.md', '_blank')
 }
 
 function openCreateAPIKeyDialog() {
