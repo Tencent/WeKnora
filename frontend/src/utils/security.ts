@@ -11,6 +11,7 @@ import {
   markdownDomPurifySecurityHooks,
 } from './markdownDomPurify.ts';
 import {
+  buildProtectedFileFallbackRequest,
   buildProtectedFileRequest,
   isProtectedFileProxyPath,
   isProviderFileURL,
@@ -537,7 +538,26 @@ export async function hydrateProtectedFileImages(
             credentials: 'include',
           });
           if (!resp.ok) {
+            // 新版前端可使用訊息範圍圖片代理；較舊的自架後端沒有該端點，
+            // 但仍可透過已驗證的租戶 /files 代理讀取同一資源，因此僅在 404
+            // 時進行相容性重試。
             if (resp.status === 404) {
+              const fallback = buildProtectedFileFallbackRequest(sourceURL, resolvedAccess);
+              if (fallback) {
+                const fallbackResp = await fetch(fallback.url, {
+                  method: 'GET',
+                  headers: fallback.headers,
+                  credentials: 'include',
+                });
+                if (fallbackResp.ok) {
+                  const blob = await fallbackResp.blob();
+                  const blobURL = URL.createObjectURL(blob);
+                  protectedFileBlobCache.set(requestURL, blobURL);
+                  protectedFileBlobCache.set(fallback.url, blobURL);
+                  protectedFileFailureCache.delete(requestURL);
+                  return { status: 'loaded', blobURL };
+                }
+              }
               protectedFileFailureCache.set(requestURL, Date.now());
               return { status: 'missing' };
             }
