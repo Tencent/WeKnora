@@ -23223,6 +23223,10 @@ const docTemplate = `{
                         "$ref": "#/definitions/internal_handler_session.MentionedItemRequest"
                     }
                 },
+                "prompt_context": {
+                    "description": "Optional LLM-only context; excluded from direct query rewrite and retrieval inputs",
+                    "type": "string"
+                },
                 "query": {
                     "description": "Query text for knowledge base search",
                     "type": "string"
