@@ -818,6 +818,37 @@ func (s *DataSourceService) resolveAutoTagIDs(ctx context.Context, ds *types.Dat
 // display (Tencent/WeKnora#2136 / #1262).
 const maxSyncResultErrors = 100
 
+// errSyncItemTombstoned skips an item the user deleted from the KB. Only user
+// deletions create tombstones. Sync-internal deletions never block re-sync.
+var errSyncItemTombstoned = errors.New("sync item matches a deleted row, skipping")
+
+const syncErrorCodeUserDeletedExcluded = "user_deleted_excluded"
+
+func syncItemUserDeletedExcludedError(item *types.FetchedItem) types.SyncItemError {
+	return types.SyncItemError{
+		Title:   item.Title,
+		Code:    syncErrorCodeUserDeletedExcluded,
+		Message: "Item was deleted from the knowledge base and will not be re-synced",
+	}
+}
+
+// checkSyncItemUserDeletionExclusion reports whether sync must skip an item
+// because the user deleted it (soft-delete tombstone). Lookup errors fail closed.
+func checkSyncItemUserDeletionExclusion(
+	ctx context.Context,
+	repo interfaces.KnowledgeRepository,
+	ds *types.DataSource,
+	item *types.FetchedItem,
+) (bool, error) {
+	tomb, terr := repo.FindTombstonedByDataSourceExternalID(
+		ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, item.ExternalID,
+	)
+	if terr != nil {
+		return false, fmt.Errorf("check tombstone for external_id=%s: %w", item.ExternalID, terr)
+	}
+	return tomb != nil, nil
+}
+
 // recordSyncError appends an error sample to result.Errors, capped at
 // maxSyncResultErrors. Callers still increment result.Failed for the exact count.
 func recordSyncError(result *types.SyncResult, item types.SyncItemError) {
@@ -936,6 +967,11 @@ func (s *DataSourceService) applyFetchedItem(
 	if err != nil {
 		var dupErr *types.DuplicateKnowledgeError
 		switch {
+		case errors.Is(err, errSyncItemTombstoned):
+			// The item matches a tombstone (user deleted it from the KB).
+			// Count as skipped, never re-create it.
+			result.Skipped++
+			recordSyncError(result, syncItemUserDeletedExcludedError(item))
 		case errors.As(err, &dupErr):
 			// Duplicate file/URL is not a failure — count as skipped.
 			logger.Infof(ctx, "item %q (external_id=%s) already exists, skipping", item.Title, item.ExternalID)
@@ -1263,18 +1299,46 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 		// external IDs from two data sources cannot collide or overwrite each
 		// other during updates.
 		existing, err := repo.FindByDataSourceExternalID(ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, item.ExternalID)
-		if err != nil {
-			logger.Warnf(ctx, "failed to check existing knowledge for external_id=%s: %v", item.ExternalID, err)
-			// Non-fatal: proceed with creation (may produce duplicate)
-		} else if existing != nil {
+		switch {
+		case err != nil:
+			excluded, exErr := checkSyncItemUserDeletionExclusion(ctx, repo, ds, item)
+			if exErr != nil {
+				return false, exErr
+			}
+			if excluded {
+				logger.Infof(ctx, "item %q (external_id=%s) was deleted from the KB, skipping resurrection",
+					item.Title, item.ExternalID)
+				return false, errSyncItemTombstoned
+			}
+			// Fail closed: a failed live lookup must not fall through to creation.
+			return false, fmt.Errorf("check existing knowledge for external_id=%s: %w", item.ExternalID, err)
+		case existing != nil:
+			if existing.ParseStatus == types.ParseStatusDeleting {
+				logger.Infof(ctx, "item %q (external_id=%s) is being deleted from the KB, skipping",
+					item.Title, item.ExternalID)
+				return false, errSyncItemTombstoned
+			}
 			logger.Infof(ctx, "found existing knowledge %s for external_id=%s, deleting for update", existing.ID, item.ExternalID)
 			if err := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); err != nil {
 				logger.Warnf(ctx, "failed to delete existing knowledge %s: %v", existing.ID, err)
 			} else {
+				// The update replaces the live row. Hard-delete it so it never
+				// acts as a tombstone, and a failed create below stays recoverable
+				// on the next sync.
 				if herr := repo.HardDeleteKnowledge(ctx, ds.TenantID, existing.ID); herr != nil {
-					logger.Warnf(ctx, "failed to hard-delete replaced knowledge %s: %v", existing.ID, herr)
+					return false, fmt.Errorf("hard-delete replaced knowledge %s: %w", existing.ID, herr)
 				}
 				isUpdate = true
+			}
+		default:
+			excluded, exErr := checkSyncItemUserDeletionExclusion(ctx, repo, ds, item)
+			if exErr != nil {
+				return false, exErr
+			}
+			if excluded {
+				logger.Infof(ctx, "item %q (external_id=%s) was deleted from the KB, skipping resurrection",
+					item.Title, item.ExternalID)
+				return false, errSyncItemTombstoned
 			}
 		}
 	}

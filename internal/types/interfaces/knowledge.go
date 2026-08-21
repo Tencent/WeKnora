@@ -322,6 +322,12 @@ type KnowledgeRepository interface {
 	FindByDataSourceExternalID(
 		ctx context.Context, tenantID uint64, kbID, dataSourceID, externalID string,
 	) (*types.Knowledge, error)
+	// FindTombstonedByDataSourceExternalID returns the soft-deleted row for a
+	// (data source, external item ID) pair, or (nil, nil) when none exists.
+	// A deleted row is a persistent tombstone: sync never resurrects it.
+	FindTombstonedByDataSourceExternalID(
+		ctx context.Context, tenantID uint64, kbID, dataSourceID, externalID string,
+	) (*types.Knowledge, error)
 	// HardDeleteKnowledge physically removes a row after DeleteKnowledge's soft-delete
 	// cascade. Sync-internal deletions use this so rows never become tombstones.
 	HardDeleteKnowledge(ctx context.Context, tenantID uint64, id string) error

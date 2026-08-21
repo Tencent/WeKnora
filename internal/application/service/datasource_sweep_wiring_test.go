@@ -30,6 +30,14 @@ func (r *sweepFakeRepo) FindByDataSourceExternalID(
 	return nil, nil // no existing main item -> skip the case-1 update delete
 }
 
+func (r *sweepFakeRepo) FindTombstonedByDataSourceExternalID(
+	_ context.Context, _ uint64, _ string, _ string, _ string,
+) (*types.Knowledge, error) {
+	return nil, nil // no tombstone → normal ingest path
+}
+
+// HardDeleteKnowledge(HardDeleteKnowledgeList) record the sync-internal
+// physical deletions. The sweep tests assert them via hardDeleted.
 func (r *sweepFakeRepo) HardDeleteKnowledge(context.Context, uint64, string) error {
 	return nil
 }
