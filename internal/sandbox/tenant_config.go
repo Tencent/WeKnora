@@ -92,6 +92,30 @@ func ResolveEffectiveConfig(
 
 	if docker := tenantCfg.Docker; docker != nil {
 		overrideString(&effective.DockerImage, docker.Image)
+		if err := ValidateDockerHost(docker.Host, effective.AllowPrivateEndpoints); err != nil {
+			return nil, err
+		}
+		if err := ValidateDockerRemoteTLS(docker.Host, docker.TLSCertPath); err != nil {
+			return nil, err
+		}
+		if err := ValidateDockerNetworkMode(docker.NetworkMode); err != nil {
+			return nil, err
+		}
+		overrideString(&effective.DockerHost, docker.Host)
+		overrideString(&effective.DockerTLSCertPath, docker.TLSCertPath)
+		overrideString(&effective.DockerNetworkMode, docker.NetworkMode)
+		overrideString(&effective.DockerRuntime, docker.Runtime)
+		if docker.CPULimit > 0 {
+			effective.DockerCPULimit = docker.CPULimit
+		}
+		if docker.MemoryLimitMB > 0 {
+			effective.DockerMemoryBytes = int64(docker.MemoryLimitMB) * 1024 * 1024
+		}
+		if docker.PidsLimit > 0 {
+			effective.DockerPidsLimit = int64(docker.PidsLimit)
+		}
+		overrideSeconds(&effective.DockerIdleTTL, docker.IdleTTLSeconds)
+		overrideSeconds(&effective.DockerHTTPTimeout, docker.HTTPTimeoutSec)
 	}
 
 	switch effective.Type {
@@ -99,6 +123,8 @@ func ResolveEffectiveConfig(
 		applyCubeRuntimeDefaults(&effective)
 	case SandboxTypeE2B:
 		applyE2BRuntimeDefaults(&effective)
+	case SandboxTypeDocker:
+		applyDockerRuntimeDefaults(&effective)
 	}
 	// Deliberately after the runtime defaults: TTLs and HTTP timeouts have
 	// built-in fallbacks, endpoints and credentials do not.
@@ -115,6 +141,15 @@ func ResolveEffectiveConfig(
 // "inherits nothing" would still have an exception to explain.
 func clearProviderFields(cfg *Config) {
 	cfg.DockerImage = ""
+	cfg.DockerHost = ""
+	cfg.DockerTLSCertPath = ""
+	cfg.DockerNetworkMode = ""
+	cfg.DockerRuntime = ""
+	cfg.DockerCPULimit = 0
+	cfg.DockerMemoryBytes = 0
+	cfg.DockerPidsLimit = 0
+	cfg.DockerIdleTTL = 0
+	cfg.DockerHTTPTimeout = 0
 	cfg.CubeAPIURL = ""
 	cfg.CubeProxyURL = ""
 	cfg.CubeSandboxDomain = ""
@@ -167,6 +202,10 @@ func EffectiveTemplateID(cfg *Config) string {
 		return cfg.CubeTemplate
 	case SandboxTypeE2B:
 		return cfg.E2BTemplate
+	case SandboxTypeDocker:
+		// The image is what a template ID is for the MicroVM backends: the
+		// pre-baked filesystem a sandbox starts from.
+		return cfg.DockerImage
 	default:
 		return ""
 	}

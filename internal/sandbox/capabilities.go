@@ -23,8 +23,9 @@ import (
 )
 
 // SessionShellExecutor executes ad-hoc shell commands inside a session-
-// scoped remote sandbox. Local/Docker backends do not implement it; a
-// SessionBoundManager only surfaces it while the remote backend is active.
+// scoped remote sandbox. Local backends do not implement it; a
+// SessionBoundManager only surfaces it while the remote backend is active
+// (Cube, E2B, or Docker).
 type SessionShellExecutor interface {
 	ExecShellCommand(
 		ctx context.Context,

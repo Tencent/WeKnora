@@ -23,10 +23,8 @@
 //     Every session-scoped capability (shell exec, file staging, session
 //     filesystem inspection) then refuses to run on the host: those calls
 //     require a real remote provider.
-//   - Sandboxes are never reaped from inside WeKnora. Idle-timeout / pause /
-//     kill is the provider's responsibility (Cube's on_timeout + Cube's
-//     sweeper; E2B's built-in TTL). Multi-instance deployments must not race
-//     on this decision.
+//   - Cube and E2B reap idle sandboxes themselves. Docker has no provider TTL,
+//     so that backend runs its own idle sweep against activity-marker mtimes.
 package sandbox
 
 import (
@@ -162,6 +160,8 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 		applyCubeRuntimeDefaults(cfg)
 	case SandboxTypeE2B:
 		applyE2BRuntimeDefaults(cfg)
+	case SandboxTypeDocker:
+		applyDockerRuntimeDefaults(cfg)
 	}
 
 	// Build the provider-specific neutral create request using the
@@ -818,6 +818,26 @@ func buildSessionCreateRequest(provider RemoteProvider, cfg *Config) (RemoteCrea
 			},
 		}, nil
 
+	case SandboxTypeDocker:
+		ttl := cfg.DockerIdleTTL
+		if ttl <= 0 {
+			ttl = DefaultDockerIdleTTL
+		}
+		return RemoteCreateRequest{
+			TemplateID: cfg.DockerImage,
+			EnvVars:    envVars,
+			Timeout: RemoteTimeoutPolicy{
+				Mode:  RemoteTimeoutExplicit,
+				Value: ttl,
+				// Docker's pause keeps the container's memory resident on the
+				// host, so pausing an abandoned sandbox would reclaim nothing.
+				// Idle containers are deleted; the lifecycle rebinds the
+				// session exactly as it does for a provider-reaped sandbox.
+				Action:     RemoteOnTimeoutKill,
+				AutoResume: false,
+			},
+		}, nil
+
 	default:
 		return RemoteCreateRequest{}, fmt.Errorf(
 			"sandbox: unsupported remote provider %q for session create request",
@@ -842,6 +862,11 @@ func effectiveHTTPTimeout(provider RemoteProvider, cfg *Config) time.Duration {
 			return cfg.E2BHTTPTimeout
 		}
 		return DefaultE2BHTTPTimeout
+	case SandboxTypeDocker:
+		if cfg.DockerHTTPTimeout > 0 {
+			return cfg.DockerHTTPTimeout
+		}
+		return DefaultDockerHTTPTimeout
 	default:
 		return DefaultCubeHTTPTimeout
 	}

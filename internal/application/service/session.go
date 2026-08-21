@@ -656,10 +656,10 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 // destroyBoundSandbox tears down the sandbox MicroVM bound to sessionID, if
 // the configured sandbox backend supports session-scoped instances.
 //
-// Only SessionBoundManager (the CubeSandbox backend) implements the
-// DestroySession method. For Docker/Local/Disabled backends the type assertion
-// fails and the call is a no-op — those backends are stateless per Execute
-// and hold no resources keyed on session ID.
+// Only SessionBoundManager implements the DestroySession method, which every
+// session-scoped backend resolves to (Cube, E2B, Docker). For Local/Disabled
+// the type assertion fails and the call is a no-op — those backends are
+// stateless per Execute and hold no resources keyed on session ID.
 //
 // Errors are logged but never propagated: sandbox teardown must not block
 // session deletion. Call this while the session row is still live so the

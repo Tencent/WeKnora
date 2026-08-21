@@ -23,9 +23,13 @@ COPY --from=node-base /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
-# Install minimal CLI tools (bash/grep/sed/coreutils already in slim image)
+# Install minimal CLI tools (bash/grep/sed/coreutils/findutils already in slim
+# image). curl is not optional: the sandbox connectivity check probes egress
+# with it, and skills that fetch a URL expect it to be there.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
+    curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
 # Note: Current preloaded skills only use Python stdlib
@@ -38,6 +42,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 1000:1000, so both paths land on the same account.
 RUN groupadd -g 1000 user && \
     useradd -u 1000 -g user -m -s /bin/bash user
+
+# Pre-create the two directories every backend writes to and hand them to the
+# sandbox account. WeKnora otherwise has to create and chown them as root on
+# each execution, which needs capabilities a hardened container should not
+# have to keep.
+RUN mkdir -p /workspace/input /workspace/output && \
+    chown -R user:user /workspace
 
 WORKDIR /workspace
 USER user

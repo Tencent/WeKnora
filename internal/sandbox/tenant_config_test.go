@@ -184,6 +184,45 @@ func TestResolveEffectiveConfigRejectsUnsafeCubeProxyURL(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnsafeOutboundURL)
 }
 
+func TestResolveEffectiveConfigRejectsDockerHostNetwork(t *testing.T) {
+	_, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType: "docker",
+		Docker: &types.DockerSandboxConfig{
+			Image:       "weknora:test",
+			NetworkMode: "host",
+		},
+	}, DefaultConfig())
+	require.Error(t, err)
+}
+
+// A blank host must come out of config resolution already pointing at the
+// daemon the Docker CLI would use, because that resolved value is what the
+// connectivity check dials. Leaving it empty here is what made the check fail
+// on a Colima or Docker Desktop host, where /var/run/docker.sock is absent.
+func TestResolveEffectiveConfigDetectsLocalDockerHostWhenBlank(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "unix:///tmp/from-env.sock")
+
+	effective, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType: "docker",
+		Docker:      &types.DockerSandboxConfig{Image: "weknora:test"},
+	}, DefaultConfig())
+
+	require.NoError(t, err)
+	require.Equal(t, "unix:///tmp/from-env.sock", effective.DockerHost)
+}
+
+func TestResolveEffectiveConfigRejectsPlaintextDockerTCP(t *testing.T) {
+	_, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType:           "docker",
+		AllowPrivateEndpoints: true,
+		Docker: &types.DockerSandboxConfig{
+			Image: "weknora:test",
+			Host:  "tcp://10.0.0.5:2376",
+		},
+	}, DefaultConfig())
+	require.Error(t, err)
+}
+
 func TestEffectiveTemplateIDPerProvider(t *testing.T) {
 	require.Equal(t, "e2b-tpl", EffectiveTemplateID(&Config{
 		Type: SandboxTypeE2B, E2BTemplate: "e2b-tpl", CubeTemplate: "cube-tpl",

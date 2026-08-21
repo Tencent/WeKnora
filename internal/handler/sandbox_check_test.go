@@ -22,6 +22,16 @@ func TestSandboxConnectionCheckConfigAllowsTemplateDiscoveryAfterConnection(t *t
 	require.Empty(t, incoming.E2B.TemplateID, "the submitted form must not be mutated")
 }
 
+func TestSandboxCheckReasonDockerUnavailableIncludesHost(t *testing.T) {
+	msg := sandboxCheckReason(&sandbox.RemoteError{
+		Kind:     sandbox.RemoteErrorKindUnavailable,
+		Provider: sandbox.SandboxTypeDocker,
+		Message:  "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?",
+	})
+	require.Contains(t, msg, "unix:///var/run/docker.sock")
+	require.Contains(t, msg, "docker context")
+}
+
 func TestRunStatelessSandboxCheckLocal(t *testing.T) {
 	cfg := sandbox.DefaultConfig()
 	cfg.Type = sandbox.SandboxTypeLocal

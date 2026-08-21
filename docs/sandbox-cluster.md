@@ -31,7 +31,7 @@
 
 | 变体 | 标签 | 用途 |
 | --- | --- | --- |
-| `sandbox`（默认） | `wechatopenai/weknora-sandbox:<版本>` | Docker 后端直接执行脚本；同时作为 E2B 模板的基础镜像 |
+| `sandbox`（默认） | `wechatopenai/weknora-sandbox:<版本>` | Docker 后端的会话容器镜像；同时作为 E2B 模板的基础镜像 |
 | `cube` | `wechatopenai/weknora-sandbox:<版本>-cube` | CubeSandbox 模板 |
 
 区别在于 Cube 变体额外注入了 envd。Cube 直接把 OCI 镜像变成模板，并以 `GET :49983/health` 探活，这个端点只有 envd 提供；不带 envd 的镜像建模板必然以 `connection refused` 失败。E2B 不需要这个变体，因为它的构建流程会自行注入 envd；Docker 后端则完全不需要 envd。详见 [Cube 自带镜像接入](https://cubesandbox.com/zh/guide/tutorials/bring-your-own-image.html)。
