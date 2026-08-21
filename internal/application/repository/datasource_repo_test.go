@@ -68,10 +68,17 @@ func TestDataSourceRepositoryUpdatePersistsDisabledSyncDeletions(t *testing.T) {
 
 	ds.SyncDeletions = false
 	require.NoError(t, repo.Update(ctx, ds))
+	assert.False(t, ds.SyncDeletions)
 
 	var stored types.DataSource
 	require.NoError(t, db.First(&stored, "id = ?", ds.ID).Error)
 	assert.False(t, stored.SyncDeletions)
+
+	ds.SyncDeletions = true
+	require.NoError(t, repo.Update(ctx, ds))
+	assert.True(t, ds.SyncDeletions)
+	require.NoError(t, db.First(&stored, "id = ?", ds.ID).Error)
+	assert.True(t, stored.SyncDeletions)
 }
 
 func TestDataSourceRepositoryCreatePersistsDisabledSyncDeletions(t *testing.T) {
@@ -88,10 +95,39 @@ func TestDataSourceRepositoryCreatePersistsDisabledSyncDeletions(t *testing.T) {
 		SyncDeletions:   false,
 	}
 	require.NoError(t, repo.Create(ctx, ds))
+	assert.False(t, ds.SyncDeletions, "Create must not leave the in-memory field hydrated to the GORM default")
 
 	var stored types.DataSource
 	require.NoError(t, db.First(&stored, "id = ?", ds.ID).Error)
 	assert.False(t, stored.SyncDeletions)
+
+	// A later Updates() on the same pointer must not persist the hydrated default.
+	ds.Name = "Renamed"
+	require.NoError(t, repo.Update(ctx, ds))
+	require.NoError(t, db.First(&stored, "id = ?", ds.ID).Error)
+	assert.False(t, stored.SyncDeletions)
+	assert.Equal(t, "Renamed", stored.Name)
+}
+
+func TestDataSourceRepositoryCreatePersistsEnabledSyncDeletions(t *testing.T) {
+	db := setupDataSourceRepoTestDB(t)
+	repo := NewDataSourceRepository(db)
+	ctx := context.Background()
+
+	ds := &types.DataSource{
+		ID:              "ds-create-sync-deletions-enabled",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Name:            "Feishu",
+		Type:            types.ConnectorTypeFeishu,
+		SyncDeletions:   true,
+	}
+	require.NoError(t, repo.Create(ctx, ds))
+	assert.True(t, ds.SyncDeletions)
+
+	var stored types.DataSource
+	require.NoError(t, db.First(&stored, "id = ?", ds.ID).Error)
+	assert.True(t, stored.SyncDeletions)
 }
 
 func TestDataSourceRepositoryDeleteSoftDeletesOnSQLite(t *testing.T) {

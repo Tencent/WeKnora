@@ -25,10 +25,13 @@ func (r *DataSourceRepository) Create(ctx context.Context, ds *types.DataSource)
 	if ds == nil {
 		return errors.New("data source is nil")
 	}
-	// GORM may omit a false value for a field with a database default. Preserve
-	// the caller's choice before Create potentially hydrates that default.
+	// GORM treats false as the zero value of bool. For a field tagged
+	// default:true it replaces both the INSERT value and the in-memory field
+	// with true, so a caller-selected false would be lost. Capture it, force
+	// the column write, then restore the struct so Create's return value (and
+	// the HTTP 201 body) match the database.
 	syncDeletions := ds.SyncDeletions
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(ds).Error; err != nil {
 			return err
 		}
@@ -36,6 +39,8 @@ func (r *DataSourceRepository) Create(ctx context.Context, ds *types.DataSource)
 			Where("id = ?", ds.ID).
 			UpdateColumn("sync_deletions", syncDeletions).Error
 	})
+	ds.SyncDeletions = syncDeletions
+	return err
 }
 
 // FindByID retrieves a data source by ID
