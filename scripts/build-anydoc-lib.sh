@@ -55,8 +55,10 @@ prepare_patched_anydoc() {
   local dest="$crate_dir/patched-anydoc"
   # The marker records which version was patched: after a version bump the
   # copy left by the previous build is the wrong crate, and reusing it would
-  # fail deep inside cargo's patch resolution instead of here.
-  if [ -f "$dest/.weknora-patched" ] && [ "$(cat "$dest/.weknora-patched")" = "$anydoc_version" ]; then
+  # fail deep inside cargo's patch resolution instead of here. Cargo.toml is
+  # required too: a truncated leftover with only the marker would otherwise
+  # skip the copy and fail with "failed to read .../Cargo.toml".
+  if [ -f "$dest/.weknora-patched" ] && [ "$(cat "$dest/.weknora-patched")" = "$anydoc_version" ] && [ -f "$dest/Cargo.toml" ]; then
     return
   fi
 
