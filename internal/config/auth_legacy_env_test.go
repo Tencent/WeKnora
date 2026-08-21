@@ -103,6 +103,25 @@ func TestApplyAuthAndTenantDefaults_DefaultTenantMode(t *testing.T) {
 	})
 }
 
+func TestApplyAuthAndTenantDefaults_LoginRateLimit(t *testing.T) {
+	cfg := &Config{Auth: &AuthConfig{}}
+
+	applyAuthAndTenantDefaults(cfg)
+
+	if cfg.Auth.LoginRateLimitMax != 10 {
+		t.Fatalf("login_rate_limit_max = %d, want 10", cfg.Auth.LoginRateLimitMax)
+	}
+	if cfg.Auth.LoginRateLimitWindowMinutes != 10 {
+		t.Fatalf("login_rate_limit_window_minutes = %d, want 10", cfg.Auth.LoginRateLimitWindowMinutes)
+	}
+	if err := ValidateConfig(&Config{Auth: &AuthConfig{LoginRateLimitMax: -1}}); err == nil {
+		t.Fatal("ValidateConfig unexpectedly accepted a negative login_rate_limit_max")
+	}
+	if err := ValidateConfig(&Config{Auth: &AuthConfig{LoginRateLimitWindowMinutes: -1}}); err == nil {
+		t.Fatal("ValidateConfig unexpectedly accepted a negative login_rate_limit_window_minutes")
+	}
+}
+
 // TestApplyAuthAndTenantDefaults_CrossTenantAccess is a regression test for the
 // env-binding gap: viper.AutomaticEnv has no SetEnvPrefix, so
 // WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS is never bound to the nested struct

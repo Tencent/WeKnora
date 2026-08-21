@@ -4495,6 +4495,8 @@ export default {
     passwordMismatch: 'Введённые пароли не совпадают',
     loginError: 'Ошибка входа, пожалуйста, проверьте электронную почту или пароль',
     loginErrorRetry: 'Ошибка входа, пожалуйста, повторите попытку позже',
+    loginRateLimited: 'Слишком много попыток входа. Повторите через {seconds} сек.',
+    loginRetryCountdown: 'Повторите через {seconds} сек.',
     registerError: 'Ошибка регистрации, пожалуйста, повторите попытку позже',
     workspaceOnboarding: {
       title: 'Выберите рабочее пространство',

@@ -4497,6 +4497,8 @@ export default {
     passwordMismatch: '两次输入的密码不一致',
     loginError: '登录错误，请检查邮箱或密码',
     loginErrorRetry: '登录错误，请稍后重试',
+    loginRateLimited: '登录尝试次数过多，请在 {seconds} 秒后重试。',
+    loginRetryCountdown: '{seconds} 秒后重试',
     registerError: '注册错误，请稍后重试',
     workspaceOnboarding: {
       title: '选择你的工作空间',
