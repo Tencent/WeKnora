@@ -16,6 +16,7 @@ import { renderWorkspaceNotifyContent } from '@/utils/workspaceNotifyContent'
 // TDesign locale configs
 import enUSConfig from 'tdesign-vue-next/esm/locale/en_US'
 import zhCNConfig from 'tdesign-vue-next/esm/locale/zh_CN'
+import zhTWConfig from 'tdesign-vue-next/esm/locale/zh_TW'
 import koKRConfig from 'tdesign-vue-next/esm/locale/ko_KR'
 import ruRUConfig from 'tdesign-vue-next/esm/locale/ru_RU'
 
@@ -28,6 +29,7 @@ const settingsStore = useSettingsStore()
 const tdLocaleMap: Record<string, object> = {
   'en-US': enUSConfig,
   'zh-CN': zhCNConfig,
+  'zh-TW': zhTWConfig,
   'ko-KR': koKRConfig,
   'ru-RU': ruRUConfig,
 }
