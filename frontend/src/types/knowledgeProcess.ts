@@ -23,6 +23,7 @@ export interface ChunkingConfigOverride {
 export interface VLMConfigOverride {
   enabled?: boolean
   model_id?: string
+  fallback_model_ids?: string[]
   description_language?: string
   custom_instructions?: string
 }

@@ -132,6 +132,10 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 		kb.CreatorID = uid
 	}
 	kb.EnsureDefaults()
+	kb.VLMConfig.NormalizeModelChain()
+	if !kb.VLMConfig.Enabled {
+		kb.VLMConfig.ClearModelChain()
+	}
 	applyTenantDefaultStorageProvider(ctx, kb)
 	if err := s.applyAndValidateStorageBackend(ctx, kb); err != nil {
 		return nil, err
