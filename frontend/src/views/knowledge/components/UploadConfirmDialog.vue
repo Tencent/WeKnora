@@ -70,12 +70,41 @@
                     {{ t('uploadConfirm.manualCharCount', { count: manualCharCount }) }}
                   </p>
                 </div>
-                <div v-else-if="mode === 'reparse' && reparsePreview" class="manual-source-panel">
+                <div v-else-if="mode === 'reparse' && !isBatchReparse && reparsePreview" class="manual-source-panel">
                   <p class="manual-source-title" :title="reparsePreview.fileName">
                     {{ reparsePreview.fileName || t('uploadConfirm.reparseSource') }}
                   </p>
                   <p class="manual-source-meta">{{ t('uploadConfirm.reparseHint') }}</p>
                 </div>
+                <ul v-else-if="isBatchReparse && reparseDocs.length > 0" class="files-list">
+                  <li
+                    v-for="doc in reparseDocs"
+                    :key="doc.knowledgeId"
+                    class="file-item file-item--doc"
+                    :class="{ 'file-item--active': doc.knowledgeId === activeDocId }"
+                    role="button"
+                    :aria-pressed="doc.knowledgeId === activeDocId"
+                    @click="selectReparseDoc(doc.knowledgeId)"
+                  >
+                    <span class="file-icon-wrap">
+                      <t-icon :name="getFileIcon(doc.fileName || '')" class="file-icon" />
+                    </span>
+                    <div class="file-meta">
+                      <span class="file-name" :title="doc.fileName">
+                        {{ doc.fileName || t('uploadConfirm.reparseSource') }}
+                      </span>
+                      <span v-if="doc.fileType" class="file-size">{{ doc.fileType }}</span>
+                    </div>
+                    <button
+                      type="button"
+                      class="file-remove"
+                      :aria-label="t('common.remove')"
+                      @click.stop="removeReparseDoc(doc.knowledgeId)"
+                    >
+                      <t-icon name="close" />
+                    </button>
+                  </li>
+                </ul>
                 <ul v-else-if="mode === 'file' && batchItemCount > 0" class="files-list">
                   <li v-for="(url, index) in localUrls" :key="`url-${url}-${index}`" class="file-item">
                     <span class="file-icon-wrap">
@@ -779,6 +808,32 @@ function inferMediaExtsFromMarkdown(content: string): string[] {
 const manualCharCount = computed(() => props.manualPreview?.content?.length ?? 0)
 const batchItemCount = computed(() => localFiles.value.length + localUrls.value.length)
 
+const isBatchReparse = computed(() => props.mode === 'reparse' && (props.reparsePreview?.docs?.length || 0) > 0)
+
+const reparseDocs = ref<Array<{ knowledgeId: string; fileName: string; fileType: string }>>([])
+const docStates = new Map<string, UploadUIState>()
+const activeDocId = ref('')
+
+const activeDoc = computed(() => reparseDocs.value.find((doc) => doc.knowledgeId === activeDocId.value))
+
+function selectReparseDoc(id: string) {
+  const state = docStates.get(id)
+  if (!state) return
+  activeDocId.value = id
+  uiState.value = state
+}
+
+function removeReparseDoc(id: string) {
+  reparseDocs.value = reparseDocs.value.filter((doc) => doc.knowledgeId !== id)
+  docStates.delete(id)
+  if (activeDocId.value === id) {
+    activeDocId.value = reparseDocs.value[0]?.knowledgeId || ''
+    if (activeDocId.value) {
+      uiState.value = docStates.get(activeDocId.value)!
+    }
+  }
+}
+
 const dialogTitle = computed(() => {
   if (props.mode === 'manual') return t('uploadConfirm.titleManual')
   if (props.mode === 'reparse') return t('uploadConfirm.titleReparse')
@@ -799,7 +854,8 @@ const batchFileExts = computed(() => {
     }
   }
   if (props.mode === 'reparse') {
-    const ext = (props.reparsePreview?.fileType || '').toLowerCase()
+    const source = isBatchReparse.value ? activeDoc.value : props.reparsePreview
+    const ext = (source?.fileType || '').toLowerCase()
     if (ext) set.add(ext)
   }
   for (const url of localUrls.value) {
@@ -1085,13 +1141,12 @@ function createDefaultUIState(): UploadUIState {
   }
 }
 
-function initFromKbInfo(kb: any) {
+function buildKbState(kb: any): UploadUIState {
   if (!kb) {
-    uiState.value = createDefaultUIState()
-    return
+    return createDefaultUIState()
   }
 
-  uiState.value = {
+  return {
     chunkingConfig: {
       chunkSize: kb.chunking_config?.chunk_size || 512,
       chunkOverlap: kb.chunking_config?.chunk_overlap || 80,
@@ -1137,8 +1192,7 @@ function initFromKbInfo(kb: any) {
   }
 }
 
-function buildProcessOverrides(): KnowledgeProcessOverrides {
-  const state = uiState.value
+function buildProcessOverrides(state: UploadUIState = uiState.value): KnowledgeProcessOverrides {
   const chunking = state.chunkingConfig
 
   const overrides: KnowledgeProcessOverrides = {
@@ -1192,9 +1246,9 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
   return overrides
 }
 
-function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
+function applyOverridesToState(o?: KnowledgeProcessOverrides | null, state: UploadUIState = uiState.value) {
   if (!o) return
-  const s = uiState.value
+  const s = state
   const cc = o.chunking_config
   if (cc) {
     if (cc.chunk_size != null) s.chunkingConfig.chunkSize = cc.chunk_size
@@ -1294,9 +1348,27 @@ watch(
     localTargetFolder.value = props.mode === 'file' ? (props.targetFolder || '') : ''
     pendingFolderPaths.value = []
     destinationPickerVisible.value = false
-    initFromKbInfo(props.kbInfo)
-    if (props.mode === 'reparse') {
-      applyOverridesToState(props.reparsePreview?.processOverrides)
+    reparseDocs.value = []
+    docStates.clear()
+    activeDocId.value = ''
+    if (isBatchReparse.value) {
+      for (const doc of props.reparsePreview?.docs || []) {
+        const state = buildKbState(props.kbInfo)
+        applyOverridesToState(doc.processOverrides, state)
+        docStates.set(doc.knowledgeId, state)
+        reparseDocs.value.push({
+          knowledgeId: doc.knowledgeId,
+          fileName: doc.fileName || '',
+          fileType: doc.fileType || '',
+        })
+      }
+      activeDocId.value = reparseDocs.value[0]?.knowledgeId || ''
+      uiState.value = (activeDocId.value && docStates.get(activeDocId.value)) || buildKbState(props.kbInfo)
+    } else {
+      uiState.value = buildKbState(props.kbInfo)
+      if (props.mode === 'reparse') {
+        applyOverridesToState(props.reparsePreview?.processOverrides)
+      }
     }
     activeSection.value = getDefaultSection()
     chunkingMoreOpen.value = false
@@ -1378,6 +1450,42 @@ const handleNodeExtractUpdate = (config: UploadUIState['nodeExtractConfig']) => 
 }
 
 const validateBeforeConfirm = (): boolean => {
+  if (isBatchReparse.value) {
+    for (const doc of reparseDocs.value) {
+      const state = docStates.get(doc.knowledgeId)
+      if (!state) continue
+      const ext = (doc.fileType || '').toLowerCase()
+      const isImage = IMAGE_EXTENSIONS.includes(ext)
+      const isAudio = AUDIO_EXTENSIONS.includes(ext)
+      if (isImage && (!state.multimodalConfig.enabled || !state.multimodalConfig.vllmModelId)) {
+        selectReparseDoc(doc.knowledgeId)
+        MessagePlugin.warning(t('uploadConfirm.vlmModelRequired'))
+        uiState.value.multimodalConfig.enabled = true
+        goToSection('multimodal')
+        return false
+      }
+      if (!isImage && state.multimodalConfig.enabled && !state.multimodalConfig.vllmModelId) {
+        selectReparseDoc(doc.knowledgeId)
+        MessagePlugin.warning(t('uploadConfirm.vlmModelSelectRequired'))
+        goToSection('multimodal')
+        return false
+      }
+      if (isAudio && (!state.asrConfig.enabled || !state.asrConfig.modelId)) {
+        selectReparseDoc(doc.knowledgeId)
+        MessagePlugin.warning(t('uploadConfirm.asrModelRequired'))
+        uiState.value.asrConfig.enabled = true
+        goToSection('asr')
+        return false
+      }
+      if (!isAudio && state.asrConfig.enabled && !state.asrConfig.modelId) {
+        selectReparseDoc(doc.knowledgeId)
+        MessagePlugin.warning(t('uploadConfirm.asrModelSelectRequired'))
+        goToSection('asr')
+        return false
+      }
+    }
+    return true
+  }
   if (hasImages.value) {
     if (!uiState.value.multimodalConfig.enabled || !uiState.value.multimodalConfig.vllmModelId) {
       MessagePlugin.warning(t('uploadConfirm.vlmModelRequired'))
@@ -1425,6 +1533,21 @@ const handleConfirm = () => {
       mode: 'manual',
       tagIds: [...selectedTagIds.value],
       manual: { ...props.manualPreview, tagIds: [...selectedTagIds.value] },
+    })
+  } else if (isBatchReparse.value) {
+    if (reparseDocs.value.length === 0) {
+      MessagePlugin.warning(t('uploadConfirm.noItems'))
+      return
+    }
+    const processConfigs: Record<string, KnowledgeProcessOverrides> = {}
+    for (const doc of reparseDocs.value) {
+      const state = docStates.get(doc.knowledgeId)
+      if (state) processConfigs[doc.knowledgeId] = buildProcessOverrides(state)
+    }
+    emit('confirm', {
+      processConfig,
+      mode: 'reparse',
+      reparse: { ...props.reparsePreview, knowledgeId: '', processConfigs },
     })
   } else if (props.mode === 'reparse' && props.reparsePreview) {
     emit('confirm', { processConfig, mode: 'reparse', reparse: { ...props.reparsePreview } })
@@ -1670,6 +1793,19 @@ const handleConfirm = () => {
 
 .file-item:hover .file-icon {
   color: var(--td-brand-color);
+}
+
+.file-item--doc {
+  cursor: pointer;
+}
+
+.file-item--doc.file-item--active,
+.file-item--doc.file-item--active:hover {
+  background: var(--td-brand-color-light);
+
+  .file-name {
+    color: var(--td-brand-color);
+  }
 }
 
 .file-meta {
