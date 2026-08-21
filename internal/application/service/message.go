@@ -724,7 +724,7 @@ func (s *messageService) rerankResults(ctx context.Context, rc *types.RetrievalC
 
 	var reranked []*types.SearchResult
 	for _, rr := range rankResults {
-		if rr.Index >= len(results) {
+		if rr.Index < 0 || rr.Index >= len(results) {
 			continue
 		}
 		if rr.RelevanceScore < threshold {
