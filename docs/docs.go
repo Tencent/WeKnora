@@ -20734,8 +20734,16 @@ const docTemplate = `{
                     "description": "IngestReduceParallel sets the errgroup limit for the Reduce phase\n(per-slug page write) WITHIN one batch. 0 falls back to 10. Bound by the\nsame LLM concurrency / HTTP pool considerations as the Map phase, plus\nDB connection pool size. Same multiplier caveat as IngestMapParallel.",
                     "type": "integer"
                 },
+                "max_page_content_bytes": {
+                    "description": "MaxPageContentBytes caps how large a single wiki page's markdown body\nmay grow before ingest stops re-synthesizing it. 0 (default) disables\nthe cap — existing behaviour, pages grow unbounded.\n\nHighly-referenced \"hub\" entity/concept pages (e.g. a company cited by\nevery research report) otherwise accumulate hundreds of KB of content\nand get re-synthesized on every ingest that touches them. Each such\nrewrite re-tokenizes the whole body into the wiki_pages fulltext GIN\nindex (title + content), turning a single-row UPDATE into the dominant\ningest write-amplification cost. When a page is already at/over this\ncap and the current batch only ADDS information (no retractions),\ningest skips the LLM re-synthesis and persists only the bookkeeping\ncolumns (source/chunk refs) via the content-preserving UpdateMeta\npath — so the fulltext GIN is never touched. Retractions still\nregenerate the page (they shrink it). New information for a capped\nhub page remains fully retrievable from its own source documents; it\njust stops being woven into the oversized hub page.",
+                    "type": "integer"
+                },
                 "max_pages_per_ingest": {
                     "description": "MaxPagesPerIngest limits pages created/updated per ingest operation (0 = no limit)",
+                    "type": "integer"
+                },
+                "max_refs": {
+                    "description": "MaxRefs caps the length of a page's chunk_refs array (most-recent\nentries kept). 0 (default) disables the cap. Bounds per-row JSONB /\nTOAST write size on hub pages whose chunk citations grow into the\nthousands. The page body's inline [cNNN] citations are unaffected;\nthis only trims the provenance index used for evidence surfacing and\ndelete reconciliation.",
                     "type": "integer"
                 },
                 "synthesis_model_id": {

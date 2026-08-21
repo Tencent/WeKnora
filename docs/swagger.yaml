@@ -4222,9 +4222,38 @@ definitions:
           same LLM concurrency / HTTP pool considerations as the Map phase, plus
           DB connection pool size. Same multiplier caveat as IngestMapParallel.
         type: integer
+      max_page_content_bytes:
+        description: |-
+          MaxPageContentBytes caps how large a single wiki page's markdown body
+          may grow before ingest stops re-synthesizing it. 0 (default) disables
+          the cap — existing behaviour, pages grow unbounded.
+
+          Highly-referenced "hub" entity/concept pages (e.g. a company cited by
+          every research report) otherwise accumulate hundreds of KB of content
+          and get re-synthesized on every ingest that touches them. Each such
+          rewrite re-tokenizes the whole body into the wiki_pages fulltext GIN
+          index (title + content), turning a single-row UPDATE into the dominant
+          ingest write-amplification cost. When a page is already at/over this
+          cap and the current batch only ADDS information (no retractions),
+          ingest skips the LLM re-synthesis and persists only the bookkeeping
+          columns (source/chunk refs) via the content-preserving UpdateMeta
+          path — so the fulltext GIN is never touched. Retractions still
+          regenerate the page (they shrink it). New information for a capped
+          hub page remains fully retrievable from its own source documents; it
+          just stops being woven into the oversized hub page.
+        type: integer
       max_pages_per_ingest:
         description: MaxPagesPerIngest limits pages created/updated per ingest operation
           (0 = no limit)
+        type: integer
+      max_refs:
+        description: |-
+          MaxRefs caps the length of a page's chunk_refs array (most-recent
+          entries kept). 0 (default) disables the cap. Bounds per-row JSONB /
+          TOAST write size on hub pages whose chunk citations grow into the
+          thousands. The page body's inline [cNNN] citations are unaffected;
+          this only trims the provenance index used for evidence surfacing and
+          delete reconciliation.
         type: integer
       synthesis_model_id:
         description: SynthesisModelID is the LLM model ID used for wiki page generation
