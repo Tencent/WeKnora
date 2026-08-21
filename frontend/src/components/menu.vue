@@ -1275,7 +1275,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         overflow: hidden;
 
         .logo {
-            width: 52px;
+            width: 32px;
             height: auto;
         }
 

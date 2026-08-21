@@ -103,8 +103,8 @@
       :title="FEATURES.showLoginGithubLink ? $t('common.github') : null"
       class="header-logo"
     >
-      <img :src="BRAND_LOGO_SRC" :alt="BRANDING.name" class="logo-image" />
-      <span class="logo-brand"><span class="brand-s" :style="{ color: BRANDING.accentColor }">{{ BRAND_ACCENT_LETTER }}</span>{{ BRAND_NAME_TAIL }}</span>
+      <img :src="LOGIN_LOGO_SRC" :alt="BRANDING.name" class="logo-image" />
+      <span class="logo-brand"><span class="brand-s">{{ BRAND_ACCENT_LETTER }}</span>{{ BRAND_NAME_TAIL }}</span>
     </component>
 
     <!-- Header Links - Top Right -->
@@ -370,7 +370,7 @@ import {
 } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
-import { BRANDING, BRAND_ACCENT_LETTER, BRAND_NAME_TAIL, BRAND_LOGO_SRC, FEATURES, AUTH_TEXT } from '@/config/branding'
+import { BRANDING, BRAND_ACCENT_LETTER, BRAND_NAME_TAIL, LOGIN_LOGO_SRC, FEATURES, AUTH_TEXT } from '@/config/branding'
 
 // Import screenshot images
 import screenshot1 from '@/assets/img/screenshot-1.svg'
@@ -1219,21 +1219,21 @@ onMounted(async () => {
   gap: 12px;
 
   .logo-image {
-    width: 80px;
+    width: 50px;
     height: auto;
   }
 
   .logo-brand {
     font-size: 24px;
     font-weight: 700;
-    color: #000000;
+    color: #ffffff;
     font-family: var(--app-font-family);
     letter-spacing: 0.5px;
     line-height: 1;
     white-space: nowrap;
 
     .brand-s {
-      color: #e60012;
+      color: #ffffff;
     }
   }
 }
@@ -1685,7 +1685,7 @@ onMounted(async () => {
     left: 40px;
 
     .logo-image {
-      width: 64px;
+      width: 40px;
     }
   }
 
@@ -1733,7 +1733,7 @@ onMounted(async () => {
     left: 30px;
 
     .logo-image {
-      width: 52px;
+      width: 33px;
     }
   }
 
@@ -1793,7 +1793,7 @@ onMounted(async () => {
     left: 20px;
 
     .logo-image {
-      width: 44px;
+      width: 28px;
     }
   }
 

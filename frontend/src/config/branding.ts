@@ -12,6 +12,8 @@ export const BRANDING = {
   accentColor: '#e60012',
   /** 品牌 logo 文件名（放在 src/assets/img/ 目录下，构建时按名字匹配） */
   logoFile: 'smee.png',
+  /** 登录页单独使用的 logo 文件名（可选；不填则跟随 logoFile） */
+  loginLogoFile: 'smee_w.png',
 } as const
 
 /** 品牌名第一个字符（高亮展示） */
@@ -55,4 +57,8 @@ const brandLogos = import.meta.glob('@/assets/img/*.{png,jpg,jpeg,svg,ico}', {
 
 export const BRAND_LOGO_SRC: string =
   brandLogos[`/src/assets/img/${BRANDING.logoFile}`] ?? brandLogos['/src/assets/img/smee.png']
+
+/** 登录页专用 logo（默认跟随 BRANDING.logoFile，可用 loginLogoFile 单独指定） */
+export const LOGIN_LOGO_SRC: string =
+  brandLogos[`/src/assets/img/${BRANDING.loginLogoFile ?? BRANDING.logoFile}`] ?? BRAND_LOGO_SRC
   
