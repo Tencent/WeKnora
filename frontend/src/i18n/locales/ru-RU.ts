@@ -5586,6 +5586,8 @@ export default {
     totalDuration: 'Всего: {d}',
     total: 'Всего {d}',
     errorCode: {
+      MULTIMODAL_OCR_REQUIRED: 'Для сканированного PDF требуется OCR',
+      MULTIMODAL_OCR_REQUIRED_SUGGESTION: 'Не удалось извлечь пригодный текст. Включите мультимодальную обработку, настройте VLM/OCR и повторно обработайте документ.',
       UNKNOWN_SUGGESTION: 'Проверьте логи приложения для подробностей.'
     },
     status: {

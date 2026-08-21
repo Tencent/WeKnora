@@ -795,6 +795,8 @@ export default {
       cancelled: 'Cancelled'
     },
     errorCode: {
+      MULTIMODAL_OCR_REQUIRED: 'Scanned PDF requires OCR',
+      MULTIMODAL_OCR_REQUIRED_SUGGESTION: 'No usable text was extracted. Enable multimodal processing and configure a VLM/OCR model, then reparse the document.',
       UNKNOWN_SUGGESTION: 'Check the application logs for details.'
     }
   },

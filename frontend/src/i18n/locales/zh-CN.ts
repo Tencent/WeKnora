@@ -5588,6 +5588,8 @@ export default {
     totalDuration: '总耗时：{d}',
     total: '总耗时 {d}',
     errorCode: {
+      MULTIMODAL_OCR_REQUIRED: '扫描型 PDF 需要 OCR',
+      MULTIMODAL_OCR_REQUIRED_SUGGESTION: '该 PDF 未提取到可用文本。请开启多模态并配置 VLM/OCR 后重新解析。',
       UNKNOWN_SUGGESTION: '请查看应用日志获取详细信息。'
     },
     status: {

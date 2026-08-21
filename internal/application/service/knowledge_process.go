@@ -3513,6 +3513,27 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		logger.Infof(ctx, "Resolved %d total images for knowledge %s", len(storedImages), knowledge.ID)
 	}
 
+	// A scanned PDF is intentionally represented as page images by DocReader.
+	// Without multimodal OCR, indexing those Markdown image placeholders creates
+	// a document that looks successfully parsed but has no retrievable text.
+	// Fail before chunking so users get an actionable remediation instead.
+	if requiresScannedPDFOCR(convertResult, payload.EnableMultimodel) {
+		const message = "该 PDF 未提取到可用文本，需开启多模态并配置 VLM/OCR 后重新解析"
+		logger.Warnf(ctx, "Scanned PDF requires OCR before indexing: knowledge=%s", knowledge.ID)
+		knowledge.ParseStatus = types.ParseStatusFailed
+		knowledge.ErrorMessage = message
+		knowledge.UpdatedAt = time.Now()
+		if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+			logger.Errorf(ctx, "Failed to mark scanned PDF as requiring OCR: %v", err)
+		}
+		s.beginStage(ctx, knowledge.ID, types.StageMultimodal, types.JSONMap{
+			"reason": "scanned_pdf_without_ocr",
+		})
+		s.failStage(ctx, knowledge.ID, types.StageMultimodal,
+			werrors.ErrCodeMultimodalOCRRequired, message, nil)
+		return nil
+	}
+
 	// Step 3: Split into chunks using Go chunker. Browser textareas normalize
 	// pasted content to LF, so normalize uploaded source text before calculating
 	// chunk boundaries as well.
@@ -3632,6 +3653,9 @@ func (s *knowledgeService) convert(
 	if isURL {
 		parserEngine = eff.ChunkingConfig.ResolveParserEngine("url")
 	}
+	if shouldPreferPDFTextLayer(fileType, parserEngine, payload.EnableMultimodel, mergedOverrides) {
+		mergedOverrides["pdf_prefer_text_layer"] = "true"
+	}
 
 	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",
 		kb.ID, fileType, isURL, parserEngine, eff.ChunkingConfig.ParserEngineRules)
@@ -3710,6 +3734,35 @@ func (s *knowledgeService) convert(
 	}
 	s.endStage(ctx, knowledge.ID, types.StageDocReader, docOutput)
 	return result, nil
+}
+
+// requiresScannedPDFOCR reports whether DocReader produced an image-only
+// scanned PDF while multimodal OCR is disabled. Hybrid PDFs that retain any
+// real text remain ingestible: their text pages can still be retrieved.
+func requiresScannedPDFOCR(result *types.ReadResult, enableMultimodel bool) bool {
+	if enableMultimodel || result == nil || result.Metadata["image_source_type"] != "scanned_pdf" {
+		return false
+	}
+	return extractRealText(result.MarkdownContent) == ""
+}
+
+// shouldPreferPDFTextLayer enables a conservative request-scoped fallback for
+// the builtin PDF parser. It only applies when OCR is unavailable; the parser
+// itself retains a text layer only after its strict quality check passes.
+// Explicit parser overrides always win over this automatic safeguard.
+func shouldPreferPDFTextLayer(
+	fileType, parserEngine string,
+	enableMultimodel bool,
+	overrides map[string]string,
+) bool {
+	if enableMultimodel || parserEngine != "" || strings.TrimPrefix(strings.ToLower(fileType), ".") != "pdf" {
+		return false
+	}
+	if _, explicit := overrides["pdf_prefer_text_layer"]; explicit {
+		return false
+	}
+	forceScanned := strings.TrimSpace(strings.ToLower(overrides["pdf_force_scanned"]))
+	return forceScanned != "true" && forceScanned != "1" && forceScanned != "yes" && forceScanned != "on"
 }
 
 // callDocReaderWithTimeout wraps the DocReader RPC in a child context whose
