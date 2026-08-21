@@ -1180,10 +1180,10 @@ func sanitizeManualDownloadFilename(title string) string {
 
 func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, content string, doSync bool,
-) {
+) error {
 	clean := strings.TrimSpace(content)
 	if clean == "" {
-		return
+		return nil
 	}
 
 	// Resolve embedded data:base64 images and remote http(s) images → storage, replace URLs.
@@ -1265,10 +1265,18 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	}
 
 	if doSync {
-		s.processChunks(ctx, kb, knowledge, parsed, opts)
-		return
+		return s.processChunks(ctx, kb, knowledge, parsed, opts)
 	}
 
 	newCtx := logger.CloneContext(ctx)
-	go s.processChunks(newCtx, kb, knowledge, parsed, opts)
+	go func() {
+		if err := s.processChunks(newCtx, kb, knowledge, parsed, opts); err != nil {
+			logger.GetLogger(newCtx).WithField("error", err).
+				Errorf("triggerManualProcessing process chunks failed")
+			// No error channel out of the goroutine: fail the row in place.
+			// Use the detached context: a cancelled request would otherwise skip the failure write.
+			s.markKnowledgeFailed(newCtx, knowledge, err.Error())
+		}
+	}()
+	return nil
 }
