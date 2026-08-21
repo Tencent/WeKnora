@@ -43,7 +43,7 @@ test('follow-up suggestions wait until the answer is fully rendered', () => {
   )
   assert.match(
     chatView,
-    /<FollowUpSuggestions v-if="session\.answerFullyRendered && !session\.suggestionsDismissed"/,
+    /<FollowUpSuggestions v-if="!session\.isRecoveringStream && session\.answerFullyRendered && !session\.suggestionsDismissed"/,
   )
   assert.match(botMessage, /emit\('render-complete-change', ready\)/)
   assert.match(agentStream, /emit\('render-complete-change', ready\)/)

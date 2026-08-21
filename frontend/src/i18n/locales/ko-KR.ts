@@ -3211,6 +3211,7 @@ export default {
     refreshSuggestedQuestions: '다른 질문',
     thinking: '생각 중...',
     thinkingAlt: '생각 중',
+    restoringGenerationProgress: '생성 진행 상황을 복원하고 있습니다…',
     preparingAnswer: '답변을 준비하고 있습니다…',
     connectingModelAndGeneratingAnswer: '모델에 연결하여 답변을 생성하고 있습니다…',
     modelStillResponding: '모델 응답이 평소보다 오래 걸리고 있습니다. 계속 기다리는 중…',
