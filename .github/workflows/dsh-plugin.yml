@@ -113,7 +113,8 @@ jobs:
   e2e:
     name: End-to-end inside dsh (pinned)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Cold cache: npm install @deepseek-ai/dsh takes ~15 min; keep headroom.
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: packages/dsh-weknora
