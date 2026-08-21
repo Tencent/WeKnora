@@ -618,11 +618,17 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		s.skipStage(ctx, knowledge.ID, types.StageEmbedding, "skipped")
 	}
 
-	// Check if this document has extracted images that will be processed asynchronously
+	// Check if this document has extracted images that will be processed asynchronously.
+	// Filter out images not worth a VLM call first so the pending-state
+	// decision and the enqueue fan-out both see the real workload.
+	multimodalImages := options.StoredImages
+	if options.EnableMultimodel && len(multimodalImages) > 0 {
+		multimodalImages = filterMultimodalImages(ctx, multimodalImages)
+	}
 	isImage := IsImageType(knowledge.FileType)
 	isVideo := IsVideoType(knowledge.FileType)
-	pendingMultimodal := isImage && options.EnableMultimodel && len(options.StoredImages) > 0
-	pendingPDFMultimodal := !isImage && !isVideo && options.EnableMultimodel && len(options.StoredImages) > 0
+	pendingMultimodal := isImage && options.EnableMultimodel && len(multimodalImages) > 0
+	pendingPDFMultimodal := !isImage && !isVideo && options.EnableMultimodel && len(multimodalImages) > 0
 
 	now := time.Now()
 	finalizeIndexedKnowledgeState(
@@ -638,15 +644,23 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	// Enqueue multimodal tasks for images (async, non-blocking)
-	if options.EnableMultimodel && len(options.StoredImages) > 0 {
+	if options.EnableMultimodel && len(multimodalImages) > 0 {
 		s.beginStage(ctx, knowledge.ID, types.StageMultimodal, types.JSONMap{
-			"image_count":    len(options.StoredImages),
-			"enable_ocr":     true,
-			"enable_caption": true,
+			"image_count":        len(multimodalImages),
+			"source_image_count": len(options.StoredImages),
+			"skipped_images":     len(options.StoredImages) - len(multimodalImages),
+			"enable_ocr":         true,
+			"enable_caption":     true,
 		})
-		s.enqueueImageMultimodalTasks(ctx, knowledge, kb, options.StoredImages, chunks, options.Metadata)
+		s.enqueueImageMultimodalTasks(ctx, knowledge, kb, multimodalImages, chunks, options.Metadata)
 	} else {
-		s.skipStage(ctx, knowledge.ID, types.StageMultimodal, "skipped")
+		reason := "skipped"
+		if options.EnableMultimodel && len(options.StoredImages) > 0 {
+			// The document had images but the filter dropped every one of
+			// them; record that so the stage timeline explains the skip.
+			reason = "all_images_filtered"
+		}
+		s.skipStage(ctx, knowledge.ID, types.StageMultimodal, reason)
 		// If there are no multimodal tasks, enqueue the post process task immediately
 		lang := types.LanguageFromContextOrDefault(ctx)
 		postProcessPayload := types.KnowledgePostProcessPayload{
