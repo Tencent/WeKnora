@@ -118,6 +118,13 @@ type KnowledgeListFilter struct {
 	FolderScope KnowledgeFolderScope
 }
 
+// BatchCancelParseResult summarizes a batch cancel-parse run.
+type BatchCancelParseResult struct {
+	Cancelled int `json:"cancelled"`
+	Skipped   int `json:"skipped"`
+	Failed    int `json:"failed"`
+}
+
 // Knowledge represents a knowledge entity in the system.
 // It contains metadata about the knowledge source, its processing status,
 // and references to the physical file if applicable.
