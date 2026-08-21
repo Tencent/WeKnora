@@ -25,10 +25,17 @@ func (r *DataSourceRepository) Create(ctx context.Context, ds *types.DataSource)
 	if ds == nil {
 		return errors.New("data source is nil")
 	}
-	if err := r.db.WithContext(ctx).Create(ds).Error; err != nil {
-		return err
-	}
-	return nil
+	// GORM may omit a false value for a field with a database default. Preserve
+	// the caller's choice before Create potentially hydrates that default.
+	syncDeletions := ds.SyncDeletions
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(ds).Error; err != nil {
+			return err
+		}
+		return tx.Model(&types.DataSource{}).
+			Where("id = ?", ds.ID).
+			UpdateColumn("sync_deletions", syncDeletions).Error
+	})
 }
 
 // FindByID retrieves a data source by ID
@@ -73,12 +80,16 @@ func (r *DataSourceRepository) Update(ctx context.Context, ds *types.DataSource)
 	if ds.ID == "" {
 		return errors.New("data source id is empty")
 	}
-	if err := r.db.WithContext(ctx).
-		Model(ds).
-		Updates(ds).Error; err != nil {
-		return err
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(ds).Updates(ds).Error; err != nil {
+			return err
+		}
+		// GORM Updates(struct) deliberately skips zero values, which would make
+		// a user-selected sync_deletions=false impossible to persist.
+		return tx.Model(&types.DataSource{}).
+			Where("id = ?", ds.ID).
+			UpdateColumn("sync_deletions", ds.SyncDeletions).Error
+	})
 }
 
 // UpdateSyncState updates only fields managed by sync execution. GORM's
