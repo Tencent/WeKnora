@@ -51,6 +51,49 @@ func TestDataSourceRepositoryUpdateSyncStateClearsErrorMessage(t *testing.T) {
 	require.NotNil(t, stored.LastSyncAt)
 }
 
+func TestDataSourceRepositoryUpdatePersistsDisabledSyncDeletions(t *testing.T) {
+	db := setupDataSourceRepoTestDB(t)
+	repo := NewDataSourceRepository(db)
+	ctx := context.Background()
+
+	ds := &types.DataSource{
+		ID:              "ds-sync-deletions",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Name:            "Feishu",
+		Type:            types.ConnectorTypeFeishu,
+		SyncDeletions:   true,
+	}
+	require.NoError(t, repo.Create(ctx, ds))
+
+	ds.SyncDeletions = false
+	require.NoError(t, repo.Update(ctx, ds))
+
+	var stored types.DataSource
+	require.NoError(t, db.First(&stored, "id = ?", ds.ID).Error)
+	assert.False(t, stored.SyncDeletions)
+}
+
+func TestDataSourceRepositoryCreatePersistsDisabledSyncDeletions(t *testing.T) {
+	db := setupDataSourceRepoTestDB(t)
+	repo := NewDataSourceRepository(db)
+	ctx := context.Background()
+
+	ds := &types.DataSource{
+		ID:              "ds-create-sync-deletions",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Name:            "Feishu",
+		Type:            types.ConnectorTypeFeishu,
+		SyncDeletions:   false,
+	}
+	require.NoError(t, repo.Create(ctx, ds))
+
+	var stored types.DataSource
+	require.NoError(t, db.First(&stored, "id = ?", ds.ID).Error)
+	assert.False(t, stored.SyncDeletions)
+}
+
 func TestDataSourceRepositoryDeleteSoftDeletesOnSQLite(t *testing.T) {
 	db := setupDataSourceRepoTestDB(t)
 	repo := NewDataSourceRepository(db)
