@@ -269,6 +269,45 @@ test('ask reuses a given session instead of creating one', async () => {
   assert.equal(mock.requests.at(-1).path, '/api/v1/knowledge-chat/session-existing')
 })
 
+// The RAG pipeline retrieves only what the request scopes, so an unconfigured
+// deployment must resolve the visible set for ask exactly as it does for search.
+// Otherwise the quickstart's optional WEKNORA_KNOWLEDGE_BASE_IDS leaves ask
+// answering from nothing while search works.
+test('ask resolves its own scope when none is configured', async () => {
+  const { byName, mock } = await toolset()
+  const { value, text } = await call(byName.get('weknora_ask'), { query: '默认的检索阈值是多少' })
+  const chat = mock.requests.find(request => request.path.startsWith('/api/v1/knowledge-chat/'))
+  assert.deepEqual(chat.body.knowledge_base_ids, ['kb-product', 'kb-ops'])
+  assert.ok(value.references.length > 0, 'an unconfigured ask must still retrieve')
+  assert.doesNotMatch(text, /没有检索到/)
+})
+
+test('ask reuses the scope search already resolved', async () => {
+  const { byName, mock } = await toolset()
+  await call(byName.get('weknora_search'), { query: '混合检索 向量' })
+  await call(byName.get('weknora_ask'), { query: '默认的检索阈值是多少' })
+  const listings = mock.requests.filter(request => request.path === '/api/v1/knowledge-bases')
+  assert.equal(listings.length, 1, 'search and ask must share the resolved scope')
+})
+
+test('a configured scope reaches ask without a listing call', async () => {
+  const { byName, mock } = await toolset({ knowledgeBaseIds: ['kb-product'] })
+  await call(byName.get('weknora_ask'), { query: '默认的检索阈值是多少' })
+  assert.equal(mock.requests.some(request => request.path === '/api/v1/knowledge-bases'), false)
+  const chat = mock.requests.find(request => request.path.startsWith('/api/v1/knowledge-chat/'))
+  assert.deepEqual(chat.body.knowledge_base_ids, ['kb-product'])
+})
+
+// A custom agent resolves its scope server-side from its KBSelectionMode, and
+// ids sent from here would override that as an explicit @mention.
+test('an agent-pipeline ask leaves the scope to the server', async () => {
+  const { byName, mock } = await toolset({ agentId: 'agent-42' })
+  await call(byName.get('weknora_ask'), { query: '部署方式有哪些' })
+  assert.equal(mock.requests.some(request => request.path === '/api/v1/knowledge-bases'), false)
+  const chat = mock.requests.find(request => request.path.startsWith('/api/v1/agent-chat/'))
+  assert.equal(chat.body.knowledge_base_ids, undefined)
+})
+
 test('a configured agent id switches ask to the agent pipeline', async () => {
   const { byName } = await toolset({ agentId: 'agent-42' })
   const { value, text } = await call(byName.get('weknora_ask'), { query: '部署方式有哪些' })

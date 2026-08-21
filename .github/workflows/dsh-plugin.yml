@@ -3,7 +3,8 @@ name: Build & Publish (dsh-weknora)
 # Build, test, and publish the DeepSeek Harness plugin (packages/dsh-weknora/) to npm.
 #
 # Three jobs:
-#   test      typecheck, unit tests, contract tests, and a packaging check
+#   test      typecheck, unit tests, both halves of the contract, and a
+#             packaging check
 #   e2e       install the package into a throwaway dsh profile and drive real
 #             tool calls through the harness agent loop against a mock backend
 #   publish   on a `dsh-weknora-v*` tag only, publish to npm with provenance
@@ -41,6 +42,10 @@ env:
   # The harness release this plugin is verified against. Bump it together with
   # the compatibility note in packages/dsh-weknora/README.md.
   DSH_PINNED_SPEC: "@deepseek-ai/dsh@0.1.0-rc.8"
+  # The contract's Go half lives in this repository's module. app.yml runs it
+  # only for a Go diff, so a change to the fixture or to the plugin alone would
+  # otherwise skip the side that checks WeKnora still serves those calls.
+  GO_VERSION: "1.26"
   # `dsh plugin add` shells out to pnpm to install into the profile, and the
   # runner image ships only npm and yarn. The profile it writes carries its
   # settings in pnpm-workspace.yaml, which pnpm 10 is the first to read.
@@ -72,6 +77,15 @@ jobs:
 
       - name: Unit and contract tests
         run: node --test "test/*.test.mjs"
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Contract tests against WeKnora's Go types
+        working-directory: ${{ github.workspace }}
+        run: go test ./packages/dsh-weknora/contract/...
 
       - name: Pack and verify the published file list
         run: |

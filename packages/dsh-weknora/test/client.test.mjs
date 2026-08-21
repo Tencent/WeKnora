@@ -94,6 +94,19 @@ test('a streamed error event becomes a failed call, not an empty answer', async 
   )
 })
 
+// A stream that stops before `complete` was cut short. Returning what arrived
+// would present a truncated answer to the model as a whole one.
+test('a stream that ends before completing becomes a failed call', async () => {
+  const { client } = await harness({}, { streamTruncated: true })
+  await assert.rejects(
+    client.ask(
+      { sessionId: 's1', query: '默认的检索阈值是多少', knowledgeBaseIds: ['kb-product'], agentId: undefined, webSearch: false },
+      never,
+    ),
+    /ended before WeKnora completed the answer/,
+  )
+})
+
 test('caller cancellation aborts an in-flight call', async () => {
   const { client } = await harness()
   const controller = new AbortController()

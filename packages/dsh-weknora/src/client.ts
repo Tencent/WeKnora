@@ -379,5 +379,13 @@ async function assembleStream(
     await reader.cancel().catch(() => undefined)
   }
 
+  // WeKnora ends every answer with a `complete` event. Without it the stream was
+  // cut short, and handing the model the partial text would present a truncated
+  // answer as a whole one.
+  if (!completed) {
+    throw new WeknoraApiError(`POST ${path} ended before WeKnora completed the answer; `
+      + `${answer.join('').length} character(s) had streamed`)
+  }
+
   return { answer: answer.join(''), references, sessionId: resolvedSessionId, toolCalls }
 }

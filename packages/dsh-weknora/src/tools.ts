@@ -159,11 +159,12 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
     ? ` Searches knowledge base(s) ${config.knowledgeBaseIds.join(', ')} unless you name others.`
     : ' Searches every knowledge base this credential can see unless you narrow it with knowledge_base_ids.'
 
-  // WeKnora refuses a retrieval that names no knowledge base, document or tag,
-  // so an unconfigured deployment resolves the full visible set once and reuses
-  // it. Making the model pick a scope first is worse: knowledge bases are often
-  // named too poorly to choose between, and fanning out across them is cheap
-  // while they share a vector store.
+  // An unscoped call reaches WeKnora as a refusal on the retrieval route and as
+  // an answer grounded in nothing on the RAG route, so an unconfigured
+  // deployment resolves the full visible set once and reuses it. Making the
+  // model pick a scope first is worse: knowledge bases are often named too
+  // poorly to choose between, and fanning out across them is cheap while they
+  // share a vector store.
   let everyId: Promise<string[]> | undefined
   const allKnowledgeBaseIds = async (signal: AbortSignal): Promise<string[]> => {
     everyId ??= client.listKnowledgeBases(signal).then(
@@ -518,8 +519,18 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
         const toolName = name('ask')
         const query = requiredString(args, 'query', toolName)
         const requested = stringArrayArg(args, 'knowledge_base_ids')
-        const knowledgeBaseIds = requested.length > 0 ? requested : config.knowledgeBaseIds
         const agentId = optionalStringArg(args, 'agent_id') ?? config.agentId
+        // A custom agent resolves its own scope server-side from its
+        // KBSelectionMode, and ids sent here would override that as an explicit
+        // mention. The RAG pipeline has no such default: it retrieves only what
+        // the request names, and answers from nothing when it names nothing.
+        const knowledgeBaseIds = agentId === undefined
+          ? await resolveScope(requested, [], exec.signal)
+          : requested.length > 0 ? requested : config.knowledgeBaseIds
+        if (agentId === undefined && knowledgeBaseIds.length === 0) {
+          throw new Error(`${toolName}: this WeKnora credential can see no knowledge base, so there is `
+            + 'nothing to answer from. Check the deployment\'s API key scope.')
+        }
         const webSearch = argRecord(args)['web_search'] === true
         const sessionId = optionalStringArg(args, 'session_id')
           ?? await client.createSession(`dsh: ${clip(query, 60).text}`, exec.signal)

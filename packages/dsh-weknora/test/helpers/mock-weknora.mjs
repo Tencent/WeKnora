@@ -112,6 +112,7 @@ function documentRecord(document) {
 
 /** Assemble the answer the fake RAG/agent pipeline streams back. */
 function answerFor(query, results) {
+  if (results.length === 0) return `没有检索到与「${query}」相关的内容。`
   const cited = results.slice(0, 2).map(result => result.content).join(' ')
   return `根据知识库内容：${cited}（问题：${query}）`
 }
@@ -120,6 +121,7 @@ function answerFor(query, results) {
  * Start the mock backend.
  * @param options.apiKey - when set, requests must carry it as `X-API-Key`.
  * @param options.streamError - make the chat routes stream an `error` event.
+ * @param options.streamTruncated - end the chat stream mid-answer, with no `complete`.
  * @returns the base URL, the recorded requests, and a close function.
  */
 export async function startMockWeknora(options = {}) {
@@ -272,7 +274,15 @@ export async function startMockWeknora(options = {}) {
           response.end()
           return
         }
-        const results = searchResults(body.query ?? '', body.knowledge_base_ids ?? [], [])
+        // The RAG route retrieves only what the request scopes: a session holds
+        // no knowledge base of its own (CreateSessionRequest carries none), so
+        // WeKnora has no default to fall back on and answers from nothing.
+        // Retrieving here anyway would hide an unscoped ask from the tests. The
+        // agent route does have a server-side default, its KBSelectionMode.
+        const scoped = (body.knowledge_base_ids ?? []).length > 0 || (body.knowledge_ids ?? []).length > 0
+        const results = route === 'agent-chat' || scoped
+          ? searchResults(body.query ?? '', body.knowledge_base_ids ?? [], [])
+          : []
         if (route === 'agent-chat') {
           send({
             id: 't1',
@@ -284,7 +294,15 @@ export async function startMockWeknora(options = {}) {
           })
         }
         send({ id: 'r1', response_type: 'references', content: '', done: false, knowledge_references: results })
-        for (const piece of answerFor(body.query ?? '', results).match(/.{1,24}/gs) ?? []) {
+        const pieces = answerFor(body.query ?? '', results).match(/.{1,24}/gs) ?? []
+        // A stream cut off mid-answer, which is what a dropped connection or a
+        // killed backend looks like: answer deltas but no `complete`.
+        if (options.streamTruncated === true) {
+          send({ id: 'a1', response_type: 'answer', content: pieces[0] ?? '', done: false, session_id: sessionId })
+          response.end()
+          return
+        }
+        for (const piece of pieces) {
           send({ id: 'a1', response_type: 'answer', content: piece, done: false, session_id: sessionId })
         }
         send({ id: 'c1', response_type: 'complete', content: '', done: true, session_id: sessionId })

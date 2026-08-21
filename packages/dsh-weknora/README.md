@@ -82,14 +82,15 @@ is the document called X* — by matching passage content and document names in 
 title additionally reports the documents it names, so a document whose wording differs from its own title is still
 reachable.
 
-Scope works without configuration. WeKnora rejects a retrieval that names no knowledge base, so when
-`knowledgeBaseIds` is empty the plugin resolves every knowledge base the credential can see and searches all of them,
-resolving that list once per process. Making the model choose first would be worse: knowledge bases are frequently
-named too poorly to choose between.
+Scope works without configuration. An unscoped call is refused by the retrieval endpoint and answered from nothing by
+the RAG one, so when `knowledgeBaseIds` is empty the plugin resolves every knowledge base the credential can see and
+uses all of them, resolving that list once per process and sharing it between `weknora_search` and `weknora_ask`.
+Making the model choose first would be worse: knowledge bases are frequently named too poorly to choose between.
 
 `weknora_ask` delegates the whole question to WeKnora. Reserve it for broad or synthesis questions spanning many
 documents, where retrieving passages yourself would take several rounds — it runs another model server-side, so it is
-slow, and it returns a conclusion rather than the evidence behind it.
+slow, and it returns a conclusion rather than the evidence behind it. With `agentId` set it leaves the scope alone: a
+custom agent resolves its own from its KB selection mode, and ids sent from here would override that.
 
 `weknora_read_document` exists because retrieval returns fragments: once a passage looks right, the agent usually needs
 its neighbours. Every search hit carries the `knowledge_id` that call needs, and page 1 leads with the document's title
