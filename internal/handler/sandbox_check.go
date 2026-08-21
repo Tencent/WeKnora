@@ -144,7 +144,7 @@ func (h *SystemHandler) CheckSandboxConfig(c *gin.Context) {
 	}
 
 	result := &SandboxCheckResponse{OK: true, Provider: string(effective.Type)}
-	if effective.Type == sandbox.SandboxTypeDocker || effective.Type == sandbox.SandboxTypeLocal {
+	if effective.Type == sandbox.SandboxTypeLocal {
 		h.runStatelessSandboxCheck(ctx, effective, req.Deep, result)
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 		return
@@ -256,13 +256,6 @@ func (h *SystemHandler) runStatelessSandboxCheck(
 		return
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	// Docker executes as a non-root user that differs from the WeKnora process
-	// owner. The isolated bind-mount directory and probe must be traversable and
-	// readable by that user.
-	if err := os.Chmod(dir, 0o755); err != nil {
-		result.add("sandbox_exec", false, err.Error(), 0)
-		return
-	}
 	path := filepath.Join(dir, "check.sh")
 	const script = "#!/bin/sh\nprintf 'weknora-ok\\n'\n"
 	if err := os.WriteFile(path, []byte(script), 0o644); err != nil {
@@ -290,27 +283,18 @@ func (h *SystemHandler) runStatelessSandboxCheck(
 			result.add("sandbox_exec", false, "沙箱没有返回执行结果", latency)
 			return
 		}
-		message := describeProbeMismatch(
+		result.add("sandbox_exec", false, describeProbeMismatch(
 			execResult.ExitCode, execResult.Killed,
 			execResult.Stdout, execResult.Stderr, execResult.Error,
-		)
-		if cfg.Type == sandbox.SandboxTypeDocker && probeScriptWasInvisible(execResult.Stderr) {
-			message += "；容器没有看到挂载进去的脚本，请确认 Docker 运行时共享了目录 " + dir +
-				"（Docker Desktop / colima 需要在文件共享设置里包含该路径）"
-		}
-		result.add("sandbox_exec", false, message, latency)
+		), latency)
 		return
 	}
 	result.add("sandbox_exec", true, "", latency)
 }
 
-// createProbeStagingDir makes the directory the probe script is bind-mounted
-// from. The OS temp dir looks like the obvious home for it but is the wrong
-// choice for Docker: on macOS runtimes $TMPDIR lives under /var/folders, which
-// the Docker VM does not share, so the mount arrives empty and the probe fails
-// where real skill runs — staged under the process working directory, next to
-// skills/ — succeed. Stage where the real scripts live and fall back to the temp
-// dir only when the working directory is not writable.
+// createProbeStagingDir makes the directory the local probe script is written
+// to. It stays next to the real skill scripts under the process working
+// directory and only falls back to the temp dir when that is not writable.
 func createProbeStagingDir() (string, error) {
 	if wd, err := os.Getwd(); err == nil {
 		if dir, err := os.MkdirTemp(wd, ".weknora-sandbox-check-*"); err == nil {
@@ -318,17 +302,6 @@ func createProbeStagingDir() (string, error) {
 		}
 	}
 	return os.MkdirTemp("", "weknora-sandbox-check-*")
-}
-
-// probeScriptWasInvisible reports whether the interpreter could not find the
-// script at all, which for Docker means the bind mount never carried it into
-// the container rather than anything being wrong with the image.
-func probeScriptWasInvisible(stderr string) bool {
-	lowered := strings.ToLower(stderr)
-	return strings.Contains(lowered, "check.sh") &&
-		(strings.Contains(lowered, "no such file") ||
-			strings.Contains(lowered, "not found") ||
-			strings.Contains(lowered, "cannot open"))
 }
 
 // describeProbeMismatch reports why the probe script did not print its marker.
@@ -587,6 +560,33 @@ func shellSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+func dockerUnavailableCheckReason(err *sandbox.RemoteError) string {
+	host := dockerHostFromUnavailableMessage(err.Message)
+	if host == "" {
+		detail := firstProbeLine(err.Message)
+		if detail == "" {
+			return "无法连接 Docker 守护进程"
+		}
+		return "无法连接 Docker 守护进程：" + detail
+	}
+	return "无法连接 Docker 守护进程 " + host +
+		"。留空地址时跟随本机 docker CLI（DOCKER_HOST 或当前 docker context）。" +
+		"Colima 一般是 unix://$HOME/.colima/default/docker.sock；" +
+		"WeKnora 跑在容器里时需要把该 socket 挂进 app。"
+}
+
+func dockerHostFromUnavailableMessage(message string) string {
+	const prefix = "Cannot connect to the Docker daemon at "
+	rest, ok := strings.CutPrefix(message, prefix)
+	if !ok {
+		return ""
+	}
+	if end := strings.IndexAny(rest, " \t"); end > 0 {
+		rest = rest[:end]
+	}
+	return strings.TrimSuffix(strings.TrimSpace(rest), ".")
+}
+
 // sandboxCheckReason turns a provider error into a readable cause using the
 // adapter's normalized RemoteError.Kind, so the UI never shows raw SDK text.
 func sandboxCheckReason(err error) string {
@@ -605,6 +605,9 @@ func sandboxCheckReason(err error) string {
 	case sandbox.RemoteErrorKindTimeout:
 		return "请求超时：端点不可达或响应过慢"
 	case sandbox.RemoteErrorKindUnavailable:
+		if remoteErr.Provider == sandbox.SandboxTypeDocker {
+			return dockerUnavailableCheckReason(remoteErr)
+		}
 		return "服务不可用：端点拒绝连接"
 	case sandbox.RemoteErrorKindCapacity:
 		return "配额不足或触发限流"
