@@ -93,12 +93,32 @@ CREATE TABLE IF NOT EXISTS wiki_folders (
 );
 `
 
+// wikiPageIssuesTestDDL mirrors the production wiki_page_issues DDL
+// (migrations/versioned/000037_wiki_and_indexing.up.sql) for SQLite.
+const wikiPageIssuesTestDDL = `
+CREATE TABLE IF NOT EXISTS wiki_page_issues (
+    id                      VARCHAR(36) PRIMARY KEY,
+    tenant_id               INTEGER NOT NULL,
+    knowledge_base_id       VARCHAR(36) NOT NULL,
+    slug                    VARCHAR(255) NOT NULL,
+    issue_type              VARCHAR(50) NOT NULL,
+    description             TEXT NOT NULL,
+    suspected_knowledge_ids TEXT,
+    status                  VARCHAR(20) NOT NULL DEFAULT 'pending',
+    reported_by             VARCHAR(100) NOT NULL,
+    created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at              DATETIME
+);
+`
+
 func setupWikiPagesTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(wikiPagesTestDDL).Error)
 	require.NoError(t, db.Exec(wikiFoldersTestDDL).Error)
+	require.NoError(t, db.Exec(wikiPageIssuesTestDDL).Error)
 	for _, stmt := range strings.Split(strings.TrimSpace(wikiPageRevisionsTestDDL), ";") {
 		if strings.TrimSpace(stmt) == "" {
 			continue
@@ -593,4 +613,88 @@ func TestDeleteRevisionsByPageOnlyTouchesThatPage(t *testing.T) {
 	// An empty id must not turn into a table-wide delete.
 	require.NoError(t, repo.DeleteRevisionsByPage(ctx, ""))
 	assert.Equal(t, int64(1), countWikiRevisions(t, db, bystander.ID))
+}
+
+// countSoftDeletedWikiRows counts rows of the given model that carry a
+// deleted_at timestamp, bypassing GORM's soft-delete filter.
+func countSoftDeletedWikiRows(t *testing.T, db *gorm.DB, model interface{}, kbID string) int64 {
+	t.Helper()
+	var n int64
+	require.NoError(t, db.Unscoped().Model(model).
+		Where("knowledge_base_id = ? AND deleted_at IS NOT NULL", kbID).
+		Count(&n).Error)
+	return n
+}
+
+// TestDeleteByKnowledgeBaseRemovesAllWikiData covers the KB-delete cleanup
+// path: every wiki table owned by the victim KB must be cleaned — pages,
+// folders and issues soft-deleted (matching the per-row Delete methods),
+// revisions hard-deleted (they have no deleted_at column) — while a sibling
+// KB stays fully intact. An empty KB id must never widen into a table-wide
+// delete.
+func TestDeleteByKnowledgeBaseRemovesAllWikiData(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	seed := func(kbID, slug, folderID string) *types.WikiPage {
+		page := makeWikiPage(kbID, slug, types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+		require.NoError(t, repo.Create(ctx, page))
+		require.NoError(t, db.Create(makeWikiRevision(page, 1, types.WikiEditSourceUser)).Error)
+		require.NoError(t, repo.CreateFolder(ctx, &types.WikiFolder{
+			ID: folderID, TenantID: 1, KnowledgeBaseID: kbID,
+			Name: "folder", Path: "folder", Depth: 1,
+			CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		}))
+		require.NoError(t, db.Create(&types.WikiPageIssue{
+			ID: uuid.New().String(), TenantID: 1, KnowledgeBaseID: kbID,
+			Slug: slug, IssueType: "broken_link", Description: "dangling link",
+			ReportedBy: "lint",
+		}).Error)
+		return page
+	}
+
+	victimPage := seed("kb-victim", "entity/victim", "f-victim")
+	bystanderPage := seed("kb-bystander", "entity/bystander", "f-bystander")
+
+	// A page that was already soft-deleted before the KB delete must stay
+	// soft-deleted and not trip the sweep.
+	gonePage := makeWikiPage("kb-victim", "entity/gone", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	require.NoError(t, repo.Create(ctx, gonePage))
+	require.NoError(t, repo.DeleteByID(ctx, gonePage.ID))
+
+	require.NoError(t, repo.DeleteByKnowledgeBase(ctx, "kb-victim"))
+
+	// Pages: hidden from live queries; both victim rows remain as
+	// soft-deleted rows (live + previously deleted).
+	_, err := repo.GetBySlug(ctx, "kb-victim", "entity/victim")
+	assert.ErrorIs(t, err, ErrWikiPageNotFound)
+	assert.Equal(t, int64(2), countSoftDeletedWikiRows(t, db, &types.WikiPage{}, "kb-victim"))
+
+	// Revisions: hard-deleted.
+	assert.Zero(t, countWikiRevisions(t, db, victimPage.ID))
+
+	// Folders and issues: soft-deleted, hidden from live queries.
+	_, err = repo.GetFolderByID(ctx, "kb-victim", "f-victim")
+	assert.ErrorIs(t, err, ErrWikiFolderNotFound)
+	assert.Equal(t, int64(1), countSoftDeletedWikiRows(t, db, &types.WikiFolder{}, "kb-victim"))
+	assert.Equal(t, int64(1), countSoftDeletedWikiRows(t, db, &types.WikiPageIssue{}, "kb-victim"))
+
+	// Bystander KB is fully intact.
+	_, err = repo.GetBySlug(ctx, "kb-bystander", "entity/bystander")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), countWikiRevisions(t, db, bystanderPage.ID))
+	_, err = repo.GetFolderByID(ctx, "kb-bystander", "f-bystander")
+	require.NoError(t, err)
+	assert.Zero(t, countSoftDeletedWikiRows(t, db, &types.WikiPage{}, "kb-bystander"))
+	assert.Zero(t, countSoftDeletedWikiRows(t, db, &types.WikiFolder{}, "kb-bystander"))
+	assert.Zero(t, countSoftDeletedWikiRows(t, db, &types.WikiPageIssue{}, "kb-bystander"))
+
+	// An empty id must not turn into a table-wide delete.
+	require.NoError(t, repo.DeleteByKnowledgeBase(ctx, ""))
+	_, err = repo.GetBySlug(ctx, "kb-bystander", "entity/bystander")
+	require.NoError(t, err)
+
+	// The sweep is idempotent so a retried KB-delete task succeeds.
+	require.NoError(t, repo.DeleteByKnowledgeBase(ctx, "kb-victim"))
 }
