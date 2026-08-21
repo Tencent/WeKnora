@@ -168,6 +168,14 @@ func TestResponseFieldsThePluginReadsStillExist(t *testing.T) {
 			KnowledgeFilename: "检索流程.md",
 			Score:             0.83,
 		},
+		"types.Knowledge": types.Knowledge{
+			ID:                "doc-1",
+			Title:             "检索流程.md",
+			FileName:          "检索流程.md",
+			Description:       "讲解 WeKnora 混合检索的召回与阈值。",
+			KnowledgeBaseID:   "kb-product",
+			KnowledgeBaseName: "Product docs",
+		},
 		"types.Chunk": types.Chunk{
 			ID:          "chunk-1",
 			Content:     "默认的 vector_threshold 是 0.5",

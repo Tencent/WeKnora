@@ -50,14 +50,20 @@ async function replayCalls() {
 
 const observed = await replayCalls()
 
-test('the plugin makes exactly the documented WeKnora calls, in order', () => {
+/** Order-insensitive key: a tool that fires two calls at once may land either way round. */
+const callKey = call => `${call.method} ${call.path} ${JSON.stringify(call.query)} ${JSON.stringify(call.body)}`
+
+test('the plugin makes exactly the documented WeKnora calls', () => {
   const expected = fixture.calls.map(call => ({
     method: call.method,
     path: call.path,
     query: call.query,
     body: call.body,
   }))
-  assert.deepEqual(observed, expected)
+  assert.deepEqual(
+    observed.map(callKey).sort(),
+    expected.map(callKey).sort(),
+  )
 })
 
 test('the fixture covers every endpoint the plugin touches', () => {
@@ -68,6 +74,8 @@ test('the fixture covers every endpoint the plugin touches', () => {
     '/api/v1/knowledge-bases',
     '/api/v1/knowledge-search',
     '/api/v1/knowledge-chat/:id',
+    '/api/v1/knowledge/search',
+    '/api/v1/knowledge/:id',
     '/api/v1/sessions',
   ].sort())
 })
@@ -109,6 +117,7 @@ test('the plugin only reads response fields the fixture declares', async () => {
   const projected = search.output.render({ query: '混合检索' }, {
     query: '混合检索',
     knowledge_base_ids: [],
+    documents: [],
     count: trimmed.length,
     results: trimmed.map((result, index) => ({
       rank: index + 1,
@@ -120,6 +129,7 @@ test('the plugin only reads response fields the fixture declares', async () => {
       content: result.content ?? '',
       truncated: false,
     })),
+    documents: [],
   })
   assert.match(projected[0].text, /knowledge_id: doc-/)
   assert.match(projected[0].text, /score \d\.\d{3}/)

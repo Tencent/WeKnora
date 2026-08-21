@@ -11,8 +11,8 @@
  *      variables — what a user gets straight after `dsh plugin add`.
  *   B. a profile patch that overrides the row, including a renamed tool prefix,
  *      which also proves configuration reaches the plugin.
- *   C. a row with no knowledge base scope, where the model has to discover one
- *      before it can retrieve — WeKnora refuses an unscoped search.
+ *   C. a row with no knowledge base scope, where the plugin resolves the full
+ *      visible set itself — WeKnora refuses an unscoped search.
  *
  * Usage:
  *   node test/e2e/run-in-dsh.mjs                 # installs dsh into a cache dir
@@ -120,12 +120,8 @@ function modelPatchRows(modelUrl) {
  * model, and the printed answer is grounded in them.
  */
 async function scenario(options) {
-  const { label, dsh, home, env, patch, prefix, weknora, discoverScope = false } = options
-  const model = await startFakeModel({
-    searchTool: `${prefix}_search`,
-    readTool: `${prefix}_read_document`,
-    ...discoverScope ? { listTool: `${prefix}_list_knowledge_bases` } : {},
-  })
+  const { label, dsh, home, env, patch, prefix, weknora, autoScope = false } = options
+  const model = await startFakeModel({ searchTool: `${prefix}_search`, readTool: `${prefix}_read_document` })
   const requestsBefore = weknora.requests.length
   try {
     await writeFile(
@@ -154,16 +150,21 @@ async function scenario(options) {
     const paths = calls.map(request => request.path)
     log(`# WeKnora received: ${paths.join(', ')}`)
     assert.ok(paths.includes('/api/v1/knowledge-search'), 'search must reach the retrieval endpoint')
-    if (discoverScope) {
-      // WeKnora rejects an unscoped retrieval, so the only way through an
-      // unconfigured deployment is for the model to discover an id and pass it.
+    if (autoScope) {
+      // WeKnora rejects an unscoped retrieval, so with nothing configured the
+      // plugin has to resolve the full visible set itself — the model asked a
+      // plain question and never named a knowledge base.
       assert.ok(
         paths.indexOf('/api/v1/knowledge-bases') >= 0
         && paths.indexOf('/api/v1/knowledge-bases') < paths.indexOf('/api/v1/knowledge-search'),
-        'the model must list knowledge bases before it can search an unscoped deployment',
+        'the plugin must resolve the visible knowledge bases before retrieving',
       )
       const search = calls.find(request => request.path === '/api/v1/knowledge-search')
-      assert.deepEqual(search.body.knowledge_base_ids, ['kb-product'], 'the discovered id must scope the search')
+      assert.deepEqual(
+        search.body.knowledge_base_ids,
+        ['kb-product', 'kb-ops'],
+        'an unconfigured deployment must search every visible knowledge base',
+      )
     }
     assert.ok(paths.some(path => path.startsWith('/api/v1/chunks/')), 'read_document must reach the chunk endpoint')
     assert.equal(
@@ -244,13 +245,13 @@ async function main() {
     // C. No configured scope at all, which is what the quickstart's optional
     //    WEKNORA_KNOWLEDGE_BASE_IDS leaves behind.
     await scenario({
-      label: 'C · no configured scope, discovered by the model',
+      label: 'C · no configured scope, resolved by the plugin',
       dsh,
       home,
       env,
       weknora,
       prefix: 'weknora',
-      discoverScope: true,
+      autoScope: true,
       patch: [{
         id: 'weknora',
         config: { baseUrl: weknora.url, apiKey: API_KEY },

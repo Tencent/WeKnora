@@ -86,7 +86,7 @@ test('an empty result set tells the model what to try next', async () => {
   const { byName } = await toolset({ knowledgeBaseIds: ['kb-product'] })
   const { value, text } = await call(byName.get('weknora_search'), { query: '量子纠缠咖啡机保修期' })
   assert.equal(value.count, 0)
-  assert.match(text, /No passage in WeKnora matched/)
+  assert.match(text, /Nothing in WeKnora matched/)
 })
 
 test('search rejects a missing query before touching the network', async () => {
@@ -95,18 +95,33 @@ test('search rejects a missing query before touching the network', async () => {
 })
 
 // WeKnora answers 400 when a retrieval names no knowledge base, document or
-// tag. Without a configured default that is the model's most likely first
-// call, so the scope has to be demanded in the description and enforced here.
-test('search demands a scope when the deployment configures no default', async () => {
+// tag. Rather than make the model choose a scope it has no basis to choose,
+// an unconfigured deployment searches everything the credential can see.
+test('search spans every visible knowledge base when none is configured', async () => {
   const { byName, mock } = await toolset()
-  const requestsBefore = mock.requests.length
-  await assert.rejects(
-    byName.get('weknora_search').execute({ query: '默认的检索阈值是多少' }, exec),
-    /needs a scope to search/,
-  )
-  assert.equal(mock.requests.length, requestsBefore, 'the unscoped call must not reach WeKnora')
-  assert.match(byName.get('weknora_search').description, /must name knowledge_base_ids/)
-  assert.match(byName.get('weknora_search').description, /weknora_list_knowledge_bases/)
+  const { value } = await call(byName.get('weknora_search'), { query: '默认的检索阈值是多少' })
+  assert.deepEqual(value.knowledge_base_ids, ['kb-product', 'kb-ops'])
+  const retrieval = mock.requests.find(request => request.path === '/api/v1/knowledge-search')
+  assert.deepEqual(retrieval.body.knowledge_base_ids, ['kb-product', 'kb-ops'])
+  assert.match(byName.get('weknora_search').description, /every knowledge base this credential can see/)
+})
+
+// A deployment can hold dozens of knowledge bases; spelling every id out on
+// every search would cost more context than the passages themselves.
+test('a wide scope is named by count rather than spelled out', async () => {
+  const { byName } = await toolset({ knowledgeBaseIds: ['kb-a', 'kb-b', 'kb-c', 'kb-d'] })
+  const { value, text } = await call(byName.get('weknora_search'), { query: '默认的检索阈值是多少' })
+  assert.match(text, /searched: 4 knowledge bases/)
+  assert.doesNotMatch(text, /kb-a/)
+  assert.deepEqual(value.knowledge_base_ids, ['kb-a', 'kb-b', 'kb-c', 'kb-d'], 'the ids stay in the canonical value')
+})
+
+test('the resolved full scope is fetched once and reused', async () => {
+  const { byName, mock } = await toolset()
+  await call(byName.get('weknora_search'), { query: '混合检索 向量' })
+  await call(byName.get('weknora_search'), { query: '部署 方式' })
+  const listings = mock.requests.filter(request => request.path === '/api/v1/knowledge-bases')
+  assert.equal(listings.length, 1, 'resolving the scope must not re-list on every search')
 })
 
 test('knowledge_ids alone is a scope WeKnora accepts', async () => {
@@ -115,13 +130,40 @@ test('knowledge_ids alone is a scope WeKnora accepts', async () => {
     query: '默认的检索阈值是多少',
     knowledge_ids: ['doc-retrieval-pipeline'],
   })
-  assert.deepEqual(mock.requests.at(-1).body.knowledge_ids, ['doc-retrieval-pipeline'])
+  const retrieval = mock.requests.find(request => request.path === '/api/v1/knowledge-search')
+  assert.deepEqual(retrieval.body.knowledge_ids, ['doc-retrieval-pipeline'])
+  assert.equal(retrieval.body.knowledge_base_ids, undefined, 'a document-scoped call must not widen to every base')
 })
 
-test('a configured default scope keeps the description free of the demand', async () => {
+test('a configured default scope is used verbatim', async () => {
+  const { byName, mock } = await toolset({ knowledgeBaseIds: ['kb-product'] })
+  await call(byName.get('weknora_search'), { query: '默认的检索阈值是多少' })
+  assert.equal(mock.requests.some(request => request.path === '/api/v1/knowledge-bases'), false)
+  assert.match(byName.get('weknora_search').description, /Searches knowledge base\(s\) kb-product/)
+})
+
+// A document nobody quotes is still the document the user asked for by name,
+// which is exactly what passage retrieval on its own cannot find.
+test('a query naming a document finds it even with no passage match', async () => {
+  const { byName } = await toolset({ knowledgeBaseIds: ['kb-ops'] })
+  const { value, text } = await call(byName.get('weknora_search'), { query: '灰度发布检查单' })
+  assert.equal(value.count, 0)
+  assert.deepEqual(value.documents.map(document => document.knowledge_id), ['doc-release-checklist'])
+  assert.match(text, /No passage matched "灰度发布检查单", but its name matches document/)
+  assert.match(text, /knowledge_id: doc-release-checklist · in Ops runbooks/)
+})
+
+test('by-name matches stay inside the scope the call asked for', async () => {
   const { byName } = await toolset({ knowledgeBaseIds: ['kb-product'] })
-  assert.match(byName.get('weknora_search').description, /Defaults to knowledge base\(s\) kb-product/)
-  assert.doesNotMatch(byName.get('weknora_search').description, /must name knowledge_base_ids/)
+  const { value } = await call(byName.get('weknora_search'), { query: '灰度发布检查单' })
+  assert.deepEqual(value.documents, [], 'a document in kb-ops must not surface in a kb-product search')
+})
+
+test('a passage hit is not repeated in the by-name section', async () => {
+  const { byName } = await toolset({ knowledgeBaseIds: ['kb-product', 'kb-ops'] })
+  const { value } = await call(byName.get('weknora_search'), { query: 'WeKnora 检索流程' })
+  const passages = new Set(value.results.map(hit => hit.knowledge_id))
+  assert.equal(value.documents.some(document => passages.has(document.knowledge_id)), false)
 })
 
 test('long passages are clipped and marked truncated', async () => {
@@ -149,6 +191,56 @@ test('read_document reassembles passages in order and reports paging', async () 
     page_size: 2,
   })
   assert.equal(second.value.has_more, false)
+})
+
+// A long document costs many pages to identify from its passages alone, so
+// page 1 carries the title and WeKnora's generated summary.
+test('read_document leads with the document title and summary', async () => {
+  const { byName } = await toolset()
+  const { value, text } = await call(byName.get('weknora_read_document'), {
+    knowledge_id: 'doc-retrieval-pipeline',
+    page: 1,
+    page_size: 2,
+  })
+  assert.equal(value.title, 'WeKnora 检索流程.md')
+  assert.match(value.summary, /混合检索/)
+  assert.match(text, /Document WeKnora 检索流程\.md \(doc-retrieval-pipeline\)/)
+  assert.match(text, /Summary: /)
+})
+
+test('read_document still returns text when the metadata call fails', async () => {
+  const { byName, mock } = await toolset()
+  mock.fail('/api/v1/knowledge/doc-retrieval-pipeline', 500)
+  const { value } = await call(byName.get('weknora_read_document'), { knowledge_id: 'doc-retrieval-pipeline' })
+  assert.equal(value.title, '')
+  assert.equal(value.summary, '')
+  assert.ok(value.content.length > 0, 'losing the metadata must not cost the model the document')
+})
+
+test('read_document leads with the title and summary, and only on page 1', async () => {
+  const { byName, mock } = await toolset({ maxChunkChars: 4000 })
+  const first = await call(byName.get('weknora_read_document'), {
+    knowledge_id: 'doc-retrieval-pipeline',
+    page: 1,
+    page_size: 2,
+  })
+  assert.equal(first.value.title, 'WeKnora 检索流程.md')
+  assert.match(first.text, /^Document WeKnora 检索流程\.md \(doc-retrieval-pipeline\)/)
+  assert.match(first.text, /Summary: 讲解 WeKnora 混合检索/)
+
+  const before = mock.requests.length
+  const second = await call(byName.get('weknora_read_document'), {
+    knowledge_id: 'doc-retrieval-pipeline',
+    page: 2,
+    page_size: 2,
+  })
+  assert.equal(second.value.summary, '')
+  assert.doesNotMatch(second.text, /Summary:/)
+  assert.equal(
+    mock.requests.slice(before).some(request => request.path === '/api/v1/knowledge/doc-retrieval-pipeline'),
+    false,
+    'a later page must not re-fetch metadata the model already has',
+  )
 })
 
 test('read_document surfaces a backend 404 as a failed call', async () => {

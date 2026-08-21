@@ -11,6 +11,9 @@ const DOCUMENTS = [
   {
     knowledge_id: 'doc-retrieval-pipeline',
     knowledge_title: 'WeKnora 检索流程.md',
+    knowledge_base_id: 'kb-product',
+    // WeKnora stores the generated summary in `description`, not `summary`.
+    description: '讲解 WeKnora 混合检索的召回、阈值与父子分块回溯。',
     chunks: [
       'WeKnora 的混合检索先做向量召回，再做关键词召回，最后交给 rerank 模型统一排序。',
       '默认的 vector_threshold 是 0.5，keyword_threshold 是 0.3，可以在知识库配置里按库调整。',
@@ -20,12 +23,35 @@ const DOCUMENTS = [
   {
     knowledge_id: 'doc-deployment',
     knowledge_title: 'WeKnora 部署手册.md',
+    knowledge_base_id: 'kb-ops',
+    description: '单机与 Kubernetes 部署方式，以及可选的向量库后端。',
     chunks: [
       'WeKnora 支持 docker compose 单机部署，也提供 Helm chart 用于 Kubernetes。',
       '向量库可以选择 pgvector、Milvus、Qdrant、Weaviate、OpenSearch 等后端。',
     ],
   },
+  {
+    // Title and body share no wording on purpose: retrieving this document by
+    // name is the only way to reach it, which is what the by-name search is for.
+    knowledge_id: 'doc-release-checklist',
+    knowledge_title: '灰度发布检查单.md',
+    knowledge_base_id: 'kb-ops',
+    description: '上线前的确认项与回滚准备。',
+    chunks: [
+      '上线前需确认监控告警、回滚预案与数据库变更脚本均已就绪，并由值班同学复核。',
+    ],
+  },
 ]
+
+// Titled so a by-name query matches it while its text shares nothing with that
+// query — the case passage retrieval alone cannot serve.
+DOCUMENTS.push({
+  knowledge_id: 'doc-release-checklist',
+  knowledge_title: '灰度发布检查单.md',
+  knowledge_base_id: 'kb-ops',
+  description: '上线前的确认项与回滚方案。',
+  chunks: ['本文列出上线前需要确认的配置项与回滚方案。'],
+})
 
 const KNOWLEDGE_BASES = [
   { id: 'kb-product', name: 'Product docs', description: 'WeKnora 产品与检索文档' },
@@ -51,8 +77,7 @@ function scoreOf(query, content) {
 function searchResults(query, knowledgeBaseIds, knowledgeIds) {
   const documents = DOCUMENTS.filter(document =>
     (knowledgeIds.length === 0 || knowledgeIds.includes(document.knowledge_id))
-    && (knowledgeBaseIds.length === 0
-      || knowledgeBaseIds.includes(document.knowledge_id === 'doc-deployment' ? 'kb-ops' : 'kb-product')))
+    && (knowledgeBaseIds.length === 0 || knowledgeBaseIds.includes(document.knowledge_base_id)))
   return documents
     .flatMap(document => document.chunks.map((content, index) => ({
       id: `${document.knowledge_id}-chunk-${index}`,
@@ -70,6 +95,21 @@ function searchResults(query, knowledgeBaseIds, knowledgeIds) {
     .sort((left, right) => right.score - left.score)
 }
 
+/** The document shape the by-name search and `GET /knowledge/:id` both return. */
+function documentRecord(document) {
+  return {
+    id: document.knowledge_id,
+    title: document.knowledge_title,
+    file_name: document.knowledge_title,
+    file_type: 'md',
+    description: document.description,
+    knowledge_base_id: document.knowledge_base_id,
+    knowledge_base_name: KNOWLEDGE_BASES.find(kb => kb.id === document.knowledge_base_id)?.name ?? '',
+    parse_status: 'completed',
+    summary_status: 'completed',
+  }
+}
+
 /** Assemble the answer the fake RAG/agent pipeline streams back. */
 function answerFor(query, results) {
   const cited = results.slice(0, 2).map(result => result.content).join(' ')
@@ -84,6 +124,9 @@ function answerFor(query, results) {
  */
 export async function startMockWeknora(options = {}) {
   const requests = []
+  // Paths forced to fail, so a test can prove the plugin degrades rather than
+  // breaks when a deployment does not serve one of the optional routes.
+  const failures = new Map()
   const server = createServer((request, response) => {
     const url = new URL(request.url, 'http://mock.invalid')
     const chunks = []
@@ -116,8 +159,44 @@ export async function startMockWeknora(options = {}) {
         return
       }
 
+      const forced = failures.get(url.pathname)
+      if (forced !== undefined) {
+        json(forced, { success: false, error: { message: `forced failure for ${url.pathname}` } })
+        return
+      }
+
       if (request.method === 'GET' && url.pathname === '/api/v1/knowledge-bases') {
         json(200, { success: true, data: KNOWLEDGE_BASES })
+        return
+      }
+
+      // By-name document search. Spans every knowledge base and takes no
+      // scope, matching the real /knowledge/search route.
+      if (request.method === 'GET' && url.pathname === '/api/v1/knowledge/search') {
+        const keyword = (url.searchParams.get('keyword') ?? url.searchParams.get('query') ?? '').trim()
+        if (keyword === '') {
+          json(400, { success: false, error: { message: 'missing search keyword: pass ?keyword=... or ?query=...' } })
+          return
+        }
+        const limit = Number(url.searchParams.get('limit') ?? '20')
+        json(200, {
+          success: true,
+          data: DOCUMENTS
+            .filter(document => document.knowledge_title.toLowerCase().includes(keyword.toLowerCase()))
+            .slice(0, limit)
+            .map(document => documentRecord(document)),
+        })
+        return
+      }
+
+      if (request.method === 'GET' && url.pathname.startsWith('/api/v1/knowledge/')) {
+        const knowledgeId = decodeURIComponent(url.pathname.slice('/api/v1/knowledge/'.length))
+        const document = DOCUMENTS.find(entry => entry.knowledge_id === knowledgeId)
+        if (document === undefined) {
+          json(404, { success: false, error: { message: 'knowledge not found' } })
+          return
+        }
+        json(200, { success: true, data: documentRecord(document) })
         return
       }
 
@@ -222,6 +301,10 @@ export async function startMockWeknora(options = {}) {
   return {
     url: `http://127.0.0.1:${port}/api/v1`,
     requests,
+    /** Force `path` to answer `status` from now on. */
+    fail(path, status) {
+      failures.set(path, status)
+    },
     async close() {
       await new Promise(resolve => server.close(resolve))
     },

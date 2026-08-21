@@ -32,6 +32,18 @@ export interface ChunkRecord {
   [key: string]: unknown
 }
 
+/** A document as returned by the by-name search and by `GET /knowledge/:id`. */
+export interface DocumentRecord {
+  id?: string
+  title?: string
+  file_name?: string
+  file_type?: string
+  description?: string
+  knowledge_base_id?: string
+  knowledge_base_name?: string
+  [key: string]: unknown
+}
+
 /** A page of chunks plus its pagination envelope. */
 export interface ChunkPage {
   chunks: ChunkRecord[]
@@ -167,6 +179,32 @@ export class WeknoraClient {
       },
     }, signal)
     return Array.isArray(envelope.data) ? envelope.data : []
+  }
+
+  /**
+   * Find documents by title or filename. Unlike `search` this spans every
+   * knowledge base the credential can see and needs no scope, so it is what
+   * answers "where is the document called X".
+   */
+  async findDocuments(
+    input: { keyword: string, limit: number },
+    signal: AbortSignal,
+  ): Promise<DocumentRecord[]> {
+    const envelope = await this.fetchJson<DocumentRecord[]>('/knowledge/search', {
+      method: 'GET',
+      query: { keyword: input.keyword, limit: input.limit },
+    }, signal)
+    return Array.isArray(envelope.data) ? envelope.data : []
+  }
+
+  /** A document's metadata, including the generated summary WeKnora stores as `description`. */
+  async getDocument(knowledgeId: string, signal: AbortSignal): Promise<DocumentRecord> {
+    const envelope = await this.fetchJson<DocumentRecord>(
+      `/knowledge/${encodeURIComponent(knowledgeId)}`,
+      { method: 'GET' },
+      signal,
+    )
+    return envelope.data ?? {}
   }
 
   /** One page of a document's stored chunks, in storage order. */

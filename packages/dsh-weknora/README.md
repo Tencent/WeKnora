@@ -71,17 +71,29 @@ Mounting two deployments is two rows with two prefixes:
 
 | Tool | WeKnora endpoint | What the model gets |
 |---|---|---|
-| `weknora_list_knowledge_bases` | `GET /knowledge-bases` | Knowledge base names and ids, so the model can scope a search |
-| `weknora_search` | `POST /knowledge-search` | Ranked passages verbatim, each with a `knowledge_id`, score and chunk index |
-| `weknora_read_document` | `GET /chunks/:knowledge_id` | One document's passages reassembled in order, with paging |
+| `weknora_list_knowledge_bases` | `GET /knowledge-bases` | Knowledge base names and ids, to report what exists or to narrow a later search |
+| `weknora_search` | `POST /knowledge-search` + `GET /knowledge/search` | Ranked passages verbatim, each with a `knowledge_id`, score and chunk index, plus any document the query names |
+| `weknora_read_document` | `GET /chunks/:knowledge_id` + `GET /knowledge/:id` | One document's passages reassembled in order, led by its title and summary, with paging |
 | `weknora_ask` | `POST /sessions` + `POST /knowledge-chat/:id` or `POST /agent-chat/:id` | WeKnora's own answer, its citations, the server-side tools it used, and a resumable `session_id` |
 
 `weknora_search` is the workhorse: it returns the source text for the agent to reason over, which keeps the agent's own
-reasoning auditable. `weknora_ask` delegates the whole question to WeKnora — cheaper in tokens, and the right choice
-when WeKnora's pipeline (reranking, FAQ, wiki, its own tools) does the job better than a passage dump.
+reasoning auditable. It answers two questions the model cannot always tell apart — *where is this discussed* and *where
+is the document called X* — by matching passage content and document names in the same call. A query that reads like a
+title additionally reports the documents it names, so a document whose wording differs from its own title is still
+reachable.
+
+Scope works without configuration. WeKnora rejects a retrieval that names no knowledge base, so when
+`knowledgeBaseIds` is empty the plugin resolves every knowledge base the credential can see and searches all of them,
+resolving that list once per process. Making the model choose first would be worse: knowledge bases are frequently
+named too poorly to choose between.
+
+`weknora_ask` delegates the whole question to WeKnora. Reserve it for broad or synthesis questions spanning many
+documents, where retrieving passages yourself would take several rounds — it runs another model server-side, so it is
+slow, and it returns a conclusion rather than the evidence behind it.
 
 `weknora_read_document` exists because retrieval returns fragments: once a passage looks right, the agent usually needs
-its neighbours. Every search hit carries the `knowledge_id` that call needs.
+its neighbours. Every search hit carries the `knowledge_id` that call needs, and page 1 leads with the document's title
+and WeKnora's generated summary so a long document can be judged without paging through it.
 
 In [Code Mode](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/core/tools/README.md) the same tools
 are available as `await tools.weknora_search({ query })`, which is a good fit for multi-hop retrieval: one program can
@@ -106,7 +118,7 @@ context window. The clip is reported to the model (`truncated: true`) instead of
 | `baseUrl` | `http://localhost:8080/api/v1` | `/api/v1` is appended when missing |
 | `apiKey` | unset | `X-API-Key`; unset means an unauthenticated deployment |
 | `tenantId` | unset | `X-Tenant-ID`, required for platform-scoped keys |
-| `knowledgeBaseIds` | `[]` | Default scope when a call names none |
+| `knowledgeBaseIds` | `[]` | Default scope when a call names none; empty means every knowledge base the credential can see |
 | `agentId` | unset | Sends `weknora_ask` to the ReAct pipeline |
 | `maxResults` | `8` | Also the ceiling for `max_results` and for cited references |
 | `maxChunkChars` | `1200` | Per-passage character budget |

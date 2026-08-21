@@ -12,7 +12,14 @@ export function formatScore(score: number): string {
   return Number.isFinite(score) ? score.toFixed(3) : 'n/a'
 }
 
-/** Join a list for prose, keeping an empty list explicit. */
-export function joinOrNone(values: string[]): string {
-  return values.length === 0 ? '(deployment default)' : values.join(', ')
+/**
+ * Name a retrieval scope without spending the model's context on it. A
+ * deployment can hold dozens of knowledge bases, and spelling out every id on
+ * every search costs far more than the count is worth; the ids stay in the
+ * tool's canonical value for anything that needs them.
+ */
+export function describeScope(ids: string[]): string {
+  if (ids.length === 0) return '(deployment default)'
+  if (ids.length <= 3) return ids.join(', ')
+  return `${ids.length} knowledge bases`
 }

@@ -1,9 +1,9 @@
 /** The model-facing tools this plugin contributes to `ctx.tools`. */
 
-import type { ChunkRecord, SearchResult, WeknoraClient } from './client.ts'
+import type { ChunkRecord, DocumentRecord, SearchResult, WeknoraClient } from './client.ts'
 import type { ResolvedConfig } from './config.ts'
 import type { JsonSchemaNode, TextContentBlock, ToolDefinition } from './harness.ts'
-import { clip, formatScore, joinOrNone } from './render.ts'
+import { clip, describeScope, formatScore } from './render.ts'
 
 /** A retrieval hit projected onto the fields the model and follow-up calls need. */
 interface SearchHit {
@@ -17,11 +17,20 @@ interface SearchHit {
   truncated: boolean
 }
 
+/** A document whose name matched, which passage retrieval alone would miss. */
+interface DocumentMatch {
+  knowledge_id: string
+  title: string
+  knowledge_base_id: string
+  knowledge_base: string
+}
+
 interface SearchValue {
   query: string
   knowledge_base_ids: string[]
   count: number
   results: SearchHit[]
+  documents: DocumentMatch[]
 }
 
 interface KnowledgeBasesValue {
@@ -31,6 +40,8 @@ interface KnowledgeBasesValue {
 
 interface DocumentValue {
   knowledge_id: string
+  title: string
+  summary: string
   page: number
   page_size: number
   total_chunks: number
@@ -106,25 +117,79 @@ function projectHit(result: SearchResult, rank: number, maxChunkChars: number): 
   }
 }
 
+/**
+ * Keep the by-name matches worth showing: inside the scope the caller asked
+ * for, and not already represented by a passage hit. WeKnora's by-name search
+ * spans the whole tenant, so the scope filter is what stops a narrowed call
+ * from reporting documents outside it.
+ */
+function projectNamedDocuments(
+  named: DocumentRecord[],
+  passages: SearchHit[],
+  knowledgeBaseIds: string[],
+  knowledgeIds: string[],
+): DocumentMatch[] {
+  const already = new Set(passages.map(hit => hit.knowledge_id))
+  const scope = new Set(knowledgeBaseIds)
+  const wanted = new Set(knowledgeIds)
+  const out: DocumentMatch[] = []
+  for (const document of named) {
+    const id = typeof document.id === 'string' ? document.id : ''
+    const kbId = typeof document.knowledge_base_id === 'string' ? document.knowledge_base_id : ''
+    if (id === '' || already.has(id)) continue
+    if (wanted.size > 0 ? !wanted.has(id) : !scope.has(kbId)) continue
+    const title = typeof document.title === 'string' && document.title.trim() !== ''
+      ? document.title.trim()
+      : typeof document.file_name === 'string' ? document.file_name : id
+    out.push({
+      knowledge_id: id,
+      title,
+      knowledge_base_id: kbId,
+      knowledge_base: typeof document.knowledge_base_name === 'string' ? document.knowledge_base_name : kbId,
+    })
+    already.add(id)
+  }
+  return out
+}
+
 /** Assemble the four tool definitions for one configured deployment. */
 export function createTools(client: WeknoraClient, config: ResolvedConfig): ToolDefinition[] {
   const name = (suffix: string): string => `${config.toolPrefix}_${suffix}`
-  // WeKnora rejects a retrieval that names no knowledge base, document or tag,
-  // so an unscoped deployment has to say so rather than imply a server default.
-  const discoveryHint = config.tools.listKnowledgeBases
-    ? ` Call ${name('list_knowledge_bases')} first to get the ids.`
-    : ''
   const scopeNote = config.knowledgeBaseIds.length > 0
-    ? ` Defaults to knowledge base(s) ${config.knowledgeBaseIds.join(', ')} when the call names none.`
-    : ' This deployment configures no default scope, so every call must name knowledge_base_ids '
-      + `or knowledge_ids.${discoveryHint}`
+    ? ` Searches knowledge base(s) ${config.knowledgeBaseIds.join(', ')} unless you name others.`
+    : ' Searches every knowledge base this credential can see unless you narrow it with knowledge_base_ids.'
+
+  // WeKnora refuses a retrieval that names no knowledge base, document or tag,
+  // so an unconfigured deployment resolves the full visible set once and reuses
+  // it. Making the model pick a scope first is worse: knowledge bases are often
+  // named too poorly to choose between, and fanning out across them is cheap
+  // while they share a vector store.
+  let everyId: Promise<string[]> | undefined
+  const allKnowledgeBaseIds = async (signal: AbortSignal): Promise<string[]> => {
+    everyId ??= client.listKnowledgeBases(signal).then(
+      bases => bases.map(kb => typeof kb.id === 'string' ? kb.id : '').filter(id => id !== ''),
+      (error: unknown) => {
+        everyId = undefined
+        throw error
+      },
+    )
+    return await everyId
+  }
+  const resolveScope = async (requested: string[], knowledgeIds: string[], signal: AbortSignal): Promise<string[]> => {
+    if (requested.length > 0) return requested
+    if (config.knowledgeBaseIds.length > 0) return config.knowledgeBaseIds
+    if (knowledgeIds.length > 0) return []
+    return await allKnowledgeBaseIds(signal)
+  }
+
   const definitions: ToolDefinition[] = []
 
   if (config.tools.listKnowledgeBases) {
     definitions.push({
       name: name('list_knowledge_bases'),
       description: 'List the WeKnora knowledge bases this deployment can retrieve from, with their ids. '
-        + `Call this first when you do not know which knowledge base to search with ${name('search')}.`,
+        + `${name('search')} already spans them all, so reach for this only to report what is available or to `
+        + 'narrow a later search to one of them.',
       parameters: { type: 'object', properties: {}, additionalProperties: false },
       timeoutMs: config.requestTimeoutMs,
       isConcurrencySafe: () => true,
@@ -178,8 +243,10 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
     definitions.push({
       name: name('search'),
       description: 'Search WeKnora knowledge bases and return the matching passages verbatim (hybrid vector + keyword '
-        + 'retrieval, no model summarization). Use this to ground an answer in the organization\'s own documents.'
-        + scopeNote + ` Each hit carries a knowledge_id you can pass to ${name('read_document')} for the full document.`,
+        + 'retrieval, no model summarization). Use this to ground an answer in the organization\'s own documents, and '
+        + 'also to locate a document by name — a query that reads like a title additionally returns the documents it '
+        + 'names.' + scopeNote
+        + ` Every hit carries a knowledge_id you can pass to ${name('read_document')} for the full document.`,
       parameters: {
         type: 'object',
         properties: {
@@ -218,40 +285,76 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
                 additionalProperties: false,
               },
             },
+            documents: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  knowledge_id: { type: 'string' },
+                  title: { type: 'string' },
+                  knowledge_base_id: { type: 'string' },
+                  knowledge_base: { type: 'string' },
+                },
+                required: ['knowledge_id', 'title', 'knowledge_base_id', 'knowledge_base'],
+                additionalProperties: false,
+              },
+            },
           },
-          required: ['query', 'knowledge_base_ids', 'count', 'results'],
+          required: ['query', 'knowledge_base_ids', 'count', 'results', 'documents'],
           additionalProperties: false,
         },
         render: (_args, value) => {
           const result = value as SearchValue
+          const named = result.documents.length === 0
+            ? ''
+            : `\n\nDocuments named "${result.query}" (read them with ${name('read_document')}):\n`
+              + result.documents.map(document =>
+                `- ${document.title} · knowledge_id: ${document.knowledge_id} · in ${document.knowledge_base}`).join('\n')
           if (result.count === 0) {
-            return text(`No passage in WeKnora matched "${result.query}" `
-              + `(knowledge bases: ${joinOrNone(result.knowledge_base_ids)}). `
-              + 'Try a differently worded query, or widen the knowledge base scope.')
+            if (named === '') {
+              return text(`Nothing in WeKnora matched "${result.query}" `
+                + `(searched: ${describeScope(result.knowledge_base_ids)}). `
+                + 'Try a differently worded query, or widen the knowledge base scope.')
+            }
+            return text(`No passage matched "${result.query}", but its name matches document(s).${named}`)
           }
           const blocks = result.results.map(hit =>
             `[${hit.rank}] ${hit.document} · score ${formatScore(hit.score)} · chunk ${hit.chunk_index} `
             + `· knowledge_id: ${hit.knowledge_id}\n${hit.content}${hit.truncated ? '\n(passage truncated)' : ''}`)
           return text(`${result.count} passage(s) for "${result.query}" `
-            + `(knowledge bases: ${joinOrNone(result.knowledge_base_ids)}):\n\n${blocks.join('\n\n')}`)
+            + `(searched: ${describeScope(result.knowledge_base_ids)}):\n\n${blocks.join('\n\n')}${named}`)
         },
       },
       async execute(args, exec): Promise<SearchValue> {
         const toolName = name('search')
         const query = requiredString(args, 'query', toolName)
-        const requested = stringArrayArg(args, 'knowledge_base_ids')
-        const knowledgeBaseIds = requested.length > 0 ? requested : config.knowledgeBaseIds
         const knowledgeIds = stringArrayArg(args, 'knowledge_ids')
+        const knowledgeBaseIds = await resolveScope(
+          stringArrayArg(args, 'knowledge_base_ids'),
+          knowledgeIds,
+          exec.signal,
+        )
         // Fail here rather than let WeKnora answer 400: the model can act on a
         // message naming the argument to supply, not on a transport error.
         if (knowledgeBaseIds.length === 0 && knowledgeIds.length === 0) {
-          throw new Error(`${toolName}: WeKnora needs a scope to search. Pass knowledge_base_ids or `
-            + `knowledge_ids; this deployment configures no default.${discoveryHint}`)
+          throw new Error(`${toolName}: this WeKnora credential can see no knowledge base, so there is `
+            + 'nothing to search. Check the deployment\'s API key scope.')
         }
         const limit = boundedIntArg(args, 'max_results', config.maxResults, config.maxResults)
-        const hits = await client.search({ query, knowledgeBaseIds, knowledgeIds }, exec.signal)
+        const [hits, named] = await Promise.all([
+          client.search({ query, knowledgeBaseIds, knowledgeIds }, exec.signal),
+          // By-name matching is an enrichment, and older WeKnora builds may not
+          // route it. Losing it must not cost the model its passages.
+          client.findDocuments({ keyword: query, limit }, exec.signal).catch(() => []),
+        ])
         const results = hits.slice(0, limit).map((hit, index) => projectHit(hit, index + 1, config.maxChunkChars))
-        return { query, knowledge_base_ids: knowledgeBaseIds, count: results.length, results }
+        return {
+          query,
+          knowledge_base_ids: knowledgeBaseIds,
+          count: results.length,
+          results,
+          documents: projectNamedDocuments(named, results, knowledgeBaseIds, knowledgeIds),
+        }
       },
     })
   }
@@ -278,6 +381,8 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
           type: 'object',
           properties: {
             knowledge_id: { type: 'string' },
+            title: { type: 'string' },
+            summary: { type: 'string' },
             page: { type: 'integer' },
             page_size: { type: 'integer' },
             total_chunks: { type: 'integer' },
@@ -286,19 +391,26 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
             truncated: { type: 'boolean' },
             content: { type: 'string' },
           },
-          required: ['knowledge_id', 'page', 'page_size', 'total_chunks', 'returned_chunks', 'has_more', 'truncated', 'content'],
+          required: [
+            'knowledge_id', 'title', 'summary', 'page', 'page_size',
+            'total_chunks', 'returned_chunks', 'has_more', 'truncated', 'content',
+          ],
           additionalProperties: false,
         },
         render: (_args, value) => {
           const result = value as DocumentValue
+          const label = result.title === '' ? result.knowledge_id : `${result.title} (${result.knowledge_id})`
           if (result.returned_chunks === 0) {
-            return text(`Document ${result.knowledge_id} has no passage on page ${result.page} `
+            return text(`Document ${label} has no passage on page ${result.page} `
               + `(${result.total_chunks} passage(s) in total).`)
           }
+          // The summary lets the model judge a long document from page 1
+          // instead of paging blindly to find out what it is holding.
+          const summary = result.summary === '' ? '' : `\n\nSummary: ${result.summary}`
           const more = result.has_more ? `\n\n(more passages available: request page ${result.page + 1})` : ''
           const cut = result.truncated ? '\n(content truncated)' : ''
-          return text(`Document ${result.knowledge_id}, passages ${result.returned_chunks} of ${result.total_chunks} `
-            + `(page ${result.page}):\n\n${result.content}${cut}${more}`)
+          return text(`Document ${label}, passages ${result.returned_chunks} of ${result.total_chunks} `
+            + `(page ${result.page}):${summary}\n\n${result.content}${cut}${more}`)
         },
       },
       async execute(args, exec): Promise<DocumentValue> {
@@ -306,12 +418,26 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
         const knowledgeId = requiredString(args, 'knowledge_id', toolName)
         const page = boundedIntArg(args, 'page', 1, 10_000)
         const pageSize = boundedIntArg(args, 'page_size', 20, 100)
-        const result = await client.listChunks({ knowledgeId, page, pageSize }, exec.signal)
+        const [result, metadata] = await Promise.all([
+          client.listChunks({ knowledgeId, page, pageSize }, exec.signal),
+          // Only page 1 is worth the extra call and the summary's tokens: by
+          // page 2 the model has already seen what this document is. Metadata
+          // is context, not the payload, so a deployment that cannot serve it
+          // must still hand over the text.
+          page === 1
+            ? client.getDocument(knowledgeId, exec.signal).catch(() => ({}) as DocumentRecord)
+            : Promise.resolve({} as DocumentRecord),
+        ])
         const ordered = [...result.chunks].sort(orderByChunkIndex)
         const joined = ordered.map(chunk => typeof chunk.content === 'string' ? chunk.content : '').join('\n\n')
         const clipped = clip(joined, config.maxChunkChars * Math.max(1, Math.min(ordered.length, 10)))
+        const title = typeof metadata.title === 'string' && metadata.title.trim() !== ''
+          ? metadata.title.trim()
+          : typeof metadata.file_name === 'string' ? metadata.file_name.trim() : ''
         return {
           knowledge_id: knowledgeId,
+          title,
+          summary: clip(typeof metadata.description === 'string' ? metadata.description.trim() : '', config.maxChunkChars).text,
           page: result.page,
           page_size: result.pageSize,
           total_chunks: result.total,
@@ -329,8 +455,10 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
     definitions.push({
       name: name('ask'),
       description: `Ask WeKnora a question and get its own composed answer with citations (${pipeline} pipeline runs `
-        + 'server-side: retrieval, reranking and summarization). Prefer this for a question WeKnora can answer end to end; '
-        + `use ${name('search')} instead when you want raw passages to reason over yourself.`,
+        + 'server-side: query rewriting, retrieval, reranking and summarization). Reserve it for broad or '
+        + 'synthesis questions whose answer spans many documents, where retrieving passages yourself would take '
+        + `several rounds. For anything you can answer from specific passages, prefer ${name('search')}: it is far `
+        + 'faster and leaves you the evidence to reason over rather than another model\'s conclusion.',
       parameters: {
         type: 'object',
         properties: {

@@ -26,12 +26,28 @@
       "goRequestType": "session.SearchKnowledgeRequest"
     },
     {
+      "tool": "weknora_search",
+      "method": "GET",
+      "path": "/api/v1/knowledge/search",
+      "query": { "keyword": "默认的检索阈值是多少", "limit": "8" },
+      "body": null,
+      "goRequestType": null
+    },
+    {
       "tool": "weknora_read_document",
       "method": "GET",
       "path": "/api/v1/chunks/doc-retrieval-pipeline",
       "query": { "page": "1", "page_size": "5" },
       "body": null,
       "goRequestType": "types.Pagination"
+    },
+    {
+      "tool": "weknora_read_document",
+      "method": "GET",
+      "path": "/api/v1/knowledge/doc-retrieval-pipeline",
+      "query": {},
+      "body": null,
+      "goRequestType": null
     },
     {
       "tool": "weknora_ask",
@@ -81,6 +97,14 @@
       "score"
     ],
     "types.Chunk": ["id", "content", "chunk_index", "knowledge_id"],
+    "types.Knowledge": [
+      "id",
+      "title",
+      "file_name",
+      "description",
+      "knowledge_base_id",
+      "knowledge_base_name"
+    ],
     "types.StreamResponse": [
       "response_type",
       "content",
