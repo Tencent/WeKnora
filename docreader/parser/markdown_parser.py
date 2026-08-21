@@ -27,6 +27,9 @@ from docreader.utils import endecode
 logger = logging.getLogger(__name__)
 
 _SEPARATOR_CELL = re.compile(r"^:?-{3,}:?$")
+# Cells of a GFM alignment row as matched by the previous ``align_pattern``.
+# Looser than ``_SEPARATOR_CELL``: any non-empty run of ``:``/``-`` qualifies.
+_ALIGNMENT_CELL = re.compile(r"^[:-]+$")
 
 
 class MarkdownTableUtil:
@@ -49,16 +52,11 @@ class MarkdownTableUtil:
     """
 
     def __init__(self):
-        # Pattern to match alignment row (e.g., |:---|---:|:---:|)
-        self.align_pattern = re.compile(
-            r"^([\t ]*)\|[\t ]*[:-]+(?:[\t ]*\|[\t ]*[:-]+)*[\t ]*\|[\t ]*$",
-            re.MULTILINE,
-        )
-        # Pattern to match regular table rows (header or data)
-        self.line_pattern = re.compile(
-            r"^([\t ]*)\|[\t ]*[^|\r\n]*(?:[\t ]*\|[^|\r\n]*)*\|[\t ]*$",
-            re.MULTILINE,
-        )
+        # Table rows are normalized line-by-line in format_table (regex-free)
+        # instead of via whole-text regexes. A ``|``-prefixed line missing its
+        # trailing ``|`` previously caused catastrophic backtracking in the
+        # single-threaded event loop (see Tencent/WeKnora#2768).
+        pass
 
     @staticmethod
     def _split_row_cells(row_line: str) -> List[str]:
@@ -82,6 +80,17 @@ class MarkdownTableUtil:
     def _is_separator_row(cls, line: str) -> bool:
         cells = cls._split_row_cells(line)
         return bool(cells) and all(_SEPARATOR_CELL.match(cell) for cell in cells)
+
+    @classmethod
+    def _is_alignment_row(cls, line: str) -> bool:
+        """Detect a GFM alignment row, matching the previous ``align_pattern``.
+
+        Deliberately looser than :meth:`_is_separator_row` (which needs three
+        or more dashes per cell) so formatting output is unchanged for rows
+        like ``| - | - |``.
+        """
+        cells = cls._split_row_cells(line)
+        return bool(cells) and all(_ALIGNMENT_CELL.match(cell) for cell in cells)
 
     @classmethod
     def _is_empty_row(cls, line: str) -> bool:
@@ -128,6 +137,12 @@ class MarkdownTableUtil:
     def format_table(self, content: str) -> str:
         """Format all Markdown tables in the content.
 
+        Line-based and regex-free: only well-formed rows (leading *and*
+        trailing ``|``) are treated as tables, so a malformed row can never
+        trigger the catastrophic backtracking described in
+        https://github.com/Tencent/WeKnora/issues/2768. Output is equivalent
+        to the previous regex implementation.
+
         Args:
             content: Raw Markdown text containing tables
 
@@ -135,10 +150,8 @@ class MarkdownTableUtil:
             Formatted Markdown text with standardized table formatting
         """
 
-        def process_align(match: Match[str]) -> str:
-            """Process alignment row to standardize format."""
-            columns = self._split_row_cells(match.group(0))
-
+        def format_alignment_row(prefix: str, columns: List[str]) -> str:
+            """Standardize an alignment row, preserving ``:`` markers."""
             processed = []
             for col in columns:
                 # Preserve left alignment marker (:---)
@@ -146,25 +159,29 @@ class MarkdownTableUtil:
                 # Preserve right alignment marker (---:)
                 right_colon = ":" if col.endswith(":") else ""
                 processed.append(left_colon + "---" + right_colon)
-
-            # Preserve original indentation
-            prefix = match.group(1)
             return prefix + "| " + " | ".join(processed) + " |"
 
-        def process_line(match: Match[str]) -> str:
-            """Process regular table row to standardize format."""
-            columns = self._split_row_cells(match.group(0))
-
-            # Preserve original indentation
-            prefix = match.group(1)
+        def format_data_row(prefix: str, columns: List[str]) -> str:
+            """Standardize a header or data row."""
             return prefix + "| " + " | ".join(columns) + " |"
 
-        formatted_content = content
-        # First format regular rows (header and data)
-        formatted_content = self.line_pattern.sub(process_line, formatted_content)
-        # Then format alignment rows (must be done after to avoid conflicts)
-        formatted_content = self.align_pattern.sub(process_align, formatted_content)
-        return self.normalize_spurious_table_prefixes(formatted_content)
+        lines = content.split("\n")
+        out: List[str] = []
+        for line in lines:
+            stripped = line.lstrip(" \t")
+            # A row must both begin and end with a pipe to be a table row;
+            # anything else is passed through unchanged. This also keeps
+            # unclosed rows (the old regex's exponential worst case) cheap.
+            if stripped.startswith("|") and line.rstrip().endswith("|"):
+                prefix = line[: len(line) - len(stripped)]
+                columns = self._split_row_cells(line)
+                if self._is_alignment_row(line):
+                    out.append(format_alignment_row(prefix, columns))
+                else:
+                    out.append(format_data_row(prefix, columns))
+            else:
+                out.append(line)
+        return self.normalize_spurious_table_prefixes("\n".join(out))
 
     @staticmethod
     def _self_test():
