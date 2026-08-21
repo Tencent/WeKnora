@@ -11,7 +11,7 @@
       >
         <template #message>
           <div>{{ t('graphSettings.disabledWarning') }}</div>
-          <t-link class="graph-guide-link" theme="primary" @click="handleOpenGraphGuide">
+          <t-link v-if="FEATURES.showGithubLinks" class="graph-guide-link" theme="primary" @click="handleOpenGraphGuide">
             {{ t('graphSettings.howToEnable') }}
           </t-link>
         </template>
@@ -320,6 +320,7 @@
 </template>
 
 <script setup lang="ts">
+import { FEATURES } from '@/config/branding'
 import { ref, watch, onMounted, computed } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -592,8 +593,7 @@ const graphGuideUrl =
 
 // Open guide documentation to show how to enable graph database
 const handleOpenGraphGuide = () => {
-  // 外链已隐藏：不再打开知识图谱文档
-  // window.open(graphGuideUrl, '_blank', 'noopener')
+  window.open(graphGuideUrl, '_blank', 'noopener')
 }
 
 // 初始化

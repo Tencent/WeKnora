@@ -498,15 +498,13 @@ const reopenGuide = () => {
 
 const openDocs = () => {
   menuVisible.value = false
-  // 外链已隐藏：不再打开 GitHub 文档
-  // window.open('https://github.com/Tencent/WeKnora/tree/main/docs', '_blank')
+  window.open('https://github.com/Tencent/WeKnora/tree/main/docs', '_blank')
 }
 
 // 打开 GitHub
 const openGithub = () => {
   menuVisible.value = false
-  // 外链已隐藏：不再打开 GitHub
-  // window.open('https://github.com/Tencent/WeKnora', '_blank')
+  window.open('https://github.com/Tencent/WeKnora', '_blank')
 }
 
 // 注销

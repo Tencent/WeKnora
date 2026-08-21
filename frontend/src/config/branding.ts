@@ -33,6 +33,8 @@ export const FEATURES = {
   showLoginGithubLink: false,
   /** 登录页右上角是否显示「官方网站」「GitHub」外链（默认隐藏） */
   showLoginHeaderLinks: false,
+  /** 是否显示指向原版 WeKnora GitHub 的文档/反馈等外链（默认隐藏；true 时恢复显示并可点击） */
+  showGithubLinks: false,
 } as const
 
 // ---------- 登录页文案 ----------
