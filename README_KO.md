@@ -183,6 +183,15 @@ Feishu, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지�
 - **하이브리드 검색** — 단일 또는 다중 지식베이스에서 벡터 + 키워드 통합 검색
 - **지식 관리** — 프로그래밍 방식으로 지식 항목 조회, 편집, 삭제
 
+## 🐋 DeepSeek Harness 플러그인
+
+[**`@wxg-prc-cpg/dsh-weknora`**](./packages/dsh-weknora/README.md)는 공식 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)(`dsh`) 플러그인입니다. harness 자체에는 검색·임베딩·지식베이스 기능이 없으므로, 이 플러그인이 코딩 에이전트에 사내 문서를 제공합니다. `dsh plugin --profile web add @wxg-prc-cpg/dsh-weknora`로 설치하고 배포 주소를 지정하면 네 개의 읽기 전용 도구가 에이전트 도구 목록에 나타납니다.
+
+- **`weknora_search`** — 하이브리드 검색. 원문 구절을 그대로 반환하며 각 항목에 재사용 가능한 `knowledge_id` 포함
+- **`weknora_read_document`** — 한 문서의 청크를 순서대로 재조합, 페이징 지원
+- **`weknora_ask`** — WeKnora가 직접 작성한 인용 포함 답변(RAG 또는 ReAct 파이프라인)
+- **`weknora_list_knowledge_bases`** — 지식베이스 이름과 id로 에이전트가 검색 범위를 스스로 좁힘
+
 
 ## 🚀 시작하기
 

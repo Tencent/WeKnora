@@ -181,6 +181,15 @@ The [WeKnora Mini Program](./miniprogram/README.md) provides a lightweight mobil
 - **Hybrid Search** — Search within or across knowledge bases with vector + keyword retrieval
 - **Knowledge Management** — List, browse, edit, and delete knowledge entries programmatically
 
+## 🐋 DeepSeek Harness Plugin
+
+[**`@wxg-prc-cpg/dsh-weknora`**](./packages/dsh-weknora/README.md) is the official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) plugin. The harness ships no retrieval, embedding or knowledge-base capability of its own, so the plugin gives a coding agent your documents: `dsh plugin --profile web add @wxg-prc-cpg/dsh-weknora`, point it at a deployment, and four read-only tools appear in the agent's tool set.
+
+- **`weknora_search`** — hybrid retrieval returning source passages verbatim, each with a reusable `knowledge_id`
+- **`weknora_read_document`** — one document's passages reassembled in order, with paging
+- **`weknora_ask`** — WeKnora's own composed answer with citations, over the RAG or the ReAct pipeline
+- **`weknora_list_knowledge_bases`** — knowledge base names and ids, so the agent can scope its own search
+
 ## ⌨️ Command-Line Interface
 
 `weknora` is the official CLI for driving the API from a terminal or an AI
