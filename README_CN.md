@@ -181,6 +181,15 @@
 - **混合检索** — 在单个或多个知识库中进行向量 + 关键词混合搜索
 - **知识管理** — 以编程方式浏览、编辑和删除知识条目
 
+## 🐋 DeepSeek Harness 插件
+
+[**`@wxg-prc-cpg/dsh-weknora`**](./packages/dsh-weknora/README_CN.md) 是官方的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）插件。harness 自身不带任何检索、向量或知识库能力，这个插件把你的文档接进编码 Agent：`dsh plugin --profile web add @wxg-prc-cpg/dsh-weknora`，指向一个部署，Agent 的工具集里就会出现四个只读工具。
+
+- **`weknora_search`** — 混合检索，返回原文片段，每条都带可复用的 `knowledge_id`
+- **`weknora_read_document`** — 把单个文档的分块按序拼回正文，支持翻页
+- **`weknora_ask`** — WeKnora 自己带引用的成稿答案，走 RAG 或 ReAct 流水线
+- **`weknora_list_knowledge_bases`** — 知识库名称与 id，便于 Agent 自己缩小检索范围
+
 ## 🚀 快速开始
 
 ### 🛠 环境要求

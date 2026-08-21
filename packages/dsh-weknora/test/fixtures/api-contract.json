@@ -1,0 +1,119 @@
+{
+  "$comment": [
+    "The exact WeKnora API calls this plugin makes, and the response fields it reads.",
+    "test/contract.test.mjs asserts the plugin still emits these calls;",
+    "contract/contract_test.go asserts the WeKnora server still accepts them and still",
+    "serves those response fields, so a rename on either side fails CI instead of a user's agent."
+  ],
+  "calls": [
+    {
+      "tool": "weknora_list_knowledge_bases",
+      "method": "GET",
+      "path": "/api/v1/knowledge-bases",
+      "query": {},
+      "body": null,
+      "goRequestType": null
+    },
+    {
+      "tool": "weknora_search",
+      "method": "POST",
+      "path": "/api/v1/knowledge-search",
+      "query": {},
+      "body": {
+        "query": "默认的检索阈值是多少",
+        "knowledge_base_ids": ["kb-product"]
+      },
+      "goRequestType": "session.SearchKnowledgeRequest"
+    },
+    {
+      "tool": "weknora_search",
+      "method": "GET",
+      "path": "/api/v1/knowledge/search",
+      "query": { "keyword": "默认的检索阈值是多少", "limit": "8" },
+      "body": null,
+      "goRequestType": null
+    },
+    {
+      "tool": "weknora_read_document",
+      "method": "GET",
+      "path": "/api/v1/chunks/doc-retrieval-pipeline",
+      "query": { "page": "1", "page_size": "5" },
+      "body": null,
+      "goRequestType": "types.Pagination"
+    },
+    {
+      "tool": "weknora_read_document",
+      "method": "GET",
+      "path": "/api/v1/knowledge/doc-retrieval-pipeline",
+      "query": {},
+      "body": null,
+      "goRequestType": null
+    },
+    {
+      "tool": "weknora_ask",
+      "method": "POST",
+      "path": "/api/v1/sessions",
+      "query": {},
+      "body": {
+        "title": "dsh: 默认的检索阈值是多少"
+      },
+      "goRequestType": "session.CreateSessionRequest"
+    },
+    {
+      "tool": "weknora_ask",
+      "method": "POST",
+      "path": "/api/v1/knowledge-chat/session-mock-1",
+      "query": {},
+      "body": {
+        "query": "默认的检索阈值是多少",
+        "channel": "api",
+        "knowledge_base_ids": ["kb-product"]
+      },
+      "goRequestType": "session.CreateKnowledgeQARequest"
+    },
+    {
+      "tool": "weknora_ask",
+      "method": "POST",
+      "path": "/api/v1/agent-chat/s1",
+      "query": {},
+      "body": {
+        "query": "部署方式",
+        "channel": "api",
+        "agent_id": "agent-42",
+        "agent_enabled": true,
+        "web_search_enabled": true
+      },
+      "goRequestType": "session.CreateKnowledgeQARequest"
+    }
+  ],
+  "responseFieldsRead": {
+    "types.SearchResult": [
+      "id",
+      "content",
+      "knowledge_id",
+      "chunk_index",
+      "knowledge_title",
+      "knowledge_filename",
+      "score"
+    ],
+    "types.Chunk": ["id", "content", "chunk_index", "knowledge_id"],
+    "types.Knowledge": [
+      "id",
+      "title",
+      "file_name",
+      "description",
+      "knowledge_base_id",
+      "knowledge_base_name"
+    ],
+    "types.StreamResponse": [
+      "response_type",
+      "content",
+      "knowledge_references",
+      "session_id",
+      "tool_calls"
+    ],
+    "types.LLMToolCall": ["function"],
+    "types.FunctionCall": ["name"]
+  },
+  "streamResponseTypes": ["answer", "references", "tool_call", "error", "complete"]
+}
