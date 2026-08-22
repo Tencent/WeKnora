@@ -646,6 +646,12 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 			}
 		}
 
+		// Persist the turn's aggregated LLM usage with the message so history
+		// reads still carry it after the live stream is gone.
+		if usage, ok := data.Usage.(*types.TokenUsage); ok && usage != nil {
+			h.assistantMessage.Usage = usage
+		}
+
 		// Drain skill-generated files from the sandbox into persistent
 		// storage. Best-effort: any failure is logged and the turn is
 		// persisted without artifacts. Collect is a no-op when either the
@@ -728,6 +734,13 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	if len(h.assistantMessage.Artifacts) > 0 {
 		completeData["artifacts"] = publicArtifactViews(h.assistantMessage.Artifacts)
 	}
+	// Carry the turn's aggregated LLM usage both inside data (map consumers)
+	// and on the typed event field, which buildStreamResponse promotes to the
+	// response's top-level usage.
+	turnUsage, _ := data.Usage.(*types.TokenUsage)
+	if turnUsage != nil {
+		completeData["usage"] = turnUsage
+	}
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeComplete,
@@ -735,6 +748,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		Done:      true,
 		Timestamp: time.Now(),
 		Data:      completeData,
+		Usage:     turnUsage,
 	}); err != nil {
 		logger.GetLogger(h.ctx).Errorf("Append complete event to stream failed: %v", err)
 	}

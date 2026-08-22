@@ -194,6 +194,7 @@ func buildStreamResponse(evt interfaces.StreamEvent, requestID string) *types.St
 		Content:      evt.Content,
 		Done:         evt.Done,
 		Data:         evt.Data,
+		Usage:        evt.Usage,
 	}
 
 	// Extract session_id and assistant_message_id for agent_query events
