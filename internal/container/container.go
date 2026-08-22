@@ -753,9 +753,15 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 
 	// Configure connection pool parameters
 	if os.Getenv("DB_DRIVER") == "sqlite" {
-		// SQLite only supports one concurrent writer even in WAL mode.
-		// Limiting to a single open connection serialises all DB access and
-		// prevents "database is locked" errors from concurrent goroutines.
+		// SQLite permits only one writer at a time. SQLite deployments
+		// intentionally use a single pooled connection to reduce SQLITE_BUSY
+		// contention between in-process goroutines.
+		//
+		// This serializes individual SQL statements, not multi-statement
+		// operations: read-modify-write sequences must still run in one
+		// transaction. The limit is scoped to this *sql.DB and does not
+		// coordinate other processes or database handles. Do not increase it
+		// without auditing SQLite transaction and ID-allocation paths.
 		sqlDB.SetMaxOpenConns(1)
 	} else {
 		sqlDB.SetMaxIdleConns(10)
