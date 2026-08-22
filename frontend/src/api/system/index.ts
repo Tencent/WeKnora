@@ -1004,6 +1004,11 @@ export interface ConfigSkill {
   error?: string
   bundle_sha256?: string
   installed_snapshot_id?: string
+  // Locators for this skill's most recent install conversation. Absent for
+  // skills installed before transcripts existed, which is how the drawer
+  // decides whether to offer the "view install" entry point.
+  install_session_id?: string
+  install_message_id?: string
   created_at: string
   updated_at: string
 }
