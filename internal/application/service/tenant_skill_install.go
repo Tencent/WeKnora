@@ -234,7 +234,7 @@ func (s *TenantSkillService) runInstall(
 	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{Percent: 35, Stage: "seeded"})
 
 	// 3. Let the installer agent install dependencies.
-	if err := s.driveInstallerAgent(ctx, tenantID, sess, mgr, skillDir, bundle); err != nil {
+	if err := s.driveInstallerAgent(ctx, tenantID, skillID, sess, mgr, skillDir, bundle); err != nil {
 		return err
 	}
 	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{Percent: 80, Stage: "agent_done"})
@@ -470,8 +470,8 @@ func (s *TenantSkillService) seedSkillFiles(
 // swallows engine failures (it emits an error event and returns nil) and we
 // need a reliable signal before switching the image.
 func (s *TenantSkillService) driveInstallerAgent(
-	ctx context.Context, tenantID uint64, sess *types.Session, mgr sandbox.Manager,
-	skillDir string, bundle *SkillBundle,
+	ctx context.Context, tenantID uint64, skillID string, sess *types.Session,
+	mgr sandbox.Manager, skillDir string, bundle *SkillBundle,
 ) error {
 	if s.installerAgents == nil {
 		return errors.New("custom agent service is not configured")
@@ -493,20 +493,49 @@ func (s *TenantSkillService) driveInstallerAgent(
 
 	bus := event.NewEventBus()
 	assistantMessageID := uuid.NewString()
+	prompt := buildInstallPrompt(skillDir, bundle, s.probeUv(ctx, mgr, sess.ID))
+
+	// The transcript is set up before the engine so a console that attaches
+	// while the install is still running finds a message to stream into. Its
+	// failures are logged rather than returned: an unreadable transcript is a
+	// worse outcome than no transcript, but neither is a reason to refuse an
+	// otherwise good install.
+	transcript := newInstallTranscript(ctx, bus, s.streams, s.messages, sess.ID, assistantMessageID)
+	if err := transcript.Create(ctx, prompt); err != nil {
+		logger.Warnf(ctx, "[skill] seed install transcript for %s failed: %v", skillID, err)
+	}
+	transcript.Subscribe()
+	if err := s.updateSkillFields(ctx, tenantID, sess.SandboxConfigID, skillID,
+		func(e *types.TenantSkillEntity) {
+			e.InstallSessionID = sess.ID
+			e.InstallMessageID = assistantMessageID
+		}); err != nil {
+		logger.Warnf(ctx, "[skill] record transcript locators for %s failed: %v", skillID, err)
+	}
+
 	engine, err := s.agents.CreateAgentEngine(
 		ctx, agentConfig, chatModel, nil, bus, sess.ID, assistantMessageID,
 	)
 	if err != nil {
-		return fmt.Errorf("create installer engine: %w", err)
+		runErr := fmt.Errorf("create installer engine: %w", err)
+		transcript.Finish(ctx, runErr)
+		return runErr
 	}
 
-	prompt := buildInstallPrompt(skillDir, bundle, s.probeUv(ctx, mgr, sess.ID))
 	state, err := engine.Execute(ctx, sess.ID, assistantMessageID, prompt, nil)
-	if err != nil {
-		return fmt.Errorf("installer agent failed: %w", err)
+	runErr := err
+	if runErr == nil && (state == nil || !state.IsComplete) {
+		runErr = errors.New("installer agent stopped without completing")
 	}
-	if state == nil || !state.IsComplete {
-		return errors.New("installer agent stopped without completing")
+	// Detached from cancellation: when the install lock's renewal fails the
+	// context dies, and the transcript of the run that just died is precisely
+	// what someone will want to read.
+	transcript.Finish(context.WithoutCancel(ctx), runErr)
+	if runErr != nil {
+		if err != nil {
+			return fmt.Errorf("installer agent failed: %w", err)
+		}
+		return runErr
 	}
 	return nil
 }
@@ -826,6 +855,10 @@ func (s *TenantSkillService) installStillOwnsTheRow(
 // operation name is carried into the session because the transcript is kept
 // deliberately, for troubleshooting: filing a removal's under "Skill install"
 // would send whoever reads it looking at the wrong operation.
+//
+// The description marker is what keeps this row out of the console's session
+// list, and the owner is the admin who started the operation, so a transcript
+// is readable by the person who caused it rather than by the whole workspace.
 func (s *TenantSkillService) startMaintenanceSession(
 	ctx context.Context, tenantID uint64, configID, operation string,
 ) (*types.Session, sandbox.Manager, error) {
@@ -848,8 +881,9 @@ func (s *TenantSkillService) startMaintenanceSession(
 	}
 	sess, err := s.sessions.CreateSession(ctx, &types.Session{
 		TenantID:        tenantID,
+		UserID:          sessionUserIDFromContext(ctx),
 		Title:           "Skill " + operation,
-		Description:     "Tenant skill image maintenance",
+		Description:     types.SkillMaintenanceSessionMarker + operation,
 		SandboxConfigID: configID,
 	})
 	if err != nil {

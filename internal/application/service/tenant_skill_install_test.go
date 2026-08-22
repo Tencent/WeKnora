@@ -651,6 +651,41 @@ func TestResolveInstallerModelFallsBackWhenTheAgentNamesNoModel(t *testing.T) {
 	require.Equal(t, "model-1", model.GetModelID())
 }
 
+// The console attaches to a running install through the assistant message, so
+// the locators must be on the skill row before the engine starts — not after
+// the run ends, by which point there is nothing live left to watch.
+func TestRunInstallPublishesTranscriptLocatorsBeforeTheAgentRuns(t *testing.T) {
+	fx := newInstallFixture(t)
+
+	var atExecute *types.TenantSkillEntity
+	fx.beforeExecute = func() {
+		skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+		require.NoError(t, err)
+		copied := *skill
+		atExecute = &copied
+	}
+
+	require.NoError(t, fx.svc.runInstall(ctxWithTenant(7), 7, "cfg-1", "sk-1", fx.bundle))
+
+	require.NotNil(t, atExecute, "the installer engine never ran")
+	require.NotEmpty(t, atExecute.InstallSessionID)
+	require.NotEmpty(t, atExecute.InstallMessageID)
+}
+
+// Maintenance sessions are excluded from the console by their description, and
+// scoped to the admin who started the install by their owner. Both are written
+// at creation time; neither has a backfill.
+func TestStartMaintenanceSessionMarksAndScopesTheSession(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.WithValue(ctxWithTenant(7), types.UserIDContextKey, "admin-1")
+
+	sess, _, err := fx.svc.startMaintenanceSession(ctx, 7, "cfg-1", "install")
+	require.NoError(t, err)
+	require.Equal(t, types.SkillMaintenanceSessionMarker+"install", sess.Description)
+	require.Equal(t, "admin-1", sess.UserID)
+	require.Equal(t, "Skill install", sess.Title)
+}
+
 const installSkillDir = "/opt/weknora/tenant/skills/pdf-tools"
 
 // The install commands are asserted verbatim: an install runs as root with the
@@ -717,6 +752,9 @@ type installFixture struct {
 	execResult        *sandbox.ExecuteResult
 	smokeRanAsRoot    bool
 	agentErr          error
+	// beforeExecute runs at the moment the engine would start, so a test can
+	// observe the state an attaching console would see mid-install.
+	beforeExecute func()
 	// staleMarks records every InvalidateConfigSandboxes call, so a test can
 	// state which config was marked rather than only that something was.
 	staleMarks []staleMark
@@ -819,6 +857,8 @@ func newInstallFixture(t *testing.T) *installFixture {
 		&installSessionService{fx: fx},
 		fx.modelSvc,
 		nil,
+		&transcriptStreams{},
+		&transcriptMessages{},
 	)
 	fx.svc.now = func() time.Time { return time.Date(2026, 8, 19, 9, 30, 0, 0, time.UTC) }
 	return fx
@@ -1462,6 +1502,9 @@ func (e *installAgentEngine) Execute(
 	[]chat.Message,
 	...[]string,
 ) (*types.AgentState, error) {
+	if e.fx.beforeExecute != nil {
+		e.fx.beforeExecute()
+	}
 	e.fx.record("agent-execute")
 	if e.fx.agentDelay > 0 {
 		time.Sleep(e.fx.agentDelay)

@@ -40,6 +40,12 @@ type TenantSkillService struct {
 	models          interfaces.ModelService
 	redis           *redis.Client
 
+	// streams and messages are the two halves of an install transcript: the
+	// replayable event log the console tails, and the durable rows it falls
+	// back to once the log's TTL has passed.
+	streams  interfaces.StreamManager
+	messages interfaces.MessageRepository
+
 	now func() time.Time
 
 	// cleanupTimeout bounds one piece of compensating work. Injectable so a
@@ -69,6 +75,8 @@ func NewTenantSkillService(
 	sessions interfaces.SessionService,
 	models interfaces.ModelService,
 	redisClient *redis.Client,
+	streams interfaces.StreamManager,
+	messages interfaces.MessageRepository,
 ) *TenantSkillService {
 	return &TenantSkillService{
 		skills:          skillsRepo,
@@ -81,6 +89,8 @@ func NewTenantSkillService(
 		sessions:        sessions,
 		models:          models,
 		redis:           redisClient,
+		streams:         streams,
+		messages:        messages,
 		now:             time.Now,
 		cleanupTimeout:  installCleanupTimeout,
 		localLocks:      newKeyedMutex(),

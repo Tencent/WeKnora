@@ -22,7 +22,7 @@ func TestSkillImageLockKeyIncludesTheTenant(t *testing.T) {
 }
 
 func TestTenantSkillServiceWithConfigLockLocalRespectsCanceledContext(t *testing.T) {
-	svc := NewTenantSkillService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	svc := NewTenantSkillService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	entered := make(chan struct{})
 	releaseHolder := make(chan struct{})
 	holderDone := make(chan error, 1)

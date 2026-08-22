@@ -108,7 +108,7 @@ func TestReconcileSnapshotsWarnsExtrasWithoutDeleting(t *testing.T) {
 }
 
 func TestTenantSkillServiceStartIsIdempotent(t *testing.T) {
-	svc := NewTenantSkillService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	svc := NewTenantSkillService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	require.NoError(t, svc.Start(context.Background()))
 	require.NoError(t, svc.Start(context.Background()),
@@ -140,7 +140,7 @@ func newReaperFixture(t *testing.T) *reaperFixture {
 	provider := &reaperSnapshotProvider{}
 	svc := NewTenantSkillService(
 		skills, configs, nil, &reaperSandboxResolver{provider: provider},
-		nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil,
 	)
 	svc.now = func() time.Time { return now }
 	return &reaperFixture{svc: svc, skills: skills, configs: configs, provider: provider, now: now}
