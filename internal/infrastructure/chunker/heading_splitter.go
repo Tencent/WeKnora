@@ -106,9 +106,10 @@ func splitByHeadingsImpl(text string, cfg SplitterConfig, profile *DocProfile) [
 		subBreadcrumbs := sectionBreadcrumbs(sectionRunes, primaryLevel, sectionStart)
 		subChunks := SplitText(sectionContent, cfg)
 		for _, sub := range subChunks {
+			sectionBreadcrumb := breadcrumbAtOffset(subBreadcrumbs, sub.Start, breadcrumb)
 			out = append(out, Chunk{
 				Content:       sub.Content,
-				ContextHeader: breadcrumbAtOffset(subBreadcrumbs, sub.Start, breadcrumb),
+				ContextHeader: mergeBreadcrumbs(sectionBreadcrumb, sub.ContextHeader),
 				Seq:           seq,
 				Start:         b.runeStart + sub.Start,
 				End:           b.runeStart + sub.End,
@@ -153,6 +154,13 @@ func coalesceTinyChunks(in []Chunk, chunkSize int) []Chunk {
 		next := in[i]
 		nextLen := utf8.RuneCountInString(next.Content)
 		sharedHeader := commonHeadingPrefix(cur.ContextHeader, next.ContextHeader)
+		// Table headers and other non-heading context are semantic data, not a
+		// breadcrumb hierarchy. Never collapse them to a shared heading prefix
+		// when crossing into a chunk with different context.
+		if (hasNonHeadingContext(cur.ContextHeader) || hasNonHeadingContext(next.ContextHeader)) &&
+			cur.ContextHeader != next.ContextHeader {
+			sharedHeader = ""
+		}
 		// Adjacent + still-small + would not blow the size budget → merge.
 		if sharedHeader != "" && cur.End == next.Start && curLen < target && curLen+nextLen <= chunkSize {
 			cur.Content += next.Content
@@ -173,6 +181,16 @@ func coalesceTinyChunks(in []Chunk, chunkSize int) []Chunk {
 		out[i].Seq = i
 	}
 	return out
+}
+
+func hasNonHeadingContext(contextHeader string) bool {
+	for _, line := range strings.Split(contextHeader, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "#") {
+			return true
+		}
+	}
+	return false
 }
 
 // commonHeadingPrefix returns the longest line-aligned prefix shared by two
