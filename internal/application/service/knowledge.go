@@ -701,7 +701,14 @@ func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types
 	if knowledge.Title != "" {
 		record.Title = knowledge.Title
 	}
-	if knowledge.Description != "" {
+	if knowledge.DescriptionSpecified {
+		record.Description = knowledge.Description
+		if record.Description != "" {
+			record.SummaryStatus = types.SummaryStatusCompleted
+		} else {
+			record.SummaryStatus = types.SummaryStatusNone
+		}
+	} else if knowledge.Description != "" {
 		record.Description = knowledge.Description
 	}
 	metadataChanged := false

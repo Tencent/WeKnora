@@ -707,6 +707,26 @@ func (s *sessionService) destroyBoundSandbox(ctx context.Context, sessionID stri
 	}
 }
 
+// maxSessionTitleRunes bounds the auto-generated session title. sessions.title
+// is VARCHAR(255) in every shipped migration, so an over-long model response
+// would be rejected by the database; 100 runes stays well clear of that limit
+// while still being a reasonable title length in the UI.
+const maxSessionTitleRunes = 100
+
+// sanitizeGeneratedTitle turns a raw title completion into something safe to
+// persist: the reasoning prefix some models emit is dropped, surrounding
+// whitespace is trimmed, and the result is truncated by rune (not byte) so a
+// multi-byte character is never cut in half. It reports whether truncation
+// happened so the caller can log it.
+func sanitizeGeneratedTitle(raw string) (string, bool) {
+	title := strings.TrimSpace(strings.TrimPrefix(raw, "<think>\n\n</think>"))
+	runes := []rune(title)
+	if len(runes) <= maxSessionTitleRunes {
+		return title, false
+	}
+	return strings.TrimSpace(string(runes[:maxSessionTitleRunes])), true
+}
+
 // GenerateTitle generates a title for the current conversation content
 // modelID: optional model ID to use for title generation (if empty, uses first available KnowledgeQA model)
 func (s *sessionService) GenerateTitle(ctx context.Context,
@@ -804,7 +824,14 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 	}
 
 	// Process and store the generated title
-	session.Title = strings.TrimPrefix(response.Content, "<think>\n\n</think>")
+	title, truncated := sanitizeGeneratedTitle(response.Content)
+	if truncated {
+		logger.Warnf(ctx,
+			"Generated session title exceeded %d runes and was truncated, session=%s, model=%s",
+			maxSessionTitleRunes, session.ID, modelID,
+		)
+	}
+	session.Title = title
 
 	// Update session with new title
 	_, err = s.sessionRepo.Update(ctx, session, session.UserID)

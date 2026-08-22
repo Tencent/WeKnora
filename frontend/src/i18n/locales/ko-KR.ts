@@ -4498,6 +4498,7 @@ export default {
     registerError: '가입 오류, 나중에 다시 시도해주세요',
     workspaceOnboarding: {
       title: '작업 공간 선택',
+      description: '작업 공간을 만들어 시작하거나 기존 작업 공간의 초대를 수락하세요.',
       create: '공간 만들기',
       invitations: '초대 보기',
       loadingPolicy: '사용 가능한 공간 참여 방식을 확인하고 있습니다…',
@@ -4506,6 +4507,7 @@ export default {
       inviteOnlyTitle: '작업 공간 초대 대기',
       inviteOnlyDescription: '개인 공간 만들기가 비활성화되어 있습니다. 관리자가 보낸 초대를 확인하고 수락하세요.',
       inviteOnlyNotice: '이 계정은 초대를 통해서만 기존 공간에 참여할 수 있습니다',
+      help: '지금 작업 공간을 만들거나 나중에 돌아와 초대를 수락할 수 있습니다.',
       inviteOnlyHelp: '초대가 없다면 등록 이메일을 공간 관리자에게 전달하고 초대를 요청하세요.'
     }
   },

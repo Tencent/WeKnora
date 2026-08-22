@@ -187,7 +187,7 @@ type FAQSearchRequest struct {
 1. **混合召回**：查询文本归一化后做向量检索 + BM25 关键词检索，融合去重；
 2. **两级标签优先**：`FirstPriorityTagIDs` 命中的条目排最前，其次 `SecondPriorityTagIDs`；
 3. **负例过滤**（`filterByNegativeQuestions`）：查询文本与某条目的任一反例问完全匹配（小写比较）→ 该条目从结果中剔除。典型场景：用户问"不支持 X 吗"，避免返回"支持 X"的条目；
-4. **迭代召回**（`applyFAQPostProcessing`）：当过滤后的唯一条目数不足 `match_count` 且向量结果打满时触发 `iterativeRetrieveWithDeduplication`——最多迭代 5 次、每次 TopK 翻倍，带去重与负例过滤缓存，无新结果提前终止；
+4. **迭代召回**（`applyFAQPostProcessing`）：当过滤后的唯一条目数不足 `match_count` 且向量结果打满时触发 `iterativeRetrieveWithDeduplication`——最多迭代 5 次、每次 TopK 翻倍（种子 `MatchCount*3` 与每轮增长均封顶 500，触顶即停），带去重与负例过滤缓存，无新结果提前终止；
 5. 结果附带 `score`、`match_type`、`matched_question`（实际命中的是标准问还是哪个相似问），答案按 `answer_strategy`（all / random）返回。
 
 非 FAQ 类型 KB 直接跳过该后处理（`if kb.Type != types.KnowledgeBaseTypeFAQ { return chunks, nil }`），普通混合检索不受影响；agent 检索链在 FAQ 库上同样经过这条后处理路径。

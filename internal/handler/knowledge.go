@@ -1947,14 +1947,22 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 	})
 }
 
+// UpdateKnowledgeRequest defines the partial-update body for PUT /knowledge/:id.
+// Omitted fields are left unchanged; an explicit empty description clears the summary.
+type UpdateKnowledgeRequest struct {
+	Title          *string         `json:"title"`
+	Description    *string         `json:"description"`
+	CustomMetadata json.RawMessage `json:"custom_metadata"`
+}
+
 // UpdateKnowledge godoc
 // @Summary      更新知识
-// @Description  更新知识条目信息
+// @Description  部分更新知识条目（标题/描述/自定义元数据）；未传字段保持不变，显式传空 description 可清空摘要
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string          true  "知识ID"
-// @Param        request  body      types.Knowledge true  "知识信息"
+// @Param        id       path      string                   true  "知识ID"
+// @Param        request  body      UpdateKnowledgeRequest   true  "更新字段（均可选）"
 // @Success      200      {object}  map[string]interface{}  "更新成功"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -1976,13 +1984,20 @@ func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 		return
 	}
 
-	var knowledge types.Knowledge
-	if err := c.ShouldBindJSON(&knowledge); err != nil {
+	var req UpdateKnowledgeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	knowledge.ID = id
+	knowledge := types.Knowledge{ID: id, CustomMetadata: types.JSON(req.CustomMetadata)}
+	if req.Title != nil {
+		knowledge.Title = *req.Title
+	}
+	if req.Description != nil {
+		knowledge.Description = *req.Description
+		knowledge.DescriptionSpecified = true
+	}
 
 	if err := h.kgService.UpdateKnowledge(effCtx, &knowledge); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)

@@ -633,7 +633,9 @@ curl --location 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-09cf-485b-a7b5-
 
 ## PUT `/knowledge/:id` - 更新知识
 
-更新知识条目的元信息（标题/描述/标签等）。请求体为 `Knowledge` 结构，仅服务侧白名单字段会被实际更新。
+部分更新知识条目的元信息。请求体字段均可选；**未传字段保持不变**。显式传入 `"description": ""` 可清空摘要。
+
+可更新字段：`title`、`description`、`custom_metadata`。
 
 **请求**:
 
@@ -643,9 +645,18 @@ curl --location --request PUT 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-0
 --header 'Content-Type: application/json' \
 --data '{
     "title": "彗星 - 天文百科",
-    "description": "彗星条目，已校对",
-    "tag_id": "tag-00000001",
-    "enable_status": "enabled"
+    "description": "彗星条目，已校对"
+}'
+```
+
+清空摘要示例：
+
+```curl
+curl --location --request PUT 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "description": ""
 }'
 ```
 
@@ -654,7 +665,8 @@ curl --location --request PUT 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-0
 ```json
 {
     "success": true,
-    "message": "Knowledge chunk updated successfully"
+    "message": "Knowledge updated successfully",
+    "data": {}
 }
 ```
 

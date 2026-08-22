@@ -4500,6 +4500,7 @@ export default {
     registerError: '注册错误，请稍后重试',
     workspaceOnboarding: {
       title: '选择你的工作空间',
+      description: '创建一个空间即可开始使用，或接受邀请加入已有空间。',
       create: '创建空间',
       invitations: '查看邀请',
       loadingPolicy: '正在确认可用的空间加入方式…',
@@ -4508,6 +4509,7 @@ export default {
       inviteOnlyTitle: '等待加入工作空间',
       inviteOnlyDescription: '当前系统不开放个人创建空间。你可以查看并接受管理员发来的空间邀请。',
       inviteOnlyNotice: '此账户只能通过邀请加入已有空间',
+      help: '你现在可以创建空间，也可以稍后回来接受邀请。',
       inviteOnlyHelp: '还没有邀请？请把你的注册邮箱提供给空间管理员，由管理员向你发送邀请。'
     }
   },

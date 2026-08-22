@@ -26,8 +26,15 @@ func TestKnowledgeFileUpdateSlotMigratesExistingSQLite(t *testing.T) {
 		CREATE TABLE knowledge_bases (id TEXT PRIMARY KEY);
 		CREATE TABLE tenants (id INTEGER PRIMARY KEY);
 		CREATE TABLE messages (id TEXT PRIMARY KEY);
+		CREATE TABLE tenant_invitations (
+			id INTEGER PRIMARY KEY,
+			tenant_id INTEGER NOT NULL,
+			invitee_user_id TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'pending',
+			deleted_at DATETIME
+		);
 		CREATE TABLE schema_migrations (version INTEGER NOT NULL PRIMARY KEY, dirty BOOLEAN NOT NULL);
-		INSERT INTO schema_migrations(version, dirty) VALUES (2, 0);
+		INSERT INTO schema_migrations(version, dirty) VALUES (11, 0);
 	`)
 	require.NoError(t, err)
 

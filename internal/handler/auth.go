@@ -103,19 +103,27 @@ func (h *AuthHandler) resolveRegistrationMode(ctx context.Context) string {
 	return h.systemSettingSvc.GetString(ctx, "auth.registration_mode", "", def)
 }
 
-// resolveDefaultTenantMode returns the provisioning policy for ordinary
-// public password registrations. Invitation registration never uses this
-// value: the invitation itself supplies the target tenant.
-func (h *AuthHandler) resolveDefaultTenantMode(ctx context.Context) types.TenantProvisioningMode {
+// resolveDefaultTenantMode returns the provisioning policy for a new
+// local user account.
+// Priority: DB system_settings > cfg.Auth > hard default (create_personal).
+// Shared by public registration and the SystemAdmin create-user endpoint.
+//
+// Invitation registration never uses this value: the invitation itself
+// supplies the target tenant.
+func resolveDefaultTenantMode(
+	ctx context.Context,
+	configInfo *config.Config,
+	systemSettingSvc interfaces.SystemSettingService,
+) types.TenantProvisioningMode {
 	def := config.AuthDefaultTenantModeCreatePersonal
-	if h.configInfo != nil && h.configInfo.Auth != nil {
-		if mode := strings.TrimSpace(h.configInfo.Auth.DefaultTenantMode); mode != "" {
+	if configInfo != nil && configInfo.Auth != nil {
+		if mode := strings.TrimSpace(configInfo.Auth.DefaultTenantMode); mode != "" {
 			def = mode
 		}
 	}
 	mode := def
-	if h.systemSettingSvc != nil {
-		mode = h.systemSettingSvc.GetString(
+	if systemSettingSvc != nil {
+		mode = systemSettingSvc.GetString(
 			ctx,
 			"auth.default_tenant_mode",
 			"WEKNORA_AUTH_DEFAULT_TENANT_MODE",
@@ -126,6 +134,18 @@ func (h *AuthHandler) resolveDefaultTenantMode(ctx context.Context) types.Tenant
 		return types.TenantProvisioningTenantless
 	}
 	return types.TenantProvisioningCreatePersonal
+}
+
+// resolveDefaultTenantMode returns the provisioning policy for ordinary
+// public password registrations.
+func (h *AuthHandler) resolveDefaultTenantMode(ctx context.Context) types.TenantProvisioningMode {
+	return resolveDefaultTenantMode(ctx, h.configInfo, h.systemSettingSvc)
+}
+
+// resolveDefaultTenantMode resolves the same policy for users provisioned
+// by a SystemAdmin via POST /api/v1/system/admin/users/create.
+func (h *SystemHandler) resolveDefaultTenantMode(ctx context.Context) types.TenantProvisioningMode {
+	return resolveDefaultTenantMode(ctx, h.cfg, h.systemSettingSvc)
 }
 
 // Register godoc

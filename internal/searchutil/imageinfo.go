@@ -46,6 +46,11 @@ const HTMLImageSrcURLGroup = 2
 //   - If chunkIDs are parent_text chunks, their children are text chunks
 //     whose children are image chunks → two queries.
 //
+// Disabled children are skipped at both levels. Removing an image from a chunk
+// disables its image_ocr / image_caption children (syncEditedChunkImages), and
+// disabling a text chunk disables them too; honoring that flag here is what
+// keeps a deleted image out of retrieval, summaries and model context.
+//
 // Returns a map of input chunkID → merged image_info JSON string.
 func CollectImageInfoByChunkIDs(
 	ctx context.Context,
@@ -107,6 +112,9 @@ func CollectImageInfoByChunkIDs(
 	textToParent := make(map[string]string)
 
 	for _, child := range children {
+		if !child.IsEnabled {
+			continue
+		}
 		switch child.ChunkType {
 		case types.ChunkTypeImageOCR, types.ChunkTypeImageCaption:
 			addInfo(child.ParentChunkID, child)
@@ -120,6 +128,9 @@ func CollectImageInfoByChunkIDs(
 		grandChildren, err := chunkRepo.ListChunksByParentIDs(ctx, tenantID, textChildIDs)
 		if err == nil {
 			for _, gc := range grandChildren {
+				if !gc.IsEnabled {
+					continue
+				}
 				if gc.ChunkType != types.ChunkTypeImageOCR && gc.ChunkType != types.ChunkTypeImageCaption {
 					continue
 				}

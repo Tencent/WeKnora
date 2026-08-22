@@ -1900,6 +1900,7 @@ export default {
     registerError: 'Registration error, please try again later',
     workspaceOnboarding: {
       title: 'Choose your workspace',
+      description: 'Create a workspace to get started, or accept an invitation to join one that already exists.',
       create: 'Create workspace',
       invitations: 'View invitations',
       loadingPolicy: 'Checking the available workspace options…',
@@ -1908,6 +1909,7 @@ export default {
       inviteOnlyTitle: 'Waiting for a workspace invitation',
       inviteOnlyDescription: 'Personal workspace creation is disabled. View and accept an invitation from a workspace administrator.',
       inviteOnlyNotice: 'This account can only join an existing workspace by invitation',
+      help: 'You can create a workspace now or return later to accept an invitation.',
       inviteOnlyHelp: 'No invitation yet? Send your registered email address to a workspace administrator and ask them to invite you.'
     }
   },

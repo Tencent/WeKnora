@@ -1225,18 +1225,37 @@ const pendingKnowledgeId = ref<string | null>(
   (route.query.knowledge_id as string) || null
 );
 
-const tryAutoOpenDocument = () => {
-  if (!pendingKnowledgeId.value || !cardList.value?.length) return;
+let autoOpenRequest = 0;
+
+const tryAutoOpenDocument = async () => {
+  if (!pendingKnowledgeId.value) return;
   const targetId = pendingKnowledgeId.value;
   pendingKnowledgeId.value = null;
+  const request = ++autoOpenRequest;
   const card = cardList.value.find((c: KnowledgeCard) => c.id === targetId);
-  if (card) {
-    nextTick(() => openCardDetails(card));
-  } else {
-    nextTick(() => {
-      openCardDetails({ id: targetId } as KnowledgeCard);
-    });
+
+  // The current card list only contains the folder being browsed. A document
+  // opened from chat references may live in any nested folder, so resolve its
+  // folder from the detail endpoint before opening the drawer. Otherwise the
+  // drawer opens correctly while the page misleadingly remains at KB root.
+  let target = card || ({ id: targetId } as KnowledgeCard);
+  try {
+    const response: any = await getKnowledgeDetails(targetId);
+    if (request !== autoOpenRequest) return;
+    const detail = response?.data || response;
+    if (detail && typeof detail === 'object') {
+      target = { ...target, ...detail, id: targetId } as KnowledgeCard;
+      selectedFolderPath.value = detail.folder_path || ROOT_FOLDER_PATH;
+    }
+  } catch (error) {
+    // Keep the previous ID-only fallback: getCardDetails will surface the
+    // normal detail loading error, while links to root-level files still work.
+    console.error('Failed to resolve referenced document folder', error);
   }
+
+  if (request !== autoOpenRequest) return;
+  await nextTick();
+  openCardDetails(target);
 };
 
 // React to later ?knowledge_id= changes on the same KB route (no remount).
@@ -1245,8 +1264,6 @@ watch(
   (newId) => {
     if (typeof newId !== 'string' || !newId) return;
     pendingKnowledgeId.value = newId;
-    // cardList is almost always already loaded at this point; if not, the
-    // cardList watcher below will pick it up.
     tryAutoOpenDocument();
   },
 );
@@ -1287,8 +1304,8 @@ watch(() => cardList.value, (newValue) => {
   if (isFAQ.value) return;
   docListLoading.value = false;
 
-  // Auto-open document if navigated with ?knowledge_id=xxx
-  if (pendingKnowledgeId.value && newValue?.length) {
+  // Auto-open document if navigated with ?knowledge_id=xxx.
+  if (pendingKnowledgeId.value) {
     tryAutoOpenDocument();
   }
 

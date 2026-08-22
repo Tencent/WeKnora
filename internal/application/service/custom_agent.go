@@ -144,8 +144,9 @@ func (s *customAgentService) GetAgentByID(ctx context.Context, id string) (*type
 		// Try to get from database first (for customized config)
 		agent, err := s.repo.GetAgentByID(ctx, id, tenantID)
 		if err == nil {
-			// Found in database, return with customized config
+			// Found in database, overlay locale-specific name/description/avatar
 			agent.EnsureDefaults()
+			types.ApplyBuiltinAgentLocalization(ctx, agent)
 			return agent, nil
 		}
 		// Not in database, return default built-in agent from registry (i18n-aware)
@@ -222,6 +223,7 @@ func (s *customAgentService) ListAgents(ctx context.Context) ([]*types.CustomAge
 			// Use customized config from database
 			for _, agent := range allAgents {
 				if agent.ID == builtinID {
+					types.ApplyBuiltinAgentLocalization(ctx, agent)
 					result = append(result, agent)
 					break
 				}
