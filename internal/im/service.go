@@ -1690,8 +1690,8 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 
 	logger.Infof(ctx, "[IM] HandleMessage: channel=%s platform=%s user=%s chat=%s msgtype=%s content_len=%d",
 		channelID, msg.Platform, msg.UserID, msg.ChatID, msg.MessageType, len(msg.Content))
-	logger.Debugf(ctx, "[IM] HandleMessage detail: msgid=%s filekey=%s filename=%s",
-		msg.MessageID, msg.FileKey, msg.FileName)
+	logger.Debugf(ctx, "[IM] HandleMessage detail: msgid=%s raw_msgtype=%s filekey=%s filename=%s",
+		msg.MessageID, msg.Extra["raw_msgtype"], msg.FileKey, msg.FileName)
 
 	// ── File/Image message handling ──
 	// File messages use the normal QA path as well.  A configured knowledge base
@@ -1700,6 +1700,22 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	// the save rather than rejecting the message.
 	if msg.MessageType == MessageTypeFile || msg.MessageType == MessageTypeImage {
 		msg.Content = fileMessageQAContent(msg)
+	}
+
+	// Never send an empty query into rewrite/intent classification. Some IM
+	// platforms deliver unsupported rich message shapes with no normalized text;
+	// allowing those through makes the model infer an unrelated intent from an
+	// empty query (for example, rewriting it as a greeting).
+	if hint, empty := emptyIncomingMessageReply(msg); empty {
+		logger.Infof(ctx, "[IM] Skipping QA for message without content: type=%s raw_type=%s",
+			msg.MessageType, msg.Extra["raw_msgtype"])
+		if err := adapter.SendReply(ctx, msg, &ReplyMessage{
+			Content: hint,
+			IsFinal: true,
+		}); err != nil {
+			logger.Warnf(ctx, "[IM] Failed to send empty-message hint reply: %v", err)
+		}
+		return nil
 	}
 
 	// 1. Get tenant
@@ -1830,6 +1846,13 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	}
 
 	return nil
+}
+
+func emptyIncomingMessageReply(msg *IncomingMessage) (string, bool) {
+	if msg == nil || strings.TrimSpace(msg.Content) != "" {
+		return "", false
+	}
+	return "未能识别这条消息中的文字内容。请改用纯文本发送；图片或文件请单独发送。", true
 }
 
 func (s *Service) persistIMLastRequestState(ctx context.Context, sessionID, agentID string, customAgent *types.CustomAgent, kbIDs []string) {
