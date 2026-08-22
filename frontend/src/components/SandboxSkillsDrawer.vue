@@ -130,6 +130,20 @@
                   @change="(v: any) => toggleEnabled(skill, Boolean(v))"
                 />
               </t-tooltip>
+              <t-tooltip
+                v-if="hasTranscript(skill)"
+                :content="$t('settings.sandbox.skillTranscript')"
+                placement="top"
+              >
+                <t-button
+                  variant="text"
+                  shape="square"
+                  size="small"
+                  @click="openTranscript(skill)"
+                >
+                  <template #icon><t-icon name="chat-bubble-history" /></template>
+                </t-button>
+              </t-tooltip>
               <t-tooltip :content="$t('settings.sandbox.skillView')" placement="top">
                 <t-button
                   variant="text"
@@ -193,6 +207,14 @@
         </li>
       </ul>
     </t-dialog>
+
+    <SkillInstallTranscript
+      v-model:visible="showTranscript"
+      :session-id="transcriptSkill?.install_session_id || ''"
+      :message-id="transcriptSkill?.install_message_id || ''"
+      :title="transcriptTitle"
+      :live="transcriptLive"
+    />
   </SettingDrawer>
 </template>
 
@@ -203,6 +225,7 @@ import { useI18n } from 'vue-i18n'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
+import SkillInstallTranscript from '@/components/SkillInstallTranscript.vue'
 import {
   getAgentById,
   updateAgent,
@@ -244,6 +267,8 @@ const togglingId = ref('')
 const deletingId = ref('')
 const showView = ref(false)
 const viewing = ref<ConfigSkill | null>(null)
+const showTranscript = ref(false)
+const transcriptSkill = ref<ConfigSkill | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const progressById = ref<Record<string, ConfigSkillInstallEvent>>({})
 
@@ -298,6 +323,31 @@ function statusLabel(skill: ConfigSkill): string {
 function isBusy(skill: ConfigSkill): boolean {
   return skill.status === 'installing' || skill.status === 'removing'
 }
+
+function hasTranscript(skill: ConfigSkill): boolean {
+  return Boolean(skill.install_session_id && skill.install_message_id)
+}
+
+function openTranscript(skill: ConfigSkill) {
+  transcriptSkill.value = skill
+  showTranscript.value = true
+}
+
+const transcriptTitle = computed(() => {
+  const skill = transcriptSkill.value
+  if (!skill) return ''
+  return t('settings.sandbox.skillTranscriptTitle', { name: skill.name || skill.id })
+})
+
+// The drawer already polls every two seconds while a skill is busy, so reading
+// the live flag off the refreshed row keeps the window in step with the run
+// without a second timer.
+const transcriptLive = computed(() => {
+  const id = transcriptSkill.value?.id
+  if (!id) return false
+  const current = skills.value.find((skill) => skill.id === id)
+  return current ? isBusy(current) : false
+})
 
 function progressOf(skill: ConfigSkill): number {
   const percent = progressById.value[skill.id]?.percent
