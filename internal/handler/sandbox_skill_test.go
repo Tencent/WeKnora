@@ -616,3 +616,26 @@ func TestSandboxSkillInstallEventsStopsFollowingAfterCap(t *testing.T) {
 	require.Equal(t, types.SkillStatusInstalling, final["status"],
 		"giving up on following must not be reported as a finished install")
 }
+
+// The transcript locators are the only way the console can find an install's
+// conversation, so they must survive the outward projection.
+func TestToSkillResponseCarriesTranscriptLocators(t *testing.T) {
+	got := toSkillResponse(&types.TenantSkillEntity{
+		ID:               "sk-1",
+		Name:             "pdf-tools",
+		Status:           types.SkillStatusReady,
+		InstallSessionID: "sess-1",
+		InstallMessageID: "msg-1",
+	})
+	require.Equal(t, "sess-1", got.InstallSessionID)
+	require.Equal(t, "msg-1", got.InstallMessageID)
+}
+
+// A skill installed before this feature shipped has no locators; the fields
+// must be absent rather than empty so the console can hide the entry point.
+func TestToSkillResponseOmitsMissingTranscriptLocators(t *testing.T) {
+	raw, err := json.Marshal(toSkillResponse(&types.TenantSkillEntity{ID: "sk-1"}))
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "install_session_id")
+	require.NotContains(t, string(raw), "install_message_id")
+}

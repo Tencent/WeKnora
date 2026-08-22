@@ -71,6 +71,13 @@ type TenantSkillEntity struct {
 	// kept for audit and chain troubleshooting.
 	InstalledSnapshotID string `gorm:"type:varchar(255)"`
 
+	// InstallSessionID / InstallMessageID locate the installer agent's
+	// transcript for the most recent install of this skill. A re-install
+	// overwrites them: the previous run's conversation is superseded by the
+	// one that produced the image now in service.
+	InstallSessionID string `gorm:"type:varchar(36)"`
+	InstallMessageID string `gorm:"type:varchar(36)"`
+
 	Status string `gorm:"type:varchar(32);not null"`
 	Error  string `gorm:"type:text"`
 	// InstallingSince drives the stuck-run reaper for both install and remove.

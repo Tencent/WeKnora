@@ -86,6 +86,8 @@ type skillResponse struct {
 	Error               string    `json:"error,omitempty"`
 	BundleSHA256        string    `json:"bundle_sha256,omitempty"`
 	InstalledSnapshotID string    `json:"installed_snapshot_id,omitempty"`
+	InstallSessionID    string    `json:"install_session_id,omitempty"`
+	InstallMessageID    string    `json:"install_message_id,omitempty"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
 }
@@ -104,6 +106,8 @@ func toSkillResponse(e *types.TenantSkillEntity) skillResponse {
 		Error:               e.Error,
 		BundleSHA256:        e.BundleSHA256,
 		InstalledSnapshotID: e.InstalledSnapshotID,
+		InstallSessionID:    e.InstallSessionID,
+		InstallMessageID:    e.InstallMessageID,
 		CreatedAt:           e.CreatedAt,
 		UpdatedAt:           e.UpdatedAt,
 	}
