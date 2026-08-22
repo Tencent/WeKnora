@@ -226,6 +226,27 @@ func NewWikiAsynqServer(svc interfaces.SystemSettingService) *asynq.Server {
 }
 
 func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
+	mux := newAsynqServeMux(params)
+
+	// Run the same mux on every pool. Shared and dedicated servers intentionally
+	// overlap, but Redis dequeue is atomic, so each task still executes once.
+	runPool := func(name string, srv *asynq.Server) {
+		go func() {
+			if err := srv.Run(mux); err != nil {
+				log.Fatalf("could not run %s asynq server: %v", name, err)
+			}
+		}()
+	}
+	runPool("core-pool", params.CoreServer)
+	runPool("postprocess-pool", params.PostProcessServer)
+	runPool("enrichment-pool", params.EnrichmentServer)
+	runPool("maintenance-pool", params.MaintenanceServer)
+	runPool("shared-pool", params.SharedServer)
+	runPool("wiki-pool", params.WikiServer)
+	return mux
+}
+
+func newAsynqServeMux(params AsynqTaskParams) *asynq.ServeMux {
 	// Create a new mux and register all handlers
 	mux := asynq.NewServeMux()
 
@@ -265,6 +286,7 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 
 	// Register document processing handler
 	mux.HandleFunc(types.TypeDocumentProcess, params.KnowledgeService.ProcessDocument)
+	mux.HandleFunc(types.TypeKnowledgeFileUpdate, params.KnowledgeService.ProcessKnowledgeFileUpdate)
 	mux.HandleFunc(types.TypeTemporaryDocumentProcess, params.TemporaryDocument.Process)
 
 	// Register manual knowledge processing handler (cleanup + re-indexing)
@@ -314,23 +336,10 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	mux.HandleFunc(types.TypeWikiFinalize, params.WikiIngest.Handle)
 
 	// Register long-term memory distillation handler
-	mux.HandleFunc(types.TypeMemoryExtract, params.MemoryService.Handle)
-
-	// Run the same mux on every pool. Shared and dedicated servers intentionally
-	// overlap, but Redis dequeue is atomic, so each task still executes once.
-	runPool := func(name string, srv *asynq.Server) {
-		go func() {
-			if err := srv.Run(mux); err != nil {
-				log.Fatalf("could not run %s asynq server: %v", name, err)
-			}
-		}()
+	if params.MemoryService != nil {
+		mux.HandleFunc(types.TypeMemoryExtract, params.MemoryService.Handle)
 	}
-	runPool("core-pool", params.CoreServer)
-	runPool("postprocess-pool", params.PostProcessServer)
-	runPool("enrichment-pool", params.EnrichmentServer)
-	runPool("maintenance-pool", params.MaintenanceServer)
-	runPool("shared-pool", params.SharedServer)
-	runPool("wiki-pool", params.WikiServer)
+
 	return mux
 }
 
@@ -398,6 +407,10 @@ func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService, tracker servic
 			markKnowledgeListDeleteFailed(ctx, repo, t, taskErr)
 			return
 		}
+		if t.Type() == types.TypeKnowledgeFileUpdate {
+			markKnowledgeFileUpdateFailed(ctx, repo, t, taskErr)
+			return
+		}
 		if _, ok := taskTypesAffectingKnowledgeStatus[t.Type()]; !ok {
 			return
 		}
@@ -428,6 +441,102 @@ func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService, tracker servic
 				types.SpanStatusFailed, nil, "TASK_TIMEOUT", errMsg)
 		}
 		logger.Infof(ctx, "dead-letter callback: marked knowledge %s as failed (task=%s)", probe.KnowledgeID, t.Type())
+	}
+}
+
+func markKnowledgeFileUpdateFailed(
+	ctx context.Context,
+	repo interfaces.KnowledgeRepository,
+	t *asynq.Task,
+	taskErr error,
+) {
+	var wake types.KnowledgeFileUpdateTaskPayload
+	if err := json.Unmarshal(t.Payload(), &wake); err != nil ||
+		wake.TenantID == 0 || wake.KnowledgeID == "" || wake.ActiveVersion == 0 {
+		return
+	}
+	slot, err := repo.GetKnowledgeFileUpdateSlot(ctx, wake.TenantID, wake.KnowledgeID)
+	if err != nil {
+		logger.Warnf(ctx, "dead-letter callback: failed to load file update slot for %s: %v",
+			wake.KnowledgeID, err)
+		return
+	}
+	if slot.ActiveVersion == nil || *slot.ActiveVersion != wake.ActiveVersion ||
+		slot.ActiveState == types.KnowledgeFileUpdateStateFailed ||
+		slot.ActiveState == types.KnowledgeFileUpdateStateIdle {
+		return
+	}
+	errMsg := "task " + t.Type() + " exhausted retries: " + taskErr.Error()
+	if len(errMsg) > 512 {
+		errMsg = errMsg[:512]
+	}
+	marked, err := repo.TransitionKnowledgeFileUpdateState(
+		ctx,
+		wake.TenantID,
+		wake.KnowledgeID,
+		wake.ActiveVersion,
+		slot.ActiveState,
+		types.KnowledgeFileUpdateStateFailed,
+		errMsg,
+	)
+	if err != nil {
+		logger.Warnf(ctx, "dead-letter callback: failed to mark file update %s as failed: %v",
+			wake.KnowledgeID, err)
+		return
+	}
+	if !marked {
+		return
+	}
+	restoreFailedKnowledgeFileUpdateClaim(ctx, repo, wake, slot)
+	logger.Infof(ctx, "dead-letter callback: marked file update %s as failed", wake.KnowledgeID)
+}
+
+func restoreFailedKnowledgeFileUpdateClaim(
+	ctx context.Context,
+	repo interfaces.KnowledgeRepository,
+	wake types.KnowledgeFileUpdateTaskPayload,
+	slot *types.KnowledgeFileUpdateSlot,
+) {
+	var active types.KnowledgeFileUpdatePayload
+	if err := json.Unmarshal(slot.ActivePayload, &active); err != nil || active.OldFilePath == "" {
+		return
+	}
+	restoreStatus := active.OldParseStatus
+	if !isRestorableFileUpdateParseStatus(restoreStatus) {
+		restoreStatus = types.ParseStatusFailed
+	}
+	kbID := wake.KnowledgeBaseID
+	if kbID == "" {
+		kbID = slot.KnowledgeBaseID
+	}
+	if kbID == "" {
+		kbID = active.KnowledgeBaseID
+	}
+	_, err := repo.UpdateApplyingKnowledgeFileColumns(
+		ctx,
+		wake.TenantID,
+		wake.KnowledgeID,
+		kbID,
+		active.OldFilePath,
+		active.OldFileHash,
+		map[string]interface{}{
+			"parse_status":  restoreStatus,
+			"error_message": "",
+			"updated_at":    time.Now(),
+		},
+	)
+	if err != nil {
+		logger.Warnf(ctx, "dead-letter callback: failed to restore file update %s status: %v",
+			wake.KnowledgeID, err)
+	}
+}
+
+func isRestorableFileUpdateParseStatus(status string) bool {
+	switch status {
+	case types.ParseStatusCompleted, types.ParseStatusFailed, types.ParseStatusCancelled:
+		return true
+	default:
+		return false
 	}
 }
 

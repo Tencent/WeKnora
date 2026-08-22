@@ -442,6 +442,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// persistence succeeded immediately before trigger enqueue failed). Re-arm
 	// them only after the matching handlers are ready.
 	must(container.Invoke(recoverPendingWikiTasks))
+	must(container.Invoke(recoverPendingFileUpdates))
 
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")
 	return container

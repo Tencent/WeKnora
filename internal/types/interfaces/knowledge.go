@@ -24,6 +24,19 @@ type KnowledgeService interface {
 		channel string,
 		processOverrides *types.KnowledgeProcessOverrides,
 	) (*types.Knowledge, error)
+	// CreateOrUpdateKnowledgeFromFile creates a new file knowledge, or updates
+	// an existing file knowledge selected by explicit knowledge_id or unique
+	// filename match.
+	CreateOrUpdateKnowledgeFromFile(
+		ctx context.Context,
+		req *types.KnowledgeFileCreateOrUpdateRequest,
+	) (*types.KnowledgeFileUpsertResult, error)
+	// UpdateKnowledgeFile stages and asynchronously replaces the source file
+	// of an existing file knowledge while preserving its ID.
+	UpdateKnowledgeFile(
+		ctx context.Context,
+		req *types.KnowledgeFileUpdateRequest,
+	) (*types.KnowledgeFileUpsertResult, error)
 	// CreateKnowledgeFromURL creates knowledge from a URL.
 	// When fileName or fileType is provided (or the URL path has a known file extension),
 	// the URL is treated as a direct file download instead of a web page crawl.
@@ -193,6 +206,8 @@ type KnowledgeService interface {
 	ProcessManualUpdate(ctx context.Context, t *asynq.Task) error
 	// ProcessDocument handles Asynq document processing tasks
 	ProcessDocument(ctx context.Context, t *asynq.Task) error
+	// ProcessKnowledgeFileUpdate coordinates durable active/pending file updates.
+	ProcessKnowledgeFileUpdate(ctx context.Context, t *asynq.Task) error
 	// ProcessFAQImport handles Asynq FAQ import tasks
 	ProcessFAQImport(ctx context.Context, t *asynq.Task) error
 	// ProcessQuestionGeneration handles Asynq question generation tasks
@@ -256,6 +271,15 @@ type KnowledgeRepository interface {
 		kbID string,
 		params *types.KnowledgeCheckParams,
 	) (bool, *types.Knowledge, error)
+	// CheckKnowledgeExistsExcluding is CheckKnowledgeExists with one knowledge
+	// ID excluded, used when validating an in-place replacement.
+	CheckKnowledgeExistsExcluding(
+		ctx context.Context,
+		tenantID uint64,
+		kbID string,
+		excludeKnowledgeID string,
+		params *types.KnowledgeCheckParams,
+	) (bool, *types.Knowledge, error)
 	// ListKnowledgeFolderCounts aggregates the number of knowledge entries
 	// stored directly in each folder_path of a knowledge base.
 	ListKnowledgeFolderCounts(
@@ -289,6 +313,65 @@ type KnowledgeRepository interface {
 	// statement so callers that flip several related fields (e.g. parse_status +
 	// error_message) cannot leave the row in a half-updated state.
 	UpdateKnowledgeColumns(ctx context.Context, id string, values map[string]interface{}) error
+	// ClaimKnowledgeFileUpdate atomically moves one exact file version from a
+	// terminal parse status to replacing.
+	ClaimKnowledgeFileUpdate(
+		ctx context.Context,
+		tenantID uint64,
+		knowledgeID string,
+		kbID string,
+		expectedStatus string,
+		expectedFilePath string,
+		expectedFileHash string,
+	) (bool, error)
+	// UpdateApplyingKnowledgeFileColumns updates a row only while it is still the
+	// file version claimed by a replacement task.
+	UpdateApplyingKnowledgeFileColumns(
+		ctx context.Context,
+		tenantID uint64,
+		knowledgeID string,
+		kbID string,
+		expectedFilePath string,
+		expectedFileHash string,
+		values map[string]interface{},
+	) (bool, error)
+	StageKnowledgeFileUpdate(
+		ctx context.Context,
+		tenantID uint64,
+		knowledgeID string,
+		kbID string,
+		payload types.JSON,
+		expectedVersion *uint64,
+	) (*types.KnowledgeFileUpdateStageResult, error)
+	GetKnowledgeFileUpdateSlot(
+		ctx context.Context, tenantID uint64, knowledgeID string,
+	) (*types.KnowledgeFileUpdateSlot, error)
+	PrepareKnowledgeFileUpdate(
+		ctx context.Context, tenantID uint64, knowledgeID string, version uint64, payload types.JSON,
+	) (bool, error)
+	TransitionKnowledgeFileUpdateState(
+		ctx context.Context,
+		tenantID uint64,
+		knowledgeID string,
+		version uint64,
+		fromState string,
+		toState string,
+		lastError string,
+	) (bool, error)
+	CompleteKnowledgeFileUpdate(
+		ctx context.Context, tenantID uint64, knowledgeID string, version uint64,
+	) (*types.KnowledgeFileUpdateSlot, error)
+	CancelKnowledgeFileUpdates(
+		ctx context.Context, tenantID uint64, knowledgeID string,
+	) (*types.KnowledgeFileUpdateSlot, error)
+	// BeginKnowledgeDeletion atomically marks active knowledge rows as deleting
+	// and removes their file-update coordination slots.
+	BeginKnowledgeDeletion(
+		ctx context.Context, tenantID uint64, knowledgeIDs []string,
+	) ([]*types.KnowledgeFileUpdateSlot, error)
+	ListRecoverableKnowledgeFileUpdates(
+		ctx context.Context, limit int,
+	) ([]*types.KnowledgeFileUpdateSlot, error)
 	// UpdateActiveDeletingKnowledgeColumns updates an active, non-deleted knowledge row
 	// only when it is still in the transient deleting state.
 	UpdateActiveDeletingKnowledgeColumns(ctx context.Context, id string, values map[string]interface{}) (bool, error)

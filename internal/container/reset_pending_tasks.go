@@ -173,6 +173,7 @@ func resettableParseStatuses() []string {
 		types.ParseStatusPending,
 		types.ParseStatusProcessing,
 		types.ParseStatusFinalizing,
+		types.ParseStatusReplacing,
 		types.ParseStatusDeleting,
 	}
 }

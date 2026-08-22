@@ -83,6 +83,7 @@ var queueDefinitions = []QueueDefinition{
 	{Name: QueueMaintenance, Pool: WorkerPoolMaintenance, Weight: 1, TaskTypes: []string{
 		TypeFAQImport, TypeKBClone, TypeIndexDelete, TypeKBDelete,
 		TypeKnowledgeListDelete, TypeKnowledgeListReparse, TypeKnowledgeMove,
+		TypeKnowledgeFileUpdate,
 	}},
 	{Name: QueueWiki, Pool: WorkerPoolWiki, Weight: 1, TaskTypes: []string{TypeWikiIngest, TypeWikiFinalize}},
 }
@@ -234,6 +235,7 @@ type WorkerServerStat struct {
 const (
 	TypeChunkExtract             = "chunk:extract"
 	TypeDocumentProcess          = "document:process"           // 文档处理任务
+	TypeKnowledgeFileUpdate      = "knowledge:file_update"      // 文件知识更新协调任务
 	TypeFAQImport                = "faq:import"                 // FAQ导入任务（包含dry run模式）
 	TypeQuestionGeneration       = "question:generation"        // 问题生成任务
 	TypeSummaryGeneration        = "summary:generation"         // 摘要生成任务
@@ -452,6 +454,46 @@ type KnowledgeListReparsePayload struct {
 	KnowledgeIDs  []string                   `json:"knowledge_ids"`
 	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
 	Initiator     TaskInitiator              `json:"initiator,omitempty"`
+}
+
+// KnowledgeFileUpdatePayload describes a staged, in-place file replacement.
+// It contains storage references and metadata only; file bytes never enter the
+// task queue. Old and new identities make retries and stale deliveries safe.
+type KnowledgeFileUpdatePayload struct {
+	TracingContext
+	TenantID         uint64                     `json:"tenant_id"`
+	KnowledgeBaseID  string                     `json:"knowledge_base_id"`
+	KnowledgeID      string                     `json:"knowledge_id"`
+	OldParseStatus   string                     `json:"old_parse_status,omitempty"`
+	OldFilePath      string                     `json:"old_file_path"`
+	OldFileHash      string                     `json:"old_file_hash"`
+	NewFilePath      string                     `json:"new_file_path"`
+	NewFileName      string                     `json:"new_file_name"`
+	NewFolderPath    string                     `json:"new_folder_path,omitempty"`
+	NewFileType      string                     `json:"new_file_type"`
+	NewFileSize      int64                      `json:"new_file_size"`
+	NewFileHash      string                     `json:"new_file_hash"`
+	Metadata         map[string]string          `json:"metadata,omitempty"`
+	MetadataProvided bool                       `json:"metadata_provided,omitempty"`
+	TagIDs           []string                   `json:"tag_ids,omitempty"`
+	TagIDsProvided   bool                       `json:"tag_ids_provided,omitempty"`
+	Channel          string                     `json:"channel,omitempty"`
+	ChannelProvided  bool                       `json:"channel_provided,omitempty"`
+	ProcessConfig    *KnowledgeProcessOverrides `json:"process_config,omitempty"`
+	ProcessProvided  bool                       `json:"process_provided,omitempty"`
+	DocumentTaskID   string                     `json:"document_task_id"`
+	Initiator        TaskInitiator              `json:"initiator,omitempty"`
+	Attempt          int                        `json:"attempt,omitempty"`
+}
+
+// KnowledgeFileUpdateTaskPayload wakes the durable active/pending coordinator.
+// The actual file payload is always loaded from knowledge_file_update_slots.
+type KnowledgeFileUpdateTaskPayload struct {
+	TenantID        uint64 `json:"tenant_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	KnowledgeID     string `json:"knowledge_id"`
+	ActiveVersion   uint64 `json:"active_version"`
+	WakeSequence    uint64 `json:"wake_sequence,omitempty"`
 }
 
 // KnowledgeMovePayload represents the knowledge move task payload

@@ -285,7 +285,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	if p.KnowledgeID != "" && s.knowledgeRepo != nil {
 		if k, kerr := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, p.KnowledgeID); kerr == nil && k != nil {
 			switch k.ParseStatus {
-			case types.ParseStatusCancelled, types.ParseStatusDeleting:
+			case types.ParseStatusCancelled, types.ParseStatusDeleting, types.ParseStatusReplacing:
 				logger.Infof(ctx, "graph extract: knowledge %s aborted (%s), skipping chunk %s",
 					p.KnowledgeID, k.ParseStatus, p.ChunkID)
 				graphOut["skipped"] = "knowledge_" + k.ParseStatus
