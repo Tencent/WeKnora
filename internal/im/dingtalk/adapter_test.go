@@ -180,6 +180,65 @@ func TestParseCallbackMessage_TextStillWorks(t *testing.T) {
 	}
 }
 
+func TestParseCallbackMessage_RichTextPreservesTextAndPictureMetadata(t *testing.T) {
+	msg := &callbackMessage{
+		MsgID:     "rich-1",
+		Msgtype:   "richText",
+		RobotCode: "robot-123",
+		Content: json.RawMessage(`{
+			"richText":[
+				{"text":"  这个问题示例图如下：  "},
+				{"pictureDownloadCode":"PIC-FALLBACK","downloadCode":"PIC-CODE","type":"picture"},
+				{"text":"通过以上示意图可以明白完整的交互流程"}
+			]
+		}`),
+	}
+
+	got := parseCallbackMessage(msg)
+	if got.MessageType != im.MessageTypeImage {
+		t.Fatalf("MessageType = %q, want %q", got.MessageType, im.MessageTypeImage)
+	}
+	if got.Content != "这个问题示例图如下：\n通过以上示意图可以明白完整的交互流程" {
+		t.Errorf("Content = %q", got.Content)
+	}
+	if got.FileKey != "PIC-CODE" {
+		t.Errorf("FileKey = %q, want PIC-CODE", got.FileKey)
+	}
+	if got.FileName != "rich-1.png" {
+		t.Errorf("FileName = %q, want rich-1.png", got.FileName)
+	}
+	if got.Extra["raw_msgtype"] != "richText" {
+		t.Errorf("raw_msgtype = %q, want richText", got.Extra["raw_msgtype"])
+	}
+	if got.Extra["rich_text_picture_count"] != "1" {
+		t.Errorf("rich_text_picture_count = %q, want 1", got.Extra["rich_text_picture_count"])
+	}
+	if got.Extra["robot_code"] != "robot-123" {
+		t.Errorf("robot_code = %q, want robot-123", got.Extra["robot_code"])
+	}
+}
+
+func TestParseCallbackMessage_RichTextPictureOnlyUsesImagePath(t *testing.T) {
+	msg := &callbackMessage{
+		MsgID:   "rich-picture",
+		Msgtype: "richText",
+		Content: json.RawMessage(`{
+			"richText":[{"pictureDownloadCode":"PIC-CODE","type":"picture"}]
+		}`),
+	}
+
+	got := parseCallbackMessage(msg)
+	if got.MessageType != im.MessageTypeImage {
+		t.Fatalf("MessageType = %q, want %q", got.MessageType, im.MessageTypeImage)
+	}
+	if got.Content != "" {
+		t.Errorf("Content = %q, want empty", got.Content)
+	}
+	if got.FileKey != "PIC-CODE" {
+		t.Errorf("FileKey = %q, want PIC-CODE", got.FileKey)
+	}
+}
+
 func TestStreamToIncoming_File(t *testing.T) {
 	data := &chatbot.BotCallbackDataModel{
 		MsgId:            "m3",
@@ -239,5 +298,35 @@ func TestStreamToIncoming_TextStillWorks(t *testing.T) {
 	}
 	if got.Content != "hi" {
 		t.Errorf("Content = %q, want %q", got.Content, "hi")
+	}
+}
+
+func TestStreamToIncoming_RichTextPreservesTextAndPictureMetadata(t *testing.T) {
+	data := &chatbot.BotCallbackDataModel{
+		MsgId:   "stream-rich",
+		Msgtype: "richText",
+		Content: map[string]interface{}{
+			"richText": []interface{}{
+				map[string]interface{}{"text": "这种场景下，AI 去纹身去不干净"},
+				map[string]interface{}{"downloadCode": "STREAM-PIC", "type": "picture"},
+			},
+		},
+	}
+
+	got := streamToIncoming(data, "client-app-key")
+	if got.MessageType != im.MessageTypeImage {
+		t.Fatalf("MessageType = %q, want %q", got.MessageType, im.MessageTypeImage)
+	}
+	if got.Content != "这种场景下，AI 去纹身去不干净" {
+		t.Errorf("Content = %q", got.Content)
+	}
+	if got.FileKey != "STREAM-PIC" {
+		t.Errorf("FileKey = %q, want STREAM-PIC", got.FileKey)
+	}
+	if got.Extra["raw_msgtype"] != "richText" {
+		t.Errorf("raw_msgtype = %q, want richText", got.Extra["raw_msgtype"])
+	}
+	if got.Extra["robot_code"] != "client-app-key" {
+		t.Errorf("robot_code = %q, want client-app-key", got.Extra["robot_code"])
 	}
 }
