@@ -1,181 +1,91 @@
 package docparser
 
 import (
-	"strings"
+	"context"
+	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// EngineRegistration is the interface every locally registered parser engine
-// must implement. Remote-only engines (e.g. markitdown) are discovered via
-// the docreader ListEngines RPC and do not need a local registration.
+// EngineRegistration is what every locally registered parser engine provides:
+// the metadata the engine list shows, and the reader that does the parsing.
+// Remote-only engines (e.g. markitdown) live in the Python docreader, are
+// discovered through its ListEngines RPC, and never register here — the
+// registry routes them to the docreader client by default.
 type EngineRegistration interface {
 	Name() string
 	Description() string
 	FileTypes(docreaderConnected bool) []string
 	CheckAvailable(docreaderConnected bool, overrides map[string]string) (available bool, reason string)
+	// NewReader builds the reader for one parse request. Returning an error
+	// means this engine cannot serve the request (missing credentials,
+	// unreachable service); the caller reports it rather than silently
+	// parsing with something else.
+	NewReader(ctx context.Context, deps ReaderDeps) (interfaces.DocReader, error)
 }
 
-// localEngines holds all locally registered parser engines.
+// ReaderDeps carries everything an engine may need to build its reader but
+// cannot construct itself: tenant configuration, tenant credentials, and the
+// shared docreader connection.
+type ReaderDeps struct {
+	// Overrides holds tenant-level engine configuration (service endpoints,
+	// API keys), as produced by ParserEngineConfig.ToOverridesMap.
+	Overrides map[string]string
+	// Remote is the docreader client. Nil when the service is not connected.
+	Remote interfaces.DocReader
+	// WeKnoraCloudCredentials resolves the tenant's WeKnora Cloud
+	// credentials. It is a function rather than a value because resolving
+	// them can hit the database, which most engines never need. Nil, or a
+	// nil return, means the tenant has not configured them.
+	WeKnoraCloudCredentials func(ctx context.Context) *types.WeKnoraCloudCredentials
+}
+
+// localEngines holds all locally registered parser engines, in registration
+// order — which is also the order the engine list is shown in.
 var localEngines []EngineRegistration
 
-// RegisterEngine adds an engine to the local registry. Called in init().
+// RegisterEngine adds an engine to the local registry. Called from init().
 func RegisterEngine(e EngineRegistration) {
 	localEngines = append(localEngines, e)
 }
 
-func init() {
-	RegisterEngine(&builtinEngine{})
-	RegisterEngine(&simpleEngine{})
-	RegisterEngine(&weKnoraCloudEngine{})
-	RegisterEngine(&mineruEngine{})
-	RegisterEngine(&mineruCloudEngine{})
-	RegisterEngine(&paddleOCRVLEngine{})
-	RegisterEngine(&paddleOCRVLCloudEngine{})
-}
-
-// ---------------------------------------------------------------------------
-// builtin — DocReader-backed parser for complex document formats.
-// ---------------------------------------------------------------------------
-
-type builtinEngine struct{}
-
-func (e *builtinEngine) Name() string { return "builtin" }
-func (e *builtinEngine) Description() string {
-	return "DocReader built-in parser engine"
-}
-func (e *builtinEngine) FileTypes(_ bool) []string {
-	return []string{"docx", "doc", "pdf", "md", "markdown", "xlsx", "xls", "epub", "html", "htm", "mhtml", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "mp3", "wav", "m4a", "flac", "ogg"}
-}
-func (e *builtinEngine) CheckAvailable(docreaderConnected bool, _ map[string]string) (bool, string) {
-	if docreaderConnected {
-		return true, ""
+// lookupEngine returns the locally registered engine with this name.
+func lookupEngine(name string) (EngineRegistration, bool) {
+	for _, engine := range localEngines {
+		if engine.Name() == name {
+			return engine, true
+		}
 	}
-	return false, "DocReader service not connected"
+	return nil, false
 }
 
-// SimpleEngineName is the engine name for Go-native simple format handling.
-const SimpleEngineName = "simple"
-
-// WeKnoraCloudEngineName is the engine name for WeKnoraCloud-backed document parsing.
-const WeKnoraCloudEngineName = "weknoracloud"
-
-// ---------------------------------------------------------------------------
-// simple — Go handles md/txt/csv natively, no external service needed.
-// Distinct from docreader's "builtin" which uses Python libraries for
-// complex formats (docx, pdf, etc.).
-// ---------------------------------------------------------------------------
-
-type simpleEngine struct{}
-
-func (e *simpleEngine) Name() string { return SimpleEngineName }
-func (e *simpleEngine) Description() string {
-	return "Simple format & image parsing (no external service required)"
-}
-func (e *simpleEngine) FileTypes(_ bool) []string {
-	return []string{"md", "markdown", "txt", "csv", "json", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "mp3", "wav", "m4a", "flac", "ogg"}
-}
-func (e *simpleEngine) CheckAvailable(_ bool, _ map[string]string) (bool, string) {
-	return true, ""
-}
-
-// ---------------------------------------------------------------------------
-// weknoracloud — Tenant-scoped WeKnoraCloud docreader with signed requests.
-// ---------------------------------------------------------------------------
-
-type weKnoraCloudEngine struct{}
-
-func (e *weKnoraCloudEngine) Name() string        { return WeKnoraCloudEngineName }
-func (e *weKnoraCloudEngine) Description() string { return "WeKnoraCloud document reader" }
-func (e *weKnoraCloudEngine) FileTypes(_ bool) []string {
-	return []string{"docx", "doc", "pdf", "md", "markdown", "xlsx", "xls", "pptx", "ppt"}
-}
-func (e *weKnoraCloudEngine) CheckAvailable(docreaderConnected bool, overrides map[string]string) (bool, string) {
-	if overrides["weknoracloud_app_id"] != "" {
-		return true, ""
+// NewReader builds the reader for an engine.
+//
+// An empty engine name means "no explicit choice": simple formats are handled
+// in Go and everything else goes to the docreader service. An unknown name is
+// routed to the docreader too, so engines that only exist in the Python
+// service keep working without a Go-side registration.
+func NewReader(
+	ctx context.Context, engine, fileType string, isURL bool, deps ReaderDeps,
+) (interfaces.DocReader, error) {
+	if registration, ok := lookupEngine(engine); ok {
+		return registration.NewReader(ctx, deps)
 	}
-	return false, "WeKnora Cloud credentials not configured. Go to Settings → WeKnora Cloud to set up."
-}
-
-// ---------------------------------------------------------------------------
-// mineru — Go-native, calls self-hosted MinerU API directly
-// ---------------------------------------------------------------------------
-
-type mineruEngine struct{}
-
-func (e *mineruEngine) Name() string        { return "mineru" }
-func (e *mineruEngine) Description() string { return "MinerU self-hosted service" }
-func (e *mineruEngine) FileTypes(_ bool) []string {
-	return []string{"pdf", "jpg", "jpeg", "png", "bmp", "tiff", "doc", "docx", "ppt", "pptx"}
-}
-func (e *mineruEngine) CheckAvailable(_ bool, overrides map[string]string) (bool, string) {
-	endpoint := strings.TrimSpace(overrides["mineru_endpoint"])
-	if endpoint == "" {
-		return false, "MinerU service not configured"
+	if engine == "" && !isURL && IsSimpleFormat(fileType) {
+		return &SimpleFormatReader{}, nil
 	}
-	return PingMinerU(endpoint)
+	return remoteReader(deps)
 }
 
-// ---------------------------------------------------------------------------
-// mineru_cloud — Go-native, calls MinerU Cloud API directly
-// ---------------------------------------------------------------------------
-
-type mineruCloudEngine struct{}
-
-func (e *mineruCloudEngine) Name() string        { return "mineru_cloud" }
-func (e *mineruCloudEngine) Description() string { return "MinerU Cloud API" }
-func (e *mineruCloudEngine) FileTypes(_ bool) []string {
-	return []string{"pdf", "jpg", "jpeg", "png", "bmp", "tiff", "doc", "docx", "ppt", "pptx"}
-}
-func (e *mineruCloudEngine) CheckAvailable(_ bool, overrides map[string]string) (bool, string) {
-	apiKey := strings.TrimSpace(overrides["mineru_api_key"])
-	if apiKey == "" {
-		return false, "MinerU API Key not configured"
+// remoteReader returns the docreader client, or an error when the service is
+// not connected — a nil interface value here would panic at the call site.
+func remoteReader(deps ReaderDeps) (interfaces.DocReader, error) {
+	if deps.Remote == nil {
+		return nil, errNotConnected
 	}
-	return PingMinerUCloud(apiKey)
+	return deps.Remote, nil
 }
-
-// ---------------------------------------------------------------------------
-// paddleocr_vl — Go-native, calls a self-hosted PaddleOCR-VL pipeline service
-// ---------------------------------------------------------------------------
-
-type paddleOCRVLEngine struct{}
-
-func (e *paddleOCRVLEngine) Name() string        { return "paddleocr_vl" }
-func (e *paddleOCRVLEngine) Description() string { return "PaddleOCR-VL self-hosted service" }
-func (e *paddleOCRVLEngine) FileTypes(_ bool) []string {
-	return []string{"pdf", "jpg", "jpeg", "png", "bmp", "tiff"}
-}
-func (e *paddleOCRVLEngine) CheckAvailable(_ bool, overrides map[string]string) (bool, string) {
-	endpoint := strings.TrimSpace(overrides["paddleocr_vl_endpoint"])
-	if endpoint == "" {
-		return false, "PaddleOCR-VL service not configured"
-	}
-	return PingPaddleOCRVL(endpoint)
-}
-
-// ---------------------------------------------------------------------------
-// paddleocr_vl_cloud — Go-native, calls the PaddleOCR-VL AI Studio cloud API
-// ---------------------------------------------------------------------------
-
-type paddleOCRVLCloudEngine struct{}
-
-func (e *paddleOCRVLCloudEngine) Name() string        { return "paddleocr_vl_cloud" }
-func (e *paddleOCRVLCloudEngine) Description() string { return "PaddleOCR-VL Cloud API" }
-func (e *paddleOCRVLCloudEngine) FileTypes(_ bool) []string {
-	return []string{"pdf", "jpg", "jpeg", "png", "bmp", "tiff"}
-}
-func (e *paddleOCRVLCloudEngine) CheckAvailable(_ bool, overrides map[string]string) (bool, string) {
-	token := strings.TrimSpace(overrides["paddleocr_vl_cloud_token"])
-	if token == "" {
-		return false, "PaddleOCR-VL Cloud Token not configured"
-	}
-	return PingPaddleOCRVLCloud(token)
-}
-
-// ---------------------------------------------------------------------------
-// ListAllEngines — merge local + remote
-// ---------------------------------------------------------------------------
 
 // ListAllEngines returns the merged engine list: locally registered engines
 // plus engines discovered from the remote docreader via ListEngines RPC.
@@ -187,7 +97,9 @@ func (e *paddleOCRVLCloudEngine) CheckAvailable(_ bool, overrides map[string]str
 //     authoritative for its own capabilities).
 //   - Remote engines not present locally are appended as-is, enabling
 //     auto-discovery of newly added docreader engines without Go changes.
-func ListAllEngines(docreaderConnected bool, overrides map[string]string, remoteEngines []types.ParserEngineInfo) []types.ParserEngineInfo {
+func ListAllEngines(
+	docreaderConnected bool, overrides map[string]string, remoteEngines []types.ParserEngineInfo,
+) []types.ParserEngineInfo {
 	remoteMap := make(map[string]types.ParserEngineInfo, len(remoteEngines))
 	for _, re := range remoteEngines {
 		remoteMap[re.Name] = re
@@ -230,4 +142,10 @@ func ListAllEngines(docreaderConnected bool, overrides map[string]string, remote
 	}
 
 	return result
+}
+
+// errEngineUnavailable reports an engine that is registered but cannot run for
+// this tenant or this build.
+func errEngineUnavailable(engine, reason string) error {
+	return fmt.Errorf("parser engine %q is unavailable: %s", engine, reason)
 }
