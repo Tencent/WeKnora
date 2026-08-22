@@ -30,6 +30,14 @@ const (
 	SkillSnapshotTriggerRebuild = "rebuild"
 )
 
+// SkillMaintenanceSessionMarker tags the sessions that skill image operations
+// run in. Those sessions carry a real agent transcript that is deliberately
+// kept for troubleshooting, but they are infrastructure rather than
+// conversations, so the console must never list them. This mirrors how embed
+// sessions are classified (EmbedSessionMarkerPrefix): a description prefix,
+// so no schema change is needed.
+const SkillMaintenanceSessionMarker = "skill_maintenance:"
+
 // TenantSkillEntity is one skill installed onto one sandbox config.
 //
 // There is deliberately no entry_script / interpreter / smoke_command column:

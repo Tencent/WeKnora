@@ -175,6 +175,12 @@ func SessionRequiresAdminConsoleRead(s *Session, imPlatform string) bool {
 		strings.HasPrefix(s.UserID, PrincipalEmbedSession+":") {
 		return true
 	}
+	// Defence in depth for skill maintenance transcripts: the listing hides
+	// them, and this keeps a leaked session id from being opened by a
+	// non-admin who happens to own the row.
+	if strings.HasPrefix(s.Description, SkillMaintenanceSessionMarker) {
+		return true
+	}
 	return strings.TrimSpace(imPlatform) != ""
 }
 

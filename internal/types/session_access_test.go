@@ -48,6 +48,11 @@ func TestSessionRequiresAdminConsoleRead(t *testing.T) {
 		t.Fatal("IM-mapped session should require admin")
 	}
 
+	maintenance := &Session{Description: SkillMaintenanceSessionMarker + "install"}
+	if !SessionRequiresAdminConsoleRead(maintenance, "") {
+		t.Fatal("maintenance session should require admin")
+	}
+
 	web := &Session{UserID: "alice", Title: "my chat"}
 	if SessionRequiresAdminConsoleRead(web, "") {
 		t.Fatal("personal web session should not require admin")
