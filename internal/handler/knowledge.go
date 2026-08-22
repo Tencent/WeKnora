@@ -2206,8 +2206,8 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        keyword    query     string  false "Keyword to search"
-// @Param        offset     query     int     false "Offset for pagination"
-// @Param        limit      query     int     false "Limit for pagination (default 20)"
+// @Param        offset     query     int     false "Offset for pagination (minimum 0)" minimum(0)
+// @Param        limit      query     int     false "Limit for pagination (default 20, maximum 100)" minimum(1) maximum(100)
 // @Param        file_types query     string  false "Comma-separated file extensions to filter (e.g., csv,xlsx)"
 // @Param        agent_id   query     string  false "Shared agent ID (search within agent's KB scope)"
 // @Param        recent     query     bool    false "Return recent files when keyword is empty"
@@ -2235,8 +2235,10 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 		return
 	}
 	keyword = strings.TrimSpace(keyword)
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	offset, limit, ok := parseOffsetPagination(c)
+	if !ok {
+		return
+	}
 
 	var fileTypes []string
 	if fileTypesStr := c.Query("file_types"); fileTypesStr != "" {
