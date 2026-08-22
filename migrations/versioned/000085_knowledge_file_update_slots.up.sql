@@ -1,4 +1,4 @@
-DO $$ BEGIN RAISE NOTICE '[Migration 000084] Creating knowledge file update slots...'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000085] Creating knowledge file update slots...'; END $$;
 
 CREATE TABLE IF NOT EXISTS knowledge_file_update_slots (
     knowledge_id VARCHAR(36) PRIMARY KEY,
@@ -30,4 +30,4 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_file_update_slots_tenant_kb
 CREATE INDEX IF NOT EXISTS idx_knowledge_file_update_slots_state
     ON knowledge_file_update_slots(active_state, updated_at);
 
-DO $$ BEGIN RAISE NOTICE '[Migration 000084] Knowledge file update slots ready'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000085] Knowledge file update slots ready'; END $$;

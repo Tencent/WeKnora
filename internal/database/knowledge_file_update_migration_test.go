@@ -24,6 +24,8 @@ func TestKnowledgeFileUpdateSlotMigratesExistingSQLite(t *testing.T) {
 
 	_, err = db.Exec(`
 		CREATE TABLE knowledge_bases (id TEXT PRIMARY KEY);
+		CREATE TABLE tenants (id INTEGER PRIMARY KEY);
+		CREATE TABLE messages (id TEXT PRIMARY KEY);
 		CREATE TABLE schema_migrations (version INTEGER NOT NULL PRIMARY KEY, dirty BOOLEAN NOT NULL);
 		INSERT INTO schema_migrations(version, dirty) VALUES (2, 0);
 	`)
@@ -45,7 +47,7 @@ func TestKnowledgeFileUpdateSlotMigratesExistingSQLite(t *testing.T) {
 	require.NoError(t, migrator.Up())
 	version, dirty, err := migrator.Version()
 	require.NoError(t, err)
-	require.Equal(t, uint(4), version)
+	require.Equal(t, uint(12), version)
 	require.False(t, dirty)
 
 	var tableName string
