@@ -154,6 +154,55 @@ func TestInstallTranscriptPersistsTheAnswerAndStepsOnComplete(t *testing.T) {
 	require.EqualValues(t, 4200, saved.AgentDurationMs)
 }
 
+// The engine routes a round's plain assistant prose through
+// EventAgentFinalAnswer, so every "now I'll check X" preamble arrives as an
+// answer chunk. Only the prose of the round that ends the run is the answer.
+// Without retracting the preambles the persisted record is every round's
+// commentary glued end to end, which is unreadable — and is what the console
+// renders as the install's result.
+func TestInstallTranscriptRetractsPreamblesSupersededByAToolCall(t *testing.T) {
+	tr, bus, _, messages := newTranscriptForTest(t)
+	ctx := context.Background()
+
+	emitAnswer := func(id, content string, done bool) {
+		require.NoError(t, bus.Emit(ctx, event.Event{
+			ID: id, Type: event.EventAgentFinalAnswer,
+			Data: event.AgentFinalAnswerData{Content: content, Done: done},
+		}))
+	}
+
+	emitAnswer("a-1", "The script needs duckduckgo-search, so I'll create the venv:", true)
+	require.NoError(t, bus.Emit(ctx, event.Event{
+		ID: "c-1", Type: event.EventAgentToolCall,
+		Data: event.AgentToolCallData{
+			ToolName: "shell_exec", ToolCallID: "call-1",
+			Arguments: map[string]any{"command": "uv venv .venv"},
+		},
+	}))
+	emitAnswer("a-2", "Installed successfully. Now verifying:", true)
+	require.NoError(t, bus.Emit(ctx, event.Event{
+		ID: "c-2", Type: event.EventAgentToolCall,
+		Data: event.AgentToolCallData{
+			ToolName: "shell_exec", ToolCallID: "call-2",
+			Arguments: map[string]any{"command": "python scripts/search.py --help"},
+		},
+	}))
+	emitAnswer("a-3", "Installed duckduckgo-search into the skill venv.", true)
+
+	require.NoError(t, bus.Emit(ctx, event.Event{
+		ID: "done", Type: event.EventAgentComplete,
+		Data: event.AgentCompleteData{MessageID: "msg-1", TotalDurationMs: 900},
+	}))
+	tr.Finish(ctx, nil)
+
+	require.Len(t, messages.updated, 1)
+	require.Equal(t,
+		"Installed duckduckgo-search into the skill venv.",
+		messages.updated[0].Content,
+		"only the final round's prose is the answer; earlier preambles were retracted by their tool calls",
+	)
+}
+
 // An install that dies before the engine emits complete is exactly the run
 // someone will come looking for, so Finish must close the record itself.
 func TestInstallTranscriptRecordsAFailedRun(t *testing.T) {
@@ -200,4 +249,19 @@ func TestInstallTranscriptCreateSeedsTheAssistantRow(t *testing.T) {
 	require.Equal(t, "assistant", messages.created[1].Role)
 	require.Equal(t, "msg-1", messages.created[1].ID)
 	require.Equal(t, "sess-1", messages.created[1].SessionID)
+}
+
+// A console that attaches to a running install reads the event log and nothing
+// else, so the prompt has to be in the log or the run shows up as an agent
+// answering a question nobody can see.
+func TestInstallTranscriptCreateOpensTheLogWithThePrompt(t *testing.T) {
+	streams := &transcriptStreams{}
+	tr := newInstallTranscript(
+		context.Background(), event.NewEventBus(), streams, &transcriptMessages{}, "sess-1", "msg-1",
+	)
+
+	require.NoError(t, tr.Create(context.Background(), "install pdf-tools"))
+
+	require.Equal(t, []types.ResponseType{types.ResponseTypeInstallPrompt}, streams.types())
+	require.Equal(t, "install pdf-tools", streams.events[0].Content)
 }

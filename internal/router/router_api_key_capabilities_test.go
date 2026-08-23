@@ -409,6 +409,9 @@ func TestSandboxConfigRoutesRequireFullAccessOnly(t *testing.T) {
 		{http.MethodPatch, "/api/v1/sandbox-configs/:id/skills/:skillId"},
 		{http.MethodDelete, "/api/v1/sandbox-configs/:id/skills/:skillId"},
 		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/install-events"},
+		// The transcript replays the root shell session that built the image,
+		// so it must not be reachable by a scoped key either.
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/transcript"},
 	}
 
 	for _, tc := range cases {

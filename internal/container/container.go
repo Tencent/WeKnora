@@ -401,8 +401,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewMessageSuggestionHandler))
 	must(container.Provide(handler.NewModelHandler))
 	must(container.Provide(handler.NewSandboxConfigHandler))
-	must(container.Provide(func(s *service.TenantSkillService) *handler.SandboxSkillHandler {
-		return handler.NewSandboxSkillHandler(s)
+	must(container.Provide(func(
+		s *service.TenantSkillService, streams interfaces.StreamManager,
+	) *handler.SandboxSkillHandler {
+		return handler.NewSandboxSkillHandler(s, streams)
 	}))
 	must(container.Provide(handler.NewEvaluationHandler))
 	must(container.Provide(handler.NewInitializationHandler))

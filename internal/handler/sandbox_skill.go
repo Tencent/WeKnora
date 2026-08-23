@@ -14,6 +14,7 @@ import (
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -59,15 +60,23 @@ type sandboxSkillService interface {
 type SandboxSkillHandler struct {
 	service sandboxSkillService
 
+	// streams replays the installer agent's own event log. It is the same
+	// manager the install writes through, and it may be nil in a deployment
+	// without Redis, which only costs the transcript endpoint.
+	streams interfaces.StreamManager
+
 	// pollInterval and maxDuration are fields rather than constants so a test
 	// can exercise a whole stream lifecycle without waiting minutes for it.
 	pollInterval time.Duration
 	maxDuration  time.Duration
 }
 
-func NewSandboxSkillHandler(svc sandboxSkillService) *SandboxSkillHandler {
+func NewSandboxSkillHandler(
+	svc sandboxSkillService, streams interfaces.StreamManager,
+) *SandboxSkillHandler {
 	return &SandboxSkillHandler{
 		service:      svc,
+		streams:      streams,
 		pollInterval: skillEventPollInterval,
 		maxDuration:  skillEventMaxDuration,
 	}
@@ -482,6 +491,121 @@ func (h *SandboxSkillHandler) InstallEvents(c *gin.Context) {
 			return
 		}
 	}
+}
+
+// InstallTranscript godoc
+// @Summary      Follow an install's agent transcript
+// @Description  Server-sent replay of everything the installer agent did — the prompt it was given, its thinking, the commands it ran and their output — followed live while the install is still running. Frames are the same shape the chat stream uses, so a console renders an install with the components it renders a chat turn with. 404 once the event log has expired; the durable message history is the fallback.
+// @Tags         SandboxConfig
+// @Produce      text/event-stream
+// @Param        id       path      string  true  "Sandbox config ID"
+// @Param        skillId  path      string  true  "Skill ID"
+// @Success      200      {string}  string  "SSE stream of transcript events"
+// @Failure      401      {object}  map[string]interface{}  "Unauthorized"
+// @Failure      404      {object}  apperrors.AppError      "Skill or transcript not found"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /sandbox-configs/{id}/skills/{skillId}/transcript [get]
+//
+// The transcript deliberately does not reuse /sessions/continue-stream. That
+// endpoint authorizes by "does this chat session belong to you", while an
+// install is a workspace-level maintenance run whose session is hidden from the
+// session list on purpose — the two rules pull in opposite directions. Here the
+// skill lookup above is the authorization, exactly as it is for every other
+// route in this file.
+func (h *SandboxSkillHandler) InstallTranscript(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	skill, err := h.resolveSkill(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	sessionID, messageID := skill.InstallSessionID, skill.InstallMessageID
+	if sessionID == "" || messageID == "" {
+		c.Error(apperrors.NewNotFoundError("this skill has no install transcript"))
+		return
+	}
+	if h.streams == nil {
+		c.Error(apperrors.NewNotFoundError("install transcripts are unavailable"))
+		return
+	}
+
+	events, offset, err := h.streams.GetEvents(ctx, sessionID, messageID, 0)
+	if err != nil {
+		logger.Errorf(ctx, "[skill] read install transcript of %s failed: %v", skill.ID, err)
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+	// An empty log means the run predates the transcript or its TTL has passed.
+	// Refuse before any SSE header is written so the caller can still fall back
+	// to the durable message history.
+	if len(events) == 0 {
+		c.Error(apperrors.NewNotFoundError("this install's event log is no longer available"))
+		return
+	}
+
+	setSandboxSkillSSEHeaders(c)
+
+	done := h.emitTranscript(c, sessionID, messageID, events)
+	if done {
+		return
+	}
+
+	// Tailing at the chat stream's cadence: the installer emits thinking token
+	// by token, and a slower tick would arrive as visible bursts.
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	deadline := time.NewTimer(h.maxDuration)
+	defer deadline.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			// The viewer navigated away. The install keeps running.
+			return
+		case <-deadline.C:
+			return
+		case <-tick.C:
+			newEvents, newOffset, err := h.streams.GetEvents(ctx, sessionID, messageID, offset)
+			if err != nil {
+				logger.Warnf(ctx, "[skill] tail install transcript of %s failed: %v", skill.ID, err)
+				return
+			}
+			offset = newOffset
+			if h.emitTranscript(c, sessionID, messageID, newEvents) {
+				return
+			}
+		}
+	}
+}
+
+// emitTranscript writes frames and reports whether the stream is over, either
+// because the run completed or because the viewer is gone.
+func (h *SandboxSkillHandler) emitTranscript(
+	c *gin.Context, sessionID, messageID string, events []interfaces.StreamEvent,
+) bool {
+	for _, evt := range events {
+		c.SSEvent("message", types.StreamResponse{
+			// Every frame carries the assistant message ID so the console
+			// groups the whole run into one turn.
+			ID:                 messageID,
+			ResponseType:       evt.Type,
+			Content:            evt.Content,
+			Done:               evt.Done,
+			SessionID:          sessionID,
+			AssistantMessageID: messageID,
+			Data:               evt.Data,
+		})
+		c.Writer.Flush()
+		if c.Request.Context().Err() != nil {
+			return true
+		}
+		if evt.Type == types.ResponseTypeComplete {
+			return true
+		}
+	}
+	return c.Request.Context().Err() != nil
 }
 
 // resolveSkill loads the skill for the caller's workspace and config, and

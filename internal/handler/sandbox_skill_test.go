@@ -19,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 const testSkillTenantID = uint64(42)
@@ -190,6 +191,7 @@ func newSkillTestRouter(h *SandboxSkillHandler) *gin.Engine {
 	r.PATCH("/sandbox-configs/:id/skills/:skillId", h.Patch)
 	r.DELETE("/sandbox-configs/:id/skills/:skillId", h.Delete)
 	r.GET("/sandbox-configs/:id/skills/:skillId/install-events", h.InstallEvents)
+	r.GET("/sandbox-configs/:id/skills/:skillId/transcript", h.InstallTranscript)
 	return r
 }
 
@@ -213,7 +215,7 @@ func skillUploadRequest(t *testing.T, configID string, archive []byte) *http.Req
 func TestSandboxSkillUploadOverLimitReturns400(t *testing.T) {
 	t.Setenv("MAX_FILE_SIZE_MB", "1")
 	svc := &fakeSandboxSkillService{installID: "skill-1"}
-	router := newSkillTestRouter(NewSandboxSkillHandler(svc))
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, skillUploadRequest(t, "cfg-a", bytes.Repeat([]byte("z"), 2<<20)))
@@ -229,7 +231,7 @@ func TestSandboxSkillUploadInvalidBundleReturns400(t *testing.T) {
 	svc := &fakeSandboxSkillService{
 		installErr: fmt.Errorf("%w: SKILL.md is missing", service.ErrSkillBundleInvalid),
 	}
-	router := newSkillTestRouter(NewSandboxSkillHandler(svc))
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, skillUploadRequest(t, "cfg-a", []byte("not a zip")))
@@ -242,7 +244,7 @@ func TestSandboxSkillUploadInvalidBundleReturns400(t *testing.T) {
 // what the client needs to follow it.
 func TestSandboxSkillUploadAcceptedReturnsSkillID(t *testing.T) {
 	svc := &fakeSandboxSkillService{installID: "skill-7"}
-	router := newSkillTestRouter(NewSandboxSkillHandler(svc))
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, skillUploadRequest(t, "cfg-a", []byte("zip-bytes")))
@@ -266,7 +268,7 @@ func TestSandboxSkillUploadAcceptedReturnsSkillID(t *testing.T) {
 
 func TestSandboxSkillUploadWithoutFileReturns400(t *testing.T) {
 	svc := &fakeSandboxSkillService{}
-	router := newSkillTestRouter(NewSandboxSkillHandler(svc))
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/sandbox-configs/cfg-a/skills",
@@ -287,7 +289,7 @@ func TestSandboxSkillRoutesScopeToCallerWorkspace(t *testing.T) {
 			Name: "pdf", Status: types.SkillStatusReady, Enabled: true,
 		},
 	}}
-	router := newSkillTestRouter(NewSandboxSkillHandler(svc))
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	for _, tc := range []struct {
 		name    string
@@ -326,7 +328,7 @@ func TestSandboxSkillListReturnsProjection(t *testing.T) {
 			InstalledSnapshotID: "snap-1",
 		},
 	}}
-	router := newSkillTestRouter(NewSandboxSkillHandler(svc))
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sandbox-configs/cfg-a/skills", nil))
@@ -358,7 +360,7 @@ func TestSandboxSkillPatchTogglesEnabled(t *testing.T) {
 			Name: "pdf", Status: types.SkillStatusReady, Enabled: true,
 		},
 	}}
-	router := newSkillTestRouter(NewSandboxSkillHandler(svc))
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPatch, "/sandbox-configs/cfg-a/skills/skill-1",
@@ -377,7 +379,7 @@ func TestSandboxSkillPatchWithoutEnabledFieldReturns400(t *testing.T) {
 	svc := &fakeSandboxSkillService{skills: map[string]*types.TenantSkillEntity{
 		"skill-1": {ID: "skill-1", SandboxConfigID: "cfg-a", Enabled: true},
 	}}
-	router := newSkillTestRouter(NewSandboxSkillHandler(svc))
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPatch, "/sandbox-configs/cfg-a/skills/skill-1",
@@ -392,7 +394,7 @@ func TestSandboxSkillPatchWithoutEnabledFieldReturns400(t *testing.T) {
 // Removal rebuilds the image, so it is accepted and followed, never awaited.
 func TestSandboxSkillDeleteIsAccepted(t *testing.T) {
 	svc := &fakeSandboxSkillService{}
-	router := newSkillTestRouter(NewSandboxSkillHandler(svc))
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodDelete,
@@ -431,7 +433,7 @@ func TestSandboxSkillInstallEventsFinishedInstallTerminatesImmediately(t *testin
 		},
 		events: make(chan service.SkillProgress),
 	}
-	router := newSkillTestRouter(NewSandboxSkillHandler(svc))
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet,
@@ -462,7 +464,7 @@ func TestSandboxSkillInstallEventsReplaysLastProgress(t *testing.T) {
 	svc.events <- service.SkillProgress{
 		Percent: 100, Stage: "done", Status: types.SkillStatusReady,
 	}
-	router := newSkillTestRouter(NewSandboxSkillHandler(svc))
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet,
@@ -489,7 +491,7 @@ func TestSandboxSkillInstallEventsFailureTerminatesStream(t *testing.T) {
 		},
 		events: events,
 	}
-	router := newSkillTestRouter(NewSandboxSkillHandler(svc))
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet,
@@ -523,7 +525,7 @@ func TestSandboxSkillInstallEventsSynthesizesTerminalWhenRowDisappears(t *testin
 			svc.skills = map[string]*types.TenantSkillEntity{}
 		}
 	}
-	h := NewSandboxSkillHandler(svc)
+	h := NewSandboxSkillHandler(svc, nil)
 	h.pollInterval = 10 * time.Millisecond
 	router := newSkillTestRouter(h)
 
@@ -546,7 +548,7 @@ func TestSandboxSkillInstallEventsWithoutRedisSendsStateAndCloses(t *testing.T) 
 			"skill-1": {ID: "skill-1", SandboxConfigID: "cfg-a", Status: types.SkillStatusInstalling},
 		},
 	}
-	router := newSkillTestRouter(NewSandboxSkillHandler(svc))
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet,
@@ -568,7 +570,7 @@ func TestSandboxSkillInstallEventsStopsWhenClientDisconnects(t *testing.T) {
 		},
 		events: make(chan service.SkillProgress),
 	}
-	h := NewSandboxSkillHandler(svc)
+	h := NewSandboxSkillHandler(svc, nil)
 	h.pollInterval = time.Hour
 	router := newSkillTestRouter(h)
 
@@ -600,7 +602,7 @@ func TestSandboxSkillInstallEventsStopsFollowingAfterCap(t *testing.T) {
 		},
 		events: make(chan service.SkillProgress),
 	}
-	h := NewSandboxSkillHandler(svc)
+	h := NewSandboxSkillHandler(svc, nil)
 	h.pollInterval = time.Hour
 	h.maxDuration = 20 * time.Millisecond
 	router := newSkillTestRouter(h)
@@ -638,4 +640,193 @@ func TestToSkillResponseOmitsMissingTranscriptLocators(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), "install_session_id")
 	require.NotContains(t, string(raw), "install_message_id")
+}
+
+// transcriptStreamManager is the installer's event log. Appends land in the
+// same slice reads serve, so a test can grow the log while the handler tails it.
+type transcriptStreamManager struct {
+	mu     sync.Mutex
+	key    string
+	events []interfaces.StreamEvent
+	err    error
+}
+
+func (m *transcriptStreamManager) AppendEvent(
+	_ context.Context, sessionID, messageID string, evt interfaces.StreamEvent,
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.key = sessionID + "/" + messageID
+	m.events = append(m.events, evt)
+	return nil
+}
+
+func (m *transcriptStreamManager) GetEvents(
+	_ context.Context, sessionID, messageID string, from int,
+) ([]interfaces.StreamEvent, int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.err != nil {
+		return nil, 0, m.err
+	}
+	// Recording the key on read as well is what proves the handler addressed
+	// the log by the skill's stored locators rather than by anything else.
+	m.key = sessionID + "/" + messageID
+	if from >= len(m.events) {
+		return nil, len(m.events), nil
+	}
+	out := append([]interfaces.StreamEvent(nil), m.events[from:]...)
+	return out, len(m.events), nil
+}
+
+func (m *transcriptStreamManager) readKey() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.key
+}
+
+func transcriptSkillService() *fakeSandboxSkillService {
+	return &fakeSandboxSkillService{skills: map[string]*types.TenantSkillEntity{
+		"skill-1": {
+			ID: "skill-1", SandboxConfigID: "cfg-a", Status: types.SkillStatusInstalling,
+			InstallSessionID: "sess-9", InstallMessageID: "msg-9",
+		},
+	}}
+}
+
+func transcriptRequest(configID, skillID string) *http.Request {
+	return httptest.NewRequest(http.MethodGet,
+		"/sandbox-configs/"+configID+"/skills/"+skillID+"/transcript", nil)
+}
+
+// The whole point of the endpoint: everything the installer did, in order,
+// shaped like the chat stream so the console renders it with the components it
+// already has.
+func TestSandboxSkillTranscriptReplaysTheInstallerConversation(t *testing.T) {
+	streams := &transcriptStreamManager{}
+	ctx := context.Background()
+	for _, evt := range []interfaces.StreamEvent{
+		{ID: "p", Type: types.ResponseTypeInstallPrompt, Content: "install web-search", Done: true},
+		{ID: "t", Type: types.ResponseTypeThinking, Content: "check for uv"},
+		{ID: "c", Type: types.ResponseTypeToolCall, Content: "Calling tool: shell_exec",
+			Data: map[string]interface{}{"tool_name": "shell_exec"}},
+		{ID: "r", Type: types.ResponseTypeToolResult, Content: "uv 0.4.0",
+			Data: map[string]interface{}{"success": true}},
+		{ID: "done", Type: types.ResponseTypeComplete, Done: true},
+	} {
+		require.NoError(t, streams.AppendEvent(ctx, "sess-9", "msg-9", evt))
+	}
+	router := newSkillTestRouter(NewSandboxSkillHandler(transcriptSkillService(), streams))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, transcriptRequest("cfg-a", "skill-1"))
+
+	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	require.Equal(t, "sess-9/msg-9", streams.readKey())
+
+	frames := parseTranscriptFrames(t, w.Body.String())
+	require.Equal(t, []string{"install_prompt", "thinking", "tool_call", "tool_result", "complete"},
+		transcriptTypes(frames))
+	require.Equal(t, "install web-search", frames[0].Content)
+	// Every frame names the same turn, or the console would scatter one install
+	// across five messages.
+	for _, frame := range frames {
+		require.Equal(t, "msg-9", frame.ID)
+		require.Equal(t, "msg-9", frame.AssistantMessageID)
+		require.Equal(t, "sess-9", frame.SessionID)
+	}
+	require.Equal(t, "shell_exec", frames[2].Data["tool_name"])
+}
+
+// A running install is the case the user actually watches: the handler must
+// keep the connection open and push what the agent does next.
+func TestSandboxSkillTranscriptTailsARunningInstall(t *testing.T) {
+	streams := &transcriptStreamManager{}
+	ctx := context.Background()
+	require.NoError(t, streams.AppendEvent(ctx, "sess-9", "msg-9", interfaces.StreamEvent{
+		ID: "p", Type: types.ResponseTypeInstallPrompt, Content: "install web-search", Done: true,
+	}))
+	router := newSkillTestRouter(NewSandboxSkillHandler(transcriptSkillService(), streams))
+
+	// The engine keeps working after the console attaches.
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		_ = streams.AppendEvent(ctx, "sess-9", "msg-9", interfaces.StreamEvent{
+			ID: "t", Type: types.ResponseTypeThinking, Content: "creating the venv",
+		})
+		_ = streams.AppendEvent(ctx, "sess-9", "msg-9", interfaces.StreamEvent{
+			ID: "done", Type: types.ResponseTypeComplete, Done: true,
+		})
+	}()
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, transcriptRequest("cfg-a", "skill-1"))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, []string{"install_prompt", "thinking", "complete"},
+		transcriptTypes(parseTranscriptFrames(t, w.Body.String())))
+}
+
+// Refusing before the SSE headers go out is what lets the console fall back to
+// the durable message history instead of rendering an empty conversation.
+func TestSandboxSkillTranscriptWithExpiredLogReturns404(t *testing.T) {
+	router := newSkillTestRouter(
+		NewSandboxSkillHandler(transcriptSkillService(), &transcriptStreamManager{}),
+	)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, transcriptRequest("cfg-a", "skill-1"))
+
+	require.Equal(t, http.StatusNotFound, w.Code, "body=%s", w.Body.String())
+	require.NotContains(t, w.Header().Get("Content-Type"), "event-stream")
+}
+
+func TestSandboxSkillTranscriptWithoutLocatorsReturns404(t *testing.T) {
+	svc := &fakeSandboxSkillService{skills: map[string]*types.TenantSkillEntity{
+		"skill-1": {ID: "skill-1", SandboxConfigID: "cfg-a", Status: types.SkillStatusReady},
+	}}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, &transcriptStreamManager{}))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, transcriptRequest("cfg-a", "skill-1"))
+
+	require.Equal(t, http.StatusNotFound, w.Code, "body=%s", w.Body.String())
+}
+
+// The skill lookup is this endpoint's authorization: an install transcript can
+// hold command output from another workspace's image build.
+func TestSandboxSkillTranscriptOfAnotherConfigReturns404(t *testing.T) {
+	streams := &transcriptStreamManager{}
+	require.NoError(t, streams.AppendEvent(context.Background(), "sess-9", "msg-9",
+		interfaces.StreamEvent{ID: "p", Type: types.ResponseTypeInstallPrompt, Content: "secret"}))
+	router := newSkillTestRouter(NewSandboxSkillHandler(transcriptSkillService(), streams))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, transcriptRequest("cfg-b", "skill-1"))
+
+	require.Equal(t, http.StatusNotFound, w.Code, "body=%s", w.Body.String())
+	require.NotContains(t, w.Body.String(), "secret")
+}
+
+func parseTranscriptFrames(t *testing.T, body string) []types.StreamResponse {
+	t.Helper()
+	var frames []types.StreamResponse
+	for _, line := range strings.Split(body, "\n") {
+		payload, ok := strings.CutPrefix(line, "data:")
+		if !ok {
+			continue
+		}
+		var frame types.StreamResponse
+		require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(payload)), &frame), "line=%q", line)
+		frames = append(frames, frame)
+	}
+	return frames
+}
+
+func transcriptTypes(frames []types.StreamResponse) []string {
+	out := make([]string, 0, len(frames))
+	for _, frame := range frames {
+		out = append(out, string(frame.ResponseType))
+	}
+	return out
 }

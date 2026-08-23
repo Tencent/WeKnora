@@ -307,7 +307,8 @@ func SandboxConfigForResponse(cfg *TenantSandboxConfig, maskSecrets bool) *Tenan
 
 // MergeSandboxConfigForUpdate resolves redacted placeholders in incoming
 // against the currently stored config, so a client that never received the
-// real secret can submit the rest of the form without wiping it.
+// real secret can submit the rest of the form without wiping it. Pointers
+// the editor does not own (SkillImage, VolumeMount) are kept from existing.
 func MergeSandboxConfigForUpdate(incoming, existing *TenantSandboxConfig) *TenantSandboxConfig {
 	if incoming == nil {
 		return nil
@@ -346,15 +347,24 @@ func MergeSandboxConfigForUpdate(incoming, existing *TenantSandboxConfig) *Tenan
 		out.EnvVars = envVars
 	}
 
-	// SkillImage is owned by the skill install/remove path, not the sandbox
-	// settings form. The editor rebuilds the payload without this field, and a
-	// crafted PUT must not plant or wipe a snapshot pointer. Copy from the
-	// stored row (or clear on create) and ignore whatever the client sent.
-	if existing != nil && existing.SkillImage != nil {
-		image := *existing.SkillImage
-		out.SkillImage = &image
-	} else {
-		out.SkillImage = nil
+	// SkillImage and VolumeMount are owned by the install / volume paths, not
+	// by the sandbox settings form. The editor rebuilds the payload without
+	// either field, so copying incoming as-is would wipe a live snapshot on
+	// every runtime save and leave sessions booting the base template while the
+	// skill rows still claim ready. Reading them from the stored row instead —
+	// and clearing when there is no stored row — also means a crafted PUT can
+	// neither plant nor wipe a pointer.
+	out.SkillImage = nil
+	out.VolumeMount = nil
+	if existing != nil {
+		if existing.SkillImage != nil {
+			image := *existing.SkillImage
+			out.SkillImage = &image
+		}
+		if existing.VolumeMount != nil {
+			mount := *existing.VolumeMount
+			out.VolumeMount = &mount
+		}
 	}
 
 	return &out

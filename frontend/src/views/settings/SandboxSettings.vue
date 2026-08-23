@@ -137,9 +137,7 @@
     </t-loading>
 
     <SandboxConfigEditorDrawer v-model:visible="showEditor" :record="editingRecord"
-      :preset-type="activeType === 'all' ? '' : activeType" @saved="load" />
-
-    <SandboxSkillsDrawer v-model:visible="showSkills" :record="skillsRecord" />
+      :preset-type="activeType === 'all' ? '' : activeType" :initial-step="editorStep" @saved="load" />
 
     <!--
       Occupancy is a list of sessions and agents, not a one-line status, and it
@@ -208,7 +206,6 @@ import { computed, onMounted, ref } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import SandboxConfigEditorDrawer from '@/components/SandboxConfigEditorDrawer.vue'
-import SandboxSkillsDrawer from '@/components/SandboxSkillsDrawer.vue'
 import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import {
@@ -238,9 +235,9 @@ const activeType = ref<string>('all')
 
 const showEditor = ref(false)
 const editingRecord = ref<SandboxConfigRecord | null>(null)
-
-const showSkills = ref(false)
-const skillsRecord = ref<SandboxConfigRecord | null>(null)
+// Which page of the editor to open on. Skills live there as the last step, so
+// "管理技能" is the same drawer opened further along.
+const editorStep = ref<'skills' | undefined>(undefined)
 
 const showInventory = ref(false)
 const inventoryLoading = ref(false)
@@ -318,12 +315,14 @@ async function onDeleteConfirmOpen(visible: boolean, record: SandboxConfigRecord
 
 function openCreate() {
   editingRecord.value = null
+  editorStep.value = undefined
   showEditor.value = true
 }
 
 function openEdit(record: SandboxConfigRecord) {
   if (isLegacyRecord(record)) return
   editingRecord.value = record
+  editorStep.value = undefined
   showEditor.value = true
 }
 
@@ -489,8 +488,9 @@ async function onMenuAction(action: string, record: SandboxConfigRecord) {
     return
   }
   if (action === 'skills') {
-    skillsRecord.value = record
-    showSkills.value = true
+    editingRecord.value = record
+    editorStep.value = 'skills'
+    showEditor.value = true
   }
 }
 

@@ -1066,3 +1066,11 @@ export function getConfigSkill(
 export function configSkillInstallEventsUrl(configId: string, skillId: string): string {
   return `/api/v1/sandbox-configs/${configId}/skills/${skillId}/install-events`
 }
+
+// The installer agent's own transcript: its prompt, thinking, commands and
+// their output, replayed from the start and then followed live. Answers 404
+// once the event log has expired, which is the signal to read the durable
+// message history instead.
+export function configSkillTranscriptUrl(configId: string, skillId: string): string {
+  return `/api/v1/sandbox-configs/${configId}/skills/${skillId}/transcript`
+}

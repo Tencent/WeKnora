@@ -567,6 +567,40 @@ func TestUpdateNonIdentityEditSkipsCordon(t *testing.T) {
 	require.Equal(t, 0, client.listCalls)
 }
 
+// Saving the connection / runtime form must not discard the snapshot pointer.
+// The editor payload has no skill_image field; that pointer is owned by the
+// install path. Wiping it is how a config can list two ready skills while
+// every session still boots the base template.
+func TestUpdateKeepsSkillImageWhenEditorOmitsIt(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
+	stored := e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300)
+	stored.SkillImage = &types.SkillImageConfig{
+		SnapshotID:       "snap-2",
+		Generation:       2,
+		BaseTemplateID:   "base-template",
+		OwnerFingerprint: "fp-1",
+	}
+	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
+		ID:          "cfg-a",
+		TenantID:    7,
+		Name:        "prod",
+		SandboxType: "e2b",
+		Config:      stored,
+	}}
+	svc := newTestConfigService(t, repo, &stubProviderClient{}, stubAgentRepo{})
+
+	updated, err := svc.Update(context.Background(), 7, "cfg-a", UpdateSandboxConfigInput{
+		Name:   "prod",
+		Config: e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 900),
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, updated.Config.SkillImage)
+	require.Equal(t, "snap-2", updated.Config.SkillImage.SnapshotID)
+	require.Equal(t, 2, updated.Config.SkillImage.Generation)
+	require.Equal(t, "base-template", updated.Config.SkillImage.BaseTemplateID)
+}
+
 func TestUpdateRefusalCarriesInventory(t *testing.T) {
 	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
 	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{

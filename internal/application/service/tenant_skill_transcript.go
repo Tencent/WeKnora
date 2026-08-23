@@ -40,9 +40,25 @@ type installTranscript struct {
 
 	mu       sync.Mutex
 	message  *types.Message
-	answer   strings.Builder
+	answers  []*installAnswerSegment
 	starts   map[string]time.Time
 	finished bool
+}
+
+// installAnswerSegment accumulates the prose streamed under one final-answer
+// event ID.
+//
+// The engine has no separate channel for a round's commentary: "the venv is
+// missing, so I'll create it" arrives as a final-answer chunk exactly like the
+// closing summary does. An install runs dozens of rounds, so keeping every
+// chunk would persist dozens of preambles glued end to end. A round that goes
+// on to call a tool was, by definition, not the last one, so its prose is
+// retracted when that call arrives and only the round that ends the run
+// survives as the answer.
+type installAnswerSegment struct {
+	id         string
+	content    string
+	superseded bool
 }
 
 func newInstallTranscript(
@@ -97,6 +113,19 @@ func (tr *installTranscript) Create(ctx context.Context, prompt string) error {
 	tr.mu.Lock()
 	tr.message = assistant
 	tr.mu.Unlock()
+
+	// The prompt goes into the event log too, ahead of everything the agent
+	// does, so one replay of the log is the whole conversation. Without it a
+	// console following a running install would show the agent's side of a
+	// conversation whose opening line it cannot see.
+	tr.append(interfaces.StreamEvent{
+		ID:        uuid.NewString(),
+		Type:      types.ResponseTypeInstallPrompt,
+		Content:   prompt,
+		Done:      true,
+		Timestamp: now,
+		Data:      map[string]interface{}{},
+	})
 	return nil
 }
 
@@ -133,10 +162,13 @@ func (tr *installTranscript) Finish(ctx context.Context, runErr error) {
 			},
 		})
 		tr.mu.Lock()
-		if tr.answer.Len() > 0 {
-			tr.answer.WriteString("\n\n")
+		// The verdict is never a preamble, so it gets its own segment that no
+		// later call can retract.
+		failure := tr.segmentLocked("install-failure")
+		if prose := tr.composeAnswerLocked(); prose != "" {
+			failure.content = "\n\n"
 		}
-		tr.answer.WriteString(runErr.Error())
+		failure.content += runErr.Error()
 		tr.mu.Unlock()
 	}
 
@@ -180,6 +212,13 @@ func (tr *installTranscript) onToolCall(_ context.Context, evt event.Event) erro
 	}
 	tr.mu.Lock()
 	tr.starts[data.ToolCallID] = time.Now()
+	// This round called a tool, so it is not the round that ends the run: any
+	// prose it streamed was a preamble and must not reach Message.Content.
+	for _, seg := range tr.answers {
+		if !seg.superseded && seg.content != "" {
+			seg.superseded = true
+		}
+	}
 	tr.mu.Unlock()
 
 	tr.append(interfaces.StreamEvent{
@@ -252,7 +291,9 @@ func (tr *installTranscript) onAnswer(_ context.Context, evt event.Event) error 
 		return nil
 	}
 	tr.mu.Lock()
-	tr.answer.WriteString(data.Content)
+	if data.Content != "" {
+		tr.segmentLocked(evt.ID).content += data.Content
+	}
 	tr.mu.Unlock()
 
 	tr.append(interfaces.StreamEvent{
@@ -303,8 +344,8 @@ func (tr *installTranscript) onComplete(_ context.Context, evt event.Event) erro
 	// The engine may finish without ever streaming an answer chunk (it stops
 	// naturally with plain text). Take the summary from the completion payload
 	// so the transcript is not left with an empty final message.
-	if tr.answer.Len() == 0 && data.FinalAnswer != "" {
-		tr.answer.WriteString(data.FinalAnswer)
+	if tr.composeAnswerLocked() == "" && data.FinalAnswer != "" {
+		tr.segmentLocked(evt.ID).content = data.FinalAnswer
 	}
 	tr.mu.Unlock()
 
@@ -341,6 +382,31 @@ func (tr *installTranscript) spanMeta(eventID string, done bool) map[string]inte
 	}
 }
 
+// segmentLocked returns the segment accumulating an answer event ID, creating
+// it on first sight. Callers must hold tr.mu.
+func (tr *installTranscript) segmentLocked(id string) *installAnswerSegment {
+	for _, seg := range tr.answers {
+		if seg.id == id {
+			return seg
+		}
+	}
+	seg := &installAnswerSegment{id: id}
+	tr.answers = append(tr.answers, seg)
+	return seg
+}
+
+// composeAnswerLocked rebuilds the answer from the segments no tool call
+// retracted, in arrival order. Callers must hold tr.mu.
+func (tr *installTranscript) composeAnswerLocked() string {
+	var b strings.Builder
+	for _, seg := range tr.answers {
+		if !seg.superseded {
+			b.WriteString(seg.content)
+		}
+	}
+	return b.String()
+}
+
 func (tr *installTranscript) append(evt interfaces.StreamEvent) {
 	if tr.streams == nil {
 		return
@@ -372,7 +438,7 @@ func (tr *installTranscript) save(ctx context.Context) {
 	}
 	tr.mu.Lock()
 	msg := tr.ensureMessageLocked()
-	msg.Content = tr.answer.String()
+	msg.Content = tr.composeAnswerLocked()
 	msg.IsCompleted = true
 	msg.UpdatedAt = time.Now()
 	tr.mu.Unlock()

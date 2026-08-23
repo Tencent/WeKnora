@@ -1,18 +1,5 @@
 <template>
-  <SettingDrawer
-    class="sandbox-skills-drawer"
-    :visible="visible"
-    :title="$t('settings.sandbox.skillsDrawerTitle')"
-    :description="drawerDescription"
-    icon="code"
-    width="680px"
-    :min-width="560"
-    :max-width="920"
-    storage-key="setting-drawer:width:sandbox-skills"
-    hide-footer
-    @cancel="close"
-    @update:visible="(v: boolean) => emit('update:visible', v)"
-  >
+  <div class="sandbox-skills-panel">
     <t-loading :loading="loading" size="small">
       <section class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.imageInfoTitle') }}</h4>
@@ -132,16 +119,23 @@
               </t-tooltip>
               <t-tooltip
                 v-if="hasTranscript(skill)"
-                :content="$t('settings.sandbox.skillTranscript')"
+                :content="
+                  expandedSkillId === skill.id
+                    ? $t('settings.sandbox.skillTranscriptHide')
+                    : $t('settings.sandbox.skillTranscript')
+                "
                 placement="top"
               >
                 <t-button
                   variant="text"
                   shape="square"
                   size="small"
-                  @click="openTranscript(skill)"
+                  :class="{ 'skill-transcript-toggle--on': expandedSkillId === skill.id }"
+                  @click="toggleTranscript(skill)"
                 >
-                  <template #icon><t-icon name="chat-bubble-history" /></template>
+                  <template #icon>
+                    <t-icon :name="expandedSkillId === skill.id ? 'chevron-up' : 'chat-bubble-history'" />
+                  </template>
                 </t-button>
               </t-tooltip>
               <t-tooltip :content="$t('settings.sandbox.skillView')" placement="top">
@@ -176,6 +170,17 @@
                 </t-tooltip>
               </t-popconfirm>
             </div>
+
+            <SkillInstallTimeline
+              v-if="expandedSkillId === skill.id"
+              :key="`${skill.id}-${skill.install_session_id || ''}-${transcriptEpoch}`"
+              class="skill-item__timeline"
+              :config-id="record?.id || ''"
+              :skill-id="skill.id"
+              :session-id="skill.install_session_id || ''"
+              :message-id="skill.install_message_id || ''"
+              :live="skill.status === 'installing'"
+            />
           </li>
         </ul>
       </section>
@@ -191,7 +196,7 @@
       <ul v-if="viewing" class="skill-view">
         <li>
           <span class="skill-view__label">{{ $t('settings.sandbox.skillVersion') }}</span>
-          <span class="skill-view__value">{{ viewing.version || $t('settings.sandbox.imageInfoEmpty') }}</span>
+          <span class="skill-view__value">{{ viewing.version || $t('settings.sandbox.skillVersionEmpty') }}</span>
         </li>
         <li>
           <span class="skill-view__label">{{ $t('settings.sandbox.skillStatusLabel') }}</span>
@@ -207,25 +212,16 @@
         </li>
       </ul>
     </t-dialog>
-
-    <SkillInstallTranscript
-      v-model:visible="showTranscript"
-      :session-id="transcriptSkill?.install_session_id || ''"
-      :message-id="transcriptSkill?.install_message_id || ''"
-      :title="transcriptTitle"
-      :live="transcriptLive"
-    />
-  </SettingDrawer>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { onUnmounted, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
-import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
-import SkillInstallTranscript from '@/components/SkillInstallTranscript.vue'
+import SkillInstallTimeline from '@/components/SkillInstallTimeline.vue'
 import {
   getAgentById,
   updateAgent,
@@ -247,13 +243,10 @@ import { getApiBaseUrl } from '@/utils/api-base'
 import { generateRandomString } from '@/utils/index'
 import i18n from '@/i18n'
 
+// Skills are installed into the config's snapshot image, so the panel needs a
+// config that already exists. The editor only renders it on a saved config.
 const props = defineProps<{
-  visible: boolean
   record: SandboxConfigRecord | null
-}>()
-
-const emit = defineEmits<{
-  (e: 'update:visible', value: boolean): void
 }>()
 
 const { t, locale } = useI18n()
@@ -267,8 +260,10 @@ const togglingId = ref('')
 const deletingId = ref('')
 const showView = ref(false)
 const viewing = ref<ConfigSkill | null>(null)
-const showTranscript = ref(false)
-const transcriptSkill = ref<ConfigSkill | null>(null)
+// Only one install timeline is open at a time: each one holds an SSE
+// connection, and two runs' worth of agent steps in a drawer is unreadable.
+const expandedSkillId = ref('')
+const transcriptEpoch = ref(0)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const progressById = ref<Record<string, ConfigSkillInstallEvent>>({})
 
@@ -288,15 +283,6 @@ function readLastChatModelID(): string {
   } catch {
     return ''
   }
-}
-
-const drawerDescription = computed(() => {
-  if (!props.record) return ''
-  return `${props.record.name} · ${t(`settings.sandbox.backends.${props.record.sandbox_type}`)}`
-})
-
-function close() {
-  emit('update:visible', false)
 }
 
 function formatBuiltAt(value?: string): string {
@@ -324,30 +310,26 @@ function isBusy(skill: ConfigSkill): boolean {
   return skill.status === 'installing' || skill.status === 'removing'
 }
 
+// The locators are written only after the installer sandbox is up and the
+// agent has a message to stream into. The row itself is already "installing"
+// the moment the upload is accepted, and that is when the button has to
+// appear — waiting for the locators would hide it for the first minute.
 function hasTranscript(skill: ConfigSkill): boolean {
+  if (skill.status === 'installing') return true
   return Boolean(skill.install_session_id && skill.install_message_id)
 }
 
-function openTranscript(skill: ConfigSkill) {
-  transcriptSkill.value = skill
-  showTranscript.value = true
+function toggleTranscript(skill: ConfigSkill) {
+  if (expandedSkillId.value === skill.id) {
+    expandedSkillId.value = ''
+    return
+  }
+  expandedSkillId.value = skill.id
+  // A run that finished while the timeline was open was tailed from the event
+  // log; reopening it should read the run again from the top rather than show
+  // whatever the closed stream left behind.
+  transcriptEpoch.value += 1
 }
-
-const transcriptTitle = computed(() => {
-  const skill = transcriptSkill.value
-  if (!skill) return ''
-  return t('settings.sandbox.skillTranscriptTitle', { name: skill.name || skill.id })
-})
-
-// The drawer already polls every two seconds while a skill is busy, so reading
-// the live flag off the refreshed row keeps the window in step with the run
-// without a second timer.
-const transcriptLive = computed(() => {
-  const id = transcriptSkill.value?.id
-  if (!id) return false
-  const current = skills.value.find((skill) => skill.id === id)
-  return current ? isBusy(current) : false
-})
 
 function progressOf(skill: ConfigSkill): number {
   const percent = progressById.value[skill.id]?.percent
@@ -605,10 +587,12 @@ function openView(skill: ConfigSkill) {
   showView.value = true
 }
 
+// The panel is mounted only while its wizard step is showing, so switching
+// steps tears the follows down and coming back re-reads the list.
 watch(
-  () => [props.visible, props.record?.id] as const,
-  ([visible]) => {
-    if (visible && props.record) {
+  () => props.record?.id,
+  (configID) => {
+    if (configID) {
       void loadAll()
       return
     }
@@ -621,6 +605,7 @@ watch(
     installerAgent.value = null
     installerModelId.value = ''
   },
+  { immediate: true },
 )
 
 onUnmounted(() => {
@@ -769,14 +754,25 @@ onUnmounted(() => {
   gap: 8px;
 }
 
+// A grid rather than a flex row so the expanded install timeline can span the
+// full width underneath the three columns of the row it belongs to.
 .skill-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: flex-start;
   gap: 12px;
   padding: 12px;
   border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
   background: var(--td-bg-color-container);
+}
+
+.skill-item__timeline {
+  grid-column: 1 / -1;
+}
+
+.skill-transcript-toggle--on {
+  color: var(--td-brand-color);
 }
 
 .skill-status-ring {

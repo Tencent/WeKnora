@@ -235,6 +235,11 @@ const (
 	// MemoryRecalled: the long-term memories injected into this answer, so
 	// the UI can show and let the user delete what influenced it.
 	ResponseTypeMemoryRecalled ResponseType = "memory_recalled"
+	// InstallPrompt: the instruction a skill install handed to the installer
+	// agent. Only the skill install transcript emits this, and it emits it
+	// first, so replaying the log alone shows what was asked for — the console
+	// does not have to read the durable prompt row to caption the run.
+	ResponseTypeInstallPrompt ResponseType = "install_prompt"
 )
 
 // StreamResponse stream response
