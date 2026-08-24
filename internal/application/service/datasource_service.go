@@ -476,7 +476,9 @@ func (s *DataSourceService) WebhookSync(ctx context.Context, dsID string) (*type
 // enqueueSync validates the data source state, creates a sync log, and enqueues
 // the asynq sync task. trigger records what started the sync ("manual",
 // "webhook", "scheduled") for logs and audit trails.
-func (s *DataSourceService) enqueueSync(ctx context.Context, ds *types.DataSource, trigger string) (*types.SyncLog, error) {
+func (s *DataSourceService) enqueueSync(
+	ctx context.Context, ds *types.DataSource, trigger string,
+) (*types.SyncLog, error) {
 	if ds.Status != types.DataSourceStatusActive &&
 		ds.Status != types.DataSourceStatusError &&
 		ds.Status != types.DataSourceStatusPaused {

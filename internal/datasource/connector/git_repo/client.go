@@ -1,3 +1,4 @@
+// Package git_repo syncs documents from git remotes into a knowledge base.
 package git_repo
 
 import (
