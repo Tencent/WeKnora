@@ -251,12 +251,15 @@ func (r *reaperSkillStore) ListSnapshotsByConfig(_ context.Context, tenantID uin
 func (r *reaperSkillStore) CreateSkill(context.Context, *types.TenantSkillEntity) error {
 	panic("CreateSkill is outside the reaper surface")
 }
+
 func (r *reaperSkillStore) GetSkillByName(context.Context, uint64, string, string) (*types.TenantSkillEntity, error) {
 	panic("GetSkillByName is outside the reaper surface")
 }
+
 func (r *reaperSkillStore) ListSkillsByConfig(context.Context, uint64, string) ([]*types.TenantSkillEntity, error) {
 	panic("ListSkillsByConfig is outside the reaper surface")
 }
+
 func (r *reaperSkillStore) DeleteSkill(_ context.Context, tenantID uint64, configID, skillID string) error {
 	e := r.rows[skillID]
 	if e == nil || e.TenantID != tenantID || e.SandboxConfigID != configID {
@@ -265,16 +268,19 @@ func (r *reaperSkillStore) DeleteSkill(_ context.Context, tenantID uint64, confi
 	delete(r.rows, skillID)
 	return nil
 }
+
 func (r *reaperSkillStore) CreateSnapshotRow(_ context.Context, e *types.TenantSkillSnapshotEntity) error {
 	cp := *e
 	r.snapshots = append(r.snapshots, &cp)
 	return nil
 }
+
 func (r *reaperSkillStore) MarkSnapshotState(
 	context.Context, uint64, string, string, string,
 ) error {
 	panic("MarkSnapshotState is outside the reaper surface")
 }
+
 func (r *reaperSkillStore) DeleteSnapshotRowsByConfig(context.Context, uint64, string) error {
 	panic("DeleteSnapshotRowsByConfig is outside the reaper surface")
 }
@@ -302,18 +308,23 @@ func (r *reaperConfigStore) ListAll(_ context.Context) ([]*types.TenantSandboxCo
 func (r *reaperConfigStore) Create(context.Context, *types.TenantSandboxConfigEntity) error {
 	panic("Create is outside the reaper surface")
 }
+
 func (r *reaperConfigStore) ListByTenant(context.Context, uint64) ([]*types.TenantSandboxConfigEntity, error) {
 	panic("ListByTenant is outside the reaper surface")
 }
+
 func (r *reaperConfigStore) Update(context.Context, *types.TenantSandboxConfigEntity) error {
 	panic("Update is outside the reaper surface")
 }
+
 func (r *reaperConfigStore) SoftDelete(context.Context, uint64, string) error {
 	panic("SoftDelete is outside the reaper surface")
 }
+
 func (r *reaperConfigStore) SetCordon(context.Context, uint64, string, time.Time) error {
 	panic("SetCordon is outside the reaper surface")
 }
+
 func (r *reaperConfigStore) ClearCordon(context.Context, uint64, string) error {
 	panic("ClearCordon is outside the reaper surface")
 }
