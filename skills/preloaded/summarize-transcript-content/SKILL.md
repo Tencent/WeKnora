@@ -9,7 +9,7 @@ description: 根据单篇文档，生成一段 150～300 个汉字的快速概�
 
 ## 输入
 
-可用工具：**阅读 Wiki 页面**、**搜索 Wiki**、**精读源文档**、**查看 Wiki 问题**
+可用工具：**阅读 Wiki 页面**、**搜索 Wiki**、**精读源文档**、**查看 Wiki 问题**、**创建/覆盖 Wiki**
 
 ## 工作流程
 
@@ -27,10 +27,11 @@ description: 根据单篇文档，生成一段 150～300 个汉字的快速概�
 
 - 不得引入不存在的事实。
 - 标记问题的 Wiki 页面和知识原子不得被引用。
-- 完成前运行 `scripts/audit_overview.py` 校验概览。
 
 ## 输出
 
-生成 `overview.md`。结构见 [references/overview-template.md](references/overview-template.md)。
+通过 **创建/覆盖 Wiki** 工具将快速概览写入知识库的 Wiki 页面。结构见 [references/overview-template.md](references/overview-template.md)。
 
-直接回复快速概览，禁止输出工作执行结果、筛选来源和字数要求。
+写入契约：工具 `page_type` 用 `index`；页面 frontmatter 必须含 `type: overview` 与 `source_video_id: {视频ID}`。
+
+禁止输出工作执行结果、筛选来源和字数要求；概览内容只能通过 **创建/覆盖 Wiki** 写入，不得落本地文件或仅以文字回复。

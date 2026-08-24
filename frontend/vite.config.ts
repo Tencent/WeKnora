@@ -132,6 +132,12 @@ export default defineConfig({
     host: true,
     // 代理配置，用于开发环境
     proxy: {
+      // 个性化后端（custom-backend）单独走 8090，必须放在 /api 之前（更具体前缀优先）
+      '/api/custom': {
+        target: process.env.VITE_CUSTOM_BACKEND_TARGET || 'http://localhost:8090',
+        changeOrigin: true,
+        secure: false,
+      },
       '/api': {
         target: DEV_PROXY_TARGET,
         changeOrigin: true,

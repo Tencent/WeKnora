@@ -76,11 +76,13 @@ export interface VideoData {
   title: string
   category: VideoCategory
   categoryName: string
+  status?: string
   duration: string
   durationSeconds: number
   created_at: string
   video_url: string
   poster_url?: string
+  processing_error_summary?: string
   overview: string
   chapters: Chapter[]
   subtitles: SubtitleCue[]
@@ -121,7 +123,7 @@ export interface ChatSession {
 }
 
 export interface UploadForm {
-  file: { name: string; size: number }
+  file: { name: string; size: number; raw?: File }
 }
 
 export interface UploadProgress {

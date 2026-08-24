@@ -1,0 +1,47 @@
+# custom-backend Docker 镜像（自研视频后端）
+# 多阶段构建：先编译（保留 GOPROXY 配置），再最小运行镜像
+
+# ===== 阶段 1: 编译 =====
+FROM golang:1.27-alpine AS builder
+WORKDIR /src
+
+# 国内镜像
+ENV GOPROXY=https://goproxy.cn,direct \
+    GOSUMDB=sum.golang.google.cn \
+    CGO_ENABLED=0 \
+    GOOS=linux
+
+COPY go.mod go.sum ./
+# vidsage/go.mod 顶层那条 `replace github.com/firecrawl/anydoc/go => ./third_party/anydoc-go`
+# 指向的 ./third_party/anydoc-go 不会复制进镜像，而其 require 也只是被 WeKnora 官方 web 抓取
+# 链路使用，custom-backend 实际不依赖 firecrawl。删掉 require + replace 两行即可让
+# `go mod download` 不去解析它（也避免 alpine 镜像缺 git 失败）。
+RUN sed -i -e '/github.com\/firecrawl\/anydoc\/go/d' \
+          -e '/open issue/d' \
+          go.mod \
+ && go mod download
+
+COPY cmd/custom-backend ./cmd/custom-backend
+COPY internal/custom ./internal/custom
+
+RUN go build -ldflags="-s -w" -o /out/custom-backend ./cmd/custom-backend
+
+# ===== 阶段 2: 运行 =====
+# 选 3.19 而非 3.20：3.20 的 apk 对 libpulse/libflac 等音频包默认 --no-network，
+# 会让 ffmpeg 装不全（错误：masked in: --no-network）。3.19 行为正常。
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates ffmpeg tini tzdata \
+    && addgroup -S app && adduser -S app -G app
+WORKDIR /app
+COPY --from=builder /out/custom-backend /app/custom-backend
+USER app
+
+ENV CUSTOM_SERVER_HOST=0.0.0.0 \
+    CUSTOM_SERVER_PORT=8090 \
+    CUSTOM_LOG_LEVEL=info
+
+EXPOSE 8090
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -qO- http://localhost:8090/healthz || exit 1
+
+ENTRYPOINT ["/sbin/tini", "--", "/app/custom-backend"]

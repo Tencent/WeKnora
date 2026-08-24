@@ -3,6 +3,7 @@
     <div class="video-card__cover">
       <img v-if="video.poster_url && !coverFailed" :src="video.poster_url" :alt="video.title" @error="coverFailed = true" />
       <div v-else class="video-card__fallback" aria-hidden="true">▶</div>
+      <span v-if="statusLabel" class="video-card__status">{{ statusLabel }}</span>
       <span class="video-card__duration">{{ video.duration }}</span>
     </div>
     <div class="video-card__body">
@@ -16,12 +17,24 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { VideoData } from '@/types/videohub'
 
-defineProps<{ video: VideoData }>()
+const props = defineProps<{ video: VideoData }>()
 defineEmits<{ select: [] }>()
 const coverFailed = ref(false)
+const statusLabel = computed(() => {
+  const map: Record<string, string> = {
+    uploading: '上传中',
+    uploaded: '已上传',
+    initializing: '准备中',
+    ready: '已就绪',
+    processing: '处理中',
+    completed: '已完成',
+    failed: '失败',
+  }
+  return map[props.video.status || ''] || ''
+})
 </script>
 
 <style scoped>
@@ -31,6 +44,7 @@ const coverFailed = ref(false)
 .video-card__cover { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: var(--td-bg-color-component); }
 .video-card__cover img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .video-card__fallback { width: 100%; height: 100%; display: grid; place-items: center; color: var(--td-brand-color); background: linear-gradient(135deg, var(--td-brand-color-1), var(--td-bg-color-component)); font-size: 36px; }
+.video-card__status { position: absolute; left: var(--td-comp-margin-s); top: var(--td-comp-margin-s); padding: 2px 6px; border-radius: var(--td-radius-medium); background: color-mix(in srgb, var(--td-bg-color-container) 88%, transparent); color: var(--td-text-color-primary); font-size: var(--td-font-size-body-small); line-height: var(--td-line-height-body-small); backdrop-filter: blur(8px); }
 .video-card__duration { position: absolute; right: var(--td-comp-margin-s); bottom: var(--td-comp-margin-s); padding: 2px var(--td-comp-margin-s); border: 1px solid var(--td-component-stroke); border-radius: var(--td-radius-round); background: color-mix(in srgb, var(--td-bg-color-container) 88%, transparent); color: var(--td-text-color-primary); font-size: var(--td-font-size-body-small); line-height: var(--td-line-height-body-small); backdrop-filter: blur(8px); }
 .video-card__body { padding: calc(var(--td-comp-margin-s) * 1.5) calc(var(--td-comp-margin-s) * 2) calc(var(--td-comp-margin-s) * 2); }
 .video-card h3 { margin: 0 0 var(--td-comp-margin-s); overflow: hidden; color: var(--td-text-color-primary); font-size: var(--td-font-size-title-medium); font-weight: 400; line-height: var(--td-line-height-title-medium); text-overflow: ellipsis; white-space: nowrap; }

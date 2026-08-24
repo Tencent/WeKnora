@@ -1,0 +1,38 @@
+# config/builtin_models.yaml — 本地联调内置模型
+# 大模型 DeepSeek V4 Pro + 向量/重排 智谱 GLM
+# 启动时自动写入 models 表并设为默认，所有租户可见。
+# .env 里的 LLM_* / EMBEDDING_* / RERANK_* 占位符会在这里被读取真实值。
+
+builtin_models:
+  - id: builtin-llm-deepseek
+    type: KnowledgeQA
+    source: remote
+    is_default: true
+    name: ${LLM_MODEL_NAME}
+    parameters:
+      base_url: ${LLM_BASE_URL}
+      api_key: ${LLM_API_KEY}
+      provider: ${LLM_PROVIDER}
+
+  - id: builtin-embedding-zhipu
+    type: Embedding
+    source: remote
+    is_default: true
+    name: ${EMBEDDING_MODEL_NAME}
+    parameters:
+      base_url: ${EMBEDDING_BASE_URL}
+      api_key: ${EMBEDDING_API_KEY}
+      provider: ${EMBEDDING_PROVIDER}
+      embedding_parameters:
+        dimension: 1024
+        truncate_prompt_tokens: 0
+
+  - id: builtin-rerank-zhipu
+    type: Rerank
+    source: remote
+    is_default: true
+    name: ${RERANK_MODEL_NAME}
+    parameters:
+      base_url: ${RERANK_BASE_URL}
+      api_key: ${RERANK_API_KEY}
+      provider: ${RERANK_PROVIDER}

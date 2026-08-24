@@ -348,3 +348,21 @@ dev-frontend:
 	./scripts/dev.sh frontend
 
 
+
+# =====================================================================
+# 自研视频后端 custom-backend（独立子命令）
+# =====================================================================
+
+.PHONY: custom-build custom-run custom-test custom-image
+
+custom-build:
+	go build -o custom-backend ./cmd/custom-backend/
+
+custom-run: custom-build
+	./custom-backend
+
+custom-test:
+	go test ./internal/custom/...
+
+custom-image:
+	docker build -f docker/Dockerfile.custom-backend -t weknora/custom-backend:dev .

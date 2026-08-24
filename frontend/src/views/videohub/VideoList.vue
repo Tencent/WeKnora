@@ -18,7 +18,7 @@
       <VideoCard v-for="video in filteredVideos" :key="video.id" :video="video" @select="router.push(`/platform/videos/${video.id}`)" />
     </section>
     <UploadModal v-model:visible="uploadVisible" :after-upload="refreshVideos" />
-    <AiAssistant v-if="videos.length" :current-video="globalScopeVideo" :global-mode="true" @navigate="navigateToEvidence" />
+    <AiAssistant v-if="playableVideos.length" :current-video="globalScopeVideo" :global-mode="true" @navigate="navigateToEvidence" />
   </main>
 </template>
 
@@ -38,6 +38,8 @@ const uploadVisible = ref(false)
 const query = ref('')
 const sortBy = ref<'latest' | 'duration'>('latest')
 const sortOptions = [{ label: '最新上传', value: 'latest' }, { label: '时长最长', value: 'duration' }]
+const playableStatuses = new Set(['ready', 'processing', 'completed'])
+const playableVideos = computed(() => videos.value.filter(video => playableStatuses.has(video.status || '')))
 const filteredVideos = computed(() => videos.value
   .filter(video => video.title.toLocaleLowerCase().includes(query.value.trim().toLocaleLowerCase()))
   .sort((a, b) => sortBy.value === 'duration' ? b.durationSeconds - a.durationSeconds : b.created_at.localeCompare(a.created_at)))

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -107,6 +108,18 @@ func (t *wikiWritePageTool) Execute(ctx context.Context, args json.RawMessage) (
 	}
 	if params.Title == "" || params.PageType == "" || params.Content == "" || params.Summary == "" {
 		return &types.ToolResult{Success: false, Error: "title, summary, content, and page_type are required for write action"}, nil
+	}
+
+	// page_type 保留字兜底：WeKnora 会拒绝"summary"（系统自动汇总页）和"knowledge_base"（保留），
+	// 但 LLM 经常按字面把"智能总结/知识库"页写成这两个类型。
+	// 为了兼容 6 个 SKILL.md 的约定（统一要求 page_type=index 并靠 frontmatter.type 区分），
+	// 我们在入参层统一把这些保留字改写成 "synthesis"（合法且语义相近的自定义页面类型），
+	// 继续保留原来的 frontmatter.type，让后续 FindWikiPage 按 expectedType 照样命中。
+	switch strings.ToLower(params.PageType) {
+	case types.WikiPageTypeSummary, "knowledge_base":
+		slog.WarnContext(ctx, "wiki_WritePage: page_type 命中保留字，兜底改为 synthesis",
+			"original", params.PageType, "title", params.Title, "slug", params.Slug)
+		params.PageType = types.WikiPageTypeSynthesis
 	}
 
 	// Validate + normalize the slug up front. The model routinely emits

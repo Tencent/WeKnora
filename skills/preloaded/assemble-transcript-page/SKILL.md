@@ -30,7 +30,7 @@ description: 将已审计的文字稿概览、内容大纲、类型化智能总�
 
 ### 三、检查与输出
 
-4. 通过 **创建/覆盖 Wiki** 工具将组装后的完整页面写入知识库的 Wiki 页面。
+4. 通过 **创建/覆盖 Wiki** 工具将组装后的完整页面写入知识库的 Wiki 页面。写入契约：工具 `page_type` 用 `index`；页面 frontmatter 必须含 `type: transcript_page` 与 `source_video_id: {视频ID}`。
 5. 检查链接、标题层级、时间范围和降级提示。
 
 ## 降级规则

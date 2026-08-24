@@ -56,13 +56,14 @@
         </div>
         <div class="upload-actions">
           <t-button variant="outline" @click="close">{{ state === 'uploading' ? '取消上传' : '关闭' }}</t-button>
-          <t-button disabled>{{ state === 'uploading' ? '上传中...' : '正在更新列表...' }}</t-button>
+          <t-button disabled>{{ state === 'uploading' ? '上传中...' : '正在准备可播放内容...' }}</t-button>
         </div>
       </div>
 
       <div v-else-if="state === 'success'" class="upload-state upload-state--success">
         <t-icon name="check-circle-filled" />
-        <h3>上传成功！</h3>
+        <h3>已上传</h3>
+        <p>正在生成封面、时长和可播放地址</p>
       </div>
 
       <div v-else class="upload-state upload-state--error">
@@ -101,6 +102,7 @@ const selectedFile = computed(() => {
   return {
     name: item.raw?.name || item.name || '',
     size: item.raw?.size ?? item.size ?? 0,
+    raw: item.raw, // 真实 File 对象，上传时用
   }
 })
 
@@ -219,6 +221,7 @@ watch(() => props.visible, value => { if (!value) reset() })
 .upload-state--progress { justify-items: stretch; padding: 0; }
 .upload-state h3, .upload-state p { margin: 0; }
 .upload-state p { max-width: 100%; overflow: hidden; color: var(--td-text-color-secondary); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.upload-state--success p { overflow: visible; white-space: normal; text-overflow: clip; }
 .upload-state > .t-icon { font-size: 48px; animation: state-in .24s ease-out; }
 .upload-state--success > .t-icon { color: var(--td-success-color); }
 .upload-state--error > .t-icon { color: var(--td-error-color); }

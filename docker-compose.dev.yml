@@ -100,9 +100,6 @@ services:
       retries: 3
     networks:
       - WeKnora-network-dev
-    profiles:
-      - minio
-      - full
 
   qdrant:
     image: qdrant/qdrant:v1.16.2
@@ -566,6 +563,52 @@ services:
     profiles:
       - langfuse
       - full
+
+  # 自研视频后端（独立于官方 WeKnora app，独立端口 8090）
+  custom-backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.custom-backend
+    image: weknora/custom-backend:dev
+    container_name: vidsage-custom-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      CUSTOM_SERVER_HOST: 0.0.0.0
+      CUSTOM_SERVER_PORT: 8090
+      CUSTOM_DB_HOST: postgres
+      CUSTOM_DB_PORT: 5432
+      CUSTOM_DB_USER: ${DB_USER:-postgres}
+      CUSTOM_DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      CUSTOM_DB_NAME: ${CUSTOM_DB_NAME:-vidsage}
+      WEKNORA_BASE_URL: http://app:8080
+      WEKNORA_API_KEY: ${WEKNORA_API_KEY:-}
+      WEKNORA_KB_ID: ${WEKNORA_KB_ID:-}
+      WEKNORA_TENANT_ID: ${WEKNORA_TENANT_ID:-}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY_ID:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_ACCESS_KEY:-minioadmin}
+      MINIO_BUCKET: ${CUSTOM_MINIO_BUCKET:-vidsage}
+      MINIO_USE_SSL: "false"
+      MINIO_PUBLIC_URL: ${CUSTOM_MINIO_PUBLIC_URL:-http://localhost:9000}
+      TONGYI_API_KEY: ${TONGYI_API_KEY:-}
+      TONGYI_ENDPOINT: ${TONGYI_ENDPOINT:-https://tingwu.aliyuncs.com}
+      CUSTOM_CONTENT_AGENT_ID: ${CUSTOM_CONTENT_AGENT_ID:-}
+      CUSTOM_WORKER_POLL_INTERVAL: ${CUSTOM_WORKER_POLL_INTERVAL:-5}
+      CUSTOM_WORKER_MAX_ATTEMPTS: ${CUSTOM_WORKER_MAX_ATTEMPTS:-3}
+      CUSTOM_WORKER_CONCURRENCY: ${CUSTOM_WORKER_CONCURRENCY:-2}
+      CUSTOM_LOG_LEVEL: ${CUSTOM_LOG_LEVEL:-info}
+    volumes:
+      # 首次启动时自动创建库；初始化逻辑可由 init 容器替代
+      - ./scripts/init-custom-db.sql:/docker-entrypoint-initdb.d/00-custom-db.sql:ro
+    ports:
+      - "${CUSTOM_SERVER_PORT:-8090}:8090"
+    networks:
+      - WeKnora-network-dev
 
 
 networks:

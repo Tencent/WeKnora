@@ -1,0 +1,4 @@
+interface:
+  display_name: "单视频知识提取"
+  short_description: "从单个视频提取可追溯的结构化知识和局部 Wiki 内容"
+  default_prompt: "使用 $extract-video-knowledge 提取单视频知识、绑定证据并生成局部 Wiki。"
