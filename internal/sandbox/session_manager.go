@@ -304,11 +304,18 @@ func (m *SessionBoundManager) Execute(ctx context.Context, cfg *ExecuteConfig) (
 	return m.ephemeral.ExecuteOnHandle(ctx, handle, cfg)
 }
 
-// ensureExecutionOutputDir creates the skill artifact directory and grants
-// DefaultSandboxExecUser write access before script execution. envd MakeDir
-// often leaves the path root-owned on Cube; the follow-up chown/chmod runs as
-// root via envd (empty User). Best-effort: failures are logged and do not
-// abort the upcoming script execution.
+// ensureExecutionOutputDir creates the skill artifact directory and makes sure
+// DefaultSandboxExecUser can write to it before script execution.
+//
+// This runs AS that account, never as root. The directory sits inside the
+// session's own writable workspace, and chown/chmod follow symlinks, so a
+// root-run bootstrap can be aimed at any directory in the container: a session
+// that swaps its artifact directory for a link to /etc gets handed ownership of
+// /etc, and from there uid 0 by rewriting passwd. Running as the sandbox
+// account makes that a no-op — chown succeeds on the directory MakeDir just
+// created for it and is refused by the kernel on anything else.
+//
+// Best-effort: failures are logged and do not abort the upcoming execution.
 func (m *SessionBoundManager) ensureExecutionOutputDir(
 	ctx context.Context,
 	handle RemoteSandboxHandle,
@@ -334,6 +341,7 @@ func (m *SessionBoundManager) ensureExecutionOutputDir(
 	result, err := m.client.Exec(ctx, handle, RemoteExecRequest{
 		Shell:   true,
 		Command: line,
+		User:    execUser,
 		Timeout: sessionArtifactDirBootstrapTimeout,
 	})
 	if err != nil {

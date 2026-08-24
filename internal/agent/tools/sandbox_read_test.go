@@ -81,9 +81,14 @@ func TestReadSandboxFileReturnsSmallTextOnlyInOutput(t *testing.T) {
 }
 
 // The output-directory guard is a string prefix test, so a symlink planted
-// under that directory satisfies it while pointing anywhere. The backends
-// report a link as-is instead of following it, and this is the check that
-// turns that into a refusal before any read is attempted.
+// under that directory satisfies it while pointing anywhere. The backends stat
+// the final component without following it, and this is the check that turns
+// that into a refusal before any read is attempted.
+//
+// The path here names the link itself, which is the case this actually covers.
+// A link used as an intermediate component is resolved by the kernel and still
+// stats as a regular file; see the note in Execute for why that is a convention
+// leak rather than a privilege one.
 func TestReadSandboxFileRefusesNonRegularFile(t *testing.T) {
 	source := &fakeSandboxFileSource{
 		stat: &sandbox.RemoteStatEntry{
@@ -96,7 +101,7 @@ func TestReadSandboxFileRefusesNonRegularFile(t *testing.T) {
 
 	result, err := NewReadSandboxFileTool(source).Execute(
 		sandboxFileTestContext(),
-		json.RawMessage(`{"path":"/workspace/output/esc/secret.txt"}`),
+		json.RawMessage(`{"path":"/workspace/output/esc"}`),
 	)
 
 	require.NoError(t, err)

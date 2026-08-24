@@ -89,16 +89,17 @@ func TestSessionBoundManagerExecuteEnsuresOutputDir(t *testing.T) {
 	require.True(t, execs[0].Shell)
 	require.Contains(t, execs[0].Command, "chown user:user")
 	require.Contains(t, execs[0].Command, SessionOutputRoot)
-	require.Empty(t, execs[0].User,
-		"the bootstrap chowns the directory TO the sandbox account, so it is the "+
-			"one exec that must keep the adapter's privileged default")
+	require.Equal(t, DefaultSandboxExecUser, execs[0].User,
+		"chown follows symlinks, so a root-run bootstrap can be aimed at /etc by "+
+			"a session that swaps its artifact directory for a link; running as the "+
+			"sandbox account is what makes that attempt fail")
 }
 
 // shell_exec carries a command line the model wrote, which makes it the exec
-// path an injected prompt reaches most directly. The account it runs as must
-// therefore be pinned here rather than left to each adapter: Docker resolves a
-// blank user to root, while the envd-backed backends resolve it to the sandbox
-// account, so omitting it would hand out different privileges per backend.
+// path an injected prompt reaches most directly. The account it runs as is
+// pinned here rather than left to each adapter, so that reading this call site
+// answers "as whom does model-authored input run" without having to trust that
+// all three adapters agree on what a blank user means.
 func TestSessionBoundManagerShellExecRunsAsSandboxUser(t *testing.T) {
 	client := newFakeRemoteClient(SandboxTypeCube)
 	cfg := DefaultConfig()

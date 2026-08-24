@@ -321,11 +321,10 @@ func TestDockerBackendScriptExecutionRefreshesActivityMarkerIntegration(t *testi
 	}
 	before := dockerActivityMarkerMTime(t, ctx, summaries[0].ID)
 
-	// Exec directly as the unprivileged account, with no root-run step in
-	// between: WeKnora happens to prepare the artifact directory as root
-	// before each script today, and leaning on that would let the marker
-	// silently stop tracking the account that actually runs user code.
-	// The marker has one-second resolution on most filesystems.
+	// Exec directly as the unprivileged account: this asserts that the account
+	// running user code refreshes the marker itself, rather than relying on
+	// some other step happening to touch it first. The marker has one-second
+	// resolution on most filesystems.
 	time.Sleep(2 * time.Second)
 	result, err := client.Exec(ctx, handle, RemoteExecRequest{
 		Command: "echo",
@@ -424,6 +423,97 @@ with open(%q) as handle:
 `, marker))
 	if !second.IsSuccess() || !strings.Contains(second.Stdout, "restored=before-stop") {
 		t.Fatalf("session did not resume with its filesystem: %#v", second)
+	}
+}
+
+// A session owns /workspace, so it can replace its own artifact directory with
+// a symlink pointing anywhere in the container. chown and chmod follow
+// symlinks, so if the pre-execution bootstrap ran as root it would hand the
+// session ownership of the link's target — /etc here, which is enough to
+// rewrite passwd and give the sandbox account uid 0 on the next exec.
+//
+// Session-scoped containers are what make this reachable: the link planted by
+// one execution is still there when the next one runs the bootstrap. Under the
+// old one-shot `docker run --rm` the two never shared a filesystem.
+func TestDockerBackendArtifactBootstrapDoesNotFollowSymlinkIntegration(t *testing.T) {
+	cfg := dockerIntegrationConfig(t)
+	manager := newDockerIntegrationManager(t, cfg)
+
+	ctx, cancel := context.WithTimeout(
+		types.WithSandboxTenantID(context.Background(), dockerIntegrationTenantID),
+		5*time.Minute,
+	)
+	defer cancel()
+
+	sessionID := fmt.Sprintf("docker-chown-escape-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(
+			types.WithSandboxTenantID(context.Background(), dockerIntegrationTenantID),
+			time.Minute,
+		)
+		defer cleanupCancel()
+		_ = manager.DestroySession(cleanupCtx, sessionID)
+	})
+
+	if first := runDockerScript(t, ctx, manager, sessionID, `print('seed')`); !first.IsSuccess() {
+		t.Fatalf("seed execution failed: %#v", first)
+	}
+
+	client, err := NewDockerRemoteClient(cfg)
+	if err != nil {
+		t.Fatalf("build docker client: %v", err)
+	}
+	summaries, err := client.List(ctx, RemoteListFilter{
+		Metadata: map[string]string{remoteMetadataSessionID: sessionID},
+	})
+	if err != nil || len(summaries) != 1 {
+		t.Fatalf("expected exactly one container for the session: %v %#v", err, summaries)
+	}
+	handle, err := client.Connect(ctx, summaries[0].ID)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	ownerOfEtc := func() string {
+		t.Helper()
+		result, err := client.Exec(ctx, handle, RemoteExecRequest{
+			Command: "stat",
+			Args:    []string{"-c", "%U:%G", "/etc"},
+			User:    DefaultSandboxExecUser,
+			Timeout: 30 * time.Second,
+		})
+		if err != nil || result.ExitCode != 0 {
+			t.Fatalf("stat /etc failed: %v %#v", err, result)
+		}
+		return strings.TrimSpace(result.Stdout)
+	}
+
+	before := ownerOfEtc()
+	if before != "root:root" {
+		t.Fatalf("/etc should start out root-owned, got %q", before)
+	}
+
+	// Exactly what a model with shell_exec can do: it owns /workspace.
+	plant, err := client.Exec(ctx, handle, RemoteExecRequest{
+		Shell: true,
+		Command: fmt.Sprintf(
+			"rm -rf %s && ln -s /etc %s", SessionOutputRoot, SessionOutputRoot,
+		),
+		User:    DefaultSandboxExecUser,
+		Timeout: 30 * time.Second,
+	})
+	if err != nil || plant.ExitCode != 0 {
+		t.Fatalf("planting the symlink failed: %v %#v", err, plant)
+	}
+
+	// Any further execution runs the bootstrap against the planted path.
+	if second := runDockerScript(t, ctx, manager, sessionID, `print('after')`); second == nil {
+		t.Fatal("second execution returned no result")
+	}
+
+	if after := ownerOfEtc(); after != "root:root" {
+		t.Fatalf("the artifact bootstrap chowned through the symlink: /etc is now %q, want root:root",
+			after)
 	}
 }
 

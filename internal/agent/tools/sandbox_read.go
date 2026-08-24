@@ -190,8 +190,14 @@ func (t *ReadSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 	}
 	// The directory guard above is a string prefix test, so it cannot tell that
 	// a symlink under the output directory points somewhere else entirely. The
-	// backends report a link as-is rather than as its target, which makes this
-	// the check that keeps such a path from being read at all.
+	// backends stat the final component without following it, so this refuses a
+	// path that names a link.
+	//
+	// A link in the MIDDLE of the path is still resolved by the kernel and is
+	// not caught here. That leaves the artifact-directory convention evadable,
+	// but not the privilege boundary: the read runs as the sandbox account, so
+	// it can only return what that account could already have read via
+	// shell_exec.
 	if stat.Type != sandbox.RemoteEntryFile {
 		return &types.ToolResult{
 			Success: false,
