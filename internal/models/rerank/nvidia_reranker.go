@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -27,6 +28,7 @@ type NvidiaReranker struct {
 func (r *NvidiaReranker) SetCustomHeaders(headers map[string]string) {
 	r.customHeaders = headers
 }
+
 type NvidiaRerankDocument struct {
 	Text string `json:"text"`
 }
@@ -40,8 +42,8 @@ type NvidiaRerankRequest struct {
 }
 
 type NvidiaRankResult struct {
-	Index          int     `json:"index"`
-	RelevanceScore float64 `json:"logit"`
+	Index int     `json:"index"`
+	Logit float64 `json:"logit"`
 }
 
 // NvidiaRerankResponse represents the response from a Jina reranking request
@@ -57,17 +59,16 @@ func NewNvidiaReranker(config *RerankerConfig) (*NvidiaReranker, error) {
 	if url := config.BaseURL; url != "" {
 		baseURL = url
 	}
+	if err := validateRerankBaseURL(baseURL); err != nil {
+		return nil, err
+	}
 
 	return &NvidiaReranker{
 		modelName: config.ModelName,
 		modelID:   config.ModelID,
 		apiKey:    apiKey,
 		baseURL:   baseURL,
-		client: &http.Client{
-			Transport: &http.Transport{
-				Proxy: http.ProxyFromEnvironment,
-			},
-		},
+		client:    newRerankHTTPClient(0),
 	}, nil
 }
 
@@ -129,10 +130,19 @@ func (r *NvidiaReranker) Rerank(ctx context.Context, query string, documents []s
 		ret[i] = RankResult{
 			Index:          result.Index,
 			Document:       DocumentInfo{Text: documents[result.Index]},
-			RelevanceScore: result.RelevanceScore,
+			RelevanceScore: normalizeNvidiaLogit(result.Logit),
 		}
 	}
 	return ret, nil
+}
+
+// normalizeNvidiaLogit converts NVIDIA's raw reranker logit into a probability.
+func normalizeNvidiaLogit(logit float64) float64 {
+	if logit >= 0 {
+		return 1 / (1 + math.Exp(-logit))
+	}
+	expLogit := math.Exp(logit)
+	return expLogit / (1 + expLogit)
 }
 
 // GetModelName returns the name of the reranking model

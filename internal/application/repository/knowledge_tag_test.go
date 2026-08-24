@@ -98,6 +98,47 @@ func TestSetKnowledgeTags_DedupesAndReplaces(t *testing.T) {
 	assert.Equal(t, int64(0), count)
 }
 
+func TestAddKnowledgeTagRelations_IsIncrementalIdempotentAndScoped(t *testing.T) {
+	db := setupKnowledgeTagTestDB(t)
+	repo := &knowledgeRepository{db: db}
+	kbID, knowledgeID, tagA, tagB := seedKnowledgeTagFixture(t, db)
+	ctx := context.Background()
+
+	require.NoError(t, repo.SetKnowledgeTags(ctx, knowledgeID, []string{tagA}))
+	require.NoError(t, repo.AddKnowledgeTagRelations(ctx, 1, kbID, knowledgeID, []string{tagA, tagB, tagB}))
+	require.NoError(t, repo.AddKnowledgeTagRelations(ctx, 1, kbID, knowledgeID, []string{tagB}))
+
+	var relations []types.KnowledgeTagRelation
+	require.NoError(t, db.Where("knowledge_id = ?", knowledgeID).Find(&relations).Error)
+	assert.Len(t, relations, 2)
+
+	otherKBTag := uuid.New().String()
+	require.NoError(t, db.Exec(`
+		INSERT INTO knowledge_tags (id, seq_id, tenant_id, knowledge_base_id, name)
+		VALUES (?, 3, 1, ?, 'other')
+	`, otherKBTag, uuid.New().String()).Error)
+	err := repo.AddKnowledgeTagRelations(ctx, 1, kbID, knowledgeID, []string{otherKBTag})
+	require.Error(t, err)
+}
+
+func TestAddKnowledgeTagRelations_RejectsCancelledKnowledge(t *testing.T) {
+	db := setupKnowledgeTagTestDB(t)
+	repo := &knowledgeRepository{db: db}
+	kbID, knowledgeID, _, tagB := seedKnowledgeTagFixture(t, db)
+	require.NoError(t, db.Model(&types.Knowledge{}).
+		Where("id = ?", knowledgeID).
+		Update("parse_status", types.ParseStatusCancelled).Error)
+
+	err := repo.AddKnowledgeTagRelations(context.Background(), 1, kbID, knowledgeID, []string{tagB})
+	require.Error(t, err)
+
+	var count int64
+	require.NoError(t, db.Model(&types.KnowledgeTagRelation{}).
+		Where("knowledge_id = ?", knowledgeID).
+		Count(&count).Error)
+	assert.Zero(t, count)
+}
+
 func TestGetKnowledgeTags_ReturnsTagDetails(t *testing.T) {
 	db := setupKnowledgeTagTestDB(t)
 	repo := &knowledgeRepository{db: db}

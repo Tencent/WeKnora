@@ -205,12 +205,12 @@ Wiki 模式允许 Agent 根据原始文档自动生成并维护一套结构化�
 
 ## 11. 升级到 0.6.0 后，原本能做的操作变成了「权限不足」？
 
-0.6.0 引入了租户内 RBAC（角色矩阵 + 资源归属），所有写入接口都会按角色 + `creator_id` 鉴权。常见现象：
+0.6.0 引入了空间内 RBAC（角色矩阵 + 资源归属），所有写入接口都会按角色 + `creator_id` 鉴权。常见现象：
 
 - **看得到但点不动**：你大概率是该资源的 `Viewer` 或非创建者的 `Contributor`，UI 已经把写操作隐藏/置灰。检查 **用户菜单 → 当前工作区** 角色徽章。
-- **共享空间里的 KB / Agent**：他人共享给你的 KB 默认按 `Viewer` 看待；要写需要在源租户里被授予 `Admin+`。
-- **API Key 调用**：`X-API-Key` 合成虚拟用户固定为所属租户的 `Admin`（仅删除租户需 `Owner`），脚本一般无需迁移。
-- **跨租户超管**：要 `User.CanAccessAllTenants=true` 且 `enable_cross_tenant_access=true`，并通过 `X-Tenant-ID` 切租户。
+- **共享空间里的 KB / Agent**：他人共享给你的 KB 默认按 `Viewer` 看待；要写需要在源空间里被授予 `Admin+`。
+- **API Key 调用**：`X-API-Key` 合成虚拟用户固定为所属空间的 `Admin`（仅删除空间需 `Owner`），脚本一般无需迁移。
+- **跨空间超管**：要 `User.CanAccessAllTenants=true` 且 `enable_cross_tenant_access=true`，并通过 `X-Tenant-ID` 切空间。
 
 如需临时回退到「仅审计、不拦截」灰度窗口，可在配置里设置 `tenant.enable_rbac=false`（或环境变量 `WEKNORA_TENANT_ENABLE_RBAC=false`）。完整的角色矩阵和归属链请见 [`docs/RBAC说明.md`](./RBAC说明.md)。
 
@@ -219,7 +219,7 @@ Wiki 模式允许 Agent 根据原始文档自动生成并维护一套结构化�
 升级到 0.6.0 后系统会记住「最后活跃工作区」并在登录后自动恢复。若仍未恢复，通常是：
 
 1. 浏览器清理了 LocalStorage / 切换了浏览器；
-2. 你最后访问的那个工作区已经把你移除（`/leave` 或被管理员剔除）— 系统会回退到默认租户；
+2. 你最后访问的那个工作区已经把你移除（`/leave` 或被管理员剔除）— 系统会回退到默认空间；
 3. JWT 中携带了 `tenant_id` 但已无效 — 退出重登录即可。
 
 ## 13. 如何让多人协作时正确分配权限？
@@ -229,9 +229,9 @@ Wiki 模式允许 Agent 根据原始文档自动生成并维护一套结构化�
 - 只读用户 → `Viewer`
 - 普通成员（上传文档、维护「自己」的 KB / Agent）→ `Contributor`
 - 运维人员（管理共享模型、向量库、解析器等基础设施）→ `Admin`
-- 租户所有者（拥有删除租户权限，每租户唯一）→ `Owner`
+- 空间所有者（拥有删除空间权限；每空间至少一位，可以有多位，最后一位不能被降级或移除）→ `Owner`
 
-如果你希望开启「invite-only」（不允许自助注册到本租户），可在租户设置里打开邀请制，并通过「邀请」入口签发邀请码或链接。
+如果你希望开启「invite-only」（不允许自助注册到本空间），可在空间设置里打开邀请制，并通过「邀请」入口签发邀请码或链接。
 
 ## 14. 文档解析卡在「处理中」/ 解析追踪时间线打不开怎么办？
 
@@ -258,7 +258,7 @@ Wiki 模式允许 Agent 根据原始文档自动生成并维护一套结构化�
 
 ## 17. 系统管理员（System Admin）与平台设置怎么用？
 
-0.6.1 引入了系统管理员与统一平台设置面板（含平台审计日志），与租户内 RBAC 区分：系统管理员管理的是「平台级」配置，而非单个租户内的资源。首次启用需通过系统管理员 bootstrap 流程晋升首个管理员；撤销管理员权限有安全防护（避免误撤导致无人可管）。相关迁移为 `000053_system_admin_and_settings`。
+0.6.1 引入了系统管理员与统一平台设置面板（含平台审计日志），与空间内 RBAC 区分：系统管理员管理的是「平台级」配置，而非单个空间内的资源。首次启用需通过系统管理员 bootstrap 流程晋升首个管理员；撤销管理员权限有安全防护（避免误撤导致无人可管）。相关迁移为 `000053_system_admin_and_settings`。
 
 ## 18. 上传时如何自定义解析配置（process_config）？
 
@@ -316,6 +316,134 @@ Wiki 模式允许 Agent 根据原始文档自动生成并维护一套结构化�
 ## 27. Agent 提示「模型未就绪」无法对话？
 
 0.6.3 在 Agent 选择器引入**模型就绪校验**：绑定的 LLM / Embedding / Rerank / VLM 缺失或配置无效时会阻断对话并给出修复指引。可在模型卡片打开 **调试抽屉** 先测试连通性；确认 KB 与 Agent 引用的模型均存在且可用。
+
+## 28. 如何创建并限制权限范围 API Key？
+
+0.7.0 引入**权限范围 API Key 与 Principal 模型**（迁移 `000064_principal_model`、`000065_tenant_api_keys`）。API Key 不再等同于某个人类用户，而是独立的 Principal，携带显式角色与能力（capability）授权：
+
+- 在 **设置 → API 集成**（Owner 可见）中创建 Key，可勾选能力（如 `manage_kbs` 覆盖 KB 全生命周期、`manage_storage_backends` 等），并可限制到指定知识库。
+- Key 的 `last_used_at` 按节流更新，避免高频写库。
+- 路由级守卫会拒绝越权访问；管理类接口对 API Key Principal 默认拒绝，请为集成使用具备对应能力的 Key，而非全权 Key。
+- MCP OAuth 与嵌入会话按 Principal 隔离，不同集成之间互不串号。
+
+### 如何用一个 API Key 自动化管理多个空间？
+
+SystemAdmin 可在 **系统管理 → 平台 API Key** 创建 `scope_type=platform` 的 Key。平台 Key 不绑定单一空间：调用普通空间 API 时必须携带 `X-Tenant-ID`，并继续受原有 capability 和知识库范围守卫约束；调用开放的系统控制面接口则需要对应的 `system_*` capability。平台 Key 不支持 `full_access`，也不能创建、轮换或吊销其他平台 Key。
+
+## 29. 一个空间如何绑定多个对象存储实例？
+
+0.7.0 支持**多实例存储后端**（迁移 `000068_storage_backends`）。一个空间可注册多个存储实例（`local` / `minio` / `cos` / `tos` / `s3` / `oss` / `ks3` / `obs`），不同知识库绑定到不同实例，空间维度还有一个默认实例：
+
+- 在 **设置 → 存储后端** 创建/测试/设为默认（需 Admin+；API Key 需 `manage_storage_backends` 能力）。
+- 未显式绑定的新知识库使用空间默认实例；响应中的 `access_key_id` / `secret_access_key` 会被掩码，更新时提交掩码占位符不会覆盖库中真实凭据。
+- 若创建知识库时提示存储引擎不可用，请确认目标 provider 在 `STORAGE_ALLOW_LIST` 允许范围内。详见 [`docs/api/storage-backend.md`](./api/storage-backend.md)。
+
+## 30. 后台解析/入库任务积压或需要排查失败任务怎么办？
+
+0.7.0 新增系统管理员的**运行时任务队列面板**与 **Worker 池治理**。文档处理从单一聚合池改为分阶段独立池（core / 后处理 / enrichment / maintenance）+ 弹性共享池，Wiki 独立治理：
+
+- 在 **系统设置 → 运行时队列** 查看队列深度、按模型并发统计、失败任务详情，并可手动重试。
+- 可通过 `WEKNORA_ASYNQ_*_CONCURRENCY` 与 `asynq.*_concurrency` 系统设置调整各池并发（需重启服务）；`model.max_concurrency` 用于约束单模型后台并发。
+- 详见 [`docs/worker-pool-governance.md`](./worker-pool-governance.md)。注意：Worker 并发只是调度预算，仍受模型配额、DocReader 容量、向量库与数据库连接数限制。
+
+## 31. 对话中如何临时上传图片/文档做一次性问答？
+
+0.7.0 支持**会话级临时附件**（迁移 `000070_temporary_documents`）。在对话输入区上传图片或文档，系统异步解析后仅用于当前会话的问答，不会写入知识库。图片与附件共享一个合并数量上限；附件内容会在多轮对话中保留。
+
+## 32. 如何接入 QQBot / Lark（飞书国际版）？
+
+0.7.0 新增 **QQBot** 平台集成，并支持飞书国际版 **Lark**（区域感知路由）。在 **设置 → IM 集成** 添加对应渠道并填写凭据即可；飞书回复通过 reply-message 接口发送，回复会落在原消息线程内。
+
+## 33. 如何为 Redis 启用 TLS？
+
+0.7.0 支持 Redis 的 **TLS 连接**（#1930）。按环境变量启用 TLS 后，启动日志会打印 TLS 配置状态便于确认。若连接失败，请核对证书/CA 配置与 Redis 服务端是否要求 TLS。
+
+## 34. 升级到 0.7.0 后 `weknora` CLI 命令找不到或行为变化？
+
+0.7.0 随附 **CLI v0.10**（Agent 优先，破坏性变更）：新增 `model` / `message` / `config` / `skills` 命令组，`doc reparse` / `doc update`，`kb config` / `kb config set`；`session continue` 更名为 `session resume`，新增 `session tool-approval`；提供 agent-first 的 chat 与 `session ask` 输出模式，并强化了 SSE 可靠性与类型化错误。详见 [`cli/CHANGELOG.md`](../cli/CHANGELOG.md)。
+
+## 35. 如何接入云之家（Yunzhijia）？
+
+0.7.1 新增 **云之家 IM 集成**。在 **设置 → IM 集成** 添加云之家渠道并填写应用凭据即可；集成基于 WebSocket 长连接接收消息，支持图片消息入库（带 SSRF 安全下载），默认以 **Markdown** 格式回复。若图片无法下载，请检查出站网络与凭据是否具备下载权限。
+
+## 36. 如何使用火山引擎 Rerank / 智谱 AI 网络搜索？
+
+0.7.1 新增两个供应商：
+
+- **火山引擎 Rerank**：在 **设置 → 模型** 中添加 Rerank 模型并选择火山引擎。当单次请求文档数超过 API 上限时，客户端会自动分批发送并合并结果。vLLM Rerank 现默认不再发送 `truncate_prompt_tokens` 以提升兼容性。
+- **智谱 AI 网络搜索**：在 **设置 → 网络搜索** 中选择智谱 AI 作为搜索供应商并填写凭据即可，用于 Agent 联网检索。
+
+## 37. 升级到 0.7.1 后对话记忆（Memory）设置消失了？还需要 Neo4j 吗？
+
+0.7.1 **移除了基于 Neo4j 的会话记忆（episodic memory）** 功能，相关 API 字段、设置项与嵌入开关一并下线，对话不再依赖 Neo4j 做记忆召回。**注意：知识图谱（GraphRAG / 图检索）仍然使用 Neo4j**，因此若你启用了图谱检索，Neo4j 依旧是必需组件，无需移除部署。若你此前仅为记忆功能部署 Neo4j 且未使用图谱，可按需精简。
+
+## 38. 官方文档在哪里看？如何本地或独立部署文档站？
+
+0.7.2 新增了完整的官方产品文档，位于仓库 [`website-docs/`](../website-docs/README.md) 目录，按「入门 → 架构 → 功能 → API → 客户端 → 开发」六个板块组织，覆盖约 360 个 API 端点、约 150 个环境变量与 9 大扩展点。
+
+该目录同时是一个 VitePress 站点，两种使用方式：
+
+```bash
+# 本地预览
+cd website-docs && npm install && npm run dev
+
+# 独立容器部署（容器内 Nginx 监听 8081）
+docker build -t weknora-docs website-docs
+docker run -d -p 8081:8081 weknora-docs
+```
+
+站点的版本号在构建时自动读取仓库根目录的 `VERSION` 文件，因此升级版本后无需手动改文档。若某处截图显示为虚线占位框，说明 `website-docs/public/screenshots/` 下缺少同名图片，补图即可生效，不需要改 Markdown。
+
+`website-docs/sample-data/` 下还提供了 4 份 Markdown 样例文档与 1 份 FAQ 导入 JSON，可以直接用来跑一遍「建库 → 上传 → 问答」；`examples/mcp-demo/` 是一个可直接运行的本地 MCP 服务示例。
+
+## 39. 文件夹上传后文档标题变成了一长串路径？
+
+这是 0.7.2 之前的行为：文件夹上传会把相对目录塞进 `file_name`，导致列表里显示整条路径，也无法按文件夹筛选。
+
+0.7.2 把路径拆到独立的 `folder_path` 字段（迁移 `000079_knowledge_folder_path`），并**自动回填历史数据**，因此升级后已有知识库同样会呈现正确的文件夹树，无需重新上传。文档列表左侧会出现文件夹树，可以像文件管理器一样浏览、重命名文件夹，也可以通过行内的文件夹选择器把文档重新归档到其他文件夹。单独上传（非文件夹）的文档统一挂在树的根目录下。
+
+## 40. 分块内容不准确，可以手动修改吗？改完会重新建索引吗？
+
+可以。0.7.2 支持在界面上直接编辑检索分块（迁移 `000078_chunk_editing_and_custom_metadata`）：
+
+- 每次编辑都会把改动前的版本存入 `chunk_revisions`，可在「分块编辑历史」里逐版本查看 diff 并一键回滚。
+- **编辑保存后会自动重建该分块的索引**（`index_status` 字段跟踪重建状态），无需手动 reparse。
+- 分块的生成问题可以单独增删改与重新生成，且在内容编辑后仍会保留。
+- 注意：重新解析（reparse）整篇文档会按新的解析结果重建分块，此前的人工编辑不会被保留，请谨慎操作。
+
+## 41. Wiki 页面被 Agent 覆盖了，能找回旧版本吗？
+
+能。0.7.2 为 Wiki 页面引入版本历史（迁移 `000075_wiki_page_revisions`）：页面每次被覆盖前都会留存一份快照，在 Wiki 浏览器右上角打开「版本历史」抽屉即可查看完整历史、行级 diff，并一键回滚到任意版本。每个版本都会记录来源（`pipeline` 流水线 / `agent` 修复工具 / `user` 手动编辑 / `revert` 回滚），便于判断是谁改的。页面也支持在浏览器内直接手动编辑。
+
+另外，0.7.2 移除了 Wiki 浏览器里重复的操作日志（迁移 `000077_remove_wiki_log`），Wiki 的变更记录统一并入**知识库活动流**查看。
+
+## 42. 第三方 App 拿到的图片链接是 `resource://...` 无法显示，怎么办？
+
+默认情况下 API 返回的是内部句柄 `resource://<handle>`，客户端需要再调用带鉴权的 `/files` 代理才能取到图。0.7.2 新增直链模式，让接口直接返回可加载的 http(s) 链接：
+
+- **单次请求**：在 URL 上加 `?resource_urls=public`。
+- **整个部署**：设置环境变量 `RESOURCE_URL_MODE=public`。
+
+注意事项：
+
+- 直链依赖 `APP_EXTERNAL_URL`（或存储后端本身公网可达）才能生成；无法生成时该引用会保持 `resource://` 原样，客户端仍可回退到 `/files`。
+- `public` 会为每个被引用文件签发**限时匿名可读**链接（WeKnora 侧 2 小时，MinIO 24 小时），请评估是否符合你的安全要求。
+- 匿名的 embed 渠道与限定了知识库范围的 API Key **始终返回 handle**，不受该变量影响。
+- 建议同时配置 `SYSTEM_AES_KEY`，以便复用 grant 行、稳定直链 URL 并降低读接口的写入压力。
+
+详见 [API 文档 · 文件与图片引用](./api/README.md)。
+
+## 43. 使用 AWS S3 但不想在配置里写 AK/SK？
+
+0.7.2 支持 **AWS SDK 默认凭据链**（#2008）：把 `S3_ACCESS_KEY` 与 `S3_SECRET_KEY` **同时留空**即可，SDK 会依次尝试 EC2/ECS/EKS 实例角色、IRSA / Web Identity、环境变量与共享配置文件。注意两者必须同时填写或同时留空，只填一个会报配置错误。`S3_ENDPOINT` 也可留空，此时使用 `S3_REGION` 对应的 AWS 标准端点。
+
+## 44. MCP Server 用 `uvx` 启动失败，或者应该装哪个包？
+
+请安装**官方包 `tencent-weknora-mcp`**（由 Tencent/WeKnora 仓库 CI 通过 Trusted Publishing 发布）。此前社区包 `weknora-mcp` 非官方维护，请迁移安装命令。
+
+0.7.2 随附 MCP Server 1.1.x，已迁移到 mcp 2.x 的高级 `MCPServer` API，修复了 `uvx` 拉到 SDK 2.x 时的启动崩溃（`AttributeError: 'Server' object has no attribute 'list_tools'`），并恢复了 HTTP（`stateless_http`）与 SSE（`/sse/messages/`）传输的路由兼容性。工具总数为 29 个，新增 `create_knowledge_from_text`（用 Markdown 文本直接建知识条目）与 `list_shared_knowledge_bases`（共享知识库也纳入按名称解析）。
+
+行为变化提醒：工具执行失败时，MCPServer 2.x 返回 `CallToolResult(isError=True)`，不再像旧版低层 API 那样以成功响应返回 `"Error executing …"` 文本前缀。只解析 `content[0].text` 的客户端通常无感，依赖 `isError` 标志的集成方行为会更符合 MCP 规范。
 
 ## P.S.
 如果以上方式未解决问题，请在issue中描述您的问题，并提供必要的日志信息辅助我们进行问题排查

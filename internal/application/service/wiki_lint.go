@@ -150,7 +150,7 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 			}
 
 			// Check 1: Orphan pages (no inbound links, excluding system pages).
-			if page.PageType != types.WikiPageTypeIndex && page.PageType != types.WikiPageTypeLog {
+			if page.PageType != types.WikiPageTypeIndex {
 				if len(page.InLinks) == 0 {
 					issues = append(issues, WikiLintIssue{
 						Type:        LintIssueOrphanPage,
@@ -193,9 +193,7 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 			// soft-deleted knowledge. Cached knowledgeLive lookup keeps
 			// per-kid checks O(1) after the first batch encounters
 			// each id.
-			if s.knowledgeService != nil &&
-				page.PageType != types.WikiPageTypeIndex &&
-				page.PageType != types.WikiPageTypeLog {
+			if s.knowledgeService != nil && page.PageType != types.WikiPageTypeIndex {
 				for _, ref := range page.SourceRefs {
 					kid := ref
 					if i := strings.Index(ref, "|"); i > 0 {
@@ -383,8 +381,8 @@ func (s *WikiLintService) AutoFix(ctx context.Context, kbID string) (int, error)
 			if err != nil {
 				continue
 			}
-			// Don't archive index or log pages
-			if page.PageType == types.WikiPageTypeIndex || page.PageType == types.WikiPageTypeLog {
+			// Don't archive the index page.
+			if page.PageType == types.WikiPageTypeIndex {
 				continue
 			}
 			page.Status = types.WikiPageStatusArchived
@@ -405,7 +403,7 @@ func (s *WikiLintService) AutoFix(ctx context.Context, kbID string) (int, error)
 			if err != nil || page == nil {
 				continue
 			}
-			if page.PageType == types.WikiPageTypeIndex || page.PageType == types.WikiPageTypeLog {
+			if page.PageType == types.WikiPageTypeIndex {
 				continue
 			}
 			remaining := removeSourceRef(page.SourceRefs, issue.TargetSlug)

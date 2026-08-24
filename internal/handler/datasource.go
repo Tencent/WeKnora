@@ -54,6 +54,9 @@ func (h *DataSourceHandler) getOwnedKnowledgeBase(
 	if kb.TenantID != tenantID {
 		return nil, http.StatusForbidden, "access denied"
 	}
+	if err := types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbID); err != nil {
+		return nil, http.StatusForbidden, err.Error()
+	}
 
 	return kb, http.StatusOK, ""
 }
@@ -91,7 +94,7 @@ func (h *DataSourceHandler) CreateDataSource(c *gin.Context) {
 	// Extract tenant ID from context (set by auth middleware)
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: tenant context missing"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
 		return
 	}
 
@@ -161,7 +164,7 @@ func (h *DataSourceHandler) ListDataSources(c *gin.Context) {
 	// Extract tenant ID from context
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: tenant context missing"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
 		return
 	}
 
@@ -170,7 +173,6 @@ func (h *DataSourceHandler) ListDataSources(c *gin.Context) {
 		c.JSON(status, gin.H{"error": msg})
 		return
 	}
-
 	dataSources, err := h.service.ListDataSources(ctx, kbID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list data sources"})

@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS knowledge_processing_spans (
     attempt         INTEGER     NOT NULL DEFAULT 1,
     span_id         VARCHAR(64) NOT NULL,
     parent_span_id  VARCHAR(64),
-    name            VARCHAR(64) NOT NULL,
+    name            VARCHAR(255) NOT NULL,
     kind            VARCHAR(16) NOT NULL,
     status          VARCHAR(16) NOT NULL,
     input           TEXT,
@@ -68,13 +68,43 @@ CREATE TABLE IF NOT EXISTS knowledge_processing_spans (
 );
 `
 
+const housekeepingPendingOpsDDL = `
+CREATE TABLE IF NOT EXISTS task_pending_ops (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id   INTEGER NOT NULL DEFAULT 0,
+    task_type   VARCHAR(64) NOT NULL,
+    scope       VARCHAR(32) NOT NULL,
+    scope_id    VARCHAR(64) NOT NULL,
+    op          VARCHAR(32) NOT NULL,
+    dedup_key   VARCHAR(128) NOT NULL DEFAULT '',
+    payload     TEXT NOT NULL DEFAULT '{}',
+    fail_count  INTEGER NOT NULL DEFAULT 0,
+    enqueued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    claimed_at  DATETIME
+);
+`
+
 func setupHousekeepingDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(knowledgeTestDDL).Error)
 	require.NoError(t, db.Exec(housekeepingSpansDDL).Error)
+	require.NoError(t, db.Exec(housekeepingPendingOpsDDL).Error)
 	return db
+}
+
+// insertWikiPendingOp mirrors newWikiIngestPendingOp: the durable row is
+// scoped to the KB but deduplicated on the knowledge ID, which is exactly
+// why the per-knowledge asynq probe cannot see it.
+func insertWikiPendingOp(t *testing.T, db *gorm.DB, kbID, knowledgeID string) {
+	t.Helper()
+	require.NoError(t, db.Exec(
+		`INSERT INTO task_pending_ops (task_type, scope, scope_id, op, dedup_key, payload)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		wikiTaskType, wikiTaskScope, kbID, WikiOpIngest, knowledgeID,
+		`{"op":"ingest","knowledge_id":"`+knowledgeID+`"}`,
+	).Error)
 }
 
 // insertKnowledge writes a knowledge row at the given updated_at. We
@@ -120,6 +150,18 @@ func (f fakeTaskInspector) HasQueuedTasksForKnowledge(
 	return f.queued[knowledgeID], nil
 }
 
+func (f fakeTaskInspector) QueueStats(
+	_ context.Context,
+) ([]types.QueueStat, bool, error) {
+	return nil, false, nil
+}
+
+func (f fakeTaskInspector) WorkerServerStats(
+	_ context.Context,
+) ([]types.WorkerServerStat, bool, error) {
+	return nil, false, nil
+}
+
 func newHousekeepingSvcForTest(db *gorm.DB) *HousekeepingService {
 	return newHousekeepingSvcWithInspector(db, fakeTaskInspector{})
 }
@@ -151,6 +193,40 @@ func TestHousekeeping_RecoversAbandoned(t *testing.T) {
 	).Row().Scan(&status, &errMsg))
 	assert.Equal(t, types.ParseStatusFailed, status)
 	assert.Contains(t, errMsg, "stuck in processing")
+}
+
+func TestHousekeeping_RecoversPendingTaskMissingFromQueue(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledge(t, db, "kid-pending-orphan", types.ParseStatusPending, stale)
+
+	svc.runSweep(context.Background())
+
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status FROM knowledges WHERE id = ?`, "kid-pending-orphan",
+	).Row().Scan(&status))
+	assert.Equal(t, types.ParseStatusFailed, status,
+		"a stale pending row with no queue task must not remain pending forever")
+}
+
+func TestHousekeeping_PreservesPendingTaskStillQueued(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcWithInspector(db, fakeTaskInspector{
+		queued: map[string]bool{"kid-pending-queued": true},
+	})
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledge(t, db, "kid-pending-queued", types.ParseStatusPending, stale)
+
+	svc.runSweep(context.Background())
+
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status FROM knowledges WHERE id = ?`, "kid-pending-queued",
+	).Row().Scan(&status))
+	assert.Equal(t, types.ParseStatusPending, status,
+		"backlogged pending work remains owned by the durable queue")
 }
 
 // TestHousekeeping_NoFalseKill_ActiveSpan is the regression test for
@@ -222,6 +298,53 @@ func TestHousekeeping_NoFalseKill_TasksStillQueued(t *testing.T) {
 	).Row().Scan(&status))
 	assert.Equal(t, types.ParseStatusFinalizing, status,
 		"finalizing row with tasks still queued must NOT be flipped to failed")
+}
+
+// A document whose only outstanding work is a queued Wiki ingest is
+// invisible to the asynq probe: the durable op lives in task_pending_ops
+// keyed by knowledge ID, while asynq holds only a per-KB trigger, and
+// TypeWikiIngest is not in taskTypesForKnowledgeCancel either. The
+// inspector below reports "nothing queued" — exactly what production does
+// — so without the durable gate the sweep force-fails a healthy row.
+func TestHousekeeping_NoFalseKill_DurableWikiIngestPending(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcWithInspector(db, fakeTaskInspector{})
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledge(t, db, "kid-durable-wiki", types.ParseStatusFinalizing, stale)
+	insertSpan(t, db, "kid-durable-wiki", 1, "wiki-1", types.SpanStatusRunning, stale)
+	insertWikiPendingOp(t, db, "kb-1", "kid-durable-wiki")
+
+	svc.runSweep(context.Background())
+
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status FROM knowledges WHERE id = ?`, "kid-durable-wiki",
+	).Row().Scan(&status))
+	assert.Equal(t, types.ParseStatusFinalizing, status,
+		"row with a durable wiki ingest op pending must NOT be flipped to failed")
+}
+
+// The durable gate must not become a blanket amnesty: a stale row with no
+// pending op and nothing in the queue is still genuinely orphaned, and the
+// sweep must keep recovering it. This is the regression guard for the gate
+// itself.
+func TestHousekeeping_StillRecoversWhenNoDurableOp(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcWithInspector(db, fakeTaskInspector{})
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledge(t, db, "kid-orphan", types.ParseStatusFinalizing, stale)
+	insertSpan(t, db, "kid-orphan", 1, "wiki-1", types.SpanStatusRunning, stale)
+	// A pending op for a DIFFERENT document must not shield this one.
+	insertWikiPendingOp(t, db, "kb-1", "kid-someone-else")
+
+	svc.runSweep(context.Background())
+
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status FROM knowledges WHERE id = ?`, "kid-orphan",
+	).Row().Scan(&status))
+	assert.Equal(t, types.ParseStatusFailed, status,
+		"row with no durable op and nothing queued must still be recovered")
 }
 
 // TestHousekeeping_QueueProbeError_FailsSafe confirms the fail-safe

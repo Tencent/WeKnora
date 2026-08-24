@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -28,12 +29,19 @@ type AgentConfig struct {
 	WebSearchProviderID     string        `json:"web_search_provider_id,omitempty"`     // WebSearchProviderEntity ID (resolved from agent config)
 	MultiTurnEnabled        bool          `json:"multi_turn_enabled"`                   // Whether multi-turn conversation is enabled
 	HistoryTurns            int           `json:"history_turns"`                        // Number of history turns to keep in context
+	MemoryEnabled           *bool         `json:"memory_enabled,omitempty"`             // nil inherits workspace
 	SearchTargets           SearchTargets `json:"-"`                                    // Pre-computed unified search targets (runtime only)
 	// MCP service selection
 	MCPSelectionMode string   `json:"mcp_selection_mode"` // MCP selection mode: "all", "selected", "none"
 	MCPServices      []string `json:"mcp_services"`       // Selected MCP service IDs (when mode is "selected")
+	// MCPAuthWaitTimeout is how many seconds an agent run waits for
+	// in-conversation OAuth authorization before skipping. <=0 falls back to
+	// the gate's configured timeout. The wait is always bounded (no leak).
+	MCPAuthWaitTimeout int `json:"mcp_auth_wait_timeout,omitempty"`
 	// Whether to enable thinking mode (for models that support extended thinking)
 	Thinking *bool `json:"thinking"`
+	// Whether final answers include knowledge/web source citations. Nil defaults to true.
+	CitationEnabled *bool `json:"citation_enabled"`
 	// Whether to retrieve knowledge base only when explicitly mentioned with @ (default: false)
 	RetrieveKBOnlyWhenMentioned bool `json:"retrieve_kb_only_when_mentioned"`
 
@@ -46,10 +54,15 @@ type AgentConfig struct {
 	AllowedSkills []string `json:"allowed_skills"` // Skill names whitelist (empty = allow all)
 
 	// Runtime-only fields (not persisted)
-	VLMModelID string `json:"-"` // VLM model ID for tool result image analysis (set from CustomAgent config)
+	VLMModelID      string `json:"-"` // VLM model ID for tool result image analysis (set from CustomAgent config)
+	SandboxConfigID string `json:"-"` // Workspace sandbox config ID for skill execution (set from CustomAgent config)
 	// Per-request @mention pins (runtime only; injected as <must_use> in the user message).
 	PinnedMCPServiceIDs []string `json:"-"`
 	PinnedSkillNames    []string `json:"-"`
+	// SharedAgentReadOnly prevents a shared agent from mutating resources in
+	// its source workspace. It is set from the verified share relation, never
+	// inferred from a client-provided tenant ID.
+	SharedAgentReadOnly bool `json:"-"`
 	// LLM call timeout in seconds (default: 120). Controls the maximum time for a single LLM call.
 	LLMCallTimeout int `json:"llm_call_timeout,omitempty"`
 
@@ -65,6 +78,12 @@ type AgentConfig struct {
 	// Whether to execute independent tool calls in parallel (default: false).
 	// When enabled and the LLM returns multiple tool calls, they run concurrently via errgroup.
 	ParallelToolCalls bool `json:"parallel_tool_calls,omitempty"`
+}
+
+// CitationsEnabled preserves citation output for legacy runtime configs that
+// predate the setting and therefore have a nil CitationEnabled value.
+func (c *AgentConfig) CitationsEnabled() bool {
+	return c == nil || c.CitationEnabled == nil || *c.CitationEnabled
 }
 
 // SessionAgentConfig represents session-level agent configuration
@@ -188,6 +207,20 @@ type ToolCall struct {
 	ProviderMetadata ToolCallMetadata       `json:"provider_metadata,omitempty"` // Provider-specific tool-call state for replay
 }
 
+// PipelineToolCallIDPrefix marks a persisted tool call the model never made.
+// The fast-answer (KnowledgeQA) pipeline records its retrieval stages as tool
+// calls so a reloaded conversation can redraw the same timeline it showed while
+// streaming. History replay must skip them: asking the model to account for
+// calls it never issued, against tools it may not even have, breaks the
+// request protocol.
+const PipelineToolCallIDPrefix = "ragpipe-"
+
+// IsPipelineToolCallID reports whether a tool call was synthesized by the
+// fast-answer pipeline rather than requested by the model.
+func IsPipelineToolCallID(id string) bool {
+	return strings.HasPrefix(id, PipelineToolCallIDPrefix)
+}
+
 // AgentStep represents one iteration of the ReAct loop
 type AgentStep struct {
 	Iteration int    `json:"iteration"` // Iteration number (0-indexed)
@@ -223,6 +256,7 @@ type AgentState struct {
 	IsComplete    bool            `json:"is_complete"`    // Whether agent has finished
 	FinalAnswer   string          `json:"final_answer"`   // The final answer to the query
 	KnowledgeRefs []*SearchResult `json:"knowledge_refs"` // Collected knowledge references
+	TurnUsage     TokenUsage      `json:"turn_usage"`     // LLM token usage accumulated across every round of this turn
 }
 
 // FunctionDefinition represents a function definition for LLM function calling

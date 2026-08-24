@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
-	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -113,7 +113,8 @@ func NewChunkExtractTask(
 	if err != nil {
 		return false, err
 	}
-	task := asynq.NewTask(types.TypeChunkExtract, payload, asynq.Queue(types.QueueGraph), asynq.MaxRetry(3))
+	task := asynq.NewTask(types.TypeChunkExtract, payload,
+		asynq.Queue(types.QueueGraph), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
 	info, err := client.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "failed to enqueue task: %v", err)
@@ -143,7 +144,8 @@ func NewDataTableSummaryTask(
 	if err != nil {
 		return err
 	}
-	task := asynq.NewTask(types.TypeDataTableSummary, payload, asynq.MaxRetry(3))
+	task := asynq.NewTask(types.TypeDataTableSummary, payload,
+		asynq.Queue(types.QueueSummary), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
 	info, err := client.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "failed to enqueue data table summary task: %v", err)
@@ -152,6 +154,27 @@ func NewDataTableSummaryTask(
 	logger.Infof(ctx, "enqueued data table summary task: id=%s queue=%s knowledge=%s",
 		info.ID, info.Queue, knowledgeID)
 	return nil
+}
+
+// enqueueDataTableSummaryIfNeeded enqueues table summary work for spreadsheet
+// imports. fileName is a fallback for older records whose FileType is empty.
+func enqueueDataTableSummaryIfNeeded(
+	ctx context.Context,
+	client interfaces.TaskEnqueuer,
+	tenantID uint64,
+	knowledgeID string,
+	fileName, fileType, summaryModelID, embeddingModelID string,
+) {
+	ft := normalizeFileExtension(fileType)
+	if ft == "" && fileName != "" {
+		ft = getFileType(fileName)
+	}
+	if !isDataTableFileType(ft) {
+		return
+	}
+	if err := NewDataTableSummaryTask(ctx, client, tenantID, knowledgeID, summaryModelID, embeddingModelID); err != nil {
+		logger.Warnf(ctx, "Failed to enqueue data table summary task for knowledge %s: %v", knowledgeID, err)
+	}
 }
 
 // ChunkExtractService is a service for extracting chunks
@@ -316,8 +339,9 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	}
 
 	template := &types.PromptTemplateStructured{
-		Description: s.template.Description,
-		Tags:        extractCfg.Tags,
+		Description: types.AppendCustomPromptInstructions(
+			s.template.Description, extractCfg.CustomInstructions, "graph_extraction"),
+		Tags: extractCfg.Tags,
 		Examples: []types.GraphData{
 			{
 				Text:     extractCfg.Text,
@@ -402,6 +426,7 @@ type DataTableSummaryService struct {
 	retrieveEngine       interfaces.RetrieveEngineRegistry
 	ownership            retriever.TenantStoreOwnership
 	sqlDB                *sql.DB
+	storageResolver      interfaces.StorageBackendResolver
 }
 
 // NewDataTableSummaryService creates a new DataTableSummaryService
@@ -415,6 +440,7 @@ func NewDataTableSummaryService(
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
 	sqlDB *sql.DB,
+	storageResolver interfaces.StorageBackendResolver,
 ) interfaces.TaskHandler {
 	return &DataTableSummaryService{
 		modelService:         modelService,
@@ -426,6 +452,7 @@ func NewDataTableSummaryService(
 		retrieveEngine:       retrieveEngine,
 		ownership:            ownership,
 		sqlDB:                sqlDB,
+		storageResolver:      storageResolver,
 	}
 }
 
@@ -470,6 +497,7 @@ func (s *DataTableSummaryService) Handle(ctx context.Context, t *asynq.Task) err
 // extractionResources 封装提取过程所需的所有资源
 type extractionResources struct {
 	knowledge      *types.Knowledge
+	knowledgeBase  *types.KnowledgeBase
 	tenant         *types.Tenant
 	chatModel      chat.Chat
 	embeddingModel embedding.Embedder
@@ -493,7 +521,7 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 		return nil, fmt.Errorf("unsupported file type: %s", fileType)
 	}
 
-	// 获取租户信息
+	// 获取空间信息
 	tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get tenant: %v", err)
@@ -540,6 +568,7 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 
 	return &extractionResources{
 		knowledge:      knowledge,
+		knowledgeBase:  kb,
 		tenant:         tenantInfo,
 		chatModel:      chatModel,
 		embeddingModel: embeddingModel,
@@ -553,24 +582,29 @@ func (s *DataTableSummaryService) resolveFileServiceForKnowledge(ctx context.Con
 	if resources == nil || resources.knowledge == nil {
 		return s.fileService
 	}
-	if resources.tenant == nil || resources.tenant.StorageEngineConfig == nil {
+	if resources.tenant == nil {
 		return s.fileService
 	}
 
 	provider := types.InferStorageFromFilePath(resources.knowledge.FilePath)
-	if provider == "" {
+	if provider == "" && resources.tenant.StorageEngineConfig != nil {
 		provider = strings.ToLower(strings.TrimSpace(resources.tenant.StorageEngineConfig.DefaultProvider))
-	}
-	if provider == "" {
-		return s.fileService
 	}
 
 	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
-	resolvedSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(
-		provider,
-		resources.tenant.StorageEngineConfig,
-		baseDir,
-	)
+	backendID, _, _ := types.ParseStorageBackendPath(resources.knowledge.FilePath)
+	if backendID == "" && resources.knowledgeBase != nil && resources.knowledgeBase.StorageBackendID != nil {
+		backendID = strings.TrimSpace(*resources.knowledgeBase.StorageBackendID)
+	}
+
+	// New-model workspaces resolve via DefaultStorageBackendID even when no
+	// legacy StorageEngineConfig / provider is present, so gate on the resolver
+	// and a usable backendID/provider rather than requiring a non-empty provider.
+	if s.storageResolver == nil || (backendID == "" && provider == "") {
+		return s.fileService
+	}
+
+	resolvedSvc, resolvedProvider, err := s.storageResolver.ResolveFileService(ctx, resources.tenant, backendID, provider, baseDir)
 	if err != nil {
 		logger.Warnf(ctx, "[TableSummary] Failed to resolve file service for provider=%s, fallback to default: %v", provider, err)
 		return s.fileService
@@ -585,7 +619,7 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 	// 创建DuckDB会话并加载数据
 	sessionID := fmt.Sprintf("table_summary_%s", resources.knowledge.ID)
 	fileSvc := s.resolveFileServiceForKnowledge(ctx, resources)
-	duckdbTool := tools.NewDataAnalysisTool(s.knowledgeBaseService, s.knowledgeService, s.tenantService, fileSvc, s.sqlDB, sessionID)
+	duckdbTool := tools.NewDataAnalysisTool(s.knowledgeBaseService, s.knowledgeService, s.tenantService, fileSvc, s.sqlDB, sessionID, s.storageResolver)
 	defer duckdbTool.Cleanup(ctx)
 
 	// 使用knowledge.ID作为表名，根据文件类型自动加载数据
@@ -615,17 +649,27 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 
 	// 构建共用的schema和样本数据描述
 	schemaDesc := tableSchema.Description()
-	sampleDesc := s.buildSampleDataDescription(sampleResult, 10)
+	sampleDesc := s.buildSampleDataDescription(ctx, sampleResult, 10)
 
 	// 使用AI生成表格摘要和列描述
-	tableDescription, err := s.generateTableDescription(ctx, resources.chatModel, tableSchema.TableName, schemaDesc, sampleDesc)
+	customInstructions := ""
+	if resources.knowledgeBase != nil {
+		var processOverrides *types.KnowledgeProcessOverrides
+		if resources.knowledge != nil {
+			processOverrides, _ = resources.knowledge.ProcessOverrides()
+		}
+		customInstructions = ResolveProcessConfig(resources.knowledgeBase, processOverrides).ChunkingConfig.TableMetadataInstructions
+	}
+	tableDescription, err := s.generateTableDescription(ctx, resources.chatModel, tableSchema.TableName,
+		schemaDesc, sampleDesc, customInstructions)
 	if err != nil {
 		logger.Errorf(ctx, "failed to generate table description: %v", err)
 		return nil, err
 	}
 	logger.Debugf(ctx, "table describe of knowledge %s: %s", resources.knowledge.ID, tableDescription)
 
-	columnDescription, err := s.generateColumnDescriptions(ctx, resources.chatModel, tableSchema.TableName, schemaDesc, sampleDesc)
+	columnDescription, err := s.generateColumnDescriptions(ctx, resources.chatModel, tableSchema.TableName,
+		schemaDesc, sampleDesc, customInstructions)
 	if err != nil {
 		logger.Errorf(ctx, "failed to generate column descriptions: %v", err)
 		return nil, err
@@ -768,8 +812,11 @@ func (s *DataTableSummaryService) cleanupOnFailure(ctx context.Context, resource
 }
 
 // generateTableDescription generates a summary description for the entire table
-func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, chatModel chat.Chat, tableName, schemaDesc, sampleDesc string) (string, error) {
+func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, chatModel chat.Chat,
+	tableName, schemaDesc, sampleDesc, customInstructions string,
+) (string, error) {
 	prompt := fmt.Sprintf(tableDescriptionPromptTemplate, tableName, schemaDesc, sampleDesc)
+	prompt = types.AppendCustomPromptInstructions(prompt, customInstructions, "table_metadata")
 	// logger.Debugf(ctx, "generateTableDescription prompt: %s", prompt)
 
 	thinking := false
@@ -788,9 +835,12 @@ func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, 
 }
 
 // generateColumnDescriptions generates descriptions for each column in batch
-func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context, chatModel chat.Chat, tableName, schemaDesc, sampleDesc string) (string, error) {
+func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context, chatModel chat.Chat,
+	tableName, schemaDesc, sampleDesc, customInstructions string,
+) (string, error) {
 	// Build batch prompt for all columns
 	prompt := fmt.Sprintf(columnDescriptionsPromptTemplate, tableName, schemaDesc, sampleDesc)
+	prompt = types.AppendCustomPromptInstructions(prompt, customInstructions, "table_metadata")
 	// logger.Debugf(ctx, "generateColumnDescriptions prompt: %s", prompt)
 
 	// Call LLM once for all columns
@@ -810,12 +860,36 @@ func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context
 }
 
 // buildSampleDataDescription builds a formatted sample data description
-func (s *DataTableSummaryService) buildSampleDataDescription(sampleData *types.ToolResult, maxRows int) string {
+func (s *DataTableSummaryService) buildSampleDataDescription(ctx context.Context, sampleData *types.ToolResult, maxRows int) string {
 	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("Sample data (first %d rows):\n", maxRows))
 
-	rows, ok := sampleData.Data["rows"].([]map[string]interface{})
-	if !ok {
+	if sampleData == nil || sampleData.Data == nil {
+		return builder.String()
+	}
+
+	rawRows, exists := sampleData.Data["rows"]
+	if !exists || rawRows == nil {
+		return builder.String()
+	}
+
+	// DataAnalysisTool returns []map[string]string. A decoded ToolResult can
+	// instead contain []map[string]interface{}, so normalize both shapes before
+	// serializing the sample rows.
+	var rows []interface{}
+	switch typedRows := rawRows.(type) {
+	case []map[string]string:
+		rows = make([]interface{}, len(typedRows))
+		for i, row := range typedRows {
+			rows[i] = row
+		}
+	case []map[string]interface{}:
+		rows = make([]interface{}, len(typedRows))
+		for i, row := range typedRows {
+			rows[i] = row
+		}
+	default:
+		logger.Warnf(ctx, "[TableSummary] Unsupported sample rows type: %T", rawRows)
 		return builder.String()
 	}
 

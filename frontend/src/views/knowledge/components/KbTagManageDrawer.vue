@@ -68,7 +68,7 @@
                   class="tag-tile__input"
                   :placeholder="$t('knowledgeBase.tagNamePlaceholder')"
                   @enter="submitCreateTag"
-                  @keydown="(_v, ctx) => onEditKeydown(ctx, cancelCreateTag)"
+                  @keydown="(_v: string, ctx?: { e?: KeyboardEvent }) => onEditKeydown(ctx, cancelCreateTag)"
                 />
               </div>
               <div class="tag-tile__actions">
@@ -116,7 +116,7 @@
                     class="tag-tile__input"
                     :placeholder="$t('knowledgeBase.tagNamePlaceholder')"
                     @enter="submitEditTag"
-                    @keydown="(_v, ctx) => onEditKeydown(ctx, cancelEditTag)"
+                    @keydown="(_v: string, ctx?: { e?: KeyboardEvent }) => onEditKeydown(ctx, cancelEditTag)"
                   />
                 </div>
                 <div class="tag-tile__actions">
@@ -153,7 +153,7 @@
                     <span class="tag-tile__count">
                       {{
                         isFaq
-                          ? $t('knowledgeBase.tagManageFaqCount', { count: tag.knowledge_count || 0 })
+                          ? $t('knowledgeBase.tagManageFaqCount', { count: tag.chunk_count || 0 })
                           : $t('knowledgeBase.tagManageDocCount', { count: tag.knowledge_count || 0 })
                       }}
                     </span>
@@ -222,6 +222,7 @@ type TagRow = {
   seq_id: number;
   name: string;
   knowledge_count?: number;
+  chunk_count?: number;
 };
 
 type TagInputInstance = ComponentPublicInstance<{ focus: () => void; select: () => void }>;
@@ -276,7 +277,7 @@ const setEditingTagInputRef = (el: TagInputInstance | null, tagId: string) => {
 const getDeleteConfirmContent = (tag: { name: string }) =>
   t(props.isFaq ? 'knowledgeBase.tagDeleteDesc' : 'knowledgeBase.tagDeleteDescDoc', { name: tag.name });
 
-const onEditKeydown = (ctx: { e?: KeyboardEvent }, cancel: () => void) => {
+const onEditKeydown = (ctx: { e?: KeyboardEvent } | undefined, cancel: () => void) => {
   if (ctx?.e?.key === 'Escape') {
     ctx.e.stopPropagation();
     ctx.e.preventDefault();

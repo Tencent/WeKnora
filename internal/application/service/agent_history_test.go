@@ -11,12 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestBuildUserHistoryMessage_PrefersRenderedContent verifies the user side of
-// history rebuild: RenderedContent (the RAG-augmented version) wins over the
-// raw Content, and image captions are appended only when there's no rendered
-// override (the rendered version already carries any retrieval context that
-// would have included the caption upstream).
-func TestBuildUserHistoryMessage_PrefersRenderedContent(t *testing.T) {
+// TestBuildUserHistoryMessage_IgnoresLegacyRenderedContent verifies that old
+// prompt/context snapshots never re-enter the current model context.
+func TestBuildUserHistoryMessage_IgnoresLegacyRenderedContent(t *testing.T) {
 	msg := &types.Message{
 		Role:            "user",
 		Content:         "what about the chart?",
@@ -27,7 +24,8 @@ func TestBuildUserHistoryMessage_PrefersRenderedContent(t *testing.T) {
 	}
 	got := buildUserHistoryMessage(msg)
 	assert.Equal(t, "user", got.Role)
-	assert.Equal(t, "what about the chart? [augmented]", got.Content)
+	assert.Equal(t, "what about the chart?\n\n[用户上传图片内容]\na bar chart", got.Content)
+	assert.NotContains(t, got.Content, "[augmented]")
 }
 
 func TestBuildUserHistoryMessage_FallsBackToContentWithCaptions(t *testing.T) {
@@ -69,10 +67,10 @@ func TestBuildUserHistoryMessage_AppendsAttachmentsWhenNoRenderedContent(t *test
 	assert.Contains(t, got.Content, "hello world")
 }
 
-// TestBuildUserHistoryMessage_RenderedContentSkipsAttachmentReplay ensures the
-// KnowledgeQA path (where RenderedContent already includes the attachment
-// prompt persisted by the pipeline) does not double-inject attachments.
-func TestBuildUserHistoryMessage_RenderedContentSkipsAttachmentReplay(t *testing.T) {
+// TestBuildUserHistoryMessage_RenderedContentRebuildsAttachment verifies that
+// canonical attachment data is retained while the legacy rendered snapshot is
+// discarded.
+func TestBuildUserHistoryMessage_RenderedContentRebuildsAttachment(t *testing.T) {
 	msg := &types.Message{
 		Role:            "user",
 		Content:         "summarize this",
@@ -82,8 +80,9 @@ func TestBuildUserHistoryMessage_RenderedContentSkipsAttachmentReplay(t *testing
 		},
 	}
 	got := buildUserHistoryMessage(msg)
-	assert.Equal(t, "summarize this [with retrieval context already included]", got.Content)
-	assert.NotContains(t, got.Content, "<attachment")
+	assert.Contains(t, got.Content, "summarize this")
+	assert.NotContains(t, got.Content, "[with retrieval context already included]")
+	assert.Contains(t, got.Content, "<attachment")
 }
 
 // TestBuildAssistantHistoryMessages_NaturalFinishEmitsSingleAnswer covers the
@@ -181,6 +180,37 @@ func TestBuildAssistantHistoryMessages_ToolCallsExpandIntoOpenAIShape(t *testing
 	assert.Equal(t, "assistant", got[2].Role)
 	assert.Equal(t, "Found 3 matches in the docs.", got[2].Content)
 	assert.Empty(t, got[2].ToolCalls)
+}
+
+// A fast-answer turn persists its retrieval stages so the UI can redraw the
+// timeline after a reload. Those calls came from the pipeline, not the model, so
+// replaying them would hand the model tool calls it never made — and, in a
+// KnowledgeQA turn, tools it was never offered.
+func TestBuildAssistantHistoryMessages_SkipsPipelineTimelineToolCalls(t *testing.T) {
+	msg := &types.Message{
+		Role:    "assistant",
+		Content: "你好！很高兴见到你。",
+		AgentSteps: types.AgentSteps{
+			{
+				Iteration: 0,
+				ToolCalls: []types.ToolCall{
+					{
+						ID:     types.PipelineToolCallIDPrefix + "abc",
+						Name:   agenttools.ToolKnowledgeSearch,
+						Args:   map[string]interface{}{"query": "你好"},
+						Result: &types.ToolResult{Success: true, Output: "未检索到相关内容"},
+					},
+				},
+			},
+		},
+	}
+	got := buildAssistantHistoryMessages(msg)
+	if !assert.Len(t, got, 1) {
+		return
+	}
+	assert.Equal(t, "assistant", got[0].Role)
+	assert.Equal(t, "你好！很高兴见到你。", got[0].Content)
+	assert.Empty(t, got[0].ToolCalls)
 }
 
 // TestBuildAssistantHistoryMessages_ToolFailureSurfacesAsError ensures a

@@ -70,6 +70,33 @@ func TestAnthropicChat(t *testing.T) {
 	assert.Equal(t, 5, resp.Usage.TotalTokens)
 }
 
+func TestAnthropicChat_CacheUsage(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg_cached","type":"message","role":"assistant",
+			"content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn",
+			"usage":{"input_tokens":24,"output_tokens":2,"cache_creation_input_tokens":100,"cache_read_input_tokens":900}
+		}`))
+	}))
+	defer server.Close()
+
+	chat, err := NewAnthropicChat(&ChatConfig{
+		Source: types.ModelSourceRemote, BaseURL: server.URL, ModelName: "claude-sonnet-4-5",
+		APIKey: "test-key", Provider: string(provider.ProviderAnthropic),
+	})
+	require.NoError(t, err)
+	resp, err := chat.Chat(context.Background(), []Message{{Role: "user", Content: "Hi"}}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1024, resp.Usage.PromptTokens)
+	assert.Equal(t, 900, resp.Usage.CacheReadTokens)
+	assert.Equal(t, 100, resp.Usage.CacheWriteTokens)
+	assert.Equal(t, 124, resp.Usage.CacheMissTokens)
+	assert.True(t, resp.Usage.CacheReported)
+	assert.Equal(t, types.PromptCacheStatusHit, resp.Usage.CacheStatus)
+}
+
 func TestAnthropicChat_FullEndpoint(t *testing.T) {
 	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
 
@@ -145,13 +172,13 @@ func TestAnthropicChat_SSEResponse(t *testing.T) {
 		assert.Equal(t, "/v1/messages", r.URL.Path)
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte(`event: message_start
-data: {"type":"message_start","message":{"usage":{"input_tokens":0,"output_tokens":0}}}
+data: {"type":"message_start","message":{"usage":{"input_tokens":14,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":100}}}
 
 event: content_block_delta
 data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"pong"}}
 
 event: message_delta
-data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":114,"output_tokens":5}}
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}
 
 event: message_stop
 data: {"type":"message_stop"}
@@ -177,6 +204,8 @@ data: {"type":"message_stop"}
 	assert.Equal(t, 114, resp.Usage.PromptTokens)
 	assert.Equal(t, 5, resp.Usage.CompletionTokens)
 	assert.Equal(t, 119, resp.Usage.TotalTokens)
+	assert.Equal(t, 100, resp.Usage.CacheReadTokens)
+	assert.Equal(t, 14, resp.Usage.CacheMissTokens)
 }
 
 func TestAnthropicChat_ChatStream(t *testing.T) {
@@ -189,13 +218,13 @@ func TestAnthropicChat_ChatStream(t *testing.T) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&capturedRequest))
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte(`event: message_start
-data: {"type":"message_start","message":{"usage":{"input_tokens":0,"output_tokens":0}}}
+data: {"type":"message_start","message":{"usage":{"input_tokens":14,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":100}}}
 
 event: content_block_delta
 data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"pong"}}
 
 event: message_delta
-data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":114,"output_tokens":5}}
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}
 
 event: message_stop
 data: {"type":"message_stop"}
@@ -231,6 +260,8 @@ data: {"type":"message_stop"}
 	assert.Equal(t, 114, chunks[1].Usage.PromptTokens)
 	assert.Equal(t, 5, chunks[1].Usage.CompletionTokens)
 	assert.Equal(t, 119, chunks[1].Usage.TotalTokens)
+	assert.Equal(t, 100, chunks[1].Usage.CacheReadTokens)
+	assert.Equal(t, 14, chunks[1].Usage.CacheMissTokens)
 }
 
 func TestNewRemoteChat_AnthropicProvider(t *testing.T) {

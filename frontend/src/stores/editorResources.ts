@@ -13,10 +13,31 @@ import {
 } from '@/api/system'
 import { listMCPServices, type MCPService } from '@/api/mcp-service'
 import { listSkills, type SkillInfo } from '@/api/skill'
-import { getAgentTypePresets, getPlaceholders, type AgentTypePreset, type PlaceholderDefinition } from '@/api/agent'
+import { getAgentTypePresets, getPlaceholders, type AgentTypePreset, type PlaceholdersResponse } from '@/api/agent'
 import { getTenantRetrievalConfig } from '@/api/retrieval'
 
 const CACHE_TTL_MS = 60_000
+
+export function pickUsableStorageProvider(
+  candidate: string | undefined,
+  engines: StorageEngineStatusItem[],
+  allowedProviders: string[],
+): string {
+  const provider = candidate?.trim() || ''
+  const isUsable = (name: string) => {
+    if (!name) return false
+    const status = engines.find((item) => item.name === name)
+    if (status) return status.allowed !== false && status.available !== false
+    if (engines.length > 0) return false
+    if (allowedProviders.length > 0) return allowedProviders.includes(name)
+    return false
+  }
+
+  if (isUsable(provider)) return provider
+  const fallback = engines.find((item) => item.allowed !== false && item.available !== false)?.name
+  if (fallback) return fallback
+  return allowedProviders[0] || provider || 'local'
+}
 
 type EditorResourceKey =
   | 'storageEngine'
@@ -38,7 +59,7 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
   const skillsAvailable = ref(true)
   const agentTypePresets = ref<AgentTypePreset[]>([])
   const promptTemplates = ref<PromptTemplatesConfig | null>(null)
-  const placeholders = ref<PlaceholderDefinition[]>([])
+  const placeholders = ref<PlaceholdersResponse | null>(null)
   const tenantRetrievalConfig = ref<Record<string, unknown> | null>(null)
   const parserEngines = ref<ParserEngineInfo[]>([])
   const systemInfo = ref<SystemInfo | null>(null)
@@ -71,6 +92,14 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
       storageAllowedProviders.value = statusRes?.data?.allowed_providers ?? []
       loadedAt.value.storageEngine = Date.now()
     })
+  }
+
+  function resolveUsableStorageProvider(candidate?: string): string {
+    return pickUsableStorageProvider(
+      candidate,
+      storageStatus.value || [],
+      storageAllowedProviders.value || [],
+    )
   }
 
   async function ensureMcpServices(force = false): Promise<void> {
@@ -114,7 +143,7 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
   async function ensurePlaceholders(force = false): Promise<void> {
     return runOnce('placeholders', force, async () => {
       const placeholdersRes = await getPlaceholders()
-      placeholders.value = placeholdersRes?.data ?? []
+      placeholders.value = placeholdersRes?.data ?? null
       loadedAt.value.placeholders = Date.now()
     })
   }
@@ -166,7 +195,7 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
       skills.value = []
       agentTypePresets.value = []
       promptTemplates.value = null
-      placeholders.value = []
+      placeholders.value = null
       tenantRetrievalConfig.value = null
       parserEngines.value = []
       systemInfo.value = null
@@ -193,6 +222,7 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
     parserEngines,
     systemInfo,
     ensureStorageEngine,
+    resolveUsableStorageProvider,
     ensureMcpServices,
     ensureSkills,
     ensureAgentTypePresets,

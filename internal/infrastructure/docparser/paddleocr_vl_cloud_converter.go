@@ -51,6 +51,9 @@ func (c *PaddleOCRVLCloudReader) Read(ctx context.Context, req *types.ReadReques
 	if c.token == "" {
 		return &types.ReadResult{Error: "PaddleOCR-VL Cloud token is not configured"}, nil
 	}
+	if err := utils.ValidateURLForSSRF(c.baseURL); err != nil {
+		return &types.ReadResult{Error: fmt.Sprintf("PaddleOCR-VL Cloud base URL blocked by SSRF policy: %v", err)}, nil
+	}
 
 	content := req.FileContent
 	if len(content) == 0 {
@@ -74,6 +77,8 @@ func (c *PaddleOCRVLCloudReader) Read(ctx context.Context, req *types.ReadReques
 	if err != nil {
 		return nil, fmt.Errorf("PaddleOCR-VL Cloud fetch results: %w", err)
 	}
+
+	mdContent = normalizeHTMLTables(mdContent)
 
 	imageRefs := c.downloadImages(mdContent, imagesURL)
 	mdContent, imageRefs = ensureOriginalImageRef(req, mdContent, imageRefs)

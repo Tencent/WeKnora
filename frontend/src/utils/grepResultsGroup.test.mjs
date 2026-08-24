@@ -31,6 +31,8 @@ test('groupGrepChunkResults merges chunks from the same document', () => {
   assert.equal(grouped.length, 2)
   assert.equal(grouped[0].chunk_hit_count, 2)
   assert.equal(grouped[0].chunks.length, 2)
+  assert.equal(grouped[0].knowledge_base_id, 'kb-1')
+  assert.deepEqual(grouped[0].chunks.map((chunk) => chunk.chunk_id), ['chunk-a', 'chunk-b'])
   assert.equal(grouped[1].chunk_hit_count, 1)
 })
 

@@ -31,7 +31,7 @@
             </div>
             <div v-if="authStore.hasRole('admin')" class="channel-card__actions" @click.stop>
               <t-dropdown trigger="click" placement="bottom-right" attach="body" :options="channelMenuOptions(ch)"
-                @click="(data) => handleChannelMenuClick(data, ch)">
+                @click="handleChannelMenuClick($event, ch)">
                 <t-button variant="text" shape="square" size="small" class="channel-card__action-btn channel-card__more"
                   @click.stop>
                   <template #icon><t-icon name="ellipsis" /></template>
@@ -397,6 +397,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
+import { copyWithToast } from '@/utils/clipboard'
 import { useAuthStore } from '@/stores/auth'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import EmbedChannelPreview from '@/components/EmbedChannelPreview.vue'
@@ -749,8 +750,7 @@ const copyToken = async (ch: EmbedChannel) => {
     MessagePlugin.warning(t('embedPublish.tokenHint'))
     return
   }
-  await navigator.clipboard.writeText(token)
-  MessagePlugin.success(t('embedPublish.tokenCopied'))
+  await copyWithToast(token, 'embedPublish.tokenCopied')
 }
 
 const iframeSnippet = (ch: EmbedChannel) => {
@@ -1035,15 +1035,11 @@ async function openPreviewForChannel(
 }
 
 const copySecureServerExample = async () => {
-  if (!secureServerExample.value) return
-  await navigator.clipboard.writeText(secureServerExample.value)
-  MessagePlugin.success(t('embedPublish.copied'))
+  await copyWithToast(secureServerExample.value, 'embedPublish.copied')
 }
 
 const copyDrawerSnippet = async () => {
-  if (!drawerSnippet.value) return
-  await navigator.clipboard.writeText(drawerSnippet.value)
-  MessagePlugin.success(t('embedPublish.copied'))
+  await copyWithToast(drawerSnippet.value, 'embedPublish.copied')
 }
 
 const performRotate = async (id: string) => {

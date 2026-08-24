@@ -41,26 +41,123 @@
             />
           </div>
         </div>
+        <div class="setting-row setting-row-vertical">
+          <div class="setting-info">
+            <label>{{ $t('knowledgeEditor.advanced.questionGeneration.instructionsLabel') }}</label>
+            <p class="desc">{{ $t('knowledgeEditor.advanced.questionGeneration.instructionsDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <t-textarea
+              v-model="localQuestionGeneration.customInstructions"
+              :placeholder="$t('knowledgeEditor.advanced.questionGeneration.instructionsPlaceholder')"
+              :maxlength="4000"
+              :autosize="{ minRows: 3, maxRows: 8 }"
+              @change="handleQuestionGenerationChange"
+            />
+          </div>
+        </div>
       </div>
       </template>
+
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('knowledgeEditor.advanced.autoTag.label') }}</label>
+          <p class="desc">{{ $t('knowledgeEditor.advanced.autoTag.description') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-switch v-model="localAutoTag.enabled" size="medium" @change="emitAutoTag" />
+        </div>
+      </div>
+
+      <div v-if="localAutoTag.enabled" class="subsection">
+        <div class="setting-row setting-row-vertical">
+          <div class="setting-info">
+            <label>{{ $t('knowledgeEditor.advanced.autoTag.modelLabel') }}</label>
+            <p class="desc">{{ $t('knowledgeEditor.advanced.autoTag.modelDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <ModelSelector
+              model-type="KnowledgeQA"
+              :selected-model-id="localAutoTag.modelId"
+              :all-models="allModels"
+              clearable
+              :placeholder="$t('knowledgeEditor.advanced.autoTag.modelPlaceholder')"
+              @update:selected-model-id="(value: string) => { localAutoTag.modelId = value; emitAutoTag() }"
+            />
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <label>{{ $t('knowledgeEditor.advanced.autoTag.maxTagsLabel') }}</label>
+            <p class="desc">{{ $t('knowledgeEditor.advanced.autoTag.maxTagsDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <t-input-number
+              v-model="localAutoTag.maxTags"
+              :min="1"
+              :max="10"
+              :step="1"
+              theme="normal"
+              style="width: 120px;"
+              @change="emitAutoTag"
+            />
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <label>{{ $t('knowledgeEditor.advanced.autoTag.skipIfTaggedLabel') }}</label>
+            <p class="desc">{{ $t('knowledgeEditor.advanced.autoTag.skipIfTaggedDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <t-switch v-model="localAutoTag.skipIfTagged" size="medium" @change="emitAutoTag" />
+          </div>
+        </div>
+      </div>
+
+      <div class="setting-row setting-row-vertical">
+        <div class="setting-info">
+          <label>{{ $t('knowledgeEditor.advanced.tableMetadataInstructions.label') }}</label>
+          <p class="desc">{{ $t('knowledgeEditor.advanced.tableMetadataInstructions.description') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-textarea
+            :model-value="tableMetadataInstructions"
+            :placeholder="$t('knowledgeEditor.advanced.tableMetadataInstructions.placeholder')"
+            :maxlength="4000"
+            :autosize="{ minRows: 3, maxRows: 8 }"
+            @change="(value: string) => emit('update:tableMetadataInstructions', value)"
+          />
+        </div>
+      </div>
 
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, withDefaults } from 'vue'
+import { ref, watch } from 'vue'
+import ModelSelector from '@/components/ModelSelector.vue'
 
 interface QuestionGenerationConfig {
   enabled: boolean
   questionCount: number
+  customInstructions?: string
+}
+
+interface AutoTagConfig {
+  enabled: boolean
+  modelId: string
+  maxTags: number
+  skipIfTagged: boolean
 }
 
 interface Props {
   questionGeneration?: QuestionGenerationConfig
+  autoTag?: AutoTagConfig
   ragEnabled?: boolean
   allModels?: any[]
   embedded?: boolean
+  tableMetadataInstructions?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -69,17 +166,35 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   'update:questionGeneration': [value: QuestionGenerationConfig]
+  'update:autoTag': [value: AutoTagConfig]
+  'update:tableMetadataInstructions': [value: string]
 }>()
 
 const localQuestionGeneration = ref<QuestionGenerationConfig>(
-  props.questionGeneration || { enabled: false, questionCount: 3 }
+  props.questionGeneration
+    ? { ...props.questionGeneration, customInstructions: props.questionGeneration.customInstructions || '' }
+    : { enabled: false, questionCount: 3, customInstructions: '' }
+)
+
+const localAutoTag = ref<AutoTagConfig>(
+  props.autoTag ? { ...props.autoTag } : { enabled: false, modelId: '', maxTags: 3, skipIfTagged: true }
 )
 
 watch(() => props.questionGeneration, (newVal) => {
   if (newVal) {
-    localQuestionGeneration.value = { ...newVal }
+    localQuestionGeneration.value = { customInstructions: '', ...newVal }
   }
 }, { deep: true })
+
+watch(() => props.autoTag, (newVal) => {
+  if (newVal) localAutoTag.value = { ...newVal }
+}, { deep: true })
+
+const emitAutoTag = () => {
+  if (!localAutoTag.value.maxTags) localAutoTag.value.maxTags = 3
+  localAutoTag.value.maxTags = Math.min(10, Math.max(1, Math.trunc(localAutoTag.value.maxTags)))
+  emit('update:autoTag', { ...localAutoTag.value })
+}
 
 const handleQuestionGenerationToggle = () => {
   if (!localQuestionGeneration.value.enabled) {
@@ -168,6 +283,23 @@ const handleQuestionGenerationChange = () => {
   display: flex;
   justify-content: flex-end;
   align-items: center;
+}
+
+.setting-row-vertical {
+  flex-direction: column;
+  gap: 12px;
+
+  .setting-info,
+  .setting-control {
+    flex: none;
+    width: 100%;
+    max-width: none;
+    padding-right: 0;
+  }
+
+  .setting-control {
+    display: block;
+  }
 }
 
 .subsection {

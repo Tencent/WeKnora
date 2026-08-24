@@ -127,6 +127,29 @@ func TestLoadBuiltinModelsConfig_Idempotent(t *testing.T) {
 	assert.Equal(t, int64(1), count, "second load must not duplicate")
 }
 
+func TestLoadBuiltinModelsConfig_PreservesRuntimeOverride(t *testing.T) {
+	db := setupBuiltinModelsDB(t)
+	dir := writeYAML(t, `builtin_models:
+  - id: builtin-llm
+    name: from-yaml
+    type: KnowledgeQA
+`)
+	require.NoError(t, LoadBuiltinModelsConfig(context.Background(), db, dir))
+
+	// System-admin edits clear managed_by. A later startup must not reclaim
+	// that row even when the same id remains declared in YAML.
+	require.NoError(t, db.Model(&Model{}).Where("id = ?", "builtin-llm").Updates(map[string]any{
+		"name":       "from-admin-ui",
+		"managed_by": "",
+	}).Error)
+	require.NoError(t, LoadBuiltinModelsConfig(context.Background(), db, dir))
+
+	var m Model
+	require.NoError(t, db.Where("id = ?", "builtin-llm").First(&m).Error)
+	assert.Equal(t, "from-admin-ui", m.Name)
+	assert.Empty(t, m.ManagedBy)
+}
+
 func TestLoadBuiltinModelsConfig_EnvInterpolation(t *testing.T) {
 	db := setupBuiltinModelsDB(t)
 	t.Setenv("BUILTIN_TEST_KEY", "sk-from-env")

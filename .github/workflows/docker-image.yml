@@ -143,11 +143,37 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           file: docker/Dockerfile.sandbox
+          target: sandbox
           context: .
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha,scope=build-sandbox
           cache-to: type=gha,scope=build-sandbox,mode=max
+
+      # Cube builds templates straight from the image and gates the build on
+      # GET :49983/health, so it needs the variant with envd baked in.
+      - name: Docker meta (Cube variant)
+        id: meta-cube
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-sandbox
+          flavor: |
+            suffix=-cube,onlatest=true
+
+      # amd64 only: cubesandbox-base, the source of the envd binary, publishes
+      # no arm64 image.
+      - name: Build sandbox Cube Image
+        uses: docker/build-push-action@v7
+        with:
+          push: true
+          platforms: linux/amd64
+          file: docker/Dockerfile.sandbox
+          target: cube
+          context: .
+          labels: ${{ steps.meta-cube.outputs.labels }}
+          tags: ${{ steps.meta-cube.outputs.tags }}
+          cache-from: type=gha,scope=build-sandbox-cube
+          cache-to: type=gha,scope=build-sandbox-cube,mode=max
 
   build-app:
     strategy:
@@ -160,7 +186,7 @@ jobs:
             platform: linux/arm64
             runs: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -208,6 +234,7 @@ jobs:
             ${{ format('COMMIT_ID_ARG={0}', steps.version.outputs.commit_id) }}
             ${{ format('BUILD_TIME_ARG={0}', steps.version.outputs.build_time) }}
             ${{ format('GO_VERSION_ARG={0}', steps.version.outputs.go_version) }}
+            WITH_ANYDOC=1
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-app
           cache-from: type=gha,scope=build-app-${{ env.PLATFORM_PAIR }}

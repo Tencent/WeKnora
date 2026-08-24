@@ -22,15 +22,24 @@ type MCPTool struct {
 	mcpTool    *types.MCPTool
 	mcpManager *mcp.MCPManager
 	gate       approval.MCPApproval // optional human approval before CallTool (issue #1173)
+	// authWaitTimeoutSeconds carries the agent-level, user-configured OAuth wait
+	// timeout (seconds) applied when a tool call triggers in-conversation auth.
+	// <=0 uses the gate's configured default.
+	authWaitTimeoutSeconds int
 }
 
-// NewMCPTool creates a new MCP tool wrapper
-func NewMCPTool(service *types.MCPService, mcpTool *types.MCPTool, mcpManager *mcp.MCPManager, gate approval.MCPApproval) *MCPTool {
+// NewMCPTool creates a new MCP tool wrapper. authWaitTimeoutSeconds carries the
+// agent-level OAuth wait timeout applied when a tool call triggers in-conversation auth.
+func NewMCPTool(
+	service *types.MCPService, mcpTool *types.MCPTool,
+	mcpManager *mcp.MCPManager, gate approval.MCPApproval, authWaitTimeoutSeconds int,
+) *MCPTool {
 	return &MCPTool{
-		service:    service,
-		mcpTool:    mcpTool,
-		mcpManager: mcpManager,
-		gate:       gate,
+		service:                service,
+		mcpTool:                mcpTool,
+		mcpManager:             mcpManager,
+		gate:                   gate,
+		authWaitTimeoutSeconds: authWaitTimeoutSeconds,
 	}
 }
 
@@ -175,7 +184,7 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 
 	isStdio := t.service.TransportType == types.MCPTransportStdio
 	meta, _ := ToolExecFromContext(ctx)
-	oauthSess := oauthSessionFromToolExec(ctx, meta)
+	oauthSess := oauthSessionFromToolExec(ctx, meta).withAuthWaitTimeout(t.authWaitTimeoutSeconds)
 	toolCallID := ""
 	if meta != nil {
 		toolCallID = meta.ToolCallID
@@ -424,6 +433,10 @@ func RegisterMCPTools(
 	}
 
 	registered := 0
+	authWaitTimeoutSeconds := 0
+	if oauthSess != nil {
+		authWaitTimeoutSeconds = oauthSess.AuthWaitTimeoutSeconds
+	}
 	regOAuth := oauthSessionForRegistration(ctx, oauthSess, listToolsTimeout)
 	for _, service := range services {
 		if !service.Enabled {
@@ -479,7 +492,7 @@ func RegisterMCPTools(
 
 		// Register each tool
 		for _, mcpTool := range mcpTools {
-			tool := NewMCPTool(service, mcpTool, mcpManager, gate)
+			tool := NewMCPTool(service, mcpTool, mcpManager, gate, authWaitTimeoutSeconds)
 			toolName := tool.Name()
 
 			// Check for name collision before registering (first-wins policy).

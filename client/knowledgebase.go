@@ -14,24 +14,25 @@ import (
 
 // KnowledgeBase represents a knowledge base
 type KnowledgeBase struct {
-	ID                    string                `json:"id"`
-	Name                  string                `json:"name"` // Name must be unique within the same tenant
-	Type                  string                `json:"type"`
-	IsTemporary           bool                  `json:"is_temporary"`
-	IsPinned              bool                  `json:"is_pinned"`
-	Description           string                `json:"description"`
-	TenantID              uint64                `json:"tenant_id"`
-	ChunkingConfig        ChunkingConfig        `json:"chunking_config"`
-	ImageProcessingConfig ImageProcessingConfig `json:"image_processing_config"`
-	FAQConfig             *FAQConfig            `json:"faq_config"`
-	EmbeddingModelID      string                `json:"embedding_model_id"`
-	SummaryModelID        string                `json:"summary_model_id"`
+	ID                    string                 `json:"id"`
+	Name                  string                 `json:"name"` // Name must be unique within the same tenant
+	Type                  string                 `json:"type"`
+	IsTemporary           bool                   `json:"is_temporary"`
+	IsPinned              bool                   `json:"is_pinned"`
+	Description           string                 `json:"description"`
+	TenantID              uint64                 `json:"tenant_id"`
+	ChunkingConfig        ChunkingConfig         `json:"chunking_config"`
+	ImageProcessingConfig ImageProcessingConfig  `json:"image_processing_config"`
+	FAQConfig             *FAQConfig             `json:"faq_config"`
+	EmbeddingModelID      string                 `json:"embedding_model_id"`
+	SummaryModelID        string                 `json:"summary_model_id"`
 	VLMConfig             VLMConfig              `json:"vlm_config"`
 	StorageProviderConfig *StorageProviderConfig `json:"storage_provider_config"`
 	StorageConfig         StorageConfig          `json:"storage_config"`
 	ExtractConfig         *ExtractConfig         `json:"extract_config"`
-	CreatedAt             time.Time             `json:"created_at"`
-	UpdatedAt             time.Time             `json:"updated_at"`
+	AutoTagConfig         *AutoTagConfig         `json:"auto_tag_config"`
+	CreatedAt             time.Time              `json:"created_at"`
+	UpdatedAt             time.Time              `json:"updated_at"`
 	// Computed fields (not stored in database)
 	KnowledgeCount  int64 `json:"knowledge_count"`
 	ChunkCount      int64 `json:"chunk_count"`
@@ -44,6 +45,7 @@ type KnowledgeBaseConfig struct {
 	ChunkingConfig        ChunkingConfig        `json:"chunking_config"`
 	ImageProcessingConfig ImageProcessingConfig `json:"image_processing_config"`
 	FAQConfig             *FAQConfig            `json:"faq_config"`
+	AutoTagConfig         *AutoTagConfig        `json:"auto_tag_config,omitempty"`
 }
 
 // ChunkingConfig represents document chunking configuration
@@ -116,8 +118,24 @@ type ParserEngineRule struct {
 
 // QuestionGenerationConfig controls LLM-generated questions per chunk during parsing.
 type QuestionGenerationConfig struct {
-	Enabled         bool `json:"enabled"`
-	QuestionCount   int  `json:"question_count"`
+	Enabled       bool `json:"enabled"`
+	QuestionCount int  `json:"question_count"`
+}
+
+// AutoTagConfig controls optional automatic association of existing knowledge
+// base tags after a document finishes parsing. Only applies to document-type
+// knowledge bases; disabled by default.
+type AutoTagConfig struct {
+	Enabled bool `json:"enabled"`
+	// ModelID selects the chat model used for classification. Empty falls
+	// back to the knowledge base's summary model.
+	ModelID string `json:"model_id,omitempty"`
+	// MaxTags caps how many existing tags one document may auto-acquire
+	// (1-10, defaults to 3).
+	MaxTags int `json:"max_tags,omitempty"`
+	// SkipIfTagged leaves documents that already carry tags untouched.
+	// Defaults to true when omitted.
+	SkipIfTagged *bool `json:"skip_if_tagged,omitempty"`
 }
 
 // ASRConfig represents automatic speech recognition settings for audio files.
@@ -209,6 +227,16 @@ type SearchResult struct {
 	// MatchedContent is the actual content that was matched in vector search
 	// For FAQ: this is the matched question text (standard or similar question)
 	MatchedContent string `json:"matched_content,omitempty"`
+	// KnowledgeBaseID identifies the KB that produced this hit. It is required
+	// for agent runs that search more than one knowledge base.
+	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+	// ParentChunkID / SubChunkID describe the chunk hierarchy: a retrieval
+	// "hit" id may be a sub-chunk, while the parent holds the self-contained
+	// passage an agent fetches via `chunk view <parent_chunk_id>`. The server
+	// ships these in the references event; without fields here Go silently
+	// drops them during unmarshal.
+	ParentChunkID string   `json:"parent_chunk_id,omitempty"`
+	SubChunkID    []string `json:"sub_chunk_id,omitempty"`
 }
 
 // HybridSearchResponse hybrid search response
@@ -229,6 +257,13 @@ type CopyKnowledgeBaseResponse struct {
 	SourceID string `json:"source_id"`
 	TargetID string `json:"target_id"`
 	Message  string `json:"message"`
+}
+
+type DuplicateKnowledgeBaseResponse struct {
+	SourceID      string        `json:"source_id"`
+	TargetID      string        `json:"target_id"`
+	Message       string        `json:"message"`
+	KnowledgeBase KnowledgeBase `json:"knowledge_base"`
 }
 
 // KBCloneProgress represents the progress of a knowledge base clone task
@@ -349,9 +384,9 @@ func (c *Client) ClearKnowledgeBaseContents(ctx context.Context, knowledgeBaseID
 	}
 
 	var response struct {
-		Success bool                                `json:"success"`
-		Message string                              `json:"message"`
-		Data    ClearKnowledgeBaseContentsResponse   `json:"data"`
+		Success bool                               `json:"success"`
+		Message string                             `json:"message"`
+		Data    ClearKnowledgeBaseContentsResponse `json:"data"`
 	}
 
 	if err := parseResponse(resp, &response); err != nil {
@@ -443,6 +478,30 @@ func (c *Client) CopyKnowledgeBase(ctx context.Context, request *CopyKnowledgeBa
 	var response struct {
 		Success bool                      `json:"success"`
 		Data    CopyKnowledgeBaseResponse `json:"data"`
+	}
+
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return &response.Data, nil
+}
+
+// DuplicateKnowledgeBase creates a settings-only duplicate and returns the new knowledge base info.
+func (c *Client) DuplicateKnowledgeBase(
+	ctx context.Context,
+	knowledgeBaseID string,
+) (*DuplicateKnowledgeBaseResponse, error) {
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/duplicate", knowledgeBaseID)
+
+	resp, err := c.doRequest(ctx, http.MethodPost, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool                           `json:"success"`
+		Data    DuplicateKnowledgeBaseResponse `json:"data"`
 	}
 
 	if err := parseResponse(resp, &response); err != nil {

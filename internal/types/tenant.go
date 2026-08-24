@@ -90,8 +90,6 @@ type Tenant struct {
 	Name string `yaml:"name"                json:"name"`
 	// Description
 	Description string `yaml:"description"         json:"description"`
-	// API key
-	APIKey string `yaml:"api_key"             json:"api_key"`
 	// Status
 	Status string `yaml:"status"              json:"status"              gorm:"default:'active'"`
 	// Retriever engines
@@ -102,9 +100,9 @@ type Tenant struct {
 	StorageQuota int64 `yaml:"storage_quota"       json:"storage_quota"       gorm:"default:10737418240"`
 	// Storage used (Bytes)
 	StorageUsed int64 `yaml:"storage_used"        json:"storage_used"        gorm:"default:0"`
-	// Global Context configuration for this tenant (default for all sessions)
+	// Global Context configuration for this workspace (default for all sessions)
 	ContextConfig *ContextConfig `yaml:"context_config"      json:"context_config"      gorm:"type:jsonb"`
-	// Global WebSearch configuration for this tenant
+	// Global WebSearch configuration for this workspace
 	WebSearchConfig *WebSearchConfig `yaml:"web_search_config"   json:"web_search_config"   gorm:"type:jsonb"`
 	// Parser engine config overrides (MinerU endpoint, API key, etc.). Used when parsing documents; overrides env.
 	ParserEngineConfig *ParserEngineConfig `yaml:"parser_engine_config" json:"parser_engine_config" gorm:"type:jsonb"`
@@ -112,10 +110,16 @@ type Tenant struct {
 	Credentials *CredentialsConfig `yaml:"credentials" json:"credentials" gorm:"type:jsonb"`
 	// Storage engine config: parameters for Local, MinIO, COS. Used for document/file storage and docreader.
 	StorageEngineConfig *StorageEngineConfig `yaml:"storage_engine_config" json:"storage_engine_config" gorm:"type:jsonb"`
+	// DefaultStorageBackendID is the workspace default concrete storage instance.
+	DefaultStorageBackendID *string `yaml:"default_storage_backend_id" json:"default_storage_backend_id,omitempty" gorm:"column:default_storage_backend_id;type:varchar(36)"`
 	// Chat history config: knowledge base configuration for indexing and searching chat messages via vector search
 	ChatHistoryConfig *ChatHistoryConfig `yaml:"chat_history_config" json:"chat_history_config" gorm:"type:jsonb"`
 	// Retrieval config: global search/retrieval parameters shared by knowledge search and message search
 	RetrievalConfig *RetrievalConfig `yaml:"retrieval_config" json:"retrieval_config" gorm:"type:jsonb"`
+	// Memory config: workspace switch for cross-session long-term memory
+	MemoryConfig *MemoryConfig `yaml:"memory_config" json:"memory_config" gorm:"type:jsonb"`
+	// API principal config: controls how X-API-Key requests map to terminal principals.
+	APIPrincipalConfig *APIPrincipalConfig `yaml:"api_principal_config" json:"-" gorm:"type:jsonb"`
 	// Creation time
 	CreatedAt time.Time `yaml:"created_at"          json:"created_at"`
 	// Last updated time
@@ -142,31 +146,6 @@ func (t *Tenant) BeforeCreate(tx *gorm.DB) error {
 	if t.RetrieverEngines.Engines == nil {
 		t.RetrieverEngines.Engines = []RetrieverEngineParams{}
 	}
-	return nil
-}
-
-// BeforeSave encrypts APIKey before persisting to database.
-// Uses tx.Statement.SetColumn to avoid polluting the in-memory struct.
-func (t *Tenant) BeforeSave(tx *gorm.DB) error {
-	if key := utils.GetAESKey(); key != nil && t.APIKey != "" {
-		if encrypted, err := utils.EncryptAESGCM(t.APIKey, key); err == nil {
-			tx.Statement.SetColumn("api_key", encrypted)
-		}
-	}
-	return nil
-}
-
-// AfterFind decrypts APIKey after loading from database.
-// Legacy plaintext (without enc:v1: prefix) is returned as-is. When the value
-// is encrypted but SYSTEM_AES_KEY is missing/rotated and the data cannot be
-// decrypted, the error is propagated so the read fails loudly instead of
-// returning ciphertext to callers.
-func (t *Tenant) AfterFind(tx *gorm.DB) error {
-	decrypted, err := utils.DecryptStoredSecret(t.APIKey)
-	if err != nil {
-		return fmt.Errorf("decrypt tenants.api_key (id=%d): %w", t.ID, err)
-	}
-	t.APIKey = decrypted
 	return nil
 }
 
@@ -213,6 +192,63 @@ type CredentialsConfig struct {
 type WeKnoraCloudCredentials struct {
 	AppID     string `json:"app_id"`
 	AppSecret string `json:"app_secret"`
+}
+
+type APIPrincipalMode string
+
+const (
+	APIPrincipalModeTenant      APIPrincipalMode = "tenant"
+	APIPrincipalModeDirect      APIPrincipalMode = "direct_header"
+	APIPrincipalModeSignedToken APIPrincipalMode = "signed_token"
+)
+
+// APIPrincipalConfig controls how tenant API-key requests map to terminal
+// principals. Direct header mode is low-assurance and should only be used for
+// trusted server-to-server calls; signed-token mode verifies the user claim.
+type APIPrincipalConfig struct {
+	Mode                  APIPrincipalMode `json:"mode"`
+	DirectHeaderName      string           `json:"direct_header_name,omitempty"`
+	SignedTokenHeaderName string           `json:"signed_token_header_name,omitempty"`
+	// RequireDirectHeader, when true in direct_header mode, rejects API-key
+	// requests that omit the configured user-id header instead of falling
+	// back to the tenant-level principal.
+	RequireDirectHeader bool   `json:"require_direct_header,omitempty"`
+	HMACSecret          string `json:"hmac_secret,omitempty"`
+}
+
+func (c *APIPrincipalConfig) Value() (driver.Value, error) {
+	if c == nil {
+		return nil, nil
+	}
+	cp := *c
+	if cp.HMACSecret != "" {
+		if key := utils.GetAESKey(); key != nil {
+			if encrypted, err := utils.EncryptAESGCM(cp.HMACSecret, key); err == nil {
+				cp.HMACSecret = encrypted
+			}
+		}
+	}
+	return json.Marshal(&cp)
+}
+
+func (c *APIPrincipalConfig) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		return nil
+	}
+	if err := json.Unmarshal(b, c); err != nil {
+		return err
+	}
+	if plain, ok := utils.DecryptStoredSecretLenient(c.HMACSecret); ok {
+		c.HMACSecret = plain
+	} else {
+		log.Printf("[crypto] tenant api_principal_config.hmac_secret: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+		c.HMACSecret = ""
+	}
+	return nil
 }
 
 // GetWeKnoraCloud returns the WeKnoraCloud credentials, or nil if not configured.
@@ -268,16 +304,22 @@ func (c *CredentialsConfig) Scan(value interface{}) error {
 // ParserEngineConfig holds tenant-level overrides for document parser engines (e.g. MinerU endpoint, API key).
 // These values take precedence over environment variables when parsing documents.
 type ParserEngineConfig struct {
-	MinerUEndpoint string `json:"mineru_endpoint"` // MinerU 自建服务端点
-	MinerUAPIKey   string `json:"mineru_api_key"`  // MinerU 云 API Key
+	// ChatParserEngineRules selects parser engines for session-scoped chat
+	// documents. Knowledge bases keep their own rules in ChunkingConfig.
+	ChatParserEngineRules []ParserEngineRule `json:"chat_parser_engine_rules,omitempty"`
+	MinerUEndpoint        string             `json:"mineru_endpoint"` // MinerU 自建服务端点
+	MinerUAPIKey          string             `json:"mineru_api_key"`  // MinerU 云 API Key
 
 	// MinerU 自建解析参数
 	MinerUModel         string `json:"mineru_model,omitempty"`          // backend: pipeline, vlm-*, hybrid-*
 	MinerUVLMServerURL  string `json:"mineru_vlm_server_url,omitempty"` // vLLM 服务器地址 (vlm-http-client / hybrid-http-client)
 	MinerUEnableFormula *bool  `json:"mineru_enable_formula,omitempty"`
 	MinerUEnableTable   *bool  `json:"mineru_enable_table,omitempty"`
-	MinerUEnableOCR     *bool  `json:"mineru_enable_ocr,omitempty"`
-	MinerULanguage      string `json:"mineru_language,omitempty"`
+	MinerUParseMethod   string `json:"mineru_parse_method,omitempty"`
+	// MinerUEnableOCR is retained for compatibility with configurations saved
+	// before parse_method supported auto/ocr/txt.
+	MinerUEnableOCR *bool  `json:"mineru_enable_ocr,omitempty"`
+	MinerULanguage  string `json:"mineru_language,omitempty"`
 
 	// MinerU 云 API 解析参数
 	MinerUCloudModel         string `json:"mineru_cloud_model,omitempty"` // model_version: pipeline, vlm, MinerU-HTML
@@ -305,6 +347,47 @@ type ParserEngineConfig struct {
 	PaddleOCRVLCloudUseChartRecognition *bool  `json:"paddleocr_vl_cloud_use_chart_recognition,omitempty"`
 }
 
+const (
+	MinerUParseMethodAuto = "auto"
+	MinerUParseMethodOCR  = "ocr"
+	MinerUParseMethodText = "txt"
+)
+
+// ResolveMinerUParseMethod normalizes the explicit MinerU parse method and
+// maps the legacy OCR toggle to the closest safe behavior. The old enabled
+// value maps to auto instead of ocr so digital PDFs keep their native text
+// layer while scanned PDFs are still detected and OCRed by MinerU.
+func ResolveMinerUParseMethod(method string, legacyOCREnabled *bool) string {
+	switch strings.ToLower(strings.TrimSpace(method)) {
+	case MinerUParseMethodAuto:
+		return MinerUParseMethodAuto
+	case MinerUParseMethodOCR:
+		return MinerUParseMethodOCR
+	case MinerUParseMethodText:
+		return MinerUParseMethodText
+	}
+
+	if legacyOCREnabled != nil && !*legacyOCREnabled {
+		return MinerUParseMethodText
+	}
+	return MinerUParseMethodAuto
+}
+
+func (c *ParserEngineConfig) ResolveChatParserEngine(fileType string) string {
+	if c == nil {
+		return ""
+	}
+	fileType = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fileType)), ".")
+	for _, rule := range c.ChatParserEngineRules {
+		for _, candidate := range rule.FileTypes {
+			if strings.TrimPrefix(strings.ToLower(strings.TrimSpace(candidate)), ".") == fileType {
+				return strings.TrimSpace(rule.Engine)
+			}
+		}
+	}
+	return ""
+}
+
 // ToOverridesMap returns a map suitable for ParserEngineOverrides in parse requests.
 // Keys are snake_case (mineru_endpoint, mineru_api_key, etc.).
 func (c *ParserEngineConfig) ToOverridesMap() map[string]string {
@@ -329,6 +412,9 @@ func (c *ParserEngineConfig) ToOverridesMap() map[string]string {
 	}
 	if c.MinerUEnableTable != nil {
 		m["mineru_enable_table"] = fmt.Sprintf("%v", *c.MinerUEnableTable)
+	}
+	if c.MinerUParseMethod != "" || c.MinerUEnableOCR != nil {
+		m["mineru_parse_method"] = ResolveMinerUParseMethod(c.MinerUParseMethod, c.MinerUEnableOCR)
 	}
 	if c.MinerUEnableOCR != nil {
 		m["mineru_enable_ocr"] = fmt.Sprintf("%v", *c.MinerUEnableOCR)
@@ -446,22 +532,26 @@ type MinIOEngineConfig struct {
 
 // COSEngineConfig is for Tencent Cloud COS.
 type COSEngineConfig struct {
-	SecretID   string `json:"secret_id"`
-	SecretKey  string `json:"secret_key"`
-	Region     string `json:"region"`
-	BucketName string `json:"bucket_name"`
-	AppID      string `json:"app_id"`
-	PathPrefix string `json:"path_prefix"`
+	SecretID       string `json:"secret_id"`
+	SecretKey      string `json:"secret_key"`
+	Region         string `json:"region"`
+	BucketName     string `json:"bucket_name"`
+	AppID          string `json:"app_id"`
+	PathPrefix     string `json:"path_prefix"`
+	TempBucketName string `json:"temp_bucket_name"`
+	TempRegion     string `json:"temp_region"`
 }
 
 // TOSEngineConfig is for Volcengine TOS (火山引擎对象存储).
 type TOSEngineConfig struct {
-	Endpoint   string `json:"endpoint"`
-	Region     string `json:"region"`
-	AccessKey  string `json:"access_key"`
-	SecretKey  string `json:"secret_key"`
-	BucketName string `json:"bucket_name"`
-	PathPrefix string `json:"path_prefix"`
+	Endpoint       string `json:"endpoint"`
+	Region         string `json:"region"`
+	AccessKey      string `json:"access_key"`
+	SecretKey      string `json:"secret_key"`
+	BucketName     string `json:"bucket_name"`
+	PathPrefix     string `json:"path_prefix"`
+	TempBucketName string `json:"temp_bucket_name"`
+	TempRegion     string `json:"temp_region"`
 }
 
 // S3EngineConfig is for AWS S3 and S3-compatible object storage.
@@ -529,4 +619,211 @@ func (c *StorageEngineConfig) Scan(value interface{}) error {
 		return nil
 	}
 	return json.Unmarshal(b, c)
+}
+
+// TenantSandboxConfig is one named sandbox backend a workspace maintains.
+//
+// It is self-contained: provider fields are not inherited from process
+// environment. Leaving a required provider field empty is rejected on save.
+type TenantSandboxConfig struct {
+	// SandboxType selects the sandbox backend. Named configs may use "cube",
+	// "e2b", "docker", or "local". "disabled" is reserved for the hidden
+	// workspace policy row.
+	SandboxType string `json:"sandbox_type,omitempty"`
+
+	// ── 通用配置（跨后端生效）──────────────────────────────────
+
+	// DefaultTimeoutSec is the per-execution timeout in seconds. 0 uses the
+	// program's built-in default.
+	DefaultTimeoutSec int `json:"default_timeout_sec,omitempty"`
+
+	// AllowPrivateEndpoints permits this workspace config to reach RFC1918 or
+	// loopback cluster endpoints. Link-local/cloud-metadata addresses remain
+	// blocked. It is explicit in the UI instead of hidden in process env.
+	AllowPrivateEndpoints bool `json:"allow_private_endpoints,omitempty"`
+
+	// EnvVars are additional environment variables injected into every
+	// sandbox created for this tenant. 🔒 Values are encrypted at rest.
+	// These become visible to all scripts running in the tenant's
+	// sandboxes — do not place secrets here that scripts must not access.
+	EnvVars map[string]string `json:"env_vars,omitempty"`
+
+	// VolumeMount configures an optional shared volume mounted into every
+	// sandbox created for this tenant. Currently used for tenant-installed
+	// skills, but the configuration itself is skill-agnostic and can serve
+	// any volume-mount use case (shared datasets, pre-installed toolchains,
+	// etc.).
+	VolumeMount *VolumeMountConfig `json:"volume_mount,omitempty"`
+
+	// ── 后端专属配置（同一时刻只有一个生效，由 SandboxType 决定）───
+
+	Cube   *CubeSandboxConfig   `json:"cube,omitempty"`
+	E2B    *E2BSandboxConfig    `json:"e2b,omitempty"`
+	Docker *DockerSandboxConfig `json:"docker,omitempty"`
+}
+
+// CubeSandboxConfig addresses one CubeSandbox deployment. APIURL, ProxyURL,
+// SandboxDomain and TemplateID are all required; APIKey is optional because the
+// common single-node setup runs unauthenticated.
+type CubeSandboxConfig struct {
+	APIURL        string `json:"api_url,omitempty"`
+	ProxyURL      string `json:"proxy_url,omitempty"`
+	SandboxDomain string `json:"sandbox_domain,omitempty"`
+	APIKey        string `json:"api_key,omitempty"` // 加密
+	TemplateID    string `json:"template_id,omitempty"`
+
+	// HTTPTimeoutSec bounds each HTTP call to the sandbox control plane.
+	// 0 means use the built-in default (30s), never the deployment's value.
+	HTTPTimeoutSec int `json:"http_timeout_sec,omitempty"`
+
+	CubeSandboxTTLSeconds int `json:"cube_sandbox_ttl_seconds,omitempty"`
+}
+
+// E2BSandboxConfig addresses one E2B-protocol control plane: E2B Cloud, a
+// self-hosted E2B Infrastructure, or any E2B-compatible implementation
+// (CubeSandbox, Agent-Sandbox, …). APIKey and TemplateID are required; APIURL
+// and SandboxDomain are optional because go-e2b resolves both on its own when
+// they are empty.
+type E2BSandboxConfig struct {
+	APIURL        string `json:"api_url,omitempty"`
+	SandboxDomain string `json:"sandbox_domain,omitempty"`
+	APIKey        string `json:"api_key,omitempty"` // 加密
+	TemplateID    string `json:"template_id,omitempty"`
+
+	// ProxyURL is the data-plane gateway that fronts envd. E2B Cloud resolves
+	// "<port>-<sandboxID>.<sandbox_domain>" through public DNS and TLS, so it
+	// needs no value here. Self-hosted E2B-compatible control planes usually
+	// serve every sandbox from one gateway address and expect the sandbox
+	// authority in the Host header; setting this makes WeKnora dial the
+	// gateway directly instead of requiring wildcard DNS and a certificate
+	// for the sandbox domain. An "http://" gateway also downgrades the
+	// data-plane scheme, which the E2B SDK otherwise pins to https.
+	ProxyURL string `json:"proxy_url,omitempty"`
+
+	// HTTPTimeoutSec bounds each HTTP call to the sandbox control plane.
+	// 0 means use the built-in default (30s), never the deployment's value.
+	HTTPTimeoutSec int `json:"http_timeout_sec,omitempty"`
+
+	E2BSandboxTTLSeconds int `json:"e2b_sandbox_ttl_seconds,omitempty"`
+}
+
+type DockerSandboxConfig struct {
+	Image string `json:"image,omitempty"`
+}
+
+// VolumeMountConfig configures a shared volume mount into every sandbox
+// created for this tenant. Currently implemented for E2B volumes (used to
+// share tenant-installed skills across sandbox sessions), but the schema is
+// intentionally skill-agnostic so it can serve other volume-based use cases
+// in the future.
+type VolumeMountConfig struct {
+	// Enabled toggles the volume mount for this tenant.
+	Enabled bool `json:"enabled"`
+
+	// MountPath is the sandbox-internal path where the volume is mounted.
+	// Default: /weknora/tenant/skills (customizable per use case).
+	MountPath string `json:"mount_path,omitempty"`
+
+	// Provider identifies the volume backend. Currently "e2b" or "cube".
+	Provider string `json:"provider,omitempty"`
+
+	// VolumeID is the provider-specific volume identifier, populated after
+	// EnsureVolume / CreateVolume succeeds.
+	VolumeID string `json:"volume_id,omitempty"`
+
+	// VolumeName is the human-readable volume name, e.g.
+	// "weknora-tenant-<id>-skills".
+	VolumeName string `json:"volume_name,omitempty"`
+
+	// VolumeOwnerFingerprint = sha256(provider + APIKey + APIURL).
+	// Used to detect when the tenant switched to a different backend or
+	// API key, at which point the volume is no longer reachable and must
+	// be recreated.
+	VolumeOwnerFingerprint string `json:"volume_owner_fingerprint,omitempty"`
+}
+
+// Value implements the driver.Valuer interface. Every secret-bearing field
+// (Cube.APIKey, E2B.APIKey and all EnvVars values) is encrypted before
+// persisting. EnvVars are included because environment variables routinely
+// carry credentials, and their values are handed to tenant scripts verbatim.
+// The receiver is never mutated: nested structs and the map are copied first.
+func (c *TenantSandboxConfig) Value() (driver.Value, error) {
+	if c == nil {
+		return nil, nil
+	}
+	cp := *c
+	key := utils.GetAESKey()
+
+	encrypt := func(plain string) string {
+		if plain == "" || key == nil {
+			return plain
+		}
+		encrypted, err := utils.EncryptAESGCM(plain, key)
+		if err != nil {
+			return plain
+		}
+		return encrypted
+	}
+
+	if c.Cube != nil {
+		cube := *c.Cube
+		cube.APIKey = encrypt(cube.APIKey)
+		cp.Cube = &cube
+	}
+	if c.E2B != nil {
+		e2b := *c.E2B
+		e2b.APIKey = encrypt(e2b.APIKey)
+		cp.E2B = &e2b
+	}
+	// Keys stay readable so operators can still see which variables are set.
+	if len(c.EnvVars) > 0 {
+		envVars := make(map[string]string, len(c.EnvVars))
+		for name, value := range c.EnvVars {
+			envVars[name] = encrypt(value)
+		}
+		cp.EnvVars = envVars
+	}
+
+	return json.Marshal(&cp)
+}
+
+// Scan implements the sql.Scanner interface. Secrets that cannot be decrypted
+// (missing or rotated SYSTEM_AES_KEY) are blanked and logged rather than
+// failing the whole load, matching ModelParameters.Scan — a tenant must stay
+// listable even if its sandbox credentials became unreadable.
+func (c *TenantSandboxConfig) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		return nil
+	}
+	if err := json.Unmarshal(b, c); err != nil {
+		return err
+	}
+
+	decrypt := func(stored, label string) string {
+		if stored == "" {
+			return ""
+		}
+		if plain, ok := utils.DecryptStoredSecretLenient(stored); ok {
+			return plain
+		}
+		log.Printf("[crypto] tenant_sandbox_config.%s: decrypt failed "+
+			"(SYSTEM_AES_KEY missing/rotated?), treating as unconfigured", label)
+		return ""
+	}
+
+	if c.Cube != nil {
+		c.Cube.APIKey = decrypt(c.Cube.APIKey, "cube.api_key")
+	}
+	if c.E2B != nil {
+		c.E2B.APIKey = decrypt(c.E2B.APIKey, "e2b.api_key")
+	}
+	for name, stored := range c.EnvVars {
+		c.EnvVars[name] = decrypt(stored, "env_vars."+name)
+	}
+
+	return nil
 }

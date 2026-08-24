@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/cli/internal/output"
+	sdk "github.com/Tencent/WeKnora/client"
 )
 
 // ErrorCode is a namespaced stable identifier emitted on stderr in the
@@ -76,6 +77,13 @@ const (
 	// contexts so the user-visible exit follows Unix signal convention.
 	CodeOperationCancelled ErrorCode = "operation.cancelled"
 
+	// CodeInternalError is the catch-all for an error that reached the top
+	// without a typed code (a bug, or an unmapped dependency error). Maps to
+	// exit 1 via the fall-through bucket. Documented so the type is never a
+	// surprise on the wire; a recurring internal.error is a classification gap
+	// worth fixing at the source.
+	CodeInternalError ErrorCode = "internal.error"
+
 	// local.* - config / file / keychain on the user's machine
 	CodeLocalConfigCorrupt   ErrorCode = "local.config_corrupt"
 	CodeLocalKeychainDenied  ErrorCode = "local.keychain_denied"
@@ -116,8 +124,8 @@ type Error struct {
 	// own output (e.g. bulk operations reporting partial-success data on
 	// stdout) but still need to surface a non-zero exit code.
 	Silent            bool
-	RetryCommand      string // Directly-executable argv, distinct from prose Hint
-	RetryAfterSeconds int    // HTTP Retry-After header semantics (transport-level retry hint)
+	RetryArgv         []string // Directly-executable argv array, distinct from prose Hint
+	RetryAfterSeconds int      // HTTP Retry-After header semantics (transport-level retry hint)
 	Detail            any    // Structured detail for envelope.error.detail (e.g. unknown-subcommand available[])
 	Risk              *RiskInfo
 }
@@ -147,11 +155,11 @@ func (e *Error) WithHint(hint string) *Error {
 	return e
 }
 
-// WithRetryCommand sets the directly-executable retry argv string so agents
-// don't have to regex-extract argv from the prose Hint.
-// Empty string for codes without a canonical retry command.
-func (e *Error) WithRetryCommand(cmd string) *Error {
-	e.RetryCommand = cmd
+// WithRetryArgv sets the directly-executable retry argv array so agents can
+// exec it directly instead of regex-extracting argv from the prose Hint.
+// Empty for codes without a canonical retry command.
+func (e *Error) WithRetryArgv(argv []string) *Error {
+	e.RetryArgv = argv
 	return e
 }
 
@@ -193,8 +201,8 @@ func AsError(err error) *Error {
 
 // ErrorToDetail converts a typed cmdutil.Error (or fallback) into
 // output.ErrDetail for embedding in success-envelope batch items or
-// MCP CallToolResult StructuredContent. Hint / RetryCommand fall back
-// to defaultHint / defaultRetryCommand when typed value is empty.
+// MCP CallToolResult StructuredContent. Hint / RetryArgv fall back
+// to defaultHint / defaultRetryArgv when typed value is empty.
 // Returns nil when err is nil.
 func ErrorToDetail(err error) *output.ErrDetail {
 	if err == nil {
@@ -205,9 +213,9 @@ func ErrorToDetail(err error) *output.ErrDetail {
 		if hint == "" {
 			hint = defaultHint(typed.Code)
 		}
-		retry := typed.RetryCommand
-		if retry == "" {
-			retry = defaultRetryCommand(typed.Code)
+		retry := typed.RetryArgv
+		if len(retry) == 0 {
+			retry = defaultRetryArgv(typed.Code)
 		}
 		// Build message without the code prefix — the envelope's separate
 		// "type" field already carries the code, so repeating it in "message"
@@ -220,9 +228,11 @@ func ErrorToDetail(err error) *output.ErrDetail {
 		detail := &output.ErrDetail{
 			Type:              string(typed.Code),
 			Message:           msg,
+			ExitCode:          ExitCode(err),
 			Hint:              hint,
-			RetryCommand:      retry,
+			RetryArgv:         retry,
 			RetryAfterSeconds: typed.RetryAfterSeconds,
+			Retryable:         retryableForCode(typed.Code),
 			Detail:            typed.Detail,
 		}
 		if typed.Risk != nil {
@@ -237,12 +247,14 @@ func ErrorToDetail(err error) *output.ErrDetail {
 	var fe *FlagError
 	if errors.As(err, &fe) {
 		return &output.ErrDetail{
-			Type:    string(CodeInputInvalidArgument),
-			Message: err.Error(),
-			Hint:    defaultHint(CodeInputInvalidArgument),
+			Type:      string(CodeInputInvalidArgument),
+			Message:   err.Error(),
+			ExitCode:  ExitCode(err), // FlagError → 2, distinguishing parse from typed-value (exit 5)
+			Hint:      defaultHint(CodeInputInvalidArgument),
+			Retryable: retryableForCode(CodeInputInvalidArgument),
 		}
 	}
-	return &output.ErrDetail{Type: "internal.error", Message: err.Error()}
+	return &output.ErrDetail{Type: string(CodeInternalError), Message: err.Error(), ExitCode: ExitCode(err)}
 }
 
 // NewError constructs a typed error.
@@ -266,6 +278,21 @@ func Wrapf(code ErrorCode, cause error, format string, args ...any) *Error {
 // enumerates the codes this helper can yield.
 func WrapHTTP(cause error, format string, args ...any) *Error {
 	return Wrapf(ClassifyHTTPError(cause), cause, format, args...)
+}
+
+// ClassifySDKError maps SDK transport, HTTP, and terminal SSE stream errors to
+// the canonical ErrorCode. SSE terminal frames classify as server.error rather
+// than network.error.
+func ClassifySDKError(err error) ErrorCode {
+	if sdk.IsSSEStreamError(err) {
+		return CodeServerError
+	}
+	return ClassifyHTTPError(err)
+}
+
+// WrapStream wraps an SDK streaming error with ClassifySDKError.
+func WrapStream(cause error, format string, args ...any) *Error {
+	return Wrapf(ClassifySDKError(cause), cause, format, args...)
 }
 
 // FlagError signals user-visible flag/argument problems; the root command
@@ -423,6 +450,8 @@ func AllCodes() []ErrorCode {
 		CodeSSEStreamAborted, CodeSessionCreateFailed,
 		// operation
 		CodeOperationTimeout, CodeOperationFailed, CodeOperationCancelled,
+		// internal catch-all
+		CodeInternalError,
 	}
 }
 

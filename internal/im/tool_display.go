@@ -49,6 +49,7 @@ var imToolNameLabels = map[string]string{
 	"query_knowledge_graph":   "知识图谱查询",
 	"read_skill":              "读取技能",
 	"execute_skill_script":    "执行技能脚本",
+	"shell_exec":              "执行沙箱命令",
 	"data_analysis":           "数据分析",
 	"data_schema":             "数据结构",
 	"database_query":          "数据库查询",
@@ -270,16 +271,27 @@ func FormatIMRagPipelineLine(step IMToolStep) string {
 		}
 		return "已完成问题理解"
 	case "knowledge_search", "search_knowledge":
+		source := imRetrievalSearchSource(step)
 		if step.Pending {
-			if query != "" {
-				return fmt.Sprintf("正在检索知识库：「%s」", query)
+			switch source {
+			case imRetrievalSourceWeb:
+				if query != "" {
+					return fmt.Sprintf("正在检索网络：「%s」", query)
+				}
+				return "正在检索网络..."
+			case imRetrievalSourceMixed:
+				if query != "" {
+					return fmt.Sprintf("正在检索知识库和网络：「%s」", query)
+				}
+				return "正在检索知识库和网络..."
+			default:
+				if query != "" {
+					return fmt.Sprintf("正在检索知识库：「%s」", query)
+				}
+				return "正在检索知识库..."
 			}
-			return "正在检索知识库..."
 		}
-		base := "检索知识库"
-		if !step.Success {
-			base = "检索知识库失败"
-		}
+		base := imRetrievalDoneTitle(source, step.Success)
 		line := imAppendQueryTitle(base, query)
 		if summary := imKnowledgeSearchSummary(step.Data); summary != "" {
 			return line + " · " + summary
@@ -464,6 +476,70 @@ func imToolResultSummary(step IMToolStep) string {
 	}
 }
 
+const (
+	imRetrievalSourceKnowledge = "knowledge"
+	imRetrievalSourceWeb       = "web"
+	imRetrievalSourceMixed     = "mixed"
+)
+
+func imRetrievalSearchSource(step IMToolStep) string {
+	if source := imSearchSourceFromData(step.Data); source != "" {
+		return source
+	}
+	if step.Arguments != nil {
+		if source, ok := step.Arguments["search_source"].(string); ok && source != "" {
+			return source
+		}
+	}
+	return imRetrievalSourceKnowledge
+}
+
+func imSearchSourceFromData(data map[string]interface{}) string {
+	if data == nil {
+		return ""
+	}
+	if source, ok := data["search_source"].(string); ok {
+		return strings.TrimSpace(source)
+	}
+	return ""
+}
+
+func imRetrievalDoneTitle(source string, success bool) string {
+	switch source {
+	case imRetrievalSourceWeb:
+		if success {
+			return "网络检索"
+		}
+		return "网络检索失败"
+	case imRetrievalSourceMixed:
+		if success {
+			return "检索知识库和网络"
+		}
+		return "检索失败"
+	default:
+		if success {
+			return "检索知识库"
+		}
+		return "检索知识库失败"
+	}
+}
+
+func imIntField(data map[string]interface{}, key string) int {
+	if data == nil {
+		return 0
+	}
+	switch v := data[key].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	default:
+		return 0
+	}
+}
+
 func imKnowledgeSearchSummary(data map[string]interface{}) string {
 	if data == nil {
 		return ""
@@ -472,8 +548,17 @@ func imKnowledgeSearchSummary(data map[string]interface{}) string {
 	if count == 0 {
 		return "未找到匹配的内容"
 	}
+	source := imSearchSourceFromData(data)
+	webCount := imIntField(data, "web_count")
+	docCount := imIntField(data, "doc_count")
+	if source == imRetrievalSourceWeb || (webCount > 0 && docCount == 0) {
+		return fmt.Sprintf("找到 %d 条网页", count)
+	}
 	if kbCounts, ok := data["kb_counts"].(map[string]interface{}); ok && len(kbCounts) > 0 {
 		return fmt.Sprintf("找到 %d 个结果，来自 %d 个文件", count, len(kbCounts))
+	}
+	if source == imRetrievalSourceMixed && docCount > 0 && webCount > 0 {
+		return fmt.Sprintf("找到 %d 个结果（%d 篇文档，%d 条网页）", count, docCount, webCount)
 	}
 	return fmt.Sprintf("找到 %d 个结果", count)
 }

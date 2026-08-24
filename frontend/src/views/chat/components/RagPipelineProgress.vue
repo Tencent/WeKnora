@@ -1,14 +1,35 @@
 <template>
   <div v-if="visible" ref="rootElement" class="rag-pipeline-progress">
-    <div v-if="showPrePipelineWait" class="tree-children">
+    <!-- Announcements need a region that outlives each wait row, otherwise screen
+         readers miss a live region that appears together with its own text. -->
+    <div class="sr-only" role="status" aria-live="polite">{{ liveStatusText }}</div>
+
+    <!-- A turn that only recalled memory has no pipeline to draw. It borrows
+         this component for the memory row alone, so anything derived from the
+         agent event stream must stay out of the way — the agent timeline is
+         rendering those same steps itself. -->
+    <ChatMemoryStep
+      v-if="memoryOnly"
+      variant="root"
+      :memories="memoryItems"
+      :expanded="memoryExpanded"
+      :forgetting-id="forgettingId"
+      @toggle="toggleMemory"
+      @forget="forgetMemory"
+    />
+
+    <div v-else-if="showPrePipelineWait" class="tree-children">
       <div class="tree-child tree-child-last streaming-loading-node">
         <div class="tree-branch" />
         <div class="tree-child-content">
-          <div class="loading-indicator">
-            <div class="loading-typing">
-              <span />
-              <span />
-              <span />
+          <div class="tool-event">
+            <div class="action-card action-pending">
+              <div class="action-header no-results">
+                <div class="action-title">
+                  <t-icon class="action-title-icon" name="lightbulb" />
+                  <span class="action-name">{{ t('chat.preparingAnswer') }}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -16,18 +37,39 @@
     </div>
 
     <div v-else-if="!showCollapsedRoot" class="tree-children">
+      <ChatMemoryStep
+        v-if="hasMemory"
+        :memories="memoryItems"
+        :expanded="memoryExpanded"
+        :is-last="memoryIsLast"
+        :forgetting-id="forgettingId"
+        @toggle="toggleMemory"
+        @forget="forgetMemory"
+      />
+
       <div v-for="(step, index) in steps" :key="step.id" class="tree-child" :class="{
         'tree-child-last':
           !showDoneRow
-          && !hasReferences
+          && !showWaitStep
           && !showThinkingStep
           && index === steps.length - 1,
       }">
         <div class="tree-branch" />
         <div class="tree-child-content">
           <div class="tool-event">
-            <div class="action-card">
-              <div class="action-header no-results">
+            <div
+              class="action-card"
+              :class="{ 'has-reference-trigger': step.canOpenReferences }"
+              :role="step.canOpenReferences ? 'button' : undefined"
+              :tabindex="step.canOpenReferences ? 0 : undefined"
+              @click="handleStepClick(step)"
+              @keydown.enter="handleStepClick(step)"
+              @keydown.space.prevent="handleStepClick(step)"
+            >
+              <div
+                class="action-header"
+                :class="{ 'no-results': !step.canOpenReferences }"
+              >
                 <div class="action-title">
                   <t-icon class="action-title-icon" :name="step.iconName" />
                   <span class="action-name" :class="{ 'is-running': step.pending }">{{ step.title }}</span>
@@ -41,20 +83,20 @@
         </div>
       </div>
 
-      <div v-if="hasReferences" class="tree-child rag-ref-step"
-        :class="{ 'tree-child-last': !showThinkingStep && !showDoneRow }">
+      <div
+        v-if="showWaitStep"
+        class="tree-child tree-child-last streaming-loading-node rag-model-wait-step"
+      >
         <div class="tree-branch" />
         <div class="tree-child-content">
           <div class="tool-event">
-            <div class="action-card">
-              <div class="action-header" @click="toggleReferences">
+            <div class="action-card" :class="{ 'action-pending': !waitStepStalled }">
+              <div class="action-header no-results">
                 <div class="action-title">
-                  <t-icon class="action-title-icon" name="file-search" />
-                  <span class="action-name">{{ referencesHeaderText }}</span>
+                  <t-icon class="action-title-icon" name="lightbulb" />
+                  <span class="action-name">{{ waitStepText }}</span>
                 </div>
               </div>
-              <DocInfo v-show="refsExpanded" :session="session" :embedded-mode="embeddedMode" timeline-mode
-                content-only />
             </div>
           </div>
         </div>
@@ -72,14 +114,7 @@
                   <span class="action-name">{{ t('agent.think') }}</span>
                 </div>
               </div>
-              <div v-if="thinkingPending && !thinkingContent" class="thinking-loading">
-                <div class="loading-typing">
-                  <span />
-                  <span />
-                  <span />
-                </div>
-              </div>
-              <div v-else-if="thinkingContent && thinkingExpanded" class="thinking-detail-content">
+              <div v-if="thinkingContent && thinkingExpanded" class="thinking-detail-content">
                 {{ thinkingContent }}
               </div>
             </div>
@@ -106,26 +141,60 @@
 
     <div v-else class="tree-container">
       <div class="tool-event">
-        <div class="action-card tree-root" @click="toggleExpanded">
-          <div class="action-header">
-            <div class="action-title">
-              <span class="action-name tree-root-summary" v-html="collapsedSummaryHtml" />
-              <div class="action-show-icon">
-                <t-icon :name="showExpandedTimeline ? 'chevron-down' : 'chevron-right'" />
-              </div>
-            </div>
+        <div class="action-card tree-root">
+          <div class="tree-root-toolbar">
+            <button
+              type="button"
+              class="tree-root-expand"
+              :aria-expanded="showExpandedTimeline"
+              :aria-label="collapsedStatusText"
+              @click="toggleExpanded"
+            >
+              <span class="tree-root-status">{{ collapsedStatusText }}</span>
+              <span
+                v-if="referenceSummaryText"
+                class="tree-root-reference"
+              >
+                {{ referenceSummaryText }}
+              </span>
+              <t-icon
+                class="tree-root-expand__icon"
+                :name="showExpandedTimeline ? 'chevron-down' : 'chevron-right'"
+              />
+            </button>
           </div>
         </div>
       </div>
 
       <div v-if="showExpandedTimeline" class="tree-children tree-children-expanded">
+        <ChatMemoryStep
+          v-if="hasMemory"
+          :memories="memoryItems"
+          :expanded="memoryExpanded"
+          :is-last="memoryIsLast"
+          :forgetting-id="forgettingId"
+          @toggle="toggleMemory"
+          @forget="forgetMemory"
+        />
+
         <div v-for="(step, index) in steps" :key="step.id" class="tree-child"
-          :class="{ 'tree-child-last': index === steps.length - 1 && !hasReferences && !showDoneRow && !showThinkingStep }">
+          :class="{ 'tree-child-last': index === steps.length - 1 && !showDoneRow && !showThinkingStep }">
           <div class="tree-branch" />
           <div class="tree-child-content">
             <div class="tool-event">
-              <div class="action-card">
-                <div class="action-header no-results">
+              <div
+                class="action-card"
+                :class="{ 'has-reference-trigger': step.canOpenReferences }"
+                :role="step.canOpenReferences ? 'button' : undefined"
+                :tabindex="step.canOpenReferences ? 0 : undefined"
+                @click="handleStepClick(step)"
+                @keydown.enter="handleStepClick(step)"
+                @keydown.space.prevent="handleStepClick(step)"
+              >
+                <div
+                  class="action-header"
+                  :class="{ 'no-results': !step.canOpenReferences }"
+                >
                   <div class="action-title">
                     <t-icon class="action-title-icon" :name="step.iconName" />
                     <span class="action-name" :class="{ 'is-running': step.pending }">{{ step.title }}</span>
@@ -134,25 +203,6 @@
                 <div v-if="step.summaryHtml" class="search-results-summary-fixed">
                   <div class="results-summary-text" v-html="step.summaryHtml" />
                 </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="hasReferences" class="tree-child rag-ref-step"
-          :class="{ 'tree-child-last': !showThinkingStep && !showDoneRow }">
-          <div class="tree-branch" />
-          <div class="tree-child-content">
-            <div class="tool-event">
-              <div class="action-card">
-                <div class="action-header" @click="toggleReferences">
-                  <div class="action-title">
-                    <t-icon class="action-title-icon" name="file-search" />
-                    <span class="action-name">{{ referencesHeaderText }}</span>
-                  </div>
-                </div>
-                <DocInfo v-show="refsExpanded" :session="session" :embedded-mode="embeddedMode" timeline-mode
-                  content-only />
               </div>
             </div>
           </div>
@@ -169,14 +219,7 @@
                     <span class="action-name">{{ t('agent.think') }}</span>
                   </div>
                 </div>
-                <div v-if="thinkingPending && !thinkingContent" class="thinking-loading">
-                  <div class="loading-typing">
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                </div>
-                <div v-else-if="thinkingContent && thinkingExpanded" class="thinking-detail-content">
+                <div v-if="thinkingContent && thinkingExpanded" class="thinking-detail-content">
                   {{ thinkingContent }}
                 </div>
               </div>
@@ -205,31 +248,62 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import DocInfo from './docInfo.vue'
+import ChatMemoryStep from './ChatMemoryStep.vue'
+import { useChatMemoryRow } from '@/composables/useChatMemoryRow'
 import { getAgentToolIconName } from '@/utils/agent-tool-icons'
 import {
   getKnowledgeSearchSummaryHtml,
   getRagPipelineStepTitle,
+  getRetrievalSearchSource,
 } from '@/utils/agent-tool-display'
-import { RAG_PIPELINE_TOOL_NAMES } from '@/utils/rag-pipeline-history'
+import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay'
+import { RAG_RETRIEVAL_TOOL_NAMES, RAG_TIMELINE_TOOL_NAMES } from '@/utils/rag-pipeline-history'
+import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
+import { buildReferenceSections } from '@/utils/referenceSources'
+import {
+  createRagWaitController,
+  getRagPipelineWaitKind,
+  type RagWaitView,
+} from '@/utils/rag-pipeline-state'
 
 const props = defineProps<{
   session?: {
+    id?: string | number
     agentEventStream?: Array<Record<string, unknown>>
     content?: string
     knowledge_references?: Array<{ chunk_type?: string; knowledge_id?: string; knowledge_title?: string }>
+    used_memories?: Array<{ id: string; kind: string; content: string }>
     is_completed?: boolean
   }
   embeddedMode?: boolean
+  // Set by hosts that already render their own timeline (the agent stream) and
+  // only need the memory row from here.
+  memoryOnly?: boolean
 }>()
 
 const { t } = useI18n()
+const referencesDrawer = useChatReferencesDrawer()
 const userExpanded = ref(false)
-const refsExpanded = ref(false)
 const thinkingExpanded = ref(true)
 const rootElement = ref<HTMLElement | null>(null)
+const waitView = ref<RagWaitView>({ kind: 'none', stalled: false })
+const waitController = createRagWaitController((view) => {
+  waitView.value = view
+})
+
+// Long-term memory is shown as a timeline row rather than as a card of its
+// own: it is one more thing the turn did before answering, and giving it a
+// separate visual language would make it read as unrelated to the pipeline.
+const {
+  memoryItems,
+  hasMemory,
+  expanded: memoryExpanded,
+  forgettingId,
+  toggle: toggleMemory,
+  forget: forgetMemory,
+} = useChatMemoryRow(() => props.session?.used_memories)
 
 const thinkingContent = computed(() => {
   const stream = props.session?.agentEventStream
@@ -265,6 +339,8 @@ const hasReferences = computed(
   () => (props.session?.knowledge_references?.length ?? 0) > 0,
 )
 
+const referenceSections = computed(() => buildReferenceSections(props.session?.knowledge_references))
+
 const steps = computed(() => {
   const stream = props.session?.agentEventStream
   if (!stream?.length) return []
@@ -274,7 +350,7 @@ const steps = computed(() => {
       return (
         event.type === 'tool_call' &&
         typeof event.tool_name === 'string' &&
-        RAG_PIPELINE_TOOL_NAMES.has(event.tool_name)
+        RAG_TIMELINE_TOOL_NAMES.has(event.tool_name)
       )
     })
     .map((event) => {
@@ -285,16 +361,24 @@ const steps = computed(() => {
           ? (event.tool_data as Record<string, unknown>)
           : null
 
-      const isSearchTool = toolName === 'knowledge_search' || toolName === 'search_knowledge'
-      const summaryHtml =
-        !pending && isSearchTool && toolData
-          ? getKnowledgeSearchSummaryHtml(t, toolData)
-          : ''
+      const isSearchTool = RAG_RETRIEVAL_TOOL_NAMES.has(toolName)
+      const isAttachmentTool = toolName === 'attachment_parsing' || toolName === 'image_analysis'
+      const searchSource = isSearchTool
+        ? getRetrievalSearchSource(event.arguments, toolData)
+        : undefined
+      let summaryHtml = ''
+      if (!pending && isSearchTool && toolData) {
+        summaryHtml = getKnowledgeSearchSummaryHtml(t, toolData)
+      } else if (!pending && isAttachmentTool) {
+        summaryHtml = getAttachmentParsingSummaryHtml(t, event)
+      }
+      const canOpenReferences = !pending && isSearchTool && hasReferences.value
 
       return {
         id: String(event.tool_call_id || `${toolName}-${event.timestamp || 0}`),
+        toolName,
         pending,
-        iconName: getAgentToolIconName(toolName),
+        iconName: getAgentToolIconName(toolName, searchSource),
         title: getRagPipelineStepTitle(t, {
           tool_name: toolName,
           pending,
@@ -303,6 +387,7 @@ const steps = computed(() => {
           tool_data: toolData,
         }),
         summaryHtml,
+        canOpenReferences,
       }
     })
 })
@@ -310,6 +395,30 @@ const steps = computed(() => {
 const allStepsDone = computed(
   () => steps.value.length > 0 && steps.value.every((step) => !step.pending),
 )
+
+const hasCompletedRetrievalStep = computed(() => steps.value.some(
+  (step) => RAG_RETRIEVAL_TOOL_NAMES.has(step.toolName) && !step.pending,
+))
+
+const waitKind = computed(() => getRagPipelineWaitKind({
+  isCompleted: Boolean(props.session?.is_completed),
+  hasAnswer: hasAnswer.value,
+  hasThinkingEvent: hasThinkingEvent.value,
+  stepCount: steps.value.length,
+  allStepsDone: allStepsDone.value,
+  hasCompletedRetrievalStep: hasCompletedRetrievalStep.value,
+}))
+
+const showWaitStep = computed(() => waitView.value.kind !== 'none')
+
+const waitStepStalled = computed(() => waitView.value.stalled)
+
+const waitStepText = computed(() => {
+  if (waitView.value.stalled) return t('chat.modelStillResponding')
+  return waitView.value.kind === 'model'
+    ? t('chat.connectingModelAndGeneratingAnswer')
+    : t('chat.preparingAnswer')
+})
 
 const showCollapsedRoot = computed(
   () =>
@@ -325,6 +434,10 @@ const showExpandedTimeline = computed(() => {
 const showDoneRow = computed(() => {
   const turnDone = hasAnswer.value || Boolean(props.session?.is_completed)
   if (!turnDone) return false
+  // A timeline rendered only because memory was used has nothing to report as
+  // finished; adding a "done" row there would put a step into plain chat that
+  // never had one.
+  if (steps.value.length === 0 && !hasThinking.value) return false
   if (steps.value.length > 0 && !allStepsDone.value) return false
   return true
 })
@@ -333,7 +446,9 @@ const showPrePipelineWait = computed(() => {
   if (hasAnswer.value || props.session?.is_completed || steps.value.length > 0 || hasThinking.value) {
     return false
   }
-  return true
+  // Memory is recalled before the first token, so once it is on screen the
+  // turn is visibly under way and the placeholder would be redundant.
+  return !hasMemory.value
 })
 
 // Only show the thinking row once the backend actually streams thinking events.
@@ -356,29 +471,37 @@ const isThinkingStreaming = computed(
     !props.session?.is_completed,
 )
 
-const visible = computed(
-  () => steps.value.length > 0 || showPrePipelineWait.value || showThinkingStep.value,
+// Memory alone is enough to render: a plain-chat answer that used memory still
+// needs somewhere to say so.
+const visible = computed(() => {
+  if (props.memoryOnly) return hasMemory.value
+  return (
+    steps.value.length > 0 || showPrePipelineWait.value || showThinkingStep.value || hasMemory.value
+  )
+})
+
+// The memory row leads the timeline, so it is only the last node when nothing
+// else rendered.
+const memoryIsLast = computed(
+  () => steps.value.length === 0 && !showWaitStep.value && !showThinkingStep.value && !showDoneRow.value,
 )
 
-const referenceDocCount = computed(() => {
-  const refs = props.session?.knowledge_references ?? []
-  const keys = new Set<string>()
-  for (const item of refs) {
-    if (item.chunk_type === 'web_search') continue
-    keys.add(item.knowledge_id || item.knowledge_title || 'doc')
+const liveStatusText = computed(() => {
+  if (showPrePipelineWait.value) return t('chat.preparingAnswer')
+  if (showWaitStep.value) return waitStepText.value
+  return ''
+})
+
+const collapsedStatusText = computed(() => {
+  if (steps.value.length === 0) {
+    return hasThinking.value ? t('agentStream.toolStatus.thinkingDone') : ''
   }
-  return keys.size
+  return t('agentStream.ragPipeline.searchDone')
 })
 
-const referenceWebCount = computed(() => {
-  const refs = props.session?.knowledge_references ?? []
-  return refs.filter((item) => item.chunk_type === 'web_search').length
-})
-
-const referencesHeaderText = computed(() => {
-  const docCount = referenceDocCount.value
-  const webCount = referenceWebCount.value
-  const total = props.session?.knowledge_references?.length ?? 0
+const referenceSummaryText = computed(() => {
+  const docCount = referenceSections.value.find((section) => section.id === 'documents')?.items.length ?? 0
+  const webCount = referenceSections.value.find((section) => section.id === 'web')?.items.length ?? 0
 
   if (docCount > 0 && webCount > 0) {
     return t('chat.referencesDocAndWebCount', { docCount, webCount })
@@ -386,48 +509,31 @@ const referencesHeaderText = computed(() => {
   if (docCount > 0) {
     return t('chat.referencesDocCount', { count: docCount })
   }
-  return t('chat.referencesTitle', { count: total })
-})
-
-const collapsedSummaryHtml = computed(() => {
-  if (steps.value.length === 0) {
-    return hasThinking.value ? t('agentStream.toolStatus.thinkingDone') : ''
+  if (webCount > 0) {
+    return t('chat.referencesWebCount', { count: webCount })
   }
 
-  const parts: string[] = [t('agentStream.ragPipeline.searchDone')]
-  const docCount = referenceDocCount.value
-  const webCount = referenceWebCount.value
-
-  if (docCount > 0 && webCount > 0) {
-    parts.push(
-      t('agentStream.ragPipeline.referencedDocAndWeb', {
-        docCount: `<strong>${docCount}</strong>`,
-        webCount: `<strong>${webCount}</strong>`,
-      }),
-    )
-  } else if (docCount > 0) {
-    parts.push(
-      t('agentStream.ragPipeline.referencedDocs', {
-        count: `<strong>${docCount}</strong>`,
-      }),
-    )
-  } else if (webCount > 0) {
-    parts.push(
-      t('agentStream.ragPipeline.referencedWebs', {
-        count: `<strong>${webCount}</strong>`,
-      }),
-    )
-  }
-
-  return parts.join(t('agent.stepSummarySeparator'))
+  return ''
 })
+
+function toggleReferencesDrawer() {
+  const refs = props.session?.knowledge_references
+  if (!referencesDrawer || !refs?.length) return
+  referencesDrawer.toggle({
+    references: refs,
+    highlight: null,
+    messageId: props.session?.id ? String(props.session.id) : '',
+    sourceKey: `rag:${props.session?.id || refs.map((item) => item.knowledge_id || item.knowledge_title).join('|')}`,
+  })
+}
+
+function handleStepClick(step: { canOpenReferences?: boolean }) {
+  if (!step.canOpenReferences) return
+  toggleReferencesDrawer()
+}
 
 function toggleExpanded() {
   userExpanded.value = !userExpanded.value
-}
-
-function toggleReferences() {
-  refsExpanded.value = !refsExpanded.value
 }
 
 function toggleThinking() {
@@ -451,6 +557,8 @@ watch(thinkingPending, (pending) => {
   }
 })
 
+watch(waitKind, (kind) => waitController.update(kind), { immediate: true })
+
 watch(hasAnswer, (answered) => {
   if (answered && hasThinking.value) {
     thinkingExpanded.value = false
@@ -466,6 +574,10 @@ watch(thinkingExpanded, (expanded) => {
   if (!expanded || !isThinkingStreaming.value) return
   scrollThinkingDetailToBottom()
 })
+
+onBeforeUnmount(() => {
+  waitController.dispose()
+})
 </script>
 
 <style scoped lang="less">
@@ -480,47 +592,86 @@ watch(thinkingExpanded, (expanded) => {
   margin: 0;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .tree-container {
-  margin: 0 0 16px;
+  margin: 0 0 8px;
   position: relative;
 }
 
 .tree-root {
-  cursor: pointer;
-  color: var(--td-text-color-secondary);
   margin-bottom: 0;
 
-  .action-header {
+  .tree-root-toolbar {
     display: flex;
     align-items: center;
-    min-height: 24px;
-    padding: 0;
-  }
-
-  .action-title {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    flex: 0 1 auto;
+    justify-content: flex-start;
+    width: 100%;
     min-width: 0;
   }
 
-  .tree-root-summary {
-    font-size: 14px;
-    line-height: 1.55;
+  .tree-root-expand {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
     color: var(--td-text-color-secondary);
+    font-size: 14px;
+    line-height: 22px;
+    cursor: pointer;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
 
-    :deep(strong) {
-      font-weight: 600;
+    &:hover {
+      background: transparent;
       color: var(--td-text-color-primary);
     }
   }
 
-  .action-show-icon {
-    color: var(--td-text-color-placeholder);
-    font-size: 14px;
-    flex-shrink: 0;
+  .tree-root-status,
+  .tree-root-reference {
+    flex: 0 1 auto;
+    min-width: 0;
+    white-space: nowrap;
   }
+
+  .tree-root-reference {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+
+    &::before {
+      content: '';
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.65;
+      flex-shrink: 0;
+    }
+  }
+
+  .tree-root-expand__icon {
+    flex-shrink: 0;
+    font-size: 14px;
+    color: currentColor;
+  }
+
 }
 
 .tree-children {
@@ -563,38 +714,23 @@ watch(thinkingExpanded, (expanded) => {
   }
 }
 
-.rag-ref-step {
-  .action-header {
-    width: 100%;
-    gap: 8px;
-  }
-
-  .action-title {
-    gap: 12px;
-  }
-
-  .action-show-icon {
-    color: var(--td-text-color-placeholder);
-    font-size: 14px;
-    flex-shrink: 0;
-  }
-
-  :deep(.refer-timeline.refer) {
-    margin-top: 4px;
-    padding-left: 0;
-  }
-
-  :deep(.refer-timeline .doc-group-chunks) {
-    padding-left: 18px;
-  }
-}
-
 .tool-event {
   .action-card {
     position: relative;
     background: transparent;
     border: 0;
     box-shadow: none;
+
+    &.has-reference-trigger {
+      cursor: pointer;
+
+      &:hover {
+        .action-name,
+        .results-summary-text {
+          color: var(--td-text-color-primary);
+        }
+      }
+    }
   }
 
   .action-header {
@@ -640,7 +776,7 @@ watch(thinkingExpanded, (expanded) => {
     font-weight: 400;
     color: var(--td-text-color-secondary);
     word-break: break-word;
-    max-width: min(680px, 100%);
+    max-width: min(820px, 100%);
   }
 }
 
@@ -661,10 +797,6 @@ watch(thinkingExpanded, (expanded) => {
 }
 
 .rag-thinking-step {
-  .thinking-loading {
-    padding: 4px 0 0;
-  }
-
   .thinking-detail-content {
     margin-top: 4px;
     padding: 0;
@@ -680,6 +812,18 @@ watch(thinkingExpanded, (expanded) => {
 
   .action-pending .action-name {
     color: var(--td-text-color-secondary);
+  }
+}
+
+@media (max-width: 640px) {
+  .tree-root {
+    .tree-root-toolbar {
+      gap: 8px;
+    }
+
+    .tree-root-expand {
+      max-width: 100%;
+    }
   }
 }
 </style>

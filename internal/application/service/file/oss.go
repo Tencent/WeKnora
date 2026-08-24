@@ -32,16 +32,19 @@ type ossFileService struct {
 
 const ossScheme = "oss://"
 
-// newOSSClient creates an OSS client using the official Aliyun SDK v2.
 // Signature version can be specified via OSS_SIGNATURE_VERSION environment variable (v1/v4).
 // If not specified, defaults to v4.
 func newOSSClient(endpoint, region, accessKey, secretKey, signatureVersion string) (*oss.Client, error) {
+	if err := utils.ValidateURLForSSRF(endpoint); err != nil {
+		return nil, fmt.Errorf("unsafe OSS endpoint: %w", err)
+	}
 	creds := credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")
 
 	cfg := oss.LoadDefaultConfig().
 		WithCredentialsProvider(creds).
 		WithRegion(region).
-		WithEndpoint(endpoint)
+		WithEndpoint(endpoint).
+		WithHttpClient(utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig()))
 
 	if strings.EqualFold(signatureVersion, "v1") {
 		cfg = oss.LoadDefaultConfig().

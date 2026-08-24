@@ -22,6 +22,15 @@ func (f *fakeGetSvc) GetKnowledgeBase(ctx context.Context, id string) (*sdk.Know
 	return f.kb, f.err
 }
 
+// ListKnowledgeBases backs is_pinned enrichment in runView. Returns the same
+// KB so the enrichment finds it; nil/empty is fine (enrichment is best-effort).
+func (f *fakeGetSvc) ListKnowledgeBases(ctx context.Context) ([]sdk.KnowledgeBase, error) {
+	if f.kb == nil {
+		return nil, nil
+	}
+	return []sdk.KnowledgeBase{*f.kb}, nil
+}
+
 func TestGet_OK_Text(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeGetSvc{kb: &sdk.KnowledgeBase{

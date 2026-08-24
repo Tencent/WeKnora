@@ -131,14 +131,35 @@
             </span>
             <span v-if="getKbCapability(activeDetail.agent)" class="detail-tag">{{ getKbCapability(activeDetail.agent)
               }}</span>
-            <span v-if="activeDetail.agent.config?.web_search_enabled" class="detail-tag">{{
-              $t('agent.capabilities.webSearchOn')
-              }}</span>
             <span v-if="getMcpCapability(activeDetail.agent)" class="detail-tag">{{ getMcpCapability(activeDetail.agent)
               }}</span>
             <span v-if="activeDetail.agent.config?.multi_turn_enabled" class="detail-tag">{{
               $t('agent.capabilities.multiTurn')
               }}</span>
+          </div>
+
+          <div class="detail-tag-group">
+            <div class="detail-tag-group-title">{{ $t('agent.selector.capabilitiesSection') }}</div>
+            <div class="detail-tags detail-tags--capabilities">
+              <span class="detail-tag detail-capability-tag"
+                :class="getWebSearchCapabilityClass(activeDetail.agent)">
+                <span class="detail-capability-icon-wrap">
+                  <TIcon :name="getWebSearchCapabilityIcon(activeDetail.agent)" size="10px"
+                    class="detail-capability-icon" />
+                </span>
+                <span class="detail-capability-name">{{ $t('agent.selector.webSearchCapability') }}</span>
+                <span class="detail-capability-state">{{ getWebSearchCapabilityState(activeDetail.agent) }}</span>
+              </span>
+              <span class="detail-tag detail-capability-tag"
+                :class="isImageUploadEnabledForAgent(activeDetail.agent) ? 'detail-capability-tag--on' : 'detail-capability-tag--off'">
+                <span class="detail-capability-icon-wrap">
+                  <TIcon :name="isImageUploadEnabledForAgent(activeDetail.agent) ? 'check' : 'close'" size="10px"
+                    class="detail-capability-icon" />
+                </span>
+                <span class="detail-capability-name">{{ $t('agent.selector.imageUploadCapability') }}</span>
+                <span class="detail-capability-state">{{ getImageUploadCapabilityState(activeDetail.agent) }}</span>
+              </span>
+            </div>
           </div>
 
           <div v-if="activeDetail.sharedMeta?.org_name || activeDetail.sharedMeta?.shared_by_username"
@@ -178,11 +199,17 @@ import {
   type AgentNotReadyReasonKey,
 } from '@/utils/agent-readiness';
 import { formatLocalizedList } from '@/utils/format-list';
+import { useChatResourcesStore } from '@/stores/chatResources';
+import {
+  isAgentWebSearchEnabled,
+  isAgentWebSearchReady,
+} from '@/utils/agentWebSearch';
 
 const { t, locale } = useI18n();
 const router = useRouter();
 const orgStore = useOrganizationStore();
 const settingsStore = useSettingsStore();
+const chatResources = useChatResourcesStore();
 
 const props = defineProps<{
   visible: boolean;
@@ -201,7 +228,11 @@ const emit = defineEmits<{
 type AgentDetailTarget = {
   agent: CustomAgent;
   sourceTenantId?: string;
-  sharedMeta?: { org_name?: string; shared_by_username?: string };
+  sharedMeta?: { org_name?: string; shared_by_username?: string; web_search_ready?: boolean };
+};
+
+type SharedAgentSelection = Omit<SharedAgentInfo, 'agent'> & {
+  agent: CustomAgent;
 };
 
 const dropdownStyle = ref<Record<string, string>>({});
@@ -212,10 +243,11 @@ const detailPanelStyle = ref<Record<string, string>>({});
 let detailHideTimer: ReturnType<typeof setTimeout> | null = null;
 
 const DETAIL_PANEL_WIDTH = 200;
-const DETAIL_BRIDGE_OVERLAP = 10;
+const DETAIL_PANEL_GAP = 8;
 const DETAIL_HIDE_DELAY_MS = 400;
 
 const agentsList = computed(() => props.agents ?? []);
+const webSearchProviders = computed(() => chatResources.webSearchProviders);
 
 const builtinAgents = computed(() => {
   const apiBuiltins = agentsList.value.filter(a => a.is_builtin);
@@ -232,13 +264,21 @@ const builtinAgents = computed(() => {
 
 const customAgents = computed(() => agentsList.value.filter(a => !a.is_builtin));
 
-const sharedAgentsList = computed<SharedAgentInfo[]>(() =>
-  (orgStore.sharedAgents || []).filter(shared => !shared.disabled_by_me),
+const toCustomAgent = (agent: SharedAgentInfo['agent']): CustomAgent => ({
+  is_builtin: false,
+  config: {},
+  ...agent,
+});
+
+const sharedAgentsList = computed<SharedAgentSelection[]>(() =>
+  (orgStore.sharedAgents || [])
+    .filter(shared => !shared.disabled_by_me)
+    .map(shared => ({ ...shared, agent: toCustomAgent(shared.agent) })),
 );
 
 const currentAgentSourceTenantId = computed(() => settingsStore.selectedAgentSourceTenantId ?? null);
 
-const isSharedAgentSelected = (shared: SharedAgentInfo) =>
+const isSharedAgentSelected = (shared: SharedAgentSelection) =>
   props.currentAgentId === shared.agent.id && currentAgentSourceTenantId.value === String(shared.source_tenant_id);
 
 const isMyAgentSelected = (agent: CustomAgent) =>
@@ -275,6 +315,47 @@ const getKbCapability = (agent: CustomAgent): string => {
   }
   if (config.kb_selection_mode === 'all') return t('agent.capabilities.kbAll');
   return '';
+};
+
+const isWebSearchEnabledForAgent = (agent: CustomAgent): boolean => {
+  return isAgentWebSearchEnabled(agent.config);
+};
+
+const isWebSearchReadyForAgent = (agent: CustomAgent): boolean => {
+  return isAgentWebSearchReady(
+    agent.config,
+    webSearchProviders.value,
+    activeDetail.value?.sourceTenantId ? activeDetail.value.sharedMeta?.web_search_ready : undefined,
+  );
+};
+
+const isImageUploadEnabledForAgent = (agent: CustomAgent): boolean => {
+  const config = agent.config || {};
+  return config.image_upload_enabled === true;
+};
+
+const getWebSearchCapabilityClass = (agent: CustomAgent): string => {
+  if (isWebSearchReadyForAgent(agent)) return 'detail-capability-tag--on';
+  if (isWebSearchEnabledForAgent(agent)) return 'detail-capability-tag--warning';
+  return 'detail-capability-tag--off';
+};
+
+const getWebSearchCapabilityIcon = (agent: CustomAgent): string => {
+  if (isWebSearchReadyForAgent(agent)) return 'check';
+  if (isWebSearchEnabledForAgent(agent)) return 'error-circle';
+  return 'close';
+};
+
+const getWebSearchCapabilityState = (agent: CustomAgent): string => {
+  if (isWebSearchReadyForAgent(agent)) return t('agent.selector.capabilityEnabled');
+  if (isWebSearchEnabledForAgent(agent)) return t('agent.selector.capabilityUnconfigured');
+  return t('agent.selector.capabilityDisabled');
+};
+
+const getImageUploadCapabilityState = (agent: CustomAgent): string => {
+  return isImageUploadEnabledForAgent(agent)
+    ? t('agent.selector.capabilitySupported')
+    : t('agent.selector.capabilityUnsupported');
 };
 
 const getMcpCapability = (agent: CustomAgent): string => {
@@ -347,8 +428,8 @@ const updateDetailPanelPosition = () => {
   const rowRect = rectToCssPx(el.getBoundingClientRect(), zoom);
   const { width: vw, height: vh } = cssViewportSize(zoom);
 
-  // 向左重叠一段透明区域，避免鼠标从选项移向浮层时经过空隙触发 mouseleave
-  let left = rowRect.right - DETAIL_BRIDGE_OVERLAP;
+  // 浮层显示在列表右侧，保留小间隙；透明桥接区覆盖间隙，避免鼠标移入时浮层消失
+  let left = rowRect.right + DETAIL_PANEL_GAP;
   if (left + DETAIL_PANEL_WIDTH > vw - 8) {
     left = Math.max(8, vw - DETAIL_PANEL_WIDTH - 8);
   }
@@ -394,10 +475,11 @@ const onOptionEnter = (agent: CustomAgent, event: MouseEvent, sourceTenantId?: s
   scheduleDetailPanelPosition();
 };
 
-const onSharedOptionEnter = (shared: SharedAgentInfo, event: MouseEvent) => {
-  onOptionEnter(shared.agent as CustomAgent, event, String(shared.source_tenant_id), {
+const onSharedOptionEnter = (shared: SharedAgentSelection, event: MouseEvent) => {
+  onOptionEnter(shared.agent, event, String(shared.source_tenant_id), {
     org_name: shared.org_name,
     shared_by_username: shared.shared_by_username,
+    web_search_ready: shared.web_search_ready,
   });
 };
 
@@ -430,13 +512,13 @@ const selectAgent = (agent: CustomAgent) => {
   emit('select', agent);
 };
 
-const selectSharedAgent = (shared: SharedAgentInfo) => {
+const selectSharedAgent = (shared: SharedAgentSelection) => {
   const sourceTenantId = String(shared.source_tenant_id);
   if (getAgentNotReadyLabels(shared.agent, sourceTenantId).length > 0) {
-    emitAgentNotReady(shared.agent as CustomAgent, sourceTenantId);
+    emitAgentNotReady(shared.agent, sourceTenantId);
     return;
   }
-  emit('select', shared.agent as CustomAgent, sourceTenantId);
+  emit('select', shared.agent, sourceTenantId);
 };
 
 const goToSettings = (agent: CustomAgent, sourceTenantId?: string) => {
@@ -466,7 +548,7 @@ const updateDropdownPosition = () => {
   const rect = rectToCssPx(props.anchorEl.getBoundingClientRect(), zoom);
   const { width: vw, height: vh } = cssViewportSize(zoom);
 
-  const dropdownWidth = 196;
+  const dropdownWidth = 220;
   const offsetY = 6;
 
   let left = Math.floor(rect.left);
@@ -512,6 +594,7 @@ const updateDropdownPosition = () => {
 watch(() => props.visible, (newVal) => {
   if (newVal) {
     nextTick(() => updateDropdownPosition());
+    chatResources.ensureWebSearchProviders();
   } else {
     hideDetailPanel();
   }
@@ -571,8 +654,8 @@ watch(activeDetail, (detail) => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 32px;
-  padding: 0 8px;
+  min-height: 36px;
+  padding: 8px 12px;
   border-bottom: .5px solid var(--td-component-stroke);
   font-size: 12px;
   font-weight: 500;
@@ -606,7 +689,7 @@ watch(activeDetail, (detail) => {
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 4px 0;
+  padding: 6px 4px 8px;
 }
 
 .agent-group {
@@ -620,7 +703,7 @@ watch(activeDetail, (detail) => {
 .agent-group-title {
   font-size: 11px;
   color: var(--td-text-color-placeholder);
-  padding: 6px 8px 4px;
+  padding: 8px 12px 4px;
   font-weight: 600;
   line-height: 16px;
 }
@@ -629,8 +712,9 @@ watch(activeDetail, (detail) => {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 32px;
-  padding: 0 8px;
+  min-height: 34px;
+  margin: 0 4px;
+  padding: 6px 8px;
   cursor: pointer;
   transition: background 0.12s;
   border-radius: 5px;
@@ -749,14 +833,16 @@ watch(activeDetail, (detail) => {
 .agent-detail-panel {
   box-sizing: border-box;
   position: relative;
+  --detail-panel-gap: 8px;
+  --detail-bridge-width: 8px;
 
   // 左侧透明桥接区：承接从选项移入的鼠标，避免经过间隙时浮层消失
   &::before {
     content: '';
     position: absolute;
-    left: -12px;
+    left: calc(-1 * (var(--detail-bridge-width) + var(--detail-panel-gap)));
     top: 0;
-    width: 12px;
+    width: calc(var(--detail-bridge-width) + var(--detail-panel-gap));
     height: 100%;
   }
 }
@@ -901,6 +987,25 @@ watch(activeDetail, (detail) => {
   gap: 6px;
   padding-top: 8px;
   border-top: .5px solid var(--td-component-stroke);
+
+  &--capabilities {
+    padding-top: 0;
+    border-top: none;
+  }
+}
+
+.detail-tag-group {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: .5px solid var(--td-component-stroke);
+}
+
+.detail-tag-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  color: var(--td-text-color-placeholder);
+  margin-bottom: 6px;
 }
 
 .detail-tag {
@@ -913,6 +1018,91 @@ watch(activeDetail, (detail) => {
   line-height: 18px;
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-secondarycontainer);
+}
+
+.detail-capability-tag {
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 7px 3px 5px;
+
+  .detail-capability-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--td-text-color-secondary);
+    font-weight: 500;
+  }
+
+  .detail-capability-state {
+    flex-shrink: 0;
+    font-size: 10px;
+    line-height: 14px;
+    color: var(--td-text-color-placeholder);
+  }
+}
+
+.detail-capability-tag--on {
+  border-color: rgba(0, 168, 112, 0.2);
+  background: rgba(0, 168, 112, 0.06);
+
+  .detail-capability-icon-wrap {
+    color: var(--td-success-color, #00a870);
+    background: rgba(0, 168, 112, 0.12);
+  }
+
+  .detail-capability-icon {
+    color: var(--td-success-color, #00a870);
+  }
+
+  .detail-capability-state {
+    color: var(--td-success-color, #00a870);
+  }
+}
+
+.detail-capability-tag--warning {
+  border-color: rgba(237, 123, 47, 0.22);
+  background: rgba(237, 123, 47, 0.06);
+
+  .detail-capability-icon-wrap {
+    color: var(--td-warning-color, #ed7b2f);
+    background: rgba(237, 123, 47, 0.12);
+  }
+
+  .detail-capability-icon,
+  .detail-capability-state {
+    color: var(--td-warning-color, #ed7b2f);
+  }
+}
+
+.detail-capability-tag--off {
+  border-color: var(--td-component-stroke);
+  background: var(--td-bg-color-secondarycontainer);
+
+  .detail-capability-icon-wrap {
+    color: var(--td-text-color-placeholder);
+    background: var(--td-bg-color-component, rgba(0, 0, 0, 0.04));
+  }
+
+  .detail-capability-icon {
+    color: var(--td-text-color-placeholder);
+  }
+}
+
+.detail-capability-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.detail-capability-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  line-height: 1;
 }
 
 .detail-meta {

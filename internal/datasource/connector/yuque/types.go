@@ -77,6 +77,9 @@ func parseYuqueConfig(config *types.DataSourceConfig) (*Config, error) {
 	if strings.TrimSpace(cfg.APIToken) == "" {
 		return nil, fmt.Errorf("%w: api_token is required", datasource.ErrInvalidCredentials)
 	}
+	if err := datasource.ValidateConnectorBaseURL(cfg.GetBaseURL()); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
 }
 

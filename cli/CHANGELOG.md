@@ -10,6 +10,61 @@ of the WeKnora server / frontend release cadence.
 CLI history before v0.3 is recorded in the project root
 [CHANGELOG.md](../CHANGELOG.md) under the release that introduced the CLI.
 
+## [Unreleased]
+
+### Breaking
+- `chat` and `session ask` now distinguish JSON from NDJSON: the default
+  `--format json` buffers a bounded answer-event projection into one
+  `{ok:true,data:{events:[...]}}` envelope; use `--format ndjson` for the
+  complete raw event stream.
+- JSON, text, and MCP chat/session output hide reasoning, tools, lifecycle
+  frames, and references by default. `--reference` adds bounded `kb_id` /
+  `chunk_id` / `parent_chunk_id` indexes; `--verbose` adds execution events.
+- `session continue-stream` renamed to `session resume`.
+- `kb init` renamed to `kb config set`.
+- Error envelope: `retry_command` (a shell string) replaced by `retry_argv`
+  (a directly-executable argv array — no shell-splitting or quoting).
+
+### Added
+- `chat` / `session ask --reference` includes indexed citations, while
+  `--verbose` includes reasoning, tools, and lifecycle events. MCP `chat` /
+  `session_ask` expose the same controls through `reference` / `verbose` inputs.
+- Buffered chat/session errors include the auto-created `session_id` in
+  `error.detail` so interrupted sessions remain recoverable.
+- `error.exit_code` embeds the process exit code in the JSON error envelope,
+  disambiguating the two `input.invalid_argument` cases (parse error → 2,
+  typed-value error → 5).
+- `kb status` / `kb check` / `kb create` report `retrieval_ready` (whether an
+  embedding model is bound); `kb create` hints the fix when it is false.
+- `model create` / `model update` / `model delete` (`update` rotates key /
+  base-url in place, preserving the id).
+- Stateless env-credential auth: `WEKNORA_API_KEY` / `WEKNORA_TOKEN` +
+  `WEKNORA_HOST`, a zero-disk path for headless / agent use. `auth logout` now
+  keeps the profile registered (use `profile remove` to delete it entirely).
+- `meta.total_count` on paginated list / search output (full result size before
+  client-side `--limit` truncation).
+
+### Changed
+- JSON, text, and MCP now share one event projector and filtering policy.
+- Projected references contain lookup indexes only; fetch full
+  passages with `chunk view <chunk_id>` or `chunk view <parent_chunk_id>`.
+- NDJSON remains an unmodified SDK event trace, including reasoning and full
+  reference payloads.
+
+### Fixed
+- Streaming SDK calls are no longer cut off by the client's default 30-second
+  timeout (explicit `WithTimeout` values remain honored), and SSE data lines
+  up to 4 MiB are accepted.
+- Terminal `response_type=error, done=true` frames now end SDK stream calls
+  even when the server leaves the HTTP connection open.
+- Agent accumulation now waits for `response_type=complete` instead of treating
+  per-event `done:true` markers as completion of the whole run.
+- Reference `knowledge_base_id`, `parent_chunk_id`, and `sub_chunk_id` fields
+  now survive SDK unmarshal.
+- E2E chat step parses the bounded JSON envelope; MCP stream errors include
+  `session_id` in `error.detail`; terminal SSE errors classify as
+  `server.error` instead of `network.error` or `local.sse_stream_aborted`.
+
 ## [0.9.0] - 2026-06-10
 
 ### v0.9 — auth/profile model harmonization + flag cleanup

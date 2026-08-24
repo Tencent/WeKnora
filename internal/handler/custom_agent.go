@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,6 +17,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// sandboxConfigLookup is the existence check an agent's sandbox selection needs.
+// Narrower than the full config service so this handler cannot grow a dependency
+// on config mutation.
+type sandboxConfigLookup interface {
+	Get(ctx context.Context, tenantID uint64, id string) (*types.TenantSandboxConfigEntity, error)
+}
+
 // CustomAgentHandler defines the HTTP handler for custom agent operations
 type CustomAgentHandler struct {
 	service      interfaces.CustomAgentService
@@ -24,6 +32,9 @@ type CustomAgentHandler struct {
 	// userService 仅用于 list 接口批量回填 creator_name，作用见
 	// KnowledgeBaseHandler.userService。
 	userService interfaces.UserService
+	// sandboxConfigs validates an agent's sandbox backend selection. Optional —
+	// nil in partially-wired unit tests, where the selection is left unchecked.
+	sandboxConfigs sandboxConfigLookup
 }
 
 // NewCustomAgentHandler creates a new custom agent handler instance
@@ -32,21 +43,23 @@ func NewCustomAgentHandler(
 	imService *im.Service,
 	disabledRepo interfaces.TenantDisabledSharedAgentRepository,
 	userService interfaces.UserService,
+	sandboxConfigs *service.TenantSandboxConfigService,
 ) *CustomAgentHandler {
 	return &CustomAgentHandler{
-		service:      service,
-		imService:    imService,
-		disabledRepo: disabledRepo,
-		userService:  userService,
+		service:        service,
+		imService:      imService,
+		disabledRepo:   disabledRepo,
+		userService:    userService,
+		sandboxConfigs: sandboxConfigs,
 	}
 }
 
 // CreateAgentRequest defines the request body for creating an agent
 type CreateAgentRequest struct {
-	Name        string                   `json:"name" binding:"required"`
-	Description string                   `json:"description"`
-	Avatar      string                   `json:"avatar"`
-	Config      types.CustomAgentConfig  `json:"config"`
+	Name        string                  `json:"name" binding:"required"`
+	Description string                  `json:"description"`
+	Avatar      string                  `json:"avatar"`
+	Config      types.CustomAgentConfig `json:"config"`
 }
 
 // UpdateAgentRequest defines the request body for updating an agent
@@ -81,6 +94,14 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
+	if err := authorizeAgentKnowledgeScope(ctx, req.Config); err != nil {
+		c.Error(err)
+		return
+	}
+	if err := h.validateAgentSandboxConfig(ctx, req.Config); err != nil {
+		c.Error(err)
+		return
+	}
 
 	// Build agent object
 	agent := &types.CustomAgent{
@@ -88,6 +109,11 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 		Description: req.Description,
 		Avatar:      req.Avatar,
 		Config:      req.Config,
+	}
+	agent.EnsureDefaults()
+	if err := agent.Config.QuestionSuggestions.Validate(); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
 	}
 
 	logger.Infof(ctx, "Creating custom agent, name: %s, agent_mode: %s",
@@ -146,6 +172,10 @@ func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 			c.Error(errors.NewNotFoundError("Agent not found"))
 			return
 		}
+		if appErr, ok := err.(*errors.AppError); ok {
+			c.Error(appErr)
+			return
+		}
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
@@ -158,7 +188,7 @@ func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 
 // ListAgents godoc
 // @Summary      获取智能体列表
-// @Description  获取当前租户的所有智能体（包括内置智能体）
+// @Description  获取当前空间的所有智能体（包括内置智能体）
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
@@ -209,14 +239,14 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 	// Per-tenant "disabled by me" for own agents (only affects this tenant's conversation dropdown)
 	tenantIDVal, exists := c.Get(types.TenantIDContextKey.String())
 	if !exists {
-		logger.Error(ctx, "Tenant ID not found in context")
-		c.Error(errors.NewUnauthorizedError("Missing tenant context"))
+		logger.Error(ctx, "Workspace ID not found in context")
+		c.Error(errors.NewUnauthorizedError("Missing workspace context"))
 		return
 	}
 	tenantID, ok := tenantIDVal.(uint64)
 	if !ok {
 		logger.Errorf(ctx, "Tenant ID has unexpected type %T in context", tenantIDVal)
-		c.Error(errors.NewInternalServerError("Invalid tenant context type"))
+		c.Error(errors.NewInternalServerError("Invalid workspace context type"))
 		return
 	}
 	disabledOwnIDs, err := h.disabledRepo.ListDisabledOwnAgentIDs(ctx, tenantID)
@@ -228,7 +258,7 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 		return
 	}
 
-	// 批量回填 creator_name，作用同 KB 列表：让前端能区分「我创建」与「同租户其他成员」。
+	// 批量回填 creator_name，作用同 KB 列表：让前端能区分「我创建」与「同空间其他成员」。
 	// 内建 agent（IsBuiltin=true, CreatedBy=""）不会有 creator_name，前端按 builtin
 	// 分支单独渲染。
 	enrichAgentCreatorNames(ctx, h.userService, agents)
@@ -311,6 +341,14 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
+	if err := authorizeAgentKnowledgeScope(ctx, req.Config); err != nil {
+		c.Error(err)
+		return
+	}
+	if err := h.validateAgentSandboxConfig(ctx, req.Config); err != nil {
+		c.Error(err)
+		return
+	}
 
 	// Build agent object
 	agent := &types.CustomAgent{
@@ -319,6 +357,11 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		Description: req.Description,
 		Avatar:      req.Avatar,
 		Config:      req.Config,
+	}
+	agent.EnsureDefaults()
+	if err := agent.Config.QuestionSuggestions.Validate(); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
 	}
 
 	logger.Infof(ctx, "Updating custom agent, ID: %s, name: %s",
@@ -444,6 +487,23 @@ func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "Copying custom agent, ID: %s", secutils.SanitizeForLog(id))
+	sourceAgent, err := h.service.GetAgentByID(ctx, id)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"agent_id": id,
+		})
+		switch err {
+		case service.ErrAgentNotFound:
+			c.Error(errors.NewNotFoundError("Agent not found"))
+		default:
+			c.Error(errors.NewInternalServerError(err.Error()))
+		}
+		return
+	}
+	if err := authorizeAgentKnowledgeScope(ctx, sourceAgent.Config); err != nil {
+		c.Error(err)
+		return
+	}
 
 	// Copy the agent
 	copiedAgent, err := h.service.CopyAgent(ctx, id)
@@ -522,7 +582,8 @@ func (h *CustomAgentHandler) GetAgentTypePresets(c *gin.Context) {
 // @Param        id                  path      string  true   "智能体ID"
 // @Param        knowledge_base_ids  query     string  false  "知识库ID列表（逗号分隔），覆盖智能体默认配置"
 // @Param        knowledge_ids       query     string  false  "知识ID列表（逗号分隔），限定到具体文档"
-// @Param        limit               query     int     false  "返回数量上限（默认6）"
+// @Param        tag_scopes          query     string  false  "带知识库归属的标签范围（JSON）"
+// @Param        limit               query     int     false  "返回数量上限（未传时使用智能体配置的开场问题数量，最大30）"
 // @Success      200                 {object}  map[string]interface{}  "推荐问题列表"
 // @Failure      400                 {object}  errors.AppError         "请求参数错误"
 // @Failure      404                 {object}  errors.AppError         "智能体不存在"
@@ -559,32 +620,38 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 		}
 	}
 
-	var tagIDs []string
-	if tagIDsStr := strings.TrimSpace(c.Query("tag_ids")); tagIDsStr != "" {
-		for _, id := range strings.Split(tagIDsStr, ",") {
-			if trimmed := strings.TrimSpace(id); trimmed != "" {
-				tagIDs = append(tagIDs, trimmed)
-			}
+	var tagScopes []types.TagScope
+	if raw := strings.TrimSpace(c.Query("tag_scopes")); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &tagScopes); err != nil {
+			c.Error(errors.NewBadRequestError("tag_scopes must be valid JSON"))
+			return
 		}
 	}
 
-	limit := 6
+	// limit == 0 signals "unspecified" so the service falls back to the agent's
+	// configured starter count. A provided value is passed through unchanged and
+	// bounded by the service's safety cap.
+	limit := 0
 	if limitStr := c.Query("limit"); limitStr != "" {
 		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
 			limit = parsed
 		}
 	}
 
-	logger.Infof(ctx, "Getting suggested questions for agent %s, kbIDs: %v, tagIDs: %v, limit: %d",
-		secutils.SanitizeForLog(id), kbIDs, tagIDs, limit)
+	logger.Infof(ctx, "Getting suggested questions for agent %s, kbIDs: %v, tagScopes: %d, limit: %d",
+		secutils.SanitizeForLog(id), kbIDs, len(tagScopes), limit)
 
-	questions, err := h.service.GetSuggestedQuestions(ctx, id, kbIDs, knowledgeIDs, tagIDs, limit)
+	questions, err := h.service.GetSuggestedQuestions(ctx, id, kbIDs, knowledgeIDs, tagScopes, limit)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"agent_id": id,
 		})
 		if err == service.ErrAgentNotFound {
 			c.Error(errors.NewNotFoundError("Agent not found"))
+			return
+		}
+		if appErr, ok := err.(*errors.AppError); ok {
+			c.Error(appErr)
 			return
 		}
 		c.Error(errors.NewInternalServerError(err.Error()))
@@ -597,4 +664,52 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 			"questions": questions,
 		},
 	})
+}
+
+// validateAgentSandboxConfig rejects a selection the workspace does not have.
+//
+// Checking at save time is what makes the mistake fixable: a dangling reference
+// only fails when the agent next runs a skill, mid-conversation, as an opaque
+// resolution error with no hint about which agent to edit.
+func (h *CustomAgentHandler) validateAgentSandboxConfig(
+	ctx context.Context, cfg types.CustomAgentConfig,
+) error {
+	configID := strings.TrimSpace(cfg.SandboxConfigID)
+	if configID == "" || h.sandboxConfigs == nil {
+		// Empty means the deployment-wide default, which always exists.
+		return nil
+	}
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return errors.NewUnauthorizedError("Missing workspace context")
+	}
+	stored, err := h.sandboxConfigs.Get(ctx, tenantID, configID)
+	if err != nil {
+		return errors.NewInternalServerError("Failed to verify sandbox config").
+			WithDetails(err.Error())
+	}
+	if stored == nil {
+		return errors.NewBadRequestError("所选沙箱后端配置不存在，请重新选择")
+	}
+	return nil
+}
+
+func authorizeAgentKnowledgeScope(ctx context.Context, cfg types.CustomAgentConfig) error {
+	scope, ok := types.TenantAPIKeyScopeFromContext(ctx)
+	if !ok || !scope.IsKnowledgeBaseRestricted() {
+		return nil
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.KBSelectionMode)) {
+	case "none":
+		return nil
+	case "all":
+		return errors.NewForbiddenError("API key scope does not allow agents that use all knowledge bases")
+	case "selected":
+		return types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, cfg.KnowledgeBases...)
+	default:
+		if len(cfg.KnowledgeBases) == 0 {
+			return nil
+		}
+		return types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, cfg.KnowledgeBases...)
+	}
 }

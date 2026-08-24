@@ -4,10 +4,6 @@
     :subtitle="$t('integrations.claw.subtitle')"
     variant="claw"
   >
-    <template #icon>
-      <span role="img" :aria-label="$t('common.clawhubSkill')">🦞</span>
-    </template>
-
     <template #actions>
       <IntegrationExternalCta
         variant="claw"
@@ -108,8 +104,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { MessagePlugin } from 'tdesign-vue-next'
-import { useI18n } from 'vue-i18n'
+import { copyWithToast } from '@/utils/clipboard'
 import { useRouter } from 'vue-router'
 import { CLAWHUB_SKILL_URL } from '@/config/integrations'
 import { useApiBaseUrlDisplay } from '@/composables/useApiBaseUrlDisplay'
@@ -117,7 +112,6 @@ import { useUIStore } from '@/stores/ui'
 import IntegrationLandingLayout from './IntegrationLandingLayout.vue'
 import IntegrationExternalCta from './IntegrationExternalCta.vue'
 
-const { t } = useI18n()
 const router = useRouter()
 const uiStore = useUIStore()
 const { apiBaseUrlDisplay } = useApiBaseUrlDisplay()
@@ -145,20 +139,10 @@ const openClawHub = () => {
 }
 
 const openApiSettings = () => {
-  router.push('/platform/knowledge-bases')
-  uiStore.openSettings('api')
+  router.push({ path: '/platform/settings', query: { section: 'integrations', tab: 'api' } })
+  uiStore.openSettings('integration-api')
 }
 
-const copyText = async (text: string, successKey: string) => {
-  if (!text) return
-  try {
-    await navigator.clipboard.writeText(text)
-    MessagePlugin.success(t(successKey))
-  } catch {
-    MessagePlugin.success(t(successKey))
-  }
-}
-
-const copyEnvExample = () => copyText(envExample.value, 'integrations.claw.copyEnvSuccess')
-const copyInstallCommand = () => copyText(installCommand, 'integrations.claw.copyCmdSuccess')
+const copyEnvExample = () => copyWithToast(envExample.value, 'integrations.claw.copyEnvSuccess')
+const copyInstallCommand = () => copyWithToast(installCommand, 'integrations.claw.copyCmdSuccess')
 </script>

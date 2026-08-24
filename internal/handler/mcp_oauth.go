@@ -36,6 +36,16 @@ func NewMCPOAuthHandler(
 	return &MCPOAuthHandler{oauth: oauth, mcpManager: mcpManager, svc: svc, gate: gate}
 }
 
+func mcpOAuthPrincipalsFromContext(ctx *gin.Context) (tokenPrincipal types.Principal, gateUserID string) {
+	raw, _ := types.PrincipalFromContext(ctx.Request.Context())
+	raw = raw.Normalize()
+	tokenPrincipal = types.MCPOAuthPrincipalFromContext(ctx.Request.Context())
+	if raw.Valid() {
+		gateUserID = raw.StorageID()
+	}
+	return tokenPrincipal, gateUserID
+}
+
 type mcpOAuthAuthorizeRequest struct {
 	// RedirectURI is the absolute backend callback URL registered with the
 	// authorization server (e.g. https://host/api/v1/mcp-services/oauth/callback).
@@ -55,7 +65,7 @@ type mcpOAuthAuthorizeRequest struct {
 // @Produce      json
 // @Param        id       path      string                    true  "MCP 服务 ID"
 // @Param        request  body      map[string]interface{}    true  "{redirect_uri: string, frontend_redirect?: string}"
-// @Success      200      {object}  map[string]interface{}    "{authorization_url: string}"
+// @Success      200      {object}  map[string]interface{}    "{authorization_url: string, authorization_attempt: string}"
 // @Failure      400      {object}  errors.AppError
 // @Security     Bearer
 // @Router       /mcp-services/{id}/oauth/authorize-url [post]
@@ -63,8 +73,8 @@ func (h *MCPOAuthHandler) AuthorizeURL(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := c.Param("id")
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	userID, _ := types.UserIDFromContext(ctx)
-	if tenantID == 0 || userID == "" {
+	principal, _ := mcpOAuthPrincipalsFromContext(c)
+	if tenantID == 0 || !principal.Valid() {
 		c.Error(errors.NewUnauthorizedError("authentication required"))
 		return
 	}
@@ -93,7 +103,9 @@ func (h *MCPOAuthHandler) AuthorizeURL(c *gin.Context) {
 		return
 	}
 
-	authURL, err := h.oauth.StartAuthorization(ctx, service, tenantID, userID, req.RedirectURI, req.FrontendRedirect)
+	authURL, attemptID, err := h.oauth.StartAuthorization(
+		ctx, service, tenantID, principal, req.RedirectURI, req.FrontendRedirect,
+	)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"service_id": secutils.SanitizeForLog(serviceID),
@@ -102,7 +114,10 @@ func (h *MCPOAuthHandler) AuthorizeURL(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"authorization_url": authURL}})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"authorization_url":     authURL,
+		"authorization_attempt": attemptID,
+	}})
 }
 
 // Callback receives the authorization-server redirect. It is registered as a
@@ -136,7 +151,7 @@ func (h *MCPOAuthHandler) Callback(c *gin.Context) {
 		return
 	}
 
-	frontendRedirect, err := h.oauth.CompleteAuthorization(ctx, state, code)
+	frontendRedirect, serviceID, err := h.oauth.CompleteAuthorization(ctx, state, code)
 	if frontendRedirect == "" {
 		frontendRedirect = fallbackRedirect
 	}
@@ -145,6 +160,12 @@ func (h *MCPOAuthHandler) Callback(c *gin.Context) {
 		c.Redirect(http.StatusFound, frontendRedirect+"#mcp_oauth_error="+urlQueryEscape("authorization_failed"))
 		return
 	}
+	// The old transport may have been created with an OAuth client registration
+	// that was invalidated together with the refresh token. Recreate it against
+	// the freshly persisted token/client on next use.
+	if h.mcpManager != nil && serviceID != "" {
+		_ = h.mcpManager.CloseClient(serviceID)
+	}
 	c.Redirect(http.StatusFound, frontendRedirect+"#mcp_oauth_result=success")
 }
 
@@ -152,29 +173,50 @@ func (h *MCPOAuthHandler) Callback(c *gin.Context) {
 //
 // Status godoc
 // @Summary      查询 MCP OAuth 授权状态
-// @Description  返回当前用户对指定 MCP 服务是否已完成 OAuth 授权
+// @Description  返回当前用户的 OAuth Token 生命周期状态；传 authorization_attempt 时只检查本次授权流程
 // @Tags         MCP服务
 // @Produce      json
 // @Param        id   path      string                  true  "MCP 服务 ID"
-// @Success      200  {object}  map[string]interface{}  "{authorized: bool}"
+// @Param        authorization_attempt  query  string  false  "本次授权尝试 ID；传入后不会接受历史 Token"
+// @Success      200  {object}  map[string]interface{}  "{authorized: bool, state: string, refresh_available: bool, expires_at?: string}"
 // @Security     Bearer
 // @Router       /mcp-services/{id}/oauth/status [get]
 func (h *MCPOAuthHandler) Status(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := c.Param("id")
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	userID, _ := types.UserIDFromContext(ctx)
-	if tenantID == 0 || userID == "" {
+	principal, _ := mcpOAuthPrincipalsFromContext(c)
+	if tenantID == 0 || !principal.Valid() {
 		c.Error(errors.NewUnauthorizedError("authentication required"))
 		return
 	}
 
-	authorized, err := h.oauth.IsAuthorized(ctx, tenantID, userID, serviceID)
+	attemptID := strings.TrimSpace(c.Query("authorization_attempt"))
+	if attemptID != "" {
+		authorized, err := h.oauth.IsAuthorizationAttemptComplete(
+			ctx, tenantID, principal, serviceID, attemptID,
+		)
+		if err != nil {
+			c.Error(errors.NewInternalServerError("failed to query authorization status: " + err.Error()))
+			return
+		}
+		state := "pending"
+		if authorized {
+			state = "authorized"
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+			"authorized": authorized,
+			"state":      state,
+		}})
+		return
+	}
+
+	status, err := h.oauth.AuthorizationStatus(ctx, tenantID, principal, serviceID)
 	if err != nil {
 		c.Error(errors.NewInternalServerError("failed to query authorization status: " + err.Error()))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"authorized": authorized}})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": status})
 }
 
 // Revoke removes the current user's stored token and recycles connections.
@@ -192,13 +234,13 @@ func (h *MCPOAuthHandler) Revoke(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := c.Param("id")
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	userID, _ := types.UserIDFromContext(ctx)
-	if tenantID == 0 || userID == "" {
+	principal, _ := mcpOAuthPrincipalsFromContext(c)
+	if tenantID == 0 || !principal.Valid() {
 		c.Error(errors.NewUnauthorizedError("authentication required"))
 		return
 	}
 
-	if err := h.oauth.Revoke(ctx, tenantID, userID, serviceID); err != nil {
+	if err := h.oauth.Revoke(ctx, tenantID, principal, serviceID); err != nil {
 		c.Error(errors.NewInternalServerError("failed to revoke authorization: " + err.Error()))
 		return
 	}
@@ -238,8 +280,8 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 	ctx := c.Request.Context()
 	pendingID := c.Param("pending_id")
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	userID, _ := types.UserIDFromContext(ctx)
-	if tenantID == 0 || strings.TrimSpace(userID) == "" {
+	principal, gateUserID := mcpOAuthPrincipalsFromContext(c)
+	if tenantID == 0 || !principal.Valid() || gateUserID == "" {
 		c.Error(errors.NewUnauthorizedError("authentication required"))
 		return
 	}
@@ -266,7 +308,7 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 
 	switch decision {
 	case "cancel", "reject", "skip":
-		if err := h.gate.Resolve(tenantID, userID, pendingID, approval.Decision{
+		if err := h.gate.Resolve(tenantID, gateUserID, pendingID, approval.Decision{
 			Approved: false,
 			Reason:   "user canceled",
 		}); err != nil {
@@ -276,7 +318,7 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 			case stderrors.Is(err, approval.ErrAlreadyResolved):
 				c.Error(errors.NewBadRequestError("pending authorization already resolved (timeout / cancel raced your action)"))
 			case stderrors.Is(err, approval.ErrTenantMismatch):
-				c.Error(errors.NewBadRequestError("tenant mismatch"))
+				c.Error(errors.NewBadRequestError("workspace mismatch"))
 			case stderrors.Is(err, approval.ErrUserMismatch):
 				c.Error(errors.NewBadRequestError("user mismatch: only the session owner may resolve this prompt"))
 			default:
@@ -298,7 +340,7 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 
 	// Only resume once the user genuinely holds a token; otherwise the retry
 	// would just fail again with another authorization-required error.
-	authorized, err := h.oauth.IsAuthorized(ctx, tenantID, userID, serviceID)
+	authorized, err := h.oauth.IsAuthorized(ctx, tenantID, principal, serviceID)
 	if err != nil {
 		c.Error(errors.NewInternalServerError("failed to verify authorization: " + err.Error()))
 		return
@@ -308,14 +350,14 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 		return
 	}
 
-	if err := h.gate.Resolve(tenantID, userID, pendingID, approval.Decision{Approved: true}); err != nil {
+	if err := h.gate.Resolve(tenantID, gateUserID, pendingID, approval.Decision{Approved: true}); err != nil {
 		switch {
 		case stderrors.Is(err, approval.ErrPendingNotFound):
 			c.Error(errors.NewNotFoundError("pending authorization not found or already completed"))
 		case stderrors.Is(err, approval.ErrAlreadyResolved):
 			c.Error(errors.NewBadRequestError("pending authorization already resolved (timeout / cancel raced your action)"))
 		case stderrors.Is(err, approval.ErrTenantMismatch):
-			c.Error(errors.NewBadRequestError("tenant mismatch"))
+			c.Error(errors.NewBadRequestError("workspace mismatch"))
 		case stderrors.Is(err, approval.ErrUserMismatch):
 			c.Error(errors.NewBadRequestError("user mismatch: only the session owner may resolve this prompt"))
 		default:
@@ -346,8 +388,8 @@ func (h *MCPOAuthHandler) CancelMCPOAuth(c *gin.Context) {
 	ctx := c.Request.Context()
 	pendingID := c.Param("pending_id")
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	userID, _ := types.UserIDFromContext(ctx)
-	if tenantID == 0 || strings.TrimSpace(userID) == "" {
+	_, gateUserID := mcpOAuthPrincipalsFromContext(c)
+	if tenantID == 0 || strings.TrimSpace(gateUserID) == "" {
 		c.Error(errors.NewUnauthorizedError("authentication required"))
 		return
 	}
@@ -356,7 +398,7 @@ func (h *MCPOAuthHandler) CancelMCPOAuth(c *gin.Context) {
 		return
 	}
 
-	if err := h.gate.Resolve(tenantID, userID, pendingID, approval.Decision{
+	if err := h.gate.Resolve(tenantID, gateUserID, pendingID, approval.Decision{
 		Approved: false,
 		Reason:   "user canceled",
 	}); err != nil {
@@ -366,7 +408,7 @@ func (h *MCPOAuthHandler) CancelMCPOAuth(c *gin.Context) {
 		case stderrors.Is(err, approval.ErrAlreadyResolved):
 			c.Error(errors.NewBadRequestError("pending authorization already resolved (timeout / cancel raced your action)"))
 		case stderrors.Is(err, approval.ErrTenantMismatch):
-			c.Error(errors.NewBadRequestError("tenant mismatch"))
+			c.Error(errors.NewBadRequestError("workspace mismatch"))
 		case stderrors.Is(err, approval.ErrUserMismatch):
 			c.Error(errors.NewBadRequestError("user mismatch: only the session owner may resolve this prompt"))
 		default:

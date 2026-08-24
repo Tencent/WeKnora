@@ -14,10 +14,10 @@ import (
 
 // ToolResult represents the result of a tool execution
 type ToolResult struct {
-	Success bool                   `json:"success"`         // Whether the tool executed successfully
-	Output  string                 `json:"output"`          // Human-readable output
-	Data    map[string]interface{} `json:"data,omitempty"`  // Structured data for programmatic use
-	Error   string                 `json:"error,omitempty"` // Error message if execution failed
+	Success bool                   `json:"success"`          // Whether the tool executed successfully
+	Output  string                 `json:"output"`           // Human-readable output
+	Data    map[string]interface{} `json:"data,omitempty"`   // Structured data for programmatic use
+	Error   string                 `json:"error,omitempty"`  // Error message if execution failed
 	Images  []string               `json:"images,omitempty"` // Base64 data URIs from tool (e.g. MCP image content)
 }
 
@@ -60,12 +60,15 @@ type MessageListResponse struct {
 	Data    []Message `json:"data"`
 }
 
-// LoadMessages loads session messages, supports pagination and time filtering
+// LoadMessages loads session messages, supports pagination and time filtering.
+// Pass ResourceURLOptions to request public HTTP(S) file URLs instead of
+// resource:// handles.
 func (c *Client) LoadMessages(
 	ctx context.Context,
 	sessionID string,
 	limit int,
 	beforeTime *time.Time,
+	opts ...ResourceURLOptions,
 ) ([]Message, error) {
 	path := fmt.Sprintf("/api/v1/messages/%s/load", sessionID)
 
@@ -74,6 +77,9 @@ func (c *Client) LoadMessages(
 
 	if beforeTime != nil {
 		queryParams.Add("before_time", beforeTime.Format(time.RFC3339Nano))
+	}
+	if len(opts) > 0 {
+		applyResourceURLQuery(queryParams, &opts[0])
 	}
 
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, queryParams)
@@ -104,7 +110,32 @@ func (c *Client) GetMessagesBefore(
 	return c.LoadMessages(ctx, sessionID, limit, &beforeTime)
 }
 
-// SearchMessagesRequest defines the request structure for searching messages
+// MessageSearchMode is the search strategy for SearchMessages. It mirrors the
+// server enum in internal/types/message.go.
+type MessageSearchMode string
+
+const (
+	// MessageSearchModeKeyword searches by keyword only.
+	MessageSearchModeKeyword MessageSearchMode = "keyword"
+	// MessageSearchModeVector searches by vector similarity only.
+	MessageSearchModeVector MessageSearchMode = "vector"
+	// MessageSearchModeHybrid combines keyword and vector search (server default).
+	MessageSearchModeHybrid MessageSearchMode = "hybrid"
+)
+
+// AllMessageSearchModes returns every search mode the server recognises, in a
+// stable order. Callers (CLI flag validation, docs) should use this instead of
+// re-typing the set so they can't drift from the SDK.
+func AllMessageSearchModes() []MessageSearchMode {
+	return []MessageSearchMode{
+		MessageSearchModeKeyword, MessageSearchModeVector, MessageSearchModeHybrid,
+	}
+}
+
+// SearchMessagesRequest defines the request structure for searching messages.
+// Mode is a plain string mirroring the server's request DTO; pass a
+// MessageSearchMode constant cast to string, or leave empty for the server
+// default (hybrid).
 type SearchMessagesRequest struct {
 	Query      string   `json:"query"`
 	Mode       string   `json:"mode"`
@@ -114,14 +145,14 @@ type SearchMessagesRequest struct {
 
 // MessageSearchGroupItem represents a grouped search result item
 type MessageSearchGroupItem struct {
-	RequestID    string    `json:"request_id"`
-	SessionID    string    `json:"session_id"`
-	SessionTitle string    `json:"session_title"`
-	QueryContent string    `json:"query_content"`
-	AnswerContent string   `json:"answer_content"`
-	Score        float64   `json:"score"`
-	MatchType    string    `json:"match_type"`
-	CreatedAt    time.Time `json:"created_at"`
+	RequestID     string    `json:"request_id"`
+	SessionID     string    `json:"session_id"`
+	SessionTitle  string    `json:"session_title"`
+	QueryContent  string    `json:"query_content"`
+	AnswerContent string    `json:"answer_content"`
+	Score         float64   `json:"score"`
+	MatchType     string    `json:"match_type"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // MessageSearchResult represents the result of a message search

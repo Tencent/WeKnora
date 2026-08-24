@@ -117,7 +117,7 @@ func TestNewOSSClient(t *testing.T) {
 		},
 		{
 			name:      "custom endpoint",
-			endpoint:  "https://custom-oss-endpoint.com",
+			endpoint:  "https://example.com",
 			region:    "cn-shanghai",
 			accessKey: "ak",
 			secretKey: "sk",
@@ -142,6 +142,12 @@ func TestNewOSSClient(t *testing.T) {
 				t.Error("expected non-nil client")
 			}
 		})
+	}
+}
+
+func TestNewOSSClientRejectsUnsafeEndpoint(t *testing.T) {
+	if _, err := newOSSClient("http://127.0.0.1:9000", "cn-hangzhou", "ak", "sk"); err == nil {
+		t.Fatal("expected loopback OSS endpoint to be rejected")
 	}
 }
 

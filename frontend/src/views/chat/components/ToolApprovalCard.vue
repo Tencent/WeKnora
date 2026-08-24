@@ -74,6 +74,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { resolveToolApproval } from '@/api/mcp-service'
+import { resolveEmbedToolApproval } from '@/api/embed'
 
 const props = defineProps<{
   pendingId: string
@@ -86,7 +87,21 @@ const props = defineProps<{
   resolved?: boolean
   approved?: boolean
   resolveReason?: string
+  embeddedMode?: boolean
+  embedChannelId?: string
+  embedToken?: string
+  embedSessionId?: string
+  embedSessionSig?: string
+  embedVisitorId?: string
 }>()
+
+const useEmbedApproval = () =>
+  props.embeddedMode
+  && props.embedChannelId
+  && props.embedToken
+  && props.embedSessionId
+  && props.embedSessionSig
+  && props.embedVisitorId
 
 const { t } = useI18n()
 
@@ -200,11 +215,25 @@ const submit = async (decision: 'approve' | 'reject') => {
         return
       }
     }
-    await resolveToolApproval(props.pendingId, {
-      decision,
-      modified_args: decision === 'approve' ? modified : undefined,
-      reason: decision === 'reject' ? t('agentStream.toolApproval.userRejected') : undefined,
-    })
+    await (useEmbedApproval()
+      ? resolveEmbedToolApproval(
+        props.embedChannelId!,
+        props.embedToken!,
+        props.embedSessionId!,
+        props.embedSessionSig!,
+        props.embedVisitorId!,
+        props.pendingId,
+        {
+          decision,
+          modified_args: decision === 'approve' ? modified : undefined,
+          reason: decision === 'reject' ? t('agentStream.toolApproval.userRejected') : undefined,
+        },
+      )
+      : resolveToolApproval(props.pendingId, {
+        decision,
+        modified_args: decision === 'approve' ? modified : undefined,
+        reason: decision === 'reject' ? t('agentStream.toolApproval.userRejected') : undefined,
+      }))
     MessagePlugin.success(t('agentStream.toolApproval.submitted'))
   } catch (e: any) {
     const msg = e?.response?.data?.error?.message || e?.message || t('agentStream.toolApproval.submitFailed')

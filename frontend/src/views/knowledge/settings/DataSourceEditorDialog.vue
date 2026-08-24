@@ -196,6 +196,152 @@ const loadingChildrenIds = ref(new Set<string>())
 // never needs an extra request.
 const treeFullyLoaded = ref(false)
 
+// Drive (云盘) root input: the Drive connectors have no "list spaces" API, so
+// the user must supply a root folder_token. We collect it here, write it into
+// form.config.resource_ids as the single root, then loadResources lists its
+// children. See 飞书云盘数据源设计.md §5.2 / ADR-0004.
+const driveFolderToken = ref('')
+// 必填校验的内联错误文案：非空时输入框显示 error 状态 + 下方 tips,
+// 替代全局 MessagePlugin,与表单字段的就地校验风格一致。
+const driveFolderTokenError = ref('')
+const driveRootLoaded = ref(false)
+const isDriveConnector = (type: string) => type === 'feishu_drive' || type === 'lark_drive'
+const isGitLabConnector = (type: string) => type === 'gitlab'
+
+interface GitLabProjectInput { project_id: string; ref: string; pathsText: string }
+const gitlabProjects = ref<GitLabProjectInput[]>([])
+function syncGitLabProjectsToSettings() {
+  if (!isGitLabConnector(form.value.type)) return
+  form.value.config.settings.projects = gitlabProjects.value
+    .filter(project => project.project_id.trim())
+    .map(project => ({
+      project_id: project.project_id.trim(), ref: project.ref.trim(),
+      paths: project.pathsText.split(/[\n,]/).map(path => path.trim()).filter(Boolean),
+    }))
+}
+function addGitLabProject() { gitlabProjects.value.push({ project_id: '', ref: '', pathsText: '' }) }
+function removeGitLabProject(index: number) { gitlabProjects.value.splice(index, 1); syncGitLabProjectsToSettings() }
+
+// extractDriveFolderToken accepts either a bare folder_token or a Drive folder
+// URL (https://xxx.feishu.cn/drive/folder/<token> or the Lark equivalent
+// https://xxx.larksuite.com/drive/folder/<token>) and returns the token.
+// Matching is path-based, host-agnostic. Trims surrounding whitespace.
+// Returns "" when nothing usable is found.
+function extractDriveFolderToken(input: string): string {
+  const raw = (input || '').trim()
+  if (!raw) return ''
+  // Bare token: no scheme, no slash - use as-is.
+  if (!raw.includes('://') && !raw.includes('/')) return raw
+  // URL form: extract the segment after /drive/folder/.
+  const match = raw.match(/\/drive\/folder\/([^/?#]+)/)
+  if (match && match[1]) return match[1]
+  // Fallback: last path segment of a URL, or the raw string.
+  try {
+    const u = new URL(raw)
+    const segs = u.pathname.split('/').filter(Boolean)
+    return segs[segs.length - 1] || raw
+  } catch {
+    return raw
+  }
+}
+
+// loadDriveRoot writes the user-supplied folder_token (or the token extracted
+// from a pasted URL) as the root resource_id, then lists the root's children
+// so the lazy-load tree can populate. On failure it classifies the error so the
+// user gets an actionable hint (e.g. share the folder with the app) instead of
+// a raw Feishu error body.
+async function loadDriveRoot() {
+  const token = extractDriveFolderToken(driveFolderToken.value)
+  if (!token) {
+    driveFolderTokenError.value = t('datasource.drive.folderTokenRequired')
+    return
+  }
+  driveFolderTokenError.value = ''
+  // Normalize the input so the user sees the extracted token, not the full URL.
+  driveFolderToken.value = token
+  form.value.config.resource_ids = [token]
+  driveRootLoaded.value = false
+  loadingResources.value = true
+  try {
+    if (!tempDsId.value) {
+      const res = await createDataSource({
+        ...form.value,
+        knowledge_base_id: props.kbId,
+        status: 'paused',
+      } as any)
+      const created = res?.data || res
+      tempDsId.value = created.id
+    } else {
+      // Edit mode OR a previously-created temp row: persist the new folder_token
+      // so listResources sees the updated config. Previously this branch skipped
+      // updates in edit mode, leaving listResources reading the old folder_token.
+      await updateDataSource(tempDsId.value, {
+        ...form.value,
+        knowledge_base_id: props.kbId,
+      } as any)
+    }
+
+    const res = await listResources(tempDsId.value)
+    resources.value = res?.data || res || []
+    if (resources.value.length > 0) {
+      // Mirror loadResources' tree initialization: index parents that already
+      // arrived with children and auto-expand them.
+      const parentsWithChildren = new Set<string>()
+      for (const r of resources.value) {
+        if (r.parent_id) parentsWithChildren.add(r.parent_id)
+      }
+      loadedChildrenIds.value = parentsWithChildren
+      loadingChildrenIds.value = new Set<string>()
+      treeFullyLoaded.value = parentsWithChildren.size > 0
+      expandedResourceIds.value = new Set(
+        resources.value
+          .filter(r => !r.parent_id && r.has_children && parentsWithChildren.has(r.external_id))
+          .map(r => r.external_id),
+      )
+      driveRootLoaded.value = true
+      // In edit mode, reveal pre-existing selections that live below the
+      // (not-yet-expanded) tree so they are visible and checked - mirrors
+      // loadResources' behavior for non-Drive connectors.
+      if (isEdit.value && !treeFullyLoaded.value) {
+        const loaded = new Set(resources.value.map(r => r.external_id))
+        const hidden = selectedResourceIds.value.filter(id => !loaded.has(id))
+        if (hidden.length > 0) void revealExistingSelections(hidden)
+      }
+    }
+  } catch (e: any) {
+    MessagePlugin.error(classifyDriveLoadError(e))
+  }
+  loadingResources.value = false
+}
+
+// classifyDriveLoadError turns a raw Drive list error into an actionable i18n
+// message. The Feishu list API returns 403 with code=1061004 when the app has
+// not been shared the target folder; without this the user sees "forbidden"
+// and has no idea what to do.
+function classifyDriveLoadError(e: any): string {
+  const raw = String(e?.message || e?.error || '')
+  const lower = raw.toLowerCase()
+  // 403 / forbidden / 1061004 -> the app lacks access to this specific folder;
+  // the user must share it with the app's group in Feishu Drive.
+  if (
+    lower.includes('status=403') ||
+    lower.includes('forbidden') ||
+    lower.includes('"code":1061004') ||
+    lower.includes('code=1061004')
+  ) {
+    return t('datasource.drive.loadForbiddenHint')
+  }
+  // 401 / auth -> app credentials wrong or app lacks the drive scopes.
+  if (lower.includes('status=401') || lower.includes('auth') || lower.includes('1061005')) {
+    return t('datasource.drive.loadAuthHint')
+  }
+  // Invalid / not-found folder_token.
+  if (lower.includes('1061003') || lower.includes('not found')) {
+    return t('datasource.drive.loadNotFoundHint')
+  }
+  return raw || t('datasource.resourceLoadFailed')
+}
+
 // Shared children/parent indexes — used by tree rendering and selection logic
 const childrenMap = computed(() => {
   const map = new Map<string, Resource[]>()
@@ -366,6 +512,66 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     fields: [
       { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
       { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.feishu.cn', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
+  },
+  {
+    // Lark is Feishu's international cloud. Same wiki/docx/drive APIs and the
+    // same scope identifiers, but a separate console, tenant and app — an app
+    // created on open.feishu.cn cannot read a Lark wiki.
+    type: 'lark',
+    available: true,
+    docUrl: 'https://open.larksuite.com/app',
+    permissionDocUrl: 'https://open.larksuite.com/document/server-docs/docs/wiki-v2/wiki-overview',
+    permissionPageUrl: 'https://open.larksuite.com/app',
+    requiredPermissions: [
+      'wiki:wiki:readonly',
+      'drive:drive:readonly',
+      'drive:export:readonly',
+      'docx:document:readonly',
+    ],
+    fields: [
+      { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.feishu.cn', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
+  },
+  {
+    // Feishu Drive (云盘) mode: sync documents/files under a user-supplied Drive
+    // folder_token. Same auth as the wiki connector but no wiki:wiki:readonly
+    // scope - Drive only needs drive + export + docx.
+    type: 'feishu_drive',
+    available: true,
+    docUrl: 'https://open.feishu.cn/app',
+    permissionDocUrl: 'https://open.feishu.cn/document/server-docs/docs/drive-v1/file/list',
+    permissionPageUrl: 'https://open.feishu.cn/app',
+    requiredPermissions: [
+      'drive:drive:readonly',
+      'drive:export:readonly',
+      'docx:document:readonly',
+    ],
+    fields: [
+      { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.feishu.cn', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
+  },
+  {
+    // Lark Drive: international counterpart of feishu_drive.
+    type: 'lark_drive',
+    available: true,
+    docUrl: 'https://open.larksuite.com/app',
+    permissionDocUrl: 'https://open.larksuite.com/document/server-docs/docs/drive-v1/file/list',
+    permissionPageUrl: 'https://open.larksuite.com/app',
+    requiredPermissions: [
+      'drive:drive:readonly',
+      'drive:export:readonly',
+      'docx:document:readonly',
+    ],
+    fields: [
+      { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.larksuite.com', optional: true, hintKey: 'datasource.field.baseUrlHint' },
     ],
   },
   {
@@ -395,6 +601,21 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    // Tencent IMA (ima.qq.com). Uses the OpenAPI at /openapi/wiki/v1 with two
+    // static headers (ima-openapi-clientid + ima-openapi-apikey); no OAuth.
+    type: 'ima',
+    available: true,
+    docUrl: 'https://ima.qq.com/agent-interface',
+    permissionDocUrl: 'https://ima.qq.com/agent-interface',
+    permissionPageUrl: 'https://ima.qq.com/agent-interface',
+    requiredPermissions: [],
+    fields: [
+      { key: 'client_id', labelKey: 'datasource.field.imaClientId', placeholder: '', secret: true },
+      { key: 'api_key', labelKey: 'datasource.field.imaApiKey', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://ima.qq.com', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
+  },
+  {
     type: 'rss',
     available: true,
     docUrl: '',
@@ -403,6 +624,13 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     requiredPermissions: [],
     fields: [
       { key: 'auth_headers', labelKey: 'datasource.field.authHeaders', placeholder: '', optional: true, hintKey: 'datasource.field.authHeadersHint', fieldType: 'custom_headers' },
+    ],
+  },
+  {
+    type: 'gitlab', available: true, docUrl: '', permissionDocUrl: '', permissionPageUrl: '', requiredPermissions: [],
+    fields: [
+      { key: 'base_url', labelKey: 'datasource.gitlab.baseUrl', placeholder: 'https://gitlab.example.com' },
+      { key: 'access_token', labelKey: 'datasource.gitlab.accessToken', placeholder: '', secret: true },
     ],
   },
 ])
@@ -435,7 +663,11 @@ watch(visible, async (v) => {
   loadedChildrenIds.value = new Set()
   loadingChildrenIds.value = new Set()
   treeFullyLoaded.value = false
+  driveFolderToken.value = ''
+  driveFolderTokenError.value = ''
+  driveRootLoaded.value = false
   rssAuthHeaders.value = []
+  gitlabProjects.value = []
 
   if (isEdit.value && props.dataSource) {
     // Reset edit/replace toggle every open so an aborted replace doesn't
@@ -462,6 +694,25 @@ watch(visible, async (v) => {
       sync_deletions: props.dataSource.sync_deletions,
     }
     selectedResourceIds.value = form.value.config?.resource_ids || []
+    if (isGitLabConnector(form.value.type)) {
+      const savedProjects = Array.isArray(form.value.config.settings.projects) ? form.value.config.settings.projects : []
+      gitlabProjects.value = savedProjects.map((project: any) => ({
+        project_id: String(project.project_id || ''), ref: String(project.ref || ''),
+        pathsText: Array.isArray(project.paths) ? project.paths.join('\n') : '',
+      }))
+    }
+    // Pre-fill the Drive root folder_token from the saved resource_ids so the
+    // user sees what they previously entered. driveRootLoaded stays false: the
+    // tree has not been listed yet, and clicking "load" triggers listResources
+    // + revealExistingSelections so pre-existing selections are revealed.
+    if (isDriveConnector(form.value.type)) {
+      const rids = form.value.config?.resource_ids || []
+      if (rids.length > 0) {
+        // resource_id is "folderToken" or "folderToken:fileToken"; the root is
+        // the first segment.
+        driveFolderToken.value = rids[0].split(':')[0]
+      }
+    }
     tempDsId.value = props.dataSource.id
   } else {
     replaceCredentialsMode.value = false
@@ -516,6 +767,7 @@ function selectType(def: ConnectorDef) {
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
   form.value.config.credentials = {}
+  if (isGitLabConnector(def.type)) addGitLabProject()
   rssAuthHeaders.value = []
   step.value = 1
 }
@@ -737,11 +989,38 @@ async function nextStep() {
     if (!validateStep1Fields()) return
     if (needsConnectionTest() && testResult.value !== 'success') {
       await testConnection()
-      if (testResult.value !== 'success') return
+      if ((testResult.value as string) !== 'success') return
+    }
+  }
+  if (step.value === 2 && isDriveConnector(form.value.type)) {
+    // folder_token 是 Drive 连接器的必填项：为空就地标错并留在本步,
+    // 不允许带着空 token 进入同步策略。
+    if (!driveFolderToken.value.trim()) {
+      driveFolderTokenError.value = t('datasource.drive.folderTokenRequired')
+      return
+    }
+    driveFolderTokenError.value = ''
+  }
+  if (step.value === 2 && isGitLabConnector(form.value.type)) {
+    syncGitLabProjectsToSettings()
+    if (!gitlabProjects.value.some(project => project.project_id.trim())) {
+      MessagePlugin.warning(t('datasource.gitlab.projectRequired'))
+      return
     }
   }
   step.value++
   if (step.value === 2) {
+    // Drive connectors need a user-supplied folder_token before listing.
+    // In edit mode with a saved folder_token, auto-load so the saved tree
+    // (and any pre-existing selections) are revealed without an extra click.
+    // In create mode (no folder_token yet), just show the placeholder.
+    if (isDriveConnector(form.value.type)) {
+      if (!driveRootLoaded.value && driveFolderToken.value.trim()) {
+        void loadDriveRoot()
+      }
+      return
+    }
+    if (isGitLabConnector(form.value.type)) return
     loadResources()
   }
 }
@@ -760,6 +1039,7 @@ function prevStep() {
 // commitCredentialsIfNeeded). Sending an empty map keeps the backend
 // validator happy.
 function buildConfigPayload(): Record<string, unknown> {
+  syncGitLabProjectsToSettings()
   return {
     credentials: isEdit.value ? {} : { ...form.value.config.credentials },
     resource_ids: form.value.config.resource_ids,
@@ -943,7 +1223,7 @@ const drawerConfirmText = computed(() => {
     v-model:visible="visible"
     :title="drawerTitle"
     :description="drawerDescription"
-    :class="form.type ? `datasource-editor-drawer datasource-editor-drawer--${form.type}` : 'datasource-editor-drawer'"
+    :class="[form.type ? `datasource-editor-drawer datasource-editor-drawer--${form.type}` : 'datasource-editor-drawer', { 'ds-fixed-step': step === 2 && !isGitLabConnector(form.type) }]"
     :hide-footer="step === 0"
     :confirm-text="drawerConfirmText"
     :confirm-loading="submitting || (step === 1 && testing)"
@@ -1279,9 +1559,68 @@ const drawerConfirmText = computed(() => {
 
     <!-- Step 2: Select resources -->
     <section v-if="step === 2" class="setting-drawer__section ds-resource-section">
+      <template v-if="isGitLabConnector(form.type)">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.gitlab.projects') }}</h4>
+        <p class="ds-resource-hint">{{ t('datasource.gitlab.projectsHint') }}</p>
+        <div class="gitlab-project-list">
+          <div v-for="(project, index) in gitlabProjects" :key="index" class="gitlab-project-row">
+            <div class="gitlab-project-row__header">
+              <strong>{{ t('datasource.gitlab.project') }} {{ index + 1 }}</strong>
+              <t-button variant="text" size="small" theme="danger" @click="removeGitLabProject(index)"><t-icon name="delete" /></t-button>
+            </div>
+            <label class="form-label required">{{ t('datasource.gitlab.projectId') }}</label>
+            <t-input v-model="project.project_id" :placeholder="t('datasource.gitlab.projectIdPlaceholder')" />
+            <label class="form-label">{{ t('datasource.gitlab.ref') }}</label>
+            <t-input v-model="project.ref" :placeholder="t('datasource.gitlab.refPlaceholder')" />
+            <label class="form-label">{{ t('datasource.gitlab.paths') }}</label>
+            <t-textarea v-model="project.pathsText" :placeholder="t('datasource.gitlab.pathsPlaceholder')" :autosize="{ minRows: 2, maxRows: 5 }" />
+          </div>
+          <t-button variant="outline" @click="addGitLabProject"><template #icon><t-icon name="add" /></template>{{ t('datasource.gitlab.addProject') }}</t-button>
+        </div>
+      </template>
+      <template v-else>
       <h4 class="setting-drawer__section-title">{{ t('datasource.step.resources') }}</h4>
       <p class="ds-resource-hint">{{ t('datasource.resourceHint') }}</p>
-      <div v-if="loadingResources" class="ds-loading-center"><t-loading /></div>
+
+      <!-- Drive (云盘) root input: shown alongside the tree (not as a switch).
+           The user supplies a folder_token (or a Drive folder URL) and clicks
+           "load"; the tree below stays as a placeholder until load succeeds.
+           Other connectors skip this and go straight to the tree. -->
+      <div v-if="isDriveConnector(form.type)" class="drive-folder-input">
+        <label class="drive-folder-input__label required">
+          {{ t('datasource.drive.folderTokenLabel') }}
+          <t-tooltip :content="t('datasource.drive.rootNotSupportedHint')" placement="top">
+            <t-icon name="help-circle" class="drive-folder-input__help" />
+          </t-tooltip>
+        </label>
+        <div class="drive-folder-input__row">
+          <t-input
+            v-model="driveFolderToken"
+            :placeholder="t('datasource.drive.folderTokenPlaceholder')"
+            :status="driveFolderTokenError ? 'error' : 'default'"
+            :tips="driveFolderTokenError ? driveFolderTokenError : t('datasource.drive.shareHint')"
+            clearable
+            @enter="loadDriveRoot"
+            @input="driveFolderTokenError = ''"
+          />
+          <t-button theme="primary" :loading="loadingResources" @click="loadDriveRoot">
+            {{ t('datasource.drive.load') }}
+          </t-button>
+        </div>
+      </div>
+
+      <!-- Drive placeholder before the first load: the tree cannot render until
+           a folder_token is supplied and loaded. Non-Drive connectors never hit
+           this branch. -->
+      <div
+        v-if="isDriveConnector(form.type) && !driveRootLoaded && !loadingResources"
+        class="ds-resource-empty ds-drive-placeholder"
+      >
+        <p class="ds-empty-title">{{ t('datasource.drive.placeholderTitle') }}</p>
+        <p class="ds-empty-desc">{{ t('datasource.drive.placeholderDesc') }}</p>
+      </div>
+
+      <div v-else-if="loadingResources" class="ds-loading-center"><t-loading /></div>
       <div v-else-if="resources.length > 0" class="resource-picker">
         <div class="resource-picker__toolbar">
           <span class="resource-picker__count">
@@ -1401,6 +1740,7 @@ const drawerConfirmText = computed(() => {
           </a>
         </div>
       </div>
+      </template>
     </section>
 
     <!-- Step 3: Sync strategy -->
@@ -1904,6 +2244,80 @@ const drawerConfirmText = computed(() => {
   color: var(--td-text-color-placeholder);
 }
 
+/* Drive (云盘) root folder_token input - shown before the lazy-load tree. */
+.drive-folder-input {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--td-border-level-1-color);
+  border-radius: 6px;
+  background: var(--td-bg-color-container);
+}
+
+.drive-folder-input__label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+
+  /* 与 .form-label.required 一致的红星必填标记 */
+  &.required::before {
+    content: '*';
+    color: var(--td-error-color);
+    font-weight: 500;
+    line-height: 1;
+  }
+}
+
+.drive-folder-input__help {
+  font-size: 15px;
+  color: var(--td-text-color-placeholder);
+  cursor: help;
+
+  &:hover {
+    color: var(--td-text-color-secondary);
+  }
+}
+
+.drive-folder-input__row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding-bottom: 20px
+}
+
+/* Drive tree placeholder: shown before the first successful load. */
+.ds-drive-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 120px;
+  padding: 24px 12px;
+  border: 1px dashed var(--td-border-level-2-color);
+  border-radius: 6px;
+  background: var(--td-bg-color-page);
+  text-align: center;
+}
+
+.ds-drive-placeholder .ds-empty-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+}
+
+.ds-drive-placeholder .ds-empty-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-placeholder);
+}
+
 .resource-picker {
   display: flex;
   flex-direction: column;
@@ -2252,6 +2666,27 @@ const drawerConfirmText = computed(() => {
   color: var(--td-text-color-primary);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
 }
+
+.gitlab-project-list {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.gitlab-project-row {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+  background: var(--td-bg-color-container);
+}
+
+.gitlab-project-row__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
 </style>
 
 <!--
@@ -2268,5 +2703,46 @@ const drawerConfirmText = computed(() => {
   width: 24px;
   height: 24px;
   object-fit: contain;
+}
+
+/* Step 2「选择范围」:整步不滚动 —— token 输入区固定,下方资源区域
+   (占位 / 加载 / 空态 / 目录树)撑满抽屉剩余高度,树列表内部滚动。 */
+.ds-fixed-step {
+  .t-drawer__body {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .setting-drawer__body {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .ds-resource-section {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .resource-picker,
+  .ds-drive-placeholder,
+  .ds-loading-center,
+  .ds-resource-empty {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .ds-loading-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .resource-picker__list {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+  }
 }
 </style>

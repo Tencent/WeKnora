@@ -41,7 +41,7 @@ type MessageService interface {
 	// ClearSessionMessages deletes all messages in a session, along with their chat history KB entries
 	ClearSessionMessages(ctx context.Context, sessionID string) error
 
-	// SearchMessages searches messages by keyword and/or vector similarity across all sessions of the current tenant.
+	// SearchMessages searches messages by keyword and/or vector similarity across the caller's own sessions.
 	// Uses the chat history knowledge base for vector search instead of in-memory computation.
 	SearchMessages(ctx context.Context, params *types.MessageSearchParams) (*types.MessageSearchResult, error)
 
@@ -57,6 +57,12 @@ type MessageService interface {
 
 	// GetChatHistoryKBStats returns statistics about the chat history knowledge base (indexed message count, etc.)
 	GetChatHistoryKBStats(ctx context.Context) (*types.ChatHistoryKBStats, error)
+
+	// GetSessionArtifacts returns every skill-produced MessageArtifact
+	// recorded against any assistant message of the session. Used to power
+	// the frontend "download files generated in this session" drawer and
+	// to clean up storage blobs on session deletion.
+	GetSessionArtifacts(ctx context.Context, sessionID string) (types.MessageArtifacts, error)
 }
 
 // MessageRepository defines the message repository interface
@@ -73,6 +79,14 @@ type MessageRepository interface {
 	GetMessagesBySessionBeforeTime(
 		ctx context.Context, sessionID string, beforeTime time.Time, limit int,
 	) ([]*types.Message, error)
+	// ListMessagesBySessionAfterTime returns messages created strictly after
+	// afterTime, oldest first. Long-term memory distillation walks forward from
+	// a watermark, so it needs the oldest unprocessed messages rather than the
+	// newest ones: paging from the newest end would skip everything in between
+	// once a session outruns the page size.
+	ListMessagesBySessionAfterTime(
+		ctx context.Context, sessionID string, afterTime time.Time, limit int,
+	) ([]*types.Message, error)
 	// UpdateMessage updates a message
 	UpdateMessage(ctx context.Context, message *types.Message) error
 	// UpdateMessageImages updates only the images JSONB column for a message
@@ -86,7 +100,9 @@ type MessageRepository interface {
 	// GetFirstMessageOfUser gets the first message of a user
 	GetFirstMessageOfUser(ctx context.Context, sessionID string) (*types.Message, error)
 	// SearchMessagesByKeyword searches messages by keyword (ILIKE) across sessions for a tenant
-	SearchMessagesByKeyword(ctx context.Context, tenantID uint64, keyword string, sessionIDs []string, limit int) ([]*types.MessageWithSession, error)
+	// OwnedSessionIDs narrows a set of session ids to the ones this person owns.
+	OwnedSessionIDs(ctx context.Context, tenantID uint64, ownerID string, sessionIDs []string) (map[string]bool, error)
+	SearchMessagesByKeyword(ctx context.Context, tenantID uint64, ownerID, keyword string, sessionIDs []string, limit int) ([]*types.MessageWithSession, error)
 	// GetMessagesByKnowledgeIDs retrieves messages by their associated Knowledge IDs
 	GetMessagesByKnowledgeIDs(ctx context.Context, knowledgeIDs []string) ([]*types.MessageWithSession, error)
 	// GetMessagesByRequestIDs retrieves messages by their request IDs (used to fetch Q&A pair partners)
@@ -95,4 +111,13 @@ type MessageRepository interface {
 	GetKnowledgeIDsBySessionID(ctx context.Context, sessionID string) ([]string, error)
 	// UpdateMessageKnowledgeID updates the knowledge_id field for a message
 	UpdateMessageKnowledgeID(ctx context.Context, messageID string, knowledgeID string) error
+	// GetSessionArtifacts returns every skill-produced MessageArtifact recorded
+	// against any assistant message of the session, in creation order. The
+	// implementation only projects the artifacts JSONB column, so it stays
+	// cheap even for long conversations. Empty slice + nil error means the
+	// session has no artifacts yet (never an error).
+	GetSessionArtifacts(ctx context.Context, sessionID string) (types.MessageArtifacts, error)
+	// GetSessionAttachments returns every user-uploaded attachment recorded in
+	// the session. Implementations should project only the attachments column.
+	GetSessionAttachments(ctx context.Context, sessionID string) (types.MessageAttachments, error)
 }

@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatFileSize, getFileIcon } from '@/utils/files';
 import { useTagChipsOverflow } from '@/composables/useTagChipsOverflow';
+import DocumentActionMenu from './DocumentActionMenu.vue';
+import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue';
 
 interface Tag {
   id: string;
@@ -13,6 +15,7 @@ interface Tag {
 interface KnowledgeItem {
   id: string;
   file_name: string;
+  folder_path?: string;
   file_type?: string;
   file_size?: number | string;
   type?: string;
@@ -30,16 +33,45 @@ const props = defineProps<{
   items: KnowledgeItem[];
   selectedIds: Set<string>;
   canEdit: boolean;
+  canDownload: boolean;
+  canMutateKnowledge: boolean;
+  traceVisibleIds: Record<string, boolean>;
   tagList: Tag[];
   loading?: boolean;
+  /** Sub-folders of the folder currently being browsed. */
+  folders?: Array<{ path: string; name: string; total_count: number }>;
+  /** Every folder of the knowledge base, for the "move to folder" picker. */
+  folderOptions?: FolderOption[];
+  /**
+   * Show each row's folder under its name. Only useful when the list spans
+   * several folders, i.e. while filtering; inside one folder the path would be
+   * identical on every row.
+   */
+  showFolderPath?: boolean;
+  // Move sub-flow state
+  moveMenuMode: 'normal' | 'targets' | 'confirm';
+  moveTargetKbs: any[];
+  moveTargetsLoading: boolean;
+  moveSelectedTargetName: string;
+  moveMode: 'reuse_vectors' | 'reparse';
+  moveSubmitting: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'open', item: KnowledgeItem): void;
   (e: 'toggle-row', id: string, checked: boolean, shiftKey: boolean): void;
   (e: 'toggle-all', checked: boolean): void;
-  (e: 'action', action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete', item: KnowledgeItem): void;
+  (e: 'action', action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem): void;
+  (e: 'probe-trace', item: KnowledgeItem): void;
   (e: 'tag-edit', item: KnowledgeItem): void;
+  (e: 'open-folder', path: string): void;
+  (e: 'move-to-folder', item: KnowledgeItem, folderPath: string): void;
+  // Move sub-flow emits
+  (e: 'move-select-target', kb: any): void;
+  (e: 'move-back'): void;
+  (e: 'move-confirm'): void;
+  (e: 'update:moveMode', mode: 'reuse_vectors' | 'reparse'): void;
+  (e: 'reset-move-state'): void;
 }>();
 
 const { t } = useI18n();
@@ -76,8 +108,14 @@ const formatTime = (time?: string) => {
 const getSourceInfo = (item: KnowledgeItem): { icon: string; label: string } => {
   const ch = item.channel;
   if (ch === 'feishu') return { icon: 'cloud-download', label: t('knowledgeBase.channelFeishu') };
+  // Drive (云盘) connectors use their own channel so Drive docs show
+  // "飞书云盘" / "Lark 云盘", distinct from the wiki connector's "飞书".
+  if (ch === 'feishu_drive') return { icon: 'cloud-download', label: t('knowledgeBase.channelFeishuDrive') };
+  if (ch === 'lark_drive') return { icon: 'cloud-download', label: t('knowledgeBase.channelLarkDrive') };
   if (ch === 'notion') return { icon: 'cloud-download', label: t('knowledgeBase.channelNotion') };
   if (ch === 'yuque') return { icon: 'cloud-download', label: t('knowledgeBase.channelYuque') };
+  if (ch === 'gitlab') return { icon: 'cloud-download', label: t('knowledgeBase.channelGitLab') };
+  if (ch === 'ima') return { icon: 'cloud-download', label: t('knowledgeBase.channelIma') };
   if (ch === 'wechat') return { icon: 'cloud-download', label: t('knowledgeBase.channelWechat') };
   if (ch === 'wecom') return { icon: 'cloud-download', label: t('knowledgeBase.channelWecom') };
   if (ch === 'dingtalk') return { icon: 'cloud-download', label: t('knowledgeBase.channelDingtalk') };
@@ -159,6 +197,14 @@ const onRowCheckboxChange = (item: KnowledgeItem, checked: boolean, ctx?: { e?: 
 const moreOpen = ref<string | null>(null);
 const onMoreVisible = (id: string, visible: boolean) => {
   moreOpen.value = visible ? id : null;
+  if (visible) {
+    const it = props.items.find(i => i.id === id);
+    if (it) emit('probe-trace', it);
+  } else {
+    folderPickerItemId.value = null;
+    // Reset move state when popup closes naturally
+    emit('reset-move-state');
+  }
 };
 
 // 吸顶检测：哨兵离开视口说明 header 已吸附在滚动容器顶部
@@ -180,17 +226,28 @@ onBeforeUnmount(() => {
   stickyObserver = null;
 });
 
-// Cancellable parse statuses mirror the backend CancelKnowledgeParse
-// gate: pending / processing / finalizing all surface the stop entry,
-// while completed / failed / cancelled / deleting hide it.
-const CANCELABLE_PARSE_STATUSES = new Set(['pending', 'processing', 'finalizing']);
-const canCancelParse = (item: KnowledgeItem) =>
-  CANCELABLE_PARSE_STATUSES.has(String(item.parse_status ?? ''));
+// Which row's action popup is currently showing the folder picker. Kept local so
+// picking a folder stays inside the menu the user already opened, exactly like
+// the "move to knowledge base" sub-menu next to it.
+const folderPickerItemId = ref<string | null>(null);
 
-const isParseInFlight = (item: KnowledgeItem) => canCancelParse(item);
-
-const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete', item: KnowledgeItem) => {
+const onFolderPicked = (item: KnowledgeItem, path: string) => {
+  folderPickerItemId.value = null;
   moreOpen.value = null;
+  item.isMore = false;
+  emit('move-to-folder', item, path);
+};
+
+const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem) => {
+  // The folder picker opens inside this same popup, so keep the menu open.
+  if (action === 'move-folder') {
+    folderPickerItemId.value = item.id;
+    return;
+  }
+  // Don't close popup for move — it triggers the move sub-flow
+  if (action !== 'move') {
+    moreOpen.value = null;
+  }
   item.isMore = false;
   emit('action', action, item);
 };
@@ -215,12 +272,41 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
     </div>
 
     <div class="doc-list-body">
+      <div
+        v-for="folder in folders"
+        :key="'folder-' + folder.path"
+        class="doc-list-row doc-list-row--folder"
+        :title="folder.path"
+        role="row"
+        @click="emit('open-folder', folder.path)"
+      >
+        <div class="cell cell-check" aria-hidden="true"></div>
+        <div class="cell cell-name">
+          <span class="row-file-icon-wrap">
+            <t-icon name="folder" class="row-folder-icon" />
+          </span>
+          <div class="row-file-text">
+            <span class="row-file-name">{{ folder.name }}</span>
+          </div>
+        </div>
+        <div class="cell cell-tag"></div>
+        <div class="cell cell-source">
+          <span class="row-folder-meta">
+            {{ t('knowledgeBase.folderTree.folderCardCount', { count: folder.total_count }) }}
+          </span>
+        </div>
+        <div class="cell cell-size"></div>
+        <div class="cell cell-status"></div>
+        <div class="cell cell-time"></div>
+        <div v-if="canEdit" class="cell cell-actions" aria-hidden="true"></div>
+      </div>
+
       <div v-for="item in items" :key="item.id" class="doc-list-row"
         :class="{ selected: selectedIds.has(item.id), 'menu-open': moreOpen === item.id }" :data-select-id="item.id"
         role="row" @click="emit('open', item)">
         <div class="cell cell-check" @click.stop>
           <t-checkbox class="doc-list-check" size="small" :checked="selectedIds.has(item.id)" :title="item.file_name"
-            @change="(c, ctx) => onRowCheckboxChange(item, c, ctx)" />
+            @change="(c: boolean, ctx?: { e?: Event }) => onRowCheckboxChange(item, c, ctx)" />
         </div>
 
         <div class="cell cell-name">
@@ -229,6 +315,11 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
           </span>
           <div class="row-file-text">
             <span class="row-file-name" :title="item.file_name">{{ item.file_name }}</span>
+            <button v-if="showFolderPath && item.folder_path" type="button" class="row-file-folder"
+              :title="item.folder_path" @click.stop="emit('open-folder', item.folder_path)">
+              <t-icon name="folder" />
+              <span>{{ item.folder_path }}</span>
+            </button>
             <span v-if="item.description" class="row-file-desc" :title="item.description">{{ item.description }}</span>
           </div>
         </div>
@@ -236,20 +327,20 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
 
         <div class="cell cell-tag">
           <template v-if="item.tags && item.tags.length > 0">
-            <t-tooltip v-if="hasTagOverflow(item.id, item.tags.length)"
-              :content="item.tags.map((t: any) => t.name).join(', ')" placement="top">
-              <div class="row-tag-chips" :ref="(el: any) => setupTagChipsObserver(el, item.id, item.tags.length)"
+            <t-tooltip v-if="hasTagOverflow(item.id, (item.tags || []).length)"
+              :content="(item.tags || []).map((t: any) => t.name).join(', ')" placement="top">
+              <div class="row-tag-chips" :ref="(el: any) => setupTagChipsObserver(el, item.id, (item.tags || []).length)"
                 :class="{ 'is-clickable': canEdit }" @click.stop="canEdit && emit('tag-edit', item)">
-                <t-tag v-for="tag in item.tags.slice(0, getTagLimit(item.id))" :key="tag.id" size="small"
+                <t-tag v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))" :key="tag.id" size="small"
                   variant="light-outline" class="row-tag">
                   {{ tag.name }}
                 </t-tag>
-                <span class="row-tag-overflow">+{{ getOverflowCount(item.id, item.tags.length) }}</span>
+                <span class="row-tag-overflow">+{{ getOverflowCount(item.id, (item.tags || []).length) }}</span>
               </div>
             </t-tooltip>
-            <div v-else class="row-tag-chips" :ref="(el: any) => setupTagChipsObserver(el, item.id, item.tags.length)"
+            <div v-else class="row-tag-chips" :ref="(el: any) => setupTagChipsObserver(el, item.id, (item.tags || []).length)"
               :class="{ 'is-clickable': canEdit }" @click.stop="canEdit && emit('tag-edit', item)">
-              <t-tag v-for="tag in item.tags.slice(0, getTagLimit(item.id))" :key="tag.id" size="small"
+              <t-tag v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))" :key="tag.id" size="small"
                 variant="light-outline" class="row-tag">
                 {{ tag.name }}
               </t-tag>
@@ -288,56 +379,100 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
         </div>
 
         <div class="cell cell-actions" v-if="canEdit" @click.stop>
-          <t-popup placement="bottom-right" trigger="click" destroy-on-close
+          <t-popup placement="bottom-right" trigger="click" destroy-on-close overlay-class-name="card-more"
             :on-visible-change="(v: boolean) => onMoreVisible(item.id, v)">
             <button class="row-more-btn" :class="{ active: moreOpen === item.id }" type="button"
               :aria-label="t('knowledgeBase.columnActions')">
               <t-icon name="more" size="16px" />
             </button>
             <template #content>
-              <div class="row-menu">
-                <div v-if="item.type === 'manual'" class="row-menu-item" @click.stop="handleAction('edit', item)">
-                  <t-icon class="icon" name="edit" />
-                  <span>{{ t('knowledgeBase.editDocument') }}</span>
+              <!-- Move: folder picker (must win over the normal menu while open) -->
+              <div v-if="folderPickerItemId === item.id" class="card-menu move-menu">
+                <FolderPickerMenu
+                  :options="folderOptions || []"
+                  :current-path="item.folder_path || ''"
+                  show-back
+                  @back="folderPickerItemId = null"
+                  @confirm="(path: string) => onFolderPicked(item, path)"
+                />
+              </div>
+
+              <!-- Normal menu -->
+              <div v-else-if="moveMenuMode === 'normal'" class="card-menu">
+                <DocumentActionMenu
+                  :item="item"
+                  :can-download="canDownload"
+                  :can-mutate-knowledge="canMutateKnowledge"
+                  :trace-visible="!!traceVisibleIds[item.id] || (item.parse_status === 'pending' || item.parse_status === 'processing' || item.parse_status === 'finalizing')"
+                  @download="handleAction('download', item)"
+                  @edit="handleAction('edit', item)"
+                  @view-trace="handleAction('view-trace', item)"
+                  @reparse="handleAction('reparse', item)"
+                  @cancel-parse="handleAction('cancel-parse', item)"
+                  @move="handleAction('move', item)"
+                  @move-folder="handleAction('move-folder', item)"
+                  @batch-manage="handleAction('batch-manage', item)"
+                  @delete="handleAction('delete', item)"
+                />
+              </div>
+
+              <!-- Move: target KB list -->
+              <div v-else-if="moveMenuMode === 'targets'" class="card-menu move-menu">
+                <div class="move-menu-header" @click.stop="emit('move-back')">
+                  <t-icon name="chevron-left" size="16px" />
+                  <span>{{ $t('knowledgeBase.moveToKnowledgeBase') }}</span>
                 </div>
-                <div v-if="isParseInFlight(item)" class="row-menu-item" @click.stop="handleAction('reparse', item)">
-                  <t-icon class="icon" name="refresh" />
-                  <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
+                <div v-if="moveTargetsLoading" class="move-menu-loading">
+                  <t-loading size="small" />
                 </div>
-                <t-popconfirm v-else theme="warning"
-                  :content="t('knowledgeBase.rebuildConfirm', { fileName: item.file_name || '' })"
-                  :confirm-btn="{ content: t('common.confirm'), theme: 'primary' }"
-                  :cancel-btn="{ content: t('common.cancel') }" placement="left"
-                  @confirm="handleAction('reparse', item)">
-                  <div class="row-menu-item" @click.stop>
-                    <t-icon class="icon" name="refresh" />
-                    <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
-                  </div>
-                </t-popconfirm>
-                <t-popconfirm v-if="canCancelParse(item)" theme="warning"
-                  :content="t('knowledgeBase.cancelParseConfirmBody', { title: item.file_name || item.id })"
-                  :confirm-btn="{ content: t('knowledgeBase.cancelParse'), theme: 'danger' }"
-                  :cancel-btn="{ content: t('common.cancel') }" placement="left"
-                  @confirm="handleAction('cancel-parse', item)">
-                  <div class="row-menu-item danger" @click.stop>
-                    <t-icon class="icon" name="close-circle" />
-                    <span>{{ t('knowledgeBase.cancelParse') }}</span>
-                  </div>
-                </t-popconfirm>
-                <div class="row-menu-item" @click.stop="handleAction('move', item)">
-                  <t-icon class="icon" name="swap" />
-                  <span>{{ t('knowledgeBase.moveDocument') }}</span>
+                <div v-else-if="moveTargetKbs.length === 0" class="move-menu-empty">
+                  {{ $t('knowledgeBase.moveNoTargets') }}
                 </div>
-                <t-popconfirm theme="warning"
-                  :content="t('knowledgeBase.confirmDeleteDocument', { fileName: item.file_name || '' })"
-                  :confirm-btn="{ content: t('knowledgeBase.confirmDelete'), theme: 'danger' }"
-                  :cancel-btn="{ content: t('common.cancel') }" placement="left"
-                  @confirm="handleAction('delete', item)">
-                  <div class="row-menu-item danger" @click.stop>
-                    <t-icon class="icon" name="delete" />
-                    <span>{{ t('knowledgeBase.deleteDocument') }}</span>
+                <template v-else>
+                  <div v-for="kb in moveTargetKbs" :key="kb.id" class="card-menu-item"
+                    @click.stop="emit('move-select-target', kb)">
+                    <t-icon class="icon" name="root-list" />
+                    <span class="move-target-name">{{ kb.name }}</span>
+                    <span v-if="kb.knowledge_count !== undefined" class="move-target-count">{{ kb.knowledge_count }}</span>
                   </div>
-                </t-popconfirm>
+                </template>
+              </div>
+
+              <!-- Move: confirm with mode selection -->
+              <div v-else-if="moveMenuMode === 'confirm'" class="card-menu move-menu">
+                <div class="move-menu-header" @click.stop="emit('move-back')">
+                  <t-icon name="chevron-left" size="16px" />
+                  <span>{{ $t('knowledgeBase.moveConfirmTitle') }}</span>
+                </div>
+                <div class="move-confirm-body">
+                  <div class="move-target-info">
+                    <t-icon name="arrow-right" size="14px" />
+                    <span>{{ moveSelectedTargetName }}</span>
+                  </div>
+                  <div class="move-mode-item" :class="{ active: moveMode === 'reuse_vectors' }"
+                    @click.stop="emit('update:moveMode', 'reuse_vectors')">
+                    <t-radio :checked="moveMode === 'reuse_vectors'" />
+                    <div class="move-mode-text">
+                      <span class="move-mode-label">{{ $t('knowledgeBase.moveModeReuseVectors') }}</span>
+                      <span class="move-mode-desc">{{ $t('knowledgeBase.moveModeReuseVectorsDesc') }}</span>
+                    </div>
+                  </div>
+                  <div class="move-mode-item" :class="{ active: moveMode === 'reparse' }"
+                    @click.stop="emit('update:moveMode', 'reparse')">
+                    <t-radio :checked="moveMode === 'reparse'" />
+                    <div class="move-mode-text">
+                      <span class="move-mode-label">{{ $t('knowledgeBase.moveModeReparse') }}</span>
+                      <span class="move-mode-desc">{{ $t('knowledgeBase.moveModeReparseDesc') }}</span>
+                    </div>
+                  </div>
+                  <div class="move-confirm-actions">
+                    <t-button size="small" variant="outline" @click.stop="emit('move-back')">{{
+                      $t('common.cancel') }}</t-button>
+                    <t-button size="small" theme="primary" :loading="moveSubmitting"
+                      @click.stop="emit('move-confirm')">{{
+                        $t('knowledgeBase.moveConfirm') }}</t-button>
+                  </div>
+                </div>
               </div>
             </template>
           </t-popup>
@@ -551,6 +686,57 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
   color: var(--td-text-color-placeholder);
 }
 
+.doc-list-row--folder {
+  cursor: pointer;
+
+  .row-file-name {
+    font-weight: 500;
+  }
+}
+
+.row-folder-icon {
+  color: var(--td-brand-color);
+}
+
+.row-folder-meta,
+.row-folder-chevron {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+  transition: color 0.15s ease;
+}
+
+.row-file-folder {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  font-family: var(--app-font-family);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s ease;
+
+  &:hover {
+    color: var(--td-brand-color);
+  }
+
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .t-icon {
+    flex: 0 0 auto;
+    font-size: 13px;
+  }
+}
+
 .cell-source {
   gap: 6px;
   min-width: 0;
@@ -685,76 +871,4 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
   }
 }
 
-.row-menu {
-  display: flex;
-  flex-direction: column;
-  min-width: 140px;
-  gap: 2px;
-  padding: 4px 6px;
-}
-
-.row-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  font-size: 14px;
-  line-height: 20px;
-  color: var(--td-text-color-primary);
-  cursor: pointer;
-  border-radius: 6px;
-  transition: background-color 0.15s cubic-bezier(0.2, 0, 0, 1), transform 0.12s ease;
-
-  &:hover {
-    background: var(--td-bg-color-container-hover);
-  }
-
-  &:active {
-    background: var(--td-bg-color-container-active);
-    transform: scale(0.98);
-  }
-
-  .icon {
-    font-size: 16px;
-    color: var(--td-text-color-secondary);
-    transition: color 0.15s ease;
-  }
-
-  &:hover .icon {
-    color: var(--td-text-color-primary);
-  }
-
-  &.danger {
-    color: var(--td-error-color-6);
-    margin-top: 4px;
-    position: relative;
-
-    &::before {
-      content: '';
-      position: absolute;
-      top: -3px;
-      left: 8px;
-      right: 8px;
-      height: 1px;
-      background: var(--td-component-stroke);
-    }
-
-    .icon {
-      color: var(--td-error-color-6);
-    }
-
-    &:hover {
-      background: var(--td-error-color-1);
-      color: var(--td-error-color-6);
-
-      .icon {
-        color: var(--td-error-color-6);
-      }
-    }
-
-    &:active {
-      background: var(--td-error-color-2);
-    }
-  }
-}
 </style>

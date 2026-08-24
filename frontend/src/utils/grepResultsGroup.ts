@@ -3,6 +3,7 @@ import type { GrepChunkResult, GrepKnowledgeResult } from '@/types/tool-results'
 export type GrepGroupedRow = {
   key: string
   knowledge_id: string
+  knowledge_base_id: string
   title: string
   is_faq: boolean
   chunk_hit_count: number
@@ -26,6 +27,7 @@ export function groupGrepChunkResults(chunkRows: GrepChunkResult[]): GrepGrouped
       map.set(key, {
         key,
         knowledge_id: result.knowledge_id,
+        knowledge_base_id: result.knowledge_base_id,
         title: result.faq_question || result.knowledge_title || '',
         is_faq: isFAQ,
         chunk_hit_count: 0,

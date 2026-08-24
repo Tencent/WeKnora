@@ -164,8 +164,12 @@ func IsValidURL(url string) bool {
 		return false
 	}
 
-	// 检查协议， 只允许 http, https, local, minio, cos, tos, oss 协议
-	allowedProtocols := []string{"http://", "https://", "local://", "minio://", "cos://", "tos://", "oss://"}
+	// Internal resource references are resolved through authenticated file
+	// proxies; provider schemes remain supported for legacy stored content.
+	allowedProtocols := []string{
+		"http://", "https://", "resource://", "storage://", "local://", "minio://",
+		"cos://", "tos://", "s3://", "oss://", "ks3://", "obs://",
+	}
 	isAllowed := false
 	for _, protocol := range allowedProtocols {
 		if strings.HasPrefix(strings.ToLower(url), protocol) {
@@ -248,6 +252,26 @@ var restrictedIPv4Ranges = []*net.IPNet{
 	mustParseCIDR("172.18.0.0/16"),
 	mustParseCIDR("172.19.0.0/16"),
 	mustParseCIDR("172.20.0.0/16"),
+}
+
+// restrictedPorts contains non-HTTP service ports that user-controlled URLs
+// must not reach. It is checked both during URL validation and again at dial
+// time so dynamically discovered URLs cannot bypass the input boundary.
+var restrictedPorts = map[string]bool{
+	"22":    true, // SSH
+	"23":    true, // Telnet
+	"25":    true, // SMTP
+	"445":   true, // SMB
+	"3389":  true, // RDP
+	"5432":  true, // PostgreSQL
+	"3306":  true, // MySQL
+	"6379":  true, // Redis
+	"27017": true, // MongoDB
+	"9200":  true, // Elasticsearch
+	"2379":  true, // etcd
+	"2380":  true, // etcd
+	"8500":  true, // Consul
+	"4001":  true, // etcd (old)
 }
 
 // mustParseCIDR parses a CIDR string and panics on error
@@ -455,27 +479,8 @@ func isSSRFSafeURL(rawURL string) (bool, string) {
 
 	// Check for suspicious port numbers
 	port := parsed.Port()
-	if port != "" {
-		// Block common internal service ports
-		blockedPorts := map[string]bool{
-			"22":    true, // SSH
-			"23":    true, // Telnet
-			"25":    true, // SMTP
-			"445":   true, // SMB
-			"3389":  true, // RDP
-			"5432":  true, // PostgreSQL
-			"3306":  true, // MySQL
-			"6379":  true, // Redis
-			"27017": true, // MongoDB
-			"9200":  true, // Elasticsearch
-			"2379":  true, // etcd
-			"2380":  true, // etcd
-			"8500":  true, // Consul
-			"4001":  true, // etcd (old)
-		}
-		if blockedPorts[port] {
-			return false, fmt.Sprintf("port %s is blocked for security reasons", port)
-		}
+	if restrictedPorts[port] {
+		return false, fmt.Sprintf("port %s is blocked for security reasons", port)
 	}
 
 	return true, ""
@@ -485,6 +490,9 @@ func isSSRFSafeURL(rawURL string) (bool, string) {
 func IsValidImageURL(url string) bool {
 	if !IsValidURL(url) {
 		return false
+	}
+	if strings.HasPrefix(strings.ToLower(url), "resource://") {
+		return true
 	}
 
 	// 检查是否为图片文件
@@ -754,43 +762,122 @@ func DefaultSSRFSafeHTTPClientConfig() SSRFSafeHTTPClientConfig {
 // ErrSSRFRedirectBlocked is returned when a redirect target is blocked due to SSRF protection
 var ErrSSRFRedirectBlocked = fmt.Errorf("redirect blocked: target URL failed SSRF validation")
 
-// NewSSRFSafeHTTPClient creates an HTTP client that validates redirect targets against SSRF protections.
-// This prevents SSRF attacks via HTTP redirects where an attacker's server redirects to internal services.
-func NewSSRFSafeHTTPClient(config SSRFSafeHTTPClientConfig) *http.Client {
-	transport := &http.Transport{
+// sameHTTPOrigin reports whether two URLs share scheme and host (port-aware).
+func sameHTTPOrigin(a, b *url.URL) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(a.Host, b.Host)
+}
+
+// stripRedirectSensitiveHeaders removes credentials that must not follow a
+// cross-host redirect (Go only strips Authorization/Cookie by default).
+func stripRedirectSensitiveHeaders(req *http.Request) {
+	req.Header.Del("Authorization")
+	req.Header.Del("Cookie")
+	req.Header.Del("X-Auth-Token")
+	req.Header.Del("X-Api-Key")
+	req.Header.Del("Api-Key")
+}
+
+// NewSSRFSafeTransport builds an *http.Transport whose connections are guarded
+// by SSRFSafeDialContext. The transport carries no per-request timeout and no
+// redirect policy — those live on the *http.Client — so a single transport can
+// be shared across many clients to pool keep-alive connections globally.
+func NewSSRFSafeTransport(config SSRFSafeHTTPClientConfig) *http.Transport {
+	return &http.Transport{
 		DisableKeepAlives:  config.DisableKeepAlives,
 		DisableCompression: config.DisableCompression,
 		// Dial with SSRF protection - validates resolved IPs before connecting
 		DialContext: SSRFSafeDialContext,
 	}
+}
 
-	return &http.Client{
-		Timeout:   config.Timeout,
-		Transport: transport,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			// Check redirect count
-			if len(via) >= config.MaxRedirects {
-				return fmt.Errorf("stopped after %d redirects", config.MaxRedirects)
-			}
+// newSSRFCheckRedirect returns a CheckRedirect policy that enforces the redirect
+// count limit, strips sensitive headers on cross-host hops, and re-validates
+// every redirect target against SSRF protections.
+func newSSRFCheckRedirect(maxRedirects int) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		// Check redirect count
+		if len(via) >= maxRedirects {
+			return fmt.Errorf("stopped after %d redirects", maxRedirects)
+		}
 
-			// Validate the redirect target URL for SSRF (whitelist-aware).
-			// Even whitelisted hosts must use http/https to prevent scheme-based attacks.
-			redirectScheme := strings.ToLower(req.URL.Scheme)
-			if redirectScheme != "http" && redirectScheme != "https" {
-				return fmt.Errorf("%w: invalid scheme %s", ErrSSRFRedirectBlocked, redirectScheme)
-			}
-			redirectHost := req.URL.Hostname()
-			if redirectHost != "" && IsSSRFWhitelisted(redirectHost) {
-				return nil
-			}
-			redirectURL := req.URL.String()
-			if safe, reason := isSSRFSafeURL(redirectURL); !safe {
-				return fmt.Errorf("%w: %s", ErrSSRFRedirectBlocked, reason)
-			}
+		// Strip credentials when the redirect crosses hosts so connector
+		// tokens (e.g. Yuque X-Auth-Token) cannot leak to a third party.
+		if len(via) > 0 && !sameHTTPOrigin(via[0].URL, req.URL) {
+			stripRedirectSensitiveHeaders(req)
+		}
 
+		// Validate the redirect target URL for SSRF (whitelist-aware).
+		// Even whitelisted hosts must use http/https to prevent scheme-based attacks.
+		redirectScheme := strings.ToLower(req.URL.Scheme)
+		if redirectScheme != "http" && redirectScheme != "https" {
+			return fmt.Errorf("%w: invalid scheme %s", ErrSSRFRedirectBlocked, redirectScheme)
+		}
+		redirectHost := req.URL.Hostname()
+		if redirectHost != "" && IsSSRFWhitelisted(redirectHost) {
 			return nil
-		},
+		}
+		if err := validateURLForSSRFForOutbound(req.URL.String()); err != nil {
+			return fmt.Errorf("%w: %w", ErrSSRFRedirectBlocked, err)
+		}
+
+		return nil
 	}
+}
+
+// SSRFValidatingRoundTripper enforces the URL policy for every outbound
+// request, including URLs discovered at runtime by SDKs (for example OAuth
+// metadata) that never passed through an application handler. Dial-time checks
+// remain necessary to pin DNS answers and cover transports that cannot accept
+// this wrapper directly.
+type SSRFValidatingRoundTripper struct {
+	Base http.RoundTripper
+}
+
+func (t *SSRFValidatingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req == nil || req.URL == nil {
+		return nil, fmt.Errorf("outbound request blocked: request URL is required")
+	}
+	if t == nil || t.Base == nil {
+		return nil, fmt.Errorf("outbound request blocked: base transport is required")
+	}
+	if err := validateURLForSSRFForOutbound(req.URL.String()); err != nil {
+		return nil, fmt.Errorf("outbound request blocked by SSRF policy: %w", err)
+	}
+	return t.Base.RoundTrip(req)
+}
+
+// NewSSRFSafeHTTPClientWithTransport wraps a caller-supplied transport in an
+// *http.Client carrying the given timeout and the SSRF-aware redirect policy.
+// Pass a transport from NewSSRFSafeTransport (optionally shared across clients)
+// to reuse a single connection pool while keeping per-client timeouts.
+func NewSSRFSafeHTTPClientWithTransport(
+	config SSRFSafeHTTPClientConfig, transport http.RoundTripper,
+) *http.Client {
+	if transport == nil {
+		transport = NewSSRFSafeTransport(config)
+	}
+	return &http.Client{
+		Timeout:       config.Timeout,
+		Transport:     &SSRFValidatingRoundTripper{Base: transport},
+		CheckRedirect: newSSRFCheckRedirect(config.MaxRedirects),
+	}
+}
+
+// NewSSRFSafeHTTPClient creates an HTTP client that validates redirect targets against SSRF protections.
+// This prevents SSRF attacks via HTTP redirects where an attacker's server redirects to internal services.
+// Each call builds a dedicated transport; callers that create many short-lived clients against the same
+// upstream should share one NewSSRFSafeTransport via NewSSRFSafeHTTPClientWithTransport instead.
+func NewSSRFSafeHTTPClient(config SSRFSafeHTTPClientConfig) *http.Client {
+	return NewSSRFSafeHTTPClientWithTransport(config, NewSSRFSafeTransport(config))
+}
+
+// SSRFSafeGRPCDialer is compatible with grpc.WithContextDialer and pins DNS
+// answers the same way as SSRFSafeDialContext.
+func SSRFSafeGRPCDialer(ctx context.Context, addr string) (net.Conn, error) {
+	return SSRFSafeDialContext(ctx, "tcp", addr)
 }
 
 // SSRFSafeDialContext is a custom dial function that validates the resolved IP addresses
@@ -798,7 +885,7 @@ func NewSSRFSafeHTTPClient(config SSRFSafeHTTPClientConfig) *http.Client {
 // against DNS rebinding attacks during the connection phase.
 func SSRFSafeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	// Parse host and port
-	host, _, err := net.SplitHostPort(addr)
+	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid address %s: %w", addr, err)
 	}
@@ -814,6 +901,9 @@ func SSRFSafeDialContext(ctx context.Context, network, addr string) (net.Conn, e
 		}
 		return dialer.DialContext(ctx, network, addr)
 	}
+	if restrictedPorts[port] {
+		return nil, fmt.Errorf("connection blocked: port %s is restricted", port)
+	}
 
 	// Check if the host is a restricted hostname
 	hostLower := strings.ToLower(host)
@@ -828,10 +918,16 @@ func SSRFSafeDialContext(ctx context.Context, network, addr string) (net.Conn, e
 		}
 	}
 
-	// Resolve the hostname to IP addresses
+	// Resolve the hostname once, validate every answer, and then dial one of
+	// those exact IPs. Dialing the original hostname here would make the
+	// standard dialer resolve it a second time, leaving a DNS-rebinding window
+	// between validation and connection establishment.
 	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		return nil, fmt.Errorf("DNS resolution failed for %s: %w", host, err)
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("DNS resolution returned no addresses for %s", host)
 	}
 
 	// Validate all resolved IPs
@@ -841,13 +937,22 @@ func SSRFSafeDialContext(ctx context.Context, network, addr string) (net.Conn, e
 		}
 	}
 
-	// If we get here, all IPs are safe. Connect using the standard dialer.
-	// We dial the original address so that proper connection routing happens.
+	// If we get here, all IPs are safe. Pin the connection to the validated DNS
+	// answers; TLS still uses the request hostname for SNI/certificate checks.
 	dialer := &net.Dialer{
 		Timeout:   30 * time.Second,
 		KeepAlive: 30 * time.Second,
 	}
-	return dialer.DialContext(ctx, network, addr)
+	var lastErr error
+	for _, ipAddr := range ips {
+		pinnedAddr := net.JoinHostPort(ipAddr.IP.String(), port)
+		conn, dialErr := dialer.DialContext(ctx, network, pinnedAddr)
+		if dialErr == nil {
+			return conn, nil
+		}
+		lastErr = dialErr
+	}
+	return nil, fmt.Errorf("failed to connect to validated addresses for %s: %w", host, lastErr)
 }
 
 // ---------------------------------------------------------------------------
@@ -931,6 +1036,7 @@ func loadSSRFWhitelist() *ssrfWhitelistConfig {
 // applySSRFWhitelist for the canonical merge logic.
 func SetSSRFWhitelistFromRaw(raw string) {
 	ssrfWhitelistAtomic.Store(parseSSRFWhitelistRaw(raw))
+	invalidateSSRFOutboundValidationCache()
 }
 
 // parseSSRFWhitelistRaw parses a comma-separated whitelist string into
@@ -1109,6 +1215,7 @@ func ResetSSRFWhitelistForTest() {
 	ssrfWhitelistOnce = sync.Once{}
 	ssrfWhitelist = nil
 	ssrfWhitelistAtomic.Store(nil)
+	invalidateSSRFOutboundValidationCache()
 }
 
 // FormatSSRFError takes the error returned by ValidateURLForSSRF and wraps
@@ -1184,6 +1291,13 @@ func ValidateURLForSSRF(rawURL string) error {
 	hostname := parsed.Hostname()
 	if hostname == "" {
 		return fmt.Errorf("URL has no hostname")
+	}
+
+	// A whitelist relaxes host/IP restrictions only. It must never turn other
+	// schemes (file://, gopher://, etc.) into valid outbound request targets.
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("invalid scheme: %s (only http/https allowed)", scheme)
 	}
 
 	// If the host is whitelisted, skip the heavy checks.

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
@@ -24,6 +23,9 @@ func (s *sessionService) AgentQA(
 	eventBus *event.EventBus,
 ) error {
 	sessionID := req.Session.ID
+	// Propagate the session ID so stateful sandbox backends (CubeSandbox) can
+	// bind script execution to a per-session MicroVM instance.
+	ctx = types.WithSessionID(ctx, sessionID)
 	sessionJSON, err := json.Marshal(req.Session)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to marshal session, session ID: %s, error: %v", sessionID, err)
@@ -140,6 +142,34 @@ func (s *sessionService) AgentQA(
 		llmContext = []chat.Message{}
 	}
 
+	// Reconcile all durable session attachments into the session's remote
+	// sandbox before the model can request shell or skill execution. The
+	// durable storage URL — not the ephemeral sandbox path — remains the
+	// source of truth. Gated on the sandbox manager advertising a session
+	// filesystem capability so provider-neutral remote wiring stays here.
+	var stagedAttachments []stagedSessionAttachment
+	stager, ok := s.agentService.(sessionAttachmentStager)
+	if !ok {
+		return errors.New("agent service does not support session attachment staging")
+	}
+	// Probe the backend this session's sandbox actually runs on. Gating on the
+	// process-wide manager instead could inspect a different backend than the
+	// named workspace config selected by this agent.
+	inputStore, storeErr := stager.sessionSandboxInputStore(ctx, sessionID, agentConfig.SandboxConfigID)
+	if storeErr != nil {
+		return fmt.Errorf("resolve sandbox file store for session %s: %w", sessionID, storeErr)
+	}
+	if inputStore != nil {
+		sessionAttachments, loadErr := s.messageRepo.GetSessionAttachments(ctx, sessionID)
+		if loadErr != nil {
+			return fmt.Errorf("load session attachments for sandbox staging: %w", loadErr)
+		}
+		stagedAttachments, err = stager.stageSessionAttachments(ctx, sessionID, agentConfig.SandboxConfigID, sessionAttachments)
+		if err != nil {
+			return fmt.Errorf("restore session attachments into sandbox: %w", err)
+		}
+	}
+
 	// Create agent engine with EventBus
 	logger.Info(ctx, "Creating agent engine")
 	engine, err := s.agentService.CreateAgentEngine(
@@ -154,6 +184,25 @@ func (s *sessionService) AgentQA(
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create agent engine: %v", err)
 		return err
+	}
+
+	// Recall long-term memory for this turn. Like the RAG path this is a
+	// no-model read, and an agent may opt out of it entirely.
+	memoryCtx := types.ApplyAgentMemoryPreference(ctx, agentConfig.MemoryEnabled)
+	if s.memoryService != nil {
+		recall := s.memoryService.Recall(memoryCtx, req.Query)
+		if recall.Prompt != "" {
+			engine.SetMemoryPrompt(recall.Prompt)
+			used := types.UsedMemoriesFromItems(recall.Items)
+			if err := eventBus.Emit(ctx, event.Event{
+				Type:      event.EventMemoryRecalled,
+				SessionID: sessionID,
+				Data:      event.MemoryRecalledData{Memories: used},
+			}); err != nil {
+				logger.Warnf(ctx, "Failed to emit memory recalled event: %v", err)
+			}
+			logger.Infof(ctx, "Injected %d long-term memories into agent context", len(used))
+		}
 	}
 
 	// Route image data based on agent model's vision capability
@@ -182,6 +231,10 @@ func (s *sessionService) AgentQA(
 	if len(req.Attachments) > 0 {
 		agentQuery += req.Attachments.BuildPrompt()
 		logger.Infof(ctx, "Appended %d attachment(s) to agent query", len(req.Attachments))
+	}
+	if manifest := buildSandboxAttachmentsPrompt(stagedAttachments); manifest != "" {
+		agentQuery += manifest
+		logger.Infof(ctx, "Appended %d staged sandbox attachment path(s) to agent query", len(stagedAttachments))
 	}
 
 	// Scope envelopes (runtime_context / must_use) are injected per LLM call inside
@@ -225,12 +278,16 @@ func (s *sessionService) buildAgentConfig(
 		WebSearchProviderID:         customAgent.Config.WebSearchProviderID,
 		MultiTurnEnabled:            customAgent.Config.MultiTurnEnabled,
 		HistoryTurns:                customAgent.Config.HistoryTurns,
+		MemoryEnabled:               customAgent.Config.MemoryEnabled,
 		MCPSelectionMode:            customAgent.Config.MCPSelectionMode,
 		MCPServices:                 customAgent.Config.MCPServices,
+		MCPAuthWaitTimeout:          customAgent.Config.MCPAuthWaitTimeout,
 		Thinking:                    customAgent.Config.Thinking,
+		CitationEnabled:             customAgent.Config.CitationEnabled,
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
+		SharedAgentReadOnly:         req.SharedAgentReadOnly,
 	}
 
 	// Falls back to global configuration if no specific timeout is set for the agent.
@@ -242,7 +299,12 @@ func (s *sessionService) buildAgentConfig(
 	s.configureSkillsFromAgent(ctx, agentConfig, customAgent)
 
 	// Resolve knowledge bases using shared helper
-	agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs = s.resolveKnowledgeBases(ctx, req)
+	kbIDs, knowledgeIDs, err := s.resolveKnowledgeBases(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	agentConfig.KnowledgeBases = kbIDs
+	agentConfig.KnowledgeIDs = knowledgeIDs
 
 	// Use custom agent's allowed tools if specified, otherwise use defaults
 	if len(customAgent.Config.AllowedTools) > 0 {
@@ -253,7 +315,7 @@ func (s *sessionService) buildAgentConfig(
 	// Apply per-turn @Skill / @MCP scope. Each helper narrows the agent's
 	// whitelist to the mentioned items and records the pinned set used for the
 	// <must_use> hint, keeping all scope logic in one place per resource type.
-	isSharedAgent := req.Session != nil && req.Session.TenantID != customAgent.TenantID
+	isSharedAgent := req.SharedAgentReadOnly
 	applyPerRequestSkillScope(ctx, agentConfig, customAgent.Config.SkillsSelectionMode, req.SkillNames)
 	applyPerRequestMCPScope(ctx, agentConfig, customAgent.Config.MCPServices, isSharedAgent, req.MCPServiceIDs)
 
@@ -298,9 +360,21 @@ func (s *sessionService) buildAgentConfig(
 	// Build search targets using agent's tenant (handler has validated access for shared agent)
 	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.TagScopes)
 	if err != nil {
-		logger.Warnf(ctx, "Failed to build search targets for agent: %v", err)
+		return nil, fmt.Errorf("build search targets: %w", err)
 	}
 	agentConfig.SearchTargets = searchTargets
+	// Document tags are stored in knowledge_tag_relations, so document-KB tag
+	// scopes are resolved to concrete knowledge IDs before retrieval. Preserve
+	// those resolved IDs as this turn's pinned documents as well: otherwise the
+	// Agent tools are correctly constrained behind the scenes, but the model only
+	// sees a bound KB and does not know which documents the user explicitly chose.
+	if len(req.TagScopes) > 0 {
+		agentConfig.KnowledgeIDs = mergeResolvedTagKnowledgeIDs(
+			agentConfig.KnowledgeIDs,
+			searchTargets,
+			req.TagScopes,
+		)
+	}
 	logger.Infof(ctx, "Agent search targets built: %d targets", len(searchTargets))
 
 	if agentConfig.MaxContextTokens <= 0 {
@@ -308,6 +382,31 @@ func (s *sessionService) buildAgentConfig(
 	}
 
 	return agentConfig, nil
+}
+
+func mergeResolvedTagKnowledgeIDs(
+	existing []string,
+	searchTargets types.SearchTargets,
+	tagScopes []types.TagScope,
+) []string {
+	tagKBs := make(map[string]bool, len(tagScopes))
+	for _, scope := range tagScopes {
+		if scope.KnowledgeBaseID != "" && len(scope.TagIDs) > 0 {
+			tagKBs[scope.KnowledgeBaseID] = true
+		}
+	}
+	if len(tagKBs) == 0 {
+		return uniqueNonEmptyStrings(existing)
+	}
+
+	merged := append([]string(nil), existing...)
+	for _, target := range searchTargets {
+		if target == nil || !tagKBs[target.KnowledgeBaseID] || target.Type != types.SearchTargetTypeKnowledge {
+			continue
+		}
+		merged = append(merged, target.KnowledgeIDs...)
+	}
+	return uniqueNonEmptyStrings(merged)
 }
 
 // applyPerRequestSkillScope narrows the agent's skill whitelist to the @Skill
@@ -454,15 +553,7 @@ func (s *sessionService) configureSkillsFromAgent(
 	if customAgent == nil {
 		return
 	}
-	// When sandbox is disabled, skills cannot be enabled (no script execution environment)
-	sandboxMode := os.Getenv("WEKNORA_SANDBOX_MODE")
-	if sandboxMode == "" || sandboxMode == "disabled" {
-		agentConfig.SkillsEnabled = false
-		agentConfig.SkillDirs = nil
-		agentConfig.AllowedSkills = nil
-		logger.Infof(ctx, "Sandbox is disabled: skills are not available")
-		return
-	}
+	agentConfig.SandboxConfigID = customAgent.Config.SandboxConfigID
 	dir := getPreloadedSkillsDir()
 	switch customAgent.Config.SkillsSelectionMode {
 	case "all":

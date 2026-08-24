@@ -52,13 +52,12 @@ const syncOIDCUserContext = async () => {
     throw new Error(currentUserResponse.message || 'Failed to get user information')
   }
 
-  const { user, tenant, memberships } = currentUserResponse.data
+  const { user, tenant, memberships, capabilities } = currentUserResponse.data
   authStore.setUser(userInfoFromApi(user, tenant?.id))
   if (tenant) {
     authStore.setTenant({
       id: String(tenant.id) || '',
       name: tenant.name || '',
-      api_key: tenant.api_key || '',
       owner_id: tenant.owner_id || user.id || '',
       description: tenant.description,
       status: tenant.status,
@@ -68,6 +67,8 @@ const syncOIDCUserContext = async () => {
       created_at: tenant.created_at || new Date().toISOString(),
       updated_at: tenant.updated_at || new Date().toISOString()
     })
+  } else {
+    authStore.setTenant(null)
   }
   // Refresh memberships so currentTenantRole reflects any role change
   // since the last login (e.g. an Owner demoted us to Viewer in a
@@ -75,6 +76,9 @@ const syncOIDCUserContext = async () => {
   // login-time snapshot and the UI silently lies about our authority.
   if (Array.isArray(memberships)) {
     authStore.setMemberships(memberships)
+  }
+  if (typeof capabilities?.can_create_tenant === 'boolean') {
+    authStore.setCanCreateTenant(capabilities.can_create_tenant)
   }
   // Same active-vs-home reconciliation as Login.vue: if the OIDC login
   // landed us in a non-home tenant (because the backend honoured a
@@ -101,8 +105,21 @@ const persistOIDCLoginResponse = async (response: any) => {
 
   await syncOIDCUserContext()
 
+  // OIDC 跳转前暂存的邀请 token：拿到会话后兑换并进入对应空间。
+  const pendingInviteToken = sessionStorage.getItem('weknora_pending_invite_token')
+  if (pendingInviteToken) {
+    sessionStorage.removeItem('weknora_pending_invite_token')
+    const result = await authStore.acceptInvitationByTokenAndRefresh(pendingInviteToken)
+    await nextTick()
+    if (result.ok) MessagePlugin.success(t('inviteRegister.joined'))
+    else MessagePlugin.warning(t('inviteRegister.invalidBody'))
+    // 会话已有效，无论 token 是否兑换成功都进入应用。
+    router.replace('/platform/knowledge-bases')
+    return
+  }
+
   await nextTick()
-  router.replace('/platform/knowledge-bases')
+  router.replace(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
 }
 
 const handleGlobalOIDCCallback = async () => {
@@ -190,7 +207,7 @@ watch(
   { immediate: true },
 )
 
-// 切换租户后会 hard reload；切换前 stash 的 toast 这里 consume 并弹出，
+// 切换空间后会 hard reload；切换前 stash 的 toast 这里 consume 并弹出，
 // 这样 toast 显示在新页面上，duration 才真正生效。
 const showPendingTenantSwitchToast = () => {
   const pending = consumePendingTenantSwitchToast()

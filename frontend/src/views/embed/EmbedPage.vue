@@ -29,6 +29,7 @@
         v-if="sessionId"
         :session-id="sessionId"
         :session-sig="sessionSig"
+        :visitor-id="visitorId"
         :channel-id="channelId"
         :token="token"
         :agent-id="config.agent_id"
@@ -52,11 +53,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import EmbedChatView from '@/views/embed/EmbedChatView.vue'
 import { useEmbedBridge } from '@/composables/useEmbedBridge'
+import { setDefaultProtectedFileAccess } from '@/utils/protectedFileAccess'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -69,12 +71,27 @@ const {
   config,
   sessionId,
   sessionSig,
+  visitorId,
   loadError,
   awaitingToken,
   bootstrapping,
   hostContext,
   startNewSession,
 } = useEmbedBridge(channelId)
+
+// An embed visitor has no Bearer/tenant credentials, so every protected file in
+// this document must go through the channel-scoped proxy. Registering the plane
+// once here keeps deeply nested renderers (agent stream, references, wiki
+// drawer) from having to thread the channel/token down as props.
+watchEffect(() => {
+  setDefaultProtectedFileAccess(
+    channelId.value && token.value
+      ? { mode: 'embed', channelId: channelId.value, token: token.value }
+      : null,
+  )
+})
+
+onUnmounted(() => setDefaultProtectedFileAccess(null))
 
 const handleNewChat = () => {
   // The current session is already empty — reuse it instead of spawning yet
@@ -177,10 +194,6 @@ watch(headerTitle, (title) => {
   }
 
   :deep(.embed-send-btn:not(.disabled)) {
-    background: var(--embed-primary, var(--td-brand-color));
-  }
-
-  :deep(.loading-typing span) {
     background: var(--embed-primary, var(--td-brand-color));
   }
 }

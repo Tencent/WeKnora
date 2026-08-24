@@ -7,6 +7,7 @@
       :disabled="disabled"
       :loading="loading"
       :status="status"
+      :clearable="clearable"
       filterable
       style="width: 100%;"
     >
@@ -46,6 +47,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { listModels, type ModelConfig } from '@/api/model'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { filterModelsByType } from './modelSelectorFilter'
 
 interface Props {
   modelType: 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR'
@@ -53,6 +55,7 @@ interface Props {
   disabled?: boolean
   placeholder?: string
   status?: 'default' | 'success' | 'warning' | 'error'
+  clearable?: boolean
   // 可选：外部传入的所有模型列表，如果提供则不调用API
   allModels?: ModelConfig[]
 }
@@ -61,6 +64,7 @@ const props = withDefaults(defineProps<Props>(), {
   disabled: false,
   placeholder: '',
   status: 'default',
+  clearable: false,
 })
 
 const emit = defineEmits<{
@@ -81,10 +85,10 @@ const modelDisplayName = (model: ModelConfig) => {
   return displayName || model.name
 }
 
-// 监听 allModels 变化，自动过滤当前类型的模型
-watch(() => props.allModels, (newModels) => {
+// 监听 allModels / modelType 变化，自动过滤当前类型的模型
+watch(() => [props.allModels, props.modelType] as const, ([newModels]) => {
   if (newModels && Array.isArray(newModels)) {
-    models.value = newModels.filter(m => m.type === props.modelType)
+    models.value = filterModelsByType(newModels, props.modelType)
   }
 }, { immediate: true })
 
@@ -105,7 +109,7 @@ const loadModels = async () => {
     const result = await listModels()
     // 前端按类型筛选模型
     if (result && Array.isArray(result)) {
-      models.value = result.filter(m => m.type === props.modelType)
+      models.value = filterModelsByType(result, props.modelType)
     } else {
       models.value = []
     }
@@ -119,13 +123,13 @@ const loadModels = async () => {
 }
 
 // 处理模型选择变化
-const handleModelChange = (value: string) => {
+const handleModelChange = (value?: string) => {
   // 如果选择的是添加模型选项，触发添加事件而不更新选中值
   if (value === '__add_model__') {
     emit('add-model')
     return
   }
-  emit('update:selectedModelId', value)
+  emit('update:selectedModelId', value || '')
 }
 
 // 暴露刷新方法给父组件

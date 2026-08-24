@@ -80,7 +80,7 @@ func (h *WebSearchProviderHandler) CreateProvider(c *gin.Context) {
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: tenant context missing"})
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
 		return
 	}
 
@@ -111,7 +111,7 @@ func (h *WebSearchProviderHandler) CreateProvider(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data":    dto.NewWebSearchProviderResponse(provider),
+		"data":    dto.NewWebSearchProviderResponse(ctx, provider),
 	})
 }
 
@@ -121,7 +121,7 @@ func (h *WebSearchProviderHandler) ListProviders(c *gin.Context) {
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: tenant context missing"})
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
 		return
 	}
 
@@ -134,7 +134,7 @@ func (h *WebSearchProviderHandler) ListProviders(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewWebSearchProviderResponses(providers),
+		"data":    dto.NewWebSearchProviderResponses(ctx, providers),
 	})
 }
 
@@ -156,7 +156,7 @@ func (h *WebSearchProviderHandler) GetProvider(c *gin.Context) {
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: tenant context missing"})
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
 		return
 	}
 
@@ -169,7 +169,7 @@ func (h *WebSearchProviderHandler) GetProvider(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewWebSearchProviderResponse(provider),
+		"data":    dto.NewWebSearchProviderResponse(ctx, provider),
 	})
 }
 
@@ -194,7 +194,7 @@ func (h *WebSearchProviderHandler) UpdateProvider(c *gin.Context) {
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: tenant context missing"})
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
 		return
 	}
 
@@ -263,7 +263,7 @@ func (h *WebSearchProviderHandler) UpdateProvider(c *gin.Context) {
 	// Re-fetch to get the full stored state
 	updated, _ := h.repo.GetByID(ctx, tenantID, id)
 	if updated != nil {
-		c.JSON(http.StatusOK, gin.H{"success": true, "data": dto.NewWebSearchProviderResponse(updated)})
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": dto.NewWebSearchProviderResponse(ctx, updated)})
 	} else {
 		c.JSON(http.StatusOK, gin.H{"success": true})
 	}
@@ -287,7 +287,7 @@ func (h *WebSearchProviderHandler) DeleteProvider(c *gin.Context) {
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: tenant context missing"})
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
 		return
 	}
 
@@ -344,7 +344,7 @@ func (h *WebSearchProviderHandler) TestProviderByID(c *gin.Context) {
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: tenant context missing"})
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
 		return
 	}
 

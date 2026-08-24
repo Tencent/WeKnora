@@ -12,11 +12,19 @@ import (
 
 type wikiFlagIssueTool struct {
 	BaseTool
-	wikiService interfaces.WikiPageService
-	kbIDs       []string
+	wikiService      interfaces.WikiPageService
+	kbIDs            []string
+	routes           *WikiRouteResolver
+	knowledgeService interfaces.KnowledgeService
+	searchTargets    types.SearchTargets
+	scopeEnforced    bool
 }
 
-func NewWikiFlagIssueTool(wikiService interfaces.WikiPageService, kbIDs []string) types.Tool {
+func NewWikiFlagIssueTool(
+	wikiService interfaces.WikiPageService,
+	kbIDs []string,
+	routes ...*WikiRouteResolver,
+) *wikiFlagIssueTool {
 	return &wikiFlagIssueTool{
 		BaseTool: NewBaseTool(
 			ToolWikiFlagIssue,
@@ -42,7 +50,7 @@ This will log an issue for human review or automated maintenance.`,
     "suspected_knowledge_ids": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Optional list of knowledge_ids (from the <sources> block) that you suspect are causing the pollution or error."
+      "description": "Optional list of short dN document IDs from the <sources> block that you suspect are causing the pollution or error."
     }
   },
   "required": ["slug", "issue_type", "description"]
@@ -50,7 +58,18 @@ This will log an issue for human review or automated maintenance.`,
 		),
 		wikiService: wikiService,
 		kbIDs:       kbIDs,
+		routes:      firstWikiRoute(routes),
 	}
+}
+
+func (t *wikiFlagIssueTool) WithKnowledgeScope(
+	knowledgeService interfaces.KnowledgeService,
+	searchTargets types.SearchTargets,
+) *wikiFlagIssueTool {
+	t.knowledgeService = knowledgeService
+	t.searchTargets = searchTargets
+	t.scopeEnforced = true
+	return t
 }
 
 func (t *wikiFlagIssueTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
@@ -65,21 +84,32 @@ func (t *wikiFlagIssueTool) Execute(ctx context.Context, args json.RawMessage) (
 	}
 
 	slug := strings.TrimSpace(params.Slug)
-	if slug == "" {
-		return &types.ToolResult{Success: false, Error: "slug is required"}, nil
+	normalizedSlug, slugErr := normalizeAndValidateWikiSlug(slug)
+	if slugErr != nil {
+		return &types.ToolResult{Success: false, Error: slugErr.Error()}, nil
 	}
+	slug = normalizedSlug
 
 	if len(t.kbIDs) == 0 {
 		return &types.ToolResult{Success: false, Error: "No knowledge bases available for issue tracking"}, nil
 	}
-	
-	// Default to first KB ID if multiple (normally there's only one in this context)
-	kbID := t.kbIDs[0]
 
-	// Verify the page exists
-	page, err := t.wikiService.GetPageBySlug(ctx, kbID, slug)
-	if err != nil || page == nil {
-		return &types.ToolResult{Success: false, Error: fmt.Sprintf("Wiki page with slug '%s' not found", slug)}, nil
+	page, kbID, err := resolveUniqueWikiPage(ctx, t.wikiService, slug, t.kbIDs, t.routes)
+	if err != nil {
+		return &types.ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	suspectedKnowledgeIDs := params.SuspectedKnowledgeIDs
+	if t.scopeEnforced && len(suspectedKnowledgeIDs) > 0 {
+		resolved, scopeErr := resolveAuthorizedSourceRefs(
+			ctx, t.searchTargets, suspectedKnowledgeIDs, t.knowledgeService,
+		)
+		if scopeErr != nil {
+			return &types.ToolResult{Success: false, Error: "Invalid suspected_knowledge_ids: " + scopeErr.Error()}, nil
+		}
+		suspectedKnowledgeIDs = make([]string, 0, len(resolved))
+		for _, ref := range resolved {
+			suspectedKnowledgeIDs = append(suspectedKnowledgeIDs, strings.SplitN(ref, "|", 2)[0])
+		}
 	}
 
 	issue := &types.WikiPageIssue{
@@ -88,7 +118,7 @@ func (t *wikiFlagIssueTool) Execute(ctx context.Context, args json.RawMessage) (
 		Slug:                  slug,
 		IssueType:             params.IssueType,
 		Description:           params.Description,
-		SuspectedKnowledgeIDs: params.SuspectedKnowledgeIDs,
+		SuspectedKnowledgeIDs: suspectedKnowledgeIDs,
 		ReportedBy:            "wiki-researcher-agent",
 		Status:                "pending",
 	}

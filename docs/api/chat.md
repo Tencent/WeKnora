@@ -7,10 +7,21 @@
 | POST | `/knowledge-chat/:session_id` | 基于知识库的问答         |
 | POST | `/agent-chat/:session_id`     | 基于 Agent 的智能问答    |
 | POST | `/knowledge-search`           | 基于知识库的搜索知识     |
+| GET  | `/sessions/:session_id/messages/:message_id/suggestions` | 获取已生成的回答后推荐 |
+| POST | `/sessions/:session_id/messages/:message_id/suggestions` | 确保生成或换一批推荐 |
+| POST | `/sessions/:session_id/suggestion-events` | 上报曝光、点击、关闭事件 |
 
 ## POST `/knowledge-chat/:session_id` - 基于知识库的问答
 
 基于知识库的 RAG 问答，支持 SSE 流式响应。
+
+**查询参数**：
+
+| 参数 | 取值 | 说明 |
+|------|------|------|
+| `resource_urls` | `handle`（默认）/ `public` | `public` 让答案与引用里的图片直接返回可加载的 http(s) 链接，省去逐个调用 `/files` 代理。详见[文件与图片引用](./README.md#文件与图片引用resource-与直链) |
+
+同样适用于下面的 `/agent-chat/:session_id`、`/knowledge-search` 与 `/sessions/continue-stream/:session_id`。
 
 **请求参数**：
 
@@ -23,9 +34,9 @@
 | `summary_model_id` | string | 否 | 覆盖默认的摘要模型 ID |
 | `mentioned_items` | object[] | 否 | @提及的知识库和文件列表 |
 | `disable_title` | bool | 否 | 是否禁用自动标题生成（默认 false） |
-| `enable_memory` | bool | 否 | 是否启用记忆功能 |
 | `images` | object[] | 否 | 附带的图片（base64 格式），需要 Agent 启用图片上传 |
 | `channel` | string | 否 | 来源渠道标识：`web`、`api`、`im`、`browser_extension` |
+| `suggestion_attribution` | object | 否 | 用户从推荐问题发起本轮时传入 `{suggestion_set_id, question_id}`；服务端会校验归属 |
 
 **请求**:
 
@@ -73,9 +84,35 @@ Agent 模式支持更智能的问答，包括工具调用、网络搜索、多�
 | `summary_model_id` | string | 否 | 覆盖默认的摘要模型 ID |
 | `mentioned_items` | object[] | 否 | @提及的知识库和文件列表 |
 | `disable_title` | bool | 否 | 是否禁用自动标题生成（默认 false） |
-| `enable_memory` | bool | 否 | 是否启用记忆功能 |
 | `images` | object[] | 否 | 附带的图片（base64 格式），需要 Agent 启用图片上传 |
 | `channel` | string | 否 | 来源渠道标识：`web`、`api`、`im`、`browser_extension` |
+| `suggestion_attribution` | object | 否 | 用户从推荐问题发起本轮时传入 `{suggestion_set_id, question_id}`；服务端会校验归属 |
+
+## 回答后推荐问题
+
+回答主消息完成后，服务端会异步生成推荐问题，不阻塞 SSE 的 `complete`/`done` 事件。生成结果按“空间、助手消息、位置、配置快照、语言”持久化并去重。
+
+```http
+POST /api/v1/sessions/{session_id}/messages/{message_id}/suggestions
+Content-Type: application/json
+
+{"regenerate": false}
+```
+
+状态包括 `generating`、`ready`、`suppressed`、`failed`。`ready` 时的每个问题都有稳定 `id`，点击后应先上报事件，并在下一次聊天请求中携带 `suggestion_attribution`。
+
+```http
+POST /api/v1/sessions/{session_id}/suggestion-events
+Content-Type: application/json
+
+{
+  "suggestion_set_id": "...",
+  "question_id": "...",
+  "event_type": "click"
+}
+```
+
+网页嵌入提供同构接口：`/api/v1/embed/{channel_id}/sessions/{session_id}/...`，继续使用嵌入令牌和 `X-Embed-Session`。
 
 **mentioned_items 结构**：
 

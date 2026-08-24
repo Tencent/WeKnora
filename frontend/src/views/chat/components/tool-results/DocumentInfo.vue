@@ -85,7 +85,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineProps } from 'vue';
+import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { DocumentInfoData, DocumentInfoDocument } from '@/types/tool-results';
 
@@ -108,9 +108,11 @@ const channelLabelMap: Record<string, string> = {
   wechat: 'knowledgeBase.channelWechat',
   wecom: 'knowledgeBase.channelWecom',
   feishu: 'knowledgeBase.channelFeishu',
+  gitlab: 'knowledgeBase.channelGitLab',
   dingtalk: 'knowledgeBase.channelDingtalk',
   slack: 'knowledgeBase.channelSlack',
   im: 'knowledgeBase.channelIm',
+  ima: 'knowledgeBase.channelIma',
 };
 
 const getChannelLabel = (channel: string) => {

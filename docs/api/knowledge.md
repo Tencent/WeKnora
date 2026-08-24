@@ -10,6 +10,8 @@
 | POST   | `/knowledge-bases/:id/knowledge/url`       | 从 URL 创建知识（网页抓取或文件下载）       |
 | POST   | `/knowledge-bases/:id/knowledge/manual`    | 创建手工 Markdown 知识                     |
 | GET    | `/knowledge-bases/:id/knowledge`           | 列出知识库下的知识（支持分页/筛选）         |
+| GET    | `/knowledge-bases/:id/knowledge/folders`   | 获取知识库文件夹目录树                       |
+| PUT    | `/knowledge-bases/:id/knowledge/folders`   | 重命名或移动文件夹（含子目录）               |
 | DELETE | `/knowledge-bases/:id/knowledge`           | 清空知识库下的所有知识（异步任务）         |
 | GET    | `/knowledge/batch`                         | 按 ID 列表批量获取知识                     |
 | GET    | `/knowledge/:id`                           | 获取知识详情                               |
@@ -23,13 +25,15 @@
 | PUT    | `/knowledge/image/:id/:chunk_id`           | 更新分块图像信息                           |
 | PUT    | `/knowledge/tags`                          | 批量更新知识标签                           |
 | GET    | `/knowledge/search`                        | 跨知识库搜索/过滤知识                      |
+| POST   | `/knowledge/batch-reparse`                 | 同一知识库内批量重新解析知识（异步任务）   |
 | POST   | `/knowledge/batch-delete`                  | 同一知识库内批量删除知识（异步任务）       |
+| POST   | `/knowledge/folder`                        | 批量移动知识到指定文件夹（仅改归类）       |
 | POST   | `/knowledge/move`                          | 迁移知识到另一知识库（异步任务）           |
 | GET    | `/knowledge/move/progress/:task_id`        | 查询知识迁移任务进度                       |
 
 > **公共说明**：
 > - 路径中的 `:id`（知识库路径下）为**知识库 ID**，`/knowledge/:id` 中的 `:id` 为**知识 ID**。
-> - 所有写操作（创建、更新、删除、迁移、重新解析、取消解析）需要当前用户在知识库所属组织内具有 `editor` 或 `admin` 权限；清空知识库内容仅 KB **所有者**（admin 且租户匹配）可操作。
+> - 所有写操作（创建、更新、删除、迁移、重新解析、取消解析）需要当前用户在知识库所属组织内具有 `editor` 或 `admin` 权限；清空知识库内容仅 KB **所有者**（admin 且空间匹配）可操作。
 > - 关键状态字段：`parse_status` 取值 `pending` / `processing` / `finalizing` / `completed` / `failed` / `cancelled`；`enable_status` 取值 `enabled` / `disabled`。
 > - `processing` 指 DocReader / 分块 / 向量化阶段；`finalizing` 指主解析已完成、仍在执行摘要 / 问题生成 / 图谱抽取等索引优化任务；只有当全部子任务到达终态后才进入 `completed`。
 > - `cancelled` 表示解析被用户主动取消，可通过 `reparse` 重新触发。`pending` / `processing` / `finalizing` 这三种状态都可通过 `cancel-parse` 终止。
@@ -275,6 +279,10 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 | `source`       | string  | -    | 按来源/渠道过滤：`web` / `api` / `browser_extension` / `feishu` / `notion` / `yuque` / `wechat` 等； 特殊值 `manual` / `url` 命中 `type` 列 |
 | `start_time`   | string  | -    | 更新时间起点，接受 RFC3339 (`2024-05-01T00:00:00+08:00`) 或 `YYYY-MM-DD HH:MM:SS` / `YYYY-MM-DD`     |
 | `end_time`     | string  | -    | 更新时间终点，格式同 `start_time`                                                                   |
+| `folder_path`  | string  | -    | 按文件夹路径筛选；**仅当传入该参数时启用文件夹维度**。空字符串表示知识库根目录（不含子文件夹中的文档）；不传则列出全部文件夹下的文档（扁平视图） |
+| `folder_recursive` | bool | false | 为 `true` 时同时返回 `folder_path` 子目录内的文档；仅在传入 `folder_path` 时生效 |
+
+> **文件夹筛选语义**：`folder_path` 是否出现在 query 中决定列表模式，不能仅凭空字符串区分「根目录」与「不按文件夹过滤」。集成方若需要浏览某一文件夹，应显式传 `folder_path`（根目录传 `folder_path=`）；若需要全库扁平列表，则省略该参数。
 
 **请求**:
 
@@ -303,6 +311,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
             "enable_status": "disabled",
             "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
             "file_name": "",
+            "folder_path": "",
             "file_type": "",
             "file_size": 0,
             "file_hash": "",
@@ -323,9 +332,91 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 }
 ```
 
+## GET `/knowledge-bases/:id/knowledge/folders` - 获取文件夹目录树
+
+返回由 `folder_path` 聚合而成的目录树，包含每个文件夹的直接文档数与含子目录的总数。只读，权限与列出知识相同（Viewer+ 且对 KB 有 read 权限）。
+
+**响应**:
+
+```json
+{
+    "success": true,
+    "data": {
+        "root_document_count": 2,
+        "total_document_count": 10,
+        "folders": [
+            {
+                "path": "docs",
+                "name": "docs",
+                "document_count": 0,
+                "total_count": 4,
+                "children": [
+                    {
+                        "path": "docs/spec",
+                        "name": "spec",
+                        "document_count": 3,
+                        "total_count": 4,
+                        "children": []
+                    }
+                ]
+            }
+        ]
+    }
+}
+```
+
+## PUT `/knowledge-bases/:id/knowledge/folders` - 重命名或移动文件夹
+
+把一个文件夹及其所有子目录改到新路径。目标路径已存在时两个文件夹合并；不能移动到自身子目录下。需要 KB **创建者**或 Admin+，且对 KB 有 write 权限。
+
+**请求体**:
+
+| 字段   | 类型   | 必填 | 说明                         |
+| ------ | ------ | ---- | ---------------------------- |
+| `from` | string | 是   | 源文件夹路径（不能为空）     |
+| `to`   | string | 是   | 目标文件夹路径（不能为空）   |
+
+**响应**:
+
+```json
+{
+    "success": true,
+    "data": {
+        "moved_count": 3,
+        "folder_path": "handbook"
+    }
+}
+```
+
+`moved_count` 为 0 表示源文件夹不存在或已是 no-op。
+
+## POST `/knowledge/folder` - 批量移动知识到文件夹
+
+批量修改知识条目的 `folder_path`，仅调整归类，**不会**重新解析、分块或向量化。目标路径不存在时会自动创建；空路径表示移回知识库根目录。需要 editor/admin 且为 KB 创建者或 Admin+。
+
+**请求体**:
+
+| 字段            | 类型     | 必填 | 说明                                      |
+| --------------- | -------- | ---- | ----------------------------------------- |
+| `kb_id`         | string   | 是   | 知识库 ID                                 |
+| `knowledge_ids` | string[] | 是   | 知识 ID 列表（最多 200 条）               |
+| `folder_path`   | string   | 否   | 目标文件夹路径；省略或空字符串表示根目录 |
+
+**响应**:
+
+```json
+{
+    "success": true,
+    "data": {
+        "moved_count": 2,
+        "folder_path": "archive/2026"
+    }
+}
+```
+
 ## DELETE `/knowledge-bases/:id/knowledge` - 清空知识库下的所有知识
 
-异步提交"清空任务"，删除该知识库下的全部知识条目；知识库本身保留。**仅 KB 所有者（admin 且租户匹配）可操作**。
+异步提交"清空任务"，删除该知识库下的全部知识条目；知识库本身保留。**仅 KB 所有者（admin 且空间匹配）可操作**。
 
 **请求**:
 
@@ -363,8 +454,8 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/knowledge-bases/k
 | 字段        | 类型     | 必填 | 说明                                                                  |
 | ----------- | -------- | ---- | --------------------------------------------------------------------- |
 | `ids`       | string[] | 是   | 知识 ID，重复 `ids=...` 传多个                                        |
-| `kb_id`     | string   | 否   | 限定知识库范围；共享知识库场景下用于按 KB 校验权限并解析有效租户       |
-| `agent_id`  | string   | 否   | 共享 Agent ID；按 Agent 所属租户拉取，常用于共享场景刷新后的文件回填   |
+| `kb_id`     | string   | 否   | 限定知识库范围；共享知识库场景下用于按 KB 校验权限并解析有效空间       |
+| `agent_id`  | string   | 否   | 共享 Agent ID；按 Agent 所属空间拉取，常用于共享场景刷新后的文件回填   |
 
 **请求**:
 
@@ -457,7 +548,9 @@ curl --location 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-09cf-485b-a7b5-
 
 ## PUT `/knowledge/:id` - 更新知识
 
-更新知识条目的元信息（标题/描述/标签等）。请求体为 `Knowledge` 结构，仅服务侧白名单字段会被实际更新。
+部分更新知识条目的元信息。请求体字段均可选；**未传字段保持不变**。显式传入 `"description": ""` 可清空摘要。
+
+可更新字段：`title`、`description`、`custom_metadata`。
 
 **请求**:
 
@@ -467,9 +560,18 @@ curl --location --request PUT 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-0
 --header 'Content-Type: application/json' \
 --data '{
     "title": "彗星 - 天文百科",
-    "description": "彗星条目，已校对",
-    "tag_id": "tag-00000001",
-    "enable_status": "enabled"
+    "description": "彗星条目，已校对"
+}'
+```
+
+清空摘要示例：
+
+```curl
+curl --location --request PUT 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "description": ""
 }'
 ```
 
@@ -478,7 +580,8 @@ curl --location --request PUT 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-0
 ```json
 {
     "success": true,
-    "message": "Knowledge chunk updated successfully"
+    "message": "Knowledge updated successfully",
+    "data": {}
 }
 ```
 
@@ -729,7 +832,7 @@ curl --location --request PUT 'http://localhost:8080/api/v1/knowledge/tags' \
 
 ## GET `/knowledge/search` - 跨知识库搜索/过滤知识
 
-按关键词在当前租户（含已共享给当前租户）的知识中检索；可按文件类型过滤；指定 `agent_id` 时按共享 Agent 所配置的知识库范围检索。
+按关键词在当前空间（含已共享给当前空间）的知识中检索；可按文件类型过滤；指定 `agent_id` 时按共享 Agent 所配置的知识库范围检索。
 
 **查询参数**:
 
@@ -782,6 +885,50 @@ curl --location --get 'http://localhost:8080/api/v1/knowledge/search' \
 
 `agent_id=...&` 且该 Agent 的 KB 选择模式为 `none` 时，将直接返回 `data: []` 与 `has_more: false`。
 
+## POST `/knowledge/batch-reparse` - 同一知识库内批量重新解析
+
+按 ID 列表在单个知识库内批量重新解析知识（异步任务）。单次最多 200 个 ID；服务侧会校验所有 ID 存在并属于同一 `kb_id`。
+
+**请求体**:
+
+| 字段             | 类型     | 必填 | 说明                                             |
+| ---------------- | -------- | ---- | ------------------------------------------------ |
+| `kb_id`          | string   | 是   | 目标知识库 ID                                    |
+| `ids`            | string[] | 是   | 待重新解析的知识 ID 列表（≤ 200）                |
+| `process_config` | object   | 否   | 本批次共用的处理配置覆盖；省略时沿用各知识原配置 |
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge/batch-reparse' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "kb_id": "kb-00000001",
+    "ids": [
+        "4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5",
+        "9c8af585-ae15-44ce-8f73-45ad18394651"
+    ]
+}'
+```
+
+**响应**:
+
+```json
+{
+    "success": true,
+    "message": "Batch reparse task submitted",
+    "data": {
+        "task_id": "a1b2c3d4",
+        "reparse_count": 2
+    }
+}
+```
+
+HTTP 成功表示批处理包装任务已入队。后台会尝试提交列表中的每个知识；单项提交失败时，该知识会进入 `failed` 状态并保留错误信息，批处理任务也会在运行队列中标记失败。为避免重复清理已成功提交的知识，出现部分失败后不会自动重试整个批次；可筛选失败知识后再次批量重新解析。
+
+任一 ID 不属于 `kb_id` 或不存在时，返回 400 并整批拒绝。
+
 ## POST `/knowledge/batch-delete` - 同一知识库内批量删除
 
 按 ID 列表在单个知识库内批量删除知识（异步任务）。单次最多 200 个 ID；服务侧会校验所有 ID 属于同一 `kb_id`。
@@ -827,7 +974,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge/batch-delete' \
 
 将一条或多条**处于 `completed` 状态**的知识从源 KB 迁到目标 KB（异步）。约束：
 
-- 源/目标 KB 必须属于当前租户；
+- 源/目标 KB 必须属于当前空间；
 - 源/目标必须为同一 KB 类型且**使用相同的 Embedding 模型**；
 - 源 KB ≠ 目标 KB；
 - 仅 `parse_status=completed` 的知识可迁移。

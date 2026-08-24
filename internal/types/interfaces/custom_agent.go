@@ -73,12 +73,17 @@ type CustomAgentService interface {
 	//   - agentID: Agent ID
 	//   - kbIDs: Optional knowledge base IDs to override agent config
 	//   - knowledgeIDs: Optional knowledge item IDs to further filter
-	//   - tagIDs: Optional knowledge tag IDs; resolved to knowledge item IDs (OR semantics)
+	//   - tagScopes: Optional KB-scoped knowledge tags (OR semantics within each KB)
 	//   - limit: Maximum number of questions to return
 	// Returns:
 	//   - List of suggested questions
 	//   - Possible errors
-	GetSuggestedQuestions(ctx context.Context, agentID string, kbIDs []string, knowledgeIDs []string, tagIDs []string, limit int) ([]types.SuggestedQuestion, error)
+	GetSuggestedQuestions(ctx context.Context, agentID string, kbIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, limit int) ([]types.SuggestedQuestion, error)
+
+	// GetKnowledgeSuggestedQuestions returns only knowledge-derived candidates.
+	// It is independent of whether starter suggestions are enabled and is used
+	// as a source/fallback for contextual follow-up generation.
+	GetKnowledgeSuggestedQuestions(ctx context.Context, agentID string, kbIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, limit int) ([]types.SuggestedQuestion, error)
 }
 
 // CustomAgentRepository defines the custom agent repository interface
@@ -131,4 +136,18 @@ type CustomAgentRepository interface {
 	// CountByModelID counts active agents in the tenant whose config references
 	// the given model ID (chat, rerank, VLM, ASR, query-understand, etc.).
 	CountByModelID(ctx context.Context, tenantID uint64, modelID string) (int64, error)
+
+	// CountBySandboxConfigID counts agents pointing at a sandbox config.
+	//
+	// Used only to warn the admin which agents reference a config; never use it
+	// to refuse operations. Agent references are permanent state, so blocking on
+	// them would make credential rotation impossible.
+	CountBySandboxConfigID(ctx context.Context, tenantID uint64, configID string) (int64, error)
+
+	// ListNamesBySandboxConfigID returns agent names pointing at a sandbox config.
+	//
+	// Used only to warn the admin which agents reference a config; never use it
+	// to refuse operations. Agent references are permanent state, so blocking on
+	// them would make credential rotation impossible.
+	ListNamesBySandboxConfigID(ctx context.Context, tenantID uint64, configID string) ([]string, error)
 }

@@ -80,7 +80,10 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 			time.Sleep(delay)
 		}
 
-		ctx := context.Background()
+		// Tag as a background worker execution so the per-model concurrency
+		// governor throttles Lite-mode ingestion/enrichment LLM calls, mirroring
+		// the asynq backgroundTaskMiddleware in the Redis path.
+		ctx := types.WithBackgroundTask(context.Background())
 		start := time.Now()
 		logger.Infof(ctx, "[SyncTask] Executing task type=%s id=%s", task.Type(), taskID)
 
@@ -96,7 +99,8 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 				time.Sleep(backoff)
 			}
 
-			lastErr = handler(ctx, task)
+			attemptCtx := types.WithTaskRetryMetadata(ctx, attempt, maxRetry)
+			lastErr = handler(attemptCtx, task)
 			if lastErr == nil {
 				logger.Infof(ctx, "[SyncTask] Task completed type=%s id=%s elapsed=%v",
 					task.Type(), taskID, time.Since(start))
@@ -123,7 +127,10 @@ type SyncTaskParams struct {
 	DataTableSummary     interfaces.TaskHandler `name:"dataTableSummary"`
 	ImageMultimodal      interfaces.TaskHandler `name:"imageMultimodal"`
 	KnowledgePostProcess interfaces.TaskHandler `name:"knowledgePostProcess"`
+	KnowledgeAutoTag     interfaces.TaskHandler `name:"knowledgeAutoTag"`
 	WikiIngest           interfaces.TaskHandler `name:"wikiIngest"`
+	TemporaryDocument    interfaces.TemporaryDocumentService
+	MemoryService        interfaces.MemoryService
 }
 
 // RegisterSyncHandlers registers all task handlers on the SyncTaskExecutor.
@@ -132,6 +139,7 @@ func RegisterSyncHandlers(params SyncTaskParams) {
 	params.Executor.RegisterHandler(types.TypeChunkExtract, params.ChunkExtractor.Handle)
 	params.Executor.RegisterHandler(types.TypeDataTableSummary, params.DataTableSummary.Handle)
 	params.Executor.RegisterHandler(types.TypeDocumentProcess, params.KnowledgeService.ProcessDocument)
+	params.Executor.RegisterHandler(types.TypeTemporaryDocumentProcess, params.TemporaryDocument.Process)
 	params.Executor.RegisterHandler(types.TypeManualProcess, params.KnowledgeService.ProcessManualUpdate)
 	params.Executor.RegisterHandler(types.TypeFAQImport, params.KnowledgeService.ProcessFAQImport)
 	params.Executor.RegisterHandler(types.TypeQuestionGeneration, params.KnowledgeService.ProcessQuestionGeneration)
@@ -144,7 +152,10 @@ func RegisterSyncHandlers(params SyncTaskParams) {
 	params.Executor.RegisterHandler(types.TypeKBDelete, params.KnowledgeBaseService.ProcessKBDelete)
 	params.Executor.RegisterHandler(types.TypeImageMultimodal, params.ImageMultimodal.Handle)
 	params.Executor.RegisterHandler(types.TypeKnowledgePostProcess, params.KnowledgePostProcess.Handle)
+	params.Executor.RegisterHandler(types.TypeKnowledgeAutoTag, params.KnowledgeAutoTag.Handle)
 	params.Executor.RegisterHandler(types.TypeDataSourceSync, params.DataSourceService.ProcessSync)
 	params.Executor.RegisterHandler(types.TypeWikiIngest, params.WikiIngest.Handle)
+	params.Executor.RegisterHandler(types.TypeWikiFinalize, params.WikiIngest.Handle)
+	params.Executor.RegisterHandler(types.TypeMemoryExtract, params.MemoryService.Handle)
 	logger.Infof(context.Background(), "[SyncTask] All task handlers registered (Lite mode, no Redis)")
 }

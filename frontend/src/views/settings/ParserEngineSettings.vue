@@ -90,6 +90,7 @@
           </div>
         </button>
       </div>
+
     </template>
 
     <!-- 配置抽屉 — 用 SettingDrawer 包装，保持与 ModelEditorDialog 同款视觉/交互 -->
@@ -254,11 +255,19 @@
             <p class="form-desc">{{ $t('settings.parser.vlmServerUrlHint') }}</p>
           </div>
           <div class="form-item">
+            <label class="form-label">{{ $t('settings.parser.parseMethodLabel') }}</label>
+            <t-select v-model="config.mineru_parse_method">
+              <t-option value="auto" :label="$t('settings.parser.parseMethodAuto')" />
+              <t-option value="ocr" :label="$t('settings.parser.parseMethodOCR')" />
+              <t-option value="txt" :label="$t('settings.parser.parseMethodText')" />
+            </t-select>
+            <p class="form-desc">{{ $t('settings.parser.parseMethodHint') }}</p>
+          </div>
+          <div class="form-item">
             <label class="form-label">{{ $t('settings.parser.featuresLabel', '识别选项') }}</label>
             <div class="form-toggles">
               <t-checkbox v-model="config.mineru_enable_formula">{{ $t('settings.parser.formulaRecognition') }}</t-checkbox>
               <t-checkbox v-model="config.mineru_enable_table">{{ $t('settings.parser.tableRecognition') }}</t-checkbox>
-              <t-checkbox v-model="config.mineru_enable_ocr">OCR</t-checkbox>
             </div>
           </div>
           <div class="form-item">
@@ -375,6 +384,7 @@ import { ref, computed, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
+import { MessagePlugin } from 'tdesign-vue-next'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import {
   getParserEngines,
@@ -412,6 +422,7 @@ const DEFAULT_PARSER_CONFIG: ParserEngineConfig = {
   mineru_vlm_server_url: '',
   mineru_enable_formula: true,
   mineru_enable_table: true,
+  mineru_parse_method: 'auto',
   mineru_enable_ocr: true,
   mineru_language: 'ch',
   mineru_cloud_model: 'pipeline',
@@ -467,11 +478,12 @@ const ENGINE_ORDER: Record<string, number> = {
   builtin: 0,
   weknoracloud: 1,
   simple: 2,
-  markitdown: 3,
-  mineru: 4,
-  mineru_cloud: 5,
-  paddleocr_vl: 6,
-  paddleocr_vl_cloud: 7,
+  anydoc: 3,
+  markitdown: 4,
+  mineru: 5,
+  mineru_cloud: 6,
+  paddleocr_vl: 7,
+  paddleocr_vl_cloud: 8,
 }
 
 const sortedEngines = computed(() => {
@@ -549,6 +561,7 @@ async function loadConfig() {
       mineru_vlm_server_url: data?.mineru_vlm_server_url ?? DEFAULT_PARSER_CONFIG.mineru_vlm_server_url ?? '',
       mineru_enable_formula: data?.mineru_enable_formula ?? DEFAULT_PARSER_CONFIG.mineru_enable_formula ?? true,
       mineru_enable_table: data?.mineru_enable_table ?? DEFAULT_PARSER_CONFIG.mineru_enable_table ?? true,
+      mineru_parse_method: data?.mineru_parse_method ?? (data?.mineru_enable_ocr === false ? 'txt' : 'auto'),
       mineru_enable_ocr: data?.mineru_enable_ocr ?? DEFAULT_PARSER_CONFIG.mineru_enable_ocr ?? true,
       mineru_language: data?.mineru_language ?? DEFAULT_PARSER_CONFIG.mineru_language ?? 'ch',
       mineru_cloud_model: data?.mineru_cloud_model ?? DEFAULT_PARSER_CONFIG.mineru_cloud_model ?? '',
@@ -586,7 +599,9 @@ function buildConfigPayload(): ParserEngineConfig {
     mineru_vlm_server_url: config.value.mineru_vlm_server_url?.trim() ?? '',
     mineru_enable_formula: config.value.mineru_enable_formula,
     mineru_enable_table: config.value.mineru_enable_table,
-    mineru_enable_ocr: config.value.mineru_enable_ocr,
+    mineru_parse_method: config.value.mineru_parse_method ?? 'auto',
+    // Keep the legacy toggle during rolling upgrades. New servers prefer parse_method.
+    mineru_enable_ocr: config.value.mineru_parse_method !== 'txt',
     mineru_language: config.value.mineru_language?.trim() ?? '',
     mineru_cloud_model: config.value.mineru_cloud_model?.trim() ?? '',
     mineru_cloud_enable_formula: config.value.mineru_cloud_enable_formula,

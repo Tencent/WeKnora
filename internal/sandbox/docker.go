@@ -60,6 +60,12 @@ func (s *DockerSandbox) Execute(ctx context.Context, config *ExecuteConfig) (*Ex
 	// Create context with timeout
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	// Managers are resolved from workspace configuration on demand, so an
+	// asynchronous pre-pull would race the first execution and start duplicate
+	// pulls on every resolve. Make image readiness part of the execution result.
+	if err := s.EnsureImage(execCtx); err != nil {
+		return nil, err
+	}
 
 	// Build docker run command
 	args := s.buildDockerArgs(config)
@@ -195,8 +201,6 @@ func (s *DockerSandbox) ImageExists(ctx context.Context) bool {
 }
 
 // EnsureImage pulls the Docker image if it doesn't exist locally.
-// This is intended to be called during initialization so the image is
-// ready before the first script execution.
 func (s *DockerSandbox) EnsureImage(ctx context.Context) error {
 	if s.ImageExists(ctx) {
 		return nil

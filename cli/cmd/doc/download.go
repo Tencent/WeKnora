@@ -79,11 +79,16 @@ stdout.`,
 	}
 	cmd.Flags().StringVarP(&opts.Output, "output", "O", "", `Output path; "-" for stdout. Defaults to the server-suggested filename.`)
 	cmd.Flags().BoolVar(&opts.Clobber, "clobber", false, "Overwrite the output file if it already exists")
+	cmdutil.AddIgnoredKBFlag(cmd)
 	cmdutil.AddFormatFlag(cmd, downloadFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "Download a document's bytes by id. Writes a file (or stdout with --output -).",
 		RequiredFlags: []string{"<doc-id> (positional)"},
 		Output:        "with --format json (file output): envelope.data has path, bytes, filename; suppressed with --output - (raw bytes to stdout)",
+		Examples: []string{
+			"weknora doc download doc_abc --output ./manual.pdf",
+			"weknora doc download doc_abc --output - > manual.pdf",
+		},
 	})
 	return cmd
 }

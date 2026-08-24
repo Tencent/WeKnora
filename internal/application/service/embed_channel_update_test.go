@@ -48,7 +48,7 @@ func TestEmbedChannelUpdateAgentID(t *testing.T) {
 		42,
 		"ch-1",
 		&types.EmbedChannel{AgentID: "agent-new"},
-		&enabled, nil, nil, nil, nil, nil, nil, nil,
+		&enabled, nil, nil, nil, nil, nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)

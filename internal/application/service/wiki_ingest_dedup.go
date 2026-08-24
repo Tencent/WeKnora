@@ -23,11 +23,15 @@ import (
 // external calls, and it only ever *removes* candidates from the prompt —
 // the downstream validMerge check still guards the final write.
 const (
-	// dedupCandidateTopK is how many existing pages we keep per new item
-	// even if none pass the score floor. Guarantees the LLM sees a small
-	// ordered shortlist rather than an empty list when nothing matches
-	// strongly.
-	dedupCandidateTopK = 20
+	// dedupCandidateTopK bounds how many trigram-similar existing pages
+	// each new item's similarity probe returns (the LIMIT passed to
+	// FindSimilarPages, applied per query term = name + each alias). Kept
+	// deliberately small: the DB already orders by similarity desc behind a
+	// pg_trgm threshold, so a genuine same-entity target is essentially
+	// always the top hit. A tight K keeps each item's <candidates> list in
+	// the dedup prompt short, which improves the model's precision and cuts
+	// tokens, at negligible recall cost.
+	dedupCandidateTopK = 5
 
 	// dedupCandidateScoreFloor is the Jaccard floor. Pairs at or above
 	// this similarity are always included regardless of the top-K cap.
@@ -168,6 +172,44 @@ func selectDedupCandidatePages(
 		}
 	}
 	return out
+}
+
+// dedupMergeRejectReason validates a single LLM-proposed merge (srcSlug →
+// dstSlug) against deterministic, model-independent rules. It returns an
+// empty string when the merge is allowed, or a short human-readable reason
+// when it must be rejected. srcCandidates is the set of existing-page slugs
+// that surfaced for srcSlug's OWN similarity probe (see itemCandidates in
+// deduplicateExtractedBatch).
+//
+// The per-item scoping check is the key guard: the dedup prompt shows the
+// model a flattened union of candidates across every new item, so nothing
+// stops a weak model from pairing an item with a page that was only similar
+// to a *different* item (observed: entity/tencent-open → entity/hiring-agent,
+// which share no trigram signal). Requiring dstSlug to be one of srcSlug's
+// own candidates rejects that entire class without depending on the model
+// getting the semantic judgment right.
+func dedupMergeRejectReason(srcSlug, dstSlug string, srcCandidates map[string]bool) string {
+	if !srcCandidates[dstSlug] {
+		// Covers both an outright hallucinated target (in no candidate
+		// set at all) and a real page that was only similar to another
+		// item. Either way the pair lacks a similarity signal for THIS
+		// item, so it is not a safe merge.
+		return "target is not a similarity candidate for this item"
+	}
+	srcSlash := strings.Index(srcSlug, "/")
+	dstSlash := strings.Index(dstSlug, "/")
+	if srcSlash <= 0 || dstSlash <= 0 {
+		// A type-prefixed slug must look like "entity/foo" or
+		// "concept/bar". An LLM that emits an un-prefixed slug here is
+		// hallucinating; reject rather than fall through the prefix-
+		// equality check (which would treat both empty prefixes as a
+		// match).
+		return "missing type prefix"
+	}
+	if srcSlug[:srcSlash+1] != dstSlug[:dstSlash+1] {
+		return "type mismatch: " + srcSlug[:srcSlash+1] + " vs " + dstSlug[:dstSlash+1]
+	}
+	return ""
 }
 
 // dedupPairScore is the max similarity between any surface form of a and

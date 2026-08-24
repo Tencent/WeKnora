@@ -44,7 +44,7 @@ func TestFormatIMToolLine_grepPatterns(t *testing.T) {
 			"patterns": []any{"文明", "策略"},
 		},
 		Data: map[string]interface{}{
-			"total_matches": float64(5),
+			"total_matches":  float64(5),
 			"document_count": float64(2),
 		},
 	})
@@ -77,6 +77,17 @@ func TestFormatIMRagPipelineLine_searchWithQuery(t *testing.T) {
 		Arguments: map[string]any{"query": "讯飞开放平台"},
 	})
 	if line != "正在检索知识库：「讯飞开放平台」" {
+		t.Fatalf("line = %q", line)
+	}
+}
+
+func TestFormatIMRagPipelineLine_webSearchWithQuery(t *testing.T) {
+	line := FormatIMRagPipelineLine(IMToolStep{
+		ToolName:  "knowledge_search",
+		Pending:   true,
+		Arguments: map[string]any{"query": "任素汐演唱会", "search_source": "web"},
+	})
+	if line != "正在检索网络：「任素汐演唱会」" {
 		t.Fatalf("line = %q", line)
 	}
 }

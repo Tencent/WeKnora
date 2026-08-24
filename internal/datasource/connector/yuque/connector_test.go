@@ -4,10 +4,18 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
+
+func TestMain(m *testing.M) {
+	os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	secutils.ResetSSRFWhitelistForTest()
+	os.Exit(m.Run())
+}
 
 func makeDSConfig(f *fakeYuque, resourceIDs []string) *types.DataSourceConfig {
 	return &types.DataSourceConfig{

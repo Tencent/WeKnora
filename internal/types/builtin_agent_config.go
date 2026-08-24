@@ -23,11 +23,11 @@ type BuiltinAgentI18n struct {
 
 // BuiltinAgentEntry is one entry in the builtin_agents list in YAML.
 type BuiltinAgentEntry struct {
-	ID        string                       `yaml:"id"`
-	Avatar    string                       `yaml:"avatar"`
-	IsBuiltin bool                         `yaml:"is_builtin"`
-	I18n      map[string]BuiltinAgentI18n  `yaml:"i18n"`
-	Config    CustomAgentConfig            `yaml:"config"`
+	ID        string                      `yaml:"id"`
+	Avatar    string                      `yaml:"avatar"`
+	IsBuiltin bool                        `yaml:"is_builtin"`
+	I18n      map[string]BuiltinAgentI18n `yaml:"i18n"`
+	Config    CustomAgentConfig           `yaml:"config"`
 }
 
 // builtinAgentsFile is the top-level YAML structure.
@@ -123,6 +123,32 @@ func GetBuiltinAgentWithContext(ctx context.Context, id string, tenantID uint64)
 	}
 
 	return buildAgentFromEntry(id, tenantID, locale)
+}
+
+// ApplyBuiltinAgentLocalization overlays the locale-specific name, description,
+// and avatar from builtin_agents.yaml onto a persisted built-in agent.
+// Tenant-specific Config and other DB fields are left untouched.
+//
+// Built-in agents are seeded into the database with the locale that was active
+// at first run. ListAgents / GetAgentByID used to return those stored strings
+// verbatim, so switching the UI language left the cards in Chinese (or
+// whichever language was seeded). YAML already has per-locale copy; this
+// applies it on the read path.
+func ApplyBuiltinAgentLocalization(ctx context.Context, agent *CustomAgent) {
+	if agent == nil {
+		return
+	}
+	localized := GetBuiltinAgentWithContext(ctx, agent.ID, agent.TenantID)
+	if localized == nil {
+		return
+	}
+	if localized.Name != "" {
+		agent.Name = localized.Name
+	}
+	if localized.Description != "" {
+		agent.Description = localized.Description
+	}
+	agent.Avatar = localized.Avatar
 }
 
 // ---------------------------------------------------------------------------

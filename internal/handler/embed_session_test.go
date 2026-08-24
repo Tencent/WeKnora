@@ -11,7 +11,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/handler/session"
-	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
@@ -38,6 +37,23 @@ func (s *stubSessionServiceForEmbed) GetSession(_ context.Context, id string) (*
 	return sess, nil
 }
 
+func (s *stubSessionServiceForEmbed) GetSessionByID(_ context.Context, tenantID uint64, id string) (*types.Session, error) {
+	sess, ok := s.sessions[id]
+	if !ok || sess.TenantID != tenantID {
+		return nil, errors.New("session not found")
+	}
+	return sess, nil
+}
+
+func (s *stubSessionServiceForEmbed) SetSessionOwnerID(_ context.Context, tenantID uint64, sessionID, ownerID string) error {
+	sess, ok := s.sessions[sessionID]
+	if !ok || sess.TenantID != tenantID {
+		return errors.New("session not found")
+	}
+	sess.UserID = ownerID
+	return nil
+}
+
 func (s *stubSessionServiceForEmbed) CreateSession(_ context.Context, session *types.Session) (*types.Session, error) {
 	created := *session
 	if created.ID == "" {
@@ -61,7 +77,7 @@ func (s *sessionEmbedSvc) ListByAgent(context.Context, uint64, string) ([]*types
 func (s *sessionEmbedSvc) ListByTenant(context.Context, uint64) ([]*types.EmbedChannel, error) {
 	return nil, nil
 }
-func (s *sessionEmbedSvc) Update(context.Context, uint64, string, *types.EmbedChannel, *bool, *bool, *bool, *bool, *bool, *string, *string, *string) (*types.EmbedChannel, error) {
+func (s *sessionEmbedSvc) Update(context.Context, uint64, string, *types.EmbedChannel, *bool, *bool, *bool, *bool, *string, *string, *string) (*types.EmbedChannel, error) {
 	return nil, nil
 }
 func (s *sessionEmbedSvc) GetOwnedChannel(context.Context, uint64, string) (*types.EmbedChannel, error) {
@@ -128,7 +144,7 @@ func newEnsureEmbedSessionCtx(ch *types.EmbedChannel, sessionID, sig string) (*g
 		c.Request.Header.Set("X-Embed-Session", sig)
 	}
 	c.Params = gin.Params{{Key: "session_id", Value: sessionID}}
-	ctx := context.WithValue(c.Request.Context(), middleware.EmbedChannelContextKey, ch)
+	ctx := context.WithValue(c.Request.Context(), types.EmbedChannelContextKey, ch)
 	c.Request = c.Request.WithContext(ctx)
 	return c, w
 }
@@ -170,8 +186,8 @@ func TestEnsureEmbedSessionWrongTenant(t *testing.T) {
 	if err := h.ensureEmbedSession(c); err == nil {
 		t.Fatal("expected error for cross-tenant session")
 	}
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusNotFound, w.Body.String())
 	}
 }
 
@@ -238,7 +254,7 @@ func TestCreateEmbedSessionSuccess(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, "/sessions", nil)
 	c.Set(types.TenantIDContextKey.String(), ch.TenantID)
-	ctx := context.WithValue(c.Request.Context(), middleware.EmbedChannelContextKey, ch)
+	ctx := context.WithValue(c.Request.Context(), types.EmbedChannelContextKey, ch)
 	c.Request = c.Request.WithContext(ctx)
 
 	h.CreateEmbedSession(c)
@@ -282,7 +298,7 @@ func TestGetEmbedChunkForbidden(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodGet, "/chunks/chunk-1", nil)
 	c.Params = gin.Params{{Key: "chunk_id", Value: "chunk-1"}}
-	ctx := context.WithValue(c.Request.Context(), middleware.EmbedChannelContextKey, ch)
+	ctx := context.WithValue(c.Request.Context(), types.EmbedChannelContextKey, ch)
 	c.Request = c.Request.WithContext(ctx)
 
 	h.GetEmbedChunk(c)
@@ -307,7 +323,7 @@ func TestGetEmbedChunkSuccess(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodGet, "/chunks/chunk-ok", nil)
 	c.Params = gin.Params{{Key: "chunk_id", Value: "chunk-ok"}}
-	ctx := context.WithValue(c.Request.Context(), middleware.EmbedChannelContextKey, ch)
+	ctx := context.WithValue(c.Request.Context(), types.EmbedChannelContextKey, ch)
 	c.Request = c.Request.WithContext(ctx)
 
 	h.GetEmbedChunk(c)
@@ -328,7 +344,7 @@ func newEmbedStopSessionCtx(ch *types.EmbedChannel, sessionID, sig, body string)
 	}
 	c.Params = gin.Params{{Key: "session_id", Value: sessionID}}
 	c.Set(types.TenantIDContextKey.String(), ch.TenantID)
-	ctx := context.WithValue(c.Request.Context(), middleware.EmbedChannelContextKey, ch)
+	ctx := context.WithValue(c.Request.Context(), types.EmbedChannelContextKey, ch)
 	c.Request = c.Request.WithContext(ctx)
 	return c, w
 }

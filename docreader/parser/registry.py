@@ -1,11 +1,12 @@
 import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Callable, Dict, List, Optional, Tuple, Type
 
 from docreader.parser.base_parser import BaseParser
 from docreader.parser.doc_parser import DocParser
 from docreader.parser.docx2_parser import Docx2Parser
 from docreader.parser.epub_parser import EPUBParser
 from docreader.parser.excel_parser import ExcelParser
+from docreader.parser.html_parser import HTMLParser
 from docreader.parser.image_parser import ImageParser
 from docreader.parser.markdown_parser import MarkdownParser
 from docreader.parser.markitdown_parser import MarkitdownParser
@@ -15,6 +16,7 @@ from docreader.parser.opendataloader_parser import (
     opendataloader_available,
 )
 from docreader.parser.pdf_parser import PDFParser
+from docreader.parser.xmind_parser import XMindParser
 
 logger = logging.getLogger(__name__)
 
@@ -133,8 +135,13 @@ def _build_default_registry() -> ParserEngineRegistry:
             "markdown": MarkdownParser,
             "xlsx": ExcelParser,
             "xls": ExcelParser,
+            "pptx": MarkitdownParser,
+            "ppt": MarkitdownParser,
             "epub": EPUBParser,
+            "html": HTMLParser,
+            "htm": HTMLParser,
             "mhtml": MHTMLParser,
+            "xmind": XMindParser,
             **_image_types,
         },
         description="内置解析引擎",
@@ -161,7 +168,9 @@ def _build_default_registry() -> ParserEngineRegistry:
         "opendataloader",
         {"pdf": OpenDataLoaderParser},
         description="OpenDataLoader PDF（版面分析，需 Java 11+）",
-        check_available=lambda overrides: opendataloader_available(overrides, quick=True),
+        check_available=lambda overrides: opendataloader_available(
+            overrides, quick=True
+        ),
         unavailable_hint="请安装 opendataloader-pdf 与 Java 11+",
     )
 

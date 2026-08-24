@@ -49,9 +49,9 @@
           <div v-if="session.role === 'user'">
             <EmbedUserMessage
               :content="String(session.content || '')"
-              :mentioned_items="session.mentioned_items"
-              :images="session.images"
-              :attachments="session.attachments"
+              :mentioned_items="asUnknownArray(session.mentioned_items)"
+              :images="asEmbedImages(session.images)"
+              :attachments="asEmbedAttachments(session.attachments)"
               :embeddedMode="true"
               :embed-channel-id="channelId"
               :embed-token="token"
@@ -66,16 +66,23 @@
               :embedded-mode="true"
               :embed-channel-id="channelId"
               :embed-token="token"
+              :embed-session-sig="sessionSig"
+              :embed-visitor-id="visitorId"
             />
+            <FollowUpSuggestions v-if="!session.suggestionsDismissed"
+              :suggestion-set="session.suggestionSet as any"
+              :loading="Boolean(session.suggestionLoading)"
+              :allow-regenerate="Boolean((session.suggestionSet as any)?.allow_regenerate)"
+              @select="(item) => handleFollowUpSelect(session, item)"
+              @regenerate="loadFollowUpSuggestions(session, true, true)"
+              @impression="(set) => recordFollowUpEvent(set, 'impression')"
+              @dismiss="(set) => dismissFollowUps(session, set)" />
           </div>
         </div>
 
-        <div v-if="showGlobalTypingIndicator" class="embed-chat__typing">
-          <div class="loading-typing">
-            <span></span>
-            <span></span>
-            <span></span>
-          </div>
+        <div v-if="showGlobalTypingIndicator" class="embed-chat__typing" role="status"
+          :aria-label="t('chat.thinkingAlt')">
+          <span class="embed-chat__typing-spinner" aria-hidden="true"></span>
         </div>
       </div>
     </div>
@@ -98,21 +105,39 @@
         @stop-generation="handleStopGeneration"
       />
     </div>
+    <ChatReferencesDrawer embedded-mode />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getEmbedSuggestedQuestions, onEmbedHostOpenWithQuery, type SuggestedQuestion } from '@/api/embed'
+import {
+  ensureEmbedMessageSuggestions,
+  getEmbedMessageSuggestions,
+  getEmbedSuggestedQuestions,
+  onEmbedHostOpenWithQuery,
+  recordEmbedMessageSuggestionEvent,
+  type SuggestedQuestion,
+} from '@/api/embed'
 import EmbedInputField from '@/components/EmbedInputField.vue'
 import EmbedBotMessage from '@/views/embed/EmbedBotMessage.vue'
 import EmbedUserMessage from '@/views/embed/EmbedUserMessage.vue'
+import ChatReferencesDrawer from '@/components/ChatReferencesDrawer.vue'
+import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
 import { useEmbedChatSession } from '@/composables/useEmbedChatSession'
+import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue'
+import type { MessageSuggestionItem, MessageSuggestionSet } from '@/api/message-suggestion'
+
+provideChatReferencesDrawer()
+
+type EmbedImage = { url?: string; data?: string }
+type EmbedAttachment = { file_name: string; file_size?: number }
 
 const props = defineProps<{
   sessionId: string
   sessionSig: string
+  visitorId: string
   channelId: string
   token: string
   agentId: string
@@ -135,9 +160,64 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const sessionIdRef = toRef(props, 'sessionId')
 const sessionSigRef = toRef(props, 'sessionSig')
+const visitorIdRef = toRef(props, 'visitorId')
 const suggestedQuestions = ref<SuggestedQuestion[]>([])
 const suggestedLoading = ref(false)
 const hostContextRef = ref<Record<string, unknown>>(props.hostContext || {})
+
+const loadFollowUpSuggestions = async (
+  message: Record<string, unknown>,
+  ensure = false,
+  regenerate = false,
+) => {
+  const messageId = String(message.id || message.assistant_message_id || '')
+  const targetSessionId = props.sessionId
+  if (!props.showSuggestedQuestions || !messageId || !targetSessionId || message.suggestionsDismissed) return
+  message.suggestionLoading = true
+  try {
+    let response = ensure
+      ? await ensureEmbedMessageSuggestions(
+        props.channelId, props.token, targetSessionId, messageId, props.sessionSig, props.visitorId, regenerate,
+      )
+      : await getEmbedMessageSuggestions(
+        props.channelId, props.token, targetSessionId, messageId, props.sessionSig, props.visitorId,
+      )
+    let set = response?.data
+    for (let attempt = 0; set?.status === 'generating' && attempt < 120; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+      if (props.sessionId !== targetSessionId || message.suggestionsDismissed) return
+      response = await getEmbedMessageSuggestions(
+        props.channelId, props.token, targetSessionId, messageId, props.sessionSig, props.visitorId,
+      )
+      set = response?.data
+    }
+    message.suggestionSet = set?.status === 'ready' ? set : null
+  } catch {
+    message.suggestionSet = null
+  } finally {
+    message.suggestionLoading = false
+  }
+}
+
+const loadPersistedFollowUps = (messages: Record<string, unknown>[]) => {
+  for (const message of messages) {
+    if (message.role === 'assistant' && message.is_completed && message.suggestionSet === undefined) {
+      void loadFollowUpSuggestions(message, false)
+    }
+  }
+}
+
+function asUnknownArray(value: unknown): unknown[] | undefined {
+  return Array.isArray(value) ? value : undefined
+}
+
+function asEmbedImages(value: unknown): EmbedImage[] | undefined {
+  return Array.isArray(value) ? value as EmbedImage[] : undefined
+}
+
+function asEmbedAttachments(value: unknown): EmbedAttachment[] | undefined {
+  return Array.isArray(value) ? value as EmbedAttachment[] : undefined
+}
 
 const embedWebSearchStorageKey = () => `weknora-embed-web-search:${props.channelId}`
 
@@ -186,9 +266,11 @@ const {
   onClickScrollToBottom,
   sendMsg,
   handleStopGeneration,
+  setSuggestionAttribution,
 } = useEmbedChatSession({
   sessionId: sessionIdRef,
   sessionSig: sessionSigRef,
+  visitorId: visitorIdRef,
   channelId: props.channelId,
   token: props.token,
   agentId: props.agentId,
@@ -202,6 +284,8 @@ const {
       emit('session-title', title)
     }
   },
+  onTurnComplete: (message) => { void loadFollowUpSuggestions(message, true) },
+  onMessagesLoaded: loadPersistedFollowUps,
 })
 
 const welcomeText = computed(() => props.welcomeMessage?.trim() || '')
@@ -231,7 +315,7 @@ const fetchSuggestedQuestions = async () => {
   }
   suggestedLoading.value = true
   try {
-    const res = await getEmbedSuggestedQuestions(props.channelId, props.token, 6)
+    const res = await getEmbedSuggestedQuestions(props.channelId, props.token)
     suggestedQuestions.value = res?.data?.questions || []
   } catch {
     suggestedQuestions.value = []
@@ -252,6 +336,38 @@ const handleSuggestedClick = (question: string) => {
   const text = question.trim()
   if (!text || isReplying.value) return
   void sendMsg(text, { webSearchEnabled: webSearchEnabled.value })
+}
+
+const recordFollowUpEvent = (
+  set: MessageSuggestionSet,
+  eventType: 'impression' | 'click' | 'dismiss',
+  questionId = '',
+) => {
+  if (!set?.id) return
+  void recordEmbedMessageSuggestionEvent(
+    props.channelId,
+    props.token,
+    props.sessionId,
+    props.sessionSig,
+    props.visitorId,
+    set.id,
+    eventType,
+    questionId,
+  ).catch(() => undefined)
+}
+
+const handleFollowUpSelect = (message: Record<string, unknown>, item: MessageSuggestionItem) => {
+  const set = message.suggestionSet as MessageSuggestionSet | undefined
+  if (set) {
+    recordFollowUpEvent(set, 'click', item.id)
+    setSuggestionAttribution(set.id, item.id)
+  }
+  if (!isReplying.value) void sendMsg(item.text, { webSearchEnabled: webSearchEnabled.value })
+}
+
+const dismissFollowUps = (message: Record<string, unknown>, set: MessageSuggestionSet) => {
+  message.suggestionsDismissed = true
+  recordFollowUpEvent(set, 'dismiss')
 }
 
 let removeOpenQueryListener: (() => void) | null = null
@@ -327,11 +443,13 @@ watch(
     background: var(--td-bg-color-container);
     text-align: left;
     cursor: pointer;
-    transition: border-color 0.15s ease, background 0.15s ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 
     &:hover {
-      border-color: var(--td-brand-color-3, var(--td-brand-color));
-      background: color-mix(in srgb, var(--td-brand-color) 4%, var(--td-bg-color-container));
+      border-color: color-mix(in srgb, var(--td-text-color-primary) 10%, var(--td-component-stroke));
+      background: color-mix(in srgb, var(--td-text-color-primary) 4%, var(--td-bg-color-container));
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
     }
 
     &--skeleton {
@@ -393,10 +511,32 @@ watch(
 }
 
 .embed-chat__typing {
-  height: 41px;
+  min-height: 28px;
   display: flex;
   align-items: center;
   padding-left: 4px;
+}
+
+.embed-chat__typing-spinner {
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--td-component-stroke);
+  border-top-color: var(--td-text-color-secondary);
+  border-radius: 50%;
+  animation: embedChatTypingSpin 0.8s linear infinite;
+}
+
+@keyframes embedChatTypingSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .embed-chat__typing-spinner {
+    animation: none;
+  }
 }
 
 .embed-chat__input {
@@ -438,29 +578,6 @@ watch(
 @keyframes sk-shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
-}
-
-.loading-typing {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-
-  span {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--td-text-color-placeholder);
-    animation: typingBounce 1.4s ease-in-out infinite;
-
-    &:nth-child(1) { animation-delay: 0s; }
-    &:nth-child(2) { animation-delay: 0.2s; }
-    &:nth-child(3) { animation-delay: 0.4s; }
-  }
-}
-
-@keyframes typingBounce {
-  0%, 60%, 100% { transform: translateY(0); }
-  30% { transform: translateY(-8px); }
 }
 
 .scroll-to-bottom-btn {

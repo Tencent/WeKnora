@@ -12,14 +12,27 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
+)
+
+const (
+	minCurrentTurnToolTokens     = 8 * 1024
+	maxCurrentTurnToolTokens     = 32 * 1024
+	currentTurnToolTokenFraction = 5 // 20%
 )
 
 // manageContextWindow consolidates or compresses messages if approaching the token limit.
 // currentTokens is the caller's best estimate of the current context size (using
 // API-reported Usage when available, falling back to BPE estimation).
 func (e *AgentEngine) manageContextWindow(ctx context.Context, messages []chat.Message, round, currentTokens int) []chat.Message {
+	var trimmed bool
+	messages, trimmed = trimCurrentTurnToolResults(messages, e.tokenEstimator, currentTurnToolResultBudget(e.config.MaxContextTokens))
+	if trimmed {
+		currentTokens = e.tokenEstimator.EstimateMessages(messages)
+		logger.Infof(ctx, "[Agent][Round-%d] Trimmed current-turn tool results to token budget", round)
+	}
 	if e.config.MaxContextTokens <= 0 {
 		return messages
 	}
@@ -49,6 +62,124 @@ func (e *AgentEngine) manageContextWindow(ctx context.Context, messages []chat.M
 	return messages
 }
 
+func currentTurnToolResultBudget(maxContextTokens int) int {
+	if maxContextTokens <= 0 {
+		return maxCurrentTurnToolTokens
+	}
+	budget := maxContextTokens / currentTurnToolTokenFraction
+	if budget < minCurrentTurnToolTokens {
+		return minCurrentTurnToolTokens
+	}
+	if budget > maxCurrentTurnToolTokens {
+		return maxCurrentTurnToolTokens
+	}
+	return budget
+}
+
+// trimCurrentTurnToolResults returns a message copy for the next model call.
+// It never mutates ToolResult objects used by SSE, diagnostics, or persistence.
+// Assistant tool-call messages remain untouched so every compacted tool result
+// retains its provider-required call/result pairing.
+func trimCurrentTurnToolResults(
+	messages []chat.Message,
+	estimator *agenttoken.Estimator,
+	budget int,
+) ([]chat.Message, bool) {
+	if estimator == nil || budget <= 0 || len(messages) == 0 {
+		return messages, false
+	}
+
+	lastUser := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" {
+			lastUser = i
+			break
+		}
+	}
+	if lastUser < 0 {
+		return messages, false
+	}
+
+	var toolIndexes []int
+	total := 0
+	for i := lastUser + 1; i < len(messages); i++ {
+		if messages[i].Role == "tool" {
+			toolIndexes = append(toolIndexes, i)
+			total += estimator.EstimateMessage(&messages[i])
+		}
+	}
+	if total <= budget || len(toolIndexes) == 0 {
+		return messages, false
+	}
+
+	out := append([]chat.Message(nil), messages...)
+	baseCosts := make(map[int]int, len(toolIndexes))
+	remaining := budget
+	for _, idx := range toolIndexes {
+		out[idx].Content = compactedToolResultMarker(messages[idx].Content)
+		cost := estimator.EstimateMessage(&out[idx])
+		baseCosts[idx] = cost
+		remaining -= cost
+	}
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	// Spend the remaining budget newest-first. A result that cannot fit in
+	// full receives the largest head/tail preview that does fit.
+	for i := len(toolIndexes) - 1; i >= 0; i-- {
+		idx := toolIndexes[i]
+		fullCost := estimator.EstimateMessage(&messages[idx])
+		extra := fullCost - baseCosts[idx]
+		if extra <= remaining {
+			out[idx] = messages[idx]
+			remaining -= extra
+			continue
+		}
+		out[idx] = compactToolMessage(messages[idx], baseCosts[idx]+remaining, estimator)
+		remaining = 0
+	}
+	return out, true
+}
+
+func compactedToolResultMarker(content string) string {
+	return fmt.Sprintf(
+		"[Tool result compacted: original_bytes=%d. Re-run the tool with narrower filters or a smaller range if more detail is needed.]",
+		len(content),
+	)
+}
+
+func compactToolMessage(msg chat.Message, maxTokens int, estimator *agenttoken.Estimator) chat.Message {
+	runes := []rune(msg.Content)
+	base := msg
+	base.Content = compactedToolResultMarker(msg.Content)
+	if len(runes) == 0 || estimator.EstimateMessage(&base) >= maxTokens {
+		return base
+	}
+
+	best := base
+	low, high := 1, len(runes)
+	for low <= high {
+		keep := low + (high-low)/2
+		head := keep / 4
+		tail := keep - head
+		candidate := base
+		candidate.Content = fmt.Sprintf(
+			"%s\n\n%s\n...[tool result preview omitted]...\n%s",
+			base.Content,
+			string(runes[:head]),
+			string(runes[len(runes)-tail:]),
+		)
+		if estimator.EstimateMessage(&candidate) <= maxTokens {
+			best = candidate
+			low = keep + 1
+		} else {
+			high = keep - 1
+		}
+	}
+	return best
+}
+
 // responseVerdict captures the result of analyzing an LLM response to determine
 // whether the agent loop should stop and what the final answer is (if any).
 type responseVerdict struct {
@@ -58,8 +189,19 @@ type responseVerdict struct {
 	step         types.AgentStep
 }
 
+// isNaturalStopFinishReason reports whether a provider finish reason means the
+// assistant has ended its message without requesting more tool work.
+func isNaturalStopFinishReason(reason string) bool {
+	switch strings.ToLower(strings.TrimSpace(reason)) {
+	case "stop", "end_turn", "stop_sequence":
+		return true
+	default:
+		return false
+	}
+}
+
 // analyzeResponse inspects the LLM response for stop conditions:
-//   - finish_reason == "stop" with no tool calls → agent is done (natural stop)
+//   - natural finish reason with no tool calls → agent is done (natural stop)
 //   - finish_reason == "content_filter" with no tool calls → agent is done (content filtered)
 //
 // The agent ends a turn by stopping naturally with its answer as plain
@@ -114,8 +256,8 @@ func (e *AgentEngine) analyzeResponse(
 		}
 	}
 
-	// Case 1: LLM stopped naturally without requesting any tool calls
-	if response.FinishReason == "stop" && len(response.ToolCalls) == 0 {
+	// Case 1: LLM stopped naturally without requesting any tool calls.
+	if isNaturalStopFinishReason(response.FinishReason) && len(response.ToolCalls) == 0 {
 		// Strip <think>…</think> blocks that some models embed in content
 		// (DeepSeek, Qwen, etc.) before processing or displaying.
 		response.Content = agenttools.StripThinkBlocks(response.Content)
@@ -363,9 +505,57 @@ func commonStringPrefix(a, b string) string {
 // (runtime_context + must_use + query). Used by Execute and finalize paths only;
 // not written to rendered_content / history.
 func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
+	e.registerRuntimeReferences()
 	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs)
+	runtimeCtx = e.modelContext.CompactKnownText(runtimeCtx)
 	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)
 	return composeUserTurnContent(runtimeCtx, mustUse, query)
+}
+
+// registerRuntimeReferences makes bound KBs, pinned documents and recent
+// chunks addressable without exposing their durable IDs to the model.
+func (e *AgentEngine) registerRuntimeReferences() {
+	if e == nil || e.modelContext == nil {
+		return
+	}
+	for _, kb := range e.knowledgeBasesInfo {
+		if kb == nil {
+			continue
+		}
+		e.modelContext.RegisterKnowledgeBase(kb.ID)
+		for _, doc := range kb.RecentDocs {
+			e.modelContext.RegisterDocument(doc.KnowledgeID)
+			if doc.ChunkID != "" {
+				title := doc.Title
+				if title == "" {
+					title = doc.FileName
+				}
+				e.modelContext.RegisterChunk(modelcontext.ChunkReference{
+					ChunkID:         doc.ChunkID,
+					KnowledgeID:     doc.KnowledgeID,
+					KnowledgeBaseID: firstNonEmptyAgent(doc.KnowledgeBaseID, kb.ID),
+					DocumentTitle:   title,
+					ChunkType:       doc.Type,
+				})
+			}
+		}
+	}
+	for _, doc := range e.selectedDocs {
+		if doc == nil {
+			continue
+		}
+		e.modelContext.RegisterDocument(doc.KnowledgeID)
+		e.modelContext.RegisterKnowledgeBase(doc.KnowledgeBaseID)
+	}
+}
+
+func firstNonEmptyAgent(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func composeUserTurnContent(parts ...string) string {
@@ -413,6 +603,13 @@ func (e *AgentEngine) appendToolResults(
 	messages []chat.Message,
 	step types.AgentStep,
 ) []chat.Message {
+	if stepContainsMarkdownImage(step) {
+		// Keep the requirement at system priority even when a custom Agent prompt
+		// replaces the built-in template. Appending it once, when image-bearing
+		// evidence first appears, also avoids burdening text-only turns.
+		messages = appendAgentRetrievedImageRequirement(messages)
+	}
+
 	// Add assistant message with tool calls (if any)
 	if step.Thought != "" || len(step.ToolCalls) > 0 || step.ReasoningContent != "" {
 		assistantMsg := chat.Message{
@@ -445,10 +642,7 @@ func (e *AgentEngine) appendToolResults(
 
 	// Add tool result messages (role: "tool", following OpenAI format)
 	for _, toolCall := range step.ToolCalls {
-		resultContent := toolCall.Result.Output
-		if !toolCall.Result.Success {
-			resultContent = fmt.Sprintf("Error: %s", toolCall.Result.Error)
-		}
+		resultContent := e.modelContext.ModelToolResultForTool(toolCall.Name, toolCall.Result)
 
 		toolMsg := chat.Message{
 			Role:       "tool",
@@ -538,13 +732,13 @@ func (e *AgentEngine) buildMessagesWithLLMContext(
 		}
 	}
 
-	// Build user message with per-turn scope envelopes (current turn only).
-	// Historical user messages in llmContext stay as bare Content from the DB.
-	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs)
-	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)
+	// Build the current user message through the same registration path used by
+	// final synthesis. Calling buildRuntimeContextBlock directly here would put
+	// durable bound-KB/document IDs into the first model request before the
+	// request-local source registry had seen them.
 	userMsg := chat.Message{
 		Role:    "user",
-		Content: composeUserTurnContent(runtimeCtx, mustUse, currentQuery),
+		Content: e.RenderUserTurnContent(sessionID, currentQuery),
 		Images:  imageURLs,
 	}
 	messages = append(messages, userMsg)

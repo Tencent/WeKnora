@@ -1,7 +1,7 @@
 <template>
   <!-- 自助创建新工作区弹窗。任意已登录用户均可调用 POST /api/v1/tenants
        （后端 router 已去掉 g.CrossTenant() 守卫），handler 会自动把当前
-       用户 EnsureOwner 成新租户的 Owner。 -->
+       用户 EnsureOwner 成新空间的 Owner。 -->
   <t-dialog :visible="visible" width="480px" :on-confirm="handleSubmit" :on-close="handleClose"
     :confirm-btn="{ content: $t('tenant.create.submit'), loading: submitting, theme: 'primary' }"
     :cancel-btn="{ content: $t('tenant.create.cancel') }" :close-on-overlay-click="!submitting"
@@ -40,7 +40,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void
-  // 创建成功后由父组件决定如何导航（切换到新租户、刷新本地列表等）。
+  // 创建成功后由父组件决定如何导航（切换到新空间、刷新本地列表等）。
   (e: 'created', tenant: TenantInfo): void
 }>()
 

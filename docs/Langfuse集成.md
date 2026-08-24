@@ -233,7 +233,11 @@ Dev 相关容器都带 `-dev` 后缀、用独立网络 `WeKnora-network-dev`，�
 | Input Tokens | `TokenUsage.PromptTokens` | 来自模型返回的 usage 字段。 |
 | Output Tokens | `TokenUsage.CompletionTokens` | 来自模型返回的 usage 字段。 |
 | Total Tokens | `TokenUsage.TotalTokens` | 大多数厂商返回；未返回时自动求和。 |
-| `userId` | `X-User-ID` / 租户 ID | 未登录时退化为 `tenant:<id>`，方便按租户汇总消耗；enqueue 时会写入 payload，worker 在无上游 trace 的场景也能保留归属。 |
+| Cache Read Tokens | `TokenUsage.CacheReadTokens` | 从 OpenAI-compatible `cached_tokens`、DeepSeek 原生 hit tokens 或 Anthropic cache read tokens 归一化。 |
+| Cache Write Tokens | `TokenUsage.CacheWriteTokens` | Anthropic cache creation 或供应商等价字段；不与 Input Tokens 重复相加。 |
+| Cache Miss Tokens | `TokenUsage.CacheMissTokens` | 已上报缓存口径下未从缓存读取的输入 token。 |
+| Generation Metadata | `call_purpose` / `prompt_prefix_fingerprint` | 用调用用途分组缓存指标；前缀只上报不可逆短哈希，不上报原始 prompt。 |
+| `userId` | `X-User-ID` / 空间 ID | 未登录时退化为 `tenant:<id>`，方便按空间汇总消耗；enqueue 时会写入 payload，worker 在无上游 trace 的场景也能保留归属。 |
 | `sessionId` | URL 中的 `:session_id`（或 `RequestID` 兜底） | 可以在 Langfuse 的 Sessions 视图聚合一整场对话，或按单次异步批次聚合。 |
 | Time-To-First-Token | 流式调用首条有效 chunk 的时间 | 通过 `generation-update.completionStartTime` 上报。 |
 

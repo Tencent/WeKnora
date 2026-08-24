@@ -46,30 +46,6 @@
       var(--td-bg-color-container) 72%
     );
     box-shadow: inset 0 1px 0 color-mix(in srgb, @claw-accent 10%, transparent);
-
-    .landing-hero__icon {
-      background: color-mix(in srgb, @claw-accent 14%, var(--td-bg-color-container));
-    }
-  }
-
-  &__icon {
-    flex-shrink: 0;
-    width: 44px;
-    height: 44px;
-    border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: color-mix(in srgb, var(--td-brand-color) 14%, var(--td-bg-color-container));
-    color: var(--td-brand-color);
-    font-size: 22px;
-    line-height: 1;
-
-    :deep(.t-icon) {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-    }
   }
 
   &__content {
@@ -126,18 +102,18 @@
     background 0.18s ease,
     box-shadow 0.18s ease;
 
-  &:hover {
+  &:not(&--claw):hover {
     border-style: solid;
     border-color: color-mix(in srgb, var(--td-brand-color) 40%, var(--td-component-stroke));
     background: color-mix(in srgb, var(--td-bg-color-container) 92%, transparent);
     box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
   }
 
-  &:active {
+  &:not(&--claw):active {
     box-shadow: none;
   }
 
-  &:focus-visible {
+  &:not(&--claw):focus-visible {
     outline: 2px solid var(--td-brand-color);
     outline-offset: 2px;
   }
@@ -146,7 +122,14 @@
     border-color: color-mix(in srgb, @claw-accent 30%, var(--td-component-stroke));
 
     &:hover {
+      border-style: solid;
       border-color: color-mix(in srgb, @claw-accent 45%, var(--td-component-stroke));
+      background: color-mix(in srgb, var(--td-bg-color-container) 92%, transparent);
+      box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+    }
+
+    &:active {
+      box-shadow: none;
     }
 
     .ext-cta__badge {
@@ -165,7 +148,8 @@
     }
 
     &:focus-visible {
-      outline-color: @claw-accent;
+      outline: 2px solid @claw-accent;
+      outline-offset: 2px;
     }
   }
 
@@ -232,7 +216,7 @@
     justify-content: center;
   }
 
-  &:hover &__arrow-wrap {
+  &:not(&--claw):hover &__arrow-wrap {
     background: color-mix(in srgb, var(--td-brand-color) 14%, transparent);
     color: var(--td-brand-color);
   }
@@ -246,11 +230,6 @@
 
 // ── Claw / 龙虾主题色 ──
 .integration-landing--claw {
-  .landing-hero__icon--claw {
-    color: @claw-accent-dark;
-    background: color-mix(in srgb, @claw-accent 14%, var(--td-bg-color-container));
-  }
-
   .landing-group {
     .setting-drawer__section-title::before {
       background: @claw-accent;
@@ -279,10 +258,6 @@
 
   .landing-meta {
     color: color-mix(in srgb, @claw-accent-dark 55%, var(--td-text-color-placeholder));
-  }
-
-  .ext-cta--claw:hover .ext-cta__arrow-wrap {
-    color: @claw-accent-dark;
   }
 
   :deep(.t-button--variant-outline) {

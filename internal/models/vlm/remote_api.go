@@ -40,14 +40,19 @@ func vlmHTTPTimeout() time.Duration {
 
 // RemoteAPIVLM implements VLM via an OpenAI-compatible chat completions API.
 type RemoteAPIVLM struct {
-	modelName string
-	modelID   string
-	client    *openai.Client
-	baseURL   string
+	modelName   string
+	modelID     string
+	client      *openai.Client
+	baseURL     string
+	temperature float32
 }
 
 // NewRemoteAPIVLM creates a remote-API backed VLM instance.
 func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
+	if err := validateVLMBaseURL(config.BaseURL); err != nil {
+		return nil, err
+	}
+
 	providerName := provider.ProviderName(config.Provider)
 	if providerName == "" {
 		providerName = provider.DetectProvider(config.BaseURL)
@@ -72,7 +77,7 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 			apiCfg.BaseURL = config.BaseURL
 		}
 	}
-	httpClient := &http.Client{Timeout: vlmHTTPTimeout()}
+	httpClient := newVLMHTTPClient(vlmHTTPTimeout())
 
 	// 注入用户自定义 HTTP header（类似 OpenAI Python SDK 的 extra_headers）
 	if len(config.CustomHeaders) > 0 {
@@ -81,18 +86,30 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 		apiCfg.HTTPClient = httpClient
 	}
 
+	temp := defaultTemp
+	if config.Extra != nil {
+		if v, ok := config.Extra["temperature"]; ok {
+			if vs, ok := v.(string); ok {
+				if f, err := strconv.ParseFloat(vs, 32); err == nil {
+					temp = float32(f)
+				}
+			}
+		}
+	}
+
 	return &RemoteAPIVLM{
-		modelName: config.ModelName,
-		modelID:   config.ModelID,
-		client:    openai.NewClientWithConfig(apiCfg),
-		baseURL:   config.BaseURL,
+		modelName:   config.ModelName,
+		modelID:     config.ModelID,
+		client:      openai.NewClientWithConfig(apiCfg),
+		baseURL:     config.BaseURL,
+		temperature: temp,
 	}, nil
 }
 
 // Predict sends an image with a text prompt to the OpenAI-compatible API.
 func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, prompt string) (string, error) {
 	var parts []openai.ChatMessagePart
-	
+
 	// Add text prompt first
 	parts = append(parts, openai.ChatMessagePart{
 		Type: openai.ChatMessagePartTypeText,
@@ -124,8 +141,9 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 			},
 		},
 		MaxTokens:   defaultMaxToks,
-		Temperature: defaultTemp,
+		Temperature: v.temperature,
 	}
+	shapeReasoningVLMRequest(&req)
 
 	totalImageSize := 0
 	for _, img := range imgBytesList {
@@ -142,9 +160,45 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 		return "", fmt.Errorf("OpenAI VLM returned no choices")
 	}
 
-	content := resp.Choices[0].Message.Content
+	choice := resp.Choices[0]
+	content := choice.Message.Content
+	if strings.TrimSpace(content) == "" && choice.FinishReason == openai.FinishReasonLength {
+		// Reasoning models spend max_completion_tokens on reasoning before any
+		// visible output, so an exhausted budget yields an empty message rather
+		// than an API error. Returning "" here would be recorded as
+		// "no_extracted_content" and look identical to an image with no text.
+		return "", fmt.Errorf(
+			"OpenAI VLM returned no content: completion truncated at %d tokens (finish_reason=length)",
+			defaultMaxToks,
+		)
+	}
 	logger.Infof(ctx, "[VLM] OpenAI response received, len=%d", len(content))
 	return content, nil
+}
+
+// shapeReasoningVLMRequest adapts an OpenAI-compatible VLM request for
+// reasoning (o-series) and GPT-5 models, which reject `max_tokens` and every
+// non-default sampling parameter.
+//
+// This mirrors shapeOpenAIReasoning in internal/models/chat, which fixed the
+// same incompatibility on the chat path for issue #1283. The VLM path was
+// never wired to it, so image OCR and captioning failed for every one of these
+// models (issue #2537).
+//
+// Both quirks have to be handled together: migrating max_tokens alone still
+// fails, because the VLM default temperature (0.1) is itself rejected.
+func shapeReasoningVLMRequest(req *openai.ChatCompletionRequest) {
+	if !provider.IsOpenAIReasoningOrGPT5Model(req.Model) {
+		return
+	}
+	if req.MaxCompletionTokens == 0 && req.MaxTokens > 0 {
+		req.MaxCompletionTokens = req.MaxTokens
+	}
+	req.MaxTokens = 0
+	req.Temperature = 0
+	req.TopP = 0
+	req.FrequencyPenalty = 0
+	req.PresencePenalty = 0
 }
 
 func (v *RemoteAPIVLM) GetModelName() string { return v.modelName }

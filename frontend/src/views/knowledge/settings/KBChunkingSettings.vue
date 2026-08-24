@@ -212,7 +212,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, withDefaults } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronRightIcon } from 'tdesign-icons-vue-next'
 import KBChunkingDebug from './KBChunkingDebug.vue'
@@ -220,6 +220,7 @@ import KBChunkingDebug from './KBChunkingDebug.vue'
 interface ParserEngineRule {
   file_types: string[]
   engine: string
+  xlsx_first_row_as_header?: boolean
 }
 
 // Slider ranges defined in this file (min/max props on t-slider) mirror
@@ -327,6 +328,9 @@ const debugConfig = computed(() => ({
   chunkSize: localChunkSize.value,
   chunkOverlap: localChunkOverlap.value,
   separators: localSeparators.value,
+  enableParentChild: localEnableParentChild.value,
+  parentChunkSize: localParentChunkSize.value,
+  childChunkSize: localChildChunkSize.value,
   strategy: localStrategy.value,
   tokenLimit: localTokenLimit.value,
   languages: localLanguages.value

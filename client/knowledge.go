@@ -36,6 +36,7 @@ type Knowledge struct {
 	EnableStatus     string          `json:"enable_status"`
 	EmbeddingModelID string          `json:"embedding_model_id"`
 	FileName         string          `json:"file_name"`
+	FolderPath       string          `json:"folder_path"`
 	FileType         string          `json:"file_type"`
 	FileSize         int64           `json:"file_size"`
 	FileHash         string          `json:"file_hash"`
@@ -86,14 +87,14 @@ var ErrDuplicateURL = errors.New("URL already exists")
 // KnowledgeProcessOverrides stores per-upload parse config overrides sent as process_config.
 // When nil, the server uses the knowledge base defaults only.
 type KnowledgeProcessOverrides struct {
-	ParserEngineRules        []ParserEngineRule            `json:"parser_engine_rules,omitempty"`
-	ChunkingConfig           *ChunkingConfig               `json:"chunking_config,omitempty"`
-	EnableMultimodel         *bool                         `json:"enable_multimodel,omitempty"`
-	VLMConfig                *VLMConfig                    `json:"vlm_config,omitempty"`
-	ASRConfig                *ASRConfig                    `json:"asr_config,omitempty"`
-	QuestionGenerationConfig *QuestionGenerationConfig     `json:"question_generation_config,omitempty"`
-	GraphEnabled             *bool                         `json:"graph_enabled,omitempty"`
-	ExtractConfig            *ExtractConfig                `json:"extract_config,omitempty"`
+	ParserEngineRules        []ParserEngineRule        `json:"parser_engine_rules,omitempty"`
+	ChunkingConfig           *ChunkingConfig           `json:"chunking_config,omitempty"`
+	EnableMultimodel         *bool                     `json:"enable_multimodel,omitempty"`
+	VLMConfig                *VLMConfig                `json:"vlm_config,omitempty"`
+	ASRConfig                *ASRConfig                `json:"asr_config,omitempty"`
+	QuestionGenerationConfig *QuestionGenerationConfig `json:"question_generation_config,omitempty"`
+	GraphEnabled             *bool                     `json:"graph_enabled,omitempty"`
+	ExtractConfig            *ExtractConfig            `json:"extract_config,omitempty"`
 }
 
 // CreateKnowledgeFromFile creates a knowledge entry from a local file path
@@ -320,7 +321,9 @@ func (c *Client) ListKnowledge(ctx context.Context,
 
 // KnowledgeListFilter mirrors the server-side filters accepted by GET
 // /api/v1/knowledge-bases/{id}/knowledge. Empty / zero fields are omitted from
-// the request.
+// the request. FolderPath, when non-nil, selects a folder scope; the empty
+// string means the knowledge base root. Omit FolderPath entirely for a flat
+// listing across every folder.
 type KnowledgeListFilter struct {
 	TagID       string
 	Keyword     string
@@ -329,8 +332,10 @@ type KnowledgeListFilter struct {
 	Source      string
 	// StartTime / EndTime filter on knowledge updated_at. Zero values are skipped.
 	// They are serialized in RFC3339 format.
-	StartTime time.Time
-	EndTime   time.Time
+	StartTime       time.Time
+	EndTime         time.Time
+	FolderPath      *string
+	FolderRecursive bool
 }
 
 // ListKnowledgeWithFilter lists knowledge entries with the full filter surface.
@@ -366,6 +371,12 @@ func (c *Client) ListKnowledgeWithFilter(ctx context.Context,
 	if !filter.EndTime.IsZero() {
 		queryParams.Add("end_time", filter.EndTime.Format(time.RFC3339))
 	}
+	if filter.FolderPath != nil {
+		queryParams.Add("folder_path", *filter.FolderPath)
+		if filter.FolderRecursive {
+			queryParams.Add("folder_recursive", "true")
+		}
+	}
 
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, queryParams)
 	if err != nil {
@@ -378,6 +389,105 @@ func (c *Client) ListKnowledgeWithFilter(ctx context.Context,
 	}
 
 	return response.Data, response.Total, nil
+}
+
+// KnowledgeFolderNode is one node of the knowledge base folder tree.
+type KnowledgeFolderNode struct {
+	Path          string                 `json:"path"`
+	Name          string                 `json:"name"`
+	DocumentCount int64                  `json:"document_count"`
+	TotalCount    int64                  `json:"total_count"`
+	Children      []*KnowledgeFolderNode `json:"children,omitempty"`
+}
+
+// KnowledgeFolderTree is returned by ListKnowledgeFolders.
+type KnowledgeFolderTree struct {
+	RootDocumentCount  int64                  `json:"root_document_count"`
+	TotalDocumentCount int64                  `json:"total_document_count"`
+	Folders            []*KnowledgeFolderNode `json:"folders"`
+}
+
+// ListKnowledgeFolders returns the folder hierarchy of a knowledge base.
+func (c *Client) ListKnowledgeFolders(ctx context.Context, knowledgeBaseID string) (*KnowledgeFolderTree, error) {
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/folders", knowledgeBaseID)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool                 `json:"success"`
+		Data    *KnowledgeFolderTree `json:"data"`
+	}
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+	return response.Data, nil
+}
+
+// MoveKnowledgeToFolderRequest re-files knowledge entries under a folder path.
+type MoveKnowledgeToFolderRequest struct {
+	KBID       string   `json:"kb_id"`
+	IDs        []string `json:"knowledge_ids"`
+	FolderPath string   `json:"folder_path"`
+}
+
+// MoveKnowledgeToFolderResponse is the payload of POST /knowledge/folder.
+type MoveKnowledgeToFolderResponse struct {
+	MovedCount int64  `json:"moved_count"`
+	FolderPath string `json:"folder_path"`
+}
+
+// MoveKnowledgeToFolder updates folder_path for the given knowledge entries.
+// An empty FolderPath moves documents back to the knowledge base root.
+func (c *Client) MoveKnowledgeToFolder(ctx context.Context, req *MoveKnowledgeToFolderRequest) (*MoveKnowledgeToFolderResponse, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/knowledge/folder", req, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool                           `json:"success"`
+		Data    *MoveKnowledgeToFolderResponse `json:"data"`
+	}
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+	return response.Data, nil
+}
+
+// RenameKnowledgeFolderRequest moves a folder and its subtree to a new path.
+type RenameKnowledgeFolderRequest struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// RenameKnowledgeFolderResponse is the payload of PUT .../knowledge/folders.
+type RenameKnowledgeFolderResponse struct {
+	MovedCount int64  `json:"moved_count"`
+	FolderPath string `json:"folder_path"`
+}
+
+// RenameKnowledgeFolder rewrites folder_path for a folder and every descendant.
+func (c *Client) RenameKnowledgeFolder(
+	ctx context.Context,
+	knowledgeBaseID string,
+	req *RenameKnowledgeFolderRequest,
+) (*RenameKnowledgeFolderResponse, error) {
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/folders", knowledgeBaseID)
+	resp, err := c.doRequest(ctx, http.MethodPut, path, req, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool                           `json:"success"`
+		Data    *RenameKnowledgeFolderResponse `json:"data"`
+	}
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+	return response.Data, nil
 }
 
 // DeleteKnowledge enqueues an asynchronous delete for the given knowledge entry.
@@ -441,7 +551,7 @@ func (c *Client) OpenKnowledgeFile(ctx context.Context, knowledgeID string) (str
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return "", nil, fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(body))
+		return "", nil, newAPIError(resp.StatusCode, body)
 	}
 	filename := filenameFromContentDisposition(resp.Header.Get("Content-Disposition"))
 	return filename, resp.Body, nil
@@ -527,7 +637,7 @@ func (c *Client) ReparseKnowledge(ctx context.Context, knowledgeID string) (*Kno
 //   - pending      — task has not started
 //   - processing   — DocReader / chunking / embedding stage
 //   - finalizing   — primary parse done, enrichment subtasks (summary,
-//                    question generation, graph extract) still running
+//     question generation, graph extract) still running
 //
 // Returns an error when the knowledge is in a terminal state
 // (completed, failed) or already being deleted.

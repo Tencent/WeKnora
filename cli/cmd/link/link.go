@@ -40,29 +40,42 @@ type linkResult struct {
 func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	opts := &Options{}
 	cmd := &cobra.Command{
-		Use:   "link",
+		Use:   "link [kb]",
 		Short: "Bind the current directory to a knowledge base",
 		Long: `Writes .weknora/project.yaml in the current working directory pointing
 at the supplied knowledge base. Subsequent commands run from this directory
 (or any subdirectory) automatically resolve --kb from the link unless
 overridden by the --kb flag or WEKNORA_KB_ID env var.
 
-Pass --kb <id-or-name> for non-interactive use (scripts, CI). Run on a TTY
-without --kb to be prompted from the list of available KBs. Always overwrites
-any existing link - re-run to switch.
+Pass the knowledge base as a positional argument (weknora link <id-or-name>) or
+via --kb — the two are equivalent — for non-interactive use (scripts, CI). Run
+on a TTY without either to be prompted from the list of available KBs. Always
+overwrites any existing link - re-run to switch.
 
 AI agents: link writes to the user's working directory. Only run it when the
 user explicitly asked to bind this directory; don't run it as a side effect.`,
-		Example: `  weknora link --kb a32a63ff-fb36-4874-bcaa-30f48570a694    # explicit UUID
-  weknora link --kb engineering                             # name → id
+		Example: `  weknora link a32a63ff-fb36-4874-bcaa-30f48570a694         # positional UUID
+  weknora link engineering                                  # positional name → id
+  weknora link --kb engineering                             # --kb form (equivalent)
   weknora link                                              # interactive (TTY)`,
-		Args: cobra.NoArgs,
-		RunE: func(c *cobra.Command, _ []string) error {
+		// The knowledge base may be given as a positional arg (matching every
+		// other <id> command) or via --kb; the two are equivalent.
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
 			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			// Accept the KB as a positional (consistent with `kb view <id>`,
+			// `doc view <id>`, …) in addition to --kb. Reject supplying both.
+			if len(args) == 1 {
+				if opts.KB != "" && opts.KB != args[0] {
+					return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+						"specify the knowledge base once: as a positional argument or --kb, not both")
+				}
+				opts.KB = args[0]
+			}
 			// Pure-local validation runs before the dry-run gate so --dry-run
 			// rejects identically to the live path. resolveProfile only reads
 			// config; the non-TTY-without-`--kb` check is a flag-shape error.
@@ -88,9 +101,10 @@ user explicitly asked to bind this directory; don't run it as a side effect.`,
 	cmdutil.AddFormatFlag(cmd, linkFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor:       "Bind the current directory to a knowledge base by writing .weknora/project.yaml. Requires --kb (non-interactive); only run when the user explicitly asks to link this directory.",
-		RequiredFlags: []string{"--kb (required when no TTY)"},
-		Output:        "envelope.data has kb_id, kb_name, project_link_path",
+		UsedFor:       "Bind the current directory to a knowledge base by writing .weknora/project.yaml. Give the KB as a positional arg or --kb (non-interactive); only run when the user explicitly asks to link this directory.",
+		RequiredFlags: []string{"<kb> positional or --kb (required when no TTY)"},
+		Examples:      []string{"weknora link engineering", "weknora link --kb a32a63ff-fb36-4874-bcaa-30f48570a694"},
+		Output:        "envelope.data has profile, kb_id, kb_name, project_link_path",
 	})
 	return cmd
 }
@@ -149,7 +163,15 @@ func resolveProfile(f *cmdutil.Factory) (string, error) {
 		return "", err
 	}
 	if cfg.CurrentProfile == "" {
-		return "", cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, "no active profile; run `weknora auth login` first")
+		// `link` binds a directory to a profile+KB, so it needs a configured
+		// profile — env credentials (WEKNORA_API_KEY) alone have no profile to
+		// record. Point at profile setup (not `auth login`, which loops with no
+		// profile) and name the headless alternative so an env-cred agent isn't
+		// stranded on a misleading hint.
+		return "", cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
+			"`link` records an active profile, but none is configured").
+			WithHint("register one with `weknora profile add <name> --host <url> --use`; for a headless (WEKNORA_API_KEY) workflow, skip `link` and pass --kb per command or set WEKNORA_KB_ID").
+			WithRetryArgv([]string{"weknora", "profile", "add", "--help"})
 	}
 	return cfg.CurrentProfile, nil
 }

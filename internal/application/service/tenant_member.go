@@ -54,6 +54,14 @@ var (
 	// value that is not one of the four defined TenantRole constants.
 	ErrInvalidTenantRole = errors.New("invalid tenant role")
 
+	// ErrAPIKeyCannotAssignOwner is returned when an API-key principal
+	// attempts to persist the Owner role through member or invitation
+	// management. manage_members deliberately excludes ownership transfer:
+	// a machine principal may manage lower roles, but must never mint a
+	// durable human Owner who could subsequently manage API keys or delete
+	// the tenant.
+	ErrAPIKeyCannotAssignOwner = errors.New("API keys cannot assign the owner role")
+
 	// ErrLastOwner is returned when an operation would leave the tenant
 	// without an active Owner. Demoting the last Owner or removing them
 	// is forbidden; an explicit ownership transfer must happen first.
@@ -67,8 +75,10 @@ const (
 
 // tenantMemberService implements interfaces.TenantMemberService.
 type tenantMemberService struct {
-	repo  interfaces.TenantMemberRepository
-	audit interfaces.AuditLogService // optional; nil ⇒ no audit, business ops still succeed
+	repo      interfaces.TenantMemberRepository
+	audit     interfaces.AuditLogService     // optional; nil ⇒ no audit, business ops still succeed
+	userRepo  interfaces.UserRepository      // optional; used to clear stale home-tenant pointers
+	tokenRepo interfaces.AuthTokenRepository // optional; used to revoke sessions after removal
 }
 
 // NewTenantMemberService constructs the service. Wired up via the DI
@@ -78,11 +88,25 @@ type tenantMemberService struct {
 // constructs tenant_member before audit_log won't crash and tests
 // don't need to stub the dependency unless they care about audit
 // behaviour.
+//
+// userRepo / tokenRepo are also optional and only used by RemoveMember
+// cleanup: after a membership is soft-deleted we best-effort clear a
+// dangling users.tenant_id / LastActiveTenantID and revoke outstanding
+// sessions so the removed user cannot keep a JWT scoped to a workspace
+// they no longer belong to. Passing nil keeps unit tests that only
+// exercise membership invariants free of extra stubs.
 func NewTenantMemberService(
 	repo interfaces.TenantMemberRepository,
 	audit interfaces.AuditLogService,
+	userRepo interfaces.UserRepository,
+	tokenRepo interfaces.AuthTokenRepository,
 ) interfaces.TenantMemberService {
-	return &tenantMemberService{repo: repo, audit: audit}
+	return &tenantMemberService{
+		repo:      repo,
+		audit:     audit,
+		userRepo:  userRepo,
+		tokenRepo: tokenRepo,
+	}
 }
 
 // emitAudit is the per-mutation audit hook. Best-effort: a nil audit
@@ -111,6 +135,21 @@ func auditActor(ctx context.Context) string {
 	return uid
 }
 
+// rejectAPIKeyOwnerAssignment is the service-layer boundary shared by
+// direct membership writes and both invitation creation paths. Route RBAC
+// intentionally defers API-key authorization to APIKeyGate, so checking the
+// authenticated principal in the service is required to preserve the
+// manage_members "no ownership transfer" contract across every caller.
+func rejectAPIKeyOwnerAssignment(ctx context.Context, role types.TenantRole) error {
+	if role != types.TenantRoleOwner {
+		return nil
+	}
+	if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+		return ErrAPIKeyCannotAssignOwner
+	}
+	return nil
+}
+
 // AddMember inserts a new active membership row. Returns
 // ErrMembershipAlreadyExists if the user is already an active member of
 // the tenant, and ErrInvalidTenantRole for unknown roles.
@@ -123,6 +162,9 @@ func (s *tenantMemberService) AddMember(
 ) (*types.TenantMember, error) {
 	if !role.IsValid() {
 		return nil, ErrInvalidTenantRole
+	}
+	if err := rejectAPIKeyOwnerAssignment(ctx, role); err != nil {
+		return nil, err
 	}
 	existing, err := s.repo.Get(ctx, userID, tenantID)
 	if err != nil {
@@ -273,6 +315,9 @@ func (s *tenantMemberService) UpdateRole(
 	if !newRole.IsValid() {
 		return ErrInvalidTenantRole
 	}
+	if err := rejectAPIKeyOwnerAssignment(ctx, newRole); err != nil {
+		return err
+	}
 	current, err := s.repo.Get(ctx, userID, tenantID)
 	if err != nil {
 		return err
@@ -343,6 +388,15 @@ func (s *tenantMemberService) emitRoleChangeAudit(
 // DELETE /tenants/:id/members/:user_id). Both go through this same
 // service method but the recorded action differs so an audit reader
 // can tell the two apart.
+//
+// After a successful soft-delete, best-effort cleanup clears any
+// dangling users.tenant_id / LastActiveTenantID that still points at
+// the removed workspace and revokes outstanding auth tokens. Without
+// this, a tenantless→invited→removed user keeps a stale home pointer
+// and the login path synthesises the removed workspace back into the
+// space switcher (see issue #2586). Cleanup failures are logged but
+// never fail the removal itself: the membership row is already gone
+// and the login-path membership checks act as a second line of defence.
 func (s *tenantMemberService) RemoveMember(ctx context.Context, userID string, tenantID uint64) error {
 	current, err := s.repo.Get(ctx, userID, tenantID)
 	if err != nil {
@@ -360,13 +414,57 @@ func (s *tenantMemberService) RemoveMember(ctx context.Context, userID string, t
 			return err
 		}
 		s.emitRemovalAudit(ctx, tenantID, userID)
+		s.cleanupRemovedMemberState(ctx, userID, tenantID)
 		return nil
 	}
 	if err := s.repo.SoftDelete(ctx, userID, tenantID); err != nil {
 		return err
 	}
 	s.emitRemovalAudit(ctx, tenantID, userID)
+	s.cleanupRemovedMemberState(ctx, userID, tenantID)
 	return nil
+}
+
+// cleanupRemovedMemberState drops stale home/preference pointers that
+// reference the removed tenant and revokes the user's sessions so any
+// JWT still scoped to that tenant cannot keep serving 403-only UI.
+// All steps are best-effort and nil-safe for partial DI graphs in tests.
+func (s *tenantMemberService) cleanupRemovedMemberState(ctx context.Context, userID string, tenantID uint64) {
+	if s.userRepo != nil {
+		user, err := s.userRepo.GetUserByID(ctx, userID)
+		if err != nil {
+			logger.Warnf(ctx,
+				"RemoveMember cleanup: failed to load user %s after removing tenant %d: %v",
+				userID, tenantID, err)
+		} else if user != nil {
+			changed := false
+			if user.TenantID == tenantID {
+				user.TenantID = 0
+				changed = true
+			}
+			if user.Preferences.LastActiveTenantID != nil && *user.Preferences.LastActiveTenantID == tenantID {
+				user.Preferences.LastActiveTenantID = nil
+				changed = true
+			}
+			if changed {
+				user.UpdatedAt = time.Now()
+				if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+					logger.Warnf(ctx,
+						"RemoveMember cleanup: failed to clear stale tenant pointers for user %s tenant %d: %v",
+						userID, tenantID, err)
+				}
+			}
+		}
+	}
+
+	if s.tokenRepo == nil {
+		return
+	}
+	if err := s.tokenRepo.RevokeTokensByUserID(ctx, userID); err != nil {
+		logger.Warnf(ctx,
+			"RemoveMember cleanup: failed to revoke tokens for user %s after removing tenant %d: %v",
+			userID, tenantID, err)
+	}
 }
 
 // emitRemovalAudit picks AuditActionMemberLeft when the caller is

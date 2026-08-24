@@ -69,6 +69,9 @@ type KnowledgeService interface {
 	GetKnowledgeBatch(ctx context.Context, tenantID uint64, ids []string) ([]*types.Knowledge, error)
 	// GetKnowledgeBatchWithSharedAccess retrieves knowledge by IDs including items from shared KBs the user has access to.
 	GetKnowledgeBatchWithSharedAccess(ctx context.Context, tenantID uint64, ids []string) ([]*types.Knowledge, error)
+	// ListKnowledgeIDsByTagIDs returns document knowledge IDs carrying any of
+	// the specified KB-local tags.
+	ListKnowledgeIDsByTagIDs(ctx context.Context, tenantID uint64, kbID string, tagIDs []string) ([]string, error)
 	// ListKnowledgeByKnowledgeBaseID lists all knowledge under a knowledge base.
 	ListKnowledgeByKnowledgeBaseID(ctx context.Context, kbID string) ([]*types.Knowledge, error)
 	// ListPagedKnowledgeByKnowledgeBaseID lists all knowledge under a knowledge base
@@ -81,6 +84,21 @@ type KnowledgeService interface {
 		page *types.Pagination,
 		filter types.KnowledgeListFilter,
 	) (*types.PageResult, error)
+	// ListKnowledgeFolderTree returns the folder hierarchy derived from the
+	// folder_path of every knowledge entry in a knowledge base, with per-folder
+	// document counts. It powers the document sidebar tree.
+	ListKnowledgeFolderTree(ctx context.Context, kbID string) (*types.KnowledgeFolderTree, error)
+	// MoveKnowledgeToFolder re-files knowledge entries under the given folder
+	// path (empty means the knowledge base top level). Folders are derived from
+	// the stored paths, so a path that does not exist yet is created implicitly.
+	MoveKnowledgeToFolder(
+		ctx context.Context,
+		kbID string,
+		ids []string,
+		folderPath string,
+	) (int64, error)
+	// RenameKnowledgeFolder moves a folder and everything below it to a new path.
+	RenameKnowledgeFolder(ctx context.Context, kbID string, from string, to string) (int64, error)
 	// DeleteKnowledge deletes knowledge by ID.
 	DeleteKnowledge(ctx context.Context, id string) error
 	// DeleteKnowledgeList deletes multiple knowledge entries by IDs.
@@ -89,6 +107,12 @@ type KnowledgeService interface {
 	GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error)
 	// UpdateKnowledge updates knowledge information.
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
+	// RegenerateKnowledgeSummary refreshes the document description and summary retrieval chunk.
+	RegenerateKnowledgeSummary(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
+	// RequestKnowledgeSummaryRefresh enqueues an async summary refresh.
+	RequestKnowledgeSummaryRefresh(ctx context.Context, knowledgeID string) error
+	// RegenerateChunkQuestions rebuilds the auxiliary questions for one current chunk revision.
+	RegenerateChunkQuestions(ctx context.Context, chunkID string) ([]types.GeneratedQuestion, error)
 	// UpdateManualKnowledge updates manual Markdown knowledge content.
 	UpdateManualKnowledge(
 		ctx context.Context,
@@ -116,14 +140,15 @@ type KnowledgeService interface {
 	// UpdateImageInfo updates image information for a knowledge chunk.
 	UpdateImageInfo(ctx context.Context, knowledgeID string, chunkID string, imageInfo string) error
 	// ListFAQEntries lists FAQ entries under a FAQ knowledge base.
-	// When tagSeqID is non-zero, results are filtered by tag seq_id on FAQ chunks.
+	// When tagUUIDs is non-empty, results are filtered by tag UUID on FAQ chunks (OR semantics).
 	// searchField: specifies which field to search in ("standard_question", "similar_questions", "answers", "" for all)
 	// sortOrder: "asc" for time ascending (updated_at ASC), default is time descending (updated_at DESC)
 	ListFAQEntries(
 		ctx context.Context,
 		kbID string,
 		page *types.Pagination,
-		tagSeqID int64,
+		tagUUIDs []string,
+		legacyTagSeqID int64,
 		keyword string,
 		searchField string,
 		sortOrder string,
@@ -149,6 +174,8 @@ type KnowledgeService interface {
 	SearchFAQEntries(ctx context.Context, kbID string, req *types.FAQSearchRequest) ([]*types.FAQEntry, error)
 	// ExportFAQEntries exports all FAQ entries for a knowledge base as CSV data.
 	ExportFAQEntries(ctx context.Context, kbID string) ([]byte, error)
+	// ExportFAQEntriesJSON exports all FAQ entries as a JSON array compatible with FAQEntryPayload.
+	ExportFAQEntriesJSON(ctx context.Context, kbID string) ([]byte, error)
 	// UpdateKnowledgeTagBatch updates tag for document knowledge items in batch.
 	// authorizedKBID restricts all updates to knowledge items belonging to this KB;
 	// pass empty string to skip (caller must ensure authorization by other means).
@@ -229,7 +256,33 @@ type KnowledgeRepository interface {
 		kbID string,
 		params *types.KnowledgeCheckParams,
 	) (bool, *types.Knowledge, error)
-	// AminusB returns the difference set of A and B.
+	// ListKnowledgeFolderCounts aggregates the number of knowledge entries
+	// stored directly in each folder_path of a knowledge base.
+	ListKnowledgeFolderCounts(
+		ctx context.Context,
+		tenantID uint64,
+		kbID string,
+	) ([]*types.KnowledgeFolderCount, error)
+	// UpdateKnowledgeFolderPath files the given entries under folderPath.
+	UpdateKnowledgeFolderPath(
+		ctx context.Context,
+		tenantID uint64,
+		kbID string,
+		ids []string,
+		folderPath string,
+	) (int64, error)
+	// RenameKnowledgeFolderPath rewrites folder_path for a folder and all of its
+	// descendants. Renaming onto an existing path merges the folders.
+	RenameKnowledgeFolderPath(
+		ctx context.Context,
+		tenantID uint64,
+		kbID string,
+		from string,
+		to string,
+	) (int64, error)
+	// AminusB returns the IDs of knowledge in A that have no counterpart in B,
+	// comparing file_hash as a multiset (so duplicate-count differences and
+	// NULL/empty hashes are handled correctly, letting a clone converge).
 	AminusB(ctx context.Context, Atenant uint64, A string, Btenant uint64, B string) ([]string, error)
 	UpdateKnowledgeColumn(ctx context.Context, id string, column string, value interface{}) error
 	// UpdateKnowledgeColumns updates multiple columns of a knowledge row in a single
@@ -261,12 +314,34 @@ type KnowledgeRepository interface {
 	// FindByMetadataKey finds a knowledge item by a key-value pair in the metadata JSON column.
 	// Used by data source sync to locate existing items by external_id.
 	FindByMetadataKey(ctx context.Context, tenantID uint64, kbID string, key string, value string) (*types.Knowledge, error)
+	// FindByMetadataKeyPrefix finds knowledge items whose metadata[key] starts
+	// with the given prefix. Used to sweep an external node's attachment sub-items.
+	FindByMetadataKeyPrefix(ctx context.Context, tenantID uint64, kbID string, key string, prefix string) ([]*types.Knowledge, error)
+	// FindByDataSourceExternalID finds a knowledge item owned by one data source
+	// and identified by the source's external item ID.
+	FindByDataSourceExternalID(
+		ctx context.Context, tenantID uint64, kbID, dataSourceID, externalID string,
+	) (*types.Knowledge, error)
+	// HardDeleteKnowledge physically removes a row after DeleteKnowledge's soft-delete
+	// cascade. Sync-internal deletions use this so rows never become tombstones.
+	HardDeleteKnowledge(ctx context.Context, tenantID uint64, id string) error
+	// HardDeleteKnowledgeList is the batch counterpart of HardDeleteKnowledge.
+	HardDeleteKnowledgeList(ctx context.Context, tenantID uint64, ids []string) error
 	// SearchKnowledgeInScopes searches knowledge items by keyword within the given (tenant_id, kb_id) scopes (own + shared).
 	SearchKnowledgeInScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error)
 	// ListIDsByTagIDs returns all knowledge IDs that have any of the specified tag IDs (OR semantics).
 	ListIDsByTagIDs(ctx context.Context, tenantID uint64, kbID string, tagIDs []string) ([]string, error)
 	// SetKnowledgeTags replaces all tags for a single knowledge entry (deletes old, inserts new).
 	SetKnowledgeTags(ctx context.Context, knowledgeID string, tagIDs []string) error
+	// AddKnowledgeTagRelations attaches tags without removing existing ones,
+	// after validating that the knowledge and every tag belong to the given
+	// tenant and knowledge base. Duplicate deliveries are idempotent.
+	AddKnowledgeTagRelations(
+		ctx context.Context,
+		tenantID uint64,
+		kbID, knowledgeID string,
+		tagIDs []string,
+	) error
 	// GetKnowledgeTags returns tags for multiple knowledge IDs.
 	GetKnowledgeTags(ctx context.Context, knowledgeIDs []string) (map[string][]*types.KnowledgeTag, error)
 	// DeleteKnowledgeTagRelations deletes all tag relations for a knowledge entry.

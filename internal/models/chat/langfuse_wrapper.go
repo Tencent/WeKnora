@@ -25,15 +25,18 @@ func (l *langfuseChat) Chat(ctx context.Context, messages []Message, opts *ChatO
 		return l.inner.Chat(ctx, messages, opts)
 	}
 
+	purpose, prefixFingerprint := types.LLMCallMetadataFromContext(ctx)
 	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
 		Name:            "chat.completion",
 		Model:           l.inner.GetModelName(),
 		Input:           buildLangfuseMessages(messages),
 		ModelParameters: buildLangfuseModelParams(opts),
 		Metadata: map[string]interface{}{
-			"model_id":  l.inner.GetModelID(),
-			"streaming": false,
-			"has_tools": opts != nil && len(opts.Tools) > 0,
+			"model_id":                  l.inner.GetModelID(),
+			"streaming":                 false,
+			"has_tools":                 opts != nil && len(opts.Tools) > 0,
+			"call_purpose":              purpose,
+			"prompt_prefix_fingerprint": prefixFingerprint,
 		},
 	})
 
@@ -57,15 +60,18 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 		return l.inner.ChatStream(ctx, messages, opts)
 	}
 
+	purpose, prefixFingerprint := types.LLMCallMetadataFromContext(ctx)
 	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
 		Name:            "chat.completion.stream",
 		Model:           l.inner.GetModelName(),
 		Input:           buildLangfuseMessages(messages),
 		ModelParameters: buildLangfuseModelParams(opts),
 		Metadata: map[string]interface{}{
-			"model_id":  l.inner.GetModelID(),
-			"streaming": true,
-			"has_tools": opts != nil && len(opts.Tools) > 0,
+			"model_id":                  l.inner.GetModelID(),
+			"streaming":                 true,
+			"has_tools":                 opts != nil && len(opts.Tools) > 0,
+			"call_purpose":              purpose,
+			"prompt_prefix_fingerprint": prefixFingerprint,
 		},
 	})
 
@@ -108,7 +114,11 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 				usage = resp.Usage
 			}
 			if len(resp.ToolCalls) > 0 {
-				toolCalls = resp.ToolCalls
+				// The downstream model-context registry decodes arguments in
+				// place before tool execution. Snapshot the provider payload so
+				// the generation observation remains the exact model output and
+				// cannot be changed through the shared slice backing array.
+				toolCalls = snapshotLangfuseToolCalls(resp.ToolCalls)
 			}
 			if resp.FinishReason != "" {
 				finishReason = resp.FinishReason
@@ -122,6 +132,10 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 		gen.Finish(output, convertUsage(usage), nil)
 	}()
 	return wrapped, nil
+}
+
+func snapshotLangfuseToolCalls(toolCalls []types.LLMToolCall) []types.LLMToolCall {
+	return append([]types.LLMToolCall(nil), toolCalls...)
 }
 
 func buildLangfuseMessages(messages []Message) []map[string]interface{} {
@@ -211,10 +225,13 @@ func convertUsage(u *types.TokenUsage) *langfuse.TokenUsage {
 		return nil
 	}
 	return &langfuse.TokenUsage{
-		Input:  u.PromptTokens,
-		Output: u.CompletionTokens,
-		Total:  u.TotalTokens,
-		Unit:   "TOKENS",
+		Input:      u.PromptTokens,
+		Output:     u.CompletionTokens,
+		Total:      u.TotalTokens,
+		CacheRead:  u.CacheReadTokens,
+		CacheWrite: u.CacheWriteTokens,
+		CacheMiss:  u.CacheMissTokens,
+		Unit:       "TOKENS",
 	}
 }
 

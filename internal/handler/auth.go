@@ -5,19 +5,25 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
+
+const oidcNonceCookieName = "weknora_oidc_nonce"
+const oidcNonceCookieMaxAge = 600
 
 // AuthHandler implements HTTP request handlers for user authentication
 // Provides functionality for user registration, login, logout, and token management
@@ -97,6 +103,51 @@ func (h *AuthHandler) resolveRegistrationMode(ctx context.Context) string {
 	return h.systemSettingSvc.GetString(ctx, "auth.registration_mode", "", def)
 }
 
+// resolveDefaultTenantMode returns the provisioning policy for a new
+// local user account.
+// Priority: DB system_settings > cfg.Auth > hard default (create_personal).
+// Shared by public registration and the SystemAdmin create-user endpoint.
+//
+// Invitation registration never uses this value: the invitation itself
+// supplies the target tenant.
+func resolveDefaultTenantMode(
+	ctx context.Context,
+	configInfo *config.Config,
+	systemSettingSvc interfaces.SystemSettingService,
+) types.TenantProvisioningMode {
+	def := config.AuthDefaultTenantModeCreatePersonal
+	if configInfo != nil && configInfo.Auth != nil {
+		if mode := strings.TrimSpace(configInfo.Auth.DefaultTenantMode); mode != "" {
+			def = mode
+		}
+	}
+	mode := def
+	if systemSettingSvc != nil {
+		mode = systemSettingSvc.GetString(
+			ctx,
+			"auth.default_tenant_mode",
+			"WEKNORA_AUTH_DEFAULT_TENANT_MODE",
+			def,
+		)
+	}
+	if mode == config.AuthDefaultTenantModeTenantless {
+		return types.TenantProvisioningTenantless
+	}
+	return types.TenantProvisioningCreatePersonal
+}
+
+// resolveDefaultTenantMode returns the provisioning policy for ordinary
+// public password registrations.
+func (h *AuthHandler) resolveDefaultTenantMode(ctx context.Context) types.TenantProvisioningMode {
+	return resolveDefaultTenantMode(ctx, h.configInfo, h.systemSettingSvc)
+}
+
+// resolveDefaultTenantMode resolves the same policy for users provisioned
+// by a SystemAdmin via POST /api/v1/system/admin/users/create.
+func (h *SystemHandler) resolveDefaultTenantMode(ctx context.Context) types.TenantProvisioningMode {
+	return resolveDefaultTenantMode(ctx, h.cfg, h.systemSettingSvc)
+}
+
 // Register godoc
 // @Summary      用户注册
 // @Description  注册新用户账号
@@ -135,7 +186,12 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 	req.Username = secutils.SanitizeForLog(req.Username)
 	req.Email = secutils.SanitizeForLog(req.Email)
-	req.Password = secutils.SanitizeForLog(req.Password)
+	// Password is intentionally NOT sanitized: SanitizeForLog replaces
+	// \n, \r, \t and strips other control characters so a string is safe
+	// to write into a log line. Applying it to a real password would
+	// silently rewrite the credential before hashing, so registration
+	// would succeed but login with the original password would fail.
+	// Passwords must never be logged, so they don't need that defence.
 
 	// Validate required fields
 	if req.Username == "" || req.Email == "" || req.Password == "" {
@@ -146,6 +202,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 	req.Username = secutils.SanitizeForLog(req.Username)
 	req.Email = secutils.SanitizeForLog(req.Email)
+	req.TenantProvisioning = h.resolveDefaultTenantMode(ctx)
 	// Call service to register user
 	user, err := h.userService.Register(ctx, &req)
 	if err != nil {
@@ -210,14 +267,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// Check if login was successful
 	if !response.Success {
 		logger.Warnf(ctx, "Login failed: %s", response.Message)
-		c.JSON(http.StatusUnauthorized, response)
+		c.JSON(http.StatusUnauthorized, dto.NewAuthLoginResponse(response))
 		return
 	}
 
 	// User is already in the correct format from service
 
 	logger.Infof(ctx, "User logged in successfully, email: %s", email)
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, dto.NewAuthLoginResponse(response))
 }
 
 // GetOIDCAuthorizationURL godoc
@@ -248,7 +305,55 @@ func (h *AuthHandler) GetOIDCAuthorizationURL(c *gin.Context) {
 		return
 	}
 
+	// Bind the state nonce to this browser so an attacker cannot replay
+	// their own authorization code into a victim's callback.
+	setOIDCNonceCookie(c, resp.Nonce)
+
 	c.JSON(http.StatusOK, resp)
+}
+
+// setOIDCNonceCookie binds the OIDC state nonce to this browser so an
+// attacker cannot replay their own authorization code into a victim's
+// callback. Shared by /auth/oidc/url (JSON) and /auth/oidc/start (302).
+func setOIDCNonceCookie(c *gin.Context, nonce string) {
+	if nonce == "" {
+		return
+	}
+	secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(oidcNonceCookieName, nonce, oidcNonceCookieMaxAge, "/", "", secure, true)
+}
+
+// oidcCallbackURL derives the absolute /auth/oidc/callback URL from the
+// request's own origin (scheme + host), so external platforms can deep-link
+// to /auth/oidc/start without supplying a redirect_uri.
+func oidcCallbackURL(c *gin.Context) string {
+	scheme := "http"
+	if c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	return scheme + "://" + c.Request.Host + "/api/v1/auth/oidc/callback"
+}
+
+// OIDCStart godoc
+// @Summary      发起 OIDC 登录（直接 302）
+// @Description  与 /auth/oidc/url 不同，此端点直接 302 重定向到 OIDC Provider 的授权页，
+// @Description  无需前端 JS 介入。适用于外部平台（如企业门户）直接给出一个链接即可
+// @Description  触发 OIDC 授权码流程，借助 IdP 的 SSO session 实现免再次输密码。
+// @Tags         认证
+// @Success      302
+// @Router       /auth/oidc/start [get]
+func (h *AuthHandler) OIDCStart(c *gin.Context) {
+	ctx := c.Request.Context()
+	resp, err := h.userService.GetOIDCAuthorizationURL(ctx, oidcCallbackURL(c))
+	if err != nil {
+		logger.Errorf(ctx, "Failed to generate OIDC authorization URL: %v", err)
+		appErr := errors.NewForbiddenError("OIDC authorization unavailable").WithDetails(err.Error())
+		c.Error(appErr)
+		return
+	}
+	setOIDCNonceCookie(c, resp.Nonce)
+	c.Redirect(http.StatusFound, resp.AuthorizationURL)
 }
 
 // GetOIDCConfig godoc
@@ -300,12 +405,14 @@ func (h *AuthHandler) OIDCRedirectCallback(c *gin.Context) {
 	}
 
 	state := strings.TrimSpace(c.Query("state"))
-	decodedState, err := decodeOIDCState(state)
+	decodedState, err := decodeOIDCState(state, c.Request)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to decode OIDC state: %v", err)
 		c.Redirect(http.StatusFound, frontendRedirectURI+"#oidc_error="+urlQueryEscape("invalid_state"))
 		return
 	}
+	// One-time use: clear the binding cookie as soon as it is checked.
+	c.SetCookie(oidcNonceCookieName, "", -1, "/", "", false, true)
 
 	code := strings.TrimSpace(c.Query("code"))
 	if code == "" {
@@ -313,7 +420,7 @@ func (h *AuthHandler) OIDCRedirectCallback(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.userService.LoginWithOIDC(ctx, code, strings.TrimSpace(decodedState.RedirectURI))
+	resp, err := h.userService.LoginWithOIDC(ctx, code, strings.TrimSpace(decodedState.RedirectURI), h.resolveDefaultTenantMode(ctx))
 	if err != nil {
 		logger.Errorf(ctx, "Failed to complete OIDC login via redirect callback: %v", err)
 		c.Redirect(http.StatusFound, frontendRedirectURI+"#oidc_error="+urlQueryEscape("login_failed")+"&oidc_error_description="+urlQueryEscape(err.Error()))
@@ -335,7 +442,7 @@ func (h *AuthHandler) OIDCRedirectCallback(c *gin.Context) {
 }
 
 func encodeOIDCCallbackPayload(resp *types.OIDCCallbackResponse) (string, error) {
-	payload, err := json.Marshal(resp)
+	payload, err := json.Marshal(dto.NewAuthOIDCCallbackResponse(resp))
 	if err != nil {
 		return "", err
 	}
@@ -343,23 +450,26 @@ func encodeOIDCCallbackPayload(resp *types.OIDCCallbackResponse) (string, error)
 }
 
 type oidcStatePayload struct {
-	Nonce       string `json:"nonce"`
-	RedirectURI string `json:"redirect_uri,omitempty"`
+	Nonce       string
+	RedirectURI string
 }
 
-func decodeOIDCState(raw string) (*oidcStatePayload, error) {
-	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(raw))
+func decodeOIDCState(raw string, req *http.Request) (*oidcStatePayload, error) {
+	payload, err := secutils.VerifyOIDCState(raw)
 	if err != nil {
 		return nil, err
 	}
-	var payload oidcStatePayload
-	if err := json.Unmarshal(decoded, &payload); err != nil {
-		return nil, err
+	cookieNonce, err := req.Cookie(oidcNonceCookieName)
+	if err != nil || cookieNonce == nil || strings.TrimSpace(cookieNonce.Value) == "" {
+		return nil, errors.NewValidationError("oidc nonce cookie missing")
 	}
-	if strings.TrimSpace(payload.RedirectURI) == "" {
-		return nil, errors.NewValidationError("state.redirect_uri is required")
+	if cookieNonce.Value != payload.Nonce {
+		return nil, errors.NewValidationError("oidc nonce mismatch")
 	}
-	return &payload, nil
+	return &oidcStatePayload{
+		Nonce:       payload.Nonce,
+		RedirectURI: strings.TrimSpace(payload.RedirectURI),
+	}, nil
 }
 
 func urlQueryEscape(value string) string {
@@ -410,8 +520,9 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 
 	token := tokenParts[1]
 
-	// Revoke token
-	err := h.userService.RevokeToken(ctx, token)
+	// Revoke every outstanding session for this user so refresh tokens
+	// cannot keep working after logout.
+	err := h.userService.Logout(ctx, token)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to revoke token: %v", err)
 		appErr := errors.NewInternalServerError("Logout failed").WithDetails(err.Error())
@@ -518,12 +629,21 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	// 同步返回当前用户的 memberships，让前端在页面刷新（仅命中 /auth/me）
 	// 后也能恢复 currentTenantRole，避免角色信息只在 login 那一刻可用。
 	memberships := h.userService.BuildLoginMemberships(ctx, user, tenant)
+	canCreateTenant := user.CanAccessAllTenants ||
+		resolveTenantSelfServiceCreationEnabled(ctx, h.configInfo, h.systemSettingSvc)
+	autoAcceptInvitation := h.systemSettingSvc != nil &&
+		h.systemSettingSvc.GetBool(ctx, "tenant.auto_accept_invitation", "WEKNORA_TENANT_AUTO_ACCEPT_INVITATION", false)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"user":        userInfo,
-			"tenant":      tenant,
-			"memberships": memberships,
+			"user":            userInfo,
+			"tenant":          dto.NewTenantResponse(ctx, tenant),
+			"memberships":     memberships,
+			"tenant_required": tenant == nil,
+			"capabilities": gin.H{
+				"can_create_tenant":      canCreateTenant,
+				"auto_accept_invitation": autoAcceptInvitation,
+			},
 		},
 	})
 }
@@ -533,10 +653,9 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 // (preserve existing value) from "explicit false". See
 // types.UserPreferences for the persistence-layer counterpart.
 type updateMyPreferencesRequest struct {
-	EnableMemory *bool `json:"enable_memory"`
 	// LastActiveTenantID lets the SPA persist "after a fresh login,
 	// drop me back into this workspace" across devices. Send a positive
-	// tenant id to set / replace, or 0 to clear. Membership is validated
+	// workspace id to set / replace, or 0 to clear. Membership is validated
 	// at next login, not here. Nil = field omitted from the PATCH and
 	// stays untouched.
 	LastActiveTenantID *uint64 `json:"last_active_tenant_id"`
@@ -573,7 +692,6 @@ func (h *AuthHandler) UpdateMyPreferences(c *gin.Context) {
 	}
 
 	patch := types.UserPreferences{
-		EnableMemory:       req.EnableMemory,
 		LastActiveTenantID: req.LastActiveTenantID,
 	}
 	prefs, err := h.userService.UpdateUserPreferences(ctx, user.ID, patch)
@@ -592,7 +710,7 @@ func (h *AuthHandler) UpdateMyPreferences(c *gin.Context) {
 
 // ChangePassword godoc
 // @Summary      修改密码
-// @Description  修改当前用户的登录密码
+// @Description  修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；成功后所有会话被撤销，需重新登录。
 // @Tags         认证
 // @Accept       json
 // @Produce      json
@@ -608,7 +726,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 
 	var req struct {
 		OldPassword string `json:"old_password" binding:"required"`
-		NewPassword string `json:"new_password" binding:"required,min=6"`
+		NewPassword string `json:"new_password" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -630,10 +748,28 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	// Change password
 	err = h.userService.ChangePassword(ctx, user.ID, req.OldPassword, req.NewPassword)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to change password: %v", err)
-		appErr := errors.NewBadRequestError("Password change failed").WithDetails(err.Error())
-		c.Error(appErr)
-		return
+		switch {
+		case stderrors.Is(err, service.ErrPasswordPolicy):
+			appErr := errors.NewValidationError("Password policy violation").
+				WithDetails(service.DetailPasswordPolicy)
+			c.Error(appErr)
+			return
+		case stderrors.Is(err, service.ErrInvalidOldPassword):
+			appErr := errors.NewBadRequestError("Current password is incorrect").
+				WithDetails(service.DetailInvalidOldPassword)
+			c.Error(appErr)
+			return
+		case stderrors.Is(err, service.ErrSamePassword):
+			appErr := errors.NewValidationError("New password must differ from current password").
+				WithDetails(service.DetailSamePassword)
+			c.Error(appErr)
+			return
+		default:
+			logger.Errorf(ctx, "Failed to change password: %v", err)
+			appErr := errors.NewBadRequestError("Password change failed").WithDetails(err.Error())
+			c.Error(appErr)
+			return
+		}
 	}
 
 	logger.Infof(ctx, "Password changed successfully for user: %s", user.Email)
@@ -667,15 +803,15 @@ func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
 }
 
 // SwitchTenant godoc
-// @Summary      切换激活租户
-// @Description  为当前用户在目标租户重新签发访问令牌；要求该用户在目标租户存在 active 成员关系
+// @Summary      切换激活空间
+// @Description  为当前用户在目标空间重新签发访问令牌；要求该用户在目标空间存在 active 成员关系
 // @Tags         认证
 // @Accept       json
 // @Produce      json
 // @Param        request  body      object{tenant_id=integer,refresh_token=string}  true  "切换请求"
 // @Success      200      {object}  types.LoginResponse
 // @Failure      400      {object}  errors.AppError  "参数错误"
-// @Failure      403      {object}  errors.AppError  "无该租户成员关系"
+// @Failure      403      {object}  errors.AppError  "无该空间成员关系"
 // @Security     Bearer
 // @Router       /auth/switch-tenant [post]
 //
@@ -690,7 +826,7 @@ func (h *AuthHandler) SwitchTenant(c *gin.Context) {
 		RefreshToken string `json:"refresh_token"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		appErr := errors.NewValidationError("Invalid switch-tenant request").WithDetails(err.Error())
+		appErr := errors.NewValidationError("Invalid workspace switch request").WithDetails(err.Error())
 		c.Error(appErr)
 		return
 	}
@@ -705,17 +841,16 @@ func (h *AuthHandler) SwitchTenant(c *gin.Context) {
 	resp, err := h.userService.SwitchTenant(ctx, user, req.TenantID, req.RefreshToken)
 	if err != nil {
 		logger.Errorf(ctx, "SwitchTenant failed user=%s target=%d: %v", user.ID, req.TenantID, err)
-		appErr := errors.NewForbiddenError("switch tenant failed").WithDetails(err.Error())
+		appErr := errors.NewForbiddenError("workspace switch failed").WithDetails(err.Error())
 		c.Error(appErr)
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.NewAuthLoginResponse(resp))
 }
 
-// AutoSetup godoc
 // @Summary      自动初始化（Lite 桌面版）
-// @Description  Lite 版专用：首次启动时自动创建默认用户和租户并返回令牌，后续启动直接签发令牌，免除手动注册/登录流程
+// @Description  Lite 版专用：首次启动时自动创建默认用户和空间并返回令牌，后续启动直接签发令牌，免除手动注册/登录流程
 // @Tags         认证
 // @Accept       json
 // @Produce      json
@@ -776,7 +911,7 @@ func (h *AuthHandler) AutoSetup(c *gin.Context) {
 	tenant, _ := h.tenantService.GetTenantByID(ctx, user.TenantID)
 
 	logger.Info(ctx, "Auto-setup: completed successfully")
-	c.JSON(http.StatusOK, &types.LoginResponse{
+	c.JSON(http.StatusOK, dto.NewAuthLoginResponse(&types.LoginResponse{
 		Success:      true,
 		Message:      "Auto-setup successful",
 		User:         user,
@@ -788,7 +923,7 @@ func (h *AuthHandler) AutoSetup(c *gin.Context) {
 		}},
 		Token:        accessToken,
 		RefreshToken: refreshToken,
-	})
+	}))
 }
 
 // tenantNameOrEmpty returns t.Name when t is non-nil, "" otherwise.

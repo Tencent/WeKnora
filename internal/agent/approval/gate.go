@@ -117,6 +117,10 @@ type OAuthPendingRequest struct {
 	ServiceName        string
 	MCPToolName        string
 	ToolCallID         string
+	// WaitTimeout overrides the gate's default wait timeout when > 0. The wait
+	// is always bounded (either by this value, the gate default, or ctx
+	// cancellation) so the blocked goroutine never leaks.
+	WaitTimeout time.Duration
 }
 
 var _ MCPApproval = (*Gate)(nil)
@@ -170,7 +174,7 @@ var (
 	// ErrPendingNotFound is returned when Resolve is called with an unknown id.
 	ErrPendingNotFound = errors.New("tool approval pending not found")
 	// ErrTenantMismatch is returned when Resolve tenant does not match the pending request.
-	ErrTenantMismatch = errors.New("tenant mismatch for tool approval")
+	ErrTenantMismatch = errors.New("workspace mismatch for tool approval")
 	// ErrAlreadyResolved is returned when Resolve loses the race against a
 	// timeout / cancellation: the waiter is still in the map but its decision
 	// channel was already consumed by the timer/ctx branch.
@@ -446,7 +450,12 @@ func (g *Gate) RequestOAuthAndWait(ctx context.Context, req OAuthPendingRequest)
 		g.mu.Unlock()
 	}()
 
-	timeoutSec := int(g.timeout / time.Second)
+	waitTimeout := g.timeout
+	if req.WaitTimeout > 0 {
+		waitTimeout = req.WaitTimeout
+	}
+
+	timeoutSec := int(waitTimeout / time.Second)
 	if timeoutSec < 1 {
 		timeoutSec = 1
 	}
@@ -497,7 +506,7 @@ func (g *Gate) RequestOAuthAndWait(ctx context.Context, req OAuthPendingRequest)
 		})
 	}
 
-	timer := time.NewTimer(g.timeout)
+	timer := time.NewTimer(waitTimeout)
 	defer timer.Stop()
 
 	var d Decision

@@ -35,9 +35,9 @@
 </template>
 
 <script setup lang="ts">
-import { defineProps } from 'vue';
 import type { ChunkDetailData } from '@/types/tool-results';
 import { useI18n } from 'vue-i18n';
+import { copyToClipboard as copyTextToClipboard } from '@/utils/clipboard';
 
 const props = defineProps<{
   data: ChunkDetailData;
@@ -46,26 +46,8 @@ const props = defineProps<{
 const { t } = useI18n();
 
 const copyToClipboard = () => {
-  const text = props.data.content;
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).catch(() => {
-      fallbackCopy(text);
-    });
-  } else {
-    fallbackCopy(text);
-  }
+  void copyTextToClipboard(props.data.content);
 };
-
-function fallbackCopy(text: string) {
-  const textArea = document.createElement('textarea');
-  textArea.value = text;
-  textArea.style.position = 'fixed';
-  textArea.style.opacity = '0';
-  document.body.appendChild(textArea);
-  textArea.select();
-  document.execCommand('copy');
-  document.body.removeChild(textArea);
-}
 </script>
 
 <style lang="less" scoped>
@@ -91,4 +73,3 @@ code {
   gap: 8px;
 }
 </style>
-

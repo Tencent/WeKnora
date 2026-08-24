@@ -34,6 +34,7 @@ type ParserEngine struct {
 // StorageEngineStatusItem describes one storage engine's availability
 type StorageEngineStatusItem struct {
 	Name        string `json:"name"`
+	Allowed     bool   `json:"allowed"`
 	Available   bool   `json:"available"`
 	Description string `json:"description"`
 }
@@ -41,6 +42,7 @@ type StorageEngineStatusItem struct {
 // StorageEngineStatusResponse is the response for storage engine status
 type StorageEngineStatusResponse struct {
 	Engines           []StorageEngineStatusItem `json:"engines"`
+	AllowedProviders  []string                  `json:"allowed_providers"`
 	MinioEnvAvailable bool                      `json:"minio_env_available"`
 }
 
@@ -61,6 +63,18 @@ type StorageCheckResponse struct {
 	BucketCreated bool   `json:"bucket_created,omitempty"`
 }
 
+// DeploymentCapability describes whether a deployment exposes a feature route.
+type DeploymentCapability struct {
+	Supported bool   `json:"supported"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// DeploymentCapabilitiesData is the payload of GET /system/capabilities.
+type DeploymentCapabilitiesData struct {
+	Edition      string                          `json:"edition"`
+	Capabilities map[string]DeploymentCapability `json:"capabilities"`
+}
+
 // GetSystemInfo gets system version and configuration information
 func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/system/info", nil, nil)
@@ -70,6 +84,22 @@ func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	var result struct {
 		Code int         `json:"code"`
 		Data *SystemInfo `json:"data"`
+	}
+	if err := parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// GetDeploymentCapabilities returns the deployment feature snapshot for SPA menu gating.
+func (c *Client) GetDeploymentCapabilities(ctx context.Context) (*DeploymentCapabilitiesData, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/system/capabilities", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Code int                         `json:"code"`
+		Data *DeploymentCapabilitiesData `json:"data"`
 	}
 	if err := parseResponse(resp, &result); err != nil {
 		return nil, err

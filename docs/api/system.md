@@ -4,12 +4,64 @@
 
 | 方法   | 路径                              | 描述                   |
 | ------ | --------------------------------- | ---------------------- |
+| GET    | `/system/capabilities`            | 获取部署能力清单       |
 | GET    | `/system/info`                    | 获取系统信息           |
 | GET    | `/system/parser-engines`          | 获取解析引擎列表       |
 | POST   | `/system/parser-engines/check`    | 检查解析引擎可用性     |
 | POST   | `/system/docreader/reconnect`     | 重连文档解析服务       |
 | GET    | `/system/storage-engine-status`   | 获取存储引擎状态       |
 | POST   | `/system/storage-engine-check`    | 检查存储引擎连通性     |
+
+## GET `/system/capabilities` - 获取部署能力清单
+
+返回当前部署版本，以及各功能模块是否已在后端注册对应路由。`supported: false` 表示 SPA 应隐藏相关入口；字段缺失或接口不可用时不应据此清空整个菜单（fail-open），但 Lite 版会始终将 `organizations` 标记为不支持。
+
+**权限**：Viewer+（租户成员）；任意有效 API Key 可读（`apiKeyAny`）。
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/system/capabilities' \
+--header 'Authorization: Bearer <token>' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "edition": "standard",
+    "capabilities": {
+      "organizations": { "supported": true },
+      "agents": { "supported": true },
+      "integrations.im": { "supported": true },
+      "integrations.embed": { "supported": false, "reason": "route_not_registered" },
+      "integrations.api": { "supported": true },
+      "settings.mcp": { "supported": true },
+      "settings.websearch": { "supported": true },
+      "settings.vectorstore": { "supported": true },
+      "settings.storage": { "supported": true },
+      "settings.sandbox": { "supported": true }
+    }
+  }
+}
+```
+
+Lite 版示例（共享空间不可用）:
+
+```json
+{
+  "capabilities": {
+    "organizations": {
+      "supported": false,
+      "reason": "not_supported_in_lite"
+    }
+  }
+}
+```
 
 ## GET `/system/info` - 获取系统信息
 

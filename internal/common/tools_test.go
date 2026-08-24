@@ -17,6 +17,11 @@ func TestParseLLMJsonResponse(t *testing.T) {
 		{"fenced json", "```json\n{\"key\":\"fenced\"}\n```", "fenced", false},
 		{"fenced no lang", "```\n{\"key\":\"plain\"}\n```", "plain", false},
 		{"prose around fence", "Here you go:\n```json\n{\"key\":\"wrapped\"}\n```\nThanks", "wrapped", false},
+		{"prose around bare json", `Sure: {"key":"bare"} hope that helps`, "bare", false},
+		// Trailing bracket-like prose must not truncate the payload.
+		{"trailing citation", `{"key":"cited"} — see section [1].`, "cited", false},
+		// Braces inside a string literal must not close the object early.
+		{"braces in string", `Result: {"key":"a}b"} done`, "a}b", false},
 		{"not json", "just some text", "", true},
 	}
 
