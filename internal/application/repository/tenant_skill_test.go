@@ -81,7 +81,7 @@ func TestSnapshotLedgerRecordsChain(t *testing.T) {
 		State:   types.SkillSnapshotStateBuilding,
 	}))
 
-	require.NoError(t, repo.MarkSnapshotState(ctx, "ins-1", types.SkillSnapshotStateActive, "snap-1"))
+	require.NoError(t, repo.MarkSnapshotState(ctx, 7, "ins-1", types.SkillSnapshotStateActive, "snap-1"))
 
 	rows, err := repo.ListSnapshotsByConfig(ctx, 7, "cfg-1")
 	require.NoError(t, err)
@@ -126,4 +126,37 @@ func TestListStaleInstallingFindsAbandonedRuns(t *testing.T) {
 	require.Len(t, stale, 2)
 	ids := []string{stale[0].ID, stale[1].ID}
 	require.ElementsMatch(t, []string{"sk-old-install", "sk-old-remove"}, ids)
+}
+
+func TestSkillRepoSoftDeleteAllowsNameReuse(t *testing.T) {
+	repo := newSkillTestRepo(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateSkill(ctx, skillRow("sk-a", "cfg-1", "pdf")))
+	require.NoError(t, repo.DeleteSkill(ctx, 7, "cfg-1", "sk-a"))
+
+	require.NoError(t, repo.CreateSkill(ctx, skillRow("sk-b", "cfg-1", "pdf")),
+		"a soft-deleted name must be reusable for an in-place reinstall")
+	got, err := repo.GetSkillByName(ctx, 7, "cfg-1", "pdf")
+	require.NoError(t, err)
+	require.Equal(t, "sk-b", got.ID)
+}
+
+func TestMarkSnapshotStateIsTenantScoped(t *testing.T) {
+	repo := newSkillTestRepo(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateSnapshotRow(ctx, &types.TenantSkillSnapshotEntity{
+		ID: "ins-1", TenantID: 7, SandboxConfigID: "cfg-1", SkillID: "sk-a",
+		ParentSnapshotID: "tpl-base", Generation: 1,
+		Trigger: types.SkillSnapshotTriggerInstall,
+		State:   types.SkillSnapshotStateBuilding,
+	}))
+
+	require.NoError(t, repo.MarkSnapshotState(ctx, 8, "ins-1", types.SkillSnapshotStateActive, "snap-stolen"))
+
+	rows, err := repo.ListSnapshotsByConfig(ctx, 7, "cfg-1")
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, types.SkillSnapshotStateBuilding, rows[0].State,
+		"a snapshot row must not move when the caller is a different tenant")
+	require.Empty(t, rows[0].SnapshotID)
 }

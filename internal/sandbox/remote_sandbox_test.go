@@ -14,7 +14,7 @@ func TestExecuteOnHandleRunsRemoteScriptWithoutUploading(t *testing.T) {
 	handle, err := client.Create(ctx, RemoteCreateRequest{TemplateID: "tpl"})
 	require.NoError(t, err)
 
-	skillDir := SkillDirFor("sk-1")
+	skillDir := mustSkillDir(t, "sk-1")
 	_, err = sb.ExecuteOnHandle(ctx, handle, &ExecuteConfig{
 		RemoteScriptPath: skillDir + "/scripts/run.py",
 		Args:             []string{"--flag"},
@@ -42,7 +42,7 @@ func TestExecuteOnHandleNestedRemoteScriptUsesSkillRootVenv(t *testing.T) {
 	handle, err := client.Create(ctx, RemoteCreateRequest{TemplateID: "tpl"})
 	require.NoError(t, err)
 
-	skillDir := SkillDirFor("sk-1")
+	skillDir := mustSkillDir(t, "sk-1")
 	_, err = sb.ExecuteOnHandle(ctx, handle, &ExecuteConfig{
 		RemoteScriptPath: skillDir + "/scripts/tools/run.py",
 	})

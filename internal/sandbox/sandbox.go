@@ -182,7 +182,10 @@ type ExecuteConfig struct {
 
 	// RemoteScriptPath is an absolute path to a script that already exists
 	// inside the sandbox image (installed skills). When set, the executor
-	// skips the upload step and runs it in place.
+	// skips the upload step and runs it in place. Only paths under a valid
+	// skill directory in SkillsImageRoot are accepted; script-content
+	// validation is skipped because the file is already on the image, so
+	// callers must have vetted the bundle at install time.
 	RemoteScriptPath string
 }
 

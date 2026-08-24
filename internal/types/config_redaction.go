@@ -346,5 +346,16 @@ func MergeSandboxConfigForUpdate(incoming, existing *TenantSandboxConfig) *Tenan
 		out.EnvVars = envVars
 	}
 
+	// SkillImage is owned by the skill install/remove path, not the sandbox
+	// settings form. The editor rebuilds the payload without this field, and a
+	// crafted PUT must not plant or wipe a snapshot pointer. Copy from the
+	// stored row (or clear on create) and ignore whatever the client sent.
+	if existing != nil && existing.SkillImage != nil {
+		image := *existing.SkillImage
+		out.SkillImage = &image
+	} else {
+		out.SkillImage = nil
+	}
+
 	return &out
 }

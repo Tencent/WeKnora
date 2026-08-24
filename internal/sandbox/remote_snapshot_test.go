@@ -26,6 +26,16 @@ func TestSnapshotManagerFromDetectsCapability(t *testing.T) {
 		require.False(t, ok)
 		require.Nil(t, mgr)
 	})
+
+	t.Run("interface without SupportsSnapshots is rejected", func(t *testing.T) {
+		client := newFakeRemoteClient(SandboxTypeCube)
+		client.capabilities.SupportsSnapshots = false
+
+		mgr, ok := SnapshotManagerFrom(client)
+
+		require.False(t, ok, "embedding snapshot methods must not override a false capability flag")
+		require.Nil(t, mgr)
+	})
 }
 
 func TestFakeSnapshotRoundTrip(t *testing.T) {

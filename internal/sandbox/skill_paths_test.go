@@ -10,7 +10,16 @@ import (
 )
 
 func TestSkillDirFor(t *testing.T) {
-	require.Equal(t, "/opt/weknora/tenant/skills/sk-1", SkillDirFor("sk-1"))
+	dir, err := SkillDirFor("sk-1")
+	require.NoError(t, err)
+	require.Equal(t, "/opt/weknora/tenant/skills/sk-1", dir)
+}
+
+func TestSkillDirForRejectsPathEscape(t *testing.T) {
+	for _, name := range []string{"", ".", "..", "../x", "foo/bar", `foo\bar`, "foo/../bar"} {
+		_, err := SkillDirFor(name)
+		require.ErrorIs(t, err, ErrInvalidSkillName, "name %q must not resolve under the skills root", name)
+	}
 }
 
 func TestSkillDirForImageScript(t *testing.T) {
@@ -31,10 +40,16 @@ func TestSkillDirForImageScript(t *testing.T) {
 		require.False(t, ok)
 		require.Empty(t, skillDir)
 	})
+
+	t.Run("dot-dot after clean that leaves the skills root is rejected", func(t *testing.T) {
+		skillDir, ok := SkillDirForImageScript(SkillsImageRoot + "/../workspace/run.py")
+		require.False(t, ok)
+		require.Empty(t, skillDir)
+	})
 }
 
 func TestSkillInterpreterCommand(t *testing.T) {
-	dir := SkillDirFor("sk-1")
+	dir := mustSkillDir(t, "sk-1")
 
 	t.Run("python prefers the skill's own venv", func(t *testing.T) {
 		cmd, args := SkillInterpreterCommand(dir, dir+"/scripts/run.py")
@@ -64,6 +79,19 @@ func TestSkillInterpreterCommand(t *testing.T) {
 		require.Equal(t, "/bin/sh", cmd)
 		require.Equal(t, []string{dir + "/scripts/run"}, args)
 	})
+
+	t.Run("uppercase python extension still uses the venv", func(t *testing.T) {
+		cmd, args := SkillInterpreterCommand(dir, dir+"/scripts/run.PY")
+		require.Equal(t, "/bin/sh", cmd)
+		require.Contains(t, args[1], dir+"/.venv/bin/python")
+	})
+}
+
+func mustSkillDir(t *testing.T, name string) string {
+	t.Helper()
+	dir, err := SkillDirFor(name)
+	require.NoError(t, err)
+	return dir
 }
 
 func TestSkillInterpreterCommandPythonForwardsAllCallerArgs(t *testing.T) {

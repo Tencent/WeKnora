@@ -706,6 +706,7 @@ func (c *CubeRemoteClient) ListSnapshots(
 	var (
 		out   []RemoteSnapshotRef
 		token string
+		seen  = map[string]struct{}{"": {}}
 	)
 	for {
 		page, next, err := c.client.ListSnapshots(ctx, cubesandbox.ListSnapshotsOptions{
@@ -722,13 +723,14 @@ func (c *CubeRemoteClient) ListSnapshots(
 		if next == "" {
 			return out, nil
 		}
-		// A provider/SDK bug that echoes the same non-empty pagination token
-		// would otherwise spin forever and block skill-image orphan cleanup.
-		// Fail fast instead of hanging until the context is cancelled.
-		if next == token {
+		// A provider/SDK bug that repeats a pagination token (the same one,
+		// or a cycle A→B→A) would otherwise spin forever and block skill-
+		// image orphan cleanup. Fail fast instead of hanging until cancel.
+		if _, dup := seen[next]; dup {
 			return nil, cubeInvalidRequest("ListSnapshots",
-				"provider returned the same pagination token", nil)
+				"provider returned a repeated pagination token", nil)
 		}
+		seen[next] = struct{}{}
 		token = next
 	}
 }

@@ -655,7 +655,9 @@ type TenantSandboxConfig struct {
 	VolumeMount *VolumeMountConfig `json:"volume_mount,omitempty"`
 
 	// SkillImage points at the snapshot that carries this config's installed
-	// skills. Empty means "use the base template".
+	// skills. Empty means "use the base template". Written only by the skill
+	// install/remove path: MergeSandboxConfigForUpdate ignores client values
+	// so a settings-form save cannot wipe or plant the pointer.
 	SkillImage *SkillImageConfig `json:"skill_image,omitempty"`
 
 	// ── 后端专属配置（同一时刻只有一个生效，由 SandboxType 决定）───

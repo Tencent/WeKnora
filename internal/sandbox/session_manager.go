@@ -522,9 +522,12 @@ type ShellExecOptions struct {
 
 	// AllowSkillsRoot lets installer calls work inside the skills image root.
 	// See cleanSessionWorkDir for why the work_dir allowlist is lexical only.
+	// Never set this from a model-authored tool such as shell_exec.
 	AllowSkillsRoot bool
 	// AsRoot is reserved for install/maintenance commands that need to write
 	// outside /workspace; ordinary sessions must keep the provider default user.
+	// Never set this from a model-authored tool such as shell_exec: root inside
+	// the sandbox bypasses file-mode isolation on the image.
 	AsRoot bool
 }
 

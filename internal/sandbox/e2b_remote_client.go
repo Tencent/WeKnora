@@ -996,6 +996,7 @@ func (c *E2BRemoteClient) ListSnapshots(
 	var (
 		out   []RemoteSnapshotRef
 		token string
+		seen  = map[string]struct{}{"": {}}
 	)
 	for {
 		options := append([]e2b.ListSnapshotsOption(nil), baseOptions...)
@@ -1021,13 +1022,14 @@ func (c *E2BRemoteClient) ListSnapshots(
 		if page.NextToken == "" {
 			return out, nil
 		}
-		// A provider/SDK bug that echoes the same non-empty pagination token
-		// would otherwise spin forever and block skill-image orphan cleanup.
-		// Fail fast instead of hanging until the context is cancelled.
-		if page.NextToken == token {
+		// A provider/SDK bug that repeats a pagination token (the same one,
+		// or a cycle A→B→A) would otherwise spin forever and block skill-
+		// image orphan cleanup. Fail fast instead of hanging until cancel.
+		if _, dup := seen[page.NextToken]; dup {
 			return nil, e2bInvalidRequest("ListSnapshots",
-				"provider returned the same pagination token", nil)
+				"provider returned a repeated pagination token", nil)
 		}
+		seen[page.NextToken] = struct{}{}
 		token = page.NextToken
 	}
 }
