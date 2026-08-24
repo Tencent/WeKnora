@@ -559,6 +559,11 @@ func (m *SessionBoundManager) ExecShellCommand(
 		Shell:   true,
 		Env:     env,
 		WorkDir: workDir,
+		// Named explicitly rather than left to each adapter's default. This
+		// command line comes from the model, so it is the one exec path an
+		// injected prompt reaches directly, and the account it runs as must
+		// not depend on which backend the workspace happens to have selected.
+		User:    DefaultSandboxExecUser,
 		Timeout: timeout,
 	})
 	duration := time.Since(start)

@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -88,4 +89,45 @@ func TestSessionBoundManagerExecuteEnsuresOutputDir(t *testing.T) {
 	require.True(t, execs[0].Shell)
 	require.Contains(t, execs[0].Command, "chown user:user")
 	require.Contains(t, execs[0].Command, SessionOutputRoot)
+	require.Empty(t, execs[0].User,
+		"the bootstrap chowns the directory TO the sandbox account, so it is the "+
+			"one exec that must keep the adapter's privileged default")
+}
+
+// shell_exec carries a command line the model wrote, which makes it the exec
+// path an injected prompt reaches most directly. The account it runs as must
+// therefore be pinned here rather than left to each adapter: Docker resolves a
+// blank user to root, while the envd-backed backends resolve it to the sandbox
+// account, so omitting it would hand out different privileges per backend.
+func TestSessionBoundManagerShellExecRunsAsSandboxUser(t *testing.T) {
+	client := newFakeRemoteClient(SandboxTypeCube)
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          client,
+		Store:           NewMemorySessionSandboxBindingStore(),
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+	})
+	require.NoError(t, err)
+
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	_, err = mgr.ExecShellCommand(
+		ctx, "session-shell", "id -un", SessionWorkspaceRoot, time.Minute, nil,
+	)
+	require.NoError(t, err)
+
+	client.mu.Lock()
+	execs := append([]RemoteExecRequest(nil), client.execRequests...)
+	client.mu.Unlock()
+
+	var shell []RemoteExecRequest
+	for _, req := range execs {
+		if req.Shell && req.Command == "id -un" {
+			shell = append(shell, req)
+		}
+	}
+	require.Len(t, shell, 1)
+	require.Equal(t, DefaultSandboxExecUser, shell[0].User)
 }

@@ -223,6 +223,47 @@ func TestResolveEffectiveConfigRejectsPlaintextDockerTCP(t *testing.T) {
 	require.Error(t, err)
 }
 
+// The same bar has to apply to a host nobody typed. A blank field is filled in
+// from DOCKER_HOST, and on a deployment pointed at a plaintext daemon that
+// resolved value is what gets dialled — so validating only the stored string
+// would accept a config that cannot work and say so only at the first sandbox.
+func TestResolveEffectiveConfigRejectsResolvedPlaintextDockerTCP(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "tcp://10.0.0.5:2375")
+
+	_, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType:           "docker",
+		AllowPrivateEndpoints: true,
+		Docker:                &types.DockerSandboxConfig{Image: "weknora:test"},
+	}, DefaultConfig())
+	require.Error(t, err)
+}
+
+// A resolved host is still only a daemon endpoint, so it answers to the same
+// outbound policy an explicitly typed one does.
+func TestResolveEffectiveConfigRejectsResolvedPrivateDockerHostWithoutOptIn(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "tcp://10.0.0.5:2376")
+
+	_, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType: "docker",
+		Docker: &types.DockerSandboxConfig{
+			Image:       "weknora:test",
+			TLSCertPath: "/etc/weknora/docker-certs",
+		},
+	}, DefaultConfig())
+	require.ErrorIs(t, err, ErrUnsafeOutboundURL)
+}
+
+// A missing image is a field the admin can see and fix in the form, so it must
+// still be reported ahead of anything about the daemon endpoint.
+func TestResolveEffectiveConfigReportsMissingImageBeforeHostProblems(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "tcp://10.0.0.5:2375")
+
+	_, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType: "docker",
+	}, DefaultConfig())
+	require.ErrorIs(t, err, ErrSandboxConfigIncomplete)
+}
+
 func TestEffectiveTemplateIDPerProvider(t *testing.T) {
 	require.Equal(t, "e2b-tpl", EffectiveTemplateID(&Config{
 		Type: SandboxTypeE2B, E2BTemplate: "e2b-tpl", CubeTemplate: "cube-tpl",
