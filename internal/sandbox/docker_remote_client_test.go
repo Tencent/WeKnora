@@ -550,14 +550,17 @@ func TestDockerClientExecWrapsCommandWithTimeoutAndActivityMarker(t *testing.T) 
 		opts.Cmd[3:], "the command must reach the shell as positional args, never interpolated")
 }
 
-// A blank user is reserved for the manager's own privileged bootstrap. Every
-// other adapter resolves it to the sandbox account, so a caller that forgets to
-// name one here would silently gain root instead of losing privileges.
-func TestDockerExecUserOnlyFallsBackToRootWhenUnnamed(t *testing.T) {
+// Every exec the daemon runs passes through dockerExecUser, so a caller that
+// forgets to name an account has to lose privileges here rather than gain them.
+// Falling back to root used to be a container-escape primitive: the artifact
+// bootstrap chowns a path inside the session's own workspace, and chown follows
+// symlinks, so root + a planted link meant the session could take ownership of
+// /etc and rewrite passwd to give itself uid 0.
+func TestDockerExecUserNeverFallsBackToRoot(t *testing.T) {
 	require.Equal(t, DefaultSandboxExecUser, dockerExecUser(DefaultSandboxExecUser))
 	require.Equal(t, "1000:1000", dockerExecUser("1000:1000"))
-	require.Equal(t, "root", dockerExecUser(""))
-	require.Equal(t, "root", dockerExecUser("   "))
+	require.Equal(t, DefaultSandboxExecUser, dockerExecUser(""))
+	require.Equal(t, DefaultSandboxExecUser, dockerExecUser("   "))
 }
 
 // Cancelling an exec leaves the copy goroutine writing into the output buffers.
@@ -611,8 +614,8 @@ func TestDockerClientExecShellPassesCommandAsPositionalArgument(t *testing.T) {
 	require.NoError(t, err)
 	opts := engine.execOptions[0]
 	require.Equal(t, []string{"weknora-exec", `echo "a b"; rm -rf /nope`}, opts.Cmd[3:])
-	require.Equal(t, "root", opts.User,
-		"a blank user is the manager's bootstrap escape hatch; callers name the account")
+	require.Equal(t, DefaultSandboxExecUser, opts.User,
+		"an unnamed account must resolve to the sandbox user, never to root")
 }
 
 func TestDockerClientExecRejectsShellWithArgs(t *testing.T) {

@@ -14,11 +14,16 @@
 //	Get/List → GET  /containers/json?filters=label=…
 //	Delete   → DELETE /containers/{id}?force=1
 //	Exec     → POST /containers/{id}/exec → /exec/{id}/start (hijack)
-//	Files    → PUT/GET/HEAD /containers/{id}/archive
 //
-// Three operations have no Engine API and are implemented as exec:
-// MakeDir, Remove and ListDir. ListDir uses `find -printf`, which needs GNU
-// findutils in the image; the standard WeKnora sandbox image provides it.
+// Every file operation — WriteFile, ReadFile, Stat, MakeDir, Remove, ListDir —
+// is an exec running as the sandbox account, NOT a call to /archive. The
+// archive endpoints run as root and resolve symlinks, so a session that plants
+// a link inside its own workspace could read or overwrite anything in the
+// container through them. Going through exec puts the kernel back in charge of
+// who may touch what. Do not "simplify" these back onto /archive.
+//
+// ListDir and Stat use `find -printf`, which needs GNU findutils in the image;
+// the standard WeKnora sandbox image provides it.
 //
 // Two Docker facts shape the rest of this file:
 //
@@ -666,18 +671,24 @@ func dockerExecCommand(req RemoteExecRequest, timeout time.Duration) []string {
 
 // dockerExecUser resolves which account a command runs as.
 //
-// An empty user is reserved for the manager's own bootstrap, which chowns the
-// artifact directory TO the sandbox account and therefore cannot run as it. It
-// is not a general default: the envd-backed backends resolve a blank user to
-// DefaultSandboxExecUser (E2B authenticates the data plane as that account,
-// Cube hands the field to envd, which defaults the same way), so a path that
-// left this to the adapter would run as root here and unprivileged there.
-// Every caller-reachable path names the account explicitly.
+// A blank user resolves to the sandbox account. It must never resolve to root:
+// this function is the single choke point for every exec the daemon runs, so a
+// caller that forgets to name an account has to lose privileges here, not
+// silently gain them. It also makes the backends agree — E2B authenticates its
+// data plane as DefaultSandboxExecUser and Cube hands a blank field to envd,
+// which defaults the same way.
+//
+// This used to fall back to root for the manager's artifact-directory
+// bootstrap. That was a container-escape primitive: chown follows symlinks, so
+// a session that replaced its own artifact directory with a link to /etc got
+// the root-run bootstrap to hand it ownership of /etc, and from there uid 0 by
+// rewriting passwd. The bootstrap now names the account like everyone else and
+// simply fails when it is aimed at something the account does not own.
 func dockerExecUser(user string) string {
-	if strings.TrimSpace(user) == "" {
-		return "root"
+	if trimmed := strings.TrimSpace(user); trimmed != "" {
+		return trimmed
 	}
-	return user
+	return DefaultSandboxExecUser
 }
 
 // dockerExecWasKilled reports whether an exit code means the wrapper killed
@@ -776,9 +787,17 @@ func (c *DockerRemoteClient) ReadFile(
 
 // Stat returns metadata for one path.
 //
-// find does not follow symlinks, so a link reports as RemoteEntryOther rather
-// than as whatever it points at. Callers that only accept regular files
-// therefore refuse it before any read is attempted.
+// find reports the FINAL component without following it, so a path that names a
+// link reports RemoteEntryOther rather than whatever it points at, and callers
+// that only accept regular files refuse it before any read is attempted.
+//
+// That guarantee stops at the final component. Intermediate components are
+// resolved by the kernel during path lookup, exactly as they are for any other
+// process, so `/workspace/output/link-to-etc/passwd` stats as a regular file —
+// verified against a real daemon. Reads through such a path are not a
+// privilege boundary being crossed, only the "stay inside the artifact
+// directory" convention: ReadFile still runs as the sandbox account, so it
+// returns what that account could have read anyway with shell_exec.
 func (c *DockerRemoteClient) Stat(
 	ctx context.Context,
 	handle RemoteSandboxHandle,
