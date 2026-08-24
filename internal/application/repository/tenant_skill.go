@@ -31,7 +31,7 @@ type TenantSkillRepository interface {
 	// CreateSnapshotRow records provider work before creating the billable snapshot.
 	CreateSnapshotRow(ctx context.Context, e *types.TenantSkillSnapshotEntity) error
 	// MarkSnapshotState updates ledger state and stores the provider snapshot ID once known.
-	MarkSnapshotState(ctx context.Context, id, state, snapshotID string) error
+	MarkSnapshotState(ctx context.Context, tenantID uint64, id, state, snapshotID string) error
 	// ListSnapshotsByConfig returns the full chain for audit and troubleshooting.
 	ListSnapshotsByConfig(ctx context.Context, tenantID uint64, configID string) ([]*types.TenantSkillSnapshotEntity, error)
 	// DeleteSnapshotRowsByConfig removes ledger rows only when an entire sandbox
@@ -150,7 +150,7 @@ func (r *tenantSkillRepository) CreateSnapshotRow(
 // MarkSnapshotState moves a ledger row and, when the snapshot has just been
 // created, records its provider-side ID.
 func (r *tenantSkillRepository) MarkSnapshotState(
-	ctx context.Context, id, state, snapshotID string,
+	ctx context.Context, tenantID uint64, id, state, snapshotID string,
 ) error {
 	updates := map[string]any{"state": state, "updated_at": time.Now()}
 	if snapshotID != "" {
@@ -162,7 +162,7 @@ func (r *tenantSkillRepository) MarkSnapshotState(
 	}
 	return r.db.WithContext(ctx).
 		Model(&types.TenantSkillSnapshotEntity{}).
-		Where("id = ?", id).
+		Where("tenant_id = ? AND id = ?", tenantID, id).
 		Updates(updates).Error
 }
 

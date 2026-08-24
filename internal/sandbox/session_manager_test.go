@@ -134,12 +134,13 @@ func TestSessionBoundManagerShellExecRunsAsSandboxUser(t *testing.T) {
 }
 
 func TestCleanSessionWorkDirRejectsSkillRootByDefault(t *testing.T) {
-	_, err := cleanSessionWorkDir(SkillDirFor("sk-1"), false)
+	skillDir := mustSkillDir(t, "sk-1")
+	_, err := cleanSessionWorkDir(skillDir, false)
 	require.Error(t, err, "ordinary sessions must stay inside /workspace")
 
-	got, err := cleanSessionWorkDir(SkillDirFor("sk-1"), true)
+	got, err := cleanSessionWorkDir(skillDir, true)
 	require.NoError(t, err, "install sessions need to work inside the skills root")
-	require.Equal(t, SkillDirFor("sk-1"), got)
+	require.Equal(t, skillDir, got)
 }
 
 func TestCleanSessionWorkDirStillRejectsArbitraryPathsInInstallMode(t *testing.T) {
@@ -157,15 +158,16 @@ func TestExecShellCommandWithOptionsRunsAsRootOnlyWhenAsked(t *testing.T) {
 	require.Equal(t, DefaultSandboxExecUser, last.User,
 		"ordinary shell_exec must stay on the non-root sandbox account")
 
+	skillDir := mustSkillDir(t, "sk-1")
 	_, err = mgr.ExecShellCommandWithOptions(ctx, "sess-1", "echo hi", ShellExecOptions{
 		AsRoot:          true,
 		AllowSkillsRoot: true,
-		WorkDir:         SkillDirFor("sk-1"),
+		WorkDir:         skillDir,
 	})
 	require.NoError(t, err)
 	last = lastExecRequest(t, client)
 	require.Equal(t, "root", last.User)
-	require.Equal(t, SkillDirFor("sk-1"), last.WorkDir)
+	require.Equal(t, skillDir, last.WorkDir)
 }
 
 func TestExecShellCommandKeepsOrdinaryRemoteRequest(t *testing.T) {

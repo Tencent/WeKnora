@@ -79,6 +79,38 @@ func TestMergeSandboxConfigForUpdateNilIncoming(t *testing.T) {
 	require.Nil(t, MergeSandboxConfigForUpdate(nil, &TenantSandboxConfig{}))
 }
 
+func TestMergeSandboxConfigForUpdatePreservesSkillImage(t *testing.T) {
+	existing := &TenantSandboxConfig{
+		E2B:        &E2BSandboxConfig{APIKey: "old-e2b"},
+		SkillImage: &SkillImageConfig{SnapshotID: "snap-1", OwnerFingerprint: "fp-1", Generation: 3},
+	}
+	incoming := &TenantSandboxConfig{
+		E2B:        &E2BSandboxConfig{APIKey: RedactedSecretPlaceholder},
+		SkillImage: &SkillImageConfig{SnapshotID: "forged-snap", OwnerFingerprint: "forged-fp"},
+	}
+
+	out := MergeSandboxConfigForUpdate(incoming, existing)
+
+	require.Equal(t, "snap-1", out.SkillImage.SnapshotID,
+		"a settings save must not replace the install-owned snapshot pointer")
+	require.Equal(t, "fp-1", out.SkillImage.OwnerFingerprint)
+	require.Equal(t, 3, out.SkillImage.Generation)
+	out.SkillImage.SnapshotID = "mutated"
+	require.Equal(t, "snap-1", existing.SkillImage.SnapshotID,
+		"merge must copy SkillImage so later mutation cannot touch the stored row")
+}
+
+func TestMergeSandboxConfigForUpdateIgnoresIncomingSkillImageOnCreate(t *testing.T) {
+	incoming := &TenantSandboxConfig{
+		E2B:        &E2BSandboxConfig{APIKey: "new-e2b"},
+		SkillImage: &SkillImageConfig{SnapshotID: "forged-snap"},
+	}
+
+	out := MergeSandboxConfigForUpdate(incoming, nil)
+
+	require.Nil(t, out.SkillImage, "create must not accept a client-supplied skill image")
+}
+
 func TestMergeSandboxConfigForUpdateDoesNotMutateInputs(t *testing.T) {
 	existing := &TenantSandboxConfig{E2B: &E2BSandboxConfig{APIKey: "old-e2b"}}
 	incoming := &TenantSandboxConfig{

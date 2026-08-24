@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -19,12 +20,33 @@ const (
 
 const skillShellArgv0 = "weknora-skill"
 
+// ErrInvalidSkillName is returned when a skill name would escape SkillsImageRoot
+// or is not a single path segment.
+var ErrInvalidSkillName = errors.New("sandbox: invalid skill name")
+
+// IsValidSkillName reports whether name is a single directory segment under
+// SkillsImageRoot. Empty names, "." / "..", and anything containing a path
+// separator are rejected so install/exec cannot walk out of the skills root.
+func IsValidSkillName(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	if strings.ContainsAny(name, "/\\\x00") {
+		return false
+	}
+	return path.Base(path.Clean(name)) == name
+}
+
 // SkillDirFor returns the image directory of a skill. The key is the skill
 // name from SKILL.md: that is what the installer writes, and what the agent
 // is told to execute. The database id stays a row key and is not part of
 // the path.
-func SkillDirFor(skillName string) string {
-	return path.Join(SkillsImageRoot, skillName)
+func SkillDirFor(skillName string) (string, error) {
+	if !IsValidSkillName(skillName) {
+		return "", fmt.Errorf("%w %q", ErrInvalidSkillName, skillName)
+	}
+	return path.Join(SkillsImageRoot, skillName), nil
 }
 
 // SkillDirForImageScript returns the owning skill directory for an image script.
@@ -40,7 +62,7 @@ func SkillDirForImageScript(scriptPath string) (string, bool) {
 
 	rest := strings.TrimPrefix(cleanScript, prefix)
 	parts := strings.SplitN(rest, "/", 2)
-	if len(parts) != 2 || parts[0] == "" {
+	if len(parts) != 2 || parts[0] == "" || !IsValidSkillName(parts[0]) {
 		return "", false
 	}
 	return path.Join(cleanRoot, parts[0]), true
@@ -56,17 +78,17 @@ func SkillDirForImageScript(scriptPath string) (string, bool) {
 // sandbox with a shell conditional instead of an extra round trip to stat the
 // path, because the extra Exec would double the latency of every skill call.
 func SkillInterpreterCommand(skillDir, scriptPath string) (string, []string) {
-	switch {
-	case strings.HasSuffix(scriptPath, ".py"):
+	switch strings.ToLower(path.Ext(scriptPath)) {
+	case ".py":
 		venvPython := path.Join(skillDir, ".venv", "bin", "python")
 		script := shellQuote(scriptPath)
 		return "/bin/sh", []string{"-c", fmt.Sprintf(
 			`if [ -x %s ]; then exec %s %s "$@"; else exec python3 %s "$@"; fi`,
 			shellQuote(venvPython), shellQuote(venvPython), script, script,
 		), skillShellArgv0}
-	case strings.HasSuffix(scriptPath, ".js"), strings.HasSuffix(scriptPath, ".mjs"):
+	case ".js", ".mjs":
 		return "node", []string{scriptPath}
-	case strings.HasSuffix(scriptPath, ".sh"):
+	case ".sh":
 		return "/bin/sh", []string{scriptPath}
 	default:
 		return "/bin/sh", []string{scriptPath}

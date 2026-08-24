@@ -446,12 +446,20 @@ type RemoteSnapshotManager interface {
 // SnapshotManagerFrom narrows a client to its snapshot capability. It returns
 // false for providers that cannot snapshot (docker/local), so callers can fall
 // back to the base template instead of failing.
+//
+// Both signals must agree: the type assertion finds the methods, and
+// SupportsSnapshots is the advertised capability. A wrapper that happens to
+// embed snapshot methods must not be treated as snapshot-capable when the
+// flag is off.
 func SnapshotManagerFrom(client RemoteSandboxClient) (RemoteSnapshotManager, bool) {
 	if client == nil {
 		return nil, false
 	}
 	mgr, ok := client.(RemoteSnapshotManager)
 	if !ok {
+		return nil, false
+	}
+	if !client.Capabilities().SupportsSnapshots {
 		return nil, false
 	}
 	return mgr, true
