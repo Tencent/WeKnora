@@ -17,14 +17,14 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/model"
 )
 
-func TestVideoListReturnsAllVideos(t *testing.T) {
+func TestVideoListReturnsOnlyInitiallyAvailableVideos(t *testing.T) {
 	db := openTestVideoDB(t)
 	now := time.Now().UTC()
 	videos := []model.Video{
 		{ID: uuid.NewString(), Title: "uploaded", Status: model.VideoStatusUploaded, CreatedAt: now.Add(-4 * time.Minute)},
-		{ID: uuid.NewString(), Title: "completed", Status: model.VideoStatusCompleted, CreatedAt: now.Add(-3 * time.Minute)},
-		{ID: uuid.NewString(), Title: "processing", Status: model.VideoStatusProcessing, CreatedAt: now.Add(-2 * time.Minute)},
-		{ID: uuid.NewString(), Title: "ready", Status: model.VideoStatusReady, CreatedAt: now.Add(-1 * time.Minute)},
+		{ID: uuid.NewString(), Title: "completed", Status: model.VideoStatusCompleted, FileURL: "source", ThumbnailURL: "poster", DurationSeconds: 30, CreatedAt: now.Add(-3 * time.Minute)},
+		{ID: uuid.NewString(), Title: "processing", Status: model.VideoStatusProcessing, FileURL: "source", ThumbnailURL: "poster", DurationSeconds: 20, CreatedAt: now.Add(-2 * time.Minute)},
+		{ID: uuid.NewString(), Title: "ready", Status: model.VideoStatusReady, FileURL: "source", ThumbnailURL: "poster", DurationSeconds: 10, CreatedAt: now.Add(-1 * time.Minute)},
 	}
 	for i := range videos {
 		if err := db.Create(&videos[i]).Error; err != nil {
@@ -52,13 +52,13 @@ func TestVideoListReturnsAllVideos(t *testing.T) {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 
-	if len(payload.Data) != 4 {
-		t.Fatalf("list length = %d, want 4", len(payload.Data))
+	if len(payload.Data) != 3 {
+		t.Fatalf("list length = %d, want 3", len(payload.Data))
 	}
 	if payload.Data[0].Status != model.VideoStatusReady {
 		t.Fatalf("first video status = %q, want %q", payload.Data[0].Status, model.VideoStatusReady)
 	}
-	if payload.Data[1].Status != model.VideoStatusProcessing || payload.Data[2].Status != model.VideoStatusCompleted || payload.Data[3].Status != model.VideoStatusUploaded {
+	if payload.Data[1].Status != model.VideoStatusProcessing || payload.Data[2].Status != model.VideoStatusCompleted {
 		t.Fatalf("unexpected order: %#v", payload.Data)
 	}
 }

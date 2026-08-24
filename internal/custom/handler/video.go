@@ -24,6 +24,10 @@ func NewVideoHandler(db *gorm.DB) *VideoHandler {
 func (h *VideoHandler) List(c *gin.Context) {
 	var videos []model.Video
 	if err := h.DB.
+		Where("status IN ?", []string{model.VideoStatusReady, model.VideoStatusProcessing, model.VideoStatusCompleted}).
+		Where("thumbnail_url <> ''").
+		Where("duration_seconds > 0").
+		Where("file_url <> ''").
 		Order("created_at DESC").
 		Find(&videos).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

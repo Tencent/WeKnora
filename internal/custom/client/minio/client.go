@@ -6,6 +6,7 @@
 package minio
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"crypto/rand"
@@ -197,6 +198,33 @@ func (c *Client) PresignPart(ctx context.Context, objectKey, uploadID string, pa
 		return "", fmt.Errorf("presign part: %w", err)
 	}
 	return signed.String(), nil
+}
+
+// UploadMultipartPart 通过服务端连接 MinIO 上传单个分片并返回 ETag。
+// 生产环境使用该路径避免浏览器访问内部 MinIO endpoint。
+func (c *Client) UploadMultipartPart(ctx context.Context, objectKey, uploadID string, partNumber int, r io.Reader, size int64) (string, error) {
+	if partNumber <= 0 {
+		return "", errors.New("multipart part number must be positive")
+	}
+	if c.IsLocal() {
+		return c.WriteMultipartPart(uploadID, partNumber, r)
+	}
+	if size < 0 {
+		data, err := io.ReadAll(r)
+		if err != nil {
+			return "", fmt.Errorf("read multipart part %d: %w", partNumber, err)
+		}
+		r = bytes.NewReader(data)
+		size = int64(len(data))
+	}
+	info, err := c.core.PutObjectPart(ctx, c.bucket, objectKey, uploadID, partNumber, r, size, minio.PutObjectPartOptions{})
+	if err != nil {
+		return "", fmt.Errorf("upload multipart part %d: %w", partNumber, err)
+	}
+	if info.ETag == "" {
+		return "", fmt.Errorf("upload multipart part %d: empty etag", partNumber)
+	}
+	return info.ETag, nil
 }
 
 // CompleteMultipartUpload 合并分片

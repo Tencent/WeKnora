@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -266,6 +267,47 @@ type MultipartSignResp struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+// MultipartPart 同源服务端分片上传。
+func (h *UploadHandler) MultipartPart(c *gin.Context) {
+	videoID := strings.TrimSpace(c.GetHeader("X-Video-ID"))
+	objectKey := strings.TrimSpace(c.GetHeader("X-Object-Key"))
+	uploadID := strings.TrimSpace(c.GetHeader("X-Upload-ID"))
+	partNumber, err := parsePositivePartNumber(c.GetHeader("X-Part-Number"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if videoID == "" || objectKey == "" || uploadID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing multipart upload headers"})
+		return
+	}
+
+	var video model.Video
+	if err := h.DB.Select("id").Where("id = ?", videoID).First(&video).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+		return
+	}
+	if !strings.HasPrefix(objectKey, "videos/"+videoID+"/") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "object key does not belong to video"})
+		return
+	}
+
+	etag, err := h.MinIO.UploadMultipartPart(
+		c.Request.Context(),
+		objectKey,
+		uploadID,
+		partNumber,
+		c.Request.Body,
+		c.Request.ContentLength,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Header("ETag", etag)
+	c.JSON(http.StatusOK, gin.H{"part_number": partNumber, "etag": etag})
+}
+
 // MultipartSign 单分片签名（VP-T002）
 func (h *UploadHandler) MultipartSign(c *gin.Context) {
 	var req MultipartSignReq
@@ -282,6 +324,14 @@ func (h *UploadHandler) MultipartSign(c *gin.Context) {
 		PartURL:   urlStr,
 		ExpiresAt: time.Now().Add(1 * time.Hour),
 	})
+}
+
+func parsePositivePartNumber(raw string) (int, error) {
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("invalid part number")
+	}
+	return n, nil
 }
 
 // MultipartCompleteReq 合并分片请求

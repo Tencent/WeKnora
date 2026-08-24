@@ -16,16 +16,16 @@ export class UploadCancelledError extends Error {
 
 // 分片大小：5 MB（MinIO multipart 最小限制；过小会导致签名请求过多）
 const PART_SIZE = 5 * 1024 * 1024
-// 并发上传数：家宽上行 ~6 MB/s，3 路 × 5 MB ≈ 2.5s/批，能跑满带宽且不拥塞
-const MAX_CONCURRENCY = 3
+// 同源后端代理会占用服务端连接，生产环境保持较低并发以降低排队和超时概率。
+const MAX_CONCURRENCY = 2
 // 单片最大重试次数：网络抖动时重传，避免整文件从头再来
 const MAX_RETRIES = 3
-// 单片重试退避间隔（毫秒）
-const RETRY_BACKOFF_MS = 500
+const RETRY_BACKOFF_MS = 700
+const PART_TIMEOUT_MS = 5 * 60 * 1000
 
 // 分片直传架构（VP-T002）：
 // 1) POST /api/custom/uploads/multipart/init 拿 upload_id + video_id + object_key
-// 2) 切片 + 并发 PUT 直传 MinIO（每片独立 presigned URL，每片完成立即更新进度）
+// 2) 切片 + 并发 PUT 到同源后端（后端在内网写入 MinIO）
 // 3) POST /api/custom/uploads/multipart/complete 后端合并 + 写库 + 入 thumbnail job
 //
 // 与单次直传相比：
@@ -46,6 +46,7 @@ export function uploadVideo(
 
   // 提到外层以便 catch 调 abort 清理
   let init: { video_id: string; object_key: string; upload_id: string } | undefined
+  let multipartCompleted = false
 
   callbacks.onProgress(2)
 
@@ -88,26 +89,18 @@ export function uploadVideo(
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         if (cancel.cancelled) throw new UploadCancelledError()
         try {
-          // 2.1 签名单片（每片独立 presigned URL，TTL=1h）
-          const signRes = await fetch('/api/custom/uploads/multipart/sign', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              video_id: init!.video_id,
-              object_key: init!.object_key,
-              upload_id: init!.upload_id,
-              part_number: partNumber,
-            }),
-          })
-          if (cancel.cancelled) throw new UploadCancelledError()
-          if (!signRes.ok) {
-            const data = await signRes.json().catch(() => ({} as { error?: string }))
-            throw new Error(data?.error || `签名失败（HTTP ${signRes.status}）`)
-          }
-          const sign = await signRes.json() as { part_url: string }
-
-          // 2.2 PUT 直传 MinIO，从响应头取 ETag（合并时必需）
-          const etag = await putPartViaXhr(sign.part_url, blob, cancel, inFlightXhrs)
+          const etag = await putPartViaXhr(
+            '/api/custom/uploads/multipart/part',
+            blob,
+            cancel,
+            inFlightXhrs,
+            {
+              'X-Video-ID': init!.video_id,
+              'X-Object-Key': init!.object_key,
+              'X-Upload-ID': init!.upload_id,
+              'X-Part-Number': String(partNumber),
+            },
+          )
           completedParts.push({ part_number: partNumber, etag })
           uploadedBytes.count += (end - start)
           // 进度映射：2% → 95%（按已上传字节比例推进，每片完成立即触发）
@@ -128,7 +121,7 @@ export function uploadVideo(
 
     if (cancel.cancelled) throw new UploadCancelledError()
 
-    // 步骤 3：complete —— 后端合并分片 + 写库 status=uploaded + 入 thumbnail job
+    // 步骤 3：complete —— 后端合并分片 + 入初始处理任务
     callbacks.onProgress(97)
     const completeRes = await fetch('/api/custom/uploads/multipart/complete', {
       method: 'POST',
@@ -145,6 +138,7 @@ export function uploadVideo(
       const data = await completeRes.json().catch(() => ({} as { error?: string }))
       throw new Error('合并分片失败：' + (data?.error || `HTTP ${completeRes.status}`))
     }
+    multipartCompleted = true
     const completed = await completeRes.json() as { video_id: string; uploaded_at: string }
 
     const poster = await generateVideoPoster(file).catch(() => null)
@@ -152,6 +146,7 @@ export function uploadVideo(
       await uploadVideoPoster(completed.video_id, poster).catch(() => {})
     }
 
+    await waitForVideoReady(completed.video_id, cancel, callbacks)
     callbacks.onProgress(100)
 
     // UploadModal 上传成功后调 afterUpload 刷新列表，video_url 由列表/详情接口补全
@@ -160,10 +155,11 @@ export function uploadVideo(
       title: file.name.replace(/\.[^.]+$/, ''),
       category: 'training',
       categoryName: '培训',
-      duration: '—',
-      durationSeconds: 0,
+      duration: formatDuration(poster.durationSeconds),
+      durationSeconds: Math.floor(poster.durationSeconds),
       created_at: completed.uploaded_at || new Date().toISOString(),
       video_url: '',
+      poster_url: '',
       overview: '',
       chapters: [],
       subtitles: [],
@@ -171,7 +167,7 @@ export function uploadVideo(
     }
   })().catch(async (err) => {
     // 失败或取消：清理 MinIO 残留分片，避免存储泄漏
-    if (init?.upload_id) {
+    if (init?.upload_id && !multipartCompleted) {
       await fetch('/api/custom/uploads/multipart/abort', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -201,6 +197,49 @@ async function uploadVideoPoster(videoId: string, poster: GeneratedPoster): Prom
     const data = await resp.json().catch(() => ({} as { error?: string }))
     throw new Error(data?.error || `上传封面失败（HTTP ${resp.status}）`)
   }
+}
+
+async function waitForVideoReady(
+  videoId: string,
+  cancel: UploadCancel,
+  callbacks: UploadCallbacks,
+): Promise<void> {
+  const deadline = Date.now() + 10 * 60 * 1000
+  while (Date.now() < deadline) {
+    if (cancel.cancelled) throw new UploadCancelledError()
+    const resp = await fetch(`/api/custom/videos/${videoId}`, { headers: { Accept: 'application/json' } })
+    if (!resp.ok) throw new Error(`等待视频初始处理失败（HTTP ${resp.status}）`)
+    const payload = await resp.json() as { data?: {
+      status?: string
+      thumbnail_url?: string
+      duration_seconds?: number
+      file_url?: string
+      processing_error_summary?: string
+    } }
+    const video = payload.data
+    if (video?.status === 'failed') {
+      throw new Error(video.processing_error_summary || '视频初始处理失败')
+    }
+    if (
+      ['ready', 'processing', 'completed'].includes(video?.status || '')
+      && !!video?.thumbnail_url
+      && Number(video?.duration_seconds) > 0
+      && !!video?.file_url
+    ) {
+      callbacks.onProgress(99)
+      return
+    }
+    callbacks.onProgress(98)
+    await new Promise(resolve => window.setTimeout(resolve, 1500))
+  }
+  throw new Error('视频处理超时，暂未生成可用封面和元数据')
+}
+
+function formatDuration(seconds: number): string {
+  if (!seconds || seconds <= 0) return '—'
+  const minutes = Math.floor(seconds / 60)
+  const remainder = Math.floor(seconds % 60)
+  return minutes > 0 ? `${minutes}分${remainder}秒` : `${remainder}秒`
 }
 
 async function generateVideoPoster(file: File): Promise<GeneratedPoster> {
@@ -286,11 +325,14 @@ async function putPartViaXhr(
   blob: Blob,
   cancel: UploadCancel,
   inFlightXhrs: XMLHttpRequest[],
+  headers: Record<string, string>,
 ): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     inFlightXhrs.push(xhr)
     xhr.open('PUT', url)
+    xhr.timeout = PART_TIMEOUT_MS
+    Object.entries(headers).forEach(([key, value]) => xhr.setRequestHeader(key, value))
 
     // 取消信号：每 200ms 轮询 cancel.cancelled
     const poll = window.setInterval(() => {
@@ -323,8 +365,12 @@ async function putPartViaXhr(
       resolve(etag.replace(/"/g, '')) // MinIO ETag 带双引号，去掉
     }
 
-    xhr.onerror = () => reject(new Error('网络错误，分片上传失败'))
-    xhr.onabort = () => reject(new UploadCancelledError())
+    xhr.onerror = () => reject(new Error('网络错误，分片上传失败，请检查生产服务连接'))
+    xhr.ontimeout = () => reject(new Error(`分片上传超时（${Math.floor(PART_TIMEOUT_MS / 1000)}秒）`))
+    xhr.onabort = () => {
+      if (cancel.cancelled) reject(new UploadCancelledError())
+      else reject(new Error('分片上传被中断'))
+    }
     xhr.send(blob)
   })
 }

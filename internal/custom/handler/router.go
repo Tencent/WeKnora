@@ -66,6 +66,7 @@ func buildRouter(deps *Deps) *gin.Engine {
 		uploads.POST("/direct", uh.Direct)
 		uploads.POST("/multipart/init", uh.MultipartInit)
 		uploads.POST("/multipart/sign", uh.MultipartSign)
+		uploads.PUT("/multipart/part", uh.MultipartPart)
 		uploads.POST("/multipart/complete", uh.MultipartComplete)
 		uploads.POST("/multipart/abort", uh.MultipartAbort)
 		if deps.MinIO.IsLocal() {
