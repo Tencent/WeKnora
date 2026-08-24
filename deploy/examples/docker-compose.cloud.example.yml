@@ -72,7 +72,7 @@ services:
   #       所以本 override 中必须写全 container_name/networks/restart 等全部字段
   # ----------------------------------------------------------
   custom-backend:
-    container_name: Vidsage-custom-backend
+    container_name: vidsage-custom-backend
     image: lizi586586/vidsage-custom-backend:custom-v0.7.2-20260820181000-fefbec3d
 
     # 依赖顺序：数据库 / Redis / 官方 app 全部 healthy 后才启
@@ -82,12 +82,12 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
+        condition: service_started
 
     # 必须与基础 compose 里定义的默认网络同名，
     # 才能通过 hostname "app" / "postgres" / "redis" / "neo4j" 互相访问
     networks:
-      - weknora
+      - WeKnora-network
 
     restart: unless-stopped
 
@@ -96,6 +96,7 @@ services:
       TZ: Asia/Shanghai
       LOG_LEVEL: info
       PORT: "8081"
+      CUSTOM_DB_NAME: vidsage
 
       # 复用官方服务 —— 通过 compose network 内 hostname 访问，不走公网
       WEKNORA_APP_INTERNAL_BASE_URL: "http://app:8080"
@@ -156,5 +157,5 @@ services:
 # 网络：与基础 docker-compose.yml 保持同名（已存在，无需 driver 定义）
 # ----------------------------------------------------------
 networks:
-  weknora:
+  WeKnora-network:
     external: false

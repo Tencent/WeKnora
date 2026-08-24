@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -99,6 +100,26 @@ func buildRouter(deps *Deps) *gin.Engine {
 			}
 			defer file.Close()
 			http.ServeFile(c.Writer, c.Request, file.Name())
+		})
+	} else if deps.MinIO != nil {
+		api.GET("/files/*objectKey", func(c *gin.Context) {
+			objectKey := strings.TrimPrefix(c.Param("objectKey"), "/")
+			if objectKey == "" {
+				c.JSON(http.StatusNotFound, gin.H{"error": "object not found"})
+				return
+			}
+			obj, err := deps.MinIO.OpenObject(c.Request.Context(), objectKey)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": "object not found"})
+				return
+			}
+			defer obj.Close()
+			info, err := obj.Stat()
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": "object not found"})
+				return
+			}
+			http.ServeContent(c.Writer, c.Request, filepath.Base(objectKey), info.LastModified, obj)
 		})
 	}
 

@@ -282,6 +282,22 @@ func (c *Client) Raw() *minio.Client {
 	return c.core.Client
 }
 
+// OpenObject 打开对象用于 HTTP 直出；仅真实 MinIO 模式可用。
+func (c *Client) OpenObject(ctx context.Context, objectKey string) (*minio.Object, error) {
+	if c == nil || c.IsLocal() || c.Raw() == nil {
+		return nil, errors.New("minio object stream only available in minio mode")
+	}
+	obj, err := c.Raw().GetObject(ctx, c.bucket, objectKey, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := obj.Stat(); err != nil {
+		_ = obj.Close()
+		return nil, err
+	}
+	return obj, nil
+}
+
 // EnsureBucket 确保业务桶存在。
 func (c *Client) EnsureBucket(ctx context.Context) error {
 	if c.IsLocal() {
