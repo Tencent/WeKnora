@@ -92,12 +92,6 @@ func ResolveEffectiveConfig(
 
 	if docker := tenantCfg.Docker; docker != nil {
 		overrideString(&effective.DockerImage, docker.Image)
-		if err := ValidateDockerHost(docker.Host, effective.AllowPrivateEndpoints); err != nil {
-			return nil, err
-		}
-		if err := ValidateDockerRemoteTLS(docker.Host, docker.TLSCertPath); err != nil {
-			return nil, err
-		}
 		if err := ValidateDockerNetworkMode(docker.NetworkMode); err != nil {
 			return nil, err
 		}
@@ -130,6 +124,27 @@ func ResolveEffectiveConfig(
 	// built-in fallbacks, endpoints and credentials do not.
 	if err := RequireCompleteConfig(&effective); err != nil {
 		return nil, err
+	}
+	// The daemon endpoint is judged on the RESOLVED host, which is why this
+	// cannot move up next to the other Docker fields: applyDockerRuntimeDefaults
+	// is what fills a blank host in from DOCKER_HOST or the current docker
+	// context, and that value is what this config will actually dial. Checking
+	// only what the admin typed would let a deployment whose DOCKER_HOST is a
+	// plaintext tcp:// daemon save a config that then fails at its first
+	// sandbox, with an error the settings form never had a chance to show.
+	// It runs after RequireCompleteConfig so a missing image — a field the
+	// admin can see and fix — is still the first thing reported.
+	if effective.Type == SandboxTypeDocker {
+		if err := ValidateDockerHost(
+			effective.DockerHost, effective.AllowPrivateEndpoints,
+		); err != nil {
+			return nil, err
+		}
+		if err := ValidateDockerRemoteTLS(
+			effective.DockerHost, effective.DockerTLSCertPath,
+		); err != nil {
+			return nil, err
+		}
 	}
 	return &effective, nil
 }

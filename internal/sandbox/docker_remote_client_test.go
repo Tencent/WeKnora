@@ -12,6 +12,8 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -50,6 +52,11 @@ type fakeDockerEngine struct {
 	execExit    int
 	execErr     error
 	execStdin   bytes.Buffer
+	// execStreamStalls hands back an output stream that never ends on its
+	// own, which is what a long-running exec looks like to a client that
+	// gives up on it. execStream is the stream handed to the last attach.
+	execStreamStalls bool
+	execStream       *stalledReader
 
 	statResult map[string]container.PathStat
 	// statHook lets a test answer differently per call, which is how the
@@ -145,6 +152,14 @@ func (f *fakeDockerEngine) ExecCreate(
 func (f *fakeDockerEngine) ExecAttach(
 	_ context.Context, _ string, _ client.ExecAttachOptions,
 ) (client.ExecAttachResult, error) {
+	if f.execStreamStalls {
+		release := make(chan struct{})
+		f.execStream = &stalledReader{release: release}
+		return client.ExecAttachResult{HijackedResponse: client.HijackedResponse{
+			Conn:   &fakeHijackedConn{stdin: &f.execStdin, release: release},
+			Reader: bufio.NewReader(f.execStream),
+		}}, nil
+	}
 	var framed bytes.Buffer
 	writeStdcopyFrame(&framed, 1, f.execStdout)
 	writeStdcopyFrame(&framed, 2, f.execStderr)
@@ -152,6 +167,37 @@ func (f *fakeDockerEngine) ExecAttach(
 		Conn:   &fakeHijackedConn{stdin: &f.execStdin},
 		Reader: bufio.NewReader(&framed),
 	}}, nil
+}
+
+// stalledReader blocks until the hijacked connection it is paired with is
+// closed, then flushes the output a daemon still has buffered when a client
+// hangs up. Both halves matter: the block keeps the copy goroutine alive past
+// cancellation, and the flush is what that goroutine writes into the caller's
+// output buffers afterwards.
+type stalledReader struct {
+	release <-chan struct{}
+	once    sync.Once
+	tail    io.Reader
+
+	// drained reports that the copier consumed the stream to its end, which
+	// is the only point at which the output buffers stop being written to.
+	drained atomic.Bool
+}
+
+func (r *stalledReader) Read(p []byte) (int, error) {
+	r.once.Do(func() {
+		<-r.release
+		var framed bytes.Buffer
+		for i := 0; i < 4096; i++ {
+			writeStdcopyFrame(&framed, 1, "flushed after hangup\n")
+		}
+		r.tail = &framed
+	})
+	n, err := r.tail.Read(p)
+	if errors.Is(err, io.EOF) {
+		r.drained.Store(true)
+	}
+	return n, err
 }
 
 func (f *fakeDockerEngine) ExecInspect(
@@ -249,13 +295,21 @@ func writeStdcopyFrame(buf *bytes.Buffer, stream byte, payload string) {
 // fakeHijackedConn stands in for the hijacked TCP connection. Only the write
 // half matters: the adapter writes stdin and half-closes.
 type fakeHijackedConn struct {
-	stdin  *bytes.Buffer
-	closed bool
+	stdin *bytes.Buffer
+	// release unblocks the paired stalledReader, mirroring how closing the
+	// real hijacked connection ends the output stream.
+	release   chan struct{}
+	closeOnce sync.Once
 }
 
-func (c *fakeHijackedConn) Read([]byte) (int, error)         { return 0, io.EOF }
-func (c *fakeHijackedConn) Write(p []byte) (int, error)      { return c.stdin.Write(p) }
-func (c *fakeHijackedConn) Close() error                     { c.closed = true; return nil }
+func (c *fakeHijackedConn) Read([]byte) (int, error)    { return 0, io.EOF }
+func (c *fakeHijackedConn) Write(p []byte) (int, error) { return c.stdin.Write(p) }
+func (c *fakeHijackedConn) Close() error {
+	if c.release != nil {
+		c.closeOnce.Do(func() { close(c.release) })
+	}
+	return nil
+}
 func (c *fakeHijackedConn) CloseWrite() error                { return nil }
 func (c *fakeHijackedConn) LocalAddr() net.Addr              { return nil }
 func (c *fakeHijackedConn) RemoteAddr() net.Addr             { return nil }
@@ -520,6 +574,53 @@ func TestDockerClientExecWrapsCommandWithTimeoutAndActivityMarker(t *testing.T) 
 	require.Contains(t, opts.Cmd[2], "timeout -s KILL 45")
 	require.Equal(t, []string{"weknora-exec", "python3", "/workspace/script.py", "--flag"},
 		opts.Cmd[3:], "the command must reach the shell as positional args, never interpolated")
+}
+
+// A blank user is reserved for the manager's own privileged bootstrap. Every
+// other adapter resolves it to the sandbox account, so a caller that forgets to
+// name one here would silently gain root instead of losing privileges.
+func TestDockerExecUserOnlyFallsBackToRootWhenUnnamed(t *testing.T) {
+	require.Equal(t, DefaultSandboxExecUser, dockerExecUser(DefaultSandboxExecUser))
+	require.Equal(t, "1000:1000", dockerExecUser("1000:1000"))
+	require.Equal(t, "root", dockerExecUser(""))
+	require.Equal(t, "root", dockerExecUser("   "))
+}
+
+// Cancelling an exec leaves the copy goroutine writing into the output buffers.
+// Returning what they hold at that moment is a data race, so the adapter has to
+// close the stream and wait for the copier before reading them. Fails under
+// -race if the wait is dropped.
+func TestDockerClientExecCancelWaitsForOutputCopier(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.execStreamStalls = true
+	docker := newTestDockerClient(t, engine)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := docker.Exec(ctx, testHandle("container-1"), RemoteExecRequest{
+			Command: "sleep 600",
+			Shell:   true,
+			User:    DefaultSandboxExecUser,
+			Timeout: 10 * time.Minute,
+		})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.Error(t, err, "a cancelled exec must not report success")
+	case <-time.After(dockerExecDrainGrace + 5*time.Second):
+		t.Fatal("Exec did not return after its context was cancelled")
+	}
+	require.True(t, engine.execStream.drained.Load(),
+		"Exec returned while the copy goroutine was still writing into the output buffers it reads from")
 }
 
 // A script containing shell metacharacters must not be re-interpreted by the

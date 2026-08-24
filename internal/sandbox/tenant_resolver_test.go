@@ -105,6 +105,11 @@ func TestResolveBuildsRemoteManagerWithoutHealthProbe(t *testing.T) {
 // a SessionBoundManager that advertises shell_exec and the session file store,
 // not to the stateless DefaultManager it used to get.
 func TestResolveBuildsSessionBoundManagerForDocker(t *testing.T) {
+	// Pinned so the resolved daemon endpoint does not depend on whatever the
+	// machine running the tests points its docker CLI at: a developer on a
+	// tcp:// daemon would otherwise trip the TLS requirement.
+	t.Setenv("DOCKER_HOST", "unix:///var/run/docker.sock")
+
 	resolver, fallback := newTestResolver(t, &stubTenantConfigLoader{
 		result: ResolvedTenantSandboxConfig{
 			Config: &types.TenantSandboxConfig{

@@ -41,6 +41,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/moby/moby/api/pkg/stdcopy"
@@ -576,7 +577,11 @@ func (c *DockerRemoteClient) streamExec(
 	if err != nil {
 		return "", "", dockerError("Exec", err)
 	}
-	defer attached.Close()
+	// Closing is what unblocks the copy goroutine below, so the cancellation
+	// path needs to do it before the deferred close would.
+	var closeOnce sync.Once
+	closeStream := func() { closeOnce.Do(attached.Close) }
+	defer closeStream()
 
 	if stdin != "" {
 		if _, err := attached.Conn.Write([]byte(stdin)); err != nil {
@@ -589,6 +594,10 @@ func (c *DockerRemoteClient) streamExec(
 		_ = closer.CloseWrite()
 	}
 
+	// These buffers belong to the copy goroutine until it reports on done.
+	// Reading them any earlier races with StdCopy writing into them, which is
+	// why the cancellation path closes the stream and waits instead of
+	// returning whatever happens to be there.
 	var stdout, stderr bytes.Buffer
 	done := make(chan error, 1)
 	go func() {
@@ -603,9 +612,21 @@ func (c *DockerRemoteClient) streamExec(
 		}
 		return stdout.String(), stderr.String(), nil
 	case <-ctx.Done():
-		return stdout.String(), stderr.String(), dockerError("Exec", ctx.Err())
+		closeStream()
+		select {
+		case <-done:
+			return stdout.String(), stderr.String(), dockerError("Exec", ctx.Err())
+		case <-time.After(dockerExecDrainGrace):
+			// StdCopy did not return even with the stream closed, so it still
+			// owns the buffers and the partial output has to be dropped.
+			return "", "", dockerError("Exec", ctx.Err())
+		}
 	}
 }
+
+// dockerExecDrainGrace bounds how long a cancelled exec waits for its output
+// copier to notice the closed stream.
+const dockerExecDrainGrace = 5 * time.Second
 
 // dockerExecCommand builds the argv actually handed to the daemon.
 //
@@ -635,10 +656,15 @@ func dockerExecCommand(req RemoteExecRequest, timeout time.Duration) []string {
 	return append(argv, req.Args...)
 }
 
-// dockerExecUser resolves which account a command runs as. An empty user means
-// root here, matching the envd-backed backends where an unspecified user is
-// the daemon's own root context; callers that need the unprivileged account
-// name it explicitly (see DefaultSandboxExecUser).
+// dockerExecUser resolves which account a command runs as.
+//
+// An empty user is reserved for the manager's own bootstrap, which chowns the
+// artifact directory TO the sandbox account and therefore cannot run as it. It
+// is not a general default: the envd-backed backends resolve a blank user to
+// DefaultSandboxExecUser (E2B authenticates the data plane as that account,
+// Cube hands the field to envd, which defaults the same way), so a path that
+// left this to the adapter would run as root here and unprivileged there.
+// Every caller-reachable path names the account explicitly.
 func dockerExecUser(user string) string {
 	if strings.TrimSpace(user) == "" {
 		return "root"
