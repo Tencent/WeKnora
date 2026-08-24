@@ -86,20 +86,24 @@ func NewTenantSkillService(
 // installs would each snapshot a base that lacks the other's work, and whoever
 // wrote the pointer last would silently discard the other install.
 func (s *TenantSkillService) withConfigLock(
-	ctx context.Context, configID string, fn func(context.Context) error,
+	ctx context.Context, tenantID uint64, configID string, fn func(context.Context) error,
 ) error {
+	key := skillImageLockKey(tenantID, configID)
 	if s.redis == nil {
-		release, err := s.localLocks.lock(ctx, configID)
+		release, err := s.localLocks.lock(ctx, key)
 		if err != nil {
 			return err
 		}
 		defer release()
 		return fn(ctx)
 	}
-	key := fmt.Sprintf("weknora-skill-image-lock:%s", configID)
 	return redislock.WithRenewableLock(
 		ctx, s.redis, key, skillImageLockLease, skillImageLockRenew, fn,
 	)
+}
+
+func skillImageLockKey(tenantID uint64, configID string) string {
+	return fmt.Sprintf("weknora-skill-image-lock:%d:%s", tenantID, configID)
 }
 
 // keyedMutex is the no-Redis fallback for withConfigLock.

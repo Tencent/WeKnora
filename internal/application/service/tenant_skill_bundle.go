@@ -217,7 +217,8 @@ func stripSkillRootPrefix(raw map[string][]byte) (map[string][]byte, error) {
 	out := make(map[string][]byte, len(raw))
 	for name, content := range raw {
 		if !strings.HasPrefix(name, prefix+"/") {
-			continue
+			return nil, fmt.Errorf("%w: archive holds files outside the skill directory %q",
+				ErrSkillBundleInvalid, prefix)
 		}
 		out[strings.TrimPrefix(name, prefix+"/")] = content
 	}
