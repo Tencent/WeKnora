@@ -1148,6 +1148,7 @@ func (m *installSandboxManager) SessionFileStore() sandbox.SessionFileStore     
 func (m *installSandboxManager) SessionInstallShellExecutor() sandbox.SessionInstallShellExecutor {
 	return m
 }
+
 func (m *installSandboxManager) EnsureSessionDir(context.Context, string, string) error {
 	return nil
 }
@@ -1441,14 +1442,18 @@ func (s *installSessionService) SetSessionOwnerID(context.Context, uint64, strin
 func (s *installSessionService) GetSessionsByTenant(context.Context) ([]*types.Session, error) {
 	return nil, nil
 }
-func (s *installSessionService) GetPagedSessionsByTenant(context.Context, *types.Pagination) (*types.PageResult, error) {
+func (s *installSessionService) GetPagedSessionsByTenant(
+	context.Context, *types.Pagination,
+) (*types.PageResult, error) {
 	return nil, nil
 }
 func (s *installSessionService) UpdateSession(context.Context, *types.Session) error {
 	s.fx.sessionCalls = append(s.fx.sessionCalls, "UpdateSession")
 	return nil
 }
-func (s *installSessionService) UpdateSessionLastRequestState(context.Context, string, *types.SessionLastRequestState) error {
+func (s *installSessionService) UpdateSessionLastRequestState(
+	context.Context, string, *types.SessionLastRequestState,
+) error {
 	return nil
 }
 func (s *installSessionService) DeleteSession(context.Context, string) error {
@@ -1472,7 +1477,9 @@ func (s *installSessionService) CountSessionsBySource(context.Context, *types.Se
 func (s *installSessionService) SetSessionPinned(context.Context, string, bool) (int64, error) {
 	return 0, nil
 }
-func (s *installSessionService) GenerateTitle(context.Context, *types.Session, []types.Message, string) (string, error) {
+func (s *installSessionService) GenerateTitle(
+	context.Context, *types.Session, []types.Message, string,
+) (string, error) {
 	return "", nil
 }
 func (s *installSessionService) GenerateTitleAsync(context.Context, *types.Session, string, string, *event.EventBus) {
