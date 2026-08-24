@@ -9,8 +9,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSkillProgressKeyIncludesTheTenant(t *testing.T) {
+	require.Equal(t, "weknora-skill-install:7:cfg-1:sk-1", skillProgressKey(7, "cfg-1", "sk-1"))
+	require.NotEqual(t, skillProgressKey(7, "cfg-1", "sk-1"), skillProgressKey(8, "cfg-1", "sk-1"),
+		"two workspaces must not share a progress slot because they happened to reuse IDs")
+}
+
 func TestTenantSkillServiceWithConfigLockLocalRespectsCanceledContext(t *testing.T) {
-	svc := NewTenantSkillService(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	svc := NewTenantSkillService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	entered := make(chan struct{})
 	releaseHolder := make(chan struct{})
 	holderDone := make(chan error, 1)

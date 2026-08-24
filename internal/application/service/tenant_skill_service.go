@@ -25,11 +25,12 @@ const (
 
 // TenantSkillService owns the skill image lifecycle for sandbox configs.
 type TenantSkillService struct {
-	skills    repository.TenantSkillRepository
-	configs   repository.TenantSandboxConfigRepository
-	resolver  interfaces.StorageBackendResolver
-	sandboxes sandbox.TenantSandboxResolver
-	agents    interfaces.AgentService
+	skills        repository.TenantSkillRepository
+	configs       repository.TenantSandboxConfigRepository
+	resolver      interfaces.StorageBackendResolver
+	sandboxes     sandbox.TenantSandboxResolver
+	sandboxPolicy WorkspaceSandboxPolicy
+	agents        interfaces.AgentService
 	// installerAgents reads the stored installer record. It is a separate
 	// dependency from agents because GetAgentByID lives on the custom agent
 	// service, not on interfaces.AgentService.
@@ -54,6 +55,7 @@ func NewTenantSkillService(
 	configsRepo repository.TenantSandboxConfigRepository,
 	resolver interfaces.StorageBackendResolver,
 	sandboxes sandbox.TenantSandboxResolver,
+	sandboxPolicy WorkspaceSandboxPolicy,
 	agents interfaces.AgentService,
 	customAgents interfaces.CustomAgentService,
 	sessions interfaces.SessionService,
@@ -65,6 +67,7 @@ func NewTenantSkillService(
 		configs:         configsRepo,
 		resolver:        resolver,
 		sandboxes:       sandboxes,
+		sandboxPolicy:   sandboxPolicy,
 		agents:          agents,
 		installerAgents: customAgents,
 		sessions:        sessions,
