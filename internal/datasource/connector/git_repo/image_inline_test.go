@@ -106,6 +106,21 @@ func TestInlineRelativeImagesSkips(t *testing.T) {
 		t.Fatalf("traversal must not inline, got n=%d", n)
 	}
 
+	// Symlink pointing outside the worktree → untouched.
+	outside := filepath.Join(t.TempDir(), "outside.png")
+	if err := os.WriteFile(outside, make([]byte, 600), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "images", "leak.png")
+	_ = os.MkdirAll(filepath.Dir(link), 0o755)
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	_, n = InlineRelativeImages(root, "docs/a.md", []byte("![leak](../images/leak.png)\n"))
+	if n != 0 {
+		t.Fatalf("escaping symlink must not inline, got n=%d", n)
+	}
+
 	// Icon-sized image (<512B) → skipped.
 	small := filepath.Join(root, "images", "icon.png")
 	_ = os.MkdirAll(filepath.Dir(small), 0o755)

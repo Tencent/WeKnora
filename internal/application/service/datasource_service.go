@@ -187,6 +187,7 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 			merged := *incomingCfg
 			if existingCfg != nil {
 				merged.Credentials = existingCfg.Credentials
+				preserveGitRepoWebhookSecret(existingCfg, &merged)
 			} else {
 				merged.Credentials = nil
 			}
@@ -480,6 +481,17 @@ func (s *DataSourceService) enqueueSync(ctx context.Context, ds *types.DataSourc
 		ds.Status != types.DataSourceStatusError &&
 		ds.Status != types.DataSourceStatusPaused {
 		return nil, datasource.ErrDataSourceNotActive
+	}
+
+	if running, err := s.syncLogRepo.HasRunningSync(ctx, ds.ID); err != nil {
+		return nil, err
+	} else if running {
+		if latest, lerr := s.syncLogRepo.FindLatest(ctx, ds.ID); lerr == nil && latest != nil &&
+			latest.Status == types.SyncLogStatusRunning {
+			logger.Infof(ctx, "sync already running, coalescing: ds=%s syncLog=%s trigger=%s",
+				ds.ID, latest.ID, trigger)
+			return latest, nil
+		}
 	}
 
 	// Create sync log
@@ -1491,4 +1503,28 @@ func bytesToFileHeader(data []byte, filename string) (*multipart.FileHeader, err
 func timePtr(t time.Time) *time.Time {
 	utc := t.UTC()
 	return &utc
+}
+
+// preserveGitRepoWebhookSecret keeps a legacy settings.webhook_secret when the
+// client re-saves settings after a redacted GET (the secret is stripped from
+// API responses). New secrets belong in credentials.webhook_secret.
+func preserveGitRepoWebhookSecret(existing, incoming *types.DataSourceConfig) {
+	if existing == nil || incoming == nil {
+		return
+	}
+	if incoming.Type != types.ConnectorTypeGitRepo && incoming.Type != "" {
+		return
+	}
+	if incoming.Settings == nil {
+		incoming.Settings = map[string]interface{}{}
+	}
+	if s, ok := incoming.Settings["webhook_secret"].(string); ok && strings.TrimSpace(s) != "" {
+		return
+	}
+	if existing.Settings == nil {
+		return
+	}
+	if s, ok := existing.Settings["webhook_secret"].(string); ok && strings.TrimSpace(s) != "" {
+		incoming.Settings["webhook_secret"] = s
+	}
 }

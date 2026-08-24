@@ -2,6 +2,7 @@ package git_repo
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,6 +124,8 @@ func testConfig(url, branch string) *types.DataSourceConfig {
 // shared LOCAL_STORAGE_BASE_DIR instead.
 func withTempStorage(t *testing.T) {
 	t.Helper()
+	allowLocalRepoURL = true
+	t.Cleanup(func() { allowLocalRepoURL = false })
 	prev, hadPrev := os.LookupEnv(localStorageBaseEnv)
 	if err := os.Setenv(localStorageBaseEnv, t.TempDir()); err != nil {
 		t.Fatalf("Setenv: %v", err)
@@ -137,6 +140,8 @@ func withTempStorage(t *testing.T) {
 }
 
 func TestConnectorValidate(t *testing.T) {
+	allowLocalRepoURL = true
+	t.Cleanup(func() { allowLocalRepoURL = false })
 	tr := setupTestRepo(t, map[string]string{"docs/a.md": "# A\n"})
 	conn := NewConnector()
 
@@ -341,6 +346,46 @@ func TestConnectorFetchAllDelegatesToStream(t *testing.T) {
 	}
 	if len(items) != 1 {
 		t.Fatalf("FetchAll items = %d, want 1", len(items))
+	}
+	if items[0].ContentType != "text/markdown" {
+		t.Fatalf("ContentType = %q, want text/markdown", items[0].ContentType)
+	}
+}
+
+func TestReadFileRejectsEscapingSymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret.md")
+	if err := os.WriteFile(outside, []byte("leaked"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "leak.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readFile(root, "leak.md"); !errors.Is(err, errPathEscapesWorktree) && err == nil {
+		t.Fatalf("escaping symlink must be rejected, err=%v", err)
+	}
+}
+
+func TestWalkFilesSkipsGitDir(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "COMMIT_EDITMSG"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ok.md"), []byte("# ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var seen []string
+	if err := walkFiles(root, nil, func(rel string) error {
+		seen = append(seen, rel)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 1 || seen[0] != "ok.md" {
+		t.Fatalf("walked %v, want only ok.md", seen)
 	}
 }
 

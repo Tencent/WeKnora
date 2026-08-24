@@ -89,15 +89,20 @@ func parseConfig(ds *types.DataSourceConfig) (*config, error) {
 // normalizeRepoURL validates a repo URL and normalizes it so the same
 // repository cannot be configured twice under equivalent spellings. Only
 // http/https remotes are accepted for real syncs (no embedded userinfo —
-// credentials go in the access_token credential field); an absolute local path
-// is allowed so tests can clone from a throwaway bare repo and local checkouts
-// can be synced directly.
+// credentials go in the access_token credential field). Absolute local paths
+// are rejected in production and only enabled by tests via allowLocalRepoURL.
 func normalizeRepoURL(raw string) (string, error) {
 	v := strings.TrimSpace(raw)
 	if v == "" {
 		return "", fmt.Errorf("%w: repo_url is required", datasource.ErrInvalidConfig)
 	}
 	if filepathIsAbs(v) {
+		// Local filesystem remotes are a test-only escape hatch. In production
+		// they bypass SSRF and would let a tenant clone another tenant's
+		// worktree or any readable git repo on the host.
+		if !allowLocalRepoURL {
+			return "", fmt.Errorf("%w: local repo_url is not allowed; use http/https", datasource.ErrInvalidConfig)
+		}
 		return path.Clean(v), nil
 	}
 	u, err := url.Parse(v)
@@ -121,6 +126,11 @@ func normalizeRepoURL(raw string) (string, error) {
 	}
 	u.Fragment = ""
 	u.RawQuery = ""
+	u.Host = strings.ToLower(u.Host)
+	u.Path = strings.TrimSuffix(strings.TrimSuffix(u.Path, "/"), ".git")
+	if u.Path == "" || u.Path == "/" {
+		return "", fmt.Errorf("%w: repo_url must include a repository path", datasource.ErrInvalidConfig)
+	}
 
 	// SSRF guard: repo_url is user-controlled and the connector clones it over
 	// the network, so it must never point at loopback / link-local / private /
@@ -132,6 +142,10 @@ func normalizeRepoURL(raw string) (string, error) {
 	}
 	return u.String(), nil
 }
+
+// allowLocalRepoURL lets tests clone from a throwaway bare repo on disk.
+// Production stays false so tenant-supplied repo_url cannot read the host.
+var allowLocalRepoURL bool
 
 // filepathIsAbs reports whether v is an absolute filesystem path, without
 // importing path/filepath in this small package (kept dependency-light).

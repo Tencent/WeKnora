@@ -74,7 +74,10 @@ var (
 
 func ensureSSRFTransport() {
 	ensureSSRFTransportOnce.Do(func() {
-		safeClient := datasource.NewConnectorHTTPClient(30 * time.Second)
+		// Clone/fetch of a real docs repo routinely exceeds 30s; the asynq
+		// sync task itself is allowed two hours. Ten minutes covers first
+		// clone without leaving hung transports around forever.
+		safeClient := datasource.NewConnectorHTTPClient(10 * time.Minute)
 		gogitclient.InstallProtocol("http", http.NewClient(safeClient))
 		gogitclient.InstallProtocol("https", http.NewClient(safeClient))
 	})
@@ -204,7 +207,7 @@ func (c *client) ensureCheckedOut(
 }
 
 func (c *client) clone(ctx context.Context, dir, repoURL, branch string) (*git.Repository, string, string, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, "", "", err
 	}
 	opts := &git.CloneOptions{
@@ -309,6 +312,9 @@ func walkFiles(dir string, roots []string, visit func(rel string) error) error {
 			return err
 		}
 		if d.IsDir() {
+			if d.Name() == ".git" {
+				return fs.SkipDir
+			}
 			return nil
 		}
 		rel, err := filepath.Rel(dir, p)
@@ -324,7 +330,11 @@ func walkFiles(dir string, roots []string, visit func(rel string) error) error {
 }
 
 func readFile(dir, rel string) ([]byte, error) {
-	return os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+	full, err := resolveUnderRoot(dir, rel)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(full)
 }
 
 func inScope(file string, roots []string) bool {

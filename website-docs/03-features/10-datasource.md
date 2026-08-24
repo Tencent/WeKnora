@@ -298,7 +298,7 @@ sequenceDiagram
 - **认证**：凭据仅 `access_token`（可选——公开仓库匿名克隆）。认证方式为 `oauth2:<token>` HTTP Basic。
 - **配置**：settings 驱动：`repos` 列表（`repo_url` + 可选 `branch`（空=跟随远端默认分支）+ 可选 `paths` 目录过滤）。
 - **安全校验**：`repo_url` 与其它连接器的 base_url 一样需通过 SSRF 校验（`utils.ValidateURLForSSRF`）——私网 IP、回环、link-local、云元数据、内网保留域名等会被拒绝；克隆/拉取走同一套 SSRF 安全客户端（`datasource.NewConnectorHTTPClient`，拨号期+重定向二次校验，防 DNS 重绑定）。内网 git 服务器需由运维在 `SSRF_WHITELIST_EXTRA` 放行（精确域名 / `*.suffix` / IP / CIDR，见 `.env.example` J1 节）。
-- **本地克隆**：按 `<LOCAL_STORAGE_BASE_DIR>/git-repos/<租户ID>/<数据源ID>/<sha1(url+branch)>/` 目录隔离（默认 `LOCAL_STORAGE_BASE_DIR` 即 `/data/files`）。同一数据源的并发同步用互斥锁串行化；改 URL/分支自动重新克隆（目录哈希不同）。
+- **本地克隆**：按 `<LOCAL_STORAGE_BASE_DIR>/git-repos/<租户ID>/<数据源ID>/<sha1(url+branch)>/` 目录隔离（默认 `LOCAL_STORAGE_BASE_DIR` 即 `/data/files`，目录权限 `0700`）。同一数据源的并发同步用互斥锁串行化 **checkout + 读树 + checkpoint**；改 URL/分支自动重新克隆（目录哈希不同）。生产环境拒绝本地文件系统 `repo_url`；读文件跟随 symlink 时若逃出 worktree 则跳过。
 - **抓取**：只同步 6 种纯文本格式（md/markdown/mdx/html/htm/txt）——**故意排除松散图片**：博客场景图片只相对于引用它的 Markdown 有意义，会被内联（见下），独立入库只是噪音文档。
 - **图片内联**（`image_inline.go`）：Markdown/HTML 中相对路径图片自动读出并转为 `data:` URI 内联，图片随文档一起入库，无需独立存储。
 - **增量逻辑**：游标 `cursor.Repos`（`repoURL → {branch, commit}`）。同步时 fetch 后比 head commit：首次全量枚举；不一致则本地 `git diff --name-status` 只发变更；游标 commit 已不存在（force-push/历史重写）降级全量重枚举。每仓库 checkpoint 一次。
@@ -320,9 +320,9 @@ POST /api/v1/datasource/webhooks/git/{data_source_id}
 | 平台 | 鉴权头 | 验证方式 |
 | --- | --- | --- |
 | GitLab | `X-Gitlab-Token` | 与共享密钥常量时间比对 |
-| GitHub | `X-Hub-Signature-256`（或旧版 `X-Hub-Signature`） | 请求体 HMAC-SHA256/SHA1 验签 |
+| GitHub | `X-Hub-Signature-256` | 请求体 HMAC-SHA256 验签 |
 
-**共享密钥**两级配置：数据源 `settings.webhook_secret` 优先，否则回退环境变量 `GIT_REPO_WEBHOOK_SECRET`。**两级都未配置时端点 fail-closed（403）**，绝不允许无鉴权触发。
+**共享密钥**两级配置：数据源凭据 `credentials.webhook_secret`（加密存储，GET 只回 `webhook_secret_configured`）优先，否则回退环境变量 `GIT_REPO_WEBHOOK_SECRET`。兼容仍读 `settings.webhook_secret`，但 API 永不回显该值。**两级都未配置或鉴权失败时端点 fail-closed（404，与数据源不存在同一响应，避免枚举）**，绝不允许无鉴权触发。生产环境拒绝本地文件系统 `repo_url`（仅测试可放行）。
 
 ### 匹配与触发规则
 

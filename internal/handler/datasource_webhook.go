@@ -2,7 +2,6 @@ package handler
 
 import (
 	"crypto/hmac"
-	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -25,9 +24,9 @@ import (
 
 const (
 	// webhookSecretEnv is the fallback shared secret when a data source has no
-	// settings.webhook_secret of its own.
+	// credentials.webhook_secret of its own.
 	webhookSecretEnv = "GIT_REPO_WEBHOOK_SECRET"
-	// webhookSecretSetting overrides the env secret per data source.
+	// webhookSecretSetting is the legacy settings key; new writes go to credentials.
 	webhookSecretSetting = "webhook_secret"
 	maxWebhookBodyBytes  = 1 << 20 // push payloads with big diffs stay well under 1 MB
 )
@@ -37,7 +36,6 @@ var (
 	gitlabEventHeader  = http.CanonicalHeaderKey("X-Gitlab-Event")
 	githubEventHeader  = http.CanonicalHeaderKey("X-GitHub-Event")
 	githubSig256Header = http.CanonicalHeaderKey("X-Hub-Signature-256")
-	githubSig1Header   = http.CanonicalHeaderKey("X-Hub-Signature")
 )
 
 // DataSourceWebhookHandler handles public git push webhooks (GitLab and
@@ -78,27 +76,13 @@ type gitPushEvent struct {
 // @Param id path string true "Data source ID"
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} map[string]string
-// @Failure 403 {object} map[string]string
 // @Failure 404 {object} map[string]string
+// @Failure 409 {object} map[string]string
+// @Failure 500 {object} map[string]string
 // @Router /datasource/webhooks/git/{id} [post]
 func (h *DataSourceWebhookHandler) HandleGitPush(c *gin.Context) {
 	ctx := c.Request.Context()
 	dsID := c.Param("id")
-
-	ds, err := h.service.GetDataSource(ctx, dsID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "data source not found"})
-		return
-	}
-	if ds.Type != types.ConnectorTypeGitRepo {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "webhook is only supported for git_repo data sources"})
-		return
-	}
-	cfg, err := ds.ParseConfig()
-	if err != nil || cfg == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to parse data source config"})
-		return
-	}
 
 	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxWebhookBodyBytes+1))
 	if err != nil {
@@ -110,28 +94,42 @@ func (h *DataSourceWebhookHandler) HandleGitPush(c *gin.Context) {
 		return
 	}
 
-	secret := resolveWebhookSecret(cfg)
-	if secret == "" {
-		// Fail closed: an unauthenticated endpoint must not be triggerable.
-		c.JSON(http.StatusForbidden, gin.H{"error": "webhook secret not configured"})
+	ds, err := h.service.GetDataSource(ctx, dsID)
+	if err != nil {
+		if isDataSourceNotFound(err) {
+			// Same 404 as "wrong type" / "bad auth" so existence is not an oracle.
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		logger.Errorf(ctx, "webhook datasource lookup failed: ds=%s err=%v", dsID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	cfg, err := ds.ParseConfig()
+	if err != nil || cfg == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
 
+	secret := resolveWebhookSecret(cfg)
+	authorized := false
 	isGitLab := c.GetHeader(gitlabEventHeader) != "" || c.GetHeader(gitlabTokenHeader) != ""
 	isGitHub := c.GetHeader(githubEventHeader) != ""
-	switch {
-	case isGitLab:
-		if !verifyGitlabToken(c.GetHeader(gitlabTokenHeader), secret) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "invalid token"})
-			return
+	if secret != "" {
+		switch {
+		case isGitLab:
+			authorized = verifyGitlabToken(c.GetHeader(gitlabTokenHeader), secret)
+		case isGitHub:
+			authorized = verifyGitHubSignature(c.GetHeader(githubSig256Header), secret, body)
 		}
-	case isGitHub:
-		if !verifyGitHubSignature(c.GetHeader(githubSig256Header), c.GetHeader(githubSig1Header), secret, body) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "invalid signature"})
-			return
-		}
-	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing webhook platform headers"})
+	}
+	if !authorized {
+		// Fail closed and do not distinguish "no secret" / "wrong token" / "wrong type".
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	if ds.Type != types.ConnectorTypeGitRepo {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
 
@@ -191,11 +189,27 @@ func ignore(c *gin.Context, reason string) {
 	c.JSON(http.StatusOK, gin.H{"status": "ignored", "reason": reason})
 }
 
-// resolveWebhookSecret prefers the per-data-source secret (connector settings),
-// falling back to the process-wide env var.
+// isDataSourceNotFound reports a missing row. The repository historically
+// returns a plain "data source not found" error rather than the package
+// sentinel, so both forms are accepted.
+func isDataSourceNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, datasource.ErrDataSourceNotFound) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "data source not found")
+}
+
+// resolveWebhookSecret prefers the encrypted credential, then a legacy
+// settings value (never returned by the API), then the process-wide env var.
 func resolveWebhookSecret(cfg *types.DataSourceConfig) string {
 	if cfg == nil {
 		return ""
+	}
+	if s, ok := cfg.Credentials["webhook_secret"].(string); ok && strings.TrimSpace(s) != "" {
+		return strings.TrimSpace(s)
 	}
 	if s, ok := cfg.Settings[webhookSecretSetting].(string); ok && strings.TrimSpace(s) != "" {
 		return strings.TrimSpace(s)
@@ -212,16 +226,10 @@ func verifyGitlabToken(token, secret string) bool {
 	return subtle.ConstantTimeCompare([]byte(token), []byte(secret)) == 1
 }
 
-// verifyGitHubSignature checks X-Hub-Signature-256 (preferred) or the legacy
-// sha1 X-Hub-Signature — an HMAC of the raw request body with the secret.
-func verifyGitHubSignature(sig256, sig1, secret string, body []byte) bool {
-	if sig256 != "" && verifyHMACSignature("sha256", sig256, sha256.New, secret, body) {
-		return true
-	}
-	if sig1 != "" && verifyHMACSignature("sha1", sig1, sha1.New, secret, body) {
-		return true
-	}
-	return false
+// verifyGitHubSignature checks X-Hub-Signature-256 — an HMAC-SHA256 of the
+// raw request body with the secret. Legacy sha1 signatures are rejected.
+func verifyGitHubSignature(sig256, secret string, body []byte) bool {
+	return sig256 != "" && verifyHMACSignature("sha256", sig256, sha256.New, secret, body)
 }
 
 // verifyHMACSignature verifies a "<algo>=<hex>" HMAC header over body in
@@ -235,8 +243,7 @@ func verifyHMACSignature(algo, sigHeader string, newHash func() hash.Hash, secre
 	if err != nil {
 		return false
 	}
-	// Accept both "sha256=<hex>" and "<hex>" forms; reject mismatched prefixes.
-	if prefix != algo && prefix != "" {
+	if prefix != algo {
 		return false
 	}
 	mac := hmac.New(newHash, []byte(secret))

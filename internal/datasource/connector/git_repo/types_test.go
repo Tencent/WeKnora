@@ -26,7 +26,7 @@ func TestParseConfigValid(t *testing.T) {
 		t.Fatalf("want 1 repo, got %d", len(cfg.Repos))
 	}
 	r := cfg.Repos[0]
-	if r.RepoURL != "https://github.com/org/blog.git" {
+	if r.RepoURL != "https://github.com/org/blog" {
 		t.Fatalf("repo_url = %q", r.RepoURL)
 	}
 	if r.Branch != "main" {
@@ -84,13 +84,25 @@ func TestParseConfigErrors(t *testing.T) {
 	}
 }
 
-func TestParseConfigAllowsLocalAbsolutePath(t *testing.T) {
+func TestParseConfigRejectsLocalAbsolutePath(t *testing.T) {
+	allowLocalRepoURL = false
+	ds := &types.DataSourceConfig{Settings: map[string]interface{}{
+		"repos": []interface{}{map[string]interface{}{"repo_url": "/tmp/repos/blog.git"}},
+	}}
+	if _, err := parseConfig(ds); err == nil {
+		t.Fatal("local absolute path must be rejected in production")
+	}
+}
+
+func TestParseConfigAllowsLocalAbsolutePathWhenEnabled(t *testing.T) {
+	allowLocalRepoURL = true
+	t.Cleanup(func() { allowLocalRepoURL = false })
 	ds := &types.DataSourceConfig{Settings: map[string]interface{}{
 		"repos": []interface{}{map[string]interface{}{"repo_url": "/tmp/repos/blog.git"}},
 	}}
 	cfg, err := parseConfig(ds)
 	if err != nil {
-		t.Fatalf("local absolute path should be allowed: %v", err)
+		t.Fatalf("local absolute path should be allowed when enabled: %v", err)
 	}
 	if cfg.Repos[0].RepoURL != "/tmp/repos/blog.git" {
 		t.Fatalf("repo_url = %q", cfg.Repos[0].RepoURL)
@@ -105,7 +117,7 @@ func TestParseConfigNormalizesGitHTTPS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("git+https should be accepted: %v", err)
 	}
-	if cfg.Repos[0].RepoURL != "https://github.com/org/blog.git" {
+	if cfg.Repos[0].RepoURL != "https://github.com/org/blog" {
 		t.Fatalf("normalized repo_url = %q", cfg.Repos[0].RepoURL)
 	}
 }

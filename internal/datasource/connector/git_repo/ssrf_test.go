@@ -57,9 +57,17 @@ func TestNormalizeRepoURLSSRF(t *testing.T) {
 	}
 }
 
-func TestNormalizeRepoURLLocalPathUnaffected(t *testing.T) {
-	// Absolute local paths are used by tests/checkouts and must not go through
-	// URL-based SSRF validation.
+func TestNormalizeRepoURLLocalPathRejectedByDefault(t *testing.T) {
+	allowLocalRepoURL = false
+	dir := filepath.Join(t.TempDir(), "repo.git")
+	if _, err := normalizeRepoURL(dir); err == nil {
+		t.Fatal("local path must be rejected unless allowLocalRepoURL is set")
+	}
+}
+
+func TestNormalizeRepoURLLocalPathWhenEnabled(t *testing.T) {
+	allowLocalRepoURL = true
+	t.Cleanup(func() { allowLocalRepoURL = false })
 	dir := filepath.Join(t.TempDir(), "repo.git")
 	got, err := normalizeRepoURL(dir)
 	if err != nil {

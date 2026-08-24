@@ -129,9 +129,8 @@ func resolveImagePath(worktreeRoot, docRel, target string) (string, bool) {
 	if abs == ".." || strings.HasPrefix(abs, "../") {
 		return "", false
 	}
-	full := filepath.Join(worktreeRoot, filepath.FromSlash(abs))
-	rel, err := filepath.Rel(worktreeRoot, full)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	full, err := resolveUnderRoot(worktreeRoot, abs)
+	if err != nil {
 		return "", false
 	}
 	return full, true
@@ -179,8 +178,6 @@ func mimeFromExt(p string) string {
 		return "image/webp"
 	case ".bmp":
 		return "image/bmp"
-	case ".svg":
-		return "image/svg+xml"
 	default:
 		return ""
 	}

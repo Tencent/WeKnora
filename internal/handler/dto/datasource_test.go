@@ -103,6 +103,37 @@ func TestDataSourceResponse_RSSAuthHeadersConfigured(t *testing.T) {
 	assert.NotContains(t, string(body), "Bearer secret")
 }
 
+func TestDataSourceResponse_GitRepoWebhookSecretRedacted(t *testing.T) {
+	cfg := types.DataSourceConfig{
+		Type: types.ConnectorTypeGitRepo,
+		Credentials: map[string]interface{}{
+			"access_token":   "git-token",
+			"webhook_secret": "super-secret",
+		},
+		Settings: map[string]interface{}{
+			"webhook_secret": "legacy-secret",
+			"repos":          []interface{}{map[string]interface{}{"repo_url": "https://github.com/org/blog"}},
+		},
+	}
+	blob, _ := cfg.ToJSON()
+	ds := &types.DataSource{
+		ID:     "ds-git",
+		Name:   "blog",
+		Type:   types.ConnectorTypeGitRepo,
+		Config: blob,
+	}
+	resp := NewDataSourceResponse(ds)
+	body, err := json.Marshal(resp)
+	assert.NoError(t, err)
+	s := string(body)
+	assert.NotContains(t, s, "super-secret")
+	assert.NotContains(t, s, "legacy-secret")
+	assert.NotContains(t, s, "git-token")
+	assert.Equal(t, true, resp.Config.Settings["webhook_secret_configured"])
+	_, stillThere := resp.Config.Settings["webhook_secret"]
+	assert.False(t, stillThere)
+}
+
 func TestDataSourceResponse_NoConfig(t *testing.T) {
 	ds := &types.DataSource{ID: "x", Name: "x"}
 	body, err := json.Marshal(NewDataSourceResponse(ds))

@@ -168,13 +168,14 @@ func (c *Connector) FetchStream(
 		}
 		dir := c.client.cloneDirFor(url, resolvedBranch)
 
-		// Two overlapping syncs of the same data source (cron + manual) would race
-		// on the shared clone dir; serialize per data source.
+		// Overlapping syncs of the same data source (cron + webhook + manual)
+		// share one clone dir; hold the lock across checkout AND the subsequent
+		// walk/read so a HardReset cannot tear the tree out from under us.
 		mu := repoDirMutex(ds.ID)
 		mu.Lock()
 		repo, headSHA, resolvedBranch, err := c.client.ensureCheckedOut(ctx, dir, url, resolvedBranch)
-		mu.Unlock()
 		if err != nil {
+			mu.Unlock()
 			return nil, err
 		}
 
@@ -189,20 +190,24 @@ func (c *Connector) FetchStream(
 				// re-enumerate the configured scope to preserve updates.
 				err = c.streamFiles(ctx, url, resolvedBranch, sel.Paths, h)
 			} else if diffErr != nil {
+				mu.Unlock()
 				return nil, diffErr
 			} else {
 				err = c.streamChanges(ctx, url, resolvedBranch, sel.Paths, changes, h)
 			}
 		}
 		if err != nil {
+			mu.Unlock()
 			return nil, err
 		}
 
 		next.Repos[url] = repoPosition{Commit: headSHA, Branch: resolvedBranch}
 		checkpoint := gitRepoCursor(next)
 		if err := h.Checkpoint(ctx, checkpoint); err != nil {
+			mu.Unlock()
 			return nil, err
 		}
+		mu.Unlock()
 	}
 	return gitRepoCursor(next), nil
 }
@@ -214,6 +219,9 @@ func (c *Connector) streamFiles(
 	dir := c.client.cloneDirFor(url, branch)
 	return walkFiles(dir, roots, func(rel string) error {
 		item, err := c.item(ctx, url, branch, rel)
+		if errors.Is(err, errPathEscapesWorktree) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -242,6 +250,9 @@ func (c *Connector) streamChanges(
 		}
 		if inScope(ch.NewPath, roots) && isSupportedFile(ch.NewPath) {
 			item, err := c.item(ctx, url, branch, ch.NewPath)
+			if errors.Is(err, errPathEscapesWorktree) {
+				continue
+			}
 			if err != nil {
 				return err
 			}
@@ -269,7 +280,7 @@ func (c *Connector) item(_ context.Context, url, branch, file string) (types.Fet
 		Title:            repoName + "/" + file,
 		FileName:         knowledgeRelativePath(repoName, branch, file),
 		Content:          data,
-		ContentType:      "text/plain",
+		ContentType:      contentTypeFor(file),
 		UpdatedAt:        time.Now().UTC(),
 		SourceResourceID: url,
 		Metadata: map[string]string{
@@ -295,6 +306,17 @@ func (c *Connector) deleted(url, branch, file string) types.FetchedItem {
 			"git_repo_branch": branch,
 			"git_repo_path":   file,
 		},
+	}
+}
+
+func contentTypeFor(file string) string {
+	switch strings.ToLower(path.Ext(file)) {
+	case ".md", ".markdown", ".mdx":
+		return "text/markdown"
+	case ".html", ".htm":
+		return "text/html"
+	default:
+		return "text/plain"
 	}
 }
 

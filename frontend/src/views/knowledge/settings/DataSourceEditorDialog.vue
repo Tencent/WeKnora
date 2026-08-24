@@ -19,6 +19,7 @@ import {
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { getDatasourceIconUrl } from './datasourceIcons'
+import { getApiBaseUrl } from '@/utils/api-base'
 import { copyWithToast } from '@/utils/clipboard'
 
 const props = defineProps<{
@@ -245,8 +246,12 @@ function removeGitRepoRepo(index: number) { gitRepoRepos.value.splice(index, 1);
 // matches how the user reaches this app; nginx proxies /api to the backend.
 const gitWebhookURL = computed(() => {
   if (!isEdit.value || !props.dataSource?.id) return ''
-  const origin = (typeof window !== 'undefined' && window.location?.origin) || ''
-  return `${origin}/api/v1/datasource/webhooks/git/${props.dataSource.id}`
+  const configured = getApiBaseUrl().trim().replace(/\/$/, '')
+  const origin = (typeof window !== 'undefined' && window.location?.origin && window.location.origin !== 'null')
+    ? window.location.origin
+    : ''
+  const prefix = configured && configured !== '/' ? `${origin}${configured}` : origin
+  return `${prefix}/api/v1/datasource/webhooks/git/${props.dataSource.id}`
 })
 async function copyGitWebhookURL() {
   await copyWithToast(gitWebhookURL.value, 'datasource.gitRepo.webhookCopied')
@@ -671,6 +676,7 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     type: 'git_repo', available: true, docUrl: '', permissionDocUrl: '', permissionPageUrl: '', requiredPermissions: [],
     fields: [
       { key: 'access_token', labelKey: 'datasource.gitRepo.accessToken', placeholder: '', secret: true, optional: true, hintKey: 'datasource.gitRepo.accessTokenHint' },
+      { key: 'webhook_secret', labelKey: 'datasource.gitRepo.webhookSecret', placeholder: '', secret: true, optional: true, hintKey: 'datasource.gitRepo.webhookSecretHint' },
     ],
   },
 ])
