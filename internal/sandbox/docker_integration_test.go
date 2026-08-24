@@ -235,6 +235,38 @@ time.sleep(60)
 			t.Fatalf("timeout left %s 'sleep 120' process(es) running: %#v", got, survivors)
 		}
 	})
+
+	// The entrypoint is a plain `sleep`, which never calls wait(). A background
+	// process that outlives the exec which started it is reparented to PID 1,
+	// so without tini in front of it every such process becomes a permanent Z
+	// entry and a long session eventually exhausts PidsLimit. Measured on a
+	// real daemon: three orphans leave three zombies without HostConfig.Init
+	// and none with it.
+	t.Run("OrphanedProcessesAreReaped", func(t *testing.T) {
+		executor := manager.SessionShellExecutor()
+		for i := 0; i < 3; i++ {
+			if _, err := executor.ExecShellCommand(
+				ctx, sessionID, "(sleep 0.2 &) ; exit 0",
+				SessionWorkspaceRoot, 30*time.Second, nil,
+			); err != nil {
+				t.Fatalf("spawn orphan %d: %v", i, err)
+			}
+		}
+		time.Sleep(2 * time.Second)
+
+		const probe = `n=0; for p in /proc/[0-9]*; do ` +
+			`s=$(awk '{print $3}' "$p/stat" 2>/dev/null); ` +
+			`[ "$s" = "Z" ] && n=$((n+1)); done; echo "$n"`
+		zombies, err := executor.ExecShellCommand(
+			ctx, sessionID, probe, SessionWorkspaceRoot, 30*time.Second, nil,
+		)
+		if err != nil {
+			t.Fatalf("zombie probe: %v", err)
+		}
+		if got := strings.TrimSpace(zombies.Stdout); got != "0" {
+			t.Fatalf("PID 1 left %s zombie(s) unreaped: %#v", got, zombies)
+		}
+	})
 }
 
 // The idle sweeper reclaims a container by the mtime of its activity marker,

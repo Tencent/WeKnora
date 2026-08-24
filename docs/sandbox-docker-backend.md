@@ -46,7 +46,7 @@ ENTRYPOINT 拼到 Cmd 前面，所以只设 Cmd 时，任何声明了 ENTRYPOINT
 | `Get` / `List` | `GET /containers/json?filters=label=…`，服务端按 label 过滤 |
 | `Delete` | `DELETE /containers/{id}?force=1&v=1` |
 | `Exec` | `POST /containers/{id}/exec` → `/exec/{id}/start`（hijack）→ `/exec/{id}/json` |
-| `WriteFile` / `ReadFile` / `Stat` | `PUT` / `GET` / `HEAD /containers/{id}/archive` |
+| `WriteFile` / `ReadFile` / `Stat` | 刻意不用 archive 接口，走 exec 的 `cat > "$1"` / `cat` / `find -maxdepth 0 -printf`（见下） |
 | `MakeDir` / `Remove` / `ListDir` | 没有原生接口，用 exec 的 `mkdir -p` / `rm -rf` / `find -printf` |
 
 几个不显然但要紧的决定：
@@ -70,14 +70,28 @@ ENTRYPOINT 拼到 Cmd 前面，所以只设 Cmd 时，任何声明了 ENTRYPOINT
 就能让容器永久免于回收。往前改只会让自己更早被回收，不构成问题。此外清扫在真正删除前
 会再读一次标记：列举加逐个 stat 在繁忙 daemon 上不是瞬时的，期间会话可能已被恢复。
 
-残留风险：容器内以 root 跑的东西（`shell_exec` 默认就是 root）可以起一个后台循环持续
-`touch` 标记，从而把自己维持成「一直活跃」。这与「容器内 root 能让自己一直运行」是同一
-信任边界，需要硬上限时应由部署方在 daemon 侧限制。
+残留风险：标记对沙箱账号可写是刻意的（只跑脚本的会话也要能刷新它），所以任何能在容器里
+执行命令的东西——包括普通技能脚本，不需要 root——都可以起一个后台循环持续 `touch` 标记，
+把自己维持成「一直活跃」。当前没有硬寿命上限，需要的话应由部署方在 daemon 侧限制。
 
-**exec 默认以 root 运行，脚本以 `user`(uid 1000) 运行。** 与 envd 后端的口径一致：
-`RemoteExecRequest.User` 为空表示 root，脚本执行路径显式传 `DefaultSandboxExecUser`。
+**所有 exec 都以 `user`(uid 1000) 运行。** 脚本执行、`shell_exec`、以及全部文件操作都显式
+传 `DefaultSandboxExecUser`。唯一的例外是 manager 自己的 bootstrap：它要把产物目录 `chown`
+**给**沙箱账号，因此不能以该账号执行，这也是 `RemoteExecRequest.User` 留空的唯一用途。
 容器 `CapDrop: ALL` 之后额外补回 CHOWN/DAC_OVERRIDE/FOWNER/FSETID/SETGID/SETUID/KILL，
 这是 root 装包和修属主需要的最小集合；Docker 默认给的 NET_RAW、MKNOD、SYS_CHROOT 等一律不给。
+
+**文件操作走 exec，不走 archive 接口。** archive 接口（`PUT`/`GET`/`HEAD /archive`）由 daemon
+执行，这意味着两件事同时成立：它忽略 exec user 一律以 root 操作，并且会在路径解析时跟随符号
+链接。沙箱账号对 `/workspace` 有写权限，而调用侧的路径守卫都是字符串前缀比较，于是
+`ln -s /root /workspace/output/esc` 之后，`/workspace/output/esc/secret.txt` 既能通过守卫，
+又会被 daemon 以 root 读出来（真机验证过，不是推演）。改成以沙箱账号 exec 之后，能不能读写
+由内核判定，符号链接指向哪里都不再重要，也不存在「先校验后使用」之间被换掉链接的窗口。
+`Stat` 用 `find`，它不跟随符号链接，因此链接会如实报告为 `other` 类型，要求正规文件的调用方
+在尝试读取之前就会拒绝。archive 接口里只剩 `HEAD` 还在用，且仅用于读固定路径的活跃标记。
+
+**PID 1 开 tini（`HostConfig.Init`）。** 容器入口是 `sleep`，它从不调用 `wait()`。长会话里
+后台进程一旦活得比启动它的 exec 久，退出后就会变成没人回收的僵尸，堆到 `pids_limit` 之后所有
+后续 exec 都会失败。
 
 **镜像即模板。** `ListTemplates` 列出 daemon 上带 `com.weknora.sandbox.template=true` 标签的、
 或名字就是标准镜像的镜像；`EnsureStandardTemplate` 在后台拉取，拉取期间模板状态显示为

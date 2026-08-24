@@ -105,18 +105,6 @@ func (a *dockerRPCTimeoutAPI) ExecInspect(
 	return a.inner.ExecInspect(rpcCtx, execID, options)
 }
 
-func (a *dockerRPCTimeoutAPI) CopyToContainer(
-	ctx context.Context, containerID string, options client.CopyToContainerOptions,
-) (client.CopyToContainerResult, error) {
-	return a.inner.CopyToContainer(ctx, containerID, options)
-}
-
-func (a *dockerRPCTimeoutAPI) CopyFromContainer(
-	ctx context.Context, containerID string, options client.CopyFromContainerOptions,
-) (client.CopyFromContainerResult, error) {
-	return a.inner.CopyFromContainer(ctx, containerID, options)
-}
-
 func (a *dockerRPCTimeoutAPI) ContainerStatPath(
 	ctx context.Context, containerID string, options client.ContainerStatPathOptions,
 ) (client.ContainerStatPathResult, error) {

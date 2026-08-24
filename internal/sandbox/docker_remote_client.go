@@ -32,7 +32,6 @@
 package sandbox
 
 import (
-	"archive/tar"
 	"bytes"
 	"context"
 	"errors"
@@ -58,14 +57,13 @@ const dockerActivityMarker = "/var/lib/weknora-sandbox-activity"
 // the container is a place to exec into, not a service — and prepares the
 // activity marker on the way.
 //
-// The marker has to be writable by every account that can exec, because
-// scripts run as the unprivileged sandbox user while shell commands and
-// filesystem helpers run as root. Creating it here, in the container's own
-// entrypoint, is the only way to get that without spending an extra API round
-// trip per sandbox: whoever PID 1 runs as owns the file, and the chmod that
-// follows lets the other account refresh it. Without this the idle sweeper
-// would see a session that only ever ran scripts as untouched, and reclaim it
-// out from under the user.
+// The marker has to be writable by the sandbox account. PID 1 runs as root so
+// that it can create the file at all, but every exec that would refresh it —
+// scripts, shell commands, filesystem helpers — runs as the unprivileged user.
+// Creating it here, in the container's own entrypoint, avoids an extra API
+// round trip per sandbox, and the chmod that follows is what lets that account
+// touch it. Without this the idle sweeper would see a session that only ever
+// ran scripts as untouched, and reclaim it out from under the user.
 var dockerSandboxEntrypoint = []string{
 	"/bin/sh", "-c",
 	"touch " + dockerActivityMarker + " 2>/dev/null; " +
@@ -323,9 +321,19 @@ func (c *DockerRemoteClient) hostConfig(policy RemoteNetworkPolicy) *container.H
 		SecurityOpt: []string{"no-new-privileges"},
 		Runtime:     c.settings.Runtime,
 		NetworkMode: container.NetworkMode(c.networkMode(policy)),
+		// The entrypoint is a plain `sleep`, which never calls wait(). Without
+		// tini in front of it, a background process outliving the exec that
+		// started it becomes an unreaped zombie on exit, and a long session
+		// accumulates them until PidsLimit is exhausted and every further exec
+		// fails.
+		Init: &dockerInitProcess,
 	}
 	return hostConfig
 }
+
+// dockerInitProcess is addressable because HostConfig.Init is a *bool: unset
+// means "follow the daemon default", which is not what this backend wants.
+var dockerInitProcess = true
 
 // networkMode resolves the effective Docker network for a sandbox.
 //
@@ -679,7 +687,22 @@ func dockerExecWasKilled(exitCode int) bool {
 	return exitCode == 137 || exitCode == 124
 }
 
-// WriteFile uploads one file through the archive endpoint.
+// WriteFile writes one file as the sandbox account.
+//
+// This and its Read/Stat counterparts deliberately avoid the Engine's archive
+// endpoints (CopyToContainer, CopyFromContainer, ContainerStatPath). Those are
+// served by the daemon, which means two things at once: they ignore the exec
+// user and act as root, and they resolve symlinks on the way. That combination
+// is unsafe here, because the sandbox account can write anywhere under
+// /workspace while every caller-facing path guard in this repository is a
+// string prefix test. A model that runs `ln -s /root /workspace/output/esc`
+// leaves /workspace/output/esc/secret.txt passing those guards, and the daemon
+// then reads it out as root — confirmed against a real daemon, not theorised.
+//
+// Running these as DefaultSandboxExecUser hands the decision to the kernel
+// instead: a path the sandbox account cannot reach on its own stays
+// unreachable regardless of what a link points at, and there is no window
+// between checking and using in which the link could be repointed.
 func (c *DockerRemoteClient) WriteFile(
 	ctx context.Context,
 	handle RemoteSandboxHandle,
@@ -698,54 +721,31 @@ func (c *DockerRemoteClient) WriteFile(
 		return err
 	}
 
-	var archive bytes.Buffer
-	writer := tar.NewWriter(&archive)
-	header := &tar.Header{
-		Name:    path.Base(clean),
-		Mode:    0o644,
-		Size:    int64(len(content)),
-		ModTime: time.Now(),
-		// Files land owned by the sandbox account so scripts can read (and
-		// replace) their own inputs; the archive endpoint applies these ids
-		// verbatim when CopyUIDGID is set.
-		Uid: dockerSandboxUID,
-		Gid: dockerSandboxGID,
-	}
-	if err := writer.WriteHeader(header); err != nil {
-		return dockerError("WriteFile", err)
-	}
-	if _, err := writer.Write(content); err != nil {
-		return dockerError("WriteFile", err)
-	}
-	if err := writer.Close(); err != nil {
-		return dockerError("WriteFile", err)
-	}
-
-	_, err = c.api.CopyToContainer(ctx, id, client.CopyToContainerOptions{
-		DestinationPath: path.Dir(clean),
-		Content:         &archive,
-		CopyUIDGID:      true,
+	// The path travels as a positional argument so a name containing shell
+	// metacharacters cannot change what the redirect targets.
+	result, err := c.Exec(ctx, &dockerSandboxHandle{id: id}, RemoteExecRequest{
+		Command: "sh",
+		Args:    []string{"-c", `cat > "$1"`, "weknora-write", clean},
+		Stdin:   string(content),
+		User:    DefaultSandboxExecUser,
+		Timeout: dockerFilesystemOpTimeout,
 	})
 	if err != nil {
 		return dockerError("WriteFile", err)
 	}
+	if result.ExitCode != 0 {
+		return dockerFileOpError("WriteFile", clean, result.Stderr)
+	}
 	return nil
 }
 
-// dockerSandboxUID / dockerSandboxGID are the ids of DefaultSandboxExecUser.
-// The template contract fixes them at 1000, the same convention E2B templates
-// use, so uploaded files can be owned correctly without an extra lookup.
-const (
-	dockerSandboxUID = 1000
-	dockerSandboxGID = 1000
+// dockerSandboxPID1User overrides the image USER so the entrypoint can create
+// the world-writable activity marker. Numeric 0 does not depend on a root
+// account existing by name in a custom image.
+const dockerSandboxPID1User = "0"
 
-	// dockerSandboxPID1User overrides the image USER so the entrypoint can
-	// create the world-writable activity marker. Numeric 0 does not depend
-	// on a root account existing by name in a custom image.
-	dockerSandboxPID1User = "0"
-)
-
-// ReadFile downloads one file through the archive endpoint.
+// ReadFile reads one file as the sandbox account. See WriteFile for why this
+// does not use the archive endpoint.
 func (c *DockerRemoteClient) ReadFile(
 	ctx context.Context,
 	handle RemoteSandboxHandle,
@@ -759,44 +759,26 @@ func (c *DockerRemoteClient) ReadFile(
 	if err != nil {
 		return nil, err
 	}
-	response, err := c.api.CopyFromContainer(ctx, id, client.CopyFromContainerOptions{
-		SourcePath: clean,
+	result, err := c.Exec(ctx, &dockerSandboxHandle{id: id}, RemoteExecRequest{
+		Command: "cat",
+		Args:    []string{"--", clean},
+		User:    DefaultSandboxExecUser,
+		Timeout: dockerFilesystemOpTimeout,
 	})
 	if err != nil {
 		return nil, dockerError("ReadFile", err)
 	}
-	defer func() { _ = response.Content.Close() }()
-
-	reader := tar.NewReader(response.Content)
-	for {
-		header, err := reader.Next()
-		if errors.Is(err, io.EOF) {
-			return nil, &RemoteError{
-				Kind:     RemoteErrorKindNotFound,
-				Provider: SandboxTypeDocker,
-				Op:       "ReadFile",
-				Message:  "archive contained no regular file for " + clean,
-			}
-		}
-		if err != nil {
-			return nil, dockerError("ReadFile", err)
-		}
-		switch header.Typeflag {
-		case tar.TypeDir:
-			return nil, dockerInvalidRequest("ReadFile", clean+" is a directory")
-		case tar.TypeReg:
-			content, err := io.ReadAll(reader)
-			if err != nil {
-				return nil, dockerError("ReadFile", err)
-			}
-			return content, nil
-		default:
-			continue
-		}
+	if result.ExitCode != 0 {
+		return nil, dockerFileOpError("ReadFile", clean, result.Stderr)
 	}
+	return []byte(result.Stdout), nil
 }
 
 // Stat returns metadata for one path.
+//
+// find does not follow symlinks, so a link reports as RemoteEntryOther rather
+// than as whatever it points at. Callers that only accept regular files
+// therefore refuse it before any read is attempted.
 func (c *DockerRemoteClient) Stat(
 	ctx context.Context,
 	handle RemoteSandboxHandle,
@@ -810,22 +792,57 @@ func (c *DockerRemoteClient) Stat(
 	if err != nil {
 		return nil, err
 	}
-	stat, err := c.api.ContainerStatPath(ctx, id, client.ContainerStatPathOptions{Path: clean})
+	result, err := c.Exec(ctx, &dockerSandboxHandle{id: id}, RemoteExecRequest{
+		Command: "find",
+		Args: []string{
+			clean, "-maxdepth", "0",
+			"-printf", `%y\t%s\t%T@\t%p\n`,
+		},
+		User:    DefaultSandboxExecUser,
+		Timeout: dockerFilesystemOpTimeout,
+	})
 	if err != nil {
 		return nil, dockerError("Stat", err)
 	}
-	entry := &RemoteStatEntry{
-		Path:    clean,
-		Type:    RemoteEntryFile,
-		Size:    stat.Stat.Size,
-		ModTime: stat.Stat.Mtime,
+	if result.ExitCode != 0 {
+		return nil, dockerFileOpError("Stat", clean, result.Stderr)
 	}
-	if stat.Stat.Mode.IsDir() {
-		entry.Type = RemoteEntryDir
-	} else if !stat.Stat.Mode.IsRegular() {
-		entry.Type = RemoteEntryOther
+	entries := parseDockerFindOutput(result.Stdout)
+	if len(entries) == 0 {
+		return nil, &RemoteError{
+			Kind:     RemoteErrorKindNotFound,
+			Provider: SandboxTypeDocker,
+			Op:       "Stat",
+			Message:  clean + " does not exist",
+		}
 	}
-	return entry, nil
+	return &RemoteStatEntry{
+		Path:    entries[0].Path,
+		Type:    entries[0].Type,
+		Size:    entries[0].Size,
+		ModTime: entries[0].ModTime,
+	}, nil
+}
+
+// dockerFileOpError classifies a failed filesystem helper. A missing path is
+// NotFound so callers can treat it as "nothing there"; everything else,
+// permission denials included, is an invalid request carrying the tool's own
+// complaint rather than a synthesised one.
+func dockerFileOpError(op, clean, stderr string) error {
+	if strings.Contains(stderr, "No such file or directory") {
+		return &RemoteError{
+			Kind:     RemoteErrorKindNotFound,
+			Provider: SandboxTypeDocker,
+			Op:       op,
+			Message:  clean + " does not exist",
+		}
+	}
+	return &RemoteError{
+		Kind:     RemoteErrorKindInvalidRequest,
+		Provider: SandboxTypeDocker,
+		Op:       op,
+		Message:  fmt.Sprintf("%s %s: %s", op, clean, firstNonEmptyLine(stderr)),
+	}
 }
 
 // MakeDir creates a directory (and its parents) inside the sandbox.
@@ -1061,13 +1078,12 @@ func dockerCleanPath(op, raw string) (string, error) {
 
 // dockerReservedPathPrefixes are refused for every file operation.
 //
-// Unlike the envd-backed backends, the archive endpoints (WriteFile, ReadFile,
-// Stat) are served by the daemon itself and therefore ignore the exec user
-// entirely: they read and write as root no matter what a caller asks for. The
-// callers in this repository only ever address /workspace, so this is defence
-// in depth rather than a live hole — but it is what keeps a future caller from
-// turning a file read into a way to lift PID 1's environment out of /proc, or
-// a file write into a way to backdate the sweeper's own bookkeeping.
+// File operations run as the sandbox account (see WriteFile), so the kernel
+// already decides what is reachable and this list is not what keeps /etc or
+// another session's data safe. It exists for the paths the sandbox account
+// legitimately can touch but never should through this API: /proc and /sys
+// expose the container's own runtime state, and the activity marker is the
+// sweeper's bookkeeping, which a session must not be able to backdate.
 var dockerReservedPathPrefixes = []string{
 	"/proc",
 	"/sys",

@@ -1,7 +1,6 @@
 package sandbox
 
 import (
-	"archive/tar"
 	"bufio"
 	"bytes"
 	"context"
@@ -10,7 +9,6 @@ import (
 	"io"
 	"iter"
 	"net"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -63,9 +61,6 @@ type fakeDockerEngine struct {
 	// sweeper's re-check before deletion is exercised.
 	statHook func(path string) (container.PathStat, bool)
 	statErr  error
-	copiedTo []client.CopyToContainerOptions
-	copyFrom []byte
-	copyErr  error
 
 	images       []image.Summary
 	imagePresent map[string]bool
@@ -204,30 +199,6 @@ func (f *fakeDockerEngine) ExecInspect(
 	_ context.Context, _ string, _ client.ExecInspectOptions,
 ) (client.ExecInspectResult, error) {
 	return client.ExecInspectResult{ExitCode: f.execExit}, nil
-}
-
-func (f *fakeDockerEngine) CopyToContainer(
-	_ context.Context, _ string, options client.CopyToContainerOptions,
-) (client.CopyToContainerResult, error) {
-	if f.copyErr != nil {
-		return client.CopyToContainerResult{}, f.copyErr
-	}
-	content, _ := io.ReadAll(options.Content)
-	options.Content = bytes.NewReader(content)
-	f.copiedTo = append(f.copiedTo, options)
-	f.copyFrom = content
-	return client.CopyToContainerResult{}, nil
-}
-
-func (f *fakeDockerEngine) CopyFromContainer(
-	_ context.Context, _ string, _ client.CopyFromContainerOptions,
-) (client.CopyFromContainerResult, error) {
-	if f.copyErr != nil {
-		return client.CopyFromContainerResult{}, f.copyErr
-	}
-	return client.CopyFromContainerResult{
-		Content: io.NopCloser(bytes.NewReader(f.copyFrom)),
-	}, nil
 }
 
 func (f *fakeDockerEngine) ContainerStatPath(
@@ -384,6 +355,9 @@ func TestDockerClientCreateAppliesIsolationAndMetadata(t *testing.T) {
 	require.Equal(t, int64(DefaultDockerCPULimit*1e9), host.NanoCPUs)
 	require.Equal(t, DefaultDockerPidsLimit, *host.PidsLimit)
 	require.Equal(t, container.NetworkMode("bridge"), host.NetworkMode)
+	require.NotNil(t, host.Init)
+	require.True(t, *host.Init,
+		"`sleep` never reaps, so without tini a long session fills PidsLimit with zombies")
 	require.Equal(t, []string{"container-1"}, engine.started)
 }
 
@@ -637,7 +611,8 @@ func TestDockerClientExecShellPassesCommandAsPositionalArgument(t *testing.T) {
 	require.NoError(t, err)
 	opts := engine.execOptions[0]
 	require.Equal(t, []string{"weknora-exec", `echo "a b"; rm -rf /nope`}, opts.Cmd[3:])
-	require.Equal(t, "root", opts.User, "an unspecified user means root, matching envd backends")
+	require.Equal(t, "root", opts.User,
+		"a blank user is the manager's bootstrap escape hatch; callers name the account")
 }
 
 func TestDockerClientExecRejectsShellWithArgs(t *testing.T) {
@@ -677,7 +652,11 @@ func TestDockerClientExecWritesStdin(t *testing.T) {
 	require.True(t, engine.execOptions[0].AttachStdin)
 }
 
-func TestDockerClientWriteFileUploadsArchiveOwnedBySandboxUser(t *testing.T) {
+// The archive endpoint would apply this write as root and resolve symlinks on
+// the way, so a link planted under the writable workspace could redirect an
+// upload onto a file the sandbox account cannot touch. Writing through exec
+// puts the kernel back in charge.
+func TestDockerClientWriteFileRunsAsSandboxUserOverExec(t *testing.T) {
 	engine := newFakeDockerEngine()
 	docker := newTestDockerClient(t, engine)
 
@@ -685,39 +664,120 @@ func TestDockerClientWriteFileUploadsArchiveOwnedBySandboxUser(t *testing.T) {
 		"/workspace/input/note.txt", []byte("hello"))
 	require.NoError(t, err)
 
-	require.Len(t, engine.copiedTo, 1)
-	require.Equal(t, "/workspace/input", engine.copiedTo[0].DestinationPath)
-	require.True(t, engine.copiedTo[0].CopyUIDGID)
-	require.Contains(t, engine.execOptions[0].Cmd, "mkdir",
-		"the parent directory has no archive-API equivalent and must be exec'd")
-	require.Equal(t, DefaultSandboxExecUser, engine.execOptions[0].User,
+	require.Len(t, engine.execOptions, 2, "one mkdir for the parent, one write")
+	mkdir, write := engine.execOptions[0], engine.execOptions[1]
+
+	require.Contains(t, mkdir.Cmd, "mkdir")
+	require.Equal(t, DefaultSandboxExecUser, mkdir.User,
 		"mkdir as root would leave nested dirs unwritable by skill scripts")
 
-	content, err := docker.ReadFile(context.Background(), testHandle("c"),
-		"/workspace/input/note.txt")
-	require.NoError(t, err)
-	require.Equal(t, []byte("hello"), content)
+	require.Equal(t, DefaultSandboxExecUser, write.User)
+	require.True(t, write.AttachStdin)
+	require.Equal(t, "hello", engine.execStdin.String())
+	require.Equal(t,
+		[]string{"weknora-exec", "sh", "-c", `cat > "$1"`, "weknora-write", "/workspace/input/note.txt"},
+		write.Cmd[3:],
+		"the destination must reach the shell as a positional arg, never interpolated")
 }
 
-func TestDockerClientReadFileRejectsDirectoryArchive(t *testing.T) {
+func TestDockerClientReadFileRunsAsSandboxUserOverExec(t *testing.T) {
 	engine := newFakeDockerEngine()
-	var archive bytes.Buffer
-	writer := tar.NewWriter(&archive)
-	require.NoError(t, writer.WriteHeader(&tar.Header{
-		Name: "output", Typeflag: tar.TypeDir, Mode: 0o755,
-	}))
-	require.NoError(t, writer.WriteHeader(&tar.Header{
-		Name: "output/nested.txt", Typeflag: tar.TypeReg, Mode: 0o644, Size: 3,
-	}))
-	_, err := writer.Write([]byte("hi\n"))
-	require.NoError(t, err)
-	require.NoError(t, writer.Close())
-	engine.copyFrom = archive.Bytes()
+	engine.execStdout = "report body\n"
+	docker := newTestDockerClient(t, engine)
 
-	_, err = newTestDockerClient(t, engine).ReadFile(
-		context.Background(), testHandle("c"), "/workspace/output")
-	require.True(t, IsRemoteInvalidRequest(err),
-		"a directory archive must not return the first nested file")
+	content, err := docker.ReadFile(context.Background(), testHandle("c"),
+		"/workspace/output/report.txt")
+	require.NoError(t, err)
+	require.Equal(t, []byte("report body\n"), content)
+
+	require.Len(t, engine.execOptions, 1)
+	require.Equal(t, DefaultSandboxExecUser, engine.execOptions[0].User)
+	require.Equal(t,
+		[]string{"weknora-exec", "cat", "--", "/workspace/output/report.txt"},
+		engine.execOptions[0].Cmd[3:])
+}
+
+// A path the sandbox account cannot read must surface as a refusal rather than
+// as content, and must stay distinguishable from a path that simply is not
+// there: callers treat NotFound as "nothing produced yet".
+func TestDockerClientReadFileMapsFailures(t *testing.T) {
+	tests := []struct {
+		name    string
+		stderr  string
+		refused func(error) bool
+	}{
+		{
+			name:    "missing path",
+			stderr:  "cat: /workspace/output/gone.txt: No such file or directory",
+			refused: IsRemoteNotFound,
+		},
+		{
+			name:    "unreadable through a planted symlink",
+			stderr:  "cat: /workspace/output/esc/secret.txt: Permission denied",
+			refused: IsRemoteInvalidRequest,
+		},
+		{
+			name:    "directory",
+			stderr:  "cat: /workspace/output: Is a directory",
+			refused: IsRemoteInvalidRequest,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := newFakeDockerEngine()
+			engine.execExit = 1
+			engine.execStderr = tt.stderr
+			docker := newTestDockerClient(t, engine)
+
+			_, err := docker.ReadFile(context.Background(), testHandle("c"),
+				"/workspace/output/probe")
+			require.True(t, tt.refused(err), "got %v", err)
+		})
+	}
+}
+
+// The attack this closes: the sandbox account can write to /workspace, and
+// every caller-facing guard is a string prefix test, so `ln -s /root
+// /workspace/output/esc` used to leave the daemon reading /root as root.
+// find does not follow links, so the link reports as itself and callers that
+// require a regular file refuse it before any read is attempted.
+func TestDockerClientStatReportsSymlinkAsOther(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.execStdout = "l\t4\t1786565482.0000000000\t/workspace/output/esc\n"
+	docker := newTestDockerClient(t, engine)
+
+	entry, err := docker.Stat(context.Background(), testHandle("c"),
+		"/workspace/output/esc")
+	require.NoError(t, err)
+	require.Equal(t, RemoteEntryOther, entry.Type,
+		"a symlink must not be reported as the file it points at")
+}
+
+// Guards the property the symlink fix rests on. The archive endpoints ignored
+// the requested user and ran as root; if any file operation goes back to one,
+// this catches it without needing a daemon to prove the consequence.
+func TestDockerClientFileOperationsNeverRunAsRoot(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.execStdout = "f\t3\t1786565482.0000000000\t/workspace/output/a.txt\n"
+	docker := newTestDockerClient(t, engine)
+	ctx := context.Background()
+	handle := testHandle("c")
+
+	require.NoError(t, docker.WriteFile(ctx, handle, "/workspace/output/a.txt", []byte("x")))
+	_, err := docker.ReadFile(ctx, handle, "/workspace/output/a.txt")
+	require.NoError(t, err)
+	_, err = docker.Stat(ctx, handle, "/workspace/output/a.txt")
+	require.NoError(t, err)
+	_, err = docker.ListDir(ctx, handle, "/workspace/output")
+	require.NoError(t, err)
+	require.NoError(t, docker.MakeDir(ctx, handle, "/workspace/output/sub"))
+	require.NoError(t, docker.Remove(ctx, handle, "/workspace/output/a.txt"))
+
+	require.NotEmpty(t, engine.execOptions)
+	for i, opts := range engine.execOptions {
+		require.Equal(t, DefaultSandboxExecUser, opts.User,
+			"exec %d (%v) must not run as root", i, opts.Cmd)
+	}
 }
 
 func TestDockerClientPathsMustBeAbsolute(t *testing.T) {
@@ -763,16 +823,22 @@ func TestDockerClientListDirMissingDirectoryIsNotFound(t *testing.T) {
 
 func TestDockerClientStatMapsEntryType(t *testing.T) {
 	engine := newFakeDockerEngine()
-	engine.statResult["/workspace/output"] = container.PathStat{
-		Size: 4096, Mode: os.ModeDir | 0o755, Mtime: time.Now(),
-	}
+	engine.execStdout = "d\t4096\t1786565482.0000000000\t/workspace/output\n"
 	docker := newTestDockerClient(t, engine)
 
 	entry, err := docker.Stat(context.Background(), testHandle("c"), "/workspace/output")
 	require.NoError(t, err)
 	require.Equal(t, RemoteEntryDir, entry.Type)
+	require.Equal(t, int64(4096), entry.Size)
+	require.Equal(t,
+		[]string{"weknora-exec", "find", "/workspace/output", "-maxdepth", "0", "-printf", `%y\t%s\t%T@\t%p\n`},
+		engine.execOptions[0].Cmd[3:])
 
-	_, err = docker.Stat(context.Background(), testHandle("c"), "/workspace/missing")
+	missing := newFakeDockerEngine()
+	missing.execExit = 1
+	missing.execStderr = "find: '/workspace/missing': No such file or directory"
+	_, err = newTestDockerClient(t, missing).Stat(
+		context.Background(), testHandle("c"), "/workspace/missing")
 	require.True(t, IsRemoteNotFound(err))
 }
 
@@ -823,9 +889,10 @@ func TestValidateDockerRemoteTLS(t *testing.T) {
 	require.NoError(t, ValidateDockerRemoteTLS("tcp://10.0.0.5:2376", "/etc/weknora/docker-certs"))
 }
 
-// The archive endpoints are served by the daemon and ignore the exec user, so
-// they read and write as root. Pseudo-filesystems and the sweeper's own marker
-// must not be addressable through them.
+// File operations run as the sandbox account, so the kernel decides what is
+// reachable. This list covers what that account legitimately can touch but
+// never should through this API: the container's own runtime state, and the
+// sweeper's marker, which a session must not be able to backdate.
 func TestDockerCleanPathRefusesReservedPaths(t *testing.T) {
 	engine := newFakeDockerEngine()
 	docker := newTestDockerClient(t, engine)
@@ -848,7 +915,7 @@ func TestDockerCleanPathRefusesReservedPaths(t *testing.T) {
 		require.Error(t, err, target)
 	}
 
-	require.Empty(t, engine.copiedTo, "a refused path must never reach the daemon")
+	require.Empty(t, engine.execOptions, "a refused path must never reach the daemon")
 }
 
 func TestDockerHostNeedsDialGuard(t *testing.T) {

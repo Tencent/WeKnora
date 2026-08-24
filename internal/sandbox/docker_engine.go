@@ -54,12 +54,11 @@ type dockerEngineAPI interface {
 	ExecAttach(ctx context.Context, execID string, options client.ExecAttachOptions) (client.ExecAttachResult, error)
 	ExecInspect(ctx context.Context, execID string, options client.ExecInspectOptions) (client.ExecInspectResult, error)
 
-	CopyToContainer(
-		ctx context.Context, containerID string, options client.CopyToContainerOptions,
-	) (client.CopyToContainerResult, error)
-	CopyFromContainer(
-		ctx context.Context, containerID string, options client.CopyFromContainerOptions,
-	) (client.CopyFromContainerResult, error)
+	// ContainerStatPath is the one archive endpoint this adapter uses, and only
+	// against the activity marker's fixed path. The copy endpoints are
+	// deliberately absent: they run as root and resolve symlinks, so exposing
+	// them to caller-supplied paths would undo the file operations' reliance on
+	// the kernel for access control (see DockerRemoteClient.WriteFile).
 	ContainerStatPath(
 		ctx context.Context, containerID string, options client.ContainerStatPathOptions,
 	) (client.ContainerStatPathResult, error)
