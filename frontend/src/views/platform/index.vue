@@ -5,7 +5,6 @@
             <RouterView />
         </div>
         <div class="upload-mask" v-show="ismask">
-            <input type="file" style="display: none" ref="uploadInput" accept=".pdf,.docx,.doc,.pptx,.ppt,.epub,.mhtml,.txt,.md,.jpg,.jpeg,.png,.csv,.xls,.xlsx" />
             <UploadMask></UploadMask>
         </div>
         <!-- 全局设置模态框，供所有 platform 子路由使用 -->
@@ -23,7 +22,6 @@
 import Menu from '@/components/menu.vue'
 import { ref, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
-import useKnowledgeBase from '@/hooks/useKnowledgeBase'
 import UploadMask from '@/components/upload-mask.vue'
 import Settings from '@/views/settings/Settings.vue'
 import GlobalCommandPalette from '@/components/GlobalCommandPalette.vue'
@@ -34,13 +32,12 @@ import { useChatResourcesStore } from '@/stores/chatResources'
 import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { collectDroppedFiles } from './collectDroppedFiles'
 
-let { requestMethod } = useKnowledgeBase()
 const route = useRoute();
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();
 let ismask = ref(false)
-let uploadInput = ref();
 const { t } = useI18n();
 
 const isRouterAlive = ref(true)
@@ -79,29 +76,6 @@ const CHAT_DROP_ROUTE_NAMES = new Set(['chat', 'globalCreatChat', 'kbCreatChat']
 
 const isChatDropRoute = () => {
     return CHAT_DROP_ROUTE_NAMES.has(String(route.name || ''));
-}
-
-const collectDroppedFiles = async (event: DragEvent): Promise<File[]> => {
-    const dataTransferFiles = event.dataTransfer?.files ? Array.from(event.dataTransfer.files) : [];
-    if (dataTransferFiles.length > 0) {
-        return dataTransferFiles;
-    }
-
-    const dataTransferItems = event.dataTransfer?.items ? Array.from(event.dataTransfer.items) : [];
-    if (dataTransferItems.length === 0) {
-        return [];
-    }
-
-    const files = await Promise.all(dataTransferItems.map(item => new Promise<File | null>((resolve) => {
-        const fileEntry = (item as any).webkitGetAsEntry?.();
-        if (fileEntry?.isFile && typeof fileEntry.file === 'function') {
-            fileEntry.file((file: File) => resolve(file), () => resolve(null));
-            return;
-        }
-        resolve(null);
-    })));
-
-    return files.filter((file): file is File => file instanceof File);
 }
 
 // 检查知识库初始化状态
@@ -198,7 +172,9 @@ const handleGlobalDrop = async (event: DragEvent) => {
         return;
     }
 
-    droppedFiles.forEach(file => requestMethod(file, uploadInput));
+    window.dispatchEvent(new CustomEvent('weknora:knowledge-file-drop', {
+        detail: { kbId: getCurrentKbId(), files: droppedFiles }
+    }));
 }
 
 // 组件挂载时添加全局事件监听器

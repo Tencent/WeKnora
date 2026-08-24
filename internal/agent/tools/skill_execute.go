@@ -22,6 +22,11 @@ var executeSkillScriptTool = BaseTool{
 - Use this tool to run utility scripts bundled with a skill
 - Scripts are executed in an isolated sandbox for security
 - Only scripts from loaded skills can be executed
+- User-uploaded files are listed in the current ` + "`<sandbox_attachments>`" + `
+  block. Pass their absolute ` + "`/workspace/input/...`" + ` paths through
+  ` + "`args`" + ` when a script accepts an input file.
+- Treat ` + "`/workspace/input`" + ` as read-only. Write generated files only to
+  ` + "`$WEKNORA_SKILL_OUTPUT_DIR`" + ` so they can be collected for download.
 
 ## When to Use
 - When a skill's instructions reference a utility script (e.g., "Run scripts/analyze_form.py")
@@ -43,8 +48,48 @@ var executeSkillScriptTool = BaseTool{
 type ExecuteSkillScriptInput struct {
 	SkillName  string   `json:"skill_name" jsonschema:"Name of the skill containing the script"`
 	ScriptPath string   `json:"script_path" jsonschema:"Relative path to the script within the skill directory (e.g. scripts/analyze.py)"`
-	Args       []string `json:"args,omitempty" jsonschema:"Optional command-line arguments to pass to the script. Note: if using --file flag, you must provide an actual file path that exists in the skill directory. If you have data in memory (not a file), use the 'input' parameter instead."`
+	Args       []string `json:"args,omitempty" jsonschema:"Optional command-line arguments. For file flags, pass an absolute path from the current <sandbox_attachments> block (/workspace/input/...). For in-memory data, use input instead."`
 	Input      string   `json:"input,omitempty" jsonschema:"Optional input data to pass to the script via stdin. Use this when you have data in memory (e.g. JSON string) that the script should process. This is equivalent to piping data: echo 'data' | python script.py"`
+}
+
+// UnmarshalJSON accepts args as either the documented string array or a single
+// command-line string. Some model providers emit a string for a single tool
+// argument; accepting it here keeps that malformed-but-unambiguous call from
+// failing before the script can run.
+func (i *ExecuteSkillScriptInput) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		SkillName  string          `json:"skill_name"`
+		ScriptPath string          `json:"script_path"`
+		Args       json.RawMessage `json:"args"`
+		Input      string          `json:"input"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	i.SkillName = raw.SkillName
+	i.ScriptPath = raw.ScriptPath
+	i.Input = raw.Input
+	i.Args = nil
+
+	if len(raw.Args) == 0 || string(raw.Args) == "null" {
+		return nil
+	}
+
+	if err := json.Unmarshal(raw.Args, &i.Args); err == nil {
+		return nil
+	}
+
+	var argsString string
+	if err := json.Unmarshal(raw.Args, &argsString); err != nil {
+		return fmt.Errorf("args must be a string or an array of strings: %w", err)
+	}
+
+	// A string is interpreted as a conventional space-separated command line.
+	// The tool schema continues to advertise []string, so well-formed calls are
+	// unaffected; this is only a compatibility fallback for model output.
+	i.Args = strings.Fields(argsString)
+	return nil
 }
 
 // ExecuteSkillScriptTool allows the agent to execute skill scripts in a sandbox

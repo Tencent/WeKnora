@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  API_EXTERNAL_USER_SESSION_OWNER_PREFIX,
   EMBED_SESSION_MARKER_PREFIX,
   classifyDateBucket,
   configuredPlatforms,
@@ -13,6 +14,7 @@ import {
 
 const sourceLabels = {
   web: 'Web',
+  api: 'API',
   embedFallback: 'Embed',
   embedChannel: (id: string) => `Embed ${id}`,
   imPlatform: (p: string) => `IM ${p}`,
@@ -30,6 +32,14 @@ test('resolveSessionOrigin distinguishes web, IM, and embed sessions', () => {
       description: `${EMBED_SESSION_MARKER_PREFIX}ch-1`,
     }),
     { kind: 'embed', channelId: 'ch-1' },
+  )
+  assert.deepEqual(
+    resolveSessionOrigin({ id: '4', user_id: 'api_tenant_key:1:10' }),
+    { kind: 'api' },
+  )
+  assert.deepEqual(
+    resolveSessionOrigin({ id: '5', user_id: `${API_EXTERNAL_USER_SESSION_OWNER_PREFIX}1:alice` }),
+    { kind: 'api' },
   )
 })
 

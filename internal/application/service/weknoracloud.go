@@ -72,7 +72,9 @@ func (s *weKnoraCloudService) verifyCredentials(ctx context.Context, appID, appS
 	logger.Infof(ctx, "credential verification request: method=GET url=%s app_id=%s request_id=%s ",
 		healthURL, appID, requestID)
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	clientCfg := utils.DefaultSSRFSafeHTTPClientConfig()
+	clientCfg.Timeout = 10 * time.Second
+	client := utils.NewSSRFSafeHTTPClient(clientCfg)
 	resp, err := client.Do(req)
 	if err != nil {
 		logger.Warnf(ctx, "credential verification HTTP failed: url=%s err=%v", healthURL, err)
@@ -116,7 +118,7 @@ func (s *weKnoraCloudService) CheckStatus(ctx context.Context) (*types.WeKnoraCl
 	return &types.WeKnoraCloudStatusResult{HasModels: true, NeedsReinit: false}, nil
 }
 
-// updateTenantCredentials 更新租户的 WeKnoraCloud 凭证
+// updateTenantCredentials 更新空间的 WeKnoraCloud 凭证
 func (s *weKnoraCloudService) updateTenantCredentials(ctx context.Context, tenantID uint64, appID, appSecret string) error {
 	if s.tenantRepo == nil {
 		return fmt.Errorf("tenant repository is required")

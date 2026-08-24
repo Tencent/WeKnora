@@ -68,7 +68,7 @@ func (h *MCPCredentialsHandler) Put(c *gin.Context) {
 	serviceID := c.Param("id")
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
-		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
+		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
 		return
 	}
 
@@ -135,7 +135,7 @@ func (h *MCPCredentialsHandler) DeleteField(c *gin.Context) {
 	field := c.Param("field")
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
-		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
+		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
 		return
 	}
 	if field != "api_key" && field != "token" {

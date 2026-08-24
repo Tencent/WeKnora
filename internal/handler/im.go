@@ -2,20 +2,35 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // validIMPlatforms is the set of supported IM platforms.
 var validIMPlatforms = map[string]bool{
-	"wecom": true, "feishu": true, "slack": true, "telegram": true, "dingtalk": true, "mattermost": true,
-	"wechat": true, "qqbot": true,
+	"wecom": true, "feishu": true, "lark": true, "slack": true, "telegram": true, "dingtalk": true,
+	"mattermost": true, "wechat": true, "qqbot": true, "yunzhijia": true,
 }
+
+// invalidIMPlatformError is the 400 message listing the accepted platforms. It
+// is derived from validIMPlatforms so the two cannot drift apart as platforms
+// are added.
+var invalidIMPlatformError = func() string {
+	names := make([]string, 0, len(validIMPlatforms))
+	for p := range validIMPlatforms {
+		names = append(names, "'"+p+"'")
+	}
+	sort.Strings(names)
+	return "platform must be one of: " + strings.Join(names, ", ")
+}()
 
 // IMHandler handles IM platform callback requests and channel CRUD.
 type IMHandler struct {
@@ -50,6 +65,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		Name            string     `json:"name"`
 		Mode            string     `json:"mode"`
 		OutputMode      string     `json:"output_mode"`
+		SessionMode     string     `json:"session_mode"`
 		KnowledgeBaseID string     `json:"knowledge_base_id"`
 		Credentials     types.JSON `json:"credentials"`
 		Enabled         *bool      `json:"enabled"`
@@ -60,7 +76,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 	}
 
 	if !validIMPlatforms[req.Platform] {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "platform must be 'wecom', 'feishu', 'slack', 'telegram', 'dingtalk', 'mattermost', 'wechat' or 'qqbot'"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidIMPlatformError})
 		return
 	}
 
@@ -71,6 +87,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		Name:            req.Name,
 		Mode:            req.Mode,
 		OutputMode:      req.OutputMode,
+		SessionMode:     req.SessionMode,
 		KnowledgeBaseID: req.KnowledgeBaseID,
 		Credentials:     req.Credentials,
 		Enabled:         true,
@@ -84,7 +101,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		channel.OutputMode = "full"
 	} else {
 		if channel.Mode == "" {
-			if channel.Platform == "mattermost" {
+			if channel.Platform == "mattermost" || channel.Platform == "yunzhijia" {
 				channel.Mode = "webhook"
 			} else {
 				channel.Mode = "websocket"
@@ -192,6 +209,7 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 		Name            *string    `json:"name"`
 		Mode            *string    `json:"mode"`
 		OutputMode      *string    `json:"output_mode"`
+		SessionMode     *string    `json:"session_mode"`
 		KnowledgeBaseID *string    `json:"knowledge_base_id"`
 		Credentials     types.JSON `json:"credentials"`
 		Enabled         *bool      `json:"enabled"`
@@ -210,6 +228,9 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 	}
 	if req.OutputMode != nil {
 		channel.OutputMode = *req.OutputMode
+	}
+	if req.SessionMode != nil {
+		channel.SessionMode = *req.SessionMode
 	}
 	if req.KnowledgeBaseID != nil {
 		channel.KnowledgeBaseID = *req.KnowledgeBaseID
@@ -315,6 +336,21 @@ func (h *IMHandler) ToggleIMChannel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": channel})
 }
 
+func writeIMCallbackACK(c *gin.Context, platform string) {
+	if platform == "yunzhijia" {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data": gin.H{
+				"type":    2,
+				"content": "",
+			},
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
 // ── Callback handlers ──
 
 // IMCallback handles IM platform callback requests for a specific channel.
@@ -336,29 +372,23 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 	ctx := c.Request.Context()
 	channelID := c.Param("channel_id")
 
-	adapter, channel, ok := h.imService.GetChannelAdapter(channelID)
-	if !ok {
-		// Try loading from DB
-		ch, err := h.imService.GetChannelByID(channelID)
-		if err != nil {
+	// Always validate the durable row before using a cached webhook adapter.
+	// This is the correctness fallback when a replica missed Redis invalidation
+	// while disconnected, and prevents stale credentials/config from being used.
+	adapter, channel, err := h.imService.EnsureChannelAdapter(channelID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.Errorf(ctx, "[IM] Channel not found for callback: %s", channelID)
 			c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
 			return
 		}
-		if err := h.imService.StartChannel(ch); err != nil {
-			logger.Errorf(ctx, "[IM] Failed to start channel for callback: %v", err)
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "channel not available"})
+		if errors.Is(err, im.ErrChannelDisabled) {
+			logger.Errorf(ctx, "[IM] Channel disabled for callback: %s", channelID)
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "channel is disabled"})
 			return
 		}
-		adapter, channel, ok = h.imService.GetChannelAdapter(channelID)
-		if !ok {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "channel not available"})
-			return
-		}
-	}
-
-	if !channel.Enabled {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "channel is disabled"})
+		logger.Errorf(ctx, "[IM] Channel unavailable for callback %s: %v", channelID, err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "channel not available"})
 		return
 	}
 
@@ -391,12 +421,12 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 		} else {
 			logger.Infof(ctx, "[IM] Callback parsed no message to process platform=%s path_channel_id=%s", channel.Platform, channelID)
 		}
-		c.JSON(http.StatusOK, gin.H{"success": true})
+		writeIMCallbackACK(c, channel.Platform)
 		return
 	}
 
 	// Respond immediately to avoid platform timeout
-	c.JSON(http.StatusOK, gin.H{"success": true})
+	writeIMCallbackACK(c, channel.Platform)
 
 	// Detach from gin request context
 	asyncCtx := context.WithoutCancel(ctx)

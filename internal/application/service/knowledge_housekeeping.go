@@ -42,8 +42,9 @@ type HousekeepingService struct {
 	// inspector lets the sweep distinguish a genuinely orphaned row from
 	// one whose enrichment subtasks are merely backlogged behind a busy
 	// queue (no span heartbeat yet because no worker has picked them up).
-	// nil-safe — a nil inspector disables the queue check and the sweep
-	// falls back to the span/updated_at heuristics alone.
+	// nil-safe — a nil inspector disables only the transient queue check.
+	// Durable Wiki ownership in task_pending_ops is always probed through db,
+	// so the sweep never falls back to the span/updated_at heuristics alone.
 	inspector interfaces.TaskInspector
 
 	mu      sync.Mutex
@@ -112,7 +113,7 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	threshold := h.staleThreshold()
 	cutoff := time.Now().Add(-threshold)
 
-	// Sweep A: knowledge stuck in "processing".
+	// Sweep A: knowledge stuck in "pending", "processing", or "finalizing".
 	//
 	// Two-stage check is critical here: knowledge.updated_at advances
 	// only at parse_status transitions, but a long stage (DocReader on
@@ -127,7 +128,9 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	// Knowledge rows with no spans at all (lite mode, in-flight tasks
 	// from before this code shipped) fall back to the simple
 	// updated_at check — they have no heartbeat to consult.
-	// Include 'finalizing' alongside 'processing': finalizing rows still
+	// Include 'pending' so a task whose enqueue was lost is eventually
+	// recovered too; filterOutQueued below protects legitimately backlogged
+	// tasks. Include 'finalizing' alongside 'processing': finalizing rows still
 	// consume LLM compute via enrichment subtasks (summary/question/graph),
 	// and the same stall modes (subtask worker dies, retry budget exhausted
 	// without decrementing the counter) leave the row hanging just as
@@ -136,7 +139,7 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	var candidates []types.Knowledge
 	if err := h.db.WithContext(ctx).
 		Where("parse_status IN ? AND updated_at < ?",
-			[]string{types.ParseStatusProcessing, types.ParseStatusFinalizing}, cutoff).
+			[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing}, cutoff).
 		Find(&candidates).Error; err != nil {
 		logger.Warnf(ctx, "[Housekeeping] knowledge candidate query failed: %v", err)
 		return
@@ -162,7 +165,7 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 		}
 		res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
 			Where("id IN ? AND parse_status IN ?", stuckIDs,
-				[]string{types.ParseStatusProcessing, types.ParseStatusFinalizing}).
+				[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing}).
 			Updates(map[string]interface{}{
 				"parse_status":           types.ParseStatusFailed,
 				"error_message":          "task stuck in processing > " + threshold.String() + ", recovered by housekeeping",
@@ -186,8 +189,9 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	if queueSkipped > 0 {
 		// Visibility into "stale span heartbeat but tasks still queued"
 		// — i.e. backpressure, not a stuck row. Persistent counts here
-		// mean the queue is the bottleneck (raise WEKNORA_ASYNQ_CONCURRENCY
-		// or document_process_timeout), not that housekeeping misfires.
+		// mean the queue is the bottleneck (raise the matching per-pool or
+		// shared asynq concurrency, or document_process_timeout), not that
+		// housekeeping misfires.
 		logger.Infof(ctx,
 			"[Housekeeping] %d candidate(s) skipped — tasks still queued (backpressure, not stuck)",
 			queueSkipped)
@@ -265,23 +269,67 @@ func (h *HousekeepingService) filterByLastSpanActivity(ctx context.Context, cand
 	return out
 }
 
-// filterOutQueued returns the subset of candidates that have NO task left
-// in the queue backend, plus a count of how many were dropped because a
-// task still references them. A dropped candidate is "backlogged, not
-// orphaned" — its enrichment subtasks are waiting for a worker, so the
-// missing span heartbeat is expected and recovering it would be a false
-// positive. When no inspector is wired (nil) the gate is a pass-through
-// so behaviour matches the pre-existing span-only sweep. On inspector
-// error we fail safe by KEEPING the candidate as stuck (recover it),
-// matching the span heartbeat query's fail-safe direction.
+// filterOutQueued returns the subset of candidates that have NO work left
+// in either the durable pending-op table or the queue backend, plus a count
+// of how many were dropped because work still references them. A dropped
+// candidate is "backlogged, not orphaned" — its enrichment subtasks are
+// waiting for a worker, so the missing span heartbeat is expected and
+// recovering it would be a false positive.
+//
+// The asynq inspector alone cannot answer this for Wiki. Wiki ingest work is
+// durable per document in task_pending_ops (dedup_key = knowledge ID), while
+// asynq only carries a per-KB wake-up trigger whose payload has no knowledge
+// ID — and TypeWikiIngest is deliberately absent from the inspector's
+// taskTypesForKnowledgeCancel set anyway. So HasQueuedTasksForKnowledge
+// structurally reports "nothing queued" for a document whose only outstanding
+// work is a queued Wiki ingest, and the sweep force-fails a perfectly healthy
+// row. Probe the durable table directly before consulting the inspector.
+//
+// When no inspector is wired (nil) the durable gate still applies; only the
+// transient queue check is skipped. On probe error we fail safe, but in
+// opposite directions by design: an inspector error KEEPS the candidate as
+// stuck (matching the span heartbeat query), whereas a durable-table error
+// DEFERS every candidate to the next sweep — we cannot tell backlog from
+// orphan without it, and wrongly failing a live document is not recoverable
+// by the user, while waiting one more interval is.
 func (h *HousekeepingService) filterOutQueued(
 	ctx context.Context, candidates []types.Knowledge,
 ) (kept []types.Knowledge, skipped int) {
-	if h.inspector == nil || len(candidates) == 0 {
+	if len(candidates) == 0 {
 		return candidates, 0
 	}
+
+	ids := make([]string, 0, len(candidates))
+	for _, k := range candidates {
+		ids = append(ids, k.ID)
+	}
+	var durableIDs []string
+	if err := h.db.WithContext(ctx).
+		Model(&types.TaskPendingOp{}).
+		Where("task_type = ? AND scope = ? AND op = ? AND dedup_key IN ?",
+			wikiTaskType, wikiTaskScope, WikiOpIngest, ids).
+		Distinct("dedup_key").
+		Pluck("dedup_key", &durableIDs).Error; err != nil {
+		logger.Warnf(ctx,
+			"[Housekeeping] durable queue probe failed: %v (deferring %d candidate(s))",
+			err, len(candidates))
+		return candidates[:0], len(candidates)
+	}
+	durable := make(map[string]struct{}, len(durableIDs))
+	for _, id := range durableIDs {
+		durable[id] = struct{}{}
+	}
+
 	out := candidates[:0]
 	for _, k := range candidates {
+		if _, ok := durable[k.ID]; ok {
+			skipped++
+			continue
+		}
+		if h.inspector == nil {
+			out = append(out, k)
+			continue
+		}
 		queued, err := h.inspector.HasQueuedTasksForKnowledge(ctx, k.ID)
 		if err != nil {
 			logger.Warnf(ctx,

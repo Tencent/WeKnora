@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   applyBucketCountProbe,
   bucketVisible,
+  buildBucketDefinitions,
   createEmptyBucket,
   prependSessionToWebBucket,
   type BucketDefinition,
@@ -55,4 +56,34 @@ test('prependSessionToWebBucket is idempotent for existing session', () => {
   const bucket = { ...createEmptyBucket(webDef), total: 1, items: [{ id: 'a' }] }
   const next = prependSessionToWebBucket(bucket, { id: 'a', title: 'Same' })
   assert.equal(next, bucket)
+})
+
+test('buildBucketDefinitions hides channel buckets unless admin', () => {
+  const defs = buildBucketDefinitions(
+    ['feishu'],
+    { ch1: 'Embed' },
+    {
+      web: 'Chats',
+      imPlatform: (platform) => platform,
+      embedChannel: (name) => name,
+      api: 'API',
+    },
+  )
+  assert.deepEqual(defs.map((def) => def.key), ['web'])
+
+  const adminDefs = buildBucketDefinitions(
+    ['feishu'],
+    { ch1: 'Embed' },
+    {
+      web: 'Chats',
+      imPlatform: (platform) => platform,
+      embedChannel: (name) => name,
+      api: 'API',
+    },
+    { includeAdminChannelBuckets: true },
+  )
+  assert.deepEqual(
+    adminDefs.map((def) => def.key),
+    ['im:feishu', 'embed:ch1', 'api', 'web'],
+  )
 })

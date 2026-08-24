@@ -14,7 +14,7 @@
             <!-- 左侧导航 -->
             <div class="settings-sidebar">
               <div class="sidebar-header">
-                <h2 class="sidebar-title">{{ mode === 'create' ? $t('knowledgeEditor.titleCreate') : $t('knowledgeEditor.titleEdit') }}</h2>
+                <h2 class="sidebar-title">{{ editorMode === 'create' ? $t('knowledgeEditor.titleCreate') : $t('knowledgeEditor.titleEdit') }}</h2>
               </div>
               <div class="settings-nav" data-guide="kb-editor-sidebar">
                 <template v-for="group in navGroups" :key="group.key">
@@ -45,11 +45,11 @@
                       <p class="section-desc">{{ $t('knowledgeEditor.basic.description') }}</p>
                     </div>
                     <div class="section-body">
-                      <div v-if="mode === 'edit' && props.kbId" class="form-item">
+                      <div v-if="editorMode === 'edit' && activeKbId" class="form-item">
                         <label class="form-label">{{ $t('knowledgeEditor.basic.kbId') }}</label>
-                        <p class="form-tip">{{ $t('knowledgeEditor.basic.kbIdDesc') }}</p>
+                        <p class="form-tip">{{ isPostCreateSession ? $t('knowledgeEditor.postCreateHint.followUpDesc') : $t('knowledgeEditor.basic.kbIdDesc') }}</p>
                         <div class="kb-id-field">
-                          <code class="kb-id-value" :title="props.kbId">{{ props.kbId }}</code>
+                          <code class="kb-id-value" :title="activeKbId">{{ activeKbId }}</code>
                           <t-tooltip :content="$t('common.copy')" placement="top">
                             <t-button theme="default" size="small" variant="text" class="kb-id-copy"
                               @click="copyKbId">
@@ -63,7 +63,7 @@
                         <label class="form-label required">{{ $t('knowledgeEditor.basic.typeLabel') }}</label>
                         <t-radio-group
                           v-model="formData.type"
-                          :disabled="mode === 'edit'"
+                          :disabled="editorMode === 'edit'"
                           data-guide="kb-create-type"
                         >
                           <t-radio-button value="document">{{ $t('knowledgeEditor.basic.typeDocument') }}</t-radio-button>
@@ -135,6 +135,28 @@
                         <p class="form-tip granularity-hint">{{ granularityHint }}</p>
                       </div>
 
+                      <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
+                        <label class="form-label">{{ $t('knowledgeEditor.wiki.contentInstructionsLabel') }}</label>
+                        <p class="form-tip">{{ $t('knowledgeEditor.wiki.contentInstructionsTip') }}</p>
+                        <t-textarea
+                          v-model="formData.wikiConfig.contentInstructions"
+                          :placeholder="$t('knowledgeEditor.wiki.contentInstructionsPlaceholder')"
+                          :maxlength="4000"
+                          :autosize="{ minRows: 3, maxRows: 8 }"
+                        />
+                      </div>
+
+                      <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
+                        <label class="form-label">{{ $t('knowledgeEditor.wiki.extractionInstructionsLabel') }}</label>
+                        <p class="form-tip">{{ $t('knowledgeEditor.wiki.extractionInstructionsTip') }}</p>
+                        <t-textarea
+                          v-model="formData.wikiConfig.extractionInstructions"
+                          :placeholder="$t('knowledgeEditor.wiki.extractionInstructionsPlaceholder')"
+                          :maxlength="4000"
+                          :autosize="{ minRows: 3, maxRows: 8 }"
+                        />
+                      </div>
+
                       <div class="form-item" data-guide="kb-create-name">
                         <label class="form-label required">{{ $t('knowledgeEditor.basic.nameLabel') }}</label>
                         <t-input 
@@ -176,7 +198,7 @@
                 <div v-show="currentSection === 'vectorStore'" class="section">
                   <KBVectorStoreSettings
                     v-if="formData"
-                    :mode="mode"
+                    :mode="editorMode"
                     :vector-store-id="formData.vectorStoreId"
                     :bound-source="formData.vectorStoreInfo?.source"
                     :bound-name="formData.vectorStoreInfo?.name"
@@ -232,8 +254,10 @@
                 <!-- 存储引擎 -->
                 <div v-if="!isFAQ && formData && currentSection === 'storage'" class="section">
                   <KBStorageSettings
+                    :storage-backend-id="formData.storageBackendId"
                     :storage-provider="formData.storageProvider"
-                    :has-files="mode === 'edit' && hasFiles"
+                    :has-files="editorMode === 'edit' && hasFiles"
+                    @update:storage-backend-id="handleStorageBackendUpdate"
                     @update:storage-provider="handleStorageProviderUpdate"
                   />
                 </div>
@@ -287,6 +311,34 @@
                             @add-model="handleAddVLLMModel"
                             :placeholder="$t('knowledgeEditor.advanced.multimodal.vllmPlaceholder')"
                           />
+                        </div>
+                      </div>
+
+                      <div v-if="formData.multimodalConfig.enabled" class="setting-row">
+                        <div class="setting-info">
+                          <label>{{ $t('knowledgeEditor.advanced.multimodal.descriptionLanguageLabel') }}</label>
+                          <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.descriptionLanguageDescription') }}</p>
+                        </div>
+                        <div class="setting-control">
+                          <t-select v-model="formData.multimodalConfig.descriptionLanguage" clearable
+                            :placeholder="$t('knowledgeEditor.advanced.multimodal.descriptionLanguageAuto')">
+                            <t-option value="Chinese" :label="$t('language.zhCN')" />
+                            <t-option value="English" :label="$t('language.enUS')" />
+                            <t-option value="Korean" :label="$t('language.koKR')" />
+                            <t-option value="Russian" :label="$t('language.ruRU')" />
+                          </t-select>
+                        </div>
+                      </div>
+
+                      <div v-if="formData.multimodalConfig.enabled" class="setting-row setting-row-vertical">
+                        <div class="setting-info">
+                          <label>{{ $t('knowledgeEditor.advanced.multimodal.customInstructionsLabel') }}</label>
+                          <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.customInstructionsDescription') }}</p>
+                        </div>
+                        <div class="setting-control setting-control-full">
+                          <t-textarea v-model="formData.multimodalConfig.customInstructions"
+                            :placeholder="$t('knowledgeEditor.advanced.multimodal.customInstructionsPlaceholder')"
+                            :maxlength="4000" :autosize="{ minRows: 3, maxRows: 8 }" />
                         </div>
                       </div>
                     </div>
@@ -354,31 +406,49 @@
                     ref="advancedSettingsRef"
                     v-if="formData"
                     :question-generation="formData.questionGenerationConfig"
+                    :auto-tag="formData.autoTagConfig"
                     :rag-enabled="formData.indexingStrategy?.vectorEnabled || formData.indexingStrategy?.keywordEnabled"
                     :all-models="allModels"
+                    :table-metadata-instructions="formData.chunkingConfig.tableMetadataInstructions"
                     @update:question-generation="handleQuestionGenerationUpdate"
+                    @update:auto-tag="(value) => { if (formData) formData.autoTagConfig = value }"
+                    @update:table-metadata-instructions="(value: string) => { if (formData) formData.chunkingConfig.tableMetadataInstructions = value }"
                   />
                 </div>
 
                 <!-- 数据源管理（仅编辑模式） -->
-                <div v-if="mode === 'edit' && kbId && currentSection === 'datasource'" class="section">
-                  <DataSourceSettings :kb-id="kbId" @count="dsCount = $event" />
+                <div v-if="editorMode === 'edit' && activeKbId && currentSection === 'datasource'" class="section">
+                  <DataSourceSettings :kb-id="activeKbId" @count="dsCount = $event" />
                 </div>
 
                 <!-- 共享设置（仅编辑模式） -->
-                <div v-if="mode === 'edit' && kbId && currentSection === 'share'" class="section">
-                  <KBShareSettings :kb-id="kbId" :can-share="canShareKB" />
+                <div v-if="editorMode === 'edit' && activeKbId && currentSection === 'share'" class="section">
+                  <KBShareSettings :kb-id="activeKbId" :can-share="canShareKB" />
+                </div>
+
+                <!-- 活动记录（仅编辑模式，KB 所属租户内 Owner/Admin） -->
+                <div v-if="editorMode === 'edit' && activeKbId && canViewActivity && currentSection === 'activity'" class="section">
+                  <KnowledgeBaseActivitySettings :kb-id="activeKbId" :active="currentSection === 'activity'" />
                 </div>
               </div>
 
               <!-- 保存按钮 -->
               <div class="settings-footer">
-                <t-button theme="default" variant="outline" @click="handleClose">
-                  {{ $t('common.cancel') }}
-                </t-button>
-                <t-button theme="primary" data-guide="kb-create-submit" @click="handleSubmit" :loading="saving">
-                  {{ mode === 'create' ? $t('knowledgeEditor.buttons.create') : $t('knowledgeEditor.buttons.save') }}
-                </t-button>
+                <p v-if="isPostCreateSession" class="settings-footer-note">
+                  <t-icon name="check-circle-filled" class="settings-footer-note__icon" />
+                  <span>
+                    <strong>{{ $t('knowledgeEditor.postCreateHint.title') }}</strong>
+                    {{ $t('knowledgeEditor.postCreateHint.footer') }}
+                  </span>
+                </p>
+                <div class="settings-footer-actions">
+                  <t-button theme="default" variant="outline" @click="handleClose">
+                    {{ $t('common.cancel') }}
+                  </t-button>
+                  <t-button theme="primary" data-guide="kb-create-submit" @click="handleSubmit" :loading="saving">
+                    {{ saveButtonLabel }}
+                  </t-button>
+                </div>
               </div>
             </div>
           </div>
@@ -387,7 +457,7 @@
     </Transition>
   </Teleport>
 
-  <KbCreateContextualGuide :when="visible && mode === 'create'" :is-faq="isFAQ"
+  <KbCreateContextualGuide :when="visible && editorMode === 'create'" :is-faq="isFAQ"
     :needs-embedding="kbCreateNeedsEmbedding" />
 </template>
 
@@ -398,8 +468,9 @@ import { KB_EDITOR_FOCUS_SECTION_EVENT, markContextualGuideDone } from '@/config
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { createKnowledgeBase, getKnowledgeBaseById, listKnowledgeFiles, updateKnowledgeBase, rebuildKBIndex } from '@/api/knowledge-base'
 import { updateKBConfig, type KBModelConfigRequest } from '@/api/initialization'
-import { type ModelConfig } from '@/api/model'
 import { useChatResourcesStore } from '@/stores/chatResources'
+import { selectInitialModelId } from '@/utils/modelDefaults'
+import { copyWithToast } from '@/utils/clipboard'
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
@@ -413,6 +484,7 @@ import ModelSelector from '@/components/ModelSelector.vue'
 import GraphSettings from './settings/GraphSettings.vue'
 import KBShareSettings from './settings/KBShareSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
+import KnowledgeBaseActivitySettings from './settings/KnowledgeBaseActivitySettings.vue'
 import { useI18n } from 'vue-i18n'
 
 const uiStore = useUIStore()
@@ -435,28 +507,19 @@ const emit = defineEmits<{
   (e: 'success', kbId: string): void
 }>()
 
-const copyKbId = async () => {
-  const id = props.kbId
-  if (!id) return
+/** 首次保存创建成功后留在弹窗内，继续配置共享等设置 */
+const savedKbId = ref<string | null>(null)
+const editorMode = computed(() => (savedKbId.value ? 'edit' : props.mode))
+const activeKbId = computed(() => savedKbId.value ?? props.kbId)
+const isPostCreateSession = computed(() => !!savedKbId.value)
+const saveButtonLabel = computed(() =>
+  editorMode.value === 'create'
+    ? t('knowledgeEditor.buttons.create')
+    : t('knowledgeEditor.buttons.saveAndClose')
+)
 
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(id)
-    } else {
-      const textarea = document.createElement('textarea')
-      textarea.value = id
-      textarea.setAttribute('readonly', '')
-      textarea.style.position = 'fixed'
-      textarea.style.opacity = '0'
-      document.body.appendChild(textarea)
-      textarea.select()
-      document.execCommand('copy')
-      document.body.removeChild(textarea)
-    }
-    MessagePlugin.success(t('common.copied'))
-  } catch {
-    MessagePlugin.error(t('common.copyFailed'))
-  }
+const copyKbId = async () => {
+  await copyWithToast(activeKbId.value, 'common.copied')
 }
 
 const currentSection = ref<string>('basic')
@@ -488,6 +551,7 @@ const dsCount = ref(0)
 // that predate per-KB ownership tracking; those KBs have no "owner" and
 // only tenant Admin+ can mutate their share settings.
 const kbCreatorId = ref<string>('')
+const kbTenantId = ref<number>(0)
 
 // Backend gate for /knowledge-bases/:id/shares (POST/PUT/DELETE) is
 // g.OwnedKBOrAdmin(): only the KB creator or tenant Admin+ may mutate
@@ -495,10 +559,21 @@ const kbCreatorId = ref<string>('')
 // would only see 403s if we let them try. Mirror the matrix here so
 // the buttons disappear instead of failing.
 const canShareKB = computed(() => {
-  if (!props.kbId) return false
+  if (!activeKbId.value) return false
   const userId = authStore.user?.id || ''
   if (kbCreatorId.value && userId && kbCreatorId.value === userId) return true
   return authStore.hasRole('admin')
+})
+
+const isKbOwner = computed(() => {
+  const userId = authStore.user?.id || ''
+  return Boolean(kbCreatorId.value && userId && kbCreatorId.value === userId)
+})
+
+const canViewActivity = computed(() => {
+  if (editorMode.value !== 'edit' || !activeKbId.value) return false
+  if (Number(kbTenantId.value || 0) !== Number(authStore.currentTenantId || 0)) return false
+  return isKbOwner.value || authStore.hasRole('admin')
 })
 // 用户是否在分块设置中手动改过任何值。一旦为 true，就不再根据索引策略自动调整默认分块参数。
 const chunkingDirty = ref(false)
@@ -542,12 +617,15 @@ const navItems = computed(() => {
       { key: 'graph', icon: 'chart-bubble', label: t('knowledgeEditor.sidebar.graph') },
       { key: 'advanced', icon: 'setting', label: t('knowledgeEditor.sidebar.advanced') }
     )
-    if (props.mode === 'edit' && props.kbId) {
+    if (editorMode.value === 'edit' && activeKbId.value) {
       items.push({ key: 'datasource', icon: 'cloud-download', label: t('knowledgeEditor.sidebar.datasource'), badge: dsCount.value || undefined })
     }
   }
-  if (props.mode === 'edit' && props.kbId && !authStore.isLiteMode) {
+  if (editorMode.value === 'edit' && activeKbId.value && !authStore.isLiteMode) {
     items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') })
+  }
+  if (canViewActivity.value) {
+    items.push({ key: 'activity', icon: 'history', label: t('knowledgeEditor.sidebar.activity') })
   }
   return items
 })
@@ -578,6 +656,11 @@ const navGroups = computed(() => {
       label: t('knowledgeEditor.navGroups.integration'),
       items: pickItems(['share']),
     },
+    {
+      key: 'management',
+      label: t('knowledgeEditor.navGroups.management'),
+      items: pickItems(['activity']),
+    },
   ].filter((group) => group.items.length > 0)
 })
 
@@ -596,18 +679,14 @@ const kbCreateNeedsEmbedding = computed(() => {
 })
 
 const applyDefaultModelsIfEmpty = () => {
-  if (!formData.value || props.mode !== 'create') return
-  const pick = (type: ModelConfig['type']) => {
-    const list = allModels.value.filter((m) => m.type === type)
-    return list.find((m) => m.is_default) || list[0]
+  if (!formData.value || editorMode.value !== 'create') return
+  const chatModelId = selectInitialModelId(allModels.value, 'KnowledgeQA')
+  const embeddingModelId = selectInitialModelId(allModels.value, 'Embedding')
+  if (!formData.value.modelConfig.llmModelId && chatModelId) {
+    formData.value.modelConfig.llmModelId = chatModelId
   }
-  const chat = pick('KnowledgeQA')
-  const embedding = pick('Embedding')
-  if (!formData.value.modelConfig.llmModelId && chat?.id) {
-    formData.value.modelConfig.llmModelId = chat.id
-  }
-  if (!formData.value.modelConfig.embeddingModelId && embedding?.id) {
-    formData.value.modelConfig.embeddingModelId = embedding.id
+  if (!formData.value.modelConfig.embeddingModelId && embeddingModelId) {
+    formData.value.modelConfig.embeddingModelId = embeddingModelId
   }
 }
 
@@ -656,12 +735,16 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       // New KBs default to the adaptive auto-strategy. User can change in the UI.
       strategy: 'auto' as string,
       tokenLimit: 0,
-      languages: [] as string[]
+      languages: [] as string[],
+      tableMetadataInstructions: ''
     },
+    storageBackendId: '' as string,
     storageProvider: '' as string,
     multimodalConfig: {
       enabled: false,
-      vllmModelId: ''
+      vllmModelId: '',
+      descriptionLanguage: '',
+      customInstructions: ''
     },
     asrConfig: {
       enabled: false,
@@ -680,16 +763,26 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
         node1: string
         node2: string
         type: string
-      }>
+      }>,
+      customInstructions: ''
     },
     questionGenerationConfig: {
       enabled: true,
-      questionCount: 3
+      questionCount: 3,
+      customInstructions: ''
+    },
+    autoTagConfig: {
+      enabled: false,
+      modelId: '',
+      maxTags: 3,
+      skipIfTagged: true
     },
     wikiConfig: {
       synthesisModelId: '',
       maxPagesPerIngest: 0,
       extractionGranularity: 'standard' as 'focused' | 'standard' | 'exhaustive',
+      contentInstructions: '',
+      extractionInstructions: '',
     },
     indexingStrategy: {
       vectorEnabled: true,
@@ -723,14 +816,15 @@ const loadAllModels = async (force = false) => {
 }
 
 // 加载知识库数据（编辑模式）
-const loadKBData = async () => {
-  if (props.mode !== 'edit' || !props.kbId) return
+const loadKBData = async (kbIdOverride?: string) => {
+  const kbId = kbIdOverride ?? activeKbId.value
+  if (editorMode.value !== 'edit' || !kbId) return
   
   loading.value = true
   try {
     const [kbInfo, filesResult] = await Promise.all([
-      getKnowledgeBaseById(props.kbId),
-      listKnowledgeFiles(props.kbId, { page: 1, page_size: 1 })
+      getKnowledgeBaseById(kbId),
+      listKnowledgeFiles(kbId, { page: 1, page_size: 1 })
     ])
     
     if (!kbInfo || !kbInfo.data) {
@@ -740,6 +834,7 @@ const loadKBData = async () => {
     const kb = kbInfo.data
     hasFiles.value = (filesResult as any)?.total > 0
     kbCreatorId.value = (kb as any).creator_id || ''
+    kbTenantId.value = Number((kb as any).tenant_id || 0)
 
     // 设置表单数据
     const kbType = (kb.type as 'document' | 'faq') || 'document'
@@ -770,12 +865,16 @@ const loadKBData = async () => {
         // The user has to actively pick a value to opt in to the new tiers.
         strategy: kb.chunking_config?.strategy || '',
         tokenLimit: kb.chunking_config?.token_limit || 0,
-        languages: kb.chunking_config?.languages || []
+        languages: kb.chunking_config?.languages || [],
+        tableMetadataInstructions: kb.chunking_config?.table_metadata_instructions || ''
       },
+      storageBackendId: (kb.storage_backend_id || '') as string,
       storageProvider: (kb.storage_provider_config?.provider || kb.storage_config?.provider || 'local') as string,
       multimodalConfig: {
         enabled: !!kb.vlm_config?.enabled,
-        vllmModelId: kb.vlm_config?.model_id || ''
+        vllmModelId: kb.vlm_config?.model_id || '',
+        descriptionLanguage: kb.vlm_config?.description_language || '',
+        customInstructions: kb.vlm_config?.custom_instructions || ''
       },
       asrConfig: {
         enabled: !!kb.asr_config?.enabled,
@@ -790,11 +889,21 @@ const loadKBData = async () => {
           name: node.name,
           attributes: node.attributes || []
         })),
-        relations: kb.extract_config?.relations || []
+        relations: kb.extract_config?.relations || [],
+        customInstructions: kb.extract_config?.custom_instructions || ''
       },
       questionGenerationConfig: {
         enabled: kb.question_generation_config?.enabled || false,
-        questionCount: kb.question_generation_config?.question_count || 3
+        questionCount: kb.question_generation_config?.question_count || 3,
+        customInstructions: kb.question_generation_config?.custom_instructions || ''
+      },
+      autoTagConfig: {
+        enabled: kb.auto_tag_config?.enabled || false,
+        modelId: kb.auto_tag_config?.model_id || '',
+        maxTags: kb.auto_tag_config?.max_tags || 3,
+        // Absent on knowledge bases saved before the toggle existed; the
+        // backend treats that as "skip", so mirror it here.
+        skipIfTagged: kb.auto_tag_config?.skip_if_tagged ?? true
       },
       wikiConfig: {
         synthesisModelId: kb.wiki_config?.synthesis_model_id || '',
@@ -805,6 +914,8 @@ const loadKBData = async () => {
             ? kb.wiki_config.extraction_granularity
             : 'standard'
         ) as 'focused' | 'standard' | 'exhaustive',
+        contentInstructions: kb.wiki_config?.content_instructions || '',
+        extractionInstructions: kb.wiki_config?.extraction_instructions || '',
       },
       indexingStrategy: {
         vectorEnabled: kb.indexing_strategy?.vector_enabled ?? true,
@@ -877,7 +988,7 @@ const handleGranularityChange = (value: string | number | boolean) => {
   }
 }
 
-const isIndexingLocked = computed(() => props.mode === 'edit' && hasFiles.value)
+const isIndexingLocked = computed(() => editorMode.value === 'edit' && hasFiles.value)
 
 const toggleVectorIndexing = () => {
   if (!formData.value) return
@@ -911,7 +1022,7 @@ const isWikiOnlyStrategy = computed(() => {
 // 仅在创建模式、用户未改过分块设置时，随索引策略自动应用/撤销 Wiki-only 预设。
 // 编辑模式严格保持后端已有配置不变，避免误改。
 watch(isWikiOnlyStrategy, (wikiOnly) => {
-  if (props.mode !== 'create') return
+  if (editorMode.value !== 'create') return
   if (!formData.value) return
   if (chunkingDirty.value) return
   const preset = wikiOnly ? WIKI_ONLY_CHUNKING_PRESET : DEFAULT_CHUNKING_PRESET
@@ -953,22 +1064,35 @@ const handleAddWikiModel = () => {
 
 const handleStorageProviderUpdate = (value: string) => {
   if (formData.value) {
-    formData.value.storageProvider = value || tenantDefaultStorageProvider.value || 'local'
+    formData.value.storageProvider = editorMode.value === 'create'
+      ? editorResources.resolveUsableStorageProvider(value || tenantDefaultStorageProvider.value)
+      : (value || tenantDefaultStorageProvider.value || 'local')
+  }
+}
+
+const handleStorageBackendUpdate = (value: string) => {
+  if (formData.value) {
+    formData.value.storageBackendId = value
   }
 }
 
 async function loadTenantDefaultStorageProvider(force = false) {
   try {
     await editorResources.ensureStorageEngine(force)
-    tenantDefaultStorageProvider.value = editorResources.storageConfig?.default_provider || 'local'
+    tenantDefaultStorageProvider.value = editorResources.resolveUsableStorageProvider(
+      editorResources.storageConfig?.default_provider,
+    )
   } catch {
-    tenantDefaultStorageProvider.value = 'local'
+    tenantDefaultStorageProvider.value = editorResources.resolveUsableStorageProvider()
   }
 }
 
 /** Resolved storage provider for create payload (never silently default to local before tenant config loads). */
 function resolvedStorageProvider(): string {
   const explicit = formData.value?.storageProvider?.trim()
+  if (editorMode.value === 'create') {
+    return editorResources.resolveUsableStorageProvider(explicit || tenantDefaultStorageProvider.value)
+  }
   if (explicit) return explicit
   return tenantDefaultStorageProvider.value || 'local'
 }
@@ -1067,6 +1191,7 @@ const buildSubmitData = () => {
       strategy: formData.value.chunkingConfig.strategy ?? '',
       token_limit: formData.value.chunkingConfig.tokenLimit ?? 0,
       languages: formData.value.chunkingConfig.languages ?? [],
+      table_metadata_instructions: formData.value.chunkingConfig.tableMetadataInstructions || '',
       ...(formData.value.chunkingConfig.parserEngineRules?.length
         ? { parser_engine_rules: formData.value.chunkingConfig.parserEngineRules }
         : {})
@@ -1089,7 +1214,9 @@ const buildSubmitData = () => {
     enabled: formData.value.multimodalConfig.enabled,
     model_id: formData.value.multimodalConfig.enabled
       ? (formData.value.multimodalConfig.vllmModelId || '')
-      : ''
+      : '',
+    description_language: formData.value.multimodalConfig.descriptionLanguage || '',
+    custom_instructions: formData.value.multimodalConfig.customInstructions || ''
   }
 
   // 添加ASR语音识别配置
@@ -1101,8 +1228,11 @@ const buildSubmitData = () => {
     language: formData.value.asrConfig?.language || ''
   }
 
-  // 存储引擎：仅传 provider，参数从全局设置读取
-  // Write to storage_provider_config (authoritative) + storage_config (legacy dual-write)
+  // storage_backend_id is authoritative. Keep provider projection for old clients
+  // and for rolling upgrades where a node has not picked up the new schema yet.
+  if (formData.value.storageBackendId) {
+    data.storage_backend_id = formData.value.storageBackendId
+  }
   const storageProvider = resolvedStorageProvider()
   data.storage_provider_config = {
     provider: storageProvider
@@ -1118,8 +1248,22 @@ const buildSubmitData = () => {
   if (formData.value.questionGenerationConfig?.enabled) {
     data.question_generation_config = {
       enabled: true,
-      question_count: formData.value.questionGenerationConfig.questionCount || 3
+      question_count: formData.value.questionGenerationConfig.questionCount || 3,
+      custom_instructions: formData.value.questionGenerationConfig.customInstructions || ''
     }
+  } else {
+    data.question_generation_config = {
+      enabled: false,
+      question_count: 3,
+      custom_instructions: formData.value.questionGenerationConfig?.customInstructions || ''
+    }
+  }
+
+  data.auto_tag_config = {
+    enabled: formData.value.autoTagConfig?.enabled || false,
+    model_id: formData.value.autoTagConfig?.modelId || '',
+    max_tags: formData.value.autoTagConfig?.maxTags || 3,
+    skip_if_tagged: formData.value.autoTagConfig?.skipIfTagged ?? true
   }
 
   if (formData.value.type === 'faq') {
@@ -1136,6 +1280,8 @@ const buildSubmitData = () => {
       synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
       max_pages_per_ingest: formData.value.wikiConfig?.maxPagesPerIngest || 0,
       extraction_granularity: formData.value.wikiConfig?.extractionGranularity || 'standard',
+      content_instructions: formData.value.wikiConfig?.contentInstructions || '',
+      extraction_instructions: formData.value.wikiConfig?.extractionInstructions || '',
     }
   }
 
@@ -1157,7 +1303,8 @@ const buildSubmitData = () => {
       text: formData.value.nodeExtractConfig.text || '',
       tags: formData.value.nodeExtractConfig.tags || [],
       nodes: formData.value.nodeExtractConfig.nodes || [],
-      relations: formData.value.nodeExtractConfig.relations || []
+      relations: formData.value.nodeExtractConfig.relations || [],
+      custom_instructions: formData.value.nodeExtractConfig.customInstructions || ''
     }
   }
 
@@ -1172,7 +1319,7 @@ const handleSubmit = async () => {
 
   // 编辑模式下，若已有文件且存储引擎发生了变化，弹窗确认
   if (
-    props.mode === 'edit' &&
+    editorMode.value === 'edit' &&
     hasFiles.value &&
     formData.value &&
     initialStorageProvider.value &&
@@ -1205,18 +1352,23 @@ const doSubmit = async () => {
       throw new Error(t('knowledgeEditor.messages.buildDataFailed'))
     }
 
-    if (props.mode === 'create') {
+    if (editorMode.value === 'create') {
       // 创建模式：一次性创建知识库及所有配置
       const result: any = await createKnowledgeBase(data)
       if (!result.success || !result.data?.id) {
         throw new Error(result.message || t('knowledgeEditor.messages.createFailed'))
       }
+      const createdKbId = result.data.id as string
+      savedKbId.value = createdKbId
+      currentSection.value = 'basic'
+      await loadKBData(createdKbId)
       MessagePlugin.success(t('knowledgeEditor.messages.createSuccess'))
       markContextualGuideDone('kbCreate')
-      emit('success', result.data.id)
+      emit('success', createdKbId)
     } else {
       // 编辑模式：分别更新基本信息和配置
-      if (!props.kbId) {
+      const kbId = activeKbId.value
+      if (!kbId) {
         throw new Error(t('knowledgeEditor.messages.missingId'))
       }
 
@@ -1233,9 +1385,12 @@ const doSubmit = async () => {
           synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
           max_pages_per_ingest: formData.value.wikiConfig.maxPagesPerIngest || 0,
           extraction_granularity: formData.value.wikiConfig.extractionGranularity || 'standard',
+          content_instructions: formData.value.wikiConfig.contentInstructions || '',
+          extraction_instructions: formData.value.wikiConfig.extractionInstructions || '',
         }
       }
       if (formData.value.type !== 'faq') {
+        updateConfig.auto_tag_config = data.auto_tag_config
         updateConfig.indexing_strategy = {
           vector_enabled: formData.value.indexingStrategy?.vectorEnabled ?? true,
           keyword_enabled: formData.value.indexingStrategy?.keywordEnabled ?? true,
@@ -1243,7 +1398,7 @@ const doSubmit = async () => {
           graph_enabled: formData.value.indexingStrategy?.graphEnabled ?? false,
         }
       }
-      await updateKnowledgeBase(props.kbId, {
+      await updateKnowledgeBase(kbId, {
         name: data.name,
         description: data.description,
         config: updateConfig
@@ -1268,26 +1423,30 @@ const doSubmit = async () => {
           // payload to let users reset back to defaults.
           strategy: formData.value?.chunkingConfig.strategy ?? '',
           tokenLimit: formData.value?.chunkingConfig.tokenLimit ?? 0,
-          languages: formData.value?.chunkingConfig.languages ?? []
+          languages: formData.value?.chunkingConfig.languages ?? [],
+          tableMetadataInstructions: formData.value?.chunkingConfig.tableMetadataInstructions ?? ''
         },
         multimodal: {
           enabled: !!data.vlm_config?.enabled
         },
+        storageBackendId: formData.value?.storageBackendId || '',
         storageProvider: data.storage_provider_config?.provider || data.storage_config?.provider || 'local',
         nodeExtract: {
           enabled: data.extract_config?.enabled || false,
           text: data.extract_config?.text || '',
           tags: data.extract_config?.tags || [],
           nodes: data.extract_config?.nodes || [],
-          relations: data.extract_config?.relations || []
+          relations: data.extract_config?.relations || [],
+          customInstructions: data.extract_config?.custom_instructions || ''
         },
         questionGeneration: {
           enabled: data.question_generation_config?.enabled || false,
-          questionCount: data.question_generation_config?.question_count || 3
+          questionCount: data.question_generation_config?.question_count || 3,
+          customInstructions: data.question_generation_config?.custom_instructions || ''
         }
       }
 
-      await updateKBConfig(props.kbId, config)
+      await updateKBConfig(kbId, config)
       MessagePlugin.success(t('knowledgeEditor.messages.updateSuccess'))
 
       // Check if indexing strategy changed and offer rebuild
@@ -1309,7 +1468,7 @@ const doSubmit = async () => {
             onConfirm: async () => {
               dialog.destroy()
               try {
-                const result: any = await rebuildKBIndex(props.kbId!)
+                const result: any = await rebuildKBIndex(kbId)
                 const count = result?.data?.document_count ?? 0
                 MessagePlugin.success(t('knowledgeEditor.indexing.rebuildSuccess', { count }))
               } catch (e) {
@@ -1324,10 +1483,9 @@ const doSubmit = async () => {
         }
       }
 
-      emit('success', props.kbId)
+      emit('success', kbId)
+      handleClose()
     }
-    
-    handleClose()
   } catch (error: any) {
     console.error('Knowledge base operation failed:', error)
     // Vector-store-binding error codes from the server. Both indicate
@@ -1354,6 +1512,7 @@ const doSubmit = async () => {
 
 // 重置所有状态
 const resetState = () => {
+  savedKbId.value = null
   currentSection.value = 'basic'
   formData.value = null
   hasFiles.value = false
@@ -1364,6 +1523,7 @@ const resetState = () => {
   loading.value = false
   chunkingDirty.value = false
   kbCreatorId.value = ''
+  kbTenantId.value = 0
 }
 
 // 关闭弹窗
@@ -1385,14 +1545,14 @@ watch(() => props.visible, async (newVal) => {
       currentSection.value = uiStore.kbEditorInitialSection
     }
     
-    // 加载模型列表与租户默认存储引擎（创建 KB 时即使用，不依赖是否打开「存储引擎」Tab）
+    // 加载模型列表与空间默认存储引擎（创建 KB 时即使用，不依赖是否打开「存储引擎」Tab）
     await Promise.all([loadAllModels(), loadTenantDefaultStorageProvider()])
     
     // 根据模式加载数据
     if (props.mode === 'edit' && props.kbId) {
       await loadKBData()
     } else {
-      // 创建模式：初始化空表单，并预填租户默认存储引擎
+      // 创建模式：初始化空表单，并预填空间默认存储引擎
       formData.value = initFormData(props.initialType || 'document')
       formData.value.storageProvider = tenantDefaultStorageProvider.value
       hasFiles.value = false
@@ -1798,10 +1958,43 @@ watch(
 }
 
 .settings-footer {
-  padding: 16px 32px;
+  padding: 12px 40px;
   border-top: 1px solid var(--td-component-stroke);
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.settings-footer-note {
+  margin: 0;
+  margin-right: auto;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--td-text-color-secondary);
+
+  strong {
+    margin-right: 4px;
+    color: var(--td-text-color-primary);
+    font-weight: 500;
+  }
+
+  &__icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+    font-size: 14px;
+    color: var(--td-success-color);
+  }
+}
+
+.settings-footer-actions {
+  display: flex;
   gap: 12px;
   flex-shrink: 0;
 }
@@ -1896,4 +2089,3 @@ watch(
   }
 }
 </style>
-

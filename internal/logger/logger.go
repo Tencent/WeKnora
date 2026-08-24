@@ -15,6 +15,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/trace"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -502,40 +503,28 @@ func Fatalf(c context.Context, format string, args ...interface{}) {
 }
 
 // CloneContext 复制上下文中的关键信息到新上下文
+//
+// Which keys survive is decided by types.contextCloneAcrossDetach, which lives
+// next to where context keys are declared so that adding a key and deciding
+// its fate are the same edit. Keeping that decision here instead meant every
+// new key silently defaulted to being dropped.
 func CloneContext(ctx context.Context) context.Context {
 	newCtx := context.Background()
 
-	for _, k := range []types.ContextKey{
-		types.LoggerContextKey,
-		types.TenantIDContextKey,
-		types.RequestIDContextKey,
-		types.TenantInfoContextKey,
-		types.UserIDContextKey,
-		types.UserContextKey,
-		types.PrincipalContextKey,
-		types.TenantAPIKeyScopeContextKey,
-		// TenantRoleContextKey: the caller's resolved role in the
-		// active tenant (PR 2 #1303). Must be propagated for the same
-		// reason as TenantIDContextKey — any handler that does
-		// `ctx := logger.CloneContext(c.Request.Context())` and then
-		// reads role via TenantRoleFromContext would otherwise see the
-		// type-zero TenantRole and fall back
-		// to Viewer, blocking even Owners.
-		types.TenantRoleContextKey,
-		types.SystemAdminContextKey,
-		types.LanguageContextKey,
-		types.SessionTenantIDContextKey,
-		types.EmbedQueryContextKey,
-		types.EmbedVisitorContextKey,
-		// Keep the Langfuse trace alive across CloneContext boundaries so
-		// LLM/Embedder/Reranker/VLM/ASR wrappers attach their generations
-		// to the same trace opened by GinMiddleware, instead of each call
-		// auto-creating its own orphan trace.
-		types.LangfuseTraceContextKey,
-	} {
+	for _, k := range types.ContextKeysClonedAcrossDetach() {
 		if v := ctx.Value(k); v != nil {
 			newCtx = context.WithValue(newCtx, k, v)
 		}
+	}
+
+	// Preserve the active OpenTelemetry span across the rebuild. The Langfuse
+	// *Trace handle above carries the trace id, but span PARENTING flows through
+	// the OTel span context (trace.SpanFromContext), which CloneContext would
+	// otherwise drop — orphaning child spans opened after a CloneContext (e.g.
+	// the agent engine's agent.execute becoming a separate trace from the HTTP
+	// root). Re-inject the recording span so children stitch to the same trace.
+	if sp := trace.SpanFromContext(ctx); sp.IsRecording() {
+		newCtx = trace.ContextWithSpan(newCtx, sp)
 	}
 
 	return newCtx

@@ -11,14 +11,18 @@ import (
 type Platform string
 
 const (
-	PlatformWeCom      Platform = "wecom"
-	PlatformFeishu     Platform = "feishu"
+	PlatformWeCom  Platform = "wecom"
+	PlatformFeishu Platform = "feishu"
+	// PlatformLark is Feishu's international edition (open.larksuite.com).
+	// It shares the Feishu adapter; only the API host and tenant differ.
+	PlatformLark       Platform = "lark"
 	PlatformSlack      Platform = "slack"
 	PlatformTelegram   Platform = "telegram"
 	PlatformDingtalk   Platform = "dingtalk"
 	PlatformMattermost Platform = "mattermost"
 	PlatformWeChat     Platform = "wechat"
 	PlatformQQBot      Platform = "qqbot"
+	PlatformYunzhijia  Platform = "yunzhijia"
 )
 
 // SessionMode determines how IM sessions are resolved.
@@ -67,7 +71,7 @@ type IncomingMessage struct {
 	// ThreadID is the platform-specific thread identifier.
 	// - Slack: thread_ts (top-level message uses its own timestamp)
 	// - Mattermost: root_id, or post_id if top-level
-	// - Feishu: root_id, or message_id if top-level
+	// - Feishu/Lark: root_id, or message_id if top-level
 	// - Telegram: message_thread_id (Forum Topics only)
 	// Empty for platforms without thread support (WeCom, DingTalk).
 	// In thread mode, top-level messages use their own ID as ThreadID,
@@ -159,9 +163,9 @@ type StreamSender interface {
 }
 
 // FileDownloader is an optional interface that adapters can implement to support
-// downloading file attachments from the IM platform. When the adapter implements
-// this interface and the IM channel has a knowledge_base_id configured, file
-// messages will be downloaded and saved to the specified knowledge base.
+// downloading file attachments from the IM platform. It allows file/image
+// messages to be supplied to QA as attachments; when a knowledge_base_id is
+// configured, the same capability also enables asynchronous knowledge-base save.
 type FileDownloader interface {
 	// DownloadFile downloads a file resource from the IM platform.
 	// Returns the file content reader, the resolved file name, and any error.

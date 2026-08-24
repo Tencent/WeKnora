@@ -168,6 +168,11 @@ func MergeParserEngineConfigForUpdate(incoming, existing *ParserEngineConfig) *P
 	}
 	out.MinerUAPIKey = PreserveIfRedacted(out.MinerUAPIKey, prev.MinerUAPIKey)
 	out.PaddleOCRVLCloudToken = PreserveIfRedacted(out.PaddleOCRVLCloudToken, prev.PaddleOCRVLCloudToken)
+	// Chat attachment parser rules are configured per agent; preserve any legacy
+	// tenant-level rules when the settings UI omits this field on engine updates.
+	if incoming.ChatParserEngineRules == nil && existing != nil {
+		out.ChatParserEngineRules = existing.ChatParserEngineRules
+	}
 	return &out
 }
 
@@ -214,8 +219,16 @@ func MergeStorageEngineConfigForUpdate(incoming, existing *StorageEngineConfig) 
 		if existing != nil && existing.S3 != nil {
 			prev = *existing.S3
 		}
-		s3.AccessKey = PreserveIfRedacted(s3.AccessKey, prev.AccessKey)
-		s3.SecretKey = PreserveIfRedacted(s3.SecretKey, prev.SecretKey)
+		// Empty S3 credentials intentionally switch authentication to the AWS
+		// default credential chain. Only the response placeholder means "keep
+		// the stored value"; treating empty as preserve makes it impossible to
+		// migrate an existing static AK/SK configuration to IAM roles.
+		if s3.AccessKey == RedactedSecretPlaceholder {
+			s3.AccessKey = prev.AccessKey
+		}
+		if s3.SecretKey == RedactedSecretPlaceholder {
+			s3.SecretKey = prev.SecretKey
+		}
 		out.S3 = &s3
 	}
 	if out.OSS != nil {
@@ -248,5 +261,90 @@ func MergeStorageEngineConfigForUpdate(incoming, existing *StorageEngineConfig) 
 		obs.SecretKey = PreserveIfRedacted(obs.SecretKey, prev.SecretKey)
 		out.OBS = &obs
 	}
+	return &out
+}
+
+// SandboxConfigForResponse returns a copy of cfg safe to serialize into an API
+// response. When maskSecrets is true every secret-bearing field is replaced
+// with RedactedSecretPlaceholder. Unset secrets stay empty so the UI can tell
+// "configured" apart from "not configured".
+func SandboxConfigForResponse(cfg *TenantSandboxConfig, maskSecrets bool) *TenantSandboxConfig {
+	if cfg == nil {
+		return nil
+	}
+	out := *cfg
+	if !maskSecrets {
+		return &out
+	}
+	if out.Cube != nil {
+		cube := *out.Cube
+		if cube.APIKey != "" {
+			cube.APIKey = RedactedSecretPlaceholder
+		}
+		out.Cube = &cube
+	}
+	if out.E2B != nil {
+		e2b := *out.E2B
+		if e2b.APIKey != "" {
+			e2b.APIKey = RedactedSecretPlaceholder
+		}
+		out.E2B = &e2b
+	}
+	// EnvVars values are encrypted at rest and may hold credentials, so they
+	// are masked as a class rather than by name.
+	if len(out.EnvVars) > 0 {
+		envVars := make(map[string]string, len(out.EnvVars))
+		for name, value := range out.EnvVars {
+			if value != "" {
+				value = RedactedSecretPlaceholder
+			}
+			envVars[name] = value
+		}
+		out.EnvVars = envVars
+	}
+	return &out
+}
+
+// MergeSandboxConfigForUpdate resolves redacted placeholders in incoming
+// against the currently stored config, so a client that never received the
+// real secret can submit the rest of the form without wiping it.
+func MergeSandboxConfigForUpdate(incoming, existing *TenantSandboxConfig) *TenantSandboxConfig {
+	if incoming == nil {
+		return nil
+	}
+	out := *incoming
+
+	if out.Cube != nil {
+		cube := *out.Cube
+		var prev CubeSandboxConfig
+		if existing != nil && existing.Cube != nil {
+			prev = *existing.Cube
+		}
+		cube.APIKey = PreserveIfRedacted(cube.APIKey, prev.APIKey)
+		out.Cube = &cube
+	}
+	if out.E2B != nil {
+		e2b := *out.E2B
+		var prev E2BSandboxConfig
+		if existing != nil && existing.E2B != nil {
+			prev = *existing.E2B
+		}
+		e2b.APIKey = PreserveIfRedacted(e2b.APIKey, prev.APIKey)
+		out.E2B = &e2b
+	}
+	// Only keys present in incoming survive: deleting a row in the UI must
+	// actually remove the variable rather than silently restore it.
+	if len(out.EnvVars) > 0 {
+		envVars := make(map[string]string, len(out.EnvVars))
+		for name, value := range out.EnvVars {
+			prev := ""
+			if existing != nil {
+				prev = existing.EnvVars[name]
+			}
+			envVars[name] = PreserveIfRedacted(value, prev)
+		}
+		out.EnvVars = envVars
+	}
+
 	return &out
 }

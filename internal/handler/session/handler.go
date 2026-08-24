@@ -4,6 +4,7 @@ import (
 	stderrors "errors"
 	"net/http"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -16,7 +17,8 @@ import (
 
 // Handler handles all HTTP requests related to conversation sessions
 type Handler struct {
-	messageService       interfaces.MessageService       // Service for managing messages
+	messageService       interfaces.MessageService // Service for managing messages
+	suggestionService    interfaces.MessageSuggestionService
 	sessionService       interfaces.SessionService       // Service for managing sessions
 	streamManager        interfaces.StreamManager        // Manager for handling streaming responses
 	config               *config.Config                  // Application configuration
@@ -26,15 +28,22 @@ type Handler struct {
 	agentShareService    interfaces.AgentShareService    // Service for resolving shared agents (KB scope in retrieval)
 	kbShareService       interfaces.KBShareService       // Service for resolving shared KB permissions
 	fileService          interfaces.FileService          // Service for file storage (image uploads)
-	modelService         interfaces.ModelService         // Service for model management (VLM access)
-	userService          interfaces.UserService          // Service for resolving per-user preferences (e.g. enable_memory default)
-	attachmentProcessor  *AttachmentProcessor            // Processor for file attachments
+	storageResolver      interfaces.StorageBackendResolver
+	modelService         interfaces.ModelService // Service for model management (VLM access)
+	attachmentProcessor  *AttachmentProcessor    // Processor for file attachments
+	temporaryDocuments   interfaces.TemporaryDocumentService
+	// artifactCollector drains skill-generated files from the session sandbox
+	// after an agent turn completes. May be nil when the sandbox backend does
+	// not support artifact collection; handlers must check before using.
+	artifactCollector *service.ArtifactCollector
+	memoryService     interfaces.MemoryService // Service for cross-session long-term memory
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
 func NewHandler(
 	sessionService interfaces.SessionService,
 	messageService interfaces.MessageService,
+	suggestionService interfaces.MessageSuggestionService,
 	streamManager interfaces.StreamManager,
 	config *config.Config,
 	knowledgebaseService interfaces.KnowledgeBaseService,
@@ -43,14 +52,18 @@ func NewHandler(
 	agentShareService interfaces.AgentShareService,
 	kbShareService interfaces.KBShareService,
 	fileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
 	modelService interfaces.ModelService,
-	userService interfaces.UserService,
 	documentReader interfaces.DocumentReader,
 	imageResolver *docparser.ImageResolver,
+	temporaryDocuments interfaces.TemporaryDocumentService,
+	artifactCollector *service.ArtifactCollector,
+	memoryService interfaces.MemoryService,
 ) *Handler {
 	return &Handler{
 		sessionService:       sessionService,
 		messageService:       messageService,
+		suggestionService:    suggestionService,
 		streamManager:        streamManager,
 		config:               config,
 		knowledgebaseService: knowledgebaseService,
@@ -59,8 +72,11 @@ func NewHandler(
 		agentShareService:    agentShareService,
 		kbShareService:       kbShareService,
 		fileService:          fileService,
+		storageResolver:      storageResolver,
 		modelService:         modelService,
-		userService:          userService,
+		temporaryDocuments:   temporaryDocuments,
+		artifactCollector:    artifactCollector,
+		memoryService:        memoryService,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,
@@ -188,14 +204,14 @@ func (h *Handler) GetSession(c *gin.Context) {
 
 // GetSessionsByTenant godoc
 // @Summary      获取会话列表
-// @Description  获取当前租户的会话列表，支持分页、关键字搜索、按来源/Agent 筛选
+// @Description  获取当前空间的会话列表，支持分页、关键字搜索、按来源/Agent 筛选
 // @Tags         会话
 // @Accept       json
 // @Produce      json
 // @Param        page       query     int     false  "页码"
 // @Param        page_size  query     int     false  "每页数量"
 // @Param        keyword    query     string  false  "标题模糊搜索"
-// @Param        source     query     string  false  "来源过滤：web / feishu / wechat / slack / ..."
+// @Param        source     query     string  false  "来源过滤：web / embed / api / feishu / wechat / slack / ...（api、embed、IM 渠道需 Admin+）"
 // @Param        agent_id   query     string  false  "按 Agent 过滤（仅对 IM 会话生效）"
 // @Success      200        {object}  map[string]interface{}  "会话列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
@@ -402,7 +418,7 @@ type batchDeleteRequest struct {
 
 // BatchDeleteSessions godoc
 // @Summary      批量删除会话
-// @Description  根据ID列表批量删除对话会话，或设置 delete_all=true 删除当前租户的所有会话
+// @Description  根据ID列表批量删除对话会话，或设置 delete_all=true 删除当前空间的所有会话
 // @Tags         会话
 // @Accept       json
 // @Produce      json

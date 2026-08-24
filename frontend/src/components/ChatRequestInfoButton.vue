@@ -48,12 +48,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { MessagePlugin } from 'tdesign-vue-next';
 import {
   buildChatRequestDebugPayload,
   type ChatRequestDebugInfo,
 } from '@/utils/chatRequestDebug';
-import { copyTextToClipboard } from '@/utils/chatMessageShared';
+import { copyWithToast } from '@/utils/clipboard';
 
 const props = defineProps<{
   session: Record<string, unknown>;
@@ -97,13 +96,8 @@ const rows = computed(() => {
 });
 
 const copyAll = async () => {
-  try {
-    await copyTextToClipboard(buildChatRequestDebugPayload(debugInfo.value));
-    MessagePlugin.success(t('common.copied'));
-    visible.value = false;
-  } catch {
-    MessagePlugin.error(t('common.copyFailed'));
-  }
+  const ok = await copyWithToast(buildChatRequestDebugPayload(debugInfo.value), 'common.copied');
+  if (ok) visible.value = false;
 };
 </script>
 

@@ -194,6 +194,7 @@ func buildStreamResponse(evt interfaces.StreamEvent, requestID string) *types.St
 		Content:      evt.Content,
 		Done:         evt.Done,
 		Data:         evt.Data,
+		Usage:        evt.Usage,
 	}
 
 	// Extract session_id and assistant_message_id for agent_query events
@@ -221,25 +222,7 @@ func buildStreamResponse(evt interfaces.StreamEvent, requestID string) *types.St
 			searchResults := make([]*types.SearchResult, 0, len(refs))
 			for _, ref := range refs {
 				if refMap, ok := ref.(map[string]interface{}); ok {
-					sr := &types.SearchResult{
-						ID:                   getString(refMap, "id"),
-						Content:              getString(refMap, "content"),
-						KnowledgeID:          getString(refMap, "knowledge_id"),
-						ChunkIndex:           int(getFloat64(refMap, "chunk_index")),
-						KnowledgeTitle:       getString(refMap, "knowledge_title"),
-						StartAt:              int(getFloat64(refMap, "start_at")),
-						EndAt:                int(getFloat64(refMap, "end_at")),
-						Seq:                  int(getFloat64(refMap, "seq")),
-						Score:                getFloat64(refMap, "score"),
-						ChunkType:            getString(refMap, "chunk_type"),
-						ParentChunkID:        getString(refMap, "parent_chunk_id"),
-						ImageInfo:            getString(refMap, "image_info"),
-						KnowledgeFilename:    getString(refMap, "knowledge_filename"),
-						KnowledgeSource:      getString(refMap, "knowledge_source"),
-						KnowledgeDescription: getString(refMap, "knowledge_description"),
-						KnowledgeBaseID:      getString(refMap, "knowledge_base_id"),
-					}
-					searchResults = append(searchResults, sr)
+					searchResults = append(searchResults, searchResultFromMap(refMap))
 				}
 			}
 			response.KnowledgeReferences = types.References(searchResults)
@@ -277,18 +260,19 @@ func createAgentQueryEvent(sessionID, assistantMessageID string) interfaces.Stre
 }
 
 // createUserMessage creates a user message and returns the created message.
-func (h *Handler) createUserMessage(ctx context.Context, sessionID, query, requestID string, mentionedItems types.MentionedItems, images types.MessageImages, attachments types.MessageAttachments, channel string) (*types.Message, error) {
+func (h *Handler) createUserMessage(ctx context.Context, sessionID, query, requestID string, mentionedItems types.MentionedItems, images types.MessageImages, attachments types.MessageAttachments, channel string, attribution *types.SuggestionAttribution) (*types.Message, error) {
 	return h.messageService.CreateMessage(ctx, &types.Message{
-		SessionID:      sessionID,
-		Role:           "user",
-		Content:        query,
-		RequestID:      requestID,
-		CreatedAt:      time.Now(),
-		IsCompleted:    true,
-		MentionedItems: mentionedItems,
-		Images:         images,
-		Attachments:    attachments,
-		Channel:        channel,
+		SessionID:        sessionID,
+		Role:             "user",
+		Content:          query,
+		RequestID:        requestID,
+		CreatedAt:        time.Now(),
+		IsCompleted:      true,
+		MentionedItems:   mentionedItems,
+		Images:           images,
+		Attachments:      attachments,
+		Channel:          channel,
+		ExecutionContext: types.MessageExecutionContext{SuggestionAttribution: attribution},
 	})
 }
 
@@ -302,13 +286,14 @@ func (h *Handler) createAssistantMessage(ctx context.Context, assistantMessage *
 func (h *Handler) setupStreamHandler(
 	ctx context.Context,
 	sessionID, assistantMessageID, requestID string,
+	tenantID uint64,
 	receivedAt time.Time,
 	assistantMessage *types.Message,
 	eventBus *event.EventBus,
 ) *AgentStreamHandler {
 	streamHandler := NewAgentStreamHandler(
-		ctx, sessionID, assistantMessageID, requestID, receivedAt,
-		assistantMessage, h.streamManager, eventBus,
+		ctx, sessionID, assistantMessageID, requestID, tenantID, receivedAt,
+		assistantMessage, h.streamManager, eventBus, h.artifactCollector,
 	)
 	streamHandler.Subscribe()
 	return streamHandler
@@ -332,7 +317,7 @@ func (h *Handler) setupStopEventHandler(
 			context.WithoutCancel(ctx),
 			types.TenantIDContextKey, sessionTenantID,
 		)
-		h.completeAssistantMessage(updateCtx, assistantMessage, "") // empty query: stopped conversations are not indexed
+		h.completeAssistantMessage(updateCtx, assistantMessage, "", "") // empty query: stopped conversations are not indexed
 		return nil
 	})
 }
@@ -447,6 +432,39 @@ func getFloat64(m map[string]interface{}, key string) float64 {
 		return float64(val)
 	}
 	return 0.0
+}
+
+// searchResultFromMap rebuilds a *types.SearchResult from a map that went
+// through JSON/Redis serialization, preserving all fields including metadata.
+func searchResultFromMap(refMap map[string]interface{}) *types.SearchResult {
+	sr := &types.SearchResult{
+		ID:                   getString(refMap, "id"),
+		Content:              getString(refMap, "content"),
+		KnowledgeID:          getString(refMap, "knowledge_id"),
+		ChunkIndex:           int(getFloat64(refMap, "chunk_index")),
+		KnowledgeTitle:       getString(refMap, "knowledge_title"),
+		StartAt:              int(getFloat64(refMap, "start_at")),
+		EndAt:                int(getFloat64(refMap, "end_at")),
+		Seq:                  int(getFloat64(refMap, "seq")),
+		Score:                getFloat64(refMap, "score"),
+		ChunkType:            getString(refMap, "chunk_type"),
+		ParentChunkID:        getString(refMap, "parent_chunk_id"),
+		ImageInfo:            getString(refMap, "image_info"),
+		KnowledgeFilename:    getString(refMap, "knowledge_filename"),
+		KnowledgeSource:      getString(refMap, "knowledge_source"),
+		KnowledgeDescription: getString(refMap, "knowledge_description"),
+		KnowledgeBaseID:      getString(refMap, "knowledge_base_id"),
+	}
+	if meta, ok := refMap["metadata"].(map[string]interface{}); ok {
+		metadata := make(map[string]string)
+		for k, v := range meta {
+			if strVal, ok := v.(string); ok {
+				metadata[k] = strVal
+			}
+		}
+		sr.Metadata = metadata
+	}
+	return sr
 }
 
 // createDefaultSummaryConfig and fillSummaryConfigDefaults used to build

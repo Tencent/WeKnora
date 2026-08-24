@@ -37,48 +37,77 @@
       <span class="submenu_title-text">{{ item.title }}</span>
     </span>
     <div v-if="!batchMode" class="session-row-menu-wrap" @click.stop>
-      <button
-        ref="triggerRef"
-        type="button"
-        class="menu-more-wrap"
-        aria-haspopup="menu"
-        :aria-expanded="menuOpen"
-        @click="toggleMenu"
+      <t-popup
+        v-model:visible="menuOpen"
+        :overlay-class-name="menuOverlayClass"
+        trigger="click"
+        destroy-on-close
+        placement="bottom-right"
+        @visible-change="onMenuVisibleChange"
       >
-        <t-icon name="ellipsis" class="menu-more" />
-      </button>
-      <Teleport to="body">
-        <div
-          v-if="menuOpen"
-          class="session-row-menu"
-          role="menu"
-          :style="menuStyle"
+        <button
+          type="button"
+          class="menu-more-wrap"
+          aria-haspopup="menu"
+          :aria-expanded="menuOpen"
           @click.stop
         >
-          <button
-            v-for="option in menuOptions"
-            :key="option.value"
-            type="button"
-            class="session-row-menu__item"
-            :class="{ 'session-row-menu__item--error': option.theme === 'error' }"
-            role="menuitem"
-            @click="handleMenuClick(option)"
-          >
-            <component
-              :is="option.prefixIcon"
-              v-if="option.prefixIcon"
-              class="session-row-menu__icon"
-            />
-            <span class="session-row-menu__text">{{ option.content }}</span>
-          </button>
-        </div>
-      </Teleport>
+          <t-icon name="ellipsis" class="menu-more" />
+        </button>
+        <template #content>
+          <div class="session-action-menu" @click.stop>
+            <template v-if="menuMode === 'menu'">
+              <template v-for="(option, index) in menuOptions" :key="option.value">
+                <div
+                  v-if="shouldShowDividerBefore(option.value, index)"
+                  class="session-action-menu__divider"
+                />
+                <button
+                  type="button"
+                  class="session-action-menu__item"
+                  :class="{ 'is-danger': option.theme === 'error' }"
+                  @click="handleMenuClick(option)"
+                >
+                  <component
+                    :is="option.prefixIcon"
+                    v-if="option.prefixIcon"
+                    class="session-action-menu__icon"
+                  />
+                  <span>{{ option.content }}</span>
+                </button>
+              </template>
+            </template>
+
+            <div v-else class="session-action-confirm">
+              <div class="session-action-confirm__title">
+                {{ menuMode === 'clear' ? t('chatHeader.clearConfirmTitle') : t('chatHeader.deleteConfirmTitle') }}
+              </div>
+              <div class="session-action-confirm__body">
+                {{ menuMode === 'clear' ? t('chatHeader.clearConfirmBody') : t('chatHeader.deleteConfirmBody') }}
+              </div>
+              <div class="session-action-confirm__footer">
+                <button type="button" class="session-action-confirm__btn" @click="backToMenu">
+                  {{ t('common.cancel') }}
+                </button>
+                <button
+                  type="button"
+                  class="session-action-confirm__btn is-danger"
+                  @click="confirmDangerAction"
+                >
+                  {{ menuMode === 'clear' ? t('common.clear') : t('common.delete') }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
+      </t-popup>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, nextTick, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { normalizeSessionTitleDraft, SESSION_TITLE_MAX_LENGTH } from './sessionTitleEdit'
 
 interface SessionMenuOption {
@@ -87,6 +116,8 @@ interface SessionMenuOption {
   theme?: 'default' | 'success' | 'warning' | 'error' | 'primary'
   prefixIcon?: any
 }
+
+type MenuMode = 'menu' | 'clear' | 'delete'
 
 const props = defineProps<{
   item: { id: string; path: string; title: string; is_pinned?: boolean }
@@ -107,59 +138,36 @@ const emit = defineEmits<{
   (e: 'hover-out'): void
 }>()
 
-const MENU_WIDTH = 132
-const MENU_GAP = 4
-const VIEWPORT_MARGIN = 8
+const { t } = useI18n()
 
 const menuOpen = ref(false)
+const menuMode = ref<MenuMode>('menu')
 const titleEditing = ref(false)
 const titleDraft = ref('')
-const triggerRef = ref<HTMLButtonElement | null>(null)
 const titleInputRef = ref<HTMLInputElement | null>(null)
-const menuStyle = ref<Record<string, string>>({})
 
-const updateMenuPosition = (): void => {
-  const trigger = triggerRef.value
-  if (!trigger) return
-  const rect = trigger.getBoundingClientRect()
-  const left = Math.max(
-    VIEWPORT_MARGIN,
-    Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - VIEWPORT_MARGIN),
-  )
-  menuStyle.value = {
-    top: `${rect.bottom + MENU_GAP}px`,
-    left: `${left}px`,
-  }
+const menuOverlayClass = computed(() => (
+  menuMode.value === 'menu'
+    ? 'session-action-menu-popup'
+    : 'session-action-menu-popup is-confirm'
+))
+
+const onMenuVisibleChange = (visible: boolean): void => {
+  if (!visible) menuMode.value = 'menu'
 }
 
-const removeListeners = (): void => {
-  document.removeEventListener('click', closeMenu)
-  window.removeEventListener('resize', closeMenu)
-  window.removeEventListener('scroll', closeMenu, true)
+const backToMenu = (): void => {
+  menuMode.value = 'menu'
 }
 
-const closeMenu = (): void => {
-  menuOpen.value = false
-  removeListeners()
-}
-
-const toggleMenu = (): void => {
-  if (menuOpen.value) {
-    closeMenu()
-    return
-  }
-  updateMenuPosition()
-  menuOpen.value = true
-  nextTick(() => {
-    document.addEventListener('click', closeMenu)
-    window.addEventListener('resize', closeMenu)
-    // 捕获阶段监听任意滚动容器，滚动时关闭以避免菜单与触发点错位
-    window.addEventListener('scroll', closeMenu, true)
-  })
+const shouldShowDividerBefore = (value: string, index: number): boolean => {
+  if (index === 0) return false
+  return value === 'clearMessages' || value === 'delete'
 }
 
 const startTitleEdit = (): void => {
-  closeMenu()
+  menuOpen.value = false
+  menuMode.value = 'menu'
   titleDraft.value = props.item.title || ''
   titleEditing.value = true
   nextTick(() => {
@@ -174,6 +182,7 @@ const cancelTitleEdit = (): void => {
 }
 
 const submitTitleEdit = (): void => {
+  // Enter 会先触发 form submit，随后 input blur 再进一次；必须同步退出编辑态防重入。
   if (!titleEditing.value) return
   const nextTitle = normalizeSessionTitleDraft(titleDraft.value)
   const currentTitle = normalizeSessionTitleDraft(props.item.title || '')
@@ -188,13 +197,25 @@ const handleMenuClick = (option: SessionMenuOption): void => {
     startTitleEdit()
     return
   }
-  closeMenu()
+  if (option.value === 'clearMessages') {
+    menuMode.value = 'clear'
+    return
+  }
+  if (option.value === 'delete') {
+    menuMode.value = 'delete'
+    return
+  }
+  menuOpen.value = false
+  menuMode.value = 'menu'
   emit('menu-click', { value: option.value })
 }
 
-onBeforeUnmount(() => {
-  removeListeners()
-})
+const confirmDangerAction = (): void => {
+  const value = menuMode.value === 'clear' ? 'clearMessages' : 'delete'
+  menuOpen.value = false
+  menuMode.value = 'menu'
+  emit('menu-click', { value })
+}
 </script>
 
 <style scoped lang="less">
@@ -234,57 +255,163 @@ onBeforeUnmount(() => {
   height: 24px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 5px;
   color: inherit;
   background: transparent;
   cursor: pointer;
-}
-
-.session-row-menu {
-  position: fixed;
-  z-index: 3000;
-  min-width: 132px;
-  padding: 4px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
-  background: var(--td-bg-color-container);
-  box-shadow: var(--td-shadow-2);
-}
-
-.session-row-menu__item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 32px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 4px;
-  color: var(--td-text-color-primary);
-  background: transparent;
-  font-size: 14px;
-  line-height: 20px;
-  text-align: left;
-  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
 
   &:hover {
     background: var(--td-bg-color-container-hover);
   }
 }
+</style>
 
-.session-row-menu__item--error {
-  color: var(--td-error-color);
+<style lang="less">
+.session-action-menu-popup {
+  z-index: 3000 !important;
+
+  .t-popup__content {
+    padding: 4px !important;
+    margin-top: 2px !important;
+    min-width: 160px !important;
+    width: max-content !important;
+    border-radius: 8px !important;
+    background: var(--td-bg-color-container) !important;
+    border: 0.5px solid var(--td-component-stroke) !important;
+    box-shadow:
+      0 0 0 0.5px rgba(0, 0, 0, 0.03),
+      0 2px 6px rgba(0, 0, 0, 0.08) !important;
+    overflow: hidden;
+  }
+
+  &.is-confirm .t-popup__content {
+    padding: 12px !important;
+    width: 260px !important;
+    min-width: 260px !important;
+  }
 }
 
-.session-row-menu__icon {
+.session-action-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 152px;
+}
+
+.session-action-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--td-text-color-primary);
+  background: transparent;
+  font-size: 14px;
+  line-height: 20px;
+  text-align: left;
+  white-space: nowrap;
+  box-sizing: border-box;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+  }
+
+  &.is-danger {
+    color: var(--td-error-color-6);
+
+    .session-action-menu__icon {
+      color: var(--td-error-color-6);
+    }
+
+    &:hover {
+      background: var(--td-error-color-1);
+    }
+  }
+}
+
+.session-action-menu__icon {
   flex: 0 0 auto;
   display: inline-flex;
+  color: var(--td-text-color-secondary);
+
+  .t-icon {
+    font-size: 16px;
+  }
 }
 
-.session-row-menu__text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.session-action-menu__divider {
+  height: 1px;
+  margin: 2px 6px;
+  background: var(--td-component-stroke);
+}
+
+.session-action-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 236px;
+}
+
+.session-action-confirm__title {
+  margin: 0;
+  color: var(--td-text-color-primary);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.session-action-confirm__body {
+  color: var(--td-text-color-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.session-action-confirm__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.session-action-confirm__btn {
+  min-width: 60px;
+  height: 30px;
+  padding: 0 12px;
+  border: 0.5px solid var(--td-component-stroke);
+  border-radius: 6px;
+  color: var(--td-text-color-primary);
+  background: var(--td-bg-color-container);
+  font-size: 14px;
+  line-height: 28px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background: var(--td-bg-color-container-hover);
+  }
+
+  &.is-danger {
+    border-color: transparent;
+    color: #fff;
+    background: var(--td-error-color-6);
+
+    &:hover:not(:disabled) {
+      background: var(--td-error-color-5);
+    }
+  }
+}
+
+:root[theme-mode='dark'] .session-action-menu-popup .t-popup__content {
+  background: rgba(36, 36, 36, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow:
+    0 0 0 0.5px rgba(255, 255, 255, 0.05),
+    0 2px 6px rgba(0, 0, 0, 0.2) !important;
 }
 </style>

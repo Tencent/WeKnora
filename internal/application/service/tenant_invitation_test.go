@@ -232,6 +232,22 @@ func TestInvitationService_Create_RejectsInvalidRole(t *testing.T) {
 	}
 }
 
+func TestInvitationService_Create_APIKeyCannotInviteOwner(t *testing.T) {
+	svc, repo, _ := newInvitationSvc()
+	ctx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
+		KeyID:        1,
+		Capabilities: types.StringArray{string(types.APIKeyCapabilityManageMembers)},
+	})
+
+	_, err := svc.Create(ctx, 1, "u-bob", types.TenantRoleOwner, nil, "")
+	if !errors.Is(err, ErrAPIKeyCannotAssignOwner) {
+		t.Fatalf("want ErrAPIKeyCannotAssignOwner, got %v", err)
+	}
+	if len(repo.rows) != 0 {
+		t.Fatalf("API key owner invitation must not be persisted, got %d rows", len(repo.rows))
+	}
+}
+
 func TestInvitationService_Create_RejectsAlreadyActiveMember(t *testing.T) {
 	svc, _, memberSvc := newInvitationSvc()
 	ctx := context.Background()
@@ -461,6 +477,22 @@ func TestInvitationService_CreateShareLink_RejectsInvalidRole(t *testing.T) {
 	}
 }
 
+func TestInvitationService_CreateShareLink_APIKeyCannotAssignOwner(t *testing.T) {
+	svc, repo, _ := newInvitationSvc()
+	ctx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
+		KeyID:        1,
+		Capabilities: types.StringArray{string(types.APIKeyCapabilityManageMembers)},
+	})
+
+	_, _, err := svc.CreateShareLink(ctx, 1, types.TenantRoleOwner, nil, "")
+	if !errors.Is(err, ErrAPIKeyCannotAssignOwner) {
+		t.Fatalf("want ErrAPIKeyCannotAssignOwner, got %v", err)
+	}
+	if len(repo.rows) != 0 {
+		t.Fatalf("API key owner invite link must not be persisted, got %d rows", len(repo.rows))
+	}
+}
+
 func TestInvitationService_LookupByToken_RejectsUnknownToken(t *testing.T) {
 	svc, _, _ := newInvitationSvc()
 	if _, err := svc.LookupByToken(context.Background(), "nonexistent"); !errors.Is(err, ErrInvitationTokenInvalid) {
@@ -550,5 +582,35 @@ func TestInvitationService_AcceptByToken_RequiresUserID(t *testing.T) {
 	}
 	if _, err := svc.AcceptByToken(ctx, plain, ""); err == nil {
 		t.Fatalf("empty user id must be rejected")
+	}
+}
+
+func TestInvitationService_MarkPendingAcceptedIfExists_NoPending(t *testing.T) {
+	svc, _, _ := newInvitationSvc()
+	ctx := context.Background()
+	if err := svc.MarkPendingAcceptedIfExists(ctx, 1, "u-alice"); err != nil {
+		t.Fatalf("MarkPendingAcceptedIfExists: %v", err)
+	}
+}
+
+func TestInvitationService_MarkPendingAcceptedIfExists_FlipsPendingRow(t *testing.T) {
+	svc, invRepo, _ := newInvitationSvc()
+	ctx := context.Background()
+	inv, err := svc.Create(ctx, 1, "u-alice", types.TenantRoleViewer, nil, "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if inv.Status != types.TenantInvitationStatusPending {
+		t.Fatalf("want pending, got %s", inv.Status)
+	}
+	if err := svc.MarkPendingAcceptedIfExists(ctx, 1, "u-alice"); err != nil {
+		t.Fatalf("MarkPendingAcceptedIfExists: %v", err)
+	}
+	got, err := invRepo.GetByID(ctx, inv.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Status != types.TenantInvitationStatusAccepted {
+		t.Fatalf("want accepted, got %s", got.Status)
 	}
 }

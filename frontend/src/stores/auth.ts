@@ -12,7 +12,7 @@ import { useChatResourcesStore } from '@/stores/chatResources'
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useOrganizationStore } from '@/stores/organization'
 
-/** 登出时丢弃 Pinia 内的租户级资源缓存，避免 SPA 重登复用上一账号数据。 */
+/** 登出时丢弃 Pinia 内的空间级资源缓存，避免 SPA 重登复用上一账号数据。 */
 function clearSessionResourceCaches() {
   useChatResourcesStore().invalidate()
   useEditorResourcesStore().invalidate()
@@ -52,6 +52,14 @@ export const useAuthStore = defineStore('auth', () => {
   // (vs SSE) is fine — the count is checked rarely and a 1-2 minute
   // staleness window is acceptable for an inbox indicator.
   const pendingInvitationCount = ref<number>(0)
+  // Authoritative deployment capability returned by /auth/me. Defaults to
+  // false (fail-closed): we hide the "create workspace" affordance until
+  // /auth/me confirms the deployment allows it, so an invitation-only
+  // deployment never briefly flashes a create action the backend would
+  // then reject with 403/2005.
+  const canCreateTenant = ref(false)
+
+  const autoAcceptInvitation = ref(false)
 
   // 计算属性
   const isLoggedIn = computed(() => {
@@ -173,7 +181,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   const effectiveTenantId = computed(() => {
-    // 如果选择了其他租户，使用选择的租户ID，否则使用用户默认租户ID
+    // 如果选择了其他空间，使用选择的空间ID，否则使用用户默认空间ID
     return selectedTenantId.value || (tenant.value?.id ? Number(tenant.value.id) : null)
   })
 
@@ -186,23 +194,16 @@ export const useAuthStore = defineStore('auth', () => {
     if (previousId !== userData.id) {
       reloadUserPreferences()
     }
-    // 把后端持久化的 user 偏好（记忆开关等）同步到 settings store。
-    // 用 import 而不是顶部 import 避免 stores 间的循环依赖：auth ↔ settings。
-    // settings store 只把它当作"本地状态 + localStorage"更新，不会再原路 PUT 回去。
-    if (userData.preferences) {
-      import('@/stores/settings').then(({ useSettingsStore }) => {
-        useSettingsStore().hydrateFromUserPreferences(userData.preferences)
-      }).catch(() => {
-        // 加载 settings store 失败不影响 setUser 主流程；下次 setUser
-        // 触发时还会再次尝试同步。
-      })
-    }
   }
 
-  const setTenant = (tenantData: TenantInfo) => {
+  const setTenant = (tenantData: TenantInfo | null) => {
     tenant.value = tenantData
-    // 保存到localStorage
-    localStorage.setItem('weknora_tenant', JSON.stringify(tenantData))
+    if (tenantData) {
+      localStorage.setItem('weknora_tenant', JSON.stringify(tenantData))
+    } else {
+      localStorage.removeItem('weknora_tenant')
+      setSelectedTenant(null, null)
+    }
   }
 
   const setToken = (tokenValue: string) => {
@@ -303,6 +304,14 @@ export const useAuthStore = defineStore('auth', () => {
     pendingInvitationCount.value = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0
   }
 
+  const setCanCreateTenant = (allowed: boolean) => {
+    canCreateTenant.value = allowed
+  }
+
+  const setAutoAcceptInvitation = (enabled: boolean) => {
+    autoAcceptInvitation.value = enabled
+  }
+
   // fetchPendingInvitationCount hits the dedicated /me/invitations/
   // pending-count endpoint and updates the store. Errors are
   // swallowed — the badge degrades to its last-known value instead
@@ -351,6 +360,8 @@ export const useAuthStore = defineStore('auth', () => {
           created_at: tenantSnapshot.created_at || new Date().toISOString(),
           updated_at: tenantSnapshot.updated_at || new Date().toISOString(),
         })
+      } else {
+        setTenant(null)
       }
 
       const list = response.data?.memberships
@@ -358,9 +369,38 @@ export const useAuthStore = defineStore('auth', () => {
         setMemberships(list)
       }
 
+      const createCapability = response.data?.capabilities?.can_create_tenant
+      if (typeof createCapability === 'boolean') {
+        setCanCreateTenant(createCapability)
+      }
+
+      setAutoAcceptInvitation(response.data?.capabilities?.auto_accept_invitation === true)
+
       return true
     } catch {
       return false
+    }
+  }
+
+  // 用 token 加入空间并刷新成员关系、切到新空间。token 无效时返回 ok:false（不抛异常），
+  // 提示与跳转交给调用方（store 不碰 router）。
+  const acceptInvitationByTokenAndRefresh = async (
+    token: string,
+  ): Promise<{ ok: boolean; tenantId?: number; tenantName?: string }> => {
+    try {
+      const { acceptInvitationByToken } = await import('@/api/tenant/invitations')
+      const resp = await acceptInvitationByToken(token)
+      if (!resp.success || !resp.data?.membership) {
+        return { ok: false }
+      }
+      const tenantId = resp.data.membership.tenant_id
+      const tenantName = resp.data.tenant_name
+      // 刷新成员关系，并切到刚加入的空间。
+      await refreshFromAuthMe()
+      setSelectedTenant(tenantId, tenantName ?? null)
+      return { ok: true, tenantId, tenantName }
+    } catch {
+      return { ok: false }
     }
   }
 
@@ -390,6 +430,8 @@ export const useAuthStore = defineStore('auth', () => {
     allTenants.value = []
     memberships.value = []
     pendingInvitationCount.value = 0
+    canCreateTenant.value = false
+    autoAcceptInvitation.value = false
     clearSessionResourceCaches()
 
     // 清空localStorage
@@ -512,6 +554,8 @@ export const useAuthStore = defineStore('auth', () => {
     allTenants,
     memberships,
     pendingInvitationCount,
+    canCreateTenant,
+    autoAcceptInvitation,
 
     // 计算属性
     isLoggedIn,
@@ -537,8 +581,11 @@ export const useAuthStore = defineStore('auth', () => {
     setAllTenants,
     setMemberships,
     setPendingInvitationCount,
+    setCanCreateTenant,
+    setAutoAcceptInvitation,
     fetchPendingInvitationCount,
     refreshFromAuthMe,
+    acceptInvitationByTokenAndRefresh,
     getSelectedTenant,
     setLiteMode,
     logout,

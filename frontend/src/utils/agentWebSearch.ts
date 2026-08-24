@@ -26,12 +26,14 @@ export function isAgentWebSearchEnabled(config: AgentWebSearchConfig | undefined
 export function isAgentWebSearchReady(
   config: AgentWebSearchConfig | undefined,
   providers: WebSearchProviderEntity[],
+  sourceWorkspaceReady?: boolean,
 ): boolean {
   if (!isAgentWebSearchEnabled(config)) return false;
+  if (sourceWorkspaceReady !== undefined) return sourceWorkspaceReady;
   return resolveAgentWebSearchProviderId(config, providers) !== null;
 }
 
-/** 租户级默认搜索引擎是否可用（无智能体约束时） */
+/** 空间级默认搜索引擎是否可用（无智能体约束时） */
 export function isTenantWebSearchReady(providers: WebSearchProviderEntity[]): boolean {
   return providers.some((p) => p.is_default);
 }

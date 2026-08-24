@@ -42,6 +42,11 @@ type Tenant struct {
 	StorageQuota int64 `yaml:"storage_quota"     json:"storage_quota"     gorm:"default:10737418240"`
 	// Storage used (Bytes)
 	StorageUsed int64 `yaml:"storage_used"      json:"storage_used"      gorm:"default:0"`
+	// APIKey is only populated by CreateTenant when the server has
+	// tenant.auto_create_api_key (env WEKNORA_TENANT_AUTO_CREATE_API_KEY)
+	// enabled: it carries the plaintext token of an auto-created full_access
+	// key. Empty otherwise. Save it on receipt — it is never returned again.
+	APIKey string `yaml:"api_key,omitempty" json:"api_key,omitempty"`
 	// Creation timestamp
 	CreatedAt time.Time `yaml:"created_at"        json:"created_at"`
 	// Last update timestamp
@@ -75,22 +80,36 @@ const (
 type TenantAPIKey struct {
 	ID               uint64           `json:"id"`
 	TenantID         uint64           `json:"tenant_id"`
+	ScopeType        string           `json:"scope_type"`
 	Name             string           `json:"name"`
 	APIKey           string           `json:"api_key"`
 	Role             TenantAPIKeyRole `json:"role"`
+	FullAccess       bool             `json:"full_access"`
 	KnowledgeBaseIDs []string         `json:"knowledge_base_ids"`
-	LastUsedAt       *time.Time          `json:"last_used_at,omitempty"`
-	ExpiresAt        *time.Time          `json:"expires_at,omitempty"`
-	CreatedAt        time.Time           `json:"created_at"`
-	UpdatedAt        time.Time           `json:"updated_at"`
+	Capabilities     []string         `json:"capabilities"`
+	LastUsedAt       *time.Time       `json:"last_used_at,omitempty"`
+	ExpiresAt        *time.Time       `json:"expires_at,omitempty"`
+	CreatedAt        time.Time        `json:"created_at"`
+	UpdatedAt        time.Time        `json:"updated_at"`
 }
 
 // CreateTenantAPIKeyRequest creates a revocable tenant API key.
 type CreateTenantAPIKeyRequest struct {
 	Name             string           `json:"name"`
 	Role             TenantAPIKeyRole `json:"role,omitempty"`
+	FullAccess       bool             `json:"full_access,omitempty"`
 	KnowledgeBaseIDs []string         `json:"knowledge_base_ids,omitempty"`
+	Capabilities     []string         `json:"capabilities,omitempty"`
 	ExpiresAtUnix    *int64           `json:"expires_at_unix,omitempty"`
+}
+
+// UpdateTenantAPIKeyRequest replaces an existing tenant API key's configurable attributes.
+type UpdateTenantAPIKeyRequest struct {
+	Name             string   `json:"name"`
+	FullAccess       bool     `json:"full_access"`
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
+	Capabilities     []string `json:"capabilities"`
+	ExpiresAtUnix    *int64   `json:"expires_at_unix"`
 }
 
 // CreatedTenantAPIKey includes the created API key. Token is kept for
@@ -265,6 +284,25 @@ func (c *Client) CreateTenantAPIKey(
 	}
 
 	var response tenantAPIKeyCreateResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+	return &response.Data, nil
+}
+
+// UpdateTenantAPIKey replaces an existing tenant API key's configuration.
+func (c *Client) UpdateTenantAPIKey(
+	ctx context.Context, tenantID uint64, keyID uint64, req *UpdateTenantAPIKeyRequest,
+) (*TenantAPIKey, error) {
+	path := fmt.Sprintf("/api/v1/tenants/%d/api-keys/%d", tenantID, keyID)
+	resp, err := c.doRequest(ctx, http.MethodPut, path, req, nil)
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		Success bool         `json:"success"`
+		Data    TenantAPIKey `json:"data"`
+	}
 	if err := parseResponse(resp, &response); err != nil {
 		return nil, err
 	}

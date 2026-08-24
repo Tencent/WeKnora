@@ -3,15 +3,51 @@
  */
 
 import DOMPurify from 'dompurify';
-import type { Config } from 'dompurify';
+import type { Config, NodeHook } from 'dompurify';
 import {
   domPurifySecurityHooks,
   domPurifySecurityOptions,
   markdownDomPurifyConfig,
+  markdownDomPurifySecurityHooks,
 } from './markdownDomPurify.ts';
+import {
+  buildProtectedFileRequest,
+  isProtectedFileProxyPath,
+  isProviderFileURL,
+  PROVIDER_SCHEME_PATTERN,
+  resolveProtectedFileAccess,
+  type ProtectedFileAccessContext,
+} from './protectedFileAccess.ts';
 
 const PROVIDER_IMAGE_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
-const PROVIDER_FILE_SCHEME_RE = /^(local|minio|cos|tos|s3|oss|ks3|obs):\/\/\S+$/i;
+const PROVIDER_IMG_SRC_RE = new RegExp(
+  `<img\\b([^>]*?)\\ssrc=(["'])(${PROVIDER_SCHEME_PATTERN}):(?:\\/\\/|&#x2f;&#x2f;|&#47;&#47;)([^"']+)\\2([^>]*)>`,
+  'gi',
+);
+const STORAGE_BACKEND_IMG_SRC_RE = new RegExp(
+  `<img\\b([^>]*?)\\ssrc=(["'])storage:\\/\\/([0-9A-Za-z_-]+)\\/(${PROVIDER_SCHEME_PATTERN}):(?:\\/\\/|&#x2f;&#x2f;|&#47;&#47;)([^"']+)\\2([^>]*)>`,
+  'gi',
+);
+
+type SecurityHooks = {
+  beforeSanitizeElements: NodeHook;
+  afterSanitizeElements: NodeHook;
+};
+
+function sanitizeWithSecurityHooks(
+  html: string,
+  config: Config,
+  hooks: SecurityHooks,
+): string {
+  DOMPurify.addHook('beforeSanitizeElements', hooks.beforeSanitizeElements);
+  DOMPurify.addHook('afterSanitizeElements', hooks.afterSanitizeElements);
+  try {
+    return DOMPurify.sanitize(html, config);
+  } finally {
+    DOMPurify.removeHook('afterSanitizeElements', hooks.afterSanitizeElements);
+    DOMPurify.removeHook('beforeSanitizeElements', hooks.beforeSanitizeElements);
+  }
+}
 
 // 配置 DOMPurify 的安全策略
 const DOMPurifyConfig = {
@@ -54,7 +90,6 @@ const DOMPurifyConfig = {
   ],
   USE_PROFILES: { html: true, svg: true, mathMl: true },
   ...domPurifySecurityOptions,
-  HOOKS: domPurifySecurityHooks,
 };
 
 /**
@@ -69,7 +104,11 @@ export function sanitizeHTML(html: string): string {
   
   try {
     const preparedHTML = protectProviderImageSrcInHTML(html);
-    return DOMPurify.sanitize(preparedHTML, DOMPurifyConfig as unknown as Config);
+    return sanitizeWithSecurityHooks(
+      preparedHTML,
+      DOMPurifyConfig as unknown as Config,
+      domPurifySecurityHooks,
+    );
   } catch (error) {
     console.error('HTML sanitization failed:', error);
     // 如果清理失败，返回转义的纯文本
@@ -85,37 +124,61 @@ export function sanitizeMarkdownHTML(html: string): string {
 
   try {
     const preparedHTML = protectProviderImageSrcInHTML(html);
-    return DOMPurify.sanitize(preparedHTML, markdownDomPurifyConfig as unknown as Config);
+    return sanitizeWithSecurityHooks(
+      preparedHTML,
+      markdownDomPurifyConfig as unknown as Config,
+      markdownDomPurifySecurityHooks,
+    );
   } catch (error) {
     console.error('Markdown HTML sanitization failed:', error);
     return escapeHTML(html);
   }
 }
 
+function buildProtectedImageTag(
+  before: string,
+  quote: string,
+  protectedSrc: string,
+  after: string,
+): string {
+  // A definitive 404 should not leave a skeleton behind. Streaming
+  // re-renders call this function repeatedly, so remember the missing
+  // source until the explicit end-of-stream retry clears the cache.
+  if (protectedFileMissingSources.has(protectedSrc)) {
+    return '';
+  }
+  // Reuse the already-hydrated blob if we have one, so repeated re-renders
+  // (typewriter streaming) keep the same stable image instead of flashing
+  // back to the placeholder every frame.
+  const cachedBlobURL = protectedFileBlobBySource.get(protectedSrc);
+  if (cachedBlobURL) {
+    return `<img${before} src=${quote}${cachedBlobURL}${quote} data-protected-src=${quote}${protectedSrc}${quote}${after}>`;
+  }
+  // Not hydrated yet: render the 1x1 placeholder but tag it so CSS can give
+  // it a stable skeleton box. Otherwise width:auto/height:auto collapse the
+  // 1x1 gif to a ~1px line that violently jumps to full size once loaded.
+  return `<img${before} src=${quote}${PROVIDER_IMAGE_PLACEHOLDER}${quote} data-protected-src=${quote}${protectedSrc}${quote} data-img-loading=${quote}1${quote}${after}>`;
+}
+
 export function protectProviderImageSrcInHTML(html: string): string {
   if (!html) return html;
-  return html.replace(
-    /<img\b([^>]*?)\ssrc=(["'])(local|minio|cos|tos|s3|oss|ks3|obs):(?:\/\/|&#x2f;&#x2f;|&#47;&#47;)([^"']+)\2([^>]*)>/gi,
+  const withProviderImages = html.replace(
+    PROVIDER_IMG_SRC_RE,
     (_m, before, quote, provider, restPathRaw, after) => {
       const restPath = decodeProviderURL(restPathRaw);
-      const protectedSrc = `${provider}://${restPath}`;
-      // A definitive 404 should not leave a skeleton behind. Streaming
-      // re-renders call this function repeatedly, so remember the missing
-      // source until the explicit end-of-stream retry clears the cache.
-      if (protectedFileMissingSources.has(protectedSrc)) {
-        return '';
-      }
-      // Reuse the already-hydrated blob if we have one, so repeated re-renders
-      // (typewriter streaming) keep the same stable image instead of flashing
-      // back to the placeholder every frame.
-      const cachedBlobURL = protectedFileBlobBySource.get(protectedSrc);
-      if (cachedBlobURL) {
-        return `<img${before} src=${quote}${cachedBlobURL}${quote} data-protected-src=${quote}${protectedSrc}${quote}${after}>`;
-      }
-      // Not hydrated yet: render the 1x1 placeholder but tag it so CSS can give
-      // it a stable skeleton box. Otherwise width:auto/height:auto collapse the
-      // 1x1 gif to a ~1px line that violently jumps to full size once loaded.
-      return `<img${before} src=${quote}${PROVIDER_IMAGE_PLACEHOLDER}${quote} data-protected-src=${quote}${protectedSrc}${quote} data-img-loading=${quote}1${quote}${after}>`;
+      return buildProtectedImageTag(before, quote, `${provider}://${restPath}`, after);
+    },
+  );
+  return withProviderImages.replace(
+    STORAGE_BACKEND_IMG_SRC_RE,
+    (_m, before, quote, backendID, provider, restPathRaw, after) => {
+      const restPath = decodeProviderURL(restPathRaw);
+      return buildProtectedImageTag(
+        before,
+        quote,
+        `storage://${backendID}/${provider}://${restPath}`,
+        after,
+      );
     },
   );
 }
@@ -129,10 +192,6 @@ function decodeProviderURL(raw: string): string {
     .replace(/&quot;/g, '"');
 }
 
-function isProviderFileURL(url: string): boolean {
-  return PROVIDER_FILE_SCHEME_RE.test(url.trim());
-}
-
 function providerSourceFromImageSrc(src: string): string | null {
   const decodedSrc = decodeProviderURL(src);
   if (isProviderFileURL(decodedSrc)) {
@@ -142,10 +201,7 @@ function providerSourceFromImageSrc(src: string): string | null {
   try {
     const baseURL = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
     const url = new URL(decodedSrc, baseURL);
-    const isFileProxy =
-      url.pathname === '/files' ||
-      /^\/api\/v1\/embed\/[^/]+\/files$/.test(url.pathname);
-    if (!isFileProxy) {
+    if (!isProtectedFileProxyPath(url.pathname)) {
       return null;
     }
 
@@ -354,30 +410,6 @@ const protectedFileFailureCache = protectedFileCacheState.failures;
 const protectedFileInflight = protectedFileCacheState.inflight;
 const PROTECTED_FILE_RETRY_COOLDOWN_MS = 5000;
 
-function getProtectedFileRequestHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
-  try {
-    const token = (localStorage.getItem('weknora_token') || '').trim();
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    const selectedTenantId = (localStorage.getItem('weknora_selected_tenant_id') || '').trim();
-    if (selectedTenantId) {
-      // Always attach when a selected tenant is set. Same rationale as
-      // utils/request.ts / api/chat/streame.ts: the
-      // "selectedTenantId === defaultTenantId → skip" short-circuit
-      // silently drops the header whenever any code path writes the
-      // active tenant into weknora_tenant, leaving authenticated file
-      // fetches landing on the home tenant.
-      headers['X-Tenant-ID'] = selectedTenantId;
-    }
-  } catch {
-    // ignore localStorage read errors
-  }
-  return headers;
-}
-
 /**
  * 将 Markdown 里通过 /files 代理的图片，改为用带鉴权 Header 的 fetch 拉取后再显示。
  * 用于避免在 URL 中暴露 token。
@@ -427,26 +459,30 @@ function applyHydratedProtectedImage(root: ParentNode, sourceURL: string, blobUR
   });
 }
 
+/**
+ * 将内容里的受保护图片（resource:// 等）通过对应的文件代理带鉴权拉取，
+ * 再以 blob URL 替换显示。
+ *
+ * 走哪条代理由 {@link resolveProtectedFileAccess} 决定：应用入口注册的默认
+ * 上下文（如嵌入应用的 Embed 平面）优先，组件只在同一鉴权平面内用
+ * `access` 细化作用域（如知识库）。
+ */
 export async function hydrateProtectedFileImages(
   root: ParentNode | null | undefined,
-  embed?: { channelId: string; token: string },
+  access?: ProtectedFileAccessContext,
 ): Promise<void> {
   if (!root || typeof window === 'undefined') {
     return;
   }
 
   const images = root.querySelectorAll<HTMLImageElement>(
-    'img[data-protected-src], img[src^="local://"], img[src^="minio://"], img[src^="cos://"], img[src^="tos://"], img[src^="s3://"], img[src^="oss://"], img[src^="ks3://"], img[src^="obs://"]',
+    'img[data-protected-src], img[src^="resource://"], img[src^="storage://"], img[src^="local://"], img[src^="minio://"], img[src^="cos://"], img[src^="tos://"], img[src^="s3://"], img[src^="oss://"], img[src^="ks3://"], img[src^="obs://"]',
   );
   if (!images.length) {
     return;
   }
 
-  // Embed visitors carry no Bearer/tenant context; route through the
-  // embed-scoped file proxy (auth via the Embed header, tenant from the channel).
-  const headers = embed
-    ? { Authorization: `Embed ${embed.token}` }
-    : getProtectedFileRequestHeaders();
+  const resolvedAccess = resolveProtectedFileAccess(access);
 
   await Promise.all(Array.from(images).map(async (img) => {
     const normalizedSourceURL = normalizeProtectedImageElement(img);
@@ -465,22 +501,15 @@ export async function hydrateProtectedFileImages(
     }
     img.dataset.authHydrated = '1';
 
-    const isProviderScheme = isProviderFileURL(sourceURL);
-    const fileProxyBase = embed
-      ? `/api/v1/embed/${embed.channelId}/files`
-      : '/files';
-    const requestURL = isProviderScheme
-      ? `${fileProxyBase}?${new URLSearchParams({ file_path: sourceURL }).toString()}`
-      : sourceURL;
-
-    const isProxyRequest =
-      requestURL.includes('file_path=') &&
-      (requestURL.startsWith('/files?') ||
-        /^\/api\/v1\/embed\/[^/]+\/files\?/.test(requestURL));
-    if (!isProxyRequest) {
+    // A null request means this source cannot be fetched under the current
+    // access context (not a storage path, or the embed token has not arrived
+    // yet). Leave the placeholder so a later pass can retry.
+    const request = buildProtectedFileRequest(sourceURL, resolvedAccess);
+    if (!request) {
       img.dataset.authHydrated = '0';
       return;
     }
+    const { url: requestURL, headers } = request;
 
     const cachedBlobURL = protectedFileBlobCache.get(requestURL);
     if (cachedBlobURL) {

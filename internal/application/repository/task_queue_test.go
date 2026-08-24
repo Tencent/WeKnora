@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -50,6 +51,26 @@ CREATE TABLE IF NOT EXISTS task_dead_letters (
 );
 `
 
+const taskQueueKnowledgeBaseTestDDL = `
+CREATE TABLE IF NOT EXISTS knowledge_bases (
+    id         VARCHAR(64) PRIMARY KEY,
+    tenant_id  INTEGER NOT NULL,
+    deleted_at DATETIME
+);
+`
+
+const taskQueueKnowledgeTestDDL = `
+CREATE TABLE IF NOT EXISTS knowledges (
+    id                     VARCHAR(64) PRIMARY KEY,
+    tenant_id              INTEGER NOT NULL,
+    knowledge_base_id      VARCHAR(64) NOT NULL,
+    parse_status           VARCHAR(32) NOT NULL,
+    pending_subtasks_count INTEGER NOT NULL DEFAULT 0,
+    updated_at             DATETIME,
+    deleted_at             DATETIME
+);
+`
+
 func setupTaskQueueTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -69,6 +90,100 @@ func makePendingOp(taskType, scope, scopeID, op, dedup string, payload []byte) *
 		DedupKey: dedup,
 		Payload:  payload,
 	}
+}
+
+func setupFinalizingPendingOpTest(t *testing.T) (*gorm.DB, interfaces.TaskPendingOpsFinalizingSeeder) {
+	t.Helper()
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	seeder, ok := repo.(interfaces.TaskPendingOpsFinalizingSeeder)
+	require.True(t, ok, "task pending repository must support atomic finalizing handoff")
+	require.NoError(t, db.Exec(taskQueueKnowledgeBaseTestDDL).Error)
+	require.NoError(t, db.Exec(taskQueueKnowledgeTestDDL).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledge_bases (id, tenant_id) VALUES ('kb-1', 1)`,
+	).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledges (id, tenant_id, knowledge_base_id, parse_status) VALUES ('knowledge-1', 1, 'kb-1', ?)`,
+		types.ParseStatusProcessing,
+	).Error)
+	return db, seeder
+}
+
+func TestTaskPendingOps_SeedKnowledgeFinalizingWithPendingOpCommitsTogether(t *testing.T) {
+	db, seeder := setupFinalizingPendingOpTest(t)
+	op := makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1", "ingest", "knowledge-1", []byte(`{}`))
+
+	promoted, err := seeder.SeedKnowledgeFinalizingWithPendingOp(
+		context.Background(), "knowledge-1", 3, op,
+	)
+
+	require.NoError(t, err)
+	require.True(t, promoted)
+	var knowledge types.Knowledge
+	require.NoError(t, db.Select("parse_status", "pending_subtasks_count").First(&knowledge, "id = ?", "knowledge-1").Error)
+	assert.Equal(t, types.ParseStatusFinalizing, knowledge.ParseStatus)
+	assert.Equal(t, 3, knowledge.PendingSubtasksCount)
+	var count int64
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Where("dedup_key = ?", "knowledge-1").Count(&count).Error)
+	assert.Equal(t, int64(1), count)
+}
+
+func TestTaskPendingOps_SeedKnowledgeFinalizingRollsBackWhenPendingOpInsertFails(t *testing.T) {
+	db, seeder := setupFinalizingPendingOpTest(t)
+	require.NoError(t, db.Exec(`DROP TABLE task_pending_ops`).Error)
+	op := makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1", "ingest", "knowledge-1", []byte(`{}`))
+
+	promoted, err := seeder.SeedKnowledgeFinalizingWithPendingOp(
+		context.Background(), "knowledge-1", 3, op,
+	)
+
+	require.Error(t, err)
+	assert.False(t, promoted)
+	var knowledge types.Knowledge
+	require.NoError(t, db.Select("parse_status", "pending_subtasks_count").First(&knowledge, "id = ?", "knowledge-1").Error)
+	assert.Equal(t, types.ParseStatusProcessing, knowledge.ParseStatus)
+	assert.Zero(t, knowledge.PendingSubtasksCount)
+}
+
+func TestTaskPendingOps_SeedKnowledgeFinalizingSkipsNonProcessingKnowledge(t *testing.T) {
+	db, seeder := setupFinalizingPendingOpTest(t)
+	require.NoError(t, db.Model(&types.Knowledge{}).
+		Where("id = ?", "knowledge-1").
+		Update("parse_status", types.ParseStatusCancelled).Error)
+	op := makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1", "ingest", "knowledge-1", []byte(`{}`))
+
+	promoted, err := seeder.SeedKnowledgeFinalizingWithPendingOp(
+		context.Background(), "knowledge-1", 3, op,
+	)
+
+	require.NoError(t, err)
+	assert.False(t, promoted)
+	var count int64
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Count(&count).Error)
+	assert.Zero(t, count)
+}
+
+func TestTaskPendingOps_SeedKnowledgeFinalizingSkipsDeletedKnowledgeBase(t *testing.T) {
+	db, seeder := setupFinalizingPendingOpTest(t)
+	require.NoError(t, db.Exec(
+		`UPDATE knowledge_bases SET deleted_at = ? WHERE id = ?`, time.Now(), "kb-1",
+	).Error)
+	op := makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1", "ingest", "knowledge-1", []byte(`{}`))
+
+	promoted, err := seeder.SeedKnowledgeFinalizingWithPendingOp(
+		context.Background(), "knowledge-1", 3, op,
+	)
+
+	require.NoError(t, err)
+	assert.False(t, promoted)
+	var knowledge types.Knowledge
+	require.NoError(t, db.Select("parse_status", "pending_subtasks_count").First(&knowledge, "id = ?", "knowledge-1").Error)
+	assert.Equal(t, types.ParseStatusProcessing, knowledge.ParseStatus)
+	assert.Zero(t, knowledge.PendingSubtasksCount)
+	var count int64
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Count(&count).Error)
+	assert.Zero(t, count)
 }
 
 // ---------------- TaskPendingOpsRepository ----------------
@@ -180,6 +295,110 @@ func TestTaskPendingOps_DeleteByIDs_RemovesOnlyTargets(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, "b", got[0].DedupKey)
+}
+
+func TestTaskPendingOps_DeleteByScope_RemovesAllTaskTypesAndIsolatesScopes(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	cleaner, ok := repo.(interfaces.TaskPendingOpsScopeCleaner)
+	require.True(t, ok)
+	ctx := context.Background()
+
+	// The deleted KB can have durable work in more than one wiki queue.
+	require.NoError(t, repo.Enqueue(ctx,
+		makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-delete", "ingest", "k1", nil)))
+	require.NoError(t, repo.Enqueue(ctx,
+		makePendingOp(types.TypeWikiFinalize, types.TaskScopeKnowledgeBase, "kb-delete", "finalize", "k2", nil)))
+
+	// Rows in another KB or another scope must survive even when their IDs or
+	// task types overlap with the deleted KB.
+	require.NoError(t, repo.Enqueue(ctx,
+		makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-keep", "ingest", "k3", nil)))
+	require.NoError(t, repo.Enqueue(ctx,
+		makePendingOp(types.TypeWikiFinalize, types.TaskScopeKnowledge, "kb-delete", "finalize", "k4", nil)))
+
+	require.NoError(t, cleaner.DeleteByScope(ctx, types.TaskScopeKnowledgeBase, "kb-delete"))
+
+	var remaining []*types.TaskPendingOp
+	require.NoError(t, db.Order("id ASC").Find(&remaining).Error)
+	require.Len(t, remaining, 2)
+	assert.Equal(t, "kb-keep", remaining[0].ScopeID)
+	assert.Equal(t, types.TaskScopeKnowledge, remaining[1].Scope)
+	assert.Equal(t, "kb-delete", remaining[1].ScopeID)
+}
+
+func TestTaskPendingOps_DeleteByScope_RejectsMissingScope(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	cleaner, ok := repo.(interfaces.TaskPendingOpsScopeCleaner)
+	require.True(t, ok)
+	ctx := context.Background()
+
+	require.NoError(t, repo.Enqueue(ctx,
+		makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb", "ingest", "k1", nil)))
+
+	assert.Error(t, cleaner.DeleteByScope(ctx, "", "kb"))
+	assert.Error(t, cleaner.DeleteByScope(ctx, types.TaskScopeKnowledgeBase, ""))
+
+	var count int64
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Count(&count).Error)
+	assert.Equal(t, int64(1), count)
+}
+
+func TestTaskPendingOps_EnqueueIfKnowledgeBaseActive(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	require.NoError(t, db.Exec(`CREATE TABLE knowledge_bases (
+		id VARCHAR(64) PRIMARY KEY,
+		tenant_id INTEGER NOT NULL,
+		deleted_at DATETIME
+	)`).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO knowledge_bases (id, tenant_id, deleted_at) VALUES (?, ?, NULL), (?, ?, ?)",
+		"kb-active", 1, "kb-deleted", 1, time.Now(),
+	).Error)
+
+	repo := NewTaskPendingOpsRepository(db)
+	guard, ok := repo.(interfaces.TaskPendingOpsKnowledgeBaseGuard)
+	require.True(t, ok)
+	ctx := context.Background()
+
+	accepted, err := guard.EnqueueIfKnowledgeBaseActive(ctx,
+		makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-active", "ingest", "active", nil))
+	require.NoError(t, err)
+	assert.True(t, accepted)
+
+	for _, tc := range []struct {
+		name string
+		op   *types.TaskPendingOp
+	}{
+		{
+			name: "soft deleted",
+			op: makePendingOp(
+				types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-deleted", "ingest", "deleted", nil,
+			),
+		},
+		{
+			name: "missing",
+			op: makePendingOp(
+				types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-missing", "ingest", "missing", nil,
+			),
+		},
+		{name: "tenant mismatch", op: &types.TaskPendingOp{
+			TenantID: 2, TaskType: types.TypeWikiIngest, Scope: types.TaskScopeKnowledgeBase,
+			ScopeID: "kb-active", Op: "ingest", DedupKey: "wrong-tenant",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			accepted, err := guard.EnqueueIfKnowledgeBaseActive(ctx, tc.op)
+			require.NoError(t, err)
+			assert.False(t, accepted)
+		})
+	}
+
+	var rows []*types.TaskPendingOp
+	require.NoError(t, db.Find(&rows).Error)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "active", rows[0].DedupKey)
 }
 
 // TestTaskPendingOps_IncrFailCount_ReturnsNewValueAndPersists exercises

@@ -44,7 +44,7 @@ func TestFormatIMToolLine_grepPatterns(t *testing.T) {
 			"patterns": []any{"文明", "策略"},
 		},
 		Data: map[string]interface{}{
-			"total_matches": float64(5),
+			"total_matches":  float64(5),
 			"document_count": float64(2),
 		},
 	})

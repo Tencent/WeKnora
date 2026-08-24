@@ -488,6 +488,10 @@ func TestParseCompletionResponse_CachedTokens(t *testing.T) {
 		assert.Equal(t, 6971, got.Usage.TotalTokens)
 		assert.Equal(t, 6900, got.Usage.CachedTokens,
 			"cached_tokens must mirror prompt_tokens_details.cached_tokens")
+		assert.Equal(t, 6900, got.Usage.CacheReadTokens)
+		assert.Equal(t, 29, got.Usage.CacheMissTokens)
+		assert.True(t, got.Usage.CacheReported)
+		assert.Equal(t, types.PromptCacheStatusHit, got.Usage.CacheStatus)
 	})
 
 	t.Run("missing prompt_tokens_details yields zero cached_tokens", func(t *testing.T) {
@@ -512,7 +516,18 @@ func TestParseCompletionResponse_CachedTokens(t *testing.T) {
 		require.NotNil(t, got)
 		assert.Equal(t, 0, got.Usage.CachedTokens,
 			"missing details must surface as zero, not panic")
+		assert.False(t, got.Usage.CacheReported)
+		assert.Equal(t, types.PromptCacheStatusUnsupported, got.Usage.CacheStatus)
 	})
+}
+
+func TestApplyRawPromptCacheUsage_DeepSeekNativeFields(t *testing.T) {
+	usage := types.TokenUsage{PromptTokens: 4096, CompletionTokens: 10, TotalTokens: 4106}
+	applyRawPromptCacheUsage([]byte(`{"usage":{"prompt_tokens":4096,"prompt_cache_hit_tokens":3072,"prompt_cache_miss_tokens":1024}}`), &usage)
+	assert.Equal(t, 3072, usage.CacheReadTokens)
+	assert.Equal(t, 1024, usage.CacheMissTokens)
+	assert.True(t, usage.CacheReported)
+	assert.Equal(t, types.PromptCacheStatusHit, usage.CacheStatus)
 }
 
 // TestTokenUsage_CachedTokensJSONOmitempty ensures the new CachedTokens field

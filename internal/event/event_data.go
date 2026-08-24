@@ -139,6 +139,7 @@ type AgentCompleteData struct {
 	FinalAnswer     string                 `json:"final_answer"`
 	KnowledgeRefs   []interface{}          `json:"knowledge_refs,omitempty"` // []*types.SearchResult
 	AgentSteps      interface{}            `json:"agent_steps,omitempty"`    // []types.AgentStep - detailed execution steps
+	Usage           interface{}            `json:"usage,omitempty"`          // *types.TokenUsage - LLM token usage aggregated over the turn
 	TotalDurationMs int64                  `json:"total_duration_ms"`
 	MessageID       string                 `json:"message_id,omitempty"` // Assistant message ID
 	RequestID       string                 `json:"request_id,omitempty"`
@@ -180,6 +181,13 @@ type AgentToolResultData struct {
 type AgentReferencesData struct {
 	References interface{} `json:"references"` // []*types.SearchResult
 	Iteration  int         `json:"iteration"`
+}
+
+// MemoryRecalledData carries the long-term memories injected into this turn.
+// Memories is []types.UsedMemory, kept as interface{} for the same reason
+// AgentReferencesData does: the event package stays free of a types import.
+type MemoryRecalledData struct {
+	Memories interface{} `json:"memories"`
 }
 
 // AgentFinalAnswerData represents final answer streaming data

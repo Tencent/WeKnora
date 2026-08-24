@@ -12,6 +12,9 @@ const t = (key, params) => {
   if (key === 'agentStream.search.foundResultsFromFiles') {
     return `found ${params?.count} from ${params?.files} files`
   }
+  if (key === 'agentStream.search.candidatesBelowThreshold') {
+    return `matched ${params?.count}, none relevant`
+  }
   if (key === 'agentStream.ragPipeline.searchingWithQuery') {
     return `searching ${params?.query}`
   }
@@ -58,6 +61,20 @@ test('getKnowledgeSearchSummaryHtml includes file count when present', () => {
   assert.match(html, /found <strong>2<\/strong> from <strong>2<\/strong> files/)
 })
 
+// Candidates that all fell below the relevance threshold never reached the
+// answer, so the row must not read like a plain empty search: the difference
+// points at the threshold rather than at the knowledge base.
+test('getKnowledgeSearchSummaryHtml distinguishes filtered candidates from an empty search', () => {
+  assert.match(
+    getKnowledgeSearchSummaryHtml(t, { count: 0, candidate_count: 10 }),
+    /matched <strong>10<\/strong>, none relevant/,
+  )
+  assert.equal(
+    getKnowledgeSearchSummaryHtml(t, { count: 0, candidate_count: 0 }),
+    'agentStream.search.noResults',
+  )
+})
+
 test('getRagPipelineStepTitle uses query-aware search labels', () => {
   const title = getRagPipelineStepTitle(t, {
     tool_name: 'knowledge_search',
@@ -75,4 +92,15 @@ test('getRagPipelineStepTitle uses web labels when search_source is web', () => 
     arguments: { search_source: 'web' },
   })
   assert.equal(title, 'agentStream.toolStatus.webSearch')
+})
+
+test('getRagPipelineStepTitle uses attachment parsing labels', () => {
+  assert.equal(
+    getRagPipelineStepTitle(t, { tool_name: 'attachment_parsing', pending: true }),
+    'agentStream.toolStatus.attachmentParsing',
+  )
+  assert.equal(
+    getRagPipelineStepTitle(t, { tool_name: 'attachment_parsing', pending: false, success: true }),
+    'agentStream.toolStatus.attachmentParsingDone',
+  )
 })

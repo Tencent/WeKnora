@@ -71,9 +71,9 @@
             <div class="settings-content">
               <div class="content-wrapper" :class="{
                 'content-wrapper--wide': currentSection === 'members',
-                'content-wrapper--full': currentSection === 'system-global' || isIntegrationSection(currentSection),
+                'content-wrapper--full': SYSTEM_ADMIN_SECTIONS.has(currentSection) || isIntegrationSection(currentSection),
               }">
-                <!-- 角色不允许访问当前 section（deep-link 进来 / 跨租户切换后角色降级）—— 优先于具体 section 渲染。
+                <!-- 角色不允许访问当前 section（deep-link 进来 / 跨空间切换后角色降级）—— 优先于具体 section 渲染。
                      正常导航走 navItems filter 不会到这里，但 watch(navItems) 的 fallback 会在角色降级
                      的瞬间触发；这一段做兜底兼容旧 URL。 -->
                 <div v-if="!canSeeSection(currentSection)" class="section role-denied">
@@ -114,6 +114,16 @@
                     <ChatHistorySettings />
                   </div>
 
+                  <!-- 长期记忆（空间级开关） -->
+                  <div v-if="currentSection === 'memory'" class="section">
+                    <MemoryWorkspaceSettings />
+                  </div>
+
+                  <!-- 我的记忆（个人记忆管理） -->
+                  <div v-if="currentSection === 'mymemory'" class="section">
+                    <MemorySettings />
+                  </div>
+
                   <!-- 向量数据库引擎 -->
                   <div v-if="currentSection === 'vectorstore'" class="section">
                     <VectorStoreSettings />
@@ -129,6 +139,11 @@
                     <StorageEngineSettings />
                   </div>
 
+                  <!-- 沙箱后端 -->
+                  <div v-if="currentSection === 'sandbox'" class="section">
+                    <SandboxSettings />
+                  </div>
+
                   <!-- 系统信息 -->
                   <div v-if="currentSection === 'system'" class="section">
                     <SystemInfo />
@@ -139,13 +154,26 @@
                     <SystemSettings />
                   </div>
 
+                  <!-- 系统管理员可见的任务队列运行状态 -->
+                  <div v-if="currentSection === 'runtime-queues'" class="section">
+                    <RuntimeQueues />
+                  </div>
+
+                  <div v-if="currentSection === 'platform-api-keys'" class="section">
+                    <PlatformAPIKeys />
+                  </div>
+
+                  <div v-if="currentSection === 'system-audit-log'" class="section">
+                    <SystemAuditLog />
+                  </div>
+
                   <!-- 用户信息（账户基础信息：ID / 用户名 / 邮箱 / 注册时间）。
                      用户的基本信息不该跟 owner 权限绑定。 -->
                   <div v-if="currentSection === 'userprofile'" class="section">
                     <UserProfile />
                   </div>
 
-                  <!-- 租户信息 -->
+                  <!-- 空间信息 -->
                   <div v-if="currentSection === 'tenant'" class="section">
                     <TenantInfo />
                   </div>
@@ -179,7 +207,9 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { useI18n } from 'vue-i18n'
+import { MessagePlugin } from 'tdesign-vue-next'
 import SystemInfo from './SystemInfo.vue'
 import TenantInfo from './TenantInfo.vue'
 import UserProfile from './UserProfile.vue'
@@ -189,24 +219,37 @@ import OllamaSettings from './OllamaSettings.vue'
 import McpSettings from './McpSettings.vue'
 import WebSearchSettings from './WebSearchSettings.vue'
 import ChatHistorySettings from './ChatHistorySettings.vue'
+import MemorySettings from './MemorySettings.vue'
+import MemoryWorkspaceSettings from './MemoryWorkspaceSettings.vue'
 import VectorStoreSettings from './VectorStoreSettings.vue'
 import ParserEngineSettings from './ParserEngineSettings.vue'
-import StorageEngineSettings from './StorageEngineSettings.vue'
+import StorageEngineSettings from './StorageBackendSettings.vue'
+import SandboxSettings from './SandboxSettings.vue'
 import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'
 import TenantMembers from './TenantMembers.vue'
 import SystemSettings from '@/views/system/SystemSettings.vue'
+import RuntimeQueues from '@/views/system/RuntimeQueues.vue'
+import PlatformAPIKeys from '@/views/system/PlatformAPIKeys.vue'
+import SystemAuditLog from '@/views/system/SystemAuditLog.vue'
 import IntegrationSettingsSection from '@/views/integrations/IntegrationSettingsSection.vue'
 import {
   INTEGRATION_PREVIEW_ITEMS,
+  INTEGRATION_TAB_CAPABILITY,
   INTEGRATION_TAB_MIN_ROLE,
   INTEGRATION_TABS,
   type IntegrationTab,
 } from '@/config/integrations'
+import {
+  SETTINGS_SECTION_MIN_ROLE,
+  SYSTEM_ADMIN_SETTINGS_SECTIONS,
+} from '@/config/settingsAccess'
+import { SETTINGS_SECTION_CAPABILITY } from '@/config/deploymentCapabilities'
 
 const route = useRoute()
 const router = useRouter()
 const uiStore = useUIStore()
 const authStore = useAuthStore()
+const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const { t } = useI18n()
 
 const currentSection = ref<string>('general')
@@ -227,7 +270,8 @@ type NavGroup = {
   items: NavItem[]
 }
 
-// 设置二级导航的最低可见角色：和 internal/router/router.go 的守卫矩阵对齐。
+// 设置二级导航的最低可见角色来自 settingsAccess.ts，和
+// internal/router/router.go 的守卫矩阵对齐。
 // 以「页面里至少有 1 个有意义的写操作所要求的最低角色」为基准，把基础设
 // 施配置（models 写、ollama 下载、websearch 写、parser/storage/vector/mcp
 // CRUD、chat-history 配置）统一收到 admin；只读类（general / system info /
@@ -241,25 +285,7 @@ type NavGroup = {
 // - models 列表 viewer 可读，页面内的「+ 添加模型 / 编辑 / 删除」按钮在
 //   ModelSettings.vue 里另用 hasRole('admin') 自己 gate，所以入口保留
 //   viewer 是合理的（contributor 也能浏览模型列表）。
-type RoleKey = 'viewer' | 'contributor' | 'admin' | 'owner'
-const SECTION_MIN_ROLE: Record<string, RoleKey> = {
-  general: 'viewer',
-  ollama: 'admin',
-  weknoracloud: 'admin',
-  models: 'viewer',
-  websearch: 'admin',
-  chathistory: 'admin',
-  vectorstore: 'admin',
-  parser: 'admin',
-  storage: 'admin',
-  mcp: 'admin',
-  system: 'viewer',
-  userprofile: 'viewer',
-  tenant: 'viewer',
-  members: 'viewer',
-}
-
-const SYSTEM_ADMIN_SECTIONS = new Set(['system-global'])
+const SYSTEM_ADMIN_SECTIONS = SYSTEM_ADMIN_SETTINGS_SECTIONS
 const INTEGRATION_SECTION_PREFIX = 'integration-'
 
 const integrationSectionKey = (tab: IntegrationTab) => `${INTEGRATION_SECTION_PREFIX}${tab}`
@@ -289,6 +315,15 @@ const normalizeSettingsSection = (section: string) => {
   return section
 }
 
+const isSectionSupported = (key: string): boolean => {
+  if (isIntegrationSection(key)) {
+    return deploymentCapabilities.isSupported(
+      INTEGRATION_TAB_CAPABILITY[integrationTabFromSection(key)],
+    )
+  }
+  return deploymentCapabilities.isSupported(SETTINGS_SECTION_CAPABILITY[key])
+}
+
 const canSeeSection = (key: string): boolean => {
   if (isIntegrationSection(key)) {
     const min = INTEGRATION_TAB_MIN_ROLE[integrationTabFromSection(key)]
@@ -299,7 +334,7 @@ const canSeeSection = (key: string): boolean => {
   if (SYSTEM_ADMIN_SECTIONS.has(key)) {
     return authStore.isSystemAdmin
   }
-  const min = SECTION_MIN_ROLE[key] ?? 'viewer'
+  const min = SETTINGS_SECTION_MIN_ROLE[key] ?? 'viewer'
   // canAccessAllTenants（superuser）和路由层一样必须 bypass，否则 cross-tenant
   // 管理员看不到自己有权操作的入口（参考 TenantMembers.vue 的 canManage）。
   if (authStore.canAccessAllTenants) return true
@@ -307,9 +342,9 @@ const canSeeSection = (key: string): boolean => {
 }
 
 const navItems = computed(() => {
-  // 一律走 SECTION_MIN_ROLE 表，避免 ad-hoc isAdmin/isOwner 散落在多处。
+  // 一律走 SETTINGS_SECTION_MIN_ROLE 表，避免 ad-hoc isAdmin/isOwner 散落在多处。
   // 服务端在每条路由上仍以 g.Viewer/Admin/Owner 为准，这里只决定 UI 是
-  // 否露入口；改动入口规则请同步更新 SECTION_MIN_ROLE 注释里的对照路由。
+  // 否露入口；改动入口规则请同步更新 settingsAccess.ts 和对应后端路由。
   const integrationItems: NavItem[] = INTEGRATION_PREVIEW_ITEMS.map((item) => ({
     key: integrationSectionKey(item.key),
     icon: item.icon.type === 'icon' ? item.icon.name : 'integration',
@@ -323,13 +358,19 @@ const navItems = computed(() => {
     { key: 'models', icon: 'control-platform', label: t('settings.modelManagement') },
     { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig') },
     { key: 'chathistory', icon: 'chat', label: t('chatHistorySettings.title') },
+    { key: 'memory', icon: 'bulletpoint', label: t('memoryWorkspaceSettings.title') },
     { key: 'vectorstore', icon: 'data-base', label: t('settings.vectorStoreEngine') },
     { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
     { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
+    { key: 'sandbox', icon: 'server', label: t('settings.sandbox.title') },
     { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
     { key: 'system', icon: 'info-circle', label: t('settings.versionInfo') },
     { key: 'system-global', icon: 'server', label: t('settings.system') },
+    { key: 'runtime-queues', icon: 'queue', label: t('settings.taskQueue') },
+    { key: 'platform-api-keys', icon: 'secured', label: t('platformApiKeys.title') },
+    { key: 'system-audit-log', icon: 'history', label: t('system.globalSettings.audit.tabLabel') },
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
+    { key: 'mymemory', icon: 'bookmark', label: t('memorySettings.title') },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
     { key: 'members', icon: 'usergroup', label: t('tenantMember.title') },
     ...integrationItems,
@@ -340,13 +381,13 @@ const navItems = computed(() => {
   if (!authStore.currentTenantRole && !authStore.canAccessAllTenants) {
     return [] as NavItem[]
   }
-  return all.filter((it) => canSeeSection(it.key))
+  return all.filter((it) => canSeeSection(it.key) && isSectionSupported(it.key))
 })
 
 const navGroups = computed<NavGroup[]>(() => {
   const itemMap = new Map(navItems.value.map((item) => [item.key, item]))
   const pickItems = (keys: string[]) => keys.map((key) => itemMap.get(key)).filter(Boolean) as NavItem[]
-  // 分组：账户 → 空间 → 模型 → 发布集成 → 数据与扩展 → 平台（文案见 i18n settings.navGroups）
+  // 分组：账户 → 空间 → 模型 → 发布集成 → 数据与扩展 → 系统管理 → 平台
   // 关键调整：把个人偏好(general)和用户信息收进「账户」；
   // 把空间内功能开关(chathistory)从「平台」挪到「空间」；
   // 把检索引擎和外部集成合并为「数据与扩展」，避免两个 2~3 项的窄分组。
@@ -354,12 +395,12 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'account',
       label: t('settings.navGroups.account'),
-      items: pickItems(['general', 'userprofile']),
+      items: pickItems(['general', 'userprofile', 'mymemory']),
     },
     {
       key: 'workspace',
       label: t('settings.navGroups.workspace'),
-      items: pickItems(['tenant', 'members', 'chathistory']),
+      items: pickItems(['tenant', 'members', 'chathistory', 'memory']),
     },
     {
       key: 'models_runtime',
@@ -384,14 +425,20 @@ const navGroups = computed<NavGroup[]>(() => {
         'vectorstore',
         'parser',
         'storage',
+        'sandbox',
         'websearch',
         'mcp',
       ]),
     },
     {
+      key: 'system_administration',
+      label: t('settings.navGroups.systemAdministration'),
+      items: pickItems(['system-global', 'runtime-queues', 'platform-api-keys', 'system-audit-log']),
+    },
+    {
       key: 'platform',
       label: t('settings.navGroups.platform'),
-      items: pickItems(['system-global', 'system']),
+      items: pickItems(['system']),
     },
   ].filter((group) => group.items.length > 0)
 })
@@ -413,7 +460,7 @@ const handleNavClick = (item: any) => {
 
   // 切换到对应页面
   currentSection.value = item.key
-  if (isIntegrationSection(item.key) && route.path === '/platform/settings') {
+  if (route.path === '/platform/settings' && isIntegrationSection(item.key)) {
     router.replace({
       path: '/platform/settings',
       query: {
@@ -421,6 +468,13 @@ const handleNavClick = (item: any) => {
         section: 'integrations',
         tab: integrationTabFromSection(item.key),
       },
+    })
+  } else if (route.path === '/platform/settings' && SYSTEM_ADMIN_SECTIONS.has(item.key)) {
+    const query = { ...route.query }
+    delete query.tab
+    router.replace({
+      path: '/platform/settings',
+      query: { ...query, section: item.key },
     })
   }
 }
@@ -446,11 +500,15 @@ const visible = computed(() => {
 
 // 关闭弹窗
 const handleClose = () => {
+  // Blur before unmount so TDesign textarea autosize won't run on a detached node.
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+  }
   uiStore.closeSettings()
   // 如果当前路由是设置页，返回上一页
   if (route.path === '/platform/settings') {
     const sec = route.query.section
-    if (sec === 'system-global') {
+    if (sec === 'system-global' || sec === 'runtime-queues' || sec === 'platform-api-keys' || sec === 'system-audit-log') {
       router.push('/platform/knowledge-bases')
     } else {
       router.back()
@@ -462,6 +520,12 @@ const handleClose = () => {
 watch(() => uiStore.settingsInitialSection, (section) => {
   if (section && visible.value) {
     const normalizedSection = normalizeSettingsSection(section)
+    if (deploymentCapabilities.loaded && !isSectionSupported(normalizedSection)) {
+      MessagePlugin.warning(t('settings.capabilityUnavailable'))
+      currentSection.value = navItems.value[0]?.key || 'general'
+      currentSubSection.value = ''
+      return
+    }
     currentSection.value = normalizedSection
     const navItem = (navItems.value as any[]).find((item) => item.key === normalizedSection)
     if (navItem && navItem.children && navItem.children.length > 0) {
@@ -484,16 +548,29 @@ watch(() => uiStore.settingsInitialSection, (section) => {
 }, { immediate: true })
 
 watch(
-  () => [visible.value, route.query.section],
-  ([isVisible, section]) => {
+  () => [visible.value, route.query.section, deploymentCapabilities.loaded] as const,
+  ([isVisible, section, capabilitiesLoaded]) => {
     if (!isVisible || typeof section !== 'string') return
-    currentSection.value = normalizeSettingsSection(section)
+    const normalizedSection = normalizeSettingsSection(section)
+    if (capabilitiesLoaded && !isSectionSupported(normalizedSection)) {
+      MessagePlugin.warning(t('settings.capabilityUnavailable'))
+      currentSection.value = navItems.value[0]?.key || 'general'
+      currentSubSection.value = ''
+      if (route.path === '/platform/settings') {
+        const query = { ...route.query }
+        delete query.section
+        delete query.tab
+        void router.replace({ path: route.path, query })
+      }
+      return
+    }
+    currentSection.value = normalizedSection
     currentSubSection.value = ''
   },
   { immediate: true },
 )
 
-// 切换租户后角色可能变化，原本可见的 admin-only 面板可能消失。
+// 切换空间后角色可能变化，原本可见的 admin-only 面板可能消失。
 // 如果 currentSection 落到了不再显示的 key 上，就回退到第一个可见项。
 watch(navItems, (items) => {
   if (!items.some((item) => item.key === currentSection.value)) {
@@ -514,6 +591,12 @@ const handleSettingsNav = (e: CustomEvent) => {
   const { section, subsection } = e.detail
   if (section) {
     const normalizedSection = normalizeSettingsSection(section)
+    if (deploymentCapabilities.loaded && !isSectionSupported(normalizedSection)) {
+      MessagePlugin.warning(t('settings.capabilityUnavailable'))
+      currentSection.value = navItems.value[0]?.key || 'general'
+      currentSubSection.value = ''
+      return
+    }
     currentSection.value = normalizedSection
     // 如果有子菜单，自动展开
     const navItem = (navItems.value as any[]).find((item: any) => item.key === normalizedSection)
@@ -530,6 +613,12 @@ const handleSettingsNav = (e: CustomEvent) => {
 onMounted(() => {
   window.addEventListener('keydown', handleEscape)
   window.addEventListener('settings-nav', handleSettingsNav as EventListener)
+})
+
+watch(currentSection, () => {
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+  }
 })
 
 onUnmounted(() => {

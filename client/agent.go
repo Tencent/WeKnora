@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -77,8 +78,10 @@ func (c *Client) AgentQAStream(ctx context.Context, sessionID string, query stri
 }
 
 // AgentQAStreamWithRequest performs agent-based Q&A with SSE streaming using the full request payload.
+// Pass ResourceURLOptions to receive public HTTP(S) file URLs in the stream.
 func (c *Client) AgentQAStreamWithRequest(ctx context.Context,
 	sessionID string, request *AgentQARequest, callback AgentEventCallback,
+	opts ...ResourceURLOptions,
 ) error {
 	if request == nil {
 		return fmt.Errorf("agent QA request cannot be nil")
@@ -88,7 +91,11 @@ func (c *Client) AgentQAStreamWithRequest(ctx context.Context,
 	}
 
 	path := fmt.Sprintf("/api/v1/agent-chat/%s", sessionID)
-	resp, err := c.doRequestStream(ctx, http.MethodPost, path, request, nil)
+	queryParams := url.Values{}
+	if len(opts) > 0 {
+		applyResourceURLQuery(queryParams, &opts[0])
+	}
+	resp, err := c.doRequestStream(ctx, http.MethodPost, path, request, queryParams)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}

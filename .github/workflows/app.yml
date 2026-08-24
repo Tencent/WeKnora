@@ -1,0 +1,107 @@
+name: App
+
+# Anydoc (Rust archive + `anydoc` build tag) lives in anydoc.yml so a
+# migrations-only or unrelated Go PR does not compile the parser engine.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.go"
+      - "!cli/**"
+      - "!client/**"
+      - "!docreader/**"
+      - "!third_party/anydoc-go/**"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - "config/**"
+      - "migrations/**"
+      - "skills/preloaded/**"
+      - "testdata/**"
+      - "docker/Dockerfile.app"
+      - ".github/workflows/app.yml"
+  pull_request:
+    paths:
+      - "**/*.go"
+      - "!cli/**"
+      - "!client/**"
+      - "!docreader/**"
+      - "!third_party/anydoc-go/**"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - "config/**"
+      - "migrations/**"
+      - "skills/preloaded/**"
+      - "testdata/**"
+      - "docker/Dockerfile.app"
+      - ".github/workflows/app.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26"
+  GOPROXY: https://proxy.golang.org,direct
+  # Keep tests independent of a developer machine's custom log template.
+  LOG_FORMAT: ""
+  BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+
+jobs:
+  verify:
+    name: Format, vet, test, and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          # v6 defaults to go.mod for the cache key (more stable than go.sum).
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Compare base..head, not the PR merge commit, so files changed only
+            # on main after the branch point are not attributed to this PR.
+            diff_range="${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"
+          else
+            base="$BASE_SHA"
+            if [ -z "$base" ] || [[ "$base" =~ ^0+$ ]]; then
+              base=$(git rev-parse HEAD^)
+            fi
+            diff_range="$base..$GITHUB_SHA"
+          fi
+          unformatted=$(
+            git diff --name-only --diff-filter=ACMR -z "$diff_range" -- '*.go' ':!cli/**' |
+              xargs -0 -r gofmt -l
+          )
+          if [ -n "$unformatted" ]; then
+            echo "The following Go files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet and test
+        shell: bash
+        run: |
+          mapfile -t pkgs < <(go list ./... | grep -v '/docreader/')
+          go vet "${pkgs[@]}"
+          go test "${pkgs[@]}"
+
+      - name: Build server
+        run: go build ./cmd/server

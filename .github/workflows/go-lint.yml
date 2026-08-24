@@ -1,0 +1,104 @@
+name: Go Lint
+
+# The repository carries a large backlog of pre-existing golangci-lint findings,
+# so pull requests are only judged on the code they introduce (`only-new-issues`).
+# That filter needs a pull request diff, which is why this workflow has no other
+# trigger; the companion go-lint-cache.yml keeps the caches this job restores
+# from warm on main.
+
+on:
+  pull_request:
+    paths:
+      - "**/*.go"
+      - "**/go.mod"
+      - "**/go.sum"
+      - ".golangci.yml"
+      - ".github/workflows/go-lint.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26"
+  GOLANGCI_LINT_VERSION: "v2.12.2"
+  GOPROXY: https://proxy.golang.org,direct
+
+jobs:
+  # Path filters above start this workflow for any Go change; the matrix still
+  # used to lint all three modules. Detect which modules the PR actually
+  # touches so a root-only change (migrations test, handler, …) does not queue
+  # cli/ and client/ runners. Changing .golangci.yml or this workflow still
+  # lints every module, since they share the root config.
+  changes:
+    name: detect lint modules
+    runs-on: ubuntu-latest
+    outputs:
+      modules: ${{ steps.detect.outputs.modules }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Detect changed modules
+        id: detect
+        shell: bash
+        run: |
+          diff_range="${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"
+          modules=()
+          if git diff --name-only --diff-filter=ACMR "$diff_range" -- \
+               .golangci.yml .github/workflows/go-lint.yml | grep -q .; then
+            modules=("." "cli" "client")
+          else
+            if git diff --name-only --diff-filter=ACMR "$diff_range" -- \
+                 '*.go' ':!cli/**' ':!client/**' go.mod go.sum | grep -q .; then
+              modules+=(".")
+            fi
+            if git diff --name-only --diff-filter=ACMR "$diff_range" -- 'cli/**' | grep -q .; then
+              modules+=("cli")
+            fi
+            if git diff --name-only --diff-filter=ACMR "$diff_range" -- 'client/**' | grep -q .; then
+              modules+=("client")
+            fi
+          fi
+          json="["
+          first=1
+          for m in "${modules[@]}"; do
+            if [ "$first" -eq 1 ]; then
+              first=0
+            else
+              json+=","
+            fi
+            json+="\"${m}\""
+          done
+          json+="]"
+          echo "modules=${json}" >> "$GITHUB_OUTPUT"
+          echo "Lint modules: ${json}"
+
+  golangci:
+    name: golangci-lint (${{ matrix.module }})
+    needs: changes
+    if: needs.changes.outputs.modules != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(needs.changes.outputs.modules) }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: ${{ matrix.module }}
+          only-new-issues: true

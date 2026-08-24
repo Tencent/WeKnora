@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -23,7 +24,10 @@ import (
 
 const mineruTimeout = 1000 * time.Second // large docs can take a while
 
-var b64DataURIPattern = regexp.MustCompile(`^data:image/(\w+);base64,(.+)$`)
+var (
+	b64DataURIPattern     = regexp.MustCompile(`^data:image/(\w+);base64,(.+)$`)
+	minerUFileTypePattern = regexp.MustCompile(`^[a-z0-9]+$`)
+)
 
 // MinerUReader calls a self-hosted MinerU API to read/convert documents.
 type MinerUReader struct {
@@ -32,19 +36,25 @@ type MinerUReader struct {
 	vlmServerURL  string // vLLM server URL for vlm-http-client / hybrid-http-client
 	formulaEnable bool
 	tableEnable   bool
-	ocrEnable     bool
+	parseMethod   string
 	language      string
 }
 
 // NewMinerUReader creates a reader from ParserEngineOverrides.
 func NewMinerUReader(overrides map[string]string) *MinerUReader {
+	var legacyOCREnabled *bool
+	if raw, ok := overrides["mineru_enable_ocr"]; ok {
+		value := parseBoolOr(raw, true)
+		legacyOCREnabled = &value
+	}
+
 	c := &MinerUReader{
 		endpoint:      strings.TrimRight(overrides["mineru_endpoint"], "/"),
 		backend:       stringOr(overrides["mineru_model"], "pipeline"),
 		vlmServerURL:  overrides["mineru_vlm_server_url"],
 		formulaEnable: parseBoolOr(overrides["mineru_enable_formula"], true),
 		tableEnable:   parseBoolOr(overrides["mineru_enable_table"], true),
-		ocrEnable:     parseBoolOr(overrides["mineru_enable_ocr"], true),
+		parseMethod:   types.ResolveMinerUParseMethod(overrides["mineru_parse_method"], legacyOCREnabled),
 		language:      stringOr(overrides["mineru_language"], "ch"),
 	}
 	return c
@@ -70,7 +80,7 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 
 	logger.Infof(context.Background(), "[MinerU] Parsing file=%s size=%d via %s", req.FileName, len(content), c.endpoint)
 
-	mdContent, imagesB64, err := c.callFileParse(ctx, content)
+	mdContent, imagesB64, err := c.callFileParse(ctx, content, req.FileName, req.FileType)
 	if err != nil {
 		return nil, fmt.Errorf("MinerU file_parse: %w", err)
 	}
@@ -93,21 +103,96 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 	}, nil
 }
 
-// mineruFileParseResponse mirrors the relevant fields from the MinerU API response.
-type mineruFileParseResponse struct {
-	Results struct {
-		Document struct {
-			MDContent string            `json:"md_content"`
-			Images    map[string]string `json:"images"` // path -> "data:image/png;base64,..." or raw base64
-		} `json:"document"`
-		Files struct {
-			MDContent string            `json:"md_content"`
-			Images    map[string]string `json:"images"` // path -> "data:image/png;base64,..." or raw base64
-		} `json:"files"`
-	} `json:"results"`
+type mineruFileEntry struct {
+	MDContent string            `json:"md_content"`
+	Images    map[string]string `json:"images"` // path -> "data:image/png;base64,..." or raw base64
 }
 
-func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (string, map[string]string, error) {
+func minerUCleanFileType(fileType string) string {
+	cleanType := strings.ToLower(strings.TrimSpace(fileType))
+	cleanType = strings.TrimPrefix(cleanType, ".")
+	if minerUFileTypePattern.MatchString(cleanType) {
+		return cleanType
+	}
+	return ""
+}
+
+func minerUUploadFileName(fileName, fileType string) string {
+	cleanName := strings.TrimSpace(fileName)
+	cleanName = strings.ReplaceAll(cleanName, `\`, "/")
+	cleanName = path.Base(cleanName)
+	cleanName = strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' || r == 0 {
+			return -1
+		}
+		return r
+	}, cleanName)
+	cleanName = strings.TrimSpace(cleanName)
+	if cleanName != "" && cleanName != "." && cleanName != ".." && cleanName != "/" {
+		if filepath.Ext(cleanName) == "" {
+			if cleanType := minerUCleanFileType(fileType); cleanType != "" {
+				return cleanName + "." + cleanType
+			}
+		}
+		return cleanName
+	}
+
+	if cleanType := minerUCleanFileType(fileType); cleanType != "" {
+		return "document." + cleanType
+	}
+	return "document"
+}
+
+// minerUResultStem mirrors MinerU's upload.stem: the basename without extension.
+func minerUResultStem(uploadFileName string) string {
+	stem := strings.TrimSuffix(path.Base(uploadFileName), filepath.Ext(uploadFileName))
+	if stem == "" || stem == "." {
+		return ""
+	}
+	return stem
+}
+
+func minerUResultLookupKeys(uploadFileName string) []string {
+	keys := make([]string, 0, 3)
+	if stem := minerUResultStem(uploadFileName); stem != "" {
+		keys = append(keys, stem)
+	}
+	return append(keys, "document", "files")
+}
+
+func parseMinerUFileParseResponse(respBody []byte, uploadFileName string) (string, map[string]string, string, error) {
+	var envelope struct {
+		Results map[string]mineruFileEntry `json:"results"`
+	}
+	if err := json.Unmarshal(respBody, &envelope); err != nil {
+		return "", nil, "", fmt.Errorf("decode response: %w", err)
+	}
+	if len(envelope.Results) == 0 {
+		return "", nil, "", nil
+	}
+
+	for _, key := range minerUResultLookupKeys(uploadFileName) {
+		if entry, ok := envelope.Results[key]; ok {
+			if entry.MDContent != "" || len(entry.Images) > 0 {
+				return entry.MDContent, entry.Images, key, nil
+			}
+		}
+	}
+
+	for key, entry := range envelope.Results {
+		if entry.MDContent != "" || len(entry.Images) > 0 {
+			return entry.MDContent, entry.Images, key, nil
+		}
+	}
+	return "", nil, "", nil
+}
+
+func (c *MinerUReader) callFileParse(
+	ctx context.Context,
+	content []byte,
+	fileName string,
+	fileType string,
+) (string, map[string]string, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
@@ -117,7 +202,7 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 		"return_images":       "true",
 		"table_enable":        fmt.Sprintf("%v", c.tableEnable),
 		"formula_enable":      fmt.Sprintf("%v", c.formulaEnable),
-		"parse_method":        "ocr",
+		"parse_method":        c.parseMethod,
 		"start_page_id":       "0",
 		"end_page_id":         "99999",
 		"backend":             c.backend,
@@ -125,9 +210,6 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 		"return_middle_json":  "false",
 		"return_model_output": "false",
 		"return_content_list": "true",
-	}
-	if !c.ocrEnable {
-		fields["parse_method"] = "txt"
 	}
 	if c.language != "" {
 		fields["lang_list"] = c.language
@@ -139,8 +221,10 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 		_ = writer.WriteField(k, v)
 	}
 
+	uploadFileName := minerUUploadFileName(fileName, fileType)
+
 	// File part
-	part, err := writer.CreateFormFile("files", "document")
+	part, err := writer.CreateFormFile("files", uploadFileName)
 	if err != nil {
 		return "", nil, fmt.Errorf("create form file: %w", err)
 	}
@@ -189,25 +273,16 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 		c.logMinerUResponseStructure(rawMap, "")
 	}
 
-	var result mineruFileParseResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", nil, fmt.Errorf("decode response: %w", err)
+	mdContent, imagesB64, resultKey, err := parseMinerUFileParseResponse(respBody, uploadFileName)
+	if err != nil {
+		return "", nil, err
+	}
+	if resultKey != "" {
+		logger.Infof(context.Background(), "[MinerU] Using response path: results.%s", resultKey)
+		return mdContent, imagesB64, nil
 	}
 
-	// MinerU response schema differs by version/deployment:
-	// - older/self-hosted variants: results.document.*
-	// - some variants:            results.files.*
-	// Prefer document when available, then fallback to files.
-	if result.Results.Document.MDContent != "" || len(result.Results.Document.Images) > 0 {
-		logger.Infof(context.Background(), "[MinerU] Using response path: results.document")
-		return result.Results.Document.MDContent, result.Results.Document.Images, nil
-	}
-	if result.Results.Files.MDContent != "" || len(result.Results.Files.Images) > 0 {
-		logger.Infof(context.Background(), "[MinerU] Using response path: results.files")
-		return result.Results.Files.MDContent, result.Results.Files.Images, nil
-	}
-
-	logger.Errorf(context.Background(), "[MinerU] Response has no markdown/images under results.document or results.files")
+	logger.Errorf(context.Background(), "[MinerU] Response has no markdown/images under results")
 	return "", nil, nil
 }
 
@@ -373,7 +448,7 @@ func extractImageRefsFromContent(content string) []string {
 			refs = append(refs, strings.TrimSpace(match[2]))
 		}
 	}
-	for _, match := range imgHTMLRelativeSrc.FindAllStringSubmatch(content, -1) {
+	for _, match := range imgHTMLSrc.FindAllStringSubmatch(content, -1) {
 		if len(match) >= 3 {
 			refs = append(refs, match[2])
 		}

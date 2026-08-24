@@ -100,19 +100,3 @@ export const buildManualMarkdown = (_question: string, answer: string): string =
   const safeAnswer = answer?.trim() || i18n.global.t('chat.noAnswerContent');
   return `${safeAnswer}`;
 };
-
-export const copyTextToClipboard = async (content: string): Promise<void> => {
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    await navigator.clipboard.writeText(content);
-    return;
-  }
-
-  const textArea = document.createElement('textarea');
-  textArea.value = content;
-  textArea.style.position = 'fixed';
-  textArea.style.opacity = '0';
-  document.body.appendChild(textArea);
-  textArea.select();
-  document.execCommand('copy');
-  document.body.removeChild(textArea);
-};

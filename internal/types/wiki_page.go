@@ -118,8 +118,6 @@ const (
 	WikiPageTypeConcept = "concept"
 	// WikiPageTypeIndex represents the wiki index page (index.md)
 	WikiPageTypeIndex = "index"
-	// WikiPageTypeLog represents the operation log page (log.md)
-	WikiPageTypeLog = "log"
 	// WikiPageTypeSynthesis represents a synthesis/analysis page.
 	// NOT auto-created by ingest — Agent creates these via wiki_write_page tool
 	// when it generates cross-document analysis, trends, or insights during conversations.
@@ -140,13 +138,36 @@ const (
 	WikiPageStatusArchived = "archived"
 )
 
+// IsValidWikiPageType reports whether pageType is one of the known page
+// types. Unknown values would silently disappear from the type-filtered
+// listings the browser is built on, so write paths reject them.
+func IsValidWikiPageType(pageType string) bool {
+	switch pageType {
+	case WikiPageTypeSummary, WikiPageTypeEntity, WikiPageTypeConcept,
+		WikiPageTypeIndex, WikiPageTypeSynthesis, WikiPageTypeComparison:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsValidWikiPageStatus reports whether status is one of the known statuses.
+func IsValidWikiPageStatus(status string) bool {
+	switch status {
+	case WikiPageStatusDraft, WikiPageStatusPublished, WikiPageStatusArchived:
+		return true
+	default:
+		return false
+	}
+}
+
 // WikiPage represents a single wiki page in a wiki knowledge base.
 // Wiki pages are LLM-generated, interlinked markdown documents that form
 // a persistent, compounding knowledge artifact.
 type WikiPage struct {
 	// Unique identifier (UUID)
 	ID string `json:"id" gorm:"type:varchar(36);primaryKey"`
-	// Tenant ID for multi-tenant isolation
+	// Workspace ID for multi-workspace isolation
 	TenantID uint64 `json:"tenant_id" gorm:"index"`
 	// Knowledge base this page belongs to
 	KnowledgeBaseID string `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
@@ -155,7 +176,7 @@ type WikiPage struct {
 	Slug string `json:"slug" gorm:"type:varchar(255);uniqueIndex:idx_kb_slug"`
 	// Human-readable title
 	Title string `json:"title" gorm:"type:varchar(512)"`
-	// Page type: summary, entity, concept, index, log, synthesis, comparison
+	// Page type: summary, entity, concept, index, synthesis, comparison
 	PageType string `json:"page_type" gorm:"type:varchar(32);index"`
 	// Page status: draft, published, archived
 	Status string `json:"status" gorm:"type:varchar(32);default:'published'"`
@@ -212,6 +233,14 @@ type WikiPage struct {
 	// sync from background jobs) leave it untouched so it can be used as a
 	// real "the page was edited" signal.
 	Version int `json:"version" gorm:"default:1"`
+	// LastEditSource records who authored the CURRENT version: pipeline |
+	// agent | user | revert. Empty for legacy rows (treated as pipeline).
+	// When the version is superseded this value travels into the revision
+	// snapshot, so each historical version keeps its own author kind.
+	LastEditSource string `json:"last_edit_source,omitempty" gorm:"type:varchar(16);default:''"`
+	// LastEditorID is the user id of the caller that produced the current
+	// version (empty for background pipeline writes).
+	LastEditorID string `json:"last_editor_id,omitempty" gorm:"type:varchar(64);default:''"`
 	// Creation time
 	CreatedAt time.Time `json:"created_at"`
 	// Last update time
@@ -223,6 +252,135 @@ type WikiPage struct {
 // TableName specifies the database table name
 func (WikiPage) TableName() string {
 	return "wiki_pages"
+}
+
+// Wiki edit source constants describe who authored a page version. Stored in
+// WikiPage.LastEditSource (current version) and WikiPageRevision.EditSource
+// (historical versions).
+const (
+	// WikiEditSourcePipeline marks versions written by the wiki ingest
+	// pipeline (also the fallback for legacy rows with an empty source).
+	WikiEditSourcePipeline = "pipeline"
+	// WikiEditSourceAgent marks versions written through the agent wiki
+	// tools (wiki_write_page / wiki_replace_text / ...).
+	WikiEditSourceAgent = "agent"
+	// WikiEditSourceUser marks versions written by a human through the
+	// wiki editor UI / REST API.
+	WikiEditSourceUser = "user"
+	// WikiEditSourceRevert marks versions produced by rolling the page
+	// back to an earlier revision.
+	WikiEditSourceRevert = "revert"
+)
+
+// NormalizeWikiEditSource maps unknown / empty values to
+// WikiEditSourcePipeline so legacy rows and forgotten call sites degrade to
+// the historical behavior ("the machine wrote this").
+func NormalizeWikiEditSource(source string) string {
+	switch source {
+	case WikiEditSourceAgent, WikiEditSourceUser, WikiEditSourceRevert, WikiEditSourcePipeline:
+		return source
+	default:
+		return WikiEditSourcePipeline
+	}
+}
+
+// WikiPageRevision is one immutable snapshot of a superseded page version.
+// The current version lives only in wiki_pages; when an edit replaces
+// version V the pre-edit state is inserted here as (page_id, V) inside the
+// same transaction, so every historical version stays diffable and
+// revertable. Rows are pruned per WikiRevisionPruneRequest to bound storage
+// on hot pipeline pages.
+type WikiPageRevision struct {
+	ID              string      `json:"id" gorm:"type:varchar(36);primaryKey"`
+	TenantID        uint64      `json:"tenant_id" gorm:"index"`
+	KnowledgeBaseID string      `json:"knowledge_base_id" gorm:"type:varchar(36);index:idx_wiki_page_revisions_kb_slug"`
+	PageID          string      `json:"page_id" gorm:"type:varchar(36);uniqueIndex:idx_wiki_page_revisions_page_version"`
+	Slug            string      `json:"slug" gorm:"type:varchar(255);index:idx_wiki_page_revisions_kb_slug"`
+	Version         int         `json:"version" gorm:"uniqueIndex:idx_wiki_page_revisions_page_version"`
+	Title           string      `json:"title" gorm:"type:varchar(512)"`
+	PageType        string      `json:"page_type" gorm:"type:varchar(32)"`
+	Status          string      `json:"status" gorm:"type:varchar(32)"`
+	Content         string      `json:"content,omitempty" gorm:"type:text"`
+	Summary         string      `json:"summary" gorm:"type:text"`
+	Aliases         StringArray `json:"aliases" gorm:"type:json"`
+	// Author of THIS version (same semantics as WikiPage.LastEditSource).
+	EditSource string `json:"edit_source" gorm:"type:varchar(16);default:''"`
+	EditorID   string `json:"editor_id" gorm:"type:varchar(64);default:''"`
+	// When this version was authored (the page's updated_at while current).
+	EditedAt  time.Time `json:"edited_at"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// TableName specifies the database table name
+func (WikiPageRevision) TableName() string {
+	return "wiki_page_revisions"
+}
+
+// Snapshot retention is two-tiered, because the two kinds of history have
+// very different value. A hot hub page is rewritten by the ingest pipeline on
+// every related batch, so machine snapshots would otherwise crowd out the
+// handful of human/agent edits this feature exists to protect.
+const (
+	// WikiMaxRevisionsPerPage is how many recent versions are kept for
+	// prunable (machine-authored) snapshots.
+	WikiMaxRevisionsPerPage = 50
+	// WikiMaxRevisionsHardCap is the absolute per-page ceiling, applied
+	// regardless of author, so a page edited only by hand still has bounded
+	// storage.
+	WikiMaxRevisionsHardCap = 200
+)
+
+// WikiPrunableEditSources lists the edit sources whose snapshots may be
+// dropped by the soft cap. Everything else (user / agent / revert) survives
+// until the hard cap. Legacy rows carry an empty source, hence "".
+var WikiPrunableEditSources = []string{"", WikiEditSourcePipeline}
+
+// WikiRevisionPruneRequest describes the two-tier retention applied to one
+// page's snapshot history. A version threshold <= 0 disables that tier.
+type WikiRevisionPruneRequest struct {
+	PageID string
+	// KeepFromVersion: snapshots below this version are dropped, but only
+	// when their edit source is listed in PrunableSources.
+	KeepFromVersion int
+	PrunableSources []string
+	// HardKeepFromVersion: snapshots below this version are always dropped,
+	// whatever their author.
+	HardKeepFromVersion int
+}
+
+// WikiPageUpdateRequest is the partial-update payload for
+// PUT /wiki/pages/*slug. All content fields are optional pointers — absent
+// fields keep their stored value, so a client can change just the body
+// without re-sending (and risking clobbering) title/status/aliases.
+type WikiPageUpdateRequest struct {
+	Title    *string      `json:"title,omitempty"`
+	Content  *string      `json:"content,omitempty"`
+	Summary  *string      `json:"summary,omitempty"`
+	PageType *string      `json:"page_type,omitempty"`
+	Status   *string      `json:"status,omitempty"`
+	Aliases  *StringArray `json:"aliases,omitempty"`
+	// Version is the optimistic-lock guard: when > 0 the update is rejected
+	// with a conflict if the stored version differs (someone else edited the
+	// page since the client loaded it). 0 skips the check (legacy clients).
+	Version int `json:"version,omitempty"`
+}
+
+// WikiPageRevisionListResponse is the payload for GET /wiki/revisions/*slug.
+// Revisions hold the superseded versions (content omitted in list mode);
+// the current version is described by CurrentVersion + the page row itself,
+// which the frontend already has.
+type WikiPageRevisionListResponse struct {
+	Revisions      []*WikiPageRevision `json:"revisions"`
+	Total          int64               `json:"total"`
+	CurrentVersion int                 `json:"current_version"`
+}
+
+// WikiPageRevertRequest rolls a page back to one of its stored revisions.
+// Slug travels in the body (not the path) for the same reason as
+// WikiPageMoveRequest: hierarchical slugs collide with gin's catch-all.
+type WikiPageRevertRequest struct {
+	Slug    string `json:"slug" binding:"required"`
+	Version int    `json:"version" binding:"required"`
 }
 
 // WikiFolderRootID is the sentinel parent/folder id meaning "the wiki root"
@@ -347,6 +505,12 @@ type WikiConfig struct {
 	// ExtractionGranularity controls how many candidate slugs Pass 0 extracts
 	// per document. Empty / unknown value is treated as WikiExtractionStandard.
 	ExtractionGranularity WikiExtractionGranularity `yaml:"extraction_granularity" json:"extraction_granularity,omitempty"`
+	// ContentInstructions controls tone, structure and emphasis for generated
+	// summary/entity/index prose. Citation and merge rules remain system-owned.
+	ContentInstructions string `yaml:"content_instructions,omitempty" json:"content_instructions,omitempty"`
+	// ExtractionInstructions tells candidate extraction which domain concepts
+	// to emphasize without replacing the stable JSON/citation protocol.
+	ExtractionInstructions string `yaml:"extraction_instructions,omitempty" json:"extraction_instructions,omitempty"`
 
 	// Wiki ingest concurrency is two-level:
 	//   1. batch-level: multiple batches per KB run concurrently in the wiki
@@ -465,7 +629,6 @@ type WikiPageListResponse struct {
 	TotalPages int         `json:"total_pages"`
 }
 
-
 // WikiGraphMode enumerates the graph query modes exposed to the API.
 const (
 	// WikiGraphModeOverview returns the top-N most-connected pages as an
@@ -491,6 +654,10 @@ type WikiGraphRequest struct {
 	Depth           int      // ego mode BFS depth, >= 1
 	Types           []string // optional page_type filter; empty = no filter
 	Limit           int      // max nodes to return; <= 0 means uncapped
+	// FamiliarKnowledgeIDs are documents this person keeps drawing answers
+	// from. Pages whose source_refs intersect the set are marked Familiar so
+	// the existing Wiki graph can light them up without cloning a second graph.
+	FamiliarKnowledgeIDs []string
 }
 
 // WikiGraphData represents the link graph structure for visualization.
@@ -510,6 +677,8 @@ type WikiGraphMeta struct {
 	Truncated bool   `json:"truncated"`        // true when Returned < Total (after filters)
 	Center    string `json:"center,omitempty"` // populated in ego mode
 	Depth     int    `json:"depth,omitempty"`  // populated in ego mode
+	// FamiliarCount is how many returned nodes are lit up for this person.
+	FamiliarCount int `json:"familiar_count,omitempty"`
 }
 
 // WikiGraphNode represents a node in the wiki link graph
@@ -519,6 +688,10 @@ type WikiGraphNode struct {
 	PageType string `json:"page_type"`
 	// Number of inbound + outbound links
 	LinkCount int `json:"link_count"`
+	// Familiar is true when this page was built from a document this person
+	// keeps citing in answers. It is a personal overlay, not a property of
+	// the page: two people looking at the same wiki see different highlights.
+	Familiar bool `json:"familiar,omitempty"`
 }
 
 // WikiGraphEdge represents a directed edge in the wiki link graph
@@ -605,8 +778,7 @@ type WikiIndexResponse struct {
 //
 // Use cases:
 //
-//   - SlugTitleFetcher: resolve slug -> title for log entries and
-//     cross-link injection.
+//   - SlugTitleFetcher: resolve slug -> title for cross-link injection.
 //   - cleanDeadLinks: read out_links + status without pulling content.
 //   - dedup pre-filter: title + aliases + page_type for the trgm /
 //     surface-similarity comparisons.
@@ -622,4 +794,44 @@ type WikiPageLite struct {
 	Status   string      `json:"status"`
 	Aliases  StringArray `json:"aliases,omitempty"`
 	OutLinks StringArray `json:"out_links,omitempty"`
+}
+
+// WikiSourceKnowledgeID extracts the knowledge id from a source_refs entry,
+// stored as "uuid" or "uuid|title".
+func WikiSourceKnowledgeID(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	if i := strings.IndexByte(ref, '|'); i > 0 {
+		return strings.TrimSpace(ref[:i])
+	}
+	return ref
+}
+
+// SourceKnowledgeIDs returns the document ids this page was built from.
+func (p *WikiPage) SourceKnowledgeIDs() []string {
+	if p == nil || len(p.SourceRefs) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(p.SourceRefs))
+	for _, ref := range p.SourceRefs {
+		if id := WikiSourceKnowledgeID(ref); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// BuiltFrom reports whether any of this page's sources is in the given set.
+func (p *WikiPage) BuiltFrom(knowledgeIDs map[string]struct{}) bool {
+	if p == nil || len(knowledgeIDs) == 0 {
+		return false
+	}
+	for _, id := range p.SourceKnowledgeIDs() {
+		if _, ok := knowledgeIDs[id]; ok {
+			return true
+		}
+	}
+	return false
 }

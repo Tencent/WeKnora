@@ -47,12 +47,35 @@ test('rag pipeline opens references from search steps and the drawer composable'
   assert.match(source, /handleStepClick/)
 })
 
-test('rag pipeline keeps loading inside the thinking step instead of orphan dots', () => {
+test('rag pipeline uses a native pending step and lets the thinking title shimmer while pending', () => {
   assert.match(source, /showPrePipelineWait/)
+  assert.match(source, /v-else-if="showPrePipelineWait"[\s\S]*class="tool-event"/)
+  assert.match(source, /class="action-card action-pending"/)
+  assert.match(source, /t\('chat\.preparingAnswer'\)/)
   assert.match(source, /showThinkingStep/)
-  assert.match(source, /thinking-loading/)
+  assert.match(source, /'action-pending': thinkingPending/)
   assert.match(source, /hasThinkingEvent/)
+  assert.doesNotMatch(source, /thinking-loading/)
   assert.doesNotMatch(source, /showActivityIndicator/)
+})
+
+test('rag pipeline shows a pending model-answer step after retrieval completes', () => {
+  assert.match(source, /showWaitStep/)
+  assert.match(source, /getRagPipelineWaitKind/)
+  assert.match(source, /createRagWaitController/)
+  assert.match(source, /t\('chat\.connectingModelAndGeneratingAnswer'\)/)
+  assert.match(source, /t\('chat\.modelStillResponding'\)/)
+  assert.match(source, /rag-model-wait-step/)
+  assert.match(source, /'action-pending': !waitStepStalled/)
+  assert.match(source, /waitController\.dispose\(\)/)
+})
+
+test('rag pipeline announces wait status from a region that outlives each row', () => {
+  const template = source.split('<script')[0]
+  assert.match(template, /class="sr-only" role="status" aria-live="polite"/)
+  assert.equal((template.match(/aria-live/g) || []).length, 1)
+  assert.match(source, /liveStatusText/)
+  assert.match(source, /\.sr-only \{[\s\S]*clip: rect\(0, 0, 0, 0\)/)
 })
 
 test('done row appears only after the full turn completes', () => {
@@ -84,4 +107,45 @@ test('rag pipeline auto-scrolls capped thinking detail while streaming', () => {
   assert.match(source, /isThinkingStreaming/)
   assert.match(source, /scrollThinkingDetailToBottom/)
   assert.match(source, /watch\(thinkingContent[\s\S]*scrollThinkingDetailToBottom/)
+})
+
+test('rag pipeline includes attachment prep steps on the timeline', () => {
+  assert.match(source, /RAG_TIMELINE_TOOL_NAMES/)
+  assert.match(source, /getAttachmentParsingSummaryHtml/)
+  assert.match(source, /isAttachmentTool/)
+})
+
+test('memory rides the existing timeline as a single reusable row', () => {
+  assert.match(source, /<ChatMemoryStep/)
+  assert.equal(source.split('<ChatMemoryStep').length - 1, 3)
+  assert.match(source, /:is-last="memoryIsLast"/)
+})
+
+// A host that draws its own timeline asks for the memory row only. Without the
+// guard this component rebuilds a whole pipeline out of the same agent event
+// stream, and the turn shows every retrieval step twice in two disjoint blocks.
+test('memory-only hosts get the memory row and nothing else', () => {
+  assert.match(source, /memoryOnly\?: boolean/)
+  assert.match(source, /v-if="memoryOnly"\s*\n\s*variant="root"/)
+  assert.match(source, /<div v-else-if="showPrePipelineWait"/)
+  assert.match(source, /if \(props\.memoryOnly\) return hasMemory\.value/)
+})
+
+// The standalone row is for answers with no timeline at all. Agent turns keep
+// their memory row inside the agent timeline, so rendering it here too would
+// show the same recall twice, in two different visual languages.
+test('only timeline-less answers get the standalone memory row', () => {
+  const botmsg = readFileSync(join(here, 'botmsg.vue'), 'utf8')
+  assert.match(
+    botmsg,
+    /<RagPipelineProgress v-if="!session\.isAgentMode && session\.used_memories\?\.length"[\s\S]*?memory-only/,
+  )
+})
+
+// Both timelines show the same row from the same state; duplicating the recall
+// list, expand state and forget call is how the two drift apart.
+test('memory row state is shared by both timelines', () => {
+  assert.match(source, /useChatMemoryRow\(\(\) => props\.session\?\.used_memories\)/)
+  const agent = readFileSync(join(here, 'AgentStreamDisplay.vue'), 'utf8')
+  assert.match(agent, /useChatMemoryRow\(/)
 })

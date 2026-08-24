@@ -41,10 +41,10 @@ func (l *langfuseReranker) Rerank(ctx context.Context, query string, documents [
 			"documents_preview": previewDocs(documents, langfuseRerankPreviewDocs),
 		},
 		Metadata: map[string]interface{}{
-			"model_id":        l.inner.GetModelID(),
-			"num_queries":     1,
-			"total_chars":     totalChars,
-			"avg_doc_chars":   avgDocChars(documents),
+			"model_id":      l.inner.GetModelID(),
+			"num_queries":   1,
+			"total_chars":   totalChars,
+			"avg_doc_chars": avgDocChars(documents),
 		},
 	})
 

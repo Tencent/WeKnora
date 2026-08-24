@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -30,8 +31,8 @@ type TenantHandler struct {
 	memberService interfaces.TenantMemberService
 	kbService     interfaces.KnowledgeBaseService
 	config        *config.Config
-	// systemSettingSvc resolves runtime tunables for tenant limits
-	// (currently `tenant.max_owned_per_user`). Reading goes DB > ENV >
+	// systemSettingSvc resolves runtime tenant policies and limits.
+	// Reading goes DB > ENV >
 	// in-code default, so a SystemAdmin's UI override applies on the
 	// very next CreateTenant call.
 	systemSettingSvc interfaces.SystemSettingService
@@ -142,16 +143,26 @@ type tenantAPIKeyCreateRequest struct {
 	ExpiresAt        *int64   `json:"expires_at_unix"`
 }
 
+// tenantAPIKeyUpdateRequest 修改已创建 API Key 的配置，字段语义与创建接口一致。
+type tenantAPIKeyUpdateRequest struct {
+	Name             string   `json:"name"`
+	FullAccess       bool     `json:"full_access"`
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
+	Capabilities     []string `json:"capabilities"`
+	ExpiresAt        *int64   `json:"expires_at_unix"`
+}
+
 type tenantAPIKeyResponse struct {
-	ID               uint64            `json:"id"`
-	Name             string            `json:"name"`
-	APIKey           string            `json:"api_key"`
-	FullAccess       bool              `json:"full_access"`
-	KnowledgeBaseIDs types.StringArray `json:"knowledge_base_ids"`
-	Capabilities     types.StringArray `json:"capabilities"`
-	LastUsedAt       *time.Time        `json:"last_used_at,omitempty"`
-	ExpiresAt        *time.Time        `json:"expires_at,omitempty"`
-	CreatedAt        time.Time         `json:"created_at"`
+	ID               uint64                `json:"id"`
+	ScopeType        types.APIKeyScopeType `json:"scope_type"`
+	Name             string                `json:"name"`
+	APIKey           string                `json:"api_key"`
+	FullAccess       bool                  `json:"full_access"`
+	KnowledgeBaseIDs types.StringArray     `json:"knowledge_base_ids"`
+	Capabilities     types.StringArray     `json:"capabilities"`
+	LastUsedAt       *time.Time            `json:"last_used_at,omitempty"`
+	ExpiresAt        *time.Time            `json:"expires_at,omitempty"`
+	CreatedAt        time.Time             `json:"created_at"`
 }
 
 type tenantAPIKeyCreateResponse struct {
@@ -198,15 +209,17 @@ func (h *TenantHandler) resolveMaxOwnedTenantsPerUser(ctx context.Context) int {
 }
 
 // CreateTenant godoc
-// @Summary      创建租户
-// @Description  创建新的租户。任意已登录用户均可调用以建立自己的新工作区，
-// @Description  调用方会被自动设为该租户的 Owner。跨租户超管仍可像以前一样
-// @Description  通过本接口创建任意租户。
-// @Tags         租户管理
+// @Summary      创建空间
+// @Description  创建新的空间。任意已登录用户均可调用以建立自己的新工作区，
+// @Description  调用方会被自动设为该空间的 Owner。跨空间超管仍可像以前一样
+// @Description  通过本接口创建任意空间。
+// @Description  当 tenant.auto_create_api_key（或 WEKNORA_TENANT_AUTO_CREATE_API_KEY）
+// @Description  开启时，会自动创建一个 full_access API Key，并在响应体的 data.api_key 字段返回其明文 token。
+// @Tags         空间管理
 // @Accept       json
 // @Produce      json
-// @Param        request  body      handler.createTenantRequest  true  "租户信息"
-// @Success      201      {object}  map[string]interface{}  "创建的租户"
+// @Param        request  body      handler.createTenantRequest  true  "空间信息"
+// @Success      201      {object}  map[string]interface{}  "创建的空间（可选含 api_key）"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Router       /tenants [post]
@@ -224,10 +237,24 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 		c.Error(errors.NewUnauthorizedError("authentication required"))
 		return
 	}
+	apiKeyScope, hasAPIKeyScope := types.TenantAPIKeyScopeFromContext(ctx)
+	platformCaller := hasAPIKeyScope && apiKeyScope.IsPlatform()
+	catalogManager := caller.CanAccessAllTenants || platformCaller
+
+	// Deployment-level policy: ordinary users may be restricted to joining
+	// existing workspaces by invitation. This check is authoritative; the
+	// frontend capability only improves UX and cannot bypass it. Cross-tenant
+	// superusers retain the catalog-management create path.
+	if !catalogManager &&
+		!resolveTenantSelfServiceCreationEnabled(ctx, h.config, h.systemSettingSvc) {
+		logger.Warnf(ctx, "Self-service tenant creation denied by policy for user %s", caller.ID)
+		c.Error(errors.NewTenantCreationDisabledError())
+		return
+	}
 
 	var tenantData types.Tenant
 
-	if caller.CanAccessAllTenants {
+	if catalogManager {
 		// Backward-compatible path for cross-tenant superusers: accept
 		// the full Tenant payload (status, storage_quota, retriever
 		// engines, configs...) so existing tooling keeps working.
@@ -264,7 +291,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 			memberships, listErr := h.memberService.ListByUser(ctx, caller.ID)
 			if listErr != nil {
 				logger.Errorf(ctx, "Failed to count owned tenants for user %s: %v", caller.ID, listErr)
-				c.Error(errors.NewInternalServerError("Failed to validate tenant quota").WithDetails(listErr.Error()))
+				c.Error(errors.NewInternalServerError("Failed to validate workspace quota").WithDetails(listErr.Error()))
 				return
 			}
 			ownedCount := 0
@@ -280,7 +307,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 					caller.ID, ownedCount, cap,
 				)
 				c.Error(errors.NewTooManyRequestsError(
-					"reached self-service tenant quota; contact an administrator to raise the limit",
+					"reached self-service workspace quota; contact an administrator to raise the limit",
 				))
 				return
 			}
@@ -321,11 +348,11 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 	if err != nil {
 		// Check if this is an application-specific error
 		if appErr, ok := errors.IsAppError(err); ok {
-			logger.Error(ctx, "Failed to create tenant: application error", appErr)
+			logger.Error(ctx, "Failed to create workspace: application error", appErr)
 			c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to create tenant").WithDetails(err.Error()))
+			c.Error(errors.NewInternalServerError("Failed to create workspace").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -338,7 +365,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 	// yet still occupies storage_bucket / name uniqueness slots.
 	// Idempotent: EnsureOwner is a no-op when the row already exists,
 	// so cross-tenant superusers create-and-own through the same path.
-	if h.memberService != nil {
+	if h.memberService != nil && !platformCaller {
 		if _, err := h.memberService.EnsureOwner(ctx, caller.ID, createdTenant.ID); err != nil {
 			logger.Errorf(ctx,
 				"Failed to bootstrap owner membership for user %s tenant %d: %v — rolling back tenant",
@@ -349,7 +376,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 					createdTenant.ID, delErr,
 				)
 			}
-			c.Error(errors.NewInternalServerError("Failed to finalise tenant ownership").WithDetails(err.Error()))
+			c.Error(errors.NewInternalServerError("Failed to finalise workspace ownership").WithDetails(err.Error()))
 			return
 		}
 
@@ -391,11 +418,28 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 						)
 					}
 					c.Error(errors.NewTooManyRequestsError(
-						"reached self-service tenant quota; contact an administrator to raise the limit",
+						"reached self-service workspace quota; contact an administrator to raise the limit",
 					))
 					return
 				}
 			}
+		}
+	}
+
+	// When a tenantless user creates their first workspace, make it their
+	// default login tenant. Roll the just-created resources back if this
+	// finalisation fails so the user is not left with an unreachable tenant.
+	if caller.TenantID == 0 && !platformCaller {
+		caller.TenantID = createdTenant.ID
+		if err := h.userService.UpdateUser(ctx, caller); err != nil {
+			logger.Errorf(ctx, "Failed to set first tenant %d as default for user %s: %v",
+				createdTenant.ID, caller.ID, err)
+			if h.memberService != nil {
+				_ = h.memberService.RemoveMember(ctx, caller.ID, createdTenant.ID)
+			}
+			_ = h.service.DeleteTenant(ctx, createdTenant.ID)
+			c.Error(errors.NewInternalServerError("Failed to finalise default workspace").WithDetails(err.Error()))
+			return
 		}
 	}
 
@@ -405,22 +449,92 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 		createdTenant.ID,
 		secutils.SanitizeForLog(createdTenant.Name),
 	)
+
+	// data carries the created tenant. When the legacy auto-create-key
+	// behaviour is enabled we embed the plaintext token as data.api_key so
+	// the response shape mirrors the pre-break-change behaviour integrations
+	// relied on.
+	var data any = createdTenant
+
+	// Optional legacy compatibility: mint a full-access API key on tenant
+	// creation and return its plaintext token, gated by the
+	// tenant.auto_create_api_key setting (env WEKNORA_TENANT_AUTO_CREATE_API_KEY).
+	// Default off — modern deployments create keys explicitly via
+	// tenant_api_keys. Failing to create the convenience key must NOT fail
+	// the whole tenant creation (the tenant is fully usable without a key);
+	// we log a warning and return the tenant as usual.
+	// A platform key with system_tenants_manage may create workspaces, but it
+	// must not bootstrap a full-access workspace key and escalate beyond its
+	// own explicit capabilities.
+	if !platformCaller && h.autoCreateTenantAPIKey(ctx) && h.apiKeyService != nil {
+		result, keyErr := h.apiKeyService.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
+			TenantID:   createdTenant.ID,
+			Name:       "default",
+			FullAccess: true,
+		})
+		if keyErr != nil {
+			logger.Errorf(ctx,
+				"Auto-create default API key failed for tenant %d: %v — returning tenant without key",
+				createdTenant.ID, keyErr)
+		} else if merged, mErr := tenantWithAPIKey(createdTenant, result.Token); mErr != nil {
+			// Round-trip failure is unexpected; degrade gracefully by
+			// returning the tenant without embedding the key rather than
+			// failing the whole request.
+			logger.Errorf(ctx, "Failed to embed api_key into tenant response for tenant %d: %v",
+				createdTenant.ID, mErr)
+		} else {
+			data = merged
+		}
+	}
+
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data":    createdTenant,
+		"data":    data,
 	})
 }
 
+// tenantWithAPIKey returns the tenant serialized as a map with an extra
+// api_key field, so the create response can embed the plaintext token inside
+// data (mirroring the pre-break-change shape) without adding a persisted
+// api_key column back onto types.Tenant.
+func tenantWithAPIKey(tenant *types.Tenant, token string) (map[string]any, error) {
+	raw, err := json.Marshal(tenant)
+	if err != nil {
+		return nil, err
+	}
+	m := map[string]any{}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, err
+	}
+	m["api_key"] = token
+	return m, nil
+}
+
+// autoCreateTenantAPIKey resolves whether tenant creation should also mint a
+// full-access API key (legacy compatibility). 3-tier resolver:
+// system_settings DB row > WEKNORA_TENANT_AUTO_CREATE_API_KEY env > false.
+func (h *TenantHandler) autoCreateTenantAPIKey(ctx context.Context) bool {
+	if h.systemSettingSvc == nil {
+		return false
+	}
+	return h.systemSettingSvc.GetBool(
+		ctx,
+		"tenant.auto_create_api_key",
+		"WEKNORA_TENANT_AUTO_CREATE_API_KEY",
+		false,
+	)
+}
+
 // GetTenant godoc
-// @Summary      获取租户详情
-// @Description  根据ID获取租户详情
-// @Tags         租户管理
+// @Summary      获取空间详情
+// @Description  根据ID获取空间详情
+// @Tags         空间管理
 // @Accept       json
 // @Produce      json
-// @Param        id   path      int  true  "租户ID"
-// @Success      200  {object}  map[string]interface{}  "租户详情"
+// @Param        id   path      int  true  "空间ID"
+// @Success      200  {object}  map[string]interface{}  "空间详情"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
-// @Failure      404  {object}  errors.AppError         "租户不存在"
+// @Failure      404  {object}  errors.AppError         "空间不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /tenants/{id} [get]
@@ -429,19 +543,19 @@ func (h *TenantHandler) GetTenant(c *gin.Context) {
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		logger.Errorf(ctx, "Invalid tenant ID: %s", secutils.SanitizeForLog(c.Param("id")))
-		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
+		logger.Errorf(ctx, "Invalid workspace ID: %s", secutils.SanitizeForLog(c.Param("id")))
+		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 
 	tenant, err := h.service.GetTenantByID(ctx, id)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
-			logger.Error(ctx, "Failed to retrieve tenant: application error", appErr)
+			logger.Error(ctx, "Failed to retrieve workspace: application error", appErr)
 			c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to retrieve tenant").WithDetails(err.Error()))
+			c.Error(errors.NewInternalServerError("Failed to retrieve workspace").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -453,14 +567,14 @@ func (h *TenantHandler) GetTenant(c *gin.Context) {
 }
 
 // UpdateTenant godoc
-// @Summary      更新租户
-// @Description  更新租户信息
-// @Tags         租户管理
+// @Summary      更新空间
+// @Description  更新空间信息
+// @Tags         空间管理
 // @Accept       json
 // @Produce      json
-// @Param        id       path      int           true  "租户ID"
-// @Param        request  body      types.Tenant  true  "租户信息"
-// @Success      200      {object}  map[string]interface{}  "更新后的租户"
+// @Param        id       path      int           true  "空间ID"
+// @Param        request  body      types.Tenant  true  "空间信息"
+// @Success      200      {object}  map[string]interface{}  "更新后的空间"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Router       /tenants/{id} [put]
@@ -471,8 +585,8 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		logger.Errorf(ctx, "Invalid tenant ID: %s", secutils.SanitizeForLog(c.Param("id")))
-		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
+		logger.Errorf(ctx, "Invalid workspace ID: %s", secutils.SanitizeForLog(c.Param("id")))
+		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 
@@ -500,7 +614,7 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 			c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to load tenant").WithDetails(err.Error()))
+			c.Error(errors.NewInternalServerError("Failed to load workspace").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -522,11 +636,11 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 	updatedTenant, err := h.service.UpdateTenant(ctx, existing)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
-			logger.Error(ctx, "Failed to update tenant: application error", appErr)
+			logger.Error(ctx, "Failed to update workspace: application error", appErr)
 			c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to update tenant").WithDetails(err.Error()))
+			c.Error(errors.NewInternalServerError("Failed to update workspace").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -547,7 +661,7 @@ func (h *TenantHandler) ListAPIKeys(c *gin.Context) {
 	ctx := c.Request.Context()
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
+		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 	keys, err := h.apiKeyService.ListAPIKeys(ctx, id)
@@ -566,7 +680,7 @@ func (h *TenantHandler) CreateAPIKey(c *gin.Context) {
 	ctx := c.Request.Context()
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
+		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 	var req tenantAPIKeyCreateRequest
@@ -580,8 +694,8 @@ func (h *TenantHandler) CreateAPIKey(c *gin.Context) {
 	}
 	var expiresAt *time.Time
 	if req.ExpiresAt != nil {
-		t := time.Unix(*req.ExpiresAt, 0)
-		if !t.After(time.Now()) {
+		t := time.Unix(*req.ExpiresAt, 0).UTC()
+		if !t.After(time.Now().UTC()) {
 			c.Error(errors.NewValidationError("expires_at_unix must be in the future"))
 			return
 		}
@@ -608,11 +722,51 @@ func (h *TenantHandler) CreateAPIKey(c *gin.Context) {
 	})
 }
 
+// UpdateAPIKey 修改已创建租户 API Key 的授权范围和其他可配置属性。
+// 路由层要求当前租户 Owner；字段校验与创建接口保持一致。
+func (h *TenantHandler) UpdateAPIKey(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenantID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || tenantID == 0 {
+		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
+		return
+	}
+	keyID, err := strconv.ParseUint(c.Param("key_id"), 10, 64)
+	if err != nil || keyID == 0 {
+		c.Error(errors.NewBadRequestError("Invalid API key ID"))
+		return
+	}
+	var req tenantAPIKeyUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	if appErr := validateTenantAPIKeyRequest(ctx, h.kbService, tenantID, tenantAPIKeyCreateRequest(req)); appErr != nil {
+		c.Error(appErr)
+		return
+	}
+	var expiresAt *time.Time
+	if req.ExpiresAt != nil {
+		t := time.Unix(*req.ExpiresAt, 0).UTC()
+		expiresAt = &t
+	}
+
+	updated, err := h.apiKeyService.UpdateAPIKey(ctx, interfaces.TenantAPIKeyUpdateRequest{
+		TenantID: tenantID, APIKeyID: keyID, Name: req.Name, FullAccess: req.FullAccess,
+		KnowledgeBaseIDs: req.KnowledgeBaseIDs, Capabilities: req.Capabilities, ExpiresAt: expiresAt,
+	})
+	if err != nil {
+		c.Error(errors.NewNotFoundError("API key not found"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": tenantAPIKeyForResponse(updated)})
+}
+
 func (h *TenantHandler) DeleteAPIKey(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
+		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 	keyID, err := strconv.ParseUint(c.Param("key_id"), 10, 64)
@@ -633,6 +787,7 @@ func tenantAPIKeyForResponse(key *types.TenantAPIKey) tenantAPIKeyResponse {
 	}
 	return tenantAPIKeyResponse{
 		ID:               key.ID,
+		ScopeType:        types.NormalizeAPIKeyScopeType(key.ScopeType),
 		Name:             key.Name,
 		APIKey:           key.APIKey,
 		FullAccess:       key.FullAccess,
@@ -668,17 +823,44 @@ func validateTenantAPIKeyRequest(
 			return errors.NewValidationError("capabilities contains an unknown capability")
 		}
 	}
-	for _, kbID := range req.KnowledgeBaseIDs {
+	return validateTenantAPIKeyKnowledgeBaseIDs(ctx, kbService, tenantID, req.KnowledgeBaseIDs)
+}
+
+// validateTenantAPIKeyKnowledgeBaseIDs 校验白名单中的知识库真实存在且属于目标租户。
+// 入参是请求上下文、知识库服务、租户 ID 和待授权 ID；成功无返回值，失败返回可直接响应的应用错误。
+func validateTenantAPIKeyKnowledgeBaseIDs(
+	ctx context.Context,
+	kbService interfaces.KnowledgeBaseService,
+	tenantID uint64,
+	knowledgeBaseIDs []string,
+) *errors.AppError {
+	if len(knowledgeBaseIDs) == 0 {
+		return nil
+	}
+	return validateTenantAPIKeyKnowledgeBaseIDsWithLookup(
+		ctx, tenantID, knowledgeBaseIDs, kbService.GetKnowledgeBaseByID,
+	)
+}
+
+// validateTenantAPIKeyKnowledgeBaseIDsWithLookup 将归属校验与大型知识库服务接口解耦，便于覆盖边界测试。
+// lookup 输入知识库 ID 并返回真实知识库；函数输出 nil 或可直接响应的校验错误。
+func validateTenantAPIKeyKnowledgeBaseIDsWithLookup(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeBaseIDs []string,
+	lookup func(context.Context, string) (*types.KnowledgeBase, error),
+) *errors.AppError {
+	for _, kbID := range knowledgeBaseIDs {
 		kbID = strings.TrimSpace(kbID)
 		if kbID == "" {
 			continue
 		}
-		kb, err := kbService.GetKnowledgeBaseByID(ctx, kbID)
+		kb, err := lookup(ctx, kbID)
 		if err != nil || kb == nil {
 			return errors.NewValidationError("knowledge_base_ids contains an unknown knowledge base")
 		}
 		if kb.TenantID != tenantID {
-			return errors.NewForbiddenError("knowledge_base_ids contains a knowledge base outside this tenant")
+			return errors.NewForbiddenError("knowledge_base_ids contains a knowledge base outside this workspace")
 		}
 	}
 	return nil
@@ -702,12 +884,12 @@ func apiPrincipalConfigForResponse(cfg *types.APIPrincipalConfig) apiPrincipalCo
 }
 
 // GetAPIPrincipalConfig godoc
-// @Summary      获取租户 API Key 用户身份配置
+// @Summary      获取空间 API Key 用户身份配置
 // @Description  返回 X-API-Key 请求如何映射为终端 Principal 的配置（Owner）
-// @Tags         租户管理
+// @Tags         空间管理
 // @Accept       json
 // @Produce      json
-// @Param        id   path      int  true  "租户ID"
+// @Param        id   path      int  true  "空间ID"
 // @Success      200  {object}  map[string]interface{}  "API principal 配置"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      403  {object}  errors.AppError         "权限不足"
@@ -717,7 +899,7 @@ func (h *TenantHandler) GetAPIPrincipalConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
+		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 	tenant, err := h.service.GetTenantByID(ctx, id)
@@ -725,7 +907,7 @@ func (h *TenantHandler) GetAPIPrincipalConfig(c *gin.Context) {
 		if appErr, ok := errors.IsAppError(err); ok {
 			c.Error(appErr)
 		} else {
-			c.Error(errors.NewInternalServerError("Failed to load tenant").WithDetails(err.Error()))
+			c.Error(errors.NewInternalServerError("Failed to load workspace").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -736,12 +918,12 @@ func (h *TenantHandler) GetAPIPrincipalConfig(c *gin.Context) {
 }
 
 // UpdateAPIPrincipalConfig godoc
-// @Summary      更新租户 API Key 用户身份配置
+// @Summary      更新空间 API Key 用户身份配置
 // @Description  配置 X-API-Key 请求如何映射为终端 Principal（Owner）
-// @Tags         租户管理
+// @Tags         空间管理
 // @Accept       json
 // @Produce      json
-// @Param        id       path      int                           true  "租户ID"
+// @Param        id       path      int                           true  "空间ID"
 // @Param        request  body      handler.apiPrincipalConfigRequest  true  "API principal 配置"
 // @Success      200      {object}  map[string]interface{}        "更新后的配置"
 // @Failure      400      {object}  errors.AppError               "请求参数错误"
@@ -752,7 +934,7 @@ func (h *TenantHandler) UpdateAPIPrincipalConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
+		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 	var req apiPrincipalConfigRequest
@@ -775,7 +957,7 @@ func (h *TenantHandler) UpdateAPIPrincipalConfig(c *gin.Context) {
 		if appErr, ok := errors.IsAppError(err); ok {
 			c.Error(appErr)
 		} else {
-			c.Error(errors.NewInternalServerError("Failed to load tenant").WithDetails(err.Error()))
+			c.Error(errors.NewInternalServerError("Failed to load workspace").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -825,11 +1007,11 @@ func (h *TenantHandler) UpdateAPIPrincipalConfig(c *gin.Context) {
 
 // CreateAPIPrincipalTestToken godoc
 // @Summary      生成 API Playground 测试 JWT
-// @Description  使用租户已保存的 HMAC 密钥签发短期外部用户 JWT（Owner）
-// @Tags         租户管理
+// @Description  使用空间已保存的 HMAC 密钥签发短期外部用户 JWT（Owner）
+// @Tags         空间管理
 // @Accept       json
 // @Produce      json
-// @Param        id       path      int                                  true  "租户ID"
+// @Param        id       path      int                                  true  "空间ID"
 // @Param        request  body      handler.apiPrincipalTestTokenRequest true  "测试 Token 参数"
 // @Success      200      {object}  map[string]interface{}               "短期 JWT"
 // @Failure      400      {object}  errors.AppError                      "请求参数错误"
@@ -840,7 +1022,7 @@ func (h *TenantHandler) CreateAPIPrincipalTestToken(c *gin.Context) {
 	ctx := c.Request.Context()
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
+		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 
@@ -861,7 +1043,7 @@ func (h *TenantHandler) CreateAPIPrincipalTestToken(c *gin.Context) {
 		if appErr, ok := errors.IsAppError(err); ok {
 			c.Error(appErr)
 		} else {
-			c.Error(errors.NewInternalServerError("Failed to load tenant").WithDetails(err.Error()))
+			c.Error(errors.NewInternalServerError("Failed to load workspace").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -928,12 +1110,12 @@ func validateAPIPrincipalExternalUserID(id string) error {
 }
 
 // DeleteTenant godoc
-// @Summary      删除租户
-// @Description  删除指定的租户
-// @Tags         租户管理
+// @Summary      删除空间
+// @Description  删除指定的空间
+// @Tags         空间管理
 // @Accept       json
 // @Produce      json
-// @Param        id   path      int  true  "租户ID"
+// @Param        id   path      int  true  "空间ID"
 // @Success      200  {object}  map[string]interface{}  "删除成功"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -945,8 +1127,8 @@ func (h *TenantHandler) DeleteTenant(c *gin.Context) {
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		logger.Errorf(ctx, "Invalid tenant ID: %s", secutils.SanitizeForLog(c.Param("id")))
-		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
+		logger.Errorf(ctx, "Invalid workspace ID: %s", secutils.SanitizeForLog(c.Param("id")))
+		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 
@@ -954,29 +1136,29 @@ func (h *TenantHandler) DeleteTenant(c *gin.Context) {
 
 	if err := h.service.DeleteTenant(ctx, id); err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
-			logger.Error(ctx, "Failed to delete tenant: application error", appErr)
+			logger.Error(ctx, "Failed to delete workspace: application error", appErr)
 			c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to delete tenant").WithDetails(err.Error()))
+			c.Error(errors.NewInternalServerError("Failed to delete workspace").WithDetails(err.Error()))
 		}
 		return
 	}
 
-	logger.Infof(ctx, "Tenant deleted successfully, ID: %d", id)
+	logger.Infof(ctx, "Workspace deleted successfully, ID: %d", id)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "Tenant deleted successfully",
+		"message": "Workspace deleted successfully",
 	})
 }
 
 // ListTenants godoc
-// @Summary      获取租户列表
-// @Description  获取当前用户可访问的租户列表
-// @Tags         租户管理
+// @Summary      获取空间列表
+// @Description  获取当前用户可访问的空间列表
+// @Tags         空间管理
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "租户列表"
+// @Success      200  {object}  map[string]interface{}  "空间列表"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
 // @Router       /tenants [get]
@@ -998,12 +1180,12 @@ func (h *TenantHandler) ListTenants(c *gin.Context) {
 }
 
 // ListAllTenants godoc
-// @Summary      获取所有租户列表
-// @Description  获取系统中所有租户（需要跨租户访问权限）
-// @Tags         租户管理
+// @Summary      获取所有空间列表
+// @Description  获取系统中所有空间（需要跨空间访问权限）
+// @Tags         空间管理
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "所有租户列表"
+// @Success      200  {object}  map[string]interface{}  "所有空间列表"
 // @Failure      403  {object}  errors.AppError         "权限不足"
 // @Security     Bearer
 // @Router       /tenants/all [get]
@@ -1017,11 +1199,11 @@ func (h *TenantHandler) ListAllTenants(c *gin.Context) {
 	if err != nil {
 		// Check if this is an application-specific error
 		if appErr, ok := errors.IsAppError(err); ok {
-			logger.Error(ctx, "Failed to retrieve all tenants list: application error", appErr)
+			logger.Error(ctx, "Failed to retrieve all workspaces list: application error", appErr)
 			c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to retrieve all tenants list").WithDetails(err.Error()))
+			c.Error(errors.NewInternalServerError("Failed to retrieve all workspaces list").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -1035,13 +1217,13 @@ func (h *TenantHandler) ListAllTenants(c *gin.Context) {
 }
 
 // SearchTenants godoc
-// @Summary      搜索租户
-// @Description  分页搜索租户（需要跨租户访问权限）
-// @Tags         租户管理
+// @Summary      搜索空间
+// @Description  分页搜索空间（需要跨空间访问权限）
+// @Tags         空间管理
 // @Accept       json
 // @Produce      json
 // @Param        keyword    query     string  false  "搜索关键词"
-// @Param        tenant_id  query     int     false  "租户ID筛选"
+// @Param        tenant_id  query     int     false  "空间ID筛选"
 // @Param        page       query     int     false  "页码"  default(1)
 // @Param        page_size  query     int     false  "每页数量"  default(20)
 // @Success      200        {object}  map[string]interface{}  "搜索结果"
@@ -1087,11 +1269,11 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 	if err != nil {
 		// Check if this is an application-specific error
 		if appErr, ok := errors.IsAppError(err); ok {
-			logger.Error(ctx, "Failed to search tenants: application error", appErr)
+			logger.Error(ctx, "Failed to search workspaces: application error", appErr)
 			c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to search tenants").WithDetails(err.Error()))
+			c.Error(errors.NewInternalServerError("Failed to search workspaces").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -1108,9 +1290,9 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 }
 
 // GetTenantKV godoc
-// @Summary      获取租户KV配置
-// @Description  获取租户级别的KV配置（支持web-search-config、prompt-templates、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
-// @Tags         租户管理
+// @Summary      获取空间KV配置
+// @Description  获取空间级别的KV配置（支持web-search-config、prompt-templates、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
+// @Tags         空间管理
 // @Accept       json
 // @Produce      json
 // @Param        key  path      string  true  "配置键名"
@@ -1150,6 +1332,9 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	case "retrieval-config":
 		h.GetTenantRetrievalConfig(c)
 		return
+	case "memory-config":
+		h.GetTenantMemoryConfig(c)
+		return
 	default:
 		logger.Info(ctx, "KV key not supported", "key", key)
 		c.Error(errors.NewBadRequestError("unsupported key"))
@@ -1158,9 +1343,9 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 }
 
 // UpdateTenantKV godoc
-// @Summary      更新租户KV配置
-// @Description  更新租户级别的KV配置（支持web-search-config、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
-// @Tags         租户管理
+// @Summary      更新空间KV配置
+// @Description  更新空间级别的KV配置（支持web-search-config、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
+// @Tags         空间管理
 // @Accept       json
 // @Produce      json
 // @Param        key      path      string  true  "配置键名"
@@ -1198,6 +1383,9 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 	case "retrieval-config":
 		h.updateTenantRetrievalConfigInternal(c)
 		return
+	case "memory-config":
+		h.updateTenantMemoryConfigInternal(c)
+		return
 	default:
 		logger.Info(ctx, "KV key not supported", "key", key)
 		c.Error(errors.NewBadRequestError("unsupported key"))
@@ -1219,8 +1407,8 @@ func (h *TenantHandler) updateTenantWebSearchConfigInternal(c *gin.Context) {
 
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
-		logger.Error(ctx, "Tenant is empty")
-		c.Error(errors.NewBadRequestError("Tenant is empty"))
+		logger.Error(ctx, "Workspace is empty")
+		c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 
@@ -1236,11 +1424,11 @@ func (h *TenantHandler) updateTenantWebSearchConfigInternal(c *gin.Context) {
 	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
-			logger.Error(ctx, "Failed to update tenant: application error", appErr)
+			logger.Error(ctx, "Failed to update workspace: application error", appErr)
 			c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to update tenant web search config").WithDetails(err.Error()))
+			c.Error(errors.NewInternalServerError("Failed to update workspace web search config").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -1252,9 +1440,9 @@ func (h *TenantHandler) updateTenantWebSearchConfigInternal(c *gin.Context) {
 }
 
 // GetTenantWebSearchConfig godoc
-// @Summary      获取租户网络搜索配置
-// @Description  获取租户的网络搜索配置
-// @Tags         租户管理
+// @Summary      获取空间网络搜索配置
+// @Description  获取空间的网络搜索配置
+// @Tags         空间管理
 // @Accept       json
 // @Produce      json
 // @Success      200  {object}  map[string]interface{}  "网络搜索配置"
@@ -1268,8 +1456,8 @@ func (h *TenantHandler) GetTenantWebSearchConfig(c *gin.Context) {
 	// Get tenant
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
-		logger.Error(ctx, "Tenant is empty")
-		c.Error(errors.NewBadRequestError("Tenant is empty"))
+		logger.Error(ctx, "Workspace is empty")
+		c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 
@@ -1285,8 +1473,8 @@ func (h *TenantHandler) GetTenantParserEngineConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
-		logger.Error(ctx, "Tenant is empty")
-		c.Error(errors.NewBadRequestError("Tenant is empty"))
+		logger.Error(ctx, "Workspace is empty")
+		c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 	data := types.ParserEngineConfigForResponse(tenant.ParserEngineConfig, true)
@@ -1310,8 +1498,8 @@ func (h *TenantHandler) updateTenantParserEngineConfigInternal(c *gin.Context) {
 	}
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
-		logger.Error(ctx, "Tenant is empty")
-		c.Error(errors.NewBadRequestError("Tenant is empty"))
+		logger.Error(ctx, "Workspace is empty")
+		c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 	merged := types.MergeParserEngineConfigForUpdate(&cfg, tenant.ParserEngineConfig)
@@ -1326,7 +1514,7 @@ func (h *TenantHandler) updateTenantParserEngineConfigInternal(c *gin.Context) {
 			c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to update tenant parser engine config").WithDetails(err.Error()))
+			c.Error(errors.NewInternalServerError("Failed to update workspace parser engine config").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -1342,8 +1530,8 @@ func (h *TenantHandler) GetTenantStorageEngineConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
-		logger.Error(ctx, "Tenant is empty")
-		c.Error(errors.NewBadRequestError("Tenant is empty"))
+		logger.Error(ctx, "Workspace is empty")
+		c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 	data := types.StorageEngineConfigForResponse(tenant.StorageEngineConfig, true)
@@ -1380,8 +1568,8 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 	cfg.DefaultProvider = provider
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
-		logger.Error(ctx, "Tenant is empty")
-		c.Error(errors.NewBadRequestError("Tenant is empty"))
+		logger.Error(ctx, "Workspace is empty")
+		c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 	merged := types.MergeStorageEngineConfigForUpdate(&cfg, tenant.StorageEngineConfig)
@@ -1392,7 +1580,7 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 			c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to update tenant storage engine config").WithDetails(err.Error()))
+			c.Error(errors.NewInternalServerError("Failed to update workspace storage engine config").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -1406,7 +1594,7 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 // GetPromptTemplates godoc
 // @Summary      获取提示词模板
 // @Description  获取系统配置的提示词模板列表
-// @Tags         租户管理
+// @Tags         空间管理
 // @Accept       json
 // @Produce      json
 // @Success      200  {object}  map[string]interface{}  "提示词模板配置"
@@ -1422,7 +1610,7 @@ func (h *TenantHandler) GetPromptTemplates(c *gin.Context) {
 	}
 
 	// Determine user language from context (set by Language middleware)
-	lang, _ := types.LanguageFromContext(c.Request.Context())
+	lang := types.LanguageFromContextOrDefault(c.Request.Context())
 
 	// Build a localized copy so the original config is never mutated
 	localized := &config.PromptTemplatesConfig{
@@ -1448,8 +1636,8 @@ func (h *TenantHandler) GetTenantChatHistoryConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
-		logger.Error(ctx, "Tenant is empty")
-		c.Error(errors.NewBadRequestError("Tenant is empty"))
+		logger.Error(ctx, "Workspace is empty")
+		c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 	data := tenant.ChatHistoryConfig
@@ -1478,8 +1666,8 @@ func (h *TenantHandler) updateTenantChatHistoryConfigInternal(c *gin.Context) {
 
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
-		logger.Error(ctx, "Tenant is empty")
-		c.Error(errors.NewBadRequestError("Tenant is empty"))
+		logger.Error(ctx, "Workspace is empty")
+		c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 
@@ -1545,8 +1733,8 @@ func (h *TenantHandler) GetTenantRetrievalConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
-		logger.Error(ctx, "Tenant is empty")
-		c.Error(errors.NewBadRequestError("Tenant is empty"))
+		logger.Error(ctx, "Workspace is empty")
+		c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 	data := tenant.RetrievalConfig
@@ -1594,8 +1782,8 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
-		logger.Error(ctx, "Tenant is empty")
-		c.Error(errors.NewBadRequestError("Tenant is empty"))
+		logger.Error(ctx, "Workspace is empty")
+		c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 
@@ -1617,6 +1805,102 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 	})
 }
 
+// GetTenantMemoryConfig returns the workspace long-term memory configuration.
+func (h *TenantHandler) GetTenantMemoryConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenant, _ := types.TenantInfoFromContext(ctx)
+	if tenant == nil {
+		logger.Error(ctx, "Workspace is empty")
+		c.Error(errors.NewBadRequestError("Workspace is empty"))
+		return
+	}
+	data := tenant.MemoryConfig
+	if data == nil {
+		// Memory is off until an admin turns it on: the feature retains what
+		// users say across sessions, so it must not arrive enabled by default.
+		data = &types.MemoryConfig{}
+	}
+	data.Normalize()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    data,
+	})
+}
+
+// updateTenantMemoryConfigInternal updates the workspace memory configuration.
+func (h *TenantHandler) updateTenantMemoryConfigInternal(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var cfg types.MemoryConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	if cfg.WriteMode != "" &&
+		cfg.WriteMode != types.MemoryWriteExplicitOnly &&
+		cfg.WriteMode != types.MemoryWriteAuto {
+		c.Error(errors.NewBadRequestError("write_mode must be explicit_only or auto"))
+		return
+	}
+	if cfg.MaxItems < 0 || cfg.MaxItems > 2000 {
+		c.Error(errors.NewBadRequestError("max_items must be between 0 and 2000"))
+		return
+	}
+	if cfg.ExtractDelaySeconds < 0 || cfg.ExtractDelaySeconds > types.MaxMemoryExtractDelaySeconds {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf(
+			"extract_delay_seconds must be between 0 and %d", types.MaxMemoryExtractDelaySeconds)))
+		return
+	}
+	if cfg.ExtractMinIntervalSeconds < 0 ||
+		cfg.ExtractMinIntervalSeconds > types.MaxMemoryExtractMinIntervalSeconds {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf(
+			"extract_min_interval_seconds must be between 0 and %d",
+			types.MaxMemoryExtractMinIntervalSeconds)))
+		return
+	}
+	if len(cfg.EmbeddingModelID) > 64 {
+		c.Error(errors.NewBadRequestError("embedding_model_id is too long"))
+		return
+	}
+	if cfg.InterestThreshold < 0 || cfg.InterestThreshold > types.MaxMemoryInterestThreshold {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf(
+			"interest_threshold must be between 1 and %d", types.MaxMemoryInterestThreshold)))
+		return
+	}
+	if len([]rune(cfg.ExtractInstructions)) > types.MaxMemoryExtractInstructionsRunes {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf(
+			"extract_instructions must be at most %d characters",
+			types.MaxMemoryExtractInstructionsRunes)))
+		return
+	}
+	cfg.Normalize()
+
+	tenant, _ := types.TenantInfoFromContext(ctx)
+	if tenant == nil {
+		logger.Error(ctx, "Workspace is empty")
+		c.Error(errors.NewBadRequestError("Workspace is empty"))
+		return
+	}
+
+	tenant.MemoryConfig = &cfg
+	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+		} else {
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError("Failed to update memory config").WithDetails(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    updatedTenant.MemoryConfig,
+		"message": "Memory configuration updated successfully",
+	})
+}
+
 func validateParserEngineOutboundURLs(cfg *types.ParserEngineConfig) error {
 	if cfg == nil {
 		return nil
@@ -1629,6 +1913,16 @@ func validateParserEngineOutboundURLs(cfg *types.ParserEngineConfig) error {
 	if vlmURL := strings.TrimSpace(cfg.MinerUVLMServerURL); vlmURL != "" {
 		if err := secutils.ValidateURLForSSRF(vlmURL); err != nil {
 			return fmt.Errorf("mineru_vlm_server_url failed SSRF validation: %v", err)
+		}
+	}
+	if odlURL := strings.TrimSpace(cfg.ODLHybridURL); odlURL != "" {
+		if err := secutils.ValidateURLForSSRF(odlURL); err != nil {
+			return fmt.Errorf("odl_hybrid_url failed SSRF validation: %v", err)
+		}
+	}
+	if endpoint := strings.TrimSpace(cfg.PaddleOCRVLEndpoint); endpoint != "" {
+		if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
+			return fmt.Errorf("paddleocr_vl_endpoint failed SSRF validation: %v", err)
 		}
 	}
 	return nil

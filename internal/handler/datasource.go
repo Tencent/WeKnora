@@ -94,7 +94,7 @@ func (h *DataSourceHandler) CreateDataSource(c *gin.Context) {
 	// Extract tenant ID from context (set by auth middleware)
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: tenant context missing"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
 		return
 	}
 
@@ -164,7 +164,7 @@ func (h *DataSourceHandler) ListDataSources(c *gin.Context) {
 	// Extract tenant ID from context
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: tenant context missing"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
 		return
 	}
 

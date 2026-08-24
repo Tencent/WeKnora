@@ -6,9 +6,9 @@ require (
 	github.com/Tencent/WeKnora/client v0.0.0-00010101000000-000000000000
 	github.com/charmbracelet/huh v1.0.0
 	github.com/itchyny/gojq v0.12.19
-	github.com/mattn/go-isatty v0.0.22
-	github.com/mattn/go-runewidth v0.0.24
-	github.com/modelcontextprotocol/go-sdk v1.6.1
+	github.com/mattn/go-isatty v0.0.24
+	github.com/mattn/go-runewidth v0.0.27
+	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
@@ -51,9 +51,10 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
-	golang.org/x/sync v0.15.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
+	golang.org/x/time v0.15.0 // indirect
 )
 
 // In-repo SDK module: cli pulls the local client/ until both modules ship

@@ -9,6 +9,7 @@ import (
 const (
 	PrincipalWebUser         = "web_user"
 	PrincipalAPITenant       = "api_tenant"
+	PrincipalAPIPlatform     = "api_platform"
 	PrincipalAPIExternalUser = "api_external_user"
 	PrincipalIMUser          = "im_user"
 	PrincipalEmbedChannel    = "embed_channel"
@@ -19,6 +20,24 @@ const (
 // EmbedVisitorHeader is sent by the embed widget to identify a browser visitor
 // across chat sessions within the same channel.
 const EmbedVisitorHeader = "X-Embed-Visitor"
+
+// SessionOwnerAPITenantKeyPrefix prefixes sessions.user_id for rows created by a
+// tenant API key. The full owner id is "api_tenant_key:<tenantID>:<keyID>", so a
+// LIKE '<prefix>%' selects every API-key session in the tenant.
+const SessionOwnerAPITenantKeyPrefix = "api_tenant_key:"
+
+// SessionOwnerAPIExternalUserPrefix prefixes sessions.user_id for rows created
+// by a tenant API key whose request resolved an external-user identity. The
+// remainder is "<tenantID>:<externalUserID>".
+const SessionOwnerAPIExternalUserPrefix = PrincipalAPIExternalUser + ":"
+
+// IsAPISessionOwnerID reports whether a stored session owner was produced by
+// a tenant API-key request, with or without an external-user identity.
+func IsAPISessionOwnerID(ownerID string) bool {
+	ownerID = strings.TrimSpace(ownerID)
+	return strings.HasPrefix(ownerID, SessionOwnerAPITenantKeyPrefix) ||
+		strings.HasPrefix(ownerID, SessionOwnerAPIExternalUserPrefix)
+}
 
 // Principal represents the terminal caller for per-subject isolation features.
 // It is intentionally separate from UserID: many principals, such as IM users
@@ -164,7 +183,7 @@ func SessionOwnerIDFromContext(ctx context.Context) string {
 		case PrincipalAPITenant:
 			if scope, ok := TenantAPIKeyScopeFromContext(ctx); ok && scope.KeyID > 0 {
 				if tenantID, ok := TenantIDFromContext(ctx); ok && tenantID > 0 {
-					return fmt.Sprintf("api_tenant_key:%d:%d", tenantID, scope.KeyID)
+					return fmt.Sprintf("%s%d:%d", SessionOwnerAPITenantKeyPrefix, tenantID, scope.KeyID)
 				}
 			}
 		}

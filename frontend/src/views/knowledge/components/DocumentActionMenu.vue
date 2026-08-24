@@ -12,16 +12,21 @@ interface KnowledgeItem {
 
 const props = defineProps<{
   item: KnowledgeItem;
+  canDownload: boolean;
   canMutateKnowledge: boolean;
   traceVisible: boolean;
+  /** Whether the knowledge base has a folder structure to file documents into. */
+  foldersAvailable?: boolean;
 }>();
 
 const emit = defineEmits<{
+  (e: 'download'): void;
   (e: 'edit'): void;
   (e: 'view-trace'): void;
   (e: 'reparse'): void;
   (e: 'cancel-parse'): void;
   (e: 'move'): void;
+  (e: 'move-folder'): void;
   (e: 'batch-manage'): void;
   (e: 'delete'): void;
 }>();
@@ -38,6 +43,16 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
 </script>
 
 <template>
+  <!-- 下载原始文档 -->
+  <div
+    v-if="canDownload && (item.type === 'file' || item.type === 'manual')"
+    class="doc-action-menu-item"
+    @click.stop="emit('download')"
+  >
+    <t-icon class="icon" name="download" />
+    <span>{{ $t('common.download') }}</span>
+  </div>
+
   <!-- 编辑文档 -->
   <div v-if="item.type === 'manual'" class="doc-action-menu-item" @click.stop="emit('edit')">
     <t-icon class="icon" name="edit" />
@@ -80,7 +95,13 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
     </div>
   </t-popconfirm>
 
-  <!-- 移动到... -->
+  <!-- 移动到目录 -->
+  <div v-if="canMutateKnowledge" class="doc-action-menu-item" @click.stop="emit('move-folder')">
+    <t-icon class="icon" name="folder" />
+    <span>{{ $t('knowledgeBase.moveToFolder.action') }}</span>
+  </div>
+
+  <!-- 移动到其他知识库 -->
   <div v-if="canMutateKnowledge" class="doc-action-menu-item" @click.stop="emit('move')">
     <t-icon class="icon" name="swap" />
     <span>{{ $t('knowledgeBase.moveDocument') }}</span>

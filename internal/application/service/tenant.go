@@ -21,12 +21,13 @@ type ListTenantsParams struct {
 
 // tenantService implements the TenantService interface
 type tenantService struct {
-	repo interfaces.TenantRepository // Repository for tenant data operations
+	repo        interfaces.TenantRepository // Repository for tenant data operations
+	storageRepo interfaces.StorageBackendRepository
 }
 
 // NewTenantService creates a new tenant service instance
-func NewTenantService(repo interfaces.TenantRepository) interfaces.TenantService {
-	return &tenantService{repo: repo}
+func NewTenantService(repo interfaces.TenantRepository, storageRepo interfaces.StorageBackendRepository) interfaces.TenantService {
+	return &tenantService{repo: repo, storageRepo: storageRepo}
 }
 
 // CreateTenant creates a new tenant
@@ -34,8 +35,8 @@ func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) 
 	logger.Info(ctx, "Start creating tenant")
 
 	if tenant.Name == "" {
-		logger.Error(ctx, "Tenant name cannot be empty")
-		return nil, errors.New("tenant name cannot be empty")
+		logger.Error(ctx, "Workspace name cannot be empty")
+		return nil, errors.New("workspace name cannot be empty")
 	}
 
 	logger.Infof(ctx, "Creating tenant, name: %s", tenant.Name)
@@ -60,15 +61,48 @@ func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) 
 		})
 		return nil, err
 	}
+	if err := s.createDefaultStorageBackend(ctx, tenant); err != nil {
+		// No related rows exist yet, so rolling the tenant back is safe and
+		// avoids leaving a workspace that cannot bind new knowledge bases.
+		_ = s.repo.DeleteTenant(ctx, tenant.ID)
+		return nil, err
+	}
 
 	logger.Infof(ctx, "Tenant created successfully, ID: %d, name: %s", tenant.ID, tenant.Name)
 	return tenant, nil
 }
 
+func (s *tenantService) createDefaultStorageBackend(ctx context.Context, tenant *types.Tenant) error {
+	if s.storageRepo == nil || tenant == nil {
+		return nil
+	}
+	provider := ""
+	if tenant.StorageEngineConfig != nil {
+		provider = tenant.StorageEngineConfig.DefaultProvider
+	}
+	backend := types.StorageBackendFromLegacy(tenant.ID, provider, tenant.StorageEngineConfig)
+	if backend == nil {
+		backend = types.StorageBackendFromEnvironment(tenant.ID)
+	}
+	if backend == nil {
+		return errors.New("no supported default storage backend is configured")
+	}
+	backend.LegacyAlias = true
+	if err := s.storageRepo.Create(ctx, backend); err != nil {
+		return err
+	}
+	tenant.DefaultStorageBackendID = &backend.ID
+	if err := s.repo.UpdateTenant(ctx, tenant); err != nil {
+		_ = s.storageRepo.Delete(ctx, tenant.ID, backend.ID)
+		return err
+	}
+	return nil
+}
+
 // GetTenantByID retrieves a tenant by their ID
 func (s *tenantService) GetTenantByID(ctx context.Context, id uint64) (*types.Tenant, error) {
 	if id == 0 {
-		logger.Error(ctx, "Tenant ID cannot be 0")
+		logger.Error(ctx, "Workspace ID cannot be 0")
 		return nil, errors.New("tenant ID cannot be 0")
 	}
 
@@ -103,7 +137,7 @@ func (s *tenantService) ListTenants(ctx context.Context) ([]*types.Tenant, error
 // UpdateTenant updates an existing tenant's information
 func (s *tenantService) UpdateTenant(ctx context.Context, tenant *types.Tenant) (*types.Tenant, error) {
 	if tenant.ID == 0 {
-		logger.Error(ctx, "Tenant ID cannot be 0")
+		logger.Error(ctx, "Workspace ID cannot be 0")
 		return nil, errors.New("tenant ID cannot be 0")
 	}
 
@@ -135,7 +169,7 @@ func (s *tenantService) DeleteTenant(ctx context.Context, id uint64) error {
 	logger.Info(ctx, "Start deleting tenant")
 
 	if id == 0 {
-		logger.Error(ctx, "Tenant ID cannot be 0")
+		logger.Error(ctx, "Workspace ID cannot be 0")
 		return errors.New("tenant ID cannot be 0")
 	}
 
@@ -164,7 +198,7 @@ func (s *tenantService) DeleteTenant(ctx context.Context, id uint64) error {
 		return err
 	}
 
-	logger.Infof(ctx, "Tenant deleted successfully, ID: %d", id)
+	logger.Infof(ctx, "Workspace deleted successfully, ID: %d", id)
 	return nil
 }
 
@@ -324,7 +358,7 @@ func (s *tenantService) validateStorageBucketUniqueness(ctx context.Context, ten
 		oldB := oldBuckets[p]
 		if b != oldB { // User is trying to change their bucket name or set a new one
 			if usedByOthers[p] != nil && usedByOthers[p][b] {
-				return werrors.NewBadRequestError("存储桶名称「" + b + "」已被其他租户使用，为保证数据隔离，请使用其他名称")
+				return werrors.NewBadRequestError("存储桶名称「" + b + "」已被其他空间使用，为保证数据隔离，请使用其他名称")
 			}
 		}
 	}

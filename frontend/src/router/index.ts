@@ -1,7 +1,11 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { autoSetup, getCurrentUser, userInfoFromApi } from '@/api/auth'
+import type { DeploymentCapabilityKey } from '@/config/deploymentCapabilities'
+import { MessagePlugin } from 'tdesign-vue-next'
+import i18n from '@/i18n'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
@@ -62,6 +66,12 @@ const router = createRouter({
       // surface for one extra field.
       component: () => import("../views/auth/Login.vue"),
       meta: { requiresAuth: false, requiresInit: false }
+    },
+    {
+      path: "/onboarding/workspace",
+      name: "workspaceOnboarding",
+      component: () => import("../views/auth/WorkspaceOnboarding.vue"),
+      meta: { requiresAuth: true, requiresInit: false, requiresTenant: false }
     },
     {
       path: "/join",
@@ -126,7 +136,7 @@ const router = createRouter({
           path: "agents",
           name: "agentList",
           component: () => import("../views/agent/AgentList.vue"),
-          meta: { requiresInit: true, requiresAuth: true }
+          meta: { requiresInit: true, requiresAuth: true, requiredCapability: 'agents' }
         },
         {
           path: "integrations",
@@ -161,13 +171,12 @@ const router = createRouter({
           path: "organizations",
           name: "organizationList",
           component: () => import("../views/organization/OrganizationList.vue"),
-          meta: { requiresInit: true, requiresAuth: true }
+          meta: { requiresInit: true, requiresAuth: true, requiredCapability: 'organizations' }
         },
-        // Compatibility redirects for legacy /platform/system/* URLs.
-        // The whole system administration surface — global settings
-        // and the system-admin roster — now lives as a single section
-        // inside the standard Settings modal. We keep the routes
-        // around so old bookmarks / external links don't 404.
+        // Compatibility redirects for /platform/system/* URLs. System
+        // administration surfaces live as dedicated sections inside the
+        // standard Settings modal; keep stable URLs for bookmarks and
+        // external links.
         {
           path: "system",
           redirect: { path: "/platform/settings", query: { section: "system-global" } },
@@ -183,6 +192,12 @@ const router = createRouter({
           path: "system/admins",
           name: "systemAdmins",
           redirect: { path: "/platform/settings", query: { section: "system-global" } },
+          meta: { requiresInit: true, requiresAuth: true, requiresSystemAdmin: true },
+        },
+        {
+          path: "system/queues",
+          name: "systemQueues",
+          redirect: { path: "/platform/settings", query: { section: "runtime-queues" } },
           meta: { requiresInit: true, requiresAuth: true, requiresSystemAdmin: true },
         },
       ],
@@ -251,6 +266,8 @@ async function hydrateSessionFromToken(authStore: ReturnType<typeof useAuthStore
         created_at: tenant.created_at || new Date().toISOString(),
         updated_at: tenant.updated_at || new Date().toISOString(),
       })
+    } else {
+      authStore.setTenant(null)
     }
 
     // Refresh memberships on every page load — same reason as
@@ -262,6 +279,15 @@ async function hydrateSessionFromToken(authStore: ReturnType<typeof useAuthStore
     if (Array.isArray(memberships)) {
       authStore.setMemberships(memberships)
     }
+
+    const canCreateTenant = response.data?.capabilities?.can_create_tenant
+    if (typeof canCreateTenant === 'boolean') {
+      authStore.setCanCreateTenant(canCreateTenant)
+    }
+
+    authStore.setAutoAcceptInvitation(
+      response.data?.capabilities?.auto_accept_invitation === true,
+    )
 
     return true
   } catch {
@@ -297,11 +323,29 @@ router.beforeEach(async (to, from, next) => {
     }
   }
 
+  // Tenantless onboarding still requires a valid user token even though it
+  // deliberately skips the normal tenant/system-initialization gates.
+  if (to.path === '/onboarding/workspace') {
+    if (!authStore.isLoggedIn) {
+      const restored = await hydrateSessionFromToken(authStore)
+      if (!restored) {
+        next('/login')
+        return
+      }
+    }
+    if (authStore.hasValidTenant) {
+      next('/platform/knowledge-bases')
+    } else {
+      next()
+    }
+    return
+  }
+
   // 如果访问的是登录页面或初始化页面，直接放行
   if (to.meta.requiresAuth === false || to.meta.requiresInit === false) {
     // 如果已登录用户访问登录页面，重定向到知识库列表页面
     if (to.path === '/login' && authStore.isLoggedIn) {
-      next('/platform/knowledge-bases')
+      next(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
       return
     }
     next()
@@ -313,7 +357,11 @@ router.beforeEach(async (to, from, next) => {
     if (!authStore.isLoggedIn) {
       const restored = await hydrateSessionFromToken(authStore)
       if (restored) {
-        next(to.fullPath)
+        next(
+          !authStore.hasValidTenant && to.meta.requiresTenant !== false
+            ? '/onboarding/workspace'
+            : to.fullPath,
+        )
         return
       }
 
@@ -336,6 +384,22 @@ router.beforeEach(async (to, from, next) => {
       next('/login')
       return
     }
+  }
+
+  if (to.meta.requiresTenant !== false && !authStore.hasValidTenant) {
+    next('/onboarding/workspace')
+    return
+  }
+
+  // 部署能力只描述“后端是否提供该功能”，不反映服务健康或是否已配置。
+  // 探测失败时 Store 会 fail-open，真正的权限和可用性仍由后端接口校验。
+  const deploymentCapabilities = useDeploymentCapabilitiesStore()
+  await deploymentCapabilities.ensureLoaded()
+  const requiredCapability = to.meta.requiredCapability as DeploymentCapabilityKey | undefined
+  if (requiredCapability && !deploymentCapabilities.isSupported(requiredCapability)) {
+    MessagePlugin.warning(i18n.global.t('settings.capabilityUnavailable'))
+    next('/platform/knowledge-bases')
+    return
   }
 
   // SystemAdmin gate — checked AFTER auth so a non-admin who's logged

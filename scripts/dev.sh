@@ -86,22 +86,32 @@ show_help() {
 }
 
 # 加载 .env 与可选的 .env.local（后者覆盖前者）
+# 读取时去掉行尾 \r，兼容 Windows 风格(CRLF)换行符，
+# 否则 bash source 会把残留的 \r 当成命令导致 "...: $'\r': command not found"。
+# 注意：不能用 source <(sed ...)——macOS 自带 Bash 3.2 对 process substitution
+# 的 source 不会把变量导入当前 shell；必须落到可 seek 的临时文件再 source。
+_source_env_file() {
+    local src="$1"
+    local tmp
+    tmp="$(mktemp)" || return 1
+    sed -e 's/\r$//' "$src" > "$tmp"
+    set -a
+    # shellcheck source=/dev/null
+    source "$tmp"
+    set +a
+    rm -f "$tmp"
+}
+
 load_env_files() {
     if [ -f ".env" ]; then
-        set -a
-        # shellcheck source=/dev/null
-        source .env
-        set +a
+        _source_env_file .env || return 1
     else
         return 1
     fi
 
     if [ -f ".env.local" ]; then
         log_info "加载 .env.local 覆盖配置..."
-        set -a
-        # shellcheck source=/dev/null
-        source .env.local
-        set +a
+        _source_env_file .env.local || return 1
     fi
     return 0
 }
@@ -372,7 +382,7 @@ check_remote_dev_connectivity() {
         local h="${rest%%:*}"
         local p="${rest##*:}"
         if command -v nc &> /dev/null; then
-            if nc -z -G 3 "$h" "$p" 2>/dev/null; then
+            if nc -z -w 3 "$h" "$p" 2>/dev/null; then
                 log_success "${name} ${h}:${p} 可达"
             else
                 log_error "${name} ${h}:${p} 不可达 (no route / connection refused)"
@@ -396,6 +406,46 @@ check_remote_dev_connectivity() {
     return 0
 }
 
+# Host-platform path of the anydoc static archive (built by `make anydoc-lib`).
+anydoc_host_archive() {
+    case "$(uname -s)-$(uname -m)" in
+        Darwin-arm64) echo "$PROJECT_ROOT/third_party/anydoc-go/lib/darwin_arm64/libanydoc_go.a" ;;
+        Darwin-x86_64) echo "$PROJECT_ROOT/third_party/anydoc-go/lib/darwin_amd64/libanydoc_go.a" ;;
+        Linux-x86_64)
+            if [ -f "$PROJECT_ROOT/third_party/anydoc-go/lib/linux_amd64_gnu/libanydoc_go.a" ]; then
+                echo "$PROJECT_ROOT/third_party/anydoc-go/lib/linux_amd64_gnu/libanydoc_go.a"
+            else
+                echo "$PROJECT_ROOT/third_party/anydoc-go/lib/linux_amd64_musl/libanydoc_go.a"
+            fi
+            ;;
+        Linux-aarch64)
+            if [ -f "$PROJECT_ROOT/third_party/anydoc-go/lib/linux_arm64_gnu/libanydoc_go.a" ]; then
+                echo "$PROJECT_ROOT/third_party/anydoc-go/lib/linux_arm64_gnu/libanydoc_go.a"
+            else
+                echo "$PROJECT_ROOT/third_party/anydoc-go/lib/linux_arm64_musl/libanydoc_go.a"
+            fi
+            ;;
+        *) echo "" ;;
+    esac
+}
+
+# Enable the in-process anydoc engine when the archive is present, unless the
+# caller already set GO_BUILD_TAGS (including empty, which opts out).
+enable_anydoc_build_tag() {
+    if [ -n "${GO_BUILD_TAGS+x}" ]; then
+        export GO_BUILD_TAGS
+        return
+    fi
+    local archive
+    archive="$(anydoc_host_archive)"
+    if [ -n "$archive" ] && [ -f "$archive" ]; then
+        export GO_BUILD_TAGS=anydoc
+        log_info "检测到 anydoc 静态库，已启用 -tags anydoc"
+    else
+        log_info "未检测到 anydoc 静态库，解析引擎不可用。需要时先运行: make anydoc-lib"
+    fi
+}
+
 # 启动后端应用（本地）
 start_app() {
     log_info "启动后端应用（本地开发模式）..."
@@ -414,7 +464,7 @@ start_app() {
         return 1
     fi
     
-    # 本地 docker-compose.dev 模式：把容器服务名映射到 localhost
+    # 本地 docker-compose.dev 模式：把容器服务名映射到宿主机回环地址
     # 远程开发模式（DEV_REMOTE_HOST 或 .env.local 已设地址）则保留 .env/.env.local 中的值
     if [ -n "${DEV_REMOTE_HOST:-}" ]; then
         log_info "远程开发模式: 基础设施 → ${DEV_REMOTE_HOST}"
@@ -429,13 +479,13 @@ start_app() {
             export LANGFUSE_HOST="http://${DEV_REMOTE_HOST}:3000"
         fi
     else
-        export DB_HOST=localhost
-        export DOCREADER_ADDR=localhost:50051
-        export MINIO_ENDPOINT=localhost:9000
-        export REDIS_ADDR=localhost:6379
-        export MILVUS_ADDRESS=localhost:19530
-        export NEO4J_URI=bolt://localhost:7687
-        export QDRANT_HOST=localhost
+        export DB_HOST=127.0.0.1
+        export DOCREADER_ADDR=127.0.0.1:50051
+        export MINIO_ENDPOINT=127.0.0.1:9000
+        export REDIS_ADDR=127.0.0.1:6379
+        export MILVUS_ADDRESS=127.0.0.1:19530
+        export NEO4J_URI=bolt://127.0.0.1:7687
+        export QDRANT_HOST=127.0.0.1
     fi
     export DOCREADER_TRANSPORT="${DOCREADER_TRANSPORT:-grpc}"
 
@@ -467,6 +517,8 @@ start_app() {
       export CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries"
     fi
 
+    enable_anydoc_build_tag
+
     # 检查是否安装了 Air（热重载工具）
     if command -v air &> /dev/null; then
         log_success "检测到 Air，使用热重载模式启动..."
@@ -477,7 +529,7 @@ start_app() {
         log_warning "提示: 安装 Air 可以实现代码修改后自动重启"
         log_info "安装命令: go install github.com/air-verse/air@latest"
         LDFLAGS="$(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"
-        go run -ldflags="$LDFLAGS" ./cmd/server
+        go run -tags "${GO_BUILD_TAGS:-}" -ldflags="$LDFLAGS" ./cmd/server
     fi
 }
 

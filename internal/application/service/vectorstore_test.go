@@ -137,7 +137,7 @@ func mockEngineFactory(err error) interfaces.EngineFactory {
 // mockEngineService satisfies interfaces.RetrieveEngineService minimally.
 type mockEngineService struct{}
 
-func (m *mockEngineService) EngineType() types.RetrieverEngineType                    { return "mock" }
+func (m *mockEngineService) EngineType() types.RetrieverEngineType { return "mock" }
 func (m *mockEngineService) Retrieve(_ context.Context, _ types.RetrieveParams) ([]*types.RetrieveResult, error) {
 	return nil, nil
 }
@@ -838,11 +838,13 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     extract_config TEXT NULL DEFAULT NULL,
     faq_config TEXT,
     question_generation_config TEXT NULL,
+    auto_tag_config TEXT NULL,
     is_temporary BOOLEAN NOT NULL DEFAULT 0,
     is_pinned INTEGER NOT NULL DEFAULT 0,
     pinned_at DATETIME NULL,
     asr_config TEXT,
-    vector_store_id VARCHAR(36),
+		vector_store_id VARCHAR(36),
+		storage_backend_id VARCHAR(36),
     wiki_config TEXT,
     indexing_strategy TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -1077,7 +1079,7 @@ func TestDeleteStore_Guard_RejectsCount3(t *testing.T) {
 	storeID := "store-A"
 	for i := 0; i < 3; i++ {
 		kb := &types.KnowledgeBase{
-			ID: "kb-multi-" + tenantID2s(1) + "-" + ptrOrEmpty(&storeID) + "-" + string(rune('a'+i)),
+			ID:   "kb-multi-" + tenantID2s(1) + "-" + ptrOrEmpty(&storeID) + "-" + string(rune('a'+i)),
 			Name: "kb", TenantID: 1, EmbeddingModelID: "e", SummaryModelID: "s",
 			VectorStoreID: &storeID,
 		}

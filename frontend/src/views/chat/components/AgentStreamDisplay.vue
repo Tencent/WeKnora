@@ -18,6 +18,14 @@
       </div>
       <!-- Tree children (intermediate steps) -->
       <div v-if="showIntermediateSteps" class="tree-children">
+        <ChatMemoryStep
+          v-if="hasMemory"
+          :memories="memoryItems"
+          :expanded="memoryExpanded"
+          :forgetting-id="memoryForgettingId"
+          @toggle="toggleMemory"
+          @forget="forgetMemory"
+        />
         <template v-for="(event, index) in visibleIntermediateEvents" :key="getEventKey(event, index)">
           <div v-if="event && event.type" class="tree-child"
             :class="{ 'tree-child-last': !isConversationDone && index === visibleIntermediateEvents.length - 1 }">
@@ -36,19 +44,24 @@
                    preamble was folded in, it becomes the card title and the
                    reasoning is the expandable body. -->
               <div v-if="event.type === 'thinking'" class="tool-event">
-                <div class="action-card" :class="{ 'action-pending': isThinkingActive(event.event_id) }">
+                <div class="action-card thinking-event-card"
+                  :class="{ 'action-pending': isThinkingActive(event.event_id) }">
                   <div class="action-header" @click="toggleEvent(event.event_id)">
-                    <div class="action-title">
+                    <div class="action-title" :class="{
+                      'thinking-inline-title': !event.title && isEventExpanded(event.event_id),
+                    }">
                       <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)"
                         aria-hidden="true" />
                       <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
-                      <span v-else-if="isEventExpanded(event.event_id)" class="action-name">{{ $t('agent.think')
-                      }}</span>
+                      <div v-else-if="event.content && isEventExpanded(event.event_id)"
+                        class="thinking-inline-content markdown-content">
+                        <div class="thinking-inline-markdown" v-html="renderMarkdownContent(event.content)"></div>
+                      </div>
                       <span v-else-if="getThinkingSummary(event)" class="action-summary">{{ getThinkingSummary(event)
                         }}</span>
                     </div>
                   </div>
-                  <div v-if="event.content && isEventExpanded(event.event_id)" class="action-details">
+                  <div v-if="event.title && event.content && isEventExpanded(event.event_id)" class="action-details">
                     <div class="thinking-detail-content markdown-content">
                       <div v-html="renderMarkdownContent(event.content)"></div>
                     </div>
@@ -160,6 +173,11 @@
                     <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                   </div>
 
+                  <div v-if="!event.pending && event.tool_name === 'attachment_parsing'"
+                    class="search-results-summary-fixed attachment-parsing-summary">
+                    <div class="results-summary-text" v-html="getAttachmentParsingSummary(event)"></div>
+                  </div>
+
                   <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
                     class="action-details">
                     <div v-if="event.display_type && event.tool_data" class="tool-result-wrapper">
@@ -203,6 +221,19 @@
         'streaming-steps-constrained': !answerEverStarted && !isConversationDone,
         'is-streaming-timeline': showStreamingTimeline
       }">
+      <!-- Recalled memory leads the timeline: it is what the turn knew before it
+           started, so it belongs on the same line as the steps that follow it
+           rather than in a card of its own above them. -->
+      <ChatMemoryStep
+        v-if="showMemoryRow"
+        class="event-item"
+        :memories="memoryItems"
+        :expanded="memoryExpanded"
+        :is-last="memoryIsLast"
+        :forgetting-id="memoryForgettingId"
+        @toggle="toggleMemory"
+        @forget="forgetMemory"
+      />
       <template v-for="(event, index) in displayEvents" :key="getEventKey(event, index)">
         <div v-if="event && event.type" class="event-item" :class="{
           'event-answer': event.type === 'answer',
@@ -225,17 +256,23 @@
              from the answer area) is shown as the card title; the reasoning is
              the expandable body. -->
             <div v-if="event.type === 'thinking'" class="tool-event">
-              <div class="action-card" :class="{ 'action-pending': isThinkingActive(event.event_id) }">
+              <div class="action-card thinking-event-card"
+                :class="{ 'action-pending': isThinkingActive(event.event_id) }">
                 <div class="action-header" @click="toggleEvent(event.event_id)">
-                  <div class="action-title">
+                  <div class="action-title" :class="{
+                    'thinking-inline-title': !event.title && isEventExpanded(event.event_id),
+                  }">
                     <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)" aria-hidden="true" />
                     <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
-                    <span v-else class="action-name">{{ $t('agent.think') }}</span>
-                    <span v-if="!event.title && getThinkingSummary(event) && !isEventExpanded(event.event_id)"
+                    <div v-else-if="event.content && isEventExpanded(event.event_id)"
+                      class="thinking-inline-content markdown-content">
+                      <div class="thinking-inline-markdown" v-html="renderMarkdownContent(event.content)"></div>
+                    </div>
+                    <span v-else-if="getThinkingSummary(event) && !isEventExpanded(event.event_id)"
                       class="action-summary">{{ getThinkingSummary(event) }}</span>
                   </div>
                 </div>
-                <div v-if="event.content && isEventExpanded(event.event_id)" class="action-details">
+                <div v-if="event.title && event.content && isEventExpanded(event.event_id)" class="action-details">
                   <div class="thinking-detail-content markdown-content">
                     <div v-html="renderMarkdownContent(event.content)"></div>
                   </div>
@@ -289,7 +326,8 @@
                 <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)">
                 </div>
               </div>
-              <div v-if="event.done && event.content && event.content.trim() && !embeddedMode" class="answer-toolbar">
+              <div v-if="answerFullyRendered && event.done && event.content && event.content.trim() && !embeddedMode"
+                class="answer-toolbar">
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
                   :title="$t('agent.copy')">
                   <t-icon name="copy" />
@@ -298,6 +336,23 @@
                   :title="$t('agent.addToKnowledgeBase')">
                   <t-icon name="bookmark-add" />
                 </t-button>
+                <!-- Skill artifact download: only shown when the persisted
+                     assistant message recorded any generated files. Agent
+                     mode is the primary path for skills, so this is where
+                     the button is most likely to appear. -->
+                <t-badge
+                  v-if="hasArtifacts"
+                  :count="artifactCount"
+                  :offset="[-4, 4]"
+                  shape="round"
+                  size="small"
+                >
+                  <t-button size="small" variant="outline" shape="round"
+                    @click.stop="openArtifactDrawer"
+                    :title="$t('agent.artifactDrawer.buttonTitle')">
+                    <t-icon name="download" />
+                  </t-button>
+                </t-badge>
                 <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
                     <t-icon name="info-circle" />
@@ -305,6 +360,13 @@
                 </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo && isConversationDone" :session="session"
                   :session-id="sessionId" />
+                <transition name="follow-up-toolbar-loading">
+                  <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
+                    aria-live="polite">
+                    <t-icon name="lightbulb" />
+                    <span class="answer-toolbar__follow-up-label">{{ t('chat.followUpQuestionsLoading') }}</span>
+                  </span>
+                </transition>
               </div>
             </div>
 
@@ -371,6 +433,11 @@
                   <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                 </div>
 
+                <div v-if="!event.pending && event.tool_name === 'attachment_parsing'"
+                  class="search-results-summary-fixed attachment-parsing-summary">
+                  <div class="results-summary-text" v-html="getAttachmentParsingSummary(event)"></div>
+                </div>
+
                 <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
                   class="action-details">
                   <div v-if="event.display_type && event.tool_data" class="tool-result-wrapper">
@@ -401,11 +468,12 @@
       <div v-if="showAgentActivityIndicator" class="tree-child tree-child-last streaming-loading-node">
         <div class="tree-branch"></div>
         <div class="tree-child-content">
-          <div class="loading-indicator">
-            <div class="loading-typing">
-              <span></span>
-              <span></span>
-              <span></span>
+          <div class="action-card action-pending">
+            <div class="action-header no-results">
+              <div class="action-title">
+                <t-icon class="action-title-icon" name="lightbulb" />
+                <span class="action-name">{{ t('chat.thinkingAlt') }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -434,7 +502,13 @@
               || 1
           }) }}</span>
         </div>
-        <t-link theme="primary" hover="color" @click="navigateToWikiGraph">
+        <t-link
+          theme="primary"
+          hover="color"
+          :href="wikiGraphHref"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
           <template #prefixIcon><t-icon name="chart-bubble" /></template>
           {{ $t('knowledgeEditor.wikiBrowser.viewInGraph') }}
         </t-link>
@@ -443,6 +517,13 @@
       </div>
     </template>
   </t-drawer>
+  <ChatArtifactsDrawer
+    v-if="hasArtifacts && sessionIdForArtifacts && messageIdForArtifacts"
+    v-model:visible="showArtifactDrawer"
+    :session-id="sessionIdForArtifacts"
+    :message-id="messageIdForArtifacts"
+    :artifacts="artifactList"
+  />
 </template>
 
 <script setup lang="ts">
@@ -456,11 +537,15 @@ import McpOAuthCard from './McpOAuthCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
+import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
+import ChatMemoryStep from './ChatMemoryStep.vue';
+import { useChatMemoryRow, type UsedMemory } from '@/composables/useChatMemoryRow';
 import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
 import { getKnowledgeChunksSummaryHtml } from '@/utils/knowledgeChunksDisplay';
+import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
-import type { KnowledgeReferenceLike } from '@/utils/referenceSources';
+import type { KnowledgeReferenceLike, ReferenceHighlightTarget } from '@/utils/referenceSources';
 import { resolveCitationChunkId } from '@/utils/citationMarkdown';
 import { getWikiPage, type WikiPage } from '@/api/wiki';
 import { MessagePlugin } from 'tdesign-vue-next';
@@ -470,18 +555,20 @@ import { useAuthStore } from '@/stores/auth';
 import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
 import { hydrateProtectedFileImages, clearProtectedFileFailureCache, sanitizeMarkdownHTML } from '@/utils/security';
+import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
 import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
+import { parseWikiToolReferences } from '@/utils/wikiToolReferences';
 import {
   buildManualMarkdown,
-  copyTextToClipboard,
   formatManualTitle,
   replaceIncompleteMermaidWithPlaceholder,
   prepareStreamingMermaidMarkdown,
   extractFirstMermaidCode,
   injectCachedMermaidSvg,
 } from '@/utils/chatMessageShared';
+import { copyWithToast } from '@/utils/clipboard';
 import {
   configureMarkedForChatMarkdown,
   renderChatMarkdown,
@@ -521,9 +608,17 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   wiki_search: 'agentEditor.tools.wikiSearch',
   wiki_read_page: 'agentEditor.tools.wikiReadPage',
   wiki_read_source_doc: 'agentStream.tools.wikiReadSourceDoc',
+  wiki_flag_issue: 'agentEditor.tools.wikiFlagIssue',
+  wiki_write_page: 'agentEditor.tools.wikiWritePage',
+  wiki_replace_text: 'agentEditor.tools.wikiReplaceText',
+  wiki_rename_page: 'agentEditor.tools.wikiRenamePage',
+  wiki_delete_page: 'agentEditor.tools.wikiDeletePage',
+  wiki_read_issue: 'agentEditor.tools.wikiReadIssue',
+  wiki_update_issue: 'agentEditor.tools.wikiUpdateIssue',
   todo_write: 'agentStream.tools.todoWrite',
   knowledge_graph_extract: 'agentStream.tools.knowledgeGraphExtract',
   thinking: 'agentStream.tools.thinking',
+  attachment_parsing: 'agentStream.tools.attachmentParsing',
   image_analysis: 'agentStream.tools.imageAnalysis',
   query_understand: 'agentStream.tools.queryUnderstand',
   query_knowledge_graph: 'agentStream.tools.queryKnowledgeGraph',
@@ -630,7 +725,7 @@ const currentWikiKbId = ref<string>('');
 function getTypeTheme(type: string): string {
   const map: Record<string, string> = {
     summary: 'primary', entity: 'success', concept: 'warning',
-    synthesis: 'primary', comparison: 'danger', index: 'default', log: 'default',
+    synthesis: 'primary', comparison: 'danger', index: 'default',
   };
   return map[type] || 'default';
 }
@@ -643,7 +738,6 @@ function getTypeLabel(type: string): string {
     synthesis: t('knowledgeEditor.wikiBrowser.filterSynthesis'),
     comparison: t('knowledgeEditor.wikiBrowser.filterComparison'),
     index: 'Index',
-    log: 'Log',
   };
   return map[type] || type;
 }
@@ -673,7 +767,7 @@ const wikiDrawerContent = computed(() => {
 watch(wikiDrawerContent, async () => {
   await nextTick();
   if (wikiDrawerBodyRef.value) {
-    await hydrateProtectedFileImages(wikiDrawerBodyRef.value);
+    await hydrateProtectedFileImages(wikiDrawerBodyRef.value, protectedFileAccess.value);
   }
 });
 
@@ -690,15 +784,17 @@ const openWikiDrawer = async (kbId: string, slug: string) => {
   }
 };
 
-const navigateToWikiGraph = () => {
-  if (currentWikiKbId.value && wikiDrawerPage.value?.slug) {
-    wikiDrawerVisible.value = false;
-    try {
-      router.push(`/platform/knowledge-bases/${currentWikiKbId.value}?tab=graph&slug=${encodeURIComponent(wikiDrawerPage.value.slug)}`);
-    } catch (error) {
-      console.error('Failed to navigate to wiki graph:', error);
-    }
-  }
+const wikiGraphHref = computed(() => {
+  if (!currentWikiKbId.value || !wikiDrawerPage.value?.slug) return '';
+  return router.resolve({
+    path: `/platform/knowledge-bases/${currentWikiKbId.value}`,
+    query: { tab: 'graph', slug: wikiDrawerPage.value.slug },
+  }).href;
+});
+
+const openRouteInNewTab = (path: string) => {
+  const href = router.resolve(path).href;
+  window.open(href, '_blank', 'noopener,noreferrer');
 };
 
 const handleWikiDrawerClick = (e: MouseEvent) => {
@@ -732,6 +828,7 @@ import thinkingIcon from '@/assets/img/Frame3718.svg';
 
 interface SessionData {
   id?: string;
+  assistant_message_id?: string;
   request_id?: string;
   debugRequest?: Record<string, unknown>;
   isAgentMode?: boolean;
@@ -750,6 +847,11 @@ const props = defineProps<{
   embedSessionSig?: string;
   embedVisitorId?: string;
   ragMode?: boolean;
+  followUpLoading?: boolean;
+}>();
+
+const emit = defineEmits<{
+  (event: 'render-complete-change', ready: boolean): void;
 }>();
 
 const embedAuthProps = computed(() => ({
@@ -766,6 +868,76 @@ const showRequestInfo = computed(
 );
 
 const {
+  memoryItems,
+  hasMemory,
+  expanded: memoryExpanded,
+  forgettingId: memoryForgettingId,
+  toggle: toggleMemory,
+  forget: forgetMemory,
+} = useChatMemoryRow(() => props.session?.used_memories as UsedMemory[] | undefined);
+
+const resolveAssistantMessageId = (session?: SessionData) =>
+  String(session?.assistant_message_id || session?.id || '').trim();
+
+// Agent answers embed exported charts and knowledge-base images as
+// `resource://` handles. Embed visitors use the channel-scoped proxy. Logged-in
+// users use the persisted assistant message as the authorization anchor, which
+// also covers resources owned by a shared agent's source workspace.
+const protectedFileAccess = computed<ProtectedFileAccessContext | undefined>(() => {
+  if (props.embeddedMode && props.embedChannelId && props.embedToken) {
+    return { mode: 'embed', channelId: props.embedChannelId, token: props.embedToken };
+  }
+  const messageId = resolveAssistantMessageId(props.session);
+  if (props.sessionId && messageId) {
+    return { mode: 'message', sessionId: props.sessionId, messageId };
+  }
+  return undefined;
+});
+
+// Re-hydrate when the message authorization anchor becomes available or is
+// corrected (e.g. request_id → persisted assistant_message_id after agent_query).
+watch(
+  () => {
+    const access = protectedFileAccess.value;
+    if (access?.mode === 'message') {
+      return `${access.sessionId}\0${access.messageId}`;
+    }
+    return '';
+  },
+  (scopeKey, previousScopeKey) => {
+    if (!scopeKey || scopeKey === previousScopeKey) return;
+    clearProtectedFileFailureCache();
+    nextTick(async () => {
+      await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
+    });
+  },
+);
+
+// -----------------------------------------------------------------------------
+// Skill artifact download drawer (Agent path)
+// -----------------------------------------------------------------------------
+// Same contract as botmsg.vue: only render the button when the persisted
+// assistant message actually recorded files, then let ChatArtifactsDrawer
+// resolve names/sizes/mtimes and stream downloads via the /artifacts
+// endpoint. Agent mode is the primary path for skills, so this button will
+// appear more often here than in the RAG path.
+const showArtifactDrawer = ref(false);
+const artifactList = computed(() => {
+  const list = ((props.session?.artifacts as any[]) || []);
+  return list.map((a, i) => ({ index: i, ...a }));
+});
+const hasArtifacts = computed(() => artifactList.value.length > 0);
+const artifactCount = computed(() => artifactList.value.length);
+const sessionIdForArtifacts = computed(() => props.sessionId ?? '');
+const messageIdForArtifacts = computed(() =>
+  String(props.session?.id || props.session?.request_id || ''),
+);
+function openArtifactDrawer() {
+  if (!hasArtifacts.value) return;
+  showArtifactDrawer.value = true;
+}
+
+const {
   float: citationFloat,
   rebind: rebindCitations,
   cancelClose: cancelCitationClose,
@@ -779,11 +951,29 @@ const {
 
 const referencesDrawer = useChatReferencesDrawer();
 
+const getReferencesForDrawer = (
+  refsOverride?: KnowledgeReferenceLike[] | null,
+): KnowledgeReferenceLike[] => {
+  const messageReferences = refsOverride?.length
+    ? refsOverride
+    : props.session?.knowledge_references;
+  if (messageReferences?.length) return messageReferences;
+
+  // Agent answers can already contain citation tags before the aggregated
+  // knowledge_references event is emitted (and some restored conversations do
+  // not have that aggregate at all). The completed retrieval tool events still
+  // carry the same source data, so use them to keep citation clicks in the
+  // references drawer instead of falling through to KB-page navigation.
+  return (props.session?.agentEventStream || []).flatMap((event) =>
+    getToolReferenceItems(event),
+  );
+};
+
 const openReferencesDrawer = (
-  highlight?: { url?: string; chunkId?: string },
+  highlight?: ReferenceHighlightTarget,
   refsOverride?: KnowledgeReferenceLike[] | null,
 ) => {
-  const refs = refsOverride?.length ? refsOverride : props.session?.knowledge_references
+  const refs = getReferencesForDrawer(refsOverride)
   if (!referencesDrawer || !refs?.length) return false
   referencesDrawer.open({
     references: refs,
@@ -853,28 +1043,123 @@ const formatToolResultContent = (value: unknown): string => {
 
 const isMcpTool = (toolName?: string | null): boolean => String(toolName || '').startsWith('mcp_');
 
-const getToolReferenceItems = (event: any): KnowledgeReferenceLike[] => {
+const WIKI_EDIT_TOOL_NAMES = new Set([
+  'wiki_write_page',
+  'wiki_replace_text',
+  'wiki_rename_page',
+  'wiki_delete_page',
+]);
+
+const WIKI_ISSUE_TOOL_NAMES = new Set([
+  'wiki_flag_issue',
+  'wiki_read_issue',
+  'wiki_update_issue',
+]);
+
+const formatWikiEditResultContent = (toolData: any): string => {
+  const rows: Array<[string, unknown]> = [];
+  switch (toolData?.display_type) {
+    case 'wiki_write_page':
+      rows.push(
+        [t('chat.wikiFieldSlug'), toolData.slug],
+        [t('chat.wikiFieldTitle'), toolData.title],
+        [t('chat.wikiFieldPageType'), toolData.page_type],
+        [t('chat.wikiFieldSummary'), toolData.summary],
+      );
+      break;
+    case 'wiki_replace_text':
+      rows.push(
+        [t('chat.wikiFieldSlug'), toolData.slug],
+        [t('chat.wikiFieldTitle'), toolData.title],
+        [t('chat.wikiFieldOldText'), toolData.old_text],
+        [t('chat.wikiFieldNewText'), toolData.new_text],
+      );
+      break;
+    case 'wiki_rename_page':
+      rows.push(
+        [t('chat.wikiFieldOldSlug'), toolData.old_slug],
+        [t('chat.wikiFieldNewSlug'), toolData.new_slug],
+        [t('chat.wikiFieldTitle'), toolData.title],
+        [t('chat.wikiFieldAffectedPages'), Array.isArray(toolData.affected_pages)
+          ? toolData.affected_pages.join(', ')
+          : toolData.affected_pages],
+      );
+      break;
+    case 'wiki_delete_page':
+      rows.push(
+        [t('chat.wikiFieldSlug'), toolData.slug],
+        [t('chat.wikiFieldTitle'), toolData.title],
+        [t('chat.wikiFieldAffectedPages'), Array.isArray(toolData.affected_pages)
+          ? toolData.affected_pages.join(', ')
+          : toolData.affected_pages],
+      );
+      break;
+  }
+  return rows
+    .filter(([, value]) => value !== undefined && value !== null && String(value).trim())
+    .map(([label, value]) => `${label}: ${String(value).trim()}`)
+    .join('\n');
+};
+
+const buildToolResultReference = (
+  event: any,
+  content: string,
+): KnowledgeReferenceLike[] => {
+  if (!content) return [];
+  const toolName = String(event.tool_name || '');
+  const title = getToolTitle(event);
+  return [{
+    id: event.tool_call_id || toolName,
+    chunk_type: 'tool_result',
+    knowledge_title: title,
+    content,
+    metadata: {
+      title,
+      source: getLocalizedToolName(toolName),
+      tool: toolName,
+    },
+  }];
+};
+
+function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
   if (!event || event.pending) return [];
   const toolName = event.tool_name;
   const toolData = event.tool_data;
 
   if (isMcpTool(toolName)) {
     const output = formatToolResultContent(event.output) || formatToolResultContent(toolData);
-    if (!output) return [];
-    return [{
-      id: event.tool_call_id || toolName,
-      chunk_type: 'tool_result',
-      knowledge_title: getToolTitle(event),
-      content: output,
-      metadata: {
-        title: getToolTitle(event),
-        source: getLocalizedToolName(toolName),
-        tool: String(toolName || ''),
-      },
-    }];
+    return buildToolResultReference(event, output);
+  }
+
+  if (WIKI_ISSUE_TOOL_NAMES.has(toolName)) {
+    return buildToolResultReference(event, formatToolResultContent(event.output));
   }
 
   if (!toolData) return [];
+
+  if (toolName === 'wiki_search' || toolName === 'wiki_read_page') {
+    return parseWikiToolReferences(toolName, event.output, event.tool_call_id || toolName)
+      .map((item) => ({
+        id: item.id,
+        chunk_type: 'tool_result',
+        knowledge_title: item.title,
+        content: item.content,
+        metadata: {
+          title: item.title,
+          source: getLocalizedToolName(toolName),
+          tool: toolName,
+          ...(item.slug ? { slug: item.slug } : {}),
+          ...(item.knowledgeBaseId ? { knowledge_base_id: item.knowledgeBaseId } : {}),
+        },
+      }));
+  }
+
+  if (WIKI_EDIT_TOOL_NAMES.has(toolName)) {
+    return buildToolResultReference(
+      event,
+      formatWikiEditResultContent(toolData) || formatToolResultContent(event.output),
+    );
+  }
 
   if (toolName === 'web_search') {
     const results = Array.isArray(toolData.results) ? toolData.results : [];
@@ -935,8 +1220,10 @@ const getToolReferenceItems = (event: any): KnowledgeReferenceLike[] => {
         .filter((group) => group.knowledge_id || group.title)
         .map((group, index) => ({
           id: group.knowledge_id || group.key,
+          chunk_ids: group.chunks.map((chunk) => chunk.chunk_id).filter(Boolean),
           knowledge_id: group.knowledge_id,
           knowledge_title: group.title,
+          knowledge_base_id: group.knowledge_base_id,
           chunk_index: index + 1,
           chunk_type: group.is_faq ? 'faq' : undefined,
           content: group.chunks.map((chunk) => chunk.content).filter(Boolean).slice(0, 3).join('\n\n') || group.match_snippet || '',
@@ -956,7 +1243,7 @@ const getToolReferenceItems = (event: any): KnowledgeReferenceLike[] => {
       })));
   }
 
-  if (toolName === 'list_knowledge_chunks') {
+  if (toolName === 'list_knowledge_chunks' || toolName === 'wiki_read_source_doc') {
     const chunks = Array.isArray(toolData.chunks) ? toolData.chunks : [];
     if (chunks.length) {
       return mergeDocumentReferences(chunks
@@ -985,7 +1272,7 @@ const getToolReferenceItems = (event: any): KnowledgeReferenceLike[] => {
   }
 
   return [];
-};
+}
 
 const canOpenToolReferences = (event: any): boolean => getToolReferenceItems(event).length > 0;
 
@@ -1057,7 +1344,7 @@ watch(eventStream, (stream) => {
   activeThinkingVersion.value++;
 
   nextTick(async () => {
-    await hydrateProtectedFileImages(rootElement.value);
+    await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
     await enhanceMarkdownContainer(rootElement.value);
     // Auto-scroll thinking detail content to bottom during streaming
     if (newActiveIds.size > 0 && rootElement.value) {
@@ -1227,21 +1514,44 @@ const answerFullyRendered = computed(
   () => isConversationDone.value && typedAnswer.value.length >= activeAnswerMarkdown.value.length,
 );
 watch(answerFullyRendered, (ready) => {
+  emit('render-complete-change', ready);
   if (!ready) return;
   // Clear before this reactive update renders, so a source that returned 404
   // mid-stream gets one real final-attempt <img> node instead of remaining
   // suppressed by the missing-source cache.
   clearProtectedFileFailureCache();
   nextTick(async () => {
-    await hydrateProtectedFileImages(rootElement.value);
+    await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
+  });
+}, { immediate: true });
+
+// Whether any currently visible step is actively pending (a running tool, or a
+// blocking approval/OAuth prompt). A pending step shimmers on its own, so we
+// don't stack a placeholder on top of it.
+const hasPendingStreamingActivity = computed(() => {
+  return displayEvents.value.some((event: any) => {
+    if (!event) return false;
+    if (event.pending === true) return true;
+    if (
+      event.type === 'thinking' &&
+      (event.thinking === true || isThinkingActive(event.event_id))
+    ) {
+      return true;
+    }
+    return event.type === 'tool_approval_required' || event.type === 'mcp_oauth_required';
   });
 });
 
-// Agent: dots until the turn completes. RAG: pipeline dots before answer; answer stream dots after.
+// Before any answer text appears, keep a native timeline placeholder whenever
+// nothing is currently pending. This covers both the initial wait (no events
+// yet) and the gap between rounds — the previous tool finished but the model
+// has not emitted the next step/answer — which would otherwise show a static,
+// feedback-less timeline. Once a real pending step exists it carries its own
+// shimmer, and once answer text starts the stream itself is enough feedback.
 const showAgentActivityIndicator = computed(() => {
   if (isConversationDone.value) return false;
-  if (props.ragMode) return hasAnswerStarted.value;
-  return true;
+  if (props.ragMode || hasAnswerStarted.value) return false;
+  return !hasPendingStreamingActivity.value;
 });
 
 const isStreamingTimelineEvent = (event: any): boolean => {
@@ -1386,6 +1696,19 @@ const shouldShowCollapsedSteps = computed(() => {
   const hasSteps = intermediateStepsCount.value > 0;
   return hasSteps && isConversationDone.value;
 });
+
+// Once the steps collapse, the memory row travels with them into the tree —
+// showing it here as well would leave two rows saying the same thing. In
+// quick-answer mode the pipeline component owns the timeline and its memory row.
+const showMemoryRow = computed(
+  () => !props.ragMode && hasMemory.value && !shouldShowCollapsedSteps.value,
+);
+
+// Memory leads the timeline, so it is only the last node while nothing has
+// followed it yet — and a lone node has no trunk line to draw below it.
+const memoryIsLast = computed(
+  () => lastStreamingTimelineEventIndex.value === -1 && !showAgentActivityIndicator.value,
+);
 
 // Check if event is a "deep thinking" type (either streaming thinking or thinking tool call)
 const isThinkingLikeEvent = (event: any): boolean => {
@@ -1594,14 +1917,10 @@ const intermediateEvents = computed(() => {
   });
 });
 
-const visibleIntermediateEvents = computed(() => {
-  return intermediateEvents.value.filter((e: any) => {
-    if (!e) return false;
-    if (e.type === 'thinking') return false;
-    if (e.type === 'tool_call' && e.tool_name === 'thinking') return false;
-    return true;
-  });
-});
+// Keep reasoning in the same compact timeline as tool calls. The template
+// auto-expands the active reasoning event and folds it again once a tool or
+// answer follows, so tool activity remains the primary structure.
+const visibleIntermediateEvents = computed(() => intermediateEvents.value);
 
 // Events to display (non-tree: before answer starts show all, after answer starts show only answer)
 const displayEvents = computed(() => {
@@ -1612,21 +1931,16 @@ const displayEvents = computed(() => {
 
   const result = buildFullEventList(stream);
 
-  // Quick-answer RAG: pipeline steps and model thinking live in RagPipelineProgress;
-  // here we only render the final answer stream.
+  // Quick-answer RAG: pipeline steps (including attachment prep) live in
+  // RagPipelineProgress; this component only renders the answer stream.
   if (props.ragMode) {
     return result.filter((e: any) => e.type === 'answer');
   }
 
-  // While the conversation is still running, keep the same lightweight tool-log
-  // surface as the completed tree. Raw thinking narration is noisy during
-  // streaming; the active state is represented by the compact activity dots.
+  // Keep the active reasoning event inline with tool activity. It uses the same
+  // compact timeline card and is auto-collapsed when a tool or answer follows.
   if (!isConversationDone.value) {
-    return result.filter((e: any) => {
-      if (e.type === 'thinking') return false;
-      if (e.type === 'tool_call' && e.tool_name === 'thinking') return false;
-      return true;
-    });
+    return result;
   }
 
   // Done: the steps live in the collapsed tree; show only the answer here.
@@ -1690,7 +2004,7 @@ const toggleIntermediateSteps = () => {
   showIntermediateSteps.value = !showIntermediateSteps.value;
   nextTick(async () => {
     if (rootElement.value) {
-      await hydrateProtectedFileImages(rootElement.value);
+      await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
     }
   });
 };
@@ -1724,12 +2038,17 @@ const isEventExpanded = (eventId: string): boolean => {
 
 const isReferenceDrawerTool = (toolName?: string | null): boolean =>
   isMcpTool(toolName) ||
+  WIKI_EDIT_TOOL_NAMES.has(String(toolName || '')) ||
+  WIKI_ISSUE_TOOL_NAMES.has(String(toolName || '')) ||
   toolName === 'search_knowledge' ||
   toolName === 'knowledge_search' ||
   toolName === 'web_search' ||
   toolName === 'web_fetch' ||
   toolName === 'grep_chunks' ||
-  toolName === 'list_knowledge_chunks';
+  toolName === 'list_knowledge_chunks' ||
+  toolName === 'wiki_search' ||
+  toolName === 'wiki_read_page' ||
+  toolName === 'wiki_read_source_doc';
 
 const hasExpandableResults = (event: any): boolean => {
   if (isReferenceDrawerTool(event?.tool_name)) return false;
@@ -1765,6 +2084,11 @@ const hasResults = (event: any): boolean => {
 
   // list_knowledge_chunks: summary is inline below the header (no expandable body)
   if (toolName === 'list_knowledge_chunks') {
+    return false;
+  }
+
+  // Attachment parsing and image analysis: compact inline status only
+  if (toolName === 'attachment_parsing' || toolName === 'image_analysis') {
     return false;
   }
 
@@ -1876,14 +2200,18 @@ const onRootClick = (e: Event) => {
       resolveCitationChunkId(
         rawChunkId,
         { doc: title, kbId },
-        props.session?.knowledge_references,
+        getReferencesForDrawer(),
       ) || rawChunkId;
-    if (openReferencesDrawer({ chunkId })) {
+    if (openReferencesDrawer({
+      chunkId,
+      documentTitle: title,
+      knowledgeBaseId: kbId,
+    })) {
       return;
     }
     if (kbId) {
       try {
-        router.push(`/platform/knowledge-bases/${kbId}`);
+        openRouteInNewTab(`/platform/knowledge-bases/${kbId}`);
       } catch (error) {
         console.error('Failed to navigate to knowledge base:', error);
       }
@@ -1948,14 +2276,18 @@ const onRootKeydown = (e: KeyboardEvent) => {
         resolveCitationChunkId(
           rawChunkId,
           { doc: title, kbId },
-          props.session?.knowledge_references,
+          getReferencesForDrawer(),
         ) || rawChunkId;
-      if (openReferencesDrawer({ chunkId })) {
+      if (openReferencesDrawer({
+        chunkId,
+        documentTitle: title,
+        knowledgeBaseId: kbId,
+      })) {
         return;
       }
       if (kbId) {
         try {
-          router.push(`/platform/knowledge-bases/${kbId}`);
+          openRouteInNewTab(`/platform/knowledge-bases/${kbId}`);
         } catch (error) {
           console.error('Failed to navigate to knowledge base:', error);
         }
@@ -1992,7 +2324,7 @@ onMounted(() => {
     (root as any).__citationKeydown__ = keydownListener;
     root.addEventListener('keydown', keydownListener, true);
     rebindCitations();
-    await hydrateProtectedFileImages(rootElement.value);
+    await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
   });
 });
 
@@ -2016,7 +2348,7 @@ onUpdated(() => {
     // and idempotent: blob results are cached per URL, in-flight fetches are
     // de-duped, and failures back off for a cooldown — so a not-yet-ready file
     // simply retries later (and the answerFullyRendered pass is the backstop).
-    await hydrateProtectedFileImages(rootElement.value);
+    await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
   });
 });
 
@@ -2043,7 +2375,7 @@ const renderAgentMarkdown = (
     escapeMarkdown,
     sanitizeHtml: sanitizeMarkdownHTML,
     streaming: !isConversationDone.value,
-    knowledgeReferences: props.session?.knowledge_references,
+    knowledgeReferences: getReferencesForDrawer(),
     cachedMermaidSvgHtml: streamingMermaidSvgCache.value,
     prepareMarkdown: prepareAgentMarkdown,
     injectCachedMermaidSvg,
@@ -2257,11 +2589,18 @@ const getKnowledgeChunksSummary = (toolData: any): string => {
   return getKnowledgeChunksSummaryHtml(t, toolData);
 };
 
+const getAttachmentParsingSummary = (event: any): string => {
+  return getAttachmentParsingSummaryHtml(t, event);
+};
+
 // Get tool title - prefer summary over description, add query for search tools
 const getToolTitle = (event: any): string => {
   if (event.pending) {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');
+    }
+    if (event.tool_name === 'attachment_parsing') {
+      return t('agentStream.toolStatus.attachmentParsing');
     }
     if (event.tool_name === 'wiki_search' || event.tool_name === 'wiki_read_page') {
       return `${getLocalizedToolName(event.tool_name)}...`;
@@ -2372,6 +2711,9 @@ const getToolDescription = (event: any): string => {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');
     }
+    if (event.tool_name === 'attachment_parsing') {
+      return t('agentStream.toolStatus.attachmentParsing');
+    }
     if (event.tool_name === 'query_understand') {
       return t('agentStream.toolStatus.queryUnderstanding');
     }
@@ -2401,6 +2743,8 @@ const getToolDescription = (event: any): string => {
     return success ? t('agentStream.toolStatus.updateTodos') : t('agentStream.toolStatus.updateTodosFailed');
   } else if (toolName === 'image_analysis') {
     return success ? t('agentStream.toolStatus.imageAnalysisDone') : t('agentStream.toolStatus.imageAnalysisFailed');
+  } else if (toolName === 'attachment_parsing') {
+    return success ? t('agentStream.toolStatus.attachmentParsingDone') : t('agentStream.toolStatus.attachmentParsingFailed');
   } else if (toolName === 'query_understand') {
     return success ? t('agentStream.toolStatus.queryUnderstandDone') : t('agentStream.toolStatus.calledFailed', { name: getLocalizedToolName(toolName) });
   } else {
@@ -2467,13 +2811,7 @@ const handleCopyAnswer = async (answerEvent: any) => {
     return;
   }
 
-  try {
-    await copyTextToClipboard(content);
-    MessagePlugin.success(t('agentStream.copy.success'));
-  } catch (err) {
-    console.error('Copy failed:', err);
-    MessagePlugin.error(t('agentStream.copy.failed'));
-  }
+  await copyWithToast(content, 'agentStream.copy.success', 'agentStream.copy.failed');
 };
 
 const handleAddToKnowledge = (answerEvent: any) => {
@@ -2531,13 +2869,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
   &.is-embedded {
     margin-bottom: 0;
-
-    .loading-indicator {
-      height: 41px;
-      padding: 0 0 0 4px;
-      margin-top: 0;
-      animation: none;
-    }
   }
 }
 
@@ -2580,6 +2911,13 @@ const handleAddToKnowledge = (answerEvent: any) => {
   &.event-answer {
     // answer 事件无特殊左侧装饰
   }
+}
+
+// While streaming, the last timeline step is `tree-child-last` (margin-bottom: 0)
+// and the answer streams in directly beneath it. Give the answer breathing room
+// so it does not collide with the final tool row.
+.event-item.tree-child + .event-item.event-answer {
+  margin-top: 16px;
 }
 
 // ============ Tree View ============
@@ -2932,32 +3270,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 }
 
-// Loading 动画关键帧
-@keyframes dotBounce {
-
-  0%,
-  80%,
-  100% {
-    transform: scale(1);
-    opacity: 0.6;
-  }
-
-  40% {
-    transform: scale(1.3);
-    opacity: 1;
-  }
-}
-
-@keyframes spin {
-  0% {
-    transform: rotate(0deg);
-  }
-
-  100% {
-    transform: rotate(360deg);
-  }
-}
-
 @keyframes pulse {
 
   0%,
@@ -2969,32 +3281,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
   50% {
     transform: scale(1.5);
     opacity: 0.3;
-  }
-}
-
-@keyframes typingBounce {
-
-  0%,
-  60%,
-  100% {
-    transform: translate3d(0, 0, 0);
-  }
-
-  30% {
-    transform: translate3d(0, -5px, 0);
-  }
-}
-
-@keyframes wave {
-
-  0%,
-  40%,
-  100% {
-    transform: scaleY(0.4);
-  }
-
-  20% {
-    transform: scaleY(1);
   }
 }
 
@@ -3274,121 +3560,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 }
 
-.loading-indicator {
-  display: flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 0;
-  margin-top: 0;
-  position: relative;
-  animation: fadeInUp 0.3s ease-out;
-
-  // 方案1: 三个跳动的圆点
-  .loading-dots {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-
-    span {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--td-brand-color);
-      animation: dotBounce 1.4s ease-in-out infinite;
-
-      &:nth-child(1) {
-        animation-delay: -0.32s;
-      }
-
-      &:nth-child(2) {
-        animation-delay: -0.16s;
-      }
-
-      &:nth-child(3) {
-        animation-delay: 0s;
-      }
-    }
-  }
-
-  // 打字机效果
-  .loading-typing {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-
-    span {
-      width: 4px;
-      height: 4px;
-      border-radius: 50%;
-      background: var(--td-text-color-placeholder);
-      animation: typingBounce 1.4s ease-in-out infinite;
-      // Composite each dot so the bounce stays smooth and ghost-free while the
-      // streaming answer relayouts every token.
-      will-change: transform;
-      backface-visibility: hidden;
-
-      &:nth-child(1) {
-        animation-delay: 0s;
-      }
-
-      &:nth-child(2) {
-        animation-delay: 0.2s;
-      }
-
-      &:nth-child(3) {
-        animation-delay: 0.4s;
-      }
-    }
-  }
-
-  // 方案5: 波浪线
-  .loading-wave {
-    display: flex;
-    align-items: center;
-    gap: 3px;
-
-    span {
-      width: 3px;
-      height: 16px;
-      background: var(--td-brand-color);
-      border-radius: 2px;
-      animation: wave 1.2s ease-in-out infinite;
-
-      &:nth-child(1) {
-        animation-delay: 0s;
-      }
-
-      &:nth-child(2) {
-        animation-delay: 0.1s;
-      }
-
-      &:nth-child(3) {
-        animation-delay: 0.2s;
-      }
-
-      &:nth-child(4) {
-        animation-delay: 0.3s;
-      }
-
-      &:nth-child(5) {
-        animation-delay: 0.4s;
-      }
-    }
-  }
-
-  .botanswer_loading_gif {
-    width: 24px;
-    height: 18px;
-    margin-left: 0;
-  }
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 // Final step layout override: keep agent reasoning/tool output visually close to
 // Claude's compact timeline instead of boxed cards.
 .agent-stream-display {
@@ -3434,6 +3605,34 @@ const handleAddToKnowledge = (answerEvent: any) => {
     color: var(--td-text-color-secondary);
     max-height: none;
     overflow-y: visible;
+  }
+
+  .thinking-inline-title {
+    align-items: flex-start;
+  }
+
+  // Anchor the bulb to the fixed header instead of the variable-height title.
+  // Otherwise expanding inline reasoning shifts the icon along the timeline.
+  .tree-child .thinking-event-card .action-title {
+    position: static;
+  }
+
+  .thinking-inline-content {
+    flex: 1;
+    min-width: 0;
+    color: var(--td-text-color-secondary);
+    font-size: var(--agent-step-summary-size);
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+    user-select: text;
+
+    :deep(.thinking-inline-markdown > :first-child) {
+      margin-top: 0;
+    }
+
+    :deep(.thinking-inline-markdown > :last-child) {
+      margin-bottom: 0;
+    }
   }
 
   .search-results-summary-fixed,

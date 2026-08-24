@@ -50,6 +50,9 @@ func TestApplyCustomHeaders_NilSafe(t *testing.T) {
 }
 
 func TestWrapHTTPClientWithHeaders(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1,::1,localhost")
+	ResetSSRFWhitelistForTest()
+	t.Cleanup(ResetSSRFWhitelistForTest)
 	gotTrace := ""
 	gotAuth := ""
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

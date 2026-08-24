@@ -15,6 +15,7 @@
 
 - `before_time`: 上一次拉取的最早一条消息的 created_at 字段，为空拉取最近的消息
 - `limit`: 每页条数(默认 20)
+- `resource_urls`: `handle`（默认）或 `public`。`public` 把历史消息里的 `resource://` 图片引用换成可加载的 http(s) 链接，详见[文件与图片引用](./README.md#文件与图片引用resource-与直链)
 
 **请求**:
 
@@ -239,7 +240,7 @@ curl --location 'http://localhost:8080/api/v1/messages/search' \
 
 ## GET `/messages/chat-history-stats` - 获取聊天历史知识库统计
 
-获取当前租户的聊天历史知识库索引统计信息。
+获取当前空间的聊天历史知识库索引统计信息。
 
 **请求**:
 

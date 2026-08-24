@@ -17,12 +17,20 @@
             <div v-if="session.isRagMode" class="rag-answer-stack">
                 <RagPipelineProgress :session="session" :embedded-mode="embeddedMode" />
                 <AgentStreamDisplay v-if="session.isAgentMode" :session="session" :session-id="sessionId"
-                    :user-query="userQuery" :rag-mode="true" />
+                    :user-query="userQuery" :rag-mode="true" :follow-up-loading="followUpLoading"
+                    @render-complete-change="emit('render-complete-change', $event)" />
             </div>
             <template v-else>
+                <!-- A plain answer has no timeline to put the memory row on, so
+                     it gets the standalone row. Agent turns render theirs inside
+                     the agent timeline instead, next to the steps it belongs
+                     with. -->
+                <RagPipelineProgress v-if="!session.isAgentMode && session.used_memories?.length"
+                    :session="session" :embedded-mode="embeddedMode" memory-only />
                 <docInfo v-if="session.knowledge_references?.length" :session="session"></docInfo>
                 <AgentStreamDisplay :session="session" :session-id="sessionId" :user-query="userQuery"
-                    v-if="session.isAgentMode" />
+                    v-if="session.isAgentMode" :follow-up-loading="followUpLoading"
+                    @render-complete-change="emit('render-complete-change', $event)" />
             </template>
             <deepThink :deepSession="session" v-if="session.showThink && !session.isAgentMode"></deepThink>
         </div>
@@ -34,16 +42,8 @@
                 <div class="ai-markdown-template markdown-content" v-stable-html="renderedHTML">
                 </div>
             </div>
-            <!-- Streaming indicator (non-Agent mode) -->
-            <div v-if="hasActualContent && !session.is_completed" class="loading-indicator">
-                <div class="loading-typing">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </div>
-            </div>
             <!-- 复制和添加到知识库按钮 - 非 Agent 模式下显示 -->
-            <div v-if="session.is_completed && (content || session.content)" class="answer-toolbar">
+            <div v-if="answerFullyRendered && (content || session.content)" class="answer-toolbar">
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer"
                     :title="$t('agent.copy')">
                     <t-icon name="copy" />
@@ -52,6 +52,23 @@
                     :title="$t('agent.addToKnowledgeBase')">
                     <t-icon name="bookmark-add" />
                 </t-button>
+                <!-- Skill artifact download: only shown when this reply's
+                     assistant message actually recorded any generated files.
+                     Emptiness is the default: the button stays hidden for
+                     conversational messages that never touched a skill. -->
+                <t-badge
+                    v-if="hasArtifacts"
+                    :count="artifactCount"
+                    :offset="[-4, 4]"
+                    shape="round"
+                    size="small"
+                >
+                    <t-button size="small" variant="outline" shape="round"
+                        @click.stop="openArtifactDrawer"
+                        :title="$t('agent.artifactDrawer.buttonTitle')">
+                        <t-icon name="download" />
+                    </t-button>
+                </t-badge>
                 <!-- Fallback 提示图标 -->
                 <t-tooltip v-if="session.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                     <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
@@ -59,6 +76,13 @@
                     </t-button>
                 </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo" :session="session" :session-id="sessionId" />
+                <transition name="follow-up-toolbar-loading">
+                    <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
+                        aria-live="polite">
+                        <t-icon name="lightbulb" />
+                        <span class="answer-toolbar__follow-up-label">{{ t('chat.followUpQuestionsLoading') }}</span>
+                    </span>
+                </transition>
             </div>
             <div v-if="isImgLoading" class="img_loading"><t-loading size="small"></t-loading><span>{{
                 $t('common.loading') }}</span></div>
@@ -68,6 +92,13 @@
             <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose"
                 :on-leave="scheduleCitationClose" />
         </Teleport>
+        <ChatArtifactsDrawer
+            v-if="hasArtifacts"
+            v-model:visible="showArtifactDrawer"
+            :session-id="sessionId"
+            :message-id="messageIdForArtifacts"
+            :artifacts="artifactList"
+        />
     </div>
 </template>
 <script setup>
@@ -80,15 +111,16 @@ import RagPipelineProgress from './RagPipelineProgress.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
+import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
 import { sanitizeMarkdownHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
 import {
     buildManualMarkdown,
-    copyTextToClipboard,
     formatManualTitle,
 } from '@/utils/chatMessageShared';
+import { copyWithToast } from '@/utils/clipboard';
 import {
     createChatMarkdownRenderer,
     renderChatMarkdown,
@@ -118,7 +150,7 @@ const mentionTagIcon = (item) => {
     return 'file';
 };
 
-const emit = defineEmits(['scroll-bottom'])
+const emit = defineEmits(['scroll-bottom', 'render-complete-change'])
 const { t } = useI18n()
 const uiStore = useUIStore();
 let parentMd = ref()
@@ -155,10 +187,48 @@ const props = defineProps({
     sessionId: {
         type: String,
         default: ''
+    },
+    followUpLoading: {
+        type: Boolean,
+        default: false
     }
 });
 
 const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
+
+// -----------------------------------------------------------------------------
+// Skill artifact download (drawer)
+// -----------------------------------------------------------------------------
+// The download button and drawer are opt-in per message: the toolbar checks
+// `hasArtifacts` and only renders when the assistant message actually
+// recorded a file. `messageIdForArtifacts` resolves to whichever field the
+// caller uses to identify the row on the server (session.id from the SSE
+// hydration path, request_id when the caller pre-populated it).
+//
+// NOTE: this file's <script setup> block is plain JS (no lang="ts"), so we
+// stay away from TypeScript-only syntax like `as any[]` — the vite Vue
+// plugin routes non-TS blocks through babel which rejects those tokens.
+const showArtifactDrawer = ref(false);
+const artifactList = computed(() => {
+    const raw = props.session && props.session.artifacts;
+    const list = Array.isArray(raw) ? raw : [];
+    // Enrich each entry with its position so the download endpoint can
+    // resolve it. Server responses already include `index` when they come
+    // via listMessageArtifacts; SSE payloads that land through Message.Artifacts
+    // omit it. Normalising here keeps ChatArtifactsDrawer index-agnostic.
+    return list.map((a, i) => ({ index: i, ...a }));
+});
+const hasArtifacts = computed(() => artifactList.value.length > 0);
+const artifactCount = computed(() => artifactList.value.length);
+const messageIdForArtifacts = computed(() => {
+    // Prefer the persistent message ID; fall back to request_id for the
+    // in-flight path where the SSE stream still identifies rows by request.
+    return String((props.session && (props.session.id || props.session.request_id)) || '');
+});
+function openArtifactDrawer() {
+    if (!hasArtifacts.value) return;
+    showArtifactDrawer.value = true;
+}
 
 const preview = (url) => {
     nextTick(() => {
@@ -195,6 +265,21 @@ const { displayed: typedAnswer } = useTypewriter(
     () => Boolean(props.session?.is_completed),
 );
 
+// The backend completion event can arrive while the local typewriter still has
+// buffered text to reveal. Treat the answer as visually complete only after the
+// displayed text has caught up, so actions never appear beside a moving answer.
+const answerFullyRendered = computed(() =>
+    Boolean(props.session?.is_completed) && typedAnswer.value.length >= answerText.value.length
+);
+
+watch(
+    answerFullyRendered,
+    (ready) => {
+        if (!props.session?.isAgentMode) emit('render-complete-change', ready);
+    },
+    { immediate: true },
+);
+
 // 单次渲染整个 Markdown 内容（替代 token-by-token，修复 KaTeX 公式在 streaming 时闪烁消失的问题）
 const renderedHTML = computed(() => {
     const text = typedAnswer.value;
@@ -227,13 +312,7 @@ const handleCopyAnswer = async () => {
         return;
     }
 
-    try {
-        await copyTextToClipboard(content);
-        MessagePlugin.success(t('chat.copySuccess'));
-    } catch (err) {
-        console.error('复制失败:', err);
-        MessagePlugin.error(t('chat.copyFailed'));
-    }
+    await copyWithToast(content, 'chat.copySuccess', 'chat.copyFailed');
 };
 
 // 添加到知识库
@@ -402,57 +481,6 @@ onBeforeUnmount(() => {
     width: 24px;
     height: 18px;
     margin-left: 16px;
-}
-
-.thinking-loading {
-    padding: 8px 0;
-}
-
-.loading-indicator {
-    padding: 8px 0;
-}
-
-.loading-typing {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-
-    span {
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: var(--td-brand-color);
-        animation: typingBounce 1.4s ease-in-out infinite;
-        // Composite the dots so the bounce stays smooth and ghost-free while the
-        // answer relayouts each streamed token.
-        will-change: transform;
-        backface-visibility: hidden;
-
-        &:nth-child(1) {
-            animation-delay: 0s;
-        }
-
-        &:nth-child(2) {
-            animation-delay: 0.2s;
-        }
-
-        &:nth-child(3) {
-            animation-delay: 0.4s;
-        }
-    }
-}
-
-@keyframes typingBounce {
-
-    0%,
-    60%,
-    100% {
-        transform: translate3d(0, 0, 0);
-    }
-
-    30% {
-        transform: translate3d(0, -6px, 0);
-    }
 }
 
 .img_loading {

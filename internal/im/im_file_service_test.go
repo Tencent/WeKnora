@@ -79,11 +79,11 @@ func TestIMFileServiceResolver_CachesPerProvider(t *testing.T) {
 	}
 	r := newIMFileServiceResolver(tenant, stub)
 
-	svc1 := r.resolve("minio://wizard-test/10000/a.png")
-	svc2 := r.resolve("minio://wizard-test/10000/b.png")
+	svc1 := r.ResolveFileService("minio://wizard-test/10000/a.png")
+	svc2 := r.ResolveFileService("minio://wizard-test/10000/b.png")
 	assert.Same(t, svc1, svc2, "same provider should reuse cached FileService")
 
-	svc3 := r.resolve("local://10000/c.png")
+	svc3 := r.ResolveFileService("local://10000/c.png")
 	assert.NotSame(t, svc1, svc3, "different provider should use a different service")
 }
 
@@ -109,6 +109,48 @@ func TestRewriteStorageURLs_MinIOFallbackViaGlobal(t *testing.T) {
 	out := rewriteStorageURLs(context.Background(), in, resolver)
 	assert.Contains(t, out, "https://minio.example/presigned")
 	assert.NotContains(t, out, "](minio://")
+}
+
+func TestRewriteStorageURLs_ScopedPath(t *testing.T) {
+	stub := &stubIMFileService{
+		getFileURL: func(_ context.Context, filePath string) (string, error) {
+			assert.Equal(t, "storage://backend-a/cos://bucket/ap-test/10000/exports/a.png", filePath)
+			return "https://storage.example/a.png", nil
+		},
+	}
+	input := "![img](storage://backend-a/cos://bucket/ap-test/10000/exports/a.png)"
+	output := rewriteStorageURLs(context.Background(), input, newIMFileServiceResolver(&types.Tenant{}, stub))
+	assert.Contains(t, output, "https://storage.example/a.png")
+}
+
+// When GetFileURL resolves a resource:// alias to a still-internal storage://
+// path (no public HTTP URL), the rewrite must be a no-op rather than emit the
+// unrenderable URL to the IM client.
+func TestRewriteStorageURLs_NonHTTPResultIsNoOp(t *testing.T) {
+	stub := &stubIMFileService{
+		getFileURL: func(_ context.Context, _ string) (string, error) {
+			return "storage://7cb970a6/oss://bcjy/10000/exports/a.png", nil
+		},
+	}
+	in := "![img](resource://xifDo7NTSL300Lp1goVutw)"
+	out := rewriteStorageURLs(context.Background(), in, newIMFileServiceResolver(&types.Tenant{}, stub))
+	assert.Equal(t, in, out)
+	assert.NotContains(t, out, "storage://")
+}
+
+// URL schemes are case-insensitive (RFC 3986); an uppercase-scheme result (e.g.
+// from an OBS_PROXY_DOMAIN configured as HTTPS://...) is renderable and must be
+// substituted, not dropped as "non-HTTP".
+func TestRewriteStorageURLs_UppercaseSchemeIsSubstituted(t *testing.T) {
+	stub := &stubIMFileService{
+		getFileURL: func(_ context.Context, _ string) (string, error) {
+			return "HTTPS://cdn.example.com/x.png", nil
+		},
+	}
+	in := "![img](resource://xifDo7NTSL300Lp1goVutw)"
+	out := rewriteStorageURLs(context.Background(), in, newIMFileServiceResolver(&types.Tenant{}, stub))
+	assert.Contains(t, out, "HTTPS://cdn.example.com/x.png")
+	assert.NotContains(t, out, "resource://")
 }
 
 func TestCleanIMContent_MinIOFallbackIntegration(t *testing.T) {

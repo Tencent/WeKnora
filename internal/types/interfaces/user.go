@@ -14,8 +14,10 @@ type UserService interface {
 	Login(ctx context.Context, req *types.LoginRequest) (*types.LoginResponse, error)
 	// GetOIDCAuthorizationURL builds the third-party OIDC authorization URL
 	GetOIDCAuthorizationURL(ctx context.Context, redirectURI string) (*types.OIDCAuthURLResponse, error)
-	// LoginWithOIDC exchanges the callback code, auto-provisions users if needed, and completes login
-	LoginWithOIDC(ctx context.Context, code, redirectURI string) (*types.OIDCCallbackResponse, error)
+	// LoginWithOIDC exchanges the callback code, auto-provisions users if needed, and completes login.
+	// provisioning is the default tenant mode for a newly auto-created user
+	// (resolved by the caller from auth.default_tenant_mode).
+	LoginWithOIDC(ctx context.Context, code, redirectURI string, provisioning types.TenantProvisioningMode) (*types.OIDCCallbackResponse, error)
 	// GetUserByID gets a user by ID
 	GetUserByID(ctx context.Context, id string) (*types.User, error)
 	// GetUsersByIDs batch-fetches users by id, returning a map keyed by
@@ -35,6 +37,10 @@ type UserService interface {
 	DeleteUser(ctx context.Context, id string) error
 	// ChangePassword changes user password
 	ChangePassword(ctx context.Context, userID string, oldPassword, newPassword string) error
+	// AdminResetPassword replaces a user's password without requiring the old
+	// password and revokes all of that user's existing sessions. Callers must
+	// enforce the system-admin and cannot-reset-self guards before invoking it.
+	AdminResetPassword(ctx context.Context, userID string, newPassword string) error
 	// ValidatePassword validates user password
 	ValidatePassword(ctx context.Context, userID string, password string) error
 	// GenerateTokens generates access and refresh tokens for user
@@ -73,6 +79,13 @@ type UserService interface {
 	// callers pass offset/limit to page through results. Used by the
 	// /api/v1/system/admin/list endpoint, gated to SystemAdmin callers.
 	ListSystemAdmins(ctx context.Context, offset, limit int) ([]*types.User, int64, error)
+	// AdminCreateUser provisions a new local user on behalf of a
+	// SystemAdmin. When req.Password is nil, a random password is generated
+	// and returned exactly once as the second result. provisioning is
+	// resolved by the caller from the shared auth.default_tenant_mode policy.
+	AdminCreateUser(
+		ctx context.Context, req *types.AdminCreateUserRequest, provisioning types.TenantProvisioningMode,
+	) (*types.User, string, error)
 	// RevokeSystemAdmin removes system-admin privileges with the
 	// last-admin/self-revoke checks performed atomically.
 	RevokeSystemAdmin(ctx context.Context, userID, actorID string) (*types.User, error)

@@ -20,9 +20,19 @@ Fixes #
 
 ## Testing
 <!-- Describe how these changes were tested. Include reproduction or verification steps. -->
+<!--
+For a focused change, run checks scoped to the files/packages you changed.
+See the Contributing section in README.md for examples. If a full-repository
+check is blocked by unrelated baseline or environment failures, record the
+exact command and failure here.
+-->
 
 ## Checklist
-- [ ] `make fmt && make lint && make test` pass locally
+- [ ] `git diff --check origin/main...HEAD` passes
+- [ ] Changed source files are formatted
+- [ ] Targeted tests for the changed packages/components pass
+- [ ] Diff-scoped lint passes where applicable (for Go: `golangci-lint run --new-from-rev=origin/main ./...`)
+- [ ] Full-repository checks were run, or any unrelated/environment-dependent failures are documented above
 - [ ] Self-reviewed the code
 - [ ] Added/updated tests covering the change
 - [ ] Updated related documentation (README, `docs/`, Swagger annotations, etc.)

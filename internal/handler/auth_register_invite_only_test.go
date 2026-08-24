@@ -107,8 +107,11 @@ func TestRegister_SelfServeAllowsRegistration(t *testing.T) {
 	// through by observing the stub being invoked.
 	called := false
 	us := &stubRegisterUserService{
-		register: func(_ context.Context, _ *types.RegisterRequest) (*types.User, error) {
+		register: func(_ context.Context, req *types.RegisterRequest) (*types.User, error) {
 			called = true
+			if req.TenantProvisioning != types.TenantProvisioningCreatePersonal {
+				t.Fatalf("default provisioning = %q, want create_personal", req.TenantProvisioning)
+			}
 			return &types.User{ID: "u1", Email: "alice@example.com"}, nil
 		},
 	}
@@ -122,6 +125,28 @@ func TestRegister_SelfServeAllowsRegistration(t *testing.T) {
 	}
 	if !called {
 		t.Fatalf("UserService.Register should have been invoked")
+	}
+}
+
+func TestRegister_TenantlessProvisioningFromConfig(t *testing.T) {
+	us := &stubRegisterUserService{
+		register: func(_ context.Context, req *types.RegisterRequest) (*types.User, error) {
+			if req.TenantProvisioning != types.TenantProvisioningTenantless {
+				t.Fatalf("provisioning = %q, want tenantless", req.TenantProvisioning)
+			}
+			return &types.User{ID: "u1", Email: "alice@example.com"}, nil
+		},
+	}
+	h := NewAuthHandler(&config.Config{
+		Auth: &config.AuthConfig{
+			RegistrationMode:  config.AuthRegistrationModeSelfServe,
+			DefaultTenantMode: config.AuthDefaultTenantModeTenantless,
+		},
+	}, us, nil, nil, nil)
+
+	w := doRegister(t, newRegisterTestRouter(h), validRegisterBody())
+	if w.Code != http.StatusCreated {
+		t.Fatalf("tenantless self-serve registration got %d body=%s", w.Code, w.Body.String())
 	}
 }
 
@@ -140,5 +165,39 @@ func TestRegister_NilAuthConfigDoesNotPanic(t *testing.T) {
 	w := doRegister(t, newRegisterTestRouter(h), validRegisterBody())
 	if w.Code != http.StatusCreated {
 		t.Fatalf("nil Auth config must fall back to allow, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestRegister_PreservesPasswordBytes is the regression for #2521.
+// SanitizeForLog is for log output only; applying it to credentials
+// rewrites tabs/newlines/control chars before hashing, so a password
+// that registers successfully cannot be used at login.
+func TestRegister_PreservesPasswordBytes(t *testing.T) {
+	// Password contains a tab and a newline — both are rewritten by
+	// SanitizeForLog (tab → space, newline → space). The handler must
+	// pass the exact original string to UserService.Register.
+	const originalPassword = "abc\t123!\nX"
+
+	var gotPassword string
+	us := &stubRegisterUserService{
+		register: func(_ context.Context, req *types.RegisterRequest) (*types.User, error) {
+			gotPassword = req.Password
+			return &types.User{ID: "u1", Email: "alice@example.com"}, nil
+		},
+	}
+	h := NewAuthHandler(&config.Config{
+		Auth: &config.AuthConfig{RegistrationMode: config.AuthRegistrationModeSelfServe},
+	}, us, nil, nil, nil)
+
+	body := validRegisterBody()
+	body["password"] = originalPassword
+	w := doRegister(t, newRegisterTestRouter(h), body)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("registration with control chars in password must succeed, got %d body=%s",
+			w.Code, w.Body.String())
+	}
+	if gotPassword != originalPassword {
+		t.Fatalf("password mutated before UserService.Register:\n  got  %q\n  want %q",
+			gotPassword, originalPassword)
 	}
 }
