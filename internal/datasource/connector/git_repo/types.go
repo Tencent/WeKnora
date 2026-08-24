@@ -54,12 +54,18 @@ func parseConfig(ds *types.DataSourceConfig) (*config, error) {
 		if err != nil {
 			return nil, err
 		}
-		if seen[normalized] {
-			return nil, fmt.Errorf("%w: repo_url must be unique (duplicate: %s)", datasource.ErrInvalidConfig, rawURL)
-		}
-		seen[normalized] = true
 		branch, _ := m["branch"].(string)
-		r := repoSelection{RepoURL: normalized, Branch: strings.TrimSpace(branch)}
+		branch = strings.TrimSpace(branch)
+		if err := validateGitBranch(branch); err != nil {
+			return nil, err
+		}
+		seenKey := repoCursorKey(normalized, branch)
+		if seen[seenKey] {
+			return nil, fmt.Errorf("%w: repo_url+branch must be unique (duplicate: %s %s)",
+				datasource.ErrInvalidConfig, rawURL, branch)
+		}
+		seen[seenKey] = true
+		r := repoSelection{RepoURL: normalized, Branch: branch}
 		if rawPaths, exists := m["paths"]; exists {
 			values, ok := rawPaths.([]interface{})
 			if !ok {
@@ -83,7 +89,29 @@ func parseConfig(ds *types.DataSourceConfig) (*config, error) {
 	if len(out.Repos) == 0 {
 		return nil, fmt.Errorf("%w: at least one repo is required", datasource.ErrInvalidConfig)
 	}
+	if token, _ := ds.Credentials["access_token"].(string); strings.TrimSpace(token) != "" {
+		for _, r := range out.Repos {
+			if u, err := url.Parse(r.RepoURL); err == nil && strings.EqualFold(u.Scheme, "http") {
+				return nil, fmt.Errorf("%w: http repo_url is not allowed with an access_token; use https",
+					datasource.ErrInvalidConfig)
+			}
+		}
+	}
 	return out, nil
+}
+
+// validateGitBranch rejects empty-ok names that cannot be used as a git
+// refspec (injection / traversal). Empty means "follow the remote default".
+func validateGitBranch(branch string) error {
+	if branch == "" {
+		return nil
+	}
+	if strings.Contains(branch, "..") || strings.ContainsAny(branch, " \t\n~^:?*[\\@") ||
+		strings.HasPrefix(branch, "/") || strings.HasSuffix(branch, "/") ||
+		strings.Contains(branch, "//") || strings.HasPrefix(branch, "-") {
+		return fmt.Errorf("%w: invalid branch name %q", datasource.ErrInvalidConfig, branch)
+	}
+	return nil
 }
 
 // normalizeRepoURL validates a repo URL and normalizes it so the same

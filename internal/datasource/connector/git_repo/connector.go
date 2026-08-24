@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path"
 	"strings"
 	"sync"
@@ -105,6 +106,7 @@ func (c *Connector) FetchIncremental(
 type repoPosition struct {
 	Commit string `json:"commit"`
 	Branch string `json:"branch"`
+	URL    string `json:"url,omitempty"`
 }
 
 type cursor struct {
@@ -144,10 +146,11 @@ func (c *Connector) FetchStream(
 		}
 	}
 	next := cursor{Repos: make(map[string]repoPosition, len(cfg.Repos))}
-	for url, pos := range prev.Repos {
-		next.Repos[url] = pos
+	for key, pos := range prev.Repos {
+		next.Repos[key] = pos
 	}
 
+	currentKeys := make(map[string]struct{}, len(cfg.Repos))
 	for _, sel := range cfg.Repos {
 		url := sel.RepoURL
 
@@ -156,7 +159,7 @@ func (c *Connector) FetchStream(
 		// remote default). Empty config → previous cursor branch → ls-remote.
 		resolvedBranch := sel.Branch
 		if resolvedBranch == "" {
-			if p, ok := prev.Repos[url]; ok && p.Branch != "" {
+			if p, ok := lookupPrev(prev, url, ""); ok && p.Branch != "" {
 				resolvedBranch = p.Branch
 			} else {
 				_, rb, err := c.client.lsRemoteRefs(ctx, url, "")
@@ -166,7 +169,12 @@ func (c *Connector) FetchStream(
 				resolvedBranch = rb
 			}
 		}
+		key := repoCursorKey(url, resolvedBranch)
+		currentKeys[key] = struct{}{}
 		dir := c.client.cloneDirFor(url, resolvedBranch)
+		if dir == "" {
+			return nil, errUnsafeCloneDir
+		}
 
 		// Overlapping syncs of the same data source (cron + webhook + manual)
 		// share one clone dir; hold the lock across checkout AND the subsequent
@@ -179,7 +187,7 @@ func (c *Connector) FetchStream(
 			return nil, err
 		}
 
-		previous := prev.Repos[url]
+		previous, _ := lookupPrev(prev, url, resolvedBranch)
 		switch {
 		case previous.Commit == "":
 			err = c.streamFiles(ctx, url, resolvedBranch, sel.Paths, h)
@@ -201,7 +209,8 @@ func (c *Connector) FetchStream(
 			return nil, err
 		}
 
-		next.Repos[url] = repoPosition{Commit: headSHA, Branch: resolvedBranch}
+		next.Repos[key] = repoPosition{Commit: headSHA, Branch: resolvedBranch, URL: url}
+		delete(next.Repos, url) // drop the legacy URL-only cursor key if present
 		checkpoint := gitRepoCursor(next)
 		if err := h.Checkpoint(ctx, checkpoint); err != nil {
 			mu.Unlock()
@@ -209,7 +218,110 @@ func (c *Connector) FetchStream(
 		}
 		mu.Unlock()
 	}
+
+	if err := c.emitStaleRepoDeletions(ctx, ds.ID, prev, currentKeys, next, h); err != nil {
+		return nil, err
+	}
 	return gitRepoCursor(next), nil
+}
+
+func lookupPrev(prev cursor, url, branch string) (repoPosition, bool) {
+	if branch != "" {
+		if p, ok := prev.Repos[repoCursorKey(url, branch)]; ok {
+			return p, true
+		}
+	}
+	if p, ok := prev.Repos[url]; ok {
+		return p, true
+	}
+	ident := repoIdentity(url)
+	for key, p := range prev.Repos {
+		keyIdent, keyBranch, cut := strings.Cut(key, "\x00")
+		if !cut {
+			continue
+		}
+		if keyIdent == ident && (branch == "" || keyBranch == branch) {
+			return p, true
+		}
+	}
+	return repoPosition{}, false
+}
+
+func isLegacyCursorAlias(key string, pos repoPosition, currentKeys map[string]struct{}) bool {
+	if strings.Contains(key, "\x00") {
+		return false
+	}
+	if pos.Branch != "" {
+		if _, ok := currentKeys[repoCursorKey(key, pos.Branch)]; ok {
+			return true
+		}
+	}
+	ident := repoIdentity(key)
+	for current := range currentKeys {
+		if id, _, cut := strings.Cut(current, "\x00"); cut && id == ident {
+			return true
+		}
+	}
+	return false
+}
+
+func staleCloneURL(key string, pos repoPosition) (url, branch string) {
+	url, branch = pos.URL, pos.Branch
+	keyURL, keyBranch, cut := strings.Cut(key, "\x00")
+	if branch == "" && cut {
+		branch = keyBranch
+	}
+	if url == "" {
+		if cut {
+			url = keyURL
+		} else {
+			url = key
+		}
+	}
+	return url, branch
+}
+
+// emitStaleRepoDeletions tombstones files from repo+branch selections that
+// disappeared from the config (including a branch switch) and drops their
+// leftover clone directories.
+func (c *Connector) emitStaleRepoDeletions(
+	ctx context.Context, dsID string, prev cursor, currentKeys map[string]struct{},
+	next cursor, h datasource.StreamHandler,
+) error {
+	for key, pos := range prev.Repos {
+		if _, keep := currentKeys[key]; keep {
+			continue
+		}
+		if isLegacyCursorAlias(key, pos, currentKeys) {
+			delete(next.Repos, key)
+			continue
+		}
+		url, branch := staleCloneURL(key, pos)
+		if url != "" && branch != "" {
+			mu := repoDirMutex(dsID)
+			mu.Lock()
+			_ = c.streamDeletedWorktree(ctx, url, branch, h)
+			if dir := c.client.cloneDirFor(url, branch); dir != "" {
+				_ = os.RemoveAll(dir)
+			}
+			mu.Unlock()
+		}
+		delete(next.Repos, key)
+		if err := h.Checkpoint(ctx, gitRepoCursor(next)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Connector) streamDeletedWorktree(ctx context.Context, url, branch string, h datasource.StreamHandler) error {
+	dir := c.client.cloneDirFor(url, branch)
+	if dir == "" {
+		return nil
+	}
+	return walkFiles(dir, nil, func(rel string) error {
+		return h.Emit(ctx, c.deleted(url, branch, rel))
+	})
 }
 
 // streamFiles emits every supported in-scope file of the worktree.
@@ -273,7 +385,7 @@ func (c *Connector) item(_ context.Context, url, branch, file string) (types.Fet
 	if isMarkdownish(file) || isHTMLish(file) {
 		data, _ = InlineRelativeImages(dir, file, data)
 	}
-	id := fmt.Sprintf("gitrepo:%s:%s:%s", url, branch, file)
+	id := itemExternalID(url, branch, file)
 	repoName := repoDisplayName(url)
 	return types.FetchedItem{
 		ExternalID:       id,
@@ -298,7 +410,7 @@ func (c *Connector) item(_ context.Context, url, branch, file string) (types.Fet
 // has SyncDeletions enabled, scoped to this data source via ExternalID.
 func (c *Connector) deleted(url, branch, file string) types.FetchedItem {
 	return types.FetchedItem{
-		ExternalID: fmt.Sprintf("gitrepo:%s:%s:%s", url, branch, file),
+		ExternalID: itemExternalID(url, branch, file),
 		IsDeleted:  true,
 		Metadata: map[string]string{
 			"channel":         types.ConnectorTypeGitRepo,
@@ -307,6 +419,10 @@ func (c *Connector) deleted(url, branch, file string) types.FetchedItem {
 			"git_repo_path":   file,
 		},
 	}
+}
+
+func itemExternalID(url, branch, file string) string {
+	return fmt.Sprintf("gitrepo:%s:%s:%s", repoIdentity(url), branch, file)
 }
 
 func contentTypeFor(file string) string {

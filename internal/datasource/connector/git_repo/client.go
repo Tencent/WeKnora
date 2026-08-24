@@ -97,10 +97,16 @@ func repoStorageBase() string {
 	return filepath.Join(base, "git-repos")
 }
 
+// SafeDataSourceID reports whether dsID is safe to use as a single path
+// segment under the clone storage root (no traversal, no separators).
+func SafeDataSourceID(dsID string) bool {
+	return dsID != "" && !strings.Contains(dsID, "..") && !strings.ContainsAny(dsID, `/\`)
+}
+
 // CloneStorageDir is the on-disk root for one data source's git clones.
 // Empty dsID or a path-like id returns "" so callers cannot RemoveAll a parent.
 func CloneStorageDir(tenantID uint64, dsID string) string {
-	if dsID == "" || strings.Contains(dsID, "..") || strings.ContainsAny(dsID, `/\`) {
+	if !SafeDataSourceID(dsID) {
 		return ""
 	}
 	return filepath.Join(repoStorageBase(), fmt.Sprint(tenantID), dsID)
@@ -116,13 +122,46 @@ func RemoveCloneStorage(tenantID uint64, dsID string) error {
 	return os.RemoveAll(dir)
 }
 
+const webhookResyncMarkerName = ".webhook_resync"
+
+// MarkWebhookResync records that another push arrived while a sync was
+// already running. ProcessSync consumes the marker after the running log
+// closes and enqueues one follow-up so the later commit is not dropped.
+func MarkWebhookResync(tenantID uint64, dsID string) error {
+	dir := CloneStorageDir(tenantID, dsID)
+	if dir == "" {
+		return errUnsafeCloneDir
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, webhookResyncMarkerName), []byte("1"), 0o600)
+}
+
+// ConsumeWebhookResync clears the follow-up marker. It reports whether a
+// marker was present.
+func ConsumeWebhookResync(tenantID uint64, dsID string) bool {
+	dir := CloneStorageDir(tenantID, dsID)
+	if dir == "" {
+		return false
+	}
+	if err := os.Remove(filepath.Join(dir, webhookResyncMarkerName)); err != nil {
+		return false
+	}
+	return true
+}
+
 // cloneDirFor returns the on-disk clone directory for a repo+branch selection.
-// Hashing the URL and branch means a config change (branch switch, URL edit)
-// naturally re-clones without stale-dir collisions.
+// The hash is scheme-stable (host/path + branch) so http↔https edits reuse
+// the same worktree. Unsafe data-source ids return "" so callers abort.
 func (c *client) cloneDirFor(repoURL, branch string) string {
-	key := repoURL + "\x00" + branch
+	root := CloneStorageDir(c.tenantID, c.dsID)
+	if root == "" {
+		return ""
+	}
+	key := repoIdentity(repoURL) + "\x00" + branch
 	sum := sha1.Sum([]byte(key))
-	return filepath.Join(c.baseDir, fmt.Sprint(c.tenantID), c.dsID, hex.EncodeToString(sum[:8]))
+	return filepath.Join(root, hex.EncodeToString(sum[:8]))
 }
 
 func buildAuth(token string) transport.AuthMethod {
@@ -189,6 +228,9 @@ func (c *client) lsRemoteRefs(ctx context.Context, repoURL, branch string) (head
 func (c *client) ensureCheckedOut(
 	ctx context.Context, dir, repoURL, branch string,
 ) (*git.Repository, string, string, error) {
+	if dir == "" {
+		return nil, "", "", errUnsafeCloneDir
+	}
 	repo, err := git.PlainOpen(dir)
 	if err != nil {
 		if !errors.Is(err, git.ErrRepositoryNotExists) && !os.IsNotExist(err) {
@@ -197,13 +239,8 @@ func (c *client) ensureCheckedOut(
 		return c.clone(ctx, dir, repoURL, branch)
 	}
 
-	// Existing clone: fetch all branch tips, then hard-reset to the requested one.
-	if err := repo.FetchContext(ctx, &git.FetchOptions{
-		RefSpecs: []gitconfig.RefSpec{"+refs/heads/*:refs/remotes/origin/*"},
-		Auth:     buildAuth(c.token),
-		Force:    true,
-	}); err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
-		return nil, "", "", fmt.Errorf("git_repo: fetch %s: %w", repoURL, err)
+	if err := c.ensureOriginURL(repo, repoURL); err != nil {
+		return nil, "", "", err
 	}
 
 	resolvedBranch := branch
@@ -213,6 +250,16 @@ func (c *client) ensureCheckedOut(
 			return nil, "", "", err
 		}
 	}
+	// Fetch only the selected branch. Pulling every remote tip on a large
+	// repo routinely exceeds the transport timeout and fills the clone dir.
+	if err := repo.FetchContext(ctx, &git.FetchOptions{
+		RefSpecs: []gitconfig.RefSpec{branchFetchRefSpec(resolvedBranch)},
+		Auth:     buildAuth(c.token),
+		Force:    true,
+	}); err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return nil, "", "", fmt.Errorf("git_repo: fetch %s: %w", repoURL, err)
+	}
+
 	tipRef, err := repo.Reference(plumbing.NewRemoteReferenceName("origin", resolvedBranch), false)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("git_repo: resolve remote branch %q: %w", resolvedBranch, err)
@@ -227,7 +274,31 @@ func (c *client) ensureCheckedOut(
 	return repo, tipRef.Hash().String(), resolvedBranch, nil
 }
 
+func branchFetchRefSpec(branch string) gitconfig.RefSpec {
+	return gitconfig.RefSpec("+refs/heads/" + branch + ":refs/remotes/origin/" + branch)
+}
+
+func (c *client) ensureOriginURL(repo *git.Repository, repoURL string) error {
+	remote, err := repo.Remote("origin")
+	if err != nil {
+		_, err = repo.CreateRemote(&gitconfig.RemoteConfig{Name: "origin", URLs: []string{repoURL}})
+		return err
+	}
+	urls := remote.Config().URLs
+	if len(urls) == 1 && urls[0] == repoURL {
+		return nil
+	}
+	if err := repo.DeleteRemote("origin"); err != nil {
+		return err
+	}
+	_, err = repo.CreateRemote(&gitconfig.RemoteConfig{Name: "origin", URLs: []string{repoURL}})
+	return err
+}
+
 func (c *client) clone(ctx context.Context, dir, repoURL, branch string) (*git.Repository, string, string, error) {
+	if dir == "" {
+		return nil, "", "", errUnsafeCloneDir
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, "", "", err
 	}
@@ -328,6 +399,9 @@ func diffNameStatus(repo *git.Repository, prevSHA, headSHA string) ([]nameStatus
 // walkFiles visits every supported file under the worktree that falls inside
 // the configured roots, with a repository-relative (slash-separated) path.
 func walkFiles(dir string, roots []string, visit func(rel string) error) error {
+	if dir == "" {
+		return errUnsafeCloneDir
+	}
 	if len(roots) == 0 {
 		roots = []string{""}
 	}
@@ -354,6 +428,9 @@ func walkFiles(dir string, roots []string, visit func(rel string) error) error {
 }
 
 func readFile(dir, rel string) ([]byte, error) {
+	if dir == "" {
+		return nil, errUnsafeCloneDir
+	}
 	full, err := resolveUnderRoot(dir, rel)
 	if err != nil {
 		return nil, err

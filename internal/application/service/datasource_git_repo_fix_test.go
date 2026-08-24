@@ -110,6 +110,7 @@ func TestUpdateDataSourceCredentialsMergesGitRepoSecrets(t *testing.T) {
 }
 
 func TestEnqueueSyncCoalescesWebhookOnly(t *testing.T) {
+	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
 	ds := &types.DataSource{
 		ID:              "ds-sync",
 		TenantID:        1,
@@ -123,9 +124,10 @@ func TestEnqueueSyncCoalescesWebhookOnly(t *testing.T) {
 		Status:       types.SyncLogStatusRunning,
 	}
 	enq := &countingTaskEnqueuer{}
+	logs := &coalesceSyncLogRepo{running: running}
 	svc := &DataSourceService{
 		dsRepo:       newKBDeleteDSRepo("kb-1", ds),
-		syncLogRepo:  &coalesceSyncLogRepo{running: running},
+		syncLogRepo:  logs,
 		taskEnqueuer: enq,
 	}
 
@@ -138,6 +140,11 @@ func TestEnqueueSyncCoalescesWebhookOnly(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEqual(t, running.ID, got.ID)
 	assert.Equal(t, 1, enq.calls)
+
+	// After the running log closes, the coalesced push must still be synced.
+	logs.running = nil
+	svc.flushWebhookResync(context.Background(), ds)
+	assert.Equal(t, 2, enq.calls)
 }
 
 func TestDeleteDataSourceRemovesGitRepoClone(t *testing.T) {

@@ -16,9 +16,16 @@ var errPathEscapesWorktree = errors.New("git_repo: path escapes worktree")
 // Callers skip the file so one oversized blob cannot abort the whole sync.
 var errFileTooLarge = errors.New("git_repo: file exceeds size limit")
 
+// errUnsafeCloneDir is returned when the data-source id is empty or
+// path-like, so a clone must not touch the storage root or another tenant.
+var errUnsafeCloneDir = errors.New("git_repo: refused unsafe clone directory")
+
 // resolveUnderRoot maps a repository-relative path to an absolute file under
 // root, following symlinks and rejecting any target that leaves the worktree.
 func resolveUnderRoot(root, rel string) (string, error) {
+	if root == "" {
+		return "", errUnsafeCloneDir
+	}
 	rootAbs, err := filepath.Abs(root)
 	if err != nil {
 		return "", err

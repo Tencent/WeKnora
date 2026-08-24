@@ -92,3 +92,28 @@ func TestRemoveCloneStorageDeletesOnlyDataSourceDir(t *testing.T) {
 		t.Fatalf("path-like dsID must be rejected, got %q", got)
 	}
 }
+
+func TestCloneDirForRejectsUnsafeID(t *testing.T) {
+	t.Setenv(localStorageBaseEnv, t.TempDir())
+	c := newClient("../escape", 1, "")
+	if got := c.cloneDirFor("https://github.com/org/a", "main"); got != "" {
+		t.Fatalf("unsafe dsID must not produce a clone dir, got %q", got)
+	}
+	if !SafeDataSourceID("ds-clean") {
+		t.Fatal("plain id should be safe")
+	}
+	if SafeDataSourceID("foo/bar") || SafeDataSourceID("..") || SafeDataSourceID("") {
+		t.Fatal("path-like ids must be rejected")
+	}
+}
+
+func TestBranchFetchRefSpecIsSingleBranch(t *testing.T) {
+	got := string(branchFetchRefSpec("release/1.0"))
+	want := "+refs/heads/release/1.0:refs/remotes/origin/release/1.0"
+	if got != want {
+		t.Fatalf("refspec = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "refs/heads/*") {
+		t.Fatal("must not fetch every remote branch")
+	}
+}

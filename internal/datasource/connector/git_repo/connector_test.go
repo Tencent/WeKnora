@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/go-git/go-git/v5"
 	gitconfig "github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
@@ -386,6 +387,114 @@ func TestWalkFilesSkipsGitDir(t *testing.T) {
 	}
 	if len(seen) != 1 || seen[0] != "ok.md" {
 		t.Fatalf("walked %v, want only ok.md", seen)
+	}
+}
+
+func TestItemExternalIDIgnoresScheme(t *testing.T) {
+	a := itemExternalID("https://github.com/org/blog", "main", "docs/a.md")
+	b := itemExternalID("http://github.com/org/blog.git", "main", "docs/a.md")
+	if a != b {
+		t.Fatalf("scheme should not fork ExternalID: %q vs %q", a, b)
+	}
+	if !strings.HasPrefix(a, "gitrepo:github.com/org/blog:main:") {
+		t.Fatalf("ExternalID = %q", a)
+	}
+}
+
+func TestFetchStreamRejectsUnsafeID(t *testing.T) {
+	withTempStorage(t)
+	tr := setupTestRepo(t, map[string]string{"docs/a.md": "# A\n"})
+	ds := testConfig(tr.bareDir, tr.branch)
+	ds.ID = "../escape"
+	_, err := NewConnector().FetchStream(context.Background(), ds, nil, &collectingHandler{})
+	if !errors.Is(err, errUnsafeCloneDir) {
+		t.Fatalf("err = %v, want errUnsafeCloneDir", err)
+	}
+}
+
+func TestConnectorFetchStreamTwoBranches(t *testing.T) {
+	withTempStorage(t)
+	tr := setupTestRepo(t, map[string]string{"docs/a.md": "# A\n"})
+	wt, err := tr.repo.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.Checkout(&git.CheckoutOptions{
+		Branch: plumbing.NewBranchReferenceName("docs"),
+		Create: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	commitAndPush(t, tr.repo, tr.workDir, map[string]string{"docs/b.md": "# B\n"}, nil, "docs-branch")
+
+	ds := &types.DataSourceConfig{
+		ID: "ds-test", TenantID: 1,
+		Settings: map[string]interface{}{
+			"repos": []interface{}{
+				map[string]interface{}{"repo_url": tr.bareDir, "branch": tr.branch},
+				map[string]interface{}{"repo_url": tr.bareDir, "branch": "docs"},
+			},
+		},
+	}
+	h := &collectingHandler{}
+	if _, err := NewConnector().FetchStream(context.Background(), ds, nil, h); err != nil {
+		t.Fatalf("FetchStream: %v", err)
+	}
+	var sawA, sawB bool
+	for _, item := range h.items {
+		if strings.HasSuffix(item.ExternalID, "docs/a.md") && strings.Contains(item.ExternalID, ":"+tr.branch+":") {
+			sawA = true
+		}
+		if strings.HasSuffix(item.ExternalID, "docs/b.md") && strings.Contains(item.ExternalID, ":docs:") {
+			sawB = true
+		}
+	}
+	if !sawA || !sawB {
+		t.Fatalf("two-branch sync items = %+v", h.items)
+	}
+}
+
+func TestConnectorFetchStreamBranchSwitchDeletesOld(t *testing.T) {
+	withTempStorage(t)
+	tr := setupTestRepo(t, map[string]string{"docs/a.md": "# A\n"})
+	conn := NewConnector()
+	ds := testConfig(tr.bareDir, tr.branch)
+	h := &collectingHandler{}
+	cursor, err := conn.FetchStream(context.Background(), ds, nil, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wt, err := tr.repo.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.Checkout(&git.CheckoutOptions{
+		Branch: plumbing.NewBranchReferenceName("docs"),
+		Create: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	commitAndPush(t, tr.repo, tr.workDir, map[string]string{"other.md": "# O\n"}, nil, "docs-branch")
+
+	ds.Settings["repos"] = []interface{}{map[string]interface{}{
+		"repo_url": tr.bareDir, "branch": "docs",
+	}}
+	h2 := &collectingHandler{}
+	if _, err := conn.FetchStream(context.Background(), ds, cursor, h2); err != nil {
+		t.Fatalf("branch-switch FetchStream: %v", err)
+	}
+	var deleted, created int
+	for _, item := range h2.items {
+		if item.IsDeleted && strings.HasSuffix(item.ExternalID, "docs/a.md") {
+			deleted++
+		}
+		if !item.IsDeleted && strings.HasSuffix(item.ExternalID, "other.md") {
+			created++
+		}
+	}
+	if deleted != 1 || created != 1 {
+		t.Fatalf("deleted=%d created=%d items=%+v, want 1/1", deleted, created, h2.items)
 	}
 }
 

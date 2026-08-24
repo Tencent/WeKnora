@@ -51,11 +51,16 @@ func TestParseConfigErrors(t *testing.T) {
 		{"missing repo_url", &types.DataSourceConfig{
 			Settings: settingsWith([]interface{}{map[string]interface{}{"branch": "main"}}),
 		}},
-		{"duplicate repo_url", &types.DataSourceConfig{
+		{"duplicate repo_url+branch", &types.DataSourceConfig{
 			Settings: settingsWith([]interface{}{
 				map[string]interface{}{"repo_url": "https://github.com/org/a.git"},
 				map[string]interface{}{"repo_url": "https://github.com/org/a.git"},
 			}),
+		}},
+		{"invalid branch", &types.DataSourceConfig{
+			Settings: settingsWith([]interface{}{map[string]interface{}{
+				"repo_url": "https://github.com/org/a.git", "branch": "main:evil",
+			}}),
 		}},
 		{"file scheme", &types.DataSourceConfig{
 			Settings: settingsWith([]interface{}{map[string]interface{}{"repo_url": "file:///etc/passwd"}}),
@@ -136,6 +141,38 @@ func TestParseConfigCollapsesNestedPaths(t *testing.T) {
 	// "docs/guides" is under "docs" and is collapsed away.
 	if len(cfg.Repos[0].Paths) != 1 || cfg.Repos[0].Paths[0] != "docs" {
 		t.Fatalf("collapsed paths = %+v, want [docs]", cfg.Repos[0].Paths)
+	}
+}
+
+func TestParseConfigAllowsSameURLDifferentBranches(t *testing.T) {
+	ds := &types.DataSourceConfig{Settings: map[string]interface{}{
+		"repos": []interface{}{
+			map[string]interface{}{"repo_url": "https://github.com/org/blog.git", "branch": "main"},
+			map[string]interface{}{"repo_url": "https://github.com/org/blog.git", "branch": "docs"},
+		},
+	}}
+	cfg, err := parseConfig(ds)
+	if err != nil {
+		t.Fatalf("same URL different branches should be allowed: %v", err)
+	}
+	if len(cfg.Repos) != 2 {
+		t.Fatalf("repos = %d, want 2", len(cfg.Repos))
+	}
+}
+
+func TestParseConfigRejectsHTTPWithToken(t *testing.T) {
+	ds := &types.DataSourceConfig{
+		Credentials: map[string]interface{}{"access_token": "tok"},
+		Settings: map[string]interface{}{
+			"repos": []interface{}{map[string]interface{}{"repo_url": "http://example.com/repo.git"}},
+		},
+	}
+	if _, err := parseConfig(ds); err == nil {
+		t.Fatal("http repo_url + access_token must be rejected")
+	}
+	ds.Credentials = nil
+	if _, err := parseConfig(ds); err != nil {
+		t.Fatalf("public http repo should still be allowed: %v", err)
 	}
 }
 

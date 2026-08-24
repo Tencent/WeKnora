@@ -27,9 +27,13 @@ const (
 	// credentials.webhook_secret of its own.
 	webhookSecretEnv = "GIT_REPO_WEBHOOK_SECRET"
 	// webhookSecretSetting is the legacy settings key; new writes go to credentials.
-	webhookSecretSetting = "webhook_secret"
-	maxWebhookBodyBytes  = 1 << 20 // push payloads with big diffs stay well under 1 MB
+	webhookSecretSetting       = "webhook_secret"
+	maxWebhookBodyBytesDefault = 25 << 20 // GitHub's documented webhook payload cap
 )
+
+// maxWebhookBodyBytes is the push-payload limit. Tests shrink it so the 413
+// path does not allocate a 25 MiB body.
+var maxWebhookBodyBytes int64 = maxWebhookBodyBytesDefault
 
 var (
 	gitlabTokenHeader  = http.CanonicalHeaderKey("X-Gitlab-Token")
@@ -89,7 +93,7 @@ func (h *DataSourceWebhookHandler) HandleGitPush(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read body"})
 		return
 	}
-	if len(body) > maxWebhookBodyBytes {
+	if int64(len(body)) > maxWebhookBodyBytes {
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "body too large"})
 		return
 	}

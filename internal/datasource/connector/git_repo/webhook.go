@@ -22,6 +22,14 @@ func webhookRepoKey(raw string) (string, bool) {
 	if filepathIsAbs(v) {
 		return path.Clean(v), true
 	}
+	// Cursor / ExternalID keys are stored as host/path without a scheme.
+	if !strings.Contains(v, "://") {
+		if !strings.Contains(v, ".") || !strings.Contains(v, "/") {
+			return "", false
+		}
+		p := strings.TrimSuffix(strings.TrimSuffix(v, "/"), ".git")
+		return strings.ToLower(p), true
+	}
 	u, err := url.Parse(v)
 	if err != nil || u.Host == "" {
 		return "", false
@@ -36,6 +44,19 @@ func webhookRepoKey(raw string) (string, bool) {
 	// case-insensitive. A user-typed lowercase URL must still match the
 	// canonical clone_url in the webhook payload.
 	return strings.ToLower(u.Host) + strings.ToLower(p), true
+}
+
+// repoIdentity is the scheme-stable id used in ExternalIDs and clone-dir
+// hashes so http/https / .git spelling changes do not fork the document set.
+func repoIdentity(url string) string {
+	if key, ok := webhookRepoKey(url); ok {
+		return key
+	}
+	return strings.TrimSpace(url)
+}
+
+func repoCursorKey(url, branch string) string {
+	return repoIdentity(url) + "\x00" + branch
 }
 
 // MatchPush reports whether a push event for repoURL on branch should trigger

@@ -372,3 +372,46 @@ func TestWebhookSecretFromCredentials(t *testing.T) {
 		t.Fatalf("status = %d syncCalls = %d, want 200/1", w.Code, svc.syncCalls)
 	}
 }
+
+func TestWebhookGitHubPingIgnored(t *testing.T) {
+	svc := &stubWebhookService{get: func(_ context.Context, _ string) (*types.DataSource, error) {
+		return gitRepoDataSource(t, map[string]interface{}{
+			"webhook_secret": "s3cret",
+			"repos":          []interface{}{map[string]interface{}{"repo_url": "https://github.com/org/blog"}},
+		}), nil
+	}}
+	r := webhookRouter(t, svc)
+	body := map[string]interface{}{"zen": "Keep it logically awesome.", "hook_id": 1}
+	raw, _ := json.Marshal(body)
+	mac := hmac.New(sha256.New, []byte("s3cret"))
+	mac.Write(raw)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/datasource/webhooks/git/ds-1", bytes.NewReader(raw))
+	req.Header.Set("X-GitHub-Event", "ping")
+	req.Header.Set("X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || svc.syncCalls != 0 {
+		t.Fatalf("ping status=%d syncCalls=%d, want 200/0", w.Code, svc.syncCalls)
+	}
+}
+
+func TestWebhookBodyTooLarge(t *testing.T) {
+	prev := maxWebhookBodyBytes
+	maxWebhookBodyBytes = 64
+	t.Cleanup(func() { maxWebhookBodyBytes = prev })
+	svc := &stubWebhookService{get: func(_ context.Context, _ string) (*types.DataSource, error) {
+		return gitRepoDataSource(t, map[string]interface{}{
+			"webhook_secret": "s3cret",
+			"repos":          []interface{}{map[string]interface{}{"repo_url": "https://gitlab.com/org/blog.git"}},
+		}), nil
+	}}
+	r := webhookRouter(t, svc)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/datasource/webhooks/git/ds-1",
+		bytes.NewReader(bytes.Repeat([]byte("a"), 80)))
+	req.Header.Set("X-Gitlab-Token", "s3cret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", w.Code)
+	}
+}

@@ -69,6 +69,9 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 	if ds == nil {
 		return nil, datasource.ErrDataSourceInvalid
 	}
+	if ds.ID != "" && !git_repo.SafeDataSourceID(ds.ID) {
+		return nil, datasource.ErrDataSourceInvalid
+	}
 
 	// Validate knowledge base exists
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, ds.KnowledgeBaseID)
@@ -510,9 +513,14 @@ func (s *DataSourceService) enqueueSync(
 		} else if running {
 			if latest, lerr := s.syncLogRepo.FindLatest(ctx, ds.ID); lerr == nil && latest != nil &&
 				latest.Status == types.SyncLogStatusRunning {
-				logger.Infof(ctx, "sync already running, coalescing: ds=%s syncLog=%s trigger=%s",
-					ds.ID, latest.ID, trigger)
-				return latest, nil
+				if markErr := git_repo.MarkWebhookResync(ds.TenantID, ds.ID); markErr != nil {
+					logger.Warnf(ctx, "webhook coalesce could not persist resync marker: ds=%s err=%v",
+						ds.ID, markErr)
+				} else {
+					logger.Infof(ctx, "sync already running, coalescing: ds=%s syncLog=%s trigger=%s",
+						ds.ID, latest.ID, trigger)
+					return latest, nil
+				}
 			}
 		}
 	}
@@ -661,6 +669,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		}
 		return nil
 	}
+	// After this run's log is no longer "running", enqueue one follow-up if
+	// webhooks arrived while we were cloning (see enqueueSync coalesce).
+	defer s.flushWebhookResync(ctx, ds)
 
 	// Get sync log
 	syncLog, err := s.syncLogRepo.FindByID(ctx, payload.SyncLogID)
@@ -1605,6 +1616,32 @@ func migrateGitRepoWebhookSecret(existing, incoming *types.DataSourceConfig) {
 		incoming.Credentials = map[string]interface{}{}
 	}
 	incoming.Credentials["webhook_secret"] = secret
+}
+
+// flushWebhookResync enqueues one more webhook sync if a push arrived while
+// the just-finished run was still marked running. The marker is left in
+// place when a log is still running so we cannot loop against ourselves.
+func (s *DataSourceService) flushWebhookResync(ctx context.Context, ds *types.DataSource) {
+	if s == nil || ds == nil || ds.Type != types.ConnectorTypeGitRepo {
+		return
+	}
+	if s.syncLogRepo != nil {
+		running, err := s.syncLogRepo.HasRunningSync(ctx, ds.ID)
+		if err != nil || running {
+			return
+		}
+	}
+	if !git_repo.ConsumeWebhookResync(ds.TenantID, ds.ID) {
+		return
+	}
+	if s.taskEnqueuer == nil {
+		_ = git_repo.MarkWebhookResync(ds.TenantID, ds.ID)
+		return
+	}
+	if _, err := s.enqueueSync(ctx, ds, "webhook"); err != nil {
+		logger.Warnf(ctx, "failed to enqueue coalesced webhook resync: ds=%s err=%v", ds.ID, err)
+		_ = git_repo.MarkWebhookResync(ds.TenantID, ds.ID)
+	}
 }
 
 func cleanupGitRepoCloneStorage(ctx context.Context, tenantID uint64, dsID, dsType string) {
