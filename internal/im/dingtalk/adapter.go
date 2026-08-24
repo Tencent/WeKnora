@@ -397,7 +397,12 @@ func parseCallbackMessage(msg *callbackMessage) *im.IncomingMessage {
 	return incoming
 }
 
-func applyRichText(incoming *im.IncomingMessage, extra map[string]string, rich parsedRichText, msgID, robotCode string) {
+func applyRichText(
+	incoming *im.IncomingMessage,
+	extra map[string]string,
+	rich parsedRichText,
+	msgID, robotCode string,
+) {
 	incoming.Content = rich.Text
 	if rich.DownloadCode != "" {
 		incoming.MessageType = im.MessageTypeImage
