@@ -1849,7 +1849,27 @@ func emptyIncomingMessageReply(msg *IncomingMessage) (string, bool) {
 	if msg == nil || strings.TrimSpace(msg.Content) != "" {
 		return "", false
 	}
-	return "未能识别这条消息中的文字内容。请改用纯文本发送；图片或文件请单独发送。", true
+	// Image/file events are allowed to arrive without a caption. Do not depend
+	// on fileMessageQAContent having already filled Content — a later reorder
+	// of HandleMessage must not reject attachments.
+	hasAttachment := msg.MessageType == MessageTypeFile ||
+		msg.MessageType == MessageTypeImage ||
+		strings.TrimSpace(msg.FileKey) != ""
+	if hasAttachment {
+		return "", false
+	}
+	rawType := ""
+	if msg.Extra != nil {
+		rawType = strings.ToLower(strings.TrimSpace(msg.Extra["raw_msgtype"]))
+	}
+	switch rawType {
+	case "audio":
+		return "未能识别这条语音中的文字内容。请改用纯文本发送，或再说一遍。", true
+	case "video":
+		return "暂不支持视频消息。请改用纯文本发送；图片或文件请单独发送。", true
+	default:
+		return "未能识别这条消息中的文字内容。请改用纯文本发送；图片或文件请单独发送。", true
+	}
 }
 
 func (s *Service) persistIMLastRequestState(ctx context.Context, sessionID, agentID string, customAgent *types.CustomAgent, kbIDs []string) {

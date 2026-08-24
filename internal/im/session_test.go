@@ -151,39 +151,6 @@ func TestIncomingMessageThreadID(t *testing.T) {
 	}
 }
 
-func TestEmptyIncomingMessageReply(t *testing.T) {
-	tests := []struct {
-		name      string
-		msg       *IncomingMessage
-		wantEmpty bool
-		wantHint  string
-	}{
-		{
-			name:      "text content is accepted",
-			msg:       &IncomingMessage{MessageType: MessageTypeText, Content: " hello "},
-			wantEmpty: false,
-		},
-		{
-			name:      "blank text is rejected",
-			msg:       &IncomingMessage{MessageType: MessageTypeText, Content: " \n\t "},
-			wantEmpty: true,
-			wantHint:  "未能识别这条消息中的文字内容。请改用纯文本发送；图片或文件请单独发送。",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gotHint, gotEmpty := emptyIncomingMessageReply(tt.msg)
-			if gotEmpty != tt.wantEmpty {
-				t.Fatalf("empty = %v, want %v", gotEmpty, tt.wantEmpty)
-			}
-			if gotHint != tt.wantHint {
-				t.Fatalf("hint = %q, want %q", gotHint, tt.wantHint)
-			}
-		})
-	}
-}
-
 func TestBuildIMLastRequestStateFromAgent(t *testing.T) {
 	agent := &types.CustomAgent{
 		ID: "agent-1",

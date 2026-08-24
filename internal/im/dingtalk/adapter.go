@@ -212,20 +212,46 @@ func parseRichTextContent(msgtype string, content json.RawMessage) (parsedRichTe
 			textParts = append(textParts, text)
 		}
 
-		if !strings.EqualFold(strings.TrimSpace(item.Type), "picture") &&
-			item.DownloadCode == "" && item.PictureDownloadCode == "" {
+		code := pictureDownloadCode(item)
+		if code == "" {
 			continue
 		}
 		result.PictureCount++
 		if result.DownloadCode == "" {
-			result.DownloadCode = item.DownloadCode
-			if result.DownloadCode == "" {
-				result.DownloadCode = item.PictureDownloadCode
-			}
+			result.DownloadCode = code
 		}
 	}
 	result.Text = strings.Join(textParts, "\n")
 	return result, true
+}
+
+func pictureDownloadCode(item richTextElement) string {
+	if !strings.EqualFold(strings.TrimSpace(item.Type), "picture") {
+		return ""
+	}
+	if item.DownloadCode != "" {
+		return item.DownloadCode
+	}
+	return item.PictureDownloadCode
+}
+
+type audioMessageContent struct {
+	Recognition string `json:"recognition"`
+}
+
+func parseAudioContent(msgtype string, content json.RawMessage) (string, bool) {
+	if !strings.EqualFold(strings.TrimSpace(msgtype), "audio") {
+		return "", false
+	}
+	var payload audioMessageContent
+	if len(content) == 0 || json.Unmarshal(content, &payload) != nil {
+		return "", false
+	}
+	text := strings.TrimSpace(payload.Recognition)
+	if text == "" {
+		return "", false
+	}
+	return text, true
 }
 
 // parseFileContent maps a DingTalk msgtype + content object to WeKnora's file
@@ -359,6 +385,9 @@ func parseCallbackMessage(msg *callbackMessage) *im.IncomingMessage {
 		incoming.FileName = defaultFileName(msgType, fileName, msg.MsgID)
 		incoming.FileKey = downloadCode
 		extra["robot_code"] = msg.RobotCode
+	} else if text, ok := parseAudioContent(msg.Msgtype, msg.Content); ok {
+		incoming.MessageType = im.MessageTypeText
+		incoming.Content = text
 	} else {
 		incoming.MessageType = im.MessageTypeText
 		if msg.Text != nil {
@@ -386,6 +415,17 @@ func applyRichText(incoming *im.IncomingMessage, extra map[string]string, rich p
 	incoming.FileKey = rich.DownloadCode
 	incoming.FileName = defaultFileName(im.MessageTypeImage, "", msgID)
 	extra["robot_code"] = robotCode
+	if rich.PictureCount > 1 {
+		incoming.Content = appendDroppedPictureHint(incoming.Content, rich.PictureCount)
+	}
+}
+
+func appendDroppedPictureHint(text string, pictureCount int) string {
+	hint := fmt.Sprintf("（该消息共 %d 张图片，当前仅处理第一张）", pictureCount)
+	if strings.TrimSpace(text) == "" {
+		return hint
+	}
+	return text + "\n" + hint
 }
 
 // defaultFileName gives picture messages (which carry no fileName) a name with a
@@ -479,6 +519,9 @@ func streamToIncoming(data *chatbot.BotCallbackDataModel, fallbackRobotCode stri
 		incoming.FileName = defaultFileName(msgType, fileName, data.MsgId)
 		incoming.FileKey = downloadCode
 		extra["robot_code"] = fallbackRobotCode
+	} else if text, ok := parseAudioContent(data.Msgtype, contentRaw); ok {
+		incoming.MessageType = im.MessageTypeText
+		incoming.Content = text
 	} else {
 		incoming.MessageType = im.MessageTypeText
 		incoming.Content = strings.TrimSpace(data.Text.Content)
