@@ -612,6 +612,48 @@ func (r *wikiPendingRepoForCleanupTest) DeleteByDedupKey(
 	return nil
 }
 
+// TestTrimWikiReduceInputsBoundsConfiguredContext is a regression for #2718:
+// hub-page reduce inputs must converge under an explicit operator budget.
+func TestTrimWikiReduceInputsBoundsConfiguredContext(t *testing.T) {
+	const budget = 800
+	data := map[string]string{
+		"ExistingContent":         "HEAD section\n" + strings.Repeat("middle section that may be dropped\n", 20) + "TAIL section",
+		"SharedSourceContexts":    "<document>\n<title>Hub source</title>\n<context>" + strings.Repeat("shared details ", 20) + "</context>\n</document>\n",
+		"NewContent":              "<document>\n<title>New source</title>\n<content>\n**Required name**: Required description\n\n" + strings.Repeat("verbatim evidence ", 20) + "\n</content>\n</document>\n",
+		"DeletedContent":          "deleted source must remain intact",
+		"RemainingSourcesContent": "<document>\n<title>Remaining source</title>\n<content>" + strings.Repeat("remaining details ", 20) + "</content>\n</document>\n",
+	}
+	original := data["ExistingContent"]
+
+	got := trimWikiReduceInputs(data, budget)
+
+	if got["DeletedContent"] != data["DeletedContent"] {
+		t.Fatalf("DeletedContent was changed: got %q", got["DeletedContent"])
+	}
+	if got["ExistingContent"] == data["ExistingContent"] ||
+		!strings.Contains(got["ExistingContent"], "HEAD section") ||
+		!strings.Contains(got["ExistingContent"], "TAIL section") {
+		t.Fatalf("ExistingContent was not middle-trimmed: %q", got["ExistingContent"])
+	}
+	if strings.Contains(got["SharedSourceContexts"], "shared details") ||
+		!strings.Contains(got["SharedSourceContexts"], "Hub source") {
+		t.Fatalf("SharedSourceContexts was not reduced to titles: %q", got["SharedSourceContexts"])
+	}
+	if !strings.Contains(got["NewContent"], "**Required name**: Required description") {
+		t.Fatalf("NewContent lost the required name/description line: %q", got["NewContent"])
+	}
+	trimmedBytes := len([]byte(got["ExistingContent"])) +
+		len([]byte(got["SharedSourceContexts"])) +
+		len([]byte(got["NewContent"])) +
+		len([]byte(got["RemainingSourcesContent"]))
+	if trimmedBytes > budget {
+		t.Fatalf("trim-eligible reduce inputs = %d bytes, want <= %d", trimmedBytes, budget)
+	}
+	if data["ExistingContent"] != original {
+		t.Fatal("trimWikiReduceInputs mutated its input map")
+	}
+}
+
 // TestGenerateWithTemplateSetsMaxTokens is a regression for #2604: without an
 // explicit MaxTokens, DeepSeek-class providers default to 8192 completion
 // tokens and truncate combined wiki extraction JSON mid-field.

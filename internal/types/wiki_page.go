@@ -502,6 +502,11 @@ type WikiConfig struct {
 	SynthesisModelID string `yaml:"synthesis_model_id" json:"synthesis_model_id"`
 	// MaxPagesPerIngest limits pages created/updated per ingest operation (0 = no limit)
 	MaxPagesPerIngest int `yaml:"max_pages_per_ingest" json:"max_pages_per_ingest"`
+	// MaxReduceInputBytes bounds the aggregate, trim-eligible input passed to the
+	// WikiPageModify prompt. It is an operator-provided byte budget because the
+	// model context window is not exposed by the chat abstraction. Zero preserves
+	// the legacy unbounded behavior.
+	MaxReduceInputBytes int `yaml:"max_reduce_input_bytes" json:"max_reduce_input_bytes,omitempty"`
 	// ExtractionGranularity controls how many candidate slugs Pass 0 extracts
 	// per document. Empty / unknown value is treated as WikiExtractionStandard.
 	ExtractionGranularity WikiExtractionGranularity `yaml:"extraction_granularity" json:"extraction_granularity,omitempty"`
