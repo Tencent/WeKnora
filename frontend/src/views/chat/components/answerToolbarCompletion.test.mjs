@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 const botMessage = readFileSync(new URL('./botmsg.vue', import.meta.url), 'utf8')
 const agentStream = readFileSync(new URL('./AgentStreamDisplay.vue', import.meta.url), 'utf8')
 const chatView = readFileSync(new URL('../index.vue', import.meta.url), 'utf8')
+const embedChat = readFileSync(new URL('../../embed/EmbedChatCore.vue', import.meta.url), 'utf8')
 const sharedStyles = readFileSync(
   new URL('../../../components/css/chat-message-shared.less', import.meta.url),
   'utf8',
@@ -34,6 +35,15 @@ test('follow-up loading is shown compactly inside both answer toolbars', () => {
   assert.match(sharedStyles, /followUpToolbarShimmer 1\.5s linear infinite/)
   assert.match(sharedStyles, /background-clip: text/)
   assert.match(sharedStyles, /follow-up-toolbar-loading-leave-to/)
+})
+
+test('conversation timestamps insert into the message flow instead of each bubble', () => {
+  assert.match(chatView, /shouldShowConversationTimestamp\(messagesList, index\)/)
+  assert.match(embedChat, /shouldShowConversationTimestamp\(messagesList, index\)/)
+  assert.doesNotMatch(chatView, /align="end"/)
+  assert.doesNotMatch(chatView, /align="start"/)
+  assert.doesNotMatch(embedChat, /align="end"/)
+  assert.doesNotMatch(embedChat, /align="start"/)
 })
 
 test('follow-up suggestions wait until the answer is fully rendered', () => {

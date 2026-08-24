@@ -5,7 +5,10 @@ import {
   bindServerTurnTimestamps,
   ensureMessageCreatedAt,
   formatMessageTimestamp,
+  getConversationTimestampModel,
   normalizeMessageCreatedAt,
+  shouldInsertConversationTimestamp,
+  shouldShowConversationTimestamp,
 } from './messageTimestamp'
 
 test('normalizeMessageCreatedAt accepts parseable timestamps and rejects junk', () => {
@@ -129,4 +132,58 @@ test('formatMessageTimestamp hides empty and invalid timestamps', () => {
   assert.equal(formatMessageTimestamp('   '), '')
   assert.equal(formatMessageTimestamp('not-a-date'), '')
   assert.equal(formatMessageTimestamp(undefined), '')
+})
+
+test('getConversationTimestampModel classifies today yesterday and older dates', () => {
+  const now = new Date(2026, 7, 24, 18, 21, 0)
+  const today = getConversationTimestampModel(new Date(2026, 7, 24, 16, 5, 0).toISOString(), now)
+  const yesterday = getConversationTimestampModel(new Date(2026, 7, 23, 9, 8, 0).toISOString(), now)
+  const thisYear = getConversationTimestampModel(new Date(2026, 0, 2, 3, 4, 0).toISOString(), now)
+  const otherYear = getConversationTimestampModel(new Date(2025, 11, 31, 23, 59, 0).toISOString(), now)
+
+  assert.deepEqual(today, {
+    datetime: new Date(2026, 7, 24, 16, 5, 0).toISOString(),
+    kind: 'today',
+    time: '16:05',
+    year: 2026,
+    month: 8,
+    day: 24,
+  })
+  assert.equal(yesterday?.kind, 'yesterday')
+  assert.equal(yesterday?.time, '09:08')
+  assert.equal(thisYear?.kind, 'thisYear')
+  assert.equal(thisYear?.month, 1)
+  assert.equal(thisYear?.day, 2)
+  assert.equal(otherYear?.kind, 'otherYear')
+  assert.equal(otherYear?.year, 2025)
+  assert.equal(getConversationTimestampModel(''), null)
+})
+
+test('shouldInsertConversationTimestamp opens a new group on first message and long gaps', () => {
+  const firstUser = { role: 'user', created_at: new Date(2026, 7, 24, 16, 5, 0).toISOString() }
+  const assistantSameTurn = { role: 'assistant', created_at: new Date(2026, 7, 24, 16, 5, 20).toISOString() }
+  const nextUserSoon = { role: 'user', created_at: new Date(2026, 7, 24, 16, 8, 0).toISOString() }
+  const nextUserLater = { role: 'user', created_at: new Date(2026, 7, 24, 16, 12, 0).toISOString() }
+  const nextDay = { role: 'user', created_at: new Date(2026, 7, 25, 9, 0, 0).toISOString() }
+
+  assert.equal(shouldInsertConversationTimestamp(undefined, firstUser), true)
+  assert.equal(shouldInsertConversationTimestamp(firstUser, assistantSameTurn), false)
+  assert.equal(shouldInsertConversationTimestamp(assistantSameTurn, nextUserSoon), false)
+  assert.equal(shouldInsertConversationTimestamp(assistantSameTurn, nextUserLater), true)
+  assert.equal(shouldInsertConversationTimestamp(nextUserLater, nextDay), true)
+  assert.equal(shouldInsertConversationTimestamp(firstUser, { role: 'user', created_at: '' }), false)
+})
+
+test('shouldShowConversationTimestamp inserts before the user turn not the assistant reply', () => {
+  const messages = [
+    { role: 'user', created_at: new Date(2026, 7, 24, 16, 5, 0).toISOString() },
+    { role: 'assistant', created_at: new Date(2026, 7, 24, 16, 5, 20).toISOString() },
+    { role: 'user', created_at: new Date(2026, 7, 24, 17, 0, 0).toISOString() },
+    { role: 'assistant', created_at: new Date(2026, 7, 24, 17, 0, 30).toISOString() },
+  ]
+
+  assert.equal(shouldShowConversationTimestamp(messages, 0), true)
+  assert.equal(shouldShowConversationTimestamp(messages, 1), false)
+  assert.equal(shouldShowConversationTimestamp(messages, 2), true)
+  assert.equal(shouldShowConversationTimestamp(messages, 3), false)
 })

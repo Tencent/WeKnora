@@ -3047,6 +3047,12 @@ export default {
     refreshSuggestedQuestions: 'More',
     thinking: 'Thinking...',
     thinkingAlt: 'Thinking in progress',
+    conversationTime: {
+      today: 'Today {time}',
+      yesterday: 'Yesterday {time}',
+      thisYear: '{month}/{day} {time}',
+      otherYear: '{month}/{day}/{year} {time}',
+    },
     preparingAnswer: 'Preparing an answer…',
     connectingModelAndGeneratingAnswer: 'Connecting to the model and generating an answer…',
     modelStillResponding: 'The model is taking longer than usual, still waiting…',

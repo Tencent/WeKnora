@@ -75,13 +75,14 @@
                 -->
                 <div v-for="(session, index) in messagesList"
                     :key="session.id || `${session.role}-${session.created_at}-${index}`" class="msg-item-wrapper">
+                    <MessageTimestamp v-if="shouldShowConversationTimestamp(messagesList, index)"
+                        :value="session.created_at" />
 
                     <div v-if="session.role == 'user'" class="message-row">
                         <usermsg :content="session.content" :mentioned_items="session.mentioned_items"
                             :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"
                             :session-id="session_id">
                         </usermsg>
-                        <MessageTimestamp :value="session.created_at" align="end" />
                     </div>
                     <div v-if="session.role == 'assistant' && shouldRenderAssistantMessage(session)"
                         class="message-row">
@@ -91,7 +92,6 @@
                             :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
                             @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
                         </botmsg>
-                        <MessageTimestamp :value="session.created_at" align="start" />
                         <FollowUpSuggestions v-if="session.answerFullyRendered && !session.suggestionsDismissed"
                             :suggestion-set="session.suggestionSet"
                             :loading="session.suggestionLoading"
@@ -151,6 +151,7 @@ import ChatReferencesDrawer from '@/components/ChatReferencesDrawer.vue';
 import ChatAttachmentPreviewDrawer from '@/components/ChatAttachmentPreviewDrawer.vue';
 import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue';
 import MessageTimestamp from '@/components/chat/MessageTimestamp.vue';
+import { shouldShowConversationTimestamp } from '@/utils/messageTimestamp';
 import ChatHeader from '@/components/ChatHeader.vue';
 import {
     notifySessionMutation,

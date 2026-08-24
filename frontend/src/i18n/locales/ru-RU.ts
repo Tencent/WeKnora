@@ -3211,6 +3211,12 @@ export default {
     refreshSuggestedQuestions: 'Ещё',
     thinking: 'Думаю...',
     thinkingAlt: 'Обдумывание...',
+    conversationTime: {
+      today: 'Сегодня {time}',
+      yesterday: 'Вчера {time}',
+      thisYear: '{day}.{month} {time}',
+      otherYear: '{day}.{month}.{year} {time}',
+    },
     preparingAnswer: 'Подготовка ответа…',
     connectingModelAndGeneratingAnswer: 'Подключение к модели и создание ответа…',
     modelStillResponding: 'Модель отвечает дольше обычного, продолжаем ждать…',
