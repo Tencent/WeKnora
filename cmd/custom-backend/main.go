@@ -85,27 +85,51 @@ func main() {
 		slog.Info("custom workers disabled")
 	} else {
 		contentAgentID := os.Getenv("CUSTOM_CONTENT_AGENT_ID")
+		missingContentConfig := make([]string, 0, 4)
 		if contentAgentID == "" {
-			slog.Error("CUSTOM_CONTENT_AGENT_ID 环境变量未配置（内容生产 Agent 必须指定）")
-			os.Exit(1)
+			missingContentConfig = append(missingContentConfig, "CUSTOM_CONTENT_AGENT_ID")
 		}
+		if cfg.Tongyi.AccessKeyID == "" {
+			missingContentConfig = append(missingContentConfig, "TONGYI_ACCESS_KEY_ID")
+		}
+		if cfg.Tongyi.AccessKeySecret == "" {
+			missingContentConfig = append(missingContentConfig, "TONGYI_ACCESS_KEY_SECRET")
+		}
+		if cfg.Tongyi.AppKey == "" {
+			missingContentConfig = append(missingContentConfig, "TONGYI_APP_KEY")
+		}
+		if cfg.WeKnora.KBID == "" {
+			missingContentConfig = append(missingContentConfig, "WEKNORA_KB_ID")
+		}
+
+		contentWorkersEnabled := len(missingContentConfig) == 0
+		if !contentWorkersEnabled {
+			slog.Warn("content workers disabled; thumbnail worker remains enabled", "missing_config", missingContentConfig)
+		}
+
 		base := worker.BaseSkillHandler{
 			DB:           db,
 			AgentClient:  agentClient,
 			Orchestrator: orchestrator,
 			AgentID:      contentAgentID,
 		}
-		engine = worker.NewEngine(db, &cfg.Worker,
-			worker.NewThumbnailHandler(db, minioCli),
-			worker.NewTranscriptionHandler(db, tongyiCli),
-			worker.NewSubtitleGenerateHandler(db, minioCli, tongyiCli),
-			worker.NewIndexHandler(db, weknoraCli, orchestrator),
-			&worker.GraphHandler{BaseSkillHandler: base},
-			&worker.OutlineHandler{BaseSkillHandler: base},
-			&worker.OverviewHandler{BaseSkillHandler: base},
-			&worker.SummaryHandler{BaseSkillHandler: base},
-			&worker.AssembleHandler{BaseSkillHandler: base},
-		)
+
+		handlers := []worker.Handler{
+			worker.NewThumbnailHandler(db, minioCli, contentWorkersEnabled),
+		}
+		if contentWorkersEnabled {
+			handlers = append(handlers,
+				worker.NewTranscriptionHandler(db, tongyiCli),
+				worker.NewSubtitleGenerateHandler(db, minioCli, tongyiCli),
+				worker.NewIndexHandler(db, weknoraCli, orchestrator),
+				&worker.GraphHandler{BaseSkillHandler: base},
+				&worker.OutlineHandler{BaseSkillHandler: base},
+				&worker.OverviewHandler{BaseSkillHandler: base},
+				&worker.SummaryHandler{BaseSkillHandler: base},
+				&worker.AssembleHandler{BaseSkillHandler: base},
+			)
+		}
+		engine = worker.NewEngine(db, &cfg.Worker, handlers...)
 		engine.Start(context.Background())
 		defer engine.Stop()
 	}

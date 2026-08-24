@@ -28,13 +28,14 @@ import (
 
 // ThumbnailHandler thumbnail job
 type ThumbnailHandler struct {
-	DB    *gorm.DB
-	MinIO *objstore.Client
+	DB                    *gorm.DB
+	MinIO                 *objstore.Client
+	ContentWorkersEnabled bool
 }
 
 // NewThumbnailHandler 构造
-func NewThumbnailHandler(db *gorm.DB, m *objstore.Client) *ThumbnailHandler {
-	return &ThumbnailHandler{DB: db, MinIO: m}
+func NewThumbnailHandler(db *gorm.DB, m *objstore.Client, contentWorkersEnabled bool) *ThumbnailHandler {
+	return &ThumbnailHandler{DB: db, MinIO: m, ContentWorkersEnabled: contentWorkersEnabled}
 }
 
 // JobType 返回 job 类型标识
@@ -102,12 +103,14 @@ func (h *ThumbnailHandler) Run(ctx context.Context, job *model.VideoProcessingJo
 			return fmt.Errorf("mark video ready: %w", err)
 		}
 
-		transcriptionJob := model.VideoProcessingJob{
-			ID: uuid.NewString(), VideoID: video.ID, JobType: "transcription", Provider: "aliyun_tingwu",
-			Status: "pending", MaxAttempts: 3, IdempotencyKey: fmt.Sprintf("transcription:%s", video.ID),
-		}
-		if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "idempotency_key"}}, DoNothing: true}).Create(&transcriptionJob).Error; err != nil {
-			return fmt.Errorf("enqueue transcription: %w", err)
+		if h.ContentWorkersEnabled {
+			transcriptionJob := model.VideoProcessingJob{
+				ID: uuid.NewString(), VideoID: video.ID, JobType: "transcription", Provider: "aliyun_tingwu",
+				Status: "pending", MaxAttempts: 3, IdempotencyKey: fmt.Sprintf("transcription:%s", video.ID),
+			}
+			if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "idempotency_key"}}, DoNothing: true}).Create(&transcriptionJob).Error; err != nil {
+				return fmt.Errorf("enqueue transcription: %w", err)
+			}
 		}
 		return nil
 	}); err != nil {
