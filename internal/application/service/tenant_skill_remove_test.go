@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -159,6 +160,41 @@ func TestRunRemoveStopsBeforeClearingThePointerWhenTheLockIsLost(t *testing.T) {
 // RemoveSkill validates the skill outside the lock, so two submissions queue
 // two runs. The second one has nothing left to do and must not spend a sandbox,
 // a snapshot and a generation bump proving it.
+func TestRunRemoveAbortsWhenANewerInstallOwnsTheRow(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.seedInstalledSkill("sk-1", "snap-old", 2)
+	fx.seedInstalledSkill("sk-2", "snap-old", 2)
+	require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), &types.TenantSkillEntity{
+		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		Name: "skill-sk-1", BundleSHA256: strings.Repeat("c", 64),
+		Status: types.SkillStatusInstalling, InstalledSnapshotID: "snap-old",
+	}))
+
+	require.NoError(t, fx.svc.runRemove(context.Background(), 7, "cfg-1", "sk-1"))
+
+	require.Empty(t, fx.events, "a queued remove must not wipe a skill a newer upload already claimed")
+	require.Nil(t, fx.configRepo.saved)
+	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.NotNil(t, skill)
+	require.Equal(t, types.SkillStatusInstalling, skill.Status)
+}
+
+func TestRunRemoveClearsTheLastSkillWhenCredentialsRotated(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.seedInstalledSkill("sk-1", "snap-old", 2)
+	fx.configRepo.entity.Config.E2B.APIKey = "key-2"
+
+	require.NoError(t, fx.svc.runRemove(context.Background(), 7, "cfg-1", "sk-1"))
+
+	require.Empty(t, fx.configRepo.saved.Config.SkillImage.SnapshotID,
+		"the last skill can fall back to the base template without booting the unreadable snapshot")
+	require.Equal(t, []string{"switch-pointer"}, fx.events)
+	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.Nil(t, skill)
+}
+
 func TestRunRemoveDoesNothingWhenTheSkillIsAlreadyGone(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.seedInstalledSkill("sk-1", "snap-old", 2)

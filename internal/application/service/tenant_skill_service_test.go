@@ -15,6 +15,12 @@ func TestSkillProgressKeyIncludesTheTenant(t *testing.T) {
 		"two workspaces must not share a progress slot because they happened to reuse IDs")
 }
 
+func TestSkillImageLockKeyIncludesTheTenant(t *testing.T) {
+	require.Equal(t, "weknora-skill-image-lock:7:cfg-1", skillImageLockKey(7, "cfg-1"))
+	require.NotEqual(t, skillImageLockKey(7, "cfg-1"), skillImageLockKey(8, "cfg-1"),
+		"two workspaces must not share an image lock because they happened to reuse config IDs")
+}
+
 func TestTenantSkillServiceWithConfigLockLocalRespectsCanceledContext(t *testing.T) {
 	svc := NewTenantSkillService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	entered := make(chan struct{})
@@ -22,7 +28,7 @@ func TestTenantSkillServiceWithConfigLockLocalRespectsCanceledContext(t *testing
 	holderDone := make(chan error, 1)
 
 	go func() {
-		holderDone <- svc.withConfigLock(context.Background(), "config-1", func(context.Context) error {
+		holderDone <- svc.withConfigLock(context.Background(), 7, "config-1", func(context.Context) error {
 			close(entered)
 			<-releaseHolder
 			return nil
@@ -36,7 +42,7 @@ func TestTenantSkillServiceWithConfigLockLocalRespectsCanceledContext(t *testing
 
 	waiterDone := make(chan error, 1)
 	go func() {
-		waiterDone <- svc.withConfigLock(ctx, "config-1", func(context.Context) error {
+		waiterDone <- svc.withConfigLock(ctx, 7, "config-1", func(context.Context) error {
 			return errors.New("canceled waiter entered lock")
 		})
 	}()

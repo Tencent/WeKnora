@@ -46,7 +46,7 @@ func (s *TenantSkillService) RemoveSkill(
 	// that is the stuck-run reaper's job (Task 17).
 	go func() {
 		bgCtx := context.WithoutCancel(ctx)
-		if err := s.withConfigLock(bgCtx, configID, func(lockCtx context.Context) error {
+		if err := s.withConfigLock(bgCtx, tenantID, configID, func(lockCtx context.Context) error {
 			return s.runRemove(lockCtx, tenantID, configID, skillID)
 		}); err != nil {
 			logger.Errorf(bgCtx, "[skill] remove %s failed: %v", skillID, err)
@@ -77,6 +77,12 @@ func (s *TenantSkillService) runRemove(
 		return fmt.Errorf("load skill %s: %w", skillID, err)
 	}
 	if existing == nil {
+		return nil
+	}
+	// RemoveSkill queues this run before the per-config lock. A newer upload
+	// of the same name already flipped the row back to installing; deleting
+	// it (or wiping its directory) would discard that install.
+	if existing.Status != types.SkillStatusRemoving {
 		return nil
 	}
 
@@ -130,14 +136,6 @@ func (s *TenantSkillService) runRemove(
 	if currentSnapshotID(cfgEntity) == "" {
 		return s.finishRemoval(cleanupBase, tenantID, configID, skillID)
 	}
-	// Shared with the install: a snapshot the live credentials cannot resolve
-	// must not be built on, and here that matters most - the removal would
-	// wipe a directory the booted image never had and then move the pointer
-	// past an image the old credentials still make recoverable.
-	if err := ensureUsableImage(cfgEntity); err != nil {
-		return err
-	}
-	builtFingerprint := skillOwnerFingerprint(cfgEntity.Config)
 
 	// Everything below either creates provider resources or moves the image
 	// pointer, and the fallback moves it without taking a snapshot first. A
@@ -167,6 +165,16 @@ func (s *TenantSkillService) runRemove(
 		s.markPreviousSnapshotsSuperseded(ctx, tenantID, configID, "")
 		return s.finishRemoval(cleanupBase, tenantID, configID, skillID)
 	}
+
+	// Remaining skills still live in the current snapshot, so it must be an
+	// image the live credentials can resolve. A last-skill clear above does
+	// not boot that snapshot — it only drops the pointer — and must stay
+	// possible after a credential rotation so the operator can fall back to
+	// the base template.
+	if err := ensureUsableImage(cfgEntity); err != nil {
+		return err
+	}
+	builtFingerprint := skillOwnerFingerprint(cfgEntity.Config)
 
 	// ResolveEffectiveConfig has already turned the current snapshot into the
 	// template, so this sandbox boots from the image the skill is in.
@@ -201,6 +209,13 @@ func (s *TenantSkillService) runRemove(
 	// lost since the check before the fallback branch.
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("remove lock lost before snapshot: %w", err)
+	}
+	owned, err := s.removeStillOwnsTheRow(ctx, tenantID, configID, skillID)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return nil
 	}
 	// The generation comes from the config read at the top of this function
 	// while switchImagePointer re-reads for everything else, for the same
@@ -373,6 +388,14 @@ func (s *TenantSkillService) finishRemoval(
 	ctx, cancel := s.cleanupContext(cleanupBase)
 	defer cancel()
 
+	owned, err := s.removeStillOwnsTheRow(ctx, tenantID, configID, skillID)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return nil
+	}
+
 	skill, err := s.skills.GetSkill(ctx, tenantID, configID, skillID)
 	if err != nil {
 		return err
@@ -400,6 +423,10 @@ func (s *TenantSkillService) finishRemoval(
 func (s *TenantSkillService) restoreSkillAfterFailedRemoval(
 	ctx context.Context, tenantID uint64, configID, skillID string, cause error,
 ) {
+	owned, err := s.removeStillOwnsTheRow(ctx, tenantID, configID, skillID)
+	if err != nil || !owned {
+		return
+	}
 	status := types.SkillStatusFailed
 	_ = s.updateSkillFields(ctx, tenantID, configID, skillID,
 		func(e *types.TenantSkillEntity) {
@@ -417,6 +444,23 @@ func (s *TenantSkillService) restoreSkillAfterFailedRemoval(
 	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
 		Percent: 100, Stage: "failed", Status: status, Log: cause.Error(),
 	})
+}
+
+// removeStillOwnsTheRow is the lock-side counterpart of RemoveSkill's
+// optimistic status flip. A newer upload of the same name already set the
+// row back to installing; deleting it (or restoring it to ready/failed)
+// would discard that install.
+func (s *TenantSkillService) removeStillOwnsTheRow(
+	ctx context.Context, tenantID uint64, configID, skillID string,
+) (bool, error) {
+	current, err := s.skills.GetSkill(ctx, tenantID, configID, skillID)
+	if err != nil {
+		return false, fmt.Errorf("load skill %s: %w", skillID, err)
+	}
+	if current == nil {
+		return false, nil
+	}
+	return current.Status == types.SkillStatusRemoving, nil
 }
 
 func (s *TenantSkillService) deleteBundleBestEffort(

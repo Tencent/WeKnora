@@ -240,6 +240,60 @@ func TestRunInstallAbortsWhenTheSkillRowWasRemoved(t *testing.T) {
 	require.Nil(t, skill)
 }
 
+func TestWriteReadySkillStateDoesNotStampANewerBundle(t *testing.T) {
+	fx := newInstallFixture(t)
+	newer := strings.Repeat("b", 64)
+	require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), &types.TenantSkillEntity{
+		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		Name: fx.bundle.Name, BundleSHA256: newer,
+		Status: types.SkillStatusInstalling,
+	}))
+
+	require.NoError(t, fx.svc.writeReadySkillState(
+		context.Background(), 7, "cfg-1", "sk-1", "snap-stale", fx.bundle))
+
+	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.Equal(t, types.SkillStatusInstalling, skill.Status)
+	require.Equal(t, newer, skill.BundleSHA256)
+	require.Empty(t, skill.InstalledSnapshotID,
+		"this run's snapshot must not be attributed to a newer upload")
+}
+
+func TestFailSkillDoesNotStampANewerBundle(t *testing.T) {
+	fx := newInstallFixture(t)
+	newer := strings.Repeat("b", 64)
+	require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), &types.TenantSkillEntity{
+		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		Name: fx.bundle.Name, BundleSHA256: newer,
+		Status: types.SkillStatusInstalling,
+	}))
+
+	fx.svc.failSkill(context.Background(), 7, "cfg-1", "sk-1", fx.bundle, errors.New("old run died"))
+
+	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.Equal(t, types.SkillStatusInstalling, skill.Status)
+	require.Equal(t, newer, skill.BundleSHA256)
+	require.Empty(t, skill.Error)
+}
+
+func TestInstallSkillRefusesWhenBundleCannotBeStored(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.saveErr = errors.New("object store down")
+	archive := zipBundle(t, map[string]string{"SKILL.md": validSkillMD})
+
+	_, err := fx.svc.InstallSkill(context.Background(), 7, "cfg-1", archive)
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "store bundle")
+	skill, getErr := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, getErr)
+	require.Equal(t, types.SkillStatusFailed, skill.Status,
+		"a skill whose archive never landed must not sit at installing")
+	require.NotContains(t, fx.events, "create-session")
+}
+
 func TestRunInstallAbortsWhenANewerBundleOwnsTheRow(t *testing.T) {
 	fx := newInstallFixture(t)
 	newer := strings.Repeat("b", 64)
@@ -688,6 +742,9 @@ type installFixture struct {
 	installerRecord *types.CustomAgent
 	engineConfig    *types.AgentConfig
 	engineModel     chat.Chat
+	// saveErr fails bundle storage so InstallSkill cannot accept a skill
+	// whose archive will later be unreadable.
+	saveErr error
 }
 
 func newInstallFixture(t *testing.T) *installFixture {
@@ -1510,7 +1567,10 @@ func (installFileService) CheckConnectivity(context.Context) error { return nil 
 func (installFileService) SaveFile(context.Context, *multipart.FileHeader, uint64, string) (string, error) {
 	return "", nil
 }
-func (installFileService) SaveBytes(context.Context, []byte, uint64, string, bool) (string, error) {
+func (s installFileService) SaveBytes(context.Context, []byte, uint64, string, bool) (string, error) {
+	if s.fx != nil && s.fx.saveErr != nil {
+		return "", s.fx.saveErr
+	}
 	return "file://bundle.zip", nil
 }
 func (installFileService) GetFile(context.Context, string) (io.ReadCloser, error) { return nil, nil }

@@ -89,14 +89,19 @@ func (s *TenantSkillService) InstallSkill(
 	}
 
 	// Store the archive before the long-running part: read_skill serves file
-	// contents from it, and a re-install after a crash needs it too.
-	if ref, err := s.saveBundle(ctx, tenantID, skillID, archive); err == nil {
-		_ = s.updateSkillFields(ctx, tenantID, configID, skillID, func(e *types.TenantSkillEntity) {
-			e.BundleRef = ref
-		})
-	} else {
-		logger.Warnf(ctx, "[skill] store bundle for %s failed: %v", skillID, err)
+	// contents from it, and a re-install after a crash needs it too. A missing
+	// archive is a failed install, not a warning — otherwise the row says
+	// "installing" and later reads have nothing to serve.
+	ref, err := s.saveBundle(ctx, tenantID, skillID, archive)
+	if err != nil {
+		failCtx, cancelFail := s.cleanupContext(ctx)
+		defer cancelFail()
+		s.failSkill(failCtx, tenantID, configID, skillID, bundle, fmt.Errorf("store bundle: %w", err))
+		return "", fmt.Errorf("store bundle for skill %s: %w", skillID, err)
 	}
+	_ = s.updateSkillFields(ctx, tenantID, configID, skillID, func(e *types.TenantSkillEntity) {
+		e.BundleRef = ref
+	})
 
 	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
 		Percent: 10, Stage: "accepted", Status: types.SkillStatusInstalling,
@@ -107,7 +112,7 @@ func (s *TenantSkillService) InstallSkill(
 	// reaper (Task 17) is what closes that gap.
 	go func() {
 		bgCtx := context.WithoutCancel(ctx)
-		if err := s.withConfigLock(bgCtx, configID, func(lockCtx context.Context) error {
+		if err := s.withConfigLock(bgCtx, tenantID, configID, func(lockCtx context.Context) error {
 			return s.runInstall(lockCtx, tenantID, configID, skillID, bundle)
 		}); err != nil {
 			logger.Errorf(bgCtx, "[skill] install %s failed: %v", skillID, err)
@@ -155,7 +160,7 @@ func (s *TenantSkillService) runInstall(
 		// snapshot keeps serving every session.
 		failCtx, cancelFail := s.cleanupContext(cleanupBase)
 		defer cancelFail()
-		s.failSkill(failCtx, tenantID, configID, skillID, err)
+		s.failSkill(failCtx, tenantID, configID, skillID, bundle, err)
 	}()
 
 	// InstallSkill queues this run before the per-config lock. A remove that
@@ -270,6 +275,16 @@ func (s *TenantSkillService) runInstall(
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("install lock lost before snapshot: %w", err)
 	}
+	// Re-check after the minutes-long agent run: InstallSkill writes the row
+	// outside this lock, so a newer upload or a queued remove may already own
+	// it. Snapshotting anyway would bake a tree the ledger no longer names.
+	owned, err = s.installStillOwnsTheRow(ctx, tenantID, configID, skillID, bundle)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return nil
+	}
 	// The generation comes from the config read at the top of this function,
 	// while switchImagePointer deliberately re-reads for everything else it
 	// writes. That asymmetry is sound because the two fields have different
@@ -314,7 +329,7 @@ func (s *TenantSkillService) runInstall(
 	// even though the skill is installed and serving.
 	readyCtx, cancelReady := s.cleanupContext(cleanupBase)
 	defer cancelReady()
-	if err := s.writeReadySkillState(readyCtx, tenantID, configID, skillID, ref.ID); err != nil {
+	if err := s.writeReadySkillState(readyCtx, tenantID, configID, skillID, ref.ID, bundle); err != nil {
 		return err
 	}
 	s.markConfigSandboxesStale(ctx, tenantID, configID)
@@ -705,10 +720,21 @@ func (s *TenantSkillService) updateSkillFields(
 // runs after the pointer switch: the skill is installed, snapshotted and being
 // served, so a transient write failure here is a bookkeeping gap, not a failed
 // install, and re-running the whole install to fix a row would be absurd.
+//
+// The write is skipped when a newer upload or a queued remove already owns
+// the row: the pointer still moved, but stamping ready (or this run's
+// snapshot id) on that row would lie about which bundle is serving.
 func (s *TenantSkillService) writeReadySkillState(
-	ctx context.Context, tenantID uint64, configID, skillID, snapshotID string,
+	ctx context.Context, tenantID uint64, configID, skillID, snapshotID string, bundle *SkillBundle,
 ) error {
 	if err := s.retrySkillBookkeeping(ctx, func() error {
+		owned, err := s.installStillOwnsTheRow(ctx, tenantID, configID, skillID, bundle)
+		if err != nil {
+			return err
+		}
+		if !owned {
+			return nil
+		}
 		return s.updateSkillFields(ctx, tenantID, configID, skillID,
 			func(e *types.TenantSkillEntity) {
 				e.Status = types.SkillStatusReady
@@ -747,8 +773,12 @@ func (s *TenantSkillService) retrySkillBookkeeping(
 }
 
 func (s *TenantSkillService) failSkill(
-	ctx context.Context, tenantID uint64, configID, skillID string, cause error,
+	ctx context.Context, tenantID uint64, configID, skillID string, bundle *SkillBundle, cause error,
 ) {
+	owned, err := s.installStillOwnsTheRow(ctx, tenantID, configID, skillID, bundle)
+	if err != nil || !owned {
+		return
+	}
 	_ = s.updateSkillFields(ctx, tenantID, configID, skillID, func(e *types.TenantSkillEntity) {
 		e.Status = types.SkillStatusFailed
 		e.Error = cause.Error()
@@ -1069,11 +1099,14 @@ func installerAgentDefaults(ctx context.Context, tenantID uint64) *types.CustomA
 // skill". The model is the one choice still taken from the stored record, in
 // resolveInstallerModel.
 func installerAgentConfig(defaults *types.CustomAgent, configID string) *types.AgentConfig {
+	memoryOff := false
 	cfg := &types.AgentConfig{
 		MaxIterations:    30,
 		AllowedTools:     []string{tools.ToolShellExec},
 		Temperature:      0.2,
 		WebSearchEnabled: false,
+		MCPSelectionMode: "none",
+		MemoryEnabled:    &memoryOff,
 		SandboxConfigID:  configID,
 	}
 	if defaults == nil {
@@ -1095,8 +1128,10 @@ func installerAgentConfig(defaults *types.CustomAgent, configID string) *types.A
 	cfg.Temperature = custom.Temperature
 	cfg.SystemPrompt = custom.SystemPrompt
 	cfg.UseCustomSystemPrompt = custom.SystemPrompt != ""
-	cfg.WebSearchEnabled = custom.WebSearchEnabled
-	cfg.WebSearchMaxResults = custom.WebSearchMaxResults
+	cfg.WebSearchEnabled = false
+	cfg.WebSearchMaxResults = 0
+	cfg.MCPSelectionMode = "none"
+	cfg.MemoryEnabled = &memoryOff
 	cfg.MultiTurnEnabled = custom.MultiTurnEnabled
 	cfg.LLMCallTimeout = custom.LLMCallTimeout
 	return cfg

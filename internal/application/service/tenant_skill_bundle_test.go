@@ -208,6 +208,15 @@ Use scripts/extract.py to pull text out of a PDF.
 			"paths must be relative to the skill root, not to the archive root")
 	})
 
+	t.Run("rejects files outside the wrapped skill directory", func(t *testing.T) {
+		_, err := ParseSkillBundle(zipBundle(t, map[string]string{
+			"pdf-tools/SKILL.md": validSkillMD,
+			"README.md":          "left over from the zip root",
+		}))
+		require.ErrorIs(t, err, ErrSkillBundleInvalid)
+		require.ErrorContains(t, err, "outside the skill directory")
+	})
+
 	t.Run("rejects an archive without SKILL.md", func(t *testing.T) {
 		_, err := ParseSkillBundle(zipBundle(t, map[string]string{"a.txt": "x"}))
 		require.ErrorIs(t, err, ErrSkillBundleInvalid)

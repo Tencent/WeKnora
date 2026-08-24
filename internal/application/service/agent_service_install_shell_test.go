@@ -108,6 +108,30 @@ func TestInstallerAgentConfigTurnsOnInstallMode(t *testing.T) {
 	}, "cfg-1")
 
 	require.True(t, config.SkillInstallMode())
+	require.Equal(t, "none", config.MCPSelectionMode,
+		"empty MCPSelectionMode defaults to all tenant MCP tools on a root shell")
+	require.NotNil(t, config.MemoryEnabled)
+	require.False(t, *config.MemoryEnabled,
+		"nil MemoryEnabled inherits the workspace and would register search_memory")
+	require.False(t, config.WebSearchEnabled)
+}
+
+func TestInstallerAgentConfigKeepsMCPOffWhenThePlatformYAMLEnablesIt(t *testing.T) {
+	memoryOn := true
+	config := installerAgentConfig(&types.CustomAgent{
+		ID: types.BuiltinSkillInstallerID,
+		Config: types.CustomAgentConfig{
+			AllowedTools:     []string{tools.ToolShellExec},
+			MCPSelectionMode: "all",
+			WebSearchEnabled: true,
+			MemoryEnabled:    &memoryOn,
+		},
+	}, "cfg-1")
+
+	require.Equal(t, "none", config.MCPSelectionMode)
+	require.False(t, config.WebSearchEnabled)
+	require.NotNil(t, config.MemoryEnabled)
+	require.False(t, *config.MemoryEnabled)
 }
 
 func TestInstallerAgentConfigLeavesInstallModeOffForAnotherAgent(t *testing.T) {
