@@ -51,13 +51,6 @@ class MarkdownTableUtil:
                 | 张三 | 25 | 北京 |
     """
 
-    def __init__(self):
-        # Table rows are normalized line-by-line in format_table (regex-free)
-        # instead of via whole-text regexes. A ``|``-prefixed line missing its
-        # trailing ``|`` previously caused catastrophic backtracking in the
-        # single-threaded event loop (see Tencent/WeKnora#2768).
-        pass
-
     @staticmethod
     def _split_row_cells(row_line: str) -> List[str]:
         """Split a markdown table row into cells, preserving empty cells."""
@@ -138,10 +131,10 @@ class MarkdownTableUtil:
         """Format all Markdown tables in the content.
 
         Line-based and regex-free: only well-formed rows (leading *and*
-        trailing ``|``) are treated as tables, so a malformed row can never
-        trigger the catastrophic backtracking described in
-        https://github.com/Tencent/WeKnora/issues/2768. Output is equivalent
-        to the previous regex implementation.
+        trailing ``|``, with at least one cell) are treated as tables, so a
+        malformed row can never trigger the catastrophic backtracking
+        described in https://github.com/Tencent/WeKnora/issues/2768.
+        CRLF/CR input is normalized to LF before scanning.
 
         Args:
             content: Raw Markdown text containing tables
@@ -165,17 +158,27 @@ class MarkdownTableUtil:
             """Standardize a header or data row."""
             return prefix + "| " + " | ".join(columns) + " |"
 
-        lines = content.split("\n")
+        # Unify CRLF/CR first so a trailing ``\r`` left by split("\n") cannot
+        # be mistaken for "ends with |" via str.rstrip(), and so we do not
+        # emit mixed line endings. Trailing newlines are preserved.
+        unified = content.replace("\r\n", "\n").replace("\r", "\n")
+        lines = unified.split("\n")
         out: List[str] = []
         for line in lines:
             stripped = line.lstrip(" \t")
             # A row must both begin and end with a pipe to be a table row;
             # anything else is passed through unchanged. This also keeps
             # unclosed rows (the old regex's exponential worst case) cheap.
-            if stripped.startswith("|") and line.rstrip().endswith("|"):
+            # rstrip only spaces/tabs (old ``\|[\t ]*$``), not all whitespace.
+            if stripped.startswith("|") and line.rstrip(" \t").endswith("|"):
                 prefix = line[: len(line) - len(stripped)]
                 columns = self._split_row_cells(line)
-                if self._is_alignment_row(line):
+                # Lone "|" is not a table row: the old line_pattern required
+                # opening *and* closing pipes. Formatting it to "|  |" would
+                # let normalize_spurious_table_prefixes drop the line.
+                if not columns:
+                    out.append(line)
+                elif self._is_alignment_row(line):
                     out.append(format_alignment_row(prefix, columns))
                 else:
                     out.append(format_data_row(prefix, columns))

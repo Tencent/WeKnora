@@ -72,7 +72,37 @@ class TestMarkdownTableUtil(unittest.TestCase):
         row = "| " + " | ".join(f"v{i}" for i in range(200)) + " |"
         formatted = MarkdownTableUtil().format_table("\n".join([header, sep, row]))
         self.assertIn("| c0 | c1 |", formatted)
+        self.assertIn("| c199 |", formatted)
+        self.assertIn("| --- |", formatted)
         self.assertIn("| v0 | v1 |", formatted)
+        self.assertIn("| v199 |", formatted)
+
+    def test_lone_pipe_is_passthrough(self):
+        """A single-pipe line is not a table row and must not be deleted."""
+        self.assertEqual(MarkdownTableUtil().format_table("|"), "|")
+        self.assertEqual(MarkdownTableUtil().format_table("  |  "), "  |  ")
+
+    def test_lone_pipe_above_table_is_kept(self):
+        raw = "|\n| a | b |\n| --- | --- |\n| 1 | 2 |"
+        formatted = MarkdownTableUtil().format_table(raw)
+        self.assertEqual(formatted.split("\n")[0], "|")
+        self.assertIn("| a | b |", formatted)
+        self.assertIn("| 1 | 2 |", formatted)
+
+    def test_alignment_colons_preserved(self):
+        raw = "| a | b | c |\n| :---------- | -------: | :------: |\n| 1 | 2 | 3 |"
+        formatted = MarkdownTableUtil().format_table(raw)
+        self.assertIn("| :--- | ---: | :---: |", formatted)
+
+    def test_crlf_table_formats_without_mixed_endings(self):
+        raw = "# Title\r\n\r\n|Name|Age|\r\n|---|---|\r\n|John|30|\r\n\r\nparagraph\r\n"
+        formatted = MarkdownTableUtil().format_table(raw)
+        self.assertIn("| Name | Age |", formatted)
+        self.assertIn("| --- | --- |", formatted)
+        self.assertIn("| John | 30 |", formatted)
+        self.assertIn("paragraph", formatted)
+        self.assertNotIn("\r", formatted)
+        self.assertTrue(formatted.endswith("\n"))
 
 
 if __name__ == "__main__":
