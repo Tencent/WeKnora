@@ -53,6 +53,80 @@ func TestFileMessageQAContent(t *testing.T) {
 	}
 }
 
+func TestEmptyIncomingMessageReply(t *testing.T) {
+	tests := []struct {
+		name      string
+		msg       *IncomingMessage
+		wantEmpty bool
+		wantHint  string
+	}{
+		{
+			name:      "text content is accepted",
+			msg:       &IncomingMessage{MessageType: MessageTypeText, Content: " hello "},
+			wantEmpty: false,
+		},
+		{
+			name:      "blank text is rejected",
+			msg:       &IncomingMessage{MessageType: MessageTypeText, Content: " \n\t "},
+			wantEmpty: true,
+			wantHint:  "未能识别这条消息中的文字内容。请改用纯文本发送；图片或文件请单独发送。",
+		},
+		{
+			name:      "image without caption is accepted before QA content fill",
+			msg:       &IncomingMessage{MessageType: MessageTypeImage, FileKey: "pic-1", FileName: "pic-1.png"},
+			wantEmpty: false,
+		},
+		{
+			name:      "file without caption is accepted before QA content fill",
+			msg:       &IncomingMessage{MessageType: MessageTypeFile, FileKey: "file-1", FileName: "spec.pdf"},
+			wantEmpty: false,
+		},
+		{
+			name:      "file key is treated as an attachment even if type stays text",
+			msg:       &IncomingMessage{MessageType: MessageTypeText, FileKey: "pic-1"},
+			wantEmpty: false,
+		},
+		{
+			name: "audio without recognition uses a voice-specific hint",
+			msg: &IncomingMessage{
+				MessageType: MessageTypeText,
+				Extra:       map[string]string{"raw_msgtype": "audio"},
+			},
+			wantEmpty: true,
+			wantHint:  "未能识别这条语音中的文字内容。请改用纯文本发送，或再说一遍。",
+		},
+		{
+			name: "video uses an unsupported-type hint",
+			msg: &IncomingMessage{
+				MessageType: MessageTypeText,
+				Extra:       map[string]string{"raw_msgtype": "video"},
+			},
+			wantEmpty: true,
+			wantHint:  "暂不支持视频消息。请改用纯文本发送；图片或文件请单独发送。",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotHint, gotEmpty := emptyIncomingMessageReply(tt.msg)
+			if gotEmpty != tt.wantEmpty {
+				t.Fatalf("empty = %v, want %v", gotEmpty, tt.wantEmpty)
+			}
+			if gotHint != tt.wantHint {
+				t.Fatalf("hint = %q, want %q", gotHint, tt.wantHint)
+			}
+		})
+	}
+}
+
+func TestEmptyIncomingMessageReplyAfterFileQAContent(t *testing.T) {
+	msg := &IncomingMessage{MessageType: MessageTypeImage, FileName: "shot.png"}
+	msg.Content = fileMessageQAContent(msg)
+	if hint, empty := emptyIncomingMessageReply(msg); empty {
+		t.Fatalf("image after fileMessageQAContent was rejected: hint=%q", hint)
+	}
+}
+
 func TestApplyIMAttachmentTruncationByLineCount(t *testing.T) {
 	lines := make([]string, maxIMAttachmentLines+1)
 	for i := range lines {
