@@ -1,6 +1,7 @@
 import { markRaw, nextTick, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ensureRagPipelineHistoryStream } from '@/utils/rag-pipeline-history'
+import { applyMessageCreatedAt, bindServerTurnTimestamps, ensureMessageCreatedAt } from '@/utils/messageTimestamp'
 
 export type ChatMessage = Record<string, unknown>
 
@@ -56,6 +57,16 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     onAgentChunkBound,
     debug = false,
   } = options
+
+  const emitMessageCreated = (message: ChatMessage) => {
+    ensureMessageCreatedAt(message)
+    onMessageCreated?.(message)
+  }
+
+  const emitMessageUpdated = (message: ChatMessage, payload?: ChatMessage) => {
+    if (payload) applyMessageCreatedAt(message, payload.created_at)
+    onMessageUpdated?.(message, payload)
+  }
 
   const log = (...args: unknown[]) => {
     if (debug) console.log(...args)
@@ -166,7 +177,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       }
       ensureAgentMessageShell(message, data.id as string | undefined)
       messagesList.push(message)
-      onMessageCreated?.(message)
+      emitMessageCreated(message)
       loading.value = false
     } else {
       ensureAgentMessageShell(message, data.id as string | undefined)
@@ -174,7 +185,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
 
     message.knowledge_references = refs.slice()
     if (created) onAgentChunkBound?.(message, true)
-    onMessageUpdated?.(message, data)
+    emitMessageUpdated(message, data)
     log('[References] Saved to message, count:', refs.length)
     return message
   }
@@ -194,7 +205,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       return undefined
     }
     message.used_memories = memories.slice()
-    onMessageUpdated?.(message, data)
+    emitMessageUpdated(message, data)
     log('[Memory] Saved to message, count:', memories.length)
     return message
   }
@@ -473,13 +484,13 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       }
       if (payload.is_fallback) message.is_fallback = true
       if (payload.is_completed) message.is_completed = true
-      onMessageUpdated?.(message, payload)
+      emitMessageUpdated(message, payload)
     } else {
       const entry = { ...payload }
       if (entry.id && !entry.request_id) entry.request_id = entry.id
       messagesList.push(entry)
-      onMessageCreated?.(entry)
-      onMessageUpdated?.(entry, payload)
+      emitMessageCreated(entry)
+      emitMessageUpdated(entry, payload)
     }
     scrollToBottom()
   }
@@ -510,7 +521,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         knowledge_references: [],
       }
       messagesList.push(newMsg)
-      onMessageCreated?.(newMsg)
+      emitMessageCreated(newMsg)
       loading.value = false
       scrollToBottom(true)
       message = newMsg
@@ -524,6 +535,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     }
 
     ensureAgentMessageShell(message, dataId)
+    applyMessageCreatedAt(message, data.created_at)
 
     if (
       loading.value &&
@@ -921,7 +933,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           knowledge_references: [],
         }
         messagesList.push(existingMessage)
-        onMessageCreated?.(existingMessage)
+        emitMessageCreated(existingMessage)
         loading.value = false
         scrollToBottom(true)
         log('[Agent Query] Created agent placeholder message')
@@ -933,6 +945,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         }
         log('[Agent Query] Continuing stream for existing message')
       }
+      bindServerTurnTimestamps(
+        messagesList,
+        (data.data as Record<string, unknown> | undefined) || data,
+        existingMessage,
+      )
       onAgentQuery?.(data, existingMessage, created)
       return
     }
