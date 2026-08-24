@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin, NotifyPlugin } from 'tdesign-vue-next'
-import ManualKnowledgeEditor from '@/components/manual-knowledge-editor.vue'
-import UploadConfirmHost from '@/components/UploadConfirmHost.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
+import { useUIStore } from '@/stores/ui'
+import { useUploadConfirmStore } from '@/stores/uploadConfirm'
 import { getCurrentUser, userInfoFromApi } from '@/api/auth'
 import { consumePendingTenantSwitchToast } from '@/utils/tenantSwitch'
 import { useRoleLabel } from '@/composables/useRoleLabel'
@@ -19,11 +19,23 @@ import zhCNConfig from 'tdesign-vue-next/esm/locale/zh_CN'
 import koKRConfig from 'tdesign-vue-next/esm/locale/ko_KR'
 import ruRUConfig from 'tdesign-vue-next/esm/locale/ru_RU'
 
+// These global dialogs are not part of the initial Home viewport. Mount them
+// only after their stores request them so their feature dependencies do not
+// delay the application shell.
+const ManualKnowledgeEditor = defineAsyncComponent(
+  () => import('@/components/manual-knowledge-editor.vue'),
+)
+const UploadConfirmHost = defineAsyncComponent(
+  () => import('@/components/UploadConfirmHost.vue'),
+)
+
 const { locale, t, tm } = useI18n()
 const { formatRole, roleIcon } = useRoleLabel()
 const router = useRouter()
 const authStore = useAuthStore()
 const settingsStore = useSettingsStore()
+const uiStore = useUIStore()
+const uploadConfirmStore = useUploadConfirmStore()
 
 const tdLocaleMap: Record<string, object> = {
   'en-US': enUSConfig,
@@ -274,8 +286,8 @@ onUnmounted(() => {
   <t-config-provider :globalConfig="tdGlobalConfig">
     <div id="app">
       <RouterView />
-      <ManualKnowledgeEditor />
-      <UploadConfirmHost />
+      <ManualKnowledgeEditor v-if="uiStore.manualEditorVisible" />
+      <UploadConfirmHost v-if="uploadConfirmStore.visible" />
     </div>
   </t-config-provider>
 </template>

@@ -29,6 +29,18 @@ function resolveFrontendCommit(): string {
 
 const FRONTEND_COMMIT = resolveFrontendCommit()
 
+const NON_CRITICAL_PRELOADS = [
+  'vendor-mermaid',
+  'vendor-highlight',
+  'vendor-markdown',
+  'vendor-tdesign',
+  'fonts-',
+]
+
+function filterNonCriticalPreloads(deps: string[]): string[] {
+  return deps.filter((dep) => !NON_CRITICAL_PRELOADS.some((chunk) => dep.includes(chunk)))
+}
+
 /** Dev parity with nginx: serve embed.html for /embed/:channelId (not the main SPA). */
 function embedHtmlDevFallback(): Plugin {
   return {
@@ -75,24 +87,20 @@ export default defineConfig({
   build: {
     modulePreload: {
       resolveDependencies(_filename, deps, { hostId }) {
-        // Embed iframe bootstraps with token exchange only; defer heavy chat chunks.
+        // Home and embed both need a small shell first. Chat, markdown and
+        // syntax-highlighting resources are loaded by their route/component
+        // when the user actually opens those features.
         if (hostId?.includes('embed')) {
-          return deps.filter((dep) => !(
-            dep.includes('vendor-mermaid')
-            || dep.includes('vendor-highlight')
-            || dep.includes('vendor-markdown')
-            || dep.includes('vendor-tdesign')
-            || dep.includes('botmsg')
+          return filterNonCriticalPreloads(deps).filter((dep) => !(
+            dep.includes('botmsg')
             || dep.includes('usermsg')
             || dep.includes('EmbedBotMessage')
             || dep.includes('EmbedUserMessage')
             || dep.includes('AgentStreamDisplay')
             || dep.includes('EmbedChatCore')
-            || dep.includes('vendor-markdown')
-            || dep.includes('fonts-')
           ))
         }
-        return deps
+        return filterNonCriticalPreloads(deps)
       },
     },
     rollupOptions: {

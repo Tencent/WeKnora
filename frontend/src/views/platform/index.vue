@@ -8,7 +8,7 @@
             <UploadMask></UploadMask>
         </div>
         <!-- 全局设置模态框，供所有 platform 子路由使用 -->
-        <Settings />
+        <Settings v-if="shouldMountSettings" />
         <!-- 全局命令面板 (⌘K)，随 platform 路由存活 -->
         <GlobalCommandPalette />
         <!-- 全局右上角"待处理邀请"铃铛。固定定位，z-index 低于抽屉，业务页面
@@ -18,12 +18,12 @@
 </template>
 <script setup lang="ts">
 import Menu from '@/components/menu.vue'
-import { ref, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
+import { computed, defineAsyncComponent, ref, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
 import UploadMask from '@/components/upload-mask.vue'
-import Settings from '@/views/settings/Settings.vue'
 import GlobalCommandPalette from '@/components/GlobalCommandPalette.vue'
 import GlobalInvitationBell from '@/components/GlobalInvitationBell.vue'
+import { useUIStore } from '@/stores/ui'
 import { useCommandPaletteStore } from '@/stores/commandPalette'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
@@ -31,13 +31,18 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { collectDroppedFiles } from './collectDroppedFiles'
 
+const Settings = defineAsyncComponent(() => import('@/views/settings/Settings.vue'))
 const route = useRoute();
 const router = useRouter();
+const uiStore = useUIStore()
 const commandPaletteStore = useCommandPaletteStore();
 let ismask = ref(false)
 const { t } = useI18n();
 
 const isRouterAlive = ref(true)
+const shouldMountSettings = computed(() => (
+    route.path === '/platform/settings' || uiStore.showSettingsModal
+))
 const reloadApp = () => {
     isRouterAlive.value = false
     nextTick(() => {
