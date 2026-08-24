@@ -1152,12 +1152,15 @@ func (m *installSandboxManager) SessionInstallShellExecutor() sandbox.SessionIns
 func (m *installSandboxManager) EnsureSessionDir(context.Context, string, string) error {
 	return nil
 }
+
 func (m *installSandboxManager) ListSessionFiles(context.Context, string, string) ([]sandbox.RemoteDirEntry, error) {
 	return nil, nil
 }
+
 func (m *installSandboxManager) StatSessionFile(context.Context, string, string) (*sandbox.RemoteStatEntry, error) {
 	return nil, nil
 }
+
 func (m *installSandboxManager) ReadSessionFile(
 	_ context.Context, _ string, filePath string,
 ) ([]byte, error) {
@@ -1166,11 +1169,13 @@ func (m *installSandboxManager) ReadSessionFile(
 	}
 	return nil, nil
 }
+
 func (m *installSandboxManager) WriteSessionInputFile(
 	_ context.Context, _ string, filePath string, content []byte,
 ) error {
 	return m.WriteSessionFile(context.Background(), "", filePath, content)
 }
+
 func (m *installSandboxManager) WriteSessionFile(
 	_ context.Context, _ string, filePath string, content []byte,
 ) error {
@@ -1188,9 +1193,11 @@ func (m *installSandboxManager) WriteSessionFile(
 	}
 	return nil
 }
+
 func (m *installSandboxManager) RemoveSessionInputPath(context.Context, string, string) error {
 	return nil
 }
+
 func (m *installSandboxManager) ExecShellCommand(
 	ctx context.Context,
 	sessionID string,
@@ -1255,6 +1262,7 @@ func (m *installSandboxManager) ExecShellCommandWithOptions(
 	}
 	return &sandbox.ExecuteResult{ExitCode: 0}, nil
 }
+
 func (m *installSandboxManager) CreateSnapshot(context.Context, string, string) (sandbox.RemoteSnapshotRef, error) {
 	m.fx.record("create-snapshot")
 	if m.fx.cancelDuringSnapshot != nil {
@@ -1273,6 +1281,7 @@ func (m *installSandboxManager) DeleteSnapshot(ctx context.Context, snapshotID s
 	m.fx.deletedSnapshots = append(m.fx.deletedSnapshots, snapshotID)
 	return nil
 }
+
 func (m *installSandboxManager) ListSnapshots(context.Context, string) ([]sandbox.RemoteSnapshotRef, error) {
 	return nil, nil
 }
@@ -1427,74 +1436,94 @@ func (s *installSessionService) CreateSession(_ context.Context, session *types.
 	}
 	return session, nil
 }
+
 func (s *installSessionService) GetSession(context.Context, string) (*types.Session, error) {
 	return nil, nil
 }
+
 func (s *installSessionService) GetOwnedSession(context.Context, string) (*types.Session, error) {
 	return nil, nil
 }
+
 func (s *installSessionService) GetSessionByID(context.Context, uint64, string) (*types.Session, error) {
 	return nil, nil
 }
+
 func (s *installSessionService) SetSessionOwnerID(context.Context, uint64, string, string) error {
 	return nil
 }
+
 func (s *installSessionService) GetSessionsByTenant(context.Context) ([]*types.Session, error) {
 	return nil, nil
 }
+
 func (s *installSessionService) GetPagedSessionsByTenant(
 	context.Context, *types.Pagination,
 ) (*types.PageResult, error) {
 	return nil, nil
 }
+
 func (s *installSessionService) UpdateSession(context.Context, *types.Session) error {
 	s.fx.sessionCalls = append(s.fx.sessionCalls, "UpdateSession")
 	return nil
 }
+
 func (s *installSessionService) UpdateSessionLastRequestState(
 	context.Context, string, *types.SessionLastRequestState,
 ) error {
 	return nil
 }
+
 func (s *installSessionService) DeleteSession(context.Context, string) error {
 	s.fx.sessionCalls = append(s.fx.sessionCalls, "DeleteSession")
 	return nil
 }
+
 func (s *installSessionService) BatchDeleteSessions(context.Context, []string) error {
 	s.fx.sessionCalls = append(s.fx.sessionCalls, "BatchDeleteSessions")
 	return nil
 }
+
 func (s *installSessionService) DeleteAllSessions(context.Context) error {
 	s.fx.sessionCalls = append(s.fx.sessionCalls, "DeleteAllSessions")
 	return nil
 }
+
 func (s *installSessionService) ListSessions(context.Context, *types.SessionListQuery) (*types.PageResult, error) {
 	return nil, nil
 }
+
 func (s *installSessionService) CountSessionsBySource(context.Context, *types.SessionListQuery) (int64, error) {
 	return 0, nil
 }
+
 func (s *installSessionService) SetSessionPinned(context.Context, string, bool) (int64, error) {
 	return 0, nil
 }
+
 func (s *installSessionService) GenerateTitle(
 	context.Context, *types.Session, []types.Message, string,
 ) (string, error) {
 	return "", nil
 }
+
 func (s *installSessionService) GenerateTitleAsync(context.Context, *types.Session, string, string, *event.EventBus) {
 }
+
 func (s *installSessionService) KnowledgeQA(context.Context, *types.QARequest, *event.EventBus) error {
 	return nil
 }
+
 func (s *installSessionService) KnowledgeQAByEvent(context.Context, *types.ChatManage, []types.EventType) error {
 	return nil
 }
+
 func (s *installSessionService) SearchKnowledge(
 	context.Context, []string, []string, []types.TagScope, string,
 ) ([]*types.SearchResult, error) {
 	return nil, nil
 }
+
 func (s *installSessionService) AgentQA(context.Context, *types.QARequest, *event.EventBus) error {
 	return nil
 }
@@ -1509,6 +1538,7 @@ func (s *installModelService) CreateModel(context.Context, *types.Model) error {
 func (s *installModelService) GetModelByID(context.Context, string) (*types.Model, error) {
 	return nil, nil
 }
+
 func (s *installModelService) ListModels(context.Context) ([]*types.Model, error) {
 	return []*types.Model{{
 		ID:        "model-1",
@@ -1522,18 +1552,23 @@ func (s *installModelService) DeleteModel(context.Context, string) error       {
 func (s *installModelService) UpdateModelCredentials(context.Context, string, *string, *string) (*types.Model, error) {
 	return nil, nil
 }
+
 func (s *installModelService) ClearModelCredential(context.Context, string, string) error {
 	return nil
 }
+
 func (s *installModelService) GetEmbeddingModel(context.Context, string) (embedding.Embedder, error) {
 	return nil, nil
 }
+
 func (s *installModelService) GetEmbeddingModelForTenant(context.Context, string, uint64) (embedding.Embedder, error) {
 	return nil, nil
 }
+
 func (s *installModelService) GetRerankModel(context.Context, string) (rerank.Reranker, error) {
 	return nil, nil
 }
+
 func (s *installModelService) GetChatModel(_ context.Context, modelID string) (chat.Chat, error) {
 	if s.missing[modelID] {
 		return nil, fmt.Errorf("model %s not found", modelID)
@@ -1562,6 +1597,7 @@ func (r *installStorageResolver) ResolveFileService(
 ) (interfaces.FileService, string, error) {
 	return installFileService{fx: r.fx}, "", nil
 }
+
 func (r *installStorageResolver) ResolveBackend(
 	context.Context, *types.Tenant, string, string,
 ) (*types.StorageBackend, error) {
@@ -1574,6 +1610,7 @@ func (installFileService) CheckConnectivity(context.Context) error { return nil 
 func (installFileService) SaveFile(context.Context, *multipart.FileHeader, uint64, string) (string, error) {
 	return "", nil
 }
+
 func (s installFileService) SaveBytes(context.Context, []byte, uint64, string, bool) (string, error) {
 	if s.fx != nil && s.fx.saveErr != nil {
 		return "", s.fx.saveErr
@@ -1588,6 +1625,7 @@ func (s installFileService) DeleteFile(_ context.Context, ref string) error {
 	}
 	return nil
 }
+
 func (installFileService) CopyFile(context.Context, string, uint64, string) (string, error) {
 	return "", nil
 }

@@ -78,9 +78,11 @@ func (stubSessionFileStore) ListSessionFiles(context.Context, string, string) ([
 func (stubSessionFileStore) StatSessionFile(context.Context, string, string) (*sandbox.RemoteStatEntry, error) {
 	return nil, nil
 }
+
 func (stubSessionFileStore) ReadSessionFile(context.Context, string, string) ([]byte, error) {
 	return nil, nil
 }
+
 func (stubSessionFileStore) WriteSessionInputFile(context.Context, string, string, []byte) error {
 	return nil
 }
