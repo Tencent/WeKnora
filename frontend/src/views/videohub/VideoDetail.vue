@@ -56,6 +56,7 @@ const currentSeconds = ref(0)
 const activeTab = ref('summary')
 const loading = ref(true)
 const error = ref('')
+let loadSequence = 0
 const playableStatuses = new Set(['ready', 'processing', 'completed'])
 
 const isPlayable = computed(() => Boolean(video.value && playableStatuses.has(video.value.status || '')))
@@ -80,17 +81,34 @@ const statusHint = computed(() => {
 })
 
 async function loadVideo(id: string) {
+  const sequence = ++loadSequence
   loading.value = true; error.value = ''; currentSeconds.value = 0
   try {
-    video.value = await fetchVideoDetail(id); selectedVideoId.value = id
+    const nextVideo = await fetchVideoDetail(id)
+    if (sequence !== loadSequence) return
+    video.value = nextVideo; selectedVideoId.value = id
     loading.value = false
     await nextTick()
     page.value?.scrollTo({ top: 0 })
     const querySeconds = Number(route.query.t)
     if (route.query.t !== undefined && Number.isFinite(querySeconds)) seekTo(Math.min(Math.max(querySeconds, 0), video.value.durationSeconds))
   }
-  catch (reason) { video.value = null; error.value = reason instanceof Error ? reason.message : '视频加载失败' }
-  finally { loading.value = false }
+  catch (reason) {
+    if (sequence !== loadSequence) return
+    video.value = null
+    error.value = reason instanceof Error ? reason.message : '视频加载失败'
+  }
+  finally {
+    if (sequence === loadSequence) loading.value = false
+  }
+}
+async function loadVideoOptions() {
+  try {
+    videoOptions.value = (await fetchVideoOptions()).map(item => ({ label: item.title, value: item.id }))
+  } catch {
+    // The detail view remains usable when the optional switcher list is unavailable.
+    videoOptions.value = []
+  }
 }
 function seekTo(seconds: number) { player.value?.seekTo(seconds) }
 function navigateToEvidence(videoId: string, seconds: number) {
@@ -103,9 +121,9 @@ function onSelectVideoById(videoId: string, seconds: number) {
 }
 function switchVideo(value: string | number | Array<string | number>) { if (typeof value === 'string') router.push(`/platform/videos/${value}`) }
 watch(() => route.params.videoId, value => { if (typeof value === 'string') loadVideo(value) })
-onMounted(async () => {
-  videoOptions.value = (await fetchVideoOptions()).map(item => ({ label: item.title, value: item.id }))
-  if (typeof route.params.videoId === 'string') await loadVideo(route.params.videoId)
+onMounted(() => {
+  void loadVideoOptions()
+  if (typeof route.params.videoId === 'string') void loadVideo(route.params.videoId)
 })
 </script>
 
