@@ -44,8 +44,9 @@ func TestVideoListReturnsOnlyInitiallyAvailableVideos(t *testing.T) {
 
 	var payload struct {
 		Data []struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
+			ID      string `json:"id"`
+			Status  string `json:"status"`
+			FileURL string `json:"file_url"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
@@ -60,6 +61,9 @@ func TestVideoListReturnsOnlyInitiallyAvailableVideos(t *testing.T) {
 	}
 	if payload.Data[1].Status != model.VideoStatusProcessing || payload.Data[2].Status != model.VideoStatusCompleted {
 		t.Fatalf("unexpected order: %#v", payload.Data)
+	}
+	if payload.Data[0].FileURL == "" || payload.Data[1].FileURL == "" || payload.Data[2].FileURL == "" {
+		t.Fatal("initially available videos must include file_url")
 	}
 }
 

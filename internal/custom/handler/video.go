@@ -40,6 +40,7 @@ func (h *VideoHandler) List(c *gin.Context) {
 		VideoType       string `json:"video_type"`
 		Status          string `json:"status"`
 		DurationSeconds int    `json:"duration_seconds"`
+		FileURL         string `json:"file_url"`
 		ThumbnailURL    string `json:"thumbnail_url"`
 		CreatedAt       string `json:"created_at"`
 	}
@@ -51,6 +52,7 @@ func (h *VideoHandler) List(c *gin.Context) {
 			VideoType:       v.VideoType,
 			Status:          v.Status,
 			DurationSeconds: v.DurationSeconds,
+			FileURL:         v.FileURL,
 			ThumbnailURL:    v.ThumbnailURL,
 			CreatedAt:       v.CreatedAt.Format("2006-01-02 15:04:05"),
 		})
