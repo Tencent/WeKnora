@@ -701,6 +701,9 @@ func applyIMCompleteDataToMessage(msg *types.Message, data event.AgentCompleteDa
 	}
 	msg.IsCompleted = true
 	msg.AgentDurationMs = data.TotalDurationMs
+	if usage, ok := data.Usage.(*types.TokenUsage); ok && usage != nil {
+		msg.Usage = usage
+	}
 	if len(data.KnowledgeRefs) > 0 {
 		refs := make([]*types.SearchResult, 0, len(data.KnowledgeRefs))
 		collectIMKnowledgeReferences(&refs, data.KnowledgeRefs)
@@ -1687,8 +1690,8 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 
 	logger.Infof(ctx, "[IM] HandleMessage: channel=%s platform=%s user=%s chat=%s msgtype=%s content_len=%d",
 		channelID, msg.Platform, msg.UserID, msg.ChatID, msg.MessageType, len(msg.Content))
-	logger.Debugf(ctx, "[IM] HandleMessage detail: msgid=%s filekey=%s filename=%s",
-		msg.MessageID, msg.FileKey, msg.FileName)
+	logger.Debugf(ctx, "[IM] HandleMessage detail: msgid=%s raw_msgtype=%s filekey=%s filename=%s",
+		msg.MessageID, msg.Extra["raw_msgtype"], msg.FileKey, msg.FileName)
 
 	// ── File/Image message handling ──
 	// File messages use the normal QA path as well.  A configured knowledge base
@@ -1697,6 +1700,22 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	// the save rather than rejecting the message.
 	if msg.MessageType == MessageTypeFile || msg.MessageType == MessageTypeImage {
 		msg.Content = fileMessageQAContent(msg)
+	}
+
+	// Never send an empty query into rewrite/intent classification. Some IM
+	// platforms deliver unsupported rich message shapes with no normalized text;
+	// allowing those through makes the model infer an unrelated intent from an
+	// empty query (for example, rewriting it as a greeting).
+	if hint, empty := emptyIncomingMessageReply(msg); empty {
+		logger.Infof(ctx, "[IM] Skipping QA for message without content: type=%s raw_type=%s",
+			msg.MessageType, msg.Extra["raw_msgtype"])
+		if err := adapter.SendReply(ctx, msg, &ReplyMessage{
+			Content: hint,
+			IsFinal: true,
+		}); err != nil {
+			logger.Warnf(ctx, "[IM] Failed to send empty-message hint reply: %v", err)
+		}
+		return nil
 	}
 
 	// 1. Get tenant
@@ -1827,6 +1846,33 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	}
 
 	return nil
+}
+
+func emptyIncomingMessageReply(msg *IncomingMessage) (string, bool) {
+	if msg == nil || strings.TrimSpace(msg.Content) != "" {
+		return "", false
+	}
+	// Image/file events are allowed to arrive without a caption. Do not depend
+	// on fileMessageQAContent having already filled Content — a later reorder
+	// of HandleMessage must not reject attachments.
+	hasAttachment := msg.MessageType == MessageTypeFile ||
+		msg.MessageType == MessageTypeImage ||
+		strings.TrimSpace(msg.FileKey) != ""
+	if hasAttachment {
+		return "", false
+	}
+	rawType := ""
+	if msg.Extra != nil {
+		rawType = strings.ToLower(strings.TrimSpace(msg.Extra["raw_msgtype"]))
+	}
+	switch rawType {
+	case "audio":
+		return "未能识别这条语音中的文字内容。请改用纯文本发送，或再说一遍。", true
+	case "video":
+		return "暂不支持视频消息。请改用纯文本发送；图片或文件请单独发送。", true
+	default:
+		return "未能识别这条消息中的文字内容。请改用纯文本发送；图片或文件请单独发送。", true
+	}
 }
 
 func (s *Service) persistIMLastRequestState(ctx context.Context, sessionID, agentID string, customAgent *types.CustomAgent, kbIDs []string) {

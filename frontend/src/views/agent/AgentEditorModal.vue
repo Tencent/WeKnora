@@ -168,8 +168,8 @@
                       </div>
                     </div>
 
-                    <!-- 长期记忆。放在这里而不是「多轮对话」那一组，是因为那一组
-                         整个带了 !isAgentMode，而智能推理恰恰是最需要这个开关的模式。
+                    <!-- 长期记忆。留在基础信息这一组而不是「多轮对话」，是因为它与
+                         多轮历史窗口无关，且智能推理恰恰是最需要这个开关的模式。
                          这个开关只能"关"：空间或个人设置关闭时，这里打开也不生效。 -->
                     <div class="setting-row">
                       <div class="setting-info">
@@ -861,16 +861,19 @@
                   </div>
                 </div>
 
-                <!-- 多轮对话（仅普通模式显示，Agent模式内部自动控制） -->
-                <div v-show="currentSection === 'conversation' && !isAgentMode" class="section">
+                <!-- 多轮对话。Agent 模式下 history_turns 同样生效（session_agent_qa.go
+                     经 LoadAgentHistory 读取），所以本组不再整体按模式隐藏；开关本身仍由
+                     EnsureDefaults 强制开启，故只在普通模式展示。 -->
+                <div v-show="currentSection === 'conversation'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.conversationSettings') }}</h2>
-                    <p class="section-description">{{ $t('agentEditor.desc.conversationSection') }}</p>
+                    <p class="section-description">{{ conversationSectionDesc }}</p>
                   </div>
 
                   <div class="settings-group">
-                    <!-- 多轮对话 -->
-                    <div class="setting-row">
+                    <!-- 多轮对话开关（仅普通模式：Agent 模式由 EnsureDefaults 强制开启，
+                         展示可关闭的开关只会被服务端改回去） -->
+                    <div v-if="!isAgentMode" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.multiTurn') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.multiTurn') }}</p>
@@ -880,14 +883,26 @@
                       </div>
                     </div>
 
-                    <!-- 保留轮数 -->
-                    <div v-if="formData.config.multi_turn_enabled" class="setting-row">
+                    <!-- 保留轮数（Agent 模式恒为多轮，故不受开关状态影响） -->
+                    <div v-if="formData.config.multi_turn_enabled || isAgentMode" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.historyTurns') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.historyRounds') }}</p>
                       </div>
                       <div class="setting-control">
-                        <t-input-number v-model="formData.config.history_turns" :min="1" :max="20" theme="column" />
+                        <t-input-number v-model="formData.config.history_turns" :min="1" :max="100" theme="column" />
+                      </div>
+                    </div>
+
+                    <!-- 跨轮保留检索结果。只有 agent 链路读取该值（internal/agent/observe.go），
+                         且改写的只是 KB/Wiki 这八个工具的历史结果，所以没有知识库时不展示。 -->
+                    <div v-if="isAgentMode && hasKnowledgeBase" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.retainRetrievalHistory') }}</label>
+                        <p class="desc">{{ $t('agentEditor.desc.retainRetrievalHistory') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.retain_retrieval_history" />
                       </div>
                     </div>
 
@@ -2287,10 +2302,8 @@ const navItems = computed(() => {
     { key: 'model', icon: 'control-platform', label: t('agent.editor.modelConfig') },
     { key: 'suggestions', icon: 'help-circle', label: t('agentEditor.questionSuggestions.navLabel') },
   ];
-  // 多轮对话（仅普通模式显示，Agent模式内部自动控制）
-  if (!isAgentMode.value) {
-    items.push({ key: 'conversation', icon: 'chat', label: t('agent.editor.conversationSettings') });
-  }
+  // 多轮对话（两种模式都需要：Agent 模式同样按 history_turns 截断历史）
+  items.push({ key: 'conversation', icon: 'chat', label: t('agent.editor.conversationSettings') });
   // 知识库与检索
   items.push({ key: 'knowledge', icon: 'folder', label: t('agent.editor.knowledgeConfig') });
   if (hasKnowledgeBase.value) {
@@ -2412,6 +2425,7 @@ const defaultFormData = {
     // 多轮对话设置
     multi_turn_enabled: false,
     history_turns: 5,
+    retain_retrieval_history: false,
     // 长期记忆：默认跟随空间设置。写 true 与不写等价，只有 false 才会
     // 让这个智能体单独不读记忆。
     memory_enabled: true,
@@ -2522,6 +2536,14 @@ const activePromptAnchor = ref('system');
 
 const hasAnyIntentCustomized = computed(() =>
   intentPromptTemplates.value.some((item) => isIntentCustomized(item.id)),
+);
+
+// Agent 模式下本组只剩「保留轮数」（以及有知识库时的检索保留），
+// 默认文案里的「问题改写」并不展示，故按模式分开。
+const conversationSectionDesc = computed(() =>
+  isAgentMode.value
+    ? t('agentEditor.desc.conversationSectionAgent')
+    : t('agentEditor.desc.conversationSection'),
 );
 
 const showRewritePrompts = computed(() =>
@@ -3332,10 +3354,6 @@ watch(hasKnowledgeBase, (hasKB, oldHasKB) => {
 watch(isAgentMode, (isAgent) => {
   // 如果当前在高级设置页面但切换到了Agent模式，切换到基础设置
   if (isAgent && currentSection.value === 'advanced') {
-    currentSection.value = 'basic';
-  }
-  // 如果当前在多轮对话页面但切换到了Agent模式，切换到基础设置（Agent模式下多轮对话由内部控制）
-  if (isAgent && currentSection.value === 'conversation') {
     currentSection.value = 'basic';
   }
 });

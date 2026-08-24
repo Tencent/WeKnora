@@ -101,6 +101,56 @@ func TestResolveBuildsRemoteManagerWithoutHealthProbe(t *testing.T) {
 	require.Equal(t, SandboxTypeE2B, mgr.GetType())
 }
 
+// Docker is a session-scoped backend like the MicroVM ones: it must resolve to
+// a SessionBoundManager that advertises shell_exec and the session file store,
+// not to the stateless DefaultManager it used to get.
+func TestResolveBuildsSessionBoundManagerForDocker(t *testing.T) {
+	// Pinned so the resolved daemon endpoint does not depend on whatever the
+	// machine running the tests points its docker CLI at: a developer on a
+	// tcp:// daemon would otherwise trip the TLS requirement.
+	t.Setenv("DOCKER_HOST", "unix:///var/run/docker.sock")
+
+	resolver, fallback := newTestResolver(t, &stubTenantConfigLoader{
+		result: ResolvedTenantSandboxConfig{
+			Config: &types.TenantSandboxConfig{
+				SandboxType: "docker",
+				Docker: &types.DockerSandboxConfig{
+					Image: "wechatopenai/weknora-sandbox:test",
+				},
+			},
+			Found: true,
+		},
+	})
+
+	mgr, err := resolver.Resolve(context.Background(), 42, "cfg-docker")
+
+	require.NoError(t, err)
+	require.NotSame(t, fallback, mgr)
+	require.Equal(t, SandboxTypeDocker, mgr.GetType())
+
+	capabilities, ok := mgr.(SessionCapabilityProvider)
+	require.True(t, ok, "docker must expose session-scoped capabilities")
+	require.NotNil(t, capabilities.SessionShellExecutor())
+	require.NotNil(t, capabilities.SessionFileStore())
+}
+
+// The image is this backend's template. Without it there is nothing to create a
+// sandbox from, so the config must be refused up front rather than at the first
+// execution.
+func TestResolveRefusesDockerConfigWithoutImage(t *testing.T) {
+	resolver, _ := newTestResolver(t, &stubTenantConfigLoader{
+		result: ResolvedTenantSandboxConfig{
+			Config: &types.TenantSandboxConfig{SandboxType: "docker"},
+			Found:  true,
+		},
+	})
+
+	mgr, err := resolver.Resolve(context.Background(), 42, "cfg-docker")
+
+	require.Nil(t, mgr)
+	require.ErrorIs(t, err, ErrSandboxConfigIncomplete)
+}
+
 func TestResolveBuildsLocalManagerFromWorkspaceConfig(t *testing.T) {
 	resolver, fallback := newTestResolver(t, &stubTenantConfigLoader{
 		result: ResolvedTenantSandboxConfig{

@@ -14,9 +14,14 @@ import (
 // It mirrors the real SessionCapabilityProvider contract SessionBoundManager
 // implements, without pulling in the full manager wiring.
 type capableManager struct {
-	typ   sandbox.SandboxType
-	shell sandbox.SessionShellExecutor
-	files sandbox.SessionFileStore
+	typ          sandbox.SandboxType
+	shell        sandbox.SessionShellExecutor
+	files        sandbox.SessionFileStore
+	installShell sandbox.SessionInstallShellExecutor
+}
+
+func (m *capableManager) SessionInstallShellExecutor() sandbox.SessionInstallShellExecutor {
+	return m.installShell
 }
 
 func (m *capableManager) Execute(context.Context, *sandbox.ExecuteConfig) (*sandbox.ExecuteResult, error) {

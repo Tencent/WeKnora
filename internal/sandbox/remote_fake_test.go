@@ -28,6 +28,11 @@ type fakeRemoteRecord struct {
 	startedAt  time.Time
 }
 
+type fakeRemoteWriteFile struct {
+	path    string
+	content []byte
+}
+
 type fakeRemoteClient struct {
 	mu           sync.Mutex
 	provider     RemoteProvider
@@ -52,6 +57,11 @@ type fakeRemoteClient struct {
 
 	makeDirPaths []string
 	execRequests []RemoteExecRequest
+	writeFiles   []fakeRemoteWriteFile
+
+	// snapshots maps snapshotID -> source sandboxID.
+	snapshots   map[string]string
+	snapshotSeq int
 }
 
 func newFakeRemoteClient(provider RemoteProvider) *fakeRemoteClient {
@@ -240,11 +250,17 @@ func (c *fakeRemoteClient) Exec(
 }
 
 func (c *fakeRemoteClient) WriteFile(
-	context.Context,
-	RemoteSandboxHandle,
-	string,
-	[]byte,
+	_ context.Context,
+	_ RemoteSandboxHandle,
+	path string,
+	content []byte,
 ) error {
+	c.mu.Lock()
+	c.writeFiles = append(c.writeFiles, fakeRemoteWriteFile{
+		path:    path,
+		content: append([]byte(nil), content...),
+	})
+	c.mu.Unlock()
 	return nil
 }
 
@@ -281,6 +297,46 @@ func (c *fakeRemoteClient) Stat(
 	string,
 ) (*RemoteStatEntry, error) {
 	return nil, nil
+}
+
+func (c *fakeRemoteClient) CreateSnapshot(
+	ctx context.Context, sandboxID string, name string,
+) (RemoteSnapshotRef, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.snapshots == nil {
+		c.snapshots = map[string]string{}
+	}
+	c.snapshotSeq++
+	id := fmt.Sprintf("snap-%d", c.snapshotSeq)
+	c.snapshots[id] = sandboxID
+	names := []string(nil)
+	if name != "" {
+		names = []string{name}
+	}
+	return RemoteSnapshotRef{ID: id, Names: names}, nil
+}
+
+func (c *fakeRemoteClient) DeleteSnapshot(ctx context.Context, snapshotID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.snapshots, snapshotID) // missing snapshot is success
+	return nil
+}
+
+func (c *fakeRemoteClient) ListSnapshots(
+	ctx context.Context, sandboxID string,
+) ([]RemoteSnapshotRef, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []RemoteSnapshotRef
+	for id, src := range c.snapshots {
+		if sandboxID != "" && src != sandboxID {
+			continue
+		}
+		out = append(out, RemoteSnapshotRef{ID: id})
+	}
+	return out, nil
 }
 
 func (c *fakeRemoteClient) addSandbox(

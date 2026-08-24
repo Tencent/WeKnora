@@ -80,6 +80,36 @@ func TestReadSandboxFileReturnsSmallTextOnlyInOutput(t *testing.T) {
 	assert.False(t, duplicated)
 }
 
+// The output-directory guard is a string prefix test, so a symlink planted
+// under that directory satisfies it while pointing anywhere. The backends stat
+// the final component without following it, and this is the check that turns
+// that into a refusal before any read is attempted.
+//
+// The path here names the link itself, which is the case this actually covers.
+// A link used as an intermediate component is resolved by the kernel and still
+// stats as a regular file; see the note in Execute for why that is a convention
+// leak rather than a privilege one.
+func TestReadSandboxFileRefusesNonRegularFile(t *testing.T) {
+	source := &fakeSandboxFileSource{
+		stat: &sandbox.RemoteStatEntry{
+			Path: "/workspace/output/esc",
+			Type: sandbox.RemoteEntryOther,
+			Size: 4,
+		},
+		data: []byte("must not be read"),
+	}
+
+	result, err := NewReadSandboxFileTool(source).Execute(
+		sandboxFileTestContext(),
+		json.RawMessage(`{"path":"/workspace/output/esc"}`),
+	)
+
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	assert.Zero(t, source.readCalls, "a non-regular path must never be downloaded")
+	assert.Contains(t, result.Error, "not a regular file")
+}
+
 func TestReadSandboxFileSuppressesBinaryWithoutBase64(t *testing.T) {
 	content := []byte{0xff, 0x00, 0x01}
 	source := &fakeSandboxFileSource{

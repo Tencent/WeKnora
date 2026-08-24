@@ -410,9 +410,19 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 		if strings.TrimSpace(merged.E2B.TemplateID) == "" {
 			merged.E2B.TemplateID = "__catalog__"
 		}
+	case string(sandbox.SandboxTypeDocker):
+		// Docker's template is an image, and the catalog step is where the
+		// admin picks one. The standard image stands in until they do, so the
+		// effective-config validation below has something to accept.
+		if merged.Docker == nil {
+			merged.Docker = &types.DockerSandboxConfig{}
+		}
+		if strings.TrimSpace(merged.Docker.Image) == "" {
+			merged.Docker.Image = sandbox.DefaultDockerImage
+		}
 	default:
 		return nil, apperrors.NewBadRequestError(
-			"sandbox template catalog only supports cube and e2b backends")
+			"sandbox template catalog only supports cube, e2b and docker backends")
 	}
 
 	for _, endpoint := range sandboxConfigEndpoints(merged) {
@@ -707,7 +717,7 @@ func (s *TenantSandboxConfigService) clientFor(
 		return nil, err
 	}
 	switch effective.Type {
-	case sandbox.SandboxTypeCube, sandbox.SandboxTypeE2B:
+	case sandbox.SandboxTypeCube, sandbox.SandboxTypeE2B, sandbox.SandboxTypeDocker:
 		return s.newClient(effective)
 	default:
 		return nil, nil

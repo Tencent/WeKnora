@@ -184,6 +184,86 @@ func TestResolveEffectiveConfigRejectsUnsafeCubeProxyURL(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnsafeOutboundURL)
 }
 
+func TestResolveEffectiveConfigRejectsDockerHostNetwork(t *testing.T) {
+	_, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType: "docker",
+		Docker: &types.DockerSandboxConfig{
+			Image:       "weknora:test",
+			NetworkMode: "host",
+		},
+	}, DefaultConfig())
+	require.Error(t, err)
+}
+
+// A blank host must come out of config resolution already pointing at the
+// daemon the Docker CLI would use, because that resolved value is what the
+// connectivity check dials. Leaving it empty here is what made the check fail
+// on a Colima or Docker Desktop host, where /var/run/docker.sock is absent.
+func TestResolveEffectiveConfigDetectsLocalDockerHostWhenBlank(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "unix:///tmp/from-env.sock")
+
+	effective, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType: "docker",
+		Docker:      &types.DockerSandboxConfig{Image: "weknora:test"},
+	}, DefaultConfig())
+
+	require.NoError(t, err)
+	require.Equal(t, "unix:///tmp/from-env.sock", effective.DockerHost)
+}
+
+func TestResolveEffectiveConfigRejectsPlaintextDockerTCP(t *testing.T) {
+	_, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType:           "docker",
+		AllowPrivateEndpoints: true,
+		Docker: &types.DockerSandboxConfig{
+			Image: "weknora:test",
+			Host:  "tcp://10.0.0.5:2376",
+		},
+	}, DefaultConfig())
+	require.Error(t, err)
+}
+
+// The same bar has to apply to a host nobody typed. A blank field is filled in
+// from DOCKER_HOST, and on a deployment pointed at a plaintext daemon that
+// resolved value is what gets dialled — so validating only the stored string
+// would accept a config that cannot work and say so only at the first sandbox.
+func TestResolveEffectiveConfigRejectsResolvedPlaintextDockerTCP(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "tcp://10.0.0.5:2375")
+
+	_, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType:           "docker",
+		AllowPrivateEndpoints: true,
+		Docker:                &types.DockerSandboxConfig{Image: "weknora:test"},
+	}, DefaultConfig())
+	require.Error(t, err)
+}
+
+// A resolved host is still only a daemon endpoint, so it answers to the same
+// outbound policy an explicitly typed one does.
+func TestResolveEffectiveConfigRejectsResolvedPrivateDockerHostWithoutOptIn(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "tcp://10.0.0.5:2376")
+
+	_, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType: "docker",
+		Docker: &types.DockerSandboxConfig{
+			Image:       "weknora:test",
+			TLSCertPath: "/etc/weknora/docker-certs",
+		},
+	}, DefaultConfig())
+	require.ErrorIs(t, err, ErrUnsafeOutboundURL)
+}
+
+// A missing image is a field the admin can see and fix in the form, so it must
+// still be reported ahead of anything about the daemon endpoint.
+func TestResolveEffectiveConfigReportsMissingImageBeforeHostProblems(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "tcp://10.0.0.5:2375")
+
+	_, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType: "docker",
+	}, DefaultConfig())
+	require.ErrorIs(t, err, ErrSandboxConfigIncomplete)
+}
+
 func TestEffectiveTemplateIDPerProvider(t *testing.T) {
 	require.Equal(t, "e2b-tpl", EffectiveTemplateID(&Config{
 		Type: SandboxTypeE2B, E2BTemplate: "e2b-tpl", CubeTemplate: "cube-tpl",
@@ -193,4 +273,104 @@ func TestEffectiveTemplateIDPerProvider(t *testing.T) {
 	}))
 	require.Empty(t, EffectiveTemplateID(&Config{Type: SandboxTypeLocal}))
 	require.Empty(t, EffectiveTemplateID(nil))
+}
+
+func TestResolveEffectiveConfigUsesSkillSnapshotAsTemplate(t *testing.T) {
+	global := DefaultConfig()
+
+	base := &types.TenantSandboxConfig{
+		SandboxType: "cube",
+		Cube: &types.CubeSandboxConfig{
+			APIURL: "https://203.0.113.10", ProxyURL: "https://203.0.113.11",
+			SandboxDomain: "cube.example.com", APIKey: "key-1", TemplateID: "tpl-base",
+		},
+	}
+	fp := SkillImageFingerprint("cube", "key-1", "https://203.0.113.10")
+
+	t.Run("usable snapshot overrides the base template", func(t *testing.T) {
+		cfg := *base
+		cfg.SkillImage = &types.SkillImageConfig{SnapshotID: "snap-1", OwnerFingerprint: fp}
+
+		eff, err := ResolveEffectiveConfig(&cfg, global)
+
+		require.NoError(t, err)
+		require.Equal(t, "snap-1", eff.CubeTemplate)
+	})
+
+	t.Run("fingerprint mismatch falls back to the base template", func(t *testing.T) {
+		cfg := *base
+		cfg.SkillImage = &types.SkillImageConfig{
+			SnapshotID: "snap-1", OwnerFingerprint: "fingerprint-of-another-account",
+		}
+
+		eff, err := ResolveEffectiveConfig(&cfg, global)
+
+		require.NoError(t, err)
+		require.Equal(t, "tpl-base", eff.CubeTemplate,
+			"a snapshot from another account is invisible; the session must still boot")
+	})
+
+	t.Run("empty snapshot keeps the base template", func(t *testing.T) {
+		cfg := *base
+		cfg.SkillImage = &types.SkillImageConfig{OwnerFingerprint: fp}
+
+		eff, err := ResolveEffectiveConfig(&cfg, global)
+
+		require.NoError(t, err)
+		require.Equal(t, "tpl-base", eff.CubeTemplate)
+	})
+}
+
+func TestResolveEffectiveConfigUsesSkillSnapshotAsE2BTemplate(t *testing.T) {
+	global := DefaultConfig()
+
+	base := &types.TenantSandboxConfig{
+		SandboxType: "e2b",
+		E2B: &types.E2BSandboxConfig{
+			APIURL: "https://203.0.113.20", SandboxDomain: "e2b.example.com",
+			APIKey: "key-1", TemplateID: "tpl-base",
+		},
+	}
+	fp := SkillImageFingerprint("e2b", "key-1", "https://203.0.113.20")
+	cubeFp := SkillImageFingerprint("cube", "key-1", "https://203.0.113.20")
+
+	t.Run("usable snapshot overrides the base template", func(t *testing.T) {
+		cfg := *base
+		cfg.SkillImage = &types.SkillImageConfig{SnapshotID: "snap-1", OwnerFingerprint: fp}
+
+		eff, err := ResolveEffectiveConfig(&cfg, global)
+
+		require.NoError(t, err)
+		require.Equal(t, "snap-1", eff.E2BTemplate)
+	})
+
+	t.Run("fingerprint mismatch falls back to the base template", func(t *testing.T) {
+		cfg := *base
+		cfg.SkillImage = &types.SkillImageConfig{
+			SnapshotID: "snap-1", OwnerFingerprint: cubeFp,
+		}
+
+		eff, err := ResolveEffectiveConfig(&cfg, global)
+
+		require.NoError(t, err)
+		require.Equal(t, "tpl-base", eff.E2BTemplate,
+			"a snapshot whose fingerprint was computed for cube must not override e2b; the session must still boot")
+	})
+
+	t.Run("empty snapshot keeps the base template", func(t *testing.T) {
+		cfg := *base
+		cfg.SkillImage = &types.SkillImageConfig{OwnerFingerprint: fp}
+
+		eff, err := ResolveEffectiveConfig(&cfg, global)
+
+		require.NoError(t, err)
+		require.Equal(t, "tpl-base", eff.E2BTemplate)
+	})
+}
+
+func TestSkillImageFingerprintIsStableAndDiscriminating(t *testing.T) {
+	a := SkillImageFingerprint("cube", "key-1", "https://a.example.com")
+	require.Equal(t, a, SkillImageFingerprint("cube", "key-1", "https://a.example.com"))
+	require.NotEqual(t, a, SkillImageFingerprint("cube", "key-2", "https://a.example.com"))
+	require.NotEqual(t, a, SkillImageFingerprint("e2b", "key-1", "https://a.example.com"))
 }

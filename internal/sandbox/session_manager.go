@@ -23,10 +23,8 @@
 //     Every session-scoped capability (shell exec, file staging, session
 //     filesystem inspection) then refuses to run on the host: those calls
 //     require a real remote provider.
-//   - Sandboxes are never reaped from inside WeKnora. Idle-timeout / pause /
-//     kill is the provider's responsibility (Cube's on_timeout + Cube's
-//     sweeper; E2B's built-in TTL). Multi-instance deployments must not race
-//     on this decision.
+//   - Cube and E2B reap idle sandboxes themselves. Docker has no provider TTL,
+//     so that backend runs its own idle sweep against activity-marker mtimes.
 package sandbox
 
 import (
@@ -162,6 +160,8 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 		applyCubeRuntimeDefaults(cfg)
 	case SandboxTypeE2B:
 		applyE2BRuntimeDefaults(cfg)
+	case SandboxTypeDocker:
+		applyDockerRuntimeDefaults(cfg)
 	}
 
 	// Build the provider-specific neutral create request using the
@@ -304,11 +304,18 @@ func (m *SessionBoundManager) Execute(ctx context.Context, cfg *ExecuteConfig) (
 	return m.ephemeral.ExecuteOnHandle(ctx, handle, cfg)
 }
 
-// ensureExecutionOutputDir creates the skill artifact directory and grants
-// DefaultSandboxExecUser write access before script execution. envd MakeDir
-// often leaves the path root-owned on Cube; the follow-up chown/chmod runs as
-// root via envd (empty User). Best-effort: failures are logged and do not
-// abort the upcoming script execution.
+// ensureExecutionOutputDir creates the skill artifact directory and makes sure
+// DefaultSandboxExecUser can write to it before script execution.
+//
+// This runs AS that account, never as root. The directory sits inside the
+// session's own writable workspace, and chown/chmod follow symlinks, so a
+// root-run bootstrap can be aimed at any directory in the container: a session
+// that swaps its artifact directory for a link to /etc gets handed ownership of
+// /etc, and from there uid 0 by rewriting passwd. Running as the sandbox
+// account makes that a no-op — chown succeeds on the directory MakeDir just
+// created for it and is refused by the kernel on anything else.
+//
+// Best-effort: failures are logged and do not abort the upcoming execution.
 func (m *SessionBoundManager) ensureExecutionOutputDir(
 	ctx context.Context,
 	handle RemoteSandboxHandle,
@@ -334,6 +341,7 @@ func (m *SessionBoundManager) ensureExecutionOutputDir(
 	result, err := m.client.Exec(ctx, handle, RemoteExecRequest{
 		Shell:   true,
 		Command: line,
+		User:    execUser,
 		Timeout: sessionArtifactDirBootstrapTimeout,
 	})
 	if err != nil {
@@ -357,7 +365,7 @@ func (m *SessionBoundManager) ensureExecutionOutputDir(
 func executionOutputDir(cfg *ExecuteConfig) string {
 	if cfg != nil && cfg.Env != nil {
 		if dir := strings.TrimSpace(cfg.Env[skillOutputEnvVar]); dir != "" {
-			if clean, err := cleanSessionWorkDir(dir); err == nil {
+			if clean, err := cleanSessionWorkDir(dir, false); err == nil {
 				return clean
 			}
 		}
@@ -379,6 +387,54 @@ func (m *SessionBoundManager) DestroySession(ctx context.Context, sessionID stri
 		return err
 	}
 	return m.lifecycle.Destroy(ctx, key)
+}
+
+// CreateSnapshot forwards provider snapshot creation for the live sandbox bound
+// to sessionID. Session execution never uses this optional capability; it is
+// reserved for skill image maintenance.
+func (m *SessionBoundManager) CreateSnapshot(
+	ctx context.Context, sessionID string, name string,
+) (RemoteSnapshotRef, error) {
+	if err := m.requireRemoteBackend(); err != nil {
+		return RemoteSnapshotRef{}, err
+	}
+	snapshots, ok := SnapshotManagerFrom(m.client)
+	if !ok || !m.client.Capabilities().SupportsSnapshots {
+		return RemoteSnapshotRef{}, errors.New("sandbox: remote provider does not support snapshots")
+	}
+	handle, err := m.resolveSession(ctx, sessionID)
+	if err != nil {
+		return RemoteSnapshotRef{}, err
+	}
+	return snapshots.CreateSnapshot(ctx, handle.ID(), name)
+}
+
+// DeleteSnapshot forwards provider snapshot deletion. It is used only to clean
+// up a just-created orphan when the DB pointer switch fails.
+func (m *SessionBoundManager) DeleteSnapshot(ctx context.Context, snapshotID string) error {
+	if err := m.requireRemoteBackend(); err != nil {
+		return err
+	}
+	snapshots, ok := SnapshotManagerFrom(m.client)
+	if !ok || !m.client.Capabilities().SupportsSnapshots {
+		return errors.New("sandbox: remote provider does not support snapshots")
+	}
+	return snapshots.DeleteSnapshot(ctx, snapshotID)
+}
+
+// ListSnapshots forwards provider snapshot listing for audit and later cleanup
+// tasks.
+func (m *SessionBoundManager) ListSnapshots(
+	ctx context.Context, sandboxID string,
+) ([]RemoteSnapshotRef, error) {
+	if err := m.requireRemoteBackend(); err != nil {
+		return nil, err
+	}
+	snapshots, ok := SnapshotManagerFrom(m.client)
+	if !ok || !m.client.Capabilities().SupportsSnapshots {
+		return nil, errors.New("sandbox: remote provider does not support snapshots")
+	}
+	return snapshots.ListSnapshots(ctx, sandboxID)
 }
 
 // EnsureSessionDir creates dir inside the session's live sandbox when one is
@@ -504,9 +560,58 @@ func (m *SessionBoundManager) ReadSessionFile(
 	return m.client.ReadFile(ctx, handle, filePath)
 }
 
+// WriteSessionFile writes an install/maintenance file into the session's live
+// sandbox. It is deliberately narrower than a general remote write: only the
+// tenant skills image root is accepted, because ordinary attachments must keep
+// using WriteSessionInputFile and its /workspace/input guard.
+func (m *SessionBoundManager) WriteSessionFile(
+	ctx context.Context, sessionID, filePath string, content []byte,
+) error {
+	if err := m.requireRemoteBackend(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return errors.New("sandbox: session ID required for file staging")
+	}
+	clean := path.Clean(strings.TrimSpace(filePath))
+	if clean != SkillsImageRoot && !strings.HasPrefix(clean, SkillsImageRoot+"/") {
+		return fmt.Errorf("sandbox: install file path %q is outside %s", filePath, SkillsImageRoot)
+	}
+	handle, err := m.resolveSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if err := m.client.MakeDir(ctx, handle, path.Dir(clean)); err != nil {
+		return fmt.Errorf("sandbox: create install directory: %w", err)
+	}
+	if err := m.client.WriteFile(ctx, handle, clean, content); err != nil {
+		return fmt.Errorf("sandbox: write install file %s: %w", clean, err)
+	}
+	return nil
+}
+
+// ShellExecOptions carries per-call shell execution knobs. The install-only
+// flags are explicit so skill image maintenance can write under /opt without
+// loosening work_dir or user privileges for ordinary chat sessions.
+type ShellExecOptions struct {
+	WorkDir string
+	Timeout time.Duration
+	Env     map[string]string
+
+	// AllowSkillsRoot lets installer calls work inside the skills image root.
+	// See cleanSessionWorkDir for why the work_dir allowlist is lexical only.
+	// Never set this from a model-authored tool such as shell_exec.
+	AllowSkillsRoot bool
+	// AsRoot is reserved for install/maintenance commands that need to write
+	// outside /workspace; ordinary sessions must keep the provider default user.
+	// Never set this from a model-authored tool such as shell_exec: root inside
+	// the sandbox bypasses file-mode isolation on the image.
+	AsRoot bool
+}
+
 // ExecShellCommand runs a shell one-liner inside the session's persistent
-// sandbox. Fallback is explicitly refused so shell_exec never escapes onto
-// the host machine.
+// sandbox. It preserves the shell_exec tool contract: /workspace-only work_dir
+// validation and provider default user.
 func (m *SessionBoundManager) ExecShellCommand(
 	ctx context.Context,
 	sessionID string,
@@ -514,6 +619,22 @@ func (m *SessionBoundManager) ExecShellCommand(
 	workDir string,
 	timeout time.Duration,
 	env map[string]string,
+) (*ExecuteResult, error) {
+	return m.ExecShellCommandWithOptions(ctx, sessionID, command, ShellExecOptions{
+		WorkDir: workDir,
+		Timeout: timeout,
+		Env:     env,
+	})
+}
+
+// ExecShellCommandWithOptions runs a shell command with install-only options.
+// Fallback is explicitly refused so even privileged installer calls never
+// escape onto the WeKnora host machine.
+func (m *SessionBoundManager) ExecShellCommandWithOptions(
+	ctx context.Context,
+	sessionID string,
+	command string,
+	opts ShellExecOptions,
 ) (*ExecuteResult, error) {
 	if err := m.requireRemoteBackend(); err != nil {
 		return nil, fmt.Errorf(
@@ -527,6 +648,7 @@ func (m *SessionBoundManager) ExecShellCommand(
 	if strings.TrimSpace(command) == "" {
 		return nil, errors.New("sandbox: command required for ExecShellCommand")
 	}
+	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = m.config.DefaultTimeout
 	}
@@ -534,9 +656,9 @@ func (m *SessionBoundManager) ExecShellCommand(
 		timeout = DefaultTimeout
 	}
 
-	workDir = strings.TrimSpace(workDir)
+	workDir := strings.TrimSpace(opts.WorkDir)
 	if workDir != "" {
-		cleanWorkDir, err := cleanSessionWorkDir(workDir)
+		cleanWorkDir, err := cleanSessionWorkDir(workDir, opts.AllowSkillsRoot)
 		if err != nil {
 			return nil, err
 		}
@@ -553,12 +675,23 @@ func (m *SessionBoundManager) ExecShellCommand(
 		}
 	}
 
+	// Named explicitly rather than left to each adapter's default. This command
+	// line comes from the model, so it is the one exec path an injected prompt
+	// reaches directly, and the account it runs as must not depend on which
+	// backend the workspace happens to have selected. Only a caller inside the
+	// server may ask for root, and only image maintenance does.
+	user := DefaultSandboxExecUser
+	if opts.AsRoot {
+		user = "root"
+	}
+
 	start := time.Now()
 	execResult, execErr := m.client.Exec(ctx, handle, RemoteExecRequest{
 		Command: command,
 		Shell:   true,
-		Env:     env,
+		Env:     opts.Env,
 		WorkDir: workDir,
+		User:    user,
 		Timeout: timeout,
 	})
 	duration := time.Since(start)
@@ -569,6 +702,16 @@ func (m *SessionBoundManager) ExecShellCommand(
 // real remote backend is active. Returns nil after Local fallback engages so
 // the tool layer refuses to run shell commands on the host machine.
 func (m *SessionBoundManager) SessionShellExecutor() SessionShellExecutor {
+	if m == nil || m.remoteDisabled() {
+		return nil
+	}
+	return m
+}
+
+// SessionInstallShellExecutor advertises the privileged install-mode shell.
+// Same nil contract as SessionShellExecutor: after Local fallback engages the
+// capability disappears, so an install can never run on the host machine.
+func (m *SessionBoundManager) SessionInstallShellExecutor() SessionInstallShellExecutor {
 	if m == nil || m.remoteDisabled() {
 		return nil
 	}
@@ -764,14 +907,39 @@ func cleanSessionInputPath(filePath string) (string, error) {
 	)
 }
 
-func cleanSessionWorkDir(workDir string) (string, error) {
+// cleanSessionWorkDir keeps shell_exec inside directories we are willing to let
+// an agent work in. Ordinary sessions get /workspace only.
+//
+// Validation is lexical (path.Clean plus prefix checks): a symlink under an
+// allowed root that resolves elsewhere at execution time is not detected and
+// that is intentional. The only caller that passes allowSkillsRoot also passes
+// AsRoot and runs arbitrary install shell commands, so a symlink would grant
+// nothing those commands cannot already reach via cd or absolute paths. For
+// ordinary sessions the allowlist is unchanged and its lexical nature is
+// pre-existing. The allowlist stops casual wandering and makes intent
+// auditable; the real isolation boundary is the remote sandbox itself.
+//
+// allowSkillsRoot widens it to the skills image root for install/maintenance
+// sessions, so the installer agent can set work_dir to the skill directory and
+// run ordinary relative commands instead of composing long absolute paths. It
+// is a widening, not a removal: everything outside these two roots is still
+// refused.
+func cleanSessionWorkDir(workDir string, allowSkillsRoot bool) (string, error) {
 	clean := path.Clean(strings.TrimSpace(workDir))
 	if clean == SessionWorkspaceRoot || strings.HasPrefix(clean, SessionWorkspaceRoot+"/") {
 		return clean, nil
 	}
+	if allowSkillsRoot &&
+		(clean == SkillsImageRoot || strings.HasPrefix(clean, SkillsImageRoot+"/")) {
+		return clean, nil
+	}
+	allowed := SessionWorkspaceRoot
+	if allowSkillsRoot {
+		allowed = SessionWorkspaceRoot + ", " + SkillsImageRoot
+	}
 	return "", fmt.Errorf(
-		"sandbox: work dir %q is outside %s",
-		workDir, SessionWorkspaceRoot,
+		"sandbox: work dir %q is outside allowed roots (%s)",
+		workDir, allowed,
 	)
 }
 
@@ -818,6 +986,26 @@ func buildSessionCreateRequest(provider RemoteProvider, cfg *Config) (RemoteCrea
 			},
 		}, nil
 
+	case SandboxTypeDocker:
+		ttl := cfg.DockerIdleTTL
+		if ttl <= 0 {
+			ttl = DefaultDockerIdleTTL
+		}
+		return RemoteCreateRequest{
+			TemplateID: cfg.DockerImage,
+			EnvVars:    envVars,
+			Timeout: RemoteTimeoutPolicy{
+				Mode:  RemoteTimeoutExplicit,
+				Value: ttl,
+				// Docker's pause keeps the container's memory resident on the
+				// host, so pausing an abandoned sandbox would reclaim nothing.
+				// Idle containers are deleted; the lifecycle rebinds the
+				// session exactly as it does for a provider-reaped sandbox.
+				Action:     RemoteOnTimeoutKill,
+				AutoResume: false,
+			},
+		}, nil
+
 	default:
 		return RemoteCreateRequest{}, fmt.Errorf(
 			"sandbox: unsupported remote provider %q for session create request",
@@ -842,15 +1030,22 @@ func effectiveHTTPTimeout(provider RemoteProvider, cfg *Config) time.Duration {
 			return cfg.E2BHTTPTimeout
 		}
 		return DefaultE2BHTTPTimeout
+	case SandboxTypeDocker:
+		if cfg.DockerHTTPTimeout > 0 {
+			return cfg.DockerHTTPTimeout
+		}
+		return DefaultDockerHTTPTimeout
 	default:
 		return DefaultCubeHTTPTimeout
 	}
 }
 
 var (
-	_ SessionCapabilityProvider = (*SessionBoundManager)(nil)
-	_ SessionShellExecutor      = (*SessionBoundManager)(nil)
-	_ SessionFileStore          = (*SessionBoundManager)(nil)
+	_ SessionCapabilityProvider        = (*SessionBoundManager)(nil)
+	_ SessionShellExecutor             = (*SessionBoundManager)(nil)
+	_ SessionFileStore                 = (*SessionBoundManager)(nil)
+	_ SessionInstallCapabilityProvider = (*SessionBoundManager)(nil)
+	_ SessionInstallShellExecutor      = (*SessionBoundManager)(nil)
 )
 
 // PermissiveSessionExistenceChecker accepts every session. It is safe in

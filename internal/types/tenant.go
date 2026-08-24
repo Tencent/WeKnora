@@ -654,6 +654,12 @@ type TenantSandboxConfig struct {
 	// etc.).
 	VolumeMount *VolumeMountConfig `json:"volume_mount,omitempty"`
 
+	// SkillImage points at the snapshot that carries this config's installed
+	// skills. Empty means "use the base template". Written only by the skill
+	// install/remove path: MergeSandboxConfigForUpdate ignores client values
+	// so a settings-form save cannot wipe or plant the pointer.
+	SkillImage *SkillImageConfig `json:"skill_image,omitempty"`
+
 	// ── 后端专属配置（同一时刻只有一个生效，由 SandboxType 决定）───
 
 	Cube   *CubeSandboxConfig   `json:"cube,omitempty"`
@@ -706,8 +712,54 @@ type E2BSandboxConfig struct {
 	E2BSandboxTTLSeconds int `json:"e2b_sandbox_ttl_seconds,omitempty"`
 }
 
+// DockerSandboxConfig addresses one Docker daemon. Image is required and plays
+// the role a template ID plays for the MicroVM backends: every session
+// container is created from it.
+//
+// The daemon endpoint is deliberately the only connection field, and TLS
+// material is referenced by path rather than stored here. Client certificates
+// are deployment infrastructure mounted onto the WeKnora host; keeping them
+// out of the database keeps them out of backups, exports and API responses.
 type DockerSandboxConfig struct {
 	Image string `json:"image,omitempty"`
+
+	// Host is the daemon endpoint in DOCKER_HOST form. Empty means the local
+	// unix socket.
+	Host string `json:"host,omitempty"`
+
+	// TLSCertPath is a directory on the WeKnora host containing ca.pem,
+	// cert.pem and key.pem. Required when Host is a TCP endpoint.
+	TLSCertPath string `json:"tls_cert_path,omitempty"`
+
+	// CPULimit is the number of CPU cores one sandbox may use. 0 uses the
+	// built-in default.
+	CPULimit float64 `json:"cpu_limit,omitempty"`
+
+	// MemoryLimitMB caps one sandbox's memory. 0 uses the built-in default.
+	MemoryLimitMB int `json:"memory_limit_mb,omitempty"`
+
+	// PidsLimit caps how many processes one sandbox may run. 0 uses the
+	// built-in default.
+	PidsLimit int `json:"pids_limit,omitempty"`
+
+	// NetworkMode is the Docker network sandboxes join: "bridge" (default) or
+	// "none" for no egress. Nothing else is accepted — host and container:
+	// modes share another namespace outright, and a named network is usually
+	// the deployment's own compose network, which would put the sandbox next
+	// to Postgres and Redis.
+	NetworkMode string `json:"network_mode,omitempty"`
+
+	// Runtime selects an alternative OCI runtime such as "runsc" (gVisor).
+	// Empty uses the daemon default.
+	Runtime string `json:"runtime,omitempty"`
+
+	// IdleTTLSeconds is how long a session container may go unused before it
+	// is reclaimed. The daemon has no idle timeout of its own, so this is what
+	// stops an abandoned session from pinning host memory indefinitely.
+	IdleTTLSeconds int `json:"idle_ttl_seconds,omitempty"`
+
+	// HTTPTimeoutSec bounds each Engine API call. 0 uses the built-in default.
+	HTTPTimeoutSec int `json:"http_timeout_sec,omitempty"`
 }
 
 // VolumeMountConfig configures a shared volume mount into every sandbox
@@ -739,6 +791,28 @@ type VolumeMountConfig struct {
 	// API key, at which point the volume is no longer reachable and must
 	// be recreated.
 	VolumeOwnerFingerprint string `json:"volume_owner_fingerprint,omitempty"`
+}
+
+// SkillImageConfig is the pointer to the snapshot that carries the skills
+// installed on this sandbox config. Snapshot IDs double as template IDs, so
+// nothing else is needed to boot sessions from it.
+//
+// It holds no secrets, so it is not encrypted by TenantSandboxConfig.Value.
+type SkillImageConfig struct {
+	// SnapshotID is the currently effective snapshot; empty = base template.
+	SnapshotID string `json:"snapshot_id,omitempty"`
+	// Generation increments on every successful install/remove, for naming
+	// and troubleshooting.
+	Generation int `json:"generation,omitempty"`
+	// BuiltAt records when this generation was produced.
+	BuiltAt time.Time `json:"built_at,omitempty"`
+	// BaseTemplateID is the template this chain was originally built from;
+	// the rebuild path starts over from it.
+	BaseTemplateID string `json:"base_template_id,omitempty"`
+	// OwnerFingerprint identifies the provider account that owns the snapshot.
+	// Snapshots are invisible across accounts, so a mismatch means "fall back
+	// to the base template" rather than "fail".
+	OwnerFingerprint string `json:"owner_fingerprint,omitempty"`
 }
 
 // Value implements the driver.Valuer interface. Every secret-bearing field

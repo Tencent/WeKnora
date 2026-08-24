@@ -23,8 +23,9 @@ import (
 )
 
 // SessionShellExecutor executes ad-hoc shell commands inside a session-
-// scoped remote sandbox. Local/Docker backends do not implement it; a
-// SessionBoundManager only surfaces it while the remote backend is active.
+// scoped remote sandbox. Local backends do not implement it; a
+// SessionBoundManager only surfaces it while the remote backend is active
+// (Cube, E2B, or Docker).
 type SessionShellExecutor interface {
 	ExecShellCommand(
 		ctx context.Context,
@@ -78,4 +79,38 @@ type SessionFileStore interface {
 type SessionCapabilityProvider interface {
 	SessionShellExecutor() SessionShellExecutor
 	SessionFileStore() SessionFileStore
+}
+
+// SessionInstallShellExecutor runs install/maintenance shell commands, which
+// need root and the skills image root. It is a separate interface from
+// SessionShellExecutor so the privilege is something a caller must ask for by
+// name: ordinary chat sessions keep the non-root, /workspace-only contract.
+type SessionInstallShellExecutor interface {
+	ExecShellCommandWithOptions(
+		ctx context.Context,
+		sessionID string,
+		command string,
+		opts ShellExecOptions,
+	) (*ExecuteResult, error)
+}
+
+// SessionFileReader reads one file out of a session's sandbox. It is the
+// single-method slice of SessionFileStore that callers which only ever read
+// need, so a manager offering just this much is enough for them.
+type SessionFileReader interface {
+	ReadSessionFile(ctx context.Context, sessionID, path string) ([]byte, error)
+}
+
+// SessionDestroyer releases the remote sandbox bound to a session, leaving the
+// session record itself alone. Like RemoteSnapshotManager it is an optional
+// capability: stateless backends have nothing to release.
+type SessionDestroyer interface {
+	DestroySession(ctx context.Context, sessionID string) error
+}
+
+// SessionInstallCapabilityProvider is implemented by managers that can run
+// install-mode shell commands. Like the other accessors it returns nil when
+// the current runtime cannot honour the capability.
+type SessionInstallCapabilityProvider interface {
+	SessionInstallShellExecutor() SessionInstallShellExecutor
 }

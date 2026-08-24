@@ -376,6 +376,40 @@ export async function resetUserPassword(req: ResetUserPasswordRequest): Promise<
   return response as unknown as { message: string }
 }
 
+export interface CreateSystemUserRequest {
+  /** 2-50 characters. */
+  username: string
+  /** Must be a valid email address. */
+  email: string
+  /**
+   * Optional. Omit the key (or send null) to have the server generate a
+   * random password, returned exactly once in `generated_password`.
+   * Any provided value (including empty string) is subject to the
+   * password policy and can be rejected.
+   */
+  password?: string
+}
+
+export interface CreateSystemUserResponse {
+  user: SystemAdminUser
+  /**
+   * Present only when the request omitted `password` (or sent null): the
+   * server-minted plaintext password, returned exactly once and could not
+   * be fetched again.
+   */
+  generated_password?: string
+}
+
+/**
+ * Provision a new local user account (SystemAdmin only).
+ * Backend returns the unwrapped CreateSystemUserResponse body.
+ * Responses 201 on success.
+ */
+export async function createSystemUser(req: CreateSystemUserRequest): Promise<CreateSystemUserResponse> {
+  const response = await post('/api/v1/system/admin/users/create', req)
+  return response as unknown as CreateSystemUserResponse
+}
+
 // ---- System Settings (P1) ----
 
 /**
@@ -723,7 +757,21 @@ export interface SandboxConfig {
   volume_mount?: SandboxVolumeMountConfig
   cube?: SandboxCubeConfig
   e2b?: SandboxE2BConfig
-  docker?: { image?: string }
+  docker?: SandboxDockerConfig
+}
+
+/** Docker backend: one daemon, one long-lived container per session. */
+export interface SandboxDockerConfig {
+  image?: string
+  host?: string
+  tls_cert_path?: string
+  cpu_limit?: number
+  memory_limit_mb?: number
+  pids_limit?: number
+  network_mode?: string
+  runtime?: string
+  idle_ttl_seconds?: number
+  http_timeout_sec?: number
 }
 
 /** `ok: null` means the probe was not executed in this run. */

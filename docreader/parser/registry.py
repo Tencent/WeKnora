@@ -16,6 +16,7 @@ from docreader.parser.opendataloader_parser import (
     opendataloader_available,
 )
 from docreader.parser.pdf_parser import PDFParser
+from docreader.parser.xmind_parser import XMindParser
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +141,7 @@ def _build_default_registry() -> ParserEngineRegistry:
             "html": HTMLParser,
             "htm": HTMLParser,
             "mhtml": MHTMLParser,
+            "xmind": XMindParser,
             **_image_types,
         },
         description="内置解析引擎",

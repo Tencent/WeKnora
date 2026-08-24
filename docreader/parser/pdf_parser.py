@@ -1185,6 +1185,52 @@ def _select_embedded_images(
     return kept
 
 
+def _decode_embedded_image_pil(obj):
+    """Decode an embedded image the way a PDF viewer displays it.
+
+    ``get_bitmap()`` returns the raw image plane and ignores any /SMask (soft
+    transparency mask). Figures exported from plotting tools often store a
+    black base plane with the visible content in the mask, so the raw plane
+    decodes to an all-black rectangle. ``get_bitmap(render=True)`` renders the
+    object through pdfium's imaging pipeline and carries the mask as an alpha
+    channel; compositing over white then yields what the page looks like
+    (JPEG cannot keep alpha, and pages render on white).
+
+    The ``PdfBitmap`` is kept alive until pixels are copied: ``to_pil()``
+    shares the pdfium buffer for RGBA/RGBX/L, and releasing the handle first
+    would use-after-free. Opaque RGB/L images keep their mode so grayscale
+    hashes and JPEGs stay single-channel.
+    """
+    from PIL import Image
+
+    bitmap = None
+    try:
+        try:
+            bitmap = obj.get_bitmap(render=True)
+        except Exception:
+            logger.warning(
+                "get_bitmap(render=True) failed; falling back to raw decode",
+                exc_info=True,
+            )
+            _close_pdfium_resource(bitmap)
+            bitmap = obj.get_bitmap()
+        pil = bitmap.to_pil()
+        if pil.mode in ("RGBA", "LA", "PA"):
+            src_mode = pil.mode
+            rgba = pil.convert("RGBA")
+            if rgba.getchannel("A").getextrema()[0] < 255:
+                background = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+                return Image.alpha_composite(background, rgba).convert("RGB")
+            if src_mode == "LA":
+                return rgba.convert("L")
+            return rgba.convert("RGB")
+        if pil.mode in ("RGB", "L"):
+            return pil.copy()
+        return pil.convert("RGB")
+    finally:
+        _close_pdfium_resource(bitmap)
+
+
 def _extract_embedded_images(pdf, classes, raw, base_name: str, quality: int) -> dict:
     """Extract filtered embedded figures from native text pages.
 
@@ -1217,7 +1263,7 @@ def _extract_embedded_images(pdf, classes, raw, base_name: str, quality: int) ->
                 if area_ratio < EMBED_MIN_AREA_RATIO:
                     continue  # cheap skip before decoding (logos/decorations)
                 try:
-                    pil = obj.get_bitmap().to_pil()
+                    pil = _decode_embedded_image_pil(obj)
                 except Exception:
                     continue
                 content_hash = hashlib.md5(pil.tobytes()).hexdigest()

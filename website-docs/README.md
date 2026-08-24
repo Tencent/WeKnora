@@ -36,41 +36,12 @@ npm run preview  # 预览构建产物
 
 图片文件不存在时，组件会渲染成一个带说明的虚线占位框，标出期望的文件路径与该图应当展示的内容；把同名图片放进 `website-docs/public/screenshots/` 即可自动生效，**不需要改 Markdown**。
 
-当前待补充的截图共 31 张：
+当前待补充的截图共 2 张：
 
 | 文件名（放在 `public/screenshots/` 下） | 出现位置 | 应当展示 |
 | --- | --- | --- |
-| `introduction-overview.png` | 产品介绍 | 登录后的主界面全貌 |
-| `quickstart-register.png` | 快速上手 | 注册页 |
-| `quickstart-init-wizard.png` | 快速上手 | 初始化向导中的模型配置 |
-| `quickstart-upload.png` | 快速上手 | 上传确认对话框 |
-| `quickstart-document-list.png` | 快速上手 | 文档解析完成的列表 |
-| `quickstart-chat.png` | 快速上手 | 一轮带引用的问答 |
-| `settings-members.png` | 租户与认证 | 空间成员与邀请 |
-| `settings-system-admin.png` | 平台管理 | 平台控制台（系统管理员专属分区） |
-| `kb-document-list.png` | 知识库 | 文档列表与批量操作栏 |
-| `kb-settings.png` | 知识库 | 分块参数与索引策略开关 |
-| `kb-chunk-edit.png` | 知识库 | 分块编辑与版本历史 |
-| `kb-batch-tag.png` | 知识库 | 批量打标签对话框 |
-| `kb-activity.png` | 知识库 | 活动流记录 |
 | `kb-folder-tree.png` | 知识库 | 文档列表的文件夹树 |
-| `settings-models.png` | 模型管理 | 模型列表与添加表单 |
-| `agent-editor.png` | Agent 引擎 | 自定义 Agent 配置弹窗 |
-| `agent-chat.png` | Agent 引擎 | Agent 推理过程时间线 |
-| `mcp-services.png` | MCP 集成 | MCP 服务配置与工具清单 |
 | `kg-graph.png` | 知识图谱 | 实体关系图 |
-| `datasource-sync.png` | 数据源导入 | 数据源列表与同步状态 |
-| `im-channels.png` | IM 集成 | IM 渠道配置 |
-| `embed-channel.png` | 网页嵌入 | 渠道配置与挂件效果 |
-| `wiki-browser.png` | Wiki 能力 | Wiki 浏览器目录与页面 |
-| `wiki-graph.png` | Wiki 能力 | Wiki 图谱视图 |
-| `wiki-revision-history.png` | Wiki 能力 | 页面版本历史与回滚 |
-| `chat-references-drawer.png` | 会话与对话体验 | 回答、引用角标与引用面板 |
-| `settings-storage-backends.png` | 存储后端 | 多实例列表与连通性测试 |
-| `chrome-extension.png` | Chrome 插件 | 网页侧边栏问答与剪藏 |
-| `faq-management.png` | FAQ 能力 | FAQ 条目列表与导入 |
-| `queue-dashboard.png` | 可观测性 | 运行时任务队列面板 |
-| `observability-langfuse.png` | 可观测性 | Langfuse 中一条完整调用链 |
 
 仓库 `docs/images/` 下已有一批现成的产品截图（`qa.png`、`knowledgebases.png`、`wiki-browser.png`、`wiki-graph.png`、`settings.png`、`agent-qa.png`、`graph1-3.png`、`langfuse.png`、`rbac-*.png` 等），补图时可以先看看能否直接复用。
 

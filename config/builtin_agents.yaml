@@ -233,3 +233,39 @@ builtin_agents:
       rerank_top_k: 10
       rerank_threshold: 0.3
 
+  - id: "builtin-skill-installer"
+    avatar: "📦"
+    is_builtin: true
+    i18n:
+      default:
+        name: "Skill Installer"
+        description: "Internal agent that installs an uploaded skill and its dependencies into the sandbox image"
+      zh-CN:
+        name: "技能安装器"
+        description: "把上传的技能及其依赖装进沙盒镜像的内部智能体"
+      zh-TW:
+        name: "技能安裝器"
+        description: "把上傳的技能及其相依套件裝進沙盒鏡像的內部智能體"
+      ja-JP:
+        name: "スキルインストーラー"
+        description: "アップロードされたスキルとその依存関係をサンドボックスイメージにインストールする内部エージェント"
+      ko-KR:
+        name: "스킬 설치 도구"
+        description: "업로드된 스킬과 의존성을 샌드박스 이미지에 설치하는 내부 에이전트"
+    config:
+      agent_mode: "smart-reasoning"
+      agent_type: "custom"
+      system_prompt_id: "skill_installer"
+      temperature: 0.2
+      max_completion_tokens: 4096
+      max_iterations: 30
+      kb_selection_mode: "none"
+      retrieve_kb_only_when_mentioned: false
+      allowed_tools:
+        - "shell_exec"
+      web_search_enabled: false
+      web_search_max_results: 0
+      reflection_enabled: false
+      multi_turn_enabled: true
+      history_turns: 10
+

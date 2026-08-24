@@ -270,5 +270,10 @@ func validateBindingMatch(
 }
 
 func isRemoteProvider(provider RemoteProvider) bool {
-	return provider == SandboxTypeCube || provider == SandboxTypeE2B
+	switch provider {
+	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker:
+		return true
+	default:
+		return false
+	}
 }

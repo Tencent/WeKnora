@@ -656,10 +656,10 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 // destroyBoundSandbox tears down the sandbox MicroVM bound to sessionID, if
 // the configured sandbox backend supports session-scoped instances.
 //
-// Only SessionBoundManager (the CubeSandbox backend) implements the
-// DestroySession method. For Docker/Local/Disabled backends the type assertion
-// fails and the call is a no-op — those backends are stateless per Execute
-// and hold no resources keyed on session ID.
+// Only SessionBoundManager implements the DestroySession method, which every
+// session-scoped backend resolves to (Cube, E2B, Docker). For Local/Disabled
+// the type assertion fails and the call is a no-op — those backends are
+// stateless per Execute and hold no resources keyed on session ID.
 //
 // Errors are logged but never propagated: sandbox teardown must not block
 // session deletion. Call this while the session row is still live so the
@@ -705,6 +705,26 @@ func (s *sessionService) destroyBoundSandbox(ctx context.Context, sessionID stri
 			logger.Warnf(ctx, "Failed to clear sandbox pin for session %s: %v", sessionID, err)
 		}
 	}
+}
+
+// maxSessionTitleRunes bounds the auto-generated session title. sessions.title
+// is VARCHAR(255) in every shipped migration, so an over-long model response
+// would be rejected by the database; 100 runes stays well clear of that limit
+// while still being a reasonable title length in the UI.
+const maxSessionTitleRunes = 100
+
+// sanitizeGeneratedTitle turns a raw title completion into something safe to
+// persist: the reasoning prefix some models emit is dropped, surrounding
+// whitespace is trimmed, and the result is truncated by rune (not byte) so a
+// multi-byte character is never cut in half. It reports whether truncation
+// happened so the caller can log it.
+func sanitizeGeneratedTitle(raw string) (string, bool) {
+	title := strings.TrimSpace(strings.TrimPrefix(raw, "<think>\n\n</think>"))
+	runes := []rune(title)
+	if len(runes) <= maxSessionTitleRunes {
+		return title, false
+	}
+	return strings.TrimSpace(string(runes[:maxSessionTitleRunes])), true
 }
 
 // GenerateTitle generates a title for the current conversation content
@@ -804,7 +824,14 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 	}
 
 	// Process and store the generated title
-	session.Title = strings.TrimPrefix(response.Content, "<think>\n\n</think>")
+	title, truncated := sanitizeGeneratedTitle(response.Content)
+	if truncated {
+		logger.Warnf(ctx,
+			"Generated session title exceeded %d runes and was truncated, session=%s, model=%s",
+			maxSessionTitleRunes, session.ID, modelID,
+		)
+	}
+	session.Title = title
 
 	// Update session with new title
 	_, err = s.sessionRepo.Update(ctx, session, session.UserID)

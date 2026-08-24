@@ -559,6 +559,7 @@ func (e *AgentEngine) runReActIteration(
 	response = resp
 	if response.Usage.TotalTokens > 0 {
 		e.lastUsage = response.Usage
+		state.TurnUsage.Accumulate(response.Usage)
 		logger.Debugf(ctx, "[Agent][Round-%d] Usage: prompt=%d, completion=%d, total=%d",
 			round, response.Usage.PromptTokens,
 			response.Usage.CompletionTokens, response.Usage.TotalTokens)

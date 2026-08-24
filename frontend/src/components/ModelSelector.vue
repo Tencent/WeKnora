@@ -47,6 +47,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { listModels, type ModelConfig } from '@/api/model'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { filterModelsByType } from './modelSelectorFilter'
 
 interface Props {
   modelType: 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR'
@@ -84,10 +85,10 @@ const modelDisplayName = (model: ModelConfig) => {
   return displayName || model.name
 }
 
-// 监听 allModels 变化，自动过滤当前类型的模型
-watch(() => props.allModels, (newModels) => {
+// 监听 allModels / modelType 变化，自动过滤当前类型的模型
+watch(() => [props.allModels, props.modelType] as const, ([newModels]) => {
   if (newModels && Array.isArray(newModels)) {
-    models.value = newModels.filter(m => m.type === props.modelType)
+    models.value = filterModelsByType(newModels, props.modelType)
   }
 }, { immediate: true })
 
@@ -108,7 +109,7 @@ const loadModels = async () => {
     const result = await listModels()
     // 前端按类型筛选模型
     if (result && Array.isArray(result)) {
-      models.value = result.filter(m => m.type === props.modelType)
+      models.value = filterModelsByType(result, props.modelType)
     } else {
       models.value = []
     }

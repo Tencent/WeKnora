@@ -2340,26 +2340,35 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 		return nil, err
 	}
 	if kb.NeedsEmbeddingModel() {
-		found := false
 		maxIndex := 0
-		summaryChunks := make([]*types.Chunk, 0, 1)
 		for _, chunk := range allChunks {
 			if chunk.ChunkIndex > maxIndex {
 				maxIndex = chunk.ChunkIndex
 			}
-			if chunk.ChunkType == types.ChunkTypeSummary {
-				chunk.Content = "# Summary\n" + summary
-				chunk.SourceContent = chunk.Content
-				chunk.IsEnabled = true
-				chunk.UpdatedAt = time.Now()
-				if err := s.chunkRepo.UpdateChunk(ctx, chunk); err != nil {
-					return nil, err
-				}
-				summaryChunks = append(summaryChunks, chunk)
-				found = true
-			}
 		}
-		if !found {
+		// allChunks holds text chunks only, so it can never carry the existing
+		// summary chunk. Scanning it for one always came up empty, which left
+		// every refresh appending a new summary chunk beside the stale one --
+		// and a stale summary stays enabled and indexed, so content the user
+		// edited out of the document kept being retrievable through it.
+		existingSummaries, err := s.chunkRepo.ListChunksByKnowledgeIDAndTypes(
+			ctx, tenantID, knowledgeID, []types.ChunkType{types.ChunkTypeSummary},
+		)
+		if err != nil {
+			return nil, err
+		}
+		summaryChunks := make([]*types.Chunk, 0, len(existingSummaries))
+		for _, chunk := range existingSummaries {
+			chunk.Content = "# Summary\n" + summary
+			chunk.SourceContent = chunk.Content
+			chunk.IsEnabled = true
+			chunk.UpdatedAt = time.Now()
+			if err := s.chunkRepo.UpdateChunk(ctx, chunk); err != nil {
+				return nil, err
+			}
+			summaryChunks = append(summaryChunks, chunk)
+		}
+		if len(summaryChunks) == 0 {
 			summaryChunk := &types.Chunk{
 				ID: uuid.NewString(), TenantID: tenantID, KnowledgeID: knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID, Content: "# Summary\n" + summary,
@@ -2973,6 +2982,10 @@ func (s *knowledgeService) UpdateImageInfo(
 			ChunkType:       types.ChunkTypeImageCaption,
 			ParentChunkID:   chunk.ID,
 			ImageInfo:       imageInfo,
+			// CreateChunks inserts with Select("*"), so the gorm default:true never
+			// applies -- an unset IsEnabled lands in the database as false and the
+			// chunk is silently excluded from retrieval and model context.
+			IsEnabled: true,
 		}
 		addChunk = append(addChunk, captionChunk)
 		logger.Infof(ctx, "Created new caption chunk ID: %s for image URL: %s", captionChunk.ID, image.OriginalURL)
@@ -2989,6 +3002,7 @@ func (s *knowledgeService) UpdateImageInfo(
 			ChunkType:       types.ChunkTypeImageOCR,
 			ParentChunkID:   chunk.ID,
 			ImageInfo:       imageInfo,
+			IsEnabled:       true,
 		}
 		addChunk = append(addChunk, ocrChunk)
 		logger.Infof(ctx, "Created new OCR chunk ID: %s for image URL: %s", ocrChunk.ID, image.OriginalURL)

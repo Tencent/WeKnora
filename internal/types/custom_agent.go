@@ -28,6 +28,8 @@ const (
 	BuiltinWikiResearcherID = "builtin-wiki-researcher"
 	// BuiltinWikiFixerID is the ID for the built-in wiki fixer agent
 	BuiltinWikiFixerID = "builtin-wiki-fixer"
+	// BuiltinSkillInstallerID is the ID for the built-in skill installer agent
+	BuiltinSkillInstallerID = "builtin-skill-installer"
 )
 
 // AgentMode constants for agent running mode
@@ -565,11 +567,12 @@ var BuiltinAgentRegistry = map[string]func(uint64) *CustomAgent{}
 // builtinAgentIDsOrdered defines the fixed display order of built-in agents
 // that are exposed in the user-facing agent list (ListAgents).
 //
-// NOTE: BuiltinWikiFixerID is intentionally excluded here. The wiki fixer is
-// an internal agent invoked programmatically from the Wiki editor
-// (see frontend WikiBrowser.vue) and should not clutter the tenant's agent
-// picker. It remains fully usable via GetAgentByID because the YAML entry
-// still registers it in BuiltinAgentRegistry.
+// NOTE: BuiltinWikiFixerID and BuiltinSkillInstallerID are intentionally
+// excluded here. Both are internal agents invoked programmatically — the wiki
+// fixer from the Wiki editor, the skill installer from the sandbox-config skill
+// upload flow — and should not clutter the tenant's agent picker. They remain
+// fully usable via GetAgentByID because the YAML entries still register them in
+// BuiltinAgentRegistry.
 var builtinAgentIDsOrdered = []string{
 	BuiltinQuickAnswerID,
 	BuiltinSmartReasoningID,

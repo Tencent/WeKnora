@@ -816,6 +816,32 @@ func TestSanitizeSandboxConfigPreservesRedactedSecret(t *testing.T) {
 	require.Equal(t, "stored-key", out.E2B.APIKey)
 }
 
+func TestSanitizeSandboxConfigPreservesSkillImage(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
+	existing := &types.TenantSandboxConfig{
+		SandboxType: "e2b",
+		E2B: &types.E2BSandboxConfig{
+			APIKey: "stored-key", APIURL: "https://203.0.113.10", TemplateID: "t1",
+		},
+		SkillImage: &types.SkillImageConfig{SnapshotID: "snap-1", OwnerFingerprint: "fp-1"},
+	}
+	incoming := &types.TenantSandboxConfig{
+		SandboxType: "e2b",
+		E2B: &types.E2BSandboxConfig{
+			APIKey:     types.RedactedSecretPlaceholder,
+			APIURL:     "https://203.0.113.10",
+			TemplateID: "t1",
+		},
+		SkillImage: &types.SkillImageConfig{SnapshotID: "forged-snap"},
+	}
+
+	out, err := SanitizeSandboxConfig(incoming, existing)
+
+	require.NoError(t, err)
+	require.Equal(t, "snap-1", out.SkillImage.SnapshotID,
+		"the sandbox config API must not let a client plant or wipe the skill image")
+}
+
 // Nothing is inherited from the deployment, so an incomplete config has to be
 // refused when it is saved rather than at the first sandbox allocation.
 func TestSanitizeSandboxConfigRejectsIncompleteConfig(t *testing.T) {

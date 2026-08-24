@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -88,4 +89,150 @@ func TestSessionBoundManagerExecuteEnsuresOutputDir(t *testing.T) {
 	require.True(t, execs[0].Shell)
 	require.Contains(t, execs[0].Command, "chown user:user")
 	require.Contains(t, execs[0].Command, SessionOutputRoot)
+	require.Equal(t, DefaultSandboxExecUser, execs[0].User,
+		"chown follows symlinks, so a root-run bootstrap can be aimed at /etc by "+
+			"a session that swaps its artifact directory for a link; running as the "+
+			"sandbox account is what makes that attempt fail")
+}
+
+// shell_exec carries a command line the model wrote, which makes it the exec
+// path an injected prompt reaches most directly. The account it runs as is
+// pinned here rather than left to each adapter, so that reading this call site
+// answers "as whom does model-authored input run" without having to trust that
+// all three adapters agree on what a blank user means.
+func TestSessionBoundManagerShellExecRunsAsSandboxUser(t *testing.T) {
+	client := newFakeRemoteClient(SandboxTypeCube)
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          client,
+		Store:           NewMemorySessionSandboxBindingStore(),
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+	})
+	require.NoError(t, err)
+
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	_, err = mgr.ExecShellCommand(
+		ctx, "session-shell", "id -un", SessionWorkspaceRoot, time.Minute, nil,
+	)
+	require.NoError(t, err)
+
+	client.mu.Lock()
+	execs := append([]RemoteExecRequest(nil), client.execRequests...)
+	client.mu.Unlock()
+
+	var shell []RemoteExecRequest
+	for _, req := range execs {
+		if req.Shell && req.Command == "id -un" {
+			shell = append(shell, req)
+		}
+	}
+	require.Len(t, shell, 1)
+	require.Equal(t, DefaultSandboxExecUser, shell[0].User)
+}
+
+func TestCleanSessionWorkDirRejectsSkillRootByDefault(t *testing.T) {
+	skillDir := mustSkillDir(t, "sk-1")
+	_, err := cleanSessionWorkDir(skillDir, false)
+	require.Error(t, err, "ordinary sessions must stay inside /workspace")
+
+	got, err := cleanSessionWorkDir(skillDir, true)
+	require.NoError(t, err, "install sessions need to work inside the skills root")
+	require.Equal(t, skillDir, got)
+}
+
+func TestCleanSessionWorkDirStillRejectsArbitraryPathsInInstallMode(t *testing.T) {
+	_, err := cleanSessionWorkDir("/etc", true)
+	require.Error(t, err, "install mode widens the allowlist, it does not remove it")
+}
+
+func TestExecShellCommandWithOptionsRunsAsRootOnlyWhenAsked(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	mgr, client := newSessionManagerExecTestHarness(t)
+
+	_, err := mgr.ExecShellCommandWithOptions(ctx, "sess-1", "echo hi", ShellExecOptions{})
+	require.NoError(t, err)
+	last := lastExecRequest(t, client)
+	require.Equal(t, DefaultSandboxExecUser, last.User,
+		"ordinary shell_exec must stay on the non-root sandbox account")
+
+	skillDir := mustSkillDir(t, "sk-1")
+	_, err = mgr.ExecShellCommandWithOptions(ctx, "sess-1", "echo hi", ShellExecOptions{
+		AsRoot:          true,
+		AllowSkillsRoot: true,
+		WorkDir:         skillDir,
+	})
+	require.NoError(t, err)
+	last = lastExecRequest(t, client)
+	require.Equal(t, "root", last.User)
+	require.Equal(t, skillDir, last.WorkDir)
+}
+
+func TestExecShellCommandKeepsOrdinaryRemoteRequest(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	mgr, client := newSessionManagerExecTestHarness(t)
+	env := map[string]string{"A": "B"}
+
+	_, err := mgr.ExecShellCommand(ctx, "sess-1", "echo hi", "/workspace/project", time.Second, env)
+	require.NoError(t, err)
+
+	last := lastExecRequest(t, client)
+	require.Equal(t, RemoteExecRequest{
+		Command: "echo hi",
+		Shell:   true,
+		Env:     env,
+		WorkDir: "/workspace/project",
+		User:    DefaultSandboxExecUser,
+		Timeout: time.Second,
+	}, last)
+}
+
+func TestExecShellCommandEmptyWorkDirLeavesRemoteRequestUnset(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	mgr, client := newSessionManagerExecTestHarness(t)
+
+	_, err := mgr.ExecShellCommand(ctx, "sess-1", "echo hi", "", time.Second, nil)
+	require.NoError(t, err)
+
+	last := lastExecRequest(t, client)
+	require.Empty(t, last.WorkDir)
+	require.Equal(t, DefaultSandboxExecUser, last.User)
+}
+
+func TestExecShellCommandRejectsInvalidWorkDir(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	mgr, _ := newSessionManagerExecTestHarness(t)
+
+	_, err := mgr.ExecShellCommand(ctx, "sess-1", "echo hi", "/etc", time.Second, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "outside allowed roots")
+	require.Contains(t, err.Error(), SessionWorkspaceRoot)
+}
+
+func newSessionManagerExecTestHarness(t *testing.T) (*SessionBoundManager, *fakeRemoteClient) {
+	t.Helper()
+
+	client := newFakeRemoteClient(SandboxTypeCube)
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          client,
+		Store:           NewMemorySessionSandboxBindingStore(),
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+	})
+	require.NoError(t, err)
+	return mgr, client
+}
+
+func lastExecRequest(t *testing.T, client *fakeRemoteClient) RemoteExecRequest {
+	t.Helper()
+
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	require.NotEmpty(t, client.execRequests)
+	return client.execRequests[len(client.execRequests)-1]
 }
