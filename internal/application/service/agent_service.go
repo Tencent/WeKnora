@@ -437,7 +437,8 @@ func (s *agentService) initializeSkillsManager(
 				toolRegistry.RegisterTool(tools.NewReadSandboxFileTool(store))
 				logger.Infof(ctx, "Registered list_sandbox_files and read_sandbox_file tools")
 			} else {
-				logger.Infof(ctx, "Sandbox backend does not advertise session filesystem capability; list_sandbox_files/read_sandbox_file not registered")
+				logger.Infof(ctx, "Sandbox backend does not advertise session filesystem capability; "+
+					"list_sandbox_files/read_sandbox_file not registered")
 			}
 		}
 
@@ -472,7 +473,7 @@ func registerSandboxShellTool(
 			toolRegistry.RegisterTool(tools.NewInstallShellExecTool(executor))
 			logger.Infof(ctx, "Registered install-mode shell_exec tool")
 		} else {
-			logger.Warnf(ctx, "Sandbox backend does not advertise install-mode shell capability; skill install cannot run")
+			logger.Warnf(ctx, "Sandbox backend does not advertise install-mode shell; skill install cannot run")
 		}
 		return
 	}

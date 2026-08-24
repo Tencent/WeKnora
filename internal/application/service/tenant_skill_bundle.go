@@ -184,7 +184,8 @@ func parseSkillBundleVersion(manifest string) (string, error) {
 	var metadata struct {
 		Version string `yaml:"version"`
 	}
-	if err := yaml.Unmarshal([]byte(strings.Join(lines[frontmatterStart+1:frontmatterEnd], "\n")), &metadata); err != nil {
+	frontmatter := strings.Join(lines[frontmatterStart+1:frontmatterEnd], "\n")
+	if err := yaml.Unmarshal([]byte(frontmatter), &metadata); err != nil {
 		return "", err
 	}
 	return metadata.Version, nil

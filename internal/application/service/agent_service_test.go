@@ -44,7 +44,9 @@ func (*fakeAgentChatModel) Chat(context.Context, []chat.Message, *chat.ChatOptio
 	return &types.ChatResponse{}, nil
 }
 
-func (m *fakeAgentChatModel) ChatStream(_ context.Context, _ []chat.Message, opts *chat.ChatOptions) (<-chan types.StreamResponse, error) {
+func (m *fakeAgentChatModel) ChatStream(
+	_ context.Context, _ []chat.Message, opts *chat.ChatOptions,
+) (<-chan types.StreamResponse, error) {
 	m.lastToolNames = nil
 	if opts != nil {
 		for _, tool := range opts.Tools {
@@ -72,6 +74,7 @@ func (stubSessionFileStore) EnsureSessionDir(context.Context, string, string) er
 func (stubSessionFileStore) ListSessionFiles(context.Context, string, string) ([]sandbox.RemoteDirEntry, error) {
 	return nil, nil
 }
+
 func (stubSessionFileStore) StatSessionFile(context.Context, string, string) (*sandbox.RemoteStatEntry, error) {
 	return nil, nil
 }

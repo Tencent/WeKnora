@@ -50,6 +50,9 @@ type TenantSkillService struct {
 	localLocks *keyedMutex
 }
 
+// NewTenantSkillService wires the repositories and runtimes the install and
+// remove flows share. Redis may be nil; the local lock then serialises one
+// process only.
 func NewTenantSkillService(
 	skillsRepo repository.TenantSkillRepository,
 	configsRepo repository.TenantSandboxConfigRepository,
