@@ -188,6 +188,19 @@ func (t *ReadSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 			Error:   fmt.Sprintf("path is a directory, not a file: %s", clean),
 		}, nil
 	}
+	// The directory guard above is a string prefix test, so it cannot tell that
+	// a symlink under the output directory points somewhere else entirely. The
+	// backends report a link as-is rather than as its target, which makes this
+	// the check that keeps such a path from being read at all.
+	if stat.Type != sandbox.RemoteEntryFile {
+		return &types.ToolResult{
+			Success: false,
+			Error: fmt.Sprintf(
+				"path is not a regular file: %s; only files produced under %s can be read",
+				clean, rootDir,
+			),
+		}, nil
+	}
 	if stat.Size > maxBytes {
 		logger.Infof(ctx, "[Tool][ReadSandboxFile] refused oversize file: session=%s path=%s size=%d limit=%d",
 			sessionID, clean, stat.Size, maxBytes)
