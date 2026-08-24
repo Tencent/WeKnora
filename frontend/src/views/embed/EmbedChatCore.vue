@@ -46,7 +46,7 @@
           :key="(session.id as string) || `${session.role}-${session.created_at}-${index}`"
           class="msg-item-wrapper"
         >
-          <div v-if="session.role === 'user'">
+          <div v-if="session.role === 'user'" class="message-row">
             <EmbedUserMessage
               :content="String(session.content || '')"
               :mentioned_items="asUnknownArray(session.mentioned_items)"
@@ -56,8 +56,9 @@
               :embed-channel-id="channelId"
               :embed-token="token"
             />
+            <MessageTimestamp :value="session.created_at" align="end" />
           </div>
-          <div v-if="session.role === 'assistant' && shouldRenderAssistantMessage(session)">
+          <div v-if="session.role === 'assistant' && shouldRenderAssistantMessage(session)" class="message-row">
             <EmbedBotMessage
               :content="String(session.content || '')"
               :session="session"
@@ -69,6 +70,7 @@
               :embed-session-sig="sessionSig"
               :embed-visitor-id="visitorId"
             />
+            <MessageTimestamp :value="session.created_at" align="start" />
             <FollowUpSuggestions v-if="!session.suggestionsDismissed"
               :suggestion-set="session.suggestionSet as any"
               :loading="Boolean(session.suggestionLoading)"
@@ -127,6 +129,7 @@ import ChatReferencesDrawer from '@/components/ChatReferencesDrawer.vue'
 import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
 import { useEmbedChatSession } from '@/composables/useEmbedChatSession'
 import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue'
+import MessageTimestamp from '@/components/chat/MessageTimestamp.vue'
 import type { MessageSuggestionItem, MessageSuggestionSet } from '@/api/message-suggestion'
 
 provideChatReferencesDrawer()
@@ -416,6 +419,12 @@ watch(
   width: 100%;
   padding: 12px 16px 0;
   box-sizing: border-box;
+}
+
+.message-row {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
 }
 
 .embed-suggested {
