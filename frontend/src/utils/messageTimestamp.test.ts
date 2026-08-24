@@ -84,7 +84,10 @@ test('formatMessageTimestamp converts a UTC string into local wall time', () => 
 })
 
 test('bindServerTurnTimestamps replaces local fallbacks with persisted server times', () => {
-  const user = { role: 'user', created_at: '2026-01-02T03:04:05.000Z' }
+  const user: { role: string; created_at: string; id?: string } = {
+    role: 'user',
+    created_at: '2026-01-02T03:04:05.000Z',
+  }
   const assistant = { role: 'assistant', created_at: '2026-01-02T03:04:06.000Z' }
 
   bindServerTurnTimestamps(
