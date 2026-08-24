@@ -142,7 +142,9 @@ type sandboxSnapshotReleaser interface {
 // sandboxConfigSkillStore is the skill/ledger slice Delete needs to destroy
 // snapshots and drop rows that would dangle after SoftDelete.
 type sandboxConfigSkillStore interface {
-	ListSnapshotsByConfig(ctx context.Context, tenantID uint64, configID string) ([]*types.TenantSkillSnapshotEntity, error)
+	ListSnapshotsByConfig(
+		ctx context.Context, tenantID uint64, configID string,
+	) ([]*types.TenantSkillSnapshotEntity, error)
 	MarkSnapshotState(ctx context.Context, tenantID uint64, id, state, snapshotID string) error
 	ListSkillsByConfig(ctx context.Context, tenantID uint64, configID string) ([]*types.TenantSkillEntity, error)
 	DeleteSkill(ctx context.Context, tenantID uint64, configID, skillID string) error
@@ -152,7 +154,9 @@ type sandboxConfigSkillStore interface {
 // sandboxConfigBundleResolver locates the tenant file service so config
 // deletion can drop skill archives after the ledger is released.
 type sandboxConfigBundleResolver interface {
-	ResolveFileService(ctx context.Context, tenant *types.Tenant, backendID, provider, localBaseDir string) (interfaces.FileService, string, error)
+	ResolveFileService(
+		ctx context.Context, tenant *types.Tenant, backendID, provider, localBaseDir string,
+	) (interfaces.FileService, string, error)
 }
 
 // SandboxInventory describes what a config holds and who a change disturbs.

@@ -207,7 +207,9 @@ func (r *reaperSkillStore) mustGet(id string) *types.TenantSkillEntity {
 	return r.rows[id]
 }
 
-func (r *reaperSkillStore) ListStaleInstalling(_ context.Context, olderThan time.Time) ([]*types.TenantSkillEntity, error) {
+func (r *reaperSkillStore) ListStaleInstalling(
+	_ context.Context, olderThan time.Time,
+) ([]*types.TenantSkillEntity, error) {
 	var out []*types.TenantSkillEntity
 	for _, e := range r.rows {
 		if e.InstallingSince == nil || !e.InstallingSince.Before(olderThan) {
@@ -222,7 +224,9 @@ func (r *reaperSkillStore) ListStaleInstalling(_ context.Context, olderThan time
 	return out, nil
 }
 
-func (r *reaperSkillStore) GetSkill(_ context.Context, tenantID uint64, configID, skillID string) (*types.TenantSkillEntity, error) {
+func (r *reaperSkillStore) GetSkill(
+	_ context.Context, tenantID uint64, configID, skillID string,
+) (*types.TenantSkillEntity, error) {
 	e := r.rows[skillID]
 	if e == nil || e.TenantID != tenantID || e.SandboxConfigID != configID {
 		return nil, nil
@@ -237,7 +241,9 @@ func (r *reaperSkillStore) UpdateSkill(_ context.Context, e *types.TenantSkillEn
 	return nil
 }
 
-func (r *reaperSkillStore) ListSnapshotsByConfig(_ context.Context, tenantID uint64, configID string) ([]*types.TenantSkillSnapshotEntity, error) {
+func (r *reaperSkillStore) ListSnapshotsByConfig(
+	_ context.Context, tenantID uint64, configID string,
+) ([]*types.TenantSkillSnapshotEntity, error) {
 	var out []*types.TenantSkillSnapshotEntity
 	for _, e := range r.snapshots {
 		if e.TenantID == tenantID && e.SandboxConfigID == configID {
@@ -289,7 +295,9 @@ type reaperConfigStore struct {
 	entity *types.TenantSandboxConfigEntity
 }
 
-func (r *reaperConfigStore) GetByID(_ context.Context, tenantID uint64, id string) (*types.TenantSandboxConfigEntity, error) {
+func (r *reaperConfigStore) GetByID(
+	_ context.Context, tenantID uint64, id string,
+) (*types.TenantSandboxConfigEntity, error) {
 	if r.entity == nil || r.entity.TenantID != tenantID || r.entity.ID != id {
 		return nil, nil
 	}
@@ -345,7 +353,9 @@ type reaperSnapshotProvider struct {
 	deleted   []string
 }
 
-func (p *reaperSnapshotProvider) ListSnapshots(_ context.Context, sandboxID string) ([]sandbox.RemoteSnapshotRef, error) {
+func (p *reaperSnapshotProvider) ListSnapshots(
+	_ context.Context, sandboxID string,
+) ([]sandbox.RemoteSnapshotRef, error) {
 	p.listCalls = append(p.listCalls, sandboxID)
 	return p.listed, nil
 }

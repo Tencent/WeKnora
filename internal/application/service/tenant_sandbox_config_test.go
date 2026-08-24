@@ -1163,7 +1163,9 @@ type snapshotReleaseClient struct {
 	failDelete map[string]error
 }
 
-func (c *snapshotReleaseClient) List(ctx context.Context, filter sandbox.RemoteListFilter) ([]sandbox.RemoteSandboxSummary, error) {
+func (c *snapshotReleaseClient) List(
+	ctx context.Context, filter sandbox.RemoteListFilter,
+) ([]sandbox.RemoteSandboxSummary, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -1307,6 +1309,7 @@ func (deleteFileService) CheckConnectivity(context.Context) error { return nil }
 func (deleteFileService) SaveFile(context.Context, *multipart.FileHeader, uint64, string) (string, error) {
 	return "", nil
 }
+
 func (deleteFileService) SaveBytes(context.Context, []byte, uint64, string, bool) (string, error) {
 	return "", nil
 }
@@ -1319,11 +1322,14 @@ func (s deleteFileService) DeleteFile(ctx context.Context, ref string) error {
 	s.r.deleted = append(s.r.deleted, ref)
 	return nil
 }
+
 func (deleteFileService) CopyFile(context.Context, string, uint64, string) (string, error) {
 	return "", nil
 }
 
-var _ sandbox.ConfigSandboxClient = (*snapshotReleaseClient)(nil)
-var _ sandboxSnapshotReleaser = (*snapshotReleaseClient)(nil)
-var _ sandboxConfigSkillStore = (*deleteSkillStore)(nil)
-var _ sandboxConfigBundleResolver = (*deleteBundleResolver)(nil)
+var (
+	_ sandbox.ConfigSandboxClient = (*snapshotReleaseClient)(nil)
+	_ sandboxSnapshotReleaser     = (*snapshotReleaseClient)(nil)
+	_ sandboxConfigSkillStore     = (*deleteSkillStore)(nil)
+	_ sandboxConfigBundleResolver = (*deleteBundleResolver)(nil)
+)

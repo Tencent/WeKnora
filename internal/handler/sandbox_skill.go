@@ -71,6 +71,7 @@ type SandboxSkillHandler struct {
 	maxDuration  time.Duration
 }
 
+// NewSandboxSkillHandler constructs the admin HTTP surface for tenant skills.
 func NewSandboxSkillHandler(
 	svc sandboxSkillService, streams interfaces.StreamManager,
 ) *SandboxSkillHandler {
@@ -127,10 +128,10 @@ func toSkillResponse(e *types.TenantSkillEntity) skillResponse {
 // validation error cannot silently start returning 500 for bad input.
 func respondSkillServiceError(c *gin.Context, err error) {
 	if stderrors.Is(err, service.ErrSkillBundleInvalid) {
-		c.Error(apperrors.NewBadRequestError(err.Error()))
+		_ = c.Error(apperrors.NewBadRequestError(err.Error()))
 		return
 	}
-	c.Error(err)
+	_ = c.Error(err)
 }
 
 // List godoc
@@ -148,7 +149,7 @@ func respondSkillServiceError(c *gin.Context, err error) {
 func (h *SandboxSkillHandler) List(c *gin.Context) {
 	skills, err := h.service.ListSkills(c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"))
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	data := make([]skillResponse, 0, len(skills))
@@ -174,7 +175,7 @@ func (h *SandboxSkillHandler) List(c *gin.Context) {
 func (h *SandboxSkillHandler) Get(c *gin.Context) {
 	skill, err := h.resolveSkill(c)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": toSkillResponse(skill)})
@@ -182,7 +183,9 @@ func (h *SandboxSkillHandler) Get(c *gin.Context) {
 
 // Upload godoc
 // @Summary      Install a skill
-// @Description  Upload a skill bundle. The install boots a sandbox from the config's current image and runs for minutes, so the upload is only accepted; follow it via the install-events stream.
+// @Description  Upload a skill bundle. The install boots a sandbox from the
+// @Description  config's current image and runs for minutes, so the upload is
+// @Description  only accepted; follow it via the install-events stream.
 // @Tags         SandboxConfig
 // @Accept       multipart/form-data
 // @Produce      json
@@ -206,26 +209,26 @@ func (h *SandboxSkillHandler) Upload(c *gin.Context) {
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if stderrors.As(err, &tooLarge) {
-			c.Error(skillTooLargeError())
+			_ = c.Error(skillTooLargeError())
 			return
 		}
-		c.Error(apperrors.NewBadRequestError("file is required"))
+		_ = c.Error(apperrors.NewBadRequestError("file is required"))
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	if header.Size > maxBytes {
-		c.Error(skillTooLargeError())
+		_ = c.Error(skillTooLargeError())
 		return
 	}
 	archive, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
 	if err != nil {
-		c.Error(apperrors.NewBadRequestError("failed to read the uploaded skill bundle"))
+		_ = c.Error(apperrors.NewBadRequestError("failed to read the uploaded skill bundle"))
 		return
 	}
 	// A multipart part may under-declare its size, so the bytes actually read
 	// are checked too.
 	if int64(len(archive)) > maxBytes {
-		c.Error(skillTooLargeError())
+		_ = c.Error(skillTooLargeError())
 		return
 	}
 
@@ -269,21 +272,21 @@ type skillPatchRequest struct {
 func (h *SandboxSkillHandler) Patch(c *gin.Context) {
 	var req skillPatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewBadRequestError(err.Error()))
+		_ = c.Error(apperrors.NewBadRequestError(err.Error()))
 		return
 	}
 	if req.Enabled == nil {
-		c.Error(apperrors.NewBadRequestError("enabled is required"))
+		_ = c.Error(apperrors.NewBadRequestError("enabled is required"))
 		return
 	}
 	updated, err := h.service.SetSkillEnabled(c.Request.Context(), sandboxConfigTenantID(c),
 		c.Param("id"), c.Param("skillId"), *req.Enabled)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	if updated == nil {
-		c.Error(apperrors.NewNotFoundError("skill not found"))
+		_ = c.Error(apperrors.NewNotFoundError("skill not found"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": toSkillResponse(updated)})
@@ -291,7 +294,9 @@ func (h *SandboxSkillHandler) Patch(c *gin.Context) {
 
 // Delete godoc
 // @Summary      Remove an installed skill
-// @Description  Remove a skill from the config's image. The removal rebuilds the image and runs for minutes, so it is only accepted; follow it via the install-events stream.
+// @Description  Remove a skill from the config's image. The removal rebuilds
+// @Description  the image and runs for minutes, so it is only accepted; follow
+// @Description  it via the install-events stream.
 // @Tags         SandboxConfig
 // @Produce      json
 // @Param        id       path      string  true  "Sandbox config ID"
@@ -308,7 +313,7 @@ func (h *SandboxSkillHandler) Delete(c *gin.Context) {
 		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), skillID,
 	)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	c.JSON(http.StatusAccepted, gin.H{"success": true, "data": gin.H{"skill_id": skillID}})
@@ -376,7 +381,10 @@ func terminalSkillEvent(skill *types.TenantSkillEntity) (skillInstallEvent, bool
 
 // InstallEvents godoc
 // @Summary      Follow an install or removal
-// @Description  Server-sent progress for one install or removal. The stream always terminates: with the run's own terminal event, with one derived from the durable status, or with a "detached" frame when it stops following a run that is still going.
+// @Description  Server-sent progress for one install or removal. The stream
+// @Description  always terminates: with the run's own terminal event, with one
+// @Description  derived from the durable status, or with a "detached" frame
+// @Description  when it stops following a run that is still going.
 // @Tags         SandboxConfig
 // @Produce      text/event-stream
 // @Param        id       path      string  true  "Sandbox config ID"
@@ -397,7 +405,7 @@ func (h *SandboxSkillHandler) InstallEvents(c *gin.Context) {
 	// refusal can still be rendered as JSON, before any SSE header is written.
 	skill, err := h.resolveSkill(c)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -405,7 +413,7 @@ func (h *SandboxSkillHandler) InstallEvents(c *gin.Context) {
 	// two is delivered rather than missed.
 	events, release, err := h.service.SubscribeProgress(ctx, tenantID, configID, skillID)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	defer release()
@@ -495,7 +503,13 @@ func (h *SandboxSkillHandler) InstallEvents(c *gin.Context) {
 
 // InstallTranscript godoc
 // @Summary      Follow an install's agent transcript
-// @Description  Server-sent replay of everything the installer agent did — the prompt it was given, its thinking, the commands it ran and their output — followed live while the install is still running. Frames are the same shape the chat stream uses, so a console renders an install with the components it renders a chat turn with. 404 once the event log has expired; the durable message history is the fallback.
+// @Description  Server-sent replay of everything the installer agent did — the
+// @Description  prompt it was given, its thinking, the commands it ran and
+// @Description  their output — followed live while the install is still
+// @Description  running. Frames are the same shape the chat stream uses, so a
+// @Description  console renders an install with the components it renders a
+// @Description  chat turn with. 404 once the event log has expired; the
+// @Description  durable message history is the fallback.
 // @Tags         SandboxConfig
 // @Produce      text/event-stream
 // @Param        id       path      string  true  "Sandbox config ID"
@@ -518,30 +532,30 @@ func (h *SandboxSkillHandler) InstallTranscript(c *gin.Context) {
 
 	skill, err := h.resolveSkill(c)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	sessionID, messageID := skill.InstallSessionID, skill.InstallMessageID
 	if sessionID == "" || messageID == "" {
-		c.Error(apperrors.NewNotFoundError("this skill has no install transcript"))
+		_ = c.Error(apperrors.NewNotFoundError("this skill has no install transcript"))
 		return
 	}
 	if h.streams == nil {
-		c.Error(apperrors.NewNotFoundError("install transcripts are unavailable"))
+		_ = c.Error(apperrors.NewNotFoundError("install transcripts are unavailable"))
 		return
 	}
 
 	events, offset, err := h.streams.GetEvents(ctx, sessionID, messageID, 0)
 	if err != nil {
 		logger.Errorf(ctx, "[skill] read install transcript of %s failed: %v", skill.ID, err)
-		c.Error(apperrors.NewInternalServerError(err.Error()))
+		_ = c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
 	}
 	// An empty log means the run predates the transcript or its TTL has passed.
 	// Refuse before any SSE header is written so the caller can still fall back
 	// to the durable message history.
 	if len(events) == 0 {
-		c.Error(apperrors.NewNotFoundError("this install's event log is no longer available"))
+		_ = c.Error(apperrors.NewNotFoundError("this install's event log is no longer available"))
 		return
 	}
 

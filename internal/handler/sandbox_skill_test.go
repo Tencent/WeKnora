@@ -298,10 +298,24 @@ func TestSandboxSkillRoutesScopeToCallerWorkspace(t *testing.T) {
 		body    string
 		wantGot int
 	}{
-		{"get own skill", http.MethodGet, "/sandbox-configs/cfg-a/skills/skill-1", "", http.StatusOK},
-		{"get skill of another config", http.MethodGet, "/sandbox-configs/cfg-b/skills/skill-1", "", http.StatusNotFound},
-		{"patch skill of another config", http.MethodPatch, "/sandbox-configs/cfg-b/skills/skill-1", `{"enabled":false}`, http.StatusNotFound},
-		{"stream skill of another config", http.MethodGet, "/sandbox-configs/cfg-b/skills/skill-1/install-events", "", http.StatusNotFound},
+		{
+			name: "get own skill", method: http.MethodGet,
+			target: "/sandbox-configs/cfg-a/skills/skill-1", wantGot: http.StatusOK,
+		},
+		{
+			name: "get skill of another config", method: http.MethodGet,
+			target: "/sandbox-configs/cfg-b/skills/skill-1", wantGot: http.StatusNotFound,
+		},
+		{
+			name: "patch skill of another config", method: http.MethodPatch,
+			target: "/sandbox-configs/cfg-b/skills/skill-1", body: `{"enabled":false}`,
+			wantGot: http.StatusNotFound,
+		},
+		{
+			name: "stream skill of another config", method: http.MethodGet,
+			target:  "/sandbox-configs/cfg-b/skills/skill-1/install-events",
+			wantGot: http.StatusNotFound,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
@@ -708,10 +722,14 @@ func TestSandboxSkillTranscriptReplaysTheInstallerConversation(t *testing.T) {
 	for _, evt := range []interfaces.StreamEvent{
 		{ID: "p", Type: types.ResponseTypeInstallPrompt, Content: "install web-search", Done: true},
 		{ID: "t", Type: types.ResponseTypeThinking, Content: "check for uv"},
-		{ID: "c", Type: types.ResponseTypeToolCall, Content: "Calling tool: shell_exec",
-			Data: map[string]interface{}{"tool_name": "shell_exec"}},
-		{ID: "r", Type: types.ResponseTypeToolResult, Content: "uv 0.4.0",
-			Data: map[string]interface{}{"success": true}},
+		{
+			ID: "c", Type: types.ResponseTypeToolCall, Content: "Calling tool: shell_exec",
+			Data: map[string]interface{}{"tool_name": "shell_exec"},
+		},
+		{
+			ID: "r", Type: types.ResponseTypeToolResult, Content: "uv 0.4.0",
+			Data: map[string]interface{}{"success": true},
+		},
 		{ID: "done", Type: types.ResponseTypeComplete, Done: true},
 	} {
 		require.NoError(t, streams.AppendEvent(ctx, "sess-9", "msg-9", evt))

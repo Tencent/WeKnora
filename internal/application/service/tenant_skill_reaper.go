@@ -34,7 +34,9 @@ type skillReaperConfigReader interface {
 // skillSnapshotLedger is the per-config chain ReconcileSnapshots compares
 // provider listings against.
 type skillSnapshotLedger interface {
-	ListSnapshotsByConfig(ctx context.Context, tenantID uint64, configID string) ([]*types.TenantSkillSnapshotEntity, error)
+	ListSnapshotsByConfig(
+		ctx context.Context, tenantID uint64, configID string,
+	) ([]*types.TenantSkillSnapshotEntity, error)
 }
 
 // skillSnapshotLister is the provider listing ReconcileSnapshots is allowed to
@@ -231,7 +233,8 @@ func (s *TenantSkillService) ReconcileSnapshots(
 		}
 		extras++
 		logger.Warnf(ctx,
-			"[skill] snapshot %s is not in the ledger of sandbox config %s (not deleted; the provider account may be shared across environments)",
+			"[skill] snapshot %s is not in the ledger of sandbox config %s "+
+				"(not deleted; the provider account may be shared across environments)",
 			id, configID)
 	}
 	return extras, nil
