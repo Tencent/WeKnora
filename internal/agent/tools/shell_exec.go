@@ -253,6 +253,10 @@ type ShellExecTool struct {
 	// workDirRoots are the directories work_dir may point inside. Ordinary
 	// sessions get /workspace only; install mode adds the skills image root.
 	workDirRoots []string
+	// defaultTimeout is applied when the caller omits timeout_sec. Ordinary
+	// sessions keep the 120s default; install mode uses the 10-minute cap
+	// because dependency installs routinely exceed two minutes.
+	defaultTimeout time.Duration
 }
 
 // NewShellExecTool constructs the tool. `executor` MUST NOT be nil:
@@ -271,9 +275,10 @@ func NewShellExecTool(executor SandboxCommandExecutor) *ShellExecTool {
 // the built-in skill installer agent (see AgentConfig.SkillInstallMode).
 func NewInstallShellExecTool(executor SandboxInstallCommandExecutor) *ShellExecTool {
 	return &ShellExecTool{
-		BaseTool:     shellExecTool,
-		executor:     installShellExecutor{inner: executor},
-		workDirRoots: []string{defaultShellExecWorkDir, sandbox.SkillsImageRoot},
+		BaseTool:       shellExecTool,
+		executor:       installShellExecutor{inner: executor},
+		workDirRoots:   []string{defaultShellExecWorkDir, sandbox.SkillsImageRoot},
+		defaultTimeout: shellExecMaxTimeout,
 	}
 }
 
@@ -347,7 +352,10 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	}
 	workDir = cleanWorkDir
 
-	timeout := defaultShellExecTimeout
+	timeout := t.defaultTimeout
+	if timeout <= 0 {
+		timeout = defaultShellExecTimeout
+	}
 	if input.TimeoutSec > 0 {
 		timeout = time.Duration(input.TimeoutSec) * time.Second
 	}

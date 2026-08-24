@@ -68,6 +68,31 @@ func TestShellExecTimeoutHonorsAndCapsRequestedValue(t *testing.T) {
 	assert.Equal(t, shellExecMaxTimeout, executor.timeout)
 }
 
+type fakeInstallShellExecutor struct {
+	timeout time.Duration
+}
+
+func (f *fakeInstallShellExecutor) ExecShellCommandWithOptions(
+	_ context.Context, _ string, _ string, opts sandbox.ShellExecOptions,
+) (*sandbox.ExecuteResult, error) {
+	f.timeout = opts.Timeout
+	return &sandbox.ExecuteResult{ExitCode: 0}, nil
+}
+
+func TestInstallShellExecDefaultsToTheTenMinuteBudget(t *testing.T) {
+	inner := &fakeInstallShellExecutor{}
+	tool := NewInstallShellExecTool(inner)
+
+	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
+		`{"command":"pip install -r requirements.txt"}`,
+	))
+
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	assert.Equal(t, shellExecMaxTimeout, inner.timeout,
+		"install-mode shell_exec must not keep the ordinary 120s default")
+}
+
 func TestShellExecConfigurableOutputAndRegistryOverride(t *testing.T) {
 	content := strings.Repeat("x", 24*1024)
 	executor := &fakeShellExecutor{result: &sandbox.ExecuteResult{

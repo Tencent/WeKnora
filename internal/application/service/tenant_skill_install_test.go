@@ -189,25 +189,117 @@ func TestRunInstallSupersedesThePreviousLedgerRowWithoutDeletingIt(t *testing.T)
 		"the base template is recorded once and never re-derived from a snapshot")
 }
 
-func TestSwitchImagePointerKeepsAConcurrentConfigEdit(t *testing.T) {
+func TestSwitchImagePointerKeepsAConcurrentNameEdit(t *testing.T) {
 	fx := newInstallFixture(t)
-	// An admin rotates the provider credential and renames the config while
-	// the (minutes-long) install is running. Config edits are serialised by
-	// the config service's own cordon, not by the skill image lock.
+	// Config edits are serialised by the config service's own cordon, not by
+	// the skill image lock, so a rename can land while this run is still
+	// driving the agent. The pointer switch must re-read and keep that name.
 	fx.configRepo.editAfterFirstRead = func(e *types.TenantSandboxConfigEntity) {
 		e.Name = "renamed"
-		e.Config.E2B.APIKey = "key-2"
 	}
 
 	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
 
 	saved := fx.configRepo.saved
 	require.Equal(t, "renamed", saved.Name, "the pointer switch must not revert a config edit")
-	require.Equal(t, "key-2", saved.Config.E2B.APIKey)
-	require.Equal(t,
-		sandbox.SkillImageFingerprint("e2b", "key-2", "https://e2b.example"),
-		saved.Config.SkillImage.OwnerFingerprint,
-		"a fingerprint taken from the stale key would make every session ignore the snapshot")
+	require.Equal(t, fx.fingerprint, saved.Config.SkillImage.OwnerFingerprint,
+		"the snapshot was built under the original credentials")
+}
+
+func TestSwitchImagePointerAbandonsSnapshotWhenCredentialsRotate(t *testing.T) {
+	fx := newInstallFixture(t)
+	// Rotating the API key mid-install does not move the already-created
+	// snapshot to the new account. Stamping the new fingerprint onto that ID
+	// would make every session trust a snapshot the live key cannot resolve.
+	fx.configRepo.editAfterFirstRead = func(e *types.TenantSandboxConfigEntity) {
+		e.Config.E2B.APIKey = "key-2"
+	}
+
+	err := fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle)
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "credentials changed")
+	require.Nil(t, fx.configRepo.saved, "an unresolvable pointer must never be persisted")
+	require.Contains(t, fx.deletedSnapshots, "snap-1")
+
+	skill, _ := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.Equal(t, types.SkillStatusFailed, skill.Status)
+}
+
+func TestRunInstallAbortsWhenTheSkillRowWasRemoved(t *testing.T) {
+	fx := newInstallFixture(t)
+	require.NoError(t, fx.skillRepo.DeleteSkill(context.Background(), 7, "cfg-1", "sk-1"))
+
+	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
+
+	require.NotContains(t, fx.events, "create-snapshot",
+		"a queued install must not bake a skill whose row a remove already deleted")
+	require.Nil(t, fx.configRepo.saved)
+	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.Nil(t, skill)
+}
+
+func TestRunInstallAbortsWhenANewerBundleOwnsTheRow(t *testing.T) {
+	fx := newInstallFixture(t)
+	newer := strings.Repeat("b", 64)
+	require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), &types.TenantSkillEntity{
+		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		Name: fx.bundle.Name, BundleSHA256: newer,
+		Status: types.SkillStatusInstalling,
+	}))
+
+	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
+
+	require.NotContains(t, fx.events, "create-snapshot")
+	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.Equal(t, newer, skill.BundleSHA256)
+	require.Equal(t, types.SkillStatusInstalling, skill.Status,
+		"failing this run must not stamp the newer owner's row")
+}
+
+func TestRunInstallRefusesWhenWorkspaceScriptsAreDisabled(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.svc.sandboxPolicy = stubWorkspaceSandboxPolicy{disabled: true}
+
+	err := fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle)
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "disabled")
+	require.Empty(t, fx.sessionCalls, "the kill switch must fire before a billed session is created")
+	require.Nil(t, fx.configRepo.saved)
+}
+
+func TestRunInstallRequiresVenvWhenRequirementsExist(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.bundle.Files["requirements.txt"] = []byte("pypdf==4.0.0\n")
+	fx.depsExitCode = 1
+
+	err := fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle)
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, ".venv")
+	require.NotContains(t, fx.events, "create-snapshot")
+	require.Nil(t, fx.configRepo.saved)
+}
+
+func TestPrimaryEntryScriptIsDeterministic(t *testing.T) {
+	bundle := &SkillBundle{Files: map[string][]byte{
+		"scripts/z-helper.py": []byte("x"),
+		"scripts/a-main.py":   []byte("x"),
+		"scripts/mid.js":      []byte("x"),
+	}}
+	require.Equal(t, "scripts/a-main.py", primaryEntryScript(bundle),
+		"python is preferred over js, and the name is sorted so the pick is stable")
+}
+
+type stubWorkspaceSandboxPolicy struct {
+	disabled bool
+}
+
+func (s stubWorkspaceSandboxPolicy) WorkspaceScriptsDisabled(context.Context, uint64) (bool, error) {
+	return s.disabled, nil
 }
 
 func TestSwitchImagePointerRefusesAnUnusableFingerprint(t *testing.T) {
@@ -223,7 +315,9 @@ func TestSwitchImagePointerRefusesAnUnusableFingerprint(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorContains(t, err, "fingerprint")
 	require.Nil(t, fx.configRepo.saved, "an ineffective pointer must never be persisted")
-	require.Contains(t, fx.deletedSnapshots, "snap-1")
+	require.NotContains(t, fx.events, "create-snapshot",
+		"a config that cannot own a skill image must not spend a billed snapshot")
+	require.Empty(t, fx.deletedSnapshots)
 }
 
 // TestRunInstallStopsWhenTheLockIsLost also covers the cleanup that has to
@@ -242,8 +336,8 @@ func TestRunInstallStopsWhenTheLockIsLost(t *testing.T) {
 	require.NotContains(t, fx.events, "create-snapshot",
 		"losing the lock means another install may already be writing; do not snapshot")
 	require.Nil(t, fx.configRepo.saved)
-	require.Equal(t, []string{"sess-1"}, fx.destroyedSandboxes,
-		"a sandbox left running on the provider is billed until its TTL expires")
+	require.Empty(t, fx.destroyedSandboxes,
+		"the lock was already gone before a sandbox was created")
 
 	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
 	require.NoError(t, err)
@@ -552,6 +646,8 @@ type installFixture struct {
 	fingerprint   string
 	smokeExitCode int
 	smokeResult   *sandbox.ExecuteResult
+	// depsExitCode fails the declared-dependency check (venv / node_modules).
+	depsExitCode int
 	// execResult is scoped to execResultCommand: an unscoped stub result
 	// applies to the first command issued, which is not the command any of
 	// these tests is about.
@@ -646,6 +742,7 @@ func newInstallFixture(t *testing.T) *installFixture {
 		fx.configRepo,
 		&installStorageResolver{fx: fx},
 		&installSandboxResolver{mgr: fx.sandboxMgr},
+		nil,
 		fx.agentSvc,
 		&installCustomAgentService{fx: fx},
 		&installSessionService{fx: fx},
@@ -1066,6 +1163,11 @@ func (m *installSandboxManager) ExecShellCommandWithOptions(
 		if !m.structureSeen {
 			m.fx.record("verify-structure")
 			m.structureSeen = true
+		}
+	case strings.HasPrefix(command, "test -x ") || strings.HasPrefix(command, "test -d "):
+		m.fx.record("verify-deps")
+		if m.fx.depsExitCode != 0 {
+			return &sandbox.ExecuteResult{ExitCode: m.fx.depsExitCode, Stderr: "deps missing"}, nil
 		}
 	case command == installSmokeCommand:
 		m.fx.smokeRanAsRoot = opts.AsRoot

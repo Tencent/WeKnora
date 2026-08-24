@@ -37,7 +37,7 @@ func (s *TenantSkillService) RemoveSkill(
 	if err := s.skills.UpdateSkill(ctx, skill); err != nil {
 		return err
 	}
-	s.publishProgress(ctx, configID, skillID, SkillProgress{
+	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
 		Percent: 5, Stage: "accepted", Status: types.SkillStatusRemoving,
 	})
 
@@ -137,6 +137,7 @@ func (s *TenantSkillService) runRemove(
 	if err := ensureUsableImage(cfgEntity); err != nil {
 		return err
 	}
+	builtFingerprint := skillOwnerFingerprint(cfgEntity.Config)
 
 	// Everything below either creates provider resources or moves the image
 	// pointer, and the fallback moves it without taking a snapshot first. A
@@ -180,7 +181,7 @@ func (s *TenantSkillService) runRemove(
 		defer cancelRelease()
 		s.releaseSandbox(releaseCtx, mgr, sess.ID)
 	}()
-	s.publishProgress(ctx, configID, skillID, SkillProgress{Percent: 30, Stage: "sandbox_ready"})
+	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{Percent: 30, Stage: "sandbox_ready"})
 
 	if err := s.removeSkillDirectory(ctx, mgr, sess.ID, skillDir); err != nil {
 		return err
@@ -193,7 +194,7 @@ func (s *TenantSkillService) runRemove(
 	if err := s.cleanImageScratch(ctx, mgr, sess.ID); err != nil {
 		return err
 	}
-	s.publishProgress(ctx, configID, skillID, SkillProgress{Percent: 60, Stage: "removed"})
+	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{Percent: 60, Stage: "removed"})
 
 	// Checked again: everything above is confined to a sandbox we are about
 	// to destroy, and the wipe itself takes minutes, so the lock may have been
@@ -231,7 +232,7 @@ func (s *TenantSkillService) runRemove(
 		return err
 	}
 
-	if err := s.switchImagePointer(ctx, tenantID, configID, ref.ID, generation); err != nil {
+	if err := s.switchImagePointer(ctx, tenantID, configID, ref.ID, generation, builtFingerprint); err != nil {
 		s.abandonSnapshot(cleanupBase, tenantID, mgr, removeRowID, ref.ID)
 		return err
 	}
@@ -389,7 +390,7 @@ func (s *TenantSkillService) finishRemoval(
 		s.deleteBundleBestEffort(ctx, tenantID, skill.BundleRef)
 	}
 	s.markConfigSandboxesStale(ctx, tenantID, configID)
-	s.publishProgress(ctx, configID, skillID, SkillProgress{
+	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
 		Percent: 100, Stage: "done", Status: "removed",
 	})
 	return nil
@@ -413,7 +414,7 @@ func (s *TenantSkillService) restoreSkillAfterFailedRemoval(
 			e.Error = cause.Error()
 			e.InstallingSince = nil
 		})
-	s.publishProgress(ctx, configID, skillID, SkillProgress{
+	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
 		Percent: 100, Stage: "failed", Status: status, Log: cause.Error(),
 	})
 }
