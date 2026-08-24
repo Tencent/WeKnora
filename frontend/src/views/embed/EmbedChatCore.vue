@@ -46,6 +46,10 @@
           :key="(session.id as string) || `${session.role}-${session.created_at}-${index}`"
           class="msg-item-wrapper"
         >
+          <MessageTimestamp
+            v-if="shouldShowConversationTimestamp(messagesList, index)"
+            :value="session.created_at"
+          />
           <div v-if="session.role === 'user'" class="message-row">
             <EmbedUserMessage
               :content="String(session.content || '')"
@@ -56,7 +60,6 @@
               :embed-channel-id="channelId"
               :embed-token="token"
             />
-            <MessageTimestamp :value="session.created_at" align="end" />
           </div>
           <div v-if="session.role === 'assistant' && shouldRenderAssistantMessage(session)" class="message-row">
             <EmbedBotMessage
@@ -70,7 +73,6 @@
               :embed-session-sig="sessionSig"
               :embed-visitor-id="visitorId"
             />
-            <MessageTimestamp :value="session.created_at" align="start" />
             <FollowUpSuggestions v-if="!session.suggestionsDismissed"
               :suggestion-set="session.suggestionSet as any"
               :loading="Boolean(session.suggestionLoading)"
@@ -130,6 +132,7 @@ import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDraw
 import { useEmbedChatSession } from '@/composables/useEmbedChatSession'
 import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue'
 import MessageTimestamp from '@/components/chat/MessageTimestamp.vue'
+import { shouldShowConversationTimestamp } from '@/utils/messageTimestamp'
 import type { MessageSuggestionItem, MessageSuggestionSet } from '@/api/message-suggestion'
 
 provideChatReferencesDrawer()

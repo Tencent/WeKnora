@@ -3213,6 +3213,12 @@ export default {
     refreshSuggestedQuestions: '换一批',
     thinking: '思考中...',
     thinkingAlt: '正在思考',
+    conversationTime: {
+      today: '今天 {time}',
+      yesterday: '昨天 {time}',
+      thisYear: '{month}月{day}日 {time}',
+      otherYear: '{year}年{month}月{day}日 {time}',
+    },
     preparingAnswer: '正在准备回答…',
     connectingModelAndGeneratingAnswer: '正在连接模型并生成回答…',
     modelStillResponding: '模型响应较慢，仍在等待…',
