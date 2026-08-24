@@ -420,11 +420,16 @@ func (s *sessionService) UpdateSession(ctx context.Context, session *types.Sessi
 
 	// Update session in repository
 	userID := sessionUserIDFromContext(ctx)
-	if _, err := s.sessionRepo.Get(ctx, session.TenantID, userID, session.ID); err != nil {
+	existing, err := s.sessionRepo.Get(ctx, session.TenantID, userID, session.ID)
+	if err != nil {
 		return err
 	}
+	if existing != nil {
+		session.Description = types.SanitizeClientSessionDescription(
+			session.Description, existing.Description)
+	}
 
-	_, err := s.sessionRepo.Update(ctx, session, userID)
+	_, err = s.sessionRepo.Update(ctx, session, userID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": session.ID,

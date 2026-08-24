@@ -102,7 +102,6 @@ func usableSkillRow(row *types.TenantSkillEntity) bool {
 		sandbox.IsValidSkillName(row.Name)
 }
 
-
 // DiscoverSkills returns Level 1 metadata for every usable skill.
 func (s *TenantSkillSource) DiscoverSkills() ([]*SkillMetadata, error) {
 	metadata := make([]*SkillMetadata, 0, len(s.order))

@@ -278,6 +278,22 @@ func TestFailSkillDoesNotStampANewerBundle(t *testing.T) {
 	require.Empty(t, skill.Error)
 }
 
+func TestInstallSkillRecoversFromNameConflict(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.skillRepo.getByNameMisses = 1
+	fx.skillRepo.createErr = errors.New("UNIQUE constraint failed: tenant_skills.sandbox_config_id")
+	archive := zipBundle(t, map[string]string{"SKILL.md": validSkillMD})
+
+	id, err := fx.svc.InstallSkill(context.Background(), 7, "cfg-1", archive)
+
+	require.NoError(t, err)
+	require.Equal(t, "sk-1", id,
+		"the upload that lost the unique index must reuse the row that won")
+	skill, getErr := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, getErr)
+	require.Equal(t, types.SkillStatusInstalling, skill.Status)
+}
+
 func TestInstallSkillRefusesWhenBundleCannotBeStored(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.saveErr = errors.New("object store down")
@@ -1012,6 +1028,8 @@ type installSkillRepo struct {
 	// deleteSkillErr models the row delete failing past the point of no
 	// return.
 	deleteSkillErr      error
+	createErr           error
+	getByNameMisses     int
 	readyWriteAttempts  int
 	deleteSkillAttempts int
 	// listCalls counts attempts, not successes: a caller that gave up before
@@ -1034,6 +1052,9 @@ func skillKey(tenantID uint64, configID, skillID string) string {
 func (r *installSkillRepo) CreateSkill(_ context.Context, e *types.TenantSkillEntity) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.createErr != nil {
+		return r.createErr
+	}
 	cp := *e
 	r.skills[skillKey(e.TenantID, e.SandboxConfigID, e.ID)] = &cp
 	return nil
@@ -1062,6 +1083,10 @@ func (r *installSkillRepo) GetSkillByName(
 ) (*types.TenantSkillEntity, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.getByNameMisses > 0 {
+		r.getByNameMisses--
+		return nil, nil
+	}
 	for _, e := range r.skills {
 		if e.TenantID == tenantID && e.SandboxConfigID == configID && e.Name == name {
 			cp := *e

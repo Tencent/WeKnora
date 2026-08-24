@@ -22,6 +22,7 @@ type skillReaperStore interface {
 	ListStaleInstalling(ctx context.Context, olderThan time.Time) ([]*types.TenantSkillEntity, error)
 	GetSkill(ctx context.Context, tenantID uint64, configID, skillID string) (*types.TenantSkillEntity, error)
 	UpdateSkill(ctx context.Context, e *types.TenantSkillEntity) error
+	DeleteSkill(ctx context.Context, tenantID uint64, configID, skillID string) error
 }
 
 // skillReaperConfigReader is the config read ReapStuckRuns needs to tell a
@@ -59,15 +60,16 @@ var (
 
 // ReapStuckRuns recovers skill rows whose install or remove process died.
 //
-// An installing row older than skillInstallStuckTTL becomes failed so the UI
-// stops spinning. A removing row goes back to ready: the image still carries
-// the skill, and showing it as gone would be a lie.
+// An installing row older than skillInstallStuckTTL is healed to ready when
+// its InstalledSnapshotID is still the live image — a re-install that died
+// before the pointer moved, or a terminal ready write that never landed.
+// Leaving it at installing would hide a skill the image still carries.
+// Otherwise it becomes failed so the UI stops spinning.
 //
-// Rows whose InstalledSnapshotID already equals the config's live SkillImage
-// snapshot are skipped. That is the Task 10 gap: the pointer switched, the
-// terminal ready write exhausted its retries, and the row still reads
-// installing while the skill is being served. Marking that failed would hide a
-// live image.
+// A removing row is restored to ready only while that same snapshot is still
+// live. If the pointer already moved (or the skill never reached an image),
+// the files are gone and the leftover row is deleted so the agent cannot be
+// told to invoke them.
 func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 	if s == nil || s.skills == nil {
 		return 0, nil
@@ -89,6 +91,17 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 		switch row.Status {
 		case types.SkillStatusInstalling:
 			if s.skillServesLiveSnapshot(ctx, row) {
+				if err := s.updateSkillFields(ctx, row.TenantID, row.SandboxConfigID, row.ID,
+					func(e *types.TenantSkillEntity) {
+						e.Status = types.SkillStatusReady
+						e.Error = ""
+						e.InstallingSince = nil
+					}); err != nil {
+					logger.Warnf(ctx, "[skill] heal abandoned install %s back to ready failed: %v",
+						row.ID, err)
+					continue
+				}
+				reaped++
 				continue
 			}
 			if err := s.updateSkillFields(ctx, row.TenantID, row.SandboxConfigID, row.ID,
@@ -102,14 +115,30 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 			}
 			reaped++
 		case types.SkillStatusRemoving:
-			if err := s.updateSkillFields(ctx, row.TenantID, row.SandboxConfigID, row.ID,
-				func(e *types.TenantSkillEntity) {
-					e.Status = types.SkillStatusReady
-					e.Error = ""
-					e.InstallingSince = nil
-				}); err != nil {
-				logger.Warnf(ctx, "[skill] restore abandoned removal %s failed: %v", row.ID, err)
+			live, known := s.liveSnapshotID(ctx, row)
+			if !known {
 				continue
+			}
+			installed := strings.TrimSpace(row.InstalledSnapshotID)
+			if installed != "" && installed == live {
+				if err := s.updateSkillFields(ctx, row.TenantID, row.SandboxConfigID, row.ID,
+					func(e *types.TenantSkillEntity) {
+						e.Status = types.SkillStatusReady
+						e.Error = ""
+						e.InstallingSince = nil
+					}); err != nil {
+					logger.Warnf(ctx, "[skill] restore abandoned removal %s failed: %v", row.ID, err)
+					continue
+				}
+				reaped++
+				continue
+			}
+			if err := s.skills.DeleteSkill(ctx, row.TenantID, row.SandboxConfigID, row.ID); err != nil {
+				logger.Warnf(ctx, "[skill] drop abandoned removal %s failed: %v", row.ID, err)
+				continue
+			}
+			if row.BundleRef != "" {
+				s.deleteBundleBestEffort(ctx, row.TenantID, row.BundleRef)
 			}
 			reaped++
 		}
@@ -120,22 +149,41 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 	return reaped, nil
 }
 
-// skillServesLiveSnapshot reports whether this installing row already produced
-// the snapshot every new session boots. A true result means the install
-// succeeded and only the terminal ready write is missing.
+// skillServesLiveSnapshot reports whether this row's last installed snapshot
+// is still the image every new session boots. A true result means the files
+// are still there: either the install never moved the pointer, or it did and
+// only the terminal ready write is missing.
 func (s *TenantSkillService) skillServesLiveSnapshot(
 	ctx context.Context, row *types.TenantSkillEntity,
 ) bool {
-	if row == nil || strings.TrimSpace(row.InstalledSnapshotID) == "" || s.configs == nil {
+	if row == nil || strings.TrimSpace(row.InstalledSnapshotID) == "" {
 		return false
+	}
+	live, ok := s.liveSnapshotID(ctx, row)
+	if !ok {
+		// A config we cannot read must not be treated as a failed install:
+		// the image may still be serving this skill.
+		return true
+	}
+	return row.InstalledSnapshotID == live
+}
+
+// liveSnapshotID returns the config's current SkillImage snapshot and whether
+// that answer is trustworthy. ok is false when the config cannot be read, so
+// the caller can refuse to guess.
+func (s *TenantSkillService) liveSnapshotID(
+	ctx context.Context, row *types.TenantSkillEntity,
+) (string, bool) {
+	if row == nil || s.configs == nil {
+		return "", false
 	}
 	cfg, err := s.configs.GetByID(ctx, row.TenantID, row.SandboxConfigID)
 	if err != nil {
 		logger.Warnf(ctx, "[skill] reaper could not read sandbox config %s: %v",
 			row.SandboxConfigID, err)
-		return true
+		return "", false
 	}
-	return row.InstalledSnapshotID == currentSnapshotID(cfg)
+	return currentSnapshotID(cfg), true
 }
 
 // ReconcileSnapshots compares provider ListSnapshots against the ledger for one

@@ -39,6 +39,7 @@ func TestReapStuckRunsRestoresAbandonedRemovals(t *testing.T) {
 		Name: "pdf", Status: types.SkillStatusRemoving,
 		InstalledSnapshotID: "snap-live", InstallingSince: &staleSince,
 	})
+	fx.configs.entity.Config.SkillImage = &types.SkillImageConfig{SnapshotID: "snap-live"}
 
 	n, err := fx.svc.ReapStuckRuns(context.Background())
 
@@ -48,6 +49,41 @@ func TestReapStuckRunsRestoresAbandonedRemovals(t *testing.T) {
 	require.Equal(t, types.SkillStatusReady, got.Status,
 		"the image still has the skill, so showing it as removed would be a lie")
 	require.Nil(t, got.InstallingSince)
+}
+
+func TestReapStuckRunsDeletesAbandonedRemovalAfterPointerMoved(t *testing.T) {
+	fx := newReaperFixture(t)
+	staleSince := fx.now.Add(-skillInstallStuckTTL - time.Minute)
+	fx.skills.put(&types.TenantSkillEntity{
+		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		Name: "pdf", Status: types.SkillStatusRemoving,
+		InstalledSnapshotID: "snap-old", BundleRef: "bundle-1",
+		InstallingSince: &staleSince,
+	})
+	fx.configs.entity.Config.SkillImage = &types.SkillImageConfig{SnapshotID: "snap-new"}
+
+	n, err := fx.svc.ReapStuckRuns(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	require.Nil(t, fx.skills.rows["sk-1"],
+		"the pointer already left this skill behind; restoring ready would offer files the image no longer has")
+}
+
+func TestReapStuckRunsDeletesAbandonedRemovalThatNeverReachedAnImage(t *testing.T) {
+	fx := newReaperFixture(t)
+	staleSince := fx.now.Add(-skillInstallStuckTTL - time.Minute)
+	fx.skills.put(&types.TenantSkillEntity{
+		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		Name: "pdf", Status: types.SkillStatusRemoving, InstallingSince: &staleSince,
+	})
+
+	n, err := fx.svc.ReapStuckRuns(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	require.Nil(t, fx.skills.rows["sk-1"],
+		"a skill that never reached an image must not be marked ready")
 }
 
 func TestReapStuckRunsIgnoresFreshRuns(t *testing.T) {
@@ -66,7 +102,7 @@ func TestReapStuckRunsIgnoresFreshRuns(t *testing.T) {
 	require.Equal(t, types.SkillStatusInstalling, got.Status)
 }
 
-func TestReapStuckRunsSkipsInstallingRowWhoseSnapshotIsTheLiveImage(t *testing.T) {
+func TestReapStuckRunsHealsInstallingRowWhoseSnapshotIsStillLive(t *testing.T) {
 	fx := newReaperFixture(t)
 	staleSince := fx.now.Add(-skillInstallStuckTTL - time.Minute)
 	fx.skills.put(&types.TenantSkillEntity{
@@ -79,10 +115,12 @@ func TestReapStuckRunsSkipsInstallingRowWhoseSnapshotIsTheLiveImage(t *testing.T
 	n, err := fx.svc.ReapStuckRuns(context.Background())
 
 	require.NoError(t, err)
-	require.Zero(t, n,
-		"the pointer already serves this skill; marking it failed would hide a live image")
+	require.Equal(t, 1, n,
+		"a re-install that died before the pointer moved must become ready again")
 	got := fx.skills.mustGet("sk-1")
-	require.Equal(t, types.SkillStatusInstalling, got.Status)
+	require.Equal(t, types.SkillStatusReady, got.Status)
+	require.Empty(t, got.Error)
+	require.Nil(t, got.InstallingSince)
 	require.Equal(t, "snap-live", got.InstalledSnapshotID)
 }
 
@@ -219,8 +257,13 @@ func (r *reaperSkillStore) GetSkillByName(context.Context, uint64, string, strin
 func (r *reaperSkillStore) ListSkillsByConfig(context.Context, uint64, string) ([]*types.TenantSkillEntity, error) {
 	panic("ListSkillsByConfig is outside the reaper surface")
 }
-func (r *reaperSkillStore) DeleteSkill(context.Context, uint64, string, string) error {
-	panic("DeleteSkill is outside the reaper surface")
+func (r *reaperSkillStore) DeleteSkill(_ context.Context, tenantID uint64, configID, skillID string) error {
+	e := r.rows[skillID]
+	if e == nil || e.TenantID != tenantID || e.SandboxConfigID != configID {
+		return nil
+	}
+	delete(r.rows, skillID)
+	return nil
 }
 func (r *reaperSkillStore) CreateSnapshotRow(_ context.Context, e *types.TenantSkillSnapshotEntity) error {
 	cp := *e

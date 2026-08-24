@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -84,7 +85,29 @@ func (s *TenantSkillService) InstallSkill(
 			BundleSHA256: bundle.SHA256, Enabled: true,
 			Status: types.SkillStatusInstalling, InstallingSince: &now,
 		}); err != nil {
-			return "", err
+			if !isSkillNameConflict(err) {
+				return "", err
+			}
+			// Two first-time uploads of the same name raced the unique index.
+			// Take the row that won rather than surfacing a 500.
+			winner, lookupErr := s.skills.GetSkillByName(ctx, tenantID, configID, bundle.Name)
+			if lookupErr != nil {
+				return "", lookupErr
+			}
+			if winner == nil {
+				return "", err
+			}
+			skillID = winner.ID
+			winner.Version = bundle.Version
+			winner.Description = bundle.Description
+			winner.Instructions = bundle.Instructions
+			winner.BundleSHA256 = bundle.SHA256
+			winner.Status = types.SkillStatusInstalling
+			winner.Error = ""
+			winner.InstallingSince = &now
+			if err := s.skills.UpdateSkill(ctx, winner); err != nil {
+				return "", err
+			}
 		}
 	}
 
@@ -1347,6 +1370,19 @@ func currentBaseTemplate(cfg *types.TenantSandboxConfig) string {
 		}
 	}
 	return ""
+}
+
+// isSkillNameConflict recognises the unique (config, name) violation two
+// concurrent first-time uploads of the same skill produce.
+func isSkillNameConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "duplicate") || strings.Contains(msg, "unique constraint")
 }
 
 func skillOwnerFingerprint(cfg *types.TenantSandboxConfig) string {

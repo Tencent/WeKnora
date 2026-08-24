@@ -116,6 +116,56 @@ func TestUpdateSessionIsScopedToCurrentUserAndAllowsNoOp(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestUpdateSessionRejectsPlantedMaintenanceDescription(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	aliceSession := &types.Session{
+		TenantID:    1,
+		UserID:      "alice",
+		Title:       "alice private session",
+		Description: "ordinary",
+	}
+	require.NoError(t, db.Create(aliceSession).Error)
+
+	err := svc.UpdateSession(testSessionScopeContext(1, "alice"), &types.Session{
+		ID:          aliceSession.ID,
+		TenantID:    1,
+		Title:       "still mine",
+		Description: types.SkillMaintenanceSessionMarker + "install",
+	})
+	require.NoError(t, err)
+
+	var got types.Session
+	require.NoError(t, db.First(&got, "id = ?", aliceSession.ID).Error)
+	require.Equal(t, "still mine", got.Title)
+	require.Empty(t, got.Description,
+		"a client must not be able to hide a session behind the maintenance marker")
+}
+
+func TestUpdateSessionPreservesMaintenanceDescription(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	marker := types.SkillMaintenanceSessionMarker + "install"
+	row := &types.Session{
+		TenantID:    1,
+		UserID:      "alice",
+		Title:       "Skill install",
+		Description: marker,
+	}
+	require.NoError(t, db.Create(row).Error)
+
+	err := svc.UpdateSession(testSessionScopeContext(1, "alice"), &types.Session{
+		ID:          row.ID,
+		TenantID:    1,
+		Title:       "unhide me",
+		Description: "plain chat",
+	})
+	require.NoError(t, err)
+
+	var got types.Session
+	require.NoError(t, db.First(&got, "id = ?", row.ID).Error)
+	require.Equal(t, marker, got.Description,
+		"a PUT must not strip the marker off a real maintenance session")
+}
+
 func TestGetSessionIsScopedToAPIExternalUser(t *testing.T) {
 	svc, db := newTestSessionService(t)
 	aliceSession := &types.Session{
