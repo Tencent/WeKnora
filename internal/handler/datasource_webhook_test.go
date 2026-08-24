@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -312,6 +313,31 @@ func TestWebhookNonGitRepoTypeRejected(t *testing.T) {
 	)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 (type is not leaked before/after failed match)", w.Code)
+	}
+}
+
+func TestWebhookPausedIgnored(t *testing.T) {
+	svc := &stubWebhookService{
+		get: func(_ context.Context, _ string) (*types.DataSource, error) {
+			return gitRepoDataSource(t, map[string]interface{}{
+				"webhook_secret": "s3cret",
+				"repos":          []interface{}{map[string]interface{}{"repo_url": "https://gitlab.com/org/blog.git"}},
+			}), nil
+		},
+		webhookFn: func(_ context.Context, _ string) (*types.SyncLog, error) {
+			return nil, datasource.ErrDataSourcePaused
+		},
+	}
+	r := webhookRouter(t, svc)
+	w := postWebhook(r, map[string]string{"X-Gitlab-Event": "Push Hook", "X-Gitlab-Token": "s3cret"},
+		gitlabPushBody("https://gitlab.com/org/blog.git", "refs/heads/main", pushSHA))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (paused is ignored, not retried)", w.Code)
+	}
+	var resp map[string]string
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["status"] != "ignored" || resp["reason"] != "data source is paused" {
+		t.Fatalf("resp = %v", resp)
 	}
 }
 

@@ -258,11 +258,12 @@ func TestConnectorFetchStreamIncremental(t *testing.T) {
 		t.Fatal("expected second cursor")
 	}
 
-	var created, modified, deleted int
+	var created, modified int
+	deleted := map[string]bool{}
 	for _, item := range h2.items {
 		switch {
 		case item.IsDeleted:
-			deleted++
+			deleted[item.ExternalID] = true
 			if !strings.HasSuffix(item.ExternalID, "README.md") {
 				t.Fatalf("deleted external_id = %q", item.ExternalID)
 			}
@@ -272,8 +273,153 @@ func TestConnectorFetchStreamIncremental(t *testing.T) {
 			modified++
 		}
 	}
-	if created != 1 || modified != 1 || deleted != 1 {
-		t.Fatalf("created=%d modified=%d deleted=%d, want 1/1/1 (items=%+v)", created, modified, deleted, h2.items)
+	if created != 1 || modified != 1 || len(deleted) != 1 {
+		t.Fatalf("created=%d modified=%d deleted=%d, want 1/1/1 (items=%+v)", created, modified, len(deleted), h2.items)
+	}
+}
+
+func TestConnectorFetchStreamHistoryRewriteDeletesMissingFiles(t *testing.T) {
+	withTempStorage(t)
+	tr := setupTestRepo(t, map[string]string{"docs/a.md": "# A\n"})
+	conn := NewConnector()
+	ds := testConfig(tr.bareDir, tr.branch)
+
+	h := &collectingHandler{}
+	if _, err := conn.FetchStream(context.Background(), ds, nil, h); err != nil {
+		t.Fatalf("first FetchStream: %v", err)
+	}
+
+	// Cursor commit is gone (cold clone / history rewrite) but the previous
+	// file snapshot still lists gone.md, which is no longer in the tree.
+	rewritten := &types.SyncCursor{
+		ConnectorCursor: map[string]interface{}{
+			"repos": map[string]interface{}{
+				repoCursorKey(tr.bareDir, tr.branch): map[string]interface{}{
+					"commit": strings.Repeat("0", 40),
+					"branch": tr.branch,
+					"url":    tr.bareDir,
+					"files":  []string{"docs/a.md", "docs/gone.md"},
+				},
+			},
+		},
+	}
+	h2 := &collectingHandler{}
+	if _, err := conn.FetchStream(context.Background(), ds, rewritten, h2); err != nil {
+		t.Fatalf("rewrite FetchStream: %v", err)
+	}
+	var sawA, sawGoneDelete bool
+	for _, item := range h2.items {
+		if !item.IsDeleted && strings.HasSuffix(item.ExternalID, "docs/a.md") {
+			sawA = true
+		}
+		if item.IsDeleted && strings.HasSuffix(item.ExternalID, "docs/gone.md") {
+			sawGoneDelete = true
+		}
+	}
+	if !sawA || !sawGoneDelete {
+		t.Fatalf("rewrite items = %+v, want a.md upsert + gone.md delete", h2.items)
+	}
+}
+
+func TestConnectorFetchStreamColdCloneDeletesMissingFiles(t *testing.T) {
+	withTempStorage(t)
+	tr := setupTestRepo(t, map[string]string{"docs/a.md": "# A\n", "docs/b.md": "# B\n"})
+	conn := NewConnector()
+	ds := testConfig(tr.bareDir, tr.branch)
+
+	h := &collectingHandler{}
+	cursor, err := conn.FetchStream(context.Background(), ds, nil, h)
+	if err != nil {
+		t.Fatalf("first FetchStream: %v", err)
+	}
+
+	commitAndPush(t, tr.repo, tr.workDir, nil, []string{"docs/b.md"}, "drop-b")
+
+	// Simulate a new worker with empty local storage: the previous commit
+	// object is gone, so the connector must reconcile against cursor.Files.
+	dir := newClient(ds.ID, ds.TenantID, "").cloneDirFor(tr.bareDir, tr.branch)
+	if dir == "" {
+		t.Fatal("empty clone dir")
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	h2 := &collectingHandler{}
+	if _, err := conn.FetchStream(context.Background(), ds, cursor, h2); err != nil {
+		t.Fatalf("cold-clone FetchStream: %v", err)
+	}
+	var sawA, sawBDelete bool
+	for _, item := range h2.items {
+		if !item.IsDeleted && strings.HasSuffix(item.ExternalID, "docs/a.md") {
+			sawA = true
+		}
+		if item.IsDeleted && strings.HasSuffix(item.ExternalID, "docs/b.md") {
+			sawBDelete = true
+		}
+	}
+	if !sawA || !sawBDelete {
+		t.Fatalf("cold-clone items = %+v, want a.md upsert + b.md delete", h2.items)
+	}
+}
+
+func TestConnectorFetchStreamForceFullReconcilesDeletions(t *testing.T) {
+	withTempStorage(t)
+	tr := setupTestRepo(t, map[string]string{"docs/a.md": "# A\n", "docs/b.md": "# B\n"})
+	conn := NewConnector()
+	ds := testConfig(tr.bareDir, tr.branch)
+	h := &collectingHandler{}
+	cursor, err := conn.FetchStream(context.Background(), ds, nil, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitAndPush(t, tr.repo, tr.workDir, nil, []string{"docs/b.md"}, "drop-b")
+
+	ds.ForceFull = true
+	h2 := &collectingHandler{}
+	if _, err := conn.FetchStream(context.Background(), ds, cursor, h2); err != nil {
+		t.Fatalf("force-full FetchStream: %v", err)
+	}
+	var sawBDelete bool
+	for _, item := range h2.items {
+		if item.IsDeleted && strings.HasSuffix(item.ExternalID, "docs/b.md") {
+			sawBDelete = true
+		}
+	}
+	if !sawBDelete {
+		t.Fatalf("force-full items = %+v, want b.md delete", h2.items)
+	}
+}
+
+func TestEnsureCheckedOutRecoversCorruptClone(t *testing.T) {
+	withTempStorage(t)
+	tr := setupTestRepo(t, map[string]string{"docs/a.md": "# A\n"})
+	ds := testConfig(tr.bareDir, tr.branch)
+	dir := newClient(ds.ID, ds.TenantID, "").cloneDirFor(tr.bareDir, tr.branch)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("not a git dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h := &collectingHandler{}
+	if _, err := NewConnector().FetchStream(context.Background(), ds, nil, h); err != nil {
+		t.Fatalf("corrupt clone should be wiped and re-cloned: %v", err)
+	}
+	if len(h.items) != 1 {
+		t.Fatalf("items = %d, want 1", len(h.items))
+	}
+}
+
+func TestRepoDisplayNameDistinguishesOwners(t *testing.T) {
+	a := repoDisplayName("https://github.com/alice/docs")
+	b := repoDisplayName("https://github.com/bob/docs.git")
+	if a == b {
+		t.Fatalf("display names collided: %q", a)
+	}
+	if a != "alice-docs" || b != "bob-docs" {
+		t.Fatalf("display names = %q %q, want alice-docs / bob-docs", a, b)
 	}
 }
 

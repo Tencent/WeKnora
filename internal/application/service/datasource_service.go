@@ -498,6 +498,9 @@ func (s *DataSourceService) WebhookSync(ctx context.Context, dsID string) (*type
 func (s *DataSourceService) enqueueSync(
 	ctx context.Context, ds *types.DataSource, trigger string,
 ) (*types.SyncLog, error) {
+	if trigger == "webhook" && ds.Status == types.DataSourceStatusPaused {
+		return nil, datasource.ErrDataSourcePaused
+	}
 	if ds.Status != types.DataSourceStatusActive &&
 		ds.Status != types.DataSourceStatusError &&
 		ds.Status != types.DataSourceStatusPaused {
@@ -1122,6 +1125,7 @@ func (s *DataSourceService) processSyncStreaming(
 	autoTagIDs := s.resolveAutoTagIDs(ctx, ds)
 
 	forceFull := payload.ForceFull || ds.SyncMode == types.SyncModeFull
+	config.ForceFull = forceFull
 	attempt, _ := asynq.GetRetryCount(ctx)
 	startCursor, err := streamStartCursor(ds, forceFull, attempt)
 	if err != nil {
@@ -1133,6 +1137,15 @@ func (s *DataSourceService) processSyncStreaming(
 
 	result := &types.SyncResult{}
 	handler := &streamSyncHandler{svc: s, ds: ds, tagIDs: autoTagIDs, result: result, syncLog: syncLog}
+
+	// git_repo needs the previous file snapshot even on a forced full scan so
+	// it can emit deletions for paths that disappeared. Other connectors
+	// still get a nil cursor on force-full (their existing contract).
+	if forceFull && ds.Type == types.ConnectorTypeGitRepo {
+		if cur, perr := ds.ParseSyncCursor(); perr == nil && cur != nil {
+			startCursor = cur
+		}
+	}
 
 	nextCursor, fetchErr := sc.FetchStream(ctx, config, startCursor, handler)
 	if fetchErr != nil {
@@ -1623,6 +1636,9 @@ func migrateGitRepoWebhookSecret(existing, incoming *types.DataSourceConfig) {
 // place when a log is still running so we cannot loop against ourselves.
 func (s *DataSourceService) flushWebhookResync(ctx context.Context, ds *types.DataSource) {
 	if s == nil || ds == nil || ds.Type != types.ConnectorTypeGitRepo {
+		return
+	}
+	if ds.Status == types.DataSourceStatusPaused {
 		return
 	}
 	if s.syncLogRepo != nil {

@@ -107,6 +107,10 @@ type repoPosition struct {
 	Commit string `json:"commit"`
 	Branch string `json:"branch"`
 	URL    string `json:"url,omitempty"`
+	// Files is the last successfully-seen set of in-scope document paths.
+	// Used to emit deletions when a full re-scan cannot diff (cold clone,
+	// history rewrite, or ForceFull) because the previous commit is gone.
+	Files []string `json:"files,omitempty"`
 }
 
 type cursor struct {
@@ -177,46 +181,56 @@ func (c *Connector) FetchStream(
 		}
 
 		// Overlapping syncs of the same data source (cron + webhook + manual)
-		// share one clone dir; hold the lock across checkout AND the subsequent
-		// walk/read so a HardReset cannot tear the tree out from under us.
-		mu := repoDirMutex(ds.ID)
-		mu.Lock()
-		repo, headSHA, resolvedBranch, err := c.client.ensureCheckedOut(ctx, dir, url, resolvedBranch)
-		if err != nil {
-			mu.Unlock()
-			return nil, err
-		}
-
-		previous, _ := lookupPrev(prev, url, resolvedBranch)
-		switch {
-		case previous.Commit == "":
-			err = c.streamFiles(ctx, url, resolvedBranch, sel.Paths, h)
-		case previous.Commit != headSHA:
-			changes, diffErr := diffNameStatus(repo, previous.Commit, headSHA)
-			if errors.Is(diffErr, errHistoryRewritten) {
-				// Cursor commit no longer exists (force-push / history rewrite):
-				// re-enumerate the configured scope to preserve updates.
-				err = c.streamFiles(ctx, url, resolvedBranch, sel.Paths, h)
-			} else if diffErr != nil {
-				mu.Unlock()
-				return nil, diffErr
-			} else {
-				err = c.streamChanges(ctx, url, resolvedBranch, sel.Paths, changes, h)
+		// share one clone dir. Hold an in-process mutex plus an inter-process
+		// flock across checkout AND the subsequent walk/read so a HardReset
+		// cannot tear the tree out from under another worker.
+		err = withRepoDirLock(ds.ID, dir, func() error {
+			repo, headSHA, resolved, lockErr := c.client.ensureCheckedOut(ctx, dir, url, resolvedBranch)
+			if lockErr != nil {
+				return lockErr
 			}
-		}
-		if err != nil {
-			mu.Unlock()
-			return nil, err
-		}
+			resolvedBranch = resolved
 
-		next.Repos[key] = repoPosition{Commit: headSHA, Branch: resolvedBranch, URL: url}
-		delete(next.Repos, url) // drop the legacy URL-only cursor key if present
-		checkpoint := gitRepoCursor(next)
-		if err := h.Checkpoint(ctx, checkpoint); err != nil {
-			mu.Unlock()
+			previous, _ := lookupPrev(prev, url, resolvedBranch)
+			forceRescan := ds.ForceFull || previous.Commit == ""
+			switch {
+			case forceRescan:
+				if lockErr = c.streamFiles(ctx, url, resolvedBranch, sel.Paths, h); lockErr != nil {
+					return lockErr
+				}
+			case previous.Commit != headSHA:
+				changes, diffErr := diffNameStatus(repo, previous.Commit, headSHA)
+				if errors.Is(diffErr, errHistoryRewritten) {
+					// Cursor commit no longer exists (cold clone / force-push):
+					// re-enumerate current files, then reconcile deletions
+					// against the previous Files snapshot below.
+					if lockErr = c.streamFiles(ctx, url, resolvedBranch, sel.Paths, h); lockErr != nil {
+						return lockErr
+					}
+				} else if diffErr != nil {
+					return diffErr
+				} else if lockErr = c.streamChanges(ctx, url, resolvedBranch, sel.Paths, changes, h); lockErr != nil {
+					return lockErr
+				}
+			}
+
+			current, listErr := listWorktreeFiles(dir, sel.Paths)
+			if listErr != nil {
+				return listErr
+			}
+			if lockErr = c.emitMissingDeletions(ctx, url, resolvedBranch, previous.Files, current, h); lockErr != nil {
+				return lockErr
+			}
+
+			next.Repos[key] = repoPosition{
+				Commit: headSHA, Branch: resolvedBranch, URL: url, Files: current,
+			}
+			delete(next.Repos, url) // drop the legacy URL-only cursor key if present
+			return h.Checkpoint(ctx, gitRepoCursor(next))
+		})
+		if err != nil {
 			return nil, err
 		}
-		mu.Unlock()
 	}
 
 	if err := c.emitStaleRepoDeletions(ctx, ds.ID, prev, currentKeys, next, h); err != nil {
@@ -298,13 +312,24 @@ func (c *Connector) emitStaleRepoDeletions(
 		}
 		url, branch := staleCloneURL(key, pos)
 		if url != "" && branch != "" {
-			mu := repoDirMutex(dsID)
-			mu.Lock()
-			_ = c.streamDeletedWorktree(ctx, url, branch, h)
-			if dir := c.client.cloneDirFor(url, branch); dir != "" {
-				_ = os.RemoveAll(dir)
+			dir := c.client.cloneDirFor(url, branch)
+			if err := withRepoDirLock(dsID, dir, func() error {
+				if len(pos.Files) > 0 {
+					for _, file := range pos.Files {
+						if err := h.Emit(ctx, c.deleted(url, branch, file)); err != nil {
+							return err
+						}
+					}
+				} else {
+					_ = c.streamDeletedWorktree(ctx, url, branch, h)
+				}
+				if dir != "" {
+					_ = os.RemoveAll(dir)
+				}
+				return nil
+			}); err != nil {
+				return err
 			}
-			mu.Unlock()
 		}
 		delete(next.Repos, key)
 		if err := h.Checkpoint(ctx, gitRepoCursor(next)); err != nil {
@@ -322,6 +347,39 @@ func (c *Connector) streamDeletedWorktree(ctx context.Context, url, branch strin
 	return walkFiles(dir, nil, func(rel string) error {
 		return h.Emit(ctx, c.deleted(url, branch, rel))
 	})
+}
+
+func listWorktreeFiles(dir string, roots []string) ([]string, error) {
+	var files []string
+	err := walkFiles(dir, roots, func(rel string) error {
+		files = append(files, rel)
+		return nil
+	})
+	return files, err
+}
+
+// emitMissingDeletions tombstones files that were present in the previous
+// snapshot but are gone from the current worktree (or left the configured
+// path scope). Safe to call with a nil/empty previous list.
+func (c *Connector) emitMissingDeletions(
+	ctx context.Context, url, branch string, previous, current []string, h datasource.StreamHandler,
+) error {
+	if len(previous) == 0 {
+		return nil
+	}
+	have := make(map[string]struct{}, len(current))
+	for _, file := range current {
+		have[file] = struct{}{}
+	}
+	for _, file := range previous {
+		if _, ok := have[file]; ok {
+			continue
+		}
+		if err := h.Emit(ctx, c.deleted(url, branch, file)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // streamFiles emits every supported in-scope file of the worktree.
@@ -437,7 +495,14 @@ func contentTypeFor(file string) string {
 }
 
 // repoDisplayName derives a stable, human-friendly repo name from its URL.
+// Uses owner-repo (last two path segments) so two remotes that share a
+// repository name (alice/docs vs bob/docs) do not collide in the KB folder.
 func repoDisplayName(url string) string {
+	ident := strings.Trim(repoIdentity(url), "/")
+	parts := strings.Split(ident, "/")
+	if len(parts) >= 2 {
+		return parts[len(parts)-2] + "-" + strings.TrimSuffix(parts[len(parts)-1], ".git")
+	}
 	return strings.TrimSuffix(path.Base(url), ".git")
 }
 
@@ -465,6 +530,24 @@ func repoDirMutex(dsID string) *sync.Mutex {
 	mu := &sync.Mutex{}
 	repoDirMutexes.m[dsID] = mu
 	return mu
+}
+
+// withRepoDirLock serializes clone-dir access in-process and across workers
+// that share LOCAL_STORAGE_BASE_DIR. dir may be empty (unsafe id); the
+// callback is then not run.
+func withRepoDirLock(dsID, dir string, fn func() error) error {
+	mu := repoDirMutex(dsID)
+	mu.Lock()
+	defer mu.Unlock()
+	if dir == "" {
+		return fn()
+	}
+	unlock, err := lockCloneDir(dir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return fn()
 }
 
 // bufferingHandler adapts the streaming emit/checkpoint interface to plain

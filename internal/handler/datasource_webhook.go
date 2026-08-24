@@ -175,6 +175,11 @@ func (h *DataSourceWebhookHandler) HandleGitPush(c *gin.Context) {
 	}
 
 	if _, err := h.service.WebhookSync(ctx, dsID); err != nil {
+		if errors.Is(err, datasource.ErrDataSourcePaused) {
+			// 200 so the platform stops retrying while the source stays paused.
+			ignore(c, "data source is paused")
+			return
+		}
 		if errors.Is(err, datasource.ErrDataSourceNotActive) {
 			c.JSON(http.StatusConflict, gin.H{"error": "data source is not active"})
 			return

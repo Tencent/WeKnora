@@ -243,6 +243,11 @@ type DataSourceConfig struct {
 	// precedent of injecting per-run context through the config object.
 	ID       string `json:"-"`
 	TenantID uint64 `json:"-"`
+
+	// ForceFull is set by the sync service for this run only (never persisted).
+	// git_repo uses it to re-enumerate the worktree while still reading the
+	// previous cursor's file list so deletions are not dropped.
+	ForceFull bool `json:"-"`
 }
 
 // HasCredentials reports whether the credentials map carries any value at

@@ -155,12 +155,19 @@ func shouldInline(target string) bool {
 // readImageFile reads a worktree image blob and derives its MIME type from the
 // file extension. Unknown extensions are skipped.
 func readImageFile(abs string) ([]byte, string, bool) {
-	data, err := os.ReadFile(abs)
+	info, err := os.Stat(abs)
 	if err != nil {
+		return nil, "", false
+	}
+	if info.Size() < minInlinedImageSize || info.Size() > maxInlinedImageSize {
 		return nil, "", false
 	}
 	mime := mimeFromExt(abs)
 	if mime == "" {
+		return nil, "", false
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
 		return nil, "", false
 	}
 	return data, mime, true

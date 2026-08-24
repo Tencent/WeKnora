@@ -147,6 +147,53 @@ func TestEnqueueSyncCoalescesWebhookOnly(t *testing.T) {
 	assert.Equal(t, 2, enq.calls)
 }
 
+func TestEnqueueSyncSkipsPausedWebhook(t *testing.T) {
+	ds := &types.DataSource{
+		ID:              "ds-paused",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Type:            types.ConnectorTypeGitRepo,
+		Status:          types.DataSourceStatusPaused,
+	}
+	enq := &countingTaskEnqueuer{}
+	svc := &DataSourceService{
+		dsRepo:       newKBDeleteDSRepo("kb-1", ds),
+		syncLogRepo:  &coalesceSyncLogRepo{},
+		taskEnqueuer: enq,
+	}
+
+	_, err := svc.WebhookSync(context.Background(), ds.ID)
+	require.ErrorIs(t, err, datasource.ErrDataSourcePaused)
+	assert.Equal(t, 0, enq.calls)
+
+	got, err := svc.ManualSync(context.Background(), ds.ID)
+	require.NoError(t, err)
+	assert.NotNil(t, got)
+	assert.Equal(t, 1, enq.calls)
+}
+
+func TestFlushWebhookResyncSkipsPaused(t *testing.T) {
+	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
+	ds := &types.DataSource{
+		ID:              "ds-paused-flush",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Type:            types.ConnectorTypeGitRepo,
+		Status:          types.DataSourceStatusPaused,
+	}
+	require.NoError(t, git_repo.MarkWebhookResync(ds.TenantID, ds.ID))
+	enq := &countingTaskEnqueuer{}
+	svc := &DataSourceService{
+		dsRepo:       newKBDeleteDSRepo("kb-1", ds),
+		syncLogRepo:  &coalesceSyncLogRepo{},
+		taskEnqueuer: enq,
+	}
+	svc.flushWebhookResync(context.Background(), ds)
+	assert.Equal(t, 0, enq.calls)
+	assert.True(t, git_repo.ConsumeWebhookResync(ds.TenantID, ds.ID),
+		"paused flush must leave the marker for a later active run")
+}
+
 func TestDeleteDataSourceRemovesGitRepoClone(t *testing.T) {
 	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
 	ds := &types.DataSource{

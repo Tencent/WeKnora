@@ -234,7 +234,10 @@ func (c *client) ensureCheckedOut(
 	repo, err := git.PlainOpen(dir)
 	if err != nil {
 		if !errors.Is(err, git.ErrRepositoryNotExists) && !os.IsNotExist(err) {
-			return nil, "", "", fmt.Errorf("git_repo: open clone %s: %w", dir, err)
+			// A previous failed clone can leave a corrupt .git that is not
+			// "repository not exists". Wipe and start clean instead of
+			// failing every subsequent sync.
+			_ = os.RemoveAll(dir)
 		}
 		return c.clone(ctx, dir, repoURL, branch)
 	}
@@ -315,6 +318,7 @@ func (c *client) clone(ctx context.Context, dir, repoURL, branch string) (*git.R
 	}
 	repo, err := git.PlainCloneContext(ctx, dir, false, opts)
 	if err != nil {
+		_ = os.RemoveAll(dir)
 		return nil, "", "", fmt.Errorf("git_repo: clone %s: %w", repoURL, err)
 	}
 	head, err := repo.Head()
