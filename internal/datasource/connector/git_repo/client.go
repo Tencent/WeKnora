@@ -27,6 +27,7 @@ import (
 	"github.com/go-git/go-git/v5/utils/merkletrie"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 // errHistoryRewritten marks a previous cursor commit that no longer exists in
@@ -94,6 +95,25 @@ func repoStorageBase() string {
 		base = "/data/files"
 	}
 	return filepath.Join(base, "git-repos")
+}
+
+// CloneStorageDir is the on-disk root for one data source's git clones.
+// Empty dsID or a path-like id returns "" so callers cannot RemoveAll a parent.
+func CloneStorageDir(tenantID uint64, dsID string) string {
+	if dsID == "" || strings.Contains(dsID, "..") || strings.ContainsAny(dsID, `/\`) {
+		return ""
+	}
+	return filepath.Join(repoStorageBase(), fmt.Sprint(tenantID), dsID)
+}
+
+// RemoveCloneStorage deletes the clone directory for a data source. Missing
+// directories are not an error.
+func RemoveCloneStorage(tenantID uint64, dsID string) error {
+	dir := CloneStorageDir(tenantID, dsID)
+	if dir == "" {
+		return nil
+	}
+	return os.RemoveAll(dir)
 }
 
 // cloneDirFor returns the on-disk clone directory for a repo+branch selection.
@@ -215,6 +235,9 @@ func (c *client) clone(ctx context.Context, dir, repoURL, branch string) (*git.R
 		URL:          repoURL,
 		Auth:         buildAuth(c.token),
 		SingleBranch: true,
+		// Tip-only clone: incremental diffs still work because later fetches
+		// keep the previous tip in the object store instead of pruning it.
+		Depth: 1,
 	}
 	if branch != "" {
 		opts.ReferenceName = plumbing.NewBranchReferenceName(branch)
@@ -334,6 +357,13 @@ func readFile(dir, rel string) ([]byte, error) {
 	full, err := resolveUnderRoot(dir, rel)
 	if err != nil {
 		return nil, err
+	}
+	info, err := os.Stat(full)
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > utils.GetMaxFileSize() {
+		return nil, errFileTooLarge
 	}
 	return os.ReadFile(full)
 }

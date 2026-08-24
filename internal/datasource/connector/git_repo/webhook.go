@@ -32,7 +32,10 @@ func webhookRepoKey(raw string) (string, bool) {
 	if p == "" {
 		return "", false
 	}
-	return strings.ToLower(u.Host) + p, true
+	// Host and path are folded: GitHub (and gitlab.com) treat owner/repo as
+	// case-insensitive. A user-typed lowercase URL must still match the
+	// canonical clone_url in the webhook payload.
+	return strings.ToLower(u.Host) + strings.ToLower(p), true
 }
 
 // MatchPush reports whether a push event for repoURL on branch should trigger

@@ -30,6 +30,7 @@ func TestMatchPushURLVariants(t *testing.T) {
 		{"scheme variant", "http://github.com/org/blog.git", true},
 		{"no .git suffix", "https://github.com/org/blog", true},
 		{"trailing slash", "https://github.com/org/blog.git/", true},
+		{"path case", "https://github.com/Org/Blog.git", true},
 		{"other project", "https://github.com/org/other.git", false},
 		{"other host", "https://gitlab.com/org/blog.git", false},
 		{"garbage", "not a url", false},
@@ -41,10 +42,10 @@ func TestMatchPushURLVariants(t *testing.T) {
 		}
 	}
 
-	// Host comparison is case-insensitive in both configured and payload URLs.
-	mixed := matchPushConfig(t, map[string]interface{}{"repo_url": "https://GitHub.com/org/blog.git"})
+	// Host and path comparison is case-insensitive in both configured and payload URLs.
+	mixed := matchPushConfig(t, map[string]interface{}{"repo_url": "https://GitHub.com/Org/Blog.git"})
 	if !MatchPush(mixed, "https://github.com/org/blog.git", "main") {
-		t.Error("host case-insensitive match failed")
+		t.Error("host/path case-insensitive match failed")
 	}
 }
 

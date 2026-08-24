@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/datasource/connector/git_repo"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -86,7 +87,11 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 
 	// Validate configuration
 	if cfg, err := ds.ParseConfig(); err == nil && cfg != nil {
+		if cfg.Type == "" {
+			cfg.Type = ds.Type
+		}
 		cfg.StripNonSecretCredentials(ds.Type)
+		migrateGitRepoWebhookSecret(nil, cfg)
 		if blob, err := cfg.ToJSON(); err == nil {
 			ds.Config = blob
 		}
@@ -187,10 +192,13 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 			merged := *incomingCfg
 			if existingCfg != nil {
 				merged.Credentials = existingCfg.Credentials
-				preserveGitRepoWebhookSecret(existingCfg, &merged)
 			} else {
 				merged.Credentials = nil
 			}
+			if merged.Type == "" {
+				merged.Type = ds.Type
+			}
+			migrateGitRepoWebhookSecret(existingCfg, &merged)
 			merged.StripNonSecretCredentials(ds.Type)
 			if blob, err := merged.ToJSON(); err == nil {
 				ds.Config = blob
@@ -202,14 +210,15 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 
 	// Validate new configuration if non-credential fields changed. Skip
 	// when there are no stored credentials yet (validators would fail with
-	// no token to call the live API) and when the parsed config is
+	// no token to call the live API) — except git_repo, which can validate
+	// public remotes without a token. Also skip when the parsed config is
 	// structurally identical.
 	configActuallyChanged := true
 	if mergedCfg != nil && existingParsedCfg != nil {
 		configActuallyChanged = !reflect.DeepEqual(*mergedCfg, *existingParsedCfg)
 	}
-	hasCreds := mergedCfg != nil && mergedCfg.HasConfiguredCredentials(ds.Type)
-	if hasCreds && (ds.Type != existing.Type || configActuallyChanged) {
+	if shouldLiveValidateDataSource(ds.Type, mergedCfg) &&
+		(ds.Type != existing.Type || configActuallyChanged) {
 		if err := s.validateDataSourceConfig(ctx, ds); err != nil {
 			return nil, err
 		}
@@ -254,8 +263,12 @@ func (s *DataSourceService) UpdateDataSourceCredentials(
 	if parsed == nil {
 		parsed = &types.DataSourceConfig{Type: existing.Type}
 	}
-	parsed.Credentials = credentials
+	if parsed.Type == "" {
+		parsed.Type = existing.Type
+	}
+	parsed.Credentials = mergeIndependentGitRepoCredentials(existing.Type, parsed.Credentials, credentials)
 	parsed.StripNonSecretCredentials(existing.Type)
+	migrateGitRepoWebhookSecret(nil, parsed)
 	blob, err := parsed.ToJSON()
 	if err != nil {
 		return nil, err
@@ -334,12 +347,15 @@ func (s *DataSourceService) DeleteDataSource(ctx context.Context, id string) err
 	}
 
 	// Remove cron schedule
-	s.scheduler.Remove(id)
+	if s.scheduler != nil {
+		s.scheduler.Remove(id)
+	}
 
 	// Cancel any pending/running sync logs so queued asynq tasks won't retry
 	if err := s.syncLogRepo.CancelPendingByDataSource(ctx, id); err != nil {
 		logger.Warnf(ctx, "failed to cancel pending sync logs for ds=%s: %v", id, err)
 	}
+	cleanupGitRepoCloneStorage(ctx, existing.TenantID, existing.ID, existing.Type)
 
 	logger.Infof(ctx, "data source deleted: id=%s", id)
 	recordKBActivity(ctx, s.audit, existing.TenantID, existing.KnowledgeBaseID, types.AuditActionDataSourceDeleted,
@@ -485,14 +501,19 @@ func (s *DataSourceService) enqueueSync(
 		return nil, datasource.ErrDataSourceNotActive
 	}
 
-	if running, err := s.syncLogRepo.HasRunningSync(ctx, ds.ID); err != nil {
-		return nil, err
-	} else if running {
-		if latest, lerr := s.syncLogRepo.FindLatest(ctx, ds.ID); lerr == nil && latest != nil &&
-			latest.Status == types.SyncLogStatusRunning {
-			logger.Infof(ctx, "sync already running, coalescing: ds=%s syncLog=%s trigger=%s",
-				ds.ID, latest.ID, trigger)
-			return latest, nil
+	// Webhook platforms retry non-2xx. Coalesce only for webhook so a burst of
+	// pushes does not enqueue overlapping clones. ManualSync must still be able
+	// to recover a stuck "running" log after a worker crash.
+	if trigger == "webhook" {
+		if running, err := s.syncLogRepo.HasRunningSync(ctx, ds.ID); err != nil {
+			return nil, err
+		} else if running {
+			if latest, lerr := s.syncLogRepo.FindLatest(ctx, ds.ID); lerr == nil && latest != nil &&
+				latest.Status == types.SyncLogStatusRunning {
+				logger.Infof(ctx, "sync already running, coalescing: ds=%s syncLog=%s trigger=%s",
+					ds.ID, latest.ID, trigger)
+				return latest, nil
+			}
 		}
 	}
 
@@ -1507,11 +1528,55 @@ func timePtr(t time.Time) *time.Time {
 	return &utc
 }
 
-// preserveGitRepoWebhookSecret keeps a legacy settings.webhook_secret when the
-// client re-saves settings after a redacted GET (the secret is stripped from
-// API responses). New secrets belong in credentials.webhook_secret.
-func preserveGitRepoWebhookSecret(existing, incoming *types.DataSourceConfig) {
-	if existing == nil || incoming == nil {
+// shouldLiveValidateDataSource reports whether a settings change should hit
+// the live connector. Most connectors skip this when no credentials are stored
+// (their validators need a token). git_repo can sync public remotes, so a
+// repo_url change must still be ls-remote'd.
+func shouldLiveValidateDataSource(dsType string, cfg *types.DataSourceConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	if dsType == types.ConnectorTypeGitRepo {
+		return true
+	}
+	return cfg.HasConfiguredCredentials(dsType)
+}
+
+// mergeIndependentGitRepoCredentials keeps independently-optional git_repo
+// secrets when the caller only sent the field they are rotating. Other
+// connectors keep the historical replace-all semantics.
+func mergeIndependentGitRepoCredentials(
+	dsType string, existing, incoming map[string]interface{},
+) map[string]interface{} {
+	if dsType != types.ConnectorTypeGitRepo {
+		return incoming
+	}
+	out := make(map[string]interface{}, len(incoming)+2)
+	for k, v := range incoming {
+		if s, ok := v.(string); ok && strings.TrimSpace(s) == "" {
+			continue
+		}
+		out[k] = v
+	}
+	for _, key := range []string{"access_token", "webhook_secret"} {
+		if _, ok := out[key]; ok {
+			continue
+		}
+		if s, ok := existing[key].(string); ok && strings.TrimSpace(s) != "" {
+			out[key] = s
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// migrateGitRepoWebhookSecret moves a plaintext settings.webhook_secret into
+// encrypted credentials and always strips the settings key so a redacted GET
+// followed by PUT cannot persist the secret in settings.
+func migrateGitRepoWebhookSecret(existing, incoming *types.DataSourceConfig) {
+	if incoming == nil {
 		return
 	}
 	if incoming.Type != types.ConnectorTypeGitRepo && incoming.Type != "" {
@@ -1520,13 +1585,33 @@ func preserveGitRepoWebhookSecret(existing, incoming *types.DataSourceConfig) {
 	if incoming.Settings == nil {
 		incoming.Settings = map[string]interface{}{}
 	}
-	if s, ok := incoming.Settings["webhook_secret"].(string); ok && strings.TrimSpace(s) != "" {
+	incomingSecret, _ := incoming.Settings["webhook_secret"].(string)
+	incomingSecret = strings.TrimSpace(incomingSecret)
+	delete(incoming.Settings, "webhook_secret")
+
+	if cred, ok := incoming.Credentials["webhook_secret"].(string); ok && strings.TrimSpace(cred) != "" {
 		return
 	}
-	if existing.Settings == nil {
+	secret := incomingSecret
+	if secret == "" && existing != nil && existing.Settings != nil {
+		if s, ok := existing.Settings["webhook_secret"].(string); ok {
+			secret = strings.TrimSpace(s)
+		}
+	}
+	if secret == "" {
 		return
 	}
-	if s, ok := existing.Settings["webhook_secret"].(string); ok && strings.TrimSpace(s) != "" {
-		incoming.Settings["webhook_secret"] = s
+	if incoming.Credentials == nil {
+		incoming.Credentials = map[string]interface{}{}
+	}
+	incoming.Credentials["webhook_secret"] = secret
+}
+
+func cleanupGitRepoCloneStorage(ctx context.Context, tenantID uint64, dsID, dsType string) {
+	if dsType != types.ConnectorTypeGitRepo {
+		return
+	}
+	if err := git_repo.RemoveCloneStorage(tenantID, dsID); err != nil {
+		logger.Warnf(ctx, "failed to remove git_repo clone storage: ds=%s err=%v", dsID, err)
 	}
 }

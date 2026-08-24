@@ -219,7 +219,7 @@ func (c *Connector) streamFiles(
 	dir := c.client.cloneDirFor(url, branch)
 	return walkFiles(dir, roots, func(rel string) error {
 		item, err := c.item(ctx, url, branch, rel)
-		if errors.Is(err, errPathEscapesWorktree) {
+		if errors.Is(err, errPathEscapesWorktree) || errors.Is(err, errFileTooLarge) {
 			return nil
 		}
 		if err != nil {
@@ -250,7 +250,7 @@ func (c *Connector) streamChanges(
 		}
 		if inScope(ch.NewPath, roots) && isSupportedFile(ch.NewPath) {
 			item, err := c.item(ctx, url, branch, ch.NewPath)
-			if errors.Is(err, errPathEscapesWorktree) {
+			if errors.Is(err, errPathEscapesWorktree) || errors.Is(err, errFileTooLarge) {
 				continue
 			}
 			if err != nil {

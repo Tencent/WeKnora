@@ -1,8 +1,10 @@
 package git_repo
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -56,5 +58,37 @@ func TestResolveUnderRootAllowsInternalSymlink(t *testing.T) {
 	data, err := os.ReadFile(got)
 	if err != nil || string(data) != "ok" {
 		t.Fatalf("read linked file: %v %q", err, data)
+	}
+}
+
+func TestReadFileRejectsOversized(t *testing.T) {
+	t.Setenv("MAX_FILE_SIZE_MB", "1")
+	root := t.TempDir()
+	big := strings.Repeat("x", 2*1024*1024)
+	if err := os.WriteFile(filepath.Join(root, "big.md"), []byte(big), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readFile(root, "big.md"); !errors.Is(err, errFileTooLarge) {
+		t.Fatalf("oversized file err=%v, want errFileTooLarge", err)
+	}
+}
+
+func TestRemoveCloneStorageDeletesOnlyDataSourceDir(t *testing.T) {
+	t.Setenv(localStorageBaseEnv, t.TempDir())
+	dir := CloneStorageDir(7, "ds-clean")
+	if dir == "" {
+		t.Fatal("expected clone dir")
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "repo"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveCloneStorage(7, "ds-clean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("clone dir still present: %v", err)
+	}
+	if got := CloneStorageDir(7, "../escape"); got != "" {
+		t.Fatalf("path-like dsID must be rejected, got %q", got)
 	}
 }

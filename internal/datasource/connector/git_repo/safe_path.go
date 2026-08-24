@@ -12,6 +12,10 @@ import (
 // than ingesting host or cross-tenant content.
 var errPathEscapesWorktree = errors.New("git_repo: path escapes worktree")
 
+// errFileTooLarge is returned when a worktree file exceeds MAX_FILE_SIZE_MB.
+// Callers skip the file so one oversized blob cannot abort the whole sync.
+var errFileTooLarge = errors.New("git_repo: file exceeds size limit")
+
 // resolveUnderRoot maps a repository-relative path to an absolute file under
 // root, following symlinks and rejecting any target that leaves the worktree.
 func resolveUnderRoot(root, rel string) (string, error) {
