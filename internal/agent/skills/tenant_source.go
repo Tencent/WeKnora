@@ -88,27 +88,27 @@ func NewTenantSkillSource(
 // an administrator is invisible: telling the model about a skill it cannot
 // invoke costs it turns and gains nothing.
 //
-// The ID guard is not defensive: every path this source hands out is
-// SkillDirFor(row.ID), which joins the ID under the skills root. A row whose ID
-// is not a single path segment yields a path outside the skill, or outside the
-// root entirely, and those paths reach the model in discovery metadata and in
-// SkillFile.Path even though execution would refuse them. Filtering the row out
-// here is what keeps them from ever being spoken. sandbox.IsValidSkillName is
-// the same rule SkillDirFor enforces, so this cannot disagree with it.
+// The name guard is not defensive: every path this source hands out is
+// SkillDirFor(row.Name), which joins the name under the skills root. A name
+// that is not a single path segment yields a path outside the skill, or outside
+// the root entirely, and those paths reach the model in discovery metadata and
+// in SkillFile.Path even though execution would refuse them. Filtering the row
+// out here is what keeps them from ever being spoken. sandbox.IsValidSkillName
+// is the same rule SkillDirFor enforces, so this cannot disagree with it.
 func usableSkillRow(row *types.TenantSkillEntity) bool {
 	return row != nil &&
 		row.Enabled &&
 		row.Status == types.SkillStatusReady &&
-		sandbox.IsValidSkillName(row.ID) &&
-		strings.TrimSpace(row.Name) != ""
+		sandbox.IsValidSkillName(row.Name)
 }
+
 
 // DiscoverSkills returns Level 1 metadata for every usable skill.
 func (s *TenantSkillSource) DiscoverSkills() ([]*SkillMetadata, error) {
 	metadata := make([]*SkillMetadata, 0, len(s.order))
 	for _, name := range s.order {
 		row := s.byName[name]
-		basePath, err := sandbox.SkillDirFor(row.ID)
+		basePath, err := sandbox.SkillDirFor(row.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -127,7 +127,7 @@ func (s *TenantSkillSource) LoadSkillInstructions(name string) (*Skill, error) {
 	if err != nil {
 		return nil, err
 	}
-	basePath, err := sandbox.SkillDirFor(row.ID)
+	basePath, err := sandbox.SkillDirFor(row.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func (s *TenantSkillSource) LoadSkillFile(name, relativePath string) (*SkillFile
 	if !ok {
 		return nil, fmt.Errorf("file not found in skill %s: %s", name, relativePath)
 	}
-	basePath, err := sandbox.SkillDirFor(row.ID)
+	basePath, err := sandbox.SkillDirFor(row.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -202,12 +202,11 @@ func (s *TenantSkillSource) GetSkillBasePath(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return sandbox.SkillDirFor(row.ID)
+	return sandbox.SkillDirFor(row.Name)
 }
 
 // RemoteScriptPath returns the absolute in-image path of one script. It is
-// keyed on the immutable skill ID, never the display name: renaming a skill
-// must not move a single file.
+// keyed on the skill name, which is also the directory the installer wrote.
 //
 // It deliberately does not consult the archive. The image is what executes,
 // and a skill whose archive failed to store - the install logs a warning and
@@ -221,7 +220,7 @@ func (s *TenantSkillSource) RemoteScriptPath(name, relativePath string) (string,
 	if err != nil {
 		return "", err
 	}
-	basePath, err := sandbox.SkillDirFor(row.ID)
+	basePath, err := sandbox.SkillDirFor(row.Name)
 	if err != nil {
 		return "", err
 	}

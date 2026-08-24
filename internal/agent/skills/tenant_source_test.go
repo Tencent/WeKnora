@@ -31,22 +31,22 @@ func TestTenantSkillSourceOnlyExposesUsableSkills(t *testing.T) {
 	require.Equal(t, "ready-enabled", metadata[0].Name)
 }
 
-// The ID is joined under the skills root to build every path this source hands
-// out, so it has to be a single path segment. IDs are server-generated and
-// execution rejects an escaping path anyway, but the base path travels to the
-// model in metadata and in SkillFile.Path, which is the same reasoning
-// guardSkillDir applies on the install side.
-func TestTenantSkillSourceRejectsAnIDThatIsNotOnePathSegment(t *testing.T) {
+// The name is joined under the skills root to build every path this source
+// hands out, so it has to be a single path segment. Execution rejects an
+// escaping path anyway, but the base path travels to the model in metadata
+// and in SkillFile.Path, which is the same reasoning guardSkillDir applies
+// on the install side.
+func TestTenantSkillSourceRejectsANameThatIsNotOnePathSegment(t *testing.T) {
 	src := NewTenantSkillSource([]*types.TenantSkillEntity{
-		{ID: "../sk-2", Name: "escaping", Status: types.SkillStatusReady, Enabled: true},
-		{ID: "nested/sk-3", Name: "nested", Status: types.SkillStatusReady, Enabled: true},
-		{ID: "..", Name: "parent", Status: types.SkillStatusReady, Enabled: true},
+		{ID: "sk-2", Name: "../escaping", Status: types.SkillStatusReady, Enabled: true},
+		{ID: "sk-3", Name: "nested/name", Status: types.SkillStatusReady, Enabled: true},
+		{ID: "sk-4", Name: "..", Status: types.SkillStatusReady, Enabled: true},
 	}, nil)
 
 	metadata, err := src.DiscoverSkills()
 	require.NoError(t, err)
 	require.Empty(t, metadata)
-	for _, name := range []string{"escaping", "nested", "parent"} {
+	for _, name := range []string{"../escaping", "nested/name", ".."} {
 		_, err := src.GetSkillBasePath(name)
 		require.Error(t, err, "%s must be invisible, not merely unexecutable", name)
 	}
@@ -60,8 +60,8 @@ func TestTenantSkillSourceBasePathIsTheImageDir(t *testing.T) {
 	base, err := src.GetSkillBasePath("pdf")
 
 	require.NoError(t, err)
-	require.Equal(t, "/opt/weknora/tenant/skills/sk-1", base,
-		"the path is keyed by ID because the display name is renameable")
+	require.Equal(t, "/opt/weknora/tenant/skills/pdf", base,
+		"the path is the skill name: that is the directory the installer writes")
 }
 
 // A skill the source does not expose must be unreachable through every entry
@@ -99,8 +99,8 @@ func TestTenantSkillSourceLoadsInstructionsFromTheRow(t *testing.T) {
 	require.Equal(t, "PDF helpers", skill.Description)
 	require.Equal(t, "Run scripts/extract.py.", skill.Instructions)
 	require.True(t, skill.Loaded)
-	require.Equal(t, "/opt/weknora/tenant/skills/sk-1", skill.BasePath)
-	require.Equal(t, "/opt/weknora/tenant/skills/sk-1/SKILL.md", skill.FilePath)
+	require.Equal(t, "/opt/weknora/tenant/skills/pdf", skill.BasePath)
+	require.Equal(t, "/opt/weknora/tenant/skills/pdf/SKILL.md", skill.FilePath)
 }
 
 func TestTenantSkillSourceReadsLevel3FilesFromTheBundle(t *testing.T) {
@@ -125,7 +125,7 @@ func TestTenantSkillSourceReadsLevel3FilesFromTheBundle(t *testing.T) {
 	file, err := src.LoadSkillFile("pdf", "reference/FORMS.md")
 	require.NoError(t, err)
 	require.Equal(t, "form notes", file.Content)
-	require.Equal(t, "/opt/weknora/tenant/skills/sk-1/reference/FORMS.md", file.Path,
+	require.Equal(t, "/opt/weknora/tenant/skills/pdf/reference/FORMS.md", file.Path,
 		"the path the model is shown must be the one it can execute or read in the sandbox")
 	require.False(t, file.IsScript)
 
@@ -185,7 +185,7 @@ func TestTenantSkillSourceReportsAMissingBundleWithoutBlockingExecution(t *testi
 
 	remote, err := src.RemoteScriptPath("pdf", "scripts/extract.py")
 	require.NoError(t, err)
-	require.Equal(t, "/opt/weknora/tenant/skills/sk-1/scripts/extract.py", remote)
+	require.Equal(t, "/opt/weknora/tenant/skills/pdf/scripts/extract.py", remote)
 }
 
 func TestManagerPrefersTheTenantSkillOverASameNamedPreloadedOne(t *testing.T) {
@@ -233,13 +233,13 @@ func TestManagerRunsATenantSkillFromTheImageWithoutUploading(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, sandboxMgr.config)
-	require.Equal(t, "/opt/weknora/tenant/skills/sk-1/scripts/extract.py",
+	require.Equal(t, "/opt/weknora/tenant/skills/pdf/scripts/extract.py",
 		sandboxMgr.config.RemoteScriptPath)
 	require.Empty(t, sandboxMgr.config.Script,
 		"there is no host-side copy of an installed skill to upload")
 	require.Equal(t, []string{"--flag"}, sandboxMgr.config.Args)
 	require.Equal(t, "sess-1", sandboxMgr.config.SessionID)
-	require.Equal(t, sandbox.SkillsImageRoot+"/sk-1",
+	require.Equal(t, sandbox.SkillsImageRoot+"/pdf",
 		sandboxMgr.config.Env["WEKNORA_SKILL_DIR"])
 	require.Equal(t, "/workspace/output", sandboxMgr.config.Env[artifactOutputEnvVar])
 }
