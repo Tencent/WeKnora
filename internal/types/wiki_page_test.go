@@ -32,9 +32,9 @@ func TestWikiPageTypes(t *testing.T) {
 
 func TestWikiConfigValueScan(t *testing.T) {
 	config := WikiConfig{
-		SynthesisModelID:      "model-123",
-		MaxPagesPerIngest:     20,
-		MaxReduceInputBytes:   4096,
+		SynthesisModelID:    "model-123",
+		MaxPagesPerIngest:   20,
+		MaxReduceInputBytes: 4096,
 	}
 
 	val, err := config.Value()
