@@ -54,6 +54,7 @@ type CreateKnowledgeQARequest struct {
 	SkillNames            []string                     `json:"skill_names"`                           // Per-request Skills selected via @mention
 	TagIDs                []string                     `json:"tag_ids"`                               // @mentioned tag IDs (display/debug; scoped via MentionedItems)
 	MentionedItems        []MentionedItemRequest       `json:"mentioned_items"`                       // @mentioned knowledge bases and files
+	MetadataFilters       []types.KBMetadataFilter     `json:"metadata_filters,omitempty"`            // Per-KB document metadata filters
 	DisableTitle          bool                         `json:"disable_title"`                         // Whether to disable auto title generation
 	Images                []ImageAttachment            `json:"images"`                                // Attached images for multimodal chat
 	AttachmentUploads     []AttachmentUpload           `json:"attachment_uploads,omitempty"`          // Attached files (documents, audio, etc.)
@@ -71,12 +72,13 @@ type AttachmentUpload struct {
 
 // SearchKnowledgeRequest defines the request structure for searching knowledge without LLM summarization
 type SearchKnowledgeRequest struct {
-	Query            string                 `json:"query"              binding:"required"` // Query text to search for
-	KnowledgeBaseID  string                 `json:"knowledge_base_id"`                     // Single knowledge base ID (for backward compatibility)
-	KnowledgeBaseIDs []string               `json:"knowledge_base_ids"`                    // IDs of knowledge bases to search (multi-KB support)
-	KnowledgeIDs     []string               `json:"knowledge_ids"`                         // IDs of specific knowledge (files) to search
-	TagIDs           []string               `json:"tag_ids"`                               // Tag IDs for filtering within a single KB
-	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // Optional scoped tag mentions
+	Query            string                   `json:"query"              binding:"required"` // Query text to search for
+	KnowledgeBaseID  string                   `json:"knowledge_base_id"`                     // Single knowledge base ID (for backward compatibility)
+	KnowledgeBaseIDs []string                 `json:"knowledge_base_ids"`                    // IDs of knowledge bases to search (multi-KB support)
+	KnowledgeIDs     []string                 `json:"knowledge_ids"`                         // IDs of specific knowledge (files) to search
+	TagIDs           []string                 `json:"tag_ids"`                               // Tag IDs for filtering within a single KB
+	MentionedItems   []MentionedItemRequest   `json:"mentioned_items"`                       // Optional scoped tag mentions
+	MetadataFilters  []types.KBMetadataFilter `json:"metadata_filters,omitempty"`            // Per-KB document metadata filters
 }
 
 // StopSessionRequest represents the stop session request

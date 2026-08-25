@@ -22,6 +22,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'download'): void;
   (e: 'edit'): void;
+  (e: 'metadata'): void;
   (e: 'view-trace'): void;
   (e: 'reparse'): void;
   (e: 'cancel-parse'): void;
@@ -57,6 +58,11 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
   <div v-if="item.type === 'manual'" class="doc-action-menu-item" @click.stop="emit('edit')">
     <t-icon class="icon" name="edit" />
     <span>{{ $t('knowledgeBase.editDocument') }}</span>
+  </div>
+
+  <div v-if="canMutateKnowledge" class="doc-action-menu-item" @click.stop="emit('metadata')">
+    <t-icon class="icon" name="catalog" />
+    <span>{{ $t('metadata.editDocumentMetadata') }}</span>
   </div>
 
   <!-- 查看处理过程 -->

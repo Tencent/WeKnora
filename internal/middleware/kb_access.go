@@ -1,8 +1,12 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	stderrors "errors"
+	"io"
+	"strings"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -146,6 +150,66 @@ func KBIDFromKnowledgeIDParam(param string, kgService KnowledgeLookup) KBIDResol
 			return "", apperrors.NewNotFoundError("Knowledge not found")
 		}
 		return k.KnowledgeBaseID, nil
+	}
+}
+
+// KBIDFromKnowledgeIDsJSON resolves a batch metadata request to one KB while
+// preserving the body for the downstream JSON binder. Batch requests spanning
+// multiple KBs must be split so each KB's sharing policy is evaluated independently.
+func KBIDFromKnowledgeIDsJSON(kgService KnowledgeLookup) KBIDResolver {
+	return func(c *gin.Context) (string, error) {
+		const maxBodyBytes = 1 << 20
+		if c.Request.Body == nil {
+			return "", apperrors.NewBadRequestError("metadata batch request body is required")
+		}
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxBodyBytes+1))
+		if err != nil {
+			return "", apperrors.NewBadRequestError("cannot read metadata batch request")
+		}
+		c.Request.Body = io.NopCloser(bytes.NewReader(body))
+		if len(body) > maxBodyBytes {
+			return "", apperrors.NewBadRequestError("metadata batch request is too large")
+		}
+		var request struct {
+			KnowledgeIDs []string `json:"knowledge_ids"`
+		}
+		if err := json.Unmarshal(body, &request); err != nil || len(request.KnowledgeIDs) == 0 {
+			return "", apperrors.NewBadRequestError("knowledge_ids are required")
+		}
+		if len(request.KnowledgeIDs) > 200 {
+			return "", apperrors.NewBadRequestError("knowledge_ids cannot contain more than 200 values")
+		}
+
+		var knowledgeBaseID string
+		seen := make(map[string]struct{}, len(request.KnowledgeIDs))
+		for _, rawID := range request.KnowledgeIDs {
+			knowledgeID := strings.TrimSpace(rawID)
+			if knowledgeID == "" {
+				return "", apperrors.NewBadRequestError("knowledge_ids cannot contain empty values")
+			}
+			if _, ok := seen[knowledgeID]; ok {
+				continue
+			}
+			seen[knowledgeID] = struct{}{}
+			knowledge, err := kgService.GetKnowledgeByIDOnly(c.Request.Context(), knowledgeID)
+			if err != nil {
+				if isResourceNotFound(err) {
+					return "", apperrors.NewNotFoundError("Knowledge not found")
+				}
+				return "", err
+			}
+			if knowledge == nil || knowledge.KnowledgeBaseID == "" {
+				return "", apperrors.NewNotFoundError("Knowledge not found")
+			}
+			if knowledgeBaseID == "" {
+				knowledgeBaseID = knowledge.KnowledgeBaseID
+				continue
+			}
+			if knowledge.KnowledgeBaseID != knowledgeBaseID {
+				return "", apperrors.NewBadRequestError("metadata batch request must target one knowledge base")
+			}
+		}
+		return knowledgeBaseID, nil
 	}
 }
 

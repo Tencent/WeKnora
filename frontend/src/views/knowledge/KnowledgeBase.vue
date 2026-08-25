@@ -39,7 +39,10 @@ import {
   moveKnowledgeToFolder,
   renameKnowledgeFolder,
   downKnowledgeDetails,
+  getMetadataSchema,
   type KnowledgeFolderTree,
+  type MetadataCondition,
+  type MetadataDefinition,
 } from "@/api/knowledge-base/index";
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
 import FAQEntryManager from './components/FAQEntryManager.vue';
@@ -49,6 +52,8 @@ import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import KbFolderTree from './components/KbFolderTree.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
+import MetadataFilterBar from './components/MetadataFilterBar.vue';
+import DocumentMetadataEditor from './components/DocumentMetadataEditor.vue';
 import BatchTagDialog from './components/BatchTagDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
@@ -543,6 +548,11 @@ const isTagFilterPlaceholder = computed(
 );
 
 const selectedTagIds = ref<string[]>([]);
+const metadataDefinitions = ref<MetadataDefinition[]>([]);
+const metadataConditions = ref<MetadataCondition[]>([]);
+const metadataEditorVisible = ref(false);
+const metadataKnowledgeID = ref('');
+const metadataKnowledgeName = ref('');
 const tagList = ref<any[]>([]);
 const tagLoading = ref(false);
 const tagSearchQuery = ref('');
@@ -645,6 +655,7 @@ const isFiltering = computed(() =>
   isFilteringDocuments({
     keyword: docSearchKeyword.value,
     tagIds: selectedTagIds.value,
+    metadataConditions: metadataConditions.value,
     fileType: selectedFileType.value,
     parseStatus: selectedParseStatus.value,
     source: selectedSource.value,
@@ -667,6 +678,7 @@ const filterParams = computed(() => {
   const [start, end] = updatedTimeRange.value || [];
   return {
     tag_ids: selectedTagIds.value.length > 0 ? selectedTagIds.value.join(',') : undefined,
+    metadata_conditions: metadataConditions.value.length > 0 ? metadataConditions.value : undefined,
     keyword: docSearchKeyword.value ? docSearchKeyword.value.trim() : undefined,
     file_type: selectedFileType.value || undefined,
     parse_status: selectedParseStatus.value || undefined,
@@ -736,6 +748,25 @@ function openTagEditDialog(item: KnowledgeCard) {
   tagEditTarget.value = item;
   tagEditDialogVisible.value = true;
 }
+
+function openMetadataEditor(item: KnowledgeCard) {
+  metadataKnowledgeID.value = item.id;
+  metadataKnowledgeName.value = item.display_name || item.file_name || item.title || '';
+  metadataEditorVisible.value = true;
+}
+
+const loadMetadataSchema = async (targetKbId: string) => {
+  if (!targetKbId) {
+    metadataDefinitions.value = [];
+    return;
+  }
+  try {
+    const response: any = await getMetadataSchema(targetKbId);
+    metadataDefinitions.value = response?.data?.definitions || [];
+  } catch {
+    metadataDefinitions.value = [];
+  }
+};
 
 function onTagEditConfirm(tagIds: string[]) {
   if (tagEditTarget.value) {
@@ -1026,6 +1057,7 @@ const loadKnowledgeBaseInfo = async (targetKbId: string, force = false) => {
 
     kbInfo.value = data;
     selectedTagIds.value = [];
+    metadataConditions.value = [];
     tagFilterCleared.value = false;
     uiStore.clearSelectedTagIds();
     // 重置store中的标签选择状态，避免上传文档时自动带上之前选择的标签
@@ -1033,6 +1065,7 @@ const loadKnowledgeBaseInfo = async (targetKbId: string, force = false) => {
     if (!isFAQ.value) {
       loadKnowledgeFiles(targetKbId);
       void loadFolderTree(targetKbId);
+      void loadMetadataSchema(targetKbId);
     } else {
       cardList.value = [];
       total.value = 0;
@@ -1118,6 +1151,13 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
 }, { immediate: true });
 
 watch(selectedTagIds, (newVal, oldVal) => {
+  if (oldVal === undefined) return;
+  if (kbId.value) {
+    loadKnowledgeFiles(kbId.value);
+  }
+}, { deep: true });
+
+watch(metadataConditions, (newVal, oldVal) => {
   if (oldVal === undefined) return;
   if (kbId.value) {
     loadKnowledgeFiles(kbId.value);
@@ -2189,7 +2229,7 @@ const downloadKnowledge = async (item: KnowledgeCard) => {
 
 // Bridge card-view actions back to existing per-card handlers.
 const handleCardAction = (
-  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage' | 'metadata',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
@@ -2204,11 +2244,12 @@ const handleCardAction = (
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);
   if (action === 'batch-manage') return handleEnterBatchFromCard(item);
+  if (action === 'metadata') return openMetadataEditor(item);
 };
 
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
-  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage' | 'metadata',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
@@ -2220,11 +2261,12 @@ const handleListAction = (
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);
   if (action === 'batch-manage') return handleEnterBatchFromCard(item);
+  if (action === 'metadata') return openMetadataEditor(item);
 };
 
 // Clear selection on filter/tag/kb change to avoid acting on hidden items.
 watch(
-  [selectedTagIds, docSearchKeyword, selectedFileType, selectedParseStatus, selectedSource, updatedTimeRange, kbId],
+  [selectedTagIds, metadataConditions, docSearchKeyword, selectedFileType, selectedParseStatus, selectedSource, updatedTimeRange, kbId],
   () => {
     clearSelection();
   },
@@ -2427,6 +2469,7 @@ async function createNewSession(value: string): Promise<void> {
                   </template>
                 </t-input>
                 <div class="doc-filter-bar__filters">
+                <MetadataFilterBar v-if="!isFAQ" v-model="metadataConditions" :definitions="metadataDefinitions" />
                 <t-popup v-model:visible="tagFilterPanelVisible" trigger="click" placement="bottom-left"
                   overlay-class-name="tag-filter-popup" :overlay-inner-style="{ padding: 0 }">
                   <template #content>
@@ -2711,6 +2754,14 @@ async function createNewSession(value: string): Promise<void> {
     :kb-id="kbId" :tag-list="tagList" :selected-tags="tagEditTarget?.tags || []" :can-manage="canEdit"
     @update:visible="tagEditDialogVisible = $event" @confirm="onTagEditConfirm" @tag-created="loadTags(kbId, true)"
     @open-manage="openTagManageFromEditDialog" />
+
+  <DocumentMetadataEditor
+    :visible="metadataEditorVisible"
+    :knowledge-id="metadataKnowledgeID"
+    :knowledge-name="metadataKnowledgeName"
+    :can-edit="canEdit"
+    @update:visible="metadataEditorVisible = $event"
+  />
 
   <!-- 批量打标签弹窗 -->
   <BatchTagDialog :visible="batchTagDialogVisible"

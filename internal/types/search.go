@@ -44,6 +44,9 @@ type SearchTarget struct {
 	// user-selected scope. The reranker still orders candidates, but vector and
 	// keyword thresholds cannot erase the whole explicit scope before reranking.
 	DisableRecallThresholds bool `json:"disable_recall_thresholds,omitempty"`
+	// MetadataFiltered marks a target whose KnowledgeIDs already reflect a
+	// document-metadata scope. Combined full-KB retrieval must not absorb it.
+	MetadataFiltered bool `json:"metadata_filtered,omitempty"`
 }
 
 // SearchTargets is a list of search targets, pre-computed at request entry point
@@ -92,7 +95,7 @@ func HasKnowledgeRetrievalScope(
 			continue
 		}
 		if target.Type == SearchTargetTypeKnowledgeBase || len(target.KnowledgeIDs) > 0 ||
-			len(target.TagIDs) > 0 || len(target.ScopeTagIDs) > 0 {
+			len(target.TagIDs) > 0 || len(target.ScopeTagIDs) > 0 || target.MetadataFiltered {
 			return true
 		}
 	}

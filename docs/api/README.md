@@ -119,6 +119,7 @@ WeKnora API 按功能分为以下几类：
 | 模型管理 | 配置和管理各种AI模型 | [model.md](./model.md) |
 | 分块管理 | 管理知识的分块内容 | [chunk.md](./chunk.md) |
 | 标签管理 | 管理知识库的标签分类 | [tag.md](./tag.md) |
+| 自定义元数据 | 知识库字段定义、文档值、自动填写与检索过滤 | [metadata.md](./metadata.md) |
 | FAQ管理 | 管理FAQ问答对 | [faq.md](./faq.md) |
 | 智能体管理 | 创建和管理自定义智能体 | [agent.md](./agent.md) |
 | 会话管理 | 创建和管理对话会话 | [session.md](./session.md) |

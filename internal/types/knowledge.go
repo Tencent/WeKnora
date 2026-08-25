@@ -116,6 +116,10 @@ type KnowledgeListFilter struct {
 	// FolderScope selects whether FolderPath matches exactly or includes
 	// descendant folders. FolderScopeAny (the default) ignores folders.
 	FolderScope KnowledgeFolderScope
+	// RestrictKnowledgeIDs, when true, limits the list to KnowledgeIDs.
+	// An empty KnowledgeIDs slice matches nothing.
+	RestrictKnowledgeIDs bool
+	KnowledgeIDs         []string
 }
 
 // Knowledge represents a knowledge entity in the system.

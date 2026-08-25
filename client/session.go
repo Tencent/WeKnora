@@ -459,14 +459,28 @@ func (c *Client) StopSession(ctx context.Context, sessionID string, messageID st
 	return parseResponse(resp, &response)
 }
 
+// MetadataCondition is a single typed document-metadata predicate.
+type MetadataCondition struct {
+	MetadataDefinitionID string `json:"metadata_definition_id"`
+	Operator             string `json:"operator"`
+	Values               []any  `json:"values"`
+}
+
+// KBMetadataFilter constrains retrieval to documents matching metadata conditions.
+type KBMetadataFilter struct {
+	KnowledgeBaseID string              `json:"knowledge_base_id"`
+	Conditions      []MetadataCondition `json:"conditions"`
+}
+
 // SearchKnowledgeRequest knowledge search request
 type SearchKnowledgeRequest struct {
-	Query            string          `json:"query"`                        // Query content
-	KnowledgeBaseID  string          `json:"knowledge_base_id,omitempty"`  // Single knowledge base ID (for backward compatibility)
-	KnowledgeBaseIDs []string        `json:"knowledge_base_ids,omitempty"` // Knowledge base IDs (multi-KB support)
-	KnowledgeIDs     []string        `json:"knowledge_ids,omitempty"`      // Specific knowledge (file) IDs
-	TagIDs           []string        `json:"tag_ids,omitempty"`            // Tag IDs for filtering within a single KB
-	MentionedItems   []MentionedItem `json:"mentioned_items,omitempty"`    // Optional scoped tag mentions
+	Query            string             `json:"query"`                        // Query content
+	KnowledgeBaseID  string             `json:"knowledge_base_id,omitempty"`  // Single knowledge base ID (for backward compatibility)
+	KnowledgeBaseIDs []string           `json:"knowledge_base_ids,omitempty"` // Knowledge base IDs (multi-KB support)
+	KnowledgeIDs     []string           `json:"knowledge_ids,omitempty"`      // Specific knowledge (file) IDs
+	TagIDs           []string           `json:"tag_ids,omitempty"`            // Tag IDs for filtering within a single KB
+	MentionedItems   []MentionedItem    `json:"mentioned_items,omitempty"`    // Optional scoped tag mentions
+	MetadataFilters  []KBMetadataFilter `json:"metadata_filters,omitempty"`   // Per-KB document metadata filters
 }
 
 // SearchKnowledgeResponse search results response

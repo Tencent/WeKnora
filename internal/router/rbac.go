@@ -606,6 +606,17 @@ func (g *rbacGuards) KBAccessWriteFromKnowledgeIDParam(param string) gin.Handler
 	)
 }
 
+func (g *rbacGuards) KBAccessReadFromKnowledgeIDsBody() gin.HandlerFunc {
+	return middleware.RequireKBAccess(
+		middleware.KBIDFromKnowledgeIDsJSON(g.knowledgeService),
+		types.OrgRoleViewer,
+		g.kbService,
+		g.kbShareService,
+		g.agentShareService,
+		g.cfg,
+	)
+}
+
 // KBAccessReadFromChunkIDParam walks chunk_id -> kb_id (using the
 // chunk's denormalised KnowledgeBaseID column). Used by
 // /chunks/by-id/:id read routes.
