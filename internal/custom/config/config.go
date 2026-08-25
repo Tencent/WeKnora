@@ -101,7 +101,7 @@ func (d DatabaseConfig) DSN() string {
 func (d DatabaseConfig) MigrateURL() string {
 	userinfo := url.UserPassword(d.User, d.Password).String()
 	return fmt.Sprintf(
-		"postgres://%s@%s:%d/%s?sslmode=disable",
+		"postgres://%s@%s:%d/%s?sslmode=disable&x-migrations-table=custom_schema_migrations",
 		userinfo, d.Host, d.Port, d.DBName,
 	)
 }
