@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/moby/moby/api/types/image"
@@ -72,6 +73,77 @@ func TestDockerSnapshotRoundTripAndListFilter(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, fromA, 1)
 	require.Equal(t, second.ID, fromA[0].ID)
+}
+
+// Each generation is committed from a container started off the previous one,
+// so untagging one alone frees nothing while its descendant lives. Without
+// noprune=0 the layers of a fully retired chain would stay on disk forever.
+func TestDockerDeleteSnapshotPrunesUntaggedAncestors(t *testing.T) {
+	engine := newFakeDockerEngine()
+	docker := newTestDockerClient(t, engine)
+
+	ref, err := docker.CreateSnapshot(context.Background(), "container-a", "weknora-sk-a-g1")
+	require.NoError(t, err)
+	require.NoError(t, docker.DeleteSnapshot(context.Background(), ref.ID))
+
+	require.True(t, engine.removeImageOptions[0].PruneChildren,
+		"a delete that keeps untagged parents can never reclaim a retired chain")
+	require.True(t, engine.removeImageOptions[0].Force)
+}
+
+// A skill snapshot the ledger cannot name is unreachable: snapshots are always
+// addressed by the tag CreateSnapshot mints, never by digest.
+func TestDockerDeleteSnapshotSweepsUntaggedSkillImages(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.images = []image.Summary{
+		{
+			ID:       "sha256:retired",
+			RepoTags: []string{"weknora-skill/weknora-sk-a-g1:latest"},
+			Labels:   map[string]string{dockerSkillSnapshotLabel: "true"},
+		},
+		{
+			ID:       "sha256:orphan",
+			RepoTags: []string{"<none>:<none>"},
+			Labels:   map[string]string{dockerSkillSnapshotLabel: "true"},
+		},
+		{
+			ID:       "sha256:live",
+			RepoTags: []string{"weknora-skill/weknora-sk-a-g2:latest"},
+			Labels:   map[string]string{dockerSkillSnapshotLabel: "true"},
+		},
+		{
+			ID:       "sha256:base",
+			RepoTags: []string{"weknora/sandbox:test"},
+			Labels:   map[string]string{dockerTemplateLabel: "true"},
+		},
+	}
+	docker := newTestDockerClient(t, engine)
+
+	require.NoError(t, docker.DeleteSnapshot(
+		context.Background(), "weknora-skill/weknora-sk-a-g1"))
+
+	require.Equal(t,
+		[]string{"weknora-skill/weknora-sk-a-g1", "sha256:orphan"},
+		engine.removedImages,
+		"the sweep must take the untagged snapshot and nothing that is still named")
+}
+
+func TestDockerDeleteSnapshotSweepFailureIsNotAnError(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.images = []image.Summary{
+		{
+			ID:       "sha256:orphan",
+			RepoTags: []string{"<none>:<none>"},
+			Labels:   map[string]string{dockerSkillSnapshotLabel: "true"},
+		},
+	}
+	engine.imagePresent["weknora-skill/weknora-sk-a-g1"] = true
+	engine.listImagesErr = errors.New("daemon busy")
+	docker := newTestDockerClient(t, engine)
+
+	require.NoError(t, docker.DeleteSnapshot(
+		context.Background(), "weknora-skill/weknora-sk-a-g1"),
+		"reclaiming storage must not turn a completed delete into a failure")
 }
 
 func TestDockerListTemplatesHidesSkillSnapshots(t *testing.T) {

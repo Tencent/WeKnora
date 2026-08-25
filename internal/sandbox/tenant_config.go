@@ -138,9 +138,11 @@ func ResolveEffectiveConfig(
 			effective.E2BTemplate = snapshot
 		}
 	case SandboxTypeDocker:
-		if snapshot := skillImageTemplateOverride(
-			tenantCfg.SkillImage, "docker", effective.DockerTLSCertPath, effective.DockerHost,
-		); snapshot != "" {
+		// Deliberately computed from the STORED docker block, not from
+		// effective.DockerHost: a blank host is resolved from the environment
+		// by applyDockerRuntimeDefaults, and that resolved value must never
+		// reach the fingerprint (see dockerLocalDaemonIdentity).
+		if snapshot := DockerSkillImageOverride(tenantCfg); snapshot != "" {
 			effective.DockerImage = snapshot
 		}
 	}

@@ -361,14 +361,19 @@ func (s *TenantSkillService) runInstall(
 	// cordon, which this lock says nothing about — hence the re-read there.
 	generation := currentGeneration(cfgEntity) + 1
 	installRowID := uuid.NewString()
+	// The name is recorded with the row rather than derived at the call below,
+	// so a run that dies during the commit still leaves the ledger able to
+	// name what it was building. Without it the snapshot would be a provider
+	// resource nothing could ever address, let alone reclaim.
+	snapshotName := skillSnapshotBuildName(configID, generation)
 	if err := s.skills.CreateSnapshotRow(ctx, &types.TenantSkillSnapshotEntity{
 		ID: installRowID, TenantID: tenantID, SandboxConfigID: configID, SkillID: skillID,
 		ParentSnapshotID: currentSnapshotID(cfgEntity), Generation: generation,
 		Trigger: types.SkillSnapshotTriggerInstall, State: types.SkillSnapshotStateBuilding,
+		PlannedName: snapshotName,
 	}); err != nil {
 		return err
 	}
-	snapshotName := fmt.Sprintf("weknora-sk-%s-g%d", shortID(configID), generation)
 	ref, err := s.createSnapshot(ctx, mgr, sess.ID, snapshotName)
 	if err != nil {
 		return err
@@ -1322,6 +1327,14 @@ func currentSnapshotID(cfgEntity *types.TenantSandboxConfigEntity) string {
 		return ""
 	}
 	return cfgEntity.Config.SkillImage.SnapshotID
+}
+
+// skillSnapshotBuildName is the name every generation of a config's image
+// chain is committed under. It is deterministic so the abandoned-build sweep
+// can match a provider listing against a ledger row that never learned its
+// snapshot ID.
+func skillSnapshotBuildName(configID string, generation int) string {
+	return fmt.Sprintf("weknora-sk-%s-g%d", shortID(configID), generation)
 }
 
 func shortID(id string) string {

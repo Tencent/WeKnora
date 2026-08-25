@@ -789,13 +789,62 @@ func snapshotReleaserFrom(client sandbox.ConfigSandboxClient) (sandboxSnapshotRe
 	return releaser, ok
 }
 
-func pendingHaveProviderIDs(rows []*types.TenantSkillSnapshotEntity) bool {
+// pendingNeedProvider reports whether releasing these rows has to talk to the
+// provider at all. A planned name counts: it is how an abandoned build — one
+// whose commit outlived the process that started it — is still addressable.
+func pendingNeedProvider(rows []*types.TenantSkillSnapshotEntity) bool {
 	for _, row := range rows {
-		if row != nil && strings.TrimSpace(row.SnapshotID) != "" {
+		if row == nil {
+			continue
+		}
+		if strings.TrimSpace(row.SnapshotID) != "" ||
+			strings.TrimSpace(row.PlannedName) != "" {
 			return true
 		}
 	}
 	return false
+}
+
+// resolveAbandonedBuildIDs fills in the provider ID of a build that died
+// between its commit and the ledger write.
+//
+// This is the last chance to reclaim one: PruneSupersededSnapshots walks live
+// configs, so once this config's row is gone the snapshot is unreachable by
+// anything. A name that resolves to nothing is left alone — the usual reason
+// is that the commit never happened, and there is no resource to release.
+func resolveAbandonedBuildIDs(
+	ctx context.Context,
+	client sandbox.ConfigSandboxClient,
+	pending []*types.TenantSkillSnapshotEntity,
+) {
+	unresolved := make([]*types.TenantSkillSnapshotEntity, 0, len(pending))
+	for _, row := range pending {
+		if row != nil && strings.TrimSpace(row.SnapshotID) == "" &&
+			strings.TrimSpace(row.PlannedName) != "" {
+			unresolved = append(unresolved, row)
+		}
+	}
+	if len(unresolved) == 0 {
+		return
+	}
+	lister, ok := client.(skillSnapshotLister)
+	if !ok {
+		return
+	}
+	listed, err := lister.ListSnapshots(ctx, "")
+	if err != nil {
+		logger.Warnf(ctx, "[sandbox] list snapshots to release abandoned builds failed: %v", err)
+		return
+	}
+	for _, row := range unresolved {
+		id := matchSnapshotByName(listed, row.PlannedName)
+		if id == "" {
+			continue
+		}
+		logger.Infof(ctx, "[sandbox] abandoned build %s resolved to snapshot %s for release",
+			row.PlannedName, id)
+		row.SnapshotID = id
+	}
 }
 
 func pendingSkillSnapshots(rows []*types.TenantSkillSnapshotEntity) []*types.TenantSkillSnapshotEntity {
@@ -865,8 +914,15 @@ func (s *TenantSandboxConfigService) destroyPendingSnapshots(
 	}
 
 	releaser := sandboxSnapshotReleaser(nil)
-	if pendingHaveProviderIDs(pending) {
-		releaser = s.snapshotReleaserFor(ctx, entity)
+	if pendingNeedProvider(pending) {
+		client := s.snapshotClientFor(ctx, entity)
+		resolveAbandonedBuildIDs(ctx, client, pending)
+		if found, ok := snapshotReleaserFrom(client); ok {
+			releaser = found
+		} else if client != nil {
+			logger.Warnf(ctx, "[sandbox] config %s provider does not support snapshot delete",
+				entityID(entity))
+		}
 	}
 	var remaining []string
 	for _, row := range pending {
@@ -884,9 +940,13 @@ func (s *TenantSandboxConfigService) destroyPendingSnapshots(
 	return remaining
 }
 
-func (s *TenantSandboxConfigService) snapshotReleaserFor(
+// snapshotClientFor builds the provider client config deletion needs to
+// release this config's snapshots. It returns the client rather than just the
+// delete capability because an abandoned build has to be looked up by name
+// first, which is a different capability on the same client.
+func (s *TenantSandboxConfigService) snapshotClientFor(
 	ctx context.Context, entity *types.TenantSandboxConfigEntity,
-) sandboxSnapshotReleaser {
+) sandbox.ConfigSandboxClient {
 	cfg := (*types.TenantSandboxConfig)(nil)
 	if entity != nil {
 		cfg = entity.Config
@@ -897,13 +957,7 @@ func (s *TenantSandboxConfigService) snapshotReleaserFor(
 			entityID(entity), err)
 		return nil
 	}
-	releaser, ok := snapshotReleaserFrom(client)
-	if !ok {
-		logger.Warnf(ctx, "[sandbox] config %s provider does not support snapshot delete",
-			entityID(entity))
-		return nil
-	}
-	return releaser
+	return client
 }
 
 func entityID(entity *types.TenantSandboxConfigEntity) string {

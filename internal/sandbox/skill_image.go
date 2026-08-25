@@ -63,13 +63,7 @@ func SkillImageActive(tenantCfg *types.TenantSandboxConfig) bool {
 			tenantCfg.SkillImage, "e2b", tenantCfg.E2B.APIKey, tenantCfg.E2B.APIURL,
 		) != ""
 	case SandboxTypeDocker:
-		if tenantCfg.Docker == nil {
-			return false
-		}
-		host, tls := dockerSkillOwnerIdentity(tenantCfg.Docker)
-		return skillImageTemplateOverride(
-			tenantCfg.SkillImage, "docker", tls, host,
-		) != ""
+		return DockerSkillImageOverride(tenantCfg) != ""
 	}
 	return false
 }
@@ -96,19 +90,48 @@ func SkillOwnerFingerprint(tenantCfg *types.TenantSandboxConfig) string {
 	return ""
 }
 
-// dockerSkillOwnerIdentity is the daemon this config will actually dial.
-// A blank host follows the local docker CLI, which is also how
-// ResolveEffectiveConfig fills DockerHost, so the fingerprint computed here
-// matches the override computed there.
+// dockerLocalDaemonIdentity stands in for a blank host in the fingerprint.
+//
+// It must not be the host DetectLocalDockerHost resolves to. That value comes
+// from DOCKER_HOST or the current docker context, so it changes when an
+// operator switches between Colima, Docker Desktop and OrbStack, or when the
+// app is redeployed with a different environment. Feeding it into the
+// fingerprint made all three of those look like a credential rotation: the
+// session layer would drop the snapshot and boot the base template with no
+// skills, installs would be refused, and PruneSupersededSnapshots would skip
+// the config forever, so nothing ever reclaimed the images either.
+//
+// The account-rotation reasoning that fingerprint exists for does not carry
+// over to a local daemon anyway. A rotated Cube/E2B key addresses a different
+// account where our snapshot IDs genuinely do not exist; a re-detected local
+// host is almost always the same daemon holding the same images on the same
+// disk. An explicitly configured host is still part of the identity, because
+// that one only changes when an admin edits the config.
+const dockerLocalDaemonIdentity = "local-daemon"
+
+// dockerSkillOwnerIdentity is the daemon identity a skill snapshot is stamped
+// with. It reads the STORED config rather than a resolved one so that every
+// caller — the install path, SkillImageActive and ResolveEffectiveConfig —
+// computes the fingerprint from the same inputs.
 func dockerSkillOwnerIdentity(docker *types.DockerSandboxConfig) (host, tls string) {
 	if docker == nil {
 		return "", ""
 	}
 	host = strings.TrimSpace(docker.Host)
 	if host == "" {
-		host = DetectLocalDockerHost()
+		host = dockerLocalDaemonIdentity
 	}
 	return host, strings.TrimSpace(docker.TLSCertPath)
+}
+
+// DockerSkillImageOverride returns the committed skill image the docker backend
+// should boot instead of the config's base image, or "" to keep the base.
+func DockerSkillImageOverride(tenantCfg *types.TenantSandboxConfig) string {
+	if tenantCfg == nil || tenantCfg.Docker == nil {
+		return ""
+	}
+	host, tls := dockerSkillOwnerIdentity(tenantCfg.Docker)
+	return skillImageTemplateOverride(tenantCfg.SkillImage, "docker", tls, host)
 }
 
 func dockerSkillOwnerFingerprint(docker *types.DockerSandboxConfig) string {
