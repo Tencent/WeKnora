@@ -1238,7 +1238,8 @@ export default {
       queryUnderstanding: '正在理解问题...',
       queryUnderstandDone: '已完成问题理解',
       called: '调用 {name}',
-      calledFailed: '调用 {name} 失败'
+      calledFailed: '调用 {name} 失败',
+      shellExecRunning: '正在执行沙箱命令...'
     },
     ragPipeline: {
       searching: '正在检索知识库...',
@@ -1309,9 +1310,20 @@ export default {
       queryKnowledgeGraph: '知识图谱查询',
       readSkill: '读取技能',
       executeSkillScript: '执行技能脚本',
+      shellExec: '执行沙箱命令',
       dataAnalysis: '数据分析',
       dataSchema: '数据结构',
       databaseQuery: '数据库查询'
+    },
+    shellExec: {
+      workDir: '目录',
+      exitCode: '退出码',
+      stdout: '标准输出',
+      stderr: '标准错误',
+      emptyOutput: '无输出',
+      truncated: '输出已截断',
+      killed: '已超时终止',
+      binarySuppressed: '二进制输出已省略，请将文件写入产物目录后下载'
     },
     mcpOAuth: {
       waiting: '等待授权 · {target}',

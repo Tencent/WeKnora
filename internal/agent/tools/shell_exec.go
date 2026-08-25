@@ -431,6 +431,7 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	// only mark Success=false when a wire-level problem prevented the command
 	// from running at all (already handled above via err != nil).
 	resultData := map[string]interface{}{
+		"display_type":           "shell_exec",
 		"session_id":             sessionID,
 		"command":                command,
 		"work_dir":               workDir,

@@ -127,3 +127,29 @@ func TestSandboxToolPersistenceStripsDuplicatePayloadsAndCompactsHistory(t *test
 	assert(len(CompactToolOutputForHistory(ToolShellExec, steps[0].ToolCalls[0].Result)) <= historicalSandboxOutputChars,
 		"historical replay must independently cap legacy raw output")
 }
+
+func TestSanitizeToolResultForClientKeepsShellStreams(t *testing.T) {
+	meta := SanitizeToolResultForClient(ToolShellExec, &types.ToolResult{
+		Success: true,
+		Output:  "=== Shell Exec ===\n**Command**: `ls`\n",
+		Data: map[string]interface{}{
+			"display_type": "shell_exec",
+			"command":      "ls",
+			"exit_code":    0,
+			"stdout":       "README.md\n",
+			"stderr":       "",
+		},
+	})
+	if _, ok := meta["output"]; ok {
+		t.Fatal("structured shell_exec should omit the markdown Output from client metadata")
+	}
+	if meta["stdout"] != "README.md\n" {
+		t.Fatalf("live UI needs stdout, got %#v", meta["stdout"])
+	}
+	if meta["command"] != "ls" {
+		t.Fatalf("command should remain, got %#v", meta["command"])
+	}
+	if meta["display_type"] != "shell_exec" {
+		t.Fatalf("display_type should remain, got %#v", meta["display_type"])
+	}
+}

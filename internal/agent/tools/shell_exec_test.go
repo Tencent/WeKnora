@@ -111,6 +111,7 @@ func TestShellExecConfigurableOutputAndRegistryOverride(t *testing.T) {
 	assert.Contains(t, result.Output, content)
 	assert.NotContains(t, result.Output, "output truncated")
 	assert.Equal(t, 32768, result.Data["max_output_bytes"])
+	assert.Equal(t, "shell_exec", result.Data["display_type"])
 }
 
 func TestShellExecOutputLimitIsHardCapped(t *testing.T) {

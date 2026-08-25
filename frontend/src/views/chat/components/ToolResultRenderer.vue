@@ -46,6 +46,13 @@
       v-else-if="displayType === 'wiki_write_page' || displayType === 'wiki_replace_text' || displayType === 'wiki_rename_page' || displayType === 'wiki_delete_page'"
       :data="toolData as WikiEditData" />
 
+    <ShellExecResult
+      v-else-if="displayType === 'shell_exec'"
+      :data="toolData as ShellExecData"
+      :output="output"
+      :arguments="toolArguments"
+    />
+
     <!-- Fallback: Display raw output -->
     <div v-else class="fallback-output">
       <div class="fallback-header">
@@ -75,7 +82,8 @@ import type {
   WebFetchResultsData,
   GrepResultsData,
   KnowledgeChunksListData,
-  WikiEditData
+  WikiEditData,
+  ShellExecData
 } from '@/types/tool-results';
 
 import SearchResults from './tool-results/SearchResults.vue';
@@ -92,6 +100,7 @@ import WebFetchResults from './tool-results/WebFetchResults.vue';
 import GrepResults from './tool-results/GrepResults.vue';
 import KnowledgeChunksList from './tool-results/KnowledgeChunksList.vue';
 import WikiEditResult from './tool-results/WikiEditResult.vue';
+import ShellExecResult from './tool-results/ShellExecResult.vue';
 
 interface Props {
   displayType?: DisplayType;

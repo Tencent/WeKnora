@@ -18,6 +18,14 @@ var persistStripFieldsByTool = map[string][]string{
 	ToolReadSandboxFile: {"stdout", "stderr", "content", "content_base64"},
 }
 
+// clientStripFieldsByTool is the lighter omit list for live SSE. The UI
+// needs stdout/stderr to render a terminal card; those streams are already
+// capped by the tool. Persist still uses persistStripFieldsByTool.
+var clientStripFieldsByTool = map[string][]string{
+	ToolShellExec:       {"content", "content_base64"},
+	ToolReadSandboxFile: {"content", "content_base64"},
+}
+
 const historicalSandboxOutputChars = 4 * 1024
 
 // ShouldOmitRawToolOutput reports whether the raw XML/text Output should be
@@ -33,6 +41,18 @@ func ShouldOmitRawToolOutput(_ string, data map[string]interface{}) bool {
 
 // SanitizeToolDataForPersist returns a copy of tool Data safe for DB / SSE replay.
 func SanitizeToolDataForPersist(toolName string, data map[string]interface{}) map[string]interface{} {
+	return sanitizeToolData(data, persistStripFieldsByTool[toolName])
+}
+
+func sanitizeToolDataForClient(toolName string, data map[string]interface{}) map[string]interface{} {
+	omit := clientStripFieldsByTool[toolName]
+	if omit == nil {
+		omit = persistStripFieldsByTool[toolName]
+	}
+	return sanitizeToolData(data, omit)
+}
+
+func sanitizeToolData(data map[string]interface{}, extraOmit []string) map[string]interface{} {
 	if data == nil {
 		return nil
 	}
@@ -44,7 +64,7 @@ func SanitizeToolDataForPersist(toolName string, data map[string]interface{}) ma
 	for _, key := range persistStripFields[displayType] {
 		delete(out, key)
 	}
-	for _, key := range persistStripFieldsByTool[toolName] {
+	for _, key := range extraOmit {
 		delete(out, key)
 	}
 	return out
@@ -57,7 +77,7 @@ func SanitizeToolResultForClient(toolName string, result *types.ToolResult) map[
 		return meta
 	}
 	if result.Data != nil {
-		for k, v := range SanitizeToolDataForPersist(toolName, result.Data) {
+		for k, v := range sanitizeToolDataForClient(toolName, result.Data) {
 			meta[k] = v
 		}
 	}
@@ -185,6 +205,16 @@ func compactToolSummary(success bool, errMsg string, data map[string]interface{}
 		if count > 0 {
 			return fmt.Sprintf("Semantic search returned %d result(s) (details omitted from history)", count)
 		}
+	case "shell_exec":
+		exit := intField(data, "exit_code")
+		cmd := stringField(data, "command")
+		if cmd != "" {
+			if len(cmd) > 80 {
+				cmd = cmd[:80] + "..."
+			}
+			return fmt.Sprintf("shell_exec exit=%d command=%s (output omitted from history)", exit, cmd)
+		}
+		return fmt.Sprintf("shell_exec exit=%d (output omitted from history)", exit)
 	case "attachment_parsing":
 		parsed := intField(data, "parsed_count")
 		skipped := intField(data, "skipped_count")
