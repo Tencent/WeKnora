@@ -63,7 +63,17 @@
       <div v-else-if="state === 'success'" class="upload-state upload-state--success">
         <t-icon name="check-circle-filled" />
         <h3>已上传</h3>
-        <p>正在生成封面、时长和可播放地址</p>
+        <p>视频已加入列表，封面和时长会自动补齐</p>
+      </div>
+
+      <div v-else-if="state === 'refresh-failed'" class="upload-state upload-state--warning">
+        <t-icon name="error-circle-filled" />
+        <h3>上传完成，列表同步失败</h3>
+        <t-alert theme="warning" :message="errorMessage" />
+        <div class="upload-actions">
+          <t-button variant="outline" @click="close">关闭</t-button>
+          <t-button theme="primary" @click="retryRefresh">重试同步</t-button>
+        </div>
       </div>
 
       <div v-else class="upload-state upload-state--error">
@@ -83,18 +93,19 @@
 import { computed, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { uploadVideo, type UploadCancel } from '@/api/videohub/upload'
-import type { UploadProgress } from '@/types/videohub'
+import type { UploadProgress, VideoData } from '@/types/videohub'
 
 type UploadFileItem = { name?: string; size?: number; raw?: File; type?: string }
 
-const props = defineProps<{ visible: boolean; afterUpload?: () => Promise<void> }>()
+const props = defineProps<{ visible: boolean; afterUpload?: (video: VideoData) => Promise<void> }>()
 const emit = defineEmits<{ 'update:visible': [value: boolean] }>()
 const files = ref<UploadFileItem[]>([])
-const state = ref<'form' | 'uploading' | 'refreshing' | 'success' | 'error'>('form')
+const state = ref<'form' | 'uploading' | 'refreshing' | 'success' | 'refresh-failed' | 'error'>('form')
 const progress = ref<UploadProgress>({ stage: 'uploading', percent: 0 })
 const errorMessage = ref('')
 let cancel: UploadCancel | null = null
 let successTimer: number | undefined
+let uploadedVideo: VideoData | null = null
 
 const selectedFile = computed(() => {
   const item = files.value[0]
@@ -114,6 +125,7 @@ function reset() {
   state.value = 'form'
   progress.value = { stage: 'uploading', percent: 0 }
   errorMessage.value = ''
+  uploadedVideo = null
 }
 
 function close() {
@@ -149,26 +161,42 @@ async function startUpload() {
     const uploaded = await uploadVideo({ file }, { onProgress: percent => { progress.value.percent = percent } }, currentCancel)
     if (currentCancel.cancelled) return
     cancel = null
-    state.value = 'refreshing'
-    try {
-      await props.afterUpload?.()
-    } catch (error) {
-      console.warn('[video-upload]', {
-        component: 'video-upload',
-        event: 'after_upload_refresh_failed',
-        video_id: uploaded.id,
-        error: error instanceof Error ? error.message : String(error),
-      })
-      MessagePlugin.warning('视频已上传，但列表刷新失败，请稍后刷新页面')
-    }
-    if (!props.visible || state.value !== 'refreshing') return
-    state.value = 'success'
-    successTimer = window.setTimeout(close, 800)
+    uploadedVideo = uploaded
+    await refreshAfterUpload(uploaded)
   } catch (reason) {
     if (currentCancel.cancelled) return
     state.value = 'error'
     errorMessage.value = reason instanceof Error ? reason.message : '上传失败，请重试'
   }
+}
+
+async function refreshAfterUpload(uploaded: VideoData) {
+  state.value = 'refreshing'
+  try {
+    await props.afterUpload?.(uploaded)
+  } catch (error) {
+    console.warn('[video-upload]', {
+      component: 'video-upload',
+      event: 'after_upload_refresh_failed',
+      video_id: uploaded.id,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    errorMessage.value = '视频已经上传完成，但列表刷新失败，请重试同步或刷新页面'
+    state.value = 'refresh-failed'
+    MessagePlugin.warning('视频已上传，但列表刷新失败，请重试同步')
+    return
+  }
+  if (!props.visible || state.value !== 'refreshing') return
+  state.value = 'success'
+  successTimer = window.setTimeout(close, 800)
+}
+
+async function retryRefresh() {
+  if (!uploadedVideo) {
+    close()
+    return
+  }
+  await refreshAfterUpload(uploadedVideo)
 }
 
 function formatSize(size: number) {
@@ -230,6 +258,7 @@ watch(() => props.visible, value => { if (!value) reset() })
 .upload-state--success p { overflow: visible; white-space: normal; text-overflow: clip; }
 .upload-state > .t-icon { font-size: 48px; animation: state-in .24s ease-out; }
 .upload-state--success > .t-icon { color: var(--td-success-color); }
+.upload-state--warning > .t-icon { color: var(--td-warning-color); }
 .upload-state--error > .t-icon { color: var(--td-error-color); }
 .upload-state--error :deep(.t-alert) { width: 100%; text-align: left; }
 @keyframes state-in { from { opacity: 0; transform: scale(.7); } to { opacity: 1; transform: scale(1); } }

@@ -37,7 +37,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { fetchVideoDetail, fetchVideoOptions } from '@/api/videohub'
+import { fetchVideoDetail, fetchVideoOptions, isVideoInitiallyAvailable } from '@/api/videohub'
 import type { VideoData } from '@/types/videohub'
 import VideoPlayer from '@/components/videohub/VideoPlayer.vue'
 import ChapterNavigation from '@/components/videohub/ChapterNavigation.vue'
@@ -57,18 +57,21 @@ const activeTab = ref('summary')
 const loading = ref(true)
 const error = ref('')
 let loadSequence = 0
-const playableStatuses = new Set(['ready', 'processing', 'completed'])
-
-const isPlayable = computed(() => Boolean(video.value && playableStatuses.has(video.value.status || '')))
+const isPlayable = computed(() => Boolean(video.value && isVideoInitiallyAvailable({
+  status: video.value.status,
+  file_url: video.value.video_url,
+  thumbnail_url: video.value.poster_url,
+  initially_available: video.value.initiallyAvailable,
+})))
 const statusLabel = computed(() => {
   if (!video.value?.status) return '状态未知'
   const map: Record<string, string> = {
     uploading: '上传中',
-    uploaded: '等待初始处理',
-    initializing: '正在生成封面',
-    ready: '已准备',
-    processing: '内容解析中',
-    completed: '已完成',
+    uploaded: '处理中',
+    initializing: '处理中',
+    ready: '可播放',
+    processing: '处理中',
+    completed: '可播放',
     failed: '处理失败',
   }
   return map[video.value.status] || video.value.status
@@ -76,7 +79,7 @@ const statusLabel = computed(() => {
 const statusHint = computed(() => {
   if (!video.value) return ''
   if (video.value.status === 'failed') return video.value.processing_error_summary || '视频初始处理失败'
-  if (video.value.status === 'uploaded' || video.value.status === 'initializing') return '视频正在生成封面、时长和可播放地址'
+  if (video.value.status === 'uploaded' || video.value.status === 'initializing') return '视频正在生成封面和时长，播放入口已保留'
   return '视频尚未进入可播放状态'
 })
 

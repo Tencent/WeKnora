@@ -77,6 +77,7 @@ export interface VideoData {
   category: VideoCategory
   categoryName: string
   status?: string
+  initiallyAvailable?: boolean
   duration: string
   durationSeconds: number
   created_at: string

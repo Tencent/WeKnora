@@ -198,10 +198,13 @@ func (h *UploadHandler) Confirm(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"video_id":    req.VideoID,
-		"status":      "uploaded",
-		"job_id":      jobID,
-		"uploaded_at": now,
+		"video_id": req.VideoID,
+		"status":   model.VideoStatusUploaded,
+		"file_url": h.MinIO.PublicURL(req.ObjectKey),
+		// 封面生成完成后才视为初始可用（详情接口轮询确认）
+		"initially_available": model.VideoIsInitiallyAvailable(model.VideoStatusUploaded, h.MinIO.PublicURL(req.ObjectKey), ""),
+		"job_id":              jobID,
+		"uploaded_at":         now,
 	})
 }
 
@@ -643,12 +646,15 @@ func (h *UploadHandler) MultipartComplete(c *gin.Context) {
 	uploadLog(c, "complete_succeeded", append(completeFields, "job_id", jobID)...)
 
 	c.JSON(http.StatusOK, gin.H{
-		"video_id":    req.VideoID,
-		"object_key":  req.ObjectKey,
-		"status":      "uploaded",
-		"job_id":      jobID,
-		"uploaded_at": now,
-		"trace_id":    uploadTraceID(c),
+		"video_id":   req.VideoID,
+		"object_key": req.ObjectKey,
+		"status":     model.VideoStatusUploaded,
+		"file_url":   h.MinIO.PublicURL(req.ObjectKey),
+		// 封面生成完成后才视为初始可用（详情接口轮询确认）
+		"initially_available": model.VideoIsInitiallyAvailable(model.VideoStatusUploaded, h.MinIO.PublicURL(req.ObjectKey), ""),
+		"job_id":              jobID,
+		"uploaded_at":         now,
+		"trace_id":            uploadTraceID(c),
 	})
 }
 

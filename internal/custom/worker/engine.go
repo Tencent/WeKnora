@@ -9,11 +9,14 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
@@ -146,20 +149,20 @@ func (e *Engine) dispatch(ctx context.Context, job *model.VideoProcessingJob) {
 	handler, ok := e.handlers[job.JobType]
 	if !ok {
 		slog.Warn("no handler for job_type", "job_type", job.JobType, "job_id", job.ID)
-		e.markFailed(job, "no_handler", "no handler registered")
+		e.markFailed(job, "no_handler", "no handler registered", nil)
 		return
 	}
 
 	var video model.Video
 	if err := e.db.First(&video, "id = ?", job.VideoID).Error; err != nil {
-		e.markFailed(job, "video_not_found", err.Error())
+		e.markFailed(job, "video_not_found", err.Error(), err)
 		return
 	}
 
 	if err := handler.Run(ctx, job, &video); err != nil {
 		slog.Warn("job run failed", "job_id", job.ID, "job_type", job.JobType, "attempt", job.AttemptCount, "error", err)
 		if job.AttemptCount >= job.MaxAttempts {
-			e.markFailed(job, "max_attempts", err.Error())
+			e.markFailed(job, "max_attempts", err.Error(), err)
 		} else {
 			// 退避：重置 pending 等下一轮 tick 重试
 			e.db.Model(job).Updates(map[string]any{
@@ -182,7 +185,7 @@ func (e *Engine) markSucceeded(job *model.VideoProcessingJob) {
 	})
 }
 
-func (e *Engine) markFailed(job *model.VideoProcessingJob, code, msg string) {
+func (e *Engine) markFailed(job *model.VideoProcessingJob, code, msg string, cause error) {
 	now := time.Now().UTC()
 	e.db.Model(job).Updates(map[string]any{
 		"status":        "failed",
@@ -191,12 +194,45 @@ func (e *Engine) markFailed(job *model.VideoProcessingJob, code, msg string) {
 		"completed_at":  now,
 	})
 	updates := map[string]any{"processing_error_summary": msg}
+	coverDegraded := false
 	if job.JobType == "thumbnail" {
-		updates["status"] = model.VideoStatusFailed
+		var video model.Video
+		if err := e.db.Select("file_url").First(&video, "id = ?", job.VideoID).Error; err != nil {
+			updates["status"] = model.VideoStatusFailed
+		} else {
+			var coreFileUnavailable *CoreFileUnavailableError
+			if errors.As(cause, &coreFileUnavailable) || video.FileURL == "" {
+				updates["status"] = model.VideoStatusFailed
+			} else {
+				// 核心文件完好、仅封面彻底失败：降级为占位图展示，不阻塞视频露出
+				coverDegraded = true
+				updates["status"] = model.VideoStatusReady
+				updates["ready_at"] = now
+				updates["processing_error_summary"] = "封面生成失败，已使用占位图展示"
+			}
+		}
 	}
 	e.db.Model(&model.Video{}).
 		Where("id = ?", job.VideoID).
 		Updates(updates)
+	if coverDegraded {
+		e.enqueueTranscriptionAfterCoverFallback(job.VideoID)
+	}
+}
+
+// enqueueTranscriptionAfterCoverFallback 封面降级后补投转写任务，避免内容链路死路。
+// 正常链路里转写由 thumbnail 成功路径入队；仅注册了 transcription handler（内容链路开启）时才补投。
+func (e *Engine) enqueueTranscriptionAfterCoverFallback(videoID string) {
+	if _, ok := e.handlers["transcription"]; !ok {
+		return
+	}
+	job := model.VideoProcessingJob{
+		ID: uuid.NewString(), VideoID: videoID, JobType: "transcription", Provider: "aliyun_tingwu",
+		Status: "pending", MaxAttempts: 3, IdempotencyKey: fmt.Sprintf("transcription:%s", videoID),
+	}
+	if err := e.db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "idempotency_key"}}, DoNothing: true}).Create(&job).Error; err != nil {
+		slog.Warn("enqueue transcription after cover fallback", "video_id", videoID, "error", err)
+	}
 }
 
 // ErrRetryable 标识 job 可重试（暂留接口位）

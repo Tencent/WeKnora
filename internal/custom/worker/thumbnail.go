@@ -33,6 +33,14 @@ type ThumbnailHandler struct {
 	ContentWorkersEnabled bool
 }
 
+type CoreFileUnavailableError struct {
+	Reason string
+}
+
+func (e *CoreFileUnavailableError) Error() string {
+	return "core video file unavailable: " + e.Reason
+}
+
 // NewThumbnailHandler 构造
 func NewThumbnailHandler(db *gorm.DB, m *objstore.Client, contentWorkersEnabled bool) *ThumbnailHandler {
 	return &ThumbnailHandler{DB: db, MinIO: m, ContentWorkersEnabled: contentWorkersEnabled}
@@ -43,14 +51,22 @@ func (h *ThumbnailHandler) JobType() string { return "thumbnail" }
 
 // Run 抽帧 → 上传 → 回写 URL + 时长
 func (h *ThumbnailHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
-	if video.FileURL == "" {
-		return fmt.Errorf("video file_url empty")
+	objectKey := videoObjectKey(video.ID, video.UploadObjectKey, video.FileURL)
+	if strings.TrimSpace(video.FileURL) == "" {
+		return &CoreFileUnavailableError{Reason: "video file_url empty"}
 	}
 	if h.MinIO == nil {
 		return fmt.Errorf("minio client 未配置")
 	}
-	if h.MinIO.PublicURL(videoObjectKey(video.ID, video.UploadObjectKey, video.FileURL)) == "" {
+	if h.MinIO.PublicURL(objectKey) == "" {
 		return fmt.Errorf("minio public url 未配置，无法生成浏览器可访问地址")
+	}
+	exists, err := h.MinIO.ObjectExists(ctx, objectKey)
+	if err != nil {
+		return fmt.Errorf("check source object: %w", err)
+	}
+	if !exists {
+		return &CoreFileUnavailableError{Reason: "source object does not exist"}
 	}
 
 	if err := h.DB.Model(video).
@@ -60,20 +76,20 @@ func (h *ThumbnailHandler) Run(ctx context.Context, job *model.VideoProcessingJo
 	}
 
 	// 抽帧（抽第 5 秒处，避免黑屏帧；失败时回退到 0 秒）
-	videoURL, err := h.MinIO.PresignGet(ctx, videoObjectKey(video.ID, video.UploadObjectKey, video.FileURL), 15*time.Minute)
+	videoURL, err := h.MinIO.PresignGet(ctx, objectKey, 15*time.Minute)
 	if err != nil {
 		return fmt.Errorf("presign source video: %w", err)
 	}
 
-	// 初始可用阶段必须拿到时长；不能把空元数据的视频标记为 ready。
+	// 时长是增强信息，读取失败时保留 0，让前端显示占位状态。
 	durationSeconds := probeDuration(ctx, videoURL)
-	if durationSeconds <= 0 {
-		return fmt.Errorf("ffprobe 未能读取视频时长")
-	}
-	if err := h.DB.Model(video).Update("duration_seconds", durationSeconds).Error; err != nil {
-		return fmt.Errorf("update duration_seconds: %w", err)
+	if durationSeconds > 0 {
+		if err := h.DB.Model(video).Update("duration_seconds", durationSeconds).Error; err != nil {
+			return fmt.Errorf("update duration_seconds: %w", err)
+		}
 	}
 
+	// 抽帧失败不应让已经上传成功的视频从列表消失。
 	frame, err := extractFrame(ctx, videoURL, 5)
 	if err != nil {
 		frame, err = extractFrame(ctx, videoURL, 0)
@@ -82,7 +98,7 @@ func (h *ThumbnailHandler) Run(ctx context.Context, job *model.VideoProcessingJo
 		}
 	}
 
-	objectKey := fmt.Sprintf("thumbnails/%s/cover.jpg", video.ID)
+	objectKey = fmt.Sprintf("thumbnails/%s/cover.jpg", video.ID)
 	if err := uploadBytes(ctx, h.MinIO, objectKey, frame, "image/jpeg"); err != nil {
 		return fmt.Errorf("upload thumbnail: %w", err)
 	}
@@ -92,14 +108,20 @@ func (h *ThumbnailHandler) Run(ctx context.Context, job *model.VideoProcessingJo
 	}
 
 	now := time.Now().UTC()
+	updates := map[string]any{
+		"thumbnail_url":            publicURL,
+		"status":                   model.VideoStatusReady,
+		"ready_at":                 now,
+		"processing_error_summary": "",
+	}
+	if durationSeconds > 0 {
+		updates["duration_seconds"] = durationSeconds
+	}
+	if durationSeconds <= 0 {
+		updates["processing_error_summary"] = "无法读取视频时长，已保留播放入口"
+	}
 	if err := h.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&model.Video{}).Where("id = ?", video.ID).Updates(map[string]any{
-			"thumbnail_url":            publicURL,
-			"duration_seconds":         durationSeconds,
-			"status":                   model.VideoStatusReady,
-			"ready_at":                 now,
-			"processing_error_summary": "",
-		}).Error; err != nil {
+		if err := tx.Model(&model.Video{}).Where("id = ?", video.ID).Updates(updates).Error; err != nil {
 			return fmt.Errorf("mark video ready: %w", err)
 		}
 

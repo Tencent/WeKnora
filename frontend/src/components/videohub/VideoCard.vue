@@ -4,7 +4,7 @@
       <img v-if="video.poster_url && !coverFailed" :src="video.poster_url" :alt="video.title" @error="coverFailed = true" />
       <div v-else class="video-card__fallback" aria-hidden="true">▶</div>
       <span v-if="statusLabel" class="video-card__status">{{ statusLabel }}</span>
-      <span class="video-card__duration">{{ video.duration }}</span>
+      <span class="video-card__duration">{{ video.durationSeconds > 0 ? video.duration : '时长待生成' }}</span>
     </div>
     <div class="video-card__body">
       <h3>{{ video.title }}</h3>
@@ -12,6 +12,9 @@
         <span v-if="video.categoryName" class="video-card__category">{{ video.categoryName }}</span>
         <time>{{ video.created_at }}</time>
       </div>
+      <p v-if="video.status === 'failed' && video.processing_error_summary" class="video-card__error">
+        {{ video.processing_error_summary }}
+      </p>
     </div>
   </article>
 </template>
@@ -26,11 +29,11 @@ const coverFailed = ref(false)
 const statusLabel = computed(() => {
   const map: Record<string, string> = {
     uploading: '上传中',
-    uploaded: '已上传',
-    initializing: '准备中',
-    ready: '已就绪',
+    uploaded: '处理中',
+    initializing: '处理中',
+    ready: '可播放',
     processing: '处理中',
-    completed: '已完成',
+    completed: '可播放',
     failed: '失败',
   }
   return map[props.video.status || ''] || ''
@@ -51,4 +54,5 @@ const statusLabel = computed(() => {
 .video-card__meta { display: flex; align-items: center; gap: var(--td-comp-margin-s); min-width: 0; }
 .video-card__category { flex: none; padding: 1px 6px; border-radius: var(--td-radius-medium); background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); line-height: var(--td-line-height-body-small); }
 .video-card time { overflow: hidden; color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); line-height: var(--td-line-height-body-small); text-overflow: ellipsis; white-space: nowrap; }
+.video-card__error { margin: var(--td-comp-margin-s) 0 0; overflow: hidden; color: var(--td-error-color); font-size: var(--td-font-size-body-small); line-height: var(--td-line-height-body-small); text-overflow: ellipsis; white-space: nowrap; }
 </style>

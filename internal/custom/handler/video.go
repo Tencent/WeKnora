@@ -24,10 +24,10 @@ func NewVideoHandler(db *gorm.DB) *VideoHandler {
 func (h *VideoHandler) List(c *gin.Context) {
 	var videos []model.Video
 	if err := h.DB.
-		Where("status IN ?", []string{model.VideoStatusReady, model.VideoStatusProcessing, model.VideoStatusCompleted}).
-		Where("thumbnail_url <> ''").
-		Where("duration_seconds > 0").
-		Where("file_url <> ''").
+		Where(
+			"((status IN ? AND TRIM(COALESCE(file_url, '')) <> '' AND (TRIM(COALESCE(thumbnail_url, '')) <> '' OR status IN ?)) OR status = ?)",
+			model.VideoInitiallyAvailableStatuses(), model.VideoCoverSettledStatuses(), model.VideoStatusFailed,
+		).
 		Order("created_at DESC").
 		Find(&videos).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -35,26 +35,30 @@ func (h *VideoHandler) List(c *gin.Context) {
 	}
 	// 返回轻量列表项，避免把完整内容字段全量下发给列表页
 	type item struct {
-		ID              string `json:"id"`
-		Title           string `json:"title"`
-		VideoType       string `json:"video_type"`
-		Status          string `json:"status"`
-		DurationSeconds int    `json:"duration_seconds"`
-		FileURL         string `json:"file_url"`
-		ThumbnailURL    string `json:"thumbnail_url"`
-		CreatedAt       string `json:"created_at"`
+		ID                     string `json:"id"`
+		Title                  string `json:"title"`
+		VideoType              string `json:"video_type"`
+		Status                 string `json:"status"`
+		DurationSeconds        int    `json:"duration_seconds"`
+		FileURL                string `json:"file_url"`
+		ThumbnailURL           string `json:"thumbnail_url"`
+		ProcessingErrorSummary string `json:"processing_error_summary"`
+		InitiallyAvailable     bool   `json:"initially_available"`
+		CreatedAt              string `json:"created_at"`
 	}
 	out := make([]item, 0, len(videos))
 	for _, v := range videos {
 		out = append(out, item{
-			ID:              v.ID,
-			Title:           v.Title,
-			VideoType:       v.VideoType,
-			Status:          v.Status,
-			DurationSeconds: v.DurationSeconds,
-			FileURL:         v.FileURL,
-			ThumbnailURL:    v.ThumbnailURL,
-			CreatedAt:       v.CreatedAt.Format("2006-01-02 15:04:05"),
+			ID:                     v.ID,
+			Title:                  v.Title,
+			VideoType:              v.VideoType,
+			Status:                 v.Status,
+			DurationSeconds:        v.DurationSeconds,
+			FileURL:                v.FileURL,
+			ThumbnailURL:           v.ThumbnailURL,
+			ProcessingErrorSummary: v.ProcessingErrorSummary,
+			InitiallyAvailable:     model.VideoIsInitiallyAvailable(v.Status, v.FileURL, v.ThumbnailURL),
+			CreatedAt:              v.CreatedAt.Format("2006-01-02 15:04:05"),
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
@@ -69,7 +73,9 @@ func (h *VideoHandler) Detail(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"data": v,
+		"data":                v,
+		"initially_available": model.VideoIsInitiallyAvailable(v.Status, v.FileURL, v.ThumbnailURL),
+		"visible_in_list":     model.VideoIsVisibleInList(v.Status, v.FileURL, v.ThumbnailURL),
 		"content_status": map[string]bool{
 			"knowledge_base":  v.KnowledgeBaseWikiPageID != "",
 			"outline":         v.OutlineWikiPageID != "",
