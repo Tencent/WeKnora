@@ -340,19 +340,14 @@
                      assistant message recorded any generated files. Agent
                      mode is the primary path for skills, so this is where
                      the button is most likely to appear. -->
-                <t-badge
-                  v-if="hasArtifacts"
-                  :count="artifactCount"
-                  :offset="[-4, 4]"
-                  shape="round"
-                  size="small"
-                >
+                <span v-if="hasArtifacts" class="answer-toolbar__artifact">
                   <t-button size="small" variant="outline" shape="round"
                     @click.stop="openArtifactDrawer"
                     :title="$t('agent.artifactDrawer.buttonTitle')">
                     <t-icon name="download" />
                   </t-button>
-                </t-badge>
+                  <span class="answer-toolbar__artifact-count" aria-hidden="true">{{ artifactCount }}</span>
+                </span>
                 <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
                     <t-icon name="info-circle" />
@@ -560,6 +555,7 @@ import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAn
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
 import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
 import { previewShellCommand } from '@/utils/shellExecResult';
+import type { DisplayType } from '@/types/tool-results';
 import { parseWikiToolReferences } from '@/utils/wikiToolReferences';
 import {
   buildManualMarkdown,
@@ -1045,8 +1041,8 @@ const formatToolResultContent = (value: unknown): string => {
 
 const isMcpTool = (toolName?: string | null): boolean => String(toolName || '').startsWith('mcp_');
 
-const resolveToolDisplayType = (event: any): string | undefined => {
-  if (event?.display_type) return event.display_type
+const resolveToolDisplayType = (event: any): DisplayType | undefined => {
+  if (event?.display_type) return event.display_type as DisplayType
   if (event?.tool_name === 'shell_exec') return 'shell_exec'
   return undefined
 };
