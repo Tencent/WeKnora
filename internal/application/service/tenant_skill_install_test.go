@@ -1205,6 +1205,9 @@ type installFixture struct {
 	// whose archive will later be unreadable.
 	saveErr      error
 	savedBundles int
+	// storedBundles is what GetFile serves back, keyed by the SaveBytes
+	// reference, so ListSkillFiles / ReadSkillFile can open a stored archive.
+	storedBundles map[string][]byte
 }
 
 func newInstallFixture(t *testing.T) *installFixture {
@@ -2208,17 +2211,30 @@ func (installFileService) SaveFile(context.Context, *multipart.FileHeader, uint6
 	return "", nil
 }
 
-func (s installFileService) SaveBytes(context.Context, []byte, uint64, string, bool) (string, error) {
+func (s installFileService) SaveBytes(_ context.Context, data []byte, _ uint64, _ string, _ bool) (string, error) {
 	if s.fx != nil {
 		s.fx.savedBundles++
 		if s.fx.saveErr != nil {
 			return "", s.fx.saveErr
 		}
+		if s.fx.storedBundles == nil {
+			s.fx.storedBundles = map[string][]byte{}
+		}
+		copied := make([]byte, len(data))
+		copy(copied, data)
+		s.fx.storedBundles["file://bundle.zip"] = copied
 	}
 	return "file://bundle.zip", nil
 }
-func (installFileService) GetFile(context.Context, string) (io.ReadCloser, error) { return nil, nil }
-func (installFileService) GetFileURL(context.Context, string) (string, error)     { return "", nil }
+func (s installFileService) GetFile(_ context.Context, ref string) (io.ReadCloser, error) {
+	if s.fx != nil {
+		if data, ok := s.fx.storedBundles[ref]; ok {
+			return io.NopCloser(bytes.NewReader(data)), nil
+		}
+	}
+	return nil, errors.New("bundle not found")
+}
+func (installFileService) GetFileURL(context.Context, string) (string, error) { return "", nil }
 func (s installFileService) DeleteFile(_ context.Context, ref string) error {
 	if s.fx != nil {
 		s.fx.deletedBundles = append(s.fx.deletedBundles, ref)

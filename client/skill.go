@@ -118,3 +118,81 @@ func (c *Client) UploadSandboxSkill(
 	}
 	return response.Data.SkillID, nil
 }
+
+// SandboxSkillFile is one path in an installed skill's stored archive.
+type SandboxSkillFile struct {
+	Path string `json:"path"`
+	Size int64  `json:"size"`
+}
+
+// SandboxSkillFileContent is one file opened from an installed skill.
+type SandboxSkillFileContent struct {
+	Path      string `json:"path"`
+	Size      int64  `json:"size"`
+	Encoding  string `json:"encoding"`
+	Content   string `json:"content,omitempty"`
+	MediaType string `json:"media_type,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+	Binary    bool   `json:"binary,omitempty"`
+}
+
+type sandboxSkillFilesResponse struct {
+	Success bool               `json:"success"`
+	Data    []SandboxSkillFile `json:"data"`
+}
+
+type sandboxSkillFileContentResponse struct {
+	Success bool                    `json:"success"`
+	Data    SandboxSkillFileContent `json:"data"`
+}
+
+// ListSandboxSkillFiles lists the stored archive of one installed skill.
+func (c *Client) ListSandboxSkillFiles(
+	ctx context.Context, configID, skillID string,
+) ([]SandboxSkillFile, error) {
+	if configID == "" {
+		return nil, fmt.Errorf("sandbox config ID is required")
+	}
+	if skillID == "" {
+		return nil, fmt.Errorf("skill ID is required")
+	}
+	path := "/api/v1/sandbox-configs/" + url.PathEscape(configID) +
+		"/skills/" + url.PathEscape(skillID) + "/files"
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var response sandboxSkillFilesResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+	return response.Data, nil
+}
+
+// GetSandboxSkillFile reads one skill-root-relative file from an installed skill.
+func (c *Client) GetSandboxSkillFile(
+	ctx context.Context, configID, skillID, filePath string,
+) (*SandboxSkillFileContent, error) {
+	if configID == "" {
+		return nil, fmt.Errorf("sandbox config ID is required")
+	}
+	if skillID == "" {
+		return nil, fmt.Errorf("skill ID is required")
+	}
+	if filePath == "" {
+		return nil, fmt.Errorf("skill file path is required")
+	}
+	path := "/api/v1/sandbox-configs/" + url.PathEscape(configID) +
+		"/skills/" + url.PathEscape(skillID) + "/files/content"
+	query := url.Values{}
+	query.Set("path", filePath)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, query)
+	if err != nil {
+		return nil, err
+	}
+	var response sandboxSkillFileContentResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+	return &response.Data, nil
+}

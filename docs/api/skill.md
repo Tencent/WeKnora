@@ -6,6 +6,8 @@
 | ---- | --------- | ------------------ |
 | GET  | `/skills` | 获取预装 Skills 列表 |
 | POST | `/sandbox-configs/{id}/skills` | 安装技能（zip 上传或托管平台 source） |
+| GET  | `/sandbox-configs/{id}/skills/{skillId}/files` | 列出已安装技能的文件 |
+| GET  | `/sandbox-configs/{id}/skills/{skillId}/files/content` | 读取已安装技能中的单个文件 |
 
 ## GET `/skills` - 获取预装 Skills 列表
 
@@ -97,6 +99,51 @@ curl --location 'http://localhost:8080/api/v1/sandbox-configs/{id}/skills' \
     "success": true,
     "data": {
         "skill_id": "..."
+    }
+}
+```
+
+## GET `/sandbox-configs/{id}/skills/{skillId}/files` - 列出技能文件
+
+返回该技能存档里的文件路径与大小。路径相对技能根目录（`SKILL.md` 所在目录），不启动沙箱。
+
+```curl
+curl --location 'http://localhost:8080/api/v1/sandbox-configs/{id}/skills/{skillId}/files' \
+--header 'X-API-Key: sk-xxxxx'
+```
+
+**响应**:
+
+```json
+{
+    "success": true,
+    "data": [
+        { "path": "SKILL.md", "size": 412 },
+        { "path": "scripts/extract.py", "size": 1280 }
+    ]
+}
+```
+
+## GET `/sandbox-configs/{id}/skills/{skillId}/files/content` - 读取技能文件
+
+`path` 为技能根目录相对路径。文本以 UTF-8 返回；较小的图片为 base64；其它二进制文件不返回正文，并设置 `binary: true`。
+
+```curl
+curl --location 'http://localhost:8080/api/v1/sandbox-configs/{id}/skills/{skillId}/files/content?path=SKILL.md' \
+--header 'X-API-Key: sk-xxxxx'
+```
+
+**响应**:
+
+```json
+{
+    "success": true,
+    "data": {
+        "path": "SKILL.md",
+        "size": 412,
+        "encoding": "utf-8",
+        "media_type": "text/markdown",
+        "content": "---\nname: pdf-tools\n..."
     }
 }
 ```

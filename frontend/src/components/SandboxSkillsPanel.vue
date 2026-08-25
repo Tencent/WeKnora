@@ -173,6 +173,18 @@
                       @change="(v: any) => toggleEnabled(skill, Boolean(v))"
                     />
                   </t-tooltip>
+                  <span class="skill-item__actions-divider" />
+                  <t-tooltip :content="$t('settings.sandbox.skillFiles')" placement="top">
+                    <button
+                      type="button"
+                      class="skill-item__icon-btn"
+                      :class="{ 'is-on': filesDrawerVisible && filesSkillId === skill.id }"
+                      :aria-label="$t('settings.sandbox.skillFiles')"
+                      @click="openSkillFiles(skill)"
+                    >
+                      <t-icon name="folder" size="16px" />
+                    </button>
+                  </t-tooltip>
                   <t-popup
                     v-if="hasTranscript(skill)"
                     :visible="expandedSkillId === skill.id"
@@ -185,17 +197,14 @@
                     :overlay-inner-style="{ padding: '0' }"
                     @visible-change="(visible: boolean) => onTranscriptVisible(skill, visible)"
                   >
-                    <t-button
-                      variant="text"
-                      shape="square"
+                    <button
+                      type="button"
                       class="skill-item__icon-btn"
-                      :class="{ 'skill-transcript-toggle--on': expandedSkillId === skill.id }"
-                      :title="$t('settings.sandbox.skillTranscript')"
+                      :class="{ 'is-on': expandedSkillId === skill.id }"
+                      :aria-label="$t('settings.sandbox.skillTranscript')"
                     >
-                      <template #icon>
-                        <t-icon name="chat-bubble-history" size="16px" />
-                      </template>
-                    </t-button>
+                      <t-icon name="chat-bubble-history" size="16px" />
+                    </button>
                     <template #content>
                       <div class="skill-transcript-popup__panel">
                         <header class="skill-transcript-popup__head">
@@ -243,41 +252,47 @@
                     @confirm="removeSkill(skill)"
                   >
                     <t-tooltip :content="$t('common.delete')" placement="top">
-                      <t-button
-                        theme="danger"
-                        variant="text"
-                        shape="square"
-                        class="skill-item__icon-btn"
-                        :disabled="isBusy(skill)"
-                        :loading="deletingId === skill.id"
+                      <button
+                        type="button"
+                        class="skill-item__icon-btn skill-item__icon-btn--danger"
+                        :disabled="isBusy(skill) || deletingId === skill.id"
+                        :aria-label="$t('common.delete')"
                       >
-                        <template #icon><t-icon name="delete" size="16px" /></template>
-                      </t-button>
+                        <t-icon name="delete" size="16px" />
+                      </button>
                     </t-tooltip>
                   </t-popconfirm>
                 </div>
               </div>
-              <p
-                v-if="skill.description"
-                class="skill-item__desc"
-                :class="{ 'skill-item__desc--expanded': isCopyExpanded(skill.id) }"
-              >
-                {{ skill.description }}
-              </p>
-              <button
-                v-if="canToggleCopy(skill)"
-                type="button"
-                class="skill-item__toggle"
-                @click="toggleCopy(skill.id)"
-              >
-                {{ isCopyExpanded(skill.id) ? $t('common.collapse') : $t('common.expand') }}
-              </button>
+              <div v-if="skill.description" class="skill-item__copy">
+                <p
+                  class="skill-item__desc"
+                  :class="{ 'skill-item__desc--expanded': isCopyExpanded(skill.id) }"
+                >
+                  {{ skill.description }}
+                </p>
+                <button
+                  v-if="canToggleCopy(skill)"
+                  type="button"
+                  class="skill-item__toggle"
+                  @click="toggleCopy(skill.id)"
+                >
+                  {{ isCopyExpanded(skill.id) ? $t('common.collapse') : $t('common.expand') }}
+                </button>
+              </div>
               <p v-if="failedError(skill)" class="skill-item__error">{{ failedError(skill) }}</p>
             </div>
           </li>
         </ul>
       </section>
     </t-loading>
+
+    <SkillFilesDrawer
+      v-model:visible="filesDrawerVisible"
+      :config-id="record?.id || ''"
+      :skill-id="filesSkillId"
+      :skill-name="filesSkillName"
+    />
   </div>
 </template>
 
@@ -288,6 +303,7 @@ import { useI18n } from 'vue-i18n'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import ModelSelector from '@/components/ModelSelector.vue'
 import SkillInstallTimeline from '@/components/SkillInstallTimeline.vue'
+import SkillFilesDrawer from '@/components/SkillFilesDrawer.vue'
 import {
   getAgentById,
   updateAgent,
@@ -335,6 +351,9 @@ const deletingId = ref('')
 // Only one install timeline is open at a time: each one holds an SSE
 // connection, and two runs' worth of agent steps in a drawer is unreadable.
 const expandedSkillId = ref('')
+const filesSkillId = ref('')
+const filesSkillName = ref('')
+const filesDrawerVisible = ref(false)
 const expandedCopyIds = ref<Set<string>>(new Set())
 const transcriptEpoch = ref(0)
 const focusedSkillId = ref('')
@@ -440,6 +459,7 @@ function revealSkill(skillId: string) {
 
 function onTranscriptVisible(skill: ConfigSkill, visible: boolean) {
   if (visible) {
+    filesDrawerVisible.value = false
     if (expandedSkillId.value !== skill.id) {
       expandedSkillId.value = skill.id
       // A run that finished while the popup was closed was tailed from the
@@ -451,6 +471,17 @@ function onTranscriptVisible(skill: ConfigSkill, visible: boolean) {
   if (expandedSkillId.value === skill.id) {
     expandedSkillId.value = ''
   }
+}
+
+function openSkillFiles(skill: ConfigSkill) {
+  expandedSkillId.value = ''
+  if (filesDrawerVisible.value && filesSkillId.value === skill.id) {
+    filesDrawerVisible.value = false
+    return
+  }
+  filesSkillId.value = skill.id
+  filesSkillName.value = skill.name || skill.id
+  filesDrawerVisible.value = true
 }
 
 function progressOf(skill: ConfigSkill): number {
@@ -1021,10 +1052,6 @@ onUnmounted(() => {
   box-shadow: 0 0 0 2px var(--td-brand-color-focus, rgba(0, 168, 112, 0.18));
 }
 
-.skill-transcript-toggle--on {
-  color: var(--td-brand-color);
-}
-
 .skill-status-ring {
   width: 16px;
   height: 16px;
@@ -1084,13 +1111,22 @@ onUnmounted(() => {
 
 .skill-item__desc,
 .skill-item__error {
-  margin: 6px 0 0;
+  margin: 0;
   font-size: 12px;
   line-height: 1.5;
   word-break: break-word;
 }
 
+.skill-item__copy {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
 .skill-item__desc {
+  min-width: 0;
+  flex: 1;
   color: var(--td-text-color-secondary);
 }
 
@@ -1103,33 +1139,72 @@ onUnmounted(() => {
 }
 
 .skill-item__error {
+  margin-top: 6px;
   color: var(--td-error-color);
 }
 
 .skill-item__toggle {
-  margin-top: 4px;
+  flex-shrink: 0;
+  margin: 0;
   padding: 0;
   border: 0;
   background: none;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--td-brand-color);
+  color: var(--td-text-color-placeholder);
   cursor: pointer;
+
+  &:hover {
+    color: var(--td-brand-color);
+  }
 }
 
 .skill-item__actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   flex-shrink: 0;
 }
 
-.skill-item__icon-btn {
-  width: 24px;
-  height: 24px;
+.skill-item__actions-divider {
+  width: 1px;
+  height: 12px;
+  margin: 0 4px;
+  background: var(--td-component-stroke);
+}
 
-  :deep(.t-button__icon) {
-    margin: 0;
+.skill-item__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
+
+  &.is-on {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-brand-color);
+  }
+
+  &--danger:hover:not(:disabled) {
+    background: var(--td-error-color-1, var(--td-bg-color-secondarycontainer));
+    color: var(--td-error-color);
   }
 }
 </style>

@@ -13856,6 +13856,89 @@ paths:
       summary: Update an installed skill
       tags:
       - SandboxConfig
+  /sandbox-configs/{id}/skills/{skillId}/files:
+    get:
+      description: List files in the stored skill bundle without starting a sandbox.
+      parameters:
+      - description: Sandbox config ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Skill ID
+        in: path
+        name: skillId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Skill files
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Skill or files not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: List files of an installed skill
+      tags:
+      - SandboxConfig
+  /sandbox-configs/{id}/skills/{skillId}/files/content:
+    get:
+      description: Read one skill file as UTF-8, a small base64 image, or binary.
+      parameters:
+      - description: Sandbox config ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Skill ID
+        in: path
+        name: skillId
+        required: true
+        type: string
+      - description: Skill-root-relative file path
+        in: query
+        name: path
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Skill file
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid path
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Skill or file not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Read one file of an installed skill
+      tags:
+      - SandboxConfig
   /sandbox-configs/{id}/skills/{skillId}/install-events:
     get:
       description: |-
@@ -13922,6 +14005,10 @@ paths:
       responses:
         "200":
           description: SSE stream of transcript events
+          schema:
+            type: string
+        "204":
+          description: Install is still preparing; retry once locators exist
           schema:
             type: string
         "401":

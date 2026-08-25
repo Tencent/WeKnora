@@ -400,6 +400,21 @@ if err != nil {
 _ = skillID // 用 skillID 订阅 /sandbox-configs/{id}/skills/{skillID}/install-events
 ```
 
+### 示例：查看已安装技能的文件
+
+```go
+files, err := apiClient.ListSandboxSkillFiles(context.Background(), sandboxConfigID, skillID)
+if err != nil {
+    // 处理错误
+}
+content, err := apiClient.GetSandboxSkillFile(context.Background(), sandboxConfigID, skillID, "SKILL.md")
+if err != nil {
+    // 处理错误
+}
+_ = files
+_ = content
+```
+
 ## 完整示例
 
 请参考 `example.go` 文件中的 `ExampleUsage` 函数，其中展示了客户端的完整使用流程。
