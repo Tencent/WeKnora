@@ -53,17 +53,15 @@ func (c *Client) ListSkills(ctx context.Context, sandboxConfigID string) ([]Skil
 
 // InstallSandboxSkillFromSource installs a skill onto a sandbox config from a
 // ClawHub / SkillHub / skills.sh / GitHub / GitLab locator or a direct archive
-// URL. The call is accepted asynchronously; follow progress on the skill ID.
+// URL. The source must be readable anonymously. The call is accepted
+// asynchronously; follow progress on the skill ID.
 func (c *Client) InstallSandboxSkillFromSource(
-	ctx context.Context, configID, source, token string,
+	ctx context.Context, configID, source string,
 ) (string, error) {
 	if configID == "" {
 		return "", fmt.Errorf("sandbox config ID is required")
 	}
 	body := map[string]string{"source": source}
-	if token != "" {
-		body["token"] = token
-	}
 	path := "/api/v1/sandbox-configs/" + url.PathEscape(configID) + "/skills"
 	resp, err := c.doRequest(ctx, http.MethodPost, path, body, nil)
 	if err != nil {

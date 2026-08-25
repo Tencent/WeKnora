@@ -38,7 +38,6 @@ type fakeSandboxSkillService struct {
 	installID     string
 	installErr    error
 	installSource string
-	installToken  string
 	sourceErr     error
 	removeErr     error
 
@@ -124,10 +123,10 @@ func (f *fakeSandboxSkillService) InstallSkill(
 }
 
 func (f *fakeSandboxSkillService) InstallSkillFromSource(
-	_ context.Context, tenantID uint64, configID, source, token string,
+	_ context.Context, tenantID uint64, configID, source string,
 ) (string, error) {
 	f.installTenant, f.installConfig = tenantID, configID
-	f.installSource, f.installToken = source, token
+	f.installSource = source
 	return f.installID, f.sourceErr
 }
 
@@ -281,7 +280,7 @@ func TestSandboxSkillInstallFromSourceAcceptedReturnsSkillID(t *testing.T) {
 	svc := &fakeSandboxSkillService{installID: "skill-9"}
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
-	body := `{"source":"@owner/demo","token":"sk_test"}`
+	body := `{"source":"@owner/demo"}`
 	req := httptest.NewRequest(http.MethodPost, "/sandbox-configs/cfg-a/skills",
 		strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -292,7 +291,6 @@ func TestSandboxSkillInstallFromSourceAcceptedReturnsSkillID(t *testing.T) {
 	require.Equal(t, testSkillTenantID, svc.installTenant)
 	require.Equal(t, "cfg-a", svc.installConfig)
 	require.Equal(t, "@owner/demo", svc.installSource)
-	require.Equal(t, "sk_test", svc.installToken)
 	require.Nil(t, svc.installBytes, "a source install must not look like an upload")
 }
 

@@ -75,7 +75,7 @@ curl --location 'http://localhost:8080/api/v1/sandbox-configs/{id}/skills' \
 - skills.sh / GitHub / GitLab 仓库或目录链接
 - 直接的 zip / `SKILL.md` URL
 
-私有 SkillHub 可带 `token`，仅用于本次下载，服务端不保存。
+来源必须可匿名读取：服务端不会为这次下载附带任何凭据，因此私有仓库/私有 registry 需要先自行导出 zip 再上传。
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/sandbox-configs/{id}/skills' \
