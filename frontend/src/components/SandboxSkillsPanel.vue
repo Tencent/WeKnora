@@ -3,28 +3,37 @@
     <t-loading :loading="loading" size="small">
       <section class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.imageInfoTitle') }}</h4>
+        <p v-if="!hasSkillSnapshot" class="image-info-note">
+          {{ $t('settings.sandbox.imageInfoUsingBase') }}
+        </p>
         <ul class="image-info">
-          <li>
-            <span class="image-info__label">{{ $t('settings.sandbox.imageInfoBaseTemplate') }}</span>
+          <template v-if="hasSkillSnapshot">
+            <li>
+              <span class="image-info__label">{{ $t('settings.sandbox.imageInfoBaseTemplate') }}</span>
+              <span class="image-info__value image-info__value--id">
+                {{ skillImage?.base_template_id || runtimeTemplateId || $t('settings.sandbox.imageInfoUnset') }}
+              </span>
+            </li>
+            <li>
+              <span class="image-info__label">{{ $t('settings.sandbox.imageInfoSnapshot') }}</span>
+              <span class="image-info__value image-info__value--id">{{ skillImage?.snapshot_id }}</span>
+            </li>
+            <li>
+              <span class="image-info__label">{{ $t('settings.sandbox.imageInfoGeneration') }}</span>
+              <span class="image-info__value">
+                {{ skillImage?.generation ? String(skillImage.generation) : $t('settings.sandbox.imageInfoUnset') }}
+              </span>
+            </li>
+            <li>
+              <span class="image-info__label">{{ $t('settings.sandbox.imageInfoBuiltAt') }}</span>
+              <span class="image-info__value">{{ formatBuiltAt(skillImage?.built_at) }}</span>
+            </li>
+          </template>
+          <li v-else>
+            <span class="image-info__label">{{ $t('settings.sandbox.imageInfoRuntimeTemplate') }}</span>
             <span class="image-info__value image-info__value--id">
-              {{ skillImage?.base_template_id || $t('settings.sandbox.imageInfoEmpty') }}
+              {{ runtimeTemplateId || $t('settings.sandbox.imageInfoUnset') }}
             </span>
-          </li>
-          <li>
-            <span class="image-info__label">{{ $t('settings.sandbox.imageInfoSnapshot') }}</span>
-            <span class="image-info__value image-info__value--id">
-              {{ skillImage?.snapshot_id || $t('settings.sandbox.imageInfoEmpty') }}
-            </span>
-          </li>
-          <li>
-            <span class="image-info__label">{{ $t('settings.sandbox.imageInfoGeneration') }}</span>
-            <span class="image-info__value">
-              {{ skillImage?.generation ? String(skillImage.generation) : $t('settings.sandbox.imageInfoEmpty') }}
-            </span>
-          </li>
-          <li>
-            <span class="image-info__label">{{ $t('settings.sandbox.imageInfoBuiltAt') }}</span>
-            <span class="image-info__value">{{ formatBuiltAt(skillImage?.built_at) }}</span>
           </li>
         </ul>
       </section>
@@ -55,6 +64,7 @@
       </section>
 
       <section class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillInstallGroup') }}</h4>
         <input
           ref="fileInputRef"
           type="file"
@@ -72,7 +82,7 @@
           @drop.prevent="onFileDrop"
         >
           <div class="file-upload-content">
-            <t-icon name="upload" size="32px" class="upload-icon" />
+            <t-icon name="upload" size="28px" class="upload-icon" />
             <div class="upload-text">
               <span v-if="uploading" class="upload-file-name">
                 {{ $t('settings.sandbox.skillUploading', { percent: uploadPercent }) }}
@@ -86,7 +96,10 @@
           </div>
         </div>
         <p class="upload-hint">{{ uploadHint }}</p>
+      </section>
 
+      <section class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillInstalledGroup') }}</h4>
         <p v-if="!loading && skills.length === 0" class="skill-empty">
           {{ $t('settings.sandbox.skillEmpty') }}
         </p>
@@ -98,134 +111,146 @@
                 v-if="isBusy(skill)"
                 theme="circle"
                 :percentage="progressOf(skill)"
-                :size="32"
+                :size="16"
               />
               <t-icon
                 v-else-if="skill.status === 'failed'"
                 name="close-circle-filled"
+                size="16px"
                 class="skill-status-ring__failed"
               />
               <t-icon
                 v-else
                 name="check-circle-filled"
+                size="16px"
                 class="skill-status-ring__ready"
               />
             </div>
             <div class="skill-item__body">
-              <div class="skill-item__title">{{ skill.name || skill.id }}</div>
-              <p v-if="skill.description" class="skill-item__desc">{{ skill.description }}</p>
-              <p class="skill-item__meta">
-                <span>{{ statusLabel(skill) }}</span>
-                <span v-if="isBusy(skill)"> · {{ progressOf(skill) }}%</span>
-              </p>
-              <p v-if="skill.status === 'failed' && (skill.error || progressLog(skill))" class="skill-item__error">
-                {{ skill.error || progressLog(skill) }}
-              </p>
-            </div>
-            <div class="skill-item__actions">
-              <t-tooltip :content="$t('settings.sandbox.skillDisableHint')" placement="top">
-                <t-switch
-                  :value="skill.enabled"
-                  :disabled="isBusy(skill)"
-                  :loading="togglingId === skill.id"
-                  @change="(v: any) => toggleEnabled(skill, Boolean(v))"
-                />
-              </t-tooltip>
-              <t-tooltip
-                v-if="hasTranscript(skill)"
-                :content="
-                  expandedSkillId === skill.id
-                    ? $t('settings.sandbox.skillTranscriptHide')
-                    : $t('settings.sandbox.skillTranscript')
-                "
-                placement="top"
-              >
-                <t-button
-                  variant="text"
-                  shape="square"
-                  size="small"
-                  :class="{ 'skill-transcript-toggle--on': expandedSkillId === skill.id }"
-                  @click="toggleTranscript(skill)"
-                >
-                  <template #icon>
-                    <t-icon :name="expandedSkillId === skill.id ? 'chevron-up' : 'chat-bubble-history'" />
-                  </template>
-                </t-button>
-              </t-tooltip>
-              <t-tooltip :content="$t('settings.sandbox.skillView')" placement="top">
-                <t-button
-                  variant="text"
-                  shape="square"
-                  size="small"
-                  @click="openView(skill)"
-                >
-                  <template #icon><t-icon name="browse" /></template>
-                </t-button>
-              </t-tooltip>
-              <t-popconfirm
-                theme="warning"
-                :content="deleteHint"
-                :confirm-btn="{ content: $t('common.delete'), theme: 'danger' }"
-                :cancel-btn="{ content: $t('common.cancel') }"
-                placement="top-right"
-                @confirm="removeSkill(skill)"
-              >
-                <t-tooltip :content="$t('common.delete')" placement="top">
-                  <t-button
-                    theme="danger"
-                    variant="text"
-                    shape="square"
-                    size="small"
-                    :disabled="isBusy(skill)"
-                    :loading="deletingId === skill.id"
+              <div class="skill-item__header">
+                <div class="skill-item__heading">
+                  <div class="skill-item__title">{{ skill.name || skill.id }}</div>
+                  <p class="skill-item__meta">
+                    <span v-if="skill.version">{{ skill.version }} · </span>
+                    <span>{{ statusLabel(skill) }}</span>
+                    <span v-if="isBusy(skill)"> · {{ progressOf(skill) }}%</span>
+                  </p>
+                </div>
+                <div class="skill-item__actions">
+                  <t-tooltip :content="$t('settings.sandbox.skillDisableHint')" placement="top">
+                    <t-switch
+                      size="small"
+                      :value="skill.enabled"
+                      :disabled="isBusy(skill)"
+                      :loading="togglingId === skill.id"
+                      @change="(v: any) => toggleEnabled(skill, Boolean(v))"
+                    />
+                  </t-tooltip>
+                  <t-popup
+                    v-if="hasTranscript(skill)"
+                    :visible="expandedSkillId === skill.id"
+                    trigger="click"
+                    placement="bottom-right"
+                    attach="body"
+                    destroy-on-close
+                    overlay-class-name="skill-transcript-popup"
+                    :z-index="3200"
+                    :overlay-inner-style="{ padding: '0' }"
+                    @visible-change="(visible: boolean) => onTranscriptVisible(skill, visible)"
                   >
-                    <template #icon><t-icon name="delete" /></template>
-                  </t-button>
-                </t-tooltip>
-              </t-popconfirm>
+                    <t-button
+                      variant="text"
+                      shape="square"
+                      class="skill-item__icon-btn"
+                      :class="{ 'skill-transcript-toggle--on': expandedSkillId === skill.id }"
+                      :title="$t('settings.sandbox.skillTranscript')"
+                    >
+                      <template #icon>
+                        <t-icon name="chat-bubble-history" size="16px" />
+                      </template>
+                    </t-button>
+                    <template #content>
+                      <div class="skill-transcript-popup__panel">
+                        <header class="skill-transcript-popup__head">
+                          <div class="skill-transcript-popup__head-text">
+                            <div class="skill-transcript-popup__title">{{ skill.name || skill.id }}</div>
+                            <div class="skill-transcript-popup__meta">
+                              <span
+                                class="skill-transcript-popup__status"
+                                :data-status="skill.status"
+                              >{{ statusLabel(skill) }}</span>
+                              <span>{{ $t('settings.sandbox.skillTranscriptTitle') }}</span>
+                            </div>
+                          </div>
+                          <t-button
+                            variant="text"
+                            shape="square"
+                            size="small"
+                            class="skill-transcript-popup__close"
+                            :title="$t('common.close')"
+                            @click.stop="onTranscriptVisible(skill, false)"
+                          >
+                            <template #icon><t-icon name="close" size="16px" /></template>
+                          </t-button>
+                        </header>
+                        <div class="skill-transcript-popup__body">
+                          <SkillInstallTimeline
+                            :key="`${skill.id}-${skill.install_session_id || ''}-${transcriptEpoch}`"
+                            compact
+                            :config-id="record?.id || ''"
+                            :skill-id="skill.id"
+                            :session-id="skill.install_session_id || ''"
+                            :message-id="skill.install_message_id || ''"
+                            :live="skill.status === 'installing'"
+                          />
+                        </div>
+                      </div>
+                    </template>
+                  </t-popup>
+                  <t-popconfirm
+                    theme="warning"
+                    :content="deleteHint"
+                    :confirm-btn="{ content: $t('common.delete'), theme: 'danger' }"
+                    :cancel-btn="{ content: $t('common.cancel') }"
+                    placement="top-right"
+                    @confirm="removeSkill(skill)"
+                  >
+                    <t-tooltip :content="$t('common.delete')" placement="top">
+                      <t-button
+                        theme="danger"
+                        variant="text"
+                        shape="square"
+                        class="skill-item__icon-btn"
+                        :disabled="isBusy(skill)"
+                        :loading="deletingId === skill.id"
+                      >
+                        <template #icon><t-icon name="delete" size="16px" /></template>
+                      </t-button>
+                    </t-tooltip>
+                  </t-popconfirm>
+                </div>
+              </div>
+              <p
+                v-if="skill.description"
+                class="skill-item__desc"
+                :class="{ 'skill-item__desc--expanded': isCopyExpanded(skill.id) }"
+              >
+                {{ skill.description }}
+              </p>
+              <button
+                v-if="canToggleCopy(skill)"
+                type="button"
+                class="skill-item__toggle"
+                @click="toggleCopy(skill.id)"
+              >
+                {{ isCopyExpanded(skill.id) ? $t('common.collapse') : $t('common.expand') }}
+              </button>
+              <p v-if="failedError(skill)" class="skill-item__error">{{ failedError(skill) }}</p>
             </div>
-
-            <SkillInstallTimeline
-              v-if="expandedSkillId === skill.id"
-              :key="`${skill.id}-${skill.install_session_id || ''}-${transcriptEpoch}`"
-              class="skill-item__timeline"
-              :config-id="record?.id || ''"
-              :skill-id="skill.id"
-              :session-id="skill.install_session_id || ''"
-              :message-id="skill.install_message_id || ''"
-              :live="skill.status === 'installing'"
-            />
           </li>
         </ul>
       </section>
     </t-loading>
-
-    <t-dialog
-      v-model:visible="showView"
-      :header="viewing?.name || $t('settings.sandbox.skillView')"
-      :footer="false"
-      width="520px"
-      attach="body"
-    >
-      <ul v-if="viewing" class="skill-view">
-        <li>
-          <span class="skill-view__label">{{ $t('settings.sandbox.skillVersion') }}</span>
-          <span class="skill-view__value">{{ viewing.version || $t('settings.sandbox.skillVersionEmpty') }}</span>
-        </li>
-        <li>
-          <span class="skill-view__label">{{ $t('settings.sandbox.skillStatusLabel') }}</span>
-          <span class="skill-view__value">{{ statusLabel(viewing) }}</span>
-        </li>
-        <li v-if="viewing.description">
-          <span class="skill-view__label">{{ $t('settings.sandbox.configDescription') }}</span>
-          <span class="skill-view__value">{{ viewing.description }}</span>
-        </li>
-        <li v-if="viewing.error">
-          <span class="skill-view__label">{{ $t('settings.sandbox.skillError') }}</span>
-          <span class="skill-view__value skill-view__error">{{ viewing.error }}</span>
-        </li>
-      </ul>
-    </t-dialog>
   </div>
 </template>
 
@@ -277,11 +302,10 @@ const skills = ref<ConfigSkill[]>([])
 const skillImage = ref<SandboxSkillImage | null>(null)
 const togglingId = ref('')
 const deletingId = ref('')
-const showView = ref(false)
-const viewing = ref<ConfigSkill | null>(null)
 // Only one install timeline is open at a time: each one holds an SSE
 // connection, and two runs' worth of agent steps in a drawer is unreadable.
 const expandedSkillId = ref('')
+const expandedCopyIds = ref<Set<string>>(new Set())
 const transcriptEpoch = ref(0)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const progressById = ref<Record<string, ConfigSkillInstallEvent>>({})
@@ -312,6 +336,11 @@ const deleteHint = computed(() =>
     ? t('settings.sandbox.skillDeleteHintNewSession')
     : t('settings.sandbox.skillDeleteHint'),
 )
+const runtimeTemplateId = computed(() => {
+  const cfg = props.record?.config
+  return cfg?.cube?.template_id?.trim() || cfg?.e2b?.template_id?.trim() || ''
+})
+const hasSkillSnapshot = computed(() => Boolean(skillImage.value?.snapshot_id?.trim()))
 
 function readLastChatModelID(): string {
   try {
@@ -322,10 +351,10 @@ function readLastChatModelID(): string {
 }
 
 function formatBuiltAt(value?: string): string {
-  if (!value) return t('settings.sandbox.imageInfoEmpty')
+  if (!value) return t('settings.sandbox.imageInfoUnset')
   const date = new Date(value)
   if (Number.isNaN(date.getTime()) || date.getFullYear() <= 1) {
-    return t('settings.sandbox.imageInfoEmpty')
+    return t('settings.sandbox.imageInfoUnset')
   }
   return date.toLocaleString(locale.value)
 }
@@ -355,16 +384,19 @@ function hasTranscript(skill: ConfigSkill): boolean {
   return Boolean(skill.install_session_id && skill.install_message_id)
 }
 
-function toggleTranscript(skill: ConfigSkill) {
-  if (expandedSkillId.value === skill.id) {
-    expandedSkillId.value = ''
+function onTranscriptVisible(skill: ConfigSkill, visible: boolean) {
+  if (visible) {
+    if (expandedSkillId.value !== skill.id) {
+      expandedSkillId.value = skill.id
+      // A run that finished while the popup was closed was tailed from the
+      // event log; reopening it should read the run again from the top.
+      transcriptEpoch.value += 1
+    }
     return
   }
-  expandedSkillId.value = skill.id
-  // A run that finished while the timeline was open was tailed from the event
-  // log; reopening it should read the run again from the top rather than show
-  // whatever the closed stream left behind.
-  transcriptEpoch.value += 1
+  if (expandedSkillId.value === skill.id) {
+    expandedSkillId.value = ''
+  }
 }
 
 function progressOf(skill: ConfigSkill): number {
@@ -377,6 +409,31 @@ function progressOf(skill: ConfigSkill): number {
 
 function progressLog(skill: ConfigSkill): string {
   return progressById.value[skill.id]?.log || ''
+}
+
+function failedError(skill: ConfigSkill): string {
+  if (skill.status !== 'failed') return ''
+  return skill.error || progressLog(skill)
+}
+
+function isCopyExpanded(skillId: string): boolean {
+  return expandedCopyIds.value.has(skillId)
+}
+
+function descriptionNeedsToggle(skill: ConfigSkill): boolean {
+  const desc = skill.description?.trim() || ''
+  return desc.length > 80 || desc.includes('\n')
+}
+
+function canToggleCopy(skill: ConfigSkill): boolean {
+  return descriptionNeedsToggle(skill) || isCopyExpanded(skill.id)
+}
+
+function toggleCopy(skillId: string) {
+  const next = new Set(expandedCopyIds.value)
+  if (next.has(skillId)) next.delete(skillId)
+  else next.add(skillId)
+  expandedCopyIds.value = next
 }
 
 function stopFollow(skillId: string) {
@@ -643,11 +700,6 @@ async function removeSkill(skill: ConfigSkill) {
   }
 }
 
-function openView(skill: ConfigSkill) {
-  viewing.value = skill
-  showView.value = true
-}
-
 // The panel is mounted only while its wizard step is showing, so switching
 // steps tears the follows down and coming back re-reads the list.
 watch(
@@ -661,8 +713,7 @@ watch(
     stopPoll()
     skills.value = []
     progressById.value = {}
-    showView.value = false
-    viewing.value = null
+    expandedCopyIds.value = new Set()
     installerAgent.value = null
     installerModelId.value = ''
   },
@@ -676,6 +727,13 @@ onUnmounted(() => {
 </script>
 
 <style lang="less" scoped>
+.image-info-note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+}
+
 .image-info {
   margin: 0;
   padding: 0;
@@ -808,13 +866,13 @@ onUnmounted(() => {
 }
 
 .skill-empty {
-  margin: 12px 0 0;
+  margin: 0;
   font-size: 13px;
   color: var(--td-text-color-placeholder);
 }
 
 .skill-list {
-  margin: 12px 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
@@ -822,11 +880,10 @@ onUnmounted(() => {
   gap: 8px;
 }
 
-// A grid rather than a flex row so the expanded install timeline can span the
-// full width underneath the three columns of the row it belongs to.
+// The install timeline opens in a popup, so the card stays a two-column row.
 .skill-item {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: flex-start;
   gap: 12px;
   padding: 12px;
@@ -835,54 +892,60 @@ onUnmounted(() => {
   background: var(--td-bg-color-container);
 }
 
-.skill-item__timeline {
-  grid-column: 1 / -1;
-}
-
 .skill-transcript-toggle--on {
   color: var(--td-brand-color);
 }
 
 .skill-status-ring {
-  width: 32px;
-  height: 32px;
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   color: var(--td-text-color-secondary);
 
-  :deep(.t-progress) {
-    width: 32px;
-    height: 32px;
+  :deep(.t-progress),
+  :deep(.t-icon) {
+    width: 16px;
+    height: 16px;
   }
 
   &__ready {
     color: var(--td-success-color);
-    font-size: 22px;
   }
 
   &__failed {
     color: var(--td-error-color);
-    font-size: 22px;
   }
 }
 
 .skill-item__body {
-  flex: 1;
   min-width: 0;
+}
+
+.skill-item__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.skill-item__heading {
+  min-width: 0;
+  flex: 1;
 }
 
 .skill-item__title {
   font-size: 14px;
   font-weight: 600;
+  line-height: 22px;
   color: var(--td-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.skill-item__desc,
 .skill-item__meta {
   margin: 2px 0 0;
   font-size: 12px;
@@ -890,54 +953,149 @@ onUnmounted(() => {
   color: var(--td-text-color-secondary);
 }
 
+.skill-item__desc,
+.skill-item__error {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
 .skill-item__desc {
+  color: var(--td-text-color-secondary);
+}
+
+.skill-item__desc:not(.skill-item__desc--expanded) {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .skill-item__error {
-  margin: 4px 0 0;
-  font-size: 12px;
-  line-height: 1.45;
   color: var(--td-error-color);
+}
+
+.skill-item__toggle {
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-brand-color);
+  cursor: pointer;
 }
 
 .skill-item__actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   flex-shrink: 0;
 }
 
-.skill-view {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+.skill-item__icon-btn {
+  width: 24px;
+  height: 24px;
 
-.skill-view li {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  :deep(.t-button__icon) {
+    margin: 0;
+  }
 }
+</style>
 
-.skill-view__label {
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-}
+<style lang="less">
+.skill-transcript-popup {
+  z-index: 3200 !important;
 
-.skill-view__value {
-  font-size: 13px;
-  color: var(--td-text-color-primary);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
+  .t-popup__content {
+    padding: 0 !important;
+    width: 420px;
+    max-width: min(420px, calc(100vw - 32px));
+    border-radius: 10px !important;
+    background: var(--td-bg-color-container) !important;
+    border: 1px solid var(--td-component-stroke) !important;
+    box-shadow:
+      0 0 0 0.5px rgba(0, 0, 0, 0.04),
+      0 8px 24px rgba(0, 0, 0, 0.12) !important;
+    overflow: hidden;
+  }
 
-.skill-view__error {
-  color: var(--td-error-color);
+  &__panel {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  &__head {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 8px 10px 14px;
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  &__head-text {
+    min-width: 0;
+    flex: 1;
+  }
+
+  &__title {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--td-text-color-placeholder);
+  }
+
+  &__status {
+    color: var(--td-text-color-secondary);
+
+    &[data-status='installing'],
+    &[data-status='removing'] {
+      color: var(--td-brand-color);
+    }
+
+    &[data-status='failed'] {
+      color: var(--td-error-color);
+    }
+
+    &[data-status='ready'] {
+      color: var(--td-success-color);
+    }
+  }
+
+  &__close {
+    flex-shrink: 0;
+    color: var(--td-text-color-secondary);
+  }
+
+  &__body {
+    max-height: min(360px, 52vh);
+    overflow: auto;
+    background: var(--td-bg-color-secondarycontainer);
+
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: var(--td-bg-color-component-disabled);
+      border-radius: 3px;
+    }
+  }
 }
 </style>

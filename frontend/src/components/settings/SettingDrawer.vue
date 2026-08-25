@@ -18,17 +18,22 @@
       so we don't need a redundant X button.
     -->
     <template #header>
-      <div class="setting-drawer__header">
-        <div v-if="$slots.headerIcon || icon" class="setting-drawer__header-icon">
-          <slot name="headerIcon">
-            <t-icon v-if="icon" :name="icon" />
-          </slot>
-        </div>
-        <div class="setting-drawer__header-text">
-          <div class="setting-drawer__title">{{ title }}</div>
-          <div v-if="description || $slots.subtitle" class="setting-drawer__subtitle">
-            <slot name="subtitle">{{ description }}</slot>
+      <div class="setting-drawer__header-block">
+        <div class="setting-drawer__header">
+          <div v-if="$slots.headerIcon || icon" class="setting-drawer__header-icon">
+            <slot name="headerIcon">
+              <t-icon v-if="icon" :name="icon" />
+            </slot>
           </div>
+          <div class="setting-drawer__header-text">
+            <div class="setting-drawer__title">{{ title }}</div>
+            <div v-if="description || $slots.subtitle" class="setting-drawer__subtitle">
+              <slot name="subtitle">{{ description }}</slot>
+            </div>
+          </div>
+        </div>
+        <div v-if="$slots['header-extra']" class="setting-drawer__header-extra">
+          <slot name="header-extra" />
         </div>
       </div>
     </template>
@@ -258,6 +263,15 @@ const handleCancel = () => {
 
 <style lang="less" scoped>
 /* ---------- Header ---------- */
+.setting-drawer__header-block {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  gap: 8px;
+}
+
 .setting-drawer__header {
   display: flex;
   align-items: center;

@@ -473,10 +473,7 @@ func (s *TenantSkillService) removeStillOwnsTheRow(
 func (s *TenantSkillService) deleteBundleBestEffort(
 	ctx context.Context, tenantID uint64, bundleRef string,
 ) {
-	if s.resolver == nil {
-		return
-	}
-	fs, _, err := s.resolver.ResolveFileService(ctx, &types.Tenant{ID: tenantID}, "", "", "")
+	fs, err := s.fileServiceForTenant(ctx, tenantID)
 	if err != nil || fs == nil {
 		logger.Warnf(ctx, "[skill] resolve file service to delete bundle %s failed: %v",
 			bundleRef, err)

@@ -21,6 +21,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 const (
@@ -126,7 +127,10 @@ func (s *TenantSkillService) InstallSkill(
 	if err != nil {
 		failCtx, cancelFail := s.cleanupContext(ctx)
 		defer cancelFail()
-		s.failSkill(failCtx, tenantID, configID, skillID, bundle, fmt.Errorf("store bundle: %w", err))
+		storeErr := fmt.Errorf("store bundle: %w", err)
+		logger.Errorf(ctx, "[skill] store bundle failed tenant=%d config=%s skill=%s name=%s: %v",
+			tenantID, configID, skillID, bundle.Name, err)
+		s.failSkill(failCtx, tenantID, configID, skillID, bundle, storeErr)
 		return "", fmt.Errorf("store bundle for skill %s: %w", skillID, err)
 	}
 	_ = s.updateSkillFields(ctx, tenantID, configID, skillID, func(e *types.TenantSkillEntity) {
@@ -754,18 +758,35 @@ func (s *TenantSkillService) execInstall(
 	return res, nil
 }
 
+func (s *TenantSkillService) tenantForStorage(ctx context.Context, tenantID uint64) *types.Tenant {
+	if info, ok := types.TenantInfoFromContext(ctx); ok && info.ID == tenantID {
+		return info
+	}
+	return &types.Tenant{ID: tenantID}
+}
+
+func (s *TenantSkillService) fileServiceForTenant(
+	ctx context.Context, tenantID uint64,
+) (interfaces.FileService, error) {
+	if s.resolver == nil {
+		return nil, errors.New("storage resolver is not configured")
+	}
+	fs, _, err := s.resolver.ResolveFileService(ctx, s.tenantForStorage(ctx, tenantID), "", "", "")
+	if err != nil {
+		return nil, err
+	}
+	if fs == nil {
+		return nil, errors.New("file service is not configured")
+	}
+	return fs, nil
+}
+
 func (s *TenantSkillService) saveBundle(
 	ctx context.Context, tenantID uint64, skillID string, archive []byte,
 ) (string, error) {
-	if s.resolver == nil {
-		return "", errors.New("storage resolver is not configured")
-	}
-	fs, _, err := s.resolver.ResolveFileService(ctx, &types.Tenant{ID: tenantID}, "", "", "")
+	fs, err := s.fileServiceForTenant(ctx, tenantID)
 	if err != nil {
 		return "", err
-	}
-	if fs == nil {
-		return "", errors.New("file service is not configured")
 	}
 	return fs.SaveBytes(ctx, archive, tenantID, fmt.Sprintf("tenant-skills/%s.zip", skillID), false)
 }
