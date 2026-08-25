@@ -13,7 +13,7 @@
 | Review Time | 2026-08-25 14:15:21 +0800 |
 | Scope | commits=2, files=24, Tier-M |
 | Findings | P0=0 / P1=0 / P2=0 / P3=0 |
-| Excluded Intermediate Findings | 2（并发删除错误映射、审计动作前端注册，均已在最终态修复） |
+| Excluded Intermediate Findings | 3（并发删除错误映射、审计动作前端注册、中文 workspace 术语，均已在最终态修复） |
 | 发布建议 | ✅ 可发 |
 
 ## 🧭 1. 审查范围与方法
@@ -75,7 +75,7 @@
 | P2 | 0 |
 | P3 | 0 |
 
-中间态曾发现并修复两项：授予期间目标并发删除原映射为 500，已改为 404；新增审计动作原未加入前端注册表，已补齐注册、默认文案和展示主题。两项均不存在于最终态，因此不计入 findings。
+中间态曾发现并修复三项：授予期间目标并发删除原映射为 500，已改为 404；新增审计动作原未加入前端注册表，已补齐注册、默认文案和展示主题；用户可见中文原使用“租户”，已按项目规范统一为“空间”。三项均不存在于最终态，因此不计入 findings。
 
 ## 🧪 5. 回归测试建议与覆盖映射
 
@@ -85,7 +85,7 @@
 | 幂等与自撤销 | `TestUserRepositoryCrossTenantAccessLifecycle` | 通过 |
 | Handler 响应与审计 | `system_cross_tenant_access_test.go` | 通过 |
 | API/DTO 与 Vue 模板 | `npm run type-check`、`npm run build-only` | 通过 |
-| 多语言与审计动作 | `localeKeyAudit.test.ts` 11 项 | 通过 |
+| 多语言、审计动作与 workspace 术语 | `localeKeyAudit.test.ts` + `workspaceTerminology.test.ts` 12 项 | 通过 |
 | 相关后端回归 | repository/service/middleware/handler/router/types 包测试 | 通过 |
 
 全仓 `go test ./...` 仅失败于既有 `internal/datasource/connector/feishu/wiki` 日志断言（期望 summary 文本，实际重复输出 `json`），与本分支文件无交集。
