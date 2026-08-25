@@ -38,9 +38,9 @@ const props = defineProps<{
   // The durable rows behind the run, used when the event log has aged out.
   sessionId: string
   messageId: string
-  // True while this skill is still installing. The locators are written only
-  // after the installer sandbox is up, so a 404 here means "not yet" rather
-  // than "gone" and the stream is retried.
+  // True while this skill is still installing. Locators are written after the
+  // sandbox is up; until then this component shows the waiting copy and does
+  // not hit /transcript.
   live?: boolean
   compact?: boolean
 }>()
@@ -168,22 +168,30 @@ async function open() {
   const run = ++openRun
   closed = false
   messages.splice(0, messages.length)
-  loading.value = true
   const stale = () => run !== openRun || closed
   try {
     // A finished install already has durable rows. Replaying the event log
     // through processStreamChunk would animate every tool call again, which
     // is what "view the run" must not do.
     if (!props.live) {
+      loading.value = true
       if (props.sessionId) {
         await loadPersisted(run)
       }
       return
     }
 
-    // Locators land after the installer sandbox is up. Keep asking until the
-    // stream answers; falling through to the empty state on the first 404
-    // would flash "no record" during setup.
+    // Locators land after the installer sandbox is up. Hitting /transcript
+    // before that 404s every second (WARNING in the access log) and leaves
+    // the spinner up for the entire file seed, which can take minutes.
+    // The parent already polls the skill list; this watch re-opens when
+    // sessionId arrives.
+    if (!props.sessionId || !props.messageId) {
+      loading.value = false
+      return
+    }
+
+    loading.value = true
     for (;;) {
       if (stale() || !props.live) return
       const served = await follow(run).catch(() => false)
@@ -204,7 +212,7 @@ async function open() {
 }
 
 watch(
-  () => [props.configId, props.skillId, props.sessionId, props.live] as const,
+  () => [props.configId, props.skillId, props.sessionId, props.messageId, props.live] as const,
   () => {
     stop()
     if (props.configId && props.skillId) void open()

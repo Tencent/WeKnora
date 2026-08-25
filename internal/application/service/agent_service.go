@@ -237,20 +237,18 @@ func (s *agentService) CreateAgentEngine(
 		}
 	}
 
-	skillsEnabledWithDirs := config.SkillsEnabled && len(config.SkillDirs) > 0
-	// Initialize the skills/sandbox manager when skills are configured, or for
-	// the skill installer, which keeps skills off yet needs the sandbox shell.
-	// The second disjunct is deliberately NOT "the config lists a sandbox
-	// tool": shell_exec is a user-selectable entry in the tool picker, so that
-	// rule would hand a live sandbox shell to every stored agent record that
-	// already lists it. Install mode is settable only through
-	// EnableSkillInstallMode, so only the built-in installer passes here and
-	// every other agent keeps exactly its previous behaviour.
-	if skillsEnabledWithDirs || config.SkillInstallMode() {
+	// TenantSkills is the sandbox image. SkillDirs is the host
+	// skills/preloaded tree and is no longer filled on the QA path; it
+	// remains so tests (and any caller that still points at a host
+	// directory) can construct a manager. Install mode initializes for
+	// the shell without hanging a skills manager on the engine.
+	offerSkills := config.SkillsEnabled &&
+		(len(config.SkillDirs) > 0 || len(config.TenantSkills) > 0)
+	if offerSkills || config.SkillInstallMode() {
 		skillsManager, err := s.initializeSkillsManager(ctx, sessionID, config, toolRegistry)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to initialize skills manager: %v", err)
-		} else if skillsEnabledWithDirs && skillsManager != nil {
+		} else if offerSkills && skillsManager != nil {
 			engine.SetSkillsManager(skillsManager)
 			logger.Infof(ctx, "Skills manager initialized with %d skills",
 				len(skillsManager.GetAllMetadata()))
@@ -838,6 +836,14 @@ func (s *agentService) registerTools(
 		case tools.ToolWikiDeletePage:
 			toolToRegister = tools.NewWikiDeletePageTool(s.wikiPageService, wikiKBIDs, wikiRoutes)
 
+		case tools.ToolShellExec, tools.ToolReadSkill, tools.ToolExecuteSkillScript,
+			tools.ToolListSandboxFiles, tools.ToolReadSandboxFile:
+			// Bound to the resolved sandbox manager in initializeSkillsManager
+			// / registerSandboxShellTool. Listing them here would warn
+			// "Unknown tool: shell_exec" on every skill install, then register
+			// the real tool a few lines later.
+			continue
+
 		default:
 			logger.Warnf(ctx, "Unknown tool: %s", toolName)
 		}
@@ -1176,6 +1182,11 @@ func (s *agentService) resolvePinnedSkillInfos(config *types.AgentConfig) []*age
 					descByName[meta.Name] = meta.Description
 				}
 			}
+		}
+	}
+	for _, row := range config.TenantSkills {
+		if row != nil && row.Name != "" {
+			descByName[row.Name] = row.Description
 		}
 	}
 

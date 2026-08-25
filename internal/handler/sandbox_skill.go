@@ -567,6 +567,7 @@ func (h *SandboxSkillHandler) InstallEvents(c *gin.Context) {
 // @Param        id       path      string  true  "Sandbox config ID"
 // @Param        skillId  path      string  true  "Skill ID"
 // @Success      200      {string}  string  "SSE stream of transcript events"
+// @Success      204      {string}  string  "Install is still preparing; retry once locators exist"
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill or transcript not found"
 // @Security     Bearer
@@ -589,6 +590,13 @@ func (h *SandboxSkillHandler) InstallTranscript(c *gin.Context) {
 	}
 	sessionID, messageID := skill.InstallSessionID, skill.InstallMessageID
 	if sessionID == "" || messageID == "" {
+		// The skill row exists the moment the upload is accepted; locators
+		// are written only after the installer sandbox is up. A 404 here is
+		// "not yet", not "gone", and the access log would WARN on every poll.
+		if skill.Status == types.SkillStatusInstalling {
+			c.Status(http.StatusNoContent)
+			return
+		}
 		_ = c.Error(apperrors.NewNotFoundError("this skill has no install transcript"))
 		return
 	}

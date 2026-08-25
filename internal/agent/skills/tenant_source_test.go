@@ -188,8 +188,8 @@ func TestTenantSkillSourceReportsAMissingBundleWithoutBlockingExecution(t *testi
 	require.Equal(t, "/opt/weknora/tenant/skills/pdf/scripts/extract.py", remote)
 }
 
-func TestManagerPrefersTheTenantSkillOverASameNamedPreloadedOne(t *testing.T) {
-	dir := preloadedSkillDir(t, "pdf", "preloaded description")
+func TestManagerIgnoresPreloadedSkillsWhenTenantSourceIsAttached(t *testing.T) {
+	dir := preloadedSkillDir(t, "document-analyzer", "preloaded description")
 	mgr := NewManager(&ManagerConfig{SkillDirs: []string{dir}, Enabled: true}, nil)
 	mgr.WithTenantSource(NewTenantSkillSource([]*types.TenantSkillEntity{
 		{
@@ -209,13 +209,17 @@ func TestManagerPrefersTheTenantSkillOverASameNamedPreloadedOne(t *testing.T) {
 		byName[meta.Name] = meta
 	}
 	require.Len(t, byName, 2)
-	require.Equal(t, "tenant description", byName["pdf"].Description,
-		"the tenant's own install is what the sandbox image actually carries")
+	require.NotContains(t, byName, "document-analyzer",
+		"host preloaded skills are not in the sandbox image")
+	require.Equal(t, "tenant description", byName["pdf"].Description)
 	require.Equal(t, "tenant only", byName["csv"].Description)
 
 	skill, err := mgr.LoadSkill(context.Background(), "pdf")
 	require.NoError(t, err)
 	require.Equal(t, "tenant body", skill.Instructions)
+
+	_, err = mgr.LoadSkill(context.Background(), "document-analyzer")
+	require.Error(t, err, "a host-only skill must not be readable once the image is the source")
 }
 
 func TestManagerRunsATenantSkillFromTheImageWithoutUploading(t *testing.T) {
@@ -246,13 +250,10 @@ func TestManagerRunsATenantSkillFromTheImageWithoutUploading(t *testing.T) {
 
 // Preloaded skills keep uploading from the host and keep running in their own
 // directory; the tenant source must not change that path at all.
-func TestManagerKeepsPreloadedSkillExecutionUnchanged(t *testing.T) {
+func TestManagerKeepsPreloadedSkillExecutionWhenNoTenantSource(t *testing.T) {
 	dir := preloadedSkillDir(t, "pdf", "preloaded description")
 	sandboxMgr := &recordingSandboxManager{}
 	mgr := NewManager(&ManagerConfig{SkillDirs: []string{dir}, Enabled: true}, sandboxMgr)
-	mgr.WithTenantSource(NewTenantSkillSource([]*types.TenantSkillEntity{{
-		ID: "sk-1", Name: "csv", Status: types.SkillStatusReady, Enabled: true,
-	}}, nil))
 	require.NoError(t, mgr.Initialize(context.Background()))
 
 	_, err := mgr.ExecuteScript(context.Background(), "pdf", "scripts/run.py", nil, "")
