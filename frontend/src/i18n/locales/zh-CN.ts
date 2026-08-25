@@ -5105,6 +5105,8 @@ export default {
         egress_available: '出网可用',
       },
       manageSkills: '管理技能',
+      cardSkillsNone: '尚未安装技能',
+      cardSkillsMore: '+{count}',
       skillInstallerModel: '安装模型',
       skillInstallerModelHint: '安装技能时由内置安装智能体调用。请选择支持工具调用的对话模型。',
       skillInstallerModelRequired: '请先选择安装模型',

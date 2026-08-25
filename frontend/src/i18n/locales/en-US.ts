@@ -1264,6 +1264,8 @@ export default {
         egress_available: 'Outbound network',
       },
       manageSkills: 'Manage skills',
+      cardSkillsNone: 'No skills installed',
+      cardSkillsMore: '+{count}',
       skillInstallerModel: 'Installer model',
       skillInstallerModelHint: 'Used by the built-in installer agent. Choose a chat model that supports tool calls.',
       skillInstallerModelRequired: 'Select an installer model first',
