@@ -126,7 +126,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	// long after the user cancelled (the AbortAttempt sweep ran before
 	// we opened postSpan, so the sweep didn't catch this row).
 	switch knowledge.ParseStatus {
-	case types.ParseStatusCancelled, types.ParseStatusDeleting:
+	case types.ParseStatusCancelled, types.ParseStatusDeleting, types.ParseStatusReplacing:
 		logger.Infof(ctx,
 			"[KnowledgePostProcess] Knowledge %s aborted (%s), skipping post-processing.",
 			payload.KnowledgeID, knowledge.ParseStatus,

@@ -7,6 +7,7 @@
 | 方法   | 路径                                       | 描述                                       |
 | ------ | ------------------------------------------ | ------------------------------------------ |
 | POST   | `/knowledge-bases/:id/knowledge/file`      | 上传文件创建知识（multipart）             |
+| POST   | `/knowledge-bases/:id/knowledge/file/create-or-update` | 新增或原位修改文件知识（multipart） |
 | POST   | `/knowledge-bases/:id/knowledge/url`       | 从 URL 创建知识（网页抓取或文件下载）       |
 | POST   | `/knowledge-bases/:id/knowledge/manual`    | 创建手工 Markdown 知识                     |
 | GET    | `/knowledge-bases/:id/knowledge`           | 列出知识库下的知识（支持分页/筛选）         |
@@ -34,7 +35,7 @@
 > **公共说明**：
 > - 路径中的 `:id`（知识库路径下）为**知识库 ID**，`/knowledge/:id` 中的 `:id` 为**知识 ID**。
 > - 所有写操作（创建、更新、删除、迁移、重新解析、取消解析）需要当前用户在知识库所属组织内具有 `editor` 或 `admin` 权限；清空知识库内容仅 KB **所有者**（admin 且空间匹配）可操作。
-> - 关键状态字段：`parse_status` 取值 `pending` / `processing` / `finalizing` / `completed` / `failed` / `cancelled`；`enable_status` 取值 `enabled` / `disabled`。
+> - 关键状态字段：`parse_status` 取值 `pending` / `processing` / `finalizing` / `replacing` / `completed` / `failed` / `cancelled`；`enable_status` 取值 `enabled` / `disabled`。
 > - `processing` 指 DocReader / 分块 / 向量化阶段；`finalizing` 指主解析已完成、仍在执行摘要 / 问题生成 / 图谱抽取等索引优化任务；只有当全部子任务到达终态后才进入 `completed`。
 > - `cancelled` 表示解析被用户主动取消，可通过 `reparse` 重新触发。`pending` / `processing` / `finalizing` 这三种状态都可通过 `cancel-parse` 终止。
 
@@ -111,6 +112,90 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 ```
 
 文件重复时返回 409 与已存在知识的引用；超过大小限制返回 400 `文件大小不能超过 N MB`。
+
+## POST `/knowledge-bases/:id/knowledge/file/create-or-update` - 新增或修改文件知识
+
+通过同一个 `multipart/form-data` 接口新增或原位修改**文件知识**。服务端优先使用显式 `knowledge_id`，未提供时按本次生效文件名在同知识库内查找唯一文件知识：
+
+- 不传 `knowledge_id` 且同知识库内没有同名文件知识：进入新增分支，复用文件创建链路。
+- 不传 `knowledge_id` 且唯一同名文件知识命中：进入修改分支，保留原 knowledge ID。
+- 不传 `knowledge_id` 但存在多条同名文件知识：返回 409，调用方必须显式传 `knowledge_id`。
+- 传入已有 `knowledge_id`：原位异步替换源文件并重建索引，既有引用继续有效。
+
+修改分支采用 latest-wins：每条 knowledge 最多保存一个 active 版本和一个最新 pending 版本。active 处理期间再次上传时，新请求覆盖原 pending；active 完成后自动处理当时最新的 pending。
+
+**路径参数**:
+
+| 字段 | 类型   | 说明      |
+| ---- | ------ | --------- |
+| id   | string | 知识库 ID |
+
+**表单字段**:
+
+| 字段                      | 类型    | 必填 | 新增分支                              | 修改分支                                               |
+| ------------------------- | ------- | ---- | ------------------------------------- | ------------------------------------------------------ |
+| `file`                    | file    | 是   | 新文件；唯一同名命中时转为修改        | 替换后的新文件                                         |
+| `knowledge_id`            | string  | 否   | 省略；按文件名唯一命中时更新，否则新增 | 已有 knowledge ID                                      |
+| `expected_file_hash`      | string  | 否   | 忽略                                  | 可选乐观锁；与当前 `file_hash` 不一致时返回 409         |
+| `expected_update_version` | integer | 否   | 忽略                                  | 可选乐观锁；与最后接受的更新版本不一致时返回 409        |
+| `fileName`                | string  | 否   | 自定义文件名                          | 新文件名；相对路径的目录部分写入 `folder_path`          |
+| `metadata`                | string  | 否   | 沿用现有创建语义                      | 省略时保留；提供时合并用户 metadata                    |
+| `enable_multimodel`       | string  | 否   | `"true"` / `"false"`                | 省略时保留，提供时更新                                 |
+| `process_config`          | string  | 否   | 解析配置覆盖 JSON                     | 省略时保留，提供时替换 process overrides              |
+| `tag_ids`                 | string  | 否   | 标签 ID 列表，逗号分隔                | 省略时保留；提供时整体替换，显式空值清空标签            |
+| `channel`                 | string  | 否   | 省略时默认为 `api`                    | 省略时保留原 channel，提供时更新                       |
+
+**请求**（修改分支）:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowledge/file/create-or-update' \
+--header 'X-API-Key: sk-xxxxx' \
+--form 'file=@"/Users/xxxx/tests/report-v2.pdf"' \
+--form 'knowledge_id="4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5"' \
+--form 'expected_update_version="12"'
+```
+
+**响应**（修改任务已接受，HTTP 202）:
+
+```json
+{
+    "success": true,
+    "data": {
+        "action": "updated",
+        "knowledge": {
+            "id": "4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5",
+            "knowledge_base_id": "kb-00000001",
+            "parse_status": "processing",
+            "file_update_version": 13,
+            "file_update_state": "pending"
+        },
+        "update_version": 13,
+        "update_state": "pending",
+        "accepted_file_hash": "..."
+    }
+}
+```
+
+`action` 取值：
+
+- `created`：新 knowledge 已创建（HTTP 202），文件进入异步解析。
+- `updated`：更新版本已持久化为 active 或最新 pending（HTTP 202）。
+- `unchanged`：内容和显式配置没有变化（HTTP 200），不增加版本。
+
+调用方通过 `GET /knowledge/:id` 同时轮询 `file_update_state` 和 `parse_status`。前者取值 `idle` / `active` / `pending` / `failed`，后者表示当前已生效文件的解析状态。`file_update_version` 可作为下一次请求的 `expected_update_version`。
+
+删除 knowledge 会先设置 `deleting` 并撤销更新槽；已排队的陈旧更新任务不会恢复该 knowledge。
+
+| 状态码 | 说明 |
+| ------ | ---- |
+| 200 | `action=unchanged`，内容未变化 |
+| 202 | `action=created` 或 `updated`，任务已接受 |
+| 400 | 文件、JSON 字段、类型或解析配置无效 |
+| 403 | 缺少知识库写权限或 API Key `ingest` 能力 |
+| 404 | 路径知识库或修改目标 knowledge 不存在 |
+| 409 | 正在删除、跨知识库、同名多条、乐观锁失败或并发修改 |
+| 413 | 文件超过大小限制 |
+| 503 | 检索引擎未注册，或更新已持久化但协调任务暂时无法入队 |
 
 ## POST `/knowledge-bases/:id/knowledge/url` - 从 URL 创建知识
 

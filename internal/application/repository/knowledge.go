@@ -9,9 +9,15 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
-var ErrKnowledgeNotFound = errors.New("knowledge not found")
+var (
+	ErrKnowledgeNotFound                  = errors.New("knowledge not found")
+	ErrKnowledgeFileUpdateVersionConflict = errors.New("knowledge file update version conflict")
+	ErrKnowledgeFileUpdateDeleting        = errors.New("knowledge is being deleted")
+	ErrKnowledgeFileUpdateStateConflict   = errors.New("knowledge file update state conflict")
+)
 
 // likeEscapeChar is the SQL ESCAPE character paired with escapeLikeKeyword.
 const likeEscapeChar = `\`
@@ -70,6 +76,7 @@ func (r *knowledgeRepository) GetKnowledgeByID(
 		}
 		return nil, err
 	}
+	r.projectKnowledgeFileUpdateSlots(ctx, tenantID, []*types.Knowledge{&knowledge})
 	return &knowledge, nil
 }
 
@@ -94,6 +101,7 @@ func (r *knowledgeRepository) ListKnowledgeByKnowledgeBaseID(
 		Order("created_at DESC").Find(&knowledges).Error; err != nil {
 		return nil, err
 	}
+	r.projectKnowledgeFileUpdateSlots(ctx, tenantID, knowledges)
 	return knowledges, nil
 }
 
@@ -200,6 +208,7 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 		Find(&knowledges).Error; err != nil {
 		return nil, 0, err
 	}
+	r.projectKnowledgeFileUpdateSlots(ctx, tenantID, knowledges)
 
 	return knowledges, total, nil
 }
@@ -344,7 +353,53 @@ func (r *knowledgeRepository) GetKnowledgeBatch(
 		Find(&knowledge).Error; err != nil {
 		return nil, err
 	}
+	r.projectKnowledgeFileUpdateSlots(ctx, tenantID, knowledge)
 	return knowledge, nil
+}
+
+// projectKnowledgeFileUpdateSlots adds read-only update state without making
+// existing knowledge queries depend on the new table. This is intentionally
+// best-effort for deployments that disable automatic migrations.
+func (r *knowledgeRepository) projectKnowledgeFileUpdateSlots(
+	ctx context.Context, tenantID uint64, knowledges []*types.Knowledge,
+) {
+	if len(knowledges) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(knowledges))
+	byID := make(map[string]*types.Knowledge, len(knowledges))
+	for _, knowledge := range knowledges {
+		if knowledge == nil {
+			continue
+		}
+		knowledge.FileUpdateState = types.KnowledgeFileUpdateStateIdle
+		ids = append(ids, knowledge.ID)
+		byID[knowledge.ID] = knowledge
+	}
+	var slots []*types.KnowledgeFileUpdateSlot
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_id IN ?", tenantID, ids).
+		Find(&slots).Error; err != nil {
+		return
+	}
+	for _, slot := range slots {
+		knowledge := byID[slot.KnowledgeID]
+		if knowledge == nil {
+			continue
+		}
+		knowledge.FileUpdateVersion = slot.LatestVersion
+		switch {
+		case slot.ActiveState == types.KnowledgeFileUpdateStateFailed:
+			knowledge.FileUpdateState = types.KnowledgeFileUpdateStateFailed
+			knowledge.FileUpdateError = "文件更新失败"
+		case slot.PendingVersion != nil:
+			knowledge.FileUpdateState = types.KnowledgeFileUpdateResultPending
+		case slot.ActiveVersion != nil:
+			knowledge.FileUpdateState = types.KnowledgeFileUpdateResultActive
+		default:
+			knowledge.FileUpdateState = types.KnowledgeFileUpdateStateIdle
+		}
+	}
 }
 
 // CheckKnowledgeExists checks if knowledge already exists
@@ -356,6 +411,31 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 ) (bool, *types.Knowledge, error) {
 	query := r.db.WithContext(ctx).Model(&types.Knowledge{}).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ?", tenantID, kbID, "failed")
+	return checkKnowledgeExistsQuery(query, params)
+}
+
+// CheckKnowledgeExistsExcluding checks duplicate identity while excluding the
+// row being replaced. It prevents a replacement from conflicting with itself
+// without weakening duplicate protection against other knowledge rows.
+func (r *knowledgeRepository) CheckKnowledgeExistsExcluding(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	excludeKnowledgeID string,
+	params *types.KnowledgeCheckParams,
+) (bool, *types.Knowledge, error) {
+	query := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ?", tenantID, kbID, types.ParseStatusFailed)
+	if excludeKnowledgeID != "" {
+		query = query.Where("id <> ?", excludeKnowledgeID)
+	}
+	return checkKnowledgeExistsQuery(query, params)
+}
+
+func checkKnowledgeExistsQuery(query *gorm.DB, params *types.KnowledgeCheckParams) (bool, *types.Knowledge, error) {
+	if params == nil {
+		return false, nil, nil
+	}
 
 	switch params.Type {
 	case "file":
@@ -530,6 +610,368 @@ func (r *knowledgeRepository) UpdateKnowledgeColumns(
 		return nil
 	}
 	return r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id).Updates(values).Error
+}
+
+// ClaimKnowledgeFileUpdate serializes in-place replacements using the exact
+// source version observed by the request. GORM's normal model scope also
+// excludes soft-deleted rows.
+func (r *knowledgeRepository) ClaimKnowledgeFileUpdate(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+	kbID string,
+	expectedStatus string,
+	expectedFilePath string,
+	expectedFileHash string,
+) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Where(
+			"tenant_id = ? AND id = ? AND knowledge_base_id = ? AND parse_status = ? AND file_path = ? AND file_hash = ?",
+			tenantID, knowledgeID, kbID, expectedStatus, expectedFilePath, expectedFileHash,
+		).
+		Updates(map[string]interface{}{
+			"parse_status":  types.ParseStatusReplacing,
+			"error_message": "",
+			"updated_at":    time.Now(),
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
+// UpdateApplyingKnowledgeFileColumns applies compensation or the final file
+// switch only if the task still owns the source version it originally claimed.
+func (r *knowledgeRepository) UpdateApplyingKnowledgeFileColumns(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+	kbID string,
+	expectedFilePath string,
+	expectedFileHash string,
+	values map[string]interface{},
+) (bool, error) {
+	if len(values) == 0 {
+		return false, nil
+	}
+	result := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Where(
+			"tenant_id = ? AND id = ? AND knowledge_base_id = ? AND parse_status = ? AND file_path = ? AND file_hash = ?",
+			tenantID, knowledgeID, kbID, types.ParseStatusReplacing, expectedFilePath, expectedFileHash,
+		).
+		Updates(values)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
+// StageKnowledgeFileUpdate accepts a new latest-wins replacement under a row
+// lock. When no active version exists, the new version is promoted directly.
+func (r *knowledgeRepository) StageKnowledgeFileUpdate(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+	kbID string,
+	payload types.JSON,
+	expectedVersion *uint64,
+) (*types.KnowledgeFileUpdateStageResult, error) {
+	var staged *types.KnowledgeFileUpdateStageResult
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Deletion locks the knowledge before its slot as well. Keeping the same
+		// order prevents an upload that passed the HTTP precheck from recreating
+		// a slot after deletion has claimed the resource.
+		knowledgeQuery := tx.Model(&types.Knowledge{}).
+			Select("id", "parse_status").
+			Where("id = ? AND tenant_id = ? AND knowledge_base_id = ?", knowledgeID, tenantID, kbID)
+		if tx.Dialector.Name() != "sqlite" {
+			knowledgeQuery = knowledgeQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		var knowledge types.Knowledge
+		if err := knowledgeQuery.Take(&knowledge).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrKnowledgeNotFound
+			}
+			return err
+		}
+		if knowledge.ParseStatus == types.ParseStatusDeleting {
+			return ErrKnowledgeFileUpdateDeleting
+		}
+
+		now := time.Now()
+		seed := &types.KnowledgeFileUpdateSlot{
+			KnowledgeID:     knowledgeID,
+			TenantID:        tenantID,
+			KnowledgeBaseID: kbID,
+			ActiveState:     types.KnowledgeFileUpdateStateIdle,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(seed).Error; err != nil {
+			return err
+		}
+
+		query := tx.Where("knowledge_id = ?", knowledgeID)
+		if tx.Dialector.Name() != "sqlite" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		var slot types.KnowledgeFileUpdateSlot
+		if err := query.First(&slot).Error; err != nil {
+			return err
+		}
+		if slot.TenantID != tenantID || slot.KnowledgeBaseID != kbID {
+			return ErrKnowledgeFileUpdateVersionConflict
+		}
+		if expectedVersion != nil && slot.LatestVersion != *expectedVersion {
+			return ErrKnowledgeFileUpdateVersionConflict
+		}
+
+		version := slot.LatestVersion + 1
+		updates := map[string]interface{}{
+			"latest_version": version,
+			"last_error":     "",
+			"updated_at":     now,
+		}
+		state := types.KnowledgeFileUpdateResultPending
+		activeVersion := uint64(0)
+		if slot.ActiveVersion == nil || slot.ActiveState == types.KnowledgeFileUpdateStateFailed {
+			updates["active_version"] = version
+			updates["active_state"] = types.KnowledgeFileUpdateStateWaiting
+			updates["active_payload"] = payload
+			updates["pending_version"] = nil
+			updates["pending_payload"] = nil
+			state = types.KnowledgeFileUpdateResultActive
+			activeVersion = version
+		} else {
+			updates["pending_version"] = version
+			updates["pending_payload"] = payload
+			activeVersion = *slot.ActiveVersion
+		}
+
+		result := tx.Model(&types.KnowledgeFileUpdateSlot{}).
+			Where("knowledge_id = ? AND latest_version = ?", knowledgeID, slot.LatestVersion).
+			Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrKnowledgeFileUpdateVersionConflict
+		}
+		staged = &types.KnowledgeFileUpdateStageResult{
+			Version:                version,
+			State:                  state,
+			ActiveVersion:          activeVersion,
+			ReplacedPendingPayload: append(types.JSON(nil), slot.PendingPayload...),
+		}
+		if slot.ActiveState == types.KnowledgeFileUpdateStateFailed {
+			staged.ReplacedActivePayload = append(types.JSON(nil), slot.ActivePayload...)
+		}
+		return nil
+	})
+	return staged, err
+}
+
+func (r *knowledgeRepository) GetKnowledgeFileUpdateSlot(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+) (*types.KnowledgeFileUpdateSlot, error) {
+	var slot types.KnowledgeFileUpdateSlot
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID).
+		First(&slot).Error
+	if err != nil {
+		return nil, err
+	}
+	return &slot, nil
+}
+
+func (r *knowledgeRepository) PrepareKnowledgeFileUpdate(
+	ctx context.Context, tenantID uint64, knowledgeID string, version uint64, payload types.JSON,
+) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&types.KnowledgeFileUpdateSlot{}).
+		Where("tenant_id = ? AND knowledge_id = ? AND active_version = ? AND active_state = ?",
+			tenantID, knowledgeID, version, types.KnowledgeFileUpdateStateWaiting).
+		Updates(map[string]interface{}{"active_payload": payload, "updated_at": time.Now()})
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *knowledgeRepository) TransitionKnowledgeFileUpdateState(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+	version uint64,
+	fromState string,
+	toState string,
+	lastError string,
+) (bool, error) {
+	updates := map[string]interface{}{
+		"active_state": toState,
+		"updated_at":   time.Now(),
+	}
+	if lastError != "" || toState != types.KnowledgeFileUpdateStateFailed {
+		updates["last_error"] = lastError
+	}
+	result := r.db.WithContext(ctx).Model(&types.KnowledgeFileUpdateSlot{}).
+		Where("tenant_id = ? AND knowledge_id = ? AND active_version = ? AND active_state = ?",
+			tenantID, knowledgeID, version, fromState).
+		Updates(updates)
+	return result.RowsAffected == 1, result.Error
+}
+
+// CompleteKnowledgeFileUpdate clears the finished active version and promotes
+// the latest pending version in the same transaction.
+func (r *knowledgeRepository) CompleteKnowledgeFileUpdate(
+	ctx context.Context, tenantID uint64, knowledgeID string, version uint64,
+) (*types.KnowledgeFileUpdateSlot, error) {
+	var completed *types.KnowledgeFileUpdateSlot
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID)
+		if tx.Dialector.Name() != "sqlite" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		var slot types.KnowledgeFileUpdateSlot
+		if err := query.First(&slot).Error; err != nil {
+			return err
+		}
+		if slot.ActiveVersion == nil || *slot.ActiveVersion != version {
+			completed = &slot
+			return nil
+		}
+
+		updates := map[string]interface{}{
+			"active_version": nil,
+			"active_state":   types.KnowledgeFileUpdateStateIdle,
+			"active_payload": nil,
+			"last_error":     "",
+			"updated_at":     time.Now(),
+		}
+		if slot.PendingVersion != nil {
+			updates["active_version"] = *slot.PendingVersion
+			updates["active_state"] = types.KnowledgeFileUpdateStateWaiting
+			updates["active_payload"] = slot.PendingPayload
+			updates["pending_version"] = nil
+			updates["pending_payload"] = nil
+		}
+		if err := tx.Model(&types.KnowledgeFileUpdateSlot{}).
+			Where("knowledge_id = ? AND active_version = ?", knowledgeID, version).
+			Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("knowledge_id = ?", knowledgeID).First(&slot).Error; err != nil {
+			return err
+		}
+		completed = &slot
+		return nil
+	})
+	return completed, err
+}
+
+// CancelKnowledgeFileUpdates deletes the coordination row and returns its
+// payloads so the caller can clean staged files after the transaction commits.
+func (r *knowledgeRepository) CancelKnowledgeFileUpdates(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+) (*types.KnowledgeFileUpdateSlot, error) {
+	var cancelled *types.KnowledgeFileUpdateSlot
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID)
+		if tx.Dialector.Name() != "sqlite" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		var slot types.KnowledgeFileUpdateSlot
+		if err := query.First(&slot).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		if err := tx.Delete(&types.KnowledgeFileUpdateSlot{}, "knowledge_id = ?", knowledgeID).Error; err != nil {
+			return err
+		}
+		cancelled = &slot
+		return nil
+	})
+	return cancelled, err
+}
+
+// BeginKnowledgeDeletion serializes deletion against file-update staging and
+// returns removed slots so staged files can be cleaned after the commit.
+func (r *knowledgeRepository) BeginKnowledgeDeletion(
+	ctx context.Context, tenantID uint64, knowledgeIDs []string,
+) ([]*types.KnowledgeFileUpdateSlot, error) {
+	if len(knowledgeIDs) == 0 {
+		return nil, nil
+	}
+	uniqueIDs := make([]string, 0, len(knowledgeIDs))
+	seen := make(map[string]struct{}, len(knowledgeIDs))
+	for _, id := range knowledgeIDs {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniqueIDs = append(uniqueIDs, id)
+	}
+	if len(uniqueIDs) == 0 {
+		return nil, ErrKnowledgeNotFound
+	}
+
+	var cancelled []*types.KnowledgeFileUpdateSlot
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		knowledgeQuery := tx.Model(&types.Knowledge{}).
+			Select("id").
+			Where("tenant_id = ? AND id IN ?", tenantID, uniqueIDs).
+			Order("id ASC")
+		if tx.Dialector.Name() != "sqlite" {
+			knowledgeQuery = knowledgeQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		var rows []types.Knowledge
+		if err := knowledgeQuery.Find(&rows).Error; err != nil {
+			return err
+		}
+		if len(rows) != len(uniqueIDs) {
+			return ErrKnowledgeNotFound
+		}
+
+		if err := tx.Model(&types.Knowledge{}).
+			Where("tenant_id = ? AND id IN ?", tenantID, uniqueIDs).
+			Updates(map[string]interface{}{
+				"parse_status": types.ParseStatusDeleting,
+				"updated_at":   time.Now(),
+			}).Error; err != nil {
+			return err
+		}
+
+		slotQuery := tx.Where("tenant_id = ? AND knowledge_id IN ?", tenantID, uniqueIDs).
+			Order("knowledge_id ASC")
+		if tx.Dialector.Name() != "sqlite" {
+			slotQuery = slotQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := slotQuery.Find(&cancelled).Error; err != nil {
+			return err
+		}
+		if len(cancelled) == 0 {
+			return nil
+		}
+		return tx.Where("tenant_id = ? AND knowledge_id IN ?", tenantID, uniqueIDs).
+			Delete(&types.KnowledgeFileUpdateSlot{}).Error
+	})
+	return cancelled, err
+}
+
+func (r *knowledgeRepository) ListRecoverableKnowledgeFileUpdates(
+	ctx context.Context, limit int,
+) ([]*types.KnowledgeFileUpdateSlot, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	var slots []*types.KnowledgeFileUpdateSlot
+	err := r.db.WithContext(ctx).
+		Where("active_version IS NOT NULL OR pending_version IS NOT NULL").
+		Order("updated_at ASC").Limit(limit).Find(&slots).Error
+	return slots, err
 }
 
 // UpdateActiveDeletingKnowledgeColumns only touches rows that are still visible

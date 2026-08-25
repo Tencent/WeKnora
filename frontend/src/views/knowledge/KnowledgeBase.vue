@@ -583,6 +583,7 @@ const parseStatusOptions = computed(() => [
   { label: t('knowledgeBase.parseStatusFailed'), value: 'failed' },
   { label: t('knowledgeBase.parseStatusCancelled'), value: 'cancelled' },
   { label: t('knowledgeBase.parseStatusFinalizing'), value: 'finalizing' },
+  { label: t('knowledgeBase.parseStatusReplacing'), value: 'replacing' },
   { label: t('knowledgeBase.parseStatusDraft'), value: 'draft' },
 ]);
 const selectedSource = ref('');
@@ -1337,6 +1338,9 @@ type KnowledgeCard = {
   metadata?: any;
   error_message?: string;
   tags?: Array<{ id: string; name: string; color?: string }>;
+  file_update_version?: number;
+  file_update_state?: string;
+  file_update_error?: string;
 };
 // needsStatusPolling decides whether a card row is still "in flight"
 // enough that the doc list should keep refreshing it. Keep in sync with
@@ -1345,7 +1349,7 @@ type KnowledgeCard = {
 // graph extract still running), and a `completed` row whose summary
 // hasn't landed yet keeps polling so the description fills in.
 const needsStatusPolling = (item: KnowledgeCard) => {
-  return knowledgeNeedsStatusPolling(item);
+  return knowledgeNeedsStatusPolling(item) || item.file_update_state === 'active' || item.file_update_state === 'pending';
 };
 
 const updateStatus = (analyzeList: KnowledgeCard[]) => {

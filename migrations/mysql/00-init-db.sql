@@ -228,3 +228,28 @@ CREATE TABLE chunk_revisions (
     UNIQUE KEY idx_chunk_revisions_chunk_revision (chunk_id, revision),
     KEY idx_chunk_revisions_tenant_chunk (tenant_id, chunk_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE knowledge_file_update_slots (
+    knowledge_id VARCHAR(36) PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    latest_version BIGINT NOT NULL DEFAULT 0,
+    active_version BIGINT NULL,
+    active_state VARCHAR(16) NOT NULL DEFAULT 'idle',
+    active_payload JSON NULL,
+    pending_version BIGINT NULL,
+    pending_payload JSON NULL,
+    last_error TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT chk_knowledge_file_update_active_state
+        CHECK (active_state IN ('idle', 'waiting', 'applying', 'retry_wait', 'failed')),
+    CONSTRAINT chk_knowledge_file_update_active_idle
+        CHECK ((active_state = 'idle') = (active_version IS NULL)),
+    CONSTRAINT chk_knowledge_file_update_active_payload
+        CHECK ((active_version IS NULL) = (active_payload IS NULL)),
+    CONSTRAINT chk_knowledge_file_update_pending_payload
+        CHECK ((pending_version IS NULL) = (pending_payload IS NULL)),
+    KEY idx_knowledge_file_update_slots_tenant_kb (tenant_id, knowledge_base_id),
+    KEY idx_knowledge_file_update_slots_state (active_state, updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文件知识更新协调槽';

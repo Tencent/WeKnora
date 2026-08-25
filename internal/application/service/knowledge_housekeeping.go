@@ -20,6 +20,8 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"sync"
@@ -29,6 +31,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/hibiken/asynq"
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
 )
@@ -46,6 +49,7 @@ type HousekeepingService struct {
 	// Durable Wiki ownership in task_pending_ops is always probed through db,
 	// so the sweep never falls back to the span/updated_at heuristics alone.
 	inspector interfaces.TaskInspector
+	task      interfaces.TaskEnqueuer
 
 	mu      sync.Mutex
 	started bool
@@ -55,12 +59,16 @@ type HousekeepingService struct {
 // the cron — call Start in the application bootstrap so a misconfigured
 // cron schedule cannot prevent the rest of the service from coming up.
 func NewHousekeepingService(
-	db *gorm.DB, cfg *config.Config, inspector interfaces.TaskInspector,
+	db *gorm.DB,
+	cfg *config.Config,
+	inspector interfaces.TaskInspector,
+	task interfaces.TaskEnqueuer,
 ) *HousekeepingService {
 	return &HousekeepingService{
 		db:        db,
 		cfg:       cfg,
 		inspector: inspector,
+		task:      task,
 		cron: cron.New(cron.WithSeconds(), cron.WithChain(
 			cron.Recover(cron.DefaultLogger),
 		)),
@@ -113,7 +121,7 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	threshold := h.staleThreshold()
 	cutoff := time.Now().Add(-threshold)
 
-	// Sweep A: knowledge stuck in "pending", "processing", or "finalizing".
+	// Sweep A: knowledge stuck in a parsing or file-replacement state.
 	//
 	// Two-stage check is critical here: knowledge.updated_at advances
 	// only at parse_status transitions, but a long stage (DocReader on
@@ -139,7 +147,7 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	var candidates []types.Knowledge
 	if err := h.db.WithContext(ctx).
 		Where("parse_status IN ? AND updated_at < ?",
-			[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing}, cutoff).
+			[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing, types.ParseStatusReplacing}, cutoff).
 		Find(&candidates).Error; err != nil {
 		logger.Warnf(ctx, "[Housekeeping] knowledge candidate query failed: %v", err)
 		return
@@ -165,7 +173,7 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 		}
 		res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
 			Where("id IN ? AND parse_status IN ?", stuckIDs,
-				[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing}).
+				[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing, types.ParseStatusReplacing}).
 			Updates(map[string]interface{}{
 				"parse_status":           types.ParseStatusFailed,
 				"error_message":          "task stuck in processing > " + threshold.String() + ", recovered by housekeeping",
@@ -197,7 +205,13 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 			queueSkipped)
 	}
 
-	// Sweep B: knowledge summary stuck. Summary is post-parse; threshold
+	// Sweep B: a durable file-update slot can outlive its Redis wake after a
+	// restart or enqueue outage. Re-arm only stale slots with no queued/active
+	// task; failed slots intentionally retain their payload for user retry or
+	// discard and are counted for operational visibility.
+	h.recoverStaleKnowledgeFileUpdates(ctx, cutoff)
+
+	// Sweep C: knowledge summary stuck. Summary is post-parse; threshold
 	// is shorter because summary tasks are bounded by a single LLM call.
 	// No span heartbeat exists for the summary stage (it lives in a
 	// downstream asynq task), so we accept the original simple check.
@@ -209,6 +223,77 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 		logger.Warnf(ctx, "[Housekeeping] summary sweep failed: %v", resSummary.Error)
 	} else if resSummary.RowsAffected > 0 {
 		logger.Infof(ctx, "[Housekeeping] recovered %d stuck summary rows", resSummary.RowsAffected)
+	}
+}
+
+func (h *HousekeepingService) recoverStaleKnowledgeFileUpdates(ctx context.Context, cutoff time.Time) {
+	var slots []*types.KnowledgeFileUpdateSlot
+	if err := h.db.WithContext(ctx).
+		Where("active_version IS NOT NULL AND active_state IN ? AND updated_at < ?", []string{
+			types.KnowledgeFileUpdateStateWaiting,
+			types.KnowledgeFileUpdateStateApplying,
+			types.KnowledgeFileUpdateStateRetryWait,
+			types.KnowledgeFileUpdateStateFailed,
+		}, cutoff).
+		Order("updated_at ASC").Limit(1000).Find(&slots).Error; err != nil {
+		logger.Warnf(ctx, "[Housekeeping] file update slot query failed: %v", err)
+		return
+	}
+
+	failed := 0
+	rearmed := 0
+	for _, slot := range slots {
+		if slot == nil || slot.ActiveVersion == nil {
+			continue
+		}
+		if slot.ActiveState == types.KnowledgeFileUpdateStateFailed {
+			failed++
+			continue
+		}
+		if h.inspector != nil {
+			queued, err := h.inspector.HasQueuedTasksForKnowledge(ctx, slot.KnowledgeID)
+			if err != nil {
+				logger.Warnf(ctx, "[Housekeeping] file update queue probe failed for %s: %v", slot.KnowledgeID, err)
+				continue
+			}
+			if queued {
+				continue
+			}
+		}
+		if h.task == nil {
+			logger.Warnf(ctx, "[Housekeeping] cannot re-arm file update %s: task enqueuer unavailable", slot.KnowledgeID)
+			continue
+		}
+		wake := types.KnowledgeFileUpdateTaskPayload{
+			TenantID:        slot.TenantID,
+			KnowledgeBaseID: slot.KnowledgeBaseID,
+			KnowledgeID:     slot.KnowledgeID,
+			ActiveVersion:   *slot.ActiveVersion,
+			WakeSequence:    uint64(time.Now().UnixNano()),
+		}
+		payload, err := json.Marshal(wake)
+		if err != nil {
+			logger.Warnf(ctx, "[Housekeeping] encode file update wake failed for %s: %v", slot.KnowledgeID, err)
+			continue
+		}
+		_, err = h.task.Enqueue(asynq.NewTask(types.TypeKnowledgeFileUpdate, payload),
+			asynq.Queue(types.QueueMaintenance),
+			asynq.MaxRetry(3),
+			asynq.Timeout(2*time.Hour),
+			asynq.Unique(2*time.Hour),
+		)
+		if err != nil && !errors.Is(err, asynq.ErrTaskIDConflict) && !errors.Is(err, asynq.ErrDuplicateTask) {
+			logger.Warnf(ctx, "[Housekeeping] re-arm file update %s failed: %v", slot.KnowledgeID, err)
+			continue
+		}
+		rearmed++
+		_ = h.db.WithContext(ctx).Model(&types.KnowledgeFileUpdateSlot{}).
+			Where("knowledge_id = ? AND active_version = ? AND active_state = ?",
+				slot.KnowledgeID, *slot.ActiveVersion, slot.ActiveState).
+			Update("updated_at", time.Now()).Error
+	}
+	if rearmed > 0 || failed > 0 {
+		logger.Infof(ctx, "[Housekeeping] file update slots: rearmed=%d retained_failed=%d", rearmed, failed)
 	}
 }
 

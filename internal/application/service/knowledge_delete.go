@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -58,22 +57,20 @@ func deleteExtractedImages(ctx context.Context, fileSvc interfaces.FileService, 
 // DeleteKnowledge deletes a knowledge entry and all related resources
 func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error {
 	// Get the knowledge entry
-	knowledge, err := s.repo.GetKnowledgeByID(ctx, ctx.Value(types.TenantIDContextKey).(uint64), id)
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, id)
 	if err != nil {
 		return err
 	}
-
 	// Mark as deleting first to prevent async task conflicts
 	// This ensures that any running async tasks will detect the deletion and abort
 	originalStatus := knowledge.ParseStatus
-	knowledge.ParseStatus = types.ParseStatusDeleting
-	knowledge.UpdatedAt = time.Now()
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
-		logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge failed to mark as deleting")
-		// Continue with deletion even if marking fails
-	} else {
-		logger.Infof(ctx, "Marked knowledge %s as deleting (previous status: %s)", id, originalStatus)
+	cancelledSlots, err := s.repo.BeginKnowledgeDeletion(ctx, tenantID, []string{id})
+	if err != nil {
+		return err
 	}
+	knowledge.ParseStatus = types.ParseStatusDeleting
+	logger.Infof(ctx, "Marked knowledge %s as deleting (previous status: %s)", id, originalStatus)
 
 	// Best-effort: purge any queued downstream tasks for this knowledge
 	// (multimodal / post-process / question / summary / graph extract).
@@ -89,9 +86,11 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 	// Resolve file service for this KB before spawning goroutines
 	kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
 	kbFileSvc := s.resolveFileService(ctx, kb)
+	for _, slot := range cancelledSlots {
+		s.cleanupCancelledKnowledgeFileUpdate(ctx, kb, knowledge.FilePath, slot)
+	}
 
 	// Collect image URLs before chunks are deleted (ImageInfo references are lost after deletion)
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	chunkImageInfos, err := s.chunkService.GetRepository().ListImageInfoByKnowledgeIDs(ctx, tenantID, []string{id})
 	if err != nil {
 		logger.Errorf(ctx, "Failed to collect image URLs for cleanup: %v", err)
@@ -498,23 +497,21 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 	if err != nil {
 		return err
 	}
-
-	// Mark all as deleting first to prevent async task conflicts.
+	// Atomically mark all as deleting and revoke their update slots before any
+	// asynchronous cleanup can race with a late file-update coordinator.
 	// Remember which entries still had queued / in-flight downstream tasks
 	// so we can dequeue them in one pass after marking.
 	var inFlightIDs []string
 	for _, knowledge := range knowledgeList {
 		prev := knowledge.ParseStatus
-		knowledge.ParseStatus = types.ParseStatusDeleting
-		knowledge.UpdatedAt = time.Now()
-		if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
-			logger.GetLogger(ctx).WithField("error", err).WithField("knowledge_id", knowledge.ID).
-				Errorf("DeleteKnowledgeList failed to mark as deleting")
-			// Continue with deletion even if marking fails
-		}
 		if prev == types.ParseStatusPending || prev == types.ParseStatusProcessing {
 			inFlightIDs = append(inFlightIDs, knowledge.ID)
 		}
+		knowledge.ParseStatus = types.ParseStatusDeleting
+	}
+	cancelledSlots, err := s.repo.BeginKnowledgeDeletion(ctx, tenantInfo.ID, ids)
+	if err != nil {
+		return err
 	}
 	logger.Infof(ctx, "Marked %d knowledge entries as deleting", len(knowledgeList))
 
@@ -528,12 +525,23 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 	// Pre-resolve KB metadata and file services so goroutines don't need DB access.
 	knowledgeBases := make(map[string]*types.KnowledgeBase)
 	kbFileServices := make(map[string]interfaces.FileService)
+	knowledgeByID := make(map[string]*types.Knowledge, len(knowledgeList))
 	for _, knowledge := range knowledgeList {
+		knowledgeByID[knowledge.ID] = knowledge
 		if _, ok := kbFileServices[knowledge.KnowledgeBaseID]; !ok {
 			kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
 			knowledgeBases[knowledge.KnowledgeBaseID] = kb
 			kbFileServices[knowledge.KnowledgeBaseID] = s.resolveFileService(ctx, kb)
 		}
+	}
+	for _, slot := range cancelledSlots {
+		knowledge := knowledgeByID[slot.KnowledgeID]
+		if knowledge == nil {
+			continue
+		}
+		s.cleanupCancelledKnowledgeFileUpdate(
+			ctx, knowledgeBases[knowledge.KnowledgeBaseID], knowledge.FilePath, slot,
+		)
 	}
 
 	// Collect image URLs before chunks are deleted

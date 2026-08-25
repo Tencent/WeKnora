@@ -397,7 +397,7 @@ func (s *knowledgeService) isKnowledgeDeleting(ctx context.Context, tenantID uin
 }
 
 // isKnowledgeAborted returns (true, status) when the knowledge has been
-// marked as deleting OR cancelled so async pipeline workers should bail
+// marked as deleting, cancelled, or replacing so async pipeline workers should bail
 // out. Status is returned so callers can branch on cleanup behavior:
 // deleting → existing cleanup of partial chunks/index applies;
 // cancelled → keep partially written data per user expectation.
@@ -417,7 +417,7 @@ func (s *knowledgeService) isKnowledgeAborted(
 		return true, types.ParseStatusDeleting
 	}
 	switch knowledge.ParseStatus {
-	case types.ParseStatusDeleting, types.ParseStatusCancelled:
+	case types.ParseStatusDeleting, types.ParseStatusCancelled, types.ParseStatusReplacing:
 		return true, knowledge.ParseStatus
 	}
 	return false, knowledge.ParseStatus
@@ -694,6 +694,9 @@ func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types
 		logger.Errorf(ctx, "Failed to get knowledge record: %v", err)
 		return err
 	}
+	if record.ParseStatus == types.ParseStatusReplacing {
+		return werrors.NewConflictError("knowledge file is being replaced")
+	}
 	// if need other fields update, please add here
 	if knowledge.Title != "" {
 		record.Title = knowledge.Title
@@ -810,6 +813,14 @@ func (s *knowledgeService) GetKnowledgeBatchWithSharedAccess(ctx context.Context
 
 // SetKnowledgeTags replaces all tags for a single knowledge entry.
 func (s *knowledgeService) SetKnowledgeTags(ctx context.Context, knowledgeID string, tagIDs []string) error {
+	tenantID, _ := ctx.Value(types.TenantIDContextKey).(uint64)
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		return err
+	}
+	if knowledge.ParseStatus == types.ParseStatusReplacing {
+		return werrors.NewConflictError("knowledge file is being replaced")
+	}
 	return s.repo.SetKnowledgeTags(ctx, knowledgeID, tagIDs)
 }
 
@@ -914,6 +925,9 @@ func (s *knowledgeService) UpdateKnowledgeTag(ctx context.Context, knowledgeID s
 	if err != nil {
 		return err
 	}
+	if knowledge.ParseStatus == types.ParseStatusReplacing {
+		return werrors.NewConflictError("knowledge file is being replaced")
+	}
 
 	// Validate all tag IDs
 	if err := s.validateKnowledgeTagIDs(ctx, tenantID, knowledge.KnowledgeBaseID, tagIDs); err != nil {
@@ -947,6 +961,11 @@ func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, authoriz
 	knowledgeList, err := s.repo.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
 	if err != nil {
 		return err
+	}
+	for _, knowledge := range knowledgeList {
+		if knowledge.ParseStatus == types.ParseStatusReplacing {
+			return werrors.NewConflictError(fmt.Sprintf("knowledge %s file is being replaced", knowledge.ID))
+		}
 	}
 
 	// Validate all requested IDs were found and belong to the authorized KB
