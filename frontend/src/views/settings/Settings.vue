@@ -245,14 +245,20 @@ import {
   INTEGRATION_PREVIEW_ITEMS,
   INTEGRATION_TAB_CAPABILITY,
   INTEGRATION_TAB_MIN_ROLE,
-  INTEGRATION_TABS,
-  type IntegrationTab,
 } from '@/config/integrations'
 import {
   SETTINGS_SECTION_MIN_ROLE,
   SYSTEM_ADMIN_SETTINGS_SECTIONS,
 } from '@/config/settingsAccess'
 import { SETTINGS_SECTION_CAPABILITY } from '@/config/deploymentCapabilities'
+import {
+  buildSettingsRouteQuery,
+  integrationSectionKey,
+  integrationTabFromSection,
+  isIntegrationSection,
+  normalizeSettingsSection as normalizeSettingsSectionFromQuery,
+  settingsQueryUnchanged,
+} from '@/config/settingsRoute'
 
 const route = useRoute()
 const router = useRouter()
@@ -295,33 +301,19 @@ type NavGroup = {
 //   ModelSettings.vue 里另用 hasRole('admin') 自己 gate，所以入口保留
 //   viewer 是合理的（contributor 也能浏览模型列表）。
 const SYSTEM_ADMIN_SECTIONS = SYSTEM_ADMIN_SETTINGS_SECTIONS
-const INTEGRATION_SECTION_PREFIX = 'integration-'
-
-const integrationSectionKey = (tab: IntegrationTab) => `${INTEGRATION_SECTION_PREFIX}${tab}`
-
-const integrationTabFromSection = (section: string): IntegrationTab => {
-  const raw = section.startsWith(INTEGRATION_SECTION_PREFIX)
-    ? section.slice(INTEGRATION_SECTION_PREFIX.length)
-    : section
-  if (INTEGRATION_TABS.includes(raw as IntegrationTab)) {
-    return raw as IntegrationTab
-  }
-  return 'im'
-}
-
-const isIntegrationSection = (section: string) => {
-  return section.startsWith(INTEGRATION_SECTION_PREFIX) &&
-    INTEGRATION_TABS.includes(integrationTabFromSection(section))
-}
 
 const normalizeSettingsSection = (section: string) => {
-  if (section === 'api') {
-    return integrationSectionKey('api')
-  }
-  if (section === 'integrations') {
-    return integrationSectionKey(integrationTabFromSection((route.query.tab as string) || 'im'))
-  }
-  return section
+  return normalizeSettingsSectionFromQuery(section, route.query.tab as string | undefined)
+}
+
+const syncSettingsRoute = (sectionKey: string) => {
+  if (route.path !== '/platform/settings') return
+  const query = buildSettingsRouteQuery(sectionKey, route.query)
+  if (settingsQueryUnchanged(route.query, query)) return
+  void router.replace({
+    path: '/platform/settings',
+    query,
+  })
 }
 
 const isSectionSupported = (key: string): boolean => {
@@ -467,25 +459,10 @@ const handleNavClick = (item: any) => {
     currentSubSection.value = ''
   }
 
-  // 切换到对应页面
+  // 切换到对应页面，并同步 URL 为 ?section=<navKey>（含 integration-claw）。
+  // 否则从其它 section 点进来时 query 不变，路由监听会把内容拉回去。
   currentSection.value = item.key
-  if (route.path === '/platform/settings' && isIntegrationSection(item.key)) {
-    router.replace({
-      path: '/platform/settings',
-      query: {
-        ...route.query,
-        section: 'integrations',
-        tab: integrationTabFromSection(item.key),
-      },
-    })
-  } else if (route.path === '/platform/settings' && SYSTEM_ADMIN_SECTIONS.has(item.key)) {
-    const query = { ...route.query }
-    delete query.tab
-    router.replace({
-      path: '/platform/settings',
-      query: { ...query, section: item.key },
-    })
-  }
+  syncSettingsRoute(item.key)
 }
 
 // 子菜单点击处理
@@ -536,6 +513,7 @@ watch(() => uiStore.settingsInitialSection, (section) => {
       return
     }
     currentSection.value = normalizedSection
+    syncSettingsRoute(normalizedSection)
     const navItem = (navItems.value as any[]).find((item) => item.key === normalizedSection)
     if (navItem && navItem.children && navItem.children.length > 0) {
       if (!expandedMenus.value.includes(section)) {
@@ -557,24 +535,28 @@ watch(() => uiStore.settingsInitialSection, (section) => {
 }, { immediate: true })
 
 watch(
-  () => [visible.value, route.query.section, deploymentCapabilities.loaded] as const,
-  ([isVisible, section, capabilitiesLoaded]) => {
-    if (!isVisible || typeof section !== 'string') return
-    const normalizedSection = normalizeSettingsSection(section)
+  () => [visible.value, route.path, route.query.section, deploymentCapabilities.loaded] as const,
+  ([isVisible, path, section, capabilitiesLoaded]) => {
+    if (!isVisible || path !== '/platform/settings') return
+    if (typeof section !== 'string') {
+      syncSettingsRoute(currentSection.value || 'general')
+      return
+    }
+    const normalizedSection = normalizeSettingsSectionFromQuery(
+      section,
+      typeof route.query.tab === 'string' ? route.query.tab : undefined,
+    )
     if (capabilitiesLoaded && !isSectionSupported(normalizedSection)) {
       MessagePlugin.warning(t('settings.capabilityUnavailable'))
-      currentSection.value = navItems.value[0]?.key || 'general'
+      const fallback = navItems.value[0]?.key || 'general'
+      currentSection.value = fallback
       currentSubSection.value = ''
-      if (route.path === '/platform/settings') {
-        const query = { ...route.query }
-        delete query.section
-        delete query.tab
-        void router.replace({ path: route.path, query })
-      }
+      syncSettingsRoute(fallback)
       return
     }
     currentSection.value = normalizedSection
     currentSubSection.value = ''
+    syncSettingsRoute(normalizedSection)
   },
   { immediate: true },
 )
@@ -583,8 +565,10 @@ watch(
 // 如果 currentSection 落到了不再显示的 key 上，就回退到第一个可见项。
 watch(navItems, (items) => {
   if (!items.some((item) => item.key === currentSection.value)) {
-    currentSection.value = items[0]?.key || 'general'
+    const fallback = items[0]?.key || 'general'
+    currentSection.value = fallback
     currentSubSection.value = ''
+    syncSettingsRoute(fallback)
   }
 })
 
@@ -607,6 +591,7 @@ const handleSettingsNav = (e: CustomEvent) => {
       return
     }
     currentSection.value = normalizedSection
+    syncSettingsRoute(normalizedSection)
     // 如果有子菜单，自动展开
     const navItem = (navItems.value as any[]).find((item: any) => item.key === normalizedSection)
     if (navItem && navItem.children && navItem.children.length > 0) {
