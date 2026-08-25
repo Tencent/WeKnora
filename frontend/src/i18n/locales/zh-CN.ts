@@ -5122,7 +5122,7 @@ export default {
       skillUploadDrag: '或将文件拖到此处',
       skillUploadHint: '安装会在当前镜像上生成新快照，可能需要数分钟。当前这一轮对话不会中断；下一轮提问时才会按新镜像重建沙箱，会话工作区草稿会在那时清空。',
       skillUploadHintNewSession: '安装会在当前镜像上生成新快照，可能需要数分钟。已打开的会话继续使用原沙箱，直到该会话结束；只有新打开的会话才会带上这次安装的技能。',
-      skillSourcePlaceholder: '粘贴链接或 {\'@\'}owner/slug',
+      skillSourcePlaceholder: 'ClawHub 用 {\'@\'}owner/slug，GitHub / SkillHub 请粘贴完整链接',
       skillSourceInstall: '安装',
       skillInstallOr: '或',
       skillSourceFailed: '从托管平台安装技能失败',

@@ -389,6 +389,8 @@ if err != nil {
 
 ### 示例：从托管平台安装沙箱技能
 
+`source` 必须写明确：ClawHub 用 `@owner/slug`，GitHub / SkillHub 粘贴完整 URL。不要传裸的 `owner/slug`。
+
 ```go
 skillID, err := apiClient.InstallSandboxSkillFromSource(
     context.Background(), sandboxConfigID, "@owner/slug")

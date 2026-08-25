@@ -69,11 +69,17 @@ curl --location 'http://localhost:8080/api/v1/sandbox-configs/{id}/skills' \
 
 ### 2. 从托管平台安装（JSON）
 
-`source` 可以是：
+`source` 只接受一种明确写法，不会根据下载结果猜测：
 
-- ClawHub / SkillHub / skillhub.cn 页面链接或 slug（`@owner/slug`、`my-team--skill`）
-- skills.sh / GitHub / GitLab 仓库或目录链接
-- 直接的 zip / `SKILL.md` URL
+| 输入 | 含义 |
+| --- | --- |
+| `@owner/slug`、`@owner/slug@1.2.0` | ClawHub（默认 registry） |
+| `my-skill`、`my-skill@1.2.0`（不含 `/`） | ClawHub slug |
+| `https://clawhub.ai/...`、`https://skillhub.cn/...`、自托管 SkillHub 页面 | 对应 registry |
+| `https://github.com/...`、`https://gitlab.com/...`、`https://skills.sh/...` | Git 托管 |
+| `https://…/foo.zip` 或 `…/SKILL.md` | 直接下载 |
+
+`owner/slug`（无 `@`、无 URL）会 400：它既是 ClawHub id 也是 GitHub 仓库，请改成 `@owner/slug` 或粘贴完整链接。
 
 来源必须可匿名读取：服务端不会为这次下载附带任何凭据，因此私有仓库/私有 registry 需要先自行导出 zip 再上传。
 

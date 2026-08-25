@@ -158,13 +158,13 @@ Docker、Local、CubeSandbox、E2B 均通过同一套空间配置 CRUD、连接�
 
 ### 安装租户技能
 
-空间「技能沙箱」设置里可以把技能装进当前配置的镜像。除上传 zip 外，也支持从托管平台粘贴来源：
+空间「技能沙箱」设置里可以把技能装进当前配置的镜像。除上传 zip 外，也支持从托管平台粘贴来源（每种写法只对应一种来源，不会猜测）：
 
-- ClawHub / SkillHub / [skillhub.cn](https://skillhub.cn) 页面链接或 slug（`@owner/slug`）
-- skills.sh、GitHub、GitLab 仓库或目录链接
+- ClawHub：`@owner/slug`，或不含 `/` 的 slug（如 `my-team--skill`）
+- 页面链接：ClawHub / [skillhub.cn](https://skillhub.cn) / 自托管 SkillHub、skills.sh、GitHub、GitLab
 - 直接的 zip / `SKILL.md` URL
 
-来源必须可匿名读取，服务端下载时不携带任何凭据；私有仓库请先导出 zip 再上传。安装仍走原有镜像快照流程。
+不要粘贴裸的 `owner/slug`：请改成 `@owner/slug` 或完整 `https://github.com/...` 链接。来源必须可匿名读取，服务端下载时不携带任何凭据；私有仓库请先导出 zip 再上传。安装仍走原有镜像快照流程。
 
 **有沙箱在跑时改不了身份字段。** 身份字段分两组，成因不同但后果都足够严重：
 

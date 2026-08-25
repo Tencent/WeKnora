@@ -1281,7 +1281,7 @@ export default {
       skillUploadDrag: 'or drop a file here',
       skillUploadHint: 'Install writes the skill onto the current image and takes a new snapshot. This can take several minutes. The current chat turn is not interrupted; open sessions rebuild their sandbox on the next turn, which clears the session workspace scratch.',
       skillUploadHintNewSession: 'Install writes the skill onto the current image and takes a new snapshot. This can take several minutes. Already-open sessions keep their current sandbox until they end; only newly started sessions pick up this install.',
-      skillSourcePlaceholder: 'Paste a URL or {\'@\'}owner/slug',
+      skillSourcePlaceholder: 'ClawHub: {\'@\'}owner/slug. GitHub/SkillHub: paste the full URL',
       skillSourceInstall: 'Install',
       skillInstallOr: 'or',
       skillSourceFailed: 'Failed to install the skill from the registry',

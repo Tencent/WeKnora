@@ -51,6 +51,14 @@ func TestParseSkillSource(t *testing.T) {
 			},
 		},
 		{
+			name: "registry slug with version",
+			in:   "my-skill@1.2.0",
+			want: parsedSkillSource{
+				Kind: skillSourceRegistry, Registry: defaultSkillRegistryOrigin,
+				Slug: "my-skill", Version: "1.2.0",
+			},
+		},
+		{
 			name: "skillhub page with version",
 			in:   "https://skillhub.example.com/my-skill@1.2.0",
 			want: parsedSkillSource{
@@ -106,14 +114,6 @@ func TestParseSkillSource(t *testing.T) {
 			},
 		},
 		{
-			name: "github shorthand",
-			in:   "vercel-labs/agent-skills@frontend-design",
-			want: parsedSkillSource{
-				Kind: skillSourceGitHub, Owner: "vercel-labs", Repo: "agent-skills",
-				Ref: "HEAD", Subdir: "frontend-design",
-			},
-		},
-		{
 			name: "gitlab project",
 			in:   "https://gitlab.com/group/project/-/tree/main/skills/foo",
 			want: parsedSkillSource{
@@ -144,6 +144,30 @@ func TestParseSkillSourceRejects(t *testing.T) {
 	_, err = parseSkillSource("file:///etc/passwd")
 	require.ErrorIs(t, err, ErrSkillSourceInvalid)
 	require.ErrorContains(t, err, "http(s)")
+
+	// owner/slug is a ClawHub id and a GitHub repo. Refuse rather than guess.
+	_, err = parseSkillSource("clawhub_pskoett/self-improving-agent")
+	require.ErrorIs(t, err, ErrSkillSourceInvalid)
+	require.ErrorContains(t, err, "ambiguous")
+	require.ErrorContains(t, err, "@clawhub_pskoett/self-improving-agent")
+
+	_, err = parseSkillSource("vercel-labs/agent-skills@frontend-design")
+	require.ErrorIs(t, err, ErrSkillSourceInvalid)
+	require.ErrorContains(t, err, "ambiguous")
+}
+
+func TestParseSkillSourceAtSlugIsRegistryNotGitHub(t *testing.T) {
+	got, err := parseSkillSource("@clawhub_pskoett/self-improving-agent")
+	require.NoError(t, err)
+	require.Equal(t, skillSourceRegistry, got.Kind)
+	require.Equal(t, defaultSkillRegistryOrigin, got.Registry)
+	require.Equal(t, "clawhub_pskoett/self-improving-agent", got.Slug)
+}
+
+func TestFetchSkillArchiveRejectsAmbiguousShorthandWithoutFetching(t *testing.T) {
+	_, err := fetchSkillArchive(t.Context(), "owner/demo", http.DefaultClient)
+	require.ErrorIs(t, err, ErrSkillSourceInvalid)
+	require.ErrorContains(t, err, "ambiguous")
 }
 
 func TestSkillHubCNMapsToDownloadAPI(t *testing.T) {
@@ -261,32 +285,6 @@ func TestFetchSkillArchiveRejectsUnusableHandoffURL(t *testing.T) {
 	_, err := fetchSkillArchive(t.Context(), server.URL+"/owner/demo", server.Client())
 	require.ErrorIs(t, err, ErrSkillSourceInvalid)
 	require.ErrorContains(t, err, "archive URL is not usable")
-}
-
-// A bare "owner/slug" reads as a GitHub repo and as a registry slug. The
-// registry is the fallback, but only for a shorthand that named nothing else.
-func TestRegistrySlugFallback(t *testing.T) {
-	bare := "clawhub_pskoett/self-improving-agent"
-	parsed, err := parseSkillSource(bare)
-	require.NoError(t, err)
-	require.Equal(t, skillSourceGitHub, parsed.Kind)
-
-	alt, ok := registrySlugFallback(bare, parsed)
-	require.True(t, ok)
-	require.Equal(t, skillSourceRegistry, alt.Kind)
-	require.Equal(t, defaultSkillRegistryOrigin, alt.Registry)
-	require.Equal(t, bare, alt.Slug)
-
-	withSubdir := "vercel-labs/agent-skills@frontend-design"
-	parsed, err = parseSkillSource(withSubdir)
-	require.NoError(t, err)
-	_, ok = registrySlugFallback(withSubdir, parsed)
-	require.False(t, ok, "a shorthand that named a skill directory meant GitHub")
-
-	parsed, err = parseSkillSource("https://github.com/vercel-labs/agent-skills")
-	require.NoError(t, err)
-	_, ok = registrySlugFallback("https://github.com/vercel-labs/agent-skills", parsed)
-	require.False(t, ok, "an explicit GitHub URL is not a registry slug")
 }
 
 func TestFetchSkillArchiveFollowsGitHubHandoff(t *testing.T) {
