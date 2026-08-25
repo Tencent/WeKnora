@@ -1321,7 +1321,7 @@
                   </div>
                 </div>
 
-                <!-- 沙箱后端配置（仅 Agent 模式）：技能脚本的运行环境 -->
+                <!-- 代码沙箱（仅 Agent 模式）：技能脚本的运行环境 -->
                 <div v-show="currentSection === 'sandbox' && isAgentMode" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.sandboxConfig') }}</h2>
@@ -1352,7 +1352,7 @@
                     </div>
 
                     <div class="skill-info-box">
-                      <t-icon name="cloud" class="info-icon" />
+                      <t-icon name="code" class="info-icon" />
                       <div class="info-content">
                         <p><strong>{{ $t('agent.editor.sandboxInfoTitle') }}</strong></p>
                         <p>{{ $t('agent.editor.sandboxInfoContent') }}</p>
@@ -2323,7 +2323,7 @@ const navItems = computed(() => {
     items.push({ key: 'tools', icon: 'tools', label: t('agent.editor.toolsConfig') });
     items.push({ key: 'mcp', icon: 'server', label: t('agentEditor.mcp.label') });
     items.push({ key: 'skills', icon: 'lightbulb', label: t('agent.editor.skillsConfig') });
-    items.push({ key: 'sandbox', icon: 'cloud', label: t('agent.editor.sandboxConfig') });
+    items.push({ key: 'sandbox', icon: 'code', label: t('agent.editor.sandboxConfig') });
   }
   // 发布（仅编辑模式）
   if (editorMode.value === 'edit' && editorAgent.value?.id && !editorAgent.value?.is_builtin && !authStore.isLiteMode) {

@@ -44,6 +44,15 @@
                         <path d="M4.5 5.5L6.5 12.5L9 7.5L11.5 12.5L13.5 5.5" stroke="currentColor" stroke-width="1.3"
                           stroke-linecap="round" stroke-linejoin="round" fill="none" />
                       </svg>
+                      <!-- 代码沙箱：隔离运行窗口，避免和 Ollama / 系统设置共用 server -->
+                      <svg v-else-if="item.key === 'sandbox'" width="17" height="17" viewBox="0 0 18 18" fill="none"
+                        xmlns="http://www.w3.org/2000/svg" class="nav-icon">
+                        <rect x="2.5" y="3" width="13" height="12" rx="2" stroke="currentColor" stroke-width="1.2"
+                          fill="none" />
+                        <path d="M2.5 6.5h13" stroke="currentColor" stroke-width="1.2" />
+                        <path d="M5.5 10h4M5.5 12.5h2.5" stroke="currentColor" stroke-width="1.2"
+                          stroke-linecap="round" />
+                      </svg>
                       <span v-else-if="item.emoji" class="nav-icon nav-icon-emoji">{{ item.emoji }}</span>
                       <t-icon v-else :name="item.icon" class="nav-icon" />
                       <span class="nav-label">{{ item.label }}</span>
@@ -139,7 +148,7 @@
                     <StorageEngineSettings />
                   </div>
 
-                  <!-- 沙箱后端 -->
+                  <!-- 代码沙箱 -->
                   <div v-if="currentSection === 'sandbox'" class="section">
                     <SandboxSettings />
                   </div>
@@ -362,7 +371,7 @@ const navItems = computed(() => {
     { key: 'vectorstore', icon: 'data-base', label: t('settings.vectorStoreEngine') },
     { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
     { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
-    { key: 'sandbox', icon: 'server', label: t('settings.sandbox.title') },
+    { key: 'sandbox', icon: 'code', label: t('settings.sandbox.title') },
     { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
     { key: 'system', icon: 'info-circle', label: t('settings.versionInfo') },
     { key: 'system-global', icon: 'server', label: t('settings.system') },
