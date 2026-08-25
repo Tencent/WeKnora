@@ -17,7 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/model"
 )
 
-func TestVideoListReturnsOnlyInitiallyAvailableVideos(t *testing.T) {
+func TestVideoListReturnsUploadedVideosWhileEnhancementsRun(t *testing.T) {
 	db := openTestVideoDB(t)
 	now := time.Now().UTC()
 	videos := []model.Video{
@@ -50,9 +50,13 @@ func TestVideoListReturnsOnlyInitiallyAvailableVideos(t *testing.T) {
 	var payload struct {
 		Data []struct {
 			ID                     string `json:"id"`
-			Title                 string `json:"title"`
+			Title                  string `json:"title"`
 			Status                 string `json:"status"`
 			FileURL                string `json:"file_url"`
+			PlayURL                string `json:"play_url"`
+			CoverURL               string `json:"cover_url"`
+			ThumbnailURL           string `json:"thumbnail_url"`
+			DurationSeconds        int    `json:"duration_seconds"`
 			ProcessingErrorSummary string `json:"processing_error_summary"`
 			InitiallyAvailable     bool   `json:"initially_available"`
 		} `json:"data"`
@@ -61,8 +65,8 @@ func TestVideoListReturnsOnlyInitiallyAvailableVideos(t *testing.T) {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 
-	if len(payload.Data) != 6 {
-		t.Fatalf("list length = %d, want 6", len(payload.Data))
+	if len(payload.Data) != 8 {
+		t.Fatalf("list length = %d, want 8", len(payload.Data))
 	}
 	if payload.Data[0].Status != model.VideoStatusFailed {
 		t.Fatalf("first video status = %q, want %q", payload.Data[0].Status, model.VideoStatusFailed)
@@ -73,35 +77,35 @@ func TestVideoListReturnsOnlyInitiallyAvailableVideos(t *testing.T) {
 	seen := map[string]bool{}
 	for _, item := range payload.Data[1:] {
 		seen[item.Title] = true
-		if item.FileURL == "" || !item.InitiallyAvailable {
+		if item.FileURL == "" || item.PlayURL == "" || !item.InitiallyAvailable {
 			t.Fatalf("initially available video metadata = %#v", item)
 		}
+		if item.Title == "completed" && (item.CoverURL != "poster" || item.ThumbnailURL != "poster" || item.DurationSeconds != 30) {
+			t.Fatalf("completed video media metadata = %#v", item)
+		}
 	}
-	// 无封面且封面仍在生成的（uploaded / initializing without cover）不得出现；
-	// 封面已就绪或降级占位图（ready without cover）的必须出现
-	for _, title := range []string{"uploaded with cover", "completed", "processing", "ready", "ready without cover"} {
+	// 文件已合并的视频立即出现；封面和时长由后台异步补齐。
+	for _, title := range []string{"uploaded without cover", "initializing without cover", "uploaded with cover", "completed", "processing", "ready", "ready without cover"} {
 		if !seen[title] {
 			t.Fatalf("video %q missing from list: %#v", title, payload.Data)
 		}
 	}
-	for _, title := range []string{"uploaded without cover", "initializing without cover"} {
-		if seen[title] {
-			t.Fatalf("video %q must stay hidden while cover is generating: %#v", title, payload.Data)
-		}
+	if seen["uploading"] {
+		t.Fatalf("active upload must stay hidden: %#v", payload.Data)
 	}
 }
 
 func TestVideoDetailUsesInitialAvailability(t *testing.T) {
 	db := openTestVideoDB(t)
 	cases := []struct {
-		name                string
-		status              string
-		fileURL             string
-		thumbnailURL        string
-		initiallyAvailable  bool
-		visibleInList       bool
+		name               string
+		status             string
+		fileURL            string
+		thumbnailURL       string
+		initiallyAvailable bool
+		visibleInList      bool
 	}{
-		{name: "cover generating keeps video hidden", status: model.VideoStatusInitializing, fileURL: "source", initiallyAvailable: false, visibleInList: false},
+		{name: "cover generating remains playable", status: model.VideoStatusInitializing, fileURL: "source", initiallyAvailable: true, visibleInList: true},
 		{name: "cover degraded to placeholder is available", status: model.VideoStatusReady, fileURL: "source", initiallyAvailable: true, visibleInList: true},
 	}
 	for _, tc := range cases {
@@ -128,14 +132,19 @@ func TestVideoDetailUsesInitialAvailability(t *testing.T) {
 				t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 			}
 			var payload struct {
-				InitiallyAvailable bool `json:"initially_available"`
-				VisibleInList      bool `json:"visible_in_list"`
+				InitiallyAvailable bool   `json:"initially_available"`
+				VisibleInList      bool   `json:"visible_in_list"`
+				PlayURL            string `json:"play_url"`
+				CoverURL           string `json:"cover_url"`
 			}
 			if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 				t.Fatalf("unmarshal response: %v", err)
 			}
 			if payload.InitiallyAvailable != tc.initiallyAvailable || payload.VisibleInList != tc.visibleInList {
 				t.Fatalf("detail availability = %#v, want initially_available=%v visible_in_list=%v", payload, tc.initiallyAvailable, tc.visibleInList)
+			}
+			if payload.PlayURL != tc.fileURL || payload.CoverURL != tc.thumbnailURL {
+				t.Fatalf("detail media URLs = %#v, want play_url=%q cover_url=%q", payload, tc.fileURL, tc.thumbnailURL)
 			}
 		})
 	}

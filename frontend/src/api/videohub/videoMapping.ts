@@ -8,15 +8,10 @@ const CATEGORY_MAP: Record<string, { category: VideoCategory; name: string }> = 
 }
 
 const INITIAL_VIDEO_STATUSES = new Set(['uploaded', 'initializing', 'ready', 'processing', 'completed'])
-// 封面已终态（生成成功，或彻底失败后降级占位图）的状态：无封面也视为可用
-const COVER_SETTLED_STATUSES = new Set(['ready', 'processing', 'completed'])
-
-export function isVideoInitiallyAvailable(video: { status?: string; file_url?: string; thumbnail_url?: string; initially_available?: boolean }): boolean {
-  if (typeof video.initially_available === 'boolean') return video.initially_available
+export function isVideoInitiallyAvailable(video: { status?: string; file_url?: string; play_url?: string; thumbnail_url?: string; initially_available?: boolean }): boolean {
+  if (video.initially_available === true) return true
   const status = video.status || ''
-  return INITIAL_VIDEO_STATUSES.has(status)
-    && Boolean(video.file_url?.trim())
-    && (Boolean(video.thumbnail_url?.trim()) || COVER_SETTLED_STATUSES.has(status))
+  return INITIAL_VIDEO_STATUSES.has(status) && Boolean((video.play_url || video.file_url)?.trim())
 }
 
 function formatDuration(seconds: number): string {
@@ -38,14 +33,17 @@ export function mapVideo(v: any, response?: any): VideoData {
     initiallyAvailable: isVideoInitiallyAvailable({
       status: v.status,
       file_url: v.file_url,
+      play_url: v.play_url,
       thumbnail_url: v.thumbnail_url,
       initially_available: v.initially_available ?? response?.initially_available,
     }),
     duration: formatDuration(durationSeconds),
     durationSeconds,
     created_at: v.created_at || '',
-    video_url: v.file_url || '',
-    poster_url: v.thumbnail_url || '',
+    video_url: v.play_url || v.file_url || '',
+    play_url: v.play_url || v.file_url || '',
+    poster_url: v.cover_url || v.thumbnail_url || '',
+    cover_url: v.cover_url || v.thumbnail_url || '',
     processing_error_summary: v.processing_error_summary || '',
     overview: '',
     chapters: [],

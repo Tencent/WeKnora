@@ -19,7 +19,7 @@
       </div>
       <div v-else class="video-detail-page__layout">
         <section class="video-detail-page__left">
-          <VideoPlayer ref="player" :src="video.video_url" :poster="video.poster_url" :duration-hint="video.durationSeconds" :subtitles="video.subtitles" @timeupdate="currentSeconds = $event" />
+          <VideoPlayer ref="player" :src="video.play_url || video.video_url" :poster="video.cover_url || video.poster_url" :duration-hint="video.durationSeconds" :subtitles="video.subtitles" @timeupdate="currentSeconds = $event" />
           <ChapterNavigation :chapters="video.chapters" :current-seconds="currentSeconds" @seek="seekTo" />
         </section>
         <aside class="video-detail-page__right">

@@ -373,8 +373,11 @@ func (c *Client) ObjectExists(ctx context.Context, objectKey string) (bool, erro
 
 // PublicURL 返回对象公开访问 URL
 func (c *Client) PublicURL(objectKey string) string {
-	if c == nil || c.publicURL == "" {
+	if c == nil {
 		return ""
+	}
+	if c.publicURL == "" {
+		return "/api/custom/files/" + strings.TrimLeft(objectKey, "/")
 	}
 	return strings.TrimRight(c.publicURL, "/") + "/" + strings.TrimLeft(objectKey, "/")
 }

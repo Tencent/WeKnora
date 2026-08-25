@@ -34,8 +34,8 @@ func TestVideoIsInitiallyAvailable(t *testing.T) {
 		want         bool
 	}{
 		{name: "uploaded with file and cover", status: VideoStatusUploaded, fileURL: "https://cdn/video.mp4", thumbnailURL: "https://cdn/cover.jpg", want: true},
-		{name: "uploaded without cover waits for thumbnail", status: VideoStatusUploaded, fileURL: "https://cdn/video.mp4", want: false},
-		{name: "initializing without cover waits for thumbnail", status: VideoStatusInitializing, fileURL: "https://cdn/video.mp4", want: false},
+		{name: "uploaded without cover is playable", status: VideoStatusUploaded, fileURL: "https://cdn/video.mp4", want: true},
+		{name: "initializing without cover is playable", status: VideoStatusInitializing, fileURL: "https://cdn/video.mp4", want: true},
 		{name: "initializing with cover", status: VideoStatusInitializing, fileURL: "https://cdn/video.mp4", thumbnailURL: "https://cdn/cover.jpg", want: true},
 		{name: "ready without cover degrades to placeholder", status: VideoStatusReady, fileURL: "https://cdn/video.mp4", want: true},
 		{name: "processing without cover degrades to placeholder", status: VideoStatusProcessing, fileURL: "https://cdn/video.mp4", want: true},
@@ -61,8 +61,8 @@ func TestVideoIsVisibleInListKeepsFailures(t *testing.T) {
 	if VideoIsVisibleInList(VideoStatusUploading, "https://cdn/video.mp4", "https://cdn/cover.jpg") {
 		t.Fatal("active uploads must not appear before multipart completion")
 	}
-	if VideoIsVisibleInList(VideoStatusInitializing, "https://cdn/video.mp4", "") {
-		t.Fatal("videos without a settled cover must not appear while the cover is generating")
+	if !VideoIsVisibleInList(VideoStatusInitializing, "https://cdn/video.mp4", "") {
+		t.Fatal("videos with a merged file must appear while the cover is generating")
 	}
 	if !VideoIsVisibleInList(VideoStatusReady, "https://cdn/video.mp4", "") {
 		t.Fatal("cover-degraded videos must remain visible with placeholder")

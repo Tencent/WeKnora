@@ -23,13 +23,19 @@ func VideoIsReadyForHome(status string) bool {
 	}
 }
 
-// VideoIsInitiallyAvailable 返回视频是否已达"初始可用"：核心文件就绪且封面已终态。
-// 封面终态 = 已生成封面（thumbnail_url 非空），或初始处理已结束、封面彻底失败后降级为占位图。
+// VideoIsInitiallyAvailable 返回视频是否已完成上传并可在产品中使用。
+// 封面和时长属于异步增强信息，不应阻塞视频播放或列表展示。
 func VideoIsInitiallyAvailable(status, fileURL, thumbnailURL string) bool {
 	if !VideoIsReadyForHome(status) || strings.TrimSpace(fileURL) == "" {
 		return false
 	}
-	return strings.TrimSpace(thumbnailURL) != "" || VideoIsCoverSettled(status)
+	return true
+}
+
+// VideoIsPlayable 是对业务语义更明确的别名：只要核心视频文件已合并即可播放。
+// thumbnailURL 保留在参数中兼容旧调用方，封面生成失败不影响播放。
+func VideoIsPlayable(status, fileURL, thumbnailURL string) bool {
+	return VideoIsInitiallyAvailable(status, fileURL, thumbnailURL)
 }
 
 // VideoIsCoverSettled 返回无封面视频的初始处理是否已结束（成功进入后续流程或彻底失败降级）。
@@ -44,7 +50,7 @@ func VideoIsCoverSettled(status string) bool {
 }
 
 // VideoIsVisibleInList 返回视频是否应出现在列表中。
-// 失败记录即使没有可播放文件也要保留，便于前端展示失败原因和提供重试入口。
+// 文件合并完成后立即展示，封面和时长由后台异步补齐。
 func VideoIsVisibleInList(status, fileURL, thumbnailURL string) bool {
 	return VideoIsInitiallyAvailable(status, fileURL, thumbnailURL) || status == VideoStatusFailed
 }

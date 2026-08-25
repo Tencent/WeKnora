@@ -1,5 +1,5 @@
 import type { UploadForm, VideoData } from '@/types/videohub'
-import { isVideoInitiallyAvailable, mapVideo } from './videoMapping'
+import { mapVideo } from './videoMapping'
 
 export interface UploadMetrics {
   totalBytes: number
@@ -35,7 +35,7 @@ export class UploadCancelledError extends Error {
   }
 }
 
-// 服务端会按文件大小返回 8MB 或 16MB；该值只作为兼容旧后端的兜底。
+  // 服务端会按文件大小返回 8MB 或 16MB；该值只作为兼容旧后端的兜底。
 export const PART_SIZE = 8 * 1024 * 1024
 export const DEFAULT_INITIAL_CONCURRENCY = 2
 export const DEFAULT_MIN_CONCURRENCY = 1
@@ -301,16 +301,30 @@ export function uploadVideo(
       throw new Error('合并分片失败：' + (data?.error || `HTTP ${completeRes.status}`))
     }
     multipartCompleted = true
-    const completed = parseJson<{ video_id: string; uploaded_at: string }>(completeRequest.responseBody)
+    const completed = parseJson<{
+      video_id: string
+      uploaded_at: string
+      status?: string
+      file_url?: string
+      play_url?: string
+    }>(completeRequest.responseBody)
     logUploadEvent('complete_ready', trace, {
       video_id: init!.video_id,
       upload_id: init!.upload_id,
       job_id: (completed as { job_id?: string }).job_id,
     })
 
-	// 浏览器本地截帧与后端抽帧并发竞速：先触发封面生成+上传，谁先就绪谁生效，缩短“封面就绪”等待
+	// 浏览器本地截帧与后端抽帧并发竞速：先触发封面生成+上传，谁先就绪谁生效。
+	// 这里故意不等待封面：文件合并成功后视频已经可播放，封面和时长由后台异步补齐。
 	void enhanceUploadedVideo(file, completed.video_id, cancel, trace)
-	const uploadedVideo = await waitForVideoReady(completed.video_id, cancel, callbacks, trace)
+	if (cancel.cancelled) throw new UploadCancelledError()
+	const uploadedVideo = await fetchUploadedVideo(
+		completed.video_id,
+		file.name,
+		completed,
+		cancel,
+		trace,
+	)
 	callbacks.onProgress(100)
 
 	// 上传完成后返回详情接口中的真实 file_url/status，UploadModal 再刷新列表。
@@ -610,57 +624,38 @@ async function enhanceUploadedVideo(file: File, videoId: string, cancel: UploadC
 	})
 }
 
-async function waitForVideoReady(
+async function fetchUploadedVideo(
   videoId: string,
+  filename: string,
+  fallback: { status?: string; file_url?: string; play_url?: string },
   cancel: UploadCancel,
-  callbacks: UploadCallbacks,
   trace: UploadTrace,
 ): Promise<VideoData> {
-  const deadline = Date.now() + 30 * 1000
-  while (Date.now() < deadline) {
-    if (cancel.cancelled) throw new UploadCancelledError()
-    const request = await fetchWithUploadDiagnostics(
-      `/api/custom/videos/${videoId}`,
-      {
-        headers: {
-          Accept: 'application/json',
-          [UPLOAD_TRACE_HEADER]: trace.traceId,
-        },
+  if (cancel.cancelled) throw new UploadCancelledError()
+  const request = await fetchWithUploadDiagnostics(
+    `/api/custom/videos/${videoId}`,
+    {
+      headers: {
+        Accept: 'application/json',
+        [UPLOAD_TRACE_HEADER]: trace.traceId,
       },
-      trace,
-      { stage: 'ready_poll', videoId },
-    )
-    const resp = request.response
-    if (!resp.ok) throw new Error(`等待视频初始处理失败（HTTP ${resp.status}）`)
-    const payload = parseJson<{ initially_available?: boolean; data?: {
-      id?: string
-      title?: string
-      video_type?: string
-      status?: string
-      thumbnail_url?: string
-      duration_seconds?: number
-      file_url?: string
-      processing_error_summary?: string
-      created_at?: string
-      initially_available?: boolean
-    } }>(request.responseBody)
-    const video = payload.data
-    if (video?.status === 'failed') {
-      throw new Error(video.processing_error_summary || '视频初始处理失败')
-    }
-    if (video?.id && isVideoInitiallyAvailable({
-      status: video.status,
-      file_url: video.file_url,
-      thumbnail_url: video.thumbnail_url,
-      initially_available: video.initially_available ?? payload.initially_available,
-    })) {
-      callbacks.onProgress(99)
-      return mapVideo(video, payload)
-    }
-    callbacks.onProgress(98)
-    await new Promise(resolve => window.setTimeout(resolve, 500))
+    },
+    trace,
+    { stage: 'uploaded_detail', videoId },
+  )
+  if (request.response.ok) {
+    const payload = parseJson<{ data?: Record<string, unknown> }>(request.responseBody)
+    if (payload.data?.id) return mapVideo(payload.data, payload)
   }
-  throw new Error('上传已完成，封面仍在处理中，请稍后刷新查看')
+
+  // 合并已经成功，详情请求短暂失败时仍返回可播放的最小记录；列表刷新会继续同步完整字段。
+  return mapVideo({
+    id: videoId,
+    title: filename.replace(/\.[^.]+$/, ''),
+    status: fallback.status || 'uploaded',
+    file_url: fallback.play_url || fallback.file_url || '',
+    play_url: fallback.play_url || fallback.file_url || '',
+  })
 }
 
 async function generateVideoPoster(file: File): Promise<GeneratedPoster> {

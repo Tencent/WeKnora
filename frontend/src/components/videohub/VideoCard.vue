@@ -1,7 +1,7 @@
 <template>
   <article class="video-card" tabindex="0" role="button" @click="$emit('select')" @keydown.enter="$emit('select')">
     <div class="video-card__cover">
-      <img v-if="video.poster_url && !coverFailed" :src="video.poster_url" :alt="video.title" @error="coverFailed = true" />
+      <img v-if="(video.cover_url || video.poster_url) && !coverFailed" :src="video.cover_url || video.poster_url" :alt="video.title" @error="coverFailed = true" />
       <div v-else class="video-card__fallback" aria-hidden="true">▶</div>
       <span v-if="statusLabel" class="video-card__status">{{ statusLabel }}</span>
       <span class="video-card__duration">{{ video.durationSeconds > 0 ? video.duration : '时长待生成' }}</span>

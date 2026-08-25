@@ -82,7 +82,9 @@ export interface VideoData {
   durationSeconds: number
   created_at: string
   video_url: string
+  play_url?: string
   poster_url?: string
+  cover_url?: string
   processing_error_summary?: string
   overview: string
   chapters: Chapter[]

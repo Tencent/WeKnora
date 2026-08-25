@@ -154,6 +154,8 @@ func (h *UploadHandler) Direct(c *gin.Context) {
 		"status":      "uploaded",
 		"object_key":  objectKey,
 		"file_url":    video.FileURL, // 返回真实可访问 URL，前端上传后即可播放（C 修复）
+		"play_url":    video.FileURL,
+		"cover_url":   video.ThumbnailURL,
 		"job_id":      jobID,
 		"uploaded_at": now,
 	})
@@ -198,9 +200,11 @@ func (h *UploadHandler) Confirm(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"video_id": req.VideoID,
-		"status":   model.VideoStatusUploaded,
-		"file_url": h.MinIO.PublicURL(req.ObjectKey),
+		"video_id":  req.VideoID,
+		"status":    model.VideoStatusUploaded,
+		"file_url":  h.MinIO.PublicURL(req.ObjectKey),
+		"play_url":  h.MinIO.PublicURL(req.ObjectKey),
+		"cover_url": "",
 		// 封面生成完成后才视为初始可用（详情接口轮询确认）
 		"initially_available": model.VideoIsInitiallyAvailable(model.VideoStatusUploaded, h.MinIO.PublicURL(req.ObjectKey), ""),
 		"job_id":              jobID,
@@ -650,6 +654,8 @@ func (h *UploadHandler) MultipartComplete(c *gin.Context) {
 		"object_key": req.ObjectKey,
 		"status":     model.VideoStatusUploaded,
 		"file_url":   h.MinIO.PublicURL(req.ObjectKey),
+		"play_url":   h.MinIO.PublicURL(req.ObjectKey),
+		"cover_url":  "",
 		// 封面生成完成后才视为初始可用（详情接口轮询确认）
 		"initially_available": model.VideoIsInitiallyAvailable(model.VideoStatusUploaded, h.MinIO.PublicURL(req.ObjectKey), ""),
 		"job_id":              jobID,
