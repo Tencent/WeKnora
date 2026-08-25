@@ -252,7 +252,30 @@ onUnmounted(stop)
   font-size: 12px;
 }
 
-.skill-timeline--compact :deep(.agent-stream-display) {
+.skill-timeline--compact :deep(.agent-stream-display.is-embedded) {
+  font-size: 12px;
+  --agent-step-text-size: 12px;
+  --agent-step-summary-size: 12px;
+}
+
+.skill-timeline--compact :deep(.agent-stream-display.is-embedded .tree-root .action-name) {
+  font-size: 12px;
+}
+
+// Chat answer Markdown is 16px. That is the right size in a conversation and
+// too loud in this 420px popup, where the prompt and step summary are 11–13px.
+.skill-timeline--compact :deep(.agent-stream-display .answer-content.markdown-content) {
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.skill-timeline--compact :deep(.agent-stream-display .answer-content.markdown-content h1) {
+  font-size: 13px;
+  margin-bottom: 0.35em;
+}
+
+.skill-timeline--compact :deep(.agent-stream-display .answer-content.markdown-content h2),
+.skill-timeline--compact :deep(.agent-stream-display .answer-content.markdown-content h3) {
   font-size: 12px;
 }
 </style>
