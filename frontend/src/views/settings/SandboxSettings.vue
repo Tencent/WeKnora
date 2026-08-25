@@ -264,10 +264,10 @@ const backendLabel = (value: string) => t(`settings.sandbox.backends.${value}`)
 
 const isLegacyRecord = (record: SandboxConfigRecord) => !isNamedSandboxBackend(record.sandbox_type)
 
-// Skills are baked into the remote snapshot image. Docker and local configs
-// have no skills step, so their cards stay a connection summary.
+// Skills are baked into the snapshot image. Local configs have no skills
+// step, so their cards stay a connection summary.
 function supportsSkills(record: SandboxConfigRecord) {
-  return record.sandbox_type === 'cube' || record.sandbox_type === 'e2b'
+  return record.sandbox_type === 'cube' || record.sandbox_type === 'e2b' || record.sandbox_type === 'docker'
 }
 
 function skillsOf(record: SandboxConfigRecord): ConfigSkill[] | undefined {
@@ -314,6 +314,8 @@ const cardMenu = (record: SandboxConfigRecord): CardMenuOption[] => {
   ]
   if (record.sandbox_type === 'cube' || record.sandbox_type === 'e2b') {
     options.push({ content: t('settings.sandbox.viewSandboxes'), value: 'inventory' })
+  }
+  if (supportsSkills(record)) {
     options.push({ content: t('settings.sandbox.manageSkills'), value: 'skills' })
   }
   options.push({ content: t('common.delete'), value: 'delete', theme: 'error' })
@@ -377,7 +379,7 @@ function openSkills(record: SandboxConfigRecord) {
   showEditor.value = true
 }
 
-// Cube/e2b cards now lead with installed skills, so a click lands on that
+// Cube/E2B/Docker cards lead with installed skills, so a click lands on that
 // step. Connection and runtime stay behind the card menu's edit action.
 function openCard(record: SandboxConfigRecord) {
   if (supportsSkills(record)) {

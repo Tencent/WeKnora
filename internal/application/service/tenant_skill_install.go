@@ -1628,6 +1628,10 @@ func currentBaseTemplate(cfg *types.TenantSandboxConfig) string {
 		if cfg.E2B != nil {
 			return cfg.E2B.TemplateID
 		}
+	case sandbox.SandboxTypeDocker:
+		if cfg.Docker != nil {
+			return cfg.Docker.Image
+		}
 	}
 	return ""
 }
@@ -1646,20 +1650,7 @@ func isSkillNameConflict(err error) bool {
 }
 
 func skillOwnerFingerprint(cfg *types.TenantSandboxConfig) string {
-	if cfg == nil {
-		return ""
-	}
-	switch sandbox.SandboxType(cfg.SandboxType) {
-	case sandbox.SandboxTypeCube:
-		if cfg.Cube != nil {
-			return sandbox.SkillImageFingerprint("cube", cfg.Cube.APIKey, cfg.Cube.APIURL)
-		}
-	case sandbox.SandboxTypeE2B:
-		if cfg.E2B != nil {
-			return sandbox.SkillImageFingerprint("e2b", cfg.E2B.APIKey, cfg.E2B.APIURL)
-		}
-	}
-	return ""
+	return sandbox.SkillOwnerFingerprint(cfg)
 }
 
 // configSandboxInvalidator is the narrow capability marking bound sandboxes

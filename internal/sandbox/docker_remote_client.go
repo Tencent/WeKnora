@@ -14,6 +14,7 @@
 //	Get/List → GET  /containers/json?filters=label=…
 //	Delete   → DELETE /containers/{id}?force=1
 //	Exec     → POST /containers/{id}/exec → /exec/{id}/start (hijack)
+//	Snapshot → POST /commit (skill images under weknora-skill/)
 //
 // Every file operation — WriteFile, ReadFile, Stat, MakeDir, Remove, ListDir —
 // is an exec running as the sandbox account, NOT a call to /archive. The
@@ -225,7 +226,11 @@ func (c *DockerRemoteClient) Capabilities() RemoteSandboxCapabilities {
 		SupportsPauseResume:           true,
 		SupportsTimeoutRefresh:        false,
 		SupportsFilesystemEnumeration: true,
-		SupportsVolumes:               false,
+		// docker commit produces a local image whose tag is a template ID,
+		// which is what skill install uses on Cube/E2B. The snapshot is
+		// filesystem-only (no memory) and lives on this daemon.
+		SupportsSnapshots: true,
+		SupportsVolumes:   false,
 	}
 }
 
@@ -1041,6 +1046,12 @@ func (c *DockerRemoteClient) ensureImage(ctx context.Context, image string) erro
 	if _, err := c.api.ImageInspect(ctx, image); err == nil {
 		return nil
 	}
+	// Skill snapshots are daemon-local commits, not registry tags. Pulling
+	// one would hit Docker Hub for a name we minted and never pushed, and a
+	// miss here means "this daemon does not have the image", not "fetch it".
+	if dockerIsSkillSnapshotRef(image) {
+		return dockerInvalidRequest("Create", "skill snapshot image "+image+" is not on this daemon")
+	}
 	pullCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dockerImagePullBudget)
 	defer cancel()
 	body, err := c.api.ImagePull(pullCtx, image, client.ImagePullOptions{})
@@ -1147,4 +1158,7 @@ func firstNonEmptyLine(output string) string {
 	return ""
 }
 
-var _ RemoteSandboxClient = (*DockerRemoteClient)(nil)
+var (
+	_ RemoteSandboxClient   = (*DockerRemoteClient)(nil)
+	_ RemoteSnapshotManager = (*DockerRemoteClient)(nil)
+)

@@ -135,4 +135,18 @@ func (a *dockerRPCTimeoutAPI) ImageList(
 	return a.inner.ImageList(rpcCtx, options)
 }
 
+func (a *dockerRPCTimeoutAPI) ImageRemove(
+	ctx context.Context, imageID string, options client.ImageRemoveOptions,
+) (client.ImageRemoveResult, error) {
+	rpcCtx, cancel := a.rpcCtx(ctx)
+	defer cancel()
+	return a.inner.ImageRemove(rpcCtx, imageID, options)
+}
+
+func (a *dockerRPCTimeoutAPI) ContainerCommit(
+	ctx context.Context, containerID string, options client.ContainerCommitOptions,
+) (client.ContainerCommitResult, error) {
+	return a.inner.ContainerCommit(ctx, containerID, options)
+}
+
 var _ dockerEngineAPI = (*dockerRPCTimeoutAPI)(nil)

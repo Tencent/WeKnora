@@ -65,6 +65,12 @@ type fakeDockerEngine struct {
 	images       []image.Summary
 	imagePresent map[string]bool
 	pulled       []string
+
+	committed      []client.ContainerCommitOptions
+	commitID       string
+	commitErr      error
+	removedImages  []string
+	removeImageErr error
 }
 
 func newFakeDockerEngine() *fakeDockerEngine {
@@ -75,6 +81,8 @@ func newFakeDockerEngine() *fakeDockerEngine {
 		imagePresent: make(map[string]bool),
 	}
 }
+
+var _ dockerEngineAPI = (*fakeDockerEngine)(nil)
 
 func (f *fakeDockerEngine) Ping(context.Context, client.PingOptions) (client.PingResult, error) {
 	return client.PingResult{APIVersion: "1.55"}, f.pingErr
@@ -240,6 +248,75 @@ func (f *fakeDockerEngine) ImageList(
 	_ context.Context, _ client.ImageListOptions,
 ) (client.ImageListResult, error) {
 	return client.ImageListResult{Items: f.images}, nil
+}
+
+func (f *fakeDockerEngine) ImageRemove(
+	_ context.Context, imageID string, _ client.ImageRemoveOptions,
+) (client.ImageRemoveResult, error) {
+	f.removedImages = append(f.removedImages, imageID)
+	if f.removeImageErr != nil {
+		return client.ImageRemoveResult{}, f.removeImageErr
+	}
+	canonical := dockerCanonicalSnapshotID(imageID)
+	found := f.imagePresent[imageID] || f.imagePresent[canonical]
+	kept := make([]image.Summary, 0, len(f.images))
+	for _, item := range f.images {
+		match := item.ID == imageID || item.ID == canonical
+		for _, tag := range item.RepoTags {
+			if tag == imageID || dockerCanonicalSnapshotID(tag) == canonical {
+				match = true
+				break
+			}
+		}
+		if match {
+			found = true
+			continue
+		}
+		kept = append(kept, item)
+	}
+	if !found {
+		return client.ImageRemoveResult{}, cerrdefs.ErrNotFound.WithMessage("no such image")
+	}
+	f.images = kept
+	delete(f.imagePresent, imageID)
+	delete(f.imagePresent, canonical)
+	return client.ImageRemoveResult{}, nil
+}
+
+func (f *fakeDockerEngine) ContainerCommit(
+	_ context.Context, _ string, options client.ContainerCommitOptions,
+) (client.ContainerCommitResult, error) {
+	f.committed = append(f.committed, options)
+	if f.commitErr != nil {
+		return client.ContainerCommitResult{}, f.commitErr
+	}
+	id := f.commitID
+	if id == "" {
+		id = "sha256:snapshot-1"
+	}
+	labels := map[string]string{}
+	for _, change := range options.Changes {
+		change = strings.TrimSpace(change)
+		if !strings.HasPrefix(strings.ToUpper(change), "LABEL ") {
+			continue
+		}
+		rest := strings.TrimSpace(change[len("LABEL "):])
+		key, value, ok := strings.Cut(rest, "=")
+		if !ok {
+			continue
+		}
+		labels[strings.TrimSpace(key)] = strings.Trim(strings.TrimSpace(value), `"`)
+	}
+	ref := strings.TrimSpace(options.Reference)
+	var tags []string
+	if ref != "" {
+		tags = []string{ref + ":latest"}
+		f.imagePresent[ref] = true
+		f.imagePresent[ref+":latest"] = true
+	}
+	f.imagePresent[id] = true
+	f.images = append(f.images, image.Summary{ID: id, RepoTags: tags, Labels: labels})
+	return client.ContainerCommitResult{ID: id}, nil
 }
 
 // fakePullResponse satisfies the pull-response contract without a registry.
@@ -853,6 +930,8 @@ func TestDockerClientCapabilities(t *testing.T) {
 	require.True(t, caps.SupportsFilesystemEnumeration)
 	require.False(t, caps.SupportsTimeoutRefresh,
 		"the daemon has no TTL to refresh; reclamation is WeKnora's own sweep")
+	require.True(t, caps.SupportsSnapshots,
+		"docker commit is the skill-image snapshot; without this flag install is refused")
 	require.False(t, caps.SupportsVolumes)
 }
 

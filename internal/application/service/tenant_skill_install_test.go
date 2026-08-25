@@ -69,6 +69,26 @@ func TestRunInstallHappyPathSwitchesPointerLast(t *testing.T) {
 	require.Equal(t, types.SkillStatusReady, skill.Status)
 }
 
+func TestRunInstallSucceedsOnDockerConfig(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.configRepo.entity.SandboxType = "docker"
+	fx.configRepo.entity.Config.SandboxType = "docker"
+	fx.configRepo.entity.Config.E2B = nil
+	fx.configRepo.entity.Config.Docker = &types.DockerSandboxConfig{
+		Image: "weknora/sandbox:base",
+		Host:  "unix:///var/run/docker.sock",
+	}
+	fx.fingerprint = sandbox.SkillImageFingerprint("docker", "", "unix:///var/run/docker.sock")
+
+	err := fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle)
+
+	require.NoError(t, err)
+	require.Contains(t, fx.events, "create-snapshot")
+	require.Equal(t, "snap-1", fx.configRepo.saved.Config.SkillImage.SnapshotID)
+	require.Equal(t, "weknora/sandbox:base", fx.configRepo.saved.Config.SkillImage.BaseTemplateID)
+	require.Equal(t, fx.fingerprint, fx.configRepo.saved.Config.SkillImage.OwnerFingerprint)
+}
+
 // TestRunInstallIssuesExactlyTheseCommands pins the order, not just the set.
 // Ownership and permissions are normalised BEFORE verification on purpose: the
 // agent creates the tree as root, so a restrictive root umask would leave the
@@ -715,10 +735,10 @@ func (s stubWorkspaceSandboxPolicy) WorkspaceScriptsDisabled(context.Context, ui
 
 func TestSwitchImagePointerRefusesAnUnusableFingerprint(t *testing.T) {
 	fx := newInstallFixture(t)
-	// A config whose provider carries no credentials produces no fingerprint,
+	// A config whose provider cannot snapshot produces no fingerprint,
 	// and a pointer with an empty fingerprint is discarded at session start.
-	fx.configRepo.entity.SandboxType = "docker"
-	fx.configRepo.entity.Config.SandboxType = "docker"
+	fx.configRepo.entity.SandboxType = "local"
+	fx.configRepo.entity.Config.SandboxType = "local"
 	fx.configRepo.entity.Config.E2B = nil
 
 	err := fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle)
