@@ -1960,8 +1960,8 @@ function pruneSelectedSkills() {
   // 拉取失败时不要把用户已选项清掉
   if (!skillsAvailable.value && skillOptions.value.length === 0) return
   const names = new Set(skillOptions.value.map((skill) => skill.name))
-  const selected = formData.value.config.selected_skills || []
-  const kept = selected.filter((name) => names.has(name))
+  const selected: string[] = formData.value.config.selected_skills || []
+  const kept = selected.filter((name: string) => names.has(name))
   if (kept.length !== selected.length) {
     formData.value.config.selected_skills = kept
   }
