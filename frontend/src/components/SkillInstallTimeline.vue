@@ -14,6 +14,7 @@
           :session="msg"
           :session-id="sessionId"
           :user-query="''"
+          embedded-mode
         />
       </div>
     </template>
@@ -157,9 +158,19 @@ async function open() {
   messages.splice(0, messages.length)
   loading.value = true
   try {
+    // A finished install already has durable rows. Replaying the event log
+    // through processStreamChunk would animate every tool call again, which
+    // is what "view the run" must not do.
+    if (!props.live) {
+      if (props.sessionId) {
+        await loadPersisted()
+      }
+      return
+    }
+
     // Locators land after the installer sandbox is up. Keep asking until the
-    // stream answers or this run is no longer live; falling through to the
-    // empty state on the first 404 would flash "no record" during setup.
+    // stream answers; falling through to the empty state on the first 404
+    // would flash "no record" during setup.
     for (;;) {
       const served = await follow().catch(() => false)
       if (closed || served) return
@@ -167,9 +178,9 @@ async function open() {
         await loadPersisted()
         if (messages.length > 0 || closed) return
       }
-      if (!props.live || closed) return
+      if (closed) return
       await wait(1000)
-      if (!props.live || closed) return
+      if (closed) return
     }
   } catch {
     // Both sources are gone; the empty state says so.
