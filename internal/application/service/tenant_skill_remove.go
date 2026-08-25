@@ -227,14 +227,15 @@ func (s *TenantSkillService) runRemove(
 	// The ledger row is written before the snapshot: a snapshot with no ledger
 	// entry is a provider resource nobody knows exists.
 	removeRowID := uuid.NewString()
+	snapshotName := skillSnapshotBuildName(configID, generation)
 	if err := s.skills.CreateSnapshotRow(ctx, &types.TenantSkillSnapshotEntity{
 		ID: removeRowID, TenantID: tenantID, SandboxConfigID: configID, SkillID: skillID,
 		ParentSnapshotID: currentSnapshotID(cfgEntity), Generation: generation,
 		Trigger: types.SkillSnapshotTriggerRemove, State: types.SkillSnapshotStateBuilding,
+		PlannedName: snapshotName,
 	}); err != nil {
 		return err
 	}
-	snapshotName := fmt.Sprintf("weknora-sk-%s-g%d", shortID(configID), generation)
 	ref, err := s.createSnapshot(ctx, mgr, sess.ID, snapshotName)
 	if err != nil {
 		return err

@@ -66,11 +66,13 @@ type fakeDockerEngine struct {
 	imagePresent map[string]bool
 	pulled       []string
 
-	committed      []client.ContainerCommitOptions
-	commitID       string
-	commitErr      error
-	removedImages  []string
-	removeImageErr error
+	committed          []client.ContainerCommitOptions
+	commitID           string
+	commitErr          error
+	removedImages      []string
+	removeImageOptions []client.ImageRemoveOptions
+	removeImageErr     error
+	listImagesErr      error
 }
 
 func newFakeDockerEngine() *fakeDockerEngine {
@@ -247,13 +249,17 @@ func (f *fakeDockerEngine) ImagePull(
 func (f *fakeDockerEngine) ImageList(
 	_ context.Context, _ client.ImageListOptions,
 ) (client.ImageListResult, error) {
+	if f.listImagesErr != nil {
+		return client.ImageListResult{}, f.listImagesErr
+	}
 	return client.ImageListResult{Items: f.images}, nil
 }
 
 func (f *fakeDockerEngine) ImageRemove(
-	_ context.Context, imageID string, _ client.ImageRemoveOptions,
+	_ context.Context, imageID string, options client.ImageRemoveOptions,
 ) (client.ImageRemoveResult, error) {
 	f.removedImages = append(f.removedImages, imageID)
+	f.removeImageOptions = append(f.removeImageOptions, options)
 	if f.removeImageErr != nil {
 		return client.ImageRemoveResult{}, f.removeImageErr
 	}

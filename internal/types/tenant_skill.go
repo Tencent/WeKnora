@@ -107,6 +107,15 @@ type TenantSkillSnapshotEntity struct {
 	ParentSnapshotID string `gorm:"type:varchar(255)"`
 	Generation       int
 
+	// PlannedName is the name handed to CreateSnapshot. It is written before
+	// the provider call, which is what makes an abandoned build identifiable:
+	// SnapshotID can only be recorded once the provider has answered, so a
+	// process that died in between left a snapshot the ledger could not name
+	// and therefore could never reclaim. Matching is by name because only
+	// Docker's ID is derivable from it; Cube and E2B mint their own and echo
+	// the name back in the listing.
+	PlannedName string `gorm:"type:varchar(255)"`
+
 	Trigger string `gorm:"type:varchar(16)"`
 	State   string `gorm:"type:varchar(16);index"`
 

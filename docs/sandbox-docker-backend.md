@@ -168,6 +168,32 @@ WeKnora 自己跑在容器里时，要把 **实际的** docker socket 挂进 app
 两个要注意的约束：镜像层上限 127，长期增量要定期压平；快照是本机资产，多机部署必须推到 registry。
 压平和跨 daemon 分发还不在这条路径里。
 
+磁盘占用的实际形态和 Cube / E2B 不一样，值得单独说清楚：
+
+- 第 N+1 代是从第 N 代起的容器 commit 出来的，**N 的层完整包含在 N+1 里**。所以两代镜像并存
+  时，旧的那个 tag 不额外占盘；反过来说，`PruneSupersededSnapshots` 到期删掉旧 tag 也几乎
+  回收不了空间。真正回收发生在整条链的 tag 全部退役之后，因此 `DeleteSnapshot` 必须带
+  `PruneChildren`（即 `noprune=0`），否则无 tag 的祖先层会永久留下。
+- **卸载一个 skill 会让镜像变大**：`rm -rf` 在 overlay 上是新增一层 whiteout，被删的文件仍
+  留在父层。也就是说装和卸都只增不减，Cube / E2B 是每代一张独立模板、到期真删，只有 Docker
+  是单调累积。要把空间还回来，只能从基础模板重建整条链——`SkillSnapshotTriggerRebuild` 为此
+  预留了，但重建流程尚未实现。
+- 快照的 owner fingerprint 只在 host 是**显式配置**时才把 host 计入。留空的配置一律记成
+  `local-daemon`，不能采用 `DetectLocalDockerHost()` 的结果：那个值来自 `DOCKER_HOST` 或当前
+  docker context，切一次 Colima / Docker Desktop / OrbStack 就会变，而它一变就等价于「凭据
+  轮换」——会话静默退回基础模板（skill 全部消失）、安装被拒、快照清理被永久跳过。本机 daemon
+  换个 host 字符串通常还是同一块盘上的同一批镜像，跨账号那套推理在这里不成立。
+
+回收路径依赖 ledger 能给每张快照命名，而 `snapshot_id` 只有在 provider 应答之后才写得下来。
+进程死在 commit 与那次写入之间，就会留下一张谁都叫不出名字的快照：`PruneSupersededSnapshots`
+因为状态是 `building` 而跳过它，`ReconcileSnapshots` 只告警不删，配置删除时空 `snapshot_id`
+被当成「无需释放」。因此 `planned_name` 在 commit **之前**就落库（迁移 000088），之后靠
+provider 的 `ListSnapshots` 按名字认领：Cube / E2B 会把请求的名字回显在 `Names` 里，Docker 的
+ID 本身就是这个名字加上 `weknora-skill/` 前缀。两条路径会用它——周期清理里的
+`reapAbandonedBuilds`，以及配置删除时的 `resolveAbandonedBuildIDs`（配置一删，周期清理就再也
+遍历不到这张快照，那是最后一次机会）。只有**认领成功**才会删；名字对不上时不动，因为无法区分
+「commit 从未发生」和「该 provider 不回显名字」，猜错就等于丢掉一张仍然存在的快照的唯一记录。
+
 ## 测试
 
 单元测试用一个内存版 Engine API 驱动适配器，不需要 daemon：

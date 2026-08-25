@@ -410,22 +410,58 @@ func TestResolveEffectiveConfigUsesSkillSnapshotAsDockerImage(t *testing.T) {
 			"a snapshot from another daemon is invisible; the session must still boot")
 	})
 
-	t.Run("blank host fingerprints as the resolved daemon", func(t *testing.T) {
-		t.Setenv("DOCKER_HOST", "unix:///tmp/weknora-skill-docker.sock")
-		cfg := &types.TenantSandboxConfig{
-			SandboxType: "docker",
-			Docker:      &types.DockerSandboxConfig{Image: "weknora/sandbox:base"},
-			SkillImage: &types.SkillImageConfig{
-				SnapshotID:       "weknora-skill/weknora-sk-cfg1-g1",
-				OwnerFingerprint: SkillImageFingerprint("docker", "", DetectLocalDockerHost()),
-			},
+	// A blank host follows the environment, so binding the fingerprint to the
+	// resolved daemon would make "switch docker context" indistinguishable
+	// from "rotate the credentials": sessions would silently lose every
+	// skill, installs would be refused, and the snapshot prune would skip the
+	// config forever. The images are on the same disk either way.
+	t.Run("blank host survives a change of local daemon", func(t *testing.T) {
+		newConfig := func() *types.TenantSandboxConfig {
+			return &types.TenantSandboxConfig{
+				SandboxType: "docker",
+				Docker:      &types.DockerSandboxConfig{Image: "weknora/sandbox:base"},
+				SkillImage: &types.SkillImageConfig{
+					SnapshotID: "weknora-skill/weknora-sk-cfg1-g1",
+					OwnerFingerprint: SkillOwnerFingerprint(&types.TenantSandboxConfig{
+						SandboxType: "docker",
+						Docker:      &types.DockerSandboxConfig{Image: "weknora/sandbox:base"},
+					}),
+				},
+			}
 		}
 
-		eff, err := ResolveEffectiveConfig(cfg, global)
+		for _, host := range []string{
+			"unix:///tmp/colima.sock",
+			"unix:///tmp/orbstack.sock",
+		} {
+			t.Setenv("DOCKER_HOST", host)
+			cfg := newConfig()
+
+			eff, err := ResolveEffectiveConfig(cfg, global)
+
+			require.NoError(t, err)
+			require.Equal(t, "weknora-skill/weknora-sk-cfg1-g1", eff.DockerImage,
+				"DOCKER_HOST=%s must not retire the config's skill image", host)
+			require.True(t, SkillImageActive(cfg))
+		}
+	})
+
+	// An explicit host is still part of the identity: only an admin editing
+	// the config can change it, and it may well be another machine.
+	t.Run("an explicit host change retires the image", func(t *testing.T) {
+		cfg := *base
+		cfg.Docker = &types.DockerSandboxConfig{
+			Image: "weknora/sandbox:base", Host: "tcp://198.51.100.10:2376",
+			TLSCertPath: "/certs",
+		}
+		cfg.SkillImage = &types.SkillImageConfig{
+			SnapshotID: "weknora-skill/weknora-sk-cfg1-g1", OwnerFingerprint: fp,
+		}
+
+		eff, err := ResolveEffectiveConfig(&cfg, global)
 
 		require.NoError(t, err)
-		require.Equal(t, "weknora-skill/weknora-sk-cfg1-g1", eff.DockerImage)
-		require.True(t, SkillImageActive(cfg))
+		require.Equal(t, "weknora/sandbox:base", eff.DockerImage)
 	})
 }
 

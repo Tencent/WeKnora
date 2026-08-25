@@ -62,12 +62,24 @@ func (c *DockerRemoteClient) CreateSnapshot(
 
 // DeleteSnapshot removes a committed skill image. A missing image is success:
 // the reaper and the install-compensation path both retry deletes.
+//
+// PruneChildren is what makes the delete reclaim anything. Each generation is
+// committed from a container started off the previous one, so generation N+1
+// holds generation N's layers as ancestors. Untagging N alone therefore frees
+// nothing while N+1 exists — which is correct and unavoidable — but the layers
+// of a chain whose every tag has been retired would stay on disk forever
+// without this, because the Go client defaults to noprune. Layers a live image
+// still references are refcounted by the daemon, so cascading here cannot take
+// the current image's storage out from under it.
 func (c *DockerRemoteClient) DeleteSnapshot(ctx context.Context, snapshotID string) error {
 	id := strings.TrimSpace(snapshotID)
 	if id == "" {
 		return dockerInvalidRequest("DeleteSnapshot", "snapshot ID is required")
 	}
-	_, err := c.api.ImageRemove(ctx, id, client.ImageRemoveOptions{Force: true})
+	_, err := c.api.ImageRemove(ctx, id, client.ImageRemoveOptions{
+		Force:         true,
+		PruneChildren: true,
+	})
 	if err != nil {
 		normalized := dockerError("DeleteSnapshot", err)
 		if IsRemoteNotFound(normalized) {
@@ -75,7 +87,46 @@ func (c *DockerRemoteClient) DeleteSnapshot(ctx context.Context, snapshotID stri
 		}
 		return normalized
 	}
+	c.pruneDanglingSkillImages(ctx)
 	return nil
+}
+
+// pruneDanglingSkillImages drops skill-snapshot images that no longer carry a
+// tag. Nothing can boot one: the ledger addresses snapshots by the tag minted
+// in CreateSnapshot and never by digest, so an untagged one is unreachable by
+// construction. They are left behind by a commit whose ledger write or pointer
+// switch failed, and by every delete that ran before PruneChildren was set.
+//
+// Best effort by nature — reclaiming storage must never turn a successful
+// delete into a failed one. An image a container still holds comes back as a
+// conflict and is skipped; the next pass retries once that container is gone.
+func (c *DockerRemoteClient) pruneDanglingSkillImages(ctx context.Context) {
+	listed, err := c.api.ImageList(ctx, client.ImageListOptions{
+		All:     true,
+		Filters: client.Filters{}.Add("label", dockerSkillSnapshotLabel+"=true"),
+	})
+	if err != nil {
+		return
+	}
+	for _, item := range listed.Items {
+		if !dockerImageIsSkillSnapshot(item) || dockerImageHasTag(item) {
+			continue
+		}
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		_, _ = c.api.ImageRemove(ctx, id, client.ImageRemoveOptions{PruneChildren: true})
+	}
+}
+
+func dockerImageHasTag(item image.Summary) bool {
+	for _, tag := range item.RepoTags {
+		if strings.TrimSpace(tag) != "" && tag != "<none>:<none>" {
+			return true
+		}
+	}
+	return false
 }
 
 // ListSnapshots returns skill-snapshot images on this daemon. An empty

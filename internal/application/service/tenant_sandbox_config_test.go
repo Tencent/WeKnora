@@ -1109,6 +1109,70 @@ func TestDeleteMarksBuildingSnapshotsWhenProviderHasNoSnapshotClient(t *testing.
 	require.Contains(t, skills.marks, "row-build:"+types.SkillSnapshotStateDeleted)
 }
 
+// Deleting the config is the last chance to reclaim a build that died between
+// its commit and the ledger write: PruneSupersededSnapshots walks live configs,
+// so once this row is gone nothing can reach that snapshot again.
+func TestDeleteReleasesAnAbandonedBuildByPlannedName(t *testing.T) {
+	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
+		ID: "cfg-a", TenantID: 7, Name: "prod", SandboxType: "e2b",
+		Config: e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300),
+	}}
+	skills := &deleteSkillStore{
+		snapshots: []*types.TenantSkillSnapshotEntity{{
+			ID: "row-build", TenantID: 7, SandboxConfigID: "cfg-a",
+			PlannedName: "weknora-sk-cfga-g3", State: types.SkillSnapshotStateBuilding,
+		}},
+	}
+	var events []string
+	client := &snapshotReleaseClient{
+		events: &events,
+		listed: []sandbox.RemoteSnapshotRef{
+			{ID: "snap-orphan", Names: []string{"weknora-sk-cfga-g3"}},
+		},
+	}
+	svc := newTestConfigService(t, repo, &client.stubProviderClient, stubAgentRepo{})
+	svc.skills = skills
+	svc.newClient = func(*sandbox.Config) (sandbox.ConfigSandboxClient, error) {
+		return client, nil
+	}
+
+	require.NoError(t, svc.Delete(context.Background(), 7, "cfg-a", false))
+
+	require.Equal(t, []string{"list-snapshots", "snap-orphan"}, events,
+		"the name has to be resolved to a provider ID before it can be released")
+	require.Contains(t, skills.marks, "row-build:"+types.SkillSnapshotStateDeleted)
+	require.True(t, repo.deleted)
+}
+
+// A planned name that resolves to nothing is the ordinary case: the commit
+// never happened, so there is no provider resource to release.
+func TestDeleteAcceptsAnAbandonedBuildThatNeverCommitted(t *testing.T) {
+	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
+		ID: "cfg-a", TenantID: 7, Name: "prod", SandboxType: "e2b",
+		Config: e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300),
+	}}
+	skills := &deleteSkillStore{
+		snapshots: []*types.TenantSkillSnapshotEntity{{
+			ID: "row-build", TenantID: 7, SandboxConfigID: "cfg-a",
+			PlannedName: "weknora-sk-cfga-g3", State: types.SkillSnapshotStateBuilding,
+		}},
+	}
+	var events []string
+	client := &snapshotReleaseClient{events: &events}
+	svc := newTestConfigService(t, repo, &client.stubProviderClient, stubAgentRepo{})
+	svc.skills = skills
+	svc.newClient = func(*sandbox.Config) (sandbox.ConfigSandboxClient, error) {
+		return client, nil
+	}
+
+	require.NoError(t, svc.Delete(context.Background(), 7, "cfg-a", false))
+
+	require.Equal(t, []string{"list-snapshots"}, events,
+		"nothing carries that name, so there is nothing to delete")
+	require.Contains(t, skills.marks, "row-build:"+types.SkillSnapshotStateDeleted)
+	require.True(t, repo.deleted)
+}
+
 // snapshotReleaseFixture drives Delete through a provider that also implements
 // snapshot deletion, which is the production Cube/E2B split.
 type snapshotReleaseFixture struct {
@@ -1177,6 +1241,17 @@ type snapshotReleaseClient struct {
 	stubProviderClient
 	events     *[]string
 	failDelete map[string]error
+	listed     []sandbox.RemoteSnapshotRef
+}
+
+func (c *snapshotReleaseClient) ListSnapshots(
+	ctx context.Context, sandboxID string,
+) ([]sandbox.RemoteSnapshotRef, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	*c.events = append(*c.events, "list-snapshots")
+	return c.listed, nil
 }
 
 func (c *snapshotReleaseClient) List(
