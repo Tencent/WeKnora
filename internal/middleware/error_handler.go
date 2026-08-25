@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/logger"
 )
 
 // ErrorHandler 是一个处理应用错误的中间件
@@ -21,6 +22,9 @@ func ErrorHandler() gin.HandlerFunc {
 
 			// 检查是否为应用错误
 			if appErr, ok := errors.IsAppError(err); ok {
+				if appErr.HTTPCode >= http.StatusInternalServerError {
+					logger.Errorf(c.Request.Context(), "[http] %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+				}
 				// 返回应用错误
 				c.JSON(appErr.HTTPCode, gin.H{
 					"success": false,
@@ -33,6 +37,7 @@ func ErrorHandler() gin.HandlerFunc {
 				return
 			}
 
+			logger.Errorf(c.Request.Context(), "[http] %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
 			// 处理其他类型的错误
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"success": false,
