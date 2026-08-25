@@ -1313,6 +1313,7 @@ func (h *SystemHandler) resolvePrivilegeTarget(
 // @Failure      400  {object}  map[string]interface{}  "Bad request"
 // @Failure      403  {object}  map[string]interface{}  "Forbidden: not a system admin"
 // @Failure      404  {object}  map[string]interface{}  "User not found"
+// @Failure      500  {object}  map[string]interface{}  "User lookup or privilege update failed"
 // @Router       /system/admin/promote [post]
 func (h *SystemHandler) PromoteUserToSystemAdmin(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
@@ -1331,14 +1332,17 @@ func (h *SystemHandler) PromoteUserToSystemAdmin(c *gin.Context) {
 	}
 
 	// Resolve user. user_id takes priority when both are sent (see request
-	// struct doc); otherwise we look up by email. Both branches funnel
-	// into the same {nil-user / error} 404 so we don't leak whether a
-	// given email exists in the system to non-admins — though SystemAdmin
-	// is already a high-trust role, the parity keeps the surface clean.
+	// struct doc); otherwise we look up by email. A missing row is a 404;
+	// storage failures remain 500s so operators can distinguish an invalid
+	// target from an unavailable database.
 	user, err := h.resolvePrivilegeTarget(ctx, userID, email)
+	if errors.Is(err, repository.ErrUserNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
 	if err != nil {
 		logger.Errorf(ctx, "Error fetching user (id=%q email=%q): %v", userID, email, err)
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch user"})
 		return
 	}
 	if user == nil {
@@ -1536,6 +1540,7 @@ type GrantCrossTenantAccessRequest struct {
 // @Failure      400  {object}  map[string]interface{}
 // @Failure      403  {object}  map[string]interface{}
 // @Failure      404  {object}  map[string]interface{}
+// @Failure      500  {object}  map[string]interface{}
 // @Router       /system/admin/cross-tenant-access/grant [post]
 func (h *SystemHandler) GrantCrossTenantAccess(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
@@ -1553,7 +1558,16 @@ func (h *SystemHandler) GrantCrossTenantAccess(c *gin.Context) {
 	}
 
 	target, err := h.resolvePrivilegeTarget(ctx, userID, email)
-	if err != nil || target == nil {
+	if errors.Is(err, repository.ErrUserNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+	if err != nil {
+		logger.Errorf(ctx, "Error fetching cross-tenant access target (id=%q email=%q): %v", userID, email, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch user"})
+		return
+	}
+	if target == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}

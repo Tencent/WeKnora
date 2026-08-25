@@ -60,3 +60,35 @@ func TestUserRepositoryCrossTenantAccessLifecycle(t *testing.T) {
 		t.Fatalf("self revoke error = %v", err)
 	}
 }
+
+func TestCountCrossTenantAccessManagersOnlyCountsActiveDualPrivilegeUsers(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:count_cross_tenant_access_managers?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&types.Tenant{}, &types.User{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	repo := NewUserRepository(db)
+	ctx := context.Background()
+	users := []*types.User{
+		{ID: "manager", Username: "manager", Email: "manager@example.com", PasswordHash: "hash", IsSystemAdmin: true, CanAccessAllTenants: true},
+		{ID: "admin-only", Username: "admin-only", Email: "admin-only@example.com", PasswordHash: "hash", IsSystemAdmin: true},
+		{ID: "cross-only", Username: "cross-only", Email: "cross-only@example.com", PasswordHash: "hash", CanAccessAllTenants: true},
+		{ID: "deleted-manager", Username: "deleted-manager", Email: "deleted@example.com", PasswordHash: "hash", IsSystemAdmin: true, CanAccessAllTenants: true},
+	}
+	for _, user := range users {
+		if err := repo.CreateUser(ctx, user); err != nil {
+			t.Fatalf("create %s: %v", user.ID, err)
+		}
+	}
+	if err := repo.DeleteUser(ctx, "deleted-manager"); err != nil {
+		t.Fatalf("delete manager: %v", err)
+	}
+
+	total, err := repo.CountCrossTenantAccessManagers(ctx)
+	if err != nil || total != 1 {
+		t.Fatalf("manager count=%d err=%v", total, err)
+	}
+}

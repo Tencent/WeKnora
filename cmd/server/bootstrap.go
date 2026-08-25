@@ -18,22 +18,22 @@ import (
 )
 
 // bootstrapEnvVar is the env var that names the email of the user who
-// may be promoted to system administrator when the deployment has no
-// existing system administrators.
+// may be granted both platform privileges when the deployment has no
+// existing dual-privilege manager.
 //
 // Why an env var (vs a CLI subcommand)?
 //   - Zero-friction in docker-compose / k8s deploys: set it once in the
 //     manifest and the very first user account that signs up with that
 //     email is auto-promoted, with no extra ops step.
-//   - Idempotent: if the user is already a system admin, bootstrapping is
-//     a no-op.
-//   - Safe to leave set: once at least one system admin exists, the env
-//     var stops granting privileges. That prevents a UI revoke from being
-//     silently undone on the next restart.
+//   - Idempotent: once at least one user holds both system-admin and
+//     cross-tenant privileges, bootstrapping is a no-op.
+//   - Recovery-oriented: when no dual-privilege manager exists, the named
+//     user receives both privileges. This lets fresh and upgraded deployments
+//     establish the first manager without editing the database directly.
 const bootstrapEnvVar = "WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL"
 
 // runStartupBootstrap consults the env and applies any one-shot
-// bootstrap actions. Currently it only handles system-admin promotion;
+// bootstrap actions. Currently it only handles platform-manager recovery;
 // future bootstrap steps (default model seeding, etc.) can be added
 // here as additional dig.Invoke calls.
 func runStartupBootstrap(c *dig.Container) {
@@ -66,8 +66,8 @@ func runStartupBootstrap(c *dig.Container) {
 	}
 }
 
-// bootstrapSystemAdmin promotes the user identified by `email` to system
-// administrator only when the deployment currently has no system admins.
+// bootstrapSystemAdmin grants both platform privileges to the user identified
+// by `email` only when the deployment currently has no dual-privilege manager.
 // The function is idempotent and non-fatal — it warns and returns on
 // every error path.
 //
@@ -77,6 +77,20 @@ func runStartupBootstrap(c *dig.Container) {
 // short-circuit. Operators should sign up normally first, then set the
 // env var on the next restart.
 func bootstrapSystemAdmin(ctx context.Context, userSvc interfaces.UserService, email string) {
+	managerCount, err := userSvc.CountCrossTenantAccessManagers(ctx)
+	if err != nil {
+		logger.Warnf(ctx,
+			"[bootstrap] %s=%s: cannot verify existing cross-tenant access managers, skipping bootstrap: %v",
+			bootstrapEnvVar, email, err)
+		return
+	}
+	if managerCount > 0 {
+		logger.Infof(ctx,
+			"[bootstrap] %s=%s: %d cross-tenant access manager(s) already exist (no-op)",
+			bootstrapEnvVar, email, managerCount)
+		return
+	}
+
 	user, err := userSvc.GetUserByEmail(ctx, email)
 	if err != nil {
 		// "not found" surfaces as an error in this codebase; treat it
@@ -93,33 +107,36 @@ func bootstrapSystemAdmin(ctx context.Context, userSvc interfaces.UserService, e
 			bootstrapEnvVar, email)
 		return
 	}
-	if user.IsSystemAdmin {
-		logger.Infof(ctx,
-			"[bootstrap] %s=%s: user %s is already a system admin (no-op)",
-			bootstrapEnvVar, email, user.ID)
-		return
+	if !user.IsSystemAdmin {
+		_, systemAdminCount, err := userSvc.ListSystemAdmins(ctx, 0, 1)
+		if err != nil {
+			logger.Warnf(ctx,
+				"[bootstrap] %s=%s: cannot verify existing system admins, skipping bootstrap: %v",
+				bootstrapEnvVar, email, err)
+			return
+		}
+		if systemAdminCount > 0 {
+			logger.Warnf(ctx,
+				"[bootstrap] %s=%s: user %s is not a system admin; select an existing system admin for recovery",
+				bootstrapEnvVar, email, user.ID)
+			return
+		}
+		_, _, err = userSvc.GrantSystemAdmin(ctx, user.ID)
+		if err != nil {
+			logger.Warnf(ctx,
+				"[bootstrap] %s=%s: failed to promote user %s: %v",
+				bootstrapEnvVar, email, user.ID, err)
+			return
+		}
 	}
-	_, total, err := userSvc.ListSystemAdmins(ctx, 0, 1)
+	_, _, err = userSvc.GrantCrossTenantAccess(ctx, user.ID)
 	if err != nil {
 		logger.Warnf(ctx,
-			"[bootstrap] %s=%s: cannot verify existing system admins, skipping promotion: %v",
-			bootstrapEnvVar, email, err)
-		return
-	}
-	if total > 0 {
-		logger.Infof(ctx,
-			"[bootstrap] %s=%s: %d system admin(s) already exist; not promoting user %s",
-			bootstrapEnvVar, email, total, user.ID)
-		return
-	}
-	_, _, err = userSvc.GrantSystemAdmin(ctx, user.ID)
-	if err != nil {
-		logger.Warnf(ctx,
-			"[bootstrap] %s=%s: failed to promote user %s: %v",
+			"[bootstrap] %s=%s: failed to grant cross-tenant access to user %s: %v",
 			bootstrapEnvVar, email, user.ID, err)
 		return
 	}
 	logger.Infof(ctx,
-		"[bootstrap] promoted user %s (%s) to system admin via %s",
+		"[bootstrap] granted system-admin and cross-tenant access to user %s (%s) via %s",
 		user.ID, email, bootstrapEnvVar)
 }

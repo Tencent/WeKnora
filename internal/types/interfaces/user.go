@@ -83,6 +83,8 @@ type UserService interface {
 	GrantSystemAdmin(ctx context.Context, userID string) (*types.User, bool, error)
 	// ListCrossTenantAccessUsers lists users with CanAccessAllTenants=true.
 	ListCrossTenantAccessUsers(ctx context.Context, offset, limit int) ([]*types.User, int64, error)
+	// CountCrossTenantAccessManagers counts users that hold both platform privileges.
+	CountCrossTenantAccessManagers(ctx context.Context) (int64, error)
 	// GrantCrossTenantAccess grants platform-wide tenant access idempotently.
 	GrantCrossTenantAccess(ctx context.Context, userID string) (*types.User, bool, error)
 	// RevokeCrossTenantAccess revokes platform-wide tenant access idempotently.
@@ -133,6 +135,8 @@ type UserRepository interface {
 	GrantSystemAdmin(ctx context.Context, userID string) (*types.User, bool, error)
 	// ListCrossTenantAccessUsers lists users where can_access_all_tenants=true.
 	ListCrossTenantAccessUsers(ctx context.Context, offset, limit int) ([]*types.User, int64, error)
+	// CountCrossTenantAccessManagers counts users that are both system admins and cross-tenant users.
+	CountCrossTenantAccessManagers(ctx context.Context) (int64, error)
 	// GrantCrossTenantAccess enables can_access_all_tenants for a user.
 	GrantCrossTenantAccess(ctx context.Context, userID string) (*types.User, bool, error)
 	// RevokeCrossTenantAccess disables can_access_all_tenants for a user.

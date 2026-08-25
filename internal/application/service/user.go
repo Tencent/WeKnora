@@ -623,6 +623,11 @@ func (s *userService) ListCrossTenantAccessUsers(
 	return s.userRepo.ListCrossTenantAccessUsers(ctx, offset, limit)
 }
 
+// CountCrossTenantAccessManagers counts users that hold both platform privileges.
+func (s *userService) CountCrossTenantAccessManagers(ctx context.Context) (int64, error) {
+	return s.userRepo.CountCrossTenantAccessManagers(ctx)
+}
+
 // GrantCrossTenantAccess enables cross-tenant access for a user.
 func (s *userService) GrantCrossTenantAccess(ctx context.Context, userID string) (*types.User, bool, error) {
 	return s.userRepo.GrantCrossTenantAccess(ctx, userID)

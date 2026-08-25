@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,12 +16,16 @@ import (
 
 type crossTenantAccessUserService struct {
 	interfaces.UserService
-	users   map[string]*types.User
-	changed bool
-	err     error
+	users     map[string]*types.User
+	changed   bool
+	err       error
+	lookupErr error
 }
 
 func (s *crossTenantAccessUserService) GetUserByEmail(_ context.Context, email string) (*types.User, error) {
+	if s.lookupErr != nil {
+		return nil, s.lookupErr
+	}
 	for _, user := range s.users {
 		if user.Email == email {
 			return user, nil
@@ -141,6 +146,41 @@ func TestGrantCrossTenantAccessUpdatesUserAndAudits(t *testing.T) {
 	}
 	if len(audit.entries) != 1 || audit.entries[0].Action != types.AuditActionCrossTenantAccessGranted {
 		t.Fatalf("grant audit entries=%+v", audit.entries)
+	}
+}
+
+func TestPrivilegeGrantTargetLookupMapsOnlyNotFoundTo404(t *testing.T) {
+	for _, path := range []string{"/grant", "/promote"} {
+		t.Run(path+" database error", func(t *testing.T) {
+			users := &crossTenantAccessUserService{
+				users:     map[string]*types.User{},
+				lookupErr: errors.New("database unavailable"),
+			}
+			router := crossTenantAccessHandlerRouter(&SystemHandler{userSvc: users})
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(`{"email":"target@example.com"}`))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusInternalServerError || bytes.Contains(w.Body.Bytes(), []byte("User not found")) {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+		})
+
+		t.Run(path+" not found", func(t *testing.T) {
+			users := &crossTenantAccessUserService{users: map[string]*types.User{}}
+			router := crossTenantAccessHandlerRouter(&SystemHandler{userSvc: users})
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(`{"email":"missing@example.com"}`))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+		})
 	}
 }
 

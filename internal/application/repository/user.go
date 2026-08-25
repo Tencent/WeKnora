@@ -241,7 +241,10 @@ func (r *userRepository) ListCrossTenantAccessUsers(
 	var users []*types.User
 	var total int64
 
-	base := r.db.WithContext(ctx).Model(&types.User{}).Where("can_access_all_tenants = ?", true)
+	// Keep the indexed predicate literal. PostgreSQL cannot always prove that
+	// a parameterized boolean predicate implies a partial-index predicate when
+	// it switches to a generic prepared plan.
+	base := r.db.WithContext(ctx).Model(&types.User{}).Where("can_access_all_tenants = TRUE")
 	if err := base.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
@@ -257,6 +260,17 @@ func (r *userRepository) ListCrossTenantAccessUsers(
 		return nil, 0, err
 	}
 	return users, total, nil
+}
+
+// CountCrossTenantAccessManagers returns the number of active users that hold
+// both privileges required to manage cross-tenant access. The bootstrap path
+// uses this to establish the first manager without weakening the HTTP guard.
+func (r *userRepository) CountCrossTenantAccessManagers(ctx context.Context) (int64, error) {
+	var total int64
+	err := r.db.WithContext(ctx).Model(&types.User{}).
+		Where("is_system_admin = TRUE AND can_access_all_tenants = TRUE").
+		Count(&total).Error
+	return total, err
 }
 
 // GrantCrossTenantAccess enables cross-tenant access atomically.
