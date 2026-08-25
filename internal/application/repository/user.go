@@ -11,12 +11,13 @@ import (
 )
 
 var (
-	ErrUserNotFound       = errors.New("user not found")
-	ErrUserAlreadyExists  = errors.New("user already exists")
-	ErrTokenNotFound      = errors.New("token not found")
-	ErrCannotRevokeSelf   = errors.New("cannot revoke your own system admin privileges")
-	ErrLastSystemAdmin    = errors.New("cannot revoke the last remaining system administrator")
-	ErrUserNotSystemAdmin = errors.New("user is not a system administrator")
+	ErrUserNotFound                     = errors.New("user not found")
+	ErrUserAlreadyExists                = errors.New("user already exists")
+	ErrTokenNotFound                    = errors.New("token not found")
+	ErrCannotRevokeSelf                 = errors.New("cannot revoke your own system admin privileges")
+	ErrLastSystemAdmin                  = errors.New("cannot revoke the last remaining system administrator")
+	ErrUserNotSystemAdmin               = errors.New("user is not a system administrator")
+	ErrCannotRevokeOwnCrossTenantAccess = errors.New("cannot revoke your own cross-tenant access")
 )
 
 // userRepository implements user repository interface
@@ -183,6 +184,86 @@ func (r *userRepository) ListSystemAdmins(ctx context.Context, offset, limit int
 		return nil, 0, err
 	}
 	return users, total, nil
+}
+
+// ListCrossTenantAccessUsers lists users where can_access_all_tenants is true.
+func (r *userRepository) ListCrossTenantAccessUsers(
+	ctx context.Context, offset, limit int,
+) ([]*types.User, int64, error) {
+	var users []*types.User
+	var total int64
+
+	base := r.db.WithContext(ctx).Model(&types.User{}).Where("can_access_all_tenants = ?", true)
+	if err := base.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	query := base.Order("created_at DESC, id ASC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
+	}
+	if err := query.Find(&users).Error; err != nil {
+		return nil, 0, err
+	}
+	return users, total, nil
+}
+
+// GrantCrossTenantAccess enables cross-tenant access atomically.
+// The changed result is false when the target already has the permission.
+func (r *userRepository) GrantCrossTenantAccess(ctx context.Context, userID string) (*types.User, bool, error) {
+	return r.updateCrossTenantAccess(ctx, userID, true)
+}
+
+// RevokeCrossTenantAccess disables cross-tenant access atomically.
+// Callers cannot revoke themselves because doing so would immediately remove
+// their ability to repair the platform-level permission set.
+func (r *userRepository) RevokeCrossTenantAccess(
+	ctx context.Context, userID, actorID string,
+) (*types.User, bool, error) {
+	if userID == actorID {
+		return nil, false, ErrCannotRevokeOwnCrossTenantAccess
+	}
+	return r.updateCrossTenantAccess(ctx, userID, false)
+}
+
+func (r *userRepository) updateCrossTenantAccess(
+	ctx context.Context, userID string, enabled bool,
+) (*types.User, bool, error) {
+	var updated *types.User
+	changed := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Where("id = ?", userID)
+		if tx.Dialector.Name() == "postgres" || tx.Dialector.Name() == "mysql" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+
+		var user types.User
+		if err := query.First(&user).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrUserNotFound
+			}
+			return err
+		}
+		if user.CanAccessAllTenants == enabled {
+			updated = &user
+			return nil
+		}
+
+		if err := tx.Model(&user).Update("can_access_all_tenants", enabled).Error; err != nil {
+			return err
+		}
+		user.CanAccessAllTenants = enabled
+		updated = &user
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return updated, changed, nil
 }
 
 // RevokeSystemAdmin revokes system-admin privileges inside a transaction.

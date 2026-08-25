@@ -1291,6 +1291,15 @@ type PromoteUserToSystemAdminRequest struct {
 	Email  string `json:"email"`
 }
 
+func (h *SystemHandler) resolvePrivilegeTarget(
+	ctx context.Context, userID, email string,
+) (*types.User, error) {
+	if userID != "" {
+		return h.userSvc.GetUserByID(ctx, userID)
+	}
+	return h.userSvc.GetUserByEmail(ctx, email)
+}
+
 // PromoteUserToSystemAdmin godoc
 // @Summary      Promote a user to system administrator
 // @Description  Grant system administrator privileges to a user (SystemAdmin only).
@@ -1326,16 +1335,7 @@ func (h *SystemHandler) PromoteUserToSystemAdmin(c *gin.Context) {
 	// into the same {nil-user / error} 404 so we don't leak whether a
 	// given email exists in the system to non-admins — though SystemAdmin
 	// is already a high-trust role, the parity keeps the surface clean.
-	var (
-		user *types.User
-		err  error
-	)
-	switch {
-	case userID != "":
-		user, err = h.userSvc.GetUserByID(ctx, userID)
-	default:
-		user, err = h.userSvc.GetUserByEmail(ctx, email)
-	}
+	user, err := h.resolvePrivilegeTarget(ctx, userID, email)
 	if err != nil {
 		logger.Errorf(ctx, "Error fetching user (id=%q email=%q): %v", userID, email, err)
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
@@ -1518,6 +1518,153 @@ func (h *SystemHandler) ListSystemAdmins(c *gin.Context) {
 		Total:  total,
 		Admins: infos,
 	})
+}
+
+// GrantCrossTenantAccessRequest identifies a user that should receive access
+// to every tenant. user_id wins when both identifiers are present.
+type GrantCrossTenantAccessRequest struct {
+	UserID string `json:"user_id"`
+	Email  string `json:"email"`
+}
+
+// GrantCrossTenantAccess godoc
+// @Summary      Grant access to all tenants
+// @Description  Enable can_access_all_tenants for a user. The caller must be both a system administrator and a cross-tenant user.
+// @Tags         System Admin
+// @Accept       json
+// @Produce      json
+// @Param        request body GrantCrossTenantAccessRequest true "Cross-tenant access grant request"
+// @Success      200  {object}  types.UserInfo
+// @Failure      400  {object}  map[string]interface{}
+// @Failure      403  {object}  map[string]interface{}
+// @Failure      404  {object}  map[string]interface{}
+// @Router       /system/admin/cross-tenant-access/grant [post]
+func (h *SystemHandler) GrantCrossTenantAccess(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+
+	var req GrantCrossTenantAccessRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
+		return
+	}
+	userID := strings.TrimSpace(req.UserID)
+	email := strings.TrimSpace(req.Email)
+	if userID == "" && email == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Either user_id or email is required"})
+		return
+	}
+
+	target, err := h.resolvePrivilegeTarget(ctx, userID, email)
+	if err != nil || target == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+	updated, changed, err := h.userSvc.GrantCrossTenantAccess(ctx, target.ID)
+	if err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+		logger.Errorf(ctx, "Error granting cross-tenant access to user %s: %v", target.ID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to grant cross-tenant access"})
+		return
+	}
+
+	h.emitAdminAudit(ctx, types.AuditActionCrossTenantAccessGranted, updated, map[string]any{
+		"target_email":    updated.Email,
+		"target_username": updated.Username,
+		"changed":         changed,
+	})
+	c.JSON(http.StatusOK, updated.ToUserInfo())
+}
+
+// RevokeCrossTenantAccessRequest identifies a user whose cross-tenant access
+// should be removed.
+type RevokeCrossTenantAccessRequest struct {
+	UserID string `json:"user_id" binding:"required"`
+}
+
+// RevokeCrossTenantAccess godoc
+// @Summary      Revoke access to all tenants
+// @Description  Disable can_access_all_tenants for another user. The caller must hold both platform flags and cannot revoke themselves.
+// @Tags         System Admin
+// @Accept       json
+// @Produce      json
+// @Param        request body RevokeCrossTenantAccessRequest true "Cross-tenant access revoke request"
+// @Success      200  {object}  types.UserInfo
+// @Failure      400  {object}  map[string]interface{}
+// @Failure      403  {object}  map[string]interface{}
+// @Failure      404  {object}  map[string]interface{}
+// @Router       /system/admin/cross-tenant-access/revoke [post]
+func (h *SystemHandler) RevokeCrossTenantAccess(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+
+	var req RevokeCrossTenantAccessRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
+		return
+	}
+	actorID, _ := types.UserIDFromContext(ctx)
+	updated, changed, err := h.userSvc.RevokeCrossTenantAccess(ctx, req.UserID, actorID)
+	switch {
+	case err == nil:
+		h.emitAdminAudit(ctx, types.AuditActionCrossTenantAccessRevoked, updated, map[string]any{
+			"target_email":    updated.Email,
+			"target_username": updated.Username,
+			"changed":         changed,
+		})
+		c.JSON(http.StatusOK, updated.ToUserInfo())
+	case errors.Is(err, repository.ErrCannotRevokeOwnCrossTenantAccess):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot revoke your own cross-tenant access"})
+	case errors.Is(err, repository.ErrUserNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+	default:
+		logger.Errorf(ctx, "Error revoking cross-tenant access from user %s: %v", req.UserID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to revoke cross-tenant access"})
+	}
+}
+
+// ListCrossTenantAccessUsersResponse is the paginated management response.
+type ListCrossTenantAccessUsersResponse struct {
+	Total int64             `json:"total"`
+	Users []*types.UserInfo `json:"users"`
+}
+
+// ListCrossTenantAccessUsers godoc
+// @Summary      List users with access to all tenants
+// @Description  List users where can_access_all_tenants=true. The caller must hold both platform flags.
+// @Tags         System Admin
+// @Produce      json
+// @Param        offset query int false "Page offset" default(0)
+// @Param        limit  query int false "Page size (max 200)" default(50)
+// @Success      200  {object}  ListCrossTenantAccessUsersResponse
+// @Failure      403  {object}  map[string]interface{}
+// @Router       /system/admin/cross-tenant-access/list [get]
+func (h *SystemHandler) ListCrossTenantAccessUsers(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+	offset := 0
+	limit := 50
+	if n, err := strconv.Atoi(c.Query("offset")); err == nil && n >= 0 {
+		offset = n
+	}
+	if n, err := strconv.Atoi(c.Query("limit")); err == nil && n > 0 {
+		limit = n
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	users, total, err := h.userSvc.ListCrossTenantAccessUsers(ctx, offset, limit)
+	if err != nil {
+		logger.Errorf(ctx, "Error listing cross-tenant access users: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list cross-tenant access users"})
+		return
+	}
+	infos := make([]*types.UserInfo, 0, len(users))
+	for _, user := range users {
+		infos = append(infos, user.ToUserInfo())
+	}
+	c.JSON(http.StatusOK, ListCrossTenantAccessUsersResponse{Total: total, Users: infos})
 }
 
 // ResetUserPasswordRequest defines the system-administrator password-reset

@@ -611,6 +611,25 @@ func (s *userService) ListSystemAdmins(
 	return s.userRepo.ListSystemAdmins(ctx, offset, limit)
 }
 
+// ListCrossTenantAccessUsers lists users who can access every tenant.
+func (s *userService) ListCrossTenantAccessUsers(
+	ctx context.Context, offset, limit int,
+) ([]*types.User, int64, error) {
+	return s.userRepo.ListCrossTenantAccessUsers(ctx, offset, limit)
+}
+
+// GrantCrossTenantAccess enables cross-tenant access for a user.
+func (s *userService) GrantCrossTenantAccess(ctx context.Context, userID string) (*types.User, bool, error) {
+	return s.userRepo.GrantCrossTenantAccess(ctx, userID)
+}
+
+// RevokeCrossTenantAccess disables cross-tenant access for another user.
+func (s *userService) RevokeCrossTenantAccess(
+	ctx context.Context, userID, actorID string,
+) (*types.User, bool, error) {
+	return s.userRepo.RevokeCrossTenantAccess(ctx, userID, actorID)
+}
+
 // RevokeSystemAdmin removes system-admin privileges through the
 // repository's transactional guard so concurrent revokes cannot remove
 // the final administrator.

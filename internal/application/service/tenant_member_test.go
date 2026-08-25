@@ -299,6 +299,15 @@ func (r *cleanupUserRepo) ListUsers(context.Context, int, int) ([]*types.User, e
 func (r *cleanupUserRepo) ListSystemAdmins(context.Context, int, int) ([]*types.User, int64, error) {
 	return nil, 0, nil
 }
+func (r *cleanupUserRepo) ListCrossTenantAccessUsers(context.Context, int, int) ([]*types.User, int64, error) {
+	return nil, 0, nil
+}
+func (r *cleanupUserRepo) GrantCrossTenantAccess(context.Context, string) (*types.User, bool, error) {
+	return nil, false, nil
+}
+func (r *cleanupUserRepo) RevokeCrossTenantAccess(context.Context, string, string) (*types.User, bool, error) {
+	return nil, false, nil
+}
 func (r *cleanupUserRepo) RevokeSystemAdmin(context.Context, string, string) (*types.User, error) {
 	return nil, nil
 }

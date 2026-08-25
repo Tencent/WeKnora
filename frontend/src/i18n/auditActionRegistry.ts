@@ -33,6 +33,8 @@ export const TENANT_MEMBER_AUDIT_ACTIONS = [
 export const SYSTEM_GLOBAL_AUDIT_ACTIONS = [
   'system.setting_changed',
   'system.admin_promoted',
+  'system.cross_tenant_access_granted',
+  'system.cross_tenant_access_revoked',
   'system.api_key_created',
   'system.api_key_revoked',
   'system.admin_revoked',

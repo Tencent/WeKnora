@@ -262,6 +262,13 @@ func RegisterSystemAdminRoutes(
 		adminRoutes.POST("/promote", handler.PromoteUserToSystemAdmin)
 		adminRoutes.POST("/revoke", handler.RevokeSystemAdmin)
 		adminRoutes.GET("/list", handler.ListSystemAdmins)
+
+		crossTenantAccessRoutes := adminRoutes.Group("/cross-tenant-access", g.CrossTenantAccessManager())
+		{
+			crossTenantAccessRoutes.POST("/grant", handler.GrantCrossTenantAccess)
+			crossTenantAccessRoutes.POST("/revoke", handler.RevokeCrossTenantAccess)
+			crossTenantAccessRoutes.GET("/list", handler.ListCrossTenantAccessUsers)
+		}
 		adminRoutes.POST("/users/reset-password", handler.ResetUserPassword)
 		adminRoutes.POST("/users/create", handler.CreateSystemUser)
 		adminRoutes.GET("/api-keys", handler.ListPlatformAPIKeys)

@@ -154,6 +154,53 @@
         </div>
       </div>
 
+          <div
+            v-if="activeSettingsSection === 'access' && canManageCrossTenantAccess"
+            class="setting-row setting-row--admin"
+          >
+            <div class="setting-info">
+              <div class="setting-label">
+                <span>{{ t('system.globalSettings.crossTenantAccess.label') }}</span>
+                <t-tag theme="danger" variant="light" size="small" class="setting-badge">
+                  {{ t('system.globalSettings.badgeHighRisk') }}
+                </t-tag>
+              </div>
+              <p class="desc">{{ t('system.globalSettings.crossTenantAccess.description') }}</p>
+            </div>
+            <div class="setting-control">
+              <div class="setting-control-row">
+                <t-popconfirm
+                  v-model:visible="crossTenantAccessPopconfirm.visible"
+                  :content="crossTenantAccessPopconfirm.content"
+                  :theme="crossTenantAccessPopconfirm.theme"
+                  :confirm-btn="crossTenantAccessPopconfirm.confirmBtn"
+                  :cancel-btn="t('system.globalSettings.confirm.cancelBtn')"
+                  :popup-props="PROGRAMMATIC_POPCONFIRM_PROPS"
+                  placement="left"
+                  @confirm="crossTenantAccessPopconfirm.finish(true)"
+                  @cancel="crossTenantAccessPopconfirm.finish(false)"
+                  @visible-change="crossTenantAccessPopconfirm.onVisibleChange"
+                >
+                  <div class="setting-control-anchor">
+                    <t-tag-input
+                      v-model="crossTenantAccessEmails"
+                      :placeholder="t('system.globalSettings.crossTenantAccess.placeholder')"
+                      :aria-label="t('system.globalSettings.crossTenantAccess.label')"
+                      :disabled="crossTenantAccessBusy"
+                      class="setting-input setting-input--wide"
+                      clearable
+                      @change="onCrossTenantAccessChange"
+                    />
+                  </div>
+                </t-popconfirm>
+                <div v-if="crossTenantAccessBusy" class="setting-save-state" role="status">
+                  <t-loading size="small" />
+                  <span>{{ t('system.globalSettings.saving') }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div v-if="activeSettingsSection === 'access'" class="setting-row setting-row--password-reset">
             <div class="setting-info">
               <div class="setting-label">
@@ -492,6 +539,9 @@ import {
   listSystemAdmins,
   promoteUserToSystemAdmin,
   revokeSystemAdmin,
+  listCrossTenantAccessUsers,
+  grantCrossTenantAccess,
+  revokeCrossTenantAccess,
   resetUserPassword,
   type SystemSettingItem,
 } from '@/api/system'
@@ -499,6 +549,9 @@ import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
 const currentUserId = computed(() => authStore.currentUserId)
+const canManageCrossTenantAccess = computed(
+  () => authStore.isSystemAdmin && authStore.canAccessAllTenants,
+)
 
 const { t, tm, te, locale } = useI18n()
 
@@ -592,6 +645,7 @@ function createInlinePopconfirm() {
 
 const ssrfPopconfirm = createInlinePopconfirm()
 const adminPopconfirm = createInlinePopconfirm()
+const crossTenantAccessPopconfirm = createInlinePopconfirm()
 const highRiskPopconfirm = createInlinePopconfirm()
 
 // Friendly labels for enum options live in i18n
@@ -670,7 +724,8 @@ const activeSectionDescription = computed(() =>
 function sectionTabLabel(section: SettingsSection): string {
   const count = section === 'other'
     ? unknownSettings.value.length
-    : SETTINGS_SECTION_KEYS[section].filter((key) => settingsByKey.value.has(key)).length + (section === 'access' ? 2 : 0)
+    : SETTINGS_SECTION_KEYS[section].filter((key) => settingsByKey.value.has(key)).length
+      + (section === 'access' ? 2 + (canManageCrossTenantAccess.value ? 1 : 0) : 0)
   return t(`system.globalSettings.sections.${section}.tab`, { count })
 }
 
@@ -698,6 +753,10 @@ function markSettingSaved(item: SystemSettingItem) {
 const adminEmails = ref<string[]>([])
 const adminEmailToId = ref<Record<string, string>>({})
 const adminBusy = ref(false)
+
+const crossTenantAccessEmails = ref<string[]>([])
+const crossTenantAccessEmailToId = ref<Record<string, string>>({})
+const crossTenantAccessBusy = ref(false)
 
 const passwordResetVisible = ref(false)
 const passwordResetSubmitting = ref(false)
@@ -1279,9 +1338,93 @@ async function onAdminsChange(next: string[]) {
   }
 }
 
+async function loadCrossTenantAccessUsers() {
+  try {
+    const resp = await listCrossTenantAccessUsers({ limit: 200 })
+    const map: Record<string, string> = {}
+    const emails: string[] = []
+    for (const user of resp.users ?? []) {
+      if (!user.email) continue
+      map[user.email] = user.id
+      if (user.id !== currentUserId.value) emails.push(user.email)
+    }
+    crossTenantAccessEmailToId.value = map
+    crossTenantAccessEmails.value = emails
+  } catch (err: any) {
+    const msg = err?.message || t('system.globalSettings.crossTenantAccess.loadFailed')
+    MessagePlugin.error(msg)
+  }
+}
+
+function confirmCrossTenantAccessChange(action: 'grant' | 'revoke', email: string): Promise<boolean> {
+  const base = `system.globalSettings.crossTenantAccess.confirm.${action}`
+  return crossTenantAccessPopconfirm.ask({
+    content: globalSettingsText(`${base}.body`, { email }),
+    theme: action === 'revoke' ? 'danger' : 'warning',
+    confirmBtn: {
+      content: globalSettingsText(`${base}.confirmBtn`),
+      theme: action === 'revoke' ? 'danger' : 'primary',
+    },
+  })
+}
+
+async function onCrossTenantAccessChange(next: string[]) {
+  if (crossTenantAccessBusy.value) return
+
+  const authoritative = new Set<string>()
+  for (const email of Object.keys(crossTenantAccessEmailToId.value)) {
+    if (crossTenantAccessEmailToId.value[email] !== currentUserId.value) authoritative.add(email)
+  }
+  const nextSet = new Set(next.map((email) => email.trim()).filter(Boolean))
+  const added = [...nextSet].filter((email) => !authoritative.has(email))
+  const removed = [...authoritative].filter((email) => !nextSet.has(email))
+  if (added.length === 0 && removed.length === 0) return
+
+  for (const email of added) {
+    if (!await confirmCrossTenantAccessChange('grant', email)) {
+      await loadCrossTenantAccessUsers()
+      return
+    }
+  }
+  for (const email of removed) {
+    if (!await confirmCrossTenantAccessChange('revoke', email)) {
+      await loadCrossTenantAccessUsers()
+      return
+    }
+  }
+
+  crossTenantAccessBusy.value = true
+  let applied = 0
+  try {
+    for (const email of added) {
+      await grantCrossTenantAccess({ email })
+      applied++
+    }
+    for (const email of removed) {
+      const userId = crossTenantAccessEmailToId.value[email]
+      if (!userId) continue
+      await revokeCrossTenantAccess(userId)
+      applied++
+    }
+    await loadCrossTenantAccessUsers()
+    if (applied > 0) {
+      saveAnnouncement.value = t('system.globalSettings.crossTenantAccess.saveSuccess')
+      MessagePlugin.success(t('system.globalSettings.crossTenantAccess.saveSuccess'))
+    }
+  } catch (err: any) {
+    const msg = err?.message || t('system.globalSettings.crossTenantAccess.saveFailed')
+    saveAnnouncement.value = msg
+    MessagePlugin.error(msg)
+    await loadCrossTenantAccessUsers()
+  } finally {
+    crossTenantAccessBusy.value = false
+  }
+}
+
 onMounted(() => {
   loadSettings()
   loadAdmins()
+  if (canManageCrossTenantAccess.value) loadCrossTenantAccessUsers()
 })
 
 onUnmounted(() => {

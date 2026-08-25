@@ -108,6 +108,41 @@ func TestRequireRoleOrSystemAdmin_RejectsOrdinaryViewer(t *testing.T) {
 	}
 }
 
+func TestRequireCrossTenantAccessManagerRequiresBothFlags(t *testing.T) {
+	tests := []struct {
+		name           string
+		systemAdmin    bool
+		crossTenant    bool
+		expectedStatus int
+	}{
+		{name: "both flags", systemAdmin: true, crossTenant: true, expectedStatus: http.StatusOK},
+		{name: "system admin only", systemAdmin: true, expectedStatus: http.StatusForbidden},
+		{name: "cross tenant only", crossTenant: true, expectedStatus: http.StatusForbidden},
+		{name: "neither flag", expectedStatus: http.StatusForbidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				ctx := context.WithValue(c.Request.Context(), types.UserIDContextKey, "u1")
+				ctx = context.WithValue(ctx, types.SystemAdminContextKey, tt.systemAdmin)
+				ctx = context.WithValue(ctx, types.UserContextKey, &types.User{
+					ID: "u1", CanAccessAllTenants: tt.crossTenant,
+				})
+				c.Request = c.Request.WithContext(ctx)
+				c.Next()
+			})
+			router.GET("/protected", RequireCrossTenantAccessManager(cfgRBAC(true)), func(c *gin.Context) {
+				c.Status(http.StatusOK)
+			})
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/protected", nil))
+			assert.Equal(t, tt.expectedStatus, w.Code)
+		})
+	}
+}
+
 func TestRequireRole_FailOpenWhenRBACDisabled(t *testing.T) {
 	// EnableRBAC=false: the middleware should log but not block, so the
 	// downstream handler still runs. This is the rollout-safety guarantee.

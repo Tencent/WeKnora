@@ -77,6 +77,15 @@ func (s *stubUserRepoForAuth) ListUsers(context.Context, int, int) ([]*types.Use
 func (s *stubUserRepoForAuth) ListSystemAdmins(context.Context, int, int) ([]*types.User, int64, error) {
 	return nil, 0, nil
 }
+func (s *stubUserRepoForAuth) ListCrossTenantAccessUsers(context.Context, int, int) ([]*types.User, int64, error) {
+	return nil, 0, nil
+}
+func (s *stubUserRepoForAuth) GrantCrossTenantAccess(context.Context, string) (*types.User, bool, error) {
+	return nil, false, nil
+}
+func (s *stubUserRepoForAuth) RevokeCrossTenantAccess(context.Context, string, string) (*types.User, bool, error) {
+	return nil, false, nil
+}
 func (s *stubUserRepoForAuth) RevokeSystemAdmin(context.Context, string, string) (*types.User, error) {
 	return nil, nil
 }

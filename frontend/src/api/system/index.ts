@@ -285,6 +285,7 @@ export interface SystemAdminUser {
   avatar?: string
   is_active: boolean
   is_system_admin: boolean
+  can_access_all_tenants: boolean
   created_at: string
   updated_at: string
 }
@@ -359,6 +360,42 @@ export async function listSystemAdmins(
   const suffix = qs.toString() ? `?${qs.toString()}` : ''
   const response = await get(`/api/v1/system/admin/list${suffix}`)
   return response as unknown as ListSystemAdminsResponse
+}
+
+export interface ListCrossTenantAccessUsersResponse {
+  total: number
+  users: SystemAdminUser[]
+}
+
+export interface GrantCrossTenantAccessRequest {
+  user_id?: string
+  email?: string
+}
+
+/** Grant a user access to every tenant. Requires both platform flags. */
+export async function grantCrossTenantAccess(
+  req: GrantCrossTenantAccessRequest,
+): Promise<SystemAdminUser> {
+  const response = await post('/api/v1/system/admin/cross-tenant-access/grant', req)
+  return response as unknown as SystemAdminUser
+}
+
+/** Revoke another user's access to every tenant. */
+export async function revokeCrossTenantAccess(userId: string): Promise<SystemAdminUser> {
+  const response = await post('/api/v1/system/admin/cross-tenant-access/revoke', { user_id: userId })
+  return response as unknown as SystemAdminUser
+}
+
+/** List users whose can_access_all_tenants flag is enabled. */
+export async function listCrossTenantAccessUsers(
+  params?: { offset?: number; limit?: number },
+): Promise<ListCrossTenantAccessUsersResponse> {
+  const qs = new URLSearchParams()
+  if (params?.offset != null) qs.set('offset', String(params.offset))
+  if (params?.limit != null) qs.set('limit', String(params.limit))
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  const response = await get(`/api/v1/system/admin/cross-tenant-access/list${suffix}`)
+  return response as unknown as ListCrossTenantAccessUsersResponse
 }
 
 export interface ResetUserPasswordRequest {

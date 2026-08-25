@@ -251,8 +251,10 @@ function auditActionTheme(
 ): 'success' | 'warning' | 'danger' | 'primary' | 'default' {
   switch (action) {
     case 'system.admin_promoted':
+    case 'system.cross_tenant_access_granted':
       return 'success'
     case 'system.admin_revoked':
+    case 'system.cross_tenant_access_revoked':
     case 'system.setting_changed':
     case 'system.queue_task_retried':
     case 'system.queue_task_run_now':
@@ -312,6 +314,8 @@ function auditTargetKey(row: AuditLog): string {
   if (
     row.action === 'system.admin_promoted'
     || row.action === 'system.admin_revoked'
+    || row.action === 'system.cross_tenant_access_granted'
+    || row.action === 'system.cross_tenant_access_revoked'
     || row.action === 'system.user_password_reset'
   ) {
     if (!details) return row.target_user_id ? row.target_user_id.slice(0, 8) : ''
