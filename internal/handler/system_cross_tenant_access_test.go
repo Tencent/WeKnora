@@ -66,6 +66,12 @@ func (s *crossTenantAccessUserService) ListCrossTenantAccessUsers(
 	return users, int64(len(users)), s.err
 }
 
+func (s *crossTenantAccessUserService) RevokeSystemAdmin(
+	context.Context, string, string,
+) (*types.User, error) {
+	return nil, s.err
+}
+
 func crossTenantAccessHandlerRouter(h *SystemHandler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -76,6 +82,7 @@ func crossTenantAccessHandlerRouter(h *SystemHandler) *gin.Engine {
 	})
 	router.POST("/grant", h.GrantCrossTenantAccess)
 	router.POST("/revoke", h.RevokeCrossTenantAccess)
+	router.POST("/revoke-admin", h.RevokeSystemAdmin)
 	router.GET("/list", h.ListCrossTenantAccessUsers)
 	return router
 }
@@ -113,6 +120,26 @@ func TestRevokeCrossTenantAccessRejectsSelf(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("self revoke status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestPrivilegeRevocationReportsLastCrossTenantAccessManager(t *testing.T) {
+	users := &crossTenantAccessUserService{
+		users: map[string]*types.User{"target": {ID: "target"}},
+		err:   repository.ErrLastCrossTenantAccessManager,
+	}
+	router := crossTenantAccessHandlerRouter(&SystemHandler{userSvc: users})
+
+	for _, path := range []string{"/revoke", "/revoke-admin"} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(`{"user_id":"target"}`))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest ||
+			!bytes.Contains(w.Body.Bytes(), []byte("last system administrator with cross-tenant access")) {
+			t.Fatalf("%s status=%d body=%s", path, w.Code, w.Body.String())
+		}
 	}
 }
 

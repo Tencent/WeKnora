@@ -1446,6 +1446,11 @@ func (h *SystemHandler) RevokeSystemAdmin(c *gin.Context) {
 			"error": "Cannot revoke the last remaining system administrator",
 		})
 		return
+	case errors.Is(err, repository.ErrLastCrossTenantAccessManager):
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Cannot revoke the last system administrator with cross-tenant access",
+		})
+		return
 	case errors.Is(err, repository.ErrUserNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
@@ -1616,6 +1621,10 @@ func (h *SystemHandler) RevokeCrossTenantAccess(c *gin.Context) {
 		c.JSON(http.StatusOK, updated.ToUserInfo())
 	case errors.Is(err, repository.ErrCannotRevokeOwnCrossTenantAccess):
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot revoke your own cross-tenant access"})
+	case errors.Is(err, repository.ErrLastCrossTenantAccessManager):
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Cannot revoke the last system administrator with cross-tenant access",
+		})
 	case errors.Is(err, repository.ErrUserNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 	default:

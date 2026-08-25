@@ -18,6 +18,7 @@ var (
 	ErrLastSystemAdmin                  = errors.New("cannot revoke the last remaining system administrator")
 	ErrUserNotSystemAdmin               = errors.New("user is not a system administrator")
 	ErrCannotRevokeOwnCrossTenantAccess = errors.New("cannot revoke your own cross-tenant access")
+	ErrLastCrossTenantAccessManager     = errors.New("cannot revoke the last system administrator with cross-tenant access")
 )
 
 // userRepository implements user repository interface
@@ -235,13 +236,17 @@ func (r *userRepository) updateCrossTenantAccess(
 	var updated *types.User
 	changed := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		query := tx.Where("id = ?", userID)
-		if tx.Dialector.Name() == "postgres" || tx.Dialector.Name() == "mysql" {
-			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		var admins []types.User
+		if !enabled {
+			var err error
+			admins, err = lockSystemAdmins(tx)
+			if err != nil {
+				return err
+			}
 		}
 
 		var user types.User
-		if err := query.First(&user).Error; err != nil {
+		if err := withUpdateLock(tx).Where("id = ?", userID).First(&user).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrUserNotFound
 			}
@@ -250,6 +255,9 @@ func (r *userRepository) updateCrossTenantAccess(
 		if user.CanAccessAllTenants == enabled {
 			updated = &user
 			return nil
+		}
+		if !enabled && user.IsSystemAdmin && countCrossTenantAccessManagers(admins) <= 1 {
+			return ErrLastCrossTenantAccessManager
 		}
 
 		if err := tx.Model(&user).Update("can_access_all_tenants", enabled).Error; err != nil {
@@ -285,43 +293,44 @@ func (r *userRepository) RevokeSystemAdmin(ctx context.Context, userID, actorID 
 
 	var revoked *types.User
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		locking := func(db *gorm.DB) *gorm.DB {
-			switch tx.Dialector.Name() {
-			case "postgres", "mysql":
-				return db.Clauses(clause.Locking{Strength: "UPDATE"})
-			default:
-				return db
-			}
-		}
-		var user types.User
-		if err := locking(tx).
-			Where("id = ?", userID).
-			First(&user).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrUserNotFound
-			}
+		admins, err := lockSystemAdmins(tx)
+		if err != nil {
 			return err
 		}
-		if !user.IsSystemAdmin {
-			revoked = &user
+
+		var user *types.User
+		for i := range admins {
+			if admins[i].ID == userID {
+				user = &admins[i]
+				break
+			}
+		}
+		if user == nil {
+			var target types.User
+			if err := withUpdateLock(tx).Where("id = ?", userID).First(&target).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return ErrUserNotFound
+				}
+				return err
+			}
+			revoked = &target
 			return ErrUserNotSystemAdmin
 		}
 
-		var admins []types.User
-		if err := locking(tx).
-			Where("is_system_admin = ?", true).
-			Find(&admins).Error; err != nil {
-			return err
-		}
 		if len(admins) <= 1 {
 			return ErrLastSystemAdmin
 		}
+		if user.CanAccessAllTenants && countCrossTenantAccessManagers(admins) <= 1 {
+			return ErrLastCrossTenantAccessManager
+		}
 
-		user.IsSystemAdmin = false
-		if err := tx.Save(&user).Error; err != nil {
+		if err := tx.Model(&types.User{}).
+			Where("id = ?", user.ID).
+			Update("is_system_admin", false).Error; err != nil {
 			return err
 		}
-		revoked = &user
+		user.IsSystemAdmin = false
+		revoked = user
 		return nil
 	})
 	// Propagate ErrUserNotSystemAdmin up to the handler alongside the
@@ -335,6 +344,37 @@ func (r *userRepository) RevokeSystemAdmin(ctx context.Context, userID, actorID 
 		return nil, err
 	}
 	return revoked, nil
+}
+
+// lockSystemAdmins serializes both privilege-revocation paths on the same
+// ordered row set. This prevents concurrent changes to either flag from
+// removing every user who can still manage cross-tenant access.
+func lockSystemAdmins(tx *gorm.DB) ([]types.User, error) {
+	var admins []types.User
+	err := withUpdateLock(tx).
+		Where("is_system_admin = ?", true).
+		Order("id ASC").
+		Find(&admins).Error
+	return admins, err
+}
+
+func withUpdateLock(tx *gorm.DB) *gorm.DB {
+	switch tx.Dialector.Name() {
+	case "postgres", "mysql":
+		return tx.Clauses(clause.Locking{Strength: "UPDATE"})
+	default:
+		return tx
+	}
+}
+
+func countCrossTenantAccessManagers(admins []types.User) int {
+	count := 0
+	for i := range admins {
+		if admins[i].CanAccessAllTenants {
+			count++
+		}
+	}
+	return count
 }
 
 // SearchUsers searches users by username or email
