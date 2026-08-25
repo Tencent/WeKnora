@@ -474,13 +474,13 @@ type KBMetadataFilter struct {
 
 // SearchKnowledgeRequest knowledge search request
 type SearchKnowledgeRequest struct {
-	Query            string             `json:"query"`                        // Query content
-	KnowledgeBaseID  string             `json:"knowledge_base_id,omitempty"`  // Single knowledge base ID (for backward compatibility)
-	KnowledgeBaseIDs []string           `json:"knowledge_base_ids,omitempty"` // Knowledge base IDs (multi-KB support)
-	KnowledgeIDs     []string           `json:"knowledge_ids,omitempty"`      // Specific knowledge (file) IDs
-	TagIDs           []string           `json:"tag_ids,omitempty"`            // Tag IDs for filtering within a single KB
-	MentionedItems   []MentionedItem    `json:"mentioned_items,omitempty"`    // Optional scoped tag mentions
-	MetadataFilters  []KBMetadataFilter `json:"metadata_filters,omitempty"`   // Per-KB document metadata filters
+	Query            string             `json:"query"`                       // Query content
+	KnowledgeBaseID  string             `json:"knowledge_base_id,omitempty"` // Single knowledge base ID
+	KnowledgeBaseIDs []string           `json:"knowledge_base_ids,omitempty"`
+	KnowledgeIDs     []string           `json:"knowledge_ids,omitempty"`
+	TagIDs           []string           `json:"tag_ids,omitempty"`
+	MentionedItems   []MentionedItem    `json:"mentioned_items,omitempty"`
+	MetadataFilters  []KBMetadataFilter `json:"metadata_filters,omitempty"`
 }
 
 // SearchKnowledgeResponse search results response
