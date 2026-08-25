@@ -426,8 +426,9 @@ func (m *SessionBoundManager) CreateSnapshot(
 	return snapshots.CreateSnapshot(ctx, handle.ID(), name)
 }
 
-// DeleteSnapshot forwards provider snapshot deletion. It is used only to clean
-// up a just-created orphan when the DB pointer switch fails.
+// DeleteSnapshot forwards provider snapshot deletion. The skill install path
+// uses it to abandon an orphan when the pointer switch fails; the reaper uses
+// it to prune superseded snapshots that have aged past retention.
 func (m *SessionBoundManager) DeleteSnapshot(ctx context.Context, snapshotID string) error {
 	if err := m.requireRemoteBackend(); err != nil {
 		return err

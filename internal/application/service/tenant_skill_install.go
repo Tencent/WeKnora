@@ -8,6 +8,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -62,6 +63,12 @@ func (s *TenantSkillService) InstallSkill(
 	existing, err := s.skills.GetSkillByName(ctx, tenantID, configID, bundle.Name)
 	if err != nil {
 		return "", err
+	}
+	if s.canSkipInstall(ctx, existing, bundle) {
+		if err := s.refreshSkippedBundle(ctx, existing, archive); err != nil {
+			return "", fmt.Errorf("store bundle for skill %s: %w", existing.ID, err)
+		}
+		return existing.ID, nil
 	}
 
 	skillID := uuid.NewString()
@@ -200,6 +207,14 @@ func (s *TenantSkillService) runInstall(
 	if !owned {
 		return nil
 	}
+
+	// From here on this run is the row's owner, and everything below can take
+	// minutes. The heartbeat is what tells a second upload of the same archive
+	// (and the reaper) that those minutes are work rather than a dead process.
+	// It is deferred before it is stopped explicitly below, so a failure path
+	// still stops it ahead of the deferred failSkill.
+	stopHeartbeat := s.startInstallHeartbeat(ctx, tenantID, configID, skillID)
+	defer stopHeartbeat()
 
 	// The name comes from SKILL.md and is already validated on parse, so a
 	// rejection here means the bundle was accepted by a looser rule than the
@@ -349,6 +364,10 @@ func (s *TenantSkillService) runInstall(
 		return err
 	}
 	pointerSwitched = true
+	// The heartbeat writes the whole row, so it must be gone before the
+	// terminal "ready" write below: a beat landing after it would put the row
+	// back to installing and have the reaper fail a skill that is serving.
+	stopHeartbeat()
 	s.markPreviousSnapshotsSuperseded(ctx, tenantID, configID, installRowID)
 
 	// The terminal write is the one that must not be best-effort: the pointer
@@ -873,9 +892,10 @@ func (s *TenantSkillService) failSkill(
 // installStillOwnsTheRow is the lock-side counterpart of InstallSkill's
 // optimistic row write. A remove that ran first deleted the row; a newer
 // upload of the same name replaced BundleSHA256; a queued remove flipped the
-// status. Any of those means this run must not snapshot — failSkill would
-// stamp the newer owner's row, and a snapshot with no matching row is an
-// orphan the ledger cannot name.
+// status; a sibling retry of the same archive found the first run had already
+// landed in the live image. Any of those means this run must not snapshot —
+// failSkill would stamp the newer owner's row, and a snapshot with no matching
+// row is an orphan the ledger cannot name.
 func (s *TenantSkillService) installStillOwnsTheRow(
 	ctx context.Context, tenantID uint64, configID, skillID string, bundle *SkillBundle,
 ) (bool, error) {
@@ -892,7 +912,145 @@ func (s *TenantSkillService) installStillOwnsTheRow(
 	if bundle != nil && current.BundleSHA256 != "" && current.BundleSHA256 != bundle.SHA256 {
 		return false, nil
 	}
+	if current.Status == types.SkillStatusReady {
+		_, inImage, ok := s.skillFilesInLiveImage(ctx, current)
+		if ok && inImage {
+			return false, nil
+		}
+	}
 	return true, nil
+}
+
+// canSkipInstall reports whether this upload is a no-op. Re-uploading the
+// exact archive of a skill that is already ready (and still in the live image)
+// must not boot a billed sandbox or grow a new snapshot. An install of the
+// same bytes that is still beating is the same situation: the first run owns
+// the work.
+//
+// Only a ready row is answered from the image. An installing row is answered
+// from the heartbeat alone, deliberately: the ledger records which skill an
+// install snapshotted, not which archive, so a row that is installing bundle
+// B while the image still carries the earlier bundle A would look "already
+// installed" and this upload would report a success that never happened.
+//
+// A failed skill with the same digest is a retry: the previous attempt never
+// made it into the image. A removal in flight is not a skip either — taking
+// the row back to installing is how an upload cancels it.
+func (s *TenantSkillService) canSkipInstall(
+	ctx context.Context, existing *types.TenantSkillEntity, bundle *SkillBundle,
+) bool {
+	if existing == nil || bundle == nil {
+		return false
+	}
+	if existing.BundleSHA256 == "" || existing.BundleSHA256 != bundle.SHA256 {
+		return false
+	}
+	switch existing.Status {
+	case types.SkillStatusInstalling:
+		return s.installIsInFlight(existing)
+	case types.SkillStatusReady:
+		_, inImage, ok := s.skillFilesInLiveImage(ctx, existing)
+		return ok && inImage
+	default:
+		return false
+	}
+}
+
+// installIsInFlight reports whether an installing row still belongs to a live
+// process. The answer is the heartbeat: a running install restamps
+// InstallingSince every skillInstallHeartbeatInterval, so silence past
+// skillInstallInFlightSkip means the process is gone and the next upload must
+// be allowed to start a new run rather than wait for the stuck-run reaper.
+//
+// Reading the submission time instead would force a choice between calling a
+// slow install dead — a single agent command may take installCommandTimeout,
+// and an install runs several — and leaving a dead one unrecoverable.
+func (s *TenantSkillService) installIsInFlight(existing *types.TenantSkillEntity) bool {
+	if existing == nil || existing.InstallingSince == nil {
+		return false
+	}
+	return !existing.InstallingSince.Before(s.clock()().Add(-skillInstallInFlightSkip))
+}
+
+// startInstallHeartbeat keeps this run's liveness visible while it works, and
+// returns the stop function that must be called before any terminal write.
+//
+// The heartbeat writes the whole row, so it would otherwise race the "ready"
+// write past the pointer switch and revive an installing status. Both callers
+// stop it before that point: runInstall stops it the moment the pointer moves,
+// and the deferred stop runs before the deferred failSkill.
+func (s *TenantSkillService) startInstallHeartbeat(
+	ctx context.Context, tenantID uint64, configID, skillID string,
+) func() {
+	interval := s.installHeartbeat
+	if interval <= 0 {
+		interval = skillInstallHeartbeatInterval
+	}
+	beatCtx, stop := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-beatCtx.Done():
+				return
+			case <-ticker.C:
+				s.beatInstallHeartbeat(beatCtx, tenantID, configID, skillID)
+			}
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			stop()
+			<-done
+		})
+	}
+}
+
+// beatInstallHeartbeat stamps InstallingSince for a row this run still owns.
+// A row that has left the installing status belongs to a newer upload, a
+// queued removal, or a finished run, and reviving its timestamp would hide
+// one of those from the reaper.
+func (s *TenantSkillService) beatInstallHeartbeat(
+	ctx context.Context, tenantID uint64, configID, skillID string,
+) {
+	current, err := s.skills.GetSkill(ctx, tenantID, configID, skillID)
+	if err != nil {
+		logger.Warnf(ctx, "[skill] load %s for install heartbeat failed: %v", skillID, err)
+		return
+	}
+	if current == nil || current.Status != types.SkillStatusInstalling {
+		return
+	}
+	at := s.clock()()
+	current.InstallingSince = &at
+	if err := s.skills.UpdateSkill(ctx, current); err != nil {
+		logger.Warnf(ctx, "[skill] install heartbeat for %s failed: %v", skillID, err)
+	}
+}
+
+// refreshSkippedBundle stores the uploaded archive even when the image work
+// is skipped. read_skill serves file contents from it, so a re-upload of a
+// ready skill is how a missing object-store blob gets repaired without
+// growing a new snapshot. A failure here is returned to the caller rather
+// than turning the ready row into a failed install.
+func (s *TenantSkillService) refreshSkippedBundle(
+	ctx context.Context, existing *types.TenantSkillEntity, archive []byte,
+) error {
+	if existing == nil {
+		return nil
+	}
+	ref, err := s.saveBundle(ctx, existing.TenantID, existing.ID, archive)
+	if err != nil {
+		return err
+	}
+	return s.updateSkillFields(ctx, existing.TenantID, existing.SandboxConfigID, existing.ID,
+		func(e *types.TenantSkillEntity) {
+			e.BundleRef = ref
+		})
 }
 
 // startMaintenanceSession opens the session one image operation runs in. The

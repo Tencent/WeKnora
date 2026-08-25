@@ -36,7 +36,8 @@ type SkillBundle struct {
 	Description  string
 	Instructions string
 	// SHA256 is over the uploaded bytes, so re-uploading the same archive is
-	// recognisable in the UI and in the ledger.
+	// recognisable in the UI and in the ledger, and a ready skill with this
+	// digest can skip a billed snapshot rebuild.
 	SHA256 string
 	// Files maps skill-root-relative paths to contents, SKILL.md included.
 	Files map[string][]byte
