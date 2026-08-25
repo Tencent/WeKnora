@@ -29,6 +29,8 @@ logs/
 *.pid
 
 WeKnora
+!internal/custom/client/weknora/
+!internal/custom/client/weknora/*.go
 WeKnora-lite
 cmd/desktop/build/bin/
 /models/
