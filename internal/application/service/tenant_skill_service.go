@@ -9,6 +9,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/common/redislock"
@@ -99,6 +100,11 @@ type TenantSkillService struct {
 	// process; multi-replica deployments require Redis for cross-process safety.
 	localLocks *keyedMutex
 
+	// bundleCache keeps recently downloaded skill zips so the admin file
+	// browser (list + N reads) does not hit object storage on every click.
+	bundleCache *skillBundleArchiveCache
+	bundleLoad  singleflight.Group
+
 	cron    *cron.Cron
 	cronMu  sync.Mutex
 	started bool
@@ -139,6 +145,7 @@ func NewTenantSkillService(
 		snapshotRetention: skillSnapshotRetention,
 		installHeartbeat:  skillInstallHeartbeatInterval,
 		localLocks:        newKeyedMutex(),
+		bundleCache:       newSkillBundleArchiveCache(),
 		cron: cron.New(cron.WithSeconds(), cron.WithChain(
 			cron.Recover(cron.DefaultLogger),
 		)),

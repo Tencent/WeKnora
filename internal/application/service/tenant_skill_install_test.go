@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1208,6 +1209,7 @@ type installFixture struct {
 	// storedBundles is what GetFile serves back, keyed by the SaveBytes
 	// reference, so ListSkillFiles / ReadSkillFile can open a stored archive.
 	storedBundles map[string][]byte
+	getFileCalls  atomic.Int32
 }
 
 func newInstallFixture(t *testing.T) *installFixture {
@@ -2228,6 +2230,7 @@ func (s installFileService) SaveBytes(_ context.Context, data []byte, _ uint64, 
 }
 func (s installFileService) GetFile(_ context.Context, ref string) (io.ReadCloser, error) {
 	if s.fx != nil {
+		s.fx.getFileCalls.Add(1)
 		if data, ok := s.fx.storedBundles[ref]; ok {
 			return io.NopCloser(bytes.NewReader(data)), nil
 		}

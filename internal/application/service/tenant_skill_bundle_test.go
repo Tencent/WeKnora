@@ -333,3 +333,24 @@ Use scripts/extract.py to pull text out of a PDF.
 		require.Equal(t, a.SHA256, b.SHA256)
 	})
 }
+
+func TestListSkillZipFilesDoesNotInflateBodies(t *testing.T) {
+	data := zipBundle(t, map[string]string{
+		"pdf-tools/SKILL.md":           validSkillMD,
+		"pdf-tools/scripts/extract.py": "print('hi')\n",
+	})
+
+	files, err := listSkillZipFiles(data)
+	require.NoError(t, err)
+	require.Equal(t, []SkillFileEntry{
+		{Path: "SKILL.md", Size: int64(len(validSkillMD))},
+		{Path: "scripts/extract.py", Size: int64(len("print('hi')\n"))},
+	}, files)
+
+	body, err := readSkillZipFile(data, "scripts/extract.py")
+	require.NoError(t, err)
+	require.Equal(t, []byte("print('hi')\n"), body)
+
+	_, err = readSkillZipFile(data, "missing.txt")
+	require.ErrorIs(t, err, errSkillFileMissing)
+}

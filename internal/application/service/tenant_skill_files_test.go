@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/base64"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -54,6 +55,71 @@ func TestReadSkillFileReturnsTextContent(t *testing.T) {
 	require.Equal(t, skillFileEncodingUTF8, file.Encoding)
 	require.Equal(t, "print('hi')\n", file.Content)
 	require.False(t, file.Binary)
+}
+
+func TestListAndReadSkillFilesDownloadTheBundleOnce(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.seedStoredSkillBundle(t)
+
+	files, err := fx.svc.ListSkillFiles(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+
+	_, err = fx.svc.ReadSkillFile(context.Background(), 7, "cfg-1", "sk-1", "SKILL.md")
+	require.NoError(t, err)
+	_, err = fx.svc.ReadSkillFile(context.Background(), 7, "cfg-1", "sk-1", "scripts/extract.py")
+	require.NoError(t, err)
+
+	require.Equal(t, int32(1), fx.getFileCalls.Load())
+}
+
+func TestListAndReadSkillFilesCoalesceConcurrentDownloads(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.seedStoredSkillBundle(t)
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, 3)
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		_, err := fx.svc.ListSkillFiles(context.Background(), 7, "cfg-1", "sk-1")
+		errCh <- err
+	}()
+	go func() {
+		defer wg.Done()
+		_, err := fx.svc.ReadSkillFile(context.Background(), 7, "cfg-1", "sk-1", "SKILL.md")
+		errCh <- err
+	}()
+	go func() {
+		defer wg.Done()
+		_, err := fx.svc.ReadSkillFile(context.Background(), 7, "cfg-1", "sk-1", "scripts/extract.py")
+		errCh <- err
+	}()
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		require.NoError(t, err)
+	}
+	require.Equal(t, int32(1), fx.getFileCalls.Load())
+}
+
+func TestListSkillFilesStripsAWrapDirectory(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.storeSkillBundle(t, "sk-1", zipBundle(t, map[string]string{
+		"pdf-tools/SKILL.md":           validSkillMD,
+		"pdf-tools/scripts/extract.py": "print('hi')\n",
+	}))
+
+	files, err := fx.svc.ListSkillFiles(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.Equal(t, []SkillFileEntry{
+		{Path: "SKILL.md", Size: int64(len(validSkillMD))},
+		{Path: "scripts/extract.py", Size: int64(len("print('hi')\n"))},
+	}, files)
+
+	file, err := fx.svc.ReadSkillFile(context.Background(), 7, "cfg-1", "sk-1", "scripts/extract.py")
+	require.NoError(t, err)
+	require.Equal(t, "print('hi')\n", file.Content)
 }
 
 func TestReadSkillFileRejectsPathTraversal(t *testing.T) {
