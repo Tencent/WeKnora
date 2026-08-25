@@ -555,9 +555,13 @@ const primaryText = computed(() => {
   }
   return t('common.save')
 })
-const canDeepCheck = computed(() => (
-  currentStepKey.value === 'connection' || currentStepKey.value === 'template'
-))
+// Deep check needs the fields that actually get probed. Docker/local collect
+// the image on the connection step; Cube/E2B still have an empty template_id
+// there, so the action waits until the template step.
+const canDeepCheck = computed(() => {
+  if (currentStepKey.value === 'template') return true
+  return currentStepKey.value === 'connection' && !isRemoteBackend.value
+})
 const showCheckResult = computed(() => canDeepCheck.value)
 const primaryDisabled = computed(() => (
   currentStepKey.value === 'template'

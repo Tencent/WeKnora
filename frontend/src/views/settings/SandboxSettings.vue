@@ -96,7 +96,10 @@
             <div v-if="targetSummary(record)" class="sandbox-card__url" :title="targetSummary(record)">
               {{ targetSummary(record) }}
             </div>
-            <div v-if="supportsSkills(record) && skillsOf(record)" class="sandbox-card__skills">
+            <div
+              v-if="supportsSkills(record) && (skillsOf(record) || skillsFailed(record))"
+              class="sandbox-card__skills"
+            >
               <template v-if="(skillsOf(record) || []).length">
                 <t-tag
                   v-for="skill in visibleSkills(record)"
@@ -110,6 +113,9 @@
                   {{ $t('settings.sandbox.cardSkillsMore', { count: extraSkillCount(record) }) }}
                 </span>
               </template>
+              <span v-else-if="skillsFailed(record)" class="sandbox-card__skills-empty">
+                {{ $t('settings.sandbox.skillLoadFailed') }}
+              </span>
               <span v-else class="sandbox-card__skills-empty">
                 {{ $t('settings.sandbox.cardSkillsNone') }}
               </span>
@@ -233,8 +239,10 @@ const workspaceScriptsDisabled = ref(false)
 const records = ref<SandboxConfigRecord[]>([])
 const activeType = ref<string>('all')
 // Skill names on cube/e2b cards. Missing until the per-config list returns, so
-// the empty hint does not flash on first paint.
+// the empty hint does not flash on first paint. A failed fetch is tracked
+// separately so it is not shown as "no skills installed".
 const skillsByConfig = ref<Record<string, ConfigSkill[]>>({})
+const skillsLoadFailed = ref<Record<string, boolean>>({})
 const SKILL_TAG_LIMIT = 3
 
 const showEditor = ref(false)
@@ -264,6 +272,10 @@ function supportsSkills(record: SandboxConfigRecord) {
 
 function skillsOf(record: SandboxConfigRecord): ConfigSkill[] | undefined {
   return skillsByConfig.value[record.id]
+}
+
+function skillsFailed(record: SandboxConfigRecord): boolean {
+  return skillsLoadFailed.value[record.id] === true
 }
 
 function visibleSkills(record: SandboxConfigRecord): ConfigSkill[] {
@@ -436,16 +448,24 @@ function buildCardWarnings(record: SandboxConfigRecord): CardWarning[] {
 
 async function loadSkills(configs: SandboxConfigRecord[]) {
   const remotes = configs.filter(supportsSkills)
+  const remoteIDs = new Set(remotes.map((record) => record.id))
   const next: Record<string, ConfigSkill[]> = {}
+  for (const [id, skills] of Object.entries(skillsByConfig.value)) {
+    if (remoteIDs.has(id)) next[id] = skills
+  }
+  const failed: Record<string, boolean> = {}
   await Promise.all(remotes.map(async (record) => {
     try {
       const res = await listConfigSkills(record.id)
       next[record.id] = (res?.data || []).filter((skill) => skill.status !== 'removed')
     } catch {
-      next[record.id] = []
+      // Keep a previous successful list. Only the first-load miss is an error
+      // row; replacing it with [] would read as "no skills installed".
+      if (next[record.id] === undefined) failed[record.id] = true
     }
   }))
   skillsByConfig.value = next
+  skillsLoadFailed.value = failed
 }
 
 async function load() {

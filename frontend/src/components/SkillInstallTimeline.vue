@@ -53,6 +53,9 @@ const fullContent = ref('')
 
 let controller: AbortController | null = null
 let closed = false
+// stop() / a newer open() bump this so an in-flight live loop cannot keep
+// calling follow() after closed is reset — that would replay a finished run.
+let openRun = 0
 
 // The timeline grows inside the drawer's own scroll container, so following the
 // tail would mean scrolling the whole drawer under a reader who is inspecting
@@ -78,16 +81,18 @@ function applyPrompt(content: string) {
   messages.unshift({ id: `${props.messageId}-prompt`, role: 'user', content })
 }
 
-async function loadPersisted() {
+async function loadPersisted(run: number) {
   const res: any = await getMessageList({
     session_id: props.sessionId,
     limit: 100,
     created_at: '',
   })
+  if (run !== openRun) return
   handleMsgList(res?.data || [])
 }
 
 function stop() {
+  openRun += 1
   closed = true
   if (controller) {
     controller.abort()
@@ -98,11 +103,16 @@ function stop() {
 // follow tails the transcript endpoint. It resolves when the stream ends, and
 // reports whether it ever produced anything: a 404 means the event log has
 // expired and the durable history is the only remaining source.
-async function follow(): Promise<boolean> {
+async function follow(run: number): Promise<boolean> {
   const url = `${getApiBaseUrl()}${configSkillTranscriptUrl(props.configId, props.skillId)}`
   const token = localStorage.getItem('weknora_token')
   const tenantId = localStorage.getItem('weknora_selected_tenant_id')
-  controller = new AbortController()
+  const ac = new AbortController()
+  controller = ac
+  if (run !== openRun) {
+    ac.abort()
+    return false
+  }
   let served = false
 
   await fetchEventSource(url, {
@@ -113,7 +123,7 @@ async function follow(): Promise<boolean> {
       'X-Request-ID': generateRandomString(12),
       ...(tenantId ? { 'X-Tenant-ID': tenantId } : {}),
     },
-    signal: controller.signal,
+    signal: ac.signal,
     openWhenHidden: true,
     onopen: async (response) => {
       if (response.ok) {
@@ -125,6 +135,7 @@ async function follow(): Promise<boolean> {
       throw new Error(`transcript stream refused: ${response.status}`)
     },
     onmessage(ev) {
+      if (run !== openRun || !props.live) return
       if (!ev.data) return
       let frame: any
       try {
@@ -154,16 +165,18 @@ function wait(ms: number): Promise<void> {
 }
 
 async function open() {
+  const run = ++openRun
   closed = false
   messages.splice(0, messages.length)
   loading.value = true
+  const stale = () => run !== openRun || closed
   try {
     // A finished install already has durable rows. Replaying the event log
     // through processStreamChunk would animate every tool call again, which
     // is what "view the run" must not do.
     if (!props.live) {
       if (props.sessionId) {
-        await loadPersisted()
+        await loadPersisted(run)
       }
       return
     }
@@ -172,20 +185,21 @@ async function open() {
     // stream answers; falling through to the empty state on the first 404
     // would flash "no record" during setup.
     for (;;) {
-      const served = await follow().catch(() => false)
-      if (closed || served) return
+      if (stale() || !props.live) return
+      const served = await follow(run).catch(() => false)
+      if (stale() || !props.live || served) return
       if (props.sessionId && props.messageId) {
-        await loadPersisted()
-        if (messages.length > 0 || closed) return
+        await loadPersisted(run)
+        if (stale() || messages.length > 0) return
       }
-      if (closed) return
+      if (stale() || !props.live) return
       await wait(1000)
-      if (closed) return
+      if (stale() || !props.live) return
     }
   } catch {
     // Both sources are gone; the empty state says so.
   } finally {
-    loading.value = false
+    if (!stale()) loading.value = false
   }
 }
 

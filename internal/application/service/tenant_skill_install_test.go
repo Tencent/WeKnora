@@ -310,6 +310,27 @@ func TestInstallSkillRefusesWhenBundleCannotBeStored(t *testing.T) {
 	require.NotContains(t, fx.events, "create-session")
 }
 
+func TestTenantForStoragePrefersMatchingContextTenant(t *testing.T) {
+	svc := &TenantSkillService{}
+	backendID := "backend-1"
+	ctxTenant := &types.Tenant{ID: 7, DefaultStorageBackendID: &backendID}
+	ctx := context.WithValue(context.Background(), types.TenantInfoContextKey, ctxTenant)
+
+	got := svc.tenantForStorage(ctx, 7)
+
+	require.Equal(t, ctxTenant, got)
+}
+
+func TestTenantForStorageIgnoresMismatchedContextTenant(t *testing.T) {
+	svc := &TenantSkillService{}
+	ctx := context.WithValue(context.Background(), types.TenantInfoContextKey, &types.Tenant{ID: 8})
+
+	got := svc.tenantForStorage(ctx, 7)
+
+	require.Equal(t, uint64(7), got.ID)
+	require.Nil(t, got.DefaultStorageBackendID)
+}
+
 func TestRunInstallAbortsWhenANewerBundleOwnsTheRow(t *testing.T) {
 	fx := newInstallFixture(t)
 	newer := strings.Repeat("b", 64)
