@@ -1,6 +1,8 @@
 package service
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -36,6 +38,11 @@ const (
 	// still missing is the row that says so.
 	readySkillWriteAttempts = 3
 	readySkillWriteDelay    = 100 * time.Millisecond
+
+	// skillSeedArchivePath is the single remote write used to land a skill's
+	// files. Writing each file with MakeDir+WriteFile is two round trips per
+	// entry, which is why a 50-file skill crawled through "seeding 12/56".
+	skillSeedArchivePath = sandbox.SkillsImageRoot + "/.weknora-seed.tar"
 )
 
 // InstallSkill validates an uploaded archive, records it, and kicks off the
@@ -270,13 +277,30 @@ func (s *TenantSkillService) runInstall(
 	if err := s.resetSkillDir(ctx, mgr, sess.ID, skillDir); err != nil {
 		return err
 	}
+
+	// Locators must land before the file seed. A large skill is copied file by
+	// file over the sandbox API and can take minutes; the console attaches to
+	// the transcript as soon as the directory is ready, not after that copy.
+	transcript, prompt := s.beginInstallTranscript(ctx, tenantID, skillID, sess, mgr, skillDir, bundle)
+
+	fileCount := 0
+	if bundle != nil {
+		fileCount = len(bundle.Files)
+	}
+	if fileCount > 0 {
+		logger.Infof(ctx, "[skill] seeding %d files for %s as one archive", fileCount, skillID)
+		s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
+			Percent: 28, Stage: "seeding",
+			Log: fmt.Sprintf("seeding %d files", fileCount),
+		})
+	}
 	if err := s.seedSkillFiles(ctx, mgr, sess.ID, skillDir, bundle); err != nil {
 		return err
 	}
 	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{Percent: 35, Stage: "seeded"})
 
 	// 3. Let the installer agent install dependencies.
-	if err := s.driveInstallerAgent(ctx, tenantID, skillID, sess, mgr, skillDir, bundle); err != nil {
+	if err := s.driveInstallerAgent(ctx, tenantID, skillID, sess, transcript, prompt); err != nil {
 		return err
 	}
 	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{Percent: 80, Stage: "agent_done"})
@@ -495,20 +519,96 @@ func guardSkillDir(skillDir string) error {
 // server-side rather than asking the agent to unpack keeps the source of truth
 // byte-identical to what was uploaded. Provisioning the directory is
 // runInstall's step 2, not this function's job.
+//
+// The files travel as one tar: each remote WriteFile is a MakeDir plus an
+// upload, and a skill with dozens of files was spending minutes on that
+// round-trip tax. Extracting inside the sandbox is one local untar.
 func (s *TenantSkillService) seedSkillFiles(
 	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string, bundle *SkillBundle,
 ) error {
+	if bundle == nil || len(bundle.Files) == 0 {
+		return nil
+	}
 	store, err := installFileStore(mgr)
 	if err != nil {
 		return err
 	}
-	for rel, content := range bundle.Files {
-		target := path.Join(skillDir, rel)
-		if err := store.WriteSessionFile(ctx, sessionID, target, content); err != nil {
-			return fmt.Errorf("seed %s: %w", target, err)
-		}
+	archive, err := packSkillTar(bundle)
+	if err != nil {
+		return err
+	}
+	if err := store.WriteSessionFile(ctx, sessionID, skillSeedArchivePath, archive); err != nil {
+		return fmt.Errorf("seed skill archive: %w", err)
+	}
+	if _, err := s.execInstall(ctx, mgr, sessionID, seedExtractCommand(skillDir)); err != nil {
+		return fmt.Errorf("extract skill archive: %w", err)
 	}
 	return nil
+}
+
+func seedExtractCommand(skillDir string) string {
+	tarPath := sandbox.ShellQuote(skillSeedArchivePath)
+	dir := sandbox.ShellQuote(skillDir)
+	return fmt.Sprintf("tar -xf %s -C %s && rm -f %s", tarPath, dir, tarPath)
+}
+
+func packSkillTar(bundle *SkillBundle) ([]byte, error) {
+	if bundle == nil {
+		return nil, nil
+	}
+	names := make([]string, 0, len(bundle.Files))
+	for rel := range bundle.Files {
+		names = append(names, rel)
+	}
+	sort.Strings(names)
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for _, rel := range names {
+		name := path.Clean(rel)
+		if name == "." || name == ".." || strings.HasPrefix(name, "../") || path.IsAbs(name) {
+			return nil, fmt.Errorf("skill file %q escapes the archive root", rel)
+		}
+		content := bundle.Files[rel]
+		if err := tw.WriteHeader(&tar.Header{
+			Name: name,
+			Mode: 0o644,
+			Size: int64(len(content)),
+		}); err != nil {
+			return nil, err
+		}
+		if _, err := tw.Write(content); err != nil {
+			return nil, err
+		}
+	}
+	if err := tw.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// beginInstallTranscript writes the locators and opening prompt after the
+// skill directory is reset, so a console that opens during the file seed
+// finds something to follow instead of 404-polling for minutes.
+func (s *TenantSkillService) beginInstallTranscript(
+	ctx context.Context, tenantID uint64, skillID string,
+	sess *types.Session, mgr sandbox.Manager, skillDir string, bundle *SkillBundle,
+) (*installTranscript, string) {
+	assistantMessageID := uuid.NewString()
+	prompt := buildInstallPrompt(skillDir, bundle, s.probeUv(ctx, mgr, sess.ID))
+	transcript := newInstallTranscript(ctx, event.NewEventBus(), s.streams, s.messages, sess.ID, assistantMessageID)
+	if err := transcript.Create(ctx, prompt); err != nil {
+		logger.Warnf(ctx, "[skill] seed install transcript for %s failed: %v", skillID, err)
+	}
+	transcript.Subscribe()
+	if err := s.updateSkillFields(ctx, tenantID, sess.SandboxConfigID, skillID,
+		func(e *types.TenantSkillEntity) {
+			e.InstallSessionID = sess.ID
+			e.InstallMessageID = assistantMessageID
+		}); err != nil {
+		logger.Warnf(ctx, "[skill] record transcript locators for %s failed: %v", skillID, err)
+	}
+	return transcript, prompt
 }
 
 // driveInstallerAgent runs one installer conversation. It calls the engine
@@ -517,10 +617,13 @@ func (s *TenantSkillService) seedSkillFiles(
 // need a reliable signal before switching the image.
 func (s *TenantSkillService) driveInstallerAgent(
 	ctx context.Context, tenantID uint64, skillID string, sess *types.Session,
-	mgr sandbox.Manager, skillDir string, bundle *SkillBundle,
+	transcript *installTranscript, prompt string,
 ) error {
 	if s.installerAgents == nil {
 		return errors.New("custom agent service is not configured")
+	}
+	if transcript == nil {
+		return errors.New("install transcript was not seeded")
 	}
 	// The record is tenant-writable: updateBuiltinAgent lets a tenant persist a
 	// Config for any built-in ID, this one included. It is therefore read for
@@ -537,30 +640,8 @@ func (s *TenantSkillService) driveInstallerAgent(
 		return err
 	}
 
-	bus := event.NewEventBus()
-	assistantMessageID := uuid.NewString()
-	prompt := buildInstallPrompt(skillDir, bundle, s.probeUv(ctx, mgr, sess.ID))
-
-	// The transcript is set up before the engine so a console that attaches
-	// while the install is still running finds a message to stream into. Its
-	// failures are logged rather than returned: an unreadable transcript is a
-	// worse outcome than no transcript, but neither is a reason to refuse an
-	// otherwise good install.
-	transcript := newInstallTranscript(ctx, bus, s.streams, s.messages, sess.ID, assistantMessageID)
-	if err := transcript.Create(ctx, prompt); err != nil {
-		logger.Warnf(ctx, "[skill] seed install transcript for %s failed: %v", skillID, err)
-	}
-	transcript.Subscribe()
-	if err := s.updateSkillFields(ctx, tenantID, sess.SandboxConfigID, skillID,
-		func(e *types.TenantSkillEntity) {
-			e.InstallSessionID = sess.ID
-			e.InstallMessageID = assistantMessageID
-		}); err != nil {
-		logger.Warnf(ctx, "[skill] record transcript locators for %s failed: %v", skillID, err)
-	}
-
 	engine, err := s.agents.CreateAgentEngine(
-		ctx, agentConfig, chatModel, nil, bus, sess.ID, assistantMessageID,
+		ctx, agentConfig, chatModel, nil, transcript.bus, sess.ID, transcript.assistantMessageID,
 	)
 	if err != nil {
 		runErr := fmt.Errorf("create installer engine: %w", err)
@@ -568,7 +649,7 @@ func (s *TenantSkillService) driveInstallerAgent(
 		return runErr
 	}
 
-	state, err := engine.Execute(ctx, sess.ID, assistantMessageID, prompt, nil)
+	state, err := engine.Execute(ctx, sess.ID, transcript.assistantMessageID, prompt, nil)
 	runErr := err
 	if runErr == nil && (state == nil || !state.IsComplete) {
 		runErr = errors.New("installer agent stopped without completing")

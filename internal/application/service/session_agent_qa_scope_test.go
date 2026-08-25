@@ -98,3 +98,18 @@ func TestApplyPerRequestSkillScope_NoneIgnores(t *testing.T) {
 	applyPerRequestSkillScope(context.Background(), cfg, "none", []string{"a"})
 	assert.Empty(t, cfg.PinnedSkillNames)
 }
+
+func TestConfigureSkillsFromAgentDoesNotLoadHostPreloadedDir(t *testing.T) {
+	svc := &sessionService{}
+	cfg := &types.AgentConfig{}
+	svc.configureSkillsFromAgent(context.Background(), cfg, &types.CustomAgent{
+		Config: types.CustomAgentConfig{
+			SandboxConfigID:     "cfg-1",
+			SkillsSelectionMode: "all",
+		},
+	})
+	assert.True(t, cfg.SkillsEnabled)
+	assert.Equal(t, "cfg-1", cfg.SandboxConfigID)
+	assert.Empty(t, cfg.SkillDirs,
+		"the host skills/preloaded tree is not what the sandbox image carries")
+}

@@ -125,7 +125,13 @@
         </p>
 
         <ul class="skill-list">
-          <li v-for="skill in skills" :key="skill.id" class="skill-item">
+          <li
+            v-for="skill in skills"
+            :key="skill.id"
+            :ref="(el) => bindSkillItem(skill.id, el)"
+            class="skill-item"
+            :class="{ 'skill-item--focused': focusedSkillId === skill.id }"
+          >
             <div class="skill-status-ring" :title="statusLabel(skill)">
               <t-progress
                 v-if="isBusy(skill)"
@@ -154,6 +160,7 @@
                     <span v-if="skill.version">{{ skill.version }} · </span>
                     <span>{{ statusLabel(skill) }}</span>
                     <span v-if="isBusy(skill)"> · {{ progressOf(skill) }}%</span>
+                    <span v-if="isBusy(skill) && progressLog(skill)"> · {{ progressLog(skill) }}</span>
                   </p>
                 </div>
                 <div class="skill-item__actions">
@@ -275,7 +282,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
@@ -330,6 +337,9 @@ const deletingId = ref('')
 const expandedSkillId = ref('')
 const expandedCopyIds = ref<Set<string>>(new Set())
 const transcriptEpoch = ref(0)
+const focusedSkillId = ref('')
+const skillItemEls = new Map<string, HTMLElement>()
+let focusTimer: number | null = null
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const progressById = ref<Record<string, ConfigSkillInstallEvent>>({})
 
@@ -406,6 +416,26 @@ function isBusy(skill: ConfigSkill): boolean {
 function hasTranscript(skill: ConfigSkill): boolean {
   if (skill.status === 'installing') return true
   return Boolean(skill.install_session_id && skill.install_message_id)
+}
+
+function bindSkillItem(id: string, el: unknown) {
+  if (el instanceof HTMLElement) {
+    skillItemEls.set(id, el)
+    return
+  }
+  skillItemEls.delete(id)
+}
+
+function revealSkill(skillId: string) {
+  focusedSkillId.value = skillId
+  void nextTick(() => {
+    skillItemEls.get(skillId)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
+  if (focusTimer != null) window.clearTimeout(focusTimer)
+  focusTimer = window.setTimeout(() => {
+    if (focusedSkillId.value === skillId) focusedSkillId.value = ''
+    focusTimer = null
+  }, 2400)
 }
 
 function onTranscriptVisible(skill: ConfigSkill, visible: boolean) {
@@ -671,7 +701,10 @@ async function uploadFile(file: File) {
     const skillId = res?.data?.skill_id
     await loadSkills()
     await refreshImage()
-    if (skillId) followProgress(skillId)
+    if (skillId) {
+      followProgress(skillId)
+      revealSkill(skillId)
+    }
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('settings.sandbox.skillUploadFailed'))
   } finally {
@@ -698,7 +731,10 @@ async function installFromSource() {
     const skillId = res?.data?.skill_id
     await loadSkills()
     await refreshImage()
-    if (skillId) followProgress(skillId)
+    if (skillId) {
+      followProgress(skillId)
+      revealSkill(skillId)
+    }
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('settings.sandbox.skillSourceFailed'))
   } finally {
@@ -773,6 +809,7 @@ watch(
 onUnmounted(() => {
   stopAllFollows()
   stopPoll()
+  if (focusTimer != null) window.clearTimeout(focusTimer)
 })
 </script>
 
@@ -976,6 +1013,12 @@ onUnmounted(() => {
   border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
   background: var(--td-bg-color-container);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.skill-item--focused {
+  border-color: var(--td-brand-color);
+  box-shadow: 0 0 0 2px var(--td-brand-color-focus, rgba(0, 168, 112, 0.18));
 }
 
 .skill-transcript-toggle--on {

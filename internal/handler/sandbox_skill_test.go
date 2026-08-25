@@ -887,6 +887,19 @@ func TestSandboxSkillTranscriptWithoutLocatorsReturns404(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, w.Code, "body=%s", w.Body.String())
 }
 
+func TestSandboxSkillTranscriptWhileInstallIsPreparingReturns204(t *testing.T) {
+	svc := &fakeSandboxSkillService{skills: map[string]*types.TenantSkillEntity{
+		"skill-1": {ID: "skill-1", SandboxConfigID: "cfg-a", Status: types.SkillStatusInstalling},
+	}}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, &transcriptStreamManager{}))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, transcriptRequest("cfg-a", "skill-1"))
+
+	require.Equal(t, http.StatusNoContent, w.Code, "body=%s", w.Body.String())
+	require.NotContains(t, w.Header().Get("Content-Type"), "event-stream")
+}
+
 // The skill lookup is this endpoint's authorization: an install transcript can
 // hold command output from another workspace's image build.
 func TestSandboxSkillTranscriptOfAnotherConfigReturns404(t *testing.T) {
