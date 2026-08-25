@@ -104,3 +104,27 @@ func TestMarkConfigSandboxesStaleRunsOnADetachedContext(t *testing.T) {
 	require.Equal(t, []staleMark{{tenantID: 7, configID: "cfg-1"}}, fx.staleMarks,
 		"the sandbox fake refuses a cancelled context, exactly as Redis would")
 }
+
+func TestMarkConfigSandboxesStaleSkipsWhenRolloutIsNewSession(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.configRepo.entity.Config.SkillRollout = types.SkillRolloutNewSession
+
+	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
+
+	require.Empty(t, fx.staleMarks,
+		"new_session rollout must not rebuild sandboxes already bound to a session")
+	require.Equal(t, "snap-1", fx.configRepo.saved.Config.SkillImage.SnapshotID,
+		"new sessions still boot the image this install produced")
+}
+
+func TestRunRemoveSkipsStaleMarkWhenRolloutIsNewSession(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.configRepo.entity.Config.SkillRollout = types.SkillRolloutNewSession
+	fx.seedInstalledSkill("sk-1", "snap-old", 3)
+	fx.seedInstalledSkill("sk-2", "snap-old", 3)
+
+	require.NoError(t, fx.svc.runRemove(context.Background(), 7, "cfg-1", "sk-1"))
+
+	require.Empty(t, fx.staleMarks)
+	require.NotEmpty(t, fx.configRepo.saved.Config.SkillImage.SnapshotID)
+}

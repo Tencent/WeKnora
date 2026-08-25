@@ -764,6 +764,7 @@ export interface SandboxConfig {
   env_vars?: Record<string, string>
   volume_mount?: SandboxVolumeMountConfig
   skill_image?: SandboxSkillImage
+  skill_rollout?: 'next_turn' | 'new_session'
   cube?: SandboxCubeConfig
   e2b?: SandboxE2BConfig
   docker?: SandboxDockerConfig

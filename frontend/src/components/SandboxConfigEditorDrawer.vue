@@ -384,7 +384,7 @@
       config whose save was refused.
     -->
     <template v-if="currentStepKey === 'skills'">
-      <SandboxSkillsPanel v-if="effectiveRecord" :record="effectiveRecord" />
+      <SandboxSkillsPanel v-if="effectiveRecord" :record="effectiveRecord" @updated="onSkillsConfigUpdated" />
       <p v-else class="skills-locked">{{ $t('settings.sandbox.stepSkillsLocked') }}</p>
     </template>
 
@@ -581,6 +581,10 @@ const primaryDisabled = computed(() => (
 // than create another one.
 const savedRecord = ref<SandboxConfigRecord | null>(null)
 const effectiveRecord = computed(() => savedRecord.value || props.record)
+
+function onSkillsConfigUpdated(record: SandboxConfigRecord) {
+  savedRecord.value = record
+}
 
 // Jumping is what separates editing from creating. A config that does not exist
 // yet has to be built in order — its connection has to check out before there
@@ -902,6 +906,7 @@ function collectPayload(): SandboxConfig {
     default_timeout_sec: defaultTimeoutSec.value || undefined,
     allow_private_endpoints: allowPrivateEndpoints.value || undefined,
     env_vars: envVars,
+    skill_rollout: effectiveRecord.value?.config?.skill_rollout,
   }
   // Send only the selected backend's block so an unused one cannot fail
   // validation (e.g. a stale private URL left in the other tab).

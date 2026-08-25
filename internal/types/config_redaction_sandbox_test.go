@@ -147,6 +147,31 @@ func TestMergeSandboxConfigForUpdateKeepsSkillImageWhenEditorOmitsIt(t *testing.
 		"merge must copy the stored image, not share the pointer")
 }
 
+func TestMergeSandboxConfigForUpdateKeepsSkillRolloutWhenEditorOmitsIt(t *testing.T) {
+	existing := &TenantSandboxConfig{
+		SandboxType:  "cube",
+		SkillRollout: SkillRolloutNewSession,
+	}
+	incoming := &TenantSandboxConfig{
+		SandboxType: "cube",
+		Cube:        &CubeSandboxConfig{APIURL: "https://cube.example.com"},
+	}
+
+	out := MergeSandboxConfigForUpdate(incoming, existing)
+
+	require.Equal(t, SkillRolloutNewSession, out.SkillRollout,
+		"a runtime save must not reset the skills-panel rollout choice")
+}
+
+func TestMergeSandboxConfigForUpdateHonoursExplicitSkillRollout(t *testing.T) {
+	existing := &TenantSandboxConfig{SkillRollout: SkillRolloutNewSession}
+	incoming := &TenantSandboxConfig{SkillRollout: SkillRolloutNextTurn}
+
+	out := MergeSandboxConfigForUpdate(incoming, existing)
+
+	require.Equal(t, SkillRolloutNextTurn, out.SkillRollout)
+}
+
 func TestMergeSandboxConfigForUpdateDoesNotMutateInputs(t *testing.T) {
 	existing := &TenantSandboxConfig{E2B: &E2BSandboxConfig{APIKey: "old-e2b"}}
 	incoming := &TenantSandboxConfig{

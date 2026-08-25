@@ -238,6 +238,57 @@ func TestMemorySessionSandboxBindingStoreContract(t *testing.T) {
 	testSessionSandboxBindingStore(t, NewMemorySessionSandboxBindingStore())
 }
 
+func TestMemorySessionSandboxBindingStoreTurnLease(t *testing.T) {
+	t.Parallel()
+	testSessionTurnLeaseStore(t, NewMemorySessionSandboxBindingStore())
+}
+
+func testSessionTurnLeaseStore(t *testing.T, store sessionTurnLeaseStore) {
+	t.Helper()
+
+	ctx := context.Background()
+	key := SessionSandboxKey{TenantID: 42, SessionID: "session-turn"}
+
+	active, rebuildOnce, err := store.TurnState(ctx, key)
+	require.NoError(t, err)
+	require.False(t, active)
+	require.False(t, rebuildOnce)
+
+	require.NoError(t, store.BeginTurn(ctx, key))
+	active, rebuildOnce, err = store.TurnState(ctx, key)
+	require.NoError(t, err)
+	require.True(t, active)
+	require.True(t, rebuildOnce)
+
+	require.NoError(t, store.BeginTurn(ctx, key))
+	active, rebuildOnce, err = store.TurnState(ctx, key)
+	require.NoError(t, err)
+	require.True(t, active)
+	require.True(t, rebuildOnce, "a nested BeginTurn must not reset rebuildOnce")
+
+	require.NoError(t, store.ConsumeTurnRebuild(ctx, key))
+	active, rebuildOnce, err = store.TurnState(ctx, key)
+	require.NoError(t, err)
+	require.True(t, active)
+	require.False(t, rebuildOnce)
+
+	require.NoError(t, store.EndTurn(ctx, key))
+	active, rebuildOnce, err = store.TurnState(ctx, key)
+	require.NoError(t, err)
+	require.True(t, active)
+	require.False(t, rebuildOnce)
+
+	require.NoError(t, store.EndTurn(ctx, key))
+	active, rebuildOnce, err = store.TurnState(ctx, key)
+	require.NoError(t, err)
+	require.False(t, active)
+	require.False(t, rebuildOnce)
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	require.Error(t, store.BeginTurn(cancelled, key))
+}
+
 func TestMemorySessionSandboxBindingStoreSeparatesTenants(t *testing.T) {
 	t.Parallel()
 	testSessionSandboxBindingTenantIsolation(t, NewMemorySessionSandboxBindingStore())

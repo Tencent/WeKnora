@@ -41,6 +41,20 @@
       </section>
 
       <section class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillRollout') }}</h4>
+        <p class="installer-model-hint">{{ $t('settings.sandbox.skillRolloutHint') }}</p>
+        <t-radio-group
+          :value="skillRollout"
+          :disabled="savingRollout"
+          class="skill-rollout-group"
+          @change="onSkillRolloutChange"
+        >
+          <t-radio value="next_turn">{{ $t('settings.sandbox.skillRolloutNextTurn') }}</t-radio>
+          <t-radio value="new_session">{{ $t('settings.sandbox.skillRolloutNewSession') }}</t-radio>
+        </t-radio-group>
+      </section>
+
+      <section class="setting-drawer__section">
         <input
           ref="fileInputRef"
           type="file"
@@ -71,7 +85,7 @@
             <t-progress v-if="uploading" :percentage="uploadPercent" size="small" />
           </div>
         </div>
-        <p class="upload-hint">{{ $t('settings.sandbox.skillUploadHint') }}</p>
+        <p class="upload-hint">{{ uploadHint }}</p>
 
         <p v-if="!loading && skills.length === 0" class="skill-empty">
           {{ $t('settings.sandbox.skillEmpty') }}
@@ -150,7 +164,7 @@
               </t-tooltip>
               <t-popconfirm
                 theme="warning"
-                :content="$t('settings.sandbox.skillDeleteHint')"
+                :content="deleteHint"
                 :confirm-btn="{ content: $t('common.delete'), theme: 'danger' }"
                 :cancel-btn="{ content: $t('common.cancel') }"
                 placement="top-right"
@@ -216,7 +230,7 @@
 </template>
 
 <script setup lang="ts">
-import { onUnmounted, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
@@ -231,6 +245,7 @@ import {
   configSkillInstallEventsUrl,
   deleteConfigSkill,
   getSandboxConfigById,
+  updateSandboxConfigById,
   listConfigSkills,
   patchConfigSkill,
   uploadConfigSkill,
@@ -247,6 +262,10 @@ import i18n from '@/i18n'
 // config that already exists. The editor only renders it on a saved config.
 const props = defineProps<{
   record: SandboxConfigRecord | null
+}>()
+
+const emit = defineEmits<{
+  updated: [record: SandboxConfigRecord]
 }>()
 
 const { t, locale } = useI18n()
@@ -276,6 +295,23 @@ const LAST_CHAT_MODEL_KEY = 'weknora_last_chat_model_id'
 const installerAgent = ref<CustomAgent | null>(null)
 const installerModelId = ref('')
 const savingInstallerModel = ref(false)
+const skillRollout = ref<'next_turn' | 'new_session'>('next_turn')
+const savingRollout = ref(false)
+
+function normalizeSkillRollout(value?: string): 'next_turn' | 'new_session' {
+  return value === 'new_session' ? 'new_session' : 'next_turn'
+}
+
+const uploadHint = computed(() =>
+  skillRollout.value === 'new_session'
+    ? t('settings.sandbox.skillUploadHintNewSession')
+    : t('settings.sandbox.skillUploadHint'),
+)
+const deleteHint = computed(() =>
+  skillRollout.value === 'new_session'
+    ? t('settings.sandbox.skillDeleteHintNewSession')
+    : t('settings.sandbox.skillDeleteHint'),
+)
 
 function readLastChatModelID(): string {
   try {
@@ -435,6 +471,7 @@ async function refreshImage() {
   try {
     const res = await getSandboxConfigById(props.record.id)
     skillImage.value = res?.data?.config?.skill_image || null
+    skillRollout.value = normalizeSkillRollout(res?.data?.config?.skill_rollout)
   } catch {
     skillImage.value = props.record.config?.skill_image || null
   }
@@ -459,6 +496,7 @@ async function loadSkills(silent = false) {
 
 async function loadAll() {
   skillImage.value = props.record?.config?.skill_image || null
+  skillRollout.value = normalizeSkillRollout(props.record?.config?.skill_rollout)
   await Promise.all([loadSkills(), refreshImage(), loadInstallerModel()])
 }
 
@@ -489,6 +527,29 @@ async function persistInstallerModel(modelId: string) {
   })
   installerAgent.value = res?.data || { ...(current as CustomAgent), config }
   installerModelId.value = id
+}
+
+async function onSkillRolloutChange(value: string) {
+  const next = normalizeSkillRollout(value)
+  if (!props.record || next === skillRollout.value) return
+  const previous = skillRollout.value
+  skillRollout.value = next
+  savingRollout.value = true
+  try {
+    const res = await getSandboxConfigById(props.record.id)
+    const current = res?.data
+    const saved = await updateSandboxConfigById(props.record.id, {
+      name: current?.name || props.record.name,
+      description: current?.description || props.record.description,
+      config: { ...(current?.config || props.record.config || {}), skill_rollout: next },
+    })
+    if (saved?.data) emit('updated', saved.data)
+  } catch (e: any) {
+    skillRollout.value = previous
+    MessagePlugin.error(e?.message || t('settings.sandbox.skillRolloutSaveFailed'))
+  } finally {
+    savingRollout.value = false
+  }
 }
 
 async function onInstallerModelChange(modelId: string) {
@@ -636,6 +697,13 @@ onUnmounted(() => {
   font-size: 12px;
   line-height: 1.5;
   color: var(--td-text-color-secondary);
+}
+
+.skill-rollout-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 .image-info__label {

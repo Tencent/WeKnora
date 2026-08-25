@@ -289,7 +289,19 @@ func SanitizeSandboxConfig(
 	if _, err := sandbox.ResolveEffectiveConfig(merged, sandbox.DefaultConfig()); err != nil {
 		return nil, err
 	}
+	if err := validateSkillRollout(merged.SkillRollout); err != nil {
+		return nil, err
+	}
 	return merged, nil
+}
+
+func validateSkillRollout(value string) error {
+	switch strings.TrimSpace(value) {
+	case "", types.SkillRolloutNextTurn, types.SkillRolloutNewSession:
+		return nil
+	default:
+		return apperrors.NewBadRequestError("invalid skill_rollout")
+	}
 }
 
 func validateNamedSandboxBackend(cfg *types.TenantSandboxConfig) error {

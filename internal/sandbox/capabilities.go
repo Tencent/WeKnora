@@ -114,3 +114,12 @@ type SessionDestroyer interface {
 type SessionInstallCapabilityProvider interface {
 	SessionInstallShellExecutor() SessionInstallShellExecutor
 }
+
+// SessionTurnHolder marks the start and end of one chat turn on a session's
+// sandbox. While the turn is open, a stale image mark waits: the first
+// resolve of the turn may rebuild, later resolves of the same turn keep the
+// sandbox so /workspace scratch and in-flight execs survive an admin install.
+type SessionTurnHolder interface {
+	BeginSessionTurn(ctx context.Context, sessionID string) error
+	EndSessionTurn(ctx context.Context, sessionID string) error
+}

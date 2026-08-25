@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -177,29 +178,24 @@ func (l *remoteSessionLifecycle) resolveLocked(
 	}
 
 	// A stale binding is one whose sandbox boots an image the config has since
-	// replaced. It is destroyed here, at the session's next resolve, rather
-	// than when the image changed, so an administrator's install does not tear
-	// down sandboxes out from under the sessions using them.
-	//
-	// Known limitation: a resolve is per sandbox OPERATION, not per turn. Every
-	// exec and file call resolves, and the lifecycle lock is released as soon as
-	// this function returns, so a mark that lands mid-turn destroys the sandbox
-	// between two tool calls of that turn — taking away the /workspace scratch
-	// the deferral is meant to preserve — and an operation of the same session
-	// running concurrently can have its sandbox deleted underneath it. The
-	// window is the same one the terminal-binding replacement below and
-	// DestroySession already have; closing it needs a turn-scoped lease, which
-	// this deferred-rebuild design deliberately does not have.
+	// replaced. Rebuild waits for a turn boundary: the first resolve of a new
+	// chat turn may destroy and recreate, later resolves of that same turn
+	// keep the sandbox so /workspace scratch and in-flight execs survive an
+	// install that landed mid-turn. A resolve with no turn lease (no AgentQA
+	// in flight) still rebuilds immediately.
 	//
 	// Destroying before rebuilding is not optional: the recovery pass below
 	// adopts any live sandbox carrying this session's metadata, so a surviving
 	// one would simply be picked up again.
-	if binding != nil && binding.StaleAt != nil {
+	if binding != nil && binding.StaleAt != nil && l.shouldRebuildStaleBinding(ctx, key) {
 		if err := l.destroyBindingLocked(ctx, key, *binding); err != nil {
 			return nil, fmt.Errorf("release stale sandbox binding: %w", err)
 		}
 		binding = nil
 	}
+	// First resolve of a turn spends rebuildOnce even when nothing was stale,
+	// so a later install in the same turn cannot tear the sandbox down.
+	l.consumeTurnRebuild(ctx, key)
 
 	if binding != nil {
 		handle, replace, err := l.connectBinding(ctx, *binding)
@@ -612,6 +608,48 @@ func (l *remoteSessionLifecycle) metadata(key SessionSandboxKey) map[string]stri
 		remoteMetadataBindingVersion: strconv.Itoa(SessionSandboxBindingVersion),
 		remoteMetadataProvider:       string(l.client.Provider()),
 		remoteMetadataConfigID:       l.sandboxConfigID,
+	}
+}
+
+// shouldRebuildStaleBinding reports whether this resolve may tear down a
+// stale sandbox. No turn, or the first resolve of a new turn, rebuilds. A
+// turn that has already used the sandbox keeps it. A lease we cannot read is
+// treated as an in-flight turn so a Redis blip cannot destroy /workspace.
+func (l *remoteSessionLifecycle) shouldRebuildStaleBinding(
+	ctx context.Context,
+	key SessionSandboxKey,
+) bool {
+	leaser, ok := l.bindings.(sessionTurnLeaseStore)
+	if !ok {
+		return true
+	}
+	active, rebuildOnce, err := leaser.TurnState(ctx, key)
+	if err != nil {
+		log.Printf(
+			"[sandbox] turn lease of session %s unavailable (%v); keeping the current sandbox",
+			key.SessionID, err,
+		)
+		return false
+	}
+	if !active {
+		return true
+	}
+	return rebuildOnce
+}
+
+func (l *remoteSessionLifecycle) consumeTurnRebuild(
+	ctx context.Context,
+	key SessionSandboxKey,
+) {
+	leaser, ok := l.bindings.(sessionTurnLeaseStore)
+	if !ok {
+		return
+	}
+	if err := leaser.ConsumeTurnRebuild(ctx, key); err != nil {
+		log.Printf(
+			"[sandbox] consume turn rebuild of session %s failed: %v",
+			key.SessionID, err,
+		)
 	}
 }
 

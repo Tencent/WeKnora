@@ -776,6 +776,43 @@ func (m *SessionBoundManager) Cleanup(ctx context.Context) error {
 
 // --- internal helpers --------------------------------------------------------
 
+// BeginSessionTurn opens the chat-turn lease for sessionID. The first
+// resolve after this may rebuild a stale image; later resolves of the same
+// turn keep the sandbox.
+func (m *SessionBoundManager) BeginSessionTurn(ctx context.Context, sessionID string) error {
+	if m == nil {
+		return nil
+	}
+	leaser, ok := m.bindings.(sessionTurnLeaseStore)
+	if !ok {
+		return nil
+	}
+	key, err := m.sessionKey(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	return leaser.BeginTurn(ctx, key)
+}
+
+// EndSessionTurn closes the chat-turn lease. It ignores request cancellation
+// so a disconnected client still releases the lease.
+func (m *SessionBoundManager) EndSessionTurn(ctx context.Context, sessionID string) error {
+	if m == nil {
+		return nil
+	}
+	leaser, ok := m.bindings.(sessionTurnLeaseStore)
+	if !ok {
+		return nil
+	}
+	key, err := m.sessionKey(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	return leaser.EndTurn(context.WithoutCancel(ctx), key)
+}
+
+var _ SessionTurnHolder = (*SessionBoundManager)(nil)
+
 // resolveSession resolves (or lazily creates) the remote sandbox bound to
 // sessionID. Persistent path only.
 func (m *SessionBoundManager) resolveSession(

@@ -943,6 +943,50 @@ func TestResolveRecreatesSandboxAfterImageChange(t *testing.T) {
 		"the stale sandbox must be released, not leaked")
 }
 
+func TestResolveKeepsStaleSandboxDuringAnOpenTurn(t *testing.T) {
+	ctx := context.Background()
+	fx := newLifecycleFixture(t)
+	require.NoError(t, fx.bindings.BeginTurn(ctx, fx.key))
+	first, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+
+	n, err := fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID, "cfg-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	second, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+	require.Equal(t, first.ID(), second.ID(),
+		"a turn already using the sandbox must keep it after an install")
+	require.NotContains(t, fx.client.deleteIDs, first.ID())
+}
+
+func TestResolveRebuildsStaleSandboxOnFirstUseOfNextTurn(t *testing.T) {
+	ctx := context.Background()
+	fx := newLifecycleFixture(t)
+	require.NoError(t, fx.bindings.BeginTurn(ctx, fx.key))
+	first, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+
+	n, err := fx.bindings.InvalidateByConfig(ctx, fx.key.TenantID, "cfg-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	require.NoError(t, fx.bindings.EndTurn(ctx, fx.key))
+	require.NoError(t, fx.bindings.BeginTurn(ctx, fx.key))
+
+	second, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+	require.NotEqual(t, first.ID(), second.ID(),
+		"the next turn's first resolve must pick up the new skill image")
+	require.Contains(t, fx.client.deleteIDs, first.ID())
+
+	third, err := fx.lifecycle.Resolve(ctx, fx.key)
+	require.NoError(t, err)
+	require.Equal(t, second.ID(), third.ID(),
+		"later resolves of the new turn must keep the rebuilt sandbox")
+}
+
 func TestInvalidateDoesNotDisturbOtherConfigs(t *testing.T) {
 	ctx := context.Background()
 	fx := newLifecycleFixture(t)

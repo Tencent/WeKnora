@@ -365,6 +365,12 @@ func MergeSandboxConfigForUpdate(incoming, existing *TenantSandboxConfig) *Tenan
 			mount := *existing.VolumeMount
 			out.VolumeMount = &mount
 		}
+		// The runtime form omits skill_rollout. An empty incoming value must
+		// not reset a saved "new_session" choice; the skills panel sends the
+		// explicit next_turn token when the admin switches back.
+		if strings.TrimSpace(out.SkillRollout) == "" {
+			out.SkillRollout = existing.SkillRollout
+		}
 	}
 
 	return &out

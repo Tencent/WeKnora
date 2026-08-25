@@ -114,6 +114,16 @@ type SessionSandboxBindingStore interface {
 	InvalidateByConfig(ctx context.Context, tenantID uint64, configID string) (int, error)
 }
 
+// sessionTurnLeaseStore is the optional turn-lease half of a binding store.
+// A resolve that sees a stale binding consults it so an in-flight chat turn
+// keeps its sandbox, and only the first resolve of the next turn rebuilds.
+type sessionTurnLeaseStore interface {
+	BeginTurn(ctx context.Context, key SessionSandboxKey) error
+	EndTurn(ctx context.Context, key SessionSandboxKey) error
+	TurnState(ctx context.Context, key SessionSandboxKey) (active, rebuildOnce bool, err error)
+	ConsumeTurnRebuild(ctx context.Context, key SessionSandboxKey) error
+}
+
 // bindingInvalidateLockTimeout bounds the wait for ONE session's lifecycle
 // lock while marking. The caller runs inside the per-config install lock, so a
 // single session that happens to be creating a sandbox right now must cost only
@@ -248,12 +258,18 @@ type memoryLifecycleLock struct {
 	users     int
 }
 
+type memoryTurnLease struct {
+	refs        int
+	rebuildOnce bool
+}
+
 // MemorySessionSandboxBindingStore is a process-local implementation intended
 // for tests and explicitly configured single-process deployments.
 type MemorySessionSandboxBindingStore struct {
 	mu       sync.Mutex
 	bindings map[SessionSandboxKey]SessionSandboxBinding
 	locks    map[SessionSandboxKey]*memoryLifecycleLock
+	turns    map[SessionSandboxKey]*memoryTurnLease
 }
 
 // NewMemorySessionSandboxBindingStore creates an empty in-memory store.
@@ -261,6 +277,7 @@ func NewMemorySessionSandboxBindingStore() *MemorySessionSandboxBindingStore {
 	return &MemorySessionSandboxBindingStore{
 		bindings: make(map[SessionSandboxKey]SessionSandboxBinding),
 		locks:    make(map[SessionSandboxKey]*memoryLifecycleLock),
+		turns:    make(map[SessionSandboxKey]*memoryTurnLease),
 	}
 }
 
@@ -450,9 +467,98 @@ func validateBindingMatch(
 	return nil
 }
 
-// Both stores must keep answering "which bindings belong to this config", or
-// an image switch stops reaching the sessions already running.
-var _ tenantBindingScanner = (*MemorySessionSandboxBindingStore)(nil)
+// BeginTurn opens a chat-turn lease. The first increment of a session's
+// refcount allows the next resolve to rebuild a stale sandbox.
+func (s *MemorySessionSandboxBindingStore) BeginTurn(
+	ctx context.Context,
+	key SessionSandboxKey,
+) error {
+	if err := key.Validate(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lease := s.turns[key]
+	if lease == nil {
+		lease = &memoryTurnLease{}
+		s.turns[key] = lease
+	}
+	if lease.refs == 0 {
+		lease.rebuildOnce = true
+	}
+	lease.refs++
+	return nil
+}
+
+// EndTurn releases one chat-turn lease. The last release drops the lease so
+// a later resolve may rebuild a stale sandbox immediately.
+func (s *MemorySessionSandboxBindingStore) EndTurn(
+	_ context.Context,
+	key SessionSandboxKey,
+) error {
+	if err := key.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lease := s.turns[key]
+	if lease == nil {
+		return nil
+	}
+	lease.refs--
+	if lease.refs <= 0 {
+		delete(s.turns, key)
+	}
+	return nil
+}
+
+// TurnState reports whether a chat turn is open and whether its first
+// resolve may still rebuild a stale sandbox.
+func (s *MemorySessionSandboxBindingStore) TurnState(
+	ctx context.Context,
+	key SessionSandboxKey,
+) (bool, bool, error) {
+	if err := key.Validate(); err != nil {
+		return false, false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return false, false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lease := s.turns[key]
+	if lease == nil || lease.refs <= 0 {
+		return false, false, nil
+	}
+	return true, lease.rebuildOnce, nil
+}
+
+// ConsumeTurnRebuild spends the one rebuild allowed for the current turn.
+func (s *MemorySessionSandboxBindingStore) ConsumeTurnRebuild(
+	ctx context.Context,
+	key SessionSandboxKey,
+) error {
+	if err := key.Validate(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if lease := s.turns[key]; lease != nil {
+		lease.rebuildOnce = false
+	}
+	return nil
+}
+
+var (
+	_ tenantBindingScanner  = (*MemorySessionSandboxBindingStore)(nil)
+	_ sessionTurnLeaseStore = (*MemorySessionSandboxBindingStore)(nil)
+)
 
 func isRemoteProvider(provider RemoteProvider) bool {
 	switch provider {

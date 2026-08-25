@@ -1442,6 +1442,20 @@ func (s *TenantSkillService) markConfigSandboxesStale(
 	markCtx, cancel := s.cleanupContext(context.WithoutCancel(ctx))
 	defer cancel()
 
+	if s.configs != nil {
+		entity, err := s.configs.GetByID(markCtx, tenantID, configID)
+		if err != nil {
+			logger.Warnf(markCtx,
+				"[skill] read config %s skill_rollout before marking sandboxes stale failed: %v",
+				configID, err)
+		} else if entity != nil && !entity.Config.RebuildsExistingOnSkillChange() {
+			logger.Infof(markCtx,
+				"[skill] config %s skill_rollout=%s; leaving live sandboxes on the previous image",
+				configID, types.SkillRolloutNewSession)
+			return
+		}
+	}
+
 	mgr, err := s.sandboxes.Resolve(markCtx, tenantID, configID)
 	if err != nil || mgr == nil {
 		logger.Warnf(markCtx,

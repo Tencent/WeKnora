@@ -883,6 +883,22 @@ func TestSanitizeSandboxConfigPreservesSkillImage(t *testing.T) {
 		"the sandbox config API must not let a client plant or wipe the skill image")
 }
 
+func TestSanitizeSandboxConfigRejectsUnknownSkillRollout(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
+	incoming := &types.TenantSandboxConfig{
+		SandboxType:  "e2b",
+		SkillRollout: "whenever",
+		E2B: &types.E2BSandboxConfig{
+			APIKey: "stored-key", APIURL: "https://203.0.113.10", TemplateID: "t1",
+		},
+	}
+
+	_, err := SanitizeSandboxConfig(incoming, nil)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "skill_rollout")
+}
+
 // Nothing is inherited from the deployment, so an incomplete config has to be
 // refused when it is saved rather than at the first sandbox allocation.
 func TestSanitizeSandboxConfigRejectsIncompleteConfig(t *testing.T) {

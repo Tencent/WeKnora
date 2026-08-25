@@ -142,6 +142,13 @@ func (s *sessionService) AgentQA(
 		llmContext = []chat.Message{}
 	}
 
+	// Hold the sandbox across this turn so an install that finishes while we
+	// are running cannot rebuild the VM between tool calls. Staging below is
+	// the first resolve: if the previous turn left a stale mark, that is
+	// where the new image is picked up.
+	releaseTurn := s.holdSandboxTurn(ctx, sessionID, agentConfig.SandboxConfigID)
+	defer releaseTurn()
+
 	// Reconcile all durable session attachments into the session's remote
 	// sandbox before the model can request shell or skill execution. The
 	// durable storage URL — not the ephemeral sandbox path — remains the
@@ -602,5 +609,4 @@ func (s *sessionService) configureSkillsFromAgent(
 		agentConfig.SkillsEnabled = false
 		logger.Warnf(ctx, "Unknown SkillsSelectionMode=%s: skills disabled", customAgent.Config.SkillsSelectionMode)
 	}
-
 }

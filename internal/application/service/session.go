@@ -936,3 +936,59 @@ func (s *sessionService) GenerateTitleAsync(
 		}
 	}()
 }
+
+// holdSandboxTurn opens a chat-turn lease on the session's remote sandbox so
+// a skill-image change mid-turn cannot rebuild the VM between tool calls.
+// The first resolve of this turn may still pick up a stale mark from the
+// previous turn. The returned closer must be called.
+func (s *sessionService) holdSandboxTurn(
+	ctx context.Context, sessionID, configID string,
+) func() {
+	if strings.TrimSpace(sessionID) == "" {
+		return func() {}
+	}
+	begin := func(mgr sandbox.Manager) sandbox.SessionTurnHolder {
+		if mgr == nil {
+			return nil
+		}
+		holder, ok := mgr.(sandbox.SessionTurnHolder)
+		if !ok {
+			return nil
+		}
+		if err := holder.BeginSessionTurn(ctx, sessionID); err != nil {
+			logger.Warnf(ctx, "[sandbox] begin turn for session %s failed: %v", sessionID, err)
+			return nil
+		}
+		return holder
+	}
+
+	if holder := begin(s.sandboxMgr); holder != nil {
+		return func() {
+			if err := holder.EndSessionTurn(ctx, sessionID); err != nil {
+				logger.Warnf(ctx, "[sandbox] end turn for session %s failed: %v", sessionID, err)
+			}
+		}
+	}
+
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	if s.sandboxResolver == nil || tenantID == 0 {
+		return func() {}
+	}
+	mgr, err := resolveTenantSandboxForConfig(
+		ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, s.sandboxPolicy,
+	)
+	if err != nil {
+		logger.Warnf(ctx, "[sandbox] resolve config %s to begin turn of session %s failed: %v",
+			configID, sessionID, err)
+		return func() {}
+	}
+	holder := begin(mgr)
+	if holder == nil {
+		return func() {}
+	}
+	return func() {
+		if err := holder.EndSessionTurn(ctx, sessionID); err != nil {
+			logger.Warnf(ctx, "[sandbox] end turn for session %s failed: %v", sessionID, err)
+		}
+	}
+}

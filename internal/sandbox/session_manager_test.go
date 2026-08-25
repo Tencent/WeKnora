@@ -249,6 +249,30 @@ func TestSessionBoundManagerInvalidateConfigSandboxesRebuildsOnNextUse(t *testin
 		"the sandbox on the old image must be released, not left billing")
 }
 
+func TestSessionBoundManagerEndSessionTurnIgnoresCancel(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	store := NewMemorySessionSandboxBindingStore()
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          newFakeRemoteClient(SandboxTypeCube),
+		Store:           store,
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+	})
+	require.NoError(t, err)
+
+	cancelled, cancel := context.WithCancel(ctx)
+	require.NoError(t, mgr.BeginSessionTurn(cancelled, "sess-1"))
+	cancel()
+	require.NoError(t, mgr.EndSessionTurn(cancelled, "sess-1"))
+
+	active, _, err := store.TurnState(ctx, SessionSandboxKey{TenantID: 10000, SessionID: "sess-1"})
+	require.NoError(t, err)
+	require.False(t, active)
+}
+
 func TestWriteSessionFileSucceedsWhenInstallDirectoryAlreadyExists(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
 	mgr, client := newSessionManagerExecTestHarness(t)
