@@ -49,7 +49,7 @@ func (h *ThumbnailHandler) Run(ctx context.Context, job *model.VideoProcessingJo
 	if h.MinIO == nil {
 		return fmt.Errorf("minio client 未配置")
 	}
-	if h.MinIO.PublicURL(videoObjectKey(video.ID, video.FileURL)) == "" {
+	if h.MinIO.PublicURL(videoObjectKey(video.ID, video.UploadObjectKey, video.FileURL)) == "" {
 		return fmt.Errorf("minio public url 未配置，无法生成浏览器可访问地址")
 	}
 
@@ -60,7 +60,7 @@ func (h *ThumbnailHandler) Run(ctx context.Context, job *model.VideoProcessingJo
 	}
 
 	// 抽帧（抽第 5 秒处，避免黑屏帧；失败时回退到 0 秒）
-	videoURL, err := h.MinIO.PresignGet(ctx, videoObjectKey(video.ID, video.FileURL), 15*time.Minute)
+	videoURL, err := h.MinIO.PresignGet(ctx, videoObjectKey(video.ID, video.UploadObjectKey, video.FileURL), 15*time.Minute)
 	if err != nil {
 		return fmt.Errorf("presign source video: %w", err)
 	}
@@ -119,7 +119,11 @@ func (h *ThumbnailHandler) Run(ctx context.Context, job *model.VideoProcessingJo
 	return nil
 }
 
-func videoObjectKey(videoID, fileURL string) string {
+func videoObjectKey(videoID, uploadObjectKey, fileURL string) string {
+	if strings.TrimSpace(uploadObjectKey) != "" {
+		return strings.TrimLeft(strings.TrimSpace(uploadObjectKey), "/")
+	}
+	// The URL fallback keeps older rows readable after the migration.
 	const prefix = "videos/"
 	if index := bytes.Index([]byte(fileURL), []byte(prefix)); index >= 0 {
 		return fileURL[index:]

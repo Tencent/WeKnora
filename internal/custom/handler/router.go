@@ -71,6 +71,7 @@ func buildRouter(deps *Deps) *gin.Engine {
 		uploads.PUT("/multipart/part", uh.MultipartPart)
 		uploads.POST("/multipart/complete", uh.MultipartComplete)
 		uploads.POST("/multipart/abort", uh.MultipartAbort)
+		api.POST("/videos/:id/retry-initial-processing", uh.RetryInitialProcessing)
 		if deps.MinIO.IsLocal() {
 			uploads.PUT("/local/:uploadID/parts/:partNumber", func(c *gin.Context) {
 				partNumber, err := parsePositiveInt(c.Param("partNumber"))

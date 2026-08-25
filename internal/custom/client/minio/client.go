@@ -315,6 +315,32 @@ func (c *Client) PutObject(ctx context.Context, objectKey string, reader io.Read
 	return c.core.Client.PutObject(ctx, c.bucket, objectKey, reader, size, opts)
 }
 
+// ObjectExists reports whether a completed object is present.
+func (c *Client) ObjectExists(ctx context.Context, objectKey string) (bool, error) {
+	if c == nil {
+		return false, errors.New("minio client is nil")
+	}
+	if c.IsLocal() {
+		_, err := os.Stat(c.LocalObjectPath(objectKey))
+		if err == nil {
+			return true, nil
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	_, err := c.Raw().StatObject(ctx, c.bucket, objectKey, minio.StatObjectOptions{})
+	if err == nil {
+		return true, nil
+	}
+	resp := minio.ToErrorResponse(err)
+	if resp.Code == "NoSuchKey" || resp.Code == "NoSuchObject" || resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	return false, err
+}
+
 // PublicURL 返回对象公开访问 URL
 func (c *Client) PublicURL(objectKey string) string {
 	if c == nil || c.publicURL == "" {

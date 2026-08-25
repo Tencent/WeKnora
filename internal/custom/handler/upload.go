@@ -81,10 +81,11 @@ func (h *UploadHandler) Presign(c *gin.Context) {
 
 	// 同步落 videos 记录（status=pending_upload），前端 confirm 后切到 uploaded
 	video := model.Video{
-		ID:      videoID,
-		Title:   strings.TrimSuffix(req.Filename, filepath.Ext(req.Filename)),
-		FileURL: h.MinIO.PublicURL(objectKey),
-		Status:  model.VideoStatusUploading,
+		ID:              videoID,
+		Title:           strings.TrimSuffix(req.Filename, filepath.Ext(req.Filename)),
+		FileURL:         h.MinIO.PublicURL(objectKey),
+		Status:          model.VideoStatusUploading,
+		UploadObjectKey: objectKey,
 	}
 	if err := h.DB.Create(&video).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "create video record: " + err.Error()})
@@ -132,21 +133,17 @@ func (h *UploadHandler) Direct(c *gin.Context) {
 
 	now := time.Now().UTC()
 	video := model.Video{
-		ID:         videoID,
-		Title:      strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename)),
-		FileURL:    h.MinIO.PublicURL(objectKey),
-		Status:     model.VideoStatusUploaded,
-		VideoType:  videoType,
-		UploadedAt: &now,
+		ID:              videoID,
+		Title:           strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename)),
+		FileURL:         h.MinIO.PublicURL(objectKey),
+		Status:          model.VideoStatusUploaded,
+		UploadObjectKey: objectKey,
+		VideoType:       videoType,
+		UploadedAt:      &now,
 	}
-	if err := h.DB.Create(&video).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "create video record: " + err.Error()})
-		return
-	}
-
-	jobID, err := enqueueInitialProcessingJob(h.DB, videoID)
+	jobID, err := createUploadedVideoWithJob(h.DB, &video)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "enqueue thumbnail job: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "persist uploaded video: " + err.Error()})
 		return
 	}
 
@@ -175,29 +172,26 @@ func (h *UploadHandler) Confirm(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if !strings.HasPrefix(req.ObjectKey, "videos/"+req.VideoID+"/") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "object key does not belong to video"})
+		return
+	}
 	now := time.Now().UTC()
-	res := h.DB.Model(&model.Video{}).
-		Where("id = ?", req.VideoID).
-		Updates(map[string]any{
-			"status":                   model.VideoStatusUploaded,
-			"file_url":                 h.MinIO.PublicURL(req.ObjectKey),
-			"duration_seconds":         req.DurationSeconds,
-			"video_type":               req.VideoType,
-			"uploaded_at":              now,
-			"processing_error_summary": "",
-		})
-	if res.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": res.Error.Error()})
-		return
-	}
-	if res.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
-		return
-	}
-
-	jobID, err := enqueueInitialProcessingJob(h.DB, req.VideoID)
+	jobID, err := finalizeUploadedVideo(h.DB, req.VideoID, req.ObjectKey, map[string]any{
+		"status":                   model.VideoStatusUploaded,
+		"file_url":                 h.MinIO.PublicURL(req.ObjectKey),
+		"duration_seconds":         req.DurationSeconds,
+		"video_type":               req.VideoType,
+		"uploaded_at":              now,
+		"processing_error_summary": "",
+	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "enqueue thumbnail job: " + err.Error()})
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+		markUploadFailed(h.DB, req.VideoID, "persist confirmed upload failed: "+err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "persist confirmed upload: " + err.Error()})
 		return
 	}
 
@@ -259,10 +253,12 @@ func (h *UploadHandler) MultipartInit(c *gin.Context) {
 		Status:              model.VideoStatusUploading,
 		VideoType:           req.VideoType,
 		UploadID:            handle.UploadID,
+		UploadObjectKey:     objectKey,
 		UploadSizeBytes:     req.FileSizeBytes,
 		UploadPartSizeBytes: req.PartSizeBytes,
 	}
 	if err := h.DB.Create(&video).Error; err != nil {
+		_ = h.MinIO.AbortMultipartUpload(c.Request.Context(), objectKey, handle.UploadID)
 		uploadError(c, http.StatusInternalServerError, "db_init", fmt.Errorf("create video: %w", err))
 		return
 	}
@@ -367,6 +363,12 @@ func (h *UploadHandler) MultipartPart(c *gin.Context) {
 		return
 	}
 	uploadLog(c, "minio_part_succeeded", append(partLogFields, "etag", etag, "elapsed_ms", time.Since(partStartedAt).Milliseconds())...)
+	if err := h.DB.Model(&model.Video{}).
+		Where("id = ? AND status = ?", videoID, model.VideoStatusUploading).
+		Update("updated_at", time.Now().UTC()).Error; err != nil {
+		uploadError(c, http.StatusInternalServerError, "part_db_touch", err, partLogFields...)
+		return
+	}
 	c.Header("ETag", etag)
 	c.JSON(http.StatusOK, gin.H{"part_number": partNumber, "etag": etag, "trace_id": uploadTraceID(c)})
 }
@@ -442,33 +444,53 @@ func (h *UploadHandler) MultipartComplete(c *gin.Context) {
 	uploadLog(c, "complete_start")
 	var req MultipartCompleteReq
 	if err := c.ShouldBindJSON(&req); err != nil {
+		if req.VideoID != "" {
+			markUploadFailed(h.DB, req.VideoID, "invalid multipart complete request: "+err.Error())
+		}
 		uploadError(c, http.StatusBadRequest, "complete_validate", err)
 		return
 	}
 	var video model.Video
-	if err := h.DB.Select("id", "status", "upload_id", "upload_size_bytes", "upload_part_size_bytes").
+	if err := h.DB.Select("id", "status", "upload_id", "upload_object_key", "file_url", "upload_size_bytes", "upload_part_size_bytes").
 		Where("id = ?", req.VideoID).First(&video).Error; err != nil {
 		uploadError(c, http.StatusNotFound, "complete_db_lookup", errors.New("video not found"))
 		return
 	}
 	if video.Status != model.VideoStatusUploading {
-		uploadError(c, http.StatusConflict, "complete_validate", fmt.Errorf("video upload is not active: status=%s", video.Status))
+		if video.UploadID != "" && req.UploadID != video.UploadID {
+			uploadError(c, http.StatusBadRequest, "complete_validate", errors.New("upload id does not belong to video"))
+			return
+		}
+		if !isCompletedVideoStatus(video.Status) || !sameUploadObject(h.MinIO, video, req.ObjectKey) {
+			uploadError(c, http.StatusConflict, "complete_validate", fmt.Errorf("video upload is not active: status=%s", video.Status))
+			return
+		}
+		jobID, err := ensureInitialProcessingJob(h.DB, req.VideoID, false)
+		if err != nil {
+			uploadError(c, http.StatusInternalServerError, "db_enqueue", err, "video_id", req.VideoID)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"video_id": req.VideoID, "object_key": req.ObjectKey, "status": video.Status, "job_id": jobID, "uploaded_at": video.UploadedAt, "trace_id": uploadTraceID(c)})
 		return
 	}
 	if video.UploadID != "" && video.UploadID != req.UploadID {
+		markUploadFailed(h.DB, req.VideoID, "upload id does not belong to video")
 		uploadError(c, http.StatusBadRequest, "complete_validate", errors.New("upload id does not belong to video"))
 		return
 	}
 	if !strings.HasPrefix(req.ObjectKey, "videos/"+req.VideoID+"/") {
+		markUploadFailed(h.DB, req.VideoID, "object key does not belong to video")
 		uploadError(c, http.StatusBadRequest, "complete_validate", errors.New("object key does not belong to video"))
 		return
 	}
 	if video.UploadSizeBytes <= 0 || video.UploadPartSizeBytes <= 0 {
+		markUploadFailed(h.DB, req.VideoID, "multipart upload metadata is missing or invalid")
 		uploadError(c, http.StatusBadRequest, "complete_validate", errors.New("multipart upload metadata is missing or invalid"))
 		return
 	}
 	totalParts := (video.UploadSizeBytes + video.UploadPartSizeBytes - 1) / video.UploadPartSizeBytes
 	if totalParts <= 0 || int64(len(req.Parts)) != totalParts {
+		markUploadFailed(h.DB, req.VideoID, fmt.Sprintf("invalid multipart parts count: got %d, want %d", len(req.Parts), totalParts))
 		uploadError(c, http.StatusBadRequest, "complete_validate",
 			fmt.Errorf("invalid multipart parts count: got %d, want %d", len(req.Parts), totalParts))
 		return
@@ -481,35 +503,34 @@ func (h *UploadHandler) MultipartComplete(c *gin.Context) {
 	}
 	uploadLog(c, "complete_validated", completeFields...)
 	completeStartedAt := time.Now()
-	if err := h.MinIO.CompleteMultipartUpload(c.Request.Context(), req.ObjectKey, req.UploadID, req.Parts); err != nil {
+	merged, err := h.MinIO.ObjectExists(c.Request.Context(), req.ObjectKey)
+	if err == nil && !merged {
+		err = h.MinIO.CompleteMultipartUpload(c.Request.Context(), req.ObjectKey, req.UploadID, req.Parts)
+		if err == nil {
+			merged = true
+		}
+	}
+	if err != nil {
 		if errors.Is(err, minio.ErrInvalidMultipartParts) {
+			markUploadFailed(h.DB, req.VideoID, "multipart complete validation failed: "+err.Error())
 			uploadError(c, http.StatusBadRequest, "minio_complete_validate", err, append(completeFields, "elapsed_ms", time.Since(completeStartedAt).Milliseconds())...)
 			return
 		}
+		markUploadFailed(h.DB, req.VideoID, "multipart complete failed: "+err.Error())
 		uploadError(c, http.StatusInternalServerError, "minio_complete", err, append(completeFields, "elapsed_ms", time.Since(completeStartedAt).Milliseconds())...)
 		return
 	}
-	uploadLog(c, "minio_complete_succeeded", append(completeFields, "elapsed_ms", time.Since(completeStartedAt).Milliseconds())...)
+	uploadLog(c, "minio_complete_succeeded", append(completeFields, "already_merged", merged, "elapsed_ms", time.Since(completeStartedAt).Milliseconds())...)
 
 	now := time.Now().UTC()
-	res := h.DB.Model(&model.Video{}).
-		Where("id = ?", req.VideoID).
-		Updates(map[string]any{
-			"status":      model.VideoStatusUploaded,
-			"file_url":    h.MinIO.PublicURL(req.ObjectKey),
-			"uploaded_at": now,
-		})
-	if res.Error != nil {
-		uploadError(c, http.StatusInternalServerError, "db_complete", res.Error, completeFields...)
-		return
-	}
-	if res.RowsAffected == 0 {
-		uploadError(c, http.StatusNotFound, "db_complete", errors.New("video not found"), completeFields...)
-		return
-	}
-
-	jobID, err := enqueueInitialProcessingJob(h.DB, req.VideoID)
+	jobID, err := finalizeUploadedVideo(h.DB, req.VideoID, req.ObjectKey, map[string]any{
+		"status":                   model.VideoStatusUploaded,
+		"file_url":                 h.MinIO.PublicURL(req.ObjectKey),
+		"uploaded_at":              now,
+		"processing_error_summary": "",
+	})
 	if err != nil {
+		markUploadFailed(h.DB, req.VideoID, "persist completed upload failed: "+err.Error())
 		uploadError(c, http.StatusInternalServerError, "db_enqueue", err, completeFields...)
 		return
 	}
@@ -523,6 +544,64 @@ func (h *UploadHandler) MultipartComplete(c *gin.Context) {
 		"uploaded_at": now,
 		"trace_id":    uploadTraceID(c),
 	})
+}
+
+// RetryInitialProcessing re-enqueues the one initial thumbnail job for a video.
+func (h *UploadHandler) RetryInitialProcessing(c *gin.Context) {
+	videoID := strings.TrimSpace(c.Param("id"))
+	if videoID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "video id is required"})
+		return
+	}
+
+	var video model.Video
+	if err := h.DB.Where("id = ?", videoID).First(&video).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if video.UploadObjectKey == "" {
+		c.JSON(http.StatusConflict, gin.H{"error": "video has no upload object key"})
+		return
+	}
+	merged, err := h.MinIO.ObjectExists(c.Request.Context(), video.UploadObjectKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "check uploaded object: " + err.Error()})
+		return
+	}
+	if !merged {
+		c.JSON(http.StatusConflict, gin.H{"error": "uploaded object does not exist"})
+		return
+	}
+
+	jobID := ""
+	err = h.DB.Transaction(func(tx *gorm.DB) error {
+		var current model.Video
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", videoID).First(&current).Error; err != nil {
+			return err
+		}
+		if current.UploadObjectKey == "" {
+			return errors.New("video has no upload object key")
+		}
+		if err := tx.Model(&model.Video{}).Where("id = ?", videoID).Updates(map[string]any{
+			"status":                   model.VideoStatusUploaded,
+			"file_url":                 h.MinIO.PublicURL(current.UploadObjectKey),
+			"processing_error_summary": "",
+		}).Error; err != nil {
+			return err
+		}
+		var ensureErr error
+		jobID, ensureErr = ensureInitialProcessingJob(tx, videoID, true)
+		return ensureErr
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "retry initial processing: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"video_id": videoID, "status": model.VideoStatusUploaded, "job_id": jobID})
 }
 
 // MultipartAbortReq 取消分片
@@ -681,6 +760,23 @@ func truncateUploadLogValue(value string) string {
 }
 
 func enqueueInitialProcessingJob(db *gorm.DB, videoID string) (string, error) {
+	return ensureInitialProcessingJob(db, videoID, false)
+}
+
+func createUploadedVideoWithJob(db *gorm.DB, video *model.Video) (string, error) {
+	jobID := ""
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(video).Error; err != nil {
+			return err
+		}
+		var err error
+		jobID, err = ensureInitialProcessingJob(tx, video.ID, false)
+		return err
+	})
+	return jobID, err
+}
+
+func ensureInitialProcessingJob(db *gorm.DB, videoID string, resetFailed bool) (string, error) {
 	job := model.VideoProcessingJob{
 		ID:             uuid.NewString(),
 		VideoID:        videoID,
@@ -701,5 +797,64 @@ func enqueueInitialProcessingJob(db *gorm.DB, videoID string) (string, error) {
 	if err := db.Where("idempotency_key = ?", job.IdempotencyKey).First(&existing).Error; err != nil {
 		return "", err
 	}
+	if resetFailed && (existing.Status == "failed" || existing.Status == "cancelled") {
+		if err := db.Model(&existing).Updates(map[string]any{
+			"status":        "pending",
+			"progress":      0,
+			"attempt_count": 0,
+			"error_code":    "",
+			"error_message": "",
+			"completed_at":  nil,
+			"started_at":    nil,
+		}).Error; err != nil {
+			return "", err
+		}
+	}
 	return existing.ID, nil
+}
+
+func finalizeUploadedVideo(db *gorm.DB, videoID, objectKey string, updates map[string]any) (string, error) {
+	returnedJobID := ""
+	err := db.Transaction(func(tx *gorm.DB) error {
+		var video model.Video
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", videoID).First(&video).Error; err != nil {
+			return err
+		}
+		if video.UploadObjectKey != "" && video.UploadObjectKey != objectKey {
+			return fmt.Errorf("upload object key does not belong to video")
+		}
+		updates["upload_object_key"] = objectKey
+		if err := tx.Model(&model.Video{}).Where("id = ?", videoID).Updates(updates).Error; err != nil {
+			return err
+		}
+		jobID, err := ensureInitialProcessingJob(tx, videoID, false)
+		if err != nil {
+			return err
+		}
+		returnedJobID = jobID
+		return nil
+	})
+	return returnedJobID, err
+}
+
+func markUploadFailed(db *gorm.DB, videoID, reason string) {
+	if err := db.Model(&model.Video{}).Where("id = ? AND status = ?", videoID, model.VideoStatusUploading).Updates(map[string]any{
+		"status":                   model.VideoStatusFailed,
+		"processing_error_summary": truncateUploadLogValue(reason),
+	}).Error; err != nil {
+		slog.Error("mark upload failed", "video_id", videoID, "error", err)
+	}
+}
+
+func isCompletedVideoStatus(status string) bool {
+	switch status {
+	case model.VideoStatusUploaded, model.VideoStatusInitializing, model.VideoStatusReady, model.VideoStatusProcessing, model.VideoStatusCompleted:
+		return true
+	default:
+		return false
+	}
+}
+
+func sameUploadObject(client *minio.Client, video model.Video, objectKey string) bool {
+	return video.UploadObjectKey == objectKey || video.FileURL == client.PublicURL(objectKey)
 }

@@ -34,6 +34,8 @@ type Engine struct {
 	wg       sync.WaitGroup
 }
 
+const stuckUploadTimeout = 30 * time.Minute
+
 // NewEngine 构造引擎
 func NewEngine(db *gorm.DB, cfg *config.WorkerConfig, handlers ...Handler) *Engine {
 	e := &Engine{
@@ -85,6 +87,9 @@ func (e *Engine) loop(ctx context.Context, id int) {
 
 // tick 处理一轮：扫描 pending / 重试 failed-pending 的 job
 func (e *Engine) tick(ctx context.Context) error {
+	if _, err := CleanupStuckUploads(e.db, time.Now().UTC(), stuckUploadTimeout); err != nil {
+		return err
+	}
 	for {
 		var job model.VideoProcessingJob
 		err := e.db.Transaction(func(tx *gorm.DB) error {
@@ -116,6 +121,24 @@ func (e *Engine) tick(ctx context.Context) error {
 		}
 		e.dispatch(ctx, &job)
 	}
+}
+
+// CleanupStuckUploads closes upload records that can no longer make progress.
+// A processing job is deliberately excluded: its retry state owns the next
+// transition, while an uploading row without a job is an orphan.
+func CleanupStuckUploads(db *gorm.DB, now time.Time, timeout time.Duration) (int64, error) {
+	if timeout <= 0 {
+		timeout = stuckUploadTimeout
+	}
+	cutoff := now.Add(-timeout)
+	result := db.Model(&model.Video{}).
+		Where("status = ? AND (updated_at < ? OR (updated_at IS NULL AND created_at < ?))", model.VideoStatusUploading, cutoff, cutoff).
+		Where("NOT EXISTS (?)", db.Model(&model.VideoProcessingJob{}).Select("1").Where("video_processing_jobs.video_id = videos.id")).
+		Updates(map[string]any{
+			"status":                   model.VideoStatusFailed,
+			"processing_error_summary": "upload timed out without a processing job",
+		})
+	return result.RowsAffected, result.Error
 }
 
 // dispatch 执行单 job（状态回写 + 重试判断）
