@@ -2,7 +2,7 @@ name: Frontend
 
 on:
   push:
-    branches: [main]
+    branches: [main, custom/main]
     paths:
       - "frontend/**"
       - "scripts/build_frontend_dist.sh"

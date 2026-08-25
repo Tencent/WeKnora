@@ -2,7 +2,7 @@ name: App
 
 on:
   push:
-    branches: [main]
+    branches: [main, custom/main]
     paths:
       - "**/*.go"
       - "!cli/**"
@@ -14,6 +14,8 @@ on:
       - "scripts/**"
       - "skills/preloaded/**"
       - "docker/Dockerfile.app"
+      - "docker/Dockerfile.custom-backend"
+      - "internal/custom/**"
       - "third_party/anydoc-go/**"
       - ".github/workflows/app.yml"
   pull_request:

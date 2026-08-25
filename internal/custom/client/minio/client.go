@@ -136,6 +136,14 @@ type CompletePart struct {
 // completion metadata before the storage backend was called.
 var ErrInvalidMultipartParts = errors.New("invalid multipart parts")
 
+// ErrMultipartRequestRead identifies a client/proxy connection that ended
+// while the backend was reading a part body.
+var ErrMultipartRequestRead = errors.New("multipart request body read failed")
+
+// ErrMultipartStorageWrite identifies a failure while persisting a part in
+// local storage or MinIO.
+var ErrMultipartStorageWrite = errors.New("multipart storage write failed")
+
 // PresignPut 生成单次 PUT presigned URL（VP-T001）
 func (c *Client) PresignPut(ctx context.Context, objectKey string, ttl time.Duration) (*PresignResult, error) {
 	if ttl <= 0 {
@@ -216,17 +224,17 @@ func (c *Client) UploadMultipartPart(ctx context.Context, objectKey, uploadID st
 	if size < 0 {
 		data, err := io.ReadAll(r)
 		if err != nil {
-			return "", fmt.Errorf("read multipart part %d: %w", partNumber, err)
+			return "", fmt.Errorf("%w: part %d: %v", ErrMultipartRequestRead, partNumber, err)
 		}
 		r = bytes.NewReader(data)
 		size = int64(len(data))
 	}
 	info, err := c.core.PutObjectPart(ctx, c.bucket, objectKey, uploadID, partNumber, r, size, minio.PutObjectPartOptions{})
 	if err != nil {
-		return "", fmt.Errorf("upload multipart part %d: %w", partNumber, err)
+		return "", fmt.Errorf("%w: part %d: %v", ErrMultipartStorageWrite, partNumber, err)
 	}
 	if info.ETag == "" {
-		return "", fmt.Errorf("upload multipart part %d: empty etag", partNumber)
+		return "", fmt.Errorf("%w: part %d: empty etag", ErrMultipartStorageWrite, partNumber)
 	}
 	return info.ETag, nil
 }
@@ -406,10 +414,10 @@ func (c *Client) WriteMultipartPart(uploadID string, partNumber int, r io.Reader
 	}
 	data, err := io.ReadAll(r)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %v", ErrMultipartRequestRead, err)
 	}
 	if err := os.WriteFile(partPath, data, 0o644); err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %v", ErrMultipartStorageWrite, err)
 	}
 	sum := md5.Sum(data)
 	return `"` + hex.EncodeToString(sum[:]) + `"`, nil

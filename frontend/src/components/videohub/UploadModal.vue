@@ -146,13 +146,19 @@ async function startUpload() {
   cancel = { cancelled: false }
   const currentCancel = cancel
   try {
-    await uploadVideo({ file }, { onProgress: percent => { progress.value.percent = percent } }, currentCancel)
+    const uploaded = await uploadVideo({ file }, { onProgress: percent => { progress.value.percent = percent } }, currentCancel)
     if (currentCancel.cancelled) return
     cancel = null
     state.value = 'refreshing'
     try {
       await props.afterUpload?.()
-    } catch {
+    } catch (error) {
+      console.warn('[video-upload]', {
+        component: 'video-upload',
+        event: 'after_upload_refresh_failed',
+        video_id: uploaded.id,
+        error: error instanceof Error ? error.message : String(error),
+      })
       MessagePlugin.warning('视频已上传，但列表刷新失败，请稍后刷新页面')
     }
     if (!props.visible || state.value !== 'refreshing') return

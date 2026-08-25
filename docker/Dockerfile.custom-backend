@@ -12,13 +12,13 @@ ENV GOPROXY=https://goproxy.cn,direct \
     GOOS=linux
 
 COPY go.mod go.sum ./
-# vidsage/go.mod 顶层那条 `replace github.com/firecrawl/anydoc/go => ./third_party/anydoc-go`
-# 指向的 ./third_party/anydoc-go 不会复制进镜像，而其 require 也只是被 WeKnora 官方 web 抓取
-# 链路使用，custom-backend 实际不依赖 firecrawl。删掉 require + replace 两行即可让
-# `go mod download` 不去解析它（也避免 alpine 镜像缺 git 失败）。
-RUN sed -i -e '/github.com\/firecrawl\/anydoc\/go/d' \
-          -e '/open issue/d' \
-          go.mod \
+# custom-backend 不依赖官方 web 抓取链路使用的 anydoc。顶层 go.mod 中的本地
+# replace 指向未复制进镜像的 third_party/anydoc-go；如果只删 require，残留的
+# replace 仍会让 go mod download 校验不存在的本地模块目录。用 go mod edit
+# 同时删除 require 和 replace，保证独立镜像构建不依赖仓库中的第三方源码目录。
+RUN go mod edit \
+      -droprequire=github.com/firecrawl/anydoc/go \
+      -dropreplace=github.com/firecrawl/anydoc/go \
  && go mod download
 
 COPY cmd/custom-backend ./cmd/custom-backend
@@ -30,7 +30,7 @@ RUN go build -ldflags="-s -w" -o /out/custom-backend ./cmd/custom-backend
 # 选 3.19 而非 3.20：3.20 的 apk 对 libpulse/libflac 等音频包默认 --no-network，
 # 会让 ffmpeg 装不全（错误：masked in: --no-network）。3.19 行为正常。
 FROM alpine:3.19
-RUN apk add --no-cache ca-certificates ffmpeg tini tzdata \
+RUN apk add --no-cache ca-certificates ffmpeg tini tzdata wget \
     && addgroup -S app && adduser -S app -G app
 WORKDIR /app
 COPY --from=builder /out/custom-backend /app/custom-backend

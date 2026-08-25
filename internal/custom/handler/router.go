@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -45,6 +46,7 @@ func buildRouter(deps *Deps) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
 	router.Use(corsMiddleware())
+	router.Use(uploadTraceMiddleware())
 
 	// 健康检查：不挂 /api/custom，便于负载均衡探活
 	router.GET("/healthz", healthCheck(deps.DB))
@@ -210,7 +212,7 @@ func corsMiddleware() gin.HandlerFunc {
 		if origin != "" {
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Vary", "Origin")
-			c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-API-Key, X-Tenant-ID")
+			c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-API-Key, X-Tenant-ID, X-Upload-Trace-ID, X-Upload-Attempt, X-Video-ID, X-Object-Key, X-Upload-ID, X-Part-Number")
 			c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 			c.Header("Access-Control-Expose-Headers", "ETag, Content-Length, Content-Type")
 		}
@@ -219,6 +221,44 @@ func corsMiddleware() gin.HandlerFunc {
 			return
 		}
 		c.Next()
+	}
+}
+
+func uploadTraceMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !strings.HasPrefix(c.Request.URL.Path, "/api/custom/uploads/") {
+			c.Next()
+			return
+		}
+
+		startedAt := time.Now()
+		c.Next()
+
+		fields := []any{
+			"component", "custom-upload",
+			"event", "http_request_completed",
+			"trace_id", uploadTraceID(c),
+			"method", c.Request.Method,
+			"path", c.Request.URL.Path,
+			"http_status", c.Writer.Status(),
+			"elapsed_ms", time.Since(startedAt).Milliseconds(),
+		}
+		if videoID := strings.TrimSpace(c.GetHeader("X-Video-ID")); videoID != "" {
+			fields = append(fields, "video_id", videoID)
+		}
+		if uploadID := strings.TrimSpace(c.GetHeader("X-Upload-ID")); uploadID != "" {
+			fields = append(fields, "upload_id", uploadID)
+		}
+		if partNumber := strings.TrimSpace(c.GetHeader("X-Part-Number")); partNumber != "" {
+			fields = append(fields, "part_number", partNumber)
+		}
+		if attempt := strings.TrimSpace(c.GetHeader(uploadAttemptHeader)); attempt != "" {
+			fields = append(fields, "attempt", attempt)
+		}
+		if len(c.Errors) > 0 {
+			fields = append(fields, "gin_errors", c.Errors.String())
+		}
+		slog.InfoContext(c.Request.Context(), "custom upload HTTP request", fields...)
 	}
 }
 

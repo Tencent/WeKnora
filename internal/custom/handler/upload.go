@@ -9,6 +9,7 @@ package handler
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -30,6 +31,13 @@ type UploadHandler struct {
 	DB    *gorm.DB
 	MinIO *minio.Client
 }
+
+const (
+	uploadTraceHeader        = "X-Upload-Trace-ID"
+	uploadAttemptHeader      = "X-Upload-Attempt"
+	defaultMultipartPartSize = int64(5 * 1024 * 1024)
+	maxMultipartPartSize     = int64(5 * 1024 * 1024 * 1024)
+)
 
 // NewUploadHandler 构造 handler
 func NewUploadHandler(db *gorm.DB, m *minio.Client) *UploadHandler {
@@ -203,9 +211,11 @@ func (h *UploadHandler) Confirm(c *gin.Context) {
 
 // MultipartInitReq 初始化分片
 type MultipartInitReq struct {
-	Filename    string `json:"filename" binding:"required"`
-	ContentType string `json:"content_type"`
-	VideoType   string `json:"video_type"`
+	Filename      string `json:"filename" binding:"required"`
+	ContentType   string `json:"content_type"`
+	VideoType     string `json:"video_type"`
+	FileSizeBytes int64  `json:"file_size_bytes"`
+	PartSizeBytes int64  `json:"part_size_bytes"`
 }
 
 // MultipartInitResp 初始化响应
@@ -217,11 +227,17 @@ type MultipartInitResp struct {
 
 // MultipartInit 初始化分片上传（VP-T002）
 func (h *UploadHandler) MultipartInit(c *gin.Context) {
+	uploadLog(c, "init_start")
 	var req MultipartInitReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		uploadError(c, http.StatusBadRequest, "init", err)
 		return
 	}
+	if err := validateMultipartInit(req); err != nil {
+		uploadError(c, http.StatusBadRequest, "init_validate", err)
+		return
+	}
+	uploadLog(c, "init_validated", "filename", truncateUploadLogValue(req.Filename), "content_type", req.ContentType, "video_type", req.VideoType)
 	videoID := uuid.NewString()
 	ext := strings.ToLower(filepath.Ext(req.Filename))
 	if ext == "" {
@@ -231,22 +247,28 @@ func (h *UploadHandler) MultipartInit(c *gin.Context) {
 
 	handle, err := h.MinIO.InitiateMultipartUpload(c.Request.Context(), objectKey, req.ContentType)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		uploadError(c, http.StatusInternalServerError, "minio_init", err)
 		return
 	}
+	uploadLog(c, "minio_init_succeeded", "video_id", videoID, "upload_id", handle.UploadID, "object_key", objectKey)
 
 	video := model.Video{
-		ID:        videoID,
-		Title:     strings.TrimSuffix(req.Filename, filepath.Ext(req.Filename)),
-		FileURL:   h.MinIO.PublicURL(objectKey),
-		Status:    model.VideoStatusUploading,
-		VideoType: req.VideoType,
+		ID:                  videoID,
+		Title:               strings.TrimSuffix(req.Filename, filepath.Ext(req.Filename)),
+		FileURL:             h.MinIO.PublicURL(objectKey),
+		Status:              model.VideoStatusUploading,
+		VideoType:           req.VideoType,
+		UploadID:            handle.UploadID,
+		UploadSizeBytes:     req.FileSizeBytes,
+		UploadPartSizeBytes: req.PartSizeBytes,
 	}
 	if err := h.DB.Create(&video).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "create video: " + err.Error()})
+		uploadError(c, http.StatusInternalServerError, "db_init", fmt.Errorf("create video: %w", err))
 		return
 	}
 
+	c.Header(uploadTraceHeader, uploadTraceID(c))
+	c.Header("X-Upload-ID", handle.UploadID)
 	c.JSON(http.StatusOK, MultipartInitResp{
 		VideoID:   videoID,
 		ObjectKey: objectKey,
@@ -273,26 +295,59 @@ func (h *UploadHandler) MultipartPart(c *gin.Context) {
 	videoID := strings.TrimSpace(c.GetHeader("X-Video-ID"))
 	objectKey := strings.TrimSpace(c.GetHeader("X-Object-Key"))
 	uploadID := strings.TrimSpace(c.GetHeader("X-Upload-ID"))
+	partLogFields := []any{
+		"video_id", videoID,
+		"upload_id", uploadID,
+		"part_number", c.GetHeader("X-Part-Number"),
+		"attempt", c.GetHeader(uploadAttemptHeader),
+	}
+	uploadLog(c, "part_start", partLogFields...)
 	partNumber, err := parsePositivePartNumber(c.GetHeader("X-Part-Number"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		uploadError(c, http.StatusBadRequest, "part_validate", err, partLogFields...)
 		return
 	}
 	if videoID == "" || objectKey == "" || uploadID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing multipart upload headers"})
+		uploadError(c, http.StatusBadRequest, "part_validate", errors.New("missing multipart upload headers"), partLogFields...)
 		return
 	}
 
 	var video model.Video
-	if err := h.DB.Select("id").Where("id = ?", videoID).First(&video).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+	if err := h.DB.Select("id", "status", "upload_id", "upload_size_bytes", "upload_part_size_bytes").
+		Where("id = ?", videoID).First(&video).Error; err != nil {
+		uploadError(c, http.StatusNotFound, "part_db_lookup", errors.New("video not found"), partLogFields...)
+		return
+	}
+	if video.Status != model.VideoStatusUploading {
+		uploadError(c, http.StatusConflict, "part_validate", fmt.Errorf("video upload is not active: status=%s", video.Status), partLogFields...)
+		return
+	}
+	if video.UploadID != "" && video.UploadID != uploadID {
+		uploadError(c, http.StatusBadRequest, "part_validate", errors.New("upload id does not belong to video"), partLogFields...)
 		return
 	}
 	if !strings.HasPrefix(objectKey, "videos/"+videoID+"/") {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "object key does not belong to video"})
+		uploadError(c, http.StatusBadRequest, "part_validate", errors.New("object key does not belong to video"), partLogFields...)
+		return
+	}
+	expectedSize, err := expectedMultipartPartSize(video.UploadSizeBytes, video.UploadPartSizeBytes, partNumber)
+	if err != nil {
+		uploadError(c, http.StatusBadRequest, "part_validate", err, partLogFields...)
+		return
+	}
+	if c.Request.ContentLength < 0 {
+		uploadError(c, http.StatusLengthRequired, "part_validate", errors.New("Content-Length is required for multipart part"), append(partLogFields, "expected_content_length", expectedSize)...)
+		return
+	}
+	if c.Request.ContentLength != expectedSize {
+		uploadError(c, http.StatusBadRequest, "part_validate",
+			fmt.Errorf("invalid Content-Length: got %d, want %d", c.Request.ContentLength, expectedSize),
+			append(partLogFields, "content_length", c.Request.ContentLength, "expected_content_length", expectedSize)...)
 		return
 	}
 
+	uploadLog(c, "minio_part_start", append(partLogFields, "content_length", c.Request.ContentLength)...)
+	partStartedAt := time.Now()
 	etag, err := h.MinIO.UploadMultipartPart(
 		c.Request.Context(),
 		objectKey,
@@ -302,11 +357,18 @@ func (h *UploadHandler) MultipartPart(c *gin.Context) {
 		c.Request.ContentLength,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		code := "minio_write_failed"
+		status := http.StatusInternalServerError
+		if errors.Is(err, minio.ErrMultipartRequestRead) || c.Request.Context().Err() != nil {
+			code = "connection_interrupted"
+			status = 499
+		}
+		uploadErrorWithCode(c, status, "part", code, err, append(partLogFields, "elapsed_ms", time.Since(partStartedAt).Milliseconds())...)
 		return
 	}
+	uploadLog(c, "minio_part_succeeded", append(partLogFields, "etag", etag, "elapsed_ms", time.Since(partStartedAt).Milliseconds())...)
 	c.Header("ETag", etag)
-	c.JSON(http.StatusOK, gin.H{"part_number": partNumber, "etag": etag})
+	c.JSON(http.StatusOK, gin.H{"part_number": partNumber, "etag": etag, "trace_id": uploadTraceID(c)})
 }
 
 // MultipartSign 单分片签名（VP-T002）
@@ -335,6 +397,38 @@ func parsePositivePartNumber(raw string) (int, error) {
 	return n, nil
 }
 
+func validateMultipartInit(req MultipartInitReq) error {
+	if strings.TrimSpace(req.Filename) == "" {
+		return errors.New("filename is required")
+	}
+	if req.FileSizeBytes <= 0 {
+		return errors.New("file_size_bytes must be positive")
+	}
+	if req.PartSizeBytes == 0 {
+		return errors.New("part_size_bytes is required")
+	}
+	if req.PartSizeBytes < defaultMultipartPartSize || req.PartSizeBytes > maxMultipartPartSize {
+		return fmt.Errorf("part_size_bytes must be between %d and %d", defaultMultipartPartSize, maxMultipartPartSize)
+	}
+	return nil
+}
+
+func expectedMultipartPartSize(fileSize, partSize int64, partNumber int) (int64, error) {
+	if fileSize <= 0 || partSize < defaultMultipartPartSize {
+		return 0, errors.New("multipart upload metadata is missing or invalid")
+	}
+	totalParts := (fileSize + partSize - 1) / partSize
+	if int64(partNumber) > totalParts {
+		return 0, fmt.Errorf("part number %d exceeds total parts %d", partNumber, totalParts)
+	}
+	start := int64(partNumber-1) * partSize
+	remaining := fileSize - start
+	if remaining < partSize {
+		return remaining, nil
+	}
+	return partSize, nil
+}
+
 // MultipartCompleteReq 合并分片请求
 type MultipartCompleteReq struct {
 	VideoID   string               `json:"video_id" binding:"required"`
@@ -345,19 +439,57 @@ type MultipartCompleteReq struct {
 
 // MultipartComplete 合并分片（VP-T002）+ 触发 thumbnail job
 func (h *UploadHandler) MultipartComplete(c *gin.Context) {
+	uploadLog(c, "complete_start")
 	var req MultipartCompleteReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		uploadError(c, http.StatusBadRequest, "complete_validate", err)
 		return
 	}
+	var video model.Video
+	if err := h.DB.Select("id", "status", "upload_id", "upload_size_bytes", "upload_part_size_bytes").
+		Where("id = ?", req.VideoID).First(&video).Error; err != nil {
+		uploadError(c, http.StatusNotFound, "complete_db_lookup", errors.New("video not found"))
+		return
+	}
+	if video.Status != model.VideoStatusUploading {
+		uploadError(c, http.StatusConflict, "complete_validate", fmt.Errorf("video upload is not active: status=%s", video.Status))
+		return
+	}
+	if video.UploadID != "" && video.UploadID != req.UploadID {
+		uploadError(c, http.StatusBadRequest, "complete_validate", errors.New("upload id does not belong to video"))
+		return
+	}
+	if !strings.HasPrefix(req.ObjectKey, "videos/"+req.VideoID+"/") {
+		uploadError(c, http.StatusBadRequest, "complete_validate", errors.New("object key does not belong to video"))
+		return
+	}
+	if video.UploadSizeBytes <= 0 || video.UploadPartSizeBytes <= 0 {
+		uploadError(c, http.StatusBadRequest, "complete_validate", errors.New("multipart upload metadata is missing or invalid"))
+		return
+	}
+	totalParts := (video.UploadSizeBytes + video.UploadPartSizeBytes - 1) / video.UploadPartSizeBytes
+	if totalParts <= 0 || int64(len(req.Parts)) != totalParts {
+		uploadError(c, http.StatusBadRequest, "complete_validate",
+			fmt.Errorf("invalid multipart parts count: got %d, want %d", len(req.Parts), totalParts))
+		return
+	}
+	completeFields := []any{
+		"video_id", req.VideoID,
+		"upload_id", req.UploadID,
+		"object_key", req.ObjectKey,
+		"parts", len(req.Parts),
+	}
+	uploadLog(c, "complete_validated", completeFields...)
+	completeStartedAt := time.Now()
 	if err := h.MinIO.CompleteMultipartUpload(c.Request.Context(), req.ObjectKey, req.UploadID, req.Parts); err != nil {
 		if errors.Is(err, minio.ErrInvalidMultipartParts) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			uploadError(c, http.StatusBadRequest, "minio_complete_validate", err, append(completeFields, "elapsed_ms", time.Since(completeStartedAt).Milliseconds())...)
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		uploadError(c, http.StatusInternalServerError, "minio_complete", err, append(completeFields, "elapsed_ms", time.Since(completeStartedAt).Milliseconds())...)
 		return
 	}
+	uploadLog(c, "minio_complete_succeeded", append(completeFields, "elapsed_ms", time.Since(completeStartedAt).Milliseconds())...)
 
 	now := time.Now().UTC()
 	res := h.DB.Model(&model.Video{}).
@@ -368,15 +500,20 @@ func (h *UploadHandler) MultipartComplete(c *gin.Context) {
 			"uploaded_at": now,
 		})
 	if res.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": res.Error.Error()})
+		uploadError(c, http.StatusInternalServerError, "db_complete", res.Error, completeFields...)
+		return
+	}
+	if res.RowsAffected == 0 {
+		uploadError(c, http.StatusNotFound, "db_complete", errors.New("video not found"), completeFields...)
 		return
 	}
 
 	jobID, err := enqueueInitialProcessingJob(h.DB, req.VideoID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		uploadError(c, http.StatusInternalServerError, "db_enqueue", err, completeFields...)
 		return
 	}
+	uploadLog(c, "complete_succeeded", append(completeFields, "job_id", jobID)...)
 
 	c.JSON(http.StatusOK, gin.H{
 		"video_id":    req.VideoID,
@@ -384,6 +521,7 @@ func (h *UploadHandler) MultipartComplete(c *gin.Context) {
 		"status":      "uploaded",
 		"job_id":      jobID,
 		"uploaded_at": now,
+		"trace_id":    uploadTraceID(c),
 	})
 }
 
@@ -392,20 +530,154 @@ type MultipartAbortReq struct {
 	VideoID   string `json:"video_id" binding:"required"`
 	ObjectKey string `json:"object_key" binding:"required"`
 	UploadID  string `json:"upload_id" binding:"required"`
+	Reason    string `json:"reason"`
 }
 
 // MultipartAbort 取消分片（VP-T002）
 func (h *UploadHandler) MultipartAbort(c *gin.Context) {
+	uploadLog(c, "abort_start")
 	var req MultipartAbortReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		uploadError(c, http.StatusBadRequest, "abort_validate", err)
 		return
 	}
-	if err := h.MinIO.AbortMultipartUpload(c.Request.Context(), req.ObjectKey, req.UploadID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	abortFields := []any{
+		"video_id", req.VideoID,
+		"upload_id", req.UploadID,
+		"object_key", req.ObjectKey,
+		"reason", truncateUploadLogValue(req.Reason),
+	}
+	uploadLog(c, "abort_validated", abortFields...)
+	abortStartedAt := time.Now()
+	minioErr := h.MinIO.AbortMultipartUpload(c.Request.Context(), req.ObjectKey, req.UploadID)
+	if minioErr != nil {
+		uploadLog(c, "minio_abort_failed", append(abortFields, "elapsed_ms", time.Since(abortStartedAt).Milliseconds(), "error", minioErr.Error())...)
+	} else {
+		uploadLog(c, "minio_abort_succeeded", append(abortFields, "elapsed_ms", time.Since(abortStartedAt).Milliseconds())...)
+	}
+
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		reason = "multipart upload aborted"
+	}
+	dbResult := h.DB.Model(&model.Video{}).
+		Where("id = ? AND status = ?", req.VideoID, model.VideoStatusUploading).
+		Updates(map[string]any{
+			"status":                   model.VideoStatusFailed,
+			"processing_error_summary": reason,
+		})
+	if dbResult.Error != nil {
+		uploadError(c, http.StatusInternalServerError, "db_abort", dbResult.Error, append(abortFields, "elapsed_ms", time.Since(abortStartedAt).Milliseconds())...)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"video_id": req.VideoID, "status": "aborted"})
+	uploadLog(c, "db_abort_marked", append(abortFields, "rows_affected", dbResult.RowsAffected)...)
+	if minioErr != nil {
+		uploadErrorWithCode(c, http.StatusInternalServerError, "abort", "minio_abort_failed", minioErr, abortFields...)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"video_id": req.VideoID,
+		"status":   "aborted",
+		"trace_id": uploadTraceID(c),
+	})
+}
+
+func uploadTraceID(c *gin.Context) string {
+	traceID := strings.TrimSpace(c.GetHeader(uploadTraceHeader))
+	if traceID == "" {
+		traceID = uuid.NewString()
+		c.Request.Header.Set(uploadTraceHeader, traceID)
+	}
+	return traceID
+}
+
+func uploadLog(c *gin.Context, event string, fields ...any) {
+	base := []any{
+		"component", "custom-upload",
+		"event", event,
+		"trace_id", uploadTraceID(c),
+		"method", c.Request.Method,
+		"path", c.Request.URL.Path,
+	}
+	if videoID := strings.TrimSpace(c.GetHeader("X-Video-ID")); videoID != "" && !hasUploadLogField(fields, "video_id") {
+		base = append(base, "video_id", videoID)
+	}
+	if uploadID := strings.TrimSpace(c.GetHeader("X-Upload-ID")); uploadID != "" && !hasUploadLogField(fields, "upload_id") {
+		base = append(base, "upload_id", uploadID)
+	}
+	slog.InfoContext(c.Request.Context(), "custom upload event", append(base, fields...)...)
+}
+
+func hasUploadLogField(fields []any, name string) bool {
+	for i := 0; i+1 < len(fields); i += 2 {
+		if key, ok := fields[i].(string); ok && key == name {
+			return true
+		}
+	}
+	return false
+}
+
+func uploadError(c *gin.Context, status int, stage string, err error, fields ...any) {
+	uploadErrorWithCode(c, status, stage, uploadErrorCode(stage), err, fields...)
+}
+
+func uploadErrorCode(stage string) string {
+	switch stage {
+	case "init", "part_validate", "complete_validate", "init_validate", "abort_validate":
+		return "request_validation_failed"
+	case "part_db_lookup", "complete_db_lookup", "db_init", "db_complete", "db_enqueue", "db_abort":
+		return "database_failed"
+	case "minio_init":
+		return "minio_init_failed"
+	case "minio_complete", "minio_complete_validate":
+		return "minio_complete_failed"
+	default:
+		return "upload_failed"
+	}
+}
+
+func uploadErrorWithCode(c *gin.Context, status int, stage, code string, err error, fields ...any) {
+	base := []any{
+		"stage", stage,
+		"code", code,
+		"http_status", status,
+		"error", err.Error(),
+	}
+	uploadLog(c, "request_failed", append(base, fields...)...)
+	c.Header(uploadTraceHeader, uploadTraceID(c))
+	response := gin.H{
+		"error":    err.Error(),
+		"code":     code,
+		"stage":    stage,
+		"trace_id": uploadTraceID(c),
+	}
+	for i := 0; i+1 < len(fields); i += 2 {
+		key, ok := fields[i].(string)
+		if !ok {
+			continue
+		}
+		switch key {
+		case "part_number":
+			if raw, ok := fields[i+1].(string); ok {
+				if partNumber, parseErr := strconv.Atoi(raw); parseErr == nil {
+					response[key] = partNumber
+				}
+			} else {
+				response[key] = fields[i+1]
+			}
+		case "content_length", "expected_content_length", "elapsed_ms":
+			response[key] = fields[i+1]
+		}
+	}
+	c.JSON(status, response)
+}
+
+func truncateUploadLogValue(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 500 {
+		return value
+	}
+	return value[:500] + "..."
 }
 
 func enqueueInitialProcessingJob(db *gorm.DB, videoID string) (string, error) {

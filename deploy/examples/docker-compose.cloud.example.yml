@@ -6,11 +6,13 @@
 #    1. 将本文件复制到 服务器 /opt/vidsage/ 目录，命名为 docker-compose.cloud.yml
 #       cp deploy/examples/docker-compose.cloud.example.yml \
 #          /opt/vidsage/docker-compose.cloud.yml
-#    2. 按本环境实际情况修改：镜像 Tag（4处）、资源限制、环境变量来源
+#    2. 在 .env 设置 CUSTOM_IMAGE_TAG（GitHub Actions 成功构建的 custom-<commit8>）
+#       并按本环境实际情况修改资源限制、环境变量来源
 #    3. 永远双文件启动（单文件必出 502 / 端口丢失 / 网络断连）：
 #       cd /opt/vidsage
-#       sudo docker compose -f docker-compose.yml -f docker-compose.cloud.yml \
-#         up -d frontend custom-backend
+#       sudo docker compose -f docker-compose.yml -f docker-compose.cloud.yml pull frontend custom-backend
+#       sudo docker compose -f docker-compose.yml -f docker-compose.cloud.yml up -d frontend custom-backend
+#       sudo docker compose -f docker-compose.yml -f docker-compose.cloud.yml ps
 #
 #  【版本控制原则】
 #    · 本地仓库只存模板（本文件），不存服务器私有镜像 Tag、资源配额等现场值
@@ -20,10 +22,9 @@
 #
 #  【镜像 Tag 约定】—— 与 output/development/个性化代码部署与发布流程.md §4.1 完全一致
 #    · 前缀 lizi586586/ （Docker Hub 用户名，按实际改为自己的）
-#    · UI:       vidsage-ui             :custom-${WEKNORA_VERSION}-YYYYMMDDHHMMSS-${COMMIT8}
-#    · App(官方版本升级 / 二开官方源码时覆盖 Tag，平时不需要动):
-#                 vidsage-app            :custom-${WEKNORA_VERSION}-YYYYMMDDHHMMSS-${COMMIT8}
-#    · 后端独立:  vidsage-custom-backend :custom-${WEKNORA_VERSION}-YYYYMMDDHHMMSS-${COMMIT8}
+#    · UI:       vidsage-ui             :custom-${COMMIT8}
+#    · 后端独立: vidsage-custom-backend :custom-${COMMIT8}
+#    · COMMIT8 必须是 GitHub Actions 构建成功的提交短 SHA，不能使用 latest。
 # ============================================================
 
 services:
@@ -34,14 +35,12 @@ services:
   #    这里只覆盖 image + depends_on.condition + deploy.resources
   # ----------------------------------------------------------
   frontend:
-    image: lizi586586/vidsage-ui:custom-v0.7.2-20260820154021-31aecd1b
+    image: ${DOCKERHUB_USERNAME:-lizi586586}/vidsage-ui:${CUSTOM_IMAGE_TAG:?CUSTOM_IMAGE_TAG must be set to a published custom tag}
     depends_on:
       app:
         condition: service_healthy
-      # custom-backend 健康检查依赖默认关闭（custom-backend 未部署时必须保持注释，否则 compose up 会因找不到服务报错）
-      # ⚠️ 仅当 docker-compose.cloud.yml 中已声明并启用 custom-backend 服务后，才取消下面两行注释
-      # custom-backend:
-      #   condition: service_healthy   # 个性化后端也健康后，前端再启（避免/api/custom 502）
+      custom-backend:
+        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -73,7 +72,7 @@ services:
   # ----------------------------------------------------------
   custom-backend:
     container_name: vidsage-custom-backend
-    image: lizi586586/vidsage-custom-backend:custom-v0.7.2-20260820181000-fefbec3d
+    image: ${DOCKERHUB_USERNAME:-lizi586586}/vidsage-custom-backend:${CUSTOM_IMAGE_TAG:?CUSTOM_IMAGE_TAG must be set to a published custom tag}
 
     # 依赖顺序：数据库 / Redis / 官方 app 全部 healthy 后才启
     depends_on:
@@ -81,6 +80,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      custom-db-init:
+        condition: service_completed_successfully
       redis:
         condition: service_started
 
@@ -94,28 +95,40 @@ services:
     environment:
       # 通用
       TZ: Asia/Shanghai
-      LOG_LEVEL: info
-      PORT: "8081"
-      CUSTOM_DB_NAME: vidsage
+      CUSTOM_LOG_LEVEL: info
+      CUSTOM_SERVER_HOST: 0.0.0.0
+      CUSTOM_SERVER_PORT: "8090"
+      CUSTOM_DB_DRIVER: postgres
+      CUSTOM_DB_HOST: postgres
+      CUSTOM_DB_PORT: "5432"
+      CUSTOM_DB_USER: "${DB_USER:?DB_USER must be set}"
+      CUSTOM_DB_PASSWORD: "${DB_PASSWORD:?DB_PASSWORD must be set}"
+      # 基础 Compose 只会创建 DB_NAME；默认复用它，避免 custom-backend 首启时因
+      # vidsage 独立库尚未手动创建而退出。需要独立库时，先创建后再显式设置 CUSTOM_DB_NAME。
+      CUSTOM_DB_NAME: "${CUSTOM_DB_NAME:-${DB_NAME:?DB_NAME must be set}}"
 
       # 复用官方服务 —— 通过 compose network 内 hostname 访问，不走公网
-      WEKNORA_APP_INTERNAL_BASE_URL: "http://app:8080"
-      DATABASE_URL: "${DATABASE_URL}"       # 与官方 app 读同一个 .env 变量
-      REDIS_URL: "${REDIS_URL}"
+      WEKNORA_BASE_URL: "http://app:8080"
+      WEKNORA_API_KEY: "${WEKNORA_API_KEY:-}"
+      WEKNORA_KB_ID: "${WEKNORA_KB_ID:-}"
+      WEKNORA_TENANT_ID: "${WEKNORA_TENANT_ID:-}"
       MINIO_ENDPOINT: "minio:9000"
-      MINIO_ROOT_USER: "${MINIO_ROOT_USER}"
-      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD}"
-      NEO4J_URI: "bolt://neo4j:7687"
-      NEO4J_USER: "${NEO4J_USER:-neo4j}"
-      NEO4J_PASSWORD: "${NEO4J_PASSWORD}"
+      MINIO_ACCESS_KEY: "${MINIO_ACCESS_KEY_ID:?MINIO_ACCESS_KEY_ID must be set}"
+      MINIO_SECRET_KEY: "${MINIO_SECRET_ACCESS_KEY:?MINIO_SECRET_ACCESS_KEY must be set}"
+      MINIO_BUCKET: "${CUSTOM_MINIO_BUCKET:-vidsage}"
+      MINIO_USE_SSL: "${MINIO_USE_SSL:-false}"
+      MINIO_PUBLIC_URL: "${CUSTOM_MINIO_PUBLIC_URL:-}"
 
-      # 鉴权：复用 WeKnora 官方签发的 JWT（handler 里调官方 /api/auth/me 校验）
-      WEKNORA_JWT_SECRET: "${JWT_SECRET}"
-
-      # LLM（官方 /api/custom/v1/* 里需要调 LLM 时用）
-      LLM_API_BASE: "${LLM_API_BASE:-}"
-      LLM_API_KEY:  "${LLM_API_KEY:-}"
-      LLM_MODEL:    "${LLM_MODEL:-}"
+      # 通义听悟与内容生产配置
+      TONGYI_API_KEY: "${TONGYI_API_KEY:-}"
+      TONGYI_ACCESS_KEY_ID: "${TONGYI_ACCESS_KEY_ID:-}"
+      TONGYI_ACCESS_KEY_SECRET: "${TONGYI_ACCESS_KEY_SECRET:-}"
+      TONGYI_APP_KEY: "${TONGYI_APP_KEY:-}"
+      TONGYI_ENDPOINT: "${TONGYI_ENDPOINT:-https://tingwu.cn-beijing.aliyuncs.com}"
+      CUSTOM_CONTENT_AGENT_ID: "${CUSTOM_CONTENT_AGENT_ID:-}"
+      CUSTOM_WORKER_POLL_INTERVAL: "${CUSTOM_WORKER_POLL_INTERVAL:-5}"
+      CUSTOM_WORKER_MAX_ATTEMPTS: "${CUSTOM_WORKER_MAX_ATTEMPTS:-3}"
+      CUSTOM_WORKER_CONCURRENCY: "${CUSTOM_WORKER_CONCURRENCY:-2}"
 
     # 2C4G 服务器资源总盘子留位：
     #   postgres + redis + minio + neo4j + app + docreader ≈ 1.6C / 2.1G
@@ -132,12 +145,7 @@ services:
           memory: 128M
 
     healthcheck:
-      # 对应 internal/custom/router 里必须注册的 GET /health 端点
-      # ⚠️ Dockerfile.custom-backend 基础镜像必须包含 wget，否则健康检查会直接 Exit 127：
-      #    - 若基础镜像为 alpine:  RUN apk add --no-cache wget
-      #    - 若基础镜像为 debian:  RUN apt-get update && apt-get install -y --no-install-recommends wget && rm -rf /var/lib/apt/lists/*
-      #    - 若基础镜像为 distroless/static-debian*：healthcheck 改用 Go 原生方案（编译一个 /bin/healthcheck go binary 打进镜像）
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/healthz"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -152,6 +160,41 @@ services:
     # ⭐ 禁止映射 host port：只允许经 Nginx /api/custom/* 反代进入，
     #    否则公网直连会绕过 Nginx 层的超时/大小限制/统一鉴权。
     # ports: []
+
+  # ----------------------------------------------------------
+  # 4. custom-backend 独立数据库初始化（幂等一次性任务）
+  #    基础 Compose 只创建 DB_NAME；CUSTOM_DB_NAME 使用独立库时，在后端启动前创建它。
+  # ----------------------------------------------------------
+  custom-db-init:
+    image: paradedb/paradedb:v0.22.2-pg17
+    container_name: vidsage-custom-db-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: "${DB_PASSWORD:?DB_PASSWORD must be set}"
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        db_name="${CUSTOM_DB_NAME:-${DB_NAME:?DB_NAME must be set}}"
+        case "$$db_name" in
+          *[!A-Za-z0-9_]*|'')
+            echo "[custom-db-init] CUSTOM_DB_NAME must contain only letters, numbers, and underscores" >&2
+            exit 1
+            ;;
+        esac
+        if psql -h postgres -U "${DB_USER:?DB_USER must be set}" -d postgres -tAc \
+          "SELECT 1 FROM pg_database WHERE datname='$$db_name'" | grep -q 1; then
+          echo "[custom-db-init] database '$$db_name' already exists."
+        else
+          psql -h postgres -U "${DB_USER:?DB_USER must be set}" -d postgres \
+            -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$$db_name\" TEMPLATE template0;"
+          echo "[custom-db-init] database '$$db_name' created."
+        fi
+    networks:
+      - WeKnora-network
+    restart: "no"
 
 # ----------------------------------------------------------
 # 网络：与基础 docker-compose.yml 保持同名（已存在，无需 driver 定义）

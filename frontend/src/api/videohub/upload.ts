@@ -19,13 +19,25 @@ export class UploadCancelledError extends Error {
 }
 
 // 分片大小：5 MB（MinIO multipart 最小限制；过小会导致签名请求过多）
-const PART_SIZE = 5 * 1024 * 1024
+export const PART_SIZE = 5 * 1024 * 1024
 // 同源后端代理会占用服务端连接，生产环境保持较低并发以降低排队和超时概率。
 const MAX_CONCURRENCY = 2
 // 单片最大重试次数：网络抖动时重传，避免整文件从头再来
-const MAX_RETRIES = 3
+export const MAX_RETRIES = 3
 const RETRY_BACKOFF_MS = 700
 const PART_TIMEOUT_MS = 5 * 60 * 1000
+const UPLOAD_TRACE_HEADER = 'X-Upload-Trace-ID'
+const UPLOAD_ATTEMPT_HEADER = 'X-Upload-Attempt'
+const MAX_LOG_RESPONSE_BODY_LENGTH = 2000
+
+interface UploadTrace {
+  traceId: string
+}
+
+interface UploadRequestResult {
+  response: Response
+  responseBody: string
+}
 
 // 分片直传架构（VP-T002）：
 // 1) POST /api/custom/uploads/multipart/init 拿 upload_id + video_id + object_key
@@ -47,30 +59,57 @@ export function uploadVideo(
   if (!file || !file.name) throw new Error('请选择视频文件')
 
   const videoType = 'tutorial'
+  const trace: UploadTrace = { traceId: createUploadTraceId() }
 
   // 提到外层以便 catch 调 abort 清理
   let init: { video_id: string; object_key: string; upload_id: string } | undefined
   let multipartCompleted = false
 
+  logUploadEvent('upload_start', trace, {
+    filename: file.name,
+    file_size: file.size,
+    part_size: PART_SIZE,
+    max_concurrency: MAX_CONCURRENCY,
+    max_retries: MAX_RETRIES,
+  })
   callbacks.onProgress(2)
 
   return (async () => {
     // 步骤 1：init —— 后端创建 multipart upload + 占位 video 记录
-    const initRes = await fetch('/api/custom/uploads/multipart/init', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        filename: file.name,
-        content_type: file.type || 'application/octet-stream',
-        video_type: videoType,
-      }),
-    })
+    const initRequest = await fetchWithUploadDiagnostics(
+      '/api/custom/uploads/multipart/init',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          [UPLOAD_TRACE_HEADER]: trace.traceId,
+        },
+        body: JSON.stringify({
+          filename: file.name,
+          content_type: file.type || 'application/octet-stream',
+          video_type: videoType,
+          file_size_bytes: file.size,
+          part_size_bytes: PART_SIZE,
+        }),
+      },
+      trace,
+      { stage: 'init' },
+    )
+    const initRes = initRequest.response
     if (cancel.cancelled) throw new UploadCancelledError()
     if (!initRes.ok) {
-      const data = await initRes.json().catch(() => ({} as { error?: string }))
+      const data = parseJson<{ error?: string }>(initRequest.responseBody)
       throw new Error(data?.error || `初始化分片上传失败（HTTP ${initRes.status}）`)
     }
-    init = await initRes.json() as typeof init
+    init = parseJson<typeof init>(initRequest.responseBody)
+    if (!init?.video_id || !init.object_key || !init.upload_id) {
+      throw new Error('初始化分片上传响应缺少 video_id、object_key 或 upload_id')
+    }
+    logUploadEvent('init_ready', trace, {
+      video_id: init.video_id,
+      upload_id: init.upload_id,
+      object_key: init.object_key,
+    })
 
     // 步骤 2：切片 + 并发上传
     const totalParts = Math.max(1, Math.ceil(file.size / PART_SIZE))
@@ -88,72 +127,110 @@ export function uploadVideo(
       const end = Math.min(start + PART_SIZE, file.size)
       const blob = file.slice(start, end)
 
-      // 单片重试 MAX_RETRIES 次
-      let lastErr: Error | undefined
-      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        if (cancel.cancelled) throw new UploadCancelledError()
-        try {
-          const etag = await putPartViaXhr(
-            '/api/custom/uploads/multipart/part',
-            blob,
-            cancel,
-            inFlightXhrs,
-            {
-              'X-Video-ID': init!.video_id,
-              'X-Object-Key': init!.object_key,
-              'X-Upload-ID': init!.upload_id,
-              'X-Part-Number': String(partNumber),
-            },
-          )
-          if (completedParts.has(partNumber)) {
-            throw new Error(`分片 ${partNumber}/${totalParts} 重复上传完成`)
-          }
-          completedParts.set(partNumber, etag)
-          uploadedBytes.count += (end - start)
-          // 进度映射：2% → 95%（按已上传字节比例推进，每片完成立即触发）
-          const pct = 2 + Math.floor((uploadedBytes.count / file.size) * 93)
-          callbacks.onProgress(Math.min(pct, 95))
-          return // 成功，退出重试循环
-        } catch (err) {
-          if (err instanceof UploadCancelledError) throw err
-          lastErr = err as Error
-          if (attempt < MAX_RETRIES) {
-            await new Promise<void>(r => setTimeout(r, RETRY_BACKOFF_MS))
-          }
-        }
+      const etag = await uploadPartWithRetry(
+        partNumber,
+        totalParts,
+        async (attempt) => putPartViaXhr(
+          '/api/custom/uploads/multipart/part',
+          blob,
+          cancel,
+          inFlightXhrs,
+          {
+            'X-Video-ID': init!.video_id,
+            'X-Object-Key': init!.object_key,
+            'X-Upload-ID': init!.upload_id,
+            'X-Part-Number': String(partNumber),
+            [UPLOAD_TRACE_HEADER]: trace.traceId,
+            [UPLOAD_ATTEMPT_HEADER]: String(attempt),
+          },
+          trace,
+          { videoId: init!.video_id, uploadId: init!.upload_id, partNumber, attempt, totalParts },
+        ),
+        {
+          cancel,
+          maxRetries: MAX_RETRIES,
+          retryDelayMs: RETRY_BACKOFF_MS,
+          onAttemptFailed: (attempt, error) => logUploadEvent('part_attempt_failed', trace, {
+            video_id: init!.video_id,
+            upload_id: init!.upload_id,
+            part_number: partNumber,
+            attempt,
+            max_retries: MAX_RETRIES,
+            error: errorMessage(error),
+          }, 'warn'),
+          onRetryExhausted: (error) => logUploadEvent('part_retry_exhausted', trace, {
+            video_id: init!.video_id,
+            upload_id: init!.upload_id,
+            part_number: partNumber,
+            attempts: MAX_RETRIES,
+            error: errorMessage(error),
+          }, 'error'),
+        },
+      )
+      if (completedParts.has(partNumber)) {
+        throw new Error(`分片 ${partNumber}/${totalParts} 重复上传完成`)
       }
-      // 重试耗尽，抛错（外层 catch 会调 abort 清理）
-      throw new Error(`分片 ${partNumber}/${totalParts} 上传失败：${lastErr?.message ?? '未知错误'}`)
+      completedParts.set(partNumber, etag)
+      uploadedBytes.count += (end - start)
+      // 进度映射：2% → 95%（按已上传字节比例推进，每片完成立即触发）
+      const pct = 2 + Math.floor((uploadedBytes.count / file.size) * 93)
+      callbacks.onProgress(Math.min(pct, 95))
     })
 
     if (cancel.cancelled) throw new UploadCancelledError()
 
     // 步骤 3：complete —— 后端合并分片 + 入初始处理任务
     callbacks.onProgress(97)
-    const completeRes = await fetch('/api/custom/uploads/multipart/complete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        video_id: init!.video_id,
-        object_key: init!.object_key,
-        upload_id: init!.upload_id,
-        parts: buildMultipartCompleteParts(completedParts, totalParts),
-      }),
-    })
+    const completeRequest = await fetchWithUploadDiagnostics(
+      '/api/custom/uploads/multipart/complete',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          [UPLOAD_TRACE_HEADER]: trace.traceId,
+        },
+        body: JSON.stringify({
+          video_id: init!.video_id,
+          object_key: init!.object_key,
+          upload_id: init!.upload_id,
+          parts: buildMultipartCompleteParts(completedParts, totalParts),
+        }),
+      },
+      trace,
+      {
+        stage: 'complete',
+        videoId: init!.video_id,
+        uploadId: init!.upload_id,
+      },
+    )
+    const completeRes = completeRequest.response
     if (cancel.cancelled) throw new UploadCancelledError()
     if (!completeRes.ok) {
-      const data = await completeRes.json().catch(() => ({} as { error?: string }))
+      const data = parseJson<{ error?: string }>(completeRequest.responseBody)
       throw new Error('合并分片失败：' + (data?.error || `HTTP ${completeRes.status}`))
     }
     multipartCompleted = true
-    const completed = await completeRes.json() as { video_id: string; uploaded_at: string }
+    const completed = parseJson<{ video_id: string; uploaded_at: string }>(completeRequest.responseBody)
+    logUploadEvent('complete_ready', trace, {
+      video_id: init!.video_id,
+      upload_id: init!.upload_id,
+      job_id: (completed as { job_id?: string }).job_id,
+    })
 
-    const poster = await generateVideoPoster(file).catch(() => null)
+    const poster = await generateVideoPoster(file).catch((error) => {
+      logUploadEvent('poster_generate_failed', trace, { error: errorMessage(error) }, 'warn')
+      return null
+    })
     if (poster) {
-      await uploadVideoPoster(completed.video_id, poster).catch(() => {})
+      await uploadVideoPoster(completed.video_id, poster, trace).catch((error) => {
+        logUploadEvent('poster_upload_failed', trace, {
+          video_id: completed.video_id,
+          error: errorMessage(error),
+        }, 'warn')
+      })
     }
 
-    await waitForVideoReady(completed.video_id, cancel, callbacks)
+    await waitForVideoReady(completed.video_id, cancel, callbacks, trace)
     callbacks.onProgress(100)
 
     // UploadModal 上传成功后调 afterUpload 刷新列表，video_url 由列表/详情接口补全
@@ -175,16 +252,45 @@ export function uploadVideo(
   })().catch(async (err) => {
     // 失败或取消：清理 MinIO 残留分片，避免存储泄漏
     if (init?.upload_id && !multipartCompleted) {
-      await fetch('/api/custom/uploads/multipart/abort', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          video_id: init.video_id,
-          object_key: init.object_key,
-          upload_id: init.upload_id,
-        }),
-      }).catch(() => {}) // 静默失败：清理失败不阻塞错误传播
+      const failureReason = err instanceof UploadCancelledError
+        ? 'browser_cancelled'
+        : 'upload_failed'
+      logUploadEvent('abort_start', trace, {
+        video_id: init.video_id,
+        upload_id: init.upload_id,
+        reason: failureReason,
+        error: errorMessage(err),
+      }, 'warn')
+      await fetchWithUploadDiagnostics(
+        '/api/custom/uploads/multipart/abort',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            [UPLOAD_TRACE_HEADER]: trace.traceId,
+          },
+          body: JSON.stringify({
+            video_id: init.video_id,
+            object_key: init.object_key,
+            upload_id: init.upload_id,
+            reason: `${failureReason}: ${errorMessage(err)}`,
+          }),
+        },
+        trace,
+        {
+          stage: 'abort',
+          videoId: init.video_id,
+          uploadId: init.upload_id,
+        },
+      ).catch((abortError) => {
+        logUploadEvent('abort_failed', trace, {
+          video_id: init?.video_id,
+          upload_id: init?.upload_id,
+          error: errorMessage(abortError),
+        }, 'error')
+      })
     }
+    logUploadEvent('upload_failed', trace, { error: errorMessage(err) }, 'error')
     throw err
   }) as Promise<VideoData>
 }
@@ -227,19 +333,81 @@ export function buildMultipartCompleteParts(
   })
 }
 
-async function uploadVideoPoster(videoId: string, poster: GeneratedPoster): Promise<void> {
+export function getMultipartPartSizes(
+  fileSize: number,
+  partSize = PART_SIZE,
+): number[] {
+  if (!Number.isSafeInteger(fileSize) || fileSize <= 0) {
+    throw new Error('文件大小无效')
+  }
+  if (!Number.isSafeInteger(partSize) || partSize <= 0) {
+    throw new Error('分片大小无效')
+  }
+  const totalParts = Math.ceil(fileSize / partSize)
+  return Array.from({ length: totalParts }, (_, index) => {
+    const start = index * partSize
+    return Math.min(partSize, fileSize - start)
+  })
+}
+
+export interface MultipartRetryOptions {
+  cancel?: UploadCancel
+  maxRetries?: number
+  retryDelayMs?: number
+  sleep?: (ms: number) => Promise<void>
+  onAttemptFailed?: (attempt: number, error: unknown) => void
+  onRetryExhausted?: (error: unknown) => void
+}
+
+// Keep retry behavior independent from XHR so the browser path and the
+// large-file regression tests exercise the same state machine.
+export async function uploadPartWithRetry<T>(
+  partNumber: number,
+  totalParts: number,
+  uploadAttempt: (attempt: number) => Promise<T>,
+  options: MultipartRetryOptions = {},
+): Promise<T> {
+  const maxRetries = options.maxRetries ?? MAX_RETRIES
+  const retryDelayMs = options.retryDelayMs ?? RETRY_BACKOFF_MS
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)))
+  let lastError: unknown = new Error('未知错误')
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    if (options.cancel?.cancelled) throw new UploadCancelledError()
+    try {
+      return await uploadAttempt(attempt)
+    } catch (error) {
+      if (error instanceof UploadCancelledError) throw error
+      lastError = error
+      options.onAttemptFailed?.(attempt, error)
+      if (attempt < maxRetries) await sleep(retryDelayMs)
+    }
+  }
+
+  options.onRetryExhausted?.(lastError)
+  throw new Error(`分片 ${partNumber}/${totalParts} 上传失败：${errorMessage(lastError)}`)
+}
+
+async function uploadVideoPoster(videoId: string, poster: GeneratedPoster, trace: UploadTrace): Promise<void> {
   const query = poster.durationSeconds > 0
     ? `?duration_seconds=${encodeURIComponent(Math.floor(poster.durationSeconds))}`
     : ''
-  const resp = await fetch(`/api/custom/videos/${videoId}/poster${query}`, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': poster.blob.type || 'image/jpeg',
+  const request = await fetchWithUploadDiagnostics(
+    `/api/custom/videos/${videoId}/poster${query}`,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': poster.blob.type || 'image/jpeg',
+        [UPLOAD_TRACE_HEADER]: trace.traceId,
+      },
+      body: poster.blob,
     },
-    body: poster.blob,
-  })
+    trace,
+    { stage: 'poster', videoId },
+  )
+  const resp = request.response
   if (!resp.ok) {
-    const data = await resp.json().catch(() => ({} as { error?: string }))
+    const data = parseJson<{ error?: string }>(request.responseBody)
     throw new Error(data?.error || `上传封面失败（HTTP ${resp.status}）`)
   }
 }
@@ -248,19 +416,31 @@ async function waitForVideoReady(
   videoId: string,
   cancel: UploadCancel,
   callbacks: UploadCallbacks,
+  trace: UploadTrace,
 ): Promise<void> {
   const deadline = Date.now() + 10 * 60 * 1000
   while (Date.now() < deadline) {
     if (cancel.cancelled) throw new UploadCancelledError()
-    const resp = await fetch(`/api/custom/videos/${videoId}`, { headers: { Accept: 'application/json' } })
+    const request = await fetchWithUploadDiagnostics(
+      `/api/custom/videos/${videoId}`,
+      {
+        headers: {
+          Accept: 'application/json',
+          [UPLOAD_TRACE_HEADER]: trace.traceId,
+        },
+      },
+      trace,
+      { stage: 'ready_poll', videoId },
+    )
+    const resp = request.response
     if (!resp.ok) throw new Error(`等待视频初始处理失败（HTTP ${resp.status}）`)
-    const payload = await resp.json() as { data?: {
+    const payload = parseJson<{ data?: {
       status?: string
       thumbnail_url?: string
       duration_seconds?: number
       file_url?: string
       processing_error_summary?: string
-    } }
+    } }>(request.responseBody)
     const video = payload.data
     if (video?.status === 'failed') {
       throw new Error(video.processing_error_summary || '视频初始处理失败')
@@ -371,9 +551,12 @@ async function putPartViaXhr(
   cancel: UploadCancel,
   inFlightXhrs: XMLHttpRequest[],
   headers: Record<string, string>,
+  trace: UploadTrace,
+  metadata: { videoId: string; uploadId: string; partNumber: number; attempt: number; totalParts: number },
 ): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
+    const startedAt = Date.now()
     inFlightXhrs.push(xhr)
     xhr.open('PUT', url)
     xhr.timeout = PART_TIMEOUT_MS
@@ -394,28 +577,166 @@ async function putPartViaXhr(
 
     xhr.onload = () => {
       if (cancel.cancelled) {
+        logUploadEvent('part_cancelled_after_response', trace, {
+          ...metadata,
+          http_status: xhr.status,
+          elapsed_ms: Date.now() - startedAt,
+          response_body: truncateForLog(xhr.responseText),
+        }, 'warn')
         reject(new UploadCancelledError())
         return
       }
       if (xhr.status < 200 || xhr.status >= 300) {
-        reject(new Error(`分片 PUT 失败（HTTP ${xhr.status}）`))
+        const detail = responseDetail(xhr.status, xhr.responseText)
+        logUploadEvent('part_response_failed', trace, {
+          ...metadata,
+          http_status: xhr.status,
+          elapsed_ms: Date.now() - startedAt,
+          response_body: truncateForLog(xhr.responseText),
+          error: detail,
+        }, 'error')
+        reject(new Error(`分片 ${metadata.partNumber}/${metadata.totalParts} PUT 失败（HTTP ${xhr.status}）：${detail}`))
         return
       }
       // MinIO 在响应头返回 ETag（分片 MD5），complete 时必需
       const etag = xhr.getResponseHeader('ETag') || ''
       if (!etag) {
-        reject(new Error('分片上传成功但响应缺少 ETag 头'))
+        const detail = '分片上传成功但响应缺少 ETag 头'
+        logUploadEvent('part_missing_etag', trace, {
+          ...metadata,
+          http_status: xhr.status,
+          elapsed_ms: Date.now() - startedAt,
+          response_body: truncateForLog(xhr.responseText),
+          error: detail,
+        }, 'error')
+        reject(new Error(detail))
         return
       }
+      logUploadEvent('part_succeeded', trace, {
+        ...metadata,
+        http_status: xhr.status,
+        elapsed_ms: Date.now() - startedAt,
+        response_body: truncateForLog(xhr.responseText),
+        etag,
+      })
       resolve(etag.replace(/"/g, '')) // MinIO ETag 带双引号，去掉
     }
 
-    xhr.onerror = () => reject(new Error('网络错误，分片上传失败，请检查生产服务连接'))
-    xhr.ontimeout = () => reject(new Error(`分片上传超时（${Math.floor(PART_TIMEOUT_MS / 1000)}秒）`))
+    xhr.onerror = () => {
+      const detail = '连接中断（XHR 状态 0，可能是 Vite/Nginx 代理断开或浏览器取消）'
+      logUploadEvent('part_xhr_error', trace, {
+        ...metadata,
+        http_status: xhr.status || 0,
+        elapsed_ms: Date.now() - startedAt,
+        response_body: truncateForLog(xhr.responseText),
+        error: detail,
+      }, 'error')
+      reject(new Error(`分片 ${metadata.partNumber}/${metadata.totalParts} ${detail}`))
+    }
+    xhr.ontimeout = () => {
+      const detail = `分片请求超时（${Math.floor(PART_TIMEOUT_MS / 1000)} 秒）`
+      logUploadEvent('part_xhr_timeout', trace, {
+        ...metadata,
+        http_status: xhr.status || 0,
+        elapsed_ms: Date.now() - startedAt,
+        response_body: truncateForLog(xhr.responseText),
+        error: detail,
+      }, 'error')
+      reject(new Error(`分片 ${metadata.partNumber}/${metadata.totalParts} ${detail}`))
+    }
     xhr.onabort = () => {
+      const detail = cancel.cancelled ? 'browser_cancelled' : 'xhr_aborted'
+      logUploadEvent('part_xhr_abort', trace, {
+        ...metadata,
+        http_status: xhr.status || 0,
+        elapsed_ms: Date.now() - startedAt,
+        response_body: truncateForLog(xhr.responseText),
+        error: detail,
+      }, 'warn')
       if (cancel.cancelled) reject(new UploadCancelledError())
-      else reject(new Error('分片上传被中断'))
+      else reject(new Error(`分片 ${metadata.partNumber}/${metadata.totalParts} 连接被中断`))
     }
     xhr.send(blob)
   })
+}
+
+function createUploadTraceId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `upload-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+async function fetchWithUploadDiagnostics(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  trace: UploadTrace,
+  metadata: Record<string, unknown>,
+): Promise<UploadRequestResult> {
+  const startedAt = Date.now()
+  try {
+    const response = await fetch(input, init)
+    const responseBody = await response.text()
+    const fields = {
+      ...metadata,
+      http_status: response.status,
+      elapsed_ms: Date.now() - startedAt,
+      response_body: truncateForLog(responseBody),
+    }
+    logUploadEvent(response.ok ? 'request_succeeded' : 'request_failed', trace, fields, response.ok ? 'info' : 'error')
+    return { response, responseBody }
+  } catch (error) {
+    logUploadEvent('request_network_error', trace, {
+      ...metadata,
+      http_status: 0,
+      elapsed_ms: Date.now() - startedAt,
+      error: errorMessage(error),
+    }, 'error')
+    throw error
+  }
+}
+
+function parseJson<T>(body: string): T {
+  try {
+    return JSON.parse(body) as T
+  } catch {
+    return {} as T
+  }
+}
+
+function responseDetail(status: number, body: string): string {
+  const parsed = parseJson<{ error?: string }>(body)
+  return parsed.error || truncateForLog(body) || `HTTP ${status}`
+}
+
+function truncateForLog(value: string): string {
+  if (!value) return ''
+  return value.length > MAX_LOG_RESPONSE_BODY_LENGTH
+    ? `${value.slice(0, MAX_LOG_RESPONSE_BODY_LENGTH)}...`
+    : value
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function logUploadEvent(
+  event: string,
+  trace: UploadTrace,
+  fields: Record<string, unknown> = {},
+  level: 'info' | 'warn' | 'error' = 'info',
+): void {
+  const payload = {
+    component: 'video-upload',
+    event,
+    trace_id: trace.traceId,
+    ...fields,
+  }
+  if (level === 'error') {
+    console.error('[video-upload]', payload)
+  } else if (level === 'warn') {
+    console.warn('[video-upload]', payload)
+  } else {
+    console.info('[video-upload]', payload)
+  }
 }

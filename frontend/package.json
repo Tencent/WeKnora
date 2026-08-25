@@ -11,6 +11,9 @@
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
     "test": "tsx --test",
+    "test:e2e:install": "playwright install chromium",
+    "test:e2e:multipart": "./scripts/run-multipart-e2e.sh",
+    "test:stability:multipart": "MULTIPART_E2E_RUNS=10 ./scripts/run-multipart-e2e.sh",
     "check-i18n": "tsx --test src/i18n/localeKeyAudit.test.ts",
     "scan-i18n-gaps": "tsx src/i18n/localeGapScan.ts",
     "regenerate-i18n-locales": "tsx src/i18n/regeneratePrunedLocales.ts"
@@ -44,6 +47,7 @@
     "xlsx": "file:./packages/xlsx-0.20.2.tgz"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tsconfig/node22": "^22.0.5",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-vue": "6.0.6",

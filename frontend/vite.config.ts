@@ -63,6 +63,28 @@ const DEV_PROXY_TARGET =
   process.env.VITE_DEV_PROXY_TARGET ||
   process.env.FRONTEND_BACKEND_URL ||
   'http://localhost:8080'
+const CUSTOM_BACKEND_TARGET =
+  process.env.VITE_CUSTOM_BACKEND_TARGET ||
+  'http://localhost:8090'
+
+const sharedBackendProxy = {
+  // Keep the custom backend route ahead of the generic /api target.
+  '/api/custom': {
+    target: CUSTOM_BACKEND_TARGET,
+    changeOrigin: true,
+    secure: false,
+  },
+  '/api': {
+    target: DEV_PROXY_TARGET,
+    changeOrigin: true,
+    secure: false,
+  },
+  '/files': {
+    target: DEV_PROXY_TARGET,
+    changeOrigin: true,
+    secure: false,
+  },
+}
 
 function resolveVueOfficePptxEntry(): string {
   try {
@@ -139,24 +161,7 @@ export default defineConfig({
     port: 5173,
     host: true,
     // 代理配置，用于开发环境
-    proxy: {
-      // 个性化后端（custom-backend）单独走 8090，必须放在 /api 之前（更具体前缀优先）
-      '/api/custom': {
-        target: process.env.VITE_CUSTOM_BACKEND_TARGET || 'http://localhost:8090',
-        changeOrigin: true,
-        secure: false,
-      },
-      '/api': {
-        target: DEV_PROXY_TARGET,
-        changeOrigin: true,
-        secure: false,
-      },
-      '/files': {
-        target: DEV_PROXY_TARGET,
-        changeOrigin: true,
-        secure: false,
-      }
-    }
+    proxy: sharedBackendProxy,
   },
   // `vite preview` 用生产构建产物(dist)本地起服务，是最接近 release 镜像的环境：
   // 同样的压缩 / 拆包 / CSS 加载顺序，可提前暴露只在生产构建出现的问题
@@ -164,17 +169,6 @@ export default defineConfig({
   preview: {
     port: 4173,
     host: true,
-    proxy: {
-      '/api': {
-        target: DEV_PROXY_TARGET,
-        changeOrigin: true,
-        secure: false,
-      },
-      '/files': {
-        target: DEV_PROXY_TARGET,
-        changeOrigin: true,
-        secure: false,
-      }
-    }
+    proxy: sharedBackendProxy,
   }
 })

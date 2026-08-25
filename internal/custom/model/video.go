@@ -28,6 +28,9 @@ type Video struct {
 	TranscriptPageWikiPageID string         `gorm:"type:varchar(64)" json:"transcript_page_wiki_page_id"`
 	Status                   string         `gorm:"type:varchar(50);index" json:"status"`
 	ProcessingErrorSummary   string         `gorm:"type:text" json:"processing_error_summary"`
+	UploadID                 string         `gorm:"type:varchar(128);index" json:"-"`
+	UploadSizeBytes          int64          `json:"-"`
+	UploadPartSizeBytes      int64          `json:"-"`
 	UploadedAt               *time.Time     `json:"uploaded_at"`
 	ReadyAt                  *time.Time     `json:"ready_at"`
 	CreatedAt                time.Time      `json:"created_at"`
