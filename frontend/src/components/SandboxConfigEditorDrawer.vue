@@ -31,28 +31,30 @@
       </t-popconfirm>
     </template>
 
-    <nav class="sandbox-steps" :aria-label="$t('settings.sandbox.setupProgress')">
-      <component
-        :is="canJumpTo(index) ? 'button' : 'div'"
-        v-for="(item, index) in wizardSteps"
-        :key="item.key"
-        :type="canJumpTo(index) ? 'button' : undefined"
-        :class="['sandbox-step', {
-          'is-active': wizardStep === index,
-          'is-done': wizardStep > index,
-          'is-clickable': canJumpTo(index),
-        }]"
-        :aria-current="wizardStep === index ? 'step' : undefined"
-        @click="goToStep(index)"
-      >
-        <span class="sandbox-step__marker">
-          <t-icon v-if="wizardStep > index" name="check" />
-          <template v-else>{{ index + 1 }}</template>
-        </span>
-        <span class="sandbox-step__title">{{ item.title }}</span>
-        <span v-if="index < wizardSteps.length - 1" class="sandbox-step__line" aria-hidden="true" />
-      </component>
-    </nav>
+    <template #header-extra>
+      <nav class="sandbox-steps" :aria-label="$t('settings.sandbox.setupProgress')">
+        <component
+          :is="canJumpTo(index) ? 'button' : 'div'"
+          v-for="(item, index) in wizardSteps"
+          :key="item.key"
+          :type="canJumpTo(index) ? 'button' : undefined"
+          :class="['sandbox-step', {
+            'is-active': wizardStep === index,
+            'is-done': wizardStep > index,
+            'is-clickable': canJumpTo(index),
+          }]"
+          :aria-current="wizardStep === index ? 'step' : undefined"
+          @click="goToStep(index)"
+        >
+          <span class="sandbox-step__marker">
+            <t-icon v-if="wizardStep > index" name="check" />
+            <template v-else>{{ index + 1 }}</template>
+          </span>
+          <span class="sandbox-step__title">{{ item.title }}</span>
+          <span v-if="index < wizardSteps.length - 1" class="sandbox-step__line" aria-hidden="true" />
+        </component>
+      </nav>
+    </template>
 
     <!--
       Identity-change refusals must sit at the top: the form is long and the
@@ -1066,7 +1068,7 @@ onUnmounted(stopTemplatePolling)
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 0 18px;
+  margin: 0;
 }
 
 .sandbox-step {
