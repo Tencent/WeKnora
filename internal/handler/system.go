@@ -1376,10 +1376,9 @@ type RevokeSystemAdminRequest struct {
 // RevokeSystemAdmin godoc
 // @Summary      Revoke system administrator privileges from a user
 // @Description  Remove system administrator privileges from a user (SystemAdmin only).
-// @Description  Two safety guards: the caller cannot revoke their own privileges,
-// @Description  and revoking the last remaining system admin is rejected — both
-// @Description  prevent a SystemAdmin from accidentally locking the platform out
-// @Description  of system-level administration. Idempotent on already-non-admin users.
+// @Description  Safety guards reject self-revocation, removal of the last system admin,
+// @Description  and removal of the last system admin with cross-tenant access.
+// @Description  Idempotent on already-non-admin users.
 // @Tags         System Admin
 // @Accept       json
 // @Produce      json
