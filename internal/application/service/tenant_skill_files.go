@@ -4,14 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"path"
-	"sort"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // skillFileTextLimit is how much of a text file the admin browser is given.
@@ -26,6 +28,12 @@ const (
 	skillFileEncodingUTF8   = "utf-8"
 	skillFileEncodingBase64 = "base64"
 	skillFileEncodingBinary = "binary"
+
+	// The settings drawer lists the tree then immediately opens SKILL.md, and
+	// every later click is another read of the same zip. A handful of recent
+	// archives covers that without holding a 256 MiB upload in RAM.
+	skillBundleArchiveCacheSlots = 8
+	skillBundleArchiveCacheBytes = 64 << 20 // 64 MiB across cached zips
 )
 
 // SkillFileEntry is one path in an installed skill's stored archive.
@@ -51,20 +59,11 @@ type SkillFileContent struct {
 func (s *TenantSkillService) ListSkillFiles(
 	ctx context.Context, tenantID uint64, configID, skillID string,
 ) ([]SkillFileEntry, error) {
-	files, err := s.skillBundleFiles(ctx, tenantID, configID, skillID)
+	archive, err := s.skillBundleArchive(ctx, tenantID, configID, skillID)
 	if err != nil {
 		return nil, err
 	}
-	names := make([]string, 0, len(files))
-	for name := range files {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	out := make([]SkillFileEntry, 0, len(names))
-	for _, name := range names {
-		out = append(out, SkillFileEntry{Path: name, Size: int64(len(files[name]))})
-	}
-	return out, nil
+	return listSkillZipFiles(archive)
 }
 
 // ReadSkillFile returns one file from the stored archive. Binary files are
@@ -77,20 +76,23 @@ func (s *TenantSkillService) ReadSkillFile(
 	if err != nil {
 		return nil, apperrors.NewBadRequestError(err.Error())
 	}
-	files, err := s.skillBundleFiles(ctx, tenantID, configID, skillID)
+	archive, err := s.skillBundleArchive(ctx, tenantID, configID, skillID)
 	if err != nil {
 		return nil, err
 	}
-	body, ok := files[clean]
-	if !ok {
-		return nil, apperrors.NewNotFoundError("skill file not found")
+	body, err := readSkillZipFile(archive, clean)
+	if err != nil {
+		if errors.Is(err, errSkillFileMissing) {
+			return nil, apperrors.NewNotFoundError("skill file not found")
+		}
+		return nil, err
 	}
 	return projectSkillFileContent(clean, body), nil
 }
 
-func (s *TenantSkillService) skillBundleFiles(
+func (s *TenantSkillService) skillBundleArchive(
 	ctx context.Context, tenantID uint64, configID, skillID string,
-) (map[string][]byte, error) {
+) ([]byte, error) {
 	skill, err := s.skills.GetSkill(ctx, tenantID, configID, skillID)
 	if err != nil {
 		return nil, err
@@ -102,6 +104,36 @@ func (s *TenantSkillService) skillBundleFiles(
 	if ref == "" {
 		return nil, apperrors.NewNotFoundError("skill files are not available")
 	}
+	key := skillBundleCacheKey(tenantID, skill)
+	if cached := s.cachedSkillBundle(key); cached != nil {
+		return cached, nil
+	}
+
+	v, err, _ := s.bundleLoad.Do(key, func() (interface{}, error) {
+		if cached := s.cachedSkillBundle(key); cached != nil {
+			return cached, nil
+		}
+		archive, err := s.downloadSkillBundle(ctx, tenantID, skill)
+		if err != nil {
+			return nil, err
+		}
+		s.storeSkillBundle(key, archive)
+		return archive, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	archive, ok := v.([]byte)
+	if !ok {
+		return nil, fmt.Errorf("download bundle of skill %s: unexpected cache result", skill.Name)
+	}
+	return archive, nil
+}
+
+func (s *TenantSkillService) downloadSkillBundle(
+	ctx context.Context, tenantID uint64, skill *types.TenantSkillEntity,
+) ([]byte, error) {
+	ref := strings.TrimSpace(skill.BundleRef)
 	fs, err := s.fileServiceForTenant(ctx, tenantID)
 	if err != nil {
 		return nil, err
@@ -118,11 +150,90 @@ func (s *TenantSkillService) skillBundleFiles(
 	if len(archive) > maxSkillBundleTotalBytes {
 		return nil, fmt.Errorf("skill bundle %s is larger than the upload limit", ref)
 	}
-	bundle, err := ParseSkillBundle(archive)
-	if err != nil {
-		return nil, err
+	return archive, nil
+}
+
+func skillBundleCacheKey(tenantID uint64, skill *types.TenantSkillEntity) string {
+	id := strings.TrimSpace(skill.BundleSHA256)
+	if id == "" {
+		id = strings.TrimSpace(skill.BundleRef)
 	}
-	return bundle.Files, nil
+	return fmt.Sprintf("%d:%s", tenantID, id)
+}
+
+func (s *TenantSkillService) cachedSkillBundle(key string) []byte {
+	if s == nil || s.bundleCache == nil {
+		return nil
+	}
+	return s.bundleCache.get(key)
+}
+
+func (s *TenantSkillService) storeSkillBundle(key string, archive []byte) {
+	if s == nil || s.bundleCache == nil {
+		return
+	}
+	s.bundleCache.put(key, archive)
+}
+
+type skillBundleArchiveCache struct {
+	mu      sync.Mutex
+	entries []cachedSkillArchive
+}
+
+type cachedSkillArchive struct {
+	key     string
+	archive []byte
+}
+
+func newSkillBundleArchiveCache() *skillBundleArchiveCache {
+	return &skillBundleArchiveCache{}
+}
+
+func (c *skillBundleArchiveCache) get(key string) []byte {
+	if c == nil || key == "" {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, entry := range c.entries {
+		if entry.key != key {
+			continue
+		}
+		c.entries = append(c.entries[:i], c.entries[i+1:]...)
+		c.entries = append([]cachedSkillArchive{entry}, c.entries...)
+		return entry.archive
+	}
+	return nil
+}
+
+func (c *skillBundleArchiveCache) put(key string, archive []byte) {
+	if c == nil || key == "" {
+		return
+	}
+	if len(archive) > skillBundleArchiveCacheBytes {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, entry := range c.entries {
+		if entry.key != key {
+			continue
+		}
+		c.entries = append(c.entries[:i], c.entries[i+1:]...)
+		break
+	}
+	c.entries = append([]cachedSkillArchive{{key: key, archive: archive}}, c.entries...)
+	for len(c.entries) > skillBundleArchiveCacheSlots || c.cachedBytes() > skillBundleArchiveCacheBytes {
+		c.entries = c.entries[:len(c.entries)-1]
+	}
+}
+
+func (c *skillBundleArchiveCache) cachedBytes() int {
+	total := 0
+	for _, entry := range c.entries {
+		total += len(entry.archive)
+	}
+	return total
 }
 
 // safeSkillFilePath normalises a caller-supplied relative path and refuses
