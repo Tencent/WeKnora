@@ -12,9 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newCubeTemplateClient points a CubeRemoteClient at a bare template-API stub.
-// The full cubeMockServer models sandboxes rather than the template catalog,
-// and these tests only need the three /templates routes.
+// newCubeTemplateClient points a CubeRemoteClient at a bare catalog-API stub.
+// The full cubeMockServer models sandboxes rather than the template catalog.
 func newCubeTemplateClient(t *testing.T, handler http.HandlerFunc) *CubeRemoteClient {
 	t.Helper()
 	server := httptest.NewServer(handler)
@@ -34,6 +33,10 @@ func newCubeTemplateClient(t *testing.T, handler http.HandlerFunc) *CubeRemoteCl
 // our own template unrecognisable and every catalog refresh build another one.
 func TestCubeRemoteClientListTemplatesRecognisesStandardByImage(t *testing.T) {
 	client := newCubeTemplateClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/snapshots" {
+			writeJSON(w, http.StatusOK, []map[string]any{})
+			return
+		}
 		require.Equal(t, "/templates", r.URL.Path)
 		writeJSON(w, http.StatusOK, []map[string]any{
 			{
@@ -61,19 +64,118 @@ func TestCubeRemoteClientListTemplatesRecognisesStandardByImage(t *testing.T) {
 }
 
 func TestCubeRemoteClientListTemplatesSurfacesLastError(t *testing.T) {
-	client := newCubeTemplateClient(t, func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, []map[string]any{{
+	client := newCubeTemplateClient(t, cubeCatalogHandler(
+		[]map[string]any{{
 			"templateID": "tpl-broken",
 			"status":     "FAILED",
 			"imageInfo":  DefaultDockerImage,
 			"lastError":  "pull access denied for wechatopenai/weknora-sandbox",
-		}})
-	})
+		}},
+		nil,
+	))
 
 	templates, err := client.ListTemplates(context.Background())
 	require.NoError(t, err)
 	require.Len(t, templates, 1)
 	require.Equal(t, "pull access denied for wechatopenai/weknora-sandbox", templates[0].Error)
+}
+
+// Cube stores snapshots in the template store. The settings step is for
+// picking a base template, so snap- IDs must not appear even if GET
+// /snapshots is empty or missing.
+func TestCubeRemoteClientListTemplatesHidesSnapPrefixedIDs(t *testing.T) {
+	client := newCubeTemplateClient(t, cubeCatalogHandler(
+		[]map[string]any{
+			{
+				"templateID": "tpl-weknora",
+				"name":       "weknora",
+				"status":     "READY",
+			},
+			{
+				"templateID": "snap-1546901f7e5e40bdb8794c78",
+				"aliases":    []string{"weknora-sk-c838ac20-g2"},
+				"status":     "READY",
+			},
+			{
+				"templateID": "SNAP-uppercase",
+				"status":     "READY",
+			},
+		},
+		nil,
+	))
+
+	templates, err := client.ListTemplates(context.Background())
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	require.Equal(t, "tpl-weknora", templates[0].ID)
+}
+
+// Snapshot IDs that do not use the snap- prefix still belong to GET
+// /snapshots, and must not be offered as a base template.
+func TestCubeRemoteClientListTemplatesHidesListedSnapshots(t *testing.T) {
+	client := newCubeTemplateClient(t, cubeCatalogHandler(
+		[]map[string]any{
+			{"templateID": "tpl-weknora", "name": "weknora", "status": "READY"},
+			{"templateID": "abc123unprefixed", "aliases": []string{"weknora-sk-cfg-g1"}, "status": "READY"},
+		},
+		[]map[string]any{
+			{"snapshotID": "abc123unprefixed", "names": []string{"weknora-sk-cfg-g1"}},
+		},
+	))
+
+	templates, err := client.ListTemplates(context.Background())
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	require.Equal(t, "tpl-weknora", templates[0].ID)
+}
+
+func TestCubeRemoteClientListTemplatesKeepsTemplatesWhenSnapshotListFails(t *testing.T) {
+	client := newCubeTemplateClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/templates":
+			writeJSON(w, http.StatusOK, []map[string]any{
+				{"templateID": "tpl-weknora", "status": "READY"},
+				{"templateID": "snap-orphan", "status": "READY"},
+			})
+		case "/snapshots":
+			http.Error(w, "unavailable", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	templates, err := client.ListTemplates(context.Background())
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	require.Equal(t, "tpl-weknora", templates[0].ID)
+}
+
+func TestCubeTemplateIsSnapshot(t *testing.T) {
+	listed := map[string]struct{}{"listed-id": {}}
+	require.True(t, cubeTemplateIsSnapshot("snap-1", nil))
+	require.True(t, cubeTemplateIsSnapshot("SNAP-1", nil))
+	require.True(t, cubeTemplateIsSnapshot("listed-id", listed))
+	require.False(t, cubeTemplateIsSnapshot("tpl-weknora", listed))
+	require.False(t, cubeTemplateIsSnapshot("", listed))
+}
+
+func cubeCatalogHandler(templates, snapshots []map[string]any) http.HandlerFunc {
+	if templates == nil {
+		templates = []map[string]any{}
+	}
+	if snapshots == nil {
+		snapshots = []map[string]any{}
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/templates" && r.Method == http.MethodGet:
+			writeJSON(w, http.StatusOK, templates)
+		case r.URL.Path == "/snapshots" && r.Method == http.MethodGet:
+			writeJSON(w, http.StatusOK, snapshots)
+		default:
+			http.NotFound(w, r)
+		}
+	}
 }
 
 // The bug this guards: an unnamed WeKnora template was invisible to the
