@@ -149,8 +149,16 @@ func (c *CubeRemoteClient) ListTemplates(ctx context.Context) ([]RemoteTemplate,
 	if err != nil {
 		return nil, normalizeCubeError("ListTemplates", err)
 	}
+	// Cube stores snapshots in the same template store that GET /templates
+	// returns, so skill-image snapshots would otherwise show up in the
+	// settings "pick a base template" step. Subtract them; E2B's catalog
+	// already keeps the two lists apart.
+	snapshotIDs := c.cubeSnapshotIDsForCatalog(ctx)
 	result := make([]RemoteTemplate, 0, len(items))
 	for _, item := range items {
+		if cubeTemplateIsSnapshot(item.TemplateID, snapshotIDs) {
+			continue
+		}
 		name := strings.TrimSpace(item.Name)
 		// Cube only reports a name when the template carries an alias, so fall
 		// back to the image before falling back to the opaque ID: recognising
@@ -175,6 +183,36 @@ func (c *CubeRemoteClient) ListTemplates(ctx context.Context) ([]RemoteTemplate,
 		})
 	}
 	return result, nil
+}
+
+// cubeSnapshotIDsForCatalog lists snapshot IDs so ListTemplates can hide them.
+// A listing failure must not fail the catalog: the settings UI still needs
+// real templates, and cubeTemplateIsSnapshot still drops the snap- prefix.
+func (c *CubeRemoteClient) cubeSnapshotIDsForCatalog(ctx context.Context) map[string]struct{} {
+	refs, err := c.ListSnapshots(ctx, "")
+	if err != nil {
+		logger.Warnf(ctx, "cube ListTemplates: listing snapshots to exclude them failed: %v", err)
+		return nil
+	}
+	out := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		if id := strings.TrimSpace(ref.ID); id != "" {
+			out[id] = struct{}{}
+		}
+	}
+	return out
+}
+
+func cubeTemplateIsSnapshot(templateID string, snapshotIDs map[string]struct{}) bool {
+	id := strings.TrimSpace(templateID)
+	if id == "" {
+		return false
+	}
+	if strings.HasPrefix(strings.ToLower(id), "snap-") {
+		return true
+	}
+	_, ok := snapshotIDs[id]
+	return ok
 }
 
 // EnsureStandardTemplate makes the cluster hold exactly one WeKnora template.
