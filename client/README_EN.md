@@ -213,6 +213,21 @@ if err != nil {
 _ = skillID // follow /sandbox-configs/{id}/skills/{skillID}/install-events
 ```
 
+### Example: Browse files of an installed skill
+
+```go
+files, err := apiClient.ListSandboxSkillFiles(context.Background(), sandboxConfigID, skillID)
+if err != nil {
+    // Handle error
+}
+content, err := apiClient.GetSandboxSkillFile(context.Background(), sandboxConfigID, skillID, "SKILL.md")
+if err != nil {
+    // Handle error
+}
+_ = files
+_ = content
+```
+
 ## Complete Example
 
 Please refer to the `ExampleUsage` function in the `example.go` file, which demonstrates the complete usage flow of the client.

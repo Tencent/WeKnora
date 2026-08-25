@@ -44,6 +44,12 @@ const (
 type sandboxSkillService interface {
 	ListSkills(ctx context.Context, tenantID uint64, configID string) ([]*types.TenantSkillEntity, error)
 	GetSkill(ctx context.Context, tenantID uint64, configID, skillID string) (*types.TenantSkillEntity, error)
+	ListSkillFiles(
+		ctx context.Context, tenantID uint64, configID, skillID string,
+	) ([]service.SkillFileEntry, error)
+	ReadSkillFile(
+		ctx context.Context, tenantID uint64, configID, skillID, relativePath string,
+	) (*service.SkillFileContent, error)
 	SetSkillEnabled(
 		ctx context.Context, tenantID uint64, configID, skillID string, enabled bool,
 	) (*types.TenantSkillEntity, error)
@@ -183,6 +189,57 @@ func (h *SandboxSkillHandler) Get(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": toSkillResponse(skill)})
+}
+
+// ListFiles godoc
+// @Summary      List files of an installed skill
+// @Description  List files in the stored skill bundle without starting a sandbox.
+// @Tags         SandboxConfig
+// @Produce      json
+// @Param        id       path      string  true  "Sandbox config ID"
+// @Param        skillId  path      string  true  "Skill ID"
+// @Success      200      {object}  map[string]interface{}  "Skill files"
+// @Failure      401      {object}  map[string]interface{}  "Unauthorized"
+// @Failure      404      {object}  apperrors.AppError      "Skill or files not found"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /sandbox-configs/{id}/skills/{skillId}/files [get]
+func (h *SandboxSkillHandler) ListFiles(c *gin.Context) {
+	files, err := h.service.ListSkillFiles(
+		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), c.Param("skillId"),
+	)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": files})
+}
+
+// GetFile godoc
+// @Summary      Read one file of an installed skill
+// @Description  Read one skill file as UTF-8, a small base64 image, or binary.
+// @Tags         SandboxConfig
+// @Produce      json
+// @Param        id       path      string  true  "Sandbox config ID"
+// @Param        skillId  path      string  true  "Skill ID"
+// @Param        path     query     string  true  "Skill-root-relative file path"
+// @Success      200      {object}  map[string]interface{}  "Skill file"
+// @Failure      400      {object}  apperrors.AppError      "Invalid path"
+// @Failure      401      {object}  map[string]interface{}  "Unauthorized"
+// @Failure      404      {object}  apperrors.AppError      "Skill or file not found"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /sandbox-configs/{id}/skills/{skillId}/files/content [get]
+func (h *SandboxSkillHandler) GetFile(c *gin.Context) {
+	file, err := h.service.ReadSkillFile(
+		c.Request.Context(), sandboxConfigTenantID(c),
+		c.Param("id"), c.Param("skillId"), c.Query("path"),
+	)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": file})
 }
 
 // Upload godoc
