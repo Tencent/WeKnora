@@ -31,8 +31,9 @@ type skillReaperConfigReader interface {
 	GetByID(ctx context.Context, tenantID uint64, id string) (*types.TenantSandboxConfigEntity, error)
 }
 
-// skillSnapshotLedger is the per-config chain ReconcileSnapshots compares
-// provider listings against.
+// skillSnapshotLedger is the per-config chain: what ReconcileSnapshots compares
+// provider listings against, and what ReapStuckRuns walks to decide whether a
+// stuck run's skill is still in the live image.
 type skillSnapshotLedger interface {
 	ListSnapshotsByConfig(
 		ctx context.Context, tenantID uint64, configID string,
@@ -62,16 +63,19 @@ var (
 
 // ReapStuckRuns recovers skill rows whose install or remove process died.
 //
-// An installing row older than skillInstallStuckTTL is healed to ready when
-// its InstalledSnapshotID is still the live image — a re-install that died
-// before the pointer moved, or a terminal ready write that never landed.
-// Leaving it at installing would hide a skill the image still carries.
-// Otherwise it becomes failed so the UI stops spinning.
+// Both branches turn on one question — does the image every new session boots
+// still carry this skill's files — and skillFilesInLiveImage answers it from
+// the snapshot ledger rather than from the row.
 //
-// A removing row is restored to ready only while that same snapshot is still
-// live. If the pointer already moved (or the skill never reached an image),
-// the files are gone and the leftover row is deleted so the agent cannot be
-// told to invoke them.
+// An installing row older than skillInstallStuckTTL is healed to ready when
+// the files are there: a re-install that died before the pointer moved, or a
+// terminal ready write that never landed. Leaving it at installing would hide
+// a skill the image still carries. Otherwise it becomes failed so the UI stops
+// spinning.
+//
+// A removing row is restored to ready while the files are still there, so the
+// operator can retry. Once they are gone the leftover row is deleted, so the
+// agent cannot be told to invoke a skill no image carries.
 func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 	if s == nil || s.skills == nil {
 		return 0, nil
@@ -90,14 +94,22 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 		if row == nil || row.InstallingSince == nil || !row.InstallingSince.Before(cutoff) {
 			continue
 		}
+		snapshotID, serving, known := s.skillFilesInLiveImage(ctx, row)
 		switch row.Status {
 		case types.SkillStatusInstalling:
-			if s.skillServesLiveSnapshot(ctx, row) {
+			// An unreadable config or ledger must not be treated as a failed
+			// install: the image may still be serving this skill.
+			if serving || !known {
 				if err := s.updateSkillFields(ctx, row.TenantID, row.SandboxConfigID, row.ID,
 					func(e *types.TenantSkillEntity) {
 						e.Status = types.SkillStatusReady
 						e.Error = ""
 						e.InstallingSince = nil
+						// The install that died past the pointer switch never
+						// got to record which snapshot carries it.
+						if snapshotID != "" {
+							e.InstalledSnapshotID = snapshotID
+						}
 					}); err != nil {
 					logger.Warnf(ctx, "[skill] heal abandoned install %s back to ready failed: %v",
 						row.ID, err)
@@ -117,17 +129,21 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 			}
 			reaped++
 		case types.SkillStatusRemoving:
-			live, known := s.liveSnapshotID(ctx, row)
+			// Deleting the row and its bundle is the one irreversible thing
+			// the reaper does, so a run it cannot judge is left for the next
+			// sweep rather than guessed at.
 			if !known {
 				continue
 			}
-			installed := strings.TrimSpace(row.InstalledSnapshotID)
-			if installed != "" && installed == live {
+			if serving {
 				if err := s.updateSkillFields(ctx, row.TenantID, row.SandboxConfigID, row.ID,
 					func(e *types.TenantSkillEntity) {
 						e.Status = types.SkillStatusReady
 						e.Error = ""
 						e.InstallingSince = nil
+						if snapshotID != "" {
+							e.InstalledSnapshotID = snapshotID
+						}
 					}); err != nil {
 					logger.Warnf(ctx, "[skill] restore abandoned removal %s failed: %v", row.ID, err)
 					continue
@@ -151,23 +167,90 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 	return reaped, nil
 }
 
-// skillServesLiveSnapshot reports whether this row's last installed snapshot
-// is still the image every new session boots. A true result means the files
-// are still there: either the install never moved the pointer, or it did and
-// only the terminal ready write is missing.
-func (s *TenantSkillService) skillServesLiveSnapshot(
+// skillFilesInLiveImage reports whether the image every new session boots
+// still carries this skill, and which snapshot of the chain put it there.
+// known is false when the config or the ledger cannot be read, so a caller
+// about to do something irreversible can refuse to guess.
+//
+// The question is not whether this row's InstalledSnapshotID equals the live
+// one. A config holds a single pointer that every install and removal
+// advances, and each new snapshot is grown from the current one, so a skill
+// installed two generations ago is still in the image under a snapshot ID its
+// row never hears about — nothing rewrites one skill's row when another skill
+// is installed. Comparing the two IDs calls such a skill gone: it fails
+// healthy installs and, worse, deletes the row and bundle of a stuck removal
+// whose files are still in the image.
+//
+// The ledger records each snapshot's parent, so the honest question is whether
+// this skill's install is on the chain the pointer currently names.
+func (s *TenantSkillService) skillFilesInLiveImage(
 	ctx context.Context, row *types.TenantSkillEntity,
-) bool {
-	if row == nil || strings.TrimSpace(row.InstalledSnapshotID) == "" {
-		return false
+) (string, bool, bool) {
+	if row == nil {
+		return "", false, false
 	}
 	live, ok := s.liveSnapshotID(ctx, row)
 	if !ok {
-		// A config we cannot read must not be treated as a failed install:
-		// the image may still be serving this skill.
-		return true
+		return "", false, false
 	}
-	return row.InstalledSnapshotID == live
+	if live = strings.TrimSpace(live); live == "" {
+		// The config boots its base template, which carries no skill by
+		// construction — the last removal of the config cleared the pointer.
+		return "", false, true
+	}
+	ledger, err := s.skills.ListSnapshotsByConfig(ctx, row.TenantID, row.SandboxConfigID)
+	if err != nil {
+		logger.Warnf(ctx, "[skill] reaper could not read the snapshot ledger of config %s: %v",
+			row.SandboxConfigID, err)
+		return "", false, false
+	}
+
+	bySnapshot := make(map[string]*types.TenantSkillSnapshotEntity, len(ledger))
+	everInstalled := false
+	for _, entry := range ledger {
+		if entry == nil {
+			continue
+		}
+		// A building row has no snapshot yet, and one abandoned between the
+		// snapshot and the pointer switch is a child of live rather than an
+		// ancestor, so anchoring the walk on live already excludes both.
+		if id := strings.TrimSpace(entry.SnapshotID); id != "" {
+			bySnapshot[id] = entry
+		}
+		if entry.SkillID == row.ID && entry.Trigger == types.SkillSnapshotTriggerInstall {
+			everInstalled = true
+		}
+	}
+
+	// The visited set only stops a corrupted parent pointer from looping; the
+	// chain itself is finite.
+	visited := make(map[string]struct{}, len(bySnapshot))
+	for cursor := live; cursor != ""; {
+		if _, seen := visited[cursor]; seen {
+			break
+		}
+		visited[cursor] = struct{}{}
+		entry, ok := bySnapshot[cursor]
+		if !ok {
+			// The chain runs out before it answers. A skill that never
+			// produced a snapshot is absent either way; for one that did,
+			// refuse to guess rather than delete files that may still exist.
+			return "", false, !everInstalled
+		}
+		if entry.SkillID == row.ID {
+			// The nearest generation naming this skill decides it: an install
+			// put the files in, a removal took them out, and a rebuild says
+			// nothing about one skill so the walk continues past it.
+			switch entry.Trigger {
+			case types.SkillSnapshotTriggerInstall:
+				return entry.SnapshotID, true, true
+			case types.SkillSnapshotTriggerRemove:
+				return "", false, true
+			}
+		}
+		cursor = strings.TrimSpace(entry.ParentSnapshotID)
+	}
+	return "", false, true
 }
 
 // liveSnapshotID returns the config's current SkillImage snapshot and whether

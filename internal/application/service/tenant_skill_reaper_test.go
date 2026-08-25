@@ -18,6 +18,9 @@ func TestReapStuckRunsFailsAbandonedInstalls(t *testing.T) {
 		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
 		Name: "pdf", Status: types.SkillStatusInstalling, InstallingSince: &staleSince,
 	})
+	// The live image is another skill's generation: this install died before
+	// it ever produced a snapshot of its own.
+	fx.installed("sk-2", "snap-other", "")
 
 	n, err := fx.svc.ReapStuckRuns(context.Background())
 
@@ -39,7 +42,8 @@ func TestReapStuckRunsRestoresAbandonedRemovals(t *testing.T) {
 		Name: "pdf", Status: types.SkillStatusRemoving,
 		InstalledSnapshotID: "snap-live", InstallingSince: &staleSince,
 	})
-	fx.configs.entity.Config.SkillImage = &types.SkillImageConfig{SnapshotID: "snap-live"}
+	fx.installed("sk-1", "snap-live", "")
+	fx.live("snap-live")
 
 	n, err := fx.svc.ReapStuckRuns(context.Background())
 
@@ -48,6 +52,35 @@ func TestReapStuckRunsRestoresAbandonedRemovals(t *testing.T) {
 	got := fx.skills.mustGet("sk-1")
 	require.Equal(t, types.SkillStatusReady, got.Status,
 		"the image still has the skill, so showing it as removed would be a lie")
+	require.Nil(t, got.InstallingSince)
+}
+
+// A config accumulates generations, and only the skill being installed gets
+// its row rewritten. Judging an older skill by whether its own snapshot is
+// still the live one therefore condemns every skill but the most recent —
+// here by deleting the row and bundle of files the image still carries.
+func TestReapStuckRunsRestoresRemovalOfSkillInheritedByALaterSnapshot(t *testing.T) {
+	fx := newReaperFixture(t)
+	staleSince := fx.now.Add(-skillInstallStuckTTL - time.Minute)
+	fx.skills.put(&types.TenantSkillEntity{
+		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		Name: "pdf", Status: types.SkillStatusRemoving,
+		InstalledSnapshotID: "snap-1", BundleRef: "bundle-1",
+		InstallingSince: &staleSince,
+	})
+	// A second skill was installed afterwards. Its snapshot grew from the one
+	// carrying pdf, so pdf is still in the image the pointer now names.
+	fx.installed("sk-1", "snap-1", "")
+	fx.installed("sk-2", "snap-2", "snap-1")
+	fx.live("snap-2")
+
+	n, err := fx.svc.ReapStuckRuns(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	got := fx.skills.mustGet("sk-1")
+	require.NotNil(t, got, "the files are still in the image; deleting the row would lose a live skill")
+	require.Equal(t, types.SkillStatusReady, got.Status)
 	require.Nil(t, got.InstallingSince)
 }
 
@@ -60,7 +93,11 @@ func TestReapStuckRunsDeletesAbandonedRemovalAfterPointerMoved(t *testing.T) {
 		InstalledSnapshotID: "snap-old", BundleRef: "bundle-1",
 		InstallingSince: &staleSince,
 	})
-	fx.configs.entity.Config.SkillImage = &types.SkillImageConfig{SnapshotID: "snap-new"}
+	// The removal got as far as snapshotting the image without the skill and
+	// switching the pointer; only its bookkeeping never landed.
+	fx.installed("sk-1", "snap-old", "")
+	fx.removed("sk-1", "snap-new", "snap-old")
+	fx.live("snap-new")
 
 	n, err := fx.svc.ReapStuckRuns(context.Background())
 
@@ -77,6 +114,7 @@ func TestReapStuckRunsDeletesAbandonedRemovalThatNeverReachedAnImage(t *testing.
 		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
 		Name: "pdf", Status: types.SkillStatusRemoving, InstallingSince: &staleSince,
 	})
+	fx.installed("sk-2", "snap-other", "")
 
 	n, err := fx.svc.ReapStuckRuns(context.Background())
 
@@ -84,6 +122,30 @@ func TestReapStuckRunsDeletesAbandonedRemovalThatNeverReachedAnImage(t *testing.
 	require.Equal(t, 1, n)
 	require.Nil(t, fx.skills.rows["sk-1"],
 		"a skill that never reached an image must not be marked ready")
+}
+
+// Deleting the row and its bundle is the only irreversible thing the reaper
+// does, so a chain it cannot follow must be left for the next sweep.
+func TestReapStuckRunsLeavesRemovalAloneWhenTheChainCannotBeFollowed(t *testing.T) {
+	fx := newReaperFixture(t)
+	staleSince := fx.now.Add(-skillInstallStuckTTL - time.Minute)
+	fx.skills.put(&types.TenantSkillEntity{
+		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		Name: "pdf", Status: types.SkillStatusRemoving,
+		InstalledSnapshotID: "snap-1", BundleRef: "bundle-1",
+		InstallingSince: &staleSince,
+	})
+	fx.installed("sk-1", "snap-1", "")
+	// The pointer names a generation the ledger does not describe, so whether
+	// snap-1 is one of its ancestors is unknowable.
+	fx.live("snap-missing")
+
+	n, err := fx.svc.ReapStuckRuns(context.Background())
+
+	require.NoError(t, err)
+	require.Zero(t, n)
+	require.Equal(t, types.SkillStatusRemoving, fx.skills.mustGet("sk-1").Status,
+		"an unreadable chain must not be resolved by deleting the row")
 }
 
 func TestReapStuckRunsIgnoresFreshRuns(t *testing.T) {
@@ -110,7 +172,8 @@ func TestReapStuckRunsHealsInstallingRowWhoseSnapshotIsStillLive(t *testing.T) {
 		Name: "pdf", Status: types.SkillStatusInstalling,
 		InstalledSnapshotID: "snap-live", InstallingSince: &staleSince,
 	})
-	fx.configs.entity.Config.SkillImage = &types.SkillImageConfig{SnapshotID: "snap-live"}
+	fx.installed("sk-1", "snap-live", "")
+	fx.live("snap-live")
 
 	n, err := fx.svc.ReapStuckRuns(context.Background())
 
@@ -122,6 +185,32 @@ func TestReapStuckRunsHealsInstallingRowWhoseSnapshotIsStillLive(t *testing.T) {
 	require.Empty(t, got.Error)
 	require.Nil(t, got.InstallingSince)
 	require.Equal(t, "snap-live", got.InstalledSnapshotID)
+}
+
+// The install's last step is a row write that runs after the pointer has
+// already switched. When the process dies in between, the skill is in the
+// image every session boots while its row still says nothing about it.
+func TestReapStuckRunsHealsInstallThatDiedAfterThePointerSwitched(t *testing.T) {
+	fx := newReaperFixture(t)
+	staleSince := fx.now.Add(-skillInstallStuckTTL - time.Minute)
+	fx.skills.put(&types.TenantSkillEntity{
+		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		Name: "pdf", Status: types.SkillStatusInstalling, InstallingSince: &staleSince,
+	})
+	fx.installed("sk-2", "snap-old", "")
+	fx.installed("sk-1", "snap-new", "snap-old")
+	fx.live("snap-new")
+
+	n, err := fx.svc.ReapStuckRuns(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	got := fx.skills.mustGet("sk-1")
+	require.Equal(t, types.SkillStatusReady, got.Status,
+		"failing this row would hide a skill from the agent that the image really carries")
+	require.Empty(t, got.Error)
+	require.Equal(t, "snap-new", got.InstalledSnapshotID,
+		"the snapshot the install never got to record is recoverable from the ledger")
 }
 
 func TestReconcileSnapshotsWarnsExtrasWithoutDeleting(t *testing.T) {
@@ -182,6 +271,30 @@ func newReaperFixture(t *testing.T) *reaperFixture {
 	)
 	svc.now = func() time.Time { return now }
 	return &reaperFixture{svc: svc, skills: skills, configs: configs, provider: provider, now: now}
+}
+
+// installed and removed write the ledger row an install or a removal leaves
+// behind: the generation that changed the image, and the one it grew from.
+func (f *reaperFixture) installed(skillID, snapshotID, parentSnapshotID string) {
+	f.snapshotRow(skillID, snapshotID, parentSnapshotID, types.SkillSnapshotTriggerInstall)
+}
+
+func (f *reaperFixture) removed(skillID, snapshotID, parentSnapshotID string) {
+	f.snapshotRow(skillID, snapshotID, parentSnapshotID, types.SkillSnapshotTriggerRemove)
+}
+
+func (f *reaperFixture) snapshotRow(skillID, snapshotID, parentSnapshotID, trigger string) {
+	f.skills.snapshots = append(f.skills.snapshots, &types.TenantSkillSnapshotEntity{
+		ID: "row-" + snapshotID, TenantID: 7, SandboxConfigID: "cfg-1", SkillID: skillID,
+		SnapshotID: snapshotID, ParentSnapshotID: parentSnapshotID,
+		Trigger: trigger, State: types.SkillSnapshotStateActive,
+	})
+}
+
+// live points the config at a snapshot, the way an install's pointer switch
+// does.
+func (f *reaperFixture) live(snapshotID string) {
+	f.configs.entity.Config.SkillImage = &types.SkillImageConfig{SnapshotID: snapshotID}
 }
 
 var (
