@@ -5,21 +5,15 @@
         <div>
           <div class="section-header__titlewrap">
             <h2>{{ $t('settings.sandbox.title') }}</h2>
-            <!--
-              The standard-template explainer used to be a permanent note block
-              above the list, where it pushed the actual configs below the fold.
-              It is reference material, so it belongs behind the title's hint.
-            -->
             <t-popup placement="bottom-start" trigger="hover" :overlay-inner-style="{ maxWidth: '380px' }">
               <button type="button" class="hint-trigger"
-                :aria-label="$t('settings.sandbox.weknoraTemplateTitle')">
+                :aria-label="$t('settings.sandbox.pageHintTitle')">
                 <t-icon name="info-circle" size="16px" />
               </button>
               <template #content>
                 <div class="hint-popover">
-                  <p class="hint-popover__title">{{ $t('settings.sandbox.weknoraTemplateTitle') }}</p>
-                  <p class="hint-popover__text">{{ $t('settings.sandbox.weknoraTemplateOverview') }}</p>
-                  <p class="hint-popover__text">{{ $t('settings.sandbox.namedBackendHint') }}</p>
+                  <p class="hint-popover__title">{{ $t('settings.sandbox.pageHintTitle') }}</p>
+                  <p class="hint-popover__text">{{ $t('settings.sandbox.pageHint') }}</p>
                 </div>
               </template>
             </t-popup>
@@ -75,53 +69,61 @@
           :class="[`sandbox-card--${record.sandbox_type}`, { 'sandbox-card--clickable': !isLegacyRecord(record) }]"
           :role="isLegacyRecord(record) ? undefined : 'button'"
           :tabindex="isLegacyRecord(record) ? undefined : 0"
-          @click="openEdit(record)" @keydown.enter="openEdit(record)">
+          @click="openCard(record)" @keydown.enter="openCard(record)">
           <SandboxBackendBadge :type="record.sandbox_type" />
           <div class="sandbox-card__body">
             <div class="sandbox-card__header">
-              <h3 class="sandbox-card__title">{{ record.name }}</h3>
+              <h3 class="sandbox-card__title" :title="record.name">{{ record.name }}</h3>
+              <t-tag v-if="isLegacyRecord(record)" theme="warning" variant="light" size="small">
+                {{ $t('settings.sandbox.legacyConfig') }}
+              </t-tag>
               <div class="sandbox-card__actions" @click.stop>
-                <t-dropdown v-if="!isLegacyRecord(record)" :options="cardMenu(record)" trigger="click" attach="body"
+                <t-dropdown :options="cardMenu(record)" trigger="click" attach="body"
                   placement="bottom-right" @click="(data: any) => onMenuAction(data.value, record)">
-                  <t-button variant="text" shape="square" size="small" class="sandbox-card__action-btn">
+                  <t-button variant="text" shape="square" size="small" class="sandbox-card__more">
                     <t-icon name="ellipsis" />
                   </t-button>
                 </t-dropdown>
-                <t-popconfirm theme="warning" :content="deleteConfirmText(record)"
-                  :confirm-btn="{ content: $t('common.delete'), theme: 'danger' }"
-                  :cancel-btn="{ content: $t('common.cancel') }" placement="bottom-right"
-                  @visible-change="(visible: boolean) => onDeleteConfirmOpen(visible, record)"
-                  @confirm="removeRecord(record)">
-                  <t-tooltip :content="$t('common.delete')" placement="top">
-                    <t-button theme="danger" shape="square" variant="text" size="small"
-                      class="sandbox-card__action-btn" @click.stop>
-                      <template #icon><t-icon name="delete" /></template>
-                    </t-button>
-                  </t-tooltip>
-                </t-popconfirm>
               </div>
             </div>
-            <p class="sandbox-card__subtitle">
-              <span>{{ backendLabel(record.sandbox_type) }}</span>
-              <t-tag v-if="isLegacyRecord(record)" theme="warning" variant="light" size="small" class="legacy-tag">
-                {{ $t('settings.sandbox.legacyConfig') }}
-              </t-tag>
-              <template v-if="targetSummary(record)">
+            <div class="sandbox-card__subtitle">
+              <span class="sandbox-card__type">{{ backendLabel(record.sandbox_type) }}</span>
+              <template v-if="record.description">
                 <span class="sandbox-card__sep">·</span>
-                <span class="sandbox-card__target" :title="targetSummary(record)">{{ targetSummary(record) }}</span>
+                <span class="sandbox-card__desc" :title="record.description">{{ record.description }}</span>
               </template>
-            </p>
-            <p v-if="record.description" class="sandbox-card__desc">{{ record.description }}</p>
-            <!--
-              The card used to spell out the raw template ID, which nobody can
-              read or act on. What an admin needs when scanning the list is
-              whether the config is complete and how it will behave at runtime.
-            -->
-            <ul v-if="cardFacts[record.id]?.length" class="sandbox-card__facts">
-              <li v-for="fact in cardFacts[record.id]" :key="fact.key" class="sandbox-card__fact"
-                :class="{ 'is-warning': fact.tone === 'warning' }" :title="fact.title">
-                <t-icon :name="fact.icon" size="12px" />
-                <span>{{ fact.text }}</span>
+            </div>
+            <div v-if="targetSummary(record)" class="sandbox-card__url" :title="targetSummary(record)">
+              {{ targetSummary(record) }}
+            </div>
+            <div
+              v-if="supportsSkills(record) && (skillsOf(record) || skillsFailed(record))"
+              class="sandbox-card__skills"
+            >
+              <template v-if="(skillsOf(record) || []).length">
+                <t-tag
+                  v-for="skill in visibleSkills(record)"
+                  :key="skill.id"
+                  size="small"
+                  variant="light"
+                  :theme="skillTagTheme(skill)"
+                  :title="skill.name"
+                >{{ skill.name }}</t-tag>
+                <span v-if="extraSkillCount(record)" class="sandbox-card__skills-more">
+                  {{ $t('settings.sandbox.cardSkillsMore', { count: extraSkillCount(record) }) }}
+                </span>
+              </template>
+              <span v-else-if="skillsFailed(record)" class="sandbox-card__skills-empty">
+                {{ $t('settings.sandbox.skillLoadFailed') }}
+              </span>
+              <span v-else class="sandbox-card__skills-empty">
+                {{ $t('settings.sandbox.cardSkillsNone') }}
+              </span>
+            </div>
+            <ul v-if="cardWarnings[record.id]?.length" class="sandbox-card__warnings">
+              <li v-for="item in cardWarnings[record.id]" :key="item.key">
+                <t-icon name="error-circle" size="12px" />
+                <span>{{ item.text }}</span>
               </li>
             </ul>
           </div>
@@ -145,7 +147,7 @@
       toast or a cramped dialog.
     -->
     <SettingDrawer v-model:visible="showInventory" :title="$t('settings.sandbox.inventoryTitle')"
-      :description="$t('settings.sandbox.inventoryDrawerDesc')" icon="server"
+      :description="$t('settings.sandbox.inventoryDrawerDesc')" icon="code"
       width="480px" storage-key="setting-drawer:width:sandbox-inventory" hide-footer>
       <t-loading :loading="inventoryLoading" size="small">
         <section class="setting-drawer__section">
@@ -208,20 +210,24 @@ import { useI18n } from 'vue-i18n'
 import SandboxConfigEditorDrawer from '@/components/SandboxConfigEditorDrawer.vue'
 import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import {
   checkSandboxConfig,
   deleteSandboxConfig,
   getSandboxConfigInventory,
   isNamedSandboxBackend,
+  listConfigSkills,
   listSandboxConfigs,
   NAMED_SANDBOX_BACKEND_TYPES,
   parseSandboxConflict,
   setSandboxWorkspacePolicy,
+  type ConfigSkill,
   type SandboxConfigRecord,
   type SandboxInventory,
 } from '@/api/system'
 
 const { t } = useI18n()
+const confirmDelete = useConfirmDelete()
 
 const sandboxGuideUrl = 'https://github.com/Tencent/WeKnora/blob/main/docs/sandbox-cluster.md'
 
@@ -232,6 +238,12 @@ const policySaving = ref(false)
 const workspaceScriptsDisabled = ref(false)
 const records = ref<SandboxConfigRecord[]>([])
 const activeType = ref<string>('all')
+// Skill names on cube/e2b cards. Missing until the per-config list returns, so
+// the empty hint does not flash on first paint. A failed fetch is tracked
+// separately so it is not shown as "no skills installed".
+const skillsByConfig = ref<Record<string, ConfigSkill[]>>({})
+const skillsLoadFailed = ref<Record<string, boolean>>({})
+const SKILL_TAG_LIMIT = 3
 
 const showEditor = ref(false)
 const editingRecord = ref<SandboxConfigRecord | null>(null)
@@ -252,6 +264,34 @@ const backendLabel = (value: string) => t(`settings.sandbox.backends.${value}`)
 
 const isLegacyRecord = (record: SandboxConfigRecord) => !isNamedSandboxBackend(record.sandbox_type)
 
+// Skills are baked into the remote snapshot image. Docker and local configs
+// have no skills step, so their cards stay a connection summary.
+function supportsSkills(record: SandboxConfigRecord) {
+  return record.sandbox_type === 'cube' || record.sandbox_type === 'e2b'
+}
+
+function skillsOf(record: SandboxConfigRecord): ConfigSkill[] | undefined {
+  return skillsByConfig.value[record.id]
+}
+
+function skillsFailed(record: SandboxConfigRecord): boolean {
+  return skillsLoadFailed.value[record.id] === true
+}
+
+function visibleSkills(record: SandboxConfigRecord): ConfigSkill[] {
+  return (skillsOf(record) || []).slice(0, SKILL_TAG_LIMIT)
+}
+
+function extraSkillCount(record: SandboxConfigRecord): number {
+  return Math.max(0, (skillsOf(record) || []).length - SKILL_TAG_LIMIT)
+}
+
+function skillTagTheme(skill: ConfigSkill): 'default' | 'warning' | 'primary' {
+  if (skill.status === 'failed') return 'warning'
+  if (skill.status === 'installing' || skill.status === 'removing') return 'primary'
+  return 'default'
+}
+
 const filteredRecords = computed(() => {
   const base = activeType.value === 'all'
     ? records.value
@@ -262,10 +302,13 @@ const filteredRecords = computed(() => {
 const countByType = (type: string) =>
   records.value.filter((r) => r.sandbox_type === type && isNamedSandboxBackend(r.sandbox_type)).length
 
-// Legacy rows can only be deleted, and that action has its own button, so they
-// get no menu at all.
-const cardMenu = (record: SandboxConfigRecord) => {
-  const options = [
+type CardMenuOption = { content: string; value: string; theme?: 'error' }
+
+const cardMenu = (record: SandboxConfigRecord): CardMenuOption[] => {
+  if (isLegacyRecord(record)) {
+    return [{ content: t('common.delete'), value: 'delete', theme: 'error' }]
+  }
+  const options: CardMenuOption[] = [
     { content: t('common.edit'), value: 'edit' },
     { content: t('settings.sandbox.testConnection'), value: 'check' },
   ]
@@ -273,6 +316,7 @@ const cardMenu = (record: SandboxConfigRecord) => {
     options.push({ content: t('settings.sandbox.viewSandboxes'), value: 'inventory' })
     options.push({ content: t('settings.sandbox.manageSkills'), value: 'skills' })
   }
+  options.push({ content: t('common.delete'), value: 'delete', theme: 'error' })
   return options
 }
 
@@ -326,6 +370,23 @@ function openEdit(record: SandboxConfigRecord) {
   showEditor.value = true
 }
 
+function openSkills(record: SandboxConfigRecord) {
+  if (isLegacyRecord(record) || !supportsSkills(record)) return
+  editingRecord.value = record
+  editorStep.value = 'skills'
+  showEditor.value = true
+}
+
+// Cube/e2b cards now lead with installed skills, so a click lands on that
+// step. Connection and runtime stay behind the card menu's edit action.
+function openCard(record: SandboxConfigRecord) {
+  if (supportsSkills(record)) {
+    openSkills(record)
+    return
+  }
+  openEdit(record)
+}
+
 // What this config actually points at: the remote host, the container image, or
 // the local runtime. Two configs of the same backend are told apart by it.
 function targetSummary(record: SandboxConfigRecord): string {
@@ -338,111 +399,73 @@ function targetSummary(record: SandboxConfigRecord): string {
   return endpointHost(record)
 }
 
-interface CardFact {
+interface CardWarning {
   key: string
-  icon: string
   text: string
-  /** Full value for opaque identifiers we only summarise on the card. */
-  title?: string
-  tone?: 'warning'
 }
 
 const REMOTE_BACKENDS = new Set(['cube', 'e2b'])
 
-// Facts are derived from the config we already hold, so the list stays cheap:
-// nothing here probes a provider. Anything that would need a remote call
-// (liveness, running sandboxes) stays behind the card menu.
-const cardFacts = computed<Record<string, CardFact[]>>(() => {
-  const map: Record<string, CardFact[]> = {}
+// Cards only surface blockers: healthy defaults (template present, timeout,
+// TTL, env count) belong in the editor, not on every tile. Nothing here
+// probes a provider; liveness stays behind the card menu.
+const cardWarnings = computed<Record<string, CardWarning[]>>(() => {
+  const map: Record<string, CardWarning[]> = {}
   for (const record of records.value) {
-    map[record.id] = buildCardFacts(record)
+    map[record.id] = buildCardWarnings(record)
   }
   return map
 })
 
-function buildCardFacts(record: SandboxConfigRecord): CardFact[] {
-  const facts: CardFact[] = []
+function buildCardWarnings(record: SandboxConfigRecord): CardWarning[] {
+  const warnings: CardWarning[] = []
   const config = record.config || {}
   const remote = config.cube || config.e2b
 
-  // Incomplete configs come first: they are why a skill fails at runtime.
   if (REMOTE_BACKENDS.has(record.sandbox_type)) {
-    const templateID = remote?.template_id?.trim() || ''
-    facts.push(templateID
-      ? {
+    if (!remote?.template_id?.trim()) {
+      warnings.push({
         key: 'template',
-        icon: 'code',
-        text: t('settings.sandbox.cardTemplateConfigured'),
-        title: templateID,
-      }
-      : {
-        key: 'template',
-        icon: 'error-circle',
         text: t('settings.sandbox.templateNotConfigured'),
-        tone: 'warning',
       })
-    if (!remote?.api_key?.trim()) {
-      facts.push({
+    }
+    // Cube API keys are optional; only E2B fails at runtime without one.
+    if (record.sandbox_type === 'e2b' && !remote?.api_key?.trim()) {
+      warnings.push({
         key: 'credential',
-        icon: 'error-circle',
         text: t('settings.sandbox.cardCredentialMissing'),
-        tone: 'warning',
       })
     }
   }
   if (record.sandbox_type === 'docker' && !config.docker?.image?.trim()) {
-    facts.push({
+    warnings.push({
       key: 'image',
-      icon: 'error-circle',
       text: t('settings.sandbox.imageNotConfigured'),
-      tone: 'warning',
     })
   }
+  return warnings
+}
 
-  if (config.default_timeout_sec) {
-    facts.push({
-      key: 'timeout',
-      icon: 'time',
-      text: t('settings.sandbox.cardTimeout', { sec: config.default_timeout_sec }),
-    })
+async function loadSkills(configs: SandboxConfigRecord[]) {
+  const remotes = configs.filter(supportsSkills)
+  const remoteIDs = new Set(remotes.map((record) => record.id))
+  const next: Record<string, ConfigSkill[]> = {}
+  for (const [id, skills] of Object.entries(skillsByConfig.value)) {
+    if (remoteIDs.has(id)) next[id] = skills
   }
-  const ttl = record.config?.cube?.cube_sandbox_ttl_seconds
-    || record.config?.e2b?.e2b_sandbox_ttl_seconds
-  if (ttl) {
-    facts.push({
-      key: 'ttl',
-      icon: 'hourglass',
-      text: t('settings.sandbox.cardTtl', { sec: ttl }),
-    })
-  }
-  if (config.volume_mount?.enabled) {
-    facts.push({
-      key: 'volume',
-      icon: 'folder',
-      text: config.volume_mount.volume_name?.trim()
-        || config.volume_mount.mount_path?.trim()
-        || t('settings.sandbox.cardVolumeMounted'),
-    })
-  }
-  const envCount = Object.keys(config.env_vars || {}).length
-  if (envCount) {
-    facts.push({
-      key: 'env',
-      icon: 'code-1',
-      text: t('settings.sandbox.cardEnvVars', { count: envCount }),
-    })
-  }
-  // A config allowed to reach private addresses widens the workspace's SSRF
-  // surface, so it is called out rather than buried in the form.
-  if (config.allow_private_endpoints) {
-    facts.push({
-      key: 'private',
-      icon: 'lock-on',
-      text: t('settings.sandbox.cardPrivateEndpoints'),
-      tone: 'warning',
-    })
-  }
-  return facts
+  const failed: Record<string, boolean> = {}
+  await Promise.all(remotes.map(async (record) => {
+    try {
+      const res = await listConfigSkills(record.id)
+      next[record.id] = (res?.data || []).filter((skill) => skill.status !== 'removed')
+    } catch {
+      // Keep a previous successful list. Only the first-load miss is an error
+      // row; replacing it with [] would read as "no skills installed".
+      if (next[record.id] === undefined) failed[record.id] = true
+    }
+  }))
+  skillsByConfig.value = next
+  skillsLoadFailed.value = failed
 }
 
 async function load() {
@@ -456,6 +479,7 @@ async function load() {
   } finally {
     loading.value = false
   }
+  await loadSkills(records.value)
 }
 
 async function setScriptsDisabled(disabled: boolean) {
@@ -475,8 +499,7 @@ async function setScriptsDisabled(disabled: boolean) {
 
 async function onMenuAction(action: string, record: SandboxConfigRecord) {
   if (action === 'edit') {
-    editingRecord.value = record
-    showEditor.value = true
+    openEdit(record)
     return
   }
   if (action === 'check') {
@@ -488,10 +511,20 @@ async function onMenuAction(action: string, record: SandboxConfigRecord) {
     return
   }
   if (action === 'skills') {
-    editingRecord.value = record
-    editorStep.value = 'skills'
-    showEditor.value = true
+    openSkills(record)
+    return
   }
+  if (action === 'delete') {
+    void confirmRemove(record)
+  }
+}
+
+async function confirmRemove(record: SandboxConfigRecord) {
+  await onDeleteConfirmOpen(true, record)
+  confirmDelete({
+    body: deleteConfirmText(record),
+    onConfirm: () => removeRecord(record),
+  })
 }
 
 // A card-level probe answers "is this backend still alive" without opening the
@@ -776,20 +809,20 @@ onMounted(load)
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 14px 16px;
+  padding: 14px 14px 14px 12px;
   border: 1px solid var(--td-component-stroke);
   border-radius: 10px;
   background: var(--td-bg-color-container);
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
   min-width: 0;
 
-  &:hover {
-    border-color: var(--td-brand-color-3, var(--td-brand-color));
-    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-  }
-
   &--clickable {
     cursor: pointer;
+
+    &:hover {
+      border-color: var(--td-brand-color-3, var(--td-brand-color));
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+    }
 
     &:focus-visible {
       outline: 2px solid var(--td-brand-color);
@@ -847,8 +880,7 @@ onMounted(load)
   min-width: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 2px;
+  gap: 4px;
 }
 
 .sandbox-card__header {
@@ -871,86 +903,110 @@ onMounted(load)
   white-space: nowrap;
 }
 
-.sandbox-card__subtitle,
-.sandbox-card__desc {
-  margin: 2px 0 0;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--td-text-color-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sandbox-card__desc {
-  color: var(--td-text-color-placeholder);
-}
-
-.sandbox-card__target {
-  font-family: var(--td-font-family-medium, inherit);
-}
-
-.sandbox-card__facts {
+.sandbox-card__subtitle {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 4px 6px;
-  margin: 8px 0 0;
-  padding: 0;
-  list-style: none;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--td-text-color-secondary);
+  min-width: 0;
 }
 
-.sandbox-card__fact {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
-  padding: 2px 7px;
-  border-radius: 5px;
-  background: var(--td-bg-color-secondarycontainer);
-  color: var(--td-text-color-secondary);
-  font-size: 12px;
-  line-height: 1.5;
-
-  span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  &.is-warning {
-    background: color-mix(in srgb, var(--td-warning-color) 12%, transparent);
-    color: var(--td-warning-color-7, var(--td-warning-color));
-  }
+.sandbox-card__type {
+  font-weight: 500;
 }
 
 .sandbox-card__sep {
-  margin: 0 4px;
   color: var(--td-text-color-placeholder);
 }
 
-.legacy-tag {
-  margin-left: 6px;
-  vertical-align: middle;
+.sandbox-card__desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.sandbox-card__url {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--td-text-color-placeholder);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.sandbox-card__skills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  min-width: 0;
+
+  :deep(.t-tag) {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+.sandbox-card__skills-empty,
+.sandbox-card__skills-more {
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.sandbox-card__skills-empty:hover,
+.sandbox-card__skills:hover .sandbox-card__skills-more {
+  color: var(--td-brand-color);
+}
+
+.sandbox-card__warnings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--td-warning-color-7, var(--td-warning-color));
+    font-size: 12px;
+    line-height: 1.4;
+  }
 }
 
 .sandbox-card__actions {
   flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 2px;
 }
 
-.sandbox-card__action-btn {
+.sandbox-card__more {
   flex-shrink: 0;
   padding: 2px;
   color: var(--td-text-color-placeholder);
-  transition: color 0.15s ease, background-color 0.15s ease;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
 
-  &:hover {
+  &:hover,
+  &:focus-visible {
     color: var(--td-text-color-primary);
     background: var(--td-bg-color-secondarycontainer);
   }
+}
+
+.sandbox-card:hover .sandbox-card__more,
+.sandbox-card:focus-within .sandbox-card__more,
+.sandbox-card__actions:focus-within .sandbox-card__more {
+  opacity: 1;
 }
 
 .sandbox-empty-hint {
