@@ -242,11 +242,13 @@ const filteredRecords = computed(() => {
 const countByType = (type: string) =>
   records.value.filter((r) => r.sandbox_type === type && isNamedSandboxBackend(r.sandbox_type)).length
 
-const cardMenu = (record: SandboxConfigRecord) => {
+type CardMenuOption = { content: string; value: string; theme?: 'error' }
+
+const cardMenu = (record: SandboxConfigRecord): CardMenuOption[] => {
   if (isLegacyRecord(record)) {
-    return [{ content: t('common.delete'), value: 'delete', theme: 'error' as const }]
+    return [{ content: t('common.delete'), value: 'delete', theme: 'error' }]
   }
-  const options = [
+  const options: CardMenuOption[] = [
     { content: t('common.edit'), value: 'edit' },
     { content: t('settings.sandbox.testConnection'), value: 'check' },
   ]
@@ -254,7 +256,7 @@ const cardMenu = (record: SandboxConfigRecord) => {
     options.push({ content: t('settings.sandbox.viewSandboxes'), value: 'inventory' })
     options.push({ content: t('settings.sandbox.manageSkills'), value: 'skills' })
   }
-  options.push({ content: t('common.delete'), value: 'delete', theme: 'error' as const })
+  options.push({ content: t('common.delete'), value: 'delete', theme: 'error' })
   return options
 }
 
