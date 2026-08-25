@@ -3,28 +3,37 @@
     <t-loading :loading="loading" size="small">
       <section class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.imageInfoTitle') }}</h4>
+        <p v-if="!hasSkillSnapshot" class="image-info-note">
+          {{ $t('settings.sandbox.imageInfoUsingBase') }}
+        </p>
         <ul class="image-info">
-          <li>
-            <span class="image-info__label">{{ $t('settings.sandbox.imageInfoBaseTemplate') }}</span>
+          <template v-if="hasSkillSnapshot">
+            <li>
+              <span class="image-info__label">{{ $t('settings.sandbox.imageInfoBaseTemplate') }}</span>
+              <span class="image-info__value image-info__value--id">
+                {{ skillImage?.base_template_id || runtimeTemplateId || $t('settings.sandbox.imageInfoUnset') }}
+              </span>
+            </li>
+            <li>
+              <span class="image-info__label">{{ $t('settings.sandbox.imageInfoSnapshot') }}</span>
+              <span class="image-info__value image-info__value--id">{{ skillImage?.snapshot_id }}</span>
+            </li>
+            <li>
+              <span class="image-info__label">{{ $t('settings.sandbox.imageInfoGeneration') }}</span>
+              <span class="image-info__value">
+                {{ skillImage?.generation ? String(skillImage.generation) : $t('settings.sandbox.imageInfoUnset') }}
+              </span>
+            </li>
+            <li>
+              <span class="image-info__label">{{ $t('settings.sandbox.imageInfoBuiltAt') }}</span>
+              <span class="image-info__value">{{ formatBuiltAt(skillImage?.built_at) }}</span>
+            </li>
+          </template>
+          <li v-else>
+            <span class="image-info__label">{{ $t('settings.sandbox.imageInfoRuntimeTemplate') }}</span>
             <span class="image-info__value image-info__value--id">
-              {{ skillImage?.base_template_id || $t('settings.sandbox.imageInfoEmpty') }}
+              {{ runtimeTemplateId || $t('settings.sandbox.imageInfoUnset') }}
             </span>
-          </li>
-          <li>
-            <span class="image-info__label">{{ $t('settings.sandbox.imageInfoSnapshot') }}</span>
-            <span class="image-info__value image-info__value--id">
-              {{ skillImage?.snapshot_id || $t('settings.sandbox.imageInfoEmpty') }}
-            </span>
-          </li>
-          <li>
-            <span class="image-info__label">{{ $t('settings.sandbox.imageInfoGeneration') }}</span>
-            <span class="image-info__value">
-              {{ skillImage?.generation ? String(skillImage.generation) : $t('settings.sandbox.imageInfoEmpty') }}
-            </span>
-          </li>
-          <li>
-            <span class="image-info__label">{{ $t('settings.sandbox.imageInfoBuiltAt') }}</span>
-            <span class="image-info__value">{{ formatBuiltAt(skillImage?.built_at) }}</span>
           </li>
         </ul>
       </section>
@@ -312,6 +321,11 @@ const deleteHint = computed(() =>
     ? t('settings.sandbox.skillDeleteHintNewSession')
     : t('settings.sandbox.skillDeleteHint'),
 )
+const runtimeTemplateId = computed(() => {
+  const cfg = props.record?.config
+  return cfg?.cube?.template_id?.trim() || cfg?.e2b?.template_id?.trim() || ''
+})
+const hasSkillSnapshot = computed(() => Boolean(skillImage.value?.snapshot_id?.trim()))
 
 function readLastChatModelID(): string {
   try {
@@ -322,10 +336,10 @@ function readLastChatModelID(): string {
 }
 
 function formatBuiltAt(value?: string): string {
-  if (!value) return t('settings.sandbox.imageInfoEmpty')
+  if (!value) return t('settings.sandbox.imageInfoUnset')
   const date = new Date(value)
   if (Number.isNaN(date.getTime()) || date.getFullYear() <= 1) {
-    return t('settings.sandbox.imageInfoEmpty')
+    return t('settings.sandbox.imageInfoUnset')
   }
   return date.toLocaleString(locale.value)
 }
@@ -676,6 +690,13 @@ onUnmounted(() => {
 </script>
 
 <style lang="less" scoped>
+.image-info-note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+}
+
 .image-info {
   margin: 0;
   padding: 0;
