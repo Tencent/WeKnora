@@ -234,6 +234,73 @@ func TestReconcileSnapshotsWarnsExtrasWithoutDeleting(t *testing.T) {
 		"extras are only warned; the same provider account may be shared across environments")
 }
 
+func TestPruneSupersededSnapshotsDeletesOldLedgerSnapshots(t *testing.T) {
+	fx := newReaperFixture(t)
+	fx.svc.snapshotRetention = time.Hour
+	old := fx.now.Add(-2 * time.Hour)
+	recent := fx.now.Add(-30 * time.Minute)
+	fx.live("snap-live")
+	fx.superseded("sk-1", "snap-old", "", old)
+	fx.superseded("sk-2", "snap-recent", "snap-old", recent)
+	fx.installed("sk-3", "snap-live", "snap-recent")
+	fx.provider.listed = []sandbox.RemoteSnapshotRef{
+		{ID: "snap-old"}, {ID: "snap-recent"}, {ID: "snap-live"}, {ID: "snap-foreign"},
+	}
+
+	n, err := fx.svc.PruneSupersededSnapshots(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	require.Equal(t, []string{"snap-old"}, fx.provider.deleted,
+		"only a superseded snapshot older than retention is a billed leftover")
+	rows, err := fx.skills.ListSnapshotsByConfig(context.Background(), 7, "cfg-1")
+	require.NoError(t, err)
+	states := map[string]string{}
+	for _, row := range rows {
+		states[row.SnapshotID] = row.State
+	}
+	require.Equal(t, types.SkillSnapshotStateDeleted, states["snap-old"])
+	require.Equal(t, types.SkillSnapshotStateSuperseded, states["snap-recent"],
+		"a snapshot still inside the retention window may have live sandboxes")
+	require.Equal(t, types.SkillSnapshotStateActive, states["snap-live"])
+}
+
+func TestPruneSupersededSnapshotsNeverDeletesTheLiveImage(t *testing.T) {
+	fx := newReaperFixture(t)
+	fx.svc.snapshotRetention = time.Hour
+	old := fx.now.Add(-2 * time.Hour)
+	fx.live("snap-live")
+	fx.skills.snapshots = append(fx.skills.snapshots, &types.TenantSkillSnapshotEntity{
+		ID: "row-wrong", TenantID: 7, SandboxConfigID: "cfg-1", SkillID: "sk-1",
+		SnapshotID: "snap-live", Trigger: types.SkillSnapshotTriggerInstall,
+		State: types.SkillSnapshotStateSuperseded, SupersededAt: &old,
+	})
+
+	n, err := fx.svc.PruneSupersededSnapshots(context.Background())
+
+	require.NoError(t, err)
+	require.Zero(t, n)
+	require.Empty(t, fx.provider.deleted,
+		"a ledger bug that marks the live snapshot superseded must not delete it")
+}
+
+func TestPruneSupersededSnapshotsNeverDeletesUnknownProviderSnapshots(t *testing.T) {
+	fx := newReaperFixture(t)
+	fx.svc.snapshotRetention = time.Hour
+	fx.live("snap-live")
+	fx.installed("sk-1", "snap-live", "")
+	fx.provider.listed = []sandbox.RemoteSnapshotRef{
+		{ID: "snap-live"}, {ID: "snap-foreign"},
+	}
+
+	n, err := fx.svc.PruneSupersededSnapshots(context.Background())
+
+	require.NoError(t, err)
+	require.Zero(t, n)
+	require.Empty(t, fx.provider.deleted,
+		"a snapshot the ledger does not name belongs to another environment")
+}
+
 func TestTenantSkillServiceStartIsIdempotent(t *testing.T) {
 	svc := NewTenantSkillService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
@@ -291,6 +358,15 @@ func (f *reaperFixture) snapshotRow(skillID, snapshotID, parentSnapshotID, trigg
 	})
 }
 
+func (f *reaperFixture) superseded(skillID, snapshotID, parentSnapshotID string, at time.Time) {
+	f.skills.snapshots = append(f.skills.snapshots, &types.TenantSkillSnapshotEntity{
+		ID: "row-" + snapshotID, TenantID: 7, SandboxConfigID: "cfg-1", SkillID: skillID,
+		SnapshotID: snapshotID, ParentSnapshotID: parentSnapshotID,
+		Trigger: types.SkillSnapshotTriggerInstall, State: types.SkillSnapshotStateSuperseded,
+		SupersededAt: &at,
+	})
+}
+
 // live points the config at a snapshot, the way an install's pointer switch
 // does.
 func (f *reaperFixture) live(snapshotID string) {
@@ -304,6 +380,7 @@ var (
 	_ sandboxConfigEnumerator       = (*reaperConfigStore)(nil)
 	_ sandbox.TenantSandboxResolver = (*reaperSandboxResolver)(nil)
 	_ skillSnapshotLister           = (*reaperSnapshotProvider)(nil)
+	_ skillSnapshotDeleter          = (*reaperSnapshotProvider)(nil)
 )
 
 type reaperSkillStore struct {
@@ -395,9 +472,23 @@ func (r *reaperSkillStore) CreateSnapshotRow(_ context.Context, e *types.TenantS
 }
 
 func (r *reaperSkillStore) MarkSnapshotState(
-	context.Context, uint64, string, string, string,
+	_ context.Context, tenantID uint64, id, state, snapshotID string,
 ) error {
-	panic("MarkSnapshotState is outside the reaper surface")
+	for _, e := range r.snapshots {
+		if e == nil || e.ID != id || e.TenantID != tenantID {
+			continue
+		}
+		e.State = state
+		if snapshotID != "" {
+			e.SnapshotID = snapshotID
+		}
+		if state == types.SkillSnapshotStateSuperseded {
+			now := time.Now()
+			e.SupersededAt = &now
+		}
+		return nil
+	}
+	return nil
 }
 
 func (r *reaperSkillStore) DeleteSnapshotRowsByConfig(context.Context, uint64, string) error {

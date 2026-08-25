@@ -310,6 +310,101 @@ func TestInstallSkillRefusesWhenBundleCannotBeStored(t *testing.T) {
 	require.NotContains(t, fx.events, "create-session")
 }
 
+func TestInstallSkillSkipsWhenReadyWithTheSameArchive(t *testing.T) {
+	fx := newInstallFixture(t)
+	archive := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('hi')\n",
+	})
+	bundle, err := ParseSkillBundle(archive)
+	require.NoError(t, err)
+	fx.seedReadySkillWithSHA(bundle.SHA256, "snap-live")
+
+	id, err := fx.svc.InstallSkill(context.Background(), 7, "cfg-1", archive)
+
+	require.NoError(t, err)
+	require.Equal(t, "sk-1", id)
+	skill, getErr := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, getErr)
+	require.Equal(t, types.SkillStatusReady, skill.Status,
+		"a ready skill whose archive did not change must not be flipped to installing")
+	require.Empty(t, fx.sessionCalls, "the same bytes must not boot a billed sandbox")
+	require.NotContains(t, fx.events, "create-snapshot")
+	require.Nil(t, fx.configRepo.saved, "the image pointer must stay where it is")
+}
+
+func TestInstallSkillRetriesAFailedSkillWithTheSameArchive(t *testing.T) {
+	fx := newInstallFixture(t)
+	archive := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('hi')\n",
+	})
+	bundle, err := ParseSkillBundle(archive)
+	require.NoError(t, err)
+	require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), &types.TenantSkillEntity{
+		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		Name: bundle.Name, BundleSHA256: bundle.SHA256,
+		Status: types.SkillStatusFailed, Error: "previous run died",
+	}))
+
+	id, err := fx.svc.InstallSkill(context.Background(), 7, "cfg-1", archive)
+
+	require.NoError(t, err)
+	require.Equal(t, "sk-1", id)
+	skill, getErr := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, getErr)
+	require.Equal(t, types.SkillStatusInstalling, skill.Status,
+		"a failed skill is a retry even when the archive digest is unchanged")
+}
+
+func TestInstallSkillReinstallsWhenTheLiveImageNoLongerCarriesTheSkill(t *testing.T) {
+	fx := newInstallFixture(t)
+	archive := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('hi')\n",
+	})
+	bundle, err := ParseSkillBundle(archive)
+	require.NoError(t, err)
+	require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), &types.TenantSkillEntity{
+		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		Name: bundle.Name, BundleSHA256: bundle.SHA256,
+		Status: types.SkillStatusReady,
+	}))
+	// The pointer was cleared (last-skill removal, or a rebuild from base).
+	// The row still says ready, but the files are gone from every new session.
+
+	id, err := fx.svc.InstallSkill(context.Background(), 7, "cfg-1", archive)
+
+	require.NoError(t, err)
+	require.Equal(t, "sk-1", id)
+	skill, getErr := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, getErr)
+	require.Equal(t, types.SkillStatusInstalling, skill.Status,
+		"a ready row whose files left the image is a repair, not a skip")
+}
+
+func TestInstallSkillSkipsAnInFlightInstallOfTheSameArchive(t *testing.T) {
+	fx := newInstallFixture(t)
+	archive := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('hi')\n",
+	})
+	bundle, err := ParseSkillBundle(archive)
+	require.NoError(t, err)
+	require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), &types.TenantSkillEntity{
+		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		Name: bundle.Name, BundleSHA256: bundle.SHA256,
+		Status: types.SkillStatusInstalling,
+	}))
+
+	id, err := fx.svc.InstallSkill(context.Background(), 7, "cfg-1", archive)
+
+	require.NoError(t, err)
+	require.Equal(t, "sk-1", id)
+	require.Empty(t, fx.sessionCalls,
+		"a second upload of the same bytes must not start another billed run")
+}
+
 func TestRunInstallAbortsWhenANewerBundleOwnsTheRow(t *testing.T) {
 	fx := newInstallFixture(t)
 	newer := strings.Repeat("b", 64)
@@ -922,6 +1017,33 @@ func (f *installFixture) seedInstalledSkill(skillID, snapshotID string, generati
 	payload, err := json.Marshal(f.manifest)
 	require.NoError(f.t, err)
 	f.sandboxMgr.manifest = payload
+}
+
+// seedReadySkillWithSHA puts the fixture in the state a no-op re-upload starts
+// from: the skill is ready, the digest matches the archive about to be posted,
+// and the ledger says those files are still on the live image.
+func (f *installFixture) seedReadySkillWithSHA(sha256, snapshotID string) {
+	f.t.Helper()
+	ctx := context.Background()
+	skill, err := f.skillRepo.GetSkill(ctx, 7, "cfg-1", "sk-1")
+	require.NoError(f.t, err)
+	require.NotNil(f.t, skill)
+	skill.Status = types.SkillStatusReady
+	skill.BundleSHA256 = sha256
+	skill.InstalledSnapshotID = snapshotID
+	skill.Error = ""
+	skill.InstallingSince = nil
+	require.NoError(f.t, f.skillRepo.UpdateSkill(ctx, skill))
+
+	require.NoError(f.t, f.skillRepo.CreateSnapshotRow(ctx, &types.TenantSkillSnapshotEntity{
+		ID: "row-live", TenantID: 7, SandboxConfigID: "cfg-1", SkillID: "sk-1",
+		SnapshotID: snapshotID, Generation: 1,
+		Trigger: types.SkillSnapshotTriggerInstall, State: types.SkillSnapshotStateActive,
+	}))
+	f.configRepo.entity.Config.SkillImage = &types.SkillImageConfig{
+		SnapshotID: snapshotID, Generation: 1,
+		BaseTemplateID: "base-template", OwnerFingerprint: f.fingerprint,
+	}
 }
 
 type installConfigRepo struct {

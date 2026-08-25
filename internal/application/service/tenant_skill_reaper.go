@@ -47,6 +47,13 @@ type skillSnapshotLister interface {
 	ListSnapshots(ctx context.Context, sandboxID string) ([]sandbox.RemoteSnapshotRef, error)
 }
 
+// skillSnapshotDeleter is the provider delete PruneSupersededSnapshots is
+// allowed to call. It is a separate surface from the lister so reconcile
+// cannot grow a delete by accident: extras not in the ledger stay untouched.
+type skillSnapshotDeleter interface {
+	DeleteSnapshot(ctx context.Context, snapshotID string) error
+}
+
 // sandboxConfigEnumerator walks every sandbox config for the orphan-snapshot
 // sweep. ListAll is housekeeping-only.
 type sandboxConfigEnumerator interface {
@@ -59,6 +66,7 @@ var (
 	_ skillReaperConfigReader = (repository.TenantSandboxConfigRepository)(nil)
 	_ sandboxConfigEnumerator = (repository.TenantSandboxConfigRepository)(nil)
 	_ skillSnapshotLister     = (sandbox.RemoteSnapshotManager)(nil)
+	_ skillSnapshotDeleter    = (*sandbox.SessionBoundManager)(nil)
 )
 
 // ReapStuckRuns recovers skill rows whose install or remove process died.
@@ -344,6 +352,128 @@ func snapshotListerFrom(
 	return lister
 }
 
+func snapshotDeleterFrom(
+	ctx context.Context, resolver sandbox.TenantSandboxResolver, tenantID uint64, configID string,
+) skillSnapshotDeleter {
+	if resolver == nil {
+		return nil
+	}
+	mgr, err := resolver.Resolve(ctx, tenantID, configID)
+	if err != nil {
+		logger.Warnf(ctx, "[skill] resolve sandbox for snapshot prune of %s failed: %v", configID, err)
+		return nil
+	}
+	if mgr == nil {
+		return nil
+	}
+	deleter, ok := mgr.(skillSnapshotDeleter)
+	if !ok {
+		return nil
+	}
+	return deleter
+}
+
+func (s *TenantSkillService) snapshotRetentionWindow() time.Duration {
+	if s != nil && s.snapshotRetention > 0 {
+		return s.snapshotRetention
+	}
+	return skillSnapshotRetention
+}
+
+// PruneSupersededSnapshots deletes provider snapshots the ledger has already
+// retired, once they are older than snapshotRetention. The current image is
+// never touched, nor is anything the ledger does not name: extras belong to
+// other environments on a shared provider account.
+//
+// A live sandbox does not need the template it was created from in order to
+// keep running, so the only reason to wait is in-flight creates that resolved
+// the previous pointer. Twenty-four hours is far past every backend TTL.
+func (s *TenantSkillService) PruneSupersededSnapshots(ctx context.Context) (int, error) {
+	if s == nil || s.skills == nil {
+		return 0, nil
+	}
+	enum, ok := s.configs.(sandboxConfigEnumerator)
+	if !ok {
+		return 0, nil
+	}
+	configs, err := enum.ListAll(ctx)
+	if err != nil {
+		return 0, err
+	}
+	cutoff := s.now().Add(-s.snapshotRetentionWindow())
+	pruned := 0
+	for _, cfg := range configs {
+		if cfg == nil || types.IsSandboxWorkspacePolicyRow(cfg) {
+			continue
+		}
+		n, err := s.pruneConfigSnapshots(ctx, cfg, cutoff)
+		if err != nil {
+			logger.Warnf(ctx, "[skill] prune superseded snapshots of config %s failed: %v",
+				cfg.ID, err)
+			continue
+		}
+		pruned += n
+	}
+	return pruned, nil
+}
+
+func (s *TenantSkillService) pruneConfigSnapshots(
+	ctx context.Context, cfg *types.TenantSandboxConfigEntity, cutoff time.Time,
+) (int, error) {
+	if cfg == nil {
+		return 0, nil
+	}
+	rows, err := s.skills.ListSnapshotsByConfig(ctx, cfg.TenantID, cfg.ID)
+	if err != nil {
+		return 0, err
+	}
+	live := currentSnapshotID(cfg)
+	deleter := snapshotDeleterFrom(ctx, s.sandboxes, cfg.TenantID, cfg.ID)
+	pruned := 0
+	for _, row := range rows {
+		if !snapshotEligibleForPrune(row, live, cutoff) {
+			continue
+		}
+		if deleter == nil {
+			logger.Warnf(ctx,
+				"[skill] cannot prune snapshot %s of config %s: provider does not support delete",
+				row.SnapshotID, cfg.ID)
+			continue
+		}
+		if err := deleter.DeleteSnapshot(ctx, row.SnapshotID); err != nil && !sandbox.IsRemoteNotFound(err) {
+			logger.Warnf(ctx, "[skill] delete superseded snapshot %s failed: %v", row.SnapshotID, err)
+			continue
+		}
+		if err := s.skills.MarkSnapshotState(
+			ctx, cfg.TenantID, row.ID, types.SkillSnapshotStateDeleted, row.SnapshotID,
+		); err != nil {
+			logger.Warnf(ctx, "[skill] mark snapshot %s deleted after prune failed: %v", row.ID, err)
+			continue
+		}
+		pruned++
+	}
+	return pruned, nil
+}
+
+// snapshotEligibleForPrune is the ledger-side gate. The provider delete is
+// what costs money; this is what keeps it from touching the live image or a
+// snapshot another environment created on the same account.
+func snapshotEligibleForPrune(
+	row *types.TenantSkillSnapshotEntity, liveSnapshotID string, cutoff time.Time,
+) bool {
+	if row == nil || row.State != types.SkillSnapshotStateSuperseded {
+		return false
+	}
+	id := strings.TrimSpace(row.SnapshotID)
+	if id == "" || id == strings.TrimSpace(liveSnapshotID) {
+		return false
+	}
+	if row.SupersededAt == nil || row.SupersededAt.After(cutoff) || row.SupersededAt.Equal(cutoff) {
+		return false
+	}
+	return true
+}
+
 func (s *TenantSkillService) reconcileAllSnapshots(ctx context.Context) {
 	enum, ok := s.configs.(sandboxConfigEnumerator)
 	if !ok {
@@ -367,6 +497,9 @@ func (s *TenantSkillService) reconcileAllSnapshots(ctx context.Context) {
 func (s *TenantSkillService) runSkillReaper(ctx context.Context) {
 	if _, err := s.ReapStuckRuns(ctx); err != nil {
 		logger.Warnf(ctx, "[skill] reap stuck runs failed: %v", err)
+	}
+	if _, err := s.PruneSupersededSnapshots(ctx); err != nil {
+		logger.Warnf(ctx, "[skill] prune superseded snapshots failed: %v", err)
 	}
 	s.reconcileAllSnapshots(ctx)
 }

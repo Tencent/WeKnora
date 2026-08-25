@@ -22,6 +22,13 @@ const (
 	skillImageLockLease  = 30 * time.Second
 	skillImageLockRenew  = 10 * time.Second
 	skillInstallStuckTTL = 60 * time.Minute
+
+	// skillSnapshotRetention is how long a superseded snapshot stays on the
+	// provider after the pointer has moved. Live sandboxes may still have
+	// been created from it (especially SkillRolloutNewSession); once they
+	// expire, the template is only a billed leftover. Twenty-four hours is
+	// well past every backend's default sandbox TTL.
+	skillSnapshotRetention = 24 * time.Hour
 )
 
 // TenantSkillService owns the skill image lifecycle for sandbox configs.
@@ -52,6 +59,10 @@ type TenantSkillService struct {
 	// test can let an install outlast it, which every real install does.
 	cleanupTimeout time.Duration
 
+	// snapshotRetention is how long a superseded snapshot is kept on the
+	// provider. Injectable so a prune test can age a row without waiting a day.
+	snapshotRetention time.Duration
+
 	// localLocks serialises installs when Redis is absent. It only guards this
 	// process; multi-replica deployments require Redis for cross-process safety.
 	localLocks *keyedMutex
@@ -79,21 +90,22 @@ func NewTenantSkillService(
 	messages interfaces.MessageRepository,
 ) *TenantSkillService {
 	return &TenantSkillService{
-		skills:          skillsRepo,
-		configs:         configsRepo,
-		resolver:        resolver,
-		sandboxes:       sandboxes,
-		sandboxPolicy:   sandboxPolicy,
-		agents:          agents,
-		installerAgents: customAgents,
-		sessions:        sessions,
-		models:          models,
-		redis:           redisClient,
-		streams:         streams,
-		messages:        messages,
-		now:             time.Now,
-		cleanupTimeout:  installCleanupTimeout,
-		localLocks:      newKeyedMutex(),
+		skills:            skillsRepo,
+		configs:           configsRepo,
+		resolver:          resolver,
+		sandboxes:         sandboxes,
+		sandboxPolicy:     sandboxPolicy,
+		agents:            agents,
+		installerAgents:   customAgents,
+		sessions:          sessions,
+		models:            models,
+		redis:             redisClient,
+		streams:           streams,
+		messages:          messages,
+		now:               time.Now,
+		cleanupTimeout:    installCleanupTimeout,
+		snapshotRetention: skillSnapshotRetention,
+		localLocks:        newKeyedMutex(),
 		cron: cron.New(cron.WithSeconds(), cron.WithChain(
 			cron.Recover(cron.DefaultLogger),
 		)),

@@ -62,6 +62,9 @@ func (s *TenantSkillService) InstallSkill(
 	if err != nil {
 		return "", err
 	}
+	if s.canSkipInstall(ctx, existing, bundle) {
+		return existing.ID, nil
+	}
 
 	skillID := uuid.NewString()
 	now := s.now()
@@ -872,6 +875,34 @@ func (s *TenantSkillService) installStillOwnsTheRow(
 		return false, nil
 	}
 	return true, nil
+}
+
+// canSkipInstall reports whether this upload is a no-op. Re-uploading the
+// exact archive of a skill that is already ready (and still in the live image)
+// must not boot a billed sandbox or grow a new snapshot. An in-flight install
+// of the same bytes is the same situation: the first run owns the work.
+//
+// A failed skill with the same digest is a retry, not a skip: the previous
+// attempt never made it into the image. A removal in flight is not a skip
+// either — taking the row back to installing is how an upload cancels it.
+func (s *TenantSkillService) canSkipInstall(
+	ctx context.Context, existing *types.TenantSkillEntity, bundle *SkillBundle,
+) bool {
+	if existing == nil || bundle == nil {
+		return false
+	}
+	if existing.BundleSHA256 == "" || existing.BundleSHA256 != bundle.SHA256 {
+		return false
+	}
+	switch existing.Status {
+	case types.SkillStatusInstalling:
+		return true
+	case types.SkillStatusReady:
+		_, inImage, ok := s.skillFilesInLiveImage(ctx, existing)
+		return ok && inImage
+	default:
+		return false
+	}
 }
 
 // startMaintenanceSession opens the session one image operation runs in. The
