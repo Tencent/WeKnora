@@ -57,7 +57,7 @@ type StreamingConnector interface {
 }
 ```
 
-价值（见源码注释，对应 issue Tencent/WeKnora#2136）：同步任务超时（Asynq 任务超时为 2 小时）后可以从最后一个 checkpoint **续传**，而不是从头重来；同时内存占用被限制在"单个条目"级别。目前只有 **Feishu/Lark 连接器**实现了 `StreamingConnector`。
+价值（见源码注释，对应 issue Tencent/WeKnora#2136）：同步任务超时（Asynq 任务超时为 2 小时）后可以从最后一个 checkpoint **续传**，而不是从头重来；同时内存占用被限制在"单个条目"级别。目前实现了 `StreamingConnector` 的连接器：**Feishu/Lark、GitLab、Git Repo**。
 
 ### ConnectorRegistry：注册与查找
 
@@ -69,9 +69,12 @@ registry.Register(feishuConnector.NewConnector(feishuConnector.RegionLark))    /
 registry.Register(notionConnector.NewConnector())                              // notion
 registry.Register(yuqueConnector.NewConnector())                               // yuque
 registry.Register(rssConnector.NewConnector())                                 // rss
+registry.Register(imaConnector.NewConnector())                                 // ima
+registry.Register(gitlabConnector.NewConnector())                              // gitlab
+registry.Register(gitRepoConnector.NewConnector())                             // git_repo
 ```
 
-> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 为前端展示定义了更多连接器元数据（Confluence、GitHub、Google Drive、OneDrive、DingTalk、Web Crawler、Slack、IMAP 等），但**当前代码库中实际注册可用的连接器只有 5 个类型：`feishu`、`lark`、`notion`、`yuque`、`rss`**（其中 feishu/lark 共用同一份实现）。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
+> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 为前端展示定义了更多连接器元数据（Confluence、GitHub、Google Drive、OneDrive、DingTalk、Web Crawler、Slack、IMAP 等），但**当前代码库中实际注册可用的连接器有 9 个类型：`feishu`、`lark`、`notion`、`yuque`、`rss`、`ima`、`gitlab`、`git_repo`**（其中 feishu/lark 共用同一份实现，即 8 份实现）。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。以 `internal/container/container.go` 的实际注册为准。
 
 ## 数据模型（internal/types/datasource.go）
 
@@ -227,19 +230,20 @@ sequenceDiagram
 
 ### 连接器能力对比
 
-| | Feishu / Lark | Notion | Yuque（语雀） | RSS / Atom |
-| --- | --- | --- | --- | --- |
-| 源码目录 | `internal/datasource/connector/feishu/` | `connector/notion/` | `connector/yuque/` | `connector/rss/` |
-| 类型标识 | `feishu` / `lark` | `notion` | `yuque` | `rss` |
-| 认证方式 | 企业自建应用 `app_id` + `app_secret`（tenant_access_token） | Internal Integration Token（`api_key`） | 个人/团队 Token（`api_token`，`X-Auth-Token` 头） | 无认证或自定义请求头（`auth_headers`） |
-| 凭据字段 | `app_id`、`app_secret`、`base_url`（可选覆盖） | `api_key`（`base_url` 走 Settings） | `api_token`、`base_url`（私有化部署可选） | `auth_headers`（可选，属凭据）；`feed_urls` 属 Settings |
-| 资源模型 | Wiki 空间 → 节点树（懒加载，`spaceID:nodeToken` 复合 ID） | 页面/数据库全量树（一次返回带 parent 关系） | 知识库（book/repo）扁平列表 | 每个 feed URL 一个资源（扁平） |
-| 内容格式 | 导出 API → `.docx`/`.xlsx` 文件；drive 文件原样下载 | Block → Markdown；数据库转 Markdown 表格；附件下载 | `body` Markdown 原文（`.md`） | Readability 全文抽取 → HTML→Markdown |
-| 增量机制 | 按节点 `obj_edit_time` 比对（cursor: `SpaceNodeTimes`） | 按页面/记录 `last_edited_time` 比对（cursor: `PageEditTimes`） | 按文档 `content_updated_at` 比对（cursor: `BookDocTimes`） | feed 信号指纹 + 内容 SHA-256 指纹双层比对 |
-| 删除检测 | 支持（游标中有、当前树没有 → `IsDeleted`；部分列举失败时跳过删除检测） | 支持（区分"源端已删"与"用户取消勾选"，后者不报删除） | 支持 | 不支持（feed 天然滚动淘汰旧条目） |
-| 流式可恢复同步 | 是（`StreamingConnector`，每 50 节点或 30 秒 checkpoint） | 否 | 否 | 否 |
-| 限流应对 | 429 读 `Retry-After` + 指数退避（2s/4s/8s，最多 3 次重试）；5xx 重试 | — | 每次 `GetDocDetail` 间隔 300ms（个人 token 约 100 req/5min） | — |
-| 部分失败 | 单文档失败生成带错误 metadata 的占位条目，继续同步 | 单页失败记日志跳过 | 单文档失败生成占位条目 | 单 feed 失败 → `PartialFetchError`；全部失败才算 fail |
+| | Feishu / Lark | Notion | Yuque（语雀） | RSS / Atom | GitLab | Git Repo |
+| --- | --- | --- | --- | --- | --- | --- |
+| 源码目录 | `internal/datasource/connector/feishu/` | `connector/notion/` | `connector/yuque/` | `connector/rss/` | `connector/gitlab/` | `connector/git_repo/` |
+| 类型标识 | `feishu` / `lark` | `notion` | `yuque` | `rss` | `gitlab` | `git_repo` |
+| 认证方式 | 企业自建应用 `app_id` + `app_secret`（tenant_access_token） | Internal Integration Token（`api_key`） | 个人/团队 Token（`api_token`，`X-Auth-Token` 头） | 无认证或自定义请求头（`auth_headers`） | 个人访问令牌（`base_url` + `access_token`，私有化 GitLab 可用） | 访问令牌（可选，公开仓库匿名） |
+| 凭据字段 | `app_id`、`app_secret`、`base_url`（可选覆盖） | `api_key`（`base_url` 走 Settings） | `api_token`、`base_url`（私有化部署可选） | `auth_headers`（可选，属凭据）；`feed_urls` 属 Settings | `base_url`、`access_token` | `access_token`（可选）；`repos` 属 Settings |
+| 资源模型 | Wiki 空间 → 节点树（懒加载，`spaceID:nodeToken` 复合 ID） | 页面/数据库全量树（一次返回带 parent 关系） | 知识库（book/repo）扁平列表 | 每个 feed URL 一个资源（扁平） | settings 驱动（项目 ID/路径 + ref + 目录，表单编辑） | settings 驱动（仓库 URL + 分支 + 目录，表单编辑） |
+| 内容格式 | 导出 API → `.docx`/`.xlsx` 文件；drive 文件原样下载 | Block → Markdown；数据库转 Markdown 表格；附件下载 | `body` Markdown 原文（`.md`） | Readability 全文抽取 → HTML→Markdown | Raw API → 原始文件（pdf/docx/md 等 25 种扩展名） | 本地 clone → 原始文件（md/markdown/mdx/html/htm/txt） |
+| 增量机制 | 按节点 `obj_edit_time` 比对（cursor: `SpaceNodeTimes`） | 按页面/记录 `last_edited_time` 比对（cursor: `PageEditTimes`） | 按文档 `content_updated_at` 比对（cursor: `BookDocTimes`） | feed 信号指纹 + 内容 SHA-256 指纹双层比对 | 项目 ref head commit 比对 + `compare` API diff（cursor: `Projects`） | 本地 clone 游标 commit 比对 + `git diff --name-status`（cursor: `Repos`） |
+| 删除检测 | 支持（游标中有、当前树没有 → `IsDeleted`；部分列举失败时跳过删除检测） | 支持（区分"源端已删"与"用户取消勾选"，后者不报删除） | 支持 | 不支持（feed 天然滚动淘汰旧条目） | 支持（diff 判 D/R 发 `IsDeleted`；compare 不可用/超时全量重枚举） | 支持（diff 判 D/R 发 `IsDeleted`；force-push 后全量重枚举） |
+| 流式可恢复同步 | 是（`StreamingConnector`，每 50 节点或 30 秒 checkpoint） | 否 | 否 | 否 | 是（每项目一次 checkpoint） | 是（每仓库一次 checkpoint） |
+| 限流应对 | 429 读 `Retry-After` + 指数退避（2s/4s/8s，最多 3 次重试）；5xx 重试 | — | 每次 `GetDocDetail` 间隔 300ms（个人 token 约 100 req/5min） | — | — | —（无 API 调用） |
+| 部分失败 | 单文档失败生成带错误 metadata 的占位条目，继续同步 | 单页失败记日志跳过 | 单文档失败生成占位条目 | 单 feed 失败 → `PartialFetchError`；全部失败才算 fail | 单项目失败中止返回错误 | 单仓库失败中止返回错误 |
+| 特有能力 | — | — | — | — | 项目路径/命名空间选择 | 任意 git 服务（内网 GitLab/Gitea 等）；Markdown/HTML 相对路径图片自动内联；Push Webhook 触发 |
 
 ### Feishu / Lark（`connector/feishu/`）
 
@@ -278,6 +282,66 @@ sequenceDiagram
 - **增量逻辑**：双层指纹——先比 feed 侧信号指纹（`feedSignalFingerprint`，未变则连原文页都不抓）；再比抓取后内容的 SHA-256 指纹。**不支持删除同步**（feed 会自然淘汰旧条目）。
 - **部分失败**：单个 feed 抓取/解析失败时沿用旧游标（`copyFeedCursor`）并继续其余 feed，最终以 `datasource.PartialFetchError` 上报（SyncLog 记 `partial`）；全部 feed 都失败才整体报错。
 
+### GitLab（`connector/gitlab/`）
+
+- **认证**：个人访问令牌（凭据字段 `base_url` + `access_token`），支持私有化部署的 GitLab。`Validate` 先 `ping` 验证连通性，再校验 Settings 中的项目列表。
+- **资源模型**：settings 驱动（非资源树）：`projects` 列表（项目 ID 或 `group/project` 命名空间路径 + 可选 `ref` + 可选 `paths` 目录过滤），在表单中直接编辑。
+- **抓取**：Raw API 按文件读取仓库内容，支持 25 种扩展名（pdf/docx/md/图片/音频等）。
+- **增量逻辑**：游标 `cursor.Projects`（`projectID → head commit SHA`）。同步时取项目 ref 的 head commit，与游标不一致则调 `compare` API 拿两个 commit 之间的 diff，仅发变更文件；一致则跳过。compare 不可用（历史重写）或被 GitLab 截断（`CompareTimeout`）时全量重枚举，保证更新不丢。
+- **删除/重命名**：diff 判定 D/R 后发 `IsDeleted` 条目（同 Git Repo）。
+- **流式同步**：实现了 `StreamingConnector`，每项目处理完 checkpoint 一次。
+
+### Git Repo（`connector/git_repo/`）
+
+通用 Git 仓库同步器（典型场景：VuePress/VitePress 博客）。与 GitLab 连接器不同，它**不依赖平台 API**：直接 go-git 本地克隆，因此适用于任意 git 服务（内网 GitLab、Gitea、GitHub、cgit 等）。
+
+- **认证**：凭据仅 `access_token`（可选——公开仓库匿名克隆）。认证方式为 `oauth2:<token>` HTTP Basic。
+- **配置**：settings 驱动：`repos` 列表（`repo_url` + 可选 `branch`（空=跟随远端默认分支）+ 可选 `paths` 目录过滤）。
+- **安全校验**：`repo_url` 与其它连接器的 base_url 一样需通过 SSRF 校验（`utils.ValidateURLForSSRF`）——私网 IP、回环、link-local、云元数据、内网保留域名等会被拒绝；克隆/拉取走同一套 SSRF 安全客户端（`datasource.NewConnectorHTTPClient`，拨号期+重定向二次校验，防 DNS 重绑定）。内网 git 服务器需由运维在 `SSRF_WHITELIST_EXTRA` 放行（精确域名 / `*.suffix` / IP / CIDR，见 `.env.example` J1 节）。
+- **本地克隆**：按 `<LOCAL_STORAGE_BASE_DIR>/git-repos/<租户ID>/<数据源ID>/<sha1(url+branch)>/` 目录隔离（默认 `LOCAL_STORAGE_BASE_DIR` 即 `/data/files`，目录权限 `0700`）。同一数据源的并发同步用互斥锁串行化 **checkout + 读树 + checkpoint**；改 URL/分支自动重新克隆（目录哈希不同）。生产环境拒绝本地文件系统 `repo_url`；读文件跟随 symlink 时若逃出 worktree 则跳过。
+- **抓取**：只同步 6 种纯文本格式（md/markdown/mdx/html/htm/txt）——**故意排除松散图片**：博客场景图片只相对于引用它的 Markdown 有意义，会被内联（见下），独立入库只是噪音文档。
+- **图片内联**（`image_inline.go`）：Markdown/HTML 中相对路径图片自动读出并转为 `data:` URI 内联，图片随文档一起入库，无需独立存储。
+- **增量逻辑**：游标 `cursor.Repos`（`repoURL → {branch, commit}`）。同步时 fetch 后比 head commit：首次全量枚举；不一致则本地 `git diff --name-status` 只发变更；游标 commit 已不存在（force-push/历史重写）降级全量重枚举。每仓库 checkpoint 一次。
+- **删除/重命名**：diff 判 D/R：删除发 `IsDeleted`（`ExternalID = gitrepo:<url>:<branch>:<file>`）；重命名先删旧路径再发新路径。
+- **Push Webhook 自动触发**：见下节。
+
+## Push Webhook 自动触发（GitLab / GitHub）
+
+定时同步（cron）与手动同步之外，git_repo 数据源还支持 push 事件驱动的即时同步：在 GitLab/GitHub 仓库上配置 Webhook，提交后自动触发一次增量同步。
+
+### 端点与鉴权
+
+```
+POST /api/v1/datasource/webhooks/git/{data_source_id}
+```
+
+该端点在认证中间件之前注册（Webhook 发送方无法携带 WeKnora 凭据），使用平台自有鉴权：
+
+| 平台 | 鉴权头 | 验证方式 |
+| --- | --- | --- |
+| GitLab | `X-Gitlab-Token` | 与共享密钥常量时间比对 |
+| GitHub | `X-Hub-Signature-256` | 请求体 HMAC-SHA256 验签 |
+
+**共享密钥**两级配置：数据源凭据 `credentials.webhook_secret`（加密存储，GET 只回 `webhook_secret_configured`）优先，否则回退环境变量 `GIT_REPO_WEBHOOK_SECRET`。兼容仍读 `settings.webhook_secret`，但 API 永不回显该值。**两级都未配置或鉴权失败时端点 fail-closed（404，与数据源不存在同一响应，避免枚举）**，绝不允许无鉴权触发。生产环境拒绝本地文件系统 `repo_url`（仅测试可放行）。
+
+### 匹配与触发规则
+
+- 事件须为分支 push（`refs/heads/*`）；tag 推送、分支删除（全零 after SHA / deleted 标记）返回 200 忽略。
+- 载荷中的仓库 URL（`repository.git_http_url` / `clone_url`）与数据源 `repos` 配置做**归一化比对**：容忍 http/https 差异、`.git` 后缀有无、host 大小写；路径不匹配则 200 忽略。
+- 配置了 `branch` 过滤时，只匹配该分支；未配置分支（跟随默认分支）则任意 push 均触发（同步本身有游标，无变更即空转，代价一次 fetch）。
+- 匹配成功后异步入队增量同步（`trigger=webhook`），立即返回 `200 {"status":"triggered"}`，不同步等待。
+- 同步本身是幂等的增量：以游标 commit 为界 diff，只有变更文件入库，重复触发无副作用。
+
+### 配置示例（GitLab）
+
+项目 → Settings → Webhooks：
+
+- URL：`http://<WeKnora 地址>/api/v1/datasource/webhooks/git/<数据源ID>`
+- Secret token：与数据源/环境变量一致的密钥
+- 触发事件：Push events
+
+前端在数据源编辑抽屉（git_repo、编辑模式）提供回调 URL 复制提示；密钥不回显。
+
 ## 安全限制（internal/datasource/httpclient.go 与 errors.go）
 
 `httpclient.go` 提供两个所有连接器共用的 SSRF 防护入口：
@@ -297,7 +361,7 @@ func NewConnectorHTTPClient(timeout time.Duration) *http.Client {
 }
 ```
 
-底层 `internal/utils/security.go` 会拒绝私网地址、回环地址、link-local 等目标，并且在**每次重定向和实际拨号时**重新校验（而非只校验初始 URL），防止恶意 feed 或自定义 base_url 把 WeKnora 引向内网服务。各连接器的 `parseXXXConfig` 都会对 base_url 调用 `ValidateConnectorBaseURL`。
+底层 `internal/utils/security.go` 会拒绝私网地址、回环地址、link-local 等目标，并且在**每次重定向和实际拨号时**重新校验（而非只校验初始 URL），防止恶意 feed 或自定义 base_url 把 WeKnora 引向内网服务。各连接器的 `parseXXXConfig` 都会对 base_url 调用 `ValidateConnectorBaseURL`；git_repo 连接器对 `repos[].repo_url` 调用 `utils.ValidateURLForSSRF`，克隆/拉取的 go-git 传输也复用 `NewConnectorHTTPClient` 的防护。
 
 `errors.go` 定义了模块级哨兵错误（`ErrConnectorNotFound`、`ErrDataSourceInvalid`、`ErrInvalidCredentials`、`ErrSyncFailed` 等）与 `PartialFetchError`（部分资源成功、部分失败；调用方应处理已得条目、持久化游标、把 `Details` 以 partial 状态呈现给用户）。
 

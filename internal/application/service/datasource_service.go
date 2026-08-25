@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/datasource/connector/git_repo"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -68,6 +69,9 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 	if ds == nil {
 		return nil, datasource.ErrDataSourceInvalid
 	}
+	if ds.ID != "" && !git_repo.SafeDataSourceID(ds.ID) {
+		return nil, datasource.ErrDataSourceInvalid
+	}
 
 	// Validate knowledge base exists
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, ds.KnowledgeBaseID)
@@ -86,7 +90,11 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 
 	// Validate configuration
 	if cfg, err := ds.ParseConfig(); err == nil && cfg != nil {
+		if cfg.Type == "" {
+			cfg.Type = ds.Type
+		}
 		cfg.StripNonSecretCredentials(ds.Type)
+		migrateGitRepoWebhookSecret(nil, cfg)
 		if blob, err := cfg.ToJSON(); err == nil {
 			ds.Config = blob
 		}
@@ -190,6 +198,10 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 			} else {
 				merged.Credentials = nil
 			}
+			if merged.Type == "" {
+				merged.Type = ds.Type
+			}
+			migrateGitRepoWebhookSecret(existingCfg, &merged)
 			merged.StripNonSecretCredentials(ds.Type)
 			if blob, err := merged.ToJSON(); err == nil {
 				ds.Config = blob
@@ -201,14 +213,15 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 
 	// Validate new configuration if non-credential fields changed. Skip
 	// when there are no stored credentials yet (validators would fail with
-	// no token to call the live API) and when the parsed config is
+	// no token to call the live API) — except git_repo, which can validate
+	// public remotes without a token. Also skip when the parsed config is
 	// structurally identical.
 	configActuallyChanged := true
 	if mergedCfg != nil && existingParsedCfg != nil {
 		configActuallyChanged = !reflect.DeepEqual(*mergedCfg, *existingParsedCfg)
 	}
-	hasCreds := mergedCfg != nil && mergedCfg.HasConfiguredCredentials(ds.Type)
-	if hasCreds && (ds.Type != existing.Type || configActuallyChanged) {
+	if shouldLiveValidateDataSource(ds.Type, mergedCfg) &&
+		(ds.Type != existing.Type || configActuallyChanged) {
 		if err := s.validateDataSourceConfig(ctx, ds); err != nil {
 			return nil, err
 		}
@@ -253,8 +266,12 @@ func (s *DataSourceService) UpdateDataSourceCredentials(
 	if parsed == nil {
 		parsed = &types.DataSourceConfig{Type: existing.Type}
 	}
-	parsed.Credentials = credentials
+	if parsed.Type == "" {
+		parsed.Type = existing.Type
+	}
+	parsed.Credentials = mergeIndependentGitRepoCredentials(existing.Type, parsed.Credentials, credentials)
 	parsed.StripNonSecretCredentials(existing.Type)
+	migrateGitRepoWebhookSecret(nil, parsed)
 	blob, err := parsed.ToJSON()
 	if err != nil {
 		return nil, err
@@ -333,12 +350,15 @@ func (s *DataSourceService) DeleteDataSource(ctx context.Context, id string) err
 	}
 
 	// Remove cron schedule
-	s.scheduler.Remove(id)
+	if s.scheduler != nil {
+		s.scheduler.Remove(id)
+	}
 
 	// Cancel any pending/running sync logs so queued asynq tasks won't retry
 	if err := s.syncLogRepo.CancelPendingByDataSource(ctx, id); err != nil {
 		logger.Warnf(ctx, "failed to cancel pending sync logs for ds=%s: %v", id, err)
 	}
+	cleanupGitRepoCloneStorage(ctx, existing.TenantID, existing.ID, existing.Type)
 
 	logger.Infof(ctx, "data source deleted: id=%s", id)
 	recordKBActivity(ctx, s.audit, existing.TenantID, existing.KnowledgeBaseID, types.AuditActionDataSourceDeleted,
@@ -452,21 +472,65 @@ func (s *DataSourceService) ResolveResourceAncestors(
 }
 
 // ManualSync triggers an immediate sync for a data source
+// ManualSync triggers an immediate sync for a data source (user-initiated).
 func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types.SyncLog, error) {
 	ds, err := s.GetDataSource(ctx, dsID)
 	if err != nil {
 		return nil, err
 	}
+	return s.enqueueSync(ctx, ds, "manual")
+}
 
+// WebhookSync triggers an immediate sync for a data source identified as
+// webhook-initiated (git push event). It shares the enqueue path with
+// ManualSync so queueing, logging, and audit semantics stay identical.
+func (s *DataSourceService) WebhookSync(ctx context.Context, dsID string) (*types.SyncLog, error) {
+	ds, err := s.GetDataSource(ctx, dsID)
+	if err != nil {
+		return nil, err
+	}
+	return s.enqueueSync(ctx, ds, "webhook")
+}
+
+// enqueueSync validates the data source state, creates a sync log, and enqueues
+// the asynq sync task. trigger records what started the sync ("manual",
+// "webhook", "scheduled") for logs and audit trails.
+func (s *DataSourceService) enqueueSync(
+	ctx context.Context, ds *types.DataSource, trigger string,
+) (*types.SyncLog, error) {
+	if trigger == "webhook" && ds.Status == types.DataSourceStatusPaused {
+		return nil, datasource.ErrDataSourcePaused
+	}
 	if ds.Status != types.DataSourceStatusActive &&
 		ds.Status != types.DataSourceStatusError &&
 		ds.Status != types.DataSourceStatusPaused {
 		return nil, datasource.ErrDataSourceNotActive
 	}
 
+	// Webhook platforms retry non-2xx. Coalesce only for webhook so a burst of
+	// pushes does not enqueue overlapping clones. ManualSync must still be able
+	// to recover a stuck "running" log after a worker crash.
+	if trigger == "webhook" {
+		if running, err := s.syncLogRepo.HasRunningSync(ctx, ds.ID); err != nil {
+			return nil, err
+		} else if running {
+			if latest, lerr := s.syncLogRepo.FindLatest(ctx, ds.ID); lerr == nil && latest != nil &&
+				latest.Status == types.SyncLogStatusRunning {
+				if markErr := git_repo.MarkWebhookResync(ds.TenantID, ds.ID); markErr != nil {
+					logger.Warnf(ctx, "webhook coalesce could not persist resync marker: ds=%s err=%v",
+						ds.ID, markErr)
+				} else {
+					logger.Infof(ctx, "sync already running, coalescing: ds=%s syncLog=%s trigger=%s",
+						ds.ID, latest.ID, trigger)
+					return latest, nil
+				}
+			}
+		}
+	}
+
 	// Create sync log
 	syncLog := &types.SyncLog{
-		DataSourceID: dsID,
+		DataSourceID: ds.ID,
 		TenantID:     ds.TenantID,
 		Status:       types.SyncLogStatusRunning,
 		StartedAt:    time.Now().UTC(),
@@ -479,12 +543,12 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 
 	// Enqueue sync task
 	payload := &types.DataSourceSyncPayload{
-		DataSourceID: dsID,
+		DataSourceID: ds.ID,
 		TenantID:     ds.TenantID,
 		SyncLogID:    syncLog.ID,
 		ForceFull:    false,
 		Initiator:    types.TaskInitiatorFromContext(ctx),
-		Trigger:      "manual",
+		Trigger:      trigger,
 	}
 	langfuse.InjectTracing(ctx, payload)
 
@@ -506,15 +570,15 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 		_ = s.dsRepo.Update(ctx, ds)
 		recordKBActivity(ctx, s.audit, ds.TenantID, ds.KnowledgeBaseID, types.AuditActionDataSourceSyncFailed,
 			"data_source", ds.ID, types.AuditOutcomeFailed,
-			map[string]any{"name": ds.Name, "type": ds.Type, "sync_log_id": syncLog.ID, "trigger": "manual"})
+			map[string]any{"name": ds.Name, "type": ds.Type, "sync_log_id": syncLog.ID, "trigger": trigger})
 		return nil, err
 	}
 
-	logger.Infof(ctx, "sync task enqueued: ds=%s syncLog=%s", dsID, syncLog.ID)
+	logger.Infof(ctx, "sync task enqueued: ds=%s syncLog=%s trigger=%s", ds.ID, syncLog.ID, trigger)
 	recordKBActivity(ctx, s.audit, ds.TenantID, ds.KnowledgeBaseID, types.AuditActionDataSourceSyncStarted,
 		"data_source", ds.ID, types.AuditOutcomeAccepted,
 		map[string]any{"name": ds.Name, "type": ds.Type, "sync_log_id": syncLog.ID,
-			"task_id": info.ID, "trigger": "manual", "processing_status": "pending"})
+			"task_id": info.ID, "trigger": trigger, "processing_status": "pending"})
 	return syncLog, nil
 }
 
@@ -608,6 +672,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		}
 		return nil
 	}
+	// After this run's log is no longer "running", enqueue one follow-up if
+	// webhooks arrived while we were cloning (see enqueueSync coalesce).
+	defer s.flushWebhookResync(ctx, ds)
 
 	// Get sync log
 	syncLog, err := s.syncLogRepo.FindByID(ctx, payload.SyncLogID)
@@ -663,6 +730,10 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	// Surface the KB's multimodal/VLM state to the connector so it only extracts
 	// embedded images for OCR when the KB can actually ingest them (never persisted).
 	config.MultimodalEnabled = kb.IsMultimodalEnabled()
+	// Surface identity so connectors that keep on-disk state (e.g. git_repo
+	// clones) can namespace it per data source (never persisted).
+	config.ID = ds.ID
+	config.TenantID = ds.TenantID
 
 	// Streaming path: connectors that support it interleave fetch→ingest→
 	// checkpoint so a large sync bounds memory and resumes after a timeout
@@ -1054,6 +1125,7 @@ func (s *DataSourceService) processSyncStreaming(
 	autoTagIDs := s.resolveAutoTagIDs(ctx, ds)
 
 	forceFull := payload.ForceFull || ds.SyncMode == types.SyncModeFull
+	config.ForceFull = forceFull
 	attempt, _ := asynq.GetRetryCount(ctx)
 	startCursor, err := streamStartCursor(ds, forceFull, attempt)
 	if err != nil {
@@ -1065,6 +1137,15 @@ func (s *DataSourceService) processSyncStreaming(
 
 	result := &types.SyncResult{}
 	handler := &streamSyncHandler{svc: s, ds: ds, tagIDs: autoTagIDs, result: result, syncLog: syncLog}
+
+	// git_repo needs the previous file snapshot even on a forced full scan so
+	// it can emit deletions for paths that disappeared. Other connectors
+	// still get a nil cursor on force-full (their existing contract).
+	if forceFull && ds.Type == types.ConnectorTypeGitRepo {
+		if cur, perr := ds.ParseSyncCursor(); perr == nil && cur != nil {
+			startCursor = cur
+		}
+	}
 
 	nextCursor, fetchErr := sc.FetchStream(ctx, config, startCursor, handler)
 	if fetchErr != nil {
@@ -1469,4 +1550,121 @@ func bytesToFileHeader(data []byte, filename string) (*multipart.FileHeader, err
 func timePtr(t time.Time) *time.Time {
 	utc := t.UTC()
 	return &utc
+}
+
+// shouldLiveValidateDataSource reports whether a settings change should hit
+// the live connector. Most connectors skip this when no credentials are stored
+// (their validators need a token). git_repo can sync public remotes, so a
+// repo_url change must still be ls-remote'd.
+func shouldLiveValidateDataSource(dsType string, cfg *types.DataSourceConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	if dsType == types.ConnectorTypeGitRepo {
+		return true
+	}
+	return cfg.HasConfiguredCredentials(dsType)
+}
+
+// mergeIndependentGitRepoCredentials keeps independently-optional git_repo
+// secrets when the caller only sent the field they are rotating. Other
+// connectors keep the historical replace-all semantics.
+func mergeIndependentGitRepoCredentials(
+	dsType string, existing, incoming map[string]interface{},
+) map[string]interface{} {
+	if dsType != types.ConnectorTypeGitRepo {
+		return incoming
+	}
+	out := make(map[string]interface{}, len(incoming)+2)
+	for k, v := range incoming {
+		if s, ok := v.(string); ok && strings.TrimSpace(s) == "" {
+			continue
+		}
+		out[k] = v
+	}
+	for _, key := range []string{"access_token", "webhook_secret"} {
+		if _, ok := out[key]; ok {
+			continue
+		}
+		if s, ok := existing[key].(string); ok && strings.TrimSpace(s) != "" {
+			out[key] = s
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// migrateGitRepoWebhookSecret moves a plaintext settings.webhook_secret into
+// encrypted credentials and always strips the settings key so a redacted GET
+// followed by PUT cannot persist the secret in settings.
+func migrateGitRepoWebhookSecret(existing, incoming *types.DataSourceConfig) {
+	if incoming == nil {
+		return
+	}
+	if incoming.Type != types.ConnectorTypeGitRepo && incoming.Type != "" {
+		return
+	}
+	if incoming.Settings == nil {
+		incoming.Settings = map[string]interface{}{}
+	}
+	incomingSecret, _ := incoming.Settings["webhook_secret"].(string)
+	incomingSecret = strings.TrimSpace(incomingSecret)
+	delete(incoming.Settings, "webhook_secret")
+
+	if cred, ok := incoming.Credentials["webhook_secret"].(string); ok && strings.TrimSpace(cred) != "" {
+		return
+	}
+	secret := incomingSecret
+	if secret == "" && existing != nil && existing.Settings != nil {
+		if s, ok := existing.Settings["webhook_secret"].(string); ok {
+			secret = strings.TrimSpace(s)
+		}
+	}
+	if secret == "" {
+		return
+	}
+	if incoming.Credentials == nil {
+		incoming.Credentials = map[string]interface{}{}
+	}
+	incoming.Credentials["webhook_secret"] = secret
+}
+
+// flushWebhookResync enqueues one more webhook sync if a push arrived while
+// the just-finished run was still marked running. The marker is left in
+// place when a log is still running so we cannot loop against ourselves.
+func (s *DataSourceService) flushWebhookResync(ctx context.Context, ds *types.DataSource) {
+	if s == nil || ds == nil || ds.Type != types.ConnectorTypeGitRepo {
+		return
+	}
+	if ds.Status == types.DataSourceStatusPaused {
+		return
+	}
+	if s.syncLogRepo != nil {
+		running, err := s.syncLogRepo.HasRunningSync(ctx, ds.ID)
+		if err != nil || running {
+			return
+		}
+	}
+	if !git_repo.ConsumeWebhookResync(ds.TenantID, ds.ID) {
+		return
+	}
+	if s.taskEnqueuer == nil {
+		_ = git_repo.MarkWebhookResync(ds.TenantID, ds.ID)
+		return
+	}
+	if _, err := s.enqueueSync(ctx, ds, "webhook"); err != nil {
+		logger.Warnf(ctx, "failed to enqueue coalesced webhook resync: ds=%s err=%v", ds.ID, err)
+		_ = git_repo.MarkWebhookResync(ds.TenantID, ds.ID)
+	}
+}
+
+func cleanupGitRepoCloneStorage(ctx context.Context, tenantID uint64, dsID, dsType string) {
+	if dsType != types.ConnectorTypeGitRepo {
+		return
+	}
+	if err := git_repo.RemoveCloneStorage(tenantID, dsID); err != nil {
+		logger.Warnf(ctx, "failed to remove git_repo clone storage: ds=%s err=%v", dsID, err)
+	}
 }

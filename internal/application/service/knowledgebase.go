@@ -1042,6 +1042,7 @@ func (s *knowledgeBaseService) deleteDataSourcesForKnowledgeBase(ctx context.Con
 				logger.Warnf(ctx, "Failed to cancel pending sync logs for ds=%s (kb=%s): %v", ds.ID, kbID, err)
 			}
 		}
+		cleanupGitRepoCloneStorage(ctx, ds.TenantID, ds.ID, ds.Type)
 		logger.Infof(ctx, "Data source deleted with knowledge base: ds=%s kb=%s", ds.ID, kbID)
 	}
 	return dataSourceIDs

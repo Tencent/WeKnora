@@ -441,6 +441,25 @@ curl -X POST $BASE/api/v1/datasource/ds-1/resource-ancestors -H "Authorization: 
 curl -X POST $BASE/api/v1/datasource/ds-1/sync -H "Authorization: Bearer $TOKEN"
 ```
 
+### POST /api/v1/datasource/webhooks/git/:id
+
+用途：git_repo 数据源的 push 事件回调（GitLab / GitHub Webhook），鉴权通过后触发一次增量同步。**公开端点**（无 WeKnora JWT/API Key，走平台自有鉴权）：
+
+- GitLab：请求头 `X-Gitlab-Token` 与共享密钥常量时间比对
+- GitHub：请求头 `X-Hub-Signature-256` 对请求体 HMAC-SHA256 验签（不再接受 sha1）
+
+共享密钥：数据源凭据 `credentials.webhook_secret` 优先，兼容 `settings.webhook_secret`，再回退环境变量 `GIT_REPO_WEBHOOK_SECRET`；均未配置或鉴权失败时 fail-closed 404（与不存在同一响应，避免枚举）。仅 `git_repo` 类型数据源可触发；载荷仓库 URL 须与数据源配置归一化匹配；非分支 push / 分支删除 / 仓库不匹配返回 200 `{"status":"ignored"}`（避免平台重试）。同步异步入队（`trigger=webhook`）。查库失败返回 500 以便平台重试。
+
+```bash
+curl -X POST $BASE/api/v1/datasource/webhooks/git/ds-1 \
+  -H "X-Gitlab-Event: Push Hook" -H "X-Gitlab-Token: <secret>" \
+  -H "Content-Type: application/json" \
+  -d '{"ref":"refs/heads/main","after":"<sha>","repository":{"git_http_url":"http://gitlab.example.com/group/repo.git"}}'
+# -> 200 {"status":"triggered"}
+```
+
+响应：200 `{"status":"triggered"|"ignored"}`；404（不存在 / 非 git_repo / 鉴权失败 / 未配密钥）；400（载荷异常）；409（数据源非 active）；500（查库或入队失败）。
+
 ### POST /api/v1/datasource/:id/pause 与 POST /api/v1/datasource/:id/resume
 
 用途：暂停 / 恢复定时同步。权限：Admin+。

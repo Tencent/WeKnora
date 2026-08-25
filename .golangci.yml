@@ -8,6 +8,11 @@ linters:
     lll:
       line-length: 120
       tab-width: 4
+  exclusions:
+    # swag emits one JSON string per field; wrapping those lines is not useful.
+    generated: lax
+    paths:
+      - docs/docs\.go$
 formatters:
   enable:
     - gofmt

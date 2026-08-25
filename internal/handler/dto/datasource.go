@@ -64,9 +64,10 @@ func NewDataSourceResponse(ds *types.DataSource) *DataSourceResponse {
 		cfgDTO = &DataSourceConfigDTO{
 			Type:        parsed.Type,
 			ResourceIDs: parsed.ResourceIDs,
-			Settings:    parsed.Settings,
+			Settings:    copySettings(parsed.Settings),
 		}
 		enrichRSSFeedURLsInSettings(ds.Type, parsed, cfgDTO)
+		redactGitRepoWebhookSecret(ds.Type, parsed, cfgDTO)
 		configured = parsed.HasConfiguredCredentials(ds.Type)
 	}
 	return &DataSourceResponse{
@@ -120,6 +121,44 @@ func enrichRSSFeedURLsInSettings(dsType string, parsed *types.DataSourceConfig, 
 		cfgDTO.Settings = make(map[string]interface{})
 	}
 	cfgDTO.Settings["feed_urls"] = feedURLs
+}
+
+func copySettings(in map[string]interface{}) map[string]interface{} {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]interface{}, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+// redactGitRepoWebhookSecret strips the legacy settings.webhook_secret value
+// from API responses. Presence is reduced to a boolean so low-privilege
+// readers cannot recover the token.
+func redactGitRepoWebhookSecret(dsType string, parsed *types.DataSourceConfig, cfgDTO *DataSourceConfigDTO) {
+	if dsType != types.ConnectorTypeGitRepo || cfgDTO == nil {
+		return
+	}
+	configured := false
+	if parsed != nil {
+		if s, ok := parsed.Credentials["webhook_secret"].(string); ok && strings.TrimSpace(s) != "" {
+			configured = true
+		}
+	}
+	if cfgDTO.Settings != nil {
+		if s, ok := cfgDTO.Settings["webhook_secret"].(string); ok && strings.TrimSpace(s) != "" {
+			configured = true
+		}
+		delete(cfgDTO.Settings, "webhook_secret")
+	}
+	if configured {
+		if cfgDTO.Settings == nil {
+			cfgDTO.Settings = make(map[string]interface{})
+		}
+		cfgDTO.Settings["webhook_secret_configured"] = true
+	}
 }
 
 func NewDataSourceResponses(dss []*types.DataSource) []*DataSourceResponse {

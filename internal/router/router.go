@@ -84,6 +84,7 @@ type RouterParams struct {
 	RedisClient                  *redis.Client
 	DataSourceHandler            *handler.DataSourceHandler
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
+	DataSourceWebhookHandler     *handler.DataSourceWebhookHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	WikiPageHandler              *handler.WikiPageHandler
 	MemoryHandler                *handler.MemoryHandler
@@ -158,6 +159,9 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 	// IM 回调路由（在认证中间件之前注册，使用各平台自身的签名验证）
 	RegisterIMRoutes(r, params.IMHandler)
+
+	// Git push webhook（公开路由，X-Gitlab-Token / X-Hub-Signature 鉴权，不走全局 Auth）
+	RegisterDataSourceWebhookRoutes(r, params.DataSourceWebhookHandler)
 
 	// Web embed 公开路由（使用 publish token 鉴权，不走全局 Auth）
 	RegisterEmbedPublicRoutes(

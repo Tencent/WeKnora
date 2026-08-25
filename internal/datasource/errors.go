@@ -17,6 +17,9 @@ var (
 	ErrDataSourceNotFound  = errors.New("data source not found")
 	ErrDataSourceInvalid   = errors.New("data source configuration is invalid")
 	ErrDataSourceNotActive = errors.New("data source is not active")
+	// ErrDataSourcePaused is returned when a webhook tries to sync a paused
+	// data source. Scheduled jobs already skip paused rows; webhooks must too.
+	ErrDataSourcePaused = errors.New("data source is paused")
 
 	// Configuration errors
 	ErrInvalidConfig      = errors.New("invalid configuration")
