@@ -45,7 +45,10 @@ type EvaluationRequest struct {
 | `chat_id` | 否 | 缺省自动选择默认 Chat 模型 |
 | `rerank_id` | 否 | 缺省自动选择默认 Rerank 模型 |
 
-任务 ID 格式为 `evaluation-{tenantID}-{datasetID}`。任务对象（`internal/types/evaluation.go`）：
+任务 ID 由 `utils.GenerateTaskID("evaluation", tenantID, datasetID)` 生成，格式为
+`evaluation_<tenantID>_<Unix 毫秒时间戳>_<8 位通用唯一标识符片段>_<datasetID>`。通用唯一标识符
+（Universally Unique Identifier，UUID）片段与时间戳共同保证同一租户、同一数据集的多次任务具有不同 ID。
+任务对象（`internal/types/evaluation.go`）：
 
 ```go
 type EvaluationTask struct {
@@ -84,7 +87,7 @@ const (
 
 ```go
 var g errgroup.Group
-metricHook := NewHookMetric(len(dataset))
+metricHook := NewHookMetric(len(dataset), knowledge.ID)
 g.SetLimit(max(runtime.GOMAXPROCS(0)-1, 1))
 for i, qaPair := range dataset {
     g.Go(func() error {
@@ -110,8 +113,11 @@ type MetricInput struct {
 
 `metric_hook.go` 对每个样本遍历所有已注册指标计算器求分，最终 `Avg()` 对全部样本逐指标取均值，写入 `MetricResult`。
 
-::: warning RetrievalIDs 的口径
-`RetrievalIDs` 必须是**数据集里的 passage ID**，不能直接用检索结果的 `ChunkIndex`——后者只是分块在知识库里的序号，与 passage ID 没有对应关系，直接使用会让所有检索指标恒为 0。`recordFinish` 因此把每条检索结果的正文与该样本的 ground truth passage 做双向包含匹配，反查出对应的 pid 并去重。重排结果为空时回退用原始检索结果，避免整条样本记成「什么都没召回」。
+::: warning RetrievalIDs 的来源契约
+评估流程先由 `getPassageList` 建立按数据集 passage ID（PID）索引的稀疏 passage 切片，再把切片索引依次写入 `ParsedChunk.Seq` 和 `Chunk.ChunkIndex`。因此，只有检索结果的 `KnowledgeID` 等于本次评估临时知识 ID 且 `ChunkIndex >= 0` 时，`recordFinish` 才将 `ChunkIndex` 作为 PID。该对应关系只适用于评估专用的受控 passage 入库流程。
+
+`recordFinish` 优先使用非空重排结果，重排结果为空时使用原始检索结果。每个结果均保留原始排名位置；来源不属于本次临时知识、索引无效或 PID 重复的结果按未命中计分。该规则使 Precision、NDCG、MRR 和 MAP 的输入排名与检索管道输出一致。
+:::
 
 语料灌入也必须**同步等待索引完成**（`CreateKnowledgeFromPassageSync`）：异步入库时评估查询会跑在索引建好之前，同样表现为指标恒为 0。另外 passage 列表按 `maxPID + 1` 分配长度，pid 是 0-based 且包含末位。
 
@@ -121,14 +127,14 @@ type MetricInput struct {
 flowchart TD
     A["POST /api/v1/evaluation<br/>(dataset_id, knowledge_base_id, chat_id, rerank_id)"] --> B["创建评估专用知识库<br/>(新建或克隆参考 KB 配置)"]
     B --> C["装配 ChatManage 评估参数<br/>(阈值 / TopK / Summary 配置)"]
-    C --> D["注册任务到内存存储<br/>ID = evaluation-{tenant}-{dataset}, 状态 Pending"]
+    C --> D["注册任务到内存存储<br/>ID 含租户、时间戳、UUID 片段和数据集，状态 Pending"]
     D --> E["立即返回任务信息"]
     D --> F["goroutine 后台执行, 状态 Running"]
     F --> G["加载 Parquet 数据集<br/>queries / corpus / qrels / answers / qas"]
-    G --> H["corpus 灌入评估知识库"]
+    G --> H["按 PID 建立稀疏 passage 切片<br/>同步灌入并完成索引"]
     H --> I["errgroup 并行处理 QA 对<br/>并发 = max(CPU-1, 1)"]
     I --> J["每个问题跑 KnowledgeQAByEvent<br/>检索 + 重排 + 生成"]
-    J --> K["记录 MetricInput<br/>(RetrievalIDs vs GT, 生成文本 vs 参考答案)"]
+    J --> K["校验 KnowledgeID + ChunkIndex<br/>保留未知来源和重复 PID 的未命中排名"]
     K --> L["MetricList.Avg 汇聚 12 项指标均值"]
     L --> M["写回 EvaluationDetail, 状态 Success / Failed<br/>清理评估知识库"]
     M --> N["GET /api/v1/evaluation?task_id=...<br/>轮询进度与指标"]
@@ -223,18 +229,18 @@ type QAPair struct {
 }
 ```
 
-自定义数据集只需按上述 Schema 生成同名 Parquet 文件。加载时服务会打印统计信息（问题数、语料数、平均相关段落数、答案覆盖率等）。
+`DatasetService.GetDatasetByID` 当前固定从 `dataset/samples/` 加载上述五个 Parquet 文件，`dataset_id` 用于任务标识，尚未参与数据目录选择。加载时服务会打印问题数、语料数、平均相关段落数和答案覆盖率等统计信息。
 
 ## 结果查询
 
-`GET /api/v1/evaluation?task_id=evaluation-{tenant}-{dataset}`，返回 `EvaluationDetail`：
+`GET /api/v1/evaluation?task_id=evaluation_1_1787880000000_a1b2c3d4_default` 返回 `EvaluationDetail`：
 
 ```json
 {
   "success": true,
   "data": {
     "task": {
-      "id": "evaluation-1-default",
+      "id": "evaluation_1_1787880000000_a1b2c3d4_default",
       "dataset_id": "default",
       "status": 2,
       "total": 100,

@@ -381,7 +381,7 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 	var finished int
 	var mu sync.Mutex
 	var g errgroup.Group
-	metricHook := NewHookMetric(len(dataset))
+	metricHook := NewHookMetric(len(dataset), knowledge.ID)
 
 	// Set worker limit based on available CPUs
 	g.SetLimit(max(runtime.GOMAXPROCS(0)-1, 1))
