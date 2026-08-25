@@ -35,7 +35,6 @@ var (
 	skillSourceHTTPDefault *http.Client
 
 	semverLike = regexp.MustCompile(`^v?\d+\.\d+(\.\d+)?([.-][0-9A-Za-z.-]+)?$`)
-	gitSHALike = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 )
 
 type skillSourceKind string
@@ -118,40 +117,21 @@ func fetchSkillArchive(ctx context.Context, source string, client *http.Client) 
 	httpClient := skillSourceHTTPClient(client)
 	fetched, err := fetchSkillSourceBytes(ctx, httpClient, parsed, 0)
 	if err != nil {
-		// A bare "owner/slug" is both a GitHub repo and a registry slug, and
-		// the paste usually came from the registry listing. Only the failure
-		// of the first reading tells us which one it was.
-		alt, ok := registrySlugFallback(source, parsed)
-		if !ok {
-			return nil, err
-		}
-		altFetched, altErr := fetchSkillSourceBytes(ctx, httpClient, alt, 0)
-		if altErr != nil {
-			return nil, err
-		}
-		fetched = altFetched
+		return nil, err
 	}
 	return normalizeFetchedSkillArchive(fetched.body, fetched.contentType, fetched.subdir)
 }
 
-// registrySlugFallback re-reads a shorthand that was taken for a GitHub repo as
-// a registry slug. It applies only to a bare "owner/slug": anything carrying a
-// ref, a subdirectory or a scheme said what it meant.
-func registrySlugFallback(raw string, parsed parsedSkillSource) (parsedSkillSource, bool) {
-	if parsed.Kind != skillSourceGitHub || parsed.Subdir != "" || parsed.Ref != "HEAD" {
-		return parsedSkillSource{}, false
-	}
-	spec := strings.TrimRight(strings.TrimSpace(raw), "/")
-	if spec == "" || strings.Contains(spec, "://") || strings.Contains(spec, "@") {
-		return parsedSkillSource{}, false
-	}
-	alt, err := parseRegistrySlug(defaultSkillRegistryOrigin, spec)
-	if err != nil {
-		return parsedSkillSource{}, false
-	}
-	return alt, true
-}
-
+// parseSkillSource maps one paste onto exactly one kind. It does not probe
+// the network to guess: owner/slug is both a ClawHub id and a GitHub repo,
+// so a slash without a URL or a leading @ is refused rather than fetched
+// twice.
+//
+//	@owner/slug          ClawHub (default registry)
+//	my-skill             ClawHub slug (no slash)
+//	my-skill@1.2.0       ClawHub slug + version
+//	https://…            host decides (GitHub / GitLab / ClawHub / SkillHub /
+//	                     skills.sh / zip|SKILL.md / self-hosted registry)
 func parseSkillSource(raw string) (parsedSkillSource, error) {
 	input := strings.TrimSpace(raw)
 	if input == "" {
@@ -165,8 +145,10 @@ func parseSkillSource(raw string) (parsedSkillSource, error) {
 	if strings.HasPrefix(input, "@") {
 		return parseRegistrySlug(defaultSkillRegistryOrigin, strings.TrimPrefix(input, "@"))
 	}
-	if looksLikeGitHubShorthand(input) {
-		return parseGitHubShorthand(input)
+	if strings.Contains(input, "/") {
+		return parsedSkillSource{}, fmt.Errorf(
+			"%w: %q is ambiguous; use @%s for ClawHub, or paste a github.com / gitlab.com / skills.sh / skillhub URL",
+			ErrSkillSourceInvalid, input, input)
 	}
 	return parseRegistrySlug(defaultSkillRegistryOrigin, input)
 }
@@ -421,63 +403,6 @@ func parseSkillsShURL(u *url.URL) (parsedSkillSource, error) {
 		src.Subdir = strings.Join(parts[2:], "/")
 	}
 	return src, nil
-}
-
-func parseGitHubShorthand(spec string) (parsedSkillSource, error) {
-	ownerRepo, suffix, ok := strings.Cut(spec, "@")
-	parts := splitPath(ownerRepo)
-	if len(parts) < 2 {
-		return parsedSkillSource{}, fmt.Errorf("%w: expected owner/repo", ErrSkillSourceInvalid)
-	}
-	src := parsedSkillSource{
-		Kind:  skillSourceGitHub,
-		Owner: parts[0],
-		Repo:  strings.TrimSuffix(parts[1], ".git"),
-		Ref:   "HEAD",
-	}
-	if len(parts) > 2 {
-		src.Subdir = strings.Join(parts[2:], "/")
-	}
-	if !ok || suffix == "" {
-		return src, nil
-	}
-	if looksLikeGitRef(suffix) {
-		src.Ref = suffix
-		return src, nil
-	}
-	// owner/repo@skill-name selects one skill out of a monorepo by directory
-	// (or by matching the last path segment).
-	if src.Subdir == "" {
-		src.Subdir = suffix
-	} else {
-		src.Subdir = path.Join(src.Subdir, suffix)
-	}
-	return src, nil
-}
-
-func looksLikeGitHubShorthand(spec string) bool {
-	ownerRepo, _, _ := strings.Cut(spec, "@")
-	parts := splitPath(ownerRepo)
-	if len(parts) < 2 {
-		return false
-	}
-	for _, p := range parts[:2] {
-		if p == "" || strings.ContainsAny(p, " \\") {
-			return false
-		}
-	}
-	return true
-}
-
-func looksLikeGitRef(s string) bool {
-	switch strings.ToLower(s) {
-	case "head", "main", "master", "develop", "trunk":
-		return true
-	}
-	if semverLike.MatchString(s) || gitSHALike.MatchString(s) {
-		return true
-	}
-	return strings.HasPrefix(s, "refs/")
 }
 
 func splitTrailingVersion(spec string) (slug, version string) {

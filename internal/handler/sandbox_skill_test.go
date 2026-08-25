@@ -324,6 +324,24 @@ func TestSandboxSkillInstallFromSourceInvalidReturns400(t *testing.T) {
 	require.Contains(t, w.Body.String(), "only http(s) sources are allowed")
 }
 
+func TestSandboxSkillInstallFromSourceAmbiguousShorthandReturns400(t *testing.T) {
+	svc := &fakeSandboxSkillService{
+		sourceErr: fmt.Errorf("%w: %q is ambiguous; use @owner/slug for ClawHub",
+			service.ErrSkillSourceInvalid, "owner/slug"),
+	}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+
+	req := httptest.NewRequest(http.MethodPost, "/sandbox-configs/cfg-a/skills",
+		strings.NewReader(`{"source":"owner/slug"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "ambiguous")
+	require.Equal(t, "owner/slug", svc.installSource)
+}
+
 func TestSandboxSkillUploadWithoutFileReturns400(t *testing.T) {
 	svc := &fakeSandboxSkillService{}
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))

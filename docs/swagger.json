@@ -11625,7 +11625,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Install a skill onto this sandbox config's image. Send a zip\nas multipart form field \"file\", or JSON {\"source\":\"...\"} to\npull from ClawHub, SkillHub, skills.sh, GitHub, GitLab, or a\ndirect archive URL. The source must be readable anonymously.\nThe install boots a sandbox and runs for minutes, so the\nrequest is only accepted; follow it via the install-events\nstream.",
+                "description": "Install a skill onto this sandbox config's image. Send a zip\nas multipart form field \"file\", or JSON {\"source\":\"...\"} to\npull a public skill. source is one of: \"@owner/slug\" or a\nslash-free slug (ClawHub), a github.com / gitlab.com /\nskills.sh / clawhub / skillhub URL, or a direct zip/SKILL.md\nURL. Bare \"owner/slug\" is rejected as ambiguous. The source\nmust be readable anonymously. The install boots a sandbox and\nruns for minutes, so the request is only accepted; follow it\nvia the install-events stream.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -24236,7 +24236,7 @@
             "type": "object",
             "properties": {
                 "source": {
-                    "description": "Source is a ClawHub/SkillHub slug or page URL, a skills.sh / GitHub /\nGitLab locator, or a direct zip/SKILL.md URL. It must be readable\nanonymously: the fetch carries no credential of any kind.",
+                    "description": "Source is exactly one of: \"@owner/slug\" or a slash-free slug (ClawHub),\na github.com / gitlab.com / skills.sh / clawhub / skillhub page URL, or\na direct zip/SKILL.md URL. Bare \"owner/slug\" is rejected: it is both a\nClawHub id and a GitHub repo. The fetch carries no credential.",
                     "type": "string"
                 }
             }

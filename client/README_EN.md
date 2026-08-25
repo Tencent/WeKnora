@@ -202,6 +202,8 @@ if err != nil {
 
 ### Example: Install a sandbox skill from a registry
 
+`source` must be explicit: `@owner/slug` for ClawHub, or a full GitHub / SkillHub URL. Bare `owner/slug` is rejected.
+
 ```go
 skillID, err := apiClient.InstallSandboxSkillFromSource(
     context.Background(), sandboxConfigID, "@owner/slug")

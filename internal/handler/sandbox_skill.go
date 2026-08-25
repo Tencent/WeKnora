@@ -189,11 +189,13 @@ func (h *SandboxSkillHandler) Get(c *gin.Context) {
 // @Summary      Install a skill
 // @Description  Install a skill onto this sandbox config's image. Send a zip
 // @Description  as multipart form field "file", or JSON {"source":"..."} to
-// @Description  pull from ClawHub, SkillHub, skills.sh, GitHub, GitLab, or a
-// @Description  direct archive URL. The source must be readable anonymously.
-// @Description  The install boots a sandbox and runs for minutes, so the
-// @Description  request is only accepted; follow it via the install-events
-// @Description  stream.
+// @Description  pull a public skill. source is one of: "@owner/slug" or a
+// @Description  slash-free slug (ClawHub), a github.com / gitlab.com /
+// @Description  skills.sh / clawhub / skillhub URL, or a direct zip/SKILL.md
+// @Description  URL. Bare "owner/slug" is rejected as ambiguous. The source
+// @Description  must be readable anonymously. The install boots a sandbox and
+// @Description  runs for minutes, so the request is only accepted; follow it
+// @Description  via the install-events stream.
 // @Tags         SandboxConfig
 // @Accept       json
 // @Accept       multipart/form-data
@@ -258,9 +260,10 @@ func (h *SandboxSkillHandler) Upload(c *gin.Context) {
 }
 
 type skillSourceRequest struct {
-	// Source is a ClawHub/SkillHub slug or page URL, a skills.sh / GitHub /
-	// GitLab locator, or a direct zip/SKILL.md URL. It must be readable
-	// anonymously: the fetch carries no credential of any kind.
+	// Source is exactly one of: "@owner/slug" or a slash-free slug (ClawHub),
+	// a github.com / gitlab.com / skills.sh / clawhub / skillhub page URL, or
+	// a direct zip/SKILL.md URL. Bare "owner/slug" is rejected: it is both a
+	// ClawHub id and a GitHub repo. The fetch carries no credential.
 	Source string `json:"source"`
 }
 

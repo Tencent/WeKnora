@@ -5120,7 +5120,7 @@ export default {
       skillUploadDrag: '또는 여기로 드래그',
       skillUploadHint: '설치하면 현재 이미지에 스킬을 쓰고 새 스냅샷을 만듭니다. 몇 분이 걸릴 수 있습니다. 현재 대화 턴은 중단되지 않으며, 이미 열린 세션은 다음 턴에서 새 이미지로 샌드박스를 다시 만들고 그때 세션 작업 공간 초안이 지워집니다.',
       skillUploadHintNewSession: '설치하면 현재 이미지에 스킬을 쓰고 새 스냅샷을 만듭니다. 몇 분이 걸릴 수 있습니다. 이미 열린 세션은 세션이 끝날 때까지 기존 샌드박스를 유지하며, 이번에 설치한 스킬은 새로 시작한 세션에만 적용됩니다.',
-      skillSourcePlaceholder: 'URL 또는 {\'@\'}owner/slug 붙여넣기',
+      skillSourcePlaceholder: 'ClawHub는 {\'@\'}owner/slug, GitHub/SkillHub는 전체 URL을 붙여넣으세요',
       skillSourceInstall: '설치',
       skillInstallOr: '또는',
       skillSourceFailed: '레지스트리에서 스킬을 설치하지 못했습니다',
