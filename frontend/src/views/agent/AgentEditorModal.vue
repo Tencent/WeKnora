@@ -1321,7 +1321,7 @@
                   </div>
                 </div>
 
-                <!-- 代码沙箱（仅 Agent 模式）：技能脚本的运行环境 -->
+                <!-- 技能沙箱（仅 Agent 模式）：技能脚本的运行环境 -->
                 <div v-show="currentSection === 'sandbox' && isAgentMode" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.sandboxConfig') }}</h2>

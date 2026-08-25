@@ -44,7 +44,7 @@
                         <path d="M4.5 5.5L6.5 12.5L9 7.5L11.5 12.5L13.5 5.5" stroke="currentColor" stroke-width="1.3"
                           stroke-linecap="round" stroke-linejoin="round" fill="none" />
                       </svg>
-                      <!-- 代码沙箱：隔离运行窗口，避免和 Ollama / 系统设置共用 server -->
+                      <!-- 技能沙箱：隔离运行窗口，避免和 Ollama / 系统设置共用 server -->
                       <svg v-else-if="item.key === 'sandbox'" width="17" height="17" viewBox="0 0 18 18" fill="none"
                         xmlns="http://www.w3.org/2000/svg" class="nav-icon">
                         <rect x="2.5" y="3" width="13" height="12" rx="2" stroke="currentColor" stroke-width="1.2"
@@ -148,7 +148,7 @@
                     <StorageEngineSettings />
                   </div>
 
-                  <!-- 代码沙箱 -->
+                  <!-- 技能沙箱 -->
                   <div v-if="currentSection === 'sandbox'" class="section">
                     <SandboxSettings />
                   </div>
