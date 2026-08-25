@@ -56,7 +56,8 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
   const storageAllowedProviders = ref<string[]>([])
   const mcpServices = ref<MCPService[]>([])
   const skills = ref<SkillInfo[]>([])
-  const skillsAvailable = ref(true)
+  const skillsAvailable = ref(false)
+  const skillsConfigId = ref('')
   const agentTypePresets = ref<AgentTypePreset[]>([])
   const promptTemplates = ref<PromptTemplatesConfig | null>(null)
   const placeholders = ref<PlaceholdersResponse | null>(null)
@@ -110,10 +111,21 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
     })
   }
 
-  async function ensureSkills(force = false): Promise<void> {
+  async function ensureSkills(sandboxConfigId?: string, force = false): Promise<void> {
+    const configId = sandboxConfigId?.trim() || ''
+    if (configId !== skillsConfigId.value) {
+      force = true
+    }
     return runOnce('skills', force, async () => {
+      skillsConfigId.value = configId
+      if (!configId) {
+        skillsAvailable.value = false
+        skills.value = []
+        loadedAt.value.skills = Date.now()
+        return
+      }
       try {
-        const skillsRes = await listSkills()
+        const skillsRes = await listSkills(configId)
         skillsAvailable.value = skillsRes.skills_available !== false
         skills.value = skillsRes.data && skillsRes.data.length > 0 ? skillsRes.data : []
       } catch {
@@ -176,7 +188,6 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
   async function prefetchAgentEditorDeps(force = false): Promise<void> {
     await Promise.all([
       ensureMcpServices(force),
-      ensureSkills(force),
       ensureAgentTypePresets(force),
       ensurePromptTemplates(force),
       ensureStorageEngine(force),
@@ -193,6 +204,8 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
       storageAllowedProviders.value = []
       mcpServices.value = []
       skills.value = []
+      skillsAvailable.value = false
+      skillsConfigId.value = ''
       agentTypePresets.value = []
       promptTemplates.value = null
       placeholders.value = null

@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"io"
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/approval"
@@ -399,6 +401,9 @@ func (s *agentService) initializeSkillsManager(
 	}
 
 	skillsManager := skills.NewManager(skillsConfig, sandboxMgr)
+	if source := s.tenantSkillSource(ctx, config); source != nil {
+		skillsManager.WithTenantSource(source)
+	}
 
 	// Initialize (discover skills)
 	if err := skillsManager.Initialize(ctx); err != nil {
@@ -446,6 +451,70 @@ func (s *agentService) initializeSkillsManager(
 	}
 
 	return skillsManager, nil
+}
+
+// tenantSkillSource builds the source for the skills installed into this run's
+// sandbox image, or nil when the run has none. The set was already narrowed to
+// what this run can invoke when the config was built; nothing here re-decides
+// it.
+func (s *agentService) tenantSkillSource(
+	ctx context.Context, config *types.AgentConfig,
+) skills.SkillSource {
+	rows := config.TenantSkills
+	if len(rows) == 0 {
+		return nil
+	}
+	// The rows were fetched under the caller's workspace, so this is the
+	// caller's ID; it is read off the row rather than the context so the
+	// bundle download cannot resolve a different workspace's storage than the
+	// one the rows came from.
+	ownerTenantID := rows[0].TenantID
+	// The closure captures the engine-creation context because loadBundle
+	// takes no context of its own. That is the turn's context today -
+	// CreateAgentEngine and engine.Execute are called back to back with the
+	// same ctx - so it stays live for as long as read_skill can be called. If
+	// a caller ever creates the engine under a shorter-lived context, bundle
+	// downloads start failing for installed skills only, and loadBundle needs
+	// a ctx parameter.
+	return skills.NewTenantSkillSource(rows, func(ref string) ([]byte, error) {
+		return s.readSkillBundle(ctx, ownerTenantID, ref)
+	})
+}
+
+// readSkillBundle downloads one uploaded skill archive. It backs read_skill for
+// installed skills: the image holds the executable copy, but reading a file out
+// of it would need a live sandbox, and the archive is byte-identical to what
+// was installed.
+func (s *agentService) readSkillBundle(
+	ctx context.Context, tenantID uint64, ref string,
+) ([]byte, error) {
+	if s.storageResolver == nil {
+		return nil, errors.New("storage resolver is not configured")
+	}
+	fs, _, err := s.storageResolver.ResolveFileService(
+		ctx, &types.Tenant{ID: tenantID}, "", "", "",
+	)
+	if err != nil {
+		return nil, err
+	}
+	if fs == nil {
+		return nil, errors.New("file service is not configured")
+	}
+	reader, err := fs.GetFile(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = reader.Close() }()
+	// Bounded because the object is read into memory: the upload limit is the
+	// only thing that says how large a legitimate archive can be.
+	archive, err := io.ReadAll(io.LimitReader(reader, maxSkillBundleTotalBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(archive) > maxSkillBundleTotalBytes {
+		return nil, fmt.Errorf("skill bundle %s is larger than the upload limit", ref)
+	}
+	return archive, nil
 }
 
 // registerSandboxShellTool registers the one shell_exec variant this run is

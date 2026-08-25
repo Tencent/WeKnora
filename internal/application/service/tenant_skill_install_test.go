@@ -43,7 +43,7 @@ func TestRunInstallHappyPathSwitchesPointerLast(t *testing.T) {
 		"create-session", "prepare-skill-dir", "seed-files", "agent-execute",
 		"chmod", "verify-structure", "verify-smoke", "write-manifest",
 		"cleanup-workspace", "create-snapshot",
-		"switch-pointer", "destroy-sandbox",
+		"switch-pointer", "mark-stale", "destroy-sandbox",
 	}, fx.events, "the pointer must move only after the snapshot exists")
 
 	cfg := fx.configRepo.saved.Config
@@ -79,8 +79,8 @@ func TestRunInstallIssuesExactlyTheseCommands(t *testing.T) {
 	require.Equal(t, []string{
 		installPrepareCommand,
 		"uv --version",
-		"chmod -R 755 " + installSkillDir,
-		"chown -R user " + installSkillDir,
+		"chmod -R 555 " + installSkillDir,
+		"chown -R root:root " + installSkillDir,
 		"test -f " + installSkillDir + "/SKILL.md",
 		"test -f " + installSkillDir + "/scripts/extract.py",
 		installSmokeCommand,
@@ -276,6 +276,22 @@ func TestFailSkillDoesNotStampANewerBundle(t *testing.T) {
 	require.Equal(t, types.SkillStatusInstalling, skill.Status)
 	require.Equal(t, newer, skill.BundleSHA256)
 	require.Empty(t, skill.Error)
+}
+
+func TestInstallSkillRecoversFromNameConflict(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.skillRepo.getByNameMisses = 1
+	fx.skillRepo.createErr = errors.New("UNIQUE constraint failed: tenant_skills.sandbox_config_id")
+	archive := zipBundle(t, map[string]string{"SKILL.md": validSkillMD})
+
+	id, err := fx.svc.InstallSkill(context.Background(), 7, "cfg-1", archive)
+
+	require.NoError(t, err)
+	require.Equal(t, "sk-1", id,
+		"the upload that lost the unique index must reuse the row that won")
+	skill, getErr := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, getErr)
+	require.Equal(t, types.SkillStatusInstalling, skill.Status)
 }
 
 func TestInstallSkillRefusesWhenBundleCannotBeStored(t *testing.T) {
@@ -651,6 +667,41 @@ func TestResolveInstallerModelFallsBackWhenTheAgentNamesNoModel(t *testing.T) {
 	require.Equal(t, "model-1", model.GetModelID())
 }
 
+// The console attaches to a running install through the assistant message, so
+// the locators must be on the skill row before the engine starts — not after
+// the run ends, by which point there is nothing live left to watch.
+func TestRunInstallPublishesTranscriptLocatorsBeforeTheAgentRuns(t *testing.T) {
+	fx := newInstallFixture(t)
+
+	var atExecute *types.TenantSkillEntity
+	fx.beforeExecute = func() {
+		skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+		require.NoError(t, err)
+		copied := *skill
+		atExecute = &copied
+	}
+
+	require.NoError(t, fx.svc.runInstall(ctxWithTenant(7), 7, "cfg-1", "sk-1", fx.bundle))
+
+	require.NotNil(t, atExecute, "the installer engine never ran")
+	require.NotEmpty(t, atExecute.InstallSessionID)
+	require.NotEmpty(t, atExecute.InstallMessageID)
+}
+
+// Maintenance sessions are excluded from the console by their description, and
+// scoped to the admin who started the install by their owner. Both are written
+// at creation time; neither has a backfill.
+func TestStartMaintenanceSessionMarksAndScopesTheSession(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.WithValue(ctxWithTenant(7), types.UserIDContextKey, "admin-1")
+
+	sess, _, err := fx.svc.startMaintenanceSession(ctx, 7, "cfg-1", "install")
+	require.NoError(t, err)
+	require.Equal(t, types.SkillMaintenanceSessionMarker+"install", sess.Description)
+	require.Equal(t, "admin-1", sess.UserID)
+	require.Equal(t, "Skill install", sess.Title)
+}
+
 const installSkillDir = "/opt/weknora/tenant/skills/pdf-tools"
 
 // The install commands are asserted verbatim: an install runs as root with the
@@ -683,6 +734,14 @@ func indexOfEvent(events []string, needle string) int {
 	return -1
 }
 
+// staleMark is one request to mark a config's bound sandboxes stale. The
+// tenant is part of it because marking the right config of the wrong workspace
+// would rebuild sandboxes that never carried this image.
+type staleMark struct {
+	tenantID uint64
+	configID string
+}
+
 type installFixture struct {
 	t          *testing.T
 	svc        *TenantSkillService
@@ -709,6 +768,15 @@ type installFixture struct {
 	execResult        *sandbox.ExecuteResult
 	smokeRanAsRoot    bool
 	agentErr          error
+	// beforeExecute runs at the moment the engine would start, so a test can
+	// observe the state an attaching console would see mid-install.
+	beforeExecute func()
+	// staleMarks records every InvalidateConfigSandboxes call, so a test can
+	// state which config was marked rather than only that something was.
+	staleMarks []staleMark
+	// invalidateErr fails the marking the way an unreachable binding store
+	// would, without failing anything else the run does.
+	invalidateErr error
 	// rmExitCode fails the removal's directory wipe, the one image step a
 	// removal has.
 	rmExitCode int
@@ -805,6 +873,8 @@ func newInstallFixture(t *testing.T) *installFixture {
 		&installSessionService{fx: fx},
 		fx.modelSvc,
 		nil,
+		&transcriptStreams{},
+		&transcriptMessages{},
 	)
 	fx.svc.now = func() time.Time { return time.Date(2026, 8, 19, 9, 30, 0, 0, time.UTC) }
 	return fx
@@ -908,6 +978,16 @@ func (r *installConfigRepo) ListByTenant(context.Context, uint64) ([]*types.Tena
 	return nil, nil
 }
 
+// ListAll returns the one config this fixture holds, so a housekeeping scan
+// sees the same config the install and removal tests act on.
+func (r *installConfigRepo) ListAll(context.Context) ([]*types.TenantSandboxConfigEntity, error) {
+	if r.entity == nil {
+		return nil, nil
+	}
+	cp := *r.entity
+	return []*types.TenantSandboxConfigEntity{&cp}, nil
+}
+
 // Update honours the context because the real gorm repository does: the
 // pointer switch is the one write a lost lock must not be able to complete.
 func (r *installConfigRepo) Update(ctx context.Context, e *types.TenantSandboxConfigEntity) error {
@@ -948,8 +1028,14 @@ type installSkillRepo struct {
 	// deleteSkillErr models the row delete failing past the point of no
 	// return.
 	deleteSkillErr      error
+	createErr           error
+	getByNameMisses     int
 	readyWriteAttempts  int
 	deleteSkillAttempts int
+	// listCalls counts attempts, not successes: a caller that gave up before
+	// listing and one whose listing failed are different bugs, and the skill
+	// derivation tests turn on telling them apart.
+	listCalls int
 }
 
 func newInstallSkillRepo() *installSkillRepo {
@@ -966,6 +1052,9 @@ func skillKey(tenantID uint64, configID, skillID string) string {
 func (r *installSkillRepo) CreateSkill(_ context.Context, e *types.TenantSkillEntity) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.createErr != nil {
+		return r.createErr
+	}
 	cp := *e
 	r.skills[skillKey(e.TenantID, e.SandboxConfigID, e.ID)] = &cp
 	return nil
@@ -994,6 +1083,10 @@ func (r *installSkillRepo) GetSkillByName(
 ) (*types.TenantSkillEntity, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.getByNameMisses > 0 {
+		r.getByNameMisses--
+		return nil, nil
+	}
 	for _, e := range r.skills {
 		if e.TenantID == tenantID && e.SandboxConfigID == configID && e.Name == name {
 			cp := *e
@@ -1006,6 +1099,11 @@ func (r *installSkillRepo) GetSkillByName(
 func (r *installSkillRepo) ListSkillsByConfig(
 	ctx context.Context, tenantID uint64, configID string,
 ) ([]*types.TenantSkillEntity, error) {
+	// Counted before the context check so a cancelled listing still registers
+	// as an attempt.
+	r.mu.Lock()
+	r.listCalls++
+	r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -1254,7 +1352,7 @@ func (m *installSandboxManager) ExecShellCommandWithOptions(
 		}, nil
 	case command == "rm -rf /workspace/* /workspace/.[!.]* || true":
 		m.fx.record("cleanup-workspace")
-	case strings.HasPrefix(command, "chmod -R 755 "):
+	case strings.HasPrefix(command, "chmod -R 555 "):
 		m.fx.record("chmod")
 	}
 	if m.fx.execResult != nil && command == m.fx.execResultCommand {
@@ -1284,6 +1382,23 @@ func (m *installSandboxManager) DeleteSnapshot(ctx context.Context, snapshotID s
 
 func (m *installSandboxManager) ListSnapshots(context.Context, string) ([]sandbox.RemoteSnapshotRef, error) {
 	return nil, nil
+}
+
+// InvalidateConfigSandboxes refuses a cancelled context exactly as the
+// Redis-backed binding store would, so a caller that forgot to detach the
+// install's context fails here rather than silently marking nothing.
+func (m *installSandboxManager) InvalidateConfigSandboxes(
+	ctx context.Context, tenantID uint64, configID string,
+) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if m.fx.invalidateErr != nil {
+		return 0, m.fx.invalidateErr
+	}
+	m.fx.staleMarks = append(m.fx.staleMarks, staleMark{tenantID: tenantID, configID: configID})
+	m.fx.record("mark-stale")
+	return 1, nil
 }
 
 // DestroySession refuses a cancelled context because the provider call does:
@@ -1412,6 +1527,9 @@ func (e *installAgentEngine) Execute(
 	[]chat.Message,
 	...[]string,
 ) (*types.AgentState, error) {
+	if e.fx.beforeExecute != nil {
+		e.fx.beforeExecute()
+	}
 	e.fx.record("agent-execute")
 	if e.fx.agentDelay > 0 {
 		time.Sleep(e.fx.agentDelay)

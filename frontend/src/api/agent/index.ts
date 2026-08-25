@@ -65,6 +65,11 @@ export interface CustomAgentConfig {
   skills_selection_mode?: 'all' | 'selected' | 'none';
   selected_skills?: string[];       // 选择的Skill名称列表
 
+  // ===== 沙盒设置 =====
+  // 该智能体的技能脚本运行在哪个沙盒配置上；为空表示不启用沙盒执行。
+  // 指向逻辑配置而非某个具体版本，凭据轮换时无需重新指派每个智能体。
+  sandbox_config_id?: string;
+
   // ===== 知识库设置 =====
   // 知识库选择模式：all=全部知识库, selected=指定知识库, none=不使用知识库
   kb_selection_mode?: 'all' | 'selected' | 'none';

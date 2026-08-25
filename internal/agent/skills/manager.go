@@ -32,6 +32,12 @@ const sessionInputEnvVar = "WEKNORA_SESSION_INPUT_DIR"
 // chain without LLM mediation.
 const artifactHistoryEnvVar = "WEKNORA_SKILL_HISTORY_ROOT"
 
+// skillDirEnvVar points a script at its own directory inside the sandbox
+// image. Installed skills run with /workspace as WorkDir, so this is how a
+// script reaches the data and helpers that were installed beside it. The
+// install-time smoke run exports the same name.
+const skillDirEnvVar = "WEKNORA_SKILL_DIR"
+
 // defaultArtifactOutputDir is used when neither the environment variable
 // (WEKNORA_SKILL_OUTPUT_DIR) nor the ExecuteConfig.Env has an override.
 // /workspace/output sits inside the base sandbox image's writable tree and
@@ -69,6 +75,11 @@ func (m *Manager) SkillOutputDir(sessionID, skillName string) string {
 type Manager struct {
 	loader     *Loader
 	sandboxMgr sandbox.Manager
+
+	// tenantSource holds the skills installed into this run's sandbox image.
+	// It is nil for every run whose workspace has none, which is why the
+	// preloaded path below is untouched by its existence.
+	tenantSource SkillSource
 
 	// Configuration
 	skillDirs     []string
@@ -109,6 +120,81 @@ func (m *Manager) IsEnabled() bool {
 	return m.enabled
 }
 
+// WithTenantSource attaches the skills an administrator installed into the
+// sandbox config this run booted from. It is part of construction - callers
+// must invoke it before Initialize, i.e. before the engine can reach the
+// manager - so it takes no lock.
+func (m *Manager) WithTenantSource(source SkillSource) *Manager {
+	m.tenantSource = source
+	return m
+}
+
+// resolveSource decides which source owns one skill name. An installed skill
+// shadows a preloaded one of the same name, because the sandbox boots the
+// image the install produced and that is the copy a script would run.
+func (m *Manager) resolveSource(skillName string) SkillSource {
+	if m.tenantSource != nil {
+		if _, err := m.tenantSource.GetSkillBasePath(skillName); err == nil {
+			return m.tenantSource
+		}
+	}
+	return m.loader
+}
+
+// discoverAllSkills merges the two sources into the set the model is told
+// about.
+func (m *Manager) discoverAllSkills() ([]*SkillMetadata, error) {
+	preloaded, err := m.loader.DiscoverSkills()
+	if err != nil {
+		return nil, err
+	}
+	return m.mergeWithTenantSkills(preloaded)
+}
+
+// mergeWithTenantSkills overlays the installed skills on a freshly discovered
+// preloaded set.
+func (m *Manager) mergeWithTenantSkills(preloaded []*SkillMetadata) ([]*SkillMetadata, error) {
+	if m.tenantSource == nil {
+		return preloaded, nil
+	}
+	tenant, err := m.tenantSource.DiscoverSkills()
+	if err != nil {
+		return nil, err
+	}
+	return mergeSkillMetadata(preloaded, tenant), nil
+}
+
+// mergeSkillMetadata overlays the installed skills on the preloaded ones,
+// keeping the preloaded ordering for the names both sources carry so the
+// system prompt does not reshuffle when a skill is installed.
+func mergeSkillMetadata(preloaded, tenant []*SkillMetadata) []*SkillMetadata {
+	byName := make(map[string]*SkillMetadata, len(tenant))
+	for _, meta := range tenant {
+		if meta != nil {
+			byName[meta.Name] = meta
+		}
+	}
+	merged := make([]*SkillMetadata, 0, len(preloaded)+len(tenant))
+	overridden := make(map[string]bool, len(tenant))
+	for _, meta := range preloaded {
+		if meta == nil {
+			continue
+		}
+		if installed, ok := byName[meta.Name]; ok {
+			merged = append(merged, installed)
+			overridden[meta.Name] = true
+			continue
+		}
+		merged = append(merged, meta)
+	}
+	for _, meta := range tenant {
+		if meta != nil && !overridden[meta.Name] {
+			merged = append(merged, meta)
+		}
+	}
+	return merged
+}
+
 // Initialize discovers all skills and caches their metadata
 // This should be called at startup
 func (m *Manager) Initialize(ctx context.Context) error {
@@ -116,7 +202,7 @@ func (m *Manager) Initialize(ctx context.Context) error {
 		return nil
 	}
 
-	metadata, err := m.loader.DiscoverSkills()
+	metadata, err := m.discoverAllSkills()
 	if err != nil {
 		return fmt.Errorf("failed to discover skills: %w", err)
 	}
@@ -180,7 +266,7 @@ func (m *Manager) LoadSkill(ctx context.Context, skillName string) (*Skill, erro
 		return nil, fmt.Errorf("skill not allowed: %s", skillName)
 	}
 
-	return m.loader.LoadSkillInstructions(skillName)
+	return m.resolveSource(skillName).LoadSkillInstructions(skillName)
 }
 
 // isSkillAllowed checks if a skill is in the allowed list
@@ -206,7 +292,7 @@ func (m *Manager) ReadSkillFile(ctx context.Context, skillName, filePath string)
 		return "", fmt.Errorf("skill not allowed: %s", skillName)
 	}
 
-	file, err := m.loader.LoadSkillFile(skillName, filePath)
+	file, err := m.resolveSource(skillName).LoadSkillFile(skillName, filePath)
 	if err != nil {
 		return "", err
 	}
@@ -224,7 +310,7 @@ func (m *Manager) ListSkillFiles(ctx context.Context, skillName string) ([]strin
 		return nil, fmt.Errorf("skill not allowed: %s", skillName)
 	}
 
-	return m.loader.ListSkillFiles(skillName)
+	return m.resolveSource(skillName).ListSkillFiles(skillName)
 }
 
 // ExecuteScript executes a script from a skill in the sandbox
@@ -242,20 +328,12 @@ func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath strin
 		return nil, fmt.Errorf("sandbox is not configured")
 	}
 
+	source := m.resolveSource(skillName)
+
 	// Get the skill base path
-	basePath, err := m.loader.GetSkillBasePath(skillName)
+	basePath, err := source.GetSkillBasePath(skillName)
 	if err != nil {
 		return nil, err
-	}
-
-	// Load the script file to verify it exists and is a script
-	file, err := m.loader.LoadSkillFile(skillName, scriptPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load script: %w", err)
-	}
-
-	if !file.IsScript {
-		return nil, fmt.Errorf("file is not an executable script: %s", scriptPath)
 	}
 
 	// Prepare execution config
@@ -287,17 +365,74 @@ func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath strin
 		}
 	}
 
-	config := &sandbox.ExecuteConfig{
-		Script:    file.Path,
-		Args:      args,
-		WorkDir:   basePath,
-		Stdin:     stdin,
-		Env:       env,
-		SessionID: sessionID,
+	config, err := buildSkillExecuteConfig(
+		source, skillName, scriptPath, basePath, args, stdin, env, sessionID,
+	)
+	if err != nil {
+		return nil, err
 	}
 
 	// Execute in sandbox
 	return m.sandboxMgr.Execute(ctx, config)
+}
+
+// buildSkillExecuteConfig turns one skill script into an execution request.
+//
+// The two sources diverge here and nowhere else. A skill installed into the
+// image is run in place: there is no host-side copy to upload, and the
+// executor pins WorkDir to the session workspace and runs it as the ordinary
+// sandbox user. A preloaded skill keeps its existing behaviour exactly -
+// uploaded from the host, executed with the skill directory as WorkDir.
+func buildSkillExecuteConfig(
+	source SkillSource,
+	skillName, scriptPath, basePath string,
+	args []string,
+	stdin string,
+	env map[string]string,
+	sessionID string,
+) (*sandbox.ExecuteConfig, error) {
+	image, installed := source.(imageSkillSource)
+	if !installed {
+		// Load the script file to verify it exists and is a script
+		file, err := source.LoadSkillFile(skillName, scriptPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load script: %w", err)
+		}
+		if !file.IsScript {
+			return nil, fmt.Errorf("file is not an executable script: %s", scriptPath)
+		}
+		return &sandbox.ExecuteConfig{
+			Script:    file.Path,
+			Args:      args,
+			WorkDir:   basePath,
+			Stdin:     stdin,
+			Env:       env,
+			SessionID: sessionID,
+		}, nil
+	}
+
+	// The archive is deliberately not consulted: the image is what executes,
+	// and a skill whose archive failed to store is still installed and
+	// runnable. That leaves the extension as the only check available here,
+	// which is also the one the executor's interpreter choice depends on.
+	if !IsScript(scriptPath) {
+		return nil, fmt.Errorf("file is not an executable script: %s", scriptPath)
+	}
+	remoteScript, err := image.RemoteScriptPath(skillName, scriptPath)
+	if err != nil {
+		return nil, err
+	}
+	// The install-time smoke run exports the skill directory under this name,
+	// so a script that located its own resources through it during
+	// verification must be able to do the same when the agent calls it.
+	env[skillDirEnvVar] = basePath
+	return &sandbox.ExecuteConfig{
+		RemoteScriptPath: remoteScript,
+		Args:             args,
+		Stdin:            stdin,
+		Env:              env,
+		SessionID:        sessionID,
+	}, nil
 }
 
 // sessionFileStoreFromManager returns the sandbox manager's effective
@@ -321,12 +456,13 @@ func (m *Manager) GetSkillInfo(ctx context.Context, skillName string) (*SkillInf
 		return nil, fmt.Errorf("skill not allowed: %s", skillName)
 	}
 
-	skill, err := m.loader.LoadSkillInstructions(skillName)
+	source := m.resolveSource(skillName)
+	skill, err := source.LoadSkillInstructions(skillName)
 	if err != nil {
 		return nil, err
 	}
 
-	files, err := m.loader.ListSkillFiles(skillName)
+	files, err := source.ListSkillFiles(skillName)
 	if err != nil {
 		files = []string{} // Non-fatal error
 	}
@@ -355,7 +491,11 @@ func (m *Manager) Reload(ctx context.Context) error {
 		return nil
 	}
 
-	metadata, err := m.loader.Reload()
+	preloaded, err := m.loader.Reload()
+	if err != nil {
+		return err
+	}
+	metadata, err := m.mergeWithTenantSkills(preloaded)
 	if err != nil {
 		return err
 	}

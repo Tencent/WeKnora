@@ -55,9 +55,10 @@ type fakeRemoteClient struct {
 	afterCreate func(RemoteSandboxHandle)
 	deleteHook  func(context.Context, string) error
 
-	makeDirPaths []string
-	execRequests []RemoteExecRequest
-	writeFiles   []fakeRemoteWriteFile
+	makeDirPaths        []string
+	failMakeDirIfExists bool
+	execRequests        []RemoteExecRequest
+	writeFiles          []fakeRemoteWriteFile
 
 	// snapshots maps snapshotID -> source sandboxID.
 	snapshots   map[string]string
@@ -282,8 +283,19 @@ func (c *fakeRemoteClient) ListDir(
 
 func (c *fakeRemoteClient) MakeDir(_ context.Context, _ RemoteSandboxHandle, path string) error {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.failMakeDirIfExists {
+		for _, existing := range c.makeDirPaths {
+			if existing == path {
+				return NewRemoteError(
+					c.provider, "MakeDir", RemoteErrorKindInternal,
+					fmt.Sprintf("failed to make dir %s: directory already exists: %s", path, path),
+					nil,
+				)
+			}
+		}
+	}
 	c.makeDirPaths = append(c.makeDirPaths, path)
-	c.mu.Unlock()
 	return nil
 }
 

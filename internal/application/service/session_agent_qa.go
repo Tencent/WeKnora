@@ -142,6 +142,13 @@ func (s *sessionService) AgentQA(
 		llmContext = []chat.Message{}
 	}
 
+	// Hold the sandbox across this turn so an install that finishes while we
+	// are running cannot rebuild the VM between tool calls. Staging below is
+	// the first resolve: if the previous turn left a stale mark, that is
+	// where the new image is picked up.
+	releaseTurn := s.holdSandboxTurn(ctx, sessionID, agentConfig.SandboxConfigID)
+	defer releaseTurn()
+
 	// Reconcile all durable session attachments into the session's remote
 	// sandbox before the model can request shell or skill execution. The
 	// durable storage URL — not the ephemeral sandbox path — remains the
@@ -297,6 +304,25 @@ func (s *sessionService) buildAgentConfig(
 
 	// Configure skills based on CustomAgentConfig
 	s.configureSkillsFromAgent(ctx, agentConfig, customAgent)
+
+	// Then add the skills installed into the sandbox config this run boots.
+	//
+	// The workspace is the one on the context rather than the agent's owner,
+	// because that is where resolveSandboxForExecution reads it; skillsForRun
+	// picks the config the same way the sandbox resolution does.
+	sandboxTenantID, _ := types.TenantIDFromContext(ctx)
+	skillConfigID, tenantSkills := skillsForRun(
+		ctx, s.sandboxPinner, s.sandboxConfigRepo, s.tenantSkillRepo,
+		sandboxTenantID, req.Session.ID, agentConfig.SandboxConfigID,
+	)
+	agentConfig.TenantSkills = tenantSkills
+	if len(tenantSkills) > 0 {
+		// The config named here is the one the skills came from, which is the
+		// pinned one whenever it differs from the agent's - the only case the
+		// line is worth reading.
+		logger.Infof(ctx, "Sandbox config %s offers %d installed skill(s) to this run",
+			skillConfigID, len(tenantSkills))
+	}
 
 	// Resolve knowledge bases using shared helper
 	kbIDs, knowledgeIDs, err := s.resolveKnowledgeBases(ctx, req)
@@ -583,5 +609,4 @@ func (s *sessionService) configureSkillsFromAgent(
 		agentConfig.SkillsEnabled = false
 		logger.Warnf(ctx, "Unknown SkillsSelectionMode=%s: skills disabled", customAgent.Config.SkillsSelectionMode)
 	}
-
 }

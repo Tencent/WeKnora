@@ -211,6 +211,89 @@ func TestExecShellCommandRejectsInvalidWorkDir(t *testing.T) {
 	require.Contains(t, err.Error(), SessionWorkspaceRoot)
 }
 
+// The manager is what the skill install flow holds, so the path from "the
+// image changed" to "this session runs on a new sandbox" has to work through
+// it, not only through the lifecycle it wraps.
+func TestSessionBoundManagerInvalidateConfigSandboxesRebuildsOnNextUse(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	client := newFakeRemoteClient(SandboxTypeCube)
+	store := NewMemorySessionSandboxBindingStore()
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          client,
+		Store:           store,
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+		ConfigID:        "cfg-1",
+	})
+	require.NoError(t, err)
+
+	_, err = mgr.ExecShellCommand(ctx, "sess-1", "echo hi", "", time.Second, nil)
+	require.NoError(t, err)
+	before, err := store.Get(ctx, SessionSandboxKey{TenantID: 10000, SessionID: "sess-1"})
+	require.NoError(t, err)
+	require.NotNil(t, before)
+
+	marked, err := mgr.InvalidateConfigSandboxes(ctx, 10000, "cfg-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, marked)
+
+	_, err = mgr.ExecShellCommand(ctx, "sess-1", "echo hi", "", time.Second, nil)
+	require.NoError(t, err)
+	after, err := store.Get(ctx, SessionSandboxKey{TenantID: 10000, SessionID: "sess-1"})
+	require.NoError(t, err)
+	require.NotEqual(t, before.SandboxID, after.SandboxID)
+	require.False(t, client.hasSandbox(before.SandboxID),
+		"the sandbox on the old image must be released, not left billing")
+}
+
+func TestSessionBoundManagerEndSessionTurnIgnoresCancel(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	store := NewMemorySessionSandboxBindingStore()
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          newFakeRemoteClient(SandboxTypeCube),
+		Store:           store,
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+	})
+	require.NoError(t, err)
+
+	cancelled, cancel := context.WithCancel(ctx)
+	require.NoError(t, mgr.BeginSessionTurn(cancelled, "sess-1"))
+	cancel()
+	require.NoError(t, mgr.EndSessionTurn(cancelled, "sess-1"))
+
+	active, _, err := store.TurnState(ctx, SessionSandboxKey{TenantID: 10000, SessionID: "sess-1"})
+	require.NoError(t, err)
+	require.False(t, active)
+}
+
+func TestWriteSessionFileSucceedsWhenInstallDirectoryAlreadyExists(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	mgr, client := newSessionManagerExecTestHarness(t)
+	client.failMakeDirIfExists = true
+
+	skillDir, err := SkillDirFor("0d3390ab-6fba-4c8f-8571-30076da51010")
+	require.NoError(t, err)
+	require.NoError(t, client.MakeDir(ctx, nil, skillDir),
+		"resetSkillDir has already created this directory via mkdir -p")
+
+	require.NoError(t,
+		mgr.WriteSessionFile(ctx, "sess-1", skillDir+"/SKILL.md", []byte("---\nname: pptx\n")),
+		"seeding SKILL.md must not fail just because the skill dir exists")
+
+	client.mu.Lock()
+	writes := append([]fakeRemoteWriteFile(nil), client.writeFiles...)
+	client.mu.Unlock()
+	require.Len(t, writes, 1)
+	require.Equal(t, skillDir+"/SKILL.md", writes[0].path)
+}
+
 func newSessionManagerExecTestHarness(t *testing.T) (*SessionBoundManager, *fakeRemoteClient) {
 	t.Helper()
 

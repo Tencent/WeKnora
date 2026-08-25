@@ -112,6 +112,8 @@ func (r *tenantSkillRepository) UpdateSkill(ctx context.Context, e *types.Tenant
 			"bundle_sha256":         e.BundleSHA256,
 			"enabled":               e.Enabled,
 			"installed_snapshot_id": e.InstalledSnapshotID,
+			"install_session_id":    e.InstallSessionID,
+			"install_message_id":    e.InstallMessageID,
 			"status":                e.Status,
 			"error":                 e.Error,
 			"installing_since":      e.InstallingSince,

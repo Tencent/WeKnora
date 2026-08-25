@@ -389,6 +389,23 @@ func (m *SessionBoundManager) DestroySession(ctx context.Context, sessionID stri
 	return m.lifecycle.Destroy(ctx, key)
 }
 
+// InvalidateConfigSandboxes marks every session sandbox this config owns stale,
+// so each session rebuilds its sandbox from the config's current image on its
+// next use, and reports how many bindings were marked.
+//
+// It is the image-maintenance counterpart to DestroySession: nothing is torn
+// down here, so marking cannot delete a sandbox that is executing right now.
+// The replacement happens at the session's next resolve, which may be the next
+// operation of a turn already in flight; see resolveLocked for that limitation.
+func (m *SessionBoundManager) InvalidateConfigSandboxes(
+	ctx context.Context, tenantID uint64, configID string,
+) (int, error) {
+	if err := m.requireRemoteBackend(); err != nil {
+		return 0, err
+	}
+	return m.bindings.InvalidateByConfig(ctx, tenantID, configID)
+}
+
 // CreateSnapshot forwards provider snapshot creation for the live sandbox bound
 // to sessionID. Session execution never uses this optional capability; it is
 // reserved for skill image maintenance.
@@ -448,7 +465,7 @@ func (m *SessionBoundManager) EnsureSessionDir(ctx context.Context, sessionID, d
 	if err != nil || !ok {
 		return err
 	}
-	if err := m.client.MakeDir(ctx, handle, dir); err != nil {
+	if err := ignoreExistingDir(m.client.MakeDir(ctx, handle, dir)); err != nil {
 		return fmt.Errorf("sandbox: ensure session dir %s: %w", dir, err)
 	}
 	return nil
@@ -475,7 +492,7 @@ func (m *SessionBoundManager) WriteSessionInputFile(
 	if err != nil {
 		return err
 	}
-	if err := m.client.MakeDir(ctx, handle, path.Dir(clean)); err != nil {
+	if err := ignoreExistingDir(m.client.MakeDir(ctx, handle, path.Dir(clean))); err != nil {
 		return fmt.Errorf("sandbox: create input directory: %w", err)
 	}
 	if err := m.client.WriteFile(ctx, handle, clean, content); err != nil {
@@ -581,7 +598,10 @@ func (m *SessionBoundManager) WriteSessionFile(
 	if err != nil {
 		return err
 	}
-	if err := m.client.MakeDir(ctx, handle, path.Dir(clean)); err != nil {
+	// resetSkillDir already created this folder with mkdir -p. Cube's MakeDir
+	// then reports the existing directory as an error; ignoreExistingDir keeps
+	// that from aborting the seed of SKILL.md.
+	if err := ignoreExistingDir(m.client.MakeDir(ctx, handle, path.Dir(clean))); err != nil {
 		return fmt.Errorf("sandbox: create install directory: %w", err)
 	}
 	if err := m.client.WriteFile(ctx, handle, clean, content); err != nil {
@@ -755,6 +775,43 @@ func (m *SessionBoundManager) Cleanup(ctx context.Context) error {
 }
 
 // --- internal helpers --------------------------------------------------------
+
+// BeginSessionTurn opens the chat-turn lease for sessionID. The first
+// resolve after this may rebuild a stale image; later resolves of the same
+// turn keep the sandbox.
+func (m *SessionBoundManager) BeginSessionTurn(ctx context.Context, sessionID string) error {
+	if m == nil {
+		return nil
+	}
+	leaser, ok := m.bindings.(sessionTurnLeaseStore)
+	if !ok {
+		return nil
+	}
+	key, err := m.sessionKey(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	return leaser.BeginTurn(ctx, key)
+}
+
+// EndSessionTurn closes the chat-turn lease. It ignores request cancellation
+// so a disconnected client still releases the lease.
+func (m *SessionBoundManager) EndSessionTurn(ctx context.Context, sessionID string) error {
+	if m == nil {
+		return nil
+	}
+	leaser, ok := m.bindings.(sessionTurnLeaseStore)
+	if !ok {
+		return nil
+	}
+	key, err := m.sessionKey(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	return leaser.EndTurn(context.WithoutCancel(ctx), key)
+}
+
+var _ SessionTurnHolder = (*SessionBoundManager)(nil)
 
 // resolveSession resolves (or lazily creates) the remote sandbox bound to
 // sessionID. Persistent path only.

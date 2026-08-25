@@ -41,6 +41,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -108,6 +109,56 @@ var ErrNamedSandboxBackendUnsupported = stderrors.New(
 	"named sandbox configs only support cube, e2b, docker and local backends",
 )
 
+// ErrSkillSnapshotReleaseFailed is returned when deleting a sandbox config
+// cannot destroy every provider snapshot on that config's ledger. Leaving the
+// row is recoverable; leaking a billable snapshot is not.
+var ErrSkillSnapshotReleaseFailed = stderrors.New("failed to release skill snapshots")
+
+// SkillSnapshotReleaseFailedError names the snapshots that are still on the
+// provider so the handler can show them and a retry can skip already-deleted
+// ones.
+type SkillSnapshotReleaseFailedError struct {
+	Remaining []string
+}
+
+func (e *SkillSnapshotReleaseFailedError) Error() string {
+	if e == nil || len(e.Remaining) == 0 {
+		return ErrSkillSnapshotReleaseFailed.Error()
+	}
+	return fmt.Sprintf("%s: %s", ErrSkillSnapshotReleaseFailed.Error(), strings.Join(e.Remaining, ", "))
+}
+
+func (e *SkillSnapshotReleaseFailedError) Unwrap() error {
+	return ErrSkillSnapshotReleaseFailed
+}
+
+// sandboxSnapshotReleaser is the provider capability Delete needs. It is a
+// named slice of RemoteSnapshotManager so tests do not have to fake Create or
+// List, and so the type assertion is not anonymous.
+type sandboxSnapshotReleaser interface {
+	DeleteSnapshot(ctx context.Context, snapshotID string) error
+}
+
+// sandboxConfigSkillStore is the skill/ledger slice Delete needs to destroy
+// snapshots and drop rows that would dangle after SoftDelete.
+type sandboxConfigSkillStore interface {
+	ListSnapshotsByConfig(
+		ctx context.Context, tenantID uint64, configID string,
+	) ([]*types.TenantSkillSnapshotEntity, error)
+	MarkSnapshotState(ctx context.Context, tenantID uint64, id, state, snapshotID string) error
+	ListSkillsByConfig(ctx context.Context, tenantID uint64, configID string) ([]*types.TenantSkillEntity, error)
+	DeleteSkill(ctx context.Context, tenantID uint64, configID, skillID string) error
+	DeleteSnapshotRowsByConfig(ctx context.Context, tenantID uint64, configID string) error
+}
+
+// sandboxConfigBundleResolver locates the tenant file service so config
+// deletion can drop skill archives after the ledger is released.
+type sandboxConfigBundleResolver interface {
+	ResolveFileService(
+		ctx context.Context, tenant *types.Tenant, backendID, provider, localBaseDir string,
+	) (interfaces.FileService, string, error)
+}
+
 // SandboxInventory describes what a config holds and who a change disturbs.
 type SandboxInventory struct {
 	SandboxCount int      `json:"sandbox_count"`
@@ -163,6 +214,12 @@ type TenantSandboxConfigService struct {
 	globalCfg *sandbox.Config
 	now       func() time.Time
 
+	// skills and files are used only when deleting a config, to destroy the
+	// snapshot ledger and drop skill archives. Either may be nil in tests
+	// that never delete a config that owns skills.
+	skills sandboxConfigSkillStore
+	files  sandboxConfigBundleResolver
+
 	// newClient is injectable so tests can supply a provider inventory.
 	newClient func(*sandbox.Config) (sandbox.ConfigSandboxClient, error)
 
@@ -178,12 +235,16 @@ func NewTenantSandboxConfigService(
 	repo repository.TenantSandboxConfigRepository,
 	agents SandboxConfigAgentRepo,
 	globalCfg *sandbox.Config,
+	skills repository.TenantSkillRepository,
+	files sandboxConfigBundleResolver,
 ) *TenantSandboxConfigService {
 	return &TenantSandboxConfigService{
 		repo:      repo,
 		agents:    agents,
 		globalCfg: globalCfg,
 		now:       time.Now,
+		skills:    skills,
+		files:     files,
 		newClient: func(cfg *sandbox.Config) (sandbox.ConfigSandboxClient, error) {
 			return sandbox.NewRemoteClientForCheck(cfg)
 		},
@@ -228,7 +289,19 @@ func SanitizeSandboxConfig(
 	if _, err := sandbox.ResolveEffectiveConfig(merged, sandbox.DefaultConfig()); err != nil {
 		return nil, err
 	}
+	if err := validateSkillRollout(merged.SkillRollout); err != nil {
+		return nil, err
+	}
 	return merged, nil
+}
+
+func validateSkillRollout(value string) error {
+	switch strings.TrimSpace(value) {
+	case "", types.SkillRolloutNextTurn, types.SkillRolloutNewSession:
+		return nil
+	default:
+		return apperrors.NewBadRequestError("invalid skill_rollout")
+	}
 }
 
 func validateNamedSandboxBackend(cfg *types.TenantSandboxConfig) error {
@@ -662,15 +735,18 @@ func (s *TenantSandboxConfigService) Update(
 	return updated, nil
 }
 
-// Delete refuses only while the config still owns sandboxes. Agent references
-// are permanent state and are surfaced as warnings by callers, not blockers.
+// Delete refuses while the config still owns sandboxes, and while skill
+// snapshots on its ledger cannot be destroyed. Agent references are permanent
+// state and are surfaced as warnings by callers, not blockers.
 //
-// force covers exactly one case: the provider could not be reached, so we cannot
-// tell whether anything is live. Without it a config whose endpoint's DNS record
-// disappeared could never be removed — unlike an edit, deletion has no "create a
-// second config" way out. It does NOT override sandboxes we can actually see;
-// those still have to be dealt with through their sessions, otherwise the forced
-// deletion would be precisely the permanent leak this whole flow prevents.
+// force covers two cases we cannot complete from here: the provider could not
+// be reached to list sandboxes, and a skill snapshot could not be destroyed.
+// Without it a config whose endpoint's DNS record disappeared, or whose
+// snapshot API is down, could never be removed — unlike an edit, deletion has
+// no "create a second config" way out. It does NOT override sandboxes we can
+// actually see; those still have to be dealt with through their sessions,
+// otherwise the forced deletion would be precisely the permanent leak this
+// whole flow prevents.
 func (s *TenantSandboxConfigService) Delete(
 	ctx context.Context, tenantID uint64, id string, force bool,
 ) error {
@@ -699,7 +775,202 @@ func (s *TenantSandboxConfigService) Delete(
 		inv := s.inventoryFromSummaries(ctx, tenantID, id, summaries)
 		return &SandboxesStillLiveError{Inventory: inv}
 	}
+	if err := s.releaseSkillSnapshots(ctx, entity, tenantID, id, force); err != nil {
+		return err
+	}
 	return s.repo.SoftDelete(ctx, tenantID, id)
+}
+
+func snapshotReleaserFrom(client sandbox.ConfigSandboxClient) (sandboxSnapshotReleaser, bool) {
+	if client == nil {
+		return nil, false
+	}
+	releaser, ok := client.(sandboxSnapshotReleaser)
+	return releaser, ok
+}
+
+func pendingHaveProviderIDs(rows []*types.TenantSkillSnapshotEntity) bool {
+	for _, row := range rows {
+		if row != nil && strings.TrimSpace(row.SnapshotID) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func pendingSkillSnapshots(rows []*types.TenantSkillSnapshotEntity) []*types.TenantSkillSnapshotEntity {
+	var out []*types.TenantSkillSnapshotEntity
+	for _, row := range rows {
+		if row == nil || row.State == types.SkillSnapshotStateDeleted {
+			continue
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+func skillSnapshotName(row *types.TenantSkillSnapshotEntity) string {
+	if row == nil {
+		return ""
+	}
+	if name := strings.TrimSpace(row.SnapshotID); name != "" {
+		return name
+	}
+	return row.ID
+}
+
+func (s *TenantSandboxConfigService) releaseSkillSnapshots(
+	ctx context.Context,
+	entity *types.TenantSandboxConfigEntity,
+	tenantID uint64,
+	configID string,
+	force bool,
+) error {
+	if s.skills == nil {
+		return nil
+	}
+
+	rows, err := s.skills.ListSnapshotsByConfig(ctx, tenantID, configID)
+	if err != nil {
+		if !force {
+			return fmt.Errorf("%w: list snapshots: %v", ErrSkillSnapshotReleaseFailed, err)
+		}
+		logger.Warnf(ctx,
+			"[sandbox] force-deleting config %s without listing skill snapshots: %v",
+			configID, err)
+	}
+
+	pending := pendingSkillSnapshots(rows)
+	remaining := s.destroyPendingSnapshots(ctx, entity, pending)
+	if len(remaining) > 0 && !force {
+		return &SkillSnapshotReleaseFailedError{Remaining: remaining}
+	}
+	if len(remaining) > 0 {
+		logger.Warnf(ctx,
+			"[sandbox] force-deleting config %s with unreleased snapshots %s",
+			configID, strings.Join(remaining, ", "))
+	}
+
+	s.cleanupSkillMetadata(ctx, tenantID, configID)
+	return nil
+}
+
+func (s *TenantSandboxConfigService) destroyPendingSnapshots(
+	ctx context.Context,
+	entity *types.TenantSandboxConfigEntity,
+	pending []*types.TenantSkillSnapshotEntity,
+) []string {
+	if len(pending) == 0 {
+		return nil
+	}
+
+	releaser := sandboxSnapshotReleaser(nil)
+	if pendingHaveProviderIDs(pending) {
+		releaser = s.snapshotReleaserFor(ctx, entity)
+	}
+	var remaining []string
+	for _, row := range pending {
+		if err := deleteProviderSnapshot(ctx, releaser, row); err != nil {
+			remaining = append(remaining, skillSnapshotName(row))
+			continue
+		}
+		if err := s.skills.MarkSnapshotState(
+			ctx, row.TenantID, row.ID, types.SkillSnapshotStateDeleted, row.SnapshotID,
+		); err != nil {
+			logger.Warnf(ctx, "[sandbox] mark snapshot %s deleted failed: %v", row.ID, err)
+			remaining = append(remaining, skillSnapshotName(row))
+		}
+	}
+	return remaining
+}
+
+func (s *TenantSandboxConfigService) snapshotReleaserFor(
+	ctx context.Context, entity *types.TenantSandboxConfigEntity,
+) sandboxSnapshotReleaser {
+	cfg := (*types.TenantSandboxConfig)(nil)
+	if entity != nil {
+		cfg = entity.Config
+	}
+	client, err := s.clientFor(cfg)
+	if err != nil {
+		logger.Warnf(ctx, "[sandbox] cannot build snapshot client for config %s: %v",
+			entityID(entity), err)
+		return nil
+	}
+	releaser, ok := snapshotReleaserFrom(client)
+	if !ok {
+		logger.Warnf(ctx, "[sandbox] config %s provider does not support snapshot delete",
+			entityID(entity))
+		return nil
+	}
+	return releaser
+}
+
+func entityID(entity *types.TenantSandboxConfigEntity) string {
+	if entity == nil {
+		return ""
+	}
+	return entity.ID
+}
+
+func deleteProviderSnapshot(
+	ctx context.Context, releaser sandboxSnapshotReleaser, row *types.TenantSkillSnapshotEntity,
+) error {
+	if row == nil {
+		return nil
+	}
+	snapshotID := strings.TrimSpace(row.SnapshotID)
+	if snapshotID == "" {
+		return nil
+	}
+	if releaser == nil {
+		return fmt.Errorf("snapshot delete is unavailable")
+	}
+	err := releaser.DeleteSnapshot(ctx, snapshotID)
+	if err == nil || sandbox.IsRemoteNotFound(err) {
+		return nil
+	}
+	return err
+}
+
+func (s *TenantSandboxConfigService) cleanupSkillMetadata(
+	ctx context.Context, tenantID uint64, configID string,
+) {
+	skills, err := s.skills.ListSkillsByConfig(ctx, tenantID, configID)
+	if err != nil {
+		logger.Warnf(ctx, "[sandbox] list skills for config %s cleanup failed: %v", configID, err)
+	}
+	for _, skill := range skills {
+		if skill == nil {
+			continue
+		}
+		s.deleteSkillBundleBestEffort(ctx, tenantID, skill.BundleRef)
+		if err := s.skills.DeleteSkill(ctx, tenantID, configID, skill.ID); err != nil {
+			logger.Warnf(ctx, "[sandbox] delete skill %s on config %s failed: %v",
+				skill.ID, configID, err)
+		}
+	}
+	if err := s.skills.DeleteSnapshotRowsByConfig(ctx, tenantID, configID); err != nil {
+		logger.Warnf(ctx, "[sandbox] delete snapshot ledger for config %s failed: %v",
+			configID, err)
+	}
+}
+
+func (s *TenantSandboxConfigService) deleteSkillBundleBestEffort(
+	ctx context.Context, tenantID uint64, bundleRef string,
+) {
+	if s.files == nil || strings.TrimSpace(bundleRef) == "" {
+		return
+	}
+	fs, _, err := s.files.ResolveFileService(ctx, &types.Tenant{ID: tenantID}, "", "", "")
+	if err != nil || fs == nil {
+		logger.Warnf(ctx, "[sandbox] resolve file service to delete bundle %s failed: %v",
+			bundleRef, err)
+		return
+	}
+	if err := fs.DeleteFile(ctx, bundleRef); err != nil {
+		logger.Warnf(ctx, "[sandbox] delete bundle %s failed: %v", bundleRef, err)
+	}
 }
 
 func (s *TenantSandboxConfigService) clientFor(

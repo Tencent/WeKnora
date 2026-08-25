@@ -128,3 +128,52 @@ func TestRemoteErrorDiagnostics(t *testing.T) {
 		t.Fatal("expected plain error text")
 	}
 }
+
+func TestIsRemoteDirAlreadyExists(t *testing.T) {
+	t.Parallel()
+
+	cubeSeedErr := NewRemoteError(
+		SandboxTypeCube, "MakeDir", RemoteErrorKindInternal,
+		"failed to make dir /opt/weknora/tenant/skills/sk-1: directory already exists: /opt/weknora/tenant/skills/sk-1",
+		nil,
+	)
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "cube envd already exists", err: cubeSeedErr, want: true},
+		{
+			name: "wrapped cube error",
+			err:  fmt.Errorf("sandbox: create install directory: %w", cubeSeedErr),
+			want: true,
+		},
+		{
+			name: "e2b conflict already exists",
+			err: NewRemoteError(
+				SandboxTypeE2B, "MakeDir", RemoteErrorKindConflict, "already exists", nil,
+			),
+			want: true,
+		},
+		{
+			name: "unrelated internal",
+			err:  NewRemoteError(SandboxTypeCube, "MakeDir", RemoteErrorKindInternal, "disk full", nil),
+			want: false,
+		},
+		{
+			name: "conflict without already exists",
+			err:  NewRemoteError(SandboxTypeCube, "Delete", RemoteErrorKindConflict, "busy", nil),
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := IsRemoteDirAlreadyExists(tt.err); got != tt.want {
+				t.Fatalf("IsRemoteDirAlreadyExists() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

@@ -23,13 +23,28 @@ COPY --from=node-base /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
+# Python package manager: uv (fast pip replacement). Preinstalled because each
+# skill gets its own venv at install time, and building that from a cold pip is
+# what dominates an install's wall clock.
+COPY --from=ghcr.io/astral-sh/uv:0.12.4 /uv /usr/local/bin/uv
+RUN ln -s /usr/local/bin/uv /usr/local/bin/uvx
+
+# Node package manager: pnpm
+RUN npm install -g pnpm
+
 # Install minimal CLI tools (bash/grep/sed/coreutils/findutils already in slim
 # image). curl is not optional: the sandbox connectivity check probes egress
-# with it, and skills that fetch a URL expect it to be there.
+# with it, and skills that fetch a URL expect it to be there. The compression
+# tools are here because skill bundles and their assets arrive archived.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     curl \
     ca-certificates \
+    zip \
+    unzip \
+    bzip2 \
+    xz-utils \
+    zstd \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
 # Note: Current preloaded skills only use Python stdlib

@@ -111,6 +111,67 @@ func TestMergeSandboxConfigForUpdateIgnoresIncomingSkillImageOnCreate(t *testing
 	require.Nil(t, out.SkillImage, "create must not accept a client-supplied skill image")
 }
 
+// The editor never sends skill_image: that pointer is written only by an
+// install or a removal. A merge that copied the incoming payload as-is would
+// therefore wipe a live snapshot on every "保存运行配置", leaving the skill
+// rows in place while every session fell back to the base template. VolumeMount
+// is covered here too because the editor omits it for the same reason.
+func TestMergeSandboxConfigForUpdateKeepsSkillImageWhenEditorOmitsIt(t *testing.T) {
+	existing := &TenantSandboxConfig{
+		SandboxType: "cube",
+		SkillImage: &SkillImageConfig{
+			SnapshotID:       "snap-2",
+			Generation:       2,
+			BaseTemplateID:   "base-template",
+			OwnerFingerprint: "fp-1",
+		},
+		VolumeMount: &VolumeMountConfig{Enabled: true, VolumeID: "vol-1"},
+	}
+	incoming := &TenantSandboxConfig{
+		SandboxType: "cube",
+		Cube:        &CubeSandboxConfig{APIURL: "https://cube.example.com"},
+	}
+
+	out := MergeSandboxConfigForUpdate(incoming, existing)
+
+	require.NotNil(t, out.SkillImage)
+	require.Equal(t, "snap-2", out.SkillImage.SnapshotID)
+	require.Equal(t, 2, out.SkillImage.Generation)
+	require.Equal(t, "base-template", out.SkillImage.BaseTemplateID)
+	require.Equal(t, "fp-1", out.SkillImage.OwnerFingerprint)
+	require.NotNil(t, out.VolumeMount)
+	require.Equal(t, "vol-1", out.VolumeMount.VolumeID)
+
+	out.SkillImage.SnapshotID = "mutated"
+	require.Equal(t, "snap-2", existing.SkillImage.SnapshotID,
+		"merge must copy the stored image, not share the pointer")
+}
+
+func TestMergeSandboxConfigForUpdateKeepsSkillRolloutWhenEditorOmitsIt(t *testing.T) {
+	existing := &TenantSandboxConfig{
+		SandboxType:  "cube",
+		SkillRollout: SkillRolloutNewSession,
+	}
+	incoming := &TenantSandboxConfig{
+		SandboxType: "cube",
+		Cube:        &CubeSandboxConfig{APIURL: "https://cube.example.com"},
+	}
+
+	out := MergeSandboxConfigForUpdate(incoming, existing)
+
+	require.Equal(t, SkillRolloutNewSession, out.SkillRollout,
+		"a runtime save must not reset the skills-panel rollout choice")
+}
+
+func TestMergeSandboxConfigForUpdateHonoursExplicitSkillRollout(t *testing.T) {
+	existing := &TenantSandboxConfig{SkillRollout: SkillRolloutNewSession}
+	incoming := &TenantSandboxConfig{SkillRollout: SkillRolloutNextTurn}
+
+	out := MergeSandboxConfigForUpdate(incoming, existing)
+
+	require.Equal(t, SkillRolloutNextTurn, out.SkillRollout)
+}
+
 func TestMergeSandboxConfigForUpdateDoesNotMutateInputs(t *testing.T) {
 	existing := &TenantSandboxConfig{E2B: &E2BSandboxConfig{APIKey: "old-e2b"}}
 	incoming := &TenantSandboxConfig{

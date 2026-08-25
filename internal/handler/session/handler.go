@@ -129,7 +129,7 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	createdSession := &types.Session{
 		TenantID:    tenantID.(uint64),
 		Title:       request.Title,
-		Description: request.Description,
+		Description: types.SanitizeClientSessionDescription(request.Description, ""),
 	}
 	// Attach the calling user as the session owner when available.
 	// API-key callers scope sessions per external user when configured;

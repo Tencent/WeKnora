@@ -342,7 +342,7 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 	RegisterWebSearchProviderRoutes(v1, &handler.WebSearchProviderHandler{}, &handler.WebSearchProviderCredentialsHandler{}, g)
 	RegisterVectorStoreRoutes(v1, &handler.VectorStoreHandler{}, g)
 	RegisterStorageBackendRoutes(v1, &handler.StorageBackendHandler{}, g)
-	RegisterSandboxConfigRoutes(v1, &handler.SandboxConfigHandler{}, g)
+	RegisterSandboxConfigRoutes(v1, &handler.SandboxConfigHandler{}, &handler.SandboxSkillHandler{}, g)
 	RegisterEmbedChannelRoutes(v1, &handler.EmbedChannelHandler{}, g)
 	RegisterIMChannelRoutes(v1, &handler.IMHandler{}, g)
 	RegisterDataSourceRoutes(v1, &handler.DataSourceHandler{}, &handler.DataSourceCredentialsHandler{}, g)
@@ -390,7 +390,7 @@ func TestSandboxConfigRoutesRequireFullAccessOnly(t *testing.T) {
 	g := &rbacGuards{}
 	v1 := gin.New().Group("/api/v1")
 
-	RegisterSandboxConfigRoutes(v1, &handler.SandboxConfigHandler{}, g)
+	RegisterSandboxConfigRoutes(v1, &handler.SandboxConfigHandler{}, &handler.SandboxSkillHandler{}, g)
 
 	cases := []struct {
 		method string
@@ -403,6 +403,15 @@ func TestSandboxConfigRoutesRequireFullAccessOnly(t *testing.T) {
 		{http.MethodPut, "/api/v1/sandbox-configs/:id"},
 		{http.MethodDelete, "/api/v1/sandbox-configs/:id"},
 		{http.MethodGet, "/api/v1/sandbox-configs/:id/sandboxes"},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills"},
+		{http.MethodPost, "/api/v1/sandbox-configs/:id/skills"},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId"},
+		{http.MethodPatch, "/api/v1/sandbox-configs/:id/skills/:skillId"},
+		{http.MethodDelete, "/api/v1/sandbox-configs/:id/skills/:skillId"},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/install-events"},
+		// The transcript replays the root shell session that built the image,
+		// so it must not be reachable by a scoped key either.
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId/transcript"},
 	}
 
 	for _, tc := range cases {

@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	stderrors "errors"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"strings"
 	"sync"
@@ -15,6 +17,7 @@ import (
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // testGlobalSandboxConfig supplies built-in runtime tuning values. Named
@@ -234,6 +237,10 @@ func (f *fakeConfigRepo) ListByTenant(
 	return out, nil
 }
 
+func (f *fakeConfigRepo) ListAll(context.Context) ([]*types.TenantSandboxConfigEntity, error) {
+	return f.ListByTenant(context.Background(), 0)
+}
+
 func (f *fakeConfigRepo) Update(
 	_ context.Context, e *types.TenantSandboxConfigEntity,
 ) error {
@@ -340,7 +347,7 @@ func newTestConfigService(
 	if client == nil {
 		client = &stubProviderClient{}
 	}
-	svc := NewTenantSandboxConfigService(repo, agents, testGlobalSandboxConfig())
+	svc := NewTenantSandboxConfigService(repo, agents, testGlobalSandboxConfig(), nil, nil)
 	svc.newClient = func(*sandbox.Config) (sandbox.ConfigSandboxClient, error) {
 		return client, nil
 	}
@@ -475,7 +482,7 @@ func TestQueryTemplatesResolvesMaskedStoredCredential(t *testing.T) {
 		ID: "cfg-a", TenantID: 7, SandboxType: "e2b",
 		Config: e2bCfg("stored-secret", "https://api.e2b.app", "e2b.app", "old", 300),
 	}}
-	svc := NewTenantSandboxConfigService(repo, stubAgentRepo{}, sandbox.DefaultConfig())
+	svc := NewTenantSandboxConfigService(repo, stubAgentRepo{}, sandbox.DefaultConfig(), nil, nil)
 	client := &stubProviderClient{templates: []sandbox.RemoteTemplate{{ID: "tpl-a", Name: "a", Status: "ready"}}}
 	svc.newClient = func(cfg *sandbox.Config) (sandbox.ConfigSandboxClient, error) {
 		require.Equal(t, "stored-secret", cfg.E2BAPIKey)
@@ -558,6 +565,40 @@ func TestUpdateNonIdentityEditSkipsCordon(t *testing.T) {
 	require.Equal(t, []string{"get", "write"}, repo.events)
 	require.Equal(t, "prod renamed", repo.updated.Name)
 	require.Equal(t, 0, client.listCalls)
+}
+
+// Saving the connection / runtime form must not discard the snapshot pointer.
+// The editor payload has no skill_image field; that pointer is owned by the
+// install path. Wiping it is how a config can list two ready skills while
+// every session still boots the base template.
+func TestUpdateKeepsSkillImageWhenEditorOmitsIt(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
+	stored := e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300)
+	stored.SkillImage = &types.SkillImageConfig{
+		SnapshotID:       "snap-2",
+		Generation:       2,
+		BaseTemplateID:   "base-template",
+		OwnerFingerprint: "fp-1",
+	}
+	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
+		ID:          "cfg-a",
+		TenantID:    7,
+		Name:        "prod",
+		SandboxType: "e2b",
+		Config:      stored,
+	}}
+	svc := newTestConfigService(t, repo, &stubProviderClient{}, stubAgentRepo{})
+
+	updated, err := svc.Update(context.Background(), 7, "cfg-a", UpdateSandboxConfigInput{
+		Name:   "prod",
+		Config: e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 900),
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, updated.Config.SkillImage)
+	require.Equal(t, "snap-2", updated.Config.SkillImage.SnapshotID)
+	require.Equal(t, 2, updated.Config.SkillImage.Generation)
+	require.Equal(t, "base-template", updated.Config.SkillImage.BaseTemplateID)
 }
 
 func TestUpdateRefusalCarriesInventory(t *testing.T) {
@@ -842,6 +883,22 @@ func TestSanitizeSandboxConfigPreservesSkillImage(t *testing.T) {
 		"the sandbox config API must not let a client plant or wipe the skill image")
 }
 
+func TestSanitizeSandboxConfigRejectsUnknownSkillRollout(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
+	incoming := &types.TenantSandboxConfig{
+		SandboxType:  "e2b",
+		SkillRollout: "whenever",
+		E2B: &types.E2BSandboxConfig{
+			APIKey: "stored-key", APIURL: "https://203.0.113.10", TemplateID: "t1",
+		},
+	}
+
+	_, err := SanitizeSandboxConfig(incoming, nil)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "skill_rollout")
+}
+
 // Nothing is inherited from the deployment, so an incomplete config has to be
 // refused when it is saved rather than at the first sandbox allocation.
 func TestSanitizeSandboxConfigRejectsIncompleteConfig(t *testing.T) {
@@ -980,3 +1037,315 @@ func TestWorkspaceScriptsDisabledPolicy(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, disabled)
 }
+
+func TestDeleteReleasesSkillSnapshotsBeforeSoftDelete(t *testing.T) {
+	fx := newSnapshotReleaseFixture(t, nil)
+
+	err := fx.svc.Delete(context.Background(), 7, "cfg-a", false)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"snap-1", "snap-2", "soft-delete"}, fx.events)
+	require.Contains(t, fx.skills.marks, "row-1:"+types.SkillSnapshotStateDeleted)
+	require.Contains(t, fx.skills.marks, "row-2:"+types.SkillSnapshotStateDeleted)
+	require.NotContains(t, fx.skills.marks, "row-0:"+types.SkillSnapshotStateDeleted)
+	require.Empty(t, fx.skills.skills, "tenant_skills rows must be dropped before SoftDelete")
+	require.True(t, fx.skills.ledgerCleared)
+	require.Equal(t, []string{"bundle://skill-a.zip"}, fx.files.deleted)
+}
+
+func TestDeleteRefusesWhenSnapshotReleaseFailsWithoutForce(t *testing.T) {
+	fx := newSnapshotReleaseFixture(t, map[string]error{
+		"snap-2": stderrors.New("provider unavailable"),
+	})
+
+	err := fx.svc.Delete(context.Background(), 7, "cfg-a", false)
+
+	require.ErrorIs(t, err, ErrSkillSnapshotReleaseFailed)
+	var releaseErr *SkillSnapshotReleaseFailedError
+	require.ErrorAs(t, err, &releaseErr)
+	require.Equal(t, []string{"snap-2"}, releaseErr.Remaining)
+	require.NotContains(t, fx.events, "soft-delete",
+		"leaving the row behind is recoverable; leaking a billable snapshot is not")
+	require.Equal(t, types.SkillSnapshotStateDeleted, fx.skills.snapshot("row-1").State)
+	require.Equal(t, types.SkillSnapshotStateSuperseded, fx.skills.snapshot("row-2").State)
+	require.Len(t, fx.skills.skills, 1, "skill rows stay so a retry can finish the release")
+	require.False(t, fx.skills.ledgerCleared)
+}
+
+func TestDeleteWithForceProceedsAndRecordsThePartialSuccess(t *testing.T) {
+	fx := newSnapshotReleaseFixture(t, map[string]error{
+		"snap-2": stderrors.New("provider unavailable"),
+	})
+
+	err := fx.svc.Delete(context.Background(), 7, "cfg-a", true)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"snap-1", "soft-delete"}, fx.events)
+	require.Contains(t, fx.skills.marks, "row-1:"+types.SkillSnapshotStateDeleted)
+	require.NotContains(t, fx.skills.marks, "row-2:"+types.SkillSnapshotStateDeleted)
+	require.True(t, fx.repo.deleted)
+	require.True(t, fx.skills.ledgerCleared)
+	require.Empty(t, fx.skills.skills)
+}
+
+func TestDeleteMarksBuildingSnapshotsWhenProviderHasNoSnapshotClient(t *testing.T) {
+	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
+		ID: "cfg-a", TenantID: 7, Name: "local", SandboxType: "local",
+		Config: &types.TenantSandboxConfig{SandboxType: "local"},
+	}}
+	skills := &deleteSkillStore{
+		snapshots: []*types.TenantSkillSnapshotEntity{{
+			ID: "row-build", TenantID: 7, SandboxConfigID: "cfg-a",
+			State: types.SkillSnapshotStateBuilding,
+		}},
+	}
+	svc := newTestConfigService(t, repo, nil, stubAgentRepo{})
+	svc.skills = skills
+
+	err := svc.Delete(context.Background(), 7, "cfg-a", false)
+
+	require.NoError(t, err)
+	require.True(t, repo.deleted)
+	require.Contains(t, skills.marks, "row-build:"+types.SkillSnapshotStateDeleted)
+}
+
+// snapshotReleaseFixture drives Delete through a provider that also implements
+// snapshot deletion, which is the production Cube/E2B split.
+type snapshotReleaseFixture struct {
+	events []string
+	repo   *eventRecordingConfigRepo
+	skills *deleteSkillStore
+	files  *deleteBundleResolver
+	svc    *TenantSandboxConfigService
+}
+
+func newSnapshotReleaseFixture(t *testing.T, failDelete map[string]error) *snapshotReleaseFixture {
+	t.Helper()
+	fx := &snapshotReleaseFixture{
+		skills: &deleteSkillStore{
+			snapshots: []*types.TenantSkillSnapshotEntity{
+				{
+					ID: "row-0", TenantID: 7, SandboxConfigID: "cfg-a",
+					SnapshotID: "snap-gone", State: types.SkillSnapshotStateDeleted,
+				},
+				{
+					ID: "row-1", TenantID: 7, SandboxConfigID: "cfg-a",
+					SnapshotID: "snap-1", State: types.SkillSnapshotStateActive,
+				},
+				{
+					ID: "row-2", TenantID: 7, SandboxConfigID: "cfg-a",
+					SnapshotID: "snap-2", State: types.SkillSnapshotStateSuperseded,
+				},
+			},
+			skills: []*types.TenantSkillEntity{{
+				ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-a",
+				BundleRef: "bundle://skill-a.zip",
+			}},
+		},
+		files: &deleteBundleResolver{},
+	}
+	inner := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
+		ID: "cfg-a", TenantID: 7, Name: "prod", SandboxType: "e2b",
+		Config: e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300),
+	}}
+	fx.repo = &eventRecordingConfigRepo{fakeConfigRepo: inner, events: &fx.events}
+	client := &snapshotReleaseClient{events: &fx.events, failDelete: failDelete}
+	fx.svc = newTestConfigService(t, inner, &client.stubProviderClient, stubAgentRepo{})
+	fx.svc.repo = fx.repo
+	fx.svc.skills = fx.skills
+	fx.svc.files = fx.files
+	fx.svc.newClient = func(*sandbox.Config) (sandbox.ConfigSandboxClient, error) {
+		return client, nil
+	}
+	return fx
+}
+
+type eventRecordingConfigRepo struct {
+	*fakeConfigRepo
+	events *[]string
+}
+
+func (r *eventRecordingConfigRepo) SoftDelete(ctx context.Context, tenantID uint64, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	*r.events = append(*r.events, "soft-delete")
+	return r.fakeConfigRepo.SoftDelete(ctx, tenantID, id)
+}
+
+type snapshotReleaseClient struct {
+	stubProviderClient
+	events     *[]string
+	failDelete map[string]error
+}
+
+func (c *snapshotReleaseClient) List(
+	ctx context.Context, filter sandbox.RemoteListFilter,
+) ([]sandbox.RemoteSandboxSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return c.stubProviderClient.List(ctx, filter)
+}
+
+func (c *snapshotReleaseClient) Delete(ctx context.Context, sandboxID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return c.stubProviderClient.Delete(ctx, sandboxID)
+}
+
+func (c *snapshotReleaseClient) DeleteSnapshot(ctx context.Context, snapshotID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := c.failDelete[snapshotID]; err != nil {
+		return err
+	}
+	*c.events = append(*c.events, snapshotID)
+	return nil
+}
+
+type deleteSkillStore struct {
+	snapshots     []*types.TenantSkillSnapshotEntity
+	skills        []*types.TenantSkillEntity
+	marks         []string
+	ledgerCleared bool
+}
+
+func (s *deleteSkillStore) snapshot(id string) *types.TenantSkillSnapshotEntity {
+	for _, row := range s.snapshots {
+		if row.ID == id {
+			return row
+		}
+	}
+	return &types.TenantSkillSnapshotEntity{}
+}
+
+func (s *deleteSkillStore) ListSnapshotsByConfig(
+	ctx context.Context, tenantID uint64, configID string,
+) ([]*types.TenantSkillSnapshotEntity, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var out []*types.TenantSkillSnapshotEntity
+	for _, row := range s.snapshots {
+		if row.TenantID == tenantID && row.SandboxConfigID == configID {
+			cp := *row
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (s *deleteSkillStore) MarkSnapshotState(
+	ctx context.Context, tenantID uint64, id, state, snapshotID string,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.marks = append(s.marks, id+":"+state)
+	for _, row := range s.snapshots {
+		// The real query is tenant-scoped, so a caller passing the wrong
+		// workspace must match nothing here too.
+		if row.ID != id || row.TenantID != tenantID {
+			continue
+		}
+		row.State = state
+		if snapshotID != "" {
+			row.SnapshotID = snapshotID
+		}
+	}
+	return nil
+}
+
+func (s *deleteSkillStore) ListSkillsByConfig(
+	ctx context.Context, tenantID uint64, configID string,
+) ([]*types.TenantSkillEntity, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var out []*types.TenantSkillEntity
+	for _, row := range s.skills {
+		if row.TenantID == tenantID && row.SandboxConfigID == configID {
+			cp := *row
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (s *deleteSkillStore) DeleteSkill(ctx context.Context, tenantID uint64, configID, skillID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	kept := s.skills[:0]
+	for _, row := range s.skills {
+		if row.TenantID == tenantID && row.SandboxConfigID == configID && row.ID == skillID {
+			continue
+		}
+		kept = append(kept, row)
+	}
+	s.skills = kept
+	return nil
+}
+
+func (s *deleteSkillStore) DeleteSnapshotRowsByConfig(ctx context.Context, tenantID uint64, configID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.ledgerCleared = true
+	kept := s.snapshots[:0]
+	for _, row := range s.snapshots {
+		if row.TenantID == tenantID && row.SandboxConfigID == configID {
+			continue
+		}
+		kept = append(kept, row)
+	}
+	s.snapshots = kept
+	return nil
+}
+
+type deleteBundleResolver struct {
+	deleted []string
+}
+
+func (r *deleteBundleResolver) ResolveFileService(
+	ctx context.Context, _ *types.Tenant, _, _, _ string,
+) (interfaces.FileService, string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
+	return deleteFileService{r: r}, "", nil
+}
+
+type deleteFileService struct{ r *deleteBundleResolver }
+
+func (deleteFileService) CheckConnectivity(context.Context) error { return nil }
+func (deleteFileService) SaveFile(context.Context, *multipart.FileHeader, uint64, string) (string, error) {
+	return "", nil
+}
+
+func (deleteFileService) SaveBytes(context.Context, []byte, uint64, string, bool) (string, error) {
+	return "", nil
+}
+func (deleteFileService) GetFile(context.Context, string) (io.ReadCloser, error) { return nil, nil }
+func (deleteFileService) GetFileURL(context.Context, string) (string, error)     { return "", nil }
+func (s deleteFileService) DeleteFile(ctx context.Context, ref string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.r.deleted = append(s.r.deleted, ref)
+	return nil
+}
+
+func (deleteFileService) CopyFile(context.Context, string, uint64, string) (string, error) {
+	return "", nil
+}
+
+var (
+	_ sandbox.ConfigSandboxClient = (*snapshotReleaseClient)(nil)
+	_ sandboxSnapshotReleaser     = (*snapshotReleaseClient)(nil)
+	_ sandboxConfigSkillStore     = (*deleteSkillStore)(nil)
+	_ sandboxConfigBundleResolver = (*deleteBundleResolver)(nil)
+)

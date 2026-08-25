@@ -137,7 +137,7 @@
     </t-loading>
 
     <SandboxConfigEditorDrawer v-model:visible="showEditor" :record="editingRecord"
-      :preset-type="activeType === 'all' ? '' : activeType" @saved="load" />
+      :preset-type="activeType === 'all' ? '' : activeType" :initial-step="editorStep" @saved="load" />
 
     <!--
       Occupancy is a list of sessions and agents, not a one-line status, and it
@@ -235,6 +235,9 @@ const activeType = ref<string>('all')
 
 const showEditor = ref(false)
 const editingRecord = ref<SandboxConfigRecord | null>(null)
+// Which page of the editor to open on. Skills live there as the last step, so
+// "管理技能" is the same drawer opened further along.
+const editorStep = ref<'skills' | undefined>(undefined)
 
 const showInventory = ref(false)
 const inventoryLoading = ref(false)
@@ -268,6 +271,7 @@ const cardMenu = (record: SandboxConfigRecord) => {
   ]
   if (record.sandbox_type === 'cube' || record.sandbox_type === 'e2b') {
     options.push({ content: t('settings.sandbox.viewSandboxes'), value: 'inventory' })
+    options.push({ content: t('settings.sandbox.manageSkills'), value: 'skills' })
   }
   return options
 }
@@ -311,12 +315,14 @@ async function onDeleteConfirmOpen(visible: boolean, record: SandboxConfigRecord
 
 function openCreate() {
   editingRecord.value = null
+  editorStep.value = undefined
   showEditor.value = true
 }
 
 function openEdit(record: SandboxConfigRecord) {
   if (isLegacyRecord(record)) return
   editingRecord.value = record
+  editorStep.value = undefined
   showEditor.value = true
 }
 
@@ -479,6 +485,12 @@ async function onMenuAction(action: string, record: SandboxConfigRecord) {
   }
   if (action === 'inventory') {
     await openInventory(record)
+    return
+  }
+  if (action === 'skills') {
+    editingRecord.value = record
+    editorStep.value = 'skills'
+    showEditor.value = true
   }
 }
 

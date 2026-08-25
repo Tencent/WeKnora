@@ -30,6 +30,14 @@ const (
 	SkillSnapshotTriggerRebuild = "rebuild"
 )
 
+// SkillMaintenanceSessionMarker tags the sessions that skill image operations
+// run in. Those sessions carry a real agent transcript that is deliberately
+// kept for troubleshooting, but they are infrastructure rather than
+// conversations, so the console must never list them. This mirrors how embed
+// sessions are classified (EmbedSessionMarkerPrefix): a description prefix,
+// so no schema change is needed.
+const SkillMaintenanceSessionMarker = "skill_maintenance:"
+
 // TenantSkillEntity is one skill installed onto one sandbox config.
 //
 // There is deliberately no entry_script / interpreter / smoke_command column:
@@ -62,6 +70,13 @@ type TenantSkillEntity struct {
 	// InstalledSnapshotID is the snapshot produced by this skill's install,
 	// kept for audit and chain troubleshooting.
 	InstalledSnapshotID string `gorm:"type:varchar(255)"`
+
+	// InstallSessionID / InstallMessageID locate the installer agent's
+	// transcript for the most recent install of this skill. A re-install
+	// overwrites them: the previous run's conversation is superseded by the
+	// one that produced the image now in service.
+	InstallSessionID string `gorm:"type:varchar(36)"`
+	InstallMessageID string `gorm:"type:varchar(36)"`
 
 	Status string `gorm:"type:varchar(32);not null"`
 	Error  string `gorm:"type:text"`

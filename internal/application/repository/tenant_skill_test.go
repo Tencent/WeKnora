@@ -61,6 +61,8 @@ func TestSkillRepoUpdatePersistsPointerAndStatus(t *testing.T) {
 	row.Status = types.SkillStatusReady
 	row.InstalledSnapshotID = "snap-1"
 	row.Enabled = false
+	row.InstallSessionID = "sess-1"
+	row.InstallMessageID = "msg-1"
 	require.NoError(t, repo.UpdateSkill(ctx, row))
 
 	got, err := repo.GetSkill(ctx, 7, "cfg-1", "sk-a")
@@ -68,6 +70,10 @@ func TestSkillRepoUpdatePersistsPointerAndStatus(t *testing.T) {
 	require.Equal(t, types.SkillStatusReady, got.Status)
 	require.Equal(t, "snap-1", got.InstalledSnapshotID)
 	require.False(t, got.Enabled, "disabling a skill must round-trip; it is the visibility switch")
+	// The locators go through the same explicit column map as everything else,
+	// so a field added to the entity but not to that map reads back empty.
+	require.Equal(t, "sess-1", got.InstallSessionID)
+	require.Equal(t, "msg-1", got.InstallMessageID)
 }
 
 func TestSnapshotLedgerRecordsChain(t *testing.T) {
