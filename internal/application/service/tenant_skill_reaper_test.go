@@ -330,6 +330,47 @@ func TestPruneSupersededSnapshotsDeletesStaleActiveLeftovers(t *testing.T) {
 	require.Equal(t, types.SkillSnapshotStateActive, states["snap-live"])
 }
 
+// A rotated credential points at another provider account, where these IDs do
+// not exist. The delete would come back not-found, which the sweep reads as
+// "already gone", so the account that really holds them would keep being
+// billed while the ledger recorded them as deleted.
+func TestPruneSupersededSnapshotsSkipsAConfigBuiltByAnotherAccount(t *testing.T) {
+	fx := newReaperFixture(t)
+	fx.svc.snapshotRetention = time.Hour
+	old := fx.now.Add(-2 * time.Hour)
+	fx.live("snap-live")
+	fx.superseded("sk-1", "snap-old", "", old)
+	fx.configs.entity.Config.E2B.APIKey = "rotated-key"
+
+	n, err := fx.svc.PruneSupersededSnapshots(context.Background())
+
+	require.NoError(t, err)
+	require.Zero(t, n)
+	require.Empty(t, fx.provider.deleted,
+		"snapshots of an account we can no longer address must not be recorded as deleted")
+	rows, err := fx.skills.ListSnapshotsByConfig(context.Background(), 7, "cfg-1")
+	require.NoError(t, err)
+	require.Equal(t, types.SkillSnapshotStateSuperseded, rows[0].State)
+}
+
+// Resolving a provider builds a client. Most configs have nothing to prune on
+// most sweeps, and the sweep runs every five minutes across every workspace.
+func TestPruneSupersededSnapshotsBuildsNoProviderClientWithNothingToPrune(t *testing.T) {
+	fx := newReaperFixture(t)
+	fx.svc.snapshotRetention = time.Hour
+	recent := fx.now.Add(-30 * time.Minute)
+	fx.live("snap-live")
+	fx.installed("sk-1", "snap-live", "snap-recent")
+	fx.superseded("sk-2", "snap-recent", "", recent)
+
+	n, err := fx.svc.PruneSupersededSnapshots(context.Background())
+
+	require.NoError(t, err)
+	require.Zero(t, n)
+	require.Zero(t, fx.resolver.resolves,
+		"a sweep with no eligible row must not pay for a provider client")
+}
+
 func TestPruneSupersededSnapshotsLeavesTheRowWhenDeleteFails(t *testing.T) {
 	fx := newReaperFixture(t)
 	fx.svc.snapshotRetention = time.Hour
@@ -372,9 +413,7 @@ func TestPruneSupersededSnapshotsTreatsMissingProviderSnapshotAsDeleted(t *testi
 func TestPruneSupersededSnapshotsHonoursALongerConfiguredSandboxTTL(t *testing.T) {
 	fx := newReaperFixture(t)
 	fx.svc.snapshotRetention = time.Hour
-	fx.configs.entity.Config.E2B = &types.E2BSandboxConfig{
-		E2BSandboxTTLSeconds: int((48 * time.Hour).Seconds()),
-	}
+	fx.configs.entity.Config.E2B.E2BSandboxTTLSeconds = int((48 * time.Hour).Seconds())
 	young := fx.now.Add(-25 * time.Hour)
 	old := fx.now.Add(-50 * time.Hour)
 	fx.live("snap-live")
@@ -405,28 +444,45 @@ type reaperFixture struct {
 	skills   *reaperSkillStore
 	configs  *reaperConfigStore
 	provider *reaperSnapshotProvider
-	now      time.Time
+	resolver *reaperSandboxResolver
+	// fingerprint is the credential identity the stored image was built with.
+	// A prune that could not tell it from another account's would delete
+	// snapshots it cannot even see, so the fixture carries a real one.
+	fingerprint string
+	now         time.Time
 }
 
 func newReaperFixture(t *testing.T) *reaperFixture {
 	t.Helper()
 	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	fingerprint := sandbox.SkillImageFingerprint("e2b", "key-1", "https://e2b.example")
 	skills := &reaperSkillStore{rows: map[string]*types.TenantSkillEntity{}}
 	configs := &reaperConfigStore{
 		entity: &types.TenantSandboxConfigEntity{
 			ID: "cfg-1", TenantID: 7,
+			SandboxType: string(sandbox.SandboxTypeE2B),
 			Config: &types.TenantSandboxConfig{
-				SkillImage: &types.SkillImageConfig{SnapshotID: "snap-other"},
+				SandboxType: string(sandbox.SandboxTypeE2B),
+				E2B: &types.E2BSandboxConfig{
+					APIURL: "https://e2b.example", APIKey: "key-1", TemplateID: "base-template",
+				},
+				SkillImage: &types.SkillImageConfig{
+					SnapshotID: "snap-other", OwnerFingerprint: fingerprint,
+				},
 			},
 		},
 	}
 	provider := &reaperSnapshotProvider{}
+	resolver := &reaperSandboxResolver{provider: provider}
 	svc := NewTenantSkillService(
-		skills, configs, nil, &reaperSandboxResolver{provider: provider},
+		skills, configs, nil, resolver,
 		nil, nil, nil, nil, nil, nil, nil, nil,
 	)
 	svc.now = func() time.Time { return now }
-	return &reaperFixture{svc: svc, skills: skills, configs: configs, provider: provider, now: now}
+	return &reaperFixture{
+		svc: svc, skills: skills, configs: configs, provider: provider,
+		resolver: resolver, fingerprint: fingerprint, now: now,
+	}
 }
 
 // installed and removed write the ledger row an install or a removal leaves
@@ -459,7 +515,9 @@ func (f *reaperFixture) superseded(skillID, snapshotID, parentSnapshotID string,
 // live points the config at a snapshot, the way an install's pointer switch
 // does.
 func (f *reaperFixture) live(snapshotID string) {
-	f.configs.entity.Config.SkillImage = &types.SkillImageConfig{SnapshotID: snapshotID}
+	f.configs.entity.Config.SkillImage = &types.SkillImageConfig{
+		SnapshotID: snapshotID, OwnerFingerprint: f.fingerprint,
+	}
 }
 
 var (
@@ -632,9 +690,13 @@ func (r *reaperConfigStore) ClearCordon(context.Context, uint64, string) error {
 
 type reaperSandboxResolver struct {
 	provider *reaperSnapshotProvider
+	// resolves counts provider constructions. Resolving builds a client, so a
+	// sweep with nothing to do must not pay for one.
+	resolves int
 }
 
 func (r *reaperSandboxResolver) Resolve(context.Context, uint64, string) (sandbox.Manager, error) {
+	r.resolves++
 	return r.provider, nil
 }
 

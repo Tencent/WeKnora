@@ -75,11 +75,12 @@ var (
 // still carry this skill's files — and skillFilesInLiveImage answers it from
 // the snapshot ledger rather than from the row.
 //
-// An installing row older than skillInstallStuckTTL is healed to ready when
-// the files are there: a re-install that died before the pointer moved, or a
-// terminal ready write that never landed. Leaving it at installing would hide
-// a skill the image still carries. Otherwise it becomes failed so the UI stops
-// spinning.
+// An installing row whose heartbeat has been silent for skillInstallStuckTTL
+// is healed to ready when the files are there: a re-install that died before
+// the pointer moved, or a terminal ready write that never landed. Leaving it
+// at installing would hide a skill the image still carries. Otherwise it
+// becomes failed so the UI stops spinning. A live install keeps stamping
+// InstallingSince, so a run that is merely slow is never swept.
 //
 // A removing row is restored to ready while the files are still there, so the
 // operator can retry. Once they are gone the leftover row is deleted, so the
@@ -88,11 +89,7 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 	if s == nil || s.skills == nil {
 		return 0, nil
 	}
-	now := s.now
-	if now == nil {
-		now = time.Now
-	}
-	cutoff := now().Add(-skillInstallStuckTTL)
+	cutoff := s.clock()().Add(-skillInstallStuckTTL)
 	stale, err := s.skills.ListStaleInstalling(ctx, cutoff)
 	if err != nil {
 		return 0, err
@@ -434,10 +431,7 @@ func (s *TenantSkillService) PruneSupersededSnapshots(ctx context.Context) (int,
 	if err != nil {
 		return 0, err
 	}
-	now := s.now
-	if now == nil {
-		now = time.Now
-	}
+	now := s.clock()
 	pruned := 0
 	for _, cfg := range configs {
 		if cfg == nil || types.IsSandboxWorkspacePolicyRow(cfg) {
@@ -461,16 +455,33 @@ func (s *TenantSkillService) pruneConfigSnapshots(
 	if cfg == nil {
 		return 0, nil
 	}
+	// A rotated credential points at a different provider account, where the
+	// ledger's snapshot IDs do not exist. The delete would come back
+	// not-found, which this sweep reads as "already gone", so the account that
+	// really holds those snapshots would keep being billed for them while the
+	// ledger recorded them as deleted. ensureUsableImage stops installs for
+	// the same reason; this stops the irreversible half.
+	if err := ensureUsableImage(cfg); err != nil {
+		logger.Warnf(ctx, "[skill] skip snapshot prune of config %s: %v", cfg.ID, err)
+		return 0, nil
+	}
 	rows, err := s.skills.ListSnapshotsByConfig(ctx, cfg.TenantID, cfg.ID)
 	if err != nil {
 		return 0, err
 	}
 	live := currentSnapshotID(cfg)
-	deleter := snapshotDeleterFrom(ctx, s.sandboxes, cfg.TenantID, cfg.ID)
+	// Resolving builds a provider client, so it waits until a row is actually
+	// eligible: most configs have nothing to prune on most sweeps.
+	var deleter skillSnapshotDeleter
+	resolved := false
 	pruned := 0
 	for _, row := range rows {
 		if !snapshotEligibleForPrune(row, live, cutoff) {
 			continue
+		}
+		if !resolved {
+			deleter = snapshotDeleterFrom(ctx, s.sandboxes, cfg.TenantID, cfg.ID)
+			resolved = true
 		}
 		if deleter == nil {
 			logger.Warnf(ctx,

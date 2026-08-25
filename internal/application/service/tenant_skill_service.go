@@ -19,15 +19,26 @@ import (
 // lock without renewing. Installs run for minutes, so the lease is renewed by
 // redislock rather than being set long.
 const (
-	skillImageLockLease  = 30 * time.Second
-	skillImageLockRenew  = 10 * time.Second
+	skillImageLockLease = 30 * time.Second
+	skillImageLockRenew = 10 * time.Second
+
+	// skillInstallStuckTTL is how long a run may go without a heartbeat
+	// before the reaper treats it as abandoned. It is a silence budget, not
+	// a duration budget: a legitimate install that spends two hours in the
+	// agent keeps beating and is left alone.
 	skillInstallStuckTTL = 60 * time.Minute
 
-	// skillInstallInFlightSkip is how long a second upload of the same
-	// archive is treated as a duplicate of a run that already owns the row.
-	// Concurrent retries land in seconds; a process that died minutes ago
-	// must be allowed to start again instead of waiting for the reaper.
-	skillInstallInFlightSkip = 2 * time.Minute
+	// skillInstallHeartbeatInterval is how often a running install stamps
+	// InstallingSince to say its process is still alive. Everything that has
+	// to tell "still working" from "died" reads that timestamp.
+	skillInstallHeartbeatInterval = 30 * time.Second
+
+	// skillInstallInFlightSkip is how much heartbeat silence makes a second
+	// upload of the same archive stop deferring to the run that owns the row.
+	// It is a multiple of the heartbeat so a slow install is never mistaken
+	// for a dead one, and short enough that a re-upload recovers a dead
+	// process in minutes instead of waiting for skillInstallStuckTTL.
+	skillInstallInFlightSkip = 3 * time.Minute
 
 	// skillSnapshotRetention is how long a superseded snapshot stays on the
 	// provider after the pointer has moved. Live sandboxes may still have
@@ -75,6 +86,10 @@ type TenantSkillService struct {
 	// provider. Injectable so a prune test can age a row without waiting a day.
 	snapshotRetention time.Duration
 
+	// installHeartbeat is how often a running install restamps its liveness.
+	// Injectable so a test can observe a beat without waiting half a minute.
+	installHeartbeat time.Duration
+
 	// localLocks serialises installs when Redis is absent. It only guards this
 	// process; multi-replica deployments require Redis for cross-process safety.
 	localLocks *keyedMutex
@@ -117,6 +132,7 @@ func NewTenantSkillService(
 		now:               time.Now,
 		cleanupTimeout:    installCleanupTimeout,
 		snapshotRetention: skillSnapshotRetention,
+		installHeartbeat:  skillInstallHeartbeatInterval,
 		localLocks:        newKeyedMutex(),
 		cron: cron.New(cron.WithSeconds(), cron.WithChain(
 			cron.Recover(cron.DefaultLogger),
@@ -149,6 +165,15 @@ func (s *TenantSkillService) withConfigLock(
 
 func skillImageLockKey(tenantID uint64, configID string) string {
 	return fmt.Sprintf("weknora-skill-image-lock:%d:%s", tenantID, configID)
+}
+
+// clock is this service's time source. Tests inject one; a service built
+// without NewTenantSkillService still gets a working default.
+func (s *TenantSkillService) clock() func() time.Time {
+	if s != nil && s.now != nil {
+		return s.now
+	}
+	return time.Now
 }
 
 // keyedMutex is the no-Redis fallback for withConfigLock.

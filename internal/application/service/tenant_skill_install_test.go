@@ -394,11 +394,12 @@ func TestInstallSkillSkipsAnInFlightInstallOfTheSameArchive(t *testing.T) {
 	})
 	bundle, err := ParseSkillBundle(archive)
 	require.NoError(t, err)
-	started := time.Date(2026, 8, 19, 9, 30, 0, 0, time.UTC)
+	// One heartbeat ago: the first run is slow, not gone.
+	beat := fx.now().Add(-skillInstallHeartbeatInterval)
 	require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), &types.TenantSkillEntity{
 		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
 		Name: bundle.Name, BundleSHA256: bundle.SHA256,
-		Status: types.SkillStatusInstalling, InstallingSince: &started,
+		Status: types.SkillStatusInstalling, InstallingSince: &beat,
 	}))
 
 	id, err := fx.svc.InstallSkill(context.Background(), 7, "cfg-1", archive)
@@ -409,6 +410,33 @@ func TestInstallSkillSkipsAnInFlightInstallOfTheSameArchive(t *testing.T) {
 		"a second upload of the same bytes must not start another billed run")
 }
 
+// A run that keeps beating is left alone however long it takes: a single agent
+// command may take installCommandTimeout, and an install runs several.
+func TestInstallSkillSkipsAnInstallThatIsSlowButStillBeating(t *testing.T) {
+	fx := newInstallFixture(t)
+	archive := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('hi')\n",
+	})
+	bundle, err := ParseSkillBundle(archive)
+	require.NoError(t, err)
+	submitted := fx.now().Add(-3 * installCommandTimeout)
+	beat := fx.now().Add(-skillInstallHeartbeatInterval)
+	require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), &types.TenantSkillEntity{
+		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		Name: bundle.Name, BundleSHA256: bundle.SHA256,
+		Status: types.SkillStatusInstalling, InstallingSince: &beat,
+		CreatedAt: submitted,
+	}))
+
+	id, err := fx.svc.InstallSkill(context.Background(), 7, "cfg-1", archive)
+
+	require.NoError(t, err)
+	require.Equal(t, "sk-1", id)
+	require.Empty(t, fx.sessionCalls,
+		"an install that started long ago but is still beating must not be restarted")
+}
+
 func TestInstallSkillRetriesAStaleInFlightInstallOfTheSameArchive(t *testing.T) {
 	fx := newInstallFixture(t)
 	archive := zipBundle(t, map[string]string{
@@ -417,7 +445,8 @@ func TestInstallSkillRetriesAStaleInFlightInstallOfTheSameArchive(t *testing.T) 
 	})
 	bundle, err := ParseSkillBundle(archive)
 	require.NoError(t, err)
-	stale := time.Date(2026, 8, 19, 9, 30, 0, 0, time.UTC).Add(-3 * time.Minute)
+	// The heartbeat stopped: the process that owned this row is gone.
+	stale := fx.now().Add(-skillInstallInFlightSkip - time.Minute)
 	require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), &types.TenantSkillEntity{
 		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
 		Name: bundle.Name, BundleSHA256: bundle.SHA256,
@@ -433,9 +462,107 @@ func TestInstallSkillRetriesAStaleInFlightInstallOfTheSameArchive(t *testing.T) 
 	require.NoError(t, getErr)
 	require.Equal(t, types.SkillStatusInstalling, skill.Status)
 	require.NotNil(t, skill.InstallingSince)
-	require.Equal(t, time.Date(2026, 8, 19, 9, 30, 0, 0, time.UTC), *skill.InstallingSince,
+	require.Equal(t, fx.now(), *skill.InstallingSince,
 		"a dead in-flight row must be allowed to start a new run, not wait for the reaper")
 	require.Empty(t, skill.Error)
+}
+
+// The ledger records which skill an install snapshotted, not which archive, so
+// an installing row must never be answered from the image: the files there may
+// belong to the previous bundle of the same skill, and skipping would report a
+// success that never happened.
+func TestCanSkipInstallNeverAnswersAnInstallingRowFromTheImage(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	fx.seedReadySkillWithSHA(fx.bundle.SHA256, "snap-live")
+	existing, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	stale := fx.now().Add(-skillInstallInFlightSkip - time.Minute)
+	existing.Status = types.SkillStatusInstalling
+	existing.InstallingSince = &stale
+
+	require.False(t, fx.svc.canSkipInstall(ctx, existing, fx.bundle),
+		"a dead install must be retried, not declared done from another bundle's snapshot")
+}
+
+// A ready skill is only skipped when the ledger can actually say the files are
+// still in the live image. An unreadable ledger must reinstall rather than
+// report a success nobody verified.
+func TestCanSkipInstallRequiresAReadableLedger(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	fx.seedReadySkillWithSHA(fx.bundle.SHA256, "snap-live")
+	existing, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.True(t, fx.svc.canSkipInstall(ctx, existing, fx.bundle),
+		"the same archive of a ready skill still in the image is a no-op")
+
+	fx.skillRepo.listSnapshotsErr = errors.New("ledger unavailable")
+
+	require.False(t, fx.svc.canSkipInstall(ctx, existing, fx.bundle),
+		"a skip must be earned by a readable ledger, not assumed")
+}
+
+func TestBeatInstallHeartbeatRestampsOnlyAnInstallingRow(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	stale := fx.now().Add(-time.Hour)
+	require.NoError(t, fx.svc.updateSkillFields(ctx, 7, "cfg-1", "sk-1",
+		func(e *types.TenantSkillEntity) { e.InstallingSince = &stale }))
+
+	fx.svc.beatInstallHeartbeat(ctx, 7, "cfg-1", "sk-1")
+
+	skill, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.Equal(t, fx.now(), *skill.InstallingSince,
+		"a live install must keep its liveness timestamp current")
+
+	// A finished run's row is no longer this install's to touch: reviving the
+	// timestamp would hide a ready skill from nothing and a newer upload from
+	// the reaper.
+	require.NoError(t, fx.svc.updateSkillFields(ctx, 7, "cfg-1", "sk-1",
+		func(e *types.TenantSkillEntity) {
+			e.Status = types.SkillStatusReady
+			e.InstallingSince = nil
+		}))
+
+	fx.svc.beatInstallHeartbeat(ctx, 7, "cfg-1", "sk-1")
+
+	skill, err = fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.Equal(t, types.SkillStatusReady, skill.Status)
+	require.Nil(t, skill.InstallingSince,
+		"a row that left the installing status must not be stamped alive again")
+}
+
+func TestStartInstallHeartbeatBeatsUntilStopped(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	fx.svc.installHeartbeat = time.Millisecond
+	stale := fx.now().Add(-time.Hour)
+	require.NoError(t, fx.svc.updateSkillFields(ctx, 7, "cfg-1", "sk-1",
+		func(e *types.TenantSkillEntity) { e.InstallingSince = &stale }))
+
+	stop := fx.svc.startInstallHeartbeat(ctx, 7, "cfg-1", "sk-1")
+	require.Eventually(t, func() bool {
+		skill, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "sk-1")
+		return err == nil && skill.InstallingSince != nil && skill.InstallingSince.Equal(fx.now())
+	}, 2*time.Second, time.Millisecond, "the heartbeat must restamp the row while the run works")
+	stop()
+
+	// Stopping is what lets the terminal write stand: a beat landing after it
+	// would put a serving skill back to installing.
+	require.NoError(t, fx.svc.updateSkillFields(ctx, 7, "cfg-1", "sk-1",
+		func(e *types.TenantSkillEntity) {
+			e.Status = types.SkillStatusReady
+			e.InstallingSince = nil
+		}))
+	time.Sleep(20 * time.Millisecond)
+	skill, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.Equal(t, types.SkillStatusReady, skill.Status)
+	require.Nil(t, skill.InstallingSince)
+	stop()
 }
 
 func TestInstallSkillDoesNotSkipARemovalOfTheSameArchive(t *testing.T) {
@@ -1073,6 +1200,10 @@ func (f *installFixture) record(event string) {
 	f.events = append(f.events, event)
 }
 
+// now is the fixture's clock, so a test can express "one heartbeat ago"
+// against the same instant the service reads.
+func (f *installFixture) now() time.Time { return f.svc.now() }
+
 // seedInstalledSkill puts the fixture in the state a removal starts from: the
 // skill is ready inside the config's current image, the ledger holds the active
 // row that produced that image, and the image manifest lists the skill.
@@ -1241,6 +1372,9 @@ type installSkillRepo struct {
 	// snapshot failing for one state, leaving the snapshot ID nowhere but a
 	// local variable.
 	markStateFails func(state string) bool
+	// listSnapshotsErr models an unreadable ledger, which is what stands
+	// between "the image still carries this skill" and a guess.
+	listSnapshotsErr error
 	// deleteSkillErr models the row delete failing past the point of no
 	// return.
 	deleteSkillErr      error
@@ -1410,6 +1544,9 @@ func (r *installSkillRepo) ListSnapshotsByConfig(
 ) ([]*types.TenantSkillSnapshotEntity, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.listSnapshotsErr != nil {
+		return nil, r.listSnapshotsErr
+	}
 	var out []*types.TenantSkillSnapshotEntity
 	for _, e := range r.snapshots {
 		if e.TenantID == tenantID && e.SandboxConfigID == configID {
