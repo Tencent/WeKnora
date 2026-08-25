@@ -31,7 +31,7 @@ type UserService interface {
 	GetUserByUsername(ctx context.Context, username string) (*types.User, error)
 	// GetUserByTenantID gets the first user (owner) of a tenant
 	GetUserByTenantID(ctx context.Context, tenantID uint64) (*types.User, error)
-	// UpdateUser updates user information
+	// UpdateUser updates ordinary user information without changing platform privileges.
 	UpdateUser(ctx context.Context, user *types.User) error
 	// DeleteUser deletes a user
 	DeleteUser(ctx context.Context, id string) error
@@ -79,6 +79,8 @@ type UserService interface {
 	// callers pass offset/limit to page through results. Used by the
 	// /api/v1/system/admin/list endpoint, gated to SystemAdmin callers.
 	ListSystemAdmins(ctx context.Context, offset, limit int) ([]*types.User, int64, error)
+	// GrantSystemAdmin grants system-administrator privileges idempotently.
+	GrantSystemAdmin(ctx context.Context, userID string) (*types.User, bool, error)
 	// ListCrossTenantAccessUsers lists users with CanAccessAllTenants=true.
 	ListCrossTenantAccessUsers(ctx context.Context, offset, limit int) ([]*types.User, int64, error)
 	// GrantCrossTenantAccess grants platform-wide tenant access idempotently.
@@ -116,7 +118,7 @@ type UserRepository interface {
 	GetUserByUsername(ctx context.Context, username string) (*types.User, error)
 	// GetUserByTenantID gets the first user (owner) of a tenant
 	GetUserByTenantID(ctx context.Context, tenantID uint64) (*types.User, error)
-	// UpdateUser updates a user
+	// UpdateUser updates ordinary user fields and preserves platform privileges.
 	UpdateUser(ctx context.Context, user *types.User) error
 	// DeleteUser deletes a user
 	DeleteUser(ctx context.Context, id string) error
@@ -127,6 +129,8 @@ type UserRepository interface {
 	// the slice plus the total count for pagination metadata. Used by
 	// the system-admin management endpoint.
 	ListSystemAdmins(ctx context.Context, offset, limit int) ([]*types.User, int64, error)
+	// GrantSystemAdmin grants system-administrator privileges atomically.
+	GrantSystemAdmin(ctx context.Context, userID string) (*types.User, bool, error)
 	// ListCrossTenantAccessUsers lists users where can_access_all_tenants=true.
 	ListCrossTenantAccessUsers(ctx context.Context, offset, limit int) ([]*types.User, int64, error)
 	// GrantCrossTenantAccess enables can_access_all_tenants for a user.

@@ -29,6 +29,21 @@ func (s *crossTenantAccessUserService) GetUserByEmail(_ context.Context, email s
 	return nil, repository.ErrUserNotFound
 }
 
+func (s *crossTenantAccessUserService) GrantSystemAdmin(
+	_ context.Context, userID string,
+) (*types.User, bool, error) {
+	if s.err != nil {
+		return nil, false, s.err
+	}
+	user := s.users[userID]
+	if user == nil {
+		return nil, false, repository.ErrUserNotFound
+	}
+	changed := !user.IsSystemAdmin
+	user.IsSystemAdmin = true
+	return user, changed, nil
+}
+
 func (s *crossTenantAccessUserService) GrantCrossTenantAccess(
 	_ context.Context, userID string,
 ) (*types.User, bool, error) {
@@ -81,10 +96,30 @@ func crossTenantAccessHandlerRouter(h *SystemHandler) *gin.Engine {
 		c.Next()
 	})
 	router.POST("/grant", h.GrantCrossTenantAccess)
+	router.POST("/promote", h.PromoteUserToSystemAdmin)
 	router.POST("/revoke", h.RevokeCrossTenantAccess)
 	router.POST("/revoke-admin", h.RevokeSystemAdmin)
 	router.GET("/list", h.ListCrossTenantAccessUsers)
 	return router
+}
+
+func TestPromoteSystemAdminUsesDedicatedGrantAndAudits(t *testing.T) {
+	target := &types.User{ID: "target", Email: "target@example.com", Username: "target"}
+	users := &crossTenantAccessUserService{users: map[string]*types.User{"target": target}}
+	audit := &capturingAuditService{}
+	router := crossTenantAccessHandlerRouter(&SystemHandler{userSvc: users, auditSvc: audit})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/promote", bytes.NewBufferString(`{"email":"target@example.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK || !target.IsSystemAdmin {
+		t.Fatalf("promote status=%d user=%+v body=%s", w.Code, target, w.Body.String())
+	}
+	if len(audit.entries) != 1 || audit.entries[0].Action != types.AuditActionSystemAdminPromoted {
+		t.Fatalf("promote audit entries=%+v", audit.entries)
+	}
 }
 
 func TestGrantCrossTenantAccessUpdatesUserAndAudits(t *testing.T) {

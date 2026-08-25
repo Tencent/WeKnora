@@ -596,10 +596,15 @@ func (s *userService) GetUserByTenantID(ctx context.Context, tenantID uint64) (*
 	return s.userRepo.GetUserByTenantID(ctx, tenantID)
 }
 
-// UpdateUser updates user information
+// UpdateUser updates ordinary user information without changing platform privileges.
 func (s *userService) UpdateUser(ctx context.Context, user *types.User) error {
 	user.UpdatedAt = time.Now()
 	return s.userRepo.UpdateUser(ctx, user)
+}
+
+// GrantSystemAdmin grants system-administrator privileges idempotently.
+func (s *userService) GrantSystemAdmin(ctx context.Context, userID string) (*types.User, bool, error) {
+	return s.userRepo.GrantSystemAdmin(ctx, userID)
 }
 
 // ListSystemAdmins lists users with IsSystemAdmin=true. Thin pass-through

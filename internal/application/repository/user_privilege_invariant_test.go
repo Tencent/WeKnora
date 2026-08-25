@@ -28,6 +28,9 @@ func newPrivilegeInvariantRepository(t *testing.T) interfaces.UserRepository {
 	if err := db.AutoMigrate(&types.Tenant{}, &types.User{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	if err := db.Create(&types.Tenant{ID: 1, Name: "test-tenant"}).Error; err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
 	return NewUserRepository(db)
 }
 
@@ -159,5 +162,92 @@ func TestConcurrentCrossTenantRevokesLeaveOneManager(t *testing.T) {
 	users, total, err := repo.ListCrossTenantAccessUsers(context.Background(), 0, 10)
 	if err != nil || total != 1 || len(users) != 1 {
 		t.Fatalf("remaining managers = users:%d total:%d err:%v", len(users), total, err)
+	}
+}
+
+func TestUpdateUserCannotOverwritePlatformPrivilegesFromStaleSnapshot(t *testing.T) {
+	repo := newPrivilegeInvariantRepository(t)
+	managerA := privilegeUser("manager-a", false, false)
+	managerA.TenantID = 1
+	managerB := privilegeUser("manager-b", true, true)
+	managerB.TenantID = 1
+	createPrivilegeInvariantUsers(t, repo,
+		managerA,
+		managerB,
+	)
+	ctx := context.Background()
+
+	staleManager, err := repo.GetUserByID(ctx, "manager-a")
+	if err != nil {
+		t.Fatalf("load stale manager snapshot: %v", err)
+	}
+	if _, changed, err := repo.GrantSystemAdmin(ctx, "manager-a"); err != nil || !changed {
+		t.Fatalf("grant system admin changed=%v err=%v", changed, err)
+	}
+	if _, changed, err := repo.GrantCrossTenantAccess(ctx, "manager-a"); err != nil || !changed {
+		t.Fatalf("grant cross-tenant access changed=%v err=%v", changed, err)
+	}
+	if _, changed, err := repo.RevokeCrossTenantAccess(ctx, "manager-b", "manager-a"); err != nil || !changed {
+		t.Fatalf("revoke peer cross-tenant access changed=%v err=%v", changed, err)
+	}
+
+	staleManager.Username = "updated-profile"
+	if err := repo.UpdateUser(ctx, staleManager); err != nil {
+		t.Fatalf("save stale manager snapshot: %v", err)
+	}
+
+	stored, err := repo.GetUserByID(ctx, "manager-a")
+	if err != nil {
+		t.Fatalf("reload manager: %v", err)
+	}
+	if stored.Username != "updated-profile" {
+		t.Fatalf("ordinary field was not updated: %+v", stored)
+	}
+	if !stored.IsSystemAdmin || !stored.CanAccessAllTenants {
+		t.Fatalf("stale update overwrote platform privileges: %+v", stored)
+	}
+	_, total, err := repo.ListCrossTenantAccessUsers(ctx, 0, 10)
+	if err != nil || total != 1 {
+		t.Fatalf("cross-tenant access users total=%d err=%v", total, err)
+	}
+}
+
+func TestUpdateUserCannotEscalatePlatformPrivileges(t *testing.T) {
+	repo := newPrivilegeInvariantRepository(t)
+	createPrivilegeInvariantUsers(t, repo, privilegeUser("regular", false, false))
+	ctx := context.Background()
+
+	regular, err := repo.GetUserByID(ctx, "regular")
+	if err != nil {
+		t.Fatalf("load regular user: %v", err)
+	}
+	regular.IsSystemAdmin = true
+	regular.CanAccessAllTenants = true
+	regular.Username = "updated-regular"
+	if err := repo.UpdateUser(ctx, regular); err != nil {
+		t.Fatalf("update regular user: %v", err)
+	}
+
+	stored, err := repo.GetUserByID(ctx, "regular")
+	if err != nil {
+		t.Fatalf("reload regular user: %v", err)
+	}
+	if stored.Username != "updated-regular" || stored.IsSystemAdmin || stored.CanAccessAllTenants {
+		t.Fatalf("ordinary update escalated platform privileges: %+v", stored)
+	}
+}
+
+func TestGrantSystemAdminIsIdempotent(t *testing.T) {
+	repo := newPrivilegeInvariantRepository(t)
+	createPrivilegeInvariantUsers(t, repo, privilegeUser("target", false, false))
+	ctx := context.Background()
+
+	granted, changed, err := repo.GrantSystemAdmin(ctx, "target")
+	if err != nil || !changed || !granted.IsSystemAdmin {
+		t.Fatalf("first grant = user:%+v changed:%v err:%v", granted, changed, err)
+	}
+	granted, changed, err = repo.GrantSystemAdmin(ctx, "target")
+	if err != nil || changed || !granted.IsSystemAdmin {
+		t.Fatalf("idempotent grant = user:%+v changed:%v err:%v", granted, changed, err)
 	}
 }

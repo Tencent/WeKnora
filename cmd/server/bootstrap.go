@@ -112,8 +112,8 @@ func bootstrapSystemAdmin(ctx context.Context, userSvc interfaces.UserService, e
 			bootstrapEnvVar, email, total, user.ID)
 		return
 	}
-	user.IsSystemAdmin = true
-	if err := userSvc.UpdateUser(ctx, user); err != nil {
+	_, _, err = userSvc.GrantSystemAdmin(ctx, user.ID)
+	if err != nil {
 		logger.Warnf(ctx,
 			"[bootstrap] %s=%s: failed to promote user %s: %v",
 			bootstrapEnvVar, email, user.ID, err)

@@ -21,6 +21,11 @@ var (
 	ErrLastCrossTenantAccessManager     = errors.New("cannot revoke the last system administrator with cross-tenant access")
 )
 
+const (
+	userSystemAdminColumn       = "is_system_admin"
+	userCrossTenantAccessColumn = "can_access_all_tenants"
+)
+
 // userRepository implements user repository interface
 type userRepository struct {
 	db *gorm.DB
@@ -112,14 +117,16 @@ func (r *userRepository) GetUserByTenantID(ctx context.Context, tenantID uint64)
 	return &user, nil
 }
 
-// UpdateUser updates a user
+// UpdateUser updates ordinary user fields while preserving platform
+// privileges. Privilege changes must use their dedicated atomic methods so a
+// stale user snapshot cannot silently grant or revoke administrative access.
 func (r *userRepository) UpdateUser(ctx context.Context, user *types.User) error {
 	if user != nil && user.TenantID == 0 {
 		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			// Preserve Save's all-fields behaviour while keeping the nullable
-			// tenant column out of the struct write, then explicitly store NULL.
-			// Writing uint64(0) would violate the PostgreSQL tenant FK.
-			if err := tx.Omit("tenant_id").Save(user).Error; err != nil {
+			// Preserve all-fields update semantics while keeping the nullable
+			// tenant column out of the write, then explicitly store NULL. Writing
+			// uint64(0) would violate the PostgreSQL tenant FK.
+			if err := updateOrdinaryUserFields(tx, user, "tenant_id"); err != nil {
 				return err
 			}
 			return tx.Model(&types.User{}).
@@ -127,7 +134,16 @@ func (r *userRepository) UpdateUser(ctx context.Context, user *types.User) error
 				UpdateColumn("tenant_id", nil).Error
 		})
 	}
-	return r.db.WithContext(ctx).Save(user).Error
+	return updateOrdinaryUserFields(r.db.WithContext(ctx), user)
+}
+
+func updateOrdinaryUserFields(db *gorm.DB, user *types.User, omittedColumns ...string) error {
+	columns := append([]string{"id", userSystemAdminColumn, userCrossTenantAccessColumn}, omittedColumns...)
+	return db.Model(&types.User{}).
+		Where("id = ?", user.ID).
+		Select("*").
+		Omit(columns...).
+		Updates(user).Error
 }
 
 // DeleteUser deletes a user
@@ -185,6 +201,37 @@ func (r *userRepository) ListSystemAdmins(ctx context.Context, offset, limit int
 		return nil, 0, err
 	}
 	return users, total, nil
+}
+
+// GrantSystemAdmin enables system-administrator access atomically.
+// The changed result is false when the target already has the permission.
+func (r *userRepository) GrantSystemAdmin(ctx context.Context, userID string) (*types.User, bool, error) {
+	var updated *types.User
+	changed := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var user types.User
+		if err := withUpdateLock(tx).Where("id = ?", userID).First(&user).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrUserNotFound
+			}
+			return err
+		}
+		if user.IsSystemAdmin {
+			updated = &user
+			return nil
+		}
+		if err := tx.Model(&user).Update(userSystemAdminColumn, true).Error; err != nil {
+			return err
+		}
+		user.IsSystemAdmin = true
+		updated = &user
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return updated, changed, nil
 }
 
 // ListCrossTenantAccessUsers lists users where can_access_all_tenants is true.

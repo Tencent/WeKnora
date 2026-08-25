@@ -1346,32 +1346,26 @@ func (h *SystemHandler) PromoteUserToSystemAdmin(c *gin.Context) {
 		return
 	}
 
-	if user.IsSystemAdmin {
-		// Idempotent: re-promoting an existing system admin is a no-op
-		// success. We still emit an audit row so probing the endpoint
-		// leaves a forensic trail (idempotent=true marks it as noop).
-		h.emitAdminAudit(ctx, types.AuditActionSystemAdminPromoted, user, map[string]any{
-			"target_email":    user.Email,
-			"target_username": user.Username,
-			"idempotent":      true,
-		})
-		c.JSON(http.StatusOK, user.ToUserInfo())
-		return
-	}
-	user.IsSystemAdmin = true
-	if err := h.userSvc.UpdateUser(ctx, user); err != nil {
-		logger.Errorf(ctx, "Error promoting user %s to system admin: %v", req.UserID, err)
+	updated, changed, err := h.userSvc.GrantSystemAdmin(ctx, user.ID)
+	if err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+		logger.Errorf(ctx, "Error promoting user %s to system admin: %v", user.ID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to promote user"})
 		return
 	}
 
-	logger.Infof(ctx, "User %s (ID: %s) promoted to system admin", user.Username, user.ID)
-	h.emitAdminAudit(ctx, types.AuditActionSystemAdminPromoted, user, map[string]any{
-		"target_email":    user.Email,
-		"target_username": user.Username,
-		"idempotent":      false,
+	if changed {
+		logger.Infof(ctx, "User %s (ID: %s) promoted to system admin", updated.Username, updated.ID)
+	}
+	h.emitAdminAudit(ctx, types.AuditActionSystemAdminPromoted, updated, map[string]any{
+		"target_email":    updated.Email,
+		"target_username": updated.Username,
+		"idempotent":      !changed,
 	})
-	c.JSON(http.StatusOK, user.ToUserInfo())
+	c.JSON(http.StatusOK, updated.ToUserInfo())
 }
 
 // RevokeSystemAdminRequest defines the request for revoking system admin privileges
