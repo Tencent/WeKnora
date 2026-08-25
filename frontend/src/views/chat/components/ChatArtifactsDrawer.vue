@@ -18,28 +18,36 @@
     -->
     <t-drawer
         v-model:visible="internalVisible"
+        class="chat-artifacts-drawer"
         placement="right"
         size="440px"
         attach="body"
-        :header="$t('agent.artifactDrawer.title')"
         :footer="false"
         :close-on-overlay-click="true"
         :destroy-on-close="false"
         @close="handleClose"
     >
+        <template #header>
+            <div class="artifact-drawer-header">
+                <div class="artifact-drawer-header-icon">
+                    <t-icon name="file" />
+                </div>
+                <div class="artifact-drawer-header-title">{{ $t('agent.artifactDrawer.title') }}</div>
+            </div>
+        </template>
         <div v-if="loading" class="artifact-drawer-empty">
             <t-loading size="small" />
             <span>{{ $t('common.loading') }}</span>
         </div>
         <div v-else-if="!items.length" class="artifact-drawer-empty">
-            <t-icon name="folder-open" size="32" />
+            <t-icon name="folder-open" size="32px" />
             <span>{{ $t('agent.artifactDrawer.empty') }}</span>
         </div>
-        <t-list v-else split :size="'medium'">
-            <t-list-item v-for="item in items" :key="`${item.index}-${item.file_name}`" class="artifact-item">
-                <div class="artifact-icon">
-                    <t-icon :name="iconForFile(item.file_name)" size="24" />
-                </div>
+        <ul v-else class="artifact-list">
+            <li v-for="item in items" :key="`${item.index}-${item.file_name}`" class="artifact-item">
+                <span class="artifact-icon">
+                    <t-icon :name="getFileIcon(item.file_name)" />
+                </span>
                 <div class="artifact-body">
                     <div class="artifact-name" :title="item.file_name">{{ item.file_name }}</div>
                     <div class="artifact-meta">
@@ -49,19 +57,20 @@
                     </div>
                 </div>
                 <t-button
+                    class="artifact-download"
+                    variant="text"
+                    shape="square"
                     size="small"
-                    variant="outline"
-                    shape="round"
+                    :title="$t('agent.artifactDrawer.download')"
                     :loading="!!downloading[item.index]"
                     @click.stop="handleDownload(item)"
                 >
-                    <t-icon name="download" />
-                    <span class="artifact-download-label">
-                        {{ $t('agent.artifactDrawer.download') }}
-                    </span>
+                    <template #icon>
+                        <t-icon name="download" size="16px" />
+                    </template>
                 </t-button>
-            </t-list-item>
-        </t-list>
+            </li>
+        </ul>
     </t-drawer>
 </template>
 
@@ -83,6 +92,7 @@ import { computed, ref, watch, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { downloadArtifact, listMessageArtifacts, type ArtifactMeta } from '@/api/chat'
+import { getFileIcon } from '@/utils/files'
 
 const props = defineProps<{
     visible: boolean
@@ -144,7 +154,6 @@ function handleClose() {
     emit('update:visible', false)
 }
 
-// Format helpers.
 function formatFileSize(size: number): string {
     if (!size || size < 0) return '0 B'
     const units = ['B', 'KB', 'MB', 'GB']
@@ -154,7 +163,6 @@ function formatFileSize(size: number): string {
         s /= 1024
         unit++
     }
-    // Keep one decimal for non-integer units; integers stay integer.
     return unit === 0 ? `${s} ${units[unit]}` : `${s.toFixed(1)} ${units[unit]}`
 }
 
@@ -162,57 +170,8 @@ function formatDateTime(raw: string): string {
     if (!raw) return '—'
     const d = new Date(raw)
     if (Number.isNaN(d.getTime())) return raw
-    // Local time, seconds precision — matches how the rest of the app
-    // renders message timestamps.
     const pad = (n: number) => String(n).padStart(2, '0')
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-function iconForFile(name: string): string {
-    const ext = (name.split('.').pop() || '').toLowerCase()
-    switch (ext) {
-        case 'pptx':
-        case 'ppt':
-            return 'chart-pie'
-        case 'xlsx':
-        case 'xls':
-        case 'csv':
-            return 'file-excel'
-        case 'docx':
-        case 'doc':
-            return 'file-word'
-        case 'pdf':
-            return 'file-pdf'
-        case 'md':
-        case 'markdown':
-            return 'file'
-        case 'html':
-        case 'htm':
-            return 'code-1'
-        case 'json':
-            return 'code-1'
-        case 'png':
-        case 'jpg':
-        case 'jpeg':
-        case 'gif':
-        case 'svg':
-        case 'webp':
-            return 'image'
-        case 'mp3':
-        case 'wav':
-        case 'ogg':
-            return 'sound-up'
-        case 'mp4':
-        case 'mov':
-        case 'webm':
-            return 'video'
-        case 'zip':
-        case 'tar':
-        case 'gz':
-            return 'folder-zip'
-        default:
-            return 'file-attachment'
-    }
 }
 
 async function handleDownload(item: ArtifactMeta) {
@@ -245,6 +204,39 @@ async function handleDownload(item: ArtifactMeta) {
 </script>
 
 <style lang="less" scoped>
+.artifact-drawer-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    width: 100%;
+    padding-right: 32px;
+}
+
+.artifact-drawer-header-icon {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(7, 192, 95, 0.1);
+    color: var(--td-brand-color);
+    font-size: 16px;
+}
+
+.artifact-drawer-header-title {
+    min-width: 0;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .artifact-drawer-empty {
     display: flex;
     flex-direction: column;
@@ -256,52 +248,91 @@ async function handleDownload(item: ArtifactMeta) {
     font-size: 13px;
 }
 
+.artifact-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
 .artifact-item {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 8px 4px;
+    gap: 10px;
+    padding: 10px 4px;
+    border-bottom: 1px solid var(--td-component-stroke);
 
-    .artifact-icon {
-        flex-shrink: 0;
-        width: 36px;
-        height: 36px;
-        border-radius: 8px;
-        background: var(--td-bg-color-container-hover);
-        display: flex;
-        align-items: center;
-        justify-content: center;
+    &:last-child {
+        border-bottom: none;
+    }
+
+    &:hover .artifact-icon {
         color: var(--td-brand-color);
     }
+}
 
-    .artifact-body {
-        flex: 1;
-        min-width: 0;
+.artifact-icon {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-secondary);
+    transition: color 0.15s ease;
+}
+
+.artifact-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.artifact-name {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    line-height: 1.35;
+    color: var(--td-text-color-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.artifact-meta {
+    margin-top: 2px;
+    font-size: 12px;
+    line-height: 1.3;
+    color: var(--td-text-color-placeholder);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.artifact-meta-sep {
+    opacity: 0.6;
+}
+
+.artifact-download {
+    flex-shrink: 0;
+    color: var(--td-text-color-secondary);
+
+    :deep(.t-button__icon) {
+        margin: 0;
+    }
+}
+</style>
+
+<style lang="less">
+.chat-artifacts-drawer.t-drawer {
+    .t-drawer__header {
+        padding: 16px 20px;
+        font-weight: normal;
     }
 
-    .artifact-name {
-        font-size: 14px;
-        color: var(--td-text-color-primary);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-
-    .artifact-meta {
-        margin-top: 2px;
-        font-size: 12px;
-        color: var(--td-text-color-placeholder);
-        display: flex;
-        gap: 4px;
-        align-items: center;
-    }
-
-    .artifact-meta-sep {
-        opacity: 0.6;
-    }
-
-    .artifact-download-label {
-        margin-left: 4px;
+    .t-drawer__body {
+        padding: 4px 20px 16px;
     }
 }
 </style>
