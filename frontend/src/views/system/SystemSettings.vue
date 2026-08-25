@@ -546,6 +546,7 @@ import {
   type SystemSettingItem,
 } from '@/api/system'
 import { useAuthStore } from '@/stores/auth'
+import { fetchAllCrossTenantAccessUsers } from './crossTenantAccessPagination'
 
 const authStore = useAuthStore()
 const currentUserId = computed(() => authStore.currentUserId)
@@ -1340,10 +1341,10 @@ async function onAdminsChange(next: string[]) {
 
 async function loadCrossTenantAccessUsers() {
   try {
-    const resp = await listCrossTenantAccessUsers({ limit: 200 })
+    const users = await fetchAllCrossTenantAccessUsers(listCrossTenantAccessUsers)
     const map: Record<string, string> = {}
     const emails: string[] = []
-    for (const user of resp.users ?? []) {
+    for (const user of users) {
       if (!user.email) continue
       map[user.email] = user.id
       if (user.id !== currentUserId.value) emails.push(user.email)
