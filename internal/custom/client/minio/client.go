@@ -132,6 +132,10 @@ type CompletePart struct {
 	ETag       string `json:"etag"`
 }
 
+// ErrInvalidMultipartParts indicates the client submitted malformed multipart
+// completion metadata before the storage backend was called.
+var ErrInvalidMultipartParts = errors.New("invalid multipart parts")
+
 // PresignPut 生成单次 PUT presigned URL（VP-T001）
 func (c *Client) PresignPut(ctx context.Context, objectKey string, ttl time.Duration) (*PresignResult, error) {
 	if ttl <= 0 {
@@ -229,21 +233,56 @@ func (c *Client) UploadMultipartPart(ctx context.Context, objectKey, uploadID st
 
 // CompleteMultipartUpload 合并分片
 func (c *Client) CompleteMultipartUpload(ctx context.Context, objectKey, uploadID string, parts []CompletePart) error {
-	if c.IsLocal() {
-		return c.completeLocalMultipart(uploadID, objectKey, parts)
+	normalized, err := normalizeMultipartParts(parts)
+	if err != nil {
+		return err
 	}
-	completed := make([]minio.CompletePart, 0, len(parts))
-	for _, p := range parts {
+	if c.IsLocal() {
+		return c.completeLocalMultipart(uploadID, objectKey, normalized)
+	}
+	completed := make([]minio.CompletePart, 0, len(normalized))
+	for _, p := range normalized {
 		completed = append(completed, minio.CompletePart{
 			PartNumber: p.PartNumber,
 			ETag:       p.ETag,
 		})
 	}
-	_, err := c.core.CompleteMultipartUpload(ctx, c.bucket, objectKey, uploadID, completed, minio.PutObjectOptions{})
+	_, err = c.core.CompleteMultipartUpload(ctx, c.bucket, objectKey, uploadID, completed, minio.PutObjectOptions{})
 	if err != nil {
 		return fmt.Errorf("complete multipart: %w", err)
 	}
 	return nil
+}
+
+func normalizeMultipartParts(parts []CompletePart) ([]CompletePart, error) {
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("%w: empty parts", ErrInvalidMultipartParts)
+	}
+
+	seen := make(map[int]struct{}, len(parts))
+	normalized := make([]CompletePart, 0, len(parts))
+	for _, part := range parts {
+		if part.PartNumber <= 0 {
+			return nil, fmt.Errorf("%w: part number must be positive", ErrInvalidMultipartParts)
+		}
+		if _, ok := seen[part.PartNumber]; ok {
+			return nil, fmt.Errorf("%w: duplicate part number %d", ErrInvalidMultipartParts, part.PartNumber)
+		}
+		etag := strings.Trim(strings.TrimSpace(part.ETag), `"`)
+		if etag == "" {
+			return nil, fmt.Errorf("%w: empty etag for part %d", ErrInvalidMultipartParts, part.PartNumber)
+		}
+		seen[part.PartNumber] = struct{}{}
+		normalized = append(normalized, CompletePart{
+			PartNumber: part.PartNumber,
+			ETag:       etag,
+		})
+	}
+
+	sort.Slice(normalized, func(i, j int) bool {
+		return normalized[i].PartNumber < normalized[j].PartNumber
+	})
+	return normalized, nil
 }
 
 // AbortMultipartUpload 取消分片

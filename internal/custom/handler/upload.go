@@ -7,6 +7,7 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -350,6 +351,10 @@ func (h *UploadHandler) MultipartComplete(c *gin.Context) {
 		return
 	}
 	if err := h.MinIO.CompleteMultipartUpload(c.Request.Context(), req.ObjectKey, req.UploadID, req.Parts); err != nil {
+		if errors.Is(err, minio.ErrInvalidMultipartParts) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

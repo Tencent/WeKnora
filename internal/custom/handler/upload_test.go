@@ -47,3 +47,32 @@ func TestMultipartPartUsesSameOriginBackendAndReturnsETag(t *testing.T) {
 		t.Fatal("ETag header is empty")
 	}
 }
+
+func TestMultipartCompleteRejectsInvalidPartsAsBadRequest(t *testing.T) {
+	db := openTestVideoDB(t)
+	router := NewRouter(db, &config.Config{
+		MinIO: config.MinIOConfig{
+			Backend:   "local",
+			LocalDir:  t.TempDir(),
+			PublicURL: "http://127.0.0.1:8090/api/custom/files",
+		},
+	})
+	body := []byte(`{
+		"video_id":"video-1",
+		"object_key":"videos/video-1/source.mp4",
+		"upload_id":"upload-1",
+		"parts":[
+			{"part_number":1,"etag":"etag-1"},
+			{"part_number":1,"etag":"etag-1-retry"}
+		]
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/custom/uploads/multipart/complete", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}

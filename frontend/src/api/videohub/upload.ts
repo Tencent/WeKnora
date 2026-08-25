@@ -2,6 +2,10 @@ import type { UploadForm, VideoData } from '@/types/videohub'
 
 export interface UploadCallbacks { onProgress(percent: number): void }
 export interface UploadCancel { cancelled: boolean }
+export interface MultipartCompletePart {
+  part_number: number
+  etag: string
+}
 interface GeneratedPoster {
   blob: Blob
   durationSeconds: number
@@ -71,7 +75,7 @@ export function uploadVideo(
     // 步骤 2：切片 + 并发上传
     const totalParts = Math.max(1, Math.ceil(file.size / PART_SIZE))
     const uploadedBytes = { count: 0 }
-    const completedParts: { part_number: number; etag: string }[] = []
+    const completedParts = new Map<number, string>()
     // 跟踪 in-flight XHR，用户取消时统一 abort
     const inFlightXhrs: XMLHttpRequest[] = []
 
@@ -101,7 +105,10 @@ export function uploadVideo(
               'X-Part-Number': String(partNumber),
             },
           )
-          completedParts.push({ part_number: partNumber, etag })
+          if (completedParts.has(partNumber)) {
+            throw new Error(`分片 ${partNumber}/${totalParts} 重复上传完成`)
+          }
+          completedParts.set(partNumber, etag)
           uploadedBytes.count += (end - start)
           // 进度映射：2% → 95%（按已上传字节比例推进，每片完成立即触发）
           const pct = 2 + Math.floor((uploadedBytes.count / file.size) * 93)
@@ -130,7 +137,7 @@ export function uploadVideo(
         video_id: init!.video_id,
         object_key: init!.object_key,
         upload_id: init!.upload_id,
-        parts: completedParts,
+        parts: buildMultipartCompleteParts(completedParts, totalParts),
       }),
     })
     if (cancel.cancelled) throw new UploadCancelledError()
@@ -180,6 +187,44 @@ export function uploadVideo(
     }
     throw err
   }) as Promise<VideoData>
+}
+
+export function buildMultipartCompleteParts(
+  completedParts: Map<number, string> | MultipartCompletePart[],
+  totalParts: number,
+): MultipartCompletePart[] {
+  if (!Number.isInteger(totalParts) || totalParts <= 0) {
+    throw new Error('分片总数无效')
+  }
+
+  const byNumber = completedParts instanceof Map
+    ? new Map(completedParts)
+    : completedParts.reduce((acc, part) => {
+        if (acc.has(part.part_number)) {
+          throw new Error(`分片 ${part.part_number} 重复上传完成`)
+        }
+        acc.set(part.part_number, part.etag)
+        return acc
+      }, new Map<number, string>())
+
+  for (const partNumber of byNumber.keys()) {
+    if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > totalParts) {
+      throw new Error(`分片编号无效：${partNumber}`)
+    }
+  }
+
+  if (byNumber.size !== totalParts) {
+    throw new Error(`分片上传未完成：已完成 ${byNumber.size}/${totalParts}`)
+  }
+
+  return Array.from({ length: totalParts }, (_, idx) => {
+    const partNumber = idx + 1
+    const etag = (byNumber.get(partNumber) || '').trim().replace(/^"+|"+$/g, '')
+    if (!etag) {
+      throw new Error(`分片 ${partNumber}/${totalParts} 缺少 ETag`)
+    }
+    return { part_number: partNumber, etag }
+  })
 }
 
 async function uploadVideoPoster(videoId: string, poster: GeneratedPoster): Promise<void> {
