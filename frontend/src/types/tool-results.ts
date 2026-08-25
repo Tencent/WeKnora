@@ -25,7 +25,8 @@ export type DisplayType =
     | 'wiki_write_page'
     | 'wiki_replace_text'
     | 'wiki_rename_page'
-    | 'wiki_delete_page';
+    | 'wiki_delete_page'
+    | 'shell_exec';
 
 // Search result item
 export interface SearchResultItem {
@@ -321,6 +322,22 @@ export interface WikiDeletePageData {
     affected_pages?: string[];
 }
 
+export interface ShellExecData {
+    display_type: 'shell_exec';
+    command?: string;
+    work_dir?: string;
+    exit_code?: number;
+    duration_ms?: number;
+    killed?: boolean;
+    truncated?: boolean;
+    stdout?: string;
+    stderr?: string;
+    stdout_binary?: boolean;
+    stderr_binary?: boolean;
+    stdout_truncated?: boolean;
+    stderr_truncated?: boolean;
+}
+
 // Union type for all wiki edit data
 export type WikiEditData = WikiWritePageData | WikiReplaceTextData | WikiRenamePageData | WikiDeletePageData;
 
@@ -342,7 +359,8 @@ export type ToolResultData =
     | WikiWritePageData
     | WikiReplaceTextData
     | WikiRenamePageData
-    | WikiDeletePageData;
+    | WikiDeletePageData
+    | ShellExecData;
 
 // Action data (from index.vue)
 export interface ActionData {

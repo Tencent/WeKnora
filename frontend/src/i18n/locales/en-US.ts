@@ -5156,9 +5156,20 @@ export default {
       queryKnowledgeGraph: 'Knowledge Graph Query',
       readSkill: 'Read Skill',
       executeSkillScript: 'Execute Skill Script',
+      shellExec: 'Run sandbox command',
       dataAnalysis: 'Data Analysis',
       dataSchema: 'Data Schema',
       databaseQuery: 'Database Query'
+    },
+    shellExec: {
+      workDir: 'Directory',
+      exitCode: 'Exit code',
+      stdout: 'Stdout',
+      stderr: 'Stderr',
+      emptyOutput: 'No output',
+      truncated: 'Output truncated',
+      killed: 'Timed out',
+      binarySuppressed: 'Binary output omitted. Write files to the artifact directory to download them.'
     },
     citation: {
       notFound: 'Content not found',
@@ -5236,7 +5247,8 @@ export default {
       queryUnderstanding: 'Understanding query...',
       queryUnderstandDone: 'Query understood',
       called: 'Called {name}',
-      calledFailed: 'Failed to call {name}'
+      calledFailed: 'Failed to call {name}',
+      shellExecRunning: 'Running sandbox command...'
     },
     copy: {
       emptyContent: 'Current response is empty, cannot copy',

@@ -1236,7 +1236,8 @@ export default {
       queryUnderstanding: 'Анализ запроса...',
       queryUnderstandDone: 'Запрос понят',
       called: 'Вызван {name}',
-      calledFailed: 'Ошибка вызова {name}'
+      calledFailed: 'Ошибка вызова {name}',
+      shellExecRunning: 'Выполнение команды в песочнице...'
     },
     ragPipeline: {
       searching: 'Поиск в базе знаний...',
@@ -1307,9 +1308,20 @@ export default {
       queryKnowledgeGraph: 'Запрос графа знаний',
       readSkill: 'Чтение навыка',
       executeSkillScript: 'Выполнение скрипта навыка',
+      shellExec: 'Выполнение команды в песочнице',
       dataAnalysis: 'Анализ данных',
       dataSchema: 'Структура данных',
       databaseQuery: 'Запрос к базе данных'
+    },
+    shellExec: {
+      workDir: 'Каталог',
+      exitCode: 'Код выхода',
+      stdout: 'Stdout',
+      stderr: 'Stderr',
+      emptyOutput: 'Нет вывода',
+      truncated: 'Вывод обрезан',
+      killed: 'Прервано по таймауту',
+      binarySuppressed: 'Двоичный вывод опущен. Сохраните файлы в каталог артефактов и скачайте их.'
     },
     mcpOAuth: {
       waiting: 'Ожидание авторизации · {target}',

@@ -1236,7 +1236,8 @@ export default {
       queryUnderstanding: '질문 이해 중...',
       queryUnderstandDone: '질문 이해 완료',
       called: '{name} 호출 완료',
-      calledFailed: '{name} 호출 실패'
+      calledFailed: '{name} 호출 실패',
+      shellExecRunning: '샌드박스 명령 실행 중...'
     },
     ragPipeline: {
       searching: '지식베이스 검색 중...',
@@ -1307,9 +1308,20 @@ export default {
       queryKnowledgeGraph: '지식 그래프 조회',
       readSkill: '스킬 읽기',
       executeSkillScript: '스킬 스크립트 실행',
+      shellExec: '샌드박스 명령 실행',
       dataAnalysis: '데이터 분석',
       dataSchema: '데이터 구조',
       databaseQuery: '데이터베이스 조회'
+    },
+    shellExec: {
+      workDir: '디렉터리',
+      exitCode: '종료 코드',
+      stdout: '표준 출력',
+      stderr: '표준 에러',
+      emptyOutput: '출력 없음',
+      truncated: '출력이 잘림',
+      killed: '시간 초과로 종료됨',
+      binarySuppressed: '바이너리 출력은 생략되었습니다. 파일은 산출물 디렉터리에 저장한 뒤 다운로드하세요.'
     },
     mcpOAuth: {
       waiting: '인증 대기 · {target}',
