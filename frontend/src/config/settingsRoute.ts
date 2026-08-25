@@ -2,7 +2,7 @@ import { INTEGRATION_TABS, type IntegrationTab } from './integrations'
 
 export const INTEGRATION_SECTION_PREFIX = 'integration-'
 
-type QueryValue = string | number | boolean | null | undefined | Array<string | number | boolean | null>
+type QueryValue = string | number | null | undefined | Array<string | number | null>
 export type SettingsRouteQuery = Record<string, QueryValue>
 
 export function integrationSectionKey(tab: IntegrationTab): string {

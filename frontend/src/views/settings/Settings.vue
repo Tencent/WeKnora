@@ -214,6 +214,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import type { LocationQueryRaw } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
@@ -312,7 +313,7 @@ const syncSettingsRoute = (sectionKey: string) => {
   if (settingsQueryUnchanged(route.query, query)) return
   void router.replace({
     path: '/platform/settings',
-    query,
+    query: query as LocationQueryRaw,
   })
 }
 
