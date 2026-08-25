@@ -331,6 +331,9 @@ func TestInstallSkillSkipsWhenReadyWithTheSameArchive(t *testing.T) {
 	require.Empty(t, fx.sessionCalls, "the same bytes must not boot a billed sandbox")
 	require.NotContains(t, fx.events, "create-snapshot")
 	require.Nil(t, fx.configRepo.saved, "the image pointer must stay where it is")
+	require.Equal(t, 1, fx.savedBundles,
+		"a no-op re-upload must still refresh the stored archive for read_skill")
+	require.Equal(t, "file://bundle.zip", skill.BundleRef)
 }
 
 func TestInstallSkillRetriesAFailedSkillWithTheSameArchive(t *testing.T) {
@@ -391,10 +394,11 @@ func TestInstallSkillSkipsAnInFlightInstallOfTheSameArchive(t *testing.T) {
 	})
 	bundle, err := ParseSkillBundle(archive)
 	require.NoError(t, err)
+	started := time.Date(2026, 8, 19, 9, 30, 0, 0, time.UTC)
 	require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), &types.TenantSkillEntity{
 		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
 		Name: bundle.Name, BundleSHA256: bundle.SHA256,
-		Status: types.SkillStatusInstalling,
+		Status: types.SkillStatusInstalling, InstallingSince: &started,
 	}))
 
 	id, err := fx.svc.InstallSkill(context.Background(), 7, "cfg-1", archive)
@@ -403,6 +407,95 @@ func TestInstallSkillSkipsAnInFlightInstallOfTheSameArchive(t *testing.T) {
 	require.Equal(t, "sk-1", id)
 	require.Empty(t, fx.sessionCalls,
 		"a second upload of the same bytes must not start another billed run")
+}
+
+func TestInstallSkillRetriesAStaleInFlightInstallOfTheSameArchive(t *testing.T) {
+	fx := newInstallFixture(t)
+	archive := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('hi')\n",
+	})
+	bundle, err := ParseSkillBundle(archive)
+	require.NoError(t, err)
+	stale := time.Date(2026, 8, 19, 9, 30, 0, 0, time.UTC).Add(-3 * time.Minute)
+	require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), &types.TenantSkillEntity{
+		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		Name: bundle.Name, BundleSHA256: bundle.SHA256,
+		Status: types.SkillStatusInstalling, InstallingSince: &stale,
+		Error: "the previous process is gone",
+	}))
+
+	id, err := fx.svc.InstallSkill(context.Background(), 7, "cfg-1", archive)
+
+	require.NoError(t, err)
+	require.Equal(t, "sk-1", id)
+	skill, getErr := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, getErr)
+	require.Equal(t, types.SkillStatusInstalling, skill.Status)
+	require.NotNil(t, skill.InstallingSince)
+	require.Equal(t, time.Date(2026, 8, 19, 9, 30, 0, 0, time.UTC), *skill.InstallingSince,
+		"a dead in-flight row must be allowed to start a new run, not wait for the reaper")
+	require.Empty(t, skill.Error)
+}
+
+func TestInstallSkillDoesNotSkipARemovalOfTheSameArchive(t *testing.T) {
+	fx := newInstallFixture(t)
+	archive := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('hi')\n",
+	})
+	bundle, err := ParseSkillBundle(archive)
+	require.NoError(t, err)
+	require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), &types.TenantSkillEntity{
+		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		Name: bundle.Name, BundleSHA256: bundle.SHA256,
+		Status: types.SkillStatusRemoving,
+	}))
+
+	id, err := fx.svc.InstallSkill(context.Background(), 7, "cfg-1", archive)
+
+	require.NoError(t, err)
+	require.Equal(t, "sk-1", id)
+	skill, getErr := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, getErr)
+	require.Equal(t, types.SkillStatusInstalling, skill.Status,
+		"re-uploading during a removal is how the upload cancels it")
+}
+
+func TestInstallSkillSkipRefusesToPretendSuccessWhenBundleCannotBeStored(t *testing.T) {
+	fx := newInstallFixture(t)
+	archive := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('hi')\n",
+	})
+	bundle, err := ParseSkillBundle(archive)
+	require.NoError(t, err)
+	fx.seedReadySkillWithSHA(bundle.SHA256, "snap-live")
+	fx.saveErr = errors.New("object store down")
+
+	_, err = fx.svc.InstallSkill(context.Background(), 7, "cfg-1", archive)
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "store bundle")
+	skill, getErr := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, getErr)
+	require.Equal(t, types.SkillStatusReady, skill.Status,
+		"a storage failure on a no-op re-upload must not flip a serving skill to failed")
+	require.Empty(t, fx.sessionCalls)
+}
+
+func TestRunInstallAbortsWhenTheSameArchiveIsAlreadyServing(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.seedReadySkillWithSHA(fx.bundle.SHA256, "snap-live")
+
+	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
+
+	require.NotContains(t, fx.events, "create-snapshot",
+		"a sibling retry that lost the race to the first run must not grow another snapshot")
+	require.Nil(t, fx.configRepo.saved)
+	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.Equal(t, types.SkillStatusReady, skill.Status)
 }
 
 func TestRunInstallAbortsWhenANewerBundleOwnsTheRow(t *testing.T) {
@@ -907,7 +1000,8 @@ type installFixture struct {
 	engineModel     chat.Chat
 	// saveErr fails bundle storage so InstallSkill cannot accept a skill
 	// whose archive will later be unreadable.
-	saveErr error
+	saveErr      error
+	savedBundles int
 }
 
 func newInstallFixture(t *testing.T) *installFixture {
@@ -1852,8 +1946,11 @@ func (installFileService) SaveFile(context.Context, *multipart.FileHeader, uint6
 }
 
 func (s installFileService) SaveBytes(context.Context, []byte, uint64, string, bool) (string, error) {
-	if s.fx != nil && s.fx.saveErr != nil {
-		return "", s.fx.saveErr
+	if s.fx != nil {
+		s.fx.savedBundles++
+		if s.fx.saveErr != nil {
+			return "", s.fx.saveErr
+		}
 	}
 	return "file://bundle.zip", nil
 }

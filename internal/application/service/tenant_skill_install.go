@@ -63,6 +63,9 @@ func (s *TenantSkillService) InstallSkill(
 		return "", err
 	}
 	if s.canSkipInstall(ctx, existing, bundle) {
+		if err := s.refreshSkippedBundle(ctx, existing, archive); err != nil {
+			return "", fmt.Errorf("store bundle for skill %s: %w", existing.ID, err)
+		}
 		return existing.ID, nil
 	}
 
@@ -855,9 +858,10 @@ func (s *TenantSkillService) failSkill(
 // installStillOwnsTheRow is the lock-side counterpart of InstallSkill's
 // optimistic row write. A remove that ran first deleted the row; a newer
 // upload of the same name replaced BundleSHA256; a queued remove flipped the
-// status. Any of those means this run must not snapshot — failSkill would
-// stamp the newer owner's row, and a snapshot with no matching row is an
-// orphan the ledger cannot name.
+// status; a sibling retry of the same archive found the first run had already
+// landed in the live image. Any of those means this run must not snapshot —
+// failSkill would stamp the newer owner's row, and a snapshot with no matching
+// row is an orphan the ledger cannot name.
 func (s *TenantSkillService) installStillOwnsTheRow(
 	ctx context.Context, tenantID uint64, configID, skillID string, bundle *SkillBundle,
 ) (bool, error) {
@@ -874,17 +878,27 @@ func (s *TenantSkillService) installStillOwnsTheRow(
 	if bundle != nil && current.BundleSHA256 != "" && current.BundleSHA256 != bundle.SHA256 {
 		return false, nil
 	}
+	if current.Status == types.SkillStatusReady {
+		_, inImage, ok := s.skillFilesInLiveImage(ctx, current)
+		if ok && inImage {
+			return false, nil
+		}
+	}
 	return true, nil
 }
 
 // canSkipInstall reports whether this upload is a no-op. Re-uploading the
 // exact archive of a skill that is already ready (and still in the live image)
-// must not boot a billed sandbox or grow a new snapshot. An in-flight install
-// of the same bytes is the same situation: the first run owns the work.
+// must not boot a billed sandbox or grow a new snapshot. A very recent
+// in-flight install of the same bytes is the same situation: the first run
+// owns the work.
 //
-// A failed skill with the same digest is a retry, not a skip: the previous
-// attempt never made it into the image. A removal in flight is not a skip
-// either — taking the row back to installing is how an upload cancels it.
+// An installing row whose InstallingSince is older than
+// skillInstallInFlightSkip is a retry, not a skip — that is how a re-upload
+// recovers a process that died before the reaper runs. A failed skill with
+// the same digest is a retry for the same reason: the previous attempt never
+// made it into the image. A removal in flight is not a skip either — taking
+// the row back to installing is how an upload cancels it.
 func (s *TenantSkillService) canSkipInstall(
 	ctx context.Context, existing *types.TenantSkillEntity, bundle *SkillBundle,
 ) bool {
@@ -896,13 +910,49 @@ func (s *TenantSkillService) canSkipInstall(
 	}
 	switch existing.Status {
 	case types.SkillStatusInstalling:
-		return true
+		return s.installIsInFlight(existing)
 	case types.SkillStatusReady:
 		_, inImage, ok := s.skillFilesInLiveImage(ctx, existing)
 		return ok && inImage
 	default:
 		return false
 	}
+}
+
+// installIsInFlight reports whether an installing row is still the duplicate
+// of a run that started moments ago. A missing timestamp, or one older than
+// the skip window, is a dead process: the next upload must be allowed to
+// start a new billed run rather than wait for the stuck-run reaper.
+func (s *TenantSkillService) installIsInFlight(existing *types.TenantSkillEntity) bool {
+	if existing == nil || existing.InstallingSince == nil {
+		return false
+	}
+	now := time.Now
+	if s != nil && s.now != nil {
+		now = s.now
+	}
+	return !existing.InstallingSince.Before(now().Add(-skillInstallInFlightSkip))
+}
+
+// refreshSkippedBundle stores the uploaded archive even when the image work
+// is skipped. read_skill serves file contents from it, so a re-upload of a
+// ready skill is how a missing object-store blob gets repaired without
+// growing a new snapshot. A failure here is returned to the caller rather
+// than turning the ready row into a failed install.
+func (s *TenantSkillService) refreshSkippedBundle(
+	ctx context.Context, existing *types.TenantSkillEntity, archive []byte,
+) error {
+	if existing == nil {
+		return nil
+	}
+	ref, err := s.saveBundle(ctx, existing.TenantID, existing.ID, archive)
+	if err != nil {
+		return err
+	}
+	return s.updateSkillFields(ctx, existing.TenantID, existing.SandboxConfigID, existing.ID,
+		func(e *types.TenantSkillEntity) {
+			e.BundleRef = ref
+		})
 }
 
 // startMaintenanceSession opens the session one image operation runs in. The

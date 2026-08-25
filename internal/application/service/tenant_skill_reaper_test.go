@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -301,6 +302,94 @@ func TestPruneSupersededSnapshotsNeverDeletesUnknownProviderSnapshots(t *testing
 		"a snapshot the ledger does not name belongs to another environment")
 }
 
+func TestPruneSupersededSnapshotsDeletesStaleActiveLeftovers(t *testing.T) {
+	fx := newReaperFixture(t)
+	fx.svc.snapshotRetention = time.Hour
+	old := fx.now.Add(-2 * time.Hour)
+	fx.live("snap-live")
+	fx.installed("sk-2", "snap-live", "snap-old")
+	fx.skills.snapshots = append(fx.skills.snapshots, &types.TenantSkillSnapshotEntity{
+		ID: "row-snap-old", TenantID: 7, SandboxConfigID: "cfg-1", SkillID: "sk-1",
+		SnapshotID: "snap-old", Trigger: types.SkillSnapshotTriggerInstall,
+		State: types.SkillSnapshotStateActive, CreatedAt: old, UpdatedAt: old,
+	})
+
+	n, err := fx.svc.PruneSupersededSnapshots(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	require.Equal(t, []string{"snap-old"}, fx.provider.deleted,
+		"a pointer switch that never marked the previous row superseded still leaves a billed snapshot")
+	rows, err := fx.skills.ListSnapshotsByConfig(context.Background(), 7, "cfg-1")
+	require.NoError(t, err)
+	states := map[string]string{}
+	for _, row := range rows {
+		states[row.SnapshotID] = row.State
+	}
+	require.Equal(t, types.SkillSnapshotStateDeleted, states["snap-old"])
+	require.Equal(t, types.SkillSnapshotStateActive, states["snap-live"])
+}
+
+func TestPruneSupersededSnapshotsLeavesTheRowWhenDeleteFails(t *testing.T) {
+	fx := newReaperFixture(t)
+	fx.svc.snapshotRetention = time.Hour
+	old := fx.now.Add(-2 * time.Hour)
+	fx.live("snap-live")
+	fx.superseded("sk-1", "snap-old", "", old)
+	fx.provider.deleteErr = errors.New("provider down")
+
+	n, err := fx.svc.PruneSupersededSnapshots(context.Background())
+
+	require.NoError(t, err)
+	require.Zero(t, n)
+	require.Empty(t, fx.provider.deleted)
+	rows, err := fx.skills.ListSnapshotsByConfig(context.Background(), 7, "cfg-1")
+	require.NoError(t, err)
+	require.Equal(t, types.SkillSnapshotStateSuperseded, rows[0].State,
+		"a failed provider delete must not be recorded as deleted")
+}
+
+func TestPruneSupersededSnapshotsTreatsMissingProviderSnapshotAsDeleted(t *testing.T) {
+	fx := newReaperFixture(t)
+	fx.svc.snapshotRetention = time.Hour
+	old := fx.now.Add(-2 * time.Hour)
+	fx.live("snap-live")
+	fx.superseded("sk-1", "snap-old", "", old)
+	fx.provider.deleteErr = &sandbox.RemoteError{
+		Kind: sandbox.RemoteErrorKindNotFound, Op: "DeleteSnapshot",
+	}
+
+	n, err := fx.svc.PruneSupersededSnapshots(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	rows, err := fx.skills.ListSnapshotsByConfig(context.Background(), 7, "cfg-1")
+	require.NoError(t, err)
+	require.Equal(t, types.SkillSnapshotStateDeleted, rows[0].State,
+		"a snapshot the provider already dropped is gone; the ledger must catch up")
+}
+
+func TestPruneSupersededSnapshotsHonoursALongerConfiguredSandboxTTL(t *testing.T) {
+	fx := newReaperFixture(t)
+	fx.svc.snapshotRetention = time.Hour
+	fx.configs.entity.Config.E2B = &types.E2BSandboxConfig{
+		E2BSandboxTTLSeconds: int((48 * time.Hour).Seconds()),
+	}
+	young := fx.now.Add(-25 * time.Hour)
+	old := fx.now.Add(-50 * time.Hour)
+	fx.live("snap-live")
+	fx.superseded("sk-1", "snap-young", "", young)
+	fx.superseded("sk-2", "snap-old", "snap-young", old)
+	fx.installed("sk-3", "snap-live", "snap-old")
+
+	n, err := fx.svc.PruneSupersededSnapshots(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	require.Equal(t, []string{"snap-old"}, fx.provider.deleted,
+		"a config whose sandbox TTL exceeds the floor must keep templates that young")
+}
+
 func TestTenantSkillServiceStartIsIdempotent(t *testing.T) {
 	svc := NewTenantSkillService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
@@ -555,6 +644,7 @@ type reaperSnapshotProvider struct {
 	listed    []sandbox.RemoteSnapshotRef
 	listCalls []string
 	deleted   []string
+	deleteErr error
 }
 
 func (p *reaperSnapshotProvider) ListSnapshots(
@@ -565,6 +655,9 @@ func (p *reaperSnapshotProvider) ListSnapshots(
 }
 
 func (p *reaperSnapshotProvider) DeleteSnapshot(_ context.Context, snapshotID string) error {
+	if p.deleteErr != nil {
+		return p.deleteErr
+	}
 	p.deleted = append(p.deleted, snapshotID)
 	return nil
 }

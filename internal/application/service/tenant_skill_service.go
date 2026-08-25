@@ -23,12 +23,24 @@ const (
 	skillImageLockRenew  = 10 * time.Second
 	skillInstallStuckTTL = 60 * time.Minute
 
+	// skillInstallInFlightSkip is how long a second upload of the same
+	// archive is treated as a duplicate of a run that already owns the row.
+	// Concurrent retries land in seconds; a process that died minutes ago
+	// must be allowed to start again instead of waiting for the reaper.
+	skillInstallInFlightSkip = 2 * time.Minute
+
 	// skillSnapshotRetention is how long a superseded snapshot stays on the
 	// provider after the pointer has moved. Live sandboxes may still have
 	// been created from it (especially SkillRolloutNewSession); once they
 	// expire, the template is only a billed leftover. Twenty-four hours is
-	// well past every backend's default sandbox TTL.
+	// well past every backend's default sandbox TTL. A config that sets a
+	// longer sandbox TTL extends this via snapshotRetentionFor.
 	skillSnapshotRetention = 24 * time.Hour
+
+	// skillSnapshotTTLMargin is added on top of a config's own sandbox TTL
+	// so an in-flight create that resolved the previous pointer still has
+	// a template to boot from.
+	skillSnapshotTTLMargin = time.Hour
 )
 
 // TenantSkillService owns the skill image lifecycle for sandbox configs.

@@ -17,7 +17,7 @@ const (
 
 // Snapshot ledger states. deleted is written only after a real provider-side
 // delete: either the whole sandbox config is removed, or the reaper has
-// pruned a superseded snapshot past its retention window.
+// pruned a retired snapshot past its retention window.
 const (
 	SkillSnapshotStateBuilding   = "building"
 	SkillSnapshotStateActive     = "active"

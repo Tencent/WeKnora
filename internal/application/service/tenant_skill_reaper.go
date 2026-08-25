@@ -380,14 +380,48 @@ func (s *TenantSkillService) snapshotRetentionWindow() time.Duration {
 	return skillSnapshotRetention
 }
 
+// snapshotRetentionFor is how long this config's retired snapshots stay on
+// the provider. The floor is snapshotRetentionWindow; a config that asked
+// for a sandbox TTL longer than that keeps the previous template at least
+// that long plus a margin, so a session created from it can still exist.
+func (s *TenantSkillService) snapshotRetentionFor(cfg *types.TenantSandboxConfigEntity) time.Duration {
+	window := s.snapshotRetentionWindow()
+	ttl := time.Duration(0)
+	if cfg != nil && cfg.Config != nil {
+		ttl = configuredSandboxTTL(cfg.Config)
+	}
+	if needed := ttl + skillSnapshotTTLMargin; needed > window {
+		return needed
+	}
+	return window
+}
+
+func configuredSandboxTTL(cfg *types.TenantSandboxConfig) time.Duration {
+	if cfg == nil {
+		return 0
+	}
+	seconds := 0
+	if cfg.Cube != nil && cfg.Cube.CubeSandboxTTLSeconds > seconds {
+		seconds = cfg.Cube.CubeSandboxTTLSeconds
+	}
+	if cfg.E2B != nil && cfg.E2B.E2BSandboxTTLSeconds > seconds {
+		seconds = cfg.E2B.E2BSandboxTTLSeconds
+	}
+	if seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 // PruneSupersededSnapshots deletes provider snapshots the ledger has already
-// retired, once they are older than snapshotRetention. The current image is
-// never touched, nor is anything the ledger does not name: extras belong to
-// other environments on a shared provider account.
+// retired, once they are older than this config's retention. The current
+// image is never touched, nor is anything the ledger does not name: extras
+// belong to other environments on a shared provider account.
 //
 // A live sandbox does not need the template it was created from in order to
 // keep running, so the only reason to wait is in-flight creates that resolved
-// the previous pointer. Twenty-four hours is far past every backend TTL.
+// the previous pointer. Twenty-four hours is far past every backend's default
+// TTL; a config that sets a longer one extends the wait.
 func (s *TenantSkillService) PruneSupersededSnapshots(ctx context.Context) (int, error) {
 	if s == nil || s.skills == nil {
 		return 0, nil
@@ -400,12 +434,16 @@ func (s *TenantSkillService) PruneSupersededSnapshots(ctx context.Context) (int,
 	if err != nil {
 		return 0, err
 	}
-	cutoff := s.now().Add(-s.snapshotRetentionWindow())
+	now := s.now
+	if now == nil {
+		now = time.Now
+	}
 	pruned := 0
 	for _, cfg := range configs {
 		if cfg == nil || types.IsSandboxWorkspacePolicyRow(cfg) {
 			continue
 		}
+		cutoff := now().Add(-s.snapshotRetentionFor(cfg))
 		n, err := s.pruneConfigSnapshots(ctx, cfg, cutoff)
 		if err != nil {
 			logger.Warnf(ctx, "[skill] prune superseded snapshots of config %s failed: %v",
@@ -458,20 +496,44 @@ func (s *TenantSkillService) pruneConfigSnapshots(
 // snapshotEligibleForPrune is the ledger-side gate. The provider delete is
 // what costs money; this is what keeps it from touching the live image or a
 // snapshot another environment created on the same account.
+//
+// Superseded rows are the normal case. Active rows that are not the live
+// pointer are the crash window between switchImagePointer and
+// markPreviousSnapshotsSuperseded: they are billed leftovers too, aged from
+// UpdatedAt / CreatedAt because they never got a SupersededAt.
 func snapshotEligibleForPrune(
 	row *types.TenantSkillSnapshotEntity, liveSnapshotID string, cutoff time.Time,
 ) bool {
-	if row == nil || row.State != types.SkillSnapshotStateSuperseded {
+	if row == nil {
 		return false
 	}
 	id := strings.TrimSpace(row.SnapshotID)
 	if id == "" || id == strings.TrimSpace(liveSnapshotID) {
 		return false
 	}
-	if row.SupersededAt == nil || row.SupersededAt.After(cutoff) || row.SupersededAt.Equal(cutoff) {
+	switch row.State {
+	case types.SkillSnapshotStateSuperseded, types.SkillSnapshotStateActive:
+	default:
 		return false
 	}
-	return true
+	aged := snapshotPruneAge(row)
+	return aged != nil && aged.Before(cutoff)
+}
+
+func snapshotPruneAge(row *types.TenantSkillSnapshotEntity) *time.Time {
+	if row == nil {
+		return nil
+	}
+	if row.State == types.SkillSnapshotStateSuperseded && row.SupersededAt != nil {
+		return row.SupersededAt
+	}
+	if !row.UpdatedAt.IsZero() {
+		return &row.UpdatedAt
+	}
+	if !row.CreatedAt.IsZero() {
+		return &row.CreatedAt
+	}
+	return nil
 }
 
 func (s *TenantSkillService) reconcileAllSnapshots(ctx context.Context) {
