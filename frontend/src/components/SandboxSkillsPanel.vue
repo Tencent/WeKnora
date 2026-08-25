@@ -391,7 +391,10 @@ const deleteHint = computed(() =>
 )
 const runtimeTemplateId = computed(() => {
   const cfg = props.record?.config
-  return cfg?.cube?.template_id?.trim() || cfg?.e2b?.template_id?.trim() || ''
+  return cfg?.cube?.template_id?.trim()
+    || cfg?.e2b?.template_id?.trim()
+    || cfg?.docker?.image?.trim()
+    || ''
 })
 const hasSkillSnapshot = computed(() => Boolean(skillImage.value?.snapshot_id?.trim()))
 

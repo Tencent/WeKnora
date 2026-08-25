@@ -532,10 +532,9 @@ const wizardSteps = computed<Array<{ key: SandboxStepKey; title: string }>>(() =
     steps.push({ key: 'template', title: t('settings.sandbox.stepTemplate') })
   }
   steps.push({ key: 'runtime', title: t('settings.sandbox.stepRuntime') })
-  // Skills are baked into the config's snapshot image, which only the remote
-  // backends have. Docker and local configs therefore end at runtime rather
-  // than showing a step that could never do anything.
-  if (isRemoteBackend.value) {
+  // Skills are baked into the config's snapshot image. Local configs end
+  // at runtime rather than showing a step that could never do anything.
+  if (isRemoteBackend.value || backend.value === 'docker') {
     steps.push({ key: 'skills', title: t('settings.sandbox.stepSkills') })
   }
   return steps

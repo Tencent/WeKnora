@@ -68,6 +68,16 @@ type dockerEngineAPI interface {
 	) (client.ImageInspectResult, error)
 	ImagePull(ctx context.Context, refStr string, options client.ImagePullOptions) (client.ImagePullResponse, error)
 	ImageList(ctx context.Context, options client.ImageListOptions) (client.ImageListResult, error)
+	ImageRemove(
+		ctx context.Context, imageID string, options client.ImageRemoveOptions,
+	) (client.ImageRemoveResult, error)
+
+	// ContainerCommit is a long call (a large skill image can take well
+	// over the short RPC budget), so the timeout wrapper leaves it on the
+	// caller's context the way it does ImagePull.
+	ContainerCommit(
+		ctx context.Context, containerID string, options client.ContainerCommitOptions,
+	) (client.ContainerCommitResult, error)
 }
 
 var _ dockerEngineAPI = (*client.Client)(nil)

@@ -568,3 +568,119 @@ func runDockerScriptWithTimeout(
 		result.ExitCode, result.Killed, result.Stdout, result.Stderr, result.Error)
 	return result
 }
+
+func TestDockerSkillSnapshotIntegration(t *testing.T) {
+	cfg := dockerIntegrationConfig(t)
+	client, err := NewDockerRemoteClient(cfg)
+	if err != nil {
+		t.Fatalf("build docker client: %v", err)
+	}
+	probeCtx, cancelProbe := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancelProbe()
+	if err := client.Health(probeCtx); err != nil {
+		t.Skipf("docker daemon unreachable: %v", err)
+	}
+	if !client.Capabilities().SupportsSnapshots {
+		t.Fatal("docker backend must advertise snapshot support")
+	}
+
+	ctx, cancel := context.WithTimeout(
+		types.WithSandboxTenantID(context.Background(), dockerIntegrationTenantID),
+		5*time.Minute,
+	)
+	defer cancel()
+
+	builder, err := client.Create(ctx, RemoteCreateRequest{
+		TemplateID: cfg.DockerImage,
+		Metadata:   map[string]string{"weknora.test": "skill-snapshot"},
+	})
+	if err != nil {
+		t.Fatalf("Create builder: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cleanupCancel()
+		_ = client.Delete(cleanupCtx, builder.ID())
+	})
+
+	skillDir := SkillsImageRoot + "/itest"
+	skillFile := skillDir + "/SKILL.md"
+	seed, err := client.Exec(ctx, builder, RemoteExecRequest{
+		Command: fmt.Sprintf(
+			"mkdir -p %s && echo skill-ok > %s && chown %s:%s %s %s",
+			skillDir, skillFile, DefaultSandboxExecUser, DefaultSandboxExecUser,
+			SkillsImageRoot, skillDir,
+		),
+		Shell:   true,
+		User:    "root",
+		Timeout: time.Minute,
+	})
+	if err != nil || seed == nil || seed.ExitCode != 0 {
+		t.Fatalf("seed skill tree: err=%v result=%#v", err, seed)
+	}
+
+	ref, err := client.CreateSnapshot(ctx, builder.ID(), "weknora-sk-itest-g1")
+	if err != nil {
+		t.Fatalf("CreateSnapshot: %v", err)
+	}
+	if ref.ID == "" {
+		t.Fatal("CreateSnapshot returned an empty id")
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cleanupCancel()
+		_ = client.DeleteSnapshot(cleanupCtx, ref.ID)
+	})
+
+	if err := client.Delete(ctx, builder.ID()); err != nil {
+		t.Fatalf("Delete builder: %v", err)
+	}
+
+	booted, err := client.Create(ctx, RemoteCreateRequest{
+		TemplateID: ref.ID,
+		Metadata:   map[string]string{"weknora.test": "skill-snapshot-boot"},
+	})
+	if err != nil {
+		t.Fatalf("Create from snapshot: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cleanupCancel()
+		_ = client.Delete(cleanupCtx, booted.ID())
+	})
+
+	check, err := client.Exec(ctx, booted, RemoteExecRequest{
+		Command: "cat " + skillFile,
+		Shell:   true,
+		User:    DefaultSandboxExecUser,
+		Timeout: 30 * time.Second,
+	})
+	if err != nil || check == nil || check.ExitCode != 0 || !strings.Contains(check.Stdout, "skill-ok") {
+		t.Fatalf("snapshot did not carry the skill: err=%v result=%#v", err, check)
+	}
+
+	listed, err := client.ListSnapshots(ctx, "")
+	if err != nil {
+		t.Fatalf("ListSnapshots: %v", err)
+	}
+	found := false
+	for _, item := range listed {
+		if item.ID == ref.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("ListSnapshots missing %s: %#v", ref.ID, listed)
+	}
+
+	templates, err := client.ListTemplates(ctx)
+	if err != nil {
+		t.Fatalf("ListTemplates: %v", err)
+	}
+	for _, item := range templates {
+		if dockerCanonicalSnapshotID(item.ID) == ref.ID {
+			t.Fatalf("skill snapshot %s leaked into the template catalog", ref.ID)
+		}
+	}
+}

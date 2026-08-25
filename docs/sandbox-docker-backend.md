@@ -159,10 +159,14 @@ WeKnora 自己跑在容器里时，要把 **实际的** docker socket 挂进 app
 
 ## 快照
 
-「空间级管理沙箱装 skill → commit 成快照 → 会话从快照起容器 → 增量出下一版」这套流程在 Docker 上
-是原生形态（容器 → 镜像），[PoC](./poc/docker-sandbox) 已经验证：commit 一个 140 MB 镜像约
-0.5–1.0 秒，从快照冷启一个容器约 0.2 秒，v1→v2 增量正常。两个要注意的约束：镜像层上限 127，
-长期增量要定期压平；快照是本机资产，多机部署必须推到 registry。这部分按计划在单独分支实现。
+「空间级管理沙箱装 skill → commit 成快照 → 会话从快照起容器 → 增量出下一版」这套流程已经接入：
+`DockerRemoteClient` 实现 `RemoteSnapshotManager`，`docker commit` 打出带
+`com.weknora.sandbox.skill-snapshot` 标签的本地镜像（命名空间 `weknora-skill/`），
+会话启动时用该镜像覆盖配置里的基础 image。安装器用 root `shell_exec` 写
+`/opt/weknora/tenant/skills`，与 Cube / E2B 同一条技能安装链路。
+
+两个要注意的约束：镜像层上限 127，长期增量要定期压平；快照是本机资产，多机部署必须推到 registry。
+压平和跨 daemon 分发还不在这条路径里。
 
 ## 测试
 

@@ -101,10 +101,27 @@ func TestEffectiveTenantSkillsInjectsNothingWhenTheFingerprintDisagrees(t *testi
 
 func TestEffectiveTenantSkillsInjectsNothingWhenTheBackendCannotSnapshot(t *testing.T) {
 	fx := newEffectiveFixture(t)
-	fx.configs.entity.SandboxType = "docker"
-	fx.configs.entity.Config.SandboxType = "docker"
+	fx.configs.entity.SandboxType = "local"
+	fx.configs.entity.Config.SandboxType = "local"
 
 	require.Empty(t, fx.derive(context.Background()))
+}
+
+func TestEffectiveTenantSkillsInjectsReadySkillsOnDocker(t *testing.T) {
+	fx := newEffectiveFixture(t)
+	host := "unix:///var/run/docker.sock"
+	fx.configs.entity.SandboxType = "docker"
+	fx.configs.entity.Config.SandboxType = "docker"
+	fx.configs.entity.Config.E2B = nil
+	fx.configs.entity.Config.Docker = &types.DockerSandboxConfig{Image: "weknora/sandbox:base", Host: host}
+	fx.configs.entity.Config.SkillImage = &types.SkillImageConfig{
+		SnapshotID:       "weknora-skill/weknora-sk-cfg1-g1",
+		Generation:       1,
+		OwnerFingerprint: sandbox.SkillImageFingerprint("docker", "", host),
+	}
+
+	require.ElementsMatch(t, []string{"ready-enabled", "second-ready"},
+		skillNames(fx.derive(context.Background())))
 }
 
 func TestEffectiveTenantSkillsInjectsNothingWithoutAnImage(t *testing.T) {
