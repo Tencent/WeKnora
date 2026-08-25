@@ -83,18 +83,6 @@
             </t-button>
           </template>
         </t-input-adornment>
-        <div v-if="showRegistryToken" class="skill-token-row">
-          <p class="skill-token-label">{{ $t('settings.sandbox.skillSourceTokenLabel') }}</p>
-          <t-input
-            v-model="sourceToken"
-            type="password"
-            size="small"
-            autocomplete="off"
-            :placeholder="$t('settings.sandbox.skillSourceTokenPlaceholder')"
-            :disabled="installBusy"
-          />
-          <p class="skill-token-hint">{{ $t('settings.sandbox.skillSourceTokenHint') }}</p>
-        </div>
         <div class="skill-install-split">
           <span>{{ $t('settings.sandbox.skillInstallOr') }}</span>
         </div>
@@ -333,8 +321,6 @@ const uploading = ref(false)
 const installingFromSource = ref(false)
 const uploadPercent = ref(0)
 const sourceInput = ref('')
-const sourceToken = ref('')
-const forceRegistryToken = ref(false)
 const skills = ref<ConfigSkill[]>([])
 const skillImage = ref<SandboxSkillImage | null>(null)
 const togglingId = ref('')
@@ -369,8 +355,6 @@ const uploadHint = computed(() =>
     : t('settings.sandbox.skillUploadHint'),
 )
 const installBusy = computed(() => uploading.value || installingFromSource.value)
-const sourceNeedsRegistryToken = computed(() => looksLikePrivateSkillHub(sourceInput.value))
-const showRegistryToken = computed(() => sourceNeedsRegistryToken.value || forceRegistryToken.value)
 const deleteHint = computed(() =>
   skillRollout.value === 'new_session'
     ? t('settings.sandbox.skillDeleteHintNewSession')
@@ -381,48 +365,6 @@ const runtimeTemplateId = computed(() => {
   return cfg?.cube?.template_id?.trim() || cfg?.e2b?.template_id?.trim() || ''
 })
 const hasSkillSnapshot = computed(() => Boolean(skillImage.value?.snapshot_id?.trim()))
-
-const PUBLIC_SKILL_HOSTS = new Set([
-  'github.com',
-  'www.github.com',
-  'codeload.github.com',
-  'gitlab.com',
-  'www.gitlab.com',
-  'skills.sh',
-  'www.skills.sh',
-  'clawhub.ai',
-  'www.clawhub.ai',
-  'clawhub.com',
-  'www.clawhub.com',
-  'skillhub.cn',
-  'www.skillhub.cn',
-  'api.skillhub.cn',
-])
-
-function looksLikePrivateSkillHub(raw: string): boolean {
-  const input = raw.trim()
-  if (!input.includes('://')) return false
-  try {
-    const parsed = new URL(input)
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
-    return !PUBLIC_SKILL_HOSTS.has(parsed.hostname.toLowerCase())
-  } catch {
-    return false
-  }
-}
-
-function isRegistryAuthError(err: unknown): boolean {
-  const message = err && typeof err === 'object' && 'message' in err
-    ? String((err as { message?: unknown }).message)
-    : String(err ?? '')
-  return /\bHTTP 401\b/.test(message) || /\bHTTP 403\b/.test(message)
-}
-
-watch(sourceInput, (value) => {
-  if (!looksLikePrivateSkillHub(value)) {
-    forceRegistryToken.value = false
-  }
-})
 
 function readLastChatModelID(): string {
   try {
@@ -750,21 +692,14 @@ async function installFromSource() {
   installingFromSource.value = true
   try {
     await persistInstallerModel(installerModelId.value)
-    const token = showRegistryToken.value ? sourceToken.value.trim() : ''
-    const res = await installConfigSkillFromSource(props.record.id, {
-      source,
-      ...(token ? { token } : {}),
-    })
+    const res = await installConfigSkillFromSource(props.record.id, { source })
     MessagePlugin.success(t('settings.sandbox.skillUploadAccepted'))
     sourceInput.value = ''
-    sourceToken.value = ''
-    forceRegistryToken.value = false
     const skillId = res?.data?.skill_id
     await loadSkills()
     await refreshImage()
     if (skillId) followProgress(skillId)
   } catch (e: any) {
-    if (isRegistryAuthError(e)) forceRegistryToken.value = true
     MessagePlugin.error(e?.message || t('settings.sandbox.skillSourceFailed'))
   } finally {
     installingFromSource.value = false
@@ -997,28 +932,6 @@ onUnmounted(() => {
     border-top-left-radius: 0;
     border-bottom-left-radius: 0;
   }
-}
-
-.skill-token-row {
-  margin-top: 8px;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 6px;
-}
-
-.skill-token-label {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--td-text-color-secondary);
-}
-
-.skill-token-hint {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--td-text-color-placeholder);
 }
 
 .skill-install-split {

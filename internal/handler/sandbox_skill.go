@@ -49,7 +49,7 @@ type sandboxSkillService interface {
 	) (*types.TenantSkillEntity, error)
 	InstallSkill(ctx context.Context, tenantID uint64, configID string, archive []byte) (string, error)
 	InstallSkillFromSource(
-		ctx context.Context, tenantID uint64, configID, source, token string,
+		ctx context.Context, tenantID uint64, configID, source string,
 	) (string, error)
 	RemoveSkill(ctx context.Context, tenantID uint64, configID, skillID string) error
 	LastProgress(
@@ -190,9 +190,10 @@ func (h *SandboxSkillHandler) Get(c *gin.Context) {
 // @Description  Install a skill onto this sandbox config's image. Send a zip
 // @Description  as multipart form field "file", or JSON {"source":"..."} to
 // @Description  pull from ClawHub, SkillHub, skills.sh, GitHub, GitLab, or a
-// @Description  direct archive URL. The install boots a sandbox and runs for
-// @Description  minutes, so the request is only accepted; follow it via the
-// @Description  install-events stream.
+// @Description  direct archive URL. The source must be readable anonymously.
+// @Description  The install boots a sandbox and runs for minutes, so the
+// @Description  request is only accepted; follow it via the install-events
+// @Description  stream.
 // @Tags         SandboxConfig
 // @Accept       json
 // @Accept       multipart/form-data
@@ -258,11 +259,9 @@ func (h *SandboxSkillHandler) Upload(c *gin.Context) {
 
 type skillSourceRequest struct {
 	// Source is a ClawHub/SkillHub slug or page URL, a skills.sh / GitHub /
-	// GitLab locator, or a direct zip/SKILL.md URL.
+	// GitLab locator, or a direct zip/SKILL.md URL. It must be readable
+	// anonymously: the fetch carries no credential of any kind.
 	Source string `json:"source"`
-	// Token is an optional registry bearer token (private SkillHub). It is
-	// used only for that fetch and is never stored.
-	Token string `json:"token"`
 }
 
 func (h *SandboxSkillHandler) installFromSource(c *gin.Context) {
@@ -283,7 +282,7 @@ func (h *SandboxSkillHandler) installFromSource(c *gin.Context) {
 	}
 
 	skillID, err := h.service.InstallSkillFromSource(
-		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), source, req.Token,
+		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), source,
 	)
 	if err != nil {
 		respondSkillServiceError(c, err)

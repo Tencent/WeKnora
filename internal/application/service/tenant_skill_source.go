@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -71,10 +72,26 @@ type skillSourceHandoff struct {
 
 // InstallSkillFromSource resolves a ClawHub / SkillHub / skills.sh / git /
 // direct-zip locator to a skill bundle and runs the same install as an upload.
+//
+// Every fetch is anonymous. Private registries are deliberately out of scope:
+// carrying a credential here would mean deciding, per hop, which of a
+// registry's handoff targets may see it, and there is no private registry to
+// validate that against yet.
 func (s *TenantSkillService) InstallSkillFromSource(
-	ctx context.Context, tenantID uint64, configID, source, token string,
+	ctx context.Context, tenantID uint64, configID, source string,
 ) (string, error) {
-	archive, err := fetchSkillArchive(ctx, source, token, s.sourceHTTP)
+	// The config is authorized before the fetch, not by InstallSkill after it.
+	// The source is a caller-supplied host, so an unknown config ID must not
+	// be able to spend an outbound request and a body-sized download first.
+	cfgEntity, err := s.configs.GetByID(ctx, tenantID, configID)
+	if err != nil {
+		return "", err
+	}
+	if cfgEntity == nil {
+		return "", apperrors.NewNotFoundError("sandbox config not found")
+	}
+
+	archive, err := fetchSkillArchive(ctx, source, s.sourceHTTP)
 	if err != nil {
 		return "", err
 	}
@@ -93,17 +110,46 @@ func skillSourceHTTPClient(override *http.Client) *http.Client {
 	return skillSourceHTTPDefault
 }
 
-func fetchSkillArchive(ctx context.Context, source, token string, client *http.Client) ([]byte, error) {
+func fetchSkillArchive(ctx context.Context, source string, client *http.Client) ([]byte, error) {
 	parsed, err := parseSkillSource(source)
 	if err != nil {
 		return nil, err
 	}
 	httpClient := skillSourceHTTPClient(client)
-	body, contentType, err := fetchSkillSourceBytes(ctx, httpClient, parsed, token, 0)
+	fetched, err := fetchSkillSourceBytes(ctx, httpClient, parsed, 0)
 	if err != nil {
-		return nil, err
+		// A bare "owner/slug" is both a GitHub repo and a registry slug, and
+		// the paste usually came from the registry listing. Only the failure
+		// of the first reading tells us which one it was.
+		alt, ok := registrySlugFallback(source, parsed)
+		if !ok {
+			return nil, err
+		}
+		altFetched, altErr := fetchSkillSourceBytes(ctx, httpClient, alt, 0)
+		if altErr != nil {
+			return nil, err
+		}
+		fetched = altFetched
 	}
-	return normalizeFetchedSkillArchive(body, contentType, parsed.Subdir)
+	return normalizeFetchedSkillArchive(fetched.body, fetched.contentType, fetched.subdir)
+}
+
+// registrySlugFallback re-reads a shorthand that was taken for a GitHub repo as
+// a registry slug. It applies only to a bare "owner/slug": anything carrying a
+// ref, a subdirectory or a scheme said what it meant.
+func registrySlugFallback(raw string, parsed parsedSkillSource) (parsedSkillSource, bool) {
+	if parsed.Kind != skillSourceGitHub || parsed.Subdir != "" || parsed.Ref != "HEAD" {
+		return parsedSkillSource{}, false
+	}
+	spec := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if spec == "" || strings.Contains(spec, "://") || strings.Contains(spec, "@") {
+		return parsedSkillSource{}, false
+	}
+	alt, err := parseRegistrySlug(defaultSkillRegistryOrigin, spec)
+	if err != nil {
+		return parsedSkillSource{}, false
+	}
+	return alt, true
 }
 
 func parseSkillSource(raw string) (parsedSkillSource, error) {
@@ -457,6 +503,17 @@ func splitPath(p string) []string {
 	return out
 }
 
+// escapePathSegments escapes a value that spans several path segments, such as
+// a "refs/heads/main" ref or a GitLab "group/subgroup" owner, without turning
+// its separators into %2F.
+func escapePathSegments(p string) string {
+	parts := strings.Split(p, "/")
+	for i, part := range parts {
+		parts[i] = url.PathEscape(part)
+	}
+	return strings.Join(parts, "/")
+}
+
 func isDirectArchivePath(p string) bool {
 	lower := strings.ToLower(p)
 	for _, ext := range []string{".zip", ".tgz", ".tar.gz", ".tar", ".md"} {
@@ -494,71 +551,65 @@ func (s parsedSkillSource) fetchURL() (string, error) {
 			ref = "HEAD"
 		}
 		return fmt.Sprintf("https://codeload.github.com/%s/%s/zip/%s",
-			s.Owner, s.Repo, ref), nil
+			escapePathSegments(s.Owner), url.PathEscape(s.Repo), escapePathSegments(ref)), nil
 	case skillSourceGitLab:
 		ref := s.Ref
 		if ref == "" {
 			ref = "HEAD"
 		}
-		return fmt.Sprintf("https://gitlab.com/%s/%s/-/archive/%s/%s-%s.zip",
-			s.Owner, s.Repo, ref, s.Repo, ref), nil
+		return fmt.Sprintf("https://gitlab.com/%s/%s/-/archive/%s/%s.zip",
+			escapePathSegments(s.Owner), url.PathEscape(s.Repo),
+			escapePathSegments(ref), url.PathEscape(s.Repo+"-"+ref)), nil
 	default:
 		return "", fmt.Errorf("%w: cannot resolve source", ErrSkillSourceInvalid)
 	}
 }
 
+// fetchedSkillSource is the archive a source resolved to, plus the skill root
+// inside it. The subdir is carried out of the fetch rather than re-derived from
+// the original locator: a registry handoff to a monorepo zip names the one
+// skill it meant, and only the last hop knows it.
+type fetchedSkillSource struct {
+	body        []byte
+	contentType string
+	subdir      string
+}
+
 func fetchSkillSourceBytes(
-	ctx context.Context, client *http.Client, src parsedSkillSource, token string, hop int,
-) ([]byte, string, error) {
+	ctx context.Context, client *http.Client, src parsedSkillSource, hop int,
+) (fetchedSkillSource, error) {
 	if hop > skillSourceMaxHops {
-		return nil, "", fmt.Errorf("%w: too many source redirects", ErrSkillSourceInvalid)
+		return fetchedSkillSource{}, fmt.Errorf("%w: too many source redirects", ErrSkillSourceInvalid)
 	}
 	target, err := src.fetchURL()
 	if err != nil {
-		return nil, "", err
+		return fetchedSkillSource{}, err
 	}
-	body, contentType, err := getSkillURL(ctx, client, target, token, shouldSendSkillToken(src, token))
+	body, contentType, err := getSkillURL(ctx, client, target)
 	if err != nil {
-		return nil, "", err
+		return fetchedSkillSource{}, err
 	}
+	fetched := fetchedSkillSource{body: body, contentType: contentType, subdir: src.Subdir}
 	if isZipMagic(body) || looksLikeSkillMarkdown(body) {
-		return body, contentType, nil
+		return fetched, nil
 	}
 	if !looksLikeJSON(contentType, body) {
 		if isZipPayload(contentType, body) {
-			return body, contentType, nil
+			return fetched, nil
 		}
-		return nil, "", fmt.Errorf("%w: remote did not return a skill archive", ErrSkillSourceInvalid)
+		return fetchedSkillSource{}, fmt.Errorf(
+			"%w: remote did not return a skill archive", ErrSkillSourceInvalid)
 	}
 	var handoff skillSourceHandoff
 	if err := json.Unmarshal(body, &handoff); err != nil {
-		return nil, "", fmt.Errorf("%w: remote JSON is not a skill archive", ErrSkillSourceInvalid)
+		return fetchedSkillSource{}, fmt.Errorf(
+			"%w: remote JSON is not a skill archive", ErrSkillSourceInvalid)
 	}
 	next, err := sourceFromHandoff(src, handoff)
 	if err != nil {
-		return nil, "", err
+		return fetchedSkillSource{}, err
 	}
-	return fetchSkillSourceBytes(ctx, client, next, token, hop+1)
-}
-
-func shouldSendSkillToken(src parsedSkillSource, token string) bool {
-	if token == "" || src.Kind == skillSourceGitHub || src.Kind == skillSourceGitLab {
-		return false
-	}
-	target, err := src.fetchURL()
-	if err != nil {
-		return false
-	}
-	host := ""
-	if u, err := url.Parse(target); err == nil {
-		host = strings.ToLower(u.Hostname())
-	}
-	switch host {
-	case "github.com", "www.github.com", "codeload.github.com",
-		"gitlab.com", "www.gitlab.com", "skills.sh", "www.skills.sh":
-		return false
-	}
-	return src.Kind == skillSourceRegistry || src.Kind == skillSourceDirect
+	return fetchSkillSourceBytes(ctx, client, next, hop+1)
 }
 
 func sourceFromHandoff(prev parsedSkillSource, handoff skillSourceHandoff) (parsedSkillSource, error) {
@@ -576,9 +627,14 @@ func sourceFromHandoff(prev parsedSkillSource, handoff skillSourceHandoff) (pars
 		}
 		archiveURL = strings.TrimRight(prev.Registry, "/") + archiveURL
 	}
+	// A handoff that is not a parseable http(s) URL is refused rather than
+	// passed through as a direct target: SSRF validation normalises a
+	// scheme-less string by prepending https://, which would turn a malformed
+	// response into a fetch of a host we never agreed to read.
 	next, err := parseSkillSourceURL(archiveURL)
 	if err != nil {
-		next = parsedSkillSource{Kind: skillSourceDirect, DirectURL: archiveURL}
+		return parsedSkillSource{}, fmt.Errorf(
+			"%w: registry archive URL is not usable: %v", ErrSkillSourceInvalid, err)
 	}
 	if next.Subdir == "" && strings.TrimSpace(handoff.Path) != "" {
 		next.Subdir = strings.Trim(handoff.Path, "/")
@@ -590,7 +646,7 @@ func sourceFromHandoff(prev parsedSkillSource, handoff skillSourceHandoff) (pars
 }
 
 func getSkillURL(
-	ctx context.Context, client *http.Client, rawURL, token string, sendToken bool,
+	ctx context.Context, client *http.Client, rawURL string,
 ) ([]byte, string, error) {
 	if err := secutils.ValidateURLForSSRF(rawURL); err != nil {
 		return nil, "", fmt.Errorf("%w: %s", ErrSkillSourceInvalid,
@@ -602,9 +658,6 @@ func getSkillURL(
 	}
 	req.Header.Set("User-Agent", skillSourceUserAgent)
 	req.Header.Set("Accept", "application/zip, application/octet-stream, application/json, text/plain;q=0.9, */*;q=0.8")
-	if sendToken && token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
 	resp, err := client.Do(req)
 	if err != nil {
 		if errors.Is(err, secutils.ErrSSRFRedirectBlocked) {

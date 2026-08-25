@@ -1038,7 +1038,7 @@ export function uploadConfigSkill(
 
 export function installConfigSkillFromSource(
   configId: string,
-  payload: { source: string; token?: string },
+  payload: { source: string },
 ): Promise<{ data: { skill_id: string } }> {
   return post(`/api/v1/sandbox-configs/${configId}/skills`, payload, {
     timeout: 2 * 60 * 1000,

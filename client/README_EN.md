@@ -204,7 +204,7 @@ if err != nil {
 
 ```go
 skillID, err := apiClient.InstallSandboxSkillFromSource(
-    context.Background(), sandboxConfigID, "@owner/slug", "")
+    context.Background(), sandboxConfigID, "@owner/slug")
 if err != nil {
     // Handle error
 }

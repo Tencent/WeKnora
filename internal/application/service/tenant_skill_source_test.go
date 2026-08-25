@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -155,9 +156,7 @@ func TestSkillHubCNMapsToDownloadAPI(t *testing.T) {
 
 func TestFetchSkillArchiveFromRegistry(t *testing.T) {
 	archive := zipBundle(t, map[string]string{"SKILL.md": validSkillMD})
-	var sawAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sawAuth = r.Header.Get("Authorization")
 		if r.URL.Path != "/api/v1/download" || r.URL.Query().Get("slug") != "owner/demo" {
 			http.NotFound(w, r)
 			return
@@ -168,13 +167,126 @@ func TestFetchSkillArchiveFromRegistry(t *testing.T) {
 	t.Cleanup(server.Close)
 	allowLoopbackSkillFetch(t)
 
-	got, err := fetchSkillArchive(t.Context(), server.URL+"/owner/demo", "sk_test", server.Client())
+	got, err := fetchSkillArchive(t.Context(), server.URL+"/owner/demo", server.Client())
 	require.NoError(t, err)
-	require.Equal(t, "Bearer sk_test", sawAuth)
 
 	bundle, err := ParseSkillBundle(got)
 	require.NoError(t, err)
 	require.Equal(t, "pdf-tools", bundle.Name)
+}
+
+// Skill sources are read anonymously. Nothing in this flow holds a credential,
+// so no hop may present one.
+func TestFetchSkillArchiveSendsNoCredentials(t *testing.T) {
+	archive := zipBundle(t, map[string]string{"SKILL.md": validSkillMD})
+
+	var archiveAuth, registryAuth string
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.URL.Path {
+		case "/api/v1/download":
+			registryAuth = r.Header.Get("Authorization")
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(skillSourceHandoff{
+				ArchiveURL: "http://" + r.Host + "/skill.zip",
+			})
+		case "/skill.zip":
+			archiveAuth = r.Header.Get("Authorization")
+			w.Header().Set("Content-Type", "application/zip")
+			_, _ = w.Write(archive)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	allowLoopbackSkillFetch(t)
+
+	_, err := fetchSkillArchive(t.Context(), server.URL+"/owner/demo", server.Client())
+	require.NoError(t, err)
+	require.Empty(t, registryAuth)
+	require.Empty(t, archiveAuth)
+}
+
+// The handoff's path is what names one skill inside a monorepo zip; losing it
+// makes a multi-skill repo either ambiguous or wrong.
+func TestFetchSkillArchiveUsesHandoffPath(t *testing.T) {
+	otherSkillMD := strings.Replace(validSkillMD, "name: pdf-tools", "name: csv-tools", 1)
+	archive := zipBundle(t, map[string]string{
+		"repo-main/README.md":               "# repo",
+		"repo-main/skills/pdf/SKILL.md":     validSkillMD,
+		"repo-main/skills/pdf/extract.py":   "print('pdf')\n",
+		"repo-main/skills/csv/SKILL.md":     otherSkillMD,
+		"repo-main/skills/csv/transform.py": "print('csv')\n",
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/download":
+			_ = json.NewEncoder(w).Encode(skillSourceHandoff{
+				SourceRef:  "public-github",
+				ArchiveURL: "http://" + r.Host + "/archive.zip",
+				Path:       "skills/csv",
+			})
+		case "/archive.zip":
+			w.Header().Set("Content-Type", "application/zip")
+			_, _ = w.Write(archive)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	allowLoopbackSkillFetch(t)
+
+	got, err := fetchSkillArchive(t.Context(), server.URL+"/owner/demo", server.Client())
+	require.NoError(t, err)
+	bundle, err := ParseSkillBundle(got)
+	require.NoError(t, err)
+	require.Equal(t, "csv-tools", bundle.Name)
+	require.Contains(t, bundle.Files, "transform.py")
+	require.NotContains(t, bundle.Files, "extract.py")
+}
+
+// A malformed handoff is refused: SSRF validation normalises a scheme-less
+// string by prepending https://, so passing it through would fetch a host the
+// response never legally named.
+func TestFetchSkillArchiveRejectsUnusableHandoffURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(skillSourceHandoff{ArchiveURL: "evil.example.com/skill.zip"})
+	}))
+	t.Cleanup(server.Close)
+	allowLoopbackSkillFetch(t)
+
+	_, err := fetchSkillArchive(t.Context(), server.URL+"/owner/demo", server.Client())
+	require.ErrorIs(t, err, ErrSkillSourceInvalid)
+	require.ErrorContains(t, err, "archive URL is not usable")
+}
+
+// A bare "owner/slug" reads as a GitHub repo and as a registry slug. The
+// registry is the fallback, but only for a shorthand that named nothing else.
+func TestRegistrySlugFallback(t *testing.T) {
+	bare := "clawhub_pskoett/self-improving-agent"
+	parsed, err := parseSkillSource(bare)
+	require.NoError(t, err)
+	require.Equal(t, skillSourceGitHub, parsed.Kind)
+
+	alt, ok := registrySlugFallback(bare, parsed)
+	require.True(t, ok)
+	require.Equal(t, skillSourceRegistry, alt.Kind)
+	require.Equal(t, defaultSkillRegistryOrigin, alt.Registry)
+	require.Equal(t, bare, alt.Slug)
+
+	withSubdir := "vercel-labs/agent-skills@frontend-design"
+	parsed, err = parseSkillSource(withSubdir)
+	require.NoError(t, err)
+	_, ok = registrySlugFallback(withSubdir, parsed)
+	require.False(t, ok, "a shorthand that named a skill directory meant GitHub")
+
+	parsed, err = parseSkillSource("https://github.com/vercel-labs/agent-skills")
+	require.NoError(t, err)
+	_, ok = registrySlugFallback("https://github.com/vercel-labs/agent-skills", parsed)
+	require.False(t, ok, "an explicit GitHub URL is not a registry slug")
 }
 
 func TestFetchSkillArchiveFollowsGitHubHandoff(t *testing.T) {
@@ -201,7 +313,7 @@ func TestFetchSkillArchiveFollowsGitHubHandoff(t *testing.T) {
 	t.Cleanup(server.Close)
 	allowLoopbackSkillFetch(t)
 
-	got, err := fetchSkillArchive(t.Context(), server.URL+"/owner/demo", "", server.Client())
+	got, err := fetchSkillArchive(t.Context(), server.URL+"/owner/demo", server.Client())
 	require.NoError(t, err)
 	bundle, err := ParseSkillBundle(got)
 	require.NoError(t, err)
@@ -218,21 +330,11 @@ func TestFetchSkillArchiveFromSkillMarkdown(t *testing.T) {
 	t.Cleanup(server.Close)
 	allowLoopbackSkillFetch(t)
 
-	got, err := fetchSkillArchive(t.Context(), server.URL+"/SKILL.md", "", server.Client())
+	got, err := fetchSkillArchive(t.Context(), server.URL+"/SKILL.md", server.Client())
 	require.NoError(t, err)
 	bundle, err := ParseSkillBundle(got)
 	require.NoError(t, err)
 	require.Equal(t, "pdf-tools", bundle.Name)
-}
-
-func TestFetchSkillArchiveDoesNotSendTokenToGitHub(t *testing.T) {
-	src := parsedSkillSource{
-		Kind: skillSourceGitHub, Owner: "o", Repo: "r", Ref: "HEAD",
-	}
-	require.False(t, shouldSendSkillToken(src, "sk_secret"))
-	src.Kind = skillSourceRegistry
-	src.Registry = "https://skillhub.example.com"
-	require.True(t, shouldSendSkillToken(src, "sk_secret"))
 }
 
 func TestParseSkillBundleNestedRemoteArchive(t *testing.T) {
@@ -267,7 +369,7 @@ func TestFetchSkillArchiveRejectsNonSkillHTML(t *testing.T) {
 	t.Cleanup(server.Close)
 	allowLoopbackSkillFetch(t)
 
-	_, err := fetchSkillArchive(t.Context(), server.URL+"/demo.zip", "", server.Client())
+	_, err := fetchSkillArchive(t.Context(), server.URL+"/demo.zip", server.Client())
 	require.ErrorIs(t, err, ErrSkillSourceInvalid)
 	require.True(t, strings.Contains(err.Error(), "skill archive") ||
 		strings.Contains(err.Error(), "zip skill bundle"))
