@@ -1757,6 +1757,7 @@ import KBParserSettings, { type ParserEngineRule } from '@/views/knowledge/setti
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
 import { listEmbedChannels } from '@/api/embed';
 import { getRootZoom, rectToCssPx } from '@/utils/zoom';
+import { integrationSectionKey } from '@/config/settingsRoute';
 import {
   evaluateToolRequirement,
   deriveKbFilterFromTools,
@@ -2636,7 +2637,7 @@ function gotoIntegrations(tab: 'im' | 'embed') {
   const agentId = editorAgent.value?.id;
   if (!agentId) return;
   handleClose();
-  router.push({ path: '/platform/settings', query: { section: 'integrations', agentId, tab } });
+  router.push({ path: '/platform/settings', query: { section: integrationSectionKey(tab), agentId } });
 }
 
 const filteredIntentPlaceholders = computed(() => {
