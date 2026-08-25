@@ -193,6 +193,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	//   - answerStreamed records that user-facing answer text was sent live to
 	//     the final-answer area, so the natural-stop branch only emits Done.
 	splitter := agenttools.NewThinkStreamSplitter()
+	answerGuard := &toolMarkupStreamGuard{}
 	thinkingOpen := false
 	answerStreamed := false
 
@@ -221,7 +222,8 @@ func (e *AgentEngine) streamThinkingToEventBus(
 			thinkingOpen = false
 		}
 	}
-	emitAnswer := func(content string) {
+	emitAnswer := func(content string, done bool) {
+		content = answerGuard.Feed(content, done)
 		if content == "" {
 			return
 		}
@@ -323,7 +325,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 					thinkingOpen = true
 					emitThought(thinkPart, false)
 				}
-				emitAnswer(answerPart)
+				emitAnswer(answerPart, false)
 			}
 			if chunk.Done {
 				thinkPart, answerPart := splitter.Flush()
@@ -331,7 +333,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 					thinkingOpen = true
 					emitThought(thinkPart, false)
 				}
-				emitAnswer(answerPart)
+				emitAnswer(answerPart, true)
 				closeThinking()
 			}
 		},
@@ -340,6 +342,8 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		logger.Errorf(ctx, "[Agent][Thinking] Iteration-%d failed: %v", iteration+1, err)
 		return nil, err
 	}
+	emitAnswer("", true)
+	closeThinking()
 
 	// Emit diagnostics: helps identify when answer content went to "thought" vs "final_answer" events
 	logger.Infof(ctx, "[Agent][Thinking] Iteration-%d completed: content=%d chars, tool_calls=%d, emitted_events=%v",

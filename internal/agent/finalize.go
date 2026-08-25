@@ -96,6 +96,7 @@ Now generate the final answer:`, query, imageRequirement)
 	answerID := generateEventID("answer")
 	logger.Debugf(ctx, "[Agent][FinalAnswer] AnswerID: %s", answerID)
 	answerDoneEmitted := false
+	answerGuard := &toolMarkupStreamGuard{}
 
 	llmResult, err := e.streamLLMToEventBus(
 		ctx,
@@ -106,14 +107,15 @@ Now generate the final answer:`, query, imageRequirement)
 			if chunk.ResponseType == types.ResponseTypeThinking {
 				return
 			}
-			if chunk.Content != "" {
-				logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(chunk.Content))
+			safeContent := answerGuard.Feed(chunk.Content, chunk.Done)
+			if safeContent != "" {
+				logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(safeContent))
 				e.eventBus.Emit(ctx, event.Event{
 					ID:        answerID,
 					Type:      event.EventAgentFinalAnswer,
 					SessionID: sessionID,
 					Data: event.AgentFinalAnswerData{
-						Content: chunk.Content,
+						Content: safeContent,
 						Done:    chunk.Done,
 					},
 				})
@@ -130,6 +132,15 @@ Now generate the final answer:`, query, imageRequirement)
 			"error":      err.Error(),
 		})
 		return err
+	}
+	if answerGuard.Rejected() || looksLikeLeakedToolMarkup(llmResult.Content) {
+		logger.Warnf(ctx, "[Agent][FinalAnswer] Rejecting leaked tool-call markup (%d chars)",
+			len(llmResult.Content))
+		common.PipelineWarn(ctx, "Agent", "final_answer_tool_markup_rejected", map[string]interface{}{
+			"session_id":  sessionID,
+			"content_len": len(llmResult.Content),
+		})
+		return errLeakedToolMarkup
 	}
 
 	if !answerDoneEmitted {

@@ -381,6 +381,7 @@ func (e *AgentEngine) executeLoop(
 	defer emitCompletion()
 
 	emptyRetries := 0
+	leakedToolMarkupRetries := 0
 	consecutiveSameContent := 0
 	lastResponseContent := ""
 loop:
@@ -406,7 +407,8 @@ loop:
 		// every exit path (break/continue/next) without having to sprinkle
 		// manual finish calls throughout the many branches below.
 		outcome, iterErr := e.runReActIteration(ctx, state, &messages, tools,
-			sessionID, messageID, query, &emptyRetries, &consecutiveSameContent, &lastResponseContent)
+			sessionID, messageID, query, &emptyRetries, &leakedToolMarkupRetries,
+			&consecutiveSameContent, &lastResponseContent)
 		if iterErr != nil {
 			return state, iterErr
 		}
@@ -442,7 +444,7 @@ const (
 	// iterOutcomeNext advances state.CurrentRound and loops again.
 	iterOutcomeNext iterOutcome = iota
 	// iterOutcomeContinue re-runs the loop without advancing the round
-	// counter. Used by the empty-content retry path.
+	// counter. Used by invalid-response retry paths.
 	iterOutcomeContinue
 	// iterOutcomeBreak exits the loop (final answer, stuck loop, or end).
 	iterOutcomeBreak
@@ -461,7 +463,7 @@ func (e *AgentEngine) runReActIteration(
 	messagesPtr *[]chat.Message,
 	tools []chat.Tool,
 	sessionID, assistantMessageID, query string,
-	emptyRetries, consecutiveSameContent *int,
+	emptyRetries, leakedToolMarkupRetries, consecutiveSameContent *int,
 	lastResponseContent *string,
 ) (outcome iterOutcome, retErr error) {
 	roundStart := time.Now()
@@ -554,27 +556,6 @@ func (e *AgentEngine) runReActIteration(
 			response.Usage.CompletionTokens, response.Usage.TotalTokens)
 	}
 
-	// Detect stuck loops: if the LLM keeps returning the same content
-	// without tool calls (e.g., an unhandled finish reason), break early.
-	if len(response.ToolCalls) == 0 && response.Content != "" {
-		if response.Content == *lastResponseContent {
-			*consecutiveSameContent++
-		} else {
-			*consecutiveSameContent = 0
-		}
-		*lastResponseContent = response.Content
-		if *consecutiveSameContent >= maxRepeatedResponseRounds {
-			logger.Warnf(ctx, "[Agent][Round-%d] Detected stuck loop: same content repeated %d times (finish=%s), stopping",
-				round, *consecutiveSameContent+1, response.FinishReason)
-			state.FinalAnswer = response.Content
-			state.IsComplete = true
-			return iterOutcomeBreak, nil
-		}
-	} else {
-		*consecutiveSameContent = 0
-		*lastResponseContent = ""
-	}
-
 	// Create agent step
 	step := types.AgentStep{
 		Iteration:        state.CurrentRound,
@@ -606,6 +587,27 @@ func (e *AgentEngine) runReActIteration(
 	// 2. Analyze: Check for stop conditions (natural stop with no tool calls)
 	verdict := e.analyzeResponse(ctx, response, step, state.CurrentRound, sessionID, roundStart)
 	if verdict.isDone {
+		// A provider may emit its internal tool-call envelope as plain content
+		// with finish=stop. The stream guard kept it out of the UI; retry without
+		// persisting the bogus assistant turn or adding it to AgentSteps.
+		if verdict.leakedToolMarkup {
+			*leakedToolMarkupRetries++
+			if *leakedToolMarkupRetries <= maxEmptyResponseRetries {
+				logger.Warnf(ctx, "[Agent][Round-%d] Leaked tool-call markup - retrying (%d/%d)",
+					round, *leakedToolMarkupRetries, maxEmptyResponseRetries)
+				*messagesPtr = append(*messagesPtr, chat.Message{
+					Role: "user",
+					Content: "Your previous reply contained an internal tool-call envelope as plain text and was discarded. " +
+						"If you still need a tool, issue a proper function call; otherwise provide the complete final answer as plain text.",
+				})
+				return iterOutcomeContinue, nil
+			}
+			logger.Warnf(ctx, "[Agent][Round-%d] Leaked tool-call markup after %d retries - using fallback",
+				round, maxEmptyResponseRetries)
+			state.FinalAnswer = "I'm sorry, I was unable to generate a response. Please try again."
+			state.IsComplete = true
+			return iterOutcomeBreak, nil
+		}
 		// Guard against empty content: when the LLM stops naturally with no
 		// content and no tool calls (e.g., thinking-only loop without KB),
 		// retry with a nudge message instead of accepting an empty answer.
@@ -632,6 +634,28 @@ func (e *AgentEngine) runReActIteration(
 		state.IsComplete = true
 		state.RoundSteps = append(state.RoundSteps, verdict.step)
 		return iterOutcomeBreak, nil
+	}
+
+	// Detect stuck loops only after terminal-response validation. Otherwise a
+	// repeatedly leaked protocol envelope could bypass the guard on its third
+	// occurrence and be accepted as the final answer.
+	if len(response.ToolCalls) == 0 && response.Content != "" {
+		if response.Content == *lastResponseContent {
+			*consecutiveSameContent++
+		} else {
+			*consecutiveSameContent = 0
+		}
+		*lastResponseContent = response.Content
+		if *consecutiveSameContent >= maxRepeatedResponseRounds {
+			logger.Warnf(ctx, "[Agent][Round-%d] Detected stuck loop: same content repeated %d times (finish=%s), stopping",
+				round, *consecutiveSameContent+1, response.FinishReason)
+			state.FinalAnswer = response.Content
+			state.IsComplete = true
+			return iterOutcomeBreak, nil
+		}
+	} else {
+		*consecutiveSameContent = 0
+		*lastResponseContent = ""
 	}
 
 	// This round is non-terminal (it will execute tools and loop again). Any
