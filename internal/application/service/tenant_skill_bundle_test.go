@@ -208,6 +208,23 @@ Use scripts/extract.py to pull text out of a PDF.
 			"paths must be relative to the skill root, not to the archive root")
 	})
 
+	t.Run("remote options re-root a nested unique skill and drop extras", func(t *testing.T) {
+		data := zipBundle(t, map[string]string{
+			"repo-main/README.md":           "noise",
+			"repo-main/skills/pdf/SKILL.md": validSkillMD,
+			"repo-main/skills/pdf/run.py":   "print(1)\n",
+		})
+		bundle, err := ParseSkillBundleWithOptions(data, SkillBundleParseOptions{
+			Subdir:           "skills/pdf",
+			AllowExtraFiles:  true,
+			AllowNestedSkill: true,
+		})
+		require.NoError(t, err)
+		require.Equal(t, "pdf-tools", bundle.Name)
+		require.Contains(t, bundle.Files, "run.py")
+		require.NotContains(t, bundle.Files, "README.md")
+	})
+
 	t.Run("rejects files outside the wrapped skill directory", func(t *testing.T) {
 		_, err := ParseSkillBundle(zipBundle(t, map[string]string{
 			"pdf-tools/SKILL.md": validSkillMD,
