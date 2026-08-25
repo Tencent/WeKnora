@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   buildMultipartCompleteParts,
+  AdaptiveConcurrencyController,
   getMultipartPartSizes,
   PART_SIZE,
+  runAdaptivePool,
   UploadCancelledError,
   uploadPartWithRetry,
 } from './upload'
@@ -97,8 +99,9 @@ test('multipart part retry stops immediately when cancelled', async () => {
 for (const fileSizeMB of [100, 200, 500]) {
   test(`local ${fileSizeMB}MB multipart regression retries every part twice`, async () => {
     const partSizes = getMultipartPartSizes(fileSizeMB * 1024 * 1024)
-    assert.equal(partSizes.length, fileSizeMB / 5)
-    assert.equal(partSizes.at(-1), PART_SIZE)
+    assert.equal(partSizes.length, Math.ceil(fileSizeMB / 8))
+    const remainderMB = fileSizeMB % 8 || 8
+    assert.equal(partSizes.at(-1), remainderMB * 1024 * 1024)
 
     let totalAttempts = 0
     for (const [index, partSize] of partSizes.entries()) {
@@ -141,4 +144,28 @@ test('local 100MB multipart regression succeeds in ten consecutive runs', async 
       assert.equal(result, partSize)
     }
   }
+})
+
+test('adaptive concurrency backs off on failures and grows after stable parts', () => {
+  const controller = new AdaptiveConcurrencyController({ initial: 2, min: 1, max: 4 })
+  controller.recordFailure()
+  assert.equal(controller.current, 1)
+  controller.recordFailure()
+  assert.equal(controller.current, 1)
+  controller.recordSuccess(100, false)
+  controller.recordSuccess(100, false)
+  assert.equal(controller.current, 2)
+  controller.recordSuccess(100, true)
+  assert.equal(controller.current, 2)
+})
+
+test('adaptive pool consumes each part exactly once while concurrency changes', async () => {
+  const controller = new AdaptiveConcurrencyController({ initial: 2, min: 1, max: 3 })
+  const seen: number[] = []
+  await runAdaptivePool(Array.from({ length: 20 }, (_, index) => index + 1), controller, async partNumber => {
+    seen.push(partNumber)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    controller.recordSuccess(1, false)
+  })
+  assert.deepEqual(seen.sort((left, right) => left - right), Array.from({ length: 20 }, (_, index) => index + 1))
 })

@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 
 const ONE_MB = 1024 * 1024
 const FILE_SIZE_BYTES = 100 * ONE_MB
+const EXPECTED_PARTS = Math.ceil(FILE_SIZE_BYTES / (8 * ONE_MB))
 const runs = Number.parseInt(process.env.MULTIPART_E2E_RUNS || '1', 10)
 
 test.describe.configure({ mode: 'serial' })
@@ -94,6 +95,6 @@ test('uploads a 100MB file through Vite and retries a failed browser XHR part', 
   expect(failedPartNumber).not.toBe('')
   expect(partAttempts.get(`${failedPartNumber}:1`)).toBe(runs)
   expect(partAttempts.get(`${failedPartNumber}:2`)).toBe(1)
-  expect(successfulPartResponses).toHaveLength(runs * 20)
+  expect(successfulPartResponses).toHaveLength(runs * EXPECTED_PARTS)
   expect(successfulPartResponses.every(response => response.partNumber !== '' && response.etag !== '')).toBeTruthy()
 })

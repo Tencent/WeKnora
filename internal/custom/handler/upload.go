@@ -23,13 +23,15 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/Tencent/WeKnora/internal/custom/client/minio"
+	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 )
 
 // UploadHandler 上传相关路由
 type UploadHandler struct {
-	DB    *gorm.DB
-	MinIO *minio.Client
+	DB     *gorm.DB
+	MinIO  *minio.Client
+	Upload config.UploadConfig
 }
 
 const (
@@ -40,8 +42,8 @@ const (
 )
 
 // NewUploadHandler 构造 handler
-func NewUploadHandler(db *gorm.DB, m *minio.Client) *UploadHandler {
-	return &UploadHandler{DB: db, MinIO: m}
+func NewUploadHandler(db *gorm.DB, m *minio.Client, uploadCfg config.UploadConfig) *UploadHandler {
+	return &UploadHandler{DB: db, MinIO: m, Upload: uploadCfg}
 }
 
 // PresignReq presigned 直传请求体
@@ -205,18 +207,27 @@ func (h *UploadHandler) Confirm(c *gin.Context) {
 
 // MultipartInitReq 初始化分片
 type MultipartInitReq struct {
-	Filename      string `json:"filename" binding:"required"`
-	ContentType   string `json:"content_type"`
-	VideoType     string `json:"video_type"`
-	FileSizeBytes int64  `json:"file_size_bytes"`
-	PartSizeBytes int64  `json:"part_size_bytes"`
+	Filename       string `json:"filename" binding:"required"`
+	ContentType    string `json:"content_type"`
+	VideoType      string `json:"video_type"`
+	FileSizeBytes  int64  `json:"file_size_bytes"`
+	PartSizeBytes  int64  `json:"part_size_bytes"`
+	IdempotencyKey string `json:"idempotency_key"`
 }
 
 // MultipartInitResp 初始化响应
 type MultipartInitResp struct {
-	VideoID   string `json:"video_id"`
-	ObjectKey string `json:"object_key"`
-	UploadID  string `json:"upload_id"`
+	VideoID                  string `json:"video_id"`
+	ObjectKey                string `json:"object_key"`
+	UploadID                 string `json:"upload_id"`
+	DirectUpload             bool   `json:"direct_upload"`
+	PartSizeBytes            int64  `json:"part_size_bytes"`
+	RecommendedPartSizeBytes int64  `json:"recommended_part_size_bytes"`
+	InitialConcurrency       int    `json:"initial_concurrency"`
+	MinConcurrency           int    `json:"min_concurrency"`
+	MaxConcurrency           int    `json:"max_concurrency"`
+	SignTTLSeconds           int    `json:"sign_ttl_seconds"`
+	AlreadyExists            bool   `json:"already_exists,omitempty"`
 }
 
 // MultipartInit 初始化分片上传（VP-T002）
@@ -227,9 +238,25 @@ func (h *UploadHandler) MultipartInit(c *gin.Context) {
 		uploadError(c, http.StatusBadRequest, "init", err)
 		return
 	}
+	if req.PartSizeBytes == 0 {
+		req.PartSizeBytes = recommendedMultipartPartSize(h.Upload, req.FileSizeBytes)
+	}
+	if req.IdempotencyKey == "" {
+		req.IdempotencyKey = strings.TrimSpace(c.GetHeader(uploadTraceHeader))
+	}
 	if err := validateMultipartInit(req); err != nil {
 		uploadError(c, http.StatusBadRequest, "init_validate", err)
 		return
+	}
+	if req.IdempotencyKey != "" {
+		var existing model.Video
+		if err := h.DB.Where("upload_idempotency_key = ?", req.IdempotencyKey).First(&existing).Error; err == nil {
+			c.JSON(http.StatusOK, h.multipartInitResponse(existing, true))
+			return
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			uploadError(c, http.StatusInternalServerError, "db_init_lookup", err)
+			return
+		}
 	}
 	uploadLog(c, "init_validated", "filename", truncateUploadLogValue(req.Filename), "content_type", req.ContentType, "video_type", req.VideoType)
 	videoID := uuid.NewString()
@@ -247,15 +274,16 @@ func (h *UploadHandler) MultipartInit(c *gin.Context) {
 	uploadLog(c, "minio_init_succeeded", "video_id", videoID, "upload_id", handle.UploadID, "object_key", objectKey)
 
 	video := model.Video{
-		ID:                  videoID,
-		Title:               strings.TrimSuffix(req.Filename, filepath.Ext(req.Filename)),
-		FileURL:             h.MinIO.PublicURL(objectKey),
-		Status:              model.VideoStatusUploading,
-		VideoType:           req.VideoType,
-		UploadID:            handle.UploadID,
-		UploadObjectKey:     objectKey,
-		UploadSizeBytes:     req.FileSizeBytes,
-		UploadPartSizeBytes: req.PartSizeBytes,
+		ID:                   videoID,
+		Title:                strings.TrimSuffix(req.Filename, filepath.Ext(req.Filename)),
+		FileURL:              h.MinIO.PublicURL(objectKey),
+		Status:               model.VideoStatusUploading,
+		VideoType:            req.VideoType,
+		UploadID:             handle.UploadID,
+		UploadIdempotencyKey: req.IdempotencyKey,
+		UploadObjectKey:      objectKey,
+		UploadSizeBytes:      req.FileSizeBytes,
+		UploadPartSizeBytes:  req.PartSizeBytes,
 	}
 	if err := h.DB.Create(&video).Error; err != nil {
 		_ = h.MinIO.AbortMultipartUpload(c.Request.Context(), objectKey, handle.UploadID)
@@ -265,11 +293,41 @@ func (h *UploadHandler) MultipartInit(c *gin.Context) {
 
 	c.Header(uploadTraceHeader, uploadTraceID(c))
 	c.Header("X-Upload-ID", handle.UploadID)
-	c.JSON(http.StatusOK, MultipartInitResp{
-		VideoID:   videoID,
-		ObjectKey: objectKey,
-		UploadID:  handle.UploadID,
-	})
+	c.JSON(http.StatusOK, h.multipartInitResponse(video, false))
+}
+
+func (h *UploadHandler) multipartInitResponse(video model.Video, alreadyExists bool) MultipartInitResp {
+	partSize := video.UploadPartSizeBytes
+	if partSize <= 0 {
+		partSize = recommendedMultipartPartSize(h.Upload, video.UploadSizeBytes)
+	}
+	return MultipartInitResp{
+		VideoID:                  video.ID,
+		ObjectKey:                video.UploadObjectKey,
+		UploadID:                 video.UploadID,
+		DirectUpload:             h.MinIO.BrowserDirectUploadAvailable(),
+		PartSizeBytes:            partSize,
+		RecommendedPartSizeBytes: partSize,
+		InitialConcurrency:       maxInt(h.Upload.InitialConcurrency, 2),
+		MinConcurrency:           maxInt(h.Upload.MinConcurrency, 1),
+		MaxConcurrency:           maxInt(h.Upload.MaxConcurrency, 4),
+		SignTTLSeconds:           maxInt(h.Upload.SignTTLSeconds, 3600),
+		AlreadyExists:            alreadyExists,
+	}
+}
+
+func maxInt(value, fallback int) int {
+	if value > 0 {
+		return value
+	}
+	return fallback
+}
+
+func maxInt64(value, fallback int64) int64 {
+	if value > 0 {
+		return value
+	}
+	return fallback
 }
 
 // MultipartSignReq 单分片签名请求
@@ -282,8 +340,9 @@ type MultipartSignReq struct {
 
 // MultipartSignResp 单分片签名响应
 type MultipartSignResp struct {
-	PartURL   string    `json:"part_url"`
-	ExpiresAt time.Time `json:"expires_at"`
+	PartURL      string    `json:"part_url"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	DirectUpload bool      `json:"direct_upload"`
 }
 
 // MultipartPart 同源服务端分片上传。
@@ -380,15 +439,62 @@ func (h *UploadHandler) MultipartSign(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	urlStr, err := h.MinIO.PresignPart(c.Request.Context(), req.ObjectKey, req.UploadID, req.PartNumber, 1*time.Hour)
-	if err != nil {
+	var video model.Video
+	if err := h.DB.Select("id", "status", "upload_id", "upload_object_key", "upload_size_bytes", "upload_part_size_bytes").
+		Where("id = ?", req.VideoID).First(&video).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	if video.Status != model.VideoStatusUploading {
+		c.JSON(http.StatusConflict, gin.H{"error": "video upload is not active"})
+		return
+	}
+	if video.UploadID != req.UploadID || video.UploadObjectKey != req.ObjectKey {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "upload identity does not belong to video"})
+		return
+	}
+	if _, err := expectedMultipartPartSize(video.UploadSizeBytes, video.UploadPartSizeBytes, req.PartNumber); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	ttl := time.Duration(maxInt(h.Upload.SignTTLSeconds, 3600)) * time.Second
+	urlStr := "/api/custom/uploads/multipart/part"
+	directUpload := false
+	if h.MinIO.BrowserDirectUploadAvailable() {
+		var signErr error
+		urlStr, signErr = h.MinIO.PresignPart(c.Request.Context(), req.ObjectKey, req.UploadID, req.PartNumber, ttl)
+		if signErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": signErr.Error()})
+			return
+		}
+		directUpload = true
+	}
 	c.JSON(http.StatusOK, MultipartSignResp{
-		PartURL:   urlStr,
-		ExpiresAt: time.Now().Add(1 * time.Hour),
+		PartURL:      urlStr,
+		ExpiresAt:    time.Now().Add(ttl),
+		DirectUpload: directUpload,
 	})
+}
+
+func recommendedMultipartPartSize(cfg config.UploadConfig, fileSize int64) int64 {
+	partSize := cfg.PartSizeBytes
+	if partSize <= 0 {
+		partSize = 8 * 1024 * 1024
+	}
+	if cfg.LargeFileThresholdBytes > 0 && fileSize >= cfg.LargeFileThresholdBytes && partSize < 16*1024*1024 {
+		partSize = 16 * 1024 * 1024
+	}
+	if partSize < defaultMultipartPartSize {
+		partSize = defaultMultipartPartSize
+	}
+	if partSize > 16*1024*1024 {
+		partSize = 16 * 1024 * 1024
+	}
+	return partSize
 }
 
 func parsePositivePartNumber(raw string) (int, error) {

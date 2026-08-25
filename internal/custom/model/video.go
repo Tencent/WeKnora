@@ -29,6 +29,7 @@ type Video struct {
 	Status                   string         `gorm:"type:varchar(50);index" json:"status"`
 	ProcessingErrorSummary   string         `gorm:"type:text" json:"processing_error_summary"`
 	UploadID                 string         `gorm:"type:varchar(128);index" json:"-"`
+	UploadIdempotencyKey     string         `gorm:"type:varchar(128);index" json:"-"`
 	UploadObjectKey          string         `gorm:"type:text" json:"-"`
 	UploadSizeBytes          int64          `json:"-"`
 	UploadPartSizeBytes      int64          `json:"-"`

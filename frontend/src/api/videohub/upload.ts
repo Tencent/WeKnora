@@ -1,6 +1,22 @@
 import type { UploadForm, VideoData } from '@/types/videohub'
 
-export interface UploadCallbacks { onProgress(percent: number): void }
+export interface UploadMetrics {
+  totalBytes: number
+  totalDurationMs: number
+  throughputBytesPerSecond: number
+  partCount: number
+  completedParts: number
+  retryCount: number
+  retryRate: number
+  averagePartDurationMs: number
+  finalConcurrency: number
+  directUpload: boolean
+}
+
+export interface UploadCallbacks {
+  onProgress(percent: number): void
+  onMetrics?(metrics: UploadMetrics): void
+}
 export interface UploadCancel { cancelled: boolean }
 export interface MultipartCompletePart {
   part_number: number
@@ -18,10 +34,11 @@ export class UploadCancelledError extends Error {
   }
 }
 
-// 分片大小：5 MB（MinIO multipart 最小限制；过小会导致签名请求过多）
-export const PART_SIZE = 5 * 1024 * 1024
-// 同源后端代理会占用服务端连接，生产环境保持较低并发以降低排队和超时概率。
-const MAX_CONCURRENCY = 2
+// 服务端会按文件大小返回 8MB 或 16MB；该值只作为兼容旧后端的兜底。
+export const PART_SIZE = 8 * 1024 * 1024
+export const DEFAULT_INITIAL_CONCURRENCY = 2
+export const DEFAULT_MIN_CONCURRENCY = 1
+export const DEFAULT_MAX_CONCURRENCY = 4
 // 单片最大重试次数：网络抖动时重传，避免整文件从头再来
 export const MAX_RETRIES = 3
 const RETRY_BACKOFF_MS = 700
@@ -39,9 +56,29 @@ interface UploadRequestResult {
   responseBody: string
 }
 
+interface MultipartInitResponse {
+  video_id: string
+  object_key: string
+  upload_id: string
+  part_size_bytes?: number
+  recommended_part_size_bytes?: number
+  initial_concurrency?: number
+  min_concurrency?: number
+  max_concurrency?: number
+  sign_ttl_seconds?: number
+  direct_upload?: boolean
+  already_exists?: boolean
+}
+
+interface MultipartSignResponse {
+  part_url: string
+  expires_at?: string
+  direct_upload?: boolean
+}
+
 // 分片直传架构（VP-T002）：
 // 1) POST /api/custom/uploads/multipart/init 拿 upload_id + video_id + object_key
-// 2) 切片 + 并发 PUT 到同源后端（后端在内网写入 MinIO）
+// 2) 后端签名，浏览器优先 PUT 到公网 MinIO；未暴露 MinIO 时走受校验网关
 // 3) POST /api/custom/uploads/multipart/complete 后端合并 + 写库 + 入 thumbnail job
 //
 // 与单次直传相比：
@@ -62,14 +99,15 @@ export function uploadVideo(
   const trace: UploadTrace = { traceId: createUploadTraceId() }
 
   // 提到外层以便 catch 调 abort 清理
-  let init: { video_id: string; object_key: string; upload_id: string } | undefined
+  let init: MultipartInitResponse | undefined
   let multipartCompleted = false
+  const uploadStartedAt = Date.now()
 
   logUploadEvent('upload_start', trace, {
     filename: file.name,
     file_size: file.size,
     part_size: PART_SIZE,
-    max_concurrency: MAX_CONCURRENCY,
+    max_concurrency: DEFAULT_MAX_CONCURRENCY,
     max_retries: MAX_RETRIES,
   })
   callbacks.onProgress(2)
@@ -89,7 +127,8 @@ export function uploadVideo(
           content_type: file.type || 'application/octet-stream',
           video_type: videoType,
           file_size_bytes: file.size,
-          part_size_bytes: PART_SIZE,
+          part_size_bytes: 0,
+          idempotency_key: trace.traceId,
         }),
       },
       trace,
@@ -101,63 +140,95 @@ export function uploadVideo(
       const data = parseJson<{ error?: string }>(initRequest.responseBody)
       throw new Error(data?.error || `初始化分片上传失败（HTTP ${initRes.status}）`)
     }
-    init = parseJson<typeof init>(initRequest.responseBody)
+    init = parseJson<MultipartInitResponse>(initRequest.responseBody)
     if (!init?.video_id || !init.object_key || !init.upload_id) {
       throw new Error('初始化分片上传响应缺少 video_id、object_key 或 upload_id')
     }
+    const partSize = init.part_size_bytes || init.recommended_part_size_bytes || PART_SIZE
+    const initialConcurrency = init.initial_concurrency || DEFAULT_INITIAL_CONCURRENCY
+    const minConcurrency = init.min_concurrency || DEFAULT_MIN_CONCURRENCY
+    const maxConcurrency = Math.max(minConcurrency, init.max_concurrency || DEFAULT_MAX_CONCURRENCY)
+    const directUpload = !!init.direct_upload
     logUploadEvent('init_ready', trace, {
       video_id: init.video_id,
       upload_id: init.upload_id,
       object_key: init.object_key,
+      part_size: partSize,
+      initial_concurrency: initialConcurrency,
+      min_concurrency: minConcurrency,
+      max_concurrency: maxConcurrency,
+      direct_upload: directUpload,
     })
 
     // 步骤 2：切片 + 并发上传
-    const totalParts = Math.max(1, Math.ceil(file.size / PART_SIZE))
+    const totalParts = getMultipartPartSizes(file.size, partSize).length
     const uploadedBytes = { count: 0 }
     const completedParts = new Map<number, string>()
+    const partDurations: number[] = []
+    let retryCount = 0
+    const concurrency = new AdaptiveConcurrencyController({
+      initial: initialConcurrency,
+      min: minConcurrency,
+      max: maxConcurrency,
+    })
     // 跟踪 in-flight XHR，用户取消时统一 abort
     const inFlightXhrs: XMLHttpRequest[] = []
 
     const partIndexes = Array.from({ length: totalParts }, (_, i) => i)
-    await runPool(partIndexes, MAX_CONCURRENCY, async (partIdx) => {
+    await runAdaptivePool(partIndexes, concurrency, async (partIdx) => {
       if (cancel.cancelled) throw new UploadCancelledError()
 
       const partNumber = partIdx + 1
-      const start = partIdx * PART_SIZE
-      const end = Math.min(start + PART_SIZE, file.size)
+      const start = partIdx * partSize
+      const end = Math.min(start + partSize, file.size)
       const blob = file.slice(start, end)
+      const partStartedAt = Date.now()
+      let attempts = 0
 
       const etag = await uploadPartWithRetry(
         partNumber,
         totalParts,
-        async (attempt) => putPartViaXhr(
-          '/api/custom/uploads/multipart/part',
-          blob,
-          cancel,
-          inFlightXhrs,
-          {
-            'X-Video-ID': init!.video_id,
-            'X-Object-Key': init!.object_key,
-            'X-Upload-ID': init!.upload_id,
-            'X-Part-Number': String(partNumber),
-            [UPLOAD_TRACE_HEADER]: trace.traceId,
-            [UPLOAD_ATTEMPT_HEADER]: String(attempt),
-          },
-          trace,
-          { videoId: init!.video_id, uploadId: init!.upload_id, partNumber, attempt, totalParts },
-        ),
+        async (attempt) => {
+          attempts = attempt
+          const signed = await signMultipartPart(init!, partNumber, trace, attempt)
+          const direct = signed.direct_upload ?? directUpload
+          const headers: Record<string, string> = direct
+            ? {}
+            : {
+                'X-Video-ID': init!.video_id,
+                'X-Object-Key': init!.object_key,
+                'X-Upload-ID': init!.upload_id,
+                'X-Part-Number': String(partNumber),
+                [UPLOAD_TRACE_HEADER]: trace.traceId,
+                [UPLOAD_ATTEMPT_HEADER]: String(attempt),
+              }
+          return putPartViaXhr(
+            signed.part_url || '/api/custom/uploads/multipart/part',
+            blob,
+            cancel,
+            inFlightXhrs,
+            headers,
+            trace,
+            { videoId: init!.video_id, uploadId: init!.upload_id, partNumber, attempt, totalParts, directUpload: direct },
+          )
+        },
         {
           cancel,
           maxRetries: MAX_RETRIES,
           retryDelayMs: RETRY_BACKOFF_MS,
-          onAttemptFailed: (attempt, error) => logUploadEvent('part_attempt_failed', trace, {
-            video_id: init!.video_id,
-            upload_id: init!.upload_id,
-            part_number: partNumber,
-            attempt,
-            max_retries: MAX_RETRIES,
-            error: errorMessage(error),
-          }, 'warn'),
+          onAttemptFailed: (attempt, error) => {
+            retryCount++
+            concurrency.recordFailure()
+            logUploadEvent('part_attempt_failed', trace, {
+              video_id: init!.video_id,
+              upload_id: init!.upload_id,
+              part_number: partNumber,
+              attempt,
+              max_retries: MAX_RETRIES,
+              current_concurrency: concurrency.current,
+              error: errorMessage(error),
+            }, 'warn')
+          },
           onRetryExhausted: (error) => logUploadEvent('part_retry_exhausted', trace, {
             video_id: init!.video_id,
             upload_id: init!.upload_id,
@@ -167,6 +238,9 @@ export function uploadVideo(
           }, 'error'),
         },
       )
+      const elapsedMs = Date.now() - partStartedAt
+      partDurations.push(elapsedMs)
+      concurrency.recordSuccess(elapsedMs, attempts > 1)
       if (completedParts.has(partNumber)) {
         throw new Error(`分片 ${partNumber}/${totalParts} 重复上传完成`)
       }
@@ -176,6 +250,22 @@ export function uploadVideo(
       const pct = 2 + Math.floor((uploadedBytes.count / file.size) * 93)
       callbacks.onProgress(Math.min(pct, 95))
     })
+
+    const totalDurationMs = Math.max(1, Date.now() - uploadStartedAt)
+    const metrics: UploadMetrics = {
+      totalBytes: file.size,
+      totalDurationMs,
+      throughputBytesPerSecond: file.size / (totalDurationMs / 1000),
+      partCount: totalParts,
+      completedParts: completedParts.size,
+      retryCount,
+      retryRate: retryCount / Math.max(1, retryCount + completedParts.size),
+      averagePartDurationMs: partDurations.reduce((sum, value) => sum + value, 0) / Math.max(1, partDurations.length),
+      finalConcurrency: concurrency.current,
+      directUpload,
+    }
+    callbacks.onMetrics?.(metrics)
+    logUploadEvent('upload_metrics', trace, { ...metrics })
 
     if (cancel.cancelled) throw new UploadCancelledError()
 
@@ -350,6 +440,89 @@ export function getMultipartPartSizes(
   })
 }
 
+export interface AdaptiveConcurrencyOptions {
+  initial: number
+  min: number
+  max: number
+  targetPartDurationMs?: number
+  stableSuccessesToIncrease?: number
+}
+
+export class AdaptiveConcurrencyController {
+  private readonly minimum: number
+  private readonly maximum: number
+  private readonly targetPartDurationMs: number
+  private readonly stableSuccessesToIncrease: number
+  private stableSuccesses = 0
+  private value: number
+
+  constructor(options: AdaptiveConcurrencyOptions) {
+    this.minimum = Math.max(1, Math.floor(options.min || 1))
+    this.maximum = Math.max(this.minimum, Math.floor(options.max || this.minimum))
+    this.value = Math.min(this.maximum, Math.max(this.minimum, Math.floor(options.initial || this.minimum)))
+    this.targetPartDurationMs = options.targetPartDurationMs ?? 60_000
+    this.stableSuccessesToIncrease = Math.max(1, options.stableSuccessesToIncrease ?? 2)
+  }
+
+  get current(): number {
+    return this.value
+  }
+
+  recordFailure(): void {
+    this.stableSuccesses = 0
+    this.value = Math.max(this.minimum, this.value - 1)
+  }
+
+  recordSuccess(durationMs: number, retried: boolean): void {
+    if (retried || durationMs > this.targetPartDurationMs) {
+      this.stableSuccesses = 0
+      return
+    }
+    if (this.value >= this.maximum) return
+    this.stableSuccesses++
+    if (this.stableSuccesses >= this.stableSuccessesToIncrease) {
+      this.value++
+      this.stableSuccesses = 0
+    }
+  }
+}
+
+export async function runAdaptivePool<T>(
+  items: T[],
+  controller: AdaptiveConcurrencyController,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  if (items.length === 0) return
+  await new Promise<void>((resolve, reject) => {
+    let cursor = 0
+    let active = 0
+    let settled = false
+
+    const pump = () => {
+      if (settled) return
+      while (active < controller.current && cursor < items.length) {
+        const item = items[cursor++]
+        active++
+        Promise.resolve(worker(item)).then(() => {
+          active--
+          if (cursor >= items.length && active === 0) {
+            settled = true
+            resolve()
+            return
+          }
+          pump()
+        }).catch(error => {
+          if (settled) return
+          settled = true
+          reject(error)
+        })
+      }
+    }
+
+    pump()
+  })
+}
+
 export interface MultipartRetryOptions {
   cancel?: UploadCancel
   maxRetries?: number
@@ -357,6 +530,40 @@ export interface MultipartRetryOptions {
   sleep?: (ms: number) => Promise<void>
   onAttemptFailed?: (attempt: number, error: unknown) => void
   onRetryExhausted?: (error: unknown) => void
+}
+
+async function signMultipartPart(
+  init: MultipartInitResponse,
+  partNumber: number,
+  trace: UploadTrace,
+  attempt: number,
+): Promise<MultipartSignResponse> {
+  const request = await fetchWithUploadDiagnostics(
+    '/api/custom/uploads/multipart/sign',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [UPLOAD_TRACE_HEADER]: trace.traceId,
+        [UPLOAD_ATTEMPT_HEADER]: String(attempt),
+      },
+      body: JSON.stringify({
+        video_id: init.video_id,
+        object_key: init.object_key,
+        upload_id: init.upload_id,
+        part_number: partNumber,
+      }),
+    },
+    trace,
+    { stage: 'sign', videoId: init.video_id, uploadId: init.upload_id, partNumber, attempt },
+  )
+  if (!request.response.ok) {
+    const data = parseJson<{ error?: string }>(request.responseBody)
+    throw new Error(data?.error || `分片签名失败（HTTP ${request.response.status}）`)
+  }
+  const signed = parseJson<MultipartSignResponse>(request.responseBody)
+  if (!signed.part_url) throw new Error('分片签名响应缺少 part_url')
+  return signed
 }
 
 // Keep retry behavior independent from XHR so the browser path and the
@@ -552,7 +759,7 @@ async function putPartViaXhr(
   inFlightXhrs: XMLHttpRequest[],
   headers: Record<string, string>,
   trace: UploadTrace,
-  metadata: { videoId: string; uploadId: string; partNumber: number; attempt: number; totalParts: number },
+  metadata: { videoId: string; uploadId: string; partNumber: number; attempt: number; totalParts: number; directUpload?: boolean },
 ): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const xhr = new XMLHttpRequest()

@@ -16,6 +16,7 @@ type Config struct {
 	Database DatabaseConfig
 	WeKnora  WeKnoraConfig
 	MinIO    MinIOConfig
+	Upload   UploadConfig
 	Tongyi   TongyiConfig
 	Worker   WorkerConfig
 }
@@ -54,7 +55,20 @@ type MinIOConfig struct {
 	Bucket    string // 视频 / 字幕 / 封面存放桶
 	UseSSL    bool
 	PublicURL string // 给前端展示用的公开地址（可能走 nginx 反代）
+	UploadURL string // 浏览器 presigned 上传地址（必须是公网 MinIO/S3 endpoint）
 	LocalDir  string // local backend 使用的本机对象存储目录
+}
+
+// UploadConfig 上传性能与 presigned 直传配置。
+// PartSizeBytes 只控制服务端默认建议值；客户端会把最终值回传到 init，
+// 便于在不重新构建前端的情况下按机器资源调优。
+type UploadConfig struct {
+	PartSizeBytes           int64
+	LargeFileThresholdBytes int64
+	InitialConcurrency      int
+	MinConcurrency          int
+	MaxConcurrency          int
+	SignTTLSeconds          int
 }
 
 // TongyiConfig 通义听悟配置（视频转写）
@@ -122,7 +136,16 @@ func Load() *Config {
 			Bucket:    getEnv("MINIO_BUCKET", "vidsage"),
 			UseSSL:    getEnvBool("MINIO_USE_SSL", false),
 			PublicURL: getEnv("MINIO_PUBLIC_URL", ""),
+			UploadURL: getEnv("MINIO_UPLOAD_URL", ""),
 			LocalDir:  getEnv("CUSTOM_STORAGE_DIR", "./data/custom-storage"),
+		},
+		Upload: UploadConfig{
+			PartSizeBytes:           getEnvInt64("CUSTOM_UPLOAD_PART_SIZE_MB", 8) * 1024 * 1024,
+			LargeFileThresholdBytes: getEnvInt64("CUSTOM_UPLOAD_LARGE_FILE_THRESHOLD_MB", 256) * 1024 * 1024,
+			InitialConcurrency:      getEnvInt("CUSTOM_UPLOAD_INITIAL_CONCURRENCY", 2),
+			MinConcurrency:          getEnvInt("CUSTOM_UPLOAD_MIN_CONCURRENCY", 1),
+			MaxConcurrency:          getEnvInt("CUSTOM_UPLOAD_MAX_CONCURRENCY", 4),
+			SignTTLSeconds:          getEnvInt("CUSTOM_UPLOAD_SIGN_TTL_SECONDS", 3600),
 		},
 		Tongyi: TongyiConfig{
 			APIKey:          getEnv("TONGYI_API_KEY", ""),
@@ -150,6 +173,15 @@ func getEnv(key, def string) string {
 func getEnvInt(key string, def int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func getEnvInt64(key string, def int64) int64 {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			return n
 		}
 	}

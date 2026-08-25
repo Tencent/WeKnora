@@ -41,6 +41,7 @@ type Client struct {
 	mode        Mode
 	core        *minio.Core
 	publicCore  *minio.Core
+	uploadCore  *minio.Core
 	bucket      string
 	publicURL   string
 	internalURL string
@@ -98,11 +99,27 @@ func New(cfg config.MinIOConfig) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("minio public core new: %w", err)
 	}
+	var uploadCore *minio.Core
+	if uploadURL := strings.TrimSpace(cfg.UploadURL); uploadURL != "" {
+		u, parseErr := url.Parse(uploadURL)
+		if parseErr != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return nil, fmt.Errorf("invalid MINIO_UPLOAD_URL: %q", cfg.UploadURL)
+		}
+		uploadCore, err = minio.NewCore(u.Host, &minio.Options{
+			Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
+			Secure: u.Scheme == "https",
+			Region: "us-east-1",
+		})
+		if err != nil {
+			return nil, fmt.Errorf("minio upload core new: %w", err)
+		}
+	}
 
 	return &Client{
 		mode:        ModeMinIO,
 		core:        core,
 		publicCore:  publicCore,
+		uploadCore:  uploadCore,
 		bucket:      cfg.Bucket,
 		publicURL:   strings.TrimRight(cfg.PublicURL, "/"),
 		internalURL: fmt.Sprintf("%s://%s", scheme, cfg.Endpoint),
@@ -143,6 +160,10 @@ var ErrMultipartRequestRead = errors.New("multipart request body read failed")
 // ErrMultipartStorageWrite identifies a failure while persisting a part in
 // local storage or MinIO.
 var ErrMultipartStorageWrite = errors.New("multipart storage write failed")
+
+// ErrBrowserDirectUploadUnavailable indicates that the deployment has no
+// public S3-compatible endpoint for browser uploads.
+var ErrBrowserDirectUploadUnavailable = errors.New("browser direct upload endpoint is not configured")
 
 // PresignPut 生成单次 PUT presigned URL（VP-T001）
 func (c *Client) PresignPut(ctx context.Context, objectKey string, ttl time.Duration) (*PresignResult, error) {
@@ -199,17 +220,26 @@ func (c *Client) PresignPart(ctx context.Context, objectKey, uploadID string, pa
 		ttl = 1 * time.Hour
 	}
 	if c.IsLocal() {
-		return c.localMultipartPartURL(uploadID, partNumber), nil
+		return "", ErrBrowserDirectUploadUnavailable
+	}
+	if c.uploadCore == nil {
+		return "", ErrBrowserDirectUploadUnavailable
 	}
 	reqParams := url.Values{
 		"partNumber": []string{fmt.Sprintf("%d", partNumber)},
 		"uploadId":   []string{uploadID},
 	}
-	signed, err := c.publicCore.PresignHeader(ctx, http.MethodPut, c.bucket, objectKey, ttl, reqParams, nil)
+	signed, err := c.uploadCore.PresignHeader(ctx, http.MethodPut, c.bucket, objectKey, ttl, reqParams, nil)
 	if err != nil {
 		return "", fmt.Errorf("presign part: %w", err)
 	}
 	return signed.String(), nil
+}
+
+// BrowserDirectUploadAvailable reports whether the browser can write parts
+// directly to the object store instead of streaming them through the backend.
+func (c *Client) BrowserDirectUploadAvailable() bool {
+	return c != nil && !c.IsLocal() && c.uploadCore != nil
 }
 
 // UploadMultipartPart 通过服务端连接 MinIO 上传单个分片并返回 ETag。

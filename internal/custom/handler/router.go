@@ -61,7 +61,7 @@ func buildRouter(deps *Deps) *gin.Engine {
 	})
 
 	if deps.MinIO != nil {
-		uh := NewUploadHandler(deps.DB, deps.MinIO)
+		uh := NewUploadHandler(deps.DB, deps.MinIO, deps.Cfg.Upload)
 		uploads := api.Group("/uploads")
 		uploads.POST("/presign", uh.Presign)
 		uploads.POST("/confirm", uh.Confirm)
