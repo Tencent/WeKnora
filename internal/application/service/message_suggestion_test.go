@@ -34,11 +34,11 @@ func TestParseGeneratedSuggestionsFiltersAndDeduplicates(t *testing.T) {
 }
 
 func TestFilterSuggestionItemsAgainstQueryDropsNormalizedEchoes(t *testing.T) {
-	const currentQuery = "介绍一下江苏省劳动争议仲裁委员会"
+	const currentQuery = "介绍一下手冲咖啡"
 	items := types.SuggestionItems{
-		{ID: "model-echo", Text: "介绍一下 江苏省劳动争议仲裁委员会？", Source: "model"},
-		{ID: "wiki-echo", Text: "介绍一下江苏省劳动争议仲裁委员会。", Source: "wiki"},
-		{ID: "keep", Text: "该委员会目前是否已经更名？", Source: "model"},
+		{ID: "model-echo", Text: "介绍一下 手冲咖啡？", Source: "model"},
+		{ID: "wiki-echo", Text: "介绍一下手冲咖啡。", Source: "wiki"},
+		{ID: "keep", Text: "手冲咖啡适合用什么水温？", Source: "model"},
 	}
 	got := filterSuggestionItemsAgainstQuery(items, currentQuery)
 	if len(got) != 1 || got[0].ID != "keep" {
@@ -81,14 +81,14 @@ func TestSuggestionMatchesQueryIgnoresPunctuationAndCase(t *testing.T) {
 // Removing the echo must not collapse the hybrid layout: the knowledge slot
 // should be filled by the next knowledge candidate, not stolen by the model.
 func TestMergeHybridKeepsLayoutAfterEchoRemoved(t *testing.T) {
-	const currentQuery = "介绍一下江苏省劳动争议仲裁委员会"
+	const currentQuery = "介绍一下手冲咖啡"
 	model := types.SuggestionItems{
-		{ID: "m1", Text: "该机构是否已更名？", Source: "model"},
-		{ID: "m2", Text: "苏高法审委〔2011〕14号规定了什么？", Source: "model"},
+		{ID: "m1", Text: "手冲咖啡适合用什么水温？", Source: "model"},
+		{ID: "m2", Text: "如何选择咖啡豆？", Source: "model"},
 	}
 	knowledge := filterSuggestionItemsAgainstQuery(types.SuggestionItems{
 		{ID: "k-echo", Text: currentQuery, Source: "wiki"},
-		{ID: "k2", Text: "什么是劳动争议受理范围？", Source: "wiki"},
+		{ID: "k2", Text: "咖啡豆应该如何保存？", Source: "wiki"},
 	}, currentQuery)
 
 	got := mergeHybridSuggestionItems(model, knowledge, 3)
