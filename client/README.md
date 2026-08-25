@@ -15,6 +15,7 @@
 7. **分块管理**：查询、更新和删除知识分块
 8. **消息管理**：获取和删除会话消息
 9. **模型管理**：创建、获取、更新和删除模型
+10. **沙箱技能**：向沙箱配置安装技能（zip 上传，或从 ClawHub / SkillHub / GitHub 等来源）
 
 ## 使用方法
 
@@ -384,6 +385,17 @@ olderMessages, err := apiClient.GetMessagesBefore(context.Background(), sessionI
 if err != nil {
     // 处理错误
 }
+```
+
+### 示例：从托管平台安装沙箱技能
+
+```go
+skillID, err := apiClient.InstallSandboxSkillFromSource(
+    context.Background(), sandboxConfigID, "@owner/slug", "")
+if err != nil {
+    // 处理错误
+}
+_ = skillID // 用 skillID 订阅 /sandbox-configs/{id}/skills/{skillID}/install-events
 ```
 
 ## 完整示例

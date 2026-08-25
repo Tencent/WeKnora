@@ -35,9 +35,12 @@ type fakeSandboxSkillService struct {
 	getErr   error
 	patchErr error
 
-	installID  string
-	installErr error
-	removeErr  error
+	installID     string
+	installErr    error
+	installSource string
+	installToken  string
+	sourceErr     error
+	removeErr     error
 
 	last      service.SkillProgress
 	hasLast   bool
@@ -118,6 +121,14 @@ func (f *fakeSandboxSkillService) InstallSkill(
 ) (string, error) {
 	f.installTenant, f.installConfig, f.installBytes = tenantID, configID, archive
 	return f.installID, f.installErr
+}
+
+func (f *fakeSandboxSkillService) InstallSkillFromSource(
+	_ context.Context, tenantID uint64, configID, source, token string,
+) (string, error) {
+	f.installTenant, f.installConfig = tenantID, configID
+	f.installSource, f.installToken = source, token
+	return f.installID, f.sourceErr
 }
 
 func (f *fakeSandboxSkillService) RemoveSkill(
@@ -264,6 +275,55 @@ func TestSandboxSkillUploadAcceptedReturnsSkillID(t *testing.T) {
 	require.Equal(t, testSkillTenantID, svc.installTenant)
 	require.Equal(t, "cfg-a", svc.installConfig)
 	require.Equal(t, []byte("zip-bytes"), svc.installBytes)
+}
+
+func TestSandboxSkillInstallFromSourceAcceptedReturnsSkillID(t *testing.T) {
+	svc := &fakeSandboxSkillService{installID: "skill-9"}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+
+	body := `{"source":"@owner/demo","token":"sk_test"}`
+	req := httptest.NewRequest(http.MethodPost, "/sandbox-configs/cfg-a/skills",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusAccepted, w.Code)
+	require.Equal(t, testSkillTenantID, svc.installTenant)
+	require.Equal(t, "cfg-a", svc.installConfig)
+	require.Equal(t, "@owner/demo", svc.installSource)
+	require.Equal(t, "sk_test", svc.installToken)
+	require.Nil(t, svc.installBytes, "a source install must not look like an upload")
+}
+
+func TestSandboxSkillInstallFromSourceRequiresSource(t *testing.T) {
+	svc := &fakeSandboxSkillService{}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+
+	req := httptest.NewRequest(http.MethodPost, "/sandbox-configs/cfg-a/skills",
+		strings.NewReader(`{"source":"  "}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Empty(t, svc.installSource)
+}
+
+func TestSandboxSkillInstallFromSourceInvalidReturns400(t *testing.T) {
+	svc := &fakeSandboxSkillService{
+		sourceErr: fmt.Errorf("%w: only http(s) sources are allowed", service.ErrSkillSourceInvalid),
+	}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+
+	req := httptest.NewRequest(http.MethodPost, "/sandbox-configs/cfg-a/skills",
+		strings.NewReader(`{"source":"file:///etc/passwd"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "only http(s) sources are allowed")
 }
 
 func TestSandboxSkillUploadWithoutFileReturns400(t *testing.T) {

@@ -1036,6 +1036,15 @@ export function uploadConfigSkill(
   }, { timeout: 5 * 60 * 1000 })
 }
 
+export function installConfigSkillFromSource(
+  configId: string,
+  payload: { source: string; token?: string },
+): Promise<{ data: { skill_id: string } }> {
+  return post(`/api/v1/sandbox-configs/${configId}/skills`, payload, {
+    timeout: 2 * 60 * 1000,
+  }) as unknown as Promise<{ data: { skill_id: string } }>
+}
+
 export function patchConfigSkill(
   configId: string,
   skillId: string,

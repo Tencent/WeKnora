@@ -65,6 +65,39 @@
 
       <section class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillInstallGroup') }}</h4>
+        <t-input-adornment class="skill-source-row">
+          <t-input
+            v-model="sourceInput"
+            :placeholder="$t('settings.sandbox.skillSourcePlaceholder')"
+            :disabled="installBusy"
+            @enter="installFromSource"
+          />
+          <template #append>
+            <t-button
+              theme="primary"
+              :loading="installingFromSource"
+              :disabled="!sourceInput.trim() || uploading"
+              @click="installFromSource"
+            >
+              {{ $t('settings.sandbox.skillSourceInstall') }}
+            </t-button>
+          </template>
+        </t-input-adornment>
+        <div v-if="showRegistryToken" class="skill-token-row">
+          <p class="skill-token-label">{{ $t('settings.sandbox.skillSourceTokenLabel') }}</p>
+          <t-input
+            v-model="sourceToken"
+            type="password"
+            size="small"
+            autocomplete="off"
+            :placeholder="$t('settings.sandbox.skillSourceTokenPlaceholder')"
+            :disabled="installBusy"
+          />
+          <p class="skill-token-hint">{{ $t('settings.sandbox.skillSourceTokenHint') }}</p>
+        </div>
+        <div class="skill-install-split">
+          <span>{{ $t('settings.sandbox.skillInstallOr') }}</span>
+        </div>
         <input
           ref="fileInputRef"
           type="file"
@@ -72,17 +105,16 @@
           class="file-input-hidden"
           @change="onFileInputChange"
         />
-
         <div
           class="file-upload-area"
-          :class="{ 'has-file': uploading }"
-          @click="fileInputRef?.click()"
+          :class="{ 'has-file': uploading, 'is-disabled': installBusy }"
+          @click="!installBusy && fileInputRef?.click()"
           @dragover.prevent
           @dragenter.prevent
           @drop.prevent="onFileDrop"
         >
           <div class="file-upload-content">
-            <t-icon name="upload" size="28px" class="upload-icon" />
+            <t-icon name="upload" size="18px" class="upload-icon" />
             <div class="upload-text">
               <span v-if="uploading" class="upload-file-name">
                 {{ $t('settings.sandbox.skillUploading', { percent: uploadPercent }) }}
@@ -274,6 +306,7 @@ import {
   listConfigSkills,
   patchConfigSkill,
   uploadConfigSkill,
+  installConfigSkillFromSource,
   type ConfigSkill,
   type ConfigSkillInstallEvent,
   type SandboxConfigRecord,
@@ -297,7 +330,11 @@ const { t, locale } = useI18n()
 
 const loading = ref(false)
 const uploading = ref(false)
+const installingFromSource = ref(false)
 const uploadPercent = ref(0)
+const sourceInput = ref('')
+const sourceToken = ref('')
+const forceRegistryToken = ref(false)
 const skills = ref<ConfigSkill[]>([])
 const skillImage = ref<SandboxSkillImage | null>(null)
 const togglingId = ref('')
@@ -331,6 +368,9 @@ const uploadHint = computed(() =>
     ? t('settings.sandbox.skillUploadHintNewSession')
     : t('settings.sandbox.skillUploadHint'),
 )
+const installBusy = computed(() => uploading.value || installingFromSource.value)
+const sourceNeedsRegistryToken = computed(() => looksLikePrivateSkillHub(sourceInput.value))
+const showRegistryToken = computed(() => sourceNeedsRegistryToken.value || forceRegistryToken.value)
 const deleteHint = computed(() =>
   skillRollout.value === 'new_session'
     ? t('settings.sandbox.skillDeleteHintNewSession')
@@ -341,6 +381,48 @@ const runtimeTemplateId = computed(() => {
   return cfg?.cube?.template_id?.trim() || cfg?.e2b?.template_id?.trim() || ''
 })
 const hasSkillSnapshot = computed(() => Boolean(skillImage.value?.snapshot_id?.trim()))
+
+const PUBLIC_SKILL_HOSTS = new Set([
+  'github.com',
+  'www.github.com',
+  'codeload.github.com',
+  'gitlab.com',
+  'www.gitlab.com',
+  'skills.sh',
+  'www.skills.sh',
+  'clawhub.ai',
+  'www.clawhub.ai',
+  'clawhub.com',
+  'www.clawhub.com',
+  'skillhub.cn',
+  'www.skillhub.cn',
+  'api.skillhub.cn',
+])
+
+function looksLikePrivateSkillHub(raw: string): boolean {
+  const input = raw.trim()
+  if (!input.includes('://')) return false
+  try {
+    const parsed = new URL(input)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
+    return !PUBLIC_SKILL_HOSTS.has(parsed.hostname.toLowerCase())
+  } catch {
+    return false
+  }
+}
+
+function isRegistryAuthError(err: unknown): boolean {
+  const message = err && typeof err === 'object' && 'message' in err
+    ? String((err as { message?: unknown }).message)
+    : String(err ?? '')
+  return /\bHTTP 401\b/.test(message) || /\bHTTP 403\b/.test(message)
+}
+
+watch(sourceInput, (value) => {
+  if (!looksLikePrivateSkillHub(value)) {
+    forceRegistryToken.value = false
+  }
+})
 
 function readLastChatModelID(): string {
   try {
@@ -627,7 +709,7 @@ function isZipFile(file: File): boolean {
 }
 
 async function uploadFile(file: File) {
-  if (!props.record || uploading.value) return
+  if (!props.record || installBusy.value) return
   if (!installerModelId.value) {
     MessagePlugin.warning(t('settings.sandbox.skillInstallerModelRequired'))
     return
@@ -657,6 +739,38 @@ async function uploadFile(file: File) {
   }
 }
 
+async function installFromSource() {
+  if (!props.record || installBusy.value) return
+  const source = sourceInput.value.trim()
+  if (!source) return
+  if (!installerModelId.value) {
+    MessagePlugin.warning(t('settings.sandbox.skillInstallerModelRequired'))
+    return
+  }
+  installingFromSource.value = true
+  try {
+    await persistInstallerModel(installerModelId.value)
+    const token = showRegistryToken.value ? sourceToken.value.trim() : ''
+    const res = await installConfigSkillFromSource(props.record.id, {
+      source,
+      ...(token ? { token } : {}),
+    })
+    MessagePlugin.success(t('settings.sandbox.skillUploadAccepted'))
+    sourceInput.value = ''
+    sourceToken.value = ''
+    forceRegistryToken.value = false
+    const skillId = res?.data?.skill_id
+    await loadSkills()
+    await refreshImage()
+    if (skillId) followProgress(skillId)
+  } catch (e: any) {
+    if (isRegistryAuthError(e)) forceRegistryToken.value = true
+    MessagePlugin.error(e?.message || t('settings.sandbox.skillSourceFailed'))
+  } finally {
+    installingFromSource.value = false
+  }
+}
+
 function onFileInputChange(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
@@ -664,6 +778,7 @@ function onFileInputChange(event: Event) {
 }
 
 function onFileDrop(event: DragEvent) {
+  if (installBusy.value) return
   const file = event.dataTransfer?.files?.[0]
   if (file) void uploadFile(file)
 }
@@ -794,17 +909,17 @@ onUnmounted(() => {
 .file-upload-area {
   position: relative;
   width: 100%;
-  min-height: 120px;
-  border: 2px dashed var(--td-component-stroke);
-  border-radius: 8px;
+  min-height: 44px;
+  border: 1px dashed var(--td-component-stroke);
+  border-radius: 6px;
   background: var(--td-bg-color-secondarycontainer);
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: border-color 0.2s ease, background 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
 
-  &:hover {
+  &:hover:not(.is-disabled) {
     border-color: var(--td-brand-color);
     background: var(--td-success-color-light);
   }
@@ -814,31 +929,37 @@ onUnmounted(() => {
     background: var(--td-success-color-light);
     border-style: solid;
   }
+
+  &.is-disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
 }
 
 .file-upload-content {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  justify-content: center;
+  gap: 8px;
   text-align: center;
-  padding: 16px;
+  padding: 8px 12px;
   width: 100%;
 }
 
 .upload-icon {
   color: var(--td-brand-color);
-  transition: transform 0.2s ease;
-}
-
-.file-upload-area:hover .upload-icon {
-  transform: translateY(-2px);
+  flex-shrink: 0;
 }
 
 .upload-text {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px 8px;
 }
 
 .upload-primary-text {
@@ -858,11 +979,63 @@ onUnmounted(() => {
   color: var(--td-brand-color);
 }
 
+.file-upload-content :deep(.t-progress) {
+  flex: 1 1 100%;
+}
+
 .upload-hint {
   margin: 8px 0 0;
   font-size: 12px;
   color: var(--td-text-color-placeholder);
   line-height: 1.5;
+}
+
+.skill-source-row {
+  width: 100%;
+
+  :deep(.t-input-adornment__append .t-button) {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+  }
+}
+
+.skill-token-row {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.skill-token-label {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--td-text-color-secondary);
+}
+
+.skill-token-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--td-text-color-placeholder);
+}
+
+.skill-install-split {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0;
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+
+  &::before,
+  &::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--td-component-stroke);
+  }
 }
 
 .skill-empty {

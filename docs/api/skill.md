@@ -5,6 +5,7 @@
 | 方法 | 路径      | 描述               |
 | ---- | --------- | ------------------ |
 | GET  | `/skills` | 获取预装 Skills 列表 |
+| POST | `/sandbox-configs/{id}/skills` | 安装技能（zip 上传或托管平台 source） |
 
 ## GET `/skills` - 获取预装 Skills 列表
 
@@ -48,5 +49,48 @@ curl --location 'http://localhost:8080/api/v1/skills' \
     "data": [],
     "skills_available": false,
     "success": true
+}
+```
+
+## POST `/sandbox-configs/{id}/skills` - 安装技能
+
+把技能安装到指定沙箱配置的镜像上。安装会启动沙箱并运行数分钟，本接口只负责受理，随后通过
+`GET /sandbox-configs/{id}/skills/{skillId}/install-events` 跟随进度。
+
+两种请求体二选一：
+
+### 1. 上传 zip（multipart）
+
+```curl
+curl --location 'http://localhost:8080/api/v1/sandbox-configs/{id}/skills' \
+--header 'X-API-Key: sk-xxxxx' \
+--form 'file=@"skill.zip"'
+```
+
+### 2. 从托管平台安装（JSON）
+
+`source` 可以是：
+
+- ClawHub / SkillHub / skillhub.cn 页面链接或 slug（`@owner/slug`、`my-team--skill`）
+- skills.sh / GitHub / GitLab 仓库或目录链接
+- 直接的 zip / `SKILL.md` URL
+
+私有 SkillHub 可带 `token`，仅用于本次下载，服务端不保存。
+
+```curl
+curl --location 'http://localhost:8080/api/v1/sandbox-configs/{id}/skills' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{"source":"@owner/slug"}'
+```
+
+**响应**（202）:
+
+```json
+{
+    "success": true,
+    "data": {
+        "skill_id": "..."
+    }
 }
 ```

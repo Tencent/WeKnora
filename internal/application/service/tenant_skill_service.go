@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -77,6 +78,10 @@ type TenantSkillService struct {
 	messages interfaces.MessageRepository
 
 	now func() time.Time
+
+	// sourceHTTP pulls remote skill archives. Nil means the package SSRF-safe
+	// default; tests inject httptest clients.
+	sourceHTTP *http.Client
 
 	// cleanupTimeout bounds one piece of compensating work. Injectable so a
 	// test can let an install outlast it, which every real install does.
