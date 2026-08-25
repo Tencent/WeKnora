@@ -5141,6 +5141,7 @@ export default {
       imageInfoEmpty: '使用基础模板',
       imageInfoUnset: '未设置',
       skillTranscript: '查看安装过程',
+      skillTranscriptTitle: '安装过程',
       skillTranscriptHide: '收起安装过程',
       skillTranscriptEmpty: '这次安装没有留下记录。',
       skillTranscriptWaiting: '安装已开始，正在等待过程记录…',

@@ -5139,6 +5139,7 @@ export default {
       imageInfoEmpty: 'Using the base template',
       imageInfoUnset: 'Не задано',
       skillTranscript: 'View install run',
+      skillTranscriptTitle: 'Ход установки',
       skillTranscriptHide: 'Hide install run',
       skillTranscriptEmpty: 'This install left no transcript.',
       skillTranscriptWaiting: 'Install has started. Waiting for the process log…',

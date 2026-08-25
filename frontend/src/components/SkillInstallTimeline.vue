@@ -1,5 +1,5 @@
 <template>
-  <section class="skill-timeline" :aria-busy="loading">
+  <section class="skill-timeline" :class="{ 'skill-timeline--compact': compact }" :aria-busy="loading">
     <t-loading v-if="loading && messages.length === 0" size="small" />
     <p v-else-if="messages.length === 0" class="skill-timeline__empty">
       {{ live
@@ -41,6 +41,7 @@ const props = defineProps<{
   // after the installer sandbox is up, so a 404 here means "not yet" rather
   // than "gone" and the stream is retried.
   live?: boolean
+  compact?: boolean
 }>()
 
 const messages = reactive<any[]>([])
@@ -219,5 +220,28 @@ onUnmounted(stop)
   margin: 8px 0;
   color: var(--td-text-color-placeholder, #999);
   font-size: 13px;
+}
+
+.skill-timeline--compact {
+  padding: 10px 12px 12px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.skill-timeline--compact .skill-timeline__prompt {
+  max-height: 72px;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.skill-timeline--compact .skill-timeline__empty {
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+.skill-timeline--compact :deep(.agent-stream-display) {
+  font-size: 12px;
 }
 </style>

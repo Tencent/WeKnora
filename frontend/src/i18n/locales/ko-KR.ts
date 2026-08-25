@@ -5139,6 +5139,7 @@ export default {
       imageInfoEmpty: 'Using the base template',
       imageInfoUnset: '설정되지 않음',
       skillTranscript: 'View install run',
+      skillTranscriptTitle: '설치 과정',
       skillTranscriptHide: 'Hide install run',
       skillTranscriptEmpty: 'This install left no transcript.',
       skillTranscriptWaiting: 'Install has started. Waiting for the process log…',

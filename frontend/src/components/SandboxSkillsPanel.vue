@@ -146,30 +146,67 @@
                       @change="(v: any) => toggleEnabled(skill, Boolean(v))"
                     />
                   </t-tooltip>
-                  <t-tooltip
+                  <t-popup
                     v-if="hasTranscript(skill)"
-                    :content="
-                      expandedSkillId === skill.id
-                        ? $t('settings.sandbox.skillTranscriptHide')
-                        : $t('settings.sandbox.skillTranscript')
-                    "
-                    placement="top"
+                    :visible="expandedSkillId === skill.id"
+                    trigger="click"
+                    placement="bottom-right"
+                    attach="body"
+                    destroy-on-close
+                    overlay-class-name="skill-transcript-popup"
+                    :z-index="3200"
+                    :overlay-inner-style="{ padding: '0' }"
+                    @visible-change="(visible: boolean) => onTranscriptVisible(skill, visible)"
                   >
                     <t-button
                       variant="text"
                       shape="square"
                       class="skill-item__icon-btn"
                       :class="{ 'skill-transcript-toggle--on': expandedSkillId === skill.id }"
-                      @click="toggleTranscript(skill)"
+                      :title="$t('settings.sandbox.skillTranscript')"
                     >
                       <template #icon>
-                        <t-icon
-                          :name="expandedSkillId === skill.id ? 'chevron-up' : 'chat-bubble-history'"
-                          size="16px"
-                        />
+                        <t-icon name="chat-bubble-history" size="16px" />
                       </template>
                     </t-button>
-                  </t-tooltip>
+                    <template #content>
+                      <div class="skill-transcript-popup__panel">
+                        <header class="skill-transcript-popup__head">
+                          <div class="skill-transcript-popup__head-text">
+                            <div class="skill-transcript-popup__title">{{ skill.name || skill.id }}</div>
+                            <div class="skill-transcript-popup__meta">
+                              <span
+                                class="skill-transcript-popup__status"
+                                :data-status="skill.status"
+                              >{{ statusLabel(skill) }}</span>
+                              <span>{{ $t('settings.sandbox.skillTranscriptTitle') }}</span>
+                            </div>
+                          </div>
+                          <t-button
+                            variant="text"
+                            shape="square"
+                            size="small"
+                            class="skill-transcript-popup__close"
+                            :title="$t('common.close')"
+                            @click.stop="onTranscriptVisible(skill, false)"
+                          >
+                            <template #icon><t-icon name="close" size="16px" /></template>
+                          </t-button>
+                        </header>
+                        <div class="skill-transcript-popup__body">
+                          <SkillInstallTimeline
+                            :key="`${skill.id}-${skill.install_session_id || ''}-${transcriptEpoch}`"
+                            compact
+                            :config-id="record?.id || ''"
+                            :skill-id="skill.id"
+                            :session-id="skill.install_session_id || ''"
+                            :message-id="skill.install_message_id || ''"
+                            :live="skill.status === 'installing'"
+                          />
+                        </div>
+                      </div>
+                    </template>
+                  </t-popup>
                   <t-popconfirm
                     theme="warning"
                     :content="deleteHint"
@@ -210,17 +247,6 @@
               </button>
               <p v-if="failedError(skill)" class="skill-item__error">{{ failedError(skill) }}</p>
             </div>
-
-            <SkillInstallTimeline
-              v-if="expandedSkillId === skill.id"
-              :key="`${skill.id}-${skill.install_session_id || ''}-${transcriptEpoch}`"
-              class="skill-item__timeline"
-              :config-id="record?.id || ''"
-              :skill-id="skill.id"
-              :session-id="skill.install_session_id || ''"
-              :message-id="skill.install_message_id || ''"
-              :live="skill.status === 'installing'"
-            />
           </li>
         </ul>
       </section>
@@ -358,16 +384,19 @@ function hasTranscript(skill: ConfigSkill): boolean {
   return Boolean(skill.install_session_id && skill.install_message_id)
 }
 
-function toggleTranscript(skill: ConfigSkill) {
-  if (expandedSkillId.value === skill.id) {
-    expandedSkillId.value = ''
+function onTranscriptVisible(skill: ConfigSkill, visible: boolean) {
+  if (visible) {
+    if (expandedSkillId.value !== skill.id) {
+      expandedSkillId.value = skill.id
+      // A run that finished while the popup was closed was tailed from the
+      // event log; reopening it should read the run again from the top.
+      transcriptEpoch.value += 1
+    }
     return
   }
-  expandedSkillId.value = skill.id
-  // A run that finished while the timeline was open was tailed from the event
-  // log; reopening it should read the run again from the top rather than show
-  // whatever the closed stream left behind.
-  transcriptEpoch.value += 1
+  if (expandedSkillId.value === skill.id) {
+    expandedSkillId.value = ''
+  }
 }
 
 function progressOf(skill: ConfigSkill): number {
@@ -851,8 +880,7 @@ onUnmounted(() => {
   gap: 8px;
 }
 
-// A grid rather than a flex row so the expanded install timeline can span the
-// full width underneath the status + body of the row it belongs to.
+// The install timeline opens in a popup, so the card stays a two-column row.
 .skill-item {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -862,10 +890,6 @@ onUnmounted(() => {
   border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
   background: var(--td-bg-color-container);
-}
-
-.skill-item__timeline {
-  grid-column: 1 / -1;
 }
 
 .skill-transcript-toggle--on {
@@ -977,6 +1001,101 @@ onUnmounted(() => {
 
   :deep(.t-button__icon) {
     margin: 0;
+  }
+}
+</style>
+
+<style lang="less">
+.skill-transcript-popup {
+  z-index: 3200 !important;
+
+  .t-popup__content {
+    padding: 0 !important;
+    width: 420px;
+    max-width: min(420px, calc(100vw - 32px));
+    border-radius: 10px !important;
+    background: var(--td-bg-color-container) !important;
+    border: 1px solid var(--td-component-stroke) !important;
+    box-shadow:
+      0 0 0 0.5px rgba(0, 0, 0, 0.04),
+      0 8px 24px rgba(0, 0, 0, 0.12) !important;
+    overflow: hidden;
+  }
+
+  &__panel {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  &__head {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 8px 10px 14px;
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  &__head-text {
+    min-width: 0;
+    flex: 1;
+  }
+
+  &__title {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--td-text-color-placeholder);
+  }
+
+  &__status {
+    color: var(--td-text-color-secondary);
+
+    &[data-status='installing'],
+    &[data-status='removing'] {
+      color: var(--td-brand-color);
+    }
+
+    &[data-status='failed'] {
+      color: var(--td-error-color);
+    }
+
+    &[data-status='ready'] {
+      color: var(--td-success-color);
+    }
+  }
+
+  &__close {
+    flex-shrink: 0;
+    color: var(--td-text-color-secondary);
+  }
+
+  &__body {
+    max-height: min(360px, 52vh);
+    overflow: auto;
+    background: var(--td-bg-color-secondarycontainer);
+
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: var(--td-bg-color-component-disabled);
+      border-radius: 3px;
+    }
   }
 }
 </style>
