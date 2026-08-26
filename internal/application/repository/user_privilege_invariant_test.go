@@ -88,20 +88,57 @@ func TestPrivilegeRevocationIgnoresDisabledCrossTenantAccessManager(t *testing.T
 	)
 	ctx := context.Background()
 
-	disabledManager, err := repo.GetUserByID(ctx, "disabled-manager")
-	if err != nil {
-		t.Fatalf("load disabled manager: %v", err)
-	}
-	disabledManager.IsActive = false
-	if err := repo.UpdateUser(ctx, disabledManager); err != nil {
-		t.Fatalf("disable manager: %v", err)
-	}
+	disablePrivilegeUser(t, repo, "disabled-manager")
 
 	if _, err := repo.RevokeSystemAdmin(ctx, "active-manager", "actor"); !errors.Is(err, ErrLastCrossTenantAccessManager) {
 		t.Fatalf("revoke system admin error = %v", err)
 	}
 	if _, _, err := repo.RevokeCrossTenantAccess(ctx, "active-manager", "actor"); !errors.Is(err, ErrLastCrossTenantAccessManager) {
 		t.Fatalf("revoke cross-tenant access error = %v", err)
+	}
+}
+
+func TestPrivilegeRevocationAllowsCleaningDisabledCrossTenantAccessManager(t *testing.T) {
+	t.Run("cross-tenant access", func(t *testing.T) {
+		repo := newPrivilegeInvariantRepository(t)
+		createPrivilegeInvariantUsers(t, repo,
+			privilegeUser("active-manager", true, true),
+			privilegeUser("disabled-manager", true, true),
+		)
+		disablePrivilegeUser(t, repo, "disabled-manager")
+
+		user, changed, err := repo.RevokeCrossTenantAccess(
+			context.Background(), "disabled-manager", "active-manager",
+		)
+		if err != nil || !changed || user.CanAccessAllTenants {
+			t.Fatalf("revoke disabled cross-tenant access = user:%+v changed:%v err:%v", user, changed, err)
+		}
+	})
+
+	t.Run("system admin", func(t *testing.T) {
+		repo := newPrivilegeInvariantRepository(t)
+		createPrivilegeInvariantUsers(t, repo,
+			privilegeUser("active-manager", true, true),
+			privilegeUser("disabled-manager", true, true),
+		)
+		disablePrivilegeUser(t, repo, "disabled-manager")
+
+		user, err := repo.RevokeSystemAdmin(context.Background(), "disabled-manager", "active-manager")
+		if err != nil || user.IsSystemAdmin {
+			t.Fatalf("revoke disabled system admin = user:%+v err:%v", user, err)
+		}
+	})
+}
+
+func disablePrivilegeUser(t *testing.T, repo interfaces.UserRepository, userID string) {
+	t.Helper()
+	user, err := repo.GetUserByID(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("load user %s: %v", userID, err)
+	}
+	user.IsActive = false
+	if err := repo.UpdateUser(context.Background(), user); err != nil {
+		t.Fatalf("disable user %s: %v", userID, err)
 	}
 }
 

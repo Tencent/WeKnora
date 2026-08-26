@@ -334,7 +334,7 @@ func (r *userRepository) updateCrossTenantAccess(
 			updated = &user
 			return nil
 		}
-		if !enabled && user.IsSystemAdmin && countCrossTenantAccessManagers(admins) <= 1 {
+		if !enabled && isActiveCrossTenantAccessManager(user) && countCrossTenantAccessManagers(admins) <= 1 {
 			return ErrLastCrossTenantAccessManager
 		}
 
@@ -398,7 +398,7 @@ func (r *userRepository) RevokeSystemAdmin(ctx context.Context, userID, actorID 
 		if len(admins) <= 1 {
 			return ErrLastSystemAdmin
 		}
-		if user.CanAccessAllTenants && countCrossTenantAccessManagers(admins) <= 1 {
+		if isActiveCrossTenantAccessManager(*user) && countCrossTenantAccessManagers(admins) <= 1 {
 			return ErrLastCrossTenantAccessManager
 		}
 
@@ -448,11 +448,15 @@ func withUpdateLock(tx *gorm.DB) *gorm.DB {
 func countCrossTenantAccessManagers(admins []types.User) int {
 	count := 0
 	for i := range admins {
-		if admins[i].IsActive && admins[i].CanAccessAllTenants {
+		if isActiveCrossTenantAccessManager(admins[i]) {
 			count++
 		}
 	}
 	return count
+}
+
+func isActiveCrossTenantAccessManager(user types.User) bool {
+	return user.IsActive && user.IsSystemAdmin && user.CanAccessAllTenants
 }
 
 // SearchUsers searches users by username or email
