@@ -157,6 +157,9 @@ func (c *Connector) fetch(
 			if err != nil {
 				return nil, fmt.Errorf("query %q: %w", query, err)
 			}
+			if len(page.Tweets) > remaining {
+				return nil, fmt.Errorf("query %q returned more posts than requested", query)
+			}
 			pagesFetched++
 
 			for _, post := range page.Tweets {
@@ -179,15 +182,25 @@ func (c *Connector) fetch(
 				state.SeenPostIDs = append(state.SeenPostIDs, id)
 			}
 
-			if !page.hasMore() || resultsFetched >= cfg.ResultsPerQuery {
+			if !page.hasMore() {
 				break
 			}
-			nextCursor := strings.TrimSpace(page.nextCursor())
-			if nextCursor == "" {
-				return nil, fmt.Errorf("query %q reported another page without a cursor", query)
+			nextCursor, err := validatedNextCursor(query, pageCursor, page)
+			if err != nil {
+				return nil, err
 			}
-			if nextCursor == pageCursor {
-				return nil, fmt.Errorf("query %q repeated its cursor", query)
+			if resultsFetched >= cfg.ResultsPerQuery {
+				continuation := state
+				continuation.QueryIndex = queryIndex
+				continuation.Query = query
+				continuation.PageCursor = nextCursor
+				continuation.ResultsFetched = 0
+				continuation.PagesFetched = pagesFetched
+				cursor := connectorCursor(continuation, false)
+				if err := handler.Checkpoint(ctx, cursor); err != nil {
+					return nil, err
+				}
+				return cursor, nil
 			}
 			pageCursor = nextCursor
 			checkpoint := state
@@ -215,6 +228,17 @@ func (c *Connector) fetch(
 	return connectorCursor(state, true), nil
 }
 
+func validatedNextCursor(query string, current string, page searchPage) (string, error) {
+	next := strings.TrimSpace(page.nextCursor())
+	if next == "" {
+		return "", fmt.Errorf("query %q reported another page without a cursor", query)
+	}
+	if next == current {
+		return "", fmt.Errorf("query %q repeated its cursor", query)
+	}
+	return next, nil
+}
+
 func (c *Connector) startState(
 	old *types.SyncCursor,
 	queries []string,
@@ -239,6 +263,7 @@ func (c *Connector) startState(
 		StartedAt:      now,
 		PreviousSyncAt: previous,
 		SinceTime:      since,
+		QueryListHash:  queryListHash(queries),
 	}
 }
 

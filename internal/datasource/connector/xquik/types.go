@@ -2,6 +2,7 @@
 package xquik
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -313,15 +314,19 @@ type cursorState struct {
 	ResultsFetched int       `json:"results_fetched,omitempty"`
 	PagesFetched   int       `json:"pages_fetched,omitempty"`
 	SeenPostIDs    []string  `json:"seen_post_ids,omitempty"`
+	QueryListHash  string    `json:"query_list_hash"`
 }
 
 func (s cursorState) canResume(queries []string, resultsPerQuery int) bool {
 	if !s.InProgress || s.StartedAt.IsZero() || s.QueryIndex < 0 || s.QueryIndex > len(queries) {
 		return false
 	}
+	if s.QueryListHash != queryListHash(queries) {
+		return false
+	}
 	if s.ResultsFetched < 0 || s.ResultsFetched > resultsPerQuery ||
 		s.PagesFetched < 0 || s.PagesFetched > maxPagesPerQuery ||
-		len(s.SeenPostIDs) > len(queries)*resultsPerQuery {
+		len(s.SeenPostIDs) > len(queries)*resultsPerQuery*maxPagesPerQuery {
 		return false
 	}
 	seen := make(map[string]struct{}, len(s.SeenPostIDs))
@@ -341,6 +346,12 @@ func (s cursorState) canResume(queries []string, resultsPerQuery int) bool {
 		return s.PageCursor == "" && s.ResultsFetched == 0 && s.PagesFetched == 0
 	}
 	return s.Query == queries[s.QueryIndex] && s.PageCursor != ""
+}
+
+func queryListHash(queries []string) string {
+	encoded, _ := json.Marshal(queries)
+	digest := sha256.Sum256(encoded)
+	return fmt.Sprintf("%x", digest)
 }
 
 func decodeCursor(cursor *types.SyncCursor) cursorState {
@@ -367,6 +378,7 @@ func connectorCursor(state cursorState, complete bool) *types.SyncCursor {
 		state.ResultsFetched = 0
 		state.PagesFetched = 0
 		state.SeenPostIDs = nil
+		state.QueryListHash = ""
 	}
 	data, _ := json.Marshal(state)
 	values := make(map[string]interface{})

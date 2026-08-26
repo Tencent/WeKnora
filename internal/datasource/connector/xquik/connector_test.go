@@ -205,7 +205,7 @@ func TestConnectorFetchStreamResumesFromCheckpoint(t *testing.T) {
 	started := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	resume := connectorCursor(cursorState{
 		InProgress: true, StartedAt: started, Query: "query", PageCursor: "next",
-		ResultsFetched: 2, PagesFetched: 1,
+		ResultsFetched: 2, PagesFetched: 1, QueryListHash: queryListHash([]string{"query"}),
 	}, false)
 	fake := &fakeAPI{searchFn: func(request searchRequest) (searchPage, error) {
 		return searchPage{Tweets: []tweet{{ID: "3", Text: "Resumed"}}}, nil
@@ -231,6 +231,7 @@ func TestConnectorFetchStreamPreservesDeduplicationAcrossResume(t *testing.T) {
 	started := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	resume := connectorCursor(cursorState{
 		InProgress: true, StartedAt: started, QueryIndex: 1, SeenPostIDs: []string{"1"},
+		QueryListHash: queryListHash([]string{"first", "second"}),
 	}, false)
 	fake := &fakeAPI{searchFn: func(request searchRequest) (searchPage, error) {
 		return searchPage{Tweets: []tweet{{ID: "1"}, {ID: "2"}}}, nil
@@ -250,6 +251,76 @@ func TestConnectorFetchStreamPreservesDeduplicationAcrossResume(t *testing.T) {
 	}
 	if len(handler.items) != 1 || handler.items[0].ExternalID != "xquik:post:2" {
 		t.Fatalf("items = %#v", handler.items)
+	}
+}
+
+func TestConnectorContinuesOverflowWithoutAdvancingSyncTime(t *testing.T) {
+	previous := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
+	started := previous.Add(2 * time.Hour)
+	fake := &fakeAPI{searchFn: func(request searchRequest) (searchPage, error) {
+		if request.Cursor == "" {
+			return searchPage{
+				Tweets: []tweet{{ID: "1"}, {ID: "2"}}, HasNextPage: true, NextCursor: "older",
+			}, nil
+		}
+		if request.Cursor == "older" {
+			return searchPage{Tweets: []tweet{{ID: "3"}}}, nil
+		}
+		return searchPage{}, errors.New("unexpected cursor")
+	}}
+	connector := connectorWith(fake, started)
+	config := testConfig("query")
+	config.ResourceIDs = []string{"query"}
+	config.Settings["results_per_query"] = 2
+
+	firstItems, continuation, err := connector.FetchIncremental(
+		context.Background(), config, &types.SyncCursor{LastSyncTime: previous},
+	)
+	if err != nil {
+		t.Fatalf("first FetchIncremental() error = %v", err)
+	}
+	state := decodeCursor(continuation)
+	if len(firstItems) != 2 || !continuation.LastSyncTime.Equal(previous) ||
+		!state.InProgress || state.PageCursor != "older" || state.ResultsFetched != 0 ||
+		state.QueryListHash != queryListHash([]string{"query"}) {
+		t.Fatalf("first items=%d cursor=%#v state=%#v", len(firstItems), continuation, state)
+	}
+
+	secondItems, final, err := connector.FetchIncremental(context.Background(), config, continuation)
+	if err != nil {
+		t.Fatalf("second FetchIncremental() error = %v", err)
+	}
+	if len(secondItems) != 1 || secondItems[0].ExternalID != "xquik:post:3" ||
+		!final.LastSyncTime.Equal(started) {
+		t.Fatalf("second items=%#v final=%#v", secondItems, final)
+	}
+	if len(fake.requests) != 2 || fake.requests[1].Cursor != "older" ||
+		!fake.requests[1].SinceTime.Equal(previous.Add(-syncOverlap)) ||
+		!fake.requests[1].UntilTime.Equal(started) {
+		t.Fatalf("requests = %#v", fake.requests)
+	}
+}
+
+func TestConnectorRejectsResumeAfterSelectedQueriesChange(t *testing.T) {
+	started := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	resume := connectorCursor(cursorState{
+		InProgress: true, StartedAt: started, QueryIndex: 1,
+		QueryListHash: queryListHash([]string{"first", "second"}),
+	}, false)
+	fake := &fakeAPI{searchFn: func(searchRequest) (searchPage, error) {
+		return searchPage{}, nil
+	}}
+	config := testConfig("replacement\nsecond")
+	config.ResourceIDs = []string{"replacement", "second"}
+
+	_, _, err := connectorWith(fake, started.Add(time.Hour)).FetchIncremental(
+		context.Background(), config, resume,
+	)
+	if err != nil {
+		t.Fatalf("FetchIncremental() error = %v", err)
+	}
+	if len(fake.requests) != 2 || fake.requests[0].Query != "replacement" || fake.requests[0].Cursor != "" {
+		t.Fatalf("requests = %#v", fake.requests)
 	}
 }
 
