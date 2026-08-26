@@ -404,7 +404,7 @@ const onCardMoreVisibleChange = (visible: boolean, item: KnowledgeCard) => {
 let isCardDetails = ref(false);
 let timeout: ReturnType<typeof setTimeout> | null = null;
 const knowledgeScroll = ref<HTMLElement | null>(null);
-const pageSize = 35;
+let pageSize = 35;
 let documentLoadGeneration = 0;
 const resetPage = () => {
   documentLoadGeneration += 1;
@@ -744,6 +744,13 @@ function onTagEditConfirm(tagIds: string[]) {
     handleKnowledgeTagChange(tagEditTarget.value.id, tagIds);
   }
 }
+const getPageSize = () => {
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+  const itemHeight = 148;
+  let itemsInView = Math.floor(viewportHeight / itemHeight) * 5;
+  pageSize = Math.max(35, itemsInView);
+}
+getPageSize()
 // 直接调用 API 获取知识库文件列表
 const getTagName = (tagId?: string | number) => {
   if (!tagId && tagId !== 0) return '';
@@ -772,7 +779,7 @@ const loadKnowledgeFiles = async (kbIdValue: string): Promise<void> => {
     }
   }
 
-  // 每批固定加载 35 个文件，成功后继续下一批，直到当前筛选结果全部加载完毕。
+  // 每批加载完成后检查后端总数，仍有文件时继续请求下一页。
   while (loaded && loadGeneration === documentLoadGeneration && isCurrentKb(kbIdValue) && !isFAQ.value) {
     const nextPage = getNextDocumentPage(cardList.value.length, total.value, page, pageSize);
     if (!nextPage) return;

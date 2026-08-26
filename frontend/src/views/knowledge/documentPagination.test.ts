@@ -3,17 +3,18 @@ import test from 'node:test'
 
 import { getNextDocumentPage } from './documentPagination.ts'
 
-test('每批加载 35 个文件，直到全部加载完毕', () => {
+test('按当前批量继续分页，直到全部加载完毕', () => {
   const pages: number[] = []
-  let loadedCount = 35
+  const pageSize = 45
+  let loadedCount = pageSize
   let currentPage = 1
 
   while (true) {
-    const nextPage = getNextDocumentPage(loadedCount, 90, currentPage, 35)
+    const nextPage = getNextDocumentPage(loadedCount, 100, currentPage, pageSize)
     if (!nextPage) break
     pages.push(nextPage)
     currentPage = nextPage
-    loadedCount = Math.min(loadedCount + 35, 90)
+    loadedCount = Math.min(loadedCount + pageSize, 100)
   }
 
   assert.deepEqual(pages, [2, 3])
