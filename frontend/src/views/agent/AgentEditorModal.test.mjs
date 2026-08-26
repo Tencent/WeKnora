@@ -113,6 +113,7 @@ test('skills and sandbox share one editor section', () => {
   const navItems = source.match(/const navItems = computed\(\(\) => \{([\s\S]*?)^\}\);/m)?.[1]
   assert.ok(navItems, 'expected to find the nav items computed')
   assert.match(navItems, /key: 'skills'/)
+  assert.match(navItems, /icon: SKILL_ICON/)
   assert.doesNotMatch(navItems, /key: 'sandbox'/)
 
   const capabilityGroup = source.match(/pickItems\(\['multimodal', 'tools', 'mcp', 'skills'\]\)/)
@@ -123,6 +124,6 @@ test('skills and sandbox share one editor section', () => {
   assert.match(source, /sandbox: 'skills'/)
   assert.match(source, /formData\.config\.sandbox_config_id/)
   assert.match(source, /:disabled="!hasSandboxSelected"/)
-  assert.match(source, /name="help-circle"/)
+  assert.match(source, /sandbox-option/)
   assert.doesNotMatch(source, /skill-info-box/)
 })
