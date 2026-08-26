@@ -78,10 +78,13 @@
                 {{ $t('settings.sandbox.legacyConfig') }}
               </t-tag>
               <div class="sandbox-card__actions" @click.stop>
-                <t-dropdown :options="cardMenu(record)" trigger="click" attach="body"
-                  placement="bottom-right" :min-column-width="108"
-                  :popup-props="{ overlayClassName: 'sandbox-card-menu' }"
-                  @click="(data: any) => onMenuAction(data.value, record)">
+                <t-dropdown
+                  :options="cardMenu(record)"
+                  placement="bottom-right"
+                  attach="body"
+                  trigger="click"
+                  @click="(data: any) => onMenuAction(data.value, record)"
+                >
                   <t-button variant="text" shape="square" size="small" class="sandbox-card__more">
                     <t-icon name="ellipsis" />
                   </t-button>
@@ -146,13 +149,12 @@
       @saved="load" @skills-changed="onSkillsChanged" />
 
     <!--
-      This drawer answers "why can't I delete / change this config?" in plain
-      language: how many sandboxes are still live, which sessions hold them,
-      and which agents will break. It is not a metrics dashboard.
+      Same SettingDrawer chrome as the skill editor. The list is chat sessions
+      that still hold a live sandbox for this config — their titles often look
+      like skill names, so the section label has to say "session".
     -->
     <SettingDrawer
       v-model:visible="showInventory"
-      class="sandbox-inventory-drawer"
       :title="$t('settings.sandbox.inventoryTitle')"
       :description="inventorySubtitle"
       width="400px"
@@ -173,22 +175,28 @@
           <t-alert theme="warning" :message="$t('settings.sandbox.inventoryUnverifiableHint')" />
         </div>
 
-        <p v-if="inventoryLead" class="inventory-lead">{{ inventoryLead }}</p>
+        <section class="setting-drawer__section inventory-section">
+          <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.inventorySessions') }}</h4>
+          <ul v-if="inventorySessions.length" class="inventory-list">
+            <li v-for="id in inventorySessions" :key="id">
+              <button type="button" class="inventory-row" @click="openSession(id)">
+                <span class="inventory-row__text">
+                  <span class="inventory-row__title" :title="id">{{ sessionTitle(id) }}</span>
+                  <span class="inventory-row__meta">{{ $t('settings.sandbox.inventorySessionKind') }}</span>
+                </span>
+                <t-icon name="chevron-right" size="16px" />
+              </button>
+            </li>
+          </ul>
+          <p v-else-if="!inventoryLoading" class="inventory-empty">
+            {{ $t('settings.sandbox.inventoryEmpty') }}
+          </p>
+        </section>
 
-        <ul v-if="inventorySessions.length" class="inventory-sessions">
-          <li v-for="id in inventorySessions" :key="id">
-            <div class="inventory-session">
-              <span class="inventory-session__title" :title="id">{{ sessionTitle(id) }}</span>
-              <t-button variant="text" theme="primary" size="small" @click="openSession(id)">
-                {{ $t('settings.sandbox.inventoryOpenSession') }}
-              </t-button>
-            </div>
-          </li>
-        </ul>
-
-        <p v-if="inventoryAgents.length" class="inventory-agents">
-          {{ $t('settings.sandbox.inventoryAgents', { names: inventoryAgents.join('、') }) }}
-        </p>
+        <section v-if="inventoryAgents.length" class="setting-drawer__section inventory-section">
+          <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.inventoryAgentsTitle') }}</h4>
+          <p class="inventory-agents">{{ inventoryAgents.join('、') }}</p>
+        </section>
       </t-loading>
 
       <!--
@@ -347,12 +355,6 @@ const inventorySubtitle = computed(() => {
 
 const inventorySessions = computed(() => inventory.value?.session_ids || [])
 const inventoryAgents = computed(() => inventory.value?.agent_names || [])
-const inventoryLead = computed(() => {
-  const inv = inventory.value
-  if (!inv || inv.unverifiable) return ''
-  if (inv.sandbox_count === 0) return t('settings.sandbox.inventoryEmpty')
-  return t('settings.sandbox.inventorySummary', { count: inv.sandbox_count })
-})
 
 const sessionTitles = ref<Record<string, string>>({})
 
@@ -1065,33 +1067,50 @@ onMounted(load)
 }
 
 .inventory-banner {
-  margin-bottom: 10px;
+  margin-bottom: 4px;
 }
 
-.inventory-lead {
-  margin: 0 0 10px;
-  color: var(--td-text-color-secondary);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.inventory-sessions {
+.inventory-list {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.inventory-session {
+.inventory-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 32px;
-  padding: 2px 0;
+  width: 100%;
+  margin: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    background: var(--td-bg-color-container-hover);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 2px;
+  }
 }
 
-.inventory-session__title {
+.inventory-row__text {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.inventory-row__title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1100,41 +1119,31 @@ onMounted(load)
   line-height: 1.4;
 }
 
-.inventory-agents {
-  margin: 10px 0 0;
+.inventory-row__meta {
   color: var(--td-text-color-secondary);
   font-size: 12px;
+  line-height: 1.4;
+}
+
+.inventory-row .t-icon {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+}
+
+.inventory-empty,
+.inventory-agents {
+  margin: 0;
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
   line-height: 1.5;
 }
 </style>
 
 <style lang="less">
-.sandbox-card-menu .t-dropdown__menu {
-  padding: 4px;
-  gap: 0;
-}
-
-.sandbox-card-menu .t-dropdown__item {
-  padding: 5px 10px;
-  font-size: 13px;
-  line-height: 22px;
-}
-
-.sandbox-card-menu .t-dropdown__item--theme-error {
-  margin-top: 4px;
-  border-top: 1px solid var(--td-component-stroke);
-  border-radius: 0 0 3px 3px;
-}
-
-.sandbox-inventory-drawer.setting-drawer {
-  .t-drawer__header {
-    padding: 12px 16px;
-    border-bottom: none;
-    box-shadow: inset 0 -1px 0 var(--td-component-stroke);
-  }
-
-  .t-drawer__body {
-    padding: 12px 16px;
-  }
+.setting-drawer .inventory-section.setting-drawer__section {
+  padding: 0;
+  gap: 8px;
+  border-bottom: none;
+  animation: none;
 }
 </style>
