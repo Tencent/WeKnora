@@ -4928,6 +4928,17 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SearchParams"
                         }
+                    },
+                    {
+                        "enum": [
+                            "handle",
+                            "public"
+                        ],
+                        "type": "string",
+                        "default": "handle",
+                        "description": "文件引用形式，public 返回可加载直链",
+                        "name": "resource_urls",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -4982,6 +4993,17 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SearchParams"
                         }
+                    },
+                    {
+                        "enum": [
+                            "handle",
+                            "public"
+                        ],
+                        "type": "string",
+                        "default": "handle",
+                        "description": "文件引用形式，public 返回可加载直链",
+                        "name": "resource_urls",
+                        "in": "query"
                     }
                 ],
                 "responses": {

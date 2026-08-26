@@ -115,7 +115,7 @@ kb, err := apiClient.GetKnowledgeBase(ctx, kbID)
 | `UpdateKnowledgeBase` | 更新知识库 |
 | `DeleteKnowledgeBase` | 删除知识库 |
 | `ClearKnowledgeBaseContents` | 清空知识库内容 |
-| `HybridSearch` | 在知识库内混合检索（向量 + 关键词） |
+| `HybridSearch` | 在知识库内混合检索（向量 + 关键词）；可传 `ResourceURLOptions` 返回文件直链 |
 | `TogglePinKnowledgeBase` | 置顶/取消置顶 |
 | `ListMoveTargets` | 列出知识可迁移的目标知识库 |
 | `CopyKnowledgeBase` | 复制知识库 |

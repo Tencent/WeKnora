@@ -88,8 +88,9 @@ X-Request-ID: unique_request_id
 - `GET /api/v1/sessions/continue-stream/{session_id}`（SSE）
 - `GET /api/v1/messages/{session_id}/load`
 - `POST /api/v1/knowledge-search`
+- `POST /api/v1/knowledge-bases/{id}/hybrid-search`（兼容 GET）
 
-改写覆盖答案正文、`knowledge_references`（含 `image_info`）、Agent 执行步骤与工具结果，以及消息
+改写覆盖答案正文、检索结果 `content` / `image_info`、`knowledge_references`、Agent 执行步骤与工具结果，以及消息
 上的图片附件。流式回答里跨两个 chunk 被截断的引用会先缓冲再改写，客户端拿到的始终是完整链接。
 
 ### 注意事项
