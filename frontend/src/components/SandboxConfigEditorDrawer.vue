@@ -208,38 +208,35 @@
 
       <section v-if="currentStepKey === 'connection' && !isRemoteBackend" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.sectionRuntimeEnvironment') }}</h4>
-        <template v-if="backend === 'docker'">
-          <div class="weknora-template-card is-active">
-            <SandboxBackendBadge type="docker" />
-            <div class="weknora-template-card__content">
-              <div class="weknora-template-card__title-row">
-                <span class="weknora-template-card__title">{{ $t('settings.sandbox.weknoraDockerImage') }}</span>
-                <t-tag theme="primary" variant="light" size="small">{{ $t('settings.sandbox.recommendedTag') }}</t-tag>
-              </div>
-              <p>{{ $t('settings.sandbox.weknoraDockerImageHint') }}</p>
+        <div class="weknora-template-card is-active">
+          <SandboxBackendBadge type="docker" />
+          <div class="weknora-template-card__content">
+            <div class="weknora-template-card__title-row">
+              <span class="weknora-template-card__title">{{ $t('settings.sandbox.weknoraDockerImage') }}</span>
+              <t-tag theme="primary" variant="light" size="small">{{ $t('settings.sandbox.recommendedTag') }}</t-tag>
             </div>
+            <p>{{ $t('settings.sandbox.weknoraDockerImageHint') }}</p>
           </div>
-          <t-form-item :label="requiredLabel('dockerImage')" :status="fieldStatus('image')"
-            :tips="fieldTip('image')">
-            <t-input v-model="docker.image" placeholder="wechatopenai/weknora-sandbox:latest"
-              :disabled="retargetFrozen" @input="onFieldInput('image')" />
-            <p v-if="retargetFrozen" class="section-help section-help--field">
-              {{ hasSkillSnapshot
-                ? $t('settings.sandbox.templateLockedBySkills')
-                : $t('settings.sandbox.templateLockedByInFlight') }}
-            </p>
-          </t-form-item>
-          <t-form-item :label="$t('settings.sandbox.dockerHost')" :help="$t('settings.sandbox.dockerHostHelp')">
-            <t-input v-model="docker.host" placeholder="unix:///var/run/docker.sock"
-              :disabled="retargetFrozen" @input="onFieldInput('host')" />
-          </t-form-item>
-          <t-form-item :label="$t('settings.sandbox.dockerTlsCertPath')"
-            :help="$t('settings.sandbox.dockerTlsCertPathHelp')">
-            <t-input v-model="docker.tls_cert_path" placeholder="/etc/weknora/docker-certs"
-              :disabled="retargetFrozen" @input="onFieldInput('tls_cert_path')" />
-          </t-form-item>
-        </template>
-        <t-alert v-else theme="warning" class="compact-alert" :message="$t('settings.sandbox.localRuntimeWarning')" />
+        </div>
+        <t-form-item :label="requiredLabel('dockerImage')" :status="fieldStatus('image')"
+          :tips="fieldTip('image')">
+          <t-input v-model="docker.image" placeholder="wechatopenai/weknora-sandbox:latest"
+            :disabled="retargetFrozen" @input="onFieldInput('image')" />
+          <p v-if="retargetFrozen" class="section-help section-help--field">
+            {{ hasSkillSnapshot
+              ? $t('settings.sandbox.templateLockedBySkills')
+              : $t('settings.sandbox.templateLockedByInFlight') }}
+          </p>
+        </t-form-item>
+        <t-form-item :label="$t('settings.sandbox.dockerHost')" :help="$t('settings.sandbox.dockerHostHelp')">
+          <t-input v-model="docker.host" placeholder="unix:///var/run/docker.sock"
+            :disabled="retargetFrozen" @input="onFieldInput('host')" />
+        </t-form-item>
+        <t-form-item :label="$t('settings.sandbox.dockerTlsCertPath')"
+          :help="$t('settings.sandbox.dockerTlsCertPathHelp')">
+          <t-input v-model="docker.tls_cert_path" placeholder="/etc/weknora/docker-certs"
+            :disabled="retargetFrozen" @input="onFieldInput('tls_cert_path')" />
+        </t-form-item>
       </section>
 
       <section v-if="currentStepKey === 'template'" class="setting-drawer__section">
@@ -572,7 +569,7 @@ const wizardStep = ref(0)
 let templatePollTimer: ReturnType<typeof setTimeout> | undefined
 
 // Remote backends additionally expose a template catalog and control-plane
-// settings. All four backends still share the same save/check API.
+// settings. Cube, E2B and Docker still share the same save/check API.
 const isRemoteBackend = computed(() => backend.value === 'cube' || backend.value === 'e2b')
 const hasImageCatalog = computed(() => isRemoteBackend.value || backend.value === 'docker')
 const currentTemplateId = computed(() => (
@@ -591,11 +588,7 @@ const wizardSteps = computed<Array<{ key: SandboxStepKey; title: string }>>(() =
     steps.push({ key: 'template', title: t('settings.sandbox.stepTemplate') })
   }
   steps.push({ key: 'runtime', title: t('settings.sandbox.stepRuntime') })
-  // Skills are baked into the config's snapshot image. Local configs end
-  // at runtime rather than showing a step that could never do anything.
-  if (isRemoteBackend.value || backend.value === 'docker') {
-    steps.push({ key: 'skills', title: t('settings.sandbox.stepSkills') })
-  }
+  steps.push({ key: 'skills', title: t('settings.sandbox.stepSkills') })
   return steps
 })
 const currentStepKey = computed<SandboxStepKey>(() => wizardSteps.value[wizardStep.value]?.key || 'connection')
@@ -613,7 +606,7 @@ const primaryText = computed(() => {
   }
   return t('common.save')
 })
-// Deep check needs the fields that actually get probed. Docker/local collect
+// Deep check needs the fields that actually get probed. Docker collects
 // the image on the connection step; Cube/E2B still have an empty template_id
 // there, so the action waits until the template step.
 const canDeepCheck = computed(() => {
@@ -707,7 +700,6 @@ const REQUIRED_FIELDS: Record<string, string[]> = {
   cube: ['api_url', 'proxy_url', 'sandbox_domain', 'template_id'],
   e2b: ['api_key', 'template_id'],
   docker: ['image'],
-  local: [],
 }
 
 const fieldErrors = ref<Record<string, string>>({})

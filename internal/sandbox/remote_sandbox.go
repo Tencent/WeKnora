@@ -8,8 +8,7 @@
 //
 //   - Ephemeral: one call to Execute allocates a sandbox, uploads the script,
 //     runs it, then deletes the sandbox regardless of success. This gives
-//     stateless-per-call semantics for callers without a SessionID, matching
-//     the Local backend.
+//     stateless-per-call semantics for callers without a SessionID.
 //   - Persistent (session-bound): SessionBoundManager resolves the session's
 //     RemoteSandboxHandle through the lifecycle coordinator and hands it to
 //     RemoteSandbox.ExecuteOnHandle. The handle stays owned by the manager;

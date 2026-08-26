@@ -756,9 +756,10 @@ func TestSwitchImagePointerRefusesAnUnusableFingerprint(t *testing.T) {
 	fx := newInstallFixture(t)
 	// A config whose provider cannot snapshot produces no fingerprint,
 	// and a pointer with an empty fingerprint is discarded at session start.
-	fx.configRepo.entity.SandboxType = "local"
-	fx.configRepo.entity.Config.SandboxType = "local"
+	fx.configRepo.entity.SandboxType = "docker"
+	fx.configRepo.entity.Config.SandboxType = "docker"
 	fx.configRepo.entity.Config.E2B = nil
+	fx.configRepo.entity.Config.Docker = nil
 
 	err := fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle)
 

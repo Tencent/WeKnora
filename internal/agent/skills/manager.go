@@ -309,8 +309,7 @@ func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath strin
 	// SessionFileStore advertises the "sandbox provides per-session file
 	// storage" capability. When present we can safely expose the input
 	// staging directory and pre-materialise the output directory; when
-	// absent (Local/Docker or fallback), stateless backends materialise
-	// directories on their own during script execution.
+	// absent, directories are materialised during script execution.
 	fileStore := sessionFileStoreFromManager(m.sandboxMgr)
 	if fileStore != nil {
 		env[sessionInputEnvVar] = sandbox.SessionInputRoot

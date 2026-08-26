@@ -230,8 +230,6 @@ func ParseSandboxType(raw string) (SandboxType, error) {
 		return SandboxTypeE2B, nil
 	case SandboxTypeDocker:
 		return SandboxTypeDocker, nil
-	case SandboxTypeLocal:
-		return SandboxTypeLocal, nil
 	case SandboxTypeDisabled:
 		return SandboxTypeDisabled, nil
 	default:

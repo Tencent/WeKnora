@@ -76,7 +76,7 @@ my-skill/
 
 ### Sandbox 配置
 
-空间管理员在「设置 → 沙箱后端」中统一维护 Docker、Local、CubeSandbox 或 E2B 配置。远端模板从目标集群实时获取；缺少 WeKnora 标准模板时由系统自动创建。智能体在编辑页选择一份空间配置，没有选择时不执行技能脚本。Docker/Local 每次独立执行，CubeSandbox/E2B 则保留会话级沙箱。
+空间管理员在「设置 → 沙箱后端」中统一维护 Docker、CubeSandbox 或 E2B 配置。远端模板从目标集群实时获取；缺少 WeKnora 标准模板时由系统自动创建。智能体在编辑页选择一份空间配置，没有选择时不执行技能脚本。Docker、CubeSandbox、E2B 均保留会话级沙箱。
 
 ## 配置示例
 

@@ -52,7 +52,7 @@ type stagingSandboxManager struct {
 	removes     []string
 
 	// disableFiles lets a test simulate a manager that advertises no
-	// session filesystem capability (e.g. Local fallback engaged).
+	// session filesystem capability.
 	disableFiles bool
 }
 
@@ -151,10 +151,10 @@ func TestStageSessionAttachmentsReconcilesAndSkipsExisting(t *testing.T) {
 
 func TestStageSessionAttachmentsSkipsWhenNoFilesystemCapability(t *testing.T) {
 	// disableFiles=true simulates any manager without a session filesystem
-	// capability (Local/Docker/Disabled DefaultManager, or a
-	// SessionBoundManager whose remote provider fell back to Local).
+	// capability (Disabled DefaultManager, or a manager whose
+	// SessionFileStore accessor returns nil).
 	manager := &stagingSandboxManager{
-		sandboxType:  sandbox.SandboxTypeLocal,
+		sandboxType:  sandbox.SandboxTypeDisabled,
 		disableFiles: true,
 	}
 	service := &agentService{sandboxMgr: manager, fileService: &stagingFileService{}}

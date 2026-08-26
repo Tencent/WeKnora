@@ -53,7 +53,6 @@ func integrationConfig(t *testing.T) *Config {
 	t.Helper()
 	cfg := DefaultConfig()
 	cfg.Type = SandboxTypeCube
-	cfg.FallbackEnabled = false
 
 	if v := strings.TrimSpace(os.Getenv("CUBE_API_URL")); v != "" {
 		cfg.CubeAPIURL = v
@@ -419,7 +418,7 @@ func TestIntegrationCubeClient_FilesystemOps(t *testing.T) {
 
 // TestIntegrationRemoteSandbox_EphemeralExecute exercises the empty-SessionID
 // path through SessionBoundManager: the manager allocates a fresh MicroVM,
-// runs the script, and tears it down — same wire behaviour Docker/Local
+// runs the script, and tears it down — same wire behaviour Docker
 // sandboxes present per Execute.
 func TestIntegrationRemoteSandbox_EphemeralExecute(t *testing.T) {
 	mgr := newIntegrationManager(t)

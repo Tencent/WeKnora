@@ -816,8 +816,8 @@ func describeExecFailure(res *sandbox.ExecuteResult) string {
 
 // installExecutor resolves the one executor every command of an install runs
 // through. It goes through the capability accessor rather than a bare type
-// assertion so a manager that fell back to LocalSandbox reports no capability
-// instead of running the install on the WeKnora host.
+// assertion so a manager that cannot run install-mode shell reports no
+// capability instead of attempting the install on the WeKnora host.
 func installExecutor(mgr sandbox.Manager) (sandbox.SessionInstallShellExecutor, error) {
 	executor := sessionSandboxInstallShellExecutor(mgr)
 	if executor == nil {
@@ -1761,8 +1761,8 @@ func skillOwnerFingerprint(cfg *types.TenantSandboxConfig) string {
 
 // configSandboxInvalidator is the narrow capability marking bound sandboxes
 // needs. It is reached by type assertion rather than declared on Manager
-// because only the session-bound remote manager owns bindings to mark: a local
-// or disabled backend has none, and for those doing nothing is correct.
+// because only the session-bound remote manager owns bindings to mark: a
+// disabled backend has none, and for that doing nothing is correct.
 type configSandboxInvalidator interface {
 	InvalidateConfigSandboxes(ctx context.Context, tenantID uint64, configID string) (int, error)
 }

@@ -5,8 +5,6 @@ import (
 	stderrors "errors"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -56,7 +54,6 @@ const (
 	skipReasonNeedsDeepCheck = "needs_deep_check"
 	// An earlier probe failed and this one cannot be reached without it.
 	skipReasonControlPlaneUnreachable = "control_plane_unreachable"
-	skipReasonEnvironmentUnavailable  = "environment_unavailable"
 	skipReasonSandboxNotCreated       = "sandbox_not_created"
 	skipReasonSandboxExecFailed       = "sandbox_exec_failed"
 )
@@ -144,12 +141,6 @@ func (h *SystemHandler) CheckSandboxConfig(c *gin.Context) {
 	}
 
 	result := &SandboxCheckResponse{OK: true, Provider: string(effective.Type)}
-	if effective.Type == sandbox.SandboxTypeLocal {
-		h.runStatelessSandboxCheck(ctx, effective, req.Deep, result)
-		c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
-		return
-	}
-
 	client, err := sandbox.NewRemoteClientForCheck(effective)
 	if err != nil {
 		result.add("client_build", false, err.Error(), 0)
@@ -222,86 +213,6 @@ func sandboxConnectionCheckConfig(cfg *types.TenantSandboxConfig) *types.TenantS
 		copy.E2B = &e2b
 	}
 	return &copy
-}
-
-func (h *SystemHandler) runStatelessSandboxCheck(
-	ctx context.Context,
-	cfg *sandbox.Config,
-	deep bool,
-	result *SandboxCheckResponse,
-) {
-	cfg.FallbackEnabled = false
-	mgr, err := sandbox.NewManager(cfg)
-	if err != nil {
-		result.add("environment_available", false, err.Error(), 0)
-		result.skip("sandbox_exec", skipReasonEnvironmentUnavailable)
-		return
-	}
-	defer func() { _ = mgr.Cleanup(context.WithoutCancel(ctx)) }()
-	active := mgr.GetSandbox()
-	available := active != nil && active.IsAvailable(ctx)
-	result.add("environment_available", available, "", 0)
-	if !available || !deep {
-		reason := skipReasonNeedsDeepCheck
-		if !available {
-			reason = skipReasonEnvironmentUnavailable
-		}
-		result.skip("sandbox_exec", reason)
-		return
-	}
-
-	dir, err := createProbeStagingDir()
-	if err != nil {
-		result.add("sandbox_exec", false, err.Error(), 0)
-		return
-	}
-	defer func() { _ = os.RemoveAll(dir) }()
-	path := filepath.Join(dir, "check.sh")
-	const script = "#!/bin/sh\nprintf 'weknora-ok\\n'\n"
-	if err := os.WriteFile(path, []byte(script), 0o644); err != nil {
-		result.add("sandbox_exec", false, err.Error(), 0)
-		return
-	}
-	if err := os.Chmod(path, 0o644); err != nil {
-		result.add("sandbox_exec", false, err.Error(), 0)
-		return
-	}
-
-	start := time.Now()
-	execResult, err := mgr.Execute(ctx, &sandbox.ExecuteConfig{
-		Script:        path,
-		ScriptContent: script,
-		Timeout:       90 * time.Second,
-	})
-	latency := time.Since(start).Milliseconds()
-	if err != nil {
-		result.add("sandbox_exec", false, err.Error(), latency)
-		return
-	}
-	if execResult == nil || !strings.Contains(execResult.Stdout, "weknora-ok") {
-		if execResult == nil {
-			result.add("sandbox_exec", false, "沙箱没有返回执行结果", latency)
-			return
-		}
-		result.add("sandbox_exec", false, describeProbeMismatch(
-			execResult.ExitCode, execResult.Killed,
-			execResult.Stdout, execResult.Stderr, execResult.Error,
-		), latency)
-		return
-	}
-	result.add("sandbox_exec", true, "", latency)
-}
-
-// createProbeStagingDir makes the directory the local probe script is written
-// to. It stays next to the real skill scripts under the process working
-// directory and only falls back to the temp dir when that is not writable.
-func createProbeStagingDir() (string, error) {
-	if wd, err := os.Getwd(); err == nil {
-		if dir, err := os.MkdirTemp(wd, ".weknora-sandbox-check-*"); err == nil {
-			return dir, nil
-		}
-	}
-	return os.MkdirTemp("", "weknora-sandbox-check-*")
 }
 
 // describeProbeMismatch reports why the probe script did not print its marker.

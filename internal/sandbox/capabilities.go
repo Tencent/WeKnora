@@ -1,20 +1,15 @@
 // Package sandbox: session-scoped capability interfaces.
 //
 // The Sandbox / Manager pair intentionally hides provider identity (Cube,
-// E2B, Docker, Local) from the application layer. Higher layers should never
+// E2B, Docker) from the application layer. Higher layers should never
 // branch on Manager.GetType() to decide whether a feature is supported —
-// that couples them to a specific backend and, worse, misfires when a
-// remote-capable manager transparently falls back to a stateless local
-// sandbox.
+// that couples them to a specific backend.
 //
 // Instead, session-scoped features (shell execution, per-session file
 // inspection, attachment staging) are advertised via the capability
 // interfaces below. A manager may satisfy the underlying methods yet still
 // return nil from the accessors on SessionCapabilityProvider when the
-// current runtime configuration cannot honour that capability — for
-// example, SessionBoundManager returns nil from every accessor after it
-// falls back to LocalSandbox, ensuring the agent never surfaces
-// tenant-isolated tools that would run on the WeKnora host.
+// current runtime configuration cannot honour that capability.
 package sandbox
 
 import (
@@ -23,9 +18,8 @@ import (
 )
 
 // SessionShellExecutor executes ad-hoc shell commands inside a session-
-// scoped remote sandbox. Local backends do not implement it; a
-// SessionBoundManager only surfaces it while the remote backend is active
-// (Cube, E2B, or Docker).
+// scoped remote sandbox. SessionBoundManager surfaces it while Cube, E2B,
+// or Docker is active.
 type SessionShellExecutor interface {
 	ExecShellCommand(
 		ctx context.Context,
@@ -73,9 +67,8 @@ type SessionFileStore interface {
 
 // SessionCapabilityProvider is implemented by managers that MAY offer
 // session-scoped capabilities. Accessors return nil when the current
-// runtime configuration cannot support that capability (e.g. remote
-// provider unhealthy → LocalSandbox fallback). Application code should
-// gate feature registration on non-nil accessor returns.
+// runtime configuration cannot support that capability. Application code
+// should gate feature registration on non-nil accessor returns.
 type SessionCapabilityProvider interface {
 	SessionShellExecutor() SessionShellExecutor
 	SessionFileStore() SessionFileStore

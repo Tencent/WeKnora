@@ -171,7 +171,7 @@ var ErrSandboxConfigNameRequired = stderrors.New("sandbox config name is require
 // ErrNamedSandboxBackendUnsupported marks a sandbox type that cannot be stored
 // as a user-facing named backend config.
 var ErrNamedSandboxBackendUnsupported = stderrors.New(
-	"named sandbox configs only support cube, e2b, docker and local backends",
+	"named sandbox configs only support cube, e2b and docker backends",
 )
 
 // ErrSkillSnapshotBlocksTemplateChange is returned when this config already
@@ -468,11 +468,11 @@ func (s *TenantSandboxConfigService) SetWorkspaceScriptsDisabled(
 func (s *TenantSandboxConfigService) Create(
 	ctx context.Context, tenantID uint64, in CreateSandboxConfigInput,
 ) (*types.TenantSandboxConfigEntity, error) {
-	merged, err := SanitizeSandboxConfig(in.Config, nil)
-	if err != nil {
+	if err := validateNamedSandboxBackend(in.Config); err != nil {
 		return nil, err
 	}
-	if err := validateNamedSandboxBackend(merged); err != nil {
+	merged, err := SanitizeSandboxConfig(in.Config, nil)
+	if err != nil {
 		return nil, err
 	}
 	name := strings.TrimSpace(in.Name)
@@ -952,6 +952,11 @@ func (s *TenantSandboxConfigService) Update(
 	}
 	if types.IsSandboxWorkspacePolicyRow(entity) {
 		return nil, apperrors.NewBadRequestError("workspace policy cannot be edited here")
+	}
+	if in.Config != nil && strings.TrimSpace(in.Config.SandboxType) != "" {
+		if err := validateNamedSandboxBackend(in.Config); err != nil {
+			return nil, err
+		}
 	}
 	merged, err := SanitizeSandboxConfig(in.Config, entity.Config)
 	if err != nil {

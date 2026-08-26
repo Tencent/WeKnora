@@ -43,7 +43,6 @@ func dockerIntegrationConfig(t *testing.T) *Config {
 	}
 	cfg := DefaultConfig()
 	cfg.Type = SandboxTypeDocker
-	cfg.FallbackEnabled = false
 	cfg.DockerImage = image
 	cfg.DockerHost = strings.TrimSpace(os.Getenv("DOCKER_INTEGRATION_HOST"))
 	cfg.DefaultTimeout = 2 * time.Minute

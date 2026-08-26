@@ -672,9 +672,9 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 // the configured sandbox backend supports session-scoped instances.
 //
 // Only SessionBoundManager implements the DestroySession method, which every
-// session-scoped backend resolves to (Cube, E2B, Docker). For Local/Disabled
-// the type assertion fails and the call is a no-op — those backends are
-// stateless per Execute and hold no resources keyed on session ID.
+// session-scoped backend resolves to (Cube, E2B, Docker). For Disabled
+// the type assertion fails and the call is a no-op — that backend holds no
+// resources keyed on session ID.
 //
 // Errors are logged but never propagated: sandbox teardown must not block
 // session deletion. Call this while the session row is still live so the

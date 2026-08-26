@@ -149,7 +149,7 @@ func TestSoftDeleteHidesSandboxPin(t *testing.T) {
 
 func TestResolveSandboxForExecutionDoesNotPinStatelessBackend(t *testing.T) {
 	pinner := NewSessionSandboxPinner(newPinTestDB(t))
-	want := &pinTestManager{typ: sandbox.SandboxTypeLocal}
+	want := &pinTestManager{typ: sandbox.SandboxTypeDisabled}
 
 	got, configID, err := resolveSandboxForExecution(
 		context.Background(), stubSandboxResolver{mgr: want}, nil, pinner,
@@ -161,7 +161,7 @@ func TestResolveSandboxForExecutionDoesNotPinStatelessBackend(t *testing.T) {
 	require.Equal(t, "cfg-local", configID)
 	pinned, err := pinner.Read(context.Background(), "s-1")
 	require.NoError(t, err)
-	require.Empty(t, pinned, "local and Docker executions must not leave a session binding")
+	require.Empty(t, pinned, "disabled backends must not leave a session binding")
 }
 
 func TestResolveSandboxForExecutionPinsRemoteBackend(t *testing.T) {

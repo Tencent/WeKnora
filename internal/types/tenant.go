@@ -625,9 +625,7 @@ func (c *StorageEngineConfig) Scan(value interface{}) error {
 // It is self-contained: provider fields are not inherited from process
 // environment. Leaving a required provider field empty is rejected on save.
 type TenantSandboxConfig struct {
-	// SandboxType selects the sandbox backend. Named configs may use "cube",
-	// "e2b", "docker", or "local". "disabled" is reserved for the hidden
-	// workspace policy row.
+	// SandboxType is cube, e2b, or docker; disabled is the hidden policy row.
 	SandboxType string `json:"sandbox_type,omitempty"`
 
 	// ── 通用配置（跨后端生效）──────────────────────────────────

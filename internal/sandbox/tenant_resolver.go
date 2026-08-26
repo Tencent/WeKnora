@@ -192,12 +192,6 @@ func (r *tenantSandboxResolver) Resolve(
 			SkipHealthProbe: true,
 			ConfigID:        configID,
 		})
-	case SandboxTypeLocal:
-		// The local backend runs scripts on the application host, so falling
-		// back to it silently is never right: a workspace that selected it did
-		// so knowingly, and one that selected something else must fail loudly.
-		effective.FallbackEnabled = false
-		return NewManager(effective)
 	default:
 		return NewDisabledManager(), nil
 	}
