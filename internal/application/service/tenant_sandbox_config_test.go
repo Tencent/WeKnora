@@ -114,6 +114,16 @@ func TestSandboxIdentityChanged(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "cube dns change only affects future templates",
+			old:  cubeCfg("key-a", "https://cube.example.com", "https://proxy.example.com", "cube.app"),
+			new: func() *types.TenantSandboxConfig {
+				cfg := cubeCfg("key-a", "https://cube.example.com", "https://proxy.example.com", "cube.app")
+				cfg.Cube.DNSServers = []string{"192.0.2.53"}
+				return cfg
+			}(),
+			want: false,
+		},
+		{
 			name: "private endpoint policy changes transport identity",
 			old:  e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300),
 			new: func() *types.TenantSandboxConfig {
@@ -294,11 +304,14 @@ type stubProviderClient struct {
 	// overlap, which is the only way to observe whether they were collapsed.
 	ensureDelay time.Duration
 
-	ensureCalls atomic.Int32
+	ensureCalls  atomic.Int32
+	replaceCalls atomic.Int32
 
-	listCalls    int
-	deleted      []string
-	deleteCtxErr error
+	listCalls        int
+	deleted          []string
+	deletedTemplates []string
+	deleteCtxErr     error
+	replaced         *sandbox.RemoteTemplate
 }
 
 func (s *stubProviderClient) ListTemplates(context.Context) ([]sandbox.RemoteTemplate, error) {
@@ -315,6 +328,20 @@ func (s *stubProviderClient) EnsureStandardTemplate(context.Context) (*sandbox.R
 		return &copy, nil
 	}
 	return &sandbox.RemoteTemplate{ID: "tpl-weknora", Name: "weknora", Status: "building", Standard: true}, nil
+}
+
+func (s *stubProviderClient) ReplaceStandardTemplate(ctx context.Context) (*sandbox.RemoteTemplate, error) {
+	s.replaceCalls.Add(1)
+	for _, item := range s.templates {
+		if item.Standard && item.ID != "" {
+			s.deletedTemplates = append(s.deletedTemplates, item.ID)
+		}
+	}
+	if s.replaced != nil {
+		copyTpl := *s.replaced
+		return &copyTpl, nil
+	}
+	return s.EnsureStandardTemplate(ctx)
 }
 
 func (s *stubProviderClient) List(
@@ -457,6 +484,178 @@ func TestQueryTemplatesReportsFailedStandardTemplateWithoutEnsure(t *testing.T) 
 	require.False(t, result.Provisioned)
 	require.Empty(t, result.StandardTemplateID, "a failed template must not be preselected")
 	require.Equal(t, "no space left", result.Templates[0].Error)
+}
+
+// EnsureStandard that cannot recover must still return the catalog: a 500
+// would hide the provider's lastError and stop the wizard from polling.
+func TestQueryTemplatesSurfacesFailedEnsureWithoutProvisioning(t *testing.T) {
+	client := &stubProviderClient{
+		templates: []sandbox.RemoteTemplate{
+			{ID: "tpl-broken", Name: "weknora", Status: "failed", Standard: true, Error: "TOOMANYREQUESTS"},
+		},
+		ensured: &sandbox.RemoteTemplate{
+			ID: "tpl-broken", Name: "weknora", Status: "failed", Standard: true, Error: "TOOMANYREQUESTS",
+		},
+	}
+	svc := newTestConfigService(t, &fakeConfigRepo{}, client, stubAgentRepo{})
+
+	result, err := svc.QueryTemplates(context.Background(), 7, SandboxTemplateQueryInput{
+		Config:         e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "", 300),
+		EnsureStandard: true,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int32(1), client.ensureCalls.Load())
+	require.False(t, result.Provisioned)
+	require.Empty(t, result.StandardTemplateID)
+	require.Equal(t, "TOOMANYREQUESTS", result.Templates[0].Error)
+}
+
+func TestQueryTemplatesReplaceStandardDeletesExisting(t *testing.T) {
+	client := &stubProviderClient{
+		templates: []sandbox.RemoteTemplate{
+			{ID: "tpl-old", Name: "weknora", Status: "ready", Standard: true},
+			{ID: "tpl-custom", Name: "custom", Status: "ready"},
+		},
+		replaced: &sandbox.RemoteTemplate{
+			ID: "tpl-new", Name: "weknora", Status: "building", Standard: true,
+		},
+	}
+	svc := newTestConfigService(t, &fakeConfigRepo{}, client, stubAgentRepo{})
+
+	result, err := svc.QueryTemplates(context.Background(), 7, SandboxTemplateQueryInput{
+		Config:          e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "", 300),
+		ReplaceStandard: true,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int32(1), client.replaceCalls.Load())
+	require.Equal(t, int32(0), client.ensureCalls.Load())
+	require.Equal(t, []string{"tpl-old"}, client.deletedTemplates)
+	require.True(t, result.Provisioned)
+	require.Equal(t, "tpl-new", result.StandardTemplateID)
+	require.Len(t, result.Templates, 2)
+	require.Equal(t, "tpl-new", result.Templates[0].ID)
+	require.Equal(t, "tpl-custom", result.Templates[1].ID)
+}
+
+func TestQueryTemplatesReplaceStandardRefusesWhenSkillSnapshotExists(t *testing.T) {
+	stored := e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300)
+	stored.SkillImage = &types.SkillImageConfig{SnapshotID: "snap-1"}
+	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
+		ID: "cfg-a", TenantID: 7, SandboxType: "e2b", Config: stored,
+	}}
+	client := &stubProviderClient{
+		templates: []sandbox.RemoteTemplate{
+			{ID: "t1", Name: "weknora", Status: "ready", Standard: true},
+		},
+		replaced: &sandbox.RemoteTemplate{
+			ID: "tpl-new", Name: "weknora", Status: "building", Standard: true,
+		},
+	}
+	svc := NewTenantSandboxConfigService(repo, stubAgentRepo{}, sandbox.DefaultConfig(), nil, nil)
+	svc.newClient = func(*sandbox.Config) (sandbox.ConfigSandboxClient, error) {
+		return client, nil
+	}
+
+	_, err := svc.QueryTemplates(context.Background(), 7, SandboxTemplateQueryInput{
+		ConfigID:        "cfg-a",
+		Config:          e2bCfg(types.RedactedSecretPlaceholder, "https://api.e2b.app", "e2b.app", "t1", 300),
+		ReplaceStandard: true,
+	})
+	require.ErrorIs(t, err, ErrSkillSnapshotBlocksTemplateChange)
+	require.Equal(t, int32(0), client.replaceCalls.Load())
+}
+
+func TestUpdateRefusesTemplateChangeWhenSkillSnapshotExists(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
+	stored := e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300)
+	stored.SkillImage = &types.SkillImageConfig{SnapshotID: "snap-1"}
+	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
+		ID:          "cfg-a",
+		TenantID:    7,
+		Name:        "prod",
+		SandboxType: "e2b",
+		Config:      stored,
+	}}
+	svc := newTestConfigService(t, repo, &stubProviderClient{}, stubAgentRepo{})
+
+	_, err := svc.Update(context.Background(), 7, "cfg-a", UpdateSandboxConfigInput{
+		Name:   "prod",
+		Config: e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t2", 300),
+	})
+	require.ErrorIs(t, err, ErrSkillSnapshotBlocksTemplateChange)
+	require.Nil(t, repo.updated)
+}
+
+func TestUpdateRefusesIdentityChangeWhenSkillSnapshotExists(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
+	stored := e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300)
+	stored.SkillImage = &types.SkillImageConfig{SnapshotID: "snap-1"}
+	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
+		ID:          "cfg-a",
+		TenantID:    7,
+		Name:        "prod",
+		SandboxType: "e2b",
+		Config:      stored,
+	}}
+	svc := newTestConfigService(t, repo, &stubProviderClient{}, stubAgentRepo{})
+
+	_, err := svc.Update(context.Background(), 7, "cfg-a", UpdateSandboxConfigInput{
+		Name:   "prod",
+		Config: e2bCfg("key-b", "https://api.e2b.app", "e2b.app", "t1", 300),
+	})
+	require.ErrorIs(t, err, ErrSkillSnapshotBlocksTemplateChange)
+	require.Nil(t, repo.updated)
+}
+
+func TestUpdateRefusesDNSChangeWhenSkillSnapshotExists(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
+	stored := cubeCfg("key-a", "https://203.0.113.10", "https://203.0.113.11", "cube.app")
+	stored.Cube.TemplateID = "tpl-1"
+	stored.Cube.DNSServers = []string{"8.8.8.8"}
+	stored.SkillImage = &types.SkillImageConfig{SnapshotID: "snap-1"}
+	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
+		ID:          "cfg-a",
+		TenantID:    7,
+		Name:        "prod",
+		SandboxType: "cube",
+		Config:      stored,
+	}}
+	svc := newTestConfigService(t, repo, &stubProviderClient{}, stubAgentRepo{})
+
+	next := cubeCfg("key-a", "https://203.0.113.10", "https://203.0.113.11", "cube.app")
+	next.Cube.TemplateID = "tpl-1"
+	next.Cube.DNSServers = []string{"1.1.1.1"}
+	_, err := svc.Update(context.Background(), 7, "cfg-a", UpdateSandboxConfigInput{
+		Name:   "prod",
+		Config: next,
+	})
+	require.ErrorIs(t, err, ErrSkillSnapshotBlocksTemplateChange)
+	require.Nil(t, repo.updated)
+}
+
+func TestUpdateRefusesPrivateEndpointChangeWhenSkillSnapshotExists(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
+	stored := e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300)
+	stored.SkillImage = &types.SkillImageConfig{SnapshotID: "snap-1"}
+	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
+		ID:          "cfg-a",
+		TenantID:    7,
+		Name:        "prod",
+		SandboxType: "e2b",
+		Config:      stored,
+	}}
+	svc := newTestConfigService(t, repo, &stubProviderClient{}, stubAgentRepo{})
+
+	next := e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300)
+	next.AllowPrivateEndpoints = true
+	_, err := svc.Update(context.Background(), 7, "cfg-a", UpdateSandboxConfigInput{
+		Name:   "prod",
+		Config: next,
+	})
+	require.ErrorIs(t, err, ErrSkillSnapshotBlocksTemplateChange)
+	require.Nil(t, repo.updated)
 }
 
 func TestQueryTemplatesDeduplicatesSameProviderTemplateID(t *testing.T) {
@@ -934,6 +1133,23 @@ func TestSanitizeSandboxConfigCountsRedactedSecretAsPresent(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, "t2", out.E2B.TemplateID)
+}
+
+func TestSanitizeSandboxConfigRejectsInvalidCubeDNS(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
+	incoming := &types.TenantSandboxConfig{
+		SandboxType: "cube",
+		Cube: &types.CubeSandboxConfig{
+			APIURL: "https://203.0.113.20", DNSServers: []string{"dns.google"},
+		},
+	}
+
+	_, err := SanitizeSandboxConfig(incoming, nil)
+
+	var appErr *apperrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, http.StatusBadRequest, appErr.HTTPCode)
+	require.Contains(t, err.Error(), "dns.google")
 }
 
 func TestSanitizeSandboxConfigRejectsUnsafeURL(t *testing.T) {

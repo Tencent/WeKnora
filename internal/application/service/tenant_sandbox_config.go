@@ -71,6 +71,68 @@ func SandboxIdentityChanged(oldCfg, newCfg *types.TenantSandboxConfig) bool {
 	return sandbox.IdentityOf(oldCfg) != sandbox.IdentityOf(newCfg)
 }
 
+func configHasSkillSnapshot(cfg *types.TenantSandboxConfig) bool {
+	return cfg != nil && cfg.SkillImage != nil && strings.TrimSpace(cfg.SkillImage.SnapshotID) != ""
+}
+
+// spawnTemplateID is the template/image this config would boot without a
+// skill snapshot. Cube and E2B store it as template_id; Docker as the image.
+func spawnTemplateID(cfg *types.TenantSandboxConfig) string {
+	if cfg == nil {
+		return ""
+	}
+	switch sandbox.SandboxType(cfg.SandboxType) {
+	case sandbox.SandboxTypeCube:
+		if cfg.Cube != nil {
+			return strings.TrimSpace(cfg.Cube.TemplateID)
+		}
+	case sandbox.SandboxTypeE2B:
+		if cfg.E2B != nil {
+			return strings.TrimSpace(cfg.E2B.TemplateID)
+		}
+	case sandbox.SandboxTypeDocker:
+		if cfg.Docker != nil {
+			return strings.TrimSpace(cfg.Docker.Image)
+		}
+	}
+	return ""
+}
+
+func cubeDNSServers(cfg *types.TenantSandboxConfig) []string {
+	if cfg == nil || cfg.Cube == nil {
+		return nil
+	}
+	return cfg.Cube.DNSServers
+}
+
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// skillSnapshotBlocksConnectionChange reports edits that would retarget the
+// environment a skill snapshot was built from: identity, spawn template, or
+// Cube DNS (which only applies if the template is rebuilt).
+func skillSnapshotBlocksConnectionChange(stored, merged *types.TenantSandboxConfig) bool {
+	if !configHasSkillSnapshot(stored) {
+		return false
+	}
+	if SandboxIdentityChanged(stored, merged) {
+		return true
+	}
+	if spawnTemplateID(stored) != spawnTemplateID(merged) {
+		return true
+	}
+	return !sameStrings(cubeDNSServers(stored), cubeDNSServers(merged))
+}
+
 // ErrSandboxesStillLive is returned when an identity change or deletion is
 // refused because the current credentials still own provider resources.
 var ErrSandboxesStillLive = stderrors.New("sandbox config still owns live sandboxes")
@@ -108,6 +170,14 @@ var ErrSandboxConfigNameRequired = stderrors.New("sandbox config name is require
 var ErrNamedSandboxBackendUnsupported = stderrors.New(
 	"named sandbox configs only support cube, e2b, docker and local backends",
 )
+
+// ErrSkillSnapshotBlocksTemplateChange is returned when this config already
+// has a skill snapshot and the caller tries to retarget its connection, DNS,
+// or spawn template, or to rebuild the cluster's WeKnora template. Sessions
+// boot the snapshot, so those edits would not reach them. The way out is a
+// second config.
+var ErrSkillSnapshotBlocksTemplateChange = stderrors.New(
+	"sandbox connection cannot change while this config has a skill snapshot")
 
 // ErrSkillSnapshotReleaseFailed is returned when deleting a sandbox config
 // cannot destroy every provider snapshot on that config's ledger. Leaving the
@@ -190,9 +260,10 @@ type UpdateSandboxConfigInput struct {
 // drawer. ConfigID is optional and lets masked credentials resolve against the
 // stored row while editing.
 type SandboxTemplateQueryInput struct {
-	Config         *types.TenantSandboxConfig
-	ConfigID       string
-	EnsureStandard bool
+	Config          *types.TenantSandboxConfig
+	ConfigID        string
+	EnsureStandard  bool
+	ReplaceStandard bool
 }
 
 type SandboxTemplateCatalog struct {
@@ -265,6 +336,13 @@ func SanitizeSandboxConfig(
 		if _, err := sandbox.ParseSandboxType(merged.SandboxType); err != nil {
 			return nil, err
 		}
+	}
+	if merged.Cube != nil {
+		dns, err := sandbox.NormalizeCubeDNSServers(merged.Cube.DNSServers)
+		if err != nil {
+			return nil, apperrors.NewBadRequestError(err.Error())
+		}
+		merged.Cube.DNSServers = dns
 	}
 	for _, endpoint := range sandboxConfigEndpoints(merged) {
 		if err := sandbox.ValidateOutboundURLWithPolicy(endpoint, sandbox.OutboundURLPolicy{
@@ -456,6 +534,9 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 		}
 		existing = entity.Config
 	}
+	if in.ReplaceStandard && configHasSkillSnapshot(existing) {
+		return nil, ErrSkillSnapshotBlocksTemplateChange
+	}
 	merged := types.MergeSandboxConfigForUpdate(in.Config, existing)
 	if merged == nil {
 		merged = types.MergeSandboxConfigForUpdate(existing, nil)
@@ -526,12 +607,17 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 	if usable != nil {
 		result.StandardTemplateID = usable.ID
 	}
-	// A template whose build failed cannot spawn anything, so it does not count
-	// as "this cluster already has one" — leaving it at that is what kept a
-	// broken cluster broken no matter how often the admin hit refresh.
-	if in.EnsureStandard && usable == nil {
+	// Listing is read-only. Creating or replacing the WeKnora template is an
+	// explicit settings-page action: auto-ensure on every refresh made DNS
+	// and image changes impossible to apply, and left admins unsure whether
+	// they had asked for a build.
+	wantStandard := in.ReplaceStandard || (in.EnsureStandard && usable == nil)
+	if wantStandard {
 		key := ensureTemplateKey(tenantID, sandbox.IdentityOf(merged))
 		ensured, ensureErr, _ := s.ensureTemplate.Do(key, func() (any, error) {
+			if in.ReplaceStandard {
+				return catalog.ReplaceStandardTemplate(ctx)
+			}
 			return catalog.EnsureStandardTemplate(ctx)
 		})
 		if ensureErr != nil {
@@ -541,9 +627,23 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 		if !ok || standard == nil {
 			return nil, fmt.Errorf("sandbox: provider %q returned no standard template", effective.Type)
 		}
-		result.Provisioned = true
-		result.StandardTemplateID = standard.ID
+		if in.ReplaceStandard {
+			// The listing above still contains the template we just deleted.
+			kept := result.Templates[:0]
+			for _, item := range result.Templates {
+				if !item.Standard {
+					kept = append(kept, item)
+				}
+			}
+			result.Templates = kept
+		}
 		result.Templates = deduplicateSandboxTemplates(append(result.Templates, *standard))
+		if !sandbox.IsTemplateBuildFailed(standard.Status) {
+			result.Provisioned = true
+			result.StandardTemplateID = standard.ID
+		} else if in.ReplaceStandard {
+			result.StandardTemplateID = ""
+		}
 	}
 	sort.SliceStable(result.Templates, func(i, j int) bool {
 		if result.Templates[i].Standard != result.Templates[j].Standard {
@@ -620,7 +720,7 @@ func templateStatusRank(status string) int {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "ready", "available", "complete", "completed", "success", "succeeded":
 		return 3
-	case "building", "waiting", "pending", "queued", "processing":
+	case "building", "waiting", "pending", "queued", "processing", "running":
 		return 2
 	case "failed", "error", "cancelled", "canceled":
 		return 1
@@ -690,6 +790,9 @@ func (s *TenantSandboxConfigService) Update(
 	}
 	if err := validateNamedSandboxBackend(merged); err != nil {
 		return nil, err
+	}
+	if skillSnapshotBlocksConnectionChange(entity.Config, merged) {
+		return nil, ErrSkillSnapshotBlocksTemplateChange
 	}
 	if !SandboxIdentityChanged(entity.Config, merged) {
 		return s.writeConfig(ctx, entity, in, merged)

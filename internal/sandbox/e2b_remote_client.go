@@ -331,6 +331,33 @@ func (c *E2BRemoteClient) EnsureStandardTemplate(ctx context.Context) (*RemoteTe
 			return &items[i], nil
 		}
 	}
+	return c.buildStandardTemplate(ctx)
+}
+
+// ReplaceStandardTemplate deletes the WeKnora template and starts a new build
+// so a later image (or an untagged leftover) can actually replace what is
+// already READY.
+func (c *E2BRemoteClient) ReplaceStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
+	items, err := c.ListTemplates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		if !item.Standard || strings.TrimSpace(item.ID) == "" {
+			continue
+		}
+		logger.Infof(ctx, "e2b replacing standard template %s", item.ID)
+		if err := c.client.DeleteTemplate(ctx, item.ID); err != nil {
+			var notFound *e2b.TemplateNotFoundError
+			if !errors.As(err, &notFound) {
+				return nil, normalizeE2BError("DeleteTemplate", err)
+			}
+		}
+	}
+	return c.buildStandardTemplate(ctx)
+}
+
+func (c *E2BRemoteClient) buildStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
 	builder := e2b.NewTemplate().FromImage(DefaultDockerImage)
 	build, err := builder.BuildInBackground(ctx, c.client, e2b.BuildConfig{
 		Name: StandardTemplateName,

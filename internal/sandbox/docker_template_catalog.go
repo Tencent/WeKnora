@@ -159,6 +159,13 @@ func (c *DockerRemoteClient) EnsureStandardTemplate(ctx context.Context) (*Remot
 	return &pending, nil
 }
 
+// ReplaceStandardTemplate is a pull of the configured image. Docker has no
+// cluster-side template object to delete; a missing image is fetched, a
+// present one is left as-is.
+func (c *DockerRemoteClient) ReplaceStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
+	return c.EnsureStandardTemplate(ctx)
+}
+
 func (c *DockerRemoteClient) pullInBackground(ctx context.Context, key, image string) {
 	pullCtx, cancel := context.WithTimeout(ctx, dockerImagePullBudget)
 	defer cancel()

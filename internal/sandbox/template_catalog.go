@@ -32,6 +32,12 @@ type RemoteTemplate struct {
 	// it a failed template is a red badge with no way to tell a registry
 	// credential problem from an out-of-disk node.
 	Error string `json:"error,omitempty"`
+
+	// Cube reports these on GET /templates; other backends leave them empty
+	// and the settings list simply omits the corresponding rows.
+	InstanceType        string `json:"instance_type,omitempty"`
+	NetworkType         string `json:"network_type,omitempty"`
+	AllowInternetAccess *bool  `json:"allow_internet_access,omitempty"`
 }
 
 // RemoteTemplateCatalog is an optional provider capability used by the
@@ -40,6 +46,10 @@ type RemoteTemplate struct {
 type RemoteTemplateCatalog interface {
 	ListTemplates(ctx context.Context) ([]RemoteTemplate, error)
 	EnsureStandardTemplate(ctx context.Context) (*RemoteTemplate, error)
+	// ReplaceStandardTemplate deletes the cluster's WeKnora template and
+	// builds a new one from the current spec. Changing DNS or the image
+	// otherwise has no effect on an already-READY template.
+	ReplaceStandardTemplate(ctx context.Context) (*RemoteTemplate, error)
 }
 
 func isStandardTemplate(name string) bool {

@@ -74,6 +74,11 @@ func ResolveEffectiveConfig(
 		overrideString(&effective.CubeTemplate, cube.TemplateID)
 		overrideSeconds(&effective.CubeHTTPTimeout, cube.HTTPTimeoutSec)
 		overrideSeconds(&effective.CubeSandboxTTL, cube.CubeSandboxTTLSeconds)
+		dns, err := NormalizeCubeDNSServers(cube.DNSServers)
+		if err != nil {
+			return nil, err
+		}
+		effective.CubeDNSServers = dns
 	}
 
 	if e2bCfg := tenantCfg.E2B; e2bCfg != nil {
@@ -198,6 +203,7 @@ func clearProviderFields(cfg *Config) {
 	cfg.CubeTemplate = ""
 	cfg.CubeSandboxTTL = 0
 	cfg.CubeHTTPTimeout = 0
+	cfg.CubeDNSServers = nil
 
 	cfg.E2BAPIURL = ""
 	cfg.E2BProxyURL = ""

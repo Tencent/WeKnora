@@ -737,6 +737,7 @@ export interface SandboxCubeConfig {
   template_id?: string
   http_timeout_sec?: number
   cube_sandbox_ttl_seconds?: number
+  dns_servers?: string[]
 }
 
 export interface SandboxE2BConfig {
@@ -812,6 +813,9 @@ export interface SandboxTemplate {
   standard: boolean
   /** The provider's own explanation for a failed build, when it reports one. */
   error?: string
+  instance_type?: string
+  network_type?: string
+  allow_internet_access?: boolean
 }
 
 export interface SandboxTemplateCatalog {
@@ -921,12 +925,15 @@ export function getSandboxConfigInventory(id: string): Promise<{ data: SandboxIn
 /**
  * Fetch templates using the connection currently entered in the drawer.
  * `ensure_standard` starts a provider-side build when no WeKnora template is
- * present; the returned building item can be polled through the same endpoint.
+ * present. `replace_standard` deletes the existing WeKnora template first so
+ * a new spec (DNS, image) can take effect. The returned building item can be
+ * polled through the same endpoint.
  */
 export function querySandboxTemplates(payload: {
   config: SandboxConfig
   config_id?: string
   ensure_standard?: boolean
+  replace_standard?: boolean
 }): Promise<{ data: SandboxTemplateCatalog }> {
   return post('/api/v1/sandbox-configs/templates/query', payload) as unknown as Promise<{
     data: SandboxTemplateCatalog
@@ -960,7 +967,10 @@ export function checkSandboxConfig(payload: {
  * `sandbox_inventory_unverifiable` says the backend is unreachable, so nothing
  * could be counted — the one case a force delete may override.
  */
-export type SandboxConflictCode = 'sandboxes_still_live' | 'sandbox_inventory_unverifiable'
+export type SandboxConflictCode =
+  | 'sandboxes_still_live'
+  | 'sandbox_inventory_unverifiable'
+  | 'skill_snapshot_blocks_template'
 
 export interface SandboxConflict {
   code: SandboxConflictCode
@@ -984,7 +994,8 @@ export function parseSandboxConflict(err: unknown): SandboxConflict | null {
   if (!detail || typeof detail !== 'object') return null
   if (
     detail.code !== 'sandboxes_still_live' &&
-    detail.code !== 'sandbox_inventory_unverifiable'
+    detail.code !== 'sandbox_inventory_unverifiable' &&
+    detail.code !== 'skill_snapshot_blocks_template'
   ) {
     return null
   }

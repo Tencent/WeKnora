@@ -63,6 +63,37 @@ func TestCubeRemoteClientListTemplatesRecognisesStandardByImage(t *testing.T) {
 	require.Equal(t, "tpl-other", templates[1].Name)
 }
 
+func TestCubeRemoteClientListTemplatesMapsCatalogMetadata(t *testing.T) {
+	allowInternet := true
+	client := newCubeTemplateClient(t, cubeCatalogHandler(
+		[]map[string]any{{
+			"templateID":          "tpl-full",
+			"name":                "custom",
+			"status":              "READY",
+			"version":             "v2",
+			"imageInfo":           "python:3.11",
+			"createdAt":           "2026-08-01T12:00:00Z",
+			"instanceType":        "small",
+			"networkType":         "tap",
+			"allowInternetAccess": allowInternet,
+		}},
+		nil,
+	))
+
+	templates, err := client.ListTemplates(context.Background())
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	require.Equal(t, "tpl-full", templates[0].ID)
+	require.Equal(t, "custom", templates[0].Name)
+	require.Equal(t, "v2", templates[0].Version)
+	require.Equal(t, "python:3.11", templates[0].Image)
+	require.Equal(t, "2026-08-01T12:00:00Z", templates[0].CreatedAt)
+	require.Equal(t, "small", templates[0].InstanceType)
+	require.Equal(t, "tap", templates[0].NetworkType)
+	require.NotNil(t, templates[0].AllowInternetAccess)
+	require.True(t, *templates[0].AllowInternetAccess)
+}
+
 func TestCubeRemoteClientListTemplatesSurfacesLastError(t *testing.T) {
 	client := newCubeTemplateClient(t, cubeCatalogHandler(
 		[]map[string]any{{
@@ -224,6 +255,7 @@ func TestCubeRemoteClientEnsureStandardTemplateRebuildsFailedTemplate(t *testing
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
 			require.Equal(t, DefaultCubeTemplateImage, payload["image"])
 			require.Equal(t, StandardTemplateName, payload["name"])
+			require.Equal(t, true, payload["allowInternetAccess"])
 			writeJSON(w, http.StatusAccepted, map[string]any{
 				"templateID": "tpl-failed",
 				"status":     "PENDING",
@@ -236,9 +268,73 @@ func TestCubeRemoteClientEnsureStandardTemplateRebuildsFailedTemplate(t *testing
 	template, err := client.EnsureStandardTemplate(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, "tpl-failed", template.ID)
-	require.Equal(t, "PENDING", template.Status)
+	require.Equal(t, "building", template.Status)
 	require.Equal(t, int32(1), rebuilt.Load())
 	require.Equal(t, int32(0), created.Load(), "a rebuild must not add a template")
+}
+
+func TestCubeRemoteClientListTemplatesNormalizesRunningStatus(t *testing.T) {
+	client := newCubeTemplateClient(t, cubeCatalogHandler(
+		[]map[string]any{{
+			"templateID": "tpl-pulling",
+			"status":     "RUNNING",
+			"imageInfo":  DefaultCubeTemplateImage,
+		}},
+		nil,
+	))
+
+	templates, err := client.ListTemplates(context.Background())
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	require.Equal(t, "building", templates[0].Status)
+	require.True(t, templates[0].Standard)
+	require.False(t, IsTemplateBuildFailed(templates[0].Status))
+}
+
+// CubeMaster may refuse redo (for example when the source image never
+// landed). The failed card stays in the catalog so the operator can delete
+// it by hand; Ensure must not 500 or spawn a replacement.
+func TestCubeRemoteClientEnsureStandardTemplateKeepsFailedWhenRedoBlocked(t *testing.T) {
+	var created atomic.Int32
+	var deleted atomic.Int32
+	client := newCubeTemplateClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/templates" && r.Method == http.MethodGet:
+			writeJSON(w, http.StatusOK, []map[string]any{{
+				"templateID": "tpl-failed",
+				"status":     "FAILED",
+				"imageInfo":  DefaultCubeTemplateImage,
+				"lastError":  "TOOMANYREQUESTS: You have reached your unauthenticated pull rate limit",
+			}})
+		case r.URL.Path == "/snapshots" && r.Method == http.MethodGet:
+			writeJSON(w, http.StatusOK, []map[string]any{})
+		case r.URL.Path == "/templates/tpl-failed" && r.Method == http.MethodPost:
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"code": 400,
+				"message": "CubeMaster returned error code 130400: " +
+					"template redo is not allowed before source image has been pulled successfully",
+			})
+		case r.URL.Path == "/templates/tpl-failed" && r.Method == http.MethodDelete:
+			deleted.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		case r.URL.Path == "/templates" && r.Method == http.MethodPost:
+			created.Add(1)
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"templateID": "tpl-fresh",
+				"status":     "PENDING",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	template, err := client.EnsureStandardTemplate(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "tpl-failed", template.ID)
+	require.Equal(t, "failed", template.Status)
+	require.Contains(t, template.Error, "TOOMANYREQUESTS")
+	require.Equal(t, int32(0), deleted.Load())
+	require.Equal(t, int32(0), created.Load())
 }
 
 func TestCubeRemoteClientEnsureStandardTemplateBuildsWhenAbsent(t *testing.T) {
@@ -267,6 +363,69 @@ func TestCubeRemoteClientEnsureStandardTemplateBuildsWhenAbsent(t *testing.T) {
 	require.Equal(t, "1G", payload["writableLayerSize"])
 	require.EqualValues(t, CubeEnvdPort, payload["probePort"])
 	require.Equal(t, CubeEnvdHealthPath, payload["probePath"])
+	require.Equal(t, true, payload["allowInternetAccess"])
+	_, hasDNS := payload["dns"]
+	require.False(t, hasDNS, "empty DNS config must omit the field so Cubelet keeps its default")
+}
+
+func TestCubeRemoteClientEnsureStandardTemplateIncludesConfiguredDNS(t *testing.T) {
+	var payload map[string]any
+	client := newCubeTemplateClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, http.StatusOK, []map[string]any{})
+		case http.MethodPost:
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"templateID": "tpl-dns",
+				"status":     "PENDING",
+			})
+		}
+	})
+	client.config.CubeDNSServers = []string{"8.8.8.8", "1.1.1.1"}
+
+	template, err := client.EnsureStandardTemplate(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "tpl-dns", template.ID)
+	require.Equal(t, []any{"8.8.8.8", "1.1.1.1"}, payload["dns"])
+}
+
+func TestCubeRemoteClientReplaceStandardTemplateDeletesThenBuilds(t *testing.T) {
+	var deleted atomic.Int32
+	var payload map[string]any
+	client := newCubeTemplateClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/templates" && r.Method == http.MethodGet:
+			writeJSON(w, http.StatusOK, []map[string]any{{
+				"templateID": "tpl-old",
+				"status":     "READY",
+				"imageInfo":  DefaultDockerImage,
+				"aliases":    []string{StandardTemplateName},
+			}})
+		case r.URL.Path == "/templates/tpl-old" && r.Method == http.MethodDelete:
+			deleted.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		case r.URL.Path == "/templates" && r.Method == http.MethodPost:
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"templateID": "tpl-new",
+				"status":     "PENDING",
+			})
+		case r.URL.Path == "/snapshots" && r.Method == http.MethodGet:
+			writeJSON(w, http.StatusOK, []map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	client.config.CubeDNSServers = []string{"192.0.2.53"}
+
+	template, err := client.ReplaceStandardTemplate(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "tpl-new", template.ID)
+	require.Equal(t, "building", template.Status)
+	require.Equal(t, int32(1), deleted.Load())
+	require.Equal(t, []any{"192.0.2.53"}, payload["dns"])
+	require.Equal(t, true, payload["allowInternetAccess"])
 }
 
 // The plain and Cube images share a repository, so a template built from either

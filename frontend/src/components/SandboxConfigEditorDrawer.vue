@@ -60,7 +60,7 @@
       Identity-change refusals must sit at the top: the form is long and the
       admin otherwise saves, sees nothing, and assumes the click did nothing.
     -->
-    <div v-if="conflict && currentStepKey === 'runtime'" ref="conflictAlertRef" class="blocked blocked-top">
+    <div v-if="conflict" ref="conflictAlertRef" class="blocked blocked-top">
       <t-alert v-if="conflict.code === 'sandboxes_still_live'" theme="warning"
         :message="$t('settings.sandbox.sandboxesStillLive', { count: conflict.inventory?.sandbox_count ?? 0 })">
         <template #description>
@@ -71,6 +71,8 @@
           <p>{{ $t('settings.sandbox.blockedHint') }}</p>
         </template>
       </t-alert>
+      <t-alert v-else-if="conflict.code === 'skill_snapshot_blocks_template'" theme="warning"
+        :message="$t('settings.sandbox.templateLockedBySkills')" />
       <t-alert v-else theme="warning" :message="$t('settings.sandbox.unverifiableBlocked')">
         <template #description>
           <p>{{ $t('settings.sandbox.unverifiableSaveHint') }}</p>
@@ -84,6 +86,7 @@
         <t-form-item :label="$t('settings.sandbox.backendType')">
           <t-select :value="backend" :placeholder="$t('settings.sandbox.backendTypePlaceholder')"
             class="backend-select" :popup-props="{ overlayClassName: 'sandbox-backend-popup' }"
+            :disabled="hasSkillSnapshot"
             @change="(v: any) => selectBackend(String(v))">
             <t-option v-for="opt in backendOptions" :key="opt" :value="opt" :label="backendLabel(opt)">
               <span class="backend-choice">
@@ -112,29 +115,31 @@
 
       <section v-if="currentStepKey === 'connection' && isRemoteBackend" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.sectionConnection') }}</h4>
-        <t-alert v-if="record" theme="info" class="identity-hint compact-alert"
+        <t-alert v-if="hasSkillSnapshot" theme="info" class="identity-hint compact-alert"
+          :message="$t('settings.sandbox.connectionLockedBySkills')" />
+        <t-alert v-else-if="record" theme="info" class="identity-hint compact-alert"
           :message="$t('settings.sandbox.identityFieldHint')" />
 
         <template v-if="backend === 'cube'">
           <t-form-item :label="requiredLabel('apiUrl')" :status="fieldStatus('api_url')" :tips="fieldTip('api_url')">
             <t-input v-model="cube.api_url" placeholder="http://cube.example.com:33000"
-              @input="onConnectionInput('api_url')" />
+              :disabled="hasSkillSnapshot" @input="onConnectionInput('api_url')" />
           </t-form-item>
           <div class="form-grid form-grid--two">
             <t-form-item :label="requiredLabel('proxyUrl')" :status="fieldStatus('proxy_url')"
               :tips="fieldTip('proxy_url')">
               <t-input v-model="cube.proxy_url" placeholder="http://cube.example.com:80"
-                @input="onConnectionInput('proxy_url')" />
+                :disabled="hasSkillSnapshot" @input="onConnectionInput('proxy_url')" />
             </t-form-item>
             <t-form-item :label="requiredLabel('sandboxDomain')" :status="fieldStatus('sandbox_domain')"
               :tips="fieldTip('sandbox_domain')">
               <t-input v-model="cube.sandbox_domain" placeholder="cube.app"
-                @input="onConnectionInput('sandbox_domain')" />
+                :disabled="hasSkillSnapshot" @input="onConnectionInput('sandbox_domain')" />
             </t-form-item>
           </div>
           <t-form-item :label="$t('settings.sandbox.apiKey')">
             <t-input v-model="cube.api_key" type="password" :placeholder="secretInputPlaceholder('cube')"
-              @input="invalidateConnection" />
+              :disabled="hasSkillSnapshot" @input="invalidateConnection" />
             <div class="field-hints">
               <p class="section-help">
                 {{ storedSecrets.cube
@@ -147,13 +152,18 @@
               </a>
             </div>
           </t-form-item>
+          <t-form-item :label="$t('settings.sandbox.cubeDnsServers')"
+            :help="$t('settings.sandbox.cubeDnsServersHelp')">
+            <t-tag-input v-model="cube.dns_servers" :placeholder="$t('settings.sandbox.cubeDnsServersPlaceholder')"
+              :disabled="hasSkillSnapshot" clearable @change="invalidateConnection" />
+          </t-form-item>
         </template>
 
         <template v-else-if="backend === 'e2b'">
           <t-form-item :label="requiredLabel('apiKey')" :status="fieldStatus('api_key')"
             :tips="fieldTip('api_key')">
             <t-input v-model="e2b.api_key" type="password" :placeholder="secretInputPlaceholder('e2b')"
-              @input="onConnectionInput('api_key')" />
+              :disabled="hasSkillSnapshot" @input="onConnectionInput('api_key')" />
             <div class="field-hints">
               <p class="section-help">
                 {{ storedSecrets.e2b
@@ -168,15 +178,17 @@
           </t-form-item>
           <div class="form-grid form-grid--two">
             <t-form-item :label="$t('settings.sandbox.apiUrl')" :help="$t('settings.sandbox.e2bApiUrlOptional')">
-              <t-input v-model="e2b.api_url" placeholder="https://api.e2b.app" @input="invalidateConnection" />
+              <t-input v-model="e2b.api_url" placeholder="https://api.e2b.app"
+                :disabled="hasSkillSnapshot" @input="invalidateConnection" />
             </t-form-item>
             <t-form-item :label="$t('settings.sandbox.sandboxDomain')" :help="$t('settings.sandbox.e2bDomainOptional')">
-              <t-input v-model="e2b.sandbox_domain" placeholder="e2b.app" @input="invalidateConnection" />
+              <t-input v-model="e2b.sandbox_domain" placeholder="e2b.app"
+                :disabled="hasSkillSnapshot" @input="invalidateConnection" />
             </t-form-item>
           </div>
           <t-form-item :label="$t('settings.sandbox.proxyUrl')" :help="$t('settings.sandbox.e2bProxyUrlOptional')">
             <t-input v-model="e2b.proxy_url" placeholder="http://sandbox-gateway.example.com"
-              @input="invalidateConnection" />
+              :disabled="hasSkillSnapshot" @input="invalidateConnection" />
           </t-form-item>
         </template>
         <div class="private-endpoint-row">
@@ -184,7 +196,11 @@
             <p class="private-endpoint-row__title">{{ $t('settings.sandbox.allowPrivateEndpoints') }}</p>
             <p class="section-help">{{ $t('settings.sandbox.allowPrivateEndpointsHint') }}</p>
           </div>
-          <t-switch v-model="allowPrivateEndpoints" @change="invalidateConnection" />
+          <t-switch
+            v-model="allowPrivateEndpoints"
+            :disabled="hasSkillSnapshot"
+            @change="invalidateConnection"
+          />
         </div>
       </section>
 
@@ -204,16 +220,19 @@
           <t-form-item :label="requiredLabel('dockerImage')" :status="fieldStatus('image')"
             :tips="fieldTip('image')">
             <t-input v-model="docker.image" placeholder="wechatopenai/weknora-sandbox:latest"
-              @input="onFieldInput('image')" />
+              :disabled="hasSkillSnapshot" @input="onFieldInput('image')" />
+            <p v-if="hasSkillSnapshot" class="section-help section-help--field">
+              {{ $t('settings.sandbox.templateLockedBySkills') }}
+            </p>
           </t-form-item>
           <t-form-item :label="$t('settings.sandbox.dockerHost')" :help="$t('settings.sandbox.dockerHostHelp')">
             <t-input v-model="docker.host" placeholder="unix:///var/run/docker.sock"
-              @input="onFieldInput('host')" />
+              :disabled="hasSkillSnapshot" @input="onFieldInput('host')" />
           </t-form-item>
           <t-form-item :label="$t('settings.sandbox.dockerTlsCertPath')"
             :help="$t('settings.sandbox.dockerTlsCertPathHelp')">
             <t-input v-model="docker.tls_cert_path" placeholder="/etc/weknora/docker-certs"
-              @input="onFieldInput('tls_cert_path')" />
+              :disabled="hasSkillSnapshot" @input="onFieldInput('tls_cert_path')" />
           </t-form-item>
         </template>
         <t-alert v-else theme="warning" class="compact-alert" :message="$t('settings.sandbox.localRuntimeWarning')" />
@@ -222,79 +241,101 @@
       <section v-if="currentStepKey === 'template'" class="setting-drawer__section">
         <div class="section-title-row">
           <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.sectionTemplate') }}</h4>
-          <t-button variant="text" size="small" :loading="templatesLoading" @click="loadTemplates(true)">
+          <t-button variant="text" size="small" :loading="templatesLoading" @click="loadTemplates()">
             <template #icon><t-icon name="refresh" /></template>
             {{ $t('settings.sandbox.refreshTemplates') }}
           </t-button>
         </div>
-        <div class="connection-summary" role="status">
-          <span class="connection-summary__icon"><t-icon name="check" /></span>
-          <div>
-            <p class="connection-summary__title">{{ $t('settings.sandbox.connectionPassedTitle') }}</p>
-            <p class="connection-summary__text">{{ $t('settings.sandbox.connectionPassed') }}</p>
-          </div>
-        </div>
-        <p class="section-help">{{ $t('settings.sandbox.templateStepHint') }}</p>
+        <t-alert v-if="hasSkillSnapshot" theme="info" class="compact-alert"
+          :message="$t('settings.sandbox.templateLockedBySkills')" />
         <div v-if="templatesLoading && !templatesLoaded" class="template-loading">
           <t-loading size="small" />
           <span>{{ $t('settings.sandbox.loadingTemplates') }}</span>
         </div>
-        <div v-else-if="templates.length" class="template-list" role="radiogroup"
-          :aria-label="$t('settings.sandbox.sectionTemplate')">
-          <button v-for="item in templates" :key="item.id" type="button" class="template-card"
-            :class="{ 'is-active': currentTemplateId === item.id, 'is-pending': isTemplatePending(item) }"
-            :disabled="!isTemplateSelectable(item)" role="radio" :aria-checked="currentTemplateId === item.id"
-            @click="selectTemplate(item.id)">
-            <span class="template-card__badge">
-              <t-icon :name="isTemplatePending(item) ? 'time' : 'code'" />
-            </span>
-            <span class="template-card__body">
-              <span class="template-card__title-row">
-                <span class="template-card__title">{{ item.name }}</span>
-                <t-tag v-if="item.standard" theme="primary" variant="light" size="small">
+        <div v-else class="template-list" role="radiogroup" :aria-label="$t('settings.sandbox.sectionTemplate')">
+          <div v-if="canCreateStandard" class="template-row template-row--offer">
+            <div class="template-row__main">
+              <div class="template-row__head">
+                <span class="template-row__title">{{ $t('settings.sandbox.weknoraStandardTemplate') }}</span>
+                <t-tag theme="primary" variant="outline" size="small">
                   {{ $t('settings.sandbox.recommendedTag') }}
                 </t-tag>
-              </span>
-              <span class="template-card__meta">{{ templateMeta(item) }}</span>
-              <!--
-                An untagged template is indistinguishable from a building one in
-                the provider's list, so it needs its own line: waiting is futile
-                and only a rebuild fixes it.
-              -->
-              <span v-if="isTemplateUntagged(item)" class="template-card__hint template-card__hint--error">
+                <span class="template-row__spacer" />
+                <t-button theme="primary" variant="outline" size="small" :loading="templatesLoading"
+                  @click="createStandardTemplate">
+                  {{ $t('settings.sandbox.createStandardTemplate') }}
+                </t-button>
+              </div>
+              <p class="template-row__hint">{{ $t('settings.sandbox.createStandardTemplateHint') }}</p>
+            </div>
+          </div>
+          <div
+            v-for="item in templates"
+            :key="item.id"
+            class="template-row"
+            :class="{
+              'is-active': currentTemplateId === item.id,
+              'is-pending': isTemplatePending(item),
+              'is-disabled': !isTemplateSelectable(item) || (hasSkillSnapshot && currentTemplateId !== item.id),
+            }"
+            role="radio"
+            :aria-checked="currentTemplateId === item.id"
+            :aria-disabled="!isTemplateSelectable(item) || (hasSkillSnapshot && currentTemplateId !== item.id)"
+            :tabindex="isTemplateSelectable(item) && !(hasSkillSnapshot && currentTemplateId !== item.id) ? 0 : -1"
+            @click="onTemplateCardClick(item)"
+            @keydown.enter.prevent="onTemplateCardClick(item)"
+            @keydown.space.prevent="onTemplateCardClick(item)"
+          >
+            <span class="template-row__marker" aria-hidden="true" />
+            <div class="template-row__main">
+              <div class="template-row__head">
+                <span class="template-row__title" :title="templateDisplayName(item)">
+                  {{ templateDisplayName(item) }}
+                </span>
+                <t-tag v-if="item.standard" theme="primary" variant="outline" size="small">
+                  {{ $t('settings.sandbox.recommendedTag') }}
+                </t-tag>
+                <span class="template-row__spacer" />
+                <t-tag :theme="templateStatusTheme(item)" variant="outline" size="small">
+                  {{ templateStatusLabel(item) }}
+                </t-tag>
+                <span v-if="canRebuildTemplate(item)" class="template-row__rebuild" @click.stop>
+                  <t-popconfirm
+                    theme="warning"
+                    :content="$t('settings.sandbox.replaceStandardTemplateConfirm')"
+                    @confirm="replaceStandardTemplate"
+                  >
+                    <t-button variant="text" size="small" :loading="templatesLoading">
+                      {{ $t('settings.sandbox.replaceStandardTemplate') }}
+                    </t-button>
+                  </t-popconfirm>
+                </span>
+              </div>
+              <dl v-if="templateFieldRows(item).length" class="template-row__fields">
+                <div v-for="field in templateFieldRows(item)" :key="field.key" class="template-row__field">
+                  <dt>{{ field.label }}</dt>
+                  <dd :class="{ 'is-mono': field.mono }" :title="field.value">{{ field.value }}</dd>
+                </div>
+              </dl>
+              <p v-if="isTemplateUntagged(item)" class="template-row__hint template-row__hint--error">
                 {{ $t('settings.sandbox.templateUntaggedHint') }}
-              </span>
-              <span v-else-if="templateFailureReason(item)" class="template-card__hint template-card__hint--error">
+              </p>
+              <p v-else-if="templateFailureReason(item)" class="template-row__hint template-row__hint--error">
                 {{ templateFailureReason(item) }}
-              </span>
-              <span v-else-if="isTemplatePending(item) && item.standard" class="template-card__hint">
+              </p>
+              <p v-else-if="isTemplatePending(item) && item.standard" class="template-row__hint">
                 {{ $t('settings.sandbox.templateBuildingHint') }}
-              </span>
-            </span>
-            <span class="template-card__state">
-              <t-tag :theme="templateStatusTheme(item)" variant="light" size="small">
-                {{ templateStatusLabel(item) }}
-              </t-tag>
-              <t-icon v-if="currentTemplateId === item.id" name="check-circle-filled"
-                class="template-card__selected" />
-            </span>
-          </button>
-        </div>
-        <div v-else-if="templatesLoaded && !templatesError" class="env-empty">
-          {{ $t('settings.sandbox.noTemplates') }}
-        </div>
-        <div v-if="selectedTemplate" class="template-state-note template-state-note--ready" role="status">
-          <t-icon name="check-circle-filled" />
-          <span>{{ $t('settings.sandbox.templateReadyHint', { name: selectedTemplate.name }) }}</span>
-        </div>
-        <div v-else-if="hasPendingTemplates" class="template-state-note" role="status">
-          <t-icon name="time" />
-          <span>{{ $t('settings.sandbox.templateProvisioningHint') }}</span>
+              </p>
+            </div>
+          </div>
+          <div
+            v-if="templatesLoaded && !templates.length && !canCreateStandard && !templatesError"
+            class="env-empty"
+          >
+            {{ $t('settings.sandbox.noTemplates') }}
+          </div>
         </div>
         <t-alert v-if="templatesError" theme="warning" class="compact-alert" :message="templatesError" />
-        <p v-else-if="!templatesLoaded" class="section-help">
-          {{ $t('settings.sandbox.templateLoadHint') }}
-        </p>
         <a class="inline-guide-link" :href="clusterGuideUrl" target="_blank" rel="noopener noreferrer">
           <t-icon name="link" />
           {{ $t('settings.sandbox.howToBuildTemplate') }}
@@ -395,7 +436,12 @@
       config whose save was refused.
     -->
     <template v-if="currentStepKey === 'skills'">
-      <SandboxSkillsPanel v-if="effectiveRecord" :record="effectiveRecord" @updated="onSkillsConfigUpdated" />
+      <SandboxSkillsPanel
+        v-if="effectiveRecord"
+        :record="effectiveRecord"
+        @updated="onSkillsConfigUpdated"
+        @skills-changed="emit('skillsChanged')"
+      />
       <p v-else class="skills-locked">{{ $t('settings.sandbox.stepSkillsLocked') }}</p>
     </template>
 
@@ -470,6 +516,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void
   (e: 'saved'): void
+  (e: 'skillsChanged', record?: SandboxConfigRecord): void
 }>()
 
 const { t } = useI18n()
@@ -524,6 +571,10 @@ const currentTemplateId = computed(() => (
   backend.value === 'cube' ? cube.template_id : backend.value === 'e2b' ? e2b.template_id : ''
 )?.trim() || '')
 const selectedTemplate = computed(() => templates.value.find((item) => item.id === currentTemplateId.value))
+const clusterStandardTemplate = computed(() => templates.value.find((item) => item.standard && item.id))
+const canCreateStandard = computed(() => (
+  isRemoteBackend.value && templatesLoaded.value && !clusterStandardTemplate.value && !hasSkillSnapshot.value
+))
 const wizardSteps = computed<Array<{ key: SandboxStepKey; title: string }>>(() => {
   const steps: Array<{ key: SandboxStepKey; title: string }> = [
     { key: 'connection', title: t('settings.sandbox.stepConnection') },
@@ -573,9 +624,13 @@ const primaryDisabled = computed(() => (
 // than create another one.
 const savedRecord = ref<SandboxConfigRecord | null>(null)
 const effectiveRecord = computed(() => savedRecord.value || props.record)
+const hasSkillSnapshot = computed(() => (
+  Boolean(effectiveRecord.value?.config?.skill_image?.snapshot_id?.trim())
+))
 
 function onSkillsConfigUpdated(record: SandboxConfigRecord) {
   savedRecord.value = record
+  emit('skillsChanged', record)
 }
 
 // Jumping is what separates editing from creating. A config that does not exist
@@ -600,7 +655,7 @@ function goToStep(index: number) {
   // step still has to ask the cluster what it offers; a step already loaded
   // just resumes its poll, as walking back through it always has.
   if (templatesLoaded.value) scheduleTemplatePolling()
-  else void loadTemplates(true)
+  else void loadTemplates()
 }
 const hasPendingTemplates = computed(() => templates.value.some(isTemplatePending))
 
@@ -711,6 +766,7 @@ function reset() {
   Object.assign(cube, cfg.cube || {})
   Object.assign(e2b, cfg.e2b || {})
   Object.assign(docker, cfg.docker || {})
+  if (!Array.isArray(cube.dns_servers)) cube.dns_servers = []
   if (backend.value === 'docker' && !docker.image) {
     docker.image = 'wechatopenai/weknora-sandbox:latest'
   }
@@ -783,8 +839,71 @@ function clearTemplateSelection() {
   delete fieldErrors.value.template_id
 }
 
-function templateMeta(item: SandboxTemplate): string {
-  return [item.status, item.version, item.id].filter(Boolean).join(' · ')
+function onTemplateCardClick(item: SandboxTemplate) {
+  if (hasSkillSnapshot.value && item.id !== currentTemplateId.value) return
+  if (!isTemplateSelectable(item)) return
+  selectTemplate(item.id)
+}
+
+function canRebuildTemplate(item: SandboxTemplate): boolean {
+  return Boolean(item.standard && item.id) && !isTemplatePending(item) && !hasSkillSnapshot.value
+}
+
+function templateDisplayName(item: SandboxTemplate): string {
+  const name = item.name?.trim() || ''
+  const id = item.id?.trim() || ''
+  if (!name || name === id) return t('settings.sandbox.templateUnnamed')
+  return name
+}
+
+function formatTemplateTime(value?: string): string {
+  const raw = value?.trim()
+  if (!raw) return ''
+  const ms = Date.parse(raw)
+  if (Number.isNaN(ms)) return raw
+  return new Date(ms).toLocaleString()
+}
+
+function templateFieldRows(item: SandboxTemplate): Array<{ key: string; label: string; value: string; mono?: boolean }> {
+  const rows: Array<{ key: string; label: string; value: string; mono?: boolean }> = []
+  const image = item.image?.trim()
+  if (image) {
+    rows.push({ key: 'image', label: t('settings.sandbox.templateFieldImage'), value: image, mono: true })
+  }
+  const version = item.version?.trim()
+  if (version) {
+    rows.push({ key: 'version', label: t('settings.sandbox.templateFieldVersion'), value: version })
+  }
+  const id = item.id?.trim()
+  if (id) {
+    rows.push({ key: 'id', label: t('settings.sandbox.templateFieldId'), value: id, mono: true })
+  }
+  const created = formatTemplateTime(item.created_at)
+  if (created) {
+    rows.push({ key: 'created', label: t('settings.sandbox.templateFieldCreated'), value: created })
+  }
+  const instanceType = item.instance_type?.trim()
+  if (instanceType) {
+    rows.push({ key: 'instance', label: t('settings.sandbox.templateFieldInstance'), value: instanceType })
+  }
+  const networkType = item.network_type?.trim()
+  if (networkType) {
+    rows.push({ key: 'network', label: t('settings.sandbox.templateFieldNetwork'), value: networkType })
+  }
+  if (item.allow_internet_access === true) {
+    rows.push({
+      key: 'internet',
+      label: t('settings.sandbox.templateFieldInternet'),
+      value: t('settings.sandbox.templateInternetOn'),
+    })
+  } else if (item.allow_internet_access === false) {
+    rows.push({
+      key: 'internet',
+      label: t('settings.sandbox.templateFieldInternet'),
+      value: t('settings.sandbox.templateInternetOff'),
+    })
+  }
+  return rows
 }
 
 function isTemplateSelectable(item: SandboxTemplate): boolean {
@@ -795,7 +914,7 @@ function isTemplateSelectable(item: SandboxTemplate): boolean {
 
 function isTemplatePending(item: SandboxTemplate): boolean {
   const status = item.status?.trim().toLowerCase()
-  return ['building', 'waiting', 'pending', 'queued', 'processing'].includes(status || '')
+  return ['building', 'waiting', 'pending', 'queued', 'processing', 'running'].includes(status || '')
 }
 
 // The backend reports this when a template's builds finished without the tag
@@ -847,7 +966,7 @@ function scheduleTemplatePolling() {
   }, 3000)
 }
 
-async function loadTemplates(ensureStandard: boolean, silent = false): Promise<boolean> {
+async function loadTemplates(ensureStandard = false, silent = false, replaceStandard = false): Promise<boolean> {
   if (!hasImageCatalog.value) return true
   if (!connectionReady()) return false
   if (!silent) templatesLoading.value = true
@@ -857,17 +976,26 @@ async function loadTemplates(ensureStandard: boolean, silent = false): Promise<b
       config: collectPayload(),
       config_id: effectiveRecord.value?.id,
       ensure_standard: ensureStandard,
+      replace_standard: replaceStandard,
     })
     templates.value = res.data?.templates || []
     templatesLoaded.value = true
     const standardID = res.data?.standard_template_id
     const current = templates.value.find((item) => item.id === currentTemplateId.value)
-    if (currentTemplateId.value && (!current || !isTemplateSelectable(current))) clearTemplateSelection()
+    if (
+      currentTemplateId.value
+      && (!current || !isTemplateSelectable(current))
+      && !hasSkillSnapshot.value
+    ) {
+      clearTemplateSelection()
+    }
     const readyStandard = templates.value.find((item) => item.id === standardID && isTemplateSelectable(item))
       || templates.value.find((item) => item.standard && isTemplateSelectable(item))
     if (!currentTemplateId.value && readyStandard) selectTemplate(readyStandard.id)
     if (res.data?.provisioned && !silent) {
-      MessagePlugin.info(t('settings.sandbox.standardTemplateProvisioning'))
+      MessagePlugin.info(replaceStandard
+        ? t('settings.sandbox.standardTemplateReplaced')
+        : t('settings.sandbox.standardTemplateProvisioning'))
     }
     scheduleTemplatePolling()
     return true
@@ -877,6 +1005,16 @@ async function loadTemplates(ensureStandard: boolean, silent = false): Promise<b
   } finally {
     if (!silent) templatesLoading.value = false
   }
+}
+
+function createStandardTemplate() {
+  return loadTemplates(true)
+}
+
+function replaceStandardTemplate() {
+  if (hasSkillSnapshot.value) return
+  clearTemplateSelection()
+  return loadTemplates(false, false, true)
 }
 
 // Re-attaches the redaction placeholder to a secret the admin left untouched:
@@ -929,7 +1067,7 @@ async function handlePrimaryAction() {
     if (isRemoteBackend.value) {
       invalidateCheck()
       wizardStep.value += 1
-      await loadTemplates(true)
+      await loadTemplates()
       return
     }
     // Docker's template is the image typed on this step. Kick a background
@@ -1174,6 +1312,14 @@ onUnmounted(stopTemplatePolling)
 }
 
 .sandbox-editor-form {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+
+  :deep(.setting-drawer__section) {
+    min-width: 0;
+  }
+
   :deep(.t-form__item) {
     margin-bottom: 0;
   }
@@ -1283,52 +1429,11 @@ onUnmounted(stopTemplatePolling)
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
 
   .setting-drawer__section-title {
     margin-bottom: 0;
   }
-}
-
-.connection-summary {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  background: var(--td-bg-color-secondarycontainer);
-}
-
-.connection-summary__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-  color: var(--td-brand-color);
-  font-size: 13px;
-}
-
-.connection-summary__title,
-.connection-summary__text {
-  margin: 0;
-}
-
-.connection-summary__title {
-  color: var(--td-text-color-primary);
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.45;
-}
-
-.connection-summary__text {
-  margin-top: 2px;
-  color: var(--td-text-color-secondary);
-  font-size: 12px;
-  line-height: 1.5;
 }
 
 .weknora-template-card {
@@ -1386,133 +1491,172 @@ onUnmounted(stopTemplatePolling)
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
-.template-card {
+.template-row {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  align-items: flex-start;
+  gap: 10px;
+  box-sizing: border-box;
   width: 100%;
-  min-height: 72px;
-  padding: 12px 14px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  overflow: hidden;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--td-bg-color-container);
   color: var(--td-text-color-primary);
-  cursor: pointer;
   text-align: left;
-  transition: border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 
-  &:hover:not(:disabled) {
+  &:hover:not(.is-disabled):not(.template-row--offer) {
     border-color: var(--td-brand-color-3, var(--td-brand-color));
-    box-shadow: 0 3px 10px rgba(15, 23, 42, 0.05);
   }
 
   &.is-active {
     border-color: var(--td-brand-color);
-    background: color-mix(in srgb, var(--td-brand-color) 4%, var(--td-bg-color-container));
   }
 
-  &:disabled {
-    cursor: not-allowed;
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 2px;
   }
 
-  &.is-pending {
-    background: color-mix(in srgb, var(--td-warning-color) 3%, var(--td-bg-color-container));
+  &.is-disabled {
+    cursor: default;
   }
 }
 
-.template-card__badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
+.template-row--offer {
+  cursor: default;
+  border-style: dashed;
+}
+
+.template-row__marker {
   flex-shrink: 0;
-  border-radius: 9px;
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052d9;
-  font-size: 16px;
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--td-border-level-2-color, var(--td-component-stroke));
+  border-radius: 50%;
+  background: var(--td-bg-color-container);
 
-  .is-pending & {
-    background: color-mix(in srgb, var(--td-warning-color) 12%, transparent);
-    color: var(--td-warning-color);
+  .is-active & {
+    border-color: var(--td-brand-color);
+    box-shadow: inset 0 0 0 3.5px var(--td-brand-color);
+  }
+
+  .is-disabled & {
+    opacity: 0.45;
   }
 }
 
-.template-card__body {
+.template-row__main {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 5px;
-  min-width: 0;
-}
-
-.template-card__title-row {
-  display: flex;
-  align-items: center;
   gap: 6px;
   min-width: 0;
+  max-width: 100%;
 }
 
-.template-card__title {
+.template-row__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+
+  :deep(.t-tag) {
+    flex-shrink: 0;
+  }
+}
+
+.template-row__title {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   font-size: 13px;
   font-weight: 600;
+  line-height: 22px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.template-card__meta,
-.template-card__hint {
-  overflow-wrap: anywhere;
-  color: var(--td-text-color-placeholder);
-  font-size: 11px;
-  line-height: 1.45;
+.template-row__spacer {
+  flex: 1 1 8px;
+  min-width: 8px;
 }
 
-.template-card__hint {
-  color: var(--td-warning-color);
+.template-row__rebuild {
+  flex-shrink: 0;
 
-  &--error {
-    color: var(--td-error-color);
+  :deep(.t-button) {
+    color: var(--td-text-color-secondary);
+    padding-left: 4px;
+    padding-right: 4px;
+
+    &:hover {
+      color: var(--td-text-color-primary);
+    }
   }
 }
 
-.template-card__state {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-  align-self: flex-start;
-  padding-top: 1px;
+.template-row__fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 4px 16px;
+  margin: 0;
+  min-width: 0;
 }
 
-.template-card__selected {
-  color: var(--td-brand-color);
-  font-size: 17px;
+.template-row__field {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+
+  dt {
+    color: var(--td-text-color-placeholder);
+    font-size: 11px;
+    line-height: 18px;
+    white-space: nowrap;
+  }
+
+  dd {
+    margin: 0;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--td-text-color-secondary);
+    font-size: 12px;
+    line-height: 18px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    &.is-mono {
+      font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+      font-size: 11px;
+    }
+  }
 }
 
-.template-state-note {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 11px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 7px;
-  background: var(--td-bg-color-secondarycontainer);
-  color: var(--td-text-color-secondary);
+.template-row__hint {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--td-text-color-placeholder);
   font-size: 12px;
   line-height: 1.5;
 
-  > .t-icon {
-    flex-shrink: 0;
-    color: var(--td-warning-color);
-    font-size: 15px;
-  }
-
-  &--ready > .t-icon {
-    color: var(--td-brand-color);
+  &--error {
+    color: var(--td-error-color);
   }
 }
 
@@ -1710,6 +1854,10 @@ onUnmounted(stopTemplatePolling)
 
   .sandbox-step__title {
     font-size: 12px;
+  }
+
+  .template-row__fields {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

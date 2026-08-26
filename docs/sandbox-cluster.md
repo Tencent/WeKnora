@@ -62,8 +62,8 @@ Cube 变体只发布 linux/amd64——envd 的来源镜像 `cubesandbox-base` �
 ### 制作模板并对接 WeKnora
 
 1. 按 [CubeSandbox Quick Start](https://github.com/TencentCloud/CubeSandbox/blob/master/docs/zh/guide/quickstart.md) 完成控制面、计算节点、CubeProxy 与域名解析。生产环境还需按官方文档完成鉴权、TLS、网络策略与多节点部署。
-2. 在 WeKnora 的空间设置中填写 CubeAPI、CubeProxy、sandbox domain 和可选 API Key。若这些端点位于 RFC1918/loopback 网络，显式打开“允许访问私网集群地址”。
-3. 点击“连接并继续”。WeKnora 先验证控制面地址与凭据，通过后才进入模板步骤并调用集群模板列表；如果集群里没有可用的 WeKnora 标准模板，会从 `wechatopenai/weknora-sandbox:latest-cube` 发起一次构建。已有模板按名称 `weknora` 或镜像识别，因此即使集群没有给模板登记别名也不会重复创建；已有模板构建失败时，走的是原地重建而不是新建一个。
+2. 在 WeKnora 的空间设置中填写 CubeAPI、CubeProxy、sandbox domain 和可选 API Key。需要自定义 guest DNS 时填写「DNS 服务器」（须为 IP）；留空则使用集群默认。若这些端点位于 RFC1918/loopback 网络，显式打开“允许访问私网集群地址”。
+3. 点击“连接并继续”。WeKnora 先验证控制面地址与凭据，通过后才进入模板步骤并列出集群模板。**不会自动创建**。没有 WeKnora 标准模板时在占位卡片上点「创建」，会从 `wechatopenai/weknora-sandbox:latest-cube` 发起构建。改 DNS 或需要换镜像时在 weknora 卡片上点「重建」：先删掉现有标准模板再用当前配置新建。已有模板按名称 `weknora` 或镜像识别；失败模板同样用「重建」（CubeMaster 拒绝 redo、错误码 130400 时尤其需要）。
 4. 模板构建状态会自动刷新。状态变为 `READY` 后才可选择并进入运行配置；界面显示模板名称、状态和版本，配置内部才保存该集群自己的 `template_id`。
 
 模板镜像必须提供 uid 1000 的 `user` 账号：WeKnora 以该账号执行脚本与文件操作。写权限只保证在 `/workspace/output` 与 `/workspace/input` 下。
@@ -90,9 +90,10 @@ go test -tags=integration ./internal/sandbox -run Integration -count=1 -v
 | 连接验证失败 | CubeAPI 地址是否是控制面端口（不是 Dashboard 端口）；私网地址是否已打开“允许访问私网集群地址” |
 | 连接通过但执行报数据面错误 | CubeProxy 地址与 sandbox domain 是否与集群 `CUBE_API_SANDBOX_DOMAIN` 一致；Proxy 是否对 WeKnora 可达 |
 | 模板长期停在构建中 | 镜像体积与网络；用 `cubemastercli tpl watch --job-id <id>` 看真实进度 |
-| 模板构建失败 | 卡片上会显示集群返回的失败原因；点「刷新模板」会就地重建同一个模板，不会新建一个 |
+| 模板构建失败 | 卡片上会显示集群返回的失败原因。未安装 Skill 时可点「重建」删掉失败模板并用当前配置新建；仅刷新列表不会再自动重建。已安装 Skill 的配置会拒绝重建，请新建沙箱 |
+| 失败原因含 `TOOMANYREQUESTS` / Docker Hub 限流 | Cube 节点匿名拉 `wechatopenai/weknora-sandbox` 触发了 Hub 限额。等限额恢复后再刷新，或在节点上 `docker login` 后重试 |
 | 失败原因是 `Get "http://<IP>:49983/health": connect: connection refused` | 模板镜像里没有 envd。确认建模板用的是 `-cube` 变体镜像；若已是该变体，再查 Cube 沙箱网段（默认 `192.168.0.0/18`）是否与物理内网冲突 |
-| 沙箱能创建但脚本报权限错误 | 模板缺少 `user` 账号，或脚本写到了 `/workspace` 根目录 |
+| 沙箱能执行但「出网可用」失败 | 先看模板「公网访问」是否开启；WeKnora 标准模板构建会带 `allowInternetAccess`。guest DNS 来自标准模板构建时写入的 `dns`（设置页「DNS 服务器」/`dns_servers`）。留空时 Cubelet 会落到 `119.29.29.29`；私网或云上 UDP 53 到不了公网 DNS 时，填 Cube 宿主机 `/etc/resolv.conf` 里能用的地址，并避开 CubeVS 默认拒绝的 `10/8`、`172.16/12`、`192.168/16`。未安装 Skill 时，已有标准模板改 DNS 后在 weknora 卡片上点「重建」；已装 Skill 的配置请新建沙箱。其次 Cube 把沙箱 80/443 TPROXY 到 `192.168.0.1:8080/8443`，宿主机占用 `0.0.0.0:8080` 时 cube-egress 起不来。探测目标 `1.1.1.1` 在腾讯云也经常不通，国内目标可达即可 |
 | 会话重连后状态丢失 | 多副本部署是否配置了 Redis 绑定存储；沙箱是否已被空闲 TTL 回收 |
 
 ### 已知限制
@@ -105,14 +106,14 @@ go test -tags=integration ./internal/sandbox -run Integration -count=1 -v
 
 ## E2B 及其它 E2B 兼容实现
 
-E2B 官方托管服务、自建 E2B Infrastructure，以及任意实现 E2B 协议的控制面（例如 Kubernetes 上以容器隔离的 Agent-Sandbox）都通过同一个 E2B 配置接入；自建集群通常还要填写 `proxy_url` 数据面网关，详见 [沙箱协议接入说明](./sandbox-protocol.md)。填写 API Key 后先执行“连接并继续”，流程与 Cube 相同：验证连接后列出账号可见模板，缺少 `weknora` 时通过 E2B Template API 从标准镜像启动后台构建。自建部署还需填写 API URL 和 sandbox domain；E2B 上游通过 Terraform 提供 AWS、GCP 等部署方式，具体以 [E2B self-hosting guide](https://github.com/e2b-dev/infra/blob/main/self-host.md) 和 [E2B Template 文档](https://e2b.dev/docs/template/quickstart) 为准。
+E2B 官方托管服务、自建 E2B Infrastructure，以及任意实现 E2B 协议的控制面（例如 Kubernetes 上以容器隔离的 Agent-Sandbox）都通过同一个 E2B 配置接入；自建集群通常还要填写 `proxy_url` 数据面网关，详见 [沙箱协议接入说明](./sandbox-protocol.md)。填写 API Key 后先执行“连接并继续”，流程与 Cube 相同：验证连接后列出账号可见模板；缺少 `weknora` 时点「创建 WeKnora 标准模板」，通过 E2B Template API 从标准镜像启动后台构建。自建部署还需填写 API URL 和 sandbox domain；E2B 上游通过 Terraform 提供 AWS、GCP 等部署方式，具体以 [E2B self-hosting guide](https://github.com/e2b-dev/infra/blob/main/self-host.md) 和 [E2B Template 文档](https://e2b.dev/docs/template/quickstart) 为准。
 
 ## 在设置页面完成接入
 
 1. 打开“设置 → 沙箱后端”，点击“添加沙箱后端”。
 2. 填写该集群自己的 API、Proxy、sandbox domain 和凭据；这些值只保存在当前空间配置中，不读取 Sandbox 环境变量。
 3. 点击“连接并继续”，验证控制面地址和凭据；连接通过后才加载模板列表。
-4. 等待自动创建的标准模板就绪，或选择集群已有的兼容模板；构建中的模板不可选择，状态会自动刷新。
+4. 没有标准模板时点占位卡片上的「创建」，或选择集群已有的兼容模板；改 DNS / 镜像后在 weknora 卡片上点「重建」。**该配置已安装 Skill 时不能更换或重建模板**——技能环境绑在快照上，新底模不会进去；请新建一份沙箱再装 Skill。构建中的模板不可选择，状态会自动刷新。
 5. 配置运行参数；上线前可执行一次“完整验证”。完整验证会真实创建、执行并销毁一个沙箱。
 6. 保存后，在智能体 Skills 配置中选择该后端。对配置的修改只影响之后新建的沙箱；已有会话仍固定使用创建时的配置。
 
