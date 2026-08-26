@@ -20,7 +20,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -76,8 +78,8 @@ type CreateTaskRequest struct {
 // createTaskBody 听悟 CreateTask 请求体（嵌套结构）。
 // 字段为帕斯卡命名；`type` 不在 body 里，而是查询参数 `?type=offline`。
 type createTaskBody struct {
-	AppKey     string `json:"AppKey"`
-	Input      struct {
+	AppKey string `json:"AppKey"`
+	Input  struct {
 		SourceLanguage string `json:"SourceLanguage"`
 		FileUrl        string `json:"FileUrl"`
 		TaskKey        string `json:"TaskKey,omitempty"`
@@ -140,6 +142,12 @@ type SubtitleSentenceLite struct {
 
 // CreateTask 发起离线转写任务
 func (c *Client) CreateTask(ctx context.Context, req CreateTaskRequest) (*CreateTaskResponse, error) {
+	if err := c.validate(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.FileURL) == "" {
+		return nil, fmt.Errorf("tingwu file url is empty")
+	}
 	if req.Type == "" {
 		req.Type = "offline"
 	}
@@ -197,14 +205,98 @@ func (c *Client) CreateTask(ctx context.Context, req CreateTaskRequest) (*Create
 	if envelope.Code != "" && envelope.Code != "0" {
 		return nil, fmt.Errorf("tingwu create code %s: %s", envelope.Code, envelope.Message)
 	}
+	if strings.TrimSpace(envelope.Data.TaskID) == "" {
+		return nil, fmt.Errorf("tingwu create returned empty task id")
+	}
 	return &CreateTaskResponse{
 		TaskID: envelope.Data.TaskID,
 		Status: envelope.Data.TaskStatus,
 	}, nil
 }
 
+// ValidateSourceFile checks that the source URL can be fetched by an external
+// transcription provider before a remote task is created.
+func (c *Client) ValidateSourceFile(ctx context.Context, fileURL string) error {
+	if strings.TrimSpace(fileURL) == "" {
+		return fmt.Errorf("tingwu source file url is empty")
+	}
+	parsed, err := url.Parse(fileURL)
+	if err != nil || parsed.Scheme == "" || parsed.Hostname() == "" ||
+		(parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return fmt.Errorf("tingwu source file url must be an absolute http(s) URL")
+	}
+	if isPrivateSourceHost(parsed.Hostname()) {
+		return fmt.Errorf("tingwu source file url is not publicly reachable: host=%s", parsed.Hostname())
+	}
+	if c == nil || c.http == nil {
+		return fmt.Errorf("tingwu source file http client is unavailable")
+	}
+
+	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(checkCtx, http.MethodHead, fileURL, nil)
+	if err != nil {
+		return fmt.Errorf("build tingwu source file check: %w", err)
+	}
+	req.Header.Set("Accept-Encoding", "identity")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("tingwu source file is not reachable: host=%s: %w", parsed.Hostname(), err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusMethodNotAllowed {
+		return c.validateSourceFileWithRange(checkCtx, fileURL, parsed.Hostname())
+	}
+	if err := validateSourceFileResponse(resp, parsed.Hostname()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Client) validateSourceFileWithRange(ctx context.Context, fileURL, host string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
+	if err != nil {
+		return fmt.Errorf("build tingwu source file range check: %w", err)
+	}
+	req.Header.Set("Range", "bytes=0-0")
+	req.Header.Set("Accept-Encoding", "identity")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("tingwu source file is not reachable: host=%s: %w", host, err)
+	}
+	defer resp.Body.Close()
+	return validateSourceFileResponse(resp, host)
+}
+
+func validateSourceFileResponse(resp *http.Response, host string) error {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("tingwu source file is not reachable: host=%s status=%d", host, resp.StatusCode)
+	}
+	if resp.ContentLength == 0 {
+		return fmt.Errorf("tingwu source file is empty: host=%s", host)
+	}
+	return nil
+}
+
+func isPrivateSourceHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	if host == "localhost" || strings.HasSuffix(host, ".local") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()
+	}
+	return false
+}
+
 // GetTask 查询任务状态与结果
 func (c *Client) GetTask(ctx context.Context, taskID string) (*GetTaskResponse, error) {
+	if err := c.validate(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(taskID) == "" {
+		return nil, fmt.Errorf("tingwu task id is empty")
+	}
 	path := apiPath + "/" + taskID
 	httpReq, err := c.newSignedRequest(ctx, http.MethodGet, path, "", actionGet, nil)
 	if err != nil {
@@ -257,6 +349,29 @@ func (c *Client) GetTask(ctx context.Context, taskID string) (*GetTaskResponse, 
 	return out, nil
 }
 
+func (c *Client) validate() error {
+	if c == nil {
+		return fmt.Errorf("tingwu client is nil")
+	}
+	missing := make([]string, 0, 3)
+	if strings.TrimSpace(c.accessKeyID) == "" {
+		missing = append(missing, "access_key_id")
+	}
+	if strings.TrimSpace(c.accessKeySecret) == "" {
+		missing = append(missing, "access_key_secret")
+	}
+	if strings.TrimSpace(c.appKey) == "" {
+		missing = append(missing, "app_key")
+	}
+	if strings.TrimSpace(c.endpoint) == "" {
+		missing = append(missing, "endpoint")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("tingwu config missing: %s", strings.Join(missing, ","))
+	}
+	return nil
+}
+
 // DownloadResult 下载并解析转写结果。
 // 听悟 GetTask 的 Result 字段形如 {"Transcription":"<转写文件下载链接>"}，
 // 需先 GET 该链接拿到真正的转写文件，再把其中的 Words（词）按 SentenceId 聚合成句子。
@@ -273,7 +388,10 @@ func (c *Client) DownloadResult(ctx context.Context, raw string) (*TranscriptRes
 	}
 
 	// 2. 下载转写文件
-	httpReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, res.Transcription, nil)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, res.Transcription, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build transcript download request: %w", err)
+	}
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("download transcript: %w", err)
@@ -281,7 +399,10 @@ func (c *Client) DownloadResult(ctx context.Context, raw string) (*TranscriptRes
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("download transcript status %d", resp.StatusCode)
+		return nil, fmt.Errorf("download transcript status %d: %s", resp.StatusCode, string(body))
+	}
+	if len(body) == 0 {
+		return nil, fmt.Errorf("download transcript returned empty body")
 	}
 
 	// 3. 解析转写文件：{"Transcription":{"Paragraphs":[{"ParagraphId","SpeakerId","Words":[...]}]}}
@@ -301,6 +422,9 @@ func (c *Client) DownloadResult(ctx context.Context, raw string) (*TranscriptRes
 	}
 	if err := json.Unmarshal(body, &file); err != nil {
 		return nil, fmt.Errorf("decode transcript file: %w", err)
+	}
+	if len(file.Transcription.Paragraphs) == 0 {
+		return nil, fmt.Errorf("transcript file contains no paragraphs")
 	}
 
 	// 4. Words 按 SentenceId 聚合成 Sentences

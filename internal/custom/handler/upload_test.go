@@ -54,6 +54,29 @@ func TestMultipartPartUsesSameOriginBackendAndReturnsETag(t *testing.T) {
 	}
 }
 
+func TestRecommendedMultipartPartSizeSupportsOneGigabyteVideo(t *testing.T) {
+	fileSize := int64(1 << 30)
+	partSize := recommendedMultipartPartSize(config.UploadConfig{
+		PartSizeBytes:           8 * 1024 * 1024,
+		LargeFileThresholdBytes: 256 * 1024 * 1024,
+	}, fileSize)
+
+	if partSize != 16*1024*1024 {
+		t.Fatalf("part size = %d, want 16 MiB", partSize)
+	}
+	totalParts := (fileSize + partSize - 1) / partSize
+	if totalParts != 64 {
+		t.Fatalf("total parts = %d, want 64", totalParts)
+	}
+	lastPart, err := expectedMultipartPartSize(fileSize, partSize, int(totalParts))
+	if err != nil {
+		t.Fatalf("last part size: %v", err)
+	}
+	if lastPart != partSize {
+		t.Fatalf("last part size = %d, want %d", lastPart, partSize)
+	}
+}
+
 func TestMultipartCompleteRejectsInvalidPartsAsBadRequest(t *testing.T) {
 	db := openTestVideoDB(t)
 	videoID := uuid.NewString()

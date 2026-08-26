@@ -13,6 +13,8 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -45,11 +47,30 @@ func (h *SubtitleGenerateHandler) JobType() string { return "subtitle_generate" 
 
 // Run 从 transcription.result_payload 读听悟 JSON，下载、转 SRT、入对象、触发 index
 func (h *SubtitleGenerateHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
-	// 找前驱 transcription job 的 result_payload
+	if h.Tongyi == nil {
+		return fmt.Errorf("听悟 client 未配置")
+	}
+	if h.MinIO == nil {
+		return fmt.Errorf("对象存储 client 未配置")
+	}
+	if video == nil || video.ID == "" {
+		return fmt.Errorf("video is missing")
+	}
+	// 优先读取当前字幕任务明确绑定的转写任务，兼容旧任务时才回退到最新成功任务。
 	var prev model.VideoProcessingJob
-	if err := h.DB.Where("video_id = ? AND job_type = ? AND status = ?",
-		video.ID, "transcription", "succeeded").
-		Order("completed_at DESC").First(&prev).Error; err != nil {
+	var input struct {
+		TranscriptionJobID string `json:"transcription_job_id"`
+	}
+	if strings.TrimSpace(job.InputPayload) != "" {
+		if err := json.Unmarshal([]byte(job.InputPayload), &input); err != nil {
+			return fmt.Errorf("parse subtitle input: %w", err)
+		}
+	}
+	query := h.DB.Where("video_id = ? AND job_type = ? AND status = ?", video.ID, "transcription", "succeeded")
+	if input.TranscriptionJobID != "" {
+		query = query.Where("id = ?", input.TranscriptionJobID)
+	}
+	if err := query.Order("completed_at DESC").First(&prev).Error; err != nil {
 		return fmt.Errorf("无成功 transcription job: %w", err)
 	}
 
@@ -59,6 +80,9 @@ func (h *SubtitleGenerateHandler) Run(ctx context.Context, job *model.VideoProce
 	}
 	if err := json.Unmarshal([]byte(prev.ResultPayload), &payload); err != nil {
 		return fmt.Errorf("parse transcription result: %w", err)
+	}
+	if strings.TrimSpace(payload.RawResult) == "" {
+		return fmt.Errorf("transcription result payload is empty")
 	}
 
 	// 下载并解析转写 JSON
@@ -70,17 +94,21 @@ func (h *SubtitleGenerateHandler) Run(ctx context.Context, job *model.VideoProce
 		return fmt.Errorf("听悟结果不含转写文件")
 	}
 
-	// 汇总所有段落（多文件拼接，本版本取第一个文件的段落）
-	src := transcript.Transcripts[0]
-	paragraphs := make([]subtitle.TranscriptParagraph, 0, len(src.Paragraphs))
-	for _, p := range src.Paragraphs {
-		paragraphs = append(paragraphs, subtitle.TranscriptParagraph{
-			ParagraphID: p.ParagraphID,
-			SpeakerID:   p.SpeakerID,
-			StartMs:     p.StartMs,
-			EndMs:       p.EndMs,
-			Sentences:   toSentences(p.Sentences),
-		})
+	// 合并所有转写文件，不能静默丢弃多文件结果。
+	paragraphs := make([]subtitle.TranscriptParagraph, 0)
+	for _, src := range transcript.Transcripts {
+		for _, p := range src.Paragraphs {
+			paragraphs = append(paragraphs, subtitle.TranscriptParagraph{
+				ParagraphID: p.ParagraphID,
+				SpeakerID:   p.SpeakerID,
+				StartMs:     p.StartMs,
+				EndMs:       p.EndMs,
+				Sentences:   toSentences(p.Sentences),
+			})
+		}
+	}
+	if err := subtitle.ValidateParagraphs(paragraphs); err != nil {
+		return err
 	}
 
 	// 生成 SRT
@@ -92,9 +120,8 @@ func (h *SubtitleGenerateHandler) Run(ctx context.Context, job *model.VideoProce
 		return fmt.Errorf("upload srt: %w", err)
 	}
 	subtitleURL := h.MinIO.PublicURL(objectKey)
-
-	if err := h.DB.Model(video).Update("subtitle_file_url", subtitleURL).Error; err != nil {
-		return fmt.Errorf("update subtitle url: %w", err)
+	if strings.TrimSpace(subtitleURL) == "" {
+		return fmt.Errorf("subtitle public url empty")
 	}
 
 	// 把段落结果暂存到本 job 的 result_payload，供 index 读取
@@ -117,7 +144,7 @@ func (h *SubtitleGenerateHandler) Run(ctx context.Context, job *model.VideoProce
 		IdempotencyKey: fmt.Sprintf("index:%s:%x", video.ID, sha256.Sum256(storePayload)),
 		ResultPayload:  string(storePayload),
 	}
-	return h.DB.Transaction(func(tx *gorm.DB) error {
+	if err := h.DB.Transaction(func(tx *gorm.DB) error {
 		var locked model.Video
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, "id = ?", video.ID).Error; err != nil {
 			return fmt.Errorf("lock video revision: %w", err)
@@ -127,6 +154,9 @@ func (h *SubtitleGenerateHandler) Run(ctx context.Context, job *model.VideoProce
 			return fmt.Errorf("advance transcript revision: %w", err)
 		}
 		indexJob.InputPayload = fmt.Sprintf(`{"revision":%d}`, revision)
+		if err := tx.Model(&model.Video{}).Where("id = ?", video.ID).Update("subtitle_file_url", subtitleURL).Error; err != nil {
+			return fmt.Errorf("update subtitle url: %w", err)
+		}
 		if err := tx.Model(job).Update("result_payload", string(storePayload)).Error; err != nil {
 			return fmt.Errorf("save subtitle result: %w", err)
 		}
@@ -134,7 +164,11 @@ func (h *SubtitleGenerateHandler) Run(ctx context.Context, job *model.VideoProce
 			return fmt.Errorf("enqueue index job: %w", err)
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	slog.Info("subtitle generation completed", "video_id", video.ID, "job_id", job.ID, "transcription_job_id", prev.ID, "paragraph_count", len(paragraphs), "subtitle_bytes", len(srt), "index_job_id", indexJob.ID)
+	return nil
 }
 
 // IndexHandler 句子级分块 + 12 字段 metadata + 入 WeKnora KB（VP-T009 + CP-T005）
@@ -155,6 +189,15 @@ func (h *IndexHandler) JobType() string { return "index" }
 
 // Run 句子级分块 → 入 WeKnora KB → 回写 transcript_knowledge_id
 func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
+	if h.WeKnora == nil {
+		return fmt.Errorf("WeKnora client 未配置")
+	}
+	if h.Splitter == nil {
+		h.Splitter = chunk.NewSplitter()
+	}
+	if h.WeKnora.KBID() == "" {
+		return fmt.Errorf("WEKNORA_KB_ID 未配置")
+	}
 	var payload struct {
 		Paragraphs []subtitle.TranscriptParagraph `json:"paragraphs"`
 		Language   string                         `json:"language"`
@@ -276,23 +319,44 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 		return fmt.Errorf("activate transcript generation: %w", err)
 	}
 	if !activated {
-		if err := h.DB.Model(&model.VideoTranscriptChunk{}).
-			Where("video_id = ? AND generation = ?", video.ID, generation).
-			Update("status", "cleanup_pending").Error; err != nil {
-			return fmt.Errorf("retire stale transcript generation: %w", err)
+		var current model.Video
+		if err := h.DB.Select("transcript_generation", "transcript_active_revision").First(&current, "id = ?", video.ID).Error; err != nil {
+			return fmt.Errorf("load active transcript generation: %w", err)
 		}
-		return h.deleteRetiredGenerations(ctx, video.ID)
+		if current.TranscriptGeneration == generation && current.TranscriptActiveRevision == jobInput.Revision {
+			if err := h.enqueueGraph(ctx, video.ID); err != nil {
+				return err
+			}
+			return h.deleteRetiredGenerations(ctx, video.ID)
+		}
+		if current.TranscriptActiveRevision > jobInput.Revision {
+			if err := h.DB.Model(&model.VideoTranscriptChunk{}).
+				Where("video_id = ? AND generation = ?", video.ID, generation).
+				Update("status", "cleanup_pending").Error; err != nil {
+				return fmt.Errorf("retire stale transcript generation: %w", err)
+			}
+			return h.deleteRetiredGenerations(ctx, video.ID)
+		}
+		return fmt.Errorf("transcript generation activation was not applied")
 	}
 
 	// 触发内容生产第一环：extract-video-knowledge（CP-T005）
-	if h.Orchestrator != nil {
-		if _, err := h.Orchestrator.EnqueueJob(ctx, video.ID, skill.JobGraph); err != nil {
-			// 失败不阻塞视频播放；内容链路可后续手动触发。
-			return fmt.Errorf("enqueue graph job: %w", err)
-		}
+	if err := h.enqueueGraph(ctx, video.ID); err != nil {
+		return err
 	}
+	slog.Info("transcript index completed", "video_id", video.ID, "job_id", job.ID, "generation", generation, "revision", jobInput.Revision, "chunk_count", len(prepared), "first_knowledge_id", firstKnowledgeID)
 	if err := h.deleteRetiredGenerations(ctx, video.ID); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (h *IndexHandler) enqueueGraph(ctx context.Context, videoID string) error {
+	if h.Orchestrator == nil {
+		return nil
+	}
+	if _, err := h.Orchestrator.EnqueueJob(ctx, videoID, skill.JobGraph); err != nil {
+		return fmt.Errorf("enqueue graph job: %w", err)
 	}
 	return nil
 }

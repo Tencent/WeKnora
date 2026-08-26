@@ -594,9 +594,14 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_ACCESS_KEY:-minioadmin}
       MINIO_BUCKET: ${CUSTOM_MINIO_BUCKET:-vidsage}
       MINIO_USE_SSL: "false"
+      # 启用听悟时必须覆盖为听悟服务可访问的公网地址；localhost 仅适合不转写的本地上传。
       MINIO_PUBLIC_URL: ${CUSTOM_MINIO_PUBLIC_URL:-http://localhost:9000}
+      # 听悟使用 AccessKey + AppKey 签名；TONGYI_API_KEY 仅保留兼容旧配置。
       TONGYI_API_KEY: ${TONGYI_API_KEY:-}
-      TONGYI_ENDPOINT: ${TONGYI_ENDPOINT:-https://tingwu.aliyuncs.com}
+      TONGYI_ACCESS_KEY_ID: ${TONGYI_ACCESS_KEY_ID:-}
+      TONGYI_ACCESS_KEY_SECRET: ${TONGYI_ACCESS_KEY_SECRET:-}
+      TONGYI_APP_KEY: ${TONGYI_APP_KEY:-}
+      TONGYI_ENDPOINT: ${TONGYI_ENDPOINT:-https://tingwu.cn-beijing.aliyuncs.com}
       CUSTOM_CONTENT_AGENT_ID: ${CUSTOM_CONTENT_AGENT_ID:-}
       CUSTOM_WORKER_POLL_INTERVAL: ${CUSTOM_WORKER_POLL_INTERVAL:-5}
       CUSTOM_WORKER_MAX_ATTEMPTS: ${CUSTOM_WORKER_MAX_ATTEMPTS:-3}

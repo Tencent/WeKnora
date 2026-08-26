@@ -12,15 +12,35 @@ import (
 	"time"
 )
 
+// ValidateParagraphs checks the minimum timeline contract required by SRT and indexing.
+func ValidateParagraphs(paragraphs []TranscriptParagraph) error {
+	validSentences := 0
+	for paragraphIndex, paragraph := range paragraphs {
+		for sentenceIndex, sentence := range paragraph.Sentences {
+			if strings.TrimSpace(sentence.Text) == "" {
+				continue
+			}
+			if sentence.StartMs < 0 || sentence.EndMs <= sentence.StartMs {
+				return fmt.Errorf("invalid subtitle timeline at paragraph=%d sentence=%d: start_ms=%d end_ms=%d", paragraphIndex, sentenceIndex, sentence.StartMs, sentence.EndMs)
+			}
+			validSentences++
+		}
+	}
+	if validSentences == 0 {
+		return fmt.Errorf("transcript contains no non-empty timed sentences")
+	}
+	return nil
+}
+
 // TranscriptParagraph 听悟转写段落（最小可用字段）
 //
 // 实际字段以听悟协议为准；此处只取生成 SRT 必需的字段。
 type TranscriptParagraph struct {
-	ParagraphID string                 `json:"paragraph_id"`
-	SpeakerID   string                 `json:"speaker_id"`
-	StartMs     int                    `json:"start_ms"`
-	EndMs       int                    `json:"end_ms"`
-	Sentences   []TranscriptSentence   `json:"sentences"`
+	ParagraphID string               `json:"paragraph_id"`
+	SpeakerID   string               `json:"speaker_id"`
+	StartMs     int                  `json:"start_ms"`
+	EndMs       int                  `json:"end_ms"`
+	Sentences   []TranscriptSentence `json:"sentences"`
 }
 
 // TranscriptSentence 听悟单句

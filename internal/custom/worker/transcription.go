@@ -22,6 +22,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/model"
 )
 
+const transcriptionPollTimeout = 30 * time.Minute
+
 // TranscriptionHandler 转写 job
 type TranscriptionHandler struct {
 	DB     *gorm.DB
@@ -41,6 +43,12 @@ func (h *TranscriptionHandler) Run(ctx context.Context, job *model.VideoProcessi
 	if h.Tongyi == nil {
 		return fmt.Errorf("听悟 client 未配置")
 	}
+	if video == nil || video.ID == "" {
+		return fmt.Errorf("video is missing")
+	}
+	if video.FileURL == "" {
+		return fmt.Errorf("video file_url is empty")
+	}
 	if err := h.DB.Model(video).
 		Where("status IN ?", []string{model.VideoStatusReady, model.VideoStatusProcessing}).
 		Update("status", model.VideoStatusProcessing).Error; err != nil {
@@ -49,7 +57,10 @@ func (h *TranscriptionHandler) Run(ctx context.Context, job *model.VideoProcessi
 
 	// 第一次跑：创建 external task
 	if job.ExternalTaskID == "" {
-		slog.Info("tingwu create task", "video_id", video.ID, "file_url", video.FileURL)
+		if err := h.Tongyi.ValidateSourceFile(ctx, video.FileURL); err != nil {
+			return fmt.Errorf("视频源文件不可供听悟访问: %w", err)
+		}
+		slog.Info("tingwu create task", "video_id", video.ID)
 		task, err := h.Tongyi.CreateTask(ctx, tongyi.CreateTaskRequest{
 			FileURL:      video.FileURL,
 			SpeakerCount: 0, // 0 = 自动识别
@@ -70,9 +81,11 @@ func (h *TranscriptionHandler) Run(ctx context.Context, job *model.VideoProcessi
 	// 循环轮询，直到听悟完成 / 失败 / 上下文取消。
 	// 听悟中间态有 ONGOING / SUBMITTED / RUNNING 等多种取值，这里只认终态
 	// （COMPLETED / FAILED），其余一律视为进行中、等待后再查。
+	pollCtx, cancelPoll := context.WithTimeout(ctx, transcriptionPollTimeout)
+	defer cancelPoll()
 	var task *tongyi.GetTaskResponse
 	for {
-		getCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		getCtx, cancel := context.WithTimeout(pollCtx, 30*time.Second)
 		var err error
 		task, err = h.Tongyi.GetTask(getCtx, job.ExternalTaskID)
 		cancel()
@@ -89,8 +102,8 @@ func (h *TranscriptionHandler) Run(ctx context.Context, job *model.VideoProcessi
 			break
 		}
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-pollCtx.Done():
+			return fmt.Errorf("等待听悟任务完成超时: %w", pollCtx.Err())
 		case <-time.After(30 * time.Second):
 		}
 	}
@@ -102,7 +115,16 @@ func (h *TranscriptionHandler) Run(ctx context.Context, job *model.VideoProcessi
 		return fmt.Errorf("听悟结果为空")
 	}
 
-	// 写 result_payload + 触发 subtitle_generate job
+	payload, _ := json.Marshal(map[string]any{
+		"task_id":      job.ExternalTaskID,
+		"raw_result":   task.Result,
+		"completed_at": time.Now().UTC(),
+	})
+	if task.Result == "" {
+		return fmt.Errorf("听悟结果为空")
+	}
+
+	// 结果和下游任务必须同事务提交，避免字幕任务先入队却读不到转写结果。
 	subtitleJob := model.VideoProcessingJob{
 		ID:             uuid.NewString(),
 		VideoID:        video.ID,
@@ -110,23 +132,22 @@ func (h *TranscriptionHandler) Run(ctx context.Context, job *model.VideoProcessi
 		Provider:       "aliyun_tingwu",
 		Status:         "pending",
 		MaxAttempts:    3,
-		IdempotencyKey: fmt.Sprintf("subtitle_generate:%s", video.ID),
+		InputPayload:   fmt.Sprintf(`{"transcription_job_id":%q}`, job.ID),
+		IdempotencyKey: fmt.Sprintf("subtitle_generate:%s:%s", video.ID, job.ID),
 	}
-	if err := h.DB.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "idempotency_key"}},
-		DoNothing: true,
-	}).Create(&subtitleJob).Error; err != nil {
-		return fmt.Errorf("enqueue subtitle_generate: %w", err)
-	}
-
-	// 把 result 写回 job（供 subtitle_generate 读取）
-	payload, _ := json.Marshal(map[string]any{
-		"task_id":      job.ExternalTaskID,
-		"raw_result":   task.Result,
-		"completed_at": time.Now().UTC(),
-	})
-	if err := h.DB.Model(job).Update("result_payload", string(payload)).Error; err != nil {
-		return fmt.Errorf("save transcription result: %w", err)
+	if err := h.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(job).Update("result_payload", string(payload)).Error; err != nil {
+			return fmt.Errorf("save transcription result: %w", err)
+		}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "idempotency_key"}},
+			DoNothing: true,
+		}).Create(&subtitleJob).Error; err != nil {
+			return fmt.Errorf("enqueue subtitle_generate: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	return nil
