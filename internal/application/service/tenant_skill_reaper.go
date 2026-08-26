@@ -310,6 +310,7 @@ func (s *TenantSkillService) ReconcileSnapshots(
 	if err != nil {
 		return 0, err
 	}
+	listed = snapshotsNotFromOtherConfig(listed, skillSnapshotNamePrefix(tenantID, configID))
 	extras := 0
 	for _, snap := range listed {
 		id := strings.TrimSpace(snap.ID)
@@ -551,6 +552,7 @@ func (s *TenantSkillService) reapAbandonedBuilds(
 			cfg.ID, err)
 		return 0
 	}
+	listed = snapshotsNotFromOtherConfig(listed, skillSnapshotNamePrefix(cfg.TenantID, cfg.ID))
 
 	live := strings.TrimSpace(currentSnapshotID(cfg))
 	reaped := 0

@@ -207,6 +207,7 @@ func TestSandboxIdentityChangedJudgesUnreachableOldEndpoint(t *testing.T) {
 type fakeConfigRepo struct {
 	entity *types.TenantSandboxConfigEntity
 	policy *types.TenantSandboxConfigEntity
+	others []*types.TenantSandboxConfigEntity
 
 	events  []string
 	updated *types.TenantSandboxConfigEntity
@@ -244,6 +245,7 @@ func (f *fakeConfigRepo) ListByTenant(
 	if f.policy != nil {
 		out = append(out, f.policy)
 	}
+	out = append(out, f.others...)
 	return out, nil
 }
 
@@ -332,6 +334,9 @@ func (s *stubProviderClient) EnsureStandardTemplate(context.Context) (*sandbox.R
 
 func (s *stubProviderClient) ReplaceStandardTemplate(ctx context.Context) (*sandbox.RemoteTemplate, error) {
 	s.replaceCalls.Add(1)
+	if s.ensureDelay > 0 {
+		time.Sleep(s.ensureDelay)
+	}
 	for _, item := range s.templates {
 		if item.Standard && item.ID != "" {
 			s.deletedTemplates = append(s.deletedTemplates, item.ID)
@@ -511,7 +516,30 @@ func TestQueryTemplatesSurfacesFailedEnsureWithoutProvisioning(t *testing.T) {
 	require.Equal(t, "TOOMANYREQUESTS", result.Templates[0].Error)
 }
 
-func TestQueryTemplatesReplaceStandardDeletesExisting(t *testing.T) {
+func TestQueryTemplatesReplaceStandardRequiresConfigID(t *testing.T) {
+	client := &stubProviderClient{
+		templates: []sandbox.RemoteTemplate{
+			{ID: "tpl-old", Name: "weknora", Status: "ready", Standard: true},
+		},
+		replaced: &sandbox.RemoteTemplate{
+			ID: "tpl-new", Name: "weknora", Status: "building", Standard: true,
+		},
+	}
+	svc := newTestConfigService(t, &fakeConfigRepo{}, client, stubAgentRepo{})
+
+	_, err := svc.QueryTemplates(context.Background(), 7, SandboxTemplateQueryInput{
+		Config:          e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "", 300),
+		ReplaceStandard: true,
+	})
+	require.Error(t, err)
+	require.Equal(t, int32(0), client.replaceCalls.Load())
+}
+
+func TestQueryTemplatesReplaceStandardPersistsNewTemplateID(t *testing.T) {
+	stored := e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "tpl-old", 300)
+	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
+		ID: "cfg-a", TenantID: 7, SandboxType: "e2b", Config: stored,
+	}}
 	client := &stubProviderClient{
 		templates: []sandbox.RemoteTemplate{
 			{ID: "tpl-old", Name: "weknora", Status: "ready", Standard: true},
@@ -521,10 +549,11 @@ func TestQueryTemplatesReplaceStandardDeletesExisting(t *testing.T) {
 			ID: "tpl-new", Name: "weknora", Status: "building", Standard: true,
 		},
 	}
-	svc := newTestConfigService(t, &fakeConfigRepo{}, client, stubAgentRepo{})
+	svc := newTestConfigService(t, repo, client, stubAgentRepo{})
 
 	result, err := svc.QueryTemplates(context.Background(), 7, SandboxTemplateQueryInput{
-		Config:          e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "", 300),
+		ConfigID:        "cfg-a",
+		Config:          stored,
 		ReplaceStandard: true,
 	})
 
@@ -534,9 +563,42 @@ func TestQueryTemplatesReplaceStandardDeletesExisting(t *testing.T) {
 	require.Equal(t, []string{"tpl-old"}, client.deletedTemplates)
 	require.True(t, result.Provisioned)
 	require.Equal(t, "tpl-new", result.StandardTemplateID)
+	require.Equal(t, "tpl-new", repo.entity.Config.E2B.TemplateID,
+		"rebuild must write the new template id so sessions do not keep targeting the deleted one")
 	require.Len(t, result.Templates, 2)
 	require.Equal(t, "tpl-new", result.Templates[0].ID)
 	require.Equal(t, "tpl-custom", result.Templates[1].ID)
+}
+
+func TestQueryTemplatesReplaceStandardRefusesWhenSiblingHasSkillSnapshot(t *testing.T) {
+	stored := e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300)
+	sibling := e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300)
+	sibling.SkillImage = &types.SkillImageConfig{SnapshotID: "snap-1"}
+	repo := &fakeConfigRepo{
+		entity: &types.TenantSandboxConfigEntity{
+			ID: "cfg-a", TenantID: 7, SandboxType: "e2b", Config: stored,
+		},
+		others: []*types.TenantSandboxConfigEntity{{
+			ID: "cfg-b", TenantID: 7, SandboxType: "e2b", Config: sibling,
+		}},
+	}
+	client := &stubProviderClient{
+		templates: []sandbox.RemoteTemplate{
+			{ID: "t1", Name: "weknora", Status: "ready", Standard: true},
+		},
+		replaced: &sandbox.RemoteTemplate{
+			ID: "tpl-new", Name: "weknora", Status: "building", Standard: true,
+		},
+	}
+	svc := newTestConfigService(t, repo, client, stubAgentRepo{})
+
+	_, err := svc.QueryTemplates(context.Background(), 7, SandboxTemplateQueryInput{
+		ConfigID:        "cfg-a",
+		Config:          stored,
+		ReplaceStandard: true,
+	})
+	require.ErrorIs(t, err, ErrSkillSnapshotBlocksTemplateChange)
+	require.Equal(t, int32(0), client.replaceCalls.Load())
 }
 
 func TestQueryTemplatesReplaceStandardRefusesWhenSkillSnapshotExists(t *testing.T) {
@@ -607,6 +669,73 @@ func TestUpdateRefusesIdentityChangeWhenSkillSnapshotExists(t *testing.T) {
 	})
 	require.ErrorIs(t, err, ErrSkillSnapshotBlocksTemplateChange)
 	require.Nil(t, repo.updated)
+}
+
+func TestUpdateRefusesIdentityChangeWhileSkillIsInstalling(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
+	stored := e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300)
+	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
+		ID:          "cfg-a",
+		TenantID:    7,
+		Name:        "prod",
+		SandboxType: "e2b",
+		Config:      stored,
+	}}
+	svc := newTestConfigService(t, repo, &stubProviderClient{}, stubAgentRepo{})
+	svc.skills = &deleteSkillStore{skills: []*types.TenantSkillEntity{{
+		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-a",
+		Status: types.SkillStatusInstalling,
+	}}}
+
+	_, err := svc.Update(context.Background(), 7, "cfg-a", UpdateSandboxConfigInput{
+		Name:   "prod",
+		Config: e2bCfg("key-b", "https://api.e2b.app", "e2b.app", "t1", 300),
+	})
+	require.ErrorIs(t, err, ErrSkillSnapshotBlocksTemplateChange)
+	require.Nil(t, repo.updated)
+}
+
+func TestQueryTemplatesEnsureAndReplaceDoNotShareSingleflight(t *testing.T) {
+	stored := e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300)
+	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
+		ID: "cfg-a", TenantID: 7, SandboxType: "e2b", Config: stored,
+	}}
+	client := &stubProviderClient{
+		templates: []sandbox.RemoteTemplate{
+			{ID: "tpl-broken", Name: "weknora", Status: "failed", Standard: true},
+		},
+		ensureDelay: 80 * time.Millisecond,
+		ensured: &sandbox.RemoteTemplate{
+			ID: "tpl-ensured", Name: "weknora", Status: "building", Standard: true,
+		},
+		replaced: &sandbox.RemoteTemplate{
+			ID: "tpl-replaced", Name: "weknora", Status: "building", Standard: true,
+		},
+	}
+	svc := newTestConfigService(t, repo, client, stubAgentRepo{})
+
+	errCh := make(chan error, 2)
+	go func() {
+		_, err := svc.QueryTemplates(context.Background(), 7, SandboxTemplateQueryInput{
+			ConfigID:       "cfg-a",
+			Config:         stored,
+			EnsureStandard: true,
+		})
+		errCh <- err
+	}()
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		_, err := svc.QueryTemplates(context.Background(), 7, SandboxTemplateQueryInput{
+			ConfigID:        "cfg-a",
+			Config:          stored,
+			ReplaceStandard: true,
+		})
+		errCh <- err
+	}()
+	require.NoError(t, <-errCh)
+	require.NoError(t, <-errCh)
+	require.Equal(t, int32(1), client.ensureCalls.Load())
+	require.Equal(t, int32(1), client.replaceCalls.Load())
 }
 
 func TestUpdateRefusesDNSChangeWhenSkillSnapshotExists(t *testing.T) {

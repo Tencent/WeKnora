@@ -246,27 +246,60 @@ func (c *CubeRemoteClient) EnsureStandardTemplate(ctx context.Context) (*RemoteT
 	return c.buildStandardTemplate(ctx)
 }
 
-// ReplaceStandardTemplate deletes every WeKnora template on the cluster and
-// builds a fresh one from the current spec. Cube bakes DNS and
-// allowInternetAccess into the template at create time, so a READY template
-// cannot pick up a settings change any other way.
+// ReplaceStandardTemplate applies the current spec to the cluster's WeKnora
+// template. Cube bakes DNS into the template, so a READY template only picks
+// up a settings change via rebuild (preferred: same ID) or a replacement.
+//
+// The old template is never deleted until a replacement with an ID exists:
+// deleting first left every config's stored template_id pointing at a
+// missing template for the duration of the build.
 func (c *CubeRemoteClient) ReplaceStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
 	items, err := c.ListTemplates(ctx)
 	if err != nil {
 		return nil, err
 	}
-	for _, item := range items {
-		if !item.Standard || strings.TrimSpace(item.ID) == "" {
+	var current *RemoteTemplate
+	for i := range items {
+		if !items[i].Standard || strings.TrimSpace(items[i].ID) == "" {
 			continue
 		}
-		logger.Infof(ctx, "cube replacing standard template %s", item.ID)
+		item := items[i]
+		if current == nil {
+			current = &item
+			continue
+		}
+		if IsTemplateBuildFailed(current.Status) && !IsTemplateBuildFailed(item.Status) {
+			current = &item
+		}
+	}
+	if current != nil {
+		rebuilt, err := c.tryRebuildStandardTemplate(ctx, *current)
+		if err == nil {
+			return rebuilt, nil
+		}
+		logger.Warnf(ctx,
+			"cube in-place rebuild of standard template %s failed: %v; building a replacement",
+			current.ID, err)
+	}
+	created, err := c.buildStandardTemplate(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if created == nil || strings.TrimSpace(created.ID) == "" || IsTemplateBuildFailed(created.Status) {
+		return created, nil
+	}
+	for _, item := range items {
+		if !item.Standard || strings.TrimSpace(item.ID) == "" || item.ID == created.ID {
+			continue
+		}
+		logger.Infof(ctx, "cube deleting superseded standard template %s", item.ID)
 		if err := c.client.DeleteTemplate(ctx, item.ID); err != nil {
 			if normalized := normalizeCubeError("DeleteTemplate", err); !IsRemoteNotFound(normalized) {
-				return nil, normalized
+				logger.Warnf(ctx, "cube delete of replaced template %s failed: %v", item.ID, err)
 			}
 		}
 	}
-	return c.buildStandardTemplate(ctx)
+	return created, nil
 }
 
 // rebuildStandardTemplate restarts the build of a template that already exists,
@@ -275,14 +308,25 @@ func (c *CubeRemoteClient) rebuildStandardTemplate(
 	ctx context.Context,
 	current RemoteTemplate,
 ) (*RemoteTemplate, error) {
-	logger.Infof(ctx, "cube standard template %s failed (%s), rebuilding in place",
-		current.ID, current.Status)
-	job, err := c.client.RebuildTemplate(ctx, current.ID, c.standardTemplateSpec())
+	rebuilt, err := c.tryRebuildStandardTemplate(ctx, current)
 	if err != nil {
 		// The failed template is still in the catalog; returning it lets the
 		// settings page show lastError instead of 500ing the whole query.
 		logger.Warnf(ctx, "cube rebuild of standard template %s failed: %v", current.ID, err)
 		return &current, nil
+	}
+	return rebuilt, nil
+}
+
+func (c *CubeRemoteClient) tryRebuildStandardTemplate(
+	ctx context.Context,
+	current RemoteTemplate,
+) (*RemoteTemplate, error) {
+	logger.Infof(ctx, "cube rebuilding standard template %s in place (%s)",
+		current.ID, current.Status)
+	job, err := c.client.RebuildTemplate(ctx, current.ID, c.standardTemplateSpec())
+	if err != nil {
+		return nil, normalizeCubeError("RebuildTemplate", err)
 	}
 	rebuilt := current
 	rebuilt.Status = normalizeCubeTemplateStatus(job.Status)

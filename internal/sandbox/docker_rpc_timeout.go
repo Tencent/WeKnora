@@ -7,10 +7,11 @@ import (
 	"github.com/moby/moby/client"
 )
 
-// withDockerRPCTimeout bounds short Engine API calls. Streaming methods are
-// left on the caller's context: http.Client.Timeout (and a blanket RPC
-// deadline) would abort a pull or hijacked exec after the budget, which is
-// exactly how the previous 30s client timeout broke cold image pulls.
+// withDockerRPCTimeout bounds short Engine API calls. Streaming and long
+// storage methods (pull, commit, image remove) are left on the caller's
+// context: http.Client.Timeout (and a blanket RPC deadline) would abort them
+// after the budget, which is exactly how the previous 30s client timeout
+// broke cold image pulls.
 func withDockerRPCTimeout(inner dockerEngineAPI, timeout time.Duration) dockerEngineAPI {
 	if inner == nil || timeout <= 0 {
 		return inner
@@ -138,9 +139,10 @@ func (a *dockerRPCTimeoutAPI) ImageList(
 func (a *dockerRPCTimeoutAPI) ImageRemove(
 	ctx context.Context, imageID string, options client.ImageRemoveOptions,
 ) (client.ImageRemoveResult, error) {
-	rpcCtx, cancel := a.rpcCtx(ctx)
-	defer cancel()
-	return a.inner.ImageRemove(rpcCtx, imageID, options)
+	// PruneChildren on a retired skill chain can run well past the short
+	// RPC budget, the way a commit or pull does. Timing out here would
+	// leave the ledger unmarked and the layers on disk.
+	return a.inner.ImageRemove(ctx, imageID, options)
 }
 
 func (a *dockerRPCTimeoutAPI) ContainerCommit(

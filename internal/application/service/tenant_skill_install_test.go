@@ -89,6 +89,15 @@ func TestRunInstallSucceedsOnDockerConfig(t *testing.T) {
 	require.Equal(t, fx.fingerprint, fx.configRepo.saved.Config.SkillImage.OwnerFingerprint)
 }
 
+func TestSkillSnapshotBuildNameIncludesTenantAndFullConfig(t *testing.T) {
+	a := skillSnapshotBuildName(7, "aaaaaaaa-bbbb-cccc-dddd-eeeeffff0001", 1)
+	b := skillSnapshotBuildName(8, "aaaaaaaa-bbbb-cccc-dddd-eeeeffff0001", 1)
+	c := skillSnapshotBuildName(7, "aaaaaaaa-bbbb-cccc-dddd-eeeeffff0002", 1)
+	require.Equal(t, "weknora-sk-t7-aaaaaaaabbbbccccddddeeeeffff0001-g1", a)
+	require.NotEqual(t, a, b, "the same config in another tenant must not share a tag")
+	require.NotEqual(t, a, c, "two configs must not share a tag")
+}
+
 // TestRunInstallIssuesExactlyTheseCommands pins the order, not just the set.
 // Ownership and permissions are normalised BEFORE verification on purpose: the
 // agent creates the tree as root, so a restrictive root umask would leave the

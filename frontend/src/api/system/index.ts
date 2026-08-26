@@ -925,9 +925,9 @@ export function getSandboxConfigInventory(id: string): Promise<{ data: SandboxIn
 /**
  * Fetch templates using the connection currently entered in the drawer.
  * `ensure_standard` starts a provider-side build when no WeKnora template is
- * present. `replace_standard` deletes the existing WeKnora template first so
- * a new spec (DNS, image) can take effect. The returned building item can be
- * polled through the same endpoint.
+ * present. `replace_standard` rebuilds the WeKnora template so a new spec
+ * (DNS, image) can take effect; it requires `config_id`. The returned
+ * building item can be polled through the same endpoint.
  */
 export function querySandboxTemplates(payload: {
   config: SandboxConfig

@@ -553,6 +553,41 @@ func TestConfiguredSandboxTTLCoversTheDockerIdleWindow(t *testing.T) {
 	}), "an unset idle TTL leaves the retention floor in charge")
 }
 
+func TestSnapshotBelongsToOtherConfig(t *testing.T) {
+	prefix := skillSnapshotNamePrefix(7, "cfg-1")
+	dockerOurs := sandbox.RemoteSnapshotRef{
+		ID: "weknora-skill/weknora-sk-t7-cfg1-g1", Names: []string{"weknora-skill/weknora-sk-t7-cfg1-g1"},
+	}
+	dockerTheirs := sandbox.RemoteSnapshotRef{
+		ID: "weknora-skill/weknora-sk-t7-cfg2-g1", Names: []string{"weknora-skill/weknora-sk-t7-cfg2-g1"},
+	}
+	cubeOurs := sandbox.RemoteSnapshotRef{ID: "snap-ours", Names: []string{"weknora-sk-t7-cfg1-g1"}}
+	cubeTheirs := sandbox.RemoteSnapshotRef{ID: "snap-theirs", Names: []string{"weknora-sk-t8-cfg1-g1"}}
+	e2bTheirs := sandbox.RemoteSnapshotRef{ID: "tpl-other", Names: []string{"weknora-sk-t7-aaaa-g3"}}
+	legacy := sandbox.RemoteSnapshotRef{ID: "snap-legacy", Names: []string{"weknora-sk-cfg1-g2"}}
+	unnamed := sandbox.RemoteSnapshotRef{ID: "snap-plain"}
+
+	require.False(t, snapshotBelongsToOtherConfig(dockerOurs, prefix))
+	require.True(t, snapshotBelongsToOtherConfig(dockerTheirs, prefix))
+	require.False(t, snapshotBelongsToOtherConfig(cubeOurs, prefix))
+	require.True(t, snapshotBelongsToOtherConfig(cubeTheirs, prefix),
+		"a Cube snapshot named for another tenant must not be this config's extra")
+	require.True(t, snapshotBelongsToOtherConfig(e2bTheirs, prefix))
+	require.False(t, snapshotBelongsToOtherConfig(legacy, prefix),
+		"legacy names without a tenant prefix must still be matchable")
+	require.False(t, snapshotBelongsToOtherConfig(unnamed, prefix),
+		"a listing that does not echo our name is not classified as another config")
+
+	kept := snapshotsNotFromOtherConfig([]sandbox.RemoteSnapshotRef{
+		dockerOurs, dockerTheirs, cubeOurs, cubeTheirs, legacy, unnamed,
+	}, prefix)
+	ids := make([]string, 0, len(kept))
+	for _, snap := range kept {
+		ids = append(ids, snap.ID)
+	}
+	require.Equal(t, []string{"weknora-skill/weknora-sk-t7-cfg1-g1", "snap-ours", "snap-legacy", "snap-plain"}, ids)
+}
+
 func TestTenantSkillServiceStartIsIdempotent(t *testing.T) {
 	svc := NewTenantSkillService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 

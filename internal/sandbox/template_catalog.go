@@ -46,9 +46,10 @@ type RemoteTemplate struct {
 type RemoteTemplateCatalog interface {
 	ListTemplates(ctx context.Context) ([]RemoteTemplate, error)
 	EnsureStandardTemplate(ctx context.Context) (*RemoteTemplate, error)
-	// ReplaceStandardTemplate deletes the cluster's WeKnora template and
-	// builds a new one from the current spec. Changing DNS or the image
-	// otherwise has no effect on an already-READY template.
+	// ReplaceStandardTemplate applies the current spec to the cluster's
+	// WeKnora template (DNS, image). A READY template cannot pick those up
+	// any other way. Implementations must not delete a usable template
+	// until a replacement with an ID exists.
 	ReplaceStandardTemplate(ctx context.Context) (*RemoteTemplate, error)
 }
 
