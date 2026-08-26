@@ -21,6 +21,15 @@ const (
 	// Can be overridden via AgentConfig.LLMCallTimeout.
 	defaultLLMCallTimeout = 120 * time.Second
 
+	// minLLMCallTimeout / maxLLMCallTimeout bound the effective per-call timeout
+	// when AgentConfig.LLMCallTimeout is set explicitly. Values below min can never
+	// survive network + first-token latency and almost always indicate operator
+	// error; values above max defeat the purpose of the per-call guard (a hung
+	// provider connection would pin a worker for hours). The max matches the
+	// frontend editor's upper bound (AgentEditorModal.vue, :max="3600").
+	minLLMCallTimeout = 10 * time.Second
+	maxLLMCallTimeout = 3600 * time.Second
+
 	// defaultToolExecTimeout is the default maximum time for a single tool execution.
 	// Prevents long-running tools (web_fetch, database_query) from hanging indefinitely.
 	defaultToolExecTimeout = 60 * time.Second
@@ -75,12 +84,24 @@ func isTransientError(err error) bool {
 	return false
 }
 
-// getLLMCallTimeout returns the configured LLM call timeout, falling back to default.
+// getLLMCallTimeout returns the configured LLM call timeout, falling back to
+// default. Explicitly configured values are clamped into
+// [minLLMCallTimeout, maxLLMCallTimeout] so a misconfiguration can neither
+// break every call (too short) nor silently disable the guard (too long);
+// values <= 0 keep the "use default" semantics. The comparison happens in
+// the seconds domain to avoid time.Duration overflow on absurd inputs.
 func (e *AgentEngine) getLLMCallTimeout() time.Duration {
-	if e.config.LLMCallTimeout > 0 {
-		return time.Duration(e.config.LLMCallTimeout) * time.Second
+	if e.config == nil || e.config.LLMCallTimeout <= 0 {
+		return defaultLLMCallTimeout
 	}
-	return defaultLLMCallTimeout
+	sec := e.config.LLMCallTimeout
+	if sec < int(minLLMCallTimeout/time.Second) {
+		return minLLMCallTimeout
+	}
+	if sec > int(maxLLMCallTimeout/time.Second) {
+		return maxLLMCallTimeout
+	}
+	return time.Duration(sec) * time.Second
 }
 
 // generateEventID generates a unique event ID with type suffix for better traceability
