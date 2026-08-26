@@ -334,27 +334,53 @@ func (c *E2BRemoteClient) EnsureStandardTemplate(ctx context.Context) (*RemoteTe
 	return c.buildStandardTemplate(ctx)
 }
 
-// ReplaceStandardTemplate deletes the WeKnora template and starts a new build
-// so a later image (or an untagged leftover) can actually replace what is
-// already READY.
+// ReplaceStandardTemplate starts a new WeKnora-template build from the current
+// spec. E2B resolves builds by name, so this is often a rebuild of the same
+// ID. Old standard templates are deleted only after a replacement with an ID
+// exists — deleting first left stored template_ids pointing at a missing
+// template for the duration of the build.
 func (c *E2BRemoteClient) ReplaceStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
 	items, err := c.ListTemplates(ctx)
 	if err != nil {
 		return nil, err
 	}
+	created, err := c.buildStandardTemplate(ctx)
+	if err != nil || created == nil || strings.TrimSpace(created.ID) == "" {
+		// A READY template may refuse a second build under the same name.
+		// Only then delete, and only to retry — if this retry also fails the
+		// old template is already gone, which is the original E2B limitation.
+		if err != nil {
+			logger.Warnf(ctx,
+				"e2b standard template rebuild without delete failed: %v; deleting then retrying",
+				err)
+		}
+		for _, item := range items {
+			if !item.Standard || strings.TrimSpace(item.ID) == "" {
+				continue
+			}
+			logger.Infof(ctx, "e2b replacing standard template %s", item.ID)
+			if delErr := c.client.DeleteTemplate(ctx, item.ID); delErr != nil {
+				var notFound *e2b.TemplateNotFoundError
+				if !errors.As(delErr, &notFound) {
+					return nil, normalizeE2BError("DeleteTemplate", delErr)
+				}
+			}
+		}
+		return c.buildStandardTemplate(ctx)
+	}
 	for _, item := range items {
-		if !item.Standard || strings.TrimSpace(item.ID) == "" {
+		if !item.Standard || strings.TrimSpace(item.ID) == "" || item.ID == created.ID {
 			continue
 		}
-		logger.Infof(ctx, "e2b replacing standard template %s", item.ID)
+		logger.Infof(ctx, "e2b deleting superseded standard template %s", item.ID)
 		if err := c.client.DeleteTemplate(ctx, item.ID); err != nil {
 			var notFound *e2b.TemplateNotFoundError
 			if !errors.As(err, &notFound) {
-				return nil, normalizeE2BError("DeleteTemplate", err)
+				logger.Warnf(ctx, "e2b delete of replaced template %s failed: %v", item.ID, err)
 			}
 		}
 	}
-	return c.buildStandardTemplate(ctx)
+	return created, nil
 }
 
 func (c *E2BRemoteClient) buildStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {

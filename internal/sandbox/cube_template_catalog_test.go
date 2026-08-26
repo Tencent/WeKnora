@@ -390,8 +390,9 @@ func TestCubeRemoteClientEnsureStandardTemplateIncludesConfiguredDNS(t *testing.
 	require.Equal(t, []any{"8.8.8.8", "1.1.1.1"}, payload["dns"])
 }
 
-func TestCubeRemoteClientReplaceStandardTemplateDeletesThenBuilds(t *testing.T) {
+func TestCubeRemoteClientReplaceStandardTemplateRebuildsInPlace(t *testing.T) {
 	var deleted atomic.Int32
+	var created atomic.Int32
 	var payload map[string]any
 	client := newCubeTemplateClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -402,11 +403,17 @@ func TestCubeRemoteClientReplaceStandardTemplateDeletesThenBuilds(t *testing.T) 
 				"imageInfo":  DefaultDockerImage,
 				"aliases":    []string{StandardTemplateName},
 			}})
+		case r.URL.Path == "/templates/tpl-old" && r.Method == http.MethodPost:
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"templateID": "tpl-old",
+				"status":     "PENDING",
+			})
 		case r.URL.Path == "/templates/tpl-old" && r.Method == http.MethodDelete:
 			deleted.Add(1)
 			w.WriteHeader(http.StatusNoContent)
 		case r.URL.Path == "/templates" && r.Method == http.MethodPost:
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			created.Add(1)
 			writeJSON(w, http.StatusAccepted, map[string]any{
 				"templateID": "tpl-new",
 				"status":     "PENDING",
@@ -421,11 +428,52 @@ func TestCubeRemoteClientReplaceStandardTemplateDeletesThenBuilds(t *testing.T) 
 
 	template, err := client.ReplaceStandardTemplate(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, "tpl-new", template.ID)
+	require.Equal(t, "tpl-old", template.ID)
 	require.Equal(t, "building", template.Status)
-	require.Equal(t, int32(1), deleted.Load())
+	require.Equal(t, int32(0), deleted.Load(), "in-place rebuild must keep the stored template ID")
+	require.Equal(t, int32(0), created.Load())
 	require.Equal(t, []any{"192.0.2.53"}, payload["dns"])
 	require.Equal(t, true, payload["allowInternetAccess"])
+}
+
+func TestCubeRemoteClientReplaceStandardTemplateBuildsThenDeletesWhenRedoBlocked(t *testing.T) {
+	var deleted atomic.Int32
+	var payload map[string]any
+	client := newCubeTemplateClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/templates" && r.Method == http.MethodGet:
+			writeJSON(w, http.StatusOK, []map[string]any{{
+				"templateID": "tpl-old",
+				"status":     "READY",
+				"imageInfo":  DefaultDockerImage,
+				"aliases":    []string{StandardTemplateName},
+			}})
+		case r.URL.Path == "/templates/tpl-old" && r.Method == http.MethodPost:
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"code":    400,
+				"message": "template redo is not allowed",
+			})
+		case r.URL.Path == "/templates" && r.Method == http.MethodPost:
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"templateID": "tpl-new",
+				"status":     "PENDING",
+			})
+		case r.URL.Path == "/templates/tpl-old" && r.Method == http.MethodDelete:
+			deleted.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		case r.URL.Path == "/snapshots" && r.Method == http.MethodGet:
+			writeJSON(w, http.StatusOK, []map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	template, err := client.ReplaceStandardTemplate(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "tpl-new", template.ID)
+	require.Equal(t, int32(1), deleted.Load(), "the old template is deleted only after the replacement has an ID")
+	require.Equal(t, DefaultCubeTemplateImage, payload["image"])
 }
 
 // The plain and Cube images share a repository, so a template built from either

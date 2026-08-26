@@ -982,12 +982,23 @@ async function loadTemplates(ensureStandard = false, silent = false, replaceStan
     templatesLoaded.value = true
     const standardID = res.data?.standard_template_id
     const current = templates.value.find((item) => item.id === currentTemplateId.value)
-    if (
+    if (replaceStandard && standardID) {
+      selectTemplate(standardID)
+    } else if (
       currentTemplateId.value
-      && (!current || !isTemplateSelectable(current))
+      && (!current || (!isTemplateSelectable(current) && !isTemplatePending(current)))
       && !hasSkillSnapshot.value
     ) {
-      clearTemplateSelection()
+      if (standardID) {
+        const next = templates.value.find((item) => item.id === standardID)
+        if (next && (isTemplateSelectable(next) || isTemplatePending(next))) {
+          selectTemplate(standardID)
+        } else {
+          clearTemplateSelection()
+        }
+      } else {
+        clearTemplateSelection()
+      }
     }
     const readyStandard = templates.value.find((item) => item.id === standardID && isTemplateSelectable(item))
       || templates.value.find((item) => item.standard && isTemplateSelectable(item))
@@ -1013,7 +1024,6 @@ function createStandardTemplate() {
 
 function replaceStandardTemplate() {
   if (hasSkillSnapshot.value) return
-  clearTemplateSelection()
   return loadTemplates(false, false, true)
 }
 

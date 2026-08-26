@@ -89,9 +89,10 @@ var _ dockerEngineAPI = (*client.Client)(nil)
 const DefaultDockerHost = "unix:///var/run/docker.sock"
 
 // DefaultDockerHTTPTimeout bounds a single short Engine API call (ping, create,
-// inspect, list, delete, exec create/inspect). Streaming calls — image pull,
-// exec hijack, archive copy — use the caller's context instead, because
-// http.Client.Timeout would kill them mid-body.
+// inspect, list, exec create/inspect). Streaming and long storage calls —
+// image pull, image remove with prune, commit, exec hijack, archive copy —
+// use the caller's context instead, because a 30s deadline would kill them
+// mid-body.
 const DefaultDockerHTTPTimeout = 30 * time.Second
 
 // DefaultDockerIdleTTL is how long a session container may go without an exec

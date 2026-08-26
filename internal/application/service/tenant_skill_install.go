@@ -365,7 +365,7 @@ func (s *TenantSkillService) runInstall(
 	// so a run that dies during the commit still leaves the ledger able to
 	// name what it was building. Without it the snapshot would be a provider
 	// resource nothing could ever address, let alone reclaim.
-	snapshotName := skillSnapshotBuildName(configID, generation)
+	snapshotName := skillSnapshotBuildName(tenantID, configID, generation)
 	if err := s.skills.CreateSnapshotRow(ctx, &types.TenantSkillSnapshotEntity{
 		ID: installRowID, TenantID: tenantID, SandboxConfigID: configID, SkillID: skillID,
 		ParentSnapshotID: currentSnapshotID(cfgEntity), Generation: generation,
@@ -1329,23 +1329,86 @@ func currentSnapshotID(cfgEntity *types.TenantSandboxConfigEntity) string {
 	return cfgEntity.Config.SkillImage.SnapshotID
 }
 
+func skillSnapshotNamePrefix(tenantID uint64, configID string) string {
+	return fmt.Sprintf("weknora-sk-t%d-%s", tenantID, compactConfigID(configID))
+}
+
 // skillSnapshotBuildName is the name every generation of a config's image
 // chain is committed under. It is deterministic so the abandoned-build sweep
 // can match a provider listing against a ledger row that never learned its
-// snapshot ID.
-func skillSnapshotBuildName(configID string, generation int) string {
-	return fmt.Sprintf("weknora-sk-%s-g%d", shortID(configID), generation)
+// snapshot ID. Tenant and the full config id are in the name because Cube,
+// E2B and Docker all list snapshots across a shared account or daemon; a
+// short config prefix would let two configs overwrite or reclaim each
+// other's images.
+func skillSnapshotBuildName(tenantID uint64, configID string, generation int) string {
+	return fmt.Sprintf("%s-g%d", skillSnapshotNamePrefix(tenantID, configID), generation)
 }
 
-func shortID(id string) string {
-	trimmed := strings.ReplaceAll(strings.TrimSpace(id), "-", "")
-	if len(trimmed) > 8 {
-		return trimmed[:8]
+func compactConfigID(id string) string {
+	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(id), "-", ""))
+}
+
+// weknoraSkillSnapshotName pulls the weknora-sk-… token out of a provider
+// listing. Cube and E2B echo it in Names; Docker embeds it in the image tag.
+func weknoraSkillSnapshotName(raw string) string {
+	s := strings.TrimSpace(raw)
+	s = strings.TrimPrefix(s, "docker.io/")
+	if i := strings.LastIndex(s, "/"); i >= 0 {
+		s = s[i+1:]
 	}
-	if trimmed == "" {
-		return "config"
+	if cut := strings.IndexByte(s, ':'); cut >= 0 {
+		s = s[:cut]
 	}
-	return trimmed
+	if strings.HasPrefix(s, "weknora-sk-") {
+		return s
+	}
+	return ""
+}
+
+// snapshotsNotFromOtherConfig drops provider listings that already name a
+// different WeKnora config. Cube, E2B and Docker all ListSnapshots across the
+// whole account/daemon, so without this a reconcile of one config would treat
+// every other config's image as an extra, and an abandoned-build match could
+// bind to the wrong snapshot.
+func snapshotsNotFromOtherConfig(
+	listed []sandbox.RemoteSnapshotRef, prefix string,
+) []sandbox.RemoteSnapshotRef {
+	if strings.TrimSpace(prefix) == "" {
+		return listed
+	}
+	out := make([]sandbox.RemoteSnapshotRef, 0, len(listed))
+	for _, snap := range listed {
+		if snapshotBelongsToOtherConfig(snap, prefix) {
+			continue
+		}
+		out = append(out, snap)
+	}
+	return out
+}
+
+func snapshotBelongsToOtherConfig(snap sandbox.RemoteSnapshotRef, prefix string) bool {
+	if strings.TrimSpace(prefix) == "" {
+		return false
+	}
+	needle := prefix + "-g"
+	sawForeign := false
+	for _, candidate := range append([]string{snap.ID}, snap.Names...) {
+		name := weknoraSkillSnapshotName(candidate)
+		if name == "" {
+			continue
+		}
+		if strings.HasPrefix(name, needle) {
+			return false
+		}
+		// New-format names are weknora-sk-t<tenant>-<config>-gN. Legacy
+		// weknora-sk-<short>-gN names are left alone so a row written before
+		// the prefix existed can still be matched.
+		rest := strings.TrimPrefix(name, "weknora-sk-")
+		if len(rest) > 1 && rest[0] == 't' && rest[1] >= '0' && rest[1] <= '9' {
+			sawForeign = true
+		}
+	}
+	return sawForeign
 }
 
 func buildInstallPrompt(skillDir string, bundle *SkillBundle, uvAvailable bool) string {

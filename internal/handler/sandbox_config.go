@@ -36,8 +36,8 @@ type sandboxTemplateQueryRequest struct {
 
 // QueryTemplates returns the templates visible through an unsaved workspace
 // connection. ensure_standard starts a build only when the cluster has no
-// usable WeKnora template; replace_standard deletes that template first so
-// a new spec (DNS, image) can take effect.
+// usable WeKnora template; replace_standard rebuilds that template so a
+// new spec (DNS, image) can take effect. replace_standard requires config_id.
 func (h *SandboxConfigHandler) QueryTemplates(c *gin.Context) {
 	var req sandboxTemplateQueryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
