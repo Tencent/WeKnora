@@ -592,7 +592,7 @@ export default {
     clearSelection: 'Deselect all',
     batchDelete: 'Delete selected',
     confirmBatchDeleteDocument: 'Delete {count} selected documents? This action cannot be undone.',
-    batchDeleteSuccess: 'Deleted {count} documents',
+    batchDeleteSuccess: 'Deletion task submitted for {count} documents',
     batchDeleteFailed: 'Batch delete failed',
     batchTag: 'Batch Tag',
     batchTagDialogHeading: 'Batch Tag',
@@ -650,7 +650,7 @@ export default {
     allUploadSuccess: 'All files uploaded successfully ({count} files)',
     partialUploadSuccess: 'Partial upload success (success: {success}, failed: {fail})',
     allUploadFailed: 'All files failed to upload ({count} files)',
-    deleteSuccess: 'Knowledge deleted successfully!',
+    deleteSuccess: 'Deletion task submitted',
     chunkLoadFailed: 'Failed to load chunks'
   },
   uploadConfirm: {
@@ -2264,7 +2264,7 @@ export default {
       sharedReadonly: 'Shared with me · View only'
     },
     messages: {
-      deleted: 'Knowledge base deleted',
+      deleted: 'Knowledge base deletion task submitted',
       deleteFailed: 'Failed to delete knowledge base',
       duplicateSuccess: 'Knowledge base duplicate created (content not included)',
       duplicateFailed: 'Failed to create knowledge base duplicate'

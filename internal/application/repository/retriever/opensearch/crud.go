@@ -349,6 +349,23 @@ func (r *Repository) DeleteByKnowledgeIDList(
 	return r.deleteByList(ctx, knowledgeIDs, dim, "knowledge_id")
 }
 
+func (r *Repository) DeleteByKnowledgeIDListAllDimensions(
+	ctx context.Context, knowledgeIDs []string, _ string,
+) error {
+	if len(knowledgeIDs) == 0 {
+		return nil
+	}
+	for from := 0; from < len(knowledgeIDs); from += 1000 {
+		to := min(from+1000, len(knowledgeIDs))
+		if err := r.deleteByTermsAcrossIndices(
+			ctx, r.baseIndex+"_*", "knowledge_id", knowledgeIDs[from:to],
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // deleteByList factors the common cap / empty / ensureReady / dispatch
 // logic out of the three DeleteBy* methods. dim==0 routes to the
 // dim-less keywords index.
@@ -380,6 +397,18 @@ func (r *Repository) deleteByList(
 func (r *Repository) deleteByTerms(
 	ctx context.Context, index, field string, values []string,
 ) error {
+	return r.deleteByTermsRequest(ctx, index, field, values, false)
+}
+
+func (r *Repository) deleteByTermsAcrossIndices(
+	ctx context.Context, index, field string, values []string,
+) error {
+	return r.deleteByTermsRequest(ctx, index, field, values, true)
+}
+
+func (r *Repository) deleteByTermsRequest(
+	ctx context.Context, index, field string, values []string, allowMissingIndices bool,
+) error {
 	body, err := json.Marshal(map[string]any{
 		"query": map[string]any{
 			"terms": map[string]any{field: values},
@@ -389,10 +418,15 @@ func (r *Repository) deleteByTerms(
 		return fmt.Errorf("opensearch: marshal delete body: %w", err)
 	}
 	refresh := true
+	params := osapi.DocumentDeleteByQueryParams{Refresh: &refresh}
+	if allowMissingIndices {
+		params.AllowNoIndices = &allowMissingIndices
+		params.IgnoreUnavailable = &allowMissingIndices
+	}
 	req := osapi.DocumentDeleteByQueryReq{
 		Indices: []string{index},
 		Body:    bytes.NewReader(body),
-		Params:  osapi.DocumentDeleteByQueryParams{Refresh: &refresh},
+		Params:  params,
 	}
 	resp, err := r.client.Document.DeleteByQuery(ctx, req)
 	if err != nil {

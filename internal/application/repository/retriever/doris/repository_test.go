@@ -321,6 +321,28 @@ func TestDeleteByKnowledgeIDList_NoOpOnEmpty(t *testing.T) {
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestDeleteByKnowledgeIDListAllDimensionsDeletesEveryMatchingTable(t *testing.T) {
+	repo, mock, _, cleanup := newTestRepo(t)
+	defer cleanup()
+
+	mock.ExpectQuery(`SELECT TABLE_NAME FROM information_schema.tables`).
+		WithArgs("weknora", "weknora_embeddings\\_%").
+		WillReturnRows(sqlmock.NewRows([]string{"TABLE_NAME"}).
+			AddRow("weknora_embeddings_2048").
+			AddRow("weknora_embeddings_4096"))
+	mock.ExpectExec("DELETE FROM `weknora_embeddings_2048` WHERE knowledge_id IN \\(\\?\\)").
+		WithArgs("knowledge-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("DELETE FROM `weknora_embeddings_4096` WHERE knowledge_id IN \\(\\?\\)").
+		WithArgs("knowledge-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	require.NoError(t, repo.DeleteByKnowledgeIDListAllDimensions(
+		context.Background(), []string{"knowledge-1"}, "file",
+	))
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestVectorRetrieve_SQLShape(t *testing.T) {
 	repo, mock, _, cleanup := newTestRepo(t)
 	defer cleanup()

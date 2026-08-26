@@ -64,6 +64,14 @@ type RetrieveEngineRepository interface {
 	RetrieveEngine
 }
 
+// CrossDimensionKnowledgeDeleter removes knowledge data from every
+// dimension-partitioned collection owned by a retrieve repository. Repositories
+// whose physical storage is not partitioned by dimension do not need to
+// implement it; callers fall back to DeleteByKnowledgeIDList.
+type CrossDimensionKnowledgeDeleter interface {
+	DeleteByKnowledgeIDListAllDimensions(ctx context.Context, knowledgeIDList []string, knowledgeType string) error
+}
+
 // RetrieveEngineRegistry defines the retrieve engine registry interface
 type RetrieveEngineRegistry interface {
 	// Register registers the retrieve engine service

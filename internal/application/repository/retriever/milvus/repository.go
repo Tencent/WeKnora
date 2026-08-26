@@ -363,6 +363,35 @@ func (m *milvusRepository) DeleteByKnowledgeIDList(ctx context.Context,
 
 	collectionName := m.getCollectionName(dimension)
 	log.Infof("[Milvus] Deleting indices by knowledge IDs from %s, count: %d", collectionName, len(knowledgeIDList))
+	return m.deleteKnowledgeIDsFromCollection(ctx, collectionName, knowledgeIDList)
+}
+
+func (m *milvusRepository) DeleteByKnowledgeIDListAllDimensions(
+	ctx context.Context, knowledgeIDList []string, _ string,
+) error {
+	if len(knowledgeIDList) == 0 {
+		return nil
+	}
+	collections, err := m.client.ListCollections(ctx, client.NewListCollectionOption())
+	if err != nil {
+		return fmt.Errorf("failed to list collections for knowledge deletion: %w", err)
+	}
+	prefix := m.collectionBaseName + "_"
+	for _, collectionName := range collections {
+		if !strings.HasPrefix(collectionName, prefix) {
+			continue
+		}
+		if err := m.deleteKnowledgeIDsFromCollection(ctx, collectionName, knowledgeIDList); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *milvusRepository) deleteKnowledgeIDsFromCollection(
+	ctx context.Context, collectionName string, knowledgeIDList []string,
+) error {
+	log := logger.GetLogger(ctx)
 
 	deleteOpt := client.NewDeleteOption(collectionName)
 	deleteOpt.WithStringIDs(fieldKnowledgeID, knowledgeIDList)
@@ -372,7 +401,7 @@ func (m *milvusRepository) DeleteByKnowledgeIDList(ctx context.Context,
 		return fmt.Errorf("failed to delete by knowledge IDs: %w", err)
 	}
 
-	log.Infof("[Milvus] Successfully deleted documents by knowledge IDs")
+	log.Infof("[Milvus] Successfully deleted documents by knowledge IDs from %s", collectionName)
 	return nil
 }
 

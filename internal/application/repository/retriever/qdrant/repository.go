@@ -311,6 +311,35 @@ func (q *qdrantRepository) DeleteByKnowledgeIDList(ctx context.Context,
 
 	collectionName := q.getCollectionName(dimension)
 	log.Infof("[Qdrant] Deleting indices by knowledge IDs from %s, count: %d", collectionName, len(knowledgeIDList))
+	return q.deleteKnowledgeIDsFromCollection(ctx, collectionName, knowledgeIDList)
+}
+
+func (q *qdrantRepository) DeleteByKnowledgeIDListAllDimensions(
+	ctx context.Context, knowledgeIDList []string, _ string,
+) error {
+	if len(knowledgeIDList) == 0 {
+		return nil
+	}
+	collections, err := q.client.ListCollections(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list collections for knowledge deletion: %w", err)
+	}
+	prefix := q.collectionBaseName + "_"
+	for _, collectionName := range collections {
+		if !strings.HasPrefix(collectionName, prefix) {
+			continue
+		}
+		if err := q.deleteKnowledgeIDsFromCollection(ctx, collectionName, knowledgeIDList); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (q *qdrantRepository) deleteKnowledgeIDsFromCollection(
+	ctx context.Context, collectionName string, knowledgeIDList []string,
+) error {
+	log := logger.GetLogger(ctx)
 
 	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
 		CollectionName: collectionName,
@@ -325,7 +354,7 @@ func (q *qdrantRepository) DeleteByKnowledgeIDList(ctx context.Context,
 		return fmt.Errorf("failed to delete by knowledge IDs: %w", err)
 	}
 
-	log.Infof("[Qdrant] Successfully deleted documents by knowledge IDs")
+	log.Infof("[Qdrant] Successfully deleted documents by knowledge IDs from %s", collectionName)
 	return nil
 }
 

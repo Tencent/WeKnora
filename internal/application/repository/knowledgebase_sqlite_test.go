@@ -1,15 +1,141 @@
 package repository
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestDeleteKnowledgeBaseWithPendingOpCommitsAtomically(t *testing.T) {
+	db := setupKBTestDB(t)
+	require.NoError(t, db.Exec(taskPendingOpsTestDDL).Error)
+	kb := makeKB(nil)
+	require.NoError(t, db.Create(kb).Error)
+
+	repo := NewKnowledgeBaseRepository(db)
+	outbox, ok := repo.(interfaces.KnowledgeBaseDeleteOutbox)
+	require.True(t, ok)
+	payload, err := json.Marshal(types.KBDeletePayload{
+		TenantID:        kb.TenantID,
+		KnowledgeBaseID: kb.ID,
+	})
+	require.NoError(t, err)
+	op := &types.TaskPendingOp{
+		TenantID: kb.TenantID,
+		TaskType: types.TypeKBDelete,
+		Scope:    types.TaskScopeKnowledgeBaseDelete,
+		ScopeID:  kb.ID,
+		Op:       types.TaskOpKnowledgeBaseDelete,
+		DedupKey: kb.ID,
+		Payload:  payload,
+	}
+
+	require.NoError(t, outbox.DeleteKnowledgeBaseWithPendingOp(
+		context.Background(), kb.ID, kb.TenantID, op,
+	))
+
+	var activeCount int64
+	require.NoError(t, db.Model(&types.KnowledgeBase{}).
+		Where("id = ?", kb.ID).Count(&activeCount).Error)
+	assert.Zero(t, activeCount)
+	var deleted types.KnowledgeBase
+	require.NoError(t, db.Unscoped().First(&deleted, "id = ?", kb.ID).Error)
+	assert.True(t, deleted.DeletedAt.Valid)
+	var persisted types.TaskPendingOp
+	require.NoError(t, db.First(&persisted, "scope_id = ?", kb.ID).Error)
+	assert.Equal(t, types.TaskScopeKnowledgeBaseDelete, persisted.Scope)
+	assert.JSONEq(t, string(payload), string(persisted.Payload))
+}
+
+func TestDeleteKnowledgeBaseWithPendingOpRollsBackWhenDeleteFails(t *testing.T) {
+	db := setupKBTestDB(t)
+	require.NoError(t, db.Exec(taskPendingOpsTestDDL).Error)
+	kbID := uuid.New().String()
+
+	repo := NewKnowledgeBaseRepository(db)
+	outbox := repo.(interfaces.KnowledgeBaseDeleteOutbox)
+	err := outbox.DeleteKnowledgeBaseWithPendingOp(context.Background(), kbID, 1,
+		&types.TaskPendingOp{
+			TenantID: 1,
+			TaskType: types.TypeKBDelete,
+			Scope:    types.TaskScopeKnowledgeBaseDelete,
+			ScopeID:  kbID,
+			Op:       types.TaskOpKnowledgeBaseDelete,
+			DedupKey: kbID,
+			Payload:  []byte(`{}`),
+		})
+	require.ErrorIs(t, err, ErrKnowledgeBaseNotFound)
+
+	var pendingCount int64
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Count(&pendingCount).Error)
+	assert.Zero(t, pendingCount, "the pending operation must roll back with the failed soft-delete")
+}
+
+func TestDeleteKnowledgeBaseWithPendingOpRejectsMismatchedScopeWithoutDeleting(t *testing.T) {
+	db := setupKBTestDB(t)
+	require.NoError(t, db.Exec(taskPendingOpsTestDDL).Error)
+	kb := makeKB(nil)
+	require.NoError(t, db.Create(kb).Error)
+
+	repo := NewKnowledgeBaseRepository(db)
+	outbox := repo.(interfaces.KnowledgeBaseDeleteOutbox)
+	err := outbox.DeleteKnowledgeBaseWithPendingOp(context.Background(), kb.ID, kb.TenantID,
+		&types.TaskPendingOp{
+			TenantID: kb.TenantID,
+			TaskType: types.TypeKBDelete,
+			Scope:    types.TaskScopeKnowledgeBaseDelete,
+			ScopeID:  "another-kb",
+			Op:       types.TaskOpKnowledgeBaseDelete,
+			DedupKey: kb.ID,
+			Payload:  []byte(`{}`),
+		})
+	require.Error(t, err)
+
+	var activeCount int64
+	require.NoError(t, db.Model(&types.KnowledgeBase{}).
+		Where("id = ?", kb.ID).Count(&activeCount).Error)
+	assert.EqualValues(t, 1, activeCount)
+	var pendingCount int64
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Count(&pendingCount).Error)
+	assert.Zero(t, pendingCount)
+}
+
+func TestDeleteKnowledgeBaseWithPendingOpRejectsMismatchedOperation(t *testing.T) {
+	db := setupKBTestDB(t)
+	require.NoError(t, db.Exec(taskPendingOpsTestDDL).Error)
+	kb := makeKB(nil)
+	require.NoError(t, db.Create(kb).Error)
+
+	repo := NewKnowledgeBaseRepository(db)
+	outbox := repo.(interfaces.KnowledgeBaseDeleteOutbox)
+	err := outbox.DeleteKnowledgeBaseWithPendingOp(context.Background(), kb.ID, kb.TenantID,
+		&types.TaskPendingOp{
+			TenantID: kb.TenantID,
+			TaskType: types.TypeKBDelete,
+			Scope:    types.TaskScopeKnowledgeBaseDelete,
+			ScopeID:  kb.ID,
+			Op:       "not-delete",
+			DedupKey: kb.ID,
+			Payload:  []byte(`{}`),
+		})
+	require.Error(t, err)
+
+	var activeCount int64
+	require.NoError(t, db.Model(&types.KnowledgeBase{}).
+		Where("id = ?", kb.ID).Count(&activeCount).Error)
+	assert.EqualValues(t, 1, activeCount)
+	var pendingCount int64
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Count(&pendingCount).Error)
+	assert.Zero(t, pendingCount)
+}
 
 // knowledgeBasesTestDDL mirrors the `knowledge_bases` section of
 // migrations/sqlite/000000_init.up.sql. We inline the DDL here instead of
