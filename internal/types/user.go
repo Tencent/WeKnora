@@ -111,6 +111,14 @@ type User struct {
 	Tenant *Tenant `json:"tenant,omitempty" gorm:"foreignKey:TenantID"`
 }
 
+// UserListCursor identifies the last row returned by a deterministic user
+// listing. Callers must apply both fields because CreatedAt alone is not
+// unique.
+type UserListCursor struct {
+	CreatedAt time.Time
+	ID        string
+}
+
 // AuthToken represents an authentication token
 type AuthToken struct {
 	// Unique identifier of the token

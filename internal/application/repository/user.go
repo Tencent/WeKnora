@@ -247,30 +247,36 @@ func (r *userRepository) GrantSystemAdmin(ctx context.Context, userID string) (*
 
 // ListCrossTenantAccessUsers lists users where can_access_all_tenants is true.
 func (r *userRepository) ListCrossTenantAccessUsers(
-	ctx context.Context, offset, limit int,
-) ([]*types.User, int64, error) {
+	ctx context.Context, cursor *types.UserListCursor, limit int,
+) ([]*types.User, *types.UserListCursor, error) {
 	var users []*types.User
-	var total int64
 
 	// Keep the indexed predicate literal. PostgreSQL cannot always prove that
 	// a parameterized boolean predicate implies a partial-index predicate when
 	// it switches to a generic prepared plan.
-	base := r.db.WithContext(ctx).Model(&types.User{}).Where("can_access_all_tenants = TRUE")
-	if err := base.Count(&total).Error; err != nil {
-		return nil, 0, err
+	query := r.db.WithContext(ctx).Model(&types.User{}).
+		Where("can_access_all_tenants = TRUE")
+	if cursor != nil {
+		query = query.Where(
+			"created_at < ? OR (created_at = ? AND id > ?)",
+			cursor.CreatedAt, cursor.CreatedAt, cursor.ID,
+		)
 	}
-
-	query := base.Order("created_at DESC, id ASC")
+	query = query.Order("created_at DESC, id ASC")
 	if limit > 0 {
-		query = query.Limit(limit)
-	}
-	if offset > 0 {
-		query = query.Offset(offset)
+		query = query.Limit(limit + 1)
 	}
 	if err := query.Find(&users).Error; err != nil {
-		return nil, 0, err
+		return nil, nil, err
 	}
-	return users, total, nil
+	if limit <= 0 || len(users) <= limit {
+		return users, nil, nil
+	}
+
+	users = users[:limit]
+	last := users[len(users)-1]
+	nextCursor := &types.UserListCursor{CreatedAt: last.CreatedAt, ID: last.ID}
+	return users, nextCursor, nil
 }
 
 // CountCrossTenantAccessManagers returns the number of active users that hold

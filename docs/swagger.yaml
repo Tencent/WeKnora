@@ -5274,8 +5274,8 @@ definitions:
     type: object
   internal_handler.ListCrossTenantAccessUsersResponse:
     properties:
-      total:
-        type: integer
+      next_cursor:
+        type: string
       users:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo'
@@ -15094,11 +15094,10 @@ paths:
       description: List users where can_access_all_tenants=true. The caller must hold
         both platform flags.
       parameters:
-      - default: 0
-        description: Page offset
+      - description: Opaque cursor returned by the previous page
         in: query
-        name: offset
-        type: integer
+        name: cursor
+        type: string
       - default: 50
         description: Page size (max 200)
         in: query
@@ -15111,6 +15110,11 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/internal_handler.ListCrossTenantAccessUsersResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
         "403":
           description: Forbidden
           schema:

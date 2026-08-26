@@ -13765,10 +13765,9 @@ const docTemplate = `{
                 "summary": "List users with access to all tenants",
                 "parameters": [
                     {
-                        "type": "integer",
-                        "default": 0,
-                        "description": "Page offset",
-                        "name": "offset",
+                        "type": "string",
+                        "description": "Opaque cursor returned by the previous page",
+                        "name": "cursor",
                         "in": "query"
                     },
                     {
@@ -13784,6 +13783,13 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/internal_handler.ListCrossTenantAccessUsersResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     },
                     "403": {
@@ -23475,8 +23481,8 @@ const docTemplate = `{
         "internal_handler.ListCrossTenantAccessUsersResponse": {
             "type": "object",
             "properties": {
-                "total": {
-                    "type": "integer"
+                "next_cursor": {
+                    "type": "string"
                 },
                 "users": {
                     "type": "array",

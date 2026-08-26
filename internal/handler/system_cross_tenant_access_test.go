@@ -75,15 +75,15 @@ func (s *crossTenantAccessUserService) RevokeCrossTenantAccess(
 }
 
 func (s *crossTenantAccessUserService) ListCrossTenantAccessUsers(
-	context.Context, int, int,
-) ([]*types.User, int64, error) {
+	context.Context, *types.UserListCursor, int,
+) ([]*types.User, *types.UserListCursor, error) {
 	users := make([]*types.User, 0, len(s.users))
 	for _, user := range s.users {
 		if user.CanAccessAllTenants {
 			users = append(users, user)
 		}
 	}
-	return users, int64(len(users)), s.err
+	return users, nil, s.err
 }
 
 func (s *crossTenantAccessUserService) RevokeSystemAdmin(
@@ -227,7 +227,19 @@ func TestListCrossTenantAccessUsersReturnsOnlyEnabledUsers(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/list?limit=200", nil))
-	if w.Code != http.StatusOK || !bytes.Contains(w.Body.Bytes(), []byte(`"total":1`)) {
+	if w.Code != http.StatusOK || !bytes.Contains(w.Body.Bytes(), []byte(`"id":"enabled"`)) ||
+		bytes.Contains(w.Body.Bytes(), []byte(`"id":"disabled"`)) {
+		t.Fatalf("list status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestListCrossTenantAccessUsersRejectsInvalidCursor(t *testing.T) {
+	users := &crossTenantAccessUserService{users: map[string]*types.User{}}
+	router := crossTenantAccessHandlerRouter(&SystemHandler{userSvc: users})
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/list?cursor=not-a-cursor", nil))
+	if w.Code != http.StatusBadRequest {
 		t.Fatalf("list status=%d body=%s", w.Code, w.Body.String())
 	}
 }

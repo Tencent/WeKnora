@@ -363,8 +363,8 @@ export async function listSystemAdmins(
 }
 
 export interface ListCrossTenantAccessUsersResponse {
-  total: number
   users: SystemAdminUser[]
+  next_cursor: string
 }
 
 export interface GrantCrossTenantAccessRequest {
@@ -388,10 +388,10 @@ export async function revokeCrossTenantAccess(userId: string): Promise<SystemAdm
 
 /** List users whose can_access_all_tenants flag is enabled. */
 export async function listCrossTenantAccessUsers(
-  params?: { offset?: number; limit?: number },
+  params?: { cursor?: string; limit?: number },
 ): Promise<ListCrossTenantAccessUsersResponse> {
   const qs = new URLSearchParams()
-  if (params?.offset != null) qs.set('offset', String(params.offset))
+  if (params?.cursor) qs.set('cursor', params.cursor)
   if (params?.limit != null) qs.set('limit', String(params.limit))
   const suffix = qs.toString() ? `?${qs.toString()}` : ''
   const response = await get(`/api/v1/system/admin/cross-tenant-access/list${suffix}`)

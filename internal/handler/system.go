@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1640,10 +1641,21 @@ func (h *SystemHandler) RevokeCrossTenantAccess(c *gin.Context) {
 	}
 }
 
-// ListCrossTenantAccessUsersResponse is the paginated management response.
+const (
+	crossTenantAccessCursorVersion  = 1
+	crossTenantAccessCursorMaxBytes = 1024
+)
+
+type crossTenantAccessCursorPayload struct {
+	Version   int       `json:"v"`
+	CreatedAt time.Time `json:"created_at"`
+	ID        string    `json:"id"`
+}
+
+// ListCrossTenantAccessUsersResponse is the cursor-paginated management response.
 type ListCrossTenantAccessUsersResponse struct {
-	Total int64             `json:"total"`
-	Users []*types.UserInfo `json:"users"`
+	Users      []*types.UserInfo `json:"users"`
+	NextCursor string            `json:"next_cursor"`
 }
 
 // ListCrossTenantAccessUsers godoc
@@ -1651,18 +1663,15 @@ type ListCrossTenantAccessUsersResponse struct {
 // @Description  List users where can_access_all_tenants=true. The caller must hold both platform flags.
 // @Tags         System Admin
 // @Produce      json
-// @Param        offset query int false "Page offset" default(0)
+// @Param        cursor query string false "Opaque cursor returned by the previous page"
 // @Param        limit  query int false "Page size (max 200)" default(50)
 // @Success      200  {object}  ListCrossTenantAccessUsersResponse
+// @Failure      400  {object}  map[string]interface{}
 // @Failure      403  {object}  map[string]interface{}
 // @Router       /system/admin/cross-tenant-access/list [get]
 func (h *SystemHandler) ListCrossTenantAccessUsers(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
-	offset := 0
 	limit := 50
-	if n, err := strconv.Atoi(c.Query("offset")); err == nil && n >= 0 {
-		offset = n
-	}
 	if n, err := strconv.Atoi(c.Query("limit")); err == nil && n > 0 {
 		limit = n
 	}
@@ -1670,7 +1679,13 @@ func (h *SystemHandler) ListCrossTenantAccessUsers(c *gin.Context) {
 		limit = 200
 	}
 
-	users, total, err := h.userSvc.ListCrossTenantAccessUsers(ctx, offset, limit)
+	cursor, err := decodeCrossTenantAccessCursor(c.Query("cursor"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid pagination cursor"})
+		return
+	}
+
+	users, next, err := h.userSvc.ListCrossTenantAccessUsers(ctx, cursor, limit)
 	if err != nil {
 		logger.Errorf(ctx, "Error listing cross-tenant access users: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list cross-tenant access users"})
@@ -1680,7 +1695,49 @@ func (h *SystemHandler) ListCrossTenantAccessUsers(c *gin.Context) {
 	for _, user := range users {
 		infos = append(infos, user.ToUserInfo())
 	}
-	c.JSON(http.StatusOK, ListCrossTenantAccessUsersResponse{Total: total, Users: infos})
+	nextCursor, err := encodeCrossTenantAccessCursor(next)
+	if err != nil {
+		logger.Errorf(ctx, "Error encoding cross-tenant access cursor: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list cross-tenant access users"})
+		return
+	}
+	c.JSON(http.StatusOK, ListCrossTenantAccessUsersResponse{Users: infos, NextCursor: nextCursor})
+}
+
+func decodeCrossTenantAccessCursor(raw string) (*types.UserListCursor, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	if len(raw) > crossTenantAccessCursorMaxBytes {
+		return nil, errors.New("cross-tenant access cursor is too large")
+	}
+	data, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, err
+	}
+	var payload crossTenantAccessCursorPayload
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	if payload.Version != crossTenantAccessCursorVersion || payload.CreatedAt.IsZero() || payload.ID == "" {
+		return nil, errors.New("invalid cross-tenant access cursor payload")
+	}
+	return &types.UserListCursor{CreatedAt: payload.CreatedAt, ID: payload.ID}, nil
+}
+
+func encodeCrossTenantAccessCursor(cursor *types.UserListCursor) (string, error) {
+	if cursor == nil {
+		return "", nil
+	}
+	data, err := json.Marshal(crossTenantAccessCursorPayload{
+		Version:   crossTenantAccessCursorVersion,
+		CreatedAt: cursor.CreatedAt,
+		ID:        cursor.ID,
+	})
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(data), nil
 }
 
 // ResetUserPasswordRequest defines the system-administrator password-reset

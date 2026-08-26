@@ -1,12 +1,12 @@
 export const CROSS_TENANT_ACCESS_PAGE_SIZE = 200
 
 export interface CrossTenantAccessPage<T> {
-  total: number
   users: T[]
+  next_cursor: string
 }
 
 export type CrossTenantAccessPageLoader<T> = (params: {
-  offset: number
+  cursor?: string
   limit: number
 }) => Promise<CrossTenantAccessPage<T>>
 
@@ -15,20 +15,14 @@ export async function fetchAllCrossTenantAccessUsers<T>(
   loadPage: CrossTenantAccessPageLoader<T>,
 ): Promise<T[]> {
   const users: T[] = []
-  let offset = 0
-  let total = 0
+  let cursor: string | undefined
 
   do {
-    const page = await loadPage({ offset, limit: CROSS_TENANT_ACCESS_PAGE_SIZE })
+    const page = await loadPage({ cursor, limit: CROSS_TENANT_ACCESS_PAGE_SIZE })
     const batch = page.users ?? []
     users.push(...batch)
-    total = Math.max(0, page.total)
-    offset += batch.length
-
-    // A shrinking data set can produce an empty trailing page. Stop instead
-    // of repeatedly requesting the same offset when total is temporarily stale.
-    if (batch.length === 0) break
-  } while (offset < total)
+    cursor = page.next_cursor || undefined
+  } while (cursor)
 
   return users
 }

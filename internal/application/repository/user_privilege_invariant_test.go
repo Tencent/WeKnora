@@ -186,9 +186,9 @@ func TestConcurrentCrossTenantRevokesLeaveOneManager(t *testing.T) {
 		t.Fatalf("concurrent outcomes = successes:%d protected:%d", successes, protected)
 	}
 
-	users, total, err := repo.ListCrossTenantAccessUsers(context.Background(), 0, 10)
-	if err != nil || total != 1 || len(users) != 1 {
-		t.Fatalf("remaining managers = users:%d total:%d err:%v", len(users), total, err)
+	users, next, err := repo.ListCrossTenantAccessUsers(context.Background(), nil, 10)
+	if err != nil || next != nil || len(users) != 1 {
+		t.Fatalf("remaining managers = users:%d next:%+v err:%v", len(users), next, err)
 	}
 }
 
@@ -233,9 +233,9 @@ func TestUpdateUserCannotOverwritePlatformPrivilegesFromStaleSnapshot(t *testing
 	if !stored.IsSystemAdmin || !stored.CanAccessAllTenants {
 		t.Fatalf("stale update overwrote platform privileges: %+v", stored)
 	}
-	_, total, err := repo.ListCrossTenantAccessUsers(ctx, 0, 10)
-	if err != nil || total != 1 {
-		t.Fatalf("cross-tenant access users total=%d err=%v", total, err)
+	users, next, err := repo.ListCrossTenantAccessUsers(ctx, nil, 10)
+	if err != nil || next != nil || len(users) != 1 {
+		t.Fatalf("cross-tenant access users=%d next=%+v err=%v", len(users), next, err)
 	}
 }
 

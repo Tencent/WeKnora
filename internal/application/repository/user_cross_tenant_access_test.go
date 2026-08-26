@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"gorm.io/driver/sqlite"
@@ -32,9 +33,9 @@ func TestUserRepositoryCrossTenantAccessLifecycle(t *testing.T) {
 		}
 	}
 
-	listed, total, err := repo.ListCrossTenantAccessUsers(ctx, 0, 10)
-	if err != nil || total != 2 || len(listed) != 2 {
-		t.Fatalf("initial list = users:%d total:%d err:%v", len(listed), total, err)
+	listed, next, err := repo.ListCrossTenantAccessUsers(ctx, nil, 10)
+	if err != nil || next != nil || len(listed) != 2 {
+		t.Fatalf("initial list = users:%d next:%+v err:%v", len(listed), next, err)
 	}
 
 	granted, changed, err := repo.GrantCrossTenantAccess(ctx, "target")
@@ -59,6 +60,53 @@ func TestUserRepositoryCrossTenantAccessLifecycle(t *testing.T) {
 	if !errors.Is(err, ErrCannotRevokeOwnCrossTenantAccess) {
 		t.Fatalf("self revoke error = %v", err)
 	}
+}
+
+func TestListCrossTenantAccessUsersCursorSurvivesHeadRevocation(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:cross_tenant_cursor?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&types.Tenant{}, &types.User{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	repo := NewUserRepository(db)
+	ctx := context.Background()
+	newest := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	tied := newest.Add(-time.Minute)
+	users := []*types.User{
+		{ID: "a", Username: "a", Email: "a@example.com", PasswordHash: "hash", CanAccessAllTenants: true, CreatedAt: newest},
+		{ID: "b", Username: "b", Email: "b@example.com", PasswordHash: "hash", CanAccessAllTenants: true, CreatedAt: tied},
+		{ID: "c", Username: "c", Email: "c@example.com", PasswordHash: "hash", CanAccessAllTenants: true, CreatedAt: tied},
+		{ID: "d", Username: "d", Email: "d@example.com", PasswordHash: "hash", CanAccessAllTenants: true, CreatedAt: tied.Add(-time.Minute)},
+	}
+	for _, user := range users {
+		if err := repo.CreateUser(ctx, user); err != nil {
+			t.Fatalf("create %s: %v", user.ID, err)
+		}
+	}
+
+	first, cursor, err := repo.ListCrossTenantAccessUsers(ctx, nil, 2)
+	if err != nil || cursor == nil || len(first) != 2 || first[0].ID != "a" || first[1].ID != "b" {
+		t.Fatalf("first page users=%v cursor=%+v err=%v", userIDs(first), cursor, err)
+	}
+	if _, changed, err := repo.RevokeCrossTenantAccess(ctx, "a", "operator"); err != nil || !changed {
+		t.Fatalf("revoke head changed=%v err=%v", changed, err)
+	}
+
+	second, next, err := repo.ListCrossTenantAccessUsers(ctx, cursor, 2)
+	if err != nil || next != nil || len(second) != 2 || second[0].ID != "c" || second[1].ID != "d" {
+		t.Fatalf("second page users=%v next=%+v err=%v", userIDs(second), next, err)
+	}
+}
+
+func userIDs(users []*types.User) []string {
+	ids := make([]string, 0, len(users))
+	for _, user := range users {
+		ids = append(ids, user.ID)
+	}
+	return ids
 }
 
 func TestCountCrossTenantAccessManagersOnlyCountsActiveDualPrivilegeUsers(t *testing.T) {

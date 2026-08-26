@@ -83,8 +83,10 @@ func (s *stubUserRepoForAuth) CountActiveSystemAdmins(context.Context) (int64, e
 func (s *stubUserRepoForAuth) GrantSystemAdmin(context.Context, string) (*types.User, bool, error) {
 	return nil, false, nil
 }
-func (s *stubUserRepoForAuth) ListCrossTenantAccessUsers(context.Context, int, int) ([]*types.User, int64, error) {
-	return nil, 0, nil
+func (s *stubUserRepoForAuth) ListCrossTenantAccessUsers(
+	context.Context, *types.UserListCursor, int,
+) ([]*types.User, *types.UserListCursor, error) {
+	return nil, nil, nil
 }
 func (s *stubUserRepoForAuth) CountCrossTenantAccessManagers(context.Context) (int64, error) {
 	return 0, nil

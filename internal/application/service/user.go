@@ -629,9 +629,9 @@ func (s *userService) CountActiveSystemAdmins(ctx context.Context) (int64, error
 
 // ListCrossTenantAccessUsers lists users who can access every tenant.
 func (s *userService) ListCrossTenantAccessUsers(
-	ctx context.Context, offset, limit int,
-) ([]*types.User, int64, error) {
-	return s.userRepo.ListCrossTenantAccessUsers(ctx, offset, limit)
+	ctx context.Context, cursor *types.UserListCursor, limit int,
+) ([]*types.User, *types.UserListCursor, error) {
+	return s.userRepo.ListCrossTenantAccessUsers(ctx, cursor, limit)
 }
 
 // CountCrossTenantAccessManagers counts users that hold both platform privileges.

@@ -83,8 +83,10 @@ type UserService interface {
 	CountActiveSystemAdmins(ctx context.Context) (int64, error)
 	// GrantSystemAdmin grants system-administrator privileges idempotently.
 	GrantSystemAdmin(ctx context.Context, userID string) (*types.User, bool, error)
-	// ListCrossTenantAccessUsers lists users with CanAccessAllTenants=true.
-	ListCrossTenantAccessUsers(ctx context.Context, offset, limit int) ([]*types.User, int64, error)
+	// ListCrossTenantAccessUsers lists users with CanAccessAllTenants=true using keyset pagination.
+	ListCrossTenantAccessUsers(
+		ctx context.Context, cursor *types.UserListCursor, limit int,
+	) ([]*types.User, *types.UserListCursor, error)
 	// CountCrossTenantAccessManagers counts enabled users that hold both platform privileges.
 	CountCrossTenantAccessManagers(ctx context.Context) (int64, error)
 	// GrantCrossTenantAccess grants platform-wide tenant access idempotently.
@@ -137,8 +139,10 @@ type UserRepository interface {
 	CountActiveSystemAdmins(ctx context.Context) (int64, error)
 	// GrantSystemAdmin grants system-administrator privileges atomically.
 	GrantSystemAdmin(ctx context.Context, userID string) (*types.User, bool, error)
-	// ListCrossTenantAccessUsers lists users where can_access_all_tenants=true.
-	ListCrossTenantAccessUsers(ctx context.Context, offset, limit int) ([]*types.User, int64, error)
+	// ListCrossTenantAccessUsers lists users where can_access_all_tenants=true using keyset pagination.
+	ListCrossTenantAccessUsers(
+		ctx context.Context, cursor *types.UserListCursor, limit int,
+	) ([]*types.User, *types.UserListCursor, error)
 	// CountCrossTenantAccessManagers counts enabled users that are both system admins and cross-tenant users.
 	CountCrossTenantAccessManagers(ctx context.Context) (int64, error)
 	// GrantCrossTenantAccess enables can_access_all_tenants for a user.

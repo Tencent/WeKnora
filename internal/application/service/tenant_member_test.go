@@ -308,8 +308,10 @@ func (r *cleanupUserRepo) CountCrossTenantAccessManagers(context.Context) (int64
 func (r *cleanupUserRepo) GrantSystemAdmin(context.Context, string) (*types.User, bool, error) {
 	return nil, false, nil
 }
-func (r *cleanupUserRepo) ListCrossTenantAccessUsers(context.Context, int, int) ([]*types.User, int64, error) {
-	return nil, 0, nil
+func (r *cleanupUserRepo) ListCrossTenantAccessUsers(
+	context.Context, *types.UserListCursor, int,
+) ([]*types.User, *types.UserListCursor, error) {
+	return nil, nil, nil
 }
 func (r *cleanupUserRepo) GrantCrossTenantAccess(context.Context, string) (*types.User, bool, error) {
 	return nil, false, nil
