@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
@@ -237,9 +238,11 @@ func TestListCrossTenantAccessUsersRejectsInvalidCursor(t *testing.T) {
 	users := &crossTenantAccessUserService{users: map[string]*types.User{}}
 	router := crossTenantAccessHandlerRouter(&SystemHandler{userSvc: users})
 
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/list?cursor=not-a-cursor", nil))
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("list status=%d body=%s", w.Code, w.Body.String())
+	for _, cursor := range []string{"not-a-cursor", strings.Repeat("a", crossTenantAccessCursorMaxBytes+1)} {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/list?cursor="+cursor, nil))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("list status=%d body=%s", w.Code, w.Body.String())
+		}
 	}
 }

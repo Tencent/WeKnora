@@ -95,8 +95,16 @@ func assertKnowledgeSearchRouteContract(t *testing.T, data []byte, parse func([]
 
 func assertCrossTenantAccessRouteContract(t *testing.T, data []byte, parse func([]byte, any) error) {
 	t.Helper()
+	type operation struct {
+		Parameters []struct {
+			Name string `json:"name" yaml:"name"`
+		} `json:"parameters" yaml:"parameters"`
+	}
 	var spec struct {
-		Paths map[string]map[string]any `json:"paths" yaml:"paths"`
+		Paths       map[string]map[string]operation `json:"paths" yaml:"paths"`
+		Definitions map[string]struct {
+			Properties map[string]any `json:"properties" yaml:"properties"`
+		} `json:"definitions" yaml:"definitions"`
 	}
 	if err := parse(data, &spec); err != nil {
 		t.Fatalf("parse generated Swagger document: %v", err)
@@ -116,5 +124,21 @@ func assertCrossTenantAccessRouteContract(t *testing.T, data []byte, parse func(
 		if _, ok := operations[method]; !ok {
 			t.Errorf("generated Swagger document does not expose %s %s", method, route)
 		}
+	}
+
+	listOperation := spec.Paths["/system/admin/cross-tenant-access/list"]["get"]
+	parameterNames := make(map[string]bool, len(listOperation.Parameters))
+	for _, parameter := range listOperation.Parameters {
+		parameterNames[parameter.Name] = true
+	}
+	if !parameterNames["cursor"] || parameterNames["offset"] {
+		t.Fatalf("list parameters must expose cursor and omit offset: %+v", parameterNames)
+	}
+	properties := spec.Definitions["internal_handler.ListCrossTenantAccessUsersResponse"].Properties
+	if _, ok := properties["next_cursor"]; !ok {
+		t.Fatal("list response schema does not expose next_cursor")
+	}
+	if _, ok := properties["total"]; ok {
+		t.Fatal("list response schema still exposes offset-pagination total")
 	}
 }
