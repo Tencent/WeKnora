@@ -79,7 +79,8 @@
               </t-tag>
               <div class="sandbox-card__actions" @click.stop>
                 <t-dropdown :options="cardMenu(record)" trigger="click" attach="body"
-                  placement="bottom-right" @click="(data: any) => onMenuAction(data.value, record)">
+                  placement="bottom-right" :min-column-width="120"
+                  @click="(data: any) => onMenuAction(data.value, record)">
                   <t-button variant="text" shape="square" size="small" class="sandbox-card__more">
                     <t-icon name="ellipsis" />
                   </t-button>
@@ -144,63 +145,79 @@
       @saved="load" @skills-changed="onSkillsChanged" />
 
     <!--
-      Occupancy is a list of sessions and agents, not a one-line status, and it
-      is also what explains a refused delete — so it gets a drawer rather than a
-      toast or a cramped dialog.
+      This drawer answers "why can't I delete / change this config?" in plain
+      language: how many sandboxes are still live, which sessions hold them,
+      and which agents will break. It is not a metrics dashboard.
     -->
-    <SettingDrawer v-model:visible="showInventory" :title="$t('settings.sandbox.inventoryTitle')"
-      :description="$t('settings.sandbox.inventoryDrawerDesc')" icon="code"
-      width="480px" storage-key="setting-drawer:width:sandbox-inventory" hide-footer>
+    <SettingDrawer
+      v-model:visible="showInventory"
+      :title="$t('settings.sandbox.inventoryTitle')"
+      :description="inventorySubtitle"
+      width="420px"
+      :resizable="false"
+      storage-key="setting-drawer:width:sandbox-inventory"
+      :hide-footer="inventoryNotice !== 'unverifiable'"
+    >
       <t-loading :loading="inventoryLoading" size="small">
-        <section class="setting-drawer__section">
-          <t-alert v-if="inventoryNotice === 'blocked'" theme="warning"
+        <div v-if="inventoryNotice === 'blocked'" class="inventory-banner">
+          <t-alert theme="warning"
             :message="$t('settings.sandbox.sandboxesStillLive', { count: inventory?.sandbox_count ?? 0 })">
             <template #description>
               <p>{{ $t('settings.sandbox.blockedHint') }}</p>
             </template>
           </t-alert>
-          <t-alert v-else-if="inventory?.unverifiable" theme="warning"
-            :message="$t('settings.sandbox.inventoryUnverifiableHint')" />
+        </div>
+        <div v-else-if="inventory?.unverifiable" class="inventory-banner">
+          <t-alert theme="warning" :message="$t('settings.sandbox.inventoryUnverifiableHint')" />
+        </div>
 
-          <ul v-if="inventory" class="inventory-list">
-            <li v-if="inventoryRecord">
-              <span class="inventory-label">{{ $t('settings.sandbox.configName') }}</span>
-              <span class="inventory-value">{{ inventoryRecord.name }}</span>
-            </li>
-            <li>
-              <span class="inventory-label">{{ $t('settings.sandbox.sandboxCount') }}</span>
-              <span class="inventory-value">{{ inventory.unverifiable
-                ? $t('settings.sandbox.sandboxCountUnknown')
-                : inventory.sandbox_count }}</span>
-            </li>
-            <li v-if="inventory.session_ids?.length">
-              <span class="inventory-label">{{ $t('settings.sandbox.affectedSessions', {
-                count: inventory.session_ids.length }) }}</span>
-            </li>
-            <li v-if="inventory.agent_names?.length">
-              <span class="inventory-label">{{ $t('settings.sandbox.affectedAgents', {
-                names: inventory.agent_names.join('、') }) }}</span>
+        <p v-if="inventoryLead" class="inventory-lead">{{ inventoryLead }}</p>
+
+        <section v-if="inventorySessions.length" class="inventory-group">
+          <h4 class="inventory-group__title">{{ $t('settings.sandbox.inventorySessions') }}</h4>
+          <p class="inventory-group__hint">{{ $t('settings.sandbox.inventorySessionsHint') }}</p>
+          <ul class="inventory-sessions">
+            <li v-for="id in inventorySessions" :key="id">
+              <div class="inventory-session">
+                <div class="inventory-session__text">
+                  <span class="inventory-session__title">{{ sessionTitle(id) }}</span>
+                  <span class="inventory-session__id" :title="id">{{ shortId(id) }}</span>
+                </div>
+                <t-button variant="text" theme="primary" size="small" @click="openSession(id)">
+                  {{ $t('settings.sandbox.inventoryOpenSession') }}
+                </t-button>
+              </div>
             </li>
           </ul>
         </section>
 
-        <!--
-          Force delete only surfaces where its justification is on screen: the
-          occupancy could not be verified, so the admin decides with the
-          unverifiable warning right above the button.
-        -->
-        <section v-if="inventoryNotice === 'unverifiable' && inventoryRecord" class="setting-drawer__section">
-          <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.forceDeleteTitle') }}</h4>
-          <t-popconfirm theme="warning" :content="$t('settings.sandbox.forceDeleteConfirm')"
-            :confirm-btn="{ content: $t('settings.sandbox.forceDelete'), theme: 'danger' }"
-            :cancel-btn="{ content: $t('common.cancel') }" placement="top"
-            @confirm="forceRemove(inventoryRecord)">
-            <t-button theme="danger" variant="outline" size="small">
-              {{ $t('settings.sandbox.forceDelete') }}
-            </t-button>
-          </t-popconfirm>
+        <section v-if="inventory && !inventoryLoading" class="inventory-group">
+          <h4 class="inventory-group__title">{{ $t('settings.sandbox.inventoryAgents') }}</h4>
+          <template v-if="inventoryAgents.length">
+            <p class="inventory-group__hint">{{ $t('settings.sandbox.inventoryAgentWarning') }}</p>
+            <ul class="inventory-agents">
+              <li v-for="name in inventoryAgents" :key="name">{{ name }}</li>
+            </ul>
+          </template>
+          <p v-else class="inventory-group__empty">{{ $t('settings.sandbox.inventoryNoAgents') }}</p>
         </section>
       </t-loading>
+
+      <!--
+        Force delete only surfaces where its justification is on screen: the
+        occupancy could not be verified, so the admin decides with the
+        unverifiable warning above the button.
+      -->
+      <template v-if="inventoryNotice === 'unverifiable' && inventoryRecord" #footer-right>
+        <t-popconfirm theme="warning" :content="$t('settings.sandbox.forceDeleteConfirm')"
+          :confirm-btn="{ content: $t('settings.sandbox.forceDelete'), theme: 'danger' }"
+          :cancel-btn="{ content: $t('common.cancel') }" placement="top"
+          @confirm="forceRemove(inventoryRecord)">
+          <t-button theme="danger">
+            {{ $t('settings.sandbox.forceDelete') }}
+          </t-button>
+        </t-popconfirm>
+      </template>
     </SettingDrawer>
   </div>
 </template>
@@ -209,12 +226,13 @@
 import { computed, onMounted, ref } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import SandboxConfigEditorDrawer from '@/components/SandboxConfigEditorDrawer.vue'
 import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
+import { getSession } from '@/api/chat/index'
 import {
-  checkSandboxConfig,
   deleteSandboxConfig,
   getSandboxConfigInventory,
   isNamedSandboxBackend,
@@ -229,6 +247,7 @@ import {
 } from '@/api/system'
 
 const { t } = useI18n()
+const router = useRouter()
 const confirmDelete = useConfirmDelete()
 
 const sandboxGuideUrl = 'https://github.com/Tencent/WeKnora/blob/main/docs/sandbox-cluster.md'
@@ -250,7 +269,7 @@ const SKILL_TAG_LIMIT = 3
 const showEditor = ref(false)
 const editingRecord = ref<SandboxConfigRecord | null>(null)
 // Which page of the editor to open on. Skills live there as the last step, so
-// "管理技能" is the same drawer opened further along.
+// clicking a cube/e2b/docker card lands on that page.
 const editorStep = ref<'skills' | undefined>(undefined)
 
 const showInventory = ref(false)
@@ -314,24 +333,75 @@ const filteredRecords = computed(() => {
 const countByType = (type: string) =>
   records.value.filter((r) => r.sandbox_type === type && isNamedSandboxBackend(r.sandbox_type)).length
 
-type CardMenuOption = { content: string; value: string; theme?: 'error' }
+type CardMenuOption = { content: string; value: string; theme?: 'error'; divider?: boolean }
 
+// Card click already opens skills, and the editor has the connection check,
+// so the menu stays edit / who-is-using / delete.
 const cardMenu = (record: SandboxConfigRecord): CardMenuOption[] => {
   if (isLegacyRecord(record)) {
     return [{ content: t('common.delete'), value: 'delete', theme: 'error' }]
   }
   const options: CardMenuOption[] = [
     { content: t('common.edit'), value: 'edit' },
-    { content: t('settings.sandbox.testConnection'), value: 'check' },
   ]
   if (record.sandbox_type === 'cube' || record.sandbox_type === 'e2b') {
-    options.push({ content: t('settings.sandbox.viewSandboxes'), value: 'inventory' })
-  }
-  if (supportsSkills(record)) {
-    options.push({ content: t('settings.sandbox.manageSkills'), value: 'skills' })
+    options.push({ content: t('settings.sandbox.viewSandboxes'), value: 'inventory', divider: true })
+  } else {
+    options[0].divider = true
   }
   options.push({ content: t('common.delete'), value: 'delete', theme: 'error' })
   return options
+}
+
+const inventorySubtitle = computed(() => {
+  const record = inventoryRecord.value
+  if (!record) return ''
+  return `${record.name} · ${backendLabel(record.sandbox_type)}`
+})
+
+const inventorySessions = computed(() => inventory.value?.session_ids || [])
+const inventoryAgents = computed(() => inventory.value?.agent_names || [])
+const inventoryLead = computed(() => {
+  const inv = inventory.value
+  if (!inv || inv.unverifiable) return ''
+  if (inv.sandbox_count === 0) return t('settings.sandbox.inventoryEmpty')
+  return t('settings.sandbox.inventorySummary', { count: inv.sandbox_count })
+})
+
+const sessionTitles = ref<Record<string, string>>({})
+
+function shortId(id: string) {
+  if (id.length <= 16) return id
+  return `${id.slice(0, 8)}…${id.slice(-4)}`
+}
+
+function sessionTitle(id: string) {
+  const title = sessionTitles.value[id]
+  if (title) return title
+  return t('settings.sandbox.inventoryUntitledSession')
+}
+
+async function loadSessionTitles(ids: string[]) {
+  const unique = [...new Set(ids.filter(Boolean))]
+  if (!unique.length) {
+    sessionTitles.value = {}
+    return
+  }
+  const next: Record<string, string> = {}
+  await Promise.all(unique.map(async (id) => {
+    try {
+      const res: any = await getSession(id)
+      next[id] = String(res?.data?.title || '').trim()
+    } catch {
+      next[id] = ''
+    }
+  }))
+  sessionTitles.value = next
+}
+
+function openSession(id: string) {
+  showInventory.value = false
+  router.push(`/platform/chat/${encodeURIComponent(id)}`)
 }
 
 // The endpoint host is what tells two configs of the same backend apart at a
@@ -523,16 +593,8 @@ async function onMenuAction(action: string, record: SandboxConfigRecord) {
     openEdit(record)
     return
   }
-  if (action === 'check') {
-    await runQuickCheck(record)
-    return
-  }
   if (action === 'inventory') {
     await openInventory(record)
-    return
-  }
-  if (action === 'skills') {
-    openSkills(record)
     return
   }
   if (action === 'delete') {
@@ -548,33 +610,17 @@ async function confirmRemove(record: SandboxConfigRecord) {
   })
 }
 
-// A card-level probe answers "is this backend still alive" without opening the
-// form; the per-probe breakdown and the sandbox-consuming deep check stay in the
-// editor, where the config being probed is on screen.
-async function runQuickCheck(record: SandboxConfigRecord) {
-  try {
-    const res = await checkSandboxConfig({ config_id: record.id })
-    const result = res?.data
-    if (result?.ok) {
-      MessagePlugin.success(t('settings.sandbox.checkPassed'))
-      return
-    }
-    const failed = result?.checks?.find((item) => item.ok === false)
-    MessagePlugin.error(failed?.message || t('settings.sandbox.checkFailed'))
-  } catch (e: any) {
-    MessagePlugin.error(e?.message || t('settings.sandbox.checkFailed'))
-  }
-}
-
 async function openInventory(record: SandboxConfigRecord) {
   inventoryRecord.value = record
   inventoryNotice.value = ''
   showInventory.value = true
   inventoryLoading.value = true
   inventory.value = null
+  sessionTitles.value = {}
   try {
     const res = await getSandboxConfigInventory(record.id)
     inventory.value = res?.data || null
+    await loadSessionTitles(inventory.value?.session_ids || [])
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('settings.sandbox.inventoryFailed'))
     showInventory.value = false
@@ -618,6 +664,7 @@ function showRefusal(
   inventory.value = inv || { sandbox_count: 0, unverifiable: notice === 'unverifiable' }
   inventoryLoading.value = false
   showInventory.value = true
+  void loadSessionTitles(inventory.value.session_ids || [])
 }
 
 async function forceRemove(record: SandboxConfigRecord) {
@@ -1036,29 +1083,97 @@ onMounted(load)
   color: var(--td-text-color-placeholder);
 }
 
-.inventory-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 13px;
+.inventory-banner {
+  margin-bottom: 14px;
 }
 
-.inventory-list li {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
+.inventory-lead {
+  margin: 0 0 18px;
+  color: var(--td-text-color-primary);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.inventory-group + .inventory-group {
+  margin-top: 20px;
+}
+
+.inventory-group__title {
+  margin: 0 0 4px;
+  color: var(--td-text-color-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.inventory-group__hint,
+.inventory-group__empty {
+  margin: 0 0 10px;
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
   line-height: 1.55;
 }
 
-.inventory-label {
-  color: var(--td-text-color-secondary);
+.inventory-group__empty {
+  margin-bottom: 0;
 }
 
-.inventory-value {
+.inventory-sessions,
+.inventory-agents {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inventory-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inventory-session {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 4px 10px 0;
+  border-bottom: 1px solid var(--td-component-stroke);
+
+  &:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+}
+
+.inventory-session__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inventory-session__title {
   color: var(--td-text-color-primary);
+  font-size: 13px;
   font-weight: 500;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inventory-session__id {
+  color: var(--td-text-color-placeholder);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.inventory-agents {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--td-text-color-primary);
+  font-size: 13px;
+  line-height: 1.45;
 }
 </style>
