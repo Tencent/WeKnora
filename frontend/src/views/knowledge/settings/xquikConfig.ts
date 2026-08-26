@@ -43,6 +43,22 @@ export function xquikSettingsSignature(settings: Record<string, unknown>): strin
   })
 }
 
+export function xquikResourceList(settings: Record<string, unknown>): Array<{
+  external_id: string
+  name: string
+  type: string
+  description: string
+  url: string
+}> {
+  return xquikQueries(settings.queries).map(query => ({
+    external_id: query,
+    name: query,
+    type: 'search_query',
+    description: 'Import matching public X posts through Xquik',
+    url: '',
+  }))
+}
+
 export function xquikValidationCredentials(
   credentials: Record<string, unknown>,
   settings: Record<string, unknown>,

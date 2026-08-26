@@ -8,6 +8,7 @@ import {
   XQUIK_MAX_RESULTS_PER_QUERY,
   validateXquikSettings,
   xquikQueries,
+  xquikResourceList,
   xquikSettingsSignature,
   xquikValidationCredentials,
 } from './xquikConfig.ts'
@@ -60,4 +61,23 @@ test('xquikSettingsSignature tracks semantic setting changes', () => {
   )
   assert.notEqual(xquikSettingsSignature({ queries: 'xquik', results_per_query: 100 }), baseline)
   assert.notEqual(xquikSettingsSignature({ queries: 'xquik\nrag', results_per_query: 200 }), baseline)
+})
+
+test('xquikResourceList stages one selectable resource per normalized query', () => {
+  assert.deepEqual(xquikResourceList({ queries: ' xquik\nrag\nxquik ' }), [
+    {
+      external_id: 'xquik',
+      name: 'xquik',
+      type: 'search_query',
+      description: 'Import matching public X posts through Xquik',
+      url: '',
+    },
+    {
+      external_id: 'rag',
+      name: 'rag',
+      type: 'search_query',
+      description: 'Import matching public X posts through Xquik',
+      url: '',
+    },
+  ])
 })

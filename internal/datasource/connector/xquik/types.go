@@ -21,6 +21,7 @@ const (
 	maxResultsPerQuery     = 1000
 	maxQueries             = 20
 	maxQueryRunes          = 512
+	maxPersistedPostIDs    = maxQueries * maxResultsPerQuery
 	syncOverlap            = 5 * time.Minute
 )
 
@@ -314,6 +315,7 @@ type cursorState struct {
 	ResultsFetched int       `json:"results_fetched,omitempty"`
 	PagesFetched   int       `json:"pages_fetched,omitempty"`
 	SeenPostIDs    []string  `json:"seen_post_ids,omitempty"`
+	SeenPostOffset int       `json:"seen_post_offset,omitempty"`
 	QueryListHash  string    `json:"query_list_hash"`
 }
 
@@ -325,7 +327,10 @@ func (s cursorState) canResume(queries []string, resultsPerQuery int) bool {
 		return false
 	}
 	if s.ResultsFetched < 0 || s.ResultsFetched > resultsPerQuery ||
-		s.PagesFetched < 0 || s.PagesFetched > maxPagesPerQuery {
+		s.PagesFetched < 0 || s.PagesFetched >= maxPagesPerQuery ||
+		len(s.SeenPostIDs) > maxPersistedPostIDs || s.SeenPostOffset < 0 ||
+		(len(s.SeenPostIDs) < maxPersistedPostIDs && s.SeenPostOffset != 0) ||
+		(len(s.SeenPostIDs) == maxPersistedPostIDs && s.SeenPostOffset >= maxPersistedPostIDs) {
 		return false
 	}
 	seen := make(map[string]struct{}, len(s.SeenPostIDs))
@@ -377,6 +382,7 @@ func connectorCursor(state cursorState, complete bool) *types.SyncCursor {
 		state.ResultsFetched = 0
 		state.PagesFetched = 0
 		state.SeenPostIDs = nil
+		state.SeenPostOffset = 0
 		state.QueryListHash = ""
 	}
 	data, _ := json.Marshal(state)

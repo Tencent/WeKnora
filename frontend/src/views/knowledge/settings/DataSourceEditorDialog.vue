@@ -23,6 +23,7 @@ import {
   XQUIK_DEFAULT_RESULTS_PER_QUERY,
   XQUIK_MAX_RESULTS_PER_QUERY,
   validateXquikSettings,
+  xquikResourceList,
   xquikSettingsSignature,
   xquikValidationCredentials,
 } from './xquikConfig'
@@ -163,7 +164,6 @@ function removeRssAuthHeader(idx: number) {
 }
 
 function needsConnectionTest(): boolean {
-  if (xquikSettingsChangedSinceValidation()) return true
   return !(isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value)
 }
 
@@ -819,7 +819,7 @@ function selectType(def: ConnectorDef) {
   step.value = 1
 }
 
-// --- Test connection (stateless, no DB write) ---
+// --- Test connection ---
 async function testConnection() {
   syncRssAuthHeadersToCredentials()
   if (!validateRssFeedUrls()) return
@@ -839,20 +839,27 @@ async function testConnection() {
   testResult.value = ''
   testErrorMsg.value = ''
   try {
-    if (isEdit.value && tempDsId.value) {
-      await updateDataSource(tempDsId.value, {
-        ...form.value,
-        knowledge_base_id: props.kbId,
-      } as any)
+    const validatesProvidedXquikCredentials = isXquikConnector(form.value.type)
+      && (!isEdit.value || replaceCredentialsMode.value)
+    if (validatesProvidedXquikCredentials) {
+      const creds = xquikValidationCredentials(
+        { ...form.value.config.credentials },
+        form.value.config.settings,
+      )
+      await validateCredentials(form.value.type, creds)
+    } else if (isEdit.value && tempDsId.value) {
+      if (!isXquikConnector(form.value.type)) {
+        await updateDataSource(tempDsId.value, {
+          ...form.value,
+          knowledge_base_id: props.kbId,
+        } as any)
+      }
       await validateConnection(tempDsId.value)
     } else {
       const creds = { ...form.value.config.credentials }
       if (form.value.type === 'rss') {
         // validate-credentials is credentials-only; feed URLs live in settings.
         creds.feed_urls = form.value.config.settings.feed_urls
-      }
-      if (isXquikConnector(form.value.type)) {
-        Object.assign(creds, xquikValidationCredentials(creds, form.value.config.settings))
       }
       await validateCredentials(form.value.type, creds)
     }
@@ -873,6 +880,10 @@ async function testConnection() {
 async function loadResources() {
   loadingResources.value = true
   try {
+    if (isEdit.value && isXquikConnector(form.value.type)) {
+      applyLoadedResources(xquikResourceList(form.value.config.settings))
+      return
+    }
     if (!tempDsId.value) {
       const res = await createDataSource({
         ...form.value,
@@ -889,36 +900,39 @@ async function loadResources() {
     }
 
     const res = await listResources(tempDsId.value)
-    resources.value = res?.data || res || []
-    // Any parent that already arrived with children (connectors returning the
-    // full tree, e.g. Notion) needs no further lazy fetch.
-    const parentsWithChildren = new Set<string>()
-    for (const r of resources.value) {
-      if (r.parent_id) parentsWithChildren.add(r.parent_id)
-    }
-    loadedChildrenIds.value = parentsWithChildren
-    loadingChildrenIds.value = new Set<string>()
-    // If any resource already has a parent, the connector returned the whole tree
-    // up front, so per-node lazy fetching is unnecessary.
-    treeFullyLoaded.value = parentsWithChildren.size > 0
-    // Auto-expand top-level nodes whose children are already loaded; lazy nodes
-    // (children not yet fetched) stay collapsed until the user expands them.
-    expandedResourceIds.value = new Set(
-      resources.value
-        .filter(r => !r.parent_id && r.has_children && parentsWithChildren.has(r.external_id))
-        .map(r => r.external_id),
-    )
-    // When editing a lazily-loaded source, reveal pre-existing selections that
-    // live below the (not-yet-loaded) tree so they are visible and checked.
-    if (isEdit.value && !treeFullyLoaded.value) {
-      const loaded = new Set(resources.value.map(r => r.external_id))
-      const hidden = selectedResourceIds.value.filter(id => !loaded.has(id))
-      if (hidden.length > 0) void revealExistingSelections(hidden)
-    }
+    applyLoadedResources(res?.data || res || [])
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
+  } finally {
+    loadingResources.value = false
   }
-  loadingResources.value = false
+}
+
+function applyLoadedResources(next: Resource[]) {
+  resources.value = next
+  const parentsWithChildren = new Set<string>()
+  for (const resource of resources.value) {
+    if (resource.parent_id) parentsWithChildren.add(resource.parent_id)
+  }
+  loadedChildrenIds.value = parentsWithChildren
+  loadingChildrenIds.value = new Set<string>()
+  treeFullyLoaded.value = parentsWithChildren.size > 0
+  expandedResourceIds.value = new Set(
+    resources.value
+      .filter(resource => !resource.parent_id
+        && resource.has_children
+        && parentsWithChildren.has(resource.external_id))
+      .map(resource => resource.external_id),
+  )
+  if (isEdit.value && !treeFullyLoaded.value) {
+    const loaded = new Set(resources.value.map(resource => resource.external_id))
+    const hidden = selectedResourceIds.value.filter(id => !loaded.has(id))
+    if (isXquikConnector(form.value.type)) {
+      selectedResourceIds.value = selectedResourceIds.value.filter(id => loaded.has(id))
+    } else if (hidden.length > 0) {
+      void revealExistingSelections(hidden)
+    }
+  }
 }
 
 // revealExistingSelections asks the backend which ancestors must be expanded to

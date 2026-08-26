@@ -150,9 +150,6 @@ func (c *Connector) fetch(
 		}
 
 		for resultsFetched < cfg.ResultsPerQuery {
-			if pagesFetched >= maxPagesPerQuery {
-				return nil, fmt.Errorf("Xquik query exceeded %d cursor pages", maxPagesPerQuery)
-			}
 			remaining := cfg.ResultsPerQuery - resultsFetched
 			page, err := client.search(ctx, searchRequest{
 				Query:     query,
@@ -185,8 +182,7 @@ func (c *Connector) fetch(
 				if err := handler.Emit(ctx, item); err != nil {
 					return nil, err
 				}
-				seen[id] = struct{}{}
-				state.SeenPostIDs = append(state.SeenPostIDs, id)
+				rememberPostID(&state, seen, id, maxPersistedPostIDs)
 			}
 
 			if !page.hasMore() {
@@ -196,7 +192,7 @@ func (c *Connector) fetch(
 			if err != nil {
 				return nil, err
 			}
-			if resultsFetched >= cfg.ResultsPerQuery {
+			if resultsFetched >= cfg.ResultsPerQuery || pagesFetched >= maxPagesPerQuery {
 				continuation := state
 				continuation.QueryIndex = queryIndex
 				continuation.Query = query
@@ -233,6 +229,19 @@ func (c *Connector) fetch(
 	}
 
 	return connectorCursor(state, true), nil
+}
+
+func rememberPostID(state *cursorState, seen map[string]struct{}, id string, limit int) {
+	if len(state.SeenPostIDs) < limit {
+		state.SeenPostIDs = append(state.SeenPostIDs, id)
+		seen[id] = struct{}{}
+		return
+	}
+	evicted := state.SeenPostIDs[state.SeenPostOffset]
+	delete(seen, evicted)
+	state.SeenPostIDs[state.SeenPostOffset] = id
+	state.SeenPostOffset = (state.SeenPostOffset + 1) % limit
+	seen[id] = struct{}{}
 }
 
 func validatedNextCursor(query string, current string, page searchPage) (string, error) {

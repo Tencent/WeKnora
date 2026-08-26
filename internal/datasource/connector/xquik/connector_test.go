@@ -341,6 +341,31 @@ func TestConnectorResetsPageGuardAtOverflowCheckpoint(t *testing.T) {
 	}
 }
 
+func TestRememberPostIDKeepsBoundedExactWindow(t *testing.T) {
+	state := cursorState{}
+	seen := make(map[string]struct{})
+	rememberPostID(&state, seen, "1", 2)
+	rememberPostID(&state, seen, "2", 2)
+	rememberPostID(&state, seen, "3", 2)
+
+	if len(state.SeenPostIDs) != 2 || state.SeenPostOffset != 1 {
+		t.Fatalf("state = %#v", state)
+	}
+	if _, exists := seen["1"]; exists {
+		t.Fatal("evicted post remained in the deduplication set")
+	}
+	if _, exists := seen["2"]; !exists {
+		t.Fatal("post 2 was evicted early")
+	}
+	if _, exists := seen["3"]; !exists {
+		t.Fatal("post 3 was not remembered")
+	}
+	resumed := decodeCursor(connectorCursor(state, false))
+	if len(resumed.SeenPostIDs) != 2 || resumed.SeenPostOffset != 1 {
+		t.Fatalf("resumed state = %#v", resumed)
+	}
+}
+
 func TestConnectorRejectsResumeAfterSelectedQueriesChange(t *testing.T) {
 	started := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	resume := connectorCursor(cursorState{
