@@ -718,6 +718,7 @@ export default {
     xquik: {
       searchesTitle: 'X 搜索设置',
       queriesRequired: '请至少输入 1 个 X 搜索查询。',
+      querySelectionRequired: '请至少选择 1 个 X 搜索查询。',
       tooManyQueries: '最多可输入 20 个 X 搜索查询。',
       queryTooLong: '每个 X 搜索查询不得超过 512 个字符。',
       resultsOutOfRange: '每个查询的结果数必须介于 1 到 1,000 之间。'

@@ -1085,6 +1085,10 @@ async function nextStep() {
       return
     }
   }
+  if (step.value === 2 && isXquikConnector(form.value.type) && selectedResourceIds.value.length === 0) {
+    MessagePlugin.warning(t('datasource.xquik.querySelectionRequired'))
+    return
+  }
   step.value++
   if (step.value === 2) {
     // Drive connectors need a user-supplied folder_token before listing.

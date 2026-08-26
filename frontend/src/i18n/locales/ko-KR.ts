@@ -716,6 +716,7 @@ export default {
     xquik: {
       searchesTitle: 'X 검색 설정',
       queriesRequired: 'X 검색 쿼리를 1개 이상 입력하세요.',
+      querySelectionRequired: 'X 검색 쿼리를 1개 이상 선택하세요.',
       tooManyQueries: 'X 검색 쿼리는 최대 20개까지 입력할 수 있습니다.',
       queryTooLong: '각 X 검색 쿼리는 512자 이내로 입력하세요.',
       resultsOutOfRange: '쿼리당 결과 수는 1에서 1,000 사이여야 합니다.'

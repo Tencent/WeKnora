@@ -423,7 +423,8 @@ func TestConnectorRejectsInvalidPostID(t *testing.T) {
 	}}
 	connector := connectorWith(fake, time.Now().UTC())
 
-	_, err := connector.FetchAll(context.Background(), testConfig("query"), nil)
+	config := testConfig("query")
+	_, err := connector.FetchAll(context.Background(), config, config.ResourceIDs)
 	if err == nil || !strings.Contains(err.Error(), "invalid id") {
 		t.Fatalf("FetchAll() error = %v", err)
 	}

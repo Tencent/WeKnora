@@ -716,6 +716,7 @@ export default {
     xquik: {
       searchesTitle: 'Настройки поиска X',
       queriesRequired: 'Введите хотя бы 1 поисковый запрос X.',
+      querySelectionRequired: 'Выберите хотя бы 1 поисковый запрос X.',
       tooManyQueries: 'Введите не более 20 поисковых запросов X.',
       queryTooLong: 'Каждый поисковый запрос X должен содержать не более 512 символов.',
       resultsOutOfRange: 'Укажите от 1 до 1 000 результатов на запрос.'

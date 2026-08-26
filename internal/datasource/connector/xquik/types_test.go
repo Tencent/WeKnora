@@ -19,6 +19,7 @@ func testConfig(queries string) *types.DataSourceConfig {
 		Settings: map[string]interface{}{
 			"queries": queries,
 		},
+		ResourceIDs: strings.Split(queries, "\n"),
 	}
 }
 
@@ -114,6 +115,9 @@ func TestSelectedQueries(t *testing.T) {
 	}
 	if _, err := cfg.selectedQueries([]string{"missing"}); err == nil {
 		t.Fatal("selectedQueries() error = nil for an unknown query")
+	}
+	if _, err := cfg.selectedQueries(nil); err == nil {
+		t.Fatal("selectedQueries() error = nil for an empty selection")
 	}
 }
 

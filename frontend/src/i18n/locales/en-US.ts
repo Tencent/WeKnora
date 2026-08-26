@@ -5875,6 +5875,7 @@ export default {
     xquik: {
       searchesTitle: 'X search settings',
       queriesRequired: 'Enter at least 1 X search query.',
+      querySelectionRequired: 'Select at least 1 X search query.',
       tooManyQueries: 'Enter at most 20 X search queries.',
       queryTooLong: 'Keep each X search query within 512 characters.',
       resultsOutOfRange: 'Choose 1 to 1,000 results per query.'

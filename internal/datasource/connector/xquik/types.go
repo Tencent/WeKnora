@@ -169,7 +169,7 @@ func parseQueries(raw string) ([]string, error) {
 
 func (c *config) selectedQueries(resourceIDs []string) ([]string, error) {
 	if len(resourceIDs) == 0 {
-		return append([]string(nil), c.Queries...), nil
+		return nil, fmt.Errorf("%w: no configured queries are selected", datasource.ErrInvalidConfig)
 	}
 	allowed := make(map[string]struct{}, len(c.Queries))
 	for _, query := range c.Queries {
