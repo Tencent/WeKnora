@@ -4,7 +4,6 @@ import (
 	"net/url"
 	"path"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -12,13 +11,23 @@ import (
 
 // Models routinely reference the files they generated in the sandbox from
 // their final answer, most often as a Markdown image (`![评分](市场画像评分.html)`).
-// A bare file name resolves to nothing in the browser, and the storage URL
-// behind each artifact must never reach the client, so the reference is
-// rewritten here into `artifact://<index>` — the same index the client already
-// uses to call /artifacts/:index/download.
+// A bare file name resolves to nothing once the sandbox is gone, so this is the
+// boundary where an answer's transient, sandbox-local references are normalized
+// into the one reference form that survives: `resource://<handle>`.
+//
+// The handle is the same identity every other stored file uses (knowledge-base
+// images, chat attachments), which is what makes a saved answer keep working:
+// re-binding the handle to a knowledge entry is enough, with no copy and no
+// second rewrite. It is also opaque — the physical storage path stays server
+// side, and every read still goes through an authorizing proxy.
+//
+// A deployment without the resource catalog has no handle to point at, so those
+// references are normalized to the canonical `sandbox:<name>` spelling instead
+// and resolved by name against the message's own artifact list. That keeps the
+// answer readable in the chat, and only there.
 //
 // The rewrite runs once per turn, after ArtifactCollector has drained
-// /workspace/output, so the index space is final.
+// /workspace/output, so every artifact already has its handle.
 
 // fencedOrInlineCodeRE splits content so destinations inside code samples are
 // never rewritten — a documentation snippet showing the syntax must survive.
@@ -32,7 +41,7 @@ var schemeRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.\-]*:`)
 var titleSuffixRE = regexp.MustCompile(`(?s)^(.*?)(\s+(?:"[^"]*"|'[^']*'))$`)
 
 // rewriteArtifactReferences replaces every Markdown link/image destination that
-// names one of the turn's artifacts with `artifact://<index>`.
+// names one of the turn's artifacts with that artifact's stable reference.
 //
 // Three destination spellings are accepted, because models are inconsistent
 // about the prefix even when the prompt asks for one:
@@ -41,14 +50,14 @@ var titleSuffixRE = regexp.MustCompile(`(?s)^(.*?)(\s+(?:"[^"]*"|'[^']*'))$`)
 //	![评分](市场画像评分.html)
 //	![评分](./output/市场画像评分.html)
 //
-// Anything else — an http URL, a provider:// path, an unknown file name — is
-// returned unchanged so existing behaviour (knowledge-base images, web links)
-// is untouched.
+// Anything else — an http URL, a resource:// handle the model copied from
+// context, an unknown file name — is returned unchanged so existing behaviour
+// (knowledge-base images, web links) is untouched.
 func rewriteArtifactReferences(content string, artifacts types.MessageArtifacts) string {
 	if content == "" || len(artifacts) == 0 {
 		return content
 	}
-	byName := artifactIndexByName(artifacts)
+	byName := artifactRefByName(artifacts)
 	if len(byName) == 0 {
 		return content
 	}
@@ -76,7 +85,7 @@ func rewriteArtifactReferences(content string, artifacts types.MessageArtifacts)
 // because skill-generated file names routinely contain both spaces and
 // parentheses (`腾讯控股(00700) 成交量_838ccc.html`). A regex that stops at the
 // first space or paren would capture half the name and never match.
-func rewriteArtifactReferencesInSegment(segment string, byName map[string]int) string {
+func rewriteArtifactReferencesInSegment(segment string, byName map[string]string) string {
 	if segment == "" || !strings.Contains(segment, "](") {
 		return segment
 	}
@@ -100,7 +109,7 @@ func rewriteArtifactReferencesInSegment(segment string, byName map[string]int) s
 		}
 
 		destination, title := splitDestinationTitle(inner)
-		index, matched := lookupArtifactIndex(destination, byName, markdownImageBefore(segment, closeBracket))
+		ref, matched := lookupArtifactRef(destination, byName, markdownImageBefore(segment, closeBracket))
 		if !matched {
 			out.WriteString(segment[cursor : end+1])
 			cursor = end + 1
@@ -108,8 +117,7 @@ func rewriteArtifactReferencesInSegment(segment string, byName map[string]int) s
 		}
 
 		out.WriteString(segment[cursor : open+1])
-		out.WriteString("artifact://")
-		out.WriteString(strconv.Itoa(index))
+		out.WriteString(ref)
 		out.WriteString(title)
 		out.WriteString(")")
 		cursor = end + 1
@@ -180,11 +188,11 @@ func looksLikeSandboxOutputPath(candidate string) bool {
 	return strings.HasPrefix(c, "workspace/output/") || strings.HasPrefix(c, "output/")
 }
 
-// lookupArtifactIndex resolves one Markdown destination to an artifact index.
-func lookupArtifactIndex(destination string, byName map[string]int, image bool) (int, bool) {
+// lookupArtifactRef resolves one Markdown destination to an artifact reference.
+func lookupArtifactRef(destination string, byName map[string]string, image bool) (string, bool) {
 	candidate := strings.TrimSpace(destination)
 	if candidate == "" {
-		return 0, false
+		return "", false
 	}
 	// Trim the optional angle-bracket form Markdown allows around a
 	// destination: `[x](<name with space>)` — kept for completeness even
@@ -202,7 +210,7 @@ func lookupArtifactIndex(destination string, byName map[string]int, image bool) 
 	// A destination that already carries a scheme is a real URL, not a file
 	// name. `sandbox:` is the one exception and was stripped above.
 	if !hadSandboxPrefix && schemeRE.MatchString(candidate) {
-		return 0, false
+		return "", false
 	}
 
 	// Models percent-encode non-ASCII names about half the time.
@@ -215,26 +223,26 @@ func lookupArtifactIndex(destination string, byName map[string]int, image bool) 
 	// are left alone unless they already carry a sandbox prefix or path —
 	// otherwise a colliding artifact name would hijack a real hyperlink.
 	if !hadSandboxPrefix && !image && !looksLikeSandboxOutputPath(candidate) {
-		return 0, false
+		return "", false
 	}
 	// Directory prefixes (`./`, `output/`, `/workspace/output/`) carry no
-	// information the index does not already have.
+	// information the artifact list does not already have.
 	candidate = path.Base(candidate)
 	if candidate == "" || candidate == "." || candidate == "/" {
-		return 0, false
+		return "", false
 	}
 
-	index, ok := byName[candidate]
-	return index, ok
+	ref, ok := byName[candidate]
+	return ref, ok
 }
 
-// artifactIndexByName maps each artifact's file name to its position. A
-// duplicate name keeps the first occurrence: the index is only a handle, and
+// artifactRefByName maps each artifact's file name to the reference that
+// replaces it in the answer. A duplicate name keeps the first occurrence:
 // silently preferring the later file would make the reference point at
 // something the model did not describe.
-func artifactIndexByName(artifacts types.MessageArtifacts) map[string]int {
-	byName := make(map[string]int, len(artifacts))
-	for i, artifact := range artifacts {
+func artifactRefByName(artifacts types.MessageArtifacts) map[string]string {
+	byName := make(map[string]string, len(artifacts))
+	for _, artifact := range artifacts {
 		name := strings.TrimSpace(artifact.FileName)
 		if name == "" {
 			continue
@@ -242,7 +250,21 @@ func artifactIndexByName(artifacts types.MessageArtifacts) map[string]int {
 		if _, exists := byName[name]; exists {
 			continue
 		}
-		byName[name] = i
+		byName[name] = artifactReference(artifact)
 	}
 	return byName
+}
+
+// artifactReference returns the destination an answer should carry for one
+// artifact: its catalog handle when the deployment has a resource registry,
+// otherwise the canonical chat-only `sandbox:<name>` form.
+//
+// The raw storage path is never a candidate. It names a bucket and key, which
+// is both an information leak and useless to a client that has no credentials
+// for the object store.
+func artifactReference(artifact types.MessageArtifact) string {
+	if handle, ok := types.ParseResourcePath(artifact.URL); ok {
+		return types.BuildResourcePath(handle)
+	}
+	return "sandbox:" + strings.TrimSpace(artifact.FileName)
 }

@@ -139,6 +139,12 @@ type bindCall struct {
 type fakeCatalog struct {
 	binds   []bindCall
 	bindErr error
+	// Release scripting, used by the deletion-guard tests. releaseRemaining
+	// maps a reference to the binding count left after the release; a missing
+	// entry answers -1 ("not a catalog handle").
+	releaseRemaining map[string]int64
+	releaseErr       error
+	releases         []string
 }
 
 func (c *fakeCatalog) Register(context.Context, uint64, string, interfaces.ResourceRegistration) (string, error) {
@@ -155,6 +161,17 @@ func (c *fakeCatalog) Bind(_ context.Context, ref, ownerType, ownerID, relation 
 	return c.bindErr
 }
 func (c *fakeCatalog) MarkDeleted(context.Context, string) error { return nil }
+
+func (c *fakeCatalog) Release(_ context.Context, ref, ownerType, ownerID string) (int64, error) {
+	c.releases = append(c.releases, ref+"|"+ownerType+"|"+ownerID)
+	if c.releaseErr != nil {
+		return -1, c.releaseErr
+	}
+	if remaining, ok := c.releaseRemaining[ref]; ok {
+		return remaining, nil
+	}
+	return -1, nil
+}
 func (c *fakeCatalog) CreateAccessGrant(context.Context, string, time.Duration) (string, error) {
 	return "", nil
 }

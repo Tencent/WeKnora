@@ -75,8 +75,8 @@ const defaultMaxArtifactFileBytes int64 = 50 * 1024 * 1024
 // so the resource registry can enumerate / garbage-collect artifacts by
 // their owning message instead of only via the messages.artifacts JSONB.
 const (
-	artifactBindingOwnerType = "message"
-	artifactBindingRelation  = "artifact"
+	artifactBindingOwnerType = types.ResourceOwnerMessage
+	artifactBindingRelation  = types.ResourceRelationArtifact
 )
 
 // ArtifactCollector implements the "drain sandbox artifacts on turn

@@ -269,8 +269,10 @@ const closePreImg = () => {
 const markdownRenderer = createChatMarkdownRenderer({
     codeRenderer: createMermaidCodeRenderer('mermaid-botmsg'),
     imageRenderer: ({ href, title, text }) => {
-        // A sandbox-generated file is addressed by artifact index, not by URL,
-        // so it is resolved before the ordinary image path.
+        // A sandbox-generated file shares the resource:// form with every other
+        // protected image, so it is matched against this message's artifacts
+        // first. Anything that does not belong to this reply falls through to
+        // the ordinary protected-image path.
         const artifactHtml = renderArtifactReference({
             href,
             alt: text || '',

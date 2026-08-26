@@ -787,15 +787,16 @@ func (h *AgentStreamHandler) emitArtifactsPending(count int) {
 }
 
 // publicArtifactViews returns a redacted view of the artifact list suitable
-// for direct serialization onto the SSE stream. The storage URL and any
-// other server-only fields are stripped; the frontend uses (index, name,
-// size, source_path, mod_time, created_at) to render the download drawer
-// and calls /artifacts/:index/download to fetch the bytes.
+// for direct serialization onto the SSE stream. The physical storage path is
+// stripped; the resource handle is kept because it is what the answer body
+// references, and the frontend needs it to tie an inline reference to the file
+// it names. Bytes are fetched through /artifacts/:index/download.
 func publicArtifactViews(list types.MessageArtifacts) []map[string]interface{} {
 	out := make([]map[string]interface{}, 0, len(list))
 	for i, a := range list {
 		out = append(out, map[string]interface{}{
 			"index":       i,
+			"handle":      artifactHandle(a),
 			"file_name":   a.FileName,
 			"file_type":   a.FileType,
 			"file_size":   a.FileSize,

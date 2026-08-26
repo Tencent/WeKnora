@@ -11,25 +11,33 @@ import {
 
 const labels = { previewHint: '点击预览', missingHint: '文件不可用' }
 
+// 22 位句柄，与后端 types.ResourceHandleLength 一致。
+const handleFor = (i: number) => `art${i}`.padEnd(22, 'x')
+const refFor = (i: number) => `resource://${handleFor(i)}`
+
 const artifacts: ArtifactRefMeta[] = [
-  { index: 0, file_name: '市场画像评分_e7edba.html', file_type: 'text/html' },
-  { index: 1, file_name: 'trend.png', file_type: 'image/png' },
-  { index: 2, file_name: 'diagram.svg', file_type: 'image/svg+xml' },
-  { index: 3, file_name: '腾讯控股(00700) 成交量_838ccc.html', file_type: 'text/html' },
+  { index: 0, handle: refFor(0), file_name: '市场画像评分_e7edba.html', file_type: 'text/html' },
+  { index: 1, handle: refFor(1), file_name: 'trend.png', file_type: 'image/png' },
+  { index: 2, handle: refFor(2), file_name: 'diagram.svg', file_type: 'image/svg+xml' },
+  { index: 3, handle: refFor(3), file_name: '腾讯控股(00700) 成交量_838ccc.html', file_type: 'text/html' },
 ]
 
-test('isArtifactRefHref only matches sandbox artifact references', () => {
-  assert.equal(isArtifactRefHref('artifact://0'), true)
+// 知识库检索图：形式与产物完全相同，但不属于这条消息。
+const foreignRef = `resource://${'z'.repeat(22)}`
+
+test('isArtifactRefHref matches handle and sandbox forms only', () => {
+  assert.equal(isArtifactRefHref(refFor(0)), true)
   assert.equal(isArtifactRefHref('sandbox:trend.png'), true)
   assert.equal(isArtifactRefHref('sandbox://trend.png'), true)
   assert.equal(isArtifactRefHref('https://example.com/trend.png'), false)
+  // 长度不对的不是句柄。
   assert.equal(isArtifactRefHref('resource://tenant/1/trend.png'), false)
   assert.equal(isArtifactRefHref('trend.png'), false)
   assert.equal(isArtifactRefHref(''), false)
 })
 
-test('resolveArtifactRef resolves both the index and the name form', () => {
-  assert.equal(resolveArtifactRef('artifact://1', artifacts)?.file_name, 'trend.png')
+test('resolveArtifactRef resolves both the handle and the name form', () => {
+  assert.equal(resolveArtifactRef(refFor(1), artifacts)?.file_name, 'trend.png')
   assert.equal(resolveArtifactRef('sandbox:trend.png', artifacts)?.index, 1)
   assert.equal(
     resolveArtifactRef('sandbox:/workspace/output/trend.png', artifacts)?.index,
@@ -39,8 +47,13 @@ test('resolveArtifactRef resolves both the index and the name form', () => {
     resolveArtifactRef('sandbox:%E5%B8%82%E5%9C%BA%E7%94%BB%E5%83%8F%E8%AF%84%E5%88%86_e7edba.html', artifacts)?.index,
     0,
   )
-  assert.equal(resolveArtifactRef('artifact://9', artifacts), null)
+  assert.equal(resolveArtifactRef(foreignRef, artifacts), null)
   assert.equal(resolveArtifactRef('sandbox:missing.csv', artifacts), null)
+})
+
+test('resolveArtifactRef accepts the url field carried by persisted messages', () => {
+  const persisted: ArtifactRefMeta[] = [{ index: 0, url: refFor(7), file_name: 'a.csv' }]
+  assert.equal(resolveArtifactRef(refFor(7), persisted)?.file_name, 'a.csv')
 })
 
 test('renderArtifactReference leaves ordinary images to the default renderer', () => {
@@ -54,9 +67,21 @@ test('renderArtifactReference leaves ordinary images to the default renderer', (
   )
 })
 
+test('a handle from outside this message falls back to protected-image rendering', () => {
+  // 知识库检索图与产物同形。此时必须交回默认渲染，而不是显示「文件不可用」。
+  assert.equal(
+    renderArtifactReference({ href: foreignRef, artifacts, labels }),
+    null,
+  )
+  assert.equal(
+    renderArtifactReference({ href: foreignRef, artifacts: [], labels, streaming: true }),
+    null,
+  )
+})
+
 test('renderArtifactReference renders image artifacts inline', () => {
   const html = renderArtifactReference({
-    href: 'artifact://1',
+    href: refFor(1),
     alt: '走势',
     artifacts,
     labels,
@@ -69,7 +94,7 @@ test('renderArtifactReference renders image artifacts inline', () => {
 
 test('renderArtifactReference renders non-image artifacts as a clickable card', () => {
   const html = renderArtifactReference({
-    href: 'artifact://0',
+    href: refFor(0),
     alt: '市场画像评分',
     artifacts,
     labels,
@@ -83,7 +108,7 @@ test('renderArtifactReference renders non-image artifacts as a clickable card', 
 })
 
 test('svg artifacts go through the sandboxed preview rather than inline rendering', () => {
-  const html = renderArtifactReference({ href: 'artifact://2', artifacts, labels })
+  const html = renderArtifactReference({ href: refFor(2), artifacts, labels })
   assert.ok(html?.includes('artifact-ref-card'))
   assert.ok(!html?.includes('artifact-ref-image'))
 })
@@ -157,8 +182,8 @@ test('normalizeSandboxArtifactRefs preserves a title and an unterminated tail', 
 
 test('artifact names are HTML-escaped', () => {
   const html = renderArtifactReference({
-    href: 'artifact://0',
-    artifacts: [{ index: 0, file_name: '<img src=x onerror=alert(1)>.csv' }],
+    href: refFor(0),
+    artifacts: [{ index: 0, handle: refFor(0), file_name: '<img src=x onerror=alert(1)>.csv' }],
     labels,
   })
   assert.ok(!html?.includes('<img src=x'))

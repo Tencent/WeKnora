@@ -2408,10 +2408,11 @@ onUpdated(() => {
 const agentRenderer = new marked.Renderer();
 agentRenderer.code = createMermaidCodeRenderer('mermaid-agent');
 
-// Files the agent generated in its sandbox are addressed by artifact index
-// rather than by URL, so they are resolved before marked's default <img>.
-// Everything else (knowledge-base `resource://` handles, external images) keeps
-// the default output, which protectProviderImageSrcInHTML still rewrites.
+// Files the agent generated in its sandbox carry the same `resource://` handle
+// as any other stored file, so they are matched against this reply's artifacts
+// before marked's default <img>. Everything else — including a handle that
+// belongs to a knowledge-base image rather than to this reply — keeps the
+// default output, which protectProviderImageSrcInHTML still rewrites.
 const defaultImageRenderer = new marked.Renderer().image;
 agentRenderer.image = function agentImageRenderer(token) {
   const artifactHtml = renderArtifactReference({

@@ -2,11 +2,16 @@
  * 把回答正文里对「沙盒生成文件」的引用，接到 artifact 下载链路上。
  *
  * 模型会用 Markdown 图片语法引用它在沙盒里生成的文件（提示词规定写成
- * `![说明](sandbox:文件名)`，服务端在落库前会把它改写成 `artifact://<下标>`）。
- * 两种写法都指向同一份 `Message.Artifacts`：
+ * `![说明](sandbox:文件名)`），服务端在落库前把它改写成该文件的稳定句柄
+ * `resource://<handle>` —— 与知识库图片、聊天附件同一种引用形式。两种写法
+ * 都指向同一份 `Message.Artifacts`：
  *
- *   - `artifact://<下标>` —— 服务端改写后的权威形式，历史会话读到的就是它；
- *   - `sandbox:<文件名>`  —— 模型原始写法，本轮流式输出尚未经过改写时用到。
+ *   - `resource://<handle>` —— 落库后的权威形式，历史会话读到的就是它；
+ *   - `sandbox:<文件名>`    —— 模型原始写法，本轮流式输出尚未改写时用到。
+ *
+ * 由于句柄形式与知识库图片完全一致，一条回答里同时出现「检索到的知识库图」
+ * 和「技能生成的图」是常态。所以句柄对不上本消息产物列表时必须返回 null，
+ * 交回默认的受保护图片渲染，而不是显示「文件不可用」。
  *
  * 图片类产物内联显示（带鉴权拉取后换成 blob），其余类型（HTML 图表、CSV、
  * 文档等）渲染成一张卡片，点击后交给 ChatArtifactsDrawer 预览——正文里塞一个
@@ -20,6 +25,13 @@ export interface ArtifactRefMeta {
   index: number;
   file_name: string;
   file_type?: string;
+  /** `resource://<handle>`。后端未启用资源目录时为空，此时只能按文件名解析。 */
+  handle?: string;
+  /**
+   * 历史消息直接携带 `Message.Artifacts`，其中的存储引用叫 `url`。与 handle
+   * 同义，取其一即可。
+   */
+  url?: string;
 }
 
 export interface ArtifactRefContext {
@@ -34,21 +46,21 @@ export interface ArtifactRefLabels {
   missingHint: string;
 }
 
-const ARTIFACT_INDEX_RE = /^artifact:\/\/(\d+)$/i;
+const RESOURCE_HANDLE_RE = /^resource:\/\/([A-Za-z0-9_-]{22})$/;
 const SANDBOX_NAME_RE = /^sandbox:(?:\/\/)?(.+)$/i;
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'avif']);
 const TRANSPARENT_PIXEL =
   'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 
-type ArtifactRef = { kind: 'index'; index: number } | { kind: 'name'; name: string };
+type ArtifactRef = { kind: 'handle'; handle: string } | { kind: 'name'; name: string };
 
 function parseArtifactRef(href: string): ArtifactRef | null {
   const trimmed = (href || '').trim();
   if (!trimmed) return null;
 
-  const indexMatch = trimmed.match(ARTIFACT_INDEX_RE);
-  if (indexMatch) {
-    return { kind: 'index', index: Number(indexMatch[1]) };
+  const handleMatch = trimmed.match(RESOURCE_HANDLE_RE);
+  if (handleMatch) {
+    return { kind: 'handle', handle: handleMatch[1] };
   }
 
   const nameMatch = trimmed.match(SANDBOX_NAME_RE);
@@ -64,9 +76,19 @@ function parseArtifactRef(href: string): ArtifactRef | null {
   return name ? { kind: 'name', name } : null;
 }
 
-/** 该链接目标是否是一个沙盒产物引用（无论能否解析到具体文件）。 */
+/**
+ * 该链接目标是否可能是沙盒产物引用。
+ *
+ * 句柄形式与知识库图片同形，因此这里为真只说明「值得交给产物解析试一次」，
+ * 不代表本消息真有这个文件。
+ */
 export function isArtifactRefHref(href: string): boolean {
   return parseArtifactRef(href) !== null;
+}
+
+function artifactHandle(artifact: ArtifactRefMeta): string {
+  const raw = (artifact.handle || artifact.url || '').trim();
+  return raw.match(RESOURCE_HANDLE_RE)?.[1] || '';
 }
 
 const CODE_SPAN_OR_FENCE_RE = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/g;
@@ -174,8 +196,8 @@ export function resolveArtifactRef(
   const ref = parseArtifactRef(href);
   if (!ref || !artifacts?.length) return null;
 
-  if (ref.kind === 'index') {
-    return artifacts.find((item) => item.index === ref.index) || null;
+  if (ref.kind === 'handle') {
+    return artifacts.find((item) => artifactHandle(item) === ref.handle) || null;
   }
   return artifacts.find((item) => (item.file_name || '').trim() === ref.name) || null;
 }
@@ -281,13 +303,16 @@ export function renderArtifactReference(args: {
 
   const artifact = resolveArtifactRef(args.href, args.artifacts);
   if (!artifact) {
+    // 句柄对不上本消息的产物，说明这是别的受保护文件（知识库检索图、
+    // 附件图……）。交回默认渲染，由 hydrateProtectedFileImages 带鉴权拉取。
+    if (ref.kind === 'handle') return null;
     // 产物列表要到本轮结束才随 complete 事件到达，流式期间必然解析不到。
     // 这时给骨架屏而不是卡片：既避免半截文件名闪一下，也不会把「生成中」
     // 这种状态留在一个其实已经结束的回答里。
     if (args.streaming) return STREAMING_PLACEHOLDER;
     // 本轮已结束仍对不上，说明模型引用了并不存在的文件。如实说明，不要
     // 继续显示「生成中」。
-    const fallbackName = (ref.kind === 'name' ? ref.name : '') || (args.alt || '').trim();
+    const fallbackName = ref.name || (args.alt || '').trim();
     if (!fallbackName) return '';
     return renderCard(fallbackName, args.labels.missingHint, null);
   }
