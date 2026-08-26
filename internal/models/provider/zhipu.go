@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -53,4 +54,14 @@ func (p *ZhipuProvider) ValidateConfig(config *Config) error {
 		return fmt.Errorf("model name is required")
 	}
 	return nil
+}
+
+// IsZhipuThinkingModel reports whether an official Zhipu GLM model uses the
+// thinking.type request field for explicit thinking-mode control.
+func IsZhipuThinkingModel(modelName string) bool {
+	name := strings.ToLower(strings.TrimSpace(modelName))
+	return strings.HasPrefix(name, "glm-4.5") ||
+		strings.HasPrefix(name, "glm-4.6") ||
+		strings.HasPrefix(name, "glm-4.7") ||
+		strings.HasPrefix(name, "glm-5")
 }

@@ -541,6 +541,15 @@ const fallbackProviderOptions = computed(() => [
     modelTypes: ['chat', 'embedding', 'vllm']
   },
   {
+    value: 'deepseek',
+    label: t('model.editor.providers.deepseek.label'),
+    defaultUrls: {
+      chat: 'https://api.deepseek.com'
+    },
+    description: t('model.editor.providers.deepseek.description'),
+    modelTypes: ['chat']
+  },
+  {
     value: 'openrouter',
     label: t('model.editor.providers.openrouter.label'),
     defaultUrls: {

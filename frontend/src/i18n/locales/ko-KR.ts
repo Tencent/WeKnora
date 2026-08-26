@@ -2391,7 +2391,7 @@ export default {
         },
         deepseek: {
           label: 'DeepSeek',
-          description: 'deepseek-chat, deepseek-reasoner 등'
+          description: 'deepseek-v4-flash, deepseek-v4-pro 등'
         },
         volcengine: {
           label: 'Volcengine',

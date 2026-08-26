@@ -2393,7 +2393,7 @@ export default {
         },
         deepseek: {
           label: 'DeepSeek',
-          description: 'deepseek-chat, deepseek-reasoner 等'
+          description: 'deepseek-v4-flash, deepseek-v4-pro 等'
         },
         volcengine: {
           label: '火山引擎 Volcengine',

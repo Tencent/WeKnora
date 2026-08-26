@@ -30,6 +30,35 @@ func TestProviderRegistry(t *testing.T) {
 	})
 }
 
+func TestIsDeepSeekThinkingModel(t *testing.T) {
+	assert.True(t, IsDeepSeekThinkingModel("deepseek-v4-flash"))
+	assert.True(t, IsDeepSeekThinkingModel("deepseek-v4-pro"))
+	assert.True(t, IsDeepSeekThinkingModel("DeepSeek-V4-Pro"))
+	assert.False(t, IsDeepSeekThinkingModel("deepseek-v4-pro-preview"))
+	assert.False(t, IsDeepSeekThinkingModel("deepseek-chat"))
+	assert.False(t, IsDeepSeekThinkingModel("deepseek-reasoner"))
+}
+
+func TestDeepSeekProviderInfoUsesCurrentOfficialChatPreset(t *testing.T) {
+	info := (&DeepSeekProvider{}).Info()
+
+	assert.Equal(t, ProviderDeepSeek, info.Name)
+	assert.Equal(t, "https://api.deepseek.com", info.GetDefaultURL(types.ModelTypeKnowledgeQA))
+	assert.Equal(t,
+		"deepseek-v4-flash, deepseek-v4-pro, etc.",
+		info.Description,
+	)
+	assert.Equal(t, []types.ModelType{types.ModelTypeKnowledgeQA}, info.ModelTypes)
+}
+
+func TestIsZhipuThinkingModel(t *testing.T) {
+	assert.True(t, IsZhipuThinkingModel("glm-4.5"))
+	assert.True(t, IsZhipuThinkingModel("glm-4.7"))
+	assert.True(t, IsZhipuThinkingModel("GLM-5.1-preview"))
+	assert.False(t, IsZhipuThinkingModel("glm-4"))
+	assert.False(t, IsZhipuThinkingModel("glm-4-plus"))
+}
+
 func TestDetectProvider(t *testing.T) {
 	tests := []struct {
 		url      string
