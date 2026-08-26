@@ -77,6 +77,9 @@ func (s *stubUserRepoForAuth) ListUsers(context.Context, int, int) ([]*types.Use
 func (s *stubUserRepoForAuth) ListSystemAdmins(context.Context, int, int) ([]*types.User, int64, error) {
 	return nil, 0, nil
 }
+func (s *stubUserRepoForAuth) CountActiveSystemAdmins(context.Context) (int64, error) {
+	return 0, nil
+}
 func (s *stubUserRepoForAuth) GrantSystemAdmin(context.Context, string) (*types.User, bool, error) {
 	return nil, false, nil
 }

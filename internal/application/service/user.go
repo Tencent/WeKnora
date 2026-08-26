@@ -616,6 +616,11 @@ func (s *userService) ListSystemAdmins(
 	return s.userRepo.ListSystemAdmins(ctx, offset, limit)
 }
 
+// CountActiveSystemAdmins counts enabled system administrators for bootstrap recovery.
+func (s *userService) CountActiveSystemAdmins(ctx context.Context) (int64, error) {
+	return s.userRepo.CountActiveSystemAdmins(ctx)
+}
+
 // ListCrossTenantAccessUsers lists users who can access every tenant.
 func (s *userService) ListCrossTenantAccessUsers(
 	ctx context.Context, offset, limit int,

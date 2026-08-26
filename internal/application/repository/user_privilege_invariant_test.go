@@ -49,6 +49,7 @@ func privilegeUser(id string, isSystemAdmin, canAccessAllTenants bool) *types.Us
 		Username:            id,
 		Email:               id + "@example.com",
 		PasswordHash:        "hash",
+		IsActive:            true,
 		IsSystemAdmin:       isSystemAdmin,
 		CanAccessAllTenants: canAccessAllTenants,
 	}
@@ -75,6 +76,32 @@ func TestPrivilegeRevocationPreservesLastCrossTenantAccessManager(t *testing.T) 
 	}
 	if !manager.IsSystemAdmin || !manager.CanAccessAllTenants {
 		t.Fatalf("last manager privileges changed: %+v", manager)
+	}
+}
+
+func TestPrivilegeRevocationIgnoresDisabledCrossTenantAccessManager(t *testing.T) {
+	repo := newPrivilegeInvariantRepository(t)
+	createPrivilegeInvariantUsers(t, repo,
+		privilegeUser("active-manager", true, true),
+		privilegeUser("disabled-manager", true, true),
+		privilegeUser("actor", true, false),
+	)
+	ctx := context.Background()
+
+	disabledManager, err := repo.GetUserByID(ctx, "disabled-manager")
+	if err != nil {
+		t.Fatalf("load disabled manager: %v", err)
+	}
+	disabledManager.IsActive = false
+	if err := repo.UpdateUser(ctx, disabledManager); err != nil {
+		t.Fatalf("disable manager: %v", err)
+	}
+
+	if _, err := repo.RevokeSystemAdmin(ctx, "active-manager", "actor"); !errors.Is(err, ErrLastCrossTenantAccessManager) {
+		t.Fatalf("revoke system admin error = %v", err)
+	}
+	if _, _, err := repo.RevokeCrossTenantAccess(ctx, "active-manager", "actor"); !errors.Is(err, ErrLastCrossTenantAccessManager) {
+		t.Fatalf("revoke cross-tenant access error = %v", err)
 	}
 }
 

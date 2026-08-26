@@ -107,8 +107,14 @@ func bootstrapSystemAdmin(ctx context.Context, userSvc interfaces.UserService, e
 			bootstrapEnvVar, email)
 		return
 	}
+	if !user.IsActive {
+		logger.Warnf(ctx,
+			"[bootstrap] %s=%s: user %s is disabled; select an active account for recovery",
+			bootstrapEnvVar, email, user.ID)
+		return
+	}
 	if !user.IsSystemAdmin {
-		_, systemAdminCount, err := userSvc.ListSystemAdmins(ctx, 0, 1)
+		systemAdminCount, err := userSvc.CountActiveSystemAdmins(ctx)
 		if err != nil {
 			logger.Warnf(ctx,
 				"[bootstrap] %s=%s: cannot verify existing system admins, skipping bootstrap: %v",

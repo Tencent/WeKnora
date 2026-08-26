@@ -203,6 +203,17 @@ func (r *userRepository) ListSystemAdmins(ctx context.Context, offset, limit int
 	return users, total, nil
 }
 
+// CountActiveSystemAdmins returns the number of enabled system administrators.
+// Bootstrap uses a dedicated count because the management list intentionally
+// includes disabled accounts so operators can still inspect and revoke them.
+func (r *userRepository) CountActiveSystemAdmins(ctx context.Context) (int64, error) {
+	var total int64
+	err := r.db.WithContext(ctx).Model(&types.User{}).
+		Where("is_system_admin = TRUE AND is_active = TRUE").
+		Count(&total).Error
+	return total, err
+}
+
 // GrantSystemAdmin enables system-administrator access atomically.
 // The changed result is false when the target already has the permission.
 func (r *userRepository) GrantSystemAdmin(ctx context.Context, userID string) (*types.User, bool, error) {
@@ -268,7 +279,7 @@ func (r *userRepository) ListCrossTenantAccessUsers(
 func (r *userRepository) CountCrossTenantAccessManagers(ctx context.Context) (int64, error) {
 	var total int64
 	err := r.db.WithContext(ctx).Model(&types.User{}).
-		Where("is_system_admin = TRUE AND can_access_all_tenants = TRUE").
+		Where("is_system_admin = TRUE AND can_access_all_tenants = TRUE AND is_active = TRUE").
 		Count(&total).Error
 	return total, err
 }
@@ -431,7 +442,7 @@ func withUpdateLock(tx *gorm.DB) *gorm.DB {
 func countCrossTenantAccessManagers(admins []types.User) int {
 	count := 0
 	for i := range admins {
-		if admins[i].CanAccessAllTenants {
+		if admins[i].IsActive && admins[i].CanAccessAllTenants {
 			count++
 		}
 	}

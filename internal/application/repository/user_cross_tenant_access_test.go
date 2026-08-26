@@ -73,15 +73,24 @@ func TestCountCrossTenantAccessManagersOnlyCountsActiveDualPrivilegeUsers(t *tes
 	repo := NewUserRepository(db)
 	ctx := context.Background()
 	users := []*types.User{
-		{ID: "manager", Username: "manager", Email: "manager@example.com", PasswordHash: "hash", IsSystemAdmin: true, CanAccessAllTenants: true},
-		{ID: "admin-only", Username: "admin-only", Email: "admin-only@example.com", PasswordHash: "hash", IsSystemAdmin: true},
-		{ID: "cross-only", Username: "cross-only", Email: "cross-only@example.com", PasswordHash: "hash", CanAccessAllTenants: true},
-		{ID: "deleted-manager", Username: "deleted-manager", Email: "deleted@example.com", PasswordHash: "hash", IsSystemAdmin: true, CanAccessAllTenants: true},
+		{ID: "manager", Username: "manager", Email: "manager@example.com", PasswordHash: "hash", IsActive: true, IsSystemAdmin: true, CanAccessAllTenants: true},
+		{ID: "admin-only", Username: "admin-only", Email: "admin-only@example.com", PasswordHash: "hash", IsActive: true, IsSystemAdmin: true},
+		{ID: "cross-only", Username: "cross-only", Email: "cross-only@example.com", PasswordHash: "hash", IsActive: true, CanAccessAllTenants: true},
+		{ID: "inactive-manager", Username: "inactive-manager", Email: "inactive@example.com", PasswordHash: "hash", IsActive: true, IsSystemAdmin: true, CanAccessAllTenants: true},
+		{ID: "deleted-manager", Username: "deleted-manager", Email: "deleted@example.com", PasswordHash: "hash", IsActive: true, IsSystemAdmin: true, CanAccessAllTenants: true},
 	}
 	for _, user := range users {
 		if err := repo.CreateUser(ctx, user); err != nil {
 			t.Fatalf("create %s: %v", user.ID, err)
 		}
+	}
+	inactiveManager, err := repo.GetUserByID(ctx, "inactive-manager")
+	if err != nil {
+		t.Fatalf("load inactive manager: %v", err)
+	}
+	inactiveManager.IsActive = false
+	if err := repo.UpdateUser(ctx, inactiveManager); err != nil {
+		t.Fatalf("disable manager: %v", err)
 	}
 	if err := repo.DeleteUser(ctx, "deleted-manager"); err != nil {
 		t.Fatalf("delete manager: %v", err)
@@ -90,5 +99,9 @@ func TestCountCrossTenantAccessManagersOnlyCountsActiveDualPrivilegeUsers(t *tes
 	total, err := repo.CountCrossTenantAccessManagers(ctx)
 	if err != nil || total != 1 {
 		t.Fatalf("manager count=%d err=%v", total, err)
+	}
+	activeAdmins, err := repo.CountActiveSystemAdmins(ctx)
+	if err != nil || activeAdmins != 2 {
+		t.Fatalf("active system admin count=%d err=%v", activeAdmins, err)
 	}
 }

@@ -17,10 +17,10 @@ type bootstrapUserService struct {
 	lookupErr        error
 	grantAdminErr    error
 	grantCrossErr    error
-	systemAdminCount int64
-	listAdminErr     error
+	activeAdminCount int64
+	countAdminErr    error
 	lookupCalls      int
-	listAdminCalls   int
+	countAdminCalls  int
 	grantAdminCalls  int
 	grantCrossCalls  int
 }
@@ -34,9 +34,9 @@ func (s *bootstrapUserService) GetUserByEmail(context.Context, string) (*types.U
 	return s.user, s.lookupErr
 }
 
-func (s *bootstrapUserService) ListSystemAdmins(context.Context, int, int) ([]*types.User, int64, error) {
-	s.listAdminCalls++
-	return nil, s.systemAdminCount, s.listAdminErr
+func (s *bootstrapUserService) CountActiveSystemAdmins(context.Context) (int64, error) {
+	s.countAdminCalls++
+	return s.activeAdminCount, s.countAdminErr
 }
 
 func (s *bootstrapUserService) GrantSystemAdmin(context.Context, string) (*types.User, bool, error) {
@@ -58,7 +58,7 @@ func (s *bootstrapUserService) GrantCrossTenantAccess(context.Context, string) (
 }
 
 func TestBootstrapSystemAdminEstablishesFirstCrossTenantAccessManager(t *testing.T) {
-	user := &types.User{ID: "bootstrap-user", Email: "admin@example.com"}
+	user := &types.User{ID: "bootstrap-user", Email: "admin@example.com", IsActive: true}
 	svc := &bootstrapUserService{user: user}
 
 	bootstrapSystemAdmin(context.Background(), svc, user.Email)
@@ -72,7 +72,7 @@ func TestBootstrapSystemAdminEstablishesFirstCrossTenantAccessManager(t *testing
 }
 
 func TestBootstrapSystemAdminRepairsExistingAdminWithoutCrossTenantAccess(t *testing.T) {
-	user := &types.User{ID: "bootstrap-user", Email: "admin@example.com", IsSystemAdmin: true}
+	user := &types.User{ID: "bootstrap-user", Email: "admin@example.com", IsActive: true, IsSystemAdmin: true}
 	svc := &bootstrapUserService{user: user}
 
 	bootstrapSystemAdmin(context.Background(), svc, user.Email)
@@ -83,8 +83,8 @@ func TestBootstrapSystemAdminRepairsExistingAdminWithoutCrossTenantAccess(t *tes
 }
 
 func TestBootstrapSystemAdminDoesNotPromoteRegularUserWhenAdminExists(t *testing.T) {
-	user := &types.User{ID: "regular-user", Email: "regular@example.com"}
-	svc := &bootstrapUserService{user: user, systemAdminCount: 1}
+	user := &types.User{ID: "regular-user", Email: "regular@example.com", IsActive: true}
+	svc := &bootstrapUserService{user: user, activeAdminCount: 1}
 
 	bootstrapSystemAdmin(context.Background(), svc, user.Email)
 
@@ -94,8 +94,8 @@ func TestBootstrapSystemAdminDoesNotPromoteRegularUserWhenAdminExists(t *testing
 }
 
 func TestBootstrapSystemAdminFailsClosedWhenSystemAdminListFails(t *testing.T) {
-	user := &types.User{ID: "regular-user", Email: "regular@example.com"}
-	svc := &bootstrapUserService{user: user, listAdminErr: errors.New("database unavailable")}
+	user := &types.User{ID: "regular-user", Email: "regular@example.com", IsActive: true}
+	svc := &bootstrapUserService{user: user, countAdminErr: errors.New("database unavailable")}
 
 	bootstrapSystemAdmin(context.Background(), svc, user.Email)
 
@@ -114,6 +114,28 @@ func TestBootstrapSystemAdminStopsWhenManagerExists(t *testing.T) {
 	}
 }
 
+func TestBootstrapSystemAdminRejectsDisabledRecoveryTarget(t *testing.T) {
+	user := &types.User{ID: "disabled-admin", Email: "disabled@example.com", IsSystemAdmin: true}
+	svc := &bootstrapUserService{user: user}
+
+	bootstrapSystemAdmin(context.Background(), svc, user.Email)
+
+	if svc.countAdminCalls != 0 || svc.grantAdminCalls != 0 || svc.grantCrossCalls != 0 {
+		t.Fatalf("disabled target should not receive privileges: %+v", svc)
+	}
+}
+
+func TestBootstrapSystemAdminIgnoresDisabledExistingAdmins(t *testing.T) {
+	user := &types.User{ID: "active-user", Email: "active@example.com", IsActive: true}
+	svc := &bootstrapUserService{user: user, activeAdminCount: 0}
+
+	bootstrapSystemAdmin(context.Background(), svc, user.Email)
+
+	if !user.IsSystemAdmin || !user.CanAccessAllTenants {
+		t.Fatalf("active user was not bootstrapped: %+v", user)
+	}
+}
+
 func TestBootstrapSystemAdminFailsClosedWhenManagerCountFails(t *testing.T) {
 	svc := &bootstrapUserService{countErr: errors.New("database unavailable")}
 
@@ -125,7 +147,7 @@ func TestBootstrapSystemAdminFailsClosedWhenManagerCountFails(t *testing.T) {
 }
 
 func TestBootstrapSystemAdminDoesNotGrantCrossTenantAccessAfterAdminGrantFailure(t *testing.T) {
-	user := &types.User{ID: "bootstrap-user", Email: "admin@example.com"}
+	user := &types.User{ID: "bootstrap-user", Email: "admin@example.com", IsActive: true}
 	svc := &bootstrapUserService{user: user, grantAdminErr: errors.New("write failed")}
 
 	bootstrapSystemAdmin(context.Background(), svc, user.Email)
@@ -136,7 +158,7 @@ func TestBootstrapSystemAdminDoesNotGrantCrossTenantAccessAfterAdminGrantFailure
 }
 
 func TestBootstrapSystemAdminRetriesAfterCrossTenantGrantFailure(t *testing.T) {
-	user := &types.User{ID: "bootstrap-user", Email: "admin@example.com"}
+	user := &types.User{ID: "bootstrap-user", Email: "admin@example.com", IsActive: true}
 	svc := &bootstrapUserService{user: user, grantCrossErr: errors.New("write failed")}
 
 	bootstrapSystemAdmin(context.Background(), svc, user.Email)
