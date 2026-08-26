@@ -29,6 +29,9 @@ func TestResolveProvider(t *testing.T) {
 		{"gemini", provider.ProviderGemini, "gemini-3-flash-preview", geminiProvider{}},
 		{"nvidia", provider.ProviderNvidia, "anything", nvidiaProvider{}},
 		{"volcengine", provider.ProviderVolcengine, "doubao", volcengineProvider{}},
+		{"official deepseek v4 thinking", provider.ProviderDeepSeek, "deepseek-v4-pro", deepseekThinkingProvider{}},
+		{"official zhipu glm thinking", provider.ProviderZhipu, "glm-4.7", zhipuThinkingProvider{}},
+		{"legacy zhipu glm falls back", provider.ProviderZhipu, "glm-4", baseProvider{}},
 		{"openai non-reasoning falls back", provider.ProviderOpenAI, "gpt-4o", baseProvider{}},
 		{"openai reasoning", provider.ProviderOpenAI, "gpt-5", openAIReasoningProvider{}},
 		{"azure non-reasoning", provider.ProviderAzureOpenAI, "gpt-4", azureProvider{}},
@@ -144,6 +147,54 @@ func TestBuildOutbound_Thinking(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, useRaw)
 		assert.Contains(t, mustJSON(t, body), `"thinking"`)
+	})
+
+	t.Run("official deepseek emits thinking type when enabled", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderDeepSeek), "deepseek-v4-pro", nil)
+		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(true)}, true)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		js := mustJSON(t, body)
+		assert.Contains(t, js, `"thinking"`)
+		assert.Contains(t, js, `"type":"enabled"`)
+	})
+
+	t.Run("official deepseek emits thinking type when disabled", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderDeepSeek), "deepseek-v4-flash", nil)
+		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(false)}, true)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		js := mustJSON(t, body)
+		assert.Contains(t, js, `"thinking"`)
+		assert.Contains(t, js, `"type":"disabled"`)
+	})
+
+	t.Run("official zhipu emits thinking type when enabled", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderZhipu), "glm-4.7", nil)
+		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(true)}, true)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		js := mustJSON(t, body)
+		assert.Contains(t, js, `"thinking"`)
+		assert.Contains(t, js, `"type":"enabled"`)
+	})
+
+	t.Run("legacy zhipu model does not receive thinking type", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderZhipu), "glm-4", nil)
+		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(false)}, true)
+		require.NoError(t, err)
+		require.False(t, useRaw)
+		_, ok := body.(*openai.ChatCompletionRequest)
+		require.True(t, ok)
+		assert.NotContains(t, mustJSON(t, body), `"thinking"`)
+	})
+
+	t.Run("legacy official deepseek model does not receive thinking type", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderDeepSeek), "deepseek-chat", nil)
+		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(false)}, true)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		assert.NotContains(t, mustJSON(t, body), `"thinking"`)
 	})
 
 	t.Run("lkeap r1 left untouched", func(t *testing.T) {

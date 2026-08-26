@@ -131,6 +131,22 @@ func TestEffectiveThinkingControl(t *testing.T) {
 		Provider:  "aliyun",
 		ModelName: "qwen3-32b",
 	}))
+	assert.Equal(t, "thinking_type", EffectiveThinkingControl(&ChatConfig{
+		Provider:  "deepseek",
+		ModelName: "deepseek-v4-pro",
+	}))
+	assert.Equal(t, "none", EffectiveThinkingControl(&ChatConfig{
+		Provider:  "deepseek",
+		ModelName: "deepseek-chat",
+	}))
+	assert.Equal(t, "thinking_type", EffectiveThinkingControl(&ChatConfig{
+		Provider:  "zhipu",
+		ModelName: "glm-4.7",
+	}))
+	assert.Equal(t, "none", EffectiveThinkingControl(&ChatConfig{
+		Provider:  "zhipu",
+		ModelName: "glm-4",
+	}))
 	assert.Equal(t, "chat_template_kwargs", EffectiveThinkingControl(&ChatConfig{
 		Provider:    "generic",
 		ModelName:   "qwen3",
