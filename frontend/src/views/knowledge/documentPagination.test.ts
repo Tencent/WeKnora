@@ -1,66 +1,28 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import {
-  beginDocumentPageRequest,
-  createDocumentPaginationState,
-  resetDocumentPagination,
-  settleDocumentPageRequest,
-  shouldLoadNextDocumentPage,
-} from './documentPagination.ts'
+import { getNextDocumentPage } from './documentPagination.ts'
 
-const viewport = {
-  loadedCount: 35,
-  totalCount: 90,
-  pageSize: 35,
-  scrollTop: 0,
-  scrollHeight: 600,
-  clientHeight: 600,
-}
+test('每批加载 35 个文件，直到全部加载完毕', () => {
+  const pages: number[] = []
+  let loadedCount = 35
+  let currentPage = 1
 
-test('首批内容没有撑出滚动条时仍应继续加载下一页', () => {
-  assert.equal(shouldLoadNextDocumentPage(viewport), true)
-})
+  while (true) {
+    const nextPage = getNextDocumentPage(loadedCount, 90, currentPage, 35)
+    if (!nextPage) break
+    pages.push(nextPage)
+    currentPage = nextPage
+    loadedCount = Math.min(loadedCount + 35, 90)
+  }
 
-test('尚未接近列表底部时不应提前翻页', () => {
-  assert.equal(
-    shouldLoadNextDocumentPage({
-      ...viewport,
-      scrollHeight: 1200,
-      clientHeight: 600,
-      threshold: 120,
-    }),
-    false,
-  )
-})
-
-test('翻页失败后不推进页码并允许重试同一页', () => {
-  const state = createDocumentPaginationState()
-  const firstRequest = beginDocumentPageRequest(state, viewport)
-
-  assert.deepEqual(firstRequest, { page: 2, generation: 0 })
-  assert.equal(settleDocumentPageRequest(state, firstRequest!, false), 'failed')
-  assert.equal(state.page, 1)
-
-  const retryRequest = beginDocumentPageRequest(state, viewport)
-  assert.deepEqual(retryRequest, { page: 2, generation: 0 })
-  assert.equal(settleDocumentPageRequest(state, retryRequest!, true), 'loaded')
-  assert.equal(state.page, 2)
-})
-
-test('重置列表后忽略旧筛选条件下完成的请求', () => {
-  const state = createDocumentPaginationState()
-  const request = beginDocumentPageRequest(state, viewport)
-
-  resetDocumentPagination(state)
-
-  assert.equal(settleDocumentPageRequest(state, request!, true), 'stale')
-  assert.deepEqual(state, { page: 1, loading: false, generation: 1 })
+  assert.deepEqual(pages, [2, 3])
 })
 
 test('全部文档已加载时不再创建翻页请求', () => {
-  const state = createDocumentPaginationState()
-  const completeViewport = { ...viewport, loadedCount: 90 }
+  assert.equal(getNextDocumentPage(90, 90, 3, 35), null)
+})
 
-  assert.equal(beginDocumentPageRequest(state, completeViewport, true), null)
+test('异常总数不会导致请求超过计算出的总页数', () => {
+  assert.equal(getNextDocumentPage(70, 90, 3, 35), null)
 })
