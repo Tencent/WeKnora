@@ -188,7 +188,8 @@ func RequireSystemAdmin(cfg *config.Config) gin.HandlerFunc {
 // RequireCrossTenantAccessManager protects the small set of endpoints that
 // can grant or revoke platform-wide tenant access. This permission is more
 // sensitive than ordinary system settings: callers must hold both platform
-// flags, and API keys are never accepted for human privilege management.
+// flags on an active account, and API keys are never accepted for human
+// privilege management.
 func RequireCrossTenantAccessManager(cfg *config.Config) gin.HandlerFunc {
 	warnOnNilConfig(cfg)
 	return func(c *gin.Context) {
@@ -202,7 +203,7 @@ func RequireCrossTenantAccessManager(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		user, ok := ctx.Value(types.UserContextKey).(*types.User)
-		if types.IsSystemAdminFromContext(ctx) && ok && user != nil && user.CanAccessAllTenants {
+		if types.IsSystemAdminFromContext(ctx) && ok && user != nil && user.IsActive && user.CanAccessAllTenants {
 			c.Next()
 			return
 		}

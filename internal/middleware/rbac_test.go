@@ -111,14 +111,16 @@ func TestRequireRoleOrSystemAdmin_RejectsOrdinaryViewer(t *testing.T) {
 func TestRequireCrossTenantAccessManagerRequiresBothFlags(t *testing.T) {
 	tests := []struct {
 		name           string
+		active         bool
 		systemAdmin    bool
 		crossTenant    bool
 		expectedStatus int
 	}{
-		{name: "both flags", systemAdmin: true, crossTenant: true, expectedStatus: http.StatusOK},
-		{name: "system admin only", systemAdmin: true, expectedStatus: http.StatusForbidden},
-		{name: "cross tenant only", crossTenant: true, expectedStatus: http.StatusForbidden},
-		{name: "neither flag", expectedStatus: http.StatusForbidden},
+		{name: "active with both flags", active: true, systemAdmin: true, crossTenant: true, expectedStatus: http.StatusOK},
+		{name: "disabled with both flags", systemAdmin: true, crossTenant: true, expectedStatus: http.StatusForbidden},
+		{name: "system admin only", active: true, systemAdmin: true, expectedStatus: http.StatusForbidden},
+		{name: "cross tenant only", active: true, crossTenant: true, expectedStatus: http.StatusForbidden},
+		{name: "neither flag", active: true, expectedStatus: http.StatusForbidden},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -127,7 +129,7 @@ func TestRequireCrossTenantAccessManagerRequiresBothFlags(t *testing.T) {
 				ctx := context.WithValue(c.Request.Context(), types.UserIDContextKey, "u1")
 				ctx = context.WithValue(ctx, types.SystemAdminContextKey, tt.systemAdmin)
 				ctx = context.WithValue(ctx, types.UserContextKey, &types.User{
-					ID: "u1", CanAccessAllTenants: tt.crossTenant,
+					ID: "u1", IsActive: tt.active, CanAccessAllTenants: tt.crossTenant,
 				})
 				c.Request = c.Request.WithContext(ctx)
 				c.Next()

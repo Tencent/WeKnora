@@ -106,7 +106,7 @@ func newAuthTestUserService(tokenRepo *stubAuthTokenRepo) *userService {
 	return &userService{
 		userRepo: &stubUserRepoForAuth{
 			users: map[string]*types.User{
-				"user-1": {ID: "user-1", TenantID: 1},
+				"user-1": {ID: "user-1", TenantID: 1, IsActive: true},
 			},
 		},
 		tokenRepo: tokenRepo,
@@ -159,6 +159,29 @@ func TestValidateTokenRejectsRefreshToken(t *testing.T) {
 	}
 }
 
+func TestValidateTokenRejectsDisabledUser(t *testing.T) {
+	ctx := context.Background()
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+	svc.userRepo.(*stubUserRepoForAuth).users["user-1"].IsActive = false
+
+	accessJWT := signTestJWT(jwt.MapClaims{
+		"user_id": "user-1",
+		"type":    "access",
+		"exp":     time.Now().Add(time.Hour).Unix(),
+	})
+	tokenRepo.tokens[accessJWT] = &types.AuthToken{
+		UserID:    "user-1",
+		Token:     accessJWT,
+		TokenType: "access_token",
+	}
+
+	_, _, err := svc.ValidateToken(ctx, accessJWT)
+	if !errors.Is(err, ErrUserInactive) {
+		t.Fatalf("ValidateToken(disabled user) err = %v, want ErrUserInactive", err)
+	}
+}
+
 func TestRefreshTokenRejectsAccessTokenRecord(t *testing.T) {
 	ctx := context.Background()
 	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
@@ -178,6 +201,33 @@ func TestRefreshTokenRejectsAccessTokenRecord(t *testing.T) {
 	_, _, err := svc.RefreshToken(ctx, refreshJWT)
 	if err == nil || err.Error() != "not a refresh token" {
 		t.Fatalf("RefreshToken(access token record) err = %v, want not a refresh token", err)
+	}
+}
+
+func TestRefreshTokenRejectsDisabledUser(t *testing.T) {
+	ctx := context.Background()
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+	svc.userRepo.(*stubUserRepoForAuth).users["user-1"].IsActive = false
+
+	refreshJWT := signTestJWT(jwt.MapClaims{
+		"user_id": "user-1",
+		"type":    "refresh",
+		"exp":     time.Now().Add(time.Hour).Unix(),
+	})
+	tokenRecord := &types.AuthToken{
+		UserID:    "user-1",
+		Token:     refreshJWT,
+		TokenType: "refresh_token",
+	}
+	tokenRepo.tokens[refreshJWT] = tokenRecord
+
+	_, _, err := svc.RefreshToken(ctx, refreshJWT)
+	if !errors.Is(err, ErrUserInactive) {
+		t.Fatalf("RefreshToken(disabled user) err = %v, want ErrUserInactive", err)
+	}
+	if tokenRecord.IsRevoked {
+		t.Fatal("disabled user refresh token was mutated before rejection")
 	}
 }
 
