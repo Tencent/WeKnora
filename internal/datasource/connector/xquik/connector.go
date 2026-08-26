@@ -16,6 +16,7 @@ import (
 const maxPagesPerQuery = 100
 
 var _ datasource.StreamingConnector = (*Connector)(nil)
+var _ datasource.ScheduledFullSyncResumer = (*Connector)(nil)
 
 // Connector imports public X posts returned by saved Xquik search queries.
 type Connector struct {
@@ -33,6 +34,12 @@ func NewConnector() *Connector {
 
 // Type returns the connector type identifier.
 func (c *Connector) Type() string { return types.ConnectorTypeXquik }
+
+// ShouldResumeScheduledFullSync reports whether a full-sync schedule must
+// finish an existing Xquik snapshot before starting another one.
+func (c *Connector) ShouldResumeScheduledFullSync(cursor *types.SyncCursor) bool {
+	return decodeCursor(cursor).InProgress
+}
 
 // Validate checks the connector settings and API key.
 func (c *Connector) Validate(ctx context.Context, ds *types.DataSourceConfig) error {

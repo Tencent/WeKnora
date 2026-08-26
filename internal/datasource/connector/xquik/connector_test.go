@@ -88,6 +88,19 @@ func TestConnectorMetadata(t *testing.T) {
 	}
 }
 
+func TestConnectorResumesOnlyUnfinishedScheduledFullSync(t *testing.T) {
+	connector := NewConnector()
+	unfinished := connectorCursor(cursorState{
+		InProgress: true, StartedAt: time.Now().UTC(), QueryListHash: queryListHash([]string{"query"}),
+	}, false)
+	if !connector.ShouldResumeScheduledFullSync(unfinished) {
+		t.Fatal("unfinished cursor was not resumed")
+	}
+	if connector.ShouldResumeScheduledFullSync(connectorCursor(cursorState{}, true)) {
+		t.Fatal("completed cursor was resumed")
+	}
+}
+
 func TestConnectorFetchStreamPaginatesAndDeduplicates(t *testing.T) {
 	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	created := now.Add(-time.Hour)

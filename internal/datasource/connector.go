@@ -93,6 +93,13 @@ type StreamingConnector interface {
 	) (*types.SyncCursor, error)
 }
 
+// ScheduledFullSyncResumer lets a streaming connector finish a checkpointed
+// snapshot across scheduled runs even when the data source uses full-sync mode.
+// Explicit ForceFull requests still start from an empty cursor.
+type ScheduledFullSyncResumer interface {
+	ShouldResumeScheduledFullSync(cursor *types.SyncCursor) bool
+}
+
 // ConnectorRegistry manages the registration and lookup of available connectors
 type ConnectorRegistry struct {
 	connectors map[string]Connector

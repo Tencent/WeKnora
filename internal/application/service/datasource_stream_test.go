@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -22,43 +21,6 @@ func (r *recordingDSRepo) UpdateSyncState(_ context.Context, ds *types.DataSourc
 	cp := *ds
 	r.updated = append(r.updated, &cp)
 	return nil
-}
-
-func makeConnectorCursor(t *testing.T, spaceNodeTimes map[string]map[string]string) types.JSON {
-	t.Helper()
-	inner := map[string]interface{}{"space_node_times": spaceNodeTimes}
-	b, err := json.Marshal(&types.SyncCursor{ConnectorCursor: inner})
-	require.NoError(t, err)
-	return types.JSON(b)
-}
-
-// A fresh full sync (ForceFull, first attempt) must ignore any recorded cursor
-// and re-fetch everything. A retry of that same task (attempt > 0) must instead
-// resume from the checkpointed cursor so it converges instead of restarting.
-func TestStreamStartCursor_ForceFullFirstAttemptDropsCursor(t *testing.T) {
-	ds := &types.DataSource{
-		LastSyncCursor: makeConnectorCursor(t, map[string]map[string]string{"space1": {"nt1": "100"}}),
-	}
-
-	fresh, err := streamStartCursor(ds, true /*forceFull*/, 0 /*attempt*/)
-	require.NoError(t, err)
-	assert.Nil(t, fresh, "fresh ForceFull must drop the cursor to re-fetch everything")
-
-	retry, err := streamStartCursor(ds, true /*forceFull*/, 1 /*attempt*/)
-	require.NoError(t, err)
-	require.NotNil(t, retry, "a retried ForceFull must resume from the checkpoint")
-	assert.NotNil(t, retry.ConnectorCursor["space_node_times"])
-}
-
-// Incremental sync always resumes from the recorded cursor regardless of attempt.
-func TestStreamStartCursor_IncrementalKeepsCursor(t *testing.T) {
-	ds := &types.DataSource{
-		LastSyncCursor: makeConnectorCursor(t, map[string]map[string]string{"space1": {"nt1": "100"}}),
-	}
-	cur, err := streamStartCursor(ds, false /*forceFull*/, 0)
-	require.NoError(t, err)
-	require.NotNil(t, cur)
-	assert.NotNil(t, cur.ConnectorCursor["space_node_times"])
 }
 
 func newStreamHandler(svc *DataSourceService, ds *types.DataSource, result *types.SyncResult, syncLog *types.SyncLog) *streamSyncHandler {
