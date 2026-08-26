@@ -380,8 +380,7 @@ export function sniffPreview(bytes: Uint8Array): FilePreviewSniff {
   if (
     headLower.startsWith('<!doctype html') ||
     headLower.startsWith('<html') ||
-    /^<head[\s>]/i.test(head) ||
-    /^<body[\s>]/i.test(head)
+    /^<(?:head|body|div|table|section|article|main|header|footer|nav|script|style|meta|link|span|p|h[1-6]|canvas|form|ul|ol|pre|template)[\s>]/i.test(head)
   ) {
     return { kind: 'html', ext: 'html' }
   }

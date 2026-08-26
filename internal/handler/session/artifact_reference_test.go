@@ -68,6 +68,16 @@ func TestRewriteArtifactReferences(t *testing.T) {
 			want:    `![评分](artifact://2 "走势")`,
 		},
 		{
+			name:    "ordinary link with a colliding name is not rewritten",
+			content: "见 [说明](trend.png)",
+			want:    "见 [说明](trend.png)",
+		},
+		{
+			name:    "sandbox-prefixed link is rewritten even when not an image",
+			content: "数据见 [表格](sandbox:concept_ranking.csv)",
+			want:    "数据见 [表格](artifact://1)",
+		},
+		{
 			name:    "prose parentheses are not link destinations",
 			content: "腾讯控股(00700) 的成交量见下图。",
 			want:    "腾讯控股(00700) 的成交量见下图。",

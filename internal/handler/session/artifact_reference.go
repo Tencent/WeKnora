@@ -100,7 +100,7 @@ func rewriteArtifactReferencesInSegment(segment string, byName map[string]int) s
 		}
 
 		destination, title := splitDestinationTitle(inner)
-		index, matched := lookupArtifactIndex(destination, byName)
+		index, matched := lookupArtifactIndex(destination, byName, markdownImageBefore(segment, closeBracket))
 		if !matched {
 			out.WriteString(segment[cursor : end+1])
 			cursor = end + 1
@@ -162,8 +162,26 @@ func splitDestinationTitle(inner string) (string, string) {
 	return strings.TrimSpace(inner), ""
 }
 
+func markdownImageBefore(text string, closeBracketIndex int) bool {
+	for i := closeBracketIndex - 1; i >= 0; i-- {
+		switch text[i] {
+		case '\n':
+			return false
+		case '[':
+			return i > 0 && text[i-1] == '!'
+		}
+	}
+	return false
+}
+
+func looksLikeSandboxOutputPath(candidate string) bool {
+	c := strings.TrimPrefix(strings.TrimSpace(candidate), "./")
+	c = strings.TrimPrefix(c, "/")
+	return strings.HasPrefix(c, "workspace/output/") || strings.HasPrefix(c, "output/")
+}
+
 // lookupArtifactIndex resolves one Markdown destination to an artifact index.
-func lookupArtifactIndex(destination string, byName map[string]int) (int, bool) {
+func lookupArtifactIndex(destination string, byName map[string]int, image bool) (int, bool) {
 	candidate := strings.TrimSpace(destination)
 	if candidate == "" {
 		return 0, false
@@ -191,9 +209,17 @@ func lookupArtifactIndex(destination string, byName map[string]int) (int, bool) 
 	if decoded, err := url.PathUnescape(candidate); err == nil {
 		candidate = decoded
 	}
+	candidate = strings.TrimSpace(candidate)
+	// Bare names are rewritten for images (`![chart](a.html)`) because that is
+	// how models actually cite generated files. Ordinary links (`[docs](README.md)`)
+	// are left alone unless they already carry a sandbox prefix or path —
+	// otherwise a colliding artifact name would hijack a real hyperlink.
+	if !hadSandboxPrefix && !image && !looksLikeSandboxOutputPath(candidate) {
+		return 0, false
+	}
 	// Directory prefixes (`./`, `output/`, `/workspace/output/`) carry no
 	// information the index does not already have.
-	candidate = path.Base(strings.TrimSpace(candidate))
+	candidate = path.Base(candidate)
 	if candidate == "" || candidate == "." || candidate == "/" {
 		return 0, false
 	}

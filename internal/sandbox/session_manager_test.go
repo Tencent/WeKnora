@@ -107,6 +107,8 @@ func TestWorkspaceBootstrapCommandRepairsUnwritableDirs(t *testing.T) {
 	cmd := workspaceBootstrapCommand(SessionInputRoot, SessionOutputRoot)
 	require.Contains(t, cmd, "for d in /workspace/input /workspace/output")
 	require.Contains(t, cmd, `mkdir -p "$d"`)
+	require.Contains(t, cmd, `[ -d "$d" ] && [ -w "$d" ] && [ ! -L "$d" ]`,
+		"directories that already belong to the account are left alone")
 	require.Contains(t, cmd, `[ -L "$d" ]`,
 		"a symlink left at the path must be removed, not followed")
 	require.Contains(t, cmd, `mv -f "$d"`,
@@ -116,9 +118,9 @@ func TestWorkspaceBootstrapCommandRepairsUnwritableDirs(t *testing.T) {
 		"nothing here may depend on privileges the sandbox account lacks")
 }
 
-// Every shell_exec would otherwise pay a remote round trip for a directory
-// tree that cannot change underneath it.
-func TestSessionBoundManagerBootstrapsWorkspaceOncePerSandbox(t *testing.T) {
+// The agent can delete /workspace/output between turns. Preparing only once
+// per process would leave later writes failing until WeKnora restarted.
+func TestSessionBoundManagerPreparesWorkspaceOnEveryCall(t *testing.T) {
 	client := newFakeRemoteClient(SandboxTypeCube)
 	cfg := DefaultConfig()
 	cfg.CubeTemplate = "tpl-test"
@@ -147,7 +149,7 @@ func TestSessionBoundManagerBootstrapsWorkspaceOncePerSandbox(t *testing.T) {
 			bootstraps++
 		}
 	}
-	require.Equal(t, 1, bootstraps)
+	require.Equal(t, 3, bootstraps)
 }
 
 // shell_exec carries a command line the model wrote, which makes it the exec

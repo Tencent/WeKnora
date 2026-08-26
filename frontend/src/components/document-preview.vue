@@ -226,6 +226,13 @@ function getPreviewSourceKey(): string {
   return '';
 }
 
+// Skill-generated HTML is often a self-contained chart that needs its own
+// scripts. Knowledge-base files and chat attachments are untrusted uploads:
+// they stay as source, matching the previous text preview.
+function allowsHtmlScriptPreview(): boolean {
+  return getPreviewSourceKey().startsWith('artifact:');
+}
+
 async function fetchPreviewBlob(): Promise<Blob> {
   if (props.knowledgeId) {
     return previewKnowledgeFile(props.knowledgeId);
@@ -267,7 +274,7 @@ async function loadPreview() {
   cleanup();
   loading.value = true;
   error.value = '';
-  htmlViewMode.value = 'render';
+  htmlViewMode.value = allowsHtmlScriptPreview() ? 'render' : 'source';
 
   let ft = resolveFilePreviewExt(props.fileName, props.fileType);
   previewType.value = resolvePreviewKind(ft);
@@ -303,7 +310,9 @@ async function loadPreview() {
         break;
       }
       case 'html': {
-        blobUrl.value = URL.createObjectURL(blob);
+        if (allowsHtmlScriptPreview()) {
+          blobUrl.value = URL.createObjectURL(blob);
+        }
         await renderText(blob, ft || 'html');
         break;
       }
@@ -382,7 +391,7 @@ onUnmounted(() => {
     <div class="preview-toolbar" v-if="!loading && !error && previewType !== 'unsupported'">
       <t-space size="small">
         <t-tooltip
-          v-if="previewType === 'html'"
+          v-if="previewType === 'html' && allowsHtmlScriptPreview()"
           :content="htmlViewMode === 'render' ? $t('preview.htmlSource') : $t('preview.htmlRendered')"
           placement="bottom"
         >
@@ -425,16 +434,16 @@ onUnmounted(() => {
       <iframe :src="blobUrl" class="pdf-iframe" />
     </div>
 
-    <!-- HTML (sandboxed render + source) -->
+    <!-- HTML: artifacts render in a unique-origin iframe; other sources stay as source. -->
     <div v-else-if="previewType === 'html'" class="preview-html">
       <iframe
-        v-show="htmlViewMode === 'render' && blobUrl"
+        v-if="allowsHtmlScriptPreview() && htmlViewMode === 'render' && blobUrl"
         :src="blobUrl"
         class="html-iframe"
         sandbox="allow-scripts"
         referrerpolicy="no-referrer"
       />
-      <pre v-show="htmlViewMode === 'source'" class="code-preview"><code class="hljs" v-html="highlightedCode"></code></pre>
+      <pre v-show="!allowsHtmlScriptPreview() || htmlViewMode === 'source'" class="code-preview"><code class="hljs" v-html="highlightedCode"></code></pre>
     </div>
 
     <!-- Image -->

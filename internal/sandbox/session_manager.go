@@ -85,19 +85,10 @@ type SessionBoundManager struct {
 	// activeType is the effective sandbox type callers observe.
 	activeType SandboxType
 
-	// mu guards Cleanup's idempotency flag and the workspace bootstrap cache.
+	// mu guards Cleanup's idempotency flag.
 	mu     sync.RWMutex
 	closed bool
-
-	// workspaceReady remembers which sandboxes this process already prepared,
-	// keyed by sandbox ID and artifact directory. See workspaceDirsReady.
-	workspaceReady map[string]struct{}
 }
-
-// maxWorkspaceReadyEntries bounds the bootstrap cache. Entries are never
-// individually invalidated — a sandbox ID is never reused — so the map is
-// dropped wholesale once it passes a size no single process needs.
-const maxWorkspaceReadyEntries = 1024
 
 // SessionBoundManagerConfig bundles the wired dependencies. Test helpers and
 // the production container use it so callers only have to name the moving
@@ -283,11 +274,12 @@ func (m *SessionBoundManager) Execute(ctx context.Context, cfg *ExecuteConfig) (
 }
 
 // ensureSessionWorkspaceDirs materialises the input and artifact directories
-// and makes sure DefaultSandboxExecUser can write to them. It runs before the
-// first operation on a sandbox rather than only before script execution: a
-// snapshot-derived image has no /workspace tree at all (skill install wipes it
-// before the snapshot), and an agent that explores with shell_exec first would
-// otherwise find neither directory.
+// and makes sure DefaultSandboxExecUser can write to them. It runs before
+// every operation rather than only before script execution: a snapshot-derived
+// image has no /workspace tree at all (skill install wipes it before the
+// snapshot), an agent that explores with shell_exec first would otherwise find
+// neither directory, and a later `rm -rf` of those paths must be repaired
+// rather than left missing until the process restarts.
 //
 // This runs AS the sandbox account, never as root. The directories sit inside
 // the session's own writable workspace, and chown/chmod follow symlinks, so a
@@ -297,16 +289,15 @@ func (m *SessionBoundManager) Execute(ctx context.Context, cfg *ExecuteConfig) (
 // account makes that a no-op — the kernel refuses everything the account does
 // not already own.
 //
-// Best-effort: failures are logged and do not abort the upcoming operation.
+// The command is a no-op when the directories already exist and are writable,
+// so repeating it is cheap relative to recreating a missing tree. Best-effort:
+// failures are logged and do not abort the upcoming operation.
 func (m *SessionBoundManager) ensureSessionWorkspaceDirs(
 	ctx context.Context,
 	handle RemoteSandboxHandle,
 	outputDir string,
 ) {
 	if m == nil || m.client == nil || handle == nil || outputDir == "" {
-		return
-	}
-	if m.workspaceDirsReady(handle.ID(), outputDir) {
 		return
 	}
 	execUser := DefaultSandboxExecUser
@@ -334,9 +325,7 @@ func (m *SessionBoundManager) ensureSessionWorkspaceDirs(
 			SessionInputRoot, outputDir, execUser,
 			result.ExitCode, strings.TrimSpace(result.Stderr), execUser,
 		)
-		return
 	}
-	m.markWorkspaceDirsReady(handle.ID(), outputDir)
 }
 
 // workspaceBootstrapCommand builds the repair script the sandbox account runs.
@@ -356,39 +345,13 @@ func workspaceBootstrapCommand(dirs ...string) string {
 	}
 	return fmt.Sprintf(
 		`set -e; for d in %s; do `+
+			`if [ -d "$d" ] && [ -w "$d" ] && [ ! -L "$d" ]; then continue; fi; `+
 			`if [ -L "$d" ] || { [ -e "$d" ] && [ ! -d "$d" ]; }; then rm -f "$d"; fi; `+
 			`[ -d "$d" ] || mkdir -p "$d"; `+
 			`if [ ! -w "$d" ]; then mv -f "$d" "$d.unwritable.$(date +%%s)"; mkdir "$d"; fi; `+
 			`chmod 775 "$d"; done`,
 		strings.Join(quoted, " "),
 	)
-}
-
-// workspaceDirsReady reports whether this process already prepared the given
-// sandbox. The bootstrap costs a remote round trip, and every shell_exec would
-// otherwise pay it. The cache is keyed by sandbox ID, so a replaced sandbox is
-// prepared again, and it is dropped wholesale once it grows past the size a
-// single process plausibly needs.
-func (m *SessionBoundManager) workspaceDirsReady(sandboxID, outputDir string) bool {
-	if sandboxID == "" {
-		return false
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	_, ok := m.workspaceReady[sandboxID+"|"+outputDir]
-	return ok
-}
-
-func (m *SessionBoundManager) markWorkspaceDirsReady(sandboxID, outputDir string) {
-	if sandboxID == "" {
-		return
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.workspaceReady == nil || len(m.workspaceReady) >= maxWorkspaceReadyEntries {
-		m.workspaceReady = make(map[string]struct{}, 1)
-	}
-	m.workspaceReady[sandboxID+"|"+outputDir] = struct{}{}
 }
 
 // withWorkspaceEnvDefaults stamps the workspace paths onto the sandbox's own

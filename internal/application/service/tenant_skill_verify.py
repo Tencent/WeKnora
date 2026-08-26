@@ -35,19 +35,31 @@ def under_root(candidate):
 def own_top_level_names():
     """Top-level names that refer to something the skill itself ships.
 
+    Only the skill root is consulted. A nested file such as vendor/requests.py
+    must not make `import requests` look first-party — that name is a
+    dependency the installer was asked to put in the venv, and skipping it
+    would snapshot a broken install.
+
     An import of one of these is the skill reaching for its own code, and
     whether it resolves depends on how the script arranges sys.path at run
     time — commonly by inserting its parent before importing `scripts.x`.
     That is a runtime decision this checker cannot evaluate without executing
-    the file, so such imports are left to the skill. What the check is for is
-    the dependencies the installer agent was asked to install, and a name that
-    exists nowhere in the tree is unambiguously one of those.
+    the file, so such imports are left to the skill. Sibling modules still
+    resolve through find_spec, which puts the script's own directory first.
     """
     names = set()
-    for _, subdirs, files in os.walk(root):
-        subdirs[:] = [d for d in subdirs if d not in PRUNED and not d.startswith(".")]
-        names.update(subdirs)
-        names.update(f[:-3] for f in files if f.endswith(".py"))
+    try:
+        entries = os.listdir(root)
+    except OSError:
+        return names
+    for name in entries:
+        if name in PRUNED or name.startswith("."):
+            continue
+        full = os.path.join(root, name)
+        if os.path.isdir(full):
+            names.add(name)
+        elif name.endswith(".py"):
+            names.add(name[:-3])
     return names
 
 
@@ -142,34 +154,74 @@ def check_relative_import(rel, node, script_dir):
         )
 
 
-def check_declared_requirements():
-    path = os.path.join(root, "requirements.txt")
-    if not os.path.isfile(path):
+def distribution_name(raw):
+    """The distribution a requirement line names, or '' if it cannot be read.
+
+    Options (-r, -e, --index-url), VCS URLs, local paths and archives name no
+    distribution of their own, and inventing one would fail an install over a
+    requirement that is present.
+    """
+    line = raw.split("#")[0].strip()
+    if not line or line.startswith("-"):
+        return ""
+    name = re.split(r"[\s<>=!~;\[@]", line)[0].strip()
+    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", name):
+        return ""
+    return name
+
+
+def load_pyproject(path):
+    try:
+        import tomllib
+    except ImportError:
+        return None
+    try:
+        with open(path, "rb") as handle:
+            return tomllib.load(handle)
+    except Exception:
+        return None
+
+
+def declared_requirement_lines():
+    """(source, requirement-line) pairs from requirements.txt and pyproject.toml."""
+    requirements = os.path.join(root, "requirements.txt")
+    if os.path.isfile(requirements):
+        with open(requirements, encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                yield "requirements.txt", line
+    pyproject = os.path.join(root, "pyproject.toml")
+    if not os.path.isfile(pyproject):
         return
+    data = load_pyproject(pyproject)
+    if not data:
+        return
+    for item in data.get("project", {}).get("dependencies") or []:
+        if isinstance(item, str):
+            yield "pyproject.toml", item
+    poetry = ((data.get("tool") or {}).get("poetry") or {}).get("dependencies") or {}
+    if isinstance(poetry, dict):
+        for name in poetry:
+            if str(name).strip().lower() == "python":
+                continue
+            yield "pyproject.toml", str(name)
+
+
+def check_declared_requirements():
     try:
         from importlib import metadata
     except ImportError:
         return
-    with open(path, encoding="utf-8", errors="replace") as handle:
-        for line in handle:
-            line = line.split("#")[0].strip()
-            # Options (-r, -e, --index-url) name no distribution of their own.
-            if not line or line.startswith("-"):
-                continue
-            name = re.split(r"[\s<>=!~;\[@]", line)[0].strip()
-            # Anything that is not a plain distribution name — a VCS URL, a
-            # local path, an archive — names something whose installed
-            # identity cannot be read off the line, and guessing one would
-            # fail an install over a requirement that is present.
-            if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", name):
-                continue
-            try:
-                metadata.distribution(name)
-            except Exception:
-                problems.append(
-                    "requirements.txt declares %s but it is not installed in %s"
-                    % (name, sys.prefix)
-                )
+    for source, raw in declared_requirement_lines():
+        name = distribution_name(raw)
+        if not name:
+            continue
+        try:
+            metadata.distribution(name)
+        except Exception:
+            problems.append(
+                "%s declares %s but it is not installed in %s"
+                % (source, name, sys.prefix)
+            )
 
 
 for relative in relative_scripts:

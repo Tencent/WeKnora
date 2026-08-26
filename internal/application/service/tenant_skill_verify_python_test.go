@@ -100,6 +100,22 @@ func TestSkillPythonVerifier(t *testing.T) {
 		},
 		wantProblem: "requirements.txt declares totally_absent_package but it is not installed",
 	}, {
+		name: "a nested file name is not treated as a first-party import",
+		files: map[string]string{
+			"vendor/totally_absent_package.py": "x = 1\n",
+			"scripts/run.py":                   "import totally_absent_package\n",
+		},
+		wantProblem: "scripts/run.py imports totally_absent_package, " +
+			"which is not available in this image",
+	}, {
+		name: "a pyproject.toml dependency the venv does not carry",
+		files: map[string]string{
+			"pyproject.toml": "[project]\nname = \"demo\"\ndependencies = [\n" +
+				"  \"totally_absent_package>=1.0\",\n]\n",
+			"scripts/run.py": "x = 1\n",
+		},
+		wantProblem: "pyproject.toml declares totally_absent_package but it is not installed",
+	}, {
 		// Lines that name a distribution only indirectly cannot be checked by
 		// name, and inventing one from the URL would fail installs whose
 		// requirements are all present.

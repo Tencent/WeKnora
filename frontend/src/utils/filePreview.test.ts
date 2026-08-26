@@ -42,6 +42,8 @@ test('resolvePreviewKind covers office, tables, html, media, and code', () => {
 
 test('sniffPreview detects html, svg, pdf, png, and mermaid from bytes', () => {
   assert.equal(sniffPreview(new TextEncoder().encode('<!DOCTYPE html><html><body>ok</body></html>')).kind, 'html')
+  assert.equal(sniffPreview(new TextEncoder().encode('<div id="chart"></div>')).kind, 'html')
+  assert.equal(sniffPreview(new TextEncoder().encode('<table><tr><td>1</td></tr></table>')).kind, 'html')
   assert.equal(sniffPreview(new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>')).kind, 'image')
   assert.equal(sniffPreview(new TextEncoder().encode('%PDF-1.7\n')).kind, 'pdf')
   assert.equal(sniffPreview(new TextEncoder().encode('flowchart TD\n  A-->B')).kind, 'mermaid')
