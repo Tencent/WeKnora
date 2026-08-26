@@ -202,7 +202,7 @@ func (c *Connector) fetch(
 				continuation.Query = query
 				continuation.PageCursor = nextCursor
 				continuation.ResultsFetched = 0
-				continuation.PagesFetched = pagesFetched
+				continuation.PagesFetched = 0
 				cursor := connectorCursor(continuation, false)
 				if err := handler.Checkpoint(ctx, cursor); err != nil {
 					return nil, err

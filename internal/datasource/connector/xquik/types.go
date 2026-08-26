@@ -325,8 +325,7 @@ func (s cursorState) canResume(queries []string, resultsPerQuery int) bool {
 		return false
 	}
 	if s.ResultsFetched < 0 || s.ResultsFetched > resultsPerQuery ||
-		s.PagesFetched < 0 || s.PagesFetched > maxPagesPerQuery ||
-		len(s.SeenPostIDs) > len(queries)*resultsPerQuery*maxPagesPerQuery {
+		s.PagesFetched < 0 || s.PagesFetched > maxPagesPerQuery {
 		return false
 	}
 	seen := make(map[string]struct{}, len(s.SeenPostIDs))

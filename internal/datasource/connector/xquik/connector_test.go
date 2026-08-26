@@ -295,7 +295,7 @@ func TestConnectorContinuesOverflowWithoutAdvancingSyncTime(t *testing.T) {
 	state := decodeCursor(continuation)
 	if len(firstItems) != 2 || !continuation.LastSyncTime.Equal(previous) ||
 		!state.InProgress || state.PageCursor != "older" || state.ResultsFetched != 0 ||
-		state.QueryListHash != queryListHash([]string{"query"}) {
+		state.PagesFetched != 0 || state.QueryListHash != queryListHash([]string{"query"}) {
 		t.Fatalf("first items=%d cursor=%#v state=%#v", len(firstItems), continuation, state)
 	}
 
@@ -311,6 +311,33 @@ func TestConnectorContinuesOverflowWithoutAdvancingSyncTime(t *testing.T) {
 		!fake.requests[1].SinceTime.Equal(previous.Add(-syncOverlap)) ||
 		!fake.requests[1].UntilTime.Equal(started) {
 		t.Fatalf("requests = %#v", fake.requests)
+	}
+}
+
+func TestConnectorResetsPageGuardAtOverflowCheckpoint(t *testing.T) {
+	started := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	resume := connectorCursor(cursorState{
+		InProgress: true, StartedAt: started, Query: "query", PageCursor: "current",
+		PagesFetched: maxPagesPerQuery - 1, QueryListHash: queryListHash([]string{"query"}),
+	}, false)
+	fake := &fakeAPI{searchFn: func(searchRequest) (searchPage, error) {
+		return searchPage{
+			Tweets: []tweet{{ID: "1"}, {ID: "2"}}, HasNextPage: true, NextCursor: "next-run",
+		}, nil
+	}}
+	config := testConfig("query")
+	config.ResourceIDs = []string{"query"}
+	config.Settings["results_per_query"] = 2
+
+	_, continuation, err := connectorWith(fake, started.Add(time.Hour)).FetchIncremental(
+		context.Background(), config, resume,
+	)
+	if err != nil {
+		t.Fatalf("FetchIncremental() error = %v", err)
+	}
+	state := decodeCursor(continuation)
+	if state.PageCursor != "next-run" || state.PagesFetched != 0 || state.ResultsFetched != 0 {
+		t.Fatalf("state = %#v", state)
 	}
 }
 
