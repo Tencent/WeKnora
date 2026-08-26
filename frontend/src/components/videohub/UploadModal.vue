@@ -25,7 +25,7 @@
           <div class="upload-dropzone__content">
             <span class="upload-dropzone__icon"><t-icon name="folder-open" /></span>
             <p><span>选择视频</span>或拖拽到此处</p>
-            <small>支持单个视频文件</small>
+            <small>支持单个视频文件，最大 1GB</small>
           </div>
         </t-upload>
 
@@ -99,6 +99,7 @@ type UploadFileItem = { name?: string; size?: number; raw?: File; type?: string 
 
 const props = defineProps<{ visible: boolean; afterUpload?: (video: VideoData) => Promise<void> }>()
 const emit = defineEmits<{ 'update:visible': [value: boolean] }>()
+const MAX_VIDEO_SIZE_BYTES = 1024 * 1024 * 1024
 const files = ref<UploadFileItem[]>([])
 const state = ref<'form' | 'uploading' | 'refreshing' | 'success' | 'refresh-failed' | 'error'>('form')
 const progress = ref<UploadProgress>({ stage: 'uploading', percent: 0 })
@@ -144,6 +145,10 @@ function handleValidate() {
 function submit() {
   if (!selectedFile.value) {
     MessagePlugin.warning('请选择本地视频文件')
+    return
+  }
+  if (selectedFile.value.size > MAX_VIDEO_SIZE_BYTES) {
+    MessagePlugin.error('视频不能超过 1GB，请压缩后再上传')
     return
   }
   void startUpload()
