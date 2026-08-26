@@ -2,7 +2,7 @@
 
 ## 📌 0. 首屏概览（先看结论）
 
-一句话结论：可发布；四轮外部 review 提出的锁死、分页、旁路写入、自举、错误映射和查询性能问题均已修复，最终态未发现 P0-P3 缺陷。
+一句话结论：可发布；review 提出的锁死、分页、旁路写入、自举、停用账号恢复、错误映射和查询性能问题均已修复，最终态未发现 P0-P3 缺陷。
 
 | 维度 | 值 |
 | :--- | :--- |
@@ -10,10 +10,10 @@
 | Range | `18d22b01..HEAD`（当前 PR merge-base） |
 | Repos | `/Users/langcaiye/research/WeKnora` |
 | Apps/Modules | `internal`、`frontend`、`docs/plans` |
-| Review Time | 2026-08-25 21:58:21 +0800 |
-| Scope | commits=11, files=36, Tier-M（含本报告更新提交） |
+| Review Time | 2026-08-26 15:47:59 +0800 |
+| Scope | commits=13, files=36, Tier-M（含本报告更新提交） |
 | Findings | P0=0 / P1=0 / P2=0 / P3=0 |
-| Excluded Intermediate Findings | 9（四轮外部 review 问题均已修复） |
+| Excluded Intermediate Findings | 10（外部 review 问题均已修复） |
 | 发布建议 | ✅ 可发 |
 
 ## 🧭 1. 审查范围与方法
@@ -27,7 +27,7 @@
 | 仓库 | WeKnora |
 | 应用范围 | 后端权限/API/Repository/Bootstrap、数据库迁移、前端系统设置/审计/i18n、设计文档 |
 
-- 使用作者范围收集器确认报告更新前 10 个提交、36 个文件、无协作者重叠；报告更新提交后共 11 个提交。
+- 使用作者范围收集器确认报告更新前 12 个提交、36 个文件、无协作者重叠；报告更新提交后共 13 个提交。
 - 基于 merge-base 到 `HEAD` 的最终态 diff 审查，不按中间提交重复报错。
 - 核查授权、异常、并发、幂等、事务、分页、审计、前端回滚和测试覆盖。
 
@@ -41,7 +41,7 @@
 | 权限维护 | handler/service/repository | list/grant/revoke | `users.can_access_all_tenants` | 幂等事务更新 |
 | 防管理锁死 | repository | 两条 revoke 路径 | `users` 行锁 | 事务不变量增强 |
 | 权限写入隔离 | repository/service | 普通 UpdateUser、原子 grant/revoke | `users` 权限列 | 防旧快照覆盖 |
-| 首位管理者自举 | bootstrap/service/repository | `WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL` | 双权限计数、既有管理员列表 | 受控恢复增强 |
+| 首位管理者自举 | bootstrap/service/repository | `WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL` | 活跃双权限计数、活跃管理员计数 | 受控恢复增强 |
 | 查询错误与性能 | handler/migrations | 目标解析、分页列表 | 500 日志、部分索引 | 可观测性与性能增强 |
 | 系统设置 UI | `SystemSettings.vue`、API client | 邮箱标签输入框 | 分页 API | 新增管理交互 |
 | 平台审计 | audit action + UI registry | grant/revoke 成功事件 | `audit_logs` | 新增可观测性 |
@@ -55,9 +55,9 @@
 | 影响点 | 影响类型 | 风险等级 | 说明 |
 | :--- | :--- | :--- | :--- |
 | 权限提升 | 安全 | 高 | 同时校验 system admin 与全空间访问，API key 明确拒绝 |
-| 权限撤销 | 可恢复性/并发 | 高 | 两条路径事务化确保至少保留一个双权限管理者 |
+| 权限撤销 | 可恢复性/并发 | 高 | 两条路径事务化确保至少保留一个活跃双权限管理者，停用账号不计入 |
 | 普通用户更新 | 安全/一致性 | 高 | 明确排除两个权限列，旧快照不能提升或撤销权限 |
-| 首位管理者自举 | 可运维性/安全 | 高 | 无双权限管理者时受控恢复；已有 SystemAdmin 时不提升普通账号 |
+| 首位管理者自举 | 可运维性/安全 | 高 | 无活跃双权限管理者时受控恢复；停用账号不阻止恢复且不能成为恢复目标 |
 | 目标账号查询 | 可观测性/接口 | 中 | 仅明确不存在返回 404，存储故障记录日志并返回 500 |
 | 列表与计数 | 性能 | 中 | 部分索引限定有效授权账号并覆盖稳定排序 |
 | 用户列表 | 完整性 | 中 | 前端循环读取分页直到达到服务端 `total` |
@@ -89,7 +89,7 @@
 | P2 | 0 |
 | P3 | 0 |
 
-已从最终态排除 9 个中间问题：授予期间目标并发删除错误映射、审计动作前端注册、中文 workspace 术语、最后双权限管理者事务保护、超过 200 个账号无法管理、通用 `UpdateUser` 旧快照覆盖平台权限、首个双权限管理者自举缺失、目标查询数据库故障被映射为 404、全量分页重复扫描用户表。它们均已有代码和回归测试修复，因此不计入 findings。
+已从最终态排除 10 个中间问题：授予期间目标并发删除错误映射、审计动作前端注册、中文 workspace 术语、最后双权限管理者事务保护、超过 200 个账号无法管理、通用 `UpdateUser` 旧快照覆盖平台权限、首个双权限管理者自举缺失、停用账号被计为可用管理者并阻止 bootstrap 恢复、目标查询数据库故障被映射为 404、全量分页重复扫描用户表。它们均已有代码和回归测试修复，因此不计入 findings。
 
 ## 🧪 5. 回归测试建议（发布前）
 
@@ -105,6 +105,8 @@
 | P1 | 全新部署通过环境变量建立首个双权限管理者 | 同时获得两项权限，之后启动 no-op | 已通过 |
 | P1 | 已有 SystemAdmin、环境变量指向普通账号 | 不提升、不授予，提示选择现有 SystemAdmin | 已通过 |
 | P1 | 无双权限管理者、环境变量指向现有 SystemAdmin | 仅补充全空间访问权限 | 已通过 |
+| P1 | 唯一其他双权限账号已停用时撤销活跃管理者 | 400，活跃管理者权限保持不变 | 已通过 |
+| P1 | 唯一双权限账号停用后通过环境变量恢复 | 停用账号不阻止活跃目标恢复；停用目标被拒绝 | 已通过 |
 | P2 | promote/grant 目标查询数据库故障 | 500 且记录错误日志；只有明确不存在返回 404 | 已通过 |
 | P2 | SQLite 新建/从 v4 升级迁移 | 到达版本 13，部分索引存在且数据保留 | 已通过 |
 | P2 | 450 个已授权账号加载 | 请求 offset 依次为 0/200/400，完整返回 | 已通过 |
@@ -122,6 +124,7 @@
 | 旁路写入 | 普通资料/密码/偏好更新覆盖权限 | `updateOrdinaryUserFields` + stale snapshot tests | 已覆盖 |
 | 并发撤销 | 两事务均看到旧计数 | `TestConcurrentCrossTenantRevokesLeaveOneManager` | 已覆盖 |
 | 自举缺口 | 部署中不存在首位双权限管理者 | `bootstrapSystemAdmin` 目标约束与失败重试测试 | 已覆盖 |
+| 停用账号锁死 | 停用账号被当作可登录管理者并阻止恢复 | 活跃管理员计数 + disabled bootstrap/revoke tests | 已覆盖 |
 | 错误伪装 | 数据库故障被返回为 404 | promote/grant 404/500 Handler 表驱动测试 | 已覆盖 |
 | 全表扫描与排序 | 多页加载反复扫描 `users` | PostgreSQL/SQLite 部分索引 + SQLite 新建/升级迁移测试 | 已覆盖 |
 | 列表截断 | 200 条以后不可撤销 | `fetchAllCrossTenantAccessUsers` 分页测试 | 已覆盖 |
@@ -136,11 +139,11 @@
 | Exclusions | 上游 main 既有问题、无文件交集的 Feishu wiki 测试失败 |
 | Assumptions | PostgreSQL/MySQL 使用 `SELECT ... FOR UPDATE`；PostgreSQL/SQLite 执行各自迁移目录；SQLite 测试通过单连接验证事务最终结果 |
 | Collaborator overlap | 0 |
-| Final diff | 1971 additions / 114 deletions（含报告更新） |
+| Final diff | 2066 additions / 112 deletions（含报告更新） |
 
 ## 🧾 8. 低问题数合理性说明
 
-结论：Tier-M 的零 findings 来自 9 项问题均在最终态前完成修复，并非缩减审查范围。
+结论：Tier-M 的零 findings 来自 10 项问题均在最终态前完成修复，并非缩减审查范围。
 
 | 维度 | 结论 | 最终态证据 | 未升级为问题原因 |
 | :--- | :--- | :--- | :--- |
