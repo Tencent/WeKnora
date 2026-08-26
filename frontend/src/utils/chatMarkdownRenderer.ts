@@ -2,6 +2,7 @@ import { marked, type Renderer } from 'marked'
 import markedKatex from 'marked-katex-extension'
 import type { Tokens } from 'marked'
 
+import { normalizeSandboxArtifactRefs } from './sandboxArtifactRefs.ts'
 import {
   collapseStandaloneCitationParagraphs,
   extractCitationHtmlPlaceholders,
@@ -465,7 +466,11 @@ export function renderChatMarkdown(rawMarkdown: unknown, options: RenderChatMark
   const citationSafeText = stripIncompleteCitationTag(imageContextSafeText)
   const { text: tagSafe, tags } = preserveCitationTags(citationSafeText)
   const normalizedImageMarkdown = normalizeFullwidthMarkdownImageParentheses(tagSafe)
-  const imageSafe = replaceIncompleteImageWithPlaceholder(normalizedImageMarkdown)
+  // Skill-generated file names routinely contain spaces and parentheses, which
+  // marked would split the destination on. Collapse each reference into a
+  // single token before parsing.
+  const artifactSafe = normalizeSandboxArtifactRefs(normalizedImageMarkdown)
+  const imageSafe = replaceIncompleteImageWithPlaceholder(artifactSafe)
   const mathSafe = preprocessMathDelimiters(imageSafe)
   const restoredTags = restoreCitationTags(mathSafe, tags)
   const inlineTags = joinCitationTagsToPreviousLine(restoredTags)

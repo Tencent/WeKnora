@@ -5470,6 +5470,8 @@ export default {
       collecting: '正在保存生成的文件…',
       download: '下载',
       downloadFailed: '下载失败，请稍后重试',
+      inlinePreviewHint: '点击预览',
+      inlineMissing: '文件不可用',
     },
     updatePlan: '更新计划',
     webSearchFound: '找到 <strong>{count}</strong> 个网络搜索结果',

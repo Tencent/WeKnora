@@ -674,6 +674,13 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 				)
 			} else if len(artifacts) > 0 {
 				h.assistantMessage.Artifacts = artifacts
+				// The answer text names generated files the way the model saw
+				// them in the sandbox. Bind those names to artifact indices now
+				// that the index space is final, so a reloaded conversation
+				// renders them instead of showing a broken link.
+				h.assistantMessage.Content = rewriteArtifactReferences(
+					h.assistantMessage.Content, artifacts,
+				)
 				logger.GetLogger(h.ctx).Infof(
 					"artifact collect attached %d file(s) to message=%s session=%s",
 					len(artifacts), h.assistantMessageID, h.sessionID,

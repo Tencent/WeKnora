@@ -5468,6 +5468,8 @@ export default {
       collecting: '생성된 파일을 저장하는 중…',
       download: '다운로드',
       downloadFailed: '다운로드에 실패했습니다. 다시 시도해 주세요.',
+      inlinePreviewHint: '클릭하여 미리보기',
+      inlineMissing: '파일을 사용할 수 없습니다',
     },
     updatePlan: '계획 업데이트',
     webSearchFound: '<strong>{count}</strong>개의 웹 검색 결과 발견',

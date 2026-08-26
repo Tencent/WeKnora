@@ -180,6 +180,11 @@ var shellExecTool = BaseTool{
   lines usually carry the crucial error message.
 - Binary output is never returned to the model. Store binary files under
   ` + "`/workspace/output`" + ` so ArtifactCollector can expose them for download.
+- To show one of those files in your answer, reference it as
+  ` + "`![description](sandbox:<file name>)`" + ` with the exact file name and no
+  directory path. Images render inline; charts, tables, and documents render as
+  a card the user clicks to preview. A bare file name or a
+  ` + "`/workspace/output/...`" + ` path does not resolve in the browser.
 - ` + "`duration_ms`" + `: wall-clock execution time.
 
 ## Safety

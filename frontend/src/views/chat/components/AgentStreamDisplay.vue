@@ -345,7 +345,7 @@
                   <t-button size="small" variant="outline" shape="round"
                     :disabled="artifactButtonCollecting"
                     :title="hasArtifacts ? $t('agent.artifactDrawer.buttonTitle') : $t('agent.artifactDrawer.collecting')"
-                    @click.stop="openArtifactDrawer">
+                    @click.stop="openArtifactDrawer()">
                     <t-icon v-if="artifactButtonCollecting" name="loading" class="answer-toolbar__artifact-spinner" />
                     <t-icon v-else name="folder" />
                   </t-button>
@@ -521,6 +521,7 @@
     :session-id="sessionIdForArtifacts"
     :message-id="messageIdForArtifacts"
     :artifacts="artifactList"
+    :preview-index="artifactPreviewIndex"
   />
 </template>
 
@@ -554,6 +555,11 @@ import { useAuthStore } from '@/stores/auth';
 import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
 import { hydrateProtectedFileImages, clearProtectedFileFailureCache, sanitizeMarkdownHTML } from '@/utils/security';
+import {
+  artifactIndexFromEventTarget,
+  hydrateArtifactImages,
+  renderArtifactReference,
+} from '@/utils/sandboxArtifactRefs';
 import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
@@ -936,10 +942,26 @@ const sessionIdForArtifacts = computed(() => props.sessionId ?? '');
 const messageIdForArtifacts = computed(() =>
   String(props.session?.id || props.session?.request_id || ''),
 );
-function openArtifactDrawer() {
+// Set when the drawer is opened from an inline artifact card in the answer, so
+// it lands on that file's preview instead of the list.
+const artifactPreviewIndex = ref<number | null>(null);
+function openArtifactDrawer(previewIndex: number | null = null) {
   if (!hasArtifacts.value) return;
+  artifactPreviewIndex.value = previewIndex;
   showArtifactDrawer.value = true;
 }
+
+const artifactRefContext = computed(() => {
+  const sessionId = sessionIdForArtifacts.value;
+  const messageId = messageIdForArtifacts.value;
+  if (!sessionId || !messageId) return null;
+  return { sessionId, messageId };
+});
+
+const artifactRefLabels = computed(() => ({
+  previewHint: t('agent.artifactDrawer.inlinePreviewHint'),
+  missingHint: t('agent.artifactDrawer.inlineMissing'),
+}));
 
 const {
   float: citationFloat,
@@ -2176,6 +2198,15 @@ const onRootClick = (e: Event) => {
   const target = e.target as HTMLElement;
   if (!target) return;
 
+  // Inline artifact card -> open the drawer straight on that file's preview.
+  const artifactIndex = artifactIndexFromEventTarget(target);
+  if (artifactIndex !== null) {
+    e.preventDefault();
+    e.stopPropagation();
+    openArtifactDrawer(artifactIndex);
+    return;
+  }
+
   // Handle image clicks -> open preview (only for images inside markdown/answer content, not icons)
   if (target.tagName === 'IMG') {
     const imgEl = target as HTMLImageElement;
@@ -2264,6 +2295,15 @@ const onRootKeydown = (e: KeyboardEvent) => {
   const target = e.target as HTMLElement;
   if (!target) return;
 
+  const artifactIndex = artifactIndexFromEventTarget(target);
+  if (artifactIndex !== null) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openArtifactDrawer(artifactIndex);
+    }
+    return;
+  }
+
   // Handle web citation keyboard
   const webEl = target.closest?.('.citation-web') as HTMLElement | null;
   if (webEl) {
@@ -2335,6 +2375,7 @@ onMounted(() => {
     root.addEventListener('keydown', keydownListener, true);
     rebindCitations();
     await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
+    await hydrateArtifactImages(rootElement.value, artifactRefContext.value);
   });
 });
 
@@ -2359,12 +2400,31 @@ onUpdated(() => {
     // de-duped, and failures back off for a cooldown — so a not-yet-ready file
     // simply retries later (and the answerFullyRendered pass is the backstop).
     await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
+    await hydrateArtifactImages(rootElement.value, artifactRefContext.value);
   });
 });
 
 // 自定义渲染器 - 支持 Mermaid
 const agentRenderer = new marked.Renderer();
 agentRenderer.code = createMermaidCodeRenderer('mermaid-agent');
+
+// Files the agent generated in its sandbox are addressed by artifact index
+// rather than by URL, so they are resolved before marked's default <img>.
+// Everything else (knowledge-base `resource://` handles, external images) keeps
+// the default output, which protectProviderImageSrcInHTML still rewrites.
+const defaultImageRenderer = new marked.Renderer().image;
+agentRenderer.image = function agentImageRenderer(token) {
+  const artifactHtml = renderArtifactReference({
+    href: token.href || '',
+    alt: token.text || '',
+    artifacts: artifactList.value,
+    labels: artifactRefLabels.value,
+    context: artifactRefContext.value,
+    streaming: !isConversationDone.value,
+  });
+  if (artifactHtml !== null) return artifactHtml;
+  return defaultImageRenderer.call(this, token);
+};
 
 const prepareAgentMarkdown = (markdown: string, cachedSvgHtml?: string | null): string => {
   const mermaidSafe = !isConversationDone.value

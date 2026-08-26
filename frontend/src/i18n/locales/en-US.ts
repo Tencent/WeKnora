@@ -812,6 +812,8 @@ export default {
       collecting: 'Saving generated files…',
       download: 'Download',
       downloadFailed: 'Download failed, please retry.',
+      inlinePreviewHint: 'Click to preview',
+      inlineMissing: 'File unavailable',
     },
     updatePlan: 'Update Plan',
     webSearchFound: 'Found <strong>{count}</strong> web search result(s)',

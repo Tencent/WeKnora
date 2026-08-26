@@ -5468,6 +5468,8 @@ export default {
       collecting: 'Сохранение сгенерированных файлов…',
       download: 'Скачать',
       downloadFailed: 'Не удалось скачать, повторите попытку.',
+      inlinePreviewHint: 'Нажмите для просмотра',
+      inlineMissing: 'Файл недоступен',
     },
     updatePlan: 'Обновить план',
     webSearchFound: 'Найдено <strong>{count}</strong> результатов веб‑поиска',

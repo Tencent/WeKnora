@@ -191,6 +191,12 @@ const props = defineProps<{
     sessionId: string
     messageId: string
     artifacts?: ArtifactMeta[]
+    /**
+     * Open straight into this artifact's preview instead of the list. Set when
+     * the drawer is opened by clicking an inline artifact card in the answer,
+     * where the user already picked the file.
+     */
+    previewIndex?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -217,6 +223,10 @@ const loading = ref(false)
 const fetched = ref<ArtifactMeta[]>([])
 const downloading = reactive<Record<number, boolean>>({})
 const previewItem = ref<ArtifactMeta | null>(null)
+// Opening the drawer from an inline artifact card jumps straight to the
+// preview, so there is no list behind it to pop back to — overlay/Esc should
+// dismiss the whole drawer. Coming from the list, they pop back to it.
+const previewOpenedDirectly = ref(false)
 const previewWidth = ref(PREVIEW_DEFAULT_WIDTH)
 const previewResizing = ref(false)
 
@@ -304,10 +314,12 @@ watch(
         if (!open) {
             suppressDrawerClose = false
             previewItem.value = null
+            previewOpenedDirectly.value = false
             return
         }
         if (props.artifacts && props.artifacts.length) {
             fetched.value = []
+            applyRequestedPreview()
             return
         }
         if (!props.sessionId || !props.messageId) return
@@ -316,6 +328,7 @@ watch(
             const res: any = await listMessageArtifacts(props.sessionId, props.messageId)
             const data = (res && (res.data || res)) as ArtifactMeta[] | undefined
             fetched.value = Array.isArray(data) ? data : []
+            applyRequestedPreview()
         } catch (err) {
             console.error('[ChatArtifactsDrawer] load failed:', err)
             fetched.value = []
@@ -325,23 +338,41 @@ watch(
     },
 )
 
+// Clicking a second inline card while the drawer is already open should swap
+// the preview rather than leave the previous file on screen.
+watch(() => props.previewIndex, () => {
+    if (props.visible) applyRequestedPreview()
+})
+
+function applyRequestedPreview() {
+    if (!Number.isInteger(props.previewIndex as number)) return
+    const target = items.value.find((item) => item.index === props.previewIndex)
+    if (!target) return
+    previewItem.value = target
+    previewOpenedDirectly.value = true
+}
+
 function handleClose(context?: { trigger?: string }) {
-    const popPreview = !!previewItem.value && (context?.trigger === 'overlay' || context?.trigger === 'esc')
+    const dismissedFromOutside = context?.trigger === 'overlay' || context?.trigger === 'esc'
+    const popPreview = !!previewItem.value && !previewOpenedDirectly.value && dismissedFromOutside
     if (popPreview) {
         closePreview()
         suppressDrawerClose = true
         return
     }
     previewItem.value = null
+    previewOpenedDirectly.value = false
     emit('update:visible', false)
 }
 
 function openPreview(item: ArtifactMeta) {
     previewItem.value = item
+    previewOpenedDirectly.value = false
 }
 
 function closePreview() {
     previewItem.value = null
+    previewOpenedDirectly.value = false
 }
 
 function formatFileSize(size: number): string {

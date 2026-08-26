@@ -61,7 +61,7 @@
                     <t-button size="small" variant="outline" shape="round"
                         :disabled="artifactButtonCollecting"
                         :title="hasArtifacts ? $t('agent.artifactDrawer.buttonTitle') : $t('agent.artifactDrawer.collecting')"
-                        @click.stop="openArtifactDrawer">
+                        @click.stop="openArtifactDrawer()">
                         <t-icon v-if="artifactButtonCollecting" name="loading" class="answer-toolbar__artifact-spinner" />
                         <t-icon v-else name="folder" />
                     </t-button>
@@ -96,6 +96,7 @@
             :session-id="sessionId"
             :message-id="messageIdForArtifacts"
             :artifacts="artifactList"
+            :preview-index="artifactPreviewIndex"
         />
     </div>
 </template>
@@ -112,6 +113,12 @@ import picturePreview from '@/components/picture-preview.vue';
 import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
 import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
 import { sanitizeMarkdownHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
+import {
+    artifactIndexFromEventTarget,
+    hydrateArtifactImages,
+    isArtifactRefHref,
+    renderArtifactReference,
+} from '@/utils/sandboxArtifactRefs';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
@@ -227,10 +234,25 @@ const messageIdForArtifacts = computed(() => {
     // in-flight path where the SSE stream still identifies rows by request.
     return String((props.session && (props.session.id || props.session.request_id)) || '');
 });
-function openArtifactDrawer() {
+// Set when the drawer is opened by clicking an inline artifact card, so it
+// lands directly on that file's preview instead of the list.
+const artifactPreviewIndex = ref(null);
+function openArtifactDrawer(previewIndex = null) {
     if (!hasArtifacts.value) return;
+    artifactPreviewIndex.value = previewIndex;
     showArtifactDrawer.value = true;
 }
+
+const artifactRefContext = computed(() => {
+    const messageId = messageIdForArtifacts.value;
+    if (!props.sessionId || !messageId) return null;
+    return { sessionId: props.sessionId, messageId };
+});
+
+const artifactRefLabels = computed(() => ({
+    previewHint: t('agent.artifactDrawer.inlinePreviewHint'),
+    missingHint: t('agent.artifactDrawer.inlineMissing'),
+}));
 
 const preview = (url) => {
     nextTick(() => {
@@ -246,9 +268,22 @@ const closePreImg = () => {
 
 const markdownRenderer = createChatMarkdownRenderer({
     codeRenderer: createMermaidCodeRenderer('mermaid-botmsg'),
-    imageRenderer: ({ href, title, text }) => createSafeImage(href, text || '', title || ''),
+    imageRenderer: ({ href, title, text }) => {
+        // A sandbox-generated file is addressed by artifact index, not by URL,
+        // so it is resolved before the ordinary image path.
+        const artifactHtml = renderArtifactReference({
+            href,
+            alt: text || '',
+            artifacts: artifactList.value,
+            labels: artifactRefLabels.value,
+            context: artifactRefContext.value,
+            streaming: !props.session?.is_completed,
+        });
+        if (artifactHtml !== null) return artifactHtml;
+        return createSafeImage(href, text || '', title || '');
+    },
     invalidImageHtml: () => `<p>${t('error.invalidImageLink')}</p>`,
-    isValidImageUrl: isValidImageURL,
+    isValidImageUrl: (href) => isArtifactRefHref(href) || isValidImageURL(href),
 });
 
 // 计算属性：将 Markdown 文本转换为 tokens
@@ -342,6 +377,13 @@ const handleAddToKnowledge = () => {
 // 处理 markdown-content 中图片的点击事件
 const handleMarkdownImageClick = (e) => {
     const target = e.target;
+    const artifactIndex = artifactIndexFromEventTarget(target);
+    if (artifactIndex !== null) {
+        e.preventDefault();
+        e.stopPropagation();
+        openArtifactDrawer(artifactIndex);
+        return;
+    }
     if (target && target.tagName === 'IMG') {
         const src = target.getAttribute('src');
         if (src) {
@@ -362,6 +404,7 @@ watch(renderedHTML, () => {
 onUpdated(() => {
     nextTick(async () => {
         await hydrateProtectedFileImages(parentMd.value);
+        await hydrateArtifactImages(parentMd.value, artifactRefContext.value);
         refreshMarkdownEnhancements(parentMd.value);
         if (props.session?.is_completed) {
             await renderMermaidInContainer(parentMd.value);
@@ -377,6 +420,7 @@ onMounted(async () => {
         }
         rebindCitations();
         await hydrateProtectedFileImages(parentMd.value);
+        await hydrateArtifactImages(parentMd.value, artifactRefContext.value);
         await enhanceMarkdownContainer(parentMd.value);
     });
 });
