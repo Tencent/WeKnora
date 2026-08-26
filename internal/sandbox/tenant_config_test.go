@@ -303,7 +303,7 @@ func TestEffectiveTemplateIDPerProvider(t *testing.T) {
 	require.Equal(t, "cube-tpl", EffectiveTemplateID(&Config{
 		Type: SandboxTypeCube, E2BTemplate: "e2b-tpl", CubeTemplate: "cube-tpl",
 	}))
-	require.Empty(t, EffectiveTemplateID(&Config{Type: SandboxTypeLocal}))
+	require.Empty(t, EffectiveTemplateID(&Config{Type: SandboxTypeDisabled}))
 	require.Empty(t, EffectiveTemplateID(nil))
 }
 
@@ -500,7 +500,7 @@ func TestResolveEffectiveConfigUsesSkillSnapshotAsDockerImage(t *testing.T) {
 func TestSkillOwnerFingerprintForDocker(t *testing.T) {
 	require.Empty(t, SkillOwnerFingerprint(&types.TenantSandboxConfig{SandboxType: "docker"}),
 		"a docker type with no daemon block cannot own a snapshot")
-	require.Empty(t, SkillOwnerFingerprint(&types.TenantSandboxConfig{SandboxType: "local"}))
+	require.Empty(t, SkillOwnerFingerprint(&types.TenantSandboxConfig{SandboxType: "disabled"}))
 
 	got := SkillOwnerFingerprint(&types.TenantSandboxConfig{
 		SandboxType: "docker",
@@ -564,7 +564,7 @@ func TestSkillImageActiveAgreesWithTheResolvedTemplate(t *testing.T) {
 		},
 		"backend that cannot snapshot": {
 			config: &types.TenantSandboxConfig{
-				SandboxType: "local",
+				SandboxType: "disabled",
 				SkillImage: &types.SkillImageConfig{
 					SnapshotID: "snap-1", OwnerFingerprint: fp,
 				},

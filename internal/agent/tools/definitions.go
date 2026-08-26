@@ -33,8 +33,7 @@ const (
 	// ToolShellExec lets the LLM execute ad-hoc shell commands inside the
 	// current session's sandbox (dependency installs, environment probing).
 	// Registered only when the resolved backend advertises the session shell
-	// capability — every session-scoped backend does (Cube, E2B, Docker); the
-	// Local backend does not, so ad-hoc commands never reach the host.
+	// capability (Cube, E2B, Docker). The command never runs on the WeKnora host.
 	ToolShellExec = "shell_exec"
 	// Wiki-related tools (only available when wiki KBs are in scope)
 	ToolWikiReadPage      = "wiki_read_page"

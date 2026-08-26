@@ -18,11 +18,6 @@
 //   - An Execute call with an empty SessionID falls through to a stateless
 //     RemoteSandbox, which allocates a fresh sandbox, runs the script, and
 //     tears the sandbox down after Execute returns.
-//   - When the remote provider's Health probe fails at construction time and
-//     config.FallbackEnabled is true, the manager falls back to LocalSandbox.
-//     Every session-scoped capability (shell exec, file staging, session
-//     filesystem inspection) then refuses to run on the host: those calls
-//     require a real remote provider.
 //   - Cube and E2B reap idle sandboxes themselves. Docker has no provider TTL,
 //     so that backend runs its own idle sweep against activity-marker mtimes.
 package sandbox
@@ -69,9 +64,9 @@ const sessionLifecycleCleanupTimeout = 30 * time.Second
 
 // SessionBoundManager is a sandbox.Manager that binds one remote sandbox per
 // tenant session. Concrete provider work is delegated to RemoteSandboxClient;
-// this type owns validation, fallback, and the mapping between application
-// concepts (ExecuteConfig, session-scoped shell/file APIs) and the provider-
-// neutral RemoteSandboxClient contract.
+// this type owns validation and the mapping between application concepts
+// (ExecuteConfig, session-scoped shell/file APIs) and the provider-neutral
+// RemoteSandboxClient contract.
 type SessionBoundManager struct {
 	config    *Config
 	validator *ScriptValidator
@@ -82,13 +77,7 @@ type SessionBoundManager struct {
 	lifecycle *remoteSessionLifecycle
 	ephemeral *RemoteSandbox
 
-	// fallback is used when the remote provider's health probe fails at
-	// construction time. Nil when the remote provider is healthy.
-	fallback Sandbox
-
-	// activeType is the effective sandbox type callers observe. It equals
-	// client.Provider() in the normal path and the fallback sandbox's Type()
-	// after Local fallback engages.
+	// activeType is the effective sandbox type callers observe.
 	activeType SandboxType
 
 	// mu guards Cleanup's idempotency flag.
@@ -110,9 +99,9 @@ type SessionBoundManagerConfig struct {
 	// touching another that shares the same provider account.
 	ConfigID string
 
-	// SkipHealthProbe skips the construction-time Health() round-trip and,
-	// with it, the Local fallback. Set by the per-tenant resolver, which
-	// builds a manager per request. See NewSessionBoundManager.
+	// SkipHealthProbe skips the construction-time Health() round-trip.
+	// Set by the per-tenant resolver, which builds a manager per request.
+	// See NewSessionBoundManager.
 	SkipHealthProbe bool
 }
 
@@ -124,10 +113,6 @@ type SessionBoundManagerConfig struct {
 // Provider identity comes from deps.Client.Provider() — not Config.Type —
 // so test harnesses and custom wiring that inject a different client backend
 // always project the correct template, TTL, and health timeout.
-//
-// When the client's Health probe fails and config.FallbackEnabled is true,
-// the manager transparently falls back to LocalSandbox for ephemeral Execute
-// calls. Session-scoped capabilities remain refused in that mode.
 func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManager, error) {
 	cfg := deps.Config
 	if cfg == nil {
@@ -204,10 +189,9 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 	}
 
 	// Per-tenant managers are rebuilt on every request, so probing here would
-	// add a remote round-trip to each one. Skipping also disables the Local
-	// fallback below, which is deliberate: when a tenant explicitly configures
-	// a backend, silently running their scripts in a local process is a
-	// surprising, security-relevant downgrade. Failing loudly is correct.
+	// add a remote round-trip to each one. When a tenant explicitly configures
+	// a backend, an unreachable provider must fail at first use rather than
+	// substituting a different execution environment.
 	if deps.SkipHealthProbe {
 		return m, nil
 	}
@@ -219,19 +203,12 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 	)
 	defer cancel()
 	if err := deps.Client.Health(probeCtx); err != nil {
-		if !cfg.FallbackEnabled {
-			return nil, fmt.Errorf("remote sandbox provider unavailable: %w", err)
-		}
-		log.Printf("[sandbox] remote provider %s unhealthy (%v); falling back to local sandbox",
-			provider, err)
-		m.fallback = NewLocalSandbox(cfg)
-		m.activeType = m.fallback.Type()
+		return nil, fmt.Errorf("remote sandbox provider unavailable: %w", err)
 	}
 	return m, nil
 }
 
-// GetType reports the current effective sandbox type. Returns the fallback
-// type after Local fallback engages.
+// GetType reports the current effective sandbox type.
 func (m *SessionBoundManager) GetType() SandboxType {
 	if m == nil {
 		return SandboxTypeDisabled
@@ -242,17 +219,14 @@ func (m *SessionBoundManager) GetType() SandboxType {
 }
 
 // GetSandbox exposes a diagnostic Sandbox for callers that need to inspect
-// availability. Returns the fallback when engaged, otherwise a stateless
-// RemoteSandbox surface for the current provider.
+// availability. Returns a stateless RemoteSandbox surface for the current
+// provider.
 func (m *SessionBoundManager) GetSandbox() Sandbox {
 	if m == nil {
 		return nil
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if m.fallback != nil {
-		return m.fallback
-	}
 	return m.ephemeral
 }
 
@@ -269,7 +243,6 @@ func (m *SessionBoundManager) Execute(ctx context.Context, cfg *ExecuteConfig) (
 		m.mu.RUnlock()
 		return nil, ErrSandboxDisabled
 	}
-	fallback := m.fallback
 	m.mu.RUnlock()
 
 	if !cfg.SkipValidation {
@@ -283,15 +256,6 @@ func (m *SessionBoundManager) Execute(ctx context.Context, cfg *ExecuteConfig) (
 		}
 	}
 
-	if fallback != nil {
-		if strings.TrimSpace(cfg.SessionID) != "" {
-			return nil, fmt.Errorf(
-				"sandbox: session-scoped execution requires the remote provider (current mode: %s)",
-				m.fallback.Type(),
-			)
-		}
-		return fallback.Execute(ctx, cfg)
-	}
 	if strings.TrimSpace(cfg.SessionID) == "" {
 		return m.ephemeral.Execute(ctx, cfg)
 	}
@@ -719,9 +683,8 @@ func (m *SessionBoundManager) ExecShellCommandWithOptions(
 	return remoteExecuteResult(execResult, execErr, duration), nil
 }
 
-// SessionShellExecutor advertises the shell-execution capability while a
-// real remote backend is active. Returns nil after Local fallback engages so
-// the tool layer refuses to run shell commands on the host machine.
+// SessionShellExecutor advertises the shell-execution capability while the
+// manager is open.
 func (m *SessionBoundManager) SessionShellExecutor() SessionShellExecutor {
 	if m == nil || m.remoteDisabled() {
 		return nil
@@ -730,8 +693,6 @@ func (m *SessionBoundManager) SessionShellExecutor() SessionShellExecutor {
 }
 
 // SessionInstallShellExecutor advertises the privileged install-mode shell.
-// Same nil contract as SessionShellExecutor: after Local fallback engages the
-// capability disappears, so an install can never run on the host machine.
 func (m *SessionBoundManager) SessionInstallShellExecutor() SessionInstallShellExecutor {
 	if m == nil || m.remoteDisabled() {
 		return nil
@@ -756,7 +717,7 @@ func (m *SessionBoundManager) SessionFileStore() SessionFileStore {
 // here: their lifecycle is authoritative in the binding store and would
 // leak to any other WeKnora replica if this replica reaped them on shutdown.
 // Providers reclaim idle sandboxes via their own timeout/pause policies.
-func (m *SessionBoundManager) Cleanup(ctx context.Context) error {
+func (m *SessionBoundManager) Cleanup(_ context.Context) error {
 	if m == nil {
 		return nil
 	}
@@ -766,12 +727,7 @@ func (m *SessionBoundManager) Cleanup(ctx context.Context) error {
 		return nil
 	}
 	m.closed = true
-	fallback := m.fallback
 	m.mu.Unlock()
-
-	if fallback != nil {
-		return fallback.Cleanup(ctx)
-	}
 	return nil
 }
 
@@ -931,9 +887,12 @@ func (m *SessionBoundManager) sessionKey(
 }
 
 func (m *SessionBoundManager) remoteDisabled() bool {
+	if m == nil {
+		return true
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.fallback != nil || m.closed
+	return m.closed
 }
 
 func (m *SessionBoundManager) requireRemoteBackend() error {
@@ -944,12 +903,6 @@ func (m *SessionBoundManager) requireRemoteBackend() error {
 	defer m.mu.RUnlock()
 	if m.closed {
 		return ErrSandboxDisabled
-	}
-	if m.fallback != nil {
-		return fmt.Errorf(
-			"sandbox: remote-only capability requires the remote provider (current mode: %s)",
-			m.fallback.Type(),
-		)
 	}
 	return nil
 }

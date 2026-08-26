@@ -101,8 +101,8 @@ func TestEffectiveTenantSkillsInjectsNothingWhenTheFingerprintDisagrees(t *testi
 
 func TestEffectiveTenantSkillsInjectsNothingWhenTheBackendCannotSnapshot(t *testing.T) {
 	fx := newEffectiveFixture(t)
-	fx.configs.entity.SandboxType = "local"
-	fx.configs.entity.Config.SandboxType = "local"
+	fx.configs.entity.SandboxType = "disabled"
+	fx.configs.entity.Config.SandboxType = "disabled"
 
 	require.Empty(t, fx.derive(context.Background()))
 }

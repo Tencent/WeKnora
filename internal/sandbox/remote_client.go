@@ -448,8 +448,8 @@ type RemoteSnapshotManager interface {
 }
 
 // SnapshotManagerFrom narrows a client to its snapshot capability. It returns
-// false for providers that cannot snapshot (local), so callers can fall
-// back to the base template instead of failing.
+// false for providers that cannot snapshot, so callers can fall back to the
+// base template instead of failing.
 //
 // Both signals must agree: the type assertion finds the methods, and
 // SupportsSnapshots is the advertised capability. A wrapper that happens to

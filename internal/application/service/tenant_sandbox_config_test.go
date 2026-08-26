@@ -1427,7 +1427,10 @@ func TestSanitizeSandboxConfigRefusesSecretsWithoutAESKey(t *testing.T) {
 	require.Error(t, err)
 
 	// A config without secrets is still allowed in that deployment.
-	_, err = SanitizeSandboxConfig(&types.TenantSandboxConfig{SandboxType: "local"}, nil)
+	_, err = SanitizeSandboxConfig(&types.TenantSandboxConfig{
+		SandboxType: "docker",
+		Docker:      &types.DockerSandboxConfig{Image: "weknora:test"},
+	}, nil)
 	require.NoError(t, err)
 }
 
@@ -1437,16 +1440,9 @@ func TestSandboxesStillLiveErrorSupportsErrorsIs(t *testing.T) {
 	require.True(t, stderrors.Is(err, ErrSandboxesStillLive))
 }
 
-func TestCreateAcceptsStatelessNamedSandboxBackends(t *testing.T) {
+func TestCreateAcceptsDockerNamedSandboxBackend(t *testing.T) {
 	repo := &fakeConfigRepo{}
 	svc := newTestConfigService(t, repo, nil, stubAgentRepo{})
-
-	local, err := svc.Create(context.Background(), 7, CreateSandboxConfigInput{
-		Name:   "local-dev",
-		Config: &types.TenantSandboxConfig{SandboxType: "local"},
-	})
-	require.NoError(t, err)
-	require.Equal(t, "local", local.SandboxType)
 
 	docker, err := svc.Create(context.Background(), 7, CreateSandboxConfigInput{
 		Name: "docker-dev",
@@ -1457,6 +1453,16 @@ func TestCreateAcceptsStatelessNamedSandboxBackends(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "docker", docker.SandboxType)
+}
+
+func TestCreateRejectsRemovedLocalBackend(t *testing.T) {
+	svc := newTestConfigService(t, &fakeConfigRepo{}, nil, stubAgentRepo{})
+
+	_, err := svc.Create(context.Background(), 7, CreateSandboxConfigInput{
+		Name:   "local-dev",
+		Config: &types.TenantSandboxConfig{SandboxType: "local"},
+	})
+	require.ErrorIs(t, err, ErrNamedSandboxBackendUnsupported)
 }
 
 func TestCreateRejectsDockerWithoutImage(t *testing.T) {
@@ -1546,8 +1552,11 @@ func TestDeleteWithForceProceedsAndRecordsThePartialSuccess(t *testing.T) {
 
 func TestDeleteMarksBuildingSnapshotsWhenProviderHasNoSnapshotClient(t *testing.T) {
 	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
-		ID: "cfg-a", TenantID: 7, Name: "local", SandboxType: "local",
-		Config: &types.TenantSandboxConfig{SandboxType: "local"},
+		ID: "cfg-a", TenantID: 7, Name: "docker", SandboxType: "docker",
+		Config: &types.TenantSandboxConfig{
+			SandboxType: "docker",
+			Docker:      &types.DockerSandboxConfig{Image: "weknora:test"},
+		},
 	}}
 	skills := &deleteSkillStore{
 		snapshots: []*types.TenantSkillSnapshotEntity{{

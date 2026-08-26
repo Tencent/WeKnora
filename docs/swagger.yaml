@@ -3828,10 +3828,7 @@ definitions:
           place secrets here that scripts must not access."
         type: object
       sandbox_type:
-        description: |-
-          SandboxType selects the sandbox backend. Named configs may use "cube",
-          "e2b", "docker", or "local". "disabled" is reserved for the hidden
-          workspace policy row.
+        description: SandboxType is cube, e2b, or docker; disabled is the hidden policy row.
         type: string
       skill_image:
         allOf:

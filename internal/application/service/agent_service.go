@@ -424,10 +424,9 @@ func (s *agentService) initializeSkillsManager(
 
 		// list_sandbox_files / read_sandbox_file expose per-session
 		// filesystem inspection. Registration is gated on the sandbox
-		// manager advertising a SessionFileStore capability — providers
-		// that fell back to a stateless local sandbox return nil so we
-		// never surface tenant-isolated tools that would run on the
-		// WeKnora host.
+		// manager advertising a SessionFileStore capability. A manager that
+		// cannot honour that capability returns nil so we never surface
+		// tenant-isolated tools against a backend that cannot isolate them.
 		//
 		// They follow SkillsEnabled for the same reason the skill tools do:
 		// the installer agent is here only for the shell it needs to install
@@ -519,8 +518,8 @@ func (s *agentService) readSkillBundle(
 // entitled to.
 //
 // shell_exec is a remote-only capability: the capability accessors yield nil
-// for stateless backends and for a SessionBoundManager that fell back to
-// LocalSandbox, so the same check works for every provider.
+// for backends that cannot run session-scoped shell, so the same check works
+// for every provider.
 //
 // The skill installer agent gets the install-mode variant, which runs as root
 // and may work inside the skills image root — it exists to install

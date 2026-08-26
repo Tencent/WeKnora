@@ -47,10 +47,6 @@ func (m *DefaultManager) initializeSandbox(ctx context.Context) error {
 		m.sandbox = &disabledSandbox{}
 		return nil
 
-	case SandboxTypeLocal:
-		m.sandbox = NewLocalSandbox(m.config)
-		return nil
-
 	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker:
 		// Session-scoped remote backends are only reachable through
 		// SessionBoundManager, which owns the authoritative binding.
@@ -226,15 +222,13 @@ func (s *disabledSandbox) IsAvailable(ctx context.Context) bool {
 // dockerImage is optional; if empty, the default image is used.
 //
 // Session-scoped backends (Cube, E2B, Docker) route to SessionBoundManager,
-// which keeps one persistent sandbox per SessionID; the stateless ones (Local,
-// Disabled) route to DefaultManager. Both satisfy Manager.
-func NewManagerFromType(sandboxType string, fallbackEnabled bool, dockerImage string) (Manager, error) {
+// which keeps one persistent sandbox per SessionID; Disabled routes to
+// DefaultManager. Both satisfy Manager.
+func NewManagerFromType(sandboxType string, dockerImage string) (Manager, error) {
 	var sType SandboxType
 	switch sandboxType {
 	case "docker":
 		sType = SandboxTypeDocker
-	case "local":
-		sType = SandboxTypeLocal
 	case "cube":
 		sType = SandboxTypeCube
 	case "e2b":
@@ -247,7 +241,6 @@ func NewManagerFromType(sandboxType string, fallbackEnabled bool, dockerImage st
 
 	config := DefaultConfig()
 	config.Type = sType
-	config.FallbackEnabled = fallbackEnabled
 	if dockerImage != "" {
 		config.DockerImage = dockerImage
 	}

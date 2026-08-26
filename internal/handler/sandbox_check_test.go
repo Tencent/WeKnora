@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -32,19 +31,10 @@ func TestSandboxCheckReasonDockerUnavailableIncludesHost(t *testing.T) {
 	require.Contains(t, msg, "docker context")
 }
 
-func TestRunStatelessSandboxCheckLocal(t *testing.T) {
-	cfg := sandbox.DefaultConfig()
-	cfg.Type = sandbox.SandboxTypeLocal
-	result := &SandboxCheckResponse{OK: true, Provider: string(cfg.Type)}
+func TestRunStatelessSandboxCheckRemovedWithLocalBackend(t *testing.T) {
+	incoming := &types.TenantSandboxConfig{SandboxType: "local"}
 
-	(&SystemHandler{}).runStatelessSandboxCheck(context.Background(), cfg, true, result)
+	_, err := sandbox.ResolveEffectiveConfig(incoming, sandbox.DefaultConfig())
 
-	require.True(t, result.OK)
-	require.Len(t, result.Checks, 2)
-	require.Equal(t, "environment_available", result.Checks[0].Name)
-	require.NotNil(t, result.Checks[0].OK)
-	require.True(t, *result.Checks[0].OK)
-	require.Equal(t, "sandbox_exec", result.Checks[1].Name)
-	require.NotNil(t, result.Checks[1].OK)
-	require.True(t, *result.Checks[1].OK)
+	require.ErrorIs(t, err, sandbox.ErrUnsupportedSandboxType)
 }

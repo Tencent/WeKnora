@@ -71,8 +71,8 @@ type sessionAttachmentStager interface {
 //
 // Callers must gate staging on this rather than on the process-wide manager: a
 // different workspace configs expose different capabilities. Remote backends
-// need attachment staging; the stateless Local backend does not advertise a
-// session filesystem at all.
+// need attachment staging; backends that do not advertise a session
+// filesystem skip staging entirely.
 func (s *agentService) sessionSandboxInputStore(
 	ctx context.Context,
 	sessionID string,

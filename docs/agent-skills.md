@@ -128,12 +128,11 @@ Sandbox 不再读取 `WEKNORA_SANDBOX_*` 环境变量。后端、凭据、模板
 
 ### Sandbox 模式
 
-Docker、Local、CubeSandbox、E2B 均通过同一套空间配置 CRUD、连接检查和智能体选择接口管理。CubeSandbox / E2B 的集群搭建和设置页接入流程见 [WeKnora 沙箱集群与标准模板](sandbox-cluster.md)。设置页会通过当前连接拉取模板目录；若没有 WeKnora 标准模板，后端会从标准镜像发起创建，用户无需复制模板 ID。
+Docker、CubeSandbox、E2B 均通过同一套空间配置 CRUD、连接检查和智能体选择接口管理。CubeSandbox / E2B 的集群搭建和设置页接入流程见 [WeKnora 沙箱集群与标准模板](sandbox-cluster.md)。设置页会通过当前连接拉取模板目录；若没有 WeKnora 标准模板，后端会从标准镜像发起创建，用户无需复制模板 ID。
 
 | 模式 | 状态 | 说明 |
 |------|------|------|
 | `docker` | 稳定 | 单机 Docker daemon；会话级持久（一个会话一个长驻容器），支持多机 WeKnora 副本（需 Redis），但沙箱都落在同一台 daemon 上。见 [Docker 沙箱后端](sandbox-docker-backend.md) |
-| `local` | 开发 | 直接在 WeKnora 服务主机执行；无容器/MicroVM 隔离，不保留会话绑定 |
 | `cube` | 稳定 | Tencent CubeSandbox MicroVM；会话级持久，支持多机（需 Redis） |
 | `e2b` | 稳定 | E2B 云端 MicroVM；会话级持久，支持多机（需 Redis）；依赖第三方 SDK go-e2b |
 
@@ -569,24 +568,6 @@ docker run --rm \
   python scripts/analyze.py input.pdf
 ```
 
-### Local 沙箱
-
-Local 模式提供基础保护：
-
-- **命令白名单**：仅允许特定解释器
-- **工作目录限制**：限定在 Skill 目录
-- **环境变量过滤**：仅传递安全变量
-- **超时控制**：默认 30 秒超时
-- **路径遍历防护**：防止访问 Skill 目录外文件
-- **脚本预校验**：执行前进行安全校验
-
-**允许的命令**：
-- `python`, `python3`
-- `node`, `nodejs`
-- `bash`, `sh`
-- `ruby`
-- `go run`
-
 ## API 参考
 
 ### SkillManager
@@ -689,10 +670,9 @@ go run ./cmd/skills-demo/main.go
 
 ### 脚本执行失败
 
-1. 检查 `sandbox_mode` 配置
+1. 检查沙箱后端配置
 2. Docker 模式：确认 Docker 服务运行中
-3. Local 模式：确认解释器已安装
-4. 检查脚本权限和语法
+3. 检查脚本权限和语法
 
 ### 元数据验证错误
 

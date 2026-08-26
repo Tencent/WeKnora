@@ -28,7 +28,7 @@ func SkillImageFingerprint(provider, apiKey, apiURL string) string {
 // already answers, from the same inputs: a skill announced to the model while
 // sessions keep booting the base template is a skill that cannot be invoked,
 // and one hidden while the image carries it is an install nobody can use. It is
-// false for backends that cannot snapshot at all (local/disabled), which is
+// false for backends that cannot snapshot at all (disabled), which is
 // what "the base template is kept" means for them.
 func SkillImageActive(tenantCfg *types.TenantSandboxConfig) bool {
 	if tenantCfg == nil {

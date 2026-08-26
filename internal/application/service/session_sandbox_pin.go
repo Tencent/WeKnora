@@ -139,8 +139,8 @@ func (p *SessionSandboxPinner) Clear(ctx context.Context, sessionID string) erro
 		Update("sandbox_config_id", nil).Error
 }
 
-// resolveSandboxForExecution resolves before pinning so stateless workspace
-// backends (docker/local) never leave a permanent session pin. Remote backends
+// resolveSandboxForExecution resolves before pinning so non-remote workspace
+// backends never leave a permanent session pin. Remote backends
 // pin before their first Create; concurrent callers adopt and re-resolve the
 // winning config before executing anything.
 func resolveSandboxForExecution(

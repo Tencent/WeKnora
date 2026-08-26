@@ -266,8 +266,8 @@ const backendLabel = (value: string) => t(`settings.sandbox.backends.${value}`)
 
 const isLegacyRecord = (record: SandboxConfigRecord) => !isNamedSandboxBackend(record.sandbox_type)
 
-// Skills are baked into the snapshot image. Local configs have no skills
-// step, so their cards stay a connection summary.
+// Skills are baked into the snapshot image. Legacy configs (removed backends)
+// have no skills step, so their cards stay a connection summary.
 function supportsSkills(record: SandboxConfigRecord) {
   return record.sandbox_type === 'cube' || record.sandbox_type === 'e2b' || record.sandbox_type === 'docker'
 }
@@ -401,14 +401,11 @@ function openCard(record: SandboxConfigRecord) {
   openEdit(record)
 }
 
-// What this config actually points at: the remote host, the container image, or
-// the local runtime. Two configs of the same backend are told apart by it.
+// What this config actually points at: the remote host or the container image.
+// Two configs of the same backend are told apart by it.
 function targetSummary(record: SandboxConfigRecord): string {
   if (record.sandbox_type === 'docker') {
     return record.config?.docker?.image || ''
-  }
-  if (record.sandbox_type === 'local') {
-    return t('settings.sandbox.localRuntimeSummary')
   }
   return endpointHost(record)
 }
