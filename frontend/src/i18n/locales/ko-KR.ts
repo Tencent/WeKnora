@@ -682,7 +682,8 @@ export default {
     resourceType: {
       wikiSpace: '위키 공간',
       docCategory: '문서 태그',
-      book: 'Yuque 지식베이스'
+      book: 'Yuque 지식베이스',
+      searchQuery: 'X 검색 쿼리'
     },
     scheduleHuman: {
       '30min': '30분마다',
@@ -703,7 +704,21 @@ export default {
       feedUrls: '피드 주소',
       feedUrlsHint: '한 줄에 하나씩 RSS / Atom 피드 주소를 입력하세요. 여러 개를 함께 입력할 수 있습니다.',
       authHeaders: '사용자 지정 헤더 (선택)',
-      authHeadersHint: '비공개 피드 접근용. 한 줄에 하나씩 「이름: 값」 형식으로 입력하세요. 예: Authorization: Bearer xxxx'
+      authHeadersHint: '비공개 피드 접근용. 한 줄에 하나씩 「이름: 값」 형식으로 입력하세요. 예: Authorization: Bearer xxxx',
+      xquikApiKey: 'Xquik API 키',
+      xquikApiKeyHint: 'Xquik에서 API 키를 만든 후 여기에 붙여 넣으세요.',
+      xquikQueries: 'X 검색 쿼리',
+      xquikQueriesPlaceholder: 'from:weknora lang:ko',
+      xquikQueriesHint: '한 줄에 하나씩 X 검색 쿼리를 입력하세요. 동기화할 때마다 Xquik이 각 쿼리를 실행합니다.',
+      xquikResultsPerQuery: '쿼리당 결과 수',
+      xquikResultsPerQueryHint: '동기화할 때 각 쿼리에서 가져올 게시물의 최대 수를 설정하세요.'
+    },
+    xquik: {
+      searchesTitle: 'X 검색 설정',
+      queriesRequired: 'X 검색 쿼리를 1개 이상 입력하세요.',
+      tooManyQueries: 'X 검색 쿼리는 최대 20개까지 입력할 수 있습니다.',
+      queryTooLong: '각 X 검색 쿼리는 512자 이내로 입력하세요.',
+      resultsOutOfRange: '쿼리당 결과 수는 1에서 1,000 사이여야 합니다.'
     },
     connectorDesc: {
       feishu: '페이슈 위키에서 문서, 스프레드시트, 파일 동기화',
@@ -714,6 +729,7 @@ export default {
       yuque: '위큐 지식베이스에서 문서 동기화',
       ima: 'Tencent IMA 지식베이스에서 문서, 노트 및 파일 동기화 (AI 세션과 동영상 분석은 지원되지 않음)',
       rss: 'RSS / Atom 피드에서 글 동기화',
+      xquik: 'Xquik 검색 쿼리로 공개 X 게시물 동기화',
       gitlab: 'GitLab 프로젝트의 파일 동기화'
     },
     connector: {
@@ -725,6 +741,7 @@ export default {
       yuque: '위큐 (Yuque)',
       ima: 'Tencent IMA',
       rss: 'RSS / Atom 피드',
+      xquik: 'Xquik',
       gitlab: 'GitLab'
     },
     logDetail: {
@@ -5951,6 +5968,7 @@ export default {
     channelNotion: 'Notion',
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
+    channelXquik: 'Xquik',
     channelIma: 'Tencent IMA',
     channelUpload: '업로드',
     channelManual: '수동',

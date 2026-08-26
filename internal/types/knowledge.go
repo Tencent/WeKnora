@@ -35,6 +35,7 @@ const (
 	ChannelNotion           = "notion"            // Notion
 	ChannelYuque            = "yuque"             // Yuque (语雀)
 	ChannelRSS              = "rss"               // RSS / Atom feed
+	ChannelXquik            = "xquik"             // Xquik X search
 	ChannelIMA              = "ima"               // Tencent IMA (ima.qq.com)
 )
 

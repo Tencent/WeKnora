@@ -19,6 +19,12 @@ import {
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { getDatasourceIconUrl } from './datasourceIcons'
+import {
+  XQUIK_DEFAULT_RESULTS_PER_QUERY,
+  XQUIK_MAX_RESULTS_PER_QUERY,
+  validateXquikSettings,
+  xquikValidationCredentials,
+} from './xquikConfig'
 
 const props = defineProps<{
   kbId: string
@@ -207,6 +213,7 @@ const driveFolderTokenError = ref('')
 const driveRootLoaded = ref(false)
 const isDriveConnector = (type: string) => type === 'feishu_drive' || type === 'lark_drive'
 const isGitLabConnector = (type: string) => type === 'gitlab'
+const isXquikConnector = (type: string) => type === 'xquik'
 
 interface GitLabProjectInput { project_id: string; ref: string; pathsText: string }
 const gitlabProjects = ref<GitLabProjectInput[]>([])
@@ -627,6 +634,17 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'xquik',
+    available: true,
+    docUrl: 'https://docs.xquik.com/api-reference/authentication',
+    permissionDocUrl: '',
+    permissionPageUrl: '',
+    requiredPermissions: [],
+    fields: [
+      { key: 'api_key', labelKey: 'datasource.field.xquikApiKey', placeholder: 'xq_...', secret: true, hintKey: 'datasource.field.xquikApiKeyHint' },
+    ],
+  },
+  {
     type: 'gitlab', available: true, docUrl: '', permissionDocUrl: '', permissionPageUrl: '', requiredPermissions: [],
     fields: [
       { key: 'base_url', labelKey: 'datasource.gitlab.baseUrl', placeholder: 'https://gitlab.example.com' },
@@ -762,12 +780,29 @@ watch(
   },
 )
 
+watch(
+  () => [form.value.config.settings.queries, form.value.config.settings.results_per_query],
+  () => {
+    if (needsConnectionTest()) {
+      testResult.value = ''
+      testErrorMsg.value = ''
+    }
+  },
+)
+
 function selectType(def: ConnectorDef) {
   if (!def.available) return
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
   form.value.config.credentials = {}
   if (isGitLabConnector(def.type)) addGitLabProject()
+  if (isXquikConnector(def.type)) {
+    form.value.config.settings = {
+      queries: '',
+      results_per_query: XQUIK_DEFAULT_RESULTS_PER_QUERY,
+    }
+  }
+  form.value.sync_deletions = !isXquikConnector(def.type)
   rssAuthHeaders.value = []
   step.value = 1
 }
@@ -776,6 +811,7 @@ function selectType(def: ConnectorDef) {
 async function testConnection() {
   syncRssAuthHeadersToCredentials()
   if (!validateRssFeedUrls()) return
+  if (!validateXquikConfig()) return
   if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
     const fields = currentDef.value?.fields || []
     for (const f of fields) {
@@ -802,6 +838,9 @@ async function testConnection() {
       if (form.value.type === 'rss') {
         // validate-credentials is credentials-only; feed URLs live in settings.
         creds.feed_urls = form.value.config.settings.feed_urls
+      }
+      if (isXquikConnector(form.value.type)) {
+        Object.assign(creds, xquikValidationCredentials(creds, form.value.config.settings))
       }
       await validateCredentials(form.value.type, creds)
     }
@@ -966,9 +1005,18 @@ function validateRssFeedUrls(): boolean {
   return true
 }
 
+function validateXquikConfig(): boolean {
+  if (!isXquikConnector(form.value.type)) return true
+  const error = validateXquikSettings(form.value.config.settings)
+  if (!error) return true
+  MessagePlugin.warning(t(`datasource.xquik.${error}`))
+  return false
+}
+
 function validateStep1Fields(): boolean {
   syncRssAuthHeadersToCredentials()
   if (!validateRssFeedUrls()) return false
+  if (!validateXquikConfig()) return false
   if (isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value) {
     return true
   }
@@ -1180,6 +1228,7 @@ const resourceTypeLabelMap: Record<string, string> = {
   wiki_space: 'datasource.resourceType.wikiSpace',
   doc_category: 'datasource.resourceType.docCategory',
   book: 'datasource.resourceType.book',
+  search_query: 'datasource.resourceType.searchQuery',
 }
 
 function resourceTypeLabel(type: string): string {
@@ -1414,6 +1463,32 @@ const drawerConfirmText = computed(() => {
             spellcheck="false"
           />
           <p class="form-desc">{{ t('datasource.field.feedUrlsHint') }}</p>
+        </div>
+      </section>
+
+      <section v-if="isXquikConnector(form.type)" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.xquik.searchesTitle') }}</h4>
+        <div class="form-item">
+          <label class="form-label required">{{ t('datasource.field.xquikQueries') }}</label>
+          <t-textarea
+            v-model="form.config.settings.queries"
+            :placeholder="t('datasource.field.xquikQueriesPlaceholder')"
+            :autosize="{ minRows: 3, maxRows: 8 }"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <p class="form-desc">{{ t('datasource.field.xquikQueriesHint') }}</p>
+        </div>
+        <div class="form-item">
+          <label class="form-label required">{{ t('datasource.field.xquikResultsPerQuery') }}</label>
+          <t-input-number
+            v-model="form.config.settings.results_per_query"
+            :min="1"
+            :max="XQUIK_MAX_RESULTS_PER_QUERY"
+            :step="10"
+            theme="normal"
+          />
+          <p class="form-desc">{{ t('datasource.field.xquikResultsPerQueryHint') }}</p>
         </div>
       </section>
 
@@ -1805,7 +1880,7 @@ const drawerConfirmText = computed(() => {
           </div>
         </div>
 
-        <div class="form-item form-item--flat">
+        <div v-if="!isXquikConnector(form.type)" class="form-item form-item--flat">
           <t-checkbox v-model="form.sync_deletions">{{ t('datasource.syncDeletions') }}</t-checkbox>
         </div>
       </section>

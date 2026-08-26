@@ -277,6 +277,14 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "custom",
 		Capabilities: []string{"incremental"},
 	},
+	types.ConnectorTypeXquik: {
+		Type:         types.ConnectorTypeXquik,
+		Name:         "Xquik",
+		Description:  "Sync public X posts from saved searches",
+		Priority:     13,
+		AuthType:     "api_key",
+		Capabilities: []string{"incremental"},
+	},
 	types.ConnectorTypeGitLab: {
 		Type:         types.ConnectorTypeGitLab,
 		Name:         "GitLab",

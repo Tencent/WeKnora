@@ -682,7 +682,8 @@ export default {
     resourceType: {
       wikiSpace: 'Пространство вики',
       docCategory: 'Тег документа',
-      book: 'База знаний Yuque'
+      book: 'База знаний Yuque',
+      searchQuery: 'Поисковый запрос X'
     },
     scheduleHuman: {
       '30min': 'Каждые 30 мин',
@@ -703,7 +704,21 @@ export default {
       feedUrls: 'Адреса лент',
       feedUrlsHint: 'По одному адресу ленты RSS / Atom в строке; можно указать несколько.',
       authHeaders: 'Пользовательские заголовки (необязательно)',
-      authHeadersHint: 'Для приватных лент. По одному в строке в формате «Имя: Значение», например Authorization: Bearer xxxx'
+      authHeadersHint: 'Для приватных лент. По одному в строке в формате «Имя: Значение», например Authorization: Bearer xxxx',
+      xquikApiKey: 'API-ключ Xquik',
+      xquikApiKeyHint: 'Создайте API-ключ в Xquik и вставьте его сюда.',
+      xquikQueries: 'Поисковые запросы X',
+      xquikQueriesPlaceholder: 'from:weknora lang:ru',
+      xquikQueriesHint: 'Введите по одному поисковому запросу X в строке. Xquik выполняет их при каждой синхронизации.',
+      xquikResultsPerQuery: 'Результатов на запрос',
+      xquikResultsPerQueryHint: 'Задайте максимум публикаций из каждого запроса за одну синхронизацию.'
+    },
+    xquik: {
+      searchesTitle: 'Настройки поиска X',
+      queriesRequired: 'Введите хотя бы 1 поисковый запрос X.',
+      tooManyQueries: 'Введите не более 20 поисковых запросов X.',
+      queryTooLong: 'Каждый поисковый запрос X должен содержать не более 512 символов.',
+      resultsOutOfRange: 'Укажите от 1 до 1 000 результатов на запрос.'
     },
     connectorDesc: {
       feishu: 'Синхронизация документов, таблиц и файлов из Feishu Wiki',
@@ -714,6 +729,7 @@ export default {
       yuque: 'Синхронизация документов из баз знаний Yuque',
       ima: 'Синхронизация документов, заметок и файлов из баз знаний Tencent IMA (ИИ-сессии и разбор видео не поддерживаются)',
       rss: 'Синхронизация статей из лент RSS / Atom',
+      xquik: 'Синхронизация общедоступных публикаций X через поисковые запросы Xquik',
       gitlab: 'Синхронизация файлов из проектов GitLab'
     },
     connector: {
@@ -725,6 +741,7 @@ export default {
       yuque: 'Yuque (Юйцюэ)',
       ima: 'Tencent IMA',
       rss: 'RSS / Atom лента',
+      xquik: 'Xquik',
       gitlab: 'GitLab'
     },
     logDetail: {
@@ -5951,6 +5968,7 @@ export default {
     channelNotion: 'Notion',
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
+    channelXquik: 'Xquik',
     channelIma: 'Tencent IMA',
     channelUpload: 'Загрузка',
     channelManual: 'Вручную',

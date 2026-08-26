@@ -467,6 +467,7 @@ export default {
     channelNotion: 'Notion',
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
+    channelXquik: 'Xquik',
     channelIma: 'Tencent IMA',
     channelUpload: 'Upload',
     channelManual: 'Manual',
@@ -5821,6 +5822,7 @@ export default {
       notion: 'Notion',
       yuque: 'Yuque',
       rss: 'RSS / Atom Feed',
+      xquik: 'Xquik',
       ima: 'Tencent IMA',
       gitlab: 'GitLab'
     },
@@ -5832,6 +5834,7 @@ export default {
       notion: 'Sync pages and databases from Notion',
       yuque: 'Sync documents from Yuque knowledge bases',
       rss: 'Sync articles from RSS / Atom feeds',
+      xquik: 'Sync public X posts from Xquik search queries',
       ima: 'Sync documents, notes and files from Tencent IMA knowledge bases (AI sessions and video parses are not supported)',
       gitlab: 'Sync files from GitLab projects'
     },
@@ -5860,7 +5863,21 @@ export default {
       feedUrls: 'Feed URLs',
       feedUrlsHint: 'One RSS / Atom feed URL per line; multiple feeds are supported.',
       authHeaders: 'Custom headers (optional)',
-      authHeadersHint: 'For private feeds. One per line in "Name: Value" form, e.g. Authorization: Bearer xxxx'
+      authHeadersHint: 'For private feeds. One per line in "Name: Value" form, e.g. Authorization: Bearer xxxx',
+      xquikApiKey: 'Xquik API key',
+      xquikApiKeyHint: 'Create an API key in Xquik, then paste it here.',
+      xquikQueries: 'X search queries',
+      xquikQueriesPlaceholder: 'from:weknora lang:en',
+      xquikQueriesHint: 'Enter one X search query per line. Xquik runs each query during every sync.',
+      xquikResultsPerQuery: 'Results per query',
+      xquikResultsPerQueryHint: 'Set the maximum posts imported from each query per sync.'
+    },
+    xquik: {
+      searchesTitle: 'X search settings',
+      queriesRequired: 'Enter at least 1 X search query.',
+      tooManyQueries: 'Enter at most 20 X search queries.',
+      queryTooLong: 'Keep each X search query within 512 characters.',
+      resultsOutOfRange: 'Choose 1 to 1,000 results per query.'
     },
     comingSoon: 'Coming soon',
     docHint: 'Get credentials at:',
@@ -5930,7 +5947,8 @@ export default {
     resourceType: {
       wikiSpace: 'Wiki Space',
       docCategory: 'Document Tag',
-      book: 'Yuque Book'
+      book: 'Yuque Book',
+      searchQuery: 'X search query'
     },
     neverSynced: 'Never synced',
     justNow: 'Just now',
