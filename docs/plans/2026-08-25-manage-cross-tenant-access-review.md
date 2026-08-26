@@ -7,11 +7,11 @@
 | 维度 | 值 |
 | :--- | :--- |
 | Author | `langcaiye@163.com` |
-| Range | `18d22b01..HEAD`（当前 PR merge-base） |
+| Range | `a753a153..HEAD`（当前 PR merge-base） |
 | Repos | `/Users/langcaiye/research/WeKnora` |
 | Apps/Modules | `internal`、`frontend`、`docs/plans` |
-| Review Time | 2026-08-26 16:19:21 +0800 |
-| Scope | commits=16, files=41, Tier-H（含本报告更新提交） |
+| Review Time | 2026-08-26 16:26:56 +0800 |
+| Scope | commits=17, files=41, Tier-H（含本报告更新提交） |
 | Findings | P0=0 / P1=0 / P2=0 / P3=0 |
 | Excluded Intermediate Findings | 12（外部 review 问题均已修复） |
 | 发布建议 | ✅ 可发 |
@@ -27,7 +27,7 @@
 | 仓库 | WeKnora |
 | 应用范围 | 后端权限/API/Repository/Bootstrap、数据库迁移、前端系统设置/审计/i18n、设计文档 |
 
-- 使用作者范围收集器确认报告更新前 15 个提交、41 个文件、无协作者重叠；报告更新提交后共 16 个提交。
+- 使用作者范围收集器确认报告更新前 16 个提交、41 个作者触达文件、无协作者重叠；报告更新提交后共 17 个提交。合并最新 `origin/main` 后，最终 PR diff 为 40 个文件。
 - 基于 merge-base 到 `HEAD` 的最终态 diff 审查，不按中间提交重复报错。
 - 核查授权、异常、并发、幂等、事务、分页、审计、前端回滚和测试覆盖。
 
@@ -148,7 +148,7 @@
 | Exclusions | 上游 main 既有问题、无文件交集的 Feishu wiki 测试失败 |
 | Assumptions | PostgreSQL/MySQL 使用 `SELECT ... FOR UPDATE`；PostgreSQL/SQLite 执行各自迁移目录；SQLite 测试通过单连接验证事务最终结果 |
 | Collaborator overlap | 0 |
-| Final diff | 8266 additions / 2456 deletions（含 Swagger 生成物与报告更新） |
+| Final diff | 2764 additions / 126 deletions（含 Swagger 生成物与报告更新） |
 
 ## 🧾 8. 低问题数合理性说明
 
