@@ -103,6 +103,24 @@ func TestBuildOutbound_Thinking(t *testing.T) {
 		assert.Contains(t, mustJSON(t, body), `"enable_thinking":false`)
 	})
 
+	t.Run("qwen stored default preserves non-stream guard", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderAliyun), "qwen3-32b",
+			map[string]string{ExtraConfigThinkingControl: "enable_thinking"})
+		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(true)}, false)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		assert.Contains(t, mustJSON(t, body), `"enable_thinking":false`)
+	})
+
+	t.Run("qwen stored default preserves always-send behavior", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderAliyun), "qwen3-32b",
+			map[string]string{ExtraConfigThinkingControl: "enable_thinking"})
+		body, _, useRaw, err := c.buildOutbound(msgs, nil, true)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		assert.Contains(t, mustJSON(t, body), `"enable_thinking":false`)
+	})
+
 	t.Run("qwen stream honors requested true", func(t *testing.T) {
 		c := newOutboundChat(t, string(provider.ProviderAliyun), "qwen3-32b", nil)
 		body, _, _, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(true)}, true)
