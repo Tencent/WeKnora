@@ -79,7 +79,8 @@
               </t-tag>
               <div class="sandbox-card__actions" @click.stop>
                 <t-dropdown :options="cardMenu(record)" trigger="click" attach="body"
-                  placement="bottom-right" :min-column-width="120"
+                  placement="bottom-right" :min-column-width="108"
+                  :popup-props="{ overlayClassName: 'sandbox-card-menu' }"
                   @click="(data: any) => onMenuAction(data.value, record)">
                   <t-button variant="text" shape="square" size="small" class="sandbox-card__more">
                     <t-icon name="ellipsis" />
@@ -151,9 +152,10 @@
     -->
     <SettingDrawer
       v-model:visible="showInventory"
+      class="sandbox-inventory-drawer"
       :title="$t('settings.sandbox.inventoryTitle')"
       :description="inventorySubtitle"
-      width="420px"
+      width="400px"
       :resizable="false"
       storage-key="setting-drawer:width:sandbox-inventory"
       :hide-footer="inventoryNotice !== 'unverifiable'"
@@ -173,34 +175,20 @@
 
         <p v-if="inventoryLead" class="inventory-lead">{{ inventoryLead }}</p>
 
-        <section v-if="inventorySessions.length" class="inventory-group">
-          <h4 class="inventory-group__title">{{ $t('settings.sandbox.inventorySessions') }}</h4>
-          <p class="inventory-group__hint">{{ $t('settings.sandbox.inventorySessionsHint') }}</p>
-          <ul class="inventory-sessions">
-            <li v-for="id in inventorySessions" :key="id">
-              <div class="inventory-session">
-                <div class="inventory-session__text">
-                  <span class="inventory-session__title">{{ sessionTitle(id) }}</span>
-                  <span class="inventory-session__id" :title="id">{{ shortId(id) }}</span>
-                </div>
-                <t-button variant="text" theme="primary" size="small" @click="openSession(id)">
-                  {{ $t('settings.sandbox.inventoryOpenSession') }}
-                </t-button>
-              </div>
-            </li>
-          </ul>
-        </section>
+        <ul v-if="inventorySessions.length" class="inventory-sessions">
+          <li v-for="id in inventorySessions" :key="id">
+            <div class="inventory-session">
+              <span class="inventory-session__title" :title="id">{{ sessionTitle(id) }}</span>
+              <t-button variant="text" theme="primary" size="small" @click="openSession(id)">
+                {{ $t('settings.sandbox.inventoryOpenSession') }}
+              </t-button>
+            </div>
+          </li>
+        </ul>
 
-        <section v-if="inventory && !inventoryLoading" class="inventory-group">
-          <h4 class="inventory-group__title">{{ $t('settings.sandbox.inventoryAgents') }}</h4>
-          <template v-if="inventoryAgents.length">
-            <p class="inventory-group__hint">{{ $t('settings.sandbox.inventoryAgentWarning') }}</p>
-            <ul class="inventory-agents">
-              <li v-for="name in inventoryAgents" :key="name">{{ name }}</li>
-            </ul>
-          </template>
-          <p v-else class="inventory-group__empty">{{ $t('settings.sandbox.inventoryNoAgents') }}</p>
-        </section>
+        <p v-if="inventoryAgents.length" class="inventory-agents">
+          {{ $t('settings.sandbox.inventoryAgents', { names: inventoryAgents.join('、') }) }}
+        </p>
       </t-loading>
 
       <!--
@@ -333,10 +321,10 @@ const filteredRecords = computed(() => {
 const countByType = (type: string) =>
   records.value.filter((r) => r.sandbox_type === type && isNamedSandboxBackend(r.sandbox_type)).length
 
-type CardMenuOption = { content: string; value: string; theme?: 'error'; divider?: boolean }
+type CardMenuOption = { content: string; value: string; theme?: 'error' }
 
 // Card click already opens skills, and the editor has the connection check,
-// so the menu stays edit / who-is-using / delete.
+// so the menu stays edit / running instances / delete.
 const cardMenu = (record: SandboxConfigRecord): CardMenuOption[] => {
   if (isLegacyRecord(record)) {
     return [{ content: t('common.delete'), value: 'delete', theme: 'error' }]
@@ -345,9 +333,7 @@ const cardMenu = (record: SandboxConfigRecord): CardMenuOption[] => {
     { content: t('common.edit'), value: 'edit' },
   ]
   if (record.sandbox_type === 'cube' || record.sandbox_type === 'e2b') {
-    options.push({ content: t('settings.sandbox.viewSandboxes'), value: 'inventory', divider: true })
-  } else {
-    options[0].divider = true
+    options.push({ content: t('settings.sandbox.viewSandboxes'), value: 'inventory' })
   }
   options.push({ content: t('common.delete'), value: 'delete', theme: 'error' })
   return options
@@ -369,11 +355,6 @@ const inventoryLead = computed(() => {
 })
 
 const sessionTitles = ref<Record<string, string>>({})
-
-function shortId(id: string) {
-  if (id.length <= 16) return id
-  return `${id.slice(0, 8)}…${id.slice(-4)}`
-}
 
 function sessionTitle(id: string) {
   const title = sessionTitles.value[id]
@@ -1084,96 +1065,76 @@ onMounted(load)
 }
 
 .inventory-banner {
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .inventory-lead {
-  margin: 0 0 18px;
-  color: var(--td-text-color-primary);
-  font-size: 14px;
-  line-height: 1.65;
-}
-
-.inventory-group + .inventory-group {
-  margin-top: 20px;
-}
-
-.inventory-group__title {
-  margin: 0 0 4px;
-  color: var(--td-text-color-primary);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.inventory-group__hint,
-.inventory-group__empty {
   margin: 0 0 10px;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
-  line-height: 1.55;
-}
-
-.inventory-group__empty {
-  margin-bottom: 0;
-}
-
-.inventory-sessions,
-.inventory-agents {
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .inventory-sessions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .inventory-session {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 4px 10px 0;
-  border-bottom: 1px solid var(--td-component-stroke);
-
-  &:last-child {
-    border-bottom: none;
-    padding-bottom: 0;
-  }
-}
-
-.inventory-session__text {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  min-height: 32px;
+  padding: 2px 0;
 }
 
 .inventory-session__title {
-  color: var(--td-text-color-primary);
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.4;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.inventory-session__id {
-  color: var(--td-text-color-placeholder);
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 11px;
+  color: var(--td-text-color-primary);
+  font-size: 13px;
   line-height: 1.4;
 }
 
 .inventory-agents {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  color: var(--td-text-color-primary);
+  margin: 10px 0 0;
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+</style>
+
+<style lang="less">
+.sandbox-card-menu .t-dropdown__menu {
+  padding: 4px;
+  gap: 0;
+}
+
+.sandbox-card-menu .t-dropdown__item {
+  padding: 5px 10px;
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 22px;
+}
+
+.sandbox-card-menu .t-dropdown__item--theme-error {
+  margin-top: 4px;
+  border-top: 1px solid var(--td-component-stroke);
+  border-radius: 0 0 3px 3px;
+}
+
+.sandbox-inventory-drawer.setting-drawer {
+  .t-drawer__header {
+    padding: 12px 16px;
+    border-bottom: none;
+    box-shadow: inset 0 -1px 0 var(--td-component-stroke);
+  }
+
+  .t-drawer__body {
+    padding: 12px 16px;
+  }
 }
 </style>
